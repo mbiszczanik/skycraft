@@ -100,13 +100,13 @@ Check user's assigned licenses:
 
 ## FAQ
 
-**Q**: Do I need to remember these passwords?
+**Q**: Do I need to remember these passwords?  
 **A**: No—this is for lab setup only. In production, use temporary passwords or SSO. Encourage users to change passwords at first login.
 
-**Q**: What happens if I delete a group?
+**Q**: What happens if I delete a group?  
 **A**: The group is soft-deleted for 30 days and can be restored. After 30 days, it's permanently deleted.
 
-**Q**: Can external users see internal company resources?
+**Q**: Can external users see internal company resources?  
 **A**: Only what you explicitly share. B2B guests are isolated unless given specific permissions.
 
 ---

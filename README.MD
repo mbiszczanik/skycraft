@@ -41,7 +41,7 @@ Transform abstract cloud concepts into **tangible hands-on experience** by build
 ### Prerequisites
 
 - Azure subscription (with credits or free trial)
-- Azure CLI or Azure PowerShell installed
+- Azure CLI & Azure PowerShell installed
 - Bicep CLI (for Infrastructure as Code)
 - Basic Linux and cloud computing knowledge
 - Git for cloning this repository
@@ -72,4 +72,4 @@ Transform abstract cloud concepts into **tangible hands-on experience** by build
 ## 📋 Prerequisites
 
 - **Azure Subscription** (free trial or credits)
-- **Azure CLI** or **Azure PowerShell** (latest version)
+- **Azure CLI** & **Azure PowerShell** (latest version)

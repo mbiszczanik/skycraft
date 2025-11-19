@@ -514,13 +514,13 @@ Create a more specific budget for the production environment:
 
 ### Structure Example
 
-Tenant Root Group
-├── Production Management Group
-│   └── SkyCraft-Prod Subscription
-├── Development Management Group
-│   └── SkyCraft-Dev Subscription
-└── Shared Services Management Group
-    └── SkyCraft-Shared Subscription
+Tenant Root Group  
+├── Production Management Group  
+│   └── SkyCraft-Prod Subscription  
+├── Development Management Group  
+│   └── SkyCraft-Dev Subscription  
+└── Shared Services Management Group  
+    └── SkyCraft-Shared Subscription  
 
 (This is ideal structure as creation Subscription does not incur any cost)
 
@@ -636,19 +636,19 @@ Tenant Root Group
 
 ## 🎓 Knowledge Check
 
-1. **Q**: What's the difference between Azure Policy and RBAC?
+1. **Q**: What's the difference between Azure Policy and RBAC?  
    **A**: RBAC controls **who** can do **what** (identity and permissions). Policy controls **what** can be done **regardless of who** does it (compliance and standards).
 
-2. **Q**: When should you use CanNotDelete vs. ReadOnly lock?
+2. **Q**: When should you use CanNotDelete vs. ReadOnly lock?  
    **A**: Use **CanNotDelete** for production resources (allows operations but prevents deletion). Use **ReadOnly** sparingly (prevents all modifications, can break automation).
 
-3. **Q**: Are tags inherited from resource groups to resources?
+3. **Q**: Are tags inherited from resource groups to resources?  
    **A**: No, tags are NOT automatically inherited. You must use Azure Policy with "Modify" effect to inherit tags, or apply tags directly to resources.
 
-4. **Q**: What happens when a budget threshold is reached?
+4. **Q**: What happens when a budget threshold is reached?  
    **A**: An **alert email** is sent. Budgets do NOT automatically stop resource creation or shut down resources—they only notify.
 
-5. **Q**: Can you remove a lock if you have Owner role?
+5. **Q**: Can you remove a lock if you have Owner role?  
    **A**: Yes, Owner can remove locks. However, the lock prevents deletion even for Owners until it's removed.
 
 ---

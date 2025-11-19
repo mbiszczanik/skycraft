@@ -126,9 +126,9 @@ az role assignment list --assignee skycraft-dev@[yourtenant].onmicrosoft.com --q
 | Principal | Type | Role | Scope | Purpose |
 |-----------|------|------|-------|---------|
 | SkyCraft Admin | User | Owner | Subscription | Full admin access |
-| AzerothCore-Developers | Group | Contributor | dev-skycraft-swc-rg | Dev environment management |
-| AzerothCore-Testers | Group | Reader | dev-skycraft-swc-rg | Dev monitoring |
-| AzerothCore-Testers | Group | Reader | prod-skycraft-swc-rg | Prod monitoring |
+| SkyCraft-Developers | Group | Contributor | dev-skycraft-swc-rg | Dev environment management |
+| SkyCraft-Testers | Group | Reader | dev-skycraft-swc-rg | Dev monitoring |
+| SkyCraft-Testers | Group | Reader | prod-skycraft-swc-rg | Prod monitoring |
 | External Partner | User (Guest) | Reader | platform-skycraft-swc-rg | Limited shared access |
 
 **Total Assignments**: 5

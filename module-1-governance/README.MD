@@ -2,7 +2,7 @@
 
 ## 📚 Module Overview
 
-In this module, you'll establish the **foundational security layer** for the SkyCraft AzerothCore deployment. 
+In this module, you'll establish the **foundational security layer** for the SkyCraft deployment. 
 You'll create the identity structure, implement role-based access control, and configure governance policies 
 that protect your infrastructure and enforce organizational standards.
 
@@ -114,9 +114,9 @@ This module covers **20-25%** of the AZ-104 exam. Key exam topics include:
 
 ## 📞 Getting Help
 
-- **Lab issues**: Check `solutions/troubleshooting.md` in each lab folder
+- **Lab issues**: Check `lab-guide/troubleshooting` in each lab folder
 - **Azure errors**: Search Azure documentation or Microsoft Learn
-- **General questions**: Post in the course discussion forum
+- **General issues/questions**: Create an issue
 
 ---
 

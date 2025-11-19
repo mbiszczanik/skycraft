@@ -88,8 +88,8 @@ Before starting this lab:
 
 Management Group (broadest)  
 └── Subscription  
-  └── Resource Group  
-     └── Resource (most specific)
+    └── Resource Group  
+        └── Resource (most specific)
 
 
 **Key Concept**: Permissions are **inherited** down the hierarchy. A role assigned at subscription level applies to all resource groups and resources within that subscription.
@@ -341,9 +341,9 @@ To truly verify permissions, you would:
 - **Condition**: Advanced - conditional access (not used in this lab)
 
 ### Understand Inheritance
-Subscription (SkyCraft Admin = Owner)
-└── dev-skycraft-swc-rg (Developers = Contributor, Testers = Reader)
-└── [Future VM] (inherits all above permissions)
+Subscription (SkyCraft Admin = Owner)  
+└── dev-skycraft-swc-rg (Developers = Contributor, Testers = Reader)  
+    └── [Future VM] (inherits all above permissions)
 
 
 **Key Concept**: When you create a VM in `dev-skycraft-swc-rg`:
@@ -434,19 +434,19 @@ Complete this checklist to verify successful lab completion:
 
 Test your understanding:
 
-1. **Q**: What's the difference between Owner and Contributor roles?
+1. **Q**: What's the difference between Owner and Contributor roles?  
    **A**: Owner can do everything Contributor can do, PLUS assign roles to others. Contributor cannot grant access to anyone else.
 
-2. **Q**: Why assign roles to groups instead of individual users?
+2. **Q**: Why assign roles to groups instead of individual users?  
    **A**: Groups are easier to manage—add/remove users from groups without changing role assignments. Also helps minimize role assignment count (4000 limit per subscription).
 
-3. **Q**: If SkyCraft Developer has Contributor at resource group level, can they create a new resource group?
+3. **Q**: If SkyCraft Developer has Contributor at resource group level, can they create a new resource group?  
    **A**: No. Creating resource groups requires permissions at subscription level.
 
-4. **Q**: A user has Reader at subscription level and Contributor at resource group level. What can they do in that resource group?
+4. **Q**: A user has Reader at subscription level and Contributor at resource group level. What can they do in that resource group?  
    **A**: Contributor permissions apply (most permissive wins). They can create and manage resources in that RG.
 
-5. **Q**: What happens to role assignments when you delete a resource group?
+5. **Q**: What happens to role assignments when you delete a resource group?  
    **A**: Role assignments scoped to that resource group are automatically deleted.
 
 ---

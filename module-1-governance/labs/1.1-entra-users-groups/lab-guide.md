@@ -276,13 +276,13 @@ Complete this checklist to verify you've successfully completed the lab:
 
 Answer these questions to verify understanding:
 
-1. **Q**: What's the difference between "Create new user" and "Invite external user"?
+1. **Q**: What's the difference between "Create new user" and "Invite external user"?  
    **A**: Create new user adds an internal user to your tenant; Invite external user sends an invitation to an external person who signs in with their own identity.
 
-2. **Q**: Why would you use security groups instead of assigning permissions to individual users?
+2. **Q**: Why would you use security groups instead of assigning permissions to individual users?  
    **A**: Groups simplify management—you assign permissions once to a group, then add/remove users from the group as needed.
 
-3. **Q**: What is SSPR and why is it useful?
+3. **Q**: What is SSPR and why is it useful?  
    **A**: SSPR allows users to reset their own passwords without IT involvement, reducing support burden and improving user experience.
 
 ---
