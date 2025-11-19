@@ -514,6 +514,7 @@ Create a more specific budget for the production environment:
 
 ### Structure Example
 
+```
 Tenant Root Group  
 ├── Production Management Group  
 │   └── SkyCraft-Prod Subscription  
@@ -521,6 +522,7 @@ Tenant Root Group
 │   └── SkyCraft-Dev Subscription  
 └── Shared Services Management Group  
     └── SkyCraft-Shared Subscription  
+```
 
 (This is ideal structure as creation Subscription does not incur any cost)
 
