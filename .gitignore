@@ -1,0 +1,54 @@
+# ===================================
+# Azure Credentials & Secrets
+# ===================================
+*.key
+*.pem
+*.pfx
+*.cer
+*.crt
+credentials.json
+*.credentials
+appsettings.Development.json
+local.settings.json
+.env
+.env.local
+
+# Azure CLI
+.azure/
+
+# Azure Functions
+local.settings.json
+__blobstorage__/
+__queuestorage__/
+__azurite_db*__.json
+
+# ===================================
+# SSH Keys
+# ===================================
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.ppk
+
+# ===================================
+# VS Code / IDE
+# ===================================
+.vscode/
+.vs/
+.idea/
+*.code-workspace
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# ===================================
+# Lab Temporary Files
+# ===================================
+lab-outputs/
+temp/
+scratch/
+student-submissions/
+test-results/
+
