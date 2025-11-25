@@ -134,7 +134,7 @@ Once complete, you'll have:
 
 ## 📌 Module Navigation
 
-- [← Back to Course Home](../README.md)
+- [← Back to Course Home](/README.MD)
 - [Lab 1.1: Manage Entra Users & Groups →](labs/1.1-entra-users-groups/lab-guide.md)
 - [Lab 1.2: Manage Access & RBAC →](labs/1.2-rbac/lab-guide.md)
 - [Lab 1.3: Governance & Policies →](labs/1.3-governance/lab-guide.md)
