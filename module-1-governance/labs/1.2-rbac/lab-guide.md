@@ -86,11 +86,12 @@ Before starting this lab:
 
 ### Understanding Scope Hierarchy
 
+```
 Management Group (broadest)  
 └── Subscription  
     └── Resource Group  
         └── Resource (most specific)
-
+```
 
 **Key Concept**: Permissions are **inherited** down the hierarchy. A role assigned at subscription level applies to all resource groups and resources within that subscription.
 
@@ -341,10 +342,12 @@ To truly verify permissions, you would:
 - **Condition**: Advanced - conditional access (not used in this lab)
 
 ### Understand Inheritance
+
+```
 Subscription (SkyCraft Admin = Owner)  
 └── dev-skycraft-swc-rg (Developers = Contributor, Testers = Reader)  
     └── [Future VM] (inherits all above permissions)
-
+```
 
 **Key Concept**: When you create a VM in `dev-skycraft-swc-rg`:
 - SkyCraft Admin can manage it (Owner at subscription)
