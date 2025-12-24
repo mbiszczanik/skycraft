@@ -1,45 +1,66 @@
 # Lab 1.1 - Create Users and Groups - Automation Script
 # This script automates user and group creation for Lab 1.1
 
+if (-not (Get-Module -ListAvailable -Name Microsoft.Graph)) {
+    Write-Host "Installing Microsoft.Graph module..."
+    Install-Module -Name Microsoft.Graph -Scope CurrentUser -Force -AllowClobber
+}
+
 param (
-    [string]$TenantId = "<Your-Tenant-ID>",
-    [string]$DemoMode = $false
+    [Parameter(HelpMessage = "The Tenant ID to use for creation. If not provided, it will be detected from the current context.")]
+    [string]$TenantId,
+    
+    [Parameter(HelpMessage = "Enable demo mode (skips actual creation).")]
+    [bool]$DemoMode = $false
 )
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = 'SilentlyContinue'
 
-function Write-Sucess {
+function Write-Success {
     param ([string]$Message)
-    Write-Host  "✓ $Message" -ForegroundColor Green
+    Write-Host  "$Message" -ForegroundColor Green
 }
 
 function Write-Info {
     param([string]$Message)
-    Write-Host "ℹ $Message" -ForegroundColor Cyan
+    Write-Host "$Message" -ForegroundColor Cyan
 }
 
 function Write-Error-Custom {
     param([string]$Message)
-    Write-Host "✗ $Message" -ForegroundColor Red
+    Write-Host "$Message" -ForegroundColor Red
 }
 
 # Check if logged in to Azure
 Write-Info "Checking Azure connection..."
+
 try {
     $context = Get-AzContext
     if (-not $context) {
-        throw "Not logged in"
+        throw "Not logged in to Azure. Please run: Connect-AzAccount"
     }
-    Write-Success "Connected to Azure - Tenant: $($context.Tenant.Id)"
+
+    if ([string]::IsNullOrWhiteSpace($TenantId)) {
+        $TenantId = $context.Tenant.Id
+        Write-Success "Detected Tenant ID from context: $TenantId"
+    }
+    else {
+        Write-Info "Using provided Tenant ID: $TenantId"
+    }
+    
+    # Get Primary Domain for UPN construction
+    $domain = (Get-MgDomain | Where-Object { $_.IsDefault }).Id
+    if (-not $domain) {
+        $domain = "onmicrosoft.com" # Fallback if domain detection fails
+        Write-Warning "Could not detect default domain. Falling back to '$domain'."
+    }
+    Write-Success "Using domain: $domain"
 }
 catch {
-    Write-Error-Custom "Not logged in to Azure. Please run: Connect-AzAccount"
+    Write-Error-Custom "Error: $($_.Exception.Message)"
     exit 1
 }
-
-$tenantName = ($context | ConvertFrom-Json).tenantId
-Write-Sucess "Connected to tenant: $tenantName"
 
 Write-Info "Creating users..."
 
@@ -70,9 +91,19 @@ $users = @(
 foreach ($user in $users) {
     Write-Info "Creating user: $($user.DisplayName)..."
 
-    $upn = "$($user.UserPrincipalName)@yourtenant.onmicrosoft.com"
+    $upn = "$($user.UserPrincipalName)@$domain"
 
-    # To be done: Add user creation logic here
+    try {
+        if ($DemoMode) {
+            Write-Info "[DEMO] Would create user: $upn"
+        }
+        else {
+            New-MgUser -UserPrincipalName $upn -DisplayName $user.DisplayName -Password @{ Password = $user.Password } -AccountEnabled $true -MailNickname $user.UserPrincipalName -UsageLocation "US"
+        }
+    }
+    catch {
+        Write-Error-Custom "Failed to create user: $($user.DisplayName). Error: $($_.Exception.Message)"
+    }
 }
 
 
@@ -96,7 +127,18 @@ $groups = @(
 foreach ($group in $groups) {
     Write-Info "Creating group: $($group.DisplayName)"
     
-    # To be done: Add group creation logic here
+    try {
+        if ($DemoMode) {
+            Write-Info "[DEMO] Would create group: $($group.DisplayName)"
+        }
+        else {
+            New-MgGroup -DisplayName $group.DisplayName -Description $group.Description -MailEnabled $false -SecurityEnabled $true -MailNickname ($group.DisplayName -replace " ", "")
+            Write-Success "Group created: $($group.DisplayName)"
+        }
+    }
+    catch {
+        Write-Error-Custom "Failed to create group: $($group.DisplayName). Error: $($_.Exception.Message)"
+    }
 }
 
 Write-Success "Script template complete. Follow manual steps in portal as prompted."
