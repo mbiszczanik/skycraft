@@ -2,11 +2,11 @@
 # This script applies tags, policies, locks, and budgets
 
 param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [string]$SubscriptionId,
     
     [Parameter(Mandatory = $true)]
-    [string]$AdminEmail,
+    [string]$AdminEmail = "admin@skycraft.com",
     
     [int]$MonthlyBudget = 200,
     
@@ -31,20 +31,37 @@ function Write-Error-Custom {
 
 # Check if logged in to Azure
 Write-Info "Checking Azure connection..."
-try {
-    $context = Get-AzContext
-    if (-not $context) {
-        throw "Not logged in"
-    }
-    Write-Success "Connected to Azure - Tenant: $($context.Tenant.Id)"
+$context = Get-AzContext
+if (-not $context) {
+    Write-Info "Not logged in. Please log in to Azure."
+    $context = Connect-AzAccount
 }
-catch {
-    Write-Error-Custom "Not logged in to Azure. Please run: Connect-AzAccount"
+
+if (-not $context) {
+    Write-Error-Custom "Failed to connect to Azure. Exiting."
+    exit 1
+}
+Write-Success "Connected to Azure - Tenant: $($context.Tenant.Id)"
+
+# Check if SubscriptionId is provided, if not, try to get from context or prompt
+if ([string]::IsNullOrWhiteSpace($SubscriptionId)) {
+    if ($context.Subscription) {
+        $SubscriptionId = $context.Subscription.Id
+        Write-Info "No SubscriptionId provided. Using current subscription: $($context.Subscription.Name) ($SubscriptionId)"
+    }
+    else {
+        Write-Info "No active subscription found in context."
+        $SubscriptionId = Read-Host "Please enter the Subscription ID"
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($SubscriptionId)) {
+    Write-Error-Custom "SubscriptionId is required for deployment. Exiting."
     exit 1
 }
 
 Write-Info "Setting subscription context..."
-Set-AzContext -SubscriptionId $SubscriptionId | Out-Null
+Set-AzContext -SubscriptionId $SubscriptionId -ErrorAction Stop | Out-Null
 Write-Success "Using subscription: $SubscriptionId"
 
 # Apply Tags
@@ -56,7 +73,7 @@ $tagConfigurations = @(
         Tags          = @{
             Environment = "Development"
             Project     = "SkyCraft"
-            ConstCenter = "MSDN"
+            CostCenter  = "MSDN"
             Owner       = $AdminEmail
 
         }
@@ -66,7 +83,7 @@ $tagConfigurations = @(
         Tags          = @{
             Environment = "Production"
             Project     = "SkyCraft"
-            ConstCenter = "MSDN"
+            CostCenter  = "MSDN"
             Owner       = $AdminEmail
 
         }
@@ -76,7 +93,7 @@ $tagConfigurations = @(
         Tags          = @{
             Environment = "Platform"
             Project     = "SkyCraft"
-            ConstCenter = 'MSDN'
+            CostCenter  = 'MSDN'
             Owner       = $AdminEmail
         }
     }
@@ -84,7 +101,7 @@ $tagConfigurations = @(
 
 foreach ($config in $tagConfigurations) {
     if ($WhatIf) {
-        Write-Host "WHATIF: Would apply tags to $(config.ResourceGroup)" -ForegroundColor -Yellow
+        Write-Host "WHATIF: Would apply tags to $($config.ResourceGroup)" -ForegroundColor Yellow
     }
     else {
         try {
@@ -107,7 +124,7 @@ Write-Info "Assigning Azure Policies..."
 $policy1 = @{
     Name                 = "Require-Environment-Tag-RG"
     DisplayName          = "Require Environment Tag on Resource Groups"
-    PolicyDefiniton      = Get-AzPolicyDefinition | Where-Object { $_.Properties.DisplayName -eq "Require a tag on resource groups" }
+    PolicyDefinition     = Get-AzPolicyDefinition | Where-Object { $_.Properties.DisplayName -eq "Require a tag on resource groups" }
     Scope                = "/subscriptions/$SubscriptionId"
     Parameters           = @{
         tagName = "Environment"
@@ -124,7 +141,7 @@ else {
             -Name $policy1.Name `
             -DisplayName $policy1.DisplayName `
             -Scope $policy1.Scope `
-            -PolicyDefinition $policy1.PolicyDefiniton `
+            -PolicyDefinition $policy1.PolicyDefinition `
             -PolicyParameterObject $policy1.Parameters `
             -NonComplianceMessage $policy1.NonComplianceMessage `
             -ErrorAction Stop | Out-Null 
@@ -132,7 +149,7 @@ else {
     }
     catch {
         if ($_.Exception.Message -like "*already exists*") {
-            Write-Info "Policy already assigmend: $($policy1.DisplayName)"
+            Write-Info "Policy already assigned: $($policy1.DisplayName)"
         }
         else {
             Write-Error-Custom "Failed to assign policy: $_"
@@ -151,7 +168,7 @@ else {
         New-AzPolicyAssignment `
             -Name "Enforce-Project-Tag" `
             -DisplayName "Enforce Project Tag Value" `
-            -Scope "/subscription/$SubscriptionId" `
+            -Scope "/subscriptions/$SubscriptionId" `
             -PolicyDefinition $policy2 `
             -PolicyParameterObject @{
             tagName  = "Project"
@@ -162,7 +179,12 @@ else {
         Write-Success "Assigned policy: Enforce Project Tag"
     }
     catch {
-        Write-Error-Custom "Failed to assign policy: $_"
+        if ($_.Exception.Message -like "*already exists*") {
+            Write-Info "Policy already assigned: Enforce Project Tag"
+        }
+        else {
+            Write-Error-Custom "Failed to assign policy: $_"
+        }
     }
 }
 
@@ -177,7 +199,7 @@ else {
         New-AzPolicyAssignment `
             -Name "Restrict-Azure-Regions" `
             -DisplayName "Restrict to Allowed Regions" `
-            -Scope "/subscription/$SubscriptionId" `
+            -Scope "/subscriptions/$SubscriptionId" `
             -PolicyDefinition $policy3 `
             -PolicyParameterObject @{
             listOfAllowedLocations = @("swedencentral", "northeurope")
