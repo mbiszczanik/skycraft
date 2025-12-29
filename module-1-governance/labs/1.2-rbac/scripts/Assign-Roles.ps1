@@ -49,25 +49,25 @@ Write-Success "Using subscription: $SubscriptionId"
 # Define resource groups
 $resourceGroups = @(
     @{
-        Name = "dev-skycraft-swc-rg"
+        Name     = "dev-skycraft-swc-rg"
         Location = $Location
-        Tags = @{
+        Tags     = @{
             Environment = "Development"
             Project     = "Skycraft"
         }
     }
     @{
-        Name = "prod-skycraft-swc-rg"
+        Name     = "prod-skycraft-swc-rg"
         Location = $Location
-        Tags = @{
+        Tags     = @{
             Environment = "Production"
             Project     = "Skycraft"
         }
     }
     @{
-        Name = "platform-skycraft-swc-rg"
+        Name     = "platform-skycraft-swc-rg"
         Location = $Location
-        Tags = @{
+        Tags     = @{
             Environment = "Platform"
             Project     = "Skycraft"
         }
@@ -98,43 +98,43 @@ Write-Info "Preparing role assignments..."
 $roleAssignments = @(
     # Subscription-level assignment
     @{
-        Scope = "/subscriptions/$SubscriptionId"
+        Scope              = "/subscriptions/$SubscriptionId"
         RoleDefinitionName = "Owner"
-        SignInName = "skycraft-admin@yourtenant.onmicrosoft.com"
-        Description = "Admin user - full control"
+        SignInName         = "skycraft-admin@yourtenant.onmicrosoft.com"
+        Description        = "Admin user - full control"
     },
 
     # Dev resource group assigments
     @{
-        Scope = "/subscriptions/$SubscriptionID/resourceGroups/dev-skycraft-swc-rg"
+        Scope              = "/subscriptions/$SubscriptionID/resourceGroups/dev-skycraft-swc-rg"
         RoleDefinitionName = "Contributor"
-        DisplayName = "SkyCraft-Developers"
-        ObjectType = "Group"
-        Description = "Developers - manage dev resources"
+        DisplayName        = "SkyCraft-Developers"
+        ObjectType         = "Group"
+        Description        = "Developers - manage dev resources"
     },
-        @{
-        Scope = "/subscriptions/$SubscriptionID/resourceGroups/dev-skycraft-swc-rg"
+    @{
+        Scope              = "/subscriptions/$SubscriptionID/resourceGroups/dev-skycraft-swc-rg"
         RoleDefinitionName = "Reader"
-        DisplayName = "SkyCraft-Testers"
-        ObjectType = "Group"
-        Description = "Testers - monitor dev enviroment"
+        DisplayName        = "SkyCraft-Testers"
+        ObjectType         = "Group"
+        Description        = "Testers - monitor dev enviroment"
     }
 
     # Prod resource group assigment
     @{
-        Scope = "/subscriptions/$SubscriptionID/resourceGroups/prod-skycraft-swc-rg"
+        Scope              = "/subscriptions/$SubscriptionID/resourceGroups/prod-skycraft-swc-rg"
         RoleDefinitionName = "Reader"
-        DisplayName = "SkyCraft-Testers"
-        ObjectType = "Group"
-        Description = "Testers - monitor prod environment"
+        DisplayName        = "SkyCraft-Testers"
+        ObjectType         = "Group"
+        Description        = "Testers - monitor prod environment"
     }
 
     # Shared resource group assigment
     @{
-        Scope = "/subscriptions/$Subscription/resourceGroups/platform-skycraft-swc-rg"
+        Scope              = "/subscriptions/$SubscriptionId/resourceGroups/platform-skycraft-swc-rg"
         RoleDefinitionName = "Reader"
-        SignInName = "partner@externalcompany.com"
-        Description = "External partner - shared services access"
+        SignInName         = "partner@externalcompany.com"
+        Description        = "External partner - shared services access"
     }
 )
 
@@ -143,35 +143,39 @@ Write-Info "Assigning RBAC roles..."
 
 foreach ($assignment in $roleAssignments) {
     $params = @{
-        Scope = $assignment.Scope
+        Scope              = $assignment.Scope
         RoleDefinitionName = $assignment.RoleDefinitionName
     }
 
     # Check principal type
     if ($assignment.SignInName) {
-        $params.Add.("SignInName", $assignment.SignInName)
+        $params.Add("SignInName", $assignment.SignInName)
         $principalName = $assignment.SignInName
-    } elseif ($assignment.DisplayName) {
-        $params.Add.("DisplayName", $assignment.DisplayName)
+    }
+    elseif ($assignment.DisplayName) {
+        $params.Add("DisplayName", $assignment.DisplayName)
         $principalName = $assignment.DisplayName
     }
 
     if ($WhatIf) {
-        Write-Host "WHATIF: Would assign $($assignment.RoleDefinitionName) to $principalNAme at scope $($assignment.Scope)" -ForegroundColor Yellow
-    } else {
+        Write-Host "WHATIF: Would assign $($assignment.RoleDefinitionName) to $principalName at scope $($assignment.Scope)" -ForegroundColor Yellow
+    }
+    else {
         try {
-            # Checking if assigment is existing
-            $existing = Get-AzRoleAssignment -Scope $assigment.Scope -RoleDefinitionName $assignment.RoleDefinitionName -ErrorAction SilentlyContinue | Where-Object {
+            # Checking if assignment is existing
+            $existing = Get-AzRoleAssignment -Scope $assignment.Scope -RoleDefinitionName $assignment.RoleDefinitionName -ErrorAction SilentlyContinue | Where-Object {
                 ($_.SignInName -eq $assignment.SignInName) -or ($_.DisplayName -eq $assignment.DisplayName) 
             }
             
             if ($existing) {
-                Write-Info "Role assigment already exists: $($assignment.RoleDefinitionName) -> $principalName"
-            } else {
+                Write-Info "Role assignment already exists: $($assignment.RoleDefinitionName) -> $principalName"
+            }
+            else {
                 New-AzRoleAssignment @params -ErrorAction Stop | Out-Null 
                 Write-Success "Assignment $($assignment.RoleDefinitionName) to $principalName"
             }
-        } catch {
+        }
+        catch {
             Write-Error-Custom "Failed to assign role: $_"
         }
     }

@@ -23,18 +23,18 @@
     Executes the creation process using the current Azure context.
 #>
 
+param (
+    [Parameter(Mandatory = $false, HelpMessage = "The Microsoft Entra Tenant ID.")]
+    [string]$TenantId,
+    
+    [Parameter(Mandatory = $false, HelpMessage = "Enable demo mode (skips actual creation).")]
+    [switch]$DemoMode
+)
+
 if (-not (Get-Module -ListAvailable -Name Microsoft.Graph)) {
     Write-Host "Installing Microsoft.Graph module..."
     Install-Module -Name Microsoft.Graph -Scope CurrentUser -Force -AllowClobber
 }
-
-param (
-    [Parameter(HelpMessage = "The Tenant ID to use for creation. If not provided, it will be detected from the current context.")]
-    [string]$TenantId,
-    
-    [Parameter(HelpMessage = "Enable demo mode (skips actual creation).")]
-    [bool]$DemoMode = $false
-)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = 'SilentlyContinue'
@@ -54,34 +54,54 @@ function Write-Error-Custom {
     Write-Host "$Message" -ForegroundColor Red
 }
 
-# Check if logged in to Azure
-Write-Info "Checking Azure connection..."
+# Check if logged in to Microsoft Graph
+Write-Info "Checking Microsoft Graph connection..."
+$mgContext = Get-MgContext
+if (-not $mgContext) {
+    Write-Info "Not connected to Microsoft Graph. Attempting to connect..."
+    Connect-MgGraph -Scopes "User.ReadWrite.All", "Group.ReadWrite.All", "Directory.ReadWrite.All", "Domain.Read.All", "User.Invite.All" -ErrorAction Stop
+    $mgContext = Get-MgContext
+}
 
+if (-not $mgContext) {
+    Write-Error-Custom "Failed to connect to Microsoft Graph. This script requires Graph permissions to create users and groups."
+    exit 1
+}
+
+Write-Success "Connected to Microsoft Entra ID - Tenant: $($mgContext.TenantId)"
+
+# Resolve Tenant ID
+if ([string]::IsNullOrWhiteSpace($TenantId)) {
+    $TenantId = $mgContext.TenantId
+    Write-Success "Using Tenant ID from Graph context: $TenantId"
+}
+else {
+    Write-Info "Using provided Tenant ID: $TenantId"
+}
+
+# Check Azure context (optional for this script, but good for context)
+Write-Info "Checking Azure context (Az module)..."
+$azContext = Get-AzContext -ErrorAction SilentlyContinue
+if (-not $azContext) {
+    Write-Warning "Not logged in to Azure (Az module). Some resource group detection might fail if added later."
+}
+
+# Get Primary Domain for UPN construction
 try {
-    $context = Get-AzContext
-    if (-not $context) {
-        throw "Not logged in to Azure. Please run: Connect-AzAccount"
-    }
-
-    if ([string]::IsNullOrWhiteSpace($TenantId)) {
-        $TenantId = $context.Tenant.Id
-        Write-Success "Detected Tenant ID from context: $TenantId"
+    Write-Info "Fetching default domain..."
+    $mgDomain = Get-MgDomain | Where-Object { $_.IsDefault }
+    if ($mgDomain) {
+        $domain = $mgDomain.Id
+        Write-Success "Detected default domain: $domain"
     }
     else {
-        Write-Info "Using provided Tenant ID: $TenantId"
-    }
-    
-    # Get Primary Domain for UPN construction
-    $domain = (Get-MgDomain | Where-Object { $_.IsDefault }).Id
-    if (-not $domain) {
-        $domain = "onmicrosoft.com" # Fallback if domain detection fails
+        $domain = "onmicrosoft.com"
         Write-Warning "Could not detect default domain. Falling back to '$domain'."
     }
-    Write-Success "Using domain: $domain"
 }
 catch {
-    Write-Error-Custom "Error: $($_.Exception.Message)"
-    exit 1
+    $domain = "onmicrosoft.com"
+    Write-Warning "Error detecting domain: $($_.Exception.Message). Falling back to '$domain'."
 }
 
 Write-Info "Creating users..."
@@ -120,7 +140,17 @@ foreach ($user in $users) {
             Write-Info "[DEMO] Would create user: $upn"
         }
         else {
-            $newUser = New-MgUser -UserPrincipalName $upn -DisplayName $user.DisplayName -PasswordProfile @{ Password = $user.Password } -AccountEnabled $true -MailNickname $user.UserPrincipalName -UsageLocation "US" -Department $user.Department -JobTitle $user.JobTitle
+            $userParams = @{
+                UserPrincipalName = $upn
+                DisplayName       = $user.DisplayName
+                PasswordProfile   = @{ Password = $user.Password }
+                AccountEnabled    = $true
+                MailNickname      = $user.UserPrincipalName
+                UsageLocation     = "US"
+                Department        = $user.Department
+                JobTitle          = $user.JobTitle
+            }
+            $newUser = New-MgUser @userParams
             Write-Success "User created: $($user.DisplayName) (ID: $($newUser.Id))"
         }
     }
@@ -146,7 +176,14 @@ foreach ($guest in $guestUsers) {
             Write-Info "[DEMO] Would invite guest: $($guest.Email)"
         }
         else {
-            New-MgInvitation -InvitedUserEmailAddress $guest.Email -InvitedUserDisplayName $guest.DisplayName -InviteRedirectUrl "https://myapplications.microsoft.com" -SendInvitationMessage -InvitedUserMessageInfo @{ CustomizedMessageBody = $guest.Message }
+            $invitationParams = @{
+                InvitedUserEmailAddress = $guest.Email
+                InvitedUserDisplayName  = $guest.DisplayName
+                InviteRedirectUrl       = "https://myapplications.microsoft.com"
+                SendInvitationMessage   = $true
+                InvitedUserMessageInfo  = @{ CustomizedMessageBody = $guest.Message }
+            }
+            New-MgInvitation @invitationParams
             Write-Success "Invitation sent to: $($guest.Email)"
         }
     }
@@ -181,7 +218,14 @@ foreach ($group in $groups) {
             Write-Info "[DEMO] Would create group: $($group.DisplayName)"
         }
         else {
-            $newGroup = New-MgGroup -DisplayName $group.DisplayName -Description $group.Description -MailEnabled $false -SecurityEnabled $true -MailNickname ($group.DisplayName -replace " ", "")
+            $groupParams = @{
+                DisplayName     = $group.DisplayName
+                Description     = $group.Description
+                MailEnabled     = $false
+                SecurityEnabled = $true
+                MailNickname    = ($group.DisplayName -replace " ", "")
+            }
+            $newGroup = New-MgGroup @groupParams
             Write-Success "Group created: $($group.DisplayName) (ID: $($newGroup.Id))"
         }
     }
@@ -209,7 +253,11 @@ foreach ($assign in $assignments) {
             $targetUser = Get-MgUser -UserId $assign.UserUPN
             
             if ($targetGroup -and $targetUser) {
-                New-MgGroupMember -GroupId $targetGroup.Id -DirectoryObjectId $targetUser.Id
+                $memberParams = @{
+                    GroupId           = $targetGroup.Id
+                    DirectoryObjectId = $targetUser.Id
+                }
+                New-MgGroupMember @memberParams
                 Write-Success "Successfully added $($assign.UserUPN) to $($assign.GroupName)"
             }
             else {

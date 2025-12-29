@@ -4,6 +4,7 @@ DESCRIPTION: Creates resource groups with proper tagging
 EXAMPLE:
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.1.0
+DEPLOYMENT: Deploy-Infra.ps1
 ======================================================*/
 
 targetScope = 'subscription'
@@ -18,24 +19,22 @@ param parLocation string = 'swedencentral'
 param parProjectName string = 'skycraft'
 
 @description('Tags to apply to all resources')
-param parCommonTags object = {
-  Project: 'SkyCraft' // Add tags!
-  Module: 'Lab-1.2-RBAC'
-  ManagedBy: 'Bicep'
-  CostCenter: 'MSDN'
-}
+param parCommonTags object = {}
 
-@description('Principal ID for SkyCraft Admin user')
-param parAdminPrincipalId string
+@description('Admin email for Owner tag')
+param parAdminEmail string = 'admin@skycraft.com'
 
-@description('Principal ID for SkyCraft-Developers group')
-param parDeveloperGroupPrincipalId string
+// @description('Principal ID for SkyCraft Admin user')
+// param parAdminPrincipalId string
 
-@description('Principal ID for SkyCraft-Testers group')
-param parTesterGroupPrincipalId string
+// @description('Principal ID for SkyCraft-Developers group')
+// param parDeveloperGroupPrincipalId string
 
-@description('Principal ID for External Partner user')
-param parPartnerPrincipalId string
+// @description('Principal ID for SkyCraft-Testers group')
+// param parTesterGroupPrincipalId string
+
+// @description('Principal ID for External Partner user')
+// param parPartnerPrincipalId string
 
 /*******************
 *    Variables     *
@@ -43,6 +42,27 @@ param parPartnerPrincipalId string
 var varResourceGroupNameDev string = 'dev-skycraft-swc-rg'
 var varResourceGroupNameProd string = 'prod-skycraft-swc-rg'
 var varResourceGroupNamePlatform string = 'platform-skycraft-swc-rg'
+
+var varTags = {
+  Development: union(parCommonTags, {
+    Environment: 'Development'
+    Project: 'SkyCraft'
+    CostCenter: 'MSDN'
+    Owner: parAdminEmail
+  })
+  Production: union(parCommonTags, {
+    Environment: 'Production'
+    Project: 'SkyCraft'
+    CostCenter: 'MSDN'
+    Owner: parAdminEmail
+  })
+  Platform: union(parCommonTags, {
+    Environment: 'Platform'
+    Project: 'SkyCraft'
+    CostCenter: 'MSDN'
+    Owner: parAdminEmail
+  })
+}
 
 /** Built-in role definition IDs **/
 var varOwnerRoleId = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635'
@@ -58,7 +78,7 @@ module modResourceGroupDev 'br/public:avm/res/resources/resource-group:0.4.3' = 
   params: {
     name: varResourceGroupNameDev
     location: parLocation
-    tags: parCommonTags
+    tags: varTags.Development
   }
 }
 
@@ -67,7 +87,7 @@ module modResourceGroupProd 'br/public:avm/res/resources/resource-group:0.4.3' =
   params: {
     name: varResourceGroupNameProd
     location: parLocation
-    tags: parCommonTags
+    tags: varTags.Production
   }
 }
 
@@ -76,42 +96,42 @@ module modResourceGroupPlatform 'br/public:avm/res/resources/resource-group:0.4.
   params: {
     name: varResourceGroupNamePlatform
     location: parLocation
-    tags: parCommonTags
+    tags: varTags.Platform
   }
 }
 
 // Subscription-level assignments
-module modAdminOwnerAssigment 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = {
-  scope: subscription()
-  params: {
-    principalId: parAdminPrincipalId
-    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varOwnerRoleId)
-  }
-}
+// module modAdminOwnerAssigment 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = {
+//   scope: subscription()
+//   params: {
+//     principalId: parAdminPrincipalId
+//     roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varOwnerRoleId)
+//   }
+// }
 
-module modDeveloperContributorAssigment 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = {
-  scope: subscription()
-  params: {
-    principalId: parDeveloperGroupPrincipalId
-    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varContributorRoleId)
-  }
-}
+// module modDeveloperContributorAssigment 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = {
+//   scope: subscription()
+//   params: {
+//     principalId: parDeveloperGroupPrincipalId
+//     roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varContributorRoleId)
+//   }
+// }
 
-module modTesterReaderAssigment 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = {
-  scope: subscription()
-  params: {
-    principalId: parTesterGroupPrincipalId
-    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
-  }
-}
+// module modTesterReaderAssigment 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = {
+//   scope: subscription()
+//   params: {
+//     principalId: parTesterGroupPrincipalId
+//     roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
+//   }
+// }
 
-module modPartnerReaderAssigment 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = {
-  scope: subscription()
-  params: {
-    principalId: parPartnerPrincipalId
-    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
-  }
-}
+// module modPartnerReaderAssigment 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = {
+//   scope: subscription()
+//   params: {
+//     principalId: parPartnerPrincipalId
+//     roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
+//   }
+// }
 
 /******************
 *     Outputs     *
