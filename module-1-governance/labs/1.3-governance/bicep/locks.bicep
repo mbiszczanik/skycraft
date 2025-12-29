@@ -12,32 +12,20 @@ param parProdResourceGroupName string = 'prod-skycraft-swc-rg'
 @description('Name of the shared resource group')
 param parPlatformResourceGroupName string = 'platform-skycraft-swc-rg'
 
-// Lock for production resource group
-resource resProdLock 'Microsoft.Authorization/locks@2020-05-01' = {
-  name: 'lock-no-delete-prod'
-  properties: {
-    level: 'CanNotDelete'
-    notes: 'Prevents accidental deletion of production resources'
+module modLockProd 'modules/rg-lock.bicep' = {
+  name: 'lock-prod'
+  scope: resourceGroup(parProdResourceGroupName)
+  params: {
+    parLockName: 'lock-no-delete-prod'
+    parLockNotes: 'Prevents accidental deletion of production resources'
   }
 }
 
-// Lock for shared resource group
-resource resPlatformLock 'Microsoft.Authorization/locks@2020-05-01' = {
-  name: 'lock-no-delete-platform'
-  properties: {
-    level: 'CanNotDelete'
-    notes: 'Protects platform monitoring and logging infrastructure'
+module modLockPlatform 'modules/rg-lock.bicep' = {
+  name: 'lock-platform'
+  scope: resourceGroup(parPlatformResourceGroupName)
+  params: {
+    parLockName: 'lock-no-delete-platform'
+    parLockNotes: 'Protects platform monitoring and logging infrastructure'
   }
 }
-
-// Outputs
-output locks array = [
-  {
-    name: resProdLock.name
-    level: resProdLock.properties.level
-  }
-  {
-    name: resPlatformLock.name
-    level: resPlatformLock.properties.level
-  }
-]

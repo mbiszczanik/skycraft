@@ -2,7 +2,7 @@
 # Lab 1.3 - Validation Script
 # Validates governance configuration (tags, policies, locks)
 
-set -e
+# set -e # Removed to allow continuation on failure
 
 # Colors
 GREEN='\033[0;32m'
@@ -29,17 +29,17 @@ echo -e "${BLUE}Using subscription: $SUB_ID${NC}\n"
 # Validate tags
 echo -e "${BLUE}=== Validating Resource Group Tags ===${NC}\n"
 
-RGS=("dev-skycraft-swc-rg, prod-skycraft-swc-rg, platform-skycraft-swc-rg")
+RGS=("dev-skycraft-swc-rg" "prod-skycraft-swc-rg" "platform-skycraft-swc-rg")
 
 for rg in "${RGS[@]}"; do
     echo -e "${YELLOW}Checking $rg... ${NC}"
 
-    if az group show --name "$rg" &> /dev/nyull; then
+    if az group show --name "$rg" &> /dev/null; then
         TAG_COUNT=$(az group show --name "$rg" --query 'length(tags)' -o tsv)
         echo -e "${GREEN}Resource Group exists with $TAG_COUNT tags${NC}"
 
         # Display tags
-        az group show --name "$rg" --query 'tags' -o json | jq -r 'to_entries[] | "\(.key): \(.value)"'
+        az group show --name "$rg" --query 'tags' -o table
     else
         echo -e "${RED}Resource Group not found: $rg${NC}"
     fi
@@ -50,9 +50,11 @@ done
 
 echo -e "${BLUE}=== Validating Azure Policy Assignments ===${NC}\n"
 
+POLICIES=("Require-Environment-Tag-RG" "Enforce-Project-Tag" "Restrict-Azure-Regions")
+
 for policy in "${POLICIES[@]}"; do
-    if az policy assigment show --name "$policy" --scope "/subscrptions/$SUB_ID" &> /dev/null; then
-        echo -e "${GREEN}Policy assigmed: $policy${NC}"
+    if az policy assignment show --name "$policy" --scope "/subscriptions/$SUB_ID" &> /dev/null; then
+        echo -e "${GREEN}Policy assigned: $policy${NC}"
     else
         echo -e "${RED}Policy not found: $policy${NC}"
     fi
@@ -66,7 +68,7 @@ az policy state summarize \
 # Validate Resource Locks
 echo -e "\n${BLUE}=== Validating Resource Locks ===${NC}\n"
 
-LOCK_RGS=("rg-skycraft-prod" "rg-skycraft-shared")
+LOCK_RGS=("prod-skycraft-swc-rg" "platform-skycraft-swc-rg")
 
 for rg in "${LOCK_RGS[@]}"; do
     LOCK_COUNT=$(az lock list --resource-group "$rg" --query 'length(@)' -o tsv)
@@ -94,8 +96,3 @@ echo -e "  • Expected: SkyCraft-Prod-Monthly ($100/month)"
 echo -e "\n${BLUE}=== Validation Summary ===${NC}\n"
 echo -e "${GREEN}Governance Configuration:${NC}"
 echo -e "${GREEN}Lab 1.3 validation complete${NC}"
-echo -e "\n${BLUE}Next Steps:${NC}"
-echo "  1. Review Policy Compliance in Azure Portal"
-echo "  2. Verify budget alerts are configured"
-echo "  3. Check Azure Advisor recommendations"
-echo "  4. Complete Lab 1.3 checklist"
