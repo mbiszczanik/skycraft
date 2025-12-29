@@ -11,6 +11,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$ProgressPreference = 'SilentlyContinue'
+
+if (-not (Get-Module -ListAvailable -Name Microsoft.Graph)) {
+    Write-Host "Installing Microsoft.Graph module..."
+    Install-Module -Name Microsoft.Graph -Scope CurrentUser -Force -AllowClobber
+}
 
 # Color functions
 function Write-Success {
@@ -33,12 +39,14 @@ Write-Info "Checking Azure connection..."
 try {
     $context = Get-AzContext
     if (-not $context) {
-        throw "Not logged in"
+        Write-Info "Not logged in. Please log in to Azure."
+        $context = Connect-AzAccount
     }
+
     Write-Success "Connected to Azure - Tenant: $($context.Tenant.Id)"
 }
 catch {
-    Write-Error-Custom "Not logged in to Azure. Please run: Connect-AzAccount"
+    Write-Error-Custom "Error: $($_.Exception.Message)"
     exit 1
 }
 
@@ -46,51 +54,40 @@ Write-Info "Setting subscription context..."
 Set-AzContext -SubscriptionId $SubscriptionId | Out-Null
 Write-Success "Using subscription: $SubscriptionId"
 
-# Define resource groups
-$resourceGroups = @(
-    @{
-        Name     = "dev-skycraft-swc-rg"
-        Location = $Location
-        Tags     = @{
-            Environment = "Development"
-            Project     = "Skycraft"
-        }
-    }
-    @{
-        Name     = "prod-skycraft-swc-rg"
-        Location = $Location
-        Tags     = @{
-            Environment = "Production"
-            Project     = "Skycraft"
-        }
-    }
-    @{
-        Name     = "platform-skycraft-swc-rg"
-        Location = $Location
-        Tags     = @{
-            Environment = "Platform"
-            Project     = "Skycraft"
-        }
-    }
-)
+# Check if logged in to Microsoft Graph
+Write-Info "Checking Microsoft Graph connection..."
+$mgContext = Get-MgContext
+if (-not $mgContext) {
+    Write-Info "Not connected to Microsoft Graph. Attempting to connect..."
+    Connect-MgGraph -Scopes "User.ReadWrite.All", "Group.ReadWrite.All", "Directory.ReadWrite.All", "Domain.Read.All", "User.Invite.All" -ErrorAction Stop
+    $mgContext = Get-MgContext
+}
 
-# Create Resource Groups
-Write-Info "Creating resource groups..."
-foreach ($rg in $resourceGroups) {
-    if ($WhatIf) {
-        Write-Host "WhatIf: Would create resource group: $($rg.Name)" -ForegroundColor Yellow
+if (-not $mgContext) {
+    Write-Error-Custom "Failed to connect to Microsoft Graph. This script requires Graph permissions to verify users/groups."
+    exit 1
+}
+
+Write-Success "Connected to Microsoft Entra ID - Tenant: $($mgContext.TenantId)"
+
+# Get Primary Domain for UPN construction
+try {
+    Write-Info "Fetching default domain..."
+    $mgDomain = Get-MgDomain | Where-Object { $_.IsDefault }
+    if ($mgDomain) {
+        $domain = $mgDomain.Id
+        Write-Success "Detected default domain: $domain"
     }
     else {
-        $exisitingRg = Get-AzResourceGroup -Name $rg.Name -ErrorAction SilentlyContinue
-        if (-not $exisitingRg) {
-            New-AzResourceGroup -Name $rg.Name -Location $rg.Location -Tag $rg.Tags | Out-Null
-            Write-Success "Created resource group: $($rg.Name)"
-        }
-        else {
-            Write-Info "Resource group $($rg.Name) already exists. Skipping creation."
-        }
+        $domain = "onmicrosoft.com"
+        Write-Warning "Could not detect default domain. Falling back to '$domain'."
     }
 }
+catch {
+    $domain = "onmicrosoft.com"
+    Write-Warning "Error detecting domain: $($_.Exception.Message). Falling back to '$domain'."
+}
+
 
 # Define role assignments
 Write-Info "Preparing role assignments..."
@@ -100,20 +97,20 @@ $roleAssignments = @(
     @{
         Scope              = "/subscriptions/$SubscriptionId"
         RoleDefinitionName = "Owner"
-        SignInName         = "skycraft-admin@yourtenant.onmicrosoft.com"
+        SignInName         = "skycraft-admin@$domain"
         Description        = "Admin user - full control"
     },
 
     # Dev resource group assigments
     @{
-        Scope              = "/subscriptions/$SubscriptionID/resourceGroups/dev-skycraft-swc-rg"
+        Scope              = "/subscriptions/$SubscriptionId/resourceGroups/dev-skycraft-swc-rg"
         RoleDefinitionName = "Contributor"
         DisplayName        = "SkyCraft-Developers"
         ObjectType         = "Group"
         Description        = "Developers - manage dev resources"
     },
     @{
-        Scope              = "/subscriptions/$SubscriptionID/resourceGroups/dev-skycraft-swc-rg"
+        Scope              = "/subscriptions/$SubscriptionId/resourceGroups/dev-skycraft-swc-rg"
         RoleDefinitionName = "Reader"
         DisplayName        = "SkyCraft-Testers"
         ObjectType         = "Group"
@@ -122,7 +119,7 @@ $roleAssignments = @(
 
     # Prod resource group assigment
     @{
-        Scope              = "/subscriptions/$SubscriptionID/resourceGroups/prod-skycraft-swc-rg"
+        Scope              = "/subscriptions/$SubscriptionId/resourceGroups/prod-skycraft-swc-rg"
         RoleDefinitionName = "Reader"
         DisplayName        = "SkyCraft-Testers"
         ObjectType         = "Group"
@@ -181,15 +178,4 @@ foreach ($assignment in $roleAssignments) {
     }
 }
 
-# Display summary
-Write-Host "`n" -NoNewline
-Write-Info "=== Lab 1.2 Deployment Summary ==="
-
-Write-Host "`n" -NoNewline
-Write-Success "Lab 1.2 setup complete!"
-Write-Host ""
-Write-Info "Next steps:"
-Write-Host "  1. Verify role assignments in Azure Portal"
-Write-Host "  2. Use 'Check access' feature to validate"
-Write-Host "  3. Complete Lab 1.2 checklist"
-Write-Host "  4. Proceed to Lab 1.3 - Governance & Policies"
+Write-Success "Role assignments completed"
