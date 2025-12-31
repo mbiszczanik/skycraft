@@ -12,15 +12,18 @@ Use this checklist to ensure you have correctly completed the lab.
 
 - [ ] **Address Space**: `10.0.0.0/16`
 - [ ] **Subnets**:
-  - [ ] `snet-shared` exists with range `10.0.1.0/24`
+  - [ ] `AzureBastionSubnet` exists with range `10.0.1.0/26`
+  - [ ] `AzureFirewallSubnet` exists with range `10.0.2.0/26`
+  - [ ] `GatewaySubnet` exists with range `10.0.3.0/27`
+  - [ ] `SharedSubnet` exists with range `10.0.4.0/24`
 
 ## Spoke VNet Configuration (prod-skycraft-swc-vnet)
 
 - [ ] **Address Space**: `10.1.0.0/16`
 - [ ] **Subnets**:
-  - [ ] `snet-auth` exists with range `10.1.1.0/24`
-  - [ ] `snet-world` exists with range `10.1.2.0/24`
-  - [ ] `snet-db` exists with range `10.1.3.0/24`
+  - [ ] `AuthSubnet` exists with range `10.1.1.0/24`
+  - [ ] `WorldSubnet` exists with range `10.1.2.0/24`
+  - [ ] `DatabaseSubnet` exists with range `10.1.3.0/24`
 
 ## Peering Configuration
 
@@ -30,7 +33,7 @@ Use this checklist to ensure you have correctly completed the lab.
 
 ## Connectivity Test (Optional but Recommended)
 
-- [ ] Create a VM in `snet-shared` (Hub)
-- [ ] Create a VM in `snet-world` (Spoke)
+- [ ] Create a VM in `SharedSubnet` (Hub)
+- [ ] Create a VM in `WorldSubnet` (Spoke)
 - [ ] Verify you can ping from Hub VM to Spoke VM (using private IP)
   > **Note**: You may need to allow ICMP in OS firewall or NSG (covered in next lab) for ping to work.

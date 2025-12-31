@@ -39,7 +39,7 @@ We will create a route that sends all internet-bound traffic (`0.0.0.0/0`) to th
 5. **Address prefix destination**: IP Addresses
 6. **Destination IP addresses/CIDR ranges**: `0.0.0.0/0`
 7. **Next hop type**: Virtual appliance
-8. **Next hop address**: `10.0.1.4` (This would be the firewall's private IP in the Hub).
+8. **Next hop address**: `10.0.2.4` (This would be the firewall's private IP in the Hub).
 9. Click **Add**.
 
 ### Task 3: Associate with Subnets
@@ -47,8 +47,8 @@ We will create a route that sends all internet-bound traffic (`0.0.0.0/0`) to th
 1. Go to **Subnets** in the Route Table blade.
 2. Click **+ Associate**.
 3. **Virtual network**: `prod-skycraft-swc-vnet`
-4. **Subnet**: `snet-auth`
-5. Repeat for `snet-world` and `snet-db`.
+4. **Subnet**: `AuthSubnet`
+5. Repeat for `WorldSubnet` and `DatabaseSubnet`.
 
 > **Warning**: Once you do this, internet access from these subnets will BREAK unless there is actually a Virtual Appliance at 10.0.1.4 forwarding traffic. **This is expected behavior.**
 

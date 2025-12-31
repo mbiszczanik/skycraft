@@ -84,7 +84,7 @@ We want to ensure ONLY the Auth and World servers can talk to the Database.
 
 1. Go to **Virtual Networks** -> `prod-skycraft-swc-vnet`.
 2. Select **Subnets**.
-3. For each subnet (`snet-auth`, `snet-world`, `snet-db`):
+3. For each subnet (`AuthSubnet`, `WorldSubnet`, `DatabaseSubnet`):
    - Click the subnet.
    - Set **Security Group** to `prod-skycraft-swc-nsg`.
    - Click **Save**.
@@ -93,12 +93,15 @@ We want to ensure ONLY the Auth and World servers can talk to the Database.
 
 Bastion allows secure RDP/SSH without exposing public IPs on VMs.
 
-1. In `platform-skycraft-swc-vnet` (Hub), add a subnet named `AzureBastionSubnet` (must use this exact name) with range `10.0.2.0/26`.
-2. Create a **Bastion** resource.
+1. Navigate to `platform-skycraft-swc-vnet` (Hub).
+2. Verify that `AzureBastionSubnet` exists (created in Lab 2.1).
+3. Create a **Bastion** resource.
    - **Name**: `platform-skycraft-swc-bas`
+   - **Region**: **Sweden Central**
    - **VNet**: `platform-skycraft-swc-vnet`
-   - **Public IP**: Create new
-3. This takes ~15 mins to deploy.
+   - **Subnet**: Select `AzureBastionSubnet`
+   - **Public IP**: Create new (`platform-skycraft-swc-bas-pip`)
+4. This takes ~15 mins to deploy.
 
 ## ✅ Verification
 

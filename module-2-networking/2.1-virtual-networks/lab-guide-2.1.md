@@ -19,12 +19,15 @@ In this lab, you will establish the fundamental network topology for SkyCraft. Y
 
 We will implement the following address space design:
 
-| Resource  | VNet Name                    | Address Space | Subnet Name   | Subnet Range  | Purpose                             |
-| :-------- | :--------------------------- | :------------ | :------------ | :------------ | :---------------------------------- |
-| **Hub**   | `platform-skycraft-swc-vnet` | `10.0.0.0/16` | `snet-shared` | `10.0.1.0/24` | Shared services (Bastion, Firewall) |
-| **Spoke** | `prod-skycraft-swc-vnet`     | `10.1.0.0/16` | `snet-auth`   | `10.1.1.0/24` | Authentication Servers              |
-|           |                              |               | `snet-world`  | `10.1.2.0/24` | World Servers                       |
-|           |                              |               | `snet-db`     | `10.1.3.0/24` | Databases                           |
+| Resource  | VNet Name                    | Address Space | Subnet Name           | Subnet Range  | Purpose                     |
+| :-------- | :--------------------------- | :------------ | :-------------------- | :------------ | :-------------------------- |
+| **Hub**   | `platform-skycraft-swc-vnet` | `10.0.0.0/16` | `AzureBastionSubnet`  | `10.0.1.0/26` | Host Azure Bastion          |
+|           |                              |               | `AzureFirewallSubnet` | `10.0.2.0/26` | Host Azure Firewall         |
+|           |                              |               | `GatewaySubnet`       | `10.0.3.0/27` | Virtual Network Gateway     |
+|           |                              |               | `SharedSubnet`        | `10.0.4.0/24` | Shared VMs (Jumpbox, Tools) |
+| **Spoke** | `prod-skycraft-swc-vnet`     | `10.1.0.0/16` | `AuthSubnet`          | `10.1.1.0/24` | Authentication Servers      |
+|           |                              |               | `WorldSubnet`         | `10.1.2.0/24` | World Servers               |
+|           |                              |               | `DatabaseSubnet`      | `10.1.3.0/24` | Databases                   |
 
 ### Task 2: Create the Hub VNet
 
@@ -37,9 +40,15 @@ We will implement the following address space design:
 4. **IP Addresses**:
    - Delete the default IPv4 address space.
    - Add IPv4 address space: `10.0.0.0/16`
-   - Add Subnet:
-     - **Name**: `snet-shared`
-     - **Address range**: `10.0.1.0/24`
+   - Add Subnets:
+     - **Name**: `AzureBastionSubnet`
+     - **Address range**: `10.0.1.0/26`
+     - **Name**: `AzureFirewallSubnet`
+     - **Address range**: `10.0.2.0/26`
+     - **Name**: `GatewaySubnet`
+     - **Address range**: `10.0.3.0/27`
+     - **Name**: `SharedSubnet`
+     - **Address range**: `10.0.4.0/24`
 5. **Security**: Leave defaults for now.
 6. Click **Review + create**, then **Create**.
 
@@ -51,9 +60,9 @@ We will implement the following address space design:
    - **Region**: **Sweden Central**
    - **Address Space**: `10.1.0.0/16`
 2. Add the following Subnets:
-   - `snet-auth` (`10.1.1.0/24`)
-   - `snet-world` (`10.1.2.0/24`)
-   - `snet-db` (`10.1.3.0/24`)
+   - `AuthSubnet` (`10.1.1.0/24`)
+   - `WorldSubnet` (`10.1.2.0/24`)
+   - `DatabaseSubnet` (`10.1.3.0/24`)
 3. Click **Review + create**, then \*\*Create`.
 
 ### Task 4: Configure VNet Peering

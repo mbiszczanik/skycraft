@@ -8,11 +8,11 @@
 
 - [ ] **Route Created**:
   - [ ] Destination: `0.0.0.0/0`
-  - [ ] Next Hop: Virtual Appliance (`10.0.1.4`)
+  - [ ] Next Hop: Virtual Appliance (`10.0.2.4`)
 - [ ] **Association**:
-  - [ ] Linked to `snet-auth`
-  - [ ] Linked to `snet-world`
-  - [ ] Linked to `snet-db`
+  - [ ] Linked to `AuthSubnet`
+  - [ ] Linked to `WorldSubnet`
+  - [ ] Linked to `DatabaseSubnet`
 
 ## Verification
 

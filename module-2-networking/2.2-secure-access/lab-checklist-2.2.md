@@ -24,9 +24,9 @@
 ## Association
 
 - [ ] `prod-skycraft-swc-nsg` is associated with:
-  - [ ] `snet-auth`
-  - [ ] `snet-world`
-  - [ ] `snet-db`
+  - [ ] `AuthSubnet`
+  - [ ] `WorldSubnet`
+  - [ ] `DatabaseSubnet`
 
 ## Bastion (If Deployed)
 
