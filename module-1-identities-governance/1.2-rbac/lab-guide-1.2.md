@@ -3,6 +3,7 @@
 ## 🎯 Lab Objectives
 
 By completing this lab, you will:
+
 - Understand Azure RBAC (Role-Based Access Control) fundamentals
 - Assign built-in Azure roles at different scopes
 - Configure role assignments for users and groups
@@ -38,12 +39,14 @@ By completing this lab, you will:
 ## ✅ Prerequisites
 
 Before starting this lab:
+
 - [ ] Completed Lab 1.1 (users and groups created)
 - [ ] Azure subscription with Owner or User Access Administrator role
 - [ ] Understanding of resource groups concept
 - [ ] Azure Portal access
 
 **Verify Lab 1.1 completion**: Confirm these exist:
+
 - Users: SkyCraft Admin, SkyCraft Developer, SkyCraft Tester
 - Groups: SkyCraft-Admins, SkyCraft-Developers, SkyCraft-Testers
 
@@ -58,12 +61,14 @@ Before starting this lab:
 ### The Three Core Components
 
 1. **Security Principal** (WHO)
+
    - User (e.g., SkyCraft Admin)
    - Group (e.g., SkyCraft-Developers)
    - Service Principal
    - Managed Identity
 
 2. **Role Definition** (WHAT)
+
    - Collection of permissions
    - Examples: Owner, Contributor, Reader
    - Built-in or Custom roles
@@ -76,20 +81,20 @@ Before starting this lab:
 
 ### Common Built-in Roles
 
-| Role | Description | Use Case |
-|------|-------------|----------|
-| **Owner** | Full access including role assignments | Admins managing entire environments |
-| **Contributor** | Can create/manage resources but not grant access | Developers deploying infrastructure |
-| **Reader** | View-only access | Auditors, monitoring teams, testers |
-| **Virtual Machine Contributor** | Manage VMs but not networking/storage | Specialized VM administrators |
-| **Storage Account Contributor** | Manage storage accounts | Storage specialists |
+| Role                            | Description                                      | Use Case                            |
+| ------------------------------- | ------------------------------------------------ | ----------------------------------- |
+| **Owner**                       | Full access including role assignments           | Admins managing entire environments |
+| **Contributor**                 | Can create/manage resources but not grant access | Developers deploying infrastructure |
+| **Reader**                      | View-only access                                 | Auditors, monitoring teams, testers |
+| **Virtual Machine Contributor** | Manage VMs but not networking/storage            | Specialized VM administrators       |
+| **Storage Account Contributor** | Manage storage accounts                          | Storage specialists                 |
 
 ### Understanding Scope Hierarchy
 
 ```
-Management Group (broadest)  
-└── Subscription  
-    └── Resource Group  
+Management Group (broadest)
+└── Subscription
+    └── Resource Group
         └── Resource (most specific)
 ```
 
@@ -114,11 +119,11 @@ Before assigning roles, create resource groups for the SkyCraft project.
 2. Click **+ Create**
 3. Fill in the details:
 
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
-| Resource group | dev-skycraft-swc-rg |
-| Region | Sweden Central (or your preferred region) |
+| Field          | Value                                     |
+| -------------- | ----------------------------------------- |
+| Subscription   | [Your subscription]                       |
+| Resource group | dev-skycraft-swc-rg                       |
+| Region         | Sweden Central (or your preferred region) |
 
 4. Click **Review + Create** → **Create**
 
@@ -129,11 +134,11 @@ Before assigning roles, create resource groups for the SkyCraft project.
 1. Click **+ Create** again
 2. Fill in:
 
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
+| Field          | Value                |
+| -------------- | -------------------- |
+| Subscription   | [Your subscription]  |
 | Resource group | prod-skycraft-swc-rg |
-| Region | Sweden Central |
+| Region         | Sweden Central       |
 
 3. Click **Review + Create** → **Create**
 
@@ -142,15 +147,16 @@ Before assigning roles, create resource groups for the SkyCraft project.
 1. Click **+ Create**
 2. Fill in:
 
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
+| Field          | Value                    |
+| -------------- | ------------------------ |
+| Subscription   | [Your subscription]      |
 | Resource group | platform-skycraft-swc-rg |
-| Region | Sweden Central |
+| Region         | Sweden Central           |
 
 3. Click **Review + Create** → **Create**
 
 **Expected Result**: Three resource groups created:
+
 - `dev-skycraft-swc-rg` (for development/testing)
 - `prod-skycraft-swc-rg` (for production deployment)
 - `platform-skycraft-swc-rg` (for shared resources like monitoring)
@@ -169,11 +175,13 @@ Before assigning roles, create resource groups for the SkyCraft project.
 **Important**: The role assignment wizard has three tabs: Role, Members, Review
 
 5. **Role tab**:
+
    - Search for **"Owner"**
    - Select **Owner** role
    - Click **Next**
 
 6. **Members tab**:
+
    - Select **Assign access to**: User, group, or service principal
    - Click **+ Select members**
    - Search for **"SkyCraft Admin"**
@@ -196,6 +204,7 @@ Before assigning roles, create resource groups for the SkyCraft project.
 3. Verify **Owner** role appears with **Subscription** scope
 
 **Expected Result**: You see the assignment listed with these details:
+
 - Name: SkyCraft Admin
 - Role: Owner
 - Scope: Subscription (your subscription name)
@@ -214,11 +223,13 @@ Now assign more specific roles at resource group level for the development team.
 3. Click **+ Add** → **Add role assignment**
 
 4. **Role tab**:
+
    - Search for **"Contributor"**
    - Select **Contributor**
    - Click **Next**
 
 5. **Members tab**:
+
    - Click **+ Select members**
    - Search for **"SkyCraft-Developers"**
    - Select the **group** (not individual users)
@@ -236,11 +247,13 @@ Now assign more specific roles at resource group level for the development team.
 2. Click **+ Add** → **Add role assignment**
 
 3. **Role tab**:
+
    - Search for **"Reader"**
    - Select **Reader**
    - Click **Next**
 
 4. **Members tab**:
+
    - Click **+ Select members**
    - Search for **"SkyCraft-Testers"**
    - Select the group
@@ -290,6 +303,7 @@ For the external partner, grant access only to the shared services resource grou
 5. Click the user name
 
 **Expected Result**: Shows the user has:
+
 - **Contributor** (inherited from SkyCraft-Developers group)
 - Scope: dev-skycraft-swc-rg
 
@@ -302,6 +316,7 @@ For the external partner, grant access only to the shared services resource grou
 3. Click the user name
 
 **Expected Result**: Shows:
+
 - **Reader** role (inherited from SkyCraft-Testers group)
 - Scope: dev-skycraft-swc-rg and prod-skycraft-swc-rg
 
@@ -319,6 +334,7 @@ For the external partner, grant access only to the shared services resource grou
 ### Step 5.4: Test Effective Permissions (Optional but Recommended)
 
 To truly verify permissions, you would:
+
 1. Sign in as **SkyCraft Developer** (in a private browser window)
 2. Try to create a resource in `dev-skycraft-swc-rg` → Should succeed
 3. Try to delete `dev-skycraft-swc-rg` → Should fail (Contributor can't delete RGs)
@@ -336,6 +352,7 @@ To truly verify permissions, you would:
 2. Click on any assignment to view details
 
 **Key Properties**:
+
 - **Principal ID**: Unique identifier for user/group
 - **Role Definition ID**: Unique identifier for the role
 - **Scope**: Exact resource path where role applies
@@ -344,12 +361,13 @@ To truly verify permissions, you would:
 ### Understand Inheritance
 
 ```
-Subscription (SkyCraft Admin = Owner)  
-└── dev-skycraft-swc-rg (Developers = Contributor, Testers = Reader)  
+Subscription (SkyCraft Admin = Owner)
+└── dev-skycraft-swc-rg (Developers = Contributor, Testers = Reader)
     └── [Future VM] (inherits all above permissions)
 ```
 
 **Key Concept**: When you create a VM in `dev-skycraft-swc-rg`:
+
 - SkyCraft Admin can manage it (Owner at subscription)
 - Developers can manage it (Contributor at RG)
 - Testers can view it (Reader at RG)
@@ -361,24 +379,30 @@ Subscription (SkyCraft Admin = Owner)
 Complete this checklist to verify successful lab completion:
 
 ### Resource Groups Created
+
 - [ ] `dev-skycraft-swc-rg` exists
 - [ ] `prod-skycraft-swc-rg` exists
 - [ ] `platform-skycraft-swc-rg` exists
 
 ### Subscription-Level Role Assignments
+
 - [ ] SkyCraft Admin has **Owner** role at subscription scope
 
 ### Resource Group-Level Assignments (dev-skycraft-swc-rg)
+
 - [ ] SkyCraft-Developers group has **Contributor** role
 - [ ] SkyCraft-Testers group has **Reader** role
 
 ### Resource Group-Level Assignments (prod-skycraft-swc-rg)
+
 - [ ] SkyCraft-Testers group has **Reader** role
 
 ### Resource Group-Level Assignments (rg-skycraft-shared)
+
 - [ ] External Partner has **Reader** role
 
 ### Verification Completed
+
 - [ ] Checked access for SkyCraft Developer (shows Contributor via group)
 - [ ] Checked access for SkyCraft Tester (shows Reader via group)
 - [ ] Reviewed role assignments in all three resource groups
@@ -393,10 +417,12 @@ Complete this checklist to verify successful lab completion:
 **Symptom**: Error when trying to assign roles
 
 **Causes**:
+
 - You don't have Owner or User Access Administrator role
 - You're trying to assign a role you don't have yourself
 
 **Solutions**:
+
 1. Verify your own role: **Subscriptions** → **Access control (IAM)** → **Check access**
 2. You need Owner or User Access Administrator to assign roles
 3. Contact your subscription administrator
@@ -406,6 +432,7 @@ Complete this checklist to verify successful lab completion:
 **Symptom**: User or group doesn't appear in search
 
 **Solutions**:
+
 1. Wait 5 minutes after creating users/groups (synchronization delay)
 2. Search by exact name: "SkyCraft-Developers"
 3. Refresh the browser (F5)
@@ -416,6 +443,7 @@ Complete this checklist to verify successful lab completion:
 **Symptom**: Just assigned a role but it doesn't appear
 
 **Solutions**:
+
 1. Wait 2-3 minutes (propagation delay)
 2. Refresh the page
 3. Check the correct scope (subscription vs. resource group)
@@ -426,6 +454,7 @@ Complete this checklist to verify successful lab completion:
 **Symptom**: Developer reports "Access Denied" errors
 
 **Solutions**:
+
 1. Verify role assignment scope matches where they're working
 2. Confirm they're members of the correct group
 3. Ask them to sign out and sign back in (token refresh)
@@ -466,12 +495,14 @@ Test your understanding:
 ## 🔗 What's Next
 
 You've successfully implemented RBAC for the SkyCraft team! Key accomplishments:
+
 - ✅ Created organized resource group structure
 - ✅ Assigned appropriate roles at correct scopes
 - ✅ Implemented least-privilege access
 - ✅ Used groups for better management
 
 **Next Lab**: Lab 1.3 - Azure Governance and Policies
+
 - You'll add policies to enforce naming conventions
 - Configure resource locks to prevent accidental deletion
 - Set up cost management and budgets
@@ -481,6 +512,7 @@ You've successfully implemented RBAC for the SkyCraft team! Key accomplishments:
 ## 📝 Lab Summary
 
 **What You Accomplished**:
+
 - ✅ Created 3 resource groups (dev, prod, shared)
 - ✅ Assigned Owner role at subscription level
 - ✅ Assigned Contributor and Reader roles at resource group level
@@ -490,9 +522,16 @@ You've successfully implemented RBAC for the SkyCraft team! Key accomplishments:
 **Time Spent**: ~2 hours
 
 **Roles Assigned**:
+
 - 1 subscription-level assignment (Owner)
 - 5 resource group-level assignments (Contributor × 1, Reader × 4)
 
 ---
 
-**Ready for Lab 1.3?** → [Go to Lab 1.3: Governance & Policies](../1.3-governance/lab-guide.md)
+---
+
+## 📌 Module Navigation
+
+- [← Lab 1.1: Manage Entra Users & Groups](../1.1-entra-users-groups/lab-guide-1.1.md)
+- [← Back to Module 1 Index](../README.MD)
+- [Lab 1.3: Governance & Policies →](../1.3-governance/lab-guide-1.3.md)

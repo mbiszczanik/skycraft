@@ -3,6 +3,7 @@
 ## 🎯 Lab Objectives
 
 By completing this lab, you will:
+
 - Create individual users in Microsoft Entra ID
 - Create security groups and assign members
 - Manage user properties and licenses
@@ -14,6 +15,7 @@ By completing this lab, you will:
 ## 📋 Real-World Scenario
 
 **Situation**: You're setting up the SkyCraft deployment team. The organization needs:
+
 - An administrator who manages all resources (SkyCraft-Admin)
 - Developers who deploy and modify infrastructure (SkyCraft-Dev)
 - Testers who monitor and report issues (SkyCraft-Tester)
@@ -59,12 +61,12 @@ By completing this lab, you will:
 2. Click **+ New user** → **Create new user**
 3. Fill in the following details:
 
-| Field | Value |
-|-------|-------|
+| Field               | Value                                       |
+| ------------------- | ------------------------------------------- |
 | User principal name | skycraft-admin@[yourtenant].onmicrosoft.com |
-| Display name | SkyCraft Admin |
-| Password (initial) | TempPassword!2025 |
-| Usage location | [Your country] |
+| Display name        | SkyCraft Admin                              |
+| Password (initial)  | TempPassword!2025                           |
+| Usage location      | [Your country]                              |
 
 4. Click **Create**
 
@@ -77,12 +79,12 @@ By completing this lab, you will:
 1. Click **+ New user** → **Create new user**
 2. Fill in the details:
 
-| Field | Value |
-|-------|-------|
+| Field               | Value                                     |
+| ------------------- | ----------------------------------------- |
 | User principal name | skycraft-dev@[yourtenant].onmicrosoft.com |
-| Display name | SkyCraft Developer |
-| Password | TempPassword!2025 |
-| Usage location | [Your country] |
+| Display name        | SkyCraft Developer                        |
+| Password            | TempPassword!2025                         |
+| Usage location      | [Your country]                            |
 
 3. Click **Create**
 
@@ -90,24 +92,25 @@ By completing this lab, you will:
 
 Repeat the process with:
 
-| Field | Value |
-|-------|-------|
+| Field               | Value                                        |
+| ------------------- | -------------------------------------------- |
 | User principal name | skycraft-tester@[yourtenant].onmicrosoft.com |
-| Display name | SkyCraft Tester |
-| Password | TempPassword!2025 |
-| Usage location | [Your country] |
+| Display name        | SkyCraft Tester                              |
+| Password            | TempPassword!2025                            |
+| Usage location      | [Your country]                               |
 
 ### Step 1.1.5: Create Guest User (External Partner)
 
 1. Click **+ New user** → **Invite external user**
 2. Fill in:
 
-| Field | Value |
-|-------|-------|
-| Email | partner@externalcompany.com |
+| Field        | Value                       |
+| ------------ | --------------------------- |
+| Email        | partner@externalcompany.com |
 | Display name | External Partner Consultant |
 
 3. Add custom invitation message:
+
    > "Welcome to the SkyCraft deployment project. Please accept this invitation to collaborate on our infrastructure deployment."
 
 4. Click **Invite**
@@ -124,12 +127,12 @@ Repeat the process with:
 2. Click **+ New group**
 3. Fill in:
 
-| Field | Value |
-|-------|-------|
-| Group type | Security |
-| Group name | SkyCraft-Admins |
+| Field             | Value                                           |
+| ----------------- | ----------------------------------------------- |
+| Group type        | Security                                        |
+| Group name        | SkyCraft-Admins                                 |
 | Group description | Administrative team for SkyCraft infrastructure |
-| Membership type | Assigned |
+| Membership type   | Assigned                                        |
 
 4. Click **Create**
 
@@ -148,12 +151,12 @@ Repeat the process with:
 1. Click **+ New group**
 2. Create group with details:
 
-| Field | Value |
-|-------|-------|
-| Group type | Security |
-| Group name | SkyCraft-Developers |
+| Field             | Value                                    |
+| ----------------- | ---------------------------------------- |
+| Group type        | Security                                 |
+| Group name        | SkyCraft-Developers                      |
 | Group description | Development team for SkyCraft deployment |
-| Membership type | Assigned |
+| Membership type   | Assigned                                 |
 
 3. Add member: **SkyCraft Developer**
 
@@ -162,12 +165,12 @@ Repeat the process with:
 1. Click **+ New group**
 2. Create group:
 
-| Field | Value |
-|-------|-------|
-| Group type | Security |
-| Group name | SkyCraft-Testers |
+| Field             | Value                       |
+| ----------------- | --------------------------- |
+| Group type        | Security                    |
+| Group name        | SkyCraft-Testers            |
 | Group description | Testing and monitoring team |
-| Membership type | Assigned |
+| Membership type   | Assigned                    |
 
 3. Add member: **SkyCraft Tester**
 
@@ -183,12 +186,12 @@ Repeat the process with:
 2. In the **Manage** section, click **Properties**
 3. Update the following:
 
-| Property | Value |
-|----------|-------|
-| Job title | Cloud Infrastructure Manager |
-| Department | IT Operations |
-| Office | Remote |
-| Manager | [Leave blank] |
+| Property   | Value                        |
+| ---------- | ---------------------------- |
+| Job title  | Cloud Infrastructure Manager |
+| Department | IT Operations                |
+| Office     | Remote                       |
+| Manager    | [Leave blank]                |
 
 4. Click **Save**
 
@@ -251,14 +254,17 @@ Complete this checklist to verify you've successfully completed the lab:
 ## 🔧 Troubleshooting
 
 **Issue**: "Insufficient privileges" error when creating users
+
 - **Solution**: Verify you have Global Administrator or User Administrator role
 - **Check**: Azure Portal → Entra ID → My role assignments
 
 **Issue**: Cannot create groups
+
 - **Solution**: Ensure group creation is enabled in security defaults
 - **Fix**: Entra ID → Security defaults → Turn off security defaults (if needed)
 
 **Issue**: License assignment fails
+
 - **Solution**: Verify licenses are available in your tenant
 - **Check**: Entra ID → Licenses → All products → View available licenses
 
@@ -298,6 +304,7 @@ Answer these questions to verify understanding:
 ## 📝 Lab Summary
 
 **What You Accomplished**:
+
 - ✅ Created identity structure for SkyCraft team (4 users, 3 groups)
 - ✅ Organized team into logical security groups
 - ✅ Configured user properties and licenses
@@ -306,4 +313,9 @@ Answer these questions to verify understanding:
 
 **Time Spent**: ~3 hours
 
-**Ready for Lab 1.2?** → [Go to Lab 1.2 Guide](../1.2-rbac/lab-guide.md)
+---
+
+## 📌 Module Navigation
+
+- [← Back to Module 1 Index](../README.MD)
+- [Lab 1.2: Manage Access & RBAC →](../1.2-rbac/lab-guide-1.2.md)

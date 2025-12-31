@@ -25,14 +25,14 @@ Transform abstract cloud concepts into **tangible hands-on experience** by build
 
 ## 📚 Course Structure (40 Hours)
 
-| Module | Topic | Hours | Exam Weight |
-|--------|-------|-------|-------------|
-| **1** | Manage Azure Identities and Governance | 9 | 20-25% |
-| **2** | Implement and Manage Virtual Networking | 7 | 15-20% |
-| **3** | Deploy and Manage Azure Compute Resources | 10 | 20-25% |
-| **4** | Implement and Manage Storage | 7 | 15-20% |
-| **5** | Monitor and Maintain Azure Resources | 5 | 10-15% |
-| **Capstone** | Full AzerothCore Deployment + Exam Prep | 2 | All domains |
+| Module       | Topic                                     | Hours | Exam Weight |
+| ------------ | ----------------------------------------- | ----- | ----------- |
+| **1**        | Manage Azure Identities and Governance    | 9     | 20-25%      |
+| **2**        | Implement and Manage Virtual Networking   | 7     | 15-20%      |
+| **3**        | Deploy and Manage Azure Compute Resources | 10    | 20-25%      |
+| **4**        | Implement and Manage Storage              | 7     | 15-20%      |
+| **5**        | Monitor and Maintain Azure Resources      | 5     | 10-15%      |
+| **Capstone** | Full AzerothCore Deployment + Exam Prep   | 2     | All domains |
 
 ---
 
@@ -49,8 +49,8 @@ Transform abstract cloud concepts into **tangible hands-on experience** by build
 ### Getting Started
 
 1. Clone the repository <p>
-`git clone https://github.com/mbiszczanik/skycraft.git`<p>
-`cd skycraft`
+   `git clone https://github.com/mbiszczanik/skycraft.git`<p>
+   `cd skycraft`
 
 2. Follow Lab instructions
 
@@ -58,14 +58,14 @@ Transform abstract cloud concepts into **tangible hands-on experience** by build
 
 ## 🛠️ Technology Stack
 
-| Category | Tool | Purpose |
-|----------|------|---------|
-| Infrastructure as Code | Bicep | Azure resource deployment |
-| Scripting | PowerShell + Bash | Automation and validation |
-| Containerization | Docker | Optional container labs |
-| Version Control | Git/GitHub | Course materials |
-| Querying | KQL (Kusto Query Language) | Azure Monitor analysis |
-| Documentation | Markdown | All guides and references |
+| Category               | Tool                       | Purpose                   |
+| ---------------------- | -------------------------- | ------------------------- |
+| Infrastructure as Code | Bicep                      | Azure resource deployment |
+| Scripting              | PowerShell + Bash          | Automation and validation |
+| Containerization       | Docker                     | Optional container labs   |
+| Version Control        | Git/GitHub                 | Course materials          |
+| Querying               | KQL (Kusto Query Language) | Azure Monitor analysis    |
+| Documentation          | Markdown                   | All guides and references |
 
 ---
 
@@ -73,3 +73,13 @@ Transform abstract cloud concepts into **tangible hands-on experience** by build
 
 - **Azure Subscription** (free trial or credits)
 - **Azure CLI** & **Azure PowerShell** (latest version)
+
+---
+
+## 📌 Course Navigation
+
+- [Module 1: Manage Azure Identities and Governance →](module-1-identities-governance/README.MD)
+- [Module 2: Implement and Manage Virtual Networking →](#)
+- [Module 3: Deploy and Manage Azure Compute Resources →](#)
+- [Module 4: Implement and Manage Storage →](#)
+- [Module 5: Monitor and Maintain Azure Resources →](#)

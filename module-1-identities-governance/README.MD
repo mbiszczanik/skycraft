@@ -2,12 +2,12 @@
 
 ## 📚 Module Overview
 
-In this module, you'll establish the **foundational security layer** for the SkyCraft deployment. 
-You'll create the identity structure, implement role-based access control, and configure governance policies 
+In this module, you'll establish the **foundational security layer** for the SkyCraft deployment.
+You'll create the identity structure, implement role-based access control, and configure governance policies
 that protect your infrastructure and enforce organizational standards.
 
-**Real-world Context**: Before deploying any infrastructure, you must control *who* can access resources, 
-*what* they can do, and *enforce* compliance standards—exactly what we'll do here for the SkyCraft team.
+**Real-world Context**: Before deploying any infrastructure, you must control _who_ can access resources,
+_what_ they can do, and _enforce_ compliance standards—exactly what we'll do here for the SkyCraft team.
 
 ---
 
@@ -27,11 +27,11 @@ By completing this module, you will be able to:
 
 ## 📋 Module Sections
 
-| Section | Duration | Topic | Exam Weight |
-|---------|----------|-------|-------------|
-| 1.1 | 3 hours | Manage Microsoft Entra Users and Groups | ~8-10% |
-| 1.2 | 2 hours | Manage Access to Azure Resources (RBAC) | ~5-7% |
-| 1.3 | 4 hours | Manage Azure Subscriptions and Governance | ~7-10% |
+| Section | Duration | Topic                                     | Exam Weight |
+| ------- | -------- | ----------------------------------------- | ----------- |
+| 1.1     | 3 hours  | Manage Microsoft Entra Users and Groups   | ~8-10%      |
+| 1.2     | 2 hours  | Manage Access to Azure Resources (RBAC)   | ~5-7%       |
+| 1.3     | 4 hours  | Manage Azure Subscriptions and Governance | ~7-10%      |
 
 **Total Module Time**: 9 hours
 
@@ -40,6 +40,7 @@ By completing this module, you will be able to:
 ## ✅ Prerequisites
 
 Before starting, ensure you have:
+
 - [ ] Active Azure subscription (with at least $50 credit available)
 - [ ] Azure Portal access (https://portal.azure.com)
 - [ ] Azure CLI installed locally (or use Cloud Shell)
@@ -63,6 +64,7 @@ Before starting, ensure you have:
 ## 📖 How to Use This Module
 
 Each lab includes:
+
 - **Lab Guide** - Step-by-step instructions with screenshots
 - **Lab Checklist** - Verification steps to confirm success
 - **Scripts** - PowerShell and Bash automation scripts
@@ -71,6 +73,7 @@ Each lab includes:
 - **Troubleshooting** - Common issues and fixes
 
 **Recommended approach**:
+
 1. Read the lab guide completely before starting
 2. Follow steps manually first (to understand the process)
 3. Use scripts to automate repetitive tasks
@@ -123,6 +126,7 @@ This module covers **20-25%** of the AZ-104 exam. Key exam topics include:
 ## ✨ What's Next After This Module?
 
 Once complete, you'll have:
+
 - ✅ Identity structure for the SkyCraft team
 - ✅ Proper access controls in place
 - ✅ Cost governance framework established
@@ -135,6 +139,6 @@ Once complete, you'll have:
 ## 📌 Module Navigation
 
 - [← Back to Course Home](/README.MD)
-- [Lab 1.1: Manage Entra Users & Groups →](labs/1.1-entra-users-groups/lab-guide.md)
-- [Lab 1.2: Manage Access & RBAC →](labs/1.2-rbac/lab-guide.md)
-- [Lab 1.3: Governance & Policies →](labs/1.3-governance/lab-guide.md)
+- [Lab 1.1: Manage Entra Users & Groups →](1.1-entra-users-groups/lab-guide-1.1.md)
+- [Lab 1.2: Manage Access & RBAC →](1.2-rbac/lab-guide-1.2.md)
+- [Lab 1.3: Governance & Policies →](1.3-governance/lab-guide-1.3.md)
