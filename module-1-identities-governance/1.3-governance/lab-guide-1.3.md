@@ -3,6 +3,7 @@
 ## 🎯 Lab Objectives
 
 By completing this lab, you will:
+
 - Implement Azure Policy to enforce organizational standards
 - Configure resource locks to prevent accidental deletion
 - Apply and manage tags for resource organization and cost tracking
@@ -15,12 +16,14 @@ By completing this lab, you will:
 ## 📋 Real-World Scenario
 
 **Situation**: The SkyCraft infrastructure now has proper identity management (Lab 1.1) and RBAC roles (Lab 1.2). However, there's still risk:
+
 - Developers might accidentally delete production resources
 - Resources are created without proper naming conventions
 - No visibility into spending patterns
 - Resources lack proper tagging for cost allocation
 
 **Your Task**: Implement governance controls to:
+
 1. Enforce naming conventions with Azure Policy
 2. Prevent accidental deletion with resource locks
 3. Tag all resources for cost tracking
@@ -44,6 +47,7 @@ By completing this lab, you will:
 ## ✅ Prerequisites
 
 Before starting this lab:
+
 - [ ] Completed Lab 1.1 (users and groups)
 - [ ] Completed Lab 1.2 (RBAC and resource groups)
 - [ ] Three resource groups exist: dev-skycraft-swc-rg, prod-skycraft-swc-rg, platform-skycraft-swc-rg
@@ -55,6 +59,7 @@ Before starting this lab:
 ### What are Azure Tags?
 
 **Tags** are name-value pairs that help you organize and categorize Azure resources. Tags enable:
+
 - **Cost tracking** - Identify spending by project, environment, or department
 - **Resource management** - Filter and group resources
 - **Automation** - Target resources for automated operations
@@ -74,13 +79,13 @@ Before starting this lab:
 3. In the left menu, click **Tags**
 4. Add the following tags:
 
-| Name | Value |
-|------|-------|
-| Environment | Development |
-| Project | SkyCraft |
-| CostCenter | Engineering |
-| Owner | skycraft-admin@yourtenant.onmicrosoft.com |
-| Purpose | SkyCraft-Development |
+| Name        | Value                                     |
+| ----------- | ----------------------------------------- |
+| Environment | Development                               |
+| Project     | SkyCraft                                  |
+| CostCenter  | Engineering                               |
+| Owner       | skycraft-admin@yourtenant.onmicrosoft.com |
+| Purpose     | SkyCraft-Development                      |
 
 5. Click **Apply**
 
@@ -92,14 +97,14 @@ Before starting this lab:
 2. Click **Tags**
 3. Add these tags:
 
-| Name | Value |
-|------|-------|
-| Environment | Production |
-| Project | SkyCraft |
-| CostCenter | Operations |
-| Owner | skycraft-admin@yourtenant.onmicrosoft.com |
-| Purpose | SkyCraft-Production |
-| Criticality | High |
+| Name        | Value                                     |
+| ----------- | ----------------------------------------- |
+| Environment | Production                                |
+| Project     | SkyCraft                                  |
+| CostCenter  | Operations                                |
+| Owner       | skycraft-admin@yourtenant.onmicrosoft.com |
+| Purpose     | SkyCraft-Production                       |
+| Criticality | High                                      |
 
 4. Click **Apply**
 
@@ -109,13 +114,13 @@ Before starting this lab:
 2. Click **Tags**
 3. Add tags:
 
-| Name | Value |
-|------|-------|
-| Environment | Platform |
-| Project | SkyCraft |
-| CostCenter | Shared-Services |
-| Owner | skycraft-admin@yourtenant.onmicrosoft.com |
-| Purpose | Monitoring-Logging |
+| Name        | Value                                     |
+| ----------- | ----------------------------------------- |
+| Environment | Platform                                  |
+| Project     | SkyCraft                                  |
+| CostCenter  | Shared-Services                           |
+| Owner       | skycraft-admin@yourtenant.onmicrosoft.com |
+| Purpose     | Monitoring-Logging                        |
 
 4. Click **Apply**
 
@@ -137,6 +142,7 @@ Before starting this lab:
 ### What is Azure Policy?
 
 **Azure Policy** helps enforce organizational standards and assess compliance at scale. Policies can:
+
 - **Audit** resources that don't meet requirements
 - **Deny** creation of non-compliant resources
 - **Modify** resources to meet requirements (e.g., add tags)
@@ -156,6 +162,7 @@ Before starting this lab:
 4. Click **+ Assign policy**
 
 **Basics tab**:
+
 - **Scope**: Click the "..." button
   - Select your subscription
   - Click **Select**
@@ -165,6 +172,7 @@ Before starting this lab:
   - Click **Select**
 
 5. Fill in additional details:
+
    - **Assignment name**: `Require-Environment-Tag-RG`
    - **Description**: `All resource groups must have an Environment tag`
    - **Policy enforcement**: Enabled
@@ -172,14 +180,15 @@ Before starting this lab:
 6. Click **Next**
 
 **Parameters tab**:
+
 - **Tag Name**: `Environment`
 
 7. Click **Next**
 
-**Remediation tab** (skip for now):
-8. Click **Next**
+**Remediation tab** (skip for now): 8. Click **Next**
 
 **Non-compliance messages tab**:
+
 - **Non-compliance message**: `Resource group must have an Environment tag (Development, Production, or Shared)`
 
 9. Click **Review + create**
@@ -193,7 +202,7 @@ Before starting this lab:
    - Click **+ Create a resource group**
    - Name: `rg-test-no-tag`
    - Click **Review + create**
-   
+
 **Expected Result**: Creation is **allowed** (policy is not retroactive, only evaluates new operations).
 
 2. Now try again:
@@ -201,7 +210,7 @@ Before starting this lab:
    - Go to **Tags** tab
    - Add tag: `Environment` = `Test`
    - Click **Review + create**
-   
+
 **Expected Result**: Creation succeeds because the required tag is present.
 
 3. Delete the test resource group: `rg-test-with-tag`
@@ -212,16 +221,19 @@ Before starting this lab:
 2. Click **+ Assign policy**
 
 **Basics tab**:
+
 - **Scope**: Your subscription
 - **Policy definition**: Search for **"Require a tag and its value on resources"**
 - **Assignment name**: `Enforce-Project-Tag`
 - **Description**: `All resources must have Project tag set to SkyCraft`
 
 **Parameters tab**:
+
 - **Tag Name**: `Project`
 - **Tag Value**: `SkyCraft`
 
 **Non-compliance message**:
+
 - Message: `All resources must be tagged with Project=SkyCraft`
 
 3. Click **Review + create** → **Create**
@@ -233,17 +245,20 @@ Prevent resource creation in unintended regions:
 1. **Policy** → **Assignments** → **+ Assign policy**
 
 **Basics tab**:
+
 - **Scope**: Your subscription
 - **Policy definition**: Search for **"Allowed locations"**
 - **Assignment name**: `Restrict-Azure-Regions`
 - **Description**: `Resources can only be created in Sweden Central and North Europe`
 
 **Parameters tab**:
+
 - **Allowed locations**: Select:
   - Sweden Central
   - North Europe
 
 **Non-compliance message**:
+
 - Message: `Resources must be deployed to Sweden Central or North Europe regions only`
 
 2. Click **Review + create** → **Create**
@@ -254,6 +269,7 @@ Prevent resource creation in unintended regions:
 2. Review the compliance dashboard
 
 **Expected View**:
+
 - **Overall compliance percentage** (likely <100% initially)
 - List of assigned policies
 - Compliance state: Compliant, Non-compliant, Not started
@@ -270,6 +286,7 @@ Prevent resource creation in unintended regions:
 ### What are Resource Locks?
 
 **Resource locks** prevent accidental deletion or modification of critical resources. Two types:
+
 - **CanNotDelete** - Users can read and modify but cannot delete
 - **ReadOnly** - Users can read but cannot modify or delete (very restrictive)
 
@@ -284,11 +301,11 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 3. Click **+ Add**
 4. Fill in:
 
-| Field | Value |
-|-------|-------|
-| Lock name | lock-no-delete-prod |
-| Lock type | Delete |
-| Notes | Prevents accidental deletion of production resources |
+| Field     | Value                                                |
+| --------- | ---------------------------------------------------- |
+| Lock name | lock-no-delete-prod                                  |
+| Lock type | Delete                                               |
+| Notes     | Prevents accidental deletion of production resources |
 
 5. Click **OK**
 
@@ -299,6 +316,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 1. Still in **prod-skycraft-swc-rg**, click **Overview**
 2. Click **Delete resource group** button
 3. **Expected Result**: You'll see an error:
+
    > "Failed to delete resource group 'prod-skycraft-swc-rg'. Error: The scope 'prod-skycraft-swc-rg' cannot perform delete operation because following scope(s) are locked: '/subscriptions/.../resourceGroups/prod-skycraft-swc-rg'. Please remove the lock and try again."
 
 4. Click **Cancel** (do not delete)
@@ -310,6 +328,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 1. Navigate to **platform-skycraft-swc-rg**
 2. Click **Locks** → **+ Add**
 3. Create lock:
+
    - Lock name: `lock-no-delete-shared`
    - Lock type: **Delete**
    - Notes: `Protects shared monitoring and logging infrastructure`
@@ -319,11 +338,13 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 ### Step 3.4: Understand Lock Hierarchy
 
 **Important Concepts**:
+
 - Locks at **subscription** level protect all resource groups and resources
 - Locks at **resource group** level protect all resources within
 - Locks at **resource** level protect only that specific resource
 
 **Best Practice**:
+
 - Use **CanNotDelete** on production resource groups
 - Use **ReadOnly** very carefully (can break automation)
 - Document all locks with clear notes
@@ -335,6 +356,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 ### What are Azure Budgets?
 
 **Budgets** help you plan for and control costs by:
+
 - Setting spending thresholds
 - Triggering alerts when thresholds are reached
 - Tracking cost trends over time
@@ -350,13 +372,13 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 5. Fill in budget details:
 
-| Field | Value |
-|-------|-------|
-| Name | SkyCraft-Monthly-Budget |
-| Reset period | Monthly |
-| Creation date | [First day of current month] |
-| Expiration date | [One year from now] |
-| Amount | $200 (adjust based on your needs) |
+| Field           | Value                             |
+| --------------- | --------------------------------- |
+| Name            | SkyCraft-Monthly-Budget           |
+| Reset period    | Monthly                           |
+| Creation date   | [First day of current month]      |
+| Expiration date | [One year from now]               |
+| Amount          | $200 (adjust based on your needs) |
 
 6. Click **Next**
 
@@ -367,6 +389,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 1. Click **+ Add condition**
 
 **Alert 1** (Warning at 50%):
+
 - **Alert type**: Actual
 - **% of budget**: 50
 - **Action group**: (leave blank for now)
@@ -376,6 +399,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 2. Click **+ Add condition** again
 
 **Alert 2** (Critical at 80%):
+
 - **Alert type**: Actual
 - **% of budget**: 80
 - **Alert recipients (email)**: Enter your email address
@@ -383,6 +407,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 3. Click **+ Add condition**
 
 **Alert 3** (Exceeded at 100%):
+
 - **Alert type**: Actual
 - **% of budget**: 100
 - **Alert recipients (email)**: Enter your email and skycraft-admin email
@@ -390,6 +415,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 4. Click **Next**
 
 **Advanced options** (optional):
+
 - Skip for now
 
 5. Click **Create**
@@ -404,11 +430,11 @@ Create a more specific budget for the production environment:
 2. Click **Scope** and select **prod-skycraft-swc-rg**
 3. Fill in:
 
-| Field | Value |
-|-------|-------|
-| Name | SkyCraft-Prod-Monthly |
-| Reset period | Monthly |
-| Amount | $100 |
+| Field        | Value                 |
+| ------------ | --------------------- |
+| Name         | SkyCraft-Prod-Monthly |
+| Reset period | Monthly               |
+| Amount       | $100                  |
 
 4. Configure alerts at 60%, 85%, and 100%
 5. Add email recipients
@@ -418,6 +444,7 @@ Create a more specific budget for the production environment:
 
 1. In **Cost Management + Billing**, click **Cost analysis**
 2. Explore different views:
+
    - **Cost by resource** - See spending per resource
    - **Cost by service** - See spending per Azure service
    - **Cost by location** - Geographic distribution
@@ -437,6 +464,7 @@ Create a more specific budget for the production environment:
 ### What is Azure Advisor?
 
 **Azure Advisor** provides personalized recommendations to:
+
 - Improve reliability (High Availability)
 - Enhance security
 - Optimize performance
@@ -450,6 +478,7 @@ Create a more specific budget for the production environment:
 3. Review the **Overview** page
 
 **Dashboard shows**:
+
 - Overall score (0-100%)
 - Recommendations by category
 - Number of affected resources
@@ -460,6 +489,7 @@ Create a more specific budget for the production environment:
 2. Review recommendations (may be none if newly created)
 
 **Common recommendations**:
+
 - Right-size underutilized virtual machines
 - Delete unused resources
 - Consider reserved instances for predictable workloads
@@ -473,6 +503,7 @@ Create a more specific budget for the production environment:
 2. Review recommendations
 
 **Common recommendations**:
+
 - Enable Microsoft Defender for Cloud
 - Configure diagnostic logs
 - Enable encryption
@@ -482,6 +513,7 @@ Create a more specific budget for the production environment:
 
 1. Click **Configuration** in left menu
 2. Review filtering options:
+
    - Include/exclude subscriptions
    - Include/exclude resource groups
    - Set low utilization thresholds
@@ -490,13 +522,14 @@ Create a more specific budget for the production environment:
 4. Click **+ New Advisor alert**
 
 **Create alert rule**:
+
 - **Scope**: Your subscription
 - **Condition**: Category = Cost
 - **Action group**: (skip for now)
 - **Alert details**:
   - Name: `Advisor-Cost-Recommendations`
   - Description: `Alert when new cost recommendations are available`
-  
+
 5. Click **Create alert rule**
 
 **Expected Result**: You'll receive alerts when Advisor identifies new cost-saving opportunities.
@@ -508,6 +541,7 @@ Create a more specific budget for the production environment:
 ### What are Management Groups?
 
 **Management groups** provide:
+
 - Hierarchical organization above subscriptions
 - Policy and access control inheritance
 - Enterprise-scale governance
@@ -515,13 +549,13 @@ Create a more specific budget for the production environment:
 ### Structure Example
 
 ```
-Tenant Root Group  
-├── Production Management Group  
-│   └── SkyCraft-Prod Subscription  
-├── Development Management Group  
-│   └── SkyCraft-Dev Subscription  
-└── Shared Services Management Group  
-    └── SkyCraft-Shared Subscription  
+Tenant Root Group
+├── Production Management Group
+│   └── SkyCraft-Prod Subscription
+├── Development Management Group
+│   └── SkyCraft-Dev Subscription
+└── Shared Services Management Group
+    └── SkyCraft-Shared Subscription
 ```
 
 (This is ideal structure as creation Subscription does not incur any cost)
@@ -546,12 +580,14 @@ Tenant Root Group
 # ✅ Lab Checklist
 
 ### Tags Applied
+
 - [ ] dev-skycraft-swc-rg has 5 tags (Environment, Project, CostCenter, Owner, Purpose)
 - [ ] prod-skycraft-swc-rg has 6 tags (+ Criticality)
 - [ ] platform-skycraft-swc-rg has 5 tags
 - [ ] Can view resources grouped by "Project" tag
 
 ### Azure Policies Assigned
+
 - [ ] Policy: Require Environment tag on resource groups
 - [ ] Policy: Require Project=SkyCraft on all resources
 - [ ] Policy: Restrict resources to East US and West US
@@ -559,12 +595,14 @@ Tenant Root Group
 - [ ] Tested policy enforcement (tried creating resource without tag)
 
 ### Resource Locks Configured
+
 - [ ] CanNotDelete lock on prod-skycraft-swc-rg
 - [ ] CanNotDelete lock on platform-skycraft-swc-rg
 - [ ] Tested lock (attempted to delete locked resource group)
 - [ ] Lock notes documented
 
 ### Cost Management
+
 - [ ] Created subscription-level budget ($200/month)
 - [ ] Configured 3 alert thresholds (50%, 80%, 100%)
 - [ ] Created resource group-specific budget (prod-skycraft-swc-rg)
@@ -572,12 +610,14 @@ Tenant Root Group
 - [ ] Understand daily cost trends
 
 ### Azure Advisor
+
 - [ ] Accessed Advisor dashboard
 - [ ] Reviewed recommendations by category
 - [ ] Configured Advisor alert for cost recommendations
 - [ ] Understand how to act on recommendations
 
 ### Management Groups
+
 - [ ] Viewed Management Groups in portal
 - [ ] Understand hierarchy and inheritance
 - [ ] Know when to use management groups
@@ -591,6 +631,7 @@ Tenant Root Group
 **Symptom**: Error when creating policy assignment
 
 **Solution**:
+
 - Need Owner, Contributor, or Resource Policy Contributor role
 - Check permissions: **Subscription** → **Access control (IAM)** → **Check access**
 
@@ -599,6 +640,7 @@ Tenant Root Group
 **Symptom**: Created resource without required tag but no error
 
 **Solutions**:
+
 - Policies take 5-10 minutes to propagate
 - Policy may be in "Audit" mode instead of "Deny" mode
 - Check **Policy enforcement** is set to "Enabled"
@@ -609,6 +651,7 @@ Tenant Root Group
 **Symptom**: "Cannot delete" error even with Owner permissions
 
 **Solution**:
+
 - Check for resource locks: **Resource** → **Locks**
 - Remove lock temporarily (document why)
 - Delete resource
@@ -619,6 +662,7 @@ Tenant Root Group
 **Symptom**: Budget threshold reached but no email
 
 **Solutions**:
+
 - Check email spam/junk folder
 - Verify email address in budget alert configuration
 - Alerts can take 6-8 hours to trigger
@@ -629,6 +673,7 @@ Tenant Root Group
 **Symptom**: Applied tags but don't appear in cost breakdown
 
 **Solutions**:
+
 - Cost data can take 24 hours to populate
 - Tags must be applied before resources are created
 - Use "Cost by tag" view in Cost Analysis
@@ -671,6 +716,7 @@ Tenant Root Group
 Congratulations! You've completed **Module 1: Manage Azure Identities and Governance**!
 
 **What You've Accomplished**:
+
 - ✅ Created identity structure (users, groups)
 - ✅ Implemented RBAC (role assignments at appropriate scopes)
 - ✅ Applied tags for organization and cost tracking
@@ -680,12 +726,14 @@ Congratulations! You've completed **Module 1: Manage Azure Identities and Govern
 - ✅ Used Azure Advisor for recommendations
 
 **Your SkyCraft infrastructure now has**:
+
 - Secure identity and access management
 - Proper governance and compliance controls
 - Cost visibility and control
 - Protection against accidental changes
 
 **Next Module**: Module 2 - Implement and Manage Virtual Networking
+
 - Design and deploy virtual networks
 - Configure network security groups
 - Implement Azure Bastion for secure access
@@ -698,6 +746,7 @@ Congratulations! You've completed **Module 1: Manage Azure Identities and Govern
 **Time Spent**: ~4 hours
 
 **Governance Components Implemented**:
+
 - 3 Azure Policy assignments
 - 2 resource locks
 - 15+ tags across resource groups
@@ -708,4 +757,10 @@ Congratulations! You've completed **Module 1: Manage Azure Identities and Govern
 
 ---
 
-**Ready for Module 2?** → [Go to Module 2: Virtual Networking](../../module-2-networking/README.md)
+---
+
+## 📌 Module Navigation
+
+- [← Lab 1.2: Manage Access & RBAC](../1.2-rbac/lab-guide-1.2.md)
+- [← Back to Module 1 Index](../README.MD)
+- [Module 2: Virtual Networking →](../../module-2-networking/README.md)
