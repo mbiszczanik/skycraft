@@ -52,6 +52,8 @@ We will implement the following address space design:
 5. **Security**: Leave defaults for now.
 6. Click **Review + create**, then **Create**.
 
+![Hub VNet Configuration](images/lab-2.1-task-2.png)
+
 ### Task 3: Create the Spoke VNet
 
 1. Repeat the process to create the Spoke VNet:
@@ -65,6 +67,8 @@ We will implement the following address space design:
    - `DatabaseSubnet` (`10.1.3.0/24`)
 3. Click **Review + create**, then \*\*Create`.
 
+![Spoke VNet Configuration](images/lab-2.1-task-3.png)
+
 ### Task 4: Configure VNet Peering
 
 Now we connect the two networks so traffic can flow between them.
@@ -72,15 +76,21 @@ Now we connect the two networks so traffic can flow between them.
 1. Go to **platform-skycraft-swc-vnet**.
 2. Select **Peerings** under Settings.
 3. Click **+ Add**.
-4. **This Virtual Network** (Hub side):
-   - **Peering Link Name**: `peer-hub-to-prod`
-   - **Traffic to remote virtual network**: Allow
-   - **Traffic forwarded from remote virtual network**: Allow (useful later)
-5. **Remote Virtual Network** (Spoke side):
-   - **Virtual Network**: Select `prod-skycraft-swc-vnet`
-   - **Peering Link Name**: `peer-prod-to-hub`
+4. **Remote virtual network** (Spoke side):
+   - **Peering link name**: `peer-prod-to-hub`
+   - **Virtual network**: Select `prod-skycraft-swc-vnet`
+   - **Allow 'prod-skycraft-swc-vnet' to access 'platform-skycraft-swc-vnet'**: Selected
+   - **Allow 'prod-skycraft-swc-vnet' to receive forwarded traffic from 'platform-skycraft-swc-vnet'**: Selected
+   - **Allow gateway or route server in 'prod-skycraft-swc-vnet' to forward traffic to 'platform-skycraft-swc-vnet'**: Unselected (Default)
+   - **Enable 'prod-skycraft-swc-vnet' to use 'platform-skycraft-swc-vnet's' remote gateway or route server**: Unselected (Default)
+5. **This virtual network** (Hub side):
+   - **Peering link name**: `peer-hub-to-prod`
+   - **Allow 'platform-skycraft-swc-vnet' to access 'prod-skycraft-swc-vnet'**: Selected (Allow)
+   - **Allow 'platform-skycraft-swc-vnet' to receive forwarded traffic from 'prod-skycraft-swc-vnet'**: Selected (Allow)
 6. Click **Add**.
 7. Wait for the Peering Status to change to **Connected**.
+
+![VNet Peering Configuration](images/lab-2.1-task-4.png)
 
 ## ✅ Verification
 
