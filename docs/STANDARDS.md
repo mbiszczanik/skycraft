@@ -53,3 +53,12 @@ We strictly follow the Azure Resource Naming recommendations with specific patte
 
 - All lab guides must reference the specific resource names defined above.
 - Do not use generic names like `myVNet` or `test-rg` in guides.
+
+## 5. Media and Images
+
+- **Storage**: Screenshots and diagrams should be stored in an `images` folder within the same directory as the lab guide.
+  - Example: `module-2-networking/2.1-virtual-networks/images/`
+- **Naming**: Use descriptive, lowercase names with hyphens.
+  - Example: `vnet-peering-connected.png`
+- **Referencing**: Use relative paths in Markdown.
+  - Example: `![VNet Peering Status](images/vnet-peering-connected.png)`
