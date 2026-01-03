@@ -1,6 +1,6 @@
 # Lab 2.2 Checklist: Secure Access
 
-## Resources Created
+## ✅ Resources Created
 
 - [ ] **ASGs Created**:
   - [ ] `prod-skycraft-swc-asg-auth`
@@ -9,7 +9,7 @@
 - [ ] **NSGs Created**:
   - [ ] `prod-skycraft-swc-nsg`
 
-## NSG Rules Validation
+## ✅ NSG Rules Validation
 
 - [ ] **Inbound Rule `AllowAuthServer`**:
   - Allow TCP 3724
@@ -21,14 +21,14 @@
   - Allow TCP 3306
   - Destination: `prod-skycraft-swc-asg-db`
 
-## Association
+## ✅ Association
 
 - [ ] `prod-skycraft-swc-nsg` is associated with:
   - [ ] `AuthSubnet`
   - [ ] `WorldSubnet`
   - [ ] `DatabaseSubnet`
 
-## Bastion (If Deployed)
+## ✅ Bastion (If Deployed)
 
 - [ ] `AzureBastionSubnet` exists in Hub VNet.
 - [ ] Bastion Host is in **Running** state.
