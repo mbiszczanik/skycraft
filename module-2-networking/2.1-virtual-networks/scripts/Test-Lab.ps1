@@ -1,5 +1,26 @@
-# Lab 2.1 - Virtual Networks Validation Script
-# Validates Virtual Networks, Subnets, and Peering
+<#
+.SYNOPSIS
+    Validates the configuration of Lab 2.1 networking resources.
+
+.DESCRIPTION
+    This script runs a comprehensive validation suite against the deployed VNets, 
+    Subnets, and Peering configurations to ensure they meet the Lab 2.1 requirements.
+
+    Valdiates:
+    - Hub VNet and all 4 subnets (Address ranges).
+    - Spoke VNet and all 3 subnets (Address ranges).
+    - VNet Peering state (Connected) and settings (Forwarded traffic, VNet access).
+
+.EXAMPLE
+    .\Test-Lab.ps1
+    Runs all validation checks and outputs Pass/Fail status.
+
+.NOTES
+    Project: SkyCraft
+    Lab: 2.1 - Virtual Networks
+    Author: Marcin Biszczanik
+    Date: 2026-01-04
+#>
 
 Write-Host "=== Lab 2.1 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 
