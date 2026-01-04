@@ -4,7 +4,7 @@ DESCRIPTION: Orchestrates the deployment of NSGs, ASGs, and Bastion across Hub a
 EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.2.0
-DEPLOYMENT: az deployment sub create
+DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
 targetScope = 'subscription'

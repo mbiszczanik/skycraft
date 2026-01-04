@@ -38,7 +38,7 @@ var varBastionPipName = 'platform-skycraft-swc-bas-pip'
 *******************/
 
 // Hub NSG
-resource resNsgHub 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
+resource resNsgHub 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
   name: varNsgName
   location: parLocation
   tags: varCommonTags
@@ -48,7 +48,7 @@ resource resNsgHub 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
 }
 
 // Bastion Public IP (conditional)
-resource resBastionPip 'Microsoft.Network/publicIPAddresses@2023-09-01' = if (parDeployBastion) {
+resource resBastionPip 'Microsoft.Network/publicIPAddresses@2023-11-01' = if (parDeployBastion) {
   name: varBastionPipName
   location: parLocation
   tags: varCommonTags
@@ -61,17 +61,17 @@ resource resBastionPip 'Microsoft.Network/publicIPAddresses@2023-09-01' = if (pa
 }
 
 // Existing VNet and Bastion Subnet
-resource resVnetHub 'Microsoft.Network/virtualNetworks@2023-09-01' existing = {
+resource resVnetHub 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
   name: parVnetName
 }
 
-resource resSubnetBastion 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' existing = {
+resource resSubnetBastion 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existing = {
   parent: resVnetHub
   name: 'AzureBastionSubnet'
 }
 
 // Bastion Host (conditional)
-resource resBastionHost 'Microsoft.Network/bastionHosts@2023-09-01' = if (parDeployBastion) {
+resource resBastionHost 'Microsoft.Network/bastionHosts@2023-11-01' = if (parDeployBastion) {
   name: varBastionName
   location: parLocation
   tags: varCommonTags

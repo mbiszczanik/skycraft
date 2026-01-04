@@ -36,26 +36,26 @@ var varAsgDbName = 'prod-skycraft-swc-asg-db'
 *******************/
 
 // Application Security Groups
-resource resAsgAuth 'Microsoft.Network/applicationSecurityGroups@2023-09-01' = {
+resource resAsgAuth 'Microsoft.Network/applicationSecurityGroups@2023-11-01' = {
   name: varAsgAuthName
   location: parLocation
   tags: varCommonTags
 }
 
-resource resAsgWorld 'Microsoft.Network/applicationSecurityGroups@2023-09-01' = {
+resource resAsgWorld 'Microsoft.Network/applicationSecurityGroups@2023-11-01' = {
   name: varAsgWorldName
   location: parLocation
   tags: varCommonTags
 }
 
-resource resAsgDb 'Microsoft.Network/applicationSecurityGroups@2023-09-01' = {
+resource resAsgDb 'Microsoft.Network/applicationSecurityGroups@2023-11-01' = {
   name: varAsgDbName
   location: parLocation
   tags: varCommonTags
 }
 
 // Network Security Group
-resource resNsgProd 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
+resource resNsgProd 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
   name: varNsgName
   location: parLocation
   tags: varCommonTags
@@ -127,11 +127,11 @@ resource resNsgProd 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
 }
 
 // Subnet Associations
-resource resVnet 'Microsoft.Network/virtualNetworks@2023-09-01' existing = {
+resource resVnet 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
   name: parVnetName
 }
 
-resource resSubnetAuth 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
+resource resSubnetAuth 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
   parent: resVnet
   name: 'AuthSubnet'
   properties: {
@@ -142,7 +142,7 @@ resource resSubnetAuth 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = 
   }
 }
 
-resource resSubnetWorld 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
+resource resSubnetWorld 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
   parent: resVnet
   name: 'WorldSubnet'
   properties: {
@@ -153,7 +153,7 @@ resource resSubnetWorld 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' =
   }
 }
 
-resource resSubnetDb 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
+resource resSubnetDb 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
   parent: resVnet
   name: 'DatabaseSubnet'
   properties: {
