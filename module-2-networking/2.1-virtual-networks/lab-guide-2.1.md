@@ -1,8 +1,8 @@
-# Lab 2.1: Configure Virtual Networks
+# Lab 2.1: Configure Virtual Networks (2.5 hours)
 
-**Estimated Time**: 2.5 Hours
+---
 
-## 📝 Lab Overview
+## 📋 Lab Overview
 
 In this lab, you will establish the fundamental network topology for SkyCraft. You will design and deploy a **Hub-and-Spoke** network architecture. This common enterprise pattern allows for central management of shared services (like firewalls or bastion hosts) in the "Hub" while isolating workloads (like our game servers) in "Spokes".
 
@@ -12,6 +12,35 @@ In this lab, you will establish the fundamental network topology for SkyCraft. Y
 - Configure Public IP Addresses
 - Implement VNet Peering to connect networks
 - Verify connectivity between peered networks
+
+## 🏗️ Architecture Overview
+
+```mermaid
+graph TD
+    subgraph "Platform VNet (Hub)"
+        direction TB
+        HubVNet["platform-skycraft-swc-vnet (10.0.0.0/16)"]
+        subgraph HubSubnets ["Hub Subnets"]
+            Bastion["AzureBastionSubnet (10.0.1.0/26)"]
+            Firewall["AzureFirewallSubnet (10.0.2.0/26)"]
+            Gateway["GatewaySubnet (10.0.3.0/27)"]
+            Shared["SharedSubnet (10.0.4.0/24)"]
+        end
+    end
+
+    subgraph "Production VNet (Spoke)"
+        direction TB
+        SpokeVNet["prod-skycraft-swc-vnet (10.1.0.0/16)"]
+        subgraph SpokeSubnets ["Spoke Subnets"]
+            Auth["AuthSubnet (10.1.1.0/24)"]
+            World["WorldSubnet (10.1.2.0/24)"]
+            DB["DatabaseSubnet (10.1.3.0/24)"]
+        end
+    end
+
+    %% Peering Connections
+    HubVNet <--> |"VNet Peering"| SpokeVNet
+```
 
 ## 📋 Lab Tasks
 
@@ -52,6 +81,8 @@ We will implement the following address space design:
 5. **Security**: Leave defaults for now.
 6. Click **Review + create**, then **Create**.
 
+**Expected Result**: The `platform-skycraft-swc-vnet` is created and all 4 subnets are visible in the **Subnets** blade.
+
 ![Hub VNet Configuration](images/lab-2.1-task-2.png)
 
 ### Task 3: Create the Spoke VNet
@@ -65,7 +96,9 @@ We will implement the following address space design:
    - `AuthSubnet` (`10.1.1.0/24`)
    - `WorldSubnet` (`10.1.2.0/24`)
    - `DatabaseSubnet` (`10.1.3.0/24`)
-3. Click **Review + create**, then \*\*Create`.
+3. Click **Review + create**, then **Create**.
+
+**Expected Result**: The `prod-skycraft-swc-vnet` is created with its 3 subnets.
 
 ![Spoke VNet Configuration](images/lab-2.1-task-3.png)
 
@@ -90,8 +123,17 @@ Now we connect the two networks so traffic can flow between them.
 6. Click **Add**.
 7. Wait for the Peering Status to change to **Connected**.
 
+**Expected Result**: Both peering links (`peer-prod-to-hub` and `peer-hub-to-prod`) show a status of **Connected**.
+
 ![VNet Peering Configuration](images/lab-2.1-task-4.png)
 
 ## ✅ Verification
 
 Proceed to the [Lab Checklist](lab-checklist-2.1.md) to verify your deployment.
+
+---
+
+## 📌 Module Navigation
+
+- [← Back to Module 2 Index](../README.md)
+- [Lab 2.2: Secure Access →](../2.2-secure-access/lab-guide-2.2.md)
