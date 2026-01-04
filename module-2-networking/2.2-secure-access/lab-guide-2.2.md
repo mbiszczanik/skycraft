@@ -158,6 +158,32 @@ Bastion allows secure RDP/SSH without exposing public IPs on VMs.
 
 Proceed to the [Lab Checklist](lab-checklist-2.2.md) to verify your deployment.
 
+## 🎓 Knowledge Check
+
+1. **Why is it recommended to use ASGs instead of IP addresses in NSG rules?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   ASGs allow you to define security policies based on workload function (e.g., "Web" or "DB") rather than specific IPs. This makes the rules self-documenting and eliminates the need to update NSGs every time a new VM is added or an IP changes.
+   </details>
+
+2. **What is the default behavior for traffic within the same Virtual Network in an NSG?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   By default, the `AllowVnetInBound` rule allows all traffic between resources within the same VNet (and peered VNets) unless a higher-priority rule explicitly denies it.
+   </details>
+
+3. **What is the primary security advantage of using Azure Bastion?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   It allows you to RDP or SSH into your virtual machines over SSL (port 443) without exposing the VMs' private ports (3389/22) to the public internet via Public IP addresses.
+   </details>
+
 ---
 
 ## 📌 Module Navigation

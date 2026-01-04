@@ -131,6 +131,32 @@ Now we connect the two networks so traffic can flow between them.
 
 Proceed to the [Lab Checklist](lab-checklist-2.1.md) to verify your deployment.
 
+## 🎓 Knowledge Check
+
+1. **What is the primary benefit of the Hub-and-Spoke network topology?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   It allows for the centralization of shared services (like security and management tools) in the Hub, while providing isolation and autonomy for workloads in the Spokes.
+   </details>
+
+2. **When connecting two VNets via peering, does traffic travel over the public internet?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   No. VNet peering traffic is kept on the Microsoft Azure private backbone network, ensuring lower latency and higher security.
+   </details>
+
+3. **Why did we use Sweden Central for all network resources?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   To comply with the Azure Policy established in Lab 1.3, which restricts resource deployments to our approved sovereign region.
+   </details>
+
 ---
 
 ## 📌 Module Navigation
