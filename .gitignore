@@ -52,3 +52,8 @@ scratch/
 student-submissions/
 test-results/
 
+# ===================================
+# Infrastructure as Code (Bicep)
+# ===================================
+# Ignore compiled ARM templates
+**/bicep/*.json
