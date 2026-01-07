@@ -1,8 +1,8 @@
 /*=====================================================
 SUMMARY: Lab 2.1 - Spoke Virtual Network
-DESCRIPTION: Deploys the Spoke (Production) VNet with game server subnets.
+DESCRIPTION: Deploys a Spoke Virtual Network (Dev or Prod) with game server subnets.
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.1.0
+VERSION: 0.2.0
 ======================================================*/
 
 /*******************
@@ -11,11 +11,23 @@ VERSION: 0.1.0
 @description('Location for resources')
 param parLocation string
 
-@description('Name of the Production VNet')
-param parVnetName string = 'prod-skycraft-swc-vnet'
+@description('Name of the Spoke VNet')
+param parVnetName string
 
 @description('Environment tag value')
-param parEnvironment string = 'Production'
+param parEnvironment string
+
+@description('Address Space for the VNet')
+param parAddressPrefix string
+
+@description('Address Prefix for AuthSubnet')
+param parAuthSubnetPrefix string
+
+@description('Address Prefix for WorldSubnet')
+param parWorldSubnetPrefix string
+
+@description('Address Prefix for DatabaseSubnet')
+param parDatabaseSubnetPrefix string
 
 /*******************
 *    Variables     *
@@ -37,26 +49,26 @@ resource resVnetSpoke 'Microsoft.Network/virtualNetworks@2023-11-01' = {
   properties: {
     addressSpace: {
       addressPrefixes: [
-        '10.1.0.0/16'
+        parAddressPrefix
       ]
     }
     subnets: [
       {
         name: 'AuthSubnet'
         properties: {
-          addressPrefix: '10.1.1.0/24'
+          addressPrefix: parAuthSubnetPrefix
         }
       }
       {
         name: 'WorldSubnet'
         properties: {
-          addressPrefix: '10.1.2.0/24'
+          addressPrefix: parWorldSubnetPrefix
         }
       }
       {
         name: 'DatabaseSubnet'
         properties: {
-          addressPrefix: '10.1.3.0/24'
+          addressPrefix: parDatabaseSubnetPrefix
         }
       }
     ]

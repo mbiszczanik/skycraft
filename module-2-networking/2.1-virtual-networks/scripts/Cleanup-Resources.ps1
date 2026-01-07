@@ -3,8 +3,8 @@
     Cleans up resources created in Lab 2.1.
 
 .DESCRIPTION
-    This script removes the Hub and Spoke Virtual Networks and their peering 
-    configurations. It prompts for confirmation unless the -Force switch is used.
+    This script removes the Hub and Spoke Virtual Networks (Dev/Prod), their peering 
+    configurations, and Public IPs. It prompts for confirmation unless the -Force switch is used.
 
 .PARAMETER Force
     Skip the confirmation prompt.
@@ -41,12 +41,16 @@ if (-not $context) {
 
 $hubRgName = "platform-skycraft-swc-rg"
 $hubVnetName = "platform-skycraft-swc-vnet"
-$spokeRgName = "prod-skycraft-swc-rg"
-$spokeVnetName = "prod-skycraft-swc-vnet"
+
+$devRgName = "dev-skycraft-swc-rg"
+$devVnetName = "dev-skycraft-swc-vnet"
+
+$prodRgName = "prod-skycraft-swc-rg"
+$prodVnetName = "prod-skycraft-swc-vnet"
 
 # Confirmation
 if (-not $Force) {
-    $confirm = Read-Host "Are you sure you want to delete Lab 2.1 Networking resources (VNets/Peering) in $hubRgName and $spokeRgName? (y/N)"
+    $confirm = Read-Host "Are you sure you want to delete Lab 2.1 Networking resources (Hub/Dev/Prod VNets & PIPs)? (y/N)"
     if ($confirm -notmatch "^y$") {
         Write-Host "Cleanup cancelled." -ForegroundColor Yellow
         exit 0
@@ -55,50 +59,60 @@ if (-not $Force) {
 
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
 
-# Removing Peerings First
-try {
-    Write-Host "Removing peering on $hubVnetName..." -ForegroundColor Yellow
-    $hubVnet = Get-AzVirtualNetwork -Name $hubVnetName -ResourceGroupName $hubRgName -ErrorAction SilentlyContinue
-    if ($hubVnet) {
-        $hubPeering = $hubVnet.VirtualNetworkPeerings | Where-Object { $_.Name -match "peer" }
-        foreach ($p in $hubPeering) {
-            Write-Host "  -> Deleting $($p.Name)" -ForegroundColor Gray
-            Remove-AzVirtualNetworkPeering -VirtualNetworkName $hubVnetName -ResourceGroupName $hubRgName -Name $p.Name -Force -ErrorAction Stop
+# Function to remove peerings
+function Remove-VNetPeerings {
+    param($VnetName, $RgName)
+    try {
+        Write-Host "Removing peerings on $VnetName..." -ForegroundColor Yellow
+        $vnet = Get-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -ErrorAction SilentlyContinue
+        if ($vnet) {
+            $peerings = $vnet.VirtualNetworkPeerings | Where-Object { $_.Name -match "peer" }
+            foreach ($p in $peerings) {
+                Write-Host "  -> Deleting $($p.Name)" -ForegroundColor Gray
+                Remove-AzVirtualNetworkPeering -VirtualNetworkName $VnetName -ResourceGroupName $RgName -Name $p.Name -Force -ErrorAction Stop
+            }
         }
+    } catch {
+        Write-Host "  - [WARNING] Failed to remove peering on ${VnetName}: $_" -ForegroundColor Yellow
     }
-} catch {
-    Write-Host "  - [WARNING] Failed to remove peering on Hub VNet. It might have already been removed." -ForegroundColor Yellow
 }
 
-try {
-    Write-Host "Removing peering on $spokeVnetName..." -ForegroundColor Yellow
-    $spokeVnet = Get-AzVirtualNetwork -Name $spokeVnetName -ResourceGroupName $spokeRgName -ErrorAction SilentlyContinue
-    if ($spokeVnet) {
-        $spokePeering = $spokeVnet.VirtualNetworkPeerings | Where-Object { $_.Name -match "peer" }
-        foreach ($p in $spokePeering) {
-            Write-Host "  -> Deleting $($p.Name)" -ForegroundColor Gray
-            Remove-AzVirtualNetworkPeering -VirtualNetworkName $spokeVnetName -ResourceGroupName $spokeRgName -Name $p.Name -Force -ErrorAction Stop
-        }
+Remove-VNetPeerings -VnetName $hubVnetName -RgName $hubRgName
+Remove-VNetPeerings -VnetName $devVnetName -RgName $devRgName
+Remove-VNetPeerings -VnetName $prodVnetName -RgName $prodRgName
+
+# Function to remove VNet
+function Remove-VNet {
+    param($VnetName, $RgName)
+    try {
+        Write-Host "Removing VNet: $VnetName..." -ForegroundColor Yellow
+        Remove-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -Force -ErrorAction Stop
+        Write-Host "  -> Success" -ForegroundColor Green
+    } catch {
+        Write-Host "  - [INFO] VNet $VnetName not found or already deleted." -ForegroundColor Gray
     }
-} catch {
-    Write-Host "  - [WARNING] Failed to remove peering on Spoke VNet." -ForegroundColor Yellow
 }
 
-# Removing VNets
-try {
-    Write-Host "Removing Hub VNet ($hubVnetName)..." -ForegroundColor Yellow
-    Remove-AzVirtualNetwork -Name $hubVnetName -ResourceGroupName $hubRgName -Force -ErrorAction Stop
-    Write-Host "  -> Success" -ForegroundColor Green
-} catch {
-    Write-Host "  - [INFO] Hub VNet not found or already deleted." -ForegroundColor Gray
-}
+Remove-VNet -VnetName $hubVnetName -RgName $hubRgName
+Remove-VNet -VnetName $devVnetName -RgName $devRgName
+Remove-VNet -VnetName $prodVnetName -RgName $prodRgName
 
-try {
-    Write-Host "Removing Spoke VNet ($spokeVnetName)..." -ForegroundColor Yellow
-    Remove-AzVirtualNetwork -Name $spokeVnetName -ResourceGroupName $spokeRgName -Force -ErrorAction Stop
-    Write-Host "  -> Success" -ForegroundColor Green
-} catch {
-    Write-Host "  - [INFO] Spoke VNet not found or already deleted." -ForegroundColor Gray
+# Check for and remove PIPs
+$pips = @(
+    @{"Name"="platform-skycraft-swc-bas-pip"; "RG"=$hubRgName},
+    @{"Name"="dev-skycraft-swc-lb-pip"; "RG"=$devRgName},
+    @{"Name"="prod-skycraft-swc-lb-pip"; "RG"=$prodRgName}
+)
+
+foreach ($pip in $pips) {
+    try {
+        Write-Host "Removing Public IP: $($pip.Name)..." -ForegroundColor Yellow
+        Remove-AzPublicIpAddress -Name $pip.Name -ResourceGroupName $pip.RG -Force -ErrorAction Stop
+        Write-Host "  -> Success" -ForegroundColor Green
+    } catch {
+        Write-Host "  - [INFO] PIP $($pip.Name) not found or already deleted." -ForegroundColor Gray
+    }
 }
 
 Write-Host "`nCleanup Complete." -ForegroundColor Green
+
