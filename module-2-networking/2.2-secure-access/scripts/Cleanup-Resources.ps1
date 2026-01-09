@@ -162,106 +162,54 @@ if ($RemoveNSGs -or $RemoveAll) {
     # First, dissociate NSG from all subnets it is currently attached to
     # We do a universal check to catch any accidental or deep associations
     Write-Host "Searching for and removing NSG associations across all VNets..." -ForegroundColor Yellow
-    try {
-        $nsgProd = Get-AzNetworkSecurityGroup -ResourceGroupName $ProdResourceGroup -Name 'prod-skycraft-swc-nsg' -ErrorAction SilentlyContinue
-        if ($nsgProd) {
-            $vnets = Get-AzVirtualNetwork
-            $anyUpdated = $false
-            foreach ($vnet in $vnets) {
-                $vnetUpdated = $false
-                foreach ($subnet in $vnet.Subnets) {
-                    if ($null -ne $subnet.NetworkSecurityGroup -and $subnet.NetworkSecurityGroup.Id -eq $nsgProd.Id) {
-                        Write-Host "  -> Removing NSG from Subnet '$($subnet.Name)' in VNet '$($vnet.Name)'..." -ForegroundColor Yellow
+    # Remove NSGs
+    # -----------------------------------
+    $nsgList = @(
+        @{ Name="dev-skycraft-swc-auth-nsg"; RG="dev-skycraft-swc-rg" },
+        @{ Name="dev-skycraft-swc-world-nsg"; RG="dev-skycraft-swc-rg" },
+        @{ Name="dev-skycraft-swc-db-nsg"; RG="dev-skycraft-swc-rg" },
+        @{ Name="prod-skycraft-swc-auth-nsg"; RG=$ProdResourceGroup },
+        @{ Name="prod-skycraft-swc-world-nsg"; RG=$ProdResourceGroup },
+        @{ Name="prod-skycraft-swc-db-nsg"; RG=$ProdResourceGroup },
+        @{ Name="platform-skycraft-swc-nsg"; RG=$PlatformResourceGroup }
+    )
+
+    # 1. Dissociate first
+    Write-Host "`nDissociating NSGs from all subnets..." -ForegroundColor Yellow
+    $allVnets = Get-AzVirtualNetwork
+    foreach ($vnet in $allVnets) {
+        $updated = $false
+        foreach ($subnet in $vnet.Subnets) {
+            if ($subnet.NetworkSecurityGroup) {
+                # Check if this subnet's NSG is one we want to remove
+                # (Simple check by name similarity or just blanket remove ID if it matches one of our targets)
+                foreach ($targetNsg in $nsgList) {
+                    if ($subnet.NetworkSecurityGroup.Id -match $targetNsg.Name) {
+                        Write-Host "  -> Removing $($targetNsg.Name) from $($vnet.Name)/$($subnet.Name)" -ForegroundColor Yellow
                         $subnet.NetworkSecurityGroup = $null
-                        $vnetUpdated = $true
-                        $anyUpdated = $true
+                        $updated = $true
+                        break
                     }
                 }
-                if ($vnetUpdated) {
-                    $vnet | Set-AzVirtualNetwork -ErrorAction Stop | Out-Null
-                }
-            }
-            
-            if ($anyUpdated) {
-                Write-Host "  -> All detected NSG associations removed from subnets" -ForegroundColor Green
-                Write-Host "  -> Waiting 45 seconds for Azure to fully process dissociation..." -ForegroundColor Yellow
-                Start-Sleep -Seconds 45 
-            }
-            else {
-                Write-Host "  -> No active NSG associations found" -ForegroundColor Gray
             }
         }
+        if ($updated) {
+            $vnet | Set-AzVirtualNetwork | Out-Null
+        }
     }
-    catch {
-        Write-Host "  -> [ERROR] Failed to remove NSG associations" -ForegroundColor Red
-        Write-Host $_.Exception.Message -ForegroundColor Red
-    }
-
-    # Remove Production NSG
-    Write-Host "Removing Production NSG: prod-skycraft-swc-nsg..." -ForegroundColor Yellow
-    $nsgProd = Get-AzNetworkSecurityGroup -ResourceGroupName $ProdResourceGroup -Name 'prod-skycraft-swc-nsg' -ErrorAction SilentlyContinue
-    $nsgProdDeleted = $false
     
-    if ($nsgProd) {
-        # CRITICAL: Clear all custom rules first to break ASG dependencies
-        if ($nsgProd.SecurityRules.Count -gt 0) {
-            Write-Host "  -> Clearing all security rules to break ASG dependencies..." -ForegroundColor Yellow
-            $nsgProd.SecurityRules = @()
-            $nsgProd | Set-AzNetworkSecurityGroup | Out-Null
-            Start-Sleep -Seconds 5
-        }
+    # Wait for azure to settle
+    Start-Sleep -Seconds 10
 
-        Write-Host "  -> Attempting deletion of NSG..." -ForegroundColor Yellow
+    # 2. Delete NSGs
+    foreach ($targetNsg in $nsgList) {
+        Write-Host "Removing NSG: $($targetNsg.Name)..." -ForegroundColor Yellow
         try {
-            # Retry loop for NSG deletion (Azure can be stubborn)
-            $retries = 3
-            while ($retries -gt 0) {
-                try {
-                    # USE -ErrorAction Stop to ensure failure triggers the catch block
-                    Remove-AzNetworkSecurityGroup -ResourceGroupName $ProdResourceGroup -Name 'prod-skycraft-swc-nsg' -Force -ErrorAction Stop
-                    Write-Host "  -> Production NSG removed successfully" -ForegroundColor Green
-                    $nsgProdDeleted = $true
-                    $retries = 0
-                }
-                catch {
-                    $retries--
-                    if ($retries -gt 0) {
-                        Write-Host "  -> NSG still busy (Error: $($_.Exception.Message.Split('.')[0])...), retrying in 20s ($retries left)..." -ForegroundColor Gray
-                        Start-Sleep -Seconds 20
-                    }
-                    else {
-                        throw $_
-                    }
-                }
-            }
+            Remove-AzNetworkSecurityGroup -ResourceGroupName $targetNsg.RG -Name $targetNsg.Name -Force -ErrorAction SilentlyContinue
+            Write-Host "  -> Success" -ForegroundColor Green
+        } catch {
+             Write-Host "  -> [WARNING] Could not delete $($targetNsg.Name) (may not exist)" -ForegroundColor Gray
         }
-        catch {
-            Write-Host "  -> [ERROR] Failed to remove Production NSG after retries" -ForegroundColor Red
-            Write-Host $_.Exception.Message -ForegroundColor Red
-            Write-Host "  -> Will check if ASGs can be deleted anyway (depends on rule clearing)..." -ForegroundColor Yellow
-            $nsgProdDeleted = $false
-        }
-    }
-    else {
-        Write-Host "  -> Production NSG does not exist, skipping" -ForegroundColor Gray
-        $nsgProdDeleted = $true
-    }
-
-    # Remove Platform NSG
-    Write-Host "Removing Platform NSG: platform-skycraft-swc-nsg..." -ForegroundColor Yellow
-    $nsgPlatform = Get-AzNetworkSecurityGroup -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-nsg' -ErrorAction SilentlyContinue
-    if ($nsgPlatform) {
-        try {
-            Remove-AzNetworkSecurityGroup -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-nsg' -Force
-            Write-Host "  -> Platform NSG removed" -ForegroundColor Green
-        }
-        catch {
-            Write-Host "  -> [ERROR] Failed to remove Platform NSG" -ForegroundColor Red
-            Write-Host $_.Exception.Message -ForegroundColor Red
-        }
-    }
-    else {
-        Write-Host "  -> Platform NSG does not exist, skipping" -ForegroundColor Gray
     }
 }
 
@@ -271,35 +219,23 @@ if ($RemoveNSGs -or $RemoveAll) {
 if ($RemoveASGs -or $RemoveAll) {
     Write-Host "`n=== Removing Application Security Groups ===" -ForegroundColor Cyan
     
-    # Only proceed if NSG was successfully deleted (or doesn't exist)
-    if (-not ($RemoveNSGs -or $RemoveAll) -or (($RemoveNSGs -or $RemoveAll) -and $nsgProdDeleted)) {
-        $asgNames = @(
-            'prod-skycraft-swc-asg-auth',
-            'prod-skycraft-swc-asg-world',
-            'prod-skycraft-swc-asg-db'
-        )
+    $asgList = @(
+        @{ Name="dev-skycraft-swc-asg-auth"; RG="dev-skycraft-swc-rg" },
+        @{ Name="dev-skycraft-swc-asg-world"; RG="dev-skycraft-swc-rg" },
+        @{ Name="dev-skycraft-swc-asg-db"; RG="dev-skycraft-swc-rg" },
+        @{ Name="prod-skycraft-swc-asg-auth"; RG=$ProdResourceGroup },
+        @{ Name="prod-skycraft-swc-asg-world"; RG=$ProdResourceGroup },
+        @{ Name="prod-skycraft-swc-asg-db"; RG=$ProdResourceGroup }
+    )
 
-        foreach ($asgName in $asgNames) {
-            Write-Host "Removing ASG: $asgName..." -ForegroundColor Yellow
-            $asg = Get-AzApplicationSecurityGroup -ResourceGroupName $ProdResourceGroup -Name $asgName -ErrorAction SilentlyContinue
-            if ($asg) {
-                try {
-                    Remove-AzApplicationSecurityGroup -ResourceGroupName $ProdResourceGroup -Name $asgName -Force
-                    Write-Host "  -> ASG removed: $asgName" -ForegroundColor Green
-                }
-                catch {
-                    Write-Host "  -> [ERROR] Failed to remove ASG: $asgName" -ForegroundColor Red
-                    Write-Host $_.Exception.Message -ForegroundColor Red
-                }
-            }
-            else {
-                Write-Host "  -> ASG does not exist, skipping: $asgName" -ForegroundColor Gray
-            }
+    foreach ($asg in $asgList) {
+        Write-Host "Removing ASG: $($asg.Name)..." -ForegroundColor Yellow
+        try {
+            Remove-AzApplicationSecurityGroup -ResourceGroupName $asg.RG -Name $asg.Name -Force -ErrorAction SilentlyContinue 
+            Write-Host "  -> Success" -ForegroundColor Green
+        } catch {
+             Write-Host "  -> [WARNING] Could not delete $($asg.Name) (may not exist)" -ForegroundColor Gray
         }
-    }
-    else {
-        Write-Host "[SKIP] Cannot remove ASGs because Production NSG deletion failed." -ForegroundColor Yellow
-        Write-Host "       ASGs are referenced by NSG security rules. Please remove NSG first." -ForegroundColor Yellow
     }
 }
 

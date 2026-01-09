@@ -3,6 +3,7 @@
 ## 🎯 Learning Objectives
 
 By completing this lab, you will:
+
 - Design and deploy hub-spoke virtual network topology
 - Create virtual networks with multiple subnets using CIDR notation
 - Configure VNet peering between hub and spoke networks
@@ -53,6 +54,7 @@ graph TB
 **Situation**: The SkyCraft AzerothCore deployment requires isolated network environments for development and production. You need a centralized hub for shared services (Bastion, future VPN gateway) and separate spoke networks for each environment. Development teams should not have direct network access to production resources.
 
 **Your Task**: Design and deploy a hub-spoke network topology that:
+
 - Isolates dev and prod environments
 - Centralizes administrative access through Azure Bastion in the hub
 - Allows controlled communication between hub and spokes
@@ -78,6 +80,7 @@ graph TB
 ### What is Hub-Spoke Network Topology?
 
 **Hub-spoke** is a network design pattern where:
+
 - **Hub VNet** contains shared services (Bastion, VPN Gateway, Firewall)
 - **Spoke VNets** contain workload-specific resources (application tiers)
 - Spokes connect to the hub via **VNet peering**
@@ -85,33 +88,34 @@ graph TB
 
 ### Benefits for SkyCraft
 
-| Benefit | Description |
-|---------|-------------|
-| **Isolation** | Dev and prod environments are network-isolated |
-| **Centralized Management** | Single Bastion for all administrative access |
-| **Cost Efficiency** | Shared services reduce duplicate resources |
-| **Scalability** | Easy to add new spoke networks for staging, QA, etc. |
-| **Security** | Hub can host firewall/NVA for centralized traffic inspection |
+| Benefit                    | Description                                                  |
+| -------------------------- | ------------------------------------------------------------ |
+| **Isolation**              | Dev and prod environments are network-isolated               |
+| **Centralized Management** | Single Bastion for all administrative access                 |
+| **Cost Efficiency**        | Shared services reduce duplicate resources                   |
+| **Scalability**            | Easy to add new spoke networks for staging, QA, etc.         |
+| **Security**               | Hub can host firewall/NVA for centralized traffic inspection |
 
 ### IP Address Planning
 
 **Important**: Proper IP planning prevents address conflicts and allows future growth.
 
-| VNet | CIDR Range | Total IPs | Purpose |
-|------|------------|-----------|---------|
-| **platform-skycraft-swc-vnet** (Hub) | 10.0.0.0/16 | 65,536 | Shared services |
-| └─ AzureBastionSubnet | 10.0.0.0/26 | 64 | Azure Bastion (minimum /26 required) |
-| └─ GatewaySubnet | 10.0.1.0/27 | 32 | Future VPN/ExpressRoute gateway |
-| **dev-skycraft-swc-vnet** (Spoke 1) | 10.1.0.0/16 | 65,536 | Development environment |
-| └─ AuthSubnet | 10.1.1.0/24 | 256 | Authentication server VMs |
-| └─ WorldSubnet | 10.1.2.0/24 | 256 | World server VMs |
-| └─ DatabaseSubnet | 10.1.3.0/24 | 256 | Database servers |
-| **prod-skycraft-swc-vnet** (Spoke 2) | 10.2.0.0/16 | 65,536 | Production environment |
-| └─ AuthSubnet | 10.2.1.0/24 | 256 | Authentication server VMs |
-| └─ WorldSubnet | 10.2.2.0/24 | 256 | World server VMs |
-| └─ DatabaseSubnet | 10.2.3.0/24 | 256 | Database servers |
+| VNet                                 | CIDR Range  | Total IPs | Purpose                              |
+| ------------------------------------ | ----------- | --------- | ------------------------------------ |
+| **platform-skycraft-swc-vnet** (Hub) | 10.0.0.0/16 | 65,536    | Shared services                      |
+| └─ AzureBastionSubnet                | 10.0.0.0/26 | 64        | Azure Bastion (minimum /26 required) |
+| └─ GatewaySubnet                     | 10.0.1.0/27 | 32        | Future VPN/ExpressRoute gateway      |
+| **dev-skycraft-swc-vnet** (Spoke 1)  | 10.1.0.0/16 | 65,536    | Development environment              |
+| └─ AuthSubnet                        | 10.1.1.0/24 | 256       | Authentication server VMs            |
+| └─ WorldSubnet                       | 10.1.2.0/24 | 256       | World server VMs                     |
+| └─ DatabaseSubnet                    | 10.1.3.0/24 | 256       | Database servers                     |
+| **prod-skycraft-swc-vnet** (Spoke 2) | 10.2.0.0/16 | 65,536    | Production environment               |
+| └─ AuthSubnet                        | 10.2.1.0/24 | 256       | Authentication server VMs            |
+| └─ WorldSubnet                       | 10.2.2.0/24 | 256       | World server VMs                     |
+| └─ DatabaseSubnet                    | 10.2.3.0/24 | 256       | Database servers                     |
 
 **Key Concepts**:
+
 - Azure reserves **5 IP addresses** in each subnet (first 4 and last 1)
 - Usable IPs = Total IPs - 5
 - Example: /24 subnet has 256 IPs, but only 251 are usable
@@ -120,45 +124,22 @@ graph TB
 
 ## 📖 Section 2: Create Hub Virtual Network (30 minutes)
 
-### Step 2.1.1: Create Platform Resource Group
+> [!IMPORTANT]
+> **Prerequisite**: The resource groups (`platform-skycraft-swc-rg`, `dev-skycraft-swc-rg`, `prod-skycraft-swc-rg`) must already exist. If you haven't created them, complete [Lab 1.2: Manage Access to Azure Resources (RBAC)](../../module-1-identities-governance/1.2-rbac/lab-guide-1.2.md#-section-2-create-resource-groups-15-minutes) first.
 
-1. Navigate to **Azure Portal** (https://portal.azure.com)
-2. Search for **"Resource groups"** and click the service
-3. Click **+ Create**
-4. Fill in the details:
-
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
-| Resource group | `platform-skycraft-swc-rg` |
-| Region | **Sweden Central** |
-
-5. Click **Tags** tab
-6. Add these tags:
-
-| Name | Value |
-|------|-------|
-| Project | SkyCraft |
-| Environment | Platform |
-| CostCenter | MSDN |
-
-7. Click **Review + create** → **Create**
-
-**Expected Result**: Resource group `platform-skycraft-swc-rg` created successfully.
-
-### Step 2.1.2: Create Hub Virtual Network
+### Step 2.1.1: Create Hub Virtual Network
 
 1. In Azure Portal, search for **"Virtual networks"**
 2. Click **+ Create**
 
 **Basics tab**:
 
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
-| Resource group | `platform-skycraft-swc-rg` |
-| Name | `platform-skycraft-swc-vnet` |
-| Region | **Sweden Central** |
+| Field          | Value                        |
+| -------------- | ---------------------------- |
+| Subscription   | [Your subscription]          |
+| Resource group | `platform-skycraft-swc-rg`   |
+| Name           | `platform-skycraft-swc-vnet` |
+| Region         | **Sweden Central**           |
 
 3. Click **Next: IP Addresses**
 
@@ -171,17 +152,17 @@ graph TB
 
 **Expected Result**: Address space `10.0.0.0/16` added (provides 65,536 IP addresses).
 
-### Step 2.1.3: Create AzureBastionSubnet
+### Step 2.1.2: Create AzureBastionSubnet
 
 1. Still on **IP Addresses** tab, click **+ Add a subnet**
 2. Fill in subnet details:
 
-| Field | Value |
-|-------|-------|
-| Subnet template | Default |
-| Name | `AzureBastionSubnet` |
-| Starting address | `10.0.0.0` |
-| Subnet size | `/26` (64 addresses) |
+| Field            | Value                |
+| ---------------- | -------------------- |
+| Subnet template  | Default              |
+| Name             | `AzureBastionSubnet` |
+| Starting address | `10.0.0.0`           |
+| Subnet size      | `/26` (64 addresses) |
 
 **Important**: The name **must be exactly** `AzureBastionSubnet` (case-sensitive). Azure Bastion requires this specific name.
 
@@ -189,17 +170,17 @@ graph TB
 
 **Expected Result**: Subnet `AzureBastionSubnet` appears in the subnet list with range 10.0.0.0/26.
 
-### Step 2.1.4: Create GatewaySubnet
+### Step 2.1.3: Create GatewaySubnet
 
 1. Click **+ Add a subnet**
 2. Fill in:
 
-| Field | Value |
-|-------|-------|
-| Subnet template | Default |
-| Name | `GatewaySubnet` |
-| Starting address | `10.0.1.0` |
-| Subnet size | `/27` (32 addresses) |
+| Field            | Value                |
+| ---------------- | -------------------- |
+| Subnet template  | Default              |
+| Name             | `GatewaySubnet`      |
+| Starting address | `10.0.1.0`           |
+| Subnet size      | `/27` (32 addresses) |
 
 **Important**: The name **must be exactly** `GatewaySubnet` for future VPN Gateway deployment.
 
@@ -207,24 +188,25 @@ graph TB
 
 **Expected Result**: Subnet `GatewaySubnet` appears with range 10.0.1.0/27.
 
-### Step 2.1.5: Complete Hub VNet Creation
+### Step 2.1.4: Complete Hub VNet Creation
 
 1. Click **Next: Security**
 2. Leave default security settings (we'll configure these in Lab 2.2)
 3. Click **Next: Tags**
 4. Add tags:
 
-| Name | Value |
-|------|-------|
-| Project | SkyCraft |
+| Name        | Value    |
+| ----------- | -------- |
+| Project     | SkyCraft |
 | Environment | Platform |
-| CostCenter | MSDN |
+| CostCenter  | MSDN     |
 
 5. Click **Review + create**
 6. Review the configuration
 7. Click **Create**
 
-**Expected Result**: 
+**Expected Result**:
+
 - Deployment completes successfully
 - Hub VNet `platform-skycraft-swc-vnet` exists with:
   - Address space: 10.0.0.0/16
@@ -234,18 +216,18 @@ graph TB
 
 ## 📖 Section 3: Create Spoke Virtual Networks (40 minutes)
 
-### Step 2.1.6: Create Development Virtual Network
+### Step 2.1.5: Create Development Virtual Network
 
 1. Navigate to **Virtual networks** → **+ Create**
 
 **Basics tab**:
 
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
-| Resource group | `dev-skycraft-swc-rg` |
-| Name | `dev-skycraft-swc-vnet` |
-| Region | **Sweden Central** |
+| Field          | Value                   |
+| -------------- | ----------------------- |
+| Subscription   | [Your subscription]     |
+| Resource group | `dev-skycraft-swc-rg`   |
+| Name           | `dev-skycraft-swc-vnet` |
+| Region         | **Sweden Central**      |
 
 2. Click **Next: IP Addresses**
 
@@ -254,7 +236,7 @@ graph TB
 3. Delete default address space
 4. Add IP address space: `10.1.0.0/16`
 
-### Step 2.1.7: Create Dev Subnets
+### Step 2.1.6: Create Dev Subnets
 
 Create three subnets for the development environment:
 
@@ -263,11 +245,11 @@ Create three subnets for the development environment:
 1. Click **+ Add a subnet**
 2. Configure:
 
-| Field | Value |
-|-------|-------|
-| Name | `AuthSubnet` |
-| Starting address | `10.1.1.0` |
-| Subnet size | `/24` (256 addresses) |
+| Field            | Value                 |
+| ---------------- | --------------------- |
+| Name             | `AuthSubnet`          |
+| Starting address | `10.1.1.0`            |
+| Subnet size      | `/24` (256 addresses) |
 
 3. Click **Add**
 
@@ -276,11 +258,11 @@ Create three subnets for the development environment:
 1. Click **+ Add a subnet**
 2. Configure:
 
-| Field | Value |
-|-------|-------|
-| Name | `WorldSubnet` |
-| Starting address | `10.1.2.0` |
-| Subnet size | `/24` |
+| Field            | Value         |
+| ---------------- | ------------- |
+| Name             | `WorldSubnet` |
+| Starting address | `10.1.2.0`    |
+| Subnet size      | `/24`         |
 
 3. Click **Add**
 
@@ -289,36 +271,37 @@ Create three subnets for the development environment:
 1. Click **+ Add a subnet**
 2. Configure:
 
-| Field | Value |
-|-------|-------|
-| Name | `DatabaseSubnet` |
-| Starting address | `10.1.3.0` |
-| Subnet size | `/24` |
+| Field            | Value            |
+| ---------------- | ---------------- |
+| Name             | `DatabaseSubnet` |
+| Starting address | `10.1.3.0`       |
+| Subnet size      | `/24`            |
 
 3. Click **Add**
 
 **Expected Result**: Three subnets created in dev VNet:
+
 - AuthSubnet: 10.1.1.0/24
 - WorldSubnet: 10.1.2.0/24
 - DatabaseSubnet: 10.1.3.0/24
 
-### Step 2.1.8: Complete Dev VNet Creation
+### Step 2.1.7: Complete Dev VNet Creation
 
 1. Click **Next: Security** (leave defaults)
 2. Click **Next: Tags**
 3. Add tags:
 
-| Name | Value |
-|------|-------|
-| Project | SkyCraft |
+| Name        | Value       |
+| ----------- | ----------- |
+| Project     | SkyCraft    |
 | Environment | Development |
-| CostCenter | MSDN |
+| CostCenter  | MSDN        |
 
 4. Click **Review + create** → **Create**
 
 **Expected Result**: Dev VNet `dev-skycraft-swc-vnet` deployed successfully with 3 subnets.
 
-### Step 2.1.9: Create Production Virtual Network
+### Step 2.1.8: Create Production Virtual Network
 
 Repeat the process for production:
 
@@ -326,11 +309,11 @@ Repeat the process for production:
 
 **Basics tab**:
 
-| Field | Value |
-|-------|-------|
-| Resource group | `prod-skycraft-swc-rg` |
-| Name | `prod-skycraft-swc-vnet` |
-| Region | **Sweden Central** |
+| Field          | Value                    |
+| -------------- | ------------------------ |
+| Resource group | `prod-skycraft-swc-rg`   |
+| Name           | `prod-skycraft-swc-vnet` |
+| Region         | **Sweden Central**       |
 
 **IP Addresses tab**:
 
@@ -340,21 +323,21 @@ Repeat the process for production:
 
 3. Create three subnets:
 
-| Subnet Name | Starting Address | Size |
-|-------------|------------------|------|
-| AuthSubnet | 10.2.1.0 | /24 |
-| WorldSubnet | 10.2.2.0 | /24 |
-| DatabaseSubnet | 10.2.3.0 | /24 |
+| Subnet Name    | Starting Address | Size |
+| -------------- | ---------------- | ---- |
+| AuthSubnet     | 10.2.1.0         | /24  |
+| WorldSubnet    | 10.2.2.0         | /24  |
+| DatabaseSubnet | 10.2.3.0         | /24  |
 
 **Tags**:
 
 4. Add tags:
 
-| Name | Value |
-|------|-------|
-| Project | SkyCraft |
+| Name        | Value      |
+| ----------- | ---------- |
+| Project     | SkyCraft   |
 | Environment | Production |
-| CostCenter | MSDN |
+| CostCenter  | MSDN       |
 
 5. Click **Review + create** → **Create**
 
@@ -367,11 +350,12 @@ Repeat the process for production:
 ### What is VNet Peering?
 
 **VNet Peering** connects two Azure virtual networks, allowing resources to communicate using private IP addresses. Peering is:
+
 - **Low latency**: Traffic stays on Microsoft backbone
 - **Non-transitive**: If A peers with B, and B peers with C, A cannot reach C
 - **Bidirectional**: Requires configuration on both sides
 
-### Step 2.1.10: Peer Hub to Dev (Hub Side)
+### Step 2.1.9: Peer Hub to Dev (Hub Side)
 
 1. Navigate to **Virtual networks**
 2. Click **platform-skycraft-swc-vnet**
@@ -380,78 +364,80 @@ Repeat the process for production:
 
 **Configure peering from hub to dev**:
 
-| Field | Value |
-|-------|-------|
-| **This virtual network** | |
-| Peering link name | `hub-to-dev` |
-| Traffic to remote virtual network | Allow |
-| Traffic forwarded from remote virtual network | Allow |
-| Virtual network gateway or Route Server | Use this virtual network's gateway or Route Server |
-| **Remote virtual network** | |
-| Peering link name | `dev-to-hub` |
-| Virtual network | `dev-skycraft-swc-vnet` |
-| Traffic to remote virtual network | Allow |
-| Traffic forwarded from remote virtual network | Allow |
-| Virtual network gateway or Route Server | Use the remote virtual network's gateway or Route Server |
+| Field                                         | Value                                                    |
+| --------------------------------------------- | -------------------------------------------------------- |
+| **This virtual network**                      |                                                          |
+| Peering link name                             | `hub-to-dev`                                             |
+| Traffic to remote virtual network             | Allow                                                    |
+| Traffic forwarded from remote virtual network | Allow                                                    |
+| Virtual network gateway or Route Server       | Use this virtual network's gateway or Route Server       |
+| **Remote virtual network**                    |                                                          |
+| Peering link name                             | `dev-to-hub`                                             |
+| Virtual network                               | `dev-skycraft-swc-vnet`                                  |
+| Traffic to remote virtual network             | Allow                                                    |
+| Traffic forwarded from remote virtual network | Allow                                                    |
+| Virtual network gateway or Route Server       | Use the remote virtual network's gateway or Route Server |
 
 5. Click **Add**
 
-**Expected Result**: 
+**Expected Result**:
+
 - Peering status changes from "Updating" to "Connected"
 - Both `hub-to-dev` and `dev-to-hub` show status "Connected"
 
 **Screenshot location**: `images/vnet-peering-hub-dev-connected.png`
 
-### Step 2.1.11: Peer Hub to Prod (Hub Side)
+### Step 2.1.10: Peer Hub to Prod (Hub Side)
 
 1. Still in **platform-skycraft-swc-vnet** → **Peerings**
 2. Click **+ Add**
 
 **Configure peering from hub to prod**:
 
-| Field | Value |
-|-------|-------|
-| **This virtual network** | |
-| Peering link name | `hub-to-prod` |
-| Traffic to remote virtual network | Allow |
-| Traffic forwarded from remote virtual network | Allow |
-| Virtual network gateway or Route Server | Use this virtual network's gateway or Route Server |
-| **Remote virtual network** | |
-| Peering link name | `prod-to-hub` |
-| Virtual network | `prod-skycraft-swc-vnet` |
-| Traffic to remote virtual network | Allow |
-| Traffic forwarded from remote virtual network | Allow |
-| Virtual network gateway or Route Server | Use the remote virtual network's gateway or Route Server |
+| Field                                         | Value                                                    |
+| --------------------------------------------- | -------------------------------------------------------- |
+| **This virtual network**                      |                                                          |
+| Peering link name                             | `hub-to-prod`                                            |
+| Traffic to remote virtual network             | Allow                                                    |
+| Traffic forwarded from remote virtual network | Allow                                                    |
+| Virtual network gateway or Route Server       | Use this virtual network's gateway or Route Server       |
+| **Remote virtual network**                    |                                                          |
+| Peering link name                             | `prod-to-hub`                                            |
+| Virtual network                               | `prod-skycraft-swc-vnet`                                 |
+| Traffic to remote virtual network             | Allow                                                    |
+| Traffic forwarded from remote virtual network | Allow                                                    |
+| Virtual network gateway or Route Server       | Use the remote virtual network's gateway or Route Server |
 
 3. Click **Add**
 
-**Expected Result**: 
+**Expected Result**:
+
 - Peering `hub-to-prod` shows status "Connected"
 - Peering `prod-to-hub` shows status "Connected"
 
-### Step 2.1.12: Verify Peering Configuration
+### Step 2.1.11: Verify Peering Configuration
 
 1. Navigate to **platform-skycraft-swc-vnet** → **Peerings**
 2. Verify both peerings are listed:
 
-| Peering Name | Status | Remote VNet |
-|--------------|--------|-------------|
-| hub-to-dev | Connected | dev-skycraft-swc-vnet |
-| hub-to-prod | Connected | prod-skycraft-swc-vnet |
+| Peering Name | Status    | Remote VNet            |
+| ------------ | --------- | ---------------------- |
+| hub-to-dev   | Connected | dev-skycraft-swc-vnet  |
+| hub-to-prod  | Connected | prod-skycraft-swc-vnet |
 
 3. Navigate to **dev-skycraft-swc-vnet** → **Peerings**
 4. Verify peering exists:
 
-| Peering Name | Status | Remote VNet |
-|--------------|--------|-------------|
-| dev-to-hub | Connected | platform-skycraft-swc-vnet |
+| Peering Name | Status    | Remote VNet                |
+| ------------ | --------- | -------------------------- |
+| dev-to-hub   | Connected | platform-skycraft-swc-vnet |
 
 5. Navigate to **prod-skycraft-swc-vnet** → **Peerings**
 6. Verify peering exists:
 
-| Peering Name | Status | Remote VNet |
-|--------------|--------|-------------|
-| prod-to-hub | Connected | platform-skycraft-swc-vnet |
+| Peering Name | Status    | Remote VNet                |
+| ------------ | --------- | -------------------------- |
+| prod-to-hub  | Connected | platform-skycraft-swc-vnet |
 
 **Expected Result**: All peering connections show "Connected" status. Hub has 2 peerings, each spoke has 1 peering.
 
@@ -459,7 +445,7 @@ Repeat the process for production:
 
 ## 📖 Section 5: Configure Public IP Addresses (20 minutes)
 
-### Step 2.1.13: Create Public IP for Azure Bastion
+### Step 2.1.12: Create Public IP for Azure Bastion
 
 Azure Bastion requires a Standard SKU public IP address.
 
@@ -468,32 +454,32 @@ Azure Bastion requires a Standard SKU public IP address.
 
 **Basics tab**:
 
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
-| Resource group | `platform-skycraft-swc-rg` |
-| Region | **Sweden Central** |
-| Name | `platform-skycraft-swc-bas-pip` |
-| IP Version | IPv4 |
-| SKU | **Standard** |
-| Tier | Regional |
-| IP address assignment | Static |
-| Routing preference | Microsoft network |
+| Field                 | Value                           |
+| --------------------- | ------------------------------- |
+| Subscription          | [Your subscription]             |
+| Resource group        | `platform-skycraft-swc-rg`      |
+| Region                | **Sweden Central**              |
+| Name                  | `platform-skycraft-swc-bas-pip` |
+| IP Version            | IPv4                            |
+| SKU                   | **Standard**                    |
+| Tier                  | Regional                        |
+| IP address assignment | Static                          |
+| Routing preference    | Microsoft network               |
 
 3. Click **Next: Tags**
 4. Add tags:
 
-| Name | Value |
-|------|-------|
-| Project | SkyCraft |
+| Name        | Value    |
+| ----------- | -------- |
+| Project     | SkyCraft |
 | Environment | Platform |
-| CostCenter | MSDN |
+| CostCenter  | MSDN     |
 
 5. Click **Review + create** → **Create**
 
 **Expected Result**: Public IP `platform-skycraft-swc-bas-pip` created with a static IP address assigned.
 
-### Step 2.1.14: Reserve Public IPs for Load Balancers
+### Step 2.1.13: Reserve Public IPs for Load Balancers
 
 Create public IPs for future load balancers (used in Lab 2.3):
 
@@ -502,12 +488,12 @@ Create public IPs for future load balancers (used in Lab 2.3):
 1. Navigate to **Public IP addresses** → **+ Create**
 2. Configure:
 
-| Field | Value |
-|-------|-------|
-| Resource group | `dev-skycraft-swc-rg` |
-| Name | `dev-skycraft-swc-lb-pip` |
-| SKU | **Standard** |
-| IP address assignment | Static |
+| Field                 | Value                     |
+| --------------------- | ------------------------- |
+| Resource group        | `dev-skycraft-swc-rg`     |
+| Name                  | `dev-skycraft-swc-lb-pip` |
+| SKU                   | **Standard**              |
+| IP address assignment | Static                    |
 
 3. Add appropriate tags (Project: SkyCraft, Environment: Development)
 4. Click **Review + create** → **Create**
@@ -516,17 +502,18 @@ Create public IPs for future load balancers (used in Lab 2.3):
 
 1. Repeat the process:
 
-| Field | Value |
-|-------|-------|
-| Resource group | `prod-skycraft-swc-rg` |
-| Name | `prod-skycraft-swc-lb-pip` |
-| SKU | **Standard** |
-| IP address assignment | Static |
+| Field                 | Value                      |
+| --------------------- | -------------------------- |
+| Resource group        | `prod-skycraft-swc-rg`     |
+| Name                  | `prod-skycraft-swc-lb-pip` |
+| SKU                   | **Standard**               |
+| IP address assignment | Static                     |
 
 2. Add appropriate tags (Project: SkyCraft, Environment: Production)
 3. Click **Review + create** → **Create**
 
 **Expected Result**: Three public IPs created:
+
 - `platform-skycraft-swc-bas-pip` (for Bastion)
 - `dev-skycraft-swc-lb-pip` (for dev load balancer)
 - `prod-skycraft-swc-lb-pip` (for prod load balancer)
@@ -535,7 +522,7 @@ Create public IPs for future load balancers (used in Lab 2.3):
 
 ## 📖 Section 6: Test and Verify Connectivity (30 minutes)
 
-### Step 2.1.15: Verify VNet Configuration
+### Step 2.1.14: Verify VNet Configuration
 
 1. Navigate to **Virtual networks**
 2. Click **platform-skycraft-swc-vnet**
@@ -551,7 +538,7 @@ Create public IPs for future load balancers (used in Lab 2.3):
 
 **Expected Result**: All VNets configured correctly with proper address spaces, subnets, and peering connections.
 
-### Step 2.1.16: Use Azure Network Watcher Topology
+### Step 2.1.15: Use Azure Network Watcher Topology
 
 1. Search for **"Network Watcher"** in Azure Portal
 2. Click **Network Watcher** service
@@ -567,16 +554,16 @@ Create public IPs for future load balancers (used in Lab 2.3):
 
 **Expected Result**: Topology diagram displays your hub-spoke architecture visually.
 
-### Step 2.1.17: Test Connectivity (Conceptual)
+### Step 2.1.16: Test Connectivity (Conceptual)
 
 Since we haven't deployed VMs yet, document the expected connectivity:
 
-| Source | Destination | Expected Result |
-|--------|-------------|-----------------|
-| Hub VNet (10.0.0.0/16) | Dev VNet (10.1.0.0/16) | ✅ Allowed (via peering) |
-| Hub VNet (10.0.0.0/16) | Prod VNet (10.2.0.0/16) | ✅ Allowed (via peering) |
-| Dev VNet (10.1.0.0/16) | Prod VNet (10.2.0.0/16) | ❌ Blocked (no direct peering) |
-| Internet | Any VNet private IP | ❌ Blocked (no public access configured) |
+| Source                 | Destination             | Expected Result                          |
+| ---------------------- | ----------------------- | ---------------------------------------- |
+| Hub VNet (10.0.0.0/16) | Dev VNet (10.1.0.0/16)  | ✅ Allowed (via peering)                 |
+| Hub VNet (10.0.0.0/16) | Prod VNet (10.2.0.0/16) | ✅ Allowed (via peering)                 |
+| Dev VNet (10.1.0.0/16) | Prod VNet (10.2.0.0/16) | ❌ Blocked (no direct peering)           |
+| Internet               | Any VNet private IP     | ❌ Blocked (no public access configured) |
 
 **Note**: In Lab 3, we'll deploy VMs and test actual connectivity using ping and SSH.
 
@@ -587,12 +574,14 @@ Since we haven't deployed VMs yet, document the expected connectivity:
 Complete this checklist to verify successful lab completion:
 
 ### Resource Groups
+
 - [ ] `platform-skycraft-swc-rg` exists in Sweden Central
 - [ ] `dev-skycraft-swc-rg` exists in Sweden Central
 - [ ] `prod-skycraft-swc-rg` exists in Sweden Central
 - [ ] All resource groups have proper tags (Project, Environment, CostCenter)
 
 ### Hub VNet (platform-skycraft-swc-vnet)
+
 - [ ] Address space: 10.0.0.0/16
 - [ ] Subnet: AzureBastionSubnet (10.0.0.0/26)
 - [ ] Subnet: GatewaySubnet (10.0.1.0/27)
@@ -600,6 +589,7 @@ Complete this checklist to verify successful lab completion:
 - [ ] Peering status: Connected
 
 ### Dev VNet (dev-skycraft-swc-vnet)
+
 - [ ] Address space: 10.1.0.0/16
 - [ ] Subnet: AuthSubnet (10.1.1.0/24)
 - [ ] Subnet: WorldSubnet (10.1.2.0/24)
@@ -608,6 +598,7 @@ Complete this checklist to verify successful lab completion:
 - [ ] Peering status: Connected
 
 ### Prod VNet (prod-skycraft-swc-vnet)
+
 - [ ] Address space: 10.2.0.0/16
 - [ ] Subnet: AuthSubnet (10.2.1.0/24)
 - [ ] Subnet: WorldSubnet (10.2.2.0/24)
@@ -616,12 +607,14 @@ Complete this checklist to verify successful lab completion:
 - [ ] Peering status: Connected
 
 ### Public IP Addresses
+
 - [ ] `platform-skycraft-swc-bas-pip` created (Standard SKU, Static)
 - [ ] `dev-skycraft-swc-lb-pip` created (Standard SKU, Static)
 - [ ] `prod-skycraft-swc-lb-pip` created (Standard SKU, Static)
 - [ ] All public IPs have proper tags
 
 ### Network Topology Verification
+
 - [ ] Network Watcher enabled for Sweden Central
 - [ ] Topology view shows hub-spoke architecture
 - [ ] No overlapping IP address ranges
@@ -711,6 +704,7 @@ Test your understanding with these questions:
 **Symptom**: Error message: "The client does not have authorization to perform action"
 
 **Solution**:
+
 - Verify you have **Contributor** or **Owner** role at subscription or resource group level
 - Check permissions: **Subscription** → **Access control (IAM)** → **Check access**
 - Wait 10-15 minutes after role assignment for permissions to propagate
@@ -720,6 +714,7 @@ Test your understanding with these questions:
 **Symptom**: Error: "Address range overlaps with existing subnet"
 
 **Solution**:
+
 - Verify subnet ranges don't overlap
 - Check IP calculator: 10.0.0.0/26 ends at 10.0.0.63
 - Next subnet should start at 10.0.0.64 or higher
@@ -730,6 +725,7 @@ Test your understanding with these questions:
 **Symptom**: Peering status stuck in "Initiated" or "Updating"
 
 **Solution**:
+
 - Refresh the Azure Portal (F5)
 - Wait 2-3 minutes for peering to complete
 - Verify both sides of peering are configured
@@ -740,6 +736,7 @@ Test your understanding with these questions:
 **Symptom**: Error: "Subnet name must be 'AzureBastionSubnet'"
 
 **Solution**:
+
 - Subnet name is **case-sensitive**
 - Must be exactly: `AzureBastionSubnet` (capital A, capital B, capital S)
 - Cannot use: `azurebastionsubnet`, `Azure-Bastion-Subnet`, or variations
@@ -749,6 +746,7 @@ Test your understanding with these questions:
 **Symptom**: Error when associating public IP with Bastion
 
 **Solution**:
+
 - Azure Bastion requires **Standard SKU** public IP
 - Cannot use Basic SKU
 - Verify: **Public IP** → **Configuration** → **SKU** shows "Standard"
@@ -759,6 +757,7 @@ Test your understanding with these questions:
 **Symptom**: Network Watcher features grayed out or unavailable
 
 **Solution**:
+
 ```azurecli
 # Enable Network Watcher for Sweden Central
 az network watcher configure   --resource-group NetworkWatcherRG   --locations swedencentral   --enabled true
@@ -788,6 +787,7 @@ Wait 2-3 minutes, then refresh Azure Portal.
 ## 📝 Lab Summary
 
 **What You Accomplished**:
+
 - ✅ Designed and deployed hub-spoke network topology
 - ✅ Created 3 virtual networks with proper IP address planning
 - ✅ Configured 8 subnets across hub and spoke VNets
