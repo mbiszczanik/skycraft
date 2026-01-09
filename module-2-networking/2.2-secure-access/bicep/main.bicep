@@ -4,7 +4,7 @@ DESCRIPTION: Orchestrates the deployment of NSGs, ASGs, and Bastion across Hub a
 EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.2.0
-DEPLOYMENT: az deployment sub create
+DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
 targetScope = 'subscription'
@@ -15,11 +15,17 @@ targetScope = 'subscription'
 @description('Location for all resources')
 param parLocation string = 'swedencentral'
 
+@description('Development Resource Group Name')
+param parResourceGroupNameDev string = 'dev-skycraft-swc-rg'
+
 @description('Production Resource Group Name')
 param parResourceGroupNameProd string = 'prod-skycraft-swc-rg'
 
 @description('Platform Resource Group Name')
 param parResourceGroupNamePlatform string = 'platform-skycraft-swc-rg'
+
+@description('Development VNet Name')
+param parVnetNameDev string = 'dev-skycraft-swc-vnet'
 
 @description('Production VNet Name')
 param parVnetNameProd string = 'prod-skycraft-swc-vnet'
@@ -34,19 +40,39 @@ param parDeployBastion bool = false
 *    Resources     *
 *******************/
 
-// Deploy Production Security Resources (ASGs, NSG)
-module modSecurityProd 'modules/security-prod.bicep' = {
+// Deploy Development Security Resources (ASGs, NSGs)
+module modSecurityDev 'modules/security-spoke.bicep' = {
+  name: 'security-dev-deployment'
+  scope: resourceGroup(parResourceGroupNameDev)
+  params: {
+    parLocation: parLocation
+    parVnetName: parVnetNameDev
+    parEnvironment: 'Development'
+    parAuthSubnetCidr: '10.1.1.0/24'
+    parWorldSubnetCidr: '10.1.2.0/24'
+    parDbSubnetCidr: '10.1.3.0/24'
+    parAppTierCidr: '10.1.0.0/16'
+  }
+}
+
+// Deploy Production Security Resources (ASGs, NSGs)
+module modSecurityProd 'modules/security-spoke.bicep' = {
   name: 'security-prod-deployment'
   scope: resourceGroup(parResourceGroupNameProd)
   params: {
     parLocation: parLocation
     parVnetName: parVnetNameProd
+    parEnvironment: 'Production'
+    parAuthSubnetCidr: '10.2.1.0/24'
+    parWorldSubnetCidr: '10.2.2.0/24'
+    parDbSubnetCidr: '10.2.3.0/24'
+    parAppTierCidr: '10.2.0.0/16'
   }
 }
 
 // Deploy Platform Security Resources (NSG, Bastion)
-module modSecurityPlatform 'modules/security-platform.bicep' = {
-  name: 'security-platform-deployment'
+module modSecurityHub 'modules/security-hub.bicep' = {
+  name: 'security-hub-deployment'
   scope: resourceGroup(parResourceGroupNamePlatform)
   params: {
     parLocation: parLocation
@@ -58,6 +84,6 @@ module modSecurityPlatform 'modules/security-platform.bicep' = {
 /******************
 *     Outputs     *
 ******************/
-output outProdNsgId string = modSecurityProd.outputs.outNsgId
-output outPlatformNsgId string = modSecurityPlatform.outputs.outNsgId
-output outBastionId string = modSecurityPlatform.outputs.outBastionId
+output outProdNsgAuthId string = modSecurityProd.outputs.outNsgAuthId
+output outPlatformNsgId string = modSecurityHub.outputs.outNsgId
+output outBastionId string = modSecurityHub.outputs.outBastionId

@@ -38,6 +38,9 @@ param(
     [string]$ProdResourceGroup = 'prod-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [string]$DevResourceGroup = 'dev-skycraft-swc-rg',
+
+    [Parameter(Mandatory = $false)]
     [string]$PlatformResourceGroup = 'platform-skycraft-swc-rg'
 )
 
@@ -69,6 +72,7 @@ try {
     $params = @{
         parLocation                  = $Location
         parResourceGroupNameProd     = $ProdResourceGroup
+        parResourceGroupNameDev      = $DevResourceGroup
         parResourceGroupNamePlatform = $PlatformResourceGroup
     }
 
@@ -86,6 +90,25 @@ try {
     }
     else {
         Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        if ($deployment.Error) {
+            Write-Host "Error Code: $($deployment.Error.Code)" -ForegroundColor Red
+            Write-Host "Error Message: $($deployment.Error.Message)" -ForegroundColor Red
+            Write-Host "Error Target: $($deployment.Error.Target)" -ForegroundColor Red
+            if ($deployment.Error.Details) {
+                foreach ($detail in $deployment.Error.Details) {
+                    Write-Host "  - Detail Code: $($detail.Code)" -ForegroundColor Red
+                    Write-Host "  - Detail Message: $($detail.Message)" -ForegroundColor Red
+                }
+            }
+        }
+        
+        # Get operations
+        $ops = Get-AzSubscriptionDeploymentOperation -DeploymentName $deploymentName
+        $failedOps = $ops | Where-Object { $_.ProvisioningState -eq "Failed" }
+        foreach ($op in $failedOps) {
+             Write-Host "Failed Operation: $($op.Properties.TargetResource.ResourceName)" -ForegroundColor Yellow
+             Write-Host "Status Message: $($op.Properties.StatusMessage)" -ForegroundColor Red
+        }
     }
 }
 catch {

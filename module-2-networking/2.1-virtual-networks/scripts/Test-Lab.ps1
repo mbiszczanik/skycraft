@@ -3,13 +3,15 @@
     Validates the configuration of Lab 2.1 networking resources.
 
 .DESCRIPTION
-    This script runs a comprehensive validation suite against the deployed VNets, 
-    Subnets, and Peering configurations to ensure they meet the Lab 2.1 requirements.
+    This script runs a comprehensive validation suite against the deployed VNets (Hub/Dev/Prod), 
+    Subnets, Peering configurations, and Public IPs to ensure they meet the Lab 2.1 requirements.
 
     Valdiates:
-    - Hub VNet and all 4 subnets (Address ranges).
-    - Spoke VNet and all 3 subnets (Address ranges).
+    - Hub VNet and all 4 subnets.
+    - Dev VNet and all 3 subnets.
+    - Prod VNet and all 3 subnets.
     - VNet Peering state (Connected) and settings (Forwarded traffic, VNet access).
+    - Public IPs existence and SKU (Standard/Static).
 
 .EXAMPLE
     .\Test-Lab.ps1
@@ -75,120 +77,102 @@ catch {
     Write-Host "[FAIL] Hub VNet $hubVnetName not found in Resource Group $hubRgName." -ForegroundColor Red
 }
 
-# 2. Validate Spoke VNet
-Write-Host "`n=== 2. Validating Spoke VNet ===" -ForegroundColor Cyan
-$spokeRgName = "prod-skycraft-swc-rg"
-$spokeVnetName = "prod-skycraft-swc-vnet"
-$spokeExpectedSubnets = @{
+function Test-SpokeVNet {
+    param($VnetName, $RgName, $Prefix, $ExpectedSubnets)
+    Write-Host "`n=== Validating VNet: $VnetName ===" -ForegroundColor Cyan
+    try {
+        $vnet = Get-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -ErrorAction Stop
+        Write-Host "[OK] VNet found: $VnetName" -ForegroundColor Green
+        
+        if ($vnet.AddressSpace.AddressPrefixes -contains $Prefix) {
+            Write-Host "  - Address Space $Prefix verified." -ForegroundColor Green
+        } else {
+            Write-Host "  - [FAIL] Address Space is $($vnet.AddressSpace.AddressPrefixes -join ', ')" -ForegroundColor Red
+        }
+
+        foreach ($subnetName in $ExpectedSubnets.Keys) {
+            $subnet = $vnet.Subnets | Where-Object { $_.Name -eq $subnetName }
+            if ($subnet) {
+                if ($subnet.AddressPrefix -eq $ExpectedSubnets[$subnetName]) {
+                    Write-Host "  - [OK] Subnet $subnetName ($($subnet.AddressPrefix)) verified." -ForegroundColor Green
+                } else {
+                    Write-Host "  - [FAIL] Subnet $subnetName found but address range is $($subnet.AddressPrefix) (Expected: $($ExpectedSubnets[$subnetName]))" -ForegroundColor Red
+                }
+            } else {
+                Write-Host "  - [FAIL] Subnet $subnetName not found." -ForegroundColor Red
+            }
+        }
+    } catch {
+        Write-Host "[FAIL] VNet $VnetName not found in Resource Group $RgName." -ForegroundColor Red
+    }
+}
+
+# 2. Validate Dev VNet
+$devExpectedSubnets = @{
     "AuthSubnet"     = "10.1.1.0/24"
     "WorldSubnet"    = "10.1.2.0/24"
     "DatabaseSubnet" = "10.1.3.0/24"
 }
+Test-SpokeVNet -VnetName "dev-skycraft-swc-vnet" -RgName "dev-skycraft-swc-rg" -Prefix "10.1.0.0/16" -ExpectedSubnets $devExpectedSubnets
 
-try {
-    $spokeVnet = Get-AzVirtualNetwork -Name $spokeVnetName -ResourceGroupName $spokeRgName -ErrorAction Stop
-    Write-Host "[OK] Spoke VNet found: $spokeVnetName" -ForegroundColor Green
-    
-    # Check Address Space
-    if ($spokeVnet.AddressSpace.AddressPrefixes -contains "10.1.0.0/16") {
-        Write-Host "  - Address Space 10.1.0.0/16 verified." -ForegroundColor Green
-    }
-    else {
-        Write-Host "  - [FAIL] Address Space is $($spokeVnet.AddressSpace.AddressPrefixes -join ', ')" -ForegroundColor Red
-    }
+# 3. Validate Prod VNet
+$prodExpectedSubnets = @{
+    "AuthSubnet"     = "10.2.1.0/24"
+    "WorldSubnet"    = "10.2.2.0/24"
+    "DatabaseSubnet" = "10.2.3.0/24"
+}
+Test-SpokeVNet -VnetName "prod-skycraft-swc-vnet" -RgName "prod-skycraft-swc-rg" -Prefix "10.2.0.0/16" -ExpectedSubnets $prodExpectedSubnets
 
-    # Check Subnets
-    foreach ($subnetName in $spokeExpectedSubnets.Keys) {
-        $subnet = $spokeVnet.Subnets | Where-Object { $_.Name -eq $subnetName }
-        if ($subnet) {
-            if ($subnet.AddressPrefix -eq $spokeExpectedSubnets[$subnetName]) {
-                Write-Host "  - [OK] Subnet $subnetName ($($subnet.AddressPrefix)) verified." -ForegroundColor Green
+
+# 4. Validate Peering
+Write-Host "`n=== 4. Validating VNet Peering ===" -ForegroundColor Cyan
+
+function Test-Peering {
+    param($VnetName, $RgName, $PeeringName)
+    try {
+        $peering = Get-AzVirtualNetworkPeering -VirtualNetworkName $VnetName -ResourceGroupName $RgName -Name $PeeringName -ErrorAction SilentlyContinue
+        if ($peering) {
+            if ($peering.PeeringState -eq "Connected") {
+                Write-Host "[OK] $PeeringName on $VnetName (Status: $($peering.PeeringState))" -ForegroundColor Green
+            } else {
+                Write-Host "[FAIL] $PeeringName on $VnetName Status is $($peering.PeeringState)" -ForegroundColor Red
             }
-            else {
-                Write-Host "  - [FAIL] Subnet $subnetName found but address range is $($subnet.AddressPrefix) (Expected: $($spokeExpectedSubnets[$subnetName]))" -ForegroundColor Red
-            }
+            if ($peering.AllowVirtualNetworkAccess) { Write-Host "  - [OK] AllowVirtualNetworkAccess" -ForegroundColor Green }
+            else { Write-Host "  - [FAIL] AllowVirtualNetworkAccess is False" -ForegroundColor Red }
+            if ($peering.AllowForwardedTraffic) { Write-Host "  - [OK] AllowForwardedTraffic" -ForegroundColor Green }
+            else { Write-Host "  - [FAIL] AllowForwardedTraffic is False" -ForegroundColor Red }
+        } else {
+            Write-Host "[FAIL] Peering $PeeringName not found on $VnetName." -ForegroundColor Red
         }
-        else {
-            Write-Host "  - [FAIL] Subnet $subnetName not found." -ForegroundColor Red
-        }
-    }
-}
-catch {
-    Write-Host "[FAIL] Spoke VNet $spokeVnetName not found in Resource Group $spokeRgName." -ForegroundColor Red
+    } catch { Write-Host "[FAIL] Error checking $PeeringName on ${VnetName}: $_" -ForegroundColor Red }
 }
 
-# 3. Validate Peering
-Write-Host "`n=== 3. Validating VNet Peering ===" -ForegroundColor Cyan
+Test-Peering -VnetName "platform-skycraft-swc-vnet" -RgName "platform-skycraft-swc-rg" -PeeringName "hub-to-dev"
+Test-Peering -VnetName "dev-skycraft-swc-vnet"      -RgName "dev-skycraft-swc-rg"      -PeeringName "dev-to-hub"
+Test-Peering -VnetName "platform-skycraft-swc-vnet" -RgName "platform-skycraft-swc-rg" -PeeringName "hub-to-prod"
+Test-Peering -VnetName "prod-skycraft-swc-vnet"     -RgName "prod-skycraft-swc-rg"     -PeeringName "prod-to-hub"
 
-# Check Peering from Hub to Spoke
-$hubPeeringName = "peer-hub-to-prod"
-try {
-    $hubToProdPeering = Get-AzVirtualNetworkPeering -VirtualNetworkName $hubVnetName -ResourceGroupName $hubRgName -Name $hubPeeringName -ErrorAction SilentlyContinue
-    if ($hubToProdPeering) {
-        if ($hubToProdPeering.PeeringState -eq "Connected") {
-            Write-Host "[OK] Peering found: $hubPeeringName (Status: $($hubToProdPeering.PeeringState))" -ForegroundColor Green
-        }
-        else {
-            Write-Host "[FAIL] Peering found: $hubPeeringName but Status is $($hubToProdPeering.PeeringState)" -ForegroundColor Red
-        }
+# 5. Validate Public IPs
+Write-Host "`n=== 5. Validating Public IPs ===" -ForegroundColor Cyan
 
-        # Check Access & Forwarded Traffic
-        if ($hubToProdPeering.AllowVirtualNetworkAccess) {
-            Write-Host "  - [OK] AllowVirtualNetworkAccess: True" -ForegroundColor Green
-        }
-        else {
-            Write-Host "  - [FAIL] AllowVirtualNetworkAccess: False (Expected: True)" -ForegroundColor Red
-        }
-
-        if ($hubToProdPeering.AllowForwardedTraffic) {
-            Write-Host "  - [OK] AllowForwardedTraffic: True" -ForegroundColor Green
-        }
-        else {
-            Write-Host "  - [FAIL] AllowForwardedTraffic: False (Expected: True)" -ForegroundColor Red
-        }
-    }
-    else {
-        Write-Host "[FAIL] VNet Peering '$hubPeeringName' not found on $hubVnetName." -ForegroundColor Red
-    }
-}
-catch {
-    Write-Host "[FAIL] Error checking Hub-to-Prod peering." -ForegroundColor Red
+function Test-PIP {
+    param($Name, $RgName)
+    try {
+        $pip = Get-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -ErrorAction SilentlyContinue
+        if ($pip) {
+            Write-Host "[OK] PIP found: $Name" -ForegroundColor Green
+            if ($pip.Sku.Name -eq "Standard") { Write-Host "  - [OK] SKU Standard" -ForegroundColor Green }
+            else { Write-Host "  - [FAIL] SKU is $($pip.Sku.Name)" -ForegroundColor Red }
+            if ($pip.PublicIpAllocationMethod -eq "Static") { Write-Host "  - [OK] Allocation Static" -ForegroundColor Green }
+            else { Write-Host "  - [FAIL] Allocation is $($pip.PublicIpAllocationMethod)" -ForegroundColor Red }
+        } else { Write-Host "[FAIL] PIP $Name not found." -ForegroundColor Red }
+    } catch { Write-Host "[FAIL] Error checking PIP ${Name}: $_" -ForegroundColor Red }
 }
 
-# Check Peering from Spoke to Hub
-$spokePeeringName = "peer-prod-to-hub"
-try {
-    $prodToHubPeering = Get-AzVirtualNetworkPeering -VirtualNetworkName $spokeVnetName -ResourceGroupName $spokeRgName -Name $spokePeeringName -ErrorAction SilentlyContinue
-    if ($prodToHubPeering) {
-        if ($prodToHubPeering.PeeringState -eq "Connected") {
-            Write-Host "[OK] Peering found: $spokePeeringName (Status: $($prodToHubPeering.PeeringState))" -ForegroundColor Green
-        }
-        else {
-            Write-Host "[FAIL] Peering found: $spokePeeringName but Status is $($prodToHubPeering.PeeringState)" -ForegroundColor Red
-        }
-
-        # Check Access & Forwarded Traffic
-        if ($prodToHubPeering.AllowVirtualNetworkAccess) {
-            Write-Host "  - [OK] AllowVirtualNetworkAccess: True" -ForegroundColor Green
-        }
-        else {
-            Write-Host "  - [FAIL] AllowVirtualNetworkAccess: False (Expected: True)" -ForegroundColor Red
-        }
-
-        if ($prodToHubPeering.AllowForwardedTraffic) {
-            Write-Host "  - [OK] AllowForwardedTraffic: True" -ForegroundColor Green
-        }
-        else {
-            Write-Host "  - [FAIL] AllowForwardedTraffic: False (Expected: True)" -ForegroundColor Red
-        }
-    }
-    else {
-        Write-Host "[FAIL] VNet Peering '$spokePeeringName' not found on $spokeVnetName." -ForegroundColor Red
-    }
-}
-catch {
-    Write-Host "[FAIL] Error checking Prod-to-Hub peering." -ForegroundColor Red
-}
+Test-PIP -Name "platform-skycraft-swc-bas-pip" -RgName "platform-skycraft-swc-rg"
+Test-PIP -Name "dev-skycraft-swc-lb-pip" -RgName "dev-skycraft-swc-rg"
+Test-PIP -Name "prod-skycraft-swc-lb-pip" -RgName "prod-skycraft-swc-rg"
 
 Write-Host "`n=== Validation Summary ===" -ForegroundColor Cyan
 Write-Host "Lab 2.1 validation complete" -ForegroundColor Green
+

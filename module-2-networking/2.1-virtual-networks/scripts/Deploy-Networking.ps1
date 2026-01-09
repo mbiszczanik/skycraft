@@ -7,9 +7,11 @@
     It serves as an alternative deployment method and demonstrates direct Azure interaction.
     
     Tasks performed:
-    1. Create Hub Virtual Network (platform-skycraft-swc-vnet) with management subnets.
-    2. Create Spoke Virtual Network (prod-skycraft-swc-vnet) with game service subnets.
-    3. Configure bi-directional VNet Peering.
+    1. Create Hub Virtual Network (platform-skycraft-swc-vnet).
+    2. Create Dev Virtual Network (dev-skycraft-swc-vnet).
+    3. Create Prod Virtual Network (prod-skycraft-swc-vnet).
+    4. Configure bi-directional VNet Peering (Hub-Dev, Hub-Prod).
+    5. Create Public IP Addresses (Bastion, Dev LB, Prod LB).
     
     It enforces project tagging standards.
 
@@ -18,6 +20,9 @@
 
 .PARAMETER ProdResourceGroup
     The production resource group name. Default: 'prod-skycraft-swc-rg'
+
+.PARAMETER DevResourceGroup
+    The development resource group name. Default: 'dev-skycraft-swc-rg'
 
 .PARAMETER PlatformResourceGroup
     The platform resource group name. Default: 'platform-skycraft-swc-rg'
@@ -42,6 +47,9 @@ param(
     [string]$ProdResourceGroup = 'prod-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [string]$DevResourceGroup = 'dev-skycraft-swc-rg',
+
+    [Parameter(Mandatory = $false)]
     [string]$PlatformResourceGroup = 'platform-skycraft-swc-rg'
 )
 
@@ -56,20 +64,15 @@ if (-not $context) {
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
 # Define Mandatory Tags
-$Tags = @{
-    Project     = 'SkyCraft'
-    Environment = 'Production'
-    CostCenter  = 'MSDN'
-}
+$TagsPlatform = @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN' }
+$TagsDev = @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN' }
+$TagsProd = @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN' }
 
 # ===================================
 # Task 2: Create Hub Virtual Network
 # ===================================
 Write-Host "`n=== Task 2: Creating Hub Virtual Network ===" -ForegroundColor Cyan
-
 $hubVnetName = 'platform-skycraft-swc-vnet'
-
-# Define Hub Subnets
 $hubSubnets = @(
     (New-AzVirtualNetworkSubnetConfig -Name 'AzureBastionSubnet' -AddressPrefix '10.0.1.0/26'),
     (New-AzVirtualNetworkSubnetConfig -Name 'AzureFirewallSubnet' -AddressPrefix '10.0.2.0/26'),
@@ -80,111 +83,97 @@ $hubSubnets = @(
 Write-Host "Creating VNet: $hubVnetName..." -ForegroundColor Yellow
 try {
     $hubVnet = Get-AzVirtualNetwork -ResourceGroupName $PlatformResourceGroup -Name $hubVnetName -ErrorAction SilentlyContinue
-    if ($hubVnet) {
-        Write-Host "  -> VNet already exists: $hubVnetName" -ForegroundColor Gray
-    }
-    else {
-        $hubVnet = New-AzVirtualNetwork `
-            -ResourceGroupName $PlatformResourceGroup `
-            -Name $hubVnetName `
-            -Location $Location `
-            -AddressPrefix '10.0.0.0/16' `
-            -Subnet $hubSubnets `
-            -Tag $Tags
+    if (-not $hubVnet) {
+        $hubVnet = New-AzVirtualNetwork -ResourceGroupName $PlatformResourceGroup -Name $hubVnetName -Location $Location -AddressPrefix '10.0.0.0/16' -Subnet $hubSubnets -Tag $TagsPlatform -ErrorAction Stop
         Write-Host "  -> Created Hub VNet: $hubVnetName" -ForegroundColor Green
-    }
-}
-catch {
-    Write-Host "  -> [ERROR] Failed to create Hub VNet" -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
-    exit 1
-}
+    } else { Write-Host "  -> exists" -ForegroundColor Gray }
+} catch { Write-Host "  -> [ERROR] Failed to create Hub VNet: $_" -ForegroundColor Red; exit 1 }
 
 # ===================================
-# Task 3: Create Spoke Virtual Network
+# Task 3: Create Dev Virtual Network
 # ===================================
-Write-Host "`n=== Task 3: Creating Spoke Virtual Network ===" -ForegroundColor Cyan
-
-$spokeVnetName = 'prod-skycraft-swc-vnet'
-
-# Define Spoke Subnets
-$spokeSubnets = @(
+Write-Host "`n=== Task 3: Creating Dev Virtual Network ===" -ForegroundColor Cyan
+$devVnetName = 'dev-skycraft-swc-vnet'
+$devSubnets = @(
     (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.1.1.0/24'),
     (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.1.2.0/24'),
     (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.1.3.0/24')
 )
 
-Write-Host "Creating VNet: $spokeVnetName..." -ForegroundColor Yellow
+Write-Host "Creating VNet: $devVnetName..." -ForegroundColor Yellow
 try {
-    $spokeVnet = Get-AzVirtualNetwork -ResourceGroupName $ProdResourceGroup -Name $spokeVnetName -ErrorAction SilentlyContinue
-    if ($spokeVnet) {
-        Write-Host "  -> VNet already exists: $spokeVnetName" -ForegroundColor Gray
-    }
-    else {
-        $spokeVnet = New-AzVirtualNetwork `
-            -ResourceGroupName $ProdResourceGroup `
-            -Name $spokeVnetName `
-            -Location $Location `
-            -AddressPrefix '10.1.0.0/16' `
-            -Subnet $spokeSubnets `
-            -Tag $Tags
-        Write-Host "  -> Created Spoke VNet: $spokeVnetName" -ForegroundColor Green
-    }
-}
-catch {
-    Write-Host "  -> [ERROR] Failed to create Spoke VNet" -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
-    exit 1
-}
+    $devVnet = Get-AzVirtualNetwork -ResourceGroupName $DevResourceGroup -Name $devVnetName -ErrorAction SilentlyContinue
+    if (-not $devVnet) {
+        $devVnet = New-AzVirtualNetwork -ResourceGroupName $DevResourceGroup -Name $devVnetName -Location $Location -AddressPrefix '10.1.0.0/16' -Subnet $devSubnets -Tag $TagsDev -ErrorAction Stop
+        Write-Host "  -> Created Dev VNet: $devVnetName" -ForegroundColor Green
+    } else { Write-Host "  -> exists" -ForegroundColor Gray }
+} catch { Write-Host "  -> [ERROR] Failed to create Dev VNet: $_" -ForegroundColor Red; exit 1 }
 
 # ===================================
-# Task 4: Configure VNet Peering
+# Task 4: Create Prod Virtual Network
 # ===================================
-Write-Host "`n=== Task 4: Configuring VNet Peering ===" -ForegroundColor Cyan
+Write-Host "`n=== Task 4: Creating Prod Virtual Network ===" -ForegroundColor Cyan
+$prodVnetName = 'prod-skycraft-swc-vnet'
+$prodSubnets = @(
+    (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.2.1.0/24'),
+    (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.2.2.0/24'),
+    (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.2.3.0/24')
+)
 
-# Peering 1: Hub to Spoke
-Write-Host "Creating Peering: peer-hub-to-prod..." -ForegroundColor Yellow
+Write-Host "Creating VNet: $prodVnetName..." -ForegroundColor Yellow
 try {
-    $peerHub = Get-AzVirtualNetworkPeering -VirtualNetworkName $hubVnetName -ResourceGroupName $PlatformResourceGroup -Name 'peer-hub-to-prod' -ErrorAction SilentlyContinue
-    if ($peerHub) {
-        Write-Host "  -> Peering already exists: peer-hub-to-prod" -ForegroundColor Gray
-    }
-    else {
-        Add-AzVirtualNetworkPeering `
-            -Name 'peer-hub-to-prod' `
-            -VirtualNetwork $hubVnet `
-            -RemoteVirtualNetworkId $spokeVnet.Id `
-            -AllowForwardedTraffic | Out-Null
-        Write-Host "  -> Created Peering: Hub to Spoke" -ForegroundColor Green
-    }
-}
-catch {
-    Write-Host "  -> [ERROR] Failed to create Hub-to-Spoke peering" -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
-    exit 1
+    $prodVnet = Get-AzVirtualNetwork -ResourceGroupName $ProdResourceGroup -Name $prodVnetName -ErrorAction SilentlyContinue
+    if (-not $prodVnet) {
+        $prodVnet = New-AzVirtualNetwork -ResourceGroupName $ProdResourceGroup -Name $prodVnetName -Location $Location -AddressPrefix '10.2.0.0/16' -Subnet $prodSubnets -Tag $TagsProd -ErrorAction Stop
+        Write-Host "  -> Created Prod VNet: $prodVnetName" -ForegroundColor Green
+    } else { Write-Host "  -> exists" -ForegroundColor Gray }
+} catch { Write-Host "  -> [ERROR] Failed to create Prod VNet: $_" -ForegroundColor Red; exit 1 }
+
+# ===================================
+# Task 5: Configure VNet Peering
+# ===================================
+Write-Host "`n=== Task 5: Configuring VNet Peering ===" -ForegroundColor Cyan
+
+function New-SkyCraftPeering {
+    param($Name, $SrcVnet, $DstVnetId, $RgName)
+    Write-Host "Creating Peering: $Name..." -ForegroundColor Yellow
+    try {
+        $peer = Get-AzVirtualNetworkPeering -VirtualNetworkName $SrcVnet.Name -ResourceGroupName $RgName -Name $Name -ErrorAction SilentlyContinue
+        if (-not $peer) {
+            Add-AzVirtualNetworkPeering -Name $Name -VirtualNetwork $SrcVnet -RemoteVirtualNetworkId $DstVnetId -AllowForwardedTraffic -ErrorAction Stop | Out-Null
+            Write-Host "  -> Created $Name" -ForegroundColor Green
+        } else { Write-Host "  -> exists" -ForegroundColor Gray }
+    } catch { Write-Host "  -> [ERROR] Failed to create $Name : $_" -ForegroundColor Red }
 }
 
-# Peering 2: Spoke to Hub
-Write-Host "Creating Peering: peer-prod-to-hub..." -ForegroundColor Yellow
-try {
-    $peerSpoke = Get-AzVirtualNetworkPeering -VirtualNetworkName $spokeVnetName -ResourceGroupName $ProdResourceGroup -Name 'peer-prod-to-hub' -ErrorAction SilentlyContinue
-    if ($peerSpoke) {
-        Write-Host "  -> Peering already exists: peer-prod-to-hub" -ForegroundColor Gray
-    }
-    else {
-        Add-AzVirtualNetworkPeering `
-            -Name 'peer-prod-to-hub' `
-            -VirtualNetwork $spokeVnet `
-            -RemoteVirtualNetworkId $hubVnet.Id `
-            -AllowForwardedTraffic | Out-Null
-        Write-Host "  -> Created Peering: Spoke to Hub" -ForegroundColor Green
-    }
+# Hub <-> Dev
+New-SkyCraftPeering -Name "hub-to-dev" -SrcVnet $hubVnet -DstVnetId $devVnet.Id -RgName $PlatformResourceGroup
+New-SkyCraftPeering -Name "dev-to-hub" -SrcVnet $devVnet -DstVnetId $hubVnet.Id -RgName $DevResourceGroup
+
+# Hub <-> Prod
+New-SkyCraftPeering -Name "hub-to-prod" -SrcVnet $hubVnet -DstVnetId $prodVnet.Id -RgName $PlatformResourceGroup
+New-SkyCraftPeering -Name "prod-to-hub" -SrcVnet $prodVnet -DstVnetId $hubVnet.Id -RgName $ProdResourceGroup
+
+# ===================================
+# Task 6: Create Public IP Addresses
+# ===================================
+Write-Host "`n=== Task 6: Creating Public IP Addresses ===" -ForegroundColor Cyan
+
+function New-SkyCraftPip {
+    param($Name, $RgName, $Tags)
+    Write-Host "Creating PIP: $Name..." -ForegroundColor Yellow
+    try {
+        $pip = Get-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -ErrorAction SilentlyContinue
+        if (-not $pip) {
+            New-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -Location $Location -Sku Standard -AllocationMethod Static -Tag $Tags -ErrorAction Stop | Out-Null
+            Write-Host "  -> Created PIP: $Name" -ForegroundColor Green
+        } else { Write-Host "  -> exists" -ForegroundColor Gray }
+    } catch { Write-Host "  -> [ERROR] Failed to create PIP $Name : $_" -ForegroundColor Red }
 }
-catch {
-    Write-Host "  -> [ERROR] Failed to create Spoke-to-Hub peering" -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
-    exit 1
-}
+
+New-SkyCraftPip -Name 'platform-skycraft-swc-bas-pip' -RgName $PlatformResourceGroup -Tags $TagsPlatform
+New-SkyCraftPip -Name 'dev-skycraft-swc-lb-pip' -RgName $DevResourceGroup -Tags $TagsDev
+New-SkyCraftPip -Name 'prod-skycraft-swc-lb-pip' -RgName $ProdResourceGroup -Tags $TagsProd
 
 Write-Host "`n=== Deployment Complete ===" -ForegroundColor Cyan -BackgroundColor Black
 Write-Host "Run Test-Lab.ps1 to verify the networking configuration" -ForegroundColor Green
