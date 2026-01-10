@@ -93,9 +93,7 @@ module modDevLb 'modules/load-balancer.bicep' = {
     parLbName: 'dev-skycraft-swc-lb'
     parLocation: parLocation
     parTags: varCommonTags
-    // We need the Public IP ID. 
-    // We can't lookup resources in specific RGs from subscription level directly without nested modules.
-    parPublicIpId: resourceId(parDevRG, 'Microsoft.Network/publicIPAddresses', parDevLbPipName)
+    parPublicIpName: parDevLbPipName
   }
 }
 
@@ -106,7 +104,7 @@ module modProdLb 'modules/load-balancer.bicep' = {
     parLbName: 'prod-skycraft-swc-lb'
     parLocation: parLocation
     parTags: varCommonTags
-    parPublicIpId: resourceId(parProdRG, 'Microsoft.Network/publicIPAddresses', parProdLbPipName)
+    parPublicIpName: parProdLbPipName
   }
 }
 
@@ -156,9 +154,9 @@ module modPrivateDns 'modules/dns-private.bicep' = {
     parDnsZoneName: parPrivateDnsZoneName
     parLocation: 'global'
     parTags: varCommonTags
-    parHubVnetId: resourceId(parPlatformRG, 'Microsoft.Network/virtualNetworks', parHubVnetName)
-    parDevVnetId: resourceId(parDevRG, 'Microsoft.Network/virtualNetworks', parDevVnetName)
-    parProdVnetId: resourceId(parProdRG, 'Microsoft.Network/virtualNetworks', parProdVnetName)
+    parHubVnetId: resourceId(subscription().subscriptionId, parPlatformRG, 'Microsoft.Network/virtualNetworks', parHubVnetName)
+    parDevVnetId: resourceId(subscription().subscriptionId, parDevRG, 'Microsoft.Network/virtualNetworks', parDevVnetName)
+    parProdVnetId: resourceId(subscription().subscriptionId, parProdRG, 'Microsoft.Network/virtualNetworks', parProdVnetName)
   }
 }
 

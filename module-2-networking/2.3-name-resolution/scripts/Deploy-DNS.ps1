@@ -159,8 +159,8 @@ function New-PrivateDnsLink {
     }
 }
 
-New-PrivateDnsLink -LinkName 'link-to-hub' -VnetRG $PlatformRG -VnetName $HubVnetName -AutoReg $false
-New-PrivateDnsLink -LinkName 'link-to-dev' -VnetRG $DevRG -VnetName $DevVnetName -AutoReg $true
-New-PrivateDnsLink -LinkName 'link-to-prod' -VnetRG $ProdRG -VnetName $ProdVnetName -AutoReg $true
+New-PrivateDnsLink -LinkName 'hub-vnet-link' -VnetRG $PlatformRG -VnetName $HubVnetName -AutoReg $false
+New-PrivateDnsLink -LinkName 'dev-vnet-link' -VnetRG $DevRG -VnetName $DevVnetName -AutoReg $true
+New-PrivateDnsLink -LinkName 'prod-vnet-link' -VnetRG $ProdRG -VnetName $ProdVnetName -AutoReg $true
 
 Write-Host "`n=== DNS Deployment Complete ===" -ForegroundColor Cyan -BackgroundColor Black

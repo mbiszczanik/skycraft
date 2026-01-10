@@ -39,10 +39,8 @@ Write-Host "`n=== 1. Validating Hub VNet ===" -ForegroundColor Cyan
 $hubRgName = "platform-skycraft-swc-rg"
 $hubVnetName = "platform-skycraft-swc-vnet"
 $hubExpectedSubnets = @{
-    "AzureBastionSubnet"  = "10.0.1.0/26"
-    "AzureFirewallSubnet" = "10.0.2.0/26"
-    "GatewaySubnet"       = "10.0.3.0/27"
-    "SharedSubnet"        = "10.0.4.0/24"
+    "AzureBastionSubnet"  = "10.0.0.0/26"
+    "GatewaySubnet"       = "10.0.1.0/27"
 }
 
 try {

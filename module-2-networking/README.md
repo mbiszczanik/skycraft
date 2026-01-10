@@ -179,4 +179,4 @@ Once complete, you'll have:
 - [← Back to Course Home](../README.md)
 - [Lab 2.1: Virtual Networks →](2.1-virtual-networks/lab-guide-2.1.md)
 - [Lab 2.2: Secure Access →](2.2-secure-access/lab-guide-2.2.md)
-- [Lab 2.3: DNS \& Load Balancing →](2.3-dns-load-balancing/lab-guide-2.3.md)
+- [Lab 2.3: DNS & Load Balancing →](2.3-name-resolution/lab-guide-2.3.md)
