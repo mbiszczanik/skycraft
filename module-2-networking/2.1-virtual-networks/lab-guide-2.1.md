@@ -533,8 +533,9 @@ Create public IPs for future load balancers (used in Lab 2.3):
 2. Click **Network Watcher** service
 3. Ensure Network Watcher is enabled for **Sweden Central** region
 4. In left menu, click **Topology**
-5. Select:
-   - Resource group: `platform-skycraft-swc-rg`
+5. Hover your mouse over Sweden Central on the Geo Map and then press Expand:
+
+![Network Watcher Topology](./images/step-2.1.15.png)
 
 **Expected View**: Visual diagram showing hub VNet with peering connections to spoke VNets.
 
