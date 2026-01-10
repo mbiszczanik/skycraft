@@ -171,7 +171,6 @@ function New-SkyCraftPip {
     } catch { Write-Host "  -> [ERROR] Failed to create PIP $Name : $_" -ForegroundColor Red }
 }
 
-New-SkyCraftPip -Name 'platform-skycraft-swc-bas-pip' -RgName $PlatformResourceGroup -Tags $TagsPlatform
 New-SkyCraftPip -Name 'dev-skycraft-swc-lb-pip' -RgName $DevResourceGroup -Tags $TagsDev
 New-SkyCraftPip -Name 'prod-skycraft-swc-lb-pip' -RgName $ProdResourceGroup -Tags $TagsProd
 
