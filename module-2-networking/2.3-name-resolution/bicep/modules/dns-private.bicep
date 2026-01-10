@@ -41,7 +41,7 @@ resource resDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
 // Link to Hub VNet (Auto-Registration: Disabled)
 resource resHubLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
   parent: resDnsZone
-  name: 'link-to-hub'
+  name: 'hub-vnet-link'
   location: parLocation
   properties: {
     registrationEnabled: false
@@ -54,7 +54,7 @@ resource resHubLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-
 // Link to Dev VNet (Auto-Registration: Enabled)
 resource resDevLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
   parent: resDnsZone
-  name: 'link-to-dev'
+  name: 'dev-vnet-link'
   location: parLocation
   properties: {
     registrationEnabled: true
@@ -67,7 +67,7 @@ resource resDevLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-
 // Link to Prod VNet (Auto-Registration: Enabled)
 resource resProdLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
   parent: resDnsZone
-  name: 'link-to-prod'
+  name: 'prod-vnet-link'
   location: parLocation
   properties: {
     registrationEnabled: true

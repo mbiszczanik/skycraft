@@ -207,6 +207,8 @@ Layer 5: VM-level firewalls (OS-level protection)
 | Name                            | `Allow-SSH-From-Bastion`                     |
 | Description                     | `Allow SSH access from Azure Bastion subnet` |
 
+![Allow-SSH-From-Bastion-Rule](./images/step-2.2.2.1.png)
+
 6. Click **Add**
 
 **Create Rule 2: Allow Game Auth Port**
@@ -231,6 +233,8 @@ Layer 5: VM-level firewalls (OS-level protection)
 
 **Expected Result**: Two custom inbound rules created with priorities 100 and 110.
 
+![Allow-Auth-GamePort-Rule](./images/step-2.2.2.2.png)
+
 ### Step 2.2.3: Associate NSG with Auth Subnet
 
 1. Still in **dev-skycraft-swc-auth-nsg**, click **Subnets** in left menu
@@ -245,6 +249,8 @@ Layer 5: VM-level firewalls (OS-level protection)
 4. Click **OK**
 
 **Expected Result**: NSG is now associated with AuthSubnet (10.1.1.0/24). All traffic to/from this subnet will be evaluated by NSG rules.
+
+![Associate-NSG-Auth-Subnet](./images/step-2.2.3.png)
 
 ### Step 2.2.4: Create NSG for World Subnet
 
@@ -407,6 +413,8 @@ To demonstrate ASG usage, let's update the database NSG rule:
    - Source ASG: Select `dev-skycraft-swc-asg-auth` and `dev-skycraft-swc-asg-world`
 4. Click **Save**
 
+![Update-NSG-Rule](./images/step-2.2.9.png)
+
 **Note**: This won't work yet (no VMs assigned to ASGs), but demonstrates the concept. In Module 3, when we create VMs, we'll assign them to these ASGs.
 
 ---
@@ -443,6 +451,8 @@ To demonstrate ASG usage, let's update the database NSG rule:
 | Public IP name    | `platform-skycraft-swc-bas-pip`    |
 | Public IP SKU     | Standard (Auto-selected)           |
 | Assignment        | Static (Auto-selected)             |
+
+![Create-Azure-Bastion](./images/step-2.2.10.png)
 
 3. Click **Next: Tags**
 4. Add tags:
@@ -566,6 +576,8 @@ Create three NSGs for production environment (following same pattern as dev):
    - **Microsoft.Storage** (for Azure Storage)
 6. Click **Save**
 
+![Enable-Service-Endpoint](./images/step-2.2.14.png)
+
 **Expected Result**:
 
 - Service endpoints enabled on DatabaseSubnet
@@ -600,37 +612,37 @@ Create three NSGs for production environment (following same pattern as dev):
 
 ### Step 2.2.17: Create Private Endpoint (Conceptual)
 
-**Note**: We'll create a placeholder without an actual Azure SQL database (which would be deployed in Module 3 or 4).
+**Note**: We will use a **Storage Account** for this conceptual step, as it is a lighter resource if you choose to provision it for testing.
 
-To create a private endpoint for Azure SQL Database:
+To create a private endpoint for an Azure Storage Account:
 
-1. Navigate to **Private Link Center** in Azure Portal
+1. Navigate to **Private Link** in Azure Portal
 2. Click **Private endpoints** → **+ Create**
 3. Configure:
 
-| Field               | Value                      |
-| ------------------- | -------------------------- |
-| Resource group      | `prod-skycraft-swc-rg`     |
-| Name                | `prod-skycraft-swc-sql-pe` |
-| Region              | **Sweden Central**         |
-| Target sub-resource | `sqlServer`                |
-| Virtual network     | `prod-skycraft-swc-vnet`   |
-| Subnet              | `DatabaseSubnet`           |
+| Field               | Value                     |
+| ------------------- | ------------------------- |
+| Resource group      | `prod-skycraft-swc-rg`    |
+| Name                | `prod-skycraft-swc-st-pe` |
+| Region              | **Sweden Central**        |
+| Target sub-resource | `blob`                    |
+| Virtual network     | `prod-skycraft-swc-vnet`  |
+| Subnet              | `DatabaseSubnet`          |
 
 4. Private DNS integration:
 
-   - Create new private DNS zone: `privatelink.database.windows.net`
+   - Create new private DNS zone: `privatelink.blob.core.windows.net`
    - Link to VNet: `prod-skycraft-swc-vnet`
 
 5. Tags and create
 
-**Expected Result** (when Azure SQL exists):
+**Expected Result** (if Storage Account exists):
 
 - Private endpoint gets IP like 10.2.3.10
-- DNS resolves `yourserver.database.windows.net` to 10.2.3.10
-- No public internet access needed
+- DNS resolves `yourstorage.blob.core.windows.net` to 10.2.3.10
+- No public internet access needed (if public access disabled)
 
-**For this lab**: Understand the concept; we'll implement in Module 4 when deploying Azure SQL.
+**For this lab**: Understand the concept; we'll implement this pattern in later modules for various PaaS services.
 
 ---
 

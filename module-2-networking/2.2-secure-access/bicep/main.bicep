@@ -51,7 +51,6 @@ module modSecurityDev 'modules/security-spoke.bicep' = {
     parAuthSubnetCidr: '10.1.1.0/24'
     parWorldSubnetCidr: '10.1.2.0/24'
     parDbSubnetCidr: '10.1.3.0/24'
-    parAppTierCidr: '10.1.0.0/16'
   }
 }
 
@@ -66,7 +65,6 @@ module modSecurityProd 'modules/security-spoke.bicep' = {
     parAuthSubnetCidr: '10.2.1.0/24'
     parWorldSubnetCidr: '10.2.2.0/24'
     parDbSubnetCidr: '10.2.3.0/24'
-    parAppTierCidr: '10.2.0.0/16'
   }
 }
 

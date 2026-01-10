@@ -59,21 +59,21 @@ if ($privZone) {
     $links = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -ErrorAction SilentlyContinue
     
     # Hub Link (No Reg)
-    $hubLink = $links | Where-Object { $_.Name -eq 'link-to-hub' }
+    $hubLink = $links | Where-Object { $_.Name -eq 'hub-vnet-link' }
     if ($hubLink) {
         if ($hubLink.RegistrationEnabled -eq $false) {
-             Write-Host "  - [OK] Link 'link-to-hub' found (Reg: False)" -ForegroundColor Green
+             Write-Host "  - [OK] Link 'hub-vnet-link' found (Reg: False)" -ForegroundColor Green
         } else {
-             Write-Host "  - [FAIL] Link 'link-to-hub' has Reg: True (Expected False)" -ForegroundColor Red
+             Write-Host "  - [FAIL] Link 'hub-vnet-link' has Reg: True (Expected False)" -ForegroundColor Red
              $validationErrors++
         }
     } else {
-        Write-Host "  - [FAIL] Link 'link-to-hub' NOT found" -ForegroundColor Red
+        Write-Host "  - [FAIL] Link 'hub-vnet-link' NOT found" -ForegroundColor Red
         $validationErrors++
     }
 
     # Dev/Prod Links (Reg)
-    foreach ($l in @('link-to-dev', 'link-to-prod')) {
+    foreach ($l in @('dev-vnet-link', 'prod-vnet-link')) {
         $link = $links | Where-Object { $_.Name -eq $l }
         if ($link) {
             if ($link.RegistrationEnabled -eq $true) {

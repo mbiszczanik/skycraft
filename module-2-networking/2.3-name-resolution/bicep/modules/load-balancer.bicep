@@ -19,8 +19,8 @@ param parLocation string
 @description('The tags for the Load Balancer.')
 param parTags object = {}
 
-@description('The resource ID of the existing Public IP address.')
-param parPublicIpId string
+@description('The name of the existing Public IP address.')
+param parPublicIpName string
 
 // ===================================
 // Variables
@@ -52,7 +52,7 @@ resource resLoadBalancer 'Microsoft.Network/loadBalancers@2023-04-01' = {
         name: varFrontendName
         properties: {
           publicIPAddress: {
-            id: parPublicIpId
+            id: resourceId('Microsoft.Network/publicIPAddresses', parPublicIpName)
           }
         }
       }
