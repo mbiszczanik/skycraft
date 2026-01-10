@@ -3,6 +3,7 @@
 ## 🎯 Learning Objectives
 
 By completing this lab, you will:
+
 - Create and configure Network Security Groups (NSGs) to control traffic flow
 - Implement Application Security Groups (ASGs) for role-based network security
 - Deploy Azure Bastion for secure administrative access without public IPs
@@ -76,6 +77,7 @@ graph TB
 **Situation**: The SkyCraft network infrastructure is deployed, but all resources are currently unprotected. Virtual machines will be exposed to the internet without proper security controls. The development team needs secure SSH access for administration, game servers need to accept player connections, and databases must only accept traffic from application servers—all without exposing unnecessary services.
 
 **Your Task**: Implement defense-in-depth security by:
+
 - Deploying Network Security Groups to control traffic at subnet level
 - Using Application Security Groups to simplify management of server roles
 - Deploying Azure Bastion for secure administrative access (no public IPs on VMs)
@@ -99,10 +101,10 @@ graph TB
 ## ✅ Prerequisites
 
 Before starting this lab:
+
 - [ ] Completed Lab 2.1 (Virtual Networks and Peering)
 - [ ] Three VNets exist: platform-skycraft-swc-vnet, dev-skycraft-swc-vnet, prod-skycraft-swc-vnet
 - [ ] VNet peering connections operational (hub-to-dev, hub-to-prod)
-- [ ] Public IP `platform-skycraft-swc-bas-pip` exists
 - [ ] Owner or Contributor role at subscription level
 - [ ] Understanding of TCP/IP ports and network security concepts
 
@@ -113,6 +115,7 @@ Before starting this lab:
 ### What are Network Security Groups (NSGs)?
 
 **Network Security Groups** filter network traffic to and from Azure resources using security rules. Think of NSGs as stateful firewalls that:
+
 - Control **inbound** and **outbound** traffic
 - Apply at **subnet** or **network interface** level
 - Evaluate rules by **priority** (100-4096, lower = higher priority)
@@ -120,23 +123,23 @@ Before starting this lab:
 
 ### NSG vs Firewall vs Application Security Groups
 
-| Feature | NSG | Azure Firewall | ASG |
-|---------|-----|----------------|-----|
-| **Purpose** | Basic traffic filtering | Advanced network security | Logical grouping |
-| **Scope** | Subnet or NIC | Entire VNet or subscription | Tag for use in NSG rules |
-| **Cost** | Free | ~$1.25/hour | Free |
-| **Features** | 5-tuple rules | FQDN filtering, threat intelligence | Simplifies NSG management |
-| **Use Case** | Standard protection | Enterprise security | Group VMs by role |
+| Feature      | NSG                     | Azure Firewall                      | ASG                       |
+| ------------ | ----------------------- | ----------------------------------- | ------------------------- |
+| **Purpose**  | Basic traffic filtering | Advanced network security           | Logical grouping          |
+| **Scope**    | Subnet or NIC           | Entire VNet or subscription         | Tag for use in NSG rules  |
+| **Cost**     | Free                    | ~$1.25/hour                         | Free                      |
+| **Features** | 5-tuple rules           | FQDN filtering, threat intelligence | Simplifies NSG management |
+| **Use Case** | Standard protection     | Enterprise security                 | Group VMs by role         |
 
 ### Service Endpoints vs Private Endpoints
 
-| Aspect | Service Endpoint | Private Endpoint |
-|--------|------------------|------------------|
+| Aspect           | Service Endpoint                          | Private Endpoint                        |
+| ---------------- | ----------------------------------------- | --------------------------------------- |
 | **Traffic Path** | Microsoft backbone (still uses public IP) | Fully private (private IP in your VNet) |
-| **DNS** | Public DNS unchanged | Private DNS zone required |
-| **Cost** | Free | ~$7.50/month per endpoint |
-| **Security** | Service-level filtering | Network-level isolation |
-| **Use Case** | Cost-effective for trusted services | Maximum security for sensitive data |
+| **DNS**          | Public DNS unchanged                      | Private DNS zone required               |
+| **Cost**         | Free                                      | ~$7.50/month per endpoint               |
+| **Security**     | Service-level filtering                   | Network-level isolation                 |
+| **Use Case**     | Cost-effective for trusted services       | Maximum security for sensitive data     |
 
 ### Defense-in-Depth Strategy for SkyCraft
 
@@ -159,21 +162,21 @@ Layer 5: VM-level firewalls (OS-level protection)
 
 **Basics tab**:
 
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
-| Resource group | `dev-skycraft-swc-rg` |
-| Name | `dev-skycraft-swc-auth-nsg` |
-| Region | **Sweden Central** |
+| Field          | Value                       |
+| -------------- | --------------------------- |
+| Subscription   | [Your subscription]         |
+| Resource group | `dev-skycraft-swc-rg`       |
+| Name           | `dev-skycraft-swc-auth-nsg` |
+| Region         | **Sweden Central**          |
 
 3. Click **Next: Tags**
 4. Add tags:
 
-| Name | Value |
-|------|-------|
-| Project | SkyCraft |
+| Name        | Value       |
+| ----------- | ----------- |
+| Project     | SkyCraft    |
 | Environment | Development |
-| CostCenter | MSDN |
+| CostCenter  | MSDN        |
 
 5. Click **Review + create** → **Create**
 
@@ -190,19 +193,19 @@ Layer 5: VM-level firewalls (OS-level protection)
 4. Click **+ Add**
 5. Configure:
 
-| Field | Value |
-|-------|-------|
-| Source | IP Addresses |
-| Source IP addresses/CIDR ranges | `10.0.0.0/26` (Bastion subnet) |
-| Source port ranges | `*` |
-| Destination | Any |
-| Service | SSH |
-| Destination port ranges | 22 |
-| Protocol | TCP |
-| Action | **Allow** |
-| Priority | `100` |
-| Name | `Allow-SSH-From-Bastion` |
-| Description | `Allow SSH access from Azure Bastion subnet` |
+| Field                           | Value                                        |
+| ------------------------------- | -------------------------------------------- |
+| Source                          | IP Addresses                                 |
+| Source IP addresses/CIDR ranges | `10.0.0.0/26` (Bastion subnet)               |
+| Source port ranges              | `*`                                          |
+| Destination                     | Any                                          |
+| Service                         | SSH                                          |
+| Destination port ranges         | 22                                           |
+| Protocol                        | TCP                                          |
+| Action                          | **Allow**                                    |
+| Priority                        | `100`                                        |
+| Name                            | `Allow-SSH-From-Bastion`                     |
+| Description                     | `Allow SSH access from Azure Bastion subnet` |
 
 6. Click **Add**
 
@@ -211,18 +214,18 @@ Layer 5: VM-level firewalls (OS-level protection)
 7. Click **+ Add** again
 8. Configure:
 
-| Field | Value |
-|-------|-------|
-| Source | Any |
-| Source port ranges | `*` |
-| Destination | Any |
-| Service | Custom |
-| Destination port ranges | `3724` |
-| Protocol | TCP |
-| Action | **Allow** |
-| Priority | `110` |
-| Name | `Allow-Auth-GamePort` |
-| Description | `Allow game authentication traffic (port 3724)` |
+| Field                   | Value                                           |
+| ----------------------- | ----------------------------------------------- |
+| Source                  | Any                                             |
+| Source port ranges      | `*`                                             |
+| Destination             | Any                                             |
+| Service                 | Custom                                          |
+| Destination port ranges | `3724`                                          |
+| Protocol                | TCP                                             |
+| Action                  | **Allow**                                       |
+| Priority                | `110`                                           |
+| Name                    | `Allow-Auth-GamePort`                           |
+| Description             | `Allow game authentication traffic (port 3724)` |
 
 9. Click **Add**
 
@@ -234,10 +237,10 @@ Layer 5: VM-level firewalls (OS-level protection)
 2. Click **+ Associate**
 3. Configure:
 
-| Field | Value |
-|-------|-------|
+| Field           | Value                   |
+| --------------- | ----------------------- |
 | Virtual network | `dev-skycraft-swc-vnet` |
-| Subnet | `AuthSubnet` |
+| Subnet          | `AuthSubnet`            |
 
 4. Click **OK**
 
@@ -249,11 +252,11 @@ Layer 5: VM-level firewalls (OS-level protection)
 
 **Create NSG**:
 
-| Field | Value |
-|-------|-------|
-| Resource group | `dev-skycraft-swc-rg` |
-| Name | `dev-skycraft-swc-world-nsg` |
-| Region | **Sweden Central** |
+| Field          | Value                        |
+| -------------- | ---------------------------- |
+| Resource group | `dev-skycraft-swc-rg`        |
+| Name           | `dev-skycraft-swc-world-nsg` |
+| Region         | **Sweden Central**           |
 
 2. Add proper tags (Project, Environment, CostCenter)
 3. Click **Review + create** → **Create**
@@ -266,28 +269,28 @@ Layer 5: VM-level firewalls (OS-level protection)
 
 5. Add rule:
 
-| Field | Value |
-|-------|-------|
-| Source IP addresses | `10.0.0.0/26` |
-| Destination port ranges | 22 |
-| Protocol | TCP |
-| Action | Allow |
-| Priority | `100` |
-| Name | `Allow-SSH-From-Bastion` |
+| Field                   | Value                    |
+| ----------------------- | ------------------------ |
+| Source IP addresses     | `10.0.0.0/26`            |
+| Destination port ranges | 22                       |
+| Protocol                | TCP                      |
+| Action                  | Allow                    |
+| Priority                | `100`                    |
+| Name                    | `Allow-SSH-From-Bastion` |
 
 **Rule 2: Allow World Server Port**
 
 6. Add rule:
 
-| Field | Value |
-|-------|-------|
-| Source | Any |
-| Destination port ranges | `8085` |
-| Protocol | TCP |
-| Action | Allow |
-| Priority | `110` |
-| Name | `Allow-World-GamePort` |
-| Description | `Allow world server connections (port 8085)` |
+| Field                   | Value                                        |
+| ----------------------- | -------------------------------------------- |
+| Source                  | Any                                          |
+| Destination port ranges | `8085`                                       |
+| Protocol                | TCP                                          |
+| Action                  | Allow                                        |
+| Priority                | `110`                                        |
+| Name                    | `Allow-World-GamePort`                       |
+| Description             | `Allow world server connections (port 8085)` |
 
 **Associate with Subnet**:
 
@@ -312,16 +315,16 @@ Layer 5: VM-level firewalls (OS-level protection)
 
 4. Add rule:
 
-| Field | Value |
-|-------|-------|
-| Source | IP Addresses |
-| Source IP addresses | `10.1.1.0/24,10.1.2.0/24` (Auth and World subnets) |
-| Destination port ranges | `3306` |
-| Protocol | TCP |
-| Action | Allow |
-| Priority | `110` |
-| Name | `Allow-MySQL-From-AppTier` |
-| Description | `Allow MySQL from Auth and World servers` |
+| Field                   | Value                                              |
+| ----------------------- | -------------------------------------------------- |
+| Source                  | IP Addresses                                       |
+| Source IP addresses     | `10.1.1.0/24,10.1.2.0/24` (Auth and World subnets) |
+| Destination port ranges | `3306`                                             |
+| Protocol                | TCP                                                |
+| Action                  | Allow                                              |
+| Priority                | `110`                                              |
+| Name                    | `Allow-MySQL-From-AppTier`                         |
+| Description             | `Allow MySQL from Auth and World servers`          |
 
 **Associate with Subnet**:
 
@@ -338,11 +341,13 @@ Layer 5: VM-level firewalls (OS-level protection)
 **Application Security Groups (ASGs)** let you group virtual machines by role, then reference those groups in NSG rules. This simplifies security management:
 
 **Without ASG**:
+
 ```
 Allow SSH from 10.1.1.4, 10.1.1.5, 10.1.1.6 (must update rule when adding VMs)
 ```
 
 **With ASG**:
+
 ```
 Allow SSH from ASG "AuthServers" (VMs automatically get rule when added to ASG)
 ```
@@ -354,12 +359,12 @@ Allow SSH from ASG "AuthServers" (VMs automatically get rule when added to ASG)
 
 **Basics tab**:
 
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
-| Resource group | `dev-skycraft-swc-rg` |
-| Name | `dev-skycraft-swc-asg-auth` |
-| Region | **Sweden Central** |
+| Field          | Value                       |
+| -------------- | --------------------------- |
+| Subscription   | [Your subscription]         |
+| Resource group | `dev-skycraft-swc-rg`       |
+| Name           | `dev-skycraft-swc-asg-auth` |
+| Region         | **Sweden Central**          |
 
 3. Click **Next: Tags**
 4. Add tags (Project: SkyCraft, Environment: Development, CostCenter: MSDN)
@@ -370,6 +375,7 @@ Allow SSH from ASG "AuthServers" (VMs automatically get rule when added to ASG)
 ### Step 2.2.7: Create ASG for World Servers
 
 1. Repeat the process:
+
    - Name: `dev-skycraft-swc-asg-world`
    - Resource group: `dev-skycraft-swc-rg`
    - Region: **Sweden Central**
@@ -380,6 +386,7 @@ Allow SSH from ASG "AuthServers" (VMs automatically get rule when added to ASG)
 ### Step 2.2.8: Create ASG for Database Servers
 
 1. Create third ASG:
+
    - Name: `dev-skycraft-swc-asg-db`
    - Resource group: `dev-skycraft-swc-rg`
    - Region: **Sweden Central**
@@ -409,6 +416,7 @@ To demonstrate ASG usage, let's update the database NSG rule:
 ### What is Azure Bastion?
 
 **Azure Bastion** provides secure RDP and SSH connectivity to virtual machines directly through the Azure Portal, without:
+
 - Exposing VMs with public IP addresses
 - Managing jump box VMs
 - Opening RDP/SSH ports to the internet
@@ -421,38 +429,42 @@ To demonstrate ASG usage, let's update the database NSG rule:
 
 **Basics tab**:
 
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
-| Resource group | `platform-skycraft-swc-rg` |
-| Name | `platform-skycraft-swc-bas` |
-| Region | **Sweden Central** |
-| Tier | **Basic** |
-| Instance count | 2 |
-| Virtual network | `platform-skycraft-swc-vnet` |
-| Subnet | `AzureBastionSubnet (10.0.0.0/26)` |
-| Public IP address | Use existing |
-| Public IP | `platform-skycraft-swc-bas-pip` |
+| Field             | Value                              |
+| ----------------- | ---------------------------------- |
+| Subscription      | [Your subscription]                |
+| Resource group    | `platform-skycraft-swc-rg`         |
+| Name              | `platform-skycraft-swc-bas`        |
+| Region            | **Sweden Central**                 |
+| Tier              | **Basic**                          |
+| Instance count    | 2                                  |
+| Virtual network   | `platform-skycraft-swc-vnet`       |
+| Subnet            | `AzureBastionSubnet (10.0.0.0/26)` |
+| Public IP address | Create new                         |
+| Public IP name    | `platform-skycraft-swc-bas-pip`    |
+| Public IP SKU     | Standard (Auto-selected)           |
+| Assignment        | Static (Auto-selected)             |
 
 3. Click **Next: Tags**
 4. Add tags:
 
-| Name | Value |
-|------|-------|
-| Project | SkyCraft |
+| Name        | Value    |
+| ----------- | -------- |
+| Project     | SkyCraft |
 | Environment | Platform |
-| CostCenter | MSDN |
+| CostCenter  | MSDN     |
 
 5. Click **Review + create**
 6. Review the configuration
 7. Click **Create**
 
-**Expected Result**: 
+**Expected Result**:
+
 - Deployment takes 5-10 minutes
 - Progress shows: Validating → Deploying → Complete
 - Azure Bastion deployed to AzureBastionSubnet in hub VNet
 
 **Important**: Do NOT navigate away during deployment. If deployment fails, check:
+
 - AzureBastionSubnet exists and is exactly /26 or larger
 - Public IP is Standard SKU and Static
 - No NSG associated with AzureBastionSubnet (Bastion manages its own security)
@@ -480,12 +492,14 @@ Create three NSGs for production environment (following same pattern as dev):
 **NSG 1: Auth Subnet**
 
 1. Create NSG:
+
    - Name: `prod-skycraft-swc-auth-nsg`
    - Resource group: `prod-skycraft-swc-rg`
    - Region: **Sweden Central**
    - Tags: Project=SkyCraft, Environment=Production, CostCenter=MSDN
 
 2. Add inbound rules:
+
    - Priority 100: Allow SSH (22) from Bastion (10.0.0.0/26)
    - Priority 110: Allow Auth port (3724) from Any
 
@@ -494,11 +508,13 @@ Create three NSGs for production environment (following same pattern as dev):
 **NSG 2: World Subnet**
 
 1. Create NSG:
+
    - Name: `prod-skycraft-swc-world-nsg`
    - Resource group: `prod-skycraft-swc-rg`
    - Add proper tags
 
 2. Add inbound rules:
+
    - Priority 100: Allow SSH (22) from Bastion (10.0.0.0/26)
    - Priority 110: Allow World port (8085) from Any
 
@@ -507,11 +523,13 @@ Create three NSGs for production environment (following same pattern as dev):
 **NSG 3: Database Subnet**
 
 1. Create NSG:
+
    - Name: `prod-skycraft-swc-db-nsg`
    - Resource group: `prod-skycraft-swc-rg`
    - Add proper tags
 
 2. Add inbound rules:
+
    - Priority 100: Allow SSH (22) from Bastion (10.0.0.0/26)
    - Priority 110: Allow MySQL (3306) from 10.2.1.0/24,10.2.2.0/24
 
@@ -548,7 +566,8 @@ Create three NSGs for production environment (following same pattern as dev):
    - **Microsoft.Storage** (for Azure Storage)
 6. Click **Save**
 
-**Expected Result**: 
+**Expected Result**:
+
 - Service endpoints enabled on DatabaseSubnet
 - Traffic to Azure SQL and Storage now uses Microsoft backbone
 - Still uses public IP addresses but never traverses public internet
@@ -566,11 +585,13 @@ Create three NSGs for production environment (following same pattern as dev):
 ### Step 2.2.16: Understand Private Endpoint Concepts
 
 **Private Endpoints** go further than service endpoints by:
+
 - Assigning a **private IP** from your VNet to the Azure service
 - Making the service **fully private** (no public IP involved)
 - Requiring **Private DNS zones** for name resolution
 
 **When to use Private Endpoints**:
+
 - Maximum security for sensitive data (compliance requirements)
 - Need to access PaaS services over VPN/ExpressRoute from on-premises
 - Want to completely disable public access to Azure services
@@ -587,22 +608,24 @@ To create a private endpoint for Azure SQL Database:
 2. Click **Private endpoints** → **+ Create**
 3. Configure:
 
-| Field | Value |
-|-------|-------|
-| Resource group | `prod-skycraft-swc-rg` |
-| Name | `prod-skycraft-swc-sql-pe` |
-| Region | **Sweden Central** |
-| Target sub-resource | `sqlServer` |
-| Virtual network | `prod-skycraft-swc-vnet` |
-| Subnet | `DatabaseSubnet` |
+| Field               | Value                      |
+| ------------------- | -------------------------- |
+| Resource group      | `prod-skycraft-swc-rg`     |
+| Name                | `prod-skycraft-swc-sql-pe` |
+| Region              | **Sweden Central**         |
+| Target sub-resource | `sqlServer`                |
+| Virtual network     | `prod-skycraft-swc-vnet`   |
+| Subnet              | `DatabaseSubnet`           |
 
 4. Private DNS integration:
+
    - Create new private DNS zone: `privatelink.database.windows.net`
    - Link to VNet: `prod-skycraft-swc-vnet`
 
 5. Tags and create
 
 **Expected Result** (when Azure SQL exists):
+
 - Private endpoint gets IP like 10.2.3.10
 - DNS resolves `yourserver.database.windows.net` to 10.2.3.10
 - No public internet access needed
@@ -623,14 +646,14 @@ To create a private endpoint for Azure SQL Database:
 
 **Verification Table**:
 
-| NSG Name | Associated Subnet | Inbound Rules Count |
-|----------|-------------------|---------------------|
-| dev-skycraft-swc-auth-nsg | dev-skycraft-swc-vnet/AuthSubnet | 2 custom + 3 default |
-| dev-skycraft-swc-world-nsg | dev-skycraft-swc-vnet/WorldSubnet | 2 custom + 3 default |
-| dev-skycraft-swc-db-nsg | dev-skycraft-swc-vnet/DatabaseSubnet | 2 custom + 3 default |
-| prod-skycraft-swc-auth-nsg | prod-skycraft-swc-vnet/AuthSubnet | 2 custom + 3 default |
-| prod-skycraft-swc-world-nsg | prod-skycraft-swc-vnet/WorldSubnet | 2 custom + 3 default |
-| prod-skycraft-swc-db-nsg | prod-skycraft-swc-vnet/DatabaseSubnet | 2 custom + 3 default |
+| NSG Name                    | Associated Subnet                     | Inbound Rules Count  |
+| --------------------------- | ------------------------------------- | -------------------- |
+| dev-skycraft-swc-auth-nsg   | dev-skycraft-swc-vnet/AuthSubnet      | 2 custom + 3 default |
+| dev-skycraft-swc-world-nsg  | dev-skycraft-swc-vnet/WorldSubnet     | 2 custom + 3 default |
+| dev-skycraft-swc-db-nsg     | dev-skycraft-swc-vnet/DatabaseSubnet  | 2 custom + 3 default |
+| prod-skycraft-swc-auth-nsg  | prod-skycraft-swc-vnet/AuthSubnet     | 2 custom + 3 default |
+| prod-skycraft-swc-world-nsg | prod-skycraft-swc-vnet/WorldSubnet    | 2 custom + 3 default |
+| prod-skycraft-swc-db-nsg    | prod-skycraft-swc-vnet/DatabaseSubnet | 2 custom + 3 default |
 
 ### Step 2.2.19: Test NSG Rule Logic (Conceptual)
 
@@ -687,6 +710,7 @@ Evaluation:
 
 1. Navigate to **dev-skycraft-swc-vnet** → **Subnets** → **DatabaseSubnet**
 2. Confirm **Service endpoints** shows:
+
    - Microsoft.Sql
    - Microsoft.Storage
 
@@ -702,29 +726,34 @@ Evaluation:
 Quick verification before proceeding:
 
 ### Azure Bastion
+
 - [ ] `platform-skycraft-swc-bas` deployed successfully
 - [ ] Associated with `AzureBastionSubnet` in hub VNet
 - [ ] Public IP: `platform-skycraft-swc-bas-pip` attached
 - [ ] Status: Succeeded
 
 ### Network Security Groups (Dev)
+
 - [ ] `dev-skycraft-swc-auth-nsg` created and associated with AuthSubnet
 - [ ] `dev-skycraft-swc-world-nsg` created and associated with WorldSubnet
 - [ ] `dev-skycraft-swc-db-nsg` created and associated with DatabaseSubnet
 - [ ] All NSGs have custom inbound rules (SSH from Bastion + service port)
 
 ### Network Security Groups (Prod)
+
 - [ ] `prod-skycraft-swc-auth-nsg` created and associated with AuthSubnet
 - [ ] `prod-skycraft-swc-world-nsg` created and associated with WorldSubnet
 - [ ] `prod-skycraft-swc-db-nsg` created and associated with DatabaseSubnet
 - [ ] All NSGs have proper tags (Project, Environment, CostCenter)
 
 ### Application Security Groups
+
 - [ ] `dev-skycraft-swc-asg-auth` created
 - [ ] `dev-skycraft-swc-asg-world` created
 - [ ] `dev-skycraft-swc-asg-db` created
 
 ### Service Endpoints
+
 - [ ] Service endpoints enabled on dev DatabaseSubnet (Microsoft.Sql, Microsoft.Storage)
 - [ ] Service endpoints enabled on prod DatabaseSubnet (Microsoft.Sql, Microsoft.Storage)
 
@@ -741,9 +770,10 @@ Test your understanding with these questions:
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: 
+   **Answer**:
 
    **Network Security Groups (NSGs)**:
+
    - Basic stateful firewall functionality
    - Free (no additional cost)
    - Filters traffic based on 5-tuple (source IP, source port, destination IP, destination port, protocol)
@@ -751,6 +781,7 @@ Test your understanding with these questions:
    - Good for: Standard micro-segmentation
 
    **Azure Firewall**:
+
    - Advanced network security service
    - ~$1.25/hour + data processing costs
    - FQDN filtering, threat intelligence, central logging
@@ -768,6 +799,7 @@ Test your understanding with these questions:
    **Answer**: Azure Bastion is a **platform service** that searches for a subnet with this exact, hardcoded name. This is similar to `GatewaySubnet` for VPN Gateway.
 
    **Requirements**:
+
    - Name: `AzureBastionSubnet` (case-sensitive)
    - Minimum size: /26 (64 IP addresses)
    - No NSG should be associated (Bastion manages its own security)
@@ -784,15 +816,19 @@ Test your understanding with these questions:
    **Answer**: ASGs provide **logical grouping** of VMs by role, eliminating the need to manage IP addresses in NSG rules.
 
    **Without ASG** (IP-based):
+
    ```
    Allow MySQL from 10.1.1.4, 10.1.1.5, 10.1.1.6, 10.1.2.10, 10.1.2.11
    ```
+
    Problem: Must update rule every time you add/remove application servers.
 
    **With ASG** (role-based):
+
    ```
    Allow MySQL from ASG "ApplicationServers"
    ```
+
    Benefit: VMs automatically inherit rules when assigned to ASG. No rule updates needed.
 
    **Real-world impact**: In SkyCraft, when you scale from 3 to 10 world servers, with ASGs you just assign new VMs to the ASG. Without ASGs, you'd need to update multiple NSG rules.
@@ -805,14 +841,14 @@ Test your understanding with these questions:
 
    **Answer**:
 
-   | Aspect | Service Endpoint | Private Endpoint |
-   |--------|------------------|------------------|
-   | **IP addressing** | Service keeps public IP | Service gets private IP in your VNet |
-   | **Traffic path** | Microsoft backbone (not internet) | Fully private (your VNet) |
-   | **DNS** | Public DNS unchanged | Requires private DNS zone |
-   | **Security** | Service-level firewall rules | Network-level isolation |
-   | **Cost** | Free | ~$7.50/month per endpoint |
-   | **Access from on-prem** | No (public IP) | Yes (via VPN/ExpressRoute) |
+   | Aspect                  | Service Endpoint                  | Private Endpoint                     |
+   | ----------------------- | --------------------------------- | ------------------------------------ |
+   | **IP addressing**       | Service keeps public IP           | Service gets private IP in your VNet |
+   | **Traffic path**        | Microsoft backbone (not internet) | Fully private (your VNet)            |
+   | **DNS**                 | Public DNS unchanged              | Requires private DNS zone            |
+   | **Security**            | Service-level firewall rules      | Network-level isolation              |
+   | **Cost**                | Free                              | ~$7.50/month per endpoint            |
+   | **Access from on-prem** | No (public IP)                    | Yes (via VPN/ExpressRoute)           |
 
    **Use service endpoints when**: Cost is a concern, traffic stays within Azure
 
@@ -829,6 +865,7 @@ Test your understanding with these questions:
    Azure enforces unique priorities within each NSG. If you try to create a rule with an existing priority, deployment fails with error: "Priority X is already used by another rule."
 
    **Rule evaluation order**:
+
    1. Custom rules evaluated lowest to highest priority (100 → 4096)
    2. Stops at **first match** (allow or deny)
    3. If no custom rules match, default rules are evaluated (65000+)
@@ -844,6 +881,7 @@ Test your understanding with these questions:
    **Answer**: **Yes**, Azure Bastion can connect to VMs in directly peered VNets.
 
    In the SkyCraft architecture:
+
    - Bastion deployed in **hub VNet** (platform-skycraft-swc-vnet)
    - Dev VNet **peers** with hub (hub-to-dev peering)
    - Prod VNet **peers** with hub (hub-to-prod peering)
@@ -863,11 +901,13 @@ Test your understanding with these questions:
    **Answer**: **Bastion deployment may fail or connectivity will break.**
 
    Azure Bastion manages its own security and requires specific ports:
+
    - Inbound 443 (HTTPS from internet)
    - Outbound 443, 22, 3389 (to VMs)
    - Azure platform communications
 
    **If you apply an NSG**:
+
    - Must allow all required ports (complex to maintain)
    - Risk of blocking platform management traffic
    - Microsoft recommends **no NSG on AzureBastionSubnet**
@@ -884,6 +924,7 @@ Test your understanding with these questions:
 **Symptom**: Error: "Subnet AzureBastionSubnet not found" or "Subnet must be at least /26"
 
 **Solution**:
+
 - Verify subnet name is exactly `AzureBastionSubnet` (case-sensitive)
 - Confirm subnet size is /26 or larger (/25, /24, etc.)
 - Check subnet exists in the selected VNet
@@ -894,6 +935,7 @@ Test your understanding with these questions:
 **Symptom**: Error: "Subnet already has an NSG associated"
 
 **Solution**:
+
 - Each subnet can only have one NSG
 - To replace: First dissociate existing NSG, then associate new one
 - Go to current NSG → **Subnets** → click **X** to dissociate
@@ -904,6 +946,7 @@ Test your understanding with these questions:
 **Symptom**: Traffic is allowed/blocked contrary to expectations
 
 **Solution**:
+
 - Check rule priority (lower number = higher priority)
 - Verify source/destination IP ranges don't have typos
 - Remember rules are stateful (return traffic automatically allowed)
@@ -915,6 +958,7 @@ Test your understanding with these questions:
 **Symptom**: Service endpoint status stuck on "Provisioning"
 
 **Solution**:
+
 - Refresh Azure Portal (F5)
 - Wait 5-10 minutes for backend provisioning
 - If still stuck after 15 minutes, remove and re-add service endpoint
@@ -925,6 +969,7 @@ Test your understanding with these questions:
 **Symptom**: Bastion connection dialog shows "Connecting" indefinitely
 
 **Solution**:
+
 - Verify VNet peering status is "Connected" (if connecting to spoke VNet VM)
 - Check NSG on target VM's subnet allows SSH (22) or RDP (3389) from Bastion subnet (10.0.0.0/26)
 - Confirm VM is running (not stopped or deallocated)
@@ -936,6 +981,7 @@ Test your understanding with these questions:
 **Symptom**: Cannot select ASG when creating NSG rule
 
 **Solution**:
+
 - ASG must be in same region as NSG
 - Verify ASG created successfully (check resource exists)
 - ASG and NSG must be in same subscription
@@ -965,6 +1011,7 @@ Test your understanding with these questions:
 ## 📝 Lab Summary
 
 **What You Accomplished**:
+
 - ✅ Deployed Azure Bastion for secure administrative access (no VMs need public IPs)
 - ✅ Created 6 Network Security Groups (3 for dev, 3 for prod) with custom rules
 - ✅ Implemented Application Security Groups for role-based security
@@ -973,6 +1020,7 @@ Test your understanding with these questions:
 - ✅ Implemented defense-in-depth security for the SkyCraft infrastructure
 
 **Security Posture**:
+
 - 🔒 All subnets protected by NSGs with least-privilege rules
 - 🔒 Administrative access only through Azure Bastion (no SSH/RDP from internet)
 - 🔒 Database subnets only accept traffic from application tiers

@@ -169,7 +169,6 @@ function Test-PIP {
     } catch { Write-Host "[FAIL] Error checking PIP ${Name}: $_" -ForegroundColor Red }
 }
 
-Test-PIP -Name "platform-skycraft-swc-bas-pip" -RgName "platform-skycraft-swc-rg"
 Test-PIP -Name "dev-skycraft-swc-lb-pip" -RgName "dev-skycraft-swc-rg"
 Test-PIP -Name "prod-skycraft-swc-lb-pip" -RgName "prod-skycraft-swc-rg"
 

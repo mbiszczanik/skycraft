@@ -99,7 +99,6 @@ Remove-VNet -VnetName $prodVnetName -RgName $prodRgName
 
 # Check for and remove PIPs
 $pips = @(
-    @{"Name"="platform-skycraft-swc-bas-pip"; "RG"=$hubRgName},
     @{"Name"="dev-skycraft-swc-lb-pip"; "RG"=$devRgName},
     @{"Name"="prod-skycraft-swc-lb-pip"; "RG"=$prodRgName}
 )
