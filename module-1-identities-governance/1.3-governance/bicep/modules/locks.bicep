@@ -1,7 +1,9 @@
-/*
-SUMMARY: Helper module to apply locks to a Resource Group
-DESCRIPTION: Uses Microsoft.Authorization/locks to apply a CanNotDelete lock to the current Resource Group scope.
-*/
+/*=====================================================
+SUMMARY: Lab 1.3 - Locks Module
+DESCRIPTION: Applies a CanNotDelete lock to the current Resource Group
+AUTHOR/S: Marcin Biszczanik
+VERSION: 0.2.0
+======================================================*/
 
 @description('Name of the lock')
 param parLockName string

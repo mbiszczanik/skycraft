@@ -1,9 +1,9 @@
 /*=====================================================
-SUMMARY: Lab 1.3 - Azure Policy Assignments
+SUMMARY: Lab 1.3 - Policies Module
 DESCRIPTION: This template assigns governance policies at subscription scope
-EXAMPLE:
+EXAMPLE: az deployment sub create --location swedencentral --template-file policies.bicep
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.1.0
+VERSION: 0.2.0
 ======================================================*/
 
 targetScope = 'subscription'
@@ -22,8 +22,9 @@ param parAllowedLocations array = [
 
 // Policy 1: Require tag on resource groups
 module modRequireTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
+  name: 'Require-Environment-Tag-RG'
   params: {
-    name: 'Require Environment Tag on Resource Groups'
+    name: 'Require-Environment-Tag-RG'
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/96670d01-0a4d-4649-9c89-2d3abc0a5025'
     displayName: 'Require Environment Tag on Resource Groups'
     description: 'All resource groups must have an Environment tag'
@@ -42,6 +43,7 @@ module modRequireTagPolicy 'br/public:avm/res/authorization/policy-assignment/su
 
 // Policy 2: Require tag and value on resources
 module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
+  name: 'Enforce-Project-Tag'
   params: {
     name: 'Enforce-Project-Tag'
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/1e30110a-5ceb-460c-a204-c1c3969c6d62'
@@ -65,6 +67,7 @@ module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assign
 
 // Policy 3: Allowed locations
 module modAllowedLocationsPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
+  name: 'Restrict-Azure-Regions'
   params: {
     name: 'Restrict-Azure-Regions'
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c'
@@ -84,7 +87,7 @@ module modAllowedLocationsPolicy 'br/public:avm/res/authorization/policy-assignm
 }
 
 // Outputs
-output policyAssignments array = [
+output outPolicyAssignments array = [
   {
     name: modRequireTagPolicy.name
   }

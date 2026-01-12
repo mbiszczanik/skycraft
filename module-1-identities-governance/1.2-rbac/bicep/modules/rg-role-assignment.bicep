@@ -1,13 +1,15 @@
-/*
-SUMMARY: Helper module for Resource Group scoped role assignments
-DESCRIPTION: Assigns a role to a principal within a specific Resource Group.
-*/
+/*=====================================================
+SUMMARY: Lab 1.2 - Role Assignment Module
+DESCRIPTION: Assigns a role to a principal within a specific scope
+AUTHOR/S: Marcin Biszczanik
+VERSION: 0.2.0
+======================================================*/
 
 @description('The Principal ID of the user or group')
-param principalId string
+param parPrincipalId string
 
 @description('The Role Definition ID (not name)')
-param roleDefinitionId string
+param parRoleDefinitionId string
 
 @description('The type of principal (User, Group, ServicePrincipal)')
 @allowed([
@@ -15,13 +17,13 @@ param roleDefinitionId string
   'Group'
   'ServicePrincipal'
 ])
-param principalType string = 'User'
+param parPrincipalType string = 'User'
 
-resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, principalId, roleDefinitionId)
+resource resRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, parPrincipalId, parRoleDefinitionId)
   properties: {
-    roleDefinitionId: roleDefinitionId
-    principalId: principalId
-    principalType: principalType
+    roleDefinitionId: parRoleDefinitionId
+    principalId: parPrincipalId
+    principalType: parPrincipalType
   }
 }

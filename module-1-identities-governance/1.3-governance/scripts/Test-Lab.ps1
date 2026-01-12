@@ -1,13 +1,34 @@
-# Lab 1.3 - Validation Script
-# Validates Tags, Policies, Locks, and Budgets
+<#
+.SYNOPSIS
+    Validates the Lab 1.3 infrastructure (Governance Controls).
 
-Write-Host "=== Lab 1.3 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
+.DESCRIPTION
+    Checks for the existence and correct configuration of:
+    1. Resource Group Tags
+    2. Policy Assignments
+    3. Resource Locks
+    4. Budgets (manual check)
+
+.EXAMPLE
+    .\Test-Lab-1.3.ps1
+
+.NOTES
+    Project: SkyCraft
+    Lab: 1.3 - Governance
+#>
+
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+
+Write-Host "=== Lab 1.3: Validation ===" -ForegroundColor Cyan -BackgroundColor Black
 
 # Check Azure Connection
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    return
+    exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
@@ -27,24 +48,22 @@ foreach ($rgName in $resourceGroups) {
         $rg = Get-AzResourceGroup -Name $rgName -ErrorAction Stop
         $tags = $rg.Tags
         if ($tags) {
-            Write-Host "[OK] $rgName has tags:" -ForegroundColor Green
-            foreach ($key in $tags.Keys) {
-                Write-Host "  - $key : $($tags[$key])" -ForegroundColor Gray
-            }
+            Write-Host "  Checking $rgName..." -NoNewline
+            
             # Check for 'Project' tag specifically
             if ($tags.ContainsKey("Project") -and $tags["Project"] -eq "SkyCraft") {
-                Write-Host "  -> Project tag verified." -ForegroundColor Green
+                Write-Host " [OK] Project tag verified." -ForegroundColor Green
             }
             else {
-                Write-Host "  -> [FAIL] Missing or incorrect 'Project' tag." -ForegroundColor Red
+                Write-Host " [FAIL] Missing or incorrect 'Project' tag." -ForegroundColor Red
             }
         }
         else {
-            Write-Host "[FAIL] $rgName has NO tags." -ForegroundColor Red
+            Write-Host "  Checking $rgName... [FAIL] No tags found." -ForegroundColor Red
         }
     }
     catch {
-        Write-Host "[FAIL] Resource Group $rgName not found." -ForegroundColor Red
+        Write-Host "  Checking $rgName... [FAIL] Not found." -ForegroundColor Red
     }
 }
 
@@ -59,10 +78,12 @@ $expectedPolicies = @(
 foreach ($policyName in $expectedPolicies) {
     $assignment = Get-AzPolicyAssignment -Name $policyName -Scope "/subscriptions/$subscriptionId" -ErrorAction SilentlyContinue
     if ($assignment) {
-        Write-Host "[OK] Policy assigned: $policyName" -ForegroundColor Green
+        Write-Host "  Policy: $policyName" -NoNewline
+        Write-Host " [OK]" -ForegroundColor Green
     }
     else {
-        Write-Host "[FAIL] Policy assignment missing: $policyName" -ForegroundColor Red
+        Write-Host "  Policy: $policyName" -NoNewline
+        Write-Host " [FAIL]" -ForegroundColor Red
     }
 }
 
@@ -74,11 +95,13 @@ foreach ($rgName in $lockTargets) {
     $locks = Get-AzResourceLock -ResourceGroupName $rgName -ErrorAction SilentlyContinue
     if ($locks) {
         foreach ($lock in $locks) {
-            Write-Host "[OK] Lock found on $rgName : $($lock.Name) ($($lock.Level))" -ForegroundColor Green
+            Write-Host "  Lock on $rgName : $($lock.Name) ($($lock.Level))" -NoNewline
+            Write-Host " [OK]" -ForegroundColor Green
         }
     }
     else {
-        Write-Host "[FAIL] No locks found on $rgName" -ForegroundColor Red
+        Write-Host "  Lock on $rgName" -NoNewline
+        Write-Host " [FAIL] Not found." -ForegroundColor Red
     }
 }
 
@@ -88,12 +111,12 @@ Write-Host "`n=== 4. Validating Budgets ===" -ForegroundColor Cyan
 $budgets = Get-AzConsumptionBudget -ErrorAction SilentlyContinue
 if ($budgets) {
     foreach ($budget in $budgets) {
-        Write-Host "[OK] Budget found: $($budget.Name) (Amount: $($budget.Amount) $($budget.Unit))" -ForegroundColor Green
+        Write-Host "  Budget found: $($budget.Name) (Amount: $($budget.Amount) $($budget.Unit))" -NoNewline
+        Write-Host " [OK]" -ForegroundColor Green
     }
 }
 else {
-    Write-Host "[INFO] No budgets found. (If you created them recently, they might take time to appear or require different permission scope)" -ForegroundColor Yellow
+    Write-Host "  [INFO] No budgets found. (If you created them recently, they might take time to appear)" -ForegroundColor Yellow
 }
 
-Write-Host "`n=== Validation Summary ===" -ForegroundColor Cyan
-Write-Host "Lab 1.3 validation complete" -ForegroundColor Green
+Write-Host "`nValidation Complete." -ForegroundColor Green
