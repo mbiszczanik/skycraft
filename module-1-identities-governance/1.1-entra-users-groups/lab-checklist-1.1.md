@@ -3,24 +3,24 @@
 ## ✅ User Creation Verification
 
 ### Internal Users
-- [ ] **SkyCraft Admin** user created
-  - UPN: skycraft-admin@[yourtenant].onmicrosoft.com
-  - Display Name: SkyCraft Admin
+
+- [ ] **Malfurion Stormrage** user created
+  - UPN: malfurion.stormrage@[yourtenant].onmicrosoft.com
+  - Display Name: Malfurion Stormrage
   - Status: Active
-  
-- [ ] **SkyCraft Developer** user created
-  - UPN: skycraft-dev@[yourtenant].onmicrosoft.com
-  - Display Name: SkyCraft Developer
+- [ ] **Khadgar Archmage** user created
+  - UPN: khadgar.archmage@[yourtenant].onmicrosoft.com
+  - Display Name: Khadgar Archmage
   - Status: Active
-  
-- [ ] **SkyCraft Tester** user created
-  - UPN: skycraft-tester@[yourtenant].onmicrosoft.com
-  - Display Name: SkyCraft Tester
+- [ ] **Chromie Timewalker** user created
+  - UPN: chromie.timewalker@[yourtenant].onmicrosoft.com
+  - Display Name: Chromie Timewalker
   - Status: Active
 
 ### External User
-- [ ] **External Partner** invited
-  - Email: partner@externalcompany.com
+
+- [ ] **Illidan Stormrage** invited
+  - Email: illidan@externalcompany.com
   - Type: Guest
   - Status: Invitation Pending (or Accepted)
 
@@ -29,22 +29,21 @@
 ## ✅ Security Group Verification
 
 - [ ] **SkyCraft-Admins** group created
-  - Members: 1 (SkyCraft Admin)
+  - Members: 1 (Malfurion Stormrage)
   - Type: Security
-  
 - [ ] **SkyCraft-Developers** group created
-  - Members: 1 (SkyCraft Developer)
+  - Members: 1 (Khadgar Archmage)
   - Type: Security
-  
 - [ ] **SkyCraft-Testers** group created
-  - Members: 1 (SkyCraft Tester)
+  - Members: 1 (Chromie Timewalker)
   - Type: Security
 
 ---
 
 ## ✅ User Properties Verification
 
-For **SkyCraft Admin**, verify:
+For **Malfurion Stormrage**, verify:
+
 - [ ] Job title: Cloud Infrastructure Manager
 - [ ] Department: IT Operations
 - [ ] Office: Remote
@@ -92,33 +91,63 @@ az ad group list --query "[].{Name:displayName,ID:id}" -o table
 **Expected Output**: Shows 3 groups
 
 ### Step 3: Get group members
+
 ```azcli
 az ad group member list --group SkyCraft-Admins --query "[].{DisplayName:displayName}" -o
 ```
 
-**Expected Output**: Shows SkyCraft Admin
+**Expected Output**: Shows Malfurion Stormrage
+
+---
+
+## 📊 Entity Summary
+
+| Entity Name         | Type  | Key Attribute       | Purpose               |
+| ------------------- | ----- | ------------------- | --------------------- |
+| Malfurion Stormrage | User  | Cloud Infra Manager | Main Admin            |
+| Khadgar Archmage    | User  | Developer           | Application Dev       |
+| Chromie Timewalker  | User  | Tester              | QA & Testing          |
+| Illidan Stormrage   | Guest | External Invitee    | External Consultant   |
+| SkyCraft-Admins     | Group | Assigned: Malfurion | Administrative access |
+| SkyCraft-Developers | Group | Assigned: Khadgar   | Dev resource access   |
+| SkyCraft-Testers    | Group | Assigned: Chromie   | Test resource access  |
 
 ---
 
 ## ⏱️ Completion Time
 
-- **Estimated Time to Complete**: 3 hours
-- **Actual Time Spent**: _________
-- **Date Started**: _________
-- **Date Completed**: _________
+- **Estimated Time**: 3 hours
+- **Actual Time Spent**: ****\_****
+- **Date Started**: ****\_****
+- **Date Completed**: ****\_****
 
 ---
 
-## 📝 Notes & Observations
+## 📝 Reflection Questions
 
-Use this space to note any issues encountered or important learnings:
+Answer these to deepen understanding:
+
+1.  **Why do we create a separate "SkyCraft-Admins" group instead of just using the Global Admin role?**
+
+    Answer: ************************\_\_\_************************
+
+2.  **What is the difference between an internal Member user and an invited Guest user in Entra ID?**
+
+    Answer: ************************\_\_\_************************
+
+3.  **Why is the "Usage location" property important for user creation?**
+
+    Answer: ************************\_\_\_************************
 
 ---
 
-## ✅ Final Approval
+## ✅ Final Sign-off
 
 - [ ] All checklist items completed
 - [ ] All validation steps passed
+- [ ] Users and Groups verified in portal or CLI
 - [ ] Ready to proceed to Lab 1.2
 
-**Date Completed**: _________________
+**Student Name**: ********\_********  
+**Completion Date**: ********\_********  
+**Instructor Signature**: ********\_********

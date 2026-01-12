@@ -3,6 +3,7 @@
 ## ✅ Resource Groups Verification
 
 ### Platform Resource Group
+
 - [ ] Resource group name: `platform-skycraft-swc-rg`
 - [ ] Location: **Sweden Central**
 - [ ] Tag: `Project` = `SkyCraft`
@@ -10,6 +11,7 @@
 - [ ] Tag: `CostCenter` = `MSDN`
 
 ### Development Resource Group
+
 - [ ] Resource group name: `dev-skycraft-swc-rg`
 - [ ] Location: **Sweden Central**
 - [ ] Tag: `Project` = `SkyCraft`
@@ -17,6 +19,7 @@
 - [ ] Tag: `CostCenter` = `MSDN`
 
 ### Production Resource Group
+
 - [ ] Resource group name: `prod-skycraft-swc-rg`
 - [ ] Location: **Sweden Central**
 - [ ] Tag: `Project` = `SkyCraft`
@@ -28,6 +31,7 @@
 ## ✅ Hub Virtual Network (platform-skycraft-swc-vnet)
 
 ### Network Configuration
+
 - [ ] Virtual network name: `platform-skycraft-swc-vnet`
 - [ ] Location: **Sweden Central**
 - [ ] Resource group: `platform-skycraft-swc-rg`
@@ -35,24 +39,24 @@
 - [ ] DNS servers: Default (Azure-provided)
 
 ### Subnets
+
 - [ ] **AzureBastionSubnet**
   - Name: `AzureBastionSubnet` (exact match, case-sensitive)
   - Address range: `10.0.0.0/26`
   - Available IPs: 59 (64 total - 5 reserved)
-  
 - [ ] **GatewaySubnet**
   - Name: `GatewaySubnet` (exact match, case-sensitive)
   - Address range: `10.0.1.0/27`
   - Available IPs: 27 (32 total - 5 reserved)
 
 ### Peering Connections
+
 - [ ] Peering name: `hub-to-dev`
   - Remote VNet: `dev-skycraft-swc-vnet`
   - Peering status: **Connected**
   - Allow virtual network access: **Enabled**
   - Allow forwarded traffic: **Enabled**
   - Allow gateway transit: **Enabled**
-  
 - [ ] Peering name: `hub-to-prod`
   - Remote VNet: `prod-skycraft-swc-vnet`
   - Peering status: **Connected**
@@ -61,6 +65,7 @@
   - Allow gateway transit: **Enabled**
 
 ### Tags
+
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Platform`
 - [ ] Tag: `CostCenter` = `MSDN`
@@ -70,6 +75,7 @@
 ## ✅ Development Virtual Network (dev-skycraft-swc-vnet)
 
 ### Network Configuration
+
 - [ ] Virtual network name: `dev-skycraft-swc-vnet`
 - [ ] Location: **Sweden Central**
 - [ ] Resource group: `dev-skycraft-swc-rg`
@@ -77,18 +83,17 @@
 - [ ] DNS servers: Default (Azure-provided)
 
 ### Subnets
+
 - [ ] **AuthSubnet**
   - Name: `AuthSubnet`
   - Address range: `10.1.1.0/24`
   - Available IPs: 251 (256 total - 5 reserved)
   - Purpose: Authentication server VMs
-  
 - [ ] **WorldSubnet**
   - Name: `WorldSubnet`
   - Address range: `10.1.2.0/24`
   - Available IPs: 251
   - Purpose: World server VMs
-  
 - [ ] **DatabaseSubnet**
   - Name: `DatabaseSubnet`
   - Address range: `10.1.3.0/24`
@@ -96,6 +101,7 @@
   - Purpose: Database server VMs
 
 ### Peering Connections
+
 - [ ] Peering name: `dev-to-hub`
   - Remote VNet: `platform-skycraft-swc-vnet`
   - Peering status: **Connected**
@@ -104,6 +110,7 @@
   - Use remote virtual network gateway: **Enabled**
 
 ### Tags
+
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
@@ -113,6 +120,7 @@
 ## ✅ Production Virtual Network (prod-skycraft-swc-vnet)
 
 ### Network Configuration
+
 - [ ] Virtual network name: `prod-skycraft-swc-vnet`
 - [ ] Location: **Sweden Central**
 - [ ] Resource group: `prod-skycraft-swc-rg`
@@ -120,18 +128,17 @@
 - [ ] DNS servers: Default (Azure-provided)
 
 ### Subnets
+
 - [ ] **AuthSubnet**
   - Name: `AuthSubnet`
   - Address range: `10.2.1.0/24`
   - Available IPs: 251 (256 total - 5 reserved)
   - Purpose: Authentication server VMs
-  
 - [ ] **WorldSubnet**
   - Name: `WorldSubnet`
   - Address range: `10.2.2.0/24`
   - Available IPs: 251
   - Purpose: World server VMs
-  
 - [ ] **DatabaseSubnet**
   - Name: `DatabaseSubnet`
   - Address range: `10.2.3.0/24`
@@ -139,6 +146,7 @@
   - Purpose: Database server VMs
 
 ### Peering Connections
+
 - [ ] Peering name: `prod-to-hub`
   - Remote VNet: `platform-skycraft-swc-vnet`
   - Peering status: **Connected**
@@ -147,6 +155,7 @@
   - Use remote virtual network gateway: **Enabled**
 
 ### Tags
+
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Production`
 - [ ] Tag: `CostCenter` = `MSDN`
@@ -155,16 +164,8 @@
 
 ## ✅ Public IP Addresses
 
-### Bastion Public IP
-- [ ] Name: `platform-skycraft-swc-bas-pip`
-- [ ] Resource group: `platform-skycraft-swc-rg`
-- [ ] Location: **Sweden Central**
-- [ ] SKU: **Standard**
-- [ ] IP assignment: **Static**
-- [ ] IP address assigned: [Record IP: ____________]
-- [ ] Tags applied: Project, Environment, CostCenter
-
 ### Dev Load Balancer Public IP
+
 - [ ] Name: `dev-skycraft-swc-lb-pip`
 - [ ] Resource group: `dev-skycraft-swc-rg`
 - [ ] Location: **Sweden Central**
@@ -174,6 +175,7 @@
 - [ ] Tags applied: Project, Environment, CostCenter
 
 ### Prod Load Balancer Public IP
+
 - [ ] Name: `prod-skycraft-swc-lb-pip`
 - [ ] Resource group: `prod-skycraft-swc-rg`
 - [ ] Location: **Sweden Central**
@@ -187,11 +189,13 @@
 ## ✅ Network Topology Verification
 
 ### Network Watcher
+
 - [ ] Network Watcher enabled for **Sweden Central** region
 - [ ] Can access Network Watcher service
 - [ ] Topology view displays hub-spoke architecture
 
 ### IP Address Planning Verification
+
 - [ ] No overlapping address spaces between VNets
 - [ ] Hub VNet (10.0.0.0/16) does not overlap with Dev (10.1.0.0/16)
 - [ ] Hub VNet (10.0.0.0/16) does not overlap with Prod (10.2.0.0/16)
@@ -199,6 +203,7 @@
 - [ ] All subnet ranges fall within their parent VNet address space
 
 ### Peering Topology
+
 - [ ] Hub has 2 peering connections (to dev and prod)
 - [ ] Dev has 1 peering connection (to hub only)
 - [ ] Prod has 1 peering connection (to hub only)
@@ -223,7 +228,6 @@ az account list --output table
 az account set --subscription "YOUR-SUBSCRIPTION-NAME"
 ```
 
-
 ### Verify Resource Groups
 
 ```azurecli
@@ -234,7 +238,6 @@ az group list \
 
 # Expected: 3 resource groups (platform, dev, prod)
 ```
-
 
 ### Verify Virtual Networks
 
@@ -252,7 +255,6 @@ az network vnet list \
 # prod-skycraft-swc-vnet     prod-skycraft-swc-rg     10.2.0.0/16     3
 ```
 
-
 ### Verify Hub VNet Subnets
 
 ```azurecli
@@ -269,7 +271,6 @@ az network vnet subnet list \
 # AzureBastionSubnet  10.0.0.0/26
 # GatewaySubnet       10.0.1.0/27
 ```
-
 
 ### Verify Dev VNet Subnets
 
@@ -289,7 +290,6 @@ az network vnet subnet list \
 # DatabaseSubnet   10.1.3.0/24
 ```
 
-
 ### Verify Prod VNet Subnets
 
 ```azurecli
@@ -307,7 +307,6 @@ az network vnet subnet list \
 # WorldSubnet      10.2.2.0/24
 # DatabaseSubnet   10.2.3.0/24
 ```
-
 
 ### Verify VNet Peering
 
@@ -340,7 +339,6 @@ az network vnet peering list \
 # Expected: 1 peering (prod-to-hub) with status "Connected"
 ```
 
-
 ### Verify Public IP Addresses
 
 ```azurecli
@@ -352,11 +350,9 @@ az network public-ip list \
 # Expected output:
 # Name                           ResourceGroup            SKU       IP              Allocation
 # -----------------------------  ----------------------   --------  --------------  ----------
-# platform-skycraft-swc-bas-pip  platform-skycraft-swc-rg Standard  [Public IP]     Static
 # dev-skycraft-swc-lb-pip        dev-skycraft-swc-rg      Standard  [Public IP]     Static
 # prod-skycraft-swc-lb-pip       prod-skycraft-swc-rg     Standard  [Public IP]     Static
 ```
-
 
 ### Verify Tags
 
@@ -375,28 +371,25 @@ az network vnet show \
 # }
 ```
 
-
 ---
 
 ## 📊 Network Architecture Summary
 
 Use this table to document your deployed architecture:
 
-
-| Component | Name | Address Space | Subnets | Peerings | Status |
-| :-- | :-- | :-- | :-- | :-- | :-- |
-| **Hub VNet** | platform-skycraft-swc-vnet | 10.0.0.0/16 | 2 | 2 | ✅ |
-| └─ Bastion Subnet | AzureBastionSubnet | 10.0.0.0/26 | N/A | N/A | ✅ |
-| └─ Gateway Subnet | GatewaySubnet | 10.0.1.0/27 | N/A | N/A | ✅ |
-| **Dev VNet** | dev-skycraft-swc-vnet | 10.1.0.0/16 | 3 | 1 | ✅ |
-| └─ Auth Subnet | AuthSubnet | 10.1.1.0/24 | N/A | N/A | ✅ |
-| └─ World Subnet | WorldSubnet | 10.1.2.0/24 | N/A | N/A | ✅ |
-| └─ Database Subnet | DatabaseSubnet | 10.1.3.0/24 | N/A | N/A | ✅ |
-| **Prod VNet** | prod-skycraft-swc-vnet | 10.2.0.0/16 | 3 | 1 | ✅ |
-| └─ Auth Subnet | AuthSubnet | 10.2.1.0/24 | N/A | N/A | ✅ |
-| └─ World Subnet | WorldSubnet | 10.2.2.0/24 | N/A | N/A | ✅ |
-| └─ Database Subnet | DatabaseSubnet | 10.2.3.0/24 | N/A | N/A | ✅ |
-
+| Component          | Name                       | Address Space | Subnets | Peerings | Status |
+| :----------------- | :------------------------- | :------------ | :------ | :------- | :----- |
+| **Hub VNet**       | platform-skycraft-swc-vnet | 10.0.0.0/16   | 2       | 2        | ✅     |
+| └─ Bastion Subnet  | AzureBastionSubnet         | 10.0.0.0/26   | N/A     | N/A      | ✅     |
+| └─ Gateway Subnet  | GatewaySubnet              | 10.0.1.0/27   | N/A     | N/A      | ✅     |
+| **Dev VNet**       | dev-skycraft-swc-vnet      | 10.1.0.0/16   | 3       | 1        | ✅     |
+| └─ Auth Subnet     | AuthSubnet                 | 10.1.1.0/24   | N/A     | N/A      | ✅     |
+| └─ World Subnet    | WorldSubnet                | 10.1.2.0/24   | N/A     | N/A      | ✅     |
+| └─ Database Subnet | DatabaseSubnet             | 10.1.3.0/24   | N/A     | N/A      | ✅     |
+| **Prod VNet**      | prod-skycraft-swc-vnet     | 10.2.0.0/16   | 3       | 1        | ✅     |
+| └─ Auth Subnet     | AuthSubnet                 | 10.2.1.0/24   | N/A     | N/A      | ✅     |
+| └─ World Subnet    | WorldSubnet                | 10.2.2.0/24   | N/A     | N/A      | ✅     |
+| └─ Database Subnet | DatabaseSubnet             | 10.2.3.0/24   | N/A     | N/A      | ✅     |
 
 ---
 
@@ -405,53 +398,56 @@ Use this table to document your deployed architecture:
 Answer these questions to document your hands-on experience and demonstrate understanding:
 
 ### Question 1: IP Address Documentation
+
 **Document the public IP addresses you created:**
 
-| Resource | Public IP Address | Purpose |
-|----------|-------------------|---------|
-| platform-skycraft-swc-bas-pip | __________ | Azure Bastion administrative access |
-| dev-skycraft-swc-lb-pip | __________ | Development load balancer |
-| prod-skycraft-swc-lb-pip | __________ | Production load balancer |
+| Resource                 | Public IP Address | Purpose                   |
+| ------------------------ | ----------------- | ------------------------- |
+| dev-skycraft-swc-lb-pip  | \***\*\_\_\*\***  | Development load balancer |
+| prod-skycraft-swc-lb-pip | \***\*\_\_\*\***  | Production load balancer  |
 
 ### Question 2: Architecture Expansion
+
 **If you were asked to add a "staging" environment (between dev and prod), how would you design it?**
 
-- VNet name: __________________
-- Address space: __________________
-- Number of subnets: __________________
-- Peering connections: __________________
-- Justification for your design: 
+- VNet name: **\*\*\*\***\_\_**\*\*\*\***
+- Address space: **\*\*\*\***\_\_**\*\*\*\***
+- Number of subnets: **\*\*\*\***\_\_**\*\*\*\***
+- Peering connections: **\*\*\*\***\_\_**\*\*\*\***
+- Justification for your design:
 
-_________________________________________________________________
+---
 
 ### Question 3: Troubleshooting Experience
+
 **What was the most challenging part of this lab? How did you resolve it?**
 
-_________________________________________________________________
-
+---
 
 ### Question 4: Network Watcher Verification
+
 **Attach or describe the Network Watcher topology view for your hub VNet:**
 
 - [ ] Screenshot saved to: `images/my-network-topology.png`
 - Does it match the expected architecture? ☐ Yes ☐ No
-- If no, what differences exist? 
+- If no, what differences exist?
 
-_________________________________________________________________
+---
 
 ### Question 5: Real-World Application
+
 **How would you modify this architecture for a production gaming company with 5 environments (dev, test, staging, prod, disaster recovery)?**
 
-_________________________________________________________________
+---
 
 ---
 
 ## ⏱️ Completion Tracking
 
 - **Estimated Time**: 3 hours
-- **Actual Time Spent**: _________ hours
-- **Date Started**: _________
-- **Date Completed**: _________
+- **Actual Time Spent**: \***\*\_\*\*** hours
+- **Date Started**: \***\*\_\*\***
+- **Date Completed**: \***\*\_\*\***
 
 ---
 
@@ -464,14 +460,14 @@ _________________________________________________________________
 - [ ] Dev VNet deployed with correct subnets and peering
 - [ ] Prod VNet deployed with correct subnets and peering
 - [ ] All VNet peering connections show "Connected" status
-- [ ] 3 public IP addresses created (Bastion + 2 LB)
-- [ ] All resources follow naming conventions (platform/dev/prod-skycraft-swc-*)
+- [ ] 2 public IP addresses created (2 LB IPs)
+- [ ] All resources follow naming conventions (platform/dev/prod-skycraft-swc-\*)
 - [ ] All Azure CLI validation commands executed successfully
 - [ ] Network Watcher topology verified
 - [ ] All reflection questions answered correctly
 - [ ] No overlapping IP address ranges
 - [ ] Ready to proceed to Lab 2.2
 
-**Student Name**: _________________
-**Lab 2.1 Completion Date**: _________________
-**Instructor Signature**: _________________
+**Student Name**: **\*\*\*\***\_**\*\*\*\***
+**Lab 2.1 Completion Date**: **\*\*\*\***\_**\*\*\*\***
+**Instructor Signature**: **\*\*\*\***\_**\*\*\*\***

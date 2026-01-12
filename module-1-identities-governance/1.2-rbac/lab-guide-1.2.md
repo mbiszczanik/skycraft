@@ -12,14 +12,36 @@ By completing this lab, you will:
 
 ---
 
+## 🏗️ Architecture Overview
+
+You will configure the following Resource Groups and Role Assignments:
+
+```mermaid
+graph TB
+    subgraph "Subscription (Owner: Malfurion)"
+        DevRG[dev-skycraft-swc-rg]
+        ProdRG[prod-skycraft-swc-rg]
+        SharedRG[platform-skycraft-swc-rg]
+    end
+
+    DevGroup[SkyCraft-Developers] -->|Contributor| DevRG
+    TestersGroup[SkyCraft-Testers] -->|Reader| DevRG
+    TestersGroup -->|Reader| ProdRG
+    Illidan[Illidan Stormrage] -->|Reader| SharedRG
+
+    style DevRG fill:#fff4e1,stroke:#f39c12,stroke-width:2px
+    style ProdRG fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
+    style SharedRG fill:#e1f5ff,stroke:#0078d4,stroke-width:3px
+```
+
 ## 📋 Real-World Scenario
 
 **Situation**: You've created the SkyCraft team (Lab 1.1), but they currently have no permissions to manage Azure resources. You need to grant appropriate access levels:
 
-- **SkyCraft Admin** → Full control over all SkyCraft resources
+- **Malfurion Stormrage** (Admin) → Full control over all SkyCraft resources
 - **SkyCraft-Developers group** → Can create and manage VMs and storage, but cannot delete resource groups
 - **SkyCraft-Testers group** → Read-only access to monitor resources
-- **External Partner** → Read-only access to a specific resource group only
+- **Illidan Stormrage** (External Partner) → Read-only access to a specific resource group only
 
 **Your Task**: Assign appropriate RBAC roles at the correct scopes to enable the team to work effectively while maintaining security.
 
@@ -47,7 +69,7 @@ Before starting this lab:
 
 **Verify Lab 1.1 completion**: Confirm these exist:
 
-- Users: SkyCraft Admin, SkyCraft Developer, SkyCraft Tester
+- Users: Malfurion Stormrage, Khadgar Archmage, Chromie Timewalker
 - Groups: SkyCraft-Admins, SkyCraft-Developers, SkyCraft-Testers
 
 ---
@@ -62,8 +84,8 @@ Before starting this lab:
 
 1. **Security Principal** (WHO)
 
-   - User (e.g., SkyCraft Admin)
-   - Group (e.g., SkyCraft-Developers)
+   - User (e.g., Malfurion Stormrage)
+   - User (e.g., Malfurion Stormrage)
    - Service Principal
    - Managed Identity
 
@@ -113,7 +135,7 @@ Management Group (broadest)
 
 Before assigning roles, create resource groups for the SkyCraft project.
 
-### Step 2.1: Create Development Resource Group
+### Step 1.2.1: Create Development Resource Group
 
 1. In **Azure Portal**, search for **"Resource groups"**
 2. Click **+ Create**
@@ -129,7 +151,9 @@ Before assigning roles, create resource groups for the SkyCraft project.
 
 **Expected Result**: Resource group `dev-skycraft-swc-rg` appears in the list.
 
-### Step 2.2: Create Production Resource Group
+![Create Development Resource Group](./images/Step-1.2.1.png)
+
+### Step 1.2.2: Create Production Resource Group
 
 1. Click **+ Create** again
 2. Fill in:
@@ -142,7 +166,7 @@ Before assigning roles, create resource groups for the SkyCraft project.
 
 3. Click **Review + Create** → **Create**
 
-### Step 2.3: Create Shared Services Resource Group
+### Step 1.2.3: Create Shared Services Resource Group
 
 1. Click **+ Create**
 2. Fill in:
@@ -165,7 +189,7 @@ Before assigning roles, create resource groups for the SkyCraft project.
 
 ## 📖 Section 3: Assign Roles at Subscription Scope (25 minutes)
 
-### Step 3.1: Assign Owner Role to Admin User
+### Step 1.2.4: Assign Owner Role to Admin User
 
 1. In Azure Portal, go to **Subscriptions**
 2. Click on your subscription name
@@ -184,8 +208,8 @@ Before assigning roles, create resource groups for the SkyCraft project.
 
    - Select **Assign access to**: User, group, or service principal
    - Click **+ Select members**
-   - Search for **"SkyCraft Admin"**
-   - Select the user
+   - Search for **"Malfurion Stormrage"**
+   - Select the group
    - Click **Select**
    - Click **Next**
 
@@ -193,19 +217,19 @@ Before assigning roles, create resource groups for the SkyCraft project.
    - Review the assignment
    - Click **Review + assign**
 
-**Expected Result**: SkyCraft Admin now has Owner permissions at subscription level.
+**Expected Result**: Malfurion Stormrage now has Owner permissions at subscription level.
 
 **Screenshot**: [Would show role assignment completion]
 
-### Step 3.2: Verify Role Assignment
+### Step 1.2.5: Verify Role Assignment
 
 1. Still in **Access control (IAM)**, click **Role assignments** tab
-2. Search for **"SkyCraft Admin"**
+2. Search for **"Malfurion Stormrage"**
 3. Verify **Owner** role appears with **Subscription** scope
 
 **Expected Result**: You see the assignment listed with these details:
 
-- Name: SkyCraft Admin
+- Name: Malfurion Stormrage
 - Role: Owner
 - Scope: Subscription (your subscription name)
 - Type: User
@@ -216,7 +240,7 @@ Before assigning roles, create resource groups for the SkyCraft project.
 
 Now assign more specific roles at resource group level for the development team.
 
-### Step 4.1: Assign Contributor Role to Developers Group (Dev Environment)
+### Step 1.2.6: Assign Contributor Role to Developers Group (Dev Environment)
 
 1. Navigate to **Resource groups** → **dev-skycraft-swc-rg**
 2. Click **Access control (IAM)**
@@ -241,7 +265,7 @@ Now assign more specific roles at resource group level for the development team.
 
 **Expected Result**: SkyCraft-Developers group can now create and manage resources in `dev-skycraft-swc-rg`.
 
-### Step 4.2: Assign Reader Role to Testers Group (Dev Environment)
+### Step 1.2.7: Assign Reader Role to Testers Group (Dev Environment)
 
 1. Still in **dev-skycraft-swc-rg**, click **Access control (IAM)**
 2. Click **+ Add** → **Add role assignment**
@@ -264,7 +288,7 @@ Now assign more specific roles at resource group level for the development team.
 
 **Expected Result**: SkyCraft-Testers can view resources but not modify them.
 
-### Step 4.3: Assign Reader Role to Testers (Production Environment)
+### Step 1.2.8: Assign Reader Role to Testers (Production Environment)
 
 Repeat the same process for production:
 
@@ -277,7 +301,7 @@ Repeat the same process for production:
 
 **Expected Result**: Testers can view production resources but cannot make changes.
 
-### Step 4.4: Assign Limited Access to External Partner
+### Step 1.2.9: Assign Limited Access to External Partner
 
 For the external partner, grant access only to the shared services resource group:
 
@@ -285,7 +309,7 @@ For the external partner, grant access only to the shared services resource grou
 2. Click **Access control (IAM)**
 3. Click **+ Add** → **Add role assignment**
 4. Select **Reader** role
-5. Add **External Partner Consultant** user (the guest user from Lab 1.1)
+5. Add **Illidan Stormrage** (the guest user from Lab 1.1)
 6. Click **Review + assign**
 
 **Expected Result**: External partner has read-only access to shared services only, not dev or prod.
@@ -294,12 +318,12 @@ For the external partner, grant access only to the shared services resource grou
 
 ## 📖 Section 5: Verify and Test Access (20 minutes)
 
-### Step 5.1: Check Access for Developer
+### Step 1.2.10: Check Access for Developer
 
 1. Navigate to **dev-skycraft-swc-rg**
 2. Click **Access control (IAM)**
 3. Click **Check access** tab
-4. Search for **"SkyCraft Developer"** (individual user)
+4. Search for **"Khadgar Archmage"** (individual user)
 5. Click the user name
 
 **Expected Result**: Shows the user has:
@@ -309,10 +333,10 @@ For the external partner, grant access only to the shared services resource grou
 
 **Analysis**: The user doesn't have the role directly—they inherit it through group membership. This confirms best practice (assign to groups, not users).
 
-### Step 5.2: Check Access for Tester
+### Step 1.2.11: Check Access for Tester
 
 1. Still in **Access control (IAM)**, click **Check access**
-2. Search for **"SkyCraft Tester"**
+2. Search for **"Chromie Timewalker"**
 3. Click the user name
 
 **Expected Result**: Shows:
@@ -320,7 +344,7 @@ For the external partner, grant access only to the shared services resource grou
 - **Reader** role (inherited from SkyCraft-Testers group)
 - Scope: dev-skycraft-swc-rg and prod-skycraft-swc-rg
 
-### Step 5.3: View All Role Assignments
+### Step 1.2.12: View All Role Assignments
 
 1. Click **Role assignments** tab
 2. Review all assignments for this resource group
@@ -331,11 +355,11 @@ For the external partner, grant access only to the shared services resource grou
 | SkyCraft-Developers | Group | Contributor | This resource |
 | SkyCraft-Testers | Group | Reader | This resource |
 
-### Step 5.4: Test Effective Permissions (Optional but Recommended)
+### Step 1.2.13: Test Effective Permissions (Optional but Recommended)
 
 To truly verify permissions, you would:
 
-1. Sign in as **SkyCraft Developer** (in a private browser window)
+1. Sign in as **Khadgar Archmage** (in a private browser window)
 2. Try to create a resource in `dev-skycraft-swc-rg` → Should succeed
 3. Try to delete `dev-skycraft-swc-rg` → Should fail (Contributor can't delete RGs)
 4. Try to create resource in `prod-skycraft-swc-rg` → Should fail (no access)
@@ -361,14 +385,14 @@ To truly verify permissions, you would:
 ### Understand Inheritance
 
 ```
-Subscription (SkyCraft Admin = Owner)
+Subscription (Malfurion Stormrage = Owner)
 └── dev-skycraft-swc-rg (Developers = Contributor, Testers = Reader)
     └── [Future VM] (inherits all above permissions)
 ```
 
 **Key Concept**: When you create a VM in `dev-skycraft-swc-rg`:
 
-- SkyCraft Admin can manage it (Owner at subscription)
+- Malfurion Stormrage can manage it (Owner at subscription)
 - Developers can manage it (Contributor at RG)
 - Testers can view it (Reader at RG)
 
@@ -386,7 +410,7 @@ Complete this checklist to verify successful lab completion:
 
 ### Subscription-Level Role Assignments
 
-- [ ] SkyCraft Admin has **Owner** role at subscription scope
+- [ ] Malfurion Stormrage has **Owner** role at subscription scope
 
 ### Resource Group-Level Assignments (dev-skycraft-swc-rg)
 
@@ -399,12 +423,19 @@ Complete this checklist to verify successful lab completion:
 
 ### Resource Group-Level Assignments (rg-skycraft-shared)
 
-- [ ] External Partner has **Reader** role
+- [ ] Illidan Stormrage has **Reader** role
 
 ### Verification Completed
 
-- [ ] Checked access for SkyCraft Developer (shows Contributor via group)
-- [ ] Checked access for SkyCraft Tester (shows Reader via group)
+- [ ] Checked access for Khadgar Archmage (shows Contributor via group)
+- [ ] Checked access for Chromie Timewalker (shows Reader via group)
+- [ ] Reviewed role assignments in all three resource groups
+- [ ] Understand the difference between subscription and resource group scope
+
+**For detailed verification**, see [lab-checklist-1.2.md](lab-checklist-1.2.md)
+
+- [ ] Checked access for Khadgar Archmage (shows Contributor via group)
+- [ ] Checked access for Chromie Timewalker (shows Reader via group)
 - [ ] Reviewed role assignments in all three resource groups
 - [ ] Understand the difference between subscription and resource group scope
 
@@ -464,22 +495,47 @@ Complete this checklist to verify successful lab completion:
 
 ## 🎓 Knowledge Check
 
-Test your understanding:
+Test your understanding with these questions:
 
-1. **Q**: What's the difference between Owner and Contributor roles?  
-   **A**: Owner can do everything Contributor can do, PLUS assign roles to others. Contributor cannot grant access to anyone else.
+1. **What's the difference between Owner and Contributor roles?**
 
-2. **Q**: Why assign roles to groups instead of individual users?  
-   **A**: Groups are easier to manage—add/remove users from groups without changing role assignments. Also helps minimize role assignment count (4000 limit per subscription).
+   <details>
+     <summary>**Click to see the answer**</summary>
 
-3. **Q**: If SkyCraft Developer has Contributor at resource group level, can they create a new resource group?  
-   **A**: No. Creating resource groups requires permissions at subscription level.
+   **Answer**: Owner can do everything Contributor can do, PLUS assign roles to others. Contributor cannot grant access to anyone else.
+   </details>
 
-4. **Q**: A user has Reader at subscription level and Contributor at resource group level. What can they do in that resource group?  
-   **A**: Contributor permissions apply (most permissive wins). They can create and manage resources in that RG.
+2. **Why assign roles to groups instead of individual users?**
 
-5. **Q**: What happens to role assignments when you delete a resource group?  
-   **A**: Role assignments scoped to that resource group are automatically deleted.
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   **Answer**: Groups are easier to manage—add/remove users from groups without changing role assignments. Also helps minimize role assignment count (4000 limit per subscription).
+   </details>
+
+3. **If Khadgar Archmage has Contributor at resource group level, can they create a new resource group?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   **Answer**: No. Creating resource groups requires permissions at the subscription level.
+   </details>
+
+4. **A user has Reader at subscription level and Contributor at resource group level. What can they do in that resource group?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   **Answer**: Contributor permissions apply (most permissive wins). They can create and manage resources in that RG.
+   </details>
+
+5. **What happens to role assignments when you delete a resource group?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   **Answer**: Role assignments scoped to that resource group are automatically deleted.
+   </details>
 
 ---
 

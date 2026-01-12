@@ -44,25 +44,13 @@ resource resVnetHub 'Microsoft.Network/virtualNetworks@2023-11-01' = {
       {
         name: 'AzureBastionSubnet'
         properties: {
-          addressPrefix: '10.0.1.0/26'
-        }
-      }
-      {
-        name: 'AzureFirewallSubnet'
-        properties: {
-          addressPrefix: '10.0.2.0/26'
+          addressPrefix: '10.0.0.0/26'
         }
       }
       {
         name: 'GatewaySubnet'
         properties: {
-          addressPrefix: '10.0.3.0/27'
-        }
-      }
-      {
-        name: 'SharedSubnet'
-        properties: {
-          addressPrefix: '10.0.4.0/24'
+          addressPrefix: '10.0.1.0/27'
         }
       }
     ]

@@ -80,15 +80,6 @@ module modVnetProd 'modules/vnet-spoke.bicep' = {
 // 4. Public IPs
 
 // Bastion PIP (Platform)
-module modPipBastion 'modules/public-ip.bicep' = {
-  name: 'platform-bastion-pip-deployment'
-  scope: resourceGroup(parResourceGroupNamePlatform)
-  params: {
-    parLocation: parLocation
-    parPublicIpName: 'platform-skycraft-swc-bas-pip'
-    parEnvironment: 'Platform'
-  }
-}
 
 // Dev LB PIP
 module modPipDevLb 'modules/public-ip.bicep' = {

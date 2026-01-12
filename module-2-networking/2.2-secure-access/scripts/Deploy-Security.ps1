@@ -164,6 +164,10 @@ function Add-Rule {
     
     # Check if rule exists to avoid conflicts
     $existing = $NSG.SecurityRules | Where-Object { $_.Name -eq $Name }
+    
+    # Determine if we use Prefix (Single) or Prefixes (Array)
+    # Validated: SourceAddressPrefix parameter accepts string array.
+    
     if ($existing) {
         $NSG | Set-AzNetworkSecurityRuleConfig -Name $Name -Description $Desc -Access Allow -Protocol Tcp -Direction Inbound -Priority $Priority -SourceAddressPrefix $SrcPrefix -SourcePortRange '*' -DestinationAddressPrefix '*' -DestinationPortRange $DestPort | Out-Null
     } else {
@@ -181,7 +185,7 @@ Add-Rule -NSG $nsgDevWorld -Name "Allow-World-GamePort"   -Priority 110 -DestPor
 $nsgDevWorld | Set-AzNetworkSecurityGroup | Out-Null
 
 Add-Rule -NSG $nsgDevDb    -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH from Bastion"
-Add-Rule -NSG $nsgDevDb    -Name "Allow-MySQL-From-AppTier" -Priority 110 -DestPort 3306 -SrcPrefix "10.1.0.0/16" -Desc "Allow MySQL from App Subnets"
+Add-Rule -NSG $nsgDevDb    -Name "Allow-MySQL-From-AppTier" -Priority 110 -DestPort 3306 -SrcPrefix @("10.1.1.0/24","10.1.2.0/24") -Desc "Allow MySQL from App Subnets"
 $nsgDevDb | Set-AzNetworkSecurityGroup | Out-Null
 
 # Prod Rules
@@ -194,7 +198,7 @@ Add-Rule -NSG $nsgProdWorld -Name "Allow-World-GamePort"   -Priority 110 -DestPo
 $nsgProdWorld | Set-AzNetworkSecurityGroup | Out-Null
 
 Add-Rule -NSG $nsgProdDb    -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH from Bastion"
-Add-Rule -NSG $nsgProdDb    -Name "Allow-MySQL-From-AppTier" -Priority 110 -DestPort 3306 -SrcPrefix "10.2.0.0/16" -Desc "Allow MySQL from App Subnets"
+Add-Rule -NSG $nsgProdDb    -Name "Allow-MySQL-From-AppTier" -Priority 110 -DestPort 3306 -SrcPrefix @("10.2.1.0/24","10.2.2.0/24") -Desc "Allow MySQL from App Subnets"
 $nsgProdDb | Set-AzNetworkSecurityGroup | Out-Null
 
 # ===================================

@@ -74,10 +74,8 @@ $TagsProd = @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'M
 Write-Host "`n=== Task 2: Creating Hub Virtual Network ===" -ForegroundColor Cyan
 $hubVnetName = 'platform-skycraft-swc-vnet'
 $hubSubnets = @(
-    (New-AzVirtualNetworkSubnetConfig -Name 'AzureBastionSubnet' -AddressPrefix '10.0.1.0/26'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'AzureFirewallSubnet' -AddressPrefix '10.0.2.0/26'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'GatewaySubnet' -AddressPrefix '10.0.3.0/27'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'SharedSubnet' -AddressPrefix '10.0.4.0/24')
+    (New-AzVirtualNetworkSubnetConfig -Name 'AzureBastionSubnet' -AddressPrefix '10.0.0.0/26'),
+    (New-AzVirtualNetworkSubnetConfig -Name 'GatewaySubnet' -AddressPrefix '10.0.1.0/27')
 )
 
 Write-Host "Creating VNet: $hubVnetName..." -ForegroundColor Yellow
@@ -171,7 +169,6 @@ function New-SkyCraftPip {
     } catch { Write-Host "  -> [ERROR] Failed to create PIP $Name : $_" -ForegroundColor Red }
 }
 
-New-SkyCraftPip -Name 'platform-skycraft-swc-bas-pip' -RgName $PlatformResourceGroup -Tags $TagsPlatform
 New-SkyCraftPip -Name 'dev-skycraft-swc-lb-pip' -RgName $DevResourceGroup -Tags $TagsDev
 New-SkyCraftPip -Name 'prod-skycraft-swc-lb-pip' -RgName $ProdResourceGroup -Tags $TagsProd
 

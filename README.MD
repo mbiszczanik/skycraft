@@ -79,7 +79,7 @@ Transform abstract cloud concepts into **tangible hands-on experience** by build
 ## 📌 Course Navigation
 
 - [Module 1: Manage Azure Identities and Governance →](module-1-identities-governance/README.MD)
-- [Module 2: Implement and Manage Virtual Networking →](#)
+- [Module 2: Implement and Manage Virtual Networking →](module-2-networking/README.MD)
 - [Module 3: Deploy and Manage Azure Compute Resources →](#)
 - [Module 4: Implement and Manage Storage →](#)
 - [Module 5: Monitor and Maintain Azure Resources →](#)

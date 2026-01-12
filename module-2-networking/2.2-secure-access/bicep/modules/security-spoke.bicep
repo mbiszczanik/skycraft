@@ -32,9 +32,6 @@ param parWorldSubnetCidr string
 @description('Address CIDR for Database Subnet')
 param parDbSubnetCidr string
 
-@description('Source CIDR for MySQL rule (App Tier range)')
-param parAppTierCidr string
-
 // ===================================
 // Variables
 // ===================================
@@ -188,7 +185,10 @@ resource resNsgDb 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
           protocol: 'Tcp'
           sourcePortRange: '*'
           destinationPortRange: '3306'
-          sourceAddressPrefix: parAppTierCidr
+          sourceAddressPrefixes: [
+            parAuthSubnetCidr
+            parWorldSubnetCidr
+          ]
           destinationAddressPrefix: '*'
           access: 'Allow'
           priority: 110

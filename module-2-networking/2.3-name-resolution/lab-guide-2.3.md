@@ -3,6 +3,7 @@
 ## 🎯 Learning Objectives
 
 By completing this lab, you will:
+
 - Create and configure Azure DNS zones for custom domain name resolution
 - Implement Azure Private DNS zones for internal name resolution
 - Deploy Azure Standard Load Balancer for high availability
@@ -82,6 +83,7 @@ graph TB
 **Situation**: SkyCraft game servers need to be highly available and accessible via friendly domain names. Players shouldn't need to remember IP addresses (203.0.113.10), and if one world server fails, traffic should automatically route to healthy servers. Additionally, internal services (databases, monitoring) need DNS resolution within the Azure VNets without exposing names to the public internet.
 
 **Your Task**: Implement DNS and load balancing by:
+
 - Creating Azure DNS zones for public domain resolution (skycraft.example.com)
 - Deploying Azure Load Balancers to distribute player connections across multiple world servers
 - Configuring health probes to detect server failures
@@ -105,6 +107,7 @@ graph TB
 ## ✅ Prerequisites
 
 Before starting this lab:
+
 - [ ] Completed Lab 2.1 (Virtual Networks and Peering)
 - [ ] Completed Lab 2.2 (Network Security)
 - [ ] Three VNets exist: platform, dev, prod
@@ -120,6 +123,7 @@ Before starting this lab:
 ### What is Azure DNS?
 
 **Azure DNS** provides name resolution using Microsoft's global DNS infrastructure. It offers:
+
 - **High availability**: 100% uptime SLA
 - **Global coverage**: Anycast network (query answered by nearest DNS server)
 - **Security**: RBAC, activity logs, resource locking
@@ -127,46 +131,46 @@ Before starting this lab:
 
 ### Public DNS vs Private DNS Zones
 
-| Feature | Public DNS Zone | Private DNS Zone |
-|---------|-----------------|------------------|
-| **Visibility** | Internet-accessible | VNet-internal only |
-| **Use Case** | External domains (skycraft.com) | Internal services (database.internal) |
-| **Records** | Standard DNS records (A, CNAME, MX) | A, AAAA, CNAME only |
-| **Registration** | Can use registered domains | Any name (no registration needed) |
-| **Cost** | $0.50/zone/month + queries | $0.10/zone/month (no query charges) |
+| Feature          | Public DNS Zone                     | Private DNS Zone                      |
+| ---------------- | ----------------------------------- | ------------------------------------- |
+| **Visibility**   | Internet-accessible                 | VNet-internal only                    |
+| **Use Case**     | External domains (skycraft.com)     | Internal services (database.internal) |
+| **Records**      | Standard DNS records (A, CNAME, MX) | A, AAAA, CNAME only                   |
+| **Registration** | Can use registered domains          | Any name (no registration needed)     |
+| **Cost**         | $0.50/zone/month + queries          | $0.10/zone/month (no query charges)   |
 
 ### Azure Load Balancer Overview
 
 **Azure Load Balancer** distributes inbound traffic across multiple backend resources. Key concepts:
 
-| Component | Purpose |
-|-----------|---------|
-| **Frontend IP** | Public or private IP that receives traffic |
-| **Backend Pool** | Group of VMs/instances that handle requests |
-| **Health Probe** | Checks if backend resources are healthy |
-| **Load Balancing Rule** | Defines how traffic is distributed |
-| **Inbound NAT Rule** | Maps specific port to specific backend (optional) |
+| Component               | Purpose                                           |
+| ----------------------- | ------------------------------------------------- |
+| **Frontend IP**         | Public or private IP that receives traffic        |
+| **Backend Pool**        | Group of VMs/instances that handle requests       |
+| **Health Probe**        | Checks if backend resources are healthy           |
+| **Load Balancing Rule** | Defines how traffic is distributed                |
+| **Inbound NAT Rule**    | Maps specific port to specific backend (optional) |
 
 ### Load Balancer SKUs
 
-| Feature | Basic | Standard |
-|---------|-------|----------|
-| **Backend pool size** | Up to 300 | Up to 1,000 |
-| **Health probe** | HTTP, TCP | HTTP, HTTPS, TCP |
-| **Availability Zones** | No | Yes |
-| **SLA** | None | 99.99% |
-| **Security** | Open by default | Closed by default (requires NSG) |
-| **Cost** | Free | ~$18/month + data processing |
+| Feature                | Basic           | Standard                         |
+| ---------------------- | --------------- | -------------------------------- |
+| **Backend pool size**  | Up to 300       | Up to 1,000                      |
+| **Health probe**       | HTTP, TCP       | HTTP, HTTPS, TCP                 |
+| **Availability Zones** | No              | Yes                              |
+| **SLA**                | None            | 99.99%                           |
+| **Security**           | Open by default | Closed by default (requires NSG) |
+| **Cost**               | Free            | ~$18/month + data processing     |
 
 **For SkyCraft**: Standard SKU required for production workloads and zone redundancy.
 
 ### Load Distribution Modes
 
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| **Hash-based (5-tuple)** | Source IP, port, dest IP, port, protocol | Default, good distribution |
-| **Source IP affinity (2-tuple)** | Source IP + dest IP only | Session persistence needed |
-| **Source IP affinity (3-tuple)** | Source IP, dest IP + protocol | Balance between persistence & distribution |
+| Mode                             | Description                              | Use Case                                   |
+| -------------------------------- | ---------------------------------------- | ------------------------------------------ |
+| **Hash-based (5-tuple)**         | Source IP, port, dest IP, port, protocol | Default, good distribution                 |
+| **Source IP affinity (2-tuple)** | Source IP + dest IP only                 | Session persistence needed                 |
+| **Source IP affinity (3-tuple)** | Source IP, dest IP + protocol            | Balance between persistence & distribution |
 
 ---
 
@@ -181,27 +185,28 @@ Before starting this lab:
 
 **Basics tab**:
 
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
-| Resource group | `platform-skycraft-swc-rg` |
-| Name | `skycraft.example.com` |
-| Resource group location | **Sweden Central** |
+| Field                   | Value                      |
+| ----------------------- | -------------------------- |
+| Subscription            | [Your subscription]        |
+| Resource group          | `platform-skycraft-swc-rg` |
+| Name                    | `skycraft.example.com`     |
+| Resource group location | **Sweden Central**         |
 
 **Important**: The DNS zone name should be your actual registered domain (or a domain you'll register). For this lab, we use `example.com` as a placeholder.
 
 3. Click **Next: Tags**
 4. Add tags:
 
-| Name | Value |
-|------|-------|
-| Project | SkyCraft |
+| Name        | Value    |
+| ----------- | -------- |
+| Project     | SkyCraft |
 | Environment | Platform |
-| CostCenter | MSDN |
+| CostCenter  | MSDN     |
 
 5. Click **Review + create** → **Create**
 
-**Expected Result**: 
+**Expected Result**:
+
 - DNS zone `skycraft.example.com` created
 - Azure provides 4 name servers (e.g., ns1-01.azure-dns.com)
 - In production, you'd update your domain registrar to use these name servers
@@ -213,19 +218,17 @@ Before starting this lab:
 
 **Create record for dev load balancer**:
 
-| Field | Value |
-|-------|-------|
-| Name | `dev` |
-| Type | A |
-| TTL | 300 |
-| TTL unit | Seconds |
+| Field      | Value                           |
+| ---------- | ------------------------------- |
+| Name       | `dev`                           |
+| Type       | A                               |
+| TTL        | 300                             |
+| TTL unit   | Seconds                         |
 | IP address | [IP of dev-skycraft-swc-lb-pip] |
 
-**To get the dev load balancer public IP**:
-3. Open another tab: **Public IP addresses** → **dev-skycraft-swc-lb-pip**
-4. Copy the IP address (e.g., 20.240.50.10)
-5. Return to DNS zone and paste the IP
-6. Click **OK**
+**To get the dev load balancer public IP**: 3. Open another tab: **Public IP addresses** → **dev-skycraft-swc-lb-pip** 4. Copy the IP address (e.g., 20.240.50.10) 5. Return to DNS zone and paste the IP 6. Click **OK**
+
+![Step 2.3.2](./images/step-2.3.2.png)
 
 **Expected Result**: A record `dev.skycraft.example.com` points to dev load balancer public IP.
 
@@ -235,12 +238,12 @@ Before starting this lab:
 
 **Create record for prod load balancer**:
 
-| Field | Value |
-|-------|-------|
-| Name | `play` |
-| Type | A |
-| TTL | 300 |
-| TTL unit | Seconds |
+| Field      | Value                            |
+| ---------- | -------------------------------- |
+| Name       | `play`                           |
+| Type       | A                                |
+| TTL        | 300                              |
+| TTL unit   | Seconds                          |
 | IP address | [IP of prod-skycraft-swc-lb-pip] |
 
 2. Get prod public IP from **prod-skycraft-swc-lb-pip**
@@ -255,11 +258,11 @@ Create a user-friendly alias:
 
 1. Click **+ Record set**
 
-| Field | Value |
-|-------|-------|
-| Name | `game` |
-| Type | CNAME |
-| TTL | 3600 |
+| Field | Value                       |
+| ----- | --------------------------- |
+| Name  | `game`                      |
+| Type  | CNAME                       |
+| TTL   | 3600                        |
 | Alias | `play.skycraft.example.com` |
 
 2. Click **OK**
@@ -277,12 +280,12 @@ Create a user-friendly alias:
 
 **Basics tab**:
 
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
-| Resource group | `platform-skycraft-swc-rg` |
-| Name | `skycraft.internal` |
-| Resource group location | **Sweden Central** |
+| Field                   | Value                      |
+| ----------------------- | -------------------------- |
+| Subscription            | [Your subscription]        |
+| Resource group          | `platform-skycraft-swc-rg` |
+| Name                    | `skycraft.internal`        |
+| Resource group location | **Sweden Central**         |
 
 **Important**: Private DNS zone names can be anything (no domain registration needed). Common patterns: `internal`, `local`, `private`, or `company.internal`.
 
@@ -302,12 +305,12 @@ Private DNS zones must be linked to VNets for name resolution to work.
 2. In left menu, click **Virtual network links**
 3. Click **+ Add**
 
-| Field | Value |
-|-------|-------|
-| Link name | `hub-vnet-link` |
-| Subscription | [Your subscription] |
-| Virtual network | `platform-skycraft-swc-vnet` |
-| Enable auto registration | ☐ Unchecked (no VMs in hub) |
+| Field                    | Value                        |
+| ------------------------ | ---------------------------- |
+| Link name                | `hub-vnet-link`              |
+| Subscription             | [Your subscription]          |
+| Virtual network          | `platform-skycraft-swc-vnet` |
+| Enable auto registration | ☐ Unchecked (no VMs in hub)  |
 
 4. Click **OK**
 
@@ -315,10 +318,10 @@ Private DNS zones must be linked to VNets for name resolution to work.
 
 5. Click **+ Add** again
 
-| Field | Value |
-|-------|-------|
-| Link name | `dev-vnet-link` |
-| Virtual network | `dev-skycraft-swc-vnet` |
+| Field                    | Value                                  |
+| ------------------------ | -------------------------------------- |
+| Link name                | `dev-vnet-link`                        |
+| Virtual network          | `dev-skycraft-swc-vnet`                |
 | Enable auto registration | ☑ **Checked** (VMs will auto-register) |
 
 6. Click **OK**
@@ -327,18 +330,23 @@ Private DNS zones must be linked to VNets for name resolution to work.
 
 7. Click **+ Add**
 
-| Field | Value |
-|-------|-------|
-| Link name | `prod-vnet-link` |
-| Virtual network | `prod-skycraft-swc-vnet` |
-| Enable auto registration | ☑ **Checked** |
+| Field                    | Value                    |
+| ------------------------ | ------------------------ |
+| Link name                | `prod-vnet-link`         |
+| Virtual network          | `prod-skycraft-swc-vnet` |
+| Enable auto registration | ☑ **Checked**            |
+
+![Link Private DNS Zone to VNets](./images/step-2.3.6a.png)
 
 8. Click **OK**
 
-**Expected Result**: 
+**Expected Result**:
+
 - Private DNS zone linked to all three VNets
 - Dev and prod VNets have auto-registration enabled
 - Future VMs in dev/prod will automatically create DNS records
+
+![Link Private DNS Zone to VNets](./images/step-2.3.6b.png)
 
 ### Step 2.3.7: Create Manual DNS Records in Private Zone
 
@@ -348,11 +356,11 @@ Create DNS records for future database servers:
 
 **Create record for dev database**:
 
-| Field | Value |
-|-------|-------|
-| Name | `dev-db` |
-| Type | A |
-| TTL | 300 |
+| Field      | Value                                   |
+| ---------- | --------------------------------------- |
+| Name       | `dev-db`                                |
+| Type       | A                                       |
+| TTL        | 300                                     |
 | IP address | `10.1.3.10` (future database server IP) |
 
 2. Click **OK**
@@ -361,16 +369,17 @@ Create DNS records for future database servers:
 
 3. Click **+ Record set**
 
-| Field | Value |
-|-------|-------|
-| Name | `prod-db` |
-| Type | A |
-| TTL | 300 |
+| Field      | Value                                   |
+| ---------- | --------------------------------------- |
+| Name       | `prod-db`                               |
+| Type       | A                                       |
+| TTL        | 300                                     |
 | IP address | `10.2.3.10` (future database server IP) |
 
 4. Click **OK**
 
 **Expected Result**: Internal DNS records created:
+
 - `dev-db.skycraft.internal` → 10.1.3.10
 - `prod-db.skycraft.internal` → 10.2.3.10
 
@@ -385,15 +394,15 @@ Create DNS records for future database servers:
 
 **Basics tab**:
 
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
+| Field          | Value                 |
+| -------------- | --------------------- |
+| Subscription   | [Your subscription]   |
 | Resource group | `dev-skycraft-swc-rg` |
-| Name | `dev-skycraft-swc-lb` |
-| Region | **Sweden Central** |
-| SKU | **Standard** |
-| Type | **Public** |
-| Tier | **Regional** |
+| Name           | `dev-skycraft-swc-lb` |
+| Region         | **Sweden Central**    |
+| SKU            | **Standard**          |
+| Type           | **Public**            |
+| Tier           | **Regional**          |
 
 3. Click **Next: Frontend IP configuration**
 
@@ -401,11 +410,11 @@ Create DNS records for future database servers:
 
 4. Click **+ Add a frontend IP configuration**
 
-| Field | Value |
-|-------|-------|
-| Name | `dev-skycraft-swc-lb-frontend` |
-| IP version | IPv4 |
-| IP type | IP address |
+| Field             | Value                                    |
+| ----------------- | ---------------------------------------- |
+| Name              | `dev-skycraft-swc-lb-frontend`           |
+| IP version        | IPv4                                     |
+| IP type           | IP address                               |
 | Public IP address | `dev-skycraft-swc-lb-pip` (use existing) |
 
 5. Click **Add**
@@ -423,17 +432,18 @@ Create DNS records for future database servers:
 
 11. Add tags:
 
-| Name | Value |
-|------|-------|
-| Project | SkyCraft |
+| Name        | Value       |
+| ----------- | ----------- |
+| Project     | SkyCraft    |
 | Environment | Development |
-| CostCenter | MSDN |
+| CostCenter  | MSDN        |
 
 12. Click **Review + create**
 13. Review configuration
 14. Click **Create**
 
-**Expected Result**: 
+**Expected Result**:
+
 - Deployment takes 1-2 minutes
 - Load balancer `dev-skycraft-swc-lb` created
 - Frontend IP configured with public IP
@@ -444,12 +454,12 @@ Create DNS records for future database servers:
 2. In left menu, click **Backend pools**
 3. Click **+ Add**
 
-| Field | Value |
-|-------|-------|
-| Name | `dev-skycraft-swc-lb-be-world` |
-| Virtual network | `dev-skycraft-swc-vnet` |
-| Backend Pool Configuration | **NIC** |
-| IP Version | IPv4 |
+| Field                      | Value                          |
+| -------------------------- | ------------------------------ |
+| Name                       | `dev-skycraft-swc-lb-be-world` |
+| Virtual network            | `dev-skycraft-swc-vnet`        |
+| Backend Pool Configuration | **NIC**                        |
+| IP Version                 | IPv4                           |
 
 **Virtual machines** section:
 
@@ -473,12 +483,12 @@ Health probes check if backend VMs are healthy before sending traffic.
 1. Still in **dev-skycraft-swc-lb**, click **Health probes** in left menu
 2. Click **+ Add**
 
-| Field | Value |
-|-------|-------|
-| Name | `dev-skycraft-swc-lb-probe-world` |
-| Protocol | **TCP** |
-| Port | `8085` (AzerothCore world server port) |
-| Interval | 15 (seconds between probes) |
+| Field               | Value                                             |
+| ------------------- | ------------------------------------------------- |
+| Name                | `dev-skycraft-swc-lb-probe-world`                 |
+| Protocol            | **TCP**                                           |
+| Port                | `8085` (AzerothCore world server port)            |
+| Interval            | 15 (seconds between probes)                       |
 | Unhealthy threshold | 2 (consecutive failures before marking unhealthy) |
 
 3. Click **Add**
@@ -490,20 +500,20 @@ Health probes check if backend VMs are healthy before sending traffic.
 1. In left menu, click **Load balancing rules**
 2. Click **+ Add**
 
-| Field | Value |
-|-------|-------|
-| Name | `dev-skycraft-swc-lb-rule-world` |
-| IP Version | IPv4 |
-| Frontend IP address | `dev-skycraft-swc-lb-frontend` |
-| Protocol | TCP |
-| Port | `8085` |
-| Backend port | `8085` |
-| Backend pool | `dev-skycraft-swc-lb-be-world` |
-| Health probe | `dev-skycraft-swc-lb-probe-world` |
-| Session persistence | **None** (5-tuple hash distribution) |
-| Idle timeout (minutes) | 4 |
-| TCP reset | Enabled |
-| Floating IP | Disabled |
+| Field                  | Value                                |
+| ---------------------- | ------------------------------------ |
+| Name                   | `dev-skycraft-swc-lb-rule-world`     |
+| IP Version             | IPv4                                 |
+| Frontend IP address    | `dev-skycraft-swc-lb-frontend`       |
+| Protocol               | TCP                                  |
+| Port                   | `8085`                               |
+| Backend port           | `8085`                               |
+| Backend pool           | `dev-skycraft-swc-lb-be-world`       |
+| Health probe           | `dev-skycraft-swc-lb-probe-world`    |
+| Session persistence    | **None** (5-tuple hash distribution) |
+| Idle timeout (minutes) | 4                                    |
+| TCP reset              | Enabled                              |
+| Floating IP            | Disabled                             |
 
 3. Click **Add**
 
@@ -517,13 +527,13 @@ Create health probe and rule for authentication servers:
 
 1. Click **Health probes** → **+ Add**
 
-| Field | Value |
-|-------|-------|
-| Name | `dev-skycraft-swc-lb-probe-auth` |
-| Protocol | TCP |
-| Port | `3724` (Auth server port) |
-| Interval | 15 |
-| Unhealthy threshold | 2 |
+| Field               | Value                            |
+| ------------------- | -------------------------------- |
+| Name                | `dev-skycraft-swc-lb-probe-auth` |
+| Protocol            | TCP                              |
+| Port                | `3724` (Auth server port)        |
+| Interval            | 15                               |
+| Unhealthy threshold | 2                                |
 
 2. Click **Add**
 
@@ -531,11 +541,11 @@ Create health probe and rule for authentication servers:
 
 3. Click **Backend pools** → **+ Add**
 
-| Field | Value |
-|-------|-------|
-| Name | `dev-skycraft-swc-lb-be-auth` |
-| Virtual network | `dev-skycraft-swc-vnet` |
-| Backend Pool Configuration | NIC |
+| Field                      | Value                         |
+| -------------------------- | ----------------------------- |
+| Name                       | `dev-skycraft-swc-lb-be-auth` |
+| Virtual network            | `dev-skycraft-swc-vnet`       |
+| Backend Pool Configuration | NIC                           |
 
 4. Click **Add**
 
@@ -543,16 +553,16 @@ Create health probe and rule for authentication servers:
 
 5. Click **Load balancing rules** → **+ Add**
 
-| Field | Value |
-|-------|-------|
-| Name | `dev-skycraft-swc-lb-rule-auth` |
-| Frontend IP | `dev-skycraft-swc-lb-frontend` |
-| Protocol | TCP |
-| Port | `3724` |
-| Backend port | `3724` |
-| Backend pool | `dev-skycraft-swc-lb-be-auth` |
-| Health probe | `dev-skycraft-swc-lb-probe-auth` |
-| Session persistence | None |
+| Field               | Value                            |
+| ------------------- | -------------------------------- |
+| Name                | `dev-skycraft-swc-lb-rule-auth`  |
+| Frontend IP         | `dev-skycraft-swc-lb-frontend`   |
+| Protocol            | TCP                              |
+| Port                | `3724`                           |
+| Backend port        | `3724`                           |
+| Backend pool        | `dev-skycraft-swc-lb-be-auth`    |
+| Health probe        | `dev-skycraft-swc-lb-probe-auth` |
+| Session persistence | None                             |
 
 6. Click **Add**
 
@@ -570,15 +580,16 @@ Repeat the load balancer creation process for production:
 
 **Configuration**:
 
-| Field | Value |
-|-------|-------|
+| Field          | Value                  |
+| -------------- | ---------------------- |
 | Resource group | `prod-skycraft-swc-rg` |
-| Name | `prod-skycraft-swc-lb` |
-| Region | **Sweden Central** |
-| SKU | **Standard** |
-| Type | **Public** |
+| Name           | `prod-skycraft-swc-lb` |
+| Region         | **Sweden Central**     |
+| SKU            | **Standard**           |
+| Type           | **Public**             |
 
 **Frontend IP**:
+
 - Name: `prod-skycraft-swc-lb-frontend`
 - Public IP: `prod-skycraft-swc-lb-pip` (use existing)
 
@@ -592,11 +603,11 @@ Repeat the load balancer creation process for production:
 
 **Backend Pool 1** (World servers):
 
-| Field | Value |
-|-------|-------|
-| Name | `prod-skycraft-swc-lb-be-world` |
-| Virtual network | `prod-skycraft-swc-vnet` |
-| Backend Pool Configuration | NIC |
+| Field                      | Value                           |
+| -------------------------- | ------------------------------- |
+| Name                       | `prod-skycraft-swc-lb-be-world` |
+| Virtual network            | `prod-skycraft-swc-vnet`        |
+| Backend Pool Configuration | NIC                             |
 
 2. Click **Add**
 
@@ -610,12 +621,12 @@ Repeat the load balancer creation process for production:
 
 **Probe 1** (World):
 
-| Field | Value |
-|-------|-------|
-| Name | `prod-skycraft-swc-lb-probe-world` |
-| Protocol | TCP |
-| Port | 8085 |
-| Interval | 15 |
+| Field    | Value                              |
+| -------- | ---------------------------------- |
+| Name     | `prod-skycraft-swc-lb-probe-world` |
+| Protocol | TCP                                |
+| Port     | 8085                               |
+| Interval | 15                                 |
 
 2. Click **Add**
 
@@ -629,12 +640,12 @@ Repeat the load balancer creation process for production:
 
 **Rule 1** (World):
 
-| Field | Value |
-|-------|-------|
-| Name | `prod-skycraft-swc-lb-rule-world` |
-| Frontend IP | `prod-skycraft-swc-lb-frontend` |
-| Port | 8085 |
-| Backend pool | `prod-skycraft-swc-lb-be-world` |
+| Field        | Value                              |
+| ------------ | ---------------------------------- |
+| Name         | `prod-skycraft-swc-lb-rule-world`  |
+| Frontend IP  | `prod-skycraft-swc-lb-frontend`    |
+| Port         | 8085                               |
+| Backend pool | `prod-skycraft-swc-lb-be-world`    |
 | Health probe | `prod-skycraft-swc-lb-probe-world` |
 
 2. Click **Add**
@@ -684,13 +695,13 @@ nslookup game.skycraft.example.com
 2. Click **Overview**
 3. Verify record sets exist:
 
-| Name | Type | Value |
-|------|------|-------|
-| @ | NS | ns1-01.azure-dns.com (and 3 others) |
-| @ | SOA | [Azure DNS SOA record] |
-| dev | A | [dev-skycraft-swc-lb-pip IP] |
-| play | A | [prod-skycraft-swc-lb-pip IP] |
-| game | CNAME | play.skycraft.example.com |
+| Name | Type  | Value                               |
+| ---- | ----- | ----------------------------------- |
+| @    | NS    | ns1-01.azure-dns.com (and 3 others) |
+| @    | SOA   | [Azure DNS SOA record]              |
+| dev  | A     | [dev-skycraft-swc-lb-pip IP]        |
+| play | A     | [prod-skycraft-swc-lb-pip IP]       |
+| game | CNAME | play.skycraft.example.com           |
 
 **Expected Result**: All DNS records visible in Azure Portal.
 
@@ -699,16 +710,17 @@ nslookup game.skycraft.example.com
 1. Navigate to **Private DNS zones** → **skycraft.internal**
 2. Click **Overview**
 3. Verify:
+
    - Virtual network links: 3 (hub, dev, prod)
    - Record sets: 2 (dev-db, prod-db)
 
 4. Click **Record sets**
 5. Verify records exist:
 
-| Name | Type | IP Address |
-|------|------|------------|
-| dev-db | A | 10.1.3.10 |
-| prod-db | A | 10.2.3.10 |
+| Name    | Type | IP Address |
+| ------- | ---- | ---------- |
+| dev-db  | A    | 10.1.3.10  |
+| prod-db | A    | 10.2.3.10  |
 
 **Expected Result**: Private DNS configured for internal name resolution.
 
@@ -736,6 +748,7 @@ nslookup game.skycraft.example.com
 **Note**: This test requires VMs (deployed in Module 3). Document the expected behavior:
 
 **Scenario 1: All backends healthy**
+
 ```
 Health Probe → VM1 (10.1.2.10:8085) → Response OK → Mark healthy
 Health Probe → VM2 (10.1.2.11:8085) → Response OK → Mark healthy
@@ -744,6 +757,7 @@ Load Balancer Decision: Distribute traffic 50/50 to VM1 and VM2
 ```
 
 **Scenario 2: One backend fails**
+
 ```
 Health Probe → VM1 (10.1.2.10:8085) → Response OK → Mark healthy
 Health Probe → VM2 (10.1.2.11:8085) → Timeout → Mark unhealthy
@@ -752,6 +766,7 @@ Load Balancer Decision: Send 100% traffic to VM1 only
 ```
 
 **Scenario 3: Backend recovers**
+
 ```
 After 2 consecutive successful probes (30 seconds):
 VM2 marked healthy again → Load Balancer resumes 50/50 distribution
@@ -764,6 +779,7 @@ VM2 marked healthy again → Load Balancer resumes 50/50 distribution
 Quick verification before proceeding:
 
 ### Azure DNS (Public Zone)
+
 - [ ] Public DNS zone `skycraft.example.com` created
 - [ ] A record `dev.skycraft.example.com` points to dev load balancer IP
 - [ ] A record `play.skycraft.example.com` points to prod load balancer IP
@@ -771,6 +787,7 @@ Quick verification before proceeding:
 - [ ] 4 Azure name servers assigned to zone
 
 ### Azure Private DNS Zone
+
 - [ ] Private DNS zone `skycraft.internal` created
 - [ ] Linked to hub VNet (auto-registration off)
 - [ ] Linked to dev VNet (auto-registration on)
@@ -779,6 +796,7 @@ Quick verification before proceeding:
 - [ ] A record `prod-db.skycraft.internal` → 10.2.3.10
 
 ### Dev Load Balancer
+
 - [ ] `dev-skycraft-swc-lb` created (Standard SKU, Public)
 - [ ] Frontend IP uses `dev-skycraft-swc-lb-pip`
 - [ ] Backend pool: `dev-skycraft-swc-lb-be-world` created
@@ -789,6 +807,7 @@ Quick verification before proceeding:
 - [ ] Load balancing rule: port 3724 → auth backend pool
 
 ### Prod Load Balancer
+
 - [ ] `prod-skycraft-swc-lb` created (Standard SKU, Public)
 - [ ] Frontend IP uses `prod-skycraft-swc-lb-pip`
 - [ ] Backend pools created (world, auth)
@@ -812,6 +831,7 @@ Test your understanding with these questions:
    **Answer**:
 
    **Public DNS Zones**:
+
    - Accessible from the internet
    - Used for registered domains (skycraft.com)
    - Resolves names for external clients (game players)
@@ -819,6 +839,7 @@ Test your understanding with these questions:
    - Cost: $0.50/zone/month + query charges
 
    **Private DNS Zones**:
+
    - Only accessible within linked VNets
    - Used for internal services (database.internal)
    - No domain registration needed (any name works)
@@ -835,15 +856,15 @@ Test your understanding with these questions:
 
    **Answer**: Standard Load Balancer provides critical enterprise features:
 
-   | Feature | Basic | Standard |
-   |---------|-------|----------|
-   | **SLA** | No SLA | 99.99% uptime |
-   | **Backend pool size** | 300 instances | 1,000 instances |
-   | **Availability Zones** | Not supported | Zone-redundant |
-   | **Health probes** | HTTP, TCP | HTTP, HTTPS, TCP |
-   | **Security** | Open by default | Closed (requires NSG allow rules) |
-   | **Monitoring** | Basic metrics | Comprehensive metrics + logs |
-   | **Multi-dimension metrics** | No | Yes |
+   | Feature                     | Basic           | Standard                          |
+   | --------------------------- | --------------- | --------------------------------- |
+   | **SLA**                     | No SLA          | 99.99% uptime                     |
+   | **Backend pool size**       | 300 instances   | 1,000 instances                   |
+   | **Availability Zones**      | Not supported   | Zone-redundant                    |
+   | **Health probes**           | HTTP, TCP       | HTTP, HTTPS, TCP                  |
+   | **Security**                | Open by default | Closed (requires NSG allow rules) |
+   | **Monitoring**              | Basic metrics   | Comprehensive metrics + logs      |
+   | **Multi-dimension metrics** | No              | Yes                               |
 
    **For production workloads like SkyCraft**: Standard is required for SLA guarantees, zone redundancy, and comprehensive monitoring. Basic SKU is being deprecated.
    </details>
@@ -856,12 +877,14 @@ Test your understanding with these questions:
    **Answer**: Health probes work as follows:
 
    **Configuration** (our SkyCraft example):
+
    - Protocol: TCP
    - Port: 8085 (world server)
    - Interval: 15 seconds (how often to check)
    - Unhealthy threshold: 2 consecutive failures
 
    **Process**:
+
    1. Every 15 seconds, load balancer attempts TCP connection to port 8085
    2. **Healthy**: If TCP handshake succeeds → VM marked healthy
    3. **Unhealthy**: If connection fails/times out → increment failure counter
@@ -886,11 +909,13 @@ Test your understanding with these questions:
    **Distribution Modes**:
 
    1. **None (5-tuple hash)** - Default
+
       - Hash: Source IP + Source Port + Dest IP + Dest Port + Protocol
       - Best distribution across backends
       - Use when: Stateless applications
 
    2. **Client IP (2-tuple hash)**
+
       - Hash: Source IP + Dest IP only
       - Same client → same backend
       - Use when: Sessions stored locally on server
@@ -900,6 +925,7 @@ Test your understanding with these questions:
       - Balance between persistence and distribution
 
    **For AzerothCore**:
+
    - **Auth servers**: Use **Client IP affinity** (session data exists)
    - **World servers**: Use **Client IP affinity** (player session state)
    - **Database**: Not load balanced (single primary)
@@ -915,17 +941,20 @@ Test your understanding with these questions:
    **Answer**: **Yes**, with **auto-registration** enabled on the VNet link.
 
    **How it works**:
+
    1. Link Private DNS zone to VNet
    2. Enable **auto-registration** checkbox
    3. When VM starts: Azure automatically creates A record
    4. When VM stops: Azure automatically deletes A record
 
    **Example** (our SkyCraft config):
+
    - Dev VNet linked to `skycraft.internal` with auto-registration
    - Deploy VM named `dev-world-01` with IP 10.1.2.10
    - Azure creates: `dev-world-01.skycraft.internal` → 10.1.2.10
 
    **Benefits**:
+
    - No manual DNS management
    - Always up-to-date records
    - Services can use names instead of IPs
@@ -941,6 +970,7 @@ Test your understanding with these questions:
    **Answer**: **Load balancer enters degraded state and stops accepting new connections.**
 
    **Behavior**:
+
    1. All VMs marked unhealthy (no healthy backends available)
    2. Load balancer health status → **Degraded**
    3. **New connections**: Rejected (connection refused or timeout)
@@ -948,10 +978,12 @@ Test your understanding with these questions:
    5. Azure Monitor alerts fire (if configured)
 
    **Monitoring**:
+
    - Metric: **Health Probe Status** drops to 0%
    - Alert rule: "Backend Health Probe Status < 50% for 5 minutes"
 
    **Prevention**:
+
    - Deploy VMs across Availability Zones
    - Use autoscaling to replace failed instances
    - Implement application-level health checks
@@ -969,24 +1001,27 @@ Test your understanding with these questions:
 
    **Propagation Timeline**:
 
-   | Change Type | Typical Time | Why |
-   |-------------|--------------|-----|
-   | **Azure DNS record update** | 60 seconds | Azure DNS authoritative servers |
-   | **Public internet DNS** | TTL duration | Recursive resolvers cache records |
-   | **Local computer cache** | Up to 24 hours | OS DNS cache |
+   | Change Type                 | Typical Time   | Why                               |
+   | --------------------------- | -------------- | --------------------------------- |
+   | **Azure DNS record update** | 60 seconds     | Azure DNS authoritative servers   |
+   | **Public internet DNS**     | TTL duration   | Recursive resolvers cache records |
+   | **Local computer cache**    | Up to 24 hours | OS DNS cache                      |
 
    **Our SkyCraft TTL**: 300 seconds (5 minutes)
+
    - Change A record from 20.240.50.10 to 20.240.50.20
    - Azure updates immediately
    - Public resolvers refresh after 5 minutes (max)
 
    **Best Practices**:
+
    - **Before change**: Lower TTL to 60 seconds (1 hour in advance)
    - **Make change**: Update record
    - **After change**: Wait 2× old TTL before critical operations
    - **Restore**: Increase TTL back to normal (3600-86400)
 
    **Force refresh** (troubleshooting):
+
    ```bash
    # Windows
    ipconfig /flushdns
@@ -996,6 +1031,7 @@ Test your understanding with these questions:
    # or
    sudo dscacheutil -flushcache
    ```
+
    </details>
 
 ---
@@ -1007,6 +1043,7 @@ Test your understanding with these questions:
 **Symptom**: `nslookup dev.skycraft.example.com` returns "Non-existent domain"
 
 **Solution**:
+
 - Verify domain delegation at registrar points to Azure NS servers
 - Check record exists in Azure Portal (DNS zones → Record sets)
 - Wait for TTL expiration (300 seconds in our config)
@@ -1021,6 +1058,7 @@ Test your understanding with these questions:
 **Symptom**: VM deployed but no DNS record created in Private DNS zone
 
 **Solution**:
+
 - Verify VNet link has **auto-registration enabled** (checkbox)
 - Confirm VM is in a linked VNet
 - Check VM has started successfully (not stopped/deallocated)
@@ -1032,6 +1070,7 @@ Test your understanding with these questions:
 **Symptom**: Backend pool VMs show 0% health probe status
 
 **Solution**:
+
 - Verify VM is running (not stopped)
 - Check NSG allows traffic from Azure Load Balancer service tag:
   - Source: **AzureLoadBalancer**
@@ -1051,6 +1090,7 @@ Test your understanding with these questions:
 **Symptom**: Error: "Quota exceeded for resource type 'Public IP Addresses'"
 
 **Solution**:
+
 - Check current quota usage: **Subscriptions** → **Usage + quotas**
 - Request quota increase if needed
 - Verify public IP is Standard SKU (matches Standard Load Balancer requirement)
@@ -1061,6 +1101,7 @@ Test your understanding with these questions:
 **Symptom**: Error: "Backend pool must be in same virtual network as load balancer"
 
 **Solution**:
+
 - Verify backend pool and load balancer are in same region
 - Confirm backend pool references correct VNet
 - Check if VNet has available IP addresses
@@ -1071,6 +1112,7 @@ Test your understanding with these questions:
 **Symptom**: One VM receiving 90% of traffic, others idle
 
 **Solution**:
+
 - Check session persistence setting (should be **None** for even distribution)
 - Verify all VMs are healthy (Health probe status = 100%)
 - Confirm load balancing rule uses correct distribution algorithm
@@ -1101,6 +1143,7 @@ Test your understanding with these questions:
 ## 📝 Lab Summary
 
 **What You Accomplished**:
+
 - ✅ Created Azure Public DNS zone with A and CNAME records
 - ✅ Deployed Azure Private DNS zone for internal name resolution
 - ✅ Configured 2 Azure Standard Load Balancers (dev and prod)
@@ -1110,6 +1153,7 @@ Test your understanding with these questions:
 - ✅ Linked Private DNS zones to all three VNets
 
 **Infrastructure Ready**:
+
 - 🌐 DNS infrastructure for public and private name resolution
 - ⚖️ Load balancers ready to distribute traffic across multiple game servers
 - 🏥 Health probes configured to detect and remove failed servers automatically
@@ -1118,6 +1162,7 @@ Test your understanding with these questions:
 **Time Spent**: ~2.5 hours
 
 **Module 2 Complete!** You've built a production-ready network infrastructure with:
+
 - Hub-spoke topology (Lab 2.1)
 - Network security with Bastion and NSGs (Lab 2.2)
 - DNS and load balancing (Lab 2.3)
