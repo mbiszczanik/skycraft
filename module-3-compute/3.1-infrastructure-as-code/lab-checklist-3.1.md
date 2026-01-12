@@ -1,566 +1,515 @@
 # Lab 3.1 Completion Checklist
 
-## ✅ Development Environment VM Verification
+## ✅ Infrastructure as Code Setup Verification
 
-### Dev Auth Server (dev-skycraft-swc-auth-01-vm)
-- [ ] VM name: `dev-skycraft-swc-auth-01-vm`
-- [ ] Resource group: `dev-skycraft-swc-rg`
-- [ ] Location: **Sweden Central**
-- [ ] Availability zone: **1**
-- [ ] Size: **Standard_B2s** (2 vCPU, 4 GiB memory)
-- [ ] Image: Ubuntu Server 22.04 LTS - x64 Gen2
-- [ ] OS disk type: **Standard SSD** (30 GB)
-- [ ] Virtual network: `dev-skycraft-swc-vnet`
-- [ ] Subnet: `AuthSubnet (10.1.1.0/24)`
-- [ ] Private IP address: [Record IP: ____________]
-- [ ] Public IP address: **None**
-- [ ] NSG: Subnet-level NSG (dev-skycraft-swc-auth-nsg)
-- [ ] SSH key name: `dev-skycraft-swc-auth-01-key`
-- [ ] Boot diagnostics: Enabled
-- [ ] VM status: **Running**
+### Bicep Tools Installation
+- [ ] Bicep CLI installed and verified
+  - Command used: `az bicep version`
+  - Version installed: [Record version: ____________]
 
-### Dev World Server 1 (dev-skycraft-swc-world-01-vm)
-- [ ] VM name: `dev-skycraft-swc-world-01-vm`
-- [ ] Resource group: `dev-skycraft-swc-rg`
-- [ ] Availability zone: **1**
-- [ ] Size: **Standard_B2ms** (2 vCPU, 8 GiB memory)
-- [ ] Image: Ubuntu Server 22.04 LTS
-- [ ] OS disk type: **Standard SSD** (30 GB)
-- [ ] Subnet: `WorldSubnet (10.1.2.0/24)`
-- [ ] Private IP address: [Record IP: ____________]
-- [ ] Public IP address: **None**
-- [ ] SSH key name: `dev-skycraft-swc-world-01-key`
-- [ ] VM status: **Running**
+- [ ] VS Code installed
+- [ ] VS Code Bicep extension installed by Microsoft
+- [ ] IntelliSense working in .bicep files (tested with autocomplete)
 
-### Dev World Server 2 (dev-skycraft-swc-world-02-vm)
-- [ ] VM name: `dev-skycraft-swc-world-02-vm`
-- [ ] Resource group: `dev-skycraft-swc-rg`
-- [ ] Availability zone: **2** (different from world-01)
-- [ ] Size: **Standard_B2ms** (2 vCPU, 8 GiB memory)
-- [ ] Image: Ubuntu Server 22.04 LTS
-- [ ] OS disk type: **Standard SSD** (30 GB)
-- [ ] Subnet: `WorldSubnet (10.1.2.0/24)`
-- [ ] Private IP address: [Record IP: ____________]
-- [ ] Public IP address: **None**
-- [ ] SSH key name: `dev-skycraft-swc-world-02-key`
-- [ ] VM status: **Running**
-
-### Dev Database Server (dev-skycraft-swc-db-01-vm)
-- [ ] VM name: `dev-skycraft-swc-db-01-vm`
-- [ ] Resource group: `dev-skycraft-swc-rg`
-- [ ] Availability zone: **1**
-- [ ] Size: **Standard_B2ms** (2 vCPU, 8 GiB memory)
-- [ ] Image: Ubuntu Server 22.04 LTS
-- [ ] OS disk type: **Standard SSD** (30 GB)
-- [ ] Subnet: `DatabaseSubnet (10.1.3.0/24)`
-- [ ] Private IP address: [Record IP: ____________]
-- [ ] Public IP address: **None**
-- [ ] SSH key name: `dev-skycraft-swc-db-01-key`
-- [ ] **Data disk attached**: `dev-skycraft-swc-db-01-datadisk-01`
-  - Size: **128 GiB**
-  - Disk type: **Standard SSD**
-  - Host caching: Read/Write
-- [ ] VM status: **Running**
-
-### Development Environment Tags
-Verify all dev VMs have these tags:
-- [ ] Tag: `Project` = `SkyCraft`
-- [ ] Tag: `Environment` = `Development`
-- [ ] Tag: `CostCenter` = `MSDN`
-- [ ] Tag: `Role` = [AuthServer | WorldServer | DatabaseServer]
+### Understanding IaC Concepts
+- [ ] Understand benefits: Repeatability, version control, speed, testing
+- [ ] Know difference between ARM templates (JSON) and Bicep (DSL)
+- [ ] Understand Bicep workflow: Bicep → transpile → ARM → Azure
+- [ ] Can explain declarative vs imperative infrastructure code
 
 ---
 
-## ✅ Production Environment VM Verification
+## ✅ ARM Template Export and Analysis
 
-### Prod Auth Server (prod-skycraft-swc-auth-01-vm)
-- [ ] VM name: `prod-skycraft-swc-auth-01-vm`
-- [ ] Resource group: `prod-skycraft-swc-rg`
-- [ ] Location: **Sweden Central**
-- [ ] Availability zone: **1**
-- [ ] Size: **Standard_D2s_v5** (2 vCPU, 8 GiB memory)
-- [ ] Image: Ubuntu Server 22.04 LTS - x64 Gen2
-- [ ] OS disk type: **Premium SSD** (30 GB)
-- [ ] Virtual network: `prod-skycraft-swc-vnet`
-- [ ] Subnet: `AuthSubnet (10.2.1.0/24)`
-- [ ] Private IP address: [Record IP: ____________]
-- [ ] Public IP address: **None**
-- [ ] NSG: Subnet-level NSG (prod-skycraft-swc-auth-nsg)
-- [ ] SSH key name: `prod-skycraft-swc-auth-01-key`
-- [ ] VM status: **Running**
+### Exported ARM Template
+- [ ] Exported existing resource group as ARM template
+  - Resource group exported: [Name: ____________]
+  - Export date: [Date: ____________]
+  - Template size: [Lines/KB: ____________]
 
-### Prod World Server 1 (prod-skycraft-swc-world-01-vm)
-- [ ] VM name: `prod-skycraft-swc-world-01-vm`
-- [ ] Resource group: `prod-skycraft-swc-rg`
-- [ ] Availability zone: **1**
-- [ ] Size: **Standard_D2s_v5** (2 vCPU, 8 GiB memory)
-- [ ] Image: Ubuntu Server 22.04 LTS
-- [ ] OS disk type: **Premium SSD** (30 GB)
-- [ ] Subnet: `WorldSubnet (10.2.2.0/24)`
-- [ ] Private IP address: [Record IP: ____________]
-- [ ] Public IP address: **None**
-- [ ] SSH key name: `prod-skycraft-swc-world-01-key`
-- [ ] VM status: **Running**
+### ARM Template Components Identified
+- [ ] Located `parameters` section in template
+- [ ] Located `variables` section in template
+- [ ] Located `resources` array in template
+- [ ] Located `outputs` section in template
+- [ ] Identified at least 3 ARM template functions (concat, resourceId, etc.)
 
-### Prod World Server 2 (prod-skycraft-swc-world-02-vm)
-- [ ] VM name: `prod-skycraft-swc-world-02-vm`
-- [ ] Resource group: `prod-skycraft-swc-rg`
-- [ ] Availability zone: **2** (different from world-01)
-- [ ] Size: **Standard_D2s_v5** (2 vCPU, 8 GiB memory)
-- [ ] Image: Ubuntu Server 22.04 LTS
-- [ ] OS disk type: **Premium SSD** (30 GB)
-- [ ] Subnet: `WorldSubnet (10.2.2.0/24)`
-- [ ] Private IP address: [Record IP: ____________]
-- [ ] Public IP address: **None**
-- [ ] SSH key name: `prod-skycraft-swc-world-02-key`
-- [ ] VM status: **Running**
-
-### Prod Database Server (prod-skycraft-swc-db-01-vm)
-- [ ] VM name: `prod-skycraft-swc-db-01-vm`
-- [ ] Resource group: `prod-skycraft-swc-rg`
-- [ ] Availability zone: **1**
-- [ ] Size: **Standard_D4s_v5** (4 vCPU, 16 GiB memory)
-- [ ] Image: Ubuntu Server 22.04 LTS
-- [ ] OS disk type: **Premium SSD** (30 GB)
-- [ ] Subnet: `DatabaseSubnet (10.2.3.0/24)`
-- [ ] Private IP address: [Record IP: ____________]
-- [ ] Public IP address: **None**
-- [ ] SSH key name: `prod-skycraft-swc-db-01-key`
-- [ ] **Data disk attached**: `prod-skycraft-swc-db-01-datadisk-01`
-  - Size: **256 GiB**
-  - Disk type: **Premium SSD**
-  - Host caching: Read/Write
-- [ ] VM status: **Running**
-
-### Production Environment Tags
-Verify all prod VMs have these tags:
-- [ ] Tag: `Project` = `SkyCraft`
-- [ ] Tag: `Environment` = `Production`
-- [ ] Tag: `CostCenter` = `MSDN`
-- [ ] Tag: `Role` = [AuthServer | WorldServer | DatabaseServer]
+### ARM Template Functions Understood
+- [ ] `parameters()` function
+- [ ] `variables()` function
+- [ ] `resourceId()` function
+- [ ] `resourceGroup()` function
+- [ ] `concat()` or string interpolation
 
 ---
 
-## ✅ Networking and Security Verification
+## ✅ Bicep Files Created
 
-### Network Configuration
-- [ ] All 8 VMs have **no public IP addresses**
-- [ ] All VMs deployed to correct subnets:
-  - Auth servers → AuthSubnet (10.1.1.0/24 or 10.2.1.0/24)
-  - World servers → WorldSubnet (10.1.2.0/24 or 10.2.2.0/24)
-  - Database servers → DatabaseSubnet (10.1.3.0/24 or 10.2.3.0/24)
-- [ ] All VMs have Network Interface Cards (NICs) attached
-- [ ] NICs have "Delete with VM" enabled
+### Core Bicep Files
+- [ ] **first-resource.bicep** created
+  - Contains: Parameter, variable, resource, output
+  - Resource type: [Type: ____________]
+  - Successfully built with `az bicep build`
 
-### NSG and Security
-- [ ] All VMs protected by subnet-level NSGs (no NIC-level NSGs)
-- [ ] NSG rules allow SSH (port 22) from Bastion subnet (10.0.0.0/26)
-- [ ] NSG rules allow application ports (3724, 8085) as configured in Lab 2.2
-- [ ] Boot diagnostics enabled on all VMs
+- [ ] **main.bicep** created
+  - Target scope: `subscription`
+  - Creates 3 resource groups (platform, dev, prod)
+  - References modules
+  - File size: [Record lines: ____________]
 
-### Azure Bastion Connectivity
-- [ ] Can connect to dev-skycraft-swc-auth-01-vm via Bastion
-- [ ] Can connect to dev-skycraft-swc-world-01-vm via Bastion
-- [ ] Can connect to dev-skycraft-swc-world-02-vm via Bastion
-- [ ] Can connect to dev-skycraft-swc-db-01-vm via Bastion
-- [ ] Can connect to prod-skycraft-swc-auth-01-vm via Bastion
-- [ ] Can connect to prod-skycraft-swc-world-01-vm via Bastion
-- [ ] Can connect to prod-skycraft-swc-world-02-vm via Bastion
-- [ ] Can connect to prod-skycraft-swc-db-01-vm via Bastion
+### Bicep Parameter Files
+- [ ] **dev.bicepparam** created
+  - Contains `using './main.bicep'` statement
+  - Development-specific parameters defined
+  - Location: `swedencentral`
+  - Environment: `dev`
 
-### Private DNS Auto-Registration
-- [ ] dev VMs auto-registered in `skycraft.internal` DNS zone
-- [ ] prod VMs auto-registered in `skycraft.internal` DNS zone
-- [ ] Can resolve VM hostnames from within VNet (nslookup test)
+- [ ] **prod.bicepparam** created
+  - Contains `using './main.bicep'` statement
+  - Production-specific parameters defined
+  - Larger VM sizes than dev (if applicable)
+
+---
+
+## ✅ Bicep Modules Created
+
+### modules/network.bicep
+- [ ] File created at `modules/network.bicep`
+- [ ] Parameters defined:
+  - [ ] `namePrefix` (string)
+  - [ ] `location` (string with default)
+  - [ ] `environment` (string with @allowed decorator)
+  - [ ] `vnetAddressPrefix` (string)
+  - [ ] `subnets` (array)
+  - [ ] `tags` (object)
+
+- [ ] Resource created: `Microsoft.Network/virtualNetworks`
+- [ ] Subnets created using `for` loop
+- [ ] Outputs defined: `vnetId`, `vnetName`, `subnets` array
+
+### modules/nsg.bicep
+- [ ] File created at `modules/nsg.bicep`
+- [ ] Parameters defined:
+  - [ ] `nsgName` (string)
+  - [ ] `location` (string with default)
+  - [ ] `securityRules` (array)
+  - [ ] `tags` (object)
+
+- [ ] Resource created: `Microsoft.Network/networkSecurityGroups`
+- [ ] Security rules created using `for` loop
+- [ ] Outputs defined: `nsgId`, `nsgName`
+
+### modules/loadbalancer.bicep
+- [ ] File created at `modules/loadbalancer.bicep`
+- [ ] Parameters defined:
+  - [ ] `namePrefix` (string)
+  - [ ] `location` (string with default)
+  - [ ] `publicIpId` (string)
+  - [ ] `backendPools` (array)
+  - [ ] `healthProbes` (array)
+  - [ ] `lbRules` (array)
+  - [ ] `tags` (object)
+
+- [ ] Load balancer SKU: `Standard`
+- [ ] Frontend IP configuration defined
+- [ ] Backend pools created using `for` loop
+- [ ] Health probes created using `for` loop
+- [ ] Load balancing rules created using `for` loop
+- [ ] Outputs defined: `loadBalancerId`, `loadBalancerName`, `backendPoolIds`
+
+### modules/publicip.bicep
+- [ ] File created at `modules/publicip.bicep`
+- [ ] Parameters defined:
+  - [ ] `publicIpName` (string)
+  - [ ] `location` (string with default)
+  - [ ] `sku` (string with @allowed)
+  - [ ] `allocationMethod` (string with @allowed)
+  - [ ] `tags` (object)
+
+- [ ] Resource created: `Microsoft.Network/publicIPAddresses`
+- [ ] SKU: `Standard`
+- [ ] Allocation method: `Static`
+- [ ] Outputs defined: `publicIpId`, `publicIpName`, `ipAddress`
+
+---
+
+## ✅ ARM to Bicep Conversion
+
+### Decompilation Process
+- [ ] Decompiled ARM template using `az bicep decompile --file template.json`
+- [ ] Decompiled file created: `template.bicep`
+- [ ] Reviewed decompiled Bicep for issues
+  - [ ] Long parameter names identified
+  - [ ] Hardcoded values identified
+  - [ ] Missing descriptions identified
+
+### Bicep Cleanup Applied
+- [ ] Shortened parameter names (e.g., `virtualNetworks_dev_name` → `vnetName`)
+- [ ] Added `@description()` decorators to parameters
+- [ ] Added `@allowed()` decorators where appropriate
+- [ ] Extracted hardcoded values to parameters
+- [ ] Added outputs for important resource IDs
+- [ ] Tested cleaned Bicep with `az bicep build`
+
+---
+
+## ✅ Template Validation and Deployment
+
+### Bicep Build Validation
+- [ ] Successfully built main.bicep: `az bicep build --file main.bicep`
+  - Output file created: `main.json` (ARM template)
+  - No errors or warnings
+
+- [ ] Verified ARM template is valid JSON
+- [ ] Reviewed transpiled ARM template structure
+
+### Template Validation
+- [ ] Validated deployment without deploying:
+  ```bash
+  az deployment sub validate     --location swedencentral     --template-file main.bicep     --parameters dev.bicepparam
+  ```
+  - Validation result: [✅ Success / ❌ Failed]
+  - Validation date/time: [Record: ____________]
+
+### What-If Analysis
+- [ ] Ran what-if analysis:
+  ```bash
+  az deployment sub what-if     --location swedencentral     --template-file main.bicep     --parameters dev.bicepparam
+  ```
+  - Resources to create: [Number: ______]
+  - Resources to modify: [Number: ______]
+  - Resources to delete: [Number: ______]
+
+- [ ] Reviewed what-if output carefully
+- [ ] No unexpected deletions or modifications
+- [ ] Confirmed changes match expectations
+
+### Deployment Execution
+- [ ] Deployed Bicep template successfully:
+  ```bash
+  az deployment sub create     --name "SkyCraft-Dev-YYYYMMDD-HHMMSS"     --location swedencentral     --template-file main.bicep     --parameters dev.bicepparam
+  ```
+  - Deployment name: [Record: ____________]
+  - Deployment start time: [Record: ____________]
+  - Deployment duration: [Record: ______ minutes]
+  - Deployment state: [✅ Succeeded / ❌ Failed]
+
+---
+
+## ✅ Deployed Resources Verification
+
+### Resource Groups Created
+- [ ] **platform-skycraft-swc-rg**
+  - Location: `swedencentral`
+  - Tags: Project=SkyCraft, Environment=Platform, CostCenter=MSDN
+  - Provisioning state: Succeeded
+
+- [ ] **dev-skycraft-swc-rg**
+  - Location: `swedencentral`
+  - Tags: Project=SkyCraft, Environment=Development, CostCenter=MSDN
+  - Provisioning state: Succeeded
+
+- [ ] **prod-skycraft-swc-rg** (if deployed)
+  - Location: `swedencentral`
+  - Tags: Project=SkyCraft, Environment=Production, CostCenter=MSDN
+  - Provisioning state: Succeeded
+
+### Network Resources in Dev
+- [ ] VNet: `dev-skycraft-swc-vnet`
+  - Address space: `10.1.0.0/16`
+  - Number of subnets: [Record: ______]
+  - Provisioning state: Succeeded
+
+- [ ] NSG: `auth-nsg`
+  - Number of security rules: [Record: ______]
+  - Associated to subnet: [Yes/No]
+
+- [ ] NSG: `world-nsg`
+  - Number of security rules: [Record: ______]
+  - Associated to subnet: [Yes/No]
+
+### Load Balancer Resources in Dev
+- [ ] Public IP: `dev-skycraft-swc-lb-pip`
+  - SKU: `Standard`
+  - Allocation: `Static`
+  - IP address: [Record IP: ____________]
+
+- [ ] Load Balancer: `dev-skycraft-swc-lb`
+  - SKU: `Standard`
+  - Frontend IP configurations: 1
+  - Backend pools: [Record: ______]
+  - Health probes: [Record: ______]
+  - Load balancing rules: [Record: ______]
+
+### Deployment Outputs
+- [ ] Retrieved deployment outputs successfully
+- [ ] Documented output values:
+  - `platformResourceGroupName`: [____________]
+  - `devResourceGroupName`: [____________]
+  - `hubVnetId`: [____________]
+  - `devVnetId`: [____________]
+  - `devLoadBalancerId`: [____________]
+  - `devLoadBalancerPublicIp`: [____________]
 
 ---
 
 ## 🔍 Validation Commands
 
-Run these Azure CLI commands to validate your lab setup:
+Run these commands and document the results:
 
-### Login and Set Context
-
-```azurecli
-# Login to Azure
-az login
-
-# Set subscription context
-az account set --subscription "YOUR-SUBSCRIPTION-NAME"
-
-# Verify current subscription
-az account show --query "{Name:name, SubscriptionId:id}" --output table
-```
-
-### List All Deployed VMs
-
-```azurecli
-# List all VMs in dev resource group
-az vm list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,Size:hardwareProfile.vmSize,Zone:zones[0],Status:provisioningState}"   --output table
-
-# Expected output:
-# Name                          Size           Zone  Status
-# ----------------------------  -------------  ----  ---------
-# dev-skycraft-swc-auth-01-vm   Standard_B2s   1     Succeeded
-# dev-skycraft-swc-world-01-vm  Standard_B2ms  1     Succeeded
-# dev-skycraft-swc-world-02-vm  Standard_B2ms  2     Succeeded
-# dev-skycraft-swc-db-01-vm     Standard_B2ms  1     Succeeded
-
-# List all VMs in prod resource group
-az vm list   --resource-group prod-skycraft-swc-rg   --query "[].{Name:name,Size:hardwareProfile.vmSize,Zone:zones[0],Status:provisioningState}"   --output table
-
-# Expected output:
-# Name                           Size             Zone  Status
-# -----------------------------  ---------------  ----  ---------
-# prod-skycraft-swc-auth-01-vm   Standard_D2s_v5  1     Succeeded
-# prod-skycraft-swc-world-01-vm  Standard_D2s_v5  1     Succeeded
-# prod-skycraft-swc-world-02-vm  Standard_D2s_v5  2     Succeeded
-# prod-skycraft-swc-db-01-vm     Standard_D4s_v5  1     Succeeded
-```
-
-### Verify VM Details
-
-```azurecli
-# Get detailed info for dev auth server
-az vm show   --resource-group dev-skycraft-swc-rg   --name dev-skycraft-swc-auth-01-vm   --query "{Name:name,Size:hardwareProfile.vmSize,Zone:zones[0],OS:storageProfile.imageReference.offer,OSType:storageProfile.osDisk.osType,DiskType:storageProfile.osDisk.managedDisk.storageAccountType}"   --output json
-
-# Expected output:
-# {
-#   "DiskType": "StandardSSD_LRS",
-#   "Name": "dev-skycraft-swc-auth-01-vm",
-#   "OS": "0001-com-ubuntu-server-jammy",
-#   "OSType": "Linux",
-#   "Size": "Standard_B2s",
-#   "Zone": "1"
-# }
-```
-
-### Verify Network Configuration
-
-```azurecli
-# Get network interface details for dev auth server
-az vm show   --resource-group dev-skycraft-swc-rg   --name dev-skycraft-swc-auth-01-vm   --query "networkProfile.networkInterfaces[0].id"   --output tsv | xargs az network nic show --ids | jq '{Name:.name,PrivateIP:.ipConfigurations[0].privateIpAddress,Subnet:.ipConfigurations[0].subnet.id,PublicIP:.ipConfigurations[0].publicIpAddress}'
-
-# Expected output:
-# {
-#   "Name": "dev-skycraft-swc-auth-01-vmVMNic",
-#   "PrivateIP": "10.1.1.X",
-#   "Subnet": "/subscriptions/.../subnets/AuthSubnet",
-#   "PublicIP": null
-# }
-
-# List all NICs in dev resource group
-az network nic list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,PrivateIP:ipConfigurations[0].privateIpAddress,Subnet:ipConfigurations[0].subnet.id}"   --output table
-```
-
-### Verify Availability Zones
-
-```azurecli
-# Check zone distribution for world servers (dev)
-az vm list   --resource-group dev-skycraft-swc-rg   --query "[?contains(name,'world')].{Name:name,Zone:zones[0]}"   --output table
-
-# Expected output:
-# Name                          Zone
-# ----------------------------  ----
-# dev-skycraft-swc-world-01-vm  1
-# dev-skycraft-swc-world-02-vm  2
-
-# Check zone distribution for world servers (prod)
-az vm list   --resource-group prod-skycraft-swc-rg   --query "[?contains(name,'world')].{Name:name,Zone:zones[0]}"   --output table
-
-# Expected output:
-# Name                           Zone
-# -----------------------------  ----
-# prod-skycraft-swc-world-01-vm  1
-# prod-skycraft-swc-world-02-vm  2
-```
-
-### Verify Managed Disks
-
-```azurecli
-# List all disks in dev resource group
-az disk list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,Size:diskSizeGb,SKU:sku.name,State:diskState}"   --output table
-
-# Expected output:
-# Name                                    Size  SKU              State
-# --------------------------------------  ----  ---------------  --------
-# dev-skycraft-swc-auth-01-vm_OsDisk_...  30    StandardSSD_LRS  Attached
-# dev-skycraft-swc-world-01-vm_OsDisk...  30    StandardSSD_LRS  Attached
-# dev-skycraft-swc-world-02-vm_OsDisk...  30    StandardSSD_LRS  Attached
-# dev-skycraft-swc-db-01-vm_OsDisk_...    30    StandardSSD_LRS  Attached
-# dev-skycraft-swc-db-01-datadisk-01      128   StandardSSD_LRS  Attached
-
-# Verify data disk attachment
-az vm show   --resource-group dev-skycraft-swc-rg   --name dev-skycraft-swc-db-01-vm   --query "storageProfile.dataDisks[].{Name:name,Size:diskSizeGb,Lun:lun,Caching:caching}"   --output table
-
-# Expected output:
-# Name                                Size  Lun  Caching
-# ----------------------------------  ----  ---  ----------
-# dev-skycraft-swc-db-01-datadisk-01  128   0    ReadWrite
-
-# List all disks in prod resource group
-az disk list   --resource-group prod-skycraft-swc-rg   --query "[].{Name:name,Size:diskSizeGb,SKU:sku.name,State:diskState}"   --output table
-
-# Expected output includes:
-# prod-skycraft-swc-db-01-datadisk-01  256  Premium_LRS  Attached
-```
-
-### Verify Tags
-
-```azurecli
-# Check tags on dev auth server
-az vm show   --resource-group dev-skycraft-swc-rg   --name dev-skycraft-swc-auth-01-vm   --query tags   --output json
-
-# Expected output:
-# {
-#   "CostCenter": "MSDN",
-#   "Environment": "Development",
-#   "Project": "SkyCraft",
-#   "Role": "AuthServer"
-# }
-
-# List all VMs with tags
-az vm list   --query "[].{Name:name,Project:tags.Project,Environment:tags.Environment,Role:tags.Role}"   --output table
-```
-
-### Verify Private DNS Records
-
-```azurecli
-# List auto-registered DNS records in private zone
-az network private-dns record-set a list   --resource-group platform-skycraft-swc-rg   --zone-name skycraft.internal   --query "[].{Name:name,IP:aRecords[0].ipv4Address,AutoRegistered:isAutoRegistered}"   --output table
-
-# Expected output includes:
-# Name                          IP          AutoRegistered
-# ----------------------------  ----------  ---------------
-# dev-skycraft-swc-auth-01-vm   10.1.1.X    True
-# dev-skycraft-swc-world-01-vm  10.1.2.X    True
-# dev-skycraft-swc-world-02-vm  10.1.2.X    True
-# dev-skycraft-swc-db-01-vm     10.1.3.X    True
-# prod-skycraft-swc-auth-01-vm  10.2.1.X    True
-# ...
-```
-
-### Test VM Connectivity from Bastion
-
-Once connected to a VM via Bastion, run these commands:
+### Bicep CLI Validation
 
 ```bash
-# Check OS version
-cat /etc/os-release | grep PRETTY_NAME
+# Verify Bicep CLI version
+az bicep version
 
-# Expected output:
-# PRETTY_NAME="Ubuntu 22.04.X LTS"
+# Expected output: Bicep CLI version 0.24.24 (or later)
+# Your version: ________________
+```
 
-# Check CPU cores
-nproc
+```bash
+# Build Bicep to ARM
+az bicep build --file main.bicep
 
-# Expected output: 2 (for B2s, B2ms, D2s_v5) or 4 (for D4s_v5)
+# Expected output: "Build succeeded"
+# Result: ________________
+```
 
-# Check memory
-free -h | grep Mem
+```bash
+# List all Bicep files in directory
+find . -name "*.bicep" -type f
 
-# Expected output varies by VM size:
-# B2s: ~3.8 GiB
-# B2ms/D2s_v5: ~7.8 GiB
-# D4s_v5: ~15.6 GiB
+# Expected files:
+# ./main.bicep
+# ./first-resource.bicep
+# ./modules/network.bicep
+# ./modules/nsg.bicep
+# ./modules/loadbalancer.bicep
+# ./modules/publicip.bicep
 
-# Check network interface and IP
-ip addr show eth0
+# Your files: ________________
+```
 
-# Expected: Private IP in correct subnet range
+### Deployment Validation
 
-# Test DNS resolution
-nslookup dev-skycraft-swc-db-01-vm.skycraft.internal
+```bash
+# List subscription deployments
+az deployment sub list   --query "[?contains(name, 'SkyCraft')].{Name:name,State:properties.provisioningState,Timestamp:properties.timestamp}"   --output table
 
-# Expected: Returns private IP (10.1.3.X)
+# Expected output: At least one SkyCraft deployment with Succeeded state
+```
 
-# Test connectivity to another VM
-nc -zv 10.1.2.10 22
+```bash
+# Show specific deployment details
+az deployment sub show   --name "YOUR-DEPLOYMENT-NAME"   --query "{Name:name,State:properties.provisioningState,Duration:properties.duration,ResourceGroups:properties.outputResources[?type=='Microsoft.Resources/resourceGroups'].id}"   --output json
 
-# Expected: Connection succeeded (SSH port open)
+# Document your deployment name: ________________
+```
 
-# Check disk layout
-lsblk
+### Resource Group Validation
 
-# Expected for auth/world VMs:
-# sda   30G  (OS disk only)
+```bash
+# List all SkyCraft resource groups
+az group list   --query "[?contains(name, 'skycraft')].{Name:name,Location:location,State:properties.provisioningState,Tags:tags}"   --output table
 
-# Expected for database VMs:
-# sda   30G  (OS disk)
-# sdb  128G/256G (data disk - may need to be mounted)
+# Expected output: 3 resource groups (platform, dev, prod)
+# Your count: ________________
+```
+
+### Network Resources Validation
+
+```bash
+# List VNets in dev resource group
+az network vnet list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,AddressSpace:addressSpace.addressPrefixes[0],Subnets:length(subnets),State:provisioningState}"   --output table
+
+# Expected output: 1 VNet with 3 subnets
+# Your result: ________________
+```
+
+```bash
+# List NSGs in dev resource group
+az network nsg list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,Rules:length(securityRules),Location:location}"   --output table
+
+# Expected output: 2-3 NSGs with configured rules
+# Your result: ________________
+```
+
+```bash
+# List load balancers
+az network lb list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,SKU:sku.name,BackendPools:length(backendAddressPools),Probes:length(probes),Rules:length(loadBalancingRules)}"   --output table
+
+# Expected output: 1 load balancer (Standard SKU) with 2 backend pools, 2 probes, 2 rules
+# Your result: ________________
+```
+
+### Bicep Module Validation
+
+```bash
+# Validate network module independently
+az bicep build --file modules/network.bicep
+
+# Result: ________________
+```
+
+```bash
+# Validate NSG module independently
+az bicep build --file modules/nsg.bicep
+
+# Result: ________________
+```
+
+```bash
+# Validate load balancer module independently
+az bicep build --file modules/loadbalancer.bicep
+
+# Result: ________________
 ```
 
 ---
 
-## 📊 VM Deployment Summary
+## 📊 Infrastructure as Code Architecture Summary
 
-Use this table to document your deployed infrastructure:
+Document your IaC architecture:
 
-| VM Name | Size | vCPU | Memory | Zone | OS Disk | Data Disk | Private IP | SSH Key Downloaded |
-|---------|------|------|--------|------|---------|-----------|------------|-------------------|
-| dev-skycraft-swc-auth-01-vm | B2s | 2 | 4 GB | 1 | 30GB SSD | - | __________ | ☐ |
-| dev-skycraft-swc-world-01-vm | B2ms | 2 | 8 GB | 1 | 30GB SSD | - | __________ | ☐ |
-| dev-skycraft-swc-world-02-vm | B2ms | 2 | 8 GB | 2 | 30GB SSD | - | __________ | ☐ |
-| dev-skycraft-swc-db-01-vm | B2ms | 2 | 8 GB | 1 | 30GB SSD | 128GB SSD | __________ | ☐ |
-| prod-skycraft-swc-auth-01-vm | D2s_v5 | 2 | 8 GB | 1 | 30GB Premium | - | __________ | ☐ |
-| prod-skycraft-swc-world-01-vm | D2s_v5 | 2 | 8 GB | 1 | 30GB Premium | - | __________ | ☐ |
-| prod-skycraft-swc-world-02-vm | D2s_v5 | 2 | 8 GB | 2 | 30GB Premium | - | __________ | ☐ |
-| prod-skycraft-swc-db-01-vm | D4s_v5 | 4 | 16 GB | 1 | 30GB Premium | 256GB Premium | __________ | ☐ |
+| Component | File Name | Purpose | Status |
+|-----------|-----------|---------|--------|
+| **Main Template** | main.bicep | Orchestrates all deployments | ✅ |
+| **Dev Parameters** | dev.bicepparam | Development environment params | ✅ |
+| **Prod Parameters** | prod.bicepparam | Production environment params | ✅ |
+| **Network Module** | modules/network.bicep | Reusable VNet creation | ✅ |
+| **NSG Module** | modules/nsg.bicep | Reusable NSG with rules | ✅ |
+| **Load Balancer Module** | modules/loadbalancer.bicep | Reusable LB configuration | ✅ |
+| **Public IP Module** | modules/publicip.bicep | Reusable public IP | ✅ |
+| **ARM Template** | main.json | Transpiled ARM (generated) | ✅ |
 
 ---
 
-## 📊 Subnet Placement Verification
+## 📊 Deployment Summary Table
 
-Document which VMs are in which subnets:
-
-### Development Environment (dev-skycraft-swc-vnet)
-
-| Subnet | IP Range | VMs Deployed | VM Count |
-|--------|----------|--------------|----------|
-| AuthSubnet | 10.1.1.0/24 | dev-skycraft-swc-auth-01-vm | 1 |
-| WorldSubnet | 10.1.2.0/24 | dev-skycraft-swc-world-01-vm<br/>dev-skycraft-swc-world-02-vm | 2 |
-| DatabaseSubnet | 10.1.3.0/24 | dev-skycraft-swc-db-01-vm | 1 |
-
-### Production Environment (prod-skycraft-swc-vnet)
-
-| Subnet | IP Range | VMs Deployed | VM Count |
-|--------|----------|--------------|----------|
-| AuthSubnet | 10.2.1.0/24 | prod-skycraft-swc-auth-01-vm | 1 |
-| WorldSubnet | 10.2.2.0/24 | prod-skycraft-swc-world-01-vm<br/>prod-skycraft-swc-world-02-vm | 2 |
-| DatabaseSubnet | 10.2.3.0/24 | prod-skycraft-swc-db-01-vm | 1 |
+| Deployment Metric | Value |
+|-------------------|-------|
+| **Total Bicep Files** | ______ |
+| **Total Modules** | ______ |
+| **Resource Groups Deployed** | ______ |
+| **VNets Deployed** | ______ |
+| **NSGs Deployed** | ______ |
+| **Load Balancers Deployed** | ______ |
+| **Public IPs Deployed** | ______ |
+| **Total Deployment Time** | ______ minutes |
+| **Manual Deployment Time (estimated)** | ~180 minutes |
+| **Time Saved** | ______ minutes (______%) |
 
 ---
 
 ## 📝 Reflection Questions
 
-Answer these questions to document your hands-on experience and demonstrate understanding:
+Answer these questions to document your hands-on experience:
 
-### Question 1: VM Sizing Justification
-**Explain why you chose different VM sizes for dev and prod environments:**
-
-| Environment | VM Size | Cost Consideration | Performance Consideration |
-|-------------|---------|-------------------|--------------------------|
-| Development | B-series (B2s, B2ms) | ________________ | ________________ |
-| Production | D-series (D2s_v5, D4s_v5) | ________________ | ________________ |
-
-**Monthly cost estimate** (calculate using Azure Pricing Calculator):
-- Development environment total: $____________/month
-- Production environment total: $____________/month
-
-### Question 2: Availability Zone Strategy
-**Document your zone deployment strategy:**
-
-VMs deployed across multiple zones:
+### Question 1: Bicep Module Benefits
+**Describe a specific example where using a Bicep module saved you time or prevented errors in this lab:**
 
 _________________________________________________________________
 
 _________________________________________________________________
 
-VMs deployed to single zone (and why):
+_________________________________________________________________
+
+**How would you modify the network module to support a different address space?**
 
 _________________________________________________________________
 
 _________________________________________________________________
 
-What would happen if Zone 1 experiences an outage?
+### Question 2: What-If Analysis Experience
+**Document what the what-if analysis showed before your deployment:**
+
+Resources to create:
+_________________________________________________________________
+
+Resources to modify:
+_________________________________________________________________
+
+Resources to delete:
+_________________________________________________________________
+
+**Did anything in the what-if output surprise you? If so, what?**
 
 _________________________________________________________________
 
 _________________________________________________________________
 
-### Question 3: Data Disk Configuration
-**Why did you add data disks only to database VMs and not to auth/world servers?**
+### Question 3: ARM Template vs Bicep Comparison
+**Choose one resource from your exported ARM template. Document the difference:**
 
-Database VMs need data disks because:
+**ARM Template (JSON) - Number of lines:** ______
 
-_________________________________________________________________
+**Bicep Equivalent - Number of lines:** ______
 
-_________________________________________________________________
-
-Auth and world server VMs don't need data disks because:
+**Which was easier to read and understand? Why?**
 
 _________________________________________________________________
 
 _________________________________________________________________
 
-### Question 4: Security Configuration
-**Explain the security measures implemented in your VM deployment:**
+### Question 4: Parameterization Strategy
+**You created dev.bicepparam and prod.bicepparam. List 3 parameters where the values differ between dev and prod:**
 
-No public IP addresses:
+| Parameter Name | Dev Value | Prod Value | Reason for Difference |
+|----------------|-----------|------------|----------------------|
+| 1. ____________ | _________ | _________ | __________________ |
+| 2. ____________ | _________ | _________ | __________________ |
+| 3. ____________ | _________ | _________ | __________________ |
+
+### Question 5: Troubleshooting Experience
+**Did you encounter any errors during this lab? If yes, describe the error and how you resolved it:**
+
+Error encountered:
+_________________________________________________________________
+
+_________________________________________________________________
+
+Solution applied:
+_________________________________________________________________
+
+_________________________________________________________________
+
+**If no errors, describe what you would do if deployment failed with "Template validation failed":**
 
 _________________________________________________________________
 
 _________________________________________________________________
 
-Bastion for administrative access:
+### Question 6: Multi-Region Deployment Planning
+**You currently deploy to Sweden Central. Plan how you would deploy the same infrastructure to West Europe:**
 
+Approach (parameter file / script / Bicep loop):
 _________________________________________________________________
 
 _________________________________________________________________
 
-NSG protection:
-
+Files to create or modify:
 _________________________________________________________________
 
 _________________________________________________________________
 
-### Question 5: Connectivity Testing Results
-**Document your connectivity tests from one VM to others:**
-
-| Source VM | Destination VM | Test Command | Result (Success/Fail) | Notes |
-|-----------|----------------|--------------|----------------------|-------|
-| dev-skycraft-swc-auth-01-vm | 10.1.2.10 (world-01) | `nc -zv 10.1.2.10 22` | __________ | __________ |
-| dev-skycraft-swc-auth-01-vm | 10.1.3.10 (db-01) | `nc -zv 10.1.3.10 22` | __________ | __________ |
-| dev-skycraft-swc-world-01-vm | 10.1.3.10 (db-01) | `nc -zv 10.1.3.10 3306` | __________ | __________ |
-
-### Question 6: Private DNS Resolution
-**Test and document private DNS auto-registration:**
-
-Command used to test DNS:
-```bash
-_________________________________________________________________
-```
-
-DNS records found for your VMs:
-
-| VM Hostname | FQDN | IP Address | Auto-Registered |
-|-------------|------|------------|-----------------|
-| dev-skycraft-swc-auth-01-vm | __________.skycraft.internal | __________ | ☐ Yes ☐ No |
-| dev-skycraft-swc-world-01-vm | __________.skycraft.internal | __________ | ☐ Yes ☐ No |
-| dev-skycraft-swc-db-01-vm | __________.skycraft.internal | __________ | ☐ Yes ☐ No |
-
-### Question 7: Troubleshooting Experience
-**Describe any issues encountered during VM deployment and how you resolved them:**
-
-Issue 1:
-
+Deployment command:
 _________________________________________________________________
 
-Resolution:
+### Question 7: Version Control Integration
+**How would you use Git to manage these Bicep templates in a team environment?**
 
-_________________________________________________________________
-
-Issue 2:
-
-_________________________________________________________________
-
-Resolution:
-
-_________________________________________________________________
-
-### Question 8: Resource Optimization
-**If you had to reduce costs by 30%, which VMs would you downsize and why?**
-
-VMs to downsize: ______________________________________________________
-
-Reasoning:
-
+Branching strategy:
 _________________________________________________________________
 
 _________________________________________________________________
 
-VMs to keep at current size:
+Files to commit to Git:
+_________________________________________________________________
 
+Files to exclude (.gitignore):
+_________________________________________________________________
+
+Code review process:
 _________________________________________________________________
 
 _________________________________________________________________
@@ -606,21 +555,22 @@ _________________________________________________________________
 ## ✅ Final Lab 3.1 Sign-off
 
 **All Verification Items Complete**:
-- [ ] 8 Virtual Machines deployed (4 dev + 4 prod)
-- [ ] All VMs using correct sizes (B-series dev, D-series prod)
-- [ ] World servers deployed across Zone 1 and Zone 2
-- [ ] All VMs using Ubuntu Server 22.04 LTS
-- [ ] Standard SSD for dev, Premium SSD for prod
-- [ ] Data disks attached to both database VMs (128GB dev, 256GB prod)
-- [ ] No public IP addresses on any VM
-- [ ] All VMs accessible via Azure Bastion
-- [ ] VMs deployed to correct subnets with NSG protection
-- [ ] All VMs have proper tags (Project, Environment, CostCenter, Role)
-- [ ] SSH private keys downloaded and stored securely
-- [ ] Private DNS auto-registration working
-- [ ] All validation commands executed successfully
-- [ ] VM-to-VM connectivity verified
+- [ ] Bicep CLI and VS Code extension installed and working
+- [ ] Exported and analyzed ARM template from existing resources
+- [ ] Created first-resource.bicep successfully
+- [ ] Created 4 Bicep modules (network, NSG, load balancer, public IP)
+- [ ] Created main.bicep orchestrator with subscription scope
+- [ ] Created parameter files for dev and prod environments
+- [ ] Successfully built Bicep to ARM with `az bicep build`
+- [ ] Validated template with `az deployment sub validate`
+- [ ] Previewed changes with what-if analysis
+- [ ] Deployed infrastructure using Bicep template
+- [ ] Verified all resources created successfully
+- [ ] Retrieved and documented deployment outputs
 - [ ] All reflection questions answered
+- [ ] Understand IaC benefits and workflow
+- [ ] Can modify and parameterize Bicep files
+- [ ] Ready to proceed to Lab 3.2 (Deploy VMs)
 
 **Student Name**: _________________  
 **Lab 3.1 Completion Date**: _________________  
@@ -630,41 +580,90 @@ _________________________________________________________________
 
 ## 🎉 Congratulations!
 
-You've successfully completed **Lab 3.1: Deploy Virtual Machines for SkyCraft**!
+You've successfully completed **Lab 3.1: Automate Deployment Using ARM/Bicep**!
 
 **What You Built**:
-- ✅ 8 Azure Virtual Machines across dev and prod environments
-- ✅ High-availability configuration with availability zones
-- ✅ Appropriate VM sizing for each workload (auth, world, database)
-- ✅ Managed disk configuration (OS + data disks)
-- ✅ Secure deployment (no public IPs, Bastion access only)
-- ✅ Private DNS integration for internal name resolution
+- ✅ Complete Infrastructure as Code solution using Bicep
+- ✅ 4 reusable Bicep modules for network components
+- ✅ Main orchestrator template with multi-resource group deployment
+- ✅ Parameter files for environment-specific configurations
+- ✅ Automated deployment pipeline replacing 3-hour manual process
 
-**Infrastructure Inventory**:
-- **Total VMs**: 8 (4 dev + 4 prod)
-- **Total vCPUs**: 20 (8 dev + 12 prod)
-- **Total Memory**: 80 GB (32 GB dev + 48 GB prod)
-- **Total Storage**: 624 GB (240 GB OS + 384 GB data)
-- **Availability Zones**: 2 (Zone 1 and Zone 2)
+**Skills Gained**:
+- 🎯 Infrastructure as Code principles and benefits
+- 🎯 ARM template interpretation and analysis
+- 🎯 Bicep language proficiency (parameters, variables, resources, outputs)
+- 🎯 Module-based architecture design
+- 🎯 Template validation and what-if analysis
+- 🎯 Multi-scope deployments (subscription and resource group)
+- 🎯 Deployment automation and verification
 
-**Cost Estimate** (approximate monthly):
-- Development: ~$150/month (B-series VMs)
-- Production: ~$280/month (D-series VMs)
-- **Total: ~$430/month** for 8-VM infrastructure
+**Infrastructure as Code Benefits Realized**:
+- 🚀 **Speed**: 15-minute deployment vs 180-minute manual process (90% time savings)
+- 🔁 **Repeatability**: Identical environments every deployment
+- 📝 **Documentation**: Infrastructure configuration in code
+- 🔍 **Version Control**: Infrastructure changes tracked in Git
+- 🧪 **Testing**: What-if preview before deployment
+- 🤝 **Collaboration**: Team code reviews for infrastructure
+- 🔄 **Disaster Recovery**: One-command infrastructure rebuild
 
-**Next Steps**: In **Lab 3.2: Configure AzerothCore on Azure VMs**, you'll:
-- Install AzerothCore dependencies (MySQL, build tools)
-- Compile AzerothCore from source
-- Configure database servers with MySQL
-- Set up authentication and world servers
-- Test game server connectivity
+**Real-World Impact**:
+- Development team can spin up test environments in minutes
+- Configuration drift eliminated (dev and prod match exactly)
+- Infrastructure changes reviewed like application code
+- Disaster recovery time reduced from days to minutes
+- New team members onboard faster with documented IaC
 
-**Estimated Lab 3.2 Duration**: 3 hours
+**Next Steps**: In **Lab 3.2: Deploy Virtual Machines**, you'll:
+- Extend main.bicep to include VM resources
+- Create compute module for VM deployment
+- Configure VM extensions for automation
+- Deploy Linux VMs for AzerothCore game servers
+- Add VMs to load balancer backend pools
+- Implement SSH key authentication
+
+**Preview - VM Module You'll Create**:
+```bicep
+// modules/vm.bicep
+param vmName string
+param vmSize string
+param subnetId string
+param sshPublicKey string
+
+resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
+  name: vmName
+  location: location
+  properties: {
+    hardwareProfile: { vmSize: vmSize }
+    osProfile: {
+      computerName: vmName
+      adminUsername: 'azureuser'
+      linuxConfiguration: {
+        ssh: {
+          publicKeys: [{
+            path: '/home/azureuser/.ssh/authorized_keys'
+            keyData: sshPublicKey
+          }]
+        }
+      }
+    }
+  }
+}
+```
 
 ---
 
 ## 📌 Module Navigation
 
 - [← Back to Module 3 Index](../README.md)
-- [Lab Guide: 3.1 Deploy VMs →](lab-guide-3.1.md)
-- [Next Lab: 3.2 Configure AzerothCore →](../3.2-configure-azerothcore/lab-checklist-3.2.md)
+- [← Previous Module: Module 2 Virtual Networking](../../module-2-networking/README.md)
+- [Lab Guide: 3.1 Automate Deployment →](lab-guide-3.1.md)
+- [Next Lab: 3.2 Deploy Virtual Machines →](../3.2-deploy-vms/README.md)
+
+---
+
+**Time Investment**: 3 hours  
+**Time Saved (future deployments)**: 2.5 hours per environment  
+**ROI**: Pays for itself after 2 deployments ✅
+
+*Remember: Infrastructure as Code is not just about automation—it's about treating infrastructure with the same rigor as application code. Version control, testing, code review, and continuous improvement all apply to infrastructure now!*

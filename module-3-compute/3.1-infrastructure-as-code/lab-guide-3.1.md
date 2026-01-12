@@ -1,609 +1,1526 @@
-# Lab 3.1: Deploy Virtual Machines for SkyCraft (3 hours)
+# Lab 3.1: Automate Deployment Using ARM/Bicep (3 hours)
 
 ## 🎯 Learning Objectives
 
 By completing this lab, you will:
-- Deploy Azure Virtual Machines using Ubuntu Server 22.04 LTS
-- Configure VM sizes appropriate for game server workloads
-- Attach VMs to existing subnets and network security groups
-- Configure managed disks for OS and data storage
-- Connect to VMs securely using Azure Bastion
-- Implement availability zones for high availability
-- Apply consistent naming conventions and tagging strategies
-- Use cloud-init for initial VM configuration
+- Understand Infrastructure as Code (IaC) concepts and benefits
+- Interpret and analyze Azure Resource Manager (ARM) templates
+- Read and understand Bicep syntax and structure
+- Modify existing ARM templates to customize for specific requirements
+- Parameterize Bicep files for reusability (VM sizes, regions, environments)
+- Deploy Azure resources using ARM templates and Bicep files
+- Export existing deployments as ARM templates
+- Convert ARM templates to Bicep files using bicep decompile
+- Create a complete Bicep template for AzerothCore infrastructure
+- Implement Bicep modules for modular, maintainable infrastructure code
 
 ---
 
 ## 🏗️ Architecture Overview
 
-You'll deploy virtual machines into the existing hub-spoke network infrastructure:
+You'll create Infrastructure as Code templates to automate SkyCraft deployment:
 
 ```mermaid
 graph TB
-    subgraph Internet
-        Admin[Administrator<br/>Your Laptop]
+    subgraph "Developer Workstation"
+        Dev[Developer<br/>Visual Studio Code]
+        BicepFile[Bicep Template<br/>main.bicep]
+        ParamFile[Parameters<br/>dev.bicepparam]
     end
 
-    subgraph "platform-skycraft-swc-rg"
-        Bastion[Azure Bastion<br/>platform-skycraft-swc-bas]
+    subgraph "Source Control"
+        Git[Git Repository<br/>GitHub/Azure DevOps]
+        Version[Version History<br/>v1.0, v1.1, v1.2]
     end
 
-    subgraph "dev-skycraft-swc-rg"
-        DevAuthVM1[dev-skycraft-swc-auth-01-vm<br/>Ubuntu 22.04 LTS<br/>Standard_B2s<br/>10.1.1.10<br/>Zone 1]
-        DevWorldVM1[dev-skycraft-swc-world-01-vm<br/>Ubuntu 22.04 LTS<br/>Standard_B2ms<br/>10.1.2.10<br/>Zone 1]
-        DevWorldVM2[dev-skycraft-swc-world-02-vm<br/>Ubuntu 22.04 LTS<br/>Standard_B2ms<br/>10.1.2.11<br/>Zone 2]
-        DevDBVM1[dev-skycraft-swc-db-01-vm<br/>Ubuntu 22.04 LTS<br/>Standard_B2ms<br/>10.1.3.10<br/>Zone 1]
-
-        DevAuthSubnet[AuthSubnet<br/>10.1.1.0/24<br/>NSG: dev-skycraft-swc-auth-nsg]
-        DevWorldSubnet[WorldSubnet<br/>10.1.2.0/24<br/>NSG: dev-skycraft-swc-world-nsg]
-        DevDBSubnet[DatabaseSubnet<br/>10.1.3.0/24<br/>NSG: dev-skycraft-swc-db-nsg]
+    subgraph "Bicep Modules"
+        ModNet[network.bicep<br/>VNets, Subnets, NSGs]
+        ModVM[compute.bicep<br/>VMs, Disks, NICs]
+        ModLB[loadbalancer.bicep<br/>Load Balancers]
+        ModDNS[dns.bicep<br/>DNS Zones]
     end
 
-    subgraph "prod-skycraft-swc-rg"
-        ProdAuthVM1[prod-skycraft-swc-auth-01-vm<br/>Ubuntu 22.04 LTS<br/>Standard_D2s_v5<br/>10.2.1.10<br/>Zone 1]
-        ProdWorldVM1[prod-skycraft-swc-world-01-vm<br/>Ubuntu 22.04 LTS<br/>Standard_D2s_v5<br/>10.2.2.10<br/>Zone 1]
-        ProdWorldVM2[prod-skycraft-swc-world-02-vm<br/>Ubuntu 22.04 LTS<br/>Standard_D2s_v5<br/>10.2.2.11<br/>Zone 2]
-        ProdDBVM1[prod-skycraft-swc-db-01-vm<br/>Ubuntu 22.04 LTS<br/>Standard_D4s_v5<br/>10.2.3.10<br/>Zone 1]
+    subgraph "Azure Deployment"
+        ARM[ARM Template<br/>JSON transpiled from Bicep]
+        Validate[Validation<br/>What-If Analysis]
+        Deploy[Deployment Engine<br/>Azure Resource Manager]
     end
 
-    Admin -->|HTTPS:443| Bastion
-    Bastion -->|SSH:22| DevAuthVM1
-    Bastion -->|SSH:22| DevWorldVM1
-    Bastion -->|SSH:22| DevWorldVM2
-    Bastion -->|SSH:22| DevDBVM1
-    Bastion -->|SSH:22| ProdAuthVM1
+    subgraph "Azure Resources (Sweden Central)"
+        RG1[platform-skycraft-swc-rg]
+        RG2[dev-skycraft-swc-rg]
+        RG3[prod-skycraft-swc-rg]
 
-    DevAuthVM1 -.->|Member of| DevAuthSubnet
-    DevWorldVM1 -.->|Member of| DevWorldSubnet
-    DevWorldVM2 -.->|Member of| DevWorldSubnet
-    DevDBVM1 -.->|Member of| DevDBSubnet
+        VNet1[Hub VNet<br/>10.0.0.0/16]
+        VNet2[Dev VNet<br/>10.1.0.0/16]
+        VNet3[Prod VNet<br/>10.2.0.0/16]
 
-    style DevAuthVM1 fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-    style DevWorldVM1 fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-    style DevWorldVM2 fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-    style DevDBVM1 fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-    style ProdAuthVM1 fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-    style ProdWorldVM1 fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-    style ProdWorldVM2 fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-    style ProdDBVM1 fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
+        VM1[Dev VMs<br/>Auth, World, DB]
+        VM2[Prod VMs<br/>Auth, World, DB]
+
+        LB1[Load Balancers<br/>Dev + Prod]
+    end
+
+    Dev -->|1. Write| BicepFile
+    BicepFile -->|2. Commit| Git
+    Git --> Version
+
+    BicepFile -->|3. References| ModNet
+    BicepFile -->|3. References| ModVM
+    BicepFile -->|3. References| ModLB
+    BicepFile -->|3. References| ModDNS
+
+    ParamFile -->|4. Provides| BicepFile
+    BicepFile -->|5. Transpile| ARM
+    ARM -->|6. Validate| Validate
+    Validate -->|7. Deploy| Deploy
+
+    Deploy -->|8. Create| RG1
+    Deploy -->|8. Create| RG2
+    Deploy -->|8. Create| RG3
+
+    Deploy -->|9. Provision| VNet1
+    Deploy -->|9. Provision| VNet2
+    Deploy -->|9. Provision| VNet3
+
+    Deploy -->|10. Deploy| VM1
+    Deploy -->|10. Deploy| VM2
+    Deploy -->|10. Deploy| LB1
+
+    style BicepFile fill:#00B4D8,stroke:#0077B6,stroke-width:3px
+    style ARM fill:#FFA500,stroke:#FF8C00,stroke-width:2px
+    style Deploy fill:#4CAF50,stroke:#2E7D32,stroke-width:3px
+    style Git fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px
 ```
 
 ---
 
 ## 📋 Real-World Scenario
 
-**Situation**: The SkyCraft network infrastructure is ready (VNets, NSGs, Load Balancers, DNS). Now you need to deploy the actual virtual machines that will run the AzerothCore game server components. Each environment (dev and prod) requires authentication servers, world servers, and database servers. These VMs must be deployed across availability zones for high availability and properly sized based on workload requirements.
+**Situation**: Your SkyCraft infrastructure has grown complex with 3 VNets, multiple subnets, NSGs, load balancers, and will soon have dozens of VMs. Deploying everything manually through Azure Portal is:
+- **Time-consuming**: Takes 2-3 hours per environment
+- **Error-prone**: Easy to misconfigure subnet addresses or NSG rules
+- **Not repeatable**: Can't easily recreate dev/prod environments
+- **Difficult to version**: No way to track infrastructure changes over time
+- **Hard to audit**: Can't review changes before deployment
 
-**Your Task**: Deploy virtual machines by:
-- Selecting appropriate VM sizes for each server role
-- Deploying VMs into correct subnets with existing NSGs
-- Configuring availability zones for resilience
-- Using managed disks for storage
-- Securing access through Azure Bastion (no public IPs)
-- Applying consistent naming and tagging
-- Preparing VMs for AzerothCore installation in Lab 3.2
+**Your Task**: Implement Infrastructure as Code using Bicep to:
+- Codify your entire infrastructure in version-controlled templates
+- Deploy complete environments in 15 minutes instead of 3 hours
+- Ensure consistency between dev and prod environments
+- Enable infrastructure code reviews (like application code)
+- Support disaster recovery with one-command redeployment
+- Parameterize templates for multiple regions and environments
+
+**Business Impact**: 
+- 90% reduction in deployment time
+- Zero configuration drift between environments
+- Infrastructure changes tracked in Git history
+- Ability to preview changes before deployment (what-if)
 
 ---
 
 ## ⏱️ Estimated Time: 3 hours
 
-- **Section 1**: Understanding Azure VM concepts and sizing (20 min)
-- **Section 2**: Deploy development environment VMs (50 min)
-- **Section 3**: Deploy production environment VMs (40 min)
-- **Section 4**: Configure managed disks and storage (30 min)
-- **Section 5**: Connect via Azure Bastion and verify (30 min)
-- **Section 6**: Configure cloud-init for initial setup (10 min)
+- **Section 1**: Understanding Infrastructure as Code (15 min)
+- **Section 2**: Export and analyze existing ARM templates (25 min)
+- **Section 3**: Introduction to Bicep syntax (20 min)
+- **Section 4**: Convert ARM templates to Bicep (20 min)
+- **Section 5**: Create parameterized Bicep modules (30 min)
+- **Section 6**: Build complete infrastructure Bicep template (40 min)
+- **Section 7**: Deploy and validate Bicep templates (30 min)
 
 ---
 
 ## ✅ Prerequisites
 
 Before starting this lab:
-- [ ] Completed Lab 2.1 (Virtual Networks)
-- [ ] Completed Lab 2.2 (Network Security with Bastion)
-- [ ] Completed Lab 2.3 (DNS and Load Balancing)
-- [ ] Azure Bastion deployed in hub VNet
-- [ ] NSGs associated with all subnets
-- [ ] Owner or Contributor role at subscription level
-- [ ] Understanding of Linux command line (basic SSH, sudo)
-
-**Verify infrastructure from Module 2**:
-- VNets: platform-skycraft-swc-vnet, dev-skycraft-swc-vnet, prod-skycraft-swc-vnet
-- Subnets: AuthSubnet, WorldSubnet, DatabaseSubnet (in dev and prod)
-- NSGs: 6 NSGs with rules allowing SSH from Bastion (10.0.0.0/26)
-- Bastion: platform-skycraft-swc-bas operational
+- [ ] Completed Module 2 (Virtual Networking)
+- [ ] Existing resources: 3 VNets, NSGs, Load Balancers deployed
+- [ ] Azure CLI installed (version 2.50.0 or later)
+- [ ] Bicep CLI installed (`az bicep install`)
+- [ ] Visual Studio Code installed (recommended)
+- [ ] VS Code extensions: Bicep, Azure Account
+- [ ] Git installed (for version control best practices)
+- [ ] Contributor or Owner role at subscription level
 
 ---
 
-## 📖 Section 1: Understanding Azure VM Concepts and Sizing (20 minutes)
+## 📖 Section 1: Understanding Infrastructure as Code (15 minutes)
 
-### What are Azure Virtual Machines?
+### What is Infrastructure as Code (IaC)?
 
-**Azure Virtual Machines** provide on-demand, scalable computing resources with Linux or Windows operating systems. Key concepts:
+**Infrastructure as Code (IaC)** is the practice of managing infrastructure through code instead of manual processes.
 
-| Component | Description |
-|-----------|-------------|
-| **VM Size** | Determines CPU, memory, storage, and network capacity |
-| **OS Disk** | Managed disk containing the operating system (30-2048 GB) |
-| **Data Disk** | Additional storage for application data |
-| **Network Interface (NIC)** | Connects VM to VNet subnet |
-| **Availability Zone** | Physically separate datacenter within region |
-| **Managed Disk** | Azure-managed storage (Standard HDD, SSD, Premium SSD) |
+**Traditional Approach** (ClickOps):
+```
+1. Login to Azure Portal
+2. Click "Create resource"
+3. Fill out 20+ form fields
+4. Click "Create" and wait
+5. Repeat 50 times for complete infrastructure
+6. Document steps in Word document
+7. Hope you remember everything next time
+```
 
-### VM Size Selection for SkyCraft
+**IaC Approach**:
+```bicep
+// network.bicep
+resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
+  name: 'dev-skycraft-swc-vnet'
+  location: 'swedencentral'
+  properties: {
+    addressSpace: { addressPrefixes: ['10.1.0.0/16'] }
+  }
+}
 
-Different server roles have different resource requirements:
+// Deploy: az deployment group create --template-file network.bicep
+```
 
-| Server Role | Workload Type | CPU Need | Memory Need | Recommended Size |
-|-------------|---------------|----------|-------------|------------------|
-| **Auth Server** | Low CPU, low memory | 2 vCPU | 4 GB | B2s (dev), D2s_v5 (prod) |
-| **World Server** | Medium CPU, medium memory | 2 vCPU | 8 GB | B2ms (dev), D2s_v5 (prod) |
-| **Database** | High I/O, high memory | 2-4 vCPU | 8-16 GB | B2ms (dev), D4s_v5 (prod) |
+### IaC Benefits
 
-### VM Series Explanation
+| Benefit | Description | SkyCraft Example |
+|---------|-------------|------------------|
+| **Repeatability** | Deploy identical environments | Dev and prod match exactly |
+| **Version Control** | Track changes with Git | See who changed what and when |
+| **Documentation** | Code documents itself | Template shows actual configuration |
+| **Collaboration** | Code reviews for infrastructure | Team reviews before deployment |
+| **Speed** | Deploy in minutes, not hours | 3-hour manual → 15-min automated |
+| **Testing** | Validate before deployment | what-if shows changes before apply |
+| **Disaster Recovery** | Redeploy entire infrastructure | One command restores everything |
 
-| Series | Type | Use Case | Cost |
-|--------|------|----------|------|
-| **B-series** | Burstable | Dev/test, low baseline CPU with burst capability | Low ($) |
-| **D-series** | General purpose | Production workloads, consistent performance | Medium ($$) |
-| **E-series** | Memory optimized | Database servers, large caching | High ($$$) |
-| **F-series** | Compute optimized | High CPU workloads, gaming servers | Medium ($$) |
+### ARM Templates vs Bicep
 
-**For SkyCraft**:
-- **Development**: B-series (cost-effective, burstable for testing)
-- **Production**: D-series (predictable performance, SLA-backed)
+**ARM Templates** (JSON):
+```json
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "vnetName": {
+      "type": "string",
+      "defaultValue": "dev-skycraft-swc-vnet"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-05-01",
+      "name": "[parameters('vnetName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": ["10.1.0.0/16"]
+        }
+      }
+    }
+  ]
+}
+```
 
-### Availability Zones
+**Bicep** (Domain-Specific Language):
+```bicep
+param vnetName string = 'dev-skycraft-swc-vnet'
 
-**Availability Zones** are physically separate datacenters within an Azure region:
-- **Zone 1, Zone 2, Zone 3**: Each has independent power, cooling, networking
-- **99.99% SLA**: When VMs deployed across multiple zones
-- **No additional cost**: Same pricing as non-zoned VMs
+resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
+  name: vnetName
+  location: resourceGroup().location
+  properties: {
+    addressSpace: { addressPrefixes: ['10.1.0.0/16'] }
+  }
+}
+```
 
-**Strategy**: Deploy redundant VMs (World Server 1, World Server 2) to different zones.
+**Comparison**:
 
-### Managed Disk Types
+| Feature | ARM Template (JSON) | Bicep |
+|---------|---------------------|-------|
+| **Syntax** | Verbose JSON | Concise, readable |
+| **Lines of code** | ~30 for VNet | ~8 for VNet |
+| **Learning curve** | Steep (JSON functions) | Gentle (declarative) |
+| **Type safety** | Limited | Strong typing |
+| **Modules** | Nested templates (complex) | Native module support |
+| **Tooling** | Basic | Excellent (IntelliSense, validation) |
+| **Microsoft recommendation** | Legacy | **Preferred** |
 
-| Disk Type | IOPS | Throughput | Use Case | Cost |
-|-----------|------|------------|----------|------|
-| **Standard HDD** | 500 | 60 MB/s | Backup, non-critical | Lowest |
-| **Standard SSD** | 500-6,000 | 60-750 MB/s | Web servers, dev/test | Low |
-| **Premium SSD** | 120-20,000 | 25-900 MB/s | Production databases | Medium |
-| **Ultra Disk** | Up to 160,000 | Up to 4,000 MB/s | Mission-critical | Highest |
+**Bottom Line**: Bicep is the modern way to write Azure IaC. ARM JSON is still used internally but rarely written by hand.
 
-**For SkyCraft**:
-- **Dev VMs**: Standard SSD (OS disk) - adequate for development
-- **Prod VMs**: Premium SSD (OS disk) - production reliability
-- **Database VMs**: Premium SSD (data disk) - I/O performance
+### Bicep Workflow
 
----
+```
+1. Write Bicep code (.bicep files)
+   ↓
+2. Bicep CLI transpiles to ARM JSON
+   ↓
+3. ARM template sent to Azure Resource Manager
+   ↓
+4. Azure deploys resources
+```
 
-## 📖 Section 2: Deploy Development Environment VMs (50 minutes)
-
-### Step 3.1.1: Deploy Dev Auth Server VM
-
-1. In **Azure Portal**, search for **"Virtual machines"**
-2. Click **+ Create** → **Azure virtual machine**
-
-**Basics tab**:
-
-| Field | Value |
-|-------|-------|
-| Subscription | [Your subscription] |
-| Resource group | `dev-skycraft-swc-rg` |
-| Virtual machine name | `dev-skycraft-swc-auth-01-vm` |
-| Region | **Sweden Central** |
-| Availability options | **Availability zone** |
-| Availability zone | **Zone 1** |
-| Security type | Standard |
-| Image | **Ubuntu Server 22.04 LTS - x64 Gen2** |
-| VM architecture | x64 |
-| Size | **Standard_B2s** (2 vCPU, 4 GiB memory) |
-
-**Administrator account**:
-
-| Field | Value |
-|-------|-------|
-| Authentication type | **SSH public key** |
-| Username | `azureuser` |
-| SSH public key source | **Generate new key pair** |
-| Key pair name | `dev-skycraft-swc-auth-01-key` |
-
-**Inbound port rules**:
-
-| Field | Value |
-|-------|-------|
-| Public inbound ports | **None** (Bastion will provide access) |
-
-3. Click **Next: Disks**
-
-**Disks tab**:
-
-| Field | Value |
-|-------|-------|
-| OS disk type | **Standard SSD** (locally-redundant storage) |
-| Delete with VM | ☑ Checked |
-| Encryption type | (Default) Encryption at rest with platform-managed key |
-
-4. Click **Next: Networking**
-
-**Networking tab**:
-
-| Field | Value |
-|-------|-------|
-| Virtual network | `dev-skycraft-swc-vnet` |
-| Subnet | `AuthSubnet (10.1.1.0/24)` |
-| Public IP | **None** |
-| NIC network security group | **None** (subnet NSG already applied) |
-| Delete NIC when VM is deleted | ☑ Checked |
-| Accelerated networking | ☐ Unchecked (not supported on B-series) |
-
-**Important**: Select **None** for Public IP - Bastion provides secure access without exposing VMs to internet.
-
-5. Click **Next: Management**
-
-**Management tab**:
-
-| Field | Value |
-|-------|-------|
-| Enable auto-shutdown | ☑ Checked (optional, saves costs) |
-| Shutdown time | 19:00:00 (7 PM) |
-| Time zone | (UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna |
-| Boot diagnostics | Enabled with managed storage account |
-
-6. Click **Next: Monitoring** (leave defaults)
-7. Click **Next: Advanced** (skip for now)
-8. Click **Next: Tags**
-
-**Tags**:
-
-| Name | Value |
-|------|-------|
-| Project | SkyCraft |
-| Environment | Development |
-| CostCenter | MSDN |
-| Role | AuthServer |
-
-9. Click **Review + create**
-10. Review configuration
-11. Click **Create**
-
-**Expected Result**:
-- Azure prompts to download SSH private key
-- **Download private key** and save as `dev-skycraft-swc-auth-01-key.pem`
-- Store securely (needed for SSH access)
-- Deployment takes 3-5 minutes
-
-### Step 3.1.2: Deploy Dev World Server VM 1
-
-1. Navigate to **Virtual machines** → **+ Create**
-
-**Use same process as Auth server with these differences**:
-
-| Field | Value |
-|-------|-------|
-| Virtual machine name | `dev-skycraft-swc-world-01-vm` |
-| Availability zone | **Zone 1** |
-| Size | **Standard_B2ms** (2 vCPU, 8 GiB memory) |
-| Key pair name | `dev-skycraft-swc-world-01-key` |
-| Subnet | `WorldSubnet (10.1.2.0/24)` |
-| Tag: Role | WorldServer |
-
-2. Click **Review + create** → **Create**
-3. Download SSH key: `dev-skycraft-swc-world-01-key.pem`
-
-**Expected Result**: World Server 1 deployed to Zone 1 in WorldSubnet.
-
-### Step 3.1.3: Deploy Dev World Server VM 2
-
-1. Create second world server for redundancy
-
-| Field | Value |
-|-------|-------|
-| Virtual machine name | `dev-skycraft-swc-world-02-vm` |
-| Availability zone | **Zone 2** (different zone for HA) |
-| Size | **Standard_B2ms** |
-| Key pair name | `dev-skycraft-swc-world-02-key` |
-| Subnet | `WorldSubnet (10.1.2.0/24)` |
-| Tag: Role | WorldServer |
-
-2. Click **Review + create** → **Create**
-3. Download SSH key: `dev-skycraft-swc-world-02-key.pem`
-
-**Expected Result**: Two world servers deployed across Zone 1 and Zone 2 for high availability.
-
-### Step 3.1.4: Deploy Dev Database Server VM
-
-1. Create database server with higher memory
-
-| Field | Value |
-|-------|-------|
-| Virtual machine name | `dev-skycraft-swc-db-01-vm` |
-| Availability zone | **Zone 1** |
-| Size | **Standard_B2ms** (2 vCPU, 8 GiB memory) |
-| Key pair name | `dev-skycraft-swc-db-01-key` |
-| Subnet | `DatabaseSubnet (10.1.3.0/24)` |
-| Tag: Role | DatabaseServer |
-
-2. Click **Review + create** → **Create**
-3. Download SSH key: `dev-skycraft-swc-db-01-key.pem`
-
-**Expected Result**: Database server deployed to DatabaseSubnet with adequate memory for MySQL.
+Bicep is a **transparent abstraction** over ARM - everything possible in ARM is possible in Bicep.
 
 ---
 
-## 📖 Section 3: Deploy Production Environment VMs (40 minutes)
+## 📖 Section 2: Export and Analyze Existing ARM Templates (25 minutes)
 
-### Step 3.1.5: Deploy Production VMs
+### Step 3.1.1: Export Resource Group as ARM Template
 
-Repeat the VM deployment process for production with **production-grade sizes**:
+Let's export your existing dev environment to see what ARM looks like:
 
-**Production Auth Server**:
+1. In **Azure Portal**, navigate to **Resource groups** → **dev-skycraft-swc-rg**
+2. In left menu, click **Export template**
+3. Wait 10-15 seconds for Azure to generate template
 
-| Field | Value |
-|-------|-------|
-| Resource group | `prod-skycraft-swc-rg` |
-| Virtual machine name | `prod-skycraft-swc-auth-01-vm` |
-| Availability zone | **Zone 1** |
-| Size | **Standard_D2s_v5** (2 vCPU, 8 GiB memory) |
-| OS disk type | **Premium SSD** |
-| Virtual network | `prod-skycraft-swc-vnet` |
-| Subnet | `AuthSubnet (10.2.1.0/24)` |
-| Key pair name | `prod-skycraft-swc-auth-01-key` |
-| Tags | Project=SkyCraft, Environment=Production, CostCenter=MSDN, Role=AuthServer |
+**What You See**:
+- **Template** tab: Complete ARM JSON (often 500-2000+ lines)
+- **Parameters** tab: Extracted parameters
+- **Download** button: Get template as ZIP file
 
-**Production World Server 1**:
+4. Click **Download** to save locally
+5. Extract ZIP file - contains:
+   - `template.json` (ARM template)
+   - `parameters.json` (parameter values)
+   - `deploy.ps1` (PowerShell deployment script)
+   - `deploy.sh` (Bash deployment script)
 
-| Field | Value |
-|-------|-------|
-| Virtual machine name | `prod-skycraft-swc-world-01-vm` |
-| Availability zone | **Zone 1** |
-| Size | **Standard_D2s_v5** |
-| OS disk type | **Premium SSD** |
-| Subnet | `WorldSubnet (10.2.2.0/24)` |
-| Key pair name | `prod-skycraft-swc-world-01-key` |
-| Tag: Role | WorldServer |
+### Step 3.1.2: Analyze Exported ARM Template Structure
 
-**Production World Server 2**:
+6. Open `template.json` in VS Code
 
-| Field | Value |
-|-------|-------|
-| Virtual machine name | `prod-skycraft-swc-world-02-vm` |
-| Availability zone | **Zone 2** (different zone) |
-| Size | **Standard_D2s_v5** |
-| OS disk type | **Premium SSD** |
-| Subnet | `WorldSubnet (10.2.2.0/24)` |
-| Key pair name | `prod-skycraft-swc-world-02-key` |
-| Tag: Role | WorldServer |
+**ARM Template Structure**:
 
-**Production Database Server**:
+```json
+{
+  "$schema": "...",                    // Schema version
+  "contentVersion": "1.0.0.0",        // Your version
+  "parameters": {                      // Input parameters
+    "vnetName": { "type": "string" }
+  },
+  "variables": {                       // Computed values
+    "subnetName": "[concat(parameters('vnetName'), '-subnet')]"
+  },
+  "resources": [                       // Resources to deploy
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-05-01",
+      "name": "[parameters('vnetName')]",
+      "location": "[resourceGroup().location]",
+      "properties": { ... }
+    }
+  ],
+  "outputs": {                         // Return values
+    "vnetId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]"
+    }
+  }
+}
+```
 
-| Field | Value |
-|-------|-------|
-| Virtual machine name | `prod-skycraft-swc-db-01-vm` |
-| Availability zone | **Zone 1** |
-| Size | **Standard_D4s_v5** (4 vCPU, 16 GiB memory) |
-| OS disk type | **Premium SSD** |
-| Subnet | `DatabaseSubnet (10.2.3.0/24)` |
-| Key pair name | `prod-skycraft-swc-db-01-key` |
-| Tag: Role | DatabaseServer |
+### Step 3.1.3: Identify Key ARM Template Components
 
-**Expected Result**: 
-- 4 production VMs deployed across Zone 1 and Zone 2
-- All using Premium SSD for production reliability
-- D-series VMs provide consistent performance
-- Total: 8 VMs deployed (4 dev + 4 prod)
+**Example from your exported template**:
+
+```json
+{
+  "type": "Microsoft.Network/virtualNetworks",
+  "apiVersion": "2023-05-01",
+  "name": "dev-skycraft-swc-vnet",
+  "location": "swedencentral",
+  "tags": {
+    "Project": "SkyCraft",
+    "Environment": "Development"
+  },
+  "properties": {
+    "addressSpace": {
+      "addressPrefixes": ["10.1.0.0/16"]
+    },
+    "subnets": [
+      {
+        "name": "AuthSubnet",
+        "properties": {
+          "addressPrefix": "10.1.1.0/24"
+        }
+      }
+    ]
+  },
+  "dependsOn": []
+}
+```
+
+**Component Breakdown**:
+
+| Field | Purpose | Example Value |
+|-------|---------|---------------|
+| `type` | Azure resource type | Microsoft.Network/virtualNetworks |
+| `apiVersion` | API version to use | 2023-05-01 |
+| `name` | Resource name | dev-skycraft-swc-vnet |
+| `location` | Azure region | swedencentral |
+| `tags` | Metadata tags | Project, Environment |
+| `properties` | Resource-specific config | addressSpace, subnets |
+| `dependsOn` | Deployment dependencies | Other resource IDs |
+
+### Step 3.1.4: Understand ARM Template Functions
+
+ARM templates use **functions** for dynamic values:
+
+| Function | Purpose | Example |
+|----------|---------|---------|
+| `parameters('name')` | Get parameter value | `parameters('vmSize')` |
+| `variables('name')` | Get variable value | `variables('subnetId')` |
+| `resourceId(...)` | Generate resource ID | `resourceId('Microsoft.Network/virtualNetworks', 'vnet')` |
+| `reference(...)` | Get resource properties | `reference('vnet').addressSpace` |
+| `concat(...)` | Concatenate strings | `concat('dev-', parameters('vmName'))` |
+| `resourceGroup()` | Get resource group info | `resourceGroup().location` |
+| `subscription()` | Get subscription info | `subscription().subscriptionId` |
+
+**Example Usage**:
+```json
+"name": "[concat(parameters('environment'), '-skycraft-swc-vnet')]",
+"location": "[resourceGroup().location]",
+"dependsOn": [
+  "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+]
+```
 
 ---
 
-## 📖 Section 4: Configure Managed Disks and Storage (30 minutes)
+## 📖 Section 3: Introduction to Bicep Syntax (20 minutes)
 
-### Step 3.1.6: Add Data Disk to Database VMs
+### Step 3.1.5: Install Bicep Tools
 
-Database servers need additional storage for MySQL data.
+1. **Install Bicep CLI**:
+```bash
+# Install Bicep via Azure CLI
+az bicep install
 
-**Add data disk to dev-skycraft-swc-db-01-vm**:
+# Verify installation
+az bicep version
+# Expected output: Bicep CLI version 0.24.24 (or later)
+```
 
-1. Navigate to **Virtual machines** → **dev-skycraft-swc-db-01-vm**
-2. In left menu, click **Disks**
-3. Click **+ Create and attach a new disk**
+2. **Install VS Code Extension**:
+   - Open VS Code
+   - Go to Extensions (Ctrl+Shift+X)
+   - Search for "Bicep"
+   - Install **Bicep** extension by Microsoft
+   - Reload VS Code
 
-| Field | Value |
-|-------|-------|
-| Disk name | `dev-skycraft-swc-db-01-datadisk-01` |
-| Source type | **None (empty disk)** |
-| Size | **128 GiB** (P10 - 500 IOPS) |
-| Disk SKU | **Standard SSD** |
-| Encryption | Platform-managed key |
-| Host caching | **Read/Write** |
+**Benefits of VS Code Bicep extension**:
+- IntelliSense (autocomplete for resource types)
+- Syntax highlighting
+- Real-time validation (red squiggly lines for errors)
+- Inline documentation
+- Resource snippets (type `resource` and press Tab)
 
-4. Click **Save**
+### Step 3.1.6: Create Your First Bicep File
 
-**Expected Result**: 128 GB data disk attached to dev database VM.
+3. Create new file: `first-resource.bicep`
 
-**Add data disk to prod-skycraft-swc-db-01-vm**:
+```bicep
+// Basic Bicep syntax demonstration
 
-5. Navigate to **prod-skycraft-swc-db-01-vm** → **Disks**
-6. Click **+ Create and attach a new disk**
+// Parameters - inputs to the template
+param location string = 'swedencentral'
+param storageAccountName string
 
-| Field | Value |
-|-------|-------|
-| Disk name | `prod-skycraft-swc-db-01-datadisk-01` |
-| Size | **256 GiB** (P15 - 1,100 IOPS) |
-| Disk SKU | **Premium SSD** |
-| Host caching | **Read/Write** |
+// Variables - computed values
+var storageAccountSku = 'Standard_LRS'
+var tags = {
+  Project: 'SkyCraft'
+  Environment: 'Development'
+  ManagedBy: 'Bicep'
+}
 
-7. Click **Save**
+// Resource declaration
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: storageAccountName
+  location: location
+  tags: tags
+  sku: {
+    name: storageAccountSku
+  }
+  kind: 'StorageV2'
+  properties: {
+    accessTier: 'Hot'
+    supportsHttpsTrafficOnly: true
+    minimumTlsVersion: 'TLS1_2'
+  }
+}
 
-**Expected Result**: 256 GB Premium SSD data disk attached to production database VM.
+// Output - return values
+output storageAccountId string = storageAccount.id
+output primaryEndpoint string = storageAccount.properties.primaryEndpoints.blob
+```
 
-### Step 3.1.7: Verify Disk Configuration
+### Bicep Syntax Fundamentals
 
-1. Navigate to **Virtual machines** → **dev-skycraft-swc-db-01-vm** → **Disks**
-2. Verify configuration:
-   - **OS disk**: Standard SSD (30 GB)
-   - **Data disks**: 1 disk (128 GB)
+**1. Parameters** (Inputs):
+```bicep
+// String parameter with default
+param vmSize string = 'Standard_B2s'
 
-3. Navigate to **prod-skycraft-swc-db-01-vm** → **Disks**
-4. Verify configuration:
-   - **OS disk**: Premium SSD (30 GB)
-   - **Data disks**: 1 disk (256 GB)
+// String parameter without default (required)
+param adminUsername string
 
-**Expected Result**: Database VMs have dedicated data disks for MySQL storage, separate from OS disk.
+// Integer parameter with validation
+@minValue(1)
+@maxValue(100)
+param instanceCount int = 2
+
+// Allowed values (enum-like)
+@allowed([
+  'swedencentral'
+  'westeurope'
+  'northeurope'
+])
+param location string = 'swedencentral'
+
+// Secure parameters (for passwords)
+@secure()
+param adminPassword string
+```
+
+**2. Variables** (Computed Values):
+```bicep
+// Simple variable
+var resourceGroupName = 'dev-skycraft-swc-rg'
+
+// Interpolated string
+var vnetName = '${environment}-skycraft-swc-vnet'
+
+// Object variable
+var tags = {
+  Project: 'SkyCraft'
+  Environment: environment
+  CostCenter: 'MSDN'
+}
+
+// Array variable
+var subnets = [
+  { name: 'AuthSubnet', addressPrefix: '10.1.1.0/24' }
+  { name: 'WorldSubnet', addressPrefix: '10.1.2.0/24' }
+]
+```
+
+**3. Resources** (Infrastructure):
+```bicep
+// Resource with symbolic name 'vnet'
+resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
+  name: 'dev-skycraft-swc-vnet'
+  location: location
+  properties: {
+    addressSpace: {
+      addressPrefixes: ['10.1.0.0/16']
+    }
+  }
+}
+
+// Reference another resource
+resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-05-01' = {
+  parent: vnet                    // Parent relationship
+  name: 'AuthSubnet'
+  properties: {
+    addressPrefix: '10.1.1.0/24'
+  }
+}
+```
+
+**4. Outputs** (Return Values):
+```bicep
+output vnetId string = vnet.id
+output vnetName string = vnet.name
+output authSubnetId string = subnet.id
+```
+
+### Step 3.1.7: Bicep vs ARM Side-by-Side Comparison
+
+**ARM Template (JSON)**:
+```json
+{
+  "resources": [
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2023-05-01",
+      "name": "[parameters('nsgName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "AllowSSH",
+            "properties": {
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "22",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 100,
+              "direction": "Inbound"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+**Bicep Equivalent**:
+```bicep
+param nsgName string
+
+resource nsg 'Microsoft.Network/networkSecurityGroups@2023-05-01' = {
+  name: nsgName
+  location: resourceGroup().location
+  properties: {
+    securityRules: [
+      {
+        name: 'AllowSSH'
+        properties: {
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '22'
+          sourceAddressPrefix: '*'
+          destinationAddressPrefix: '*'
+          access: 'Allow'
+          priority: 100
+          direction: 'Inbound'
+        }
+      }
+    ]
+  }
+}
+```
+
+**Key Differences**:
+- ✅ No `"type"` field name wrapping in Bicep
+- ✅ No `[parameters()]` function - just `nsgName`
+- ✅ No commas after properties (newlines sufficient)
+- ✅ Cleaner, more readable syntax
 
 ---
 
-## 📖 Section 5: Connect via Azure Bastion and Verify (30 minutes)
+## 📖 Section 4: Convert ARM Templates to Bicep (20 minutes)
 
-### Step 3.1.8: Connect to Dev Auth Server via Bastion
+### Step 3.1.8: Decompile ARM Template to Bicep
 
-1. Navigate to **Virtual machines** → **dev-skycraft-swc-auth-01-vm**
-2. Click **Connect** → **Bastion**
-3. Configure Bastion connection:
+Bicep CLI can automatically convert ARM JSON to Bicep:
 
-| Field | Value |
-|-------|-------|
-| Authentication type | **SSH Private Key from Local File** |
-| Username | `azureuser` |
-| Local file | [Browse and select `dev-skycraft-swc-auth-01-key.pem`] |
+1. Navigate to your exported template directory:
+```bash
+cd ~/Downloads/dev-skycraft-swc-rg-export
+```
 
-4. Click **Connect**
+2. **Decompile ARM to Bicep**:
+```bash
+az bicep decompile --file template.json
+```
 
-**Expected Result**: 
-- New browser tab opens with SSH session
-- Connected to `azureuser@dev-skycraft-swc-auth-01-vm`
-- No public IP needed (traffic routes through Bastion via VNet peering)
+**Expected Output**:
+```
+Decompilation complete. Output file: template.bicep
+Warning: Decompilation is a best-effort process. Review the generated file carefully.
+```
 
-### Step 3.1.9: Verify VM Configuration
+3. **Review generated Bicep file**:
+```bash
+code template.bicep
+```
 
-Once connected via Bastion, run these commands:
+### Step 3.1.9: Analyze Decompiled Bicep
+
+**What you'll see** (example excerpt):
+
+```bicep
+// WARNING: Decompiled Bicep may have issues
+// Review carefully and test before using
+
+param virtualNetworks_dev_skycraft_swc_vnet_name string = 'dev-skycraft-swc-vnet'
+param networkSecurityGroups_auth_nsg_name string = 'auth-nsg'
+
+resource virtualNetworks_dev_skycraft_swc_vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
+  name: virtualNetworks_dev_skycraft_swc_vnet_name
+  location: 'swedencentral'
+  tags: {
+    Project: 'SkyCraft'
+    Environment: 'Development'
+    CostCenter: 'MSDN'
+  }
+  properties: {
+    addressSpace: {
+      addressPrefixes: [
+        '10.1.0.0/16'
+      ]
+    }
+    subnets: [
+      {
+        name: 'AuthSubnet'
+        properties: {
+          addressPrefix: '10.1.1.0/24'
+          networkSecurityGroup: {
+            id: networkSecurityGroups_auth_nsg.id
+          }
+        }
+      }
+    ]
+  }
+}
+
+resource networkSecurityGroups_auth_nsg 'Microsoft.Network/networkSecurityGroups@2023-05-01' = {
+  name: networkSecurityGroups_auth_nsg_name
+  location: 'swedencentral'
+  properties: {
+    securityRules: [
+      // ... rules
+    ]
+  }
+}
+```
+
+**Common Decompilation Issues**:
+
+| Issue | Why It Happens | Fix |
+|-------|----------------|-----|
+| Long parameter names | Auto-generated from resource names | Rename to shorter names |
+| No parameter descriptions | Not in ARM template | Add `@description()` decorators |
+| Hardcoded values | Values were hardcoded in ARM | Extract to parameters |
+| No modules | ARM uses nested templates | Refactor to Bicep modules |
+| Repetitive code | Copy-paste in original | Create loops with `for` |
+
+### Step 3.1.10: Clean Up and Improve Decompiled Bicep
+
+**Before** (Decompiled):
+```bicep
+param virtualNetworks_dev_skycraft_swc_vnet_name string = 'dev-skycraft-swc-vnet'
+param location string = 'swedencentral'
+
+resource virtualNetworks_dev_skycraft_swc_vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
+  name: virtualNetworks_dev_skycraft_swc_vnet_name
+  location: location
+  properties: {
+    addressSpace: {
+      addressPrefixes: ['10.1.0.0/16']
+    }
+  }
+}
+```
+
+**After** (Cleaned):
+```bicep
+@description('Name of the virtual network')
+param vnetName string = 'dev-skycraft-swc-vnet'
+
+@description('Azure region for deployment')
+@allowed(['swedencentral', 'westeurope', 'northeurope'])
+param location string = 'swedencentral'
+
+@description('Virtual network address space')
+param vnetAddressPrefix string = '10.1.0.0/16'
+
+resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
+  name: vnetName
+  location: location
+  properties: {
+    addressSpace: {
+      addressPrefixes: [vnetAddressPrefix]
+    }
+  }
+}
+
+output vnetId string = vnet.id
+```
+
+**Improvements**:
+- ✅ Descriptive parameter names
+- ✅ `@description()` decorators for documentation
+- ✅ `@allowed()` for validation
+- ✅ Parameterized address prefix
+- ✅ Added output for reusability
+
+---
+
+## 📖 Section 5: Create Parameterized Bicep Modules (30 minutes)
+
+### Step 3.1.11: Create Network Module
+
+Modules enable code reuse and organization. Create `modules/network.bicep`:
+
+```bicep
+// modules/network.bicep
+// Reusable network module for SkyCraft infrastructure
+
+@description('Name prefix for network resources')
+param namePrefix string
+
+@description('Azure region for deployment')
+param location string = resourceGroup().location
+
+@description('Environment name (dev, prod)')
+@allowed(['dev', 'prod', 'platform'])
+param environment string
+
+@description('VNet address space')
+param vnetAddressPrefix string
+
+@description('Subnet configurations')
+param subnets array
+
+@description('Resource tags')
+param tags object = {
+  Project: 'SkyCraft'
+  Environment: environment
+  ManagedBy: 'Bicep'
+}
+
+// Virtual Network
+resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
+  name: '${namePrefix}-vnet'
+  location: location
+  tags: tags
+  properties: {
+    addressSpace: {
+      addressPrefixes: [vnetAddressPrefix]
+    }
+    subnets: [for subnet in subnets: {
+      name: subnet.name
+      properties: {
+        addressPrefix: subnet.addressPrefix
+        networkSecurityGroup: contains(subnet, 'nsgId') ? {
+          id: subnet.nsgId
+        } : null
+      }
+    }]
+  }
+}
+
+// Outputs
+output vnetId string = vnet.id
+output vnetName string = vnet.name
+output subnets array = [for (subnet, i) in subnets: {
+  name: subnet.name
+  id: vnet.properties.subnets[i].id
+}]
+```
+
+### Step 3.1.12: Create Network Security Group Module
+
+Create `modules/nsg.bicep`:
+
+```bicep
+// modules/nsg.bicep
+// Network Security Group module with configurable rules
+
+@description('Name of the Network Security Group')
+param nsgName string
+
+@description('Azure region for deployment')
+param location string = resourceGroup().location
+
+@description('Security rules configuration')
+param securityRules array = []
+
+@description('Resource tags')
+param tags object
+
+// Network Security Group
+resource nsg 'Microsoft.Network/networkSecurityGroups@2023-05-01' = {
+  name: nsgName
+  location: location
+  tags: tags
+  properties: {
+    securityRules: [for rule in securityRules: {
+      name: rule.name
+      properties: {
+        protocol: rule.protocol
+        sourcePortRange: rule.sourcePortRange
+        destinationPortRange: rule.destinationPortRange
+        sourceAddressPrefix: contains(rule, 'sourceAddressPrefix') ? rule.sourceAddressPrefix : '*'
+        destinationAddressPrefix: contains(rule, 'destinationAddressPrefix') ? rule.destinationAddressPrefix : '*'
+        access: rule.access
+        priority: rule.priority
+        direction: rule.direction
+      }
+    }]
+  }
+}
+
+// Outputs
+output nsgId string = nsg.id
+output nsgName string = nsg.name
+```
+
+### Step 3.1.13: Create Load Balancer Module
+
+Create `modules/loadbalancer.bicep`:
+
+```bicep
+// modules/loadbalancer.bicep
+// Azure Load Balancer module for high availability
+
+@description('Name prefix for load balancer resources')
+param namePrefix string
+
+@description('Azure region for deployment')
+param location string = resourceGroup().location
+
+@description('Public IP address resource ID')
+param publicIpId string
+
+@description('Backend pool configurations')
+param backendPools array
+
+@description('Health probe configurations')
+param healthProbes array
+
+@description('Load balancing rule configurations')
+param lbRules array
+
+@description('Resource tags')
+param tags object
+
+// Load Balancer
+resource loadBalancer 'Microsoft.Network/loadBalancers@2023-05-01' = {
+  name: '${namePrefix}-lb'
+  location: location
+  tags: tags
+  sku: {
+    name: 'Standard'
+    tier: 'Regional'
+  }
+  properties: {
+    frontendIPConfigurations: [
+      {
+        name: '${namePrefix}-lb-frontend'
+        properties: {
+          publicIPAddress: {
+            id: publicIpId
+          }
+        }
+      }
+    ]
+    backendAddressPools: [for pool in backendPools: {
+      name: pool.name
+    }]
+    probes: [for probe in healthProbes: {
+      name: probe.name
+      properties: {
+        protocol: probe.protocol
+        port: probe.port
+        intervalInSeconds: probe.intervalInSeconds
+        numberOfProbes: probe.numberOfProbes
+      }
+    }]
+    loadBalancingRules: [for (rule, i) in lbRules: {
+      name: rule.name
+      properties: {
+        frontendIPConfiguration: {
+          id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', '${namePrefix}-lb', '${namePrefix}-lb-frontend')
+        }
+        backendAddressPool: {
+          id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', '${namePrefix}-lb', rule.backendPoolName)
+        }
+        probe: {
+          id: resourceId('Microsoft.Network/loadBalancers/probes', '${namePrefix}-lb', rule.probeName)
+        }
+        protocol: rule.protocol
+        frontendPort: rule.frontendPort
+        backendPort: rule.backendPort
+        enableFloatingIP: false
+        idleTimeoutInMinutes: 4
+        loadDistribution: 'Default'
+      }
+    }]
+  }
+}
+
+// Outputs
+output loadBalancerId string = loadBalancer.id
+output loadBalancerName string = loadBalancer.name
+output backendPoolIds array = [for (pool, i) in backendPools: {
+  name: pool.name
+  id: loadBalancer.properties.backendAddressPools[i].id
+}]
+```
+
+### Step 3.1.14: Create Parameter Files
+
+**Bicep Parameter File** (`.bicepparam`) is the modern way to provide parameters:
+
+Create `dev.bicepparam`:
+
+```bicep
+using './main.bicep'
+
+// Global parameters
+param location = 'swedencentral'
+param environment = 'dev'
+param project = 'skycraft'
+param costCenter = 'MSDN'
+
+// Network parameters
+param hubVnetAddressPrefix = '10.0.0.0/16'
+param devVnetAddressPrefix = '10.1.0.0/16'
+
+// VM parameters (for future use)
+param vmAdminUsername = 'azureuser'
+param vmSize = 'Standard_B2s'
+```
+
+Create `prod.bicepparam`:
+
+```bicep
+using './main.bicep'
+
+param location = 'swedencentral'
+param environment = 'prod'
+param project = 'skycraft'
+param costCenter = 'MSDN'
+
+param hubVnetAddressPrefix = '10.0.0.0/16'
+param prodVnetAddressPrefix = '10.2.0.0/16'
+
+// Production uses larger VMs
+param vmSize = 'Standard_D2s_v3'
+```
+
+---
+
+## 📖 Section 6: Build Complete Infrastructure Bicep Template (40 minutes)
+
+### Step 3.1.15: Create Main Bicep Template
+
+Create `main.bicep` as the orchestrator that references modules:
+
+```bicep
+// main.bicep
+// Main template for SkyCraft Azure infrastructure deployment
+// Deploys VNets, NSGs, Load Balancers, and supporting resources
+
+targetScope = 'subscription'
+
+// ============================================================================
+// PARAMETERS
+// ============================================================================
+
+@description('Azure region for resource deployment')
+@allowed(['swedencentral', 'westeurope', 'northeurope'])
+param location string = 'swedencentral'
+
+@description('Environment name')
+@allowed(['dev', 'prod'])
+param environment string
+
+@description('Project name for resource naming')
+param project string = 'skycraft'
+
+@description('Service/workload name')
+param service string = 'swc'
+
+@description('Cost center for billing')
+param costCenter string = 'MSDN'
+
+@description('Hub VNet address space')
+param hubVnetAddressPrefix string = '10.0.0.0/16'
+
+@description('Dev VNet address space')
+param devVnetAddressPrefix string = '10.1.0.0/16'
+
+@description('Prod VNet address space')
+param prodVnetAddressPrefix string = '10.2.0.0/16'
+
+@description('Admin username for VMs')
+param vmAdminUsername string = 'azureuser'
+
+@description('VM size for compute resources')
+param vmSize string = 'Standard_B2s'
+
+@description('SSH public key for VM authentication')
+@secure()
+param sshPublicKey string
+
+// ============================================================================
+// VARIABLES
+// ============================================================================
+
+var locationShortCode = 'swc'  // Sweden Central
+var tags = {
+  Project: project
+  Service: service
+  CostCenter: costCenter
+  ManagedBy: 'Bicep'
+  DeploymentDate: utcNow('yyyy-MM-dd')
+}
+
+// Resource group names
+var platformRgName = 'platform-${project}-${locationShortCode}-rg'
+var devRgName = 'dev-${project}-${locationShortCode}-rg'
+var prodRgName = 'prod-${project}-${locationShortCode}-rg'
+
+// ============================================================================
+// RESOURCE GROUPS
+// ============================================================================
+
+resource platformRg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
+  name: platformRgName
+  location: location
+  tags: union(tags, {
+    Environment: 'Platform'
+  })
+}
+
+resource devRg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
+  name: devRgName
+  location: location
+  tags: union(tags, {
+    Environment: 'Development'
+  })
+}
+
+resource prodRg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
+  name: prodRgName
+  location: location
+  tags: union(tags, {
+    Environment: 'Production'
+  })
+}
+
+// ============================================================================
+// NETWORK SECURITY GROUPS (Dev Environment)
+// ============================================================================
+
+module devAuthNsg 'modules/nsg.bicep' = {
+  name: 'devAuthNsgDeployment'
+  scope: devRg
+  params: {
+    nsgName: 'auth-nsg'
+    location: location
+    tags: union(tags, { Environment: 'Development', Purpose: 'AuthServers' })
+    securityRules: [
+      {
+        name: 'AllowBastionSSH'
+        protocol: 'Tcp'
+        sourcePortRange: '*'
+        destinationPortRange: '22'
+        sourceAddressPrefix: '10.0.0.0/26'
+        destinationAddressPrefix: '*'
+        access: 'Allow'
+        priority: 100
+        direction: 'Inbound'
+      }
+      {
+        name: 'AllowAuthPort'
+        protocol: 'Tcp'
+        sourcePortRange: '*'
+        destinationPortRange: '3724'
+        sourceAddressPrefix: '*'
+        destinationAddressPrefix: '*'
+        access: 'Allow'
+        priority: 110
+        direction: 'Inbound'
+      }
+    ]
+  }
+}
+
+module devWorldNsg 'modules/nsg.bicep' = {
+  name: 'devWorldNsgDeployment'
+  scope: devRg
+  params: {
+    nsgName: 'world-nsg'
+    location: location
+    tags: union(tags, { Environment: 'Development', Purpose: 'WorldServers' })
+    securityRules: [
+      {
+        name: 'AllowBastionSSH'
+        protocol: 'Tcp'
+        sourcePortRange: '*'
+        destinationPortRange: '22'
+        sourceAddressPrefix: '10.0.0.0/26'
+        destinationAddressPrefix: '*'
+        access: 'Allow'
+        priority: 100
+        direction: 'Inbound'
+      }
+      {
+        name: 'AllowWorldPort'
+        protocol: 'Tcp'
+        sourcePortRange: '*'
+        destinationPortRange: '8085'
+        sourceAddressPrefix: '*'
+        destinationAddressPrefix: '*'
+        access: 'Allow'
+        priority: 110
+        direction: 'Inbound'
+      }
+    ]
+  }
+}
+
+// ============================================================================
+// VIRTUAL NETWORKS
+// ============================================================================
+
+module hubVnet 'modules/network.bicep' = {
+  name: 'hubVnetDeployment'
+  scope: platformRg
+  params: {
+    namePrefix: 'platform-${project}-${locationShortCode}'
+    location: location
+    environment: 'platform'
+    vnetAddressPrefix: hubVnetAddressPrefix
+    subnets: [
+      {
+        name: 'AzureBastionSubnet'
+        addressPrefix: '10.0.0.0/26'
+      }
+    ]
+    tags: union(tags, { Environment: 'Platform', Purpose: 'HubNetwork' })
+  }
+}
+
+module devVnet 'modules/network.bicep' = {
+  name: 'devVnetDeployment'
+  scope: devRg
+  dependsOn: [
+    devAuthNsg
+    devWorldNsg
+  ]
+  params: {
+    namePrefix: 'dev-${project}-${locationShortCode}'
+    location: location
+    environment: 'dev'
+    vnetAddressPrefix: devVnetAddressPrefix
+    subnets: [
+      {
+        name: 'AuthSubnet'
+        addressPrefix: '10.1.1.0/24'
+        nsgId: devAuthNsg.outputs.nsgId
+      }
+      {
+        name: 'WorldSubnet'
+        addressPrefix: '10.1.2.0/24'
+        nsgId: devWorldNsg.outputs.nsgId
+      }
+      {
+        name: 'DatabaseSubnet'
+        addressPrefix: '10.1.3.0/24'
+      }
+    ]
+    tags: union(tags, { Environment: 'Development' })
+  }
+}
+
+// ============================================================================
+// PUBLIC IP ADDRESSES
+// ============================================================================
+
+module devLbPublicIp 'modules/publicip.bicep' = {
+  name: 'devLbPublicIpDeployment'
+  scope: devRg
+  params: {
+    publicIpName: 'dev-${project}-${locationShortCode}-lb-pip'
+    location: location
+    sku: 'Standard'
+    allocationMethod: 'Static'
+    tags: union(tags, { Environment: 'Development', Purpose: 'LoadBalancer' })
+  }
+}
+
+// ============================================================================
+// LOAD BALANCERS
+// ============================================================================
+
+module devLoadBalancer 'modules/loadbalancer.bicep' = {
+  name: 'devLoadBalancerDeployment'
+  scope: devRg
+  dependsOn: [
+    devLbPublicIp
+  ]
+  params: {
+    namePrefix: 'dev-${project}-${locationShortCode}'
+    location: location
+    publicIpId: devLbPublicIp.outputs.publicIpId
+    backendPools: [
+      { name: 'dev-${project}-${locationShortCode}-lb-be-world' }
+      { name: 'dev-${project}-${locationShortCode}-lb-be-auth' }
+    ]
+    healthProbes: [
+      {
+        name: 'dev-${project}-${locationShortCode}-lb-probe-world'
+        protocol: 'Tcp'
+        port: 8085
+        intervalInSeconds: 15
+        numberOfProbes: 2
+      }
+      {
+        name: 'dev-${project}-${locationShortCode}-lb-probe-auth'
+        protocol: 'Tcp'
+        port: 3724
+        intervalInSeconds: 15
+        numberOfProbes: 2
+      }
+    ]
+    lbRules: [
+      {
+        name: 'dev-${project}-${locationShortCode}-lb-rule-world'
+        protocol: 'Tcp'
+        frontendPort: 8085
+        backendPort: 8085
+        backendPoolName: 'dev-${project}-${locationShortCode}-lb-be-world'
+        probeName: 'dev-${project}-${locationShortCode}-lb-probe-world'
+      }
+      {
+        name: 'dev-${project}-${locationShortCode}-lb-rule-auth'
+        protocol: 'Tcp'
+        frontendPort: 3724
+        backendPort: 3724
+        backendPoolName: 'dev-${project}-${locationShortCode}-lb-be-auth'
+        probeName: 'dev-${project}-${locationShortCode}-lb-probe-auth'
+      }
+    ]
+    tags: union(tags, { Environment: 'Development' })
+  }
+}
+
+// ============================================================================
+// OUTPUTS
+// ============================================================================
+
+output platformResourceGroupName string = platformRg.name
+output devResourceGroupName string = devRg.name
+output prodResourceGroupName string = prodRg.name
+
+output hubVnetId string = hubVnet.outputs.vnetId
+output devVnetId string = devVnet.outputs.vnetId
+
+output devLoadBalancerId string = devLoadBalancer.outputs.loadBalancerId
+output devLoadBalancerPublicIp string = devLbPublicIp.outputs.ipAddress
+```
+
+### Step 3.1.16: Create Public IP Module
+
+Create `modules/publicip.bicep`:
+
+```bicep
+// modules/publicip.bicep
+// Public IP address module
+
+@description('Name of the public IP address')
+param publicIpName string
+
+@description('Azure region for deployment')
+param location string = resourceGroup().location
+
+@description('Public IP SKU')
+@allowed(['Basic', 'Standard'])
+param sku string = 'Standard'
+
+@description('IP allocation method')
+@allowed(['Static', 'Dynamic'])
+param allocationMethod string = 'Static'
+
+@description('DNS label (optional)')
+param dnsLabel string = ''
+
+@description('Resource tags')
+param tags object
+
+// Public IP Address
+resource publicIp 'Microsoft.Network/publicIPAddresses@2023-05-01' = {
+  name: publicIpName
+  location: location
+  tags: tags
+  sku: {
+    name: sku
+    tier: 'Regional'
+  }
+  properties: {
+    publicIPAllocationMethod: allocationMethod
+    publicIPAddressVersion: 'IPv4'
+    dnsSettings: !empty(dnsLabel) ? {
+      domainNameLabel: dnsLabel
+    } : null
+  }
+}
+
+// Outputs
+output publicIpId string = publicIp.id
+output publicIpName string = publicIp.name
+output ipAddress string = publicIp.properties.ipAddress
+```
+
+---
+
+## 📖 Section 7: Deploy and Validate Bicep Templates (30 minutes)
+
+### Step 3.1.17: Validate Bicep Template
+
+Before deploying, always validate:
 
 ```bash
-# Check OS version
-cat /etc/os-release
+# Build Bicep to ARM (checks for syntax errors)
+az bicep build --file main.bicep
 
-# Expected output:
-# PRETTY_NAME="Ubuntu 22.04.X LTS"
-# VERSION_ID="22.04"
+# Expected output: "Build succeeded"
+# Creates main.json (ARM template)
 
-# Check CPU and memory
-lscpu | grep "CPU(s):"
-free -h
+# Validate deployment (doesn't actually deploy)
+az deployment sub validate   --location swedencentral   --template-file main.bicep   --parameters dev.bicepparam
 
-# Expected output:
-# CPU(s): 2
-# Mem: 3.8Gi (for B2s)
-
-# Check network interface
-ip addr show
-
-# Expected output:
-# eth0: 10.1.1.X (IP in AuthSubnet range)
-
-# Check internet connectivity
-ping -c 3 8.8.8.8
-
-# Test DNS resolution
-nslookup dev-db.skycraft.internal
-
-# Expected output:
-# Name: dev-db.skycraft.internal
-# Address: 10.1.3.10
-
-# Check disk configuration
-lsblk
-
-# Expected output:
-# sda   30G  (OS disk)
-# └─sda1  30G  /
+# Expected output: Validation successful
 ```
 
-### Step 3.1.10: Test Connectivity Between VMs
+### Step 3.1.18: Preview Changes with What-If
 
-From dev-skycraft-swc-auth-01-vm, test connectivity to other VMs:
+**What-If** shows what will change before deployment:
 
 ```bash
-# Test SSH to world server (using private IP)
-ssh azureuser@10.1.2.10
-
-# Note: This will fail because you don't have the private key on this VM yet
-# We're just verifying network connectivity
-
-# Test TCP connectivity to world server port
-nc -zv 10.1.2.10 22
-
-# Expected output:
-# Connection to 10.1.2.10 22 port [tcp/ssh] succeeded!
-
-# Test connectivity to database server
-nc -zv 10.1.3.10 22
-
-# Expected output:
-# Connection to 10.1.3.10 22 port [tcp/ssh] succeeded!
-
-# Test MySQL port (not installed yet, should timeout)
-nc -zv -w 2 10.1.3.10 3306
-
-# Expected: Connection refused or timeout (MySQL not installed yet)
+az deployment sub what-if   --location swedencentral   --template-file main.bicep   --parameters dev.bicepparam
 ```
 
-**Expected Result**: VMs can communicate within VNet. SSH works (port 22). MySQL not yet installed.
+**Expected Output**:
+```
+Resource changes: 15 to create, 0 to modify, 0 to delete.
 
-### Step 3.1.11: Connect to Other VMs via Bastion
++ Microsoft.Resources/resourceGroups
+  ~ platform-skycraft-swc-rg [Create]
+  ~ dev-skycraft-swc-rg [Create]
+  ~ prod-skycraft-swc-rg [Create]
 
-Repeat Bastion connection for all VMs to verify deployment:
++ Microsoft.Network/virtualNetworks
+  ~ platform-skycraft-swc-vnet [Create]
+  ~ dev-skycraft-swc-vnet [Create]
 
-**Dev Environment**:
-- dev-skycraft-swc-world-01-vm (use dev-skycraft-swc-world-01-key.pem)
-- dev-skycraft-swc-world-02-vm (use dev-skycraft-swc-world-02-key.pem)
-- dev-skycraft-swc-db-01-vm (use dev-skycraft-swc-db-01-key.pem)
++ Microsoft.Network/networkSecurityGroups
+  ~ auth-nsg [Create]
+  ~ world-nsg [Create]
 
-**Production Environment**:
-- prod-skycraft-swc-auth-01-vm (use prod-skycraft-swc-auth-01-key.pem)
-- prod-skycraft-swc-world-01-vm (use prod-skycraft-swc-world-01-key.pem)
-- prod-skycraft-swc-world-02-vm (use prod-skycraft-swc-world-02-key.pem)
-- prod-skycraft-swc-db-01-vm (use prod-skycraft-swc-db-01-key.pem)
++ Microsoft.Network/loadBalancers
+  ~ dev-skycraft-swc-lb [Create]
 
-**Expected Result**: All 8 VMs accessible via Bastion. No connectivity issues.
-
----
-
-## 📖 Section 6: Configure Cloud-Init for Initial Setup (10 minutes)
-
-### What is Cloud-Init?
-
-**Cloud-init** is a standard for VM initialization on first boot. It can:
-- Update packages
-- Install software
-- Create users
-- Run custom scripts
-
-**For production deployments**, cloud-init is preferred over manual SSH configuration.
-
-### Step 3.1.12: Review Cloud-Init Configuration (Conceptual)
-
-Cloud-init can be specified during VM creation in the **Advanced** tab. Here's an example for future reference:
-
-```yaml
-#cloud-config
-package_update: true
-package_upgrade: true
-
-packages:
-  - build-essential
-  - git
-  - cmake
-  - libssl-dev
-  - libmysqlclient-dev
-
-runcmd:
-  - echo "Cloud-init completed" > /var/log/cloudinit-complete.log
-  - timedatectl set-timezone Europe/Stockholm
++ Microsoft.Network/publicIPAddresses
+  ~ dev-skycraft-swc-lb-pip [Create]
 ```
 
-**Note**: Our VMs are already deployed. In Lab 3.2, we'll use Custom Script Extension as an alternative to install AzerothCore dependencies.
+**Color Legend**:
+- 🟢 Green (+): Resource will be created
+- 🟡 Yellow (~): Resource will be modified
+- 🔴 Red (-): Resource will be deleted
+- ⚪ White (=): No change
 
-**Expected Understanding**: Cloud-init automates initial VM configuration, reducing manual setup time.
+### Step 3.1.19: Deploy Bicep Template
+
+Deploy to Azure:
+
+```bash
+# Deploy to subscription scope
+az deployment sub create   --name "SkyCraft-Dev-$(date +%Y%m%d-%H%M%S)"   --location swedencentral   --template-file main.bicep   --parameters dev.bicepparam   --confirm-with-what-if
+
+# The --confirm-with-what-if flag shows what-if and prompts for confirmation
+```
+
+**Deployment Process**:
+1. Bicep transpiles to ARM JSON
+2. ARM validates template
+3. Shows what-if preview
+4. Asks for confirmation: `Are you sure? (y/N)`
+5. Creates resource groups
+6. Deploys resources in parallel (where possible)
+7. Shows deployment progress
+
+**Expected Duration**: 3-5 minutes for network infrastructure
+
+### Step 3.1.20: Monitor Deployment Progress
+
+```bash
+# Watch deployment status
+az deployment sub show   --name "SkyCraft-Dev-20260112-205000"   --query "{Name:name,State:properties.provisioningState,Duration:properties.duration}"   --output table
+
+# List all deployments
+az deployment sub list   --query "[].{Name:name,State:properties.provisioningState,Timestamp:properties.timestamp}"   --output table
+```
+
+### Step 3.1.21: Verify Deployed Resources
+
+```bash
+# List resource groups created
+az group list   --query "[?contains(name, 'skycraft')].{Name:name,Location:location,State:properties.provisioningState}"   --output table
+
+# Expected output:
+# Name                        Location       State
+# --------------------------  -------------  ---------
+# platform-skycraft-swc-rg    swedencentral  Succeeded
+# dev-skycraft-swc-rg         swedencentral  Succeeded
+# prod-skycraft-swc-rg        swedencentral  Succeeded
+
+# List VNets in dev resource group
+az network vnet list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,AddressSpace:addressSpace.addressPrefixes[0],Subnets:length(subnets)}"   --output table
+
+# Expected output:
+# Name                    AddressSpace  Subnets
+# ----------------------  ------------  -------
+# dev-skycraft-swc-vnet   10.1.0.0/16   3
+
+# Verify load balancer
+az network lb list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,SKU:sku.name,BackendPools:length(backendAddressPools)}"   --output table
+
+# Expected output:
+# Name                   SKU       BackendPools
+# ---------------------  --------  ------------
+# dev-skycraft-swc-lb    Standard  2
+```
+
+### Step 3.1.22: View Deployment Outputs
+
+```bash
+# Get deployment outputs
+az deployment sub show   --name "SkyCraft-Dev-20260112-205000"   --query "properties.outputs"   --output json
+
+# Expected output:
+# {
+#   "devLoadBalancerPublicIp": {
+#     "type": "String",
+#     "value": "20.240.50.10"
+#   },
+#   "devResourceGroupName": {
+#     "type": "String",
+#     "value": "dev-skycraft-swc-rg"
+#   },
+#   "devVnetId": {
+#     "type": "String",
+#     "value": "/subscriptions/.../dev-skycraft-swc-vnet"
+#   }
+# }
+```
+
+### Step 3.1.23: Export Updated ARM Template
+
+After deployment, export to compare:
+
+```bash
+# Export resource group as ARM template
+az group export   --name dev-skycraft-swc-rg   --output json > deployed-template.json
+
+# Convert to Bicep to see clean version
+az bicep decompile --file deployed-template.json
+
+# Compare with your original main.bicep
+```
+
+### Step 3.1.24: Clean Up (Optional)
+
+If you want to test redeployment:
+
+```bash
+# Delete resource groups (careful!)
+az group delete --name dev-skycraft-swc-rg --yes --no-wait
+az group delete --name prod-skycraft-swc-rg --yes --no-wait
+az group delete --name platform-skycraft-swc-rg --yes --no-wait
+
+# Redeploy from scratch using Bicep
+az deployment sub create   --name "SkyCraft-Redeploy-$(date +%Y%m%d-%H%M%S)"   --location swedencentral   --template-file main.bicep   --parameters dev.bicepparam
+```
 
 ---
 
@@ -611,33 +1528,47 @@ runcmd:
 
 Quick verification before proceeding:
 
-### Development Environment VMs
-- [ ] dev-skycraft-swc-auth-01-vm deployed (Zone 1, B2s, AuthSubnet)
-- [ ] dev-skycraft-swc-world-01-vm deployed (Zone 1, B2ms, WorldSubnet)
-- [ ] dev-skycraft-swc-world-02-vm deployed (Zone 2, B2ms, WorldSubnet)
-- [ ] dev-skycraft-swc-db-01-vm deployed (Zone 1, B2ms, DatabaseSubnet)
-- [ ] All dev VMs have Standard SSD OS disks
-- [ ] dev-skycraft-swc-db-01-vm has 128 GB data disk attached
+### Understanding Infrastructure as Code
+- [ ] Understand benefits of IaC (repeatability, version control, speed)
+- [ ] Know difference between ARM templates and Bicep
+- [ ] Can explain Bicep workflow (Bicep → ARM → Azure)
 
-### Production Environment VMs
-- [ ] prod-skycraft-swc-auth-01-vm deployed (Zone 1, D2s_v5, Premium SSD)
-- [ ] prod-skycraft-swc-world-01-vm deployed (Zone 1, D2s_v5, Premium SSD)
-- [ ] prod-skycraft-swc-world-02-vm deployed (Zone 2, D2s_v5, Premium SSD)
-- [ ] prod-skycraft-swc-db-01-vm deployed (Zone 1, D4s_v5, Premium SSD)
-- [ ] prod-skycraft-swc-db-01-vm has 256 GB Premium SSD data disk
+### ARM Template Analysis
+- [ ] Exported existing resource group as ARM template
+- [ ] Analyzed ARM template structure (parameters, variables, resources, outputs)
+- [ ] Identified ARM template functions (concat, resourceId, reference)
 
-### Networking and Security
-- [ ] All VMs have **no public IP** addresses
-- [ ] All VMs accessible via Azure Bastion
-- [ ] VMs deployed to correct subnets (Auth, World, Database)
-- [ ] NSG rules allow SSH from Bastion subnet (10.0.0.0/26)
-- [ ] Private DNS auto-registration enabled (VMs appear in skycraft.internal)
+### Bicep Fundamentals
+- [ ] Installed Bicep CLI and VS Code extension
+- [ ] Created first Bicep file with parameters, variables, resources, outputs
+- [ ] Understand Bicep syntax (no brackets, no commas, cleaner than JSON)
 
-### Configuration and Management
-- [ ] All VMs have proper tags (Project, Environment, CostCenter, Role)
-- [ ] All VMs follow naming convention (env-skycraft-swc-role-##-vm)
-- [ ] SSH private keys downloaded and stored securely
-- [ ] All VMs running Ubuntu 22.04 LTS
+### ARM to Bicep Conversion
+- [ ] Decompiled ARM template to Bicep using `az bicep decompile`
+- [ ] Reviewed and cleaned up decompiled Bicep code
+- [ ] Added parameter descriptions and validation decorators
+
+### Bicep Modules
+- [ ] Created reusable network module (network.bicep)
+- [ ] Created NSG module with configurable rules (nsg.bicep)
+- [ ] Created load balancer module (loadbalancer.bicep)
+- [ ] Created public IP module (publicip.bicep)
+- [ ] Created parameter files (.bicepparam) for dev and prod
+
+### Complete Infrastructure Template
+- [ ] Created main.bicep orchestrator template
+- [ ] Used targetScope = 'subscription' for multi-resource group deployment
+- [ ] Referenced modules with proper parameters
+- [ ] Configured resource dependencies with dependsOn
+- [ ] Added outputs for important values
+
+### Deployment and Validation
+- [ ] Built Bicep to ARM (`az bicep build`)
+- [ ] Validated template (`az deployment sub validate`)
+- [ ] Previewed changes with what-if analysis
+- [ ] Deployed Bicep template successfully
+- [ ] Verified deployed resources in Azure Portal
+- [ ] Retrieved deployment outputs
 
 **For detailed verification**, see [lab-checklist-3.1.md](lab-checklist-3.1.md)
 
@@ -647,333 +1578,541 @@ Quick verification before proceeding:
 
 Test your understanding with these questions:
 
-1. **Why did we deploy World Servers to different availability zones?**
+1. **What are the key benefits of Infrastructure as Code compared to manual deployment?**
 
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: **High availability and fault tolerance.**
+   **Answer**: Infrastructure as Code provides multiple critical benefits:
 
-   - **Zone 1 and Zone 2** are physically separate datacenters in Sweden Central
-   - If Zone 1 experiences power failure, Zone 2 continues operating
-   - Load balancer (from Lab 2.3) distributes traffic across both zones
-   - Provides **99.99% SLA** (vs 99.9% for single-zone)
+   **1. Repeatability**: Deploy identical environments every time
+   - Manual: "What did I click last time?"
+   - IaC: `az deployment create` always produces same result
 
-   **For SkyCraft**: If dev-skycraft-swc-world-01-vm (Zone 1) fails, world-02-vm (Zone 2) continues serving players. Load balancer detects failure via health probes and routes all traffic to healthy VM.
+   **2. Version Control**: Track infrastructure changes in Git
+   - See who changed what and when
+   - Rollback to previous versions
+   - Code review infrastructure changes
 
-   **Why not Auth or Database?**: 
-   - Auth servers: Single instance sufficient for dev (low traffic)
-   - Database: Requires replication setup (covered in advanced scenarios)
-   - Cost optimization: Focus HA on critical player-facing services
+   **3. Speed**: Deploy in minutes instead of hours
+   - Manual: 2-3 hours for complete environment
+   - IaC: 10-15 minutes automated
+
+   **4. Documentation**: Code documents itself
+   - Templates show exactly what's deployed
+   - No separate documentation to maintain
+
+   **5. Testing**: Validate before deployment
+   - `what-if` preview shows changes
+   - Catch errors before they affect production
+
+   **6. Collaboration**: Team can contribute
+   - Multiple people can work on infrastructure
+   - Pull requests for infrastructure changes
+
+   **7. Disaster Recovery**: Redeploy entire infrastructure
+   - One command restores everything
+   - No manual rebuild needed
+
+   **For SkyCraft**: IaC enables rapid environment creation for dev, test, staging, and production.
    </details>
 
-2. **What is the difference between Standard SSD and Premium SSD?**
+2. **Why is Bicep preferred over ARM templates for new projects?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   **Answer**: Bicep offers significant advantages over ARM JSON templates:
+
+   | Feature | ARM Template (JSON) | Bicep |
+   |---------|---------------------|-------|
+   | **Readability** | Verbose, nested JSON | Clean, declarative syntax |
+   | **Lines of code** | ~500 for VNet with subnets | ~100 for same VNet |
+   | **Learning curve** | Steep (complex functions) | Gentle (simple syntax) |
+   | **Type safety** | Limited runtime checks | Strong compile-time validation |
+   | **IntelliSense** | Basic | Excellent (resource properties) |
+   | **Error messages** | Cryptic deployment errors | Clear compile-time errors |
+   | **Modules** | Nested templates (complex) | Native module support |
+   | **Parameter files** | JSON only | `.bicepparam` (type-safe) |
+   | **Refactoring** | Manual, error-prone | Safe with IntelliSense |
+
+   **Example Comparison**:
+
+   ARM: `"name": "[concat(parameters('environment'), '-', variables('projectName'), '-vnet')]"`
+
+   Bicep: `name: '${environment}-${projectName}-vnet'`
+
+   **Microsoft's Stance**: Bicep is the recommended way to write Azure IaC. ARM JSON is still used internally (Bicep transpiles to ARM) but rarely written by hand.
+
+   **Migration**: Existing ARM templates can be converted to Bicep with `az bicep decompile`.
+   </details>
+
+3. **Explain the purpose of each Bicep file component: parameters, variables, resources, outputs.**
 
    <details>
      <summary>**Click to see the answer**</summary>
 
    **Answer**:
 
-   | Feature | Standard SSD | Premium SSD |
-   |---------|--------------|-------------|
-   | **IOPS** | Up to 6,000 | Up to 20,000 |
-   | **Throughput** | Up to 750 MB/s | Up to 900 MB/s |
-   | **Latency** | Single-digit ms | Sub-millisecond |
-   | **SLA** | No SLA | 99.9% availability |
-   | **Cost** | Lower | Higher (~2-3x) |
-   | **Use case** | Dev/test, non-critical | Production, databases |
+   **1. Parameters** - Inputs to the template
+   ```bicep
+   @description('Azure region for deployment')
+   param location string = 'swedencentral'
 
-   **For SkyCraft decisions**:
-   - **Dev VMs**: Standard SSD (cost-effective, adequate performance for testing)
-   - **Prod VMs**: Premium SSD (SLA-backed, production reliability)
-   - **Database data disks**: Premium SSD (I/O intensive workload)
+   @secure()
+   param adminPassword string
+   ```
+   - **Purpose**: Customize deployment without changing code
+   - **Use cases**: Region, environment name, VM size, admin credentials
+   - **Benefits**: Same template for dev/prod with different parameter files
 
-   **Why?** Database performance directly impacts game responsiveness. Premium SSD ensures low-latency database queries even under heavy player load.
+   **2. Variables** - Computed values
+   ```bicep
+   var vnetName = '${environment}-skycraft-swc-vnet'
+   var tags = {
+     Project: 'SkyCraft'
+     Environment: environment
+   }
+   ```
+   - **Purpose**: Calculate values from parameters or constants
+   - **Use cases**: Resource names following naming conventions, complex configurations
+   - **Benefits**: DRY principle (Don't Repeat Yourself)
+
+   **3. Resources** - Azure resources to deploy
+   ```bicep
+   resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
+     name: vnetName
+     location: location
+     properties: { ... }
+   }
+   ```
+   - **Purpose**: Declare infrastructure to create
+   - **Use cases**: VNets, VMs, storage accounts, load balancers
+   - **Benefits**: Declarative (describe desired state, not steps)
+
+   **4. Outputs** - Return values from deployment
+   ```bicep
+   output vnetId string = vnet.id
+   output subnetIds array = vnet.properties.subnets
+   ```
+   - **Purpose**: Extract information for use elsewhere
+   - **Use cases**: Resource IDs for other templates, IP addresses, connection strings
+   - **Benefits**: Chain deployments, provide info to applications
+
+   **Workflow**: Parameters (input) → Variables (compute) → Resources (deploy) → Outputs (return)
    </details>
 
-3. **Why don't we assign public IP addresses to the VMs?**
+4. **What is the difference between `targetScope = 'resourceGroup'` and `targetScope = 'subscription'`?**
 
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: **Security best practice - minimize attack surface.**
+   **Answer**:
 
-   **Without public IPs**:
-   - ✅ VMs not exposed to internet port scans
-   - ✅ No brute-force SSH attacks possible
-   - ✅ Reduces need for complex NSG rules
-   - ✅ Azure Bastion provides secure administrative access
-   - ✅ Game traffic goes through load balancers (controlled entry points)
+   **targetScope** determines the deployment level and what resources you can create.
 
-   **Access methods**:
-   - **Administrative**: Azure Bastion (HTTPS tunnel, no VPN needed)
-   - **Player traffic**: Load balancer public IPs (ports 3724, 8085 only)
-   - **Inter-VM**: Private IPs within VNet (10.1.x.x, 10.2.x.x)
+   **1. Resource Group Scope** (default)
+   ```bicep
+   targetScope = 'resourceGroup'  // or omit (default)
 
-   **Result**: Attack surface reduced to two public IPs (load balancers) instead of 8 (one per VM).
+   resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
+     name: 'my-vnet'
+     // ...
+   }
+   ```
+   - Deploys to a **single existing resource group**
+   - Can create: VNets, VMs, Storage, Load Balancers, etc.
+   - Cannot create: Resource groups, subscriptions
+   - Deployment command: `az deployment group create --resource-group <name>`
+
+   **2. Subscription Scope**
+   ```bicep
+   targetScope = 'subscription'
+
+   resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
+     name: 'dev-skycraft-swc-rg'
+     location: 'swedencentral'
+   }
+
+   module vnet 'vnet.bicep' = {
+     name: 'vnetDeployment'
+     scope: rg  // Deploy into the resource group
+     params: { ... }
+   }
+   ```
+   - Deploys to **subscription level**
+   - Can create: Resource groups, policy assignments, role assignments
+   - Can deploy modules to specific resource groups
+   - Deployment command: `az deployment sub create --location <region>`
+
+   **Other Scopes**:
+   - `managementGroup`: Deploy across multiple subscriptions
+   - `tenant`: Deploy at Azure AD tenant level (rare)
+
+   **For SkyCraft**: We use `targetScope = 'subscription'` in main.bicep to create resource groups (platform, dev, prod) and deploy modules into each.
+
+   **When to use which**:
+   - Single resource group → `resourceGroup` scope (default)
+   - Multiple resource groups → `subscription` scope
+   - Multi-subscription governance → `managementGroup` scope
    </details>
 
-4. **What is the purpose of host caching on data disks?**
+5. **How do Bicep modules enable code reusability?**
 
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: **Host caching improves disk performance by caching frequently accessed data on the VM host.**
+   **Answer**: Bicep modules enable **DRY** (Don't Repeat Yourself) by allowing reusable components.
 
-   **Caching options**:
+   **Without Modules** (Copy-Paste):
+   ```bicep
+   // Dev VNet
+   resource devVnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
+     name: 'dev-skycraft-swc-vnet'
+     location: 'swedencentral'
+     properties: { addressSpace: { addressPrefixes: ['10.1.0.0/16'] } }
+   }
 
-   1. **None**: No caching, all I/O goes to disk
-      - Use for: Write-heavy workloads, logs
-
-   2. **Read-only**: Caches read operations
-      - Use for: Static content, read-heavy databases
-
-   3. **Read/Write**: Caches both read and write operations
-      - Use for: General purpose, OS disks
-
-   **For SkyCraft database disks**: We used **Read/Write** because:
-   - MySQL performs both reads (player data queries) and writes (inventory updates)
-   - Caching reduces latency for frequently accessed tables (character, items)
-   - Azure ensures cached writes are persisted to durable storage
-
-   **Important**: Read/Write caching should NOT be used for database transaction logs (use None or Read-only) to ensure write durability.
-   </details>
-
-5. **Why use B-series VMs for development and D-series for production?**
-
-   <details>
-     <summary>**Click to see the answer**</summary>
-
-   **Answer**: **Cost optimization balanced with performance requirements.**
-
-   **B-series (Burstable)**:
-   - **CPU model**: Baseline CPU credits + burst capability
-   - **Pricing**: ~$0.05-0.10/hour (very low)
-   - **Performance**: 30-40% baseline, can burst to 100% when credits available
-   - **Best for**: Dev/test where sustained high CPU not needed
-
-   **D-series (General Purpose)**:
-   - **CPU model**: Consistent 100% CPU availability
-   - **Pricing**: ~$0.10-0.20/hour (moderate)
-   - **Performance**: Predictable, no throttling
-   - **Best for**: Production workloads requiring reliable performance
-
-   **For SkyCraft**:
-   - **Dev**: Low player count (1-5 testers), burst capability sufficient, saves ~50% cost
-   - **Prod**: High player count (50-500 players), must maintain performance 24/7, SLA-backed
-
-   **Example**: B2ms costs $38/month vs D2s_v5 at $70/month. For 4 dev VMs, savings = $128/month while maintaining adequate test performance.
-   </details>
-
-6. **What happens if a VM in Zone 1 fails during a zone outage?**
-
-   <details>
-     <summary>**Click to see the answer**</summary>
-
-   **Answer**: **Automatic failover via load balancer health probes.**
-
-   **Failure scenario**:
-   1. Zone 1 experiences datacenter power failure
-   2. All VMs in Zone 1 become unreachable
-   3. **Load balancer health probes** (every 15 seconds) detect failure
-   4. After 2 consecutive failures (30 seconds), VMs marked unhealthy
-   5. **Load balancer stops** sending traffic to Zone 1 VMs
-   6. All traffic routes to Zone 2 VMs automatically
-
-   **For SkyCraft World Servers**:
-   - `dev-skycraft-swc-world-01-vm` (Zone 1) fails
-   - `dev-skycraft-swc-world-02-vm` (Zone 2) handles 100% traffic
-   - Players experience ~30 second hiccup, then normal gameplay
-   - No manual intervention needed
-
-   **When Zone 1 recovers**:
-   - VMs restart automatically
-   - Health probes succeed (2 consecutive checks)
-   - Load balancer restores traffic to Zone 1
-   - Returns to 50/50 distribution
-
-   **Single point of failure**: Auth and Database servers (single instance). In production, these would also be deployed across zones with replication.
-   </details>
-
-7. **How does private DNS auto-registration work with these VMs?**
-
-   <details>
-     <summary>**Click to see the answer**</summary>
-
-   **Answer**: **Azure automatically creates DNS A records when VMs start in linked VNets.**
-
-   **Configuration** (from Lab 2.3):
-   - Private DNS zone: `skycraft.internal`
-   - VNet links: dev-skycraft-swc-vnet (auto-registration: **enabled**)
-
-   **Automatic process**:
-   1. VM starts: `dev-skycraft-swc-auth-01-vm`
-   2. Azure detects VM in linked VNet with auto-registration
-   3. Azure creates A record: `dev-skycraft-swc-auth-01-vm.skycraft.internal` → 10.1.1.10
-   4. DNS propagates within seconds
-   5. All VMs in VNet can resolve the name
-
-   **Test from any dev VM**:
-   ```bash
-   nslookup dev-skycraft-swc-db-01-vm.skycraft.internal
-   # Returns: 10.1.3.X
-
-   ping dev-skycraft-swc-world-02-vm.skycraft.internal
-   # Works using private IP
+   // Prod VNet (copy-paste with different values)
+   resource prodVnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
+     name: 'prod-skycraft-swc-vnet'
+     location: 'swedencentral'
+     properties: { addressSpace: { addressPrefixes: ['10.2.0.0/16'] } }
+   }
+   // Problem: If you fix a bug or add a feature, must update both places
    ```
 
-   **Benefits**:
-   - No manual DNS management needed
-   - Always up-to-date (records deleted when VM stopped)
-   - Application configs can use names instead of IPs
-   - Easy service discovery within environment
+   **With Modules** (Reusable):
+   ```bicep
+   // modules/vnet.bicep
+   param vnetName string
+   param addressPrefix string
+
+   resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
+     name: vnetName
+     location: resourceGroup().location
+     properties: { addressSpace: { addressPrefixes: [addressPrefix] } }
+   }
+
+   // main.bicep
+   module devVnet 'modules/vnet.bicep' = {
+     name: 'devVnetDeployment'
+     params: {
+       vnetName: 'dev-skycraft-swc-vnet'
+       addressPrefix: '10.1.0.0/16'
+     }
+   }
+
+   module prodVnet 'modules/vnet.bicep' = {
+     name: 'prodVnetDeployment'
+     params: {
+       vnetName: 'prod-skycraft-swc-vnet'
+       addressPrefix: '10.2.0.0/16'
+     }
+   }
+   // Benefit: Update vnet.bicep once, both environments get the change
+   ```
+
+   **Module Benefits**:
+   1. **Reusability**: Write once, use many times
+   2. **Maintainability**: Fix bugs in one place
+   3. **Testability**: Test module independently
+   4. **Organization**: Logical separation (network, compute, storage)
+   5. **Team collaboration**: Different people own different modules
+   6. **Versioning**: Can version modules separately
+
+   **For SkyCraft**: We created modules for network, NSG, load balancer, and public IP. These can be used for dev, prod, staging, DR environments.
+   </details>
+
+6. **What does the `what-if` operation show, and why is it important?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   **Answer**: `what-if` provides a **preview of changes before deployment**, similar to `terraform plan` or `git diff`.
+
+   **Command**:
+   ```bash
+   az deployment sub what-if      --location swedencentral      --template-file main.bicep      --parameters dev.bicepparam
+   ```
+
+   **Output Shows**:
+   ```
+   Resource changes: 5 to create, 2 to modify, 1 to delete.
+
+   + Microsoft.Network/virtualNetworks (Create)
+     ~ dev-skycraft-swc-vnet
+       location: "swedencentral"
+       addressSpace: ["10.1.0.0/16"]
+
+   ~ Microsoft.Network/networkSecurityGroups (Modify)
+     ~ auth-nsg
+       properties.securityRules[0].properties.priority: 100 -> 110
+
+   - Microsoft.Compute/virtualMachines (Delete)
+     - old-test-vm
+   ```
+
+   **Color Code**:
+   - 🟢 **+ (Green)**: Resource will be **created**
+   - 🟡 **~ (Yellow)**: Resource will be **modified**
+   - 🔴 **- (Red)**: Resource will be **deleted**
+   - ⚪ **= (White)**: **No change**
+
+   **Why Important**:
+
+   1. **Prevent Accidents**: See if resources will be deleted
+   2. **Understand Impact**: Know what will change before it happens
+   3. **Code Review**: Team can review infrastructure changes
+   4. **Compliance**: Required in many organizations for prod changes
+   5. **Learning**: Understand what Bicep code actually does
+
+   **Real-World Example**:
+   ```
+   Developer: "I'll just update the NSG rule priority..."
+   What-If: "This will DELETE and RECREATE the NSG, breaking all VMs!"
+   Developer: "Oh! I need to modify, not replace. Let me fix that."
+   ```
+
+   **Best Practice**: Always run `what-if` before deploying to production.
+
+   **Integration**: Use `--confirm-with-what-if` flag to show what-if and prompt for confirmation before deployment.
+   </details>
+
+7. **How would you deploy the same infrastructure to multiple Azure regions?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   **Answer**: Use **parameterization** to deploy to multiple regions.
+
+   **Approach 1: Multiple Parameter Files**
+
+   ```bicep
+   // main.bicep (stays the same)
+   param location string
+   param environment string
+   ```
+
+   ```bicep
+   // swedencentral.bicepparam
+   using './main.bicep'
+   param location = 'swedencentral'
+   param environment = 'prod-se'
+   ```
+
+   ```bicep
+   // westeurope.bicepparam
+   using './main.bicep'
+   param location = 'westeurope'
+   param environment = 'prod-we'
+   ```
+
+   Deploy:
+   ```bash
+   # Deploy to Sweden Central
+   az deployment sub create      --location swedencentral      --template-file main.bicep      --parameters swedencentral.bicepparam
+
+   # Deploy to West Europe
+   az deployment sub create      --location westeurope      --template-file main.bicep      --parameters westeurope.bicepparam
+   ```
+
+   **Approach 2: Loop Over Regions** (Advanced)
+
+   ```bicep
+   targetScope = 'subscription'
+
+   param regions array = [
+     'swedencentral'
+     'westeurope'
+     'northeurope'
+   ]
+
+   // Deploy to all regions
+   module regionalDeployment 'regional.bicep' = [for region in regions: {
+     name: '${region}Deployment'
+     params: {
+       location: region
+       environment: 'prod-${substring(region, 0, 2)}'
+     }
+   }]
+   ```
+
+   **Approach 3: Separate Deployments with Script**
+
+   ```bash
+   #!/bin/bash
+   # deploy-multi-region.sh
+
+   REGIONS=("swedencentral" "westeurope" "northeurope")
+
+   for REGION in "${REGIONS[@]}"; do
+     echo "Deploying to $REGION..."
+     az deployment sub create        --name "SkyCraft-$REGION-$(date +%Y%m%d)"        --location "$REGION"        --template-file main.bicep        --parameters location="$REGION" environment="prod-${REGION:0:2}"
+   done
+   ```
+
+   **For SkyCraft Multi-Region**:
+   - Primary region: Sweden Central (main production)
+   - DR region: West Europe (disaster recovery)
+   - Use Traffic Manager for global load balancing
+   - Share Azure Front Door or CDN for game assets
+
+   **Considerations**:
+   - Data sovereignty (GDPR compliance)
+   - Cross-region replication costs
+   - Latency for global players
+   - Disaster recovery strategy
    </details>
 
 ---
 
 ## 🔧 Troubleshooting
 
-### Issue 1: Cannot connect to VM via Bastion
+### Issue 1: Bicep build fails with "Invalid template" error
 
-**Symptom**: Bastion connection times out or shows "Unable to connect"
-
-**Solution**:
-- Verify VM is running (not stopped): **Virtual machines** → Status should show "Running"
-- Check NSG allows SSH from Bastion subnet (10.0.0.0/26):
-  ```bash
-  az network nsg rule list --resource-group dev-skycraft-swc-rg --nsg-name dev-skycraft-swc-auth-nsg
-  ```
-- Verify VNet peering status: **Virtual networks** → **Peerings** → Status "Connected"
-- Ensure correct SSH key file selected (dev-skycraft-swc-auth-01-key.pem for auth-01-vm)
-- Try reconnecting after 2-3 minutes (VM may still be initializing)
-
-### Issue 2: VM deployment fails - quota exceeded
-
-**Symptom**: Error: "Operation could not be completed as it results in exceeding approved StandardBSFamily Cores quota"
+**Symptom**: `az bicep build` returns error: "The template is not valid"
 
 **Solution**:
-- Check current quota: **Subscriptions** → **Usage + quotas**
-- Request quota increase:
-  - Select region: **Sweden Central**
-  - Select quota: **Standard BS Family vCPUs**
-  - Request: 16 vCPUs (for 4 B-series VMs)
-- Alternative: Deploy to different region with available quota
-- Temporary: Use smaller VM sizes (B1s instead of B2s)
+- Check Bicep syntax (missing braces, incorrect resource type)
+- Verify resource API version exists: `az provider show --namespace Microsoft.Network --query "resourceTypes[?resourceType=='virtualNetworks'].apiVersions[0]"`
+- Use VS Code with Bicep extension for real-time validation (red squiggles)
+- Check for typos in property names (e.g., `addressSpace` not `addressspace`)
 
-### Issue 3: SSH authentication fails with "Permission denied"
+### Issue 2: Deployment fails with "Template validation failed"
 
-**Symptom**: Bastion connects but shows "Permission denied (publickey)"
+**Symptom**: Deployment starts but fails during validation phase
 
 **Solution**:
-- Verify correct SSH key file selected (each VM has unique key)
-- Check key file permissions on downloaded .pem file:
-  - Windows: Right-click → Properties → Security (should have read access)
-  - Linux/Mac: `chmod 400 dev-skycraft-swc-auth-01-key.pem`
-- Confirm username is `azureuser` (not root or admin)
-- If key lost, reset SSH key: **Virtual machines** → **Reset password** → Upload new key
+- Review error message carefully (often indicates which resource/property)
+- Verify parameter values are correct (e.g., valid Azure region name)
+- Check resource dependencies (use `dependsOn` if needed)
+- Ensure resource names follow Azure naming rules (length, characters)
+- Verify SKU combinations are valid (e.g., Standard LB requires Standard Public IP)
 
-### Issue 4: Cannot ping between VMs
+### Issue 3: Module not found error
 
-**Symptom**: `ping 10.1.2.10` times out from auth server
-
-**Solution**:
-- **Note**: Ping uses ICMP, not TCP/UDP
-- Check NSG allows ICMP (may need to add rule)
-- Alternative: Use TCP connectivity test:
-  ```bash
-  nc -zv 10.1.2.10 22
-  ```
-- Verify VMs are in same VNet or peered VNets
-- Check effective NSG rules: **Virtual machines** → **Networking** → **Effective security rules**
-
-### Issue 5: Data disk not visible in VM
-
-**Symptom**: After attaching disk, `lsblk` doesn't show new disk
+**Symptom**: Error: "Unable to find module 'modules/network.bicep'"
 
 **Solution**:
-- Disk may need initialization and mounting:
-  ```bash
-  # List disks (should see sdb or similar)
-  lsblk
+- Verify file path is correct (relative to main.bicep)
+- Check file exists: `ls modules/network.bicep`
+- Use correct path separator ('/' not '\' even on Windows)
+- Ensure no typos in filename
+- Module path is case-sensitive on some systems
 
-  # Partition the disk (if sdb)
-  sudo fdisk /dev/sdb
-  # Press: n (new), p (primary), 1, Enter, Enter, w (write)
+### Issue 4: Parameter file not recognized
 
-  # Format the partition
-  sudo mkfs.ext4 /dev/sdb1
-
-  # Create mount point
-  sudo mkdir /datadisk
-
-  # Mount the disk
-  sudo mount /dev/sdb1 /datadisk
-
-  # Add to /etc/fstab for persistence
-  echo '/dev/sdb1 /datadisk ext4 defaults 0 0' | sudo tee -a /etc/fstab
-  ```
-- Verify disk attached in Azure Portal: **Virtual machines** → **Disks**
-
-### Issue 6: VM stuck in "Creating" state
-
-**Symptom**: VM deployment takes longer than 10 minutes, status shows "Creating"
+**Symptom**: `--parameters dev.bicepparam` not working
 
 **Solution**:
-- Check deployment status: **Resource groups** → **Deployments** → Select deployment
-- Review activity log for errors: **Virtual machines** → **Activity log**
-- Common causes:
-  - Image not available in region (try different image)
-  - Zone capacity issues (try different zone or no zone)
-  - Network connectivity timeout (check VNet configuration)
-- If stuck > 20 minutes, cancel deployment and retry
-- Contact Azure support if persistent
+- Ensure `.bicepparam` file has `using './main.bicep'` at the top
+- Verify Bicep CLI version supports .bicepparam (0.18.4+): `az bicep version`
+- Update if needed: `az bicep upgrade`
+- Alternative: Use JSON parameter file: `--parameters @params.json`
+
+### Issue 5: Deployment succeeds but resources not created
+
+**Symptom**: Deployment shows "Succeeded" but resources missing in portal
+
+**Solution**:
+- Check deployment scope matches expected (subscription vs resource group)
+- Verify resource group was created if using subscription scope
+- Review deployment details: `az deployment sub show --name <deployment-name>`
+- Check if deployment created resources in different subscription/resource group than expected
+- Look for `condition` properties that may have skipped resource creation
+
+### Issue 6: Resource already exists error
+
+**Symptom**: Error: "Resource 'dev-skycraft-swc-vnet' already exists"
+
+**Solution**:
+- Bicep deployments are **idempotent** but resource names must be unique
+- Use `what-if` to see if deployment will conflict
+- Option 1: Delete existing resource: `az network vnet delete`
+- Option 2: Change resource name in parameter file
+- Option 3: Import existing resource (advanced): Use `existing` keyword
+
+**Example - Reference existing resource**:
+```bicep
+// Reference existing VNet instead of creating new
+resource existingVnet 'Microsoft.Network/virtualNetworks@2023-05-01' existing = {
+  name: 'dev-skycraft-swc-vnet'
+}
+
+output vnetId string = existingVnet.id
+```
 
 ---
 
 ## 📚 Additional Resources
 
-- [Azure Virtual Machines Documentation](https://learn.microsoft.com/en-us/azure/virtual-machines/)
-- [Linux VM sizes](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes)
-- [Azure Managed Disks](https://learn.microsoft.com/en-us/azure/virtual-machines/managed-disks-overview)
-- [Availability zones](https://learn.microsoft.com/en-us/azure/reliability/availability-zones-overview)
-- [Cloud-init support for VMs](https://learn.microsoft.com/en-us/azure/virtual-machines/linux/using-cloud-init)
-- [Azure Bastion connectivity](https://learn.microsoft.com/en-us/azure/bastion/bastion-connect-vm-ssh-linux)
+**Official Documentation**:
+- [Bicep Documentation](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/)
+- [Bicep Tutorial](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/learn-bicep)
+- [ARM Template Reference](https://learn.microsoft.com/en-us/azure/templates/)
+- [Bicep Best Practices](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/best-practices)
+
+**Tools and Extensions**:
+- [VS Code Bicep Extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-bicep)
+- [Bicep Playground](https://aka.ms/bicepdemo) - Try Bicep in browser
+- [Azure Resource Manager Template Toolkit](https://github.com/Azure/arm-ttk)
+
+**Learning Resources**:
+- [Microsoft Learn: Deploy Azure Infrastructure with Bicep](https://learn.microsoft.com/en-us/training/paths/bicep-deploy/)
+- [Bicep on GitHub](https://github.com/Azure/bicep)
+- [Azure Quickstart Templates (Bicep)](https://github.com/Azure/azure-quickstart-templates)
+
+**Community**:
+- [Bicep GitHub Discussions](https://github.com/Azure/bicep/discussions)
+- [Azure Tech Community](https://techcommunity.microsoft.com/t5/azure/ct-p/Azure)
 
 ---
 
 ## 📌 Module Navigation
 
 - [← Back to Module 3 Index](../README.md)
-- [← Previous Module: Module 2 Networking](../../module-2-networking/README.md)
-- [Next Lab: 3.2 Configure AzerothCore →](../3.2-configure-azerothcore/lab-guide-3.2.md)
+- [← Previous Module: Module 2 Virtual Networking](../../module-2-networking/README.md)
+- [Next Lab: 3.2 Deploy Virtual Machines →](../3.2-deploy-vms/lab-guide-3.2.md)
 
 ---
 
 ## 📝 Lab Summary
 
 **What You Accomplished**:
-- ✅ Deployed 8 Azure Virtual Machines (4 dev + 4 prod)
-- ✅ Selected appropriate VM sizes for each workload (B-series dev, D-series prod)
-- ✅ Configured availability zones for high availability
-- ✅ Attached managed disks (Standard SSD dev, Premium SSD prod)
-- ✅ Added data disks to database servers (128 GB dev, 256 GB prod)
-- ✅ Connected to all VMs securely via Azure Bastion
-- ✅ Verified networking and Private DNS auto-registration
-- ✅ Applied consistent naming conventions and tags
+- ✅ Understood Infrastructure as Code concepts and benefits
+- ✅ Exported and analyzed existing ARM templates
+- ✅ Learned Bicep syntax (parameters, variables, resources, outputs)
+- ✅ Converted ARM templates to Bicep using decompile
+- ✅ Created reusable Bicep modules (network, NSG, load balancer, public IP)
+- ✅ Built complete infrastructure template with main.bicep orchestrator
+- ✅ Created parameter files for dev and prod environments
+- ✅ Validated templates with `az bicep build` and `validate`
+- ✅ Previewed changes with `what-if` analysis
+- ✅ Deployed infrastructure using Bicep templates
+- ✅ Verified deployed resources and outputs
 
-**Infrastructure Inventory**:
+**Infrastructure as Code Benefits Realized**:
+- 🚀 **Speed**: 15-minute deployment vs 3-hour manual process
+- 🔁 **Repeatability**: Identical dev and prod environments
+- 📝 **Documentation**: Code documents actual configuration
+- 🔍 **Version Control**: Infrastructure changes tracked in Git
+- 🧪 **Testing**: What-if preview before deployment
+- 🤝 **Collaboration**: Team can review infrastructure changes
+- 🔄 **Disaster Recovery**: One-command infrastructure rebuild
 
-| VM Name | Size | Zone | OS Disk | Data Disk | Subnet | IP Range |
-|---------|------|------|---------|-----------|--------|----------|
-| dev-skycraft-swc-auth-01-vm | B2s | 1 | 30GB SSD | - | AuthSubnet | 10.1.1.x |
-| dev-skycraft-swc-world-01-vm | B2ms | 1 | 30GB SSD | - | WorldSubnet | 10.1.2.x |
-| dev-skycraft-swc-world-02-vm | B2ms | 2 | 30GB SSD | - | WorldSubnet | 10.1.2.x |
-| dev-skycraft-swc-db-01-vm | B2ms | 1 | 30GB SSD | 128GB | DatabaseSubnet | 10.1.3.x |
-| prod-skycraft-swc-auth-01-vm | D2s_v5 | 1 | 30GB Premium | - | AuthSubnet | 10.2.1.x |
-| prod-skycraft-swc-world-01-vm | D2s_v5 | 1 | 30GB Premium | - | WorldSubnet | 10.2.2.x |
-| prod-skycraft-swc-world-02-vm | D2s_v5 | 2 | 30GB Premium | - | WorldSubnet | 10.2.2.x |
-| prod-skycraft-swc-db-01-vm | D4s_v5 | 1 | 30GB Premium | 256GB | DatabaseSubnet | 10.2.3.x |
+**Skills Gained**:
+- Infrastructure as Code principles
+- ARM template interpretation
+- Bicep language proficiency
+- Module-based architecture design
+- Multi-scope deployments (subscription and resource group)
+- Deployment validation and preview techniques
 
 **Time Spent**: ~3 hours
 
-**Ready for Lab 3.2?** Next, you'll install AzerothCore dependencies, compile the game server software, configure databases, and prepare VMs for production gameplay!
+**Ready for Lab 3.2?** Next, you'll deploy Azure Virtual Machines using Bicep templates and configure them for AzerothCore game server deployment!
+
+---
+
+*Note: This lab introduces Infrastructure as Code, which will be used throughout the rest of Module 3 for deploying VMs, storage, and monitoring. All future labs will leverage Bicep for rapid, repeatable deployments.*
