@@ -1,10 +1,10 @@
 /*=====================================================
-SUMMARY: Lab 1.2 - RBAC Assignments
-DESCRIPTION: Assigns RBAC roles to resource groups
-EXAMPLE:
+SUMMARY: Lab 1.2 - RBAC Assignments Orchestrator
+DESCRIPTION: Orchestrates role assignments for SkyCraft users and groups
+EXAMPLE: az deployment sub create --location swedencentral --template-file role-assignments.bicep
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.1.0
-DEPLOYMENT: Deploy-Infra.ps1
+VERSION: 0.2.0
+DEPLOYMENT: .\scripts\New-LabRoleAssignment.ps1
 ======================================================*/
 
 targetScope = 'subscription'
@@ -46,8 +46,9 @@ var varReaderRoleId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
 *    Resources     *
 *******************/
 
-/* Subscription-level assignments */
+/* Subscription-level assignment */
 module modAdminOwnerAssigment 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = {
+  name: 'admin-owner-sub'
   scope: subscription()
   params: {
     principalId: parAdminPrincipalId
@@ -55,13 +56,14 @@ module modAdminOwnerAssigment 'br/public:avm/res/authorization/role-assignment/s
   }
 }
 
+/* Resource Group level assignments */
 module modDeveloperContributorAssigment 'modules/rg-role-assignment.bicep' = {
   name: 'developer-contributor-${parResourceGroupNameDev}'
   scope: resourceGroup(parResourceGroupNameDev)
   params: {
-    principalId: parDeveloperGroupPrincipalId
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varContributorRoleId)
-    principalType: 'Group'
+    parPrincipalId: parDeveloperGroupPrincipalId
+    parRoleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varContributorRoleId)
+    parPrincipalType: 'Group'
   }
 }
 
@@ -69,9 +71,9 @@ module modTesterReaderAssigment 'modules/rg-role-assignment.bicep' = {
   name: 'tester-reader-${parResourceGroupNameDev}'
   scope: resourceGroup(parResourceGroupNameDev)
   params: {
-    principalId: parTesterGroupPrincipalId
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
-    principalType: 'Group'
+    parPrincipalId: parTesterGroupPrincipalId
+    parRoleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
+    parPrincipalType: 'Group'
   }
 }
 
@@ -79,9 +81,9 @@ module modTesterProdReaderAssigment 'modules/rg-role-assignment.bicep' = {
   name: 'tester-reader-${parResourceGroupNameProd}'
   scope: resourceGroup(parResourceGroupNameProd)
   params: {
-    principalId: parTesterGroupPrincipalId
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
-    principalType: 'Group'
+    parPrincipalId: parTesterGroupPrincipalId
+    parRoleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
+    parPrincipalType: 'Group'
   }
 }
 
@@ -89,12 +91,8 @@ module modPartnerReaderAssigment 'modules/rg-role-assignment.bicep' = {
   name: 'partner-reader-${parResourceGroupNamePlatform}'
   scope: resourceGroup(parResourceGroupNamePlatform)
   params: {
-    principalId: parPartnerPrincipalId
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
-    principalType: 'User'
+    parPrincipalId: parPartnerPrincipalId
+    parRoleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
+    parPrincipalType: 'User'
   }
 }
-
-/******************
-*     Outputs     *
-******************/

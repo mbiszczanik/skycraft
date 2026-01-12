@@ -12,14 +12,43 @@ By completing this lab, you will:
 
 ---
 
+## 🏗️ Architecture Overview
+
+You'll set up the following identity structure in Microsoft Entra ID:
+
+```mermaid
+graph TB
+    subgraph "Microsoft Entra ID (SkyCraft Tenant)"
+        AdminGroup[SkyCraft-Admins]
+        DevGroup[SkyCraft-Developers]
+        TestGroup[SkyCraft-Testers]
+
+        Malfurion[Malfurion Stormrage<br/>(Admin)]
+        Khadgar[Khadgar Archmage<br/>(Developer)]
+        Chromie[Chromie Timewalker<br/>(Tester)]
+        Illidan[Illidan Stormrage<br/>(Guest)]
+    end
+
+    Malfurion -->|Member| AdminGroup
+    Khadgar -->|Member| DevGroup
+    Chromie -->|Member| TestGroup
+    Illidan -.->|Guest| AdminGroup
+
+    style AdminGroup fill:#e1f5ff,stroke:#0078d4,stroke-width:2px
+    style DevGroup fill:#fff4e1,stroke:#f39c12,stroke-width:2px
+    style TestGroup fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
+```
+
+---
+
 ## 📋 Real-World Scenario
 
 **Situation**: You're setting up the SkyCraft deployment team. The organization needs:
 
-- An administrator who manages all resources (SkyCraft-Admin)
-- Developers who deploy and modify infrastructure (SkyCraft-Dev)
-- Testers who monitor and report issues (SkyCraft-Tester)
-- External consultant with guest access (Partner-Consultant)
+- An administrator who manages all resources (Malfurion Stormrage)
+- Developers who deploy and modify infrastructure (Khadgar Archmage)
+- Testers who monitor and report issues (Chromie Timewalker)
+- External consultant with guest access (Illidan Stormrage)
 
 **Your Task**: Create these users, organize them into groups, and set up the team structure.
 
@@ -55,59 +84,56 @@ By completing this lab, you will:
 
 **Expected Result**: You see the Entra ID dashboard with options for Users, Groups, and Roles.
 
-### Step 1.1.2: Create First User (SkyCraft Admin)
+### Step 1.1.2: Create First User (Malfurion Stormrage)
 
 1. In the left sidebar, click **Users** → **All users**
 2. Click **+ New user** → **Create new user**
 3. Fill in the following details:
 
-| Field               | Value                                       |
-| ------------------- | ------------------------------------------- |
-| User principal name | skycraft-admin@[yourtenant].onmicrosoft.com |
-| Display name        | SkyCraft Admin                              |
-| Password (initial)  | TempPassword!2025                           |
-| Usage location      | [Your country]                              |
+| Field               | Value                                            |
+| ------------------- | ------------------------------------------------ |
+| User principal name | malfurion.stormrage@[yourtenant].onmicrosoft.com |
+| Display name        | Malfurion Stormrage                              |
+| Password (initial)  | LoveAzeroth!2004                                 |
 
 4. Click **Create**
 
-**Expected Result**: New user appears in the user list with "SkyCraft Admin" display name.
+**Expected Result**: New user appears in the user list with "Malfurion Stormrage" display name.
 
-**Screenshot**: [Would show the "New User" form filled out]
+![Create First User](./images/Step-1.1.2.png)
 
-### Step 1.1.3: Create Second User (Developer)
+### Step 1.1.3: Create Second User (Khadgar Archmage)
 
 1. Click **+ New user** → **Create new user**
 2. Fill in the details:
 
-| Field               | Value                                     |
-| ------------------- | ----------------------------------------- |
-| User principal name | skycraft-dev@[yourtenant].onmicrosoft.com |
-| Display name        | SkyCraft Developer                        |
-| Password            | TempPassword!2025                         |
-| Usage location      | [Your country]                            |
+| Field               | Value                                         |
+| ------------------- | --------------------------------------------- |
+| User principal name | khadgar.archmage@[yourtenant].onmicrosoft.com |
+| Display name        | Khadgar Archmage                              |
+| Password            | LoveAzeroth!2004                              |
 
 3. Click **Create**
 
-### Step 1.1.4: Create Third User (Tester)
+### Step 1.1.4: Create Third User (Chromie Timewalker)
 
 Repeat the process with:
 
-| Field               | Value                                        |
-| ------------------- | -------------------------------------------- |
-| User principal name | skycraft-tester@[yourtenant].onmicrosoft.com |
-| Display name        | SkyCraft Tester                              |
-| Password            | TempPassword!2025                            |
-| Usage location      | [Your country]                               |
+| Field               | Value                                           |
+| ------------------- | ----------------------------------------------- |
+| User principal name | chromie.timewalker@[yourtenant].onmicrosoft.com |
+| Display name        | Chromie Timewalker                              |
+| Password            | LoveAzeroth!2004                                |
 
-### Step 1.1.5: Create Guest User (External Partner)
+### Step 1.1.5: Create Guest User (Illidan Stormrage)
 
 1. Click **+ New user** → **Invite external user**
 2. Fill in:
 
-| Field        | Value                       |
-| ------------ | --------------------------- |
-| Email        | partner@externalcompany.com |
-| Display name | External Partner Consultant |
+| Field        | Value                   |
+| ------------ | ----------------------- |
+| Email        | istormrage@illidari.com |
+| Display name | Illidan Stormrage       |
 
 3. Add custom invitation message:
 
@@ -117,11 +143,13 @@ Repeat the process with:
 
 **Expected Result**: Invitation email sent to external partner.
 
+![Create Guest User](./images/Step-1.1.5.png)
+
 ---
 
 ## 📖 Section 2: Create Security Groups (30 minutes)
 
-### Step 1.2.1: Create First Group (Admins)
+### Step 1.1.6: Create First Group (Admins)
 
 1. In left sidebar, click **Groups** → **All groups**
 2. Click **+ New group**
@@ -136,17 +164,19 @@ Repeat the process with:
 
 4. Click **Create**
 
-### Step 1.2.2: Add Members to Admin Group
+### Step 1.1.7: Add Members to Admin Group
 
 1. Open the **SkyCraft-Admins** group
 2. Click **Members** → **+ Add members**
 3. Search for and select:
-   - SkyCraft Admin
+   - Malfurion Stormrage
 4. Click **Select**
 
-**Expected Result**: SkyCraft Admin now appears in group members.
+**Expected Result**: Malfurion Stormrage now appears in group members.
 
-### Step 1.2.3: Create Second Group (Developers)
+![Add Members to Admin Group](./images/Step-1.1.7.png)
+
+### Step 1.1.8: Create Second Group (Developers)
 
 1. Click **+ New group**
 2. Create group with details:
@@ -158,9 +188,9 @@ Repeat the process with:
 | Group description | Development team for SkyCraft deployment |
 | Membership type   | Assigned                                 |
 
-3. Add member: **SkyCraft Developer**
+3. Add member: **Khadgar Archmage**
 
-### Step 1.2.4: Create Third Group (Testers)
+### Step 1.1.9: Create Third Group (Testers)
 
 1. Click **+ New group**
 2. Create group:
@@ -172,17 +202,21 @@ Repeat the process with:
 | Group description | Testing and monitoring team |
 | Membership type   | Assigned                    |
 
-3. Add member: **SkyCraft Tester**
+3. Add member: **Chromie Timewalker**
 
 **Expected Result**: Three security groups created with appropriate members.
+
+![Add Members to Admin Group](./images/Step-1.1.9.png)
 
 ---
 
 ## 📖 Section 3: Manage User Properties and Licenses (30 minutes)
 
-### Step 1.3.1: Configure User Properties
+![Manage User Properties and Licenses](./images/Step-1.1.10a.png)
 
-1. Open **All Users** and click on **SkyCraft Admin**
+### Step 1.1.10: Configure User Properties
+
+1. Open **All Users** and click on **Malfurion Stormrage**
 2. In the **Manage** section, click **Properties**
 3. Update the following:
 
@@ -195,7 +229,9 @@ Repeat the process with:
 
 4. Click **Save**
 
-### Step 1.3.2: Review License Information
+![Manage User Properties and Licenses](./images/Step-1.1.10b.png)
+
+### Step 1.1.11: Review License Information
 
 1. Click **Licenses** in the admin user's profile
 2. Note the current license status
@@ -205,7 +241,7 @@ Repeat the process with:
 
 **Expected Result**: License assignment shows in the user's profile.
 
-### Step 1.3.3: Configure SSPR (Self-Service Password Reset)
+### Step 1.1.12: Configure SSPR (Self-Service Password Reset)
 
 1. Go back to **Microsoft Entra ID** home page
 2. Click **Password reset** in the left sidebar
@@ -214,11 +250,13 @@ Repeat the process with:
 
 **Expected Result**: All users can now reset their own passwords using SSPR.
 
+![Configure SSPR](./images/Step-1.1.12.png)
+
 ---
 
 ## 📖 Section 4: External User Management (15 minutes)
 
-### Step 1.4.1: Accept Guest Invitation (Simulated)
+### Step 1.1.13: Accept Guest Invitation (Simulated)
 
 1. In production, the external partner would receive an email
 2. They would click the invitation link and sign in
@@ -226,11 +264,14 @@ Repeat the process with:
 
 **Expected Result**: Guest user appears in the user list with "Guest" designation.
 
-### Step 1.4.2: Review B2B Collaboration Settings
+### Step 1.1.14: Review B2B Collaboration Settings
 
-1. Click **External Identities** in left sidebar
-2. Click **External Collaboration Settings**
-3. Review the current settings for guest access
+1. Go back to Microsoft Entra ID home page
+2. Click **External Identities** in left sidebar
+3. Click **External Collaboration Settings**
+4. Review the current settings for guest access
+
+![Review B2B Collaboration Settings](./images/Step-1.1.14.png)
 
 ---
 
@@ -238,8 +279,8 @@ Repeat the process with:
 
 Complete this checklist to verify you've successfully completed the lab:
 
-- [ ] Created 3 internal users (Admin, Developer, Tester)
-- [ ] Created 1 guest user (External Partner)
+- [ ] Created 3 internal users (Malfurion, Khadgar, Chromie)
+- [ ] Created 1 guest user (Illidan)
 - [ ] Created 3 security groups (Admins, Developers, Testers)
 - [ ] Added appropriate users to each group
 - [ ] Updated user properties (job title, department)

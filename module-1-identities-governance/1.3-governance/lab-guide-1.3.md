@@ -13,6 +13,40 @@ By completing this lab, you will:
 
 ---
 
+## 🏗️ Architecture Overview
+
+You will implement the following governance controls:
+
+```mermaid
+graph TB
+    subgraph "Subscription"
+        Policy1[Policy: Require Tags]
+        Policy2[Policy: Allowed Locations]
+        Budget[Budget: Subscription Scope]
+
+        subgraph "prod-skycraft-swc-rg"
+            LockProd[Lock: CanNotDelete]
+            BudgetProd[Budget: RG Scope]
+        end
+
+        subgraph "platform-skycraft-swc-rg"
+            LockShared[Lock: CanNotDelete]
+        end
+
+        subgraph "dev-skycraft-swc-rg"
+            Tags[Tags: Env, CostCenter...]
+        end
+    end
+
+    Policy1 -->|Enforced on| prod-skycraft-swc-rg
+    Policy1 -->|Enforced on| platform-skycraft-swc-rg
+    Policy1 -->|Enforced on| dev-skycraft-swc-rg
+
+    style prod-skycraft-swc-rg fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
+    style platform-skycraft-swc-rg fill:#e1f5ff,stroke:#0078d4,stroke-width:2px
+    style dev-skycraft-swc-rg fill:#fff4e1,stroke:#f39c12,stroke-width:2px
+```
+
 ## 📋 Real-World Scenario
 
 **Situation**: The SkyCraft infrastructure now has proper identity management (Lab 1.1) and RBAC roles (Lab 1.2). However, there's still risk:
@@ -72,59 +106,63 @@ Before starting this lab:
 - Tag value: 256 characters
 - Tags are not inherited from parent scopes (need Azure Policy for inheritance)
 
-### Step 1.1: Apply Tags to Resource Groups
+### Step 1.3.1: Apply Tags to Resource Groups
+
+> [!IMPORTANT] > **Prerequisite**: The resource groups (`platform-skycraft-swc-rg`, `dev-skycraft-swc-rg`, `prod-skycraft-swc-rg`) must already exist. If you haven't created them, complete [Lab 1.2: Manage Access to Azure Resources (RBAC)](../../module-1-identities-governance/1.2-rbac/lab-guide-1.2.md#-section-2-create-resource-groups-15-minutes) first.
 
 1. In **Azure Portal**, navigate to **Resource groups**
 2. Click on **dev-skycraft-swc-rg**
 3. In the left menu, click **Tags**
 4. Add the following tags:
 
-| Name        | Value                                     |
-| ----------- | ----------------------------------------- |
-| Environment | Development                               |
-| Project     | SkyCraft                                  |
-| CostCenter  | Engineering                               |
-| Owner       | skycraft-admin@yourtenant.onmicrosoft.com |
-| Purpose     | SkyCraft-Development                      |
+| Name        | Value                                            |
+| ----------- | ------------------------------------------------ |
+| Environment | Development                                      |
+| Project     | SkyCraft                                         |
+| CostCenter  | Engineering                                      |
+| Owner       | malfurion.stormrage@[yourtenant].onmicrosoft.com |
+| Purpose     | SkyCraft-Development                             |
 
 5. Click **Apply**
 
 **Expected Result**: Tags are saved and visible in the Tags blade.
 
-### Step 1.2: Tag Production Resource Group
+![Apply Tags to Resource Groups](./images/step-1.3.1.png)
+
+### Step 1.3.2: Tag Production Resource Group
 
 1. Navigate to **prod-skycraft-swc-rg**
 2. Click **Tags**
 3. Add these tags:
 
-| Name        | Value                                     |
-| ----------- | ----------------------------------------- |
-| Environment | Production                                |
-| Project     | SkyCraft                                  |
-| CostCenter  | Operations                                |
-| Owner       | skycraft-admin@yourtenant.onmicrosoft.com |
-| Purpose     | SkyCraft-Production                       |
-| Criticality | High                                      |
+| Name        | Value                                            |
+| ----------- | ------------------------------------------------ |
+| Environment | Production                                       |
+| Project     | SkyCraft                                         |
+| CostCenter  | Operations                                       |
+| Owner       | malfurion.stormrage@[yourtenant].onmicrosoft.com |
+| Purpose     | SkyCraft-Production                              |
+| Criticality | High                                             |
 
 4. Click **Apply**
 
-### Step 1.3: Tag Platform Services Resource Group
+### Step 1.3.3: Tag Platform Services Resource Group
 
 1. Navigate to **platform-skycraft-swc-rg**
 2. Click **Tags**
 3. Add tags:
 
-| Name        | Value                                     |
-| ----------- | ----------------------------------------- |
-| Environment | Platform                                  |
-| Project     | SkyCraft                                  |
-| CostCenter  | Shared-Services                           |
-| Owner       | skycraft-admin@yourtenant.onmicrosoft.com |
-| Purpose     | Monitoring-Logging                        |
+| Name        | Value                                            |
+| ----------- | ------------------------------------------------ |
+| Environment | Platform                                         |
+| Project     | SkyCraft                                         |
+| CostCenter  | Shared-Services                                  |
+| Owner       | malfurion.stormrage@[yourtenant].onmicrosoft.com |
+| Purpose     | Monitoring-Logging                               |
 
 4. Click **Apply**
 
-### Step 1.4: View Resources by Tag
+### Step 1.3.4: View Resources by Tag
 
 1. In the Azure Portal search bar, type **Tags**
 2. Click **Tags** service
@@ -134,6 +172,8 @@ Before starting this lab:
 6. **Expected Result**: Shows all three resource groups with the "SkyCraft" project tag
 
 **Best Practice**: Standardize tag names and values across your organization to ensure consistency.
+
+![View Resources by Tag](./images/step-1.3.4.png)
 
 ---
 
@@ -154,12 +194,14 @@ Before starting this lab:
 - **Custom policies** - Created by your organization for specific needs
 - **Policy initiatives** - Groups of policies (also called policy sets)
 
-### Step 2.1: Assign a Built-in Policy (Require Tag on Resource Groups)
+### Step 1.3.5: Assign a Built-in Policy (Require Tag on Resource Groups)
 
 1. In Azure Portal, search for **Policy**
 2. Click **Policy** service
 3. In the left menu, click **Assignments**
 4. Click **+ Assign policy**
+
+![Assign a Built-in Policy](./images/step-1.3.5a.png)
 
 **Basics tab**:
 
@@ -169,7 +211,9 @@ Before starting this lab:
 - **Policy definition**: Click the "..." button
   - Search for: **"Require a tag on resource groups"**
   - Select this policy
-  - Click **Select**
+  - Click **Add**
+
+![Assign a Built-in Policy](./images/step-1.3.5b.png)
 
 5. Fill in additional details:
 
@@ -196,7 +240,9 @@ Before starting this lab:
 
 **Expected Result**: Policy is assigned and will evaluate new resource groups.
 
-### Step 2.2: Test the Policy
+![Assign a Built-in Policy](./images/step-1.3.5c.png)
+
+### Step 1.3.6: Test the Policy
 
 1. Try to create a new resource group **WITHOUT** the "Environment" tag:
    - Click **+ Create a resource group**
@@ -204,6 +250,8 @@ Before starting this lab:
    - Click **Review + create**
 
 **Expected Result**: Creation is **allowed** (policy is not retroactive, only evaluates new operations).
+
+![Assign a Built-in Policy](./images/step-1.3.6a.png)
 
 2. Now try again:
    - Name: `rg-test-with-tag`
@@ -213,9 +261,11 @@ Before starting this lab:
 
 **Expected Result**: Creation succeeds because the required tag is present.
 
+![Assign a Built-in Policy](./images/step-1.3.6b.png)
+
 3. Delete the test resource group: `rg-test-with-tag`
 
-### Step 2.3: Assign Policy for Resource Naming Convention
+### Step 1.3.7: Assign Policy for Resource Naming Convention
 
 1. In **Policy** service, click **Assignments**
 2. Click **+ Assign policy**
@@ -238,7 +288,7 @@ Before starting this lab:
 
 3. Click **Review + create** → **Create**
 
-### Step 2.4: Assign Policy to Enforce Allowed Locations
+### Step 1.3.8: Assign Policy to Enforce Allowed Locations
 
 Prevent resource creation in unintended regions:
 
@@ -263,7 +313,7 @@ Prevent resource creation in unintended regions:
 
 2. Click **Review + create** → **Create**
 
-### Step 2.5: View Policy Compliance
+### Step 1.3.9: View Policy Compliance
 
 1. In **Policy** service, click **Compliance** in left menu
 2. Review the compliance dashboard
@@ -278,6 +328,8 @@ Prevent resource creation in unintended regions:
 4. View which resource groups are compliant
 
 **Note**: Existing resources created before policy assignment may show as non-compliant. This is expected.
+
+![Assign a Built-in Policy](./images/step-1.3.9.png)
 
 ---
 
@@ -294,7 +346,7 @@ Prevent resource creation in unintended regions:
 
 Locks applied at parent scope (subscription/resource group) are inherited by child resources.
 
-### Step 3.1: Apply CanNotDelete Lock to Production Resource Group
+### Step 1.3.10: Apply CanNotDelete Lock to Production Resource Group
 
 1. Navigate to **prod-skycraft-swc-rg**
 2. In the left menu, click **Locks**
@@ -311,7 +363,9 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 **Expected Result**: Lock is created and shows in the Locks list.
 
-### Step 3.2: Test the Lock
+![Assign a Built-in Policy](./images/step-1.3.10.png)
+
+### Step 1.3.11: Test the Lock
 
 1. Still in **prod-skycraft-swc-rg**, click **Overview**
 2. Click **Delete resource group** button
@@ -323,7 +377,9 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 **Key Learning**: Even with Owner role, you cannot delete a locked resource until the lock is removed.
 
-### Step 3.3: Apply CanNotDelete Lock to Shared Resource Group
+![Assign a Built-in Policy](./images/step-1.3.11.png)
+
+### Step 1.3.12: Apply CanNotDelete Lock to Shared Resource Group
 
 1. Navigate to **platform-skycraft-swc-rg**
 2. Click **Locks** → **+ Add**
@@ -335,7 +391,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 4. Click **OK**
 
-### Step 3.4: Understand Lock Hierarchy
+### Step 1.3.13: Understand Lock Hierarchy
 
 **Important Concepts**:
 
@@ -361,7 +417,9 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 - Triggering alerts when thresholds are reached
 - Tracking cost trends over time
 
-### Step 4.1: Create a Subscription Budget
+![Manage Costs with Budgets and Alerts](./images/step-1.3.14a.png)
+
+### Step 1.3.14: Create a Subscription Budget
 
 1. In Azure Portal, search for **Cost Management + Billing**
 2. Click **Cost Management + Billing**
@@ -378,11 +436,13 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 | Reset period    | Monthly                           |
 | Creation date   | [First day of current month]      |
 | Expiration date | [One year from now]               |
-| Amount          | $200 (adjust based on your needs) |
+| Amount          | $100 (adjust based on your needs) |
 
 6. Click **Next**
 
-### Step 4.2: Configure Budget Alerts
+![Manage Costs with Budgets and Alerts](./images/step-1.3.14b.png)
+
+### Step 1.3.15: Configure Budget Alerts
 
 **Alert conditions** tab:
 
@@ -410,7 +470,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 - **Alert type**: Actual
 - **% of budget**: 100
-- **Alert recipients (email)**: Enter your email and skycraft-admin email
+- **Alert recipients (email)**: Enter your email and Malfurion Stormrage's email
 
 4. Click **Next**
 
@@ -422,7 +482,9 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 **Expected Result**: Budget is created and you'll receive email confirmation
 
-### Step 4.3: Create Resource Group Budget
+![Manage Costs with Budgets and Alerts](./images/step-1.3.15.png)
+
+### Step 1.3.16: Create Resource Group Budget
 
 Create a more specific budget for the production environment:
 
@@ -434,28 +496,35 @@ Create a more specific budget for the production environment:
 | ------------ | --------------------- |
 | Name         | SkyCraft-Prod-Monthly |
 | Reset period | Monthly               |
-| Amount       | $100                  |
+| Amount       | $50                   |
+
+![Manage Costs with Budgets and Alerts](./images/step-1.3.16.png)
 
 4. Configure alerts at 60%, 85%, and 100%
 5. Add email recipients
 6. Click **Create**
 
-### Step 4.4: View Cost Analysis
+### Step 1.3.17: View Cost Analysis
 
 1. In **Cost Management + Billing**, click **Cost analysis**
-2. Explore different views:
+2. Click **Go to subscription**
+3. Under **Cost Management** click **Cost analysis**
+4. Explore different views:
 
    - **Cost by resource** - See spending per resource
    - **Cost by service** - See spending per Azure service
-   - **Cost by location** - Geographic distribution
    - **Daily costs** - Trend over time
 
-3. Apply filters:
+![Manage Costs with Budgets and Alerts](./images/step-1.3.17a.png)
+
+5. Apply filters:
    - **Tag**: Project = SkyCraft
    - **Resource group**: prod-skycraft-swc-rg
    - **Time range**: Last 30 days
 
 **Expected Result**: Visual charts showing cost breakdown (likely very low since we haven't deployed resources yet).
+
+![Manage Costs with Budgets and Alerts](./images/step-1.3.17b.png)
 
 ---
 
@@ -471,7 +540,7 @@ Create a more specific budget for the production environment:
 - Reduce costs
 - Achieve operational excellence
 
-### Step 5.1: Access Azure Advisor
+### Step 1.3.18: Access Azure Advisor
 
 1. In Azure Portal, search for **Advisor**
 2. Click **Advisor** service
@@ -483,7 +552,9 @@ Create a more specific budget for the production environment:
 - Recommendations by category
 - Number of affected resources
 
-### Step 5.2: Review Cost Recommendations
+![Manage Costs with Budgets and Alerts](./images/step-1.3.18.png)
+
+### Step 1.3.19: Review Cost Recommendations
 
 1. Click **Cost** tab in left menu
 2. Review recommendations (may be none if newly created)
@@ -497,7 +568,7 @@ Create a more specific budget for the production environment:
 
 3. If recommendations exist, click one to view details
 
-### Step 5.3: Review Security Recommendations
+### Step 1.3.20: Review Security Recommendations
 
 1. Click **Security** tab
 2. Review recommendations
@@ -509,28 +580,37 @@ Create a more specific budget for the production environment:
 - Enable encryption
 - Configure backup
 
-### Step 5.4: Configure Advisor Alerts
+![Review Security Recommendations](./images/step-1.3.20.png)
 
-1. Click **Configuration** in left menu
-2. Review filtering options:
+### Step 1.3.21: Configure Advisor Alerts
 
-   - Include/exclude subscriptions
-   - Include/exclude resource groups
-   - Set low utilization thresholds
-
-3. Click **Alerts** in left menu
-4. Click **+ New Advisor alert**
+1. Click **Monitoring** in left menu
+2. Click **Alerts** in left menu
+3. Click **+ New Advisor alert**
 
 **Create alert rule**:
 
 - **Scope**: Your subscription
 - **Condition**: Category = Cost
-- **Action group**: (skip for now)
-- **Alert details**:
-  - Name: `Advisor-Cost-Recommendations`
-  - Description: `Alert when new cost recommendations are available`
+- **Action group**:
+  - Click **Create new**
+  - Choose resource group: `prod-skycraft-swc-rg`
+- **Action groups**:
+  - Action group name: `prod-skycraft-swc-rg`
+  - Display name: `Advisor-Cost-Recommendations`
+  - Fill tags accordingly to policies
+  - Click **Review + Create**
 
-5. Click **Create alert rule**
+![Manage Costs with Budgets and Alerts](./images/step-1.3.21a.png)
+
+- **Alert details**:
+  - Alert rule name: `Advisor-Cost-Recommendations`
+  - Description: `Alert when new cost recommendations are available`
+  - Select existing resource group: `prod-skycraft-swc-rg`
+
+![Manage Costs with Budgets and Alerts](./images/step-1.3.21b.png)
+
+4. Click **Create alert**
 
 **Expected Result**: You'll receive alerts when Advisor identifies new cost-saving opportunities.
 
@@ -560,11 +640,13 @@ Tenant Root Group
 
 (This is ideal structure as creation Subscription does not incur any cost)
 
-### Step 6.1: View Management Groups
+### Step 1.3.22: View Management Groups
 
 1. In Azure Portal, search for **Management groups**
 2. Click **Management groups** service
 3. You'll see the **Tenant Root Group**
+
+![View Management Groups](./images/step-1.3.22.png)
 
 **Note**: Creating management groups requires specific permissions. For this lab, understanding the concept is sufficient.
 
@@ -621,6 +703,8 @@ Tenant Root Group
 - [ ] Viewed Management Groups in portal
 - [ ] Understand hierarchy and inheritance
 - [ ] Know when to use management groups
+
+**For detailed verification**, see [lab-checklist-1.3.md](lab-checklist-1.3.md)
 
 ---
 
@@ -683,20 +767,47 @@ Tenant Root Group
 
 ## 🎓 Knowledge Check
 
-1. **Q**: What's the difference between Azure Policy and RBAC?  
-   **A**: RBAC controls **who** can do **what** (identity and permissions). Policy controls **what** can be done **regardless of who** does it (compliance and standards).
+Test your understanding with these questions:
 
-2. **Q**: When should you use CanNotDelete vs. ReadOnly lock?  
-   **A**: Use **CanNotDelete** for production resources (allows operations but prevents deletion). Use **ReadOnly** sparingly (prevents all modifications, can break automation).
+1. **What's the difference between Azure Policy and RBAC?**
 
-3. **Q**: Are tags inherited from resource groups to resources?  
-   **A**: No, tags are NOT automatically inherited. You must use Azure Policy with "Modify" effect to inherit tags, or apply tags directly to resources.
+   <details>
+     <summary>**Click to see the answer**</summary>
 
-4. **Q**: What happens when a budget threshold is reached?  
-   **A**: An **alert email** is sent. Budgets do NOT automatically stop resource creation or shut down resources—they only notify.
+   **Answer**: RBAC controls **who** can do **what** (identity and permissions). Policy controls **what** can be done **regardless of who** does it (compliance and standards).
+   </details>
 
-5. **Q**: Can you remove a lock if you have Owner role?  
-   **A**: Yes, Owner can remove locks. However, the lock prevents deletion even for Owners until it's removed.
+2. **When should you use CanNotDelete vs. ReadOnly lock?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   **Answer**: Use **CanNotDelete** for production resources (allows operations but prevents deletion). Use **ReadOnly** sparingly (prevents all modifications, can break automation).
+   </details>
+
+3. **Are tags inherited from resource groups to resources?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   **Answer**: No, tags are NOT automatically inherited. You must use Azure Policy with "Modify" effect to inherit tags, or apply tags directly to resources.
+   </details>
+
+4. **What happens when a budget threshold is reached?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   **Answer**: An **alert email** is sent. Budgets do NOT automatically stop resource creation or shut down resources—they only notify.
+   </details>
+
+5. **Can you remove a lock if you have Owner role?**
+
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   **Answer**: Yes, Owner can remove locks. However, the lock prevents deletion even for Owners until it's removed.
+   </details>
 
 ---
 
