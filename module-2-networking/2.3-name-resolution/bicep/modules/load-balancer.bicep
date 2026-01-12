@@ -1,10 +1,10 @@
 /*=====================================================
-SUMMARY: Standard Load Balancer Module
+SUMMARY: Lab 2.3 - Load Balancer Module
 DESCRIPTION: Deploys a Standard Public LB with Backend Pools, Probes, and Rules.
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.1.0
-DEPLOYMENT: Internal Module
-=====================================================*/
+VERSION: 0.2.0
+DEPRECATED: False
+======================================================*/
 
 // ===================================
 // Parameters

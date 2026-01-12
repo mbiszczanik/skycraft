@@ -1,10 +1,10 @@
 /*=====================================================
-SUMMARY: Public DNS Zone Module
+SUMMARY: Lab 2.3 - Public DNS Module
 DESCRIPTION: Deploys a Public DNS Zone and A/CNAME records.
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.1.0
-DEPLOYMENT: Internal Module
-=====================================================*/
+VERSION: 0.2.0
+DEPRECATED: False
+======================================================*/
 
 // ===================================
 // Parameters

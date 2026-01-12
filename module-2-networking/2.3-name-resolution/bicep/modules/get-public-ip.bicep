@@ -1,10 +1,10 @@
 /*=====================================================
-SUMMARY: Public IP Lookup Helper
+SUMMARY: Lab 2.3 - Public IP Lookup Module
 DESCRIPTION: Returns properties of an existing Public IP.
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.1.0
-DEPLOYMENT: Internal Module
-=====================================================*/
+VERSION: 0.2.0
+DEPRECATED: False
+======================================================*/
 
 @description('The name of the existing Public IP.')
 param parPublicIpName string
