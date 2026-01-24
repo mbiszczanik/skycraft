@@ -3,6 +3,7 @@
 ## 🎯 Learning Objectives
 
 By completing this lab, you will:
+
 - Understand Infrastructure as Code (IaC) concepts and benefits
 - Interpret and analyze Azure Resource Manager (ARM) templates
 - Read and understand Bicep syntax and structure
@@ -98,6 +99,7 @@ graph TB
 ## 📋 Real-World Scenario
 
 **Situation**: Your SkyCraft infrastructure has grown complex with 3 VNets, multiple subnets, NSGs, load balancers, and will soon have dozens of VMs. Deploying everything manually through Azure Portal is:
+
 - **Time-consuming**: Takes 2-3 hours per environment
 - **Error-prone**: Easy to misconfigure subnet addresses or NSG rules
 - **Not repeatable**: Can't easily recreate dev/prod environments
@@ -105,6 +107,7 @@ graph TB
 - **Hard to audit**: Can't review changes before deployment
 
 **Your Task**: Implement Infrastructure as Code using Bicep to:
+
 - Codify your entire infrastructure in version-controlled templates
 - Deploy complete environments in 15 minutes instead of 3 hours
 - Ensure consistency between dev and prod environments
@@ -112,7 +115,8 @@ graph TB
 - Support disaster recovery with one-command redeployment
 - Parameterize templates for multiple regions and environments
 
-**Business Impact**: 
+**Business Impact**:
+
 - 90% reduction in deployment time
 - Zero configuration drift between environments
 - Infrastructure changes tracked in Git history
@@ -135,6 +139,7 @@ graph TB
 ## ✅ Prerequisites
 
 Before starting this lab:
+
 - [ ] Completed Module 2 (Virtual Networking)
 - [ ] Existing resources: 3 VNets, NSGs, Load Balancers deployed
 - [ ] Azure CLI installed (version 2.50.0 or later)
@@ -153,6 +158,7 @@ Before starting this lab:
 **Infrastructure as Code (IaC)** is the practice of managing infrastructure through code instead of manual processes.
 
 **Traditional Approach** (ClickOps):
+
 ```
 1. Login to Azure Portal
 2. Click "Create resource"
@@ -164,6 +170,7 @@ Before starting this lab:
 ```
 
 **IaC Approach**:
+
 ```bicep
 // network.bicep
 resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
@@ -179,19 +186,20 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
 
 ### IaC Benefits
 
-| Benefit | Description | SkyCraft Example |
-|---------|-------------|------------------|
-| **Repeatability** | Deploy identical environments | Dev and prod match exactly |
-| **Version Control** | Track changes with Git | See who changed what and when |
-| **Documentation** | Code documents itself | Template shows actual configuration |
-| **Collaboration** | Code reviews for infrastructure | Team reviews before deployment |
-| **Speed** | Deploy in minutes, not hours | 3-hour manual → 15-min automated |
-| **Testing** | Validate before deployment | what-if shows changes before apply |
-| **Disaster Recovery** | Redeploy entire infrastructure | One command restores everything |
+| Benefit               | Description                     | SkyCraft Example                    |
+| --------------------- | ------------------------------- | ----------------------------------- |
+| **Repeatability**     | Deploy identical environments   | Dev and prod match exactly          |
+| **Version Control**   | Track changes with Git          | See who changed what and when       |
+| **Documentation**     | Code documents itself           | Template shows actual configuration |
+| **Collaboration**     | Code reviews for infrastructure | Team reviews before deployment      |
+| **Speed**             | Deploy in minutes, not hours    | 3-hour manual → 15-min automated    |
+| **Testing**           | Validate before deployment      | what-if shows changes before apply  |
+| **Disaster Recovery** | Redeploy entire infrastructure  | One command restores everything     |
 
 ### ARM Templates vs Bicep
 
 **ARM Templates** (JSON):
+
 ```json
 {
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
@@ -219,6 +227,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
 ```
 
 **Bicep** (Domain-Specific Language):
+
 ```bicep
 param vnetName string = 'dev-skycraft-swc-vnet'
 
@@ -233,15 +242,15 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
 
 **Comparison**:
 
-| Feature | ARM Template (JSON) | Bicep |
-|---------|---------------------|-------|
-| **Syntax** | Verbose JSON | Concise, readable |
-| **Lines of code** | ~30 for VNet | ~8 for VNet |
-| **Learning curve** | Steep (JSON functions) | Gentle (declarative) |
-| **Type safety** | Limited | Strong typing |
-| **Modules** | Nested templates (complex) | Native module support |
-| **Tooling** | Basic | Excellent (IntelliSense, validation) |
-| **Microsoft recommendation** | Legacy | **Preferred** |
+| Feature                      | ARM Template (JSON)        | Bicep                                |
+| ---------------------------- | -------------------------- | ------------------------------------ |
+| **Syntax**                   | Verbose JSON               | Concise, readable                    |
+| **Lines of code**            | ~30 for VNet               | ~8 for VNet                          |
+| **Learning curve**           | Steep (JSON functions)     | Gentle (declarative)                 |
+| **Type safety**              | Limited                    | Strong typing                        |
+| **Modules**                  | Nested templates (complex) | Native module support                |
+| **Tooling**                  | Basic                      | Excellent (IntelliSense, validation) |
+| **Microsoft recommendation** | Legacy                     | **Preferred**                        |
 
 **Bottom Line**: Bicep is the modern way to write Azure IaC. ARM JSON is still used internally but rarely written by hand.
 
@@ -271,7 +280,10 @@ Let's export your existing dev environment to see what ARM looks like:
 2. In left menu, click **Export template**
 3. Wait 10-15 seconds for Azure to generate template
 
+![Export ARM Template](images/step-3.1.1.png)
+
 **What You See**:
+
 - **Template** tab: Complete ARM JSON (often 500-2000+ lines)
 - **Parameters** tab: Extracted parameters
 - **Download** button: Get template as ZIP file
@@ -350,31 +362,32 @@ Let's export your existing dev environment to see what ARM looks like:
 
 **Component Breakdown**:
 
-| Field | Purpose | Example Value |
-|-------|---------|---------------|
-| `type` | Azure resource type | Microsoft.Network/virtualNetworks |
-| `apiVersion` | API version to use | 2023-05-01 |
-| `name` | Resource name | dev-skycraft-swc-vnet |
-| `location` | Azure region | swedencentral |
-| `tags` | Metadata tags | Project, Environment |
-| `properties` | Resource-specific config | addressSpace, subnets |
-| `dependsOn` | Deployment dependencies | Other resource IDs |
+| Field        | Purpose                  | Example Value                     |
+| ------------ | ------------------------ | --------------------------------- |
+| `type`       | Azure resource type      | Microsoft.Network/virtualNetworks |
+| `apiVersion` | API version to use       | 2023-05-01                        |
+| `name`       | Resource name            | dev-skycraft-swc-vnet             |
+| `location`   | Azure region             | swedencentral                     |
+| `tags`       | Metadata tags            | Project, Environment              |
+| `properties` | Resource-specific config | addressSpace, subnets             |
+| `dependsOn`  | Deployment dependencies  | Other resource IDs                |
 
 ### Step 3.1.4: Understand ARM Template Functions
 
 ARM templates use **functions** for dynamic values:
 
-| Function | Purpose | Example |
-|----------|---------|---------|
-| `parameters('name')` | Get parameter value | `parameters('vmSize')` |
-| `variables('name')` | Get variable value | `variables('subnetId')` |
-| `resourceId(...)` | Generate resource ID | `resourceId('Microsoft.Network/virtualNetworks', 'vnet')` |
-| `reference(...)` | Get resource properties | `reference('vnet').addressSpace` |
-| `concat(...)` | Concatenate strings | `concat('dev-', parameters('vmName'))` |
-| `resourceGroup()` | Get resource group info | `resourceGroup().location` |
-| `subscription()` | Get subscription info | `subscription().subscriptionId` |
+| Function             | Purpose                 | Example                                                   |
+| -------------------- | ----------------------- | --------------------------------------------------------- |
+| `parameters('name')` | Get parameter value     | `parameters('vmSize')`                                    |
+| `variables('name')`  | Get variable value      | `variables('subnetId')`                                   |
+| `resourceId(...)`    | Generate resource ID    | `resourceId('Microsoft.Network/virtualNetworks', 'vnet')` |
+| `reference(...)`     | Get resource properties | `reference('vnet').addressSpace`                          |
+| `concat(...)`        | Concatenate strings     | `concat('dev-', parameters('vmName'))`                    |
+| `resourceGroup()`    | Get resource group info | `resourceGroup().location`                                |
+| `subscription()`     | Get subscription info   | `subscription().subscriptionId`                           |
 
 **Example Usage**:
+
 ```json
 "name": "[concat(parameters('environment'), '-skycraft-swc-vnet')]",
 "location": "[resourceGroup().location]",
@@ -387,16 +400,17 @@ ARM templates use **functions** for dynamic values:
 
 ## 📖 Section 3: Introduction to Bicep Syntax (20 minutes)
 
-### Step 3.1.5: Install Bicep Tools
+### Step 3.1.5: Install Bicep Tools (If you don't have one yet)
 
 1. **Install Bicep CLI**:
+
 ```bash
 # Install Bicep via Azure CLI
 az bicep install
 
 # Verify installation
 az bicep version
-# Expected output: Bicep CLI version 0.24.24 (or later)
+# Expected output: Bicep CLI version 0.39 (or later)
 ```
 
 2. **Install VS Code Extension**:
@@ -407,6 +421,7 @@ az bicep version
    - Reload VS Code
 
 **Benefits of VS Code Bicep extension**:
+
 - IntelliSense (autocomplete for resource types)
 - Syntax highlighting
 - Real-time validation (red squiggly lines for errors)
@@ -456,6 +471,7 @@ output primaryEndpoint string = storageAccount.properties.primaryEndpoints.blob
 ### Bicep Syntax Fundamentals
 
 **1. Parameters** (Inputs):
+
 ```bicep
 // String parameter with default
 param vmSize string = 'Standard_B2s'
@@ -482,6 +498,7 @@ param adminPassword string
 ```
 
 **2. Variables** (Computed Values):
+
 ```bicep
 // Simple variable
 var resourceGroupName = 'dev-skycraft-swc-rg'
@@ -504,6 +521,7 @@ var subnets = [
 ```
 
 **3. Resources** (Infrastructure):
+
 ```bicep
 // Resource with symbolic name 'vnet'
 resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
@@ -527,6 +545,7 @@ resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-05-01' = {
 ```
 
 **4. Outputs** (Return Values):
+
 ```bicep
 output vnetId string = vnet.id
 output vnetName string = vnet.name
@@ -536,6 +555,7 @@ output authSubnetId string = subnet.id
 ### Step 3.1.7: Bicep vs ARM Side-by-Side Comparison
 
 **ARM Template (JSON)**:
+
 ```json
 {
   "resources": [
@@ -567,6 +587,7 @@ output authSubnetId string = subnet.id
 ```
 
 **Bicep Equivalent**:
+
 ```bicep
 param nsgName string
 
@@ -594,6 +615,7 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-05-01' = {
 ```
 
 **Key Differences**:
+
 - ✅ No `"type"` field name wrapping in Bicep
 - ✅ No `[parameters()]` function - just `nsgName`
 - ✅ No commas after properties (newlines sufficient)
@@ -608,22 +630,26 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-05-01' = {
 Bicep CLI can automatically convert ARM JSON to Bicep:
 
 1. Navigate to your exported template directory:
+
 ```bash
 cd ~/Downloads/dev-skycraft-swc-rg-export
 ```
 
 2. **Decompile ARM to Bicep**:
+
 ```bash
 az bicep decompile --file template.json
 ```
 
 **Expected Output**:
+
 ```
 Decompilation complete. Output file: template.bicep
 Warning: Decompilation is a best-effort process. Review the generated file carefully.
 ```
 
 3. **Review generated Bicep file**:
+
 ```bash
 code template.bicep
 ```
@@ -680,17 +706,18 @@ resource networkSecurityGroups_auth_nsg 'Microsoft.Network/networkSecurityGroups
 
 **Common Decompilation Issues**:
 
-| Issue | Why It Happens | Fix |
-|-------|----------------|-----|
-| Long parameter names | Auto-generated from resource names | Rename to shorter names |
-| No parameter descriptions | Not in ARM template | Add `@description()` decorators |
-| Hardcoded values | Values were hardcoded in ARM | Extract to parameters |
-| No modules | ARM uses nested templates | Refactor to Bicep modules |
-| Repetitive code | Copy-paste in original | Create loops with `for` |
+| Issue                     | Why It Happens                     | Fix                             |
+| ------------------------- | ---------------------------------- | ------------------------------- |
+| Long parameter names      | Auto-generated from resource names | Rename to shorter names         |
+| No parameter descriptions | Not in ARM template                | Add `@description()` decorators |
+| Hardcoded values          | Values were hardcoded in ARM       | Extract to parameters           |
+| No modules                | ARM uses nested templates          | Refactor to Bicep modules       |
+| Repetitive code           | Copy-paste in original             | Create loops with `for`         |
 
 ### Step 3.1.10: Clean Up and Improve Decompiled Bicep
 
 **Before** (Decompiled):
+
 ```bicep
 param virtualNetworks_dev_skycraft_swc_vnet_name string = 'dev-skycraft-swc-vnet'
 param location string = 'swedencentral'
@@ -707,6 +734,7 @@ resource virtualNetworks_dev_skycraft_swc_vnet 'Microsoft.Network/virtualNetwork
 ```
 
 **After** (Cleaned):
+
 ```bicep
 @description('Name of the virtual network')
 param vnetName string = 'dev-skycraft-swc-vnet'
@@ -732,6 +760,7 @@ output vnetId string = vnet.id
 ```
 
 **Improvements**:
+
 - ✅ Descriptive parameter names
 - ✅ `@description()` decorators for documentation
 - ✅ `@allowed()` for validation
@@ -1380,6 +1409,7 @@ az deployment sub what-if   --location swedencentral   --template-file main.bice
 ```
 
 **Expected Output**:
+
 ```
 Resource changes: 15 to create, 0 to modify, 0 to delete.
 
@@ -1404,6 +1434,7 @@ Resource changes: 15 to create, 0 to modify, 0 to delete.
 ```
 
 **Color Legend**:
+
 - 🟢 Green (+): Resource will be created
 - 🟡 Yellow (~): Resource will be modified
 - 🔴 Red (-): Resource will be deleted
@@ -1421,6 +1452,7 @@ az deployment sub create   --name "SkyCraft-Dev-$(date +%Y%m%d-%H%M%S)"   --loca
 ```
 
 **Deployment Process**:
+
 1. Bicep transpiles to ARM JSON
 2. ARM validates template
 3. Shows what-if preview
@@ -1529,26 +1561,31 @@ az deployment sub create   --name "SkyCraft-Redeploy-$(date +%Y%m%d-%H%M%S)"   -
 Quick verification before proceeding:
 
 ### Understanding Infrastructure as Code
+
 - [ ] Understand benefits of IaC (repeatability, version control, speed)
 - [ ] Know difference between ARM templates and Bicep
 - [ ] Can explain Bicep workflow (Bicep → ARM → Azure)
 
 ### ARM Template Analysis
+
 - [ ] Exported existing resource group as ARM template
 - [ ] Analyzed ARM template structure (parameters, variables, resources, outputs)
 - [ ] Identified ARM template functions (concat, resourceId, reference)
 
 ### Bicep Fundamentals
+
 - [ ] Installed Bicep CLI and VS Code extension
 - [ ] Created first Bicep file with parameters, variables, resources, outputs
 - [ ] Understand Bicep syntax (no brackets, no commas, cleaner than JSON)
 
 ### ARM to Bicep Conversion
+
 - [ ] Decompiled ARM template to Bicep using `az bicep decompile`
 - [ ] Reviewed and cleaned up decompiled Bicep code
 - [ ] Added parameter descriptions and validation decorators
 
 ### Bicep Modules
+
 - [ ] Created reusable network module (network.bicep)
 - [ ] Created NSG module with configurable rules (nsg.bicep)
 - [ ] Created load balancer module (loadbalancer.bicep)
@@ -1556,6 +1593,7 @@ Quick verification before proceeding:
 - [ ] Created parameter files (.bicepparam) for dev and prod
 
 ### Complete Infrastructure Template
+
 - [ ] Created main.bicep orchestrator template
 - [ ] Used targetScope = 'subscription' for multi-resource group deployment
 - [ ] Referenced modules with proper parameters
@@ -1563,6 +1601,7 @@ Quick verification before proceeding:
 - [ ] Added outputs for important values
 
 ### Deployment and Validation
+
 - [ ] Built Bicep to ARM (`az bicep build`)
 - [ ] Validated template (`az deployment sub validate`)
 - [ ] Previewed changes with what-if analysis
@@ -1624,17 +1663,17 @@ Test your understanding with these questions:
 
    **Answer**: Bicep offers significant advantages over ARM JSON templates:
 
-   | Feature | ARM Template (JSON) | Bicep |
-   |---------|---------------------|-------|
-   | **Readability** | Verbose, nested JSON | Clean, declarative syntax |
-   | **Lines of code** | ~500 for VNet with subnets | ~100 for same VNet |
-   | **Learning curve** | Steep (complex functions) | Gentle (simple syntax) |
-   | **Type safety** | Limited runtime checks | Strong compile-time validation |
-   | **IntelliSense** | Basic | Excellent (resource properties) |
-   | **Error messages** | Cryptic deployment errors | Clear compile-time errors |
-   | **Modules** | Nested templates (complex) | Native module support |
-   | **Parameter files** | JSON only | `.bicepparam` (type-safe) |
-   | **Refactoring** | Manual, error-prone | Safe with IntelliSense |
+   | Feature             | ARM Template (JSON)        | Bicep                           |
+   | ------------------- | -------------------------- | ------------------------------- |
+   | **Readability**     | Verbose, nested JSON       | Clean, declarative syntax       |
+   | **Lines of code**   | ~500 for VNet with subnets | ~100 for same VNet              |
+   | **Learning curve**  | Steep (complex functions)  | Gentle (simple syntax)          |
+   | **Type safety**     | Limited runtime checks     | Strong compile-time validation  |
+   | **IntelliSense**    | Basic                      | Excellent (resource properties) |
+   | **Error messages**  | Cryptic deployment errors  | Clear compile-time errors       |
+   | **Modules**         | Nested templates (complex) | Native module support           |
+   | **Parameter files** | JSON only                  | `.bicepparam` (type-safe)       |
+   | **Refactoring**     | Manual, error-prone        | Safe with IntelliSense          |
 
    **Example Comparison**:
 
@@ -1655,6 +1694,7 @@ Test your understanding with these questions:
    **Answer**:
 
    **1. Parameters** - Inputs to the template
+
    ```bicep
    @description('Azure region for deployment')
    param location string = 'swedencentral'
@@ -1662,11 +1702,13 @@ Test your understanding with these questions:
    @secure()
    param adminPassword string
    ```
+
    - **Purpose**: Customize deployment without changing code
    - **Use cases**: Region, environment name, VM size, admin credentials
    - **Benefits**: Same template for dev/prod with different parameter files
 
    **2. Variables** - Computed values
+
    ```bicep
    var vnetName = '${environment}-skycraft-swc-vnet'
    var tags = {
@@ -1674,11 +1716,13 @@ Test your understanding with these questions:
      Environment: environment
    }
    ```
+
    - **Purpose**: Calculate values from parameters or constants
    - **Use cases**: Resource names following naming conventions, complex configurations
    - **Benefits**: DRY principle (Don't Repeat Yourself)
 
    **3. Resources** - Azure resources to deploy
+
    ```bicep
    resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
      name: vnetName
@@ -1686,15 +1730,18 @@ Test your understanding with these questions:
      properties: { ... }
    }
    ```
+
    - **Purpose**: Declare infrastructure to create
    - **Use cases**: VNets, VMs, storage accounts, load balancers
    - **Benefits**: Declarative (describe desired state, not steps)
 
    **4. Outputs** - Return values from deployment
+
    ```bicep
    output vnetId string = vnet.id
    output subnetIds array = vnet.properties.subnets
    ```
+
    - **Purpose**: Extract information for use elsewhere
    - **Use cases**: Resource IDs for other templates, IP addresses, connection strings
    - **Benefits**: Chain deployments, provide info to applications
@@ -1712,6 +1759,7 @@ Test your understanding with these questions:
    **targetScope** determines the deployment level and what resources you can create.
 
    **1. Resource Group Scope** (default)
+
    ```bicep
    targetScope = 'resourceGroup'  // or omit (default)
 
@@ -1720,12 +1768,14 @@ Test your understanding with these questions:
      // ...
    }
    ```
+
    - Deploys to a **single existing resource group**
    - Can create: VNets, VMs, Storage, Load Balancers, etc.
    - Cannot create: Resource groups, subscriptions
    - Deployment command: `az deployment group create --resource-group <name>`
 
    **2. Subscription Scope**
+
    ```bicep
    targetScope = 'subscription'
 
@@ -1740,6 +1790,7 @@ Test your understanding with these questions:
      params: { ... }
    }
    ```
+
    - Deploys to **subscription level**
    - Can create: Resource groups, policy assignments, role assignments
    - Can deploy modules to specific resource groups
@@ -1765,6 +1816,7 @@ Test your understanding with these questions:
    **Answer**: Bicep modules enable **DRY** (Don't Repeat Yourself) by allowing reusable components.
 
    **Without Modules** (Copy-Paste):
+
    ```bicep
    // Dev VNet
    resource devVnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
@@ -1783,6 +1835,7 @@ Test your understanding with these questions:
    ```
 
    **With Modules** (Reusable):
+
    ```bicep
    // modules/vnet.bicep
    param vnetName string
@@ -1832,11 +1885,13 @@ Test your understanding with these questions:
    **Answer**: `what-if` provides a **preview of changes before deployment**, similar to `terraform plan` or `git diff`.
 
    **Command**:
+
    ```bash
    az deployment sub what-if      --location swedencentral      --template-file main.bicep      --parameters dev.bicepparam
    ```
 
    **Output Shows**:
+
    ```
    Resource changes: 5 to create, 2 to modify, 1 to delete.
 
@@ -1860,7 +1915,6 @@ Test your understanding with these questions:
    - ⚪ **= (White)**: **No change**
 
    **Why Important**:
-
    1. **Prevent Accidents**: See if resources will be deleted
    2. **Understand Impact**: Know what will change before it happens
    3. **Code Review**: Team can review infrastructure changes
@@ -1868,6 +1922,7 @@ Test your understanding with these questions:
    5. **Learning**: Understand what Bicep code actually does
 
    **Real-World Example**:
+
    ```
    Developer: "I'll just update the NSG rule priority..."
    What-If: "This will DELETE and RECREATE the NSG, breaking all VMs!"
@@ -1909,6 +1964,7 @@ Test your understanding with these questions:
    ```
 
    Deploy:
+
    ```bash
    # Deploy to Sweden Central
    az deployment sub create      --location swedencentral      --template-file main.bicep      --parameters swedencentral.bicepparam
@@ -1974,6 +2030,7 @@ Test your understanding with these questions:
 **Symptom**: `az bicep build` returns error: "The template is not valid"
 
 **Solution**:
+
 - Check Bicep syntax (missing braces, incorrect resource type)
 - Verify resource API version exists: `az provider show --namespace Microsoft.Network --query "resourceTypes[?resourceType=='virtualNetworks'].apiVersions[0]"`
 - Use VS Code with Bicep extension for real-time validation (red squiggles)
@@ -1984,6 +2041,7 @@ Test your understanding with these questions:
 **Symptom**: Deployment starts but fails during validation phase
 
 **Solution**:
+
 - Review error message carefully (often indicates which resource/property)
 - Verify parameter values are correct (e.g., valid Azure region name)
 - Check resource dependencies (use `dependsOn` if needed)
@@ -1995,6 +2053,7 @@ Test your understanding with these questions:
 **Symptom**: Error: "Unable to find module 'modules/network.bicep'"
 
 **Solution**:
+
 - Verify file path is correct (relative to main.bicep)
 - Check file exists: `ls modules/network.bicep`
 - Use correct path separator ('/' not '\' even on Windows)
@@ -2006,6 +2065,7 @@ Test your understanding with these questions:
 **Symptom**: `--parameters dev.bicepparam` not working
 
 **Solution**:
+
 - Ensure `.bicepparam` file has `using './main.bicep'` at the top
 - Verify Bicep CLI version supports .bicepparam (0.18.4+): `az bicep version`
 - Update if needed: `az bicep upgrade`
@@ -2016,6 +2076,7 @@ Test your understanding with these questions:
 **Symptom**: Deployment shows "Succeeded" but resources missing in portal
 
 **Solution**:
+
 - Check deployment scope matches expected (subscription vs resource group)
 - Verify resource group was created if using subscription scope
 - Review deployment details: `az deployment sub show --name <deployment-name>`
@@ -2027,6 +2088,7 @@ Test your understanding with these questions:
 **Symptom**: Error: "Resource 'dev-skycraft-swc-vnet' already exists"
 
 **Solution**:
+
 - Bicep deployments are **idempotent** but resource names must be unique
 - Use `what-if` to see if deployment will conflict
 - Option 1: Delete existing resource: `az network vnet delete`
@@ -2034,6 +2096,7 @@ Test your understanding with these questions:
 - Option 3: Import existing resource (advanced): Use `existing` keyword
 
 **Example - Reference existing resource**:
+
 ```bicep
 // Reference existing VNet instead of creating new
 resource existingVnet 'Microsoft.Network/virtualNetworks@2023-05-01' existing = {
@@ -2048,22 +2111,26 @@ output vnetId string = existingVnet.id
 ## 📚 Additional Resources
 
 **Official Documentation**:
+
 - [Bicep Documentation](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/)
 - [Bicep Tutorial](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/learn-bicep)
 - [ARM Template Reference](https://learn.microsoft.com/en-us/azure/templates/)
 - [Bicep Best Practices](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/best-practices)
 
 **Tools and Extensions**:
+
 - [VS Code Bicep Extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-bicep)
 - [Bicep Playground](https://aka.ms/bicepdemo) - Try Bicep in browser
 - [Azure Resource Manager Template Toolkit](https://github.com/Azure/arm-ttk)
 
 **Learning Resources**:
+
 - [Microsoft Learn: Deploy Azure Infrastructure with Bicep](https://learn.microsoft.com/en-us/training/paths/bicep-deploy/)
 - [Bicep on GitHub](https://github.com/Azure/bicep)
 - [Azure Quickstart Templates (Bicep)](https://github.com/Azure/azure-quickstart-templates)
 
 **Community**:
+
 - [Bicep GitHub Discussions](https://github.com/Azure/bicep/discussions)
 - [Azure Tech Community](https://techcommunity.microsoft.com/t5/azure/ct-p/Azure)
 
@@ -2080,6 +2147,7 @@ output vnetId string = existingVnet.id
 ## 📝 Lab Summary
 
 **What You Accomplished**:
+
 - ✅ Understood Infrastructure as Code concepts and benefits
 - ✅ Exported and analyzed existing ARM templates
 - ✅ Learned Bicep syntax (parameters, variables, resources, outputs)
@@ -2093,6 +2161,7 @@ output vnetId string = existingVnet.id
 - ✅ Verified deployed resources and outputs
 
 **Infrastructure as Code Benefits Realized**:
+
 - 🚀 **Speed**: 15-minute deployment vs 3-hour manual process
 - 🔁 **Repeatability**: Identical dev and prod environments
 - 📝 **Documentation**: Code documents actual configuration
@@ -2102,6 +2171,7 @@ output vnetId string = existingVnet.id
 - 🔄 **Disaster Recovery**: One-command infrastructure rebuild
 
 **Skills Gained**:
+
 - Infrastructure as Code principles
 - ARM template interpretation
 - Bicep language proficiency
@@ -2115,4 +2185,4 @@ output vnetId string = existingVnet.id
 
 ---
 
-*Note: This lab introduces Infrastructure as Code, which will be used throughout the rest of Module 3 for deploying VMs, storage, and monitoring. All future labs will leverage Bicep for rapid, repeatable deployments.*
+_Note: This lab introduces Infrastructure as Code, which will be used throughout the rest of Module 3 for deploying VMs, storage, and monitoring. All future labs will leverage Bicep for rapid, repeatable deployments._
