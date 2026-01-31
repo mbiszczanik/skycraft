@@ -99,6 +99,11 @@
   - Address range: `10.1.3.0/24`
   - Available IPs: 251
   - Purpose: Database server VMs
+- [ ] **AppServiceSubnet**
+  - Name: `AppServiceSubnet`
+  - Address range: `10.1.4.0/24`
+  - Available IPs: 251
+  - Purpose: App Service instances
 
 ### Peering Connections
 
@@ -144,6 +149,11 @@
   - Address range: `10.2.3.0/24`
   - Available IPs: 251
   - Purpose: Database server VMs
+- [ ] **AppServiceSubnet**
+  - Name: `AppServiceSubnet`
+  - Address range: `10.2.4.0/24`
+  - Available IPs: 251
+  - Purpose: App Service instances
 
 ### Peering Connections
 

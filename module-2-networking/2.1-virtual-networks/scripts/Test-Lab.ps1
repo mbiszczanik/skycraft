@@ -110,6 +110,7 @@ $devExpectedSubnets = @{
     "AuthSubnet"     = "10.1.1.0/24"
     "WorldSubnet"    = "10.1.2.0/24"
     "DatabaseSubnet" = "10.1.3.0/24"
+    "AppServiceSubnet" = "10.1.4.0/24"
 }
 Test-SpokeVNet -VnetName "dev-skycraft-swc-vnet" -RgName "dev-skycraft-swc-rg" -Prefix "10.1.0.0/16" -ExpectedSubnets $devExpectedSubnets
 
@@ -118,6 +119,7 @@ $prodExpectedSubnets = @{
     "AuthSubnet"     = "10.2.1.0/24"
     "WorldSubnet"    = "10.2.2.0/24"
     "DatabaseSubnet" = "10.2.3.0/24"
+    "AppServiceSubnet" = "10.2.4.0/24"
 }
 Test-SpokeVNet -VnetName "prod-skycraft-swc-vnet" -RgName "prod-skycraft-swc-rg" -Prefix "10.2.0.0/16" -ExpectedSubnets $prodExpectedSubnets
 
