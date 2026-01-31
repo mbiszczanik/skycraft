@@ -21,7 +21,7 @@ You'll deploy this PaaS infrastructure for the SkyCraft monitoring dashboard:
 ```mermaid
 graph TB
     subgraph "dev-skycraft-swc-rg"
-        ASP[App Service Plan<br/>dev-skycraft-swc-asp<br/>Standard S1]
+        ASP[App Service Plan<br/>dev-skycraft-swc-asp<br/>Premium V4 P0V4]
 
         WebApp[App Service<br/>dev-skycraft-swc-app01]
 
@@ -103,14 +103,15 @@ Key attributes determined by the ASP:
 
 ### Choosing the Right Tier for SkyCraft
 
-| Tier               | Features                                                        | Use Case                                |
-| ------------------ | --------------------------------------------------------------- | --------------------------------------- |
-| **Free/Shared**    | Shared infrastructure, no scaling, no VNet integration          | Dev/Test of simple prototypes           |
-| **Basic (B1)**     | Dedicated instances, custom domains, SSL                        | Low-traffic sites                       |
-| **Standard (S1)**  | Auto-scale, **Deployment Slots**, **VNet Integration**, Backups | **Production workloads** & SkyCraft Lab |
-| **Premium (P1v2)** | Faster processors, higher scale limits                          | High-performance apps                   |
+| Tier               | Features                                                        | Use Case                      |
+| ------------------ | --------------------------------------------------------------- | ----------------------------- |
+| **Free/Shared**    | Shared infrastructure, no scaling, no VNet integration          | Dev/Test of simple prototypes |
+| **Basic (B1)**     | Dedicated instances, custom domains, SSL                        | Low-traffic sites             |
+| **Standard (S1)**  | Auto-scale, **Deployment Slots**, **VNet Integration**, Backups | Production workloads          |
+| **Premium (P0V4)** | Faster processors, higher scale limits, cost-effective          | **SkyCraft Lab**              |
+| **Premium (P1v2)** | Faster processors, higher scale limits                          | High-performance apps         |
 
-For this lab, we will use **Premium V4 P0V4** because we need **Deployment Slots** and **VNet Integration**.
+For this lab, we will use **Premium V4 P0V4** because we need **Deployment Slots** and **VNet Integration** at a competitive price point.
 
 ---
 
@@ -350,22 +351,27 @@ To allow the dashboard to connect to the Game Servers (e.g., to query status dir
 3. Under **Outbound traffic configuration**, click **VNet integration**.
 4. Click **+ Add VNet integration**.
 5. Select `dev-skycraft-swc-vnet`.
-6. create a new subnet:
-   - Name: `AppServiceSubnet`
-   - Address block: `10.1.3.0/24` (Make sure this doesn't overlap with existing subnets. If `10.1.0.0/16` is the VNet, and `10.1.1.0` and `10.1.2.0` are taken, this works).
+6. Select **Existing subnet**:
+   - Subnet: `AppServiceSubnet` (10.1.4.0/24)
+   - _Note: This subnet was created in Lab 2.1 specifically for this purpose._
 7. Click **Connect**.
 
 **Expected Result**: The App Service is now connected to the VNet. It can access private IPs (like the database or VMs) within that VNet.
 
+![VNet Integration](./images/step-3.4.10.png)
+
 ### Step 3.4.11: HTTPS Only
 
-1. Under **Settings**, select **Configuration** (or **Environment variables** in newer UI, check **General settings** tab).
-2. Look for **Platform settings** -> **HTTPS Only**.
-3. Set to **On**.
-4. (Optional) **Minimum TLS Version**: Set to **1.2**.
-5. Click **Save**.
+1. Go back to the **Overview** App Service blade.
+2. Under **Settings**, select **Configuration** (or **Environment variables** in newer UI, check **General settings** tab).
+3. Look for **Platform settings** -> **HTTPS Only**.
+4. Set to **On**.
+5. (Optional) **Minimum TLS Version**: Set to **1.2**.
+6. Click **Apply**.
 
 **Expected Result**: All HTTP requests are redirected to HTTPS.
+
+![HTTPS Only](./images/step-3.4.11.png)
 
 ### Step 3.4.12: Custom DNS (Conceptual)
 
@@ -385,7 +391,7 @@ In a real production environment, you wouldn't use the `azurewebsites.net` domai
 
 ### Step 3.4.13: Configure Backups
 
-The **Standard S1** tier allows for automated backups.
+The **Premium V4 P0V4** tier allows for automated backups.
 
 1. In the App Service menu, under **Settings**, select **Backups**.
 2. Click **+ Configure**.
@@ -440,10 +446,10 @@ For detailed verification, see `lab-checklist-3.4.md`.
 
 ## 🎓 Knowledge Check
 
-1. **Why did we choose the Standard (S1) tier instead of Basic (B1)?**
+1. **Why did we choose the Premium V4 (P0V4) tier instead of Basic (B1)?**
    <details>
      <summary>Click to see the answer</summary>
-     **Answer**: Standard (S1) is the entry-level tier that supports **Deployment Slots** and **Auto-scaling**, which were core requirements for this lab. Basic tier supports manual scaling but not slots or auto-scale.
+     **Answer**: Premium V4 (P0V4) provides **Deployment Slots** and **Auto-scaling**, which were core requirements for this lab. Basic tier supports manual scaling but not slots or auto-scale. P0V4 is often more cost-effective than older Premium generations while offering modern performance.
    </details>
 
 2. **What happens to the Staging slot after a Swap?**
