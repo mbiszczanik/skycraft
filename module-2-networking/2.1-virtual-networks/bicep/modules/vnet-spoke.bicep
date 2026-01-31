@@ -29,6 +29,9 @@ param parWorldSubnetPrefix string
 @description('Address Prefix for DatabaseSubnet')
 param parDatabaseSubnetPrefix string
 
+@description('Address Prefix for AppServiceSubnet')
+param parAppServiceSubnetPrefix string
+
 /*******************
 *    Variables     *
 *******************/
@@ -69,6 +72,20 @@ resource resVnetSpoke 'Microsoft.Network/virtualNetworks@2023-11-01' = {
         name: 'DatabaseSubnet'
         properties: {
           addressPrefix: parDatabaseSubnetPrefix
+        }
+      }
+      {
+        name: 'AppServiceSubnet'
+        properties: {
+          addressPrefix: parAppServiceSubnetPrefix
+          delegations: [
+            {
+              name: 'delegation'
+              properties: {
+                serviceName: 'Microsoft.Web/serverFarms'
+              }
+            }
+          ]
         }
       }
     ]

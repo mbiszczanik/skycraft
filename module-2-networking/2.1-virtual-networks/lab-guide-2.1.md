@@ -109,10 +109,12 @@ graph TB
 | └─ AuthSubnet                        | 10.1.1.0/24 | 256       | Authentication server VMs            |
 | └─ WorldSubnet                       | 10.1.2.0/24 | 256       | World server VMs                     |
 | └─ DatabaseSubnet                    | 10.1.3.0/24 | 256       | Database servers                     |
+| └─ AppServiceSubnet                  | 10.1.4.0/24 | 256       | App Service instances                |
 | **prod-skycraft-swc-vnet** (Spoke 2) | 10.2.0.0/16 | 65,536    | Production environment               |
 | └─ AuthSubnet                        | 10.2.1.0/24 | 256       | Authentication server VMs            |
 | └─ WorldSubnet                       | 10.2.2.0/24 | 256       | World server VMs                     |
 | └─ DatabaseSubnet                    | 10.2.3.0/24 | 256       | Database servers                     |
+| └─ AppServiceSubnet                  | 10.2.4.0/24 | 256       | App Service instances                |
 
 **Key Concepts**:
 
@@ -282,11 +284,25 @@ Create three subnets for the development environment:
 
 3. Click **Add**
 
-**Expected Result**: Three subnets created in dev VNet:
+**Subnet 4: AppServiceSubnet**
+
+1. Click **+ Add a subnet**
+2. Configure:
+
+| Field            | Value              |
+| ---------------- | ------------------ |
+| Name             | `AppServiceSubnet` |
+| Starting address | `10.1.4.0`         |
+| Subnet size      | `/24`              |
+
+3. Click **Add**
+
+**Expected Result**: Four subnets created in dev VNet:
 
 - AuthSubnet: 10.1.1.0/24
 - WorldSubnet: 10.1.2.0/24
 - DatabaseSubnet: 10.1.3.0/24
+- AppServiceSubnet: 10.1.4.0/24
 
 ![Dev Subnets](./images/step-2.1.6.png)
 
@@ -328,11 +344,12 @@ Repeat the process for production:
 
 3. Create three subnets:
 
-| Subnet Name    | Starting Address | Size |
-| -------------- | ---------------- | ---- |
-| AuthSubnet     | 10.2.1.0         | /24  |
-| WorldSubnet    | 10.2.2.0         | /24  |
-| DatabaseSubnet | 10.2.3.0         | /24  |
+| Subnet Name      | Starting Address | Size |
+| ---------------- | ---------------- | ---- |
+| AuthSubnet       | 10.2.1.0         | /24  |
+| WorldSubnet      | 10.2.2.0         | /24  |
+| DatabaseSubnet   | 10.2.3.0         | /24  |
+| AppServiceSubnet | 10.2.4.0         | /24  |
 
 ![Prod Subnets](./images/step-2.1.8.png)
 
@@ -516,14 +533,13 @@ Create public IPs for future load balancers (used in Lab 2.3):
 2. Click **platform-skycraft-swc-vnet**
 3. Click **Overview**
 4. Verify:
-
    - Address space: 10.0.0.0/16
    - Subnets: 2 (AzureBastionSubnet, GatewaySubnet)
    - Peerings: 2 (hub-to-dev, hub-to-prod)
 
 5. Repeat verification for:
-   - `dev-skycraft-swc-vnet` (Address: 10.1.0.0/16, Subnets: 3, Peerings: 1)
-   - `prod-skycraft-swc-vnet` (Address: 10.2.0.0/16, Subnets: 3, Peerings: 1)
+   - `dev-skycraft-swc-vnet` (Address: 10.1.0.0/16, Subnets: 4, Peerings: 1)
+   - `prod-skycraft-swc-vnet` (Address: 10.2.0.0/16, Subnets: 4, Peerings: 1)
 
 **Expected Result**: All VNets configured correctly with proper address spaces, subnets, and peering connections.
 
@@ -623,7 +639,6 @@ Test your understanding with these questions:
      <summary>**Click to see the answer**</summary>
 
    **Answer**: Hub-spoke provides:
-
    - **Centralized management**: Shared services (Bastion, VPN Gateway) in one location
    - **Cost efficiency**: Fewer peering connections (3 peerings vs. 6 for full mesh with 3 VNets)
    - **Security**: Controlled inter-spoke communication through hub (firewall/NVA can be added)
@@ -650,7 +665,6 @@ Test your understanding with these questions:
    **Answer**: **No**, not by default.
 
    VNet peering is **non-transitive**. Dev peers with Hub, and Prod peers with Hub, but Dev does NOT peer with Prod. Traffic between dev and prod would need to:
-
    - Route through hub VNet (requires user-defined routes and a firewall/NVA)
    - Or establish direct peering between dev-to-prod (not recommended for isolation)
 
@@ -663,14 +677,12 @@ Test your understanding with these questions:
      <summary>**Click to see the answer**</summary>
 
    **Answer**: Azure reserves 5 IPs in every subnet:
-
    - **x.x.x.0**: Network address
    - **x.x.x.1**: Default gateway
    - **x.x.x.2 & x.x.x.3**: Azure DNS
    - **x.x.x.255**: Broadcast address
 
    Example: In 10.1.1.0/24 (256 IPs):
-
    - Reserved: 10.1.1.0, 10.1.1.1, 10.1.1.2, 10.1.1.3, 10.1.1.255
    - Usable: 10.1.1.4 through 10.1.1.254 (251 IPs)
    </details>
@@ -681,7 +693,6 @@ Test your understanding with these questions:
      <summary>**Click to see the answer**</summary>
 
    **Answer**: While all three are private IP ranges (RFC 1918), **10.0.0.0/8** provides:
-
    - **Largest address space**: 16.7 million addresses (vs. 1 million for 172.16.0.0/12)
    - **Easy to remember**: Simple numbering (10.0.x.x, 10.1.x.x, 10.2.x.x)
    - **Less conflict**: 192.168.0.0/16 often used by home routers/VPNs
