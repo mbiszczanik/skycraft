@@ -48,10 +48,7 @@ if (-not $context) {
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
-# 2. Handle SSH Key - REMOVED per requirements
-# SSH Key logic removed as it is not needed for Lab 3.1 infrastructure-only deployment.
-
-# 3. Deploy Bicep
+# 2. Deploy Bicep
 $bicepPath = Join-Path $PSScriptRoot "..\bicep\main.bicep"
 $paramPath = Join-Path $PSScriptRoot "..\bicep\parameters\$Environment.bicepparam"
 
