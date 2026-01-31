@@ -59,6 +59,7 @@ module modVnetDev 'modules/vnet-spoke.bicep' = {
     parAuthSubnetPrefix: '10.1.1.0/24'
     parWorldSubnetPrefix: '10.1.2.0/24'
     parDatabaseSubnetPrefix: '10.1.3.0/24'
+    parAppServiceSubnetPrefix: '10.1.4.0/24'
   }
 }
 
@@ -74,6 +75,7 @@ module modVnetProd 'modules/vnet-spoke.bicep' = {
     parAuthSubnetPrefix: '10.2.1.0/24'
     parWorldSubnetPrefix: '10.2.2.0/24'
     parDatabaseSubnetPrefix: '10.2.3.0/24'
+    parAppServiceSubnetPrefix: '10.2.4.0/24'
   }
 }
 
