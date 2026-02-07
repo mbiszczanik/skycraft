@@ -82,4 +82,4 @@ Transform abstract cloud concepts into **tangible hands-on experience** by build
 - [Module 2: Implement and Manage Virtual Networking →](module-2-networking/README.MD)
 - [Module 3: Deploy and Manage Azure Compute Resources →](#)
 - [Module 4: Implement and Manage Storage →](#)
-- [Module 5: Monitor and Maintain Azure Resources →](#)
+- [Module 5: Monitor and Maintain Azure Resources →](module-5-monitoring-maintenance/README.MD)

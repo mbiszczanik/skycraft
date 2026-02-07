@@ -92,7 +92,7 @@ $storageConfigs = @{
     prod     = @{
         Name                   = 'prodskycraftswcsa'
         ResourceGroup          = 'prod-skycraft-swc-rg'
-        ExpectedSku            = 'Standard_GRS'
+        ExpectedSku            = 'Standard_GZRS'
         ExpectedEnvironmentTag = 'Production'
     }
 }

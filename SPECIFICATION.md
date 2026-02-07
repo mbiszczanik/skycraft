@@ -116,7 +116,7 @@ _Example_: `prod-skycraft-swc-vnet`
 - **Focus**: Building the "Roads".
 - **Key Deliverables**: VNet Peering, NSGs, ASGs, Azure Bastion, Public/Private DNS, Load Balancers.
 
-### Module 3: Compute (Planned)
+### Module 3: Compute
 
 - **Focus**: Building the "Use Case".
 - **Key Deliverables**:
@@ -124,3 +124,22 @@ _Example_: `prod-skycraft-swc-vnet`
   - Virtual Machine Scale Sets (VMSS)
   - App Services (Web Apps)
   - Container Instances (ACI)
+
+### Module 4: Storage
+
+- **Focus**: Building the "Persistence Layer".
+- **Key Deliverables**:
+  - Storage Accounts (Standard/Premium)
+  - Blob Containers & Access Tiers
+  - Azure Files (SMB/NFS)
+  - Storage Security (Firewalls, SAS, Private Endpoints)
+
+### Module 5: Monitoring & Maintenance
+
+- **Focus**: Building the "Operations Center".
+- **Key Deliverables**:
+  - Log Analytics Workspaces (LAW)
+  - Azure Monitor Alerts & Metrics
+  - VM Insights & Diagnostic Settings
+  - Azure Backup & Recovery Services Vault
+  - Network Watcher Diagnostics

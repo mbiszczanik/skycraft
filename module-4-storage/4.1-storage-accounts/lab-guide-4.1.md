@@ -34,7 +34,11 @@ graph TB
 
     subgraph "prod-skycraft-swc-rg"
         style prod fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
+<<<<<<< HEAD
         SA_Prod["prodskycraftswcsa<br/>────────────────<br/>SKU: Standard_GRS<br/>Tier: Hot<br/>TLS: 1.2<br/>────────────────<br/>Production Storage"]
+=======
+        SA_Prod["prodskycraftswcsa<br/>────────────────<br/>SKU: Standard_GZRS<br/>Tier: Hot<br/>TLS: 1.2<br/>────────────────<br/>Production Storage"]
+>>>>>>> develop
     end
 
     subgraph "Services Included"
@@ -62,17 +66,27 @@ graph TB
 
 **Situation**: SkyCraft needs persistent storage for game server configurations, player data backups, world state snapshots, and asset distribution. The storage requirements vary by environment:
 
-| Environment     | Use Case                                 | Redundancy Need       | Cost Priority           |
-| --------------- | ---------------------------------------- | --------------------- | ----------------------- |
-| **Platform**    | Shared scripts, templates, common assets | Geo-redundancy for DR | Medium                  |
-| **Development** | Dev server configs, test data            | Local redundancy only | High (cost-saving)      |
-| **Production**  | Player data, world saves, game assets    | Geo-redundancy for DR | Low (reliability first) |
+| Environment     | Use Case                                 | Redundancy Need       | Cost Priority      |
+| --------------- | ---------------------------------------- | --------------------- | ------------------ |
+| **Platform**    | Shared scripts, templates, common assets | Geo-redundancy for DR | Medium             |
+| **Development** | Dev server configs, test data            | Local redundancy only | High (cost-saving) |
+
+<<<<<<< HEAD
+| **Production** | Player data, world saves, game assets | Geo-redundancy for DR | Low (reliability first) |
+=======
+| **Production** | Player data, world saves, game assets | Maximum durability | Low (reliability first) |
+
+> > > > > > > develop
 
 **Your Task**: Deploy storage accounts across all three environments with appropriate redundancy, configure security settings (TLS 1.2, disabled public access), apply governance tags, and set up encryption at rest.
 
 **Business Impact**:
 
-- Ensure player data survives regional outages (GRS in production)
+<<<<<<< HEAD
+
+- # Ensure player data survives regional outages (GRS in production)
+- Ensure player data survives regional outages (GZRS in production)
+  > > > > > > > develop
 - Reduce development costs by 60% with LRS instead of GRS
 - Meet compliance requirements for data encryption
 - Enable disaster recovery with geo-replicated storage
@@ -201,11 +215,20 @@ flowchart TB
 
 ### SkyCraft Redundancy Strategy
 
-| Environment     | Redundancy | Justification                                        |
+<<<<<<< HEAD
+| Environment | Redundancy | Justification |
 | --------------- | ---------- | ---------------------------------------------------- |
-| **Development** | LRS        | Cost-effective, data can be recreated                |
-| **Platform**    | GRS        | Geo-redundancy for shared services DR                |
-| **Production**  | GRS        | Geo-redundancy for player data, enables archive tier |
+| **Development** | LRS | Cost-effective, data can be recreated |
+| **Platform** | GRS | Geo-redundancy for shared services DR |
+| **Production** | GRS | Geo-redundancy for player data, enables archive tier |
+=======
+| Environment | Redundancy | Rationale |
+| --------------- | ---------- | ----------------------------------------------- |
+| **Platform** | GRS | Shared resources need DR, but not zone-level HA |
+| **Development** | LRS | Cost optimization; data can be recreated |
+| **Production** | GZRS | Maximum protection for player data |
+
+> > > > > > > develop
 
 ### Step 4.1.1: Understand Storage Account Naming Rules
 
@@ -248,9 +271,12 @@ Storage account names have **unique requirements** different from other Azure re
 | Performance          | **Standard**                    |
 | Redundancy           | **Geo-redundant storage (GRS)** |
 
+<<<<<<< HEAD
 ![Create Storage Account](images/step-4.1.2.png)
 
-4. Click **Next: Advanced**
+=======
+
+> > > > > > > develop 4. Click **Next: Advanced**
 
 5. Configure **Advanced** settings:
 
@@ -357,12 +383,22 @@ Storage account names have **unique requirements** different from other Azure re
 1. Return to **Storage accounts** → **+ Create**
 2. Configure with these values:
 
-| Field                | Value                           |
+<<<<<<< HEAD
+| Field | Value |
 | -------------------- | ------------------------------- |
-| Resource group       | `prod-skycraft-swc-rg`          |
-| Storage account name | `prodskycraftswcsa`             |
-| Region               | **Sweden Central**              |
-| Redundancy           | **Geo-redundant storage (GRS)** |
+| Resource group | `prod-skycraft-swc-rg` |
+| Storage account name | `prodskycraftswcsa` |
+| Region | **Sweden Central** |
+| Redundancy | **Geo-redundant storage (GRS)** |
+=======
+| Field | Value |
+| -------------------- | ------------------------------------- |
+| Resource group | `prod-skycraft-swc-rg` |
+| Storage account name | `prodskycraftswcsa` |
+| Region | **Sweden Central** |
+| Redundancy | **Geo-zone-redundant storage (GZRS)** |
+
+> > > > > > > develop
 
 3. On **Tags** tab:
 
@@ -374,7 +410,12 @@ Storage account names have **unique requirements** different from other Azure re
 
 4. Click **Review + create** → **Create**
 
+<<<<<<< HEAD
 **Expected Result**: Storage account `prodskycraftswcsa` created with GRS redundancy (geo-redundancy for player data, enables archive tier).
+=======
+**Expected Result**: Storage account `prodskycraftswcsa` created with GZRS redundancy (maximum durability for player data).
+
+> > > > > > > develop
 
 ---
 
@@ -417,12 +458,20 @@ az storage account create \
   --https-only true \
   --tags Project=SkyCraft Environment=Development CostCenter=MSDN
 
+<<<<<<< HEAD
 # Create Production storage account (GRS)
+=======
+# Create Production storage account (GZRS)
+>>>>>>> develop
 az storage account create \
   --name prodskycraftswcsa \
   --resource-group $PROD_RG \
   --location $LOCATION \
+<<<<<<< HEAD
   --sku Standard_GRS \
+=======
+  --sku Standard_GZRS \
+>>>>>>> develop
   --kind StorageV2 \
   --access-tier Hot \
   --min-tls-version TLS1_2 \
@@ -442,7 +491,11 @@ az storage account create \
   "name": "prodskycraftswcsa",
   "primaryLocation": "swedencentral",
   "sku": {
+<<<<<<< HEAD
     "name": "Standard_GRS",
+=======
+    "name": "Standard_GZRS",
+>>>>>>> develop
     "tier": "Standard"
   }
 }
@@ -488,12 +541,20 @@ New-AzStorageAccount `
     -EnableHttpsTrafficOnly $true `
     -Tag ($CommonTags + @{Environment = "Development"})
 
+<<<<<<< HEAD
 # Create Production storage account (GRS)
+=======
+# Create Production storage account (GZRS)
+>>>>>>> develop
 New-AzStorageAccount `
     -ResourceGroupName $ProdRG `
     -Name "prodskycraftswcsa" `
     -Location $Location `
+<<<<<<< HEAD
     -SkuName "Standard_GRS" `
+=======
+    -SkuName "Standard_GZRS" `
+>>>>>>> develop
     -Kind "StorageV2" `
     -AccessTier "Hot" `
     -MinimumTlsVersion "TLS1_2" `
@@ -518,7 +579,11 @@ Name                    ResourceGroup             SKU            Location
 ----------------------  ------------------------  -------------  -------------
 platformskycraftswcsa   platform-skycraft-swc-rg  Standard_GRS   swedencentral
 devskycraftswcsa        dev-skycraft-swc-rg       Standard_LRS   swedencentral
+<<<<<<< HEAD
 prodskycraftswcsa       prod-skycraft-swc-rg      Standard_GRS  swedencentral
+=======
+prodskycraftswcsa       prod-skycraft-swc-rg      Standard_GZRS  swedencentral
+>>>>>>> develop
 ```
 
 ---
@@ -537,11 +602,20 @@ Azure Storage automatically encrypts all data at rest using 256-bit AES encrypti
 
 **Encryption Options Explained**:
 
-| Option                           | Key Management                | Use Case                               |
+<<<<<<< HEAD
+| Option | Key Management | Use Case |
 | -------------------------------- | ----------------------------- | -------------------------------------- | ----------------------- | --- |
-| **Microsoft-managed keys (MMK)** | Azure manages keys            | Default, sufficient for most workloads |
-| **Customer-managed keys (CMK)**  | You manage keys in Key Vault  | Compliance requirements                |
+| **Microsoft-managed keys (MMK)** | Azure manages keys | Default, sufficient for most workloads |
+| **Customer-managed keys (CMK)** | You manage keys in Key Vault | Compliance requirements |
 | <!--                             | **Infrastructure encryption** | Double encryption at hardware level    | High-security workloads | --> |
+=======
+| Option | Key Management | Use Case |
+| -------------------------------- | ----------------------------------- | -------------------------------------- |
+| **Microsoft-managed keys (MMK)** | Azure manages keys | Default, sufficient for most workloads |
+| **Customer-managed keys (CMK)** | You manage keys in Key Vault | Compliance requirements |
+| **Infrastructure encryption** | Double encryption at hardware level | High-security workloads |
+
+> > > > > > > develop
 
 ### Step 4.1.9: Configure Customer-Managed Keys (Optional)
 
@@ -575,7 +649,12 @@ For production environments requiring additional control:
 
 This prevents accidental exposure of sensitive data through misconfigured container access levels.
 
+<<<<<<< HEAD
 ![Verify TLS Settings](./images/step-4.1.11.png)
+
+=======
+
+> > > > > > > develop
 
 ---
 
@@ -619,9 +698,13 @@ DefaultEndpointsProtocol=https;AccountName=prodskycraftswcsa;
 AccountKey=<key>;EndpointSuffix=core.windows.net
 ```
 
+<<<<<<< HEAD
 ![Connection String](./images/step-4.1.14.png)
 
-Use these in applications to connect to storage.
+=======
+
+> > > > > > > develop
+> > > > > > > Use these in applications to connect to storage.
 
 ### Step 4.1.15: Install Azure Storage Explorer
 
@@ -649,7 +732,10 @@ Azure Storage Explorer is a cross-platform GUI for managing storage:
 
 - [ ] Platform storage account created with GRS redundancy
 - [ ] Development storage account created with LRS redundancy
-- [ ] Production storage account created with GRS redundancy
+      <<<<<<< HEAD
+- [ ] # Production storage account created with GRS redundancy
+- [ ] Production storage account created with GZRS redundancy
+  > > > > > > > develop
 - [ ] All storage accounts have TLS 1.2 minimum
 - [ ] All storage accounts have public blob access disabled
 - [ ] All storage accounts tagged correctly (Project, Environment, CostCenter)
@@ -675,6 +761,8 @@ Azure Storage Explorer is a cross-platform GUI for managing storage:
   az storage account check-name --name prodskycraftswcsa
   ```
 
+<<<<<<< HEAD
+
 ### Issue 2: Archive Tier Not Available in Lifecycle Management
 
 **Symptom**: "Move to archive storage" option missing from lifecycle policy dropdown
@@ -683,7 +771,18 @@ Azure Storage Explorer is a cross-platform GUI for managing storage:
 
 - Archive tier is NOT supported for ZRS, GZRS, or RA-GZRS redundancy
 - Verify storage account uses LRS, GRS, or RA-GRS
-- Check redundancy: `az storage account show --name <account> --query sku.name`
+- # Check redundancy: `az storage account show --name <account> --query sku.name`
+
+### Issue 2: Cannot Create GZRS in Region
+
+**Symptom**: "GZRS is not supported in this region"
+
+**Solution**:
+
+- GZRS requires availability zones
+- Sweden Central supports GZRS
+- Check supported regions: [Azure regions with availability zones](https://learn.microsoft.com/azure/reliability/availability-zones-region-support)
+  > > > > > > > develop
 
 ### Issue 3: Insufficient Permissions
 
@@ -828,7 +927,10 @@ Azure Storage Explorer is a cross-platform GUI for managing storage:
 
 - Platform: GRS for shared services
 - Development: LRS for cost optimization
-- Production: GRS for geo-redundancy and archive tier support
+  <<<<<<< HEAD
+- # Production: GRS for geo-redundancy and archive tier support
+- Production: GZRS for maximum durability
+  > > > > > > > develop
 
 ✅ Configured security best practices:
 

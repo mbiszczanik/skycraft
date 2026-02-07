@@ -124,7 +124,11 @@ module modStorageAccountDev 'modules/storageAccount.bicep' = if (contains(varEnv
   }
 }
 
+<<<<<<< HEAD
 // Production storage account (GRS)
+=======
+// Production storage account (GZRS)
+>>>>>>> develop
 module modStorageAccountProd 'modules/storageAccount.bicep' = if (contains(varEnvironments, 'prod')) {
   name: 'deploy-storage-account-prod'
   scope: resProdRg
