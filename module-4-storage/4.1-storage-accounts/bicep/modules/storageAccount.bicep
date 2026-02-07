@@ -56,6 +56,18 @@ param parIsNewDeployment bool = true
 @description('Enable infrastructure (double) encryption. Only applies to new deployments. Cannot be changed after creation.')
 param parEnableInfrastructureEncryption bool = false
 
+@description('Allow Blob public access. Required for AZ-104 labs (Dev), disabled for Prod.')
+param parAllowBlobPublicAccess bool = false
+
+@description('Enable blob versioning')
+param parEnableVersioning bool = false
+
+@description('List of containers to create')
+param parContainers array = []
+
+@description('List of lifecycle management rules')
+param parLifecycleRules array = []
+
 /*******************
 *    Variables     *
 *******************/
@@ -63,10 +75,10 @@ param parEnableInfrastructureEncryption bool = false
 var varStorageAccountName = '${parEnvironment}skycraftswcsa'
 
 // Select redundancy based on environment
-// Production: GZRS (maximum durability for player data)
+// Production: GRS (geo-redundancy for player data, enables archive tier)
 // Platform: GRS (geo-redundancy for shared services)
 // Development: LRS (cost optimization, data can be recreated)
-var varRedundancy = parEnvironment == 'prod' ? 'Standard_GZRS' : parEnvironment == 'platform' ? 'Standard_GRS' : 'Standard_LRS'
+var varRedundancy = parEnvironment == 'prod' ? 'Standard_GRS' : parEnvironment == 'platform' ? 'Standard_GRS' : 'Standard_LRS'
 
 // Encryption configuration for NEW deployments (includes keyType and infrastructure encryption)
 var varEncryptionNew = {
@@ -129,7 +141,8 @@ resource resStorageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
     accessTier: 'Hot'
     
     // Security settings (AZ-104 best practices)
-    allowBlobPublicAccess: false
+    // Security settings (AZ-104 best practices)
+    allowBlobPublicAccess: parAllowBlobPublicAccess
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
     allowSharedKeyAccess: true
@@ -161,7 +174,7 @@ resource resBlobServices 'Microsoft.Storage/storageAccounts/blobServices@2023-01
       days: parContainerSoftDeleteDays
     }
     // Versioning and change feed will be enabled in Lab 4.2
-    isVersioningEnabled: false
+    isVersioningEnabled: parEnableVersioning
     changeFeed: {
       enabled: false
     }
@@ -176,6 +189,26 @@ resource resFileServices 'Microsoft.Storage/storageAccounts/fileServices@2023-01
     shareDeleteRetentionPolicy: {
       enabled: parEnableFileSoftDelete
       days: parFileSoftDeleteDays
+    }
+  }
+}
+
+// Containers
+resource resContainers 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = [for container in parContainers: {
+  parent: resBlobServices
+  name: container.name
+  properties: {
+    publicAccess: contains(container, 'publicAccess') ? container.publicAccess : 'None'
+  }
+}]
+
+// Lifecycle Management Policy
+resource resManagementPolicy 'Microsoft.Storage/storageAccounts/managementPolicies@2023-01-01' = if (!empty(parLifecycleRules)) {
+  parent: resStorageAccount
+  name: 'default'
+  properties: {
+    policy: {
+      rules: parLifecycleRules
     }
   }
 }
