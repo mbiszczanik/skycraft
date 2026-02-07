@@ -68,7 +68,7 @@
 - [ ] Resource group: `prod-skycraft-swc-rg`
 - [ ] Performance tier: **Standard**
 - [ ] Account kind: **StorageV2 (general-purpose v2)**
-- [ ] Redundancy: **Geo-zone-redundant storage (GZRS)**
+- [ ] Redundancy: **Geo-redundant storage (GRS)**
 - [ ] Access tier: **Hot**
 
 ### Security Settings
@@ -101,7 +101,7 @@ az storage account list \
 # ----------------------  ------------------------  -------------  -------------  ------
 # platformskycraftswcsa   platform-skycraft-swc-rg  Standard_GRS   swedencentral  TLS1_2
 # devskycraftswcsa        dev-skycraft-swc-rg       Standard_LRS   swedencentral  TLS1_2
-# prodskycraftswcsa       prod-skycraft-swc-rg      Standard_GZRS  swedencentral  TLS1_2
+# prodskycraftswcsa       prod-skycraft-swc-rg      Standard_GRS  swedencentral  TLS1_2
 ```
 
 ### Verify Security Settings
@@ -132,7 +132,7 @@ done
 # Expected SKUs:
 # platformskycraftswcsa: Standard_GRS
 # devskycraftswcsa: Standard_LRS
-# prodskycraftswcsa: Standard_GZRS
+# prodskycraftswcsa: Standard_GRS
 ```
 
 ### Verify Tags
@@ -177,7 +177,7 @@ az storage account show \
 | --------------------- | ------------------------ | ---------- | --- | ------------- | ---------- | ------ |
 | platformskycraftswcsa | platform-skycraft-swc-rg | GRS        | 1.2 | Disabled      | MMK        | ✅     |
 | devskycraftswcsa      | dev-skycraft-swc-rg      | LRS        | 1.2 | Disabled      | MMK        | ✅     |
-| prodskycraftswcsa     | prod-skycraft-swc-rg     | GZRS       | 1.2 | Disabled      | MMK        | ✅     |
+| prodskycraftswcsa     | prod-skycraft-swc-rg     | GRS        | 1.2 | Disabled      | MMK        | ✅     |
 
 ---
 
@@ -187,11 +187,11 @@ az storage account show \
 
 **Document your rationale for the redundancy level chosen for each environment:**
 
-| Environment | Redundancy | Your Rationale                     |
-| ----------- | ---------- | ---------------------------------- |
-| Platform    | GRS        | ****************\_**************** |
-| Development | LRS        | ****************\_**************** |
-| Production  | GZRS       | ****************\_**************** |
+| Environment | Redundancy | Your Rationale                                     |
+| ----------- | ---------- | -------------------------------------------------- |
+| Platform    | GRS        | **\*\***\*\*\*\***\*\***\_**\*\***\*\*\*\***\*\*** |
+| Development | LRS        | **\*\***\*\*\*\***\*\***\_**\*\***\*\*\*\***\*\*** |
+| Production  | GRS        | **************\_**************                     |
 
 ### Question 2: Cost Analysis
 
@@ -199,27 +199,27 @@ az storage account show \
 
 | Redundancy | Cost per GB/month | 100 GB Monthly Cost |
 | ---------- | ----------------- | ------------------- |
-| LRS        | $****\_****       | $****\_****         |
-| GRS        | $****\_****       | $****\_****         |
-| GZRS       | $****\_****       | $****\_****         |
+| LRS        | $\***\*\_\*\***   | $\***\*\_\*\***     |
+| GRS        | $\***\*\_\*\***   | $\***\*\_\*\***     |
+| GZRS       | $\***\*\_\*\***   | $\***\*\_\*\***     |
 
-**Cost savings using LRS for dev instead of GZRS**: $****\_****
+**Cost savings using LRS for dev instead of GZRS**: $\***\*\_\*\***
 
 ### Question 3: Disaster Recovery Scenario
 
 **If Sweden Central experiences a complete regional outage:**
 
-- Which storage accounts would survive? ****************\_****************
-- How would you access the production data? ****************\_****************
-- What is the expected RPO (Recovery Point Objective)? ****************\_****************
+- Which storage accounts would survive? **\*\***\*\*\*\***\*\***\_**\*\***\*\*\*\***\*\***
+- How would you access the production data? **\*\***\*\*\*\***\*\***\_**\*\***\*\*\*\***\*\***
+- What is the expected RPO (Recovery Point Objective)? **\*\***\*\*\*\***\*\***\_**\*\***\*\*\*\***\*\***
 
 ### Question 4: Key Rotation Policy
 
 **Document your organization's key rotation requirements:**
 
-- Rotation frequency: ****************\_****************
-- Who is responsible for rotation? ****************\_****************
-- How would you automate this? ****************\_****************
+- Rotation frequency: **\*\***\*\*\*\***\*\***\_**\*\***\*\*\*\***\*\***
+- Who is responsible for rotation? **\*\***\*\*\*\***\*\***\_**\*\***\*\*\*\***\*\***
+- How would you automate this? **\*\***\*\*\*\***\*\***\_**\*\***\*\*\*\***\*\***
 
 ### Question 5: Troubleshooting Experience
 
@@ -227,17 +227,17 @@ az storage account show \
 
 ---
 
-**Instructor Review Date**: ****\_****
-**Feedback**: ********************************\_********************************
+**Instructor Review Date**: \***\*\_\*\***
+**Feedback**: ******\*\*******\*\*\*\*******\*\*******\_******\*\*******\*\*\*\*******\*\*******
 
 ---
 
 ## ⏱️ Completion Tracking
 
 - **Estimated Time**: 2 hours
-- **Actual Time Spent**: ****\_**** hours
-- **Date Started**: ****\_****
-- **Date Completed**: ****\_****
+- **Actual Time Spent**: \***\*\_\*\*** hours
+- **Date Started**: \***\*\_\*\***
+- **Date Completed**: \***\*\_\*\***
 
 ---
 
@@ -255,9 +255,9 @@ az storage account show \
 - [ ] All reflection questions answered
 - [ ] Ready to proceed to Lab 4.2
 
-**Student Name**: ********\_********
-**Lab 4.1 Completion Date**: ********\_********
-**Instructor Signature**: ********\_********
+**Student Name**: **\*\*\*\***\_**\*\*\*\***
+**Lab 4.1 Completion Date**: **\*\*\*\***\_**\*\*\*\***
+**Instructor Signature**: **\*\*\*\***\_**\*\*\*\***
 
 ---
 
@@ -268,7 +268,7 @@ You've completed **Lab 4.1: Configure and Manage Storage Accounts**!
 **What You Built**:
 
 - ✅ Three storage accounts with environment-appropriate redundancy
-- ✅ Platform (GRS), Development (LRS), Production (GZRS)
+- ✅ Platform (GRS), Development (LRS), Production (GRS)
 - ✅ Secure configuration with TLS 1.2 and disabled public access
 - ✅ Proper governance tags applied
 - ✅ Encryption at rest verified
