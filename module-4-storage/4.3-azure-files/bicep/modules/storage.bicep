@@ -73,6 +73,24 @@ resource resFileServices 'Microsoft.Storage/storageAccounts/fileServices@2023-01
   }
 }
 
+resource resFileShareConfig 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-01-01' = {
+  parent: resFileServices
+  name: 'skycraft-config'
+  properties: {
+    accessTier: 'Hot'
+    shareQuota: 100
+  }
+}
+
+resource resFileShareShared 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-01-01' = {
+  parent: resFileServices
+  name: 'skycraft-shared'
+  properties: {
+    accessTier: 'Hot'
+    shareQuota: 500
+  }
+}
+
 /******************
 *     Outputs     *
 ******************/
