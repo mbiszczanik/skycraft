@@ -103,7 +103,32 @@ resource resExample 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
 
 ---
 
-## 7. Boilerplate Templates
+## 7. Storage & Data Standards
+
+### 7.1 Redundancy Decisions (D001)
+
+| Environment     | Redundancy                  | Rationale                                        |
+| :-------------- | :-------------------------- | :----------------------------------------------- |
+| **Development** | **LRS** (Locally Redundant) | Lowest cost, acceptable risk for ephemeral data. |
+| **Production**  | **GRS** (Geo-Redundant)     | Balances disaster recovery with cost.            |
+
+> [!NOTE]
+> **SkyCraft Choice**: We chose **GRS** over GZRS for Production because GRS supports Archive Tier (GZRS does not) and is ~17% cheaper.
+
+### 7.2 Constraints & Compatibility (L001)
+
+> [!CAUTION]
+> **Archive tier is NOT supported for ZRS, GZRS, or RA-GZRS.**
+> If you need lifecycle management with archive tier, you **MUST** use LRS or GRS.
+
+### 7.3 Public Access (D003)
+
+- **Development**: Public Blob Access **Allowed** (for exam prep skills).
+- **Production**: Public Blob Access **Disabled** (enterprise security best practice).
+
+---
+
+## 8. Boilerplate Templates
 
 Copy and paste these templates to start a new file.
 
