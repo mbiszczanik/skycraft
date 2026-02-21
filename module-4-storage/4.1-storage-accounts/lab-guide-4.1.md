@@ -604,9 +604,56 @@ Two keys enable zero-downtime key rotation:
 
 ### Step 4.1.13: Rotate Access Keys
 
-1. Click **Rotate key** next to key1
-2. Confirm rotation
-3. Note the new key value
+Practice the dual-key rotation ceremony. In production, you would coordinate this with all applications using the key.
+
+#### Option 1: Azure Portal (GUI)
+
+1. Navigate to `prodskycraftswcsa` → **Security + networking** → **Access keys**
+2. Note the current **key1** value (or its "Last regenerated" timestamp)
+3. Click **Rotate key** next to **key1**
+4. Confirm the rotation
+5. Verify the "Last regenerated" timestamp has updated
+
+#### Option 2: Azure CLI
+
+```bash
+# View current keys
+az storage account keys list \
+  --account-name prodskycraftswcsa \
+  --resource-group prod-skycraft-swc-rg \
+  --output table
+
+# Regenerate Key1
+az storage account keys renew \
+  --account-name prodskycraftswcsa \
+  --resource-group prod-skycraft-swc-rg \
+  --key key1
+
+# Verify new key value
+az storage account keys list \
+  --account-name prodskycraftswcsa \
+  --resource-group prod-skycraft-swc-rg \
+  --output table
+```
+
+#### Option 3: PowerShell
+
+```powershell
+# View current keys
+Get-AzStorageAccountKey -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa' |
+  Format-Table KeyName, Value, CreationTime
+
+# Regenerate Key1
+New-AzStorageAccountKey -ResourceGroupName 'prod-skycraft-swc-rg' `
+  -Name 'prodskycraftswcsa' `
+  -KeyName 'key1'
+
+# Verify new key value
+Get-AzStorageAccountKey -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa' |
+  Format-Table KeyName, Value, CreationTime
+```
+
+**Expected Result**: Key1 shows a new value and an updated "CreationTime" / "Last regenerated" timestamp.
 
 > **Security Best Practice**: Rotate keys every 90 days. Use Azure Key Vault with automatic rotation for production.
 
