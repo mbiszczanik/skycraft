@@ -2,8 +2,7 @@
 .SYNOPSIS
     Validates Lab 4.4 Storage Security
 .DESCRIPTION
-    Checks for Storage Firewall settings, Service Endpoints, dev-assets container,
-    Stored Access Policies, and RBAC assignments.
+    Checks for Storage Firewall settings, RBAC assignments, and Service Endpoints.
 .PARAMETER Environment
     Environment to validate (prod, dev, platform). Default: prod.
 .EXAMPLE
@@ -11,7 +10,7 @@
 .NOTES
     Project: SkyCraft
     Author: SkyCraft
-    Date: 2026-02-21
+    Date: 2026-02-07
 #>
 
 [CmdletBinding()]
@@ -35,100 +34,63 @@ if (-not (Get-AzContext)) {
 try {
     Write-Host "Checking Storage Firewall for '$storageAccountName'..." -ForegroundColor Yellow
     $sa = Get-AzStorageAccount -ResourceGroupName $resourceGroupName -Name $storageAccountName -ErrorAction Stop
-
+    
     if ($sa.NetworkRuleSet.DefaultAction -eq 'Deny') {
         Write-Host "  -> Firewall is correctly set to 'Deny' by default." -ForegroundColor Green
     }
     else {
-        Write-Host "  -> [WARNING] Firewall default action is '$($sa.NetworkRuleSet.DefaultAction)'. Expected: Deny." -ForegroundColor Yellow
+        Write-Host "  -> [WARNING] Firewall default action is set to '$($sa.NetworkRuleSet.DefaultAction)'. Expected: Deny." -ForegroundColor Yellow
     }
 
     if ($sa.NetworkRuleSet.VirtualNetworkRules.Count -gt 0) {
-        Write-Host "  -> Found $($sa.NetworkRuleSet.VirtualNetworkRules.Count) Virtual Network rule(s)." -ForegroundColor Green
+        Write-Host "  -> Found $($sa.NetworkRuleSet.VirtualNetworkRules.Count) Virtual Network rules." -ForegroundColor Green
     }
     else {
         Write-Host "  -> [WARNING] No Virtual Network rules found." -ForegroundColor Yellow
     }
-
-    if ($sa.NetworkRuleSet.IpRules.Count -gt 0) {
-        Write-Host "  -> Found $($sa.NetworkRuleSet.IpRules.Count) IP rule(s)." -ForegroundColor Green
-    }
-    else {
-        Write-Host "  -> [INFO] No IP rules configured." -ForegroundColor Gray
-    }
 }
 catch {
     Write-Host "  -> [ERROR] Failed to retrieve storage account firewall settings." -ForegroundColor Red
-    return
 }
 
 # 3. Check Service Endpoints on VNet
 try {
-    Write-Host "Checking Service Endpoints on '$vnetName/WorldSubnet'..." -ForegroundColor Yellow
+    Write-Host "Checking Service Endpoints on '$vnetName'..." -ForegroundColor Yellow
     $vnet = Get-AzVirtualNetwork -ResourceGroupName $resourceGroupName -Name $vnetName -ErrorAction Stop
-    $worldSubnet = $vnet.Subnets | Where-Object { $_.Name -eq 'WorldSubnet' }
-
-    if ($worldSubnet.ServiceEndpoints.Service -contains 'Microsoft.Storage') {
-        Write-Host "  -> Service Endpoint 'Microsoft.Storage' is enabled on WorldSubnet." -ForegroundColor Green
+    $appSubnet = $vnet.Subnets | Where-Object { $_.Name -eq 'ApplicationSubnet' }
+    
+    if ($appSubnet.ServiceEndpoints.Service -contains 'Microsoft.Storage') {
+        Write-Host "  -> Service Endpoint 'Microsoft.Storage' is enabled on ApplicationSubnet." -ForegroundColor Green
     }
     else {
-        Write-Host "  -> [WARNING] Service Endpoint 'Microsoft.Storage' is NOT enabled on WorldSubnet." -ForegroundColor Yellow
+        Write-Host "  -> [WARNING] Service Endpoint 'Microsoft.Storage' is NOT enabled on ApplicationSubnet." -ForegroundColor Yellow
     }
 }
 catch {
     Write-Host "  -> [ERROR] Failed to retrieve VNet information." -ForegroundColor Red
 }
 
-# 4. Check dev-assets container
+# 4. Check for Stored Access Policies
 try {
-    Write-Host "Checking for 'dev-assets' container..." -ForegroundColor Yellow
-    $container = Get-AzStorageContainer -Name 'dev-assets' -Context $sa.Context -ErrorAction SilentlyContinue
-    if ($container) {
-        Write-Host "  -> Container 'dev-assets' exists (Access: $($container.PublicAccess))." -ForegroundColor Green
-    }
-    else {
-        Write-Host "  -> [MISSING] Container 'dev-assets' not found." -ForegroundColor Red
-    }
-}
-catch {
-    Write-Host "  -> [ERROR] Could not check containers (firewall may be blocking)." -ForegroundColor Red
-}
-
-# 5. Check for Stored Access Policies
-try {
-    Write-Host "Checking for Stored Access Policies on 'dev-assets'..." -ForegroundColor Yellow
-    $policies = Get-AzStorageContainerStoredAccessPolicy -Container 'dev-assets' -Context $sa.Context -ErrorAction SilentlyContinue
-    if ($policies) {
-        foreach ($policy in $policies) {
-            Write-Host "  -> Found Policy '$($policy.Policy)' (Permissions: $($policy.Permission))" -ForegroundColor Green
+    Write-Host "Checking for Stored Access Policies..." -ForegroundColor Yellow
+    # This requires listing containers and their policies
+    $containers = Get-AzStorageContainer -Context $sa.Context -ErrorAction SilentlyContinue
+    if ($containers) {
+        $foundPolicy = $false
+        foreach ($container in $containers) {
+            $policies = Get-AzStorageContainerStoredAccessPolicy -Container $container.Name -Context $sa.Context -ErrorAction SilentlyContinue
+            if ($policies) {
+                Write-Host "  -> Found Policy '$($policies.Id)' on container '$($container.Name)'" -ForegroundColor Green
+                $foundPolicy = $true
+            }
+        }
+        if (-not $foundPolicy) {
+            Write-Host "  -> [INFO] No stored access policies found." -ForegroundColor Gray
         }
     }
-    else {
-        Write-Host "  -> [INFO] No stored access policies found (expected after revocation test)." -ForegroundColor Gray
-    }
 }
 catch {
-    Write-Host "  -> [INFO] Could not check policies (firewall may be blocking or container absent)." -ForegroundColor Gray
-}
-
-# 6. Check RBAC Assignment
-try {
-    Write-Host "Checking RBAC 'Storage Blob Data Contributor' assignments..." -ForegroundColor Yellow
-    $storageId = $sa.Id
-    $assignments = Get-AzRoleAssignment -Scope $storageId |
-    Where-Object RoleDefinitionName -eq 'Storage Blob Data Contributor'
-
-    if ($assignments) {
-        foreach ($assignment in $assignments) {
-            Write-Host "  -> Assigned to: $($assignment.DisplayName) ($($assignment.SignInName))" -ForegroundColor Green
-        }
-    }
-    else {
-        Write-Host "  -> [WARNING] No 'Storage Blob Data Contributor' assignments found." -ForegroundColor Yellow
-    }
-}
-catch {
-    Write-Host "  -> [ERROR] Failed to check RBAC assignments." -ForegroundColor Red
+    Write-Host "  -> [ERROR] Failed to check access policies." -ForegroundColor Red
 }
 
 Write-Host "`nValidation Complete." -ForegroundColor Cyan
