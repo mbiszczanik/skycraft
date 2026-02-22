@@ -103,28 +103,7 @@ resource resExample 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
 
 ---
 
-## 7. Storage & Data Standards
-
-### 7.1 Redundancy Decisions (D001)
-
-| Environment     | Redundancy                  | Rationale                                        |
-| :-------------- | :-------------------------- | :----------------------------------------------- |
-| **Development** | **LRS** (Locally Redundant) | Lowest cost, acceptable risk for ephemeral data. |
-| **Production**  | **GRS** (Geo-Redundant)     | Balances disaster recovery with cost.            |
-
-> [!NOTE]
-> **SkyCraft Choice**: We chose **GRS** over GZRS for Production because GRS supports Archive Tier (GZRS does not) and is ~17% cheaper.
-
-### 7.2 Constraints & Compatibility (L001)
-
-> [!CAUTION]
-> **Archive tier is NOT supported for ZRS, GZRS, or RA-GZRS.**
-> If you need lifecycle management with archive tier, you **MUST** use LRS or GRS.
-
-### 7.3 Public Access (D003)
-
-- **Development**: Public Blob Access **Allowed** (for exam prep skills).
-- **Production**: Public Blob Access **Disabled** (enterprise security best practice).
+> For Azure Storage architecture decisions (redundancy, tiers, public access), see [azure-reference.md](azure-reference.md).
 
 ---
 
@@ -226,3 +205,52 @@ resource resExample 'Microsoft.Example/examples@2020-06-01' = {
 ******************/
 output outExampleId string = resExample.id
 ```
+
+---
+
+## 9. Known Issues & Gotchas
+
+### 9.1 BCP120: Cannot Reference `kind`/`sku` from Existing Resources (E001)
+
+**Error**: `BCP120: This expression is being used in an assignment to the "kind" property... which requires a value that can be calculated at the start of the deployment.`
+
+**Root Cause**: When re-declaring a storage account to update its `networkAcls` (firewall), Bicep requires `kind` and `sku` — but these cannot be read from an `existing` resource reference at compile time.
+
+**Solution**: Hardcode the known values (`StorageV2`, `Standard_GRS`) since we control the storage account creation in Lab 4.1.
+
+```bicep
+// ❌ WRONG — BCP120 error
+resource resUpdate 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: resExisting.name
+  kind: resExisting.kind        // BCP120!
+  sku: { name: resExisting.sku.name }  // BCP120!
+}
+
+// ✅ CORRECT — hardcode known values
+resource resUpdate 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: resExisting.name
+  kind: 'StorageV2'
+  sku: { name: 'Standard_GRS' }
+}
+```
+
+### 9.2 Subnet Name Consistency (E002)
+
+**Error**: Bicep or scripts reference a non-existent subnet (e.g., `ApplicationSubnet`).
+
+**Root Cause**: Lab guides may use conceptual subnet names that don't match the actual subnets created in Module 2.
+
+**Solution**: Always verify subnet names against `module-2-networking/2.2-secure-access/bicep/` definitions:
+
+| Subnet             | Prod CIDR     | Exists Since |
+| ------------------ | ------------- | ------------ |
+| `AuthSubnet`       | `10.2.1.0/24` | Lab 2.1      |
+| `WorldSubnet`      | `10.2.2.0/24` | Lab 2.1      |
+| `DatabaseSubnet`   | `10.2.3.0/24` | Lab 2.1      |
+| `AppServiceSubnet` | `10.2.4.0/24` | Lab 2.1      |
+
+### 9.3 Content Deduplication (D004)
+
+**Rule**: A concept should be **taught once** (in its most natural module) and **referenced** elsewhere. If a step exists in two labs, consolidate it to the earlier lab and add a cross-reference.
+
+**Example**: Key rotation was taught in both Lab 4.1 (Step 4.1.13) and Lab 4.4 (old Section 2). Consolidated CLI/PS rotation into Lab 4.1 and replaced Lab 4.4's section with ad-hoc SAS tokens.

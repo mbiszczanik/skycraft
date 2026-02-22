@@ -33,30 +33,39 @@ Every checklist must follow this exact structure:
 # Lab X.Y Completion Checklist
 
 ## ✅ [Resource Category 1] Verification
+
 [Checkboxes for configuration items]
 
 ## ✅ [Resource Category 2] Verification
+
 [Checkboxes for configuration items]
 
 ## 🔍 Validation Commands
+
 [Azure CLI/PowerShell commands to verify deployment]
 
 ## 📊 [Summary Table]
+
 [Visual summary of deployed architecture]
 
 ## 📝 Reflection Questions
+
 [Open-ended, experiential questions]
 
 ## ⏱️ Completion Tracking
+
 [Time tracking and metadata]
 
 ## ✅ Final Lab X.Y Sign-off
+
 [Final approval checklist]
 
 ## 🎉 Congratulations!
+
 [Brief summary of accomplishments]
 
 ## 📌 Module Navigation
+
 [Links to next lab]
 ```
 
@@ -69,12 +78,14 @@ Every checklist must follow this exact structure:
 **Format**: Each resource type gets its own subsection with specific configuration details to verify.
 
 **DO**:
+
 - ✅ List exact resource names following naming conventions
 - ✅ Include specific configuration values (SKU, IP ranges, sizes)
 - ✅ Reference tags that must be applied (Project, Environment, CostCenter)
 - ✅ Verify relationships (peerings, associations, dependencies)
 
 **DON'T**:
+
 - ❌ Explain WHY something should be configured that way (belongs in lab guide)
 - ❌ Provide step-by-step instructions (belongs in lab guide)
 - ❌ Include screenshots (reference lab guide instead)
@@ -85,6 +96,7 @@ Every checklist must follow this exact structure:
 ## ✅ Hub Virtual Network (platform-skycraft-swc-vnet)
 
 ### Network Configuration
+
 - [ ] Virtual network name: `platform-skycraft-swc-vnet`
 - [ ] Location: **Sweden Central**
 - [ ] Resource group: `platform-skycraft-swc-rg`
@@ -92,6 +104,7 @@ Every checklist must follow this exact structure:
 - [ ] DNS servers: Default (Azure-provided)
 
 ### Subnets
+
 - [ ] **AzureBastionSubnet**
   - Name: `AzureBastionSubnet` (exact match, case-sensitive)
   - Address range: `10.0.0.0/26`
@@ -111,26 +124,16 @@ Every checklist must follow this exact structure:
 
 ### 3.2 Validation Commands
 
-**Purpose**: Provide copy-paste Azure CLI or PowerShell commands that students/instructors can run to verify deployment.
+**Purpose**: Provide copy-paste Azure CLI **and PowerShell** commands that students/instructors can run to verify deployment. Both tools are tested on the AZ-104 exam, so students must practice both.
 
 **Structure**:
 
-```markdown
+````markdown
 ## 🔍 Validation Commands
 
-Run these Azure CLI commands to validate your lab setup:
+Run these commands to validate your lab setup:
 
-### Login and Set Context
-
-```azurecli
-# Login to Azure
-az login
-
-# Set subscription context
-az account set --subscription "YOUR-SUBSCRIPTION-NAME"
-```
-
-### Verify [Resource Type]
+### Verify [Resource Type] (Azure CLI)
 
 ```azurecli
 # List all VNets
@@ -143,14 +146,29 @@ az network vnet list \
 # ------------------------   ----------------------   -------------
 # platform-skycraft-swc-vnet platform-skycraft-swc-rg 10.0.0.0/16
 ```
+
+### Verify [Resource Type] (PowerShell)
+
+```powershell
+Get-AzVirtualNetwork |
+  Select-Object Name, ResourceGroupName, @{N='AddressSpace';E={$_.AddressSpace.AddressPrefixes -join ', '}} |
+  Format-Table
+
+# Expected output:
+# Name                       ResourceGroupName        AddressSpace
+# ----                       -----------------        ------------
+# platform-skycraft-swc-vnet platform-skycraft-swc-rg 10.0.0.0/16
 ```
+````
 
 **Requirements**:
-- Always include expected output
-- Use `--query` to filter relevant fields only
-- Use `--output table` for readability
+
+- Always include expected output for both CLI and PowerShell
+- Use `--query` (CLI) and `Select-Object` (PS) to filter relevant fields
+- Use `--output table` (CLI) and `Format-Table` (PS) for readability
 - Group commands by resource type
 - Include comments explaining what each command checks
+- Include **connectivity tests** where applicable (e.g., `Test-NetConnection` for port checks)
 
 ---
 
@@ -161,6 +179,7 @@ az network vnet list \
 **RULE**: If a question tests conceptual understanding with a provided answer, it belongs in the **Lab Guide Knowledge Check**, not here.
 
 **Checklist Reflection Questions MUST**:
+
 - ✅ Be open-ended (no provided answers)
 - ✅ Require students to document what THEY built
 - ✅ Capture experiential learning (challenges, solutions, observations)
@@ -173,35 +192,39 @@ az network vnet list \
 ## 📝 Reflection Questions
 
 ### Question 1: IP Address Documentation
+
 **Document the public IP addresses you created:**
 
-| Resource | Public IP Address | Purpose |
-|----------|-------------------|---------|
-| platform-skycraft-swc-bas-pip | __________ | Azure Bastion |
-| dev-skycraft-swc-lb-pip | __________ | Dev load balancer |
+| Resource                      | Public IP Address | Purpose           |
+| ----------------------------- | ----------------- | ----------------- |
+| platform-skycraft-swc-bas-pip | ****\_\_****      | Azure Bastion     |
+| dev-skycraft-swc-lb-pip       | ****\_\_****      | Dev load balancer |
 
 ### Question 2: Troubleshooting Experience
+
 **What was the most challenging part of this lab? How did you resolve it?**
 
-_________________________________________________________________
+---
 
-_________________________________________________________________
+---
 
 ### Question 3: Architecture Expansion
+
 **If you added a staging environment, what address space would you use?**
 
-- VNet name: __________________
-- Address space: __________________
-- Justification: _________________________________________________________________
+- VNet name: ********\_\_********
+- Address space: ********\_\_********
+- Justification: ********************************\_********************************
 
-**Instructor Review Date**: _________  
-**Feedback**: _________________________________________________________________
+**Instructor Review Date**: ****\_****
+**Feedback**: ********************************\_********************************
 ```
 
 **DON'T** (this belongs in Lab Guide Knowledge Check):
 
 ```markdown
 ### Question 1: Subnet Sizing
+
 **What is the minimum subnet size for AzureBastionSubnet?**
 
 <details>
@@ -211,6 +234,7 @@ _________________________________________________________________
 ```
 
 **Key Difference**:
+
 - **Lab Guide Knowledge Check**: "What is...?" / "Why does...?" / "How does...?" with provided answers
 - **Checklist Reflection**: "What did you...?" / "How did you...?" / "Document your..." with student fills in blanks
 
@@ -225,13 +249,14 @@ _________________________________________________________________
 ```markdown
 ## 📊 Network Architecture Summary
 
-| Component | Name | Address Space | Subnets | Peerings | Status |
-|-----------|------|---------------|---------|----------|--------|
-| **Hub VNet** | platform-skycraft-swc-vnet | 10.0.0.0/16 | 2 | 2 | ✅ |
-| └─ Bastion Subnet | AzureBastionSubnet | 10.0.0.0/26 | N/A | N/A | ✅ |
+| Component         | Name                       | Address Space | Subnets | Peerings | Status |
+| ----------------- | -------------------------- | ------------- | ------- | -------- | ------ |
+| **Hub VNet**      | platform-skycraft-swc-vnet | 10.0.0.0/16   | 2       | 2        | ✅     |
+| └─ Bastion Subnet | AzureBastionSubnet         | 10.0.0.0/26   | N/A     | N/A      | ✅     |
 ```
 
 **Use Cases**:
+
 - Network topology summaries
 - Resource inventory tables
 - Cost tracking tables
@@ -243,16 +268,16 @@ _________________________________________________________________
 
 Use these emojis consistently across all checklists:
 
-| Section Type | Emoji | Usage |
-|--------------|-------|-------|
-| **Verification** | ✅ | Resource configuration checklists |
-| **Validation** | 🔍 | CLI/PowerShell command sections |
-| **Summary** | 📊 | Architecture/resource summary tables |
-| **Reflection** | 📝 | Open-ended student response questions |
-| **Time Tracking** | ⏱️ | Lab duration and completion dates |
-| **Sign-off** | ✅ | Final approval section |
-| **Celebration** | 🎉 | Congratulations/completion message |
-| **Navigation** | 📌 | Links to other labs |
+| Section Type      | Emoji | Usage                                 |
+| ----------------- | ----- | ------------------------------------- |
+| **Verification**  | ✅    | Resource configuration checklists     |
+| **Validation**    | 🔍    | CLI/PowerShell command sections       |
+| **Summary**       | 📊    | Architecture/resource summary tables  |
+| **Reflection**    | 📝    | Open-ended student response questions |
+| **Time Tracking** | ⏱️    | Lab duration and completion dates     |
+| **Sign-off**      | ✅    | Final approval section                |
+| **Celebration**   | 🎉    | Congratulations/completion message    |
+| **Navigation**    | 📌    | Links to other labs                   |
 
 ---
 
@@ -266,13 +291,13 @@ Use these emojis consistently across all checklists:
 ## ⏱️ Completion Tracking
 
 - **Estimated Time**: 3 hours
-- **Actual Time Spent**: _________ hours
-- **Date Started**: _________
-- **Date Completed**: _________
+- **Actual Time Spent**: \***\*\_\*\*** hours
+- **Date Started**: \***\*\_\*\***
+- **Date Completed**: \***\*\_\*\***
 
 **Challenges Encountered** (optional):
 
-_________________________________________________________________
+---
 ```
 
 ---
@@ -287,15 +312,16 @@ _________________________________________________________________
 ## ✅ Final Lab X.Y Sign-off
 
 **All Verification Items Complete**:
+
 - [ ] All resources created with proper naming conventions
 - [ ] All tags applied (Project, Environment, CostCenter)
 - [ ] All validation commands executed successfully
 - [ ] All reflection questions answered
 - [ ] Ready to proceed to Lab X.Z
 
-**Student Name**: _________________  
-**Lab X.Y Completion Date**: _________________  
-**Instructor Signature**: _________________
+**Student Name**: **\*\*\*\***\_**\*\*\*\***  
+**Lab X.Y Completion Date**: **\*\*\*\***\_**\*\*\*\***  
+**Instructor Signature**: **\*\*\*\***\_**\*\*\*\***
 ```
 
 ---
@@ -315,7 +341,7 @@ Follow these steps to create the hub VNet:
 2. Click + Create
 3. Enter the name platform-skycraft-swc-vnet
 4. Select Sweden Central region
-...
+   ...
 ```
 
 **WHY**: Step-by-step instructions belong ONLY in lab guides, not checklists.
@@ -354,8 +380,8 @@ Follow these steps to create the hub VNet:
 
 List the peering connections you created:
 
-1. Peering name: __________ | Remote VNet: __________ | Status: __________
-2. Peering name: __________ | Remote VNet: __________ | Status: __________
+1. Peering name: \***\*\_\_\*\*** | Remote VNet: \***\*\_\_\*\*** | Status: \***\*\_\_\*\***
+2. Peering name: \***\*\_\_\*\*** | Remote VNet: \***\*\_\_\*\*** | Status: \***\*\_\_\*\***
 ```
 
 ---
@@ -386,18 +412,20 @@ List the peering connections you created:
 
 Copy this template when creating a new checklist:
 
-```markdown
+````markdown
 # Lab X.Y Completion Checklist
 
 ## ✅ [Resource Type 1] Verification
 
 ### [Subcategory]
+
 - [ ] Resource name: `[exact-name-from-standards]`
 - [ ] Location: **Sweden Central**
 - [ ] Resource group: `[rg-name]`
 - [ ] [Specific configuration]: [expected value]
 
 ### Tags
+
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `[Development|Production|Platform]`
 - [ ] Tag: `CostCenter` = `MSDN`
@@ -425,60 +453,65 @@ az [command] \
 # Expected output:
 # [Show expected table output]
 ```
+````
 
 ---
 
 ## 📊 [Architecture/Resource] Summary
 
-| Component | Name | [Property 1] | [Property 2] | Status |
-|-----------|------|--------------|--------------|--------|
-| [Type] | [name] | [value] | [value] | ✅ |
+| Component | Name   | [Property 1] | [Property 2] | Status |
+| --------- | ------ | ------------ | ------------ | ------ |
+| [Type]    | [name] | [value]      | [value]      | ✅     |
 
 ---
 
 ## 📝 Reflection Questions
 
 ### Question 1: [Open-ended Documentation Question]
+
 **[Prompt requiring student to document what they built]**
 
-_________________________________________________________________
+---
 
 ### Question 2: [Experiential Learning Question]
+
 **What challenges did you encounter? How did you resolve them?**
 
-_________________________________________________________________
+---
 
 ### Question 3: [Architecture Extension Question]
+
 **How would you modify this for [scenario]?**
 
-_________________________________________________________________
+---
 
-**Instructor Review Date**: _________  
-**Feedback**: _________________________________________________________________
+**Instructor Review Date**: \***\*\_\*\***  
+**Feedback**: **************\*\*\*\***************\_**************\*\*\*\***************
 
 ---
 
 ## ⏱️ Completion Tracking
 
 - **Estimated Time**: X hours
-- **Actual Time Spent**: _________ hours
-- **Date Started**: _________
-- **Date Completed**: _________
+- **Actual Time Spent**: \***\*\_\*\*** hours
+- **Date Started**: \***\*\_\*\***
+- **Date Completed**: \***\*\_\*\***
 
 ---
 
 ## ✅ Final Lab X.Y Sign-off
 
 **All Verification Items Complete**:
+
 - [ ] All resources created with proper naming conventions
 - [ ] All tags applied correctly
 - [ ] All validation commands executed successfully
 - [ ] All reflection questions answered
 - [ ] Ready to proceed to Lab X.Z
 
-**Student Name**: _________________  
-**Lab X.Y Completion Date**: _________________  
-**Instructor Signature**: _________________
+**Student Name**: **\*\*\*\***\_**\*\*\*\***  
+**Lab X.Y Completion Date**: **\*\*\*\***\_**\*\*\*\***  
+**Instructor Signature**: **\*\*\*\***\_**\*\*\*\***
 
 ---
 
@@ -487,6 +520,7 @@ _________________________________________________________________
 You've successfully completed **Lab X.Y: [Title]**!
 
 **What You Built**:
+
 - ✅ [Key accomplishment 1]
 - ✅ [Key accomplishment 2]
 - ✅ [Key accomplishment 3]
@@ -499,6 +533,7 @@ You've successfully completed **Lab X.Y: [Title]**!
 
 - [← Back to Module X Index](../README.md)
 - [Lab X.Z: Next Lab →](../X.Z-lab-name/lab-guide-X.Z.md)
+
 ```
 
 ---
@@ -509,12 +544,12 @@ Before finalizing a checklist, verify:
 
 - [ ] No step-by-step instructions included (those belong in lab guide)
 - [ ] No Knowledge Check questions with provided answers (those belong in lab guide)
-- [ ] All resource names follow STANDARDS.md naming conventions
-- [ ] All tags reference match BICEP_STANDARDS.md requirements
+- [ ] All resource names follow `project-standards.md` naming conventions
+- [ ] All tags reference match `bicep-standards.md` requirements
 - [ ] Validation commands include expected output
 - [ ] Reflection Questions are open-ended and experiential
 - [ ] Summary table provides at-a-glance architecture view
-- [ ] Emojis follow DOCUMENTATION_STANDARDS.md guidelines
+- [ ] Emojis follow `lab-guide-template.md` guidelines
 - [ ] Final sign-off section included
 - [ ] Module navigation links work
 
@@ -524,9 +559,10 @@ Before finalizing a checklist, verify:
 
 This document complements:
 
-- **DOCUMENTATION_STANDARDS.md**: Covers lab guide structure and markdown formatting
-- **STANDARDS.md**: Defines resource naming conventions
-- **BICEP_STANDARDS.md**: Specifies required tags and IaC patterns
-- **POWERSHELL_STANDARDS.md**: PowerShell script conventions
+- **lab-guide-template.md**: Covers lab guide structure and markdown formatting
+- **project-standards.md**: Defines resource naming conventions
+- **bicep-standards.md**: Specifies required tags and IaC patterns
+- **powershell-standards.md**: PowerShell script conventions
 
 **Rule of Thumb**: If it teaches a concept, it belongs in the lab guide. If it verifies correct implementation, it belongs in the checklist.
+```

@@ -69,17 +69,10 @@ Transform abstract cloud concepts into **tangible hands-on experience** by build
 
 ---
 
-## 📋 Prerequisites
-
-- **Azure Subscription** (free trial or credits)
-- **Azure CLI** & **Azure PowerShell** (latest version)
-
----
-
-## 📌 Course Navigation
+## Course Navigation
 
 - [Module 1: Manage Azure Identities and Governance →](module-1-identities-governance/README.MD)
 - [Module 2: Implement and Manage Virtual Networking →](module-2-networking/README.MD)
-- [Module 3: Deploy and Manage Azure Compute Resources →](#)
-- [Module 4: Implement and Manage Storage →](#)
-- [Module 5: Monitor and Maintain Azure Resources →](#)
+- [Module 3: Deploy and Manage Azure Compute Resources →](module-3-compute/README.MD)
+- [Module 4: Implement and Manage Storage →](module-4-storage/README.MD)
+- [Module 5: Monitor and Maintain Azure Resources →](module-5-monitoring-maintenance/README.md)
