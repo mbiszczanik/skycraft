@@ -216,7 +216,6 @@ Before starting this lab:
 ![Assign a Built-in Policy](./images/step-1.3.5b.png)
 
 5. Fill in additional details:
-
    - **Assignment name**: `Require-Environment-Tag-RG`
    - **Description**: `All resource groups must have an Environment tag`
    - **Policy enforcement**: Enabled
@@ -384,7 +383,6 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 1. Navigate to **platform-skycraft-swc-rg**
 2. Click **Locks** → **+ Add**
 3. Create lock:
-
    - Lock name: `lock-no-delete-shared`
    - Lock type: **Delete**
    - Notes: `Protects shared monitoring and logging infrastructure`
@@ -510,7 +508,6 @@ Create a more specific budget for the production environment:
 2. Click **Go to subscription**
 3. Under **Cost Management** click **Cost analysis**
 4. Explore different views:
-
    - **Cost by resource** - See spending per resource
    - **Cost by service** - See spending per Azure service
    - **Daily costs** - Trend over time
