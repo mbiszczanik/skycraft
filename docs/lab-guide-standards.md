@@ -4,8 +4,6 @@
 
 This document defines the structure, formatting rules, and content requirements for lab guide files (`lab-guide-X.Y.md`). Lab guides are **instructional materials** that teach concepts and walk students through Azure configuration. They complement checklists but must NOT duplicate verification content.
 
-For the ready-to-copy skeleton with `[PLACEHOLDER]` markers, see `lab-guide-template.md`.
-
 ---
 
 ## 1. Purpose and Scope
@@ -99,7 +97,7 @@ Labs must teach **Portal (GUI)**, **CLI**, and **PowerShell** methods for every 
 
 ### Structure
 
-````markdown
+```markdown
 ### Step X.Y.Z: [Action Name]
 
 #### Option 1: Azure Portal (GUI)
@@ -124,7 +122,7 @@ az [command] --name [value] --resource-group [rg] --output table
 ​`
 
 **Expected Result**: [Specific success description]
-````
+```
 
 ### Rules
 
@@ -245,7 +243,6 @@ Before finalizing any lab guide, verify:
 
 This document complements:
 
-- **lab-guide-template.md**: Ready-to-copy skeleton with `[PLACEHOLDER]` markers
 - **checklist-standards.md**: Defines verification checklists (the counterpart to lab guides)
 - **project-standards.md**: Defines resource naming conventions
 - **bicep-standards.md**: Specifies required tags and IaC patterns
