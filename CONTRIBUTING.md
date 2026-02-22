@@ -6,9 +6,9 @@ Thank you for your interest in contributing to SkyCraft! We welcome contribution
 
 Before submitting a Pull Request (PR), please review our project standards to ensure your contribution aligns with the project's structure and style:
 
-- **[General Standards](docs/STANDARDS.md)**: Naming conventions, directory structure, and tagging strategy.
-- **[PowerShell Standards](docs/POWERSHELL_STANDARDS.md)**: Scripting style, error handling, and formatting.
-- **[Bicep Standards](docs/BICEP_STANDARDS.md)**: Infrastructure as Code modules and parameters.
+- **[General Standards](docs/project-standards.md)**: Naming conventions, directory structure, and tagging strategy.
+- **[PowerShell Standards](docs/powershell-standards.md)**: Scripting style, error handling, and formatting.
+- **[Bicep Standards](docs/bicep-standards.md)**: Infrastructure as Code modules and parameters.
 
 ## 🛠️ How to Contribute
 
