@@ -194,6 +194,6 @@ Once complete, you'll have:
 ## 📌 Module Navigation
 
 - [← Back to Course Home](../README.MD)
-- [Lab 5.1: Azure Monitor →](./5.1-azure-monitor/)
-- [Lab 5.2: Business Continuity →](./5.2-business-continuity/)
-- [Lab 5.3: Network Monitoring →](./5.3-network-monitoring/)
+- [Lab 5.1: Azure Monitor →](./5.1-azure-monitor/lab-guide-5.1.md)
+- [Lab 5.2: Business Continuity →](./5.2-business-continuity/lab-guide-5.2.md)
+- [Lab 5.3: Network Monitoring →](./5.3-network-monitoring/lab-guide-5.3.md)
