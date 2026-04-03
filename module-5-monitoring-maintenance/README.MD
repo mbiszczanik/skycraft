@@ -1,4 +1,4 @@
-# Module 5: Monitor and Maintain Azure Resources (5 hours)
+# Module 5: Monitor and Maintain Azure Resources (7 hours)
 
 ## 📚 Module Overview
 
@@ -26,11 +26,11 @@ By completing this module, you will be able to:
 
 | Lab | Duration | Topic                                | Exam Weight |
 | --- | -------- | ------------------------------------ | ----------- |
-| 5.1 | 2 hours  | Monitor Resources with Azure Monitor | ~4-6%       |
-| 5.2 | 2 hours  | Implement Backup and Recovery        | ~4-6%       |
-| 5.3 | 1 hour   | Network Monitoring and Diagnostics   | ~2-3%       |
+| 5.1 | 2.5 hours | Monitor Resources with Azure Monitor | ~4-6%       |
+| 5.2 | 2.5 hours | Implement Backup and Recovery        | ~4-6%       |
+| 5.3 | 2 hours   | Network Monitoring and Diagnostics   | ~3-4%       |
 
-**Total Module Time**: 5 hours
+**Total Module Time**: 7 hours
 
 ---
 
@@ -151,11 +151,11 @@ This module covers **10-15%** of the AZ-104 exam. Key exam topics include:
 
 ## ⏱️ Time Management
 
-- **Total module time**: 5 hours
-- **Recommended pace**: 2.5 hours per day for 2 days
-- **Lab 5.1**: 2 hours (Azure Monitor setup, KQL queries, alerts)
-- **Lab 5.2**: 2 hours (backup vaults, policies, Site Recovery)
-- **Lab 5.3**: 1 hour (Network Watcher, Connection Monitor)
+- **Total module time**: 7 hours
+- **Recommended pace**: 3-3.5 hours per day for 2 days, or 2-2.5 hours per day for 3 days
+- **Lab 5.1**: 2.5 hours (Azure Monitor setup, KQL queries, alerts, alert processing rules)
+- **Lab 5.2**: 2.5 hours (Recovery Services Vault, Backup Vault, backup policies, Site Recovery)
+- **Lab 5.3**: 2 hours (Network Watcher diagnostics, Connection Monitor, NSG Flow Logs)
 
 ---
 

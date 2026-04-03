@@ -1,4 +1,4 @@
-# Lab 5.1: Azure Monitor and Insights (2 hours)
+# Lab 5.1: Azure Monitor and Insights (2.5 hours)
 
 ## 🎯 Learning Objectives
 
@@ -9,13 +9,14 @@ By completing this lab, you will:
 - **Write KQL queries** to analyze heartbeat, CPU, memory, and disk performance
 - **Configure Metric Alerts** for proactive CPU threshold monitoring
 - **Create Action Groups** with email notification for the operations team
+- **Configure Alert Processing Rules** to reduce noise and route notifications intentionally
 - **Build a custom Azure Dashboard** for multi-resource operational visibility
 
 ---
 
 ## 🏗️ Architecture Overview
 
-Log Analytics Workspace serves as the central repository for all telemetry. Azure Monitor Agent streams guest OS logs and metrics via Data Collection Rules. Alert rules watch metrics and logs to trigger notifications through Action Groups.
+Log Analytics Workspace serves as the central repository for all telemetry. Azure Monitor Agent streams guest OS logs and metrics via Data Collection Rules. Alert rules watch metrics and logs, while Alert Processing Rules help route or suppress notifications through Action Groups.
 
 ```mermaid
 graph TB
@@ -24,6 +25,7 @@ graph TB
         LAW["platform-skycraft-swc-law<br/>Log Analytics Workspace<br/>Sweden Central"]
         AG["skycraft-ops-ag<br/>Action Group<br/>Email Notification"]
         Alert["skycraft-cpu-alert<br/>Metric Alert<br/>CPU > 80%"]
+        APR["skycraft-hours-apr<br/>Alert Processing Rule<br/>Business-hours routing"]
         Dashboard["SkyCraft-Ops<br/>Azure Dashboard"]
     end
 
@@ -41,7 +43,8 @@ graph TB
     VM_Prod -->|"Guest OS Logs & Metrics"| LAW
     LAW --> Dashboard
     VM_Prod --> Alert
-    Alert -->|"Fires notification"| AG
+    Alert -->|"Evaluated by rule"| APR
+    APR -->|"Fires notification"| AG
 ```
 
 ---
@@ -66,13 +69,13 @@ graph TB
 
 ---
 
-## ⏱️ Estimated Time: 2 hours
+## ⏱️ Estimated Time: 2.5 hours
 
-- **Section 1**: Monitoring Fundamentals (20 min)
-- **Section 2**: Deploy Log Analytics Workspace (20 min)
-- **Section 3**: Enable VM Insights & Data Collection (25 min)
-- **Section 4**: Querying with KQL (25 min)
-- **Section 5**: Configure Alerts & Dashboards (30 min)
+- **Section 1**: Monitoring Fundamentals (25 min)
+- **Section 2**: Deploy Log Analytics Workspace (25 min)
+- **Section 3**: Enable VM Insights & Data Collection (30 min)
+- **Section 4**: Querying with KQL (30 min)
+- **Section 5**: Configure Alerts & Dashboards (40 min)
 
 ---
 
@@ -85,9 +88,11 @@ Before starting this lab:
 - [ ] Existing resources:
   - Resource groups: `platform-skycraft-swc-rg`, `dev-skycraft-swc-rg`, `prod-skycraft-swc-rg`
   - At least one running VM (e.g., `dev-skycraft-swc-auth-vm` or `prod-skycraft-swc-auth-vm`)
+  - At least one storage account from Lab 4.1 (e.g., `platformskycraftswcsa`)
 - [ ] Azure CLI installed (version 2.50.0 or later)
 - [ ] PowerShell Az module installed
 - [ ] `Contributor` role at the subscription level
+- [ ] A valid email address you can access (required to validate Action Group notifications)
 
 **Verify prerequisites**:
 
@@ -95,13 +100,16 @@ Before starting this lab:
 # Verify resource groups exist
 az group list --query "[?contains(name,'skycraft')].{Name:name,Location:location}" --output table
 
+# Verify storage accounts exist
+az storage account list --query "[?contains(name,'skycraft')].{Name:name,RG:resourceGroup,Location:primaryLocation}" --output table
+
 # Verify at least one VM is running
-az vm list --query "[?contains(name,'skycraft')].{Name:name,Status:powerState,RG:resourceGroup}" --output table
+az vm list -d --query "[?contains(name,'skycraft')].{Name:name,Status:powerState,RG:resourceGroup}" --output table
 ```
 
 ---
 
-## 📖 Section 1: Monitoring Fundamentals (20 min)
+## 📖 Section 1: Monitoring Fundamentals (25 min)
 
 ### What is Azure Monitor?
 
@@ -142,9 +150,12 @@ A **Log Analytics Workspace** is a unique environment for Azure Monitor log data
 
 > **SkyCraft Choice**: We chose a **single centralized Log Analytics Workspace** in the platform resource group because it allows cross-environment KQL queries (e.g., comparing dev vs. prod CPU patterns) without workspace federation complexity. For larger organizations, per-environment workspaces with cross-workspace queries would be more appropriate.
 
+> [!NOTE]
+> **Network Watcher and Connection Monitor** are part of AZ-104 monitoring scope and are covered hands-on in **Lab 5.3 (Network Monitoring)**. This lab focuses on Azure Monitor, VM Insights, KQL, and alerting workflows.
+
 ---
 
-## 📖 Section 2: Deploy Log Analytics Workspace (20 min)
+## 📖 Section 2: Deploy Log Analytics Workspace (25 min)
 
 ### Step 5.1.1: Create the Workspace
 
@@ -199,7 +210,7 @@ New-AzOperationalInsightsWorkspace `
 
 ---
 
-## 📖 Section 3: Enable VM Insights & Data Collection (25 min)
+## 📖 Section 3: Enable VM Insights & Data Collection (30 min)
 
 ### What is VM Insights?
 
@@ -211,33 +222,101 @@ New-AzOperationalInsightsWorkspace `
 
 1. Navigate to **Monitor** → **Virtual Machines** (in the left menu)
 2. Click the **Not monitored** tab
-3. Find your VM (e.g., `dev-skycraft-swc-auth-vm`)
+3. Find your VM (e.g., `dev-skycraft-swc-auth-vm` or `dev-skycraft-swc-world-vm`)
+
+![Monitor view](images/step-5.1.2.png)
+
 4. Click **Enable**
-5. Select the **Azure Monitor Agent** (recommended)
-6. Under **Data Collection Rule**, click **Create New**:
+5. On the **Configure monitor** page, under **Infrastructure monitoring**:
+   - Check the **[Classic] Log-based metrics** checkbox
+   - In the **Log Analytics workspace** dropdown, select `platform-skycraft-swc-law`
+  - (Optionally enable **[Preview] OpenTelemetry metrics** for advanced monitoring, but do not rely on it for this lab's Log Analytics queries)
 
-| Field                   | Value                       |
-| :---------------------- | :-------------------------- |
-| Rule name               | `skycraft-vm-dcr`           |
-| Subscription            | [Your Subscription]         |
-| Log Analytics Workspace | `platform-skycraft-swc-law` |
-
-7. Enable **Processes and dependencies** (map view)
-8. Click **Configure** → **Enable**
+6. Click **Review + enable** (or **Enable** depending on your portal version)
 
 > [!NOTE]
-> This process installs the **Azure Monitor Agent (AMA)** extension on the VM and creates a **Data Collection Rule (DCR)** to stream performance counters (CPU, Memory, Disk, Network) and Syslog/Event logs to your Log Analytics Workspace.
+> The Azure Monitor Agent (AMA) is automatically deployed in the background when you enable monitoring. You do not need to manually select it in the portal—it's deployed automatically as part of the infrastructure monitoring setup.
+
+> [!NOTE]
+> When you enable monitoring through the portal, Azure automatically:
+> - Installs the **Azure Monitor Agent (AMA)** extension on the VM
+> - Creates or associates a **VM Insights DCR** with an auto-generated name
+> - Sends the predefined VM Insights performance dataset to the **`InsightsMetrics`** table in the selected Log Analytics workspace
+> - Does **not** require you to manually create a custom performance-counter DCR for this lab
+
+> [!TIP]
+> Microsoft documentation distinguishes between two performance-data paths:
+> - **VM Insights** performance data goes to **`InsightsMetrics`**
+> - **Custom AMA performance counters** collected through a separate DCR go to **`Perf`**
+> This lab uses the **VM Insights** path, so the KQL queries in Section 4 target `InsightsMetrics`.
 
 #### Option 2: Azure CLI
+
+> [!TIP]
+> Run this option in **Bash** (for example Azure Cloud Shell Bash). If you're in a PowerShell terminal, use **Option 3**.
 
 ```bash
 # Install Azure Monitor Agent extension on the VM
 az vm extension set \
   --resource-group dev-skycraft-swc-rg \
-  --vm-name dev-skycraft-swc-auth-vm \
+  --vm-name dev-skycraft-swc-world-vm \
   --name AzureMonitorLinuxAgent \
   --publisher Microsoft.Azure.Monitor \
   --enable-auto-upgrade true
+
+# Create a logs-based VM Insights DCR that writes InsightsMetrics to the lab workspace
+cat > vminsights-dcr.json <<'EOF'
+{
+  "location": "swedencentral",
+  "properties": {
+    "description": "Data collection rule for VM Insights logs-based metrics.",
+    "dataSources": {
+      "performanceCounters": [
+        {
+          "name": "VMInsightsPerfCounters",
+          "streams": [
+            "Microsoft-InsightsMetrics"
+          ],
+          "scheduledTransferPeriod": "PT1M",
+          "samplingFrequencyInSeconds": 60,
+          "counterSpecifiers": [
+            "\\VmInsights\\DetailedMetrics"
+          ]
+        }
+      ]
+    },
+    "destinations": {
+      "logAnalytics": [
+        {
+          "workspaceResourceId": "/subscriptions/{sub-id}/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.OperationalInsights/workspaces/platform-skycraft-swc-law",
+          "name": "VMInsightsPerf-Logs-Dest"
+        }
+      ]
+    },
+    "dataFlows": [
+      {
+        "streams": [
+          "Microsoft-InsightsMetrics"
+        ],
+        "destinations": [
+          "VMInsightsPerf-Logs-Dest"
+        ]
+      }
+    ]
+  }
+}
+EOF
+
+az monitor data-collection rule create \
+  --name skycraft-vminsights-dcr \
+  --resource-group platform-skycraft-swc-rg \
+  --location swedencentral \
+  --rule-file vminsights-dcr.json
+
+az monitor data-collection rule association create \
+  --name skycraft-vminsights-dcr-assoc \
+  --rule-id /subscriptions/{sub-id}/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.Insights/dataCollectionRules/skycraft-vminsights-dcr \
+  --resource /subscriptions/{sub-id}/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Compute/virtualMachines/dev-skycraft-swc-world-vm
 ```
 
 #### Option 3: PowerShell
@@ -246,101 +325,219 @@ az vm extension set \
 # Install Azure Monitor Agent extension
 Set-AzVMExtension `
     -ResourceGroupName 'dev-skycraft-swc-rg' `
-    -VMName 'dev-skycraft-swc-auth-vm' `
+    -VMName 'dev-skycraft-swc-world-vm' `
     -Name 'AzureMonitorLinuxAgent' `
     -Publisher 'Microsoft.Azure.Monitor' `
     -ExtensionType 'AzureMonitorLinuxAgent' `
     -TypeHandlerVersion '1.0' `
     -EnableAutomaticUpgrade $true
+
+# Create a logs-based VM Insights DCR and associate it with the VM
+$subscriptionId = (Get-AzContext).Subscription.Id
+$workspace = Get-AzOperationalInsightsWorkspace -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platform-skycraft-swc-law'
+$vm = Get-AzVM -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-world-vm'
+$dcrJsonPath = Join-Path $env:TEMP 'skycraft-vminsights-dcr.json'
+
+@"
+{
+  "location": "swedencentral",
+  "properties": {
+    "description": "Data collection rule for VM Insights logs-based metrics.",
+    "dataSources": {
+      "performanceCounters": [
+        {
+          "name": "VMInsightsPerfCounters",
+          "streams": [
+            "Microsoft-InsightsMetrics"
+          ],
+          "scheduledTransferPeriod": "PT1M",
+          "samplingFrequencyInSeconds": 60,
+          "counterSpecifiers": [
+            "\\VmInsights\\DetailedMetrics"
+          ]
+        }
+      ]
+    },
+    "destinations": {
+      "logAnalytics": [
+        {
+          "workspaceResourceId": "$($workspace.ResourceId)",
+          "name": "VMInsightsPerf-Logs-Dest"
+        }
+      ]
+    },
+    "dataFlows": [
+      {
+        "streams": [
+          "Microsoft-InsightsMetrics"
+        ],
+        "destinations": [
+          "VMInsightsPerf-Logs-Dest"
+        ]
+      }
+    ]
+  }
+}
+"@ | Set-Content -Path $dcrJsonPath -Encoding utf8
+
+New-AzDataCollectionRule `
+    -Name 'skycraft-vminsights-dcr' `
+    -ResourceGroupName 'platform-skycraft-swc-rg' `
+    -JsonFilePath $dcrJsonPath
+
+New-AzDataCollectionRuleAssociation `
+    -AssociationName 'skycraft-vminsights-dcr-assoc' `
+    -ResourceUri $vm.Id `
+    -DataCollectionRuleId "/subscriptions/$subscriptionId/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.Insights/dataCollectionRules/skycraft-vminsights-dcr"
 ```
 
 > [!IMPORTANT]
 > VM Insights data takes **5–10 minutes** to appear after enabling. Wait before proceeding to KQL queries.
 
-**Expected Result**: After 5–10 minutes, the VM status changes to **Monitored** in the VM Insights view. The AMA extension appears under VM → Extensions + applications.
+**Expected Result**: After 5–10 minutes, the VM status changes to **Monitored** in the VM Insights view. The AMA extension appears under VM → Extensions + applications, and a VM Insights DCR is associated with the VM (auto-generated in the portal flow or `skycraft-vminsights-dcr` in the CLI/PowerShell fallback).
 
 ### Step 5.1.3: Configure Diagnostic Settings for Storage Accounts
 
+#### Option 1: Azure Portal (GUI)
+
 1. Navigate to a storage account (e.g., `platformskycraftswcsa`)
 2. Go to **Monitoring** → **Diagnostic settings**
-3. Click **+ Add diagnostic setting**
-4. Configure:
+3. Select resource `blob`
+4. Click **+ Add diagnostic setting**
+5. Configure:
 
 | Field                   | Value                           |
 | :---------------------- | :------------------------------ |
 | Diagnostic setting name | `skycraft-storage-diag`         |
-| Logs: blob              | ✅ StorageRead, StorageWrite    |
+| Logs: blob              | ✅ StorageRead, StorageWrite     |
 | Destination             | Send to Log Analytics Workspace |
 | Workspace               | `platform-skycraft-swc-law`     |
 
+![Monitor view](images/step-5.1.3.png)
+
 5. Click **Save**
+
+#### Option 2: Azure CLI
+
+```bash
+# Get the storage account resource ID
+storageId=$(az storage account show \
+  --name platformskycraftswcsa \
+  --resource-group platform-skycraft-swc-rg \
+  --query id -o tsv)
+
+# Create diagnostic settings and send logs to Log Analytics Workspace
+az monitor diagnostic-settings create \
+  --name skycraft-storage-diag \
+  --resource "$storageId" \
+  --workspace platform-skycraft-swc-law \
+  --resource-group platform-skycraft-swc-rg \
+  --logs '[{"category":"StorageRead","enabled":true},{"category":"StorageWrite","enabled":true}]'
+```
+
+#### Option 3: PowerShell
+
+```powershell
+# Get resource IDs
+$storage = Get-AzStorageAccount -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platformskycraftswcsa'
+$workspace = Get-AzOperationalInsightsWorkspace -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platform-skycraft-swc-law'
+
+# Configure diagnostic settings for blob operations
+Set-AzDiagnosticSetting `
+    -Name 'skycraft-storage-diag' `
+    -ResourceId $storage.Id `
+    -WorkspaceId $workspace.ResourceId `
+    -Enabled $true `
+    -Category 'StorageRead','StorageWrite'
+```
 
 **Expected Result**: Storage account activity logs start flowing to the centralized workspace.
 
 ---
 
-## 📖 Section 4: Querying with KQL (25 min)
+## 📖 Section 4: Querying with KQL (30 min)
 
 ### What is KQL?
 
 **Kusto Query Language (KQL)** is the query language used across Azure Monitor, Microsoft Sentinel, and Azure Data Explorer. It reads left-to-right using a pipe (`|`) syntax similar to PowerShell.
 
-### Step 5.1.4: Run Your First Query — Heartbeat
+### Step 5.1.4: Run Your First Query — Heartbeat & InsightsMetrics
 
 1. Navigate to your **Log Analytics workspace** (`platform-skycraft-swc-law`)
 2. Click **Logs** in the left menu
-3. Close the "Queries" overlay
-4. Paste the following query:
+3. Set the query scope to workspace `platform-skycraft-swc-law` and change the time range to **Last 24 hours**
+4. Close the "Queries" overlay
+5. Paste the following query:
 
 ```kusto
 Heartbeat
+| where TimeGenerated > ago(24h)
 | summarize LastHeartbeat = max(TimeGenerated) by Computer, OSType, Version
 | order by LastHeartbeat desc
 ```
 
-5. Click **Run**
+6. Click **Run**
 
-**Expected Result**: A table showing each connected VM, its OS type, agent version, and last heartbeat timestamp.
+**Expected Result**: A table showing each connected VM, its OS type, agent version, and last heartbeat timestamp. In this environment, you should see `dev-skycraft-swc-world-vm` once ingestion completes.
+
+![KQL query](images/step-5.1.4.png)
 
 ### Step 5.1.5: Query CPU Performance
 
-Run this query to see top CPU consumers over the last hour:
+For Linux VM Insights environments, use `InsightsMetrics` to chart CPU utilization over the last hour:
 
 ```kusto
-Perf
+InsightsMetrics
 | where TimeGenerated > ago(1h)
-| where CounterName == "% Processor Time"
-| where InstanceName == "_Total"
-| summarize AverageCPU = avg(CounterValue), MaxCPU = max(CounterValue) by Computer, bin(TimeGenerated, 5m)
+| where Namespace == "Processor" and Name == "UtilizationPercentage"
+| summarize AverageCPU = avg(todouble(Val)), MaxCPU = max(todouble(Val)) by Computer, bin(TimeGenerated, 5m)
 | render timechart
 ```
+
+**Expected Result**: A timechart showing 5-minute average CPU utilization for each monitored VM.
+
+> [!NOTE]
+> This query follows the VM Insights documentation path where predefined guest performance data is written to `InsightsMetrics`. Use `Perf` only if you separately create a custom AMA performance-counter DCR.
 
 ### Step 5.1.6: Query Available Memory
 
 ```kusto
-Perf
+InsightsMetrics
 | where TimeGenerated > ago(1h)
-| where CounterName == "Available MBytes"
-| summarize AvgMemoryMB = avg(CounterValue) by Computer, bin(TimeGenerated, 5m)
+| where Namespace == "Memory" and Name == "AvailableMB"
+| summarize AvgMemoryMB = avg(todouble(Val)) by Computer, bin(TimeGenerated, 5m)
 | render timechart
 ```
+
+![Query Available Memory](images/step-5.1.5.png)
+
+**Expected Result**: A timechart showing available memory in MB for each monitored VM.
 
 ### Step 5.1.7: Query Disk Usage
 
 ```kusto
-Perf
+InsightsMetrics
 | where TimeGenerated > ago(1h)
-| where CounterName == "% Used Space"
-| summarize AvgDiskUsed = avg(CounterValue) by Computer, InstanceName
+| where Namespace == "LogicalDisk" and Name == "FreeSpacePercentage"
+| extend Mount = tostring(parse_json(Tags)["vm.azm.ms/mountId"])
+| summarize AvgDiskUsed = avg(100.0 - todouble(Val)) by Computer, Mount
 | order by AvgDiskUsed desc
 ```
+
+**Expected Result**: A table showing average disk utilization by VM and mount point.
+
+> [!TIP]
+> Microsoft documentation for VM Insights specifies that its predefined guest performance data is written to `InsightsMetrics`, while `Perf` is used for other AMA performance-counter collection scenarios.
+
+> [!TIP]
+> If `Heartbeat` returns data but `InsightsMetrics` does not, return to **Monitor** → **Virtual Machines** → **Configure monitor** and verify **[Classic] Log-based metrics** is enabled for workspace `platform-skycraft-swc-law`.
 
 > [!TIP]
 > Use `ago(1h)`, `ago(24h)`, or `ago(7d)` to adjust the time window. For production monitoring, `ago(1h)` is typical for real-time dashboards.
 
 ---
 
-## 📖 Section 5: Configure Alerts & Dashboards (30 min)
+## 📖 Section 5: Configure Alerts & Dashboards (40 min)
 
 ### Step 5.1.8: Create an Action Group
 
@@ -363,6 +560,7 @@ An **Action Group** defines who gets notified and how when an alert fires.
    - Notification type: **Email/SMS message/Push/Voice**
    - Name: `ops-email`
    - Email: [Your email address]
+  
 5. Click **Review + create** → **Create**
 
 #### Option 2: Azure CLI
@@ -393,6 +591,8 @@ New-AzActionGroup `
     -EmailReceiver $emailReceiver
 ```
 
+![Create an Action Group](images/step-5.1.8.png)
+
 **Expected Result**: Action Group `skycraft-ops-ag` created with email notification configured.
 
 ### Step 5.1.9: Create a Metric Alert (CPU > 80%)
@@ -404,16 +604,17 @@ New-AzActionGroup `
 3. Under **Signal name**, select **Percentage CPU**
 4. Configure the logic:
 
-| Field           | Value            |
-| :-------------- | :--------------- |
-| Threshold       | **Static**       |
-| Operator        | **Greater than** |
-| Threshold value | **80**           |
-| Check every     | **1 minute**     |
-| Lookback period | **5 minutes**    |
+| Field            | Value            |
+| :--------------- | :--------------- |
+| Threshold        | **Static**       |
+| Aggregation Type | **Average**      |
+| Operator         | **Greater than** |
+| Threshold value  | **80**           |
+| Check every      | **1 minute**     |
+| Lookback period  | **5 minutes**    |
 
-5. Click **Next: Actions** → Select `skycraft-ops-ag`
-6. Click **Next: Details**:
+1. Click **Next: Actions** → Select `skycraft-ops-ag`
+2. Click **Next: Details**:
 
 | Field           | Value                      |
 | :-------------- | :------------------------- |
@@ -467,18 +668,98 @@ Add-AzMetricAlertRuleV2 `
     -Description 'CPU > 80% on SkyCraft VM'
 ```
 
+  ![Create a Metric Alert](images/step-5.1.9.png)
+
 **Expected Result**: Alert rule `skycraft-cpu-alert` is created and active. When CPU exceeds 80% for 5 minutes, an email is sent to the ops team.
 
-### Step 5.1.10: Pin KQL Query to Dashboard
+### Step 5.1.10: Add an Alert Processing Rule (Business Hours)
+
+An **Alert Processing Rule** lets you suppress, route, or time-bound notifications after the alert condition is met.
+
+#### Option 1: Azure Portal (GUI)
+
+1. Navigate to **Monitor** → **Alerts** → **Alert processing rules**
+2. Click **+ Create**
+3. In the **Scope** tab:
+  - Click **Select scope**
+  - Select the resource where your CPU alert is configured (for this lab: `dev-skycraft-swc-world-vm` during testing, or your chosen production VM)
+4. In the **Rule settings** tab:
+  - Rule type: **Apply action group**
+  - Action group: `skycraft-ops-ag`
+5. In the **Scheduling** tab:
+  - Apply the rule: **Recurring**
+  - Time zone: **(UTC+01:00) Sarajevo, Skopje, Warsaw, Zagreb** (or your local equivalent)
+  - Start time: **08:00**
+  - End time: **18:00**
+  - Days: **Monday-Friday**
+
+6. In the **Details** tab:
+  - Resource group (rule resource): `platform-skycraft-swc-rg`
+  - Rule name: `skycraft-hours-apr`
+  - Enable rule upon creation: **Checked**
+7. Click **Review + create** → **Create**
+
+> [!TIP]
+> If you open APR creation from a VM's **Alerts** blade, Azure pre-populates that VM as scope and may default the rule resource group to the VM's resource group. Adjust both fields if you want to store APR resources in `platform-skycraft-swc-rg`.
+
+#### Option 2: Azure CLI
+
+```bash
+# Create an Alert Processing Rule that applies an action group during business hours
+az monitor alert-processing-rule create \
+  --name skycraft-hours-apr \
+  --resource-group platform-skycraft-swc-rg \
+  --rule-type AddActionGroups \
+  --scopes "/subscriptions/{sub-id}/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Compute/virtualMachines/dev-skycraft-swc-world-vm" \
+  --action-groups "/subscriptions/{sub-id}/resourceGroups/platform-skycraft-swc-rg/providers/microsoft.insights/actionGroups/skycraft-ops-ag" \
+  --schedule-time-zone "W. Europe Standard Time" \
+  --schedule-recurrence-type Weekly \
+  --schedule-recurrence-start-time "08:00:00" \
+  --schedule-recurrence-end-time "18:00:00" \
+  --schedule-recurrence Monday Tuesday Wednesday Thursday Friday \
+  --description "Route SkyCraft CPU alerts through action group during business hours"
+```
+
+#### Option 3: PowerShell
+
+```powershell
+# Install preview module once (if missing)
+Install-Module Az.AlertsManagement -Scope CurrentUser -AllowPrerelease -Force
+
+# Create or update an Alert Processing Rule that applies an action group
+Set-AzAlertProcessingRule `
+    -ResourceGroupName 'platform-skycraft-swc-rg' `
+    -Name 'skycraft-hours-apr' `
+  -Scope '/subscriptions/{sub-id}/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Compute/virtualMachines/dev-skycraft-swc-world-vm' `
+  -AlertProcessingRuleType 'AddActionGroups' `
+  -ActionGroupId '/subscriptions/{sub-id}/resourceGroups/platform-skycraft-swc-rg/providers/microsoft.insights/actionGroups/skycraft-ops-ag' `
+  -ScheduleTimeZone 'W. Europe Standard Time' `
+  -ScheduleReccurenceType 'Weekly' `
+  -ScheduleReccurenceDaysOfWeek 'Monday,Tuesday,Wednesday,Thursday,Friday' `
+  -ScheduleReccurenceStartTime '08:00:00' `
+  -ScheduleReccurenceEndTime '18:00:00' `
+    -Description 'Route SkyCraft CPU alerts through action group during business hours'
+```
+
+![Scheduling](images/step-5.1.10.png)
+
+**Expected Result**: Alert processing rule `skycraft-hours-apr` appears as **Enabled**, uses **Apply action group**, and targets the selected VM or resource scope during business hours.
+
+### Step 5.1.11: Pin KQL Query to Dashboard
 
 1. Navigate to `platform-skycraft-swc-law` → **Logs**
 2. Run the CPU performance query from Step 5.1.5
-3. Click **Pin to** → **Azure Dashboard**
+3. Click **Save** → **Pin to Azure Dashboard**
 4. Select **Create new** → Name: `SkyCraft-Ops`
 5. Click **Pin**
 6. Add the memory query from Step 5.1.6 to the same dashboard
 
+![Pin KQL Query to Dashboard](images/step-5.1.11.png)
+
 **Expected Result**: Dashboard `SkyCraft-Ops` is created with CPU and memory charts visible.
+
+> [!TIP]
+> You can reach dasboard by going to the main Azure Portal page and uder **Navigate** section select **Dashboard**
 
 ---
 
@@ -487,9 +768,10 @@ Add-AzMetricAlertRuleV2 `
 ### Resources Created
 
 - [ ] Log Analytics Workspace `platform-skycraft-swc-law` created in `platform-skycraft-swc-rg`
-- [ ] Data Collection Rule `skycraft-vm-dcr` created
+- [ ] VM Insights Data Collection Rule associated with the monitored VM (auto-generated or `skycraft-vminsights-dcr`)
 - [ ] Action Group `skycraft-ops-ag` created with email notification
 - [ ] Alert rule `skycraft-cpu-alert` created and active
+- [ ] Alert processing rule `skycraft-hours-apr` created and enabled
 - [ ] Dashboard `SkyCraft-Ops` created with at least 2 charts
 
 ### Configuration Verified
@@ -511,16 +793,19 @@ Add-AzMetricAlertRuleV2 `
 
 ### Issue 1: "No Data Received" in Log Analytics
 
-**Symptom**: KQL queries (Heartbeat, Perf) return empty results.
+**Symptom**: KQL queries (`Heartbeat`, `Perf`, or `InsightsMetrics`) return empty results.
 
-**Root Cause**: The Azure Monitor Agent has not finished initial data collection, or the Data Collection Rule is not correctly associated with the VM.
+**Root Cause**: The Azure Monitor Agent may still be initializing, the selected workspace scope may be wrong, or guest metrics may be routed to a different workspace than the one used in the lab.
 
 **Solution**:
 
 - Ensure the VM is **Running** (not deallocated)
 - Wait **10–15 minutes** after enabling VM Insights
+- In the **Logs** blade, confirm the query scope is workspace `platform-skycraft-swc-law` and set the time range to **Last 24 hours**
+- Run `Heartbeat` first to validate basic ingestion before testing performance queries
 - Verify the DCR association: VM → Settings → Extensions + applications → check `AzureMonitorLinuxAgent` is **Provisioning succeeded**
-- Check DCR exists: Monitor → Data Collection Rules → verify `skycraft-vm-dcr` lists your VM
+- Return to **Monitor** → **Virtual Machines** → **Configure monitor** and confirm **[Classic] Log-based metrics** targets `platform-skycraft-swc-law`
+- If the portal path installs AMA but no VM Insights DCR is associated, use the CLI or PowerShell workflow in Step 5.1.2 to create `skycraft-vminsights-dcr` and associate it manually
 
 ### Issue 2: Alert Not Firing Despite High CPU
 
@@ -570,13 +855,28 @@ az provider register --namespace Microsoft.Insights
 
 **Symptom**: Error `'Perf' is not a recognized table name` when running queries.
 
-**Root Cause**: The Data Collection Rule is not configured to collect performance counters, or data has not yet been ingested.
+**Root Cause**: Microsoft documents two different guest performance collection paths. **VM Insights** writes its predefined Linux and Windows performance dataset to `InsightsMetrics`, while **custom AMA performance counters** are written to `Perf`. If the VM was enabled through VM Insights, `Perf` may stay empty even when monitoring is working.
 
 **Solution**:
 
-- Verify the DCR collects performance counters: Monitor → Data Collection Rules → `skycraft-vm-dcr` → Data sources → verify **Performance Counters** is enabled
-- Wait at minimum 15 minutes for initial data ingestion
-- Try the `Heartbeat` table first — it populates faster
+- Confirm the workspace scope in Logs is `platform-skycraft-swc-law`
+- Run `Heartbeat` first to validate basic ingestion
+- For Linux VM Insights data, use `InsightsMetrics` queries from Steps 5.1.5–5.1.7
+- Reopen **Configure monitor** for the VM and verify **[Classic] Log-based metrics** is enabled for the workspace used in this lab
+- Do not expect `Perf` data unless you intentionally deploy a separate custom AMA performance-counter DCR
+- Wait at minimum 10-15 minutes after enabling monitoring for guest metrics to appear
+
+### Issue 6: Alert Fired but No Notification Sent
+
+**Symptom**: Alert rule is in fired state, but no email is received.
+
+**Root Cause**: An Alert Processing Rule is suppressing notifications due to scope or schedule settings.
+
+**Solution**:
+
+- Check **Monitor** → **Alerts** → **Alert processing rules**
+- Open `skycraft-hours-apr` and verify scope, rule filters, and schedule
+- Temporarily disable the rule and re-test alert notification delivery
 
 ---
 
@@ -639,6 +939,8 @@ az provider register --namespace Microsoft.Insights
 - [KQL Quick Reference](https://learn.microsoft.com/en-us/azure/data-explorer/kql-quick-reference)
 - [Azure Monitor Agent Overview](https://learn.microsoft.com/en-us/azure/azure-monitor/agents/agents-overview)
 - [Data Collection Rules](https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/data-collection-rule-overview)
+- [Configure alert processing rules in Azure Monitor](https://learn.microsoft.com/en-us/azure/azure-monitor/alerts/alerts-processing-rules)
+- [Azure Network Watcher documentation](https://learn.microsoft.com/en-us/azure/network-watcher/network-watcher-monitoring-overview)
 
 **Best Practices**:
 
@@ -649,6 +951,7 @@ az provider register --namespace Microsoft.Insights
 ## 📌 Module Navigation
 
 [← Back to Module 5 Index](../README.md)
+[← Previous Lab: 4.4 - Storage Security](../../module-4-storage/4.4-storage-security/lab-guide-4.4.md)
 
 [Next Lab: 5.2 - Business Continuity & Disaster Recovery →](../5.2-business-continuity/lab-guide-5.2.md)
 
@@ -663,19 +966,21 @@ az provider register --namespace Microsoft.Insights
 ✅ Queried heartbeat, CPU, memory, and disk data using Kusto Query Language (KQL)
 ✅ Created an Action Group (`skycraft-ops-ag`) with email notification
 ✅ Configured a metric alert (`skycraft-cpu-alert`) for CPU > 80% threshold
+✅ Added an alert processing rule (`skycraft-hours-apr`) for controlled notification routing
 ✅ Built a custom Azure Dashboard (`SkyCraft-Ops`) for operational visibility
 
 **Infrastructure Deployed**:
 
-| Resource             | Name                        | Configuration                    |
-| -------------------- | --------------------------- | -------------------------------- |
-| Log Analytics WS     | `platform-skycraft-swc-law` | Sweden Central, 30-day retention |
-| Data Collection Rule | `skycraft-vm-dcr`           | Perf counters + Syslog           |
-| Action Group         | `skycraft-ops-ag`           | Email notification               |
-| Metric Alert         | `skycraft-cpu-alert`        | CPU > 80%, Sev 2, 5 min window   |
-| Azure Dashboard      | `SkyCraft-Ops`              | CPU + Memory charts              |
+| Resource              | Name                                                        | Configuration                          |
+| --------------------- | ----------------------------------------------------------- | -------------------------------------- |
+| Log Analytics WS      | `platform-skycraft-swc-law`                                 | Sweden Central, 30-day retention       |
+| Data Collection Rule  | Auto-generated VM Insights DCR or `skycraft-vminsights-dcr` | Guest performance to `InsightsMetrics` |
+| Action Group          | `skycraft-ops-ag`                                           | Email notification                     |
+| Metric Alert          | `skycraft-cpu-alert`                                        | CPU > 80%, Sev 2, 5 min window         |
+| Alert Processing Rule | `skycraft-hours-apr`                                        | Business-hours notification flow       |
+| Azure Dashboard       | `SkyCraft-Ops`                                              | CPU + Memory charts                    |
 
-**Time Spent**: ~2 hours
+**Time Spent**: ~2.5 hours
 
 **Ready for Lab 5.2?** Next, you'll implement backup and disaster recovery for SkyCraft VMs and storage using Recovery Services Vault and Azure Site Recovery.
 
