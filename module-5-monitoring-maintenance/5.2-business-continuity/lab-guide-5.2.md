@@ -1,4 +1,4 @@
-# Lab 5.2: Business Continuity & Disaster Recovery (2 hours)
+# Lab 5.2: Business Continuity & Disaster Recovery (2.5 hours)
 
 ## 🎯 Learning Objectives
 
@@ -73,14 +73,14 @@ graph TB
 
 ---
 
-## ⏱️ Estimated Time: 2 hours
+## ⏱️ Estimated Time: 2.5 hours
 
-- **Section 1**: Backup & Recovery Concepts (15 min)
-- **Section 2**: Recovery Services Vault & VM Backup (30 min)
-- **Section 3**: Backup Vault & Blob Protection (25 min)
-- **Section 4**: Azure Site Recovery & Cross-Region DR (30 min)
-- **Section 5**: Recovery Simulation (10 min)
-- **Section 6**: Reports & Alerts (10 min)
+- **Section 1**: Backup & Recovery Concepts (20 min)
+- **Section 2**: Recovery Services Vault & VM Backup (35 min)
+- **Section 3**: Backup Vault & Blob Protection (30 min)
+- **Section 4**: Azure Site Recovery & Cross-Region DR (35 min)
+- **Section 5**: Recovery Simulation (15 min)
+- **Section 6**: Reports & Alerts (15 min)
 
 ---
 
@@ -105,10 +105,13 @@ Before starting this lab:
 
 ```azurecli
 # Verify VM is running
-az vm show --resource-group prod-skycraft-swc-rg --name prod-skycraft-swc-auth-vm --query "{Name:name,Status:provisioningState}" --output table
+az vm show -d --resource-group prod-skycraft-swc-rg --name prod-skycraft-swc-auth-vm --query "{Name:name,Status:powerState}" --output table
 
 # Verify storage account exists
 az storage account show --name prodskycraftswcsa --query "{Name:name,Location:location}" --output table
+
+# Verify Log Analytics Workspace exists
+az monitor log-analytics workspace show --resource-group platform-skycraft-swc-rg --workspace-name platform-skycraft-swc-law --query "{Name:name,ProvisioningState:provisioningState}" --output table
 
 # Check Norway East vCPU quota
 az vm list-usage --location norwayeast --query "[?contains(name.value,'standardDSv3Family')].{Name:name.localizedValue,Current:currentValue,Limit:limit}" --output table
@@ -116,7 +119,7 @@ az vm list-usage --location norwayeast --query "[?contains(name.value,'standardD
 
 ---
 
-## 📖 Section 1: Backup & Recovery Concepts (15 min)
+## 📖 Section 1: Backup & Recovery Concepts (20 min)
 
 ### What is Azure Backup?
 
@@ -140,7 +143,7 @@ Azure offers two types of backup vaults:
 | **LRS**    | Rack/drive failures | Development backups (cost savings) |
 | **GRS**    | Regional outages    | Production backups (recommended)   |
 
-> **SkyCraft Choice**: We chose **GRS** for the Recovery Services Vault because production game server backups must survive a regional outage. The ~2x cost increase over LRS is justified by the critical nature of world database data. Development VMs use LRS backups since they can be rebuilt from Bicep templates.
+> **SkyCraft Choice**: We chose **LRS** for the Recovery Services Vault to keep lab costs low. In a production environment, GRS would be recommended for production game server backups to survive a regional outage. For this lab, LRS provides sufficient protection against hardware failures while remaining cost-effective. Development VMs can be rebuilt from Bicep templates regardless of redundancy tier.
 
 ### RPO and RTO
 
@@ -149,7 +152,7 @@ Azure offers two types of backup vaults:
 
 ---
 
-## 📖 Section 2: Recovery Services Vault & VM Backup (30 min)
+## ⚙️ Section 2: Recovery Services Vault & VM Backup (35 min)
 
 ### Step 5.2.1: Create the Recovery Services Vault
 
@@ -157,7 +160,7 @@ Azure offers two types of backup vaults:
 
 1. Navigate to **Azure Portal** → Search for **Recovery Services vaults**
 2. Click **+ Create**
-3. Fill in the details:
+3. On the **Basics** tab, fill in the details:
 
 | Field          | Value                       |
 | :------------- | :-------------------------- |
@@ -166,10 +169,22 @@ Azure offers two types of backup vaults:
 | Vault Name     | `platform-skycraft-swc-rsv` |
 | Region         | **Sweden Central**          |
 
-4. Click **Review + Create** → **Create**
+4. Click **Next: Redundancy**
+5. On the **Redundancy** tab, configure:
 
-> [!IMPORTANT]
-> Change the **Storage Replication Type** immediately after creation **before any backups are performed**. Go to vault → **Properties** → **Backup Configuration** → **Update** → Select **Geo-redundant**. This cannot be changed after the first backup.
+| Field                      | Value                    |
+| :------------------------- | :----------------------- |
+| Backup Storage Redundancy  | **Locally-redundant**    |
+| Cross Region Restore       | **Disable**              |
+
+6. Click **Next: Encryption**
+7. On the **Encryption** tab, leave the default:
+   - Encryption type: **Use Microsoft-managed key (default)**
+
+8. Click **Review + Create** → **Create**
+
+> [!NOTE]
+> The vault creation wizard now includes a dedicated **Redundancy** tab where you set `Backup Storage Redundancy` during creation. Once any backup is stored in the vault, this setting **cannot be changed**, so it is critical to configure it correctly here.
 
 #### Option 2: Azure CLI
 
@@ -180,11 +195,11 @@ az backup vault create \
   --name platform-skycraft-swc-rsv \
   --location swedencentral
 
-# Set storage redundancy to GRS (must be done before first backup)
+# Set storage redundancy to LRS (must be done before first backup)
 az backup vault backup-properties set \
   --resource-group platform-skycraft-swc-rg \
   --name platform-skycraft-swc-rsv \
-  --backup-storage-redundancy GeoRedundant
+  --backup-storage-redundancy LocallyRedundant
 ```
 
 #### Option 3: PowerShell
@@ -196,31 +211,41 @@ New-AzRecoveryServicesVault `
     -Name 'platform-skycraft-swc-rsv' `
     -Location 'swedencentral'
 
-# Set storage redundancy to GRS
+# Set storage redundancy to LRS
 $vault = Get-AzRecoveryServicesVault -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platform-skycraft-swc-rsv'
-Set-AzRecoveryServicesBackupProperty -Vault $vault -BackupStorageRedundancy GeoRedundant
+Set-AzRecoveryServicesBackupProperty -Vault $vault -BackupStorageRedundancy LocallyRedundant
 ```
 
-**Expected Result**: Vault `platform-skycraft-swc-rsv` is deployed with GRS redundancy.
+**Expected Result**: Vault `platform-skycraft-swc-rsv` is deployed with LRS redundancy.
 
 ### Step 5.2.2: Create a Backup Policy
 
 #### Option 1: Azure Portal (GUI)
 
-1. Inside the vault, go to **Manage** → **Backup policies**
-2. Click **+ Add** → **Azure Virtual Machine**
-3. Configure the policy:
+1. Inside the vault, click **Overview** → **+ Backup**
+2. Where is your workload running? **Azure**
+3. What do you want to back up? **Virtual machine**
+4. Click **Backup**
+5. In **Configure backup**, set:
 
 | Field                     | Value                                |
 | :------------------------ | :----------------------------------- |
+| Policy sub type           | **Standard**                         |
 | Policy name               | `SkyCraft-Daily-Prod`                |
 | Frequency                 | **Daily**                            |
 | Time                      | **02:00 AM**                         |
 | Timezone                  | **(UTC) Coordinated Universal Time** |
 | Instant Restore retention | **2 days**                           |
 | Retention of daily backup | **30 days**                          |
+| Consistency type          | **Application or file-system consistent** |
 
-4. Click **Create**
+6. Click **Create a new policy** (next to Backup policy), then save the policy
+7. In **Virtual machines**, click **Add**
+8. In **Select virtual machines**, choose `prod-skycraft-swc-auth-vm` and click **OK**
+9. Click **Enable backup**
+
+> [!NOTE]
+> The portal also offers **Enhanced** policy sub type. For this lab, use **Standard** to keep the backup flow aligned with the expected once-per-day schedule and retention settings.
 
 #### Option 2: Azure CLI
 
@@ -248,28 +273,53 @@ az backup policy set \
   }'
 ```
 
-**Expected Result**: Policy `SkyCraft-Daily-Prod` created with daily 2 AM backup and 30-day retention.
+#### Option 3: PowerShell
 
-### Step 5.2.3: Enable VM Backup
+```powershell
+# Create a VM backup policy with daily schedule and 30-day retention
+$vault = Get-AzRecoveryServicesVault -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platform-skycraft-swc-rsv'
+Set-AzRecoveryServicesVaultContext -Vault $vault
+
+$schedule = Get-AzRecoveryServicesBackupSchedulePolicyObject -WorkloadType AzureVM
+$retention = Get-AzRecoveryServicesBackupRetentionPolicyObject -WorkloadType AzureVM
+
+$schedule.ScheduleRunTimes = @([DateTime]::Parse('2024-01-01T02:00:00Z'))
+$retention.DailySchedule.DurationCountInDays = 30
+$retention.DailySchedule.RetentionTimes = @([DateTime]::Parse('2024-01-01T02:00:00Z'))
+
+New-AzRecoveryServicesBackupProtectionPolicy `
+    -Name 'SkyCraft-Daily-Prod' `
+    -WorkloadType AzureVM `
+    -RetentionPolicy $retention `
+    -SchedulePolicy $schedule
+```
+
+**Expected Result**: Policy `SkyCraft-Daily-Prod` is created, VM is selected in the backup configuration, and protection is enabled.
+
+![Configure backup and VM selection](images/step-5.2.2.png)
+
+### Step 5.2.3: Enable or Verify VM Backup
 
 #### Option 1: Azure Portal (GUI)
 
-1. In the vault, click **Overview** → **+ Backup**
-2. Where is your workload running? **Azure**
-3. What do you want to back up? **Virtual machine**
-4. Click **Backup**
-5. Select the policy: `SkyCraft-Daily-Prod`
-6. Click **Add** → Find and select `prod-skycraft-swc-auth-vm`
-7. Click **Enable Backup**
+1. In the vault, go to **Backup items** → **Azure Virtual Machine**
+2. Verify `prod-skycraft-swc-auth-vm` appears as a protected item
+3. Open the item and review policy `SkyCraft-Daily-Prod`
+4. Confirm protection state is enabled before continuing
 
 #### Option 2: Azure CLI
 
 ```bash
-# Enable backup for prod VM
+# Enable backup for prod VM — use full resource ID (--vm-resource-group is not a valid flag)
+vmId=$(az vm show \
+  --resource-group prod-skycraft-swc-rg \
+  --name prod-skycraft-swc-auth-vm \
+  --query id --output tsv)
+
 az backup protection enable-for-vm \
   --resource-group platform-skycraft-swc-rg \
   --vault-name platform-skycraft-swc-rsv \
-  --vm prod-skycraft-swc-auth-vm \
+  --vm "$vmId" \
   --policy-name SkyCraft-Daily-Prod
 ```
 
@@ -290,6 +340,8 @@ Enable-AzRecoveryServicesBackupProtection `
 > The first backup is an **Initial Replica** (full backup). Subsequent backups are **Incrementals** (only changed blocks), making them faster and cheaper.
 
 **Expected Result**: VM `prod-skycraft-swc-auth-vm` appears under **Protected items** → **Backup items** → **Azure Virtual Machine**.
+
+![Enable or Verify VM Backup](images/step-5.2.3.png)
 
 ### Step 5.2.4: Trigger an On-Demand Backup
 
@@ -313,6 +365,23 @@ az backup protection backup-now \
   --retain-until $(date -d '+30 days' +%d-%m-%Y)
 ```
 
+#### Option 3: PowerShell
+
+```powershell
+# Trigger immediate backup for the protected VM
+$vault = Get-AzRecoveryServicesVault -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platform-skycraft-swc-rsv'
+Set-AzRecoveryServicesVaultContext -Vault $vault
+
+$item = Get-AzRecoveryServicesBackupItem `
+    -WorkloadType AzureVM `
+    -VaultId $vault.ID |
+    Where-Object { $_.FriendlyName -eq 'prod-skycraft-swc-auth-vm' }
+
+Backup-AzRecoveryServicesBackupItem `
+    -Item $item `
+    -ExpiryDateTimeUTC (Get-Date).ToUniversalTime().AddDays(30)
+```
+
 > [!NOTE]
 > Initial backup can take 15-60 minutes depending on disk size. You can continue with the next sections while it runs.
 
@@ -320,7 +389,7 @@ az backup protection backup-now \
 
 ---
 
-## 📖 Section 3: Backup Vault & Blob Protection (25 min)
+## ⚙️ Section 3: Backup Vault & Blob Protection (30 min)
 
 ### What is a Backup Vault?
 
@@ -332,7 +401,7 @@ az backup protection backup-now \
 
 1. Search for **Backup vaults**
 2. Click **+ Create**
-3. Fill in the details:
+3. On the **Basics** tab, fill in the details:
 
 | Field                     | Value                       |
 | :------------------------ | :-------------------------- |
@@ -342,7 +411,21 @@ az backup protection backup-now \
 | Region                    | **Sweden Central**          |
 | Backup Storage Redundancy | **Locally-redundant (LRS)** |
 
-4. Click **Review + create** → **Create**
+4. Click **Next: Vault Properties**
+5. On the **Vault Properties** tab, review and configure:
+
+| Section                  | Field                      | Value                              |
+| :----------------------- | :------------------------- | :--------------------------------- |
+| **Security Settings**    | Soft Delete Retention      | **14 days** (default)              |
+| **Managed Identity**     | Enable System Identity     | **Enabled** (already set)          |
+| **Encryption Settings**  | Encryption type            | **Use Microsoft-managed key** (default) |
+| **Restore Settings**     | Cross Subscription Restore | **Enable** (optional for this lab) |
+
+6. Click **Next: Tags** (or skip to review)
+7. Click **Review + create** → **Create**
+
+> [!NOTE]
+> The **Soft Delete Retention Period** of 14 days is included free of charge and provides ransomware protection. If you accidentally delete a backup, it can be recovered within this window.
 
 #### Option 2: Azure CLI
 
@@ -390,27 +473,126 @@ New-AzDataProtectionBackupVault `
 
 5. Click **Create**
 
+#### Option 2: Azure CLI
+
+```bash
+# Create blob backup policy from a policy template
+az dataprotection backup-policy get-default-policy-template \
+  --datasource-type AzureBlob \
+  --output json > blob-policy-template.json
+
+# Edit retention in blob-policy-template.json to 30 days, then create policy
+az dataprotection backup-policy create \
+  --resource-group platform-skycraft-swc-rg \
+  --vault-name platform-skycraft-swc-bv \
+  --name SkyCraft-Blob-Policy \
+  --policy blob-policy-template.json
+```
+
+#### Option 3: PowerShell
+
+```powershell
+# Create a blob backup policy from default template
+$template = Get-AzDataProtectionPolicyTemplate -DatasourceType AzureBlob
+
+# Configure policy name and retention settings as needed
+$template.Name = 'SkyCraft-Blob-Policy'
+
+New-AzDataProtectionBackupPolicy `
+    -ResourceGroupName 'platform-skycraft-swc-rg' `
+    -VaultName 'platform-skycraft-swc-bv' `
+    -Name 'SkyCraft-Blob-Policy' `
+    -Policy $template
+```
+
 **Expected Result**: Policy `SkyCraft-Blob-Policy` created in the Backup Vault.
+
+### Step 5.2.7: Enable Blob Backup Protection on Storage Account
+
+#### Option 1: Azure Portal (GUI)
+
+1. In the Backup Vault (`platform-skycraft-swc-bv`), click **Overview** → **+ Backup**
+2. Under **Datasource type**, select **Azure Blobs (Azure Storage)**
+3. Click **Continue**
+4. Under **Backup policy**, select `SkyCraft-Blob-Policy`
+5. Under **Select data source**, click **Select** and find `prodskycraftswcsa` in `prod-skycraft-swc-rg`
+6. Click **Configure backup**
+
+> [!IMPORTANT]
+> To use **Assign missing roles**, your user account must have permission to create role assignments at the storage account scope (for example, **Owner** or **User Access Administrator**).
+> If **Validate** reports **UserErrorMissingRequiredPermissions**, click **Assign missing roles**, wait 5-10 minutes for RBAC propagation, and then click **Revalidate** before enabling backup.
+
+#### Option 2: Azure CLI
+
+```bash
+# Initialize a backup instance template for blob storage
+az dataprotection backup-instance initialize \
+  --datasource-type AzureBlob \
+  --datasource-location swedencentral \
+  --datasource-id "$(az storage account show --name prodskycraftswcsa --resource-group prod-skycraft-swc-rg --query id -o tsv)" \
+  --policy-id "$(az dataprotection backup-policy show --resource-group platform-skycraft-swc-rg --vault-name platform-skycraft-swc-bv --name SkyCraft-Blob-Policy --query id -o tsv)" \
+  > blob-instance.json
+
+# Enable blob protection
+az dataprotection backup-instance create \
+  --resource-group platform-skycraft-swc-rg \
+  --vault-name platform-skycraft-swc-bv \
+  --backup-instance blob-instance.json
+```
+
+#### Option 3: PowerShell
+
+```powershell
+$vault = Get-AzDataProtectionBackupVault -ResourceGroupName 'platform-skycraft-swc-rg' -VaultName 'platform-skycraft-swc-bv'
+$storage = Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa'
+$policy = Get-AzDataProtectionBackupPolicy -ResourceGroupName 'platform-skycraft-swc-rg' -VaultName 'platform-skycraft-swc-bv' -Name 'SkyCraft-Blob-Policy'
+
+$backupInstance = Initialize-AzDataProtectionBackupInstance `
+    -DatasourceType AzureBlob `
+    -DatasourceLocation 'swedencentral' `
+    -DatasourceId $storage.Id `
+    -PolicyId $policy.Id
+
+New-AzDataProtectionBackupInstance `
+    -ResourceGroupName 'platform-skycraft-swc-rg' `
+    -VaultName 'platform-skycraft-swc-bv' `
+    -BackupInstance $backupInstance
+```
+
+**Expected Result**: Storage account `prodskycraftswcsa` appears under Backup Vault → **Backup instances** with status **Protection configured**.
+
+![Enable Blob Backup](images/step-5.2.7.png)
 
 ---
 
-## 📖 Section 4: Azure Site Recovery (30 min)
+## ⚙️ Section 4: Azure Site Recovery & Cross-Region DR (35 min)
 
 ### What is Azure Site Recovery?
 
 **Azure Site Recovery (ASR)** provides disaster recovery by replicating VMs from a primary region to a secondary region. During an outage, you **fail over** to the secondary region, and when the primary recovers, you **fail back**.
 
-### Step 5.2.7: Enable Replication
+### Step 5.2.8: Enable Replication
 
 #### Option 1: Azure Portal (GUI)
 
 1. Navigate to your VM: `prod-skycraft-swc-auth-vm`
 2. Go to **Operations** → **Disaster recovery**
-3. Target region: **Norway East**
-4. Click **Advanced settings** to review:
-   - ASR creates a cache storage account in the source region
-   - ASR creates target resource group, VNet, and storage in Norway East
-5. Click **Review + Start replication**
+3. On the **Basics** tab, set target region to **Norway East**
+4. Open **Advanced settings** and review **Target settings**:
+
+| Setting                  | Source (expected)            | Target (recommended/default)            |
+| :----------------------- | :--------------------------- | :-------------------------------------- |
+| Subscription             | [Your subscription]          | Same subscription                       |
+| VM resource group        | `prod-skycraft-swc-rg`       | `(new) prod-skycraft-swc-rg-asr`        |
+| Virtual network          | `prod-skycraft-swc-vnet`     | `(new) prod-skycraft-swc-vnet-asr`      |
+| Availability             | **Single instance**          | Keep default                            |
+
+5. In **Storage settings**, keep defaults (ASR creates cache storage and replica managed disks)
+6. In **Replication settings**, keep defaults (ASR creates recovery policy/vault resources when needed)
+7. In **Extension settings**, keep:
+  - **Update settings**: `Allow ASR to manage`
+  - **Automation account**: Create/select the suggested automation account
+8. Click **Review + Start replication**
 
 > [!NOTE]
 > Initial synchronization can take **15-30 minutes** depending on disk size. The VM remains online during replication.
@@ -420,19 +602,19 @@ New-AzDataProtectionBackupVault `
 
 #### Option 2: Azure CLI
 
-```bash
-# Enable replication (simplified — Portal is recommended for initial setup)
-# ASR CLI commands require multiple steps: create fabric, protection container,
-# replication policy, and mapping. Use Portal for first-time setup.
-az site-recovery vault create \
-  --resource-group platform-skycraft-swc-rg \
-  --vault-name platform-skycraft-swc-rsv \
-  --location swedencentral
-```
+> [!NOTE]
+> Full ASR replication via CLI requires multiple steps: registering site recovery fabric, creating protection containers, replication policies, and container mappings. This is significantly more complex than the portal flow and is **not recommended** for initial setup. Use **Option 1 (Azure Portal)** for enabling replication.
+
+#### Option 3: PowerShell
+
+> [!NOTE]
+> The Azure PowerShell `Az.RecoveryServices` cmdlets for enabling ASR replication (`New-AzRecoveryServicesAsrReplicationProtectedItem`) require pre-created fabric, container, and policy objects that are normally provisioned automatically by the portal wizard. Use **Option 1 (Azure Portal)** for initial setup. See [Azure Site Recovery PowerShell documentation](https://learn.microsoft.com/en-us/azure/site-recovery/azure-to-azure-powershell) for fully scripted approaches.
 
 **Expected Result**: Replication status shows **Enabling protection** → eventually **Protected** (5-30 minutes).
 
-### Step 5.2.8: Perform Test Failover
+![Azure Site Recovery](images/step-5.2.8.png)
+
+### Step 5.2.9: Perform Test Failover
 
 > [!IMPORTANT]
 > **Always run a test failover before relying on ASR.** This validates that the replicated VM boots successfully in the DR region without affecting production.
@@ -452,11 +634,13 @@ az site-recovery vault create \
 
 **Expected Result**: Test VM boots successfully in Norway East. Cleanup removes all temporary resources.
 
+![Perform Test Failover](images/step-5.2.9.png)
+
 ---
 
-## 📖 Section 5: Recovery Simulation (10 min)
+## 📖 Section 5: Recovery Simulation (15 min) (Optional)
 
-### Step 5.2.9: File-Level Recovery
+### Step 5.2.10: File-Level Recovery
 
 Instead of restoring the entire VM, you can mount a specific recovery point as a drive:
 
@@ -473,15 +657,47 @@ Instead of restoring the entire VM, you can mount a specific recovery point as a
 
 ---
 
-## 📖 Section 6: Reports & Alerts (10 min)
+## 📖 Section 6: Reports & Alerts (15 min)
 
-### Step 5.2.10: Configure Backup Reports
+### Step 5.2.11: Configure Backup Reports
 
-1. Navigate to **Backup center** → **Backup reports**
-2. Link your **Log Analytics Workspace** (`platform-skycraft-swc-law`) to enable reporting
-3. View the **Backup Instances** report to see protection status across all vaults
+1. Confirm your **Log Analytics Workspace** `platform-skycraft-swc-law` exists and is accessible
+2. Configure diagnostics on the **Recovery Services Vault**:
+  - Go to `platform-skycraft-swc-rsv` → **Monitoring** → **Diagnostic settings** → **+ Add diagnostic setting**
+  - Name: `rsv-backup-reports-diag`
+  - Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`
+  - Table format: **Resource specific**
+  - Select categories:
+    - **Core Azure Backup Data**
+    - **Addon Azure Backup Job Data**
+    - **Addon Azure Backup Policy Data**
+    - **Addon Azure Backup Protected Instance Data**
+    - **Azure Backup Operations**
+  - Click **Save**
+3. Configure diagnostics on the **Backup Vault**:
+  - Go to `platform-skycraft-swc-bv` → **Monitoring** → **Diagnostic settings** → **+ Add diagnostic setting**
+  - Name: `bv-backup-reports-diag`
+  - Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`
+  - Select categories:
+    - **Core Azure Backup Data**
+    - **Addon Azure Backup Job Data**
+    - **Addon Azure Backup Policy Data**
+    - **Addon Azure Backup Protected Instance Data**
+  - Click **Save**
+4. Open **Backup center** → **Backup reports**
+5. Select workspace `platform-skycraft-swc-law`
+6. Validate the main tabs:
+  - **Summary** (high-level estate status)
+  - **Backup Items** (protected items and storage trend)
+  - **Jobs** (success/failure trends and error reasons)
 
-### Step 5.2.11: Configure Backup Alerts
+> [!IMPORTANT]
+> Backup reports only show data after vault diagnostics are configured. Initial ingestion can take time (typically 15-60 minutes, and up to 24 hours for first full data push).
+
+> [!NOTE]
+> To view reports in Backup Center, you need read access to the vaults and read access to the Log Analytics workspace.
+
+### Step 5.2.12: Configure Backup Alerts
 
 1. In **Backup center**, click **Alerts**
 2. Review any existing Critical or Warning alerts
@@ -495,10 +711,11 @@ Instead of restoring the entire VM, you can mount a specific recovery point as a
 
 ### Resources Created
 
-- [ ] Recovery Services Vault `platform-skycraft-swc-rsv` (GRS)
+- [ ] Recovery Services Vault `platform-skycraft-swc-rsv` (LRS)
 - [ ] Backup Vault `platform-skycraft-swc-bv` (LRS)
 - [ ] Backup policy `SkyCraft-Daily-Prod` (daily, 30-day retention)
 - [ ] Blob backup policy `SkyCraft-Blob-Policy` (30-day retention)
+- [ ] Blob backup protection enabled on `prodskycraftswcsa`
 
 ### Protection Verified
 
@@ -583,6 +800,22 @@ Navigate to **Subscription** → **Resource Providers** → verify both show **R
 - Use `sudo` when running the script on Linux
 - Try a different recovery point if the issue persists
 
+### Issue 6: Blob Backup Validation Fails with `UserErrorMissingRequiredPermissions`
+
+**Symptom**: In Step 5.2.7, **Validate** fails on the **Datasources** tab and the error pane shows `UserErrorMissingRequiredPermissions`.
+
+**Root Cause**: The Backup Vault system-assigned managed identity does not yet have the required RBAC roles on the storage account, or role assignment changes are still propagating.
+
+**Solution**:
+
+1. In **Configure Backup** → **Datasources**, select the storage account row and click **Assign missing roles**.
+2. Wait 5-10 minutes and click **Revalidate**.
+3. If the error persists, verify your user can assign roles at storage-account scope (**Owner** or **User Access Administrator**).
+4. Manually confirm the Backup Vault managed identity has required access on `prodskycraftswcsa`:
+  - `Storage Blob Data Owner`
+  - `Storage Account Backup Contributor`
+5. Re-run validation, then click **Enable backup**.
+
 ---
 
 ## 🎓 Knowledge Check
@@ -665,10 +898,10 @@ Navigate to **Subscription** → **Resource Providers** → verify both show **R
 
 **What You Accomplished:**
 
-✅ Deployed a **Recovery Services Vault** (`platform-skycraft-swc-rsv`) with GRS redundancy
+✅ Deployed a **Recovery Services Vault** (`platform-skycraft-swc-rsv`) with LRS redundancy
 ✅ Created backup policy `SkyCraft-Daily-Prod` (daily at 2 AM, 30-day retention)
 ✅ Enabled and triggered VM backup for the production server
-✅ Deployed a **Backup Vault** (`platform-skycraft-swc-bv`) for Blob operational backup
+✅ Deployed a **Backup Vault** (`platform-skycraft-swc-bv`) and enabled blob protection on `prodskycraftswcsa`
 ✅ Configured **Azure Site Recovery** replication to Norway East
 ✅ Performed a successful **test failover** to validate the BCDR strategy
 ✅ Explored **File-Level Recovery** for granular data restoration
@@ -677,13 +910,14 @@ Navigate to **Subscription** → **Resource Providers** → verify both show **R
 
 | Resource                | Name                        | Configuration                    |
 | ----------------------- | --------------------------- | -------------------------------- |
-| Recovery Services Vault | `platform-skycraft-swc-rsv` | Sweden Central, GRS, Soft Delete |
+| Recovery Services Vault | `platform-skycraft-swc-rsv` | Sweden Central, LRS, Soft Delete |
 | Backup Vault            | `platform-skycraft-swc-bv`  | Sweden Central, LRS              |
 | VM Backup Policy        | `SkyCraft-Daily-Prod`       | Daily 2 AM, 30-day retention     |
 | Blob Backup Policy      | `SkyCraft-Blob-Policy`      | 30-day retention                 |
+| Blob Backup Instance    | `prodskycraftswcsa`         | Protection configured            |
 | Site Recovery           | ASR to Norway East          | Prod VM replicated               |
 
-**Time Spent**: ~2 hours
+**Time Spent**: ~2.5 hours
 
 **Ready for Lab 5.3?** Next, you'll use Network Watcher to diagnose and troubleshoot connectivity issues across the SkyCraft infrastructure.
 

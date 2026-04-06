@@ -254,3 +254,52 @@ resource resUpdate 'Microsoft.Storage/storageAccounts@2023-01-01' = {
 **Rule**: A concept should be **taught once** (in its most natural module) and **referenced** elsewhere. If a step exists in two labs, consolidate it to the earlier lab and add a cross-reference.
 
 **Example**: Key rotation was taught in both Lab 4.1 (Step 4.1.13) and Lab 4.4 (old Section 2). Consolidated CLI/PS rotation into Lab 4.1 and replaced Lab 4.4's section with ad-hoc SAS tokens.
+
+### 9.4 Azure Backup Policy Cannot Be Updated via ARM (E003)
+
+**Error**: `UserErrorBMSUpdatePolicyNotSupported: Update of existing policy is not supported. Please create a new policy.`
+
+**Root Cause**: Azure Backup (`Microsoft.RecoveryServices/vaults/backupPolicies` and `Microsoft.DataProtection/backupVaults/backupPolicies`) rejects ARM PUT updates on any existing policy. Bicep's idempotent PUT behaviour triggers this error on every re-deployment after the first.
+
+**Solution**: Do not define backup policies in Bicep. Create them in the deployment PowerShell script using an existence-check pattern:
+
+```powershell
+# ✅ CORRECT — create only if not present
+$existing = az backup policy show --resource-group $rg --vault-name $vault --name $policyName --output json 2>$null | ConvertFrom-Json
+if (-not $existing) {
+    az backup policy set --resource-group $rg --vault-name $vault --name $policyName --policy "@policy.json" --output none
+}
+```
+
+### 9.5 Recovery Services Vault Storage Redundancy Is Locked After First Backup (E004)
+
+**Error**: `BMSUserErrorRedundancySettingsUseVaultApi: Redundancy settings for this vault cannot be modified using this API. Since the Vault API was previously used to update the redundancy settings for this vault, you must again use the Vault API to make any further changes to this property.`
+
+**Root Cause**: The `Microsoft.RecoveryServices/vaults/backupstorageconfig` sub-resource cannot be applied after the vault's `storageTypeState` is `Locked` (which happens after the first backup is stored). Additionally, the `redundancySettings` property in the vault body type is **read-only** in the Bicep type system (BCP073).
+
+**Solution**: Set storage redundancy in the deployment PowerShell script using `az backup vault backup-properties set`, guarded by an idempotency check:
+
+```powershell
+# ✅ CORRECT — only set if not already LocallyRedundant and not Locked
+$props = az backup vault backup-properties show --resource-group $rg --name $vaultName --output json 2>$null | ConvertFrom-Json
+if ($props.properties.storageModelType -ne 'LocallyRedundant') {
+    az backup vault backup-properties set --resource-group $rg --name $vaultName --backup-storage-redundancy LocallyRedundant --output none
+}
+# If already Locked at desired value, no action needed.
+```
+
+### 9.6 `az backup item list --workload-type VM` Returns Invalid Input (E005)
+
+**Error**: `BMSUserErrorInvalidInput: Input provided for the call is invalid.`
+
+**Root Cause**: The `--workload-type VM` parameter value is not accepted by this command version of `az backup item list`.
+
+**Solution**: Use `--backup-management-type AzureIaasVM` instead:
+
+```powershell
+# ❌ WRONG
+az backup item list --vault-name $vault --resource-group $rg --workload-type VM
+
+# ✅ CORRECT
+az backup item list --vault-name $vault --resource-group $rg --backup-management-type AzureIaasVM
+```

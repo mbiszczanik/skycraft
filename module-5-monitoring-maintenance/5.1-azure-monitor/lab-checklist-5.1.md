@@ -18,6 +18,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Platform`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `[your Azure identity / student name]`
 
 ---
 
@@ -50,7 +51,7 @@
 
 - [ ] Action Group name: `skycraft-ops-ag`
 - [ ] Resource group: `platform-skycraft-swc-rg`
-- [ ] Display name: `SkyCraft Ops`
+- [ ] Display name: `SkyCraftOps`
 - [ ] Email notification configured with valid email address
 
 ### Metric Alert Rule
@@ -64,6 +65,26 @@
 - [ ] Severity: **Sev 2 - Warning**
 - [ ] Action Group: `skycraft-ops-ag` linked
 - [ ] Alert rule status: **Enabled**
+
+---
+
+## ✅ Alert Processing Rule Verification
+
+### Alert Processing Rule
+
+- [ ] APR name: `skycraft-hours-apr`
+- [ ] Resource group: `platform-skycraft-swc-rg`
+- [ ] Rule type: **Apply action groups**
+- [ ] Action Group: `skycraft-ops-ag` linked
+- [ ] Schedule: Business hours only (Mon–Fri, 08:00–18:00, W. Europe Standard Time)
+- [ ] APR status: **Enabled**
+
+### Tags
+
+- [ ] Tag: `Project` = `SkyCraft`
+- [ ] Tag: `Environment` = `Platform`
+- [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `[your Azure identity / student name]`
 
 ---
 
@@ -214,6 +235,96 @@ Get-AzActionGroup -ResourceGroupName 'platform-skycraft-swc-rg' |
 # skycraft-ops-ag   SkyCraftOps     True
 ```
 
+### Verify Data Collection Rule (Azure CLI)
+
+```azurecli
+az monitor data-collection rule show \
+  --name skycraft-vm-dcr \
+  --resource-group platform-skycraft-swc-rg \
+  --query "{Name:name,Location:location,Workspace:destinations.logAnalytics[0].workspaceResourceId}" \
+  --output table
+
+# Expected output:
+# Name              Location       Workspace
+# ----------------  -------------  ----------------------------------------------------------
+# skycraft-vm-dcr   swedencentral  .../platform-skycraft-swc-rg/.../platform-skycraft-swc-law
+```
+
+### Verify Data Collection Rule (PowerShell)
+
+```powershell
+$dcr = az monitor data-collection rule show `
+    --name skycraft-vm-dcr `
+    --resource-group platform-skycraft-swc-rg | ConvertFrom-Json
+
+[PSCustomObject]@{
+    Name        = $dcr.name
+    Location    = $dcr.location
+    Workspace   = $dcr.destinations.logAnalytics[0].workspaceResourceId
+} | Format-Table
+```
+
+### Verify Storage Diagnostic Setting (Azure CLI)
+
+```azurecli
+storageId=$(az storage account show \
+  --name platformskycraftswcsa \
+  --resource-group platform-skycraft-swc-rg \
+  --query id -o tsv)
+blobServiceId="${storageId}/blobServices/default"
+
+az monitor diagnostic-settings list \
+  --resource "$blobServiceId" \
+  --query "[?name=='skycraft-storage-diag'].{Name:name,Workspace:workspaceId}" \
+  --output table
+
+# Expected output:
+# Name                    Workspace
+# ----------------------  -----------------------------------------------
+# skycraft-storage-diag   .../platform-skycraft-swc-law
+```
+
+### Verify Storage Diagnostic Setting (PowerShell)
+
+```powershell
+$storage = Get-AzStorageAccount -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platformskycraftswcsa'
+$blobServiceId = "$($storage.Id)/blobServices/default"
+
+Get-AzDiagnosticSetting -ResourceId $blobServiceId |
+  Where-Object { $_.Name -eq 'skycraft-storage-diag' } |
+  Select-Object Name, @{N='Workspace';E={$_.WorkspaceId}} |
+  Format-Table
+```
+
+### Verify Alert Processing Rule (Azure CLI)
+
+```azurecli
+az monitor alert-processing-rule show \
+  --name skycraft-hours-apr \
+  --resource-group platform-skycraft-swc-rg \
+  --query "{Name:name,Enabled:properties.enabled,Type:properties.actions[0].actionType}" \
+  --output table
+
+# Expected output:
+# Name                Enabled  Type
+# ------------------  -------  -----------------
+# skycraft-hours-apr  True     AddActionGroups
+```
+
+### Verify Alert Processing Rule (PowerShell)
+
+```powershell
+$apr = az monitor alert-processing-rule show `
+    --name skycraft-hours-apr `
+    --resource-group platform-skycraft-swc-rg | ConvertFrom-Json
+
+[PSCustomObject]@{
+    Name    = $apr.name
+    Enabled = $apr.properties.enabled
+    Type    = $apr.properties.actions[0].actionType
+} | Format-Table
+```
+
 ---
 
 ## 📊 Monitoring Architecture Summary
@@ -221,12 +332,13 @@ Get-AzActionGroup -ResourceGroupName 'platform-skycraft-swc-rg' |
 | Component                | Name                        | Status | Verification Method              |
 | :----------------------- | :-------------------------- | :----- | :------------------------------- |
 | **Log Analytics WS**     | `platform-skycraft-swc-law` | [ ]    | CLI/PS workspace list            |
-| **Data Collection Rule** | `skycraft-vm-dcr`           | [ ]    | Monitor → Data Collection Rules  |
+| **Data Collection Rule** | `skycraft-vm-dcr`           | [ ]    | CLI/PS DCR show                  |
 | **VM Telemetry**         | AMA on dev/prod VMs         | [ ]    | KQL Heartbeat query returns data |
 | **Action Group**         | `skycraft-ops-ag`           | [ ]    | CLI/PS action-group list         |
 | **CPU Alert**            | `skycraft-cpu-alert`        | [ ]    | CLI/PS metric alert list         |
+| **Alert Processing Rule**| `skycraft-hours-apr`        | [ ]    | CLI/PS APR show                  |
 | **Dashboard**            | `SkyCraft-Ops`              | [ ]    | Visible in Portal → Dashboards   |
-| **Storage Diagnostics**  | Diagnostic setting          | [ ]    | Storage → Diagnostic settings    |
+| **Storage Diagnostics**  | `skycraft-storage-diag`     | [ ]    | CLI/PS diagnostic-settings list  |
 
 ---
 
@@ -252,9 +364,14 @@ Get-AzActionGroup -ResourceGroupName 'platform-skycraft-swc-rg' |
 
 ---
 
-### Question 3: Alert Design
+### Question 3: Alert Configuration
 
-**If you needed to alert on "VM unreachable for more than 5 minutes", would you use a Metric Alert or a Log Search Alert? Describe how you would configure it.**
+**Document the exact configuration of the metric alert you created:**
+
+- Alert rule name: ********\_\_********
+- Target resource: ********\_\_********
+- Condition threshold: ********\_\_********
+- Action group invoked: ********\_\_********
 
 ---
 

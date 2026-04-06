@@ -8,17 +8,17 @@
 
 ### Vault Configuration
 
-- [ ] Vault name: `platform-skycraft-swc-rsv`
-- [ ] Location: **Sweden Central**
-- [ ] Resource group: `platform-skycraft-swc-rg`
-- [ ] Storage replication type: **Geo-redundant (GRS)**
-- [ ] Soft delete: **Enabled** (default)
+- [x] Vault name: `platform-skycraft-swc-rsv`
+- [x] Location: **Sweden Central**
+- [x] Resource group: `platform-skycraft-swc-rg`
+- [x] Storage replication type: **Locally-redundant (LRS)**
+- [x] Soft delete: **Enabled** (default)
 
 ### Tags
 
-- [ ] Tag: `Project` = `SkyCraft`
-- [ ] Tag: `Environment` = `Platform`
-- [ ] Tag: `CostCenter` = `MSDN`
+- [x] Tag: `Project` = `SkyCraft`
+- [x] Tag: `Environment` = `Platform`
+- [x] Tag: `CostCenter` = `MSDN`
 
 ---
 
@@ -26,17 +26,17 @@
 
 ### VM Backup Policy
 
-- [ ] Policy name: `SkyCraft-Daily-Prod`
-- [ ] Backup frequency: **Daily**
-- [ ] Backup time: **02:00 AM UTC**
-- [ ] Instant Restore retention: **2 days**
-- [ ] Daily backup retention: **30 days**
+- [x] Policy name: `SkyCraft-Daily-Prod`
+- [x] Backup frequency: **Daily**
+- [x] Backup time: **02:00 AM UTC**
+- [x] Instant Restore retention: **2 days**
+- [x] Daily backup retention: **30 days**
 
 ### Blob Backup Policy
 
-- [ ] Policy name: `SkyCraft-Blob-Policy`
-- [ ] Retention: **30 days**
-- [ ] Associated vault: `platform-skycraft-swc-bv`
+- [x] Policy name: `SkyCraft-Blob-Policy`
+- [x] Retention: **30 days**
+- [x] Associated vault: `platform-skycraft-swc-bv`
 
 ---
 
@@ -44,10 +44,10 @@
 
 ### VM Backup
 
-- [ ] VM `prod-skycraft-swc-auth-vm` listed under **Backup items** → Azure Virtual Machine
-- [ ] Policy assigned: `SkyCraft-Daily-Prod`
-- [ ] Initial backup triggered (status: **Completed** or **In progress**)
-- [ ] Last backup status: **Success** (once completed)
+- [x] VM `prod-skycraft-swc-auth-vm` listed under **Backup items** → Azure Virtual Machine
+- [x] Policy assigned: `SkyCraft-Daily-Prod`
+- [x] Initial backup triggered (status: **Completed** or **In progress**)
+- [x] Last backup status: **Success** (once completed)
 
 ---
 
@@ -55,11 +55,17 @@
 
 ### Vault Configuration
 
-- [ ] Vault name: `platform-skycraft-swc-bv`
-- [ ] Location: **Sweden Central**
-- [ ] Resource group: `platform-skycraft-swc-rg`
-- [ ] Storage redundancy: **Locally-redundant (LRS)**
-- [ ] Identity type: **System Assigned**
+- [x] Vault name: `platform-skycraft-swc-bv`
+- [x] Location: **Sweden Central**
+- [x] Resource group: `platform-skycraft-swc-rg`
+- [x] Storage redundancy: **Locally-redundant (LRS)**
+- [x] Identity type: **System Assigned**
+
+### Tags
+
+- [x] Tag: `Project` = `SkyCraft`
+- [x] Tag: `Environment` = `Platform`
+- [x] Tag: `CostCenter` = `MSDN`
 
 ---
 
@@ -82,8 +88,8 @@
 
 ## ✅ Backup Reports Verification
 
-- [ ] Log Analytics Workspace linked to Backup center
-- [ ] Backup Instances report shows all protected items
+- [x] Log Analytics Workspace linked to Backup center
+- [x] Backup Instances report shows all protected items
 
 ---
 
@@ -210,17 +216,92 @@ Get-AzDataProtectionBackupVault -ResourceGroupName 'platform-skycraft-swc-rg' |
 # platform-skycraft-swc-bv   swedencentral   Succeeded
 ```
 
+### Verify Blob Backup Policy (Azure CLI)
+
+```azurecli
+az dataprotection backup-policy show \
+  --resource-group platform-skycraft-swc-rg \
+  --vault-name platform-skycraft-swc-bv \
+  --name SkyCraft-Blob-Policy \
+  --query "{Name:name,DatasourceTypes:properties.datasourceTypes[0]}" \
+  --output table
+
+# Expected output:
+# Name                   DatasourceTypes
+# ---------------------  -----------------------------------------------
+# SkyCraft-Blob-Policy   Microsoft.Storage/storageAccounts/blobServices
+```
+
+### Verify Blob Backup Policy (PowerShell)
+
+```powershell
+Get-AzDataProtectionBackupPolicy -ResourceGroupName 'platform-skycraft-swc-rg' -VaultName 'platform-skycraft-swc-bv' |
+  Where-Object { $_.Name -eq 'SkyCraft-Blob-Policy' } |
+  Select-Object Name, @{N='DatasourceType';E={$_.Property.DatasourceTypes[0]}} |
+  Format-Table
+
+# Expected output:
+# Name                   DatasourceType
+# ----                   --------------
+# SkyCraft-Blob-Policy   Microsoft.Storage/storageAccounts/blobServices
+```
+
+### Verify Blob Backup Instance (Azure CLI)
+
+```azurecli
+az dataprotection backup-instance list \
+  --resource-group platform-skycraft-swc-rg \
+  --vault-name platform-skycraft-swc-bv \
+  --query "[].{Name:name,SourceResource:properties.dataSourceInfo.resourceName,Status:properties.currentProtectionState}" \
+  --output table
+
+# Expected output:
+# Name                           SourceResource       Status
+# -----------------------------  -------------------  ---------------------
+# prodskycraftswcsa-...          prodskycraftswcsa    ProtectionConfigured
+```
+
+### Verify Blob Backup Instance (PowerShell)
+
+```powershell
+Get-AzDataProtectionBackupInstance -ResourceGroupName 'platform-skycraft-swc-rg' -VaultName 'platform-skycraft-swc-bv' |
+  Select-Object Name, @{N='Source';E={$_.Property.DataSourceInfo.ResourceName}}, @{N='Status';E={$_.Property.CurrentProtectionState}} |
+  Format-Table
+
+# Expected output:
+# Name                           Source               Status
+# ----                           ------               ------
+# prodskycraftswcsa-...          prodskycraftswcsa    ProtectionConfigured
+```
+
+### Verify ASR Replication Status (Azure CLI)
+
+```azurecli
+# ASR replication status is managed within the Recovery Services Vault
+az backup replication-protected-item list \
+  --resource-group platform-skycraft-swc-rg \
+  --vault-name platform-skycraft-swc-rsv \
+  --output table
+
+# Expected output (after replication is enabled):
+# Name                                  ProtectionState
+# ------------------------------------  ---------------
+# prod-skycraft-swc-auth-vm             Protected
+```
+
+> **Note**: ASR replication is configured via the Azure Portal (Step 5.2.8) and may not yet be enabled in all environments. Verify status in **Azure Portal → Recovery Services Vault → Replicated items**.
+
 ---
 
 ## 📊 BCDR Architecture Summary
 
 | Component                   | Name                        | Type          | Status |
 | :-------------------------- | :-------------------------- | :------------ | :----- |
-| **Recovery Services Vault** | `platform-skycraft-swc-rsv` | GRS           | [ ]    |
-| **VM Backup Policy**        | `SkyCraft-Daily-Prod`       | Daily, 30-day | [ ]    |
-| **Protected VM**            | `prod-skycraft-swc-auth-vm` | VM Backup     | [ ]    |
-| **Backup Vault**            | `platform-skycraft-swc-bv`  | LRS           | [ ]    |
-| **Blob Policy**             | `SkyCraft-Blob-Policy`      | 30-day        | [ ]    |
+| **Recovery Services Vault** | `platform-skycraft-swc-rsv` | LRS           | [x]    |
+| **VM Backup Policy**        | `SkyCraft-Daily-Prod`       | Daily, 30-day | [x]    |
+| **Protected VM**            | `prod-skycraft-swc-auth-vm` | VM Backup     | [x]    |
+| **Backup Vault**            | `platform-skycraft-swc-bv`  | LRS           | [x]    |
+| **Blob Policy**             | `SkyCraft-Blob-Policy`      | 30-day        | [x]    |
 | **Site Recovery**           | ASR → Norway East           | Continuous    | [ ]    |
 | **Test Failover**           | Completed + cleaned up      | Validated     | [ ]    |
 
@@ -261,7 +342,7 @@ Get-AzDataProtectionBackupVault -ResourceGroupName 'platform-skycraft-swc-rg' |
 
 ## ⏱️ Completion Tracking
 
-- **Estimated Time**: 2 hours
+- **Estimated Time**: 2.5 hours
 - **Actual Time Spent**: **\_\_\_\_** hours
 - **Date Started**: **\_\_\_\_**
 - **Date Completed**: **\_\_\_\_**
