@@ -71,7 +71,7 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 Write-Host "[1/5] Validating prerequisites..." -ForegroundColor Yellow
 
 # Check Azure CLI login
-$account = az account show 2>$null | ConvertFrom-Json
+$account = az account show --output json 2>$null | ConvertFrom-Json
 if (-not $account) {
     Write-Error "Not logged into Azure CLI. Run 'az login' first."
     exit 1
@@ -152,8 +152,7 @@ if (-not $WhatIf) {
 # Run deployment
 Write-Host "`n[4/5] Running deployment..." -ForegroundColor Yellow
 
-$deployArgs = @(
-    'deployment', 'sub', 'create'
+$commonParams = @(
     '--name', $deploymentName
     '--location', $location
     '--template-file', $templatePath
@@ -165,8 +164,9 @@ $deployArgs = @(
 
 if ($WhatIf) {
     Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
-    $deployArgs[1] = 'sub'
-    $deployArgs[2] = 'what-if'
+    $deployArgs = @('deployment', 'sub', 'what-if') + $commonParams
+} else {
+    $deployArgs = @('deployment', 'sub', 'create') + $commonParams + @('--output', 'json')
 }
 
 $result = az @deployArgs 2>&1
@@ -184,7 +184,7 @@ if ($WhatIf) {
     Write-Host $result
     Write-Host "`n  What-if completed. Review changes above." -ForegroundColor Cyan
 } else {
-    $deployment = $result | ConvertFrom-Json
+    $deployment = $result
     Write-Host "  ✓ Deployment succeeded!" -ForegroundColor Green
     Write-Host "`n  Outputs:"
     Write-Host "    Auth VM:          $($deployment.properties.outputs.outAuthVmName.value)"
