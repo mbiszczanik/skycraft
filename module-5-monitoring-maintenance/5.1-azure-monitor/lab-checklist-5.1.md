@@ -4,392 +4,101 @@
 
 ---
 
-## ✅ Log Analytics Workspace Verification
+## ✅ Log Analytics Workspace (platform-skycraft-swc-law)
 
 ### Workspace Configuration
 
 - [ ] Workspace name: `platform-skycraft-swc-law`
 - [ ] Location: **Sweden Central**
 - [ ] Resource group: `platform-skycraft-swc-rg`
-- [ ] Retention period: **30 days**
-
-### Tags
-
-- [ ] Tag: `Project` = `SkyCraft`
-- [ ] Tag: `Environment` = `Platform`
-- [ ] Tag: `CostCenter` = `MSDN`
-- [ ] Tag: `Owner` = `[your Azure identity / student name]`
+- [ ] Retention period: **30 days** (minimum)
 
 ---
 
-## ✅ VM Monitoring Verification
+## ✅ VM Monitoring (AMA Agent)
 
-### Azure Monitor Agent (AMA)
+### Data Collection
 
-- [ ] AMA extension installed on at least one VM (e.g., `dev-skycraft-swc-auth-vm`)
-- [ ] Extension provisioning state: **Succeeded**
-- [ ] Extension auto-upgrade: **Enabled**
-
-### Data Collection Rule (DCR)
-
-- [ ] DCR name: `skycraft-vm-dcr`
-- [ ] Associated with target VM(s)
-- [ ] Performance Counters collection: **Enabled**
-- [ ] Syslog collection: **Enabled**
-- [ ] Destination workspace: `platform-skycraft-swc-law`
-
-### VM Insights
-
-- [ ] VM status in Monitor → Virtual Machines: **Monitored**
-- [ ] Heartbeat data visible in Log Analytics (within 15 minutes of enabling)
+- [ ] VM Insights enabled for at least one VM (e.g., `dev-skycraft-vm`)
+- [ ] Azure Monitor Agent (AMA) installed on the VM
+- [ ] Data Collection Rule (DCR) `skycraft-vm-dcr` created and associated
+- [ ] Syslog and Performance Counters being collected
 
 ---
 
-## ✅ Alert Configuration Verification
+## ✅ Alerts and Notifications
 
-### Action Group
+### Alert Rules
 
-- [ ] Action Group name: `skycraft-ops-ag`
-- [ ] Resource group: `platform-skycraft-swc-rg`
-- [ ] Display name: `SkyCraftOps`
-- [ ] Email notification configured with valid email address
-
-### Metric Alert Rule
-
-- [ ] Alert name: `skycraft-cpu-alert`
-- [ ] Metric: **Percentage CPU**
-- [ ] Operator: **Greater than**
-- [ ] Threshold: **80**
-- [ ] Check every: **1 minute**
-- [ ] Lookback period: **5 minutes**
-- [ ] Severity: **Sev 2 - Warning**
-- [ ] Action Group: `skycraft-ops-ag` linked
-- [ ] Alert rule status: **Enabled**
-
----
-
-## ✅ Alert Processing Rule Verification
-
-### Alert Processing Rule
-
-- [ ] APR name: `skycraft-hours-apr`
-- [ ] Resource group: `platform-skycraft-swc-rg`
-- [ ] Rule type: **Apply action groups**
-- [ ] Action Group: `skycraft-ops-ag` linked
-- [ ] Schedule: Business hours only (Mon–Fri, 08:00–18:00, W. Europe Standard Time)
-- [ ] APR status: **Enabled**
-
-### Tags
-
-- [ ] Tag: `Project` = `SkyCraft`
-- [ ] Tag: `Environment` = `Platform`
-- [ ] Tag: `CostCenter` = `MSDN`
-- [ ] Tag: `Owner` = `[your Azure identity / student name]`
-
----
-
-## ✅ Dashboard Verification
-
-- [ ] Dashboard name: `SkyCraft-Ops`
-- [ ] Contains CPU performance chart (pinned from KQL)
-- [ ] Contains memory performance chart (pinned from KQL)
-
----
-
-## ✅ Storage Diagnostics Verification
-
-- [ ] Diagnostic setting created for at least one storage account
-- [ ] Logs sent to: `platform-skycraft-swc-law`
+- [ ] Metric Alert: **Percentage CPU > 80%**
+- [ ] Log Search Alert: (Optional) Heartbeat missing
+- [ ] Action Group: `SkyCraft-Admins-Email` created
+- [ ] Target email matches your account for testing
 
 ---
 
 ## 🔍 Validation Commands
 
-Run these commands to validate your lab setup:
-
-### Verify Log Analytics Workspace (Azure CLI)
+### Verify Log Analytics Workspace Exists
 
 ```azurecli
-# List LAW in platform resource group
+# List LAW in primary resource group
 az monitor log-analytics workspace list \
   --resource-group platform-skycraft-swc-rg \
-  --query "[?name=='platform-skycraft-swc-law'].{Name:name,Location:location,Retention:retentionInDays,State:provisioningState}" \
+  --query "[?name=='platform-skycraft-swc-law'].{Name:name,Location:location,Retention:retentionInDays}" \
   --output table
-
-# Expected output:
-# Name                        Location        Retention  State
-# --------------------------  --------------  ---------  ---------
-# platform-skycraft-swc-law   swedencentral   30         Succeeded
 ```
 
-### Verify Log Analytics Workspace (PowerShell)
-
-```powershell
-Get-AzOperationalInsightsWorkspace -ResourceGroupName 'platform-skycraft-swc-rg' |
-  Where-Object { $_.Name -eq 'platform-skycraft-swc-law' } |
-  Select-Object Name, Location, @{N='Retention';E={$_.RetentionInDays}}, ProvisioningState |
-  Format-Table
-
-# Expected output:
-# Name                        Location        Retention  ProvisioningState
-# ----                        --------        ---------  -----------------
-# platform-skycraft-swc-law   swedencentral   30         Succeeded
-```
-
-### Verify AMA Extension on VM (Azure CLI)
-
-```azurecli
-# Check AMA extension status
-az vm extension list \
-  --resource-group dev-skycraft-swc-rg \
-  --vm-name dev-skycraft-swc-auth-vm \
-  --query "[?contains(name,'AzureMonitor')].{Name:name,Status:provisioningState,AutoUpgrade:enableAutomaticUpgrade}" \
-  --output table
-
-# Expected output:
-# Name                     Status     AutoUpgrade
-# -----------------------  ---------  -----------
-# AzureMonitorLinuxAgent   Succeeded  True
-```
-
-### Verify AMA Extension on VM (PowerShell)
-
-```powershell
-Get-AzVMExtension -ResourceGroupName 'dev-skycraft-swc-rg' -VMName 'dev-skycraft-swc-auth-vm' |
-  Where-Object { $_.Name -like '*AzureMonitor*' } |
-  Select-Object Name, ProvisioningState, EnableAutomaticUpgrade |
-  Format-Table
-
-# Expected output:
-# Name                     ProvisioningState  EnableAutomaticUpgrade
-# ----                     -----------------  ----------------------
-# AzureMonitorLinuxAgent   Succeeded          True
-```
-
-### Verify Alert Rules (Azure CLI)
-
-```azurecli
-# List metric alerts
-az monitor metrics alert list \
-  --resource-group platform-skycraft-swc-rg \
-  --query "[?name=='skycraft-cpu-alert'].{Name:name,Enabled:enabled,Severity:severity}" \
-  --output table
-
-# Expected output:
-# Name                Enabled  Severity
-# ------------------  -------  --------
-# skycraft-cpu-alert  True     2
-```
-
-### Verify Alert Rules (PowerShell)
-
-```powershell
-Get-AzMetricAlertRuleV2 -ResourceGroupName 'platform-skycraft-swc-rg' |
-  Where-Object { $_.Name -eq 'skycraft-cpu-alert' } |
-  Select-Object Name, Enabled, Severity |
-  Format-Table
-
-# Expected output:
-# Name                Enabled  Severity
-# ----                -------  --------
-# skycraft-cpu-alert  True     2
-```
-
-### Verify Heartbeat in LAW (KQL — Run in Portal)
+### Verify Heartbeat in LAW (Run in Portal)
 
 ```kusto
 // Run this in LAW Logs blade
 Heartbeat
 | where TimeGenerated > ago(1h)
 | summarize LastCall = max(TimeGenerated) by Computer, OSType, Version
-| order by LastCall desc
-
-// Expected: At least one row per connected VM
 ```
 
-### Verify Action Group (Azure CLI)
+### Verify Alert Rules
 
 ```azurecli
-az monitor action-group list \
-  --resource-group platform-skycraft-swc-rg \
-  --query "[?name=='skycraft-ops-ag'].{Name:name,ShortName:groupShortName,Enabled:enabled}" \
+# List all metric alerts in the subscription
+az monitor metrics alert list \
+  --query "[].{Name:name,Enabled:enabled,Threshold:criteria.threshold}" \
   --output table
-
-# Expected output:
-# Name              ShortName    Enabled
-# ----------------  -----------  -------
-# skycraft-ops-ag   SkyCraftOps  True
-```
-
-### Verify Action Group (PowerShell)
-
-```powershell
-Get-AzActionGroup -ResourceGroupName 'platform-skycraft-swc-rg' |
-  Where-Object { $_.Name -eq 'skycraft-ops-ag' } |
-  Select-Object Name, GroupShortName, Enabled |
-  Format-Table
-
-# Expected output:
-# Name              GroupShortName  Enabled
-# ----              --------------  -------
-# skycraft-ops-ag   SkyCraftOps     True
-```
-
-### Verify Data Collection Rule (Azure CLI)
-
-```azurecli
-az monitor data-collection rule show \
-  --name skycraft-vm-dcr \
-  --resource-group platform-skycraft-swc-rg \
-  --query "{Name:name,Location:location,Workspace:destinations.logAnalytics[0].workspaceResourceId}" \
-  --output table
-
-# Expected output:
-# Name              Location       Workspace
-# ----------------  -------------  ----------------------------------------------------------
-# skycraft-vm-dcr   swedencentral  .../platform-skycraft-swc-rg/.../platform-skycraft-swc-law
-```
-
-### Verify Data Collection Rule (PowerShell)
-
-```powershell
-$dcr = az monitor data-collection rule show `
-    --name skycraft-vm-dcr `
-    --resource-group platform-skycraft-swc-rg | ConvertFrom-Json
-
-[PSCustomObject]@{
-    Name        = $dcr.name
-    Location    = $dcr.location
-    Workspace   = $dcr.destinations.logAnalytics[0].workspaceResourceId
-} | Format-Table
-```
-
-### Verify Storage Diagnostic Setting (Azure CLI)
-
-```azurecli
-storageId=$(az storage account show \
-  --name platformskycraftswcsa \
-  --resource-group platform-skycraft-swc-rg \
-  --query id -o tsv)
-blobServiceId="${storageId}/blobServices/default"
-
-az monitor diagnostic-settings list \
-  --resource "$blobServiceId" \
-  --query "[?name=='skycraft-storage-diag'].{Name:name,Workspace:workspaceId}" \
-  --output table
-
-# Expected output:
-# Name                    Workspace
-# ----------------------  -----------------------------------------------
-# skycraft-storage-diag   .../platform-skycraft-swc-law
-```
-
-### Verify Storage Diagnostic Setting (PowerShell)
-
-```powershell
-$storage = Get-AzStorageAccount -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platformskycraftswcsa'
-$blobServiceId = "$($storage.Id)/blobServices/default"
-
-Get-AzDiagnosticSetting -ResourceId $blobServiceId |
-  Where-Object { $_.Name -eq 'skycraft-storage-diag' } |
-  Select-Object Name, @{N='Workspace';E={$_.WorkspaceId}} |
-  Format-Table
-```
-
-### Verify Alert Processing Rule (Azure CLI)
-
-```azurecli
-az monitor alert-processing-rule show \
-  --name skycraft-hours-apr \
-  --resource-group platform-skycraft-swc-rg \
-  --query "{Name:name,Enabled:properties.enabled,Type:properties.actions[0].actionType}" \
-  --output table
-
-# Expected output:
-# Name                Enabled  Type
-# ------------------  -------  -----------------
-# skycraft-hours-apr  True     AddActionGroups
-```
-
-### Verify Alert Processing Rule (PowerShell)
-
-```powershell
-$apr = az monitor alert-processing-rule show `
-    --name skycraft-hours-apr `
-    --resource-group platform-skycraft-swc-rg | ConvertFrom-Json
-
-[PSCustomObject]@{
-    Name    = $apr.name
-    Enabled = $apr.properties.enabled
-    Type    = $apr.properties.actions[0].actionType
-} | Format-Table
 ```
 
 ---
 
-## 📊 Monitoring Architecture Summary
+## 📊 Monitoring Summary
 
-| Component                | Name                        | Status | Verification Method              |
-| :----------------------- | :-------------------------- | :----- | :------------------------------- |
-| **Log Analytics WS**     | `platform-skycraft-swc-law` | [ ]    | CLI/PS workspace list            |
-| **Data Collection Rule** | `skycraft-vm-dcr`           | [ ]    | CLI/PS DCR show                  |
-| **VM Telemetry**         | AMA on dev/prod VMs         | [ ]    | KQL Heartbeat query returns data |
-| **Action Group**         | `skycraft-ops-ag`           | [ ]    | CLI/PS action-group list         |
-| **CPU Alert**            | `skycraft-cpu-alert`        | [ ]    | CLI/PS metric alert list         |
-| **Alert Processing Rule**| `skycraft-hours-apr`        | [ ]    | CLI/PS APR show                  |
-| **Dashboard**            | `SkyCraft-Ops`              | [ ]    | Visible in Portal → Dashboards   |
-| **Storage Diagnostics**  | `skycraft-storage-diag`     | [ ]    | CLI/PS diagnostic-settings list  |
+| Component        | Status | Verification Method             |
+| :--------------- | :----- | :------------------------------ |
+| **Central Logs** | [ ]    | LAW exists in Platform RG       |
+| **VM Telemetry** | [ ]    | KQL query returns Heartbeat     |
+| **CPU Alerts**   | [ ]    | Alert rule listed in Monitor    |
+| **Dashboard**    | [ ]    | Ops Dashboard visible in Portal |
 
 ---
 
 ## 📝 Reflection Questions
 
-### Question 1: Workspace Topology
+### Question 1: Metrics vs. Logs
 
-**Document the Log Analytics Workspace you created:**
-
-| Property         | Value        |
-| ---------------- | ------------ |
-| Workspace name   | ****\_\_**** |
-| Resource group   | ****\_\_**** |
-| Location         | ****\_\_**** |
-| Retention (days) | ****\_\_**** |
-| Connected VMs    | ****\_\_**** |
-
-### Question 2: Troubleshooting Experience
-
-**What was the most challenging part of this lab? How did you resolve it?**
+**In which scenario would you prefer Metrics over Logs for alerting?**
 
 ---
 
----
+### Question 2: Cost Management
 
-### Question 3: Alert Configuration
-
-**Document the exact configuration of the metric alert you created:**
-
-- Alert rule name: ********\_\_********
-- Target resource: ********\_\_********
-- Condition threshold: ********\_\_********
-- Action group invoked: ********\_\_********
+**How does the amount of data ingested affect the cost of Log Analytics?**
 
 ---
 
+### Question 3: Real-Time vs. Latency
+
+**What is the typical ingestion latency for Azure Monitor Logs, and why does this matter for critical alerts?**
+
 ---
-
-**Instructor Review Date**: **\_\_\_\_**
-**Feedback**: ******************\_\_\_\_******************
-
----
-
-## ⏱️ Completion Tracking
-
-- **Estimated Time**: 2 hours
-- **Actual Time Spent**: **\_\_\_\_** hours
-- **Date Started**: **\_\_\_\_**
-- **Date Completed**: **\_\_\_\_**
-
-**Challenges Encountered** (optional):
 
 ---
 
@@ -397,34 +106,12 @@ $apr = az monitor alert-processing-rule show `
 
 **All Verification Items Complete**:
 
-- [ ] All resources created with proper naming conventions
-- [ ] All tags applied (Project, Environment, CostCenter)
-- [ ] All validation commands executed successfully
+- [ ] Log Analytics Workspace correctly deployed
+- [ ] AMA Agent active and reporting to LAW
+- [ ] CPU Threshold alert configured
+- [ ] Central dashboard created
 - [ ] All reflection questions answered
 - [ ] Ready to proceed to Lab 5.2
 
 **Student Name**: ******\_\_\_\_******
 **Lab 5.1 Completion Date**: ******\_\_\_\_******
-**Instructor Signature**: ******\_\_\_\_******
-
----
-
-## 🎉 Congratulations!
-
-You've successfully completed **Lab 5.1: Azure Monitor and Insights**!
-
-**What You Built**:
-
-- ✅ Centralized Log Analytics Workspace for all SkyCraft telemetry
-- ✅ VM monitoring with Azure Monitor Agent and Data Collection Rules
-- ✅ Proactive alerting with CPU threshold monitoring and email notifications
-- ✅ Operational dashboard for multi-resource visibility
-
-**Next**: [Lab 5.2: Business Continuity & Disaster Recovery →](../5.2-business-continuity/lab-guide-5.2.md)
-
----
-
-## 📌 Module Navigation
-
-- [← Back to Module 5 Index](../README.md)
-- [Lab 5.2: Business Continuity →](../5.2-business-continuity/lab-guide-5.2.md)
