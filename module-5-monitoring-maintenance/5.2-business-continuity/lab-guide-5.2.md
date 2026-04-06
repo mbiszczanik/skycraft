@@ -110,6 +110,9 @@ az vm show -d --resource-group prod-skycraft-swc-rg --name prod-skycraft-swc-aut
 # Verify storage account exists
 az storage account show --name prodskycraftswcsa --query "{Name:name,Location:location}" --output table
 
+# Verify Log Analytics Workspace exists
+az monitor log-analytics workspace show --resource-group platform-skycraft-swc-rg --workspace-name platform-skycraft-swc-law --query "{Name:name,ProvisioningState:provisioningState}" --output table
+
 # Check Norway East vCPU quota
 az vm list-usage --location norwayeast --query "[?contains(name.value,'standardDSv3Family')].{Name:name.localizedValue,Current:currentValue,Limit:limit}" --output table
 ```
@@ -149,7 +152,7 @@ Azure offers two types of backup vaults:
 
 ---
 
-## 📖 Section 2: Recovery Services Vault & VM Backup (35 min)
+## ⚙️ Section 2: Recovery Services Vault & VM Backup (35 min)
 
 ### Step 5.2.1: Create the Recovery Services Vault
 
@@ -241,8 +244,6 @@ Set-AzRecoveryServicesBackupProperty -Vault $vault -BackupStorageRedundancy Loca
 8. In **Select virtual machines**, choose `prod-skycraft-swc-auth-vm` and click **OK**
 9. Click **Enable backup**
 
-![Configure backup and VM selection](images/step-5.2.2.png)
-
 > [!NOTE]
 > The portal also offers **Enhanced** policy sub type. For this lab, use **Standard** to keep the backup flow aligned with the expected once-per-day schedule and retention settings.
 
@@ -295,6 +296,8 @@ New-AzRecoveryServicesBackupProtectionPolicy `
 
 **Expected Result**: Policy `SkyCraft-Daily-Prod` is created, VM is selected in the backup configuration, and protection is enabled.
 
+![Configure backup and VM selection](images/step-5.2.2.png)
+
 ### Step 5.2.3: Enable or Verify VM Backup
 
 #### Option 1: Azure Portal (GUI)
@@ -307,12 +310,16 @@ New-AzRecoveryServicesBackupProtectionPolicy `
 #### Option 2: Azure CLI
 
 ```bash
-# Enable backup for prod VM
+# Enable backup for prod VM — use full resource ID (--vm-resource-group is not a valid flag)
+vmId=$(az vm show \
+  --resource-group prod-skycraft-swc-rg \
+  --name prod-skycraft-swc-auth-vm \
+  --query id --output tsv)
+
 az backup protection enable-for-vm \
   --resource-group platform-skycraft-swc-rg \
   --vault-name platform-skycraft-swc-rsv \
-  --vm prod-skycraft-swc-auth-vm \
-  --vm-resource-group prod-skycraft-swc-rg \
+  --vm "$vmId" \
   --policy-name SkyCraft-Daily-Prod
 ```
 
@@ -382,7 +389,7 @@ Backup-AzRecoveryServicesBackupItem `
 
 ---
 
-## 📖 Section 3: Backup Vault & Blob Protection (30 min)
+## ⚙️ Section 3: Backup Vault & Blob Protection (30 min)
 
 ### What is a Backup Vault?
 
@@ -509,9 +516,6 @@ New-AzDataProtectionBackupPolicy `
 3. Click **Continue**
 4. Under **Backup policy**, select `SkyCraft-Blob-Policy`
 5. Under **Select data source**, click **Select** and find `prodskycraftswcsa` in `prod-skycraft-swc-rg`
-
-![Enable Blob Backup](images/step-5.2.7.png)
-
 6. Click **Configure backup**
 
 > [!IMPORTANT]
@@ -557,9 +561,11 @@ New-AzDataProtectionBackupInstance `
 
 **Expected Result**: Storage account `prodskycraftswcsa` appears under Backup Vault → **Backup instances** with status **Protection configured**.
 
+![Enable Blob Backup](images/step-5.2.7.png)
+
 ---
 
-## 📖 Section 4: Azure Site Recovery & Cross-Region DR (35 min)
+## ⚙️ Section 4: Azure Site Recovery & Cross-Region DR (35 min)
 
 ### What is Azure Site Recovery?
 
@@ -586,9 +592,6 @@ New-AzDataProtectionBackupInstance `
 7. In **Extension settings**, keep:
   - **Update settings**: `Allow ASR to manage`
   - **Automation account**: Create/select the suggested automation account
-
-![Azure Site Recovery](images/step-5.2.8.png)
-
 8. Click **Review + Start replication**
 
 > [!NOTE]
@@ -597,12 +600,19 @@ New-AzDataProtectionBackupInstance `
 > [!CAUTION]
 > Site Recovery incurs costs for the replicated instance, cache storage, and network egress. For SkyCraft, this is justified only for the production VM. Do not enable ASR for development VMs.
 
-#### Option 2: Azure CLI & PowerShell
+#### Option 2: Azure CLI
 
 > [!NOTE]
-> Full ASR replication via CLI requires multiple steps: registering site recovery fabric, creating protection containers, replication policies, and container mappings. This is significantly more complex than the portal flow and is not recommended for initial setup. Use the Azure Portal (Option 1) for enabling replication. The Recovery Services Vault used for ASR was already created in Step 5.2.1.
+> Full ASR replication via CLI requires multiple steps: registering site recovery fabric, creating protection containers, replication policies, and container mappings. This is significantly more complex than the portal flow and is **not recommended** for initial setup. Use **Option 1 (Azure Portal)** for enabling replication.
+
+#### Option 3: PowerShell
+
+> [!NOTE]
+> The Azure PowerShell `Az.RecoveryServices` cmdlets for enabling ASR replication (`New-AzRecoveryServicesAsrReplicationProtectedItem`) require pre-created fabric, container, and policy objects that are normally provisioned automatically by the portal wizard. Use **Option 1 (Azure Portal)** for initial setup. See [Azure Site Recovery PowerShell documentation](https://learn.microsoft.com/en-us/azure/site-recovery/azure-to-azure-powershell) for fully scripted approaches.
 
 **Expected Result**: Replication status shows **Enabling protection** → eventually **Protected** (5-30 minutes).
+
+![Azure Site Recovery](images/step-5.2.8.png)
 
 ### Step 5.2.9: Perform Test Failover
 
@@ -624,9 +634,11 @@ New-AzDataProtectionBackupInstance `
 
 **Expected Result**: Test VM boots successfully in Norway East. Cleanup removes all temporary resources.
 
+![Perform Test Failover](images/step-5.2.9.png)
+
 ---
 
-## 📖 Section 5: Recovery Simulation (15 min)
+## 📖 Section 5: Recovery Simulation (15 min) (Optional)
 
 ### Step 5.2.10: File-Level Recovery
 
@@ -649,9 +661,41 @@ Instead of restoring the entire VM, you can mount a specific recovery point as a
 
 ### Step 5.2.11: Configure Backup Reports
 
-1. Navigate to **Backup center** → **Backup reports**
-2. Link your **Log Analytics Workspace** (`platform-skycraft-swc-law`) to enable reporting
-3. View the **Backup Instances** report to see protection status across all vaults
+1. Confirm your **Log Analytics Workspace** `platform-skycraft-swc-law` exists and is accessible
+2. Configure diagnostics on the **Recovery Services Vault**:
+  - Go to `platform-skycraft-swc-rsv` → **Monitoring** → **Diagnostic settings** → **+ Add diagnostic setting**
+  - Name: `rsv-backup-reports-diag`
+  - Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`
+  - Table format: **Resource specific**
+  - Select categories:
+    - **Core Azure Backup Data**
+    - **Addon Azure Backup Job Data**
+    - **Addon Azure Backup Policy Data**
+    - **Addon Azure Backup Protected Instance Data**
+    - **Azure Backup Operations**
+  - Click **Save**
+3. Configure diagnostics on the **Backup Vault**:
+  - Go to `platform-skycraft-swc-bv` → **Monitoring** → **Diagnostic settings** → **+ Add diagnostic setting**
+  - Name: `bv-backup-reports-diag`
+  - Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`
+  - Select categories:
+    - **Core Azure Backup Data**
+    - **Addon Azure Backup Job Data**
+    - **Addon Azure Backup Policy Data**
+    - **Addon Azure Backup Protected Instance Data**
+  - Click **Save**
+4. Open **Backup center** → **Backup reports**
+5. Select workspace `platform-skycraft-swc-law`
+6. Validate the main tabs:
+  - **Summary** (high-level estate status)
+  - **Backup Items** (protected items and storage trend)
+  - **Jobs** (success/failure trends and error reasons)
+
+> [!IMPORTANT]
+> Backup reports only show data after vault diagnostics are configured. Initial ingestion can take time (typically 15-60 minutes, and up to 24 hours for first full data push).
+
+> [!NOTE]
+> To view reports in Backup Center, you need read access to the vaults and read access to the Log Analytics workspace.
 
 ### Step 5.2.12: Configure Backup Alerts
 

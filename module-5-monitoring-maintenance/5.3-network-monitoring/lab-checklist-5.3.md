@@ -60,12 +60,12 @@
 
 ---
 
-## ✅ NSG Flow Logs Verification
+## ✅ VNet Flow Logs Verification
 
 ### Flow Log Configuration
 
-- [ ] Flow Log name: `prod-nsg-flow-log`
-- [ ] NSG: `prod-skycraft-swc-nsg`
+- [ ] Flow Log name: `prod-skycraft-swc-vnet-flowlog`
+- [ ] VNet: `prod-skycraft-swc-vnet`
 - [ ] Storage account: `platformskycraftswcsa`
 - [ ] Version: **2**
 - [ ] Retention: **7 days**
@@ -76,6 +76,35 @@
 - [ ] Traffic Analytics enabled
 - [ ] Workspace: `platform-skycraft-swc-law`
 - [ ] Processing interval: **10 minutes**
+
+---
+
+## ✅ Connection Monitor Verification
+
+### Monitor Configuration
+
+- [ ] Connection Monitor name: `skycraft-hub-spoke-cm`
+- [ ] Location: **Sweden Central**
+- [ ] Resource group: `NetworkWatcherRG`
+- [ ] Monitoring status: **Running**
+
+### Test Group
+
+- [ ] Test group name: `hub-spoke-ssh`
+- [ ] Protocol: **TCP**, Port: **22**
+- [ ] Test frequency: **Every 5 minutes** (300 seconds)
+- [ ] Source: `prod-skycraft-swc-auth-vm`
+- [ ] Destination: `dev-skycraft-swc-auth-vm` (IP: `10.1.1.4`)
+
+### Output
+
+- [ ] Log Analytics workspace linked: `platform-skycraft-swc-law`
+
+### Tags
+
+- [ ] Tag: `Project` = `SkyCraft`
+- [ ] Tag: `Environment` = `Production`
+- [ ] Tag: `CostCenter` = `MSDN`
 
 ---
 
@@ -150,7 +179,7 @@ Test-AzNetworkWatcherIPFlow `
 # RuleName : <NSG-rule-name>
 ```
 
-### Verify NSG Flow Logs (Azure CLI)
+### Verify VNet Flow Logs (Azure CLI)
 
 ```azurecli
 # List flow logs
@@ -160,12 +189,12 @@ az network watcher flow-log list \
   --output table
 
 # Expected output:
-# Name                 Enabled  StorageId
-# -------------------  -------  ---------
-# prod-nsg-flow-log    True     /subscriptions/.../platformskycraftswcsa
+# Name                            Enabled  StorageId
+# ------------------------------  -------  ---------
+# prod-skycraft-swc-vnet-flowlog  True     /subscriptions/.../platformskycraftswcsa
 ```
 
-### Verify NSG Flow Logs (PowerShell)
+### Verify VNet Flow Logs (PowerShell)
 
 ```powershell
 $nw = Get-AzNetworkWatcher | Where-Object { $_.Location -eq 'swedencentral' }
@@ -176,9 +205,9 @@ Get-AzNetworkWatcherFlowLog -NetworkWatcher $nw |
   Format-Table
 
 # Expected output:
-# Name                 Enabled  Version  RetentionInDays
-# ----                 -------  -------  ---------------
-# prod-nsg-flow-log    True     2        7
+# Name                            Enabled  Version  RetentionInDays
+# ----                            -------  -------  ---------------
+# prod-skycraft-swc-vnet-flowlog  True     2        7
 ```
 
 ### Connectivity Test (PowerShell)
@@ -188,6 +217,37 @@ Get-AzNetworkWatcherFlowLog -NetworkWatcher $nw |
 Test-NetConnection -ComputerName <prod-vm-public-ip> -Port 22
 
 # Expected: TcpTestSucceeded = True (if Bastion or public IP is configured)
+```
+
+### Verify Connection Monitor (Azure CLI)
+
+```azurecli
+az network watcher connection-monitor show \
+  --name skycraft-hub-spoke-cm \
+  --location swedencentral \
+  --query "{Name:name,Status:monitoringStatus,AutoStart:autoStart}" \
+  --output table
+
+# Expected output:
+# Name                   Status   AutoStart
+# ---------------------  -------  ---------
+# skycraft-hub-spoke-cm  Running  True
+```
+
+### Verify Connection Monitor (PowerShell)
+
+```powershell
+$nw = Get-AzNetworkWatcher | Where-Object { $_.Location -eq 'swedencentral' }
+
+Get-AzNetworkWatcherConnectionMonitor -NetworkWatcher $nw |
+  Where-Object { $_.Name -eq 'skycraft-hub-spoke-cm' } |
+  Select-Object Name, MonitoringStatus, AutoStart |
+  Format-Table
+
+# Expected output:
+# Name                   MonitoringStatus  AutoStart
+# ----                   ----------------  ---------
+# skycraft-hub-spoke-cm  Running           True
 ```
 
 ---
@@ -201,7 +261,17 @@ Test-NetConnection -ComputerName <prod-vm-public-ip> -Port 22
 | **Next Hop (Internal)**     | [ ]     | Next hop type: **VNetPeering**      |
 | **Topology**                | [ ]     | Hub-Spoke layout visually confirmed |
 | **Connection Troubleshoot** | [ ]     | Prod → Dev: **Reachable**           |
-| **NSG Flow Logs**           | [ ]     | Enabled on prod NSG with Version 2  |
+| **VNet Flow Logs**           | [ ]     | Enabled on VNet with Version 2  |
+
+---
+
+## 📊 Infrastructure Deployed Summary
+
+| Resource | Name | Configuration | Status |
+| :--- | :--- | :--- | :--- |
+| Connection Monitor | `skycraft-hub-spoke-cm` | TCP/22, 5-min interval, prod→dev | ☐ |
+| VNet Flow Log | `prod-skycraft-swc-vnet-flowlog` | Version 2, 7-day retention, enabled | ☐ |
+| Traffic Analytics | Via `platform-skycraft-swc-law` | 10-min processing interval | ☐ |
 
 ---
 
@@ -242,7 +312,7 @@ Test-NetConnection -ComputerName <prod-vm-public-ip> -Port 22
 
 ## ⏱️ Completion Tracking
 
-- **Estimated Time**: 1 hour
+- **Estimated Time**: 2 hours
 - **Actual Time Spent**: **\_\_\_\_** hours
 - **Date Started**: **\_\_\_\_**
 - **Date Completed**: **\_\_\_\_**
@@ -256,7 +326,7 @@ Test-NetConnection -ComputerName <prod-vm-public-ip> -Port 22
 **All Verification Items Complete**:
 
 - [ ] All diagnostic tools used and results documented
-- [ ] NSG Flow Logs enabled on production NSG
+- [ ] VNet Flow Logs enabled on production VNet
 - [ ] All validation commands executed successfully
 - [ ] All reflection questions answered
 - [ ] Module 5 complete — ready for Capstone Project
@@ -275,7 +345,7 @@ You've successfully completed **Lab 5.3: Network Monitoring & Diagnostics** and 
 
 - ✅ Comprehensive network diagnostics using IP Flow Verify, Next Hop, and Connection Troubleshooter
 - ✅ Visual network topology for infrastructure documentation
-- ✅ NSG Flow Logs with Traffic Analytics for ongoing traffic analysis
+- ✅ VNet Flow Logs with Traffic Analytics for ongoing traffic analysis
 
 **Module 5 Complete!** You now have monitoring, backup, disaster recovery, and network diagnostics for the entire SkyCraft infrastructure. Proceed to the **Capstone Project** to deploy everything from scratch.
 

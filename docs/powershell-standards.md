@@ -102,8 +102,32 @@ catch {
 - **Retry Logic**: Implement retry loops for "stubborn" Azure resources (like NSGs) that suffer from eventual consistency delays.
 - **Dependencies First**: Dissociate resources (e.g., NSG from Subnet) before attempting deletion.
 - **No Hardcoding**: Default parameter values are acceptable, but hardcoded strings inside logic are discouraged.
+- **Always Specify `--output json` for `az` → `ConvertFrom-Json` Pipelines**: The Azure CLI defaults to table/text output based on the user's local config (`AZURE_DEFAULTS_OUTPUT`). When using `az` output with `ConvertFrom-Json`, **always** explicitly pass `--output json`. Without it, the command will produce a `Conversion from JSON failed` error for any user whose default output format is not `json`.
+
+  ```powershell
+  # ❌ WRONG — breaks if user's default output format is 'table' or 'tsv'
+  $account = az account show 2>$null | ConvertFrom-Json
+
+  # ✅ CORRECT — always works regardless of az CLI configuration
+  $account = az account show --output json 2>$null | ConvertFrom-Json
+  ```
+
+- **WhatIf Deployment Pattern**: Build separate args arrays for what-if vs real deployment rather than mutating indices. This avoids brittle index-based overwrites and makes intent clear:
+
+  ```powershell
+  # ❌ WRONG — index mutation is fragile
+  $deployArgs[2] = 'what-if'
+
+  # ✅ CORRECT — build two clean arrays
+  if ($WhatIf) {
+      $deployArgs = @('deployment', 'sub', 'what-if') + $commonParams
+  } else {
+      $deployArgs = @('deployment', 'sub', 'create') + $commonParams + @('--output', 'json')
+  }
+  ```
 
 ---
+
 
 ## 6. Script Boilerplate
 
