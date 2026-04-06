@@ -38,7 +38,7 @@ Write-Host "========================================"  -ForegroundColor Cyan
 Write-Host ""
 
 # Check Azure CLI login
-$account = az account show 2>$null | ConvertFrom-Json
+$account = az account show --output json 2>$null | ConvertFrom-Json
 if (-not $account) {
     Write-Error "Not logged into Azure CLI. Run 'az login' first."
     exit 1
