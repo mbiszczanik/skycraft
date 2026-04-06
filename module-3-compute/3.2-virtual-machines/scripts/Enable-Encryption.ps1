@@ -50,7 +50,6 @@ $ErrorActionPreference = 'Stop'
 # Configuration
 $rgName = "$Environment-skycraft-swc-rg"
 $kvName = "$Environment-skycraft-swc-kv"
-$originalSize = 'Standard_B2s'
 $encryptionSize = 'Standard_B2ms'  # 8 GB RAM required for ADE
 
 # Default VM names if not specified
@@ -69,7 +68,7 @@ Write-Host "[!] WARNING: ADE is scheduled for retirement on September 15, 2028."
 Write-Host "    Consider using Encryption at Host for new deployments.`n" -ForegroundColor Yellow
 
 # Check Azure CLI login
-$account = az account show 2>$null | ConvertFrom-Json
+$account = az account show --output json 2>$null | ConvertFrom-Json
 if (-not $account) {
     Write-Error "Not logged into Azure CLI. Run 'az login' first."
     exit 1
@@ -78,7 +77,7 @@ Write-Host "✓ Logged in as: $($account.user.name)" -ForegroundColor Green
 
 # Check Key Vault exists
 Write-Host "`n[1/5] Checking Key Vault..." -ForegroundColor Yellow
-$kv = az keyvault show --name $kvName --resource-group $rgName 2>$null | ConvertFrom-Json
+$kv = az keyvault show --name $kvName --resource-group $rgName --output json 2>$null | ConvertFrom-Json
 if (-not $kv) {
     Write-Error "Key Vault '$kvName' not found. Deploy with -EncryptionStrategy AzureDiskEncryption first."
     exit 1
@@ -89,7 +88,7 @@ Write-Host "  ✓ Key Vault found: $kvName" -ForegroundColor Green
 Write-Host "`n[2/5] Checking VMs..." -ForegroundColor Yellow
 $vmInfo = @{}
 foreach ($vmName in $VmNames) {
-    $vm = az vm show --name $vmName --resource-group $rgName 2>$null | ConvertFrom-Json
+    $vm = az vm show --name $vmName --resource-group $rgName --output json 2>$null | ConvertFrom-Json
     if (-not $vm) {
         Write-Error "VM '$vmName' not found in resource group '$rgName'"
         exit 1
@@ -163,7 +162,7 @@ foreach ($vmName in $VmNames) {
         Start-Sleep -Seconds 30
         $attempt++
         
-        $status = az vm encryption show --name $vmName --resource-group $rgName 2>$null | ConvertFrom-Json
+        $status = az vm encryption show --name $vmName --resource-group $rgName --output json 2>$null | ConvertFrom-Json
         $osEncrypted = $status.disks | Where-Object { $_.name -like "*osdisk*" } | Select-Object -ExpandProperty statuses | Where-Object { $_.code -eq 'EncryptionState/encrypted' }
         
         if ($osEncrypted) {

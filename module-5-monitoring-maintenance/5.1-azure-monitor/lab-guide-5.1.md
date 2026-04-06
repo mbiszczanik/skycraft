@@ -257,7 +257,7 @@ New-AzOperationalInsightsWorkspace `
 # Install Azure Monitor Agent extension on the VM
 az vm extension set \
   --resource-group dev-skycraft-swc-rg \
-  --vm-name dev-skycraft-swc-auth-vm \
+  --vm-name dev-skycraft-swc-world-vm \
   --name AzureMonitorLinuxAgent \
   --publisher Microsoft.Azure.Monitor \
   --enable-auto-upgrade true
@@ -337,7 +337,7 @@ az monitor data-collection rule association create \
 # Install Azure Monitor Agent extension
 Set-AzVMExtension `
     -ResourceGroupName 'dev-skycraft-swc-rg' `
-    -VMName 'dev-skycraft-swc-auth-vm' `
+    -VMName 'dev-skycraft-swc-world-vm' `
     -Name 'AzureMonitorLinuxAgent' `
     -Publisher 'Microsoft.Azure.Monitor' `
     -ExtensionType 'AzureMonitorLinuxAgent' `
@@ -428,6 +428,8 @@ New-AzDataCollectionRuleAssociation `
 
 #### Option 1: Azure Portal (GUI)
 
+#### Option 1: Azure Portal (GUI)
+
 1. Navigate to a storage account (e.g., `platformskycraftswcsa`)
 2. Go to **Monitoring** → **Diagnostic settings**
 3. Select resource `blob`
@@ -440,6 +442,8 @@ New-AzDataCollectionRuleAssociation `
 | Logs: blob              | ✅ StorageRead, StorageWrite     |
 | Destination             | Send to Log Analytics Workspace |
 | Workspace               | `platform-skycraft-swc-law`     |
+
+![Monitor view](images/step-5.1.3.png)
 
 5. Click **Save**
 
@@ -717,6 +721,8 @@ New-AzActionGroup `
     -EmailReceiver $emailReceiver
 ```
 
+![Create an Action Group](images/step-5.1.8.png)
+
 **Expected Result**: Action Group `skycraft-ops-ag` created with email notification configured.
 
 ![Create an Action Group](images/step-5.1.8.png)
@@ -793,6 +799,8 @@ Add-AzMetricAlertRuleV2 `
     -Severity 2 `
     -Description 'CPU > 80% on SkyCraft VM'
 ```
+
+  ![Create a Metric Alert](images/step-5.1.9.png)
 
 **Expected Result**: Alert rule `skycraft-cpu-alert` is created and active. When CPU exceeds 80% for 5 minutes, an email is sent to the ops team.
 
@@ -882,6 +890,8 @@ Set-AzAlertProcessingRule `
 4. Select **Create new** → Name: `SkyCraft-Ops`
 5. Click **Pin**
 6. Add the memory query from Step 5.1.6 to the same dashboard
+
+![Pin KQL Query to Dashboard](images/step-5.1.11.png)
 
 **Expected Result**: Dashboard `SkyCraft-Ops` is created with CPU and memory charts visible.
 

@@ -50,7 +50,7 @@ Write-Host "  Lab 3.2 - Resource Cleanup" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 # Check Azure CLI login
-$account = az account show 2>$null | ConvertFrom-Json
+$account = az account show --output json 2>$null | ConvertFrom-Json
 if (-not $account) {
     Write-Error "Not logged into Azure CLI. Run 'az login' first."
     exit 1
