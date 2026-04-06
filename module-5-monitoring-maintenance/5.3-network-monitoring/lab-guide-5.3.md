@@ -1,4 +1,4 @@
-# Lab 5.3: Network Monitoring & Diagnostics (1 hour)
+# Lab 5.3: Network Monitoring & Diagnostics (2 hours)
 
 ## 🎯 Learning Objectives
 
@@ -9,6 +9,7 @@ By completing this lab, you will:
 - **Use Next Hop** to troubleshoot routing issues between VNets
 - **Generate Network Topology** diagrams for visual infrastructure review
 - **Run Connection Troubleshooter** for end-to-end connectivity testing
+- **Configure Connection Monitor** for continuous connectivity monitoring
 - **Enable NSG Flow Logs** for traffic analysis and security auditing
 
 ---
@@ -28,6 +29,7 @@ graph TB
         IPF["IP Flow Verify<br/>NSG Rule Evaluation"]
         NH["Next Hop<br/>Route Table Evaluation"]
         CT["Connection Troubleshooter<br/>End-to-End Check"]
+        CM["Connection Monitor<br/>Continuous Probe"]
         TOPO["Network Topology<br/>Visual Map"]
         FL["NSG Flow Logs<br/>Traffic Analysis"]
     end
@@ -52,10 +54,12 @@ graph TB
     NW --> IPF
     NW --> NH
     NW --> CT
+    NW --> CM
     NW --> TOPO
     NW --> FL
 
     IPF -.-> VM_Dev
+    CM -.-> VM_Prod
     CT -.-> VM_Prod
     TOPO -.-> VNET_Hub
     VNET_Hub <-->|"Peering"| VNET_Dev
@@ -85,12 +89,13 @@ graph TB
 
 ---
 
-## ⏱️ Estimated Time: 1 hour
+## ⏱️ Estimated Time: 2 hours
 
-- **Section 1**: Network Watcher Fundamentals (10 min)
-- **Section 2**: IP Flow Verify (15 min)
-- **Section 3**: Next Hop & Topology (15 min)
-- **Section 4**: Connection Troubleshooter & Flow Logs (20 min)
+- **Section 1**: Network Watcher Fundamentals (15 min)
+- **Section 2**: IP Flow Verify (25 min)
+- **Section 3**: Next Hop & Topology (25 min)
+- **Section 4**: Connection Troubleshooter, Connection Monitor & Flow Logs (35 min)
+- **Section 5**: Operational Review & Interpretation (20 min)
 
 ---
 
@@ -124,7 +129,7 @@ az network nsg list --query "[?contains(name,'skycraft')].{Name:name,RG:resource
 
 ---
 
-## 📖 Section 1: Network Watcher Fundamentals (10 min)
+## 📖 Section 1: Network Watcher Fundamentals (15 min)
 
 ### What is Network Watcher?
 
@@ -173,7 +178,7 @@ Get-AzNetworkWatcher |
 
 ---
 
-## 📖 Section 2: IP Flow Verify (15 min)
+## 📖 Section 2: IP Flow Verify (25 min)
 
 ### What is IP Flow Verify?
 
@@ -232,18 +237,48 @@ Test-AzNetworkWatcherIPFlow `
 
 ### Step 5.3.3: Check Outbound Traffic
 
-Repeat the test for outbound traffic:
+#### Option 1: Azure Portal (GUI)
 
-1. Change **Direction** to **Outbound**
+1. In **IP flow verify**, change **Direction** to **Outbound**
 2. Local port: **\*** (any)
 3. Remote IP: **8.8.8.8**, Remote port: **53** (DNS)
 4. Click **Check**
+
+#### Option 2: Azure CLI
+
+```bash
+# IP Flow Verify — check outbound DNS traffic
+az network watcher test-ip-flow \
+  --vm dev-skycraft-swc-auth-vm \
+  --resource-group dev-skycraft-swc-rg \
+  --direction Outbound \
+  --protocol TCP \
+  --local "*:0" \
+  --remote "8.8.8.8:53"
+```
+
+#### Option 3: PowerShell
+
+```powershell
+$vm = Get-AzVM -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-auth-vm'
+
+Test-AzNetworkWatcherIPFlow `
+    -NetworkWatcherName (Get-AzNetworkWatcher | Where-Object { $_.Location -eq 'swedencentral' }).Name `
+    -NetworkWatcherResourceGroupName 'NetworkWatcherRG' `
+    -TargetVirtualMachineId $vm.Id `
+    -Direction Outbound `
+    -Protocol TCP `
+    -LocalIPAddress (Get-AzNetworkInterface -ResourceId $vm.NetworkProfile.NetworkInterfaces[0].Id).IpConfigurations[0].PrivateIpAddress `
+    -LocalPort 0 `
+    -RemoteIPAddress '8.8.8.8' `
+    -RemotePort 53
+```
 
 **Expected Result**: **Access: Allow** — confirming the VM can make outbound DNS queries.
 
 ---
 
-## 📖 Section 3: Next Hop & Topology (15 min)
+## 📖 Section 3: Next Hop & Topology (25 min)
 
 ### What is Next Hop?
 
@@ -316,11 +351,21 @@ az network watcher show-topology \
   --output table
 ```
 
+#### Option 3: PowerShell
+
+```powershell
+$nw = Get-AzNetworkWatcher | Where-Object { $_.Location -eq 'swedencentral' }
+
+Get-AzNetworkWatcherTopology `
+    -NetworkWatcher $nw `
+    -TargetResourceGroupName 'dev-skycraft-swc-rg'
+```
+
 **Expected Result**: A visual map showing VNets, subnets, NICs, NSGs, and VMs with their connections. Peering connections to the Hub VNet are visible.
 
 ---
 
-## 📖 Section 4: Connection Troubleshooter & Flow Logs (20 min)
+## 📖 Section 4: Connection Troubleshooter, Connection Monitor & Flow Logs (35 min)
 
 ### Step 5.3.7: End-to-End Connection Test
 
@@ -373,7 +418,51 @@ Test-AzNetworkWatcherConnectivity `
 > [!NOTE]
 > Connection Troubleshooter requires the **Network Watcher Agent** VM extension to be installed on the source VM. Azure usually installs this automatically, but verify if the test fails.
 
-### Step 5.3.8: Enable NSG Flow Logs
+### Step 5.3.8: Configure Connection Monitor
+
+**Connection Monitor** runs scheduled connectivity tests and keeps historical reachability and latency trends.
+
+#### Option 1: Azure Portal (GUI)
+
+1. In **Network Watcher**, go to **Monitoring** → **Connection monitor**
+2. Click **+ Create**
+3. Configure:
+
+| Field               | Value                        |
+| :------------------ | :--------------------------- |
+| Name                | `skycraft-hub-spoke-cm`      |
+| Source endpoint     | `prod-skycraft-swc-auth-vm`  |
+| Destination address | `10.1.1.4`                   |
+| Protocol            | **TCP**                      |
+| Destination port    | **22**                       |
+| Test frequency      | **Every 5 minutes**          |
+
+4. Click **Create**
+
+#### Option 2: Azure CLI
+
+```bash
+# Create a basic connection monitor test
+az network watcher connection-monitor create \
+  --name skycraft-hub-spoke-cm \
+  --location swedencentral \
+  --resource-group NetworkWatcherRG
+```
+
+#### Option 3: PowerShell
+
+```powershell
+# Create a connection monitor in Sweden Central
+New-AzNetworkWatcherConnectionMonitor `
+    -NetworkWatcherName (Get-AzNetworkWatcher | Where-Object { $_.Location -eq 'swedencentral' }).Name `
+    -ResourceGroupName 'NetworkWatcherRG' `
+    -Name 'skycraft-hub-spoke-cm' `
+    -Location 'swedencentral'
+```
+
+**Expected Result**: Connection monitor `skycraft-hub-spoke-cm` appears as **Running**, with initial reachability and latency data visible after a few minutes.
+
+### Step 5.3.9: Enable NSG Flow Logs
 
 **NSG Flow Logs** capture information about IP traffic flowing through NSGs. They are essential for security auditing and traffic pattern analysis.
 
@@ -441,6 +530,20 @@ Set-AzNetworkWatcherFlowLog `
 
 ---
 
+## 📖 Section 5: Operational Review & Interpretation (20 min)
+
+### Step 5.3.10: Interpret Results and Confirm Monitoring Coverage
+
+1. Open **Connection monitor** results for `skycraft-hub-spoke-cm`
+2. Confirm status is **Reachable** and review baseline latency trend
+3. Open **IP flow verify** history and confirm the evaluated NSG rule names are documented
+4. Open **NSG flow logs** settings and confirm retention + Traffic Analytics are enabled
+5. Record one operational conclusion (for example: "Hub-Spoke path healthy, no deny rule on TCP/22")
+
+**Expected Result**: You can clearly explain which tool validates each layer: NSG decision, route decision, path reachability, and ongoing traffic behavior.
+
+---
+
 ## ✅ Lab Checklist
 
 ### Diagnostic Tools Used
@@ -452,6 +555,7 @@ Set-AzNetworkWatcherFlowLog `
 - [ ] Next Hop verified for Hub traffic (VNetPeering)
 - [ ] Network Topology generated for `dev-skycraft-swc-rg`
 - [ ] Connection Troubleshooter tested between prod and dev VMs
+- [ ] Connection Monitor `skycraft-hub-spoke-cm` created and running
 
 ### Flow Logs Configured
 
@@ -533,6 +637,19 @@ az vm extension set \
 - Generate traffic by SSH-ing between VMs to ensure flow data is captured
 - Check the Flow Log JSON files in the storage account's `insights-logs-networksecuritygroupflowevent` container
 
+### Issue 6: Connection Monitor Shows "Unknown" or No Data
+
+**Symptom**: Connection monitor test exists but no reachability/latency results appear.
+
+**Root Cause**: Endpoint configuration is incomplete, test group not started, or source VM lacks required agent/permissions.
+
+**Solution**:
+
+- Confirm source and destination endpoints are valid and reachable
+- Verify monitor status is **Running**
+- Validate VM extension health on the source VM
+- Re-run a manual connection test with Connection Troubleshooter to confirm baseline path
+
 ---
 
 ## 🎓 Knowledge Check
@@ -585,6 +702,7 @@ az vm extension set \
 - [IP Flow Verify Documentation](https://learn.microsoft.com/en-us/azure/network-watcher/network-watcher-ip-flow-verify-overview)
 - [NSG Flow Logs](https://learn.microsoft.com/en-us/azure/network-watcher/network-watcher-nsg-flow-logging-overview)
 - [Connection Troubleshoot](https://learn.microsoft.com/en-us/azure/network-watcher/network-watcher-connectivity-overview)
+- [Connection Monitor](https://learn.microsoft.com/en-us/azure/network-watcher/connection-monitor-overview)
 - [Traffic Analytics](https://learn.microsoft.com/en-us/azure/network-watcher/traffic-analytics)
 
 ---
@@ -594,6 +712,8 @@ az vm extension set \
 [← Back to Module 5 Index](../README.md)
 
 [← Previous Lab: 5.2 - Business Continuity](../5.2-business-continuity/lab-guide-5.2.md)
+
+[Next: Capstone Project & Exam Review →](../../README.MD)
 
 ---
 
@@ -606,23 +726,26 @@ az vm extension set \
 ✅ Checked routing with Next Hop for external and internal traffic
 ✅ Generated network topology visualization for infrastructure review
 ✅ Ran end-to-end Connection Troubleshooter between Hub and Spoke VMs
+✅ Configured Connection Monitor for continuous connectivity checks
 ✅ Enabled NSG Flow Logs with Traffic Analytics for ongoing monitoring
 
 **Infrastructure Deployed**:
 
 | Resource          | Name                | Configuration                    |
 | ----------------- | ------------------- | -------------------------------- |
-| Network Watcher   | (auto-provisioned)  | Sweden Central, NetworkWatcherRG |
-| NSG Flow Log      | `prod-nsg-flow-log` | Version 2, 7-day retention       |
-| Traffic Analytics | Via LAW             | 10-min processing interval       |
+| Network Watcher    | (auto-provisioned)    | Sweden Central, NetworkWatcherRG |
+| Connection Monitor | `skycraft-hub-spoke-cm` | 5-minute continuous test interval |
+| NSG Flow Log       | `prod-nsg-flow-log`   | Version 2, 7-day retention       |
+| Traffic Analytics  | Via LAW               | 10-min processing interval       |
 
 **Skills Gained**:
 
 - On-demand network diagnostics (IP Flow, Next Hop, Connection Troubleshoot)
+- Continuous connectivity monitoring (Connection Monitor)
 - Automated traffic analysis (NSG Flow Logs, Traffic Analytics)
 - Visual infrastructure review (Network Topology)
 
-**Time Spent**: ~1 hour
+**Time Spent**: ~2 hours
 
 **Congratulations!** You have completed **Module 5: Monitor and Maintain Azure Resources**. Your SkyCraft infrastructure now has comprehensive monitoring, backup, disaster recovery, and network diagnostics. You are ready for the **Capstone Project**.
 
