@@ -188,7 +188,7 @@ Once complete, you'll have:
 
 ## 📌 Module Navigation
 
-- [← Back to Course Home](../README.MD)
+- [← Back to Course Home](../README.md)
 - [Lab 3.1: Infrastructure as Code →](./3.1-infrastructure-as-code/lab-guide-3.1.md)
 - [Lab 3.2: Virtual Machines →](./3.2-virtual-machines/lab-guide-3.2.md)
 - [Lab 3.3: Containers →](./3.3-containers/lab-guide-3.3.md)

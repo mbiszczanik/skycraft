@@ -589,5 +589,5 @@ You've successfully implemented RBAC for the SkyCraft team! Key accomplishments:
 ## 📌 Module Navigation
 
 - [← Lab 1.1: Manage Entra Users & Groups](../1.1-entra-users-groups/lab-guide-1.1.md)
-- [← Back to Module 1 Index](../README.MD)
+- [← Back to Module 1 Index](../README.md)
 - [Lab 1.3: Governance & Policies →](../1.3-governance/lab-guide-1.3.md)

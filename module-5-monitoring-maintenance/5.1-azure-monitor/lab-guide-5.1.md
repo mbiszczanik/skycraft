@@ -240,7 +240,7 @@ Perf
 
 ## 📌 Module Navigation
 
-[Module 5 README](../README.MD) | [Next Lab: 5.2 Business Continuity →](../5.2-business-continuity/lab-guide-5.2.md)
+[Module 5 README](../README.md) | [Next Lab: 5.2 Business Continuity →](../5.2-business-continuity/lab-guide-5.2.md)
 
 ---
 

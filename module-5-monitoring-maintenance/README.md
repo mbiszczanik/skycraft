@@ -194,7 +194,7 @@ Once complete, you'll have:
 
 ## 📌 Module Navigation
 
-- [← Back to Course Home](../README.MD)
+- [← Back to Course Home](../README.md)
 - [← Previous: Module 4 — Storage](../module-4-storage/README.md)
 - [Lab 5.1: Azure Monitor & Insights →](./5.1-azure-monitor/lab-guide-5.1.md)
 - [Lab 5.2: Business Continuity & Backup →](./5.2-business-continuity/lab-guide-5.2.md)
