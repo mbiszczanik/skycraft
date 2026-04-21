@@ -34,7 +34,7 @@ var varAcrNameStart = toLower(parAcrName)
 *******************/
 
 // ACR - Standard SKU with Admin enabled
-resource resAcr 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' = {
+resource resAcr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: varAcrNameStart
   location: parLocation
   tags: varCommonTags

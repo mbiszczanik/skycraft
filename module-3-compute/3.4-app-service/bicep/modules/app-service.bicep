@@ -37,7 +37,7 @@ var varCommonTags = {
 *    Resources     *
 *******************/
 
-resource resAppServicePlan 'Microsoft.Web/serverfarms@2025-03-01' = {
+resource resAppServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: parAppServicePlanName
   location: parLocation
   tags: varCommonTags
@@ -54,7 +54,7 @@ resource resAppServicePlan 'Microsoft.Web/serverfarms@2025-03-01' = {
   }
 }
 
-resource resWebApp 'Microsoft.Web/sites@2025-03-01' = {
+resource resWebApp 'Microsoft.Web/sites@2023-12-01' = {
   name: parAppName
   location: parLocation
   tags: varCommonTags
