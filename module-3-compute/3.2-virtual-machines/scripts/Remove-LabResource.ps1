@@ -24,6 +24,12 @@
     
 .EXAMPLE
     .\Remove-LabResource.ps1 -Environment dev -Force -IncludeKeyVault
+
+.NOTES
+    Project: SkyCraft
+    Lab: 3.2 - Virtual Machines
+    Author: Marcin Biszczanik
+    Date: 2026-01-11
 #>
 
 [CmdletBinding()]

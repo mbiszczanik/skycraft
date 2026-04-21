@@ -1,3 +1,25 @@
+<#
+.SYNOPSIS
+    Validates Lab 2.3 DNS zones, links, records, and load balancers.
+
+.DESCRIPTION
+    Runs a set of read-only checks against the deployed Lab 2.3 resources and prints a
+    pass/fail summary. Exits with a non-zero code if any validation fails. Checks:
+      - Public DNS zone and required A / CNAME records
+      - Private DNS zone and hub / dev / prod VNet links with the expected registration flag
+      - Dev and prod load balancers have Standard SKU, >=2 probes and >=2 LB rules
+
+.EXAMPLE
+    .\Test-Lab.ps1
+    Runs all Lab 2.3 validations using the current Az context.
+
+.NOTES
+    Project: SkyCraft
+    Lab: 2.3 - Name Resolution & Load Balancing
+    Author: Marcin Biszczanik
+    Date: 2026-01-11
+#>
+
 [CmdletBinding()]
 param()
 
