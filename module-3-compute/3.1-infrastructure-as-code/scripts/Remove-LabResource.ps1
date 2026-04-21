@@ -12,6 +12,12 @@
 
 .EXAMPLE
     .\Cleanup-Resources.ps1 -Environment all
+
+.NOTES
+    Project: SkyCraft
+    Lab: 3.1 - Infrastructure as Code
+    Author: Marcin Biszczanik
+    Date: 2026-01-11
 #>
 
 [CmdletBinding()]

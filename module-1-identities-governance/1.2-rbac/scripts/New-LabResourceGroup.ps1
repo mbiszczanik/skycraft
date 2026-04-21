@@ -1,12 +1,46 @@
-# Lab 1.2 - Resource Groups Creation Script
-# This script creates resource groups
+<#
+.SYNOPSIS
+    Creates the three SkyCraft resource groups (dev / prod / platform) in Sweden Central.
 
+.DESCRIPTION
+    Idempotently creates the resource groups required by Lab 1.2 and stamps each one
+    with the mandatory governance tags (Project, Environment, CostCenter). Skips
+    groups that already exist. Use -WhatIf to print planned actions without making changes.
+
+.PARAMETER SubscriptionId
+    The target Azure Subscription ID. Mandatory — the script switches context to it before
+    creating any resource groups.
+
+.PARAMETER Location
+    Azure region for all three resource groups. Defaults to 'Sweden Central'.
+
+.PARAMETER WhatIf
+    If specified, prints the resource groups that would be created without actually creating them.
+
+.EXAMPLE
+    .\New-LabResourceGroup.ps1 -SubscriptionId '00000000-0000-0000-0000-000000000000'
+    Creates dev/prod/platform resource groups in Sweden Central.
+
+.EXAMPLE
+    .\New-LabResourceGroup.ps1 -SubscriptionId $subId -WhatIf
+    Prints the planned resource groups without creating anything.
+
+.NOTES
+    Project: SkyCraft
+    Lab: 1.2 - RBAC
+    Author: Marcin Biszczanik
+    Date: 2026-01-11
+#>
+
+[CmdletBinding(SupportsShouldProcess = $false)]
 param(
     [Parameter(Mandatory = $true)]
     [string]$SubscriptionId,
 
+    [Parameter(Mandatory = $false)]
     [string]$Location = "Sweden Central",
 
+    [Parameter(Mandatory = $false)]
     [switch]$WhatIf
 )
 

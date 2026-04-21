@@ -7,6 +7,12 @@
     1. Deploy Standard Public Load Balancer for Dev.
     2. Deploy Standard Public Load Balancer for Prod.
     3. Configure Backend Pools, Health Probes, and Rules.
+
+.NOTES
+    Project: SkyCraft
+    Lab: 2.3 - Name Resolution & Load Balancing
+    Author: Marcin Biszczanik
+    Date: 2026-01-11
 #>
 
 [CmdletBinding()]
