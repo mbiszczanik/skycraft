@@ -37,6 +37,61 @@ By completing this module, you will be able to:
 
 ---
 
+## 🏗️ Architecture Overview
+
+This module establishes the identity and governance layer that every subsequent module depends on. Entra ID users are placed into security groups, the groups are bound to built-in Azure roles via RBAC, and Azure Policy / locks / budgets are applied to the three SkyCraft resource groups at the subscription level.
+
+```mermaid
+graph TB
+    subgraph "Microsoft Entra ID tenant"
+        UserMal["Malfurion Stormrage<br/>(Owner — Global Admin)"]
+        UserKhad["Khadgar Archmage<br/>(Contributor)"]
+        UserChrom["Chromie Timewalker<br/>(Reader)"]
+        UserIll["Illidan Stormrage<br/>(Guest)"]
+        GAdmin["SkyCraft-Admins"]
+        GDev["SkyCraft-Developers"]
+        GTest["SkyCraft-Testers"]
+        UserMal --> GAdmin
+        UserKhad --> GDev
+        UserChrom --> GTest
+    end
+
+    subgraph "Azure Subscription — governance"
+        Policy["Azure Policy<br/>(naming / SKU / tag required)"]
+        Budget["Budgets & Cost Alerts<br/>(MSDN)"]
+        Locks["Resource Locks<br/>(CanNotDelete on Prod)"]
+    end
+
+    subgraph "Resource Groups (scopes)"
+        RGPlatform["platform-skycraft-swc-rg"]
+        RGDev["dev-skycraft-swc-rg"]
+        RGProd["prod-skycraft-swc-rg"]
+    end
+
+    GAdmin -->|Owner| RGPlatform
+    GAdmin -->|Owner| RGDev
+    GAdmin -->|Owner| RGProd
+    GDev -->|Contributor| RGDev
+    GTest -->|Reader| RGDev
+    GTest -->|Reader| RGProd
+    UserIll -->|Guest, limited| RGPlatform
+
+    Policy --> RGPlatform
+    Policy --> RGDev
+    Policy --> RGProd
+    Budget --> RGProd
+    Locks --> RGProd
+
+    style RGPlatform fill:#e1f5ff,stroke:#0078d4,stroke-width:3px
+    style RGDev fill:#fff4e1,stroke:#f39c12,stroke-width:2px
+    style RGProd fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
+    style GAdmin fill:#e8f5e9
+    style GDev fill:#e8f5e9
+    style GTest fill:#e8f5e9
+```
+
+---
+
 ## ✅ Prerequisites
 
 Before starting, ensure you have:
