@@ -1,3 +1,44 @@
+<#
+.SYNOPSIS
+    Removes Lab 2.3 DNS zones, VNet links, and dev/prod load balancers.
+
+.DESCRIPTION
+    Cleanup script for Lab 2.3. Removes resources in the safe order: public DNS zone,
+    both load balancers, private DNS VNet links, private DNS zone. Each removal is
+    guarded by a Get-* existence check so the script is idempotent and can be re-run.
+
+.PARAMETER PublicDnsZoneName
+    Public DNS zone to delete. Defaults to 'skycraft.example.com'.
+
+.PARAMETER PrivateDnsZoneName
+    Private DNS zone to delete. Defaults to 'skycraft.internal'.
+
+.PARAMETER PlatformRG
+    Resource group that hosts the DNS zones. Defaults to 'platform-skycraft-swc-rg'.
+
+.PARAMETER DevRG
+    Resource group that hosts the dev load balancer. Defaults to 'dev-skycraft-swc-rg'.
+
+.PARAMETER ProdRG
+    Resource group that hosts the prod load balancer. Defaults to 'prod-skycraft-swc-rg'.
+
+.PARAMETER DevLbName
+    Name of the dev load balancer. Defaults to 'dev-skycraft-swc-lb'.
+
+.PARAMETER ProdLbName
+    Name of the prod load balancer. Defaults to 'prod-skycraft-swc-lb'.
+
+.EXAMPLE
+    .\Remove-LabResource.ps1
+    Removes all Lab 2.3 DNS and load balancer resources using the default names.
+
+.NOTES
+    Project: SkyCraft
+    Lab: 2.3 - Name Resolution & Load Balancing
+    Author: Marcin Biszczanik
+    Date: 2026-01-11
+#>
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
