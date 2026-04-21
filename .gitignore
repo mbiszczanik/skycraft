@@ -42,8 +42,6 @@ id_ed25519.pub
 *.user
 *.userosscache
 *.sln.docstates
-*.agent
-*.github
 
 # ===================================
 # Lab Temporary Files
@@ -53,6 +51,7 @@ temp/
 scratch/
 student-submissions/
 test-results/
+.patches/
 
 # ===================================
 # Infrastructure as Code (Bicep)
