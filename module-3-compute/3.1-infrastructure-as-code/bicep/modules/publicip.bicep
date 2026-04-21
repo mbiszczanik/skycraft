@@ -1,45 +1,57 @@
-// modules/publicip.bicep
-// Public IP address module
+/*=====================================================
+SUMMARY: Lab 3.1 - Public IP Address Module
+DESCRIPTION: Deploys a Standard / Static Public IP Address for load balancers or gateways in SkyCraft Lab 3.1.
+AUTHOR/S: Marcin Biszczanik
+VERSION: 1.1.0
+DEPLOYMENT: [Internal use via Orchestrator]
+======================================================*/
 
+/*******************
+*    Parameters    *
+*******************/
 @description('Name of the public IP address')
-param publicIpName string
+param parPublicIpName string
 
 @description('Azure region for deployment')
-param location string = resourceGroup().location
+param parLocation string = resourceGroup().location
 
 @description('Public IP SKU')
 @allowed(['Basic', 'Standard'])
-param sku string = 'Standard'
+param parSku string = 'Standard'
 
 @description('IP allocation method')
 @allowed(['Static', 'Dynamic'])
-param allocationMethod string = 'Static'
+param parAllocationMethod string = 'Static'
 
-@description('DNS label (optional)')
-param dnsLabel string = ''
+@description('Optional DNS label (leave empty to skip DNS settings)')
+param parDnsLabel string = ''
 
-@description('Resource tags')
-param tags object
+@description('Resource tags (must include Project, Environment, CostCenter)')
+param parTags object
 
-// Public IP Address
-resource publicIp 'Microsoft.Network/publicIPAddresses@2023-05-01' = {
-  name: publicIpName
-  location: location
-  tags: tags
+/*******************
+*    Resources     *
+*******************/
+resource resPublicIp 'Microsoft.Network/publicIPAddresses@2023-11-01' = {
+  name: parPublicIpName
+  location: parLocation
+  tags: parTags
   sku: {
-    name: sku
+    name: parSku
     tier: 'Regional'
   }
   properties: {
-    publicIPAllocationMethod: allocationMethod
+    publicIPAllocationMethod: parAllocationMethod
     publicIPAddressVersion: 'IPv4'
-    dnsSettings: !empty(dnsLabel) ? {
-      domainNameLabel: dnsLabel
+    dnsSettings: !empty(parDnsLabel) ? {
+      domainNameLabel: parDnsLabel
     } : null
   }
 }
 
-// Outputs
-output publicIpId string = publicIp.id
-output publicIpName string = publicIp.name
-output ipAddress string = publicIp.properties.ipAddress
+/******************
+*     Outputs     *
+******************/
+output outPublicIpId string = resPublicIp.id
+output outPublicIpName string = resPublicIp.name
+output outIpAddress string = resPublicIp.properties.ipAddress
