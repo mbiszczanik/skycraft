@@ -97,10 +97,10 @@ module modDevAuthNsg 'modules/nsg.bicep' = {
   name: 'devAuthNsgDeployment'
   scope: resDevRg
   params: {
-    nsgName: 'auth-nsg'
-    location: parLocation
-    tags: union(varCommonTags, { Environment: 'Development', Purpose: 'AuthServers' })
-    securityRules: [
+    parNsgName: 'auth-nsg'
+    parLocation: parLocation
+    parTags: union(varCommonTags, { Environment: 'Development', Purpose: 'AuthServers' })
+    parSecurityRules: [
       {
         name: 'AllowBastionSSH'
         protocol: 'Tcp'
@@ -131,10 +131,10 @@ module modDevWorldNsg 'modules/nsg.bicep' = {
   name: 'devWorldNsgDeployment'
   scope: resDevRg
   params: {
-    nsgName: 'world-nsg'
-    location: parLocation
-    tags: union(varCommonTags, { Environment: 'Development', Purpose: 'WorldServers' })
-    securityRules: [
+    parNsgName: 'world-nsg'
+    parLocation: parLocation
+    parTags: union(varCommonTags, { Environment: 'Development', Purpose: 'WorldServers' })
+    parSecurityRules: [
       {
         name: 'AllowBastionSSH'
         protocol: 'Tcp'
@@ -169,17 +169,16 @@ module modHubVnet 'modules/network.bicep' = {
   name: 'hubVnetDeployment'
   scope: resPlatformRg
   params: {
-    namePrefix: 'platform-${parProject}-${varLocationShortCode}'
-    location: parLocation
-    environment: 'platform'
-    vnetAddressPrefix: parHubVnetAddressPrefix
-    subnets: [
+    parNamePrefix: 'platform-${parProject}-${varLocationShortCode}'
+    parLocation: parLocation
+    parVnetAddressPrefix: parHubVnetAddressPrefix
+    parSubnets: [
       {
         name: 'AzureBastionSubnet'
         addressPrefix: '10.0.0.0/26'
       }
     ]
-    tags: union(varCommonTags, { Environment: 'Platform', Purpose: 'HubNetwork' })
+    parTags: union(varCommonTags, { Environment: 'Platform', Purpose: 'HubNetwork' })
   }
 }
 
@@ -188,27 +187,26 @@ module modDevVnet 'modules/network.bicep' = {
   scope: resDevRg
   // dependencies inferred by Bicep from output references
   params: {
-    namePrefix: 'dev-${parProject}-${varLocationShortCode}'
-    location: parLocation
-    environment: 'dev'
-    vnetAddressPrefix: parDevVnetAddressPrefix
-    subnets: [
+    parNamePrefix: 'dev-${parProject}-${varLocationShortCode}'
+    parLocation: parLocation
+    parVnetAddressPrefix: parDevVnetAddressPrefix
+    parSubnets: [
       {
         name: 'AuthSubnet'
         addressPrefix: '10.1.1.0/24'
-        nsgId: modDevAuthNsg.outputs.nsgId
+        nsgId: modDevAuthNsg.outputs.outNsgId
       }
       {
         name: 'WorldSubnet'
         addressPrefix: '10.1.2.0/24'
-        nsgId: modDevWorldNsg.outputs.nsgId
+        nsgId: modDevWorldNsg.outputs.outNsgId
       }
       {
         name: 'DatabaseSubnet'
         addressPrefix: '10.1.3.0/24'
       }
     ]
-    tags: union(varCommonTags, { Environment: 'Development' })
+    parTags: union(varCommonTags, { Environment: 'Development' })
   }
 }
 
@@ -220,11 +218,11 @@ module modDevLbPublicIp 'modules/publicip.bicep' = {
   name: 'devLbPublicIpDeployment'
   scope: resDevRg
   params: {
-    publicIpName: 'dev-${parProject}-${varLocationShortCode}-lb-pip'
-    location: parLocation
-    sku: 'Standard'
-    allocationMethod: 'Static'
-    tags: union(varCommonTags, { Environment: 'Development', Purpose: 'LoadBalancer' })
+    parPublicIpName: 'dev-${parProject}-${varLocationShortCode}-lb-pip'
+    parLocation: parLocation
+    parSku: 'Standard'
+    parAllocationMethod: 'Static'
+    parTags: union(varCommonTags, { Environment: 'Development', Purpose: 'LoadBalancer' })
   }
 }
 
@@ -236,14 +234,14 @@ module modDevLoadBalancer 'modules/loadbalancer.bicep' = {
   name: 'devLoadBalancerDeployment'
   scope: resDevRg
   params: {
-    namePrefix: 'dev-${parProject}-${varLocationShortCode}'
-    location: parLocation
-    publicIpId: modDevLbPublicIp.outputs.publicIpId
-    backendPools: [
+    parNamePrefix: 'dev-${parProject}-${varLocationShortCode}'
+    parLocation: parLocation
+    parPublicIpId: modDevLbPublicIp.outputs.outPublicIpId
+    parBackendPools: [
       { name: 'dev-${parProject}-${varLocationShortCode}-lb-be-world' }
       { name: 'dev-${parProject}-${varLocationShortCode}-lb-be-auth' }
     ]
-    healthProbes: [
+    parHealthProbes: [
       {
         name: 'dev-${parProject}-${varLocationShortCode}-lb-probe-world'
         protocol: 'Tcp'
@@ -259,7 +257,7 @@ module modDevLoadBalancer 'modules/loadbalancer.bicep' = {
         numberOfProbes: 2
       }
     ]
-    lbRules: [
+    parLbRules: [
       {
         name: 'dev-${parProject}-${varLocationShortCode}-lb-rule-world'
         protocol: 'Tcp'
@@ -277,7 +275,7 @@ module modDevLoadBalancer 'modules/loadbalancer.bicep' = {
         probeName: 'dev-${parProject}-${varLocationShortCode}-lb-probe-auth'
       }
     ]
-    tags: union(varCommonTags, { Environment: 'Development' })
+    parTags: union(varCommonTags, { Environment: 'Development' })
   }
 }
 
@@ -289,11 +287,11 @@ output outPlatformResourceGroupName string = resPlatformRg.name
 output outDevResourceGroupName string = resDevRg.name
 output outProdResourceGroupName string = resProdRg.name
 
-output outHubVnetId string = modHubVnet.outputs.vnetId
-output outDevVnetId string = modDevVnet.outputs.vnetId
+output outHubVnetId string = modHubVnet.outputs.outVnetId
+output outDevVnetId string = modDevVnet.outputs.outVnetId
 
-output outDevLoadBalancerId string = modDevLoadBalancer.outputs.loadBalancerId
-output outDevLoadBalancerPublicIp string = modDevLbPublicIp.outputs.ipAddress
+output outDevLoadBalancerId string = modDevLoadBalancer.outputs.outLoadBalancerId
+output outDevLoadBalancerPublicIp string = modDevLbPublicIp.outputs.outIpAddress
 
 // Outputs to silence "Unused Parameter" warnings and expose config
 // output configVmSize string - Removed

@@ -1,39 +1,41 @@
-// modules/network.bicep
-// Reusable network module for SkyCraft infrastructure
+/*=====================================================
+SUMMARY: Lab 3.1 - Virtual Network Module
+DESCRIPTION: Deploys a Virtual Network with configurable subnets (optionally NSG-associated) for SkyCraft Lab 3.1.
+AUTHOR/S: Marcin Biszczanik
+VERSION: 1.1.0
+DEPLOYMENT: [Internal use via Orchestrator]
+======================================================*/
 
-@description('Name prefix for network resources')
-param namePrefix string
+/*******************
+*    Parameters    *
+*******************/
+@description('Name prefix for network resources (e.g., dev-skycraft-swc)')
+param parNamePrefix string
 
 @description('Azure region for deployment')
-param location string = resourceGroup().location
-
-@description('Environment name (dev, prod)')
-@allowed(['dev', 'prod', 'platform'])
-param environment string
+param parLocation string = resourceGroup().location
 
 @description('VNet address space')
-param vnetAddressPrefix string
+param parVnetAddressPrefix string
 
-@description('Subnet configurations')
-param subnets array
+@description('Subnet configurations: [{ name, addressPrefix, nsgId? }]')
+param parSubnets array
 
-@description('Resource tags')
-param tags object = {
-  Project: 'SkyCraft'
-  Environment: environment
-  ManagedBy: 'Bicep'
-}
+@description('Resource tags (must include Project, Environment, CostCenter)')
+param parTags object
 
-// Virtual Network
-resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
-  name: '${namePrefix}-vnet'
-  location: location
-  tags: tags
+/*******************
+*    Resources     *
+*******************/
+resource resVnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
+  name: '${parNamePrefix}-vnet'
+  location: parLocation
+  tags: parTags
   properties: {
     addressSpace: {
-      addressPrefixes: [vnetAddressPrefix]
+      addressPrefixes: [parVnetAddressPrefix]
     }
-    subnets: [for subnet in subnets: {
+    subnets: [for subnet in parSubnets: {
       name: subnet.name
       properties: {
         addressPrefix: subnet.addressPrefix
@@ -45,10 +47,12 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
   }
 }
 
-// Outputs
-output vnetId string = vnet.id
-output vnetName string = vnet.name
-output subnets array = [for (subnet, i) in subnets: {
+/******************
+*     Outputs     *
+******************/
+output outVnetId string = resVnet.id
+output outVnetName string = resVnet.name
+output outSubnets array = [for (subnet, i) in parSubnets: {
   name: subnet.name
-  id: vnet.properties.subnets[i].id
+  id: resVnet.properties.subnets[i].id
 }]

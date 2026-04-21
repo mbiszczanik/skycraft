@@ -1,25 +1,35 @@
-// modules/nsg.bicep
-// Network Security Group module with configurable rules
+/*=====================================================
+SUMMARY: Lab 3.1 - Network Security Group Module
+DESCRIPTION: Deploys a Network Security Group with a configurable set of security rules for SkyCraft Lab 3.1.
+AUTHOR/S: Marcin Biszczanik
+VERSION: 1.1.0
+DEPLOYMENT: [Internal use via Orchestrator]
+======================================================*/
 
+/*******************
+*    Parameters    *
+*******************/
 @description('Name of the Network Security Group')
-param nsgName string
+param parNsgName string
 
 @description('Azure region for deployment')
-param location string = resourceGroup().location
+param parLocation string = resourceGroup().location
 
 @description('Security rules configuration')
-param securityRules array = []
+param parSecurityRules array = []
 
-@description('Resource tags')
-param tags object
+@description('Resource tags (must include Project, Environment, CostCenter)')
+param parTags object
 
-// Network Security Group
-resource nsg 'Microsoft.Network/networkSecurityGroups@2023-05-01' = {
-  name: nsgName
-  location: location
-  tags: tags
+/*******************
+*    Resources     *
+*******************/
+resource resNsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
+  name: parNsgName
+  location: parLocation
+  tags: parTags
   properties: {
-    securityRules: [for rule in securityRules: {
+    securityRules: [for rule in parSecurityRules: {
       name: rule.name
       properties: {
         protocol: rule.protocol
@@ -35,6 +45,8 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-05-01' = {
   }
 }
 
-// Outputs
-output nsgId string = nsg.id
-output nsgName string = nsg.name
+/******************
+*     Outputs     *
+******************/
+output outNsgId string = resNsg.id
+output outNsgName string = resNsg.name
