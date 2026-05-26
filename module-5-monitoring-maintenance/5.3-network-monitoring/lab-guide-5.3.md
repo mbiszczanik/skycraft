@@ -186,7 +186,7 @@ Before starting this lab:
 
 ## 📌 Module Navigation
 
-[Lab 5.2 Business Continuity ←](../5.2-business-continuity/lab-guide-5.2.md) | [Back to Module 5 Index](../README.MD)
+[Lab 5.2 Business Continuity ←](../5.2-business-continuity/lab-guide-5.2.md) | [Back to Module 5 Index](../README.md)
 
 ---
 

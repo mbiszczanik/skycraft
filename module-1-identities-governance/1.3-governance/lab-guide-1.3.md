@@ -870,5 +870,5 @@ Congratulations! You've completed **Module 1: Manage Azure Identities and Govern
 ## 📌 Module Navigation
 
 - [← Lab 1.2: Manage Access & RBAC](../1.2-rbac/lab-guide-1.2.md)
-- [← Back to Module 1 Index](../README.MD)
+- [← Back to Module 1 Index](../README.md)
 - [Module 2: Virtual Networking →](../../module-2-networking/README.md)
