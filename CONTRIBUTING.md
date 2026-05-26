@@ -10,13 +10,27 @@ Before submitting a Pull Request (PR), please review our project standards to en
 - **[PowerShell Standards](docs/powershell-standards.md)**: Scripting style, error handling, and formatting.
 - **[Bicep Standards](docs/bicep-standards.md)**: Infrastructure as Code modules and parameters.
 
+## 🌿 Branching & PR workflow
+
+SkyCraft follows **GitHub Flow** (see [ADR-0001](docs/adr/0001-use-github-flow.md)):
+
+- `main` is the only long-lived branch.
+- All work happens on short-lived branches: `feature/*`, `fix/*`, `docs/*`, `chore/*`.
+- Changes land on `main` exclusively via Pull Request, **squash-merged** for linear history.
+- Branch protection rules on `main` are documented in [ADR-0002](docs/adr/0002-branch-protection-rules.md).
+
+For multi-commit work — and for any work driven by an automated agent — use a
+`git worktree` to isolate the feature from the main checkout (see
+[ADR-0003](docs/adr/0003-worktree-branch-discipline.md) for the rationale and
+the exact commands).
+
 ## 🛠️ How to Contribute
 
 1.  **Fork the Repository**: Create your own copy of the project.
-2.  **Create a Branch**: Use a descriptive name (e.g., `feat/lab-3.1-vm`, `fix/typo-lab-1.2`).
+2.  **Create a Branch off `main`**: Use a descriptive name (e.g., `feature/lab-3.1-vm`, `fix/typo-lab-1.2`).
 3.  **Make Changes**: Implement your feature or fix.
 4.  **Verify**: Run the relevant `Test-Lab.ps1` scripts to ensure no regressions.
-5.  **Submit a Pull Request**: Describe your changes clearly and link to any relevant issues.
+5.  **Submit a Pull Request against `main`**: Describe your changes clearly and link to any relevant issues. PRs are squash-merged.
 
 ## 🧪 Testing
 
