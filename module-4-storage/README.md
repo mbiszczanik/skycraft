@@ -196,7 +196,7 @@ Once complete, you'll have:
 
 ## 📌 Module Navigation
 
-- [← Back to Course Home](../README.MD)
+- [← Back to Course Home](../README.md)
 - [Lab 4.1: Storage Accounts →](./4.1-storage-accounts/lab-guide-4.1.md)
 - [Lab 4.2: Blob Storage →](./4.2-blob-storage/lab-guide-4.2.md)
 - [Lab 4.3: Azure Files →](./4.3-azure-files/lab-guide-4.3.md)

@@ -10,6 +10,12 @@
 
 .PARAMETER OutputFile
     Path to save the JSON file. Default: 'exported-template.json'
+
+.NOTES
+    Project: SkyCraft
+    Lab: 3.1 - Infrastructure as Code
+    Author: Marcin Biszczanik
+    Date: 2026-01-11
 #>
 
 [CmdletBinding()]

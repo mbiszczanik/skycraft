@@ -7,6 +7,12 @@
     1. Create Public DNS Zone (skycraft.example.com) & Records.
     2. Create Private DNS Zone (skycraft.internal) & Records.
     3. Link Private DNS to VNets (Hub, Dev, Prod).
+
+.NOTES
+    Project: SkyCraft
+    Lab: 2.3 - Name Resolution & Load Balancing
+    Author: Marcin Biszczanik
+    Date: 2026-01-11
 #>
 
 [CmdletBinding()]

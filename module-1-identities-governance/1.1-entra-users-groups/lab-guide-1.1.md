@@ -358,5 +358,5 @@ Answer these questions to verify understanding:
 
 ## 📌 Module Navigation
 
-- [← Back to Module 1 Index](../README.MD)
+- [← Back to Module 1 Index](../README.md)
 - [Lab 1.2: Manage Access & RBAC →](../1.2-rbac/lab-guide-1.2.md)

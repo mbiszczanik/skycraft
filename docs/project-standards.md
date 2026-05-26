@@ -34,10 +34,10 @@ Every module-level `README.md` **must** contain the following 13 sections in thi
 
 **Rules**:
 
-- **Directory naming must match link targets exactly**. In the main `README.MD`, every module link must point to the actual directory name on disk (e.g., `module-5-monitoring-maintenance/`, not `module-5-monitoring/`). Mismatched directory names cause broken links.
+- **Directory naming must match link targets exactly**. In the main `README.md`, every module link must point to the actual directory name on disk (e.g., `module-5-monitoring-maintenance/`, not `module-5-monitoring/`). Mismatched directory names cause broken links.
 - **Lab links must point to verified paths**. If a lab guide file does not exist yet, link to the lab directory instead of a non-existent file.
 - **Durations must be consistent**. The hours in the module README table must match `docs/course-structure.md`. If they differ, `course-structure.md` is the source of truth.
-- **Do not duplicate sections in the main `README.MD`**. If information already appears in Quick Start (e.g., prerequisites), do not repeat it in a separate section below.
+- **Do not duplicate sections in the main `README.md`**. If information already appears in Quick Start (e.g., prerequisites), do not repeat it in a separate section below.
 
 ---
 

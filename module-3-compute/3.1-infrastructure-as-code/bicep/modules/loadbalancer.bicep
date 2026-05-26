@@ -1,32 +1,48 @@
-// modules/loadbalancer.bicep
-// Azure Load Balancer module for high availability
+/*=====================================================
+SUMMARY: Lab 3.1 - Load Balancer Module
+DESCRIPTION: Deploys a Standard Azure Load Balancer with configurable backend pools, health probes, and LB rules for SkyCraft Lab 3.1.
+AUTHOR/S: Marcin Biszczanik
+VERSION: 1.1.0
+DEPLOYMENT: [Internal use via Orchestrator]
+======================================================*/
 
-@description('Name prefix for load balancer resources')
-param namePrefix string
+/*******************
+*    Parameters    *
+*******************/
+@description('Name prefix for load balancer resources (e.g., dev-skycraft-swc)')
+param parNamePrefix string
 
 @description('Azure region for deployment')
-param location string = resourceGroup().location
+param parLocation string = resourceGroup().location
 
-@description('Public IP address resource ID')
-param publicIpId string
+@description('Public IP address resource ID for the frontend')
+param parPublicIpId string
 
-@description('Backend pool configurations')
-param backendPools array
+@description('Backend pool configurations: [{ name }]')
+param parBackendPools array
 
-@description('Health probe configurations')
-param healthProbes array
+@description('Health probe configurations: [{ name, protocol, port, intervalInSeconds, numberOfProbes }]')
+param parHealthProbes array
 
-@description('Load balancing rule configurations')
-param lbRules array
+@description('Load balancing rule configurations: [{ name, protocol, frontendPort, backendPort, backendPoolName, probeName }]')
+param parLbRules array
 
-@description('Resource tags')
-param tags object
+@description('Resource tags (must include Project, Environment, CostCenter)')
+param parTags object
 
-// Load Balancer
-resource loadBalancer 'Microsoft.Network/loadBalancers@2023-05-01' = {
-  name: '${namePrefix}-lb'
-  location: location
-  tags: tags
+/*******************
+*    Variables     *
+*******************/
+var varLbName = '${parNamePrefix}-lb'
+var varFrontendName = '${parNamePrefix}-lb-frontend'
+
+/*******************
+*    Resources     *
+*******************/
+resource resLoadBalancer 'Microsoft.Network/loadBalancers@2023-11-01' = {
+  name: varLbName
+  location: parLocation
+  tags: parTags
   sku: {
     name: 'Standard'
     tier: 'Regional'
@@ -34,18 +50,18 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2023-05-01' = {
   properties: {
     frontendIPConfigurations: [
       {
-        name: '${namePrefix}-lb-frontend'
+        name: varFrontendName
         properties: {
           publicIPAddress: {
-            id: publicIpId
+            id: parPublicIpId
           }
         }
       }
     ]
-    backendAddressPools: [for pool in backendPools: {
+    backendAddressPools: [for pool in parBackendPools: {
       name: pool.name
     }]
-    probes: [for probe in healthProbes: {
+    probes: [for probe in parHealthProbes: {
       name: probe.name
       properties: {
         protocol: probe.protocol
@@ -54,17 +70,17 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2023-05-01' = {
         numberOfProbes: probe.numberOfProbes
       }
     }]
-    loadBalancingRules: [for (rule, i) in lbRules: {
+    loadBalancingRules: [for rule in parLbRules: {
       name: rule.name
       properties: {
         frontendIPConfiguration: {
-          id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', '${namePrefix}-lb', '${namePrefix}-lb-frontend')
+          id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', varLbName, varFrontendName)
         }
         backendAddressPool: {
-          id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', '${namePrefix}-lb', rule.backendPoolName)
+          id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', varLbName, rule.backendPoolName)
         }
         probe: {
-          id: resourceId('Microsoft.Network/loadBalancers/probes', '${namePrefix}-lb', rule.probeName)
+          id: resourceId('Microsoft.Network/loadBalancers/probes', varLbName, rule.probeName)
         }
         protocol: rule.protocol
         frontendPort: rule.frontendPort
@@ -77,10 +93,12 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2023-05-01' = {
   }
 }
 
-// Outputs
-output loadBalancerId string = loadBalancer.id
-output loadBalancerName string = loadBalancer.name
-output backendPoolIds array = [for (pool, i) in backendPools: {
+/******************
+*     Outputs     *
+******************/
+output outLoadBalancerId string = resLoadBalancer.id
+output outLoadBalancerName string = resLoadBalancer.name
+output outBackendPoolIds array = [for (pool, i) in parBackendPools: {
   name: pool.name
-  id: loadBalancer.properties.backendAddressPools[i].id
+  id: resLoadBalancer.properties.backendAddressPools[i].id
 }]
