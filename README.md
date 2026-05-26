@@ -60,6 +60,26 @@ Transform abstract cloud concepts into **tangible hands-on experience** by build
 
 ---
 
+## 🏛️ Architecture Layer
+
+Alongside the step-by-step labs, the repository carries an **architecture
+commentary layer** that explains *why* each lab is built the way it is, what
+the lab deliberately simplifies for clarity, and how a real production
+deployment would differ.
+
+- See [DESIGN-DECISIONS.md](DESIGN-DECISIONS.md) for the cross-cutting view
+  and the index linking to every per-module `ARCHITECTURE.md`.
+- Each lab's `ARCHITECTURE.md` (e.g. `module-2-networking/2.1-virtual-networks/ARCHITECTURE.md`)
+  covers design decisions & trade-offs, lab-vs-production gaps, a light
+  Well-Architected lens, and a cost / FinOps note.
+
+This layer is **additive learning context**, not a production reference
+architecture. SkyCraft remains a hands-on AZ-104 learning project; the
+architecture notes are there to make the trade-offs explicit so the same code
+can also be read as an architect-level case study.
+
+---
+
 ## 🛠️ Technology Stack
 
 | Category               | Tool                       | Purpose                   |
