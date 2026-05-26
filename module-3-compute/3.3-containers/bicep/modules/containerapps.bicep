@@ -41,7 +41,7 @@ var varCommonTags = {
 *******************/
 
 // ACR Reference for Credentials
-resource resAcr 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' existing = {
+resource resAcr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
   name: parAcrName
 }
 
