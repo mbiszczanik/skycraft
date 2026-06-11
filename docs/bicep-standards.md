@@ -4,6 +4,9 @@
 
 This document outlines the strict coding conventions for Bicep files in the SkyCraft project. All infrastructure code must adhere to these standards to ensure maintainability, readability, and deployment success.
 
+> [!NOTE]
+> These standards follow the official [Microsoft Bicep best practices](https://learn.microsoft.com/azure/azure-resource-manager/bicep/best-practices) with a small number of **conscious divergences** documented in [Section 8](#8-conscious-divergences-from-microsoft-guidance).
+
 ---
 
 ## 1. File Structure & Header
@@ -30,9 +33,15 @@ To ensure stability, consistency, and tool compatibility across the SkyCraft pro
 - **Tooling Support**: Avoid versions so new they may not be fully supported by all standard Bicep CLI versions or VS Code extensions.
 - **Simplicity**: Bleeding-edge versions often include specialized enterprise features (like IPAM Pool integration) that add unnecessary complexity to the core learning objectives.
 
+> [!NOTE]
+> This policy is enforced by `tests/Api-Version-Policy.Tests.ps1` and is the reason the `use-recent-api-versions` linter rule is disabled in [`bicepconfig.json`](#7-linter-configuration-bicepconfigjson).
+
 ## 3. Naming Conventions (Hungarian Notation)
 
 We use specific prefixes to identify the type of object within Bicep code. This prevents confusion between a parameter, a variable, and the resource itself.
+
+> [!NOTE]
+> Microsoft guidance recommends plain `lowerCamelCase` without prefixes. We deliberately diverge for educational clarity — see [Section 8.1](#81-hungarian-notation-prefixes).
 
 | Object Type   | Prefix | Format                | Example                            |
 | :------------ | :----- | :-------------------- | :--------------------------------- |
@@ -41,6 +50,10 @@ We use specific prefixes to identify the type of object within Bicep code. This 
 | **Resource**  | `res`  | `res[PascalCaseName]` | `resVnet`, `resKeyVault`, `resNic` |
 | **Module**    | `mod`  | `mod[PascalCaseName]` | `modSecurityProd`, `modNetworkHub` |
 | **Output**    | `out`  | `out[PascalCaseName]` | `outVnetId`, `outPublicIp`         |
+
+### Azure Resource Names
+
+For the names of the **deployed Azure resources themselves** (`prod-skycraft-swc-vnet`, etc.), see [azure-reference.md — Naming Conventions](azure-reference.md#1-naming-conventions). That document is the single source of truth for resource naming; do not duplicate the pattern here (rule D004).
 
 ## 4. Architecture Pattern
 
@@ -97,9 +110,105 @@ resource resExample 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
 
 ## 6. Best Practices
 
+### 6.1 Parameters
+
 - **Descriptions**: Every `param` must have a `@description('...')` decorator.
+- **Validation decorators**: Constrain every parameter that has a known value range. This catches mistakes at compile/validation time instead of mid-deployment:
+
+  ```bicep
+  @description('Deployment environment')
+  @allowed(['Platform', 'Development', 'Production'])
+  param parEnvironment string
+
+  @description('VNet name')
+  @minLength(2)
+  @maxLength(64)
+  param parVnetName string
+
+  @description('Number of VM instances')
+  @minValue(1)
+  @maxValue(3)
+  param parVmCount int = 1
+  ```
+
+- **Secrets**: Any parameter carrying a password, key, or connection string **must** be decorated with `@secure()`. Secure parameters must **never** have a default value and must **never** be echoed in outputs:
+
+  ```bicep
+  @description('Local administrator password for the VM')
+  @secure()
+  param parAdminPassword string
+  ```
+
 - **No Hardcoding**: Use parameters for values that typically change (names, locations, SKUs).
+
+### 6.2 Variables & Types
+
+- **User-defined types**: For complex object parameters (e.g., a list of subnets), prefer a `type` definition over an untyped `object`/`array`. This gives IntelliSense and compile-time validation:
+
+  ```bicep
+  type subnetConfig = {
+    name: string
+    addressPrefix: string
+    nsgId: string?
+  }
+
+  @description('Subnets to create in the VNet')
+  param parSubnets subnetConfig[]
+  ```
+
+- **External content**: Load static JSON or text (policy definitions, custom script content) with `loadJsonContent()` / `loadTextContent()` instead of inlining long strings:
+
+  ```bicep
+  var varPolicyRules = loadJsonContent('policies/require-tags.rules.json')
+  ```
+
+### 6.3 Outputs
+
 - **Clean Outputs**: Only output values that are needed by other modules or for debugging (e.g., Resource IDs).
+- **No secrets in outputs**: Never output passwords, keys, or connection strings — the `outputs-should-not-contain-secrets` linter rule enforces this.
+
+### 6.4 Deployment Workflow
+
+- **What-if first**: Every deployment must be previewed with `what-if` before the real run. The standard pattern (separate args arrays) is defined in [powershell-standards.md — WhatIf Deployment Pattern](powershell-standards.md#5-best-practices).
+
+## 7. Linter Configuration (`bicepconfig.json`)
+
+The repository root contains a [`bicepconfig.json`](../bicepconfig.json) that the Bicep CLI and VS Code extension pick up automatically for every `.bicep` file in the repo. It promotes the most important linter rules to `error` severity, so violations **fail the build** instead of being silently ignored.
+
+Key decisions encoded there:
+
+| Rule                                  | Level   | Rationale                                                         |
+| :------------------------------------ | :------ | :---------------------------------------------------------------- |
+| `secure-parameter-default`            | `error` | Secure params must never have defaults                            |
+| `outputs-should-not-contain-secrets`  | `error` | Prevents secret leakage via deployment history                    |
+| `admin-username-should-not-be-literal`| `error` | Admin usernames must come from parameters                         |
+| `no-unused-params` / `no-unused-vars` | `error` | Dead code is removed, not ignored                                 |
+| `no-hardcoded-env-urls`               | `error` | Use `environment()` function instead                              |
+| `use-recent-api-versions`             | `off`   | Conscious divergence — we pin stable versions (see [Section 2](#2-api-versioning-standards)) |
+
+Do not suppress a linter error with `#disable-next-line` without a comment explaining why.
+
+## 8. Conscious Divergences from Microsoft Guidance
+
+These are deliberate decisions where SkyCraft departs from the official Microsoft gold path. Each one trades a production-grade convention for educational clarity. **Do not "fix" these in code review** — if you want to change one, update this document first.
+
+### 8.1 Hungarian Notation Prefixes
+
+- **Microsoft says**: Use plain `lowerCamelCase` names; avoid prefixes ([best practices](https://learn.microsoft.com/azure/azure-resource-manager/bicep/best-practices#parameters)).
+- **We do**: `par*`, `var*`, `res*`, `mod*`, `out*` prefixes ([Section 3](#3-naming-conventions-hungarian-notation)).
+- **Why**: AZ-104 learners read templates before they write them. Explicit prefixes make the role of every identifier visible at a glance without IDE hover support (e.g., in lab guides, diffs, and printed material).
+
+### 8.2 No Azure Verified Modules (AVM)
+
+- **Microsoft says**: Prefer consuming [Azure Verified Modules](https://aka.ms/avm) from the public registry (`br/public:avm/res/...`) instead of hand-writing resource modules.
+- **We do**: Hand-written modules in `bicep/modules/`.
+- **Why**: Writing the resource definitions yourself is the learning objective. AVM hides exactly the properties (subnets, NSG rules, SKUs) that AZ-104 requires you to understand. AVM is introduced as a "what production teams actually use" reference, not as the lab tool.
+
+### 8.3 Pinned Stable API Versions
+
+- **Microsoft says** (linter default): Use recent API versions (`use-recent-api-versions`).
+- **We do**: Pin "Gold Standard" stable versions per resource family ([Section 2](#2-api-versioning-standards)).
+- **Why**: Reproducible labs. A bleeding-edge API version can change validation behaviour mid-course and break published lab guides.
 
 ---
 
@@ -107,7 +216,7 @@ resource resExample 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
 
 ---
 
-## 8. Boilerplate Templates
+## 9. Boilerplate Templates
 
 Copy and paste these templates to start a new file.
 
@@ -132,6 +241,8 @@ targetScope = 'subscription'
 param parLocation string = 'swedencentral'
 
 @description('Resource Group Name')
+@minLength(1)
+@maxLength(90)
 param parResourceGroupName string
 
 /*******************
@@ -174,6 +285,7 @@ DEPLOYMENT: [Internal use via Orchestrator]
 param parLocation string
 
 @description('Environment tag value')
+@allowed(['Platform', 'Development', 'Production'])
 param parEnvironment string = 'Production'
 
 /*******************
@@ -208,9 +320,9 @@ output outExampleId string = resExample.id
 
 ---
 
-## 9. Known Issues & Gotchas
+## 10. Known Issues & Gotchas
 
-### 9.1 BCP120: Cannot Reference `kind`/`sku` from Existing Resources (E001)
+### 10.1 BCP120: Cannot Reference `kind`/`sku` from Existing Resources (E001)
 
 **Error**: `BCP120: This expression is being used in an assignment to the "kind" property... which requires a value that can be calculated at the start of the deployment.`
 
@@ -234,7 +346,7 @@ resource resUpdate 'Microsoft.Storage/storageAccounts@2023-01-01' = {
 }
 ```
 
-### 9.2 Subnet Name Consistency (E002)
+### 10.2 Subnet Name Consistency (E002)
 
 **Error**: Bicep or scripts reference a non-existent subnet (e.g., `ApplicationSubnet`).
 
@@ -249,13 +361,13 @@ resource resUpdate 'Microsoft.Storage/storageAccounts@2023-01-01' = {
 | `DatabaseSubnet`   | `10.2.3.0/24` | Lab 2.1      |
 | `AppServiceSubnet` | `10.2.4.0/24` | Lab 2.1      |
 
-### 9.3 Content Deduplication (D004)
+### 10.3 Content Deduplication (D004)
 
 **Rule**: A concept should be **taught once** (in its most natural module) and **referenced** elsewhere. If a step exists in two labs, consolidate it to the earlier lab and add a cross-reference.
 
 **Example**: Key rotation was taught in both Lab 4.1 (Step 4.1.13) and Lab 4.4 (old Section 2). Consolidated CLI/PS rotation into Lab 4.1 and replaced Lab 4.4's section with ad-hoc SAS tokens.
 
-### 9.4 Azure Backup Policy Cannot Be Updated via ARM (E003)
+### 10.4 Azure Backup Policy Cannot Be Updated via ARM (E003)
 
 **Error**: `UserErrorBMSUpdatePolicyNotSupported: Update of existing policy is not supported. Please create a new policy.`
 
@@ -271,7 +383,7 @@ if (-not $existing) {
 }
 ```
 
-### 9.5 Recovery Services Vault Storage Redundancy Is Locked After First Backup (E004)
+### 10.5 Recovery Services Vault Storage Redundancy Is Locked After First Backup (E004)
 
 **Error**: `BMSUserErrorRedundancySettingsUseVaultApi: Redundancy settings for this vault cannot be modified using this API. Since the Vault API was previously used to update the redundancy settings for this vault, you must again use the Vault API to make any further changes to this property.`
 
@@ -288,7 +400,7 @@ if ($props.properties.storageModelType -ne 'LocallyRedundant') {
 # If already Locked at desired value, no action needed.
 ```
 
-### 9.6 `az backup item list --workload-type VM` Returns Invalid Input (E005)
+### 10.6 `az backup item list --workload-type VM` Returns Invalid Input (E005)
 
 **Error**: `BMSUserErrorInvalidInput: Input provided for the call is invalid.`
 
