@@ -4,11 +4,16 @@
 
 This document outlines the strict coding conventions for PowerShell scripts in the SkyCraft project. All automation must adhere to these standards to ensure readability, consistent user experience, and robust error handling.
 
+> [!NOTE]
+> These standards follow the official [PowerShell cmdlet development guidelines](https://learn.microsoft.com/powershell/scripting/developer/cmdlet/strongly-encouraged-development-guidelines) with a small number of **conscious divergences** documented in [Section 7](#7-conscious-divergences-from-microsoft-guidance).
+
 ---
 
 ## 1. File Structure & Header (Comment-Based Help)
 
 Every PowerShell script must start with a standardized **Comment-Based Help (CBH)** block. This enables the use of `Get-Help` and provides immediate context.
+
+Directly after the CBH block, declare requirements with `#Requires` statements so the script fails fast on an unsupported host:
 
 ```powershell
 <#
@@ -31,9 +36,15 @@ Every PowerShell script must start with a standardized **Comment-Based Help (CBH
     Date: [YYYY-MM-DD]
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts
+
 [CmdletBinding()]
 param(...)
 ```
+
+- `#Requires -Version 7.0` is mandatory in every script.
+- Add `#Requires -Modules <Name>` for each Az module the script imports (e.g., `Az.Accounts`, `Az.Network`). Scripts that only shell out to the `az` CLI omit the module requirement.
 
 ## 2. Naming Conventions
 
@@ -55,9 +66,37 @@ Consistency in naming helps distinguish between external inputs and internal log
 | **Variables**  | `camelCase`  | `$vnet`, `$nsgProd`, `$retries`          |
 | **Functions**  | `Verb-Noun`  | `Get-ProjectStatus`, `Test-AzConnection` |
 
+### Language Rules
+
+- **No aliases in scripts**: Always use full cmdlet and parameter names (`Get-ChildItem`, not `gci`/`ls`; `Where-Object`, not `?`; `ForEach-Object`, not `%`). Aliases are for the interactive prompt only. Enforced by the `PSAvoidUsingCmdletAliases` analyzer rule.
+- **Approved verbs only**: Script and function verbs must come from `Get-Verb` (enforced by `PSUseApprovedVerbs`).
+
+### Parameter Validation
+
+Constrain parameters declaratively instead of validating them in the body. This gives the caller an immediate, well-formatted error and self-documents the contract:
+
+```powershell
+param(
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
+    [string]$Location = 'swedencentral',
+
+    [Parameter(Mandatory = $true)]
+    [ValidateNotNullOrEmpty()]
+    [string]$ResourceGroupName,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 3)]
+    [int]$VmCount = 1
+)
+```
+
 ## 3. User Interface & Output
 
 We use a standardized color scheme for `Write-Host` to provide a premium and consistent CLI experience.
+
+> [!NOTE]
+> Microsoft guidance discourages `Write-Host` in favour of `Write-Information`/`Write-Verbose`. We deliberately diverge for these learner-facing lab scripts — see [Section 7.1](#71-write-host-for-learner-facing-output).
 
 | Output Type         | Color Style | Purpose                                  |
 | :------------------ | :---------- | :--------------------------------------- |
@@ -82,11 +121,14 @@ Scripts interacting with Azure **must** use `try...catch` blocks to handle API f
 
 ### Mandatory Pattern
 
-1. Use `try...catch` for all Azure cmdlets.
-2. Use `-ErrorAction SilentlyContinue` if manually checking existence.
-3. Use `-ErrorAction Stop` when a failure should trigger the `catch` block for retries or termination.
+1. Set `$ErrorActionPreference = 'Stop'` at the top of every script (right after the `param` block), so unhandled errors terminate instead of silently continuing.
+2. Use `try...catch` for all Azure cmdlets.
+3. Use `-ErrorAction SilentlyContinue` if manually checking existence.
+4. Use `-ErrorAction Stop` when a failure should trigger the `catch` block for retries or termination.
 
 ```powershell
+$ErrorActionPreference = 'Stop'
+
 try {
     Remove-AzResource -Name "Example" -Force -ErrorAction Stop
 }
@@ -98,10 +140,32 @@ catch {
 
 ## 5. Best Practices
 
-- **Interactive Prompts**: Always use a confirmation prompt for destructive actions (Cleanup) unless the `-Force` switch is used.
+- **`SupportsShouldProcess` for destructive scripts**: Every `Remove-Lab*` script (and any `Invoke-Lab*` script that changes state irreversibly) must declare `[CmdletBinding(SupportsShouldProcess)]` and wrap each destructive operation in `$PSCmdlet.ShouldProcess()`. This provides `-WhatIf` and `-Confirm` for free — do not reimplement them with manual `Read-Host` prompts:
+
+  ```powershell
+  [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+  param(
+      [Parameter(Mandatory = $true)]
+      [string]$ResourceGroupName
+  )
+
+  if ($PSCmdlet.ShouldProcess($ResourceGroupName, 'Remove resource group')) {
+      Remove-AzResourceGroup -Name $ResourceGroupName -Force
+  }
+  ```
+
+  Callers bypass confirmation with `-Confirm:$false` (the idiomatic replacement for a custom `-Force` switch).
+
+- **Secrets handling**: Never accept or store credentials as plain `[string]`. Use `[SecureString]` / `[PSCredential]` parameters (`Get-Credential`), and never echo secret values with `Write-Host`. Generated passwords go to Key Vault, not to the console or a file.
+
+- **Az PowerShell vs. `az` CLI**: Prefer **Az PowerShell cmdlets** (`Get-AzContext`, `New-AzSubscriptionDeployment`, ...) as the default in scripts — they return objects, not text. Dropping to the **`az` CLI** is acceptable where its coverage is better (e.g., `az backup`, `az bicep`), but never mix both for the *same* resource within one script, and always follow the `--output json` rule below.
+
 - **Retry Logic**: Implement retry loops for "stubborn" Azure resources (like NSGs) that suffer from eventual consistency delays.
+
 - **Dependencies First**: Dissociate resources (e.g., NSG from Subnet) before attempting deletion.
+
 - **No Hardcoding**: Default parameter values are acceptable, but hardcoded strings inside logic are discouraged.
+
 - **Always Specify `--output json` for `az` → `ConvertFrom-Json` Pipelines**: The Azure CLI defaults to table/text output based on the user's local config (`AZURE_DEFAULTS_OUTPUT`). When using `az` output with `ConvertFrom-Json`, **always** explicitly pass `--output json`. Without it, the command will produce a `Conversion from JSON failed` error for any user whose default output format is not `json`.
 
   ```powershell
@@ -126,10 +190,47 @@ catch {
   }
   ```
 
----
+## 6. Static Analysis & Testing
 
+### PSScriptAnalyzer
 
-## 6. Script Boilerplate
+All scripts must pass **PSScriptAnalyzer** using the repo-root [`PSScriptAnalyzerSettings.psd1`](../PSScriptAnalyzerSettings.psd1):
+
+```powershell
+Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1
+```
+
+- `Error`-severity findings block merge (enforced in CI).
+- `Warning`-severity findings should be fixed or justified in the PR description.
+- The settings file excludes `PSAvoidUsingWriteHost` (see [Section 7.1](#71-write-host-for-learner-facing-output)) — do not suppress other rules inline without a comment explaining why.
+
+### Pester (Repository Standards Tests)
+
+Repo-wide conventions are enforced by **Pester 5** tests in [`tests/`](../tests/) (API version policy, CBH coverage, README casing, etc.). Run them before pushing:
+
+```powershell
+Invoke-Pester -Path .\tests
+```
+
+New repo-wide rules should be added as Pester tests, not as manual checklist items. Lab-level `Test-Lab.ps1` scripts intentionally remain procedural — see [Section 7.2](#72-procedural-test-labps1-scripts).
+
+## 7. Conscious Divergences from Microsoft Guidance
+
+These are deliberate decisions where SkyCraft departs from the official Microsoft gold path, trading production-grade convention for the learning experience. **Do not "fix" these in code review** — if you want to change one, update this document first.
+
+### 7.1 `Write-Host` for Learner-Facing Output
+
+- **Microsoft says**: Avoid `Write-Host`; use `Write-Output` for data, `Write-Verbose`/`Write-Information` for status (analyzer rule `PSAvoidUsingWriteHost`).
+- **We do**: Color-coded `Write-Host` throughout ([Section 3](#3-user-interface--output)).
+- **Why**: Lab scripts are interactive teaching tools, not pipeline building blocks. The fixed color scheme (Cyan/Yellow/Green/Red/Gray) is part of the curriculum's UX and must render identically for every student regardless of preference variables. `PSAvoidUsingWriteHost` is excluded in `PSScriptAnalyzerSettings.psd1` for this reason.
+
+### 7.2 Procedural `Test-Lab.ps1` Scripts
+
+- **Microsoft says**: Infrastructure validation belongs in a test framework (Pester).
+- **We do**: Procedural `Test-Lab.ps1` scripts with color-coded pass/fail output; Pester is reserved for repo-standards tests in `tests/`.
+- **Why**: Students run `Test-Lab.ps1` *before* the testing module is taught; the linear, narrated output doubles as a learning aid showing *what* is being verified and *how* (which cmdlets query which resources).
+
+## 8. Script Boilerplate
 
 ```powershell
 <#
@@ -137,16 +238,26 @@ catch {
     [Summary]
 .DESCRIPTION
     [Detailed Description]
+.PARAMETER Location
+    Azure region for all resources. Defaults to 'swedencentral'.
+.EXAMPLE
+    .\Script-Name.ps1 -Location swedencentral
 .NOTES
     Project: SkyCraft
     Date: [Current Date]
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$Location = 'swedencentral'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Script Title ===" -ForegroundColor Cyan
 
@@ -164,5 +275,52 @@ try {
 }
 catch {
     Write-Host "Failed!" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    exit 1
+}
+```
+
+### Destructive Script Boilerplate (`Remove-Lab*.ps1`)
+
+```powershell
+<#
+.SYNOPSIS
+    Removes [Lab Resources].
+.DESCRIPTION
+    [Detailed Description]
+.PARAMETER ResourceGroupName
+    Name of the resource group to remove.
+.EXAMPLE
+    .\Remove-LabExample.ps1 -ResourceGroupName 'dev-skycraft-swc-rg' -WhatIf
+    Previews the removal without deleting anything.
+.NOTES
+    Project: SkyCraft
+    Date: [Current Date]
+#>
+
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+param(
+    [Parameter(Mandatory = $true)]
+    [ValidateNotNullOrEmpty()]
+    [string]$ResourceGroupName
+)
+
+$ErrorActionPreference = 'Stop'
+
+Write-Host "=== Cleanup: $ResourceGroupName ===" -ForegroundColor Cyan
+
+try {
+    if ($PSCmdlet.ShouldProcess($ResourceGroupName, 'Remove resource group')) {
+        Write-Host "Removing resource group..." -ForegroundColor Yellow
+        Remove-AzResourceGroup -Name $ResourceGroupName -Force
+        Write-Host "  -> Removed" -ForegroundColor Green
+    }
+}
+catch {
+    Write-Host "  -> [ERROR] $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
 }
 ```
