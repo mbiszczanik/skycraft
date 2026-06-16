@@ -35,10 +35,9 @@
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
-# Module 1's README is still missing the '🏗️ Architecture Overview' Mermaid section (L004 #4).
-# That gap is tracked separately and will be closed on branch task/05-module-1-architecture-overview,
-# which also widens this test to cover module 1. Until then, assert L004 only for modules 2-5.
-$ExcludedModules = @('module-1-identities-governance')
+# All five modules (1-5) now ship the full L004 13-section contract, including the
+# '🏗️ Architecture Overview' Mermaid section. No module is excluded.
+$ExcludedModules = @()
 
 $Modules  = Get-ChildItem -Path $RepoRoot -Directory -Filter 'module-*' |
             Where-Object { $ExcludedModules -notcontains $_.Name } |
