@@ -34,9 +34,9 @@ Protection rules for `main` are:
   commits on `main`.
 - **Require conversation resolution before merging** — enabled. All
   review threads must be closed.
-- **Require status checks to pass** — enabled *once CI exists* (currently
-  no `.github/workflows/` in the repo; this rule activates as soon as the
-  first job is added).
+- **Require status checks to pass** — enabled. The required checks are
+  `PSScriptAnalyzer`, `Repository Standards (Pester)`, and `Bicep Build
+  (Linter)`, defined in `.github/workflows/lint.yml`.
 - **Require approvals** — **disabled**, with the explicit understanding
   that external contributors still need maintainer approval because only
   the maintainer has merge permission. If/when a second maintainer joins,
@@ -57,14 +57,17 @@ Merge method: **squash and merge only**. Other options disabled.
 
 - No formal "two pairs of eyes" gate. Acceptable in a solo project; the
   PR description + diff review by the maintainer is the eyes.
-- No automated quality gate yet — `Require status checks` is configured
-  but inert until CI exists.
+- ~~No automated quality gate yet — `Require status checks` is configured
+  but inert until CI exists.~~ **Resolved (2026-06-16):** CI now exists and
+  `Require status checks` enforces the `lint.yml` jobs before merge.
 
 **Follow-up tasks:**
 
-- Add a `.github/workflows/` directory with at minimum: Bicep build/lint,
-  PowerShell `PSScriptAnalyzer`, Markdown lint. Wire those job names into
-  the `Require status checks` list.
+- ✅ **Done (2026-06-16):** `.github/workflows/lint.yml` added with
+  `Bicep Build (Linter)`, `PSScriptAnalyzer`, and `Repository Standards
+  (Pester)`; all three are wired into the `Require status checks` list.
+  A Markdown lint job is still not present — add it and wire its name in
+  when it lands.
 - When a second maintainer is added, write a new ADR re-enabling
   `Require approvals ≥ 1` and adjust this one's status.
 
