@@ -224,19 +224,21 @@ lab; this section is the architect's view in one place.
 
 ---
 
-## Author TODOs
+## Author decisions (resolved)
 
-Several `ARCHITECTURE.md` files contain `TODO(author):` markers where rationale
-could not be inferred from code alone and should be confirmed by the project
-author. They cluster around:
+Earlier drafts of several `ARCHITECTURE.md` files carried `TODO(author):` markers
+where rationale could not be inferred from code alone. These have been resolved:
 
-- Specific game-port choices (3724, 8085) — assumed WoW-compatible defaults
-  but not documented.
-- Egress NSG strategy — currently allow-all by default; production would
-  constrain.
-- ACR credential handling in Lab 3.3 — registry password leaks through Bicep
-  outputs.
-- Public DNS zone — `skycraft.example.com` is a placeholder and a
-  "bring-your-own-domain" variant has not been written.
+- **Game-port choices (3724, 8085)** — documented as the default auth/world
+  listen ports for World of Warcraft-compatible server cores, which the game
+  tier emulates (Lab 2.2).
+- **Egress NSG strategy** — kept at default allow-all in the base lab; explicit
+  egress allow-lists are deferred to an advanced challenge (Lab 2.2).
+- **ACR credential handling (Lab 3.3)** — the lab's `listCredentials()` approach
+  leaks the registry password through Bicep outputs; the production alternative
+  is Managed Identity (AcrPull) with Key Vault references.
+- **Public DNS zone** — `skycraft.example.com` remains a placeholder; a
+  "bring-your-own-domain" path is offered as an optional advanced variant
+  (Lab 2.3).
 
 A consolidated list is in the PR description that introduces this layer.
