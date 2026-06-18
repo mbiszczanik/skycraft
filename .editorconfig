@@ -1,0 +1,27 @@
+# .editorconfig - editor defaults for the SkyCraft repository.
+# See https://editorconfig.org
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Shell scripts use LF line endings.
+[*.sh]
+end_of_line = lf
+
+# PowerShell scripts.
+[*.{ps1,psm1,psd1}]
+indent_size = 4
+
+# IaC, config, and data files use 2-space indentation.
+[*.{bicep,yml,yaml,json,jsonc}]
+indent_size = 2
+
+# Markdown relies on trailing spaces for hard line breaks.
+[*.md]
+trim_trailing_whitespace = false
