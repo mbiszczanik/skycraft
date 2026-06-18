@@ -1,5 +1,7 @@
 # SkyCraft: Azure Learning Project
 
+[![Lint](https://github.com/mbiszczanik/skycraft/actions/workflows/lint.yml/badge.svg)](https://github.com/mbiszczanik/skycraft/actions/workflows/lint.yml)
+
 SkyCraft is an **Azure project** that combines real-world infrastructure deployment with comprehensive exam preparation. Instead of passive learning, students build production-grade cloud infrastructure while mastering Microsoft Azure.
 
 ## 🎯 Project Overview
@@ -90,6 +92,20 @@ can also be read as an architect-level case study.
 | Version Control        | Git/GitHub                 | Course materials          |
 | Querying               | KQL (Kusto Query Language) | Azure Monitor analysis    |
 | Documentation          | Markdown                   | All guides and references |
+
+---
+
+## 📖 Project Documentation
+
+Reference material and contributor guides that support the labs:
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — How to propose changes and the pull-request workflow.
+- [SECURITY.md](SECURITY.md) — How to report a security vulnerability responsibly.
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — Fixes for common Azure deployment issues.
+- [DESIGN-DECISIONS.md](DESIGN-DECISIONS.md) — Cross-cutting architecture commentary and the index of per-module `ARCHITECTURE.md` files.
+- [docs/project-standards.md](docs/project-standards.md) — Directory structure and documentation rules.
+- [docs/bicep-standards.md](docs/bicep-standards.md) — Bicep / IaC conventions with examples.
+- [docs/powershell-standards.md](docs/powershell-standards.md) — PowerShell automation conventions with examples.
 
 ---
 

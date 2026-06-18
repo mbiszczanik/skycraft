@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Pester 5 test: every module ships README.md (lowercase) and every link uses that casing.
 

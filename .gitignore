@@ -34,7 +34,8 @@ id_ed25519.pub
 # ===================================
 # VS Code / IDE
 # ===================================
-.vscode/
+.vscode/*
+!.vscode/extensions.json
 .vs/
 .idea/
 *.code-workspace
@@ -56,5 +57,7 @@ test-results/
 # ===================================
 # Infrastructure as Code (Bicep)
 # ===================================
-# Ignore compiled ARM templates
+# Ignore compiled ARM templates (az bicep build output).
+# NOTE: this matches *.json only; Bicep parameter files (*.bicepparam) are
+# intentionally NOT ignored and are tracked in version control.
 **/bicep/*.json

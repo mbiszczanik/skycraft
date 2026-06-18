@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Removes Lab 5.1 Azure Monitor & Insights resources.
 

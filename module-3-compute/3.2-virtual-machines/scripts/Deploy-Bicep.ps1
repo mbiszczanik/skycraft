@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Deploys Lab 3.2 Virtual Machines infrastructure using Bicep.
 

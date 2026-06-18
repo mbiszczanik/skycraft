@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Removes Lab 5.2 Business Continuity & Disaster Recovery resources.
 

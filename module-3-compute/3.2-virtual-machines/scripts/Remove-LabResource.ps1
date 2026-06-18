@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Removes Lab 3.2 Virtual Machines resources.
 

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Deploys Lab 5.2 Business Continuity & Disaster Recovery infrastructure using Bicep.
 

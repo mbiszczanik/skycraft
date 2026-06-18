@@ -1,0 +1,25 @@
+# .gitattributes - line-ending normalization for the SkyCraft repository.
+# Normalize all text files to LF in the repository, with per-family
+# checkout overrides for the Windows/PowerShell toolchain.
+
+# Default: auto-detect text and normalize to LF on commit.
+* text=auto
+
+# Binary files - never diff or normalize.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pfx  binary
+*.pdf  binary
+
+# PowerShell / Windows scripts - check out with CRLF.
+*.ps1  text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+# Shell scripts - always LF.
+*.sh   text eol=lf

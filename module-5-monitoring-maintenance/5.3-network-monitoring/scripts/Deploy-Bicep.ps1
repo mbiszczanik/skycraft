@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Deploys Lab 5.3 Network Monitoring & Diagnostics infrastructure using Bicep.
 

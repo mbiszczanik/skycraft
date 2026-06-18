@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Removes Lab 5.3 Network Monitoring & Diagnostics resources.
 

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Automates the creation of Warcraft-themed users and security groups for the SkyCraft Lab 1.1.
 

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Pester 5 tests for New-LabUser.ps1 password handling.
 

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Configures Azure Blob Backup protection on the production storage account.
 

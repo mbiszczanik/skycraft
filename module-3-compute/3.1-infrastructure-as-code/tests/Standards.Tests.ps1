@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Pester 5 tests verifying Lab 3.1 Bicep files conform to SkyCraft Bicep standards.
 

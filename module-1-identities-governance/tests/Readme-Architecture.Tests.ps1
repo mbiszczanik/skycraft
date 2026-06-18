@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Pester 5 test: Module 1 README ships the required Architecture Overview section.
 

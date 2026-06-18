@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Pester 5 tests asserting every module README follows the L004 13-section contract.
 
