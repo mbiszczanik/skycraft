@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Deploys Lab 5.1 Azure Monitor & Insights infrastructure using Bicep.
 

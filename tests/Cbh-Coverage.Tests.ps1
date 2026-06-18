@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Pester 5 test: every PowerShell script in the repo ships Comment-Based Help.
 

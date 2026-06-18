@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Pester 5 tests: every Bicep file pins a stable, non-future API version.
 

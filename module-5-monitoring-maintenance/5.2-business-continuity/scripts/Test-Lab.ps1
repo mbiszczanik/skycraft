@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Validates Lab 5.2 Business Continuity & Disaster Recovery deployment.
 

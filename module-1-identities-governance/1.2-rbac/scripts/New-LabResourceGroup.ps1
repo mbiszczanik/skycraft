@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Creates the three SkyCraft resource groups (dev / prod / platform) in Sweden Central.
 

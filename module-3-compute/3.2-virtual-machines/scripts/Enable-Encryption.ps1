@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Enables Azure Disk Encryption on Lab 3.2 VMs.
 
