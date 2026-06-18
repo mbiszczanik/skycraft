@@ -1,0 +1,29 @@
+{
+  // SkyCraft - recommended VS Code extensions for contributors.
+  // VS Code prompts new contributors to install these when the repo is opened.
+  // They mirror the toolchain enforced by CI (Bicep, PSScriptAnalyzer/Pester,
+  // markdownlint) and the editor settings shipped via .editorconfig.
+  "recommendations": [
+    // Bicep authoring, IntelliSense, and the linter used by the "Bicep Build" CI job.
+    "ms-azuretools.vscode-bicep",
+
+    // PowerShell language support; aligns with the PSScriptAnalyzer/Pester CI jobs
+    // and the Verb-Noun / Comment-Based Help script conventions.
+    "ms-vscode.powershell",
+
+    // Markdown linting in-editor; matches the markdownlint CI job for the lab/docs Markdown.
+    "DavidAnson.vscode-markdownlint",
+
+    // Applies the repo .editorconfig (indentation, charset, line endings).
+    "EditorConfig.EditorConfig",
+
+    // Azure CLI authoring/IntelliSense for `az deployment` / `az bicep` workflows (Sweden Central).
+    "ms-vscode.azurecli",
+
+    // Browse and manage Azure resources created by the labs without leaving the editor.
+    "ms-azuretools.vscode-azureresourcegroups",
+
+    // YAML support for the GitHub Actions workflows under .github/workflows/.
+    "redhat.vscode-yaml"
+  ]
+}
