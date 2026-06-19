@@ -11,11 +11,11 @@
     Skip the confirmation prompt.
 
 .EXAMPLE
-    .\Cleanup-Resources.ps1
+    .\Remove-LabResource.ps1
     Prompts for confirmation before deleting resources.
 
 .EXAMPLE
-    .\Cleanup-Resources.ps1 -Force
+    .\Remove-LabResource.ps1 -Force
     Deletes resources without prompting.
 
 .NOTES
@@ -25,11 +25,17 @@
     Date: 2026-01-10
 #>
 
-[CmdletBinding()]
+#Requires -Version 7.0
+#Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups
+
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $false)]
     [switch]$Force
 )
+
+$ErrorActionPreference = 'Stop'
+if ($Force) { $ConfirmPreference = 'None' }
 
 Write-Host "=== Lab 1.1 - Resource Cleanup ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -59,15 +65,6 @@ catch {
     Write-Host "  -> [WARNING] Failed to detect domain. using $domain" -ForegroundColor Yellow
 }
 
-# Confirmation
-if (-not $Force) {
-    $confirm = Read-Host "Are you sure you want to delete Lab 1.1 Users & Groups (Malfurion, Khadgar, etc.)? (y/N)"
-    if ($confirm -notmatch "^y$") {
-        Write-Host "Cleanup cancelled." -ForegroundColor Yellow
-        exit 0
-    }
-}
-
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
 
 # Cleanup Users
@@ -83,8 +80,10 @@ foreach ($upn in $usersToDelete) {
     try {
         $user = Get-MgUser -Filter "UserPrincipalName eq '$upn'" -ErrorAction SilentlyContinue
         if ($user) {
-            Remove-MgUser -UserId $user.Id -ErrorAction Stop
-            Write-Host "  -> [SUCCESS] Deleted user: $upn" -ForegroundColor Green
+            if ($PSCmdlet.ShouldProcess($upn, 'Remove user')) {
+                Remove-MgUser -UserId $user.Id -ErrorAction Stop
+                Write-Host "  -> [SUCCESS] Deleted user: $upn" -ForegroundColor Green
+            }
         }
         else {
             Write-Host "  -> [INFO] User not found: $upn" -ForegroundColor Gray
@@ -102,8 +101,10 @@ try {
     # Find guest by mail
     $guest = Get-MgUser -Filter "Mail eq '$guestEmail'" -ErrorAction SilentlyContinue
     if ($guest) {
-        Remove-MgUser -UserId $guest.Id -ErrorAction Stop
-        Write-Host "  -> [SUCCESS] Deleted guest: $guestEmail" -ForegroundColor Green
+        if ($PSCmdlet.ShouldProcess($guestEmail, 'Remove guest user')) {
+            Remove-MgUser -UserId $guest.Id -ErrorAction Stop
+            Write-Host "  -> [SUCCESS] Deleted guest: $guestEmail" -ForegroundColor Green
+        }
     }
     else {
         Write-Host "  -> [INFO] Guest not found: $guestEmail" -ForegroundColor Gray
@@ -125,8 +126,10 @@ foreach ($groupName in $groupsToDelete) {
     try {
         $group = Get-MgGroup -Filter "DisplayName eq '$groupName'" -ErrorAction SilentlyContinue
         if ($group) {
-            Remove-MgGroup -GroupId $group.Id -ErrorAction Stop
-            Write-Host "  -> [SUCCESS] Deleted group: $groupName" -ForegroundColor Green
+            if ($PSCmdlet.ShouldProcess($groupName, 'Remove group')) {
+                Remove-MgGroup -GroupId $group.Id -ErrorAction Stop
+                Write-Host "  -> [SUCCESS] Deleted group: $groupName" -ForegroundColor Green
+            }
         }
         else {
             Write-Host "  -> [INFO] Group not found: $groupName" -ForegroundColor Gray

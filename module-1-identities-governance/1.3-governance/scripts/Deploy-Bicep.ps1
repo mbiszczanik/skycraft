@@ -20,9 +20,15 @@
     Lab: 1.3 - Governance
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
+    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
     [string]$Location = 'swedencentral',
+
+    [ValidateNotNullOrEmpty()]
     [string]$AdminEmail = 'admin@skycraft.com'
 )
 

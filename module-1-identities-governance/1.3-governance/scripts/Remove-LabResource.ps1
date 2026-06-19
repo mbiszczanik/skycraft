@@ -11,7 +11,7 @@
     Skip confirmation prompt.
 
 .EXAMPLE
-    .\Cleanup-Resources.ps1
+    .\Remove-LabResource.ps1
     Interactive cleanup.
 
 .NOTES
@@ -19,12 +19,16 @@
     Lab: 1.3 - Governance
 #>
 
-[CmdletBinding()]
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
+if ($Force) { $ConfirmPreference = 'None' }
 
 Write-Host "=== Lab 1.3: Cleanup Resources ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -37,15 +41,6 @@ if (-not $context) {
 $subId = $context.Subscription.Id
 Write-Host "Using Subscription: $($context.Subscription.Name)" -ForegroundColor Green
 
-# Confirm
-if (-not $Force) {
-    $c = Read-Host "Are you sure you want to remove Lab 1.3 Governance (Locks, Policies)? (y/N)"
-    if ($c -notmatch "^y$") {
-        Write-Host "Cancelled." -ForegroundColor Yellow
-        exit 0
-    }
-}
-
 # 1. Remove Locks
 Write-Host "`n1. Removing Resource Locks..." -ForegroundColor Cyan
 $locks = @(
@@ -55,12 +50,14 @@ $locks = @(
 
 foreach ($lock in $locks) {
     if (Get-AzResourceLock -ResourceGroupName $lock.RG -LockName $lock.Name -ErrorAction SilentlyContinue) {
-        try {
-            Remove-AzResourceLock -ResourceGroupName $lock.RG -LockName $lock.Name -Force -ErrorAction Stop
-            Write-Host "  -> [SUCCESS] Removed lock: $($lock.Name)" -ForegroundColor Green
-        }
-        catch {
-            Write-Host "  -> [ERROR] Failed to remove lock $($lock.Name): $_" -ForegroundColor Red
+        if ($PSCmdlet.ShouldProcess("$($lock.Name) on $($lock.RG)", 'Remove resource lock')) {
+            try {
+                Remove-AzResourceLock -ResourceGroupName $lock.RG -LockName $lock.Name -Force -ErrorAction Stop
+                Write-Host "  -> [SUCCESS] Removed lock: $($lock.Name)" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "  -> [ERROR] Failed to remove lock $($lock.Name): $_" -ForegroundColor Red
+            }
         }
     }
     else {
@@ -74,12 +71,14 @@ $policies = @("Require-Environment-Tag-RG", "Enforce-Project-Tag", "Restrict-Azu
 
 foreach ($policy in $policies) {
     if (Get-AzPolicyAssignment -Name $policy -Scope "/subscriptions/$subId" -ErrorAction SilentlyContinue) {
-        try {
-            Remove-AzPolicyAssignment -Name $policy -Scope "/subscriptions/$subId" -ErrorAction Stop
-            Write-Host "  -> [SUCCESS] Removed policy: $policy" -ForegroundColor Green
-        }
-        catch {
-             Write-Host "  -> [ERROR] Failed to remove policy ${policy}: $_" -ForegroundColor Red
+        if ($PSCmdlet.ShouldProcess("$policy on /subscriptions/$subId", 'Remove policy assignment')) {
+            try {
+                Remove-AzPolicyAssignment -Name $policy -Scope "/subscriptions/$subId" -ErrorAction Stop
+                Write-Host "  -> [SUCCESS] Removed policy: $policy" -ForegroundColor Green
+            }
+            catch {
+                 Write-Host "  -> [ERROR] Failed to remove policy ${policy}: $_" -ForegroundColor Red
+            }
         }
     }
     else {
