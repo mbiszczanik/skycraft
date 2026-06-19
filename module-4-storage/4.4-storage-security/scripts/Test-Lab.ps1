@@ -13,11 +13,17 @@
     Date: 2026-02-07
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Storage, Az.Network
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('prod', 'dev', 'platform')]
     [string]$Environment = 'prod'
 )
+
+$ErrorActionPreference = 'Stop'
 
 $resourceGroupName = "$Environment-skycraft-swc-rg"
 $storageAccountName = "${Environment}skycraftswcsa"

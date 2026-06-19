@@ -16,14 +16,21 @@
     Date: 2026-02-07
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
+    [ValidateSet('prod', 'dev', 'platform')]
     [string]$Environment = 'prod'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 4.3: Deploying Azure Files Infrastructure ===" -ForegroundColor Cyan
 
