@@ -33,7 +33,9 @@
     Date: 2026-04-06
 #>
 
-[CmdletBinding()]
+#Requires -Version 7.0
+
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter()]
     [ValidateSet('dev', 'prod')]
@@ -44,6 +46,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($Force) { $ConfirmPreference = 'None' }
 
 # Configuration
 $platformRg      = 'platform-skycraft-swc-rg'
@@ -153,104 +156,107 @@ if ($resourcesToDelete.Count -eq 0) {
     exit 0
 }
 
-# ── Confirm deletion ──────────────────────────────────────────────────────
-if (-not $Force) {
-    Write-Host "`n⚠️  This will permanently delete the above resources." -ForegroundColor Yellow
-    Write-Host "  Note: The 'SkyCraft-Ops' dashboard must be removed manually in the Azure Portal." -ForegroundColor Gray
-    $confirm = Read-Host "Are you sure? Type 'DELETE' to confirm"
-    if ($confirm -ne 'DELETE') {
-        Write-Host "Cleanup cancelled." -ForegroundColor Yellow
-        exit 0
-    }
-}
-
 # ── Delete resources in dependency order ──────────────────────────────────
 Write-Host "`nDeleting resources..." -ForegroundColor Yellow
 
 # 1. Alert Processing Rule
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'APR' }) {
-    Write-Host "  Deleting Alert Processing Rule: $($r.Name)..." -ForegroundColor Gray
-    try {
-        az rest `
-            --method DELETE `
-            --url "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$platformRg/providers/Microsoft.AlertsManagement/alertProcessingRules/$($r.Name)?api-version=2021-08-08" | Out-Null
-        Write-Host "  ✓ Deleted" -ForegroundColor Green
-    } catch {
-        Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+    if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Alert Processing Rule')) {
+        Write-Host "  Deleting Alert Processing Rule: $($r.Name)..." -ForegroundColor Gray
+        try {
+            az rest `
+                --method DELETE `
+                --url "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$platformRg/providers/Microsoft.AlertsManagement/alertProcessingRules/$($r.Name)?api-version=2021-08-08" | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        } catch {
+            Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+        }
     }
 }
 
 # 2. Metric Alert
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'Alert' }) {
-    Write-Host "  Deleting Metric Alert: $($r.Name)..." -ForegroundColor Gray
-    try {
-        az monitor metrics alert delete `
-            --name $r.Name --resource-group $platformRg | Out-Null
-        Write-Host "  ✓ Deleted" -ForegroundColor Green
-    } catch {
-        Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+    if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Metric Alert')) {
+        Write-Host "  Deleting Metric Alert: $($r.Name)..." -ForegroundColor Gray
+        try {
+            az monitor metrics alert delete `
+                --name $r.Name --resource-group $platformRg | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        } catch {
+            Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+        }
     }
 }
 
 # 3. DCR Association
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'DCRAssoc' }) {
-    Write-Host "  Deleting DCR Association: $($r.Name)..." -ForegroundColor Gray
-    try {
-        az monitor data-collection rule association delete `
-            --name $r.Name --resource $r.VmId --yes | Out-Null
-        Write-Host "  ✓ Deleted" -ForegroundColor Green
-    } catch {
-        Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+    if ($PSCmdlet.ShouldProcess($r.Name, 'Remove DCR Association')) {
+        Write-Host "  Deleting DCR Association: $($r.Name)..." -ForegroundColor Gray
+        try {
+            az monitor data-collection rule association delete `
+                --name $r.Name --resource $r.VmId --yes | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        } catch {
+            Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+        }
     }
 }
 
 # 4. Data Collection Rule
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'DCR' }) {
-    Write-Host "  Deleting Data Collection Rule: $($r.Name)..." -ForegroundColor Gray
-    try {
-        az monitor data-collection rule delete `
-            --name $r.Name --resource-group $platformRg --yes | Out-Null
-        Write-Host "  ✓ Deleted" -ForegroundColor Green
-    } catch {
-        Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+    if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Data Collection Rule')) {
+        Write-Host "  Deleting Data Collection Rule: $($r.Name)..." -ForegroundColor Gray
+        try {
+            az monitor data-collection rule delete `
+                --name $r.Name --resource-group $platformRg --yes | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        } catch {
+            Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+        }
     }
 }
 
 # 5. Action Group
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'ActionGroup' }) {
-    Write-Host "  Deleting Action Group: $($r.Name)..." -ForegroundColor Gray
-    try {
-        az monitor action-group delete `
-            --name $r.Name --resource-group $platformRg | Out-Null
-        Write-Host "  ✓ Deleted" -ForegroundColor Green
-    } catch {
-        Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+    if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Action Group')) {
+        Write-Host "  Deleting Action Group: $($r.Name)..." -ForegroundColor Gray
+        try {
+            az monitor action-group delete `
+                --name $r.Name --resource-group $platformRg | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        } catch {
+            Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+        }
     }
 }
 
 # 6. Storage Diagnostic Settings
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'StorageDiag' }) {
-    Write-Host "  Deleting Storage Diagnostic Settings: $($r.Name)..." -ForegroundColor Gray
-    try {
-        az monitor diagnostic-settings delete `
-            --name $r.Name `
-            --resource $r.BlobServiceId | Out-Null
-        Write-Host "  ✓ Deleted" -ForegroundColor Green
-    } catch {
-        Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+    if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Storage Diagnostic Settings')) {
+        Write-Host "  Deleting Storage Diagnostic Settings: $($r.Name)..." -ForegroundColor Gray
+        try {
+            az monitor diagnostic-settings delete `
+                --name $r.Name `
+                --resource $r.BlobServiceId | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        } catch {
+            Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+        }
     }
 }
 
 # 7. Log Analytics Workspace (soft-delete by default — 14 days recovery window)
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'Workspace' }) {
-    Write-Host "  Deleting Log Analytics Workspace: $($r.Name)..." -ForegroundColor Gray
-    try {
-        az monitor log-analytics workspace delete `
-            --workspace-name $r.Name --resource-group $platformRg --yes --force | Out-Null
-        Write-Host "  ✓ Deleted (soft-delete: 14-day recovery window)" -ForegroundColor Green
-        Write-Host "    To permanently purge: az monitor log-analytics workspace purge --workspace-name $($r.Name) --resource-group $platformRg" -ForegroundColor Gray
-    } catch {
-        Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+    if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Log Analytics Workspace')) {
+        Write-Host "  Deleting Log Analytics Workspace: $($r.Name)..." -ForegroundColor Gray
+        try {
+            az monitor log-analytics workspace delete `
+                --workspace-name $r.Name --resource-group $platformRg --yes --force | Out-Null
+            Write-Host "  ✓ Deleted (soft-delete: 14-day recovery window)" -ForegroundColor Green
+            Write-Host "    To permanently purge: az monitor log-analytics workspace purge --workspace-name $($r.Name) --resource-group $platformRg" -ForegroundColor Gray
+        } catch {
+            Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+        }
     }
 }
 

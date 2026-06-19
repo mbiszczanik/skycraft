@@ -20,6 +20,8 @@
     Date: 2026-04-06
 #>
 
+#Requires -Version 7.0
+
 [CmdletBinding()]
 param()
 
@@ -30,9 +32,7 @@ $networkWatcherRg      = 'NetworkWatcherRG'
 $networkWatcherName    = 'NetworkWatcher_swedencentral'
 $flowLogName           = 'prod-skycraft-swc-vnet-flowlog'
 $connectionMonitorName = 'skycraft-hub-spoke-cm'
-$platformRg            = 'platform-skycraft-swc-rg'
 $workspaceName         = 'platform-skycraft-swc-law'
-$prodRg                = 'prod-skycraft-swc-rg'
 $prodVnetName          = 'prod-skycraft-swc-vnet'
 
 $passCount = 0
