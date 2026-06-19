@@ -22,11 +22,17 @@
     Date: 2026-01-31
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.ContainerInstance
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ResourceGroupName = 'dev-skycraft-swc-rg'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 3.3 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 

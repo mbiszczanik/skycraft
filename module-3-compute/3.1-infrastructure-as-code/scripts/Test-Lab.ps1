@@ -22,11 +22,16 @@
     Date: 2026-01-11
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources, Az.Network
+
 [CmdletBinding()]
 param(
     [ValidateSet('dev', 'prod')]
     [string]$Environment = 'dev'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 3.1 Validation Script ($Environment) ===" -ForegroundColor Cyan
 

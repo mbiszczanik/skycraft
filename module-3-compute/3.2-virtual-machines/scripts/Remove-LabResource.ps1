@@ -32,7 +32,9 @@
     Date: 2026-01-11
 #>
 
-[CmdletBinding()]
+#Requires -Version 7.0
+
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter()]
     [ValidateSet('dev', 'prod')]
@@ -46,6 +48,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($Force) { $ConfirmPreference = 'None' }
 
 # Configuration
 $rgName = "$Environment-skycraft-swc-rg"
@@ -100,40 +103,36 @@ if ($resourcesToDelete.Count -eq 0) {
     exit 0
 }
 
-# Confirm deletion
-if (-not $Force) {
-    Write-Host "`n⚠️  This will permanently delete the above resources." -ForegroundColor Yellow
-    $confirm = Read-Host "Are you sure? Type 'DELETE' to confirm"
-    if ($confirm -ne 'DELETE') {
-        Write-Host "Cleanup cancelled." -ForegroundColor Yellow
-        exit 0
-    }
-}
-
 # Delete resources
 Write-Host "`nDeleting resources..." -ForegroundColor Yellow
 
 # Delete VMs first (NICs and OS disks auto-delete if configured)
 foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'VM' }) {
-    Write-Host "  Deleting VM: $($resource.Name)..." -ForegroundColor Gray
-    az vm delete --name $resource.Name --resource-group $rgName --yes --force-deletion true 2>$null
-    Write-Host "  ✓ Deleted" -ForegroundColor Green
+    if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove virtual machine')) {
+        Write-Host "  Deleting VM: $($resource.Name)..." -ForegroundColor Gray
+        az vm delete --name $resource.Name --resource-group $rgName --yes --force-deletion true 2>$null
+        Write-Host "  ✓ Deleted" -ForegroundColor Green
+    }
 }
 
 # Delete data disks
 foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'Disk' }) {
-    Write-Host "  Deleting Disk: $($resource.Name)..." -ForegroundColor Gray
-    az disk delete --name $resource.Name --resource-group $rgName --yes 2>$null
-    Write-Host "  ✓ Deleted" -ForegroundColor Green
+    if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove managed disk')) {
+        Write-Host "  Deleting Disk: $($resource.Name)..." -ForegroundColor Gray
+        az disk delete --name $resource.Name --resource-group $rgName --yes 2>$null
+        Write-Host "  ✓ Deleted" -ForegroundColor Green
+    }
 }
 
 # Delete Key Vault (soft-delete means it goes to "deleted" state first)
 foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'KeyVault' }) {
-    Write-Host "  Deleting Key Vault: $($resource.Name)..." -ForegroundColor Gray
-    az keyvault delete --name $resource.Name --resource-group $rgName 2>$null
-    Write-Host "  ✓ Deleted (soft-delete)" -ForegroundColor Green
-    Write-Host "    Note: Key Vault is in soft-deleted state for 90 days." -ForegroundColor Gray
-    Write-Host "    To permanently purge: az keyvault purge --name $($resource.Name)" -ForegroundColor Gray
+    if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove Key Vault')) {
+        Write-Host "  Deleting Key Vault: $($resource.Name)..." -ForegroundColor Gray
+        az keyvault delete --name $resource.Name --resource-group $rgName 2>$null
+        Write-Host "  ✓ Deleted (soft-delete)" -ForegroundColor Green
+        Write-Host "    Note: Key Vault is in soft-deleted state for 90 days." -ForegroundColor Gray
+        Write-Host "    To permanently purge: az keyvault purge --name $($resource.Name)" -ForegroundColor Gray
+    }
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan

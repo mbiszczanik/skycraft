@@ -13,12 +13,17 @@
     Date: 2026-01-31
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Websites, Az.Monitor
+
 [CmdletBinding()]
 param(
     [string]$RgName = "dev-skycraft-swc-rg",
     [string]$AspName = "dev-skycraft-swc-asp",
     [string]$AppName = "dev-skycraft-swc-app01"
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 3.4 Validation: App Service ===" -ForegroundColor Cyan
 
@@ -77,9 +82,9 @@ $settings = Get-AzAutoscaleSetting -ResourceGroupName $RgName -Name $autoScaleNa
 
 if ($settings) {
     # Profiles is a list, usually one profile
-    $profile = $settings.Profiles[0]
-    Assert-Resource "Autoscale" ($profile.Capacity.Minimum -eq "1" -and $profile.Capacity.Maximum -eq "3") "Instance limits (1-3) correct"
-    Assert-Resource "Autoscale" ($profile.Rules.Count -ge 2) "Found $($profile.Rules.Count) scaling rules"
+    $autoScaleProfile = $settings.Profiles[0]
+    Assert-Resource "Autoscale" ($autoScaleProfile.Capacity.Minimum -eq "1" -and $autoScaleProfile.Capacity.Maximum -eq "3") "Instance limits (1-3) correct"
+    Assert-Resource "Autoscale" ($autoScaleProfile.Rules.Count -ge 2) "Found $($autoScaleProfile.Rules.Count) scaling rules"
 } else {
     Write-Host "  [FAIL] Autoscale setting '$autoScaleName' not found!" -ForegroundColor Red; $failures++
 }

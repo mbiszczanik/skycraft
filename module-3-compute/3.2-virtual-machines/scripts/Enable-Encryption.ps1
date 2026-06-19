@@ -32,6 +32,8 @@
     For new deployments, consider using Encryption at Host instead.
 #>
 
+#Requires -Version 7.0
+
 [CmdletBinding()]
 param(
     [Parameter()]
