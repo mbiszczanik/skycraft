@@ -146,15 +146,20 @@ catch {
   [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
   param(
       [Parameter(Mandatory = $true)]
-      [string]$ResourceGroupName
+      [string]$ResourceGroupName,
+
+      [switch]$Force
   )
+
+  $ErrorActionPreference = 'Stop'
+  if ($Force) { $ConfirmPreference = 'None' }
 
   if ($PSCmdlet.ShouldProcess($ResourceGroupName, 'Remove resource group')) {
       Remove-AzResourceGroup -Name $ResourceGroupName -Force
   }
   ```
 
-  Callers bypass confirmation with `-Confirm:$false` (the idiomatic replacement for a custom `-Force` switch).
+  Callers skip the confirmation prompt with `-Confirm:$false`. SkyCraft `Remove-Lab*` scripts additionally retain a `-Force` switch — the backward-compatible, learner-facing equivalent that sets `$ConfirmPreference = 'None'` so existing `-Force` usage keeps working without a manual `Read-Host`. Keeping `-Force` is a conscious divergence — see [§7.4](#74--force-switch-on-destructive-scripts).
 
 - **Secrets handling**: Never accept or store credentials as plain `[string]`. Use `[SecureString]` / `[PSCredential]` parameters (`Get-Credential`), and never echo secret values with `Write-Host`. Generated passwords go to Key Vault, not to the console or a file.
 
@@ -229,6 +234,18 @@ These are deliberate decisions where SkyCraft departs from the official Microsof
 - **Microsoft says**: Infrastructure validation belongs in a test framework (Pester).
 - **We do**: Procedural `Test-Lab.ps1` scripts with color-coded pass/fail output; Pester is reserved for repo-standards tests in `tests/`.
 - **Why**: Students run `Test-Lab.ps1` *before* the testing module is taught; the linear, narrated output doubles as a learning aid showing *what* is being verified and *how* (which cmdlets query which resources).
+
+### 7.3 Duplicated Connection Checks per Lab
+
+- **Microsoft says**: Don't repeat yourself; factor shared setup (the `Get-AzContext` / `Connect-AzAccount` / `az account show` connection check) into a single shared module dot-sourced by every script.
+- **We do**: Each lab's scripts carry their own self-contained connection-check block.
+- **Why**: Every lab folder must be runnable in isolation and readable end-to-end without chasing a shared helper up the tree. The connection step is itself part of the lesson — students should see *how* a script verifies it is authenticated before acting. A shared `Common.ps1` would couple labs together and hide a teaching moment behind an abstraction.
+
+### 7.4 `-Force` Switch on Destructive Scripts
+
+- **Microsoft says**: `SupportsShouldProcess` already provides `-Confirm:$false`; a custom `-Force` switch is redundant and should not be reintroduced.
+- **We do**: Every `Remove-Lab*` script keeps a `[switch]$Force` that sets `$ConfirmPreference = 'None'` (alongside full `SupportsShouldProcess` support, so `-WhatIf` / `-Confirm:$false` also work).
+- **Why**: `-Force` shipped in earlier lab guides, READMEs, and student muscle memory. Removing it would be a breaking change to the documented learner interface for no functional gain. Retaining it as a thin alias over `$ConfirmPreference` keeps the scripts backward compatible while still routing every deletion through `$PSCmdlet.ShouldProcess()` (no manual `Read-Host`). `PSReviewUnusedParameter` may flag `-Force` where a script reads it only via the preference assignment — suppress with a justification rather than deleting the switch.
 
 ## 8. Script Boilerplate
 
