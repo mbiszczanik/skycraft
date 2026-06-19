@@ -15,29 +15,41 @@
     Date: 2026-01-11
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Network
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$DevRG = 'dev-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdRG = 'prod-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$DevLbName = 'dev-skycraft-swc-lb',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdLbName = 'prod-skycraft-swc-lb',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$DevPipName = 'dev-skycraft-swc-lb-pip',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdPipName = 'prod-skycraft-swc-lb-pip'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 2.3 - Deploy Load Balancers (PowerShell) ===" -ForegroundColor Cyan -BackgroundColor Black
 

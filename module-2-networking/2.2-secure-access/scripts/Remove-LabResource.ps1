@@ -38,11 +38,11 @@
     Switch to suppress confirmation prompts.
 
 .EXAMPLE
-    .\Cleanup-Resources.ps1 -RemoveAll
+    .\Remove-LabResource.ps1 -RemoveAll
     Removes all Lab 2.2 resources after asking for confirmation.
 
 .EXAMPLE
-    .\Cleanup-Resources.ps1 -RemoveBastion -Force
+    .\Remove-LabResource.ps1 -RemoveBastion -Force
     Removes only Azure Bastion without asking for confirmation.
 
 .NOTES
@@ -52,15 +52,21 @@
     Date: 2026-01-03
 #>
 
-[CmdletBinding()]
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Network
+
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdResourceGroup = 'prod-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$PlatformResourceGroup = 'platform-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdVnetName = 'prod-skycraft-swc-vnet',
 
     [Parameter(Mandatory = $false)]
@@ -79,6 +85,9 @@ param(
     [switch]$Force
 )
 
+$ErrorActionPreference = 'Stop'
+if ($Force) { $ConfirmPreference = 'None' }
+
 Write-Host "=== Lab 2.2 - Cleanup Security Resources ===" -ForegroundColor Cyan -BackgroundColor Black
 
 # Verify Azure Connection
@@ -88,30 +97,6 @@ if (-not $context) {
     exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
-
-# Safety confirmation
-if (-not $Force) {
-    Write-Host "`n[WARNING] This script will remove Lab 2.2 resources." -ForegroundColor Yellow
-    Write-Host "Resources to be removed:" -ForegroundColor Yellow
-    
-    if ($RemoveAll) {
-        Write-Host "  - Azure Bastion (saves ~$140/month)" -ForegroundColor Gray
-        Write-Host "  - Bastion Public IP" -ForegroundColor Gray
-        Write-Host "  - Network Security Groups" -ForegroundColor Gray
-        Write-Host "  - Application Security Groups" -ForegroundColor Gray
-    }
-    else {
-        if ($RemoveBastion) { Write-Host "  - Azure Bastion (saves ~$140/month)" -ForegroundColor Gray }
-        if ($RemoveNSGs) { Write-Host "  - Network Security Groups" -ForegroundColor Gray }
-        if ($RemoveASGs) { Write-Host "  - Application Security Groups" -ForegroundColor Gray }
-    }
-
-    $confirmation = Read-Host "`nAre you sure you want to proceed? (yes/no)"
-    if ($confirmation -ne 'yes') {
-        Write-Host "Cleanup cancelled." -ForegroundColor Yellow
-        exit 0
-    }
-}
 
 # ===================================
 # Remove Azure Bastion (Highest Cost)
@@ -123,8 +108,10 @@ if ($RemoveBastion -or $RemoveAll) {
     if ($bastion) {
         Write-Host "Removing Bastion: platform-skycraft-swc-bas (this may take a few minutes)..." -ForegroundColor Yellow
         try {
-            Remove-AzBastion -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-bas' -Force
-            Write-Host "  -> Bastion removed successfully" -ForegroundColor Green
+            if ($PSCmdlet.ShouldProcess('platform-skycraft-swc-bas', 'Remove Azure Bastion')) {
+                Remove-AzBastion -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-bas' -Force
+                Write-Host "  -> Bastion removed successfully" -ForegroundColor Green
+            }
         }
         catch {
             Write-Host "  -> [ERROR] Failed to remove Bastion" -ForegroundColor Red
@@ -140,8 +127,10 @@ if ($RemoveBastion -or $RemoveAll) {
     $bastionPip = Get-AzPublicIpAddress -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-bas-pip' -ErrorAction SilentlyContinue
     if ($bastionPip) {
         try {
-            Remove-AzPublicIpAddress -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-bas-pip' -Force
-            Write-Host "  -> Bastion Public IP removed" -ForegroundColor Green
+            if ($PSCmdlet.ShouldProcess('platform-skycraft-swc-bas-pip', 'Remove Bastion Public IP')) {
+                Remove-AzPublicIpAddress -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-bas-pip' -Force
+                Write-Host "  -> Bastion Public IP removed" -ForegroundColor Green
+            }
         }
         catch {
             Write-Host "  -> [ERROR] Failed to remove Bastion Public IP" -ForegroundColor Red
@@ -194,7 +183,9 @@ if ($RemoveNSGs -or $RemoveAll) {
             }
         }
         if ($updated) {
-            $vnet | Set-AzVirtualNetwork | Out-Null
+            if ($PSCmdlet.ShouldProcess($vnet.Name, 'Dissociate NSGs from subnets')) {
+                $vnet | Set-AzVirtualNetwork | Out-Null
+            }
         }
     }
     
@@ -205,8 +196,10 @@ if ($RemoveNSGs -or $RemoveAll) {
     foreach ($targetNsg in $nsgList) {
         Write-Host "Removing NSG: $($targetNsg.Name)..." -ForegroundColor Yellow
         try {
-            Remove-AzNetworkSecurityGroup -ResourceGroupName $targetNsg.RG -Name $targetNsg.Name -Force -ErrorAction SilentlyContinue
-            Write-Host "  -> Success" -ForegroundColor Green
+            if ($PSCmdlet.ShouldProcess($targetNsg.Name, 'Remove network security group')) {
+                Remove-AzNetworkSecurityGroup -ResourceGroupName $targetNsg.RG -Name $targetNsg.Name -Force -ErrorAction SilentlyContinue
+                Write-Host "  -> Success" -ForegroundColor Green
+            }
         } catch {
              Write-Host "  -> [WARNING] Could not delete $($targetNsg.Name) (may not exist)" -ForegroundColor Gray
         }
@@ -231,8 +224,10 @@ if ($RemoveASGs -or $RemoveAll) {
     foreach ($asg in $asgList) {
         Write-Host "Removing ASG: $($asg.Name)..." -ForegroundColor Yellow
         try {
-            Remove-AzApplicationSecurityGroup -ResourceGroupName $asg.RG -Name $asg.Name -Force -ErrorAction SilentlyContinue 
-            Write-Host "  -> Success" -ForegroundColor Green
+            if ($PSCmdlet.ShouldProcess($asg.Name, 'Remove application security group')) {
+                Remove-AzApplicationSecurityGroup -ResourceGroupName $asg.RG -Name $asg.Name -Force -ErrorAction SilentlyContinue 
+                Write-Host "  -> Success" -ForegroundColor Green
+            }
         } catch {
              Write-Host "  -> [WARNING] Could not delete $($asg.Name) (may not exist)" -ForegroundColor Gray
         }
