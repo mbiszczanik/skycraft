@@ -28,6 +28,9 @@
 #Requires -Version 7.0
 #Requires -Modules Az.Accounts, Az.Network
 
+[CmdletBinding()]
+param()
+
 $ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 2.2 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
