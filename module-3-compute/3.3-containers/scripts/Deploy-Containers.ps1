@@ -29,14 +29,21 @@
     Date: 2026-01-31
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ResourceGroupName = 'dev-skycraft-swc-rg'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 3.3 - Deploy Container Resources ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -76,12 +83,12 @@ if (-not (Test-Path $acrTemplatePath)) {
 
 Write-Host "Deploying ACR: $acrName..." -ForegroundColor Yellow
 try {
-    $acrDeploy = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName `
+    New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName `
         -TemplateFile $acrTemplatePath `
         -Name "deploy-acr-$(Get-Date -Format 'yyyyMMddHHmm')" `
         -parLocation $Location `
         -parAcrName $acrName `
-        -ErrorAction Stop
+        -ErrorAction Stop | Out-Null
 
     Write-Host "  -> Deployment Successful" -ForegroundColor Green
 } catch {

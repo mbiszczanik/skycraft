@@ -18,6 +18,9 @@
     Date: 2026-01-11
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
@@ -26,6 +29,8 @@ param(
     [Parameter(Mandatory = $false)]
     [string]$OutputFile = 'exported-template.json'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 3.1 - Export ARM Template ===" -ForegroundColor Cyan
 

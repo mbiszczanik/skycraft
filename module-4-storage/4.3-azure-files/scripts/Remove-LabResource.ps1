@@ -15,14 +15,21 @@
     Date: 2026-02-07
 #>
 
-[CmdletBinding()]
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('prod', 'dev', 'platform')]
     [string]$Environment = 'prod',
 
     [Parameter(Mandatory = $false)]
     [switch]$Force
 )
+
+$ErrorActionPreference = 'Stop'
+if ($Force) { $ConfirmPreference = 'None' }
 
 $resourceGroupName = "$Environment-skycraft-swc-rg"
 
@@ -34,24 +41,18 @@ if (-not (Get-AzContext)) {
 }
 
 # 2. Confirm Deletion
-if (-not $Force) {
-    if (-not (Get-AzResourceGroup -Name $resourceGroupName -ErrorAction SilentlyContinue)) {
-        Write-Host " [INFO] Resource group '$resourceGroupName' does not exist. Skipping." -ForegroundColor Gray
-        exit 0
-    }
-    
-    $confirm = Read-Host "Are you sure you want to delete Resource Group '$resourceGroupName' and ALL its contents? (y/n)"
-    if ($confirm -ne 'y') {
-        Write-Host "Cleanup cancelled." -ForegroundColor Gray
-        exit 0
-    }
+if (-not (Get-AzResourceGroup -Name $resourceGroupName -ErrorAction SilentlyContinue)) {
+    Write-Host " [INFO] Resource group '$resourceGroupName' does not exist. Skipping." -ForegroundColor Gray
+    exit 0
 }
 
 # 3. Delete Resource Group
 try {
-    Write-Host "Removing resource group '$resourceGroupName'..." -ForegroundColor Yellow
-    Remove-AzResourceGroup -Name $resourceGroupName -Force -ErrorAction Stop
-    Write-Host "  -> Successfully removed resource group." -ForegroundColor Green
+    if ($PSCmdlet.ShouldProcess($resourceGroupName, 'Remove resource group')) {
+        Write-Host "Removing resource group '$resourceGroupName'..." -ForegroundColor Yellow
+        Remove-AzResourceGroup -Name $resourceGroupName -Force -ErrorAction Stop
+        Write-Host "  -> Successfully removed resource group." -ForegroundColor Green
+    }
 }
 catch {
     Write-Host "  -> [ERROR] Failed to remove resource group." -ForegroundColor Red

@@ -18,8 +18,12 @@
     Version: 1.0.0
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
+    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
     [string]$Location = 'swedencentral'
 )
 

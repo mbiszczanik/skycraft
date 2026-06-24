@@ -15,38 +15,53 @@
     Date: 2026-01-11
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Dns, Az.Network
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$PublicDnsZoneName = 'skycraft.example.com',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$PrivateDnsZoneName = 'skycraft.internal',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$PlatformRG = 'platform-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$DevRG = 'dev-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdRG = 'prod-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$HubVnetName = 'platform-skycraft-swc-vnet',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$DevVnetName = 'dev-skycraft-swc-vnet',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdVnetName = 'prod-skycraft-swc-vnet',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$DevLbPipName = 'dev-skycraft-swc-lb-pip',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdLbPipName = 'prod-skycraft-swc-lb-pip'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 2.3 - Deploy DNS Configuration (PowerShell) ===" -ForegroundColor Cyan -BackgroundColor Black
 

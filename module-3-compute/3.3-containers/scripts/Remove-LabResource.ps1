@@ -24,14 +24,21 @@
     Date: 2026-01-31
 #>
 
-[CmdletBinding()]
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.App, Az.ContainerInstance, Az.ContainerRegistry
+
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $false)]
     [switch]$Force,
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ResourceGroupName = 'dev-skycraft-swc-rg'
 )
+
+$ErrorActionPreference = 'Stop'
+if ($Force) { $ConfirmPreference = 'None' }
 
 Write-Host "=== Lab 3.3 - Resource Cleanup ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -49,18 +56,10 @@ $resourcesToDelete = @(
     @{ Name = "devskycraftswcacr01"; Type = "Container Registry" }
 )
 
-# Confirmation
-if (-not $Force) {
-    Write-Host "This will delete the following resources from $($ResourceGroupName):" -ForegroundColor Yellow
-    foreach ($res in $resourcesToDelete) {
-        Write-Host " - [$($res.Type)] $($res.Name)" -ForegroundColor Gray
-    }
-    
-    $confirm = Read-Host "Are you sure? (y/N)"
-    if ($confirm -notmatch "^y$") {
-        Write-Host "Cleanup cancelled." -ForegroundColor Yellow
-        exit 0
-    }
+# Summary of resources targeted for deletion
+Write-Host "This will delete the following resources from $($ResourceGroupName):" -ForegroundColor Yellow
+foreach ($res in $resourcesToDelete) {
+    Write-Host " - [$($res.Type)] $($res.Name)" -ForegroundColor Gray
 }
 
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
@@ -68,50 +67,58 @@ Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
 # 1. Remove ACA
 Write-Host "Removing Container App: dev-skycraft-swc-aca-world-02..." -ForegroundColor Yellow
 # Using az cli for ACA deletion to be safe or Az module
-try {
-    # Try Az module first if available, else CLI
-    if (Get-Command Remove-AzContainerApp -ErrorAction SilentlyContinue) {
-        Remove-AzContainerApp -Name "dev-skycraft-swc-aca-world-02" -ResourceGroupName $ResourceGroupName -ErrorAction SilentlyContinue | Out-Null
-        Write-Host "  -> Deleted (via Az)" -ForegroundColor Green
-    } else {
-        # Fallback to CLI
-        az containerapp delete --name "dev-skycraft-swc-aca-world-02" --resource-group $ResourceGroupName --yes --output none
-        Write-Host "  -> Deleted (via CLI)" -ForegroundColor Green
+if ($PSCmdlet.ShouldProcess("dev-skycraft-swc-aca-world-02", "Remove Container App")) {
+    try {
+        # Try Az module first if available, else CLI
+        if (Get-Command Remove-AzContainerApp -ErrorAction SilentlyContinue) {
+            Remove-AzContainerApp -Name "dev-skycraft-swc-aca-world-02" -ResourceGroupName $ResourceGroupName -ErrorAction SilentlyContinue | Out-Null
+            Write-Host "  -> Deleted (via Az)" -ForegroundColor Green
+        } else {
+            # Fallback to CLI
+            az containerapp delete --name "dev-skycraft-swc-aca-world-02" --resource-group $ResourceGroupName --yes --output none
+            Write-Host "  -> Deleted (via CLI)" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "  -> [INFO] Not found or already deleted." -ForegroundColor Gray
     }
-} catch {
-    Write-Host "  -> [INFO] Not found or already deleted." -ForegroundColor Gray
 }
 
 # 2. Remove ACA Environment
 Write-Host "Removing Container Apps Environment: dev-skycraft-swc-cae-02..." -ForegroundColor Yellow
-try {
-    if (Get-Command Remove-AzContainerAppManagedEnvironment -ErrorAction SilentlyContinue) {
-        Remove-AzContainerAppManagedEnvironment -Name "dev-skycraft-swc-cae-02" -ResourceGroupName $ResourceGroupName -ErrorAction SilentlyContinue | Out-Null
-         Write-Host "  -> Deleted (via Az)" -ForegroundColor Green
-    } else {
-         az containerapp env delete --name "dev-skycraft-swc-cae-02" --resource-group $ResourceGroupName --yes --output none
-         Write-Host "  -> Deleted (via CLI)" -ForegroundColor Green
+if ($PSCmdlet.ShouldProcess("dev-skycraft-swc-cae-02", "Remove Container Apps Environment")) {
+    try {
+        if (Get-Command Remove-AzContainerAppManagedEnvironment -ErrorAction SilentlyContinue) {
+            Remove-AzContainerAppManagedEnvironment -Name "dev-skycraft-swc-cae-02" -ResourceGroupName $ResourceGroupName -ErrorAction SilentlyContinue | Out-Null
+             Write-Host "  -> Deleted (via Az)" -ForegroundColor Green
+        } else {
+             az containerapp env delete --name "dev-skycraft-swc-cae-02" --resource-group $ResourceGroupName --yes --output none
+             Write-Host "  -> Deleted (via CLI)" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "  -> [INFO] Not found or already deleted." -ForegroundColor Gray
     }
-} catch {
-    Write-Host "  -> [INFO] Not found or already deleted." -ForegroundColor Gray
 }
 
 # 3. Remove ACI
 Write-Host "Removing Container Instance: dev-skycraft-swc-aci-auth..." -ForegroundColor Yellow
-try {
-    Remove-AzContainerGroup -Name "dev-skycraft-swc-aci-auth" -ResourceGroupName $ResourceGroupName -ErrorAction Stop | Out-Null
-    Write-Host "  -> Deleted" -ForegroundColor Green
-} catch {
-    Write-Host "  -> [INFO] Not found or already deleted." -ForegroundColor Gray
+if ($PSCmdlet.ShouldProcess("dev-skycraft-swc-aci-auth", "Remove Container Instance")) {
+    try {
+        Remove-AzContainerGroup -Name "dev-skycraft-swc-aci-auth" -ResourceGroupName $ResourceGroupName -ErrorAction Stop | Out-Null
+        Write-Host "  -> Deleted" -ForegroundColor Green
+    } catch {
+        Write-Host "  -> [INFO] Not found or already deleted." -ForegroundColor Gray
+    }
 }
 
 # 4. Remove ACR
 Write-Host "Removing Container Registry: devskycraftswcacr01..." -ForegroundColor Yellow
-try {
-    Remove-AzContainerRegistry -Name "devskycraftswcacr01" -ResourceGroupName $ResourceGroupName -ErrorAction Stop | Out-Null
-    Write-Host "  -> Deleted" -ForegroundColor Green
-} catch {
-    Write-Host "  -> [INFO] Not found or already deleted." -ForegroundColor Gray
+if ($PSCmdlet.ShouldProcess("devskycraftswcacr01", "Remove Container Registry")) {
+    try {
+        Remove-AzContainerRegistry -Name "devskycraftswcacr01" -ResourceGroupName $ResourceGroupName -ErrorAction Stop | Out-Null
+        Write-Host "  -> Deleted" -ForegroundColor Green
+    } catch {
+        Write-Host "  -> [INFO] Not found or already deleted." -ForegroundColor Gray
+    }
 }
 
 Write-Host "`nCleanup Complete." -ForegroundColor Green

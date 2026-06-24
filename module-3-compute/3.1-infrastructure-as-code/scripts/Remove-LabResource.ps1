@@ -10,8 +10,11 @@
     Target environment to clean (dev, prod, all). Default: 'dev'
     'all' will remove Platform, Dev, and Prod RGs.
 
+.PARAMETER Force
+    Skips the confirmation prompt before deleting resources.
+
 .EXAMPLE
-    .\Cleanup-Resources.ps1 -Environment all
+    .\Remove-LabResource.ps1 -Environment all
 
 .NOTES
     Project: SkyCraft
@@ -20,11 +23,19 @@
     Date: 2026-01-11
 #>
 
-[CmdletBinding()]
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [ValidateSet('dev', 'prod', 'all')]
-    [string]$Environment = 'dev'
+    [string]$Environment = 'dev',
+
+    [switch]$Force
 )
+
+$ErrorActionPreference = 'Stop'
+if ($Force) { $ConfirmPreference = 'None' }
 
 Write-Host "=== Lab 3.1 Cleanup Script ===" -ForegroundColor Cyan
 
@@ -51,21 +62,17 @@ if ($groupsToRemove.Count -eq 0) {
 Write-Host "The following Resource Groups will be DELETED:" -ForegroundColor Red
 $groupsToRemove | ForEach-Object { Write-Host " - $_" }
 
-$confirm = Read-Host "Are you sure? (Type 'yes' to confirm)"
-if ($confirm -ne 'yes') {
-    Write-Host "Cancelled." -ForegroundColor Gray
-    exit
-}
-
 foreach ($rgName in $groupsToRemove) {
-    Write-Host "Deleting '$rgName'..." -ForegroundColor Yellow
-    try {
-        Remove-AzResourceGroup -Name $rgName -Force -ErrorAction Stop
-        Write-Host "[SUCCESS] Deleted '$rgName'." -ForegroundColor Green
-    }
-    catch {
-        Write-Host "[FAIL] Could not delete '$rgName'. It may not exist." -ForegroundColor Red
-        Write-Host "Error: $_" -ForegroundColor Red
+    if ($PSCmdlet.ShouldProcess($rgName, 'Remove resource group')) {
+        Write-Host "Deleting '$rgName'..." -ForegroundColor Yellow
+        try {
+            Remove-AzResourceGroup -Name $rgName -Force -ErrorAction Stop
+            Write-Host "[SUCCESS] Deleted '$rgName'." -ForegroundColor Green
+        }
+        catch {
+            Write-Host "[FAIL] Could not delete '$rgName'. It may not exist." -ForegroundColor Red
+            Write-Host "Error: $_" -ForegroundColor Red
+        }
     }
 }
 

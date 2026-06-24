@@ -26,13 +26,16 @@
     Date: 2026-04-06
 #>
 
-[CmdletBinding()]
+#Requires -Version 7.0
+
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter()]
     [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
+if ($Force) { $ConfirmPreference = 'None' }
 
 # Configuration
 $connectionMonitorName = 'skycraft-hub-spoke-cm'
@@ -57,14 +60,6 @@ Write-Host "`n  The following resources will be removed:" -ForegroundColor Yello
 Write-Host "    - Connection Monitor: $connectionMonitorName (location: $location)"
 Write-Host "    - VNet Flow Log:      $flowLogName (location: $location)"
 
-if (-not $Force) {
-    $confirm = Read-Host "`nProceed with cleanup? (y/N)"
-    if ($confirm -ne 'y') {
-        Write-Host "Cleanup cancelled." -ForegroundColor Yellow
-        exit 0
-    }
-}
-
 # ── [1/2] Remove Connection Monitor ───────────────────────────────────────
 Write-Host "`n[1/2] Removing Connection Monitor '$connectionMonitorName'..." -ForegroundColor Yellow
 try {
@@ -73,11 +68,13 @@ try {
         --location $location `
         --output json 2>$null | ConvertFrom-Json
     if ($cmExists) {
-        az network watcher connection-monitor delete `
-            --name $connectionMonitorName `
-            --location $location `
-            --output none 2>$null
-        Write-Host "  ✓ Connection Monitor removed: $connectionMonitorName" -ForegroundColor Green
+        if ($PSCmdlet.ShouldProcess($connectionMonitorName, 'Remove Connection Monitor')) {
+            az network watcher connection-monitor delete `
+                --name $connectionMonitorName `
+                --location $location `
+                --output none 2>$null
+            Write-Host "  ✓ Connection Monitor removed: $connectionMonitorName" -ForegroundColor Green
+        }
     } else {
         Write-Host "  ✓ Connection Monitor not found (already removed): $connectionMonitorName" -ForegroundColor Gray
     }
@@ -94,11 +91,13 @@ try {
         --location $location `
         --output json 2>$null | ConvertFrom-Json
     if ($flExists) {
-        az network watcher flow-log delete `
-            --name $flowLogName `
-            --location $location `
-            --output none 2>$null
-        Write-Host "  ✓ VNet Flow Log removed: $flowLogName" -ForegroundColor Green
+        if ($PSCmdlet.ShouldProcess($flowLogName, 'Remove VNet Flow Log')) {
+            az network watcher flow-log delete `
+                --name $flowLogName `
+                --location $location `
+                --output none 2>$null
+            Write-Host "  ✓ VNet Flow Log removed: $flowLogName" -ForegroundColor Green
+        }
     } else {
         Write-Host "  ✓ VNet Flow Log not found (already removed): $flowLogName" -ForegroundColor Gray
     }

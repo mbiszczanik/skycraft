@@ -31,19 +31,20 @@
     Date: 2026-04-06
 #>
 
-[CmdletBinding()]
+#Requires -Version 7.0
+
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter()]
     [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
+if ($Force) { $ConfirmPreference = 'None' }
 
 $platformRg     = 'platform-skycraft-swc-rg'
-$prodRg         = 'prod-skycraft-swc-rg'
 $rsvName        = 'platform-skycraft-swc-rsv'
 $bvName         = 'platform-skycraft-swc-bv'
-$storageAccount = 'prodskycraftswcsa'
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Lab 5.2 - Resource Cleanup" -ForegroundColor Cyan
@@ -109,22 +110,16 @@ if ($resourcesToDelete.Count -eq 0) {
     exit 0
 }
 
-# ── Confirm deletion ──────────────────────────────────────────────────────
-if (-not $Force) {
-    Write-Host "`n[WARNING] This will permanently delete the above resources." -ForegroundColor Yellow
-    Write-Host "  Ensure ASR replication has been removed via Azure Portal first." -ForegroundColor Gray
-    Write-Host "  VMs, VNets, and Storage Accounts will NOT be deleted." -ForegroundColor Gray
-    $confirm = Read-Host "Are you sure? Type 'DELETE' to confirm"
-    if ($confirm -ne 'DELETE') {
-        Write-Host "Cleanup cancelled." -ForegroundColor Yellow
-        exit 0
-    }
-}
+# ── Confirm deletion (per-operation via ShouldProcess; pass -Force or -Confirm:$false to skip) ──
+Write-Host "`n[WARNING] This will permanently delete the above resources." -ForegroundColor Yellow
+Write-Host "  Ensure ASR replication has been removed via Azure Portal first." -ForegroundColor Gray
+Write-Host "  VMs, VNets, and Storage Accounts will NOT be deleted." -ForegroundColor Gray
 
 Write-Host "`nDeleting resources..." -ForegroundColor Yellow
 
 # 1. Delete Blob Backup Instances
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BlobInstance' }) {
+    if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete blob backup instance')) { continue }
     Write-Host "  Deleting Blob Backup Instance: $($r.Name)..." -ForegroundColor Gray
     try {
         az dataprotection backup-instance delete `
@@ -140,6 +135,7 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BlobInstance' })
 
 # 2. Delete Backup Vault
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BackupVault' }) {
+    if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete backup vault')) { continue }
     Write-Host "  Deleting Backup Vault: $($r.Name)..." -ForegroundColor Gray
     try {
         az dataprotection backup-vault delete `
@@ -154,6 +150,7 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BackupVault' }) 
 
 # 3. Disable VM backup protection and delete backup data
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'VmBackupItem' }) {
+    if (-not $PSCmdlet.ShouldProcess($r.FriendlyName, 'Disable VM backup protection and delete backup data')) { continue }
     Write-Host "  Disabling VM backup protection: $($r.FriendlyName)..." -ForegroundColor Gray
     try {
         az backup protection disable `
@@ -173,6 +170,7 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'VmBackupItem' })
 
 # 4. Delete Recovery Services Vault
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RSV' }) {
+    if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete Recovery Services Vault')) { continue }
     Write-Host "  Deleting Recovery Services Vault: $($r.Name)..." -ForegroundColor Gray
     try {
         az backup vault delete `

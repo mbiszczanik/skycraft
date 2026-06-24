@@ -18,17 +18,24 @@
     Date: 2026-02-21
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
+    [ValidateSet('prod', 'dev', 'platform')]
     [string]$Environment = 'prod',
 
     [Parameter(Mandatory = $false)]
     [string]$ClientIp = ''
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 4.4: Deploying Storage Security ===" -ForegroundColor Cyan
 

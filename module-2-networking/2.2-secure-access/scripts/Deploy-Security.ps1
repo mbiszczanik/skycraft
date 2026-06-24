@@ -41,23 +41,33 @@
     Date: 2026-01-03
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Network
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdResourceGroup = 'prod-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$PlatformResourceGroup = 'platform-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdVnetName = 'prod-skycraft-swc-vnet',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$PlatformVnetName = 'platform-skycraft-swc-vnet'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 2.2 - Deploy Security Configuration (PowerShell) ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -151,7 +161,7 @@ $nsgProdWorld = New-SkyCraftNSG -Name "prod-skycraft-swc-world-nsg" -RG $ProdRes
 $nsgProdDb    = New-SkyCraftNSG -Name "prod-skycraft-swc-db-nsg"    -RG $ProdResourceGroup -Env "Production"
 
 # Platform NSG
-$nsgPlatform = New-SkyCraftNSG -Name "platform-skycraft-swc-nsg" -RG $PlatformResourceGroup -Env "Platform"
+$null = New-SkyCraftNSG -Name "platform-skycraft-swc-nsg" -RG $PlatformResourceGroup -Env "Platform"
 
 # ===================================
 # Task 3 & 4: Configure NSG Rules

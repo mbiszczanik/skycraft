@@ -31,17 +31,25 @@
     Date: 2026-01-03
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdResourceGroup = 'prod-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$PlatformResourceGroup = 'platform-skycraft-swc-rg'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 2.2 - Deploy Security Configuration ===" -ForegroundColor Cyan -BackgroundColor Black
 

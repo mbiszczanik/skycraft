@@ -21,6 +21,9 @@
     Lab: 1.2 - RBAC
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources, Microsoft.Graph.Authentication, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Users, Microsoft.Graph.Groups
+
 [CmdletBinding()]
 param()
 

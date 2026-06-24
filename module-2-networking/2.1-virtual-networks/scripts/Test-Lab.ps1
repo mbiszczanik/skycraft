@@ -24,6 +24,14 @@
     Date: 2026-01-04
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Network
+
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+
 Write-Host "=== Lab 2.1 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 
 # Check Azure Connection
@@ -174,4 +182,3 @@ Test-PIP -Name "prod-skycraft-swc-lb-pip" -RgName "prod-skycraft-swc-rg"
 
 Write-Host "`n=== Validation Summary ===" -ForegroundColor Cyan
 Write-Host "Lab 2.1 validation complete" -ForegroundColor Green
-

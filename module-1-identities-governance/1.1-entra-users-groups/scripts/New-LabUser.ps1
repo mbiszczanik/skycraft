@@ -38,7 +38,11 @@
     Date: 2026-01-10
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups
+
 [CmdletBinding()]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'TenantId', Justification = 'Documented public parameter retained for the lab interface; reserved for explicit tenant targeting.')]
 param (
     [Parameter(Mandatory = $false, HelpMessage = "The Microsoft Entra Tenant ID.")]
     [string]$TenantId,
@@ -85,7 +89,7 @@ if (-not (Get-Module -ListAvailable -Name Microsoft.Graph)) {
     Install-Module -Name Microsoft.Graph -Scope CurrentUser -Force -AllowClobber
 }
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 
 # Connect to Graph
 try {

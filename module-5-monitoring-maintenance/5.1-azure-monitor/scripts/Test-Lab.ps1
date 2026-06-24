@@ -25,10 +25,13 @@
     Date: 2026-04-06
 #>
 
+#Requires -Version 7.0
+
 [CmdletBinding()]
 param(
     [Parameter()]
     [ValidateSet('dev', 'prod')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Environment', Justification = 'Documented public parameter retained for interface stability and future VM-scoped probes.')]
     [string]$Environment = 'prod'
 )
 

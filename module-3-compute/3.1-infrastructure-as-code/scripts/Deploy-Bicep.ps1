@@ -25,9 +25,13 @@
     Date: 2026-01-12
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
@@ -37,6 +41,8 @@ param(
     [Parameter(Mandatory = $false)]
     [switch]$WhatIf
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 3.1 - Deploy Infrastructure ($Environment) ===" -ForegroundColor Cyan
 

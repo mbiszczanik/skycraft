@@ -19,11 +19,18 @@
     Author: SkyCraft
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Storage
+
 [CmdletBinding()]
 param(
+    [ValidateNotNullOrEmpty()]
     [string]$ProdRgName = 'prod-skycraft-swc-rg',
+    [ValidateNotNullOrEmpty()]
     [string]$DevRgName = 'dev-skycraft-swc-rg',
+    [ValidateNotNullOrEmpty()]
     [string]$ProdSaName = 'prodskycraftswcsa',
+    [ValidateNotNullOrEmpty()]
     [string]$DevSaName = 'devskycraftswcsa'
 )
 
@@ -71,7 +78,7 @@ Assert-Check "PROD: AllowBlobPublicAccess is disabled" `
     -FailureMessage "Public Access Enabled (Security Risk!)"
 
 # Versioning MUST be enabled
-$prodBlobService = Get-AzStorageBlobServiceProperty -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName
+$prodBlobService = Get-AzStorageBlobServiceProperty -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName -ErrorAction SilentlyContinue
 Assert-Check "PROD: Versioning enabled" `
     -Condition ($prodBlobService.IsVersioningEnabled -eq $true) `
     -SuccessMessage "Versioning ON" `
@@ -79,7 +86,7 @@ Assert-Check "PROD: Versioning enabled" `
 
 # Containers Verification
 $prodCtx = $prodSa.Context
-$prodContainers = Get-AzStorageContainer -Context $prodCtx
+$prodContainers = Get-AzStorageContainer -Context $prodCtx -ErrorAction SilentlyContinue
 
 $gameAssets = $prodContainers | Where-Object Name -eq 'game-assets'
 Assert-Check "PROD: 'game-assets' container exists" `
@@ -113,7 +120,7 @@ Assert-Check "DEV: AllowBlobPublicAccess is enabled" `
     -FailureMessage "Public Access Disabled (Lab 4.2/Exam Req Missing)"
 
 # Versioning should be Disabled (default)
-$devBlobService = Get-AzStorageBlobServiceProperty -ResourceGroupName $DevRgName -StorageAccountName $DevSaName
+$devBlobService = Get-AzStorageBlobServiceProperty -ResourceGroupName $DevRgName -StorageAccountName $DevSaName -ErrorAction SilentlyContinue
 Assert-Check "DEV: Versioning disabled (scope check)" `
     -Condition ($devBlobService.IsVersioningEnabled -eq $false)
 

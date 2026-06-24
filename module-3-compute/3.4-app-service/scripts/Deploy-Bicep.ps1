@@ -20,15 +20,21 @@
     Date: 2026-01-31
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prod')]
     [string]$Environment = 'dev'
 )
+
+$ErrorActionPreference = 'Stop'
 
 $BicepFile = Join-Path $PSScriptRoot "..\bicep\main.bicep"
 $DeploymentName = "deploy-lab3.4-$Environment"

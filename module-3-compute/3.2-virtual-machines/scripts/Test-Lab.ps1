@@ -22,6 +22,8 @@
     Date: 2026-01-11
 #>
 
+#Requires -Version 7.0
+
 [CmdletBinding()]
 param(
     [Parameter()]
