@@ -104,7 +104,9 @@ if ($acrExists) {
     }
 }
 
+$acrWasBootstrapped = $false
 if (-not $repoExists) {
+    $acrWasBootstrapped = $true
     if (-not $acrExists) {
         Write-Host "Deploying ACR (Bootstrap)..." -ForegroundColor Yellow
         try {
@@ -131,6 +133,14 @@ if (-not $repoExists) {
         Write-Host "[ERROR] Failed to build image: $_" -ForegroundColor Red
         exit 1
     }
+}
+
+# Azure Container Apps resolves ACR via Azure internal DNS. When the ACR is freshly
+# created the DNS entry may not have propagated to 100.100.x.x resolvers yet, causing
+# ACA to fail with 'no such host'. Wait 90s to let propagation complete.
+if ($acrWasBootstrapped) {
+    Write-Host "`n  Waiting 90 seconds for ACR DNS propagation before ACA deployment..." -ForegroundColor Gray
+    Start-Sleep -Seconds 90
 }
 
 # ==============================================================================
