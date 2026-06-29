@@ -83,7 +83,7 @@ try {
         $share = Get-AzRmStorageShare -ResourceGroupName $resourceGroupName -StorageAccountName $storageAccountName `
             -Name $item.Name -ErrorAction SilentlyContinue
         if ($share) {
-            $quotaGB = $share.ShareProperties.QuotaInGB
+            $quotaGB = $share.ShareProperties.ShareQuota
             $tier    = $share.AccessTier
             Write-Host "  -> Found Share: $($share.Name) (Quota: ${quotaGB}GB, Tier: $tier)" -ForegroundColor Green
             if ($quotaGB -ne $item.ExpectedQuotaGB) {
