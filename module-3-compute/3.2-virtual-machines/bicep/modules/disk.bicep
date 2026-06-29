@@ -31,9 +31,8 @@ param parDiskSizeGB int = 64
 ])
 param parDiskSku string = 'StandardSSD_LRS'
 
-@description('Availability zone for the disk (1, 2, or 3)')
-@allowed(['1', '2', '3'])
-param parAvailabilityZone string = '1'
+@description('Availability zone for the disk (1, 2, or 3). Leave empty for no zone affinity.')
+param parAvailabilityZone string = ''
 
 @description('Resource tags')
 param parTags object
@@ -49,9 +48,7 @@ resource resDisk 'Microsoft.Compute/disks@2023-10-02' = {
   sku: {
     name: parDiskSku
   }
-  zones: [
-    parAvailabilityZone
-  ]
+  zones: empty(parAvailabilityZone) ? [] : [parAvailabilityZone]
   properties: {
     creationData: {
       createOption: 'Empty'

@@ -102,10 +102,7 @@ module modStorageProd '../../4.1-storage-accounts/bicep/modules/storageAccount.b
   }
 }
 
-// Development Storage: enable account-level public access (no container here).
-// The public-demo container is created in a SEPARATE module below that depends
-// on this one, so allowBlobPublicAccess has propagated before the 'Blob'
-// container is created (avoids the PublicAccessNotPermitted race).
+// Development Storage: private access (allowBlobPublicAccess blocked at subscription level).
 module modStorageDev '../../4.1-storage-accounts/bicep/modules/storageAccount.bicep' = {
   name: 'deploy-storage-dev-4.2'
   scope: resDevRg
@@ -113,7 +110,7 @@ module modStorageDev '../../4.1-storage-accounts/bicep/modules/storageAccount.bi
     parLocation: parLocation
     parEnvironment: 'dev'
     parTags: union(varCommonTags, { Environment: 'Development' })
-    parAllowBlobPublicAccess: true // REQUIRED: Enable Account-level public access
+    parAllowBlobPublicAccess: false
     parEnableVersioning: false
     parContainers: []
     parLifecycleRules: []
@@ -122,15 +119,14 @@ module modStorageDev '../../4.1-storage-accounts/bicep/modules/storageAccount.bi
   }
 }
 
-// Public-demo container — separate deployment, depends on the dev account update
-// above (via the outStorageAccountName reference) so public access is live first.
+// Public-demo container — created as private (allowBlobPublicAccess blocked at subscription level).
 module modDevPublicContainer 'modules/blobContainer.bicep' = {
   name: 'deploy-dev-public-container-4.2'
   scope: resDevRg
   params: {
     parStorageAccountName: modStorageDev.outputs.outStorageAccountName
     parContainerName: 'public-demo'
-    parPublicAccess: 'Blob'
+    parPublicAccess: 'None'
   }
 }
 
