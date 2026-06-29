@@ -172,7 +172,7 @@ function New-PrivateDnsLink {
         Write-Host "Linking VNet: $VnetName..." -ForegroundColor Yellow
         $vnet = Get-AzVirtualNetwork -ResourceGroupName $VnetRG -Name $VnetName
         if ($vnet) {
-            New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $LinkName -VirtualNetworkId $vnet.Id -EnableRegistration:$AutoReg | Out-Null
+            New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $LinkName -VirtualNetworkId $vnet.Id -EnableRegistration:$AutoReg -Tag @{ Project = 'SkyCraft' } | Out-Null
             Write-Host "  -> Link created (AutoReg: $AutoReg)" -ForegroundColor Green
         } else {
              Write-Host "  -> [ERROR] VNet '$VnetName' not found!" -ForegroundColor Red
@@ -185,3 +185,4 @@ New-PrivateDnsLink -LinkName 'dev-vnet-link' -VnetRG $DevRG -VnetName $DevVnetNa
 New-PrivateDnsLink -LinkName 'prod-vnet-link' -VnetRG $ProdRG -VnetName $ProdVnetName -AutoReg $true
 
 Write-Host "`n=== DNS Deployment Complete ===" -ForegroundColor Cyan -BackgroundColor Black
+exit 0

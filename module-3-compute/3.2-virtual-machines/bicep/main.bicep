@@ -14,7 +14,7 @@ targetScope = 'subscription'
 // ============================================================================
 
 @description('Azure region for resource deployment')
-@allowed(['swedencentral', 'westeurope', 'northeurope'])
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
 @description('Environment name')
@@ -41,7 +41,7 @@ param parSshPublicKey string
   'Standard_B2ms'
   'Standard_D2s_v3'
 ])
-param parVmSize string = 'Standard_B2s'
+param parVmSize string = 'Standard_D2s_v3'
 
 @description('Encryption strategy for VMs')
 @allowed([

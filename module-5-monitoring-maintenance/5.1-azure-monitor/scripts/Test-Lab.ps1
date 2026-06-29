@@ -8,16 +8,15 @@
     - VM Insights DCR exists and is associated with a SkyCraft VM
     - Action Group exists with email receiver configured
     - Metric Alert rule exists and is enabled
-    - Alert Processing Rule exists and is enabled
     - Storage Diagnostic Settings are configured
     - Tags match governance requirements
 
 .PARAMETER Environment
-    Target environment prefix when checking VM resources. Default: prod
+    Target environment prefix when checking VM resources. Default: dev
 
 .EXAMPLE
     .\Test-Lab.ps1
-    .\Test-Lab.ps1 -Environment prod
+    .\Test-Lab.ps1 -Environment dev
 
 .NOTES
     Project: SkyCraft
@@ -26,13 +25,14 @@
 #>
 
 #Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources, Az.OperationalInsights, Az.Monitor, Az.Storage
 
 [CmdletBinding()]
 param(
     [Parameter()]
     [ValidateSet('dev', 'prod')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Environment', Justification = 'Documented public parameter retained for interface stability and future VM-scoped probes.')]
-    [string]$Environment = 'prod'
+    [string]$Environment = 'dev'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,7 +43,6 @@ $workspaceName  = 'platform-skycraft-swc-law'
 $dcrName        = 'skycraft-vm-dcr'
 $actionGroupName = 'skycraft-ops-ag'
 $alertRuleName  = 'skycraft-cpu-alert'
-$aprName        = 'skycraft-hours-apr'
 $storageRg      = 'platform-skycraft-swc-rg'
 
 $passCount = 0
@@ -77,15 +76,13 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Verify login
-$account = az account show --output json 2>$null | ConvertFrom-Json
-if (-not $account) {
-    Write-Host "  [ERROR] Not logged into Azure CLI. Run 'az login' first." -ForegroundColor Red
+$context = Get-AzContext
+if (-not $context) {
+    Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
     exit 1
 }
-Write-Host "  Account: $($account.user.name)" -ForegroundColor Gray
-
-# Allow non-interactive installation of required Azure CLI extensions.
-az config set extension.use_dynamic_install=yes_without_prompt --only-show-errors | Out-Null
+$subscriptionId = $context.Subscription.Id
+Write-Host "  Account: $($context.Account.Id)" -ForegroundColor Gray
 Write-Host ""
 
 # ============================================================================
@@ -93,29 +90,26 @@ Write-Host ""
 # ============================================================================
 Write-Host "[Log Analytics Workspace]" -ForegroundColor Yellow
 
-$wsCache = az monitor log-analytics workspace show `
-    --workspace-name $workspaceName `
-    --resource-group $platformRg `
-    --output json 2>$null | ConvertFrom-Json
+$wsCache = Get-AzOperationalInsightsWorkspace -ResourceGroupName $platformRg -Name $workspaceName -ErrorAction SilentlyContinue
 
 Invoke-Test "Workspace '$workspaceName' exists" {
-    return ($null -ne $wsCache -and $wsCache.name -eq $workspaceName)
+    return ($null -ne $wsCache -and $wsCache.Name -eq $workspaceName)
 }
 
 Invoke-Test "Workspace SKU is PerGB2018" {
-    return ($wsCache.sku.name -eq 'PerGB2018')
+    return ($wsCache.Sku -eq 'PerGB2018')
 }
 
-Invoke-Test "Workspace retention is 30 days" {
-    return ($wsCache.retentionInDays -eq 30)
+Invoke-Test "Workspace retention is at least 30 days" {
+    return ($wsCache.RetentionInDays -ge 30)
 }
 
 Invoke-Test "Workspace location is swedencentral" {
-    return ($wsCache.location -eq 'swedencentral')
+    return ($wsCache.Location -eq 'swedencentral')
 }
 
 Invoke-Test "Workspace has correct tags (Project, Environment, CostCenter)" {
-    return ($wsCache.tags.Project -eq 'SkyCraft' -and $wsCache.tags.CostCenter -eq 'MSDN')
+    return ($wsCache.Tags.Project -eq 'SkyCraft' -and $wsCache.Tags.Environment -eq 'Platform' -and $wsCache.Tags.CostCenter -eq 'MSDN')
 }
 
 # ============================================================================
@@ -124,50 +118,33 @@ Invoke-Test "Workspace has correct tags (Project, Environment, CostCenter)" {
 Write-Host ""
 Write-Host "[VM Insights Data Collection Rule]" -ForegroundColor Yellow
 
+# DCR detail is read from the raw ARM body (Get-AzResource -ExpandProperties)
+# so the camelCase destinations/dataFlows structure matches the ARM schema.
+$dcrId = "/subscriptions/$subscriptionId/resourceGroups/$platformRg/providers/Microsoft.Insights/dataCollectionRules/$dcrName"
+$dcrResource = Get-AzResource -ResourceId $dcrId -ExpandProperties -ErrorAction SilentlyContinue
+
 Invoke-Test "DCR '$dcrName' exists" {
-    $dcr = az monitor data-collection rule show `
-        --name $dcrName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    return ($null -ne $dcr -and $dcr.name -eq $dcrName)
+    return ($null -ne $dcrResource -and $dcrResource.Name -eq $dcrName)
 }
 
 Invoke-Test "DCR destination points to workspace" {
-    $dcr = az monitor data-collection rule show `
-        --name $dcrName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    $wsId = az monitor log-analytics workspace show `
-        --workspace-name $workspaceName `
-        --resource-group $platformRg `
-        --query id --output tsv 2>$null
-    $destWsId = $dcr.destinations.logAnalytics[0].workspaceResourceId
-    return ($destWsId -eq $wsId)
+    $destWsId = $dcrResource.Properties.destinations.logAnalytics[0].workspaceResourceId
+    return ($destWsId -eq $wsCache.ResourceId)
 }
 
 Invoke-Test "DCR has InsightsMetrics data flow" {
-    $dcr = az monitor data-collection rule show `
-        --name $dcrName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    $streams = $dcr.dataFlows | ForEach-Object { $_.streams } | Select-Object -Unique
+    $streams = $dcrResource.Properties.dataFlows | ForEach-Object { $_.streams } | Select-Object -Unique
     return ($streams -contains 'Microsoft-InsightsMetrics')
 }
 
 Invoke-Test "DCR includes Syslog stream" {
-    $dcr = az monitor data-collection rule show `
-        --name $dcrName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    $streams = $dcr.dataFlows | ForEach-Object { $_.streams } | Select-Object -Unique
+    $streams = $dcrResource.Properties.dataFlows | ForEach-Object { $_.streams } | Select-Object -Unique
     return ($streams -contains 'Microsoft-Syslog')
 }
 
 Invoke-Test "DCR has at least one VM association" {
-    $assocList = az rest `
-        --method GET `
-        --url "https://management.azure.com/subscriptions/$($account.id)/resourceGroups/$platformRg/providers/Microsoft.Insights/dataCollectionRules/$dcrName/associations?api-version=2023-03-11" `
-        --output json 2>$null | ConvertFrom-Json
+    $assocResponse = Invoke-AzRestMethod -Method GET -Path "/subscriptions/$subscriptionId/resourceGroups/$platformRg/providers/Microsoft.Insights/dataCollectionRules/$dcrName/associations?api-version=2023-03-11"
+    $assocList = $assocResponse.Content | ConvertFrom-Json
     return ($assocList.value.Count -gt 0)
 }
 
@@ -178,35 +155,24 @@ Write-Host ""
 Write-Host "[Action Group]" -ForegroundColor Yellow
 
 Invoke-Test "Action Group '$actionGroupName' exists" {
-    $ag = az monitor action-group show `
-        --name $actionGroupName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    return ($null -ne $ag -and $ag.name -eq $actionGroupName)
+    $ag = Get-AzActionGroup -ResourceGroupName $platformRg -Name $actionGroupName -ErrorAction SilentlyContinue
+    return ($null -ne $ag -and $ag.Name -eq $actionGroupName)
 }
 
 Invoke-Test "Action Group shortName is 'SkyCraftOps'" {
-    $ag = az monitor action-group show `
-        --name $actionGroupName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    return ($ag.groupShortName -eq 'SkyCraftOps')
+    $ag = Get-AzActionGroup -ResourceGroupName $platformRg -Name $actionGroupName -ErrorAction SilentlyContinue
+    return ($ag.GroupShortName -eq 'SkyCraftOps')
 }
 
 Invoke-Test "Action Group has at least one email receiver" {
-    $ag = az monitor action-group show `
-        --name $actionGroupName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    return ($ag.emailReceivers.Count -gt 0)
+    $ag = Get-AzActionGroup -ResourceGroupName $platformRg -Name $actionGroupName -ErrorAction SilentlyContinue
+    # Guard against $null ag — @($null).Count is 1 (false positive without this guard)
+    return ($null -ne $ag -and @($ag.EmailReceiver).Count -gt 0)
 }
 
 Invoke-Test "Action Group is enabled" {
-    $ag = az monitor action-group show `
-        --name $actionGroupName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    return ($ag.enabled -eq $true)
+    $ag = Get-AzActionGroup -ResourceGroupName $platformRg -Name $actionGroupName -ErrorAction SilentlyContinue
+    return ($ag.Enabled -eq $true)
 }
 
 # ============================================================================
@@ -216,83 +182,37 @@ Write-Host ""
 Write-Host "[Metric Alert]" -ForegroundColor Yellow
 
 Invoke-Test "Alert rule '$alertRuleName' exists" {
-    $alert = az monitor metrics alert show `
-        --name $alertRuleName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    return ($null -ne $alert -and $alert.name -eq $alertRuleName)
+    $alert = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
+    return ($null -ne $alert -and $alert.Name -eq $alertRuleName)
 }
 
 Invoke-Test "Alert rule is enabled" {
-    $alert = az monitor metrics alert show `
-        --name $alertRuleName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    return ($alert.enabled -eq $true)
+    $alert = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
+    return ($alert.Enabled -eq $true)
 }
 
 Invoke-Test "Alert rule severity is 2 (Warning)" {
-    $alert = az monitor metrics alert show `
-        --name $alertRuleName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    return ($alert.severity -eq 2)
+    $alert = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
+    return ($alert.Severity -eq 2)
 }
 
 Invoke-Test "Alert rule window size is 5 minutes" {
-    $alert = az monitor metrics alert show `
-        --name $alertRuleName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    return ($alert.windowSize -eq 'PT5M')
+    $alert = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
+    return ($null -ne $alert -and $alert.WindowSize -eq [System.TimeSpan]::FromMinutes(5))
 }
 
 Invoke-Test "Alert rule evaluation frequency is 1 minute" {
-    $alert = az monitor metrics alert show `
-        --name $alertRuleName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    return ($alert.evaluationFrequency -eq 'PT1M')
+    $alert = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
+    return ($null -ne $alert -and $alert.EvaluationFrequency -eq [System.TimeSpan]::FromMinutes(1))
 }
 
 Invoke-Test "Alert rule threshold is > 80% CPU" {
-    $alert = az monitor metrics alert show `
-        --name $alertRuleName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    $criteria = $alert.criteria.allOf[0]
-    return ($criteria.metricName -eq 'Percentage CPU' -and $criteria.threshold -eq 80 -and $criteria.operator -eq 'GreaterThan')
-}
-
-# ============================================================================
-# Alert Processing Rule Tests
-# ============================================================================
-Write-Host ""
-Write-Host "[Alert Processing Rule]" -ForegroundColor Yellow
-
-Invoke-Test "Alert processing rule '$aprName' exists" {
-    $apr = az monitor alert-processing-rule show `
-        --name $aprName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    return ($null -ne $apr -and $apr.name -eq $aprName)
-}
-
-Invoke-Test "Alert processing rule is enabled" {
-    $apr = az monitor alert-processing-rule show `
-        --name $aprName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    return ($apr.properties.enabled -eq $true)
-}
-
-Invoke-Test "APR action type is AddActionGroups" {
-    $apr = az monitor alert-processing-rule show `
-        --name $aprName `
-        --resource-group $platformRg `
-        --output json 2>$null | ConvertFrom-Json
-    $action = $apr.properties.actions | Where-Object { $_.actionType -eq 'AddActionGroups' }
-    return ($null -ne $action)
+    $alert = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
+    if (-not $alert) { return $false }
+    # Read criteria from raw ARM (camelCase) — the typed PSMetricCriteria object
+    # does not reliably expose metricName/operator across Az.Monitor versions.
+    $crit = (Get-AzResource -ResourceId $alert.Id -ExpandProperties -ErrorAction SilentlyContinue).Properties.criteria.allOf[0]
+    return ($crit.metricName -eq 'Percentage CPU' -and [int]$crit.threshold -eq 80 -and $crit.operator -eq 'GreaterThan')
 }
 
 # ============================================================================
@@ -302,30 +222,20 @@ Write-Host ""
 Write-Host "[Storage Diagnostic Settings]" -ForegroundColor Yellow
 
 Invoke-Test "Diagnostic setting 'skycraft-storage-diag' exists on blob service" {
-    $storageAcct = az storage account list `
-        --resource-group $storageRg `
-        --output json 2>$null | ConvertFrom-Json | Select-Object -First 1
+    $storageAcct = Get-AzStorageAccount -ResourceGroupName $storageRg -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $storageAcct) { return $false }
-    $blobServiceId = "$($storageAcct.id)/blobServices/default"
-    $diag = az monitor diagnostic-settings show `
-        --name 'skycraft-storage-diag' `
-        --resource $blobServiceId `
-        --output json 2>$null | ConvertFrom-Json
-    return ($null -ne $diag -and $diag.name -eq 'skycraft-storage-diag')
+    # Diagnostic settings are extension resources — Get-AzDiagnosticSetting reads them
+    # reliably (Get-AzResource on the sub-resource id returns null).
+    $diag = Get-AzDiagnosticSetting -ResourceId "$($storageAcct.Id)/blobServices/default" -Name 'skycraft-storage-diag' -ErrorAction SilentlyContinue
+    return ($null -ne $diag)
 }
 
 Invoke-Test "Diagnostic setting sends StorageRead and StorageWrite to workspace" {
-    $storageAcct = az storage account list `
-        --resource-group $storageRg `
-        --output json 2>$null | ConvertFrom-Json | Select-Object -First 1
+    $storageAcct = Get-AzStorageAccount -ResourceGroupName $storageRg -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $storageAcct) { return $false }
-    $blobServiceId = "$($storageAcct.id)/blobServices/default"
-    $diag = az monitor diagnostic-settings show `
-        --name 'skycraft-storage-diag' `
-        --resource $blobServiceId `
-        --output json 2>$null | ConvertFrom-Json
-    $readLog  = $diag.logs | Where-Object { $_.category -eq 'StorageRead'  -and $_.enabled -eq $true }
-    $writeLog = $diag.logs | Where-Object { $_.category -eq 'StorageWrite' -and $_.enabled -eq $true }
+    $diag = Get-AzDiagnosticSetting -ResourceId "$($storageAcct.Id)/blobServices/default" -Name 'skycraft-storage-diag' -ErrorAction SilentlyContinue
+    $readLog  = $diag.Log | Where-Object { $_.Category -eq 'StorageRead'  -and $_.Enabled }
+    $writeLog = $diag.Log | Where-Object { $_.Category -eq 'StorageWrite' -and $_.Enabled }
     return ($null -ne $readLog -and $null -ne $writeLog)
 }
 

@@ -27,12 +27,12 @@ graph TB
 
     subgraph "Compute Context"
         style compute fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-        VM_Dev["dev-skycraft-vm"]
-        VM_Prod["prod-skycraft-vm"]
+        VM_Auth["dev-skycraft-swc-auth-vm"]
+        VM_World["dev-skycraft-swc-world-vm"]
     end
 
-    VM_Dev -->|"Guest OS Logs & Metrics"| LAW
-    VM_Prod -->|"Guest OS Logs & Metrics"| LAW
+    VM_Auth -->|"Guest OS Logs & Metrics"| LAW
+    VM_World -->|"Guest OS Logs & Metrics"| LAW
     LAW --> Dashboard
     LAW --> Alerts["Alert Rule:<br/>High CPU > 80%"]
 ```
@@ -43,7 +43,7 @@ graph TB
 
 **Situation**: The SkyCraft game world servers periodically experience performance spikes. The operations team (led by Malfurion) needs a centralized way to view logs and receive urgent notifications if a server becomes unresponsive or overloaded. Currently, logs are scattered across individual VMs, making troubleshooting "AzerothCore" crashes difficult.
 
-**Your Task**: Deploy a centralized Log Analytics Workspace, connect the existing development and production virtual machines to it, and create an automated alert system that notifies the team when CPU exceeds 80%.
+**Your Task**: Deploy a centralized Log Analytics Workspace, connect the existing SkyCraft development virtual machines to it, and create an automated alert system that notifies the team when CPU exceeds 80%.
 
 ---
 
@@ -62,6 +62,7 @@ graph TB
 Before starting this lab:
 
 - [ ] Completed **Module 3: Compute** (at least one VM should be running)
+- [ ] Completed **Lab 4.1: Storage Accounts** (platform storage account exists)
 - [ ] Resource group `platform-skycraft-swc-rg` exists
 - [ ] `Contributor` role at the subscription level
 
@@ -115,7 +116,7 @@ A **Log Analytics Workspace** is a unique environment for Azure Monitor log data
 
 1. Navigate to **Monitor** (portal sidebar) → **Virtual Machines**.
 2. Click the **Not monitored** tab.
-3. Find your `dev-skycraft-vm` (or equivalent).
+3. Find your `dev-skycraft-swc-auth-vm` (or equivalent).
 4. Click **Enable**.
 5. Select the **Azure Monitor agent** (recommended).
 6. Under **Data Collection Rule**, click **Create New**:
@@ -163,7 +164,7 @@ Perf
 
 ### Step 5.1.5: Create a Metric Alert (CPU > 80%)
 
-1. Navigate to your VM (`dev-skycraft-vm`) → **Monitoring** → **Alerts**.
+1. Navigate to your VM (`dev-skycraft-swc-auth-vm`) → **Monitoring** → **Alerts**.
 2. Click **+ Create** → **Alert rule**.
 3. Under **Signal name**, select **Percentage CPU**.
 4. Configure the logic:
@@ -173,7 +174,8 @@ Perf
    - Check every: **1 minute**
 5. Click **Next: Actions**.
 6. Create an **Action Group**:
-   - Name: `SkyCraft-Admins-Email`
+   - Name: `skycraft-ops-ag`
+   - Short name: `SkyCraftOps`
    - Notification: **Email/SMS/Push/Voice** (Enter your email).
 7. Click **Create**.
 
@@ -182,6 +184,9 @@ Perf
 1. Run the CPU query from Step 5.1.4 again.
 2. Click **Pin to** → **Azure Dashboard**.
 3. Create a new dashboard named `SkyCraft-Ops`.
+
+> [!NOTE]
+> Beyond VM telemetry, this lab also routes the **platform storage account's diagnostics** to the workspace. The automated deployment (`Deploy-Bicep.ps1`) creates a diagnostic setting (`skycraft-storage-diag`) that sends `StorageRead` and `StorageWrite` blob logs to `platform-skycraft-swc-law`, centralizing storage access auditing alongside VM metrics and logs.
 
 ---
 

@@ -48,7 +48,7 @@ Write-Host "1. Checking App Service Plan..." -ForegroundColor Yellow
 $asp = Get-AzAppServicePlan -ResourceGroupName $RgName -Name $AspName -ErrorAction SilentlyContinue
 
 if ($asp) {
-    Assert-Resource $AspName ($asp.Sku.Tier -eq "PremiumV3" -or $asp.Sku.Tier -eq "Premium0V3") "Tier is Premium V4 (P0V4/P0v3)"
+    Assert-Resource $AspName ($asp.Sku.Tier -eq "PremiumV4" -or $asp.Sku.Name -eq "P0v4") "Tier is PremiumV4 (P0v4)"
     Assert-Resource $AspName ($asp.Kind -like "*linux*") "OS is Linux"
     Assert-Resource $AspName ($asp.Status -eq "Ready") "Status is Ready"
 } else {
@@ -63,8 +63,8 @@ if ($app) {
     Assert-Resource $AppName ($app.State -eq "Running") "App is Running"
     Assert-Resource $AppName ($app.HttpsOnly -eq $true) "HTTPS Only is Enabled"
     
-    # Check VNet Integration using CLI for reliability
-    $vnetId = az webapp show --name $AppName --resource-group $RgName --query "virtualNetworkSubnetId" -o tsv 2>$null
+    # Check VNet Integration via ARM properties (no az CLI dependency)
+    $vnetId = (Get-AzResource -ResourceId $app.Id -ExpandProperties -ErrorAction SilentlyContinue).Properties.virtualNetworkSubnetId
     Assert-Resource $AppName ($vnetId -like "*AppServiceSubnet*") "VNet Integration Configured"
 } else {
     Write-Host "  [FAIL] Web App '$AppName' not found!" -ForegroundColor Red; $failures++
@@ -78,13 +78,15 @@ Assert-Resource "staging" ($null -ne $slot) "Slot 'staging' exists"
 # 5. Check Autoscale Settings
 Write-Host "4. Checking Autoscale Rules..." -ForegroundColor Yellow
 $autoScaleName = "${AspName}-autoscale"
-$settings = Get-AzAutoscaleSetting -ResourceGroupName $RgName -Name $autoScaleName -ErrorAction SilentlyContinue
+# Get-AzAutoscaleSetting returns an empty .Profiles collection in this Az.Monitor
+# version, so read the raw ARM body via Get-AzResource where profiles (capacity +
+# rules, camelCase) are populated.
+$asRes = Get-AzResource -ResourceGroupName $RgName -ResourceType 'Microsoft.Insights/autoscalesettings' -Name $autoScaleName -ExpandProperties -ErrorAction SilentlyContinue
+$asProfile = if ($asRes) { $asRes.Properties.profiles | Select-Object -First 1 } else { $null }
 
-if ($settings) {
-    # Profiles is a list, usually one profile
-    $autoScaleProfile = $settings.Profiles[0]
-    Assert-Resource "Autoscale" ($autoScaleProfile.Capacity.Minimum -eq "1" -and $autoScaleProfile.Capacity.Maximum -eq "3") "Instance limits (1-3) correct"
-    Assert-Resource "Autoscale" ($autoScaleProfile.Rules.Count -ge 2) "Found $($autoScaleProfile.Rules.Count) scaling rules"
+if ($asProfile) {
+    Assert-Resource "Autoscale" ($asProfile.capacity.minimum -eq "1" -and $asProfile.capacity.maximum -eq "3") "Instance limits (1-3) correct"
+    Assert-Resource "Autoscale" ($asProfile.rules.Count -ge 2) "Found $($asProfile.rules.Count) scaling rules"
 } else {
     Write-Host "  [FAIL] Autoscale setting '$autoScaleName' not found!" -ForegroundColor Red; $failures++
 }
@@ -95,5 +97,5 @@ if ($failures -eq 0) {
     Write-Host "SUCCESS: All checks passed!" -ForegroundColor Green
 } else {
     Write-Host "FAILURE: Found $failures issues." -ForegroundColor Red
-    exit 1
 }
+exit $failures

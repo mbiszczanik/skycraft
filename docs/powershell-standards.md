@@ -78,7 +78,7 @@ Constrain parameters declaratively instead of validating them in the body. This 
 ```powershell
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $true)]

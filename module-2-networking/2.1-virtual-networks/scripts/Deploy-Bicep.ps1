@@ -35,7 +35,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
@@ -110,14 +110,15 @@ try {
                 }
             }
         }
-        
+
         # Get operations
         $ops = Get-AzSubscriptionDeploymentOperation -DeploymentName $deploymentName
         $failedOps = $ops | Where-Object { $_.ProvisioningState -eq "Failed" }
         foreach ($op in $failedOps) {
-             Write-Host "Failed Operation: $($op.Properties.TargetResource.ResourceName)" -ForegroundColor Yellow
-             Write-Host "Status Message: $($op.Properties.StatusMessage)" -ForegroundColor Red
+            Write-Host "Failed Operation: $($op.Properties.TargetResource.ResourceName)" -ForegroundColor Yellow
+            Write-Host "Status Message: $($op.Properties.StatusMessage)" -ForegroundColor Red
         }
+        exit 1
     }
 }
 catch {

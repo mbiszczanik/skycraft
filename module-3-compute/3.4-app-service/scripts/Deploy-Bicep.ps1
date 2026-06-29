@@ -26,7 +26,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
@@ -56,12 +56,17 @@ try {
         parEnvironment = $Environment
     }
 
-    New-AzSubscriptionDeployment `
+    $deployment = New-AzSubscriptionDeployment `
         -Name $DeploymentName `
         -Location $Location `
         -TemplateFile $BicepFile `
         -TemplateParameterObject $params `
         -ErrorAction Stop
+
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host "[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        exit 1
+    }
 
     Write-Host "Deployment '$DeploymentName' completed successfully." -ForegroundColor Green
 }

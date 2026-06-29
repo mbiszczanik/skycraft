@@ -42,6 +42,14 @@ resource resVnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
         networkSecurityGroup: contains(subnet, 'nsgId') ? {
           id: subnet.nsgId
         } : null
+        delegations: contains(subnet, 'delegation') ? [
+          {
+            name: 'delegation'
+            properties: {
+              serviceName: subnet.delegation
+            }
+          }
+        ] : null
       }
     }]
   }

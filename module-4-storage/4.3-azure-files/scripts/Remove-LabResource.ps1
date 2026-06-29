@@ -2,13 +2,13 @@
 .SYNOPSIS
     Removes Lab 4.3 Resources
 .DESCRIPTION
-    Deletes the resource group and all contained resources for Lab 4.3.
-.PARAMETER Environment
-    The environment to clean up (prod, dev, platform). Default: prod.
+    Removes only the two Azure File Shares created by Lab 4.3 (skycraft-config, skycraft-shared)
+    from the production storage account. Does NOT delete the shared prod-skycraft-swc-rg resource
+    group, which contains Lab 4.1 storage required by Labs 4.2 and 4.4.
 .PARAMETER Force
     Skip confirmation prompt.
 .EXAMPLE
-    .\Remove-LabResource.ps1 -Environment prod -Force
+    .\Remove-LabResource.ps1 -Force
 .NOTES
     Project: SkyCraft
     Author: SkyCraft
@@ -16,14 +16,10 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.Resources
+#Requires -Modules Az.Accounts, Az.Storage
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
-    [Parameter(Mandatory = $false)]
-    [ValidateSet('prod', 'dev', 'platform')]
-    [string]$Environment = 'prod',
-
     [Parameter(Mandatory = $false)]
     [switch]$Force
 )
@@ -31,30 +27,43 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($Force) { $ConfirmPreference = 'None' }
 
-$resourceGroupName = "$Environment-skycraft-swc-rg"
+$prodRg             = 'prod-skycraft-swc-rg'
+$storageAccountName = 'prodskycraftswcsa'
+$subscriptionId     = (Get-AzContext).Subscription.Id
 
-Write-Host "=== Lab 4.3: Cleaning Up Lab Resources ===" -ForegroundColor Cyan
+Write-Host "=== Lab 4.3: Cleaning Up File Shares ===" -ForegroundColor Cyan
 
 # 1. Verify Connection
 if (-not (Get-AzContext)) {
     Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; exit 1
 }
 
-# 2. Confirm Deletion
-if (-not (Get-AzResourceGroup -Name $resourceGroupName -ErrorAction SilentlyContinue)) {
-    Write-Host " [INFO] Resource group '$resourceGroupName' does not exist. Skipping." -ForegroundColor Gray
+# 2. Verify storage account exists (do not attempt to delete the RG)
+$sa = Get-AzStorageAccount -ResourceGroupName $prodRg -Name $storageAccountName -ErrorAction SilentlyContinue
+if (-not $sa) {
+    Write-Host " [INFO] Storage account '$storageAccountName' not found. Nothing to clean up." -ForegroundColor Gray
     exit 0
 }
 
-# 3. Delete Resource Group
-try {
-    if ($PSCmdlet.ShouldProcess($resourceGroupName, 'Remove resource group')) {
-        Write-Host "Removing resource group '$resourceGroupName'..." -ForegroundColor Yellow
-        Remove-AzResourceGroup -Name $resourceGroupName -Force -ErrorAction Stop
-        Write-Host "  -> Successfully removed resource group." -ForegroundColor Green
+# 3. Remove the two file shares created by this lab
+$sharesToRemove = @('skycraft-config', 'skycraft-shared')
+foreach ($shareName in $sharesToRemove) {
+    $shareId = "/subscriptions/$subscriptionId/resourceGroups/$prodRg/providers/Microsoft.Storage/storageAccounts/$storageAccountName/fileServices/default/shares/$shareName"
+    $shareExists = Get-AzResource -ResourceId $shareId -ErrorAction SilentlyContinue
+    if ($shareExists) {
+        Write-Host "Removing file share '$shareName'..." -ForegroundColor Yellow
+        try {
+            if ($PSCmdlet.ShouldProcess($shareName, 'Remove file share')) {
+                Remove-AzResource -ResourceId $shareId -Force -ErrorAction Stop | Out-Null
+                Write-Host "  -> Successfully removed '$shareName'." -ForegroundColor Green
+            }
+        } catch {
+            Write-Host "  -> [WARNING] Could not remove '$shareName': $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  -> Share '$shareName' not found, skipping." -ForegroundColor Gray
     }
 }
-catch {
-    Write-Host "  -> [ERROR] Failed to remove resource group." -ForegroundColor Red
-    Write-Host "  -> Cause: $($_.Exception.Message)" -ForegroundColor Red
-}
+
+Write-Host "`nLab 4.3 Cleanup Complete." -ForegroundColor Cyan
+Write-Host "Note: The shared '$prodRg' resource group and storage account were preserved for Labs 4.2 and 4.4." -ForegroundColor Gray

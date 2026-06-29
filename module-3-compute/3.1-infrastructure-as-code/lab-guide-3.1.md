@@ -487,7 +487,6 @@ param instanceCount int = 2
 // Allowed values (enum-like)
 @allowed([
   'swedencentral'
-  'westeurope'
   'northeurope'
 ])
 param location string = 'swedencentral'
@@ -740,7 +739,7 @@ resource virtualNetworks_dev_skycraft_swc_vnet 'Microsoft.Network/virtualNetwork
 param vnetName string = 'dev-skycraft-swc-vnet'
 
 @description('Azure region for deployment')
-@allowed(['swedencentral', 'westeurope', 'northeurope'])
+@allowed(['swedencentral', 'northeurope'])
 param location string = 'swedencentral'
 
 @description('Virtual network address space')
@@ -1033,7 +1032,7 @@ targetScope = 'subscription'
 // ============================================================================
 
 @description('Azure region for resource deployment')
-@allowed(['swedencentral', 'westeurope', 'northeurope'])
+@allowed(['swedencentral', 'northeurope'])
 param location string = 'swedencentral'
 
 @description('Environment name')
@@ -1957,10 +1956,10 @@ Test your understanding with these questions:
    ```
 
    ```bicep
-   // westeurope.bicepparam
+   // northeurope.bicepparam
    using './main.bicep'
-   param location = 'westeurope'
-   param environment = 'prod-we'
+   param location = 'northeurope'
+   param environment = 'prod-ne'
    ```
 
    Deploy:
@@ -1969,8 +1968,8 @@ Test your understanding with these questions:
    # Deploy to Sweden Central
    az deployment sub create      --location swedencentral      --template-file main.bicep      --parameters swedencentral.bicepparam
 
-   # Deploy to West Europe
-   az deployment sub create      --location westeurope      --template-file main.bicep      --parameters westeurope.bicepparam
+   # Deploy to North Europe
+   az deployment sub create      --location northeurope      --template-file main.bicep      --parameters northeurope.bicepparam
    ```
 
    **Approach 2: Loop Over Regions** (Advanced)
@@ -1980,7 +1979,6 @@ Test your understanding with these questions:
 
    param regions array = [
      'swedencentral'
-     'westeurope'
      'northeurope'
    ]
 
@@ -2000,7 +1998,7 @@ Test your understanding with these questions:
    #!/bin/bash
    # deploy-multi-region.sh
 
-   REGIONS=("swedencentral" "westeurope" "northeurope")
+   REGIONS=("swedencentral" "northeurope")
 
    for REGION in "${REGIONS[@]}"; do
      echo "Deploying to $REGION..."

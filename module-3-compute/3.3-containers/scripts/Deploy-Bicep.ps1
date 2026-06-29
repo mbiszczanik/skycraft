@@ -7,7 +7,7 @@
     
     CRITICAL WORKFLOW:
     1. Bootstraps Azure Container Registry (ACR) first (if not exists).
-    2. Builds the required container image (skycraft-auth:v1) using ACR Tasks.
+    2. Imports the required container image (skycraft-auth:v1) from MCR (Microsoft Container Registry).
     3. Executes the main.bicep orchestrator to deploy ACI and ACA.
     
     This multi-step process is required because ACI/ACA depend on the image existing
@@ -39,7 +39,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
@@ -78,7 +78,8 @@ if (-not (Test-Path $mainBicep)) {
 try {
     if (-not (Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue)) {
         Write-Host "Creating Resource Group: $ResourceGroupName..." -ForegroundColor Yellow
-        New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Tag @{ Project = 'SkyCraft' } -ErrorAction Stop | Out-Null
+        New-AzResourceGroup -Name $ResourceGroupName -Location $Location `
+            -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN' } -ErrorAction Stop | Out-Null
     }
 } catch {
     Write-Host "[ERROR] Failed to create Resource Group: $_" -ForegroundColor Red
@@ -121,12 +122,11 @@ if (-not $repoExists) {
 
     Write-Host "Building Container Image (This may take 1-2 mins)..." -ForegroundColor Yellow
     try {
-        az acr build --registry $acrName --image "skycraft-auth:v1" "https://github.com/Azure-Samples/aci-helloworld.git" --output none
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "  -> Image Build Success" -ForegroundColor Green
-        } else {
-            throw "Build command failed"
-        }
+        # Import prebuilt aci-helloworld from MCR instead of `az acr build` — Az PowerShell has no build-from-source cmdlet; functionally equivalent runnable web image.
+        Import-AzContainerRegistryImage -ResourceGroupName $ResourceGroupName -RegistryName $acrName `
+            -SourceRegistryUri 'mcr.microsoft.com' -SourceImage 'azuredocs/aci-helloworld:latest' `
+            -TargetTag 'skycraft-auth:v1' -ErrorAction Stop | Out-Null
+        Write-Host "  -> Image Build Success" -ForegroundColor Green
     } catch {
         Write-Host "[ERROR] Failed to build image: $_" -ForegroundColor Red
         exit 1

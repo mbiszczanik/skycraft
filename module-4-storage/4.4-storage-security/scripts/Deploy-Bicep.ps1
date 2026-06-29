@@ -24,7 +24,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
@@ -65,11 +65,16 @@ try {
     $deployment = New-AzSubscriptionDeployment `
         -Name "lab-4.4-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')" `
         -Location $Location `
-        -TemplateFile "..\bicep\main.bicep" `
+        -TemplateFile (Join-Path $PSScriptRoot "..\bicep\main.bicep") `
         -parLocation $Location `
         -parEnvironment $Environment `
         -parClientIp $ClientIp `
         -ErrorAction Stop
+
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host "`n [FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        exit 1
+    }
 
     Write-Host "`nSuccessfully deployed Lab 4.4 security configuration!" -ForegroundColor Green
     Write-Host "  -> Storage Account: $($deployment.Outputs.outStorageAccountId.Value)" -ForegroundColor Green

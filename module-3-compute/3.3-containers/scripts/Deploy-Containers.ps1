@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Deploys Lab 3.3 Container resources using Bicep and Azure CLI.
+    Deploys Lab 3.3 Container resources using Bicep and Azure PowerShell.
 
 .DESCRIPTION
     This script orchestrates the deployment of SkyCraft Lab 3.3 (Containers).
@@ -8,7 +8,7 @@
     1. Validate Azure connection.
     2. Create/Update the Resource Group.
     3. Deploy Azure Container Registry (ACR) via Bicep.
-    4. Build and push the container image (skycraft-auth:v1) using ACR Tasks.
+    4. Import the container image (skycraft-auth:v1) from MCR (Microsoft Container Registry).
     5. Deploy Azure Container Instance (ACI) via Bicep.
     6. Deploy Azure Container Apps (ACA) via Bicep.
 
@@ -30,12 +30,12 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.Resources
+#Requires -Modules Az.Accounts, Az.Resources, Az.ContainerRegistry
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
@@ -61,7 +61,7 @@ try {
     $rg = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue
     if (-not $rg) {
         Write-Host "Creating Resource Group: $ResourceGroupName..." -ForegroundColor Yellow
-        New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Tag @{ Project = 'SkyCraft'; Environment = 'Development' } -ErrorAction Stop | Out-Null
+        New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN' } -ErrorAction Stop | Out-Null
         Write-Host "  -> Created $ResourceGroupName" -ForegroundColor Green
     } else {
         Write-Host "  -> Found existing Resource Group: $ResourceGroupName" -ForegroundColor Green
@@ -99,24 +99,24 @@ try {
 # 4. Build Image
 Write-Host "`n=== Task 3: Build Container Image ===" -ForegroundColor Cyan
 $imageName = "skycraft-auth:v1"
-$gitSource = "https://github.com/Azure-Samples/aci-helloworld.git"
 
-Write-Host "Building image '$imageName' in ACR '$acrName'..." -ForegroundColor Yellow
-Write-Host "This typically takes 1-2 minutes..." -ForegroundColor Gray
+$existingRepos = Get-AzContainerRegistryRepository -RegistryName $acrName -ErrorAction SilentlyContinue
+if ($existingRepos -contains 'skycraft-auth') {
+    Write-Host "  -> Image '$imageName' already exists in ACR. Skipping import." -ForegroundColor Green
+} else {
+    Write-Host "Building image '$imageName' in ACR '$acrName'..." -ForegroundColor Yellow
+    Write-Host "This typically takes 1-2 minutes..." -ForegroundColor Gray
 
-try {
-    # Using az cli for build as it's imperative and not supported by Bicep natively checks
-    # Check if image exists usually, but we force build for the lab ensure it's fresh
-    az acr build --registry $acrName --image $imageName $gitSource --output none
-    if ($LASTEXITCODE -eq 0) {
+    try {
+        # Import prebuilt aci-helloworld from MCR instead of `az acr build` — Az PowerShell has no build-from-source cmdlet; functionally equivalent runnable web image.
+        Import-AzContainerRegistryImage -ResourceGroupName $ResourceGroupName -RegistryName $acrName `
+            -SourceRegistryUri 'mcr.microsoft.com' -SourceImage 'azuredocs/aci-helloworld:latest' `
+            -TargetTag $imageName -ErrorAction Stop | Out-Null
         Write-Host "  -> Image built successfully" -ForegroundColor Green
-    } else {
-        throw "ACR Build command returned failure code."
+    } catch {
+        Write-Host "  -> [ERROR] Failed to build image: $_" -ForegroundColor Red
+        exit 1
     }
-} catch {
-    Write-Host "  -> [ERROR] Failed to build image: $_" -ForegroundColor Red
-    # Continue? No, subsequent steps fail.
-    exit 1
 }
 
 # 5. Deploy ACI
@@ -146,8 +146,8 @@ try {
 
 # 6. Deploy ACA
 Write-Host "`n=== Task 5: Deploy Azure Container Apps ===" -ForegroundColor Cyan
-$caeName = "dev-skycraft-swc-cae"
-$acaName = "dev-skycraft-swc-aca-world"
+$caeName = "dev-skycraft-swc-cae-02"
+$acaName = "dev-skycraft-swc-aca-world-02"
 $acaTemplatePath = Join-Path $PSScriptRoot "..\bicep\modules\containerapps.bicep"
 
 Write-Host "Deploying ACA: $acaName..." -ForegroundColor Yellow

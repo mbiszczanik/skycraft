@@ -25,10 +25,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$failCount = 0
 
-$resourceGroupName = "$Environment-skycraft-swc-rg"
+$resourceGroupName  = "$Environment-skycraft-swc-rg"
 $storageAccountName = "${Environment}skycraftswcsa"
-$expectedSku = ($Environment -eq 'prod' -or $Environment -eq 'platform') ? 'Standard_GRS' : 'Standard_LRS'
+$expectedSku        = ($Environment -eq 'prod' -or $Environment -eq 'platform') ? 'Standard_GRS' : 'Standard_LRS'
 
 Write-Host "=== Lab 4.3: Validating Azure Files Environment ===" -ForegroundColor Cyan
 
@@ -38,56 +39,68 @@ if (-not (Get-AzContext)) {
 }
 
 # 2. Check Storage Account
+$sa = $null
 try {
     Write-Host "Checking Storage Account '$storageAccountName'..." -ForegroundColor Yellow
     $sa = Get-AzStorageAccount -ResourceGroupName $resourceGroupName -Name $storageAccountName -ErrorAction Stop
-    
-    # Verify SKU
+
     if ($sa.Sku.Name -eq $expectedSku) {
         Write-Host "  -> SKU is correct: $($sa.Sku.Name)" -ForegroundColor Green
     }
     else {
-        Write-Host "  -> [WARNING] SKU mismatch. Expected: $expectedSku, Found: $($sa.Sku.Name)" -ForegroundColor Yellow
+        Write-Host "  -> [FAIL] SKU mismatch. Expected: $expectedSku, Found: $($sa.Sku.Name)" -ForegroundColor Red
+        $failCount++
     }
 
-    # Verify File Service Soft Delete
-    $fileProps = Get-AzStorageAccount -ResourceGroupName $resourceGroupName -Name $storageAccountName
-    $softDelete = $fileProps.FileService.ShareDeleteRetentionPolicy
-    if ($softDelete.Enabled -and $softDelete.Days -ge 14) {
+    # Verify File Service Soft Delete via management-plane cmdlet (PSStorageAccount has no .FileService property)
+    $fileServiceProps = Get-AzStorageFileServiceProperty -ResourceGroupName $resourceGroupName -StorageAccountName $storageAccountName -ErrorAction SilentlyContinue
+    $softDelete = $fileServiceProps.ShareDeleteRetentionPolicy
+    if ($softDelete -and $softDelete.Enabled -and $softDelete.Days -ge 14) {
         Write-Host "  -> Soft Delete is correctly enabled for $($softDelete.Days) days" -ForegroundColor Green
     }
     else {
-        Write-Host "  -> [WARNING] Soft Delete not configured correctly (Enabled: $($softDelete.Enabled), Days: $($softDelete.Days))" -ForegroundColor Yellow
+        Write-Host "  -> [FAIL] Soft Delete not configured correctly (Enabled: $($softDelete.Enabled), Days: $($softDelete.Days))" -ForegroundColor Red
+        $failCount++
     }
 }
 catch {
-    Write-Host "  -> [ERROR] Storage Account not found or accessible." -ForegroundColor Red
-    return
+    Write-Host "  -> [FAIL] Storage Account '$storageAccountName' not found or not accessible." -ForegroundColor Red
+    $failCount++
+    Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor Red
+    exit $failCount
 }
 
-# 3. Check File Shares
+# 3. Check File Shares via management-plane (Get-AzRmStorageShare) to read quota and tier reliably
 try {
     Write-Host "Checking File Shares..." -ForegroundColor Yellow
-    $shares = Get-AzStorageShare -Context $sa.Context -ErrorAction SilentlyContinue
 
-    if ($shares) {
-        $sharesToCheck = @('skycraft-config', 'skycraft-shared')
-        foreach ($shareName in $sharesToCheck) {
-            $share = $shares | Where-Object { $_.Name -eq $shareName }
-            if ($share) {
-                Write-Host "  -> Found Share: $($share.Name) (Quota: $($share.Quota)GB, Tier: $($share.AccessTier))" -ForegroundColor Green
-            }
-            else {
-                Write-Host "  -> [MISSING] File Share '$shareName' not found." -ForegroundColor Red
+    $sharesToCheck = @(
+        @{ Name = 'skycraft-config'; ExpectedQuotaGB = 100 },
+        @{ Name = 'skycraft-shared'; ExpectedQuotaGB = 500 }
+    )
+
+    foreach ($item in $sharesToCheck) {
+        $share = Get-AzRmStorageShare -ResourceGroupName $resourceGroupName -StorageAccountName $storageAccountName `
+            -Name $item.Name -ErrorAction SilentlyContinue
+        if ($share) {
+            $quotaGB = $share.ShareProperties.QuotaInGB
+            $tier    = $share.AccessTier
+            Write-Host "  -> Found Share: $($share.Name) (Quota: ${quotaGB}GB, Tier: $tier)" -ForegroundColor Green
+            if ($quotaGB -ne $item.ExpectedQuotaGB) {
+                Write-Host "  -> [FAIL] $($share.Name) quota ${quotaGB}GB (Expected: $($item.ExpectedQuotaGB)GB)" -ForegroundColor Red
+                $failCount++
             }
         }
-    }
-    else {
-        Write-Host "  -> [INFO] No file shares found. Please create them as per the lab guide." -ForegroundColor Gray
+        else {
+            Write-Host "  -> [FAIL] File Share '$($item.Name)' not found." -ForegroundColor Red
+            $failCount++
+        }
     }
 }
 catch {
-    Write-Host "  -> [ERROR] Could not list file shares." -ForegroundColor Red
+    Write-Host "  -> [FAIL] Could not list file shares: $_" -ForegroundColor Red
+    $failCount++
 }
 
-Write-Host "`nValidation Complete." -ForegroundColor Cyan
+Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor $(if ($failCount -eq 0) { 'Cyan' } else { 'Red' })
+exit $failCount

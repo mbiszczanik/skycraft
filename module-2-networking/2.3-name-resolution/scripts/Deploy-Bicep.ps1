@@ -32,7 +32,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
@@ -55,12 +55,17 @@ if (-not (Test-Path $TemplateFile)) {
 Write-Host "Starting deployment: $deploymentName..." -ForegroundColor Yellow
 
 try {
-    New-AzDeployment `
+    $deployment = New-AzDeployment `
         -Name $deploymentName `
         -Location $Location `
         -TemplateFile $TemplateFile `
         -Verbose
-    
+
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        exit 1
+    }
+
     Write-Host "`n[OK] Deployment completed successfully!" -ForegroundColor Green
 }
 catch {

@@ -1,10 +1,10 @@
-﻿<#
+<#
 .SYNOPSIS
     Removes Lab 3.2 Virtual Machines resources.
 
 .DESCRIPTION
     Cleans up Lab 3.2 resources in the following order:
-    1. Virtual Machines (which auto-deletes NICs and OS disks)
+    1. Virtual Machines (which auto-deletes NICs and OS disks via deleteOption=Delete)
     2. Data Disks
     3. Key Vault (if exists)
 
@@ -21,7 +21,7 @@
 
 .EXAMPLE
     .\Remove-LabResource.ps1 -Environment dev
-    
+
 .EXAMPLE
     .\Remove-LabResource.ps1 -Environment dev -Force -IncludeKeyVault
 
@@ -33,6 +33,7 @@
 #>
 
 #Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Compute, Az.KeyVault
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -58,10 +59,10 @@ Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Lab 3.2 - Resource Cleanup" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
-# Check Azure CLI login
-$account = az account show --output json 2>$null | ConvertFrom-Json
-if (-not $account) {
-    Write-Error "Not logged into Azure CLI. Run 'az login' first."
+# Verify Azure context
+$context = Get-AzContext
+if (-not $context) {
+    Write-Error "Not logged into Azure. Run Connect-AzAccount first."
     exit 1
 }
 
@@ -73,7 +74,7 @@ $resourcesToDelete = @()
 # Check VMs
 $vms = @("$namePrefix-auth-vm", "$namePrefix-world-vm")
 foreach ($vm in $vms) {
-    $exists = az vm show --name $vm --resource-group $rgName 2>$null
+    $exists = Get-AzVM -Name $vm -ResourceGroupName $rgName -ErrorAction SilentlyContinue
     if ($exists) {
         $resourcesToDelete += @{ Type = 'VM'; Name = $vm }
         Write-Host "  - VM: $vm" -ForegroundColor Gray
@@ -82,7 +83,7 @@ foreach ($vm in $vms) {
 
 # Check Data Disks
 $dataDisk = "$namePrefix-world-datadisk"
-$exists = az disk show --name $dataDisk --resource-group $rgName 2>$null
+$exists = Get-AzDisk -DiskName $dataDisk -ResourceGroupName $rgName -ErrorAction SilentlyContinue
 if ($exists) {
     $resourcesToDelete += @{ Type = 'Disk'; Name = $dataDisk }
     Write-Host "  - Disk: $dataDisk" -ForegroundColor Gray
@@ -91,7 +92,7 @@ if ($exists) {
 # Check Key Vault
 if ($IncludeKeyVault) {
     $kvName = "$namePrefix-kv"
-    $exists = az keyvault show --name $kvName --resource-group $rgName 2>$null
+    $exists = Get-AzKeyVault -VaultName $kvName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
     if ($exists) {
         $resourcesToDelete += @{ Type = 'KeyVault'; Name = $kvName }
         Write-Host "  - Key Vault: $kvName" -ForegroundColor Gray
@@ -106,11 +107,11 @@ if ($resourcesToDelete.Count -eq 0) {
 # Delete resources
 Write-Host "`nDeleting resources..." -ForegroundColor Yellow
 
-# Delete VMs first (NICs and OS disks auto-delete if configured)
+# Delete VMs first (NICs and OS disks auto-delete via deleteOption=Delete)
 foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'VM' }) {
     if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove virtual machine')) {
         Write-Host "  Deleting VM: $($resource.Name)..." -ForegroundColor Gray
-        az vm delete --name $resource.Name --resource-group $rgName --yes --force-deletion true 2>$null
+        Remove-AzVM -Name $resource.Name -ResourceGroupName $rgName -Force -ErrorAction Stop | Out-Null
         Write-Host "  ✓ Deleted" -ForegroundColor Green
     }
 }
@@ -119,7 +120,7 @@ foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'VM' }) {
 foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'Disk' }) {
     if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove managed disk')) {
         Write-Host "  Deleting Disk: $($resource.Name)..." -ForegroundColor Gray
-        az disk delete --name $resource.Name --resource-group $rgName --yes 2>$null
+        Remove-AzDisk -DiskName $resource.Name -ResourceGroupName $rgName -Force -ErrorAction Stop | Out-Null
         Write-Host "  ✓ Deleted" -ForegroundColor Green
     }
 }
@@ -128,10 +129,10 @@ foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'Disk' }) 
 foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'KeyVault' }) {
     if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove Key Vault')) {
         Write-Host "  Deleting Key Vault: $($resource.Name)..." -ForegroundColor Gray
-        az keyvault delete --name $resource.Name --resource-group $rgName 2>$null
+        Remove-AzKeyVault -VaultName $resource.Name -ResourceGroupName $rgName -Force -ErrorAction Stop | Out-Null
         Write-Host "  ✓ Deleted (soft-delete)" -ForegroundColor Green
         Write-Host "    Note: Key Vault is in soft-deleted state for 90 days." -ForegroundColor Gray
-        Write-Host "    To permanently purge: az keyvault purge --name $($resource.Name)" -ForegroundColor Gray
+        Write-Host "    To permanently purge: Remove-AzKeyVault -VaultName $($resource.Name) -InRemovedState -Location $($context.Subscription.HomeTenantId)" -ForegroundColor Gray
     }
 }
 

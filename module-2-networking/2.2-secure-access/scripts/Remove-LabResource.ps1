@@ -88,6 +88,11 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($Force) { $ConfirmPreference = 'None' }
 
+# Default to full cleanup when invoked without explicit switches (e.g. from the orchestrator)
+if (-not ($RemoveBastion -or $RemoveNSGs -or $RemoveASGs -or $RemoveAll)) {
+    $RemoveAll = $true
+}
+
 Write-Host "=== Lab 2.2 - Cleanup Security Resources ===" -ForegroundColor Cyan -BackgroundColor Black
 
 # Verify Azure Connection

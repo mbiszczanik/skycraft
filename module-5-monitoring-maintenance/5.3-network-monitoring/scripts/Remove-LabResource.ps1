@@ -27,6 +27,7 @@
 #>
 
 #Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Network
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -38,6 +39,8 @@ $ErrorActionPreference = 'Stop'
 if ($Force) { $ConfirmPreference = 'None' }
 
 # Configuration
+$networkWatcherRg      = 'NetworkWatcherRG'
+$networkWatcherName    = 'NetworkWatcher_swedencentral'
 $connectionMonitorName = 'skycraft-hub-spoke-cm'
 $flowLogName           = 'prod-skycraft-swc-vnet-flowlog'
 $location              = 'swedencentral'
@@ -46,15 +49,12 @@ Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Lab 5.3 - Resource Cleanup" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
-$account = az account show --output json 2>$null | ConvertFrom-Json
-if (-not $account) {
-    Write-Host "  [ERROR] Not logged into Azure CLI. Run 'az login' first." -ForegroundColor Red
+$context = Get-AzContext
+if (-not $context) {
+    Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
     exit 1
 }
-Write-Host "  Account: $($account.user.name)" -ForegroundColor Gray
-
-# Allow non-interactive installation of required Azure CLI extensions.
-az config set extension.use_dynamic_install=yes_without_prompt --only-show-errors | Out-Null
+Write-Host "  Account: $($context.Account.Id)" -ForegroundColor Gray
 
 Write-Host "`n  The following resources will be removed:" -ForegroundColor Yellow
 Write-Host "    - Connection Monitor: $connectionMonitorName (location: $location)"
@@ -63,16 +63,10 @@ Write-Host "    - VNet Flow Log:      $flowLogName (location: $location)"
 # ── [1/2] Remove Connection Monitor ───────────────────────────────────────
 Write-Host "`n[1/2] Removing Connection Monitor '$connectionMonitorName'..." -ForegroundColor Yellow
 try {
-    $cmExists = az network watcher connection-monitor show `
-        --name $connectionMonitorName `
-        --location $location `
-        --output json 2>$null | ConvertFrom-Json
+    $cmExists = Get-AzNetworkWatcherConnectionMonitor -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $connectionMonitorName -ErrorAction SilentlyContinue
     if ($cmExists) {
         if ($PSCmdlet.ShouldProcess($connectionMonitorName, 'Remove Connection Monitor')) {
-            az network watcher connection-monitor delete `
-                --name $connectionMonitorName `
-                --location $location `
-                --output none 2>$null
+            Remove-AzNetworkWatcherConnectionMonitor -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $connectionMonitorName -Confirm:$false -ErrorAction Stop | Out-Null
             Write-Host "  ✓ Connection Monitor removed: $connectionMonitorName" -ForegroundColor Green
         }
     } else {
@@ -85,17 +79,10 @@ try {
 # ── [2/2] Remove VNet Flow Log ────────────────────────────────────────────
 Write-Host "`n[2/2] Removing VNet Flow Log '$flowLogName'..." -ForegroundColor Yellow
 try {
-    # az network watcher flow-log show/delete accept --location only (not --resource-group)
-    $flExists = az network watcher flow-log show `
-        --name $flowLogName `
-        --location $location `
-        --output json 2>$null | ConvertFrom-Json
+    $flExists = Get-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $flowLogName -ErrorAction SilentlyContinue
     if ($flExists) {
         if ($PSCmdlet.ShouldProcess($flowLogName, 'Remove VNet Flow Log')) {
-            az network watcher flow-log delete `
-                --name $flowLogName `
-                --location $location `
-                --output none 2>$null
+            Remove-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $flowLogName -Confirm:$false -ErrorAction Stop | Out-Null
             Write-Host "  ✓ VNet Flow Log removed: $flowLogName" -ForegroundColor Green
         }
     } else {

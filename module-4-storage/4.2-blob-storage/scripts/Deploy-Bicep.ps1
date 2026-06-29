@@ -23,7 +23,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('swedencentral', 'westeurope', 'northeurope')]
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral'
 )
 
@@ -53,6 +53,11 @@ try {
         -Location $Location `
         -TemplateFile $TemplateFile `
         -WarningAction SilentlyContinue
+
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host "[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        exit 1
+    }
 
     Write-Host "Deployment Successful!" -ForegroundColor Green
     

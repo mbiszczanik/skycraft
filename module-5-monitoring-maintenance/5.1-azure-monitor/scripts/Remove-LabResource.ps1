@@ -4,13 +4,12 @@
 
 .DESCRIPTION
     Cleans up Lab 5.1 monitoring resources in the following order:
-    1. Alert Processing Rule (skycraft-hours-apr)
-    2. Metric Alert (skycraft-cpu-alert)
-    3. VM Insights DCR association
-    4. VM Insights Data Collection Rule (skycraft-vm-dcr)
-    5. Action Group (skycraft-ops-ag)
-    6. Storage Diagnostic Settings (skycraft-storage-diag)
-    7. Log Analytics Workspace (platform-skycraft-swc-law)
+    1. Metric Alert (skycraft-cpu-alert)
+    2. VM Insights DCR association
+    3. VM Insights Data Collection Rule (skycraft-vm-dcr)
+    4. Action Group (skycraft-ops-ag)
+    5. Storage Diagnostic Settings (skycraft-storage-diag)
+    6. Log Analytics Workspace (platform-skycraft-swc-law)
 
     Note: This does NOT remove VMs, VNets, or Storage Accounts from earlier labs.
     The Azure Dashboard (SkyCraft-Ops) must be removed manually via the Azure Portal.
@@ -34,6 +33,7 @@
 #>
 
 #Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources, Az.Compute, Az.Storage, Az.OperationalInsights, Az.Monitor
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -55,7 +55,6 @@ $dcrName         = 'skycraft-vm-dcr'
 $dcrAssocName    = 'skycraft-vminsights-dcr-assoc'
 $actionGroupName = 'skycraft-ops-ag'
 $alertRuleName   = 'skycraft-cpu-alert'
-$aprName         = 'skycraft-hours-apr'
 $devVmName       = "$DevEnvironment-skycraft-swc-auth-vm"
 $devRgName       = "$DevEnvironment-skycraft-swc-rg"
 
@@ -64,47 +63,30 @@ Write-Host "  Lab 5.1 - Resource Cleanup" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 # Verify login
-$account = az account show --output json 2>$null | ConvertFrom-Json
-if (-not $account) {
-    Write-Host "  [ERROR] Not logged into Azure CLI. Run 'az login' first." -ForegroundColor Red
+$context = Get-AzContext
+if (-not $context) {
+    Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
     exit 1
 }
-$subscriptionId = $account.id
-
-# Allow non-interactive installation of required Azure CLI extensions.
-az config set extension.use_dynamic_install=yes_without_prompt --only-show-errors | Out-Null
+$subscriptionId = $context.Subscription.Id
 
 # ── Inventory resources to delete ────────────────────────────────────────
 Write-Host "Resources to be deleted:" -ForegroundColor Yellow
 
 $resourcesToDelete = [System.Collections.Generic.List[hashtable]]::new()
 
-# Alert Processing Rule
-$aprExists = az rest `
-    --method GET `
-    --url "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$platformRg/providers/Microsoft.AlertsManagement/alertProcessingRules/$($aprName)?api-version=2021-08-08" `
-    --output json 2>$null | ConvertFrom-Json
-if ($aprExists) {
-    $resourcesToDelete.Add(@{ Type = 'APR'; Name = $aprName })
-    Write-Host "  - Alert Processing Rule: $aprName" -ForegroundColor Gray
-}
-
 # Metric Alert
-$alertExists = az monitor metrics alert show `
-    --name $alertRuleName --resource-group $platformRg --output json 2>$null | ConvertFrom-Json
+$alertExists = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
 if ($alertExists) {
     $resourcesToDelete.Add(@{ Type = 'Alert'; Name = $alertRuleName })
     Write-Host "  - Metric Alert: $alertRuleName" -ForegroundColor Gray
 }
 
 # DCR Association on dev VM
-$devVmExists = az vm show --name $devVmName --resource-group $devRgName --output json 2>$null | ConvertFrom-Json
+$devVmExists = Get-AzVM -Name $devVmName -ResourceGroupName $devRgName -ErrorAction SilentlyContinue
 if ($devVmExists) {
-    $devVmId = $devVmExists.id
-    $assocExists = az monitor data-collection rule association show `
-        --name $dcrAssocName `
-        --resource $devVmId `
-        --output json 2>$null | ConvertFrom-Json
+    $devVmId = $devVmExists.Id
+    $assocExists = Get-AzDataCollectionRuleAssociation -ResourceUri $devVmId -AssociationName $dcrAssocName -ErrorAction SilentlyContinue
     if ($assocExists) {
         $resourcesToDelete.Add(@{ Type = 'DCRAssoc'; Name = $dcrAssocName; VmId = $devVmId })
         Write-Host "  - DCR Association: $dcrAssocName (on $devVmName)" -ForegroundColor Gray
@@ -112,31 +94,25 @@ if ($devVmExists) {
 }
 
 # Data Collection Rule
-$dcrExists = az monitor data-collection rule show `
-    --name $dcrName --resource-group $platformRg --output json 2>$null | ConvertFrom-Json
+$dcrId = "/subscriptions/$subscriptionId/resourceGroups/$platformRg/providers/Microsoft.Insights/dataCollectionRules/$dcrName"
+$dcrExists = Get-AzResource -ResourceId $dcrId -ErrorAction SilentlyContinue
 if ($dcrExists) {
     $resourcesToDelete.Add(@{ Type = 'DCR'; Name = $dcrName })
     Write-Host "  - Data Collection Rule: $dcrName" -ForegroundColor Gray
 }
 
 # Action Group
-$agExists = az monitor action-group show `
-    --name $actionGroupName --resource-group $platformRg --output json 2>$null | ConvertFrom-Json
+$agExists = Get-AzActionGroup -ResourceGroupName $platformRg -Name $actionGroupName -ErrorAction SilentlyContinue
 if ($agExists) {
     $resourcesToDelete.Add(@{ Type = 'ActionGroup'; Name = $actionGroupName })
     Write-Host "  - Action Group: $actionGroupName" -ForegroundColor Gray
 }
 
 # Storage Diagnostic Settings (scoped to blobServices/default)
-$storageAcct = az storage account list `
-    --resource-group $platformRg `
-    --output json 2>$null | ConvertFrom-Json | Select-Object -First 1
+$storageAcct = Get-AzStorageAccount -ResourceGroupName $platformRg -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($storageAcct) {
-    $blobServiceId = "$($storageAcct.id)/blobServices/default"
-    $diagExists = az monitor diagnostic-settings show `
-        --name 'skycraft-storage-diag' `
-        --resource $blobServiceId `
-        --output json 2>$null | ConvertFrom-Json
+    $blobServiceId = "$($storageAcct.Id)/blobServices/default"
+    $diagExists = Get-AzDiagnosticSetting -ResourceId $blobServiceId -Name 'skycraft-storage-diag' -ErrorAction SilentlyContinue
     if ($diagExists) {
         $resourcesToDelete.Add(@{ Type = 'StorageDiag'; Name = 'skycraft-storage-diag'; BlobServiceId = $blobServiceId })
         Write-Host "  - Storage Diagnostic Settings: skycraft-storage-diag" -ForegroundColor Gray
@@ -144,8 +120,7 @@ if ($storageAcct) {
 }
 
 # Log Analytics Workspace
-$wsExists = az monitor log-analytics workspace show `
-    --workspace-name $workspaceName --resource-group $platformRg --output json 2>$null | ConvertFrom-Json
+$wsExists = Get-AzOperationalInsightsWorkspace -ResourceGroupName $platformRg -Name $workspaceName -ErrorAction SilentlyContinue
 if ($wsExists) {
     $resourcesToDelete.Add(@{ Type = 'Workspace'; Name = $workspaceName })
     Write-Host "  - Log Analytics Workspace: $workspaceName" -ForegroundColor Gray
@@ -159,28 +134,12 @@ if ($resourcesToDelete.Count -eq 0) {
 # ── Delete resources in dependency order ──────────────────────────────────
 Write-Host "`nDeleting resources..." -ForegroundColor Yellow
 
-# 1. Alert Processing Rule
-foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'APR' }) {
-    if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Alert Processing Rule')) {
-        Write-Host "  Deleting Alert Processing Rule: $($r.Name)..." -ForegroundColor Gray
-        try {
-            az rest `
-                --method DELETE `
-                --url "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$platformRg/providers/Microsoft.AlertsManagement/alertProcessingRules/$($r.Name)?api-version=2021-08-08" | Out-Null
-            Write-Host "  ✓ Deleted" -ForegroundColor Green
-        } catch {
-            Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
-        }
-    }
-}
-
-# 2. Metric Alert
+# 1. Metric Alert
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'Alert' }) {
     if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Metric Alert')) {
         Write-Host "  Deleting Metric Alert: $($r.Name)..." -ForegroundColor Gray
         try {
-            az monitor metrics alert delete `
-                --name $r.Name --resource-group $platformRg | Out-Null
+            Remove-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $r.Name -ErrorAction Stop | Out-Null
             Write-Host "  ✓ Deleted" -ForegroundColor Green
         } catch {
             Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
@@ -188,13 +147,12 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'Alert' }) {
     }
 }
 
-# 3. DCR Association
+# 2. DCR Association
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'DCRAssoc' }) {
     if ($PSCmdlet.ShouldProcess($r.Name, 'Remove DCR Association')) {
         Write-Host "  Deleting DCR Association: $($r.Name)..." -ForegroundColor Gray
         try {
-            az monitor data-collection rule association delete `
-                --name $r.Name --resource $r.VmId --yes | Out-Null
+            Remove-AzDataCollectionRuleAssociation -ResourceUri $r.VmId -AssociationName $r.Name -ErrorAction Stop | Out-Null
             Write-Host "  ✓ Deleted" -ForegroundColor Green
         } catch {
             Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
@@ -202,13 +160,13 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'DCRAssoc' }) {
     }
 }
 
-# 4. Data Collection Rule
+# 3. Data Collection Rule
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'DCR' }) {
     if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Data Collection Rule')) {
         Write-Host "  Deleting Data Collection Rule: $($r.Name)..." -ForegroundColor Gray
         try {
-            az monitor data-collection rule delete `
-                --name $r.Name --resource-group $platformRg --yes | Out-Null
+            $dcrResourceId = "/subscriptions/$subscriptionId/resourceGroups/$platformRg/providers/Microsoft.Insights/dataCollectionRules/$($r.Name)"
+            Remove-AzResource -ResourceId $dcrResourceId -Force -ErrorAction Stop | Out-Null
             Write-Host "  ✓ Deleted" -ForegroundColor Green
         } catch {
             Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
@@ -216,13 +174,12 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'DCR' }) {
     }
 }
 
-# 5. Action Group
+# 4. Action Group
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'ActionGroup' }) {
     if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Action Group')) {
         Write-Host "  Deleting Action Group: $($r.Name)..." -ForegroundColor Gray
         try {
-            az monitor action-group delete `
-                --name $r.Name --resource-group $platformRg | Out-Null
+            Remove-AzActionGroup -ResourceGroupName $platformRg -Name $r.Name -ErrorAction Stop | Out-Null
             Write-Host "  ✓ Deleted" -ForegroundColor Green
         } catch {
             Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
@@ -230,14 +187,12 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'ActionGroup' }) 
     }
 }
 
-# 6. Storage Diagnostic Settings
+# 5. Storage Diagnostic Settings
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'StorageDiag' }) {
     if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Storage Diagnostic Settings')) {
         Write-Host "  Deleting Storage Diagnostic Settings: $($r.Name)..." -ForegroundColor Gray
         try {
-            az monitor diagnostic-settings delete `
-                --name $r.Name `
-                --resource $r.BlobServiceId | Out-Null
+            Remove-AzDiagnosticSetting -ResourceId $r.BlobServiceId -Name $r.Name -ErrorAction Stop | Out-Null
             Write-Host "  ✓ Deleted" -ForegroundColor Green
         } catch {
             Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
@@ -245,15 +200,14 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'StorageDiag' }) 
     }
 }
 
-# 7. Log Analytics Workspace (soft-delete by default — 14 days recovery window)
+# 6. Log Analytics Workspace (soft-delete by default — 14 days recovery window)
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'Workspace' }) {
     if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Log Analytics Workspace')) {
         Write-Host "  Deleting Log Analytics Workspace: $($r.Name)..." -ForegroundColor Gray
         try {
-            az monitor log-analytics workspace delete `
-                --workspace-name $r.Name --resource-group $platformRg --yes --force | Out-Null
+            Remove-AzOperationalInsightsWorkspace -ResourceGroupName $platformRg -Name $r.Name -Force -ErrorAction Stop | Out-Null
             Write-Host "  ✓ Deleted (soft-delete: 14-day recovery window)" -ForegroundColor Green
-            Write-Host "    To permanently purge: az monitor log-analytics workspace purge --workspace-name $($r.Name) --resource-group $platformRg" -ForegroundColor Gray
+            Write-Host "    To permanently purge: Remove-AzOperationalInsightsWorkspace -ResourceGroupName $platformRg -Name $($r.Name) -ForceDelete" -ForegroundColor Gray
         } catch {
             Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
         }

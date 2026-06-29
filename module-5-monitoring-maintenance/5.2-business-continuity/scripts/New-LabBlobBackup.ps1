@@ -31,6 +31,7 @@
 #>
 
 #Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources, Az.DataProtection, Az.Storage
 
 [CmdletBinding()]
 param(
@@ -54,50 +55,38 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 # ── [1/4] Validate prerequisites ──────────────────────────────────────────
 Write-Host "[1/4] Validating prerequisites..." -ForegroundColor Yellow
 
-$account = az account show --output json 2>$null | ConvertFrom-Json
-if (-not $account) {
-    Write-Host "  [ERROR] Not logged into Azure CLI. Run 'az login' first." -ForegroundColor Red
+$context = Get-AzContext
+if (-not $context) {
+    Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
     exit 1
 }
-Write-Host "  ✓ Logged in as: $($account.user.name)" -ForegroundColor Green
-
-az config set extension.use_dynamic_install=yes_without_prompt --only-show-errors | Out-Null
+Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
 
 # ── [2/4] Resolve resource IDs ────────────────────────────────────────────
 Write-Host "`n[2/4] Resolving resource IDs..." -ForegroundColor Yellow
 
-$bvJson = az dataprotection backup-vault show `
-    --resource-group $platformRg `
-    --vault-name $bvName `
-    --output json 2>$null | ConvertFrom-Json
-if (-not $bvJson) {
+$bv = Get-AzDataProtectionBackupVault -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction SilentlyContinue
+if (-not $bv) {
     Write-Host "  [ERROR] Backup Vault '$bvName' not found. Run Deploy-Bicep.ps1 first." -ForegroundColor Red
     exit 1
 }
-$bvPrincipalId = $bvJson.identity.principalId
+$bvPrincipalId = $bv.IdentityPrincipalId
 Write-Host "  ✓ Backup Vault found: $bvName (Principal: $bvPrincipalId)" -ForegroundColor Green
 
-$storageJson = az storage account show `
-    --name $storageAccount `
-    --resource-group $prodRg `
-    --output json 2>$null | ConvertFrom-Json
-if (-not $storageJson) {
+$storage = Get-AzStorageAccount -ResourceGroupName $prodRg -Name $storageAccount -ErrorAction SilentlyContinue
+if (-not $storage) {
     Write-Host "  [ERROR] Storage account '$storageAccount' not found in '$prodRg'. Deploy Lab 4.1 first." -ForegroundColor Red
     exit 1
 }
-$storageId = $storageJson.id
+$storageId = $storage.Id
 Write-Host "  ✓ Storage account found: $storageAccount" -ForegroundColor Green
 
-$policyJson = az dataprotection backup-policy show `
-    --resource-group $platformRg `
-    --vault-name $bvName `
-    --name $policyName `
-    --output json 2>$null | ConvertFrom-Json
-if (-not $policyJson) {
+$policy = Get-AzDataProtectionBackupPolicy -ResourceGroupName $platformRg -VaultName $bvName -Name $policyName -ErrorAction SilentlyContinue
+if (-not $policy) {
     Write-Host "  [ERROR] Backup policy '$policyName' not found. Run Deploy-Bicep.ps1 first." -ForegroundColor Red
     exit 1
 }
-$policyId = $policyJson.id
+$policyId = $policy.Id
 Write-Host "  ✓ Backup policy found: $policyName" -ForegroundColor Green
 
 # ── [3/4] Assign RBAC roles ───────────────────────────────────────────────
@@ -110,22 +99,21 @@ $requiredRoles = @(
 
 foreach ($role in $requiredRoles) {
     Write-Host "  Checking: $($role.Name)..." -ForegroundColor Gray
-    $existing = az role assignment list `
-        --assignee $bvPrincipalId `
-        --role $role.RoleId `
-        --scope $storageId `
-        --output json 2>$null | ConvertFrom-Json
-    if ($existing.Count -gt 0) {
+    $existing = Get-AzRoleAssignment `
+        -ObjectId $bvPrincipalId `
+        -RoleDefinitionId $role.RoleId `
+        -Scope $storageId `
+        -ErrorAction SilentlyContinue
+    if (@($existing).Count -gt 0) {
         Write-Host "  ✓ Already assigned: $($role.Name)" -ForegroundColor Green
     } elseif ($WhatIf) {
         Write-Host "  [WhatIf] Would assign: $($role.Name)" -ForegroundColor Cyan
     } else {
         try {
-            az role assignment create `
-                --assignee $bvPrincipalId `
-                --role $role.RoleId `
-                --scope $storageId `
-                --output none
+            New-AzRoleAssignment `
+                -ObjectId $bvPrincipalId `
+                -RoleDefinitionId $role.RoleId `
+                -Scope $storageId | Out-Null
             Write-Host "  ✓ Assigned: $($role.Name)" -ForegroundColor Green
         } catch {
             Write-Host "  [ERROR] Failed to assign '$($role.Name)': $_" -ForegroundColor Red
@@ -143,12 +131,9 @@ if (-not $WhatIf) {
 # ── [4/4] Create blob backup instance ────────────────────────────────────
 Write-Host "`n[4/4] Configuring blob backup protection instance..." -ForegroundColor Yellow
 
-$existingInstances = az dataprotection backup-instance list `
-    --resource-group $platformRg `
-    --vault-name $bvName `
-    --output json 2>$null | ConvertFrom-Json
+$existingInstances = Get-AzDataProtectionBackupInstance -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction SilentlyContinue
 $existingInstance = $existingInstances | Where-Object {
-    $_.properties.dataSourceInfo.resourceId -eq $storageId
+    $_.Property.DataSourceInfo.ResourceId -eq $storageId
 }
 
 if ($existingInstance) {
@@ -157,21 +142,33 @@ if ($existingInstance) {
     Write-Host "  [WhatIf] Would create blob backup instance for $storageAccount" -ForegroundColor Cyan
 } else {
     try {
-        $tempFile = Join-Path $env:TEMP 'blob-instance.json'
-        az dataprotection backup-instance initialize `
-            --datasource-type AzureBlob `
-            --datasource-location $location `
-            --datasource-id $storageId `
-            --policy-id $policyId `
-            --output json | Out-File -FilePath $tempFile -Encoding utf8
+        # The Backup Vault uses a VaultStore datastore with the default (vaulted)
+        # AzureBlob policy, so the instance MUST carry a backup configuration listing
+        # the containers — without it the service rejects the request ("NO_PARAM is
+        # invalid"). -ErrorAction Stop is required because the autorest DataProtection
+        # cmdlets emit non-terminating errors, which previously printed a false
+        # "created" success.
+        $backupConfig = New-AzDataProtectionBackupConfigurationClientObject `
+            -DatasourceType AzureBlob `
+            -IncludeAllContainer `
+            -StorageAccountResourceGroupName $prodRg `
+            -StorageAccountName $storageAccount `
+            -ErrorAction Stop
 
-        az dataprotection backup-instance create `
-            --resource-group $platformRg `
-            --vault-name $bvName `
-            --backup-instance "@$tempFile" `
-            --output none
+        $backupInstance = Initialize-AzDataProtectionBackupInstance `
+            -DatasourceType AzureBlob `
+            -DatasourceLocation $location `
+            -DatasourceId $storageId `
+            -PolicyId $policyId `
+            -BackupConfiguration $backupConfig `
+            -ErrorAction Stop
 
-        Remove-Item -Path $tempFile -ErrorAction SilentlyContinue
+        New-AzDataProtectionBackupInstance `
+            -ResourceGroupName $platformRg `
+            -VaultName $bvName `
+            -BackupInstance $backupInstance `
+            -ErrorAction Stop | Out-Null
+
         Write-Host "  ✓ Blob backup instance created for $storageAccount" -ForegroundColor Green
     } catch {
         Write-Host "  [ERROR] Failed to create blob backup instance: $_" -ForegroundColor Red
@@ -185,4 +182,4 @@ Write-Host "  Blob Backup Configuration Complete" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 Write-Host "  Next Steps:" -ForegroundColor Cyan
 Write-Host "    1. Run .\Test-Lab.ps1 to validate full BCDR deployment" -ForegroundColor Gray
-Write-Host "    2. Configure Azure Site Recovery via Azure Portal (Step 5.2.8)" -ForegroundColor Gray
+Write-Host "    2. Configure Azure Site Recovery via Azure Portal (Step 5.2.6)" -ForegroundColor Gray

@@ -29,7 +29,7 @@
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [ValidateSet('dev', 'prod', 'all')]
-    [string]$Environment = 'dev',
+    [string]$Environment = 'all',
 
     [switch]$Force
 )

@@ -25,7 +25,7 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.App, Az.ContainerInstance, Az.ContainerRegistry
+#Requires -Modules Az.Accounts, Az.Resources, Az.ContainerInstance, Az.ContainerRegistry
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -66,18 +66,12 @@ Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
 
 # 1. Remove ACA
 Write-Host "Removing Container App: dev-skycraft-swc-aca-world-02..." -ForegroundColor Yellow
-# Using az cli for ACA deletion to be safe or Az module
 if ($PSCmdlet.ShouldProcess("dev-skycraft-swc-aca-world-02", "Remove Container App")) {
     try {
-        # Try Az module first if available, else CLI
-        if (Get-Command Remove-AzContainerApp -ErrorAction SilentlyContinue) {
-            Remove-AzContainerApp -Name "dev-skycraft-swc-aca-world-02" -ResourceGroupName $ResourceGroupName -ErrorAction SilentlyContinue | Out-Null
-            Write-Host "  -> Deleted (via Az)" -ForegroundColor Green
-        } else {
-            # Fallback to CLI
-            az containerapp delete --name "dev-skycraft-swc-aca-world-02" --resource-group $ResourceGroupName --yes --output none
-            Write-Host "  -> Deleted (via CLI)" -ForegroundColor Green
-        }
+        # Generic ARM delete — no Container Apps base-module cmdlet in the Az gold-path.
+        $r = Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.App/containerApps' -Name 'dev-skycraft-swc-aca-world-02' -ErrorAction SilentlyContinue
+        if ($r) { Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction SilentlyContinue | Out-Null }
+        Write-Host "  -> Deleted (via Az)" -ForegroundColor Green
     } catch {
         Write-Host "  -> [INFO] Not found or already deleted." -ForegroundColor Gray
     }
@@ -87,13 +81,10 @@ if ($PSCmdlet.ShouldProcess("dev-skycraft-swc-aca-world-02", "Remove Container A
 Write-Host "Removing Container Apps Environment: dev-skycraft-swc-cae-02..." -ForegroundColor Yellow
 if ($PSCmdlet.ShouldProcess("dev-skycraft-swc-cae-02", "Remove Container Apps Environment")) {
     try {
-        if (Get-Command Remove-AzContainerAppManagedEnvironment -ErrorAction SilentlyContinue) {
-            Remove-AzContainerAppManagedEnvironment -Name "dev-skycraft-swc-cae-02" -ResourceGroupName $ResourceGroupName -ErrorAction SilentlyContinue | Out-Null
-             Write-Host "  -> Deleted (via Az)" -ForegroundColor Green
-        } else {
-             az containerapp env delete --name "dev-skycraft-swc-cae-02" --resource-group $ResourceGroupName --yes --output none
-             Write-Host "  -> Deleted (via CLI)" -ForegroundColor Green
-        }
+        # Generic ARM delete — no Container Apps base-module cmdlet in the Az gold-path.
+        $r = Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.App/managedEnvironments' -Name 'dev-skycraft-swc-cae-02' -ErrorAction SilentlyContinue
+        if ($r) { Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction SilentlyContinue | Out-Null }
+        Write-Host "  -> Deleted (via Az)" -ForegroundColor Green
     } catch {
         Write-Host "  -> [INFO] Not found or already deleted." -ForegroundColor Gray
     }
