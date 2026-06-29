@@ -65,6 +65,12 @@ foreach ($lock in $locks) {
     }
 }
 
+# ARM lock removal propagates asynchronously — downstream cleanup (Cleanup Lab 2.3)
+# deletes resources in the now-unlocked scope; without this wait the delete races
+# the propagation window and fails with a 'scope is locked' error.
+Write-Host "`n  Waiting 45 seconds for ARM lock removal to propagate..." -ForegroundColor Gray
+Start-Sleep -Seconds 45
+
 # 2. Remove Policies
 Write-Host "`n2. Removing Policy Assignments..." -ForegroundColor Cyan
 $policies = @("Require-Environment-Tag-RG", "Enforce-Project-Tag", "Restrict-Azure-Regions")

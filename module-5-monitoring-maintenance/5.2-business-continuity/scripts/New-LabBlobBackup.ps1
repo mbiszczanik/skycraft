@@ -124,8 +124,8 @@ foreach ($role in $requiredRoles) {
 }
 
 if (-not $WhatIf) {
-    Write-Host "`n  Waiting 30 seconds for RBAC propagation..." -ForegroundColor Gray
-    Start-Sleep -Seconds 30
+    Write-Host "`n  Waiting 360 seconds for RBAC propagation (Azure Backup requires 5-10 min)..." -ForegroundColor Gray
+    Start-Sleep -Seconds 360
 }
 
 # ── [4/4] Create blob backup instance ────────────────────────────────────
