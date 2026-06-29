@@ -43,6 +43,8 @@
 #Requires -Version 7.0
 #Requires -Modules Az.Accounts, Az.Resources, Az.Network, Az.Compute
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '',
+    Justification = 'SSH public keys are not secrets. SecureString is required because New-AzSubscriptionDeployment passes this value to a @secure() Bicep parameter, which prevents it from appearing in deployment logs.')]
 [CmdletBinding()]
 param(
     [Parameter()]
