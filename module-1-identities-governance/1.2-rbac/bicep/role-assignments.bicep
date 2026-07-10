@@ -25,12 +25,18 @@ param parTesterGroupPrincipalId string
 param parPartnerPrincipalId string
 
 @description('Name of the Development Resource Group')
+@minLength(1)
+@maxLength(90)
 param parResourceGroupNameDev string = 'dev-skycraft-swc-rg'
 
 @description('Name of the Production Resource Group')
+@minLength(1)
+@maxLength(90)
 param parResourceGroupNameProd string = 'prod-skycraft-swc-rg'
 
 @description('Name of the Platform Resource Group')
+@minLength(1)
+@maxLength(90)
 param parResourceGroupNamePlatform string = 'platform-skycraft-swc-rg'
 
 /*******************

@@ -6,6 +6,8 @@ VERSION: 0.2.0
 ======================================================*/
 
 @description('Name of the lock')
+@minLength(1)
+@maxLength(90)
 param parLockName string
 
 @description('Notes for the lock')

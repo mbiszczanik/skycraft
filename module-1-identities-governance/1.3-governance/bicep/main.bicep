@@ -14,6 +14,7 @@ targetScope = 'subscription'
 *******************/
 
 @description('Azure Region')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
 @description('Admin Email for Owner Tag')
