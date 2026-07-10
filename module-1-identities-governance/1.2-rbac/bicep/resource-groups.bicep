@@ -19,6 +19,9 @@ param parLocation string = 'swedencentral'
 @description('Common tags object')
 param parCommonTags object = {}
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 /*******************
 *    Variables     *
 *******************/
@@ -30,18 +33,21 @@ var varTagsDev = union(parCommonTags, {
   Environment: 'Development'
   Project: 'SkyCraft'
   CostCenter: 'MSDN'
+  Owner: parOwnerEmail
 })
 
 var varTagsProd = union(parCommonTags, {
   Environment: 'Production'
   Project: 'SkyCraft'
   CostCenter: 'MSDN'
+  Owner: parOwnerEmail
 })
 
 var varTagsPlatform = union(parCommonTags, {
   Environment: 'Platform'
   Project: 'SkyCraft'
   CostCenter: 'MSDN'
+  Owner: parOwnerEmail
 })
 
 /*******************
