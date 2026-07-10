@@ -18,9 +18,11 @@ targetScope = 'subscription'
 *******************/
 
 @description('Azure region for all resources.')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
 @description('Environment tag value for monitoring resources.')
+@allowed(['Development', 'Production', 'Platform'])
 param parEnvironment string = 'Platform'
 
 @description('Email address for the operations Action Group notifications.')

@@ -23,6 +23,7 @@ param parLocation string
 param parWorkspaceId string
 
 @description('Environment tag value.')
+@allowed(['Development', 'Production', 'Platform'])
 param parEnvironment string = 'Platform'
 
 /*******************

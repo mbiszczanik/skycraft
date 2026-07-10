@@ -21,6 +21,7 @@ DEPLOYMENT: [Internal use via Orchestrator]
 param parLocation string = 'swedencentral'
 
 @description('Environment tag value for the monitoring resources.')
+@allowed(['Development', 'Production', 'Platform'])
 param parEnvironment string = 'Platform'
 
 @description('Email address for Action Group notifications.')

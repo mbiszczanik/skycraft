@@ -22,6 +22,7 @@ DEPLOYMENT: [Internal use via Orchestrator]
 param parLocation string = 'swedencentral'
 
 @description('Environment tag value for the monitoring resources.')
+@allowed(['Development', 'Production', 'Platform'])
 param parEnvironment string = 'Production'
 
 @description('Resource ID of the production VNet to enable flow logging on.')

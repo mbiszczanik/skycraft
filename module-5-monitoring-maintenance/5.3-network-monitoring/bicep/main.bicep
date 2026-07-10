@@ -17,9 +17,11 @@ targetScope = 'subscription'
 *******************/
 
 @description('Azure region for all resources.')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
 @description('Environment tag value applied to all resources.')
+@allowed(['Development', 'Production', 'Platform'])
 param parEnvironment string = 'Production'
 
 @description('Resource ID of the production VNet to enable flow logging on.')
