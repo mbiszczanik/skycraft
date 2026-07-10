@@ -10,6 +10,8 @@ DEPLOYMENT: [Internal use via Orchestrator]
 *    Parameters    *
 *******************/
 @description('Name of the public IP address')
+@minLength(1)
+@maxLength(80)
 param parPublicIpName string
 
 @description('Azure region for deployment')
@@ -24,6 +26,7 @@ param parSku string = 'Standard'
 param parAllocationMethod string = 'Static'
 
 @description('Optional DNS label (leave empty to skip DNS settings)')
+@maxLength(63)
 param parDnsLabel string = ''
 
 @description('Resource tags (must include Project, Environment, CostCenter)')

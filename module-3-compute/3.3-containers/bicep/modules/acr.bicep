@@ -13,9 +13,12 @@ DEPLOYMENT: [Internal use via Orchestrator]
 param parLocation string
 
 @description('Environment tag value')
+@allowed(['dev', 'prod', 'platform'])
 param parEnvironment string = 'dev'
 
 @description('Name of the Container Registry')
+@minLength(5)
+@maxLength(50)
 param parAcrName string
 
 /*******************

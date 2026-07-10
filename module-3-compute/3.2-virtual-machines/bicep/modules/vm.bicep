@@ -11,6 +11,8 @@ DEPLOYMENT: Internal use via Orchestrator
 // ============================================================================
 
 @description('Name of the Virtual Machine')
+@minLength(1)
+@maxLength(64)
 param parVmName string
 
 @description('Azure region for deployment')
@@ -40,6 +42,8 @@ param parSshPublicKey string
 param parNicId string
 
 @description('OS disk size in GB')
+@minValue(30)
+@maxValue(4095)
 param parOsDiskSizeGB int = 30
 
 @description('OS disk storage account type')

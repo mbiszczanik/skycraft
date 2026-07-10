@@ -13,24 +13,36 @@ targetScope = 'subscription'
 *    Parameters    *
 *******************/
 @description('Location for all resources')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
 @description('Resource Group Name')
+@minLength(1)
+@maxLength(90)
 param parResourceGroupName string = 'dev-skycraft-swc-rg'
 
 @description('Environment tag')
+@allowed(['dev', 'prod', 'platform'])
 param parEnvironment string = 'dev'
 
 @description('Name of the Container Registry')
+@minLength(5)
+@maxLength(50)
 param parAcrName string = 'devskycraftswcacr01'
 
 @description('Name of the ACI Instance')
+@minLength(1)
+@maxLength(63)
 param parAciName string = 'dev-skycraft-swc-aci-auth'
 
 @description('Name of the Container Apps Environment')
+@minLength(2)
+@maxLength(60)
 param parCaeName string = 'dev-skycraft-swc-cae-02'
 
 @description('Name of the Container App')
+@minLength(2)
+@maxLength(32)
 param parAcaName string = 'dev-skycraft-swc-aca-world-02'
 
 @description('Name of the image repository and tag')

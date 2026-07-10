@@ -53,6 +53,8 @@ param parVmSize string = 'Standard_D2s_v3'
 param parEncryptionStrategy string = 'None'
 
 @description('Worldserver data disk size in GB')
+@minValue(4)
+@maxValue(32767)
 param parDataDiskSizeGB int = 64
 
 @description('Deployment timestamp (auto-generated)')

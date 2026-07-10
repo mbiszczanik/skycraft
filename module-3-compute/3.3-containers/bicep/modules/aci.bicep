@@ -13,12 +13,15 @@ DEPLOYMENT: [Internal use via Orchestrator]
 param parLocation string
 
 @description('Environment tag value')
+@allowed(['dev', 'prod', 'platform'])
 param parEnvironment string = 'dev'
 
 @description('Name of the Container Registry to pull from')
 param parAcrName string
 
 @description('Name of the Container Instance')
+@minLength(1)
+@maxLength(63)
 param parAciName string
 
 @description('Container Image to deploy (e.g., repository:tag)')

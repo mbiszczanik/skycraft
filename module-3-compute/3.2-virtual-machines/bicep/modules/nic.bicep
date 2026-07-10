@@ -11,6 +11,8 @@ DEPLOYMENT: Internal use via Orchestrator
 // ============================================================================
 
 @description('Name of the Network Interface')
+@minLength(1)
+@maxLength(80)
 param parNicName string
 
 @description('Azure region for deployment')

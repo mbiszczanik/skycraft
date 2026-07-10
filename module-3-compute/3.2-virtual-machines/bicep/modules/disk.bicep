@@ -11,6 +11,8 @@ DEPLOYMENT: Internal use via Orchestrator
 // ============================================================================
 
 @description('Name of the managed disk')
+@minLength(1)
+@maxLength(80)
 param parDiskName string
 
 @description('Azure region for deployment')

@@ -13,12 +13,17 @@ DEPLOYMENT: Internal via Orchestrator
 param parLocation string
 
 @description('Environment tag value')
+@allowed(['dev', 'prod'])
 param parEnvironment string
 
 @description('Name of the App Service Plan')
+@minLength(1)
+@maxLength(60)
 param parAppServicePlanName string
 
 @description('Name of the Web App (must be globally unique)')
+@minLength(2)
+@maxLength(60)
 param parAppName string
 
 @description('Resource ID of the subnet for VNet Integration')

@@ -10,6 +10,8 @@ DEPLOYMENT: [Internal use via Orchestrator]
 *    Parameters    *
 *******************/
 @description('Name of the Network Security Group')
+@minLength(1)
+@maxLength(80)
 param parNsgName string
 
 @description('Azure region for deployment')

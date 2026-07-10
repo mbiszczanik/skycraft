@@ -13,18 +13,26 @@ targetScope = 'subscription'
 *    Parameters    *
 *******************/
 @description('Location for all resources')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
 @description('Environment Name')
+@allowed(['dev', 'prod'])
 param parEnvironment string = 'dev'
 
 @description('Resource Group Name')
+@minLength(1)
+@maxLength(90)
 param parResourceGroupName string = 'dev-skycraft-swc-rg'
 
 @description('VNet Name')
+@minLength(2)
+@maxLength(64)
 param parVnetName string = 'dev-skycraft-swc-vnet'
 
 @description('Subnet Name for App Service')
+@minLength(1)
+@maxLength(80)
 param parSubnetName string = 'AppServiceSubnet'
 
 /*******************

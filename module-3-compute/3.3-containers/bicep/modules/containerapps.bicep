@@ -13,15 +13,20 @@ DEPLOYMENT: [Internal use via Orchestrator]
 param parLocation string
 
 @description('Environment tag value')
+@allowed(['dev', 'prod', 'platform'])
 param parEnvironment string = 'dev'
 
 @description('Acr Name')
 param parAcrName string
 
 @description('Name of the Container Apps Environment')
+@minLength(2)
+@maxLength(60)
 param parCaeName string
 
 @description('Name of the Container App')
+@minLength(2)
+@maxLength(32)
 param parAcaName string
 
 @description('Container Image to deploy')
