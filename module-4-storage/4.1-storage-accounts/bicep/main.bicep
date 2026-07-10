@@ -27,6 +27,9 @@ param parEnvironment string = 'dev'
 @description('Deploy storage accounts to all environments (platform, dev, prod)')
 param parDeployAllEnvironments bool = false
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 @description('Enable blob soft delete')
 param parEnableBlobSoftDelete bool = true
 
@@ -59,16 +62,19 @@ var varTagConfigs = {
     Project: 'SkyCraft'
     Environment: 'Platform'
     CostCenter: 'MSDN'
+    Owner: parOwnerEmail
   }
   dev: {
     Project: 'SkyCraft'
     Environment: 'Development'
     CostCenter: 'MSDN'
+    Owner: parOwnerEmail
   }
   prod: {
     Project: 'SkyCraft'
     Environment: 'Production'
     CostCenter: 'MSDN'
+    Owner: parOwnerEmail
   }
 }
 

@@ -17,6 +17,9 @@ targetScope = 'subscription'
 @allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 /*******************
 *    Variables     *
 *******************/
@@ -26,6 +29,7 @@ var varDevRgName = 'dev-skycraft-swc-rg'
 var varCommonTags = {
   Project: 'SkyCraft'
   CostCenter: 'MSDN'
+  Owner: parOwnerEmail
 }
 
 // Production Containers (Private)
