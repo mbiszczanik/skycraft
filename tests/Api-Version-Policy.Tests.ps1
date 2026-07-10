@@ -24,7 +24,7 @@
 
 $RepoRoot    = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $BicepFiles  = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.bicep' |
-               Where-Object { $_.FullName -match '\\module-\d.*\\bicep\\' }
+               Where-Object { $_.FullName -match '[/\\]module-\d.*[/\\]bicep[/\\]' }
 
 # Allow-list: resource types that have NEVER shipped a stable API version.
 # Microsoft.Insights/diagnosticSettings is permanently stuck on *-preview upstream —
