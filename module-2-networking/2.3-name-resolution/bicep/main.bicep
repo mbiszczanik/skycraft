@@ -14,6 +14,7 @@ targetScope = 'subscription'
 // ===================================
 
 @description('The Azure region for the resource group metadata.')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
 @description('The name of the Private DNS Zone.')

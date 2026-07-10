@@ -13,24 +13,37 @@ targetScope = 'subscription'
 *    Parameters    *
 *******************/
 @description('Location for all resources')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
 @description('Development Resource Group Name')
+@minLength(1)
+@maxLength(90)
 param parResourceGroupNameDev string = 'dev-skycraft-swc-rg'
 
 @description('Production Resource Group Name')
+@minLength(1)
+@maxLength(90)
 param parResourceGroupNameProd string = 'prod-skycraft-swc-rg'
 
 @description('Platform Resource Group Name')
+@minLength(1)
+@maxLength(90)
 param parResourceGroupNamePlatform string = 'platform-skycraft-swc-rg'
 
 @description('Development VNet Name')
+@minLength(2)
+@maxLength(64)
 param parVnetNameDev string = 'dev-skycraft-swc-vnet'
 
 @description('Production VNet Name')
+@minLength(2)
+@maxLength(64)
 param parVnetNameProd string = 'prod-skycraft-swc-vnet'
 
 @description('Platform VNet Name')
+@minLength(2)
+@maxLength(64)
 param parVnetNamePlatform string = 'platform-skycraft-swc-vnet'
 
 @description('Deploy Azure Bastion (incurs ~$140/month cost)')

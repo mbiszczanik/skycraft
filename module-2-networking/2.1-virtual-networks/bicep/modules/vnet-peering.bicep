@@ -9,12 +9,16 @@ VERSION: 0.1.0
 *    Parameters    *
 *******************/
 @description('Name of the Source Virtual Network')
+@minLength(2)
+@maxLength(64)
 param parSourceVnetName string
 
 @description('ID of the Target Virtual Network')
 param parTargetVnetId string
 
 @description('Name of the Peering Connection')
+@minLength(1)
+@maxLength(80)
 param parPeeringName string
 
 /*******************

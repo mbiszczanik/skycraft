@@ -14,6 +14,8 @@ DEPLOYMENT: Internal Module
 param parLocation string
 
 @description('Name of the existing Spoke VNet')
+@minLength(2)
+@maxLength(64)
 param parVnetName string
 
 @description('Environment tag value (Development or Production)')

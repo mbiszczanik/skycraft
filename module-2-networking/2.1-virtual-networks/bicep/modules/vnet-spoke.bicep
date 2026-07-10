@@ -12,9 +12,12 @@ VERSION: 0.2.0
 param parLocation string
 
 @description('Name of the Spoke VNet')
+@minLength(2)
+@maxLength(64)
 param parVnetName string
 
 @description('Environment tag value')
+@allowed(['Development', 'Production', 'Platform'])
 param parEnvironment string
 
 @description('Address Space for the VNet')

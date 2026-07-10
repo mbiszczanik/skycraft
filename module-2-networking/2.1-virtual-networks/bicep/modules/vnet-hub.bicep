@@ -12,9 +12,12 @@ VERSION: 0.1.0
 param parLocation string
 
 @description('Name of the Platform VNet')
+@minLength(2)
+@maxLength(64)
 param parVnetName string = 'platform-skycraft-swc-vnet'
 
 @description('Environment tag value')
+@allowed(['Development', 'Production', 'Platform'])
 param parEnvironment string = 'Platform'
 
 /*******************

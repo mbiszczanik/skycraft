@@ -12,9 +12,12 @@ VERSION: 0.1.0
 param parLocation string
 
 @description('Name of the platform VNet')
+@minLength(2)
+@maxLength(64)
 param parVnetName string
 
 @description('Environment tag value')
+@allowed(['Development', 'Production', 'Platform'])
 param parEnvironment string = 'Platform'
 
 @description('Deploy Azure Bastion (incurs ~$140/month cost)')

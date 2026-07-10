@@ -12,9 +12,12 @@ VERSION: 0.1.0
 param parLocation string
 
 @description('Name of the Public IP')
+@minLength(1)
+@maxLength(80)
 param parPublicIpName string
 
 @description('Environment tag value')
+@allowed(['Development', 'Production', 'Platform'])
 param parEnvironment string
 
 /*******************

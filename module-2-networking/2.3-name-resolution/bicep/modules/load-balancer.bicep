@@ -11,6 +11,8 @@ DEPRECATED: False
 // ===================================
 
 @description('The name of the Load Balancer.')
+@minLength(1)
+@maxLength(80)
 param parLbName string
 
 @description('The location for the Load Balancer.')
@@ -20,6 +22,8 @@ param parLocation string
 param parTags object = {}
 
 @description('The name of the existing Public IP address.')
+@minLength(1)
+@maxLength(80)
 param parPublicIpName string
 
 // ===================================

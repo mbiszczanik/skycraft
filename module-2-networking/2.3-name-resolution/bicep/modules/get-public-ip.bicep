@@ -7,6 +7,8 @@ DEPRECATED: False
 ======================================================*/
 
 @description('The name of the existing Public IP.')
+@minLength(1)
+@maxLength(80)
 param parPublicIpName string
 
 resource resPublicIp 'Microsoft.Network/publicIPAddresses@2023-04-01' existing = {
