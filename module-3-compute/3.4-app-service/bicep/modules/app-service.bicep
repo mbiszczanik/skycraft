@@ -16,6 +16,9 @@ param parLocation string
 @allowed(['dev', 'prod'])
 param parEnvironment string
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 @description('Name of the App Service Plan')
 @minLength(1)
 @maxLength(60)
@@ -36,6 +39,7 @@ var varCommonTags = {
   Project: 'SkyCraft'
   Environment: parEnvironment
   CostCenter: 'MSDN'
+  Owner: parOwnerEmail
 }
 
 /*******************

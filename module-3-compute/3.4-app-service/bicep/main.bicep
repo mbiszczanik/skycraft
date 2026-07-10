@@ -20,6 +20,9 @@ param parLocation string = 'swedencentral'
 @allowed(['dev', 'prod'])
 param parEnvironment string = 'dev'
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 @description('Resource Group Name')
 @minLength(1)
 @maxLength(90)
@@ -59,6 +62,7 @@ module modAppService 'modules/app-service.bicep' = {
   params: {
     parLocation: parLocation
     parEnvironment: parEnvironment
+    parOwnerEmail: parOwnerEmail
     parAppServicePlanName: '${parEnvironment}-skycraft-swc-asp'
     parAppName: '${parEnvironment}-skycraft-swc-app01' // Note: This must be globally unique. User might need to change it if collision.
     parSubnetId: varSubnetId

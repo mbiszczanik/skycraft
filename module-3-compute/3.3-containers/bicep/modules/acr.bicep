@@ -16,6 +16,9 @@ param parLocation string
 @allowed(['dev', 'prod', 'platform'])
 param parEnvironment string = 'dev'
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 @description('Name of the Container Registry')
 @minLength(5)
 @maxLength(50)
@@ -28,6 +31,7 @@ var varCommonTags = {
   Project: 'SkyCraft'
   Environment: parEnvironment
   CostCenter: 'MSDN'
+  Owner: parOwnerEmail
 }
 // Force Lowercase just in case
 var varAcrNameStart = toLower(parAcrName)

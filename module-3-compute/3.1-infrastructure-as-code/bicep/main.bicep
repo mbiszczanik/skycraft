@@ -24,11 +24,11 @@ param parEnvironment string
 @description('Project name for resource naming')
 param parProject string = 'skycraft'
 
-@description('Service/workload name')
-param parService string = 'swc'
-
 @description('Cost center for billing')
 param parCostCenter string = 'MSDN'
+
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
 
 @description('Hub VNet address space')
 param parHubVnetAddressPrefix string = '10.0.0.0/16'
@@ -39,10 +39,6 @@ param parDevVnetAddressPrefix string = '10.1.0.0/16'
 @description('Prod VNet address space')
 param parProdVnetAddressPrefix string = '10.2.0.0/16'
 
-
-@description('Deployment date string (auto-generated)')
-param parCurrentDate string = utcNow('yyyy-MM-dd')
-
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -50,10 +46,8 @@ param parCurrentDate string = utcNow('yyyy-MM-dd')
 var varLocationShortCode = 'swc'  // Sweden Central
 var varCommonTags = {
   Project: parProject
-  Service: parService
   CostCenter: parCostCenter
-  ManagedBy: 'Bicep'
-  DeploymentDate: parCurrentDate
+  Owner: parOwnerEmail
 }
 
 // Resource group names

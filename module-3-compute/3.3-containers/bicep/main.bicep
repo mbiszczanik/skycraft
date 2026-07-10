@@ -25,6 +25,9 @@ param parResourceGroupName string = 'dev-skycraft-swc-rg'
 @allowed(['dev', 'prod', 'platform'])
 param parEnvironment string = 'dev'
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 @description('Name of the Container Registry')
 @minLength(5)
 @maxLength(50)
@@ -59,6 +62,8 @@ resource resRg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
   tags: {
     Project: 'SkyCraft'
     Environment: parEnvironment
+    CostCenter: 'MSDN'
+    Owner: parOwnerEmail
   }
 }
 
@@ -69,6 +74,7 @@ module modAcr 'modules/acr.bicep' = {
   params: {
     parLocation: parLocation
     parEnvironment: parEnvironment
+    parOwnerEmail: parOwnerEmail
     parAcrName: parAcrName
   }
 }
@@ -85,6 +91,7 @@ module modAci 'modules/aci.bicep' = {
   params: {
     parLocation: parLocation
     parEnvironment: parEnvironment
+    parOwnerEmail: parOwnerEmail
     parAcrName: parAcrName
     parAciName: parAciName
     parImage: parImage
@@ -101,6 +108,7 @@ module modAca 'modules/containerapps.bicep' = {
   params: {
     parLocation: parLocation
     parEnvironment: parEnvironment
+    parOwnerEmail: parOwnerEmail
     parAcrName: parAcrName
     parCaeName: parCaeName
     parAcaName: parAcaName

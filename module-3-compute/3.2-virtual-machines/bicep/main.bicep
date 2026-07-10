@@ -24,11 +24,11 @@ param parEnvironment string
 @description('Project name for resource naming')
 param parProject string = 'skycraft'
 
-@description('Service/workload name')
-param parService string = 'swc'
-
 @description('Cost center for billing')
 param parCostCenter string = 'MSDN'
+
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
 
 @description('SSH public key for VM authentication')
 @secure()
@@ -57,9 +57,6 @@ param parEncryptionStrategy string = 'None'
 @maxValue(32767)
 param parDataDiskSizeGB int = 64
 
-@description('Deployment timestamp (auto-generated)')
-param parCurrentDate string = utcNow('yyyy-MM-dd')
-
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -67,10 +64,8 @@ param parCurrentDate string = utcNow('yyyy-MM-dd')
 var varLocationShortCode = 'swc' // Sweden Central
 var varCommonTags = {
   Project: parProject
-  Service: parService
   CostCenter: parCostCenter
-  ManagedBy: 'Bicep'
-  DeploymentDate: parCurrentDate
+  Owner: parOwnerEmail
 }
 
 // Resource group name (uses existing from Lab 3.1)
