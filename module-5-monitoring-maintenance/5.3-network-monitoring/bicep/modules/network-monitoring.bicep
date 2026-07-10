@@ -43,6 +43,9 @@ param parDevVmResourceId string
 @description('Private IP address of the dev auth VM. Used only as fallback if the VM endpoint is not resolvable at test time.')
 param parDevAuthVmPrivateIp string = '10.1.1.4'
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 /*******************
 *    Variables     *
 *******************/
@@ -51,6 +54,7 @@ var varCommonTags = {
   Project: 'SkyCraft'
   Environment: parEnvironment
   CostCenter: 'MSDN'
+  Owner: parOwnerEmail
 }
 
 // Derived from location so this module works in any region without changes

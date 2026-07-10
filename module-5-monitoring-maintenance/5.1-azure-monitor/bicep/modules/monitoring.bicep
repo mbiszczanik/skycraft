@@ -27,6 +27,9 @@ param parEnvironment string = 'Platform'
 @description('Email address for Action Group notifications.')
 param parOpsEmail string
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 @description('Resource ID of the production VM to monitor with the CPU metric alert.')
 param parProdVmResourceId string
 
@@ -41,6 +44,7 @@ var varCommonTags = {
   Project: 'SkyCraft'
   Environment: parEnvironment
   CostCenter: 'MSDN'
+  Owner: parOwnerEmail
 }
 
 var varWorkspaceName = 'platform-skycraft-swc-law'

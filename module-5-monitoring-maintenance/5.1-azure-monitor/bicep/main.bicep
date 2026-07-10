@@ -25,6 +25,9 @@ param parLocation string = 'swedencentral'
 @allowed(['Development', 'Production', 'Platform'])
 param parEnvironment string = 'Platform'
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 @description('Email address for the operations Action Group notifications.')
 param parOpsEmail string
 
@@ -56,6 +59,7 @@ module modMonitoring 'modules/monitoring.bicep' = {
   params: {
     parLocation: parLocation
     parEnvironment: parEnvironment
+    parOwnerEmail: parOwnerEmail
     parOpsEmail: parOpsEmail
     parProdVmResourceId: parProdVmResourceId
     parStorageAccountResourceId: parStorageAccountResourceId

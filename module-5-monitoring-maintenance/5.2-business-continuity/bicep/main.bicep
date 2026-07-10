@@ -27,6 +27,9 @@ param parWorkspaceId string
 @allowed(['Development', 'Production', 'Platform'])
 param parEnvironment string = 'Platform'
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 /*******************
 *    Variables     *
 *******************/
@@ -50,6 +53,7 @@ module modRecoveryServicesVault 'modules/recoveryServicesVault.bicep' = {
     parLocation: parLocation
     parWorkspaceId: parWorkspaceId
     parEnvironment: parEnvironment
+    parOwnerEmail: parOwnerEmail
   }
 }
 
@@ -61,6 +65,7 @@ module modBackupVault 'modules/backupVault.bicep' = {
     parLocation: parLocation
     parWorkspaceId: parWorkspaceId
     parEnvironment: parEnvironment
+    parOwnerEmail: parOwnerEmail
   }
 }
 

@@ -24,6 +24,9 @@ param parLocation string = 'swedencentral'
 @allowed(['Development', 'Production', 'Platform'])
 param parEnvironment string = 'Production'
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 @description('Resource ID of the production VNet to enable flow logging on.')
 param parProdVnetResourceId string
 
@@ -61,6 +64,7 @@ module modNetworkMonitoring 'modules/network-monitoring.bicep' = {
   params: {
     parLocation: parLocation
     parEnvironment: parEnvironment
+    parOwnerEmail: parOwnerEmail
     parProdVnetResourceId: parProdVnetResourceId
     parStorageAccountResourceId: parStorageAccountResourceId
     parWorkspaceResourceId: parWorkspaceResourceId
