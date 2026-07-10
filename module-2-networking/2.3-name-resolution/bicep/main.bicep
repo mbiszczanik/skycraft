@@ -47,6 +47,9 @@ param parDevLbPipName string = 'dev-skycraft-swc-lb-pip'
 @description('The Prod Load Balancer Public IP name.')
 param parProdLbPipName string = 'prod-skycraft-swc-lb-pip'
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 // ===================================
 // Variables
 // ===================================
@@ -55,6 +58,7 @@ var varCommonTags = {
   Project: 'SkyCraft'
   Environment: 'Production'
   CostCenter: 'MSDN'
+  Owner: parOwnerEmail
 }
 
 // ===================================

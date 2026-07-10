@@ -20,6 +20,9 @@ param parVnetName string = 'platform-skycraft-swc-vnet'
 @allowed(['Development', 'Production', 'Platform'])
 param parEnvironment string = 'Platform'
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 /*******************
 *    Variables     *
 *******************/
@@ -27,6 +30,7 @@ var varCommonTags = {
   Project: 'SkyCraft'
   Environment: parEnvironment
   CostCenter: 'MSDN'
+  Owner: parOwnerEmail
 }
 
 /*******************

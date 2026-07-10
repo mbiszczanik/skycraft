@@ -46,6 +46,9 @@ param parVnetNameDev string = 'dev-skycraft-swc-vnet'
 @maxLength(64)
 param parVnetNameProd string = 'prod-skycraft-swc-vnet'
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 /*******************
 *    Resources     *
 *******************/
@@ -57,6 +60,7 @@ module modVnetHub 'modules/vnet-hub.bicep' = {
   params: {
     parLocation: parLocation
     parVnetName: parVnetNamePlatform
+    parOwnerEmail: parOwnerEmail
   }
 }
 
@@ -73,6 +77,7 @@ module modVnetDev 'modules/vnet-spoke.bicep' = {
     parWorldSubnetPrefix: '10.1.2.0/24'
     parDatabaseSubnetPrefix: '10.1.3.0/24'
     parAppServiceSubnetPrefix: '10.1.4.0/24'
+    parOwnerEmail: parOwnerEmail
   }
 }
 
@@ -89,6 +94,7 @@ module modVnetProd 'modules/vnet-spoke.bicep' = {
     parWorldSubnetPrefix: '10.2.2.0/24'
     parDatabaseSubnetPrefix: '10.2.3.0/24'
     parAppServiceSubnetPrefix: '10.2.4.0/24'
+    parOwnerEmail: parOwnerEmail
   }
 }
 
@@ -104,6 +110,7 @@ module modPipDevLb 'modules/public-ip.bicep' = {
     parLocation: parLocation
     parPublicIpName: 'dev-skycraft-swc-lb-pip'
     parEnvironment: 'Development'
+    parOwnerEmail: parOwnerEmail
   }
 }
 
@@ -115,6 +122,7 @@ module modPipProdLb 'modules/public-ip.bicep' = {
     parLocation: parLocation
     parPublicIpName: 'prod-skycraft-swc-lb-pip'
     parEnvironment: 'Production'
+    parOwnerEmail: parOwnerEmail
   }
 }
 

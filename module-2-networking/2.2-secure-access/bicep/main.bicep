@@ -49,6 +49,9 @@ param parVnetNamePlatform string = 'platform-skycraft-swc-vnet'
 @description('Deploy Azure Bastion (incurs ~$140/month cost)')
 param parDeployBastion bool = false
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 /*******************
 *    Resources     *
 *******************/
@@ -64,6 +67,7 @@ module modSecurityDev 'modules/security-spoke.bicep' = {
     parAuthSubnetCidr: '10.1.1.0/24'
     parWorldSubnetCidr: '10.1.2.0/24'
     parDbSubnetCidr: '10.1.3.0/24'
+    parOwnerEmail: parOwnerEmail
   }
 }
 
@@ -78,6 +82,7 @@ module modSecurityProd 'modules/security-spoke.bicep' = {
     parAuthSubnetCidr: '10.2.1.0/24'
     parWorldSubnetCidr: '10.2.2.0/24'
     parDbSubnetCidr: '10.2.3.0/24'
+    parOwnerEmail: parOwnerEmail
   }
 }
 
@@ -89,6 +94,7 @@ module modSecurityHub 'modules/security-hub.bicep' = {
     parLocation: parLocation
     parVnetName: parVnetNamePlatform
     parDeployBastion: parDeployBastion
+    parOwnerEmail: parOwnerEmail
   }
 }
 

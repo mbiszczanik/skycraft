@@ -34,6 +34,9 @@ param parWorldSubnetCidr string
 @description('Address CIDR for Database Subnet')
 param parDbSubnetCidr string
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 // ===================================
 // Variables
 // ===================================
@@ -42,6 +45,7 @@ var varCommonTags = {
   Project: 'SkyCraft'
   Environment: parEnvironment
   CostCenter: 'MSDN'
+  Owner: parOwnerEmail
 }
 
 // Prefix based on environment for naming resources

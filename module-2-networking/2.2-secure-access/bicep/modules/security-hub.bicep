@@ -23,6 +23,9 @@ param parEnvironment string = 'Platform'
 @description('Deploy Azure Bastion (incurs ~$140/month cost)')
 param parDeployBastion bool = false
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 /*******************
 *    Variables     *
 *******************/
@@ -30,6 +33,7 @@ var varCommonTags = {
   Project: 'SkyCraft'
   Environment: parEnvironment
   CostCenter: 'MSDN'
+  Owner: parOwnerEmail
 }
 
 var varNsgName = 'platform-skycraft-swc-nsg'
