@@ -17,6 +17,7 @@ targetScope = 'subscription'
 *    Parameters    *
 *******************/
 @description('Location for all resources')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
 @description('Environment to deploy: dev, prod, platform. Ignored if parDeployAllEnvironments is true.')
@@ -30,6 +31,8 @@ param parDeployAllEnvironments bool = false
 param parEnableBlobSoftDelete bool = true
 
 @description('Blob soft delete retention days')
+@minValue(1)
+@maxValue(365)
 param parBlobSoftDeleteDays int = 7
 
 @description('Enable container soft delete')

@@ -15,9 +15,11 @@ targetScope = 'subscription'
 *    Parameters    *
 *******************/
 @description('Location for all resources')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
 @description('Environment tag value')
+@allowed(['dev', 'prod', 'platform'])
 param parEnvironment string = 'prod'
 
 @description('Client IP to allow through storage firewall (leave empty to skip)')

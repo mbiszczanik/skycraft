@@ -26,6 +26,8 @@ param parStorageAccountName string
 param parVnetName string
 
 @description('Subnet name to allow through the firewall')
+@minLength(1)
+@maxLength(80)
 param parSubnetName string = 'WorldSubnet'
 
 @description('Client IP address to allow through the firewall (CIDR notation)')

@@ -15,9 +15,13 @@ DEPLOYMENT: [Internal use via Orchestrator]
 *    Parameters    *
 *******************/
 @description('Name of the existing storage account')
+@minLength(3)
+@maxLength(24)
 param parStorageAccountName string
 
 @description('Container name to create')
+@minLength(3)
+@maxLength(63)
 param parContainerName string
 
 @description('Public access level for the container')

@@ -14,6 +14,7 @@ targetScope = 'subscription'
 *    Parameters    *
 *******************/
 @description('Location for all resources')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
 /*******************
