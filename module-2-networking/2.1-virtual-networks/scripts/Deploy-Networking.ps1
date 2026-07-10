@@ -42,6 +42,7 @@
 #Requires -Modules Az.Accounts, Az.Network
 
 [CmdletBinding()]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Deploy script; idempotent guard (Get-before-New) and az --what-if provide the dry-run safety net.')]
 param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('swedencentral', 'northeurope')]
@@ -144,6 +145,7 @@ try {
 Write-Host "`n=== Task 5: Configuring VNet Peering ===" -ForegroundColor Cyan
 
 function New-SkyCraftPeering {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper; parent script guards idempotency via Get-before-New.')]
     param($Name, $SrcVnet, $DstVnetId, $RgName)
     Write-Host "Creating Peering: $Name..." -ForegroundColor Yellow
     try {
@@ -169,6 +171,7 @@ New-SkyCraftPeering -Name "prod-to-hub" -SrcVnet $prodVnet -DstVnetId $hubVnet.I
 Write-Host "`n=== Task 6: Creating Public IP Addresses ===" -ForegroundColor Cyan
 
 function New-SkyCraftPip {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper; parent script guards idempotency via Get-before-New.')]
     param($Name, $RgName, $Tags)
     Write-Host "Creating PIP: $Name..." -ForegroundColor Yellow
     try {

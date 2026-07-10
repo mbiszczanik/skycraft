@@ -19,6 +19,7 @@
 #Requires -Modules Az.Accounts, Az.Dns, Az.Network
 
 [CmdletBinding()]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Deploy script; idempotent Get-before-New guards cover ShouldProcess intent.')]
 param(
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
@@ -144,6 +145,7 @@ if ($privZone) {
 
 # 2. Create DB Records (Placeholder)
 function New-PrivateDnsRecord {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper; parent script guards idempotency via Get-before-New.')]
     param($Name, $Ip)
     $rec = Get-AzPrivateDnsRecordSet -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $Name -RecordType A -ErrorAction SilentlyContinue
     if (-not $rec) {
@@ -163,6 +165,7 @@ New-PrivateDnsRecord -Name 'prod-db' -Ip '10.2.3.10'
 Write-Host "`n=== Task 3: Linking Virtual Networks ===" -ForegroundColor Cyan
 
 function New-PrivateDnsLink {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper; parent script guards idempotency via Get-before-New.')]
     param($LinkName, $VnetRG, $VnetName, $AutoReg)
     
     $link = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $LinkName -ErrorAction SilentlyContinue

@@ -19,6 +19,8 @@
 #Requires -Modules Az.Accounts, Az.Network
 
 [CmdletBinding()]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Deploy script; idempotent Get-before-New guards cover ShouldProcess intent.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Location', Justification = 'Consumed inside New-SkyCraftLB via parent-scope resolution; PSSA nested-scope false positive.')]
 param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('swedencentral', 'northeurope')]
@@ -66,6 +68,7 @@ $Tags = @{
 }
 
 function New-SkyCraftLB {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper; parent script guards idempotency via Get-before-New.')]
     param (
         [string]$ResourceGroupName,
         [string]$LbName,
