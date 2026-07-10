@@ -3,8 +3,8 @@ SUMMARY: Lab 5.1 - Azure Monitor & Insights Orchestrator
 DESCRIPTION: Orchestrates deployment of centralized monitoring
              infrastructure for SkyCraft. Deploys a Log Analytics
              Workspace, VM Insights Data Collection Rule, Action Group,
-             Metric Alert, and Alert Processing Rule into the
-             platform-skycraft-swc-rg resource group.
+             and Metric Alert into the platform-skycraft-swc-rg
+             resource group.
 EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
 AUTHOR/S: SkyCraft
 VERSION: 0.1.0

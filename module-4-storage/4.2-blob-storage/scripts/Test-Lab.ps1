@@ -19,11 +19,18 @@
     Author: SkyCraft
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Storage
+
 [CmdletBinding()]
 param(
+    [ValidateNotNullOrEmpty()]
     [string]$ProdRgName = 'prod-skycraft-swc-rg',
+    [ValidateNotNullOrEmpty()]
     [string]$DevRgName = 'dev-skycraft-swc-rg',
+    [ValidateNotNullOrEmpty()]
     [string]$ProdSaName = 'prodskycraftswcsa',
+    [ValidateNotNullOrEmpty()]
     [string]$DevSaName = 'devskycraftswcsa'
 )
 
@@ -71,7 +78,7 @@ Assert-Check "PROD: AllowBlobPublicAccess is disabled" `
     -FailureMessage "Public Access Enabled (Security Risk!)"
 
 # Versioning MUST be enabled
-$prodBlobService = Get-AzStorageBlobServiceProperty -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName
+$prodBlobService = Get-AzStorageBlobServiceProperty -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName -ErrorAction SilentlyContinue
 Assert-Check "PROD: Versioning enabled" `
     -Condition ($prodBlobService.IsVersioningEnabled -eq $true) `
     -SuccessMessage "Versioning ON" `
@@ -79,7 +86,7 @@ Assert-Check "PROD: Versioning enabled" `
 
 # Containers Verification
 $prodCtx = $prodSa.Context
-$prodContainers = Get-AzStorageContainer -Context $prodCtx
+$prodContainers = Get-AzStorageContainer -Context $prodCtx -ErrorAction SilentlyContinue
 
 $gameAssets = $prodContainers | Where-Object Name -eq 'game-assets'
 Assert-Check "PROD: 'game-assets' container exists" `
@@ -103,21 +110,21 @@ if ($prodPolicy) {
     Assert-Check "PROD: 'archive-backups' rule present" -Condition ($rules -contains 'archive-backups')
 }
 
-# 3. Development Verification (Exam Prep - Public Access)
-Write-Host "`n--- Development Verification (Exam Prep) ---" -ForegroundColor Yellow
+# 3. Development Verification
+Write-Host "`n--- Development Verification ---" -ForegroundColor Yellow
 
-# AllowBlobPublicAccess MUST be True (for AZ-104 demo)
-Assert-Check "DEV: AllowBlobPublicAccess is enabled" `
-    -Condition ($devSa.AllowBlobPublicAccess -eq $true) `
-    -SuccessMessage "Public Access Enabled (Exam Req)" `
-    -FailureMessage "Public Access Disabled (Lab 4.2/Exam Req Missing)"
+# AllowBlobPublicAccess MUST be False (blocked at subscription level)
+Assert-Check "DEV: AllowBlobPublicAccess is disabled" `
+    -Condition ($devSa.AllowBlobPublicAccess -eq $false) `
+    -SuccessMessage "Public Access Disabled" `
+    -FailureMessage "Public Access Enabled (unexpected)"
 
 # Versioning should be Disabled (default)
-$devBlobService = Get-AzStorageBlobServiceProperty -ResourceGroupName $DevRgName -StorageAccountName $DevSaName
+$devBlobService = Get-AzStorageBlobServiceProperty -ResourceGroupName $DevRgName -StorageAccountName $DevSaName -ErrorAction SilentlyContinue
 Assert-Check "DEV: Versioning disabled (scope check)" `
     -Condition ($devBlobService.IsVersioningEnabled -eq $false)
 
-# Public Container Verification
+# Container Verification — public-demo exists as private container
 $devCtx = $devSa.Context
 $devContainer = Get-AzStorageContainer -Context $devCtx -Name 'public-demo' -ErrorAction SilentlyContinue
 
@@ -125,10 +132,10 @@ Assert-Check "DEV: 'public-demo' container exists" `
     -Condition ($null -ne $devContainer)
 
 if ($devContainer) {
-    Assert-Check "DEV: 'public-demo' allows Blob public access" `
-        -Condition ($devContainer.PublicAccess -eq 'Blob') `
-        -SuccessMessage "Public Blob Access OK" `
-        -FailureMessage "Access is $($devContainer.PublicAccess), expected Blob"
+    Assert-Check "DEV: 'public-demo' is private (subscription policy)" `
+        -Condition ($devContainer.PublicAccess -eq 'Off') `
+        -SuccessMessage "Private Access OK" `
+        -FailureMessage "Access is $($devContainer.PublicAccess), expected Off"
 }
 
 # Summary

@@ -10,11 +10,11 @@
     Skip the confirmation prompt.
 
 .EXAMPLE
-    .\Cleanup-Resources.ps1
+    .\Remove-LabResource.ps1
     Prompts for confirmation before deleting resources.
 
 .EXAMPLE
-    .\Cleanup-Resources.ps1 -Force
+    .\Remove-LabResource.ps1 -Force
     Deletes resources without prompting.
 
 .NOTES
@@ -24,11 +24,17 @@
     Date: 2026-01-04
 #>
 
-[CmdletBinding()]
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Network
+
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $false)]
     [switch]$Force
 )
+
+$ErrorActionPreference = 'Stop'
+if ($Force) { $ConfirmPreference = 'None' }
 
 Write-Host "=== Lab 2.1 - Resource Cleanup ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -48,19 +54,11 @@ $devVnetName = "dev-skycraft-swc-vnet"
 $prodRgName = "prod-skycraft-swc-rg"
 $prodVnetName = "prod-skycraft-swc-vnet"
 
-# Confirmation
-if (-not $Force) {
-    $confirm = Read-Host "Are you sure you want to delete Lab 2.1 Networking resources (Hub/Dev/Prod VNets & PIPs)? (y/N)"
-    if ($confirm -notmatch "^y$") {
-        Write-Host "Cleanup cancelled." -ForegroundColor Yellow
-        exit 0
-    }
-}
-
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
 
 # Function to remove peerings
-function Remove-VNetPeerings {
+function Remove-VNetPeering {
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param($VnetName, $RgName)
     try {
         Write-Host "Removing peerings on $VnetName..." -ForegroundColor Yellow
@@ -68,8 +66,10 @@ function Remove-VNetPeerings {
         if ($vnet) {
             $peerings = $vnet.VirtualNetworkPeerings | Where-Object { $_.Name -match "peer" }
             foreach ($p in $peerings) {
-                Write-Host "  -> Deleting $($p.Name)" -ForegroundColor Gray
-                Remove-AzVirtualNetworkPeering -VirtualNetworkName $VnetName -ResourceGroupName $RgName -Name $p.Name -Force -ErrorAction Stop
+                if ($PSCmdlet.ShouldProcess("$VnetName/$($p.Name)", 'Remove VNet peering')) {
+                    Write-Host "  -> Deleting $($p.Name)" -ForegroundColor Gray
+                    Remove-AzVirtualNetworkPeering -VirtualNetworkName $VnetName -ResourceGroupName $RgName -Name $p.Name -Force -ErrorAction Stop
+                }
             }
         }
     } catch {
@@ -77,17 +77,20 @@ function Remove-VNetPeerings {
     }
 }
 
-Remove-VNetPeerings -VnetName $hubVnetName -RgName $hubRgName
-Remove-VNetPeerings -VnetName $devVnetName -RgName $devRgName
-Remove-VNetPeerings -VnetName $prodVnetName -RgName $prodRgName
+Remove-VNetPeering -VnetName $hubVnetName -RgName $hubRgName
+Remove-VNetPeering -VnetName $devVnetName -RgName $devRgName
+Remove-VNetPeering -VnetName $prodVnetName -RgName $prodRgName
 
 # Function to remove VNet
 function Remove-VNet {
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param($VnetName, $RgName)
     try {
         Write-Host "Removing VNet: $VnetName..." -ForegroundColor Yellow
-        Remove-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -Force -ErrorAction Stop
-        Write-Host "  -> Success" -ForegroundColor Green
+        if ($PSCmdlet.ShouldProcess($VnetName, 'Remove virtual network')) {
+            Remove-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -Force -ErrorAction Stop
+            Write-Host "  -> Success" -ForegroundColor Green
+        }
     } catch {
         Write-Host "  - [INFO] VNet $VnetName not found or already deleted." -ForegroundColor Gray
     }
@@ -106,12 +109,13 @@ $pips = @(
 foreach ($pip in $pips) {
     try {
         Write-Host "Removing Public IP: $($pip.Name)..." -ForegroundColor Yellow
-        Remove-AzPublicIpAddress -Name $pip.Name -ResourceGroupName $pip.RG -Force -ErrorAction Stop
-        Write-Host "  -> Success" -ForegroundColor Green
+        if ($PSCmdlet.ShouldProcess($pip.Name, 'Remove public IP address')) {
+            Remove-AzPublicIpAddress -Name $pip.Name -ResourceGroupName $pip.RG -Force -ErrorAction Stop
+            Write-Host "  -> Success" -ForegroundColor Green
+        }
     } catch {
         Write-Host "  - [INFO] PIP $($pip.Name) not found or already deleted." -ForegroundColor Gray
     }
 }
 
 Write-Host "`nCleanup Complete." -ForegroundColor Green
-

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-10
+
 ### Added
 
 - Repository hygiene baseline: `.gitattributes` enforcing line-ending normalization (CRLF for `*.ps1`/`*.psm1`/`*.psd1`/`*.cmd`/`*.bat`, LF for `*.sh`, `* text=auto` as the catch-all for other text files, and image/binary types marked binary) and `.editorconfig` for consistent editor settings.
@@ -36,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Removed dead plaintext-to-`SecureString` conversion from `New-LabUser`.
+- Lab 3.3: Added 90-second DNS propagation wait after ACR bootstrap to prevent ACA image-pull failures on freshly created registries.
+- Lab 3.2: Removed availability zone pinning from VM and managed disk deployments to prevent `ZonalAllocationFailed` capacity errors in Sweden Central.
+- Lab 4.2: Disabled blob public access on the development storage account to comply with subscription-level `PublicAccessNotPermitted` enforcement.
+- Lab 4.3: Corrected file share quota property path from `ShareProperties.ShareQuota` (null) to `QuotaGiB` on `PSShare` objects returned by `Get-AzRmStorageShare`.
+- Lab 5.2: Increased RBAC propagation wait from 30 seconds to 360 seconds to satisfy Azure Backup's 5–10 minute role-assignment requirement.
+- Cleanup 1.3 / Lab 2.3: Added 45-second ARM lock removal propagation wait to prevent downstream cleanup steps from racing the lock-removal window.
 
 ## [0.6.0] - 2026-05-26
 
@@ -73,7 +81,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Module 4 (Storage): Lab 4.1 storage accounts with conditional encryption and Lab 4.2 Blob Storage.
 - Project foundations: specification, naming/standards documents, security files, README, and course navigation.
 
-[Unreleased]: https://github.com/mbiszczanik/skycraft/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/mbiszczanik/skycraft/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/mbiszczanik/skycraft/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/mbiszczanik/skycraft/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/mbiszczanik/skycraft/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/mbiszczanik/skycraft/releases/tag/v0.4.0

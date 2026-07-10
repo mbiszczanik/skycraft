@@ -1,4 +1,4 @@
-# Lab 5.2: Business Continuity & Disaster Recovery (1.5 hours)
+# Lab 5.2: Business Continuity & Disaster Recovery (2.5 hours)
 
 ## 🎯 Learning Objectives
 
@@ -21,8 +21,8 @@ By completing this lab, you will:
 graph TB
     subgraph "Sweden Central (Primary)"
         style primary fill:#e1f5ff,stroke:#0078d4,stroke-width:3px
-        VM_Prod["prod-skycraft-vm"]
-        SA_Prod["prodskycraftstore"]
+        VM_Prod["dev-skycraft-swc-auth-vm"]
+        SA_Prod["prodskycraftswcsa"]
         RSV["platform-skycraft-swc-rsv<br/>Recovery Services Vault"]
         BV["platform-skycraft-swc-bv<br/>Backup Vault"]
     end
@@ -30,7 +30,7 @@ graph TB
     subgraph "Norway East (Secondary)"
         style secondary fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
         RSV_Sec["asr-skycraft-ne-rsv<br/>Site Recovery Vault"]
-        VM_Replica["prod-skycraft-vm-asr"]
+        VM_Replica["dev-skycraft-swc-auth-vm-asr"]
     end
 
     VM_Prod -->|"VM Backup"| RSV
@@ -74,7 +74,7 @@ Before starting this lab:
 
 ---
 
-## 📖 Section 1: Backup Concepts (20 min)
+## 📖 Section 1: Backup & Recovery Concepts (15 min)
 
 ### What is Azure Backup?
 
@@ -94,7 +94,7 @@ Just like storage accounts, vaults support redundancy:
 
 ---
 
-## 📖 Section 2: Deploy Recovery Services Vault (20 min)
+## 📖 Section 2: Recovery Services Vault & VM Backup (30 min)
 
 ### Step 5.2.1: Create the Vault
 
@@ -119,8 +119,6 @@ Just like storage accounts, vaults support redundancy:
 
 ---
 
-## 📖 Section 3: Configure Backup Policy (15 min)
-
 ### Step 5.2.2: Create a Production Policy
 
 1. Inside the vault, go to **Manage** → **Backup policies**.
@@ -134,8 +132,6 @@ Just like storage accounts, vaults support redundancy:
 
 ---
 
-## 📖 Section 4: Enable VM Backup (20 min)
-
 ### Step 5.2.3: Protect the Production VM
 
 1. In the vault, click **Overview** → **+ Backup**.
@@ -143,7 +139,7 @@ Just like storage accounts, vaults support redundancy:
 3. What do you want to back up? **Virtual machine**.
 4. Click **Configure Backup**.
 5. Select the policy: `SkyCraft-Daily-Prod`.
-6. Select Virtual Machines: Find and select `prod-skycraft-vm`.
+6. Select Virtual Machines: Find and select `dev-skycraft-swc-auth-vm`.
 7. Click **Enable Backup**.
 
 > [!TIP]
@@ -151,7 +147,7 @@ Just like storage accounts, vaults support redundancy:
 
 ---
 
-## 📖 Section 3: Backup Vault & Blob Protection (30 min)
+## 📖 Section 3: Backup Vault & Blob Backup (30 min)
 
 ### Step 5.2.4: Deploy Backup Vault
 
@@ -167,23 +163,53 @@ Just like storage accounts, vaults support redundancy:
 
 ### Step 5.2.5: Configure Blob Backup
 
+Create the blob backup **policy**, then grant the vault identity access and protect the storage account.
+
+**a. Create the blob backup policy**
+
 1. Navigate to your new **Backup Vault**.
 2. Go to **Manage** → **Backup policies**.
 3. Create a new policy:
    - Datasource type: **Azure Blobs**
    - Policy name: `SkyCraft-Blob-Policy`
    - Vault: `platform-skycraft-swc-bv`
-   - Schedule: **Daily**
-   - Retention: **30 days**
+   - Retention: **30 days** (operational)
 4. Review and create the policy.
+
+**b. Grant the Backup Vault identity access to the storage account**
+
+The Backup Vault uses its **system-assigned managed identity** to read and protect blob data. Assign these two roles to that identity, scoped to `prodskycraftswcsa`:
+
+| Role                                   | Why                                                                       |
+| :------------------------------------- | :------------------------------------------------------------------------ |
+| **Storage Account Backup Contributor** | Lets the vault configure and manage operational backup on the account.    |
+| **Storage Blob Data Owner**            | Lets the vault access blob data for protection.                           |
+
+1. Open the storage account `prodskycraftswcsa` (resource group `prod-skycraft-swc-rg`).
+2. Go to **Access control (IAM)** → **+ Add** → **Add role assignment**.
+3. For each role above: select the role → **Assign access to: Managed identity** → pick the `platform-skycraft-swc-bv` Backup Vault → **Review + assign**.
+
+> [!NOTE]
+> Allow ~5 minutes for the role assignments to propagate before the next step, or it may fail with `UserErrorMissingRequiredPermissions`.
+
+**c. Configure backup (create the backup instance)**
+
+1. In the **Backup Vault**, click **+ Backup**.
+2. Datasource type: **Azure Blobs (Azure Storage)**.
+3. Backup policy: `SkyCraft-Blob-Policy`.
+4. Select the storage account: `prodskycraftswcsa`.
+5. **Review + configure** to create the **backup instance** that protects the account.
+
+> [!TIP]
+> The automation script `New-LabBlobBackup.ps1` performs steps **b** and **c** for you (role assignments + backup instance); the portal flow above is the manual equivalent.
 
 ---
 
-## 📖 Section 4: Azure Site Recovery (45 min)
+## 📖 Section 4: Azure Site Recovery & Cross-Region (45 min)
 
 ### Step 5.2.6: Enable Replication
 
-1. Navigate to your VM: `prod-skycraft-vm`.
+1. Navigate to your VM: `dev-skycraft-swc-auth-vm`.
 2. Access **Disaster recovery** in the left menu.
 3. Target region: **Norway East** (or another available European region).
 4. Click **Advanced settings** to review resources (ASR creates a cache storage account and target resources).

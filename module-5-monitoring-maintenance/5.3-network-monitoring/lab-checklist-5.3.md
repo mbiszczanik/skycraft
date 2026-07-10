@@ -58,7 +58,7 @@ az network watcher list \
 ```azurecli
 # Example CLI check
 az network watcher test-ip-flow \
-  --name dev-skycraft-vm \
+  --name dev-skycraft-swc-auth-vm \
   --resource-group dev-skycraft-swc-rg \
   --direction inbound \
   --protocol tcp \

@@ -28,12 +28,17 @@
     Date: 2026-02-05
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Storage
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prod', 'platform', 'all')]
     [string]$Environment = 'all'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 4.1: Validate Storage Accounts ===" -ForegroundColor Cyan
 Write-Host ""

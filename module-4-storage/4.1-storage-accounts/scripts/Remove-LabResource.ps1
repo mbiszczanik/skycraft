@@ -27,7 +27,10 @@
     Date: 2026-02-05
 #>
 
-[CmdletBinding(SupportsShouldProcess)]
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Storage
+
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prod', 'platform', 'all')]
@@ -38,6 +41,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($Force) { $ConfirmPreference = 'None' }
 
 Write-Host "=== Lab 4.1: Remove Storage Accounts ===" -ForegroundColor Cyan
 Write-Host ""
@@ -77,19 +81,10 @@ foreach ($env in $envsToClean) {
 }
 Write-Host ""
 
-# Confirmation
-if (-not $Force) {
-    Write-Host "[WARNING] This action will permanently delete the above storage accounts!" -ForegroundColor Yellow
-    Write-Host "          All data in these accounts will be lost." -ForegroundColor Yellow
-    Write-Host ""
-    $confirm = Read-Host "Type 'yes' to confirm deletion"
-    
-    if ($confirm -ne 'yes') {
-        Write-Host ""
-        Write-Host "Operation cancelled." -ForegroundColor Gray
-        exit 0
-    }
-}
+# Warning
+Write-Host "[WARNING] This action will permanently delete the above storage accounts!" -ForegroundColor Yellow
+Write-Host "          All data in these accounts will be lost." -ForegroundColor Yellow
+Write-Host ""
 
 # Delete storage accounts
 Write-Host ""

@@ -33,6 +33,30 @@ This guide addresses common issues encountered while setting up or running the S
 2.  Install **Bicep CLI**.
 3.  Restart your terminal/VS Code reliability.
 
+### "The script ... cannot be run because the following modules ... are missing" (`#Requires`)
+
+**Cause**: Scripts declare their dependencies with `#Requires -Version 7.0` and `#Requires -Modules ...`, so they fail fast on a host that lacks PowerShell 7 or the required Az / Microsoft Graph modules.
+**Solution**:
+
+1.  Ensure you are on **PowerShell 7+** (`$PSVersionTable.PSVersion`); install from <https://aka.ms/powershell>.
+2.  Install only the narrow submodules the lab needs (faster than the full `Az` / `Microsoft.Graph` meta-modules). Examples:
+
+    ```powershell
+    # Az labs (install the submodules named in the script's #Requires line)
+    Install-Module Az.Accounts, Az.Resources, Az.Network, Az.Compute, Az.Storage `
+        -Scope CurrentUser -Repository PSGallery -Force
+
+    # Module-specific extras as needed
+    Install-Module Az.Monitor, Az.OperationalInsights, Az.KeyVault, Az.RecoveryServices `
+        -Scope CurrentUser -Force
+
+    # Lab 1.1 / 1.2 identity scripts (Microsoft Graph submodules — NOT the full Microsoft.Graph)
+    Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups `
+        -Scope CurrentUser -Force
+    ```
+
+3.  Re-run the script. The `#Requires` line at the top of each script lists exactly which modules it needs.
+
 ## ☁️ Deployment Errors
 
 ### "QuotaExceeded"

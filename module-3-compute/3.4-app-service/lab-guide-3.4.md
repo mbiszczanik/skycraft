@@ -153,7 +153,7 @@ For this lab, we will use **Premium V4 P0V4** because we need **Deployment Slots
 | Resource Group   | `dev-skycraft-swc-rg`                                    |
 | Name             | `dev-skycraft-swc-app01` (must be globally unique)       |
 | Publish          | **Code**                                                 |
-| Runtime stack    | **Node 24 LTS** (or newer)                               |
+| Runtime stack    | **Node 20 LTS**                                          |
 | Operating System | **Linux**                                                |
 | Region           | **Sweden Central**                                       |
 | Linux Plan       | `dev-skycraft-swc-asp` (Select the one you just created) |

@@ -29,20 +29,29 @@
     Date: 2026-01-04
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdResourceGroup = 'prod-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$DevResourceGroup = 'dev-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$PlatformResourceGroup = 'platform-skycraft-swc-rg'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 2.1 - Deploy Networking Configuration ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -101,14 +110,15 @@ try {
                 }
             }
         }
-        
+
         # Get operations
         $ops = Get-AzSubscriptionDeploymentOperation -DeploymentName $deploymentName
         $failedOps = $ops | Where-Object { $_.ProvisioningState -eq "Failed" }
         foreach ($op in $failedOps) {
-             Write-Host "Failed Operation: $($op.Properties.TargetResource.ResourceName)" -ForegroundColor Yellow
-             Write-Host "Status Message: $($op.Properties.StatusMessage)" -ForegroundColor Red
+            Write-Host "Failed Operation: $($op.Properties.TargetResource.ResourceName)" -ForegroundColor Yellow
+            Write-Host "Status Message: $($op.Properties.StatusMessage)" -ForegroundColor Red
         }
+        exit 1
     }
 }
 catch {

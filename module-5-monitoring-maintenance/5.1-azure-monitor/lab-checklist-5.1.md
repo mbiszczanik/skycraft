@@ -19,7 +19,7 @@
 
 ### Data Collection
 
-- [ ] VM Insights enabled for at least one VM (e.g., `dev-skycraft-vm`)
+- [ ] VM Insights enabled for at least one VM (e.g., `dev-skycraft-swc-auth-vm`)
 - [ ] Azure Monitor Agent (AMA) installed on the VM
 - [ ] Data Collection Rule (DCR) `skycraft-vm-dcr` created and associated
 - [ ] Syslog and Performance Counters being collected
@@ -32,7 +32,7 @@
 
 - [ ] Metric Alert: **Percentage CPU > 80%**
 - [ ] Log Search Alert: (Optional) Heartbeat missing
-- [ ] Action Group: `SkyCraft-Admins-Email` created
+- [ ] Action Group: `skycraft-ops-ag` created (short name `SkyCraftOps`)
 - [ ] Target email matches your account for testing
 
 ---

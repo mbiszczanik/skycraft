@@ -15,38 +15,53 @@
     Date: 2026-01-11
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Dns, Az.Network
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$PublicDnsZoneName = 'skycraft.example.com',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$PrivateDnsZoneName = 'skycraft.internal',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$PlatformRG = 'platform-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$DevRG = 'dev-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdRG = 'prod-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$HubVnetName = 'platform-skycraft-swc-vnet',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$DevVnetName = 'dev-skycraft-swc-vnet',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdVnetName = 'prod-skycraft-swc-vnet',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$DevLbPipName = 'dev-skycraft-swc-lb-pip',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ProdLbPipName = 'prod-skycraft-swc-lb-pip'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 2.3 - Deploy DNS Configuration (PowerShell) ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -157,7 +172,7 @@ function New-PrivateDnsLink {
         Write-Host "Linking VNet: $VnetName..." -ForegroundColor Yellow
         $vnet = Get-AzVirtualNetwork -ResourceGroupName $VnetRG -Name $VnetName
         if ($vnet) {
-            New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $LinkName -VirtualNetworkId $vnet.Id -EnableRegistration:$AutoReg | Out-Null
+            New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $LinkName -VirtualNetworkId $vnet.Id -EnableRegistration:$AutoReg -Tag @{ Project = 'SkyCraft' } | Out-Null
             Write-Host "  -> Link created (AutoReg: $AutoReg)" -ForegroundColor Green
         } else {
              Write-Host "  -> [ERROR] VNet '$VnetName' not found!" -ForegroundColor Red
@@ -170,3 +185,4 @@ New-PrivateDnsLink -LinkName 'dev-vnet-link' -VnetRG $DevRG -VnetName $DevVnetNa
 New-PrivateDnsLink -LinkName 'prod-vnet-link' -VnetRG $ProdRG -VnetName $ProdVnetName -AutoReg $true
 
 Write-Host "`n=== DNS Deployment Complete ===" -ForegroundColor Cyan -BackgroundColor Black
+exit 0

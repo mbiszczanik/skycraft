@@ -3,13 +3,13 @@
     Validates the configuration of Lab 2.1 networking resources.
 
 .DESCRIPTION
-    This script runs a comprehensive validation suite against the deployed VNets (Hub/Dev/Prod), 
+    This script runs a comprehensive validation suite against the deployed VNets (Hub/Dev/Prod),
     Subnets, Peering configurations, and Public IPs to ensure they meet the Lab 2.1 requirements.
 
-    Valdiates:
-    - Hub VNet and all 4 subnets.
-    - Dev VNet and all 3 subnets.
-    - Prod VNet and all 3 subnets.
+    Validates:
+    - Hub VNet and all 2 subnets.
+    - Dev VNet and all 4 subnets (AuthSubnet, WorldSubnet, DatabaseSubnet, AppServiceSubnet).
+    - Prod VNet and all 4 subnets.
     - VNet Peering state (Connected) and settings (Forwarded traffic, VNet access).
     - Public IPs existence and SKU (Standard/Static).
 
@@ -24,13 +24,22 @@
     Date: 2026-01-04
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Network
+
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+$script:failCount = 0
+
 Write-Host "=== Lab 2.1 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 
 # Check Azure Connection
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    return
+    exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
@@ -39,23 +48,22 @@ Write-Host "`n=== 1. Validating Hub VNet ===" -ForegroundColor Cyan
 $hubRgName = "platform-skycraft-swc-rg"
 $hubVnetName = "platform-skycraft-swc-vnet"
 $hubExpectedSubnets = @{
-    "AzureBastionSubnet"  = "10.0.0.0/26"
-    "GatewaySubnet"       = "10.0.1.0/27"
+    "AzureBastionSubnet" = "10.0.0.0/26"
+    "GatewaySubnet"      = "10.0.1.0/27"
 }
 
 try {
     $hubVnet = Get-AzVirtualNetwork -Name $hubVnetName -ResourceGroupName $hubRgName -ErrorAction Stop
     Write-Host "[OK] Hub VNet found: $hubVnetName" -ForegroundColor Green
-    
-    # Check Address Space
+
     if ($hubVnet.AddressSpace.AddressPrefixes -contains "10.0.0.0/16") {
         Write-Host "  - Address Space 10.0.0.0/16 verified." -ForegroundColor Green
     }
     else {
         Write-Host "  - [FAIL] Address Space is $($hubVnet.AddressSpace.AddressPrefixes -join ', ')" -ForegroundColor Red
+        $script:failCount++
     }
 
-    # Check Subnets
     foreach ($subnetName in $hubExpectedSubnets.Keys) {
         $subnet = $hubVnet.Subnets | Where-Object { $_.Name -eq $subnetName }
         if ($subnet) {
@@ -64,15 +72,18 @@ try {
             }
             else {
                 Write-Host "  - [FAIL] Subnet $subnetName found but address range is $($subnet.AddressPrefix) (Expected: $($hubExpectedSubnets[$subnetName]))" -ForegroundColor Red
+                $script:failCount++
             }
         }
         else {
             Write-Host "  - [FAIL] Subnet $subnetName not found." -ForegroundColor Red
+            $script:failCount++
         }
     }
 }
 catch {
     Write-Host "[FAIL] Hub VNet $hubVnetName not found in Resource Group $hubRgName." -ForegroundColor Red
+    $script:failCount++
 }
 
 function Test-SpokeVNet {
@@ -81,11 +92,12 @@ function Test-SpokeVNet {
     try {
         $vnet = Get-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -ErrorAction Stop
         Write-Host "[OK] VNet found: $VnetName" -ForegroundColor Green
-        
+
         if ($vnet.AddressSpace.AddressPrefixes -contains $Prefix) {
             Write-Host "  - Address Space $Prefix verified." -ForegroundColor Green
         } else {
             Write-Host "  - [FAIL] Address Space is $($vnet.AddressSpace.AddressPrefixes -join ', ')" -ForegroundColor Red
+            $script:failCount++
         }
 
         foreach ($subnetName in $ExpectedSubnets.Keys) {
@@ -95,30 +107,33 @@ function Test-SpokeVNet {
                     Write-Host "  - [OK] Subnet $subnetName ($($subnet.AddressPrefix)) verified." -ForegroundColor Green
                 } else {
                     Write-Host "  - [FAIL] Subnet $subnetName found but address range is $($subnet.AddressPrefix) (Expected: $($ExpectedSubnets[$subnetName]))" -ForegroundColor Red
+                    $script:failCount++
                 }
             } else {
                 Write-Host "  - [FAIL] Subnet $subnetName not found." -ForegroundColor Red
+                $script:failCount++
             }
         }
     } catch {
         Write-Host "[FAIL] VNet $VnetName not found in Resource Group $RgName." -ForegroundColor Red
+        $script:failCount++
     }
 }
 
-# 2. Validate Dev VNet
+# 2. Validate Dev VNet (4 subnets including AppServiceSubnet)
 $devExpectedSubnets = @{
-    "AuthSubnet"     = "10.1.1.0/24"
-    "WorldSubnet"    = "10.1.2.0/24"
-    "DatabaseSubnet" = "10.1.3.0/24"
+    "AuthSubnet"       = "10.1.1.0/24"
+    "WorldSubnet"      = "10.1.2.0/24"
+    "DatabaseSubnet"   = "10.1.3.0/24"
     "AppServiceSubnet" = "10.1.4.0/24"
 }
 Test-SpokeVNet -VnetName "dev-skycraft-swc-vnet" -RgName "dev-skycraft-swc-rg" -Prefix "10.1.0.0/16" -ExpectedSubnets $devExpectedSubnets
 
-# 3. Validate Prod VNet
+# 3. Validate Prod VNet (4 subnets including AppServiceSubnet)
 $prodExpectedSubnets = @{
-    "AuthSubnet"     = "10.2.1.0/24"
-    "WorldSubnet"    = "10.2.2.0/24"
-    "DatabaseSubnet" = "10.2.3.0/24"
+    "AuthSubnet"       = "10.2.1.0/24"
+    "WorldSubnet"      = "10.2.2.0/24"
+    "DatabaseSubnet"   = "10.2.3.0/24"
     "AppServiceSubnet" = "10.2.4.0/24"
 }
 Test-SpokeVNet -VnetName "prod-skycraft-swc-vnet" -RgName "prod-skycraft-swc-rg" -Prefix "10.2.0.0/16" -ExpectedSubnets $prodExpectedSubnets
@@ -136,15 +151,20 @@ function Test-Peering {
                 Write-Host "[OK] $PeeringName on $VnetName (Status: $($peering.PeeringState))" -ForegroundColor Green
             } else {
                 Write-Host "[FAIL] $PeeringName on $VnetName Status is $($peering.PeeringState)" -ForegroundColor Red
+                $script:failCount++
             }
             if ($peering.AllowVirtualNetworkAccess) { Write-Host "  - [OK] AllowVirtualNetworkAccess" -ForegroundColor Green }
-            else { Write-Host "  - [FAIL] AllowVirtualNetworkAccess is False" -ForegroundColor Red }
+            else { Write-Host "  - [FAIL] AllowVirtualNetworkAccess is False" -ForegroundColor Red; $script:failCount++ }
             if ($peering.AllowForwardedTraffic) { Write-Host "  - [OK] AllowForwardedTraffic" -ForegroundColor Green }
-            else { Write-Host "  - [FAIL] AllowForwardedTraffic is False" -ForegroundColor Red }
+            else { Write-Host "  - [FAIL] AllowForwardedTraffic is False" -ForegroundColor Red; $script:failCount++ }
         } else {
             Write-Host "[FAIL] Peering $PeeringName not found on $VnetName." -ForegroundColor Red
+            $script:failCount++
         }
-    } catch { Write-Host "[FAIL] Error checking $PeeringName on ${VnetName}: $_" -ForegroundColor Red }
+    } catch {
+        Write-Host "[FAIL] Error checking $PeeringName on ${VnetName}: $_" -ForegroundColor Red
+        $script:failCount++
+    }
 }
 
 Test-Peering -VnetName "platform-skycraft-swc-vnet" -RgName "platform-skycraft-swc-rg" -PeeringName "hub-to-dev"
@@ -162,16 +182,22 @@ function Test-PIP {
         if ($pip) {
             Write-Host "[OK] PIP found: $Name" -ForegroundColor Green
             if ($pip.Sku.Name -eq "Standard") { Write-Host "  - [OK] SKU Standard" -ForegroundColor Green }
-            else { Write-Host "  - [FAIL] SKU is $($pip.Sku.Name)" -ForegroundColor Red }
+            else { Write-Host "  - [FAIL] SKU is $($pip.Sku.Name)" -ForegroundColor Red; $script:failCount++ }
             if ($pip.PublicIpAllocationMethod -eq "Static") { Write-Host "  - [OK] Allocation Static" -ForegroundColor Green }
-            else { Write-Host "  - [FAIL] Allocation is $($pip.PublicIpAllocationMethod)" -ForegroundColor Red }
-        } else { Write-Host "[FAIL] PIP $Name not found." -ForegroundColor Red }
-    } catch { Write-Host "[FAIL] Error checking PIP ${Name}: $_" -ForegroundColor Red }
+            else { Write-Host "  - [FAIL] Allocation is $($pip.PublicIpAllocationMethod)" -ForegroundColor Red; $script:failCount++ }
+        } else {
+            Write-Host "[FAIL] PIP $Name not found." -ForegroundColor Red
+            $script:failCount++
+        }
+    } catch {
+        Write-Host "[FAIL] Error checking PIP ${Name}: $_" -ForegroundColor Red
+        $script:failCount++
+    }
 }
 
 Test-PIP -Name "dev-skycraft-swc-lb-pip" -RgName "dev-skycraft-swc-rg"
 Test-PIP -Name "prod-skycraft-swc-lb-pip" -RgName "prod-skycraft-swc-rg"
 
 Write-Host "`n=== Validation Summary ===" -ForegroundColor Cyan
-Write-Host "Lab 2.1 validation complete" -ForegroundColor Green
-
+Write-Host "Lab 2.1 validation complete. Failures: $($script:failCount)" -ForegroundColor $(if ($script:failCount -eq 0) { 'Green' } else { 'Red' })
+exit $script:failCount

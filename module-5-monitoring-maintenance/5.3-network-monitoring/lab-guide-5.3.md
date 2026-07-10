@@ -27,8 +27,8 @@ graph TB
         CT["Connection Troubleshooter<br/>(Can A talk to B?)"]
     end
 
-    VM_Dev["dev-skycraft-vm"]
-    VM_Prod["prod-skycraft-vm"]
+    VM_Dev["dev-skycraft-swc-auth-vm"]
+    VM_Prod["prod-skycraft-swc-auth-vm"]
 
     NW --- Diagnostic Tools
     Diagnostic Tools -.-> VM_Dev
@@ -58,8 +58,11 @@ graph TB
 
 Before starting this lab:
 
-- [ ] Completed **Module 2: Networking** (VNets and NSGs must exist)
-- [ ] At least one VM must be running
+- [ ] Completed **Lab 2.1: Virtual Networks** (VNets must exist)
+- [ ] Completed **Lab 2.2: Secure Access** (NSGs must exist)
+- [ ] Completed **Lab 3.2: Virtual Machines** (`dev-skycraft-swc-auth-vm` and `dev-skycraft-swc-world-vm` must be running)
+- [ ] Completed **Lab 4.1: Storage Accounts** (`platformskycraftswcsa` must exist for flow log storage)
+- [ ] Completed **Lab 5.1: Azure Monitor** (`platform-skycraft-swc-law` Log Analytics Workspace must exist)
 
 ---
 
@@ -79,7 +82,7 @@ Before starting this lab:
 ### Step 5.3.1: Check for NSG Blocks
 
 1. Navigate to **Network Watcher** → **Diagnostic tools** → **IP flow verify**.
-2. Select your VM: `dev-skycraft-vm`.
+2. Select your VM: `dev-skycraft-swc-auth-vm`.
 3. Configure the check:
    - Protocol: **TCP**
    - Direction: **Inbound**
@@ -97,7 +100,7 @@ Before starting this lab:
 ### Step 5.3.2: Verify Routing
 
 1. In Network Watcher, go to **Next hop**.
-2. Select your VM: `prod-skycraft-vm`.
+2. Select your VM: `prod-skycraft-swc-auth-vm`.
 3. Source IP address: (Auto-filled).
 4. Destination IP address: `1.1.1.1` (External DNS).
 5. Click **Next hop**.
@@ -121,14 +124,15 @@ Before starting this lab:
 1. In Network Watcher, go to **Connection troubleshoot**.
 2. **Source**:
    - Type: **Virtual Machine**
-   - Resource: `prod-skycraft-vm`
+   - Resource: `prod-skycraft-swc-auth-vm` *(if Lab 3.2 prod environment was deployed)*
+   - **Fallback** — if only dev environment exists: use `dev-skycraft-swc-world-vm` as source
 3. **Destination**:
-   - Type: **Specify manually**
-   - IP Address: (Select the private IP of your `dev-skycraft-vm`)
+   - Type: **Virtual Machine**
+   - Resource: `dev-skycraft-swc-auth-vm`
    - Port: **22** (SSH)
 4. Click **Check**.
 
-**Expected Result**: After a minute, the tool shows a hop-by-hop breakdown of the connection status.
+**Expected Result**: After a minute, the tool shows a hop-by-hop breakdown of the connection status. Source and destination must be two distinct VMs — both must have the **NetworkWatcherAgent** extension installed (the deployment script installs it automatically).
 
 ---
 

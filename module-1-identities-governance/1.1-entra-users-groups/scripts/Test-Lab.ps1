@@ -18,8 +18,13 @@
     Date: 2026-01-10
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups
+
 [CmdletBinding()]
 param()
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 1.1 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 

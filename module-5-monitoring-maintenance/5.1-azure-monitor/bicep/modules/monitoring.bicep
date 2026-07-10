@@ -6,9 +6,8 @@ DESCRIPTION: Deploys all Azure Monitor resources for Lab 5.1:
              - Action Group (skycraft-ops-ag) with email notification
              - Metric Alert (skycraft-cpu-alert) for CPU > 80%
              - Storage Account Diagnostic Settings (skycraft-storage-diag)
-NOTE: DCR Association (skycraft-vminsights-dcr-assoc) and Alert Processing
-      Rule (skycraft-hours-apr) are created post-deployment by Deploy-Bicep.ps1
-      (steps 5/6) due to runtime dependency on VM resource IDs.
+NOTE: DCR Association (skycraft-vminsights-dcr-assoc) is created post-deployment
+      by Deploy-Bicep.ps1 (step 5) due to runtime dependency on VM resource IDs.
 AUTHOR/S: SkyCraft
 VERSION: 0.1.0
 DEPLOYMENT: [Internal use via Orchestrator]

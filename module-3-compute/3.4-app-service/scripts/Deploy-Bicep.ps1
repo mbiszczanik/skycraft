@@ -20,15 +20,21 @@
     Date: 2026-01-31
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prod')]
     [string]$Environment = 'dev'
 )
+
+$ErrorActionPreference = 'Stop'
 
 $BicepFile = Join-Path $PSScriptRoot "..\bicep\main.bicep"
 $DeploymentName = "deploy-lab3.4-$Environment"
@@ -50,12 +56,17 @@ try {
         parEnvironment = $Environment
     }
 
-    New-AzSubscriptionDeployment `
+    $deployment = New-AzSubscriptionDeployment `
         -Name $DeploymentName `
         -Location $Location `
         -TemplateFile $BicepFile `
         -TemplateParameterObject $params `
         -ErrorAction Stop
+
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host "[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        exit 1
+    }
 
     Write-Host "Deployment '$DeploymentName' completed successfully." -ForegroundColor Green
 }

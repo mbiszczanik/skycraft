@@ -22,6 +22,9 @@
     Date: 2026-01-11
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Compute, Az.Network
+
 [CmdletBinding()]
 param(
     [Parameter()]
@@ -43,10 +46,10 @@ Write-Host "  Lab 3.2 - Deployment Validation"  -ForegroundColor Cyan
 Write-Host "========================================"  -ForegroundColor Cyan
 Write-Host ""
 
-# Check Azure CLI login
-$account = az account show --output json 2>$null | ConvertFrom-Json
-if (-not $account) {
-    Write-Error "Not logged into Azure CLI. Run 'az login' first."
+# Verify Azure context
+$context = Get-AzContext
+if (-not $context) {
+    Write-Error "Not logged into Azure. Run Connect-AzAccount first."
     exit 1
 }
 
@@ -56,30 +59,35 @@ if (-not $account) {
 Write-Host "[VMs]" -ForegroundColor Yellow
 
 # Test Auth VM exists and running
+# Note: Get-AzVM -Name -Status returns an instance view whose power state lives in
+# .Statuses (Code 'PowerState/running' -> DisplayStatus 'VM running'); there is no
+# direct .PowerState property on this object.
 Write-Host "  Testing: Auth VM exists and running..." -NoNewline
-$authVmState = az vm get-instance-view --name "$namePrefix-auth-vm" --resource-group $rgName --query "instanceView.statuses[1].displayStatus" -o tsv 2>$null
-if ($authVmState -eq 'VM running') {
+$authIv = Get-AzVM -ResourceGroupName $rgName -Name "$namePrefix-auth-vm" -Status -ErrorAction SilentlyContinue
+$authState = ($authIv.Statuses | Where-Object { $_.Code -like 'PowerState/*' }).DisplayStatus
+if ($authState -eq 'VM running') {
     Write-Host " PASS" -ForegroundColor Green
     $passCount++
 } else {
-    Write-Host " FAIL (State: $authVmState)" -ForegroundColor Red
+    Write-Host " FAIL (State: $authState)" -ForegroundColor Red
     $failCount++
 }
 
 # Test World VM exists and running
 Write-Host "  Testing: World VM exists and running..." -NoNewline
-$worldVmState = az vm get-instance-view --name "$namePrefix-world-vm" --resource-group $rgName --query "instanceView.statuses[1].displayStatus" -o tsv 2>$null
-if ($worldVmState -eq 'VM running') {
+$worldIv = Get-AzVM -ResourceGroupName $rgName -Name "$namePrefix-world-vm" -Status -ErrorAction SilentlyContinue
+$worldState = ($worldIv.Statuses | Where-Object { $_.Code -like 'PowerState/*' }).DisplayStatus
+if ($worldState -eq 'VM running') {
     Write-Host " PASS" -ForegroundColor Green
     $passCount++
 } else {
-    Write-Host " FAIL (State: $worldVmState)" -ForegroundColor Red
+    Write-Host " FAIL (State: $worldState)" -ForegroundColor Red
     $failCount++
 }
 
 # Test Auth VM in Zone 1
 Write-Host "  Testing: Auth VM in Zone 1..." -NoNewline
-$authZone = az vm show --name "$namePrefix-auth-vm" --resource-group $rgName --query "zones[0]" -o tsv 2>$null
+$authZone = (Get-AzVM -ResourceGroupName $rgName -Name "$namePrefix-auth-vm" -ErrorAction SilentlyContinue).Zones[0]
 if ($authZone -eq '1') {
     Write-Host " PASS" -ForegroundColor Green
     $passCount++
@@ -90,7 +98,7 @@ if ($authZone -eq '1') {
 
 # Test World VM in Zone 2
 Write-Host "  Testing: World VM in Zone 2..." -NoNewline
-$worldZone = az vm show --name "$namePrefix-world-vm" --resource-group $rgName --query "zones[0]" -o tsv 2>$null
+$worldZone = (Get-AzVM -ResourceGroupName $rgName -Name "$namePrefix-world-vm" -ErrorAction SilentlyContinue).Zones[0]
 if ($worldZone -eq '2') {
     Write-Host " PASS" -ForegroundColor Green
     $passCount++
@@ -107,7 +115,7 @@ Write-Host "[NICs]" -ForegroundColor Yellow
 
 # Test Auth NIC in AuthSubnet
 Write-Host "  Testing: Auth NIC in AuthSubnet..." -NoNewline
-$authSubnet = az network nic show --name "$namePrefix-auth-nic" --resource-group $rgName --query "ipConfigurations[0].subnet.id" -o tsv 2>$null
+$authSubnet = (Get-AzNetworkInterface -ResourceGroupName $rgName -Name "$namePrefix-auth-nic" -ErrorAction SilentlyContinue).IpConfigurations[0].Subnet.Id
 if ($authSubnet -like "*AuthSubnet*") {
     Write-Host " PASS" -ForegroundColor Green
     $passCount++
@@ -118,7 +126,7 @@ if ($authSubnet -like "*AuthSubnet*") {
 
 # Test World NIC in WorldSubnet
 Write-Host "  Testing: World NIC in WorldSubnet..." -NoNewline
-$worldSubnet = az network nic show --name "$namePrefix-world-nic" --resource-group $rgName --query "ipConfigurations[0].subnet.id" -o tsv 2>$null
+$worldSubnet = (Get-AzNetworkInterface -ResourceGroupName $rgName -Name "$namePrefix-world-nic" -ErrorAction SilentlyContinue).IpConfigurations[0].Subnet.Id
 if ($worldSubnet -like "*WorldSubnet*") {
     Write-Host " PASS" -ForegroundColor Green
     $passCount++
@@ -135,8 +143,8 @@ Write-Host "[Data Disks]" -ForegroundColor Yellow
 
 # Test World data disk exists
 Write-Host "  Testing: World data disk exists..." -NoNewline
-$disk = az disk show --name "$namePrefix-world-datadisk" --resource-group $rgName --query "name" -o tsv 2>$null
-if ($disk -eq "$namePrefix-world-datadisk") {
+$disk = Get-AzDisk -ResourceGroupName $rgName -DiskName "$namePrefix-world-datadisk" -ErrorAction SilentlyContinue
+if ($disk -and $disk.Name -eq "$namePrefix-world-datadisk") {
     Write-Host " PASS" -ForegroundColor Green
     $passCount++
 } else {
@@ -146,7 +154,7 @@ if ($disk -eq "$namePrefix-world-datadisk") {
 
 # Test Data disk attached to World VM
 Write-Host "  Testing: Data disk attached to World VM..." -NoNewline
-$attachedDisks = az vm show --name "$namePrefix-world-vm" --resource-group $rgName --query "storageProfile.dataDisks[].managedDisk.id" -o tsv 2>$null
+$attachedDisks = (Get-AzVM -ResourceGroupName $rgName -Name "$namePrefix-world-vm" -ErrorAction SilentlyContinue).StorageProfile.DataDisks.ManagedDisk.Id
 if ($attachedDisks -like "*datadisk*") {
     Write-Host " PASS" -ForegroundColor Green
     $passCount++
@@ -161,9 +169,11 @@ if ($attachedDisks -like "*datadisk*") {
 Write-Host ""
 Write-Host "[Load Balancer]" -ForegroundColor Yellow
 
+$lb = Get-AzLoadBalancer -ResourceGroupName $rgName -Name "$namePrefix-lb" -ErrorAction SilentlyContinue
+
 # Test Auth NIC in LB backend pool
 Write-Host "  Testing: Auth NIC in LB backend pool..." -NoNewline
-$authBePool = az network lb address-pool show --lb-name "$namePrefix-lb" --name "$namePrefix-lb-be-auth" --resource-group $rgName --query "backendIPConfigurations[0].id" -o tsv 2>$null
+$authBePool = ($lb.BackendAddressPools | Where-Object { $_.Name -eq "$namePrefix-lb-be-auth" }).BackendIpConfigurations[0].Id
 if ($authBePool -like "*auth-nic*") {
     Write-Host " PASS" -ForegroundColor Green
     $passCount++
@@ -174,7 +184,7 @@ if ($authBePool -like "*auth-nic*") {
 
 # Test World NIC in LB backend pool
 Write-Host "  Testing: World NIC in LB backend pool..." -NoNewline
-$worldBePool = az network lb address-pool show --lb-name "$namePrefix-lb" --name "$namePrefix-lb-be-world" --resource-group $rgName --query "backendIPConfigurations[0].id" -o tsv 2>$null
+$worldBePool = ($lb.BackendAddressPools | Where-Object { $_.Name -eq "$namePrefix-lb-be-world" }).BackendIpConfigurations[0].Id
 if ($worldBePool -like "*world-nic*") {
     Write-Host " PASS" -ForegroundColor Green
     $passCount++

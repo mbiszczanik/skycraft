@@ -24,7 +24,7 @@ graph TB
 
         subgraph "prodskycraftswcsa"
             subgraph "Containers"
-                Assets["game-assets<br/>Public: Blob<br/>Tier: Hot"]
+                Assets["game-assets<br/>Private<br/>Tier: Hot"]
                 Backups["player-backups<br/>Private<br/>Tier: Archive"]
                 Config["server-config<br/>Private<br/>Tier: Hot"]
                 Logs["game-logs<br/>Private<br/>Tier: Cool → Archive"]
@@ -793,8 +793,8 @@ az storage blob list \
 ## ✅ Lab Checklist
 
 - [ ] Four containers created (game-assets, player-backups, server-config, game-logs)
-- [ ] `game-assets` has blob-level public access
-- [ ] Other containers are private
+- [ ] `game-assets` is private (no anonymous access)
+- [ ] All containers are private
 - [ ] Soft delete enabled for blobs (7 days)
 - [ ] Soft delete enabled for containers (7 days)
 - [ ] Blob versioning enabled

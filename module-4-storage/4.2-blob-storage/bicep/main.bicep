@@ -35,11 +35,6 @@ var varProdContainers = [
   { name: 'game-logs', publicAccess: 'None' }
 ]
 
-// Development Container (Public Access Demo)
-var varDevContainers = [
-  { name: 'public-demo', publicAccess: 'Blob' }
-]
-
 // Lifecycle Rules (Production Only)
 var varLifecycleRules = [
   {
@@ -107,7 +102,7 @@ module modStorageProd '../../4.1-storage-accounts/bicep/modules/storageAccount.b
   }
 }
 
-// Development Storage: Public Access Demo
+// Development Storage: private access (allowBlobPublicAccess blocked at subscription level).
 module modStorageDev '../../4.1-storage-accounts/bicep/modules/storageAccount.bicep' = {
   name: 'deploy-storage-dev-4.2'
   scope: resDevRg
@@ -115,12 +110,23 @@ module modStorageDev '../../4.1-storage-accounts/bicep/modules/storageAccount.bi
     parLocation: parLocation
     parEnvironment: 'dev'
     parTags: union(varCommonTags, { Environment: 'Development' })
-    parAllowBlobPublicAccess: true // REQUIRED: Enable Account-level public access
+    parAllowBlobPublicAccess: false
     parEnableVersioning: false
-    parContainers: varDevContainers
+    parContainers: []
     parLifecycleRules: []
     parIsNewDeployment: false // Update existing
     parEnableInfrastructureEncryption: false
+  }
+}
+
+// Public-demo container — created as private (allowBlobPublicAccess blocked at subscription level).
+module modDevPublicContainer 'modules/blobContainer.bicep' = {
+  name: 'deploy-dev-public-container-4.2'
+  scope: resDevRg
+  params: {
+    parStorageAccountName: modStorageDev.outputs.outStorageAccountName
+    parContainerName: 'public-demo'
+    parPublicAccess: 'None'
   }
 }
 

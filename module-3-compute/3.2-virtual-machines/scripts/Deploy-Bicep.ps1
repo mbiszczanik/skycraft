@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Deploys Lab 3.2 Virtual Machines infrastructure using Bicep.
 
@@ -26,7 +26,7 @@
 
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment dev
-    
+
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment dev -EncryptionStrategy EncryptionAtHost
 
@@ -40,6 +40,11 @@
     Date: 2026-01-11
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources, Az.Network, Az.Compute
+
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '',
+    Justification = 'SSH public keys are not secrets. SecureString is required because New-AzSubscriptionDeployment passes this value to a @secure() Bicep parameter, which prevents it from appearing in deployment logs.')]
 [CmdletBinding()]
 param(
     [Parameter()]
@@ -48,7 +53,7 @@ param(
 
     [Parameter()]
     [ValidateSet('Standard_B1s', 'Standard_B2s', 'Standard_B2ms', 'Standard_D2s_v3')]
-    [string]$VmSize = 'Standard_B2s',
+    [string]$VmSize = 'Standard_D2s_v3',
 
     [Parameter()]
     [ValidateSet('None', 'EncryptionAtHost', 'AzureDiskEncryption')]
@@ -76,13 +81,12 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 # Validate prerequisites
 Write-Host "[1/5] Validating prerequisites..." -ForegroundColor Yellow
 
-# Check Azure CLI login
-$account = az account show --output json 2>$null | ConvertFrom-Json
-if (-not $account) {
-    Write-Error "Not logged into Azure CLI. Run 'az login' first."
+$context = Get-AzContext
+if (-not $context) {
+    Write-Error "Not logged into Azure. Run Connect-AzAccount first."
     exit 1
 }
-Write-Host "  ✓ Logged in as: $($account.user.name)" -ForegroundColor Green
+Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
 
 # Check SSH key exists
 if (-not (Test-Path $SshKeyPath)) {
@@ -90,7 +94,8 @@ if (-not (Test-Path $SshKeyPath)) {
     Write-Host "  Generate one with: ssh-keygen -t rsa -b 4096 -f `"$HOME\.ssh\skycraft-dev`" -N `"`""
     exit 1
 }
-$sshPublicKey = Get-Content $SshKeyPath -Raw
+$sshPublicKey = (Get-Content $SshKeyPath -Raw).Trim()
+$sshPublicKeySecure = ConvertTo-SecureString -String $sshPublicKey -AsPlainText -Force
 Write-Host "  ✓ SSH public key found" -ForegroundColor Green
 
 # Check if Lab 3.1 resources exist
@@ -99,43 +104,26 @@ $rgName = "$Environment-skycraft-swc-rg"
 $vnetName = "$Environment-skycraft-swc-vnet"
 $lbName = "$Environment-skycraft-swc-lb"
 
-$rgExists = az group show --name $rgName 2>$null
+$rgExists = Get-AzResourceGroup -Name $rgName -ErrorAction SilentlyContinue
 if (-not $rgExists) {
     Write-Error "Resource group '$rgName' not found. Deploy Lab 3.1 first."
     exit 1
 }
 Write-Host "  ✓ Resource group exists: $rgName" -ForegroundColor Green
 
-$vnetExists = az network vnet show --name $vnetName --resource-group $rgName 2>$null
+$vnetExists = Get-AzVirtualNetwork -Name $vnetName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
 if (-not $vnetExists) {
     Write-Error "VNet '$vnetName' not found. Deploy Lab 3.1 first."
     exit 1
 }
 Write-Host "  ✓ VNet exists: $vnetName" -ForegroundColor Green
 
-$lbExists = az network lb show --name $lbName --resource-group $rgName 2>$null
+$lbExists = Get-AzLoadBalancer -Name $lbName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
 if (-not $lbExists) {
     Write-Error "Load Balancer '$lbName' not found. Deploy Lab 3.1 first."
     exit 1
 }
 Write-Host "  ✓ Load Balancer exists: $lbName" -ForegroundColor Green
-
-# Check Encryption at Host feature registration if needed
-if ($EncryptionStrategy -eq 'EncryptionAtHost') {
-    Write-Host "`n[2.5/5] Checking Encryption at Host feature registration..." -ForegroundColor Yellow
-    $featureState = az feature show --name EncryptionAtHost --namespace Microsoft.Compute --query "properties.state" -o tsv 2>$null
-    if ($featureState -ne 'Registered') {
-        Write-Warning "Encryption at Host feature is not registered (state: $featureState)"
-        Write-Host "  Register with: az feature register --name EncryptionAtHost --namespace Microsoft.Compute"
-        Write-Host "  Then propagate: az provider register --namespace Microsoft.Compute"
-        $continue = Read-Host "Continue anyway? (y/N)"
-        if ($continue -ne 'y') {
-            exit 1
-        }
-    } else {
-        Write-Host "  ✓ Encryption at Host feature is registered" -ForegroundColor Green
-    }
-}
 
 # Display deployment configuration
 Write-Host "`n[3/5] Deployment Configuration:" -ForegroundColor Yellow
@@ -158,51 +146,47 @@ if (-not $WhatIf) {
 # Run deployment
 Write-Host "`n[4/5] Running deployment..." -ForegroundColor Yellow
 
-$commonParams = @(
-    '--name', $deploymentName
-    '--location', $location
-    '--template-file', $templatePath
-    '--parameters', "parEnvironment=$Environment"
-    '--parameters', "parVmSize=$VmSize"
-    '--parameters', "parEncryptionStrategy=$EncryptionStrategy"
-    '--parameters', "parSshPublicKey=$sshPublicKey"
-)
-
-if ($WhatIf) {
-    Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
-    $deployArgs = @('deployment', 'sub', 'what-if') + $commonParams
-} else {
-    $deployArgs = @('deployment', 'sub', 'create') + $commonParams + @('--output', 'json')
-}
-
-$result = az @deployArgs 2>&1
-$exitCode = $LASTEXITCODE
-
-if ($exitCode -ne 0) {
-    Write-Error "Deployment failed with exit code $exitCode"
-    Write-Host $result -ForegroundColor Red
-    exit $exitCode
-}
-
-# Display results
-Write-Host "`n[5/5] Deployment Results:" -ForegroundColor Yellow
-if ($WhatIf) {
-    Write-Host $result
-    Write-Host "`n  What-if completed. Review changes above." -ForegroundColor Cyan
-} else {
-    $deployment = $result
-    Write-Host "  ✓ Deployment succeeded!" -ForegroundColor Green
-    Write-Host "`n  Outputs:"
-    Write-Host "    Auth VM:          $($deployment.properties.outputs.outAuthVmName.value)"
-    Write-Host "    World VM:         $($deployment.properties.outputs.outWorldVmName.value)"
-    Write-Host "    Auth Private IP:  $($deployment.properties.outputs.outAuthNicPrivateIp.value)"
-    Write-Host "    World Private IP: $($deployment.properties.outputs.outWorldNicPrivateIp.value)"
-    Write-Host "    Encryption:       $($deployment.properties.outputs.outEncryptionStrategy.value)"
-    
-    if ($EncryptionStrategy -eq 'AzureDiskEncryption') {
-        Write-Host "`n  ⚠️  Azure Disk Encryption requires additional step:" -ForegroundColor Yellow
-        Write-Host "     Run: .\Enable-Encryption.ps1 -Environment $Environment"
+try {
+    $deployParams = @{
+        Name                = $deploymentName
+        Location            = $location
+        TemplateFile        = $templatePath
+        parEnvironment      = $Environment
+        parVmSize           = $VmSize
+        parEncryptionStrategy = $EncryptionStrategy
+        parSshPublicKey     = $sshPublicKeySecure
+        ErrorAction         = 'Stop'
     }
+
+    if ($WhatIf) {
+        Write-Host "  What-if mode: run 'az deployment sub what-if' for ARM preview. Skipping deployment." -ForegroundColor Cyan
+        exit 0
+    } else {
+        $deployment = New-AzSubscriptionDeployment @deployParams
+
+        if ($deployment.ProvisioningState -ne 'Succeeded') {
+            Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+            exit 1
+        }
+
+        Write-Host "`n[5/5] Deployment Results:" -ForegroundColor Yellow
+        Write-Host "  ✓ Deployment succeeded!" -ForegroundColor Green
+        Write-Host "`n  Outputs:"
+        Write-Host "    Auth VM:          $($deployment.Outputs['outAuthVmName'].Value)"
+        Write-Host "    World VM:         $($deployment.Outputs['outWorldVmName'].Value)"
+        Write-Host "    Auth Private IP:  $($deployment.Outputs['outAuthNicPrivateIp'].Value)"
+        Write-Host "    World Private IP: $($deployment.Outputs['outWorldNicPrivateIp'].Value)"
+        Write-Host "    Encryption:       $($deployment.Outputs['outEncryptionStrategy'].Value)"
+
+        if ($EncryptionStrategy -eq 'AzureDiskEncryption') {
+            Write-Host "`n  Azure Disk Encryption requires additional step:" -ForegroundColor Yellow
+            Write-Host "     Run: .\Enable-Encryption.ps1 -Environment $Environment"
+        }
+    }
+}
+catch {
+    Write-Error "Deployment failed: $($_.Exception.Message)"
+    exit 1
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan

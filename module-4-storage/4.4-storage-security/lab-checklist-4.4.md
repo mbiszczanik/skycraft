@@ -6,13 +6,13 @@
 
 - [ ] Storage Account: `prodskycraftswcsa`
 - [ ] Public access: `Enabled from selected virtual networks and IP addresses`
-- [ ] VNet Rule: `prod-skycraft-swc-vnet` / `ApplicationSubnet`
+- [ ] VNet Rule: `prod-skycraft-swc-vnet` / `WorldSubnet`
 - [ ] Firewall: Your Client IP added to authorized addresses
 
 ### Service Endpoints
 
 - [ ] VNet: `prod-skycraft-swc-vnet`
-- [ ] Subnet: `ApplicationSubnet`
+- [ ] Subnet: `WorldSubnet`
 - [ ] Service Endpoint: `Microsoft.Storage` (Status: Succeeded)
 
 ---

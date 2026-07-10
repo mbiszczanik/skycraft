@@ -56,13 +56,13 @@
   - Peering status: **Connected**
   - Allow virtual network access: **Enabled**
   - Allow forwarded traffic: **Enabled**
-  - Allow gateway transit: **Enabled**
+  - Allow gateway transit: **Disabled**
 - [ ] Peering name: `hub-to-prod`
   - Remote VNet: `prod-skycraft-swc-vnet`
   - Peering status: **Connected**
   - Allow virtual network access: **Enabled**
   - Allow forwarded traffic: **Enabled**
-  - Allow gateway transit: **Enabled**
+  - Allow gateway transit: **Disabled**
 
 ### Tags
 
@@ -112,7 +112,7 @@
   - Peering status: **Connected**
   - Allow virtual network access: **Enabled**
   - Allow forwarded traffic: **Enabled**
-  - Use remote virtual network gateway: **Enabled**
+  - Use remote virtual network gateway: **Disabled**
 
 ### Tags
 
@@ -162,7 +162,7 @@
   - Peering status: **Connected**
   - Allow virtual network access: **Enabled**
   - Allow forwarded traffic: **Enabled**
-  - Use remote virtual network gateway: **Enabled**
+  - Use remote virtual network gateway: **Disabled**
 
 ### Tags
 
@@ -223,57 +223,58 @@
 
 ## 🔍 Validation Commands
 
-Run these Azure CLI commands to validate your lab setup:
+Run these Az PowerShell commands to validate your lab setup:
 
 ### Login and Set Context
 
-```azurecli
+```powershell
 # Login to Azure
-az login
+Connect-AzAccount
 
 # List subscriptions
-az account list --output table
+Get-AzSubscription | Select-Object Name, Id, State | Format-Table -AutoSize
 
 # Set subscription context
-az account set --subscription "YOUR-SUBSCRIPTION-NAME"
+Set-AzContext -SubscriptionName "YOUR-SUBSCRIPTION-NAME"
 ```
 
 ### Verify Resource Groups
 
-```azurecli
-# List resource groups with Sweden Central location
-az group list \
-  --query "[?location=='swedencentral'].{Name:name,Location:location,Tags:tags}" \
-  --output table
+```powershell
+# List resource groups in Sweden Central
+Get-AzResourceGroup |
+    Where-Object { $_.Location -eq 'swedencentral' } |
+    Select-Object ResourceGroupName, Location |
+    Format-Table -AutoSize
 
-# Expected: 3 resource groups (platform, dev, prod)
+# Expected: 3 resource groups (platform-skycraft-swc-rg, dev-skycraft-swc-rg, prod-skycraft-swc-rg)
 ```
 
 ### Verify Virtual Networks
 
-```azurecli
-# List all VNets
-az network vnet list \
-  --query "[].{Name:name,ResourceGroup:resourceGroup,AddressSpace:addressSpace.addressPrefixes,Subnets:length(subnets)}" \
-  --output table
+```powershell
+# List all VNets with subnet counts
+Get-AzVirtualNetwork |
+    Select-Object Name, ResourceGroupName,
+        @{N='AddressSpace'; E={ $_.AddressSpace.AddressPrefixes -join ', ' }},
+        @{N='Subnets'; E={ $_.Subnets.Count }} |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                       ResourceGroup            AddressSpace    Subnets
-# ------------------------   ----------------------   -------------   -------
-# platform-skycraft-swc-vnet platform-skycraft-swc-rg 10.0.0.0/16     2
-# dev-skycraft-swc-vnet      dev-skycraft-swc-rg      10.1.0.0/16     3
-# prod-skycraft-swc-vnet     prod-skycraft-swc-rg     10.2.0.0/16     3
+# Name                       ResourceGroupName         AddressSpace   Subnets
+# -------------------------  ------------------------  -------------  -------
+# platform-skycraft-swc-vnet platform-skycraft-swc-rg  10.0.0.0/16    2
+# dev-skycraft-swc-vnet      dev-skycraft-swc-rg        10.1.0.0/16    4
+# prod-skycraft-swc-vnet     prod-skycraft-swc-rg       10.2.0.0/16    4
 ```
 
 ### Verify Hub VNet Subnets
 
-```azurecli
+```powershell
 # List hub VNet subnets
-az network vnet subnet list \
-  --resource-group platform-skycraft-swc-rg \
-  --vnet-name platform-skycraft-swc-vnet \
-  --query "[].{Name:name,AddressPrefix:addressPrefix}" \
-  --output table
+(Get-AzVirtualNetwork -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platform-skycraft-swc-vnet').Subnets |
+    Select-Object Name, @{N='AddressPrefix'; E={ $_.AddressPrefix }} |
+    Format-Table -AutoSize
 
 # Expected output:
 # Name                AddressPrefix
@@ -284,101 +285,91 @@ az network vnet subnet list \
 
 ### Verify Dev VNet Subnets
 
-```azurecli
+```powershell
 # List dev VNet subnets
-az network vnet subnet list \
-  --resource-group dev-skycraft-swc-rg \
-  --vnet-name dev-skycraft-swc-vnet \
-  --query "[].{Name:name,AddressPrefix:addressPrefix}" \
-  --output table
+(Get-AzVirtualNetwork -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-vnet').Subnets |
+    Select-Object Name, @{N='AddressPrefix'; E={ $_.AddressPrefix }} |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name             AddressPrefix
-# ---------------  -------------
-# AuthSubnet       10.1.1.0/24
-# WorldSubnet      10.1.2.0/24
-# DatabaseSubnet   10.1.3.0/24
+# Name              AddressPrefix
+# ----------------  -------------
+# AuthSubnet        10.1.1.0/24
+# WorldSubnet       10.1.2.0/24
+# DatabaseSubnet    10.1.3.0/24
+# AppServiceSubnet  10.1.4.0/24
 ```
 
 ### Verify Prod VNet Subnets
 
-```azurecli
+```powershell
 # List prod VNet subnets
-az network vnet subnet list \
-  --resource-group prod-skycraft-swc-rg \
-  --vnet-name prod-skycraft-swc-vnet \
-  --query "[].{Name:name,AddressPrefix:addressPrefix}" \
-  --output table
+(Get-AzVirtualNetwork -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prod-skycraft-swc-vnet').Subnets |
+    Select-Object Name, @{N='AddressPrefix'; E={ $_.AddressPrefix }} |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name             AddressPrefix
-# ---------------  -------------
-# AuthSubnet       10.2.1.0/24
-# WorldSubnet      10.2.2.0/24
-# DatabaseSubnet   10.2.3.0/24
+# Name              AddressPrefix
+# ----------------  -------------
+# AuthSubnet        10.2.1.0/24
+# WorldSubnet       10.2.2.0/24
+# DatabaseSubnet    10.2.3.0/24
+# AppServiceSubnet  10.2.4.0/24
 ```
 
 ### Verify VNet Peering
 
-```azurecli
+```powershell
 # List all peering connections for hub VNet
-az network vnet peering list \
-  --resource-group platform-skycraft-swc-rg \
-  --vnet-name platform-skycraft-swc-vnet \
-  --query "[].{Name:name,RemoteVNet:remoteVirtualNetwork.id,Status:peeringState}" \
-  --output table
+Get-AzVirtualNetworkPeering -ResourceGroupName 'platform-skycraft-swc-rg' -VirtualNetworkName 'platform-skycraft-swc-vnet' |
+    Select-Object Name, PeeringState, AllowVirtualNetworkAccess, AllowForwardedTraffic |
+    Format-Table -AutoSize
 
-# Expected: 2 peerings (hub-to-dev, hub-to-prod) with status "Connected"
+# Expected: 2 peerings (hub-to-dev, hub-to-prod) with PeeringState "Connected"
 
 # List peering for dev VNet
-az network vnet peering list \
-  --resource-group dev-skycraft-swc-rg \
-  --vnet-name dev-skycraft-swc-vnet \
-  --query "[].{Name:name,Status:peeringState}" \
-  --output table
+Get-AzVirtualNetworkPeering -ResourceGroupName 'dev-skycraft-swc-rg' -VirtualNetworkName 'dev-skycraft-swc-vnet' |
+    Select-Object Name, PeeringState |
+    Format-Table -AutoSize
 
-# Expected: 1 peering (dev-to-hub) with status "Connected"
+# Expected: 1 peering (dev-to-hub) with PeeringState "Connected"
 
 # List peering for prod VNet
-az network vnet peering list \
-  --resource-group prod-skycraft-swc-rg \
-  --vnet-name prod-skycraft-swc-vnet \
-  --query "[].{Name:name,Status:peeringState}" \
-  --output table
+Get-AzVirtualNetworkPeering -ResourceGroupName 'prod-skycraft-swc-rg' -VirtualNetworkName 'prod-skycraft-swc-vnet' |
+    Select-Object Name, PeeringState |
+    Format-Table -AutoSize
 
-# Expected: 1 peering (prod-to-hub) with status "Connected"
+# Expected: 1 peering (prod-to-hub) with PeeringState "Connected"
 ```
 
 ### Verify Public IP Addresses
 
-```azurecli
+```powershell
 # List all public IPs
-az network public-ip list \
-  --query "[].{Name:name,ResourceGroup:resourceGroup,SKU:sku.name,IP:ipAddress,Allocation:publicIpAllocationMethod}" \
-  --output table
+Get-AzPublicIpAddress |
+    Select-Object Name, ResourceGroupName, Sku, IpAddress,
+        @{N='Allocation'; E={ $_.PublicIpAllocationMethod }} |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                           ResourceGroup            SKU       IP              Allocation
-# -----------------------------  ----------------------   --------  --------------  ----------
-# dev-skycraft-swc-lb-pip        dev-skycraft-swc-rg      Standard  [Public IP]     Static
-# prod-skycraft-swc-lb-pip       prod-skycraft-swc-rg     Standard  [Public IP]     Static
+# Name                      ResourceGroupName        Sku      IpAddress    Allocation
+# ------------------------  -----------------------  -------  -----------  ----------
+# dev-skycraft-swc-lb-pip   dev-skycraft-swc-rg       Standard [Public IP]  Static
+# prod-skycraft-swc-lb-pip  prod-skycraft-swc-rg      Standard [Public IP]  Static
 ```
 
 ### Verify Tags
 
-```azurecli
+```powershell
 # Check tags on hub VNet
-az network vnet show \
-  --resource-group platform-skycraft-swc-rg \
-  --name platform-skycraft-swc-vnet \
-  --query tags
+(Get-AzVirtualNetwork -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platform-skycraft-swc-vnet').Tag
 
 # Expected output:
-# {
-#   "CostCenter": "MSDN",
-#   "Environment": "Platform",
-#   "Project": "SkyCraft"
-# }
+# Key         Value
+# ---         -----
+# CostCenter  MSDN
+# Environment Platform
+# Project     SkyCraft
 ```
 
 ---
