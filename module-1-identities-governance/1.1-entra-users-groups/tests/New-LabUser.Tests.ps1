@@ -19,6 +19,11 @@
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
+# PSAvoidUsingInvokeExpression: intentional — injects the generator function
+# extracted via AST so it can be tested in isolation without sourcing the full script.
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingInvokeExpression', '')]
+param()
+
 BeforeAll {
     $script:ScriptPath = Join-Path $PSScriptRoot '..\scripts\New-LabUser.ps1' | Resolve-Path
     $script:ScriptText = Get-Content -Raw -LiteralPath $script:ScriptPath
@@ -74,17 +79,17 @@ Describe 'New-LabUser.ps1 — random password generator' {
     }
 
     It 'produces a 20-character password' {
-        $pwd = New-LabRandomPassword
-        $pwd.Length | Should -Be 20
+        $password = New-LabRandomPassword
+        $password.Length | Should -Be 20
     }
 
     It 'produces passwords with all four character classes' {
         1..20 | ForEach-Object {
-            $pwd = New-LabRandomPassword
-            $pwd | Should -Match '[A-Z]'
-            $pwd | Should -Match '[a-z]'
-            $pwd | Should -Match '[0-9]'
-            $pwd | Should -Match '[!@#\$%\^&\*\(\)\-_=\+\[\]\{\}]'
+            $password = New-LabRandomPassword
+            $password | Should -Match '[A-Z]'
+            $password | Should -Match '[a-z]'
+            $password | Should -Match '[0-9]'
+            $password | Should -Match '[!@#\$%\^&\*\(\)\-_=\+\[\]\{\}]'
         }
     }
 

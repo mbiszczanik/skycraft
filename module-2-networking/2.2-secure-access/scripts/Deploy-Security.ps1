@@ -45,6 +45,8 @@
 #Requires -Modules Az.Accounts, Az.Network
 
 [CmdletBinding()]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Deploy script; interactive Bastion prompt and idempotent Get-before-New guards cover ShouldProcess intent.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'ProdVnetName', Justification = 'Used as -VnetName in Set-SubnetSecurity calls; PSSA nested-scope false positive.')]
 param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('swedencentral', 'northeurope')]
@@ -134,6 +136,7 @@ foreach ($config in $asgConfigs) {
 Write-Host "`n=== Task 2: Creating Network Security Groups ===" -ForegroundColor Cyan
 
 function New-SkyCraftNSG {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper; parent script guards idempotency via Get-before-New.')]
     param($Name, $RG, $Env)
     Write-Host "Creating NSG: $Name..." -ForegroundColor Yellow
     try {

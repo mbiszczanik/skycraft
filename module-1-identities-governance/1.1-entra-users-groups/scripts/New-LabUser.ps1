@@ -42,6 +42,7 @@
 #Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups
 
 [CmdletBinding()]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Lab script; -DemoMode dry-run switch fulfils the ShouldProcess intent.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'TenantId', Justification = 'Documented public parameter retained for the lab interface; reserved for explicit tenant targeting.')]
 param (
     [Parameter(Mandatory = $false, HelpMessage = "The Microsoft Entra Tenant ID.")]
