@@ -26,14 +26,21 @@
     Date: 2026-01-11
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$TemplateFile = '..\bicep\main.bicep'
 )
+
+$ErrorActionPreference = 'Stop'
 
 $deploymentName = "Lab-2.3-DNS-$(Get-Date -Format 'yyyyMMdd-HHmm')"
 
@@ -48,12 +55,17 @@ if (-not (Test-Path $TemplateFile)) {
 Write-Host "Starting deployment: $deploymentName..." -ForegroundColor Yellow
 
 try {
-    New-AzDeployment `
+    $deployment = New-AzDeployment `
         -Name $deploymentName `
         -Location $Location `
         -TemplateFile $TemplateFile `
         -Verbose
-    
+
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        exit 1
+    }
+
     Write-Host "`n[OK] Deployment completed successfully!" -ForegroundColor Green
 }
 catch {

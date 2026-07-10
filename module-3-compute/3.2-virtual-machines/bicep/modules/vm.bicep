@@ -26,9 +26,8 @@ param parLocation string = resourceGroup().location
 ])
 param parVmSize string = 'Standard_B2s'
 
-@description('Availability zone (1, 2, or 3)')
-@allowed(['1', '2', '3'])
-param parAvailabilityZone string = '1'
+@description('Availability zone (1, 2, or 3). Leave empty for no zone affinity.')
+param parAvailabilityZone string = ''
 
 @description('Admin username for SSH access')
 param parAdminUsername string = 'azureuser'
@@ -97,9 +96,7 @@ resource resVm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   name: parVmName
   location: parLocation
   tags: parTags
-  zones: [
-    parAvailabilityZone
-  ]
+  zones: empty(parAvailabilityZone) ? [] : [parAvailabilityZone]
   identity: parEnableSystemIdentity ? {
     type: 'SystemAssigned'
   } : null

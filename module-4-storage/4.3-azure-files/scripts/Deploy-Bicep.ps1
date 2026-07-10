@@ -16,14 +16,21 @@
     Date: 2026-02-07
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
+    [ValidateSet('prod', 'dev', 'platform')]
     [string]$Environment = 'prod'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 4.3: Deploying Azure Files Infrastructure ===" -ForegroundColor Cyan
 
@@ -40,14 +47,21 @@ try {
     $deployment = New-AzSubscriptionDeployment `
         -Name "lab-4.3-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')" `
         -Location $Location `
-        -TemplateFile "..\bicep\main.bicep" `
+        -TemplateFile (Join-Path $PSScriptRoot "..\bicep\main.bicep") `
         -parLocation $Location `
         -parEnvironment $Environment `
         -ErrorAction Stop
 
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host "`n [FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        exit 1
+    }
+
     Write-Host "`nSuccessfully deployed Lab 4.3 resources!" -ForegroundColor Green
-    Write-Host "  -> Storage Account: $($deployment.Outputs.outStorageAccountName.Value)" -ForegroundColor Green
-    Write-Host "  -> Resource ID:     $($deployment.Outputs.outStorageAccountId.Value)" -ForegroundColor Green
+    if ($deployment.Outputs) {
+        Write-Host "  -> Storage Account: $($deployment.Outputs.outStorageAccountName.Value)" -ForegroundColor Green
+        Write-Host "  -> Resource ID:     $($deployment.Outputs.outStorageAccountId.Value)" -ForegroundColor Green
+    }
 }
 catch {
     Write-Host "`n [ERROR] Deployment failed!" -ForegroundColor Red

@@ -27,7 +27,7 @@ graph TB
         end
 
         subgraph VNet ["prod-skycraft-swc-vnet"]
-            Subnet["ApplicationSubnet<br/>(Service Endpoint: Microsoft.Storage)"]
+            Subnet["WorldSubnet<br/>(Service Endpoint: Microsoft.Storage)"]
             VM["Game Server VM"]
         end
     end
@@ -105,7 +105,7 @@ By default, Storage Accounts are accessible from the public internet. Secure org
 #### Option 1: Azure Portal
 
 1. Navigate to **Virtual Networks** > `prod-skycraft-swc-vnet` > **Subnets**.
-2. Select **ApplicationSubnet**.
+2. Select **WorldSubnet**.
 3. In **Service endpoints**, select `Microsoft.Storage`.
 4. Click **Save**.
 
@@ -115,7 +115,7 @@ By default, Storage Accounts are accessible from the public internet. Secure org
 az network vnet subnet update \
   --resource-group prod-skycraft-swc-rg \
   --vnet-name prod-skycraft-swc-vnet \
-  --name ApplicationSubnet \
+  --name WorldSubnet \
   --service-endpoints Microsoft.Storage
 ```
 
@@ -126,7 +126,7 @@ az network vnet subnet update \
 1. Navigate to Storage Account: `prodskycraftswcsa`.
 2. Go to **Networking**.
 3. Change **Public network access** to `Enabled from selected virtual networks and IP addresses`.
-4. Click **+ Add existing virtual network**: `prod-skycraft-swc-vnet` / `ApplicationSubnet`.
+4. Click **+ Add existing virtual network**: `prod-skycraft-swc-vnet` / `WorldSubnet`.
 5. Check **Add your client IP address**.
 6. Click **Save**.
 
@@ -175,7 +175,7 @@ A standard SAS token is like a signed check—once issued, it cannot be stopped 
 
 ## ✅ Lab Checklist
 
-- [ ] `ApplicationSubnet` has `Microsoft.Storage` service endpoint enabled
+- [ ] `WorldSubnet` has `Microsoft.Storage` service endpoint enabled
 - [ ] `prodskycraftswcsa` firewall restricted to VNet and Client IP
 - [ ] Access Key 1 successfully rotated (verify version change)
 - [ ] `DevRevokePolicy` tested and verified for revocation

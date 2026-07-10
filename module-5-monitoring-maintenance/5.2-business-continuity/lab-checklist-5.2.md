@@ -44,7 +44,7 @@
 
 ### VM Backup
 
-- [x] VM `prod-skycraft-swc-auth-vm` listed under **Backup items** → Azure Virtual Machine
+- [x] VM `dev-skycraft-swc-auth-vm` listed under **Backup items** → Azure Virtual Machine
 - [x] Policy assigned: `SkyCraft-Daily-Prod`
 - [x] Initial backup triggered (status: **Completed** or **In progress**)
 - [x] Last backup status: **Success** (once completed)
@@ -73,7 +73,7 @@
 
 ### Replication Status
 
-- [ ] VM `prod-skycraft-swc-auth-vm` replication status: **Protected**
+- [ ] VM `dev-skycraft-swc-auth-vm` replication status: **Protected**
 - [ ] Target region: **Norway East**
 - [ ] Cache storage account created in source region
 - [ ] Target resource group created in Norway East
@@ -170,7 +170,7 @@ az backup item list \
 # Expected output:
 # Name                           Status     LastBackup
 # -----------------------------  ---------  -------------------
-# prod-skycraft-swc-auth-vm      Healthy    2026-02-27T02:00:00
+# dev-skycraft-swc-auth-vm      Healthy    2026-02-27T02:00:00
 ```
 
 ### Verify Protected Items (PowerShell)
@@ -185,7 +185,7 @@ Get-AzRecoveryServicesBackupItem -VaultId $vault.ID -Container $container -Workl
 # Expected output:
 # Name                           ProtectionStatus  LastBackupTime
 # ----                           ----------------  --------------
-# prod-skycraft-swc-auth-vm      Healthy           2026-02-27 02:00:00
+# dev-skycraft-swc-auth-vm      Healthy           2026-02-27 02:00:00
 ```
 
 ### Verify Backup Vault (Azure CLI)
@@ -286,10 +286,10 @@ az backup replication-protected-item list \
 # Expected output (after replication is enabled):
 # Name                                  ProtectionState
 # ------------------------------------  ---------------
-# prod-skycraft-swc-auth-vm             Protected
+# dev-skycraft-swc-auth-vm             Protected
 ```
 
-> **Note**: ASR replication is configured via the Azure Portal (Step 5.2.8) and may not yet be enabled in all environments. Verify status in **Azure Portal → Recovery Services Vault → Replicated items**.
+> **Note**: ASR replication is configured via the Azure Portal (Step 5.2.6) and may not yet be enabled in all environments. Verify status in **Azure Portal → Recovery Services Vault → Replicated items**.
 
 ---
 
@@ -299,7 +299,7 @@ az backup replication-protected-item list \
 | :-------------------------- | :-------------------------- | :------------ | :----- |
 | **Recovery Services Vault** | `platform-skycraft-swc-rsv` | LRS           | [x]    |
 | **VM Backup Policy**        | `SkyCraft-Daily-Prod`       | Daily, 30-day | [x]    |
-| **Protected VM**            | `prod-skycraft-swc-auth-vm` | VM Backup     | [x]    |
+| **Protected VM**            | `dev-skycraft-swc-auth-vm` | VM Backup     | [x]    |
 | **Backup Vault**            | `platform-skycraft-swc-bv`  | LRS           | [x]    |
 | **Blob Policy**             | `SkyCraft-Blob-Policy`      | 30-day        | [x]    |
 | **Site Recovery**           | ASR → Norway East           | Continuous    | [ ]    |

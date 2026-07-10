@@ -17,6 +17,9 @@
     Lab: 1.3 - Governance
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources, Az.Billing
+
 [CmdletBinding()]
 param()
 

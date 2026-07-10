@@ -22,40 +22,46 @@
     Date: 2026-01-11
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources, Az.Network
+
 [CmdletBinding()]
 param(
     [ValidateSet('dev', 'prod')]
     [string]$Environment = 'dev'
 )
 
+$ErrorActionPreference = 'Stop'
+$failCount = 0
+
 Write-Host "=== Lab 3.1 Validation Script ($Environment) ===" -ForegroundColor Cyan
 
-# Configuration Mappings based on main.bicep
 $locationShortCode = 'swc'
-$project = 'skycraft'
+$project           = 'skycraft'
 
-$rgName = "$Environment-$project-$locationShortCode-rg"
+$rgName   = "$Environment-$project-$locationShortCode-rg"
 $vnetName = "$Environment-$project-$locationShortCode-vnet"
-$lbName = "$Environment-$project-$locationShortCode-lb"
-$pipName = "$Environment-$project-$locationShortCode-lb-pip"
+$lbName   = "$Environment-$project-$locationShortCode-lb"
+$pipName  = "$Environment-$project-$locationShortCode-lb-pip"
 
 # 1. Verify Resource Group
 try {
-    # Use $rg to suppress output but check existence
     $rg = Get-AzResourceGroup -Name $rgName -ErrorAction Stop
     Write-Host "[OK] Resource Group '$($rg.ResourceGroupName)' found." -ForegroundColor Green
 }
 catch {
     Write-Host "[FAIL] Resource Group '$rgName' NOT found." -ForegroundColor Red
-    return # Cannot proceed if RG is missing
+    $failCount++
+    # Cannot proceed with VNet/NSG/LB checks if the RG is missing
+    Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor Red
+    exit $failCount
 }
 
 # 2. Verify VNet
 try {
     $vnet = Get-AzVirtualNetwork -Name $vnetName -ResourceGroupName $rgName -ErrorAction Stop
     Write-Host "[OK] VNet '$vnetName' found." -ForegroundColor Green
-    
-    # Check Subnets (Dev expects Auth, World, Database)
+
     $expectedSubnets = @('AuthSubnet', 'WorldSubnet', 'DatabaseSubnet')
     foreach ($sub in $expectedSubnets) {
         if ($vnet.Subnets.Name -contains $sub) {
@@ -63,11 +69,13 @@ try {
         }
         else {
             Write-Host "  - [FAIL] Subnet '$sub' MISSING." -ForegroundColor Red
+            $failCount++
         }
     }
 }
 catch {
     Write-Host "[FAIL] VNet '$vnetName' NOT found." -ForegroundColor Red
+    $failCount++
 }
 
 # 3. Verify NSGs
@@ -76,7 +84,7 @@ foreach ($nsgName in $expectedNsgs) {
     try {
         $nsg = Get-AzNetworkSecurityGroup -Name $nsgName -ResourceGroupName $rgName -ErrorAction Stop
         Write-Host "[OK] NSG '$nsgName' found." -ForegroundColor Green
-        
+
         if ($nsg.SecurityRules.Count -gt 0) {
             Write-Host "  - [OK] Rules present ($($nsg.SecurityRules.Count))." -ForegroundColor Green
         }
@@ -86,6 +94,7 @@ foreach ($nsgName in $expectedNsgs) {
     }
     catch {
         Write-Host "[FAIL] NSG '$nsgName' NOT found." -ForegroundColor Red
+        $failCount++
     }
 }
 
@@ -93,29 +102,33 @@ foreach ($nsgName in $expectedNsgs) {
 try {
     $lb = Get-AzLoadBalancer -Name $lbName -ResourceGroupName $rgName -ErrorAction Stop
     Write-Host "[OK] Load Balancer '$lbName' found." -ForegroundColor Green
-    
+
     if ($lb.FrontendIpConfigurations.Count -gt 0) {
         Write-Host "  - [OK] Frontend IP Configured." -ForegroundColor Green
     }
     else {
         Write-Host "  - [FAIL] No Frontend IP Config." -ForegroundColor Red
+        $failCount++
     }
 }
 catch {
     Write-Host "[FAIL] Load Balancer '$lbName' NOT found." -ForegroundColor Red
+    $failCount++
 }
 
 # 5. Verify Public IP
 try {
     $pip = Get-AzPublicIpAddress -Name $pipName -ResourceGroupName $rgName -ErrorAction Stop
     Write-Host "[OK] Public IP '$pipName' found." -ForegroundColor Green
-    
+
     if ($pip.IpAddress) {
         Write-Host "  - [OK] IP Address: $($pip.IpAddress)" -ForegroundColor Green
     }
 }
 catch {
     Write-Host "[FAIL] Public IP '$pipName' NOT found." -ForegroundColor Red
+    $failCount++
 }
 
-Write-Host "`nValidation Complete." -ForegroundColor Cyan
+Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor $(if ($failCount -eq 0) { 'Cyan' } else { 'Red' })
+exit $failCount

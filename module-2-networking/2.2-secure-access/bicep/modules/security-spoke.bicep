@@ -227,6 +227,17 @@ resource resSubnetWorld 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' =
     networkSecurityGroup: {
       id: resNsgWorld.id
     }
+    // Storage service endpoint so Lab 4.4 can add WorldSubnet to the storage
+    // account's network ACL. This module re-deploys the subnet (standalone) and
+    // is the final authority, so the endpoint must live here, not in Lab 2.1.
+    serviceEndpoints: [
+      {
+        service: 'Microsoft.Storage'
+        locations: [
+          parLocation
+        ]
+      }
+    ]
   }
 }
 

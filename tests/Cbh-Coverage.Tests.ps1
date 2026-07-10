@@ -18,7 +18,7 @@
 
 $RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $PsScripts  = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.ps1' |
-              Where-Object { $_.FullName -match '\\module-\d.*\\scripts\\' }
+              Where-Object { $_.FullName -match '[/\\]module-\d.*[/\\]scripts[/\\]' }
 
 $ScriptCases = $PsScripts | ForEach-Object {
     @{ file = $_.FullName.Substring($RepoRoot.Length + 1); path = $_.FullName }

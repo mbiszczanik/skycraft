@@ -62,8 +62,8 @@ lab; this section is the architect's view in one place.
 ### 2. Region lock — Sweden Central
 
 - **Lab:** All deployments default to `swedencentral`. Allowed values in
-  parameter validators are typically `swedencentral`, `westeurope`,
-  `northeurope`.
+  parameter validators are `swedencentral`, `northeurope` — `westeurope` is
+  excluded because the Lab 1.3 Restrict-Azure-Regions policy denies it.
 - **Production gap:** No multi-region deployment, no paired-region failover,
   no Traffic Manager / Front Door geographic routing. Storage GRS gives passive
   geo-redundancy of bytes only, not of compute.

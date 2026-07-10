@@ -18,8 +18,12 @@
     Version: 1.0.0
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+
 [CmdletBinding()]
 param(
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral'
 )
 
@@ -49,6 +53,11 @@ try {
         -Location $Location `
         -TemplateFile $TemplateFile `
         -WarningAction SilentlyContinue
+
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host "[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        exit 1
+    }
 
     Write-Host "Deployment Successful!" -ForegroundColor Green
     

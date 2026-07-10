@@ -7,7 +7,7 @@
     
     CRITICAL WORKFLOW:
     1. Bootstraps Azure Container Registry (ACR) first (if not exists).
-    2. Builds the required container image (skycraft-auth:v1) using ACR Tasks.
+    2. Imports the required container image (skycraft-auth:v1) from MCR (Microsoft Container Registry).
     3. Executes the main.bicep orchestrator to deploy ACI and ACA.
     
     This multi-step process is required because ACI/ACA depend on the image existing
@@ -33,17 +33,25 @@
     Date: 2026-01-31
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources, Az.ContainerRegistry
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$ResourceGroupName = 'dev-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
+    [ValidateSet('dev', 'prod', 'platform')]
     [string]$Environment = 'dev'
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "=== Lab 3.3 - Deploy Bicep Configuration ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -70,7 +78,8 @@ if (-not (Test-Path $mainBicep)) {
 try {
     if (-not (Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue)) {
         Write-Host "Creating Resource Group: $ResourceGroupName..." -ForegroundColor Yellow
-        New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Tag @{ Project = 'SkyCraft' } -ErrorAction Stop | Out-Null
+        New-AzResourceGroup -Name $ResourceGroupName -Location $Location `
+            -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN' } -ErrorAction Stop | Out-Null
     }
 } catch {
     Write-Host "[ERROR] Failed to create Resource Group: $_" -ForegroundColor Red
@@ -95,7 +104,9 @@ if ($acrExists) {
     }
 }
 
+$acrWasBootstrapped = $false
 if (-not $repoExists) {
+    $acrWasBootstrapped = $true
     if (-not $acrExists) {
         Write-Host "Deploying ACR (Bootstrap)..." -ForegroundColor Yellow
         try {
@@ -113,16 +124,23 @@ if (-not $repoExists) {
 
     Write-Host "Building Container Image (This may take 1-2 mins)..." -ForegroundColor Yellow
     try {
-        az acr build --registry $acrName --image "skycraft-auth:v1" "https://github.com/Azure-Samples/aci-helloworld.git" --output none
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "  -> Image Build Success" -ForegroundColor Green
-        } else {
-            throw "Build command failed"
-        }
+        # Import prebuilt aci-helloworld from MCR instead of `az acr build` — Az PowerShell has no build-from-source cmdlet; functionally equivalent runnable web image.
+        Import-AzContainerRegistryImage -ResourceGroupName $ResourceGroupName -RegistryName $acrName `
+            -SourceRegistryUri 'mcr.microsoft.com' -SourceImage 'azuredocs/aci-helloworld:latest' `
+            -TargetTag 'skycraft-auth:v1' -ErrorAction Stop | Out-Null
+        Write-Host "  -> Image Build Success" -ForegroundColor Green
     } catch {
         Write-Host "[ERROR] Failed to build image: $_" -ForegroundColor Red
         exit 1
     }
+}
+
+# Azure Container Apps resolves ACR via Azure internal DNS. When the ACR is freshly
+# created the DNS entry may not have propagated to 100.100.x.x resolvers yet, causing
+# ACA to fail with 'no such host'. Wait 90s to let propagation complete.
+if ($acrWasBootstrapped) {
+    Write-Host "`n  Waiting 90 seconds for ACR DNS propagation before ACA deployment..." -ForegroundColor Gray
+    Start-Sleep -Seconds 90
 }
 
 # ==============================================================================

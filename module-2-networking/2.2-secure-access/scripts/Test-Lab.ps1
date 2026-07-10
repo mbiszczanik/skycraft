@@ -3,7 +3,7 @@
     Validates the configuration of Lab 2.2 security resources.
 
 .DESCRIPTION
-    This script runs a comprehensive validation suite against the deployed resources to ensure 
+    This script runs a comprehensive validation suite against the deployed resources to ensure
     they meet the Lab 2.2 requirements, including separate NSGs per subnet and Development environment resources.
 
     It validates:
@@ -12,7 +12,7 @@
     - NSG Rules: Verifies key rules (SSH, Game Ports, DB Ports) on each NSG.
     - Subnet Associations: Ensures specific NSGs are associated with specific subnets.
     - Service Endpoints: Checks for Microsoft.Sql and Microsoft.Storage on Database subnets.
-    - Azure Bastion: Checks for existence.
+    - Azure Bastion: Checks for existence (optional).
 
 .EXAMPLE
     .\Test-Lab.ps1
@@ -25,13 +25,22 @@
     Date: 2026-01-08
 #>
 
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Network
+
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+$script:failCount = 0
+
 Write-Host "=== Lab 2.2 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 
 # Check Azure Connection
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    return
+    exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
@@ -56,7 +65,10 @@ $expectedAsgs = @(
 foreach ($item in $expectedAsgs) {
     $asg = Get-AzApplicationSecurityGroup -ResourceGroupName $item.RG -Name $item.Name -ErrorAction SilentlyContinue
     if ($asg) { Write-Host "[OK] ASG found: $($item.Name)" -ForegroundColor Green }
-    else { Write-Host "[FAIL] ASG missing: $($item.Name)" -ForegroundColor Red }
+    else {
+        Write-Host "[FAIL] ASG missing: $($item.Name)" -ForegroundColor Red
+        $script:failCount++
+    }
 }
 
 # 2. Validate Network Security Groups (NSGs)
@@ -75,29 +87,30 @@ foreach ($nsgInfo in $nsgs) {
     $nsg = Get-AzNetworkSecurityGroup -ResourceGroupName $nsgInfo.RG -Name $nsgInfo.Name -ErrorAction SilentlyContinue
     if ($nsg) {
         Write-Host "[OK] NSG found: $($nsgInfo.Name)" -ForegroundColor Green
-        
-        # Validate critical rule if specified
+
         if ($nsgInfo.Rule) {
             $rule = $nsg.SecurityRules | Where-Object { $_.Name -match $nsgInfo.Rule }
             if ($rule) {
                 if ($rule.DestinationPortRange -eq $nsgInfo.Port -and $rule.Access -eq "Allow") {
-                     Write-Host "  -> [OK] Rule '$($nsgInfo.Rule)' verified (Port: $($nsgInfo.Port))" -ForegroundColor Gray
+                    Write-Host "  -> [OK] Rule '$($nsgInfo.Rule)' verified (Port: $($nsgInfo.Port))" -ForegroundColor Gray
                 } else {
-                     Write-Host "  -> [FAIL] Rule '$($nsgInfo.Rule)' matches incorrect settings" -ForegroundColor Red
+                    Write-Host "  -> [FAIL] Rule '$($nsgInfo.Rule)' matches incorrect settings" -ForegroundColor Red
+                    $script:failCount++
                 }
             } else {
-                # Try finding by port if name differs (e.g. Bicep vs PS naming)
                 $ruleByPort = $nsg.SecurityRules | Where-Object { $_.DestinationPortRange -eq $nsgInfo.Port }
                 if ($ruleByPort) {
                     Write-Host "  -> [OK] Rule for Port $($nsgInfo.Port) found (Name: $($ruleByPort.Name))" -ForegroundColor Gray
                 } else {
                     Write-Host "  -> [FAIL] Rule '$($nsgInfo.Rule)' missing" -ForegroundColor Red
+                    $script:failCount++
                 }
             }
         }
     }
     else {
         Write-Host "[FAIL] NSG missing: $($nsgInfo.Name)" -ForegroundColor Red
+        $script:failCount++
     }
 }
 
@@ -110,46 +123,53 @@ function Test-Subnet {
     if ($vnet) {
         $sn = $vnet.Subnets | Where-Object { $_.Name -eq $SubnetName }
         if ($sn) {
-            # Check NSG
             if ($sn.NetworkSecurityGroup.Id -match $ExpectedNsgName) {
                 Write-Host "[OK] $SubnetName associated with $ExpectedNsgName" -ForegroundColor Green
             } else {
                 Write-Host "[FAIL] $SubnetName NOT associated with $ExpectedNsgName (Current: $($sn.NetworkSecurityGroup.Id))" -ForegroundColor Red
+                $script:failCount++
             }
 
-            # Check Service Endpoints
             if ($CheckSE) {
-                $sqlSE = $sn.ServiceEndpoints | Where-Object { $_.Service -eq "Microsoft.Sql" }
+                $sqlSE   = $sn.ServiceEndpoints | Where-Object { $_.Service -eq "Microsoft.Sql" }
                 $storeSE = $sn.ServiceEndpoints | Where-Object { $_.Service -eq "Microsoft.Storage" }
-                
+
                 if ($sqlSE -and $storeSE) {
                     Write-Host "  -> [OK] Service Endpoints (SQL, Storage) enabled" -ForegroundColor Gray
                 } else {
                     Write-Host "  -> [FAIL] Missing Service Endpoints on $SubnetName" -ForegroundColor Red
+                    $script:failCount++
                 }
             }
-        } else { Write-Host "[FAIL] Subnet $SubnetName not found in $VnetName" -ForegroundColor Red }
-    } else { Write-Host "[FAIL] VNet $VnetName not found" -ForegroundColor Red }
+        } else {
+            Write-Host "[FAIL] Subnet $SubnetName not found in $VnetName" -ForegroundColor Red
+            $script:failCount++
+        }
+    } else {
+        Write-Host "[FAIL] VNet $VnetName not found" -ForegroundColor Red
+        $script:failCount++
+    }
 }
 
 # Dev
-Test-Subnet -VnetName $devVnetName -RgName $devRg -SubnetName "AuthSubnet" -ExpectedNsgName "dev-skycraft-swc-auth-nsg"
-Test-Subnet -VnetName $devVnetName -RgName $devRg -SubnetName "WorldSubnet" -ExpectedNsgName "dev-skycraft-swc-world-nsg"
+Test-Subnet -VnetName $devVnetName -RgName $devRg -SubnetName "AuthSubnet"     -ExpectedNsgName "dev-skycraft-swc-auth-nsg"
+Test-Subnet -VnetName $devVnetName -RgName $devRg -SubnetName "WorldSubnet"    -ExpectedNsgName "dev-skycraft-swc-world-nsg"
 Test-Subnet -VnetName $devVnetName -RgName $devRg -SubnetName "DatabaseSubnet" -ExpectedNsgName "dev-skycraft-swc-db-nsg" -CheckSE $true
 
 # Prod
-Test-Subnet -VnetName $prodVnetName -RgName $prodRg -SubnetName "AuthSubnet" -ExpectedNsgName "prod-skycraft-swc-auth-nsg"
-Test-Subnet -VnetName $prodVnetName -RgName $prodRg -SubnetName "WorldSubnet" -ExpectedNsgName "prod-skycraft-swc-world-nsg"
+Test-Subnet -VnetName $prodVnetName -RgName $prodRg -SubnetName "AuthSubnet"     -ExpectedNsgName "prod-skycraft-swc-auth-nsg"
+Test-Subnet -VnetName $prodVnetName -RgName $prodRg -SubnetName "WorldSubnet"    -ExpectedNsgName "prod-skycraft-swc-world-nsg"
 Test-Subnet -VnetName $prodVnetName -RgName $prodRg -SubnetName "DatabaseSubnet" -ExpectedNsgName "prod-skycraft-swc-db-nsg" -CheckSE $true
 
-# 4. Validate Azure Bastion
+# 4. Validate Azure Bastion (optional)
 Write-Host "`n=== 4. Validating Azure Bastion ===" -ForegroundColor Cyan
 $bastion = Get-AzBastion -ResourceGroupName $platRg -Name "platform-skycraft-swc-bas" -ErrorAction SilentlyContinue
 if ($bastion) {
     Write-Host "[OK] Bastion 'platform-skycraft-swc-bas' found." -ForegroundColor Green
 } else {
-    Write-Host "[INFO] Bastion not found (Optional)." -ForegroundColor Yellow
+    Write-Host "[INFO] Bastion not found (Optional — parDeployBastion defaults to false)." -ForegroundColor Yellow
 }
 
 Write-Host "`n=== Validation Summary ===" -ForegroundColor Cyan
-Write-Host "Lab 2.2 validation complete" -ForegroundColor Green
+Write-Host "Lab 2.2 validation complete. Failures: $($script:failCount)" -ForegroundColor $(if ($script:failCount -eq 0) { 'Green' } else { 'Red' })
+exit $script:failCount

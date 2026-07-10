@@ -6,7 +6,7 @@
 
 | Decision | Choice in this lab | Alternatives considered | Why this choice (in a learning context) |
 |---|---|---|---|
-| Region allowance | swedencentral, westeurope, northeurope | Single region only | Multiple regions teach multi-region awareness; students can experiment with failover regions without redeploying. |
+| Region allowance | swedencentral, northeurope | Single region only | Two allowed regions teach multi-region awareness; westeurope is excluded — the Lab 1.3 Restrict-Azure-Regions policy denies it at the ARM layer. |
 | VNet sizing | /16 per environment (Hub 10.0.0.0/16, Dev 10.1.0.0/16, Prod 10.2.0.0/16) | Tightly sized /24 or /25 | Generous spacing keeps the lab uncluttered; students can add subnets without re-addressing. In production, you size based on actual VM forecasts and leave headroom for growth. |
 | Subnet segmentation | Three /24 subnets per spoke (AuthSubnet, WorldSubnet, DatabaseSubnet) | Single flat subnet per VNet | Segmentation teaches network layering early; each subnet gets its own NSG, preventing uncontrolled lateral movement. |
 | Hub VNet purpose | Bastion host only (AzureBastionSubnet /26) | Hub for shared services (DNS, routing, egress) | Simplified for a lab; production hubs hold firewall, DNS forwarders, and central egress inspection. |

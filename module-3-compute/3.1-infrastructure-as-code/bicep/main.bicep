@@ -14,7 +14,7 @@ targetScope = 'subscription'
 // ============================================================================
 
 @description('Azure region for resource deployment')
-@allowed(['swedencentral', 'westeurope', 'northeurope'])
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
 @description('Environment name')
@@ -204,6 +204,13 @@ module modDevVnet 'modules/network.bicep' = {
       {
         name: 'DatabaseSubnet'
         addressPrefix: '10.1.3.0/24'
+      }
+      {
+        // Kept in sync with Lab 2.1's dev VNet so re-deploying 3.1 does not drop
+        // the App Service delegated subnet that Lab 3.4 integrates with.
+        name: 'AppServiceSubnet'
+        addressPrefix: '10.1.4.0/24'
+        delegation: 'Microsoft.Web/serverFarms'
       }
     ]
     parTags: union(varCommonTags, { Environment: 'Development' })

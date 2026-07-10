@@ -30,6 +30,7 @@ graph TB
         DevAuth[AuthSubnet<br/>10.1.1.0/24]
         DevWorld[WorldSubnet<br/>10.1.2.0/24]
         DevDB[DatabaseSubnet<br/>10.1.3.0/24]
+        DevApp[AppServiceSubnet<br/>10.1.4.0/24]
     end
 
     subgraph "prod-skycraft-swc-rg"
@@ -37,6 +38,7 @@ graph TB
         ProdAuth[AuthSubnet<br/>10.2.1.0/24]
         ProdWorld[WorldSubnet<br/>10.2.2.0/24]
         ProdDB[DatabaseSubnet<br/>10.2.3.0/24]
+        ProdApp[AppServiceSubnet<br/>10.2.4.0/24]
     end
 
     HubVNet <-->|Peering: hub-to-dev<br/>Allow Gateway Transit| DevVNet
@@ -320,7 +322,7 @@ Create three subnets for the development environment:
 
 4. Click **Review + create** → **Create**
 
-**Expected Result**: Dev VNet `dev-skycraft-swc-vnet` deployed successfully with 3 subnets.
+**Expected Result**: Dev VNet `dev-skycraft-swc-vnet` deployed successfully with 4 subnets.
 
 ### Step 2.1.8: Create Production Virtual Network
 
@@ -342,7 +344,7 @@ Repeat the process for production:
 
 **Subnets**:
 
-3. Create three subnets:
+3. Create four subnets:
 
 | Subnet Name      | Starting Address | Size |
 | ---------------- | ---------------- | ---- |
@@ -365,7 +367,7 @@ Repeat the process for production:
 
 5. Click **Review + create** → **Create**
 
-**Expected Result**: Production VNet `prod-skycraft-swc-vnet` created with 3 subnets.
+**Expected Result**: Production VNet `prod-skycraft-swc-vnet` created with 4 subnets.
 
 ---
 
@@ -795,7 +797,7 @@ Wait 2-3 minutes, then refresh Azure Portal.
 
 - ✅ Designed and deployed hub-spoke network topology
 - ✅ Created 3 virtual networks with proper IP address planning
-- ✅ Configured 8 subnets across hub and spoke VNets
+- ✅ Configured 10 subnets across hub and spoke VNets
 - ✅ Established VNet peering (hub-to-dev, hub-to-prod)
 - ✅ Reserved 2 public IP addresses for future use
 - ✅ Verified network topology with Network Watcher

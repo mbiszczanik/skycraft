@@ -14,7 +14,7 @@ targetScope = 'subscription'
 // ============================================================================
 
 @description('Azure region for resource deployment')
-@allowed(['swedencentral', 'westeurope', 'northeurope'])
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
 @description('Environment name')
@@ -40,8 +40,9 @@ param parSshPublicKey string
   'Standard_B2s'
   'Standard_B2ms'
   'Standard_D2s_v3'
+  'Standard_D4s_v3'
 ])
-param parVmSize string = 'Standard_B2s'
+param parVmSize string = 'Standard_D2s_v3'
 
 @description('Encryption strategy for VMs')
 @allowed([
@@ -169,7 +170,6 @@ module modWorldDataDisk 'modules/disk.bicep' = {
     parLocation: parLocation
     parDiskSizeGB: parDataDiskSizeGB
     parDiskSku: 'StandardSSD_LRS'
-    parAvailabilityZone: '2' // Same zone as World VM
     parTags: union(varCommonTags, {
       Environment: parEnvironment == 'dev' ? 'Development' : 'Production'
       Purpose: 'WorldServerDatabase'
@@ -188,7 +188,6 @@ module modAuthVm 'modules/vm.bicep' = {
     parVmName: '${varNamePrefix}-auth-vm'
     parLocation: parLocation
     parVmSize: parVmSize
-    parAvailabilityZone: '1'
     parSshPublicKey: parSshPublicKey
     parNicId: modAuthNic.outputs.outNicId
     parEncryptionStrategy: parEncryptionStrategy
@@ -207,7 +206,6 @@ module modWorldVm 'modules/vm.bicep' = {
     parVmName: '${varNamePrefix}-world-vm'
     parLocation: parLocation
     parVmSize: parVmSize
-    parAvailabilityZone: '2'
     parSshPublicKey: parSshPublicKey
     parNicId: modWorldNic.outputs.outNicId
     parDataDiskIds: [

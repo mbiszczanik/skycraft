@@ -24,7 +24,7 @@
 ### Configuration
 
 - [ ] Name: `dev-skycraft-swc-app01` (globally unique)
-- [ ] Runtime Stack: **Node 18 LTS** (or newer)
+- [ ] Runtime Stack: **Node 20 LTS**
 - [ ] Plan: `dev-skycraft-swc-asp`
 - [ ] Health Check: **Enabled** (if configured, otherwise optional)
 - [ ] HTTPS Only: **On**
