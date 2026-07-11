@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-11
+
+### Added
+
+- Bicep parameter files (`bicep/parameters/*.bicepparam`) for every entry point — per-environment (`dev`/`prod`/`platform`) for environment-aware labs, a single `main.bicepparam` otherwise; kept minimal (only differentiating or required values) to avoid drift.
+- Validation decorators (`@allowed`, `@minLength`/`@maxLength`, `@minValue`/`@maxValue`) across all Bicep parameters, consistent with the PowerShell `[ValidateSet]` values.
+- Lint workflow now validates every `*.bicepparam` with `az bicep build-params` (parameter files are not covered by `az bicep build`).
+
+### Changed
+
+- Canonical resource tags standardized to exactly `Project` / `Environment` / `CostCenter` / `Owner`, with `Owner` sourced from a new `parOwnerEmail` parameter (deliberate per-resource extras such as `Purpose`/`Criticality` retained).
+- `Deploy-Bicep.ps1` made backward-compatible with `-Environment` / `-TemplateParameterFile`, merging the parameter file with runtime-computed overrides; a no-argument run deploys identically to before.
+- Audited explicit `dependsOn` across all labs: documented every genuine non-symbolic ordering and removed a transitively-redundant hub-VNet dependency.
+- Bicep standards documented the canonical tag set, the `bicep/parameters/{env}.bicepparam` convention, and the "never write an explicit `dependsOn` when a symbolic reference already exists" rule.
+- Swept the canonical `Owner` tag into the imperative companion deploy scripts and the storage/BCDR lab tag-enumeration docs so both deployment paths agree.
+
+### Removed
+
+- Banned the `ManagedBy` and `DeploymentDate` tags (and the now-unused `parCurrentDate`/`parService` parameters); the `utcNow()`-fed `DeploymentDate` broke `what-if` idempotency by changing on every run.
+
+### Fixed
+
+- Corrected the `Skycraft` → `SkyCraft` project-tag casing in the Lab 1.2 resource-group script.
+
 ## [0.7.0] - 2026-07-10
 
 ### Added
