@@ -43,13 +43,20 @@ jobs:
       - name: Install Bicep CLI
         run: az bicep install
 
-      - name: Build all Bicep entry points
+      - name: Build all Bicep entry points and parameter files
         shell: pwsh
         run: |
           $failed = $false
           Get-ChildItem -Recurse -Filter '*.bicep' | Where-Object FullName -NotMatch '[\\/]modules[\\/]' | ForEach-Object {
               Write-Host "::group::$($_.FullName)"
               az bicep build --file $_.FullName --stdout 1>$null
+              if ($LASTEXITCODE -ne 0) { $failed = $true }
+              Write-Host '::endgroup::'
+          }
+          # az bicep build does not cover .bicepparam files - validate them separately
+          Get-ChildItem -Recurse -Filter '*.bicepparam' | ForEach-Object {
+              Write-Host "::group::$($_.FullName)"
+              az bicep build-params --file $_.FullName --stdout 1>$null
               if ($LASTEXITCODE -ne 0) { $failed = $true }
               Write-Host '::endgroup::'
           }
