@@ -12,6 +12,15 @@
     Prerequisites: Labs 2.1 (VNets), 2.2 (NSGs), 3.2 (VMs), 4.1 (Storage),
     and 5.1 (Log Analytics Workspace) must be deployed.
 
+.PARAMETER Environment
+    Environment whose parameter file supplies template defaults (dev/prod/platform).
+    Default: prod (matches the template's previous default parEnvironment = 'Production').
+
+.PARAMETER TemplateParameterFile
+    Path to the Bicep parameter file supplying template defaults. Defaults to
+    '..\bicep\parameters\<Environment>.bicepparam'. Computed resource IDs (VNet,
+    storage, workspace, VM endpoints) are overlaid on top of this file at runtime.
+
 .PARAMETER WhatIf
     Run deployment in what-if mode (dry run).
 
@@ -33,6 +42,13 @@
 [CmdletBinding()]
 param(
     [Parameter()]
+    [ValidateSet('dev', 'prod', 'platform')]
+    [string]$Environment = 'prod',
+
+    [Parameter(Mandatory = $false)]
+    [string]$TemplateParameterFile,
+
+    [Parameter()]
     [switch]$WhatIf,
 
     [Parameter()]
@@ -44,6 +60,7 @@ $ErrorActionPreference = 'Stop'
 # Script configuration
 $scriptPath     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $templatePath   = Join-Path $scriptPath '..\bicep\main.bicep'
+if (-not $TemplateParameterFile) { $TemplateParameterFile = Join-Path $PSScriptRoot "..\bicep\parameters\$Environment.bicepparam" }
 $location       = 'swedencentral'
 $platformRg     = 'platform-skycraft-swc-rg'
 $prodRg         = 'prod-skycraft-swc-rg'
@@ -199,16 +216,30 @@ if (-not $WhatIf -and -not $Force) {
 # ── [4/5] Run deployment ──────────────────────────────────────────────────
 Write-Host "`n[4/5] Running deployment..." -ForegroundColor Yellow
 
+# Start from the values declared in the .bicepparam file (template defaults),
+# then overlay the computed resource IDs so a no-argument run deploys exactly
+# what it did before parameter files existed.
+$tp = @{}
+$built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
+if ($built.parametersJson) {
+    ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object {
+        $tp[$_.Name] = $_.Value.value
+    }
+}
+
+# Runtime / script-computed overrides win.
+$tp.parProdVnetResourceId       = $prodVnetId
+$tp.parStorageAccountResourceId = $storageId
+$tp.parWorkspaceResourceId      = $workspaceId
+$tp.parProdVmResourceId         = $prodVmId
+$tp.parDevVmResourceId          = $devVmId
+
 $deployParams = @{
-    Name                        = $deploymentName
-    Location                    = $location
-    TemplateFile                = $templatePath
-    parProdVnetResourceId       = $prodVnetId
-    parStorageAccountResourceId = $storageId
-    parWorkspaceResourceId      = $workspaceId
-    parProdVmResourceId         = $prodVmId
-    parDevVmResourceId          = $devVmId
-    ErrorAction                 = 'Stop'
+    Name                    = $deploymentName
+    Location                = $location
+    TemplateFile            = $templatePath
+    TemplateParameterObject = $tp
+    ErrorAction             = 'Stop'
 }
 
 try {

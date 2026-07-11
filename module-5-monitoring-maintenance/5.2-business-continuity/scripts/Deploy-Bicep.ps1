@@ -19,6 +19,15 @@
 
     Prerequisites: Lab 3.2 (VM) and Lab 5.1 (Log Analytics Workspace) must be deployed.
 
+.PARAMETER Environment
+    Environment whose parameter file supplies template defaults (dev/prod/platform).
+    Default: platform (matches the template's previous default parEnvironment = 'Platform').
+
+.PARAMETER TemplateParameterFile
+    Path to the Bicep parameter file supplying template defaults. Defaults to
+    '..\bicep\parameters\<Environment>.bicepparam'. The computed Log Analytics
+    Workspace ID is overlaid on top of this file's values at runtime.
+
 .PARAMETER WhatIf
     Run deployment in what-if mode (dry run).
 
@@ -47,6 +56,13 @@
 [CmdletBinding()]
 param(
     [Parameter()]
+    [ValidateSet('dev', 'prod', 'platform')]
+    [string]$Environment = 'platform',
+
+    [Parameter(Mandatory = $false)]
+    [string]$TemplateParameterFile,
+
+    [Parameter()]
     [switch]$WhatIf,
 
     [Parameter()]
@@ -57,6 +73,7 @@ $ErrorActionPreference = 'Stop'
 
 $scriptPath     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $templatePath   = Join-Path $scriptPath '..\bicep\main.bicep'
+if (-not $TemplateParameterFile) { $TemplateParameterFile = Join-Path $PSScriptRoot "..\bicep\parameters\$Environment.bicepparam" }
 $location       = 'swedencentral'
 $platformRg     = 'platform-skycraft-swc-rg'
 $workspaceName  = 'platform-skycraft-swc-law'
@@ -126,12 +143,26 @@ if (-not $WhatIf -and -not $Force) {
 # ── [4/7] Run Bicep deployment ────────────────────────────────────────────
 Write-Host "`n[4/7] Running Bicep deployment..." -ForegroundColor Yellow
 
+# Start from the values declared in the .bicepparam file (template defaults),
+# then overlay the computed Log Analytics Workspace ID so a no-argument run
+# deploys exactly what it did before parameter files existed.
+$tp = @{}
+$built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
+if ($built.parametersJson) {
+    ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object {
+        $tp[$_.Name] = $_.Value.value
+    }
+}
+
+# Runtime / script-computed overrides win.
+$tp.parWorkspaceId = $workspaceId
+
 $deployParams = @{
-    Name           = $deploymentName
-    Location       = $location
-    TemplateFile   = $templatePath
-    parWorkspaceId = $workspaceId
-    ErrorAction    = 'Stop'
+    Name                    = $deploymentName
+    Location                = $location
+    TemplateFile            = $templatePath
+    TemplateParameterObject = $tp
+    ErrorAction             = 'Stop'
 }
 
 $deployment = $null
