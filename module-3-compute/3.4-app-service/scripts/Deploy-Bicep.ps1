@@ -12,6 +12,9 @@
 .PARAMETER Environment
     Target environment (dev, prod). Default: dev.
 
+.PARAMETER TemplateParameterFile
+    Optional path to a .bicepparam file. Defaults to ..\bicep\parameters\<Environment>.bicepparam.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment dev
 
@@ -31,13 +34,18 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prod')]
-    [string]$Environment = 'dev'
+    [string]$Environment = 'dev',
+
+    [Parameter(Mandatory = $false)]
+    [string]$TemplateParameterFile
 )
 
 $ErrorActionPreference = 'Stop'
 
 $BicepFile = Join-Path $PSScriptRoot "..\bicep\main.bicep"
 $DeploymentName = "deploy-lab3.4-$Environment"
+
+if (-not $TemplateParameterFile) { $TemplateParameterFile = Join-Path $PSScriptRoot "..\bicep\parameters\$Environment.bicepparam" }
 
 Write-Host "=== Lab 3.4 Deployment: App Service ($Environment) ===" -ForegroundColor Cyan
 
@@ -50,11 +58,17 @@ if (-not $context) {
 # 2. Deploy Bicep
 try {
     Write-Host "Starting Bicep deployment from: $BicepFile" -ForegroundColor Yellow
-    
-    $params = @{
-        parLocation    = $Location
-        parEnvironment = $Environment
+    Write-Host "Params: $TemplateParameterFile" -ForegroundColor Gray
+
+    # Load base values from the per-environment .bicepparam file, then overlay
+    # the exact script-supplied values (keeps a no-argument run identical to before).
+    $params = @{}
+    $built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
+    if ($built.parametersJson) {
+        ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object { $params[$_.Name] = $_.Value.value }
     }
+    $params.parLocation = $Location
+    $params.parEnvironment = $Environment
 
     $deployment = New-AzSubscriptionDeployment `
         -Name $DeploymentName `

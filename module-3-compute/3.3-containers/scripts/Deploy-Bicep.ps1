@@ -22,6 +22,10 @@
 .PARAMETER Environment
     The environment tag. Default: 'dev'
 
+.PARAMETER TemplateParameterFile
+    Optional path to a .bicepparam file for the Phase 2 main.bicep deployment.
+    Defaults to ..\bicep\parameters\<Environment>.bicepparam.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1
     Deploys to default resource groups.
@@ -48,10 +52,15 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prod', 'platform')]
-    [string]$Environment = 'dev'
+    [string]$Environment = 'dev',
+
+    [Parameter(Mandatory = $false)]
+    [string]$TemplateParameterFile
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $TemplateParameterFile) { $TemplateParameterFile = Join-Path $PSScriptRoot "..\bicep\parameters\$Environment.bicepparam" }
 
 Write-Host "=== Lab 3.3 - Deploy Bicep Configuration ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -149,12 +158,19 @@ if ($acrWasBootstrapped) {
 Write-Host "`n=== Phase 2: Orchestrated Deployment (main.bicep) ===" -ForegroundColor Cyan
 
 try {
-    $params = @{
-        parLocation        = $Location
-        parResourceGroupName = $ResourceGroupName
-        parEnvironment     = $Environment
-        parAcrName         = $acrName
+    Write-Host "Params: $TemplateParameterFile" -ForegroundColor Gray
+
+    # Load base values from the per-environment .bicepparam file, then overlay the
+    # exact script-supplied values (keeps a no-argument run identical to before).
+    $params = @{}
+    $built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
+    if ($built.parametersJson) {
+        ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object { $params[$_.Name] = $_.Value.value }
     }
+    $params.parLocation = $Location
+    $params.parResourceGroupName = $ResourceGroupName
+    $params.parEnvironment = $Environment
+    $params.parAcrName = $acrName
 
     $deployment = New-AzSubscriptionDeployment `
         -Name $deploymentName `

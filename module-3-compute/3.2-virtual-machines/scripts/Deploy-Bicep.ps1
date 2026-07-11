@@ -21,6 +21,9 @@
 .PARAMETER SshKeyPath
     Path to SSH public key file. Default: $HOME\.ssh\skycraft-dev.pub
 
+.PARAMETER TemplateParameterFile
+    Optional path to a .bicepparam file. Defaults to ..\bicep\parameters\<Environment>.bicepparam.
+
 .PARAMETER WhatIf
     Run deployment in what-if mode (dry run)
 
@@ -63,6 +66,9 @@ param(
     [string]$SshKeyPath = "$HOME\.ssh\skycraft-dev.pub",
 
     [Parameter()]
+    [string]$TemplateParameterFile,
+
+    [Parameter()]
     [switch]$WhatIf
 )
 
@@ -71,6 +77,7 @@ $ErrorActionPreference = 'Stop'
 # Script configuration
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $templatePath = Join-Path $scriptPath "..\bicep\main.bicep"
+if (-not $TemplateParameterFile) { $TemplateParameterFile = Join-Path $scriptPath "..\bicep\parameters\$Environment.bicepparam" }
 $location = 'swedencentral'
 $deploymentName = "lab32-$Environment-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 
@@ -147,15 +154,27 @@ if (-not $WhatIf) {
 Write-Host "`n[4/5] Running deployment..." -ForegroundColor Yellow
 
 try {
+    Write-Host "  Params: $TemplateParameterFile" -ForegroundColor Gray
+
+    # Load base values from the per-environment .bicepparam file, then overlay the
+    # exact script-supplied / generated values (keeps a no-argument run identical
+    # to before, including the runtime SSH key placeholder override).
+    $tp = @{}
+    $built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
+    if ($built.parametersJson) {
+        ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object { $tp[$_.Name] = $_.Value.value }
+    }
+    $tp.parEnvironment = $Environment
+    $tp.parVmSize = $VmSize
+    $tp.parEncryptionStrategy = $EncryptionStrategy
+    $tp.parSshPublicKey = $sshPublicKeySecure
+
     $deployParams = @{
-        Name                = $deploymentName
-        Location            = $location
-        TemplateFile        = $templatePath
-        parEnvironment      = $Environment
-        parVmSize           = $VmSize
-        parEncryptionStrategy = $EncryptionStrategy
-        parSshPublicKey     = $sshPublicKeySecure
-        ErrorAction         = 'Stop'
+        Name                    = $deploymentName
+        Location                = $location
+        TemplateFile            = $templatePath
+        TemplateParameterObject = $tp
+        ErrorAction             = 'Stop'
     }
 
     if ($WhatIf) {
