@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Corrected the `Skycraft` → `SkyCraft` project-tag casing in the Lab 1.2 resource-group script.
+- Lab 3.2: pass the SSH public key to `New-AzSubscriptionDeployment` as a plain string. Az cannot serialize a `SecureString` inside a merged `-TemplateParameterObject` (`Unable to serialize secure string value`); the key is public, so no secret is exposed. Surfaced by the live deployment cycle.
+- Lab 3.2 `Test-Lab.ps1`: validate that the VMs are regional (no availability zone) instead of asserting fixed zones — the VMs are deliberately deployed without zone pinning to avoid `ZonalAllocationFailed` capacity errors in Sweden Central, and the stale assertion crashed on `Zones[0]`.
 
 ## [0.7.0] - 2026-07-10
 
