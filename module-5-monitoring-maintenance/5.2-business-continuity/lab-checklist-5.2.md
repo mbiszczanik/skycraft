@@ -19,6 +19,7 @@
 - [x] Tag: `Project` = `SkyCraft`
 - [x] Tag: `Environment` = `Platform`
 - [x] Tag: `CostCenter` = `MSDN`
+- [x] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
@@ -66,6 +67,7 @@
 - [x] Tag: `Project` = `SkyCraft`
 - [x] Tag: `Environment` = `Platform`
 - [x] Tag: `CostCenter` = `MSDN`
+- [x] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
@@ -356,7 +358,7 @@ az backup replication-protected-item list \
 **All Verification Items Complete**:
 
 - [ ] All resources created with proper naming conventions
-- [ ] All tags applied (Project, Environment, CostCenter)
+- [ ] All tags applied (Project, Environment, CostCenter, Owner)
 - [ ] All validation commands executed successfully
 - [ ] All reflection questions answered
 - [ ] Ready to proceed to Lab 5.3

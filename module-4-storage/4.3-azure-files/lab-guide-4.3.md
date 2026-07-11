@@ -582,6 +582,7 @@ ls /mnt/skycraft-config/common/
 - [ ] Project = `SkyCraft`
 - [ ] Environment = `Production`
 - [ ] CostCenter = `MSDN`
+- [ ] Owner = `admin@skycraft.com`
 
 **For detailed verification**, see [lab-checklist-4.3.md](lab-checklist-4.3.md)
 
