@@ -71,6 +71,21 @@ We aim for a modular architecture that separates **Orchestration** from **Implem
 - **Purpose**: Deploys specific sets of resources (e.g., "Networking", "Security", "Compute").
 - **Best Practice**: Modules should be self-contained and reusable.
 
+### 4.3 Parameter Files (`bicep/parameters/*.bicepparam`)
+
+Every entry-point template ships Bicep parameter files under `bicep/parameters/`:
+
+- **Entry points with a `parEnvironment` parameter**: one file per supported environment — `bicep/parameters/{dev,prod,platform}.bicepparam` (create only the environments the template's `@allowed` list and deploy script actually support; labs pinned to a single environment ship just that one file, e.g. `platform.bicepparam`).
+- **Entry points without an environment axis**: a single `bicep/parameters/main.bicepparam`. When a lab has more than one entry point, name each file after its entry point (e.g. `resource-groups.bicepparam`, `role-assignments.bicepparam`).
+
+Rules:
+
+- **Minimal content**: a parameter file sets only values that differentiate the environment or have no default in the template. Everything else comes from template defaults — duplicating a default here creates drift when the template changes.
+- **Computed values stay in scripts**: values only known at runtime (SSH keys, resource IDs, existence checks, client IPs) are applied as overrides by `Deploy-Bicep.ps1`, never stored in parameter files. Required parameters of this kind get an empty-string placeholder with a comment (`// overridden by Deploy-Bicep.ps1 at runtime`), because `bicep build-params` fails on missing required parameters (BCP258).
+- **CI coverage**: `az bicep build` does **not** validate parameter files; the lint workflow runs `az bicep build-params` over every `*.bicepparam` separately.
+
+See [powershell-standards.md — Best Practices](powershell-standards.md#5-best-practices) for how `Deploy-Bicep.ps1` merges a parameter file with runtime-computed overrides.
+
 ## 5. Resource Tagging (REQUIRED)
 
 All Azure resources **must** be tagged to comply with governance policies (Lab 1.3).
@@ -79,11 +94,17 @@ All Azure resources **must** be tagged to comply with governance policies (Lab 1
 
 Every resource must include the following tags:
 
-| Tag             | Description              | Example                     |
-| :-------------- | :----------------------- | :-------------------------- |
-| **Project**     | Always set to `SkyCraft` | `Project: 'SkyCraft'`       |
-| **Environment** | Deployment environment   | `Environment: 'Production'` |
-| **CostCenter**  | Cost tracking identifier | `CostCenter: 'MSDN'`        |
+| Tag             | Description                 | Example                       |
+| :-------------- | :-------------------------- | :---------------------------- |
+| **Project**     | Always set to `SkyCraft`    | `Project: 'SkyCraft'`         |
+| **Environment** | Deployment environment      | `Environment: 'Production'`   |
+| **CostCenter**  | Cost tracking identifier    | `CostCenter: 'MSDN'`          |
+| **Owner**       | Responsible owner's e-mail  | `Owner: 'admin@skycraft.com'` |
+
+These four keys are the **canonical base set** — every taggable resource carries exactly these, plus (optionally) deliberate purpose-specific extras such as `Purpose` or `Criticality`.
+
+> [!WARNING]
+> `ManagedBy` and `DeploymentDate` are **banned**. A timestamp tag fed by `utcNow()` changes on every run, so `what-if` always reports a modification and the deployment is never idempotent.
 
 ### Implementation Pattern
 
@@ -94,6 +115,7 @@ var varCommonTags = {
   Project: 'SkyCraft'
   Environment: parEnvironment  // Pass as parameter
   CostCenter: 'MSDN'
+  Owner: 'admin@skycraft.com'
 }
 
 resource resExample 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
@@ -170,6 +192,12 @@ resource resExample 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
 ### 6.4 Deployment Workflow
 
 - **What-if first**: Every deployment must be previewed with `what-if` before the real run. The standard pattern (separate args arrays) is defined in [powershell-standards.md — WhatIf Deployment Pattern](powershell-standards.md#5-best-practices).
+
+### 6.5 Dependencies (`dependsOn`)
+
+- **Never write an explicit `dependsOn` when a symbolic reference already exists.** A module output reference (`modX.outputs.outY`), a resource property reference (`resX.id`), or a `parent:` relationship already makes Bicep infer the dependency — the explicit entry is dead weight that hides real ordering constraints.
+- Explicit `dependsOn` is allowed **only** for genuine sequencing with no symbolic link — e.g. serializing peering writes against the same VNet, chaining subnet updates on a shared VNet, or applying locks after all other governance config.
+- Every surviving `dependsOn` entry **must** carry a comment explaining why the ordering is required. An uncommented `dependsOn` is a code-review finding.
 
 ## 7. Linter Configuration (`bicepconfig.json`)
 
@@ -295,6 +323,7 @@ var varCommonTags = {
   Project: 'SkyCraft'
   Environment: parEnvironment
   CostCenter: 'MSDN'
+  Owner: 'admin@skycraft.com'
 }
 
 var varResourceName = 'example-resource'

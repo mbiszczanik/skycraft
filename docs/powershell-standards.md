@@ -195,6 +195,24 @@ catch {
   }
   ```
 
+- **Template parameters via `.bicepparam` + runtime overrides**: `Deploy-Bicep.ps1` reads the lab's parameter file (default `bicep/parameters/<env>.bicepparam`, overridable with `-TemplateParameterFile`), compiles it with the standalone `bicep` CLI, and merges runtime-computed values (generated keys, resource IDs, existence checks) on top. Computed overrides always win, so a no-argument invocation deploys exactly what the script deployed before parameter files existed:
+
+  ```powershell
+  # Static values from the .bicepparam file...
+  $buildOutput = bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json
+  $templateParams = @{}
+  foreach ($p in ($buildOutput.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+      $templateParams[$p.Key] = $p.Value.value
+  }
+
+  # ...then runtime-computed overrides win
+  $templateParams.parIsNewDeployment = $isNewDeployment
+
+  New-AzSubscriptionDeployment -TemplateFile $templateFile -TemplateParameterObject $templateParams @commonArgs
+  ```
+
+  Scripts that pass **no** computed values skip the merge and hand the file straight to the cmdlet via `-TemplateParameterFile`. See [bicep-standards.md §4.3](bicep-standards.md#43-parameter-files-bicepparametersbicepparam) for the parameter-file conventions themselves.
+
 ## 6. Static Analysis & Testing
 
 ### PSScriptAnalyzer
