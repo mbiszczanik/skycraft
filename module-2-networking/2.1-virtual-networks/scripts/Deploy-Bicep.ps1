@@ -18,6 +18,11 @@
 .PARAMETER PlatformResourceGroup
     The platform resource group name. Default: 'platform-skycraft-swc-rg'
 
+.PARAMETER TemplateParameterFile
+    Path to the Bicep parameter file supplying template defaults. Defaults to
+    '..\bicep\parameters\main.bicepparam' (relative to this script's folder).
+    Script-supplied and computed values are overlaid on top of this file's values.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1
     Deploys to default resource groups in Sweden Central.
@@ -48,7 +53,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$PlatformResourceGroup = 'platform-skycraft-swc-rg'
+    [string]$PlatformResourceGroup = 'platform-skycraft-swc-rg',
+
+    [Parameter(Mandatory = $false)]
+    [string]$TemplateParameterFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -67,9 +75,19 @@ Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 $bicepPath = Join-Path $PSScriptRoot "..\bicep"
 $mainBicep = Join-Path $bicepPath "main.bicep"
 
+if (-not $TemplateParameterFile) {
+    $TemplateParameterFile = Join-Path $PSScriptRoot '..\bicep\parameters\main.bicepparam'
+}
+
 # Verify Bicep file exists
 if (-not (Test-Path $mainBicep)) {
     Write-Host "[ERROR] Bicep file not found: $mainBicep" -ForegroundColor Red
+    exit 1
+}
+
+# Verify parameter file exists
+if (-not (Test-Path $TemplateParameterFile)) {
+    Write-Host "[ERROR] Parameter file not found: $TemplateParameterFile" -ForegroundColor Red
     exit 1
 }
 
@@ -77,13 +95,23 @@ Write-Host "`nDeploying Lab 2.1 Resources..." -ForegroundColor Cyan
 
 try {
     $deploymentName = "Lab-2.1-Virtual-Networks"
-    
-    $params = @{
-        parLocation                  = $Location
-        parResourceGroupNameProd     = $ProdResourceGroup
-        parResourceGroupNameDev      = $DevResourceGroup
-        parResourceGroupNamePlatform = $PlatformResourceGroup
+
+    # Start from the values declared in the .bicepparam file (template defaults),
+    # then overlay the script-supplied values so a no-argument run deploys exactly
+    # what it did before parameter files existed.
+    $params = @{}
+    $built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
+    if ($built.parametersJson) {
+        ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object {
+            $params[$_.Name] = $_.Value.value
+        }
     }
+
+    # Runtime / script-supplied overrides win.
+    $params.parLocation = $Location
+    $params.parResourceGroupNameProd = $ProdResourceGroup
+    $params.parResourceGroupNameDev = $DevResourceGroup
+    $params.parResourceGroupNamePlatform = $PlatformResourceGroup
 
     $deployment = New-AzSubscriptionDeployment `
         -Name $deploymentName `

@@ -15,6 +15,11 @@
     Path to the Bicep template to deploy. Defaults to '..\bicep\main.bicep' (relative to
     this script's folder).
 
+.PARAMETER TemplateParameterFile
+    Path to the Bicep parameter file supplying template defaults. Defaults to
+    '..\bicep\parameters\main.bicepparam' (relative to this script's folder).
+    This script supplies no per-template overrides, so the file is passed directly.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1
     Deploys the default main.bicep to Sweden Central using the current Az context.
@@ -37,12 +42,19 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$TemplateFile = '..\bicep\main.bicep'
+    [string]$TemplateFile = '..\bicep\main.bicep',
+
+    [Parameter(Mandatory = $false)]
+    [string]$TemplateParameterFile
 )
 
 $ErrorActionPreference = 'Stop'
 
 $deploymentName = "Lab-2.3-DNS-$(Get-Date -Format 'yyyyMMdd-HHmm')"
+
+if (-not $TemplateParameterFile) {
+    $TemplateParameterFile = Join-Path $PSScriptRoot '..\bicep\parameters\main.bicepparam'
+}
 
 Write-Host "=== Lab 2.3 - Deploy Bicep (DNS) ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -52,13 +64,23 @@ if (-not (Test-Path $TemplateFile)) {
     exit 1
 }
 
+# Verify parameter file
+if (-not (Test-Path $TemplateParameterFile)) {
+    Write-Host "Error: Parameter file not found at $TemplateParameterFile" -ForegroundColor Red
+    exit 1
+}
+
 Write-Host "Starting deployment: $deploymentName..." -ForegroundColor Yellow
 
 try {
+    # This script supplies no per-template overrides, so the parameter file is
+    # passed straight through. A no-argument run therefore deploys exactly what it
+    # did before parameter files existed (all template defaults).
     $deployment = New-AzDeployment `
         -Name $deploymentName `
         -Location $Location `
         -TemplateFile $TemplateFile `
+        -TemplateParameterFile $TemplateParameterFile `
         -Verbose
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {
