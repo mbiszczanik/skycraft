@@ -27,7 +27,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('prod', 'dev', 'platform')]
-    [string]$Environment = 'prod'
+    [string]$Environment = 'prod',
+
+    [Parameter(Mandatory = $false)]
+    [string]$TemplateParameterFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,16 +43,32 @@ if (-not $context) {
     Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; exit 1
 }
 
-# 2. Deploy Bicep
+# 2. Resolve parameter file (backward-compatible) and hydrate parameters.
+if (-not $TemplateParameterFile) {
+    $TemplateParameterFile = Join-Path $PSScriptRoot "..\bicep\parameters\$Environment.bicepparam"
+}
+
+$deploymentParams = @{}
+$built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
+if ($built.parametersJson) {
+    ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object {
+        $deploymentParams[$_.Name] = $_.Value.value
+    }
+}
+
+# Overlay the exact values this script has always set.
+$deploymentParams.parLocation = $Location
+$deploymentParams.parEnvironment = $Environment
+
+# 3. Deploy Bicep
 try {
     Write-Host "Deploying main.bicep to subscription level..." -ForegroundColor Yellow
-    
+
     $deployment = New-AzSubscriptionDeployment `
         -Name "lab-4.3-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')" `
         -Location $Location `
         -TemplateFile (Join-Path $PSScriptRoot "..\bicep\main.bicep") `
-        -parLocation $Location `
-        -parEnvironment $Environment `
+        -TemplateParameterObject $deploymentParams `
         -ErrorAction Stop
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {

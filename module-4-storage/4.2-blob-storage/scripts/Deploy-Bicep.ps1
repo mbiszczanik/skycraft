@@ -24,12 +24,20 @@
 [CmdletBinding()]
 param(
     [ValidateSet('swedencentral', 'northeurope')]
-    [string]$Location = 'swedencentral'
+    [string]$Location = 'swedencentral',
+
+    [Parameter(Mandatory = $false)]
+    [string]$TemplateParameterFile
 )
 
 $ErrorActionPreference = 'Stop'
 $ScriptPath = $PSScriptRoot
 $TemplateFile = Join-Path $ScriptPath "../bicep/main.bicep"
+
+# Backward-compatible parameter-file resolution (non-environment lab).
+if (-not $TemplateParameterFile) {
+    $TemplateParameterFile = Join-Path $ScriptPath "../bicep/parameters/main.bicepparam"
+}
 
 Write-Host "=== Lab 4.2: Deploying Blob Storage Infrastructure ===" -ForegroundColor Cyan
 
@@ -52,6 +60,7 @@ try {
         -Name "lab-4.2-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')" `
         -Location $Location `
         -TemplateFile $TemplateFile `
+        -TemplateParameterFile $TemplateParameterFile `
         -WarningAction SilentlyContinue
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {

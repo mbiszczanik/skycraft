@@ -32,7 +32,10 @@ param(
     [string]$Environment = 'prod',
 
     [Parameter(Mandatory = $false)]
-    [string]$ClientIp = ''
+    [string]$ClientIp = '',
+
+    [Parameter(Mandatory = $false)]
+    [string]$TemplateParameterFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,7 +61,26 @@ if ([string]::IsNullOrWhiteSpace($ClientIp)) {
     }
 }
 
-# 3. Deploy Bicep
+# 3. Resolve parameter file (backward-compatible) and hydrate parameters.
+if (-not $TemplateParameterFile) {
+    $TemplateParameterFile = Join-Path $PSScriptRoot "..\bicep\parameters\$Environment.bicepparam"
+}
+
+$deploymentParams = @{}
+$built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
+if ($built.parametersJson) {
+    ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object {
+        $deploymentParams[$_.Name] = $_.Value.value
+    }
+}
+
+# Overlay the exact values this script has always set. parClientIp is a runtime
+# override (auto-detected above) and is never stored in the parameter file.
+$deploymentParams.parLocation = $Location
+$deploymentParams.parEnvironment = $Environment
+$deploymentParams.parClientIp = $ClientIp
+
+# 4. Deploy Bicep
 try {
     Write-Host "Deploying main.bicep to subscription level..." -ForegroundColor Yellow
 
@@ -66,9 +88,7 @@ try {
         -Name "lab-4.4-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')" `
         -Location $Location `
         -TemplateFile (Join-Path $PSScriptRoot "..\bicep\main.bicep") `
-        -parLocation $Location `
-        -parEnvironment $Environment `
-        -parClientIp $ClientIp `
+        -TemplateParameterObject $deploymentParams `
         -ErrorAction Stop
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {

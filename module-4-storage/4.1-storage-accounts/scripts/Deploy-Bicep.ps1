@@ -70,7 +70,10 @@ param(
     [switch]$NewDeployment,
 
     [Parameter(Mandatory = $false)]
-    [switch]$InfraEncryption
+    [switch]$InfraEncryption,
+
+    [Parameter(Mandatory = $false)]
+    [string]$TemplateParameterFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -154,17 +157,31 @@ Write-Host "--- Deployment Configuration ---" -ForegroundColor Yellow
 $templateFile = Join-Path $PSScriptRoot "..\bicep\main.bicep"
 $deploymentName = "lab41-storage-$(Get-Date -Format 'yyyyMMddHHmmss')"
 
-$deploymentParams = @{
-    parLocation                       = $Location
-    parDeployAllEnvironments          = $All.IsPresent
-    parEnvironment                    = $Environment
-    parEnableBlobSoftDelete           = $true
-    parBlobSoftDeleteDays             = 7
-    parEnableContainerSoftDelete      = $true
-    parEnableFileSoftDelete           = $true
-    parIsNewDeployment                = $isNewDeployment
-    parEnableInfrastructureEncryption = $InfraEncryption.IsPresent
+# Backward-compatible parameter-file resolution. When not supplied, default to
+# the environment-specific .bicepparam. Non-computed values are sourced from the
+# file; computed/switch values are overlaid below so behaviour is unchanged.
+if (-not $TemplateParameterFile) {
+    $TemplateParameterFile = Join-Path $PSScriptRoot "..\bicep\parameters\$Environment.bicepparam"
 }
+
+$deploymentParams = @{}
+$built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
+if ($built.parametersJson) {
+    ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object {
+        $deploymentParams[$_.Name] = $_.Value.value
+    }
+}
+
+# Overlay the exact values this script has always set (computed / switch / script).
+$deploymentParams.parLocation = $Location
+$deploymentParams.parDeployAllEnvironments = $All.IsPresent
+$deploymentParams.parEnvironment = $Environment
+$deploymentParams.parEnableBlobSoftDelete = $true
+$deploymentParams.parBlobSoftDeleteDays = 7
+$deploymentParams.parEnableContainerSoftDelete = $true
+$deploymentParams.parEnableFileSoftDelete = $true
+$deploymentParams.parIsNewDeployment = $isNewDeployment
+$deploymentParams.parEnableInfrastructureEncryption = $InfraEncryption.IsPresent
 
 Write-Host "  Template: $templateFile"
 Write-Host "  Location: $Location"
