@@ -12,6 +12,10 @@
 .PARAMETER AdminEmail
     Email address for the Owner tag. Default: admin@skycraft.com.
 
+.PARAMETER TemplateParameterFile
+    Bicep parameter file whose values are merged before the runtime overrides
+    (-Location, -AdminEmail). Defaults to bicep/parameters/main.bicepparam.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1 -AdminEmail "malfurion@azureflame.onmicrosoft.com"
 
@@ -29,10 +33,17 @@ param(
     [string]$Location = 'swedencentral',
 
     [ValidateNotNullOrEmpty()]
-    [string]$AdminEmail = 'admin@skycraft.com'
+    [string]$AdminEmail = 'admin@skycraft.com',
+
+    [Parameter(Mandatory = $false)]
+    [string]$TemplateParameterFile
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $TemplateParameterFile) {
+    $TemplateParameterFile = Join-Path $PSScriptRoot '..\bicep\parameters\main.bicepparam'
+}
 
 Write-Host "=== Lab 1.3: Governance Deployment ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -57,18 +68,32 @@ if (-not (Test-Path $templateFile)) {
     exit 1
 }
 
+if (-not (Test-Path $TemplateParameterFile)) {
+    Write-Host "  -> [ERROR] Parameter file not found at: $TemplateParameterFile" -ForegroundColor Red
+    exit 1
+}
+
 $deploymentName = "Lab-1.3-Gov-$(Get-Date -Format 'yyyyMMdd-HHmm')"
 
 Write-Host "`nStarting Bicep Deployment..." -ForegroundColor Cyan
 Write-Host "  Template: $templateFile" -ForegroundColor Gray
+Write-Host "  Parameters: $TemplateParameterFile" -ForegroundColor Gray
 Write-Host "  Location: $Location" -ForegroundColor Gray
 Write-Host "  AdminEmail: $AdminEmail" -ForegroundColor Gray
 
 try {
-    $params = @{
-        parLocation   = $Location
-        parAdminEmail = $AdminEmail
+    # Static values from the .bicepparam file...
+    $params = @{}
+    $built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
+    if ($built.parametersJson) {
+        ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object {
+            $params[$_.Name] = $_.Value.value
+        }
     }
+
+    # ...then runtime overrides win (reproduces the previous no-argument behaviour).
+    $params.parLocation = $Location
+    $params.parAdminEmail = $AdminEmail
 
     $deployment = New-AzSubscriptionDeployment `
         -Name $deploymentName `

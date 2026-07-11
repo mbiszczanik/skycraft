@@ -9,6 +9,10 @@
 .PARAMETER Location
     Azure region for deployment. Default: swedencentral.
 
+.PARAMETER TemplateParameterFile
+    Bicep parameter file to deploy. Defaults to the lab's
+    bicep/parameters/resource-groups.bicepparam.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1
     Deploys to Sweden Central.
@@ -24,10 +28,17 @@
 [CmdletBinding()]
 param(
     [ValidateSet('swedencentral', 'northeurope')]
-    [string]$Location = 'swedencentral'
+    [string]$Location = 'swedencentral',
+
+    [Parameter(Mandatory = $false)]
+    [string]$TemplateParameterFile
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $TemplateParameterFile) {
+    $TemplateParameterFile = Join-Path $PSScriptRoot '..\bicep\parameters\resource-groups.bicepparam'
+}
 
 Write-Host "=== Lab 1.2: Infrastructure Deployment ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -52,10 +63,16 @@ if (-not (Test-Path $templateFile)) {
     exit 1
 }
 
+if (-not (Test-Path $TemplateParameterFile)) {
+    Write-Host "  -> [ERROR] Parameter file not found at: $TemplateParameterFile" -ForegroundColor Red
+    exit 1
+}
+
 $deploymentName = "Lab-1.2-RBAC-RG-$(Get-Date -Format 'yyyyMMdd-HHmm')"
 
 Write-Host "`nStarting Bicep Deployment..." -ForegroundColor Cyan
 Write-Host "  Template: $templateFile" -ForegroundColor Gray
+Write-Host "  Parameters: $TemplateParameterFile" -ForegroundColor Gray
 Write-Host "  Location: $Location" -ForegroundColor Gray
 Write-Host "  DeploymentName: $deploymentName" -ForegroundColor Gray
 
@@ -64,6 +81,7 @@ try {
         -Name $deploymentName `
         -Location $Location `
         -TemplateFile $templateFile `
+        -TemplateParameterFile $TemplateParameterFile `
         -ErrorAction Stop | Out-Null
     
     Write-Host "  -> [SUCCESS] Resource Groups deployed successfully." -ForegroundColor Green
