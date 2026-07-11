@@ -77,6 +77,7 @@ $Tags = @{
     Project     = 'SkyCraft'
     Environment = 'Platform'
     CostCenter  = 'MSDN'
+    Owner       = 'admin@skycraft.com'
 }
 
 # ==========================================

@@ -180,10 +180,10 @@ if (-not $nwExists -or $nwExists.Count -eq 0) {
         $nwRg = Get-AzResourceGroup -Name 'NetworkWatcherRG' -ErrorAction SilentlyContinue
         if (-not $nwRg) {
             New-AzResourceGroup -Name 'NetworkWatcherRG' -Location $location `
-                -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN' } -ErrorAction Stop | Out-Null
+                -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = 'admin@skycraft.com' } -ErrorAction Stop | Out-Null
         }
         New-AzNetworkWatcher -Name "NetworkWatcher_$location" -ResourceGroupName 'NetworkWatcherRG' -Location $location `
-            -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN' } -ErrorAction Stop | Out-Null
+            -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = 'admin@skycraft.com' } -ErrorAction Stop | Out-Null
         Write-Host "  ✓ Network Watcher enabled for swedencentral" -ForegroundColor Green
     }
     catch {

@@ -65,6 +65,7 @@ if (-not $context) {
 $Tags = @{
     Project     = 'SkyCraft'
     CostCenter  = 'MSDN'
+    Owner       = 'admin@skycraft.com'
 }
 
 function New-SkyCraftLB {

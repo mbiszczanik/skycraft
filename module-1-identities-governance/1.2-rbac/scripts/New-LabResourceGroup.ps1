@@ -96,8 +96,9 @@ $resourceGroups = @(
         Location = $Location
         Tags     = @{
             Environment = "Development"
-            Project     = "Skycraft"
+            Project     = "SkyCraft"
             CostCenter  = "MSDN"
+            Owner       = "admin@skycraft.com"
         }
     }
     @{
@@ -105,8 +106,9 @@ $resourceGroups = @(
         Location = $Location
         Tags     = @{
             Environment = "Production"
-            Project     = "Skycraft"
+            Project     = "SkyCraft"
             CostCenter  = "MSDN"
+            Owner       = "admin@skycraft.com"
         }
     }
     @{
@@ -114,8 +116,9 @@ $resourceGroups = @(
         Location = $Location
         Tags     = @{
             Environment = "Platform"
-            Project     = "Skycraft"
+            Project     = "SkyCraft"
             CostCenter  = "MSDN"
+            Owner       = "admin@skycraft.com"
         }
     }
 )

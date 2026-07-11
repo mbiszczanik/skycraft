@@ -74,9 +74,9 @@ if (-not $context) {
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
 # Define Mandatory Tags
-$TagsPlatform = @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN' }
-$TagsDev = @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN' }
-$TagsProd = @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN' }
+$TagsPlatform = @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = 'admin@skycraft.com' }
+$TagsDev = @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN'; Owner = 'admin@skycraft.com' }
+$TagsProd = @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN'; Owner = 'admin@skycraft.com' }
 
 # ===================================
 # Task 2: Create Hub Virtual Network

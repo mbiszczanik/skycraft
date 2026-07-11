@@ -61,7 +61,7 @@ try {
     $rg = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue
     if (-not $rg) {
         Write-Host "Creating Resource Group: $ResourceGroupName..." -ForegroundColor Yellow
-        New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN' } -ErrorAction Stop | Out-Null
+        New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN'; Owner = 'admin@skycraft.com' } -ErrorAction Stop | Out-Null
         Write-Host "  -> Created $ResourceGroupName" -ForegroundColor Green
     } else {
         Write-Host "  -> Found existing Resource Group: $ResourceGroupName" -ForegroundColor Green

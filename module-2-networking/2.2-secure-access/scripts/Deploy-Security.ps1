@@ -86,6 +86,7 @@ $Tags = @{
     Project     = 'SkyCraft'
     Environment = 'Production'
     CostCenter  = 'MSDN'
+    Owner       = 'admin@skycraft.com'
 }
 
 # ===================================
@@ -112,7 +113,7 @@ foreach ($config in $asgConfigs) {
         }
         else {
             $tagEnv = if ($config.RG -match 'prod') { 'Production' } else { 'Development' }
-            $tags = @{ Project = 'SkyCraft'; Environment = $tagEnv; CostCenter = 'MSDN' }
+            $tags = @{ Project = 'SkyCraft'; Environment = $tagEnv; CostCenter = 'MSDN'; Owner = 'admin@skycraft.com' }
             
             $asg = New-AzApplicationSecurityGroup `
                 -ResourceGroupName $config.RG `
@@ -144,7 +145,7 @@ function New-SkyCraftNSG {
         if ($nsg) {
             Write-Host "  -> NSG already exists, will update rules" -ForegroundColor Gray
         } else {
-            $tags = @{ Project = 'SkyCraft'; Environment = $Env; CostCenter = 'MSDN' }
+            $tags = @{ Project = 'SkyCraft'; Environment = $Env; CostCenter = 'MSDN'; Owner = 'admin@skycraft.com' }
             $nsg = New-AzNetworkSecurityGroup -ResourceGroupName $RG -Name $Name -Location $Location -Tag $tags
             Write-Host "  -> Created NSG: $Name" -ForegroundColor Green
         }

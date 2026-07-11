@@ -88,7 +88,7 @@ try {
     if (-not (Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue)) {
         Write-Host "Creating Resource Group: $ResourceGroupName..." -ForegroundColor Yellow
         New-AzResourceGroup -Name $ResourceGroupName -Location $Location `
-            -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN' } -ErrorAction Stop | Out-Null
+            -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN'; Owner = 'admin@skycraft.com' } -ErrorAction Stop | Out-Null
     }
 } catch {
     Write-Host "[ERROR] Failed to create Resource Group: $_" -ForegroundColor Red
