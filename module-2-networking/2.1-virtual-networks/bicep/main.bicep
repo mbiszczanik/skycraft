@@ -136,6 +136,8 @@ module modPeeringHubToDev 'modules/vnet-peering.bicep' = {
     parTargetVnetId: modVnetDev.outputs.outVnetId
     parPeeringName: 'hub-to-dev'
   }
+  // Non-symbolic: the hub VNet is referenced by name inside the peering module,
+  // so Bicep cannot infer it must exist first.
   dependsOn: [
     modVnetHub
   ]
@@ -149,6 +151,8 @@ module modPeeringDevToHub 'modules/vnet-peering.bicep' = {
     parTargetVnetId: modVnetHub.outputs.outVnetId
     parPeeringName: 'dev-to-hub'
   }
+  // Non-symbolic: the dev spoke VNet is referenced by name inside the peering
+  // module, so Bicep cannot infer it must exist first.
   dependsOn: [
     modVnetDev
   ]
@@ -164,9 +168,11 @@ module modPeeringHubToProd 'modules/vnet-peering.bicep' = {
     parTargetVnetId: modVnetProd.outputs.outVnetId
     parPeeringName: 'hub-to-prod'
   }
+  // Serialize peering writes on the hub VNet: concurrent peering PUTs on one VNet
+  // fail with AnotherOperationInProgress. This also transitively ensures the hub
+  // VNet exists, since modPeeringHubToDev already depends on modVnetHub.
   dependsOn: [
-    modVnetHub
-    modPeeringHubToDev 
+    modPeeringHubToDev
   ]
 }
 
@@ -178,6 +184,8 @@ module modPeeringProdToHub 'modules/vnet-peering.bicep' = {
     parTargetVnetId: modVnetHub.outputs.outVnetId
     parPeeringName: 'prod-to-hub'
   }
+  // Non-symbolic: the prod spoke VNet is referenced by name inside the peering
+  // module, so Bicep cannot infer it must exist first.
   dependsOn: [
     modVnetProd
   ]

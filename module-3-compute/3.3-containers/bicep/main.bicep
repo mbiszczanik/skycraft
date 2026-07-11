@@ -96,6 +96,8 @@ module modAci 'modules/aci.bicep' = {
     parAciName: parAciName
     parImage: parImage
   }
+  // Non-symbolic: the ACR is referenced by name (existing) and must hold the
+  // pushed image before the container can start.
   dependsOn: [
     modAcr
   ]
@@ -114,6 +116,8 @@ module modAca 'modules/containerapps.bicep' = {
     parAcaName: parAcaName
     parImage: parImage
   }
+  // Non-symbolic: the ACR is referenced by name (existing) and must hold the
+  // pushed image before the container can start.
   dependsOn: [
     modAcr
   ]

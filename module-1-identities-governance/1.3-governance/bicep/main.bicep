@@ -98,6 +98,8 @@ module modLockProd 'modules/locks.bicep' = {
     parLockName: 'lock-no-delete-prod'
     parLockNotes: 'Prevents accidental deletion of production resources'
   }
+  // Non-symbolic sequencing: tag the RG before locking it. The lock module
+  // targets the RG only by scope, so Bicep cannot infer this ordering.
   dependsOn: [
     modTagsProd
   ]
@@ -110,6 +112,8 @@ module modLockPlatform 'modules/locks.bicep' = {
     parLockName: 'lock-no-delete-platform'
     parLockNotes: 'Protects platform monitoring and logging infrastructure'
   }
+  // Non-symbolic sequencing: tag the RG before locking it. The lock module
+  // targets the RG only by scope, so Bicep cannot infer this ordering.
   dependsOn: [
     modTagsPlatform
   ]

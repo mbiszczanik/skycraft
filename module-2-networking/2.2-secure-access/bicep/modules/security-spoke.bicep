@@ -225,6 +225,8 @@ resource resSubnetAuth 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = 
 resource resSubnetWorld 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
   parent: resVnet
   name: 'WorldSubnet'
+  // Serialize subnet writes on the shared VNet (concurrent subnet PUTs fail with
+  // AnotherOperationInProgress); the previous subnet is referenced only by name.
   dependsOn: [
     resSubnetAuth
   ]
@@ -250,6 +252,8 @@ resource resSubnetWorld 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' =
 resource resSubnetDb 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
   parent: resVnet
   name: 'DatabaseSubnet'
+  // Serialize subnet writes on the shared VNet (concurrent subnet PUTs fail with
+  // AnotherOperationInProgress); the previous subnet is referenced only by name.
   dependsOn: [
     resSubnetWorld
   ]
