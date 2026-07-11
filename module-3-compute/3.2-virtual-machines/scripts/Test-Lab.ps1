@@ -85,25 +85,26 @@ if ($worldState -eq 'VM running') {
     $failCount++
 }
 
-# Test Auth VM in Zone 1
-Write-Host "  Testing: Auth VM in Zone 1..." -NoNewline
-$authZone = (Get-AzVM -ResourceGroupName $rgName -Name "$namePrefix-auth-vm" -ErrorAction SilentlyContinue).Zones[0]
-if ($authZone -eq '1') {
+# Availability zones are intentionally NOT pinned on these VMs (regional deployment)
+# to avoid ZonalAllocationFailed capacity errors in Sweden Central. Verify the VMs
+# are regional rather than zonal.
+Write-Host "  Testing: Auth VM is regional (no availability zone)..." -NoNewline
+$authZones = (Get-AzVM -ResourceGroupName $rgName -Name "$namePrefix-auth-vm" -ErrorAction SilentlyContinue).Zones
+if (-not $authZones) {
     Write-Host " PASS" -ForegroundColor Green
     $passCount++
 } else {
-    Write-Host " FAIL (Zone: $authZone)" -ForegroundColor Red
+    Write-Host " FAIL (unexpected zone: $($authZones -join ','))" -ForegroundColor Red
     $failCount++
 }
 
-# Test World VM in Zone 2
-Write-Host "  Testing: World VM in Zone 2..." -NoNewline
-$worldZone = (Get-AzVM -ResourceGroupName $rgName -Name "$namePrefix-world-vm" -ErrorAction SilentlyContinue).Zones[0]
-if ($worldZone -eq '2') {
+Write-Host "  Testing: World VM is regional (no availability zone)..." -NoNewline
+$worldZones = (Get-AzVM -ResourceGroupName $rgName -Name "$namePrefix-world-vm" -ErrorAction SilentlyContinue).Zones
+if (-not $worldZones) {
     Write-Host " PASS" -ForegroundColor Green
     $passCount++
 } else {
-    Write-Host " FAIL (Zone: $worldZone)" -ForegroundColor Red
+    Write-Host " FAIL (unexpected zone: $($worldZones -join ','))" -ForegroundColor Red
     $failCount++
 }
 
