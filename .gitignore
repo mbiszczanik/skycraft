@@ -55,6 +55,11 @@ test-results/
 .patches/
 
 # ===================================
+# Claude Code / AI assistant (private, not checked in)
+# ===================================
+CLAUDE.local.md
+
+# ===================================
 # Infrastructure as Code (Bicep)
 # ===================================
 # Ignore compiled ARM templates (az bicep build output).
