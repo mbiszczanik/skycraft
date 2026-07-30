@@ -16,7 +16,7 @@ targetScope = 'subscription'
 @allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
-@description('Environment Name')
+@description('Environment axis for naming and parameter-file selection (short form)')
 @allowed(['dev', 'prod'])
 param parEnvironment string = 'dev'
 
@@ -56,12 +56,16 @@ resource resVnet 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
 // Using string interpolation is reliable for existing subnets
 var varSubnetId = '${resVnet.id}/subnets/${parSubnetName}'
 
+// parEnvironment stays short because it drives resource naming, but the Environment
+// *tag* must carry the canonical value from bicep-standards.md §5.
+var varEnvironmentTag = parEnvironment == 'prod' ? 'Production' : 'Development'
+
 module modAppService 'modules/app-service.bicep' = {
   name: 'deploy-app-service-${parEnvironment}'
   scope: resRg
   params: {
     parLocation: parLocation
-    parEnvironment: parEnvironment
+    parEnvironment: varEnvironmentTag
     parOwnerEmail: parOwnerEmail
     parAppServicePlanName: '${parEnvironment}-skycraft-swc-asp'
     parAppName: '${parEnvironment}-skycraft-swc-app01' // Note: This must be globally unique. User might need to change it if collision.

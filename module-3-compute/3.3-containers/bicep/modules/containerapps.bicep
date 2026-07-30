@@ -13,8 +13,8 @@ DEPLOYMENT: [Internal use via Orchestrator]
 param parLocation string
 
 @description('Environment tag value')
-@allowed(['dev', 'prod', 'platform'])
-param parEnvironment string = 'dev'
+@allowed(['Development', 'Production', 'Platform'])
+param parEnvironment string = 'Development'
 
 @description('Owner e-mail address for the canonical Owner governance tag')
 param parOwnerEmail string = 'admin@skycraft.com'

@@ -13,7 +13,7 @@ DEPLOYMENT: Internal via Orchestrator
 param parLocation string
 
 @description('Environment tag value')
-@allowed(['dev', 'prod'])
+@allowed(['Development', 'Production'])
 param parEnvironment string
 
 @description('Owner e-mail address for the canonical Owner governance tag')

@@ -21,7 +21,7 @@ param parLocation string = 'swedencentral'
 @maxLength(90)
 param parResourceGroupName string = 'dev-skycraft-swc-rg'
 
-@description('Environment tag')
+@description('Environment axis for naming and parameter-file selection (short form)')
 @allowed(['dev', 'prod', 'platform'])
 param parEnvironment string = 'dev'
 
@@ -52,6 +52,14 @@ param parAcaName string = 'dev-skycraft-swc-aca-world-02'
 param parImage string = 'skycraft-auth:v1'
 
 /*******************
+*    Variables     *
+*******************/
+// parEnvironment stays short because it drives resource naming and the .bicepparam
+// axis, but the Environment *tag* must carry the canonical value from
+// bicep-standards.md §5. Same mapping as labs 4.3 and 4.4.
+var varEnvironmentTag = parEnvironment == 'prod' ? 'Production' : (parEnvironment == 'dev' ? 'Development' : 'Platform')
+
+/*******************
 *    Resources     *
 *******************/
 
@@ -61,7 +69,7 @@ resource resRg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
   location: parLocation
   tags: {
     Project: 'SkyCraft'
-    Environment: parEnvironment
+    Environment: varEnvironmentTag
     CostCenter: 'MSDN'
     Owner: parOwnerEmail
   }
@@ -73,7 +81,7 @@ module modAcr 'modules/acr.bicep' = {
   scope: resRg
   params: {
     parLocation: parLocation
-    parEnvironment: parEnvironment
+    parEnvironment: varEnvironmentTag
     parOwnerEmail: parOwnerEmail
     parAcrName: parAcrName
   }
@@ -90,7 +98,7 @@ module modAci 'modules/aci.bicep' = {
   scope: resRg
   params: {
     parLocation: parLocation
-    parEnvironment: parEnvironment
+    parEnvironment: varEnvironmentTag
     parOwnerEmail: parOwnerEmail
     parAcrName: parAcrName
     parAciName: parAciName
@@ -109,7 +117,7 @@ module modAca 'modules/containerapps.bicep' = {
   scope: resRg
   params: {
     parLocation: parLocation
-    parEnvironment: parEnvironment
+    parEnvironment: varEnvironmentTag
     parOwnerEmail: parOwnerEmail
     parAcrName: parAcrName
     parCaeName: parCaeName
