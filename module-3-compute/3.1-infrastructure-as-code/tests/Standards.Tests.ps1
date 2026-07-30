@@ -88,20 +88,25 @@ Describe 'Lab 3.1 Bicep - API versions' {
     }
 }
 
-Describe 'Lab 3.1 Bicep - CostCenter tag coverage' {
+Describe 'Lab 3.1 Bicep - canonical tag coverage' {
     BeforeAll {
         $script:MainFile = (Resolve-Path (Join-Path $PSScriptRoot '..\bicep\main.bicep')).Path
     }
 
-    It 'main.bicep defines CostCenter in varCommonTags' {
-        Get-Content -Raw -LiteralPath $script:MainFile | Should -Match 'CostCenter'
+    It 'main.bicep defines the canonical tag keys in varCommonTags' {
+        $text = Get-Content -Raw -LiteralPath $script:MainFile
+        $text | Should -Match '(?m)^\s+Project\s*:'
+        $text | Should -Match '(?m)^\s+CostCenter\s*:'
+        $text | Should -Match '(?m)^\s+Owner\s*:'
     }
 
-    It 'main.bicep is not relying on ManagedBy instead of CostCenter' {
+    It 'main.bicep assigns none of the banned tags' {
+        # Superseded the old 'not relying on ManagedBy instead of CostCenter' test, whose
+        # `if ($text -match 'ManagedBy')` body became unreachable once ManagedBy was banned.
         $text = Get-Content -Raw -LiteralPath $script:MainFile
-        if ($text -match 'ManagedBy') {
-            $text | Should -Match 'CostCenter' -Because 'ManagedBy is OK as extra metadata, but CostCenter must also be present'
-        }
+        $text | Should -Not -Match '(?m)^\s+ManagedBy\s*:'      -Because 'bicep-standards.md §5 bans the ManagedBy tag'
+        $text | Should -Not -Match '(?m)^\s+DeploymentDate\s*:' -Because 'bicep-standards.md §5 bans the DeploymentDate tag'
+        $text | Should -Not -Match 'utcNow\s*\('               -Because 'a utcNow()-derived tag breaks what-if idempotency'
     }
 }
 
