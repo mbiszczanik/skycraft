@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bicep parameter files (`bicep/parameters/*.bicepparam`) for every entry point — per-environment (`dev`/`prod`/`platform`) for environment-aware labs, a single `main.bicepparam` otherwise; kept minimal (only differentiating or required values) to avoid drift.
 - Validation decorators (`@allowed`, `@minLength`/`@maxLength`, `@minValue`/`@maxValue`) across all Bicep parameters, consistent with the PowerShell `[ValidateSet]` values.
 - Lint workflow now validates every `*.bicepparam` with `az bicep build-params` (parameter files are not covered by `az bicep build`).
+- `tests/Tag-Policy.Tests.ps1`: enforces the canonical tag set. Fails on a `ManagedBy`/`DeploymentDate` assignment (Bicep or PowerShell), on any `utcNow()` in a template, on a Bicep tag block that sets `Project` without `CostCenter` and `Owner`, and on a PowerShell tag hashtable that omits `Owner`.
 
 ### Changed
 
@@ -21,14 +22,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Deploy-Bicep.ps1` made backward-compatible with `-Environment` / `-TemplateParameterFile`, merging the parameter file with runtime-computed overrides; a no-argument run deploys identically to before.
 - Audited explicit `dependsOn` across all labs: documented every genuine non-symbolic ordering and removed a transitively-redundant hub-VNet dependency.
 - Bicep standards documented the canonical tag set, the `bicep/parameters/{env}.bicepparam` convention, and the "never write an explicit `dependsOn` when a symbolic reference already exists" rule.
-- Swept the canonical `Owner` tag into the imperative companion deploy scripts and the storage/BCDR lab tag-enumeration docs so both deployment paths agree.
+- Swept the canonical `Owner` tag into the imperative companion deploy scripts and the storage/BCDR lab tag-enumeration docs so both deployment paths agree, and into the remaining lab materials (checklists for 2.1, 2.2, 2.3, 3.1, 3.2 and `lab-guide-4.1.md`).
+- Canonicalized the `Environment` tag *value* in labs 3.3 and 3.4, which tagged resources `dev`/`prod` instead of `Development`/`Production`. The module parameters now declare the canonical form; the orchestrators keep the short value for naming and map it once, as labs 4.3 and 4.4 already did.
+- Lab 4.1: the soft-delete settings are no longer re-hardcoded in the deploy overlay, so the parameter files actually govern them; the configuration summary now reports the effective value instead of a fixed string.
+- Module 5 labs ship only the environment they support (5.1/5.2 platform, 5.3 prod) and dropped the `-Environment` parameter accordingly — every resource in those labs is name-pinned, so the other parameter files could only mis-tag platform infrastructure.
+- Lab 3.2 is now consistently regional: the guide's architecture diagram, portal walkthroughs, verification tables and summaries no longer teach zone pinning, and Section 6 explains the `ZonalAllocationFailed` trade-off that drives the choice.
 
 ### Removed
 
-- Banned the `ManagedBy` and `DeploymentDate` tags (and the now-unused `parCurrentDate`/`parService` parameters); the `utcNow()`-fed `DeploymentDate` broke `what-if` idempotency by changing on every run.
+- Banned the `ManagedBy` and `DeploymentDate` tags (and the now-unused `parCurrentDate`/`parService` parameters); the `utcNow()`-fed `DeploymentDate` broke `what-if` idempotency by changing on every run. Also removed them from the lab materials that still taught them (`lab-guide-3.1.md`, `3.1/ARCHITECTURE.md`, `lab-guide-3.2.md`, `lab-checklist-3.2.md`).
 
 ### Fixed
 
+- `Deploy-Bicep.ps1` (12 labs): parameter files are compiled with `az bicep build-params` instead of a bare `bicep`. The only Bicep install this project documents is `az bicep install`, which does not put `bicep` on `PATH`, so every one of those scripts failed with `CommandNotFoundException` on a correctly-provisioned machine.
+- `Deploy-Bicep.ps1` (12 labs): the hydration step checks `$LASTEXITCODE`. `$ErrorActionPreference = 'Stop'` does not catch native-command failures, so a failed compile previously skipped hydration silently and deployed with only the runtime overrides — e.g. `3.4 -Environment prod` targeting the dev resource group and VNet, or `3.3 -Environment prod` creating `dev-skycraft-swc-aci-auth` in the prod resource group.
+- Parameter files that carry empty placeholders for runtime values no longer advertise a direct `az deployment sub create` in their `EXAMPLE:` header; following it submitted the empty placeholders.
 - Corrected the `Skycraft` → `SkyCraft` project-tag casing in the Lab 1.2 resource-group script.
 - Lab 3.2: pass the SSH public key to `New-AzSubscriptionDeployment` as a plain string. Az cannot serialize a `SecureString` inside a merged `-TemplateParameterObject` (`Unable to serialize secure string value`); the key is public, so no secret is exposed. Surfaced by the live deployment cycle.
 - Lab 3.2 `Test-Lab.ps1`: validate that the VMs are regional (no availability zone) instead of asserting fixed zones — the VMs are deliberately deployed without zone pinning to avoid `ZonalAllocationFailed` capacity errors in Sweden Central, and the stale assertion crashed on `Zones[0]`.
