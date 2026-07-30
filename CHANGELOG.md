@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.0] - 2026-07-11
+## [0.8.0] - 2026-07-30
 
 ### Added
 
@@ -32,6 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected the `Skycraft` → `SkyCraft` project-tag casing in the Lab 1.2 resource-group script.
 - Lab 3.2: pass the SSH public key to `New-AzSubscriptionDeployment` as a plain string. Az cannot serialize a `SecureString` inside a merged `-TemplateParameterObject` (`Unable to serialize secure string value`); the key is public, so no secret is exposed. Surfaced by the live deployment cycle.
 - Lab 3.2 `Test-Lab.ps1`: validate that the VMs are regional (no availability zone) instead of asserting fixed zones — the VMs are deliberately deployed without zone pinning to avoid `ZonalAllocationFailed` capacity errors in Sweden Central, and the stale assertion crashed on `Zones[0]`.
+
+## [0.7.1] - 2026-07-27
+
+### Removed
+
+- `AUDIT-modules-2-5.md`: working audit report accidentally committed with the v0.7.0 release. All of its findings were already resolved in 0.7.0, and no file referenced it; recoverable from git history if needed.
+
+### Changed
+
+- `.gitignore` now excludes the private, un-checked-in `CLAUDE.local.md` assistant instructions file so it is no longer listed as untracked.
 
 ## [0.7.0] - 2026-07-10
 
