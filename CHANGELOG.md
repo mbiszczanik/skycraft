@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bicep parameter files (`bicep/parameters/*.bicepparam`) for every entry point — per-environment (`dev`/`prod`/`platform`) for environment-aware labs, a single `main.bicepparam` otherwise; kept minimal (only differentiating or required values) to avoid drift.
 - Validation decorators (`@allowed`, `@minLength`/`@maxLength`, `@minValue`/`@maxValue`) across all Bicep parameters, consistent with the PowerShell `[ValidateSet]` values.
 - Lint workflow now validates every `*.bicepparam` with `az bicep build-params` (parameter files are not covered by `az bicep build`).
+- `docs/deployment-verification.md`: runbook for smoke-testing `Deploy-Bicep.ps1` changes against a live subscription, linked from `CONTRIBUTING.md`. CI proves the templates compile; it cannot prove they deploy the right thing, and the failure modes that only appear live (a `prod` run silently targeting `dev` resources, a hydration failure swallowed by `$ErrorActionPreference`) had no documented check.
 - `tests/Tag-Policy.Tests.ps1`: enforces the canonical tag set. Fails on a `ManagedBy`/`DeploymentDate` assignment (Bicep or PowerShell), on any `utcNow()` in a template, on a Bicep tag block that sets `Project` without `CostCenter` and `Owner`, and on a PowerShell tag hashtable that omits `Owner`.
 
 ### Changed

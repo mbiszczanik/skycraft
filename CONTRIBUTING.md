@@ -38,6 +38,7 @@ All new labs and scripts must include validation steps.
 
 - **PowerShell**: Use `Test-Lab.ps1` scripts for Pester-like validation.
 - **Documentation**: Ensure all links work and screenshots are placed in the correct `images/` directory.
+- **Live deployment**: Changes to `Deploy-Bicep.ps1`, to a template's parameters or tags, or to a `.bicepparam` file need a smoke test against a real subscription — CI proves the templates compile, not that they deploy the right thing. Follow [Deployment Verification](docs/deployment-verification.md) and record the outcome in the PR.
 
 ## 🐛 Reporting Issues
 
