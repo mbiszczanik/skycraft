@@ -174,23 +174,32 @@ if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
     $deploymentParams[$p.Key] = $p.Value.value
 }
 
-# Overlay the exact values this script has always set (computed / switch / script).
+# Overlay only the values this script actually computes (switches, existence checks).
+# The soft-delete settings are deliberately NOT overlaid: they are static values whose
+# template defaults already match what this script used to hardcode, so leaving them to
+# the parameter file keeps behaviour identical while letting a lab tune them.
 $deploymentParams.parLocation = $Location
 $deploymentParams.parDeployAllEnvironments = $All.IsPresent
 $deploymentParams.parEnvironment = $Environment
-$deploymentParams.parEnableBlobSoftDelete = $true
-$deploymentParams.parBlobSoftDeleteDays = 7
-$deploymentParams.parEnableContainerSoftDelete = $true
-$deploymentParams.parEnableFileSoftDelete = $true
 $deploymentParams.parIsNewDeployment = $isNewDeployment
 $deploymentParams.parEnableInfrastructureEncryption = $InfraEncryption.IsPresent
+
+# Effective values = compiled template defaults, overridden by the parameter file and
+# then by the overlay above. Used only for the configuration summary, so the summary
+# reports what will actually be deployed instead of a hardcoded claim.
+$effectiveParams = @{}
+foreach ($p in ($built.templateJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+    if ($p.Value.ContainsKey('defaultValue')) { $effectiveParams[$p.Key] = $p.Value.defaultValue }
+}
+foreach ($k in $deploymentParams.Keys) { $effectiveParams[$k] = $deploymentParams[$k] }
 
 Write-Host "  Template: $templateFile"
 Write-Host "  Location: $Location"
 Write-Host "  Environment(s): $(if ($All) { 'ALL (platform, dev, prod)' } else { $Environment })"
 Write-Host "  Deployment Mode: $(if ($isNewDeployment) { 'NEW (full encryption settings)' } else { 'UPDATE (compatible settings)' })"
 Write-Host "  Infrastructure Encryption: $(if ($InfraEncryption) { 'Enabled' } else { 'Disabled' })"
-Write-Host "  Soft Delete: Enabled (7 days)"
+Write-Host "  Parameters: $TemplateParameterFile"
+Write-Host "  Soft Delete: $(if ($effectiveParams.parEnableBlobSoftDelete) { "Enabled ($($effectiveParams.parBlobSoftDeleteDays) days)" } else { 'Disabled' })"
 
 # 4. Deploy
 Write-Host ""
