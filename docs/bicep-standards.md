@@ -82,6 +82,8 @@ Rules:
 
 - **Minimal content**: a parameter file sets only values that differentiate the environment or have no default in the template. Everything else comes from template defaults — duplicating a default here creates drift when the template changes.
 - **Computed values stay in scripts**: values only known at runtime (SSH keys, resource IDs, existence checks, client IPs) are applied as overrides by `Deploy-Bicep.ps1`, never stored in parameter files. Required parameters of this kind get an empty-string placeholder with a comment (`// overridden by Deploy-Bicep.ps1 at runtime`), because `bicep build-params` fails on missing required parameters (BCP258).
+- **A file with placeholders must not advertise a direct CLI deployment**: its `EXAMPLE:` header names the script that supplies the runtime values. An `az deployment sub create --parameters <file>` example is copy-pasteable and would submit the empty placeholders — an empty `principalId`, an empty SSH `keyData`, an empty resource ID.
+- **Script-controlled values belong in the script; everything else belongs here**: only overlay a value in `Deploy-Bicep.ps1` if the script actually computes it. Re-asserting a static value in the overlay makes the parameter file inert for that value.
 - **CI coverage**: `az bicep build` does **not** validate parameter files; the lint workflow runs `az bicep build-params` over every `*.bicepparam` separately.
 
 See [powershell-standards.md — Best Practices](powershell-standards.md#5-best-practices) for how `Deploy-Bicep.ps1` merges a parameter file with runtime-computed overrides.
@@ -103,19 +105,32 @@ Every resource must include the following tags:
 
 These four keys are the **canonical base set** — every taggable resource carries exactly these, plus (optionally) deliberate purpose-specific extras such as `Purpose` or `Criticality`.
 
+`Environment` takes exactly one of **`Development`**, **`Production`** or **`Platform`** — the long form, which is what the Lab 1.3 policy message names. Several labs also use a *short* `dev` / `prod` / `platform` value for resource naming and for the `.bicepparam` axis; that value is **not** the tag. Where both exist, keep the parameter short and map it once:
+
+```bicep
+var varEnvironmentTag = parEnvironment == 'prod' ? 'Production' : (parEnvironment == 'dev' ? 'Development' : 'Platform')
+```
+
+Modules that consume the value only for tagging should instead declare the canonical form directly, with `@allowed(['Development', 'Production', 'Platform'])`.
+
 > [!WARNING]
 > `ManagedBy` and `DeploymentDate` are **banned**. A timestamp tag fed by `utcNow()` changes on every run, so `what-if` always reports a modification and the deployment is never idempotent.
 
+Both rules are enforced by [`tests/Tag-Policy.Tests.ps1`](../tests/Tag-Policy.Tests.ps1), which fails the build on a banned key, on any `utcNow()` in a template, and on a tag block that sets `Project` without `CostCenter` and `Owner`.
+
 ### Implementation Pattern
 
-Define a `varCommonTags` variable and apply it to all resources:
+Define a `varCommonTags` variable and apply it to all resources. `Owner` comes from a `parOwnerEmail` parameter so the address is not duplicated across every template:
 
 ```bicep
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 var varCommonTags = {
   Project: 'SkyCraft'
   Environment: parEnvironment  // Pass as parameter
   CostCenter: 'MSDN'
-  Owner: 'admin@skycraft.com'
+  Owner: parOwnerEmail
 }
 
 resource resExample 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
@@ -316,6 +331,9 @@ param parLocation string
 @allowed(['Platform', 'Development', 'Production'])
 param parEnvironment string = 'Production'
 
+@description('Owner e-mail address for the canonical Owner governance tag')
+param parOwnerEmail string = 'admin@skycraft.com'
+
 /*******************
 *    Variables     *
 *******************/
@@ -323,7 +341,7 @@ var varCommonTags = {
   Project: 'SkyCraft'
   Environment: parEnvironment
   CostCenter: 'MSDN'
-  Owner: 'admin@skycraft.com'
+  Owner: parOwnerEmail
 }
 
 var varResourceName = 'example-resource'

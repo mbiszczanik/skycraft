@@ -1017,7 +1017,7 @@ az vm show \
 | **Cost**                 | Same as standard                    | Same as standard                |
 | **Cross-zone resources** | Standard LB, Zone-redundant storage | N/A                             |
 
-A third option — the one this lab uses — is **neither**: a *regional* VM, where you let
+A third option — the one this lab uses — is **neither**: a _regional_ VM, where you let
 Azure place the instance anywhere in the region. It carries the 99.9% single-instance SLA
 and no infrastructure redundancy.
 
@@ -1046,7 +1046,7 @@ zones: empty(parAvailabilityZone) ? [] : [parAvailabilityZone]
 **What you would change for production**: pass `parAvailabilityZone` per VM (`'1'` for
 Authserver, `'2'` for Worldserver), size up to a D-series family with better zonal
 capacity, and deploy two or more instances of each role so the 99.99% multi-zone SLA
-actually applies. A single zone-pinned VM has a *worse* effective availability than a
+actually applies. A single zone-pinned VM has a _worse_ effective availability than a
 regional one — you have added a placement constraint without adding redundancy.
 
 ### Step 3.2.20: Verify VM Placement
