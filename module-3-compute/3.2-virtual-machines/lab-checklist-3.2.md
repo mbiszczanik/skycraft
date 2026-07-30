@@ -7,7 +7,7 @@
 - [ ] Virtual machine name: `dev-skycraft-swc-auth-vm`
 - [ ] Location: **Sweden Central**
 - [ ] Resource group: `dev-skycraft-swc-rg`
-- [ ] Availability zone: **Zone 1**
+- [ ] Availability zone: **none — regional VM** (lab guide Section 6)
 - [ ] Size: `Standard_B2s` (2 vCPUs, 4 GiB memory)
 - [ ] Image: Ubuntu Server 22.04 LTS - x64 Gen2
 - [ ] Status: **Running**
@@ -52,7 +52,7 @@
 - [ ] Virtual machine name: `dev-skycraft-swc-world-vm`
 - [ ] Location: **Sweden Central**
 - [ ] Resource group: `dev-skycraft-swc-rg`
-- [ ] Availability zone: **Zone 2**
+- [ ] Availability zone: **none — regional VM** (lab guide Section 6)
 - [ ] Size: `Standard_B2s` (2 vCPUs, 4 GiB memory)
 - [ ] Image: Ubuntu Server 22.04 LTS - x64 Gen2
 - [ ] Status: **Running**
@@ -124,13 +124,19 @@
 
 ---
 
-## ✅ Availability Zone Distribution Verification
+## ✅ VM Placement Verification
 
-| Component      | Zone           | Status |
-| -------------- | -------------- | ------ |
-| Authserver VM  | Zone 1         | ✅     |
-| Worldserver VM | Zone 2         | ✅     |
-| Load Balancer  | Zone-redundant | ✅     |
+| Component      | Placement           | Status |
+| -------------- | ------------------- | ------ |
+| Authserver VM  | Regional (no zone)  | ✅     |
+| Worldserver VM | Regional (no zone)  | ✅     |
+| Load Balancer  | Zone-redundant      | ✅     |
+
+> [!NOTE]
+> The VMs are deliberately **not** zone-pinned: Sweden Central rejects zonal B-series
+> allocations with `ZonalAllocationFailed`. `Test-Lab.ps1` asserts that both VMs are
+> regional, so a zone-pinned VM shows up as a failure. See lab guide Section 6 for the
+> trade-off and what production would do differently.
 
 ---
 
@@ -194,11 +200,11 @@ az vm list \
   --query "[].{Name:name,Size:hardwareProfile.vmSize,Zone:zones[0],State:powerState}" \
   --output table
 
-# Expected output:
+# Expected output (empty Zone column = regional VM):
 # Name                        Size          Zone  State
 # --------------------------  ------------  ----  ---------
-# dev-skycraft-swc-auth-vm    Standard_B2s  1     VM running
-# dev-skycraft-swc-world-vm   Standard_B2s  2     VM running
+# dev-skycraft-swc-auth-vm    Standard_B2s        VM running
+# dev-skycraft-swc-world-vm   Standard_B2s        VM running
 ```
 
 ### Verify VM Network Configuration
@@ -305,11 +311,11 @@ az keyvault show \
 
 ## 📊 VM Infrastructure Summary
 
-| Component       | Name                      | Zone | Size         | Disk Encryption | Backend Pool |
-| --------------- | ------------------------- | ---- | ------------ | --------------- | ------------ |
-| **Authserver**  | dev-skycraft-swc-auth-vm  | 1    | Standard_B2s | ✅              | be-auth      |
-| **Worldserver** | dev-skycraft-swc-world-vm | 2    | Standard_B2s | ✅              | be-world     |
-| **Key Vault**   | dev-skycraft-swc-kv       | N/A  | Standard     | N/A             | N/A          |
+| Component       | Name                      | Placement | Size         | Disk Encryption | Backend Pool |
+| --------------- | ------------------------- | --------- | ------------ | --------------- | ------------ |
+| **Authserver**  | dev-skycraft-swc-auth-vm  | Regional  | Standard_B2s | ✅              | be-auth      |
+| **Worldserver** | dev-skycraft-swc-world-vm | Regional  | Standard_B2s | ✅              | be-world     |
+| **Key Vault**   | dev-skycraft-swc-kv       | N/A       | Standard     | N/A             | N/A          |
 
 ### Disk Summary
 
@@ -327,8 +333,8 @@ az keyvault show \
 
 **Document the VMs you created:**
 
-| VM Name                   | Private IP       | Zone     | Subnet           |
-| ------------------------- | ---------------- | -------- | ---------------- |
+| VM Name                   | Private IP       | Zone (expect empty) | Subnet           |
+| ------------------------- | ---------------- | ------------------- | ---------------- |
 | dev-skycraft-swc-auth-vm  | \***\*\_\_\*\*** | **\_\_** | \***\*\_\_\*\*** |
 | dev-skycraft-swc-world-vm | \***\*\_\_\*\*** | **\_\_** | \***\*\_\_\*\*** |
 
@@ -344,7 +350,7 @@ az keyvault show \
 
 ### Question 3: High Availability Design
 
-**If Zone 1 experiences an outage, which services are affected? How would you design for true HA?**
+**These VMs are regional, so Azure chose their placement. Which services are affected if that datacenter has an outage, and what would you change to get real HA?**
 
 ---
 
@@ -404,7 +410,7 @@ az keyvault show \
 **All Verification Items Complete**:
 
 - [ ] Both VMs created and running
-- [ ] VMs deployed in different availability zones
+- [ ] Both VMs are regional (no availability zone pinned)
 - [ ] All disks encrypted with Azure Disk Encryption
 - [ ] Data disk attached and mounted on Worldserver
 - [ ] VMs added to load balancer backend pools
@@ -427,7 +433,7 @@ You've successfully completed **Lab 3.2: Create and Configure Virtual Machines**
 **What You Built**:
 
 - ✅ 2 Ubuntu Linux VMs for SkyCraft game servers
-- ✅ High-availability deployment across 2 availability zones
+- ✅ A deliberate regional placement decision, with the zone trade-off understood
 - ✅ Encrypted OS and data disks for security compliance
 - ✅ 64 GB dedicated data disk for database storage
 - ✅ Secure access configuration via Azure Bastion

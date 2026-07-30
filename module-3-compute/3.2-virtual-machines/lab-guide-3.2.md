@@ -8,7 +8,7 @@ By completing this lab, you will:
 - Configure Azure Disk Encryption for OS and data disks
 - Manage virtual machine sizes and resize VMs based on workload requirements
 - Add and configure managed data disks for database storage
-- Deploy VMs to availability zones for high availability
+- Understand availability zones, and why this lab deploys **regional** VMs instead
 - Understand Azure Virtual Machine Scale Sets for auto-scaling Worldserver instances
 - Move virtual machines between resource groups (conceptual)
 
@@ -28,11 +28,8 @@ graph TB
     subgraph "dev-skycraft-swc-rg"
         DevVNet[dev-skycraft-swc-vnet<br/>10.1.0.0/16]
 
-        subgraph "Availability Zone 1"
+        subgraph "Sweden Central (regional, no zone pinning)"
             AuthVM[dev-skycraft-swc-auth-vm<br/>Ubuntu 22.04 LTS<br/>Standard_B2s<br/>Port 3724]
-        end
-
-        subgraph "Availability Zone 2"
             WorldVM[dev-skycraft-swc-world-vm<br/>Ubuntu 22.04 LTS<br/>Standard_B2s<br/>Port 8085]
         end
 
@@ -75,7 +72,7 @@ graph TB
 **Your Task**: Deploy Azure Virtual Machines that:
 
 - Run Ubuntu 22.04 LTS (AzerothCore's recommended OS)
-- Are distributed across availability zones for high availability
+- Are deployed as regional VMs (see the availability-zone note in Section 6)
 - Have encrypted disks for security compliance
 - Include additional data disks for database storage
 - Are properly sized for the expected player load (starting small, can resize later)
@@ -84,7 +81,7 @@ graph TB
 **Business Impact**:
 
 - Game servers become operational for player connections
-- High availability ensures players can connect even if one zone fails
+- Understanding the zonal-vs-regional trade-off is what lets you argue for (or against) paying for zone redundancy
 - Disk encryption meets security and compliance requirements
 - Proper sizing optimizes costs while ensuring performance
 
@@ -97,7 +94,7 @@ graph TB
 - **Section 3**: Create Worldserver Virtual Machine (40 min)
 - **Section 4**: Configure managed data disks (30 min)
 - **Section 5**: Configure Azure Disk Encryption (35 min)
-- **Section 6**: Deploy VMs to availability zones (25 min)
+- **Section 6**: Availability zones and the regional trade-off (25 min)
 - **Section 7**: Manage VM sizes (25 min)
 - **Section 8**: Introduction to Virtual Machine Scale Sets (20 min)
 
@@ -155,7 +152,7 @@ az network vnet subnet list --vnet-name dev-skycraft-swc-vnet --resource-group d
 | **Data Disk**         | Additional storage for data   | 64 GB Standard SSD for MySQL database |
 | **NIC**               | Network connectivity          | Connects to AuthSubnet or WorldSubnet |
 | **Public IP**         | External access (optional)    | Not used - access via Bastion         |
-| **Availability Zone** | Physical datacenter isolation | Zone 1 for Auth, Zone 2 for World     |
+| **Availability Zone** | Physical datacenter isolation | Not pinned - regional (see Section 6) |
 
 ### VM Sizing for Game Servers
 
@@ -190,18 +187,30 @@ For development, we'll use **Standard_B2s** (cost-effective). For production, up
 
 ```
 Sweden Central Region
-├── Zone 1 (Datacenter A) ← Authserver VM
-├── Zone 2 (Datacenter B) ← Worldserver VM
-└── Zone 3 (Datacenter C) ← Future expansion
+├── Zone 1 (Datacenter A)
+├── Zone 2 (Datacenter B)
+└── Zone 3 (Datacenter C)
 ```
 
 **Benefits**:
 
-- 99.99% SLA (vs 99.9% for single zone)
-- Protection against datacenter failures
+- 99.99% SLA for two or more VMs spread across zones (vs 99.9% for a single-instance VM)
+- Protection against the loss of a single datacenter
 - Load balancer distributes traffic across zones
 
-**For SkyCraft**: Deploy Authserver in Zone 1 and Worldserver in Zone 2 for fault tolerance.
+> [!IMPORTANT]
+> **This lab deploys regional VMs — no zone is pinned.** Pinning a zone reserves capacity
+> in one specific datacenter, and Sweden Central regularly rejects those requests for the
+> smaller B-series sizes with `ZonalAllocationFailed`. A lab that cannot be deployed
+> teaches nothing, so `parAvailabilityZone` is left at its default `''` and Azure places
+> the VMs anywhere in the region.
+>
+> The trade-off is explicit: regional VMs get the 99.9% single-instance SLA and no
+> datacenter-failure isolation. Section 6 covers what you would change for a production
+> deployment, and both `modules/vm.bicep` and `modules/disk.bicep` already accept
+> `parAvailabilityZone` so you can opt in when capacity allows.
+
+**For SkyCraft**: deploy both game servers regionally in the lab, and treat zone pinning as a production decision that has to be justified against capacity risk.
 
 ---
 
@@ -285,8 +294,7 @@ cat ~/.ssh/skycraft-dev.pub
 | Resource group       | `dev-skycraft-swc-rg`                    |
 | Virtual machine name | `dev-skycraft-swc-auth-vm`               |
 | Region               | **Sweden Central**                       |
-| Availability options | **Availability zone**                    |
-| Availability zone    | **Zone 1**                               |
+| Availability options | **No infrastructure redundancy required** |
 | Security type        | Standard                                 |
 | Image                | **Ubuntu Server 22.04 LTS - x64 Gen2**   |
 | VM architecture      | x64                                      |
@@ -411,7 +419,7 @@ cat ~/.ssh/skycraft-dev.pub
 **Expected Result**:
 
 - Deployment starts (takes 2-5 minutes)
-- VM `dev-skycraft-swc-auth-vm` created in Zone 1
+- VM `dev-skycraft-swc-auth-vm` created as a regional VM (no zone)
 - Connected to AuthSubnet with no public IP
 - Added to load balancer backend pool
 
@@ -426,7 +434,7 @@ cat ~/.ssh/skycraft-dev.pub
 | Status                 | Running                          |
 | Location               | Sweden Central                   |
 | Size                   | Standard_B2s                     |
-| Availability zone      | 1                                |
+| Availability zone      | None (regional)                  |
 | Public IP address      | None                             |
 | Virtual network/subnet | dev-skycraft-swc-vnet/AuthSubnet |
 
@@ -452,8 +460,7 @@ Repeat the VM creation process for the Worldserver:
 | Resource group       | `dev-skycraft-swc-rg`                   |
 | Virtual machine name | `dev-skycraft-swc-world-vm`             |
 | Region               | **Sweden Central**                      |
-| Availability options | **Availability zone**                   |
-| Availability zone    | **Zone 2** (different from Authserver!) |
+| Availability options | **No infrastructure redundancy required** |
 | Image                | **Ubuntu Server 22.04 LTS - x64 Gen2**  |
 | Size                 | **Standard_B2s**                        |
 | Authentication type  | **SSH public key**                      |
@@ -530,7 +537,7 @@ Repeat the VM creation process for the Worldserver:
 
 **Expected Result**:
 
-- VM `dev-skycraft-swc-world-vm` created in Zone 2
+- VM `dev-skycraft-swc-world-vm` created as a regional VM (no zone)
 - Connected to WorldSubnet
 - Added to load balancer backend pool for port 8085
 
@@ -539,17 +546,17 @@ Repeat the VM creation process for the Worldserver:
 1. Navigate to **Virtual machines**
 2. Verify both VMs are listed and running:
 
-| VM Name                   | Zone | Subnet      | Size         | Status  |
-| ------------------------- | ---- | ----------- | ------------ | ------- |
-| dev-skycraft-swc-auth-vm  | 1    | AuthSubnet  | Standard_B2s | Running |
-| dev-skycraft-swc-world-vm | 2    | WorldSubnet | Standard_B2s | Running |
+| VM Name                   | Zone     | Subnet      | Size         | Status  |
+| ------------------------- | -------- | ----------- | ------------ | ------- |
+| dev-skycraft-swc-auth-vm  | (none)   | AuthSubnet  | Standard_B2s | Running |
+| dev-skycraft-swc-world-vm | (none)   | WorldSubnet | Standard_B2s | Running |
 
 3. Navigate to **Load balancers** → `dev-skycraft-swc-lb` → **Backend pools**
 4. Verify both backend pools have VMs:
    - `dev-skycraft-swc-lb-be-auth`: 1 VM
    - `dev-skycraft-swc-lb-be-world`: 1 VM
 
-**Expected Result**: Both VMs running in different availability zones, connected to respective load balancer backend pools.
+**Expected Result**: Both VMs running as regional instances, connected to respective load balancer backend pools.
 
 ![Worldserver Backend Pools](images/step-3.2.12.png)
 
@@ -997,27 +1004,55 @@ az vm show \
 
 ---
 
-## 📖 Section 6: Deploy VMs to Availability Zones (25 minutes)
+## 📖 Section 6: Availability Zones and the Regional Trade-Off (25 minutes)
 
 ### Understanding Availability Zones vs Availability Sets
 
 | Feature                  | Availability Zones                  | Availability Sets               |
 | ------------------------ | ----------------------------------- | ------------------------------- |
 | **Isolation**            | Separate datacenters                | Same datacenter, separate racks |
-| **SLA**                  | 99.99%                              | 99.95%                          |
+| **SLA**                  | 99.99% (2+ VMs across zones)        | 99.95% (2+ VMs in the set)      |
 | **Protection**           | Datacenter failure                  | Rack/power failure              |
 | **Network latency**      | ~2ms between zones                  | Sub-millisecond                 |
 | **Cost**                 | Same as standard                    | Same as standard                |
 | **Cross-zone resources** | Standard LB, Zone-redundant storage | N/A                             |
 
-**For SkyCraft**: We use **Availability Zones** for maximum fault tolerance.
+A third option — the one this lab uses — is **neither**: a *regional* VM, where you let
+Azure place the instance anywhere in the region. It carries the 99.9% single-instance SLA
+and no infrastructure redundancy.
 
-### Step 3.2.20: Verify Availability Zone Distribution
+### Why SkyCraft's lab VMs are regional
 
-Your VMs should already be in different zones:
+Pinning a zone is a **capacity reservation in one specific datacenter**. Sweden Central
+frequently has no room for the smaller B-series sizes in a named zone and rejects the
+request:
+
+```text
+Code: ZonalAllocationFailed
+Message: Allocation failed. We do not have sufficient capacity for the requested VM size
+in this zone. Read more about improving likelihood of allocation success at
+https://aka.ms/allocation-guidance
+```
+
+That failure is not something you can retry your way out of on a student subscription, and
+a lab that cannot be deployed teaches nothing. So `main.bicep` does not pass
+`parAvailabilityZone`, both `modules/vm.bicep` and `modules/disk.bicep` default it to `''`,
+and their `zones` property collapses to an empty array:
+
+```bicep
+zones: empty(parAvailabilityZone) ? [] : [parAvailabilityZone]
+```
+
+**What you would change for production**: pass `parAvailabilityZone` per VM (`'1'` for
+Authserver, `'2'` for Worldserver), size up to a D-series family with better zonal
+capacity, and deploy two or more instances of each role so the 99.99% multi-zone SLA
+actually applies. A single zone-pinned VM has a *worse* effective availability than a
+regional one — you have added a placement constraint without adding redundancy.
+
+### Step 3.2.20: Verify VM Placement
 
 ```azurecli
-# List VMs with their availability zones
+# List VMs with their availability zones (empty Zone column = regional)
 az vm list \
   --resource-group dev-skycraft-swc-rg \
   --query "[].{Name:name,Zone:zones[0],Size:hardwareProfile.vmSize}" \
@@ -1026,43 +1061,48 @@ az vm list \
 # Expected output:
 # Name                        Zone  Size
 # --------------------------  ----  -------------
-# dev-skycraft-swc-auth-vm    1     Standard_B2s
-# dev-skycraft-swc-world-vm   2     Standard_B2s
+# dev-skycraft-swc-auth-vm          Standard_B2s
+# dev-skycraft-swc-world-vm         Standard_B2s
 ```
 
-**Expected Result**: VMs are distributed across Zone 1 and Zone 2.
+**Expected Result**: both VMs report an empty `Zone` — they are regional. `Test-Lab.ps1`
+asserts exactly this, so a zone-pinned VM will show up as a failure there.
 
 ### Step 3.2.21: Understand Zone-Redundant Load Balancing
 
-Your Standard Load Balancer automatically distributes traffic across zones:
+Your Standard Load Balancer is zone-redundant even though the VMs behind it are not:
 
 1. Navigate to **Load balancers** → `dev-skycraft-swc-lb`
 2. Click **Overview**
 3. Note: Standard SKU load balancers are **zone-redundant by default**
 4. Click **Frontend IP configuration**
-5. The public IP is zone-redundant, meaning:
-   - If Zone 1 fails, traffic routes to Zone 2
-   - Players experience no interruption
+5. The frontend survives the loss of a single zone — but with regional VMs behind it, the
+   backend is only as available as wherever Azure happened to place those VMs
 
-**Expected Result**: Load balancer configured for zone-redundant access.
+**Expected Result**: Load balancer configured for zone-redundant access. This is worth
+seeing precisely because it shows redundancy is end-to-end: a zone-redundant frontend does
+not make a single-instance backend highly available.
 
 ### Step 3.2.22: Test High Availability (Conceptual)
 
 In a real scenario, you would test HA by:
 
-1. **Simulating zone failure**: Stop one VM
-2. **Verifying traffic routing**: Load balancer routes to remaining VM
+1. **Simulating instance failure**: Stop one VM
+2. **Verifying traffic routing**: Load balancer stops sending traffic to the failed pool member
 3. **Restoring service**: Start stopped VM, verify it rejoins backend pool
 
 For this lab, we'll document the expected behavior:
 
-| Scenario               | Expected Behavior                             |
-| ---------------------- | --------------------------------------------- |
-| Zone 1 fails           | Authserver unavailable, Worldserver continues |
-| Zone 2 fails           | Worldserver unavailable, Authserver continues |
-| Both zones operational | Full redundancy, load balanced                |
+| Scenario                     | Expected Behavior                                          |
+| ---------------------------- | ---------------------------------------------------------- |
+| Authserver VM stopped        | Logins fail, Worldserver continues serving connected players |
+| Worldserver VM stopped       | Gameplay stops, logins still succeed                       |
+| Regional outage              | Both roles unavailable — no zone isolation to fall back on  |
+| Both VMs running            | Load balancer distributes traffic, no redundancy per role   |
 
-**Note**: For true game server HA, you would deploy multiple instances of each server type across different zones.
+**Note**: For true game server HA, you would deploy multiple instances of each server type
+across different zones — see the VMSS section, where zone spreading is handled by the
+scale set rather than by pinning individual VMs.
 
 ---
 
@@ -1437,8 +1477,8 @@ Quick verification before proceeding:
 
 ### Virtual Machines Created
 
-- [ ] `dev-skycraft-swc-auth-vm` deployed in Zone 1
-- [ ] `dev-skycraft-swc-world-vm` deployed in Zone 2
+- [ ] `dev-skycraft-swc-auth-vm` deployed as a regional VM (no availability zone)
+- [ ] `dev-skycraft-swc-world-vm` deployed as a regional VM (no availability zone)
 - [ ] Both VMs running Ubuntu 22.04 LTS
 - [ ] Both VMs sized as Standard_B2s
 - [ ] Both VMs have no public IP addresses
@@ -1498,7 +1538,9 @@ Test your understanding with these questions:
    **When to use which**:
    - Use **Availability Zones** when you need highest availability and can tolerate 2ms latency
    - Use **Availability Sets** when zones aren't available or latency is critical
-   - For SkyCraft, we use Zones because game servers tolerate 2ms easily
+   - SkyCraft's lab VMs use **neither** — they are regional, because zone pinning fails on
+     `ZonalAllocationFailed` for B-series sizes in Sweden Central (Section 6). A production
+     SkyCraft would use Zones with two or more instances per role.
 
    </details>
 
@@ -1829,7 +1871,7 @@ sudo reboot
 **What You Accomplished**:
 
 - ✅ Created 2 Ubuntu Linux VMs for SkyCraft game servers
-- ✅ Deployed VMs across Availability Zones 1 and 2 for high availability
+- ✅ Deployed them as regional VMs, and can justify that choice against zone pinning
 - ✅ Configured SSH authentication with key pairs
 - ✅ Connected VMs to existing VNet subnets (AuthSubnet, WorldSubnet)
 - ✅ Added VMs to load balancer backend pools
@@ -1842,15 +1884,15 @@ sudo reboot
 **Infrastructure Deployed**:
 | Resource | Name | Configuration |
 |----------|------|---------------|
-| VM (Authserver) | dev-skycraft-swc-auth-vm | Zone 1, B2s, AuthSubnet |
-| VM (Worldserver) | dev-skycraft-swc-world-vm | Zone 2, B2s, WorldSubnet |
+| VM (Authserver) | dev-skycraft-swc-auth-vm | Regional (no zone), B2s, AuthSubnet |
+| VM (Worldserver) | dev-skycraft-swc-world-vm | Regional (no zone), B2s, WorldSubnet |
 | Data Disk | dev-skycraft-swc-world-vm-data | 64 GB Premium SSD |
 | Key Vault | dev-skycraft-swc-kv | Disk encryption keys |
 
 **Skills Gained**:
 
 - Azure VM creation and configuration
-- Availability zone deployment strategies
+- Choosing between zonal, availability-set and regional placement — and the capacity risk that drives it
 - Managed disk management
 - Azure Disk Encryption implementation
 - VM sizing and optimization
