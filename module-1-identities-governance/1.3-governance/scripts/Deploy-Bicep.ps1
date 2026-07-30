@@ -84,11 +84,13 @@ Write-Host "  AdminEmail: $AdminEmail" -ForegroundColor Gray
 try {
     # Static values from the .bicepparam file...
     $params = @{}
-    $built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
-    if ($built.parametersJson) {
-        ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object {
-            $params[$_.Name] = $_.Value.value
-        }
+    $built = az bicep build-params --file $TemplateParameterFile --stdout | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
+        Write-Host "  -> [ERROR] Failed to compile parameter file: $TemplateParameterFile" -ForegroundColor Red
+        exit 1
+    }
+    foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+        $params[$p.Key] = $p.Value.value
     }
 
     # ...then runtime overrides win (reproduces the previous no-argument behaviour).

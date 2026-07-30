@@ -63,9 +63,13 @@ try {
     # Load base values from the per-environment .bicepparam file, then overlay
     # the exact script-supplied values (keeps a no-argument run identical to before).
     $params = @{}
-    $built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
-    if ($built.parametersJson) {
-        ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object { $params[$_.Name] = $_.Value.value }
+    $built = az bicep build-params --file $TemplateParameterFile --stdout | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
+        Write-Host "  -> [ERROR] Failed to compile parameter file: $TemplateParameterFile" -ForegroundColor Red
+        exit 1
+    }
+    foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+        $params[$p.Key] = $p.Value.value
     }
     $params.parLocation = $Location
     $params.parEnvironment = $Environment

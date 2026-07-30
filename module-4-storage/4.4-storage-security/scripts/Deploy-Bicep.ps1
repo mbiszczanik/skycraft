@@ -67,11 +67,13 @@ if (-not $TemplateParameterFile) {
 }
 
 $deploymentParams = @{}
-$built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
-if ($built.parametersJson) {
-    ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object {
-        $deploymentParams[$_.Name] = $_.Value.value
-    }
+$built = az bicep build-params --file $TemplateParameterFile --stdout | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
+    Write-Host "  -> [ERROR] Failed to compile parameter file: $TemplateParameterFile" -ForegroundColor Red
+    exit 1
+}
+foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+    $deploymentParams[$p.Key] = $p.Value.value
 }
 
 # Overlay the exact values this script has always set. parClientIp is a runtime

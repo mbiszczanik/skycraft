@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Deploys Lab 5.3 Network Monitoring & Diagnostics infrastructure using Bicep.
 
@@ -220,11 +220,13 @@ Write-Host "`n[4/5] Running deployment..." -ForegroundColor Yellow
 # then overlay the computed resource IDs so a no-argument run deploys exactly
 # what it did before parameter files existed.
 $tp = @{}
-$built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
-if ($built.parametersJson) {
-    ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object {
-        $tp[$_.Name] = $_.Value.value
-    }
+$built = az bicep build-params --file $TemplateParameterFile --stdout | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
+    Write-Host "  -> [ERROR] Failed to compile parameter file: $TemplateParameterFile" -ForegroundColor Red
+    exit 1
+}
+foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+    $tp[$p.Key] = $p.Value.value
 }
 
 # Runtime / script-computed overrides win.

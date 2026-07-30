@@ -157,9 +157,13 @@ try {
     # exact script-supplied / generated values (keeps a no-argument run identical
     # to before, including the runtime SSH key placeholder override).
     $tp = @{}
-    $built = (bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json)
-    if ($built.parametersJson) {
-        ($built.parametersJson | ConvertFrom-Json).parameters.PSObject.Properties | ForEach-Object { $tp[$_.Name] = $_.Value.value }
+    $built = az bicep build-params --file $TemplateParameterFile --stdout | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
+        Write-Host "  -> [ERROR] Failed to compile parameter file: $TemplateParameterFile" -ForegroundColor Red
+        exit 1
+    }
+    foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+        $tp[$p.Key] = $p.Value.value
     }
     $tp.parEnvironment = $Environment
     $tp.parVmSize = $VmSize

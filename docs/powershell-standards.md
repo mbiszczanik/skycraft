@@ -195,13 +195,17 @@ catch {
   }
   ```
 
-- **Template parameters via `.bicepparam` + runtime overrides**: `Deploy-Bicep.ps1` reads the lab's parameter file (default `bicep/parameters/<env>.bicepparam`, overridable with `-TemplateParameterFile`), compiles it with the standalone `bicep` CLI, and merges runtime-computed values (generated keys, resource IDs, existence checks) on top. Computed overrides always win, so a no-argument invocation deploys exactly what the script deployed before parameter files existed:
+- **Template parameters via `.bicepparam` + runtime overrides**: `Deploy-Bicep.ps1` reads the lab's parameter file (default `bicep/parameters/<env>.bicepparam`, overridable with `-TemplateParameterFile`), compiles it with `az bicep build-params`, and merges runtime-computed values (generated keys, resource IDs, existence checks) on top. Computed overrides always win, so a no-argument invocation deploys exactly what the script deployed before parameter files existed:
 
   ```powershell
   # Static values from the .bicepparam file...
-  $buildOutput = bicep build-params $TemplateParameterFile --stdout | ConvertFrom-Json
   $templateParams = @{}
-  foreach ($p in ($buildOutput.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+  $built = az bicep build-params --file $TemplateParameterFile --stdout | ConvertFrom-Json
+  if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
+      Write-Host "  -> [ERROR] Failed to compile parameter file: $TemplateParameterFile" -ForegroundColor Red
+      exit 1
+  }
+  foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
       $templateParams[$p.Key] = $p.Value.value
   }
 
@@ -210,6 +214,12 @@ catch {
 
   New-AzSubscriptionDeployment -TemplateFile $templateFile -TemplateParameterObject $templateParams @commonArgs
   ```
+
+  Three rules make this pattern safe:
+
+  - **Use `az bicep build-params`, never a bare `bicep`.** The only Bicep install this project documents is `az bicep install`, which places the binary inside the Azure CLI's private directory and **not** on `PATH`. A bare `bicep` call fails with `CommandNotFoundException` on a correctly-provisioned machine, and it would diverge from what CI runs.
+  - **Always check `$LASTEXITCODE`.** `$ErrorActionPreference = 'Stop'` does not catch native-command failures (`$PSNativeCommandUseErrorActionPreference` is `$false` by default). Without the check, a failed compile leaves the hashtable holding only the runtime overrides, and the deployment silently proceeds with template defaults — e.g. a `prod` run creating `dev`-named resources.
+  - **Hydrate with `-AsHashtable`.** It yields nested hashtables rather than `PSCustomObject`s, which is what `-TemplateParameterObject` expects for `object`-typed parameters.
 
   Scripts that pass **no** computed values skip the merge and hand the file straight to the cmdlet via `-TemplateParameterFile`. See [bicep-standards.md §4.3](bicep-standards.md#43-parameter-files-bicepparametersbicepparam) for the parameter-file conventions themselves.
 
