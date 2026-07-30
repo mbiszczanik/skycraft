@@ -7,7 +7,11 @@ DESCRIPTION: Parameter values for the role-assignments.bicep entry point. Module
              by scripts/New-LabRoleAssignment.ps1, so they carry empty-string
              placeholders here to satisfy 'bicep build-params' (BCP258). The three
              parResourceGroupName* parameters have defaults and are omitted.
-EXAMPLE: az deployment sub create --location swedencentral --template-file role-assignments.bicep --parameters parameters/role-assignments.bicepparam
+EXAMPLE: .\scripts\New-LabRoleAssignment.ps1
+         Deploy through the script, not 'az deployment' directly: this file leaves
+         the four Entra principal IDs as empty placeholders, which exist only to keep
+         'az bicep build-params' valid (BCP258). Passing it straight to the CLI
+         submits those empty values.
 AUTHOR/S: Marcin Biszczanik
 VERSION: 1.0.0
 ======================================================*/

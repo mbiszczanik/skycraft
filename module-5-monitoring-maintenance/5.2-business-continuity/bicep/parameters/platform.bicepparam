@@ -1,7 +1,11 @@
 /*=====================================================
 SUMMARY: Lab 5.2 - Platform Parameters
 DESCRIPTION: Parameter values for the Platform environment (Business Continuity & Disaster Recovery).
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep --parameters parameters/platform.bicepparam
+EXAMPLE: .\scripts\Deploy-Bicep.ps1
+         Deploy through the script, not 'az deployment' directly: this file leaves
+         the Log Analytics workspace ID as an empty placeholder, which exist only to keep
+         'az bicep build-params' valid (BCP258). Passing it straight to the CLI
+         submits those empty values.
 AUTHOR/S: Marcin Biszczanik
 VERSION: 1.0.0
 ======================================================*/
