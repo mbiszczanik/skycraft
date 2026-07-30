@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Deploys Lab 5.2 Business Continuity & Disaster Recovery infrastructure using Bicep.
 
@@ -19,13 +19,10 @@
 
     Prerequisites: Lab 3.2 (VM) and Lab 5.1 (Log Analytics Workspace) must be deployed.
 
-.PARAMETER Environment
-    Environment whose parameter file supplies template defaults (dev/prod/platform).
-    Default: platform (matches the template's previous default parEnvironment = 'Platform').
-
 .PARAMETER TemplateParameterFile
     Path to the Bicep parameter file supplying template defaults. Defaults to
-    '..\bicep\parameters\<Environment>.bicepparam'. The computed Log Analytics
+    '..\bicep\parameters\platform.bicepparam' - the only environment this lab
+    supports, because the Recovery Services vault and Backup vault are hardcoded platform-skycraft-swc-rsv / -bv. The computed Log Analytics
     Workspace ID is overlaid on top of this file's values at runtime.
 
 .PARAMETER WhatIf
@@ -55,9 +52,6 @@
 
 [CmdletBinding()]
 param(
-    [Parameter()]
-    [ValidateSet('dev', 'prod', 'platform')]
-    [string]$Environment = 'platform',
 
     [Parameter(Mandatory = $false)]
     [string]$TemplateParameterFile,
@@ -73,7 +67,7 @@ $ErrorActionPreference = 'Stop'
 
 $scriptPath     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $templatePath   = Join-Path $scriptPath '..\bicep\main.bicep'
-if (-not $TemplateParameterFile) { $TemplateParameterFile = Join-Path $PSScriptRoot "..\bicep\parameters\$Environment.bicepparam" }
+if (-not $TemplateParameterFile) { $TemplateParameterFile = Join-Path $PSScriptRoot '..\bicep\parameters\platform.bicepparam' }
 $location       = 'swedencentral'
 $platformRg     = 'platform-skycraft-swc-rg'
 $workspaceName  = 'platform-skycraft-swc-law'

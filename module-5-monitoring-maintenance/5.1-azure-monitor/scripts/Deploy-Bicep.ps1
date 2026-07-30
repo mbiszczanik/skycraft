@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Deploys Lab 5.1 Azure Monitor & Insights infrastructure using Bicep.
 
@@ -22,13 +22,10 @@
 .PARAMETER DevEnvironment
     Dev environment prefix to locate the development VM. Default: dev
 
-.PARAMETER Environment
-    Environment whose parameter file supplies template defaults (dev/prod/platform).
-    Default: platform (matches the template's previous default parEnvironment = 'Platform').
-
 .PARAMETER TemplateParameterFile
     Path to the Bicep parameter file supplying template defaults. Defaults to
-    '..\bicep\parameters\<Environment>.bicepparam'. Computed resource IDs and the
+    '..\bicep\parameters\platform.bicepparam' - the only environment this lab
+    supports, because the Log Analytics workspace, DCR, action group and alert rule are all platform-scoped. Computed resource IDs and the
     Ops email are overlaid on top of this file's values at runtime.
 
 .PARAMETER WhatIf
@@ -66,10 +63,6 @@ param(
     [ValidateSet('dev', 'prod')]
     [string]$DevEnvironment = 'dev',
 
-    [Parameter()]
-    [ValidateSet('dev', 'prod', 'platform')]
-    [string]$Environment = 'platform',
-
     [Parameter(Mandatory = $false)]
     [string]$TemplateParameterFile,
 
@@ -85,7 +78,7 @@ $ErrorActionPreference = 'Stop'
 # Script configuration
 $scriptPath     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $templatePath   = Join-Path $scriptPath '..\bicep\main.bicep'
-if (-not $TemplateParameterFile) { $TemplateParameterFile = Join-Path $PSScriptRoot "..\bicep\parameters\$Environment.bicepparam" }
+if (-not $TemplateParameterFile) { $TemplateParameterFile = Join-Path $PSScriptRoot '..\bicep\parameters\platform.bicepparam' }
 $location       = 'swedencentral'
 $platformRg     = 'platform-skycraft-swc-rg'
 $deploymentName = "lab51-$(Get-Date -Format 'yyyyMMdd-HHmmss')"

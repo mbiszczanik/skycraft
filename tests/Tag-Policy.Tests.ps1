@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Pester 5 tests: every resource carries the canonical tag set and none of the banned tags.
 
