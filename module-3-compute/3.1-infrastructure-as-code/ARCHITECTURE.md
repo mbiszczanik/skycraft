@@ -21,7 +21,7 @@
 | DNS | Azure-provided default (internal only) | Private DNS Zones + conditional forwarder | Required for custom domain names (e.g., auth.skycraft.local) and cross-VNet name resolution. |
 | VNet Peering | None shown; assumes manual setup | Hub-spoke with auto-peering via automation | The lab assumes Lab 3.1 creates RGs and networks; peering is typically automated or done in a separate orchestration step. |
 | Public IP allocation | Static on Load Balancer | Static with auto-release / reserved addresses | Lab uses Static to keep the public IP stable during the lab. Production reserves public IPs to avoid IP exhaustion in shared subscriptions. |
-| Tagging discipline | Common tags on all resources (Project, Service, CostCenter, ManagedBy, DeploymentDate) | Team/Owner, ApplicationId, DataClassification, Automation owner | Lab tags enable cost tracking and resource management; production adds fields for automation handoff and compliance auditing. |
+| Tagging discipline | Canonical tags on all resources (Project, Environment, CostCenter, Owner) | ApplicationId, DataClassification, automation owner, cost-allocation hierarchy | Lab tags enable cost tracking and ownership; production adds fields for automation handoff and compliance auditing. `DeploymentDate` is deliberately banned - a `utcNow()`-fed tag changes every run and breaks `what-if` idempotency. |
 
 ## 3. Well-Architected lens (light)
 

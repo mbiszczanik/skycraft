@@ -29,6 +29,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Platform`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
@@ -71,6 +72,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Platform`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
@@ -142,6 +144,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
@@ -199,6 +202,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Production`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
@@ -354,6 +358,7 @@ az network dns zone show   --resource-group platform-skycraft-swc-rg   --name sk
 # {
 #   "CostCenter": "MSDN",
 #   "Environment": "Platform",
+#   "Owner": "admin@skycraft.com",
 #   "Project": "SkyCraft"
 # }
 
@@ -364,6 +369,7 @@ az network lb show   --resource-group dev-skycraft-swc-rg   --name dev-skycraft-
 # {
 #   "CostCenter": "MSDN",
 #   "Environment": "Development",
+#   "Owner": "admin@skycraft.com",
 #   "Project": "SkyCraft"
 # }
 ```
@@ -558,7 +564,7 @@ _________________________________________________________________
 - [ ] 4 backend pools created (2 per load balancer)
 - [ ] 4 health probes configured (TCP ports 3724, 8085)
 - [ ] 4 load balancing rules configured
-- [ ] All resources have required tags (Project, Environment, CostCenter)
+- [ ] All resources have required tags (Project, Environment, CostCenter, Owner)
 - [ ] All validation commands executed successfully
 - [ ] All reflection questions answered
 - [ ] DNS name servers documented for future domain delegation

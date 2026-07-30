@@ -444,7 +444,8 @@ var storageAccountSku = 'Standard_LRS'
 var tags = {
   Project: 'SkyCraft'
   Environment: 'Development'
-  ManagedBy: 'Bicep'
+  CostCenter: 'MSDN'
+  Owner: 'admin@skycraft.com'
 }
 
 // Resource declaration
@@ -798,7 +799,8 @@ param subnets array
 param tags object = {
   Project: 'SkyCraft'
   Environment: environment
-  ManagedBy: 'Bicep'
+  CostCenter: 'MSDN'
+  Owner: 'admin@skycraft.com'
 }
 
 // Virtual Network
@@ -1042,11 +1044,11 @@ param environment string
 @description('Project name for resource naming')
 param project string = 'skycraft'
 
-@description('Service/workload name')
-param service string = 'swc'
-
 @description('Cost center for billing')
 param costCenter string = 'MSDN'
+
+@description('Owner e-mail address for the canonical Owner governance tag')
+param ownerEmail string = 'admin@skycraft.com'
 
 @description('Hub VNet address space')
 param hubVnetAddressPrefix string = '10.0.0.0/16'
@@ -1072,12 +1074,15 @@ param sshPublicKey string
 // ============================================================================
 
 var locationShortCode = 'swc'  // Sweden Central
+// The canonical base tag set - exactly these four keys on every resource.
+// Note what is NOT here: no ManagedBy, and no DeploymentDate. A utcNow()-fed
+// timestamp changes on every run, so `what-if` would report a modification
+// forever and the deployment would never be idempotent.
 var tags = {
   Project: project
-  Service: service
+  Environment: environment
   CostCenter: costCenter
-  ManagedBy: 'Bicep'
-  DeploymentDate: utcNow('yyyy-MM-dd')
+  Owner: ownerEmail
 }
 
 // Resource group names

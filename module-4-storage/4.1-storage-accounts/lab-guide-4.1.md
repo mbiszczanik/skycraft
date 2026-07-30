@@ -315,6 +315,7 @@ Storage account names have **unique requirements** different from other Azure re
 | Project     | SkyCraft |
 | Environment | Platform |
 | CostCenter  | MSDN     |
+| Owner       | admin@skycraft.com |
 
 14. Click **Review + create**
 
@@ -346,6 +347,7 @@ Storage account names have **unique requirements** different from other Azure re
 | Project     | SkyCraft    |
 | Environment | Development |
 | CostCenter  | MSDN        |
+| Owner       | admin@skycraft.com |
 
 4. Keep other settings the same as platform account
 5. Click **Review + create** → **Create**
@@ -371,6 +373,7 @@ Storage account names have **unique requirements** different from other Azure re
 | Project     | SkyCraft   |
 | Environment | Production |
 | CostCenter  | MSDN       |
+| Owner       | admin@skycraft.com |
 
 4. Click **Review + create** → **Create**
 
@@ -402,7 +405,7 @@ az storage account create \
   --min-tls-version TLS1_2 \
   --allow-blob-public-access false \
   --https-only true \
-  --tags Project=SkyCraft Environment=Platform CostCenter=MSDN
+  --tags Project=SkyCraft Environment=Platform CostCenter=MSDN Owner=admin@skycraft.com
 
 # Create Development storage account (LRS)
 az storage account create \
@@ -415,7 +418,7 @@ az storage account create \
   --min-tls-version TLS1_2 \
   --allow-blob-public-access false \
   --https-only true \
-  --tags Project=SkyCraft Environment=Development CostCenter=MSDN
+  --tags Project=SkyCraft Environment=Development CostCenter=MSDN Owner=admin@skycraft.com
 
 # Create Production storage account (GRS)
 az storage account create \
@@ -428,7 +431,7 @@ az storage account create \
   --min-tls-version TLS1_2 \
   --allow-blob-public-access false \
   --https-only true \
-  --tags Project=SkyCraft Environment=Production CostCenter=MSDN
+  --tags Project=SkyCraft Environment=Production CostCenter=MSDN Owner=admin@skycraft.com
 ```
 
 **Expected Output**:
@@ -460,6 +463,7 @@ $ProdRG = "prod-skycraft-swc-rg"
 $CommonTags = @{
     Project = "SkyCraft"
     CostCenter = "MSDN"
+    Owner = "admin@skycraft.com"
 }
 
 # Create Platform storage account (GRS)
@@ -699,7 +703,7 @@ Azure Storage Explorer is a cross-platform GUI for managing storage:
 - [ ] Production storage account created with GRS redundancy
 - [ ] All storage accounts have TLS 1.2 minimum
 - [ ] All storage accounts have public blob access disabled
-- [ ] All storage accounts tagged correctly (Project, Environment, CostCenter)
+- [ ] All storage accounts tagged correctly (Project, Environment, CostCenter, Owner)
 - [ ] Encryption verified on all accounts (Microsoft-managed keys)
 - [ ] Access keys viewed and rotation demonstrated
 
@@ -774,7 +778,7 @@ Azure Storage Explorer is a cross-platform GUI for managing storage:
   az storage account update \
     --name prodskycraftswcsa \
     --resource-group prod-skycraft-swc-rg \
-    --tags Project=SkyCraft Environment=Production CostCenter=MSDN
+    --tags Project=SkyCraft Environment=Production CostCenter=MSDN Owner=admin@skycraft.com
   ```
 
 ### Issue 7: Encryption Settings Cannot Be Changed
@@ -888,6 +892,7 @@ Azure Storage Explorer is a cross-platform GUI for managing storage:
 - Project: SkyCraft
 - Environment: Platform/Development/Production
 - CostCenter: MSDN
+- Owner: admin@skycraft.com
 
 ✅ Learned both Portal and CLI/PowerShell methods for automation
 

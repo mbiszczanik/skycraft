@@ -22,6 +22,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Platform`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
@@ -51,6 +52,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ### dev-skycraft-swc-world-nsg
 
@@ -76,6 +78,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ### dev-skycraft-swc-db-nsg
 
@@ -101,6 +104,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
@@ -121,6 +125,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Production`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ### prod-skycraft-swc-world-nsg
 
@@ -137,6 +142,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Production`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ### prod-skycraft-swc-db-nsg
 
@@ -153,6 +159,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Production`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
@@ -163,21 +170,21 @@
 - [ ] Resource group: `dev-skycraft-swc-rg`
 - [ ] Location: **Sweden Central**
 - [ ] Purpose: Group authentication server VMs
-- [ ] Tags applied: Project, Environment, CostCenter
+- [ ] Tags applied: Project, Environment, CostCenter, Owner
 
 ### dev-skycraft-swc-asg-world
 - [ ] Resource name: `dev-skycraft-swc-asg-world`
 - [ ] Resource group: `dev-skycraft-swc-rg`
 - [ ] Location: **Sweden Central**
 - [ ] Purpose: Group world server VMs
-- [ ] Tags applied: Project, Environment, CostCenter
+- [ ] Tags applied: Project, Environment, CostCenter, Owner
 
 ### dev-skycraft-swc-asg-db
 - [ ] Resource name: `dev-skycraft-swc-asg-db`
 - [ ] Resource group: `dev-skycraft-swc-rg`
 - [ ] Location: **Sweden Central**
 - [ ] Purpose: Group database server VMs
-- [ ] Tags applied: Project, Environment, CostCenter
+- [ ] Tags applied: Project, Environment, CostCenter, Owner
 
 ---
 
@@ -324,11 +331,12 @@ az network nsg show   --resource-group dev-skycraft-swc-rg   --name dev-skycraft
 # {
 #   "CostCenter": "MSDN",
 #   "Environment": "Development",
+#   "Owner": "admin@skycraft.com",
 #   "Project": "SkyCraft"
 # }
 
 # Check tags on all NSGs
-az network nsg list   --query "[].{Name:name,Environment:tags.Environment,Project:tags.Project,CostCenter:tags.CostCenter}"   --output table
+az network nsg list   --query "[].{Name:name,Environment:tags.Environment,Project:tags.Project,CostCenter:tags.CostCenter,Owner:tags.Owner}"   --output table
 ```
 
 ### Verify Bastion Public IP
@@ -503,7 +511,7 @@ _________________________________________________________________
 - [ ] All NSGs associated with correct subnets
 - [ ] 3 Application Security Groups created for dev environment
 - [ ] Service endpoints enabled on dev and prod database subnets
-- [ ] All resources have required tags (Project, Environment, CostCenter)
+- [ ] All resources have required tags (Project, Environment, CostCenter, Owner)
 - [ ] All validation commands executed successfully
 - [ ] All reflection questions answered
 - [ ] No NSG associated with AzureBastionSubnet (Bastion manages own security)

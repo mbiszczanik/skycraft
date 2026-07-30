@@ -9,6 +9,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Platform`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ### Development Resource Group
 
@@ -17,6 +18,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ### Production Resource Group
 
@@ -25,6 +27,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Production`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
@@ -69,6 +72,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Platform`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
@@ -119,6 +123,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
@@ -169,6 +174,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Production`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
@@ -182,7 +188,7 @@
 - [ ] SKU: **Standard**
 - [ ] IP assignment: **Static**
 - [ ] IP address assigned: [Record IP: ____________]
-- [ ] Tags applied: Project, Environment, CostCenter
+- [ ] Tags applied: Project, Environment, CostCenter, Owner
 
 ### Prod Load Balancer Public IP
 
@@ -192,7 +198,7 @@
 - [ ] SKU: **Standard**
 - [ ] IP assignment: **Static**
 - [ ] IP address assigned: [Record IP: ____________]
-- [ ] Tags applied: Project, Environment, CostCenter
+- [ ] Tags applied: Project, Environment, CostCenter, Owner
 
 ---
 
@@ -369,6 +375,7 @@ Get-AzPublicIpAddress |
 # ---         -----
 # CostCenter  MSDN
 # Environment Platform
+# Owner       admin@skycraft.com
 # Project     SkyCraft
 ```
 

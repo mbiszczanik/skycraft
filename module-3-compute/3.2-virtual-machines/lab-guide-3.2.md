@@ -409,8 +409,8 @@ cat ~/.ssh/skycraft-dev.pub
 | Project     | SkyCraft    |
 | Environment | Development |
 | CostCenter  | MSDN        |
+| Owner       | admin@skycraft.com |
 | Role        | Authserver  |
-| ManagedBy   | SkyCraft    |
 
 10. Click **Review + create**
 11. Review the configuration summary
@@ -530,8 +530,8 @@ Repeat the VM creation process for the Worldserver:
 | Project     | SkyCraft    |
 | Environment | Development |
 | CostCenter  | MSDN        |
+| Owner       | admin@skycraft.com |
 | Role        | Worldserver |
-| ManagedBy   | SkyCraft    |
 
 3. Click **Review + create** → **Create**
 

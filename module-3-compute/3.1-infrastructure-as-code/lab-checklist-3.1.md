@@ -201,17 +201,17 @@
 ### Resource Groups Created
 - [ ] **platform-skycraft-swc-rg**
   - Location: `swedencentral`
-  - Tags: Project=SkyCraft, Environment=Platform, CostCenter=MSDN
+  - Tags: Project=SkyCraft, Environment=Platform, CostCenter=MSDN, Owner=admin@skycraft.com
   - Provisioning state: Succeeded
 
 - [ ] **dev-skycraft-swc-rg**
   - Location: `swedencentral`
-  - Tags: Project=SkyCraft, Environment=Development, CostCenter=MSDN
+  - Tags: Project=SkyCraft, Environment=Development, CostCenter=MSDN, Owner=admin@skycraft.com
   - Provisioning state: Succeeded
 
 - [ ] **prod-skycraft-swc-rg** (if deployed)
   - Location: `swedencentral`
-  - Tags: Project=SkyCraft, Environment=Production, CostCenter=MSDN
+  - Tags: Project=SkyCraft, Environment=Production, CostCenter=MSDN, Owner=admin@skycraft.com
   - Provisioning state: Succeeded
 
 ### Network Resources in Dev

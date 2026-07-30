@@ -40,8 +40,8 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 - [ ] Tag: `Role` = `Authserver`
-- [ ] Tag: `ManagedBy` = `Portal`
 
 ---
 
@@ -81,6 +81,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 - [ ] Tag: `Role` = `Worldserver`
 
 ---
@@ -105,6 +106,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `admin@skycraft.com`
 
 ---
 
