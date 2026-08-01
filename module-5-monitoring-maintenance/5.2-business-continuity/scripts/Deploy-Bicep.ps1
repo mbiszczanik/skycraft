@@ -29,7 +29,7 @@
     Run deployment in what-if mode (dry run).
 
 .PARAMETER Force
-    Skip the confirmation prompt for non-interactive execution (master-lab-cycle.ps1 passes this).
+    Run without prompting. Retained for interface consistency across the lab scripts.
 
 .EXAMPLE
     .\Deploy-Bicep.ps1
@@ -51,6 +51,7 @@
 #Requires -Modules Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights
 
 [CmdletBinding()]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Force', Justification = 'Retained for interface consistency across the lab scripts now that the confirmation prompt is gone.')]
 param(
 
     [Parameter(Mandatory = $false)]
@@ -125,14 +126,6 @@ Write-Host "  Workspace:       $workspaceName"
 Write-Host "  Location:        $location"
 Write-Host "  Template:        $templatePath"
 Write-Host "  Deployment Name: $deploymentName"
-
-if (-not $WhatIf -and -not $Force) {
-    $confirm = Read-Host "`nProceed with deployment? (y/N)"
-    if ($confirm -ne 'y') {
-        Write-Host "Deployment cancelled." -ForegroundColor Yellow
-        exit 0
-    }
-}
 
 # ── [4/7] Run Bicep deployment ────────────────────────────────────────────
 Write-Host "`n[4/7] Running Bicep deployment..." -ForegroundColor Yellow

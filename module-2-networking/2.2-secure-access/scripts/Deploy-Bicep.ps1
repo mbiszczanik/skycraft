@@ -7,7 +7,7 @@
     It calls the `main.bicep` template to deploy:
     - Application Security Groups (ASGs)
     - Network Security Groups (NSGs) with secure rules
-    - Azure Bastion (Optional, with interactive prompt)
+    - Azure Bastion (Optional, opt in with -DeployBastion)
     
     It enforces project standards including proper tagging.
 
@@ -28,6 +28,12 @@
 .EXAMPLE
     .\Deploy-Bicep.ps1
     Deploys to default resource groups in Sweden Central.
+
+.PARAMETER DeployBastion
+    Deploy Azure Bastion. Off by default: Bastion carries a standing cost.
+
+.PARAMETER Force
+    Run without prompting. Retained for interface consistency across the lab scripts.
 
 .NOTES
     Project: SkyCraft
@@ -54,7 +60,13 @@ param(
     [string]$PlatformResourceGroup = 'platform-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
-    [string]$TemplateParameterFile
+    [string]$TemplateParameterFile,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$DeployBastion,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -91,13 +103,14 @@ if (-not (Test-Path $TemplateParameterFile)) {
 
 Write-Host "`nDeploying Lab 2.2 resources..." -ForegroundColor Cyan
 
-# Ask user about Bastion deployment
-Write-Host "`n[OPTIONAL] Azure Bastion provides secure RDP/SSH access without public IPs." -ForegroundColor Yellow
-Write-Host "Cost: ~$140/month | Deployment time: ~15 minutes" -ForegroundColor Gray
-$deployBastion = Read-Host "Do you want to deploy Azure Bastion? (y/N)"
-
-$shouldDeployBastion = ($deployBastion -eq 'y' -or $deployBastion -eq 'Y')
-
+# Azure Bastion is optional: it provides secure RDP/SSH without public IPs, at a
+# standing cost. Opt in with -DeployBastion; -Force answers "no" without prompting.
+$shouldDeployBastion = $DeployBastion.IsPresent
+if (-not $Force -and -not $DeployBastion) {
+    Write-Host "`n[OPTIONAL] Azure Bastion provides secure RDP/SSH access without public IPs." -ForegroundColor Yellow
+    Write-Host "Cost: ~$140/month | Deployment time: ~15 minutes" -ForegroundColor Gray
+    Write-Host "  -> Not requested (-DeployBastion absent). Skipping." -ForegroundColor Gray
+}
 if ($shouldDeployBastion) {
     Write-Host "  -> Bastion will be deployed" -ForegroundColor Green
 }
