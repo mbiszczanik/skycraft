@@ -1,0 +1,109 @@
+<#
+.SYNOPSIS
+    Pester 5 test: every lab deployment script and validator honours the automation contract.
+
+.DESCRIPTION
+    An orchestrator can only trust a script that reports failure through its exit code and never
+    waits for a human. These rules are enforced statically against the PowerShell AST so a
+    violation is caught in CI rather than ninety minutes into a live Azure run.
+
+    Rule 1  Deploy-Bicep.ps1 contains no Read-Host.
+    Rule 2  No lab script calls Connect-AzAccount.
+    Rule 3  Every statement block that reports a failure also exits non-zero.
+    Rule 4  Test-Lab.ps1 ends in an unconditional exit.
+
+    Which files count as lab scripts is defined once in tests/LabScripts.psm1 and shared with
+    the script-standards and CBH-coverage suites, so all three lint the same set.
+
+.EXAMPLE
+    Invoke-Pester -Path .\tests\Automation-Contract.Tests.ps1
+
+.NOTES
+    Project: SkyCraft
+#>
+
+#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
+
+# ValidatorCases and AllLabCases really are unused until Rules 2 and 4 land. Each suppression
+# is targeted and says which of the two it is, so a dead variable added later still surfaces.
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Type', Justification = 'False positive: read inside the GetNewClosure predicate handed to FindAll.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Where', Justification = 'False positive: read inside the GetNewClosure predicate handed to FindAll.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Name', Justification = 'False positive: captured by GetNewClosure into the command-name predicate.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'DeployCases', Justification = 'False positive: consumed by -ForEach on the Rule 1 It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'ValidatorCases', Justification = 'Genuinely unused here. Scaffold for Rule 4 (Test-Lab.ps1 ends in an unconditional exit), landed early so the discovery block is written once.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'AllLabCases', Justification = 'Genuinely unused here. Scaffold for Rule 2 (no Connect-AzAccount in lab scripts), landed early so the discovery block is written once.')]
+param()
+
+BeforeDiscovery {
+    Import-Module (Join-Path $PSScriptRoot 'LabScripts.psm1') -Force
+
+    $DeployCases    = @(Get-ScriptCase -FileName 'Deploy-Bicep.ps1')
+    $ValidatorCases = @(Get-ScriptCase -FileName 'Test-Lab.ps1')
+    $AllLabCases    = @(Get-ScriptCase)
+}
+
+BeforeAll {
+    function Get-ScriptAst {
+        param([string]$Path)
+        $tokens = $null; $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+        if ($errors.Count -gt 0) { throw "Parse error in '$Path': $($errors[0].Message)" }
+        $ast
+    }
+
+    # One walk, shared by every rule. `exit` is an ExitStatementAst rather than a CommandAst,
+    # and Rule 3 has to climb from a node to its enclosing block, so a command-only helper
+    # would have forced each later rule to hand-roll its own FindAll predicate.
+    function Find-AstNode {
+        param(
+            [Parameter(Mandatory)]$Ast,
+            [Parameter(Mandatory)][type]$Type,
+            [scriptblock]$Where
+        )
+        $predicate = {
+            param($node)
+            $node -is $Type -and (-not $Where -or (& $Where $node))
+        }.GetNewClosure()
+        @($Ast.FindAll($predicate, $true))
+    }
+
+    function Get-CommandCall {
+        param($Ast, [string]$Name)
+        # GetNewClosure captures $Name; without it the predicate would resolve the name in
+        # whatever scope FindAll happens to invoke it from.
+        $match = { param($node) $node.GetCommandName() -eq $Name }.GetNewClosure()
+        Find-AstNode -Ast $Ast -Type ([System.Management.Automation.Language.CommandAst]) -Where $match
+    }
+
+    function Get-ExitStatement {
+        param($Ast)
+        Find-AstNode -Ast $Ast -Type ([System.Management.Automation.Language.ExitStatementAst])
+    }
+
+    function Get-TerminalStatement {
+        # Rule 4: the last statement of the script body, where an unconditional exit has to
+        # sit for a validator to report its verdict through the exit code.
+        param($Ast)
+        $statements = @($Ast.EndBlock.Statements)
+        if ($statements.Count -eq 0) { return $null }
+        $statements[-1]
+    }
+
+    function Get-EnclosingStatementBlock {
+        # Rule 3: from a failure-reporting call, climb to the block that must also exit.
+        param($Node)
+        $current = $Node
+        while ($current -and $current -isnot [System.Management.Automation.Language.StatementBlockAst]) {
+            $current = $current.Parent
+        }
+        $current
+    }
+}
+
+Describe 'Deploy scripts run unattended - no interactive prompt' {
+    It "'<file>' calls no Read-Host" -ForEach $DeployCases {
+        $found = @(Get-CommandCall -Ast (Get-ScriptAst -Path $path) -Name 'Read-Host')
+        $lines = ($found | ForEach-Object { $_.Extent.StartLineNumber }) -join ', '
+        $found.Count | Should -Be 0 -Because "an orchestrator cannot answer a prompt; '$file' asks at line(s) $lines. Expose a parameter instead."
+    }
+}

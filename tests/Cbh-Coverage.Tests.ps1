@@ -7,6 +7,9 @@
     a Comment-Based Help block with .SYNOPSIS, .DESCRIPTION, and .NOTES. This test finds
     every such script and asserts those three tags are present in the first 60 lines.
 
+    Which files count as lab scripts is defined once in tests/LabScripts.psm1 and shared
+    with the script-standards and automation-contract suites, so all three lint the same set.
+
 .EXAMPLE
     Invoke-Pester -Path .\tests\Cbh-Coverage.Tests.ps1
 
@@ -16,13 +19,9 @@
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
-$RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$PsScripts  = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.ps1' |
-              Where-Object { $_.FullName -match '[/\\]module-\d.*[/\\]scripts[/\\]' }
+Import-Module (Join-Path $PSScriptRoot 'LabScripts.psm1') -Force
 
-$ScriptCases = $PsScripts | ForEach-Object {
-    @{ file = $_.FullName.Substring($RepoRoot.Length + 1); path = $_.FullName }
-}
+$ScriptCases = @(Get-ScriptCase)
 
 Describe 'SkyCraft PowerShell - CBH coverage' {
     It "'<file>' contains a .SYNOPSIS tag in the first 60 lines" -ForEach $ScriptCases {

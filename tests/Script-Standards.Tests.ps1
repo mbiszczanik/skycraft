@@ -12,8 +12,8 @@
       - declare SupportsShouldProcess (so it exposes -WhatIf / -Confirm)
       - contain no manual Read-Host confirmation prompt
 
-    Path matching is separator-agnostic so the suite runs identically on the
-    Windows dev box and the Linux CI runner.
+    Which files count as lab scripts is defined once in tests/LabScripts.psm1 and shared
+    with the CBH-coverage and automation-contract suites, so all three lint the same set.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Script-Standards.Tests.ps1
@@ -24,17 +24,10 @@
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
-$RepoRoot  = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$AllScripts = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.ps1' |
-              Where-Object { ($_.FullName -replace '\\', '/') -match '/module-\d.*/scripts/' }
+Import-Module (Join-Path $PSScriptRoot 'LabScripts.psm1') -Force
 
-$ScriptCases = $AllScripts | ForEach-Object {
-    @{ file = $_.FullName.Substring($RepoRoot.Length + 1); path = $_.FullName }
-}
-
-$RemoveCases = $AllScripts | Where-Object { $_.Name -like 'Remove-*.ps1' } | ForEach-Object {
-    @{ file = $_.FullName.Substring($RepoRoot.Length + 1); path = $_.FullName }
-}
+$ScriptCases = @(Get-ScriptCase)
+$RemoveCases = @(Get-ScriptCase -FileName 'Remove-*.ps1')
 
 Describe 'SkyCraft PowerShell - script standards' {
 
