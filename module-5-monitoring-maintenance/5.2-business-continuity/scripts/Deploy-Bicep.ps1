@@ -29,7 +29,8 @@
     Run deployment in what-if mode (dry run).
 
 .PARAMETER Force
-    Run without prompting. Retained for interface consistency across the lab scripts.
+    Accepted but inert: this script no longer prompts, so there is nothing to bypass.
+    Retained so existing invocations that pass -Force keep working.
 
 .EXAMPLE
     .\Deploy-Bicep.ps1
@@ -51,7 +52,7 @@
 #Requires -Modules Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights
 
 [CmdletBinding()]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Force', Justification = 'Deliberate no-op: the analyzer is correct that -Force now gates nothing. The switch is retained for interface consistency across the lab scripts.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Force', Justification = 'Deliberate no-op: the analyzer is correct that -Force now gates nothing. The switch shipped in this script before the confirmation prompt was removed, so dropping it would break any existing invocation that passes it. Unifying -Force across all 16 Deploy-Bicep.ps1 is deferred to plan 2.')]
 param(
 
     [Parameter(Mandatory = $false)]

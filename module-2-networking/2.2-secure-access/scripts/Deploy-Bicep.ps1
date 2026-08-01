@@ -25,15 +25,19 @@
     '..\bicep\parameters\main.bicepparam' (relative to this script's folder).
     Script-supplied and computed values are overlaid on top of this file's values.
 
-.EXAMPLE
-    .\Deploy-Bicep.ps1
-    Deploys to default resource groups in Sweden Central.
-
 .PARAMETER DeployBastion
     Deploy Azure Bastion. Off by default: Bastion carries a standing cost.
 
 .PARAMETER Force
     Run without prompting. Suppresses the advisory notice printed when Bastion is skipped.
+
+.EXAMPLE
+    .\Deploy-Bicep.ps1
+    Deploys to default resource groups in Sweden Central, without Bastion.
+
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -DeployBastion
+    Also deploys Azure Bastion, which carries a standing monthly cost.
 
 .NOTES
     Project: SkyCraft
@@ -113,7 +117,7 @@ if ($shouldDeployBastion) {
 else {
     if (-not $Force) {
         Write-Host "`n[OPTIONAL] Azure Bastion provides secure RDP/SSH access without public IPs." -ForegroundColor Yellow
-        Write-Host "Cost: ~$140/month | Deployment time: ~15 minutes" -ForegroundColor Gray
+        Write-Host "Cost: ~EUR 140/month | Deployment time: ~15 minutes" -ForegroundColor Gray
     }
     Write-Host "  -> Bastion deployment skipped (pass -DeployBastion to include it)" -ForegroundColor Gray
 }

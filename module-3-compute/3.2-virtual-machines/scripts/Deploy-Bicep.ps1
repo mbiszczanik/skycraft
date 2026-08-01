@@ -27,9 +27,6 @@
 .PARAMETER WhatIf
     Run deployment in what-if mode (dry run)
 
-.PARAMETER Force
-    Run without prompting. Retained for interface consistency across the lab scripts.
-
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment dev
 
@@ -50,7 +47,6 @@
 #Requires -Modules Az.Accounts, Az.Resources, Az.Network, Az.Compute
 
 [CmdletBinding()]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Force', Justification = 'Deliberate no-op: the analyzer is correct that -Force now gates nothing. The switch is retained for interface consistency across the lab scripts.')]
 param(
     [Parameter()]
     [ValidateSet('dev', 'prod')]
@@ -71,10 +67,7 @@ param(
     [string]$TemplateParameterFile,
 
     [Parameter()]
-    [switch]$WhatIf,
-
-    [Parameter()]
-    [switch]$Force
+    [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
