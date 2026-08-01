@@ -68,22 +68,17 @@ function Write-Error-Custom {
     Write-Host "$Message" -ForegroundColor Red
 }
 
-# Check if logged in to Azure
+# Check if logged in to Azure. Authentication is the caller's responsibility: connecting
+# from here would block forever inside a non-interactive child process.
 Write-Info "Checking Azure connection..."
 
-try {
-    $context = Get-AzContext
-    if (-not $context) {
-        Write-Info "Not logged in. Please log in to Azure."
-        $context = Connect-AzAccount
-    }
-
-    Write-Success "Connected to Azure - Tenant: $($context.Tenant.Id)"
-}
-catch {
-    Write-Error-Custom "Error: $($_.Exception.Message)"
+$context = Get-AzContext
+if (-not $context) {
+    Write-Error-Custom "Not logged in to Azure. Run Connect-AzAccount first."
     exit 1
 }
+
+Write-Success "Connected to Azure - Tenant: $($context.Tenant.Id)"
 
 Write-Info "Setting subscription context..."
 Set-AzContext -SubscriptionId $SubscriptionId | Out-Null

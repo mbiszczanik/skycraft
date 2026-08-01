@@ -55,8 +55,10 @@ try {
     Write-Info "Checking Azure connection..."
     $context = Get-AzContext
     if (-not $context) {
-        Write-Host "Logging in..." -ForegroundColor Yellow
-        $context = Connect-AzAccount -ErrorAction Stop
+        # Authentication is the caller's responsibility: connecting from here would block
+        # forever inside a non-interactive child process.
+        Write-Error-Custom "Not logged in to Azure. Run Connect-AzAccount first."
+        exit 1
     }
     
     if ([string]::IsNullOrWhiteSpace($SubscriptionId)) {

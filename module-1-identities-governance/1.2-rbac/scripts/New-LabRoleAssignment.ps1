@@ -52,9 +52,10 @@ try {
     Write-Host "`nChecking Azure PowerShell connection..." -ForegroundColor Yellow
     $azContext = Get-AzContext
     if (-not $azContext) {
-        Write-Host "Connecting to Azure..." -ForegroundColor Yellow
-        Connect-AzAccount -ErrorAction Stop
-        $azContext = Get-AzContext
+        # Authentication is the caller's responsibility: connecting from here would block
+        # forever inside a non-interactive child process.
+        Write-Host "  -> [ERROR] Not logged in to Azure. Run Connect-AzAccount first." -ForegroundColor Red
+        exit 1
     }
     $subscriptionId = $azContext.Subscription.Id
     Write-Host "Connected to Subscription: $($azContext.Subscription.Name) ($subscriptionId)" -ForegroundColor Green

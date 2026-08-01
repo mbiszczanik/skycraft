@@ -32,11 +32,12 @@ if ($Force) { $ConfirmPreference = 'None' }
 
 Write-Host "=== Lab 1.2: Cleanup Resources ===" -ForegroundColor Cyan -BackgroundColor Black
 
-# Check Azure Context
+# Check Azure Context. Authentication is the caller's responsibility: connecting from here
+# would block forever inside a non-interactive child process.
 $context = Get-AzContext
 if (-not $context) {
-    Write-Host "Not logged in. Connecting..." -ForegroundColor Yellow
-    $context = Connect-AzAccount
+    Write-Host "  -> [ERROR] Not logged in to Azure. Run Connect-AzAccount first." -ForegroundColor Red
+    exit 1
 }
 $subId = $context.Subscription.Id
 Write-Host "Using Subscription: $($context.Subscription.Name)" -ForegroundColor Green

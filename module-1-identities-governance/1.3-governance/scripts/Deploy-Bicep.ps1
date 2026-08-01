@@ -47,19 +47,14 @@ if (-not $TemplateParameterFile) {
 
 Write-Host "=== Lab 1.3: Governance Deployment ===" -ForegroundColor Cyan -BackgroundColor Black
 
-# 1. Verify Connection
-try {
-    $context = Get-AzContext
-    if (-not $context) {
-        Write-Host "Checking Azure connection..." -ForegroundColor Yellow
-        $context = Connect-AzAccount -ErrorAction Stop
-    }
-    Write-Host "Connected to: $($context.Subscription.Name) ($($context.Subscription.Id))" -ForegroundColor Green
-}
-catch {
-    Write-Host "  -> [ERROR] Failed to connect to Azure: $_" -ForegroundColor Red
+# 1. Verify Connection. Authentication is the caller's responsibility: connecting from here
+# would block forever inside a non-interactive child process.
+$context = Get-AzContext
+if (-not $context) {
+    Write-Host "  -> [ERROR] Not logged in to Azure. Run Connect-AzAccount first." -ForegroundColor Red
     exit 1
 }
+Write-Host "Connected to: $($context.Subscription.Name) ($($context.Subscription.Id))" -ForegroundColor Green
 
 # 2. Deployment
 $templateFile = Join-Path $PSScriptRoot "..\bicep\main.bicep"
