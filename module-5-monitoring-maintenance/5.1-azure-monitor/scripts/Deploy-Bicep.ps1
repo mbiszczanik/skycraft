@@ -50,7 +50,7 @@
 #Requires -Modules Az.Accounts, Az.Resources, Az.Compute, Az.Storage, Az.Monitor
 
 [CmdletBinding()]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Force', Justification = 'Retained for interface consistency across the lab scripts now that the confirmation prompt is gone.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Force', Justification = 'Deliberate no-op: the analyzer is correct that -Force now gates nothing. The switch is retained for interface consistency across the lab scripts.')]
 param(
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]

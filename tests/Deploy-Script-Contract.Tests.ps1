@@ -21,11 +21,14 @@
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
-# PSSA analyses each scriptblock in isolation, so it cannot see that Pester consumes
-# these at discovery time. Suppressed rather than reshaped to keep the file idiomatic.
+# Suppressions are targeted per item and justified individually: two of the case lists
+# below really are unused today, and saying otherwise would make this file lie about
+# itself. Retarget or delete each one as the rule that consumes it lands.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'New-ScriptCase builds an in-memory test-case list; it changes no state.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Name', Justification = 'Read inside the FindAll predicate scriptblock; PSSA nested-scope false positive.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '', Justification = 'Discovery-time case lists consumed by -ForEach on the It blocks.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'DeployCases', Justification = 'False positive: consumed by -ForEach on the Rule 1 It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'ValidatorCases', Justification = 'Genuinely unused here. Scaffold for Rule 4 (Test-Lab.ps1 ends in an unconditional exit), landed early so the discovery block is written once.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'AllLabCases', Justification = 'Genuinely unused here. Scaffold for Rule 2 (no Connect-AzAccount in lab scripts), landed early so the discovery block is written once.')]
 param()
 
 BeforeDiscovery {

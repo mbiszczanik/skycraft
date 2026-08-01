@@ -33,7 +33,7 @@
     Deploy Azure Bastion. Off by default: Bastion carries a standing cost.
 
 .PARAMETER Force
-    Run without prompting. Retained for interface consistency across the lab scripts.
+    Run without prompting. Suppresses the advisory notice printed when Bastion is skipped.
 
 .NOTES
     Project: SkyCraft
@@ -104,18 +104,18 @@ if (-not (Test-Path $TemplateParameterFile)) {
 Write-Host "`nDeploying Lab 2.2 resources..." -ForegroundColor Cyan
 
 # Azure Bastion is optional: it provides secure RDP/SSH without public IPs, at a
-# standing cost. Opt in with -DeployBastion; -Force answers "no" without prompting.
+# standing cost. Opt in with -DeployBastion; -Force drops the advisory notice for
+# unattended runs. Exactly one status line is written either way.
 $shouldDeployBastion = $DeployBastion.IsPresent
-if (-not $Force -and -not $DeployBastion) {
-    Write-Host "`n[OPTIONAL] Azure Bastion provides secure RDP/SSH access without public IPs." -ForegroundColor Yellow
-    Write-Host "Cost: ~$140/month | Deployment time: ~15 minutes" -ForegroundColor Gray
-    Write-Host "  -> Not requested (-DeployBastion absent). Skipping." -ForegroundColor Gray
-}
 if ($shouldDeployBastion) {
     Write-Host "  -> Bastion will be deployed" -ForegroundColor Green
 }
 else {
-    Write-Host "  -> Bastion deployment skipped" -ForegroundColor Gray
+    if (-not $Force) {
+        Write-Host "`n[OPTIONAL] Azure Bastion provides secure RDP/SSH access without public IPs." -ForegroundColor Yellow
+        Write-Host "Cost: ~$140/month | Deployment time: ~15 minutes" -ForegroundColor Gray
+    }
+    Write-Host "  -> Bastion deployment skipped (pass -DeployBastion to include it)" -ForegroundColor Gray
 }
 
 try {

@@ -38,7 +38,7 @@
     .\Deploy-Bicep.ps1 -WhatIf
 
 .EXAMPLE
-    .\Deploy-Bicep.ps1 -Force
+    .\Deploy-Bicep.ps1 -TemplateParameterFile ..\bicep\parameters\platform.bicepparam
 
 .NOTES
     Project: SkyCraft
@@ -51,7 +51,7 @@
 #Requires -Modules Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights
 
 [CmdletBinding()]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Force', Justification = 'Retained for interface consistency across the lab scripts now that the confirmation prompt is gone.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Force', Justification = 'Deliberate no-op: the analyzer is correct that -Force now gates nothing. The switch is retained for interface consistency across the lab scripts.')]
 param(
 
     [Parameter(Mandatory = $false)]
