@@ -24,14 +24,14 @@
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
-# ValidatorCases and AllLabCases really are unused until Rules 2 and 4 land. Each suppression
-# is targeted and says which of the two it is, so a dead variable added later still surfaces.
+# ValidatorCases really is unused until Rule 4 lands. Its suppression is targeted and says so,
+# so a dead variable added later still surfaces instead of hiding behind a file-wide waiver.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Type', Justification = 'False positive: read inside the GetNewClosure predicate handed to FindAll.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Where', Justification = 'False positive: read inside the GetNewClosure predicate handed to FindAll.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Name', Justification = 'False positive: captured by GetNewClosure into the command-name predicate.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'DeployCases', Justification = 'False positive: consumed by -ForEach on the Rule 1 It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'ValidatorCases', Justification = 'Genuinely unused here. Scaffold for Rule 4 (Test-Lab.ps1 ends in an unconditional exit), landed early so the discovery block is written once.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'AllLabCases', Justification = 'Genuinely unused here. Scaffold for Rule 2 (no Connect-AzAccount in lab scripts), landed early so the discovery block is written once.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'AllLabCases', Justification = 'False positive: consumed by -ForEach on the Rule 2 It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
 param()
 
 BeforeDiscovery {
@@ -105,5 +105,15 @@ Describe 'Deploy scripts run unattended - no interactive prompt' {
         $found = @(Get-CommandCall -Ast (Get-ScriptAst -Path $path) -Name 'Read-Host')
         $lines = ($found | ForEach-Object { $_.Extent.StartLineNumber }) -join ', '
         $found.Count | Should -Be 0 -Because "an orchestrator cannot answer a prompt; '$file' asks at line(s) $lines. Expose a parameter instead."
+    }
+}
+
+Describe 'Lab scripts never authenticate on their own' {
+    # Matched as a command in the AST, not as text, so the many scripts that merely name
+    # Connect-AzAccount inside a "please run ..." message are not flagged.
+    It "'<file>' calls no Connect-AzAccount" -ForEach $AllLabCases {
+        $found = @(Get-CommandCall -Ast (Get-ScriptAst -Path $path) -Name 'Connect-AzAccount')
+        $lines = ($found | ForEach-Object { $_.Extent.StartLineNumber }) -join ', '
+        $found.Count | Should -Be 0 -Because "in a child process with no console this blocks until the phase timeout; '$file' calls it at line(s) $lines. Fail fast and let the caller authenticate."
     }
 }
