@@ -180,10 +180,15 @@ if (-not $repoExists) {
     if (-not $acrExists) {
         Write-Host "Deploying ACR (Bootstrap)..." -ForegroundColor Yellow
         try {
+            # No Environment tag here, for the same reason the resource group above sets none.
+            # acr.bicep's parEnvironmentTag takes the canonical long form ('Development' /
+            # 'Production' / 'Platform'); this script only has the short key that selects the
+            # parameter file. Computing the long form here would put a second copy of
+            # main.bicep:60's mapping in another language with nothing comparing the two.
+            # Phase 2 re-declares this registry through main.bicep and tags it correctly.
             New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName `
                 -TemplateFile $acrBicep `
                 -parLocation $Location `
-                -parEnvironment $Environment `
                 -parAcrName $acrName `
                 -ErrorAction Stop | Out-Null
         } catch {

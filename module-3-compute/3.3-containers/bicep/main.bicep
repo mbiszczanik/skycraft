@@ -81,7 +81,7 @@ module modAcr 'modules/acr.bicep' = {
   scope: resRg
   params: {
     parLocation: parLocation
-    parEnvironment: varEnvironmentTag
+    parEnvironmentTag: varEnvironmentTag
     parOwnerEmail: parOwnerEmail
     parAcrName: parAcrName
   }
@@ -98,7 +98,7 @@ module modAci 'modules/aci.bicep' = {
   scope: resRg
   params: {
     parLocation: parLocation
-    parEnvironment: varEnvironmentTag
+    parEnvironmentTag: varEnvironmentTag
     parOwnerEmail: parOwnerEmail
     parAcrName: parAcrName
     parAciName: parAciName
@@ -117,7 +117,7 @@ module modAca 'modules/containerapps.bicep' = {
   scope: resRg
   params: {
     parLocation: parLocation
-    parEnvironment: varEnvironmentTag
+    parEnvironmentTag: varEnvironmentTag
     parOwnerEmail: parOwnerEmail
     parAcrName: parAcrName
     parCaeName: parCaeName

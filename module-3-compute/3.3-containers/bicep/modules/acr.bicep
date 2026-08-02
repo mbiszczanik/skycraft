@@ -14,7 +14,7 @@ param parLocation string
 
 @description('Environment tag value')
 @allowed(['Development', 'Production', 'Platform'])
-param parEnvironment string = 'Development'
+param parEnvironmentTag string = 'Development'
 
 @description('Owner e-mail address for the canonical Owner governance tag')
 param parOwnerEmail string = 'admin@skycraft.com'
@@ -29,7 +29,7 @@ param parAcrName string
 *******************/
 var varCommonTags = {
   Project: 'SkyCraft'
-  Environment: parEnvironment
+  Environment: parEnvironmentTag
   CostCenter: 'MSDN'
   Owner: parOwnerEmail
 }
