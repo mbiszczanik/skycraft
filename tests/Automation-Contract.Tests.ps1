@@ -32,7 +32,7 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Type', Justification = 'False positive: read inside the GetNewClosure predicate handed to FindAll.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Where', Justification = 'False positive: read inside the GetNewClosure predicate handed to FindAll.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Name', Justification = 'False positive: captured by GetNewClosure into the command-name predicate.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'DeployCases', Justification = 'False positive: consumed by -ForEach on the Rule 1 and Rule 3 It blocks, which PSSA cannot correlate across Pester scriptblock scopes.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'DeployCases', Justification = 'False positive: consumed by -ForEach on the Rule 1, Rule 3 and Rule 5 It blocks, which PSSA cannot correlate across Pester scriptblock scopes.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'ValidatorCases', Justification = 'False positive: consumed by -ForEach on the Rule 4 and Rule 4a It blocks, which PSSA cannot correlate across Pester scriptblock scopes.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'AllLabCases', Justification = 'False positive: consumed by -ForEach on the Rule 2 It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'Lab52Assertions', Justification = 'False positive: consumed by -ForEach on the lab 5.2 invariant It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
@@ -166,11 +166,19 @@ BeforeAll {
     function Get-MandatoryParameter {
         # Rule 5: parameters the binder would stop and prompt for.
         #
-        # Three shapes declare it - `Mandatory = $true`, `Mandatory=$true`, and a bare
-        # `Mandatory`, which is also true. The first two differ only in whitespace and the AST
-        # gives both the same argument expression, so only the bare form needs its own branch:
-        # it parses with the expression omitted. Measured: this corpus contains `Mandatory` in
-        # 110 places, all of them the spaced form, two of them true.
+        # Matches the three shapes the repository uses or plausibly would: `Mandatory = $true`,
+        # `Mandatory=$true` and a bare `Mandatory`, which is also true. The first two differ
+        # only in whitespace and the AST gives both the same argument expression, so only the
+        # bare form needs its own branch - it parses with the expression omitted.
+        #
+        # It does not match a truthy expression that is not literally $true. [Parameter(
+        # Mandatory = 1)] binds as mandatory and this predicate lets it through. There are no
+        # such declarations here, so the gap is theoretical rather than live, but the predicate
+        # recognises literals and not truthiness and the comment should not imply otherwise.
+        #
+        # Measured on the current tree: `Mandatory` appears 110 times across the 62 lab
+        # scripts, all in the spaced form - 109 false, and one true, which is
+        # New-LabResourceGroup.ps1's -SubscriptionId.
         param($Ast)
         foreach ($parameter in (Find-AstNode -Ast $Ast -Type ([System.Management.Automation.Language.ParameterAst]))) {
             $isMandatory = $false
@@ -259,11 +267,18 @@ Describe 'Deploy scripts declare no mandatory parameter' {
     # ON THE SCOPES IN THIS FILE, because they differ on purpose and the difference reads like
     # an oversight. Rule 2 covers every lab script: an unattended login attempt is never right
     # anywhere. Rules 1 and 5 cover deploy scripts only, because stopping to ask a human is a
-    # legitimate feature of a script a person runs by hand. New-LabUser.ps1:31 reads a password
-    # with Read-Host -AsSecureString; New-LabResourceGroup.ps1:40 makes -SubscriptionId
-    # mandatory so nothing silently decides which subscription gets resource groups created in
-    # it. Widening these two rules to every lab script would delete both safeguards to buy a
-    # consistency the situation does not call for.
+    # legitimate feature of a script a person runs by hand. Widening either would delete a real
+    # safeguard to buy a consistency the situation does not call for - specifically:
+    #   Deploy-Security.ps1:269   Read-Host "Deploy Bastion? (y/N)" - a resource with a
+    #                             standing cost, confirmed before it is created
+    #   Enable-Encryption.ps1:112 Read-Host before restarting VMs
+    #   New-LabResourceGroup.ps1:40  -SubscriptionId mandatory, so nothing silently decides
+    #                             which subscription gets resource groups created in it
+    # Those two Read-Host sites are the only ones in the repository that are actually called.
+    # A text search also matches New-LabUser.ps1:31, but that line is inside a .EXAMPLE block
+    # showing a caller prompting and passing the result to -InitialPassword; the script itself
+    # calls no Read-Host and generates a password when the parameter is omitted. Mistaking that
+    # mention for a call is the error Rule 2 matches commands in the AST to avoid.
     It "'<file>' declares no mandatory parameter" -ForEach $DeployCases {
         $found = @(Get-MandatoryParameter -Ast (Get-ScriptAst -Path $path))
         $names = ($found | ForEach-Object { "-$($_.Name.VariablePath.UserPath) at line $($_.Extent.StartLineNumber)" }) -join ', '
