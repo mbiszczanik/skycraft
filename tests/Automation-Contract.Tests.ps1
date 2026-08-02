@@ -255,6 +255,15 @@ Describe 'Deploy scripts declare no mandatory parameter' {
     # .github/workflows/lint.yml installs only PSScriptAnalyzer and Pester, so a Get-Command
     # rule would pass on a developer machine with the Az modules and break in CI. The AST also
     # binds nothing and executes nothing.
+    #
+    # ON THE SCOPES IN THIS FILE, because they differ on purpose and the difference reads like
+    # an oversight. Rule 2 covers every lab script: an unattended login attempt is never right
+    # anywhere. Rules 1 and 5 cover deploy scripts only, because stopping to ask a human is a
+    # legitimate feature of a script a person runs by hand. New-LabUser.ps1:31 reads a password
+    # with Read-Host -AsSecureString; New-LabResourceGroup.ps1:40 makes -SubscriptionId
+    # mandatory so nothing silently decides which subscription gets resource groups created in
+    # it. Widening these two rules to every lab script would delete both safeguards to buy a
+    # consistency the situation does not call for.
     It "'<file>' declares no mandatory parameter" -ForEach $DeployCases {
         $found = @(Get-MandatoryParameter -Ast (Get-ScriptAst -Path $path))
         $names = ($found | ForEach-Object { "-$($_.Name.VariablePath.UserPath) at line $($_.Extent.StartLineNumber)" }) -join ', '
