@@ -67,15 +67,25 @@ Write-Host "Template: $bicepPath" -ForegroundColor Gray
 Write-Host "Params:   $paramPath" -ForegroundColor Gray
 
 try {
-    # Override sshPublicKey in parameter file
-    # Note: .bicepparam files typically shouldn't be modified on fly, but for labs we pass key dynamically
-    # Since 'using' param files, we can pass --parameters twice: once for file, once for override
-    
+    # Compile the .bicepparam with the Azure CLI's own Bicep rather than handing the file to Az,
+    # which resolves it by shelling out to a bare `bicep` on PATH that `az bicep install` does
+    # not provide. This script computes nothing, so there is no overlay: the hashtable is the
+    # parameter file and nothing more.
+    $params = @{}
+    $built = az bicep build-params --file $paramPath --stdout | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
+        Write-Host "  -> [ERROR] Failed to compile parameter file: $paramPath" -ForegroundColor Red
+        exit 1
+    }
+    foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+        $params[$p.Key] = $p.Value.value
+    }
+
     $commonArgs = @{
-        Name                  = $deploymentName
-        Location              = $Location
-        TemplateFile          = $bicepPath
-        TemplateParameterFile = $paramPath
+        Name                    = $deploymentName
+        Location                = $Location
+        TemplateFile            = $bicepPath
+        TemplateParameterObject = $params
     }
 
     if ($WhatIf) {

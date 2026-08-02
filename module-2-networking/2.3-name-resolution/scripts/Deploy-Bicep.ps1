@@ -73,14 +73,25 @@ if (-not (Test-Path $TemplateParameterFile)) {
 Write-Host "Starting deployment: $deploymentName..." -ForegroundColor Yellow
 
 try {
-    # This script supplies no per-template overrides, so the parameter file is
-    # passed straight through. A no-argument run therefore deploys exactly what it
-    # did before parameter files existed (all template defaults).
+    # This script supplies no per-template overrides, so the hashtable below is the parameter
+    # file and nothing more. It is compiled with the Azure CLI's own Bicep rather than handed
+    # to Az, which resolves a .bicepparam by shelling out to a bare `bicep` on PATH that
+    # `az bicep install` does not provide.
+    $params = @{}
+    $built = az bicep build-params --file $TemplateParameterFile --stdout | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
+        Write-Host "  -> [ERROR] Failed to compile parameter file: $TemplateParameterFile" -ForegroundColor Red
+        exit 1
+    }
+    foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+        $params[$p.Key] = $p.Value.value
+    }
+
     $deployment = New-AzDeployment `
         -Name $deploymentName `
         -Location $Location `
         -TemplateFile $TemplateFile `
-        -TemplateParameterFile $TemplateParameterFile `
+        -TemplateParameterObject $params `
         -Verbose
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {

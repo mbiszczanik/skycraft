@@ -56,11 +56,25 @@ if (-not (Test-Path $TemplateFile)) {
 try {
     Write-Host "Deploying to Subscription scope..." -ForegroundColor Yellow
     
+    # Compile the .bicepparam with the Azure CLI's own Bicep rather than handing the file to Az,
+    # which resolves it by shelling out to a bare `bicep` on PATH that `az bicep install` does
+    # not provide. This script computes nothing, so there is no overlay: the hashtable is the
+    # parameter file and nothing more.
+    $params = @{}
+    $built = az bicep build-params --file $TemplateParameterFile --stdout | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
+        Write-Host "  -> [ERROR] Failed to compile parameter file: $TemplateParameterFile" -ForegroundColor Red
+        exit 1
+    }
+    foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+        $params[$p.Key] = $p.Value.value
+    }
+
     $deployment = New-AzSubscriptionDeployment `
         -Name "lab-4.2-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')" `
         -Location $Location `
         -TemplateFile $TemplateFile `
-        -TemplateParameterFile $TemplateParameterFile `
+        -TemplateParameterObject $params `
         -WarningAction SilentlyContinue
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {

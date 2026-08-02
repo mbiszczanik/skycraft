@@ -72,11 +72,25 @@ Write-Host "  Location: $Location" -ForegroundColor Gray
 Write-Host "  DeploymentName: $deploymentName" -ForegroundColor Gray
 
 try {
+    # Compile the .bicepparam with the Azure CLI's own Bicep rather than handing the file to Az,
+    # which resolves it by shelling out to a bare `bicep` on PATH that `az bicep install` does
+    # not provide. This script computes nothing, so there is no overlay: the hashtable is the
+    # parameter file and nothing more.
+    $params = @{}
+    $built = az bicep build-params --file $TemplateParameterFile --stdout | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
+        Write-Host "  -> [ERROR] Failed to compile parameter file: $TemplateParameterFile" -ForegroundColor Red
+        exit 1
+    }
+    foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+        $params[$p.Key] = $p.Value.value
+    }
+
     New-AzSubscriptionDeployment `
         -Name $deploymentName `
         -Location $Location `
         -TemplateFile $templateFile `
-        -TemplateParameterFile $TemplateParameterFile `
+        -TemplateParameterObject $params `
         -ErrorAction Stop | Out-Null
     
     Write-Host "  -> [SUCCESS] Resource Groups deployed successfully." -ForegroundColor Green

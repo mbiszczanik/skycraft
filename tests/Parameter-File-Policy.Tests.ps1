@@ -36,11 +36,16 @@
     `$deploymentParams` - as lab 4.1 does - is outside it entirely. Widening Rule B means adding
     cases and generalising that name, deliberately.
 
-    The file is still named Overlay-Policy for Rule B's sake; Rule A arrived later and the two
-    share a subject rather than a name.
+    STANDARDS CONFLICT, live as this is written. docs/powershell-standards.md carries both the
+    prohibition Rule A enforces and a closing carve-out that triggers it: "Scripts that pass no
+    computed values skip the merge and hand the file straight to the cmdlet via
+    -TemplateParameterFile." Three of the four scripts Rule A first flagged were exactly that
+    case, so their authors were following the standard. A companion change in this same pull
+    request removes the carve-out. Until it lands, a reader who meets the contradiction should
+    conclude the sentence is wrong, not this rule.
 
 .EXAMPLE
-    Invoke-Pester -Path .\tests\Overlay-Policy.Tests.ps1
+    Invoke-Pester -Path .\tests\Parameter-File-Policy.Tests.ps1
 
 .NOTES
     Project: SkyCraft
