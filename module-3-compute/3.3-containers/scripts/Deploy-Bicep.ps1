@@ -190,7 +190,7 @@ try {
     }
     else {
         Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-        # Error handling logic omitted for brevity, similar to template
+        exit 1
     }
 }
 catch {

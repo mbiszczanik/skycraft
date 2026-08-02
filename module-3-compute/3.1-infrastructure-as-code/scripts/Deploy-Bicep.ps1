@@ -92,6 +92,7 @@ try {
         }
         else {
             Write-Host "`n[FAILED] State: $($dep.ProvisioningState)" -ForegroundColor Red
+            exit 1
         }
     }
 }
