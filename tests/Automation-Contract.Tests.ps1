@@ -29,7 +29,7 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Type', Justification = 'False positive: read inside the GetNewClosure predicate handed to FindAll.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Where', Justification = 'False positive: read inside the GetNewClosure predicate handed to FindAll.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Name', Justification = 'False positive: captured by GetNewClosure into the command-name predicate.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'DeployCases', Justification = 'False positive: consumed by -ForEach on the Rule 1 It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'DeployCases', Justification = 'False positive: consumed by -ForEach on the Rule 1 and Rule 3 It blocks, which PSSA cannot correlate across Pester scriptblock scopes.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'ValidatorCases', Justification = 'Genuinely unused here. Scaffold for Rule 4 (Test-Lab.ps1 ends in an unconditional exit), landed early so the discovery block is written once.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'AllLabCases', Justification = 'False positive: consumed by -ForEach on the Rule 2 It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
 param()
@@ -98,6 +98,27 @@ BeforeAll {
         }
         $current
     }
+
+    function Get-FailureMessage {
+        # Rule 3: the literals through which a script announces failure to the user. Both AST
+        # shapes are needed - "[ERROR] Deployment failed!" parses as StringConstantExpressionAst,
+        # while "[FAILED] state: $($d.ProvisioningState)" parses as ExpandableStringExpressionAst.
+        # The two share no base type below ExpressionAst, so they are collected separately.
+        param($Ast)
+        $isFailure = { param($node) $node.Value -match '\[(FAILED|ERROR)\]' }
+        @(
+            Find-AstNode -Ast $Ast -Type ([System.Management.Automation.Language.StringConstantExpressionAst])   -Where $isFailure
+            Find-AstNode -Ast $Ast -Type ([System.Management.Automation.Language.ExpandableStringExpressionAst]) -Where $isFailure
+        )
+    }
+
+    function Test-NonZeroExit {
+        # A bare `exit` and `exit 0` both hand the caller a success code, so neither discharges
+        # the obligation; `exit $var` is accepted because the value is not knowable statically.
+        param($Block)
+        $exits = @(Get-ExitStatement -Ast $Block)
+        @($exits | Where-Object { $_.Pipeline -and $_.Pipeline.Extent.Text -ne '0' }).Count -gt 0
+    }
 }
 
 Describe 'Deploy scripts run unattended - no interactive prompt' {
@@ -115,5 +136,27 @@ Describe 'Lab scripts never authenticate on their own' {
         $found = @(Get-CommandCall -Ast (Get-ScriptAst -Path $path) -Name 'Connect-AzAccount')
         $lines = ($found | ForEach-Object { $_.Extent.StartLineNumber }) -join ', '
         $found.Count | Should -Be 0 -Because "in a child process with no console this blocks until the phase timeout; '$file' calls it at line(s) $lines. Fail fast and let the caller authenticate."
+    }
+}
+
+Describe 'Deploy scripts report failure through the exit code' {
+    # Scoped to the block holding the message, not the whole script: a script can exit 1 from its
+    # catch and still fall through the else branch of a provisioning-state check, which is exactly
+    # the shape this rule exists to catch. A whole-script check would call that script clean.
+    It "'<file>' exits non-zero after announcing a failure" -ForEach $DeployCases {
+        $ast = Get-ScriptAst -Path $path
+        $lines = @(
+            Get-FailureMessage -Ast $ast |
+                ForEach-Object {
+                    # No deploy script announces a failure outside a statement block today. The
+                    # fallback keeps such a message in scope instead of silently skipping it.
+                    $block = Get-EnclosingStatementBlock -Node $_
+                    if ($block) { $block } else { $ast.EndBlock }
+                } |
+                Where-Object { -not (Test-NonZeroExit -Block $_) } |
+                ForEach-Object { $_.Extent.StartLineNumber } |
+                Sort-Object -Unique
+        )
+        $lines.Count | Should -Be 0 -Because "an orchestrator gates on the exit code, so a reported failure that falls through to exit 0 is recorded as a pass; '$file' does that in the block(s) starting at line(s) $($lines -join ', ')."
     }
 }
