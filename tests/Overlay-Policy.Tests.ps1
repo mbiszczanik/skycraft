@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Pester 5 test: a deploy script overlays only the values it actually computes.
+    Pester 5 test: lab 3.3's deploy script does not overwrite two keys its parameter file sets.
 
 .DESCRIPTION
     docs/bicep-standards.md:86 requires a deploy script to overlay onto the hydrated parameter
@@ -17,6 +17,12 @@
     PSScriptAnalyzer and nothing else. A test that shelled out to `az` would pass locally and
     fail in CI. The parameter files' own contents are already validated there by the
     build-params loop; what needs guarding here is the script's behaviour.
+
+    SCOPE, so nobody reads this suite as broader than its name. It is a regression guard over
+    one script and two named keys, not a general overlay policy: which keys a script legitimately
+    computes is not decidable from the AST. The predicate also hardcodes the variable name
+    `params`, so a lab hydrating into `$deploymentParams` - as lab 4.1 does - is outside it
+    entirely. Widening means adding cases and generalising that name, deliberately.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Overlay-Policy.Tests.ps1
@@ -76,7 +82,7 @@ BeforeAll {
     }
 }
 
-Describe 'Deploy scripts overlay only what they compute' {
+Describe 'Lab 3.3 leaves its parameter file authoritative for two keys' {
     It "lab <lab> leaves `$params.<key> to the parameter file" -ForEach $OverlayCases {
         $found = @(Get-ParamsOverlay -Ast (Get-ScriptAst -Path $path) -Key $key)
         $lines = ($found | ForEach-Object { $_.Extent.StartLineNumber }) -join ', '

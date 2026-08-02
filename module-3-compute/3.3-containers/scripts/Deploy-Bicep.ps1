@@ -16,18 +16,16 @@
 .PARAMETER Location
     The Azure region deployment target. Default: 'swedencentral'
 
-.PARAMETER ResourceGroupName
-    Optional override for the resource group. When omitted, the group comes from the
-    .bicepparam file for the chosen -Environment, falling back to main.bicep's default. A value
-    that disagrees with the parameter file is rejected: Phase 2 deploys to the file's group, so
-    bootstrapping elsewhere would split the lab across two resource groups.
-
 .PARAMETER Environment
-    The environment tag. Default: 'dev'
+    Selects which .bicepparam file to deploy. Default: 'dev'. The file is authoritative for
+    every value it sets, including its own parEnvironment; this switch chooses the file rather
+    than overriding it. Passing -TemplateParameterFile for a different environment alongside an
+    explicit -Environment is rejected rather than silently resolved.
 
 .PARAMETER TemplateParameterFile
-    Optional path to a .bicepparam file for the Phase 2 main.bicep deployment.
-    Defaults to ..\bicep\parameters\<Environment>.bicepparam.
+    Optional path to a .bicepparam file. Defaults to ..\bicep\parameters\<Environment>.bicepparam.
+    It supplies the resource group and registry that Phase 1 bootstraps as well as the values
+    Phase 2 deploys, so both phases are driven by one file.
 
 .EXAMPLE
     .\Deploy-Bicep.ps1
@@ -48,10 +46,6 @@ param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
-
-    [Parameter(Mandatory = $false)]
-    [ValidateNotNullOrEmpty()]
-    [string]$ResourceGroupName = 'dev-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prod', 'platform')]
@@ -102,28 +96,46 @@ foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameter
     $params[$p.Key] = $p.Value.value
 }
 
-# Overlay only what this script computes. parResourceGroupName and parAcrName are deliberately
-# absent: the parameter file supplies them, and re-asserting them here was the defect.
-$params.parLocation    = $Location
-$params.parEnvironment = $Environment
+# Overlay only what this script computes. parResourceGroupName, parAcrName and parEnvironment
+# are deliberately absent: all three parameter files set them, and re-asserting any of them
+# here was the defect. -Location is overlaid because no parameter file sets it, so this is the
+# only route by which the caller's choice reaches the deployment.
+$params.parLocation = $Location
 
 # Effective values = compiled template defaults, overridden by the parameter file, then by the
-# overlay above. The template-default fallback is load-bearing rather than defensive: a
-# .bicepparam sets only what differs from the template, so dev.bicepparam supplies
-# parEnvironment alone and both names below would be $null if read from the file directly.
-$effective = @{}
+# overlay above. Used to resolve the three locals below, which Phase 1 needs before Phase 2
+# runs; it is not sent to Azure, $params is. The template-default fallback is load-bearing
+# rather than defensive: a .bicepparam sets only what differs from the template, so
+# dev.bicepparam supplies parEnvironment alone and the other two would be $null if read from
+# the parameter file directly.
+$effectiveParams = @{}
 foreach ($p in ($built.templateJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
-    if ($p.Value.ContainsKey('defaultValue')) { $effective[$p.Key] = $p.Value.defaultValue }
+    if ($p.Value.ContainsKey('defaultValue')) { $effectiveParams[$p.Key] = $p.Value.defaultValue }
 }
-foreach ($k in $params.Keys) { $effective[$k] = $params[$k] }
+foreach ($k in $params.Keys) { $effectiveParams[$k] = $params[$k] }
 
-if ($PSBoundParameters.ContainsKey('ResourceGroupName') -and $ResourceGroupName -ne $effective.parResourceGroupName) {
-    Write-Host "[ERROR] -ResourceGroupName '$ResourceGroupName' disagrees with '$($effective.parResourceGroupName)' from $TemplateParameterFile." -ForegroundColor Red
-    Write-Host "        Phase 2 deploys to the parameter file's group, so bootstrapping elsewhere would split the lab across two groups." -ForegroundColor Red
+# -Environment selects the file; the file then decides. Reject the one combination where the
+# two can disagree, rather than letting an explicit -TemplateParameterFile be overridden by an
+# -Environment default: that is how prod-named resources came to be tagged Development.
+if ($PSBoundParameters.ContainsKey('TemplateParameterFile') -and
+    $PSBoundParameters.ContainsKey('Environment') -and
+    $Environment -ne $effectiveParams.parEnvironment) {
+    Write-Host "[ERROR] -Environment '$Environment' disagrees with parEnvironment '$($effectiveParams.parEnvironment)' in $TemplateParameterFile." -ForegroundColor Red
+    Write-Host "        Pass one or the other: -Environment selects a parameter file, it does not override one." -ForegroundColor Red
     exit 1
 }
-$ResourceGroupName = $effective.parResourceGroupName
-$acrName           = $effective.parAcrName
+
+$Environment       = $effectiveParams.parEnvironment
+$ResourceGroupName = $effectiveParams.parResourceGroupName
+$acrName           = $effectiveParams.parAcrName
+
+# A null here means the template stopped declaring a default for a key the parameter file also
+# omits, which would otherwise surface as an obscure ARM error much later.
+if (-not $ResourceGroupName -or -not $acrName -or -not $Environment) {
+    Write-Host "[ERROR] Could not resolve deployment values from $TemplateParameterFile or main.bicep's defaults." -ForegroundColor Red
+    Write-Host "        Environment='$Environment' ResourceGroup='$ResourceGroupName' Registry='$acrName'" -ForegroundColor Red
+    exit 1
+}
 
 Write-Host "  Environment:    $Environment" -ForegroundColor Gray
 Write-Host "  Resource Group: $ResourceGroupName" -ForegroundColor Gray
