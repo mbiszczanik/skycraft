@@ -55,8 +55,8 @@ try {
     Write-Info "Checking Azure connection..."
     $context = Get-AzContext
     if (-not $context) {
-        # Authentication is the caller's responsibility: connecting from here would block
-        # forever inside a non-interactive child process.
+        # Authentication is the caller's responsibility: in a child process with no
+        # console, connecting from here blocks until the phase timeout.
         Write-Error-Custom "Not logged in to Azure. Run Connect-AzAccount first."
         exit 1
     }
@@ -69,7 +69,7 @@ try {
     Write-Host "Using Subscription: $($context.Subscription.Name) ($SubscriptionId)" -ForegroundColor Green
 }
 catch {
-    Write-Error-Custom "Failed to connect: $_"
+    Write-Error-Custom "Failed to verify connection or select subscription: $_"
     exit 1
 }
 

@@ -47,13 +47,13 @@ catch {
     exit 1
 }
 
-# 2. Connect to Azure PowerShell (for Role Assignment)
+# 2. Verify Azure PowerShell connection (for Role Assignment)
 try {
     Write-Host "`nChecking Azure PowerShell connection..." -ForegroundColor Yellow
     $azContext = Get-AzContext
     if (-not $azContext) {
-        # Authentication is the caller's responsibility: connecting from here would block
-        # forever inside a non-interactive child process.
+        # Authentication is the caller's responsibility: in a child process with no
+        # console, connecting from here blocks until the phase timeout.
         Write-Host "  -> [ERROR] Not logged in to Azure. Run Connect-AzAccount first." -ForegroundColor Red
         exit 1
     }
@@ -71,7 +71,7 @@ try {
     }
 }
 catch {
-    Write-Host "  -> [ERROR] Failed to connect to Azure: $_" -ForegroundColor Red
+    Write-Host "  -> [ERROR] Failed to check Azure connection: $_" -ForegroundColor Red
     exit 1
 }
 

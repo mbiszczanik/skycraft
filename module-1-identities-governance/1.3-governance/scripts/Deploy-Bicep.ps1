@@ -47,8 +47,8 @@ if (-not $TemplateParameterFile) {
 
 Write-Host "=== Lab 1.3: Governance Deployment ===" -ForegroundColor Cyan -BackgroundColor Black
 
-# 1. Verify Connection. Authentication is the caller's responsibility: connecting from here
-# would block forever inside a non-interactive child process.
+# 1. Verify Connection. Authentication is the caller's responsibility: in a child process
+# with no console, connecting from here blocks until the phase timeout.
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "  -> [ERROR] Not logged in to Azure. Run Connect-AzAccount first." -ForegroundColor Red

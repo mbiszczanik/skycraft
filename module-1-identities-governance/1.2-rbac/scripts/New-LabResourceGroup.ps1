@@ -68,8 +68,8 @@ function Write-Error-Custom {
     Write-Host "$Message" -ForegroundColor Red
 }
 
-# Check if logged in to Azure. Authentication is the caller's responsibility: connecting
-# from here would block forever inside a non-interactive child process.
+# Check if logged in to Azure. Authentication is the caller's responsibility: in a child
+# process with no console, connecting from here blocks until the phase timeout.
 Write-Info "Checking Azure connection..."
 
 $context = Get-AzContext
