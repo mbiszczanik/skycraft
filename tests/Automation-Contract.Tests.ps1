@@ -13,6 +13,7 @@
             obliges the script to exit non-zero on its way out.
     Rule 4  Test-Lab.ps1 ends in an exit on every path out of its last statement.
     Rule 4a Test-Lab.ps1 does not end in an unconditional 'exit 0'.
+    Rule 5  Deploy-Bicep.ps1 declares no mandatory parameter, which the binder would prompt for.
 
     Which files count as lab scripts is defined once in tests/LabScripts.psm1 and shared with
     the script-standards and CBH-coverage suites, so all three lint the same set.
@@ -162,6 +163,28 @@ BeforeAll {
         )
     }
 
+    function Get-MandatoryParameter {
+        # Rule 5: parameters the binder would stop and prompt for.
+        #
+        # Three shapes declare it - `Mandatory = $true`, `Mandatory=$true`, and a bare
+        # `Mandatory`, which is also true. The first two differ only in whitespace and the AST
+        # gives both the same argument expression, so only the bare form needs its own branch:
+        # it parses with the expression omitted. Measured: this corpus contains `Mandatory` in
+        # 110 places, all of them the spaced form, two of them true.
+        param($Ast)
+        foreach ($parameter in (Find-AstNode -Ast $Ast -Type ([System.Management.Automation.Language.ParameterAst]))) {
+            $isMandatory = $false
+            foreach ($attribute in @($parameter.Attributes | Where-Object { $_ -is [System.Management.Automation.Language.AttributeAst] })) {
+                if ($attribute.TypeName.GetReflectionAttributeType() -ne [System.Management.Automation.ParameterAttribute]) { continue }
+                foreach ($named in @($attribute.NamedArguments)) {
+                    if ($named.ArgumentName -ne 'Mandatory') { continue }
+                    if ($named.ExpressionOmitted -or $named.Argument.Extent.Text -eq '$true') { $isMandatory = $true }
+                }
+            }
+            if ($isMandatory) { $parameter }
+        }
+    }
+
     function Test-ExitOnEveryPath {
         # Rule 4: does control always leave the script at this statement? An exit does. An if
         # does only when every branch does and an else exists - without an else the fall-through
@@ -218,6 +241,24 @@ Describe 'Deploy scripts run unattended - no interactive prompt' {
         $found = @(Get-CommandCall -Ast (Get-ScriptAst -Path $path) -Name 'Read-Host')
         $lines = ($found | ForEach-Object { $_.Extent.StartLineNumber }) -join ', '
         $found.Count | Should -Be 0 -Because "an orchestrator cannot answer a prompt; '$file' asks at line(s) $lines. Expose a parameter instead."
+    }
+}
+
+Describe 'Deploy scripts declare no mandatory parameter' {
+    # The third way a script can stop and wait for a human, after Read-Host (Rule 1) and
+    # Connect-AzAccount (Rule 2). This one arrives through the parameter binder rather than a
+    # statement: a missing mandatory value makes PowerShell prompt, and in a child process with
+    # no console that blocks until the phase timeout.
+    #
+    # Read from the AST rather than (Get-Command $path).Parameters. Every lab script carries
+    # #Requires -Modules, and Get-Command on such a script fails when those modules are absent.
+    # .github/workflows/lint.yml installs only PSScriptAnalyzer and Pester, so a Get-Command
+    # rule would pass on a developer machine with the Az modules and break in CI. The AST also
+    # binds nothing and executes nothing.
+    It "'<file>' declares no mandatory parameter" -ForEach $DeployCases {
+        $found = @(Get-MandatoryParameter -Ast (Get-ScriptAst -Path $path))
+        $names = ($found | ForEach-Object { "-$($_.Name.VariablePath.UserPath) at line $($_.Extent.StartLineNumber)" }) -join ', '
+        $found.Count | Should -Be 0 -Because "an orchestrator cannot answer the binder's prompt any more than it can answer Read-Host; '$file' declares $names. Give the parameter a default instead."
     }
 }
 
