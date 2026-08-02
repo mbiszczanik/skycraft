@@ -17,7 +17,10 @@
     The Azure region deployment target. Default: 'swedencentral'
 
 .PARAMETER ResourceGroupName
-    The resource group name. Default: 'dev-skycraft-swc-rg'
+    Optional override for the resource group. When omitted, the group comes from the
+    .bicepparam file for the chosen -Environment, falling back to main.bicep's default. A value
+    that disagrees with the parameter file is rejected: Phase 2 deploys to the file's group, so
+    bootstrapping elsewhere would split the lab across two resource groups.
 
 .PARAMETER Environment
     The environment tag. Default: 'dev'
@@ -83,12 +86,59 @@ if (-not (Test-Path $mainBicep)) {
     exit 1
 }
 
+# ==============================================================================
+# RESOLVE PARAMETERS (before bootstrapping - Phase 1 must agree with Phase 2)
+# ==============================================================================
+# Phase 1 creates the resource group and the registry, so it has to use the values Phase 2
+# will deploy with. Hydrating afterwards and overlaying static values here is what made
+# `-Environment prod` create prod-named containers inside the dev resource group.
+$params = @{}
+$built = az bicep build-params --file $TemplateParameterFile --stdout | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
+    Write-Host "  -> [ERROR] Failed to compile parameter file: $TemplateParameterFile" -ForegroundColor Red
+    exit 1
+}
+foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+    $params[$p.Key] = $p.Value.value
+}
+
+# Overlay only what this script computes. parResourceGroupName and parAcrName are deliberately
+# absent: the parameter file supplies them, and re-asserting them here was the defect.
+$params.parLocation    = $Location
+$params.parEnvironment = $Environment
+
+# Effective values = compiled template defaults, overridden by the parameter file, then by the
+# overlay above. The template-default fallback is load-bearing rather than defensive: a
+# .bicepparam sets only what differs from the template, so dev.bicepparam supplies
+# parEnvironment alone and both names below would be $null if read from the file directly.
+$effective = @{}
+foreach ($p in ($built.templateJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+    if ($p.Value.ContainsKey('defaultValue')) { $effective[$p.Key] = $p.Value.defaultValue }
+}
+foreach ($k in $params.Keys) { $effective[$k] = $params[$k] }
+
+if ($PSBoundParameters.ContainsKey('ResourceGroupName') -and $ResourceGroupName -ne $effective.parResourceGroupName) {
+    Write-Host "[ERROR] -ResourceGroupName '$ResourceGroupName' disagrees with '$($effective.parResourceGroupName)' from $TemplateParameterFile." -ForegroundColor Red
+    Write-Host "        Phase 2 deploys to the parameter file's group, so bootstrapping elsewhere would split the lab across two groups." -ForegroundColor Red
+    exit 1
+}
+$ResourceGroupName = $effective.parResourceGroupName
+$acrName           = $effective.parAcrName
+
+Write-Host "  Environment:    $Environment" -ForegroundColor Gray
+Write-Host "  Resource Group: $ResourceGroupName" -ForegroundColor Gray
+Write-Host "  Registry:       $acrName" -ForegroundColor Gray
+
 # Ensure RG exists (needed for module deployment / bootstrapping)
 try {
     if (-not (Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue)) {
         Write-Host "Creating Resource Group: $ResourceGroupName..." -ForegroundColor Yellow
+        # No Environment tag here. main.bicep:60 maps parEnvironment to the canonical long form
+        # and sets it on this group at :72, so Phase 2 tags it correctly. Setting it from
+        # PowerShell would put a second copy of that mapping in another language, with nothing
+        # comparing the two.
         New-AzResourceGroup -Name $ResourceGroupName -Location $Location `
-            -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN'; Owner = 'admin@skycraft.com' } -ErrorAction Stop | Out-Null
+            -Tag @{ Project = 'SkyCraft'; CostCenter = 'MSDN'; Owner = 'admin@skycraft.com' } -ErrorAction Stop | Out-Null
     }
 } catch {
     Write-Host "[ERROR] Failed to create Resource Group: $_" -ForegroundColor Red
@@ -99,7 +149,6 @@ try {
 # PHASE 1: BOOTSTRAP ACR & IMAGE
 # ==============================================================================
 Write-Host "`n=== Phase 1: Bootstrapping Prerequisites ===" -ForegroundColor Cyan
-$acrName = "devskycraftswcacr01" # Should match main.bicep default or param
 
 # Check if we need to bootstrap image
 $repoExists = $false
@@ -160,21 +209,8 @@ Write-Host "`n=== Phase 2: Orchestrated Deployment (main.bicep) ===" -Foreground
 try {
     Write-Host "Params: $TemplateParameterFile" -ForegroundColor Gray
 
-    # Load base values from the per-environment .bicepparam file, then overlay the
-    # exact script-supplied values (keeps a no-argument run identical to before).
-    $params = @{}
-    $built = az bicep build-params --file $TemplateParameterFile --stdout | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
-        Write-Host "  -> [ERROR] Failed to compile parameter file: $TemplateParameterFile" -ForegroundColor Red
-        exit 1
-    }
-    foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
-        $params[$p.Key] = $p.Value.value
-    }
-    $params.parLocation = $Location
-    $params.parResourceGroupName = $ResourceGroupName
-    $params.parEnvironment = $Environment
-    $params.parAcrName = $acrName
+    # $params was hydrated and overlaid before Phase 1, so both phases deploy one set of
+    # values. Re-hydrating here would reintroduce the split this task removed.
 
     $deployment = New-AzSubscriptionDeployment `
         -Name $deploymentName `
