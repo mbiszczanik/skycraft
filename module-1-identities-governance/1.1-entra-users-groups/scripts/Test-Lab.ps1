@@ -46,7 +46,7 @@ catch {
 
 # Counts the [FAIL] reports below so the exit code carries the verdict. The Graph connection
 # failure above is not counted: it exits 1 directly, since nothing further can be checked.
-$script:testsFailed = 0
+$testsFailed = 0
 
 # Get Default Domain
 try {
@@ -83,12 +83,12 @@ foreach ($upn in $expectedUsers) {
         }
         else {
             Write-Host "[FAIL] User missing: $upn" -ForegroundColor Red
-            $script:testsFailed++
+            $testsFailed++
         }
     }
     catch {
         Write-Host "[FAIL] Error checking user $($upn): $_" -ForegroundColor Red
-        $script:testsFailed++
+        $testsFailed++
     }
 }
 
@@ -129,7 +129,7 @@ foreach ($item in $expectedGroups) {
                 }
                 else {
                      Write-Host "  -> [FAIL] Verify: $($item.ExpectedMember) NOT found in group." -ForegroundColor Red
-                     $script:testsFailed++
+                     $testsFailed++
                 }
             }
             else {
@@ -138,20 +138,16 @@ foreach ($item in $expectedGroups) {
         }
         else {
             Write-Host "[FAIL] Group missing: $groupName" -ForegroundColor Red
-            $script:testsFailed++
+            $testsFailed++
         }
     }
     catch {
         Write-Host "[FAIL] Error checking group: $groupName. $_" -ForegroundColor Red
-        $script:testsFailed++
+        $testsFailed++
     }
 }
 
 Write-Host "`n=== Validation Summary ===" -ForegroundColor Cyan
-if ($script:testsFailed -eq 0) {
-    Write-Host "Lab 1.1 validation complete. All checks passed." -ForegroundColor Green
-    exit 0
-}
-Write-Host "Lab 1.1 validation complete. $script:testsFailed check(s) failed - review the output above." -ForegroundColor Red
-exit $script:testsFailed
+Write-Host "Lab 1.1 validation complete. Failures: $testsFailed" -ForegroundColor $(if ($testsFailed -eq 0) { 'Green' } else { 'Red' })
+exit $testsFailed
 

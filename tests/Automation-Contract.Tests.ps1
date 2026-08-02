@@ -32,7 +32,7 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Where', Justification = 'False positive: read inside the GetNewClosure predicate handed to FindAll.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Name', Justification = 'False positive: captured by GetNewClosure into the command-name predicate.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'DeployCases', Justification = 'False positive: consumed by -ForEach on the Rule 1 and Rule 3 It blocks, which PSSA cannot correlate across Pester scriptblock scopes.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'ValidatorCases', Justification = 'False positive: consumed by -ForEach on the Rule 4 It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'ValidatorCases', Justification = 'False positive: consumed by -ForEach on the Rule 4 and Rule 4a It blocks, which PSSA cannot correlate across Pester scriptblock scopes.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'AllLabCases', Justification = 'False positive: consumed by -ForEach on the Rule 2 It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'Lab52Assertions', Justification = 'False positive: consumed by -ForEach on the lab 5.2 invariant It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
 param()
@@ -255,9 +255,12 @@ Describe 'Deploy scripts report failure through the exit code' {
 }
 
 Describe 'Validators report their verdict through the exit code' {
-    # Scoped to the last top-level statement, not "contains an exit somewhere". Every validator
-    # here already exits from its not-logged-in guard, so a containment check would call all 17
-    # clean while one that prints [FAIL] and then runs off the end still reports success.
+    # Scoped to the last top-level statement, not "contains an exit somewhere". Sixteen of the
+    # seventeen validators hold an exit outside their terminal statement - a guard, or a catch -
+    # so containment is nearly vacuous here: measured against the pre-fix tree it would have
+    # missed three of the four defects this rule caught, flagging only lab 1.2, which at that
+    # point held no exit statement at all. Lab 4.1 is the single file whose only exits are both
+    # inside its terminal if; it has no not-logged-in guard.
     #
     # This rule needs no Find-AstNode: it asks what the script's final statement is, not whether
     # some node exists anywhere in it, so there is nothing to search for.
