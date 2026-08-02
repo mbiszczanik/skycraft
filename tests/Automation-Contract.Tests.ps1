@@ -279,6 +279,10 @@ Describe 'Deploy scripts declare no mandatory parameter' {
     # showing a caller prompting and passing the result to -InitialPassword; the script itself
     # calls no Read-Host and generates a password when the parameter is omitted. Mistaking that
     # mention for a call is the error Rule 2 matches commands in the AST to avoid.
+    #
+    # The tokenizer settles it in one step, if you ever need to re-check: a <# .. #> help block
+    # is a single Comment token, so ask whether a Comment token spans the line. Measured -
+    # Deploy-Security.ps1:269 false, Enable-Encryption.ps1:112 false, New-LabUser.ps1:31 true.
     It "'<file>' declares no mandatory parameter" -ForEach $DeployCases {
         $found = @(Get-MandatoryParameter -Ast (Get-ScriptAst -Path $path))
         $names = ($found | ForEach-Object { "-$($_.Name.VariablePath.UserPath) at line $($_.Extent.StartLineNumber)" }) -join ', '
