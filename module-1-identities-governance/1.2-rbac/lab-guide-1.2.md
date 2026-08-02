@@ -72,6 +72,16 @@ Before starting this lab:
 - Users: Malfurion Stormrage, Khadgar Archmage, Chromie Timewalker
 - Groups: SkyCraft-Admins, SkyCraft-Developers, SkyCraft-Testers
 
+**Sign in before running any script in this lab:**
+
+```powershell
+Connect-AzAccount
+(Get-AzContext).Subscription.Name    # confirm it is the subscription you intend
+```
+
+> [!NOTE]
+> The scripts verify that you are signed in; they never sign you in. A script that tried to authenticate would hang forever when run without a console, so signing in is the caller's job. If you skip this step, the script stops immediately and tells you to run `Connect-AzAccount` — it does not prompt.
+
 ---
 
 ## 📖 Section 1: Understanding Azure RBAC (20 minutes)

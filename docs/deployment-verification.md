@@ -19,13 +19,19 @@ The hydration block is shared, in near-identical form, by twelve `Deploy-Bicep.p
 
 ```powershell
 az bicep install        # or: az bicep upgrade
+winget install -e --id Microsoft.Bicep    # the standalone CLI - see the warning below
 az login
 az account set --subscription "<your SkyCraft subscription>"
 Connect-AzAccount       # the deploy scripts use Az PowerShell, not the az CLI
 ```
 
+> [!WARNING]
+> **`az bicep install` alone is not enough.** Az PowerShell compiles a `.bicep` template client-side by shelling out to a bare `bicep` on `PATH`, and `az bicep install` deliberately places its binary inside the Azure CLI's private directory instead. Every deploy script passes a `.bicep` template, so without the standalone CLI on `PATH` **no lab deploys** — `New-AzSubscriptionDeployment` fails with `Cannot find Bicep` while binding its dynamic parameters, before it reaches Azure.
+>
+> Verified by removing the standalone CLI from `PATH`: a `.bicep` template fails, a pre-compiled `.json` template deploys, and `az bicep build` keeps working because it uses the CLI's private binary.
+
 > [!IMPORTANT]
-> Deploy scripts must call `az bicep build-params`, never a bare `bicep`. `az bicep install` places the binary inside the Azure CLI's private directory and **not** on `PATH`, so a bare `bicep` call fails with `CommandNotFoundException` on a machine provisioned from this repository's own prerequisites. See [powershell-standards.md — Best Practices](powershell-standards.md#5-best-practices).
+> Inside a script the rule is the opposite: deploy scripts must call `az bicep build-params`, never a bare `bicep`, so that compiling a parameter file works with either installation. See [powershell-standards.md — Best Practices](powershell-standards.md#5-best-practices).
 
 Confirm the Az context points where you think it does — this is the single most common cause of a confusing run:
 
@@ -40,7 +46,7 @@ Confirm the Az context points where you think it does — this is the single mos
 **What it proves**: a script invoked with no arguments still deploys exactly what it deployed before parameter files existed.
 
 ```powershell
-cd module-4-storage\4.1-storage-accounts\scripts
+cd module-3-compute\3.1-infrastructure-as-code\scripts
 .\Deploy-Bicep.ps1 -WhatIf
 ```
 
@@ -49,6 +55,18 @@ Check that:
 - [ ] The `Parameters:` line names the expected `.bicepparam` file
 - [ ] `what-if` reports **no changes** against an already-deployed environment. Any unexplained modification is a regression — most often a tag that changed value, or a parameter that silently fell back to a template default
 - [ ] The configuration summary reflects the values actually being sent, not a hardcoded string
+
+> [!IMPORTANT]
+> **`-WhatIf` does not mean the same thing in every lab, and most labs do not have it.** Only these produce a real ARM What-If with a resource-level diff, so only these can satisfy the "no changes" check above:
+>
+> | Lab | `-WhatIf` behaviour |
+> | :-- | :------------------ |
+> | `3.1`, `5.1`, `5.2`, `5.3` | real ARM What-If |
+> | `4.1` | `SupportsShouldProcess` — **skips** the deployment and prints a generic message; no ARM call, so no diff |
+> | `3.2` | prints a message and exits 0 — performs no what-if at all |
+> | the remaining ten | no `-WhatIf` parameter; passing it is a parameter-binding error |
+>
+> Unifying this is tracked separately. Until then, choose a lab from the first row when a step below calls for a what-if. Note also that `5.3` mutates Azure *before* its `-WhatIf` guard, so a dry run there is not dry.
 
 > [!NOTE]
 > A `what-if` that reports changes on every run usually means a non-deterministic value reached a resource property or tag. This is why `utcNow()` and the `DeploymentDate` tag are banned — see [bicep-standards.md §5](bicep-standards.md#5-resource-tagging-required).
@@ -61,23 +79,19 @@ Check that:
 
 This is the failure mode that offline validation cannot catch. Each script overlays the values it computes, then relies on the parameter file for everything else. If hydration fails, the overlay still succeeds and the deployment proceeds — with template defaults.
 
-Every SkyCraft template defaults to `dev`, so a broken `prod` run silently targets development resources:
+Template defaults vary by lab — some default to `dev`, several to `prod` or a platform value, and a couple require the parameter outright. Whichever it is, a failed hydration falls back to *that* default rather than to what you asked for, so the run silently targets the wrong environment:
 
 ```powershell
-cd module-3-compute\3.4-app-service\scripts
+cd module-3-compute\3.1-infrastructure-as-code\scripts
 .\Deploy-Bicep.ps1 -Environment prod -WhatIf
 ```
 
-- [ ] Targets `prod-skycraft-swc-rg` and `prod-skycraft-swc-vnet` — **not** `dev-*`
+- [ ] Every resource in the diff carries the `prod-` prefix — a single `dev-*` name means the parameter file was not read
 
-```powershell
-cd module-3-compute\3.3-containers\scripts
-.\Deploy-Bicep.ps1 -Environment prod -WhatIf
-```
+Repeat for any lab whose parameter file supplies a value the script does not overlay, choosing one that supports a real what-if per the table in §2.
 
-- [ ] Container resources use the `prod-` prefix — a `dev-skycraft-swc-aci-auth` inside the prod resource group means the parameter file was never read
-
-Repeat for any lab whose parameter file supplies a value the script does not overlay.
+> [!NOTE]
+> This section previously prescribed `3.4-app-service` and `3.3-containers`. Neither declares `-WhatIf`, so both commands failed at parameter binding — which is why the defect this section exists to catch shipped in lab 3.3 unnoticed: the check that would have found it could not be run. The lesson generalises past this document. A verification step nobody can execute is worse than none, because the checklist still gets ticked.
 
 ---
 
@@ -118,11 +132,25 @@ az resource list --resource-group prod-skycraft-swc-rg `
 
 ```powershell
 .\Test-Lab.ps1
+$LASTEXITCODE      # 0 = every check passed; anything else is the failure count
 ```
 
 - [ ] Passes against the resources you just deployed
 
 A `Test-Lab.ps1` failure after a successful deployment usually means the validator and the template disagree about what the lab produces. Fix whichever is wrong — but fix the disagreement, do not relax the assertion to make it pass.
+
+> [!WARNING]
+> **Do not read that exit code through `pwsh -File`.** Every validator declares `#Requires -Modules`, which makes `pwsh -NoProfile -File Test-Lab.ps1` exit `0` no matter how many checks failed. Run it in-process as above, or use the `-Command` form that re-exits:
+>
+> ```powershell
+> pwsh -NoProfile -Command "& .\Test-Lab.ps1; exit `$LASTEXITCODE"   # correct
+> pwsh -NoProfile -Command "& .\Test-Lab.ps1"                        # ALWAYS 1, whatever happened
+> pwsh -NoProfile -File .\Test-Lab.ps1                               # ALWAYS 0, whatever happened
+> ```
+>
+> The bare `-Command` form is the worst of the three: it looks correct until a validator fails with a count, and then reports 1. See [powershell-standards.md §8](powershell-standards.md#8-script-boilerplate).
+>
+> This matters most to anything automating a lab cycle: the wrong invocation reports every lab as passing, which is the exact defect these validators were fixed to stop doing.
 
 ---
 

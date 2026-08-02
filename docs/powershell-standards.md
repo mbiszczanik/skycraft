@@ -103,9 +103,13 @@ We use a standardized color scheme for `Write-Host` to provide a premium and con
 | **Section Header**  | `Cyan`      | Main tasks or module headers             |
 | **Action/Progress** | `Yellow`    | Current operation or "Wait" messages     |
 | **Success**         | `Green`     | Completed tasks or positive validation   |
-| **Error**           | `Red`       | Failures or exceptions                   |
-| **Warning**         | `Yellow`    | Potential issues or safety confirmations |
+| **Error**           | `Red`       | Failures the script will not continue past |
+| **Warning**         | `Yellow`    | Potential issues, safety confirmations, and failures the script deliberately survives |
 | **Information**     | `Gray`      | Background details or skipping messages  |
+
+The distinction is **what the script does next**, not whether something went wrong. A caught exception that the script deliberately continues past is a `[WARNING]`, even though it is an exception — and the message must then say what the consequence is, so "continues" is not read as "is fine". Lab 5.2's backup-policy failures are the worked example: the deploy script carries on because that lab's `Test-Lab.ps1` asserts both policies and will report the lab as failed, and the message says so.
+
+Reserve `[ERROR]` for a message followed by a non-zero `exit` in the same block. That pairing is enforced by Rule 3 in [`tests/Automation-Contract.Tests.ps1`](../tests/Automation-Contract.Tests.ps1), which also treats any `-ForegroundColor Red` as a failure announcement — so red output that does not exit will fail the suite whether or not it carries the token.
 
 ### Example Implementation
 
@@ -221,7 +225,14 @@ catch {
   - **Always check `$LASTEXITCODE`.** `$ErrorActionPreference = 'Stop'` does not catch native-command failures (`$PSNativeCommandUseErrorActionPreference` is `$false` by default). Without the check, a failed compile leaves the hashtable holding only the runtime overrides, and the deployment silently proceeds with template defaults — e.g. a `prod` run creating `dev`-named resources.
   - **Hydrate with `-AsHashtable`.** It yields nested hashtables rather than `PSCustomObject`s, which is what `-TemplateParameterObject` expects for `object`-typed parameters.
 
-  Scripts that pass **no** computed values skip the merge and hand the file straight to the cmdlet via `-TemplateParameterFile`. See [bicep-standards.md §4.3](bicep-standards.md#43-parameter-files-bicepparametersbicepparam) for the parameter-file conventions themselves.
+  **Every script hydrates, including those that compute nothing.** An empty overlay is still an overlay: compile the file and pass `-TemplateParameterObject` with whatever comes back. Handing a `.bicepparam` to `-TemplateParameterFile` makes Az PowerShell resolve it through a bare `bicep` on `PATH` — the very thing the first rule above forbids, arriving through the cmdlet instead of through your own code. This document previously carved out an exemption for exactly these scripts; three labs followed it and stopped working on a correctly-provisioned machine. See [bicep-standards.md §4.3](bicep-standards.md#43-parameter-files-bicepparametersbicepparam) for the parameter-file conventions themselves.
+
+> [!WARNING]
+> **`az bicep install` alone is not sufficient to run any lab.** The rules above remove one of two dependencies on a bare `bicep`. The other is the template itself: `New-AzSubscriptionDeployment -TemplateFile <file>.bicep` compiles client-side by shelling out to `bicep` on `PATH`, independently of any parameter file — and **all sixteen deploy scripts pass a `.bicep` template**.
+>
+> Verified by removing the standalone Bicep CLI from `PATH`, leaving the documented `az bicep install` state: a `.bicep` template fails with `Cannot find Bicep` while binding dynamic parameters and before reaching Azure, a pre-compiled `.json` template deploys normally, and `az bicep build` keeps working because it uses the CLI's private binary.
+>
+> Until the scripts compile their templates the way they already compile their parameter files, running any lab requires the **standalone** Bicep CLI on `PATH`.
 
 ## 6. Static Analysis & Testing
 
@@ -265,9 +276,12 @@ These are deliberate decisions where SkyCraft departs from the official Microsof
 
 ### 7.3 Duplicated Connection Checks per Lab
 
-- **Microsoft says**: Don't repeat yourself; factor shared setup (the `Get-AzContext` / `Connect-AzAccount` / `az account show` connection check) into a single shared module dot-sourced by every script.
+- **Microsoft says**: Don't repeat yourself; factor shared setup (the `Get-AzContext` / `az account show` connection check) into a single shared module dot-sourced by every script.
 - **We do**: Each lab's scripts carry their own self-contained connection-check block.
 - **Why**: Every lab folder must be runnable in isolation and readable end-to-end without chasing a shared helper up the tree. The connection step is itself part of the lesson — students should see *how* a script verifies it is authenticated before acting. A shared `Common.ps1` would couple labs together and hide a teaching moment behind an abstraction.
+
+> [!IMPORTANT]
+> The check **verifies**; it never authenticates. No lab script may call `Connect-AzAccount` — enforced by Rule 2 in [`tests/Automation-Contract.Tests.ps1`](../tests/Automation-Contract.Tests.ps1). Inside a child process with no console, an authentication attempt blocks until the caller gives up, so a script that tries to log in cannot be automated and cannot be timed out cleanly. Signing in is the caller's job; the script's job is to fail fast and say so.
 
 ### 7.4 `-Force` Switch on Destructive Scripts
 
@@ -306,10 +320,11 @@ $ErrorActionPreference = 'Stop'
 
 Write-Host "=== Script Title ===" -ForegroundColor Cyan
 
-# 1. Verify Connection
+# 1. Verify Connection - verify only; never Connect-AzAccount (see 7.3)
 $context = Get-AzContext
 if (-not $context) {
-    Write-Host "Not logged in." -ForegroundColor Red; exit 1
+    Write-Host "[ERROR] Not logged in to Azure. Run Connect-AzAccount first." -ForegroundColor Red
+    exit 1
 }
 
 # 2. Logic with Error Handling
@@ -324,6 +339,20 @@ catch {
     exit 1
 }
 ```
+
+> [!WARNING]
+> **A lab script's exit code does not survive `pwsh -File`.** Every script here declares `#Requires -Modules`, and under `pwsh -NoProfile -File script.ps1` that causes the process to exit `0` regardless of what the script's own `exit` statement returned. Measured on PowerShell 7.6.3 — a script with only `#Requires -Version 7.0` returns its code correctly; adding any `#Requires -Modules` line loses it.
+>
+> This matters because every `exit` in this document is otherwise pointless to a caller. Working invocations:
+>
+> ```powershell
+> pwsh -NoProfile -Command "& .\script.ps1; exit `$LASTEXITCODE"   # correct
+> & .\script.ps1; $LASTEXITCODE                                     # correct, in-process
+> pwsh -NoProfile -File .\script.ps1                                # ALWAYS 0
+> pwsh -NoProfile -Command "& .\script.ps1"                         # ALWAYS 1, whatever happened
+> ```
+>
+> The bare `-Command` form is the trap: it returns `1` for every outcome, so it passes a smoke test where the script fails and reports the wrong number precisely when a script fails with a count.
 
 ### Destructive Script Boilerplate (`Remove-Lab*.ps1`)
 
