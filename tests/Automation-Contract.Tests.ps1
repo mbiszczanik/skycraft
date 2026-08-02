@@ -28,9 +28,8 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
 # Every suppression here is targeted at one variable, so a genuinely dead variable added later
-# still surfaces instead of hiding behind a file-wide waiver.
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Type', Justification = 'False positive: read inside the GetNewClosure predicate handed to FindAll.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Where', Justification = 'False positive: read inside the GetNewClosure predicate handed to FindAll.')]
+# still surfaces instead of hiding behind a file-wide waiver. The 'Type' and 'Where'
+# suppressions moved to tests/ScriptAst.psm1 with Find-AstNode.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Name', Justification = 'False positive: captured by GetNewClosure into the command-name predicate.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'DeployCases', Justification = 'False positive: consumed by -ForEach on the Rule 1, Rule 3 and Rule 5 It blocks, which PSSA cannot correlate across Pester scriptblock scopes.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'ValidatorCases', Justification = 'False positive: consumed by -ForEach on the Rule 4 and Rule 4a It blocks, which PSSA cannot correlate across Pester scriptblock scopes.')]
@@ -55,29 +54,10 @@ BeforeDiscovery {
 }
 
 BeforeAll {
-    function Get-ScriptAst {
-        param([string]$Path)
-        $tokens = $null; $errors = $null
-        $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
-        if ($errors.Count -gt 0) { throw "Parse error in '$Path': $($errors[0].Message)" }
-        $ast
-    }
-
-    # One walk, shared by every rule. `exit` is an ExitStatementAst rather than a CommandAst,
-    # and Rule 3 has to climb from a node to its enclosing block, so a command-only helper
-    # would have forced each later rule to hand-roll its own FindAll predicate.
-    function Find-AstNode {
-        param(
-            [Parameter(Mandatory)]$Ast,
-            [Parameter(Mandatory)][type]$Type,
-            [scriptblock]$Where
-        )
-        $predicate = {
-            param($node)
-            $node -is $Type -and (-not $Where -or (& $Where $node))
-        }.GetNewClosure()
-        @($Ast.FindAll($predicate, $true))
-    }
+    # Get-ScriptAst and Find-AstNode now live in tests/ScriptAst.psm1, shared with the
+    # overlay-policy suite. The predicates below stay here: each encodes what one contract
+    # means rather than how to walk an AST, and each has a single consumer.
+    Import-Module (Join-Path $PSScriptRoot 'ScriptAst.psm1') -Force
 
     function Get-CommandCall {
         param($Ast, [string]$Name)
