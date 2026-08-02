@@ -37,6 +37,9 @@ Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
 $subscriptionId = $context.Subscription.Id
 
+# Counts the [FAIL] reports below so the exit code carries the verdict.
+$script:testsFailed = 0
+
 # Define Resource Groups
 $resourceGroups = @(
     "dev-skycraft-swc-rg",
@@ -59,14 +62,17 @@ foreach ($rgName in $resourceGroups) {
             }
             else {
                 Write-Host " [FAIL] Missing or incorrect 'Project' tag." -ForegroundColor Red
+                $script:testsFailed++
             }
         }
         else {
             Write-Host "  Checking $rgName... [FAIL] No tags found." -ForegroundColor Red
+            $script:testsFailed++
         }
     }
     catch {
         Write-Host "  Checking $rgName... [FAIL] Not found." -ForegroundColor Red
+        $script:testsFailed++
     }
 }
 
@@ -87,6 +93,7 @@ foreach ($policyName in $expectedPolicies) {
     else {
         Write-Host "  Policy: $policyName" -NoNewline
         Write-Host " [FAIL]" -ForegroundColor Red
+        $script:testsFailed++
     }
 }
 
@@ -105,6 +112,7 @@ foreach ($rgName in $lockTargets) {
     else {
         Write-Host "  Lock on $rgName" -NoNewline
         Write-Host " [FAIL] Not found." -ForegroundColor Red
+        $script:testsFailed++
     }
 }
 
@@ -122,4 +130,9 @@ else {
     Write-Host "  [INFO] No budgets found. (If you created them recently, they might take time to appear)" -ForegroundColor Yellow
 }
 
-Write-Host "`nValidation Complete." -ForegroundColor Green
+if ($script:testsFailed -eq 0) {
+    Write-Host "`nValidation Complete. All checks passed." -ForegroundColor Green
+    exit 0
+}
+Write-Host "`nValidation Complete. $script:testsFailed check(s) failed - review the output above." -ForegroundColor Red
+exit $script:testsFailed

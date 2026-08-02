@@ -33,10 +33,13 @@ Write-Host "`nChecking Azure connection..." -ForegroundColor Cyan
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    return
+    exit 1
 }
 $subId = $context.Subscription.Id
 Write-Host "Connected to: $($context.Subscription.Name) ($subId)" -ForegroundColor Green
+
+# Counts the [FAIL]/[ERROR] reports below so the exit code carries the verdict.
+$script:testsFailed = 0
 
 # 1. Validate Resource Groups
 Write-Host "`n=== Validating Resource Groups ===" -ForegroundColor Cyan
@@ -48,6 +51,7 @@ foreach ($rg in $rgs) {
     }
     else {
         Write-Host "[FAIL] Resource Group missing: $rg" -ForegroundColor Red
+        $script:testsFailed++
     }
 }
 
@@ -72,6 +76,7 @@ foreach ($check in $checks) {
         $assignments = Get-AzRoleAssignment -Scope $check.Scope -ErrorAction SilentlyContinue
         if (-not $assignments) {
              Write-Host " [FAIL] No assignments at scope." -ForegroundColor Red
+             $script:testsFailed++
              continue
         }
         
@@ -87,11 +92,18 @@ foreach ($check in $checks) {
         }
         else {
             Write-Host " [FAIL] Expected Assignment '$($check.Role)' for '$($check.Principal)' NOT found." -ForegroundColor Red
+            $script:testsFailed++
         }
     }
     catch {
         Write-Host " [ERROR] $_" -ForegroundColor Red
+        $script:testsFailed++
     }
 }
 
-Write-Host "`nValidation complete." -ForegroundColor Green
+if ($script:testsFailed -eq 0) {
+    Write-Host "`nValidation complete. All checks passed." -ForegroundColor Green
+    exit 0
+}
+Write-Host "`nValidation complete. $script:testsFailed check(s) failed - review the output above." -ForegroundColor Red
+exit $script:testsFailed

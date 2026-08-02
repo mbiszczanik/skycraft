@@ -167,6 +167,7 @@ Test-LB -RgName $ProdRG -LbName 'prod-skycraft-swc-lb'
 Write-Host "`n=== Validation Summary ===" -ForegroundColor Cyan
 if ($validationErrors -eq 0) {
     Write-Host "Lab 2.3 validation complete. All checks passed!" -ForegroundColor Green -BackgroundColor Black
+    exit 0
 } else {
     Write-Host "Lab 2.3 validation failed with $validationErrors error(s). Please review the logs above." -ForegroundColor Red -BackgroundColor Black
     exit 1

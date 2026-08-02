@@ -12,6 +12,7 @@
     Rule 3  Announcing failure - a [FAILED] or [ERROR] message, or Write-Host in Red -
             obliges the script to exit non-zero on its way out.
     Rule 4  Test-Lab.ps1 ends in an exit on every path out of its last statement.
+    Rule 4a Test-Lab.ps1 does not end in an unconditional 'exit 0'.
 
     Which files count as lab scripts is defined once in tests/LabScripts.psm1 and shared with
     the script-standards and CBH-coverage suites, so all three lint the same set.
@@ -269,6 +270,22 @@ Describe 'Validators report their verdict through the exit code' {
         }
         Test-ExitOnEveryPath -Statement $terminal |
             Should -BeTrue -Because "an orchestrator reads this script's exit code as the lab's verdict, so one that ends without exiting reports success however many checks failed; in '$file' $where."
+    }
+
+    # Rule 4a. Rule 4 alone would accept a validator ending in a flat `exit 0`, which reports
+    # success unconditionally - the same defect one step removed. Only a terminal statement that
+    # is *itself* a literal `exit 0` is rejected: labs 4.1 and 4.2 end in an if that exits 0 on
+    # the success branch of a real counter, which is correct and must stay legal.
+    #
+    # WHERE THIS STOPS: no rule here can see whether the counter behind `exit $failCount` is ever
+    # incremented. A validator that declares a counter, prints [FAIL] without incrementing it and
+    # exits that counter satisfies both Rule 4 and Rule 4a while always reporting success. That
+    # gap is closed by reading the code, not by this suite.
+    It "'<file>' does not end in an unconditional 'exit 0'" -ForEach $ValidatorCases {
+        $terminal = Get-TerminalStatement -Ast (Get-ScriptAst -Path $path)
+        $isFlatZero = $terminal -is [System.Management.Automation.Language.ExitStatementAst] -and
+                      -not (Test-ExitIsNonZero -Exit $terminal)
+        $isFlatZero | Should -BeFalse -Because "'$file' would report success whatever its checks found. Exit a failure count, or branch on one."
     }
 }
 
