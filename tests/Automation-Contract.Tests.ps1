@@ -11,7 +11,7 @@
     Rule 2  No lab script calls Connect-AzAccount.
     Rule 3  Announcing failure - a [FAILED] or [ERROR] message, or Write-Host in Red -
             obliges the script to exit non-zero on its way out.
-    Rule 4  Test-Lab.ps1 ends in an unconditional exit. (pending - lands with Task 4)
+    Rule 4  Test-Lab.ps1 ends in an exit on every path out of its last statement.
 
     Which files count as lab scripts is defined once in tests/LabScripts.psm1 and shared with
     the script-standards and CBH-coverage suites, so all three lint the same set.
@@ -25,13 +25,13 @@
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
-# ValidatorCases really is unused until Rule 4 lands. Its suppression is targeted and says so,
-# so a dead variable added later still surfaces instead of hiding behind a file-wide waiver.
+# Every suppression here is targeted at one variable, so a genuinely dead variable added later
+# still surfaces instead of hiding behind a file-wide waiver.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Type', Justification = 'False positive: read inside the GetNewClosure predicate handed to FindAll.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Where', Justification = 'False positive: read inside the GetNewClosure predicate handed to FindAll.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Name', Justification = 'False positive: captured by GetNewClosure into the command-name predicate.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'DeployCases', Justification = 'False positive: consumed by -ForEach on the Rule 1 and Rule 3 It blocks, which PSSA cannot correlate across Pester scriptblock scopes.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'ValidatorCases', Justification = 'Genuinely unused here. Scaffold for Rule 4 (Test-Lab.ps1 ends in an unconditional exit), landed early so the discovery block is written once.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'ValidatorCases', Justification = 'False positive: consumed by -ForEach on the Rule 4 It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'AllLabCases', Justification = 'False positive: consumed by -ForEach on the Rule 2 It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'Lab52Assertions', Justification = 'False positive: consumed by -ForEach on the lab 5.2 invariant It block, which PSSA cannot correlate across Pester scriptblock scopes.')]
 param()
@@ -161,6 +161,30 @@ BeforeAll {
         )
     }
 
+    function Test-ExitOnEveryPath {
+        # Rule 4: does control always leave the script at this statement? An exit does. An if
+        # does only when every branch does and an else exists - without an else the fall-through
+        # path carries on past the if and off the end of the script.
+        #
+        # $null here means the script body has no statements, which is a real answer rather than
+        # a gap to paper over: such a script cannot exit, so it fails. That is why this is not
+        # made total the way Get-EnclosingStatementBlock was. There the $null would have reached
+        # a mandatory parameter and prompted; this one is consumed on the next line.
+        param($Statement)
+        if (-not $Statement) { return $false }
+        if ($Statement -is [System.Management.Automation.Language.ExitStatementAst]) { return $true }
+        if ($Statement -is [System.Management.Automation.Language.IfStatementAst]) {
+            if (-not $Statement.ElseClause) { return $false }
+            $bodies = @($Statement.Clauses | ForEach-Object { $_.Item2 }) + @($Statement.ElseClause)
+            foreach ($body in $bodies) {
+                $last = @($body.Statements) | Select-Object -Last 1
+                if (-not (Test-ExitOnEveryPath -Statement $last)) { return $false }
+            }
+            return $true
+        }
+        $false
+    }
+
     function Test-ExitIsNonZero {
         # The value predicate on a single exit. A bare `exit` and `exit 0` both hand the caller
         # a success code, so neither discharges the obligation; `exit $var` is accepted because
@@ -226,6 +250,25 @@ Describe 'Deploy scripts report failure through the exit code' {
                 Sort-Object -Unique
         )
         $lines.Count | Should -Be 0 -Because "an orchestrator gates on the exit code, so a reported failure that falls through to exit 0 is recorded as a pass; '$file' does that in the block(s) starting at line(s) $($lines -join ', ')."
+    }
+}
+
+Describe 'Validators report their verdict through the exit code' {
+    # Scoped to the last top-level statement, not "contains an exit somewhere". Every validator
+    # here already exits from its not-logged-in guard, so a containment check would call all 17
+    # clean while one that prints [FAIL] and then runs off the end still reports success.
+    #
+    # This rule needs no Find-AstNode: it asks what the script's final statement is, not whether
+    # some node exists anywhere in it, so there is nothing to search for.
+    It "'<file>' ends in an exit on every path" -ForEach $ValidatorCases {
+        $terminal = Get-TerminalStatement -Ast (Get-ScriptAst -Path $path)
+        $where = if ($terminal) {
+            "its last statement is at line $($terminal.Extent.StartLineNumber): $((($terminal.Extent.Text -split "`n")[0]).Trim())"
+        } else {
+            'its body has no statements at all'
+        }
+        Test-ExitOnEveryPath -Statement $terminal |
+            Should -BeTrue -Because "an orchestrator reads this script's exit code as the lab's verdict, so one that ends without exiting reports success however many checks failed; in '$file' $where."
     }
 }
 
