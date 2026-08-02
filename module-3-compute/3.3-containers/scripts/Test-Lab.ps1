@@ -8,12 +8,23 @@
     - Azure Container Instance (ACI) running state and accessibility.
     - Azure Container Apps (ACA) running state, scaling config, and accessibility.
 
-.PARAMETER ResourceGroupName
-    The resource group name. Default: 'dev-skycraft-swc-rg'
+.PARAMETER Environment
+    Which environment to validate: dev, prod or platform. Selects the .bicepparam file that
+    Deploy-Bicep.ps1 deployed from, so the validator looks for the resources that run actually
+    created. Defaults to 'dev'.
+
+.PARAMETER TemplateParameterFile
+    Path to the .bicepparam file to read resource names from. Defaults to the file -Environment
+    selects. Pass one or the other; an explicit file with a disagreeing -Environment is rejected.
 
 .EXAMPLE
     .\Test-Lab.ps1
-    Runs all validation checks and outputs results.
+    Validates the dev deployment.
+
+.EXAMPLE
+    .\Test-Lab.ps1 -Environment prod
+    Validates the prod deployment. Without this the script would look for dev-named resources
+    and report three failures against a perfectly good prod deployment.
 
 .NOTES
     Project: SkyCraft
@@ -28,8 +39,11 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateNotNullOrEmpty()]
-    [string]$ResourceGroupName = 'dev-skycraft-swc-rg'
+    [ValidateSet('dev', 'prod', 'platform')]
+    [string]$Environment = 'dev',
+
+    [Parameter(Mandatory = $false)]
+    [string]$TemplateParameterFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,14 +54,54 @@ Write-Host "=== Lab 3.3 Validation Script ===" -ForegroundColor Cyan -Background
 # Check Azure Connection
 $context = Get-AzContext
 if (-not $context) {
-    Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
+    Write-Host "Not logged in to Azure. Run Connect-AzAccount first." -ForegroundColor Red
     exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
+# Resource names come from the same .bicepparam file Deploy-Bicep.ps1 deployed from, resolved the
+# same way. They used to be literals here, which meant this script could only ever validate dev:
+# passing -ResourceGroupName prod-skycraft-swc-rg still looked for devskycraftswcacr01 and reported
+# three failures against a correct prod deployment.
+if (-not $TemplateParameterFile) {
+    $TemplateParameterFile = Join-Path $PSScriptRoot "..\bicep\parameters\$Environment.bicepparam"
+}
+
+$built = az bicep build-params --file $TemplateParameterFile --stdout | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or -not $built.parametersJson) {
+    Write-Host "  -> [ERROR] Failed to compile parameter file: $TemplateParameterFile" -ForegroundColor Red
+    exit 1
+}
+
+# A .bicepparam sets only what differs from the template, so dev.bicepparam supplies
+# parEnvironment alone and every name below would be $null if read from the file directly. The
+# template-default fallback is what makes the dev path work at all.
+$resolved = @{}
+foreach ($p in ($built.templateJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+    if ($p.Value.ContainsKey('defaultValue')) { $resolved[$p.Key] = $p.Value.defaultValue }
+}
+foreach ($p in ($built.parametersJson | ConvertFrom-Json -AsHashtable).parameters.GetEnumerator()) {
+    $resolved[$p.Key] = $p.Value.value
+}
+
+# -Environment selects the file; the file then decides. Same guard as Deploy-Bicep.ps1.
+if ($PSBoundParameters.ContainsKey('TemplateParameterFile') -and
+    $PSBoundParameters.ContainsKey('Environment') -and
+    $Environment -ne $resolved.parEnvironment) {
+    Write-Host "[ERROR] -Environment '$Environment' disagrees with parEnvironment '$($resolved.parEnvironment)' in $TemplateParameterFile." -ForegroundColor Red
+    exit 1
+}
+
+$ResourceGroupName = $resolved.parResourceGroupName
+if (-not $ResourceGroupName -or -not $resolved.parAcrName) {
+    Write-Host "[ERROR] Could not resolve resource names from $TemplateParameterFile or main.bicep's defaults." -ForegroundColor Red
+    exit 1
+}
+Write-Host "Validating '$($resolved.parEnvironment)' in $ResourceGroupName" -ForegroundColor Gray
+
 # 1. Validate ACR
 Write-Host "`n=== 1. Validating Azure Container Registry ===" -ForegroundColor Cyan
-$acrName = "devskycraftswcacr01"
+$acrName = $resolved.parAcrName
 $imageName = "skycraft-auth"
 $imageTag = "v1"
 
@@ -84,7 +138,7 @@ if ($acr) {
 
 # 2. Validate ACI
 Write-Host "`n=== 2. Validating Azure Container Instance ===" -ForegroundColor Cyan
-$aciName = "dev-skycraft-swc-aci-auth"
+$aciName = $resolved.parAciName
 
 try {
     $aci = Get-AzContainerGroup -ResourceGroupName $ResourceGroupName -Name $aciName -ErrorAction Stop
@@ -112,8 +166,8 @@ try {
 
 # 3. Validate ACA
 Write-Host "`n=== 3. Validating Azure Container Apps ===" -ForegroundColor Cyan
-$acaName = "dev-skycraft-swc-aca-world-02"
-$caeName = "dev-skycraft-swc-cae-02"
+$acaName = $resolved.parAcaName
+$caeName = $resolved.parCaeName
 
 # Generic ARM lookup (no native Az cmdlet for Container Apps in base modules)
 $aca = Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.App/containerApps' -Name $acaName -ExpandProperties -ErrorAction SilentlyContinue
