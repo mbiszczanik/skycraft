@@ -14,7 +14,8 @@
     Prerequisites: Lab 3.2 (at least one VM, dev preferred) and Lab 4.1 (Storage) must be deployed.
 
 .PARAMETER OpsEmail
-    Email address for Action Group notifications. Required.
+    Email address for Action Group notifications. Default: admin@skycraft.com, the Owner tag
+    address used throughout the repository. Pass your own to be notified instead.
 
 .PARAMETER ProdEnvironment
     Prod environment prefix to locate the production VM. Default: prod
@@ -53,9 +54,9 @@
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Force', Justification = 'Deliberate no-op: the analyzer is correct that -Force now gates nothing. The switch shipped in this script before the confirmation prompt was removed, so dropping it would break any existing invocation that passes it. Unifying -Force across all 16 Deploy-Bicep.ps1 is deferred to plan 2.')]
 param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$OpsEmail,
+    [string]$OpsEmail = 'admin@skycraft.com',
 
     [Parameter()]
     [ValidateSet('dev', 'prod')]
