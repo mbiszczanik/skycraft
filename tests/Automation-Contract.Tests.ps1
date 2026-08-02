@@ -9,7 +9,8 @@
 
     Rule 1  Deploy-Bicep.ps1 contains no Read-Host.
     Rule 2  No lab script calls Connect-AzAccount.
-    Rule 3  Every block announcing failure with a [FAILED] or [ERROR] message exits non-zero.
+    Rule 3  Announcing failure - a [FAILED] or [ERROR] message, or Write-Host in Red -
+            obliges the script to exit non-zero on its way out.
     Rule 4  Test-Lab.ps1 ends in an unconditional exit. (pending - lands with Task 4)
 
     Which files count as lab scripts is defined once in tests/LabScripts.psm1 and shared with
@@ -98,51 +99,92 @@ BeforeAll {
         $statements[-1]
     }
 
-    function Get-EnclosingStatementBlock {
-        # Rule 3: from a failure-reporting call, climb to the block that must also exit.
-        # Always returns a block, so callers never have to null-check. That guarantee is load
-        # bearing rather than tidy: NamedBlockAst does not derive from StatementBlockAst, so a
-        # message at script top level climbs past the end block to $null, and $null passed to
-        # Find-AstNode binds to a [Parameter(Mandatory)] - which prompts, hanging the very
-        # unattended run this suite exists to protect. Falling back to the end block keeps such
-        # a message in scope instead.
+    function Get-EnclosingStatementBlockChain {
+        # Rule 3: every block enclosing a node, innermost first, with the script end block last.
+        # The rule has to ask whether anything on the way out of the script terminates it, not
+        # just the innermost block, because a failure message is routinely one line of a nested
+        # diagnostic block whose enclosing branch is the one that exits.
+        #
+        # The end block is appended rather than found by the climb because NamedBlockAst does
+        # not derive from StatementBlockAst, so a message at script top level would otherwise
+        # run off the top to $null - and $null passed to Find-AstNode binds to a
+        # [Parameter(Mandatory)], which prompts, hanging the very unattended run this suite
+        # exists to protect.
         param($Node, $ScriptAst)
+        $chain = @()
         $current = $Node
-        while ($current -and $current -isnot [System.Management.Automation.Language.StatementBlockAst]) {
+        while ($current) {
+            if ($current -is [System.Management.Automation.Language.StatementBlockAst]) { $chain += $current }
             $current = $current.Parent
         }
-        if ($current) { $current } else { $ScriptAst.EndBlock }
+        $chain + $ScriptAst.EndBlock
+    }
+
+    function Get-EnclosingStatementBlock {
+        # The innermost enclosing block, which is what Rule 3 reports as the offending location.
+        # Expressed in terms of the chain so there is only one climb to keep correct, and it
+        # inherits the chain's guarantee of always returning a block.
+        param($Node, $ScriptAst)
+        (Get-EnclosingStatementBlockChain -Node $Node -ScriptAst $ScriptAst)[0]
     }
 
     function Get-FailureMessage {
-        # Rule 3: the literals through which a script announces failure to the user. Both AST
-        # shapes are needed - "[ERROR] Deployment failed!" parses as StringConstantExpressionAst,
-        # while "[FAILED] state: $($d.ProvisioningState)" parses as ExpandableStringExpressionAst.
-        # The two share no base type below ExpressionAst, so they are collected separately.
+        # Rule 3: the nodes through which a script announces failure. Two signals, because the
+        # repository announces failure in two ways:
+        #   - a [FAILED] or [ERROR] token in the message text
+        #   - Write-Host ... -ForegroundColor Red, which docs/powershell-standards.md:106
+        #     defines as the colour for an error
+        # Keying on both is what stops a plain Write-Host "Deployment failed!" -ForegroundColor
+        # Red from shipping unnoticed; five such announcements already exist that carry no
+        # bracketed token at all.
+        #
+        # For the text signal both string AST shapes are needed: "[ERROR] Deployment failed!"
+        # parses as StringConstantExpressionAst and "[FAILED] $($d.ProvisioningState)" as
+        # ExpandableStringExpressionAst, and the two share no base type below ExpressionAst.
         param($Ast)
-        $isFailure = { param($node) $node.Value -match '\[(FAILED|ERROR)\]' }
+        $isFailureText = { param($node) $node.Value -match '\[(FAILED|ERROR)\]' }
+        $isRedWriteHost = {
+            param($node)
+            if ($node.GetCommandName() -ne 'Write-Host') { return $false }
+            $elements = @($node.CommandElements)
+            for ($i = 0; $i -lt $elements.Count - 1; $i++) {
+                if ($elements[$i] -is [System.Management.Automation.Language.CommandParameterAst] -and
+                    $elements[$i].ParameterName -eq 'ForegroundColor' -and
+                    $elements[$i + 1].Extent.Text.Trim("'", '"') -eq 'Red') { return $true }
+            }
+            $false
+        }
         @(
-            Find-AstNode -Ast $Ast -Type ([System.Management.Automation.Language.StringConstantExpressionAst])   -Where $isFailure
-            Find-AstNode -Ast $Ast -Type ([System.Management.Automation.Language.ExpandableStringExpressionAst]) -Where $isFailure
+            Find-AstNode -Ast $Ast -Type ([System.Management.Automation.Language.StringConstantExpressionAst])   -Where $isFailureText
+            Find-AstNode -Ast $Ast -Type ([System.Management.Automation.Language.ExpandableStringExpressionAst]) -Where $isFailureText
+            Find-AstNode -Ast $Ast -Type ([System.Management.Automation.Language.CommandAst])                    -Where $isRedWriteHost
         )
     }
 
     function Test-ExitIsNonZero {
         # The value predicate on a single exit. A bare `exit` and `exit 0` both hand the caller
         # a success code, so neither discharges the obligation; `exit $var` is accepted because
-        # the value is not knowable statically. Rule 4 needs this without the subtree search
-        # below, which is why the two are separate.
+        # the value is not knowable statically. Rule 4 needs this on its own, without the block
+        # search below, which is why the two are separate.
         param($Exit)
         [bool]($Exit.Pipeline -and $Exit.Pipeline.Extent.Text -ne '0')
     }
 
-    function Test-BlockExitsNonZero {
-        # The subtree search. Note this is satisfied by an exit nested inside a conditional
-        # within the block, which may not execute. Left deliberately loose: all 70 blocks that
-        # currently satisfy Rule 3 exit directly, so tightening to $Block.Statements buys
-        # nothing today and would reject a legitimate conditional exit later.
+    function Test-BlockExitsDirectly {
+        # Whether this block itself terminates the script - an exit among its own statements,
+        # not one buried in a conditional inside it.
+        #
+        # That distinction is what makes walking the chain safe rather than merely permissive,
+        # and it is the part most likely to look like over-complication later. Lab 2.2's failing
+        # branch sits inside a try whose body does contain an exit 1, nested in an if. A search
+        # that counted any descendant exit would therefore mark it covered - passing the exact
+        # defect Rule 3 was written to catch. Measured: with the descendant search this rule
+        # reports 12 blocks across the corpus, 7 of them false; with the direct check, 5, all
+        # real, matching the known defect list exactly.
         param($Block)
-        @(Get-ExitStatement -Ast $Block | Where-Object { Test-ExitIsNonZero -Exit $_ }).Count -gt 0
+        @(@($Block.Statements) | Where-Object {
+            $_ -is [System.Management.Automation.Language.ExitStatementAst] -and (Test-ExitIsNonZero -Exit $_)
+        }).Count -gt 0
     }
 }
 
@@ -165,16 +207,22 @@ Describe 'Lab scripts never authenticate on their own' {
 }
 
 Describe 'Deploy scripts report failure through the exit code' {
-    # Scoped to the block holding the message, not the whole script: a script can exit 1 from its
-    # catch and still fall through the else branch of a provisioning-state check, which is exactly
-    # the shape this rule exists to catch. A whole-script check would call that script clean.
+    # A failure is covered when some block on the way out of the script terminates it directly.
+    #
+    # Not the whole script: lab 2.2 exits 1 from its catch while the else branch of its
+    # provisioning-state check falls through, and a whole-script check would call that clean.
+    # Not the innermost block alone either: a failure message is often one line of a nested
+    # diagnostic block whose enclosing branch is the one that exits, and demanding an exit from
+    # the innermost block reports 7 such places falsely.
     It "'<file>' exits non-zero after announcing a failure" -ForEach $DeployCases {
         $ast = Get-ScriptAst -Path $path
         $lines = @(
             Get-FailureMessage -Ast $ast |
-                ForEach-Object { Get-EnclosingStatementBlock -Node $_ -ScriptAst $ast } |
-                Where-Object { -not (Test-BlockExitsNonZero -Block $_) } |
-                ForEach-Object { $_.Extent.StartLineNumber } |
+                Where-Object {
+                    $chain = Get-EnclosingStatementBlockChain -Node $_ -ScriptAst $ast
+                    @($chain | Where-Object { Test-BlockExitsDirectly -Block $_ }).Count -eq 0
+                } |
+                ForEach-Object { (Get-EnclosingStatementBlock -Node $_ -ScriptAst $ast).Extent.StartLineNumber } |
                 Sort-Object -Unique
         )
         $lines.Count | Should -Be 0 -Because "an orchestrator gates on the exit code, so a reported failure that falls through to exit 0 is recorded as a pass; '$file' does that in the block(s) starting at line(s) $($lines -join ', ')."

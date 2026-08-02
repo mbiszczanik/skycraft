@@ -77,6 +77,11 @@ $vmName         = 'dev-skycraft-swc-auth-vm'
 $vmRg           = 'dev-skycraft-swc-rg'
 $deploymentName = "lab52-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 
+# Several steps below warn and continue rather than exiting, because Test-Lab.ps1 is the gate
+# for this lab. Counting them keeps the closing banner honest: without it a run that failed to
+# create a backup policy still ends with an unqualified "Deployment Complete".
+$warningCount = 0
+
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Lab 5.2 - BCDR Deployment" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
@@ -199,6 +204,7 @@ if ($WhatIf) {
             Set-AzRecoveryServicesBackupProperty -Vault $vault -BackupStorageRedundancy LocallyRedundant | Out-Null
             Write-Host "  ✓ Redundancy set to LocallyRedundant" -ForegroundColor Green
         } catch {
+            $warningCount++
             Write-Host "  [WARNING] Could not set redundancy (vault may already be in use): $_" -ForegroundColor Yellow
         }
     }
@@ -250,6 +256,7 @@ if ($WhatIf) {
             # every VM-protection step after it, turning one policy error into a lab missing
             # several unrelated resources. Automation-Contract.Tests.ps1 asserts both validator
             # checks still exist, so this stays true even if someone edits Test-Lab.ps1.
+            $warningCount++
             Write-Host "  [WARNING] Failed to create RSV policy: $_" -ForegroundColor Yellow
             Write-Host "  [WARNING]   The lab is incomplete; Test-Lab.ps1 will report it as failed." -ForegroundColor Yellow
         }
@@ -287,6 +294,7 @@ if ($WhatIf) {
         } catch {
             # Deliberately not fatal, as with the RSV policy above: Test-Lab.ps1 asserts
             # "Policy 'SkyCraft-Blob-Policy' exists" and fails the lab when it is missing.
+            $warningCount++
             Write-Host "  [WARNING] Failed to create Blob policy: $_" -ForegroundColor Yellow
             Write-Host "  [WARNING]   The lab is incomplete; Test-Lab.ps1 will report it as failed." -ForegroundColor Yellow
         }
@@ -309,6 +317,7 @@ if ($WhatIf) {
         Write-Host "  Enabling backup protection for $vmName..." -ForegroundColor Gray
         $vm = Get-AzVM -Name $vmName -ResourceGroupName $vmRg -ErrorAction SilentlyContinue
         if (-not $vm) {
+            $warningCount++
             Write-Host "  [WARNING] VM '$vmName' not found in '$vmRg'. Skipping VM-backup steps." -ForegroundColor Yellow
             Write-Host "  Complete Lab 3.2 (dev VM) first and re-run this script if VM backup is required." -ForegroundColor Yellow
         } else {
@@ -338,6 +347,7 @@ if ($WhatIf) {
                     Write-Host "  ✓ Initial backup triggered (runs in background — check Backup jobs in portal)" -ForegroundColor Green
                 }
             } catch {
+                $warningCount++
                 Write-Host "  [WARNING] Could not enable VM backup: $_" -ForegroundColor Yellow
                 Write-Host "  Enable manually: Enable-AzRecoveryServicesBackupProtection (Step 5.2.3)" -ForegroundColor Gray
             }
@@ -351,5 +361,13 @@ if ($WhatIf) {
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  Deployment Complete" -ForegroundColor Cyan
+if ($warningCount -gt 0) {
+    # Qualified rather than clean: steps that warned and continued left the lab incomplete,
+    # and Test-Lab.ps1 will fail it. Saying "Complete" unconditionally would make a run that
+    # lost a backup policy read end to end as a success.
+    Write-Host "  Deployment Complete ($warningCount warning(s))" -ForegroundColor Yellow
+    Write-Host "  Review the warnings above; Test-Lab.ps1 will report the affected checks." -ForegroundColor Yellow
+} else {
+    Write-Host "  Deployment Complete" -ForegroundColor Cyan
+}
 Write-Host "========================================`n" -ForegroundColor Cyan
