@@ -246,9 +246,10 @@ if ($WhatIf) {
             # Deliberately not fatal. Test-Lab.ps1 is the gate for this lab: it asserts
             # "Policy 'SkyCraft-Daily-Prod' exists" along with its backup frequency, daily
             # retention, instant-restore retention and schedule time, then ends in
-            # `exit $failCount`. Failing here instead would end the run before the validator
-            # produced any of that detail. If those assertions ever leave Test-Lab.ps1, this
-            # has to become fatal again.
+            # `exit $failCount`. Exiting here instead would skip the blob policy below and
+            # every VM-protection step after it, turning one policy error into a lab missing
+            # several unrelated resources. Automation-Contract.Tests.ps1 asserts both validator
+            # checks still exist, so this stays true even if someone edits Test-Lab.ps1.
             Write-Host "  [WARNING] Failed to create RSV policy: $_" -ForegroundColor Yellow
             Write-Host "  [WARNING]   The lab is incomplete; Test-Lab.ps1 will report it as failed." -ForegroundColor Yellow
         }
@@ -284,11 +285,8 @@ if ($WhatIf) {
                 -Policy $blobPolicyTemplate | Out-Null
             Write-Host "  ✓ Policy 'SkyCraft-Blob-Policy' created (30-day retention)" -ForegroundColor Green
         } catch {
-            # Deliberately not fatal, for the same reason as the RSV policy above:
-            # Test-Lab.ps1 asserts "Policy 'SkyCraft-Blob-Policy' exists" along with its
-            # datasource type and operational retention, and reports the lab as failed when it
-            # is missing. If those assertions ever leave Test-Lab.ps1, this has to become
-            # fatal again.
+            # Deliberately not fatal, as with the RSV policy above: Test-Lab.ps1 asserts
+            # "Policy 'SkyCraft-Blob-Policy' exists" and fails the lab when it is missing.
             Write-Host "  [WARNING] Failed to create Blob policy: $_" -ForegroundColor Yellow
             Write-Host "  [WARNING]   The lab is incomplete; Test-Lab.ps1 will report it as failed." -ForegroundColor Yellow
         }
