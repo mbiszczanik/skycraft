@@ -349,10 +349,10 @@ catch {
 > pwsh -NoProfile -Command "& .\script.ps1; exit `$LASTEXITCODE"   # correct
 > & .\script.ps1; $LASTEXITCODE                                     # correct, in-process
 > pwsh -NoProfile -File .\script.ps1                                # ALWAYS 0
-> pwsh -NoProfile -Command "& .\script.ps1"                         # ALWAYS 1, whatever happened
+> pwsh -NoProfile -Command "& .\script.ps1"                         # 1 on ANY failure - the count is lost
 > ```
 >
-> The bare `-Command` form is the trap: it returns `1` for every outcome, so it passes a smoke test where the script fails and reports the wrong number precisely when a script fails with a count.
+> The bare `-Command` form is the trap: it collapses every non-zero exit code to 1. A failure stays visible, but its value does not, so it passes a smoke test where the script fails and then reports the wrong number precisely when a script fails with a count.
 
 ### Destructive Script Boilerplate (`Remove-Lab*.ps1`)
 

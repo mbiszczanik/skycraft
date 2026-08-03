@@ -144,7 +144,7 @@ A `Test-Lab.ps1` failure after a successful deployment usually means the validat
 >
 > ```powershell
 > pwsh -NoProfile -Command "& .\Test-Lab.ps1; exit `$LASTEXITCODE"   # correct
-> pwsh -NoProfile -Command "& .\Test-Lab.ps1"                        # ALWAYS 1, whatever happened
+> pwsh -NoProfile -Command "& .\Test-Lab.ps1"                        # 1 on ANY failure - the count is lost
 > pwsh -NoProfile -File .\Test-Lab.ps1                               # ALWAYS 0, whatever happened
 > ```
 >
