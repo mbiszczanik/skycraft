@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Pester guard `tests/Avm-Module-Pinning.Tests.ps1`: every `br/public:avm/...` reference must pin an exact semver, each AVM module must resolve to a single version repo-wide, and `bicepconfig.json` must not define registry aliases.
+
+### Changed
+
+- Bicep standards rewritten to an **AVM-first** policy (issue #62 v2): Azure Verified Modules consumed directly from `main.bicep` entry points, exact-version pinning with a repo-wide catalogue, canonical tag set (`Project`/`Environment`/`CostCenter`/`Owner`), an explicit-`dependsOn` rule, lab-friction override principle, and a documented Lab 3.1 hand-written-modules exception.
+- Lint workflow now builds every `.bicepparam` file with `az bicep build-params`.
+
 ## [0.7.1] - 2026-07-27
 
 ### Removed
