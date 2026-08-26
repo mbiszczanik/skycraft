@@ -12,6 +12,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Verify every PowerShell file parses
+        shell: pwsh
+        run: |
+          $failed = $false
+          $root = (Get-Location).Path
+          Get-ChildItem -Path . -Recurse -File |
+              Where-Object { $_.Extension -in '.ps1', '.psm1', '.psd1' } |
+              ForEach-Object {
+                  $parseErrors = $null
+                  [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$parseErrors) | Out-Null
+                  if ($parseErrors.Count -gt 0) {
+                      $failed = $true
+                      $rel = $_.FullName.Substring($root.Length + 1).Replace('\', '/')
+                      foreach ($e in $parseErrors) {
+                          Write-Host "::error file=$rel,line=$($e.Extent.StartLineNumber),col=$($e.Extent.StartColumnNumber)::$($e.Message)"
+                      }
+                  }
+              }
+          if ($failed) { exit 1 }
+          Write-Host 'All PowerShell files parse.'
+
       - name: Run PSScriptAnalyzer
         shell: pwsh
         run: |
