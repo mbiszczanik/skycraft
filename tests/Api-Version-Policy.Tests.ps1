@@ -13,6 +13,10 @@
     A sibling regression test guards the specific bleeding-edge versions that were
     previously in the repo so they do not creep back in.
 
+    Scope: raw resource declarations only. AVM registry references
+    ('br/public:avm/...') carry no API version; their pinning policy is
+    enforced by tests/Avm-Module-Pinning.Tests.ps1 instead.
+
 .EXAMPLE
     Invoke-Pester -Path .\tests\Api-Version-Policy.Tests.ps1
 
