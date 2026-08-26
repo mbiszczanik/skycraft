@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Pester guard `tests/Avm-Module-Pinning.Tests.ps1`: every `br/public:avm/...` reference must pin an exact semver, each AVM module must resolve to a single version repo-wide, and `bicepconfig.json` must not define registry aliases.
+- Pester guard `tests/Avm-Module-Pinning.Tests.ps1`: every `br/public:avm/...` reference must pin an exact semver, each AVM module must resolve to a single version repo-wide, and `bicepconfig.json` must not define registry aliases. The suite also asserts that the scan itself matched at least one `.bicep` file and one AVM declaration, so the guard cannot pass vacuously.
 
 ### Changed
 

@@ -28,7 +28,7 @@ $BicepFiles = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.bicep'
 
 # Every AVM registry reference across the repo from actual module declarations:
 # module <symbolicName> 'br/public:<avm-path>:<version>' = {
-$AvmRefPattern = "(?m)^\s*module\s+\S+\s+['`\"]br/public:(avm/[a-z0-9/-]+):([^'`\"]+)['`\"]"
+$AvmRefPattern = "(?m)^\s*module\s+\S+\s+'br/public:(avm/[a-z0-9/-]+):([^']+)'"
 $AllRefs = foreach ($f in $BicepFiles) {
     $text = Get-Content -Raw -LiteralPath $f.FullName
     foreach ($m in [regex]::Matches($text, $AvmRefPattern)) {
@@ -51,6 +51,23 @@ $ModuleCases = @($AllRefs | Group-Object Module | ForEach-Object {
         files    = @($_.Group.File | Sort-Object -Unique)
     }
 })
+
+# The guards below are data-driven: an empty scan produces zero test cases and
+# a vacuously green suite. Assert that the scan itself found something.
+$ScanCases = @(@{
+    fileCount = @($BicepFiles).Count
+    refCount  = $RefCases.Count
+})
+
+Describe 'AVM - the scan is not vacuous' {
+    It 'finds at least one .bicep file to scan' -ForEach $ScanCases {
+        $fileCount | Should -BeGreaterThan 0 -Because 'an empty file scan lets every other assertion in this file pass without validating anything'
+    }
+
+    It 'matches at least one AVM module declaration' -ForEach $ScanCases {
+        $refCount | Should -BeGreaterThan 0 -Because "scanned $fileCount .bicep file(s) and matched no 'br/public:avm/...' module declaration; either the AVM-first policy regressed or the scan pattern no longer matches the declaration syntax"
+    }
+}
 
 Describe 'AVM - every reference is pinned to an exact semver' {
     It "'<file>' pins '<module>' to an exact x.y.z version (got '<version>')" -ForEach $RefCases {
