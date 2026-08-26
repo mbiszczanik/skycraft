@@ -24,8 +24,7 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
 $RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$BicepFiles = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.bicep' |
-              Where-Object { $_.FullName -match '[/\\]module-\d' }
+$BicepFiles = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.bicep'
 
 # Every AVM registry reference across the repo: br/public:<avm-path>:<version>
 $AvmRefPattern = "'br/public:(avm/[a-z0-9/-]+):([^']+)'"
