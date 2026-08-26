@@ -55,6 +55,18 @@ jobs:
           }
           if ($failed) { exit 1 }
 
+      - name: Build all Bicep parameter files
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Recurse -Filter '*.bicepparam' | ForEach-Object {
+              Write-Host "::group::$($_.FullName)"
+              az bicep build-params --file $_.FullName --stdout 1>$null
+              if ($LASTEXITCODE -ne 0) { $failed = $true }
+              Write-Host '::endgroup::'
+          }
+          if ($failed) { exit 1 }
+
   markdownlint:
     name: Markdownlint
     runs-on: ubuntu-latest
