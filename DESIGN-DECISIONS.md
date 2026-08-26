@@ -209,10 +209,11 @@ lab; this section is the architect's view in one place.
 ### 14. Infrastructure-as-Code maturity
 
 - **Lab:** Bicep throughout (no ARM JSON). `main.bicep` orchestrator pattern
-  with reusable modules in `bicep/modules/`. Standardized header block
+  consuming Azure Verified Modules directly (see theme 15); hand-written
+  modules only as documented fallbacks. Standardized header block
   (SUMMARY / DESCRIPTION / EXAMPLE / AUTHOR / VERSION). API versions pinned
-  (`2023-11-01` for Networking, `2022-04-01` for Authorization). PowerShell
-  conventions and Bicep conventions enforced via
+  for raw resources; AVM references pinned by exact module version.
+  PowerShell conventions and Bicep conventions enforced via
   [docs/bicep-standards.md](docs/bicep-standards.md) and
   [docs/powershell-standards.md](docs/powershell-standards.md).
 - **Production gap:** No CI/CD pipeline that lints / validates / `what-if`s
@@ -221,6 +222,24 @@ lab; this section is the architect's view in one place.
 - **Why it matters:** Templates without a pipeline are still
   click-through-with-extra-steps. The lab demonstrates the artifact;
   production needs the workflow.
+
+### 15. AVM-first module strategy
+
+- **Lab:** All Bicep entry points consume [Azure Verified Modules](https://aka.ms/avm)
+  directly from the public registry (`br/public:avm/res/...`), pinned to exact
+  versions catalogued in [docs/bicep-standards.md](docs/bicep-standards.md).
+  Hand-written modules remain only where no `Available` AVM module exists
+  (tags, autoscale settings) — and in Lab 3.1, where writing modules by hand
+  *is* the learning objective.
+- **Production gap:** No private registry mirror of AVM modules, no automated
+  AVM version-update pipeline (Dependabot does not cover Bicep registries),
+  and lab-friction overrides (soft delete disabled on Key Vault and Recovery
+  Services Vault) that a production deployment must never copy.
+- **Why it matters:** This is a deliberate educational stance: the course
+  teaches consuming verified building blocks the way production teams do,
+  not authoring expert-level IaC from scratch. The student reads AVM
+  parameters instead of raw resource properties everywhere except Lab 3.1,
+  which opens the black box once.
 
 ---
 
