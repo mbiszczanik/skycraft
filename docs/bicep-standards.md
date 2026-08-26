@@ -36,6 +36,9 @@ To ensure stability, consistency, and tool compatibility across the SkyCraft pro
 > [!NOTE]
 > This policy is enforced by `tests/Api-Version-Policy.Tests.ps1` and is the reason the `use-recent-api-versions` linter rule is disabled in [`bicepconfig.json`](#7-linter-configuration-bicepconfigjson).
 
+> [!NOTE]
+> API versions apply to **raw resource declarations only**. AVM module references (`br/public:avm/...`) carry no API version — they are pinned by exact module version instead (see [Section 4.4](#44-avm-version-catalogue)) and enforced by `tests/Avm-Module-Pinning.Tests.ps1`.
+
 ## 3. Naming Conventions (Hungarian Notation)
 
 We use specific prefixes to identify the type of object within Bicep code. This prevents confusion between a parameter, a variable, and the resource itself.
@@ -55,58 +58,118 @@ We use specific prefixes to identify the type of object within Bicep code. This 
 
 For the names of the **deployed Azure resources themselves** (`prod-skycraft-swc-vnet`, etc.), see [azure-reference.md — Naming Conventions](azure-reference.md#1-naming-conventions). That document is the single source of truth for resource naming; do not duplicate the pattern here (rule D004).
 
-## 4. Architecture Pattern
+## 4. Architecture Pattern (AVM-First)
 
-We aim for a modular architecture that separates **Orchestration** from **Implementation**.
+We separate **Orchestration** from **Implementation**, and we implement resources by consuming [Azure Verified Modules (AVM)](https://aka.ms/avm) from the public Bicep registry.
 
 ### 4.1 Orchestrator (`main.bicep`)
 
 - **Scope**: `targetScope = 'subscription'` (usually).
-- **Purpose**: Creates Resource Groups (if needed) and calls Modules.
-- **Content**: Should **not** contain resource definitions directly (except RGs). It should mostly contain `module` blocks.
+- **Purpose**: Creates Resource Groups via `br/public:avm/res/resources/resource-group` and calls resource AVM modules **directly**.
+- **Content**: `module` blocks (plus trivial `existing` lookups). No raw `resource` definitions.
 
-### 4.2 Modules (`modules/*.bicep`)
+### 4.2 Consuming AVM Modules
 
-- **Scope**: Default (Resource Group).
-- **Purpose**: Deploys specific sets of resources (e.g., "Networking", "Security", "Compute").
-- **Best Practice**: Modules should be self-contained and reusable.
+Reference AVM modules directly from the entry point with their **full registry path** and an **exact pinned version**:
+
+```bicep
+module modStorage 'br/public:avm/res/storage/storage-account:<pinned-version>' = {
+  name: 'storage-deployment'
+  scope: resRg
+  params: {
+    name: varStorageAccountName
+    location: parLocation
+    tags: varCommonTags
+  }
+}
+```
+
+Rules:
+
+- **No registry aliases** — do not add `moduleAliases` to `bicepconfig.json`. The full `br/public:avm/res/...` path keeps provenance visible in every file (enforced by `tests/Avm-Module-Pinning.Tests.ps1`).
+- **AVM parameter names are camelCase** without prefixes — that is the module's contract, not ours. Hungarian notation ([Section 3](#3-naming-conventions-hungarian-notation)) applies only to *our* symbols (`par*`, `var*`, `mod*`, `out*`).
+- **Use built-in AVM parameters** instead of separate local modules where they exist: `tags`, `lock`, `diagnosticSettings`, `roleAssignments`.
+- **Network access**: building templates with AVM references requires access to `mcr.microsoft.com` (available on GitHub runners; local builds cache modules under `~/.bicep`).
+
+### 4.3 Local Fallback Modules (`modules/*.bicep`)
+
+Hand-written modules are the **exception**, allowed only when no suitable AVM module exists (missing from the AVM index, or not `Available`). Current fallbacks:
+
+- `Microsoft.Resources/tags` (Lab 1.3) — no AVM module exists.
+- Autoscale settings (Lab 3.4) — `avm/res/insights/autoscale-setting` is only *Proposed*.
+- Trivial `existing` lookups (e.g. the public-IP lookup in Lab 2.3) — stay inline or as a tiny local module.
+- All of Lab 3.1's modules — see [Section 8.2](#82-hand-written-modules-in-lab-31).
+
+Fallback modules must meet the full gold-path standard: header banner, Hungarian notation, `@description` + validation decorators on every parameter, canonical tags, pinned stable API versions.
+
+### 4.4 AVM Version Catalogue
+
+Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module uses a **single version across the whole repository**. Both rules are enforced by `tests/Avm-Module-Pinning.Tests.ps1`. To upgrade a module, update every reference and this catalogue in the same PR.
+
+| AVM module | Pinned version | Used in |
+| :--- | :--- | :--- |
+| `avm/res/authorization/role-assignment/sub-scope` | `0.1.1` | Lab 1.2 |
+| `avm/res/authorization/policy-assignment/sub-scope` | `0.1.0` | Lab 1.3 |
+
+> [!NOTE]
+> The catalogue grows as labs are converted (issue #62 v2). Each conversion PR appends its modules here.
+
+### 4.5 Lab-Friction Overrides
+
+The labs must stay easy to run, test, and tear down for students. Wherever an AVM default conflicts with that, override it explicitly at the call site with a short comment referencing this section. Known overrides:
+
+- **Key Vault** (`key-vault/vault`): disable soft delete and purge protection, so labs can be re-run and cleaned up without purge waits.
+- **Recovery Services Vault** (`recovery-services/vault`): disable soft delete / immutability settings, so `Remove-LabResource.ps1` can delete the vault.
+
+Further overrides follow the same principle and are decided per lab.
 
 ## 5. Resource Tagging (REQUIRED)
 
 All Azure resources **must** be tagged to comply with governance policies (Lab 1.3).
 
-### Required Tags
+### Required Tags (canonical set)
 
-Every resource must include the following tags:
+Every resource carries **exactly** these four tags — no more, no fewer:
 
 | Tag             | Description              | Example                     |
 | :-------------- | :----------------------- | :-------------------------- |
 | **Project**     | Always set to `SkyCraft` | `Project: 'SkyCraft'`       |
 | **Environment** | Deployment environment   | `Environment: 'Production'` |
 | **CostCenter**  | Cost tracking identifier | `CostCenter: 'MSDN'`        |
+| **Owner**       | Resource owner           | `Owner: 'mbiszczanik'`      |
+
+> [!IMPORTANT]
+> `ManagedBy` and `DeploymentDate` are **not** part of the canonical set. In particular, never tag with a deployment timestamp (`parCurrentDate` pattern) — a value that changes on every run breaks `what-if` idempotency and produces noisy diffs.
 
 ### Implementation Pattern
 
-Define a `varCommonTags` variable and apply it to all resources:
+Define a `varCommonTags` variable and pass it to every AVM module call via its `tags` parameter (and to any raw resource via `tags:`):
 
 ```bicep
+@description('Resource owner tag value')
+param parOwner string = 'mbiszczanik'
+
 var varCommonTags = {
   Project: 'SkyCraft'
-  Environment: parEnvironment  // Pass as parameter
+  Environment: parEnvironment
   CostCenter: 'MSDN'
+  Owner: parOwner
 }
 
-resource resExample 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
-  name: 'example-nsg'
-  location: parLocation
-  tags: varCommonTags  // Apply tags here
-  properties: {
-    // ...
+module modVnet 'br/public:avm/res/network/virtual-network:<pinned-version>' = {
+  name: 'vnet-deployment'
+  scope: resRg
+  params: {
+    name: varVnetName
+    addressPrefixes: [parVnetAddressPrefix]
+    location: parLocation
+    tags: varCommonTags
   }
 }
 ```
 
-> [!IMPORTANT] > **Failure to tag resources will cause deployment failures** due to Azure Policy enforcement.
+> [!IMPORTANT]
+> **Failure to tag resources will cause deployment failures** due to Azure Policy enforcement.
 
 ## 6. Best Practices
 
@@ -171,6 +234,11 @@ resource resExample 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
 
 - **What-if first**: Every deployment must be previewed with `what-if` before the real run. The standard pattern (separate args arrays) is defined in [powershell-standards.md — WhatIf Deployment Pattern](powershell-standards.md#5-best-practices).
 
+### 6.5 Dependencies
+
+- **Never write explicit `dependsOn` when a symbolic reference already exists.** Referencing another resource's or module's property (`modVnet.outputs.outVnetId`) creates the dependency implicitly; a redundant `dependsOn` is dead weight and hides the real data flow.
+- Explicit `dependsOn` is allowed **only** for genuine sequencing that no symbolic reference expresses (e.g. VNet peering ordering) — and must carry a comment explaining why.
+
 ## 7. Linter Configuration (`bicepconfig.json`)
 
 The repository root contains a [`bicepconfig.json`](../bicepconfig.json) that the Bicep CLI and VS Code extension pick up automatically for every `.bicep` file in the repo. It promotes the most important linter rules to `error` severity, so violations **fail the build** instead of being silently ignored.
@@ -198,11 +266,11 @@ These are deliberate decisions where SkyCraft departs from the official Microsof
 - **We do**: `par*`, `var*`, `res*`, `mod*`, `out*` prefixes ([Section 3](#3-naming-conventions-hungarian-notation)).
 - **Why**: AZ-104 learners read templates before they write them. Explicit prefixes make the role of every identifier visible at a glance without IDE hover support (e.g., in lab guides, diffs, and printed material).
 
-### 8.2 No Azure Verified Modules (AVM)
+### 8.2 Hand-Written Modules in Lab 3.1
 
-- **Microsoft says**: Prefer consuming [Azure Verified Modules](https://aka.ms/avm) from the public registry (`br/public:avm/res/...`) instead of hand-writing resource modules.
-- **We do**: Hand-written modules in `bicep/modules/`.
-- **Why**: Writing the resource definitions yourself is the learning objective. AVM hides exactly the properties (subnets, NSG rules, SKUs) that AZ-104 requires you to understand. AVM is introduced as a "what production teams actually use" reference, not as the lab tool.
+- **Microsoft says**: Prefer consuming [Azure Verified Modules](https://aka.ms/avm) from the public registry instead of hand-writing resource modules — which is exactly what the rest of this repository does ([Section 4](#4-architecture-pattern-avm-first)).
+- **We do**: Lab 3.1 (Infrastructure as Code) keeps fully hand-written local modules.
+- **Why**: Writing resource definitions by hand **is** that lab's learning objective. Everywhere else the course teaches what production teams actually do — consume AVM; in Lab 3.1 it teaches what is inside such a module. Lab 3.1 receives the gold-path retrofit (decorators, tags, conventions) but no AVM conversion.
 
 ### 8.3 Pinned Stable API Versions
 
@@ -238,7 +306,15 @@ targetScope = 'subscription'
 *    Parameters    *
 *******************/
 @description('Location for all resources')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
+
+@description('Environment tag value')
+@allowed(['Platform', 'Development', 'Production'])
+param parEnvironment string = 'Production'
+
+@description('Resource owner tag value')
+param parOwner string = 'mbiszczanik'
 
 @description('Resource Group Name')
 @minLength(1)
@@ -246,28 +322,54 @@ param parLocation string = 'swedencentral'
 param parResourceGroupName string
 
 /*******************
-*    Resources     *
+*    Variables     *
 *******************/
+var varCommonTags = {
+  Project: 'SkyCraft'
+  Environment: parEnvironment
+  CostCenter: 'MSDN'
+  Owner: parOwner
+}
+
+/*******************
+*     Modules      *
+*******************/
+
+module modResourceGroup 'br/public:avm/res/resources/resource-group:<pinned-version>' = {
+  name: 'rg-deployment'
+  params: {
+    name: parResourceGroupName
+    location: parLocation
+    tags: varCommonTags
+  }
+}
 
 resource resRg 'Microsoft.Resources/resourceGroups@2023-07-01' existing = {
   name: parResourceGroupName
 }
 
-module modExample 'modules/example.bicep' = {
+module modExample 'br/public:avm/res/storage/storage-account:<pinned-version>' = {
   name: 'example-deployment'
   scope: resRg
   params: {
-    parLocation: parLocation
+    name: 'examplename'
+    location: parLocation
+    tags: varCommonTags
   }
+  dependsOn: [
+    modResourceGroup // RG must exist before RG-scoped modules; no symbolic reference available
+  ]
 }
 
 /******************
 *     Outputs     *
 ******************/
-output outExampleId string = modExample.outputs.outExampleId
+output outExampleId string = modExample.outputs.resourceId
 ```
 
-### Module Template (`modules/example.bicep`)
+### Local Fallback Module Template (`modules/example.bicep`)
+
+Use only when no suitable AVM module exists — see [Section 4.3](#43-local-fallback-modules-modulesbicep). Remember to extend `varCommonTags` with `Owner` (as in the orchestrator template above).
 
 ```bicep
 /*=====================================================
@@ -288,6 +390,9 @@ param parLocation string
 @allowed(['Platform', 'Development', 'Production'])
 param parEnvironment string = 'Production'
 
+@description('Resource owner tag value')
+param parOwner string = 'mbiszczanik'
+
 /*******************
 *    Variables     *
 *******************/
@@ -295,6 +400,7 @@ var varCommonTags = {
   Project: 'SkyCraft'
   Environment: parEnvironment
   CostCenter: 'MSDN'
+  Owner: parOwner
 }
 
 var varResourceName = 'example-resource'
@@ -323,6 +429,9 @@ output outExampleId string = resExample.id
 ## 10. Known Issues & Gotchas
 
 ### 10.1 BCP120: Cannot Reference `kind`/`sku` from Existing Resources (E001)
+
+> [!NOTE]
+> This gotcha applies to the pre-AVM hand-written pattern (today's Lab 4.1 code and local fallback modules). It will be retired when Lab 4.1 is converted to `avm/res/storage/storage-account` (issue #62 v2, PR 4/6), where `networkAcls` is a module parameter.
 
 **Error**: `BCP120: This expression is being used in an assignment to the "kind" property... which requires a value that can be calculated at the start of the deployment.`
 

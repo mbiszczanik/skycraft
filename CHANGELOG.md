@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Pester guard `tests/Avm-Module-Pinning.Tests.ps1`: every `br/public:avm/...` reference must pin an exact semver, each AVM module must resolve to a single version repo-wide, and `bicepconfig.json` must not define registry aliases. The suite also asserts that the scan itself matched at least one `.bicep` file and one AVM declaration, so the guard cannot pass vacuously.
+
+### Changed
+
+- Bicep standards rewritten to an **AVM-first** policy (issue #62 v2): Azure Verified Modules consumed directly from `main.bicep` entry points, exact-version pinning with a repo-wide catalogue, canonical tag set (`Project`/`Environment`/`CostCenter`/`Owner`), an explicit-`dependsOn` rule, lab-friction override principle, and a documented Lab 3.1 hand-written-modules exception.
+- Lint workflow now builds every `.bicepparam` file with `az bicep build-params`.
+- Lint workflow now parses every `.ps1`/`.psm1`/`.psd1` with the PowerShell parser before running PSScriptAnalyzer, annotating each syntax error with its file and line. PSScriptAnalyzer's gate counts only `Severity -eq 'Error'` and reports none for a file that cannot be parsed, so a syntax error used to reach CI unnoticed unless a Pester container happened to fail on it.
+
 ## [0.7.1] - 2026-07-27
 
 ### Removed
@@ -91,7 +101,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Module 4 (Storage): Lab 4.1 storage accounts with conditional encryption and Lab 4.2 Blob Storage.
 - Project foundations: specification, naming/standards documents, security files, README, and course navigation.
 
-[Unreleased]: https://github.com/mbiszczanik/skycraft/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/mbiszczanik/skycraft/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/mbiszczanik/skycraft/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/mbiszczanik/skycraft/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/mbiszczanik/skycraft/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/mbiszczanik/skycraft/compare/v0.4.0...v0.5.0
