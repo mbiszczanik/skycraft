@@ -430,6 +430,9 @@ output outExampleId string = resExample.id
 
 ### 10.1 BCP120: Cannot Reference `kind`/`sku` from Existing Resources (E001)
 
+> [!NOTE]
+> This gotcha applies to the pre-AVM hand-written pattern (today's Lab 4.1 code and local fallback modules). It will be retired when Lab 4.1 is converted to `avm/res/storage/storage-account` (issue #62 v2, PR 4/6), where `networkAcls` is a module parameter.
+
 **Error**: `BCP120: This expression is being used in an assignment to the "kind" property... which requires a value that can be calculated at the start of the deployment.`
 
 **Root Cause**: When re-declaring a storage account to update its `networkAcls` (firewall), Bicep requires `kind` and `sku` — but these cannot be read from an `existing` resource reference at compile time.
