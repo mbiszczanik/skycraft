@@ -28,7 +28,7 @@ $BicepFiles = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.bicep'
 
 # Every AVM registry reference across the repo from actual module declarations:
 # module <symbolicName> 'br/public:<avm-path>:<version>' = {
-$AvmRefPattern = "(?m)^\s*module\s+\S+\s+'br/public:(avm/[a-z0-9/-]+):([^']+)'"
+$AvmRefPattern = "(?m)^\s*module\s+\S+\s+['`\"]br/public:(avm/[a-z0-9/-]+):([^'`\"]+)['`\"]"
 $AllRefs = foreach ($f in $BicepFiles) {
     $text = Get-Content -Raw -LiteralPath $f.FullName
     foreach ($m in [regex]::Matches($text, $AvmRefPattern)) {
