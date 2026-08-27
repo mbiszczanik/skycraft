@@ -41,8 +41,8 @@ graph TB
         ProdApp[AppServiceSubnet<br/>10.2.4.0/24]
     end
 
-    HubVNet <-->|Peering: hub-to-dev<br/>Allow Gateway Transit| DevVNet
-    HubVNet <-->|Peering: hub-to-prod<br/>Allow Gateway Transit| ProdVNet
+    HubVNet <-->|Peering: hub-to-dev<br/>Allow Forwarded Traffic| DevVNet
+    HubVNet <-->|Peering: hub-to-prod<br/>Allow Forwarded Traffic| ProdVNet
 
     style HubVNet fill:#e1f5ff,stroke:#0078d4,stroke-width:3px
     style DevVNet fill:#fff4e1,stroke:#f39c12,stroke-width:2px
@@ -202,11 +202,12 @@ graph TB
 3. Click **Next: Tags**
 4. Add tags:
 
-| Name        | Value    |
-| ----------- | -------- |
-| Project     | SkyCraft |
-| Environment | Platform |
-| CostCenter  | MSDN     |
+| Name        | Value       |
+| ----------- | ----------- |
+| Project     | SkyCraft    |
+| Environment | Platform    |
+| CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
 
 5. Click **Review + create**
 6. Review the configuration
@@ -319,6 +320,7 @@ Create three subnets for the development environment:
 | Project     | SkyCraft    |
 | Environment | Development |
 | CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
 
 4. Click **Review + create** → **Create**
 
@@ -359,11 +361,12 @@ Repeat the process for production:
 
 4. Add tags:
 
-| Name        | Value      |
-| ----------- | ---------- |
-| Project     | SkyCraft   |
-| Environment | Production |
-| CostCenter  | MSDN       |
+| Name        | Value       |
+| ----------- | ----------- |
+| Project     | SkyCraft    |
+| Environment | Production  |
+| CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
 
 5. Click **Review + create** → **Create**
 
@@ -488,7 +491,7 @@ Create public IPs for future load balancers (used in Lab 2.3):
 
 ![Dev Load Balancer Public IP](./images/step-2.1.12.png)
 
-4. Add appropriate tags (Project: SkyCraft, Environment: Development)
+4. Add appropriate tags (Project: SkyCraft, Environment: Development, CostCenter: MSDN, Owner: mbiszczanik)
 5. Click **Review + create** → **Create**
 
 **Prod Load Balancer Public IP**:
@@ -503,7 +506,7 @@ Create public IPs for future load balancers (used in Lab 2.3):
 | IP address assignment | Static                     |
 | DDoS protection       | Disabled                   |
 
-4. Add appropriate tags (Project: SkyCraft, Environment: Production)
+4. Add appropriate tags (Project: SkyCraft, Environment: Production, CostCenter: MSDN, Owner: mbiszczanik)
 5. Click **Review + create** → **Create**
 
 **Prod Load Balancer Public IP**:
@@ -517,7 +520,7 @@ Create public IPs for future load balancers (used in Lab 2.3):
 | SKU                   | **Standard**               |
 | IP address assignment | Static                     |
 
-2. Add appropriate tags (Project: SkyCraft, Environment: Production)
+2. Add appropriate tags (Project: SkyCraft, Environment: Production, CostCenter: MSDN, Owner: mbiszczanik)
 3. Click **Review + create** → **Create**
 
 **Expected Result**: Two public IPs created:
@@ -586,7 +589,7 @@ Complete this checklist to verify successful lab completion:
 - [ ] `platform-skycraft-swc-rg` exists in Sweden Central
 - [ ] `dev-skycraft-swc-rg` exists in Sweden Central
 - [ ] `prod-skycraft-swc-rg` exists in Sweden Central
-- [ ] All resource groups have proper tags (Project, Environment, CostCenter)
+- [ ] All resource groups have proper tags (Project, Environment, CostCenter, Owner)
 
 ### Hub VNet (platform-skycraft-swc-vnet)
 

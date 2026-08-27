@@ -197,11 +197,12 @@ Before starting this lab:
 3. Click **Next: Tags**
 4. Add tags:
 
-| Name        | Value    |
-| ----------- | -------- |
-| Project     | SkyCraft |
-| Environment | Platform |
-| CostCenter  | MSDN     |
+| Name        | Value       |
+| ----------- | ----------- |
+| Project     | SkyCraft    |
+| Environment | Platform    |
+| CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
 
 5. Click **Review + create** → **Create**
 
@@ -290,7 +291,7 @@ Create a user-friendly alias:
 **Important**: Private DNS zone names can be anything (no domain registration needed). Common patterns: `internal`, `local`, `private`, or `company.internal`.
 
 3. Click **Next: Tags**
-4. Add tags (Project, Environment, CostCenter)
+4. Add tags (Project, Environment, CostCenter, Owner)
 5. Click **Review + create** → **Create**
 
 **Expected Result**: Private DNS zone `skycraft.internal` created for internal name resolution.
@@ -437,6 +438,7 @@ Create DNS records for future database servers:
 | Project     | SkyCraft    |
 | Environment | Development |
 | CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
 
 12. Click **Review + create**
 13. Review configuration
@@ -593,7 +595,7 @@ Repeat the load balancer creation process for production:
 - Name: `prod-skycraft-swc-lb-frontend`
 - Public IP: `prod-skycraft-swc-lb-pip` (use existing)
 
-**Tags**: Project=SkyCraft, Environment=Production, CostCenter=MSDN
+**Tags**: Project=SkyCraft, Environment=Production, CostCenter=MSDN, Owner=mbiszczanik
 
 2. Click **Review + create** → **Create**
 

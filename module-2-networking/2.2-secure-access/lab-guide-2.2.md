@@ -177,6 +177,7 @@ Layer 5: VM-level firewalls (OS-level protection)
 | Project     | SkyCraft    |
 | Environment | Development |
 | CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
 
 5. Click **Review + create** → **Create**
 
@@ -264,7 +265,7 @@ Layer 5: VM-level firewalls (OS-level protection)
 | Name           | `dev-skycraft-swc-world-nsg` |
 | Region         | **Sweden Central**           |
 
-2. Add proper tags (Project, Environment, CostCenter)
+2. Add proper tags (Project, Environment, CostCenter, Owner)
 3. Click **Review + create** → **Create**
 
 **Configure Inbound Rules**:
@@ -373,7 +374,7 @@ Allow SSH from ASG "AuthServers" (VMs automatically get rule when added to ASG)
 | Region         | **Sweden Central**          |
 
 3. Click **Next: Tags**
-4. Add tags (Project: SkyCraft, Environment: Development, CostCenter: MSDN)
+4. Add tags (Project: SkyCraft, Environment: Development, CostCenter: MSDN, Owner: mbiszczanik)
 5. Click **Review + create** → **Create**
 
 **Expected Result**: ASG `dev-skycraft-swc-asg-auth` created.
@@ -457,11 +458,12 @@ To demonstrate ASG usage, let's update the database NSG rule:
 3. Click **Next: Tags**
 4. Add tags:
 
-| Name        | Value    |
-| ----------- | -------- |
-| Project     | SkyCraft |
-| Environment | Platform |
-| CostCenter  | MSDN     |
+| Name        | Value       |
+| ----------- | ----------- |
+| Project     | SkyCraft    |
+| Environment | Platform    |
+| CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
 
 5. Click **Review + create**
 6. Review the configuration
@@ -506,7 +508,7 @@ Create three NSGs for production environment (following same pattern as dev):
    - Name: `prod-skycraft-swc-auth-nsg`
    - Resource group: `prod-skycraft-swc-rg`
    - Region: **Sweden Central**
-   - Tags: Project=SkyCraft, Environment=Production, CostCenter=MSDN
+   - Tags: Project=SkyCraft, Environment=Production, CostCenter=MSDN, Owner=mbiszczanik
 
 2. Add inbound rules:
 
@@ -756,7 +758,7 @@ Quick verification before proceeding:
 - [ ] `prod-skycraft-swc-auth-nsg` created and associated with AuthSubnet
 - [ ] `prod-skycraft-swc-world-nsg` created and associated with WorldSubnet
 - [ ] `prod-skycraft-swc-db-nsg` created and associated with DatabaseSubnet
-- [ ] All NSGs have proper tags (Project, Environment, CostCenter)
+- [ ] All NSGs have proper tags (Project, Environment, CostCenter, Owner)
 
 ### Application Security Groups
 
