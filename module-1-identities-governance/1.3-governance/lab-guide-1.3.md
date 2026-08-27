@@ -121,7 +121,6 @@ Before starting this lab:
 | Project     | SkyCraft                                         |
 | CostCenter  | Engineering                                      |
 | Owner       | malfurion.stormrage@[yourtenant].onmicrosoft.com |
-| Purpose     | SkyCraft-Development                             |
 
 5. Click **Apply**
 
@@ -141,8 +140,6 @@ Before starting this lab:
 | Project     | SkyCraft                                         |
 | CostCenter  | Operations                                       |
 | Owner       | malfurion.stormrage@[yourtenant].onmicrosoft.com |
-| Purpose     | SkyCraft-Production                              |
-| Criticality | High                                             |
 
 4. Click **Apply**
 
@@ -158,7 +155,6 @@ Before starting this lab:
 | Project     | SkyCraft                                         |
 | CostCenter  | Shared-Services                                  |
 | Owner       | malfurion.stormrage@[yourtenant].onmicrosoft.com |
-| Purpose     | Monitoring-Logging                               |
 
 4. Click **Apply**
 
@@ -232,7 +228,7 @@ Before starting this lab:
 
 **Non-compliance messages tab**:
 
-- **Non-compliance message**: `Resource group must have an Environment tag (Development, Production, or Shared)`
+- **Non-compliance message**: `Resource group must have an Environment tag (Development, Production, or Platform)`
 
 9. Click **Review + create**
 10. Click **Create**
@@ -383,7 +379,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 1. Navigate to **platform-skycraft-swc-rg**
 2. Click **Locks** → **+ Add**
 3. Create lock:
-   - Lock name: `lock-no-delete-shared`
+   - Lock name: `lock-no-delete-platform`
    - Lock type: **Delete**
    - Notes: `Protects shared monitoring and logging infrastructure`
 
@@ -660,16 +656,16 @@ Tenant Root Group
 
 ### Tags Applied
 
-- [ ] dev-skycraft-swc-rg has 5 tags (Environment, Project, CostCenter, Owner, Purpose)
-- [ ] prod-skycraft-swc-rg has 6 tags (+ Criticality)
-- [ ] platform-skycraft-swc-rg has 5 tags
+- [ ] dev-skycraft-swc-rg has 4 tags (Environment, Project, CostCenter, Owner)
+- [ ] prod-skycraft-swc-rg has 4 tags
+- [ ] platform-skycraft-swc-rg has 4 tags
 - [ ] Can view resources grouped by "Project" tag
 
 ### Azure Policies Assigned
 
 - [ ] Policy: Require Environment tag on resource groups
 - [ ] Policy: Require Project=SkyCraft on all resources
-- [ ] Policy: Restrict resources to East US and West US
+- [ ] Policy: Restrict resources to Sweden Central and North Europe
 - [ ] Policy compliance dashboard shows all three policies
 - [ ] Tested policy enforcement (tried creating resource without tag)
 
@@ -857,7 +853,7 @@ Congratulations! You've completed **Module 1: Manage Azure Identities and Govern
 
 - 3 Azure Policy assignments
 - 2 resource locks
-- 15+ tags across resource groups
+- 12 tags across resource groups (4 canonical tags per resource group)
 - 2 budgets with multiple alert thresholds
 - Azure Advisor recommendations configured
 
