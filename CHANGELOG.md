@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Module 1 local Bicep modules `rg-role-assignment.bicep`, `locks.bicep`, and `policies.bicep`, superseded by the AVM modules above; `tags.bicep` is retained as the documented fallback for `Microsoft.Resources/tags`.
 
+### Fixed
+
+- Lab 1.1 `Test-Lab.ps1` looked for the guest user by the wrong e-mail (`istormrage@...`); it now checks `illidan@externalcompany.com`, the address `New-LabUser.ps1` invites.
+- Lab 1.2 `Test-Lab.ps1` could never find the External Partner assignment: guest sign-in names are rewritten to `<alias>_<domain>#EXT#@<tenant>`, so the `illidan@` match is now `illidan[@_]`.
+
 ## [0.7.1] - 2026-07-27
 
 ### Removed
