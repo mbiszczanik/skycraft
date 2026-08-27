@@ -18,7 +18,7 @@
     Value for the canonical Owner tag. Default: mbiszczanik.
 
 .EXAMPLE
-    .\Deploy-Governance.ps1
+    .\Invoke-LabGovernance.ps1
 
 .NOTES
     Project: SkyCraft
