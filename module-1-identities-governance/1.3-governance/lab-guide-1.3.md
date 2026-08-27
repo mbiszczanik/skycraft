@@ -30,7 +30,7 @@ graph TB
         end
 
         subgraph "platform-skycraft-swc-rg"
-            LockShared[Lock: CanNotDelete]
+            LockPlatform[Lock: CanNotDelete]
         end
 
         subgraph "dev-skycraft-swc-rg"
@@ -374,14 +374,14 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 ![Assign a Built-in Policy](./images/step-1.3.11.png)
 
-### Step 1.3.12: Apply CanNotDelete Lock to Shared Resource Group
+### Step 1.3.12: Apply CanNotDelete Lock to Platform Resource Group
 
 1. Navigate to **platform-skycraft-swc-rg**
 2. Click **Locks** → **+ Add**
 3. Create lock:
    - Lock name: `lock-no-delete-platform`
    - Lock type: **Delete**
-   - Notes: `Protects shared monitoring and logging infrastructure`
+   - Notes: `Protects platform monitoring and logging infrastructure`
 
 4. Click **OK**
 

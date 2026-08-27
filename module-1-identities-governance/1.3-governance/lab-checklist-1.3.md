@@ -70,11 +70,11 @@
 - [ ] Tested lock (attempted to delete resource group)
 - [ ] Verified error message received
 
-### Lock 2: Shared Resource Group
+### Lock 2: Platform Resource Group
 - [ ] Lock applied to: `platform-skycraft-swc-rg`
 - [ ] Lock name: `lock-no-delete-platform`
 - [ ] Lock type: **Delete** (CanNotDelete)
-- [ ] Notes: `Protects shared monitoring and logging infrastructure`
+- [ ] Notes: `Protects platform monitoring and logging infrastructure`
 
 ### Lock Understanding
 - [ ] Understand lock inheritance (parent to child)

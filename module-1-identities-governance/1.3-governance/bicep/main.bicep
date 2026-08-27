@@ -13,7 +13,7 @@ targetScope = 'subscription'
 *    Parameters    *
 *******************/
 
-@description('Deployment region; also used as the location of the policy assignment managed identities')
+@description('Deployment region; stored as location metadata on the policy assignments (only relevant if a managed identity is added later)')
 @allowed([
   'swedencentral'
   'northeurope'
@@ -104,6 +104,7 @@ module modRgProd 'br/public:avm/res/resources/resource-group:0.4.4' = {
     lock: {
       kind: 'CanNotDelete'
       name: 'lock-no-delete-prod'
+      notes: 'Prevents accidental deletion of production resources'
     }
   }
 }
@@ -117,6 +118,7 @@ module modRgPlatform 'br/public:avm/res/resources/resource-group:0.4.4' = {
     lock: {
       kind: 'CanNotDelete'
       name: 'lock-no-delete-platform'
+      notes: 'Protects platform monitoring and logging infrastructure'
     }
   }
 }

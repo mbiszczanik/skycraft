@@ -17,8 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bicep standards rewritten to an **AVM-first** policy (issue #62 v2): Azure Verified Modules consumed directly from `main.bicep` entry points, exact-version pinning with a repo-wide catalogue, canonical tag set (`Project`/`Environment`/`CostCenter`/`Owner`), an explicit-`dependsOn` rule, lab-friction override principle, and a documented Lab 3.1 hand-written-modules exception.
 - Lint workflow now builds every `.bicepparam` file with `az bicep build-params`.
 - Lint workflow now parses every `.ps1`/`.psm1`/`.psd1` with the PowerShell parser before running PSScriptAnalyzer, annotating each syntax error with its file and line. PSScriptAnalyzer's gate counts only `Severity -eq 'Error'` and reports none for a file that cannot be parsed, so a syntax error used to reach CI unnoticed unless a Pester container happened to fail on it.
-- Module 1 Bicep converted to the AVM-first architecture (issue #62 v2, PR 1/6): resource groups via `avm/res/resources/resource-group`, RG-scope role assignments via `avm/res/authorization/role-assignment/rg-scope`, Lab 1.3 policy assignments called directly from `main.bicep`, and locks via the AVM `lock` parameter. Local modules `rg-role-assignment.bicep`, `locks.bicep`, and `policies.bicep` removed; `tags.bicep` retained as the documented fallback.
+- Module 1 Bicep converted to the AVM-first architecture (issue #62 v2, PR 1/6): resource groups via `avm/res/resources/resource-group`, RG-scope role assignments via `avm/res/authorization/role-assignment/rg-scope`, Lab 1.3 policy assignments called directly from `main.bicep`, and locks via the AVM `lock` parameter.
 - Canonical four-tag set (`Project`/`Environment`/`CostCenter`/`Owner`) applied across Module 1: the non-canonical `Criticality` tag is dropped and the Lab 1.3 scripts take `-Owner` (default `mbiszczanik`) instead of `-AdminEmail`.
+
+### Removed
+
+- Module 1 local Bicep modules `rg-role-assignment.bicep`, `locks.bicep`, and `policies.bicep`, superseded by the AVM modules above; `tags.bicep` is retained as the documented fallback for `Microsoft.Resources/tags`.
 
 ## [0.7.1] - 2026-07-27
 
