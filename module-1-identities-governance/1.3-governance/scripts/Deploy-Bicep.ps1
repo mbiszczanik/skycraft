@@ -9,11 +9,11 @@
 .PARAMETER Location
     Azure region for deployment. Default: swedencentral.
 
-.PARAMETER AdminEmail
-    Email address for the Owner tag. Default: admin@skycraft.com.
+.PARAMETER Owner
+    Value for the canonical Owner tag. Default: mbiszczanik.
 
 .EXAMPLE
-    .\Deploy-Bicep.ps1 -AdminEmail "malfurion@azureflame.onmicrosoft.com"
+    .\Deploy-Bicep.ps1 -Owner "mbiszczanik"
 
 .NOTES
     Project: SkyCraft
@@ -29,7 +29,7 @@ param(
     [string]$Location = 'swedencentral',
 
     [ValidateNotNullOrEmpty()]
-    [string]$AdminEmail = 'admin@skycraft.com'
+    [string]$Owner = 'mbiszczanik'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,12 +62,12 @@ $deploymentName = "Lab-1.3-Gov-$(Get-Date -Format 'yyyyMMdd-HHmm')"
 Write-Host "`nStarting Bicep Deployment..." -ForegroundColor Cyan
 Write-Host "  Template: $templateFile" -ForegroundColor Gray
 Write-Host "  Location: $Location" -ForegroundColor Gray
-Write-Host "  AdminEmail: $AdminEmail" -ForegroundColor Gray
+Write-Host "  Owner: $Owner" -ForegroundColor Gray
 
 try {
     $params = @{
-        parLocation   = $Location
-        parAdminEmail = $AdminEmail
+        parLocation = $Location
+        parOwner    = $Owner
     }
 
     $deployment = New-AzSubscriptionDeployment `
@@ -113,4 +113,4 @@ catch {
 
 Write-Host "`nDeployment Complete." -ForegroundColor Green
 Write-Host "Next Steps:" -ForegroundColor Gray
-Write-Host " 1. Run Test-Lab-1.3.ps1 to validate." -ForegroundColor Gray
+Write-Host " 1. Run Test-Lab.ps1 to validate." -ForegroundColor Gray

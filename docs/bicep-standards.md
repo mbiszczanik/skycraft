@@ -108,8 +108,10 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 
 | AVM module | Pinned version | Used in |
 | :--- | :--- | :--- |
-| `avm/res/authorization/role-assignment/sub-scope` | `0.1.1` | Lab 1.2 |
 | `avm/res/authorization/policy-assignment/sub-scope` | `0.1.0` | Lab 1.3 |
+| `avm/res/authorization/role-assignment/rg-scope` | `0.1.1` | Lab 1.2 |
+| `avm/res/authorization/role-assignment/sub-scope` | `0.1.1` | Lab 1.2 |
+| `avm/res/resources/resource-group` | `0.4.4` | Labs 1.2, 1.3 |
 
 > [!NOTE]
 > The catalogue grows as labs are converted (issue #62 v2). Each conversion PR appends its modules here.

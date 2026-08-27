@@ -14,11 +14,11 @@
 .PARAMETER SubscriptionId
     Target Subscription ID. Defaults to current context.
 
-.PARAMETER AdminEmail
-    Email address for the Owner tag. Default: admin@skycraft.com.
+.PARAMETER Owner
+    Value for the canonical Owner tag. Default: mbiszczanik.
 
 .EXAMPLE
-    .\Deploy-Governance.ps1
+    .\Invoke-LabGovernance.ps1
 
 .NOTES
     Project: SkyCraft
@@ -35,7 +35,7 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$AdminEmail = "admin@skycraft.com",
+    [string]$Owner = 'mbiszczanik',
 
     [switch]$WhatIf
 )
@@ -75,9 +75,9 @@ catch {
 Write-Header "`n=== 1. Applying Tags (Update-AzTag) ==="
 
 $tagConfigurations = @(
-    @{ Name = "dev-skycraft-swc-rg"; Tags = @{ Environment="Development"; Project="SkyCraft"; CostCenter="MSDN"; Owner=$AdminEmail } },
-    @{ Name = "prod-skycraft-swc-rg"; Tags = @{ Environment="Production"; Project="SkyCraft"; CostCenter="MSDN"; Owner=$AdminEmail } },
-    @{ Name = "platform-skycraft-swc-rg"; Tags = @{ Environment="Platform"; Project="SkyCraft"; CostCenter="MSDN"; Owner=$AdminEmail } }
+    @{ Name = "dev-skycraft-swc-rg"; Tags = @{ Environment="Development"; Project="SkyCraft"; CostCenter="MSDN"; Owner=$Owner } },
+    @{ Name = "prod-skycraft-swc-rg"; Tags = @{ Environment="Production"; Project="SkyCraft"; CostCenter="MSDN"; Owner=$Owner } },
+    @{ Name = "platform-skycraft-swc-rg"; Tags = @{ Environment="Platform"; Project="SkyCraft"; CostCenter="MSDN"; Owner=$Owner } }
 )
 
 foreach ($config in $tagConfigurations) {

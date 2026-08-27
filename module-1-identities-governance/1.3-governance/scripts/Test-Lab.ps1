@@ -10,7 +10,7 @@
     4. Budgets (manual check)
 
 .EXAMPLE
-    .\Test-Lab-1.3.ps1
+    .\Test-Lab.ps1
 
 .NOTES
     Project: SkyCraft

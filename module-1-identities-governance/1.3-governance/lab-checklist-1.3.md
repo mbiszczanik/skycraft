@@ -7,22 +7,18 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `CostCenter` = `Engineering`
 - [ ] Tag: `Owner` = `skycraft-admin@yourtenant.onmicrosoft.com`
-- [ ] Tag: `Purpose` = `SkyCraft-Development`
 
 ### Resource Group: prod-skycraft-swc-rg
 - [ ] Tag: `Environment` = `Production`
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `CostCenter` = `Operations`
 - [ ] Tag: `Owner` = `skycraft-admin@yourtenant.onmicrosoft.com`
-- [ ] Tag: `Purpose` = `SkyCraft-Production`
-- [ ] Tag: `Criticality` = `High`
 
 ### Resource Group: platform-skycraft-swc-rg
-- [ ] Tag: `Environment` = `Shared`
+- [ ] Tag: `Environment` = `Platform`
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `CostCenter` = `Shared-Services`
 - [ ] Tag: `Owner` = `skycraft-admin@yourtenant.onmicrosoft.com`
-- [ ] Tag: `Purpose` = `Monitoring-Logging`
 
 ### Tag Verification
 - [ ] Can view resources by "Project" tag in Tags service
@@ -70,15 +66,15 @@
 - [ ] Lock applied to: `prod-skycraft-swc-rg`
 - [ ] Lock name: `lock-no-delete-prod`
 - [ ] Lock type: **Delete** (CanNotDelete)
-- [ ] Notes: `Prevents accidental deletion of production resources`
+- [ ] Notes: `Cannot delete resource or child resources.`
 - [ ] Tested lock (attempted to delete resource group)
 - [ ] Verified error message received
 
-### Lock 2: Shared Resource Group
+### Lock 2: Platform Resource Group
 - [ ] Lock applied to: `platform-skycraft-swc-rg`
-- [ ] Lock name: `lock-no-delete-shared`
+- [ ] Lock name: `lock-no-delete-platform`
 - [ ] Lock type: **Delete** (CanNotDelete)
-- [ ] Notes: `Protects shared monitoring and logging infrastructure`
+- [ ] Notes: `Cannot delete resource or child resources.`
 
 ### Lock Understanding
 - [ ] Understand lock inheritance (parent to child)
@@ -239,7 +235,7 @@ az consumption budget list --query "[].{Name:name,Amount:amount,Category:categor
 
 | Component | Implemented | Count | Purpose |
 |-----------|-------------|-------|---------|
-| Tags | ✅ | 15+ tags | Resource organization and cost tracking |
+| Tags | ✅ | 12 tags (4 per RG) | Resource organization and cost tracking |
 | Azure Policies | ✅ | 3 assignments | Enforce standards and compliance |
 | Resource Locks | ✅ | 2 locks | Prevent accidental deletion |
 | Budgets | ✅ | 2 budgets | Cost control and alerts |
