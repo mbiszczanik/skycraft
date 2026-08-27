@@ -4,7 +4,7 @@ DESCRIPTION: Orchestrates role assignments for SkyCraft users and groups via AVM
 EXAMPLE: az deployment sub create --location swedencentral --template-file role-assignments.bicep
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.3.0
-DEPLOYMENT: .\scripts\New-LabRoleAssignment.ps1
+DEPLOYMENT: New-AzSubscriptionDeployment -TemplateFile role-assignments.bicep -par<Principal>Id ... (alternative: .\scripts\New-LabRoleAssignment.ps1 via Az cmdlets)
 ======================================================*/
 
 targetScope = 'subscription'
@@ -34,12 +34,18 @@ param parTesterGroupPrincipalId string
 param parPartnerPrincipalId string
 
 @description('Name of the Development Resource Group')
+@minLength(1)
+@maxLength(42) // deployment names prefix this with up to 22 chars; ARM limit is 64
 param parResourceGroupNameDev string = 'dev-skycraft-swc-rg'
 
 @description('Name of the Production Resource Group')
+@minLength(1)
+@maxLength(42) // deployment names prefix this with up to 22 chars; ARM limit is 64
 param parResourceGroupNameProd string = 'prod-skycraft-swc-rg'
 
 @description('Name of the Platform Resource Group')
+@minLength(1)
+@maxLength(42) // deployment names prefix this with up to 22 chars; ARM limit is 64
 param parResourceGroupNamePlatform string = 'platform-skycraft-swc-rg'
 
 /*******************
@@ -62,6 +68,7 @@ module modAdminOwnerAssignment 'br/public:avm/res/authorization/role-assignment/
   params: {
     principalId: parAdminPrincipalId
     roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varOwnerRoleId)
+    principalType: 'User'
   }
 }
 
