@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Pester guard `tests/Avm-Module-Pinning.Tests.ps1`: every `br/public:avm/...` reference must pin an exact semver, each AVM module must resolve to a single version repo-wide, and `bicepconfig.json` must not define registry aliases. The suite also asserts that the scan itself matched at least one `.bicep` file and one AVM declaration, so the guard cannot pass vacuously.
 - `.bicepparam` parameter files for the Module 1 Bicep entry points (Labs 1.2 and 1.3).
+- `.bicepparam` parameter files for the Module 2 Bicep entry points (Labs 2.1, 2.2 and 2.3).
 
 ### Changed
 
@@ -19,15 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lint workflow now parses every `.ps1`/`.psm1`/`.psd1` with the PowerShell parser before running PSScriptAnalyzer, annotating each syntax error with its file and line. PSScriptAnalyzer's gate counts only `Severity -eq 'Error'` and reports none for a file that cannot be parsed, so a syntax error used to reach CI unnoticed unless a Pester container happened to fail on it.
 - Module 1 Bicep converted to the AVM-first architecture (issue #62 v2, PR 1/6): resource groups via `avm/res/resources/resource-group`, RG-scope role assignments via `avm/res/authorization/role-assignment/rg-scope`, Lab 1.3 policy assignments called directly from `main.bicep`, and locks via the AVM `lock` parameter.
 - Canonical four-tag set (`Project`/`Environment`/`CostCenter`/`Owner`) applied across Module 1: the non-canonical `Criticality` tag is dropped and the Lab 1.3 scripts take `-Owner` (default `mbiszczanik`) instead of `-AdminEmail`.
+- Module 2 Bicep converted to the AVM-first architecture (issue #62 v2, PR 2/6): virtual networks, subnets and both hub-spoke peering directions via `avm/res/network/virtual-network` (the hub module's `peerings` parameter with `remotePeeringEnabled`), public IPs via `avm/res/network/public-ip-address`, NSGs/ASGs and subnet associations via `avm/res/network/network-security-group`, `avm/res/network/application-security-group` and `avm/res/network/virtual-network/subnet`, Azure Bastion via `avm/res/network/bastion-host`, load balancers via `avm/res/network/load-balancer`, DNS via `avm/res/network/dns-zone` and `avm/res/network/private-dns-zone`. Standard public IPs are now zone-redundant (AVM default), subnet delegations are named after the delegated service (`Microsoft.Web/serverFarms`), and every load-balancing rule sets `disableOutboundSnat: false` explicitly (the AVM default would disable the implicit outbound SNAT the Module 3 VMs rely on).
+- Canonical four-tag set (`Project`/`Environment`/`CostCenter`/`Owner`) applied across Module 2, including the portal-path tables in the lab guides and checklists; Lab 2.3 resources carry their own environment tag (DNS zones `Platform`, dev load balancer `Development`) instead of a blanket `Production`.
 
 ### Removed
 
 - Module 1 local Bicep modules `rg-role-assignment.bicep`, `locks.bicep`, and `policies.bicep`, superseded by the AVM modules above; `tags.bicep` is retained as the documented fallback for `Microsoft.Resources/tags`.
+- Module 2 local Bicep modules `vnet-hub.bicep`, `vnet-spoke.bicep`, `vnet-peering.bicep`, `public-ip.bicep` (Lab 2.1), `security-hub.bicep`, `security-spoke.bicep` (Lab 2.2), `dns-public.bicep`, `dns-private.bicep`, `load-balancer.bicep` (Lab 2.3), superseded by the AVM modules above; `get-public-ip.bicep` is retained as the documented trivial `existing` lookup.
 
 ### Fixed
 
 - Lab 1.1 `Test-Lab.ps1` looked for the guest user by the wrong e-mail (`istormrage@...`); it now checks `illidan@externalcompany.com`, the address `New-LabUser.ps1` invites.
 - Lab 1.2 `Test-Lab.ps1` could never find the External Partner assignment: guest sign-in names are rewritten to `<alias>_<domain>#EXT#@<tenant>`, so the `illidan@` match is now `illidan[@_]`.
+- Lab 2.1 guide: the hub-spoke peering diagram claimed "Allow Gateway Transit"; the lab disables gateway transit and allows forwarded traffic, and the diagram now says so.
 
 ## [0.7.1] - 2026-07-27
 
