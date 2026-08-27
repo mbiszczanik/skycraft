@@ -10,7 +10,7 @@
     - Illidan -> Reader (platform-rg)
 
 .EXAMPLE
-    .\Test-Lab-1.2.ps1
+    .\Test-Lab.ps1
     Runs validation.
 
 .NOTES
@@ -61,7 +61,7 @@ $checks = @(
     @{ Name="Developers Group";  Principal="SkyCraft-Developers";  Role="Contributor"; Scope="/subscriptions/$subId/resourceGroups/dev-skycraft-swc-rg" }
     @{ Name="Testers Group (Dev)"; Principal="SkyCraft-Testers";   Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/dev-skycraft-swc-rg" }
     @{ Name="Testers Group (Prod)"; Principal="SkyCraft-Testers";  Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/prod-skycraft-swc-rg" }
-    @{ Name="External Partner";  Principal="illidan@";             Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/platform-skycraft-swc-rg" }
+    @{ Name="External Partner";  Principal="illidan[@_]";         Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/platform-skycraft-swc-rg" }
 )
 
 foreach ($check in $checks) {
@@ -76,7 +76,8 @@ foreach ($check in $checks) {
         }
         
         # Filter for role and principal
-        # Using match for UPN because domain might vary, or DisplayName for groups
+        # Using match for UPN because domain might vary, or DisplayName for groups.
+        # Guest sign-in names are rewritten to <alias>_<domain>#EXT#@<tenant>, hence the [@_] pattern for Illidan.
         $found = $assignments | Where-Object { 
             ($_.RoleDefinitionName -eq $check.Role) -and 
             ( ($_.SignInName -match $check.Principal) -or ($_.DisplayName -eq $check.Principal) )

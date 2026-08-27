@@ -8,7 +8,7 @@
     (Admins, Developers, Testers) exist and have the correct members assigned.
 
 .EXAMPLE
-    .\Test-Lab-1.1.ps1
+    .\Test-Lab.ps1
     Runs the validation suite.
 
 .NOTES
@@ -59,7 +59,7 @@ $expectedUsers = @(
     "malfurion.stormrage@$domain"
     "khadgar.archmage@$domain"
     "chromie.timewalker@$domain"
-    "istormrage@externalcompany.com" # Guest user
+    "illidan@externalcompany.com" # Guest user (invited by New-LabUser.ps1)
 )
 
 # Validate Users
