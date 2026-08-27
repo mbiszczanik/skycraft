@@ -13,7 +13,7 @@ targetScope = 'subscription'
 *    Parameters    *
 *******************/
 
-@description('Azure Region')
+@description('Deployment region; also used as the location of the policy assignment managed identities')
 @allowed([
   'swedencentral'
   'northeurope'
@@ -53,10 +53,27 @@ var varTagsPlatform = {
   Owner: parOwner
 }
 
+// Fixed list, independent of the deployment region: the RGs created in Lab 1.2 live in
+// swedencentral, so it must always stay allowed.
 var varAllowedLocations = [
-  parLocation
+  'swedencentral'
   'northeurope'
 ]
+
+/*******************
+*    Resources     *
+*******************/
+
+// The prod/platform resource groups already exist (created in Lab 1.2). Their location is
+// read back so the AVM resource-group re-declaration below stays idempotent regardless of
+// the region this deployment runs from (resource group location is immutable).
+resource resRgProd 'Microsoft.Resources/resourceGroups@2025-04-01' existing = {
+  name: varRgProd
+}
+
+resource resRgPlatform 'Microsoft.Resources/resourceGroups@2025-04-01' existing = {
+  name: varRgPlatform
+}
 
 /*******************
 *     Modules      *
@@ -64,6 +81,8 @@ var varAllowedLocations = [
 
 // 1. Tags on the dev resource group via the local fallback module
 //    (Microsoft.Resources/tags has no AVM module - docs/bicep-standards.md, Section 4.3).
+//    Kept deliberately as the teaching example of a fallback; prod/platform below get their
+//    tags through the AVM resource-group module's own 'tags' parameter instead.
 module modTagsDev 'modules/tags.bicep' = {
   name: 'deploy-tags-dev'
   scope: resourceGroup(varRgDev)
@@ -80,7 +99,7 @@ module modRgProd 'br/public:avm/res/resources/resource-group:0.4.4' = {
   name: 'deploy-rg-prod-governance'
   params: {
     name: varRgProd
-    location: parLocation
+    location: resRgProd.location
     tags: varTagsProd
     lock: {
       kind: 'CanNotDelete'
@@ -93,7 +112,7 @@ module modRgPlatform 'br/public:avm/res/resources/resource-group:0.4.4' = {
   name: 'deploy-rg-platform-governance'
   params: {
     name: varRgPlatform
-    location: parLocation
+    location: resRgPlatform.location
     tags: varTagsPlatform
     lock: {
       kind: 'CanNotDelete'
@@ -107,6 +126,7 @@ module modRequireTagPolicy 'br/public:avm/res/authorization/policy-assignment/su
   name: 'Require-Environment-Tag-RG'
   params: {
     name: 'Require-Environment-Tag-RG'
+    location: parLocation
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/96670d01-0a4d-4649-9c89-2d3abc0a5025'
     displayName: 'Require Environment Tag on Resource Groups'
     description: 'All resource groups must have an Environment tag'
@@ -127,6 +147,7 @@ module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assign
   name: 'Enforce-Project-Tag'
   params: {
     name: 'Enforce-Project-Tag'
+    location: parLocation
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/1e30110a-5ceb-460c-a204-c1c3969c6d62'
     displayName: 'Enforce Project Tag Value'
     description: 'All resources must have Project tag set to SkyCraft'
@@ -150,6 +171,7 @@ module modAllowedLocationsPolicy 'br/public:avm/res/authorization/policy-assignm
   name: 'Restrict-Azure-Regions'
   params: {
     name: 'Restrict-Azure-Regions'
+    location: parLocation
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c'
     displayName: 'Restrict to Allowed Regions'
     description: 'Resources can only be created in specified regions'
