@@ -171,7 +171,7 @@ module modProdPip 'modules/get-public-ip.bicep' = {
 // 2. Load balancers (Standard SKU, regional). Frontends use the Lab 2.1 public IPs; the
 //    backend pools stay empty until Module 3 adds the VM NICs (Lab 3.2 references '-be-auth').
 //    disableOutboundSnat is set explicitly: the AVM default (true) would remove the implicit
-//    outbound SNAT through the frontend IP that the Module 3 VMs rely on.
+//    outbound SNAT through the frontend IP that the Module 3 VMs rely on (docs/bicep-standards.md, Section 4.5).
 module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
   name: 'deploy-dev-lb'
   scope: resDevRG
