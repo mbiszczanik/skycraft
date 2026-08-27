@@ -1,9 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 1.3 - Governance Orchestrator
-DESCRIPTION: Orchestrates deployment of tags, policies, and locks for Lab 1.3
+DESCRIPTION: Orchestrates deployment of tags, policies, and locks for Lab 1.3 via AVM
 EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.1.0
+VERSION: 0.2.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -14,10 +14,15 @@ targetScope = 'subscription'
 *******************/
 
 @description('Azure Region')
+@allowed([
+  'swedencentral'
+  'northeurope'
+])
 param parLocation string = 'swedencentral'
 
-@description('Admin Email for Owner Tag')
-param parAdminEmail string = 'malfurion.stormrage@skycraft.com'
+@description('Resource owner tag value')
+@minLength(1)
+param parOwner string = 'mbiszczanik'
 
 /*******************
 *    Variables     *
@@ -28,32 +33,37 @@ var varRgProd = 'prod-skycraft-swc-rg'
 var varRgPlatform = 'platform-skycraft-swc-rg'
 
 var varTagsDev = {
-  Environment: 'Development'
   Project: 'SkyCraft'
+  Environment: 'Development'
   CostCenter: 'MSDN'
-  Owner: parAdminEmail
+  Owner: parOwner
 }
 
 var varTagsProd = {
-  Environment: 'Production'
   Project: 'SkyCraft'
+  Environment: 'Production'
   CostCenter: 'MSDN'
-  Owner: parAdminEmail
-  Criticality: 'High'
+  Owner: parOwner
 }
 
 var varTagsPlatform = {
-  Environment: 'Platform'
   Project: 'SkyCraft'
+  Environment: 'Platform'
   CostCenter: 'MSDN'
-  Owner: parAdminEmail
+  Owner: parOwner
 }
+
+var varAllowedLocations = [
+  parLocation
+  'northeurope'
+]
 
 /*******************
 *     Modules      *
 *******************/
 
-// 1. Apply Tags
+// 1. Tags on the dev resource group via the local fallback module
+//    (Microsoft.Resources/tags has no AVM module - docs/bicep-standards.md, Section 4.3).
 module modTagsDev 'modules/tags.bicep' = {
   name: 'deploy-tags-dev'
   scope: resourceGroup(varRgDev)
@@ -62,54 +72,96 @@ module modTagsDev 'modules/tags.bicep' = {
   }
 }
 
-module modTagsProd 'modules/tags.bicep' = {
-  name: 'deploy-tags-prod'
-  scope: resourceGroup(varRgProd)
+// 2. Locks and tags on prod/platform via the AVM resource-group module.
+//    Re-declaring the RG is idempotent; the built-in 'lock' parameter replaces the
+//    former modules/locks.bicep. Tags must be passed too - an RG PUT without tags
+//    would wipe the ones applied in Lab 1.2.
+module modRgProd 'br/public:avm/res/resources/resource-group:0.4.4' = {
+  name: 'deploy-rg-prod-governance'
   params: {
-    parTags: varTagsProd
+    name: varRgProd
+    location: parLocation
+    tags: varTagsProd
+    lock: {
+      kind: 'CanNotDelete'
+      name: 'lock-no-delete-prod'
+    }
   }
 }
 
-module modTagsPlatform 'modules/tags.bicep' = {
-  name: 'deploy-tags-platform'
-  scope: resourceGroup(varRgPlatform)
+module modRgPlatform 'br/public:avm/res/resources/resource-group:0.4.4' = {
+  name: 'deploy-rg-platform-governance'
   params: {
-    parTags: varTagsPlatform
+    name: varRgPlatform
+    location: parLocation
+    tags: varTagsPlatform
+    lock: {
+      kind: 'CanNotDelete'
+      name: 'lock-no-delete-platform'
+    }
   }
 }
 
-// 2. Assign Policies (Subscription Scope)
-module modPolicies 'modules/policies.bicep' = {
-  name: 'deploy-policies'
+// 3. Policy assignments at subscription scope via AVM.
+module modRequireTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
+  name: 'Require-Environment-Tag-RG'
   params: {
-    parAllowedLocations: [
-      parLocation
-      'northeurope'
+    name: 'Require-Environment-Tag-RG'
+    policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/96670d01-0a4d-4649-9c89-2d3abc0a5025'
+    displayName: 'Require Environment Tag on Resource Groups'
+    description: 'All resource groups must have an Environment tag'
+    parameters: {
+      tagName: {
+        value: 'Environment'
+      }
+    }
+    nonComplianceMessages: [
+      {
+        message: 'Resource group must have an Environment tag (Development, Production, or Platform)'
+      }
     ]
   }
 }
 
-// 3. Apply Locks
-module modLockProd 'modules/locks.bicep' = {
-  name: 'deploy-lock-prod'
-  scope: resourceGroup(varRgProd)
+module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
+  name: 'Enforce-Project-Tag'
   params: {
-    parLockName: 'lock-no-delete-prod'
-    parLockNotes: 'Prevents accidental deletion of production resources'
+    name: 'Enforce-Project-Tag'
+    policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/1e30110a-5ceb-460c-a204-c1c3969c6d62'
+    displayName: 'Enforce Project Tag Value'
+    description: 'All resources must have Project tag set to SkyCraft'
+    parameters: {
+      tagName: {
+        value: 'Project'
+      }
+      tagValue: {
+        value: 'SkyCraft'
+      }
+    }
+    nonComplianceMessages: [
+      {
+        message: 'All resources must be tagged with Project=SkyCraft'
+      }
+    ]
   }
-  dependsOn: [
-    modTagsProd
-  ]
 }
 
-module modLockPlatform 'modules/locks.bicep' = {
-  name: 'deploy-lock-platform'
-  scope: resourceGroup(varRgPlatform)
+module modAllowedLocationsPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
+  name: 'Restrict-Azure-Regions'
   params: {
-    parLockName: 'lock-no-delete-platform'
-    parLockNotes: 'Protects platform monitoring and logging infrastructure'
+    name: 'Restrict-Azure-Regions'
+    policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c'
+    displayName: 'Restrict to Allowed Regions'
+    description: 'Resources can only be created in specified regions'
+    parameters: {
+      listOfAllowedLocations: {
+        value: varAllowedLocations
+      }
+    }
+    nonComplianceMessages: [
+      {
+        message: 'Resources must be deployed to approved regions only'
+      }
+    ]
   }
-  dependsOn: [
-    modTagsPlatform
-  ]
 }
