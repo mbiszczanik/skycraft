@@ -1,9 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 1.2 - RBAC Assignments Orchestrator
-DESCRIPTION: Orchestrates role assignments for SkyCraft users and groups
+DESCRIPTION: Orchestrates role assignments for SkyCraft users and groups via AVM
 EXAMPLE: az deployment sub create --location swedencentral --template-file role-assignments.bicep
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.2.0
+VERSION: 0.3.0
 DEPLOYMENT: .\scripts\New-LabRoleAssignment.ps1
 ======================================================*/
 
@@ -12,16 +12,25 @@ targetScope = 'subscription'
 /*******************
 *    Parameters    *
 *******************/
+
 @description('Principal ID for SkyCraft Admin user')
+@minLength(36)
+@maxLength(36)
 param parAdminPrincipalId string
 
 @description('Principal ID for SkyCraft-Developers group')
+@minLength(36)
+@maxLength(36)
 param parDeveloperGroupPrincipalId string
 
 @description('Principal ID for SkyCraft-Testers group')
+@minLength(36)
+@maxLength(36)
 param parTesterGroupPrincipalId string
 
 @description('Principal ID for External Partner user')
+@minLength(36)
+@maxLength(36)
 param parPartnerPrincipalId string
 
 @description('Name of the Development Resource Group')
@@ -43,11 +52,11 @@ var varContributorRoleId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
 var varReaderRoleId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
 
 /*******************
-*    Resources     *
+*     Modules      *
 *******************/
 
 /* Subscription-level assignment */
-module modAdminOwnerAssigment 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = {
+module modAdminOwnerAssignment 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = {
   name: 'admin-owner-sub'
   scope: subscription()
   params: {
@@ -57,42 +66,42 @@ module modAdminOwnerAssigment 'br/public:avm/res/authorization/role-assignment/s
 }
 
 /* Resource Group level assignments */
-module modDeveloperContributorAssigment 'modules/rg-role-assignment.bicep' = {
+module modDeveloperContributorAssignment 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
   name: 'developer-contributor-${parResourceGroupNameDev}'
   scope: resourceGroup(parResourceGroupNameDev)
   params: {
-    parPrincipalId: parDeveloperGroupPrincipalId
-    parRoleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varContributorRoleId)
-    parPrincipalType: 'Group'
+    principalId: parDeveloperGroupPrincipalId
+    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varContributorRoleId)
+    principalType: 'Group'
   }
 }
 
-module modTesterReaderAssigment 'modules/rg-role-assignment.bicep' = {
+module modTesterReaderAssignment 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
   name: 'tester-reader-${parResourceGroupNameDev}'
   scope: resourceGroup(parResourceGroupNameDev)
   params: {
-    parPrincipalId: parTesterGroupPrincipalId
-    parRoleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
-    parPrincipalType: 'Group'
+    principalId: parTesterGroupPrincipalId
+    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
+    principalType: 'Group'
   }
 }
 
-module modTesterProdReaderAssigment 'modules/rg-role-assignment.bicep' = {
+module modTesterProdReaderAssignment 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
   name: 'tester-reader-${parResourceGroupNameProd}'
   scope: resourceGroup(parResourceGroupNameProd)
   params: {
-    parPrincipalId: parTesterGroupPrincipalId
-    parRoleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
-    parPrincipalType: 'Group'
+    principalId: parTesterGroupPrincipalId
+    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
+    principalType: 'Group'
   }
 }
 
-module modPartnerReaderAssigment 'modules/rg-role-assignment.bicep' = {
+module modPartnerReaderAssignment 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
   name: 'partner-reader-${parResourceGroupNamePlatform}'
   scope: resourceGroup(parResourceGroupNamePlatform)
   params: {
-    parPrincipalId: parPartnerPrincipalId
-    parRoleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
-    parPrincipalType: 'User'
+    principalId: parPartnerPrincipalId
+    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', varReaderRoleId)
+    principalType: 'User'
   }
 }
