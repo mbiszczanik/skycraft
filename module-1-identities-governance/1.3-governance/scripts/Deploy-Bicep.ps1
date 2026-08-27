@@ -113,4 +113,4 @@ catch {
 
 Write-Host "`nDeployment Complete." -ForegroundColor Green
 Write-Host "Next Steps:" -ForegroundColor Gray
-Write-Host " 1. Run Test-Lab-1.3.ps1 to validate." -ForegroundColor Gray
+Write-Host " 1. Run Test-Lab.ps1 to validate." -ForegroundColor Gray
