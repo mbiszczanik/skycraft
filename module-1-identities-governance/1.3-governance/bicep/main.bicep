@@ -1,9 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 1.3 - Governance Orchestrator
-DESCRIPTION: Orchestrates deployment of tags, policies, and locks for Lab 1.3 via AVM
+DESCRIPTION: Orchestrates deployment of tags, policies, and locks for Lab 1.3 via AVM (requires the Lab 1.2 resource groups to exist)
 EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.2.0
+VERSION: 0.2.1
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -53,8 +53,8 @@ var varTagsPlatform = {
   Owner: parOwner
 }
 
-// Fixed list, independent of the deployment region: the RGs created in Lab 1.2 live in
-// swedencentral, so it must always stay allowed.
+// Fixed list covering every region Lab 1.2 allows, so the Deny policy can never exclude
+// the region the existing resource groups live in (independent of the deployment region).
 var varAllowedLocations = [
   'swedencentral'
   'northeurope'
@@ -67,11 +67,11 @@ var varAllowedLocations = [
 // The prod/platform resource groups already exist (created in Lab 1.2). Their location is
 // read back so the AVM resource-group re-declaration below stays idempotent regardless of
 // the region this deployment runs from (resource group location is immutable).
-resource resRgProd 'Microsoft.Resources/resourceGroups@2025-04-01' existing = {
+resource resRgProd 'Microsoft.Resources/resourceGroups@2023-07-01' existing = {
   name: varRgProd
 }
 
-resource resRgPlatform 'Microsoft.Resources/resourceGroups@2025-04-01' existing = {
+resource resRgPlatform 'Microsoft.Resources/resourceGroups@2023-07-01' existing = {
   name: varRgPlatform
 }
 
@@ -121,13 +121,16 @@ module modRgPlatform 'br/public:avm/res/resources/resource-group:0.4.4' = {
   }
 }
 
-// 3. Policy assignments at subscription scope via AVM.
+// 3. Policy assignments at subscription scope via AVM. definitionVersion pins the built-in
+//    definitions' major version explicitly (Azure stores '1.*.*' by default) so what-if reports
+//    NoChange on re-runs instead of a spurious Modify.
 module modRequireTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
   name: 'Require-Environment-Tag-RG'
   params: {
     name: 'Require-Environment-Tag-RG'
     location: parLocation
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/96670d01-0a4d-4649-9c89-2d3abc0a5025'
+    definitionVersion: '1.*.*'
     displayName: 'Require Environment Tag on Resource Groups'
     description: 'All resource groups must have an Environment tag'
     parameters: {
@@ -149,6 +152,7 @@ module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assign
     name: 'Enforce-Project-Tag'
     location: parLocation
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/1e30110a-5ceb-460c-a204-c1c3969c6d62'
+    definitionVersion: '1.*.*'
     displayName: 'Enforce Project Tag Value'
     description: 'All resources must have Project tag set to SkyCraft'
     parameters: {
@@ -173,6 +177,7 @@ module modAllowedLocationsPolicy 'br/public:avm/res/authorization/policy-assignm
     name: 'Restrict-Azure-Regions'
     location: parLocation
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c'
+    definitionVersion: '1.*.*'
     displayName: 'Restrict to Allowed Regions'
     description: 'Resources can only be created in specified regions'
     parameters: {
