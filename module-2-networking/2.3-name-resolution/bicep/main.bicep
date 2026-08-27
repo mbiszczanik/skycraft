@@ -144,13 +144,24 @@ resource resVnetProd 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
   scope: resProdRG
 }
 
+// Public IPs created in Lab 2.1 - referenced by the load balancer frontends
+resource resPipDev 'Microsoft.Network/publicIPAddresses@2023-11-01' existing = {
+  name: parDevLbPipName
+  scope: resDevRG
+}
+
+resource resPipProd 'Microsoft.Network/publicIPAddresses@2023-11-01' existing = {
+  name: parProdLbPipName
+  scope: resProdRG
+}
+
 /*******************
 *     Modules      *
 *******************/
 
 // 1. Public IP address lookups - local fallback for a trivial 'existing' lookup
 //    (docs/bicep-standards.md, Section 4.3). Only the address needs a runtime lookup (DNS A
-//    records); the LB frontends reference the PIPs by resourceId() so what-if stays static.
+//    records); the LB frontends reference the PIPs through 'existing' lookups so what-if stays static.
 //    The IPs themselves are owned by Lab 2.1.
 module modDevPip 'modules/get-public-ip.bicep' = {
   name: 'get-dev-pip'
@@ -184,7 +195,7 @@ module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
     frontendIPConfigurations: [
       {
         name: '${varLbNameDev}-frontend'
-        publicIPAddressResourceId: resourceId(parDevRG, 'Microsoft.Network/publicIPAddresses', parDevLbPipName)
+        publicIPAddressResourceId: resPipDev.id
       }
     ]
     backendAddressPools: [
@@ -254,7 +265,7 @@ module modProdLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
     frontendIPConfigurations: [
       {
         name: '${varLbNameProd}-frontend'
-        publicIPAddressResourceId: resourceId(parProdRG, 'Microsoft.Network/publicIPAddresses', parProdLbPipName)
+        publicIPAddressResourceId: resPipProd.id
       }
     ]
     backendAddressPools: [
