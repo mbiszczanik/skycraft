@@ -66,7 +66,7 @@
 - [ ] Lock applied to: `prod-skycraft-swc-rg`
 - [ ] Lock name: `lock-no-delete-prod`
 - [ ] Lock type: **Delete** (CanNotDelete)
-- [ ] Notes: `Prevents accidental deletion of production resources`
+- [ ] Notes: `Cannot delete resource or child resources.`
 - [ ] Tested lock (attempted to delete resource group)
 - [ ] Verified error message received
 
@@ -74,7 +74,7 @@
 - [ ] Lock applied to: `platform-skycraft-swc-rg`
 - [ ] Lock name: `lock-no-delete-platform`
 - [ ] Lock type: **Delete** (CanNotDelete)
-- [ ] Notes: `Protects platform monitoring and logging infrastructure`
+- [ ] Notes: `Cannot delete resource or child resources.`
 
 ### Lock Understanding
 - [ ] Understand lock inheritance (parent to child)

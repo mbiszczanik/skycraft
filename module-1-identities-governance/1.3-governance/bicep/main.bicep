@@ -95,6 +95,7 @@ module modTagsDev 'modules/tags.bicep' = {
 //    Re-declaring the RG is idempotent; the built-in 'lock' parameter replaces the
 //    former modules/locks.bicep. Tags must be passed too - an RG PUT without tags
 //    would wipe the ones applied in Lab 1.2.
+//    Lock notes are fixed by the module ('Cannot delete resource or child resources.').
 module modRgProd 'br/public:avm/res/resources/resource-group:0.4.4' = {
   name: 'deploy-rg-prod-governance'
   params: {
@@ -104,7 +105,6 @@ module modRgProd 'br/public:avm/res/resources/resource-group:0.4.4' = {
     lock: {
       kind: 'CanNotDelete'
       name: 'lock-no-delete-prod'
-      notes: 'Prevents accidental deletion of production resources'
     }
   }
 }
@@ -118,7 +118,6 @@ module modRgPlatform 'br/public:avm/res/resources/resource-group:0.4.4' = {
     lock: {
       kind: 'CanNotDelete'
       name: 'lock-no-delete-platform'
-      notes: 'Protects platform monitoring and logging infrastructure'
     }
   }
 }

@@ -352,7 +352,9 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 | --------- | ---------------------------------------------------- |
 | Lock name | lock-no-delete-prod                                  |
 | Lock type | Delete                                               |
-| Notes     | Prevents accidental deletion of production resources |
+| Notes     | Cannot delete resource or child resources.           |
+
+> The Bicep path applies both locks through the AVM resource-group module, which sets this notes text itself; the notes are not configurable through the module. If you create the locks in the portal, use the same text so `Test-Lab.ps1` and the checklist match.
 
 5. Click **OK**
 
@@ -381,7 +383,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 3. Create lock:
    - Lock name: `lock-no-delete-platform`
    - Lock type: **Delete**
-   - Notes: `Protects platform monitoring and logging infrastructure`
+   - Notes: `Cannot delete resource or child resources.`
 
 4. Click **OK**
 
