@@ -148,8 +148,10 @@ resource resVnetProd 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
 *     Modules      *
 *******************/
 
-// 1. Public IP lookups - local fallback for a trivial 'existing' lookup
-//    (docs/bicep-standards.md, Section 4.3). The IPs themselves are owned by Lab 2.1.
+// 1. Public IP address lookups - local fallback for a trivial 'existing' lookup
+//    (docs/bicep-standards.md, Section 4.3). Only the address needs a runtime lookup (DNS A
+//    records); the LB frontends reference the PIPs by resourceId() so what-if stays static.
+//    The IPs themselves are owned by Lab 2.1.
 module modDevPip 'modules/get-public-ip.bicep' = {
   name: 'get-dev-pip'
   scope: resDevRG
@@ -168,6 +170,8 @@ module modProdPip 'modules/get-public-ip.bicep' = {
 
 // 2. Load balancers (Standard SKU, regional). Frontends use the Lab 2.1 public IPs; the
 //    backend pools stay empty until Module 3 adds the VM NICs (Lab 3.2 references '-be-auth').
+//    disableOutboundSnat is set explicitly: the AVM default (true) would remove the implicit
+//    outbound SNAT through the frontend IP that the Module 3 VMs rely on.
 module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
   name: 'deploy-dev-lb'
   scope: resDevRG
@@ -180,7 +184,7 @@ module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
     frontendIPConfigurations: [
       {
         name: '${varLbNameDev}-frontend'
-        publicIPAddressResourceId: modDevPip.outputs.outId
+        publicIPAddressResourceId: resourceId(parDevRG, 'Microsoft.Network/publicIPAddresses', parDevLbPipName)
       }
     ]
     backendAddressPools: [
@@ -218,6 +222,7 @@ module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
         backendPort: varWorldPort
         idleTimeoutInMinutes: 4
         enableTcpReset: true
+        disableOutboundSnat: false
         loadDistribution: 'Default'
       }
       {
@@ -230,6 +235,7 @@ module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
         backendPort: varAuthPort
         idleTimeoutInMinutes: 4
         enableTcpReset: true
+        disableOutboundSnat: false
         loadDistribution: 'Default'
       }
     ]
@@ -248,7 +254,7 @@ module modProdLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
     frontendIPConfigurations: [
       {
         name: '${varLbNameProd}-frontend'
-        publicIPAddressResourceId: modProdPip.outputs.outId
+        publicIPAddressResourceId: resourceId(parProdRG, 'Microsoft.Network/publicIPAddresses', parProdLbPipName)
       }
     ]
     backendAddressPools: [
@@ -286,6 +292,7 @@ module modProdLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
         backendPort: varWorldPort
         idleTimeoutInMinutes: 4
         enableTcpReset: true
+        disableOutboundSnat: false
         loadDistribution: 'Default'
       }
       {
@@ -298,6 +305,7 @@ module modProdLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
         backendPort: varAuthPort
         idleTimeoutInMinutes: 4
         enableTcpReset: true
+        disableOutboundSnat: false
         loadDistribution: 'Default'
       }
     ]
