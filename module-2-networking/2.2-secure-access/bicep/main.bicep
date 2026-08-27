@@ -320,7 +320,7 @@ module modSubnetWorld 'br/public:avm/res/network/virtual-network/subnet:0.2.0' =
     ]
   }
   dependsOn: [
-    modSubnetAuth // serialise subnet updates per VNet (see comment above)
+    modSubnetAuth[i] // serialise subnet updates per VNet (see comment above)
   ]
 }]
 
@@ -338,7 +338,7 @@ module modSubnetDb 'br/public:avm/res/network/virtual-network/subnet:0.2.0' = [f
     ]
   }
   dependsOn: [
-    modSubnetWorld // serialise subnet updates per VNet (see comment above)
+    modSubnetWorld[i] // serialise subnet updates per VNet (see comment above)
   ]
 }]
 

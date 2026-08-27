@@ -160,7 +160,7 @@ resource resRgProd 'Microsoft.Resources/resourceGroups@2023-07-01' existing = {
 *******************/
 
 // 1. Spoke VNets. NSG associations are applied later by Lab 2.2; re-running this template
-//    after Lab 2.2 re-declares the subnets without NSGs - run the labs in order.
+//    after Lab 2.2 re-declares the subnets without NSGs or service endpoints - run the labs in order.
 module modVnetDev 'br/public:avm/res/network/virtual-network:0.10.2' = {
   name: 'dev-vnet-deployment'
   scope: resRgDev

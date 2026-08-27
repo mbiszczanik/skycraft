@@ -159,10 +159,10 @@ resource resPipProd 'Microsoft.Network/publicIPAddresses@2023-11-01' existing = 
 *     Modules      *
 *******************/
 
-// 1. Public IP address lookups - local fallback for a trivial 'existing' lookup
-//    (docs/bicep-standards.md, Section 4.3). Only the address needs a runtime lookup (DNS A
-//    records); the LB frontends reference the PIPs through 'existing' lookups so what-if stays static.
-//    The IPs themselves are owned by Lab 2.1.
+// 1. Public IP address lookups - local fallback for a trivial 'existing' lookup, kept as the
+//    documented Section 4.3 example (docs/bicep-standards.md). Only the addresses need a runtime
+//    lookup (DNS A records); the LB frontends use the 'existing' resources above so what-if stays
+//    static. The IPs themselves are owned by Lab 2.1.
 module modDevPip 'modules/get-public-ip.bicep' = {
   name: 'get-dev-pip'
   scope: resDevRG
