@@ -1,17 +1,31 @@
 /*=====================================================
-SUMMARY: Lab 2.3 - Public IP Lookup Module
-DESCRIPTION: Returns properties of an existing Public IP.
+SUMMARY: Lab 2.3 - Public IP Lookup
+DESCRIPTION: Returns the address and resource ID of an existing Public IP. Local fallback for a trivial 'existing' lookup (docs/bicep-standards.md, Section 4.3)
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.2.0
-DEPRECATED: False
+VERSION: 0.3.0
+DEPLOYMENT: Internal use via Orchestrator
 ======================================================*/
 
-@description('The name of the existing Public IP.')
+/*******************
+*    Parameters    *
+*******************/
+
+@description('Name of the existing Public IP')
+@minLength(1)
+@maxLength(80)
 param parPublicIpName string
 
-resource resPublicIp 'Microsoft.Network/publicIPAddresses@2023-04-01' existing = {
+/*******************
+*    Resources     *
+*******************/
+
+resource resPublicIp 'Microsoft.Network/publicIPAddresses@2023-11-01' existing = {
   name: parPublicIpName
 }
+
+/******************
+*     Outputs     *
+******************/
 
 output outIpAddress string = resPublicIp.properties.ipAddress
 output outId string = resPublicIp.id
