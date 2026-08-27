@@ -1,9 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 1.2 - Resource Groups
-DESCRIPTION: Deploys the prerequisite Resource Groups for SkyCraft
+DESCRIPTION: Deploys the prerequisite Resource Groups for SkyCraft via AVM
 EXAMPLE: az deployment sub create --location swedencentral --template-file resource-groups.bicep
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.2.0
+VERSION: 0.3.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -12,62 +12,82 @@ targetScope = 'subscription'
 /*******************
 *    Parameters    *
 *******************/
+
 @description('Location for all resources')
+@allowed([
+  'swedencentral'
+  'northeurope'
+])
 param parLocation string = 'swedencentral'
 
-@description('Common tags object')
-param parCommonTags object = {}
+@description('Resource owner tag value')
+@minLength(1)
+param parOwner string = 'mbiszczanik'
 
 /*******************
 *    Variables     *
 *******************/
+
 var varResourceGroupNameDev = 'dev-skycraft-swc-rg'
 var varResourceGroupNameProd = 'prod-skycraft-swc-rg'
 var varResourceGroupNamePlatform = 'platform-skycraft-swc-rg'
 
-var varTagsDev = union(parCommonTags, {
+var varTagsDev = {
+  Project: 'SkyCraft'
   Environment: 'Development'
-  Project: 'SkyCraft'
   CostCenter: 'MSDN'
-})
+  Owner: parOwner
+}
 
-var varTagsProd = union(parCommonTags, {
+var varTagsProd = {
+  Project: 'SkyCraft'
   Environment: 'Production'
-  Project: 'SkyCraft'
   CostCenter: 'MSDN'
-})
+  Owner: parOwner
+}
 
-var varTagsPlatform = union(parCommonTags, {
-  Environment: 'Platform'
+var varTagsPlatform = {
   Project: 'SkyCraft'
+  Environment: 'Platform'
   CostCenter: 'MSDN'
-})
+  Owner: parOwner
+}
 
 /*******************
-*    Resources     *
+*     Modules      *
 *******************/
 
-resource resRgDev 'Microsoft.Resources/resourceGroups@2023-07-01' = {
-  name: varResourceGroupNameDev
-  location: parLocation
-  tags: varTagsDev
+module modRgDev 'br/public:avm/res/resources/resource-group:0.4.4' = {
+  name: 'rg-dev-deployment'
+  params: {
+    name: varResourceGroupNameDev
+    location: parLocation
+    tags: varTagsDev
+  }
 }
 
-resource resRgProd 'Microsoft.Resources/resourceGroups@2023-07-01' = {
-  name: varResourceGroupNameProd
-  location: parLocation
-  tags: varTagsProd
+module modRgProd 'br/public:avm/res/resources/resource-group:0.4.4' = {
+  name: 'rg-prod-deployment'
+  params: {
+    name: varResourceGroupNameProd
+    location: parLocation
+    tags: varTagsProd
+  }
 }
 
-resource resRgPlatform 'Microsoft.Resources/resourceGroups@2023-07-01' = {
-  name: varResourceGroupNamePlatform
-  location: parLocation
-  tags: varTagsPlatform
+module modRgPlatform 'br/public:avm/res/resources/resource-group:0.4.4' = {
+  name: 'rg-platform-deployment'
+  params: {
+    name: varResourceGroupNamePlatform
+    location: parLocation
+    tags: varTagsPlatform
+  }
 }
 
 /******************
 *     Outputs     *
 ******************/
-output outDevResourceGroupName string = resRgDev.name
-output outProdResourceGroupName string = resRgProd.name
-output outPlatformResourceGroupName string = resRgPlatform.name
+
+output outDevResourceGroupName string = modRgDev.outputs.name
+output outProdResourceGroupName string = modRgProd.outputs.name
+output outPlatformResourceGroupName string = modRgPlatform.outputs.name
