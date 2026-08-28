@@ -11,8 +11,8 @@
     - NSGs: Checks existence of all 7 NSGs (3 Dev, 3 Prod, 1 Platform).
     - NSG Rules: Verifies key rules (SSH, Game Ports, DB Ports) on each NSG.
     - Subnet Associations: Ensures specific NSGs are associated with specific subnets.
-    - Service Endpoints: Checks for Microsoft.Sql and Microsoft.Storage on Database subnets.
-    - Azure Bastion: Checks for existence (optional).
+    - Service Endpoints: Microsoft.Storage on World subnets, Microsoft.Sql and Microsoft.Storage on Database subnets.
+    - Azure Bastion: Checks existence, SKU, public IP and canonical tags when deployed (optional).
 
 .EXAMPLE
     .\Test-Lab.ps1
@@ -118,7 +118,7 @@ foreach ($nsgInfo in $nsgs) {
 Write-Host "`n=== 3. Validating Subnet Associations & Service Endpoints ===" -ForegroundColor Cyan
 
 function Test-Subnet {
-    param($VnetName, $RgName, $SubnetName, $ExpectedNsgName, $CheckSE=$false)
+    param($VnetName, $RgName, $SubnetName, $ExpectedNsgName, [string[]]$ExpectedServiceEndpoints = @())
     $vnet = Get-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -ErrorAction SilentlyContinue
     if ($vnet) {
         $sn = $vnet.Subnets | Where-Object { $_.Name -eq $SubnetName }
@@ -130,14 +130,13 @@ function Test-Subnet {
                 $script:failCount++
             }
 
-            if ($CheckSE) {
-                $sqlSE   = $sn.ServiceEndpoints | Where-Object { $_.Service -eq "Microsoft.Sql" }
-                $storeSE = $sn.ServiceEndpoints | Where-Object { $_.Service -eq "Microsoft.Storage" }
-
-                if ($sqlSE -and $storeSE) {
-                    Write-Host "  -> [OK] Service Endpoints (SQL, Storage) enabled" -ForegroundColor Gray
+            if ($ExpectedServiceEndpoints.Count -gt 0) {
+                $present = @($sn.ServiceEndpoints | ForEach-Object { $_.Service })
+                $missing = @($ExpectedServiceEndpoints | Where-Object { $present -notcontains $_ })
+                if ($missing.Count -eq 0) {
+                    Write-Host "  -> [OK] Service Endpoints ($($ExpectedServiceEndpoints -join ', ')) enabled" -ForegroundColor Gray
                 } else {
-                    Write-Host "  -> [FAIL] Missing Service Endpoints on $SubnetName" -ForegroundColor Red
+                    Write-Host "  -> [FAIL] Missing Service Endpoints on ${SubnetName}: $($missing -join ', ')" -ForegroundColor Red
                     $script:failCount++
                 }
             }
@@ -153,19 +152,67 @@ function Test-Subnet {
 
 # Dev
 Test-Subnet -VnetName $devVnetName -RgName $devRg -SubnetName "AuthSubnet"     -ExpectedNsgName "dev-skycraft-swc-auth-nsg"
-Test-Subnet -VnetName $devVnetName -RgName $devRg -SubnetName "WorldSubnet"    -ExpectedNsgName "dev-skycraft-swc-world-nsg"
-Test-Subnet -VnetName $devVnetName -RgName $devRg -SubnetName "DatabaseSubnet" -ExpectedNsgName "dev-skycraft-swc-db-nsg" -CheckSE $true
+Test-Subnet -VnetName $devVnetName -RgName $devRg -SubnetName "WorldSubnet"    -ExpectedNsgName "dev-skycraft-swc-world-nsg" -ExpectedServiceEndpoints 'Microsoft.Storage'
+Test-Subnet -VnetName $devVnetName -RgName $devRg -SubnetName "DatabaseSubnet" -ExpectedNsgName "dev-skycraft-swc-db-nsg"    -ExpectedServiceEndpoints 'Microsoft.Sql', 'Microsoft.Storage'
 
 # Prod
 Test-Subnet -VnetName $prodVnetName -RgName $prodRg -SubnetName "AuthSubnet"     -ExpectedNsgName "prod-skycraft-swc-auth-nsg"
-Test-Subnet -VnetName $prodVnetName -RgName $prodRg -SubnetName "WorldSubnet"    -ExpectedNsgName "prod-skycraft-swc-world-nsg"
-Test-Subnet -VnetName $prodVnetName -RgName $prodRg -SubnetName "DatabaseSubnet" -ExpectedNsgName "prod-skycraft-swc-db-nsg" -CheckSE $true
+Test-Subnet -VnetName $prodVnetName -RgName $prodRg -SubnetName "WorldSubnet"    -ExpectedNsgName "prod-skycraft-swc-world-nsg" -ExpectedServiceEndpoints 'Microsoft.Storage'
+Test-Subnet -VnetName $prodVnetName -RgName $prodRg -SubnetName "DatabaseSubnet" -ExpectedNsgName "prod-skycraft-swc-db-nsg"    -ExpectedServiceEndpoints 'Microsoft.Sql', 'Microsoft.Storage'
 
 # 4. Validate Azure Bastion (optional)
 Write-Host "`n=== 4. Validating Azure Bastion ===" -ForegroundColor Cyan
+
+function Test-CanonicalTags {
+    param($ResourceLabel, $Tags, $ExpectedEnvironment)
+    foreach ($t in @('Project', 'Environment', 'CostCenter', 'Owner')) {
+        if (-not $Tags -or [string]::IsNullOrWhiteSpace($Tags[$t])) {
+            Write-Host "  -> [FAIL] $ResourceLabel is missing tag '$t'" -ForegroundColor Red
+            $script:failCount++
+        }
+    }
+    if ($Tags -and $Tags['Environment'] -ne $ExpectedEnvironment) {
+        Write-Host "  -> [FAIL] $ResourceLabel tag 'Environment' is '$($Tags['Environment'])' (Expected $ExpectedEnvironment)" -ForegroundColor Red
+        $script:failCount++
+    }
+}
+
 $bastion = Get-AzBastion -ResourceGroupName $platRg -Name "platform-skycraft-swc-bas" -ErrorAction SilentlyContinue
 if ($bastion) {
     Write-Host "[OK] Bastion 'platform-skycraft-swc-bas' found." -ForegroundColor Green
+
+    if ($bastion.Sku.Name -eq 'Basic') {
+        Write-Host "  -> [OK] Bastion SKU is Basic" -ForegroundColor Gray
+    } else {
+        Write-Host "  -> [FAIL] Bastion SKU is $($bastion.Sku.Name) (Expected Basic)" -ForegroundColor Red
+        $script:failCount++
+    }
+
+    Test-CanonicalTags -ResourceLabel "Bastion" -Tags $bastion.Tag -ExpectedEnvironment 'Platform'
+
+    $bastionPip = Get-AzPublicIpAddress -ResourceGroupName $platRg -Name "platform-skycraft-swc-bas-pip" -ErrorAction SilentlyContinue
+    if ($bastionPip) {
+        Write-Host "  -> [OK] Bastion public IP 'platform-skycraft-swc-bas-pip' found" -ForegroundColor Gray
+
+        if ($bastionPip.Sku.Name -eq 'Standard') {
+            Write-Host "  -> [OK] Bastion public IP SKU is Standard" -ForegroundColor Gray
+        } else {
+            Write-Host "  -> [FAIL] Bastion public IP SKU is $($bastionPip.Sku.Name) (Expected Standard)" -ForegroundColor Red
+            $script:failCount++
+        }
+
+        if ($bastionPip.PublicIpAllocationMethod -eq 'Static') {
+            Write-Host "  -> [OK] Bastion public IP allocation is Static" -ForegroundColor Gray
+        } else {
+            Write-Host "  -> [FAIL] Bastion public IP allocation is $($bastionPip.PublicIpAllocationMethod) (Expected Static)" -ForegroundColor Red
+            $script:failCount++
+        }
+
+        Test-CanonicalTags -ResourceLabel "Bastion public IP" -Tags $bastionPip.Tag -ExpectedEnvironment 'Platform'
+    } else {
+        Write-Host "  -> [FAIL] Bastion public IP 'platform-skycraft-swc-bas-pip' NOT found" -ForegroundColor Red
+        $script:failCount++
+    }
 } else {
     Write-Host "[INFO] Bastion not found (Optional — parDeployBastion defaults to false)." -ForegroundColor Yellow
 }
