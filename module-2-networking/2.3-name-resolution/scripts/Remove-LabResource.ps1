@@ -7,6 +7,11 @@
     both load balancers, private DNS VNet links, private DNS zone. Each removal is
     guarded by a Get-* existence check so the script is idempotent and can be re-run.
 
+    Private DNS VNet link deletion is asynchronous: Remove-AzPrivateDnsVirtualNetworkLink
+    returns before the link is gone, and deleting the zone too early fails with
+    "Cannot delete resource while nested resources exist". The script waits for the links
+    to disappear before touching the zone.
+
 .PARAMETER PublicDnsZoneName
     Public DNS zone to delete. Defaults to 'skycraft.example.com'.
 
@@ -39,7 +44,8 @@
     Project: SkyCraft
     Lab: 2.3 - Name Resolution & Load Balancing
     Author: Marcin Biszczanik
-    Date: 2026-01-11
+    Version: 2.1.0
+    Date: 2026-08-28
 #>
 
 #Requires -Version 7.0
@@ -132,11 +138,36 @@ Write-Host "`n=== Cleaning up Private DNS ===" -ForegroundColor Cyan
 
 # Links
 $links = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -ErrorAction SilentlyContinue
+$linksRemoved = $false
 foreach ($link in $links) {
     if ($PSCmdlet.ShouldProcess($link.Name, 'Remove private DNS VNet link')) {
         Write-Host "Removing link: $($link.Name)..." -ForegroundColor Yellow
         Remove-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $link.Name -Confirm:$false
         Write-Host "  -> Deleted" -ForegroundColor Green
+        $linksRemoved = $true
+    }
+}
+
+# Link deletion is asynchronous. Deleting the zone while a link is still draining fails with
+# "Cannot delete resource while nested resources exist" and needs a manual retry (#97).
+if ($linksRemoved) {
+    $maxAttempts = 12
+    $delaySeconds = 5
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        $remaining = @(Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -ErrorAction SilentlyContinue)
+        if ($remaining.Count -eq 0) {
+            Write-Host "  -> All links drained" -ForegroundColor Green
+            break
+        }
+
+        if ($attempt -eq $maxAttempts) {
+            Write-Host "  -> [ERROR] Links still present after $($maxAttempts * $delaySeconds)s: $($remaining.Name -join ', ')" -ForegroundColor Red
+            Write-Host "     The private DNS zone cannot be deleted while they exist. Re-run this script." -ForegroundColor Red
+            exit 1
+        }
+
+        Write-Host "  -> Waiting for $($remaining.Count) link(s) to finish deleting ($attempt/$maxAttempts)..." -ForegroundColor Gray
+        Start-Sleep -Seconds $delaySeconds
     }
 }
 
