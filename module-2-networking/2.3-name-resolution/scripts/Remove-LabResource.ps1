@@ -8,9 +8,9 @@
     guarded by a Get-* existence check so the script is idempotent and can be re-run.
 
     Private DNS VNet link deletion is asynchronous: Remove-AzPrivateDnsVirtualNetworkLink
-    returns before the link is gone, and deleting the zone too early fails with
-    "Cannot delete resource while nested resources exist". The script waits for the links
-    to disappear before touching the zone.
+    returns before ARM has released the link, and deleting the zone too early fails with
+    "Cannot delete resource while nested resources exist". The zone deletion is retried on
+    that specific error until the links have drained.
 
 .PARAMETER PublicDnsZoneName
     Public DNS zone to delete. Defaults to 'skycraft.example.com'.
@@ -138,36 +138,11 @@ Write-Host "`n=== Cleaning up Private DNS ===" -ForegroundColor Cyan
 
 # Links
 $links = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -ErrorAction SilentlyContinue
-$linksRemoved = $false
 foreach ($link in $links) {
     if ($PSCmdlet.ShouldProcess($link.Name, 'Remove private DNS VNet link')) {
         Write-Host "Removing link: $($link.Name)..." -ForegroundColor Yellow
         Remove-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $link.Name -Confirm:$false
         Write-Host "  -> Deleted" -ForegroundColor Green
-        $linksRemoved = $true
-    }
-}
-
-# Link deletion is asynchronous. Deleting the zone while a link is still draining fails with
-# "Cannot delete resource while nested resources exist" and needs a manual retry (#97).
-if ($linksRemoved) {
-    $maxAttempts = 12
-    $delaySeconds = 5
-    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-        $remaining = @(Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -ErrorAction SilentlyContinue)
-        if ($remaining.Count -eq 0) {
-            Write-Host "  -> All links drained" -ForegroundColor Green
-            break
-        }
-
-        if ($attempt -eq $maxAttempts) {
-            Write-Host "  -> [ERROR] Links still present after $($maxAttempts * $delaySeconds)s: $($remaining.Name -join ', ')" -ForegroundColor Red
-            Write-Host "     The private DNS zone cannot be deleted while they exist. Re-run this script." -ForegroundColor Red
-            exit 1
-        }
-
-        Write-Host "  -> Waiting for $($remaining.Count) link(s) to finish deleting ($attempt/$maxAttempts)..." -ForegroundColor Gray
-        Start-Sleep -Seconds $delaySeconds
     }
 }
 
@@ -175,8 +150,35 @@ if ($linksRemoved) {
 if (Get-AzPrivateDnsZone -ResourceGroupName $PlatformRG -Name $PrivateDnsZoneName -ErrorAction SilentlyContinue) {
     if ($PSCmdlet.ShouldProcess($PrivateDnsZoneName, 'Remove private DNS zone')) {
         Write-Host "Removing Private DNS Zone: $PrivateDnsZoneName..." -ForegroundColor Yellow
-        Remove-AzPrivateDnsZone -ResourceGroupName $PlatformRG -Name $PrivateDnsZoneName -Confirm:$false
-        Write-Host "  -> Deleted" -ForegroundColor Green
+
+        # Link deletion is asynchronous, and ARM still counts the links as nested resources for
+        # a few seconds after Get-AzPrivateDnsVirtualNetworkLink has stopped returning them - so
+        # polling the link list is not a reliable signal. Retry the delete itself on exactly the
+        # nested-resource error instead; anything else fails immediately (#97).
+        $maxAttempts = 12
+        $delaySeconds = 5
+
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            try {
+                Remove-AzPrivateDnsZone -ResourceGroupName $PlatformRG -Name $PrivateDnsZoneName -Confirm:$false
+                Write-Host "  -> Deleted" -ForegroundColor Green
+                break
+            }
+            catch {
+                if ($_.Exception.Message -notmatch 'nested resource') {
+                    Write-Host "  -> [ERROR] Could not delete the private DNS zone: $($_.Exception.Message)" -ForegroundColor Red
+                    exit 1
+                }
+
+                if ($attempt -eq $maxAttempts) {
+                    Write-Host "  -> [ERROR] VNet links were still draining after $($maxAttempts * $delaySeconds)s. Re-run this script." -ForegroundColor Red
+                    exit 1
+                }
+
+                Write-Host "  -> VNet links still draining, retrying in ${delaySeconds}s ($attempt/$maxAttempts)..." -ForegroundColor Gray
+                Start-Sleep -Seconds $delaySeconds
+            }
+        }
     }
 } else {
     Write-Host "  -> Private Zone not found" -ForegroundColor Gray
