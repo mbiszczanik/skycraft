@@ -444,7 +444,8 @@ var storageAccountSku = 'Standard_LRS'
 var tags = {
   Project: 'SkyCraft'
   Environment: 'Development'
-  ManagedBy: 'Bicep'
+  CostCenter: 'MSDN'
+  Owner: 'mbiszczanik'
 }
 
 // Resource declaration
@@ -798,7 +799,8 @@ param subnets array
 param tags object = {
   Project: 'SkyCraft'
   Environment: environment
-  ManagedBy: 'Bicep'
+  CostCenter: 'MSDN'
+  Owner: 'mbiszczanik'
 }
 
 // Virtual Network
@@ -984,7 +986,7 @@ using './main.bicep'
 param location = 'swedencentral'
 param environment = 'dev'
 param project = 'skycraft'
-param costCenter = 'MSDN'
+param owner = 'mbiszczanik'
 
 // Network parameters
 param hubVnetAddressPrefix = '10.0.0.0/16'
@@ -1003,7 +1005,7 @@ using './main.bicep'
 param location = 'swedencentral'
 param environment = 'prod'
 param project = 'skycraft'
-param costCenter = 'MSDN'
+param owner = 'mbiszczanik'
 
 param hubVnetAddressPrefix = '10.0.0.0/16'
 param prodVnetAddressPrefix = '10.2.0.0/16'
@@ -1042,11 +1044,8 @@ param environment string
 @description('Project name for resource naming')
 param project string = 'skycraft'
 
-@description('Service/workload name')
-param service string = 'swc'
-
-@description('Cost center for billing')
-param costCenter string = 'MSDN'
+@description('Resource owner tag value')
+param owner string = 'mbiszczanik'
 
 @description('Hub VNet address space')
 param hubVnetAddressPrefix string = '10.0.0.0/16'
@@ -1073,11 +1072,9 @@ param sshPublicKey string
 
 var locationShortCode = 'swc'  // Sweden Central
 var tags = {
-  Project: project
-  Service: service
-  CostCenter: costCenter
-  ManagedBy: 'Bicep'
-  DeploymentDate: utcNow('yyyy-MM-dd')
+  Project: 'SkyCraft'
+  CostCenter: 'MSDN'
+  Owner: owner
 }
 
 // Resource group names

@@ -80,7 +80,7 @@
   - [ ] `location` (string with default)
   - [ ] `environment` (string with @allowed decorator)
   - [ ] `vnetAddressPrefix` (string)
-  - [ ] `subnets` (array)
+  - [ ] `subnets` (typed array)
   - [ ] `tags` (object)
 
 - [ ] Resource created: `Microsoft.Network/virtualNetworks`
@@ -201,17 +201,17 @@
 ### Resource Groups Created
 - [ ] **platform-skycraft-swc-rg**
   - Location: `swedencentral`
-  - Tags: Project=SkyCraft, Environment=Platform, CostCenter=MSDN
+  - Tags: Project=SkyCraft, Environment=Platform, CostCenter=MSDN, Owner=mbiszczanik
   - Provisioning state: Succeeded
 
 - [ ] **dev-skycraft-swc-rg**
   - Location: `swedencentral`
-  - Tags: Project=SkyCraft, Environment=Development, CostCenter=MSDN
+  - Tags: Project=SkyCraft, Environment=Development, CostCenter=MSDN, Owner=mbiszczanik
   - Provisioning state: Succeeded
 
 - [ ] **prod-skycraft-swc-rg** (if deployed)
   - Location: `swedencentral`
-  - Tags: Project=SkyCraft, Environment=Production, CostCenter=MSDN
+  - Tags: Project=SkyCraft, Environment=Production, CostCenter=MSDN, Owner=mbiszczanik
   - Provisioning state: Succeeded
 
 ### Network Resources in Dev
@@ -322,7 +322,7 @@ az group list   --query "[?contains(name, 'skycraft')].{Name:name,Location:locat
 # List VNets in dev resource group
 az network vnet list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,AddressSpace:addressSpace.addressPrefixes[0],Subnets:length(subnets),State:provisioningState}"   --output table
 
-# Expected output: 1 VNet with 3 subnets
+# Expected output: 1 VNet with 4 subnets
 # Your result: ________________
 ```
 

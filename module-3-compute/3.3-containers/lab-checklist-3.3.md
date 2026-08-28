@@ -31,8 +31,8 @@
 ## ✅ Azure Container Apps (ACA) Verification
 
 ### Environment & App
-- [ ] Environment name: `dev-skycraft-swc-cae`
-- [ ] App name: `dev-skycraft-swc-aca-world`
+- [ ] Environment name: `dev-skycraft-swc-cae-02`
+- [ ] App name: `dev-skycraft-swc-aca-world-02`
 - [ ] Ingress: **Enabled** (Target port 80)
 - [ ] Visibility: **External**
 
@@ -87,7 +87,7 @@ az container show \
 # Check ACA Ingress and Provisioning
 az containerapp show \
   --resource-group dev-skycraft-swc-rg \
-  --name dev-skycraft-swc-aca-world \
+  --name dev-skycraft-swc-aca-world-02 \
   --query "{Name:name, ProvisioningState:provisioningState, FQDN:configuration.ingress.fqdn}" \
   --output table
 ```
@@ -100,7 +100,7 @@ az containerapp show \
 |-----------|------|------|-------|--------|
 | **Registry** | `devskycraftswcacr01` | ACR | N/A | ✅ |
 | **Auth Service** | `dev-skycraft-swc-aci-auth` | ACI | `skycraft-auth:v1` | ✅ |
-| **World Service** | `dev-skycraft-swc-aca-world` | ACA | `skycraft-auth:v1` | ✅ |
+| **World Service** | `dev-skycraft-swc-aca-world-02` | ACA | `skycraft-auth:v1` | ✅ |
 
 ---
 

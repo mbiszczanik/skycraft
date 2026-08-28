@@ -29,11 +29,11 @@ graph TB
         DevVNet[dev-skycraft-swc-vnet<br/>10.1.0.0/16]
 
         subgraph "Availability Zone 1"
-            AuthVM[dev-skycraft-swc-auth-vm<br/>Ubuntu 22.04 LTS<br/>Standard_B2s<br/>Port 3724]
+            AuthVM[dev-skycraft-swc-auth-vm<br/>Ubuntu 22.04 LTS<br/>Standard_B2ls_v2<br/>Port 3724]
         end
 
         subgraph "Availability Zone 2"
-            WorldVM[dev-skycraft-swc-world-vm<br/>Ubuntu 22.04 LTS<br/>Standard_B2s<br/>Port 8085]
+            WorldVM[dev-skycraft-swc-world-vm<br/>Ubuntu 22.04 LTS<br/>Standard_B2ls_v2<br/>Port 8085]
         end
 
         AuthDisk[OS Disk<br/>30 GB Standard SSD<br/>Encrypted]
@@ -150,7 +150,7 @@ az network vnet subnet list --vnet-name dev-skycraft-swc-vnet --resource-group d
 
 | Component             | Purpose                       | SkyCraft Example                      |
 | --------------------- | ----------------------------- | ------------------------------------- |
-| **VM Size**           | CPU, memory, storage capacity | Standard_B2s (2 vCPUs, 4 GB RAM)      |
+| **VM Size**           | CPU, memory, storage capacity | Standard_B2ls_v2 (2 vCPUs, 4 GB RAM)  |
 | **OS Disk**           | Contains operating system     | Ubuntu 22.04 LTS, 30 GB Standard SSD  |
 | **Data Disk**         | Additional storage for data   | 64 GB Standard SSD for MySQL database |
 | **NIC**               | Network connectivity          | Connects to AuthSubnet or WorldSubnet |
@@ -169,20 +169,21 @@ az network vnet subnet list --vnet-name dev-skycraft-swc-vnet --resource-group d
 
 **Azure VM Size Mapping**:
 
-| Size                | vCPUs | RAM   | Disk  | Use Case         |
-| ------------------- | ----- | ----- | ----- | ---------------- |
-| **Standard_B1s**    | 1     | 1 GB  | 4 GB  | Testing only     |
-| **Standard_B2s**    | 2     | 4 GB  | 8 GB  | Dev Authserver   |
-| **Standard_B2ms**   | 2     | 8 GB  | 16 GB | Dev Worldserver  |
-| **Standard_D2s_v3** | 2     | 8 GB  | 16 GB | Prod Authserver  |
-| **Standard_D4s_v3** | 4     | 16 GB | 32 GB | Prod Worldserver |
+| Size                 | vCPUs | RAM   | Use Case         |
+| -------------------- | ----- | ----- | ---------------- |
+| **Standard_B2ls_v2** | 2     | 4 GB  | Dev Authserver   |
+| **Standard_B2s_v2**  | 2     | 8 GB  | Dev Worldserver  |
+| **Standard_D2s_v3**  | 2     | 8 GB  | Prod Authserver  |
+| **Standard_D4s_v3**  | 4     | 16 GB | Prod Worldserver |
 
 **B-series vs D-series**:
 
 - **B-series** (Burstable): Cost-effective for variable workloads, earns CPU credits during idle time
 - **D-series** (General Purpose): Consistent performance for sustained workloads
 
-For development, we'll use **Standard_B2s** (cost-effective). For production, upgrade to **D-series**.
+For development, we'll use **Standard_B2ls_v2** (cost-effective). For production, upgrade to **D-series**.
+
+B-series v1 (B1s, B2s, B2ms) is not available in Sweden Central on the lab subscription; the lab uses the v2 generation.
 
 ### Availability Zones
 
@@ -279,20 +280,20 @@ cat ~/.ssh/skycraft-dev.pub
 
 **Basics tab**:
 
-| Field                | Value                                    |
-| -------------------- | ---------------------------------------- |
-| Subscription         | [Your subscription]                      |
-| Resource group       | `dev-skycraft-swc-rg`                    |
-| Virtual machine name | `dev-skycraft-swc-auth-vm`               |
-| Region               | **Sweden Central**                       |
-| Availability options | **Availability zone**                    |
-| Availability zone    | **Zone 1**                               |
-| Security type        | Standard                                 |
-| Image                | **Ubuntu Server 22.04 LTS - x64 Gen2**   |
-| VM architecture      | x64                                      |
-| Size                 | **Standard_B2s** (2 vCPUs, 4 GiB memory) |
+| Field                | Value                                        |
+| -------------------- | -------------------------------------------- |
+| Subscription         | [Your subscription]                          |
+| Resource group       | `dev-skycraft-swc-rg`                        |
+| Virtual machine name | `dev-skycraft-swc-auth-vm`                   |
+| Region               | **Sweden Central**                           |
+| Availability options | **Availability zone**                        |
+| Availability zone    | **Zone 1**                                   |
+| Security type        | Standard                                     |
+| Image                | **Ubuntu Server 22.04 LTS - x64 Gen2**       |
+| VM architecture      | x64                                          |
+| Size                 | **Standard_B2ls_v2** (2 vCPUs, 4 GiB memory) |
 
-3. Click **See all sizes** if B2s is not visible, search for "B2s"
+3. Click **See all sizes** if B2ls_v2 is not visible, search for "B2ls_v2"
 
 **Administrator account**:
 
@@ -401,8 +402,7 @@ cat ~/.ssh/skycraft-dev.pub
 | Project     | SkyCraft    |
 | Environment | Development |
 | CostCenter  | MSDN        |
-| Role        | Authserver  |
-| ManagedBy   | SkyCraft    |
+| Owner       | mbiszczanik |
 
 10. Click **Review + create**
 11. Review the configuration summary
@@ -425,7 +425,7 @@ cat ~/.ssh/skycraft-dev.pub
 | ---------------------- | -------------------------------- |
 | Status                 | Running                          |
 | Location               | Sweden Central                   |
-| Size                   | Standard_B2s                     |
+| Size                   | Standard_B2ls_v2                 |
 | Availability zone      | 1                                |
 | Public IP address      | None                             |
 | Virtual network/subnet | dev-skycraft-swc-vnet/AuthSubnet |
@@ -455,7 +455,7 @@ Repeat the VM creation process for the Worldserver:
 | Availability options | **Availability zone**                   |
 | Availability zone    | **Zone 2** (different from Authserver!) |
 | Image                | **Ubuntu Server 22.04 LTS - x64 Gen2**  |
-| Size                 | **Standard_B2s**                        |
+| Size                 | **Standard_B2ls_v2**                    |
 | Authentication type  | **SSH public key**                      |
 | Username             | `azureuser`                             |
 | SSH public key       | [Same public key as Authserver]         |
@@ -523,8 +523,7 @@ Repeat the VM creation process for the Worldserver:
 | Project     | SkyCraft    |
 | Environment | Development |
 | CostCenter  | MSDN        |
-| Role        | Worldserver |
-| ManagedBy   | SkyCraft    |
+| Owner       | mbiszczanik |
 
 3. Click **Review + create** → **Create**
 
@@ -539,10 +538,10 @@ Repeat the VM creation process for the Worldserver:
 1. Navigate to **Virtual machines**
 2. Verify both VMs are listed and running:
 
-| VM Name                   | Zone | Subnet      | Size         | Status  |
-| ------------------------- | ---- | ----------- | ------------ | ------- |
-| dev-skycraft-swc-auth-vm  | 1    | AuthSubnet  | Standard_B2s | Running |
-| dev-skycraft-swc-world-vm | 2    | WorldSubnet | Standard_B2s | Running |
+| VM Name                   | Zone | Subnet      | Size             | Status  |
+| ------------------------- | ---- | ----------- | ---------------- | ------- |
+| dev-skycraft-swc-auth-vm  | 1    | AuthSubnet  | Standard_B2ls_v2 | Running |
+| dev-skycraft-swc-world-vm | 2    | WorldSubnet | Standard_B2ls_v2 | Running |
 
 3. Navigate to **Load balancers** → `dev-skycraft-swc-lb` → **Backend pools**
 4. Verify both backend pools have VMs:
@@ -767,6 +766,7 @@ exit
 | Project     | SkyCraft    |
 | Environment | Development |
 | CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
 
 5. Click **Review + create** → **Create**
 
@@ -777,54 +777,37 @@ exit
 > [!WARNING]
 > **Deprecation Notice**: Azure Disk Encryption (ADE) is scheduled for retirement on **September 15, 2028**. Microsoft recommends using **Encryption at Host** for new deployments. However, ADE is still part of the **AZ-104 exam** curriculum, so we cover it here for certification preparation. See [Step 3.2.20](#step-3220-optional-enable-encryption-at-host-best-practice) for the modern approach.
 
-Azure Disk Encryption for Linux VMs requires **8 GB RAM minimum** for OS disk encryption. Our `Standard_B2s` VMs have only 4 GB, so we need to temporarily resize them.
+Azure Disk Encryption for Linux VMs requires **8 GB RAM minimum** for OS disk encryption. Our `Standard_B2ls_v2` VMs have only 4 GB, so we temporarily resize them to their 8 GB sibling `Standard_B2s_v2`.
 
 > [!IMPORTANT]
 > **Memory Requirement**: ADE for Linux requires 8 GB RAM. The encryption process uses significant memory to encrypt the OS volume.
+
+> [!NOTE]
+> `Standard_B2ls_v2` and `Standard_B2s_v2` are in the same Bsv2 family (same hardware cluster), so the resize happens in place: the VM restarts, but no deallocation is needed. The `Enable-Encryption.ps1` script performs exactly these two resizes for you.
 
 1. Open **Azure Cloud Shell** (Bash) from the Azure Portal
 
 2. Resize Authserver VM to 8 GB RAM:
 
 ```azurecli
-# Deallocate the VM (required for resize)
-az vm deallocate \
-  --name dev-skycraft-swc-auth-vm \
-  --resource-group dev-skycraft-swc-rg
-
-# Resize to Standard_B2ms (8 GB RAM)
+# Resize to Standard_B2s_v2 (8 GB RAM) - in-place, the VM restarts
 az vm resize \
   --name dev-skycraft-swc-auth-vm \
   --resource-group dev-skycraft-swc-rg \
-  --size Standard_B2ms
-
-# Start the VM
-az vm start \
-  --name dev-skycraft-swc-auth-vm \
-  --resource-group dev-skycraft-swc-rg
+  --size Standard_B2s_v2
 ```
 
 3. Resize Worldserver VM to 8 GB RAM:
 
 ```azurecli
-# Deallocate the VM
-az vm deallocate \
-  --name dev-skycraft-swc-world-vm \
-  --resource-group dev-skycraft-swc-rg
-
-# Resize to Standard_B2ms (8 GB RAM)
+# Resize to Standard_B2s_v2 (8 GB RAM) - in-place, the VM restarts
 az vm resize \
   --name dev-skycraft-swc-world-vm \
   --resource-group dev-skycraft-swc-rg \
-  --size Standard_B2ms
-
-# Start the VM
-az vm start \
-  --name dev-skycraft-swc-world-vm \
-  --resource-group dev-skycraft-swc-rg
+  --size Standard_B2s_v2
 ```
 
-**Expected Result**: Both VMs running with `Standard_B2ms` size (2 vCPUs, 8 GB RAM).
+**Expected Result**: Both VMs running with `Standard_B2s_v2` size (2 vCPUs, 8 GB RAM).
 
 ### Step 3.2.18: Enable Azure Disk Encryption on Both VMs
 
@@ -894,24 +877,20 @@ Provisioning succeeded  Encryption succeeded for all volumes
 > - `disks[].statuses[].code` shows `EncryptionState/encrypted`
 > - `substatus[].message` shows `{"os": "Encrypted", "data": "Encrypted"}`
 
-2. **(Optional)** Resize VMs back to `Standard_B2s` to save costs:
+2. **(Optional)** Resize VMs back to `Standard_B2ls_v2` to save costs:
 
 ```azurecli
-# Resize Authserver back to B2s
-az vm deallocate --name dev-skycraft-swc-auth-vm --resource-group dev-skycraft-swc-rg
-az vm resize --name dev-skycraft-swc-auth-vm --resource-group dev-skycraft-swc-rg --size Standard_B2s
-az vm start --name dev-skycraft-swc-auth-vm --resource-group dev-skycraft-swc-rg
+# Resize Authserver back to B2ls_v2
+az vm resize --name dev-skycraft-swc-auth-vm --resource-group dev-skycraft-swc-rg --size Standard_B2ls_v2
 
-# Resize Worldserver back to B2s
-az vm deallocate --name dev-skycraft-swc-world-vm --resource-group dev-skycraft-swc-rg
-az vm resize --name dev-skycraft-swc-world-vm --resource-group dev-skycraft-swc-rg --size Standard_B2s
-az vm start --name dev-skycraft-swc-world-vm --resource-group dev-skycraft-swc-rg
+# Resize Worldserver back to B2ls_v2
+az vm resize --name dev-skycraft-swc-world-vm --resource-group dev-skycraft-swc-rg --size Standard_B2ls_v2
 ```
 
 > [!TIP]
-> Once encryption is enabled, you can resize back to a smaller VM. The encrypted disks will continue to work.
+> Resize back only after encryption has completed - the resize restarts the VM and would interrupt an encryption that is still running. `Enable-Encryption.ps1` does this for you when `-ResizeBack $true` (the default), and skips it when the encryption did not complete.
 
-**Expected Result**: All disks encrypted, VMs optionally resized back to `Standard_B2s`.
+**Expected Result**: All disks encrypted, VMs optionally resized back to `Standard_B2ls_v2`.
 
 ---
 
@@ -1025,9 +1004,9 @@ az vm list \
 
 # Expected output:
 # Name                        Zone  Size
-# --------------------------  ----  -------------
-# dev-skycraft-swc-auth-vm    1     Standard_B2s
-# dev-skycraft-swc-world-vm   2     Standard_B2s
+# --------------------------  ----  -----------------
+# dev-skycraft-swc-auth-vm    1     Standard_B2ls_v2
+# dev-skycraft-swc-world-vm   2     Standard_B2ls_v2
 ```
 
 **Expected Result**: VMs are distributed across Zone 1 and Zone 2.
@@ -1082,13 +1061,12 @@ az vm list-skus \
   --output table
 
 # Expected output (partial):
-# Name            vCPUs    Memory
-# --------------- -------  --------
-# Standard_B1ls   1        0.5
-# Standard_B1s    1        1
-# Standard_B2s    2        4
-# Standard_B2ms   2        8
-# Standard_B4ms   4        16
+# Name               vCPUs    Memory
+# ------------------ -------  --------
+# Standard_B2ls_v2   2        4
+# Standard_B2s_v2    2        8
+# Standard_B4ls_v2   4        8
+# Standard_B4s_v2    4        16
 ```
 
 ### Step 3.2.24: Resize Worldserver VM (Example)
@@ -1101,10 +1079,13 @@ If player load increases, you might need to resize:
 > [!WARNING]
 > Resizing requires stopping the VM in most cases. Plan for downtime or use availability sets/zones with multiple instances.
 
+> [!NOTE]
+> A resize inside the same family (`Standard_B2ls_v2` to `Standard_B2s_v2`, both Bsv2) does not need a deallocation - Azure restarts the VM in place. The stop/start below is the general procedure that also covers cross-family resizes.
+
 3. Wait for VM to fully stop (Status: Stopped (deallocated))
 4. In the left menu, click **Size**
-5. Search for `Standard_B2ms` (upgrade to 8 GB RAM)
-6. Select **Standard_B2ms**
+5. Search for `Standard_B2s_v2` (upgrade to 8 GB RAM)
+6. Select **Standard_B2s_v2**
 7. Click **Resize**
 8. Wait for resize to complete (1-2 minutes)
 9. Click **Start** to restart the VM
@@ -1113,16 +1094,16 @@ If player load increases, you might need to resize:
 
 **Expected Result**:
 
-- VM resized from Standard_B2s (4 GB) to Standard_B2ms (8 GB)
+- VM resized from Standard_B2ls_v2 (4 GB) to Standard_B2s_v2 (8 GB)
 - All data preserved
 - Network configuration retained
 
 ### Step 3.2.25: Resize Back for Cost Optimization (Optional)
 
-For this lab, resize back to B2s to minimize costs:
+For this lab, resize back to B2ls_v2 to minimize costs:
 
 1. Stop the VM again
-2. Resize to **Standard_B2s**
+2. Resize to **Standard_B2ls_v2**
 3. Start the VM
 
 **Best Practice for Production**:
@@ -1241,7 +1222,7 @@ Click **Configure scaling options** to set autoscale rules:
 | --------------- | ------------------------------------------ |
 | Image           | **Ubuntu Server 24.04 LTS - x64 Gen2**     |
 | VM architecture | **x64**                                    |
-| Size            | **Standard_B1s** (1 vCPU, 1 GB - for cost) |
+| Size            | **Standard_B2ls_v2** (2 vCPUs, 4 GB)       |
 
 **Basics tab - Administrator account**:
 
@@ -1314,11 +1295,12 @@ Click **Configure scaling options** to set autoscale rules:
 
 **Tags**:
 
-| Name        | Value      |
-| ----------- | ---------- |
-| Project     | SkyCraft   |
-| Environment | Production |
-| CostCenter  | MSDN       |
+| Name        | Value       |
+| ----------- | ----------- |
+| Project     | SkyCraft    |
+| Environment | Production  |
+| CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
 
 9. Click **Review + create** → **Create**
 
@@ -1440,7 +1422,7 @@ Quick verification before proceeding:
 - [ ] `dev-skycraft-swc-auth-vm` deployed in Zone 1
 - [ ] `dev-skycraft-swc-world-vm` deployed in Zone 2
 - [ ] Both VMs running Ubuntu 22.04 LTS
-- [ ] Both VMs sized as Standard_B2s
+- [ ] Both VMs sized as Standard_B2ls_v2
 - [ ] Both VMs have no public IP addresses
 
 ### Networking Configuration
@@ -1464,7 +1446,7 @@ Quick verification before proceeding:
 - [ ] Project = SkyCraft
 - [ ] Environment = Development
 - [ ] CostCenter = MSDN
-- [ ] Role = Authserver/Worldserver
+- [ ] Owner = mbiszczanik
 
 **For detailed verification**, see [lab-checklist-3.2.md](lab-checklist-3.2.md)
 
@@ -1533,7 +1515,7 @@ Test your understanding with these questions:
 
    </details>
 
-3. **What happens when you resize a VM from Standard_B2s to Standard_D4s_v3?**
+3. **What happens when you resize a VM from Standard_B2ls_v2 to Standard_D4s_v3?**
 
    <details>
      <summary>**Click to see the answer**</summary>
@@ -1548,11 +1530,11 @@ Test your understanding with these questions:
    5. Data disks remain attached
 
    **What Changes**:
-   | Property | B2s | D4s_v3 |
-   |----------|-----|--------|
+   | Property | B2ls_v2 | D4s_v3 |
+   |----------|---------|--------|
    | vCPUs | 2 | 4 |
    | RAM | 4 GB | 16 GB |
-   | Temp disk | 8 GB | 32 GB |
+   | Temp disk | None (Bsv2 is diskless) | 32 GB |
    | Max data disks | 4 | 8 |
    | Max NICs | 2 | 2 |
    | Cost | ~$30/month | ~$140/month |
@@ -1686,11 +1668,11 @@ Test your understanding with these questions:
    - Credits can be "spent" for higher performance when needed
    - If credits exhausted, VM runs at baseline only
 
-   **Example (Standard_B2s)**:
-   - Baseline: 40% of 2 vCPUs = 0.8 vCPU equivalent
-   - Burst: Up to 100% of 2 vCPUs = 2 vCPU
-   - Credit accumulation: 24 credits/hour
-   - Max banked credits: 576
+   **Example (Standard_B2ls_v2)**:
+   - Baseline: a guaranteed fraction of the 2 vCPUs, always available
+   - Burst: up to 100% of 2 vCPUs for as long as credits last
+   - Credits accumulate whenever the VM runs below its baseline
+   - Banked credits are capped at roughly one day of accumulation
 
    **When B-series is Good**:
    | Use Case | Fit | Reason |
@@ -1707,7 +1689,7 @@ Test your understanding with these questions:
    - **Production**: D-series recommended for consistent performance
 
    **Cost Comparison**:
-   - Standard_B2s: ~$30/month
+   - Standard_B2ls_v2: ~$30/month
    - Standard_D2s_v3: ~$70/month
    - B-series saves ~60% for variable workloads
 
@@ -1842,8 +1824,8 @@ sudo reboot
 **Infrastructure Deployed**:
 | Resource | Name | Configuration |
 |----------|------|---------------|
-| VM (Authserver) | dev-skycraft-swc-auth-vm | Zone 1, B2s, AuthSubnet |
-| VM (Worldserver) | dev-skycraft-swc-world-vm | Zone 2, B2s, WorldSubnet |
+| VM (Authserver) | dev-skycraft-swc-auth-vm | Zone 1, B2ls_v2, AuthSubnet |
+| VM (Worldserver) | dev-skycraft-swc-world-vm | Zone 2, B2ls_v2, WorldSubnet |
 | Data Disk | dev-skycraft-swc-world-vm-data | 64 GB Premium SSD |
 | Key Vault | dev-skycraft-swc-kv | Disk encryption keys |
 
