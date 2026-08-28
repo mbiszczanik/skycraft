@@ -115,12 +115,12 @@ Before starting this lab:
 3. In the left menu, click **Tags**
 4. Add the following tags:
 
-| Name        | Value                                            |
-| ----------- | ------------------------------------------------ |
-| Environment | Development                                      |
-| Project     | SkyCraft                                         |
-| CostCenter  | Engineering                                      |
-| Owner       | malfurion.stormrage@[yourtenant].onmicrosoft.com |
+| Name        | Value       |
+| ----------- | ----------- |
+| Environment | Development |
+| Project     | SkyCraft    |
+| CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
 
 5. Click **Apply**
 
@@ -134,12 +134,12 @@ Before starting this lab:
 2. Click **Tags**
 3. Add these tags:
 
-| Name        | Value                                            |
-| ----------- | ------------------------------------------------ |
-| Environment | Production                                       |
-| Project     | SkyCraft                                         |
-| CostCenter  | Operations                                       |
-| Owner       | malfurion.stormrage@[yourtenant].onmicrosoft.com |
+| Name        | Value       |
+| ----------- | ----------- |
+| Environment | Production  |
+| Project     | SkyCraft    |
+| CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
 
 4. Click **Apply**
 
@@ -149,12 +149,12 @@ Before starting this lab:
 2. Click **Tags**
 3. Add tags:
 
-| Name        | Value                                            |
-| ----------- | ------------------------------------------------ |
-| Environment | Platform                                         |
-| Project     | SkyCraft                                         |
-| CostCenter  | Shared-Services                                  |
-| Owner       | malfurion.stormrage@[yourtenant].onmicrosoft.com |
+| Name        | Value       |
+| ----------- | ----------- |
+| Environment | Platform    |
+| Project     | SkyCraft    |
+| CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
 
 4. Click **Apply**
 

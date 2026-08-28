@@ -246,7 +246,7 @@ graph TB
 
 ### Step 2.1.6: Create Dev Subnets
 
-Create three subnets for the development environment:
+Create four subnets for the development environment:
 
 **Subnet 1: AuthSubnet**
 
@@ -505,20 +505,6 @@ Create public IPs for future load balancers (used in Lab 2.3):
 | SKU                   | **Standard**               |
 | IP address assignment | Static                     |
 | DDoS protection       | Disabled                   |
-
-4. Add appropriate tags (Project: SkyCraft, Environment: Production, CostCenter: MSDN, Owner: mbiszczanik)
-5. Click **Review + create** → **Create**
-
-**Prod Load Balancer Public IP**:
-
-1. Repeat the process:
-
-| Field                 | Value                      |
-| --------------------- | -------------------------- |
-| Resource group        | `prod-skycraft-swc-rg`     |
-| Name                  | `prod-skycraft-swc-lb-pip` |
-| SKU                   | **Standard**               |
-| IP address assignment | Static                     |
 
 2. Add appropriate tags (Project: SkyCraft, Environment: Production, CostCenter: MSDN, Owner: mbiszczanik)
 3. Click **Review + create** → **Create**
