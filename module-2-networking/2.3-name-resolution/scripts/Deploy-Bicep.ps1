@@ -35,9 +35,11 @@ param(
     [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
+    # Anchored to $PSScriptRoot, not the current directory - the bare relative default made this
+    # the only script in the repository that had to be run from its own scripts/ folder (#75).
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$TemplateFile = '..\bicep\main.bicep'
+    [string]$TemplateFile = (Join-Path $PSScriptRoot '..\bicep\main.bicep')
 )
 
 $ErrorActionPreference = 'Stop'
