@@ -3,7 +3,7 @@ SUMMARY: Lab 2.3 - DNS and Load Balancing
 DESCRIPTION: Deploys the Dev/Prod Standard Load Balancers, the public DNS zone with its records and the private DNS zone with its VNet links via AVM (requires the Lab 2.1 virtual networks and public IPs to exist)
 EXAMPLE: az deployment sub create --name Lab-2.3-DNS --location swedencentral --template-file main.bicep
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.2.0
+VERSION: 0.2.1
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -35,42 +35,42 @@ param parPublicDnsZoneName string = 'skycraft.example.com'
 @description('Platform (Hub) Resource Group Name - hosts both DNS zones')
 @minLength(1)
 @maxLength(90)
-param parPlatformRG string = 'platform-skycraft-swc-rg'
+param parResourceGroupNamePlatform string = 'platform-skycraft-swc-rg'
 
 @description('Development Resource Group Name')
 @minLength(1)
 @maxLength(90)
-param parDevRG string = 'dev-skycraft-swc-rg'
+param parResourceGroupNameDev string = 'dev-skycraft-swc-rg'
 
 @description('Production Resource Group Name')
 @minLength(1)
 @maxLength(90)
-param parProdRG string = 'prod-skycraft-swc-rg'
+param parResourceGroupNameProd string = 'prod-skycraft-swc-rg'
 
 @description('Hub VNet Name')
 @minLength(2)
 @maxLength(64)
-param parHubVnetName string = 'platform-skycraft-swc-vnet'
+param parVnetNamePlatform string = 'platform-skycraft-swc-vnet'
 
 @description('Dev VNet Name')
 @minLength(2)
 @maxLength(64)
-param parDevVnetName string = 'dev-skycraft-swc-vnet'
+param parVnetNameDev string = 'dev-skycraft-swc-vnet'
 
 @description('Prod VNet Name')
 @minLength(2)
 @maxLength(64)
-param parProdVnetName string = 'prod-skycraft-swc-vnet'
+param parVnetNameProd string = 'prod-skycraft-swc-vnet'
 
 @description('Dev Load Balancer Public IP name (created in Lab 2.1)')
 @minLength(1)
 @maxLength(80)
-param parDevLbPipName string = 'dev-skycraft-swc-lb-pip'
+param parPipNameDev string = 'dev-skycraft-swc-lb-pip'
 
 @description('Prod Load Balancer Public IP name (created in Lab 2.1)')
 @minLength(1)
 @maxLength(80)
-param parProdLbPipName string = 'prod-skycraft-swc-lb-pip'
+param parPipNameProd string = 'prod-skycraft-swc-lb-pip'
 
 /*******************
 *    Variables     *
@@ -117,41 +117,41 @@ var varTtlCname = 3600
 *******************/
 
 resource resPlatformRG 'Microsoft.Resources/resourceGroups@2023-07-01' existing = {
-  name: parPlatformRG
+  name: parResourceGroupNamePlatform
 }
 
 resource resDevRG 'Microsoft.Resources/resourceGroups@2023-07-01' existing = {
-  name: parDevRG
+  name: parResourceGroupNameDev
 }
 
 resource resProdRG 'Microsoft.Resources/resourceGroups@2023-07-01' existing = {
-  name: parProdRG
+  name: parResourceGroupNameProd
 }
 
 // VNets created in Lab 2.1 - linked to the private DNS zone
 resource resVnetHub 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
-  name: parHubVnetName
+  name: parVnetNamePlatform
   scope: resPlatformRG
 }
 
 resource resVnetDev 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
-  name: parDevVnetName
+  name: parVnetNameDev
   scope: resDevRG
 }
 
 resource resVnetProd 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
-  name: parProdVnetName
+  name: parVnetNameProd
   scope: resProdRG
 }
 
 // Public IPs created in Lab 2.1 - referenced by the load balancer frontends
 resource resPipDev 'Microsoft.Network/publicIPAddresses@2023-11-01' existing = {
-  name: parDevLbPipName
+  name: parPipNameDev
   scope: resDevRG
 }
 
 resource resPipProd 'Microsoft.Network/publicIPAddresses@2023-11-01' existing = {
-  name: parProdLbPipName
+  name: parPipNameProd
   scope: resProdRG
 }
 
@@ -167,7 +167,7 @@ module modDevPip 'modules/get-public-ip.bicep' = {
   name: 'get-dev-pip'
   scope: resDevRG
   params: {
-    parPublicIpName: parDevLbPipName
+    parPublicIpName: parPipNameDev
   }
 }
 
@@ -175,7 +175,7 @@ module modProdPip 'modules/get-public-ip.bicep' = {
   name: 'get-prod-pip'
   scope: resProdRG
   params: {
-    parPublicIpName: parProdLbPipName
+    parPublicIpName: parPipNameProd
   }
 }
 
