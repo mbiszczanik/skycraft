@@ -54,3 +54,11 @@
 - **Delete ACR or clear all images** (frees at least storage costs; ACR registry itself is ~€20/mo).
 - Images in ACR storage cost additional per GB (~€0.02/GB/mo); large images left in ACR add up.
 - Orphaned Container Apps Environments with no apps still incur charges; delete these immediately.
+
+## 5. Bicep implementation note (AVM)
+
+- **Registry**: `avm/res/container-registry/registry` — Standard SKU with the admin user enabled (the lab's credential model) and `networkRuleSetDefaultAction: 'Allow'`, a lab-friction override (docs/bicep-standards.md §4.5): with public access enabled the module's default `Deny` adds a network rule set that blocks image pulls and imports.
+- **Container instance**: `avm/res/container-instance/container-group` — public IP and the same DNS label as before; the FQDN is composed in an output because this module version returns only the IPv4 address.
+- **Container Apps environment**: `avm/res/app/managed-environment` with the §4.5 overrides `zoneRedundant: false` (the default needs an infrastructure subnet) and `publicNetworkAccess: 'Enabled'`. The module names the environment's infrastructure resource group `ME_<environment-name>`; that name is immutable, so a leftover environment has to be deleted rather than redeployed onto.
+- **Container app**: `avm/res/app/container-app` — external ingress with `ingressAllowInsecure: false` and 1–3 replicas scaled on HTTP concurrency; the module also sends `maxInactiveRevisions: 0`.
+- **Two-phase deployment**: `bicep/acr.bicep` is the bootstrap entry point for phase 1, so the image can be imported into the registry before `main.bicep` deploys ACI and the container app. `Deploy-Containers.ps1` is retired — `Deploy-Bicep.ps1` performs the same steps.

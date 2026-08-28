@@ -8,8 +8,8 @@
 |---|---|---|---|
 | Region allowance | swedencentral, northeurope | Single region only | Two allowed regions teach multi-region awareness; westeurope is excluded — the Lab 1.3 Restrict-Azure-Regions policy denies it at the ARM layer. |
 | VNet sizing | /16 per environment (Hub 10.0.0.0/16, Dev 10.1.0.0/16, Prod 10.2.0.0/16) | Tightly sized /24 or /25 | Generous spacing keeps the lab uncluttered; students can add subnets without re-addressing. In production, you size based on actual VM forecasts and leave headroom for growth. |
-| Subnet segmentation | Three /24 subnets per spoke (AuthSubnet, WorldSubnet, DatabaseSubnet) | Single flat subnet per VNet | Segmentation teaches network layering early; each subnet gets its own NSG, preventing uncontrolled lateral movement. |
-| Hub VNet purpose | Bastion host only (AzureBastionSubnet /26) | Hub for shared services (DNS, routing, egress) | Simplified for a lab; production hubs hold firewall, DNS forwarders, and central egress inspection. |
+| Subnet segmentation | Four /24 subnets in the dev spoke (AuthSubnet, WorldSubnet, DatabaseSubnet, AppServiceSubnet delegated to Microsoft.Web/serverFarms) | Single flat subnet per VNet | Segmentation teaches network layering early; each subnet gets its own NSG, preventing uncontrolled lateral movement. |
+| Hub VNet purpose | Bastion host (AzureBastionSubnet /26) plus a reserved GatewaySubnet /27 - the same layout Lab 2.1 builds | Hub for shared services (DNS, routing, egress) | Simplified for a lab; production hubs hold firewall, DNS forwarders, and central egress inspection. |
 | Load Balancer SKU | Standard, Regional tier | Basic LB (deprecated) | Standard is now the only supported option; teaches modern best practices. Regional tier prevents cross-region asymmetry. |
 | NSG rules | Bastion SSH (from 10.0.0.0/26), service ports (3724 Auth, 8085 World from any source) | Restrict service ports to VNet only | Public inbound on game ports teaches port mapping; production closes these to VNet+known client ranges only. |
 
@@ -21,7 +21,7 @@
 | DNS | Azure-provided default (internal only) | Private DNS Zones + conditional forwarder | Required for custom domain names (e.g., auth.skycraft.local) and cross-VNet name resolution. |
 | VNet Peering | None shown; assumes manual setup | Hub-spoke with auto-peering via automation | The lab assumes Lab 3.1 creates RGs and networks; peering is typically automated or done in a separate orchestration step. |
 | Public IP allocation | Static on Load Balancer | Static with auto-release / reserved addresses | Lab uses Static to keep the public IP stable during the lab. Production reserves public IPs to avoid IP exhaustion in shared subscriptions. |
-| Tagging discipline | Common tags on all resources (Project, Service, CostCenter, ManagedBy, DeploymentDate) | Team/Owner, ApplicationId, DataClassification, Automation owner | Lab tags enable cost tracking and resource management; production adds fields for automation handoff and compliance auditing. |
+| Tagging discipline | Canonical tags on all resources (Project, Environment, CostCenter, Owner) | Team/Owner, ApplicationId, DataClassification, Automation owner | Lab tags enable cost tracking and resource management; production adds fields for automation handoff and compliance auditing. |
 
 ## 3. Well-Architected lens (light)
 
@@ -50,3 +50,9 @@
 - Delete Load Balancer (frees ~€15/mo).
 - Delete VNets (no storage cost but keeps the address space reserved).
 - Leave Resource Groups empty or delete entirely.
+
+## 5. Bicep implementation note
+
+- **Hand-written modules stay.** `modules/network.bicep`, `nsg.bicep`, `publicip.bicep` and `loadbalancer.bicep` are this lab's learning objective — writing a module from scratch (docs/bicep-standards.md §8.2). Every other lab consumes Azure Verified Modules instead.
+- **Aligned with the Lab 2.1 AVM output.** The load-balancer public IP is zone-redundant (`zones: ['1','2','3']`, parameterised) and the `AppServiceSubnet` delegation is named after its service (`Microsoft.Web/serverFarms`) — the same shape the AVM modules produce, so this lab and Module 2 describe the same resources instead of overwriting each other.
+- **Outbound SNAT.** The load-balancing rules set `disableOutboundSnat: false` explicitly for parity with Lab 2.3 (docs/bicep-standards.md §4.5); the value matches the implicit default this lab always had.

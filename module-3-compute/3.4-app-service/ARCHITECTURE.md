@@ -54,5 +54,11 @@
 **Cleanup reminder after the lab**:
 - **Delete the App Service Plan** (frees all associated costs). Deleting the web app without the plan leaves the plan running and billing.
 - **Delete the staging slot first**, then the web app, then the plan (dependencies matter).
-- **Delete VNet Integration rule** if no backend services depend on it (no direct cost but keeps the config clean).
+- **Detach VNet integration first** (app and slot) and wait until `AppServiceSubnet` shows no service association link, then delete slot/app/plan — `Remove-LabResource.ps1` does this; deleting the plan while integrated leaves an orphaned link that blocks deleting the subnet, VNet, NSGs and resource group.
 - Exported logs in Log Analytics continue to incur ingestion + retention charges; delete old workspaces or set retention to 30 days.
+
+## 5. Bicep implementation note (AVM)
+
+- **Plan**: `avm/res/web/serverfarm` — Linux P0v4 with the lab-friction overrides `zoneRedundant: false` and `skuCapacity: 1`, because the module defaults Premium SKUs to zone-redundant with three workers (docs/bicep-standards.md §4.5).
+- **App and slot**: `avm/res/web/site`, with the staging slot declared through the module's `slots` parameter. The slot inherits `siteConfig`, HTTPS-only, the system-assigned identity **and the regional VNet integration** from the app — the hand-written slot had neither of the last two. That is the swap-safe configuration, and cleanup detaches both integrations.
+- **Autoscale**: a local fallback module (`modules/autoscale.bicep`), because `avm/res/insights/autoscale-setting` is only *Proposed* (docs/bicep-standards.md §4.3).
