@@ -3,16 +3,23 @@
     Removes Lab 4.3 Resources
 .DESCRIPTION
     Removes only the two Azure File Shares created by Lab 4.3 (skycraft-config, skycraft-shared)
-    from the production storage account. Does NOT delete the shared prod-skycraft-swc-rg resource
-    group, which contains Lab 4.1 storage required by Labs 4.2 and 4.4.
+    from the storage account of the selected environment. Does NOT delete the shared
+    <env>-skycraft-swc-rg resource group, which contains Lab 4.1 storage required by Labs 4.2 and 4.4.
+.PARAMETER Environment
+    Environment to clean up (prod, dev or platform). Default: prod. Matches Deploy-Bicep.ps1.
 .PARAMETER Force
     Skip confirmation prompt.
 .EXAMPLE
     .\Remove-LabResource.ps1 -Force
+    Removes both shares from prodskycraftswcsa.
+.EXAMPLE
+    .\Remove-LabResource.ps1 -Environment dev -Force
+    Removes both shares from devskycraftswcsa.
 .NOTES
     Project: SkyCraft
     Author: SkyCraft
-    Date: 2026-02-07
+    Version: 2.1.0
+    Date: 2026-08-28
 #>
 
 #Requires -Version 7.0
@@ -21,17 +28,21 @@
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('prod', 'dev', 'platform')]
+    [string]$Environment = 'prod',
+
+    [Parameter(Mandatory = $false)]
     [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
 if ($Force) { $ConfirmPreference = 'None' }
 
-$prodRg             = 'prod-skycraft-swc-rg'
-$storageAccountName = 'prodskycraftswcsa'
+$resourceGroupName  = "$Environment-skycraft-swc-rg"
+$storageAccountName = "${Environment}skycraftswcsa"
 $subscriptionId     = (Get-AzContext).Subscription.Id
 
-Write-Host "=== Lab 4.3: Cleaning Up File Shares ===" -ForegroundColor Cyan
+Write-Host "=== Lab 4.3: Cleaning Up File Shares ($Environment) ===" -ForegroundColor Cyan
 
 # 1. Verify Connection
 if (-not (Get-AzContext)) {
@@ -39,7 +50,7 @@ if (-not (Get-AzContext)) {
 }
 
 # 2. Verify storage account exists (do not attempt to delete the RG)
-$sa = Get-AzStorageAccount -ResourceGroupName $prodRg -Name $storageAccountName -ErrorAction SilentlyContinue
+$sa = Get-AzStorageAccount -ResourceGroupName $resourceGroupName -Name $storageAccountName -ErrorAction SilentlyContinue
 if (-not $sa) {
     Write-Host " [INFO] Storage account '$storageAccountName' not found. Nothing to clean up." -ForegroundColor Gray
     exit 0
@@ -48,7 +59,7 @@ if (-not $sa) {
 # 3. Remove the two file shares created by this lab
 $sharesToRemove = @('skycraft-config', 'skycraft-shared')
 foreach ($shareName in $sharesToRemove) {
-    $shareId = "/subscriptions/$subscriptionId/resourceGroups/$prodRg/providers/Microsoft.Storage/storageAccounts/$storageAccountName/fileServices/default/shares/$shareName"
+    $shareId = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.Storage/storageAccounts/$storageAccountName/fileServices/default/shares/$shareName"
     $shareExists = Get-AzResource -ResourceId $shareId -ErrorAction SilentlyContinue
     if ($shareExists) {
         Write-Host "Removing file share '$shareName'..." -ForegroundColor Yellow
@@ -66,4 +77,4 @@ foreach ($shareName in $sharesToRemove) {
 }
 
 Write-Host "`nLab 4.3 Cleanup Complete." -ForegroundColor Cyan
-Write-Host "Note: The shared '$prodRg' resource group and storage account were preserved for Labs 4.2 and 4.4." -ForegroundColor Gray
+Write-Host "Note: The shared '$resourceGroupName' resource group and storage account were preserved for Labs 4.2 and 4.4." -ForegroundColor Gray
