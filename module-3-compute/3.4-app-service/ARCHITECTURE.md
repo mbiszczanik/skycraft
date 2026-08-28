@@ -53,12 +53,11 @@
 
 **Cleanup reminder after the lab**:
 - **Delete the App Service Plan** (frees all associated costs). Deleting the web app without the plan leaves the plan running and billing.
-- **Delete the staging slot first**, then the web app, then the plan (dependencies matter).
-- **Detach VNet integration first** (app and slot) and wait until `AppServiceSubnet` shows no service association link, then delete slot/app/plan — `Remove-LabResource.ps1` does this; deleting the plan while integrated leaves an orphaned link that blocks deleting the subnet, VNet, NSGs and resource group.
+- **Order matters** — **detach the VNet integration first** (the app *and* every slot) and confirm `AppServiceSubnet` no longer shows a service association link, then delete the web app (its slots go with it), then the autoscale setting, then the plan. `Remove-LabResource.ps1` does exactly this; deleting the plan while it is still integrated leaves an orphaned service association link that blocks deleting the subnet, the VNet, their NSGs and the whole resource group.
 - Exported logs in Log Analytics continue to incur ingestion + retention charges; delete old workspaces or set retention to 30 days.
 
 ## 5. Bicep implementation note (AVM)
 
 - **Plan**: `avm/res/web/serverfarm` — Linux P0v4 with the lab-friction overrides `zoneRedundant: false` and `skuCapacity: 1`, because the module defaults Premium SKUs to zone-redundant with three workers (docs/bicep-standards.md §4.5).
-- **App and slot**: `avm/res/web/site`, with the staging slot declared through the module's `slots` parameter. The slot inherits `siteConfig`, HTTPS-only, the system-assigned identity **and the regional VNet integration** from the app — the hand-written slot had neither of the last two. That is the swap-safe configuration, and cleanup detaches both integrations.
+- **App and slot**: `avm/res/web/site`, with the staging slot declared through the module's `slots` parameter. The slot inherits `siteConfig`, HTTPS-only, the system-assigned identity **and the regional VNet integration** from the app — the hand-written slot had neither of the last two. That is the swap-safe configuration, and cleanup detaches both integrations. The explicit `siteConfig` object replaces the module's default one, so `ftpsState: 'FtpsOnly'` is restated in it (it would otherwise be dropped), while `alwaysOn` is left at Azure's default `false` to keep the lab cheap — the slot inherits the same object.
 - **Autoscale**: a local fallback module (`modules/autoscale.bicep`), because `avm/res/insights/autoscale-setting` is only *Proposed* (docs/bicep-standards.md §4.3).
