@@ -47,7 +47,7 @@ resource resPublicIp 'Microsoft.Network/publicIPAddresses@2023-11-01' = {
     name: parSku
     tier: 'Regional'
   }
-  zones: parAvailabilityZones
+  zones: parSku == 'Standard' && !empty(parAvailabilityZones) ? parAvailabilityZones : null
   properties: {
     publicIPAllocationMethod: parAllocationMethod
     publicIPAddressVersion: 'IPv4'

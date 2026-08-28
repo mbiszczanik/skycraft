@@ -37,6 +37,9 @@ type healthProbeConfig = {
   @description('Consecutive failures before the endpoint is marked unhealthy')
   @minValue(1)
   numberOfProbes: int
+
+  @description('Request path for Http/Https probes (ignored for Tcp)')
+  requestPath: string?
 }
 
 @description('Load-balancing rule definition')
@@ -45,7 +48,7 @@ type lbRuleConfig = {
   name: string
 
   @description('Transport protocol')
-  protocol: 'Tcp' | 'Udp' | 'All'
+  protocol: 'Tcp' | 'Udp'
 
   @description('Frontend port')
   @minValue(0)
@@ -131,6 +134,7 @@ resource resLoadBalancer 'Microsoft.Network/loadBalancers@2023-11-01' = {
         port: probe.port
         intervalInSeconds: probe.intervalInSeconds
         numberOfProbes: probe.numberOfProbes
+        requestPath: probe.?requestPath
       }
     }]
     loadBalancingRules: [for rule in parLbRules: {
