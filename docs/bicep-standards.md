@@ -111,6 +111,15 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 | `avm/res/authorization/policy-assignment/sub-scope` | `0.1.0` | Lab 1.3 |
 | `avm/res/authorization/role-assignment/rg-scope` | `0.1.1` | Lab 1.2 |
 | `avm/res/authorization/role-assignment/sub-scope` | `0.1.1` | Lab 1.2 |
+| `avm/res/network/application-security-group` | `0.2.2` | Lab 2.2 |
+| `avm/res/network/bastion-host` | `0.8.2` | Lab 2.2 |
+| `avm/res/network/dns-zone` | `0.6.2` | Lab 2.3 |
+| `avm/res/network/load-balancer` | `0.8.0` | Lab 2.3 |
+| `avm/res/network/network-security-group` | `0.5.3` | Lab 2.2 |
+| `avm/res/network/private-dns-zone` | `0.8.1` | Lab 2.3 |
+| `avm/res/network/public-ip-address` | `0.13.0` | Lab 2.1 |
+| `avm/res/network/virtual-network` | `0.10.2` | Lab 2.1 |
+| `avm/res/network/virtual-network/subnet` | `0.2.0` | Lab 2.2 |
 | `avm/res/resources/resource-group` | `0.4.4` | Labs 1.2, 1.3 |
 
 > [!NOTE]
@@ -122,6 +131,7 @@ The labs must stay easy to run, test, and tear down for students. Wherever an AV
 
 - **Key Vault** (`key-vault/vault`): disable soft delete and purge protection, so labs can be re-run and cleaned up without purge waits.
 - **Recovery Services Vault** (`recovery-services/vault`): disable soft delete / immutability settings, so `Remove-LabResource.ps1` can delete the vault.
+- **Load Balancer** (`network/load-balancer`): set `disableOutboundSnat: false` on every load-balancing rule (Lab 2.3). The module defaults it to `true`, which would silently remove the implicit outbound SNAT through the frontend IP that the Module 3 VMs (no public IPs, no NAT gateway) rely on.
 
 Further overrides follow the same principle and are decided per lab.
 
@@ -463,7 +473,7 @@ resource resUpdate 'Microsoft.Storage/storageAccounts@2023-01-01' = {
 
 **Root Cause**: Lab guides may use conceptual subnet names that don't match the actual subnets created in Module 2.
 
-**Solution**: Always verify subnet names against `module-2-networking/2.2-secure-access/bicep/` definitions:
+**Solution**: Always verify subnet names against the `var*Subnets` variables in `module-2-networking/2.1-virtual-networks/bicep/main.bicep` (Lab 2.2 attaches the NSGs to the same names):
 
 | Subnet             | Prod CIDR     | Exists Since |
 | ------------------ | ------------- | ------------ |

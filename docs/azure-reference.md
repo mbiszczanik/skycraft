@@ -96,7 +96,7 @@ We strictly follow the Azure Resource Naming recommendations with specific patte
 
 ## 5. Subnet Reference
 
-Always verify subnet names against `module-2-networking/2.2-secure-access/bicep/` definitions:
+Always verify subnet names against the `var*Subnets` variables in `module-2-networking/2.1-virtual-networks/bicep/main.bicep` (Lab 2.2 attaches the NSGs to the same names):
 
 | Subnet             | Prod CIDR     | Exists Since |
 | ------------------ | ------------- | ------------ |

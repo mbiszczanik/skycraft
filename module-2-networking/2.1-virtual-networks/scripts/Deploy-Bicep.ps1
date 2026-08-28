@@ -3,17 +3,20 @@
     Deploys Lab 2.1 networking resources using Bicep templates.
 
 .DESCRIPTION
-    This script orchestrates the deployment of the Hub-and-Spoke networking topology 
-    for SkyCraft Lab 2.1. It calls the main.bicep template to create:
-    - Platform (Hub) Virtual Network with 4 subnets.
-    - Production (Spoke) Virtual Network with 3 subnets.
-    - Bi-directional VNet Peering.
+    This script orchestrates the deployment of the Hub-and-Spoke networking topology
+    for SkyCraft Lab 2.1. It calls the main.bicep template (Azure Verified Modules) to create:
+    - Platform (Hub) Virtual Network with 2 subnets (AzureBastionSubnet, GatewaySubnet).
+    - Development and Production (Spoke) Virtual Networks with 4 subnets each.
+    - Bi-directional Hub-Spoke VNet peering and the two Load Balancer Public IPs.
 
 .PARAMETER Location
     The Azure region deployment target. Default: 'swedencentral'
 
 .PARAMETER ProdResourceGroup
     The production resource group name. Default: 'prod-skycraft-swc-rg'
+
+.PARAMETER DevResourceGroup
+    The development resource group name. Default: 'dev-skycraft-swc-rg'
 
 .PARAMETER PlatformResourceGroup
     The platform resource group name. Default: 'platform-skycraft-swc-rg'
