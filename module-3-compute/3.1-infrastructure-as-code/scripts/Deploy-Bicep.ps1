@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     This script orchestrates the deployment of SkyCraft infrastructure (VNets, NSGs, LBs).
-    It handles SSH Key generation and passes it to the Bicep template.
+    It deploys main.bicep with the environment's .bicepparam file (dev or prod).
 
 .PARAMETER Location
     The Azure region deployment target. Default: 'swedencentral'
@@ -16,7 +16,7 @@
     If specified, runs What-If analysis instead of deploying.
 
 .EXAMPLE
-    .\Deploy-Infra.ps1 -Environment dev
+    .\Deploy-Bicep.ps1 -Environment dev
     Deploys the Development environment.
 
 .NOTES
@@ -67,9 +67,6 @@ Write-Host "Template: $bicepPath" -ForegroundColor Gray
 Write-Host "Params:   $paramPath" -ForegroundColor Gray
 
 try {
-    # Override sshPublicKey in parameter file
-    # Note: .bicepparam files typically shouldn't be modified on fly, but for labs we pass key dynamically
-    # Since 'using' param files, we can pass --parameters twice: once for file, once for override
     
     $commonArgs = @{
         Name                  = $deploymentName
