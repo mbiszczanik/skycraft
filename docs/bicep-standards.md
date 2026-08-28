@@ -128,6 +128,7 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 | `avm/res/network/virtual-network` | `0.10.2` | Lab 2.1 |
 | `avm/res/network/virtual-network/subnet` | `0.2.0` | Lab 2.2 |
 | `avm/res/resources/resource-group` | `0.4.4` | Labs 1.2, 1.3, 3.3 |
+| `avm/res/storage/storage-account` | `0.33.0` | Labs 4.1, 4.2, 4.3, 4.4 |
 | `avm/res/web/serverfarm` | `0.7.0` | Lab 3.4 |
 | `avm/res/web/site` | `0.24.0` | Lab 3.4 |
 
@@ -144,8 +145,12 @@ The labs must stay easy to run, test, and tear down for students. Wherever an AV
 - **Container Apps environment** (`app/managed-environment`): `zoneRedundant: false` (the default `true` requires an infrastructure subnet) and `publicNetworkAccess: 'Enabled'` (default `Disabled`), so the consumption environment with external ingress the lab teaches still deploys (Lab 3.3).
 - **Container Registry** (`container-registry/registry`): `networkRuleSetDefaultAction: 'Allow'` — with public access enabled the module's default `Deny` makes it emit a `networkRuleSet`, but network rule sets are a Premium-only feature, so on the lab's Standard registry that object is rejected at deploy time (and would have no effect anyway). `Allow` keeps the module from sending one. The module also defaults `azureADAuthenticationAsArmPolicyStatus` to `disabled` while Azure's own default is `enabled`; the lab sets it back to `enabled`, because with it disabled an ARM-audience token cannot reach the registry data plane and `Get-AzContainerRegistryRepository` - the call the lab's `Test-Lab.ps1` makes - fails with `Unauthorized` even though the image is present (Lab 3.3).
 - **App Service Plan** (`web/serverfarm`): `zoneRedundant: false` and `skuCapacity: 1` — two independent defaults. The module defaults `zoneRedundant` to `true` for the P and EP SKU tiers (the lab's plan is `P0v4`), and defaults `skuCapacity` to `3` for every SKU; zone redundancy also requires at least two workers, so a one-worker lab plan must opt out of it (Lab 3.4).
+- **Storage account** (`storage/storage-account`): two overrides. (1) `networkAcls: { bypass: 'AzureServices', defaultAction: 'Allow' }` in Labs 4.1–4.3 — when the parameter is omitted the module emits `defaultAction: 'Deny'`, which would lock the account down before Lab 4.4, the lab that actually teaches locking it. Lab 4.4 is the one place `Deny` is intentional. (2) `requireInfrastructureEncryption: false` in all four labs — the module defaults it to `true` while Azure's own default is `false`, and the property is creation-only, so left at the module default it would silently enable double encryption on new accounts and produce an unapplicable update on existing ones. Lab 4.1 wires it to its `parEnableInfrastructureEncryption` parameter so the lab's opt-in still works.
 
 Further overrides follow the same principle and are decided per lab.
+
+> [!NOTE]
+> Module 4's four labs configure the **same** storage accounts. The AVM storage-account module skips a sub-service entirely when its parameter is empty (`blobServices`, `fileServices`, `queueServices`, `tableServices`, `managementPolicyRules`), so a lab that does not own a sub-service passes `{}` and provably cannot regress an earlier lab. A lab that must write into a sub-service an earlier lab configured restates that earlier configuration — Lab 4.4 is the only such case. Account-level properties are always a full replace, so every lab restates the same baseline. Consequence: run the labs in order; re-running an earlier lab reverts a later lab's settings for the sub-services it owns.
 
 ## 5. Resource Tagging (REQUIRED)
 
@@ -456,7 +461,7 @@ output outExampleId string = resExample.id
 ### 10.1 BCP120: Cannot Reference `kind`/`sku` from Existing Resources (E001)
 
 > [!NOTE]
-> This gotcha applies to the pre-AVM hand-written pattern (today's Lab 4.1 code and local fallback modules). It will be retired when Lab 4.1 is converted to `avm/res/storage/storage-account` (issue #62 v2, PR 4/6), where `networkAcls` is a module parameter.
+> **Retired for Module 4 as of PR 4/6 (issue #62 v2).** Labs 4.1-4.4 now call `avm/res/storage/storage-account`, where `networkAcls`, `kind` and `skuName` are ordinary module parameters, so the re-declaration this gotcha describes no longer happens anywhere in the repository. It is kept as a reference for the hand-written pattern (Lab 3.1 and local fallback modules).
 
 **Error**: `BCP120: This expression is being used in an assignment to the "kind" property... which requires a value that can be calculated at the start of the deployment.`
 

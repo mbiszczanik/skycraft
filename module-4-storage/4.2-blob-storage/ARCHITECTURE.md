@@ -45,3 +45,12 @@
   - Lifecycle policies don't delete immediately; archived blobs in 365+ day retention remain until deletion task runs.
   - Snapshots (if any) must be manually deleted; not covered by container deletion.
   - Soft-deleted containers/blobs still occupy storage for 7 days; plan cleanup accordingly.
+
+## 5. Bicep implementation note (AVM)
+
+- **Containers and lifecycle rules are parameters, not resources**: both prod and dev go through `avm/res/storage/storage-account` (pinned in docs/bicep-standards.md §4.4), with the containers as `blobServices.containers` and the two tiering rules as `managementPolicyRules`. The lab's `modules/blobContainer.bicep` is deleted.
+- **The cross-lab import is gone.** This template used to import `../../4.1-storage-accounts/bicep/modules/storageAccount.bicep`, coupling two labs at compile time; each lab now calls the AVM module directly.
+- **The `PublicAccessNotPermitted` race no longer exists.** `blobContainer.bicep` was a workaround for creating a `Blob`-level container before `allowBlobPublicAccess` had settled. Every container in this lab is `publicAccess: 'None'` — the subscription policy blocks anything else — so the race cannot occur and the container declaration moved inside the module call.
+- **`fileServices` is omitted on purpose.** The module skips a sub-service entirely when its parameter is empty, so Lab 4.1's file-share soft delete (and later Lab 4.3's shares) survive this deployment untouched. See the cumulative-lab note in docs/bicep-standards.md §4.5.
+- **Lab-friction overrides** (docs/bicep-standards.md §4.5): `networkAcls` default action `Allow` and `requireInfrastructureEncryption: false`, as in Lab 4.1.
+- **`Deploy-Bicep.ps1` now passes `parLocation`.** It accepted `-Location` but only used it as the deployment location, so the template always kept its own default.

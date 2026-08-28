@@ -42,3 +42,11 @@
   - Delete storage accounts to stop billing (data is deleted with the account unless backed up elsewhere).
   - Soft-deleted blobs/containers remain for 7 days after deletion; no additional cleanup needed.
   - Ensure no external locks on storage accounts before RG deletion.
+
+## 5. Bicep implementation note (AVM)
+
+- **Accounts**: `avm/res/storage/storage-account` (pinned in docs/bicep-standards.md §4.4). One module call covers the account, its blob service and its file service, so the lab's local `modules/storageAccount.bicep` is gone; there is no `bicep/modules/` directory left in Module 4.
+- **One copy loop, three environments**: the three near-identical conditional module calls collapsed into `[for env in varEnvironments: ...]` with `scope: resourceGroup('${env}-skycraft-swc-rg')`. `parDeployAllEnvironments` decides whether the loop runs over `platform, dev, prod` or over the single `parEnvironment`, and the three named outputs are rebuilt with `indexOf`, returning `not-deployed` for an environment this run skipped. The three `existing` resource-group lookups disappeared with the loop.
+- **Lab-friction overrides** (docs/bicep-standards.md §4.5): `networkAcls: { bypass: 'AzureServices', defaultAction: 'Allow' }` — the module emits `Deny` when the parameter is omitted, which would lock the account before Lab 4.4 teaches it; and `requireInfrastructureEncryption: false` — the module defaults it to `true` while Azure's own default is `false`, and the property is creation-only. Lab 4.1 wires the second one to `parEnableInfrastructureEncryption`, so `Deploy-Bicep.ps1 -InfraEncryption` still works on a brand-new account.
+- **`parIsNewDeployment` is gone**, and with it the `-NewDeployment` switch. The old template switched between two encryption objects so an update would not send the creation-only `keyType`; the AVM module leaves `keyType` unset unless it is passed, and the resulting encryption block is exactly the old update-safe one. The deploy script keeps its existing-account scan, because that scan still has a job: forcing infrastructure encryption off when the account already exists.
+- **Behavioural deltas from AVM defaults**, accepted rather than overridden: `allowCrossTenantReplication: false` (Azure's default is `true`) and `isLocalUserEnabled: false`.
