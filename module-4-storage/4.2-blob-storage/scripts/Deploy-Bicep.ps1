@@ -52,6 +52,7 @@ try {
         -Name "lab-4.2-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')" `
         -Location $Location `
         -TemplateFile $TemplateFile `
+        -TemplateParameterObject @{ parLocation = $Location } `
         -WarningAction SilentlyContinue
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {

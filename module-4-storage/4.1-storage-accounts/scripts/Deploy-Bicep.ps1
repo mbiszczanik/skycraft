@@ -4,8 +4,9 @@
 
 .DESCRIPTION
     Deploys storage accounts for SkyCraft environments with environment-specific
-    redundancy (LRS/GRS/GZRS). Supports single or all environment deployment.
-    Auto-detects existing storage accounts to use appropriate encryption settings.
+    redundancy (LRS/GRS). Supports single or all environment deployment.
+    Auto-detects existing storage accounts so infrastructure encryption - a creation-only
+    property - is never forced onto an account that already exists.
 
 .PARAMETER Environment
     Target environment: dev, prod, or platform. Ignored if -All is specified.
@@ -15,10 +16,6 @@
 
 .PARAMETER Location
     Azure region for deployment. Defaults to swedencentral.
-
-.PARAMETER NewDeployment
-    Force full encryption settings (keyType, infrastructureEncryption).
-    Auto-detected if not specified. Will be overridden to false if accounts exist.
 
 .PARAMETER InfraEncryption
     Enable infrastructure (double) encryption. Only applies to new deployments.
@@ -40,14 +37,14 @@
     Previews production deployment without making changes.
 
 .EXAMPLE
-    .\Deploy-Bicep.ps1 -Environment prod -NewDeployment -InfraEncryption
+    .\Deploy-Bicep.ps1 -Environment prod -InfraEncryption
     Creates new production storage with infrastructure (double) encryption.
 
 .NOTES
     Project: SkyCraft
     Lab: 4.1 - Storage Accounts
-    Version: 1.1.0
-    Date: 2026-02-05
+    Version: 2.0.0
+    Date: 2026-08-28
 #>
 
 #Requires -Version 7.0
@@ -65,9 +62,6 @@ param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
-
-    [Parameter(Mandatory = $false)]
-    [switch]$NewDeployment,
 
     [Parameter(Mandatory = $false)]
     [switch]$InfraEncryption
@@ -124,8 +118,8 @@ else {
     @(@{ Name = "${Environment}skycraftswcsa"; RG = "$Environment-skycraft-swc-rg" })
 }
 
-$isNewDeployment = $NewDeployment.IsPresent
 $existingAccounts = @()
+$enableInfraEncryption = $InfraEncryption.IsPresent
 
 foreach ($sa in $storageAccounts) {
     $existing = Get-AzStorageAccount -ResourceGroupName $sa.RG -Name $sa.Name -ErrorAction SilentlyContinue
@@ -135,16 +129,14 @@ foreach ($sa in $storageAccounts) {
     }
     else {
         Write-Host "  [NEW] $($sa.Name) will be created" -ForegroundColor Yellow
-        if (-not $NewDeployment.IsPresent) {
-            $isNewDeployment = $true
-        }
     }
 }
 
-if ($existingAccounts.Count -gt 0 -and $NewDeployment.IsPresent) {
+# Infrastructure encryption is a creation-only property; forcing it on an existing account fails the deployment.
+if ($existingAccounts.Count -gt 0 -and $InfraEncryption.IsPresent) {
     Write-Host ""
-    Write-Host "[WARNING] -NewDeployment specified but accounts exist. Using UPDATE mode to avoid errors." -ForegroundColor Yellow
-    $isNewDeployment = $false
+    Write-Host "[WARNING] -InfraEncryption specified but accounts already exist. Ignoring it (creation-only property)." -ForegroundColor Yellow
+    $enableInfraEncryption = $false
 }
 
 # 4. Set Deployment Parameters
@@ -162,15 +154,13 @@ $deploymentParams = @{
     parBlobSoftDeleteDays             = 7
     parEnableContainerSoftDelete      = $true
     parEnableFileSoftDelete           = $true
-    parIsNewDeployment                = $isNewDeployment
-    parEnableInfrastructureEncryption = $InfraEncryption.IsPresent
+    parEnableInfrastructureEncryption = $enableInfraEncryption
 }
 
 Write-Host "  Template: $templateFile"
 Write-Host "  Location: $Location"
 Write-Host "  Environment(s): $(if ($All) { 'ALL (platform, dev, prod)' } else { $Environment })"
-Write-Host "  Deployment Mode: $(if ($isNewDeployment) { 'NEW (full encryption settings)' } else { 'UPDATE (compatible settings)' })"
-Write-Host "  Infrastructure Encryption: $(if ($InfraEncryption) { 'Enabled' } else { 'Disabled' })"
+Write-Host "  Infrastructure Encryption: $(if ($enableInfraEncryption) { 'Enabled' } else { 'Disabled' })"
 Write-Host "  Soft Delete: Enabled (7 days)"
 
 # 4. Deploy
