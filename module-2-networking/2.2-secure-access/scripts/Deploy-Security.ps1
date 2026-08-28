@@ -219,25 +219,26 @@ $nsgProdDb | Set-AzNetworkSecurityGroup | Out-Null
 # ===================================
 Write-Host "`n=== Task 5: Associating NSG to Subnets & Service Endpoints ===" -ForegroundColor Cyan
 
+# Service endpoints are per-subnet, not a single on/off switch: the Bicep path puts
+# Microsoft.Storage on WorldSubnet and Microsoft.Sql + Microsoft.Storage on DatabaseSubnet.
+# The old boolean set both on DatabaseSubnet only, which left WorldSubnet without the endpoint
+# Lab 4.4's storage firewall rule requires - so the manual path could not reach Lab 4.4 (#98).
 function Set-SubnetSecurity {
-    param($VnetName, $RgName, $SubnetName, $NsgObject, $EnableSE=$false)
+    param($VnetName, $RgName, $SubnetName, $NsgObject, [string[]]$ServiceEndpoints = @())
     try {
         $vnet = Get-AzVirtualNetwork -ResourceGroupName $RgName -Name $VnetName
         $subnet = $vnet.Subnets | Where-Object { $_.Name -eq $SubnetName }
         if ($subnet) {
             Write-Host "Configuring $SubnetName in $VnetName..." -ForegroundColor Yellow
             $subnet.NetworkSecurityGroup = $NsgObject
-            
-            if ($EnableSE) {
-                Write-Host "  -> Enabling Service Endpoints (Sql, Storage)..." -ForegroundColor Yellow
+
+            if ($ServiceEndpoints.Count -gt 0) {
+                Write-Host "  -> Enabling Service Endpoints ($($ServiceEndpoints -join ', '))..." -ForegroundColor Yellow
                 # No Locations: the Bicep path (AVM virtual-network/subnet) records these endpoints
                 # region-unrestricted, and a mismatch makes every subsequent what-if report a Modify.
-                $subnet.ServiceEndpoints = @(
-                    @{ Service = "Microsoft.Sql" },
-                    @{ Service = "Microsoft.Storage" }
-                )
+                $subnet.ServiceEndpoints = @($ServiceEndpoints | ForEach-Object { @{ Service = $_ } })
             }
-            
+
             $vnet | Set-AzVirtualNetwork | Out-Null
             Write-Host "  -> Success" -ForegroundColor Green
         } else { Write-Host "  -> [WARNING] Subnet $SubnetName not found" -ForegroundColor Yellow }
@@ -246,13 +247,13 @@ function Set-SubnetSecurity {
 
 # Dev
 Set-SubnetSecurity -VnetName "dev-skycraft-swc-vnet" -RgName "dev-skycraft-swc-rg" -SubnetName "AuthSubnet"     -NsgObject $nsgDevAuth
-Set-SubnetSecurity -VnetName "dev-skycraft-swc-vnet" -RgName "dev-skycraft-swc-rg" -SubnetName "WorldSubnet"    -NsgObject $nsgDevWorld
-Set-SubnetSecurity -VnetName "dev-skycraft-swc-vnet" -RgName "dev-skycraft-swc-rg" -SubnetName "DatabaseSubnet" -NsgObject $nsgDevDb -EnableSE $true
+Set-SubnetSecurity -VnetName "dev-skycraft-swc-vnet" -RgName "dev-skycraft-swc-rg" -SubnetName "WorldSubnet"    -NsgObject $nsgDevWorld -ServiceEndpoints @('Microsoft.Storage')
+Set-SubnetSecurity -VnetName "dev-skycraft-swc-vnet" -RgName "dev-skycraft-swc-rg" -SubnetName "DatabaseSubnet" -NsgObject $nsgDevDb    -ServiceEndpoints @('Microsoft.Sql', 'Microsoft.Storage')
 
 # Prod
 Set-SubnetSecurity -VnetName $ProdVnetName -RgName $ProdResourceGroup -SubnetName "AuthSubnet"     -NsgObject $nsgProdAuth
-Set-SubnetSecurity -VnetName $ProdVnetName -RgName $ProdResourceGroup -SubnetName "WorldSubnet"    -NsgObject $nsgProdWorld
-Set-SubnetSecurity -VnetName $ProdVnetName -RgName $ProdResourceGroup -SubnetName "DatabaseSubnet" -NsgObject $nsgProdDb -EnableSE $true
+Set-SubnetSecurity -VnetName $ProdVnetName -RgName $ProdResourceGroup -SubnetName "WorldSubnet"    -NsgObject $nsgProdWorld -ServiceEndpoints @('Microsoft.Storage')
+Set-SubnetSecurity -VnetName $ProdVnetName -RgName $ProdResourceGroup -SubnetName "DatabaseSubnet" -NsgObject $nsgProdDb   -ServiceEndpoints @('Microsoft.Sql', 'Microsoft.Storage')
 
 # ===================================
 # Task 6: Deploy Azure Bastion (Optional)

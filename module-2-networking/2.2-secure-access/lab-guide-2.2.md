@@ -565,7 +565,7 @@ Create three NSGs for production environment (following same pattern as dev):
 
 ## 📖 Section 6: Configure Service and Private Endpoints (20 minutes)
 
-### Step 2.2.14: Enable Service Endpoint on Database Subnet
+### Step 2.2.14: Enable Service Endpoints on the Dev Subnets
 
 **Service endpoints** route traffic to Azure PaaS services (Storage, SQL, Key Vault) over the Azure backbone, avoiding the public internet.
 
@@ -577,24 +577,35 @@ Create three NSGs for production environment (following same pattern as dev):
    - **Microsoft.Sql** (for Azure SQL Database)
    - **Microsoft.Storage** (for Azure Storage)
 6. Click **Save**
+7. Go back to **Subnets** and click on **WorldSubnet**
+8. Under **Service endpoints**, click **+ Add** and select **Microsoft.Storage**
+9. Click **Save**
 
 ![Enable-Service-Endpoint](./images/step-2.2.14.png)
 
+> [!IMPORTANT]
+> **`WorldSubnet` needs `Microsoft.Storage` too, and it is not optional.**
+> Lab 4.4 locks the storage account down to a virtual network rule for `WorldSubnet`, and
+> Azure rejects that rule for a subnet without the endpoint. Skip this and Lab 4.4 fails
+> with an error that points at storage rather than at this step.
+
 **Expected Result**:
 
-- Service endpoints enabled on DatabaseSubnet
+- `Microsoft.Sql` and `Microsoft.Storage` on DatabaseSubnet, `Microsoft.Storage` on WorldSubnet
 - Traffic to Azure SQL and Storage now uses Microsoft backbone
 - Still uses public IP addresses but never traverses public internet
 
-### Step 2.2.15: Enable Service Endpoint on Production Database Subnet
+### Step 2.2.15: Enable Service Endpoints on the Production Subnets
 
 1. Navigate to **prod-skycraft-swc-vnet** → **Subnets** → **DatabaseSubnet**
 2. Add service endpoints:
    - **Microsoft.Sql**
    - **Microsoft.Storage**
 3. Click **Save**
+4. Go to **Subnets** → **WorldSubnet** and add **Microsoft.Storage**
+5. Click **Save**
 
-**Expected Result**: Both dev and prod database subnets can securely access Azure PaaS services.
+**Expected Result**: Both dev and prod can securely access Azure PaaS services, and both `WorldSubnet`s are ready for the Lab 4.4 storage firewall.
 
 ### Step 2.2.16: Understand Private Endpoint Concepts
 
@@ -728,10 +739,10 @@ Evaluation:
    - Microsoft.Sql
    - Microsoft.Storage
 
-3. Navigate to **prod-skycraft-swc-vnet** → **Subnets** → **DatabaseSubnet**
-4. Confirm same service endpoints enabled
+3. Navigate to **Subnets** → **WorldSubnet** and confirm **Microsoft.Storage**
+4. Navigate to **prod-skycraft-swc-vnet** and repeat both checks
 
-**Expected Result**: Database subnets can access Azure SQL and Storage over Microsoft backbone (private routing).
+**Expected Result**: Database subnets can access Azure SQL and Storage over Microsoft backbone (private routing), and both `WorldSubnet`s carry `Microsoft.Storage` for Lab 4.4.
 
 ---
 
