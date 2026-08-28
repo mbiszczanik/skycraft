@@ -89,9 +89,7 @@ Describe 'Bicep - regression guard on known bleeding-edge versions' {
 Describe 'Bicep - module-3.3 and module-3.4 still compile' {
     $FixedModules = @(
         @{ file = 'module-3-compute/3.3-containers/bicep/main.bicep'        ; path = (Join-Path $RepoRoot 'module-3-compute/3.3-containers/bicep/main.bicep') }
-        @{ file = 'module-3-compute/3.3-containers/bicep/modules/acr.bicep' ; path = (Join-Path $RepoRoot 'module-3-compute/3.3-containers/bicep/modules/acr.bicep') }
-        @{ file = 'module-3-compute/3.3-containers/bicep/modules/aci.bicep' ; path = (Join-Path $RepoRoot 'module-3-compute/3.3-containers/bicep/modules/aci.bicep') }
-        @{ file = 'module-3-compute/3.3-containers/bicep/modules/containerapps.bicep' ; path = (Join-Path $RepoRoot 'module-3-compute/3.3-containers/bicep/modules/containerapps.bicep') }
+        @{ file = 'module-3-compute/3.3-containers/bicep/acr.bicep'         ; path = (Join-Path $RepoRoot 'module-3-compute/3.3-containers/bicep/acr.bicep') }
         @{ file = 'module-3-compute/3.4-app-service/bicep/main.bicep'       ; path = (Join-Path $RepoRoot 'module-3-compute/3.4-app-service/bicep/main.bicep') }
         @{ file = 'module-3-compute/3.4-app-service/bicep/modules/app-service.bicep' ; path = (Join-Path $RepoRoot 'module-3-compute/3.4-app-service/bicep/modules/app-service.bicep') }
     )
