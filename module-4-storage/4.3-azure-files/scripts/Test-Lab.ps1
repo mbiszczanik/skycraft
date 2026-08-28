@@ -4,6 +4,9 @@
 .DESCRIPTION
     Checks if resources exist and are configured correctly according to Lab 4.3 standards.
     Checks for Storage Account redundancy, File Shares, quotas, and Soft Delete policy.
+
+    The file share check compares the deployed set against the expected set in both directions:
+    a missing share and an unexpected share both fail. The lab creates exactly two shares.
 .PARAMETER Environment
     The environment to validate (prod, dev, platform). Default: prod.
 .EXAMPLE
@@ -11,7 +14,8 @@
 .NOTES
     Project: SkyCraft
     Author: SkyCraft
-    Date: 2026-02-07
+    Version: 2.1.0
+    Date: 2026-08-28
 #>
 
 #Requires -Version 7.0
@@ -74,27 +78,36 @@ catch {
 try {
     Write-Host "Checking File Shares..." -ForegroundColor Yellow
 
-    $sharesToCheck = @(
-        @{ Name = 'skycraft-config'; ExpectedQuotaGB = 100 },
-        @{ Name = 'skycraft-shared'; ExpectedQuotaGB = 500 }
-    )
+    $expectedShares = @{
+        'skycraft-config' = 100
+        'skycraft-shared' = 500
+    }
 
-    foreach ($item in $sharesToCheck) {
-        $share = Get-AzRmStorageShare -ResourceGroupName $resourceGroupName -StorageAccountName $storageAccountName `
-            -Name $item.Name -ErrorAction SilentlyContinue
-        if ($share) {
-            $quotaGB = $share.QuotaGiB
-            $tier    = $share.AccessTier
-            Write-Host "  -> Found Share: $($share.Name) (Quota: ${quotaGB}GB, Tier: $tier)" -ForegroundColor Green
-            if ($quotaGB -ne $item.ExpectedQuotaGB) {
-                Write-Host "  -> [FAIL] $($share.Name) quota ${quotaGB}GB (Expected: $($item.ExpectedQuotaGB)GB)" -ForegroundColor Red
-                $failCount++
-            }
+    # Enumerate rather than probing the expected names one by one: a hardcoded probe list can
+    # only catch a missing share, never a stray one left behind by a hand-made experiment (#99).
+    $actualShares = @(Get-AzRmStorageShare -ResourceGroupName $resourceGroupName -StorageAccountName $storageAccountName -ErrorAction Stop)
+
+    foreach ($name in $expectedShares.Keys) {
+        $share = $actualShares | Where-Object { $_.Name -eq $name }
+        if (-not $share) {
+            Write-Host "  -> [FAIL] File Share '$name' not found." -ForegroundColor Red
+            $failCount++
+            continue
         }
-        else {
-            Write-Host "  -> [FAIL] File Share '$($item.Name)' not found." -ForegroundColor Red
+
+        $quotaGB = $share.QuotaGiB
+        $tier    = $share.AccessTier
+        Write-Host "  -> Found Share: $($share.Name) (Quota: ${quotaGB}GB, Tier: $tier)" -ForegroundColor Green
+        if ($quotaGB -ne $expectedShares[$name]) {
+            Write-Host "  -> [FAIL] $($share.Name) quota ${quotaGB}GB (Expected: $($expectedShares[$name])GB)" -ForegroundColor Red
             $failCount++
         }
+    }
+
+    $unexpected = $actualShares | Where-Object { -not $expectedShares.ContainsKey($_.Name) }
+    foreach ($share in $unexpected) {
+        Write-Host "  -> [FAIL] Unexpected File Share '$($share.Name)' - Lab 4.3 creates only $($expectedShares.Keys -join ', ')." -ForegroundColor Red
+        $failCount++
     }
 }
 catch {
