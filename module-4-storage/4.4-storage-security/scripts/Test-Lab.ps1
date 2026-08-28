@@ -5,7 +5,7 @@
     Checks for Storage Firewall settings, RBAC assignments, Service Endpoints,
     Stored Access Policies, and the dev-assets container.
 .PARAMETER Environment
-    Environment to validate (prod, dev, platform). Default: prod.
+    Environment to validate (prod or dev). Default: prod.
 .EXAMPLE
     .\Test-Lab.ps1 -Environment prod
 .NOTES
@@ -20,7 +20,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateSet('prod', 'dev', 'platform')]
+    [ValidateSet('prod', 'dev')]
     [string]$Environment = 'prod'
 )
 

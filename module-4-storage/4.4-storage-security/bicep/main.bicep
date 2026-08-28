@@ -17,8 +17,10 @@ targetScope = 'subscription'
 @allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
+// platform is deliberately excluded: this lab allows a workload subnet through the storage
+// firewall, and the hub VNet has only AzureBastionSubnet and GatewaySubnet.
 @description('Target environment')
-@allowed(['dev', 'prod', 'platform'])
+@allowed(['dev', 'prod'])
 param parEnvironment string = 'prod'
 
 @description('Resource owner tag value')
@@ -50,7 +52,6 @@ param parContainerSoftDeleteDays int = 7
 var varEnvironmentTags = {
   dev: 'Development'
   prod: 'Production'
-  platform: 'Platform'
 }
 
 var varCommonTags = {
@@ -61,7 +62,6 @@ var varCommonTags = {
 }
 
 var varSkuNames = {
-  platform: 'Standard_GRS'
   dev: 'Standard_LRS'
   prod: 'Standard_GRS'
 }
@@ -72,13 +72,11 @@ var varResourceGroupName = '${parEnvironment}-skycraft-swc-rg'
 // the whole blob service configuration - so it restates what Labs 4.1 and 4.2 set for this
 // environment (standards section 4.5 note on cumulative labs).
 var varVersioningEnabled = {
-  platform: false
   dev: false
   prod: true
 }
 
 var varContainersByEnvironment = {
-  platform: []
   dev: [
     { name: 'public-demo', publicAccess: 'None' }
   ]

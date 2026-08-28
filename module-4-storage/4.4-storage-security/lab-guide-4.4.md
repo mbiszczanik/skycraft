@@ -85,9 +85,9 @@ Before starting this lab:
       for a subnet without it.
 - [ ] Completed **Lab 4.1: Storage Accounts** (Production Storage Account exists)
 - [ ] Account with **User Access Administrator** or **Owner** role on the subscription
-- [ ] `dev` or `prod` environment. `platform` is not supported: the hub VNet has only
-      `AzureBastionSubnet` and `GatewaySubnet`, so it has no workload subnet to allow through
-      the storage firewall.
+- [ ] `dev` or `prod` environment. `platform` is rejected by both the template and the
+      scripts: the hub VNet has only `AzureBastionSubnet` and `GatewaySubnet`, so it has no
+      workload subnet to allow through the storage firewall.
 
 > [!IMPORTANT]
 > **Run the Module 4 labs in order (4.1 → 4.2 → 4.3 → 4.4).** All four configure the **same**

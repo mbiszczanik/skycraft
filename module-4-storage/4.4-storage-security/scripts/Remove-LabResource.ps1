@@ -7,7 +7,7 @@
     Does NOT delete the storage account (owned by Lab 4.1) and does NOT remove the
     'Microsoft.Storage' service endpoint from WorldSubnet (owned by Lab 2.2).
 .PARAMETER Environment
-    The environment to clean up (prod, dev, platform). Default: prod.
+    The environment to clean up (prod or dev). Default: prod.
 .PARAMETER Force
     Skip confirmation prompt.
 .EXAMPLE
@@ -25,7 +25,7 @@
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateSet('prod', 'dev', 'platform')]
+    [ValidateSet('prod', 'dev')]
     [string]$Environment = 'prod',
 
     [Parameter(Mandatory = $false)]
