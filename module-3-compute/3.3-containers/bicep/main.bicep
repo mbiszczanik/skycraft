@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 3.3 - Containers Orchestrator
 DESCRIPTION: Deploys the Container Registry, a Container Instance and a Container Apps environment with one app for SkyCraft Lab 3.3 via Azure Verified Modules (the image must already exist in the registry - Deploy-Bicep.ps1 bootstraps it with acr.bicep first)
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
+EXAMPLE: .\scripts\Deploy-Bicep.ps1 (Phase 1 deploys acr.bicep and imports the image, Phase 2 runs: az deployment sub create --location swedencentral --template-file main.bicep)
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.2.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
@@ -71,8 +71,9 @@ var varCommonTags = {
 }
 
 var varAcrName = toLower(parAcrName)
-// Same seed as the previous module-level uniqueString(resourceGroup().id), so the FQDN is unchanged
-var varAciDnsLabel = toLower('${parAciName}-${uniqueString(resRg.id)}')
+// The DNS label is derived from the resource group's ARM id - the same input the pre-conversion
+// template hashed through uniqueString(resourceGroup().id); confirm the FQDN on the first live deployment.
+var varAciDnsLabel = toLower('${parAciName}-${uniqueString('/subscriptions/${subscription().subscriptionId}/resourceGroups/${parResourceGroupName}')}')
 
 /*******************
 *     Existing     *
@@ -252,5 +253,8 @@ module modAca 'br/public:avm/res/app/container-app:0.23.0' = {
 ******************/
 
 output outAcrLoginServer string = modAcr.outputs.loginServer
+// container-group:0.7.0 outputs only the IPv4 address, so the FQDN is composed here. The composition
+// assumes the Unsecure domain-name-label scope ({label}.{region}.azurecontainer.io); check it against
+// (Get-AzContainerGroup -ResourceGroupName <rg> -Name <name>).IpAddress.Fqdn on the first deployment.
 output outAciFqdn string = '${varAciDnsLabel}.${parLocation}.azurecontainer.io'
 output outAcaFqdn string = modAca.outputs.fqdn

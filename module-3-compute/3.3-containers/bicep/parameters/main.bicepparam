@@ -1,6 +1,6 @@
 /*=====================================================
 SUMMARY: Lab 3.3 - Parameters
-DESCRIPTION: Parameter values for the Development environment (the defaults of main.bicep, pinned)
+DESCRIPTION: Assigns the parameters the CI "bicep build-params" check requires; every other parameter keeps its main.bicep default
 EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep --parameters parameters/main.bicepparam
 AUTHOR/S: Marcin Biszczanik
 VERSION: 1.0.0
