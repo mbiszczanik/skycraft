@@ -9,11 +9,14 @@
 - [ ] VNet Rule: `prod-skycraft-swc-vnet` / `WorldSubnet`
 - [ ] Firewall: Your Client IP added to authorized addresses
 
-### Service Endpoints
+### Service Endpoints (prerequisite from Lab 2.2)
 
 - [ ] VNet: `prod-skycraft-swc-vnet`
 - [ ] Subnet: `WorldSubnet`
 - [ ] Service Endpoint: `Microsoft.Storage` (Status: Succeeded)
+
+> This endpoint is created and owned by **Lab 2.2**, not by this lab. Verify it is present before
+> deploying - the storage firewall rejects a virtual network rule for a subnet without it.
 
 ---
 
@@ -106,6 +109,20 @@ az storage container policy list \
 - **Actual Time Spent**: ****\_**** hours
 - **Date Started**: ****\_****
 - **Date Completed**: ****\_****
+
+---
+
+## 🧹 Cleanup Verification
+
+`Remove-LabResource.ps1` reverts what this lab created:
+
+- [ ] Storage firewall default action back to `Allow`
+- [ ] Container `dev-assets` removed
+- [ ] `Storage Blob Data Contributor` role assignments removed
+- [ ] `WorldSubnet` **still** carries the `Microsoft.Storage` service endpoint
+
+> The cleanup deliberately leaves that service endpoint in place: it belongs to Lab 2.2, whose
+> `Test-Lab.ps1` asserts it. Remove it with Lab 2.2's own cleanup if you want it gone.
 
 ---
 

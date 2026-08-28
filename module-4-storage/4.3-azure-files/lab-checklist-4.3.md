@@ -53,6 +53,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Production`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `mbiszczanik`
 
 ---
 
@@ -159,6 +160,7 @@ az storage account show \
 # Expected Output:
 # {
 #   "CostCenter": "MSDN",
+#   "Owner": "mbiszczanik",
 #   "Environment": "Production",
 #   "Project": "SkyCraft"
 # }
@@ -244,7 +246,7 @@ Test-NetConnection `
 **All Verification Items Complete**:
 
 - [ ] All file shares created with proper naming conventions
-- [ ] All tags applied correctly (Project, Environment, CostCenter)
+- [ ] All tags applied correctly (Project, Environment, CostCenter, Owner)
 - [ ] All validation commands executed successfully
 - [ ] All reflection questions answered
 - [ ] Snapshot restore workflow verified

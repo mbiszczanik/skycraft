@@ -105,6 +105,36 @@ Before starting this lab:
 - [ ] Azure CLI installed (`az --version` ≥ 2.50)
 - [ ] Understanding of storage account concepts from Lab 4.1
 
+> [!IMPORTANT]
+> **Run the Module 4 labs in order (4.1 → 4.2 → 4.3 → 4.4).** All four configure the **same**
+> three storage accounts, and they are cumulative forward: each lab replaces the account-level
+> properties and the sub-services it owns, while leaving the sub-services it does not own alone.
+> Re-running Lab 4.2 after Lab 4.3 resets file-share retention from 14 days back to 7; re-running
+> Lab 4.1 after Lab 4.2 turns production blob versioning back off. See `docs/bicep-standards.md`
+> §4.5 for the mechanism.
+
+**Preview - the AVM module call the Bicep path makes**:
+
+```bicep
+module modStorageProd 'br/public:avm/res/storage/storage-account:0.33.0' = {
+  name: 'sa-deployment-prod-42'
+  scope: resourceGroup(parResourceGroupNameProd)
+  params: {
+    name: 'prodskycraftswcsa'
+    blobServices: {
+      isVersioningEnabled: true
+      containers: varContainersProd     // game-assets, player-backups, server-config, game-logs
+    }
+    managementPolicyRules: varLifecycleRules   // tier-game-logs, archive-backups
+  }
+}
+```
+
+Containers and lifecycle rules are parameters of the same module that created the account in
+Lab 4.1 — there is no separate container module and no cross-lab import any more. `fileServices`
+is deliberately not passed: an omitted sub-service is skipped entirely, so Lab 4.1's file-share
+settings survive untouched (`docs/bicep-standards.md` §4.5).
+
 ---
 
 ## 📖 Section 1: Blob Storage Fundamentals (20 min)

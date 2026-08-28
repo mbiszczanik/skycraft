@@ -117,6 +117,36 @@ Before starting this lab:
 - [ ] Contributor or Owner role on the subscription
 - [ ] Understanding of SMB protocol basics and file system concepts
 
+> [!IMPORTANT]
+> **Run the Module 4 labs in order (4.1 → 4.2 → 4.3 → 4.4).** All four configure the **same**
+> three storage accounts, and they are cumulative forward: each lab replaces the account-level
+> properties and the sub-services it owns, while leaving the sub-services it does not own alone.
+> Re-running Lab 4.2 after Lab 4.3 resets file-share retention from 14 days back to 7; re-running
+> Lab 4.1 after Lab 4.2 turns production blob versioning back off. See `docs/bicep-standards.md`
+> §4.5 for the mechanism.
+
+**Preview - the AVM module call the Bicep path makes**:
+
+```bicep
+module modStorage 'br/public:avm/res/storage/storage-account:0.33.0' = {
+  name: 'sa-deployment-files'
+  scope: resourceGroup('${parEnvironment}-skycraft-swc-rg')
+  params: {
+    name: '${parEnvironment}skycraftswcsa'
+    blobServices: {}                    // skip the blob service - Lab 4.2 owns it
+    fileServices: {
+      shareDeleteRetentionPolicy: { enabled: true, days: 14 }
+      shares: [ /* skycraft-config 100 GiB, skycraft-shared 500 GiB */ ]
+    }
+  }
+}
+```
+
+The empty `blobServices: {}` is load-bearing: the module skips a sub-service whose parameter is
+empty, so Lab 4.2's containers, versioning and lifecycle rules are left exactly as they were.
+`blobServices` is the only sub-service that needs the explicit `{}` — it is the only one with a
+non-empty default (`docs/bicep-standards.md` §4.5).
+
 **Verify prerequisites**:
 
 ```azurecli
@@ -582,6 +612,7 @@ ls /mnt/skycraft-config/common/
 - [ ] Project = `SkyCraft`
 - [ ] Environment = `Production`
 - [ ] CostCenter = `MSDN`
+- [ ] Owner = `mbiszczanik`
 
 **For detailed verification**, see [lab-checklist-4.3.md](lab-checklist-4.3.md)
 

@@ -29,6 +29,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Platform`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `mbiszczanik`
 
 ---
 
@@ -56,6 +57,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `mbiszczanik`
 
 ---
 
@@ -83,6 +85,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Production`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `mbiszczanik`
 
 ---
 
@@ -148,6 +151,7 @@ az storage account show \
 # Expected output:
 # {
 #   "CostCenter": "MSDN",
+#   "Owner": "mbiszczanik",
 #   "Environment": "Production",
 #   "Project": "SkyCraft"
 # }
@@ -248,7 +252,7 @@ az storage account show \
 - [ ] All three storage accounts created with correct names
 - [ ] Appropriate redundancy levels configured (LRS, GRS, GZRS)
 - [ ] Security settings applied (TLS 1.2, HTTPS only, no public access)
-- [ ] All required tags applied (Project, Environment, CostCenter)
+- [ ] All required tags applied (Project, Environment, CostCenter, Owner)
 - [ ] Encryption verified (Microsoft-managed keys)
 - [ ] Access keys reviewed
 - [ ] All validation commands executed successfully
