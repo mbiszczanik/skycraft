@@ -116,6 +116,7 @@ if ($confirm -ne 'y') {
 }
 
 # Process each VM
+$failed = @()
 foreach ($vmName in $VmNames) {
     Write-Host "`n----------------------------------------" -ForegroundColor Gray
     Write-Host "Processing: $vmName" -ForegroundColor Cyan
@@ -128,61 +129,81 @@ foreach ($vmName in $VmNames) {
         Write-Host "  Resizing $originalSize -> $targetSize (ADE needs 8 GB RAM)..." -ForegroundColor Yellow
         $vm = Get-AzVM -ResourceGroupName $rgName -Name $vmName
         $vm.HardwareProfile.VmSize = $targetSize
+        # No deallocation needed: both sizes are in the same Bsv2/Basv2 family (same hardware cluster), so the resize is an in-place restart.
         Update-AzVM -ResourceGroupName $rgName -VM $vm -ErrorAction Stop | Out-Null
         $vmInfo[$vmName].Resized = $true
         Write-Host "  ✓ Resized" -ForegroundColor Green
     }
 
-    # Enable Azure Disk Encryption
-    Write-Host "  Enabling Azure Disk Encryption..." -ForegroundColor Yellow
-    Write-Host "  (This may take 15-30 minutes per VM)" -ForegroundColor Gray
-
+    # Encrypt and wait; the finally block restores the VM size whatever happens above
+    $completed = $false
     try {
-        Set-AzVMDiskEncryptionExtension -ResourceGroupName $rgName -VMName $vmName `
-            -DiskEncryptionKeyVaultUrl $kv.VaultUri -DiskEncryptionKeyVaultId $kv.ResourceId `
-            -VolumeType All -Force -ErrorAction Stop | Out-Null
-    } catch {
-        Write-Error "Failed to enable encryption on $vmName : $_"
-        continue
-    }
+        # Enable Azure Disk Encryption
+        Write-Host "  Enabling Azure Disk Encryption..." -ForegroundColor Yellow
+        Write-Host "  (This may take 15-30 minutes per VM)" -ForegroundColor Gray
 
-    Write-Host "  ✓ Encryption initiated" -ForegroundColor Green
-
-    # Wait for encryption to complete
-    Write-Host "  Waiting for encryption to complete..." -ForegroundColor Yellow
-    $maxAttempts = 60  # 30 minutes max wait
-    $attempt = 0
-
-    do {
-        Start-Sleep -Seconds 30
-        $attempt++
-
-        $status = Get-AzVmDiskEncryptionStatus -ResourceGroupName $rgName -VMName $vmName -ErrorAction SilentlyContinue
-        $osEncrypted = $status.OsVolumeEncrypted -eq 'Encrypted'
-
-        if ($osEncrypted) {
-            Write-Host "  ✓ Encryption completed!" -ForegroundColor Green
-            break
+        $initiated = $false
+        try {
+            Set-AzVMDiskEncryptionExtension -ResourceGroupName $rgName -VMName $vmName `
+                -DiskEncryptionKeyVaultUrl $kv.VaultUri -DiskEncryptionKeyVaultId $kv.ResourceId `
+                -VolumeType All -Force -ErrorAction Stop | Out-Null
+            $initiated = $true
+        } catch {
+            Write-Warning "Failed to enable encryption on $vmName : $_"
+            $failed += $vmName
         }
 
-        Write-Host "    Still encrypting... (attempt $attempt of $maxAttempts)" -ForegroundColor Gray
+        if ($initiated) {
+            Write-Host "  ✓ Encryption initiated" -ForegroundColor Green
 
-    } while ($attempt -lt $maxAttempts)
+            # Wait for encryption to complete
+            Write-Host "  Waiting for encryption to complete..." -ForegroundColor Yellow
+            $maxAttempts = 60  # 30 minutes max wait
+            $attempt = 0
 
-    if ($attempt -ge $maxAttempts) {
-        Write-Warning "Encryption still in progress after 30 minutes. Check status manually:"
-        Write-Host "  Get-AzVmDiskEncryptionStatus -ResourceGroupName $rgName -VMName $vmName"
+            do {
+                Start-Sleep -Seconds 30
+                $attempt++
+
+                $status = Get-AzVmDiskEncryptionStatus -ResourceGroupName $rgName -VMName $vmName -ErrorAction SilentlyContinue
+                $osEncrypted = $status.OsVolumeEncrypted -eq 'Encrypted'
+
+                if ($osEncrypted) {
+                    $completed = $true
+                    Write-Host "  ✓ Encryption completed!" -ForegroundColor Green
+                    break
+                }
+
+                Write-Host "    Still encrypting... (attempt $attempt of $maxAttempts)" -ForegroundColor Gray
+
+            } while ($attempt -lt $maxAttempts)
+
+            if (-not $completed) {
+                Write-Warning "Encryption still in progress after 30 minutes. Check status manually:"
+                Write-Host "  Get-AzVmDiskEncryptionStatus -ResourceGroupName $rgName -VMName $vmName"
+            }
+        }
+    } finally {
+        # Resize back (default) so the lab keeps its cheaper size - only once encryption has completed,
+        # because a resize restarts the VM and would interrupt an encryption that is still running
+        if ($vmInfo[$vmName].Resized) {
+            if ($ResizeBack -and $completed) {
+                Write-Host "  Resizing back to $originalSize..." -ForegroundColor Yellow
+                $vm = Get-AzVM -ResourceGroupName $rgName -Name $vmName
+                $vm.HardwareProfile.VmSize = $originalSize
+                # No deallocation needed: both sizes are in the same Bsv2/Basv2 family (same hardware cluster), so the resize is an in-place restart.
+                Update-AzVM -ResourceGroupName $rgName -VM $vm -ErrorAction Stop | Out-Null
+                Write-Host "  ✓ Resized back" -ForegroundColor Green
+            } elseif (-not $completed) {
+                Write-Warning "$vmName was resized to $targetSize but encryption did not complete, so it was NOT resized back. Once Get-AzVmDiskEncryptionStatus shows OsVolumeEncrypted = Encrypted, run:"
+                Write-Host "  Update-AzVM -ResourceGroupName $rgName -VM (Get-AzVM -ResourceGroupName $rgName -Name $vmName | % { `$_.HardwareProfile.VmSize = '$originalSize'; `$_ })"
+            }
+        }
     }
+}
 
-    # Resize back (default) so the lab keeps its cheaper size
-    if ($ResizeBack -and $vmInfo[$vmName].Resized) {
-        Write-Host "  Resizing back to $originalSize..." -ForegroundColor Yellow
-        $vm = Get-AzVM -ResourceGroupName $rgName -Name $vmName
-        $vm.HardwareProfile.VmSize = $originalSize
-        Update-AzVM -ResourceGroupName $rgName -VM $vm -ErrorAction Stop | Out-Null
-        Write-Host "  ✓ Resized back" -ForegroundColor Green
-    }
-
+if ($failed.Count -gt 0) {
+    Write-Error "Encryption failed for: $($failed -join ', ')"
 }
 
 # Final verification

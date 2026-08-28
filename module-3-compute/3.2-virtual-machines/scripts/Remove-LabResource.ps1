@@ -132,8 +132,13 @@ foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'KeyVault'
         Write-Host "  Deleting Key Vault: $($resource.Name)..." -ForegroundColor Gray
         Remove-AzKeyVault -VaultName $resource.Name -ResourceGroupName $rgName -Force -ErrorAction Stop | Out-Null
         Write-Host "  Purging Key Vault: $($resource.Name) (location $($vault.Location))..." -ForegroundColor Gray
-        Remove-AzKeyVault -VaultName $resource.Name -Location $vault.Location -InRemovedState -Force -ErrorAction Stop | Out-Null
-        Write-Host "  ✓ Deleted and purged" -ForegroundColor Green
+        try {
+            Remove-AzKeyVault -VaultName $resource.Name -Location $vault.Location -InRemovedState -Force -ErrorAction Stop | Out-Null
+            Write-Host "  ✓ Deleted and purged" -ForegroundColor Green
+        } catch {
+            Write-Warning "Vault '$($vault.VaultName)' deleted but not purged: $_"
+            Write-Host "  Purge manually: Remove-AzKeyVault -VaultName $($vault.VaultName) -Location $($vault.Location) -InRemovedState -Force" -ForegroundColor Gray
+        }
     }
 }
 
