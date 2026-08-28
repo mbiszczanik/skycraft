@@ -244,9 +244,9 @@ Write-Host "`n=== Cleanup Complete ===" -ForegroundColor Cyan -BackgroundColor B
 # Show cost savings estimate
 if ($RemoveBastion -or $RemoveAll) {
     Write-Host "`n[INFO] Estimated monthly savings:" -ForegroundColor Green
-    Write-Host "  - Azure Bastion Basic SKU: ~$140/month" -ForegroundColor Gray
-    Write-Host "  - Public IP: ~$3/month" -ForegroundColor Gray
-    Write-Host "  Total: ~$143/month" -ForegroundColor Green
+    Write-Host '  - Azure Bastion Basic SKU: ~$140/month' -ForegroundColor Gray
+    Write-Host '  - Public IP: ~$3/month' -ForegroundColor Gray
+    Write-Host '  Total: ~$143/month' -ForegroundColor Green
 }
 
 Write-Host "`nNote: NSGs and ASGs have no compute costs, only minimal metadata storage." -ForegroundColor Gray

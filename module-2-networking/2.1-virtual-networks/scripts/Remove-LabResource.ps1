@@ -64,7 +64,10 @@ function Remove-VNetPeering {
         Write-Host "Removing peerings on $VnetName..." -ForegroundColor Yellow
         $vnet = Get-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -ErrorAction SilentlyContinue
         if ($vnet) {
-            $peerings = $vnet.VirtualNetworkPeerings | Where-Object { $_.Name -match "peer" }
+            # No name filter: SkyCraft peerings are named hub-to-dev / dev-to-hub etc., and every peering
+            # on a lab VNet is lab state. Leaving the spoke side behind is what caused
+            # RemotePeeringIsDisconnected on the next Lab 2.1 deployment during the #87 live cycle.
+            $peerings = $vnet.VirtualNetworkPeerings
             foreach ($p in $peerings) {
                 if ($PSCmdlet.ShouldProcess("$VnetName/$($p.Name)", 'Remove VNet peering')) {
                     Write-Host "  -> Deleting $($p.Name)" -ForegroundColor Gray

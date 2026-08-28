@@ -230,9 +230,11 @@ function Set-SubnetSecurity {
             
             if ($EnableSE) {
                 Write-Host "  -> Enabling Service Endpoints (Sql, Storage)..." -ForegroundColor Yellow
+                # No Locations: the Bicep path (AVM virtual-network/subnet) records these endpoints
+                # region-unrestricted, and a mismatch makes every subsequent what-if report a Modify.
                 $subnet.ServiceEndpoints = @(
-                    @{ Service = "Microsoft.Sql"; Locations = @("swedencentral") },
-                    @{ Service = "Microsoft.Storage"; Locations = @("swedencentral") }
+                    @{ Service = "Microsoft.Sql" },
+                    @{ Service = "Microsoft.Storage" }
                 )
             }
             
