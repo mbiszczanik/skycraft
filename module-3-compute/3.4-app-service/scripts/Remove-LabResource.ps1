@@ -100,7 +100,6 @@ function Get-SubnetLinkSnapshot {
         Internal helper for Remove-LabResource.ps1.
     #>
     [CmdletBinding()]
-    [OutputType([string[]])]
     param(
         [Parameter(Mandatory)][string]$Vnet,
         [Parameter(Mandatory)][string]$Rg,
@@ -113,16 +112,22 @@ function Get-SubnetLinkSnapshot {
     $subnetObject = $vnetObject.Subnets | Where-Object { $_.Name -eq $Subnet }
     if (-not $subnetObject) { return $null }
 
-    return @($subnetObject.ServiceAssociationLinks | ForEach-Object { $_.Link })
+    # Unary comma: without it an empty pipeline collapses to $null and a linkless subnet
+    # would be misreported as unreadable.
+    return ,@($subnetObject.ServiceAssociationLinks | ForEach-Object { $_.Link })
 }
 
-# 2. Snapshot the subnet links BEFORE the detach. The known orphan names a plan with this very
-#    name, so only a before/after comparison can tell it apart from a link left by this run.
-$linksBefore = Get-SubnetLinkSnapshot -Vnet $VnetName -Rg $RgName -Subnet $SubnetName
-
 try {
+    # 2. Snapshot the subnet links BEFORE the detach. The known orphan names a plan with this very
+    #    name, so only a before/after comparison can tell it apart from a link left by this run.
+    #    Not needed under -WhatIf, where the comparison never runs.
+    $linksBefore = if ($WhatIfPreference) { $null } else {
+        Get-SubnetLinkSnapshot -Vnet $VnetName -Rg $RgName -Subnet $SubnetName
+    }
+
     $app = Get-AzWebApp -ResourceGroupName $RgName -Name $AppName -ErrorAction SilentlyContinue
     $targets = @()
+    $detached = @()
 
     # 3. Detach the VNet integration from the app and every slot BEFORE anything is deleted
     if ($app) {
@@ -133,6 +138,7 @@ try {
         foreach ($id in $targets) {
             if ($PSCmdlet.ShouldProcess($id, 'Remove VNet integration')) {
                 Write-Host "Detaching VNet integration: $id" -ForegroundColor Yellow
+                $detached += $id
                 $response = Invoke-AzRestMethod -Method DELETE -Path "$id/networkConfig/virtualNetwork?api-version=$webApiVersion" -ErrorAction SilentlyContinue
                 if ($null -eq $response) {
                     Write-Host "  -> [WARN] No response from the management API - the integration may still be attached." -ForegroundColor Yellow
@@ -149,13 +155,15 @@ try {
 
     # 4. Verify per site that the integration is gone: the route answers 404 once detached and 200
     #    while it still exists. This is the only check the known orphaned link cannot confuse.
+    #    Only sites whose DELETE actually ran are polled - a declined prompt leaves the site
+    #    attached on purpose, so waiting three minutes for it would be pointless.
     if ($WhatIfPreference) {
         Write-Host "What if: Would poll networkConfig/virtualNetwork for HTTP 404 on $($targets.Count) site(s), up to 3 minutes." -ForegroundColor Gray
     }
-    elseif ($targets.Count -gt 0) {
+    elseif ($detached.Count -gt 0) {
         $deadline = (Get-Date).AddMinutes(3)
         $pending = [System.Collections.Generic.List[string]]::new()
-        foreach ($id in $targets) { $pending.Add($id) }
+        foreach ($id in $detached) { $pending.Add($id) }
 
         while ($pending.Count -gt 0) {
             foreach ($id in @($pending)) {
