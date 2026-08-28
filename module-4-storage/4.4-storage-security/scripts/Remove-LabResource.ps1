@@ -4,7 +4,8 @@
 .DESCRIPTION
     Reverts storage firewall to allow-all, removes the dev-assets container,
     and cleans up RBAC role assignments created during the lab.
-    Does NOT delete the storage account (owned by Lab 4.1).
+    Does NOT delete the storage account (owned by Lab 4.1) and does NOT remove the
+    'Microsoft.Storage' service endpoint from WorldSubnet (owned by Lab 2.2).
 .PARAMETER Environment
     The environment to clean up (prod, dev, platform). Default: prod.
 .PARAMETER Force
@@ -14,11 +15,12 @@
 .NOTES
     Project: SkyCraft
     Author: SkyCraft
-    Date: 2026-02-21
+    Version: 2.0.0
+    Date: 2026-08-28
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.Resources, Az.Storage, Az.Network
+#Requires -Modules Az.Accounts, Az.Resources, Az.Storage
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -98,24 +100,10 @@ if ($PSCmdlet.ShouldProcess($storageAccountName, "Remove 'Storage Blob Data Cont
     }
 }
 
-# 6. Remove Service Endpoint from subnet
-if ($PSCmdlet.ShouldProcess('WorldSubnet', "Remove 'Microsoft.Storage' service endpoint")) {
-    try {
-        Write-Host "Removing 'Microsoft.Storage' service endpoint from 'WorldSubnet'..." -ForegroundColor Yellow
-        $vnet = Get-AzVirtualNetwork -ResourceGroupName $resourceGroupName -Name $vnetName -ErrorAction Stop
-        $subnet = Get-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -VirtualNetwork $vnet -ErrorAction Stop
-
-        $endpoints = $subnet.ServiceEndpoints | Where-Object Service -ne 'Microsoft.Storage'
-        Set-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' `
-            -VirtualNetwork $vnet `
-            -AddressPrefix $subnet.AddressPrefix `
-            -ServiceEndpoint ($endpoints.Service) -ErrorAction Stop | Out-Null
-        $vnet | Set-AzVirtualNetwork -ErrorAction Stop | Out-Null
-        Write-Host "  -> Service endpoint removed from WorldSubnet." -ForegroundColor Green
-    }
-    catch {
-        Write-Host "  -> [INFO] Could not remove service endpoint (may not exist)." -ForegroundColor Gray
-    }
-}
+# 6. The Microsoft.Storage service endpoint on WorldSubnet is Lab 2.2 state, not Lab 4.4 state:
+# Lab 2.2 sets it on WorldSubnet and DatabaseSubnet, and its Test-Lab.ps1 asserts it. Removing it
+# here silently regressed Module 2 on every Module 4 cleanup, so it is deliberately left in place.
+Write-Host "`n[INFO] Leaving the 'Microsoft.Storage' service endpoint on '$vnetName/WorldSubnet' in place." -ForegroundColor Gray
+Write-Host "       It belongs to Lab 2.2; remove it with that lab's cleanup if you want it gone." -ForegroundColor Gray
 
 Write-Host "`nCleanup Complete." -ForegroundColor Cyan
