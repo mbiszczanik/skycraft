@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.bicepparam` parameter files for the Module 3 Bicep entry points (Labs 3.2, 3.3 and 3.4; Lab 3.1 already had dev/prod files).
 - Lab 3.3 `bicep/acr.bicep`: a resource-group-scope entry point that deploys only the container registry, used by `Deploy-Bicep.ps1` to bootstrap the image before the orchestrator runs.
 - Lab 3.4 `bicep/modules/autoscale.bicep`: the documented local fallback for autoscale settings, because `avm/res/insights/autoscale-setting` is only *Proposed*.
+- `.bicepparam` parameter files for the Module 4 Bicep entry points (Labs 4.1, 4.2, 4.3 and 4.4).
+- `parOwner` and the canonical `Owner` tag across Module 4, including the portal, CLI and PowerShell paths in the Lab 4.1 guide and the Lab 4.1/4.3 checklists.
+- Lab 2.2 `Test-Lab.ps1` asserts the `Microsoft.Storage` service endpoint on `WorldSubnet` (the endpoint Lab 4.4 depends on) and, when Bastion is deployed, its SKU, its public IP SKU and allocation method, and the canonical tags on both (#90).
+- Lab 2.3 `Test-Lab.ps1` asserts `DisableOutboundSnat` is false on every load-balancing rule, the canonical tags on both load balancers and both DNS zones, and that the `dev` and `play` A records resolve to the load balancer public IPs reserved in Lab 2.1 (#90).
 
 ### Changed
 
@@ -35,6 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lab 3.2 resource deltas from the AVM conversion: the data disk is created with `networkAccessPolicy: DenyAll` and `publicNetworkAccess: Disabled` (AVM defaults; the lab never exports a disk) plus `hyperVGeneration: V2` and explicit `burstingEnabled`/`maxShares`/`optimizedForFrequentAttach` values, the OS disk sets `caching: ReadWrite` explicitly, and `adminUsername` became a parameter (`parAdminUsername`, default `azureuser`) because a literal admin name is an error-level linter rule.
 - Lab 3.3 resource deltas: the Container Apps environment's infrastructure resource group is named `ME_<environment-name>` by the module (Azure's auto-name was `ME_<env>_<rg>_<region>`), inter-app traffic encryption is enabled, and the container app is sent `maxInactiveRevisions: 0`, `activeRevisionsMode: 'Single'` and `ingressAllowInsecure: false`; and the registry keeps Azure's `azureADAuthenticationAsArmPolicy: enabled` through an explicit override (the module defaults it to `disabled`, which makes `Get-AzContainerRegistryRepository` fail with `Unauthorized`) and is sent a 7-day disabled soft-delete policy and `anonymousPullEnabled: false`.
 - Lab 3.4 resource deltas: the staging slot now inherits the app's `siteConfig`, HTTPS-only setting, system-assigned identity, outbound VNet routing **and regional VNet integration** (the hand-written slot had none of the last three); the plan is sent one worker without zone redundancy (the AVM defaults are three workers and zone-redundant for Premium SKUs); the site keeps `ftpsState: 'FtpsOnly'` and uses the `outboundVnetRouting` property of the 2025-03-01 API instead of the legacy `siteConfig` route-all flag, while `alwaysOn` stays at Azure's default for lab cost.
+- Module 4 Bicep converted to the AVM-first architecture (issue #62 v2, PR 4/6): all four labs configure the SkyCraft storage accounts through `avm/res/storage/storage-account`, which covers the account, the blob service (soft delete, versioning, containers), lifecycle management rules, the file service (soft delete, shares) and the network ACLs in a single module call.
+- Module 4 lab-friction overrides (`docs/bicep-standards.md` §4.5): `networkAcls: { bypass: 'AzureServices', defaultAction: 'Allow' }` in Labs 4.1–4.3, because the module emits `Deny` when the parameter is omitted and Lab 4.4 is the lab that teaches locking the account; and `requireInfrastructureEncryption: false` in all four labs, because the module defaults it to `true` while Azure's own default is `false` and the property is creation-only.
+- Module 4 labs are cumulative forward and must be run in order. The AVM module skips a sub-service whose parameter is empty, so a lab that does not own a sub-service passes `{}` and cannot regress an earlier lab; account-level properties are a full replace, so every lab restates the same baseline. Lab 4.4 is the only lab that has to restate another lab's blob configuration, because it creates `dev-assets`.
+- Lab 4.1 deploys its three environments through one copy loop instead of three conditional module calls, and no longer switches encryption shape by deployment age: `parIsNewDeployment` and the `-NewDeployment` switch are gone (the module omits the creation-only `keyType` unless it is passed). `Deploy-Bicep.ps1` keeps its existing-account scan, which now only forces `parEnableInfrastructureEncryption` to false when the account already exists.
+- Lab 4.2 `Deploy-Bicep.ps1` passes `parLocation`; it accepted `-Location` but only used it as the deployment location, so the template always kept its own default.
+- Lab 4.4 `Remove-LabResource.ps1` no longer removes the `Microsoft.Storage` service endpoint from `WorldSubnet`. That endpoint is Lab 2.2 state, and removing it during a Module 4 cleanup silently regressed Module 2.
+- Module 4 resource deltas from the AVM conversion: `allowCrossTenantReplication: false` (Azure's default is `true`) and `isLocalUserEnabled: false`; on a `Standard_LRS` account the Lab 4.3 `outPrimaryFileEndpoint` output can be empty, because LRS/ZRS accounts expose only a blob endpoint.
+- Lab 2.3 template parameters renamed to the Module 2 convention: `parPlatformRG`/`parDevRG`/`parProdRG` to `parResourceGroupNamePlatform`/`Dev`/`Prod`, `parHubVnetName`/`parDevVnetName`/`parProdVnetName` to `parVnetNamePlatform`/`Dev`/`Prod`, and `parDevLbPipName`/`parProdLbPipName` to `parPipNameDev`/`parPipNameProd` (#91).
+- Lab 3.4 `Deploy-Bicep.ps1 -Environment prod` now targets the prod resource group and VNet; it passed only `parLocation` and `parEnvironment`, so a prod run renamed the resources but deployed them into the dev resource group and VNet.
+- Lab 3.3 `Deploy-Bicep.ps1` tags the bootstrap resource group with all four canonical tags derived from `-Environment` (it hardcoded `Environment = 'Development'` and omitted `Owner`) and waits for ACR DNS only when the registry itself was just created, not whenever the image is missing.
 - Lab 3.4 `Remove-LabResource.ps1` detaches the VNet integration from the web app and every slot and verifies per site that it is gone before deleting the plan (an integrated plan deleted first leaves an orphaned service association link that blocks deleting the subnet, VNet, NSGs and resource group); the resource names are parameters, and the script exits non-zero on failure instead of continuing silently.
 
 ### Removed
@@ -43,6 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Module 2 local Bicep modules `vnet-hub.bicep`, `vnet-spoke.bicep`, `vnet-peering.bicep`, `public-ip.bicep` (Lab 2.1), `security-hub.bicep`, `security-spoke.bicep` (Lab 2.2), `dns-public.bicep`, `dns-private.bicep`, `load-balancer.bicep` (Lab 2.3), superseded by the AVM modules above; `get-public-ip.bicep` is retained as the documented trivial `existing` lookup.
 - Module 3 local Bicep modules `keyvault.bicep`, `nic.bicep`, `vm.bicep`, `disk.bicep` (Lab 3.2), `acr.bicep`, `aci.bicep`, `containerapps.bicep` (Lab 3.3) and `app-service.bicep` (Lab 3.4), superseded by the AVM modules above; Lab 3.4 `modules/autoscale.bicep` is the documented fallback.
 - Lab 3.3 `Deploy-Containers.ps1`: an older duplicate of `Deploy-Bicep.ps1` that deployed the deleted local modules directly and was referenced by nothing.
+- Module 4 local Bicep modules `storageAccount.bicep` (Lab 4.1), `blobContainer.bicep` (Lab 4.2), `storage.bicep` (Lab 4.3) and `security.bicep` (Lab 4.4), superseded by the AVM module above. Module 4 has no local modules left and no `bicep/modules/` directory.
+- The cross-lab import that made Lab 4.2 compile Lab 4.1's `modules/storageAccount.bicep`.
+- The `blobContainer.bicep` `PublicAccessNotPermitted` race workaround: every container in Module 4 is `publicAccess: 'None'` (the subscription policy blocks anything else), so the race cannot occur.
 
 ### Fixed
 
@@ -54,6 +71,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lab 3.3 `Deploy-Bicep.ps1` bootstrapped the registry from `bicep/modules/acr.bicep`, a module that is not deployable on its own; it now deploys `bicep/acr.bicep`.
 - Lab 3.3 checklist named the Container Apps environment and app `dev-skycraft-swc-cae`/`dev-skycraft-swc-aca-world`; the template and `Test-Lab.ps1` use the `-02` names.
 - Lab 3.1 checklist expected a dev VNet with three subnets; it has four, and its hand-off to Lab 3.2 no longer previews a hand-written VM module or links to a folder that does not exist.
+- Lab 1.3 guide and checklist taught non-canonical tag values (`CostCenter` of `Engineering`/`Operations`/`Shared-Services`, an `Owner` e-mail address); the portal path now teaches the same `CostCenter = MSDN` and `Owner = mbiszczanik` the Bicep path deploys (#88).
+- Lab 2.1 guide: the "Prod Load Balancer Public IP" block appeared twice with different content, and the dev VNet was described as having three subnets instead of four (#88).
+- Lab 2.2 `ARCHITECTURE.md` counted 9 NSGs; the lab deploys 7 (1 hub + 3 dev + 3 prod) (#88).
+- Lab 2.1 `Remove-LabResource.ps1` filtered peerings on `-match "peer"`, which matches none of the `hub-to-dev`/`dev-to-hub` names, so cleanup left the spoke side behind as `Disconnected` and the next Lab 2.1 deployment failed with `RemotePeeringIsDisconnected` (#89).
+- Lab 2.2 `Remove-LabResource.ps1` printed `~/month` for its three cost estimates: `"~$140/month"` interpolated the undefined variable `$140` (#89).
+- Lab 2.2 `Deploy-Security.ps1` recorded service endpoints with `Locations = @("swedencentral")` while the Bicep path records them region-unrestricted, so every subsequent what-if reported a subnet Modify (#89).
 
 ## [0.7.1] - 2026-07-27
 
