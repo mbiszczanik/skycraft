@@ -52,8 +52,10 @@ try {
     Write-Host "Starting Bicep deployment from: $BicepFile" -ForegroundColor Yellow
     
     $params = @{
-        parLocation    = $Location
-        parEnvironment = $Environment
+        parLocation          = $Location
+        parEnvironment       = $Environment
+        parResourceGroupName = "$Environment-skycraft-swc-rg"
+        parVnetName          = "$Environment-skycraft-swc-vnet"
     }
 
     $deployment = New-AzSubscriptionDeployment `

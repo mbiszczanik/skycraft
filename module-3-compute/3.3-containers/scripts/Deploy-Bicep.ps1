@@ -78,8 +78,9 @@ if (-not (Test-Path $mainBicep)) {
 try {
     if (-not (Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue)) {
         Write-Host "Creating Resource Group: $ResourceGroupName..." -ForegroundColor Yellow
+        $envTag = @{ dev = 'Development'; prod = 'Production'; platform = 'Platform' }[$Environment]
         New-AzResourceGroup -Name $ResourceGroupName -Location $Location `
-            -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN' } -ErrorAction Stop | Out-Null
+            -Tag @{ Project = 'SkyCraft'; Environment = $envTag; CostCenter = 'MSDN'; Owner = 'mbiszczanik' } -ErrorAction Stop | Out-Null
     }
 } catch {
     Write-Host "[ERROR] Failed to create Resource Group: $_" -ForegroundColor Red
@@ -106,8 +107,8 @@ if ($acrExists) {
 
 $acrWasBootstrapped = $false
 if (-not $repoExists) {
-    $acrWasBootstrapped = $true
     if (-not $acrExists) {
+        $acrWasBootstrapped = $true    # only a brand-new registry needs the DNS wait
         Write-Host "Deploying ACR (Bootstrap)..." -ForegroundColor Yellow
         try {
             New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName `
