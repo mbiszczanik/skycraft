@@ -615,38 +615,33 @@ You've successfully completed **Lab 3.1: Automate Deployment Using ARM/Bicep**!
 - New team members onboard faster with documented IaC
 
 **Next Steps**: In **Lab 3.2: Deploy Virtual Machines**, you'll:
-- Extend main.bicep to include VM resources
-- Create compute module for VM deployment
-- Configure VM extensions for automation
-- Deploy Linux VMs for AzerothCore game servers
-- Add VMs to load balancer backend pools
+- Write the Lab 3.2 entry point that deploys into the network this lab created
+- Deploy the Auth and World Linux VMs through the AVM virtual-machine module
+- Attach a data disk created with the AVM disk module
+- Add the VMs to the load balancer backend pools from this lab
 - Implement SSH key authentication
+- Optionally encrypt the OS disks with Azure Disk Encryption and a Key Vault
 
-**Preview - VM Module You'll Create**:
+**Preview - AVM module call you'll write**:
 ```bicep
-// modules/vm.bicep
-param vmName string
-param vmSize string
-param subnetId string
-param sshPublicKey string
-
-resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
-  name: vmName
-  location: location
-  properties: {
-    hardwareProfile: { vmSize: vmSize }
-    osProfile: {
-      computerName: vmName
-      adminUsername: 'azureuser'
-      linuxConfiguration: {
-        ssh: {
-          publicKeys: [{
-            path: '/home/azureuser/.ssh/authorized_keys'
-            keyData: sshPublicKey
-          }]
-        }
+module modAuthVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
+  name: 'auth-vm-deployment'
+  scope: resRg
+  params: {
+    name: '${varNamePrefix}-auth-vm'
+    location: parLocation
+    tags: varCommonTags
+    vmSize: parVmSize
+    osType: 'Linux'
+    availabilityZone: parAvailabilityZoneAuth
+    adminUsername: parAdminUsername
+    disablePasswordAuthentication: true
+    publicKeys: [
+      {
+        keyData: parSshPublicKey
+        path: '/home/${parAdminUsername}/.ssh/authorized_keys'
       }
-    }
+    ]
   }
 }
 ```
@@ -658,7 +653,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
 - [← Back to Module 3 Index](../README.md)
 - [← Previous Module: Module 2 Virtual Networking](../../module-2-networking/README.md)
 - [Lab Guide: 3.1 Automate Deployment →](lab-guide-3.1.md)
-- [Next Lab: 3.2 Deploy Virtual Machines →](../3.2-deploy-vms/README.md)
+- [Next Lab: 3.2 Deploy Virtual Machines →](../3.2-virtual-machines/lab-guide-3.2.md)
 
 ---
 

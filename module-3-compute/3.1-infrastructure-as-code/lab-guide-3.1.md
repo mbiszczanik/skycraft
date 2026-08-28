@@ -475,7 +475,7 @@ output primaryEndpoint string = storageAccount.properties.primaryEndpoints.blob
 
 ```bicep
 // String parameter with default
-param vmSize string = 'Standard_B2s'
+param vmSize string = 'Standard_B2ls_v2'
 
 // String parameter without default (required)
 param adminUsername string
@@ -994,7 +994,7 @@ param devVnetAddressPrefix = '10.1.0.0/16'
 
 // VM parameters (for future use)
 param vmAdminUsername = 'azureuser'
-param vmSize = 'Standard_B2s'
+param vmSize = 'Standard_B2ls_v2'
 ```
 
 Create `prod.bicepparam`:
@@ -1060,7 +1060,7 @@ param prodVnetAddressPrefix string = '10.2.0.0/16'
 param vmAdminUsername string = 'azureuser'
 
 @description('VM size for compute resources')
-param vmSize string = 'Standard_B2s'
+param vmSize string = 'Standard_B2ls_v2'
 
 @description('SSH public key for VM authentication')
 @secure()
@@ -2135,7 +2135,7 @@ output vnetId string = existingVnet.id
 
 - [← Back to Module 3 Index](../README.md)
 - [← Previous Module: Module 2 Virtual Networking](../../module-2-networking/README.md)
-- [Next Lab: 3.2 Deploy Virtual Machines →](../3.2-deploy-vms/lab-guide-3.2.md)
+- [Next Lab: 3.2 Deploy Virtual Machines →](../3.2-virtual-machines/lab-guide-3.2.md)
 
 ---
 
