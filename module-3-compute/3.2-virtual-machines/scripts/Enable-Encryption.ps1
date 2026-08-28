@@ -184,26 +184,23 @@ foreach ($vmName in $VmNames) {
             }
         }
     } finally {
-        # Resize back (default) so the lab keeps its cheaper size - only once encryption has completed,
+        # Resize back (default) so the lab keeps its cheaper size - only once encryption has completed or never started,
         # because a resize restarts the VM and would interrupt an encryption that is still running
         if ($vmInfo[$vmName].Resized) {
-            if ($ResizeBack -and $completed) {
+            if ($ResizeBack -and ($completed -or -not $initiated)) {
+                # Safe to restore the size: encryption finished, or it never started.
                 Write-Host "  Resizing back to $originalSize..." -ForegroundColor Yellow
                 $vm = Get-AzVM -ResourceGroupName $rgName -Name $vmName
                 $vm.HardwareProfile.VmSize = $originalSize
                 # No deallocation needed: both sizes are in the same Bsv2/Basv2 family (same hardware cluster), so the resize is an in-place restart.
                 Update-AzVM -ResourceGroupName $rgName -VM $vm -ErrorAction Stop | Out-Null
                 Write-Host "  ✓ Resized back" -ForegroundColor Green
-            } elseif (-not $completed) {
+            } elseif ($initiated -and -not $completed) {
                 Write-Warning "$vmName was resized to $targetSize but encryption did not complete, so it was NOT resized back. Once Get-AzVmDiskEncryptionStatus shows OsVolumeEncrypted = Encrypted, run:"
-                Write-Host "  Update-AzVM -ResourceGroupName $rgName -VM (Get-AzVM -ResourceGroupName $rgName -Name $vmName | % { `$_.HardwareProfile.VmSize = '$originalSize'; `$_ })"
+                Write-Host "  Update-AzVM -ResourceGroupName $rgName -VM (Get-AzVM -ResourceGroupName $rgName -Name $vmName | ForEach-Object { `$_.HardwareProfile.VmSize = '$originalSize'; `$_ })"
             }
         }
     }
-}
-
-if ($failed.Count -gt 0) {
-    Write-Error "Encryption failed for: $($failed -join ', ')"
 }
 
 # Final verification
@@ -215,6 +212,10 @@ foreach ($vmName in $VmNames) {
         OS   = $encStatus.OsVolumeEncrypted
         Data = $encStatus.DataVolumesEncrypted
     } | Format-Table -AutoSize
+}
+
+if ($failed.Count -gt 0) {
+    Write-Error "Encryption failed for: $($failed -join ', ')"
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
