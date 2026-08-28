@@ -3,13 +3,21 @@
     Removes Lab 3.4 resources.
 
 .DESCRIPTION
-    Detaches the regional VNet integration from the Web App and from every deployment slot, waits for
-    the AppServiceSubnet service association link to the plan to disappear, then deletes the Web App
-    (with its slots), the autoscale setting and the App Service Plan - in that order.
+    Detaches the regional VNet integration from the Web App and from every deployment slot, then
+    verifies per site that the integration is really gone (the site's networkConfig/virtualNetwork
+    route answers 404 once detached), reports the state of the integration subnet, and finally
+    deletes the Web App (with its slots), the autoscale setting and the App Service Plan - in that
+    order.
 
     Deleting the plan while an integration is still attached can leave an orphaned
     serviceAssociationLink on the subnet, which makes the subnet, the VNet, its NSGs and the whole
-    resource group undeletable (Azure support ticket). Hence the detach-first order.
+    resource group undeletable (Azure support ticket). Hence the detach-first order. The dev and
+    prod AppServiceSubnets already carry such an orphaned link naming a plan with the same name, so
+    the subnet links are compared against a snapshot taken before the detach and only reported -
+    a leftover link is a warning, never a failure.
+
+    The subnet is inspected before the plan is deleted even when the Web App is already gone, so a
+    partially cleaned lab still gets a warning instead of a silent plan deletion.
 
     Does NOT delete the Resource Group or the VNet (shared resources).
 
@@ -76,13 +84,47 @@ Write-Host "Target Resource Group: $RgName" -ForegroundColor Yellow
 # 1. Verify Connection
 if (-not (Get-AzContext)) { Write-Host "Not logged in." -ForegroundColor Red; exit 1 }
 
+# The AVM modules deploy Microsoft.Web/* at 2025-03-01; the networkConfig/virtualNetwork sub-resource
+# route is unchanged across both versions, so pinning the older one here is deliberate.
 $webApiVersion = '2023-12-01'
 $autoscaleName = "$AspName-autoscale"
 
+function Get-SubnetLinkSnapshot {
+    <#
+    .SYNOPSIS
+        Returns the service association link URIs of the integration subnet.
+    .DESCRIPTION
+        Returns $null when the VNet or the subnet cannot be read, so that "unknown" stays
+        distinguishable from "no links".
+    .NOTES
+        Internal helper for Remove-LabResource.ps1.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][string]$Vnet,
+        [Parameter(Mandatory)][string]$Rg,
+        [Parameter(Mandatory)][string]$Subnet
+    )
+
+    $vnetObject = Get-AzVirtualNetwork -Name $Vnet -ResourceGroupName $Rg -ErrorAction SilentlyContinue
+    if (-not $vnetObject) { return $null }
+
+    $subnetObject = $vnetObject.Subnets | Where-Object { $_.Name -eq $Subnet }
+    if (-not $subnetObject) { return $null }
+
+    return @($subnetObject.ServiceAssociationLinks | ForEach-Object { $_.Link })
+}
+
+# 2. Snapshot the subnet links BEFORE the detach. The known orphan names a plan with this very
+#    name, so only a before/after comparison can tell it apart from a link left by this run.
+$linksBefore = Get-SubnetLinkSnapshot -Vnet $VnetName -Rg $RgName -Subnet $SubnetName
+
 try {
     $app = Get-AzWebApp -ResourceGroupName $RgName -Name $AppName -ErrorAction SilentlyContinue
+    $targets = @()
 
-    # 2. Detach the VNet integration from the app and every slot BEFORE anything is deleted
+    # 3. Detach the VNet integration from the app and every slot BEFORE anything is deleted
     if ($app) {
         $targets = @($app.Id)
         $slots = @(Get-AzWebAppSlot -ResourceGroupName $RgName -Name $AppName -ErrorAction SilentlyContinue)
@@ -91,42 +133,80 @@ try {
         foreach ($id in $targets) {
             if ($PSCmdlet.ShouldProcess($id, 'Remove VNet integration')) {
                 Write-Host "Detaching VNet integration: $id" -ForegroundColor Yellow
-                $response = Invoke-AzRestMethod -Method DELETE -Path "$id/networkConfig/virtualNetwork?api-version=$webApiVersion"
-                if ($response.StatusCode -notin 200, 204, 404) {
+                $response = Invoke-AzRestMethod -Method DELETE -Path "$id/networkConfig/virtualNetwork?api-version=$webApiVersion" -ErrorAction SilentlyContinue
+                if ($null -eq $response) {
+                    Write-Host "  -> [WARN] No response from the management API - the integration may still be attached." -ForegroundColor Yellow
+                }
+                elseif ($response.StatusCode -notin 200, 202, 204, 404) {
                     Write-Host "  -> [WARN] HTTP $($response.StatusCode): $($response.Content)" -ForegroundColor Yellow
                 }
             }
         }
-
-        # Bounded wait for the subnet's service association link to the plan to disappear
-        $deadline = (Get-Date).AddMinutes(3)
-        do {
-            $vnet = Get-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -ErrorAction SilentlyContinue
-            $subnet = $vnet.Subnets | Where-Object { $_.Name -eq $SubnetName }
-            $links = @($subnet.ServiceAssociationLinks | Where-Object { $_.Link -like "*/serverfarms/$AspName" })
-            if ($links.Count -eq 0) { break }
-            Start-Sleep -Seconds 10
-        } while ((Get-Date) -lt $deadline)
-
-        if ($links.Count -gt 0) {
-            Write-Host "  -> [WARN] '$SubnetName' still carries a serviceAssociationLink to '$AspName' (pre-existing orphaned link or propagation delay). Continuing." -ForegroundColor Yellow
-        }
-        else {
-            Write-Host "  -> VNet integration detached; '$SubnetName' has no link to '$AspName'." -ForegroundColor Green
-        }
-
-        # 3. Delete the Web App (slots go with it)
-        if ($PSCmdlet.ShouldProcess($AppName, 'Remove Web App (including slots)')) {
-            Write-Host "Removing Web App '$AppName'..." -ForegroundColor Yellow
-            Remove-AzWebApp -ResourceGroupName $RgName -Name $AppName -Force -ErrorAction Stop | Out-Null
-            Write-Host "  -> Deleted" -ForegroundColor Green
-        }
     }
     else {
-        Write-Host "Web App '$AppName' not found - skipping detach and app deletion." -ForegroundColor Gray
+        Write-Host "Web App '$AppName' not found - nothing to detach." -ForegroundColor Gray
     }
 
-    # 4. Delete the autoscale setting
+    # 4. Verify per site that the integration is gone: the route answers 404 once detached and 200
+    #    while it still exists. This is the only check the known orphaned link cannot confuse.
+    if ($WhatIfPreference) {
+        Write-Host "What if: Would poll networkConfig/virtualNetwork for HTTP 404 on $($targets.Count) site(s), up to 3 minutes." -ForegroundColor Gray
+    }
+    elseif ($targets.Count -gt 0) {
+        $deadline = (Get-Date).AddMinutes(3)
+        $pending = [System.Collections.Generic.List[string]]::new()
+        foreach ($id in $targets) { $pending.Add($id) }
+
+        while ($pending.Count -gt 0) {
+            foreach ($id in @($pending)) {
+                $check = Invoke-AzRestMethod -Method GET -Path "$id/networkConfig/virtualNetwork?api-version=$webApiVersion" -ErrorAction SilentlyContinue
+                if ($null -ne $check -and $check.StatusCode -eq 404) {
+                    Write-Host "  -> Integration detached: $id" -ForegroundColor Green
+                    [void]$pending.Remove($id)
+                }
+            }
+            if ($pending.Count -eq 0 -or (Get-Date) -ge $deadline) { break }
+            Start-Sleep -Seconds 10
+        }
+
+        foreach ($id in $pending) {
+            Write-Host "  -> [WARN] Integration still attached after 3 minutes: $id" -ForegroundColor Yellow
+        }
+    }
+
+    # 5. Report the subnet state before the plan is deleted - informational, never fatal.
+    if ($WhatIfPreference) {
+        Write-Host "What if: Would compare the service association links of '$SubnetName' against the pre-cleanup snapshot." -ForegroundColor Gray
+    }
+    else {
+        $linksAfter = Get-SubnetLinkSnapshot -Vnet $VnetName -Rg $RgName -Subnet $SubnetName
+        if ($null -eq $linksAfter) {
+            Write-Host "  -> [WARN] Subnet '$SubnetName' not found in '$VnetName' - cannot confirm the link is gone." -ForegroundColor Yellow
+        }
+        else {
+            $planLinksAfter = @($linksAfter | Where-Object { $_ -like "*/serverfarms/$AspName" })
+            $planLinksBefore = @($linksBefore | Where-Object { $_ -like "*/serverfarms/$AspName" })
+
+            if ($planLinksAfter.Count -eq 0) {
+                Write-Host "  -> Confirmed: '$SubnetName' carries no service association link to '$AspName'." -ForegroundColor Green
+            }
+            elseif ($planLinksBefore.Count -gt 0) {
+                Write-Host "  -> [WARN] '$SubnetName' still carries a link to '$AspName' - pre-existing link (unchanged), the known orphan. Continuing." -ForegroundColor Yellow
+            }
+            else {
+                Write-Host "  -> [WARN] '$SubnetName' carries a NEW link to '$AspName' that was absent before cleanup. Continuing." -ForegroundColor Yellow
+            }
+        }
+    }
+
+    # 6. Delete the Web App (slots go with it)
+    if ($app -and $PSCmdlet.ShouldProcess($AppName, 'Remove Web App (including slots)')) {
+        Write-Host "Removing Web App '$AppName'..." -ForegroundColor Yellow
+        Remove-AzWebApp -ResourceGroupName $RgName -Name $AppName -Force -ErrorAction Stop | Out-Null
+        Write-Host "  -> Deleted" -ForegroundColor Green
+    }
+
+    # 7. Delete the autoscale setting
     if ($PSCmdlet.ShouldProcess($autoscaleName, 'Remove Autoscale Setting')) {
         Write-Host "Removing autoscale setting '$autoscaleName'..." -ForegroundColor Yellow
         $autoscale = Get-AzAutoscaleSetting -ResourceGroupName $RgName -Name $autoscaleName -ErrorAction SilentlyContinue
@@ -139,7 +219,7 @@ try {
         }
     }
 
-    # 5. Delete the App Service Plan
+    # 8. Delete the App Service Plan
     if ($PSCmdlet.ShouldProcess($AspName, 'Remove App Service Plan')) {
         Write-Host "Removing App Service Plan '$AspName'..." -ForegroundColor Yellow
         $plan = Get-AzAppServicePlan -ResourceGroupName $RgName -Name $AspName -ErrorAction SilentlyContinue

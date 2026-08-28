@@ -75,6 +75,9 @@ Describe 'Bicep - no future-dated API versions' {
 }
 
 Describe 'Bicep - regression guard on known bleeding-edge versions' {
+    # Applies to repo-authored 'resource' declarations only. AVM module references carry no API
+    # version in .bicep source, so a lab calling avm/res/web/site (which deploys 2025-03-01
+    # internally) does not trip this guard - and must not, that version is the module's choice.
     It "'<file>' does not reintroduce Microsoft.Web/*@2025-03-01" -ForEach $FileCases {
         $text = Get-Content -Raw -LiteralPath $path
         $text | Should -Not -Match "Microsoft\.Web/[^@']+@2025-03-01"

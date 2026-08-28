@@ -81,7 +81,7 @@ module modAppServicePlan 'br/public:avm/res/web/serverfarm:0.7.0' = {
     tags: varCommonTags
     kind: 'linux'
     skuName: 'P0v4'
-    skuCapacity: 1
+    skuCapacity: 1 // AVM default is 3 (standards section 4.5)
     zoneRedundant: false // Lab-friction override (standards section 4.5): AVM defaults P-SKUs to zone-redundant
   }
 }
@@ -102,10 +102,17 @@ module modWebApp 'br/public:avm/res/web/site:0.24.0' = {
       systemAssigned: true
     }
     virtualNetworkSubnetResourceId: resSubnet.id
+    // Route all outbound traffic through the VNet. The pinned module deploys the 2025-03-01
+    // Microsoft.Web sites API, where this replaces the legacy siteConfig.vnetRouteAllEnabled flag.
+    outboundVnetRouting: {
+      allTraffic: true
+    }
+    // Replaces the AVM default siteConfig object, so every value the lab needs is restated here.
+    // alwaysOn is deliberately left at Azure's default (false) to keep the lab cheap; the staging slot inherits this object.
     siteConfig: {
       linuxFxVersion: 'NODE|20-lts'
-      vnetRouteAllEnabled: true
       minTlsVersion: '1.2'
+      ftpsState: 'FtpsOnly'
     }
     slots: [
       {
