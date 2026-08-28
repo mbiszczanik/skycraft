@@ -57,7 +57,7 @@
 
 ## 5. Bicep implementation note (AVM)
 
-- **Registry**: `avm/res/container-registry/registry` — Standard SKU with the admin user enabled (the lab's credential model) and `networkRuleSetDefaultAction: 'Allow'`, a lab-friction override (docs/bicep-standards.md §4.5): with public access enabled the module's default `Deny` adds a network rule set that blocks image pulls and imports.
+- **Registry**: `avm/res/container-registry/registry` — Standard SKU with the admin user enabled (the lab's credential model) and `networkRuleSetDefaultAction: 'Allow'`, a lab-friction override (docs/bicep-standards.md §4.5): with public access enabled the module's default `Deny` adds a network rule set a Standard registry cannot accept. `azureADAuthenticationAsArmPolicyStatus: 'enabled'` is the second override: the module defaults it to `disabled`, which blocks ARM-audience tokens from the registry data plane and makes `Get-AzContainerRegistryRepository` fail with `Unauthorized`.
 - **Container instance**: `avm/res/container-instance/container-group` — public IP and the same DNS label as before; the FQDN is composed in an output because this module version returns only the IPv4 address.
 - **Container Apps environment**: `avm/res/app/managed-environment` with the §4.5 overrides `zoneRedundant: false` (the default needs an infrastructure subnet) and `publicNetworkAccess: 'Enabled'`. The module names the environment's infrastructure resource group `ME_<environment-name>`; that name is immutable, so a leftover environment has to be deleted rather than redeployed onto.
 - **Container app**: `avm/res/app/container-app` — external ingress with `ingressAllowInsecure: false` and 1–3 replicas scaled on HTTP concurrency; the module also sends `maxInactiveRevisions: 0`.

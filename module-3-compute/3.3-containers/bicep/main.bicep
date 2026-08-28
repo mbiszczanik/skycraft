@@ -115,6 +115,10 @@ module modAcr 'br/public:avm/res/container-registry/registry:0.13.0' = {
     acrAdminUserEnabled: true
     publicNetworkAccess: 'Enabled'
     networkRuleSetDefaultAction: 'Allow' // AVM default 'Deny' would add a network rule set that blocks the lab
+    // AVM defaults this to 'disabled'; Azure's own default is 'enabled'. While disabled, ARM-audience tokens
+    // cannot reach the registry data plane, so Get-AzContainerRegistryRepository (used by Test-Lab.ps1)
+    // fails with 'Unauthorized' even though the image is present.
+    azureADAuthenticationAsArmPolicyStatus: 'enabled'
   }
   dependsOn: [
     modResourceGroup // RG must exist before RG-scoped modules; no symbolic reference available
