@@ -163,7 +163,7 @@ Test-Subnet -VnetName $prodVnetName -RgName $prodRg -SubnetName "DatabaseSubnet"
 # 4. Validate Azure Bastion (optional)
 Write-Host "`n=== 4. Validating Azure Bastion ===" -ForegroundColor Cyan
 
-function Test-CanonicalTags {
+function Test-CanonicalTagSet {
     param($ResourceLabel, $Tags, $ExpectedEnvironment)
     foreach ($t in @('Project', 'Environment', 'CostCenter', 'Owner')) {
         if (-not $Tags -or [string]::IsNullOrWhiteSpace($Tags[$t])) {
@@ -188,7 +188,7 @@ if ($bastion) {
         $script:failCount++
     }
 
-    Test-CanonicalTags -ResourceLabel "Bastion" -Tags $bastion.Tag -ExpectedEnvironment 'Platform'
+    Test-CanonicalTagSet -ResourceLabel "Bastion" -Tags $bastion.Tag -ExpectedEnvironment 'Platform'
 
     $bastionPip = Get-AzPublicIpAddress -ResourceGroupName $platRg -Name "platform-skycraft-swc-bas-pip" -ErrorAction SilentlyContinue
     if ($bastionPip) {
@@ -208,7 +208,7 @@ if ($bastion) {
             $script:failCount++
         }
 
-        Test-CanonicalTags -ResourceLabel "Bastion public IP" -Tags $bastionPip.Tag -ExpectedEnvironment 'Platform'
+        Test-CanonicalTagSet -ResourceLabel "Bastion public IP" -Tags $bastionPip.Tag -ExpectedEnvironment 'Platform'
     } else {
         Write-Host "  -> [FAIL] Bastion public IP 'platform-skycraft-swc-bas-pip' NOT found" -ForegroundColor Red
         $script:failCount++
