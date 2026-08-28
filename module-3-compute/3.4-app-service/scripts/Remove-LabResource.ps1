@@ -153,12 +153,13 @@ try {
         Write-Host "Web App '$AppName' not found - nothing to detach." -ForegroundColor Gray
     }
 
-    # 4. Verify per site that the integration is gone: the route answers 404 once detached and 200
-    #    while it still exists. This is the only check the known orphaned link cannot confuse.
-    #    Only sites whose DELETE actually ran are polled - a declined prompt leaves the site
+    # 4. Verify per site that the integration is gone. This is the only check the known orphaned link
+    #    cannot confuse. The route answers 404 on some stamps and 200 with an empty body on others
+    #    once the integration is deleted, so both count as detached; only a non-empty subnet id does
+    #    not. Only sites whose DELETE actually ran are polled - a declined prompt leaves the site
     #    attached on purpose, so waiting three minutes for it would be pointless.
     if ($WhatIfPreference) {
-        Write-Host "What if: Would poll networkConfig/virtualNetwork for HTTP 404 on $($targets.Count) site(s), up to 3 minutes." -ForegroundColor Gray
+        Write-Host "What if: Would poll networkConfig/virtualNetwork on $($targets.Count) site(s) until no subnet is reported, up to 3 minutes." -ForegroundColor Gray
     }
     elseif ($detached.Count -gt 0) {
         $deadline = (Get-Date).AddMinutes(3)
@@ -168,7 +169,20 @@ try {
         while ($pending.Count -gt 0) {
             foreach ($id in @($pending)) {
                 $check = Invoke-AzRestMethod -Method GET -Path "$id/networkConfig/virtualNetwork?api-version=$webApiVersion" -ErrorAction SilentlyContinue
-                if ($null -ne $check -and $check.StatusCode -eq 404) {
+                if ($null -eq $check) { continue }
+
+                $stillAttached = $false
+                if ($check.StatusCode -eq 200) {
+                    $subnetId = $null
+                    try { $subnetId = ($check.Content | ConvertFrom-Json).properties.subnetResourceId } catch { $subnetId = $null }
+                    $stillAttached = -not [string]::IsNullOrWhiteSpace($subnetId)
+                }
+                elseif ($check.StatusCode -ne 404) {
+                    # Any other status is inconclusive; keep polling until the deadline.
+                    $stillAttached = $true
+                }
+
+                if (-not $stillAttached) {
                     Write-Host "  -> Integration detached: $id" -ForegroundColor Green
                     [void]$pending.Remove($id)
                 }
