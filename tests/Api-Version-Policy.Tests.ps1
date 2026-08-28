@@ -75,6 +75,9 @@ Describe 'Bicep - no future-dated API versions' {
 }
 
 Describe 'Bicep - regression guard on known bleeding-edge versions' {
+    # Applies to repo-authored 'resource' declarations only. AVM module references carry no API
+    # version in .bicep source, so a lab calling avm/res/web/site (which deploys 2025-03-01
+    # internally) does not trip this guard - and must not, that version is the module's choice.
     It "'<file>' does not reintroduce Microsoft.Web/*@2025-03-01" -ForEach $FileCases {
         $text = Get-Content -Raw -LiteralPath $path
         $text | Should -Not -Match "Microsoft\.Web/[^@']+@2025-03-01"
@@ -89,11 +92,9 @@ Describe 'Bicep - regression guard on known bleeding-edge versions' {
 Describe 'Bicep - module-3.3 and module-3.4 still compile' {
     $FixedModules = @(
         @{ file = 'module-3-compute/3.3-containers/bicep/main.bicep'        ; path = (Join-Path $RepoRoot 'module-3-compute/3.3-containers/bicep/main.bicep') }
-        @{ file = 'module-3-compute/3.3-containers/bicep/modules/acr.bicep' ; path = (Join-Path $RepoRoot 'module-3-compute/3.3-containers/bicep/modules/acr.bicep') }
-        @{ file = 'module-3-compute/3.3-containers/bicep/modules/aci.bicep' ; path = (Join-Path $RepoRoot 'module-3-compute/3.3-containers/bicep/modules/aci.bicep') }
-        @{ file = 'module-3-compute/3.3-containers/bicep/modules/containerapps.bicep' ; path = (Join-Path $RepoRoot 'module-3-compute/3.3-containers/bicep/modules/containerapps.bicep') }
+        @{ file = 'module-3-compute/3.3-containers/bicep/acr.bicep'         ; path = (Join-Path $RepoRoot 'module-3-compute/3.3-containers/bicep/acr.bicep') }
         @{ file = 'module-3-compute/3.4-app-service/bicep/main.bicep'       ; path = (Join-Path $RepoRoot 'module-3-compute/3.4-app-service/bicep/main.bicep') }
-        @{ file = 'module-3-compute/3.4-app-service/bicep/modules/app-service.bicep' ; path = (Join-Path $RepoRoot 'module-3-compute/3.4-app-service/bicep/modules/app-service.bicep') }
+        @{ file = 'module-3-compute/3.4-app-service/bicep/modules/autoscale.bicep' ; path = (Join-Path $RepoRoot 'module-3-compute/3.4-app-service/bicep/modules/autoscale.bicep') }
     )
 
     It "'<file>' compiles via 'az bicep build'" -ForEach $FixedModules {

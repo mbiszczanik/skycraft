@@ -6,7 +6,7 @@
     This script orchestrates the deployment of SkyCraft Lab 3.3 (Containers).
     
     CRITICAL WORKFLOW:
-    1. Bootstraps Azure Container Registry (ACR) first (if not exists).
+    1. Bootstraps Azure Container Registry (ACR) first with bicep\acr.bicep (if not exists).
     2. Imports the required container image (skycraft-auth:v1) from MCR (Microsoft Container Registry).
     3. Executes the main.bicep orchestrator to deploy ACI and ACA.
     
@@ -66,7 +66,7 @@ Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 # Define paths
 $bicepPath = Join-Path $PSScriptRoot "..\bicep"
 $mainBicep = Join-Path $bicepPath "main.bicep"
-$acrBicep = Join-Path $bicepPath "modules\acr.bicep"
+$acrBicep = Join-Path $bicepPath "acr.bicep"
 $deploymentName = "Lab-3.3-Containers"
 
 if (-not (Test-Path $mainBicep)) {

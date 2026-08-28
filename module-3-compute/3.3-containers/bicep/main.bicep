@@ -1,9 +1,9 @@
 /*=====================================================
-SUMMARY: Lab 3.3 - Orchestrator
-DESCRIPTION: Orchestrates deployment for Lab 3.3 (ACR, ACI, CA)
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
-AUTHOR/S: Antigravity
-VERSION: 0.1.0
+SUMMARY: Lab 3.3 - Containers Orchestrator
+DESCRIPTION: Deploys the Container Registry, a Container Instance and a Container Apps environment with one app for SkyCraft Lab 3.3 via Azure Verified Modules (the image must already exist in the registry - Deploy-Bicep.ps1 bootstraps it with acr.bicep first)
+EXAMPLE: .\scripts\Deploy-Bicep.ps1 (Phase 1 deploys acr.bicep and imports the image, Phase 2 runs: az deployment sub create --location swedencentral --template-file main.bicep)
+AUTHOR/S: Marcin Biszczanik
+VERSION: 0.2.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -12,96 +12,253 @@ targetScope = 'subscription'
 /*******************
 *    Parameters    *
 *******************/
+
 @description('Location for all resources')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
-@description('Resource Group Name')
-param parResourceGroupName string = 'dev-skycraft-swc-rg'
-
-@description('Environment tag')
+@description('Environment (maps to the canonical Environment tag value)')
+@allowed(['dev', 'prod', 'platform'])
 param parEnvironment string = 'dev'
 
-@description('Name of the Container Registry')
+@description('Resource owner tag value')
+@minLength(1)
+param parOwner string = 'mbiszczanik'
+
+@description('Resource Group Name')
+@minLength(1)
+@maxLength(90)
+param parResourceGroupName string = 'dev-skycraft-swc-rg'
+
+@description('Name of the Container Registry (alphanumeric, globally unique)')
+@minLength(5)
+@maxLength(50)
 param parAcrName string = 'devskycraftswcacr01'
 
-@description('Name of the ACI Instance')
+@description('Name of the Container Instance')
+@minLength(1)
+@maxLength(63)
 param parAciName string = 'dev-skycraft-swc-aci-auth'
 
 @description('Name of the Container Apps Environment')
+@minLength(1)
+@maxLength(60)
 param parCaeName string = 'dev-skycraft-swc-cae-02'
 
 @description('Name of the Container App')
+@minLength(1)
+@maxLength(32)
 param parAcaName string = 'dev-skycraft-swc-aca-world-02'
 
-@description('Name of the image repository and tag')
+@description('Image repository and tag to run (must exist in the registry)')
+@minLength(3)
 param parImage string = 'skycraft-auth:v1'
 
 /*******************
-*    Resources     *
+*    Variables     *
 *******************/
 
-// Ensure Resource Group exists
-resource resRg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
+var varEnvironmentTags = {
+  dev: 'Development'
+  prod: 'Production'
+  platform: 'Platform'
+}
+var varCommonTags = {
+  Project: 'SkyCraft'
+  Environment: varEnvironmentTags[parEnvironment]
+  CostCenter: 'MSDN'
+  Owner: parOwner
+}
+
+var varAcrName = toLower(parAcrName)
+// The DNS label is derived from the resource group's ARM id - the same input the pre-conversion
+// template hashed through uniqueString(resourceGroup().id); confirm the FQDN on the first live deployment.
+var varAciDnsLabel = toLower('${parAciName}-${uniqueString('/subscriptions/${subscription().subscriptionId}/resourceGroups/${parResourceGroupName}')}')
+
+/*******************
+*     Existing     *
+*******************/
+
+resource resRg 'Microsoft.Resources/resourceGroups@2023-07-01' existing = {
   name: parResourceGroupName
-  location: parLocation
-  tags: {
-    Project: 'SkyCraft'
-    Environment: parEnvironment
+}
+
+// Registry lookup for the admin credentials consumed by ACI and the Container App
+resource resAcr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
+  name: varAcrName
+  scope: resRg
+}
+
+/*******************
+*     Modules      *
+*******************/
+
+// Resource group (idempotent; re-applies the canonical tags)
+module modResourceGroup 'br/public:avm/res/resources/resource-group:0.4.4' = {
+  name: 'rg-deployment'
+  params: {
+    name: parResourceGroupName
+    location: parLocation
+    tags: varCommonTags
   }
 }
 
-// 1. Deploy ACR
-module modAcr 'modules/acr.bicep' = {
-  name: 'deploy-acr'
+// 1. Container Registry (Standard, admin user on - the lab's credential model)
+module modAcr 'br/public:avm/res/container-registry/registry:0.13.0' = {
+  name: 'acr-deployment'
   scope: resRg
   params: {
-    parLocation: parLocation
-    parEnvironment: parEnvironment
-    parAcrName: parAcrName
-  }
-}
-
-// Note: The image must exist in ACR before ACI/ACA deployment succeeds if pulling immediately.
-// In a real pipeline, you'd deploy ACR -> Build Image -> Deploy Compute.
-// Here modules might fail if image is missing. User is expected to run "az acr build..." manually after ACR creation if following guides strictly.
-// However, if running this template fully, it assumes image exists or will retry.
-
-// 2. Deploy ACI
-module modAci 'modules/aci.bicep' = {
-  name: 'deploy-aci'
-  scope: resRg
-  params: {
-    parLocation: parLocation
-    parEnvironment: parEnvironment
-    parAcrName: parAcrName
-    parAciName: parAciName
-    parImage: parImage
+    name: varAcrName
+    location: parLocation
+    tags: varCommonTags
+    acrSku: 'Standard'
+    acrAdminUserEnabled: true
+    publicNetworkAccess: 'Enabled'
+    networkRuleSetDefaultAction: 'Allow' // AVM default 'Deny' would add a network rule set that blocks the lab
+    // AVM defaults this to 'disabled'; Azure's own default is 'enabled'. While disabled, ARM-audience tokens
+    // cannot reach the registry data plane, so Get-AzContainerRegistryRepository (used by Test-Lab.ps1)
+    // fails with 'Unauthorized' even though the image is present.
+    azureADAuthenticationAsArmPolicyStatus: 'enabled'
   }
   dependsOn: [
-    modAcr
+    modResourceGroup // RG must exist before RG-scoped modules; no symbolic reference available
   ]
 }
 
-// 3. Deploy Container Apps
-module modAca 'modules/containerapps.bicep' = {
-  name: 'deploy-aca'
+// 2. Container Instance (public IP, port 80)
+module modAci 'br/public:avm/res/container-instance/container-group:0.7.0' = {
+  name: 'aci-deployment'
   scope: resRg
   params: {
-    parLocation: parLocation
-    parEnvironment: parEnvironment
-    parAcrName: parAcrName
-    parCaeName: parCaeName
-    parAcaName: parAcaName
-    parImage: parImage
+    name: parAciName
+    location: parLocation
+    tags: varCommonTags
+    availabilityZone: -1
+    osType: 'Linux'
+    containers: [
+      {
+        name: parAciName
+        properties: {
+          image: '${modAcr.outputs.loginServer}/${parImage}'
+          ports: [
+            {
+              port: 80
+              protocol: 'TCP'
+            }
+          ]
+          resources: {
+            requests: {
+              cpu: 1
+              memoryInGB: '1'
+            }
+          }
+        }
+      }
+    ]
+    ipAddress: {
+      type: 'Public'
+      dnsNameLabel: varAciDnsLabel
+      ports: [
+        {
+          port: 80
+          protocol: 'TCP'
+        }
+      ]
+    }
+    imageRegistryCredentials: [
+      {
+        server: modAcr.outputs.loginServer
+        username: resAcr.listCredentials().username
+        password: resAcr.listCredentials().passwords[0].value
+      }
+    ]
+  }
+}
+
+// 3. Container Apps environment (consumption, Azure Monitor logs)
+module modCae 'br/public:avm/res/app/managed-environment:0.15.0' = {
+  name: 'cae-deployment'
+  scope: resRg
+  params: {
+    name: parCaeName
+    location: parLocation
+    tags: varCommonTags
+    appLogsConfiguration: {
+      destination: 'azure-monitor'
+    }
+    // Lab-friction overrides (standards section 4.5): the AVM defaults (zone redundancy, which
+    // needs an infrastructure subnet, and public network access disabled) would block the lab.
+    zoneRedundant: false
+    publicNetworkAccess: 'Enabled'
   }
   dependsOn: [
-    modAcr
+    modResourceGroup // RG must exist before RG-scoped modules; no symbolic reference available
   ]
+}
+
+// 4. Container App (external HTTP ingress, 1-3 replicas on HTTP concurrency)
+module modAca 'br/public:avm/res/app/container-app:0.23.0' = {
+  name: 'aca-deployment'
+  scope: resRg
+  params: {
+    name: parAcaName
+    location: parLocation
+    tags: varCommonTags
+    environmentResourceId: modCae.outputs.resourceId
+    managedIdentities: {
+      systemAssigned: true
+    }
+    ingressExternal: true
+    ingressTargetPort: 80
+    ingressTransport: 'auto'
+    ingressAllowInsecure: false
+    scaleSettings: {
+      minReplicas: 1
+      maxReplicas: 3
+      rules: [
+        {
+          name: 'http-load'
+          http: {
+            metadata: {
+              concurrentRequests: '10'
+            }
+          }
+        }
+      ]
+    }
+    secrets: [
+      {
+        name: 'acr-password'
+        value: resAcr.listCredentials().passwords[0].value
+      }
+    ]
+    registries: [
+      {
+        server: modAcr.outputs.loginServer
+        username: resAcr.listCredentials().username
+        passwordSecretRef: 'acr-password'
+      }
+    ]
+    containers: [
+      {
+        name: 'worldserver'
+        image: '${modAcr.outputs.loginServer}/${parImage}'
+        resources: {
+          cpu: json('0.25')
+          memory: '0.5Gi'
+        }
+      }
+    ]
+  }
 }
 
 /******************
 *     Outputs     *
 ******************/
-output outAcrLoginServer string = modAcr.outputs.outAcrLoginServer
-output outAciFqdn string = modAci.outputs.outAciFqdn
-output outAcaFqdn string = modAca.outputs.outAcaFqdn
+
+output outAcrLoginServer string = modAcr.outputs.loginServer
+// container-group:0.7.0 outputs only the IPv4 address, so the FQDN is composed here. The composition
+// assumes the Unsecure domain-name-label scope ({label}.{region}.azurecontainer.io); check it against
+// (Get-AzContainerGroup -ResourceGroupName <rg> -Name <name>).IpAddress.Fqdn on the first deployment.
+output outAciFqdn string = '${varAciDnsLabel}.${parLocation}.azurecontainer.io'
+output outAcaFqdn string = modAca.outputs.fqdn

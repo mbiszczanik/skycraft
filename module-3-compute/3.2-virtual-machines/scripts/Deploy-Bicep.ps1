@@ -13,7 +13,7 @@
     Target environment (dev or prod). Default: dev
 
 .PARAMETER VmSize
-    Azure VM size. Default: Standard_B2s
+    Azure VM size (B-series v2 or D-series; B v1 is not available in Sweden Central on this subscription). Default: Standard_B2ls_v2
 
 .PARAMETER EncryptionStrategy
     Encryption approach: None, EncryptionAtHost, or AzureDiskEncryption. Default: None
@@ -52,8 +52,8 @@ param(
     [string]$Environment = 'dev',
 
     [Parameter()]
-    [ValidateSet('Standard_B1s', 'Standard_B2s', 'Standard_B2ms', 'Standard_D2s_v3')]
-    [string]$VmSize = 'Standard_D2s_v3',
+    [ValidateSet('Standard_B2ls_v2', 'Standard_B2als_v2', 'Standard_B2s_v2', 'Standard_B2as_v2', 'Standard_D2s_v3', 'Standard_D4s_v3')]
+    [string]$VmSize = 'Standard_B2ls_v2',
 
     [Parameter()]
     [ValidateSet('None', 'EncryptionAtHost', 'AzureDiskEncryption')]

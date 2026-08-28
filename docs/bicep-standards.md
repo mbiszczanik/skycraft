@@ -96,7 +96,7 @@ Rules:
 Hand-written modules are the **exception**, allowed only when no suitable AVM module exists (missing from the AVM index, or not `Available`). Current fallbacks:
 
 - `Microsoft.Resources/tags` (Lab 1.3) — no AVM module exists.
-- Autoscale settings (Lab 3.4) — `avm/res/insights/autoscale-setting` is only *Proposed*.
+- Autoscale settings (Lab 3.4, `modules/autoscale.bicep`) — `avm/res/insights/autoscale-setting` is only *Proposed*.
 - Trivial `existing` lookups (e.g. the public-IP lookup in Lab 2.3) — stay inline or as a tiny local module.
 - All of Lab 3.1's modules — see [Section 8.2](#82-hand-written-modules-in-lab-31).
 
@@ -108,9 +108,16 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 
 | AVM module | Pinned version | Used in |
 | :--- | :--- | :--- |
+| `avm/res/app/container-app` | `0.23.0` | Lab 3.3 |
+| `avm/res/app/managed-environment` | `0.15.0` | Lab 3.3 |
 | `avm/res/authorization/policy-assignment/sub-scope` | `0.1.0` | Lab 1.3 |
 | `avm/res/authorization/role-assignment/rg-scope` | `0.1.1` | Lab 1.2 |
 | `avm/res/authorization/role-assignment/sub-scope` | `0.1.1` | Lab 1.2 |
+| `avm/res/compute/disk` | `0.6.1` | Lab 3.2 |
+| `avm/res/compute/virtual-machine` | `0.22.3` | Lab 3.2 |
+| `avm/res/container-instance/container-group` | `0.7.0` | Lab 3.3 |
+| `avm/res/container-registry/registry` | `0.13.0` | Lab 3.3 |
+| `avm/res/key-vault/vault` | `0.14.0` | Lab 3.2 |
 | `avm/res/network/application-security-group` | `0.2.2` | Lab 2.2 |
 | `avm/res/network/bastion-host` | `0.8.2` | Lab 2.2 |
 | `avm/res/network/dns-zone` | `0.6.2` | Lab 2.3 |
@@ -120,7 +127,9 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 | `avm/res/network/public-ip-address` | `0.13.0` | Lab 2.1 |
 | `avm/res/network/virtual-network` | `0.10.2` | Lab 2.1 |
 | `avm/res/network/virtual-network/subnet` | `0.2.0` | Lab 2.2 |
-| `avm/res/resources/resource-group` | `0.4.4` | Labs 1.2, 1.3 |
+| `avm/res/resources/resource-group` | `0.4.4` | Labs 1.2, 1.3, 3.3 |
+| `avm/res/web/serverfarm` | `0.7.0` | Lab 3.4 |
+| `avm/res/web/site` | `0.24.0` | Lab 3.4 |
 
 > [!NOTE]
 > The catalogue grows as labs are converted (issue #62 v2). Each conversion PR appends its modules here.
@@ -129,9 +138,12 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 
 The labs must stay easy to run, test, and tear down for students. Wherever an AVM default conflicts with that, override it explicitly at the call site with a short comment referencing this section. Known overrides:
 
-- **Key Vault** (`key-vault/vault`): disable soft delete and purge protection, so labs can be re-run and cleaned up without purge waits.
+- **Key Vault** (`key-vault/vault`): Azure no longer allows soft delete to be disabled on new vaults, so the override is the shortest retention (`softDeleteRetentionInDays: 7`) and `enablePurgeProtection: false` (the module defaults to `true`); the lab's `Remove-LabResource.ps1` purges the vault after deleting it so the name is reusable at once (Lab 3.2).
 - **Recovery Services Vault** (`recovery-services/vault`): disable soft delete / immutability settings, so `Remove-LabResource.ps1` can delete the vault.
 - **Load Balancer** (`network/load-balancer`): set `disableOutboundSnat: false` on every load-balancing rule (Lab 2.3). The module defaults it to `true`, which would silently remove the implicit outbound SNAT through the frontend IP that the Module 3 VMs (no public IPs, no NAT gateway) rely on.
+- **Container Apps environment** (`app/managed-environment`): `zoneRedundant: false` (the default `true` requires an infrastructure subnet) and `publicNetworkAccess: 'Enabled'` (default `Disabled`), so the consumption environment with external ingress the lab teaches still deploys (Lab 3.3).
+- **Container Registry** (`container-registry/registry`): `networkRuleSetDefaultAction: 'Allow'` — with public access enabled the module's default `Deny` makes it emit a `networkRuleSet`, but network rule sets are a Premium-only feature, so on the lab's Standard registry that object is rejected at deploy time (and would have no effect anyway). `Allow` keeps the module from sending one. The module also defaults `azureADAuthenticationAsArmPolicyStatus` to `disabled` while Azure's own default is `enabled`; the lab sets it back to `enabled`, because with it disabled an ARM-audience token cannot reach the registry data plane and `Get-AzContainerRegistryRepository` - the call the lab's `Test-Lab.ps1` makes - fails with `Unauthorized` even though the image is present (Lab 3.3).
+- **App Service Plan** (`web/serverfarm`): `zoneRedundant: false` and `skuCapacity: 1` — two independent defaults. The module defaults `zoneRedundant` to `true` for the P and EP SKU tiers (the lab's plan is `P0v4`), and defaults `skuCapacity` to `3` for every SKU; zone redundancy also requires at least two workers, so a one-worker lab plan must opt out of it (Lab 3.4).
 
 Further overrides follow the same principle and are decided per lab.
 
@@ -289,6 +301,7 @@ These are deliberate decisions where SkyCraft departs from the official Microsof
 - **Microsoft says** (linter default): Use recent API versions (`use-recent-api-versions`).
 - **We do**: Pin "Gold Standard" stable versions per resource family ([Section 2](#2-api-versioning-standards)).
 - **Why**: Reproducible labs. A bleeding-edge API version can change validation behaviour mid-course and break published lab guides.
+- **Scope**: the no-preview / no-future-date rule governs repo-authored `resource` declarations only; AVM modules carry their own upstream pinning and may deploy preview or future-dated API versions internally (e.g. `Microsoft.App/managedEnvironments@2025-10-02-preview`), which `tests/Api-Version-Policy.Tests.ps1` deliberately does not scan.
 
 ---
 

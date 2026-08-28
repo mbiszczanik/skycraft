@@ -6,7 +6,7 @@
     Cleans up Lab 3.2 resources in the following order:
     1. Virtual Machines (which auto-deletes NICs and OS disks via deleteOption=Delete)
     2. Data Disks
-    3. Key Vault (if exists)
+    3. Key Vault (if exists; deleted and purged)
 
     Note: This does NOT remove Lab 3.1 resources (VNets, NSGs, Load Balancer).
 
@@ -17,7 +17,7 @@
     Skip confirmation prompts
 
 .PARAMETER IncludeKeyVault
-    Also remove the Key Vault (requires purge permissions)
+    Also remove the Key Vault and purge it from the soft-deleted state (requires purge permission on the vault).
 
 .EXAMPLE
     .\Remove-LabResource.ps1 -Environment dev
@@ -125,14 +125,20 @@ foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'Disk' }) 
     }
 }
 
-# Delete Key Vault (soft-delete means it goes to "deleted" state first)
+# Delete and purge the Key Vault (soft delete cannot be disabled; the lab keeps 7-day retention and no purge protection)
 foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'KeyVault' }) {
-    if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove Key Vault')) {
+    if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove and purge Key Vault')) {
+        $vault = Get-AzKeyVault -VaultName $resource.Name -ResourceGroupName $rgName -ErrorAction Stop
         Write-Host "  Deleting Key Vault: $($resource.Name)..." -ForegroundColor Gray
         Remove-AzKeyVault -VaultName $resource.Name -ResourceGroupName $rgName -Force -ErrorAction Stop | Out-Null
-        Write-Host "  ✓ Deleted (soft-delete)" -ForegroundColor Green
-        Write-Host "    Note: Key Vault is in soft-deleted state for 90 days." -ForegroundColor Gray
-        Write-Host "    To permanently purge: Remove-AzKeyVault -VaultName $($resource.Name) -InRemovedState -Location $($context.Subscription.HomeTenantId)" -ForegroundColor Gray
+        Write-Host "  Purging Key Vault: $($resource.Name) (location $($vault.Location))..." -ForegroundColor Gray
+        try {
+            Remove-AzKeyVault -VaultName $resource.Name -Location $vault.Location -InRemovedState -Force -ErrorAction Stop | Out-Null
+            Write-Host "  ✓ Deleted and purged" -ForegroundColor Green
+        } catch {
+            Write-Warning "Vault '$($vault.VaultName)' deleted but not purged: $_"
+            Write-Host "  Purge manually: Remove-AzKeyVault -VaultName $($vault.VaultName) -Location $($vault.Location) -InRemovedState -Force" -ForegroundColor Gray
+        }
     }
 }
 

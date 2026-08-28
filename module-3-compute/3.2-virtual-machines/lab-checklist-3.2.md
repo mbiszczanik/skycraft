@@ -8,7 +8,7 @@
 - [ ] Location: **Sweden Central**
 - [ ] Resource group: `dev-skycraft-swc-rg`
 - [ ] Availability zone: **Zone 1**
-- [ ] Size: `Standard_B2s` (2 vCPUs, 4 GiB memory)
+- [ ] Size: `Standard_B2ls_v2` (2 vCPUs, 4 GiB memory)
 - [ ] Image: Ubuntu Server 22.04 LTS - x64 Gen2
 - [ ] Status: **Running**
 
@@ -40,8 +40,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
-- [ ] Tag: `Role` = `Authserver`
-- [ ] Tag: `ManagedBy` = `Portal`
+- [ ] Tag: `Owner` = `mbiszczanik`
 
 ---
 
@@ -53,7 +52,7 @@
 - [ ] Location: **Sweden Central**
 - [ ] Resource group: `dev-skycraft-swc-rg`
 - [ ] Availability zone: **Zone 2**
-- [ ] Size: `Standard_B2s` (2 vCPUs, 4 GiB memory)
+- [ ] Size: `Standard_B2ls_v2` (2 vCPUs, 4 GiB memory)
 - [ ] Image: Ubuntu Server 22.04 LTS - x64 Gen2
 - [ ] Status: **Running**
 
@@ -81,7 +80,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
-- [ ] Tag: `Role` = `Worldserver`
+- [ ] Tag: `Owner` = `mbiszczanik`
 
 ---
 
@@ -105,6 +104,7 @@
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `mbiszczanik`
 
 ---
 
@@ -143,7 +143,7 @@
 - [ ] Orchestration mode: Uniform
 - [ ] Initial instances: 2
 - [ ] Availability zones: 1, 2, 3
-- [ ] VM size: Standard_B1s
+- [ ] VM size: Standard_B2ls_v2
 - [ ] VNet: `prod-skycraft-swc-vnet`
 - [ ] Subnet: WorldSubnet
 
@@ -195,10 +195,10 @@ az vm list \
   --output table
 
 # Expected output:
-# Name                        Size          Zone  State
-# --------------------------  ------------  ----  ---------
-# dev-skycraft-swc-auth-vm    Standard_B2s  1     VM running
-# dev-skycraft-swc-world-vm   Standard_B2s  2     VM running
+# Name                        Size              Zone  State
+# --------------------------  ----------------  ----  ---------
+# dev-skycraft-swc-auth-vm    Standard_B2ls_v2  1     VM running
+# dev-skycraft-swc-world-vm   Standard_B2ls_v2  2     VM running
 ```
 
 ### Verify VM Network Configuration
@@ -221,7 +221,7 @@ az vm show \
 
 ### Verify Disk Encryption Status
 
-> **Note**: Azure Disk Encryption for Linux VMs requires **8 GB RAM** and is enabled via Azure CLI (not Portal). VMs must be temporarily resized to `Standard_B2ms` for encryption.
+> **Note**: Azure Disk Encryption for Linux VMs requires **8 GB RAM** and is enabled via Azure CLI (not Portal). VMs must be temporarily resized to `Standard_B2s_v2` for encryption.
 
 ```azurecli
 # Check encryption status for both VMs
@@ -305,11 +305,11 @@ az keyvault show \
 
 ## 📊 VM Infrastructure Summary
 
-| Component       | Name                      | Zone | Size         | Disk Encryption | Backend Pool |
-| --------------- | ------------------------- | ---- | ------------ | --------------- | ------------ |
-| **Authserver**  | dev-skycraft-swc-auth-vm  | 1    | Standard_B2s | ✅              | be-auth      |
-| **Worldserver** | dev-skycraft-swc-world-vm | 2    | Standard_B2s | ✅              | be-world     |
-| **Key Vault**   | dev-skycraft-swc-kv       | N/A  | Standard     | N/A             | N/A          |
+| Component       | Name                      | Zone | Size             | Disk Encryption | Backend Pool |
+| --------------- | ------------------------- | ---- | ---------------- | --------------- | ------------ |
+| **Authserver**  | dev-skycraft-swc-auth-vm  | 1    | Standard_B2ls_v2 | ✅              | be-auth      |
+| **Worldserver** | dev-skycraft-swc-world-vm | 2    | Standard_B2ls_v2 | ✅              | be-world     |
+| **Key Vault**   | dev-skycraft-swc-kv       | N/A  | Standard         | N/A             | N/A          |
 
 ### Disk Summary
 
@@ -435,7 +435,7 @@ You've successfully completed **Lab 3.2: Create and Configure Virtual Machines**
 
 **Infrastructure Cost (Estimated)**:
 
-- VMs (2x B2s): ~$60/month
+- VMs (2x B2ls_v2): ~$60/month
 - Standard SSD Disks: ~$10/month
 - Key Vault: ~$0.03/operation
 - **Total**: ~$70/month for development environment

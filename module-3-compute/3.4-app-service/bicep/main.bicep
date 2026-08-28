@@ -1,9 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 3.4 - App Service Orchestrator
-DESCRIPTION: Orchestrates deployment of App Service Lab resources
+DESCRIPTION: Deploys the Linux App Service Plan (P0v4), the Node web app with a staging slot and regional VNet integration, and the CPU autoscale setting for SkyCraft Lab 3.4 via Azure Verified Modules (autoscale via a local fallback module)
 EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
-AUTHOR/S: Antigravity
-VERSION: 0.1.0
+AUTHOR/S: Marcin Biszczanik
+VERSION: 0.2.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -12,53 +12,134 @@ targetScope = 'subscription'
 /*******************
 *    Parameters    *
 *******************/
+
 @description('Location for all resources')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
-@description('Environment Name')
+@description('Environment name (used in resource names and mapped to the canonical Environment tag)')
+@allowed(['dev', 'prod'])
 param parEnvironment string = 'dev'
 
+@description('Resource owner tag value')
+@minLength(1)
+param parOwner string = 'mbiszczanik'
+
 @description('Resource Group Name')
+@minLength(1)
+@maxLength(90)
 param parResourceGroupName string = 'dev-skycraft-swc-rg'
 
 @description('VNet Name')
+@minLength(2)
+@maxLength(64)
 param parVnetName string = 'dev-skycraft-swc-vnet'
 
-@description('Subnet Name for App Service')
+@description('Delegated subnet name for App Service VNet integration')
+@minLength(1)
+@maxLength(80)
 param parSubnetName string = 'AppServiceSubnet'
 
 /*******************
-*    Resources     *
+*    Variables     *
+*******************/
+
+var varAppServicePlanName = '${parEnvironment}-skycraft-swc-asp'
+var varAppName = '${parEnvironment}-skycraft-swc-app01' // Must be globally unique; change on collision
+var varEnvironmentTag = parEnvironment == 'dev' ? 'Development' : 'Production'
+var varCommonTags = {
+  Project: 'SkyCraft'
+  Environment: varEnvironmentTag
+  CostCenter: 'MSDN'
+  Owner: parOwner
+}
+
+/*******************
+*     Existing     *
 *******************/
 
 resource resRg 'Microsoft.Resources/resourceGroups@2023-07-01' existing = {
   name: parResourceGroupName
 }
 
-// Reference existing VNet to construct Subnet ID
-resource resVnet 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
+resource resSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existing = {
+  name: '${parVnetName}/${parSubnetName}'
   scope: resRg
-  name: parVnetName
 }
 
-// Construct Subnet ID manually or via nested resource reference
-// Using string interpolation is reliable for existing subnets
-var varSubnetId = '${resVnet.id}/subnets/${parSubnetName}'
+/*******************
+*     Modules      *
+*******************/
 
-module modAppService 'modules/app-service.bicep' = {
-  name: 'deploy-app-service-${parEnvironment}'
+// App Service Plan - Premium V4 P0v4, Linux, one instance
+module modAppServicePlan 'br/public:avm/res/web/serverfarm:0.7.0' = {
+  name: 'asp-deployment'
   scope: resRg
   params: {
+    name: varAppServicePlanName
+    location: parLocation
+    tags: varCommonTags
+    kind: 'linux'
+    skuName: 'P0v4'
+    skuCapacity: 1 // AVM default is 3 (standards section 4.5)
+    zoneRedundant: false // Lab-friction override (standards section 4.5): AVM defaults P-SKUs to zone-redundant
+  }
+}
+
+// Web App (Node 20 LTS) with the staging slot and regional VNet integration.
+// The slot inherits siteConfig, httpsOnly, identity and the VNet integration from the app.
+module modWebApp 'br/public:avm/res/web/site:0.24.0' = {
+  name: 'webapp-deployment'
+  scope: resRg
+  params: {
+    name: varAppName
+    location: parLocation
+    tags: varCommonTags
+    kind: 'app,linux'
+    serverFarmResourceId: modAppServicePlan.outputs.resourceId
+    httpsOnly: true
+    managedIdentities: {
+      systemAssigned: true
+    }
+    virtualNetworkSubnetResourceId: resSubnet.id
+    // Route all outbound traffic through the VNet. The pinned module deploys the 2025-03-01
+    // Microsoft.Web sites API, where this replaces the legacy siteConfig.vnetRouteAllEnabled flag.
+    outboundVnetRouting: {
+      allTraffic: true
+    }
+    // Replaces the AVM default siteConfig object, so every value the lab needs is restated here.
+    // alwaysOn is deliberately left at Azure's default (false) to keep the lab cheap; the staging slot inherits this object.
+    siteConfig: {
+      linuxFxVersion: 'NODE|20-lts'
+      minTlsVersion: '1.2'
+      ftpsState: 'FtpsOnly'
+    }
+    slots: [
+      {
+        name: 'staging'
+      }
+    ]
+  }
+}
+
+// Autoscale - local fallback (avm/res/insights/autoscale-setting is only Proposed; standards section 4.3)
+module modAutoscale 'modules/autoscale.bicep' = {
+  name: 'autoscale-deployment'
+  scope: resRg
+  params: {
+    parAutoscaleName: '${varAppServicePlanName}-autoscale'
     parLocation: parLocation
-    parEnvironment: parEnvironment
-    parAppServicePlanName: '${parEnvironment}-skycraft-swc-asp'
-    parAppName: '${parEnvironment}-skycraft-swc-app01' // Note: This must be globally unique. User might need to change it if collision.
-    parSubnetId: varSubnetId
+    parEnvironment: varEnvironmentTag
+    parOwner: parOwner
+    parTargetResourceId: modAppServicePlan.outputs.resourceId
   }
 }
 
 /******************
 *     Outputs     *
 ******************/
-output outWebAppName string = modAppService.outputs.outWebAppName
-output outAppServicePlanId string = modAppService.outputs.outAppServicePlanId
+
+output outWebAppName string = modWebApp.outputs.name
+output outWebAppDefaultHostname string = modWebApp.outputs.defaultHostname
+output outAppServicePlanId string = modAppServicePlan.outputs.resourceId
+output outAutoscaleId string = modAutoscale.outputs.outAutoscaleId
