@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tests/Lab53-Cleanup-Logic.Tests.ps1`: the repository's first behavioural test. Every other suite in `tests/` matches source text; this one lifts the decision helpers out of Lab 5.3 `Remove-LabResource.ps1` with the PowerShell parser (evaluating only the `FunctionDefinitionAst` nodes, so the script body never runs and no Azure call is made) and exercises them against synthetic input. It exists because the `NWTA-*` branch added in #106 could not be verified against live Azure: Traffic Analytics materializes its data collection rule and endpoint only after processing real flow data for a sustained period, and a purpose-built environment with a correct Traffic Analytics configuration, captured flow-log blobs and forced traffic did not produce them in ~86 minutes. Endpoint filtering, target de-duplication, the `Project = SkyCraft` ownership guard, the `NWTA-*` type/prefix filter, the rule-before-endpoint deletion order and the still-feeding guard are now pinned in 19 tests that run in seconds.
+
+### Changed
+
+- Lab 5.3 `Remove-LabResource.ps1` states each of its cleanup decisions as a named function (`Get-VirtualMachineEndpointId`, `ConvertTo-VmTarget`, `Test-LabOwnedExtension`, `Select-TrafficAnalyticsResource`) instead of inlining them among the Azure calls, so the choices can be tested without Azure. The functions stay in the script rather than moving to a shared module, because every lab folder must remain runnable and readable on its own (`docs/powershell-standards.md` §7.3). Behaviour is unchanged - verified by running the script against the live subscription before and after.
+
 ### Fixed
 
 - Every automation script now sets `$Host.SetShouldExit(<code>)` immediately before a non-zero `exit`, so a failed run is visible to its caller (#104). PowerShell 7 discards `exit <code>` from a script run as `pwsh -File` when that script declares `#Requires -Modules` for a module it has to auto-import - which every `Az.*` script here does. The `exit` still ran, but the process reported **0**, so the lab cycle recorded a failed teardown as a clean one; Lab 2.1 cleanup printed `Cleanup finished with 1 failure(s)` and exited 0. The same script exits correctly when dot-called or run with `-Command`, which is why only the automated cycle was affected. Applied to 144 exit sites across 55 scripts and enforced by the new `tests/Exit-Code-Propagation.Tests.ps1`, which asserts the guard structurally and verifies that the idiom really carries the code through `pwsh -File`.
