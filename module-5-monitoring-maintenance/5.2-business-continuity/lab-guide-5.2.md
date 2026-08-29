@@ -9,7 +9,7 @@ By completing this lab, you will:
 - Implement **Azure VM Backup** for production workloads
 - Perform a **File-Level Recovery (FLR)** from a backup snapshot
 - Understand the difference between **LRS** and **GRS** for backup data
-- Understand **Soft Delete** for protected items (and why the lab automation turns it off)
+- Understand **Soft Delete** for protected items (and why Azure now enforces it)
 
 ---
 
@@ -112,7 +112,7 @@ Just like storage accounts, vaults support redundancy:
 4. Click **Review + Create** → **Create**.
 
 > [!IMPORTANT]
-> Change the **Storage Replication Type** immediately after creation if you want to use LRS (to save cost) before any backups are performed: go to **Properties** → **Backup Configuration** → **Update**. The Bicep path (`Deploy-Bicep.ps1`) declares LRS at creation through the AVM vault module's `redundancySettings`, and also turns **soft delete off** on both vaults so `Remove-LabResource.ps1` can delete them without a 14-day hold — a lab-only choice; production keeps soft delete on (see `ARCHITECTURE.md` §1).
+> Change the **Storage Replication Type** immediately after creation if you want to use LRS (to save cost) before any backups are performed: go to **Properties** → **Backup Configuration** → **Update**. The Bicep path (`Deploy-Bicep.ps1`) declares LRS at creation through the AVM vault module's `redundancySettings`. Soft delete is **not** configurable: Azure Backup "secure by default" creates every Recovery Services Vault with `AlwaysON` soft delete and a 14-day retention (see `ARCHITECTURE.md` §1). Cleanup still works in one pass, because Azure allows deleting a vault that holds only soft-deleted items.
 
 **Preview - the AVM module call the Bicep path makes** (`bicep/main.bicep`; versions pinned in `docs/bicep-standards.md` §4.4):
 
@@ -123,7 +123,7 @@ module modRecoveryServicesVault 'br/public:avm/res/recovery-services/vault:0.13.
   params: {
     name: 'platform-skycraft-swc-rsv'
     publicNetworkAccess: 'Enabled'                             // module default: Disabled
-    softDeleteSettings: { softDeleteState: 'Disabled', ... }   // lab-friction override
+    // softDeleteSettings deliberately not set - Azure enforces AlwaysON soft delete
     redundancySettings: { standardTierStorageRedundancy: 'LocallyRedundant' }
     diagnosticSettings: [ { name: 'rsv-backup-reports-diag', workspaceResourceId: parWorkspaceId, ... } ]
     ...
@@ -311,7 +311,7 @@ Instead of restoring the whole VM, we can mount a specific recovery point as a d
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: It retains deleted backup data for 14 additional days at no cost, protecting against accidental deletion or ransomware attacks. In this lab the Bicep path disables it on both vaults so the cleanup script can delete them immediately; production keeps it on.
+   **Answer**: It retains deleted backup data for 14 additional days at no cost, protecting against accidental deletion or ransomware attacks. Azure Backup now enforces it on every new Recovery Services Vault (`AlwaysON`, not disableable); the lab's cleanup script still works because Azure allows deleting a vault that holds only soft-deleted items.
    </details>
 
 2. **Can you change the vault redundancy (LRS to GRS) after backups are taken?**

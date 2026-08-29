@@ -120,11 +120,11 @@ Invoke-Test "RSV tag 'CostCenter' = 'MSDN'" {
     return ($null -ne $rsvTags -and $rsvTags.CostCenter -eq 'MSDN')
 }
 
-Invoke-Test "RSV soft delete is disabled (lab-friction override, docs/bicep-standards.md section 4.5)" {
+Invoke-Test "RSV soft delete is AlwaysON (platform-enforced, docs/bicep-standards.md section 4.5)" {
     if (-not $rsv) { return $false }
-    # Read soft-delete state from the raw ARM backupconfig sub-resource (reliable); the AVM vault
-    # module sets securitySettings.softDeleteSettings.softDeleteState = Disabled so that
-    # Remove-LabResource.ps1 can delete the vault without a 14-day soft-delete hold.
+    # Read soft-delete state from the raw ARM backupconfig sub-resource (reliable). Azure Backup
+    # "secure by default" enforces AlwaysON on every new vault; the template sends no
+    # softDeleteSettings at all, and no API version or tool can turn it off.
     $state = $null
     $cfg = Get-AzResource -ResourceId "$($rsv.ID)/backupconfig/vaultconfig" -ApiVersion '2023-06-01' -ExpandProperties -ErrorAction SilentlyContinue
     if ($cfg) { $state = $cfg.Properties.softDeleteFeatureState }
@@ -132,7 +132,7 @@ Invoke-Test "RSV soft delete is disabled (lab-friction override, docs/bicep-stan
         $props = Get-AzRecoveryServicesVaultProperty -VaultId $rsv.ID -ErrorAction SilentlyContinue
         $state = $props.SoftDeleteFeatureState
     }
-    return ($state -eq 'Disabled')
+    return ($state -eq 'AlwaysON')
 }
 
 # ============================================================================

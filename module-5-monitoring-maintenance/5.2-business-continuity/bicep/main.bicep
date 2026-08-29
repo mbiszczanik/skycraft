@@ -1,6 +1,6 @@
 /*=====================================================
 SUMMARY: Lab 5.2 - Business Continuity & Disaster Recovery - Orchestrator
-DESCRIPTION: Deploys the SkyCraft BCDR vaults into platform-skycraft-swc-rg through Azure Verified Modules - the Recovery Services Vault for VM backup (LRS, soft delete off, backup-report diagnostics) and the Backup Vault for blob backup (LRS, system-assigned identity) - plus the Backup Vault's diagnostic setting through a local fallback module. Backup policies are created by Deploy-Bicep.ps1 (docs/bicep-standards.md section 10.4)
+DESCRIPTION: Deploys the SkyCraft BCDR vaults into platform-skycraft-swc-rg through Azure Verified Modules - the Recovery Services Vault for VM backup (LRS, platform-enforced AlwaysON soft delete, backup-report diagnostics) and the Backup Vault for blob backup (LRS, system-assigned identity) - plus the Backup Vault's diagnostic setting through a local fallback module. Backup policies are created by Deploy-Bicep.ps1 (docs/bicep-standards.md section 10.4)
 EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
 VERSION: 2.0.0
@@ -74,16 +74,14 @@ module modRecoveryServicesVault 'br/public:avm/res/recovery-services/vault:0.13.
     name: varRsvName
     location: parLocation
     tags: varCommonTags
-    // Lab-friction overrides (docs/bicep-standards.md section 4.5): the module defaults public network
-    // access to Disabled, which blocks Azure VM backup without private endpoints; and Azure enables soft
-    // delete on new vaults, which parks removed backup items for 14 days and makes Remove-LabResource.ps1
-    // fail to delete the vault.
+    // Lab-friction override (docs/bicep-standards.md section 4.5): the module defaults public network
+    // access to Disabled, which blocks Azure VM backup without private endpoints.
     publicNetworkAccess: 'Enabled'
-    softDeleteSettings: {
-      softDeleteState: 'Disabled'
-      enhancedSecurityState: 'Disabled'
-      softDeleteRetentionPeriodInDays: 14
-    }
+    // softDeleteSettings is deliberately not set. Azure Backup "secure by default" enforces soft delete
+    // on every new Recovery Services Vault platform-side: the vault is created with softDeleteState and
+    // enhancedSecurityState = AlwaysON at the default 14-day retention, and sending any other value is
+    // rejected with BMSUserErrorSoftDeleteStateNotSetToAlwaysON. Teardown is unaffected - a vault holding
+    // only soft-deleted items can be deleted and is itself soft-deleted at no cost (section 4.5).
     // SkyCraft uses LRS to keep lab costs low; production would use GeoRedundant. Declared at creation
     // because the redundancy is locked once the first backup is stored (section 10.5).
     redundancySettings: {

@@ -10,7 +10,7 @@
 | Backup frequency | Daily (via Deploy-Bicep.ps1 policy creation) | Hourly or multiple times per day | Daily balances RPO (up to 24 hours of loss acceptable) with cost and simplicity; production may require 4-hourly or 1-hourly recovery points depending on mission-critical data. |
 | Retention period | 30 days for daily backups | 365 days or tiered (daily 30d, weekly 1y, monthly 5y) | 30 days is enough to recover from a recent corruption or accidental deletion in a lab; production uses longer retention for compliance (HIPAA 7-year, SOX 10-year) and archival cost tiers. |
 | Vault storage access | Public network enabled | Private Endpoints, no public access | Lab simplicity; production isolates backup vault traffic to private networks to satisfy compliance and reduce ransomware blast radius. |
-| Soft delete | **Disabled** on both vaults (lab-friction override, docs/bicep-standards.md §4.5) | Enabled (Azure's default for new vaults) | With soft delete on, a removed backup item stays for 14 days and the vault cannot be deleted; the lab turns it off so `Remove-LabResource.ps1` tears everything down in one pass. Production always keeps soft delete (and immutability) on to survive accidental or malicious deletion. |
+| Soft delete | **AlwaysON** on the Recovery Services Vault (platform-enforced, see docs/bicep-standards.md §4.5); **Off** on the Backup Vault (lab-friction override) | AlwaysON on both, plus immutability | Azure Backup "secure by default" makes soft delete mandatory and irreversible on every new Recovery Services Vault, so the lab documents it instead of overriding it; the Backup Vault API still accepts Off, which keeps blob-backup teardown a single pass. Production keeps soft delete on everywhere and adds immutability to survive accidental or malicious deletion. |
 | Blob operational backup (Backup Vault) | Continuous, 30-day retention | Snapshot-based (cheaper but lower granularity) | Continuous backup captures every block change; useful for learning destructive workloads; production chooses based on RTO/RPO (snapshots faster to restore, continuous granular point-in-time). |
 | Backup Vault identity | System-assigned managed identity | User-assigned MI (recommended) | System-assigned is simpler for a single vault in a lab; production uses user-assigned MI to support role inheritance across multiple vaults and cleaner identity hygiene. |
 
@@ -29,7 +29,7 @@
 
 - **Dominant pillar:** Reliability & Resilience
   - Backup is the foundational tool for recovery from data loss and ransomware; teaches backup design and testing discipline.
-- **Security:** RBAC on vault access prevents unauthorized deletion or tampering; soft delete (off in the lab, see §4.5 of the standards) adds a 14-day recovery window in production.
+- **Security:** RBAC on vault access prevents unauthorized deletion or tampering; soft delete on the Recovery Services Vault is platform-enforced (`AlwaysON`, see §4.5 of the standards) and adds a 14-day recovery window in every environment.
   - Private Endpoints and deny-public-access policies required in production.
 - **Cost:** LRS + 30-day retention keeps lab cost ~€4.50/month per VM (<50 GB).
   - Tiered retention (archive after 1 year) essential in production for long-term compliance retention.
@@ -48,13 +48,13 @@
   - 30-day retention avoids long-term storage fees; archive tiers reduce per-GB cost to €0.01/month after hot period.
   - Deploy-Bicep.ps1 uses Azure Backup REST API to create policies (idempotent), avoiding repeated creation attempts.
 - **Cleanup reminder:**
-  - Soft delete is **off** on both vaults in this lab, so `Remove-LabResource.ps1` can remove the backup items and instances and then delete the vaults immediately. In production, where soft delete stays on, a vault with soft-deleted items cannot be removed until the 14-day grace period ends (or the items are undeleted and purged explicitly).
+  - The Recovery Services Vault keeps soft delete `AlwaysON`, so `Remove-LabResource.ps1` stops protection with the recovery points deleted — which moves the backup item to a soft-deleted state — and then deletes the vault: Azure allows deleting a vault that holds only soft-deleted items, and the vault is itself soft-deleted for 14 days at no cost. This needs Azure CLI 2.75.0+ or Az PowerShell 7.5.0+; older tooling insists on a fully empty vault and reintroduces the 14-day wait. The Backup Vault has soft delete off, so its blob backup instance and the vault go in the same pass.
   - Diagnostic settings on the vault itself will be deleted with the vault, but logs already sent to the Log Analytics workspace (Lab 5.1) remain and continue to incur ingestion charges unless the workspace is also deleted.
 
 ## 5. Bicep implementation note (AVM)
 
 - **Modules**: `avm/res/recovery-services/vault` and `avm/res/data-protection/backup-vault` (pinned in docs/bicep-standards.md §4.4), called directly from `main.bicep`. The local `modules/recoveryServicesVault.bicep` and `modules/backupVault.bicep` are gone.
-- **Lab-friction overrides** (§4.5): Recovery Services Vault `softDeleteSettings` disabled and `publicNetworkAccess: 'Enabled'` (the module defaults to `Disabled`, which needs private endpoints for VM backup); Backup Vault `softDeleteSettings.state: 'Off'`.
+- **Lab-friction override and platform constraint** (§4.5): the Recovery Services Vault sets `publicNetworkAccess: 'Enabled'` (the module defaults to `Disabled`, which needs private endpoints for VM backup) and deliberately sends **no** `softDeleteSettings` — Azure Backup "secure by default" enforces `AlwaysON` platform-side and rejects any other value. The Backup Vault sets `softDeleteSettings.state: 'Off'`, which its own API still accepts.
 - **Storage redundancy is declared in Bicep**: the vault module emits `redundancySettings.standardTierStorageRedundancy: 'LocallyRedundant'` on the vault itself (the vault API path of §10.5). `Deploy-Bicep.ps1` keeps its idempotent redundancy step, which now only confirms the value.
 - **Diagnostics**: the Recovery Services Vault's `rsv-backup-reports-diag` goes through the module's `diagnosticSettings` parameter (`Dedicated` tables, five Backup Reports categories, no metrics). The Backup Vault module has no such parameter, so `modules/backup-vault-diagnostics.bicep` is the documented local fallback for `bv-backup-reports-diag` (§4.3).
 - **Still in the scripts** (§10.4): the VM backup policy, the protected VM, the blob backup policy (`Deploy-Bicep.ps1`) and the blob backup instance with its two RBAC roles (`New-LabBlobBackup.ps1`) — Azure Backup rejects ARM PUT updates on an existing policy.

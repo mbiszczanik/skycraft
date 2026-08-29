@@ -12,7 +12,7 @@
 - [x] Location: **Sweden Central**
 - [x] Resource group: `platform-skycraft-swc-rg`
 - [x] Storage replication type: **Locally-redundant (LRS)**
-- [x] Soft delete: **Disabled** (lab-friction override for cleanup; production keeps it enabled)
+- [x] Soft delete: **AlwaysON** (platform-enforced by Azure Backup "secure by default"; not configurable)
 
 ### Tags
 
