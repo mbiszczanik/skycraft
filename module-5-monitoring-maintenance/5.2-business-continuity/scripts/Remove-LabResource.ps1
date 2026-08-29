@@ -10,6 +10,8 @@
     3. Backup Vault (platform-skycraft-swc-bv)
     4. VM backup protection item with data deletion
     5. Recovery Services Vault (platform-skycraft-swc-rsv)
+    6. Orphaned Azure Backup restore point collections and the AzureBackupRG_<location>_*
+       resource groups that held them, once those groups are empty
 
     Notes:
     - The role assignments are removed before the Backup Vault so its managed
@@ -19,6 +21,16 @@
       account) must be cleaned up manually via the Azure Portal before
       deleting the Recovery Services Vault.
     - VMs and Storage Accounts from earlier labs are NOT removed by this script.
+
+    Every step continues on error, so a single stuck resource does not strand the rest. A step
+    that fails is reported as [ERROR] with the Azure error message and counted; if any step
+    failed the script exits 1 - so a masked failure cannot be mistaken for a clean cleanup.
+
+    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
+    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
+    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+    A caller that dot-sources this script, or runs "& .\Remove-LabResource.ps1" with further
+    statements after it, still ends with its own exit code rather than this one.
 
 .PARAMETER Force
     Skip confirmation prompts.
@@ -32,8 +44,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.0.0
-    Date: 2026-04-06
+    Version: 1.1.0
+    Date: 2026-08-29
 #>
 
 #Requires -Version 7.0
@@ -53,6 +65,13 @@ $prodRg         = 'prod-skycraft-swc-rg'
 $rsvName        = 'platform-skycraft-swc-rsv'
 $bvName         = 'platform-skycraft-swc-bv'
 $storageAccount = 'prodskycraftswcsa'
+$location       = 'swedencentral'
+
+# Minimum Az.RecoveryServices for the one-pass vault delete (see the prerequisite check below).
+$rsvMinModuleVersion = [version]'7.5.0'
+
+# Counts resources that exist but could not be deleted. Absent resources are not failures.
+$script:cleanupFailures = 0
 
 # Roles granted to the Backup Vault identity by New-LabBlobBackup.ps1 (must be revoked here)
 $backupRoles = @(
@@ -71,8 +90,26 @@ if (-not $context) {
     exit 1
 }
 
+# Azure Backup "secure by default" keeps soft delete AlwaysON on every new Recovery Services
+# Vault, so step 5 deletes a vault that still holds soft-deleted items. That works in a single
+# pass - but only on Azure CLI 2.75.0+ / Az PowerShell 7.5.0+ (Az.RecoveryServices 7.5.0);
+# older tooling insists on a fully empty vault and reintroduces the 14-day wait. Diagnose a
+# stale module here, before the delete is attempted, and still run the teardown: refusing to
+# clean up over a warning would strand billable resources.
+$rsvModuleVersion = (Get-Module -ListAvailable -Name Az.RecoveryServices |
+                     Sort-Object Version -Descending |
+                     Select-Object -First 1).Version
+if ($rsvModuleVersion -and $rsvModuleVersion -ge $rsvMinModuleVersion) {
+    Write-Host "  ✓ Az.RecoveryServices version: $rsvModuleVersion" -ForegroundColor Green
+} else {
+    Write-Host "  [WARNING] Az.RecoveryServices $rsvModuleVersion is older than $rsvMinModuleVersion." -ForegroundColor Yellow
+    Write-Host "    Deleting a vault that holds soft-deleted items needs Azure CLI 2.75.0+ or" -ForegroundColor Gray
+    Write-Host "    Az PowerShell 7.5.0+. Older versions require a fully empty vault and" -ForegroundColor Gray
+    Write-Host "    reintroduce the 14-day soft-delete wait. Run: Update-Module Az.RecoveryServices" -ForegroundColor Gray
+}
+
 # ── Inventory existing resources ──────────────────────────────────────────
-Write-Host "Checking resources to delete..." -ForegroundColor Yellow
+Write-Host "`nChecking resources to delete..." -ForegroundColor Yellow
 
 $resourcesToDelete = [System.Collections.Generic.List[hashtable]]::new()
 
@@ -124,6 +161,39 @@ if ($rsvExists) {
     Write-Host "  - Recovery Services Vault: $rsvName" -ForegroundColor Gray
 }
 
+# Azure Backup provisions AzureBackupRG_<location>_<n> next to the protected VM and parks a
+# Microsoft.Compute/restorePointCollections container in it for instant-restore snapshots.
+# Disabling protection releases the snapshots, but the (now empty) container and its resource
+# group outlive the vault and had to be deleted by hand after the v0.8.0 cycle (#105).
+$backupRgCandidates = Get-AzResourceGroup -ErrorAction SilentlyContinue |
+                      Where-Object { $_.ResourceGroupName -like "AzureBackupRG_${location}_*" }
+foreach ($backupRg in $backupRgCandidates) {
+    $rgName      = $backupRg.ResourceGroupName
+    $rgResources = @(Get-AzResource -ResourceGroupName $rgName -ErrorAction SilentlyContinue)
+
+    # Only SkyCraft's own collections: the group is shared, and an unrelated protected VM's
+    # collection must survive this teardown.
+    $rpcs = @($rgResources | Where-Object {
+        $_.ResourceType -eq 'Microsoft.Compute/restorePointCollections' -and
+        $_.Name -like 'AzureBackup_*skycraft*'
+    })
+    foreach ($rpc in $rpcs) {
+        $resourcesToDelete.Add(@{
+            Type              = 'RestorePointCollection'
+            Name              = $rpc.Name
+            ResourceGroupName = $rgName
+            ResourceId        = $rpc.ResourceId
+        })
+        Write-Host "  - Restore point collection: $($rpc.Name) (in $rgName)" -ForegroundColor Gray
+    }
+
+    # The group itself is only deleted if it is left empty once those collections are gone.
+    if ($rpcs.Count -gt 0 -or $rgResources.Count -eq 0) {
+        $resourcesToDelete.Add(@{ Type = 'BackupResourceGroup'; Name = $rgName })
+        Write-Host "  - Azure Backup resource group: $rgName (deleted only if left empty)" -ForegroundColor Gray
+    }
+}
+
 if ($resourcesToDelete.Count -eq 0) {
     Write-Host "`nNo Lab 5.2 resources found to delete." -ForegroundColor Green
     exit 0
@@ -147,7 +217,8 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BlobInstance' })
             -Name $r.Name | Out-Null
         Write-Host "  ✓ Deleted" -ForegroundColor Green
     } catch {
-        Write-Host "  [WARNING] Could not delete: $_" -ForegroundColor Yellow
+        $script:cleanupFailures++
+        Write-Host "  [ERROR] Could not delete blob backup instance '$($r.Name)': $_" -ForegroundColor Red
     }
 }
 
@@ -165,7 +236,8 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RoleAssignment' 
             Write-Host "  ✓ Role assignment already absent: $($r.Name)" -ForegroundColor Green
         }
     } catch {
-        Write-Host "  [WARNING] Could not remove role assignment '$($r.Name)': $_" -ForegroundColor Yellow
+        $script:cleanupFailures++
+        Write-Host "  [ERROR] Could not remove role assignment '$($r.Name)': $_" -ForegroundColor Red
     }
 }
 
@@ -179,7 +251,8 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BackupVault' }) 
             -VaultName $r.Name | Out-Null
         Write-Host "  ✓ Deleted" -ForegroundColor Green
     } catch {
-        Write-Host "  [WARNING] Could not delete Backup Vault: $_" -ForegroundColor Yellow
+        $script:cleanupFailures++
+        Write-Host "  [ERROR] Could not delete Backup Vault '$($r.Name)': $_" -ForegroundColor Red
     }
 }
 
@@ -195,7 +268,8 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'VmBackupItem' })
             -Force | Out-Null
         Write-Host "  ✓ Protection disabled and backup data deleted" -ForegroundColor Green
     } catch {
-        Write-Host "  [WARNING] Could not disable backup protection: $_" -ForegroundColor Yellow
+        $script:cleanupFailures++
+        Write-Host "  [ERROR] Could not disable backup protection for '$($r.FriendlyName)': $_" -ForegroundColor Red
         Write-Host "    Manual cleanup may be required via Azure Portal." -ForegroundColor Gray
     }
 }
@@ -208,13 +282,62 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RSV' }) {
         Remove-AzRecoveryServicesVault -Vault $rsvExists | Out-Null
         Write-Host "  ✓ Deleted" -ForegroundColor Green
     } catch {
-        Write-Host "  [WARNING] Could not delete RSV: $_" -ForegroundColor Yellow
-        Write-Host "    Ensure all backup items, data, and ASR resources are removed first." -ForegroundColor Gray
-        Write-Host "    Use Azure Portal: RSV → Backup Items → Stop protection + Delete backup data" -ForegroundColor Gray
+        $script:cleanupFailures++
+        Write-Host "  [ERROR] Could not delete RSV '$($r.Name)': $_" -ForegroundColor Red
+        Write-Host "    Most likely cause is stale tooling: deleting a vault that still holds" -ForegroundColor Gray
+        Write-Host "    soft-deleted items needs Azure CLI 2.75.0+ or Az PowerShell 7.5.0+" -ForegroundColor Gray
+        Write-Host "    (Az.RecoveryServices $rsvMinModuleVersion+). Older versions require a fully" -ForegroundColor Gray
+        Write-Host "    empty vault and reintroduce the 14-day soft-delete wait." -ForegroundColor Gray
+        Write-Host "    Otherwise the vault still has dependencies this script does not touch:" -ForegroundColor Gray
+        Write-Host "    ASR replicated items, registered storage accounts, or private endpoints." -ForegroundColor Gray
+    }
+}
+
+# 6. Delete the orphaned Azure Backup restore point collections and, once they are gone, the
+#    AzureBackupRG_<location>_* groups that held them.
+foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RestorePointCollection' }) {
+    if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete orphaned restore point collection')) { continue }
+    Write-Host "  Deleting restore point collection: $($r.Name)..." -ForegroundColor Gray
+    try {
+        Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null
+        Write-Host "  ✓ Deleted" -ForegroundColor Green
+    } catch {
+        $script:cleanupFailures++
+        Write-Host "  [ERROR] Could not delete restore point collection '$($r.Name)': $_" -ForegroundColor Red
+    }
+}
+
+foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BackupResourceGroup' }) {
+    # Re-check emptiness: the group is shared infrastructure and Azure recreates it on demand,
+    # so it is only removed when nothing is left in it.
+    $remaining = @(Get-AzResource -ResourceGroupName $r.Name -ErrorAction SilentlyContinue)
+    if ($remaining.Count -gt 0) {
+        Write-Host "  [INFO] $($r.Name) still holds $($remaining.Count) resource(s) - left in place." -ForegroundColor Gray
+        continue
+    }
+    if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete empty Azure Backup resource group')) { continue }
+    Write-Host "  Deleting empty Azure Backup resource group: $($r.Name)..." -ForegroundColor Gray
+    try {
+        Remove-AzResourceGroup -Name $r.Name -Force -ErrorAction Stop | Out-Null
+        Write-Host "  ✓ Deleted" -ForegroundColor Green
+    } catch {
+        $script:cleanupFailures++
+        Write-Host "  [ERROR] Could not delete resource group '$($r.Name)': $_" -ForegroundColor Red
     }
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
+if ($script:cleanupFailures -gt 0) {
+    Write-Host "  Cleanup finished with $($script:cleanupFailures) failure(s)" -ForegroundColor Red
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "  See the [ERROR] lines above - this run exits 1, nothing was masked." -ForegroundColor Gray
+    Write-Host "  VMs, VNets, and Storage Accounts were NOT deleted." -ForegroundColor Gray
+    Write-Host "  ASR replication resources must be removed via Azure Portal." -ForegroundColor Gray
+    Write-Host "========================================`n" -ForegroundColor Cyan
+    $Host.SetShouldExit(1)
+    exit 1
+}
+
 Write-Host "  Cleanup Complete" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  VMs, VNets, and Storage Accounts were NOT deleted." -ForegroundColor Gray

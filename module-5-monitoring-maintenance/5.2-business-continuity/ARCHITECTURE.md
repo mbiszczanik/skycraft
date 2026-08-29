@@ -49,6 +49,7 @@
   - Deploy-Bicep.ps1 uses Azure Backup REST API to create policies (idempotent), avoiding repeated creation attempts.
 - **Cleanup reminder:**
   - The Recovery Services Vault keeps soft delete `AlwaysON`, so `Remove-LabResource.ps1` stops protection with the recovery points deleted — which moves the backup item to a soft-deleted state — and then deletes the vault: Azure allows deleting a vault that holds only soft-deleted items, and the vault is itself soft-deleted for 14 days at no cost. This needs Azure CLI 2.75.0+ or Az PowerShell 7.5.0+; older tooling insists on a fully empty vault and reintroduces the 14-day wait. The Backup Vault has soft delete off, so its blob backup instance and the vault go in the same pass.
+  - Azure Backup also provisions an `AzureBackupRG_<location>_<n>` resource group beside the protected VM and keeps a `Microsoft.Compute/restorePointCollections` container there for instant-restore snapshots. Disabling protection releases the snapshots, but the emptied container and its resource group outlive the vault, so `Remove-LabResource.ps1` deletes SkyCraft’s own collections and then the group itself — but only once the group is left empty, because Azure shares it across every protected VM in the region and recreates it on demand.
   - Diagnostic settings on the vault itself will be deleted with the vault, but logs already sent to the Log Analytics workspace (Lab 5.1) remain and continue to incur ingestion charges unless the workspace is also deleted.
 
 ## 5. Bicep implementation note (AVM)
