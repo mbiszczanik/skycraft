@@ -24,6 +24,11 @@
 .PARAMETER WhatIf
     Run deployment in what-if mode (dry run)
 
+.PARAMETER Force
+    Skip the confirmation prompt so the script can run non-interactively
+    (lab-cycle orchestration, CI). Without it, a session that cannot prompt
+    aborts with exit code 2 instead of silently deploying nothing.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment dev
 
@@ -33,11 +38,18 @@
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment dev -EncryptionStrategy AzureDiskEncryption -WhatIf
 
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -Environment dev -Force
+    Deploys without prompting - the form to use from an automated caller.
+
 .NOTES
     Project: SkyCraft
     Lab: 3.2 - Virtual Machines
     Author: Marcin Biszczanik
     Date: 2026-01-11
+    Exit codes: 0 = success (or -WhatIf preview), 1 = prerequisite or deployment
+                failure, 2 = deployment declined or no console to confirm on
+                (nothing was deployed).
 #>
 
 #Requires -Version 7.0
@@ -63,7 +75,10 @@ param(
     [string]$SshKeyPath = "$HOME\.ssh\skycraft-dev.pub",
 
     [Parameter()]
-    [switch]$WhatIf
+    [switch]$WhatIf,
+
+    [Parameter()]
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -135,11 +150,30 @@ Write-Host "  Template:             $templatePath"
 Write-Host "  Deployment Name:      $deploymentName"
 
 # Confirm deployment
-if (-not $WhatIf) {
-    $confirm = Read-Host "`nProceed with deployment? (y/N)"
-    if ($confirm -ne 'y') {
+# The prompt must never be answered by a stream: a confirmation read from stdin
+# returns an empty answer at EOF, which used to cancel the deployment and still
+# exit 0 - an automated caller then treated the skipped deployment as a success.
+# Automation passes -Force; every other outcome (declined, or no console to ask
+# on) exits 2 and deploys nothing.
+if (-not $WhatIf -and -not $Force) {
+    $choices = [System.Management.Automation.Host.ChoiceDescription[]]@(
+        [System.Management.Automation.Host.ChoiceDescription]::new('&Yes', 'Deploy the resources listed above.')
+        [System.Management.Automation.Host.ChoiceDescription]::new('&No', 'Cancel. Nothing is deployed.')
+    )
+
+    try {
+        $answer = $Host.UI.PromptForChoice('Lab 3.2 - Virtual Machines', "`nProceed with deployment?", $choices, 1)
+    }
+    catch {
+        Write-Host "`n[ABORTED] Cannot ask for confirmation: this session has no interactive console." -ForegroundColor Red
+        Write-Host "  Re-run with -Force to deploy non-interactively. Deployment cancelled." -ForegroundColor Gray
+        Write-Verbose "PromptForChoice failed: $($_.Exception.Message)"
+        exit 2
+    }
+
+    if ($answer -ne 0) {
         Write-Host "Deployment cancelled." -ForegroundColor Yellow
-        exit 0
+        exit 2
     }
 }
 

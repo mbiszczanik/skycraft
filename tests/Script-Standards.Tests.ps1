@@ -36,6 +36,21 @@ $RemoveCases = $AllScripts | Where-Object { $_.Name -like 'Remove-*.ps1' } | For
     @{ file = $_.FullName.Substring($RepoRoot.Length + 1); path = $_.FullName }
 }
 
+$DeployPromptCases = $AllScripts |
+                     Where-Object { $_.Name -like 'Deploy-*.ps1' -and
+                                    (Get-Content -Raw -LiteralPath $_.FullName) -match 'Proceed with deployment' } |
+                     ForEach-Object {
+                         @{ file = $_.FullName.Substring($RepoRoot.Length + 1); path = $_.FullName }
+                     }
+
+# Regression guard for issue #103 (Lab 3.2 deployment silently skipped by a non-interactive caller)
+$Lab32DeployCase = @(
+    @{
+        file = 'module-3-compute/3.2-virtual-machines/scripts/Deploy-Bicep.ps1'
+        path = (Join-Path $RepoRoot 'module-3-compute/3.2-virtual-machines/scripts/Deploy-Bicep.ps1')
+    }
+)
+
 Describe 'SkyCraft PowerShell - script standards' {
 
     It "'<file>' sets `$ErrorActionPreference = 'Stop'" -ForEach $ScriptCases {
@@ -64,5 +79,32 @@ Describe 'SkyCraft PowerShell - destructive scripts use ShouldProcess' {
     It "'<file>' contains no manual Read-Host prompt" -ForEach $RemoveCases {
         $content = Get-Content -Raw -LiteralPath $path
         $content | Should -Not -Match 'Read-Host'
+    }
+}
+
+Describe 'SkyCraft PowerShell - deployment scripts stay automatable' {
+
+    It "'<file>' declares a -Force switch so the confirmation can be skipped" -ForEach $DeployPromptCases {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match '\[switch\]\$Force'
+    }
+}
+
+Describe 'SkyCraft PowerShell - Lab 3.2 deployment cannot be silently skipped' {
+
+    It "'<file>' documents the -Force switch in its comment-based help" -ForEach $Lab32DeployCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match '\.PARAMETER Force'
+    }
+
+    It "'<file>' contains no manual Read-Host prompt" -ForEach $Lab32DeployCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Not -Match 'Read-Host'
+    }
+
+    It "'<file>' exits non-zero when the deployment is declined" -ForEach $Lab32DeployCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Not -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*exit 0'
+        $content | Should -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*exit [1-9]'
     }
 }

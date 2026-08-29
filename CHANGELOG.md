@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Lab 3.2 `Deploy-Bicep.ps1` takes a `-Force` switch and no longer confirms the deployment by reading stdin (#103). Run non-interactively, the old `Read-Host` prompt read EOF, printed `Deployment cancelled.` and exited **0**, so an orchestrating chain recorded the skipped VM deployment as a success and only failed two labs later. The confirmation is now a host prompt defaulting to No instead of a stdin read: `-Force` deploys without asking, and a declined confirmation - or a session with no console to prompt on - exits **2** having deployed nothing.
+
 ## [0.8.0] - 2026-08-29
 
 ### Added
