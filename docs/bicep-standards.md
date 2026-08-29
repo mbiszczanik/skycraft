@@ -97,6 +97,7 @@ Hand-written modules are the **exception**, allowed only when no suitable AVM mo
 
 - `Microsoft.Resources/tags` (Lab 1.3) — no AVM module exists.
 - Autoscale settings (Lab 3.4, `modules/autoscale.bicep`) — `avm/res/insights/autoscale-setting` is only *Proposed*.
+- Diagnostic settings on a resource the lab does not deploy itself or whose AVM module has no `diagnosticSettings` parameter (Lab 5.1 `modules/storage-blob-diagnostics.bicep` on the platform storage account's blob service; Lab 5.2 `modules/backup-vault-diagnostics.bicep` on the Backup Vault) — `avm/res/insights/diagnostic-setting` is a *subscription-scope* module (activity log) and cannot target a resource, and `avm/res/data-protection/backup-vault` exposes no `diagnosticSettings` parameter.
 - Trivial `existing` lookups (e.g. the public-IP lookup in Lab 2.3) — stay inline or as a tiny local module.
 - All of Lab 3.1's modules — see [Section 8.2](#82-hand-written-modules-in-lab-31).
 
@@ -117,30 +118,38 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 | `avm/res/compute/virtual-machine` | `0.22.3` | Lab 3.2 |
 | `avm/res/container-instance/container-group` | `0.7.0` | Lab 3.3 |
 | `avm/res/container-registry/registry` | `0.13.0` | Lab 3.3 |
+| `avm/res/data-protection/backup-vault` | `0.13.2` | Lab 5.2 |
+| `avm/res/insights/action-group` | `0.8.0` | Lab 5.1 |
+| `avm/res/insights/data-collection-rule` | `0.11.0` | Lab 5.1 |
+| `avm/res/insights/metric-alert` | `0.4.1` | Lab 5.1 |
 | `avm/res/key-vault/vault` | `0.14.0` | Lab 3.2 |
 | `avm/res/network/application-security-group` | `0.2.2` | Lab 2.2 |
 | `avm/res/network/bastion-host` | `0.8.2` | Lab 2.2 |
 | `avm/res/network/dns-zone` | `0.6.2` | Lab 2.3 |
 | `avm/res/network/load-balancer` | `0.8.0` | Lab 2.3 |
 | `avm/res/network/network-security-group` | `0.5.3` | Lab 2.2 |
+| `avm/res/network/network-watcher` | `0.5.1` | Lab 5.3 |
 | `avm/res/network/private-dns-zone` | `0.8.1` | Lab 2.3 |
 | `avm/res/network/public-ip-address` | `0.13.0` | Lab 2.1 |
 | `avm/res/network/virtual-network` | `0.10.2` | Lab 2.1 |
 | `avm/res/network/virtual-network/subnet` | `0.2.0` | Lab 2.2 |
+| `avm/res/operational-insights/workspace` | `0.16.1` | Lab 5.1 |
+| `avm/res/recovery-services/vault` | `0.13.0` | Lab 5.2 |
 | `avm/res/resources/resource-group` | `0.4.4` | Labs 1.2, 1.3, 3.3 |
 | `avm/res/storage/storage-account` | `0.33.0` | Labs 4.1, 4.2, 4.3, 4.4 |
 | `avm/res/web/serverfarm` | `0.7.0` | Lab 3.4 |
 | `avm/res/web/site` | `0.24.0` | Lab 3.4 |
 
 > [!NOTE]
-> The catalogue grows as labs are converted (issue #62 v2). Each conversion PR appends its modules here.
+> The catalogue is complete for issue #62 v2 (all five modules converted). Upgrading a module means updating every reference and this table in the same PR.
 
 ### 4.5 Lab-Friction Overrides
 
 The labs must stay easy to run, test, and tear down for students. Wherever an AVM default conflicts with that, override it explicitly at the call site with a short comment referencing this section. Known overrides:
 
 - **Key Vault** (`key-vault/vault`): Azure no longer allows soft delete to be disabled on new vaults, so the override is the shortest retention (`softDeleteRetentionInDays: 7`) and `enablePurgeProtection: false` (the module defaults to `true`); the lab's `Remove-LabResource.ps1` purges the vault after deleting it so the name is reusable at once (Lab 3.2).
-- **Recovery Services Vault** (`recovery-services/vault`): disable soft delete / immutability settings, so `Remove-LabResource.ps1` can delete the vault.
+- **Recovery Services Vault** (`recovery-services/vault`): one override and one platform constraint (Lab 5.2). (1) `publicNetworkAccess: 'Enabled'` — the module defaults it to `Disabled`, and Azure VM backup into a vault without public access requires private endpoints the lab does not deploy. (2) `softDeleteSettings` is **not** set: Azure Backup "secure by default" enforces soft delete platform-side on every new vault (`softDeleteState` and `enhancedSecurityState` = `AlwaysON`, 14-day retention). Sending any other value fails with `BMSUserErrorSoftDeleteStateNotSetToAlwaysON`, and no API version, portal, Azure CLI or Az PowerShell path can disable it. Teardown still works in one pass — Azure allows deleting a vault that holds only soft-deleted items, and the vault is then itself soft-deleted for 14 days at no cost — but it requires Azure CLI 2.75.0+ or Az PowerShell 7.5.0+.
+- **Backup Vault** (`data-protection/backup-vault`): `softDeleteSettings: { state: 'Off', retentionDurationInDays: 14 }` — unlike the Recovery Services Vault, the `Microsoft.DataProtection` API still accepts a disabled state, so `Remove-LabResource.ps1` deletes the blob backup instance and the vault in one pass (Lab 5.2).
 - **Load Balancer** (`network/load-balancer`): set `disableOutboundSnat: false` on every load-balancing rule (Lab 2.3). The module defaults it to `true`, which would silently remove the implicit outbound SNAT through the frontend IP that the Module 3 VMs (no public IPs, no NAT gateway) rely on.
 - **Container Apps environment** (`app/managed-environment`): `zoneRedundant: false` (the default `true` requires an infrastructure subnet) and `publicNetworkAccess: 'Enabled'` (default `Disabled`), so the consumption environment with external ingress the lab teaches still deploys (Lab 3.3).
 - **Container Registry** (`container-registry/registry`): `networkRuleSetDefaultAction: 'Allow'` — with public access enabled the module's default `Deny` makes it emit a `networkRuleSet`, but network rule sets are a Premium-only feature, so on the lab's Standard registry that object is rejected at deploy time (and would have no effect anyway). `Allow` keeps the module from sending one. The module also defaults `azureADAuthenticationAsArmPolicyStatus` to `disabled` while Azure's own default is `enabled`; the lab sets it back to `enabled`, because with it disabled an ARM-audience token cannot reach the registry data plane and `Get-AzContainerRegistryRepository` - the call the lab's `Test-Lab.ps1` makes - fails with `Unauthorized` even though the image is present (Lab 3.3).
@@ -526,18 +535,18 @@ if (-not $existing) {
 
 **Error**: `BMSUserErrorRedundancySettingsUseVaultApi: Redundancy settings for this vault cannot be modified using this API. Since the Vault API was previously used to update the redundancy settings for this vault, you must again use the Vault API to make any further changes to this property.`
 
-**Root Cause**: The `Microsoft.RecoveryServices/vaults/backupstorageconfig` sub-resource cannot be applied after the vault's `storageTypeState` is `Locked` (which happens after the first backup is stored). Additionally, the `redundancySettings` property in the vault body type is **read-only** in the Bicep type system (BCP073).
+**Root Cause**: The `Microsoft.RecoveryServices/vaults/backupstorageconfig` sub-resource cannot be written once the vault's `storageTypeState` is `Locked`, which happens as soon as the first backup item is configured. The error tells you to use the *vault API* instead — and the vault body carries its own `redundancySettings` property, which is not subject to that restriction.
 
-**Solution**: Set storage redundancy in the deployment PowerShell script using `az backup vault backup-properties set`, guarded by an idempotency check:
+**Solution**: Declare the redundancy on the vault itself. `avm/res/recovery-services/vault` exposes a `redundancySettings` parameter and emits it on `Microsoft.RecoveryServices/vaults`, so the value is set at creation and re-sent unchanged on every later deployment:
 
-```powershell
-# ✅ CORRECT — only set if not already LocallyRedundant and not Locked
-$props = az backup vault backup-properties show --resource-group $rg --name $vaultName --output json 2>$null | ConvertFrom-Json
-if ($props.properties.storageModelType -ne 'LocallyRedundant') {
-    az backup vault backup-properties set --resource-group $rg --name $vaultName --backup-storage-redundancy LocallyRedundant --output none
+```bicep
+// ✅ CORRECT — the vault API path, accepted at creation and on re-deploy
+redundancySettings: {
+  standardTierStorageRedundancy: 'LocallyRedundant'
 }
-# If already Locked at desired value, no action needed.
 ```
+
+Verified against a vault whose `storageTypeState` was already `Locked`: re-deploying the unchanged `redundancySettings` succeeds. Keep any `backupstorageconfig` step in a deployment script only as an idempotent guard that reads the current value first and never writes when it already matches — Lab 5.2's `Deploy-Bicep.ps1` does exactly that with `Get-AzRecoveryServicesBackupProperty` / `Set-AzRecoveryServicesBackupProperty`.
 
 ### 10.6 `az backup item list --workload-type VM` Returns Invalid Input (E005)
 

@@ -188,6 +188,34 @@ Perf
 > [!NOTE]
 > Beyond VM telemetry, this lab also routes the **platform storage account's diagnostics** to the workspace. The automated deployment (`Deploy-Bicep.ps1`) creates a diagnostic setting (`skycraft-storage-diag`) that sends `StorageRead` and `StorageWrite` blob logs to `platform-skycraft-swc-law`, centralizing storage access auditing alongside VM metrics and logs.
 
+**Preview - the AVM module calls the Bicep path makes** (`bicep/main.bicep`; versions pinned in `docs/bicep-standards.md` §4.4):
+
+```bicep
+module modWorkspace 'br/public:avm/res/operational-insights/workspace:0.16.1' = {
+  name: 'law-deployment'
+  scope: resourceGroup('platform-skycraft-swc-rg')
+  params: {
+    name: 'platform-skycraft-swc-law'
+    skuName: 'PerGB2018'
+    dataRetention: 30                       // the module defaults to 365
+    ...
+  }
+}
+
+module modCpuAlert 'br/public:avm/res/insights/metric-alert:0.4.1' = {
+  ...
+  params: {
+    criteria: {
+      'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria'
+      allof: [ { metricName: 'Percentage CPU', operator: 'GreaterThan', threshold: 80, ... } ]
+    }
+    actions: [modActionGroup.outputs.resourceId]
+  }
+}
+```
+
+The data collection rule and the action group follow the same pattern. The storage diagnostic setting is the one resource without an AVM module and lives in `bicep/modules/storage-blob-diagnostics.bicep` (see `ARCHITECTURE.md` §5).
+
 ---
 
 ## ✅ Lab Checklist

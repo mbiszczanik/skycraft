@@ -249,6 +249,15 @@ if ($WhatIf) {
                 -Name Default `
                 -LifeCycles $blobLifecycle `
                 -IsDefault $true
+            # Current Az.DataProtection templates ship a vaulted 'BackupWeekly' AzureBackupRule
+            # alongside the retention rule. This lab wants operational (continuous) backup only,
+            # so the backup rule is dropped - leaving it in stores a policy whose backup rule
+            # writes to VaultStore while its only retention lifecycle targets OperationalStore,
+            # and Azure then rejects every backup instance built from it with
+            # 'UserErrorInvalidRequestParameter: Parameter NO_PARAM in request is invalid'.
+            $blobPolicyTemplate.PolicyRule = @(
+                $blobPolicyTemplate.PolicyRule | Where-Object { $_.ObjectType -ne 'AzureBackupRule' }
+            )
             New-AzDataProtectionBackupPolicy `
                 -ResourceGroupName $platformRg `
                 -VaultName 'platform-skycraft-swc-bv' `

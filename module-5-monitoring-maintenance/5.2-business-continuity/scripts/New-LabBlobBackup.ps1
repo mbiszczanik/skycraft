@@ -142,25 +142,17 @@ if ($existingInstance) {
     Write-Host "  [WhatIf] Would create blob backup instance for $storageAccount" -ForegroundColor Cyan
 } else {
     try {
-        # The Backup Vault uses a VaultStore datastore with the default (vaulted)
-        # AzureBlob policy, so the instance MUST carry a backup configuration listing
-        # the containers — without it the service rejects the request ("NO_PARAM is
-        # invalid"). -ErrorAction Stop is required because the autorest DataProtection
-        # cmdlets emit non-terminating errors, which previously printed a false
-        # "created" success.
-        $backupConfig = New-AzDataProtectionBackupConfigurationClientObject `
-            -DatasourceType AzureBlob `
-            -IncludeAllContainer `
-            -StorageAccountResourceGroupName $prodRg `
-            -StorageAccountName $storageAccount `
-            -ErrorAction Stop
-
+        # SkyCraft-Blob-Policy is an operational (continuous) blob policy and protects the whole
+        # storage account. A backup configuration listing containers belongs to vaulted blob
+        # backup; passing one here makes the service reject the request with
+        # 'UserErrorInvalidRequestParameter: Parameter NO_PARAM in request is invalid'.
+        # -ErrorAction Stop is required because the autorest DataProtection cmdlets emit
+        # non-terminating errors, which previously printed a false "created" success.
         $backupInstance = Initialize-AzDataProtectionBackupInstance `
             -DatasourceType AzureBlob `
             -DatasourceLocation $location `
             -DatasourceId $storageId `
             -PolicyId $policyId `
-            -BackupConfiguration $backupConfig `
             -ErrorAction Stop
 
         New-AzDataProtectionBackupInstance `
