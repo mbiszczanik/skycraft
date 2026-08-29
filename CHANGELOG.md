@@ -63,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lab 5.2 declares the Recovery Services Vault's LRS redundancy in Bicep (`redundancySettings`); `Deploy-Bicep.ps1` keeps its idempotent redundancy step, which now only confirms the value.
 - Lab 5.3 re-declares the auto-provisioned `NetworkWatcher_swedencentral` through the AVM module (an idempotent update that applies the canonical tags); the flow log and the connection monitor are the module's children.
 - Module 5 resource deltas from the AVM conversion: the Log Analytics workspace is created with `features.disableLocalAuth: true` and `forceCmkForQuery: true` (Azure's own defaults are `false`; nothing in the course uses the workspace shared keys), the Backup Vault is created with Azure Monitor alerts for all job failures enabled, and the deprecated `retentionPolicy` block is no longer sent with the storage diagnostic setting.
+- `docs/bicep-standards.md` §10.5 rewritten: the Recovery Services Vault's storage redundancy is declared in Bicep through the AVM module's `redundancySettings` (the vault API path the error message demands), replacing the previous guidance that it is read-only in the Bicep type system and must be set from the deployment script. Verified against a vault whose `storageTypeState` was already `Locked`.
 
 ### Removed
 

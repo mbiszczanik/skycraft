@@ -535,18 +535,18 @@ if (-not $existing) {
 
 **Error**: `BMSUserErrorRedundancySettingsUseVaultApi: Redundancy settings for this vault cannot be modified using this API. Since the Vault API was previously used to update the redundancy settings for this vault, you must again use the Vault API to make any further changes to this property.`
 
-**Root Cause**: The `Microsoft.RecoveryServices/vaults/backupstorageconfig` sub-resource cannot be applied after the vault's `storageTypeState` is `Locked` (which happens after the first backup is stored). Additionally, the `redundancySettings` property in the vault body type is **read-only** in the Bicep type system (BCP073).
+**Root Cause**: The `Microsoft.RecoveryServices/vaults/backupstorageconfig` sub-resource cannot be written once the vault's `storageTypeState` is `Locked`, which happens as soon as the first backup item is configured. The error tells you to use the *vault API* instead — and the vault body carries its own `redundancySettings` property, which is not subject to that restriction.
 
-**Solution**: Set storage redundancy in the deployment PowerShell script using `az backup vault backup-properties set`, guarded by an idempotency check:
+**Solution**: Declare the redundancy on the vault itself. `avm/res/recovery-services/vault` exposes a `redundancySettings` parameter and emits it on `Microsoft.RecoveryServices/vaults`, so the value is set at creation and re-sent unchanged on every later deployment:
 
-```powershell
-# ✅ CORRECT — only set if not already LocallyRedundant and not Locked
-$props = az backup vault backup-properties show --resource-group $rg --name $vaultName --output json 2>$null | ConvertFrom-Json
-if ($props.properties.storageModelType -ne 'LocallyRedundant') {
-    az backup vault backup-properties set --resource-group $rg --name $vaultName --backup-storage-redundancy LocallyRedundant --output none
+```bicep
+// ✅ CORRECT — the vault API path, accepted at creation and on re-deploy
+redundancySettings: {
+  standardTierStorageRedundancy: 'LocallyRedundant'
 }
-# If already Locked at desired value, no action needed.
 ```
+
+Verified against a vault whose `storageTypeState` was already `Locked`: re-deploying the unchanged `redundancySettings` succeeds. Keep any `backupstorageconfig` step in a deployment script only as an idempotent guard that reads the current value first and never writes when it already matches — Lab 5.2's `Deploy-Bicep.ps1` does exactly that with `Get-AzRecoveryServicesBackupProperty` / `Set-AzRecoveryServicesBackupProperty`.
 
 ### 10.6 `az backup item list --workload-type VM` Returns Invalid Input (E005)
 
