@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `parOwner` and the canonical `Owner` tag across Module 4, including the portal, CLI and PowerShell paths in the Lab 4.1 guide and the Lab 4.1/4.3 checklists.
 - Lab 2.2 `Test-Lab.ps1` asserts the `Microsoft.Storage` service endpoint on `WorldSubnet` (the endpoint Lab 4.4 depends on) and, when Bastion is deployed, its SKU, its public IP SKU and allocation method, and the canonical tags on both (#90).
 - Lab 2.3 `Test-Lab.ps1` asserts `DisableOutboundSnat` is false on every load-balancing rule, the canonical tags on both load balancers and both DNS zones, and that the `dev` and `play` A records resolve to the load balancer public IPs reserved in Lab 2.1 (#90).
+- `.bicepparam` parameter files for the Module 5 Bicep entry points (Labs 5.1, 5.2 and 5.3). Their required resource-ID parameters default to well-formed placeholders under the zero subscription GUID (an empty default fails `az bicep build-params` with BCP333 against `@minLength(1)`); the deploy scripts resolve the real IDs from Azure.
+- `parOwner` and the canonical `Owner` tag across Module 5.
+- Lab 5.1 `bicep/modules/storage-blob-diagnostics.bicep` and Lab 5.2 `bicep/modules/backup-vault-diagnostics.bicep`: the documented local fallbacks for diagnostic settings (`avm/res/insights/diagnostic-setting` is subscription-scope only; `avm/res/data-protection/backup-vault` has no `diagnosticSettings` parameter).
+- Lab 5.2 `Test-Lab.ps1` asserts that soft delete is off on the Backup Vault.
+- Lab 5.1 template output `outStorageDiagnosticSettingId`; Lab 5.3 template output `outNetworkWatcherId`.
 
 ### Changed
 
@@ -53,6 +58,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lab 4.3 `Remove-LabResource.ps1` takes `-Environment`, matching `Deploy-Bicep.ps1` and `Test-Lab.ps1`; it hardcoded the prod resource group and account, so a `dev` or `platform` run reported success while leaving both shares behind (#95).
 - Lab 2.1 `Remove-LabResource.ps1` probes each virtual network and public IP before deleting it, so a resource that is genuinely absent stays an `[INFO]` while a resource that exists but cannot be deleted is reported as `[ERROR]` with the Azure message, and the script exits non-zero (#96).
 - Lab 3.4 `Remove-LabResource.ps1` detaches the VNet integration from the web app and every slot and verifies per site that it is gone before deleting the plan (an integrated plan deleted first leaves an orphaned service association link that blocks deleting the subnet, VNet, NSGs and resource group); the resource names are parameters, and the script exits non-zero on failure instead of continuing silently.
+- Module 5 Bicep converted to the AVM-first architecture (issue #62 v2, PR 5/6): the Log Analytics workspace via `avm/res/operational-insights/workspace`, the VM Insights data collection rule via `avm/res/insights/data-collection-rule`, the action group via `avm/res/insights/action-group`, the CPU metric alert via `avm/res/insights/metric-alert`, the Recovery Services Vault (with its backup-reports diagnostic setting) via `avm/res/recovery-services/vault`, the Backup Vault via `avm/res/data-protection/backup-vault`, and the VNet flow log and connection monitor via `avm/res/network/network-watcher`.
+- Module 5 lab-friction overrides (`docs/bicep-standards.md` §4.5): soft delete is **disabled** on the Recovery Services Vault and **off** on the Backup Vault so `Remove-LabResource.ps1` can delete both vaults without a 14-day hold, and the Recovery Services Vault keeps `publicNetworkAccess: 'Enabled'` (the module defaults to `Disabled`, which requires private endpoints for VM backup). Lab 5.2 `Test-Lab.ps1` now asserts soft delete is `Disabled` instead of enabled.
+- Lab 5.2 declares the Recovery Services Vault's LRS redundancy in Bicep (`redundancySettings`); `Deploy-Bicep.ps1` keeps its idempotent redundancy step, which now only confirms the value.
+- Lab 5.3 re-declares the auto-provisioned `NetworkWatcher_swedencentral` through the AVM module (an idempotent update that applies the canonical tags); the flow log and the connection monitor are the module's children.
+- Module 5 resource deltas from the AVM conversion: the Log Analytics workspace is created with `features.disableLocalAuth: true` and `forceCmkForQuery: true` (Azure's own defaults are `false`; nothing in the course uses the workspace shared keys), the Backup Vault is created with Azure Monitor alerts for all job failures enabled, and the deprecated `retentionPolicy` block is no longer sent with the storage diagnostic setting.
 
 ### Removed
 
@@ -63,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Module 4 local Bicep modules `storageAccount.bicep` (Lab 4.1), `blobContainer.bicep` (Lab 4.2), `storage.bicep` (Lab 4.3) and `security.bicep` (Lab 4.4), superseded by the AVM module above. Module 4 has no local modules left and no `bicep/modules/` directory.
 - The cross-lab import that made Lab 4.2 compile Lab 4.1's `modules/storageAccount.bicep`.
 - The `blobContainer.bicep` `PublicAccessNotPermitted` race workaround: every container in Module 4 is `publicAccess: 'None'` (the subscription policy blocks anything else), so the race cannot occur.
+- Module 5 local Bicep modules `monitoring.bicep` (Lab 5.1), `recoveryServicesVault.bicep`, `backupVault.bicep` (Lab 5.2) and `network-monitoring.bicep` (Lab 5.3), superseded by the AVM modules above; Lab 5.3 has no `bicep/modules/` directory left.
 
 ### Fixed
 
