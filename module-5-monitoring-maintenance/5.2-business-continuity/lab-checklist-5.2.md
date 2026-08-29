@@ -12,13 +12,14 @@
 - [x] Location: **Sweden Central**
 - [x] Resource group: `platform-skycraft-swc-rg`
 - [x] Storage replication type: **Locally-redundant (LRS)**
-- [x] Soft delete: **Enabled** (default)
+- [x] Soft delete: **Disabled** (lab-friction override for cleanup; production keeps it enabled)
 
 ### Tags
 
 - [x] Tag: `Project` = `SkyCraft`
 - [x] Tag: `Environment` = `Platform`
 - [x] Tag: `CostCenter` = `MSDN`
+- [x] Tag: `Owner` = `mbiszczanik`
 
 ---
 
@@ -60,12 +61,14 @@
 - [x] Resource group: `platform-skycraft-swc-rg`
 - [x] Storage redundancy: **Locally-redundant (LRS)**
 - [x] Identity type: **System Assigned**
+- [x] Soft delete: **Off** (lab-friction override for cleanup)
 
 ### Tags
 
 - [x] Tag: `Project` = `SkyCraft`
 - [x] Tag: `Environment` = `Platform`
 - [x] Tag: `CostCenter` = `MSDN`
+- [x] Tag: `Owner` = `mbiszczanik`
 
 ---
 
@@ -356,7 +359,7 @@ az backup replication-protected-item list \
 **All Verification Items Complete**:
 
 - [ ] All resources created with proper naming conventions
-- [ ] All tags applied (Project, Environment, CostCenter)
+- [ ] All tags applied (Project, Environment, CostCenter, Owner)
 - [ ] All validation commands executed successfully
 - [ ] All reflection questions answered
 - [ ] Ready to proceed to Lab 5.3

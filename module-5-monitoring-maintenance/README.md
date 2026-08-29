@@ -117,7 +117,7 @@ Each lab includes:
 
 - **Lab Guide** (`lab-guide-5.X.md`) — concepts, Mermaid diagram, and multi-modal (Portal + CLI + PowerShell) step-by-step
 - **Lab Checklist** (`lab-checklist-5.X.md`) — verification-only checkboxes and validation commands
-- **Bicep Templates** (`bicep/`) — Infrastructure as Code for the lab's resources
+- **Bicep Templates** (`bicep/`) — `main.bicep` calling Azure Verified Modules, a `parameters/main.bicepparam`, and (Labs 5.1 and 5.2) a local diagnostic-settings fallback under `modules/`
 - **Automation Scripts** (`scripts/`) — `Deploy-Bicep.ps1`, `Test-Lab.ps1`, `Remove-LabResource.ps1`, plus lab-specific helpers
 
 **Recommended approach**:
@@ -173,8 +173,8 @@ This module covers **10-15%** of the AZ-104 exam. Key topics include:
 ## 📞 Getting Help
 
 - **Lab failures**: start with `Test-Lab.ps1` output; most issues surface as a missing RG or VM.
-- **Backup "UpdatePolicyNotSupported"**: see `docs/bicep-standards.md` §9.4 — policies must be created via PowerShell, not Bicep (this is handled by the Lab 5.2 deployment script).
-- **RSV "redundancy locked"**: see `docs/bicep-standards.md` §9.5 — redundancy is set via `az backup vault backup-properties set`, guarded by an idempotency check.
+- **Backup "UpdatePolicyNotSupported"**: see `docs/bicep-standards.md` §10.4 — policies must be created via PowerShell, not Bicep (this is handled by the Lab 5.2 deployment script).
+- **RSV "redundancy locked"**: see `docs/bicep-standards.md` §10.5 — the Bicep path declares LRS at vault creation (`redundancySettings`), and `Deploy-Bicep.ps1` re-checks it idempotently; redundancy cannot be changed once the first backup is stored.
 - **KQL not returning data**: diagnostic settings take up to 15 minutes to start flowing on first deploy.
 
 ---

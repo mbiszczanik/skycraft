@@ -9,7 +9,7 @@ By completing this lab, you will:
 - Implement **Azure VM Backup** for production workloads
 - Perform a **File-Level Recovery (FLR)** from a backup snapshot
 - Understand the difference between **LRS** and **GRS** for backup data
-- Configure **Soft Delete** for protected items
+- Understand **Soft Delete** for protected items (and why the lab automation turns it off)
 
 ---
 
@@ -112,8 +112,26 @@ Just like storage accounts, vaults support redundancy:
 4. Click **Review + Create** → **Create**.
 
 > [!IMPORTANT]
-> Change the **Storage Replication Type** immediately after creation if you want to use LRS (to save cost) before any backups are performed.
-> Go to **Properties** → **Backup Configuration** → **Update**.
+> Change the **Storage Replication Type** immediately after creation if you want to use LRS (to save cost) before any backups are performed: go to **Properties** → **Backup Configuration** → **Update**. The Bicep path (`Deploy-Bicep.ps1`) declares LRS at creation through the AVM vault module's `redundancySettings`, and also turns **soft delete off** on both vaults so `Remove-LabResource.ps1` can delete them without a 14-day hold — a lab-only choice; production keeps soft delete on (see `ARCHITECTURE.md` §1).
+
+**Preview - the AVM module call the Bicep path makes** (`bicep/main.bicep`; versions pinned in `docs/bicep-standards.md` §4.4):
+
+```bicep
+module modRecoveryServicesVault 'br/public:avm/res/recovery-services/vault:0.13.0' = {
+  name: 'bcdr-rsv-deployment'
+  scope: resourceGroup('platform-skycraft-swc-rg')
+  params: {
+    name: 'platform-skycraft-swc-rsv'
+    publicNetworkAccess: 'Enabled'                             // module default: Disabled
+    softDeleteSettings: { softDeleteState: 'Disabled', ... }   // lab-friction override
+    redundancySettings: { standardTierStorageRedundancy: 'LocallyRedundant' }
+    diagnosticSettings: [ { name: 'rsv-backup-reports-diag', workspaceResourceId: parWorkspaceId, ... } ]
+    ...
+  }
+}
+```
+
+The Backup Vault uses `avm/res/data-protection/backup-vault:0.13.2` the same way; its diagnostic setting is the one resource without an AVM parameter and lives in `bicep/modules/backup-vault-diagnostics.bicep`. Backup policies stay in `Deploy-Bicep.ps1` (`docs/bicep-standards.md` §10.4).
 
 **Expected Result**: Vault `platform-skycraft-swc-rsv` is deployed.
 
@@ -293,7 +311,7 @@ Instead of restoring the whole VM, we can mount a specific recovery point as a d
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: It retains deleted backup data for 14 additional days at no cost, protecting against accidental deletion or ransomware attacks.
+   **Answer**: It retains deleted backup data for 14 additional days at no cost, protecting against accidental deletion or ransomware attacks. In this lab the Bicep path disables it on both vaults so the cleanup script can delete them immediately; production keeps it on.
    </details>
 
 2. **Can you change the vault redundancy (LRS to GRS) after backups are taken?**

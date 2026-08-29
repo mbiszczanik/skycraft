@@ -134,6 +134,20 @@ Before starting this lab:
 
 **Expected Result**: After a minute, the tool shows a hop-by-hop breakdown of the connection status. Source and destination must be two distinct VMs — both must have the **NetworkWatcherAgent** extension installed (the deployment script installs it automatically).
 
+**Preview - the AVM module call the Bicep path makes** (`bicep/main.bicep`; version pinned in `docs/bicep-standards.md` §4.4):
+
+```bicep
+module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
+  name: 'network-monitoring-deployment'
+  scope: resourceGroup('NetworkWatcherRG')
+  params: {
+    name: 'NetworkWatcher_swedencentral'        // re-declares the auto-provisioned watcher (idempotent)
+    flowLogs: [ { name: 'prod-skycraft-swc-vnet-flowlog', targetResourceId: parProdVnetResourceId, formatVersion: 2, retentionInDays: 7, workspaceResourceId: parWorkspaceResourceId, trafficAnalyticsInterval: 10, ... } ]
+    connectionMonitors: [ { name: 'skycraft-hub-spoke-cm', endpoints: [...], testConfigurations: [...], testGroups: [...], workspaceResourceId: parWorkspaceResourceId } ]
+  }
+}
+```
+
 ---
 
 ## ✅ Lab Checklist
