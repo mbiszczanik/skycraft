@@ -40,6 +40,7 @@
 - **Monthly cost estimate:**
   - Recovery Services Vault: Free (no base cost).
   - Instance Protection (per VM per month): ~€4.50 for a Standard_B2s VM with <50 GB incremental backups.
+  - The VM policy is an **Enhanced** policy — Azure defaults VM deployments to Trusted Launch, which a Standard policy cannot protect. Enhanced bills more for instant-restore snapshots and defaults to keeping them 7 days, so `Deploy-Bicep.ps1` pulls that back to the 2 days the lab documents. The sub-type cannot be changed after a VM is protected, so rebuilding means deleting the policy first.
   - Backup Vault: Free (no base cost).
   - Blob operational backup: ~€0 for <100 GB stored (continuous, 30-day retention).
   - **Total for 2 VMs:** ~€9/month.

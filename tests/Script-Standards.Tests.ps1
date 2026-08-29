@@ -51,6 +51,14 @@ $Lab32DeployCase = @(
     }
 )
 
+# Regression guard for issue #113 (Lab 5.2 deploy used a Standard policy and masked the failure)
+$Lab52DeployCase = @(
+    @{
+        file = 'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Deploy-Bicep.ps1'
+        path = (Join-Path $RepoRoot 'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Deploy-Bicep.ps1')
+    }
+)
+
 Describe 'SkyCraft PowerShell - script standards' {
 
     It "'<file>' sets `$ErrorActionPreference = 'Stop'" -ForEach $ScriptCases {
@@ -106,5 +114,40 @@ Describe 'SkyCraft PowerShell - Lab 3.2 deployment cannot be silently skipped' {
         $content = Get-Content -Raw -LiteralPath $path
         $content | Should -Not -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*(\$Host\.SetShouldExit\(0\)[\r\n]+\s*)?exit 0'
         $content | Should -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*(\$Host\.SetShouldExit\([1-9]\)[\r\n]+\s*)?exit [1-9]'
+    }
+}
+
+Describe 'SkyCraft PowerShell - Lab 5.2 deployment survives Trusted Launch' {
+
+    It "'<file>' creates the VM backup policy as an Enhanced policy" -ForEach $Lab52DeployCase {
+        # Azure defaults VM deployments to Trusted Launch, which a Standard policy cannot protect.
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match '-PolicySubType Enhanced'
+    }
+
+    It "'<file>' keeps instant restore at the 2 days the lab documents" -ForEach $Lab52DeployCase {
+        # Enhanced defaults to 7 days of billed snapshots, and Test-Lab.ps1 asserts 2.
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match 'SnapshotRetentionInDays\s*=\s*2'
+    }
+
+    It "'<file>' counts deployment failures and exits non-zero" -ForEach $Lab52DeployCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match '\$script:deployFailures\s*=\s*0'
+        $content | Should -Match '\$script:deployFailures\+\+'
+        $content | Should -Match '(?s)if \(\$script:deployFailures -gt 0\).*?exit 1'
+    }
+
+    It "'<file>' reports a failed VM protection as [ERROR], not [WARNING]" -ForEach $Lab52DeployCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Not -Match '\[WARNING\] Could not enable VM backup'
+        $content | Should -Match '\[ERROR\] Could not enable VM backup'
+    }
+
+    It "'<file>' does not identify a protected VM by FriendlyName alone" -ForEach $Lab52DeployCase {
+        # FriendlyName comes back empty for some VMs (#105), which made the idempotency check
+        # miss an already-protected VM and re-run Enable on every deployment.
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match 'ContainerName -split'
     }
 }
