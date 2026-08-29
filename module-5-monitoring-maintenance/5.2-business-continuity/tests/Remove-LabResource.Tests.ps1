@@ -177,7 +177,7 @@ function Get-AzRecoveryServicesBackupItem {
     [pscustomobject]@{
         Name          = 'VM;iaasvmcontainerv2;dev-skycraft-swc-rg;dev-skycraft-swc-auth-vm'
         ContainerName = 'iaasvmcontainerv2;dev-skycraft-swc-rg;dev-skycraft-swc-auth-vm'
-        FriendlyName  = 'dev-skycraft-swc-auth-vm'
+        FriendlyName  = $(if ($env:SKYCRAFT_STUB_NOFRIENDLY -eq '1') { '' } else { 'dev-skycraft-swc-auth-vm' })
     }
 }
 
@@ -260,7 +260,8 @@ function Remove-AzResourceGroup {
             [string]$Manifest,
             [string[]]$Fail = @(),
             [string]$RecoveryServicesVersion = '7.7.1',
-            [switch]$Empty
+            [switch]$Empty,
+            [switch]$NoFriendlyName
         )
 
         $logPath = Join-Path (Split-Path -Parent $Manifest) 'calls.log'
@@ -294,6 +295,7 @@ exit `$LASTEXITCODE
             Empty      = $env:SKYCRAFT_STUB_EMPTY
             Log        = $env:SKYCRAFT_STUB_LOG
             RsVersion  = $env:SKYCRAFT_STUB_RSVERSION
+            NoFriendly = $env:SKYCRAFT_STUB_NOFRIENDLY
             ModulePath = $env:PSModulePath
         }
         try {
@@ -301,6 +303,7 @@ exit `$LASTEXITCODE
             $env:SKYCRAFT_STUB_EMPTY     = if ($Empty) { '1' } else { '0' }
             $env:SKYCRAFT_STUB_LOG       = $logPath
             $env:SKYCRAFT_STUB_RSVERSION = $RecoveryServicesVersion
+            $env:SKYCRAFT_STUB_NOFRIENDLY = if ($NoFriendlyName) { '1' } else { '0' }
             # Only so the placeholder Az.* modules are discoverable when no real Az is installed.
             $env:PSModulePath = (Join-Path (Split-Path -Parent $Manifest) 'modules') +
                                 [System.IO.Path]::PathSeparator + $env:PSModulePath
@@ -312,6 +315,7 @@ exit `$LASTEXITCODE
             $env:SKYCRAFT_STUB_EMPTY     = $saved.Empty
             $env:SKYCRAFT_STUB_LOG       = $saved.Log
             $env:SKYCRAFT_STUB_RSVERSION = $saved.RsVersion
+            $env:SKYCRAFT_STUB_NOFRIENDLY = $saved.NoFriendly
             $env:PSModulePath            = $saved.ModulePath
         }
 
@@ -334,6 +338,7 @@ exit `$LASTEXITCODE
     $script:TwoStuck    = Invoke-CleanupScript -Manifest $script:Manifest -Fail 'Remove-AzDataProtectionBackupInstance', 'Remove-AzRecoveryServicesVault'
     $script:FirstStuck  = Invoke-CleanupScript -Manifest $script:Manifest -Fail 'Remove-AzDataProtectionBackupInstance'
     $script:StaleModule = Invoke-CleanupScript -Manifest $script:Manifest -RecoveryServicesVersion '7.1.0'
+    $script:NoFriendly  = Invoke-CleanupScript -Manifest $script:Manifest -NoFriendlyName
 }
 
 AfterAll {
@@ -379,6 +384,21 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - exit code contract' {
         $script:FirstStuck.Calls    | Should -Contain 'Remove-AzRecoveryServicesVault'
         $script:FirstStuck.Calls    | Should -Contain 'Remove-AzResource'
         $script:FirstStuck.ExitCode | Should -Be 1
+    }
+}
+
+Describe 'Lab 5.2 Remove-LabResource.ps1 - VM backup item naming' {
+
+    It 'falls back to the container name when Azure returns an empty FriendlyName' {
+        # The live v0.8.0 verification printed a blank name and passed an empty target to
+        # ShouldProcess, because the stub used to populate FriendlyName unconditionally.
+        $script:NoFriendly.Output | Should -Match 'VM Backup Item: dev-skycraft-swc-auth-vm'
+        $script:NoFriendly.Output | Should -Match 'Disabling VM backup protection: dev-skycraft-swc-auth-vm'
+        $script:NoFriendly.ExitCode | Should -Be 0
+    }
+
+    It 'still uses FriendlyName when Azure provides one' {
+        $script:Clean.Output | Should -Match 'VM Backup Item: dev-skycraft-swc-auth-vm'
     }
 }
 

@@ -147,14 +147,24 @@ if ($rsvExists) {
     $vmItems = Get-AzRecoveryServicesBackupItem -VaultId $rsvExists.ID -BackupManagementType AzureVM -WorkloadType AzureVM -ErrorAction SilentlyContinue
     if ($vmItems -and @($vmItems).Count -gt 0) {
         foreach ($item in $vmItems) {
+            # FriendlyName comes back empty for some protected VMs, which left the progress
+            # lines and the ShouldProcess target blank during the live v0.8.0 verification.
+            # The container name carries the VM name as its last ';'-separated segment.
+            $displayName = if ($item.FriendlyName) {
+                $item.FriendlyName
+            } elseif ($item.ContainerName) {
+                ($item.ContainerName -split ';')[-1]
+            } else {
+                $item.Name
+            }
             $resourcesToDelete.Add(@{
                 Type          = 'VmBackupItem'
                 Name          = $item.Name
                 ContainerName = $item.ContainerName
-                FriendlyName  = $item.FriendlyName
+                FriendlyName  = $displayName
                 Item          = $item
             })
-            Write-Host "  - VM Backup Item: $($item.FriendlyName)" -ForegroundColor Gray
+            Write-Host "  - VM Backup Item: $displayName" -ForegroundColor Gray
         }
     }
     $resourcesToDelete.Add(@{ Type = 'RSV'; Name = $rsvName })
