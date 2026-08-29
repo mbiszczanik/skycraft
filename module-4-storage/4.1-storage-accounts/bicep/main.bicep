@@ -1,13 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 4.1 - Storage Accounts - Orchestrator
-DESCRIPTION: Orchestrates deployment of storage accounts for SkyCraft across
-             platform, development, and production environments. Supports
-             single environment or all environments deployment.
-EXAMPLE: 
-  Single environment: az deployment sub create --location swedencentral --template-file main.bicep --parameters parEnvironment=dev
-  All environments: az deployment sub create --location swedencentral --template-file main.bicep --parameters parDeployAllEnvironments=true
-AUTHOR/S: SkyCraft
-VERSION: 1.0.0
+DESCRIPTION: Deploys the SkyCraft storage accounts (platform, development, production) via the Azure Verified Module for storage accounts, with environment-specific redundancy, the canonical tags and blob/file soft delete
+EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev
+AUTHOR/S: Marcin Biszczanik
+VERSION: 2.0.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -16,142 +12,143 @@ targetScope = 'subscription'
 /*******************
 *    Parameters    *
 *******************/
+
 @description('Location for all resources')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
 
-@description('Environment to deploy: dev, prod, platform. Ignored if parDeployAllEnvironments is true.')
+@description('Environment to deploy. Ignored when parDeployAllEnvironments is true.')
 @allowed(['dev', 'prod', 'platform'])
 param parEnvironment string = 'dev'
 
 @description('Deploy storage accounts to all environments (platform, dev, prod)')
 param parDeployAllEnvironments bool = false
 
+@description('Resource owner tag value')
+@minLength(1)
+param parOwner string = 'mbiszczanik'
+
 @description('Enable blob soft delete')
 param parEnableBlobSoftDelete bool = true
 
 @description('Blob soft delete retention days')
+@minValue(1)
+@maxValue(365)
 param parBlobSoftDeleteDays int = 7
 
 @description('Enable container soft delete')
 param parEnableContainerSoftDelete bool = true
 
+@description('Container soft delete retention days')
+@minValue(1)
+@maxValue(365)
+param parContainerSoftDeleteDays int = 7
+
 @description('Enable file share soft delete')
 param parEnableFileSoftDelete bool = true
 
-@description('Set to true for new deployments (applies keyType and infrastructureEncryption). Set to false when updating existing storage accounts.')
-param parIsNewDeployment bool = true
+@description('File share soft delete retention days')
+@minValue(1)
+@maxValue(365)
+param parFileSoftDeleteDays int = 7
 
-@description('Enable infrastructure (double) encryption for new deployments. Cannot be changed after creation.')
+@description('Allow public network access to the storage accounts (Lab 4.4 restricts this)')
+@allowed(['Enabled', 'Disabled'])
+param parPublicNetworkAccess string = 'Enabled'
+
+@description('Enable infrastructure (double) encryption. Creation-only - cannot be changed on an existing account.')
 param parEnableInfrastructureEncryption bool = false
 
 /*******************
 *    Variables     *
 *******************/
-// Environment configurations
+
 var varEnvironments = parDeployAllEnvironments ? ['platform', 'dev', 'prod'] : [parEnvironment]
 
-// Tag configurations per environment
-var varTagConfigs = {
+// Canonical four tags per environment (docs/bicep-standards.md section 5)
+var varTags = {
   platform: {
     Project: 'SkyCraft'
     Environment: 'Platform'
     CostCenter: 'MSDN'
+    Owner: parOwner
   }
   dev: {
     Project: 'SkyCraft'
     Environment: 'Development'
     CostCenter: 'MSDN'
+    Owner: parOwner
   }
   prod: {
     Project: 'SkyCraft'
     Environment: 'Production'
     CostCenter: 'MSDN'
+    Owner: parOwner
   }
+}
+
+// Production and Platform hold data worth geo-replicating; Development is recreatable.
+var varSkuNames = {
+  platform: 'Standard_GRS'
+  dev: 'Standard_LRS'
+  prod: 'Standard_GRS'
 }
 
 /*******************
-*    Resources     *
+*     Modules      *
 *******************/
 
-// Reference existing resource groups
-resource resPlatformRg 'Microsoft.Resources/resourceGroups@2023-07-01' existing = if (contains(varEnvironments, 'platform')) {
-  name: 'platform-skycraft-swc-rg'
-}
-
-resource resDevRg 'Microsoft.Resources/resourceGroups@2023-07-01' existing = if (contains(varEnvironments, 'dev')) {
-  name: 'dev-skycraft-swc-rg'
-}
-
-resource resProdRg 'Microsoft.Resources/resourceGroups@2023-07-01' existing = if (contains(varEnvironments, 'prod')) {
-  name: 'prod-skycraft-swc-rg'
-}
-
-/*******************
-*    Modules       *
-*******************/
-
-// Platform storage account (GRS)
-module modStorageAccountPlatform 'modules/storageAccount.bicep' = if (contains(varEnvironments, 'platform')) {
-  name: 'deploy-storage-account-platform'
-  scope: resPlatformRg
+module modStorageAccount 'br/public:avm/res/storage/storage-account:0.33.0' = [for env in varEnvironments: {
+  name: 'sa-deployment-${env}'
+  scope: resourceGroup('${env}-skycraft-swc-rg')
   params: {
-    parLocation: parLocation
-    parEnvironment: 'platform'
-    parTags: varTagConfigs.platform
-    parEnableBlobSoftDelete: parEnableBlobSoftDelete
-    parBlobSoftDeleteDays: parBlobSoftDeleteDays
-    parEnableContainerSoftDelete: parEnableContainerSoftDelete
-    parEnableFileSoftDelete: parEnableFileSoftDelete
-    parIsNewDeployment: parIsNewDeployment
-    parEnableInfrastructureEncryption: parEnableInfrastructureEncryption
+    name: '${env}skycraftswcsa'
+    location: parLocation
+    tags: varTags[env]
+    skuName: varSkuNames[env]
+    kind: 'StorageV2'
+    accessTier: 'Hot'
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+    allowBlobPublicAccess: false
+    allowSharedKeyAccess: true
+    publicNetworkAccess: parPublicNetworkAccess
+    // Creation-only property; AVM defaults it to true while Azure's own default is false (standards section 4.5)
+    requireInfrastructureEncryption: parEnableInfrastructureEncryption
+    // AVM emits defaultAction 'Deny' when networkAcls is omitted; Lab 4.4 is the lab that locks the account (standards section 4.5)
+    networkAcls: {
+      bypass: 'AzureServices'
+      defaultAction: 'Allow'
+    }
+    blobServices: {
+      deleteRetentionPolicyEnabled: parEnableBlobSoftDelete
+      deleteRetentionPolicyDays: parBlobSoftDeleteDays
+      containerDeleteRetentionPolicyEnabled: parEnableContainerSoftDelete
+      containerDeleteRetentionPolicyDays: parContainerSoftDeleteDays
+      isVersioningEnabled: false
+      changeFeedEnabled: false
+    }
+    fileServices: {
+      shareDeleteRetentionPolicy: {
+        enabled: parEnableFileSoftDelete
+        days: parFileSoftDeleteDays
+      }
+    }
   }
-}
-
-// Development storage account (LRS)
-module modStorageAccountDev 'modules/storageAccount.bicep' = if (contains(varEnvironments, 'dev')) {
-  name: 'deploy-storage-account-dev'
-  scope: resDevRg
-  params: {
-    parLocation: parLocation
-    parEnvironment: 'dev'
-    parTags: varTagConfigs.dev
-    parEnableBlobSoftDelete: parEnableBlobSoftDelete
-    parBlobSoftDeleteDays: parBlobSoftDeleteDays
-    parEnableContainerSoftDelete: parEnableContainerSoftDelete
-    parEnableFileSoftDelete: parEnableFileSoftDelete
-    parIsNewDeployment: parIsNewDeployment
-    parEnableInfrastructureEncryption: parEnableInfrastructureEncryption
-  }
-}
-
-// Production storage account (GRS)
-module modStorageAccountProd 'modules/storageAccount.bicep' = if (contains(varEnvironments, 'prod')) {
-  name: 'deploy-storage-account-prod'
-  scope: resProdRg
-  params: {
-    parLocation: parLocation
-    parEnvironment: 'prod'
-    parTags: varTagConfigs.prod
-    parEnableBlobSoftDelete: parEnableBlobSoftDelete
-    parBlobSoftDeleteDays: parBlobSoftDeleteDays
-    parEnableContainerSoftDelete: parEnableContainerSoftDelete
-    parEnableFileSoftDelete: parEnableFileSoftDelete
-    parIsNewDeployment: parIsNewDeployment
-    parEnableInfrastructureEncryption: parEnableInfrastructureEncryption
-  }
-}
+}]
 
 /******************
 *     Outputs     *
 ******************/
+
 @description('Platform storage account name (if deployed)')
-output outPlatformStorageAccountName string = modStorageAccountPlatform.?outputs.outStorageAccountName ?? 'not-deployed'
+output outPlatformStorageAccountName string = contains(varEnvironments, 'platform') ? modStorageAccount[indexOf(varEnvironments, 'platform')].outputs.name : 'not-deployed'
 
 @description('Development storage account name (if deployed)')
-output outDevStorageAccountName string = modStorageAccountDev.?outputs.outStorageAccountName ?? 'not-deployed'
+output outDevStorageAccountName string = contains(varEnvironments, 'dev') ? modStorageAccount[indexOf(varEnvironments, 'dev')].outputs.name : 'not-deployed'
 
 @description('Production storage account name (if deployed)')
-output outProdStorageAccountName string = modStorageAccountProd.?outputs.outStorageAccountName ?? 'not-deployed'
+output outProdStorageAccountName string = contains(varEnvironments, 'prod') ? modStorageAccount[indexOf(varEnvironments, 'prod')].outputs.name : 'not-deployed'
 
 @description('Deployed environments')
 output outDeployedEnvironments array = varEnvironments

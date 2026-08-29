@@ -46,7 +46,7 @@
 **Monthly cost (if Bastion enabled):**
 - Azure Bastion (Basic SKU): ~€140/mo (largest cost)
 - Bastion Public IP (Standard): €3.40/mo
-- NSGs (3 Hub + 6 Spokes = 9 total): €0 (free)
+- NSGs (1 Hub + 6 Spokes = 7 total): €0 (free)
 - ASGs (6 total): €0 (free)
 - **Total with Bastion: ~€143.40/mo**
 - **Total without Bastion (default): ~€0/mo** (inherits Lab 2.1 costs)

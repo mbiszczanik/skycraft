@@ -1,10 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 4.2 - Implement Azure Blob Storage
-DESCRIPTION: Orchestrates deployment for Lab 4.2, configuring containers,
-             lifecycle policies, and public access settings.
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
-AUTHOR/S: SkyCraft
-VERSION: 1.0.0
+DESCRIPTION: Configures the production and development storage accounts from Lab 4.1 with containers, blob versioning and lifecycle management rules via the Azure Verified Module for storage accounts
+EXAMPLE: .\scripts\Deploy-Bicep.ps1
+AUTHOR/S: Marcin Biszczanik
+VERSION: 2.0.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -13,29 +12,67 @@ targetScope = 'subscription'
 /*******************
 *    Parameters    *
 *******************/
+
 @description('Location for all resources')
+@allowed(['swedencentral', 'northeurope'])
 param parLocation string = 'swedencentral'
+
+@description('Resource owner tag value')
+@minLength(1)
+param parOwner string = 'mbiszczanik'
+
+@description('Production resource group name')
+@minLength(1)
+@maxLength(90)
+param parResourceGroupNameProd string = 'prod-skycraft-swc-rg'
+
+@description('Development resource group name')
+@minLength(1)
+@maxLength(90)
+param parResourceGroupNameDev string = 'dev-skycraft-swc-rg'
+
+@description('Blob soft delete retention days (baseline from Lab 4.1)')
+@minValue(1)
+@maxValue(365)
+param parBlobSoftDeleteDays int = 7
+
+@description('Container soft delete retention days (baseline from Lab 4.1)')
+@minValue(1)
+@maxValue(365)
+param parContainerSoftDeleteDays int = 7
 
 /*******************
 *    Variables     *
 *******************/
-var varProdRgName = 'prod-skycraft-swc-rg'
-var varDevRgName = 'dev-skycraft-swc-rg'
 
-var varCommonTags = {
+var varTagsProd = {
   Project: 'SkyCraft'
+  Environment: 'Production'
   CostCenter: 'MSDN'
+  Owner: parOwner
 }
 
-// Production Containers (Private)
-var varProdContainers = [
+var varTagsDev = {
+  Project: 'SkyCraft'
+  Environment: 'Development'
+  CostCenter: 'MSDN'
+  Owner: parOwner
+}
+
+// Production containers - all private
+var varContainersProd = [
   { name: 'game-assets', publicAccess: 'None' }
   { name: 'player-backups', publicAccess: 'None' }
   { name: 'server-config', publicAccess: 'None' }
   { name: 'game-logs', publicAccess: 'None' }
 ]
 
-// Lifecycle Rules (Production Only)
+// Development container - created private; allowBlobPublicAccess is blocked at subscription level
+var varContainersDev = [
+  { name: 'public-demo', publicAccess: 'None' }
+]
+
+// Lifecycle management - production only
 var varLifecycleRules = [
   {
     enabled: true
@@ -51,7 +88,7 @@ var varLifecycleRules = [
         }
       }
       filters: {
-        blobTypes: [ 'blockBlob' ]
+        blobTypes: ['blockBlob']
       }
     }
   }
@@ -66,72 +103,95 @@ var varLifecycleRules = [
         }
       }
       filters: {
-        blobTypes: [ 'blockBlob' ]
-        prefixMatch: [ 'player-backups/' ]
+        blobTypes: ['blockBlob']
+        prefixMatch: ['player-backups/']
       }
     }
   }
 ]
 
 /*******************
-*    Resources     *
+*     Modules      *
 *******************/
 
-resource resProdRg 'Microsoft.Resources/resourceGroups@2023-07-01' existing = {
-  name: varProdRgName
-}
-
-resource resDevRg 'Microsoft.Resources/resourceGroups@2023-07-01' existing = {
-  name: varDevRgName
-}
-
-// Production Storage: Private, Versioning, Lifecycle Rules
-module modStorageProd '../../4.1-storage-accounts/bicep/modules/storageAccount.bicep' = {
-  name: 'deploy-storage-prod-4.2'
-  scope: resProdRg
+// Production: private containers, versioning and lifecycle tiering.
+// fileServices is omitted deliberately - an empty value makes AVM skip the file service entirely,
+// so Lab 4.1's (and later Lab 4.3's) file share configuration is left untouched.
+module modStorageProd 'br/public:avm/res/storage/storage-account:0.33.0' = {
+  name: 'sa-deployment-prod-42'
+  scope: resourceGroup(parResourceGroupNameProd)
   params: {
-    parLocation: parLocation
-    parEnvironment: 'prod'
-    parTags: union(varCommonTags, { Environment: 'Production' })
-    parAllowBlobPublicAccess: false
-    parEnableVersioning: true
-    parContainers: varProdContainers
-    parLifecycleRules: varLifecycleRules
-    parIsNewDeployment: false // Update existing account
-    parEnableInfrastructureEncryption: false // Don't change existing
+    name: 'prodskycraftswcsa'
+    location: parLocation
+    tags: varTagsProd
+    skuName: 'Standard_GRS'
+    kind: 'StorageV2'
+    accessTier: 'Hot'
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+    allowBlobPublicAccess: false
+    allowSharedKeyAccess: true
+    publicNetworkAccess: 'Enabled'
+    requireInfrastructureEncryption: false
+    networkAcls: {
+      bypass: 'AzureServices'
+      defaultAction: 'Allow'
+    }
+    blobServices: {
+      deleteRetentionPolicyEnabled: true
+      deleteRetentionPolicyDays: parBlobSoftDeleteDays
+      containerDeleteRetentionPolicyEnabled: true
+      containerDeleteRetentionPolicyDays: parContainerSoftDeleteDays
+      isVersioningEnabled: true
+      changeFeedEnabled: false
+      containers: varContainersProd
+    }
+    managementPolicyRules: varLifecycleRules
   }
 }
 
-// Development Storage: private access (allowBlobPublicAccess blocked at subscription level).
-module modStorageDev '../../4.1-storage-accounts/bicep/modules/storageAccount.bicep' = {
-  name: 'deploy-storage-dev-4.2'
-  scope: resDevRg
+// Development: one demo container, no versioning, no lifecycle rules.
+module modStorageDev 'br/public:avm/res/storage/storage-account:0.33.0' = {
+  name: 'sa-deployment-dev-42'
+  scope: resourceGroup(parResourceGroupNameDev)
   params: {
-    parLocation: parLocation
-    parEnvironment: 'dev'
-    parTags: union(varCommonTags, { Environment: 'Development' })
-    parAllowBlobPublicAccess: false
-    parEnableVersioning: false
-    parContainers: []
-    parLifecycleRules: []
-    parIsNewDeployment: false // Update existing
-    parEnableInfrastructureEncryption: false
-  }
-}
-
-// Public-demo container — created as private (allowBlobPublicAccess blocked at subscription level).
-module modDevPublicContainer 'modules/blobContainer.bicep' = {
-  name: 'deploy-dev-public-container-4.2'
-  scope: resDevRg
-  params: {
-    parStorageAccountName: modStorageDev.outputs.outStorageAccountName
-    parContainerName: 'public-demo'
-    parPublicAccess: 'None'
+    name: 'devskycraftswcsa'
+    location: parLocation
+    tags: varTagsDev
+    skuName: 'Standard_LRS'
+    kind: 'StorageV2'
+    accessTier: 'Hot'
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+    allowBlobPublicAccess: false
+    allowSharedKeyAccess: true
+    publicNetworkAccess: 'Enabled'
+    requireInfrastructureEncryption: false
+    networkAcls: {
+      bypass: 'AzureServices'
+      defaultAction: 'Allow'
+    }
+    blobServices: {
+      deleteRetentionPolicyEnabled: true
+      deleteRetentionPolicyDays: parBlobSoftDeleteDays
+      containerDeleteRetentionPolicyEnabled: true
+      containerDeleteRetentionPolicyDays: parContainerSoftDeleteDays
+      isVersioningEnabled: false
+      changeFeedEnabled: false
+      containers: varContainersDev
+    }
   }
 }
 
 /******************
 *     Outputs     *
 ******************/
-output outProdStorageId string = modStorageProd.outputs.outStorageAccountId
-output outDevStorageId string = modStorageDev.outputs.outStorageAccountId
+
+@description('Resource ID of the production storage account')
+output outProdStorageId string = modStorageProd.outputs.resourceId
+
+@description('Resource ID of the development storage account')
+output outDevStorageId string = modStorageDev.outputs.resourceId
+
+@description('Production container names created by this lab')
+output outProdContainerNames array = [for container in varContainersProd: container.name]

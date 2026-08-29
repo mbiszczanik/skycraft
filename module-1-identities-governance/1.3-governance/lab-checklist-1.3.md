@@ -5,20 +5,20 @@
 ### Resource Group: dev-skycraft-swc-rg
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `Project` = `SkyCraft`
-- [ ] Tag: `CostCenter` = `Engineering`
-- [ ] Tag: `Owner` = `skycraft-admin@yourtenant.onmicrosoft.com`
+- [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `mbiszczanik`
 
 ### Resource Group: prod-skycraft-swc-rg
 - [ ] Tag: `Environment` = `Production`
 - [ ] Tag: `Project` = `SkyCraft`
-- [ ] Tag: `CostCenter` = `Operations`
-- [ ] Tag: `Owner` = `skycraft-admin@yourtenant.onmicrosoft.com`
+- [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `mbiszczanik`
 
 ### Resource Group: platform-skycraft-swc-rg
 - [ ] Tag: `Environment` = `Platform`
 - [ ] Tag: `Project` = `SkyCraft`
-- [ ] Tag: `CostCenter` = `Shared-Services`
-- [ ] Tag: `Owner` = `skycraft-admin@yourtenant.onmicrosoft.com`
+- [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `mbiszczanik`
 
 ### Tag Verification
 - [ ] Can view resources by "Project" tag in Tags service

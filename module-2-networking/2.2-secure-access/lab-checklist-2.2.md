@@ -197,11 +197,23 @@
 - [ ] Service endpoint: **Microsoft.Storage** enabled
 - [ ] Status: **Succeeded**
 
+### Development World Subnet
+- [ ] VNet: `dev-skycraft-swc-vnet`
+- [ ] Subnet: `WorldSubnet (10.1.2.0/24)`
+- [ ] Service endpoint: **Microsoft.Storage** enabled - required by Lab 4.4
+- [ ] Status: **Succeeded**
+
 ### Production Database Subnet
 - [ ] VNet: `prod-skycraft-swc-vnet`
 - [ ] Subnet: `DatabaseSubnet (10.2.3.0/24)`
 - [ ] Service endpoint: **Microsoft.Sql** enabled
 - [ ] Service endpoint: **Microsoft.Storage** enabled
+- [ ] Status: **Succeeded**
+
+### Production World Subnet
+- [ ] VNet: `prod-skycraft-swc-vnet`
+- [ ] Subnet: `WorldSubnet (10.2.2.0/24)`
+- [ ] Service endpoint: **Microsoft.Storage** enabled - required by Lab 4.4
 - [ ] Status: **Succeeded**
 
 ---
@@ -319,6 +331,18 @@ az network vnet subnet show   --resource-group dev-skycraft-swc-rg   --vnet-name
 
 # Check service endpoints on prod database subnet
 az network vnet subnet show   --resource-group prod-skycraft-swc-rg   --vnet-name prod-skycraft-swc-vnet   --name DatabaseSubnet   --query "{Subnet:name,ServiceEndpoints:serviceEndpoints[].service}"   --output json
+
+# Check the Microsoft.Storage endpoint on both world subnets - Lab 4.4 cannot deploy without it
+az network vnet subnet show   --resource-group dev-skycraft-swc-rg   --vnet-name dev-skycraft-swc-vnet   --name WorldSubnet   --query "{Subnet:name,ServiceEndpoints:serviceEndpoints[].service}"   --output json
+az network vnet subnet show   --resource-group prod-skycraft-swc-rg   --vnet-name prod-skycraft-swc-vnet   --name WorldSubnet   --query "{Subnet:name,ServiceEndpoints:serviceEndpoints[].service}"   --output json
+
+# Expected output for each:
+# {
+#   "Subnet": "WorldSubnet",
+#   "ServiceEndpoints": [
+#     "Microsoft.Storage"
+#   ]
+# }
 ```
 
 ### Verify Tags on NSGs
@@ -370,6 +394,7 @@ Use this table to document your deployed security architecture:
 | **World ASG** | dev-skycraft-swc-asg-world | N/A | Ready for VM assignment | ✅ |
 | **DB ASG** | dev-skycraft-swc-asg-db | N/A | Ready for VM assignment | ✅ |
 | **Service Endpoints** | Microsoft.Sql, Microsoft.Storage | Dev & Prod DatabaseSubnets | Enabled | ✅ |
+| **Service Endpoints** | Microsoft.Storage | Dev & Prod WorldSubnets | Enabled | ✅ |
 
 ---
 
@@ -511,6 +536,7 @@ _________________________________________________________________
 - [ ] All NSGs associated with correct subnets
 - [ ] 3 Application Security Groups created for dev environment
 - [ ] Service endpoints enabled on dev and prod database subnets
+- [ ] `Microsoft.Storage` endpoint enabled on dev and prod world subnets (Lab 4.4 prerequisite)
 - [ ] All resources have required tags (Project, Environment, CostCenter, Owner)
 - [ ] All validation commands executed successfully
 - [ ] All reflection questions answered

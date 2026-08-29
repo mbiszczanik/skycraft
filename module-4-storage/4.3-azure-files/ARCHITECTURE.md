@@ -47,3 +47,10 @@
   - Soft-deleted file shares (if any) occupy storage for 14 days before purge.
   - Snapshots (if created manually) must be deleted individually; not auto-cleaned with share deletion.
   - Ensure no locks on shares before RG deletion.
+
+## 5. Bicep implementation note (AVM)
+
+- **Shares and their retention are parameters**: `avm/res/storage/storage-account` (pinned in docs/bicep-standards.md §4.4) takes the 14-day `fileServices.shareDeleteRetentionPolicy` and the two shares as `fileServices.shares`. The lab's `modules/storage.bicep` is deleted.
+- **`blobServices: {}` is deliberate and load-bearing.** The module skips a sub-service when its parameter is empty, so passing an explicit empty object leaves Lab 4.2's containers, versioning and lifecycle rules exactly as they were. `blobServices` is the only sub-service that needs this: unlike `fileServices`, `queueServices`, `tableServices` and `managementPolicyRules`, it has a non-empty default (which would rewrite blob soft delete to 6 days). See the cumulative-lab note in docs/bicep-standards.md §4.5.
+- **Lab-friction overrides** (docs/bicep-standards.md §4.5): `networkAcls` default action `Allow` and `requireInfrastructureEncryption: false`, as in Lab 4.1.
+- **`outPrimaryFileEndpoint` reads `serviceEndpoints.file`.** The module's own documentation warns that `Standard_LRS` / `Standard_ZRS` accounts may expose only a blob endpoint; on the lab's `StorageV2` accounts that is not the case - the live cycle returned `https://devskycraftswcsa.file.core.windows.net/` for the `Standard_LRS` dev account. Keep the caveat in mind if the SKU or account kind ever changes.

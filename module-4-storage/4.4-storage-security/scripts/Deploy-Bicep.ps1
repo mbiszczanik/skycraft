@@ -7,7 +7,9 @@
 .PARAMETER Location
     Azure region for deployment. Default: swedencentral.
 .PARAMETER Environment
-    Target environment (prod, dev, platform). Default: prod.
+    Target environment (prod or dev). Default: prod.
+    platform is not supported: the hub VNet has no workload subnet to allow through
+    the storage firewall.
 .PARAMETER ClientIp
     Your client IP to allow through the firewall. Auto-detected if omitted.
 .EXAMPLE
@@ -28,7 +30,7 @@ param(
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
-    [ValidateSet('prod', 'dev', 'platform')]
+    [ValidateSet('prod', 'dev')]
     [string]$Environment = 'prod',
 
     [Parameter(Mandatory = $false)]

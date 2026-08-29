@@ -80,8 +80,45 @@ flowchart TD
 Before starting this lab:
 
 - [ ] Completed **Lab 2.1: Virtual Networks** (Existing VNet required)
+- [ ] Completed **Lab 2.2: Secure Access** - `WorldSubnet` must carry the `Microsoft.Storage`
+      service endpoint, which Lab 2.2 adds. The storage firewall rejects a virtual network rule
+      for a subnet without it.
 - [ ] Completed **Lab 4.1: Storage Accounts** (Production Storage Account exists)
 - [ ] Account with **User Access Administrator** or **Owner** role on the subscription
+- [ ] `dev` or `prod` environment. `platform` is rejected by both the template and the
+      scripts: the hub VNet has only `AzureBastionSubnet` and `GatewaySubnet`, so it has no
+      workload subnet to allow through the storage firewall.
+
+> [!IMPORTANT]
+> **Run the Module 4 labs in order (4.1 → 4.2 → 4.3 → 4.4).** All four configure the **same**
+> three storage accounts, and they are cumulative forward: each lab replaces the account-level
+> properties and the sub-services it owns, while leaving the sub-services it does not own alone.
+> Re-running Lab 4.2 after Lab 4.3 resets file-share retention from 14 days back to 7; re-running
+> Lab 4.1 after Lab 4.2 turns production blob versioning back off. See `docs/bicep-standards.md`
+> §4.5 for the mechanism.
+
+**Preview - the AVM module call the Bicep path makes**:
+
+```bicep
+module modStorage 'br/public:avm/res/storage/storage-account:0.33.0' = {
+  name: 'sa-deployment-security'
+  scope: resourceGroup(varResourceGroupName)
+  params: {
+    name: '${parEnvironment}skycraftswcsa'
+    networkAcls: {
+      bypass: 'AzureServices'
+      defaultAction: 'Deny'                                    // this lab is where Deny belongs
+      virtualNetworkRules: [ { id: resVnet::resSubnet.id, action: 'Allow' } ]
+      ipRules: empty(parClientIp) ? [] : [ { value: parClientIp, action: 'Allow' } ]
+    }
+    blobServices: { containers: varContainers }                // adds dev-assets
+  }
+}
+```
+
+Because `dev-assets` has to go through `blobServices`, and a non-empty `blobServices` replaces the
+whole blob service configuration, this template restates the blob settings Labs 4.1 and 4.2 applied
+to the same account. It is the only lab in Module 4 that has to (`docs/bicep-standards.md` §4.5).
 
 ---
 

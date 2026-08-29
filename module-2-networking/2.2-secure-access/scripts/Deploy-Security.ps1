@@ -11,9 +11,10 @@
     2. Create Network Security Groups (NSGs).
     3. Configure complex NSG Security Rules (Auth, World, DB).
     4. Associate NSGs to subnets properly.
-    5. Optionally deploy Azure Bastion (interactive prompt).
-    
-    It enforces project tagging standards.
+    5. Optionally deploy Azure Bastion (-DeployBastion, or an interactive prompt).
+
+    It enforces project tagging standards: every resource carries the canonical four tags
+    (Project, Environment, CostCenter, Owner), and the hub resources are tagged Platform.
 
 .PARAMETER Location
     The Azure region deployment target. Default: 'swedencentral'
@@ -30,22 +31,34 @@
 .PARAMETER PlatformVnetName
     The name of the Platform VNet. Default: 'platform-skycraft-swc-vnet'
 
+.PARAMETER Owner
+    Value of the canonical Owner tag. Default: 'mbiszczanik'. Mirrors parOwner in the Bicep path.
+
+.PARAMETER DeployBastion
+    Deploy Azure Bastion without prompting. Without it the script asks, and a non-interactive
+    session declines - which is not an error.
+
 .EXAMPLE
     .\Deploy-Security.ps1
-    Deploys all security resources using default settings.
+    Deploys all security resources using default settings, prompting about Bastion.
+
+.EXAMPLE
+    .\Deploy-Security.ps1 -DeployBastion
+    Deploys all security resources including Azure Bastion, with no prompt.
 
 .NOTES
     Project: SkyCraft
     Lab: 2.2 - Secure Access
     Author: Ops Team
-    Date: 2026-01-03
+    Version: 2.1.0
+    Date: 2026-08-28
 #>
 
 #Requires -Version 7.0
 #Requires -Modules Az.Accounts, Az.Network
 
 [CmdletBinding()]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Deploy script; interactive Bastion prompt and idempotent Get-before-New guards cover ShouldProcess intent.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Deploy script; -DeployBastion switch and idempotent Get-before-New guards cover ShouldProcess intent.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'ProdVnetName', Justification = 'Used as -VnetName in Set-SubnetSecurity calls; PSSA nested-scope false positive.')]
 param(
     [Parameter(Mandatory = $false)]
@@ -66,7 +79,14 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$PlatformVnetName = 'platform-skycraft-swc-vnet'
+    [string]$PlatformVnetName = 'platform-skycraft-swc-vnet',
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Owner = 'mbiszczanik',
+
+    [Parameter(Mandatory = $false)]
+    [switch]$DeployBastion
 )
 
 $ErrorActionPreference = 'Stop'
@@ -81,12 +101,17 @@ if (-not $context) {
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
-# Define Mandatory Tags
-$Tags = @{
+# Canonical four-tag set. The hub resources are Platform, not Production - the Bicep path
+# tags them varTagsPlatform, and a mismatch showed up as ten what-if Modify entries (#100).
+$PlatformTags = @{
     Project     = 'SkyCraft'
-    Environment = 'Production'
+    Environment = 'Platform'
     CostCenter  = 'MSDN'
+    Owner       = $Owner
 }
+
+# Counts tasks that failed without aborting the script (subnet association, Bastion).
+$script:taskFailures = 0
 
 # ===================================
 # Task 1: Create Application Security Groups
@@ -112,7 +137,7 @@ foreach ($config in $asgConfigs) {
         }
         else {
             $tagEnv = if ($config.RG -match 'prod') { 'Production' } else { 'Development' }
-            $tags = @{ Project = 'SkyCraft'; Environment = $tagEnv; CostCenter = 'MSDN' }
+            $tags = @{ Project = 'SkyCraft'; Environment = $tagEnv; CostCenter = 'MSDN'; Owner = $Owner }
             
             $asg = New-AzApplicationSecurityGroup `
                 -ResourceGroupName $config.RG `
@@ -144,7 +169,7 @@ function New-SkyCraftNSG {
         if ($nsg) {
             Write-Host "  -> NSG already exists, will update rules" -ForegroundColor Gray
         } else {
-            $tags = @{ Project = 'SkyCraft'; Environment = $Env; CostCenter = 'MSDN' }
+            $tags = @{ Project = 'SkyCraft'; Environment = $Env; CostCenter = 'MSDN'; Owner = $Owner }
             $nsg = New-AzNetworkSecurityGroup -ResourceGroupName $RG -Name $Name -Location $Location -Tag $tags
             Write-Host "  -> Created NSG: $Name" -ForegroundColor Green
         }
@@ -219,38 +244,47 @@ $nsgProdDb | Set-AzNetworkSecurityGroup | Out-Null
 # ===================================
 Write-Host "`n=== Task 5: Associating NSG to Subnets & Service Endpoints ===" -ForegroundColor Cyan
 
+# Service endpoints are per-subnet, not a single on/off switch: the Bicep path puts
+# Microsoft.Storage on WorldSubnet and Microsoft.Sql + Microsoft.Storage on DatabaseSubnet.
+# The old boolean set both on DatabaseSubnet only, which left WorldSubnet without the endpoint
+# Lab 4.4's storage firewall rule requires - so the manual path could not reach Lab 4.4 (#98).
 function Set-SubnetSecurity {
-    param($VnetName, $RgName, $SubnetName, $NsgObject, $EnableSE=$false)
+    param($VnetName, $RgName, $SubnetName, $NsgObject, [string[]]$ServiceEndpoints = @())
     try {
         $vnet = Get-AzVirtualNetwork -ResourceGroupName $RgName -Name $VnetName
         $subnet = $vnet.Subnets | Where-Object { $_.Name -eq $SubnetName }
         if ($subnet) {
             Write-Host "Configuring $SubnetName in $VnetName..." -ForegroundColor Yellow
             $subnet.NetworkSecurityGroup = $NsgObject
-            
-            if ($EnableSE) {
-                Write-Host "  -> Enabling Service Endpoints (Sql, Storage)..." -ForegroundColor Yellow
-                $subnet.ServiceEndpoints = @(
-                    @{ Service = "Microsoft.Sql"; Locations = @("swedencentral") },
-                    @{ Service = "Microsoft.Storage"; Locations = @("swedencentral") }
-                )
+
+            if ($ServiceEndpoints.Count -gt 0) {
+                Write-Host "  -> Enabling Service Endpoints ($($ServiceEndpoints -join ', '))..." -ForegroundColor Yellow
+                # No Locations: the Bicep path (AVM virtual-network/subnet) records these endpoints
+                # region-unrestricted, and a mismatch makes every subsequent what-if report a Modify.
+                $subnet.ServiceEndpoints = @($ServiceEndpoints | ForEach-Object { @{ Service = $_ } })
             }
-            
+
             $vnet | Set-AzVirtualNetwork | Out-Null
             Write-Host "  -> Success" -ForegroundColor Green
-        } else { Write-Host "  -> [WARNING] Subnet $SubnetName not found" -ForegroundColor Yellow }
-    } catch { Write-Host "  -> [ERROR] Failed: $_" -ForegroundColor Red }
+        } else {
+            Write-Host "  -> [ERROR] Subnet $SubnetName not found in $VnetName" -ForegroundColor Red
+            $script:taskFailures++
+        }
+    } catch {
+        Write-Host "  -> [ERROR] Failed to configure ${SubnetName}: $($_.Exception.Message)" -ForegroundColor Red
+        $script:taskFailures++
+    }
 }
 
 # Dev
 Set-SubnetSecurity -VnetName "dev-skycraft-swc-vnet" -RgName "dev-skycraft-swc-rg" -SubnetName "AuthSubnet"     -NsgObject $nsgDevAuth
-Set-SubnetSecurity -VnetName "dev-skycraft-swc-vnet" -RgName "dev-skycraft-swc-rg" -SubnetName "WorldSubnet"    -NsgObject $nsgDevWorld
-Set-SubnetSecurity -VnetName "dev-skycraft-swc-vnet" -RgName "dev-skycraft-swc-rg" -SubnetName "DatabaseSubnet" -NsgObject $nsgDevDb -EnableSE $true
+Set-SubnetSecurity -VnetName "dev-skycraft-swc-vnet" -RgName "dev-skycraft-swc-rg" -SubnetName "WorldSubnet"    -NsgObject $nsgDevWorld -ServiceEndpoints @('Microsoft.Storage')
+Set-SubnetSecurity -VnetName "dev-skycraft-swc-vnet" -RgName "dev-skycraft-swc-rg" -SubnetName "DatabaseSubnet" -NsgObject $nsgDevDb    -ServiceEndpoints @('Microsoft.Sql', 'Microsoft.Storage')
 
 # Prod
 Set-SubnetSecurity -VnetName $ProdVnetName -RgName $ProdResourceGroup -SubnetName "AuthSubnet"     -NsgObject $nsgProdAuth
-Set-SubnetSecurity -VnetName $ProdVnetName -RgName $ProdResourceGroup -SubnetName "WorldSubnet"    -NsgObject $nsgProdWorld
-Set-SubnetSecurity -VnetName $ProdVnetName -RgName $ProdResourceGroup -SubnetName "DatabaseSubnet" -NsgObject $nsgProdDb -EnableSE $true
+Set-SubnetSecurity -VnetName $ProdVnetName -RgName $ProdResourceGroup -SubnetName "WorldSubnet"    -NsgObject $nsgProdWorld -ServiceEndpoints @('Microsoft.Storage')
+Set-SubnetSecurity -VnetName $ProdVnetName -RgName $ProdResourceGroup -SubnetName "DatabaseSubnet" -NsgObject $nsgProdDb   -ServiceEndpoints @('Microsoft.Sql', 'Microsoft.Storage')
 
 # ===================================
 # Task 6: Deploy Azure Bastion (Optional)
@@ -264,10 +298,23 @@ if ($bastion) {
     Write-Host "  -> Bastion already exists, skipping deployment" -ForegroundColor Gray
 }
 else {
-    Write-Host "Do you want to deploy Azure Bastion? (This will take ~15 minutes and incur costs)" -ForegroundColor Yellow
-    $response = Read-Host "Deploy Bastion? (y/N)"
-    
-    if ($response -eq 'y' -or $response -eq 'Y') {
+    $deployBastionNow = $DeployBastion.IsPresent
+
+    if (-not $deployBastionNow) {
+        Write-Host "Do you want to deploy Azure Bastion? (This will take ~15 minutes and incur costs)" -ForegroundColor Yellow
+        try {
+            $response = Read-Host "Deploy Bastion? (y/N)"
+            $deployBastionNow = ($response -eq 'y' -or $response -eq 'Y')
+        }
+        catch {
+            # Non-interactive session (CI, an automated lab cycle). Declining is the safe default
+            # and is not a failure - pass -DeployBastion to deploy it without a prompt (#101).
+            Write-Host "  -> Non-interactive session; skipping Bastion. Use -DeployBastion to deploy it." -ForegroundColor Gray
+            $deployBastionNow = $false
+        }
+    }
+
+    if ($deployBastionNow) {
         Write-Host "Creating Bastion Public IP..." -ForegroundColor Yellow
         try {
             $bastionPip = New-AzPublicIpAddress `
@@ -276,7 +323,7 @@ else {
                 -Location $Location `
                 -AllocationMethod Static `
                 -Sku Standard `
-                -Tag $Tags
+                -Tag $PlatformTags
             Write-Host "  -> Created Bastion Public IP" -ForegroundColor Green
 
             # Get the VNet and Bastion Subnet
@@ -295,17 +342,24 @@ else {
                 -PublicIpAddress $bastionPip `
                 -VirtualNetwork $vnetHub `
                 -Sku Basic `
-                -Tag $Tags
+                -Tag $PlatformTags
             Write-Host "  -> Bastion created successfully!" -ForegroundColor Green
         }
         catch {
             Write-Host "  -> [ERROR] Failed to create Bastion" -ForegroundColor Red
             Write-Host $_.Exception.Message -ForegroundColor Red
+            $script:taskFailures++
         }
     }
     else {
         Write-Host "  -> Skipping Bastion deployment" -ForegroundColor Gray
     }
+}
+
+if ($script:taskFailures -gt 0) {
+    Write-Host "`n=== Deployment finished with $($script:taskFailures) failure(s) ===" -ForegroundColor Red -BackgroundColor Black
+    Write-Host "See the [ERROR] lines above." -ForegroundColor Red
+    exit 1
 }
 
 Write-Host "`n=== Deployment Complete ===" -ForegroundColor Cyan -BackgroundColor Black

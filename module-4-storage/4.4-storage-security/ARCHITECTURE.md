@@ -46,3 +46,12 @@
   - Network rules (service endpoint, IP firewall) are deleted with storage account or can be manually cleared before RG deletion.
   - Private endpoint NICs (if later used) are orphaned if storage account is deleted; must be cleaned separately.
   - Diagnostic settings (if added) may send logs to Log Analytics; ensure log retention policies are set before cleanup to avoid unexpected egress charges.
+
+## 5. Bicep implementation note (AVM)
+
+- **The firewall is one parameter**: `avm/res/storage/storage-account` (pinned in docs/bicep-standards.md §4.4) takes `networkAcls` with `defaultAction: 'Deny'`, one `virtualNetworkRules` entry for the lab subnet and an optional `ipRules` entry for the student's client IP (omitted when `parClientIp` is empty). The lab's `modules/security.bicep` is deleted. This is the one lab where `Deny` is intentional — Labs 4.1-4.3 override it to `Allow` (docs/bicep-standards.md §4.5).
+- **The subnet is resolved through a nested `existing` reference**, so the virtual network rule carries a real subnet resource ID rather than a composed string.
+- **This lab restates Labs 4.1 and 4.2 blob settings.** `dev-assets` has to be created through `blobServices.containers`, and a non-empty `blobServices` replaces the whole blob service configuration — so the template restates soft delete, versioning and the earlier containers for the target environment. Lab 4.4 is the only lab in Module 4 that has to do this; see the cumulative-lab note in docs/bicep-standards.md §4.5.
+- **Prerequisite: `WorldSubnet` must carry the `Microsoft.Storage` service endpoint**, which Lab 2.2 sets. Without it the virtual network rule is rejected.
+- **Cleanup no longer removes that service endpoint.** It is Lab 2.2 state — Lab 2.2 sets it and its `Test-Lab.ps1` asserts it — so removing it here silently regressed Module 2 on every Module 4 cleanup. `Remove-LabResource.ps1` now prints an informational line instead. The firewall revert, the `dev-assets` removal and the role-assignment cleanup are unchanged.
+- **`platform` is rejected, not merely unusable.** The hub VNet has only `AzureBastionSubnet` and `GatewaySubnet`, so there is no workload subnet to allow through the storage firewall. `parEnvironment` is `@allowed(['dev', 'prod'])` and all three scripts validate the same set, so the run fails at parameter binding with a clear message instead of at deployment time (#94).

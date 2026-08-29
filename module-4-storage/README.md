@@ -110,6 +110,14 @@ Before starting, ensure you have:
 5. **Complete Lab 4.4** - Secure storage with SAS, firewalls, and encryption
 6. **Take the module assessment** to validate learning
 
+> [!IMPORTANT]
+> **The order matters.** All four labs configure the **same** three storage accounts through
+> `avm/res/storage/storage-account`, and they are cumulative forward: each lab replaces the
+> account-level properties and the sub-services it owns, and leaves the sub-services it does not
+> own untouched. Re-running Lab 4.2 after Lab 4.3 resets file-share retention from 14 days back
+> to 7; re-running Lab 4.1 after Lab 4.2 turns production blob versioning back off. The mechanism
+> is documented in `docs/bicep-standards.md` §4.5.
+
 ---
 
 ## 📖 How to Use This Module
