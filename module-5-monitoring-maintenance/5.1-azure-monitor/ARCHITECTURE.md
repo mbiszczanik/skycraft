@@ -44,3 +44,11 @@
   - **Do not delete the workspace until the lab is complete.** Deleting the RG does not immediately delete the workspace; it may persist and incur ingestion costs if agents are still writing to it.
   - After lab completion: Delete the workspace explicitly to stop ingestion charges. If flow logs from Lab 5.3 are also routing to this workspace, coordinate deletion to avoid query failure in dependent labs.
   - Storage account diagnostic settings remain after RG deletion; verify no data continues to flow to any workspace that you intend to delete.
+
+## 5. Bicep implementation note (AVM)
+
+- **Modules**: `avm/res/operational-insights/workspace`, `avm/res/insights/data-collection-rule`, `avm/res/insights/action-group` and `avm/res/insights/metric-alert` (all pinned in docs/bicep-standards.md §4.4), called directly from `main.bicep`. The local `modules/monitoring.bicep` is gone.
+- **Local fallback**: `modules/storage-blob-diagnostics.bicep` attaches `skycraft-storage-diag` to the platform storage account's blob service. `avm/res/insights/diagnostic-setting` is a subscription-scope module (activity log) and cannot target a resource, and re-declaring the storage account through `avm/res/storage/storage-account` from this lab would replace Lab 4.1's account-level configuration (standards §4.3).
+- **Still in `Deploy-Bicep.ps1`**: the DCR association (the monitored VM's resource ID is only known at run time) — unchanged.
+- **Behavioural deltas from AVM defaults**, accepted rather than overridden: the workspace is created with `features.disableLocalAuth: true` and `forceCmkForQuery: true` (Azure's own defaults are `false`). Nothing in Module 5 uses the workspace shared keys — VM Insights runs through the Azure Monitor Agent and the DCR, Traffic Analytics and the connection monitor write through service-side integrations, and every query authenticates with Entra ID. Data retention is passed explicitly (`parRetentionInDays`, 30 days) because the module defaults to 365.
+- **Metric alert criteria** are expressed through the module's `alertResourceType` (`odata.type` + lowercase `allof`); the deployed rule carries the same `Percentage CPU > 80` criterion, severity 2, 1-minute evaluation over a 5-minute window.

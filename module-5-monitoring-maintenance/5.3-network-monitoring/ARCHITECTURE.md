@@ -53,3 +53,11 @@
   - Flow logs already in the storage account blob container must be manually deleted or moved to archive tier to avoid ongoing Hot tier charges.
   - Traffic Analytics data in Log Analytics Workspace (Lab 5.1) will continue to accumulate; delete the Flow Log source to stop analytics ingestion, then purge old data from the workspace.
   - If Connection Monitor is left running, it will continue to probe the network indefinitely, potentially triggering alerts in production-like systems; disable or delete the Connection Monitor resource immediately after troubleshooting.
+
+## 5. Bicep implementation note (AVM)
+
+- **Module**: `avm/res/network/network-watcher` (pinned in docs/bicep-standards.md §4.4), called directly from `main.bicep`; the flow log and the connection monitor are its `flowLogs` and `connectionMonitors` children. The local `modules/network-monitoring.bicep` is gone and Lab 5.3 has no `bicep/modules/` directory.
+- **The Network Watcher itself is re-declared.** The module always PUTs `NetworkWatcher_<location>` in `NetworkWatcherRG` — an idempotent update of the auto-provisioned watcher, which now carries the canonical four tags (`Environment = Production`, the lab's default). `Deploy-Bicep.ps1` still bootstraps the watcher when Azure has not created it and installs the NetworkWatcherAgent extension on both VMs; `Remove-LabResource.ps1` never deletes the watcher.
+- **Flow log**: the module derives `retentionPolicy.enabled` from `retentionInDays` (`0` = keep forever), so `parFlowLogRetentionDays = 7` reproduces the 7-day retention; Traffic Analytics is switched on by passing `workspaceResourceId` and `trafficAnalyticsInterval: 10`.
+- **Outputs**: the module exposes only the watcher's resource ID; `outFlowLogId` and `outConnectionMonitorId` are composed from it and the child names.
+- **Known module quirk**: the per-item `tags` field of the flow log type is not wired through — the children receive the module-level `tags` — so only the module-level `tags` is set.
