@@ -47,6 +47,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Azure: $_" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -54,6 +55,7 @@ catch {
 $templateFile = Join-Path $PSScriptRoot "..\bicep\main.bicep"
 if (-not (Test-Path $templateFile)) {
     Write-Host "  -> [ERROR] Template file not found at: $templateFile" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -102,12 +104,14 @@ try {
              Write-Host "Failed Operation: $($op.Properties.TargetResource.ResourceName)" -ForegroundColor Yellow
              Write-Host "Status Message: $($op.Properties.StatusMessage)" -ForegroundColor Red
         }
+        $Host.SetShouldExit(1)
         exit 1
     }
 }
 catch {
     Write-Host "  -> [ERROR] Deployment failed: $_" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 

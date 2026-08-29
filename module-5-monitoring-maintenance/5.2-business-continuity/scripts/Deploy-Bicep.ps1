@@ -74,6 +74,7 @@ Write-Host "[1/7] Validating prerequisites..." -ForegroundColor Yellow
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
@@ -95,6 +96,7 @@ Write-Host "`n[2/7] Resolving existing resource IDs..." -ForegroundColor Yellow
 $platformRgExists = Get-AzResourceGroup -Name $platformRg -ErrorAction SilentlyContinue
 if (-not $platformRgExists) {
     Write-Host "  [ERROR] Resource group '$platformRg' not found. Complete earlier labs first." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "  ✓ Platform RG found: $platformRg" -ForegroundColor Green
@@ -102,6 +104,7 @@ Write-Host "  ✓ Platform RG found: $platformRg" -ForegroundColor Green
 $workspace = Get-AzOperationalInsightsWorkspace -ResourceGroupName $platformRg -Name $workspaceName -ErrorAction SilentlyContinue
 if (-not $workspace) {
     Write-Host "  [ERROR] Log Analytics Workspace '$workspaceName' not found. Deploy Lab 5.1 first." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 $workspaceId = $workspace.ResourceId
@@ -146,6 +149,7 @@ try {
     }
 } catch {
     Write-Host "`n  [ERROR] Deployment failed: $($_.Exception.Message)" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 

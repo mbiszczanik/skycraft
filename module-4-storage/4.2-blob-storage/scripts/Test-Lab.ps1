@@ -65,6 +65,7 @@ try {
 }
 catch {
     Write-Host "FATAL: Could not retrieve storage accounts. Ensure deployment succeeded." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -147,5 +148,6 @@ if ($TestsPassed -eq $TestsTotal) {
 }
 else {
     Write-Host "FAILURE: Some checks failed." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }

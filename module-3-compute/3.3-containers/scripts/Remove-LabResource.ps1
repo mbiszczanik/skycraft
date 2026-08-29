@@ -46,6 +46,7 @@ Write-Host "=== Lab 3.3 - Resource Cleanup ===" -ForegroundColor Cyan -Backgroun
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 

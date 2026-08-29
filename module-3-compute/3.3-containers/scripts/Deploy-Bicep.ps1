@@ -59,6 +59,7 @@ Write-Host "=== Lab 3.3 - Deploy Bicep Configuration ===" -ForegroundColor Cyan 
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
@@ -71,6 +72,7 @@ $deploymentName = "Lab-3.3-Containers"
 
 if (-not (Test-Path $mainBicep)) {
     Write-Host "[ERROR] Bicep file not found: $mainBicep" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -84,6 +86,7 @@ try {
     }
 } catch {
     Write-Host "[ERROR] Failed to create Resource Group: $_" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -119,6 +122,7 @@ if (-not $repoExists) {
                 -ErrorAction Stop | Out-Null
         } catch {
             Write-Host "[ERROR] ACR Bootstrap Failed: $_" -ForegroundColor Red
+            $Host.SetShouldExit(1)
             exit 1
         }
     }
@@ -132,6 +136,7 @@ if (-not $repoExists) {
         Write-Host "  -> Image Build Success" -ForegroundColor Green
     } catch {
         Write-Host "[ERROR] Failed to build image: $_" -ForegroundColor Red
+        $Host.SetShouldExit(1)
         exit 1
     }
 }
@@ -177,6 +182,7 @@ try {
 catch {
     Write-Host "`n[ERROR] Deployment failed with exception:" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 

@@ -44,6 +44,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Graph: $_" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -71,6 +72,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Azure: $_" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 

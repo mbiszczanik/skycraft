@@ -218,5 +218,6 @@ if ($script:testsFailed -eq 0) {
 }
 else {
     Write-Host "Some tests failed. Review the errors above." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }

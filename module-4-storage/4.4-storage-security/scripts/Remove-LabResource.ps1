@@ -43,7 +43,7 @@ Write-Host "=== Lab 4.4: Cleaning Up Security Configuration ===" -ForegroundColo
 
 # 1. Verify Connection
 if (-not (Get-AzContext)) {
-    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; exit 1
+    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
 }
 
 # 3. Revert Storage Firewall to Allow

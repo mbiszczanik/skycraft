@@ -50,6 +50,7 @@ Write-Host "=== Lab 3.1 - Deploy Infrastructure ($Environment) ===" -ForegroundC
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
@@ -58,7 +59,7 @@ Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 $bicepPath = Join-Path $PSScriptRoot "..\bicep\main.bicep"
 $paramPath = Join-Path $PSScriptRoot "..\bicep\parameters\$Environment.bicepparam"
 
-if (-not (Test-Path $bicepPath)) { Write-Host "Bicep file missing: $bicepPath" -ForegroundColor Red; exit 1 }
+if (-not (Test-Path $bicepPath)) { Write-Host "Bicep file missing: $bicepPath" -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
 
 $deploymentName = "SkyCraft-$Environment-$(Get-Date -Format 'yyyyMMdd-HHmm')"
 
@@ -95,5 +96,6 @@ try {
 catch {
     Write-Host "`n[ERROR] Deployment failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }

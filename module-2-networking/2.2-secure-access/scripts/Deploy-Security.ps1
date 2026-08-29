@@ -97,6 +97,7 @@ Write-Host "=== Lab 2.2 - Deploy Security Configuration (PowerShell) ===" -Foreg
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
@@ -151,6 +152,7 @@ foreach ($config in $asgConfigs) {
     catch {
         Write-Host "  -> [ERROR] Failed to create ASG: $($config.Name)" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor Red
+        $Host.SetShouldExit(1)
         exit 1
     }
 }
@@ -176,6 +178,7 @@ function New-SkyCraftNSG {
         return $nsg
     } catch {
         Write-Host "  -> [ERROR] Failed to create NSG: $Name - $_" -ForegroundColor Red
+        $Host.SetShouldExit(1)
         exit 1
     }
 }
@@ -332,6 +335,7 @@ else {
 
             if (-not $bastionSubnet) {
                 Write-Host "  -> [ERROR] AzureBastionSubnet not found in $PlatformVnetName" -ForegroundColor Red
+                $Host.SetShouldExit(1)
                 exit 1
             }
 
@@ -359,6 +363,7 @@ else {
 if ($script:taskFailures -gt 0) {
     Write-Host "`n=== Deployment finished with $($script:taskFailures) failure(s) ===" -ForegroundColor Red -BackgroundColor Black
     Write-Host "See the [ERROR] lines above." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 

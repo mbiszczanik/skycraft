@@ -31,6 +31,7 @@ Write-Host "=== Lab 1.3: Validation ===" -ForegroundColor Cyan -BackgroundColor 
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green

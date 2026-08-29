@@ -41,6 +41,7 @@ Write-Host "=== Lab 3.3 Validation Script ===" -ForegroundColor Cyan -Background
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
@@ -176,4 +177,5 @@ if ($failCount -eq 0) {
     Write-Host "Lab 3.3 validation found $failCount issue(s)." -ForegroundColor Red
 }
 
+$Host.SetShouldExit($failCount)
 exit $failCount

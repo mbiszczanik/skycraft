@@ -54,6 +54,7 @@ catch {
     $failCount++
     # Cannot proceed with VNet/NSG/LB checks if the RG is missing
     Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor Red
+    $Host.SetShouldExit($failCount)
     exit $failCount
 }
 
@@ -131,4 +132,5 @@ catch {
 }
 
 Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor $(if ($failCount -eq 0) { 'Cyan' } else { 'Red' })
+$Host.SetShouldExit($failCount)
 exit $failCount

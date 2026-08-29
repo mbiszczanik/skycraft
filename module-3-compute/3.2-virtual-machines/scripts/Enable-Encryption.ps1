@@ -78,6 +78,7 @@ Write-Host "    Consider using Encryption at Host for new deployments.`n" -Foreg
 $account = Get-AzContext
 if (-not $account) {
     Write-Error "Not logged into Azure. Run 'Connect-AzAccount' first."
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "✓ Logged in as: $($account.Account.Id)" -ForegroundColor Green
@@ -87,6 +88,7 @@ Write-Host "`n[1/5] Checking Key Vault..." -ForegroundColor Yellow
 $kv = Get-AzKeyVault -VaultName $kvName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
 if (-not $kv) {
     Write-Error "Key Vault '$kvName' not found. Deploy with -EncryptionStrategy AzureDiskEncryption first."
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "  ✓ Key Vault found: $kvName" -ForegroundColor Green
@@ -98,6 +100,7 @@ foreach ($vmName in $VmNames) {
     $vm = Get-AzVM -ResourceGroupName $rgName -Name $vmName -ErrorAction SilentlyContinue
     if (-not $vm) {
         Write-Error "VM '$vmName' not found in resource group '$rgName'"
+        $Host.SetShouldExit(1)
         exit 1
     }
     $powerState = (Get-AzVM -ResourceGroupName $rgName -Name $vmName -Status).Statuses |

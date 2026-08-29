@@ -69,6 +69,7 @@ Write-Host "=== Lab 2.1 - Deploy Networking Configuration (PowerShell) ===" -For
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
@@ -95,7 +96,7 @@ try {
         $hubVnet = New-AzVirtualNetwork -ResourceGroupName $PlatformResourceGroup -Name $hubVnetName -Location $Location -AddressPrefix '10.0.0.0/16' -Subnet $hubSubnets -Tag $TagsPlatform -ErrorAction Stop
         Write-Host "  -> Created Hub VNet: $hubVnetName" -ForegroundColor Green
     } else { Write-Host "  -> exists" -ForegroundColor Gray }
-} catch { Write-Host "  -> [ERROR] Failed to create Hub VNet: $_" -ForegroundColor Red; exit 1 }
+} catch { Write-Host "  -> [ERROR] Failed to create Hub VNet: $_" -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
 
 # ===================================
 # Task 3: Create Dev Virtual Network
@@ -116,7 +117,7 @@ try {
         $devVnet = New-AzVirtualNetwork -ResourceGroupName $DevResourceGroup -Name $devVnetName -Location $Location -AddressPrefix '10.1.0.0/16' -Subnet $devSubnets -Tag $TagsDev -ErrorAction Stop
         Write-Host "  -> Created Dev VNet: $devVnetName" -ForegroundColor Green
     } else { Write-Host "  -> exists" -ForegroundColor Gray }
-} catch { Write-Host "  -> [ERROR] Failed to create Dev VNet: $_" -ForegroundColor Red; exit 1 }
+} catch { Write-Host "  -> [ERROR] Failed to create Dev VNet: $_" -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
 
 # ===================================
 # Task 4: Create Prod Virtual Network
@@ -137,7 +138,7 @@ try {
         $prodVnet = New-AzVirtualNetwork -ResourceGroupName $ProdResourceGroup -Name $prodVnetName -Location $Location -AddressPrefix '10.2.0.0/16' -Subnet $prodSubnets -Tag $TagsProd -ErrorAction Stop
         Write-Host "  -> Created Prod VNet: $prodVnetName" -ForegroundColor Green
     } else { Write-Host "  -> exists" -ForegroundColor Gray }
-} catch { Write-Host "  -> [ERROR] Failed to create Prod VNet: $_" -ForegroundColor Red; exit 1 }
+} catch { Write-Host "  -> [ERROR] Failed to create Prod VNet: $_" -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
 
 # ===================================
 # Task 5: Configure VNet Peering

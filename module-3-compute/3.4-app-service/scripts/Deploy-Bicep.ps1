@@ -44,7 +44,7 @@ Write-Host "=== Lab 3.4 Deployment: App Service ($Environment) ===" -ForegroundC
 # 1. Verify Connection
 $context = Get-AzContext
 if (-not $context) {
-    Write-Host "Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; exit 1
+    Write-Host "Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
 }
 
 # 2. Deploy Bicep
@@ -67,6 +67,7 @@ try {
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host "[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        $Host.SetShouldExit(1)
         exit 1
     }
 
@@ -75,5 +76,6 @@ try {
 catch {
     Write-Host "Deployment failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }

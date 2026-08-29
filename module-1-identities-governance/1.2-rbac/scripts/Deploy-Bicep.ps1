@@ -42,6 +42,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Azure: $_" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -49,6 +50,7 @@ catch {
 $templateFile = Join-Path $PSScriptRoot "..\bicep\resource-groups.bicep"
 if (-not (Test-Path $templateFile)) {
     Write-Host "  -> [ERROR] Template file not found at: $templateFile" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -80,6 +82,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Deployment failed: $_" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 

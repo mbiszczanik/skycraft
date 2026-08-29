@@ -83,6 +83,7 @@ Write-Host "[1/6] Validating prerequisites..." -ForegroundColor Yellow
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
@@ -98,6 +99,7 @@ Write-Host "`n[2/6] Resolving existing resource IDs..." -ForegroundColor Yellow
 $platformRgExists = Get-AzResourceGroup -Name $platformRg -ErrorAction SilentlyContinue
 if (-not $platformRgExists) {
     Write-Host "  [ERROR] Resource group '$platformRg' not found. Complete earlier labs first." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "  ✓ Platform RG found: $platformRg" -ForegroundColor Green
@@ -117,6 +119,7 @@ $prodVmObj = Get-AzVM -Name $prodVmName -ResourceGroupName $prodRgName -ErrorAct
 $monitoredVm = if ($devVmObj) { $devVmObj } elseif ($prodVmObj) { $prodVmObj } else { $null }
 if (-not $monitoredVm) {
     Write-Host "  [ERROR] No SkyCraft VM found (checked '$devVmName' and '$prodVmName'). Deploy Lab 3.2 first (at least one VM)." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "  ✓ Monitored VM: $($monitoredVm.Name)" -ForegroundColor Green
@@ -129,6 +132,7 @@ $devVmId  = if ($devVmObj) { $devVmObj.Id } else { $monitoredVm.Id }
 $storageObj = Get-AzStorageAccount -ResourceGroupName $platformRg -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $storageObj) {
     Write-Host "  [ERROR] No storage account found in '$platformRg'. Deploy Lab 4.1 first." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 $storageId = $storageObj.Id
@@ -172,7 +176,7 @@ $result     = $null
 if ($WhatIf) {
     Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
     try { $result = Get-AzSubscriptionDeploymentWhatIfResult @deployParams }
-    catch { Write-Host "`n  [ERROR] What-if failed: $($_.Exception.Message)" -ForegroundColor Red; exit 1 }
+    catch { Write-Host "`n  [ERROR] What-if failed: $($_.Exception.Message)" -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
 }
 else {
     # A freshly-created Log Analytics workspace needs a minute before its
@@ -192,6 +196,7 @@ else {
             }
             else {
                 Write-Host "`n  [ERROR] Deployment failed: $msg" -ForegroundColor Red
+                $Host.SetShouldExit(1)
                 exit 1
             }
         }

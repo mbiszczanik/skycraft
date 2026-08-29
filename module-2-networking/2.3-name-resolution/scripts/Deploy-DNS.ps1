@@ -70,6 +70,7 @@ Write-Host "=== Lab 2.3 - Deploy DNS Configuration (PowerShell) ===" -Foreground
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 

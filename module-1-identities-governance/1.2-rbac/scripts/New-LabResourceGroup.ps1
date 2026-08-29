@@ -82,6 +82,7 @@ try {
 }
 catch {
     Write-Error-Custom "Error: $($_.Exception.Message)"
+    $Host.SetShouldExit(1)
     exit 1
 }
 

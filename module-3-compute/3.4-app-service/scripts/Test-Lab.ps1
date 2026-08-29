@@ -28,7 +28,7 @@ $ErrorActionPreference = 'Stop'
 Write-Host "=== Lab 3.4 Validation: App Service ===" -ForegroundColor Cyan
 
 # 1. Verify Connection
-if (-not (Get-AzContext)) { Write-Host "Not logged in." -ForegroundColor Red; exit 1 }
+if (-not (Get-AzContext)) { Write-Host "Not logged in." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
 
 $failures = 0
 
@@ -98,4 +98,5 @@ if ($failures -eq 0) {
 } else {
     Write-Host "FAILURE: Found $failures issues." -ForegroundColor Red
 }
+$Host.SetShouldExit($failures)
 exit $failures

@@ -66,6 +66,7 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 $subscriptionId = $context.Subscription.Id

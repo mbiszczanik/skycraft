@@ -52,6 +52,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Microsoft Graph: $_" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 
