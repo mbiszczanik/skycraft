@@ -120,10 +120,11 @@ Invoke-Test "RSV tag 'CostCenter' = 'MSDN'" {
     return ($null -ne $rsvTags -and $rsvTags.CostCenter -eq 'MSDN')
 }
 
-Invoke-Test "RSV soft delete is enabled" {
+Invoke-Test "RSV soft delete is disabled (lab-friction override, docs/bicep-standards.md section 4.5)" {
     if (-not $rsv) { return $false }
-    # Read soft-delete state from the raw ARM backupconfig sub-resource (reliable);
-    # accept Enabled or AlwaysON (enhanced soft delete is the modern default).
+    # Read soft-delete state from the raw ARM backupconfig sub-resource (reliable); the AVM vault
+    # module sets securitySettings.softDeleteSettings.softDeleteState = Disabled so that
+    # Remove-LabResource.ps1 can delete the vault without a 14-day soft-delete hold.
     $state = $null
     $cfg = Get-AzResource -ResourceId "$($rsv.ID)/backupconfig/vaultconfig" -ApiVersion '2023-06-01' -ExpandProperties -ErrorAction SilentlyContinue
     if ($cfg) { $state = $cfg.Properties.softDeleteFeatureState }
@@ -131,7 +132,7 @@ Invoke-Test "RSV soft delete is enabled" {
         $props = Get-AzRecoveryServicesVaultProperty -VaultId $rsv.ID -ErrorAction SilentlyContinue
         $state = $props.SoftDeleteFeatureState
     }
-    return ($null -ne $state -and $state -ne 'Disabled')
+    return ($state -eq 'Disabled')
 }
 
 # ============================================================================
@@ -257,6 +258,11 @@ Invoke-Test "Backup Vault tag 'Environment' = 'Platform'" {
 Invoke-Test "Backup Vault tag 'CostCenter' = 'MSDN'" {
     if (-not $bvArm) { return $false }
     return ($bvArm.Tags.CostCenter -eq 'MSDN')
+}
+
+Invoke-Test "Backup Vault soft delete is off (lab-friction override, docs/bicep-standards.md section 4.5)" {
+    if (-not $bvArm) { return $false }
+    return ($bvArm.Properties.securitySettings.softDeleteSettings.state -eq 'Off')
 }
 
 # ============================================================================
