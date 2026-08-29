@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Lab 3.2 `Deploy-Bicep.ps1` takes a `-Force` switch and no longer confirms the deployment by reading stdin (#103). Run non-interactively, the old `Read-Host` prompt read EOF, printed `Deployment cancelled.` and exited **0**, so an orchestrating chain recorded the skipped VM deployment as a success and only failed two labs later. The confirmation is now a host prompt defaulting to No instead of a stdin read: `-Force` deploys without asking, and a declined confirmation - or a session with no console to prompt on - exits **2** having deployed nothing.
+- Lab 5.3 `Remove-LabResource.ps1` now cleans up everything the deployment creates, not just the connection monitor and the flow log (#106). It also removes the `NetworkWatcherAgent` extension that `Deploy-Bicep.ps1` installs on both connection monitor endpoint VMs — resolved from the monitor's own endpoints before it is deleted, skipped for a missing VM, a missing extension, or an agent not tagged `Project = SkyCraft` — and the `NWTA-*` Traffic Analytics data collection rule and endpoint Azure creates next to the Log Analytics Workspace, once no flow log with Traffic Analytics is left to feed them.
 
 ## [0.8.0] - 2026-08-29
 
