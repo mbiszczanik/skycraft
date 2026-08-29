@@ -125,6 +125,7 @@ Scripts interacting with Azure **must** use `try...catch` blocks to handle API f
 2. Use `try...catch` for all Azure cmdlets.
 3. Use `-ErrorAction SilentlyContinue` if manually checking existence.
 4. Use `-ErrorAction Stop` when a failure should trigger the `catch` block for retries or termination.
+5. Signal failure to the caller with `$Host.SetShouldExit(<code>)` immediately before every non-zero `exit <code>`. PowerShell 7 discards `exit <code>` from a script run as `pwsh -File` when that script declares `#Requires -Modules` for a module it has to auto-import - every `Az.*` module qualifies. The `exit` still unwinds the script, but the host never applies the code, so the process exits `0` and a failed run looks clean to the automated lab cycle. Keep the `exit` as well, so execution still stops. `exit 0` needs no guard. Enforced by [`tests/Exit-Code-Propagation.Tests.ps1`](../tests/Exit-Code-Propagation.Tests.ps1) (issue #104).
 
 ```powershell
 $ErrorActionPreference = 'Stop'
@@ -135,6 +136,14 @@ try {
 catch {
     Write-Host "  -> [ERROR] Failed to remove resource" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+}
+```
+
+```powershell
+if ($script:cleanupFailures -gt 0) {
+    Write-Host "Cleanup finished with $($script:cleanupFailures) failure(s)." -ForegroundColor Red
+    $Host.SetShouldExit(1)   # without this, `pwsh -File` reports success anyway
+    exit 1
 }
 ```
 
@@ -281,7 +290,7 @@ Write-Host "=== Script Title ===" -ForegroundColor Cyan
 # 1. Verify Connection
 $context = Get-AzContext
 if (-not $context) {
-    Write-Host "Not logged in." -ForegroundColor Red; exit 1
+    Write-Host "Not logged in." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
 }
 
 # 2. Logic with Error Handling
@@ -293,6 +302,7 @@ try {
 catch {
     Write-Host "Failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 ```
@@ -338,6 +348,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] $($_.Exception.Message)" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 ```

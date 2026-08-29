@@ -77,6 +77,7 @@ Write-Host "--- Verifying Azure Connection ---" -ForegroundColor Yellow
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "[ERROR] Not logged in to Azure. Please run Connect-AzAccount." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "  -> Connected as: $($context.Account.Id)" -ForegroundColor Green
@@ -98,6 +99,7 @@ foreach ($rg in $requiredRGs) {
     if (-not $rgExists) {
         Write-Host "[ERROR] Resource group '$rg' does not exist." -ForegroundColor Red
         Write-Host "  Create it first or complete Module 1 prerequisites." -ForegroundColor Yellow
+        $Host.SetShouldExit(1)
         exit 1
     }
     Write-Host "  [OK] Resource group exists: $rg" -ForegroundColor Green
@@ -220,6 +222,7 @@ catch {
         Write-Host "Details: $($_.Exception.InnerException.Message)" -ForegroundColor Red
     }
     
+    $Host.SetShouldExit(1)
     exit 1
 }
 

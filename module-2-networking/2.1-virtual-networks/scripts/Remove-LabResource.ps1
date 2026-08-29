@@ -47,6 +47,7 @@ Write-Host "=== Lab 2.1 - Resource Cleanup ===" -ForegroundColor Cyan -Backgroun
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -149,6 +150,7 @@ foreach ($pip in $pips) {
 
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s) - see the [ERROR] lines above." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 

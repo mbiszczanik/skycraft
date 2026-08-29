@@ -51,6 +51,7 @@ Write-Host "=== Lab 2.3 - Deploy Bicep (DNS) ===" -ForegroundColor Cyan -Backgro
 # Verify Bicep File
 if (-not (Test-Path $TemplateFile)) {
     Write-Host "Error: Template file not found at $TemplateFile" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -65,6 +66,7 @@ try {
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        $Host.SetShouldExit(1)
         exit 1
     }
 
@@ -72,5 +74,6 @@ try {
 }
 catch {
     Write-Host "`n[ERROR] Deployment failed: $($_.Exception.Message)" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }

@@ -39,7 +39,7 @@ Write-Host "=== Lab 4.3: Validating Azure Files Environment ===" -ForegroundColo
 
 # 1. Verify Connection
 if (-not (Get-AzContext)) {
-    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; exit 1
+    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
 }
 
 # 2. Check Storage Account
@@ -71,6 +71,7 @@ catch {
     Write-Host "  -> [FAIL] Storage Account '$storageAccountName' not found or not accessible." -ForegroundColor Red
     $failCount++
     Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor Red
+    $Host.SetShouldExit($failCount)
     exit $failCount
 }
 
@@ -116,4 +117,5 @@ catch {
 }
 
 Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor $(if ($failCount -eq 0) { 'Cyan' } else { 'Red' })
+$Host.SetShouldExit($failCount)
 exit $failCount

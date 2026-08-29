@@ -35,7 +35,7 @@ Write-Host "=== Lab 4.4: Validating Storage Security ===" -ForegroundColor Cyan
 
 # 1. Verify Connection
 if (-not (Get-AzContext)) {
-    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; exit 1
+    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
 }
 
 # 2. Check Storage Firewall
@@ -135,4 +135,5 @@ if ($sa) {
 }
 
 Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor $(if ($failCount -eq 0) { 'Cyan' } else { 'Red' })
+$Host.SetShouldExit($failCount)
 exit $failCount

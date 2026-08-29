@@ -37,7 +37,7 @@ Write-Host "=== Lab 4.3: Deploying Azure Files Infrastructure ===" -ForegroundCo
 # 1. Verify Connection
 $context = Get-AzContext
 if (-not $context) {
-    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; exit 1
+    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
 }
 
 # 2. Deploy Bicep
@@ -54,6 +54,7 @@ try {
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host "`n [FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        $Host.SetShouldExit(1)
         exit 1
     }
 
@@ -66,5 +67,6 @@ try {
 catch {
     Write-Host "`n [ERROR] Deployment failed!" -ForegroundColor Red
     Write-Host "  -> Cause: $($_.Exception.Message)" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }

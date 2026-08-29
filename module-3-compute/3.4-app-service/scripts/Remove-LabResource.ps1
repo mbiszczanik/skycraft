@@ -82,7 +82,7 @@ Write-Host "=== Cleanup Lab 3.4: App Service ===" -ForegroundColor Cyan
 Write-Host "Target Resource Group: $RgName" -ForegroundColor Yellow
 
 # 1. Verify Connection
-if (-not (Get-AzContext)) { Write-Host "Not logged in." -ForegroundColor Red; exit 1 }
+if (-not (Get-AzContext)) { Write-Host "Not logged in." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
 
 # The AVM modules deploy Microsoft.Web/* at 2025-03-01; the networkConfig/virtualNetwork sub-resource
 # route is unchanged across both versions, so pinning the older one here is deliberate.
@@ -259,5 +259,6 @@ try {
 catch {
     Write-Host "Cleanup failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }

@@ -46,7 +46,7 @@ Write-Host "=== Lab 4.3: Cleaning Up File Shares ($Environment) ===" -Foreground
 
 # 1. Verify Connection
 if (-not (Get-AzContext)) {
-    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; exit 1
+    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
 }
 
 # 2. Verify storage account exists (do not attempt to delete the RG)

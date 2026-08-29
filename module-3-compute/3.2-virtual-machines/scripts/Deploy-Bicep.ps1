@@ -99,6 +99,7 @@ Write-Host "[1/5] Validating prerequisites..." -ForegroundColor Yellow
 $context = Get-AzContext
 if (-not $context) {
     Write-Error "Not logged into Azure. Run Connect-AzAccount first."
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
@@ -107,6 +108,7 @@ Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
 if (-not (Test-Path $SshKeyPath)) {
     Write-Error "SSH public key not found at: $SshKeyPath"
     Write-Host "  Generate one with: ssh-keygen -t rsa -b 4096 -f `"$HOME\.ssh\skycraft-dev`" -N `"`""
+    $Host.SetShouldExit(1)
     exit 1
 }
 $sshPublicKey = (Get-Content $SshKeyPath -Raw).Trim()
@@ -122,6 +124,7 @@ $lbName = "$Environment-skycraft-swc-lb"
 $rgExists = Get-AzResourceGroup -Name $rgName -ErrorAction SilentlyContinue
 if (-not $rgExists) {
     Write-Error "Resource group '$rgName' not found. Deploy Lab 3.1 first."
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "  ✓ Resource group exists: $rgName" -ForegroundColor Green
@@ -129,6 +132,7 @@ Write-Host "  ✓ Resource group exists: $rgName" -ForegroundColor Green
 $vnetExists = Get-AzVirtualNetwork -Name $vnetName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
 if (-not $vnetExists) {
     Write-Error "VNet '$vnetName' not found. Deploy Lab 3.1 first."
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "  ✓ VNet exists: $vnetName" -ForegroundColor Green
@@ -136,6 +140,7 @@ Write-Host "  ✓ VNet exists: $vnetName" -ForegroundColor Green
 $lbExists = Get-AzLoadBalancer -Name $lbName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
 if (-not $lbExists) {
     Write-Error "Load Balancer '$lbName' not found. Deploy Lab 3.1 first."
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "  ✓ Load Balancer exists: $lbName" -ForegroundColor Green
@@ -168,11 +173,13 @@ if (-not $WhatIf -and -not $Force) {
         Write-Host "`n[ABORTED] Cannot ask for confirmation: this session has no interactive console." -ForegroundColor Red
         Write-Host "  Re-run with -Force to deploy non-interactively. Deployment cancelled." -ForegroundColor Gray
         Write-Verbose "PromptForChoice failed: $($_.Exception.Message)"
+        $Host.SetShouldExit(2)
         exit 2
     }
 
     if ($answer -ne 0) {
         Write-Host "Deployment cancelled." -ForegroundColor Yellow
+        $Host.SetShouldExit(2)
         exit 2
     }
 }
@@ -200,6 +207,7 @@ try {
 
         if ($deployment.ProvisioningState -ne 'Succeeded') {
             Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+            $Host.SetShouldExit(1)
             exit 1
         }
 
@@ -220,6 +228,7 @@ try {
 }
 catch {
     Write-Error "Deployment failed: $($_.Exception.Message)"
+    $Host.SetShouldExit(1)
     exit 1
 }
 

@@ -93,6 +93,7 @@ Write-Host "=== Lab 2.3 Cleanup Script ===" -ForegroundColor Cyan -BackgroundCol
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -167,11 +168,13 @@ if (Get-AzPrivateDnsZone -ResourceGroupName $PlatformRG -Name $PrivateDnsZoneNam
             catch {
                 if ($_.Exception.Message -notmatch 'nested resource') {
                     Write-Host "  -> [ERROR] Could not delete the private DNS zone: $($_.Exception.Message)" -ForegroundColor Red
+                    $Host.SetShouldExit(1)
                     exit 1
                 }
 
                 if ($attempt -eq $maxAttempts) {
                     Write-Host "  -> [ERROR] VNet links were still draining after $($maxAttempts * $delaySeconds)s. Re-run this script." -ForegroundColor Red
+                    $Host.SetShouldExit(1)
                     exit 1
                 }
 

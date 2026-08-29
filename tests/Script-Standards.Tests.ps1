@@ -104,7 +104,7 @@ Describe 'SkyCraft PowerShell - Lab 3.2 deployment cannot be silently skipped' {
 
     It "'<file>' exits non-zero when the deployment is declined" -ForEach $Lab32DeployCase {
         $content = Get-Content -Raw -LiteralPath $path
-        $content | Should -Not -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*exit 0'
-        $content | Should -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*exit [1-9]'
+        $content | Should -Not -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*(\$Host\.SetShouldExit\(0\)[\r\n]+\s*)?exit 0'
+        $content | Should -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*(\$Host\.SetShouldExit\([1-9]\)[\r\n]+\s*)?exit [1-9]'
     }
 }

@@ -60,6 +60,7 @@ Write-Host "[1/5] Validating prerequisites..." -ForegroundColor Yellow
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
@@ -74,6 +75,7 @@ Write-Host "`n[2/5] Resolving existing resource IDs..." -ForegroundColor Yellow
 $platformRgObj = Get-AzResourceGroup -Name $platformRg -ErrorAction SilentlyContinue
 if (-not $platformRgObj) {
     Write-Host "  [ERROR] Resource group '$platformRg' not found. Complete earlier labs first." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "  ✓ Platform RG found: $platformRg" -ForegroundColor Green
@@ -83,6 +85,7 @@ $prodVnetName = 'prod-skycraft-swc-vnet'
 $prodVnetObj = Get-AzVirtualNetwork -ResourceGroupName $prodRg -Name $prodVnetName -ErrorAction SilentlyContinue
 if (-not $prodVnetObj) {
     Write-Host "  [ERROR] VNet '$prodVnetName' not found in '$prodRg'. Deploy Lab 2.1 first." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 $prodVnetId = $prodVnetObj.Id
@@ -93,6 +96,7 @@ $storageName = 'platformskycraftswcsa'
 $storageObj = Get-AzStorageAccount -ResourceGroupName $platformRg -Name $storageName -ErrorAction SilentlyContinue
 if (-not $storageObj) {
     Write-Host "  [ERROR] Storage account '$storageName' not found in '$platformRg'. Deploy Lab 4.1 first." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 $storageId = $storageObj.Id
@@ -103,6 +107,7 @@ $workspaceName = 'platform-skycraft-swc-law'
 $workspaceObj = Get-AzOperationalInsightsWorkspace -ResourceGroupName $platformRg -Name $workspaceName -ErrorAction SilentlyContinue
 if (-not $workspaceObj) {
     Write-Host "  [ERROR] Log Analytics Workspace '$workspaceName' not found in '$platformRg'. Deploy Lab 5.1 first." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 $workspaceId = $workspaceObj.ResourceId
@@ -124,6 +129,7 @@ $destVm = $devAuthVm
 $sourceVm = if ($prodAuthVm) { $prodAuthVm } else { $devWorldVm }
 if (-not $sourceVm -or -not $destVm -or $sourceVm.Id -eq $destVm.Id) {
     Write-Host "  [ERROR] Connection Monitor needs two distinct SkyCraft VMs (dev auth + world, or prod auth + dev auth). Deploy Lab 3.2 first." -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 $prodVmId = $sourceVm.Id
@@ -148,6 +154,7 @@ foreach ($cmVm in @($sourceVm, $destVm)) {
             Write-Host "  ✓ NetworkWatcherAgent installed on $($cmVm.Name)" -ForegroundColor Green
         } catch {
             Write-Host "  [ERROR] Failed to install NetworkWatcherAgent on $($cmVm.Name): $($_.Exception.Message)" -ForegroundColor Red
+            $Host.SetShouldExit(1)
             exit 1
         }
     } else {
@@ -171,6 +178,7 @@ if (-not $nwExists -or $nwExists.Count -eq 0) {
     }
     catch {
         Write-Host "  [ERROR] Could not enable Network Watcher: $_" -ForegroundColor Red
+        $Host.SetShouldExit(1)
         exit 1
     }
 } else {
@@ -221,6 +229,7 @@ try {
 }
 catch {
     Write-Host "`n  [ERROR] Deployment failed: $($_.Exception.Message)" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 

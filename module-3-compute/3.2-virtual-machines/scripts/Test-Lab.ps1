@@ -50,6 +50,7 @@ Write-Host ""
 $context = Get-AzContext
 if (-not $context) {
     Write-Error "Not logged into Azure. Run Connect-AzAccount first."
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -209,4 +210,5 @@ if ($failCount -gt 0) {
 Write-Host "========================================"  -ForegroundColor Cyan
 Write-Host ""
 
+$Host.SetShouldExit($failCount)
 exit $failCount

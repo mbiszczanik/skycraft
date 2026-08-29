@@ -68,6 +68,7 @@ try {
 }
 catch {
     Write-Error-Custom "Failed to connect: $_"
+    $Host.SetShouldExit(1)
     exit 1
 }
 

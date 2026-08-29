@@ -62,6 +62,7 @@ Write-Host "=== Lab 2.1 - Deploy Networking Configuration ===" -ForegroundColor 
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
@@ -73,6 +74,7 @@ $mainBicep = Join-Path $bicepPath "main.bicep"
 # Verify Bicep file exists
 if (-not (Test-Path $mainBicep)) {
     Write-Host "[ERROR] Bicep file not found: $mainBicep" -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -121,12 +123,14 @@ try {
             Write-Host "Failed Operation: $($op.Properties.TargetResource.ResourceName)" -ForegroundColor Yellow
             Write-Host "Status Message: $($op.Properties.StatusMessage)" -ForegroundColor Red
         }
+        $Host.SetShouldExit(1)
         exit 1
     }
 }
 catch {
     Write-Host "`n[ERROR] Deployment failed with exception:" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
 

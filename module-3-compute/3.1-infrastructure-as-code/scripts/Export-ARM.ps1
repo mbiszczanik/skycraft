@@ -36,13 +36,14 @@ Write-Host "=== Lab 3.1 - Export ARM Template ===" -ForegroundColor Cyan
 
 # 1. Verify Connection
 $context = Get-AzContext
-if (-not $context) { Write-Host "Not logged in." -ForegroundColor Red; exit 1 }
+if (-not $context) { Write-Host "Not logged in." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
 
 # 2. Check RG existence
 $rg = Get-AzResourceGroup -Name $ResourceGroup -ErrorAction SilentlyContinue
 if (-not $rg) {
     Write-Host "Resource Group '$ResourceGroup' not found." -ForegroundColor Yellow
     Write-Host "Have you deployed the prerequisites?" -ForegroundColor Gray
+    $Host.SetShouldExit(1)
     exit 1
 }
 
@@ -56,5 +57,6 @@ try {
 catch {
     Write-Host "[ERROR] Export failed." -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+    $Host.SetShouldExit(1)
     exit 1
 }
