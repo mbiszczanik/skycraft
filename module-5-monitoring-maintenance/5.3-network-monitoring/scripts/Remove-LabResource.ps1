@@ -59,6 +59,108 @@ $candidateVms = @(
     @{ ResourceGroupName = 'dev-skycraft-swc-rg';  Name = 'dev-skycraft-swc-world-vm' }
 )
 
+# ── Decision helpers ──────────────────────────────────────────────────────
+# These four functions hold every choice this script makes about *what* to
+# delete; everything below them only performs the Azure I/O. They stay in this
+# file rather than a shared module, so the lab is still runnable and readable
+# on its own (docs/powershell-standards.md §7.3) — but as named functions,
+# tests/Lab53-Cleanup-Logic.Tests.ps1 can lift them out with the PowerShell
+# parser and exercise them against synthetic input. That matters most for the
+# NWTA-* selection: Traffic Analytics only materializes those resources after
+# processing real flow data for a sustained period, so no live environment can
+# be made to produce them on demand.
+
+function Get-VirtualMachineEndpointId {
+    <#
+    .SYNOPSIS
+        Returns the virtual machine resource IDs among a connection monitor's endpoints.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter()]
+        [object[]]$Endpoint
+    )
+
+    # Emits the IDs one by one, as a PowerShell function does; every caller
+    # collects them with @(...) so a single match is still a one-item array.
+    $vmId = [System.Collections.Generic.List[string]]::new()
+    foreach ($item in @($Endpoint)) {
+        if ($item.resourceId -like '*/providers/Microsoft.Compute/virtualMachines/*') {
+            $vmId.Add([string]$item.resourceId)
+        }
+    }
+    return $vmId.ToArray()
+}
+
+function ConvertTo-VmTarget {
+    <#
+    .SYNOPSIS
+        Turns virtual machine resource IDs into the resource group / name pairs the cleanup works with.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [string[]]$VmResourceId
+    )
+
+    foreach ($id in (@($VmResourceId) | Where-Object { $_ } | Select-Object -Unique)) {
+        $segment = $id -split '/'
+        [PSCustomObject]@{
+            Id                = $id
+            ResourceGroupName = $segment[4]
+            Name              = $segment[-1]
+        }
+    }
+}
+
+function Test-LabOwnedExtension {
+    <#
+    .SYNOPSIS
+        Tells whether a NetworkWatcherAgent extension was installed by this lab.
+
+    .DESCRIPTION
+        Deploy-Bicep.ps1 tags every agent it installs with Project=SkyCraft and
+        skips a VM that already carries one, so an untagged agent came from
+        somewhere else and has to be left to its owner.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter()]
+        [object]$Tag
+    )
+
+    return ($Tag.Project -eq 'SkyCraft')
+}
+
+function Select-TrafficAnalyticsResource {
+    <#
+    .SYNOPSIS
+        Picks the NWTA-* data collection resources to delete, in deletion order.
+
+    .DESCRIPTION
+        Returns nothing while any flow log still feeds Traffic Analytics. The
+        descending sort puts dataCollectionRules before dataCollectionEndpoints,
+        because the rule references the endpoint and has to go first.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [object[]]$Resource,
+
+        [Parameter()]
+        [int]$TrafficAnalyticsFlowLogCount = 0
+    )
+
+    if ($TrafficAnalyticsFlowLogCount -gt 0) { return @() }
+
+    return @(@($Resource) | Where-Object {
+            $_.Name -like 'NWTA-*' -and
+            $_.ResourceType -in @('Microsoft.Insights/dataCollectionRules', 'Microsoft.Insights/dataCollectionEndpoints')
+        } | Sort-Object ResourceType -Descending)
+}
+
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Lab 5.3 - Resource Cleanup" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
@@ -81,18 +183,14 @@ Write-Host "    - Traffic Analytics:   NWTA-* data collection rule + endpoint in
 
 # ── [1/4] Remove Connection Monitor ───────────────────────────────────────
 Write-Host "`n[1/4] Removing Connection Monitor '$connectionMonitorName'..." -ForegroundColor Yellow
-$endpointVmIds = [System.Collections.Generic.List[string]]::new()
+$endpointVmIds = @()
 try {
     # Read the raw ARM body before deleting: its AzureVM endpoints name the VMs
     # that carry the NetworkWatcherAgent extension removed in step [3/4], and
     # they cannot be read once the monitor is gone.
     $cmResource = Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction SilentlyContinue
     if ($cmResource) {
-        foreach ($endpoint in @($cmResource.Properties.endpoints)) {
-            if ($endpoint.resourceId -like '*/providers/Microsoft.Compute/virtualMachines/*') {
-                $endpointVmIds.Add([string]$endpoint.resourceId)
-            }
-        }
+        $endpointVmIds = @(Get-VirtualMachineEndpointId -Endpoint $cmResource.Properties.endpoints)
         if ($PSCmdlet.ShouldProcess($connectionMonitorName, 'Remove Connection Monitor')) {
             Remove-AzNetworkWatcherConnectionMonitor -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $connectionMonitorName -Confirm:$false -ErrorAction Stop | Out-Null
             Write-Host "  ✓ Connection Monitor removed: $connectionMonitorName" -ForegroundColor Green
@@ -130,17 +228,18 @@ Write-Host "`n[3/4] Removing NetworkWatcherAgent extensions..." -ForegroundColor
 if ($endpointVmIds.Count -eq 0) {
     foreach ($candidate in $candidateVms) {
         $candidateVm = Get-AzVM -ResourceGroupName $candidate.ResourceGroupName -Name $candidate.Name -ErrorAction SilentlyContinue
-        if ($candidateVm) { $endpointVmIds.Add($candidateVm.Id) }
+        if ($candidateVm) { $endpointVmIds += $candidateVm.Id }
     }
 }
 
-if ($endpointVmIds.Count -eq 0) {
+$agentTargets = @(ConvertTo-VmTarget -VmResourceId $endpointVmIds)
+if ($agentTargets.Count -eq 0) {
     Write-Host "  ✓ No connection monitor endpoint VMs found - nothing to remove" -ForegroundColor Gray
 }
 
-foreach ($vmId in ($endpointVmIds | Select-Object -Unique)) {
-    $vmRg   = ($vmId -split '/')[4]
-    $vmName = ($vmId -split '/')[-1]
+foreach ($target in $agentTargets) {
+    $vmRg   = $target.ResourceGroupName
+    $vmName = $target.Name
     try {
         if (-not (Get-AzVM -ResourceGroupName $vmRg -Name $vmName -ErrorAction SilentlyContinue)) {
             Write-Host "  ✓ VM not found (already removed): $vmName" -ForegroundColor Gray
@@ -153,11 +252,8 @@ foreach ($vmId in ($endpointVmIds | Select-Object -Unique)) {
             continue
         }
         foreach ($agent in $agents) {
-            # Deploy-Bicep.ps1 tags every agent it installs with Project=SkyCraft
-            # and skips a VM that already has one, so an untagged agent came from
-            # somewhere else — leave it to its owner.
             $agentTags = (Get-AzResource -ResourceId $agent.Id -ErrorAction SilentlyContinue).Tags
-            if ($agentTags.Project -ne 'SkyCraft') {
+            if (-not (Test-LabOwnedExtension -Tag $agentTags)) {
                 Write-Host "  [SKIP] $($agent.Name) on $vmName is not tagged Project=SkyCraft - left in place" -ForegroundColor Gray
                 continue
             }
@@ -191,17 +287,12 @@ try {
     if ($taFlowLogs.Count -gt 0) {
         Write-Host "  [SKIP] $($taFlowLogs.Count) flow log(s) still use Traffic Analytics - NWTA-* resources left in place" -ForegroundColor Yellow
     } else {
-        $taResources = @(Get-AzResource -ResourceGroupName $platformRg -ErrorAction SilentlyContinue |
-            Where-Object {
-                $_.Name -like 'NWTA-*' -and
-                $_.ResourceType -in @('Microsoft.Insights/dataCollectionRules', 'Microsoft.Insights/dataCollectionEndpoints')
-            })
+        $platformResources = @(Get-AzResource -ResourceGroupName $platformRg -ErrorAction SilentlyContinue)
+        $taResources = @(Select-TrafficAnalyticsResource -Resource $platformResources -TrafficAnalyticsFlowLogCount $taFlowLogs.Count)
         if ($taResources.Count -eq 0) {
             Write-Host "  ✓ No NWTA-* data collection resources found (already removed)" -ForegroundColor Gray
         }
-        # Descending sort puts dataCollectionRules before dataCollectionEndpoints:
-        # the rule references the endpoint, so it has to go first.
-        foreach ($taResource in ($taResources | Sort-Object ResourceType -Descending)) {
+        foreach ($taResource in $taResources) {
             $taKind = ($taResource.ResourceType -split '/')[-1]
             try {
                 if ($PSCmdlet.ShouldProcess($taResource.Name, "Remove Traffic Analytics $taKind")) {

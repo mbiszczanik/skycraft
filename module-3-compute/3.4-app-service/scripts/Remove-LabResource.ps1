@@ -4,10 +4,15 @@
 
 .DESCRIPTION
     Detaches the regional VNet integration from the Web App and from every deployment slot, then
-    verifies per site that the integration is really gone (the site's networkConfig/virtualNetwork
-    route answers 404 once detached), reports the state of the integration subnet, and finally
-    deletes the Web App (with its slots), the autoscale setting and the App Service Plan - in that
-    order.
+    verifies per site that the integration is really gone, reports the state of the integration
+    subnet, and finally deletes the Web App (with its slots), the autoscale setting and the App
+    Service Plan - in that order.
+
+    Once the integration is detached, the site's networkConfig/virtualNetwork route answers 404
+    on some stamps and 200 with an empty subnetResourceId on others, so the verification counts
+    both as detached and only a non-empty subnet id as still attached. Checking for 404 alone is
+    a known trap - it reads a perfectly detached site as still attached and burns the whole
+    three-minute wait budget.
 
     Deleting the plan while an integration is still attached can leave an orphaned
     serviceAssociationLink on the subnet, which makes the subnet, the VNet, its NSGs and the whole
