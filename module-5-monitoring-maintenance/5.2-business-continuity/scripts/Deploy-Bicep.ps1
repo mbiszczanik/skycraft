@@ -5,7 +5,9 @@
 .DESCRIPTION
     Deploys the Lab 5.2 Bicep templates to Azure, including:
     - Recovery Services Vault (platform-skycraft-swc-rsv) with LRS redundancy
-    - VM Backup Policy (SkyCraft-Daily-Prod): daily 02:00 UTC, 30-day retention
+    - VM Backup Policy (SkyCraft-Daily-Prod): Enhanced subtype, daily 02:00 UTC,
+      30-day retention, 2-day instant restore. Enhanced is required because Azure
+      defaults VM deployments to Trusted Launch, which a Standard policy cannot protect.
     - Backup Vault (platform-skycraft-swc-bv) with LRS and system-assigned identity
     - Blob Backup Policy (SkyCraft-Blob-Policy): 30-day operational retention
     - Diagnostic settings for both vaults -> Log Analytics Workspace
@@ -63,6 +65,10 @@ $workspaceName  = 'platform-skycraft-swc-law'
 $vmName         = 'dev-skycraft-swc-auth-vm'
 $vmRg           = 'dev-skycraft-swc-rg'
 $deploymentName = "lab52-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+
+# Counts lab resources that were meant to be created but were not. A step that only warns
+# and lets the script exit 0 lets an orchestrated cycle record a half-built lab as a success.
+$script:deployFailures = 0
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Lab 5.2 - BCDR Deployment" -ForegroundColor Cyan
@@ -194,20 +200,45 @@ if ($WhatIf) {
         -ErrorAction SilentlyContinue
 
     if ($existingRsvPolicy) {
-        Write-Host "  ✓ Policy 'SkyCraft-Daily-Prod' already exists in RSV" -ForegroundColor Green
+        # Azure cannot convert a policy between subtypes, so a 'SkyCraft-Daily-Prod' left behind
+        # by an earlier revision of this script is Standard and still cannot protect a Trusted
+        # Launch VM. Say so instead of letting step [7/7] fail with a service error (#113).
+        $enhancedPolicyNames = @(
+            Get-AzRecoveryServicesBackupProtectionPolicy `
+                -WorkloadType AzureVM `
+                -BackupManagementType AzureVM `
+                -PolicySubType Enhanced `
+                -VaultId $vault.ID `
+                -ErrorAction SilentlyContinue
+        ).Name
+        if ($enhancedPolicyNames -contains 'SkyCraft-Daily-Prod') {
+            Write-Host "  ✓ Policy 'SkyCraft-Daily-Prod' already exists in RSV (Enhanced)" -ForegroundColor Green
+        } else {
+            $script:deployFailures++
+            Write-Host "  [ERROR] Policy 'SkyCraft-Daily-Prod' exists but is a Standard policy." -ForegroundColor Red
+            Write-Host "    A Standard policy cannot protect a Trusted Launch VM, and Azure cannot" -ForegroundColor Gray
+            Write-Host "    change a policy's subtype. Delete it once nothing is protected by it and" -ForegroundColor Gray
+            Write-Host "    re-run this script, or run Remove-LabResource.ps1 for a clean rebuild:" -ForegroundColor Gray
+            Write-Host "      Remove-AzRecoveryServicesBackupProtectionPolicy -Name 'SkyCraft-Daily-Prod' -VaultId <id>" -ForegroundColor Gray
+        }
     } else {
         Write-Host "  Creating 'SkyCraft-Daily-Prod' backup policy..." -ForegroundColor Gray
         try {
-            # Standard daily schedule at 02:00 UTC with 30-day daily retention.
-            # (PolicySubType 'V2' is invalid — valid values are Standard/Enhanced;
-            # the Standard default already gives a 2-day instant restore point.)
+            # Daily schedule at 02:00 UTC with 30-day daily retention, on an *Enhanced*
+            # policy. Azure defaults VM deployments to Trusted Launch from Ignite 2023 onward,
+            # and a Trusted Launch VM cannot be protected by a Standard policy - it fails with
+            # UserErrorThisVMBackupIsSupportedUsingEnhancedPolicy (#113). Every SkyCraft VM is
+            # affected, so this is the default path, not an edge case.
+            # Enhanced returns a SimpleSchedulePolicyV2, which nests the run times under
+            # DailySchedule instead of exposing a flat ScheduleRunTimes collection.
+            $runTimeUtc = [datetime]::SpecifyKind([datetime]'02:00:00', [System.DateTimeKind]::Utc)
             $schedulePolicy = Get-AzRecoveryServicesBackupSchedulePolicyObject `
                 -WorkloadType AzureVM `
                 -BackupManagementType AzureVM `
+                -PolicySubType Enhanced `
                 -ScheduleRunFrequency Daily
-            $runTimeUtc = [datetime]::SpecifyKind([datetime]'02:00:00', [System.DateTimeKind]::Utc)
-            $schedulePolicy.ScheduleRunTimes.Clear()
-            $schedulePolicy.ScheduleRunTimes.Add($runTimeUtc)
+            $schedulePolicy.DailySchedule.ScheduleRunTimes.Clear()
+            $schedulePolicy.DailySchedule.ScheduleRunTimes.Add($runTimeUtc)
 
             $retentionPolicy = Get-AzRecoveryServicesBackupRetentionPolicyObject `
                 -WorkloadType AzureVM `
@@ -224,8 +255,17 @@ if ($WhatIf) {
                 -SchedulePolicy $schedulePolicy `
                 -RetentionPolicy $retentionPolicy `
                 -VaultId $vault.ID | Out-Null
-            Write-Host "  ✓ Policy 'SkyCraft-Daily-Prod' created" -ForegroundColor Green
+
+            # Enhanced keeps instant-restore snapshots for 7 days by default, where Standard kept
+            # 2. Snapshots are billed, so pull it back to 2 and keep the cost estimate in
+            # ARCHITECTURE.md honest.
+            $createdPolicy = Get-AzRecoveryServicesBackupProtectionPolicy -Name 'SkyCraft-Daily-Prod' -VaultId $vault.ID
+            $createdPolicy.SnapshotRetentionInDays = 2
+            Set-AzRecoveryServicesBackupProtectionPolicy -Policy $createdPolicy -VaultId $vault.ID | Out-Null
+
+            Write-Host "  ✓ Policy 'SkyCraft-Daily-Prod' created (Enhanced, daily 02:00 UTC, 30-day retention)" -ForegroundColor Green
         } catch {
+            $script:deployFailures++
             Write-Host "  [ERROR] Failed to create RSV policy: $_" -ForegroundColor Red
         }
     }
@@ -269,6 +309,7 @@ if ($WhatIf) {
                 -Policy $blobPolicyTemplate | Out-Null
             Write-Host "  ✓ Policy 'SkyCraft-Blob-Policy' created (30-day retention)" -ForegroundColor Green
         } catch {
+            $script:deployFailures++
             Write-Host "  [ERROR] Failed to create Blob policy: $_" -ForegroundColor Red
         }
     }
@@ -282,7 +323,12 @@ if ($WhatIf) {
         -BackupManagementType AzureVM `
         -WorkloadType AzureVM `
         -ErrorAction SilentlyContinue
-    $vmItem = $vmItems | Where-Object { $_.FriendlyName -eq $vmName }
+    # FriendlyName comes back empty for some protected VMs (#105), which made this check
+    # miss an already-protected VM and re-run Enable on every deployment. The container name
+    # carries the VM name as its last ';'-separated segment.
+    $vmItem = $vmItems | Where-Object {
+        $_.FriendlyName -eq $vmName -or ($_.ContainerName -split ';')[-1] -eq $vmName
+    }
 
     if ($vmItem) {
         Write-Host "  ✓ $vmName is already protected (policy: $($vmItem.ProtectionPolicyName))" -ForegroundColor Green
@@ -319,8 +365,11 @@ if ($WhatIf) {
                     Write-Host "  ✓ Initial backup triggered (runs in background — check Backup jobs in portal)" -ForegroundColor Green
                 }
             } catch {
-                Write-Host "  [WARNING] Could not enable VM backup: $_" -ForegroundColor Yellow
-                Write-Host "  Enable manually: Enable-AzRecoveryServicesBackupProtection (Step 5.2.3)" -ForegroundColor Gray
+                $script:deployFailures++
+                Write-Host "  [ERROR] Could not enable VM backup: $_" -ForegroundColor Red
+                Write-Host "    If this is UserErrorThisVMBackupIsSupportedUsingEnhancedPolicy, the vault still" -ForegroundColor Gray
+                Write-Host "    holds a Standard 'SkyCraft-Daily-Prod' from an earlier run - see step [6/7]." -ForegroundColor Gray
+                Write-Host "    Enable manually: Enable-AzRecoveryServicesBackupProtection (Step 5.2.3)" -ForegroundColor Gray
             }
         }
     }
@@ -332,5 +381,15 @@ if ($WhatIf) {
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
+if ($script:deployFailures -gt 0) {
+    Write-Host "  Deployment finished with $($script:deployFailures) failure(s)" -ForegroundColor Red
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "  See the [ERROR] lines above - this run exits 1, nothing was masked." -ForegroundColor Gray
+    Write-Host "  A missing VM (Lab 3.2 not run) is a skip, not a failure." -ForegroundColor Gray
+    Write-Host "========================================`n" -ForegroundColor Cyan
+    $Host.SetShouldExit(1)
+    exit 1
+}
+
 Write-Host "  Deployment Complete" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
