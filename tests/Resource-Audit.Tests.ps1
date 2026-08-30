@@ -74,9 +74,55 @@ Describe 'Resource audit - the script exposes its decisions as functions' {
         foreach ($name in @(
                 'Get-KnownResourceName'
                 'Test-LabResourceKnown'
-                'Select-UnreferencedResource')) {
+                'Select-UnreferencedResource'
+                'Select-LabResourceGroup'
+                'Join-AuditTarget')) {
             $script:LiftedName | Should -Contain $name
         }
+    }
+}
+
+Describe 'Resource audit - untagged drift inside a lab resource group' {
+
+    BeforeAll {
+        $script:RealKnown = @(Get-KnownResourceName -RepoRoot $script:RealRepoRoot)
+    }
+
+    # Found by the live run. The audit read only resources tagged Project=SkyCraft,
+    # so anything created without tags was invisible to it - and NetworkWatcherRG
+    # really does sit in this subscription carrying no tags at all. An untagged VM
+    # dropped into prod-skycraft-swc-rg is the #116 teardown-blocking case exactly,
+    # and the tag query would never have surfaced it. A lab resource group is
+    # repo-owned ground: whatever sits in it has to be a name the repo can produce.
+    It 'treats a resource group the repo names as a lab resource group' {
+        $groups = @('prod-skycraft-swc-rg', 'dev-skycraft-swc-rg', 'NetworkWatcherRG', 'someone-elses-rg')
+        $lab = @(Select-LabResourceGroup -Name $groups -KnownName $script:RealKnown)
+
+        $lab | Should -Contain 'prod-skycraft-swc-rg'
+        $lab | Should -Contain 'dev-skycraft-swc-rg'
+        $lab | Should -Not -Contain 'someone-elses-rg'
+    }
+
+    It 'flags an untagged resource sitting in a lab resource group' {
+        $untagged = Get-ResourceFixture -Name 'prod-skycraft-swc-traffic-vm'
+        @(Select-UnreferencedResource -Resource @($untagged) -KnownName $script:RealKnown).Count | Should -Be 1
+    }
+
+    It 'counts a resource once when it is both tagged and inside a lab group' {
+        $tagged = Get-ResourceFixture -Name 'prod-skycraft-swc-traffic-vm'
+        $sameAgain = Get-ResourceFixture -Name 'prod-skycraft-swc-traffic-vm'
+        $other = Get-ResourceFixture -Name 'prod-skycraft-swc-jumpbox-vm'
+
+        $joined = @(Join-AuditTarget -Resource @($tagged, $sameAgain, $other))
+
+        $joined.Count | Should -Be 2
+    }
+
+    It 'keeps resources whose ids differ even when their names match' {
+        $dev = [PSCustomObject]@{ Name = 'shared'; ResourceId = '/subscriptions/x/resourceGroups/dev-skycraft-swc-rg/providers/p/shared' }
+        $prod = [PSCustomObject]@{ Name = 'shared'; ResourceId = '/subscriptions/x/resourceGroups/prod-skycraft-swc-rg/providers/p/shared' }
+
+        @(Join-AuditTarget -Resource @($dev, $prod)).Count | Should -Be 2
     }
 }
 
@@ -247,5 +293,45 @@ Describe 'Resource audit - selection reports drift without deleting' {
     # #116: "Report, do not delete - a false positive must not tear down live lab state."
     It 'contains no resource-deleting call' {
         $script:ScriptText | Should -Not -Match 'Remove-Az\w+'
+    }
+}
+
+Describe 'Resource audit - a repository that names nothing' {
+
+    # Found by a live run pointed at an empty directory. PowerShell unrolls an
+    # empty array on return, so a caller that does not wrap the call receives
+    # $null rather than an empty collection, and [AllowEmptyCollection()] does not
+    # cover null. The audit died with a parameter binding error instead of
+    # reporting every resource as drift - the wrong answer, and a confusing one,
+    # for anyone who simply passed the wrong -RepoRoot.
+    BeforeAll {
+        $script:EmptyRepo = Join-Path $TestDrive 'names-nothing'
+        New-Item -ItemType Directory -Path $script:EmptyRepo -Force | Out-Null
+        # Deliberately unwrapped, to reproduce what the script itself did.
+        $script:NoNames = Get-KnownResourceName -RepoRoot $script:EmptyRepo
+    }
+
+    It 'finds no names to know' {
+        @($script:NoNames).Count | Should -Be 0
+    }
+
+    It 'selects no lab resource group rather than throwing' {
+        { Select-LabResourceGroup -Name @('prod-skycraft-swc-rg') -KnownName $script:NoNames } |
+            Should -Not -Throw
+        @(Select-LabResourceGroup -Name @('prod-skycraft-swc-rg') -KnownName $script:NoNames) |
+            Should -BeNullOrEmpty
+    }
+
+    It 'reports every resource as drift rather than throwing' {
+        $resources = @(Get-ResourceFixture -Name 'prod-skycraft-swc-auth-vm')
+        { Select-UnreferencedResource -Resource $resources -KnownName $script:NoNames } |
+            Should -Not -Throw
+        @(Select-UnreferencedResource -Resource $resources -KnownName $script:NoNames).Count |
+            Should -Be 1
+    }
+
+    It 'treats an unknown name as unknown rather than throwing' {
+        { Test-LabResourceKnown -Name 'anything' -KnownName $script:NoNames } | Should -Not -Throw
+        Test-LabResourceKnown -Name 'anything' -KnownName $script:NoNames | Should -BeFalse
     }
 }

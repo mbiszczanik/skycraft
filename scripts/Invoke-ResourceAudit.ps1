@@ -1,11 +1,18 @@
 <#
 .SYNOPSIS
-    Reports Azure resources tagged for this project that no lab source accounts for.
+    Reports Azure resources that no lab source accounts for.
 
 .DESCRIPTION
-    Lists every resource carrying the project tag and flags the ones whose name
-    the repository cannot produce. It reports only - nothing is deleted - because
-    a false positive must never tear down live lab state.
+    Lists every resource in scope and flags the ones whose name the repository
+    cannot produce. It reports only - nothing is deleted - because a false
+    positive must never tear down live lab state.
+
+    Scope is two things, not one. Resources carrying the project tag, anywhere in
+    the subscription; and every resource inside a resource group the repository
+    names, tagged or not. The tag alone has a blind spot - anything created
+    without tags is invisible to it, and an untagged VM in a lab resource group
+    is #116's teardown-blocking case exactly. A group the repository names is lab
+    ground, so whatever sits in it has to be a name the repository can produce.
 
     The check is not a literal name grep. Roughly half of all SkyCraft resource
     names are composed at deploy time from an environment parameter and a suffix
@@ -17,9 +24,10 @@
 
     Instead the audit rebuilds the set of names the repository can produce. It
     reads the deployment sources, keeps the names spelled literally, and expands
-    the composed ones over the environment domain. A resource is drift when its
-    name is not in that set - the discriminator is the suffix, which for real lab
-    resources is always one some template emits.
+    the composed ones over the domains the templates constrain with @allowed -
+    environments and locations both. A resource is drift when its name is not in
+    that set; the discriminator is the suffix, which for a real lab resource is
+    always one some template emits.
 
     Test fixtures under tests/ are not deployment sources and are not read.
 
@@ -39,7 +47,7 @@
 
 .EXAMPLE
     .\scripts\Invoke-ResourceAudit.ps1
-    Reports every tagged resource the repository does not account for.
+    Reports every resource in scope the repository does not account for.
 
 .EXAMPLE
     .\scripts\Invoke-ResourceAudit.ps1 -PassThru | Format-Table Name, ResourceType
@@ -49,7 +57,7 @@
     Project: SkyCraft
     Issue: 116 - nothing detects a lab resource that no template deploys and no teardown deletes
     Author: Marcin Biszczanik
-    Version: 1.0.0
+    Version: 1.1.0
 #>
 
 #Requires -Version 7.0
@@ -232,6 +240,7 @@ function Test-LabResourceKnown {
 
         [Parameter(Mandatory = $true)]
         [AllowEmptyCollection()]
+        [AllowNull()]
         [string[]]$KnownName
     )
 
@@ -251,14 +260,72 @@ function Select-UnreferencedResource {
     param(
         [Parameter(Mandatory = $true)]
         [AllowEmptyCollection()]
+        [AllowNull()]
         [object[]]$Resource,
 
         [Parameter(Mandatory = $true)]
         [AllowEmptyCollection()]
+        [AllowNull()]
         [string[]]$KnownName
     )
 
     return @($Resource | Where-Object { -not (Test-LabResourceKnown -Name $_.Name -KnownName $KnownName) })
+}
+
+function Select-LabResourceGroup {
+    <#
+    .SYNOPSIS
+        Selects the resource groups the repository names.
+    .DESCRIPTION
+        A resource group whose name the repository can produce is lab ground, and
+        everything inside it is in scope whether or not it carries a tag.
+    .NOTES
+        Project: SkyCraft
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowNull()]
+        [string[]]$Name,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowNull()]
+        [string[]]$KnownName
+    )
+
+    return @($Name | Where-Object { Test-LabResourceKnown -Name $_ -KnownName $KnownName })
+}
+
+function Join-AuditTarget {
+    <#
+    .SYNOPSIS
+        Merges the audit's resource lists into one, without duplicates.
+    .DESCRIPTION
+        The tag query and the per-group queries overlap, so a tagged resource in a
+        lab group arrives twice. Identity is the resource id, not the name: two
+        environments can hold resources of the same name.
+    .NOTES
+        Project: SkyCraft
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowNull()]
+        [object[]]$Resource
+    )
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $merged = [System.Collections.Generic.List[object]]::new()
+    foreach ($item in $Resource) {
+        $identity = if ($item.ResourceId) { [string]$item.ResourceId } else { [string]$item.Name }
+        if ($seen.Add($identity)) { $merged.Add($item) }
+    }
+
+    return @($merged)
 }
 
 Write-Host "=== SkyCraft - Resource Audit ===" -ForegroundColor Cyan -BackgroundColor Black
@@ -273,29 +340,45 @@ if (-not $context) {
 Write-Host "`nSubscription : $($context.Subscription.Name) ($($context.Subscription.Id))" -ForegroundColor Gray
 Write-Host "Repository   : $RepoRoot" -ForegroundColor Gray
 
-$knownName = Get-KnownResourceName -RepoRoot $RepoRoot -ProjectToken $ProjectTag.ToLowerInvariant() -EnvironmentPrefix $EnvironmentPrefix
+$knownName = @(Get-KnownResourceName -RepoRoot $RepoRoot -ProjectToken $ProjectTag.ToLowerInvariant() -EnvironmentPrefix $EnvironmentPrefix)
 Write-Host "Known names  : $($knownName.Count)" -ForegroundColor Gray
 
 Write-Host "`nReading resources tagged Project=$ProjectTag..." -ForegroundColor Cyan
 $tagged = @(Get-AzResource -TagName 'Project' -TagValue $ProjectTag)
-$taggedGroup = @(Get-AzResourceGroup -Tag @{ Project = $ProjectTag } |
+Write-Host "  -> $($tagged.Count) tagged resource(s)" -ForegroundColor Gray
+
+# The tag query alone has a blind spot: anything created without tags is invisible
+# to it, and an untagged VM in a lab resource group is #116's teardown-blocking case
+# exactly. A group the repository names is lab ground, so read all of it.
+$allGroup = @(Get-AzResourceGroup)
+$labGroup = @(Select-LabResourceGroup -Name @($allGroup.ResourceGroupName) -KnownName $knownName)
+Write-Host "Reading every resource in $($labGroup.Count) lab resource group(s)..." -ForegroundColor Cyan
+
+$inLabGroup = [System.Collections.Generic.List[object]]::new()
+foreach ($group in $labGroup) {
+    foreach ($item in @(Get-AzResource -ResourceGroupName $group)) { $inLabGroup.Add($item) }
+}
+Write-Host "  -> $($inLabGroup.Count) resource(s) in lab groups" -ForegroundColor Gray
+
+$groupAsResource = @($allGroup |
+    Where-Object { $_.Tags.Project -eq $ProjectTag -or $labGroup -contains $_.ResourceGroupName } |
     Select-Object -Property @{ n = 'Name'; e = { $_.ResourceGroupName } },
                             @{ n = 'ResourceType'; e = { 'Microsoft.Resources/resourceGroups' } },
                             @{ n = 'ResourceGroupName'; e = { $_.ResourceGroupName } },
                             ResourceId)
 
-$all = @($tagged) + @($taggedGroup)
-Write-Host "  -> $($all.Count) tagged resource(s) found" -ForegroundColor Gray
+$all = @(Join-AuditTarget -Resource (@($tagged) + @($inLabGroup) + @($groupAsResource)))
+Write-Host "  -> $($all.Count) distinct resource(s) in scope" -ForegroundColor Gray
 
 $drift = @(Select-UnreferencedResource -Resource $all -KnownName $knownName)
 
 if ($drift.Count -eq 0) {
-    Write-Host "`n[OK] Every tagged resource is accounted for by a lab source." -ForegroundColor Green
+    Write-Host "`n[OK] Every resource in scope is accounted for by a lab source." -ForegroundColor Green
     if ($PassThru) { @() }
     exit 0
 }
 
-Write-Host "`n[DRIFT] $($drift.Count) tagged resource(s) that no lab source accounts for:" -ForegroundColor Yellow
+Write-Host "`n[DRIFT] $($drift.Count) resource(s) that no lab source accounts for:" -ForegroundColor Yellow
 foreach ($item in $drift) {
     Write-Host "  - $($item.Name)" -ForegroundColor Yellow
     Write-Host "      type : $($item.ResourceType)" -ForegroundColor Gray
