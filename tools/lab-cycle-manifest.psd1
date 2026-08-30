@@ -438,23 +438,26 @@
         @{ Lab = 'module-1-identities-governance/1.2-rbac';                 Invocations = @(@{ Force = $true }); TimeoutMs = 1200000 }
     )
 
-    # -- Residue the per-lab teardown scripts do not collect --------------------------------------
-    # Swept by Remove-LabCycle.ps1 after every lab has been through its own Remove-LabResource.ps1.
+    # -- What the cycle checks and deletes after every lab has been torn down ----------------------
+    # Run by Remove-LabCycle.ps1 once each lab has been through its own Remove-LabResource.ps1.
     #
-    # AzureBackupRG_<region>_1 is created by Azure, not by this repository: the Recovery Services
-    # Vault puts a Microsoft.Compute/restorePointCollections in it while a VM is protected, and
-    # both the group and the collection survive the vault. Verified on 2026-08-30 against this
-    # tree: the string 'AzureBackupRG' appears in no script in the repository, so nothing else
-    # removes it. Issue #73 allowed relying on the fix in #105; #105 shipped without it, so the
-    # sweep is here.
+    # ON AzureBackupRG_<region>_<n>, AND A CORRECTION. Issue #73 said this leftover was unowned and
+    # allowed collecting it here. That is no longer true: #111 gave lab 5.2's Remove-LabResource.ps1
+    # exactly that job, for issue #105, and it does it better than a sweep here could. THE GROUP IS
+    # SHARED - it can hold restore point collections for protected VMs that have nothing to do with
+    # SkyCraft - so lab 5.2 removes only collections named 'AzureBackup_*skycraft*' and deletes the
+    # group only if that leaves it empty.
+    #
+    # So the prefix below drives an ASSERTION, not a delete. What must be gone is SkyCraft's
+    # contribution to that group, not the group.
     #
     # NetworkWatcherRG is Azure's own resource group and is NEVER deleted - only lab 5.3's children
     # inside it. Deleting the group would take out Network Watcher for every other workload in the
     # subscription.
     ResidualSweep = @{
-        # Matched as a prefix against resource group names, then deleted only if the group holds
-        # nothing but restore point collections. Anything else in it means it is not the group this
-        # rule means, and the sweep leaves it alone and says so.
+        # Matched as a prefix against resource group names. Used only to find SkyCraft-owned restore
+        # point collections still parked in one, which is a failure: lab 5.2's teardown should have
+        # removed them.
         BackupResourceGroupPrefix = 'AzureBackupRG_'
 
         # Vaults that must be gone once teardown has run. Issue #73 is explicit that a surviving

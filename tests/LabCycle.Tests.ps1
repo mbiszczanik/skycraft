@@ -361,9 +361,21 @@ Describe 'Manifest - the soft-delete guards name resources the labs really creat
     }
 }
 
-Describe 'Manifest - the residue sweep names Azure''s groups and never Azure''s own' {
-    It 'sweeps AzureBackupRG_ by prefix' {
+Describe 'Manifest - what the cycle deletes, and what it only checks' {
+    It 'knows the AzureBackupRG_ prefix, which it uses to check rather than to delete' {
+        # Lab 5.2's own Remove-LabResource.ps1 owns that removal (#111 for #105) and filters by
+        # ownership, which matters because the group is shared. This prefix drives an assertion.
         $script:Manifest.ResidualSweep.BackupResourceGroupPrefix | Should -Be 'AzureBackupRG_'
+    }
+
+    It 'lists only the three lab resource groups as things to delete' {
+        # The blast radius, asserted. Anything else appearing here is a resource group this cycle
+        # would start deleting, and that is worth noticing in review rather than in production.
+        @($script:Manifest.ResidualSweep.ResourceGroups) | Should -Be @(
+            'dev-skycraft-swc-rg'
+            'prod-skycraft-swc-rg'
+            'platform-skycraft-swc-rg'
+        )
     }
 
     It 'never lists NetworkWatcherRG among the resource groups it deletes' {
@@ -626,7 +638,7 @@ Describe 'Report - says what the run cannot claim, as well as what it did' {
         Write-LabCycleReport -Path $script:ReportFile -SubscriptionId 'fixture' `
             -Assertions @(
                 @{ Name = 'RecoveryServicesVault absent'; Ok = $true; Detail = 'platform-skycraft-swc-rsv is gone' }
-                @{ Name = 'no AzureBackupRG left'; Ok = $true; Detail = 'none' }
+                @{ Name = 'no SkyCraft restore point collection left'; Ok = $true; Detail = 'none' }
             )
 
         $text = Get-Content -Raw -LiteralPath $script:ReportFile
@@ -641,7 +653,7 @@ Describe 'Report - says what the run cannot claim, as well as what it did' {
         Write-LabCycleReport -Path $script:ReportFile -SubscriptionId 'fixture' `
             -Assertions @(
                 @{ Name = 'RecoveryServicesVault absent'; Ok = $false; Detail = 'it is still there' }
-                @{ Name = 'no AzureBackupRG left'; Ok = $true; Detail = 'none' }
+                @{ Name = 'no SkyCraft restore point collection left'; Ok = $true; Detail = 'none' }
             )
 
         $text = Get-Content -Raw -LiteralPath $script:ReportFile
@@ -1254,7 +1266,7 @@ Describe 'Teardown - order, failure handling and -WhatIf' {
         $probes = @{} + $script:CleanProbes
         $probes.ResourceGroupRemover = $remover
         $probes.ResourceGroupProbe   = { 'still here' }
-        $probes.BackupResourceGroupProbe = { @(@{ Name = 'AzureBackupRG_swedencentral_1'; ResourceTypes = @('Microsoft.Compute/restorePointCollections') }) }
+        $probes.BackupResourceGroupProbe = { @(@{ Name = 'AzureBackupRG_swedencentral_1'; SkyCraftCollections = @() }) }
 
         & $script:RemoveCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:TeardownManifest `
             -TeardownRunner $runner -WhatIf `
@@ -1318,10 +1330,16 @@ Describe 'Teardown - the residue sweep' {
         }
     }
 
-    It 'deletes an AzureBackupRG group that holds only restore point collections' {
+    It 'never deletes an AzureBackupRG group, whatever is in it' {
+        # THE GROUP IS SHARED. An earlier version of this script deleted any AzureBackupRG_* group
+        # whose contents were restore point collections and nothing else - which never asks whose
+        # collections they are, and on a subscription with an unrelated protected VM would have
+        # taken that workload's group with it. Lab 5.2's own teardown removes SkyCraft's
+        # collections by name and deletes the group only if that leaves it empty; this script
+        # checks and does not duplicate that less safely.
         $deleted = [System.Collections.Generic.List[string]]::new()
         $probes = @{} + $script:SweepBase
-        $probes.BackupResourceGroupProbe = { @(@{ Name = 'AzureBackupRG_swedencentral_1'; ResourceTypes = @('Microsoft.Compute/restorePointCollections') }) }
+        $probes.BackupResourceGroupProbe = { @(@{ Name = 'AzureBackupRG_swedencentral_1'; SkyCraftCollections = @() }) }
         $probes.ResourceGroupRemover = { param($Name) $deleted.Add($Name); $null }.GetNewClosure()
         $probes.ResourceGroupProbe = { $null }
         $probes.VaultProbe = { $null }
@@ -1330,16 +1348,15 @@ Describe 'Teardown - the residue sweep' {
             -Confirm:$false -LogDirectory $script:OfflinePaths.LogDirectory `
             -ResultsPath $script:OfflinePaths.ResultsPath @probes | Out-Null
 
-        @($deleted) | Should -Contain 'AzureBackupRG_swedencentral_1'
+        @($deleted) | Should -Not -Contain 'AzureBackupRG_swedencentral_1'
     }
 
-    It 'leaves an AzureBackupRG group holding anything else standing, and says so' {
-        # A group by that name holding something else is not the group the rule means. Deleting it
-        # on a name match would be the sweep doing the exact damage it exists to prevent.
-        $deleted = [System.Collections.Generic.List[string]]::new()
+    It 'passes when the shared group survives with none of our collections in it' {
+        # Something else in the subscription is using it. Asserting the group away would fail on a
+        # subscription that is doing nothing wrong.
         $probes = @{} + $script:SweepBase
-        $probes.BackupResourceGroupProbe = { @(@{ Name = 'AzureBackupRG_swedencentral_1'; ResourceTypes = @('Microsoft.Compute/restorePointCollections', 'Microsoft.Storage/storageAccounts') }) }
-        $probes.ResourceGroupRemover = { param($Name) $deleted.Add($Name); $null }.GetNewClosure()
+        $probes.BackupResourceGroupProbe = { @(@{ Name = 'AzureBackupRG_swedencentral_1'; SkyCraftCollections = @() }) }
+        $probes.ResourceGroupRemover = { $null }
         $probes.ResourceGroupProbe = { $null }
         $probes.VaultProbe = { $null }
 
@@ -1347,8 +1364,26 @@ Describe 'Teardown - the residue sweep' {
             -Confirm:$false -LogDirectory $script:OfflinePaths.LogDirectory `
             -ResultsPath $script:OfflinePaths.ResultsPath @probes
 
-        @($deleted) | Should -Not -Contain 'AzureBackupRG_swedencentral_1'
-        @($result.LeftBehind | Where-Object { $_.What -match 'AzureBackupRG' }).Count | Should -Be 1
+        $result.AssertionFailedCount | Should -Be 0
+    }
+
+    It 'fails when a SkyCraft restore point collection is still parked in one' {
+        # Our contribution surviving means lab 5.2's teardown did not finish, and the assertion
+        # names that lab rather than leaving someone to work it out.
+        $probes = @{} + $script:SweepBase
+        $probes.BackupResourceGroupProbe = {
+            @(@{ Name = 'AzureBackupRG_swedencentral_1'; SkyCraftCollections = @('AzureBackup_dev-skycraft-swc-auth-vm_77021405') })
+        }
+        $probes.ResourceGroupRemover = { $null }
+        $probes.ResourceGroupProbe = { $null }
+        $probes.VaultProbe = { $null }
+
+        $result = & $script:RemoveCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:SweepManifest `
+            -Confirm:$false -LogDirectory $script:OfflinePaths.LogDirectory `
+            -ResultsPath $script:OfflinePaths.ResultsPath @probes
+
+        $result.AssertionFailedCount | Should -BeGreaterThan 0
+        @($result.Assertions | Where-Object { -not $_.Ok })[0].Detail | Should -Match 'Lab 5\.2'
     }
 
     It 'fails when a vault survived, rather than recording it as expected residue' {

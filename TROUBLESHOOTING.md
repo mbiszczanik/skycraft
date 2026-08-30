@@ -130,17 +130,26 @@ az upgrade
 Update-Module -Name Az -Force
 ```
 
-### An empty `AzureBackupRG_<region>_1` is left behind
+### An `AzureBackupRG_<region>_<n>` group is still there
 
-**Cause**: Azure creates this group itself. While a VM is protected, the Recovery Services Vault
-places a `Microsoft.Compute/restorePointCollections` in a resource group named
-`AzureBackupRG_<region>_1`, and **both the collection and the group outlive the vault**. No lab
-script owns it — the string `AzureBackupRG` appears nowhere else in this repository.
+**This is not necessarily wrong.** Azure creates that group itself: while a VM is protected, the
+Recovery Services Vault parks a `Microsoft.Compute/restorePointCollections` in it, and both the
+collection and the group outlive the vault.
 
-`Remove-LabCycle.ps1` sweeps it, but only when the group holds *nothing but* restore point
-collections. A group by that name holding anything else is left standing and reported, because
-deleting a resource group on a name match alone is exactly the damage the sweep exists to prevent.
-If you see it reported as kept, look inside it by hand.
+**The group is shared.** It holds restore point collections for *every* protected VM in that
+region, including workloads that have nothing to do with SkyCraft. So the question is never "is the
+group gone" — it is "is *our* collection gone".
+
+- **Lab 5.2's `Remove-LabResource.ps1` owns the removal** (added by #111 for issue #105). It deletes
+  only collections named `AzureBackup_*skycraft*`, and deletes the group itself only if that leaves
+  it empty.
+- **`Remove-LabCycle.ps1` only asserts.** It fails if a SkyCraft-owned collection is still parked in
+  one of those groups, and points you at lab 5.2's transcript. It deliberately does not delete
+  them: it cannot filter by ownership as safely as the script that already does.
+
+If the assertion fails, read `tools/lab-cycle-logs/module-5-monitoring-maintenance-5.2-business-continuity.teardown.log`.
+If the *group* survives with no SkyCraft collection in it, nothing is wrong — something else in the
+subscription is using it.
 
 ### `NetworkWatcherRG` is still there after a clean teardown
 

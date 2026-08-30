@@ -43,30 +43,38 @@
       Lab 5.2's own Remove-LabResource.ps1 does the disarm and the delete. This script does not
       duplicate that work; it orders it, and then asserts the vault is gone.
 
-    WHAT THIS SCRIPT SWEEPS THAT NO LAB SCRIPT OWNS.
+    WHAT THIS SCRIPT DELETES, AND WHAT IT ONLY CHECKS.
 
-      AzureBackupRG_<region>_1. Created by Azure rather than by this repository: while a VM is
-      protected, the Recovery Services Vault puts a Microsoft.Compute/restorePointCollections in a
-      resource group of that name, and both survive the vault. Verified on 2026-08-30 against this
-      tree - the string 'AzureBackupRG' appears in no script in the repository, so nothing else
-      removes it. Issue #73 allowed relying on the fix in #105; #105 shipped without it.
+      It deletes the three lab resource groups, last and in parallel, once every lab teardown has
+      run against them. That is all it deletes.
 
-      A group matching the prefix is deleted only when it holds nothing but restore point
-      collections. Anything else in it means it is not the group this rule means, and the sweep
-      leaves it standing and says so rather than guessing.
+      AzureBackupRG_<region>_<n> is CHECKED, NOT DELETED, and the distinction is the whole point.
+      Azure creates that group itself: while a VM is protected, the Recovery Services Vault parks a
+      Microsoft.Compute/restorePointCollections in it, and both outlive the vault. Lab 5.2's own
+      Remove-LabResource.ps1 removes it - added by #111 for issue #105 - and it does so far more
+      carefully than a sweep here could: THE GROUP IS SHARED. It can hold restore point collections
+      belonging to protected VMs that have nothing to do with SkyCraft, so lab 5.2 removes only
+      collections named 'AzureBackup_*skycraft*' and deletes the group only if that leaves it
+      empty.
 
-      NetworkWatcherRG is NEVER deleted. It is Azure's own resource group, shared with every other
-      workload in the subscription; lab 5.3's own teardown removes this repository's children from
-      inside it, which is the correct scope.
+      An earlier version of this script deleted any AzureBackupRG_* group whose contents were
+      restore point collections and nothing else. That looks equivalent and is not: it does not ask
+      whose collections they are, and on a subscription with an unrelated protected VM it would
+      have taken that workload's group with it. Duplicating a delete less safely than the script
+      that already owns it is worse than not duplicating it, so this one now asserts instead - a
+      surviving SkyCraft collection means lab 5.2's teardown did not do its job, and that is worth
+      failing over.
 
-      The three lab resource groups are deleted last, in parallel, after every lab teardown has run
-      against them.
+      NetworkWatcherRG is likewise never deleted. It is Azure's own resource group, shared with
+      every other workload in the subscription; lab 5.3's own teardown removes this repository's
+      children from inside it, which is the correct scope.
 
     THEN IT CHECKS. Issue #73 is explicit that a surviving vault is a failure rather than expected
-    residue, so the vaults are asserted absent rather than reported. So are the AzureBackupRG groups
-    and the three lab resource groups. An assertion that fails is counted like a teardown failure
-    and leaves through the exit code, because a teardown that says it worked while the subscription
-    disagrees is the exact failure this whole tool exists to make impossible.
+    residue, so the vaults are asserted absent rather than reported. So are the three lab resource
+    groups, and any SkyCraft restore point collection still parked in an AzureBackupRG_* group. An
+    assertion that fails is counted like a teardown failure and leaves through the exit code,
+    because a teardown that says it worked while the subscription disagrees is the exact failure
+    this whole tool exists to make impossible.
 
     -WhatIf lists the entire plan - every lab invocation, every sweep, every resource group - and
     deletes nothing. Every destructive step goes through ShouldProcess, so there is no path that
@@ -118,7 +126,12 @@
     to be installed on the machine running them.
 
 .PARAMETER BackupResourceGroupProbe
-    Given the prefix, returns @{ Name; ResourceTypes } for each matching resource group.
+    Given the prefix, returns @{ Name; SkyCraftCollections } for each matching resource group -
+    the group's name, and the names of the restore point collections in it that belong to SkyCraft.
+
+    Only SkyCraft's own, because the group is shared: an unrelated protected VM's collection lives
+    in the same group and is none of this teardown's business. The filter matches lab 5.2's own,
+    which is the script that actually removes them.
 
 .PARAMETER ResourceGroupRemover
     Given a resource group name, deletes it. Returns nothing; throws on failure.
@@ -196,15 +209,19 @@ param(
     [Parameter()]
     [scriptblock]$BackupResourceGroupProbe = {
         param($Prefix)
-        # Resource types rather than the resources themselves: the rule only has to distinguish
-        # 'restore point collections and nothing else' from anything else, and the type list is a
-        # much smaller answer than the resource list.
+        # 'AzureBackup_*skycraft*' is lab 5.2's own filter, and it is here for the same reason it
+        # is there: the group is shared, and an unrelated protected VM's collection must not be
+        # counted against this teardown. Reporting one would send someone to debug a leftover that
+        # is not theirs.
         Get-AzResourceGroup -ErrorAction SilentlyContinue |
             Where-Object { $_.ResourceGroupName -like "$Prefix*" } |
             ForEach-Object {
-                $types = @(Get-AzResource -ResourceGroupName $_.ResourceGroupName -ErrorAction SilentlyContinue |
-                    ForEach-Object { $_.ResourceType } | Sort-Object -Unique)
-                @{ Name = $_.ResourceGroupName; ResourceTypes = $types }
+                $ours = @(Get-AzResource -ResourceGroupName $_.ResourceGroupName -ErrorAction SilentlyContinue |
+                    Where-Object {
+                        $_.ResourceType -eq 'Microsoft.Compute/restorePointCollections' -and
+                        $_.Name -like 'AzureBackup_*skycraft*'
+                    } | ForEach-Object { $_.Name })
+                @{ Name = $_.ResourceGroupName; SkyCraftCollections = $ours }
             }
     },
 
@@ -417,43 +434,13 @@ else {
     Write-Host ''
     Write-Host '  Sweep' -ForegroundColor Cyan
 
-    # AzureBackupRG_<region>_1. Azure's, not ours, and it outlives the vault that created it.
-    foreach ($group in @(& $BackupResourceGroupProbe $sweep.BackupResourceGroupPrefix)) {
-        if (-not $group) { continue }
-
-        $unexpected = @($group.ResourceTypes | Where-Object { $_ -ne 'Microsoft.Compute/restorePointCollections' })
-        if ($unexpected.Count -gt 0) {
-            # Left standing on purpose. A group by this name holding something else is not the
-            # group this rule means, and deleting it on a name match would be the sweep doing the
-            # exact class of damage it exists to prevent.
-            $what = "resource group '$($group.Name)'"
-            $why  = "left standing: it holds $($unexpected -join ', '), not only restore point collections, so it is not the orphan this sweep removes. Check it by hand."
-            $leftBehind.Add(@{ Lab = '(sweep)'; What = $what; Why = $why })
-            Write-Host "    [KEPT] $what - $why" -ForegroundColor Yellow
-            continue
-        }
-
-        if (-not $PSCmdlet.ShouldProcess($group.Name, 'delete orphaned Azure Backup resource group')) {
-            Write-Host "    [PLAN] delete $($group.Name)" -ForegroundColor Gray
-            continue
-        }
-
-        try {
-            $job = & $ResourceGroupRemover $group.Name
-            if ($job) { $job | Wait-Job | Receive-Job -ErrorAction Stop | Out-Null }
-            $record = @{ Lab = '(sweep)'; Status = 'Removed'; ExitCode = 0; Target = $group.Name }
-            Write-Host "    [ OK ] $($group.Name)" -ForegroundColor Green
-        }
-        catch {
-            $record = @{ Lab = '(sweep)'; Status = 'Failed'; ExitCode = 1; Target = $group.Name; Detail = "$_" }
-            Write-Host "    [FAIL] $($group.Name) - $_" -ForegroundColor Red
-        }
-        $results.Add($record)
-        & $recordResult $record
-    }
+    # AzureBackupRG_<region>_<n> is NOT deleted here - see the header. Lab 5.2's own teardown owns
+    # it and filters by ownership, which this script cannot do as safely on a shared group. It is
+    # asserted below instead.
 
     # The three lab resource groups, last and in parallel. Each is independent of the others, and
-    # a resource group delete is minutes rather than seconds.
+    # a resource group delete is minutes rather than seconds. These are the only things this script
+    # deletes directly.
     $jobs = @()
     foreach ($name in @($sweep.ResourceGroups)) {
         if (-not (& $ResourceGroupProbe $name)) {
@@ -513,15 +500,27 @@ else {
             }
         }
 
-        $survivingBackupGroups = @(& $BackupResourceGroupProbe $sweep.BackupResourceGroupPrefix | Where-Object { $_ })
-        if ($survivingBackupGroups.Count -gt 0) {
-            $names = @($survivingBackupGroups | ForEach-Object { $_.Name }) -join ', '
-            $assertions.Add(@{ Name = 'no AzureBackupRG left'; Ok = $false; Detail = "still present: $names" })
-            Write-Host "    [FAIL] Azure Backup resource groups still present: $names" -ForegroundColor Red
+        # A GROUP THAT STILL EXISTS IS NOT THE FAILURE; one that still holds a SkyCraft restore
+        # point collection is. The group is shared, so an unrelated protected VM legitimately keeps
+        # it alive, and asserting the group away would fail on a subscription that is doing nothing
+        # wrong. What must be gone is our contribution to it.
+        $ourLeftovers = @(
+            foreach ($group in @(& $BackupResourceGroupProbe $sweep.BackupResourceGroupPrefix)) {
+                if (-not $group) { continue }
+                foreach ($collection in @($group.SkyCraftCollections)) {
+                    if ($collection) { "$($group.Name)/$collection" }
+                }
+            }
+        )
+
+        if ($ourLeftovers.Count -gt 0) {
+            $detail = "SkyCraft restore point collections still parked in Azure Backup groups: $($ourLeftovers -join ', '). Lab 5.2's Remove-LabResource.ps1 is what removes these, so its teardown did not finish - check that lab's transcript."
+            $assertions.Add(@{ Name = 'no SkyCraft restore point collection left'; Ok = $false; Detail = $detail })
+            Write-Host "    [FAIL] $detail" -ForegroundColor Red
         }
         else {
-            $assertions.Add(@{ Name = 'no AzureBackupRG left'; Ok = $true; Detail = 'none' })
-            Write-Host '    [ OK ] no AzureBackupRG_* resource group remains' -ForegroundColor Green
+            $assertions.Add(@{ Name = 'no SkyCraft restore point collection left'; Ok = $true; Detail = 'none' })
+            Write-Host '    [ OK ] no SkyCraft restore point collection remains in any AzureBackupRG_* group' -ForegroundColor Green
         }
 
         foreach ($name in @($sweep.ResourceGroups)) {
