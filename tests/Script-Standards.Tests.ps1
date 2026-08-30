@@ -51,6 +51,14 @@ $Lab32DeployCase = @(
     }
 )
 
+# Regression guard for issue #105 (Lab 5.2 cleanup masked every failure and always exited 0)
+$Lab52CleanupCase = @(
+    @{
+        file = 'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Remove-LabResource.ps1'
+        path = (Join-Path $RepoRoot 'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Remove-LabResource.ps1')
+    }
+)
+
 Describe 'SkyCraft PowerShell - script standards' {
 
     It "'<file>' sets `$ErrorActionPreference = 'Stop'" -ForEach $ScriptCases {
@@ -106,5 +114,39 @@ Describe 'SkyCraft PowerShell - Lab 3.2 deployment cannot be silently skipped' {
         $content = Get-Content -Raw -LiteralPath $path
         $content | Should -Not -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*(\$Host\.SetShouldExit\(0\)[\r\n]+\s*)?exit 0'
         $content | Should -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*(\$Host\.SetShouldExit\([1-9]\)[\r\n]+\s*)?exit [1-9]'
+    }
+}
+
+Describe 'SkyCraft PowerShell - Lab 5.2 cleanup cannot mask a failure' {
+
+    It "'<file>' counts the steps that failed" -ForEach $Lab52CleanupCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match '\$script:cleanupFailures\s*=\s*0'
+        $content | Should -Match '\$script:cleanupFailures\+\+'
+    }
+
+    It "'<file>' exits non-zero when a step failed" -ForEach $Lab52CleanupCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match '(?s)if \(\$script:cleanupFailures -gt 0\).*?exit 1'
+    }
+
+    It "'<file>' reports a failed delete as [ERROR], not [WARNING]" -ForEach $Lab52CleanupCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Not -Match '\[WARNING\] Could not'
+        $content | Should -Match '\[ERROR\] Could not delete RSV'
+    }
+
+    It "'<file>' blames stale tooling first in the vault failure hint" -ForEach $Lab52CleanupCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match 'Azure CLI 2\.75\.0\+'
+        $content | Should -Match 'Az PowerShell 7\.5\.0\+'
+        # The pre-#105 hint claimed the vault had to be emptied through the portal first.
+        $content | Should -Not -Match 'Backup Items . Stop protection'
+    }
+
+    It "'<file>' removes the orphaned Azure Backup restore point collection" -ForEach $Lab52CleanupCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match 'Microsoft\.Compute/restorePointCollections'
+        $content | Should -Match 'AzureBackupRG_'
     }
 }
