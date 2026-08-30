@@ -172,6 +172,16 @@ BeforeAll {
     $script:InvokeCycle = Join-Path $script:ToolsDir 'Invoke-LabCycle.ps1'
     $script:RemoveCycle = Join-Path $script:ToolsDir 'Remove-LabCycle.ps1'
 
+    # Snapshotted BEFORE any test runs, because the question at the end is 'did this suite create
+    # one of these', not 'does one exist'. A working tree where somebody has legitimately run a
+    # real cycle already holds a state file and a report - both gitignored - and a test that reads
+    # the second question as the first fails on a perfectly good checkout. It did.
+    $script:RunArtefacts = 'lab-cycle-logs', 'lab-cycle-report.md', '.lab-cycle-lock.json', '.lab-cycle-state.json'
+    $script:ArtefactsBefore = @{}
+    foreach ($name in $script:RunArtefacts) {
+        $script:ArtefactsBefore[$name] = Test-Path -LiteralPath (Join-Path $script:ToolsDir $name)
+    }
+
     # Paths every engine test redirects at, so nothing lands beside the real orchestrator.
     $script:OfflinePaths = @{
         LogDirectory = (Join-Path $script:Scratch 'logs')
@@ -312,6 +322,15 @@ Describe 'Manifest - teardown covers what the cycle deploys' {
         # Not cosmetic ordering. A CanNotDelete lock left in place turns every delete below it into
         # a failure that reads like a permissions problem.
         $script:Manifest.Teardowns[0].Lab | Should -Be 'module-1-identities-governance/1.3-governance'
+    }
+
+    It 'gives lab 3.3 a teardown limit above the 20 minutes that killed it' {
+        # Set from a measured failure rather than from caution: on 2026-08-30 the Container Apps
+        # Environment delete was still running when the old 20-minute limit killed it, and that
+        # was the single teardown failure in an otherwise clean cycle. A teardown that reports a
+        # failure on every clean run teaches its operator to discount failures.
+        $containers = $script:Manifest.Teardowns | Where-Object { $_.Lab -eq 'module-3-compute/3.3-containers' }
+        $containers.TimeoutMs | Should -BeGreaterThan 1200000
     }
 
     It 'tears the remaining labs down in the reverse of the deploy order' {
@@ -595,6 +614,61 @@ Describe 'Results file - append-only, one JSON object per line' {
         $path = Join-Path $script:Scratch "whatif-$([guid]::NewGuid().ToString('N')).jsonl"
         Write-LabCycleResultLine -Path $path -Record @{ Id = 'x' } -WhatIf
         Test-Path -LiteralPath $path | Should -BeFalse
+    }
+}
+
+Describe 'Report - says what the run cannot claim, as well as what it did' {
+    BeforeEach {
+        $script:ReportFile = Join-Path $script:Scratch "report-$([guid]::NewGuid().ToString('N')).md"
+    }
+
+    It 'renders a passing assertion set as evidence rather than as a bare count' {
+        Write-LabCycleReport -Path $script:ReportFile -SubscriptionId 'fixture' `
+            -Assertions @(
+                @{ Name = 'RecoveryServicesVault absent'; Ok = $true; Detail = 'platform-skycraft-swc-rsv is gone' }
+                @{ Name = 'no AzureBackupRG left'; Ok = $true; Detail = 'none' }
+            )
+
+        $text = Get-Content -Raw -LiteralPath $script:ReportFile
+        $text | Should -Match '## Teardown assertions'
+        $text | Should -Match 'All 2 passed'
+        $text | Should -Match 'platform-skycraft-swc-rsv is gone'
+    }
+
+    It 'makes a failed assertion impossible to skim past' {
+        # The whole reason this section exists: every delete can report success while the
+        # subscription disagrees, and that is not residue.
+        Write-LabCycleReport -Path $script:ReportFile -SubscriptionId 'fixture' `
+            -Assertions @(
+                @{ Name = 'RecoveryServicesVault absent'; Ok = $false; Detail = 'it is still there' }
+                @{ Name = 'no AzureBackupRG left'; Ok = $true; Detail = 'none' }
+            )
+
+        $text = Get-Content -Raw -LiteralPath $script:ReportFile
+        $text | Should -Match '\*\*1 of 2 FAILED'
+        $text | Should -Match '\*\*FAIL\*\* - RecoveryServicesVault absent'
+    }
+
+    It 'says nothing was checked rather than implying everything passed' {
+        # A partial teardown asserts nothing. An empty section that read 'All 0 passed' would be
+        # a clean bill of health for a check that never ran.
+        Write-LabCycleReport -Path $script:ReportFile -SubscriptionId 'fixture' -Assertions @()
+
+        (Get-Content -Raw -LiteralPath $script:ReportFile) | Should -Match 'Not checked'
+    }
+
+    It 'calls a teardown timeout a timeout rather than printing a bare exit 124' {
+        # 124 is the runner's sentinel. 'Still running when we stopped waiting' and 'the delete
+        # failed' send someone to different places - a longer TimeoutMs, or Azure.
+        Write-LabCycleReport -Path $script:ReportFile -SubscriptionId 'fixture' `
+            -Teardowns @(@{ Lab = 'module-3-compute/3.3-containers'; Status = 'Failed'; ExitCode = 124 })
+
+        (Get-Content -Raw -LiteralPath $script:ReportFile) | Should -Match 'timed out'
+    }
+
+    It 'writes nothing under -WhatIf' {
+        Write-LabCycleReport -Path $script:ReportFile -SubscriptionId 'fixture' -WhatIf
+        Test-Path -LiteralPath $script:ReportFile | Should -BeFalse
     }
 }
 
@@ -882,6 +956,105 @@ Describe 'Engine - -OpsEmail is demanded before the run, not an hour into it' {
             -ContextProbe $script:GoodContext -Yes -SkipCleanup @script:OfflinePaths | Out-Null
 
         $captured['needs-email'].Keys | Should -Not -Contain 'OpsEmail'
+    }
+}
+
+Describe 'Engine - hands off to the teardown script and carries its answer back' {
+    BeforeAll {
+        $script:HandoffManifest = New-FixtureManifest -Body @'
+@{
+    Phases = @(
+        @{ Id = 'only'; Lab = 'module-2-networking/2.1-virtual-networks'; ParamFile = 'x'; Deploy = @{}; PostDeploy = $null; Test = @{}; DependsOn = @(); TimeoutMs = 1000; Excluded = $null }
+    )
+    SoftDeleteGuards = @()
+    CompileOnly = @()
+    Teardowns = @()
+}
+'@
+        # A stand-in for Remove-LabCycle.ps1. The handoff is what is under test here, not the
+        # teardown itself - that has its own Describe below.
+        #
+        # SupportsShouldProcess is not decoration: the orchestrator passes -Confirm:$false so an
+        # unattended cycle does not stop on the teardown's confirmation, and a replacement script
+        # that does not declare it fails parameter binding. The first version of this fake did not,
+        # and that is how the requirement was found - so any -RemoveScriptPath must honour it.
+        $script:FakeRemove = Join-Path $script:Scratch 'Fake-Remove.ps1'
+        Set-Content -LiteralPath $script:FakeRemove -Value @'
+[CmdletBinding(SupportsShouldProcess)]
+param(
+    [string]$SubscriptionId, [string]$ManifestPath, [string]$LabRoot, [string]$LogDirectory,
+    [string]$ResultsPath, [string]$RunId, [string[]]$Labs
+)
+Set-Content -LiteralPath (Join-Path $LogDirectory 'fake-remove-was-called.txt') -Value $RunId
+[pscustomobject]@{
+    Teardowns  = @(@{ Lab = 'module-2-networking/2.1-virtual-networks'; Status = 'Removed'; ExitCode = 0 })
+    LeftBehind = @(@{ Lab = '(sweep)'; What = 'something'; Why = 'a reason' })
+    Assertions = @(
+        @{ Name = 'RecoveryServicesVault absent'; Ok = $true;  Detail = 'gone' }
+        @{ Name = 'lab resource group absent';    Ok = $false; Detail = "'dev-skycraft-swc-rg' still exists" }
+    )
+}
+'@
+    }
+
+    It 'calls the teardown script when -SkipCleanup was not passed' {
+        $logs = Join-Path $script:Scratch "handoff-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $logs -Force | Out-Null
+        $paths = @{} + $script:OfflinePaths
+        $paths.LogDirectory = $logs
+
+        & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:HandoffManifest `
+            -PhaseRunner { 0 } -PreflightRunner { @() } -ContextProbe $script:GoodContext `
+            -RemoveScriptPath $script:FakeRemove -Yes @paths | Out-Null
+
+        Test-Path -LiteralPath (Join-Path $logs 'fake-remove-was-called.txt') | Should -BeTrue
+    }
+
+    It 'does not call it under -SkipCleanup' {
+        $logs = Join-Path $script:Scratch "handoff-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $logs -Force | Out-Null
+        $paths = @{} + $script:OfflinePaths
+        $paths.LogDirectory = $logs
+
+        & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:HandoffManifest `
+            -PhaseRunner { 0 } -PreflightRunner { @() } -ContextProbe $script:GoodContext `
+            -RemoveScriptPath $script:FakeRemove -Yes -SkipCleanup @paths | Out-Null
+
+        Test-Path -LiteralPath (Join-Path $logs 'fake-remove-was-called.txt') | Should -BeFalse
+    }
+
+    It 'carries the teardown''s assertions into its own result and report' {
+        $report = Join-Path $script:Scratch "handoff-report-$([guid]::NewGuid().ToString('N')).md"
+        $logs = Join-Path $script:Scratch "handoff-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $logs -Force | Out-Null
+        $paths = @{} + $script:OfflinePaths
+        $paths.LogDirectory = $logs
+        $paths.ReportPath = $report
+
+        $result = & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:HandoffManifest `
+            -PhaseRunner { 0 } -PreflightRunner { @() } -ContextProbe $script:GoodContext `
+            -RemoveScriptPath $script:FakeRemove -Yes @paths
+
+        $result.AssertionFailedCount | Should -Be 1
+        (Get-Content -Raw -LiteralPath $report) | Should -Match '\*\*FAIL\*\* - lab resource group absent'
+    }
+
+    It 'keeps a failed teardown assertion out of the deploy exit code' {
+        # 'The lab failed' and 'the lab could not be removed' are different facts with different
+        # remedies. The assertion is reported loudly; it does not turn a clean deploy into a
+        # failed one.
+        # Its own log directory, created up front: the fake writes its marker there, and unlike a
+        # real teardown it does not create the directory first.
+        $logs = Join-Path $script:Scratch "handoff-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $logs -Force | Out-Null
+        $paths = @{} + $script:OfflinePaths
+        $paths.LogDirectory = $logs
+
+        & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:HandoffManifest `
+            -PhaseRunner { 0 } -PreflightRunner { @() } -ContextProbe $script:GoodContext `
+            -RemoveScriptPath $script:FakeRemove -Yes @paths | Out-Null
+
+        $LASTEXITCODE | Should -Be 0
     }
 }
 
@@ -1330,11 +1503,31 @@ Describe 'Gold-path standards for the orchestrator scripts' {
 }
 
 Describe 'The offline suite must not write into the repository' {
-    It 'leaves no run artefacts beside the orchestrator' {
+    It 'creates no run artefact beside the orchestrator that was not already there' {
         # Every engine test above redirects its paths at the scratch directory. This is what
         # catches one that forgot.
-        foreach ($name in '.lab-cycle-lock.json', '.lab-cycle-state.json', 'lab-cycle-report.md') {
-            Test-Path -LiteralPath (Join-Path $script:ToolsDir $name) | Should -BeFalse -Because "$name is a run artefact, and a test suite that creates one leaves the next run starting dirty"
-        }
+        #
+        # WHAT IS ASSERTED IS THE CHANGE, not the presence. A working tree where somebody has run
+        # a real cycle legitimately holds tools/.lab-cycle-state.json and tools/lab-cycle-report.md
+        # - both gitignored, both none of this suite's business. Comparing against the snapshot
+        # taken before the first test distinguishes 'this suite wrote it' from 'it was already
+        # here', which is the only distinction that matters. Asserting absence outright made this
+        # test fail on a checkout where the orchestrator had simply been used.
+        $created = @(
+            foreach ($name in $script:RunArtefacts) {
+                $now = Test-Path -LiteralPath (Join-Path $script:ToolsDir $name)
+                if ($now -and -not $script:ArtefactsBefore[$name]) { $name }
+            }
+        )
+
+        $created | Should -BeNullOrEmpty -Because 'a test suite that writes into tools/ leaves the next real run starting dirty'
+    }
+
+    It 'is checking a non-empty set of artefacts, so the check above cannot pass by vacuity' {
+        # A difference-based assertion over an empty list passes for ever and asserts nothing. This
+        # is the guard against the snapshot silently failing to populate - which is exactly the
+        # failure mode that makes a green suite worth less than no suite.
+        @($script:RunArtefacts).Count | Should -BeGreaterThan 0
+        $script:ArtefactsBefore.Keys.Count | Should -Be @($script:RunArtefacts).Count
     }
 }

@@ -126,6 +126,14 @@
 .PARAMETER RemoveScriptPath
     The teardown script this hands off to. Defaults to tools/Remove-LabCycle.ps1 beside this one.
 
+    It is called with -Confirm:$false, so a replacement must declare
+    [CmdletBinding(SupportsShouldProcess)] or parameter binding fails. That is not incidental: an
+    unattended cycle must not stop on a teardown confirmation at hour two, and a teardown that
+    silently never happened is worse than one that failed loudly.
+
+    Whatever it returns is read for Teardowns, LeftBehind and Assertions, and those are carried
+    into this script's report and result object.
+
 .PARAMETER MaxAttempts
     How many times a retryable step is attempted. Three, not unlimited: regional capacity can stay
     unavailable for hours, and a run that keeps retrying one capacity failure never reaches the
@@ -347,8 +355,9 @@ $cause   = @{}
 
 # Teardown results are kept apart from phase results all the way to the report, because they
 # answer a different question and a reader who conflates them debugs the wrong thing.
-$teardownResults = [System.Collections.Generic.List[hashtable]]::new()
-$leftBehind      = [System.Collections.Generic.List[hashtable]]::new()
+$teardownResults    = [System.Collections.Generic.List[hashtable]]::new()
+$teardownAssertions = [System.Collections.Generic.List[hashtable]]::new()
+$leftBehind         = [System.Collections.Generic.List[hashtable]]::new()
 
 $runId = [guid]::NewGuid().ToString('N')
 
@@ -691,6 +700,17 @@ if (-not $SkipCleanup -and -not $DryRun) {
         if ($teardown) {
             foreach ($entry in @($teardown.Teardowns)) { if ($entry) { $teardownResults.Add($entry) } }
             foreach ($residue in @($teardown.LeftBehind)) { if ($residue) { $leftBehind.Add($residue) } }
+            # Carried into the report rather than left in the teardown's own console output. The
+            # assertions are the strongest evidence the cycle has that it cleaned up, and a report
+            # that lists sixteen successful deletes without them overstates what was checked.
+            foreach ($assertion in @($teardown.Assertions)) { if ($assertion) { $teardownAssertions.Add($assertion) } }
+
+            $survivors = @($teardown.Assertions | Where-Object { $_ -and -not $_.Ok })
+            if ($survivors.Count -gt 0) {
+                Write-Host ''
+                Write-Host "[WARNING] Teardown left $($survivors.Count) assertion(s) failing - the subscription is not as empty as the deletes claimed." -ForegroundColor Red
+                Write-Host '          See the Teardown assertions section of the report, and TROUBLESHOOTING.md.' -ForegroundColor Yellow
+            }
         }
     }
 }
@@ -735,7 +755,8 @@ Write-Host "  Coverage: $($coverage.Live) deployed and validated, $($coverage.De
 Write-Host ''
 
 Write-LabCycleReport -Path $ReportPath -SubscriptionId $SubscriptionId -ManifestPath $ManifestPath `
-    -Phases $results -Teardowns $teardownResults -LeftBehind $leftBehind -Coverage $coverage `
+    -Phases $results -Teardowns $teardownResults -Assertions $teardownAssertions `
+    -LeftBehind $leftBehind -Coverage $coverage `
     -LivePhases $live -LogDirectory $LogDirectory -DryRun:$DryRun
 Write-Host "  Report:  $ReportPath" -ForegroundColor Gray
 if (-not $DryRun) { Write-Host "  Results: $ResultsPath" -ForegroundColor Gray }
@@ -752,6 +773,8 @@ Write-Host ''
     ResultsPath          = $ResultsPath
     Teardowns            = $teardownResults
     TeardownFailedCount  = @($teardownResults | Where-Object { $_.Status -eq 'Failed' }).Count
+    Assertions           = $teardownAssertions
+    AssertionFailedCount = @($teardownAssertions | Where-Object { -not $_.Ok }).Count
     LeftBehind           = $leftBehind
 }
 

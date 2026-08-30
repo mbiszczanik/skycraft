@@ -445,6 +445,13 @@ function Write-LabCycleReport {
     .PARAMETER Teardowns
         Teardown results.
 
+    .PARAMETER Assertions
+        What the teardown checked afterwards - that the vaults are gone, that no AzureBackupRG
+        survived, that the lab resource groups are gone. Rendered as its own section rather than
+        folded into Teardown, because they answer different questions: Teardown says every delete
+        reported success, and this says the subscription agrees. A teardown where the first is
+        clean and the second is not is the exact failure worth a section of its own.
+
     .PARAMETER LeftBehind
         Documented residue.
 
@@ -473,6 +480,7 @@ function Write-LabCycleReport {
         [Parameter()][string]$ManifestPath,
         [Parameter()][AllowEmptyCollection()]$Phases = @(),
         [Parameter()][AllowEmptyCollection()]$Teardowns = @(),
+        [Parameter()][AllowEmptyCollection()]$Assertions = @(),
         [Parameter()][AllowEmptyCollection()]$LeftBehind = @(),
         [Parameter()]$Coverage,
         [Parameter()][AllowEmptyCollection()]$LivePhases = @(),
@@ -595,8 +603,36 @@ function Write-LabCycleReport {
         $lines.Add('Counted separately from the phases above and deliberately absent from the exit code: a lab that deployed cleanly and could not be removed is not a failed deployment.')
         $lines.Add('')
         foreach ($teardown in $Teardowns) {
-            $detail = if ($teardown.ExitCode) { " (exit $($teardown.ExitCode))" } else { '' }
-            $lines.Add("- $($teardown.Lab) - $($teardown.Status)$detail")
+            # 124 is the runner's timeout sentinel, and a bare 'exit 124' tells a reader nothing.
+            # 'The delete is still running and we stopped waiting' and 'the delete failed' send
+            # someone to different places - the first to a longer TimeoutMs, the second to Azure.
+            $detail = if ($teardown.ExitCode -eq 124) { ' (timed out; the delete was still running when the limit killed it)' }
+                      elseif ($teardown.ExitCode)     { " (exit $($teardown.ExitCode))" }
+                      else                            { '' }
+            $target = if ($teardown.Target) { "$($teardown.Lab): $($teardown.Target)" } else { $teardown.Lab }
+            $lines.Add("- $target - $($teardown.Status)$detail")
+        }
+    }
+    $lines.Add('')
+
+    # Its own section. Teardown above says every delete reported success; this says the
+    # subscription agrees. Issue #73 is explicit that a surviving vault is a failure rather than
+    # expected residue, so this is the section that carries the evidence for the claim.
+    $lines.Add('## Teardown assertions')
+    $lines.Add('')
+    if (@($Assertions).Count -eq 0) { $lines.Add('Not checked. A partial or skipped teardown asserts nothing, because a subscription that still holds the other labs on purpose is not one to assert empty.') }
+    else {
+        $failedAssertions = @($Assertions | Where-Object { -not $_.Ok })
+        if ($failedAssertions.Count -eq 0) {
+            $lines.Add("All $(@($Assertions).Count) passed: the subscription is as empty as the teardown claims.")
+        }
+        else {
+            $lines.Add("**$($failedAssertions.Count) of $(@($Assertions).Count) FAILED.** Every delete above may have reported success; the subscription disagrees. This is not residue, and it is not expected.")
+        }
+        $lines.Add('')
+        foreach ($assertion in $Assertions) {
+            $mark = if ($assertion.Ok) { 'PASS' } else { '**FAIL**' }
+            $lines.Add("- $mark - $($assertion.Name): $($assertion.Detail)")
         }
     }
     $lines.Add('')

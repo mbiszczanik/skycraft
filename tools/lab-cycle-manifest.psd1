@@ -56,10 +56,35 @@
       DECLARED - follows each lab's stated prerequisites, with no gate read to confirm it.
       Everything else. Reasonable, and re-tested by every live run.
 
-    TIMEOUTS ARE ESTIMATES, not measurements: 20 minutes by default, 40 for the VM phases, 30 for
-    containers and module 5. A phase killed by one is far more likely to mean the estimate was low
-    than that the lab hung, which is why a timeout gets its own status rather than being reported
-    as an ordinary failure.
+    TIMEOUTS ARE MEASURED NOW, not estimated. The full cycle ran green on the MPN subscription on
+    2026-08-30 in 89 minutes wall clock, and these are the per-phase durations it recorded, deploy
+    through validate:
+
+        1.2  1.3m    1.3  1.2m    2.1  2.9m    2.2  1.6m
+        2.3  2.3m    3.1  1.4m    3.2  2.2m    3.3  6.4m
+        3.4  2.7m    4.1  1.8m    4.2  1.2m    4.3  0.8m
+        4.4  0.9m    5.1  3.4m    5.2 12.5m    5.3  4.1m
+
+    The limits below are deliberately left far above those numbers rather than trimmed to them. A
+    timeout is a backstop against a hung phase, not a performance budget: a run that hits regional
+    capacity and retries with backoff legitimately takes several times its measured duration, and a
+    limit set at the measured value would turn every slow afternoon into a killed phase. A phase
+    killed by one of these is far more likely to mean the lab hung than that the estimate was low -
+    which is the opposite of what this note used to say - and it still gets its own status rather
+    than being reported as an ordinary failure.
+
+    THE ONE LIMIT THAT WAS ACTUALLY TOO LOW was lab 3.3's TEARDOWN, and it is the reason this note
+    is no longer speculative. Measured on 2026-08-30: the Container App deleted immediately and
+    then 'Removing Container Apps Environment: dev-skycraft-swc-cae-02' was still running when the
+    20-minute limit killed it - the one teardown failure in an otherwise clean run. Nothing was
+    left behind, because the resource group delete that follows swept the environment up anyway,
+    but a teardown that reports a failure on every clean run is exactly what teaches an operator to
+    discount failures.
+
+    The real duration was then measured in isolation rather than guessed at: lab 3.3 deployed alone
+    (7.0 minutes) and torn down alone took 24.3 MINUTES end to end, and completed cleanly - the
+    Container Apps Environment is simply slow to delete. Its limit is 45 minutes, which is that
+    measurement with the same headroom every other limit here carries.
 #>
 
 @{
@@ -399,7 +424,11 @@
         @{ Lab = 'module-4-storage/4.2-blob-storage';                       Invocations = @(@{ Force = $true }); TimeoutMs = 1200000 }
         @{ Lab = 'module-4-storage/4.1-storage-accounts';                   Invocations = @(@{ Environment = 'all'; Force = $true }); TimeoutMs = 1200000 }
         @{ Lab = 'module-3-compute/3.4-app-service';                        Invocations = @(@{ Force = $true }); TimeoutMs = 1200000 }
-        @{ Lab = 'module-3-compute/3.3-containers';                         Invocations = @(@{ Force = $true }); TimeoutMs = 1200000 }
+        # 45 minutes, and the one limit in this file set from a measurement rather than from
+        # caution. Measured 2026-08-30: this teardown takes 24.3 minutes, all of it the Container
+        # Apps Environment, and the previous 20-minute limit killed it mid-delete. See the TIMEOUTS
+        # note at the top.
+        @{ Lab = 'module-3-compute/3.3-containers';                         Invocations = @(@{ Force = $true }); TimeoutMs = 2700000 }
         @{ Lab = 'module-3-compute/3.2-virtual-machines';                   Invocations = @(@{ Environment = 'dev'; Force = $true }); TimeoutMs = 1800000
            LeavesBehind = @(@{ What = "Key Vault '<env>-skycraft-swc-kv', if an earlier run created one"; Why = 'removal requires -IncludeKeyVault, which this cycle deliberately does not pass, so the vault is left untouched rather than soft-deleted. This cycle never creates one: it deploys with -EncryptionStrategy at its default of None.' }) }
         @{ Lab = 'module-3-compute/3.1-infrastructure-as-code';             Invocations = @(@{ Environment = 'all'; Force = $true }); TimeoutMs = 1200000 }

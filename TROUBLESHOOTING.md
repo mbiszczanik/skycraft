@@ -160,6 +160,26 @@ provisioning state `Succeeded`.
 `Invoke-LabCycle.ps1`'s preflight therefore reports this as a **warning and continues**. Treating it
 as fatal would mean every successful run blocked the next one from starting.
 
+### Lab 3.3's teardown reports `exit 124`
+
+**`124` is the orchestrator's timeout sentinel**, not an error from the lab. It means the delete was
+still running when the limit killed it — which sends you somewhere different from a delete that
+actually failed. The report says so in words rather than printing the bare number.
+
+**Cause**: deleting a **Container Apps Environment** is slow. Measured on 2026-08-30, lab 3.3's
+teardown takes **24.3 minutes** end to end, and almost all of that is the environment. The original
+20-minute limit killed it mid-delete; the manifest now allows 45 minutes.
+
+Nothing is lost when this happens — the resource group delete that follows sweeps the environment
+up, and the final assertions still pass. It is worth fixing anyway: a teardown that reports a
+failure on every otherwise-clean run teaches its operator to discount failures, which is the one
+habit this orchestrator exists to prevent.
+
+If you see it again, raise `TimeoutMs` on that lab's entry in `tools/lab-cycle-manifest.psd1`. Do
+not lower the others to match your fastest run — a limit is a backstop against a hung phase, not a
+performance budget, and a phase retrying through regional capacity legitimately takes several times
+its measured duration.
+
 ### The cycle reported success and nothing was deployed
 
 **Cause, historically**: a lab script that printed a failure and exited 0. Both known instances are
