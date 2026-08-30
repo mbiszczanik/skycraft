@@ -52,6 +52,8 @@ temp/
 scratch/
 student-submissions/
 test-results/
+# Invoke-Pester -CI writes this at the repository root.
+testResults.xml
 .patches/
 
 # ===================================

@@ -123,6 +123,28 @@ $gadgetName = "$Environment-skycraft-swc-gadget"
     }
 }
 
+Describe 'Resource audit - the known set stays a set of resource names' {
+
+    BeforeAll {
+        $script:RealKnown = @(Get-KnownResourceName -RepoRoot $script:RealRepoRoot)
+    }
+
+    # The audit prints the size of this set, so the number has to mean something.
+    # Description strings and resource-ID templates also mention the project and
+    # would otherwise be expanded and counted alongside the real names - no Azure
+    # resource can be called 'Development team for SkyCraft deployment'.
+    It 'holds nothing that Azure could not name a resource' {
+        $implausible = @($script:RealKnown | Where-Object { $_ -match '[\s/\\:]' -or $_.Length -gt 90 })
+        $implausible | Should -BeNullOrEmpty
+    }
+
+    It 'still holds the names the labs really deploy' {
+        foreach ($name in @('prod-skycraft-swc-auth-vm', 'devskycraftswcsa', 'NetworkWatcher_swedencentral')) {
+            $script:RealKnown | Should -Contain $name
+        }
+    }
+}
+
 Describe 'Resource audit - regression guards for issue #116' {
 
     BeforeAll {
@@ -166,6 +188,19 @@ Describe 'Resource audit - regression guards for issue #116' {
 
     It 'recognises the container registry named by a bicepparam default' {
         Test-LabResourceKnown -Name 'devskycraftswcacr01' -KnownName $script:RealKnown | Should -BeTrue
+    }
+
+    # Found by the first live run against the subscription. Lab 5.3 re-declares
+    # the Network Watcher and tags it, so it comes back tagged Project=SkyCraft -
+    # but its name carries neither the project token nor the dashed prefix, being
+    # composed as 'NetworkWatcher_${parLocation}' over the location domain the
+    # template declares in @allowed. It was the audit's only false positive.
+    It 'recognises the Network Watcher Lab 5.3 names after its location' {
+        Test-LabResourceKnown -Name 'NetworkWatcher_swedencentral' -KnownName $script:RealKnown | Should -BeTrue
+    }
+
+    It 'recognises the resource group the live subscription still holds' {
+        Test-LabResourceKnown -Name 'dev-skycraft-swc-rg' -KnownName $script:RealKnown | Should -BeTrue
     }
 
     # The resource that actually drifted. Its suffix - traffic-vm - is produced

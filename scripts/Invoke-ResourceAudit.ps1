@@ -107,28 +107,77 @@ function Get-KnownResourceName {
     $singleQuoted = [regex]"'([^'\r\n]{3,160})'"
     $doubleQuoted = [regex]'"([^"\r\n]{3,160})"'
 
-    # Pass 1 - string literals that name something in this project.
+    # A name declaration need not mention the project: Lab 5.3 names the Network
+    # Watcher 'NetworkWatcher_${parLocation}'. Matching the declaration itself
+    # catches those; matching the project token catches the rest.
+    $nameDeclaration = [regex]@'
+(?:var\s+\w*Name|\$\w*Name\w*)\s*=\s*['"]([^'"\r\n]{3,160})['"]
+'@
+
+    # The values a placeholder can take. Every domain a template constrains with
+    # @allowed is one the audit can expand over - environments, locations, and
+    # the short codes the sources declare outright.
+    $domain = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($environment in $EnvironmentPrefix) { [void]$domain.Add($environment) }
+    foreach ($text in $texts) {
+        foreach ($allowed in [regex]::Matches($text, '@allowed\(\s*\[([^\]]*)\]', 'IgnoreCase')) {
+            foreach ($value in $singleQuoted.Matches($allowed.Groups[1].Value)) {
+                [void]$domain.Add($value.Groups[1].Value)
+            }
+        }
+        foreach ($match in [regex]::Matches($text, 'LocationShortCode\s*=\s*[''"](\w+)[''"]', 'IgnoreCase')) {
+            [void]$domain.Add($match.Groups[1].Value)
+        }
+    }
+
+    # Pass 1 - literals that name something, expanded over the domain.
+    # Descriptions and resource-ID templates mention the project too, and would be
+    # expanded and counted alongside the real names; Azure cannot name a resource
+    # with whitespace or a path separator, and 90 is the longest name it accepts.
+    $isPlausibleName = {
+        param([string]$Value)
+        $Value -notmatch '[\s/\\:]' -and $Value.Length -le 90
+    }
+
+    $candidate = [System.Collections.Generic.List[string]]::new()
     foreach ($text in $texts) {
         foreach ($pattern in @($singleQuoted, $doubleQuoted)) {
             foreach ($match in $pattern.Matches($text)) {
-                $value = $match.Groups[1].Value
-                if ($value -notmatch $ProjectToken) { continue }
-
-                # Every interpolation form collapses to one placeholder.
-                $normalised = $value -replace '\$\{[^}]+\}', '<X>' -replace '\$\([^)]*\)', '<X>' -replace '\$\w+', '<X>'
-
-                if ($normalised -notmatch '<X>') {
-                    [void]$known.Add($normalised)
-                    continue
-                }
-
-                # A leading environment placeholder is the only one with a known
-                # domain; anything still ambiguous after expanding it is dropped.
-                foreach ($environment in $EnvironmentPrefix) {
-                    $candidate = $normalised -replace '^<X>', $environment
-                    if ($candidate -notmatch '<X>') { [void]$known.Add($candidate) }
-                }
+                if ($match.Groups[1].Value -match $ProjectToken -and
+                    (& $isPlausibleName $match.Groups[1].Value)) { $candidate.Add($match.Groups[1].Value) }
             }
+        }
+        foreach ($match in $nameDeclaration.Matches($text)) {
+            if (& $isPlausibleName $match.Groups[1].Value) { $candidate.Add($match.Groups[1].Value) }
+        }
+    }
+
+    foreach ($value in $candidate) {
+        # Every interpolation form collapses to one placeholder.
+        $normalised = $value -replace '\$\{[^}]+\}', '<X>' -replace '\$\([^)]*\)', '<X>' -replace '\$\w+', '<X>'
+
+        if ($normalised -notmatch '<X>') {
+            [void]$known.Add($normalised)
+            continue
+        }
+
+        # A template with no literal run of its own - a bare '${parEnvironment}' -
+        # would expand to the domain values themselves and match far too much.
+        if (($normalised -replace '<X>', '') -notmatch '[A-Za-z0-9]{3}') { continue }
+
+        $placeholder = $normalised.Split('<X>').Count - 1
+        if ($placeholder -gt 2) { continue }
+
+        $pending = @($normalised)
+        for ($round = 0; $round -lt $placeholder; $round++) {
+            $next = [System.Collections.Generic.List[string]]::new()
+            foreach ($partial in $pending) {
+                foreach ($value in $domain) { $next.Add(([regex]'<X>').Replace($partial, $value, 1)) }
+            }
+            $pending = $next
+        }
+        foreach ($expanded in $pending) {
+            if ($expanded -notmatch '<X>') { [void]$known.Add($expanded) }
         }
     }
 
