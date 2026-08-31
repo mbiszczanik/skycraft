@@ -19,7 +19,7 @@
 $RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 # Repo-root scripts/ is included alongside the per-lab ones (issue #116).
 $PsScripts  = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.ps1' |
-              Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^(module-\d.*/)?scripts/' }
+              Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^(module-\d.*/)?(scripts|tools)/' }
 
 $ScriptCases = $PsScripts | ForEach-Object {
     @{ file = $_.FullName.Substring($RepoRoot.Length + 1); path = $_.FullName }

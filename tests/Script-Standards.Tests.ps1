@@ -29,7 +29,7 @@ $RepoRoot  = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 # outside the module tree (scripts/Invoke-ResourceAudit.ps1) is held to the same
 # standards as tooling inside it (issue #116).
 $AllScripts = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.ps1' |
-              Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^(module-\d.*/)?scripts/' }
+              Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^(module-\d.*/)?(scripts|tools)/' }
 
 $ScriptCases = $AllScripts | ForEach-Object {
     @{ file = $_.FullName.Substring($RepoRoot.Length + 1); path = $_.FullName }

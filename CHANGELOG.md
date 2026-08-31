@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Lab 5.3 `Remove-LabResource.ps1` states each of its cleanup decisions as a named function (`Get-VirtualMachineEndpointId`, `ConvertTo-VmTarget`, `Test-LabOwnedExtension`, `Select-TrafficAnalyticsResource`) instead of inlining them among the Azure calls, so the choices can be tested without Azure. The functions stay in the script rather than moving to a shared module, because every lab folder must remain runnable and readable on its own (`docs/powershell-standards.md` §7.3). Behaviour is unchanged - verified by running the script against the live subscription before and after.
-- `tests/Script-Standards.Tests.ps1`, `tests/Cbh-Coverage.Tests.ps1` and `tests/Exit-Code-Propagation.Tests.ps1` now scan the repo-root `scripts/` directory as well as `module-*/**/scripts/` (#116). All three matched only the module tree, so tooling added outside it was held to none of the standards they enforce.
+- `tests/Script-Standards.Tests.ps1`, `tests/Cbh-Coverage.Tests.ps1` and `tests/Exit-Code-Propagation.Tests.ps1` now scan the repo-root `scripts/` and `tools/` directories as well as `module-*/**/scripts/` (#116). All three matched only the module tree, so tooling added outside it - this audit and `tools/Invoke-DryRun.ps1` alike - was held to none of the standards they enforce. Both pass the widened gates unchanged.
 
 ### Fixed
 
