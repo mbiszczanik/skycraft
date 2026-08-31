@@ -27,7 +27,10 @@
     the composed ones over the domains the templates constrain with @allowed -
     environments and locations both. A resource is drift when its name is not in
     that set; the discriminator is the suffix, which for a real lab resource is
-    always one some template emits.
+    always one some template emits. A name that references another declared
+    name is resolved through it before anything is collapsed, and a child
+    resource - 'site/slot', 'zone/link' - is accounted for only when every
+    segment of its name is.
 
     Test fixtures under tests/ are not deployment sources and are not read.
 
@@ -57,7 +60,7 @@
     Project: SkyCraft
     Issue: 116 - nothing detects a lab resource that no template deploys and no teardown deletes
     Author: Marcin Biszczanik
-    Version: 1.1.0
+    Version: 1.2.0
 #>
 
 #Requires -Version 7.0
@@ -116,11 +119,15 @@ function Get-KnownResourceName {
     $doubleQuoted = [regex]'"([^"\r\n]{3,160})"'
 
     # A name declaration need not mention the project: Lab 5.3 names the Network
-    # Watcher 'NetworkWatcher_${parLocation}'. Matching the declaration itself
-    # catches those; matching the project token catches the rest.
-    $nameDeclaration = [regex]@'
-(?:var\s+\w*Name|\$\w*Name\w*)\s*=\s*['"]([^'"\r\n]{3,160})['"]
-'@
+    # Watcher 'NetworkWatcher_${parLocation}', Lab 3.1 names its NSGs by passing
+    # 'auth-nsg' straight into a module argument without declaring a variable at
+    # all, and a child resource is named by a bare 'name:' on the nested block -
+    # 'staging' for the slot, 'dev-vnet-link' for the DNS link. Matching the
+    # declaration itself catches those, whatever its casing and whether it is an
+    # assignment or an argument; matching the project token catches the rest.
+    $nameDeclaration = [regex]::new(
+        '(?:(?:var\s+)?\w*name|\$\w*name\w*)\s*[=:]\s*[''"]([^''"\r\n]{3,160})[''"]',
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
 
     # The values a placeholder can take. Every domain a template constrains with
     # @allowed is one the audit can expand over - environments, locations, and
@@ -147,6 +154,62 @@ function Get-KnownResourceName {
         $Value -notmatch '[\s/\\:]' -and $Value.Length -le 90
     }
 
+    # A composed name can name another composed name: Lab 3.4 calls its autoscale
+    # setting '${varAppServicePlanName}-autoscale', and that variable is itself
+    # '${varNamePrefix}-asp'. Collapsing the reference straight to a placeholder
+    # throws away the two literal runs hiding behind it and the expansion misses
+    # the real name, so references are resolved against their own declarations
+    # first and only what is left over becomes a placeholder. Only 'var' and
+    # script-body assignments are read: a bicep param default would pin
+    # parEnvironment to 'dev' and cost the audit every other environment.
+    $definition = @{}
+    $declaration = [regex]::new(
+        '(?:^|\n)\s*var\s+(\w+)\s*=\s*[''"]([^''"\r\n]{1,160})[''"]' + '|(?:^|\n)\s*\$(\w+)\s*=\s*[''"]([^''"\r\n]{1,160})[''"]')
+    foreach ($text in $texts) {
+        foreach ($match in $declaration.Matches($text)) {
+            $identifier = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[3].Value }
+            $value = if ($match.Groups[1].Success) { $match.Groups[2].Value } else { $match.Groups[4].Value }
+            if (-not $definition.ContainsKey($identifier)) {
+                $definition[$identifier] = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            }
+            [void]$definition[$identifier].Add($value)
+        }
+    }
+
+    # Substitutes one reference per round, over every value the identifier is
+    # declared with. The round cap breaks a self-referential declaration; the
+    # width cap gives up on a name too branchy to be worth expanding, and the
+    # unresolved original is still expanded over the domain afterwards.
+    $reference = [regex]'\$\{(\w+)}|\$(\w+)'
+    $resolveReference = {
+        param([string]$Value)
+
+        $current = @($Value)
+        for ($round = 0; $round -lt 6; $round++) {
+            $next = [System.Collections.Generic.List[string]]::new()
+            $changed = $false
+            foreach ($item in $current) {
+                $hit = $reference.Match($item)
+                $identifier = if (-not $hit.Success) { $null }
+                    elseif ($hit.Groups[1].Success) { $hit.Groups[1].Value }
+                    else { $hit.Groups[2].Value }
+
+                if ($identifier -and $definition.ContainsKey($identifier)) {
+                    $changed = $true
+                    foreach ($replacement in $definition[$identifier]) {
+                        $next.Add($item.Remove($hit.Index, $hit.Length).Insert($hit.Index, $replacement))
+                    }
+                }
+                else { $next.Add($item) }
+            }
+            if (-not $changed) { break }
+            if ($next.Count -gt 64) { return @($Value) }
+            $current = @($next)
+        }
+
+        return @($current)
+    }
+
     $candidate = [System.Collections.Generic.List[string]]::new()
     foreach ($text in $texts) {
         foreach ($pattern in @($singleQuoted, $doubleQuoted)) {
@@ -160,8 +223,15 @@ function Get-KnownResourceName {
         }
     }
 
+    $resolved = [System.Collections.Generic.List[string]]::new()
     foreach ($value in $candidate) {
-        # Every interpolation form collapses to one placeholder.
+        foreach ($item in (& $resolveReference $value)) {
+            if (& $isPlausibleName $item) { $resolved.Add($item) }
+        }
+    }
+
+    foreach ($value in $resolved) {
+        # Every interpolation form that survived resolution collapses to one placeholder.
         $normalised = $value -replace '\$\{[^}]+\}', '<X>' -replace '\$\([^)]*\)', '<X>' -replace '\$\w+', '<X>'
 
         if ($normalised -notmatch '<X>') {
@@ -244,7 +314,15 @@ function Test-LabResourceKnown {
         [string[]]$KnownName
     )
 
-    return [bool]($KnownName -contains $Name)
+    # ARM returns a child resource under its parent's name - 'dev-skycraft-swc-app01/staging',
+    # 'skycraft.internal/dev-vnet-link' - and neither half is a name on its own. Each
+    # segment is tested separately, and all of them have to be accounted for: a drifted
+    # slot under a legitimate site is still drift.
+    foreach ($segment in $Name.Split('/')) {
+        if ($KnownName -notcontains $segment) { return $false }
+    }
+
+    return $true
 }
 
 function Select-UnreferencedResource {

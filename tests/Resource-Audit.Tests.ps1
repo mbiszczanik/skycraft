@@ -249,6 +249,79 @@ Describe 'Resource audit - regression guards for issue #116' {
         Test-LabResourceKnown -Name 'dev-skycraft-swc-rg' -KnownName $script:RealKnown | Should -BeTrue
     }
 
+    # Found by the live cycle deploy. Lab 3.1 names its NSGs by passing a literal
+    # straight into a module argument - parNsgName: 'auth-nsg' - rather than
+    # declaring a variable for it. Those two names carry no project token and no
+    # environment prefix at all, so nothing else in the audit could reach them,
+    # and both were flagged as drift against a subscription that had just
+    # deployed them. Note lab 2.2 names its own NSGs the prefixed way
+    # ('${spoke.prefix}-skycraft-swc-auth-nsg'), so the repository does both.
+    It 'recognises <_>, which Lab 3.1 passes as a bare module argument' -ForEach @(
+        'auth-nsg'
+        'world-nsg'
+    ) {
+        Test-LabResourceKnown -Name $_ -KnownName $script:RealKnown | Should -BeTrue
+    }
+
+    It 'recognises the prefixed NSG names Lab 2.2 composes' {
+        foreach ($name in @('dev-skycraft-swc-auth-nsg', 'prod-skycraft-swc-world-nsg')) {
+            Test-LabResourceKnown -Name $name -KnownName $script:RealKnown | Should -BeTrue
+        }
+    }
+
+    # Found by the live cycle deploy. ARM returns a child resource under its
+    # parent's name, and neither half is a resource name in its own right:
+    # 'dev-skycraft-swc-app01/staging' is the slot Lab 3.4 declares as a bare
+    # 'name: staging' on a nested block, and 'skycraft.internal/dev-vnet-link' is
+    # one of the three links Lab 2.3 hangs off the private DNS zone. All five were
+    # flagged as drift against a subscription that had just deployed them.
+    It 'recognises the child resource <_>' -ForEach @(
+        'dev-skycraft-swc-app01/staging'
+        'prod-skycraft-swc-app01/staging'
+        'skycraft.internal/dev-vnet-link'
+        'skycraft.internal/prod-vnet-link'
+        'skycraft.internal/hub-vnet-link'
+    ) {
+        Test-LabResourceKnown -Name $_ -KnownName $script:RealKnown | Should -BeTrue
+    }
+
+    # Splitting on the separator must not become a free pass. A child the
+    # repository does not name is still drift under a legitimate parent, and a
+    # legitimate child is still drift under a parent the repository never names.
+    It 'does not recognise <_>, whose halves do not both belong' -ForEach @(
+        'dev-skycraft-swc-app01/nosuchslot'
+        'nosuchzone.internal/dev-vnet-link'
+    ) {
+        Test-LabResourceKnown -Name $_ -KnownName $script:RealKnown | Should -BeFalse
+    }
+
+    # Found by the live cycle deploy. Lab 3.4 names its autoscale setting
+    # '${varAppServicePlanName}-autoscale', and that variable is itself
+    # '${varNamePrefix}-asp' - two hops from anything literal. Collapsing the
+    # reference straight to a placeholder throws away both literal runs hiding
+    # behind it, so the expansion produced 'dev-autoscale' and never the real name.
+    It 'recognises <_>, named through a variable that names another' -ForEach @(
+        'dev-skycraft-swc-asp-autoscale'
+        'prod-skycraft-swc-asp-autoscale'
+    ) {
+        Test-LabResourceKnown -Name $_ -KnownName $script:RealKnown | Should -BeTrue
+    }
+
+    # Lab 3.3 spells every container name for dev and for nothing else -
+    # parAcrName defaults to 'devskycraftswcacr01', parCaeName to
+    # 'dev-skycraft-swc-cae-02' - and the repository carries no prod or platform
+    # value for any of them. A prod-named registry sitting in a lab resource group
+    # is therefore a resource this repository cannot have deployed, and the audit
+    # is right to say so; the live run found eight such container resources. This
+    # guard characterises the lab as it stands - if Lab 3.3 ever learns prod and
+    # platform names, this guard should go with it.
+    It 'does not recognise <_>, a container name spelled only for dev' -ForEach @(
+        'prodskycraftswcacr01'
+        'platform-skycraft-swc-cae-02'
+    ) {
+        Test-LabResourceKnown -Name $_ -KnownName $script:RealKnown | Should -BeFalse
+    }
+
     # The resource that actually drifted. Its suffix - traffic-vm - is produced
     # by no template in the repository, which is what separates it from the above.
     It 'does not recognise prod-skycraft-swc-traffic-vm' {
