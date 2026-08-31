@@ -66,4 +66,35 @@ Describe '.gitignore - required ignore patterns' {
             $LASTEXITCODE | Should -Be 0
         } finally { Pop-Location }
     }
+
+    It 'ignores every lab cycle run artefact' {
+        # These carry Az error streams and the deployment outputs each lab script echoes, which can
+        # include a connection string or an access key, and nothing in them is redacted.
+        $artefacts = @(
+            'tools/lab-cycle-logs/2.1.deploy.log'
+            'tools/lab-cycle-logs/lab-cycle-results.jsonl'
+            'tools/lab-cycle-report.md'
+            'tools/.lab-cycle-lock.json'
+            'tools/.lab-cycle-state.json'
+        )
+        Push-Location $script:RepoRoot
+        try {
+            foreach ($artefact in $artefacts) {
+                git check-ignore -q $artefact
+                $LASTEXITCODE | Should -Be 0 -Because "$artefact is a run artefact and must never reach history"
+            }
+        } finally { Pop-Location }
+    }
+
+    It 'does not ignore the orchestrator itself' {
+        # The other half of the rule. A pattern broad enough to swallow tools/*.ps1 would leave the
+        # orchestrator untracked, and the mistake would only surface on a fresh clone.
+        Push-Location $script:RepoRoot
+        try {
+            foreach ($tracked in 'tools/Invoke-LabCycle.ps1', 'tools/Remove-LabCycle.ps1', 'tools/lab-cycle-manifest.psd1') {
+                git check-ignore -q $tracked
+                $LASTEXITCODE | Should -Be 1 -Because "$tracked is source and must stay tracked"
+            }
+        } finally { Pop-Location }
+    }
 }
