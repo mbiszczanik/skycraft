@@ -28,6 +28,7 @@
 ### VM Backup Policy
 
 - [x] Policy name: `SkyCraft-Daily-Prod`
+- [x] Policy sub-type: **Enhanced** (required for Trusted Launch VMs; cannot be changed later)
 - [x] Backup frequency: **Daily**
 - [x] Backup time: **02:00 AM UTC**
 - [x] Instant Restore retention: **2 days**

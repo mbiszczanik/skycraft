@@ -142,11 +142,15 @@ The Backup Vault uses `avm/res/data-protection/backup-vault:0.13.2` the same way
 1. Inside the vault, go to **Manage** → **Backup policies**.
 2. Click **+ Add** → **Azure Virtual Machine**.
 3. Policy Name: `SkyCraft-Daily-Prod`.
-4. Frequency: **Daily** at **02:00 AM**.
-5. Timezone: **(UTC) Coordinated Universal Time**.
-6. Instant Restore retention: **2 days**.
-7. Retention of daily backup point: **30 days**.
-8. Click **Create**.
+4. Policy sub-type: **Enhanced**. Azure defaults VM deployments to Trusted Launch, and a
+   Standard policy cannot protect a Trusted Launch VM — it fails with
+   `UserErrorThisVMBackupIsSupportedUsingEnhancedPolicy`. The sub-type cannot be changed
+   after a VM is protected, so pick it now.
+5. Frequency: **Daily** at **02:00 AM**.
+6. Timezone: **(UTC) Coordinated Universal Time**.
+7. Instant Restore retention: **2 days** (Enhanced defaults to 7 — snapshots are billed).
+8. Retention of daily backup point: **30 days**.
+9. Click **Create**.
 
 ---
 

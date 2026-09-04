@@ -52,6 +52,8 @@ temp/
 scratch/
 student-submissions/
 test-results/
+# Invoke-Pester -CI writes this at the repository root.
+testResults.xml
 .patches/
 
 # ===================================
@@ -66,3 +68,18 @@ CLAUDE.local.md
 # NOTE: this matches *.json only; Bicep parameter files (*.bicepparam) are
 # intentionally NOT ignored and are tracked in version control.
 **/bicep/*.json
+
+# ===================================
+# Lab cycle orchestrator run artefacts (tools/Invoke-LabCycle.ps1)
+# ===================================
+# TREAT A TRANSCRIPT AS A SECRET. These capture whatever a lab script printed,
+# which includes Az error streams and the deployment parameter values each script
+# echoes before deploying; a deployment output can carry a connection string or an
+# access key. Nothing is redacted - the run needs that detail to be diagnosable -
+# so none of it may reach history. tests/Gitignore.Tests.ps1 asserts this through
+# 'git check-ignore' rather than by reading the patterns, so it catches real
+# matching behaviour.
+tools/lab-cycle-logs/
+tools/lab-cycle-report.md
+tools/.lab-cycle-lock.json
+tools/.lab-cycle-state.json
