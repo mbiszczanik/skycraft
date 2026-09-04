@@ -37,13 +37,14 @@ By completing this lab, you will:
 
 ## 🏗️ Architecture Overview
 
-[ARCHITECTURE_DESCRIPTION — 1-2 sentences describing what the diagram shows]: ```mermaid
+[ARCHITECTURE_DESCRIPTION — 1-2 sentences describing what the diagram shows]:
 
+```mermaid
 graph TB
-subgraph "[RESOURCE_GROUP_NAME_1 — e.g. platform-skycraft-swc-rg]"
-style [STYLE_ID_1] fill:#e1f5ff,stroke:#0078d4,stroke-width:3px
-[RESOURCE_1]"[RESOURCE_DISPLAY_NAME]<br/>[RESOURCE_DETAILS]"]
-end
+    subgraph "[RESOURCE_GROUP_NAME_1 — e.g. platform-skycraft-swc-rg]"
+        style [STYLE_ID_1] fill:#e1f5ff,stroke:#0078d4,stroke-width:3px
+        [RESOURCE_1]["[RESOURCE_DISPLAY_NAME]<br/>[RESOURCE_DETAILS]"]
+    end
 
     subgraph "[RESOURCE_GROUP_NAME_2 — e.g. dev-skycraft-swc-rg]"
         style [STYLE_ID_2] fill:#fff4e1,stroke:#f39c12,stroke-width:2px
@@ -57,8 +58,7 @@ end
 
     [RESOURCE_1] -->|"[RELATIONSHIP_LABEL]"| [RESOURCE_2]
     [RESOURCE_2] -->|"[RELATIONSHIP_LABEL]"| [RESOURCE_3]
-
-````
+```
 
 <!-- NOTE: Color scheme MUST follow standard:
   - Platform/Hub:   fill:#e1f5ff, stroke:#0078d4, stroke-width:3px
@@ -70,8 +70,6 @@ end
 
 <!-- OPTIONAL: Additional diagrams (e.g. flowcharts for processes, tier transitions) -->
 
-
-
 ---
 
 ## 📋 Real-World Scenario
@@ -80,9 +78,9 @@ end
 
 | [COMPARISON_COLUMN_1 — e.g. Environment/Data Type] | [COMPARISON_COLUMN_2 — e.g. Use Case/Access Pattern] | [COMPARISON_COLUMN_3 — e.g. Requirement] | [COMPARISON_COLUMN_4 — e.g. Priority] |
 | --- | --- | --- | --- |
-| [ROW_1_VALUES] |
-| [ROW_2_VALUES] |
-| [ROW_3_VALUES] |
+| [ROW_1_VALUE_1] | [ROW_1_VALUE_2] | [ROW_1_VALUE_3] | [ROW_1_VALUE_4] |
+| [ROW_2_VALUE_1] | [ROW_2_VALUE_2] | [ROW_2_VALUE_3] | [ROW_2_VALUE_4] |
+| [ROW_3_VALUE_1] | [ROW_3_VALUE_2] | [ROW_3_VALUE_3] | [ROW_3_VALUE_4] |
 
 <!-- OPTIONAL: comparison table above — use when lab covers multiple environments or data categories -->
 
@@ -154,7 +152,7 @@ Before starting this lab:
 
 | [COMPARISON_HEADER_1] | [COMPARISON_HEADER_2] | [COMPARISON_HEADER_3] | [COMPARISON_HEADER_4 — e.g. SkyCraft Use Case] |
 | --------------------- | --------------------- | --------------------- | ---------------------------------------------- |
-| [ROW_VALUES]          |
+| [ROW_VALUE_1]          | [ROW_VALUE_2]          | [ROW_VALUE_3]          | [ROW_VALUE_4]                                   |
 
 <!-- OPTIONAL: Key characteristics bullet list -->
 
@@ -170,7 +168,7 @@ Before starting this lab:
 
 | [DECISION_COLUMN_1 — e.g. Environment] | [DECISION_COLUMN_2 — e.g. Choice] | [DECISION_COLUMN_3 — e.g. Justification] |
 | -------------------------------------- | --------------------------------- | ---------------------------------------- |
-| [ROW_VALUES]                           |
+| [ROW_VALUE_1]                          | [ROW_VALUE_2]                     | [ROW_VALUE_3]                            |
 
 > **SkyCraft Choice**: We chose **[OPTION]** because [JUSTIFICATION — relate to cost, performance, or business requirement].
 
