@@ -267,7 +267,7 @@ A standard SAS token is like a signed check—once issued, it cannot be stopped 
 
 ## 📌 Module Navigation
 
-[← Lab 4.3: Azure Files](../4.3-azure-files/lab-guide-4.3.md) | [Next Lab: 5.1 Monitoring →](../../module-5-monitor/5.1-monitor-resources/lab-guide-5.1.md)
+[← Lab 4.3: Azure Files](../4.3-azure-files/lab-guide-4.3.md) | [Next Lab: 5.1 Monitoring →](../../module-5-monitoring-maintenance/5.1-azure-monitor/lab-guide-5.1.md)
 
 ---
 

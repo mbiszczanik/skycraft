@@ -1029,7 +1029,7 @@ Test your understanding with these questions:
 
 - [← Back to Module 2 Index](../README.md)
 - [← Previous Lab: 2.1 Virtual Networks](../2.1-virtual-networks/lab-guide-2.1.md)
-- [Next Lab: 2.3 DNS & Load Balancing →](../2.3-dns-load-balancing/lab-guide-2.3.md)
+- [Next Lab: 2.3 DNS & Load Balancing →](../2.3-name-resolution/lab-guide-2.3.md)
 
 ---
 

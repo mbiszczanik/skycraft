@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Pester guard `tests/Bicep-Tags.Tests.ps1`: every `.bicep` file's tag declarations must cover the canonical four (`Project`/`Environment`/`CostCenter`/`Owner`), resolved at the file level so it tolerates the `union(varCommonTags, { Environment: '<env>' })` composition pattern, and `ManagedBy`/`DeploymentDate` are forbidden repo-wide (#63).
+- Pester guard `tests/Markdown-Links.Tests.ps1`: every relative link in a tracked `*.md` file must resolve to a path `git ls-files` actually tracks, matched case-sensitively so a link that only "works" on Windows' case-insensitive filesystem is caught before it breaks on Linux/macOS or the CI runner (#63). Fixed four stale links this surfaced — a renamed lab directory (`2.3-dns-load-balancing` → `2.3-name-resolution`), a missing `../` level in three `module-4-storage` back-references, a renamed module (`module-5-monitor` → `module-5-monitoring-maintenance`), and a lowercase `docs/az-104-study-guide.md` versus the tracked `docs/AZ-104-Study-Guide.md` — and added `docs/lab-guide-template.md`, referenced from `docs/project-standards.md` since Phase 3 but never committed.
+
 ### Fixed
 
 - Every automation script now sets `$Host.SetShouldExit(<code>)` immediately before a non-zero `exit`, so a failed run is visible to its caller (#104). PowerShell 7 discards `exit <code>` from a script run as `pwsh -File` when that script declares `#Requires -Modules` for a module it has to auto-import - which every `Az.*` script here does. The `exit` still ran, but the process reported **0**, so the lab cycle recorded a failed teardown as a clean one; Lab 2.1 cleanup printed `Cleanup finished with 1 failure(s)` and exited 0. The same script exits correctly when dot-called or run with `-Command`, which is why only the automated cycle was affected. Applied to 144 exit sites across 55 scripts and enforced by the new `tests/Exit-Code-Propagation.Tests.ps1`, which asserts the guard structurally and verifies that the idiom really carries the code through `pwsh -File`.
