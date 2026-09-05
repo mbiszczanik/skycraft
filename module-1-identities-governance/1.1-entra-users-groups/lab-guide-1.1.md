@@ -292,6 +292,11 @@ Complete this checklist to verify you've successfully completed the lab:
 - **Solution**: Verify licenses are available in your tenant
 - **Check**: Entra ID → Licenses → All products → View available licenses
 
+**Issue**: The lab scripts stop at "Checking Microsoft Graph connection..." and never come back
+
+- **Cause**: `Connect-MgGraph -Scopes ...` signs a person in, and a cached token that needs a refresh the broker cannot complete silently falls back to a prompt. A run with no console has nobody to answer it.
+- **Solution**: Running by hand, answer the prompt — it is a real sign-in. If none appears, sign in once with `Connect-MgGraph -UseDeviceCode` and re-run the script. For an unattended run there is nobody to answer it, so set `SKYCRAFT_GRAPH_TENANT_ID`, `SKYCRAFT_GRAPH_CLIENT_ID` and `SKYCRAFT_GRAPH_CERT_THUMBPRINT` and the scripts sign in app-only instead — see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md).
+
 ---
 
 ## 📚 Additional Resources

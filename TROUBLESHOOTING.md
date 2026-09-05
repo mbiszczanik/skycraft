@@ -22,6 +22,106 @@ This guide addresses common issues encountered while setting up or running the S
 1.  Ensure you have the **User Administrator** or **Global Administrator** role in Entra ID.
 2.  Ensure you have granted consent to the Microsoft Graph PowerShell application.
 
+### Lab 1.1 hangs at "Checking Microsoft Graph connection..."
+
+**Symptoms**: `New-LabUser.ps1`, `Test-Lab.ps1` or `Remove-LabResource.ps1` in Lab 1.1 print the connection banner and then sit there. Nothing times out, nothing fails; run under `tools/Invoke-LabCycle.ps1` the phase is eventually killed at its limit and reported `Failed(Timeout)`.
+
+**Cause**: `Connect-MgGraph -Scopes ...` binds the **delegated** parameter set, which signs a *person* in. When the cached token needs a refresh that the broker cannot complete silently, the SDK falls back to a prompt — and a run with no console has nobody to answer it. Turning WAM off does not help; the prompt simply moves.
+
+**If you are running the lab by hand** — which is how SkyCraft runs Lab 1.1 today — answer the prompt. It is a real sign-in and the scripts wait for it on purpose. If no prompt appears at all, the browser handoff failed rather than the token: check that a default browser is set, or sign in first with `Connect-MgGraph -UseDeviceCode` and re-run the script, which will reuse that context.
+
+**If the run is unattended** — a scheduler, CI, `tools/Invoke-LabCycle.ps1`, anything with no console — there is nothing to answer the prompt, and the only real fix is to stop asking for one: give the lab a **service principal** so it signs in app-only (client credentials). This is **optional**, and today's cycle does not need it: `tools/lab-cycle-manifest.psd1` runs 1.2 through 5.3 and does not include Lab 1.1. Set it up when you automate 1.1, not before.
+
+The three Lab 1.1 scripts pick a service principal up automatically when these variables are set:
+
+| Variable | Meaning |
+| :--- | :--- |
+| `SKYCRAFT_GRAPH_TENANT_ID` | Tenant the principal lives in (the Entra tenant, which is **not** necessarily the subscription's) |
+| `SKYCRAFT_GRAPH_CLIENT_ID` | The app registration's application (client) ID |
+| `SKYCRAFT_GRAPH_CERT_THUMBPRINT` | Thumbprint of a certificate in `Cert:\CurrentUser\My` — preferred |
+| `SKYCRAFT_GRAPH_CLIENT_SECRET` | Client secret — used when no thumbprint is set |
+| `SKYCRAFT_UNATTENDED` | Set to anything by a caller with no console. Makes a missing or half-configured principal fail in seconds instead of waiting out a step timeout |
+
+With none of them set the scripts sign in interactively exactly as before. Set **by halves** they refuse to start and name the variable that is missing: falling back to a prompt there is the hang this exists to remove, so a half-configured principal is reported rather than degraded into.
+
+`SKYCRAFT_UNATTENDED` is the *only* thing the scripts treat as "nobody is watching". They deliberately do not sniff the console for it — `[Console]::IsInputRedirected` was tried and dropped, because it refuses a sign-in to a learner who is sitting right there the moment anything redirects a stream, and refusing a prompt someone could have answered is a worse failure than the hang it would have caught. An automated caller says so explicitly.
+
+These are deliberately *not* the Azure SDK's `AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET`. Those are usually already exported for the **subscription** identity, which in this project is a different account from the one that administers Entra ID — consuming them would sign Graph in as the wrong principal, silently. Map them yourself if your CI sets them:
+
+```powershell
+$env:SKYCRAFT_GRAPH_TENANT_ID = $env:AZURE_TENANT_ID
+$env:SKYCRAFT_GRAPH_CLIENT_ID = $env:AZURE_CLIENT_ID
+$env:SKYCRAFT_GRAPH_CLIENT_SECRET = $env:AZURE_CLIENT_SECRET
+```
+
+### Creating the Lab 1.1 service principal
+
+Only needed for an unattended run — see above. Requires **Global Administrator** in the Entra tenant (granting application permissions needs admin consent). Run once.
+
+```powershell
+# 1. Register the application and give it a service principal in the tenant.
+$appId = az ad app create --display-name 'SkyCraft-Lab-Automation' --query appId --output tsv
+az ad sp create --id $appId
+
+# 2. Grant the four Microsoft Graph APPLICATION permissions the lab actually uses, then consent.
+#    The role IDs are read from the tenant rather than hard-coded, so this cannot drift.
+$graphAppId = '00000003-0000-0000-c000-000000000000'
+$graph = az ad sp show --id $graphAppId --output json | ConvertFrom-Json
+
+foreach ($role in 'User.ReadWrite.All', 'Group.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All') {
+    $roleId = ($graph.appRoles | Where-Object { $_.value -eq $role -and $_.allowedMemberTypes -contains 'Application' }).id
+    az ad app permission add --id $appId --api $graphAppId --api-permissions "$roleId=Role"
+}
+az ad app permission admin-consent --id $appId
+```
+
+That is the **minimum** set: `User.ReadWrite.All` creates and deletes the three internal users, `Group.ReadWrite.All` covers the groups and their memberships, `Domain.Read.All` resolves the tenant's default domain, and `User.Invite.All` invites the guest. `Directory.ReadWrite.All` — which the interactive sign-in asks for, and which the lab guide's portal steps rely on — is **not** required app-only; do not grant it to this principal.
+
+Then create a credential. A certificate is preferred: it never sits in an environment variable, and it cannot be leaked by an environment dump or a transcript.
+
+```powershell
+# Certificate (preferred)
+$cert = New-SelfSignedCertificate -Subject 'CN=SkyCraft-Lab-Automation' `
+    -CertStoreLocation Cert:\CurrentUser\My -KeyExportPolicy NonExportable `
+    -KeySpec Signature -NotAfter (Get-Date).AddYears(1)
+az ad app credential reset --id $appId --cert ([Convert]::ToBase64String($cert.RawData)) --append
+
+$env:SKYCRAFT_GRAPH_TENANT_ID       = '<entra-tenant-id>'
+$env:SKYCRAFT_GRAPH_CLIENT_ID       = $appId
+$env:SKYCRAFT_GRAPH_CERT_THUMBPRINT = $cert.Thumbprint
+```
+
+```powershell
+# Client secret (simpler; expires, and is a string you now have to keep somewhere)
+$secret = az ad app credential reset --id $appId --years 1 --query password --output tsv
+```
+
+### Storing and rotating the credential
+
+**Never commit either credential.** No secret belongs in a `.bicepparam`, a script default, a transcript, or a commit message — `.gitignore` and the `gitleaks` CI job are the backstop, not the plan.
+
+Where the secret should live, in order of preference:
+
+1. **Nowhere** — use the certificate. The private key stays in `Cert:\CurrentUser\My` and only the thumbprint is ever exported.
+2. **`Microsoft.PowerShell.SecretManagement`**, materialised into the environment variable for the session that needs it:
+
+    ```powershell
+    Install-Module Microsoft.PowerShell.SecretManagement, Microsoft.PowerShell.SecretStore -Scope CurrentUser
+    Set-Secret -Name SkyCraft-Graph-ClientSecret -Secret $secret
+
+    # ...then, once per session, before running the lab:
+    $env:SKYCRAFT_GRAPH_CLIENT_SECRET = Get-Secret -Name SkyCraft-Graph-ClientSecret -AsPlainText
+    ```
+
+    The scripts read the environment variable and never call `Get-Secret` themselves, on purpose: a locked `SecretStore` vault prompts for its password, which would be the same hang in a different place.
+3. **The CI secret store** (GitHub Actions secrets, Key Vault), exported into the environment by the job.
+
+Rotation:
+
+- `az ad app credential reset --id $appId --years 1` issues a new secret. Without `--append` it **invalidates every existing credential** on the app — which is what you want for a compromised secret, and what you do not want mid-cycle.
+- Certificates expire too. Re-run the `New-SelfSignedCertificate` block with `--append`, update `SKYCRAFT_GRAPH_CERT_THUMBPRINT`, then remove the old credential.
+- After rotating, verify without touching the tenant's state: `pwsh -NoProfile -File .\module-1-identities-governance\1.1-entra-users-groups\scripts\Test-Lab.ps1`. It signs in and only reads.
+
 ## 💻 Environment Issues
 
 ### "The term 'az' is not recognized" or "The term 'bicep' is not recognized"
@@ -51,7 +151,8 @@ This guide addresses common issues encountered while setting up or running the S
         -Scope CurrentUser -Force
 
     # Lab 1.1 / 1.2 identity scripts (Microsoft Graph submodules — NOT the full Microsoft.Graph)
-    Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups `
+    Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups, `
+        Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Identity.SignIns `
         -Scope CurrentUser -Force
     ```
 
