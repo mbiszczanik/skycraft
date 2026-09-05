@@ -25,7 +25,10 @@
     the if body, '-eq Succeeded' fails in the else clause.
 
     Pairing the guard with the exit code itself is left to Exit-Code-Propagation.Tests.ps1,
-    which separately requires every non-zero 'exit' to be preceded by $Host.SetShouldExit.
+    which requires every non-zero 'exit' in a script declaring '#Requires -Modules' to be preceded
+    by $Host.SetShouldExit. This file keeps the wider scope on purpose (#124): New-Az*Deployment
+    returns an ungated 'Failed' whatever the script requires, so the rule here follows the call
+    rather than the declaration.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Deployment-State-Gating.Tests.ps1
