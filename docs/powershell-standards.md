@@ -190,19 +190,44 @@ if ($script:cleanupFailures -gt 0) {
   $account = az account show --output json 2>$null | ConvertFrom-Json
   ```
 
-- **WhatIf Deployment Pattern**: Build separate args arrays for what-if vs real deployment rather than mutating indices. This avoids brittle index-based overwrites and makes intent clear:
+- **WhatIf Deployment Pattern**: Every `Deploy-Bicep.ps1` declares a `[switch]$WhatIf` and branches on it **around one shared splat**, so the preview is built from exactly the arguments the deployment would use. Build the hashtable once, then pick the cmdlet:
 
   ```powershell
-  # ❌ WRONG — index mutation is fragile
-  $deployArgs[2] = 'what-if'
-
-  # ✅ CORRECT — build two clean arrays
-  if ($WhatIf) {
-      $deployArgs = @('deployment', 'sub', 'what-if') + $commonParams
-  } else {
-      $deployArgs = @('deployment', 'sub', 'create') + $commonParams + @('--output', 'json')
+  # ✅ CORRECT — one splat, two cmdlets
+  $deployParams = @{
+      Name         = $deploymentName
+      Location     = $Location
+      TemplateFile = $templateFile
+      ErrorAction  = 'Stop'
   }
+
+  if ($WhatIf) {
+      Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
+      Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+      Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
+      exit 0
+  }
+
+  $deployment = New-AzSubscriptionDeployment @deployParams
   ```
+
+  Template parameters go in the same hashtable, either as `TemplateParameterFile` /
+  `TemplateParameterObject` or as the cmdlet's dynamic `par*` parameters — both bind on the
+  what-if cmdlet too.
+
+  Two things this rules out, both of which shipped before issue #74:
+
+  ```powershell
+  # ❌ WRONG — a message is not a preview. Exits 0 having checked nothing.
+  if ($WhatIf) { Write-Host "What-if mode: run 'az deployment sub what-if' by hand."; exit 0 }
+
+  # ❌ WRONG — SupportsShouldProcess makes -WhatIf skip the call, not preview it.
+  if ($PSCmdlet.ShouldProcess('resources', 'Deploy')) { New-AzSubscriptionDeployment @deployParams }
+  ```
+
+  `tests/Script-Standards.Tests.ps1` enforces this: it parses each deploy script, finds the body of
+  its `if ($WhatIf)` branch, and asserts that the branch calls `Get-AzSubscriptionDeploymentWhatIfResult`
+  and deploys nothing.
 
 ## 6. Static Analysis & Testing
 

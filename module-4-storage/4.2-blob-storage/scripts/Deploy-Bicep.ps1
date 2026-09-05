@@ -9,8 +9,15 @@
 .PARAMETER Location
     Azure region for deployment. Default: swedencentral
 
+.PARAMETER WhatIf
+    Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Location "swedencentral"
+
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -WhatIf
+    Previews the blob storage deployment without changing anything.
 
 .NOTES
     Project: SkyCraft
@@ -24,7 +31,9 @@
 [CmdletBinding()]
 param(
     [ValidateSet('swedencentral', 'northeurope')]
-    [string]$Location = 'swedencentral'
+    [string]$Location = 'swedencentral',
+
+    [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,12 +57,22 @@ if (-not (Test-Path $TemplateFile)) {
 try {
     Write-Host "Deploying to Subscription scope..." -ForegroundColor Yellow
     
-    $deployment = New-AzSubscriptionDeployment `
-        -Name "lab-4.2-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')" `
-        -Location $Location `
-        -TemplateFile $TemplateFile `
-        -TemplateParameterObject @{ parLocation = $Location } `
-        -WarningAction SilentlyContinue
+    $deployParams = @{
+        Name                    = "lab-4.2-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')"
+        Location                = $Location
+        TemplateFile            = $TemplateFile
+        TemplateParameterObject = @{ parLocation = $Location }
+        ErrorAction             = 'Stop'
+    }
+
+    if ($WhatIf) {
+        Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
+        Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+        Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
+        exit 0
+    }
+
+    $deployment = New-AzSubscriptionDeployment @deployParams -WarningAction SilentlyContinue
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host "[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red

@@ -21,9 +21,16 @@
 .PARAMETER PlatformResourceGroup
     The platform resource group name. Default: 'platform-skycraft-swc-rg'
 
+.PARAMETER WhatIf
+    Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1
     Deploys to default resource groups in Sweden Central.
+
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -WhatIf
+    Previews the hub-and-spoke deployment without changing anything.
 
 .NOTES
     Project: SkyCraft
@@ -51,7 +58,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$PlatformResourceGroup = 'platform-skycraft-swc-rg'
+    [string]$PlatformResourceGroup = 'platform-skycraft-swc-rg',
+
+    [Parameter(Mandatory = $false)]
+    [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
@@ -90,12 +100,22 @@ try {
         parResourceGroupNamePlatform = $PlatformResourceGroup
     }
 
-    $deployment = New-AzSubscriptionDeployment `
-        -Name $deploymentName `
-        -Location $Location `
-        -TemplateFile $mainBicep `
-        -TemplateParameterObject $params `
-        -Verbose
+    $deployParams = @{
+        Name                    = $deploymentName
+        Location                = $Location
+        TemplateFile            = $mainBicep
+        TemplateParameterObject = $params
+        ErrorAction             = 'Stop'
+    }
+
+    if ($WhatIf) {
+        Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
+        Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+        Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
+        exit 0
+    }
+
+    $deployment = New-AzSubscriptionDeployment @deployParams -Verbose
 
     if ($deployment.ProvisioningState -eq 'Succeeded') {
         Write-Host "`n[SUCCESS] Deployment completed successfully!" -ForegroundColor Green

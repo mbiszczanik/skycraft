@@ -22,7 +22,7 @@
     Cannot be changed after storage account creation.
 
 .PARAMETER WhatIf
-    Preview changes without deploying.
+    Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
 
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment dev
@@ -34,7 +34,7 @@
 
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment prod -WhatIf
-    Previews production deployment without making changes.
+    Previews the production deployment with an ARM diff, without making changes.
 
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment prod -InfraEncryption
@@ -50,7 +50,7 @@
 #Requires -Version 7.0
 #Requires -Modules Az.Accounts, Az.Resources, Az.Storage
 
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prod', 'platform')]
@@ -64,7 +64,10 @@ param(
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
-    [switch]$InfraEncryption
+    [switch]$InfraEncryption,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
@@ -169,47 +172,56 @@ Write-Host "  Soft Delete: Enabled (7 days)"
 Write-Host ""
 Write-Host "--- Deploying Bicep Template ---" -ForegroundColor Yellow
 
+$deployParams = @{
+    Name                    = $deploymentName
+    Location                = $Location
+    TemplateFile            = $templateFile
+    TemplateParameterObject = $deploymentParams
+    ErrorAction             = 'Stop'
+}
+
 try {
-    if ($PSCmdlet.ShouldProcess("Storage accounts", "Deploy")) {
-        $deployment = New-AzSubscriptionDeployment `
-            -Name $deploymentName `
-            -Location $Location `
-            -TemplateFile $templateFile `
-            -TemplateParameterObject $deploymentParams `
-            -ErrorAction Stop
-
+    if ($WhatIf) {
+        Write-Host "Running in what-if mode (dry run)..." -ForegroundColor Cyan
+        Get-AzSubscriptionDeploymentWhatIfResult @deployParams
         Write-Host ""
-        Write-Host "=== Deployment Complete ===" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "--- Deployment Outputs ---" -ForegroundColor Yellow
-        
-        if ($deployment.Outputs.outDeployedEnvironments) {
-            $envs = $deployment.Outputs.outDeployedEnvironments.Value
-            Write-Host "  Deployed Environments: $($envs -join ', ')" -ForegroundColor Green
-        }
-
-        if ($All -or $Environment -eq 'platform') {
-            if ($deployment.Outputs.outPlatformStorageAccountName.Value -ne 'not-deployed') {
-                Write-Host "  Platform Storage: $($deployment.Outputs.outPlatformStorageAccountName.Value)" -ForegroundColor Green
-            }
-        }
-        
-        if ($All -or $Environment -eq 'dev') {
-            if ($deployment.Outputs.outDevStorageAccountName.Value -ne 'not-deployed') {
-                Write-Host "  Dev Storage: $($deployment.Outputs.outDevStorageAccountName.Value)" -ForegroundColor Green
-            }
-        }
-        
-        if ($All -or $Environment -eq 'prod') {
-            if ($deployment.Outputs.outProdStorageAccountName.Value -ne 'not-deployed') {
-                Write-Host "  Prod Storage: $($deployment.Outputs.outProdStorageAccountName.Value)" -ForegroundColor Green
-            }
-        }
-
-        Write-Host ""
-        Write-Host "Deployment Name: $deploymentName" -ForegroundColor Gray
-        Write-Host "Provisioning State: $($deployment.ProvisioningState)" -ForegroundColor Green
+        Write-Host "What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
+        exit 0
     }
+
+    $deployment = New-AzSubscriptionDeployment @deployParams
+
+    Write-Host ""
+    Write-Host "=== Deployment Complete ===" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "--- Deployment Outputs ---" -ForegroundColor Yellow
+    
+    if ($deployment.Outputs.outDeployedEnvironments) {
+        $envs = $deployment.Outputs.outDeployedEnvironments.Value
+        Write-Host "  Deployed Environments: $($envs -join ', ')" -ForegroundColor Green
+    }
+
+    if ($All -or $Environment -eq 'platform') {
+        if ($deployment.Outputs.outPlatformStorageAccountName.Value -ne 'not-deployed') {
+            Write-Host "  Platform Storage: $($deployment.Outputs.outPlatformStorageAccountName.Value)" -ForegroundColor Green
+        }
+    }
+    
+    if ($All -or $Environment -eq 'dev') {
+        if ($deployment.Outputs.outDevStorageAccountName.Value -ne 'not-deployed') {
+            Write-Host "  Dev Storage: $($deployment.Outputs.outDevStorageAccountName.Value)" -ForegroundColor Green
+        }
+    }
+    
+    if ($All -or $Environment -eq 'prod') {
+        if ($deployment.Outputs.outProdStorageAccountName.Value -ne 'not-deployed') {
+            Write-Host "  Prod Storage: $($deployment.Outputs.outProdStorageAccountName.Value)" -ForegroundColor Green
+        }
+    }
+
+    Write-Host ""
+    Write-Host "Deployment Name: $deploymentName" -ForegroundColor Gray
+    Write-Host "Provisioning State: $($deployment.ProvisioningState)" -ForegroundColor Green
 }
 catch {
     Write-Host ""
