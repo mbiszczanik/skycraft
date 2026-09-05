@@ -201,6 +201,12 @@ else {
             }
         }
     }
+
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host "`n  [FAILED] Deployment finished with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        $Host.SetShouldExit(1)
+        exit 1
+    }
 }
 
 # ── [5/6] Create DCR association ──────────────────────────────────────────

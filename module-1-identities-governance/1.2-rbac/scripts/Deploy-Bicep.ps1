@@ -85,8 +85,14 @@ try {
         exit 0
     }
 
-    New-AzSubscriptionDeployment @deployParams | Out-Null
-    
+    $deployment = New-AzSubscriptionDeployment @deployParams
+
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host "  -> [FAILED] Deployment finished with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        $Host.SetShouldExit(1)
+        exit 1
+    }
+
     Write-Host "  -> [SUCCESS] Resource Groups deployed successfully." -ForegroundColor Green
     
     # Verify RGs

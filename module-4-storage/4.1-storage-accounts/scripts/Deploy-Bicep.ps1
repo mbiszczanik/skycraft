@@ -191,6 +191,13 @@ try {
 
     $deployment = New-AzSubscriptionDeployment @deployParams
 
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host ""
+        Write-Host "[FAILED] Deployment finished with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        $Host.SetShouldExit(1)
+        exit 1
+    }
+
     Write-Host ""
     Write-Host "=== Deployment Complete ===" -ForegroundColor Cyan
     Write-Host ""
