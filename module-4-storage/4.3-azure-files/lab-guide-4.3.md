@@ -17,56 +17,19 @@ By completing this lab, you will:
 
 This diagram shows the Azure Files infrastructure you will deploy inside the production resource group, including the two file shares, data protection settings, and VM connectivity over SMB:
 
-```mermaid
-graph TB
-    subgraph ProdResources ["prod-skycraft-swc-rg"]
-        style ProdResources fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-
-        subgraph SA ["prodskycraftswcsa"]
-            style SA fill:#fff0f0,stroke:#c0392b,stroke-width:1px
-
-            subgraph Shares ["File Shares"]
-                Config["skycraft-config<br/>100 GB quota<br/>Hot tier"]
-                Shared["skycraft-shared<br/>500 GB quota<br/>Hot tier"]
-            end
-
-            DataProtection["Data Protection<br/>✅ Soft Delete: 14 days<br/>✅ Snapshots: Manual"]
-        end
-
-        subgraph VNet ["prod-skycraft-swc-vnet"]
-            VM1["World Server VM<br/>(Windows Server)"]
-            VM2["Auth Server VM<br/>(Ubuntu Linux)"]
-        end
-    end
-
-    VM1 -->|SMB 3.0 / Port 445| Config
-    VM2 -->|SMB 3.0 / Port 445| Config
-    VM1 -->|SMB 3.0 / Port 445| Shared
-    VM2 -->|SMB 3.0 / Port 445| Shared
-
-    DataProtection -.-> Config
-    DataProtection -.-> Shared
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-4.3-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-4.3-architecture.svg">
+  <img src="images/lab-4.3-architecture.svg" width="100%" alt="Lab 4.3 architecture: Azure Files shares mounted over SMB">
+</picture>
 
 ### Logic Flow / Lifecycle
 
-```mermaid
-flowchart LR
-    Active["Active File<br/>Ver 1.0"]
-    Snap["Snapshot 1<br/>(ReadOnly)"]
-    Delete["Soft Deleted<br/>(14 Days)"]
-    Gone["Permanently<br/>Deleted"]
-
-    Active -->|"Take Snapshot"| Snap
-    Active -->|"Delete File"| Delete
-    Delete -->|"Undelete"| Active
-    Delete -->|"After 14 Days"| Gone
-    Snap -->|"Restore"| Active
-
-    style Active fill:#a5d8ff,stroke:#1971c2
-    style Snap fill:#ffe8cc,stroke:#e67700
-    style Delete fill:#ffc9c9,stroke:#e03131
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-4.3-file-recovery.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-4.3-file-recovery.svg">
+  <img src="images/lab-4.3-file-recovery.svg" width="100%" alt="File recovery states: active, snapshot, soft deleted">
+</picture>
 
 ---
 
