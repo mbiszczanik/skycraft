@@ -13,11 +13,15 @@
     Target environment (dev, prod). Default: 'dev'
 
 .PARAMETER WhatIf
-    If specified, runs What-If analysis instead of deploying.
+    Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
 
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment dev
     Deploys the Development environment.
+
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -Environment dev -WhatIf
+    Previews the Development deployment without changing anything.
 
 .NOTES
     Project: SkyCraft
@@ -69,20 +73,22 @@ Write-Host "Params:   $paramPath" -ForegroundColor Gray
 
 try {
     
-    $commonArgs = @{
+    $deployParams = @{
         Name                  = $deploymentName
         Location              = $Location
         TemplateFile          = $bicepPath
         TemplateParameterFile = $paramPath
+        ErrorAction           = 'Stop'
     }
 
     if ($WhatIf) {
-        Write-Host "Running What-If Analysis..." -ForegroundColor Yellow
-        New-AzSubscriptionDeployment @commonArgs -WhatIf
+        Write-Host "Running in what-if mode (dry run)..." -ForegroundColor Cyan
+        Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+        Write-Host "`nWhat-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
     }
     else {
         Write-Host "Deploying..." -ForegroundColor Yellow
-        $dep = New-AzSubscriptionDeployment @commonArgs
+        $dep = New-AzSubscriptionDeployment @deployParams
         
         if ($dep.ProvisioningState -eq 'Succeeded') {
             Write-Host "`n[SUCCESS] Deployment complete!" -ForegroundColor Green

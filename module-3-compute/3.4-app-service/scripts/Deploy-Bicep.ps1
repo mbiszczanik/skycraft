@@ -12,8 +12,15 @@
 .PARAMETER Environment
     Target environment (dev, prod). Default: dev.
 
+.PARAMETER WhatIf
+    Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment dev
+
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -Environment dev -WhatIf
+    Previews the App Service deployment without changing anything.
 
 .NOTES
     Project: SkyCraft
@@ -31,7 +38,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prod')]
-    [string]$Environment = 'dev'
+    [string]$Environment = 'dev',
+
+    [Parameter(Mandatory = $false)]
+    [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,12 +68,22 @@ try {
         parVnetName          = "$Environment-skycraft-swc-vnet"
     }
 
-    $deployment = New-AzSubscriptionDeployment `
-        -Name $DeploymentName `
-        -Location $Location `
-        -TemplateFile $BicepFile `
-        -TemplateParameterObject $params `
-        -ErrorAction Stop
+    $deployParams = @{
+        Name                    = $DeploymentName
+        Location                = $Location
+        TemplateFile            = $BicepFile
+        TemplateParameterObject = $params
+        ErrorAction             = 'Stop'
+    }
+
+    if ($WhatIf) {
+        Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
+        Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+        Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
+        exit 0
+    }
+
+    $deployment = New-AzSubscriptionDeployment @deployParams
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host "[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
