@@ -64,13 +64,15 @@ of 29 lines of text, so review means looking at the rendered SVG. Code panels
 lose the terminal look in light mode, which is the price of rule 2. The
 toolchain now depends on `uv`, Playwright and a CDN fetch at render time.
 
-**Follow-up work this creates.**
+**Follow-up work, done in the same change.**
 
-- Convert the 26 existing Mermaid diagrams, narrowest-value-first.
-- While converting, fix the missing VNet→subnet containment edges; the Lab 2.1
-  defect is unlikely to be the only instance.
-- Re-author the two bake-off diagrams (Lab 2.1 and the first Lab 2.2 draft) —
-  both are 1900 units wide and violate rule 1.
+- All 26 Mermaid diagrams converted; no `mermaid` fence remains in the repository.
+- The Lab 2.1 containment defect is fixed — the VNet-to-subnet relationships are
+  drawn. No other lab turned out to declare orphaned nodes.
+- The two bake-off drafts were re-authored at 860 units rather than carried over.
+
+Both labs that ship two diagrams (4.1–4.4) keep them as two files rather than
+merging them, so each stays anchored to the section of the guide it explains.
 
 ## Alternatives considered
 
