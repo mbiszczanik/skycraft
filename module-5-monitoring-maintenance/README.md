@@ -81,7 +81,7 @@ az network vnet list --query "[?starts_with(name, 'prod-skycraft')].name" -o tsv
 
 Each lab includes:
 
-- **Lab Guide** (`lab-guide-5.X.md`) — concepts, Mermaid diagram, and multi-modal (Portal + CLI + PowerShell) step-by-step
+- **Lab Guide** (`lab-guide-5.X.md`) — concepts, architecture diagram, and multi-modal (Portal + CLI + PowerShell) step-by-step
 - **Lab Checklist** (`lab-checklist-5.X.md`) — verification-only checkboxes and validation commands
 - **Bicep Templates** (`bicep/`) — `main.bicep` calling Azure Verified Modules, a `parameters/main.bicepparam`, and (Labs 5.1 and 5.2) a local diagnostic-settings fallback under `modules/`
 - **Automation Scripts** (`scripts/`) — `Deploy-Bicep.ps1`, `Test-Lab.ps1`, `Remove-LabResource.ps1`, plus lab-specific helpers

@@ -39,36 +39,37 @@ By completing this lab, you will:
 
 [ARCHITECTURE_DESCRIPTION — 1-2 sentences describing what the diagram shows]:
 
-```mermaid
-graph TB
-    subgraph "[RESOURCE_GROUP_NAME_1 — e.g. platform-skycraft-swc-rg]"
-        style [STYLE_ID_1] fill:#e1f5ff,stroke:#0078d4,stroke-width:3px
-        [RESOURCE_1]["[RESOURCE_DISPLAY_NAME]<br/>[RESOURCE_DETAILS]"]
-    end
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-[X.Y]-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-[X.Y]-architecture.svg">
+  <img src="images/lab-[X.Y]-architecture.svg" width="100%" alt="Lab [X.Y] architecture: [SHORT_DESCRIPTION]">
+</picture>
 
-    subgraph "[RESOURCE_GROUP_NAME_2 — e.g. dev-skycraft-swc-rg]"
-        style [STYLE_ID_2] fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-        [RESOURCE_2]["[RESOURCE_DISPLAY_NAME]<br/>[RESOURCE_DETAILS]"]
-    end
+<!-- NOTE: the diagram is authored in Excalidraw and committed as three files:
+       images/lab-[X.Y]-architecture.excalidraw     source of truth, hand-editable
+       images/lab-[X.Y]-architecture.svg            light
+       images/lab-[X.Y]-architecture.dark.svg       dark
 
-    subgraph "[RESOURCE_GROUP_NAME_3 — e.g. prod-skycraft-swc-rg]"
-        style [STYLE_ID_3] fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-        [RESOURCE_3]["[RESOURCE_DISPLAY_NAME]<br/>[RESOURCE_DETAILS]"]
-    end
+  Two rules are mandatory — see lab-guide-standards.md section 3 and ADR-0004:
+    1. Author at 860 units wide or less. Anything wider is scaled down by GitHub
+       and the body text drops to ~5 px. Stack sections vertically.
+    2. Nothing in the source may be deliberately dark. The dark variant is a
+       colour inversion, so a dark panel inverts to light. Code and evidence
+       panels use fill #e2e8f0, border #cbd5e1, text #166534.
 
-    [RESOURCE_1] -->|"[RELATIONSHIP_LABEL]"| [RESOURCE_2]
-    [RESOURCE_2] -->|"[RELATIONSHIP_LABEL]"| [RESOURCE_3]
-```
+  Render both themes with the excalidraw-diagram skill:
+    cd ~/.claude/skills/excalidraw-diagram/references
+    uv run python render_excalidraw.py --format svg             <file>.excalidraw
+    uv run python render_excalidraw.py --format svg --theme dark <file>.excalidraw
 
-<!-- NOTE: Color scheme MUST follow standard:
-  - Platform/Hub:   fill:#e1f5ff, stroke:#0078d4, stroke-width:3px
-  - Development:    fill:#fff4e1, stroke:#f39c12, stroke-width:2px
-  - Production:     fill:#ffe1e1, stroke:#e74c3c, stroke-width:2px
-  - Key resources:  use accent colors (green #4CAF50, purple #9C27B0, orange #FF9800)
-  Always include resource names following project-standards.md and CIDR ranges for networks.
+  Content: resource group boundaries, names following project-standards.md, CIDR
+  ranges for every network, labelled relationship arrows, and at least one
+  evidence artifact — a real az command, API response, or error string.
 -->
 
-<!-- OPTIONAL: Additional diagrams (e.g. flowcharts for processes, tier transitions) -->
+<!-- OPTIONAL: additional diagrams (process flows, tier transitions) follow the
+     same three-file contract, named after what they show rather than
+     '-architecture', e.g. images/lab-[X.Y]-lifecycle.excalidraw. -->
 
 ---
 
@@ -488,7 +489,7 @@ Before finalizing any lab guide, verify:
 
 - [ ] Title includes lab number and duration
 - [ ] 3-6 clear learning objectives (AZ-104 aligned)
-- [ ] **Mermaid diagram included** with color scheme
+- [ ] **Architecture diagram included** — Excalidraw source + light/dark SVG, ≤860 units wide, embedded via `<picture>`
 - [ ] Real-world scenario provides business context
 - [ ] **SkyCraft Choice** callout included (explains architectural decision)
 - [ ] **Multi-modal instructions** (Portal/CLI/PS) provided where applicable
