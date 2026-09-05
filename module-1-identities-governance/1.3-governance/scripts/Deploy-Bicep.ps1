@@ -12,8 +12,15 @@
 .PARAMETER Owner
     Value for the canonical Owner tag. Default: mbiszczanik.
 
+.PARAMETER WhatIf
+    Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Owner "mbiszczanik"
+
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -WhatIf
+    Previews the governance deployment without changing anything.
 
 .NOTES
     Project: SkyCraft
@@ -29,7 +36,9 @@ param(
     [string]$Location = 'swedencentral',
 
     [ValidateNotNullOrEmpty()]
-    [string]$Owner = 'mbiszczanik'
+    [string]$Owner = 'mbiszczanik',
+
+    [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
@@ -72,12 +81,22 @@ try {
         parOwner    = $Owner
     }
 
-    $deployment = New-AzSubscriptionDeployment `
-        -Name $deploymentName `
-        -Location $Location `
-        -TemplateFile $templateFile `
-        -TemplateParameterObject $params `
-        -Verbose
+    $deployParams = @{
+        Name                    = $deploymentName
+        Location                = $Location
+        TemplateFile            = $templateFile
+        TemplateParameterObject = $params
+        ErrorAction             = 'Stop'
+    }
+
+    if ($WhatIf) {
+        Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
+        Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+        Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
+        exit 0
+    }
+
+    $deployment = New-AzSubscriptionDeployment @deployParams -Verbose
 
     if ($deployment.ProvisioningState -eq 'Succeeded') {
         Write-Host "  -> [SUCCESS] Governance deployment completed." -ForegroundColor Green

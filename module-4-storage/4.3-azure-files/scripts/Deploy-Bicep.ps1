@@ -8,8 +8,13 @@
     Azure region for deployment. Default: swedencentral.
 .PARAMETER Environment
     Target environment (prod, dev, platform). Default: prod.
+.PARAMETER WhatIf
+    Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment prod
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -Environment prod -WhatIf
+    Previews the Azure Files deployment without changing anything.
 .NOTES
     Project: SkyCraft
     Author: SkyCraft
@@ -27,7 +32,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('prod', 'dev', 'platform')]
-    [string]$Environment = 'prod'
+    [string]$Environment = 'prod',
+
+    [Parameter(Mandatory = $false)]
+    [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,13 +52,23 @@ if (-not $context) {
 try {
     Write-Host "Deploying main.bicep to subscription level..." -ForegroundColor Yellow
     
-    $deployment = New-AzSubscriptionDeployment `
-        -Name "lab-4.3-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')" `
-        -Location $Location `
-        -TemplateFile (Join-Path $PSScriptRoot "..\bicep\main.bicep") `
-        -parLocation $Location `
-        -parEnvironment $Environment `
-        -ErrorAction Stop
+    $deployParams = @{
+        Name           = "lab-4.3-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')"
+        Location       = $Location
+        TemplateFile   = (Join-Path $PSScriptRoot "..\bicep\main.bicep")
+        parLocation    = $Location
+        parEnvironment = $Environment
+        ErrorAction    = 'Stop'
+    }
+
+    if ($WhatIf) {
+        Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
+        Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+        Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
+        exit 0
+    }
+
+    $deployment = New-AzSubscriptionDeployment @deployParams
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host "`n [FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red

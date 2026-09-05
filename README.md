@@ -58,7 +58,7 @@ Transform abstract cloud concepts into **tangible hands-on experience** by build
 
 ### Supplementary Resources
 
-- [AZ-104 Study Guide](docs/az-104-study-guide.md) — Comprehensive study guide courtesy of [azurekt.com/az-104](https://www.azurekt.com/az-104)
+- [AZ-104 Study Guide](docs/AZ-104-Study-Guide.md) — Comprehensive study guide courtesy of [azurekt.com/az-104](https://www.azurekt.com/az-104)
 
 ---
 

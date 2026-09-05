@@ -22,9 +22,18 @@
 .PARAMETER Environment
     The environment tag. Default: 'dev'
 
+.PARAMETER WhatIf
+    Previews the main.bicep deployment with the ARM what-if API and exits. Nothing is created
+    or changed - which also means the Phase 1 bootstrap (resource group, ACR, image import) is
+    skipped rather than simulated, so the preview needs those prerequisites to already exist.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1
     Deploys to default resource groups.
+
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -WhatIf
+    Previews the ACI/ACA orchestrator without bootstrapping or deploying anything.
 
 .NOTES
     Project: SkyCraft
@@ -48,7 +57,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prod', 'platform')]
-    [string]$Environment = 'dev'
+    [string]$Environment = 'dev',
+
+    [Parameter(Mandatory = $false)]
+    [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,11 +81,35 @@ $bicepPath = Join-Path $PSScriptRoot "..\bicep"
 $mainBicep = Join-Path $bicepPath "main.bicep"
 $acrBicep = Join-Path $bicepPath "acr.bicep"
 $deploymentName = "Lab-3.3-Containers"
+$acrName = "devskycraftswcacr01" # Should match main.bicep default or param
 
 if (-not (Test-Path $mainBicep)) {
     Write-Host "[ERROR] Bicep file not found: $mainBicep" -ForegroundColor Red
     $Host.SetShouldExit(1)
     exit 1
+}
+
+$deployParams = @{
+    Name                    = $deploymentName
+    Location                = $Location
+    TemplateFile            = $mainBicep
+    TemplateParameterObject = @{
+        parLocation          = $Location
+        parResourceGroupName = $ResourceGroupName
+        parEnvironment       = $Environment
+        parAcrName           = $acrName
+    }
+    ErrorAction             = 'Stop'
+}
+
+# What-if runs before Phase 1: bootstrapping the registry and importing the image are real
+# changes, so a preview must not perform them. The preview covers main.bicep only.
+if ($WhatIf) {
+    Write-Host "`nRunning in what-if mode (dry run)..." -ForegroundColor Cyan
+    Write-Host "  Phase 1 (resource group, ACR bootstrap, image import) is skipped, not simulated." -ForegroundColor Gray
+    Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+    Write-Host "`nWhat-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
+    exit 0
 }
 
 # Ensure RG exists (needed for module deployment / bootstrapping)
@@ -94,7 +130,6 @@ try {
 # PHASE 1: BOOTSTRAP ACR & IMAGE
 # ==============================================================================
 Write-Host "`n=== Phase 1: Bootstrapping Prerequisites ===" -ForegroundColor Cyan
-$acrName = "devskycraftswcacr01" # Should match main.bicep default or param
 
 # Check if we need to bootstrap image
 $repoExists = $false
@@ -114,12 +149,18 @@ if (-not $repoExists) {
         $acrWasBootstrapped = $true    # only a brand-new registry needs the DNS wait
         Write-Host "Deploying ACR (Bootstrap)..." -ForegroundColor Yellow
         try {
-            New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName `
+            $acrDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName `
                 -TemplateFile $acrBicep `
                 -parLocation $Location `
                 -parEnvironment $Environment `
                 -parAcrName $acrName `
-                -ErrorAction Stop | Out-Null
+                -ErrorAction Stop
+
+            if ($acrDeployment.ProvisioningState -ne 'Succeeded') {
+                Write-Host "[ERROR] ACR Bootstrap finished with state: $($acrDeployment.ProvisioningState)" -ForegroundColor Red
+                $Host.SetShouldExit(1)
+                exit 1
+            }
         } catch {
             Write-Host "[ERROR] ACR Bootstrap Failed: $_" -ForegroundColor Red
             $Host.SetShouldExit(1)
@@ -155,19 +196,7 @@ if ($acrWasBootstrapped) {
 Write-Host "`n=== Phase 2: Orchestrated Deployment (main.bicep) ===" -ForegroundColor Cyan
 
 try {
-    $params = @{
-        parLocation        = $Location
-        parResourceGroupName = $ResourceGroupName
-        parEnvironment     = $Environment
-        parAcrName         = $acrName
-    }
-
-    $deployment = New-AzSubscriptionDeployment `
-        -Name $deploymentName `
-        -Location $Location `
-        -TemplateFile $mainBicep `
-        -TemplateParameterObject $params `
-        -Verbose
+    $deployment = New-AzSubscriptionDeployment @deployParams -Verbose
 
     if ($deployment.ProvisioningState -eq 'Succeeded') {
         Write-Host "`n[SUCCESS] Deployment completed successfully!" -ForegroundColor Green
@@ -176,7 +205,8 @@ try {
     }
     else {
         Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-        # Error handling logic omitted for brevity, similar to template
+        $Host.SetShouldExit(1)
+        exit 1
     }
 }
 catch {

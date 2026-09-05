@@ -9,9 +9,16 @@
 .PARAMETER Location
     Azure region for deployment. Default: swedencentral.
 
+.PARAMETER WhatIf
+    Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1
     Deploys to Sweden Central.
+
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -WhatIf
+    Previews the resource group deployment without creating anything.
 
 .NOTES
     Project: SkyCraft
@@ -24,7 +31,9 @@
 [CmdletBinding()]
 param(
     [ValidateSet('swedencentral', 'northeurope')]
-    [string]$Location = 'swedencentral'
+    [string]$Location = 'swedencentral',
+
+    [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,12 +71,28 @@ Write-Host "  Location: $Location" -ForegroundColor Gray
 Write-Host "  DeploymentName: $deploymentName" -ForegroundColor Gray
 
 try {
-    New-AzSubscriptionDeployment `
-        -Name $deploymentName `
-        -Location $Location `
-        -TemplateFile $templateFile `
-        -ErrorAction Stop | Out-Null
-    
+    $deployParams = @{
+        Name         = $deploymentName
+        Location     = $Location
+        TemplateFile = $templateFile
+        ErrorAction  = 'Stop'
+    }
+
+    if ($WhatIf) {
+        Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
+        Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+        Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
+        exit 0
+    }
+
+    $deployment = New-AzSubscriptionDeployment @deployParams
+
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host "  -> [FAILED] Deployment finished with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        $Host.SetShouldExit(1)
+        exit 1
+    }
+
     Write-Host "  -> [SUCCESS] Resource Groups deployed successfully." -ForegroundColor Green
     
     # Verify RGs

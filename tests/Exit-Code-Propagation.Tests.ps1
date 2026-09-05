@@ -73,7 +73,7 @@ function Get-ExitSite {
 # Path matching is separator-agnostic so the suite runs identically on the Windows dev box
 # and the Linux CI runner.
 $ExitCases = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.ps1' |
-             Where-Object { ($_.FullName -replace '\\', '/') -match '/module-\d.*/scripts/' } |
+             Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^(module-\d.*/)?(scripts|tools)/' } |
              ForEach-Object {
                  $file = $_.FullName.Substring($RepoRoot.Length + 1) -replace '\\', '/'
                  foreach ($site in Get-ExitSite -Path $_.FullName) {

@@ -12,8 +12,13 @@
     the storage firewall.
 .PARAMETER ClientIp
     Your client IP to allow through the firewall. Auto-detected if omitted.
+.PARAMETER WhatIf
+    Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment prod
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -Environment prod -WhatIf
+    Previews the storage firewall deployment without changing anything.
 .NOTES
     Project: SkyCraft
     Author: SkyCraft
@@ -34,7 +39,10 @@ param(
     [string]$Environment = 'prod',
 
     [Parameter(Mandatory = $false)]
-    [string]$ClientIp = ''
+    [string]$ClientIp = '',
+
+    [Parameter(Mandatory = $false)]
+    [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,14 +72,24 @@ if ([string]::IsNullOrWhiteSpace($ClientIp)) {
 try {
     Write-Host "Deploying main.bicep to subscription level..." -ForegroundColor Yellow
 
-    $deployment = New-AzSubscriptionDeployment `
-        -Name "lab-4.4-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')" `
-        -Location $Location `
-        -TemplateFile (Join-Path $PSScriptRoot "..\bicep\main.bicep") `
-        -parLocation $Location `
-        -parEnvironment $Environment `
-        -parClientIp $ClientIp `
-        -ErrorAction Stop
+    $deployParams = @{
+        Name           = "lab-4.4-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')"
+        Location       = $Location
+        TemplateFile   = (Join-Path $PSScriptRoot "..\bicep\main.bicep")
+        parLocation    = $Location
+        parEnvironment = $Environment
+        parClientIp    = $ClientIp
+        ErrorAction    = 'Stop'
+    }
+
+    if ($WhatIf) {
+        Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
+        Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+        Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
+        exit 0
+    }
+
+    $deployment = New-AzSubscriptionDeployment @deployParams
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host "`n [FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red

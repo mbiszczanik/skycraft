@@ -25,8 +25,11 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
 $RepoRoot  = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+# Repo-root scripts/ is included alongside the per-lab ones: tooling that lives
+# outside the module tree (scripts/Invoke-ResourceAudit.ps1) is held to the same
+# standards as tooling inside it (issue #116).
 $AllScripts = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.ps1' |
-              Where-Object { ($_.FullName -replace '\\', '/') -match '/module-\d.*/scripts/' }
+              Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^(module-\d.*/)?(scripts|tools)/' }
 
 $ScriptCases = $AllScripts | ForEach-Object {
     @{ file = $_.FullName.Substring($RepoRoot.Length + 1); path = $_.FullName }
@@ -34,6 +37,57 @@ $ScriptCases = $AllScripts | ForEach-Object {
 
 $RemoveCases = $AllScripts | Where-Object { $_.Name -like 'Remove-*.ps1' } | ForEach-Object {
     @{ file = $_.FullName.Substring($RepoRoot.Length + 1); path = $_.FullName }
+}
+
+# Every command name the script actually invokes - comments and strings excluded.
+function Get-InvokedCommandName {
+    param([string]$Path)
+
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+
+    $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) |
+        ForEach-Object { $_.GetCommandName() } |
+        Where-Object { $_ }
+}
+
+# Every `if ($WhatIf) { ... }` branch body in the script, concatenated, or $null when the
+# script has none. Parsed rather than regex-matched: Lab 3.2's fake what-if printed a message
+# and exited, and only looking inside the branch distinguishes that from one that really calls
+# the ARM API. All branches, not the first: Lab 2.2 guards its Bastion prompt with one branch
+# and previews the deployment in another.
+function Get-WhatIfBranchBody {
+    param([string]$Path)
+
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+
+    $bodies = foreach ($if in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] }, $true)) {
+        # Clauses[0].Item1 is the condition, Item2 the body. The ElseClause is deliberately
+        # excluded - that is where the real deployment lives.
+        $condition = $if.Clauses[0].Item1.Extent.Text.Trim()
+        if ($condition -eq '$WhatIf') { $if.Clauses[0].Item2.Extent.Text }
+    }
+
+    if ($bodies) { return ($bodies -join "`n") }
+    return $null
+}
+
+# Anything a function above derives is resolved here, at discovery time: a function declared
+# in the container body is not in scope inside an It block.
+$RemoveCases = $RemoveCases | ForEach-Object {
+    @{ file = $_.file; path = $_.path; commands = @(Get-InvokedCommandName -Path $_.path) }
+}
+
+# Every lab deploy script, for the what-if contract of issue #74.
+$DeployBicepCases = $AllScripts | Where-Object { $_.Name -eq 'Deploy-Bicep.ps1' } | ForEach-Object {
+    @{
+        file       = $_.FullName.Substring($RepoRoot.Length + 1)
+        path       = $_.FullName
+        whatIfBody = Get-WhatIfBranchBody -Path $_.FullName
+    }
 }
 
 $DeployPromptCases = $AllScripts |
@@ -93,8 +147,9 @@ Describe 'SkyCraft PowerShell - destructive scripts use ShouldProcess' {
     }
 
     It "'<file>' contains no manual Read-Host prompt" -ForEach $RemoveCases {
-        $content = Get-Content -Raw -LiteralPath $path
-        $content | Should -Not -Match 'Read-Host'
+        # Commands, not raw text: tools/Remove-LabCycle.ps1 documents in its own help that it
+        # contains no Read-Host, and a raw match reads that sentence as a prompt.
+        $commands | Should -Not -Contain 'Read-Host'
     }
 }
 
@@ -103,6 +158,34 @@ Describe 'SkyCraft PowerShell - deployment scripts stay automatable' {
     It "'<file>' declares a -Force switch so the confirmation can be skipped" -ForEach $DeployPromptCases {
         $content = Get-Content -Raw -LiteralPath $path
         $content | Should -Match '\[switch\]\$Force'
+    }
+}
+
+Describe 'SkyCraft PowerShell - deploy scripts preview with a real what-if' {
+
+    # docs/bicep-standards.md 6.4: every deployment must be previewable with what-if. Before
+    # issue #74 ten of the sixteen deploy scripts had no what-if at all and Lab 3.2's was a
+    # print-and-exit stub, so -WhatIf reported success having previewed nothing.
+
+    It "'<file>' declares a -WhatIf switch" -ForEach $DeployBicepCases {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match '\[switch\]\$WhatIf'
+    }
+
+    It "'<file>' documents -WhatIf in its comment-based help" -ForEach $DeployBicepCases {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match '\.PARAMETER WhatIf'
+        $content | Should -Match '(?m)^\s+\.\\Deploy-Bicep\.ps1.*-WhatIf'
+    }
+
+    It "'<file>' calls the ARM what-if API inside its -WhatIf branch" -ForEach $DeployBicepCases {
+        $whatIfBody | Should -Not -BeNullOrEmpty -Because 'the script must branch on its own $WhatIf switch'
+        $whatIfBody | Should -Match 'Get-AzSubscriptionDeploymentWhatIfResult' -Because 'a what-if that prints a message and exits previews nothing (#74)'
+    }
+
+    It "'<file>' deploys nothing from its -WhatIf branch" -ForEach $DeployBicepCases {
+        $whatIfBody | Should -Not -Match 'New-Az(Subscription)?Deployment'
+        $whatIfBody | Should -Not -Match 'New-AzResourceGroupDeployment'
     }
 }
 

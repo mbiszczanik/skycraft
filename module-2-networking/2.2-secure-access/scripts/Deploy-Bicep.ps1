@@ -20,9 +20,18 @@
 .PARAMETER PlatformResourceGroup
     The platform resource group name. Default: 'platform-skycraft-swc-rg'
 
+.PARAMETER WhatIf
+    Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
+    The Bastion prompt is skipped in this mode and the preview is built with Bastion off -
+    the same answer an unattended cycle gives, and the one that costs nothing.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1
     Deploys to default resource groups in Sweden Central.
+
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -WhatIf
+    Previews the ASG/NSG deployment (Bastion off) without changing anything.
 
 .NOTES
     Project: SkyCraft
@@ -46,7 +55,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$PlatformResourceGroup = 'platform-skycraft-swc-rg'
+    [string]$PlatformResourceGroup = 'platform-skycraft-swc-rg',
+
+    [Parameter(Mandatory = $false)]
+    [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
@@ -75,12 +87,20 @@ if (-not (Test-Path $mainBicep)) {
 
 Write-Host "`nDeploying Lab 2.2 resources..." -ForegroundColor Cyan
 
-# Ask user about Bastion deployment
-Write-Host "`n[OPTIONAL] Azure Bastion provides secure RDP/SSH access without public IPs." -ForegroundColor Yellow
-Write-Host "Cost: ~$140/month | Deployment time: ~15 minutes" -ForegroundColor Gray
-$deployBastion = Read-Host "Do you want to deploy Azure Bastion? (y/N)"
+# Ask user about Bastion deployment. A what-if run answers the prompt for the caller:
+# it changes nothing, so blocking a preview on stdin would only break non-interactive
+# callers, and 'no' is the answer that keeps the ~$140/month meter off.
+if ($WhatIf) {
+    Write-Host "`n[OPTIONAL] Azure Bastion prompt skipped in what-if mode - previewing with Bastion off." -ForegroundColor Gray
+    $shouldDeployBastion = $false
+}
+else {
+    Write-Host "`n[OPTIONAL] Azure Bastion provides secure RDP/SSH access without public IPs." -ForegroundColor Yellow
+    Write-Host "Cost: ~$140/month | Deployment time: ~15 minutes" -ForegroundColor Gray
+    $deployBastion = Read-Host "Do you want to deploy Azure Bastion? (y/N)"
 
-$shouldDeployBastion = ($deployBastion -eq 'y' -or $deployBastion -eq 'Y')
+    $shouldDeployBastion = ($deployBastion -eq 'y' -or $deployBastion -eq 'Y')
+}
 
 if ($shouldDeployBastion) {
     Write-Host "  -> Bastion will be deployed" -ForegroundColor Green
@@ -99,12 +119,22 @@ try {
         parDeployBastion             = $shouldDeployBastion
     }
 
-    $deployment = New-AzSubscriptionDeployment `
-        -Name $deploymentName `
-        -Location $Location `
-        -TemplateFile $mainBicep `
-        -TemplateParameterObject $params `
-        -Verbose
+    $deployParams = @{
+        Name                    = $deploymentName
+        Location                = $Location
+        TemplateFile            = $mainBicep
+        TemplateParameterObject = $params
+        ErrorAction             = 'Stop'
+    }
+
+    if ($WhatIf) {
+        Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
+        Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+        Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
+        exit 0
+    }
+
+    $deployment = New-AzSubscriptionDeployment @deployParams -Verbose
 
     if ($deployment.ProvisioningState -eq 'Succeeded') {
         Write-Host "`n[SUCCESS] Deployment completed successfully!" -ForegroundColor Green
@@ -113,6 +143,8 @@ try {
     }
     else {
         Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        $Host.SetShouldExit(1)
+        exit 1
     }
 }
 catch {

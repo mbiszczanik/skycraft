@@ -163,6 +163,12 @@ if ($WhatIf) {
     $result
     Write-Host "`n  What-if completed. Review changes above." -ForegroundColor Cyan
 } else {
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host "`n  [FAILED] Deployment finished with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        $Host.SetShouldExit(1)
+        exit 1
+    }
+
     Write-Host "  ✓ Vaults deployed successfully!" -ForegroundColor Green
     $rsvId = $deployment.Outputs['outRsvId'].Value
     $bvPrincipalId = $deployment.Outputs['outBvPrincipalId'].Value

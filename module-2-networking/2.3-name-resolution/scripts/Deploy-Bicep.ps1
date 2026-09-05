@@ -15,9 +15,16 @@
     Path to the Bicep template to deploy. Defaults to '..\bicep\main.bicep' (relative to
     this script's folder).
 
+.PARAMETER WhatIf
+    Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1
     Deploys the default main.bicep to Sweden Central using the current Az context.
+
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -WhatIf
+    Previews the DNS and load balancer deployment without changing anything.
 
 .NOTES
     Project: SkyCraft
@@ -39,7 +46,10 @@ param(
     # the only script in the repository that had to be run from its own scripts/ folder (#75).
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$TemplateFile = (Join-Path $PSScriptRoot '..\bicep\main.bicep')
+    [string]$TemplateFile = (Join-Path $PSScriptRoot '..\bicep\main.bicep'),
+
+    [Parameter(Mandatory = $false)]
+    [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,11 +68,21 @@ if (-not (Test-Path $TemplateFile)) {
 Write-Host "Starting deployment: $deploymentName..." -ForegroundColor Yellow
 
 try {
-    $deployment = New-AzDeployment `
-        -Name $deploymentName `
-        -Location $Location `
-        -TemplateFile $TemplateFile `
-        -Verbose
+    $deployParams = @{
+        Name         = $deploymentName
+        Location     = $Location
+        TemplateFile = $TemplateFile
+        ErrorAction  = 'Stop'
+    }
+
+    if ($WhatIf) {
+        Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
+        Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+        Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
+        exit 0
+    }
+
+    $deployment = New-AzDeployment @deployParams -Verbose
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red

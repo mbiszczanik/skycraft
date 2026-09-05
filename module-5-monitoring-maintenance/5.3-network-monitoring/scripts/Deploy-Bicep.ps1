@@ -240,6 +240,12 @@ if ($WhatIf) {
     $result
     Write-Host "`n  What-if completed. Review changes above." -ForegroundColor Cyan
 } else {
+    if ($deployment.ProvisioningState -ne 'Succeeded') {
+        Write-Host "`n  [FAILED] Deployment finished with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        $Host.SetShouldExit(1)
+        exit 1
+    }
+
     Write-Host "  ✓ Deployment succeeded!" -ForegroundColor Green
     Write-Host "`n  Outputs:"
     Write-Host "    Flow Log ID:            $($deployment.Outputs['outFlowLogId'].Value)"

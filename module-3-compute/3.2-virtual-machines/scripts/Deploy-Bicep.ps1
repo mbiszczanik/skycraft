@@ -22,7 +22,7 @@
     Path to SSH public key file. Default: $HOME\.ssh\skycraft-dev.pub
 
 .PARAMETER WhatIf
-    Run deployment in what-if mode (dry run)
+    Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
 
 .PARAMETER Force
     Skip the confirmation prompt so the script can run non-interactively
@@ -200,7 +200,9 @@ try {
     }
 
     if ($WhatIf) {
-        Write-Host "  What-if mode: run 'az deployment sub what-if' for ARM preview. Skipping deployment." -ForegroundColor Cyan
+        Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
+        Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+        Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
         exit 0
     } else {
         $deployment = New-AzSubscriptionDeployment @deployParams

@@ -103,12 +103,18 @@ Two things to know before copying anything below:
 - **`az deployment sub what-if` is read-only.** It previews the change set and deploys nothing.
 - **Labs are cumulative.** A what-if for a later lab reports the resources an earlier lab was supposed to create as missing if that lab was never deployed. Work through a module in order.
 
-Labs 3.1, 3.2, 5.1, 5.2 and 5.3 have a `-WhatIf` switch on their own `Deploy-Bicep.ps1`. Prefer it over the raw `az` command wherever the checked-in parameter file cannot stand on its own:
+Every lab's `Deploy-Bicep.ps1` now takes a `-WhatIf` switch (issue #74) that runs
+`Get-AzSubscriptionDeploymentWhatIfResult` with the same arguments the real deployment would use,
+prints the ARM change set and exits 0 without deploying. **Prefer it over a raw `az` command**: it
+previews exactly what the script would send, including the values the script resolves at run time,
+which a raw command against the checked-in parameter file cannot always reproduce:
 
 - **Module 5 (5.1, 5.2, 5.3)**: the `.bicepparam` files carry well-formed **placeholder** resource IDs under the zero subscription GUID, purely so `az bicep build-params` can validate them offline against `@minLength(1)`. The deploy scripts resolve the real IDs from Azure at run time, so a raw what-if for these labs previews against the placeholders and is not meaningful.
 - **Lab 3.2**: `parSshPublicKey` is read from the `SKYCRAFT_SSH_PUBLIC_KEY` environment variable and defaults to empty. `Deploy-Bicep.ps1` supplies the key directly.
+- **Lab 4.4**: `parClientIp` is auto-detected by the script; a raw what-if previews an empty firewall rule instead.
 
-Labs 3.1, and every lab in Modules 1, 2 and 4, have self-contained parameter files, so the raw `az deployment sub what-if` form below is accurate for them.
+The raw `az deployment sub what-if` form is still listed where the script does not cover a template:
+Lab 1.2's `role-assignments.bicep` and Lab 3.3's resource-group-scope `acr.bicep` bootstrap.
 
 All commands are written to be run from the repository root.
 
@@ -120,8 +126,7 @@ All commands are written to be run from the repository root.
 .\module-1-identities-governance\1.1-entra-users-groups\scripts\Remove-LabResource.ps1 -WhatIf
 
 # Lab 1.2 - RBAC
-az deployment sub what-if --location swedencentral `
-    --parameters module-1-identities-governance/1.2-rbac/bicep/parameters/resource-groups.bicepparam
+.\module-1-identities-governance\1.2-rbac\scripts\Deploy-Bicep.ps1 -WhatIf
 # role-assignments.bicep has no parameter file: its four principal IDs are Entra object IDs
 # that only exist once Lab 1.1 has run, so pass them explicitly.
 az deployment sub what-if --location swedencentral `
@@ -132,8 +137,7 @@ az deployment sub what-if --location swedencentral `
 .\module-1-identities-governance\1.2-rbac\scripts\Remove-LabResource.ps1 -WhatIf
 
 # Lab 1.3 - Governance
-az deployment sub what-if --location swedencentral `
-    --parameters module-1-identities-governance/1.3-governance/bicep/parameters/main.bicepparam
+.\module-1-identities-governance\1.3-governance\scripts\Deploy-Bicep.ps1 -WhatIf
 .\module-1-identities-governance\1.3-governance\scripts\Test-Lab.ps1
 .\module-1-identities-governance\1.3-governance\scripts\Remove-LabResource.ps1 -WhatIf
 ```
@@ -142,20 +146,17 @@ az deployment sub what-if --location swedencentral `
 
 ```powershell
 # Lab 2.1 - Virtual networks
-az deployment sub what-if --location swedencentral `
-    --parameters module-2-networking/2.1-virtual-networks/bicep/parameters/main.bicepparam
+.\module-2-networking\2.1-virtual-networks\scripts\Deploy-Bicep.ps1 -WhatIf
 .\module-2-networking\2.1-virtual-networks\scripts\Test-Lab.ps1
 .\module-2-networking\2.1-virtual-networks\scripts\Remove-LabResource.ps1 -WhatIf
 
-# Lab 2.2 - Secure access
-az deployment sub what-if --location swedencentral `
-    --parameters module-2-networking/2.2-secure-access/bicep/parameters/main.bicepparam
+# Lab 2.2 - Secure access (-WhatIf skips the Bastion prompt and previews with Bastion off)
+.\module-2-networking\2.2-secure-access\scripts\Deploy-Bicep.ps1 -WhatIf
 .\module-2-networking\2.2-secure-access\scripts\Test-Lab.ps1
 .\module-2-networking\2.2-secure-access\scripts\Remove-LabResource.ps1 -WhatIf
 
 # Lab 2.3 - Name resolution
-az deployment sub what-if --location swedencentral `
-    --parameters module-2-networking/2.3-name-resolution/bicep/parameters/main.bicepparam
+.\module-2-networking\2.3-name-resolution\scripts\Deploy-Bicep.ps1 -WhatIf
 .\module-2-networking\2.3-name-resolution\scripts\Test-Lab.ps1
 .\module-2-networking\2.3-name-resolution\scripts\Remove-LabResource.ps1 -WhatIf
 ```
@@ -164,10 +165,8 @@ az deployment sub what-if --location swedencentral `
 
 ```powershell
 # Lab 3.1 - Infrastructure as code (dev and prod parameter sets)
-az deployment sub what-if --location swedencentral `
-    --parameters module-3-compute/3.1-infrastructure-as-code/bicep/parameters/dev.bicepparam
-az deployment sub what-if --location swedencentral `
-    --parameters module-3-compute/3.1-infrastructure-as-code/bicep/parameters/prod.bicepparam
+.\module-3-compute\3.1-infrastructure-as-code\scripts\Deploy-Bicep.ps1 -Environment dev -WhatIf
+.\module-3-compute\3.1-infrastructure-as-code\scripts\Deploy-Bicep.ps1 -Environment prod -WhatIf
 .\module-3-compute\3.1-infrastructure-as-code\scripts\Test-Lab.ps1
 .\module-3-compute\3.1-infrastructure-as-code\scripts\Remove-LabResource.ps1 -WhatIf
 
@@ -176,9 +175,8 @@ az deployment sub what-if --location swedencentral `
 .\module-3-compute\3.2-virtual-machines\scripts\Test-Lab.ps1
 .\module-3-compute\3.2-virtual-machines\scripts\Remove-LabResource.ps1 -WhatIf
 
-# Lab 3.3 - Containers
-az deployment sub what-if --location swedencentral `
-    --parameters module-3-compute/3.3-containers/bicep/parameters/main.bicepparam
+# Lab 3.3 - Containers (-WhatIf previews main.bicep only; the ACR bootstrap is skipped, not simulated)
+.\module-3-compute\3.3-containers\scripts\Deploy-Bicep.ps1 -WhatIf
 # acr.bicep is the resource-group-scope bootstrap that Deploy-Bicep.ps1 runs first:
 az deployment group what-if --resource-group dev-skycraft-swc-rg `
     --template-file module-3-compute/3.3-containers/bicep/acr.bicep
@@ -186,8 +184,7 @@ az deployment group what-if --resource-group dev-skycraft-swc-rg `
 .\module-3-compute\3.3-containers\scripts\Remove-LabResource.ps1 -WhatIf
 
 # Lab 3.4 - App Service
-az deployment sub what-if --location swedencentral `
-    --parameters module-3-compute/3.4-app-service/bicep/parameters/main.bicepparam
+.\module-3-compute\3.4-app-service\scripts\Deploy-Bicep.ps1 -WhatIf
 .\module-3-compute\3.4-app-service\scripts\Test-Lab.ps1
 .\module-3-compute\3.4-app-service\scripts\Remove-LabResource.ps1 -WhatIf
 ```
@@ -198,33 +195,29 @@ Module 4 labs are cumulative forward and must be previewed in order — every la
 
 ```powershell
 # Lab 4.1 - Storage accounts
-az deployment sub what-if --location swedencentral `
-    --parameters module-4-storage/4.1-storage-accounts/bicep/parameters/main.bicepparam
+.\module-4-storage\4.1-storage-accounts\scripts\Deploy-Bicep.ps1 -All -WhatIf
 .\module-4-storage\4.1-storage-accounts\scripts\Test-Lab.ps1
 .\module-4-storage\4.1-storage-accounts\scripts\Remove-LabResource.ps1 -WhatIf
 
 # Lab 4.2 - Blob storage
-az deployment sub what-if --location swedencentral `
-    --parameters module-4-storage/4.2-blob-storage/bicep/parameters/main.bicepparam
+.\module-4-storage\4.2-blob-storage\scripts\Deploy-Bicep.ps1 -WhatIf
 .\module-4-storage\4.2-blob-storage\scripts\Test-Lab.ps1
 .\module-4-storage\4.2-blob-storage\scripts\Remove-LabResource.ps1 -WhatIf
 
 # Lab 4.3 - Azure Files
-az deployment sub what-if --location swedencentral `
-    --parameters module-4-storage/4.3-azure-files/bicep/parameters/main.bicepparam
+.\module-4-storage\4.3-azure-files\scripts\Deploy-Bicep.ps1 -Environment prod -WhatIf
 .\module-4-storage\4.3-azure-files\scripts\Test-Lab.ps1
 .\module-4-storage\4.3-azure-files\scripts\Remove-LabResource.ps1 -WhatIf
 
 # Lab 4.4 - Storage security
-az deployment sub what-if --location swedencentral `
-    --parameters module-4-storage/4.4-storage-security/bicep/parameters/main.bicepparam
+.\module-4-storage\4.4-storage-security\scripts\Deploy-Bicep.ps1 -Environment prod -WhatIf
 .\module-4-storage\4.4-storage-security\scripts\Test-Lab.ps1
 .\module-4-storage\4.4-storage-security\scripts\Remove-LabResource.ps1 -WhatIf
 ```
 
 ### 4.5 Module 5 — Monitoring and Maintenance
 
-Every Module 5 lab resolves resource IDs from Azure at run time, so use the deploy script's own `-WhatIf` rather than a raw `az` command.
+Every Module 5 lab resolves resource IDs from Azure at run time, so the deploy script's own `-WhatIf` is the only meaningful preview here - a raw `az` command would preview the placeholder IDs.
 
 ```powershell
 # Lab 5.1 - Azure Monitor (-OpsEmail is mandatory)
