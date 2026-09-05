@@ -18,50 +18,11 @@ By completing this lab, you will:
 
 You'll deploy this VM infrastructure for SkyCraft game servers:
 
-```mermaid
-graph TB
-    subgraph "platform-skycraft-swc-rg"
-        Bastion[Azure Bastion<br/>platform-skycraft-swc-bas]
-        HubVNet[platform-skycraft-swc-vnet<br/>10.0.0.0/16]
-    end
-
-    subgraph "dev-skycraft-swc-rg"
-        DevVNet[dev-skycraft-swc-vnet<br/>10.1.0.0/16]
-
-        subgraph "Availability Zone 1"
-            AuthVM[dev-skycraft-swc-auth-vm<br/>Ubuntu 22.04 LTS<br/>Standard_B2ls_v2<br/>Port 3724]
-        end
-
-        subgraph "Availability Zone 2"
-            WorldVM[dev-skycraft-swc-world-vm<br/>Ubuntu 22.04 LTS<br/>Standard_B2ls_v2<br/>Port 8085]
-        end
-
-        AuthDisk[OS Disk<br/>30 GB Standard SSD<br/>Encrypted]
-        WorldDisk[OS Disk<br/>30 GB Standard SSD<br/>Encrypted]
-        DataDisk[Data Disk<br/>64 GB Standard SSD<br/>Database Storage]
-
-        DevLB[dev-skycraft-swc-lb<br/>Standard Load Balancer]
-    end
-
-    Bastion -->|SSH via Bastion| AuthVM
-    Bastion -->|SSH via Bastion| WorldVM
-
-    HubVNet <-->|Peering| DevVNet
-
-    AuthVM --> AuthDisk
-    WorldVM --> WorldDisk
-    WorldVM --> DataDisk
-
-    DevLB -->|Port 3724| AuthVM
-    DevLB -->|Port 8085| WorldVM
-
-    style Bastion fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px
-    style AuthVM fill:#4CAF50,stroke:#2E7D32,stroke-width:3px
-    style WorldVM fill:#4CAF50,stroke:#2E7D32,stroke-width:3px
-    style DevLB fill:#FF9800,stroke:#F57C00,stroke-width:2px
-    style HubVNet fill:#e1f5ff,stroke:#0078d4,stroke-width:2px
-    style DevVNet fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-3.2-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-3.2-architecture.svg">
+  <img src="images/lab-3.2-architecture.svg" width="100%" alt="Lab 3.2 architecture: VMs across availability zones">
+</picture>
 
 ---
 

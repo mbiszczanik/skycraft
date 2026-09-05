@@ -38,39 +38,11 @@ By completing this module, you will be able to:
 
 This module deploys compute resources into the network topology built in Module 2:
 
-```mermaid
-graph TB
-    subgraph "Hub VNet (Platform)"
-        Bastion[Azure Bastion<br/>Secure Admin Access]
-    end
-
-    subgraph "Dev Spoke (dev-skycraft-swc-vnet)"
-        DevAuth[Auth VM<br/>AuthSubnet: 10.1.1.0/24]
-        DevWorld[World VM<br/>WorldSubnet: 10.1.2.0/24]
-    end
-
-    subgraph "Prod Spoke (prod-skycraft-swc-vnet)"
-        ProdAuth[Auth VM<br/>AuthSubnet: 10.2.1.0/24]
-        ProdVMSS[World VMSS<br/>WorldSubnet: 10.2.2.0/24]
-    end
-
-    subgraph "Platform Services"
-        ACR[Azure Container Registry]
-        AppSvc[App Service<br/>Admin Dashboard]
-    end
-
-    Bastion -->|Manage| DevAuth
-    Bastion -->|Manage| ProdAuth
-    ACR -->|Images| ProdVMSS
-
-    style Bastion fill:#e1f5ff
-    style DevAuth fill:#fff4e1
-    style DevWorld fill:#fff4e1
-    style ProdAuth fill:#ffe1e1
-    style ProdVMSS fill:#ffe1e1
-    style ACR fill:#e8f5e9
-    style AppSvc fill:#e8f5e9
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/module-3-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/module-3-architecture.svg">
+  <img src="images/module-3-architecture.svg" width="100%" alt="Module 3 architecture: compute services">
+</picture>
 
 ---
 

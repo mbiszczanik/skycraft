@@ -16,28 +16,11 @@ By completing this lab, you will:
 
 You will deploy a containerized environment for the SkyCraft authentication service:
 
-```mermaid
-graph TB
-    subgraph "dev-skycraft-swc-rg"
-        ACR[Azure Container Registry<br/>devskycraftswcacr01]
-
-        subgraph "Container Instances"
-            ACI[ACI: dev-skycraft-swc-aci-auth<br/>Image: skycraft-auth:v1]
-        end
-
-        subgraph "Container Apps Environment"
-            CAE[dev-skycraft-swc-cae]
-            ACA[Container App: dev-skycraft-swc-aca-world]
-        end
-    end
-
-    ACR -->|Pulls Image| ACI
-    ACR -->|Pulls Image| ACA
-
-    style ACR fill:#e1f5ff,stroke:#0078d4
-    style ACI fill:#fff4e1,stroke:#f39c12
-    style ACA fill:#fff4e1,stroke:#f39c12
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-3.3-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-3.3-architecture.svg">
+  <img src="images/lab-3.3-architecture.svg" width="100%" alt="Lab 3.3 architecture: container registry, ACI and Container Apps">
+</picture>
 
 ## 📋 Real-World Scenario
 

@@ -18,37 +18,11 @@ By completing this lab, you will:
 
 You'll deploy this PaaS infrastructure for the SkyCraft monitoring dashboard:
 
-```mermaid
-graph TB
-    subgraph "dev-skycraft-swc-rg"
-        ASP[App Service Plan<br/>dev-skycraft-swc-asp<br/>Premium V4 P0V4]
-
-        WebApp[App Service<br/>dev-skycraft-swc-app01]
-
-        subgraph "Deployment Slots"
-            Prod[Production Slot]
-            Staging[Staging Slot]
-        end
-
-        WebApp --> ASP
-        Prod --> ASP
-        Staging --> ASP
-    end
-
-    subgraph "dev-skycraft-swc-vnet"
-        subgraph "IntegratedSubnet"
-            VNetInt[VNet Integration]
-        end
-    end
-
-    WebApp -->|VNet Integration| VNetInt
-
-    style ASP fill:#e1f5ff,stroke:#0078d4,stroke-width:2px
-    style WebApp fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px
-    style Prod fill:#4CAF50,stroke:#2E7D32,stroke-width:1px
-    style Staging fill:#FF9800,stroke:#F57C00,stroke-width:1px
-    style VNetInt fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-3.4-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-3.4-architecture.svg">
+  <img src="images/lab-3.4-architecture.svg" width="100%" alt="Lab 3.4 architecture: App Service plan, slots and VNet integration">
+</picture>
 
 ---
 
