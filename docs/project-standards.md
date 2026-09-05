@@ -21,7 +21,7 @@ Every module-level `README.md` **must** contain the following 13 sections in thi
 | 1   | **Module Overview** (`📚`)        | Description + real-world context paragraph         |
 | 2   | **Learning Objectives** (`🎯`)    | Bulleted list with bold action verbs               |
 | 3   | **Module Sections** (`📋`)        | Table with Lab, Duration, Topic, Exam Weight       |
-| 4   | **Architecture Overview** (`🏗️`)  | Mermaid diagram showing resource relationships     |
+| 4   | **Architecture Overview** (`🏗️`)  | Excalidraw SVG showing resource relationships      |
 | 5   | **Prerequisites** (`✅`)          | Checklist with prior module verification steps     |
 | 6   | **Getting Started** (`🚀`)        | Numbered step-by-step to begin labs                |
 | 7   | **How to Use This Module** (`📖`) | Lab resource descriptions + recommended approach   |
@@ -56,6 +56,9 @@ Every module-level `README.md` **must** contain the following 13 sections in thi
   - Example: `vnet-peering-connected.png`
 - **Referencing**: Use relative paths in Markdown.
   - Example: `![VNet Peering Status](images/vnet-peering-connected.png)`
+- **Architecture diagrams**: Committed as `.excalidraw` source plus light and dark
+  `.svg` renders, embedded with `<picture>`. Authoring and layout rules are in
+  [lab-guide-standards.md §3](lab-guide-standards.md).
 
 ---
 

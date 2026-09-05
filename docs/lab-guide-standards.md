@@ -33,7 +33,7 @@ Every lab guide must include these sections with their emojis:
 | --------------------- | ----- | ------------------------------------------------ |
 | Title                 | n/a   | `# Lab X.Y: [Title] ([Duration] hours)`          |
 | Learning Objectives   | 🎯    | 5-7 measurable outcomes with AZ-104 action verbs |
-| Architecture Overview | 🏗️    | **MANDATORY** Mermaid diagram                    |
+| Architecture Overview | 🏗️    | **MANDATORY** Excalidraw SVG (see §3)            |
 | Real-World Scenario   | 📋    | Business context with SkyCraft deployment        |
 | Estimated Time        | ⏱️    | Section-by-section breakdown (must sum to total) |
 | Prerequisites         | ✅    | Dependencies, roles, verification CLI block      |
@@ -48,9 +48,88 @@ Every lab guide must include these sections with their emojis:
 
 ---
 
-## 3. Mermaid Diagram Requirements
+## 3. Architecture Diagram Requirements
 
-**Color Scheme** (MANDATORY):
+The Architecture Overview diagram is authored in **Excalidraw** and committed as
+**SVG**, one light and one dark render. Rationale and the alternatives we rejected
+are in [ADR-0004](adr/0004-excalidraw-svg-for-lab-diagrams.md).
+
+### 3.1 The two hard rules
+
+Both were established by measuring real renders on github.com. Breaking either
+produces a diagram that technically displays but fails the reader.
+
+**Rule 1 — author at 860 units wide or less.**
+
+GitHub's README column is ~861 css px on a 1280 px laptop. A diagram wider than
+that is scaled down, and the scale factor lands directly on the text:
+
+| Authored width | Rendered scale @1280 px | 11 px body text becomes |
+| -------------- | ----------------------- | ----------------------- |
+| 1900 units     | 0.45x                   | 5.4 px — unreadable     |
+| 860 units      | 1.00x                   | 11.0 px — as authored   |
+
+Consequence for layout: stack sections **vertically**. A three-column landscape
+composition cannot hold detail at this width.
+
+**Rule 2 — nothing in the source may be deliberately dark.**
+
+The dark variant is produced by Excalidraw's export, which is a colour
+**inversion**, not a second palette. Any element authored dark inverts to light.
+Code and evidence panels therefore use a light fill (`#e2e8f0`, border `#cbd5e1`)
+with dark text (`#166534` for code), never a dark terminal-style panel.
+
+### 3.2 Content requirements
+
+- Resource group boundaries as labelled regions
+- Resource names following `project-standards.md`
+- CIDR ranges for every network
+- Relationship arrows with labels
+- At least one **evidence artifact**: a real `az` command, a real API response, or
+  a real error message from the lab — not a placeholder
+
+### 3.3 Files and rendering
+
+Committed per diagram, in the lab's `images/` folder:
+
+```text
+lab-X.Y-architecture.excalidraw     # source of truth, hand-editable
+lab-X.Y-architecture.svg            # light
+lab-X.Y-architecture.dark.svg       # dark
+```
+
+Render with the `excalidraw-diagram` skill's renderer:
+
+```bash
+cd ~/.claude/skills/excalidraw-diagram/references
+uv run python render_excalidraw.py --format svg            <file>.excalidraw
+uv run python render_excalidraw.py --format svg --theme dark <file>.excalidraw
+```
+
+### 3.4 Embedding
+
+Always use `<picture>` so the diagram follows the reader's theme. A bare
+`![](…svg)` shows a white slab to everyone on GitHub's dark theme.
+
+```html
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-X.Y-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-X.Y-architecture.svg">
+  <img src="images/lab-X.Y-architecture.svg" width="100%" alt="Lab X.Y architecture">
+</picture>
+```
+
+GitHub serves these SVGs byte-for-byte, keeps the `<style>` block, and loads the
+embedded `@font-face`, so the render matches local output exactly.
+
+### 3.5 Mermaid (legacy, being phased out)
+
+Lab guides not yet converted still carry a Mermaid block. Do not add new ones.
+When touching an existing Mermaid diagram, convert it rather than patching it —
+and check for missing containment edges, which are a known defect in several of
+the originals (subnets declared but never connected to their VNet).
+
+Colour scheme for the diagrams still on Mermaid:
 
 | Element       | Fill                                                               | Stroke    | Width |
 | ------------- | ------------------------------------------------------------------ | --------- | ----- |
@@ -58,13 +137,6 @@ Every lab guide must include these sections with their emojis:
 | Development   | `#fff4e1`                                                          | `#f39c12` | 2px   |
 | Production    | `#ffe1e1`                                                          | `#e74c3c` | 2px   |
 | Key resources | Accent colors: green `#4CAF50`, purple `#9C27B0`, orange `#FF9800` | —         | —     |
-
-**Must Include**:
-
-- Resource group boundaries (`subgraph`)
-- Resource names following `project-standards.md`
-- CIDR ranges for networks
-- Relationship arrows with labels
 
 ---
 
@@ -218,7 +290,7 @@ Before finalizing any lab guide, verify:
 
 - [ ] Title includes lab number and duration
 - [ ] 5-7 clear learning objectives (AZ-104 action verbs)
-- [ ] **Mermaid diagram included** with standard color scheme
+- [ ] **Architecture diagram included** — Excalidraw source + light/dark SVG, authored ≤860 units wide, embedded via `<picture>`
 - [ ] Real-world scenario provides business context
 - [ ] **SkyCraft Choice** callout included (≥1, explains architectural decision)
 - [ ] **Multi-modal instructions** (Portal + CLI + PowerShell) for all steps
