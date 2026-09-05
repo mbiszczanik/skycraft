@@ -36,7 +36,7 @@
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
 # All five modules (1-5) now ship the full L004 13-section contract, including the
-# '🏗️ Architecture Overview' Mermaid section. No module is excluded.
+# '🏗️ Architecture Overview' diagram. No module is excluded.
 $ExcludedModules = @()
 
 $Modules  = Get-ChildItem -Path $RepoRoot -Directory -Filter 'module-*' |
@@ -83,9 +83,38 @@ Describe 'Module README - L004 section order' {
     }
 }
 
-Describe 'Module README - Mermaid diagram in section 4' {
-    It "'<module>' embeds a Mermaid diagram in section 4" -ForEach $Modules {
+Describe 'Module README - architecture diagram in section 4' {
+    It "'<module>' embeds a theme-aware architecture diagram in section 4" -ForEach $Modules {
         $raw = Get-Content -Raw -LiteralPath $readme
-        $raw | Should -Match '```mermaid' -Because "module '$module' must contain at least one Mermaid code block (L004 section 4)"
+
+        $raw | Should -Match '<picture>' -Because "module '$module' must embed its architecture diagram through <picture> (lab-guide-standards.md section 3.4)"
+        $raw | Should -Match 'prefers-color-scheme: dark' -Because "module '$module' must offer a dark variant of the diagram"
+        $raw | Should -Match 'srcset="images/module-\d-architecture\.dark\.svg"' -Because "module '$module' must point at its own dark SVG"
+        $raw | Should -Match 'src="images/module-\d-architecture\.svg"' -Because "module '$module' must keep a plain <img> fallback"
+        $raw | Should -Not -Match '```mermaid' -Because "Mermaid is legacy — module '$module' should carry no Mermaid block (ADR-0004)"
+    }
+
+    It "'<module>' ships every file its <picture> block references" -ForEach $Modules {
+        $dir = Split-Path -Parent $readme
+        $raw = Get-Content -Raw -LiteralPath $readme
+
+        $referenced = [regex]::Matches($raw, '(?:srcset|src)="(images/[^"]+)"') |
+                      ForEach-Object { $_.Groups[1].Value } |
+                      Select-Object -Unique
+
+        $referenced.Count | Should -BeGreaterThan 0 -Because "module '$module' must reference at least one diagram file"
+
+        foreach ($relative in $referenced) {
+            $full = Join-Path $dir $relative
+            Test-Path -LiteralPath $full | Should -BeTrue -Because "module '$module' references '$relative', which must exist on disk"
+        }
+    }
+
+    It "'<module>' keeps the editable Excalidraw source next to the renders" -ForEach $Modules {
+        $dir    = Split-Path -Parent $readme
+        $source = Join-Path $dir 'images/module-*-architecture.excalidraw'
+
+        @(Get-ChildItem -Path $source -File -ErrorAction SilentlyContinue).Count |
+            Should -BeGreaterThan 0 -Because "module '$module' must commit the .excalidraw source, not only the renders (lab-guide-standards.md section 3.3)"
     }
 }
