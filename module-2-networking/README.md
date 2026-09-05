@@ -38,35 +38,11 @@ By completing this module, you will be able to:
 
 This module builds a **hub-spoke network topology** following Azure best practices:
 
-```mermaid
-graph TB
-    subgraph "Hub VNet (Platform)"
-        Hub[platform-skycraft-swc-vnet<br/>10.0.0.0/16]
-        Bastion[Azure Bastion<br/>AzureBastionSubnet]
-        Gateway[Gateway Subnet<br/>Future VPN/ExpressRoute]
-    end
-
-    subgraph "Dev Spoke"
-        DevVNet[dev-skycraft-swc-vnet<br/>10.1.0.0/16]
-        DevAuth[AuthSubnet: 10.1.1.0/24]
-        DevWorld[WorldSubnet: 10.1.2.0/24]
-        DevDB[DatabaseSubnet: 10.1.3.0/24]
-    end
-
-    subgraph "Prod Spoke"
-        ProdVNet[prod-skycraft-swc-vnet<br/>10.2.0.0/16]
-        ProdAuth[AuthSubnet: 10.2.1.0/24]
-        ProdWorld[WorldSubnet: 10.2.2.0/24]
-        ProdDB[DatabaseSubnet: 10.2.3.0/24]
-    end
-
-    Hub -->|VNet Peering| DevVNet
-    Hub -->|VNet Peering| ProdVNet
-
-    style Hub fill:#e1f5ff
-    style DevVNet fill:#fff4e1
-    style ProdVNet fill:#ffe1e1
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/module-2-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/module-2-architecture.svg">
+  <img src="images/module-2-architecture.svg" width="100%" alt="Module 2 architecture: hub-spoke networking baseline">
+</picture>
 
 ---
 
