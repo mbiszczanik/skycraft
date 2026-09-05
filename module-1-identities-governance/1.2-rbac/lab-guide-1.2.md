@@ -16,23 +16,11 @@ By completing this lab, you will:
 
 You will configure the following Resource Groups and Role Assignments:
 
-```mermaid
-graph TB
-    subgraph "Subscription (Owner: Malfurion)"
-        DevRG[dev-skycraft-swc-rg]
-        ProdRG[prod-skycraft-swc-rg]
-        SharedRG[platform-skycraft-swc-rg]
-    end
-
-    DevGroup[SkyCraft-Developers] -->|Contributor| DevRG
-    TestersGroup[SkyCraft-Testers] -->|Reader| DevRG
-    TestersGroup -->|Reader| ProdRG
-    Illidan[Illidan Stormrage] -->|Reader| SharedRG
-
-    style DevRG fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-    style ProdRG fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-    style SharedRG fill:#e1f5ff,stroke:#0078d4,stroke-width:3px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-1.2-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-1.2-architecture.svg">
+  <img src="images/lab-1.2-architecture.svg" width="100%" alt="Lab 1.2 architecture: RBAC role assignments and scope">
+</picture>
 
 ## 📋 Real-World Scenario
 

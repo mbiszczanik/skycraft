@@ -1,0 +1,357 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "https://excalidraw.com",
+  "elements": [
+    {
+      "type": "text", "id": "title", "x": 20, "y": 16, "width": 520, "height": 25,
+      "text": "Lab 1.3 — Governance: policy, locks, budgets",
+      "originalText": "Lab 1.3 — Governance: policy, locks, budgets",
+      "fontSize": 20, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#1e40af", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 100001, "version": 1, "versionNonce": 100002, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "text", "id": "subtitle", "x": 20, "y": 46, "width": 660, "height": 15,
+      "text": "Three guardrails that act at three different moments — and only two of them block anything",
+      "originalText": "Three guardrails that act at three different moments — and only two of them block anything",
+      "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 100003, "version": 1, "versionNonce": 100004, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "line", "id": "divider_top", "x": 20, "y": 74, "width": 820, "height": 0,
+      "strokeColor": "#94a3b8", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "dashed", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 100005, "version": 1, "versionNonce": 100006, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "points": [[0, 0], [820, 0]]
+    },
+
+    {
+      "type": "text", "id": "s1_title", "x": 20, "y": 92, "width": 460, "height": 19,
+      "text": "1 · Three mechanisms, three jobs",
+      "originalText": "1 · Three mechanisms, three jobs",
+      "fontSize": 15, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#1e40af", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200001, "version": 1, "versionNonce": 200002, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "rectangle", "id": "c1", "x": 20, "y": 124, "width": 260, "height": 46,
+      "strokeColor": "#b45309", "backgroundColor": "#fef3c7", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 210001, "version": 1, "versionNonce": 210002, "isDeleted": false,
+      "groupIds": [], "boundElements": [{"id": "c1t", "type": "text"}], "link": null,
+      "locked": false, "roundness": {"type": 3}
+    },
+    {
+      "type": "text", "id": "c1t", "x": 78, "y": 139, "width": 144, "height": 16,
+      "text": "Azure Policy", "originalText": "Azure Policy",
+      "fontSize": 13, "fontFamily": 3, "textAlign": "center", "verticalAlign": "middle",
+      "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 210003, "version": 1, "versionNonce": 210004, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": "c1", "lineHeight": 1.25
+    },
+    {
+      "type": "rectangle", "id": "c2", "x": 300, "y": 124, "width": 260, "height": 46,
+      "strokeColor": "#dc2626", "backgroundColor": "#fee2e2", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 210005, "version": 1, "versionNonce": 210006, "isDeleted": false,
+      "groupIds": [], "boundElements": [{"id": "c2t", "type": "text"}], "link": null,
+      "locked": false, "roundness": {"type": 3}
+    },
+    {
+      "type": "text", "id": "c2t", "x": 358, "y": 139, "width": 144, "height": 16,
+      "text": "Resource lock", "originalText": "Resource lock",
+      "fontSize": 13, "fontFamily": 3, "textAlign": "center", "verticalAlign": "middle",
+      "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 210007, "version": 1, "versionNonce": 210008, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": "c2", "lineHeight": 1.25
+    },
+    {
+      "type": "rectangle", "id": "c3", "x": 580, "y": 124, "width": 260, "height": 46,
+      "strokeColor": "#1e40af", "backgroundColor": "#dbeafe", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "dashed", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 210009, "version": 1, "versionNonce": 210010, "isDeleted": false,
+      "groupIds": [], "boundElements": [{"id": "c3t", "type": "text"}], "link": null,
+      "locked": false, "roundness": {"type": 3}
+    },
+    {
+      "type": "text", "id": "c3t", "x": 638, "y": 139, "width": 144, "height": 16,
+      "text": "Budget + alerts", "originalText": "Budget + alerts",
+      "fontSize": 13, "fontFamily": 3, "textAlign": "center", "verticalAlign": "middle",
+      "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 210011, "version": 1, "versionNonce": 210012, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": "c3", "lineHeight": 1.25
+    },
+    {
+      "type": "text", "id": "c1d", "x": 20, "y": 180, "width": 270, "height": 69,
+      "text": "blocks creation\n\nRequire a tag on resources\nAllowed locations:\n  swedencentral, northeurope",
+      "originalText": "blocks creation\n\nRequire a tag on resources\nAllowed locations:\n  swedencentral, northeurope",
+      "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 210013, "version": 1, "versionNonce": 210014, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "text", "id": "c2d", "x": 300, "y": 180, "width": 270, "height": 69,
+      "text": "blocks deletion\n\nCanNotDelete on\n  prod-skycraft-swc-rg\n  platform-skycraft-swc-rg",
+      "originalText": "blocks deletion\n\nCanNotDelete on\n  prod-skycraft-swc-rg\n  platform-skycraft-swc-rg",
+      "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 210015, "version": 1, "versionNonce": 210016, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "text", "id": "c3d", "x": 580, "y": 180, "width": 270, "height": 69,
+      "text": "blocks nothing\n\nSkyCraft-Monthly-Budget\n  $100, monthly reset\n  alerts at 50 / 80 / 100 %",
+      "originalText": "blocks nothing\n\nSkyCraft-Monthly-Budget\n  $100, monthly reset\n  alerts at 50 / 80 / 100 %",
+      "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 210017, "version": 1, "versionNonce": 210018, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "text", "id": "s1_note", "x": 20, "y": 258, "width": 800, "height": 15,
+      "text": "A budget never stops a deployment. It sends email. Cost control comes from policy, not from the budget.",
+      "originalText": "A budget never stops a deployment. It sends email. Cost control comes from policy, not from the budget.",
+      "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#b91c1c", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 210019, "version": 1, "versionNonce": 210020, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "line", "id": "divider_1", "x": 20, "y": 288, "width": 820, "height": 0,
+      "strokeColor": "#e2e8f0", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 210021, "version": 1, "versionNonce": 210022, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "points": [[0, 0], [820, 0]]
+    },
+
+    {
+      "type": "text", "id": "s2_title", "x": 20, "y": 304, "width": 480, "height": 19,
+      "text": "2 · When each one acts", "originalText": "2 · When each one acts",
+      "fontSize": 15, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#1e40af", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 300001, "version": 1, "versionNonce": 300002, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "line", "id": "s2_spine", "x": 90, "y": 350, "width": 660, "height": 0,
+      "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 300003, "version": 1, "versionNonce": 300004, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "points": [[0, 0], [660, 0]]
+    },
+    {
+      "type": "ellipse", "id": "s2_dot1", "x": 84, "y": 344, "width": 12, "height": 12,
+      "strokeColor": "#3b82f6", "backgroundColor": "#3b82f6", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 300005, "version": 1, "versionNonce": 300006, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false
+    },
+    {
+      "type": "ellipse", "id": "s2_dot2", "x": 304, "y": 344, "width": 12, "height": 12,
+      "strokeColor": "#b45309", "backgroundColor": "#b45309", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 300007, "version": 1, "versionNonce": 300008, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false
+    },
+    {
+      "type": "ellipse", "id": "s2_dot3", "x": 524, "y": 344, "width": 12, "height": 12,
+      "strokeColor": "#dc2626", "backgroundColor": "#dc2626", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 300009, "version": 1, "versionNonce": 300010, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false
+    },
+    {
+      "type": "ellipse", "id": "s2_dot4", "x": 744, "y": 344, "width": 12, "height": 12,
+      "strokeColor": "#1e40af", "backgroundColor": "#1e40af", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 300011, "version": 1, "versionNonce": 300012, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false
+    },
+    {
+      "type": "text", "id": "s2_t1", "x": 20, "y": 366, "width": 140, "height": 28,
+      "text": "deployment\nrequest", "originalText": "deployment\nrequest",
+      "fontSize": 11, "fontFamily": 3, "textAlign": "center", "verticalAlign": "top",
+      "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 300013, "version": 1, "versionNonce": 300014, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "text", "id": "s2_t2", "x": 240, "y": 366, "width": 140, "height": 28,
+      "text": "policy evaluates\ndeny or allow", "originalText": "policy evaluates\ndeny or allow",
+      "fontSize": 11, "fontFamily": 3, "textAlign": "center", "verticalAlign": "top",
+      "strokeColor": "#b45309", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 300015, "version": 1, "versionNonce": 300016, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "text", "id": "s2_t3", "x": 460, "y": 366, "width": 140, "height": 28,
+      "text": "resource lives\nlock guards delete", "originalText": "resource lives\nlock guards delete",
+      "fontSize": 11, "fontFamily": 3, "textAlign": "center", "verticalAlign": "top",
+      "strokeColor": "#dc2626", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 300017, "version": 1, "versionNonce": 300018, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "text", "id": "s2_t4", "x": 680, "y": 366, "width": 140, "height": 28,
+      "text": "cost accrues\nbudget emails", "originalText": "cost accrues\nbudget emails",
+      "fontSize": 11, "fontFamily": 3, "textAlign": "center", "verticalAlign": "top",
+      "strokeColor": "#1e40af", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 300019, "version": 1, "versionNonce": 300020, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "text", "id": "s2_note", "x": 20, "y": 406, "width": 800, "height": 15,
+      "text": "A lock beats RBAC: an Owner still cannot delete a CanNotDelete resource group until the lock is removed.",
+      "originalText": "A lock beats RBAC: an Owner still cannot delete a CanNotDelete resource group until the lock is removed.",
+      "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 300021, "version": 1, "versionNonce": 300022, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "line", "id": "divider_2", "x": 20, "y": 434, "width": 820, "height": 0,
+      "strokeColor": "#e2e8f0", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 300023, "version": 1, "versionNonce": 300024, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "points": [[0, 0], [820, 0]]
+    },
+
+    {
+      "type": "text", "id": "ev1_l", "x": 20, "y": 448, "width": 460, "height": 14,
+      "text": "az CLI — the policy assignment and the lock",
+      "originalText": "az CLI — the policy assignment and the lock",
+      "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 700001, "version": 1, "versionNonce": 700002, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "rectangle", "id": "ev1_r", "x": 20, "y": 466, "width": 820, "height": 112,
+      "strokeColor": "#cbd5e1", "backgroundColor": "#e2e8f0", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 700003, "version": 1, "versionNonce": 700004, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "roundness": {"type": 3}
+    },
+    {
+      "type": "text", "id": "ev1_t", "x": 36, "y": 478, "width": 780, "height": 90,
+      "text": "az policy assignment create --name allowed-locations \\\n  --policy e56962a6-4747-49cd-b67b-bf8b01975c4c \\\n  --scope /subscriptions/<id> \\\n  --params '{\"listOfAllowedLocations\":{\"value\":[\"swedencentral\",\"northeurope\"]}}'\n\naz lock create -n prod-no-delete --lock-type CanNotDelete -g prod-skycraft-swc-rg",
+      "originalText": "az policy assignment create --name allowed-locations \\\n  --policy e56962a6-4747-49cd-b67b-bf8b01975c4c \\\n  --scope /subscriptions/<id> \\\n  --params '{\"listOfAllowedLocations\":{\"value\":[\"swedencentral\",\"northeurope\"]}}'\n\naz lock create -n prod-no-delete --lock-type CanNotDelete -g prod-skycraft-swc-rg",
+      "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#166534", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 700005, "version": 1, "versionNonce": 700006, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "text", "id": "ev2_l", "x": 20, "y": 590, "width": 400, "height": 14,
+      "text": "what a denied deployment looks like",
+      "originalText": "what a denied deployment looks like",
+      "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 700007, "version": 1, "versionNonce": 700008, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "rectangle", "id": "ev2_r", "x": 20, "y": 608, "width": 400, "height": 92,
+      "strokeColor": "#cbd5e1", "backgroundColor": "#e2e8f0", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 700009, "version": 1, "versionNonce": 700010, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "roundness": {"type": 3}
+    },
+    {
+      "type": "text", "id": "ev2_t", "x": 34, "y": 620, "width": 370, "height": 69,
+      "text": "code: RequestDisallowedByPolicy\npolicy: Allowed locations\nreason: 'westeurope' is not in the\n        allowed list\n# the resource is never created",
+      "originalText": "code: RequestDisallowedByPolicy\npolicy: Allowed locations\nreason: 'westeurope' is not in the\n        allowed list\n# the resource is never created",
+      "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#166534", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 700011, "version": 1, "versionNonce": 700012, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "text", "id": "ev3_l", "x": 440, "y": 590, "width": 400, "height": 14,
+      "text": "budget thresholds configured in this lab",
+      "originalText": "budget thresholds configured in this lab",
+      "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 700013, "version": 1, "versionNonce": 700014, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "rectangle", "id": "ev3_r", "x": 440, "y": 608, "width": 400, "height": 92,
+      "strokeColor": "#cbd5e1", "backgroundColor": "#e2e8f0", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 700015, "version": 1, "versionNonce": 700016, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "roundness": {"type": 3}
+    },
+    {
+      "type": "text", "id": "ev3_t", "x": 454, "y": 620, "width": 370, "height": 69,
+      "text": "SkyCraft-Monthly-Budget  $100  monthly\n   50 %  Actual  → you\n   80 %  Actual  → you\n  100 %  Actual  → you + Malfurion\n# alerts only, spending continues",
+      "originalText": "SkyCraft-Monthly-Budget  $100  monthly\n   50 %  Actual  → you\n   80 %  Actual  → you\n  100 %  Actual  → you + Malfurion\n# alerts only, spending continues",
+      "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#166534", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 700017, "version": 1, "versionNonce": 700018, "isDeleted": false,
+      "groupIds": [], "boundElements": null, "link": null, "locked": false,
+      "containerId": null, "lineHeight": 1.25
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff",
+    "gridSize": 20
+  },
+  "files": {}
+}

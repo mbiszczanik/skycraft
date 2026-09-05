@@ -16,28 +16,11 @@ By completing this lab, you will:
 
 You'll set up the following identity structure in Microsoft Entra ID:
 
-```mermaid
-graph TB
-    subgraph "Microsoft Entra ID (SkyCraft Tenant)"
-        AdminGroup[SkyCraft-Admins]
-        DevGroup[SkyCraft-Developers]
-        TestGroup[SkyCraft-Testers]
-
-        Malfurion[Malfurion Stormrage<br/>(Admin)]
-        Khadgar[Khadgar Archmage<br/>(Developer)]
-        Chromie[Chromie Timewalker<br/>(Tester)]
-        Illidan[Illidan Stormrage<br/>(Guest)]
-    end
-
-    Malfurion -->|Member| AdminGroup
-    Khadgar -->|Member| DevGroup
-    Chromie -->|Member| TestGroup
-    Illidan -.->|Guest| AdminGroup
-
-    style AdminGroup fill:#e1f5ff,stroke:#0078d4,stroke-width:2px
-    style DevGroup fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-    style TestGroup fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-1.1-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-1.1-architecture.svg">
+  <img src="images/lab-1.1-architecture.svg" width="100%" alt="Lab 1.1 architecture: Entra ID users and groups">
+</picture>
 
 ---
 
