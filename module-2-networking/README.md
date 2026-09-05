@@ -78,7 +78,7 @@ Before starting, ensure you have:
 
 Each lab includes:
 
-- **Lab Guide** - Step-by-step instructions with Mermaid architecture diagrams
+- **Lab Guide** - Step-by-step instructions with architecture diagrams
 - **Lab Checklist** - Verification steps to confirm success
 - **Solutions** - Expected configurations and Azure CLI commands
 - **Troubleshooting** - Common issues and fixes
