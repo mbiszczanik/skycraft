@@ -17,23 +17,11 @@ By completing this lab, you will:
 
 [Description]: Network Watcher is a regional service that provides tools to monitor, diagnose, and view metrics and logs for resources in an Azure virtual network.
 
-```mermaid
-graph TB
-    NW["Network Watcher<br/>(Sweden Central)"]
-
-    subgraph "Diagnostic Tools"
-        IPF["IP Flow Verify<br/>(NSG Blocks?)"]
-        NH["Next Hop<br/>(Routing?)"]
-        CT["Connection Troubleshooter<br/>(Can A talk to B?)"]
-    end
-
-    VM_Dev["dev-skycraft-swc-auth-vm"]
-    VM_Prod["prod-skycraft-swc-auth-vm"]
-
-    NW --- Diagnostic Tools
-    Diagnostic Tools -.-> VM_Dev
-    Diagnostic Tools -.-> VM_Prod
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-5.3-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-5.3-architecture.svg">
+  <img src="images/lab-5.3-architecture.svg" width="100%" alt="Lab 5.3 architecture: Network Watcher tools and flow logs">
+</picture>
 
 ---
 

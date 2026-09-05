@@ -38,45 +38,11 @@ By completing this module, you will be able to:
 
 This module layers observability and recovery on top of the existing SkyCraft infrastructure. The Platform resource group hosts all shared telemetry and backup services; Dev and Prod send signals to the Platform hub.
 
-```mermaid
-graph TB
-    subgraph "Platform (Hub) — observability & recovery"
-        LAW["Log Analytics Workspace<br/>(central logs & KQL)"]
-        AG["Action Group<br/>(email / webhook)"]
-        Alert["Metric Alert Rules<br/>(CPU &gt; 80%, availability)"]
-        RSV["Recovery Services Vault<br/>(VM backups)"]
-        BV["Backup Vault<br/>(blob & disk backups)"]
-        NW["Network Watcher<br/>(Flow Logs, Connection Monitor)"]
-    end
-
-    subgraph "Development — tracked resources"
-        DevVM["dev-skycraft-swc-*-vm"]
-        DevVNet["dev-skycraft-swc-vnet"]
-    end
-
-    subgraph "Production — tracked resources"
-        ProdVM["prod-skycraft-swc-*-vm"]
-        ProdVNet["prod-skycraft-swc-vnet"]
-        ProdSA["prod-skycraft storage"]
-    end
-
-    DevVM -->|Diagnostic Settings| LAW
-    ProdVM -->|Diagnostic Settings| LAW
-    ProdSA -->|Diagnostic Settings| LAW
-    Alert --> LAW
-    Alert --> AG
-    RSV -->|Protects| ProdVM
-    BV -->|Protects| ProdSA
-    NW -->|Flow Logs| DevVNet
-    NW -->|Flow Logs| ProdVNet
-
-    style LAW fill:#e1f5ff,stroke:#0078d4,stroke-width:3px
-    style DevVM fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-    style DevVNet fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-    style ProdVM fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-    style ProdVNet fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-    style ProdSA fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/module-5-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/module-5-architecture.svg">
+  <img src="images/module-5-architecture.svg" width="100%" alt="Module 5 architecture: monitoring, recovery and network diagnostics">
+</picture>
 
 ---
 
