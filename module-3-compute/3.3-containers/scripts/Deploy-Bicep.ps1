@@ -149,12 +149,18 @@ if (-not $repoExists) {
         $acrWasBootstrapped = $true    # only a brand-new registry needs the DNS wait
         Write-Host "Deploying ACR (Bootstrap)..." -ForegroundColor Yellow
         try {
-            New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName `
+            $acrDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName `
                 -TemplateFile $acrBicep `
                 -parLocation $Location `
                 -parEnvironment $Environment `
                 -parAcrName $acrName `
-                -ErrorAction Stop | Out-Null
+                -ErrorAction Stop
+
+            if ($acrDeployment.ProvisioningState -ne 'Succeeded') {
+                Write-Host "[ERROR] ACR Bootstrap finished with state: $($acrDeployment.ProvisioningState)" -ForegroundColor Red
+                $Host.SetShouldExit(1)
+                exit 1
+            }
         } catch {
             Write-Host "[ERROR] ACR Bootstrap Failed: $_" -ForegroundColor Red
             $Host.SetShouldExit(1)
@@ -199,7 +205,8 @@ try {
     }
     else {
         Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-        # Error handling logic omitted for brevity, similar to template
+        $Host.SetShouldExit(1)
+        exit 1
     }
 }
 catch {

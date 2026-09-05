@@ -143,6 +143,8 @@ try {
     }
     else {
         Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
+        $Host.SetShouldExit(1)
+        exit 1
     }
 }
 catch {
