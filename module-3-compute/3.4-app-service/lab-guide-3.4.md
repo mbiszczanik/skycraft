@@ -469,7 +469,7 @@ For detailed verification, see `lab-checklist-3.4.md`.
 ## 📌 Module Navigation
 
 ← [Back to Module 3 Index](../README.md)
-Next Lab: [Module 4 - Storage](../module-4-storage/README.md) ->
+Next Lab: [Module 4 - Storage](../../module-4-storage/README.md) ->
 
 ## 📝 Lab Summary
 

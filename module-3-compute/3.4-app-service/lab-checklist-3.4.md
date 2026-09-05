@@ -183,11 +183,11 @@ You've successfully completed **Lab 3.4: Create and Configure Azure App Service*
 - ✅ A "Blue-Green" deployment pipeline using Slots
 - ✅ A secure connection bridge between Web and Internal Network
 
-**Next**: [Module 4 - Storage](../module-4-storage/README.md) ->
+**Next**: [Module 4 - Storage](../../module-4-storage/README.md) ->
 
 ---
 
 ## 📌 Module Navigation
 
 - [← Back to Module 3 Index](../README.md)
-- [Module 4: Storage Accounts →](../module-4-storage/README.md)
+- [Module 4: Storage Accounts →](../../module-4-storage/README.md)

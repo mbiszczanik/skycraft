@@ -582,4 +582,4 @@ You've successfully implemented **comprehensive network security** for the SkyCr
 - [← Back to Module 2 Index](../README.md)
 - [← Previous Lab: 2.1 Virtual Networks](../2.1-virtual-networks/lab-checklist-2.1.md)
 - [Lab Guide: 2.2 Secure Access →](lab-guide-2.2.md)
-- [Next Lab: 2.3 DNS & Load Balancing →](../2.3-dns-load-balancing/lab-checklist-2.3.md)
+- [Next Lab: 2.3 DNS & Load Balancing →](../2.3-name-resolution/lab-checklist-2.3.md)
