@@ -38,48 +38,11 @@ By completing this module, you will be able to:
 
 This module builds the storage layer integrated with your existing compute and network infrastructure:
 
-```mermaid
-graph TB
-    subgraph "Storage Accounts"
-        PlatformSA["platform storage<br/>LRS | Hot"]
-        DevSA["dev storage<br/>LRS | Hot/Cool"]
-        ProdSA["prod storage<br/>GRS | Hot"]
-    end
-
-    subgraph "Blob Containers"
-        Assets[Game Assets<br/>Hot Tier]
-        Backups[Backups<br/>Cool Tier]
-        Logs[Logs & Archives<br/>Lifecycle Policy]
-    end
-
-    subgraph "Azure Files"
-        ConfigShare[Config File Share<br/>SMB 3.0]
-        DataShare[Data File Share<br/>Snapshots Enabled]
-    end
-
-    subgraph "Security Layer"
-        Firewall[Storage Firewalls<br/>VNet Restrictions]
-        SAS[SAS Tokens<br/>Stored Access Policies]
-        RBAC[Entra ID RBAC<br/>Data Plane Access]
-    end
-
-    ProdSA --> Assets
-    ProdSA --> Backups
-    DevSA --> Logs
-    PlatformSA --> ConfigShare
-    ProdSA --> DataShare
-
-    Firewall --> ProdSA
-    SAS --> DevSA
-    RBAC --> PlatformSA
-
-    style PlatformSA fill:#e1f5ff
-    style DevSA fill:#fff4e1
-    style ProdSA fill:#ffe1e1
-    style Firewall fill:#e8f5e9
-    style SAS fill:#e8f5e9
-    style RBAC fill:#e8f5e9
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/module-4-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/module-4-architecture.svg">
+  <img src="images/module-4-architecture.svg" width="100%" alt="Module 4 architecture: storage accounts, blob, files and security">
+</picture>
 
 ---
 

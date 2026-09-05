@@ -17,55 +17,19 @@ By completing this lab, you will:
 
 This lab configures blob storage for SkyCraft's production environment with multiple containers optimized for different data access patterns.
 
-```mermaid
-graph TB
-    subgraph "prod-skycraft-swc-rg"
-        style ProdRG fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-
-        subgraph "prodskycraftswcsa"
-            subgraph "Containers"
-                Assets["game-assets<br/>Private<br/>Tier: Hot"]
-                Backups["player-backups<br/>Private<br/>Tier: Archive"]
-                Config["server-config<br/>Private<br/>Tier: Hot"]
-                Logs["game-logs<br/>Private<br/>Tier: Cool → Archive"]
-            end
-
-            DataProtection["Data Protection<br/>✅ Soft Delete: 7 days<br/>✅ Versioning: Enabled"]
-            Lifecycle["Lifecycle Policy<br/>📋 tier-game-logs<br/>📋 archive-backups"]
-        end
-    end
-
-    DataProtection --> Assets
-    DataProtection --> Backups
-    DataProtection --> Config
-    DataProtection --> Logs
-    Lifecycle --> Logs
-    Lifecycle --> Backups
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-4.2-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-4.2-architecture.svg">
+  <img src="images/lab-4.2-architecture.svg" width="100%" alt="Lab 4.2 architecture: blob containers, data protection and lifecycle">
+</picture>
 
 ### Access Tier Transitions
 
-```mermaid
-flowchart LR
-    subgraph "Automated Lifecycle"
-        Hot["🔥 Hot<br/>Frequently accessed"]
-        Cool["❄️ Cool<br/>30+ days"]
-        Cold["🧊 Cold<br/>90+ days"]
-        Archive["📦 Archive<br/>180+ days"]
-        Delete["🗑️ Delete<br/>365+ days"]
-    end
-
-    Hot -->|"After 30 days"| Cool
-    Cool -->|"After 90 days"| Cold
-    Cold -->|"After 180 days"| Archive
-    Archive -->|"After 365 days"| Delete
-
-    style Hot fill:#ff6b6b,stroke:#c92a2a
-    style Cool fill:#4dabf7,stroke:#1971c2
-    style Cold fill:#a5d8ff,stroke:#1971c2
-    style Archive fill:#868e96,stroke:#495057
-    style Delete fill:#212529,stroke:#000,color:#fff
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-4.2-lifecycle.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-4.2-lifecycle.svg">
+  <img src="images/lab-4.2-lifecycle.svg" width="100%" alt="Blob lifecycle tier ladder">
+</picture>
 
 ## 📋 Real-World Scenario
 

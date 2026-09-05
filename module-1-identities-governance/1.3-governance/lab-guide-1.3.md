@@ -17,35 +17,11 @@ By completing this lab, you will:
 
 You will implement the following governance controls:
 
-```mermaid
-graph TB
-    subgraph "Subscription"
-        Policy1[Policy: Require Tags]
-        Policy2[Policy: Allowed Locations]
-        Budget[Budget: Subscription Scope]
-
-        subgraph "prod-skycraft-swc-rg"
-            LockProd[Lock: CanNotDelete]
-            BudgetProd[Budget: RG Scope]
-        end
-
-        subgraph "platform-skycraft-swc-rg"
-            LockPlatform[Lock: CanNotDelete]
-        end
-
-        subgraph "dev-skycraft-swc-rg"
-            Tags[Tags: Env, CostCenter...]
-        end
-    end
-
-    Policy1 -->|Enforced on| prod-skycraft-swc-rg
-    Policy1 -->|Enforced on| platform-skycraft-swc-rg
-    Policy1 -->|Enforced on| dev-skycraft-swc-rg
-
-    style prod-skycraft-swc-rg fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-    style platform-skycraft-swc-rg fill:#e1f5ff,stroke:#0078d4,stroke-width:2px
-    style dev-skycraft-swc-rg fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-1.3-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-1.3-architecture.svg">
+  <img src="images/lab-1.3-architecture.svg" width="100%" alt="Lab 1.3 architecture: policy, locks and budgets">
+</picture>
 
 ## 📋 Real-World Scenario
 

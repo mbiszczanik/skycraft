@@ -54,3 +54,4 @@ See `template.md`.
 | [0001](0001-use-github-flow.md) | Use GitHub Flow (drop `develop`) | Accepted |
 | [0002](0002-branch-protection-rules.md) | Branch protection rules for `main` | Accepted |
 | [0003](0003-worktree-branch-discipline.md) | Use git worktrees for multi-commit work | Accepted |
+| [0004](0004-excalidraw-svg-for-lab-diagrams.md) | Author lab architecture diagrams in Excalidraw, commit as SVG | Accepted |

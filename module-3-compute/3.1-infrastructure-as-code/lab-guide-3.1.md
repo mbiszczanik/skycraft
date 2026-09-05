@@ -21,78 +21,11 @@ By completing this lab, you will:
 
 You'll create Infrastructure as Code templates to automate SkyCraft deployment:
 
-```mermaid
-graph TB
-    subgraph "Developer Workstation"
-        Dev[Developer<br/>Visual Studio Code]
-        BicepFile[Bicep Template<br/>main.bicep]
-        ParamFile[Parameters<br/>dev.bicepparam]
-    end
-
-    subgraph "Source Control"
-        Git[Git Repository<br/>GitHub/Azure DevOps]
-        Version[Version History<br/>v1.0, v1.1, v1.2]
-    end
-
-    subgraph "Bicep Modules"
-        ModNet[network.bicep<br/>VNets, Subnets, NSGs]
-        ModVM[compute.bicep<br/>VMs, Disks, NICs]
-        ModLB[loadbalancer.bicep<br/>Load Balancers]
-        ModDNS[dns.bicep<br/>DNS Zones]
-    end
-
-    subgraph "Azure Deployment"
-        ARM[ARM Template<br/>JSON transpiled from Bicep]
-        Validate[Validation<br/>What-If Analysis]
-        Deploy[Deployment Engine<br/>Azure Resource Manager]
-    end
-
-    subgraph "Azure Resources (Sweden Central)"
-        RG1[platform-skycraft-swc-rg]
-        RG2[dev-skycraft-swc-rg]
-        RG3[prod-skycraft-swc-rg]
-
-        VNet1[Hub VNet<br/>10.0.0.0/16]
-        VNet2[Dev VNet<br/>10.1.0.0/16]
-        VNet3[Prod VNet<br/>10.2.0.0/16]
-
-        VM1[Dev VMs<br/>Auth, World, DB]
-        VM2[Prod VMs<br/>Auth, World, DB]
-
-        LB1[Load Balancers<br/>Dev + Prod]
-    end
-
-    Dev -->|1. Write| BicepFile
-    BicepFile -->|2. Commit| Git
-    Git --> Version
-
-    BicepFile -->|3. References| ModNet
-    BicepFile -->|3. References| ModVM
-    BicepFile -->|3. References| ModLB
-    BicepFile -->|3. References| ModDNS
-
-    ParamFile -->|4. Provides| BicepFile
-    BicepFile -->|5. Transpile| ARM
-    ARM -->|6. Validate| Validate
-    Validate -->|7. Deploy| Deploy
-
-    Deploy -->|8. Create| RG1
-    Deploy -->|8. Create| RG2
-    Deploy -->|8. Create| RG3
-
-    Deploy -->|9. Provision| VNet1
-    Deploy -->|9. Provision| VNet2
-    Deploy -->|9. Provision| VNet3
-
-    Deploy -->|10. Deploy| VM1
-    Deploy -->|10. Deploy| VM2
-    Deploy -->|10. Deploy| LB1
-
-    style BicepFile fill:#00B4D8,stroke:#0077B6,stroke-width:3px
-    style ARM fill:#FFA500,stroke:#FF8C00,stroke-width:2px
-    style Deploy fill:#4CAF50,stroke:#2E7D32,stroke-width:3px
-    style Git fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-3.1-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-3.1-architecture.svg">
+  <img src="images/lab-3.1-architecture.svg" width="100%" alt="Lab 3.1 architecture: Bicep deployment pipeline">
+</picture>
 
 ---
 

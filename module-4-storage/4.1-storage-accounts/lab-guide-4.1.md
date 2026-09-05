@@ -20,41 +20,11 @@ By completing this lab, you will:
 
 This lab deploys storage accounts across all three SkyCraft environments with environment-appropriate redundancy:
 
-```mermaid
-graph TB
-    subgraph "platform-skycraft-swc-rg"
-        style platform fill:#e1f5ff,stroke:#0078d4,stroke-width:3px
-        SA_Platform["platformskycraftswcsa<br/>────────────────<br/>SKU: Standard_GRS<br/>Tier: Hot<br/>TLS: 1.2<br/>────────────────<br/>Shared Services Storage"]
-    end
-
-    subgraph "dev-skycraft-swc-rg"
-        style dev fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-        SA_Dev["devskycraftswcsa<br/>────────────────<br/>SKU: Standard_LRS<br/>Tier: Hot<br/>TLS: 1.2<br/>────────────────<br/>Development Storage"]
-    end
-
-    subgraph "prod-skycraft-swc-rg"
-        style prod fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-        SA_Prod["prodskycraftswcsa<br/>────────────────<br/>SKU: Standard_GRS<br/>Tier: Hot<br/>TLS: 1.2<br/>────────────────<br/>Production Storage"]
-    end
-
-    subgraph "Services Included"
-        Blob["Blob Storage<br/>Unstructured Data"]
-        Files["Azure Files<br/>SMB/NFS Shares"]
-        Tables["Table Storage<br/>NoSQL Data"]
-        Queues["Queue Storage<br/>Messaging"]
-    end
-
-    SA_Platform --> Blob
-    SA_Platform --> Files
-    SA_Dev --> Blob
-    SA_Dev --> Files
-    SA_Prod --> Blob
-    SA_Prod --> Files
-    SA_Prod --> Tables
-    SA_Prod --> Queues
-
-    SA_Dev -.->|"Object Replication<br/>(Lab 4.2)"| SA_Prod
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-4.1-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-4.1-architecture.svg">
+  <img src="images/lab-4.1-architecture.svg" width="100%" alt="Lab 4.1 architecture: storage accounts per environment">
+</picture>
 
 ---
 
@@ -182,52 +152,11 @@ Azure Storage automatically maintains **multiple copies** of your data. The redu
 | **RA-GRS**  | 6      | GRS + read access to secondary  | 16 nines   | High+    |
 | **RA-GZRS** | 6      | GZRS + read access to secondary | 16 nines   | Highest+ |
 
-```mermaid
-flowchart TB
-    subgraph LRS["LRS (3 copies)<br/>Single Datacenter"]
-        style LRS fill:#e8f4ea,stroke:#2e7d32
-        L1[("Copy 1")]
-        L2[("Copy 2")]
-        L3[("Copy 3")]
-    end
-
-    subgraph ZRS["ZRS (3 copies)<br/>3 Availability Zones"]
-        style ZRS fill:#e3f2fd,stroke:#1565c0
-        Z1[("AZ1<br/>Copy")]
-        Z2[("AZ2<br/>Copy")]
-        Z3[("AZ3<br/>Copy")]
-    end
-
-    subgraph GRS["GRS (6 copies)"]
-        style GRS fill:#fff3e0,stroke:#ef6c00
-        subgraph GRS_Primary["Primary Region"]
-            GP1[("Copy 1")]
-            GP2[("Copy 2")]
-            GP3[("Copy 3")]
-        end
-        subgraph GRS_Secondary["Secondary Region"]
-            GS1[("Copy 4")]
-            GS2[("Copy 5")]
-            GS3[("Copy 6")]
-        end
-        GRS_Primary -->|"Async<br/>Replication"| GRS_Secondary
-    end
-
-    subgraph GZRS["GZRS (6 copies)<br/>Maximum Durability"]
-        style GZRS fill:#fce4ec,stroke:#c2185b
-        subgraph GZRS_Primary["Primary Region (ZRS)"]
-            GZP1[("AZ1")]
-            GZP2[("AZ2")]
-            GZP3[("AZ3")]
-        end
-        subgraph GZRS_Secondary["Secondary Region"]
-            GZS1[("Copy 4")]
-            GZS2[("Copy 5")]
-            GZS3[("Copy 6")]
-        end
-        GZRS_Primary -->|"Async<br/>Replication"| GZRS_Secondary
-    end
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-4.1-redundancy.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-4.1-redundancy.svg">
+  <img src="images/lab-4.1-redundancy.svg" width="100%" alt="Storage redundancy options: LRS, ZRS, GRS, GZRS">
+</picture>
 
 ### SkyCraft Redundancy Strategy
 

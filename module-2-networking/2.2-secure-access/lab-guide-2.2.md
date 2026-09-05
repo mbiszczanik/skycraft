@@ -18,57 +18,11 @@ By completing this lab, you will:
 
 You'll implement comprehensive network security on the existing hub-spoke topology:
 
-```mermaid
-graph TB
-    subgraph Internet
-        Admin[Administrator<br/>Your Laptop]
-    end
-
-    subgraph "platform-skycraft-swc-rg"
-        Bastion[Azure Bastion<br/>platform-skycraft-swc-bas<br/>10.0.0.0/26]
-        BastionPIP[Public IP<br/>platform-skycraft-swc-bas-pip]
-    end
-
-    subgraph "dev-skycraft-swc-rg"
-        DevNSG1[dev-skycraft-swc-auth-nsg<br/>Allow: SSH from Bastion]
-        DevNSG2[dev-skycraft-swc-world-nsg<br/>Allow: Game ports]
-        DevNSG3[dev-skycraft-swc-db-nsg<br/>Allow: MySQL from App]
-
-        DevASG1[dev-skycraft-swc-asg-auth<br/>Auth Servers]
-        DevASG2[dev-skycraft-swc-asg-world<br/>World Servers]
-
-        DevSubnet1[AuthSubnet<br/>10.1.1.0/24]
-        DevSubnet2[WorldSubnet<br/>10.1.2.0/24]
-        DevSubnet3[DatabaseSubnet<br/>10.1.3.0/24]
-    end
-
-    subgraph "prod-skycraft-swc-rg"
-        ProdNSG1[prod-skycraft-swc-auth-nsg]
-        ProdNSG2[prod-skycraft-swc-world-nsg]
-        ProdNSG3[prod-skycraft-swc-db-nsg]
-
-        ProdSubnet1[AuthSubnet<br/>10.2.1.0/24]
-        ProdSubnet2[WorldSubnet<br/>10.2.2.0/24]
-        ProdSubnet3[DatabaseSubnet<br/>10.2.3.0/24]
-
-        PrivateEndpoint[Private Endpoint<br/>Azure SQL]
-    end
-
-    Admin -->|HTTPS:443| BastionPIP
-    Bastion -->|SSH:22| DevSubnet1
-    Bastion -->|SSH:22| ProdSubnet1
-
-    DevNSG1 -.->|Applied to| DevSubnet1
-    DevNSG2 -.->|Applied to| DevSubnet2
-    DevNSG3 -.->|Applied to| DevSubnet3
-
-    style Bastion fill:#4CAF50,stroke:#2E7D32,stroke-width:3px
-    style DevNSG1 fill:#FFC107,stroke:#F57C00,stroke-width:2px
-    style DevNSG2 fill:#FFC107,stroke:#F57C00,stroke-width:2px
-    style DevNSG3 fill:#FFC107,stroke:#F57C00,stroke-width:2px
-    style ProdNSG1 fill:#FF5722,stroke:#D84315,stroke-width:2px
-    style PrivateEndpoint fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-2.2-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-2.2-architecture.svg">
+  <img src="images/lab-2.2-architecture.svg" width="100%" alt="Lab 2.2 architecture: Bastion, NSG rule evaluation, ASG">
+</picture>
 
 ---
 

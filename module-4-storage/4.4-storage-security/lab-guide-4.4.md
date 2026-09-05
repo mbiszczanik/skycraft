@@ -16,40 +16,19 @@ By completing this lab, you will:
 
 ### Topology
 
-```mermaid
-graph TB
-    subgraph ProdResources ["prod-skycraft-swc-rg"]
-        style ProdResources fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-
-        subgraph SA ["prodskycraftswcsa"]
-            Firewall["Firewall<br/>✅ VNet Restricted<br/>✅ Client IP Restricted"]
-            IAM["RBAC<br/>Storage Blob Data Contributor"]
-        end
-
-        subgraph VNet ["prod-skycraft-swc-vnet"]
-            Subnet["WorldSubnet<br/>(Service Endpoint: Microsoft.Storage)"]
-            VM["Game Server VM"]
-        end
-    end
-
-    User["Admin / Developer"] -->|Entra ID RBAC| SA
-    VM -->|Service Endpoint / SMB| SA
-    Internet["Public Internet"] --x|"Access Denied (403)"| SA
-    LegacyApp["Legacy App"] -->|"SAS Token via Policy"| SA
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-4.4-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-4.4-architecture.svg">
+  <img src="images/lab-4.4-architecture.svg" width="100%" alt="Lab 4.4 architecture: storage firewall, SAS and RBAC">
+</picture>
 
 ### Access Model
 
-```mermaid
-flowchart TD
-    Request[Request incoming] --> Net[Network Rules]
-    Net -->|Blocked| Fail[403 Denied]
-    Net -->|Allowed| Auth[Authentication]
-    Auth -->|Key / SAS| Success[Success]
-    Auth -->|OAuth / RBAC| DataPlane[Data Plane Check]
-    DataPlane -->|Allowed| Success
-    DataPlane -->|Denied| Fail
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-4.4-request-flow.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-4.4-request-flow.svg">
+  <img src="images/lab-4.4-request-flow.svg" width="100%" alt="Storage request flow: network, authentication, authorization">
+</picture>
 
 ## 📋 Real-World Scenario
 

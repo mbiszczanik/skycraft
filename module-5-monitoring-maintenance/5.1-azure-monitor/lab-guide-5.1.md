@@ -17,25 +17,11 @@ By completing this lab, you will:
 
 [Description]: Log Analytics Workspace serves as the central repository for all telemetry. Monitor Alerts watch the workspace and metrics to trigger notifications.
 
-```mermaid
-graph TB
-    subgraph "Platform Context"
-        style platform fill:#e1f5ff,stroke:#0078d4,stroke-width:3px
-        LAW["platform-skycraft-swc-law<br/>Log Analytics Workspace"]
-        Dashboard["SkyCraft-Operations-Dash<br/>Azure Dashboard"]
-    end
-
-    subgraph "Compute Context"
-        style compute fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-        VM_Auth["dev-skycraft-swc-auth-vm"]
-        VM_World["dev-skycraft-swc-world-vm"]
-    end
-
-    VM_Auth -->|"Guest OS Logs & Metrics"| LAW
-    VM_World -->|"Guest OS Logs & Metrics"| LAW
-    LAW --> Dashboard
-    LAW --> Alerts["Alert Rule:<br/>High CPU > 80%"]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-5.1-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-5.1-architecture.svg">
+  <img src="images/lab-5.1-architecture.svg" width="100%" alt="Lab 5.1 architecture: Azure Monitor pipeline and alerts">
+</picture>
 
 ---
 

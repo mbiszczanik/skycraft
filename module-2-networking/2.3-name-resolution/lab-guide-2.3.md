@@ -18,63 +18,11 @@ By completing this lab, you will:
 
 You'll implement DNS and load balancing for the SkyCraft infrastructure:
 
-```mermaid
-graph TB
-    subgraph Internet
-        Players[Game Players<br/>Worldwide]
-        DNS[Public DNS Query<br/>skycraft.example.com]
-    end
-
-    subgraph "Azure DNS"
-        PublicZone[Public DNS Zone<br/>skycraft.example.com]
-        PrivateZone[Private DNS Zone<br/>skycraft.internal]
-    end
-
-    subgraph "platform-skycraft-swc-rg"
-        Bastion[Azure Bastion<br/>10.0.0.0/26]
-    end
-
-    subgraph "dev-skycraft-swc-rg"
-        DevLB[Azure Load Balancer<br/>dev-skycraft-swc-lb<br/>Standard SKU]
-        DevLBPIP[Public IP<br/>dev-skycraft-swc-lb-pip<br/>203.0.113.10]
-
-        DevBackend[Backend Pool<br/>dev-skycraft-swc-lb-be-world]
-        DevVM1[World Server 1<br/>10.1.2.10<br/>Future VM]
-        DevVM2[World Server 2<br/>10.1.2.11<br/>Future VM]
-
-        DevProbe[Health Probe<br/>TCP:8085<br/>Interval: 15s]
-        DevRule[Load Balancing Rule<br/>Port 8085<br/>Distribution: Hash]
-    end
-
-    subgraph "prod-skycraft-swc-rg"
-        ProdLB[Azure Load Balancer<br/>prod-skycraft-swc-lb]
-        ProdLBPIP[Public IP<br/>prod-skycraft-swc-lb-pip<br/>203.0.113.20]
-
-        ProdBackend[Backend Pool<br/>prod-skycraft-swc-lb-be-world]
-        ProdVM1[World Server 1<br/>10.2.2.10<br/>Future VM]
-        ProdVM2[World Server 2<br/>10.2.2.11<br/>Future VM]
-    end
-
-    Players --> DNS
-    DNS --> PublicZone
-    PublicZone -->|dev.skycraft.example.com| DevLBPIP
-    PublicZone -->|play.skycraft.example.com| ProdLBPIP
-
-    DevLBPIP --> DevLB
-    DevLB --> DevBackend
-    DevBackend -.-> DevVM1
-    DevBackend -.-> DevVM2
-    DevProbe -.->|Health Check| DevVM1
-    DevProbe -.->|Health Check| DevVM2
-
-    DevVM1 -.->|Private DNS| PrivateZone
-    DevVM2 -.->|Private DNS| PrivateZone
-
-    style DevLB fill:#4CAF50,stroke:#2E7D32,stroke-width:3px
-    style ProdLB fill:#FF5722,stroke:#D84315,stroke-width:3px
-    style PublicZone fill:#2196F3,stroke:#1565C0,stroke-width:2px
-    style PrivateZone fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-2.3-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-2.3-architecture.svg">
+  <img src="images/lab-2.3-architecture.svg" width="100%" alt="Lab 2.3 architecture: DNS zones and load balancing">
+</picture>
 
 ---
 

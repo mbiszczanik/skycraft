@@ -17,37 +17,11 @@ By completing this lab, you will:
 
 You'll deploy this three-VNet hub-spoke architecture:
 
-```mermaid
-graph TB
-    subgraph "platform-skycraft-swc-rg"
-        HubVNet[platform-skycraft-swc-vnet<br/>10.0.0.0/16<br/>Sweden Central]
-        BastionSubnet[AzureBastionSubnet<br/>10.0.0.0/26]
-        GatewaySubnet[GatewaySubnet<br/>10.0.1.0/27]
-    end
-
-    subgraph "dev-skycraft-swc-rg"
-        DevVNet[dev-skycraft-swc-vnet<br/>10.1.0.0/16<br/>Sweden Central]
-        DevAuth[AuthSubnet<br/>10.1.1.0/24]
-        DevWorld[WorldSubnet<br/>10.1.2.0/24]
-        DevDB[DatabaseSubnet<br/>10.1.3.0/24]
-        DevApp[AppServiceSubnet<br/>10.1.4.0/24]
-    end
-
-    subgraph "prod-skycraft-swc-rg"
-        ProdVNet[prod-skycraft-swc-vnet<br/>10.2.0.0/16<br/>Sweden Central]
-        ProdAuth[AuthSubnet<br/>10.2.1.0/24]
-        ProdWorld[WorldSubnet<br/>10.2.2.0/24]
-        ProdDB[DatabaseSubnet<br/>10.2.3.0/24]
-        ProdApp[AppServiceSubnet<br/>10.2.4.0/24]
-    end
-
-    HubVNet <-->|Peering: hub-to-dev<br/>Allow Forwarded Traffic| DevVNet
-    HubVNet <-->|Peering: hub-to-prod<br/>Allow Forwarded Traffic| ProdVNet
-
-    style HubVNet fill:#e1f5ff,stroke:#0078d4,stroke-width:3px
-    style DevVNet fill:#fff4e1,stroke:#f39c12,stroke-width:2px
-    style ProdVNet fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-2.1-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-2.1-architecture.svg">
+  <img src="images/lab-2.1-architecture.svg" width="100%" alt="Lab 2.1 architecture: hub-spoke VNet topology">
+</picture>
 
 ---
 

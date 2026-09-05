@@ -17,26 +17,11 @@ By completing this lab, you will:
 
 [Description]: Recovery Services Vault stores VM snapshots. Backup Vault stores Blob/Disk backups. Site Recovery replicates the VM to a secondary region (Norway East).
 
-```mermaid
-graph TB
-    subgraph "Sweden Central (Primary)"
-        style primary fill:#e1f5ff,stroke:#0078d4,stroke-width:3px
-        VM_Prod["dev-skycraft-swc-auth-vm"]
-        SA_Prod["prodskycraftswcsa"]
-        RSV["platform-skycraft-swc-rsv<br/>Recovery Services Vault"]
-        BV["platform-skycraft-swc-bv<br/>Backup Vault"]
-    end
-
-    subgraph "Norway East (Secondary)"
-        style secondary fill:#ffe1e1,stroke:#e74c3c,stroke-width:2px
-        RSV_Sec["asr-skycraft-ne-rsv<br/>Site Recovery Vault"]
-        VM_Replica["dev-skycraft-swc-auth-vm-asr"]
-    end
-
-    VM_Prod -->|"VM Backup"| RSV
-    SA_Prod -->|"Blob Backup"| BV
-    VM_Prod -.->|"ASR Replication"| VM_Replica
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/lab-5.2-architecture.dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="images/lab-5.2-architecture.svg">
+  <img src="images/lab-5.2-architecture.svg" width="100%" alt="Lab 5.2 architecture: backup vaults and site recovery">
+</picture>
 
 ---
 
