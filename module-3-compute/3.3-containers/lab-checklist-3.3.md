@@ -45,51 +45,45 @@
 
 ## 🔍 Validation Commands
 
-Run these Azure CLI commands to validate your lab setup:
+Run these Az PowerShell commands to validate your lab setup:
 
 ### Login and Set Context
 
-```azurecli
+```powershell
 # Login to Azure
-az login
+Connect-AzAccount
 
 # Set subscription context
-az account set --subscription "YOUR-SUBSCRIPTION-NAME"
+Set-AzContext -SubscriptionName "YOUR-SUBSCRIPTION-NAME"
 ```
 
 ### Verify ACR and Images
 
-```azurecli
-# List Repositories in your ACR
-# Replace [your-acr-name] with your actual registry name
-az acr repository list --name [your-acr-name] --output table
+```powershell
+# List repositories in your ACR
+# Replace [your-acr-name] with your actual registry name (the lab default is devskycraftswcacr01)
+Get-AzContainerRegistryRepository -RegistryName [your-acr-name]
 
 # Expected output:
-# Result
-# -------------
 # skycraft-auth
 ```
 
 ### Verify ACI Status
 
-```azurecli
-# Check ACI State
-az container show \
-  --resource-group dev-skycraft-swc-rg \
-  --name dev-skycraft-swc-aci-auth \
-  --query "{Name:name, State:instanceView.state, IP:ipAddress.ip, FQDN:ipAddress.fqdn}" \
-  --output table
+```powershell
+# Check ACI state
+Get-AzContainerGroup -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-aci-auth |
+    Select-Object Name, @{N='State';E={$_.InstanceViewState}}, @{N='IP';E={$_.IPAddressIP}}, @{N='FQDN';E={$_.IPAddressFqdn}} |
+    Format-Table -AutoSize
 ```
 
 ### Verify ACA Configuration
 
-```azurecli
-# Check ACA Ingress and Provisioning
-az containerapp show \
-  --resource-group dev-skycraft-swc-rg \
-  --name dev-skycraft-swc-aca-world-02 \
-  --query "{Name:name, ProvisioningState:provisioningState, FQDN:configuration.ingress.fqdn}" \
-  --output table
+```powershell
+# Check ACA ingress and provisioning
+Get-AzContainerApp -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-aca-world-02 |
+    Select-Object Name, ProvisioningState, @{N='FQDN';E={$_.IngressFqdn}} |
+    Format-Table -AutoSize
 ```
 
 ---

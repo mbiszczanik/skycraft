@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 2.1 - Virtual Networks
 DESCRIPTION: Orchestrates the Hub VNet, the Dev/Prod Spoke VNets, the Hub-Spoke peerings and the Load Balancer Public IPs via AVM (requires the Lab 1.2 resource groups to exist)
-EXAMPLE: az deployment sub create --name Lab-2.1-Virtual-Networks --location swedencentral --template-file main.bicep
+EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.3.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1

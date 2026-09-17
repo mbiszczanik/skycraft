@@ -45,59 +45,53 @@
 
 ## 🔍 Validation Commands
 
-Run these Azure CLI commands to validate your lab setup:
+Run these Az PowerShell commands to validate your lab setup:
 
 ### Login and Set Context
 
-```azurecli
+```powershell
 # Login to Azure
-az login
+Connect-AzAccount
 
 # Set subscription context
-az account set --subscription "YOUR-SUBSCRIPTION-NAME"
+Set-AzContext -SubscriptionName "YOUR-SUBSCRIPTION-NAME"
 ```
 
 ### Verify App Service Plan
 
-```azurecli
-# Check Plan Details
-az appservice plan show \
-  --name dev-skycraft-swc-asp \
-  --resource-group dev-skycraft-swc-rg \
-  --query "{Name:name, Location:location, SKU:sku.name, Status:status}" \
-  --output table
+```powershell
+# Check plan details
+Get-AzAppServicePlan -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-asp |
+    Select-Object Name, Location, @{N='SKU';E={$_.Sku.Name}}, Status |
+    Format-Table -AutoSize
 
 # Expected Output:
 # Name                  Location        SKU    Status
-# --------------------  --------------  -----  --------
+# ----                  --------        ---    ------
 # dev-skycraft-swc-asp  Sweden Central  P0V4   Ready
 ```
 
 ### Verify Web App & Slots
 
-```azurecli
-# List Web Apps and Slots
-az webapp list \
-  --resource-group dev-skycraft-swc-rg \
-  --query "[].{Name:name, State:state, Hostnames:defaultHostName}" \
-  --output table
+```powershell
+# List Web Apps
+Get-AzWebApp -ResourceGroupName dev-skycraft-swc-rg |
+    Select-Object Name, State, DefaultHostName |
+    Format-Table -AutoSize
 
-# Check Deployment Slots
-az webapp deployment slot list \
-  --name dev-skycraft-swc-app01 \
-  --resource-group dev-skycraft-swc-rg \
-  --query "[].{Name:name, State:state}" \
-  --output table
+# Check deployment slots
+Get-AzWebAppSlot -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-app01 |
+    Select-Object Name, State |
+    Format-Table -AutoSize
 ```
 
 ### Verify Autoscale Settings
 
-```azurecli
-# List Autoscale Settings
-az monitor autoscale list \
-  --resource-group dev-skycraft-swc-rg \
-  --query "[].{Name:name, Profiles:profiles[0].name, Rules:length(profiles[0].rules)}" \
-  --output table
+```powershell
+# List autoscale settings
+Get-AzAutoscaleSetting -ResourceGroupName dev-skycraft-swc-rg |
+    Select-Object Name, @{N='Profiles';E={$_.Profile[0].Name}}, @{N='Rules';E={$_.Profile[0].Rule.Count}} |
+    Format-Table -AutoSize
 ```
 
 ---

@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 2.3 - DNS and Load Balancing
 DESCRIPTION: Deploys the Dev/Prod Standard Load Balancers, the public DNS zone with its records and the private DNS zone with its VNet links via AVM (requires the Lab 2.1 virtual networks and public IPs to exist)
-EXAMPLE: az deployment sub create --name Lab-2.3-DNS --location swedencentral --template-file main.bicep
+EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.2.1
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1

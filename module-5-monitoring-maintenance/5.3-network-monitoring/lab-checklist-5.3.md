@@ -71,50 +71,38 @@
 
 ### Verify Network Watcher Status
 
-```azurecli
+```powershell
 # Check if Network Watcher is enabled in the region
-az network watcher list \
-  --query "[?location=='swedencentral'].{Name:name,Region:location,ProvisioningState:provisioningState}" \
-  --output table
+Get-AzNetworkWatcher |
+    Where-Object { $_.Location -eq 'swedencentral' } |
+    Select-Object Name, Location, ProvisioningState |
+    Format-Table -AutoSize
 ```
 
-### Run IP Flow Verify via CLI (Optional)
+### Run IP Flow Verify via PowerShell (Optional)
 
-```azurecli
-# Example CLI check
-az network watcher test-ip-flow \
-  --name dev-skycraft-swc-auth-vm \
-  --resource-group dev-skycraft-swc-rg \
-  --direction inbound \
-  --protocol tcp \
-  --local 8080 \
-  --remote 8.8.8.8 \
-  --remote-port 443
+```powershell
+# Example check: is inbound TCP 443 from 8.8.8.8 allowed to reach the auth VM?
+$watcher = Get-AzNetworkWatcher -Location swedencentral
+$vm = Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-vm
+$nic = Get-AzNetworkInterface -ResourceId $vm.NetworkProfile.NetworkInterfaces[0].Id
+Test-AzNetworkWatcherIPFlow -NetworkWatcher $watcher -TargetVirtualMachineId $vm.Id `
+    -Direction Inbound -Protocol TCP `
+    -LocalIPAddress $nic.IpConfigurations[0].PrivateIpAddress -LocalPort 8080 `
+    -RemoteIPAddress 8.8.8.8 -RemotePort 443
 ```
 
 ### Verify the Flow Log and the Connection Monitor
 
-```azurecli
-# Flow log: target, format version, retention, Traffic Analytics
-az network watcher flow-log show \
-  --name prod-skycraft-swc-vnet-flowlog \
-  --location swedencentral \
-  --query "{Target:targetResourceId, Enabled:enabled, Version:format.version, RetentionDays:retentionPolicy.days, TA:flowAnalyticsConfiguration.networkWatcherFlowAnalyticsConfiguration.enabled, Interval:flowAnalyticsConfiguration.networkWatcherFlowAnalyticsConfiguration.trafficAnalyticsInterval}" \
-  --output table
-
-# Connection monitor: state, test group, test configuration
-az network watcher connection-monitor show \
-  --name skycraft-hub-spoke-cm \
-  --location swedencentral \
-  --query "{State:monitoringStatus, Groups:testGroups[].name, Tests:testConfigurations[].{name:name, port:tcpConfiguration.port, freq:testFrequencySec}}" \
-  --output json
-```
-
 ```powershell
+# Flow log: target, format version, retention, Traffic Analytics
 $nw = Get-AzNetworkWatcher -Location swedencentral
 Get-AzNetworkWatcherFlowLog -NetworkWatcher $nw -Name prod-skycraft-swc-vnet-flowlog |
-  Select-Object Name, Enabled, TargetResourceId, @{n='Version';e={$_.Format.Version}}, @{n='RetentionDays';e={$_.RetentionPolicy.Days}}
+  Select-Object Name, Enabled, TargetResourceId, @{n='Version';e={$_.Format.Version}}, @{n='RetentionDays';e={$_.RetentionPolicy.Days}},
+    @{n='TA';e={$_.FlowAnalyticsConfiguration.NetworkWatcherFlowAnalyticsConfiguration.Enabled}},
+    @{n='Interval';e={$_.FlowAnalyticsConfiguration.NetworkWatcherFlowAnalyticsConfiguration.TrafficAnalyticsInterval}}
 
+# Connection monitor: state, test group, test configuration
 Get-AzNetworkWatcherConnectionMonitor -NetworkWatcher $nw -Name skycraft-hub-spoke-cm |
   Select-Object Name, MonitoringStatus, @{n='TestGroups';e={$_.TestGroups.Name -join ','}}
 

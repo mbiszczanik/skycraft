@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 1.3 - Governance Orchestrator
 DESCRIPTION: Orchestrates deployment of tags, policies, and locks for Lab 1.3 via AVM (requires the Lab 1.2 resource groups to exist)
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
+EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Owner mbiszczanik
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.2.1
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1

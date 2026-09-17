@@ -59,35 +59,19 @@
 
 ## 🔍 Validation Commands
 
-Run these commands to validate your lab setup:
+Run these Az PowerShell commands to validate your lab setup:
 
 ### Login and Set Context
 
-```azurecli
+```powershell
 # Login to Azure
-az login
+Connect-AzAccount
 
 # Set subscription context
-az account set --subscription "YOUR-SUBSCRIPTION-NAME"
+Set-AzContext -SubscriptionName "YOUR-SUBSCRIPTION-NAME"
 ```
 
-### 1. Verify File Shares and Quotas (Azure CLI)
-
-```azurecli
-az storage share-rm list \
-  --storage-account prodskycraftswcsa \
-  --resource-group prod-skycraft-swc-rg \
-  --query "[].{Name:name, Quota:quota, Tier:accessTier}" \
-  --output table
-
-# Expected Output:
-# Name             Quota    Tier
-# ---------------  -------  ----
-# skycraft-config  100      Hot
-# skycraft-shared  500      Hot
-```
-
-### 2. Verify File Shares and Quotas (PowerShell)
+### 1. Verify File Shares and Quotas
 
 ```powershell
 Get-AzRmStorageShare `
@@ -103,22 +87,7 @@ Get-AzRmStorageShare `
 # skycraft-shared  500       Hot
 ```
 
-### 3. Verify Soft Delete Policy (Azure CLI)
-
-```azurecli
-az storage account file-service-properties show \
-  --account-name prodskycraftswcsa \
-  --resource-group prod-skycraft-swc-rg \
-  --query "shareDeleteRetentionPolicy"
-
-# Expected Output:
-# {
-#   "days": 14,
-#   "enabled": true
-# }
-```
-
-### 4. Verify Soft Delete Policy (PowerShell)
+### 2. Verify Soft Delete Policy
 
 ```powershell
 Get-AzStorageFileServiceProperty `
@@ -132,41 +101,38 @@ Get-AzStorageFileServiceProperty `
 # 14      True
 ```
 
-### 5. Verify Existing Snapshots (Azure CLI)
+### 3. Verify Existing Snapshots
 
-```azurecli
-az storage share-rm list \
-  --storage-account prodskycraftswcsa \
-  --resource-group prod-skycraft-swc-rg \
-  --include-snapshots \
-  --query "[?snapshot != null].{Name:name, Snapshot:snapshot}" \
-  --output table
-
-# Expected Output:
-# Name             Snapshot
-# ---------------  ----------------------------
-# skycraft-config  2026-02-10T07:15:00.0000000Z
-```
-
-### 6. Verify Tags (Azure CLI)
-
-```azurecli
-az storage account show \
-  --name prodskycraftswcsa \
-  --resource-group prod-skycraft-swc-rg \
-  --query "tags" \
-  --output json
+```powershell
+Get-AzRmStorageShare `
+  -ResourceGroupName "prod-skycraft-swc-rg" `
+  -StorageAccountName "prodskycraftswcsa" `
+  -IncludeSnapshot |
+  Where-Object { $_.SnapshotTime } |
+  Select-Object Name, SnapshotTime |
+  Format-Table
 
 # Expected Output:
-# {
-#   "CostCenter": "MSDN",
-#   "Owner": "mbiszczanik",
-#   "Environment": "Production",
-#   "Project": "SkyCraft"
-# }
+# Name             SnapshotTime
+# ----             ------------
+# skycraft-config  2026-02-10 07:15:00 +00:00
 ```
 
-### 7. Verify Port 445 Connectivity (PowerShell)
+### 4. Verify Tags
+
+```powershell
+(Get-AzStorageAccount -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa).Tags
+
+# Expected Output:
+# Name        Value
+# ----        -----
+# CostCenter  MSDN
+# Owner       mbiszczanik
+# Environment Production
+# Project     SkyCraft
+```
+
+### 5. Verify Port 445 Connectivity
 
 ```powershell
 Test-NetConnection `

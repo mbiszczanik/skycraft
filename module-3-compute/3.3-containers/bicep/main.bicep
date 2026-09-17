@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 3.3 - Containers Orchestrator
 DESCRIPTION: Deploys the Container Registry, a Container Instance and a Container Apps environment with one app for SkyCraft Lab 3.3 via Azure Verified Modules (the image must already exist in the registry - Deploy-Bicep.ps1 bootstraps it with acr.bicep first)
-EXAMPLE: .\scripts\Deploy-Bicep.ps1 (Phase 1 deploys acr.bicep and imports the image, Phase 2 runs: az deployment sub create --location swedencentral --template-file main.bicep)
+EXAMPLE: .\scripts\Deploy-Bicep.ps1 (Phase 1 deploys acr.bicep and imports the image, Phase 2 runs: New-AzSubscriptionDeployment -Location swedencentral -TemplateFile main.bicep)
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.2.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1

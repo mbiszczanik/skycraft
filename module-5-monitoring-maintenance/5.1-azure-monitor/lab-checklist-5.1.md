@@ -30,15 +30,10 @@
 
 ### Alert Rules
 
-- [ ] Metric Alert `skycraft-cpu-alert` in `platform-skycraft-swc-rg`: **Percentage CPU > 80%**, enabled, severity **2 (Warning)**, window **5 minutes**, evaluated every **1 minute**
+- [ ] Metric Alert: **Percentage CPU > 80%**
 - [ ] Log Search Alert: (Optional) Heartbeat missing
-- [ ] Action Group: `skycraft-ops-ag` created (short name `SkyCraftOps`), enabled, at least one email receiver
+- [ ] Action Group: `skycraft-ops-ag` created (short name `SkyCraftOps`)
 - [ ] Target email matches your account for testing
-
-### Storage Diagnostics
-
-- [ ] Diagnostic setting `skycraft-storage-diag` on the **blob service** of `platformskycraftswcsa`
-- [ ] Categories `StorageRead` and `StorageWrite` enabled, destination `platform-skycraft-swc-law`
 
 ---
 
@@ -46,12 +41,11 @@
 
 ### Verify Log Analytics Workspace Exists
 
-```azurecli
-# List LAW in primary resource group
-az monitor log-analytics workspace list \
-  --resource-group platform-skycraft-swc-rg \
-  --query "[?name=='platform-skycraft-swc-law'].{Name:name,Location:location,Retention:retentionInDays}" \
-  --output table
+```powershell
+# Show the LAW in the platform resource group
+Get-AzOperationalInsightsWorkspace -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-law |
+    Select-Object Name, Location, @{N='Retention';E={$_.RetentionInDays}} |
+    Format-Table -AutoSize
 ```
 
 ### Verify Heartbeat in LAW (Run in Portal)
@@ -65,24 +59,20 @@ Heartbeat
 
 ### Verify Alert Rules
 
-```azurecli
+```powershell
 # The lab's alert rule, by name, in the platform resource group
-az monitor metrics alert show \
-  --name skycraft-cpu-alert \
-  --resource-group platform-skycraft-swc-rg \
-  --query "{Name:name,Enabled:enabled,Severity:severity,Window:windowSize,Every:evaluationFrequency,Threshold:criteria.allOf[0].threshold}" \
-  --output table
+Get-AzMetricAlertRuleV2 -ResourceGroupName platform-skycraft-swc-rg -Name skycraft-cpu-alert |
+    Select-Object Name, Enabled, Severity, @{N='Window';E={$_.WindowSize}}, @{N='Every';E={$_.EvaluationFrequency}},
+        @{N='Threshold';E={$_.Criteria[0].Threshold}} |
+    Format-Table -AutoSize
 ```
 
 ### Verify the Storage Diagnostic Setting
 
-```azurecli
-SA=$(az storage account show -g platform-skycraft-swc-rg -n platformskycraftswcsa --query id -o tsv)
-az monitor diagnostic-settings show \
-  --name skycraft-storage-diag \
-  --resource "$SA/blobServices/default" \
-  --query "{Workspace:workspaceId, Logs:logs[?enabled].category}" \
-  --output json
+```powershell
+$sa = Get-AzStorageAccount -ResourceGroupName platform-skycraft-swc-rg -Name platformskycraftswcsa
+Get-AzDiagnosticSetting -ResourceId "$($sa.Id)/blobServices/default" -Name skycraft-storage-diag |
+    Select-Object @{N='Workspace';E={$_.WorkspaceId}}, @{N='Logs';E={($_.Log | Where-Object Enabled).Category -join ', '}}
 ```
 
 ---
@@ -93,8 +83,7 @@ az monitor diagnostic-settings show \
 | :--------------- | :----- | :------------------------------ |
 | **Central Logs** | [ ]    | LAW exists in Platform RG       |
 | **VM Telemetry** | [ ]    | KQL query returns Heartbeat     |
-| **CPU Alerts**   | [ ]    | `skycraft-cpu-alert` listed in Monitor |
-| **Storage Logs** | [ ]    | `skycraft-storage-diag` on the blob service |
+| **CPU Alerts**   | [ ]    | Alert rule listed in Monitor    |
 | **Dashboard**    | [ ]    | Ops Dashboard visible in Portal |
 
 ---
@@ -127,8 +116,7 @@ az monitor diagnostic-settings show \
 
 - [ ] Log Analytics Workspace correctly deployed
 - [ ] AMA Agent active and reporting to LAW
-- [ ] CPU Threshold alert `skycraft-cpu-alert` configured
-- [ ] Storage diagnostic setting `skycraft-storage-diag` streaming to the workspace
+- [ ] CPU Threshold alert configured
 - [ ] Central dashboard created
 - [ ] All reflection questions answered
 - [ ] Ready to proceed to Lab 5.2

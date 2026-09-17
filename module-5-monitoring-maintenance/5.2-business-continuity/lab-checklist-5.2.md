@@ -100,24 +100,9 @@
 
 ## 🔍 Validation Commands
 
-Run these commands to validate your lab setup:
+Run these Az PowerShell commands to validate your lab setup:
 
-### Verify Recovery Services Vault (Azure CLI)
-
-```azurecli
-# List Recovery Services Vaults
-az backup vault list \
-  --resource-group platform-skycraft-swc-rg \
-  --query "[?name=='platform-skycraft-swc-rsv'].{Name:name,Location:location,State:properties.provisioningState}" \
-  --output table
-
-# Expected output:
-# Name                        Location        State
-# --------------------------  --------------  ---------
-# platform-skycraft-swc-rsv   swedencentral   Succeeded
-```
-
-### Verify Recovery Services Vault (PowerShell)
+### Verify Recovery Services Vault
 
 ```powershell
 Get-AzRecoveryServicesVault -ResourceGroupName 'platform-skycraft-swc-rg' |
@@ -131,24 +116,7 @@ Get-AzRecoveryServicesVault -ResourceGroupName 'platform-skycraft-swc-rg' |
 # platform-skycraft-swc-rsv   swedencentral   Succeeded
 ```
 
-### Verify Backup Policy (Azure CLI)
-
-```azurecli
-# Get policy details
-az backup policy show \
-  --name SkyCraft-Daily-Prod \
-  --resource-group platform-skycraft-swc-rg \
-  --vault-name platform-skycraft-swc-rsv \
-  --query "{Name:name,ScheduleFrequency:properties.schedulePolicy.scheduleRunFrequency}" \
-  --output table
-
-# Expected output:
-# Name                 ScheduleFrequency
-# -------------------  -----------------
-# SkyCraft-Daily-Prod  Daily
-```
-
-### Verify Backup Policy (PowerShell)
+### Verify Backup Policy
 
 ```powershell
 $vault = Get-AzRecoveryServicesVault -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platform-skycraft-swc-rsv'
@@ -162,23 +130,7 @@ Get-AzRecoveryServicesBackupProtectionPolicy -VaultId $vault.ID -Name 'SkyCraft-
 # SkyCraft-Daily-Prod  AzureVM         Daily
 ```
 
-### Verify Protected Items (Azure CLI)
-
-```azurecli
-# List items protected in the vault
-az backup item list \
-  --vault-name platform-skycraft-swc-rsv \
-  --resource-group platform-skycraft-swc-rg \
-  --query "[].{Name:properties.friendlyName,Status:properties.protectionStatus,LastBackup:properties.lastBackupTime}" \
-  --output table
-
-# Expected output:
-# Name                           Status     LastBackup
-# -----------------------------  ---------  -------------------
-# dev-skycraft-swc-auth-vm      Healthy    2026-02-27T02:00:00
-```
-
-### Verify Protected Items (PowerShell)
+### Verify Protected Items
 
 ```powershell
 $vault = Get-AzRecoveryServicesVault -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platform-skycraft-swc-rsv'
@@ -193,21 +145,7 @@ Get-AzRecoveryServicesBackupItem -VaultId $vault.ID -Container $container -Workl
 # dev-skycraft-swc-auth-vm      Healthy           2026-02-27 02:00:00
 ```
 
-### Verify Backup Vault (Azure CLI)
-
-```azurecli
-az dataprotection backup-vault list \
-  --resource-group platform-skycraft-swc-rg \
-  --query "[?name=='platform-skycraft-swc-bv'].{Name:name,Region:location,State:properties.provisioningState}" \
-  --output table
-
-# Expected output:
-# Name                       Region          State
-# -------------------------  --------------  ---------
-# platform-skycraft-swc-bv   swedencentral   Succeeded
-```
-
-### Verify Backup Vault (PowerShell)
+### Verify Backup Vault
 
 ```powershell
 Get-AzDataProtectionBackupVault -ResourceGroupName 'platform-skycraft-swc-rg' |
@@ -221,23 +159,7 @@ Get-AzDataProtectionBackupVault -ResourceGroupName 'platform-skycraft-swc-rg' |
 # platform-skycraft-swc-bv   swedencentral   Succeeded
 ```
 
-### Verify Blob Backup Policy (Azure CLI)
-
-```azurecli
-az dataprotection backup-policy show \
-  --resource-group platform-skycraft-swc-rg \
-  --vault-name platform-skycraft-swc-bv \
-  --name SkyCraft-Blob-Policy \
-  --query "{Name:name,DatasourceTypes:properties.datasourceTypes[0]}" \
-  --output table
-
-# Expected output:
-# Name                   DatasourceTypes
-# ---------------------  -----------------------------------------------
-# SkyCraft-Blob-Policy   Microsoft.Storage/storageAccounts/blobServices
-```
-
-### Verify Blob Backup Policy (PowerShell)
+### Verify Blob Backup Policy
 
 ```powershell
 Get-AzDataProtectionBackupPolicy -ResourceGroupName 'platform-skycraft-swc-rg' -VaultName 'platform-skycraft-swc-bv' |
@@ -251,22 +173,7 @@ Get-AzDataProtectionBackupPolicy -ResourceGroupName 'platform-skycraft-swc-rg' -
 # SkyCraft-Blob-Policy   Microsoft.Storage/storageAccounts/blobServices
 ```
 
-### Verify Blob Backup Instance (Azure CLI)
-
-```azurecli
-az dataprotection backup-instance list \
-  --resource-group platform-skycraft-swc-rg \
-  --vault-name platform-skycraft-swc-bv \
-  --query "[].{Name:name,SourceResource:properties.dataSourceInfo.resourceName,Status:properties.currentProtectionState}" \
-  --output table
-
-# Expected output:
-# Name                           SourceResource       Status
-# -----------------------------  -------------------  ---------------------
-# prodskycraftswcsa-...          prodskycraftswcsa    ProtectionConfigured
-```
-
-### Verify Blob Backup Instance (PowerShell)
+### Verify Blob Backup Instance
 
 ```powershell
 Get-AzDataProtectionBackupInstance -ResourceGroupName 'platform-skycraft-swc-rg' -VaultName 'platform-skycraft-swc-bv' |
@@ -279,19 +186,22 @@ Get-AzDataProtectionBackupInstance -ResourceGroupName 'platform-skycraft-swc-rg'
 # prodskycraftswcsa-...          prodskycraftswcsa    ProtectionConfigured
 ```
 
-### Verify ASR Replication Status (Azure CLI)
+### Verify ASR Replication Status
 
-```azurecli
+```powershell
 # ASR replication status is managed within the Recovery Services Vault
-az backup replication-protected-item list \
-  --resource-group platform-skycraft-swc-rg \
-  --vault-name platform-skycraft-swc-rsv \
-  --output table
+$vault = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-rsv
+Set-AzRecoveryServicesAsrVaultContext -Vault $vault
+$fabric = Get-AzRecoveryServicesAsrFabric
+$container = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric
+Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $container |
+    Select-Object FriendlyName, ProtectionState |
+    Format-Table -AutoSize
 
 # Expected output (after replication is enabled):
-# Name                                  ProtectionState
-# ------------------------------------  ---------------
-# dev-skycraft-swc-auth-vm             Protected
+# FriendlyName                          ProtectionState
+# ------------                          ---------------
+# dev-skycraft-swc-auth-vm              Protected
 ```
 
 > **Note**: ASR replication is configured via the Azure Portal (Step 5.2.6) and may not yet be enabled in all environments. Verify status in **Azure Portal → Recovery Services Vault → Replicated items**.

@@ -151,18 +151,18 @@
 
 ## 🔍 Validation Commands
 
-Run these commands to validate your governance configuration:
+Run these Az PowerShell commands to validate your governance configuration:
 
 ### Login to Azure
 
-```azcli
-az login
+```powershell
+Connect-AzAccount
 ```
 
 ### Set subscription context
 
-```azcli
-az account set --subscription "YOUR-SUBSCRIPTION-ID"
+```powershell
+Set-AzContext -Subscription "YOUR-SUBSCRIPTION-ID"
 ```
 
 ========================================
@@ -171,14 +171,16 @@ az account set --subscription "YOUR-SUBSCRIPTION-ID"
 
 ### List tags on dev-skycraft-swc-rg
 
-```azcli
-az tag list --resource-id /subscriptions/YOUR-SUB-ID/resourceGroups/dev-skycraft-swc-rg
+```powershell
+(Get-AzResourceGroup -Name dev-skycraft-swc-rg).Tags
 ```
 
 ### List all resources with Project=SkyCraft tag
 
-```azcli
-az resource list --tag Project=SkyCraft --query "[].{Name:name,Type:type,RG:resourceGroup}" -o table
+```powershell
+Get-AzResource -TagName Project -TagValue SkyCraft |
+    Select-Object Name, ResourceType, ResourceGroupName |
+    Format-Table -AutoSize
 ```
 
 ========================================
@@ -187,14 +189,19 @@ az resource list --tag Project=SkyCraft --query "[].{Name:name,Type:type,RG:reso
 
 ### List all policy assignments
 
-```azcli
-az policy assignment list --query "[].{Name:name,DisplayName:displayName,Scope:scope}" -o table
+```powershell
+Get-AzPolicyAssignment |
+    Select-Object Name, DisplayName, Scope |
+    Format-Table -AutoSize
 ```
 
 ### Check policy compliance
 
-```azcli
-az policy state summarize --query "results[].{PolicyName:policyAssignments.policyDefinitionName,Compliant:resourceDetails.complianceState}"
+```powershell
+Get-AzPolicyStateSummary |
+    Select-Object -ExpandProperty PolicyAssignments |
+    Select-Object PolicyAssignmentId, @{N='NonCompliant';E={$_.Results.NonCompliantResources}} |
+    Format-Table -AutoSize
 ```
 
 ========================================
@@ -203,24 +210,30 @@ az policy state summarize --query "results[].{PolicyName:policyAssignments.polic
 
 ### List locks on prod-skycraft-swc-rg
 
-```azcli
-az lock list --resource-group prod-skycraft-swc-rg --query "[].{Name:name,Level:level,Notes:notes}" -o table
+```powershell
+Get-AzResourceLock -ResourceGroupName prod-skycraft-swc-rg |
+    Select-Object Name, @{N='Level';E={$_.Properties.level}}, @{N='Notes';E={$_.Properties.notes}} |
+    Format-Table -AutoSize
 ```
 
 ### List locks on platform-skycraft-swc-rg
 
-```azcli
-az lock list --resource-group platform-skycraft-swc-rg --query "[].{Name:name,Level:level,Notes:notes}" -o table
+```powershell
+Get-AzResourceLock -ResourceGroupName platform-skycraft-swc-rg |
+    Select-Object Name, @{N='Level';E={$_.Properties.level}}, @{N='Notes';E={$_.Properties.notes}} |
+    Format-Table -AutoSize
 ```
 
 ========================================
 ### Validate Budgets
 ========================================
 
-### List all budgets (requires Cost Management extension)
+### List all budgets (requires the Az.Consumption module)
 
-```azcli
-az consumption budget list --query "[].{Name:name,Amount:amount,Category:category}" -o table
+```powershell
+Get-AzConsumptionBudget |
+    Select-Object Name, Amount, Category |
+    Format-Table -AutoSize
 ```
 
 **Expected Results**:
