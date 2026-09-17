@@ -47,10 +47,12 @@ By completing this lab, you will:
 
 Before starting this lab:
 
-- [ ] Completed **Module 3: Compute** (at least one VM should be running)
-- [ ] Completed **Lab 4.1: Storage Accounts** (platform storage account exists)
-- [ ] Resource group `platform-skycraft-swc-rg` exists
+- [ ] Completed **Lab 3.2: Virtual Machines** - at least one of `dev-skycraft-swc-auth-vm` or `prod-skycraft-swc-auth-vm` is running (the dev VM is preferred as the monitored VM and alert target)
+- [ ] Completed **Lab 4.1: Storage Accounts** (`platformskycraftswcsa` in `platform-skycraft-swc-rg` receives the storage diagnostic setting)
+- [ ] Resource group `platform-skycraft-swc-rg` exists (Lab 1.2)
 - [ ] `Contributor` role at the subscription level
+
+These are the checks `scripts/Deploy-Bicep.ps1` performs before deploying - it exits if no VM or no platform storage account is found.
 
 ---
 
@@ -150,20 +152,65 @@ Perf
 
 ### Step 5.1.5: Create a Metric Alert (CPU > 80%)
 
-1. Navigate to your VM (`dev-skycraft-swc-auth-vm`) → **Monitoring** → **Alerts**.
-2. Click **+ Create** → **Alert rule**.
-3. Under **Signal name**, select **Percentage CPU**.
-4. Configure the logic:
+The alert rule and its action group are **platform** resources - they live in `platform-skycraft-swc-rg` next to the workspace, even though the rule watches a dev VM. Create them from Azure Monitor rather than from the VM blade so they land in the right resource group; `scripts/Test-Lab.ps1` looks for `skycraft-cpu-alert` there by name.
+
+1. Navigate to **Monitor** → **Alerts** → **+ Create** → **Alert rule**.
+2. **Scope**: select `dev-skycraft-swc-auth-vm` (or `prod-skycraft-swc-auth-vm` if only the prod environment exists).
+3. **Condition** → **Signal name**: **Percentage CPU**. Configure the logic:
    - Threshold: **Static**
+   - Aggregation type: **Average**
    - Operator: **Greater than**
    - Threshold value: **80**
    - Check every: **1 minute**
-5. Click **Next: Actions**.
-6. Create an **Action Group**:
-   - Name: `skycraft-ops-ag`
-   - Short name: `SkyCraftOps`
-   - Notification: **Email/SMS/Push/Voice** (Enter your email).
-7. Click **Create**.
+   - Lookback period: **5 minutes**
+4. **Actions** → **+ Create action group**:
+   - Resource group: `platform-skycraft-swc-rg`
+   - Action group name: `skycraft-ops-ag`
+   - Display name: `SkyCraftOps`
+   - Notification: **Email/SMS message/Push/Voice** (enter your email)
+5. **Details**:
+   - Resource group: `platform-skycraft-swc-rg`
+   - Severity: **2 - Warning**
+   - Alert rule name: `skycraft-cpu-alert`
+   - Enable upon creation: **checked**
+6. **Tags**: `Project = SkyCraft`, `Environment = Platform`, `CostCenter = MSDN`.
+7. Click **Review + create** → **Create**.
+
+#### Azure CLI
+
+```azurecli
+az monitor action-group create \
+  --name skycraft-ops-ag --short-name SkyCraftOps \
+  --resource-group platform-skycraft-swc-rg \
+  --action email ops you@example.com
+
+az monitor metrics alert create \
+  --name skycraft-cpu-alert \
+  --resource-group platform-skycraft-swc-rg \
+  --scopes $(az vm show -g dev-skycraft-swc-rg -n dev-skycraft-swc-auth-vm --query id -o tsv) \
+  --condition "avg Percentage CPU > 80" \
+  --window-size 5m --evaluation-frequency 1m --severity 2 \
+  --action skycraft-ops-ag \
+  --tags Project=SkyCraft Environment=Platform CostCenter=MSDN
+```
+
+#### Azure PowerShell
+
+```powershell
+$email = New-AzActionGroupEmailReceiverObject -Name ops -EmailAddress you@example.com
+$ag = New-AzActionGroup -Name skycraft-ops-ag -ShortName SkyCraftOps -ResourceGroupName platform-skycraft-swc-rg -Location Global -EmailReceiver $email
+
+$vm = Get-AzVM -Name dev-skycraft-swc-auth-vm -ResourceGroupName dev-skycraft-swc-rg
+$criteria = New-AzMetricAlertRuleV2Criteria -MetricName 'Percentage CPU' -MetricNamespace 'Microsoft.Compute/virtualMachines' `
+  -TimeAggregation Average -Operator GreaterThan -Threshold 80
+
+Add-AzMetricAlertRuleV2 -Name skycraft-cpu-alert -ResourceGroupName platform-skycraft-swc-rg `
+  -TargetResourceId $vm.Id -Condition $criteria -ActionGroupId $ag.Id `
+  -WindowSize 00:05:00 -Frequency 00:01:00 -Severity 2 `
+  -Description 'CPU > 80% on SkyCraft VM'
+```
+
+**Expected Result**: `skycraft-cpu-alert` is listed under **Monitor** → **Alerts** → **Alert rules** in `platform-skycraft-swc-rg`, enabled, severity 2, with `skycraft-ops-ag` as its action.
 
 ### Step 5.1.6: Pin to Dashboard
 
@@ -171,8 +218,39 @@ Perf
 2. Click **Pin to** → **Azure Dashboard**.
 3. Create a new dashboard named `SkyCraft-Ops`.
 
-> [!NOTE]
-> Beyond VM telemetry, this lab also routes the **platform storage account's diagnostics** to the workspace. The automated deployment (`Deploy-Bicep.ps1`) creates a diagnostic setting (`skycraft-storage-diag`) that sends `StorageRead` and `StorageWrite` blob logs to `platform-skycraft-swc-law`, centralizing storage access auditing alongside VM metrics and logs.
+### Step 5.1.7: Route storage diagnostics to the workspace
+
+Beyond VM telemetry, this lab also routes the **platform storage account's blob logs** to the workspace, centralizing storage access auditing alongside VM metrics and logs. The setting is attached to the **blob service** of the account, not to the account itself.
+
+1. Navigate to **Storage accounts** → `platformskycraftswcsa` → **Monitoring** → **Diagnostic settings**.
+2. Select **blob** in the resource tree, then **+ Add diagnostic setting**.
+3. Diagnostic setting name: `skycraft-storage-diag`
+4. Logs: **StorageRead** and **StorageWrite**.
+5. Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`.
+6. Click **Save**.
+
+#### Azure CLI
+
+```azurecli
+SA=$(az storage account show -g platform-skycraft-swc-rg -n platformskycraftswcsa --query id -o tsv)
+LAW=$(az monitor log-analytics workspace show -g platform-skycraft-swc-rg -n platform-skycraft-swc-law --query id -o tsv)
+
+az monitor diagnostic-settings create --name skycraft-storage-diag \
+  --resource "$SA/blobServices/default" --workspace "$LAW" \
+  --logs '[{"category":"StorageRead","enabled":true},{"category":"StorageWrite","enabled":true}]'
+```
+
+#### Azure PowerShell
+
+```powershell
+$sa  = Get-AzStorageAccount -ResourceGroupName platform-skycraft-swc-rg -Name platformskycraftswcsa
+$law = Get-AzOperationalInsightsWorkspace -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-law
+$logs = 'StorageRead', 'StorageWrite' | ForEach-Object { New-AzDiagnosticSettingLogSettingsObject -Category $_ -Enabled $true }
+
+New-AzDiagnosticSetting -Name skycraft-storage-diag -ResourceId "$($sa.Id)/blobServices/default" -WorkspaceId $law.ResourceId -Log $logs
+```
+
+**Expected Result**: `skycraft-storage-diag` appears under the blob service's diagnostic settings; within 15 minutes `StorageBlobLogs` in the workspace returns rows for every read and write against the platform account.
 
 **Preview - the AVM module calls the Bicep path makes** (`bicep/main.bicep`; versions pinned in `docs/bicep-standards.md` §4.4):
 
@@ -209,8 +287,9 @@ The data collection rule and the action group follow the same pattern. The stora
 - [ ] Log Analytics Workspace `platform-skycraft-swc-law` created
 - [ ] At least one VM connected using Azure Monitor Agent
 - [ ] KQL query returned `Heartbeat` data
-- [ ] Alert rule for >80% CPU created
+- [ ] Alert rule `skycraft-cpu-alert` (>80% CPU, severity 2) with action group `skycraft-ops-ag` in `platform-skycraft-swc-rg`
 - [ ] Azure Dashboard contains at least one pinned chart
+- [ ] Diagnostic setting `skycraft-storage-diag` streams `StorageRead`/`StorageWrite` from `platformskycraftswcsa` to the workspace
 
 **For detailed verification**, see [lab-checklist-5.1.md](lab-checklist-5.1.md)
 

@@ -116,14 +116,14 @@ $sshPublicKeySecure = ConvertTo-SecureString -String $sshPublicKey -AsPlainText 
 Write-Host "  ✓ SSH public key found" -ForegroundColor Green
 
 # Check if Lab 3.1 resources exist
-Write-Host "`n[2/5] Checking Lab 3.1 prerequisites..." -ForegroundColor Yellow
+Write-Host "`n[2/5] Checking prerequisites (Lab 2.1 network, Lab 2.3 or 3.1 load balancer)..." -ForegroundColor Yellow
 $rgName = "$Environment-skycraft-swc-rg"
 $vnetName = "$Environment-skycraft-swc-vnet"
 $lbName = "$Environment-skycraft-swc-lb"
 
 $rgExists = Get-AzResourceGroup -Name $rgName -ErrorAction SilentlyContinue
 if (-not $rgExists) {
-    Write-Error "Resource group '$rgName' not found. Deploy Lab 3.1 first."
+    Write-Error "Resource group '$rgName' not found. Deploy Lab 2.1 (or 3.1) first."
     $Host.SetShouldExit(1)
     exit 1
 }
@@ -131,7 +131,7 @@ Write-Host "  ✓ Resource group exists: $rgName" -ForegroundColor Green
 
 $vnetExists = Get-AzVirtualNetwork -Name $vnetName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
 if (-not $vnetExists) {
-    Write-Error "VNet '$vnetName' not found. Deploy Lab 3.1 first."
+    Write-Error "VNet '$vnetName' not found. Deploy Lab 2.1 (or 3.1) first."
     $Host.SetShouldExit(1)
     exit 1
 }
@@ -139,7 +139,7 @@ Write-Host "  ✓ VNet exists: $vnetName" -ForegroundColor Green
 
 $lbExists = Get-AzLoadBalancer -Name $lbName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
 if (-not $lbExists) {
-    Write-Error "Load Balancer '$lbName' not found. Deploy Lab 3.1 first."
+    Write-Error "Load Balancer '$lbName' not found. Deploy Lab 2.3 (or 3.1) first."
     $Host.SetShouldExit(1)
     exit 1
 }

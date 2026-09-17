@@ -52,10 +52,13 @@ By completing this lab, you will:
 
 Before starting this lab:
 
-- [ ] Completed **Module 3: Compute** (VM must exist)
-- [ ] Completed **Module 4: Storage** (Storage account must exist)
-- [ ] Resource group `platform-skycraft-swc-rg` exists
-- [ ] **Quota Availability**: Ensure you have quota for 2 vCPUs in **Norway East**
+- [ ] Completed **Lab 5.1: Azure Monitor** (`platform-skycraft-swc-law` must exist - both vaults send their diagnostics to it, and `Deploy-Bicep.ps1` stops if the workspace is missing)
+- [ ] Completed **Lab 3.2: Virtual Machines** (`dev-skycraft-swc-auth-vm` in `dev-skycraft-swc-rg` is the VM the lab protects; without it the deployment script skips VM backup with a warning)
+- [ ] Completed **Lab 4.1: Storage Accounts** with the production account (`prodskycraftswcsa` in `prod-skycraft-swc-rg` is the blob backup datasource - run 4.1 with `-All`, the dev-only cycle does not create it)
+- [ ] Resource group `platform-skycraft-swc-rg` exists (Lab 1.2)
+- [ ] **Section 4 only** (portal, not automated): quota for 2 vCPUs in **Norway East** for the Site Recovery test failover
+
+The first four are the checks `scripts/Deploy-Bicep.ps1` and `scripts/New-LabBlobBackup.ps1` perform before deploying; the cheapest chain that satisfies them is 1.2 → 3.2 (dev) → 4.1 `-All` → 5.1 → 5.2 (see `tools/lab-cycle-manifest.psd1`).
 
 ---
 
@@ -240,9 +243,67 @@ The Backup Vault uses its **system-assigned managed identity** to read and prote
 
 ### Step 5.2.8: Configure Backup Reports
 
+Backup reports are built from **diagnostic settings** on the vaults: each vault streams its backup logs to a Log Analytics workspace, and Backup center renders the workbooks from that data. Create one diagnostic setting per vault, with the names below - `scripts/Test-Lab.ps1` looks them up by name.
+
+**a. Recovery Services Vault → `rsv-backup-reports-diag`**
+
+1. Open `platform-skycraft-swc-rsv` → **Monitoring** → **Diagnostic settings** → **+ Add diagnostic setting**.
+2. Diagnostic setting name: `rsv-backup-reports-diag`
+3. Logs - select the categories:
+   - **Azure Backup Reporting Data** (`AzureBackupReport`)
+   - **Core Azure Backup Data** (`CoreAzureBackup`)
+   - **Addon Azure Backup Job Data** (`AddonAzureBackupJobs`)
+   - **Addon Azure Backup Policy Data** (`AddonAzureBackupPolicy`)
+   - **Addon Azure Backup Protected Instance Data** (`AddonAzureBackupProtectedInstance`)
+4. Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`, destination table **Resource specific**.
+5. Click **Save**.
+
+**b. Backup Vault → `bv-backup-reports-diag`**
+
+1. Open `platform-skycraft-swc-bv` → **Monitoring** → **Diagnostic settings** → **+ Add diagnostic setting**.
+2. Diagnostic setting name: `bv-backup-reports-diag`
+3. Logs: **Core Azure Backup Data**, **Addon Azure Backup Job Data**, **Addon Azure Backup Policy Data**, **Addon Azure Backup Protected Instance Data** (the Backup Vault has no `AzureBackupReport` category).
+4. Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`, **Resource specific**.
+5. Click **Save**.
+
+#### Azure CLI
+
+```azurecli
+LAW=$(az monitor log-analytics workspace show -g platform-skycraft-swc-rg -n platform-skycraft-swc-law --query id -o tsv)
+RSV=$(az backup vault show -g platform-skycraft-swc-rg -n platform-skycraft-swc-rsv --query id -o tsv)
+BV=$(az dataprotection backup-vault show -g platform-skycraft-swc-rg -v platform-skycraft-swc-bv --query id -o tsv)
+
+az monitor diagnostic-settings create --name rsv-backup-reports-diag --resource "$RSV" \
+  --workspace "$LAW" --export-to-resource-specific true \
+  --logs '[{"category":"AzureBackupReport","enabled":true},{"category":"CoreAzureBackup","enabled":true},{"category":"AddonAzureBackupJobs","enabled":true},{"category":"AddonAzureBackupPolicy","enabled":true},{"category":"AddonAzureBackupProtectedInstance","enabled":true}]'
+
+az monitor diagnostic-settings create --name bv-backup-reports-diag --resource "$BV" \
+  --workspace "$LAW" --export-to-resource-specific true \
+  --logs '[{"category":"CoreAzureBackup","enabled":true},{"category":"AddonAzureBackupJobs","enabled":true},{"category":"AddonAzureBackupPolicy","enabled":true},{"category":"AddonAzureBackupProtectedInstance","enabled":true}]'
+```
+
+#### Azure PowerShell
+
+```powershell
+$law = Get-AzOperationalInsightsWorkspace -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-law
+$rsv = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-rsv
+$bv  = Get-AzDataProtectionBackupVault -ResourceGroupName platform-skycraft-swc-rg -VaultName platform-skycraft-swc-bv
+
+$core = 'CoreAzureBackup', 'AddonAzureBackupJobs', 'AddonAzureBackupPolicy', 'AddonAzureBackupProtectedInstance'
+$rsvLogs = ($core + 'AzureBackupReport') | ForEach-Object { New-AzDiagnosticSettingLogSettingsObject -Category $_ -Enabled $true }
+$bvLogs  = $core | ForEach-Object { New-AzDiagnosticSettingLogSettingsObject -Category $_ -Enabled $true }
+
+New-AzDiagnosticSetting -Name rsv-backup-reports-diag -ResourceId $rsv.ID -WorkspaceId $law.ResourceId -LogAnalyticsDestinationType Dedicated -Log $rsvLogs
+New-AzDiagnosticSetting -Name bv-backup-reports-diag  -ResourceId $bv.Id  -WorkspaceId $law.ResourceId -LogAnalyticsDestinationType Dedicated -Log $bvLogs
+```
+
+**c. Read the reports**
+
 1. Navigate to **Backup center** → **Backup reports**.
-2. Link your **Log Analytics Workspace** (`platform-skycraft-swc-law`) to enable reporting.
-3. View the **Backup Instances** report to see protection status across all vaults.
+2. Select `platform-skycraft-swc-law` as the workspace.
+3. View the **Backup Instances** report to see protection status across both vaults. Data appears up to 24 hours after the settings are created.
+
+**Expected Result**: Each vault lists one diagnostic setting targeting `platform-skycraft-swc-law`; `Test-Lab.ps1` reports both `[Diagnostic Settings]` checks as PASS.
 
 ### Step 5.2.9: Review Alerts
 
@@ -273,8 +334,10 @@ Instead of restoring the whole VM, we can mount a specific recovery point as a d
 
 - [ ] Vault `platform-skycraft-swc-rsv` deployed and configured (LRS/GRS)
 - [ ] Backup policy `SkyCraft-Daily-Prod` created with 30-day retention
-- [ ] Production VM registered for backup
+- [ ] `dev-skycraft-swc-auth-vm` registered for backup
 - [ ] Initial backup job triggered or completed
+- [ ] Backup Vault `platform-skycraft-swc-bv` with `SkyCraft-Blob-Policy` protecting `prodskycraftswcsa`
+- [ ] Diagnostic settings `rsv-backup-reports-diag` and `bv-backup-reports-diag` send backup logs to `platform-skycraft-swc-law`
 - [ ] Detailed verification performed (see checklist)
 
 **For detailed verification**, see [lab-checklist-5.2.md](lab-checklist-5.2.md)
@@ -336,7 +399,7 @@ Instead of restoring the whole VM, we can mount a specific recovery point as a d
 ✅ Configured backup policies for both Compute and Storage
 ✅ Enabled **Azure Site Recovery** to replicate Production to Norway East
 ✅ Successfully performed a **Test Failover** to validate BCDR strategy
-✅ Configured **Backup Reports** for ongoing compliance monitoring
+✅ Configured **Backup Reports** through the `rsv-backup-reports-diag` and `bv-backup-reports-diag` diagnostic settings
 ✅ Explored File-Level Recovery vs Full VM Restore
 
 **Time Spent**: ~2.5 hours

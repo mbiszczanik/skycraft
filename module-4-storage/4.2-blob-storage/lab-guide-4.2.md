@@ -198,7 +198,7 @@ Get-AzStorageAccount `
 This container will store game textures, models, and other assets.
 
 > [!NOTE]
-> **Security Best Practice**: In production, we keep containers **Private** (no anonymous access) and use robust delivery mechanisms like Azure CDN or Front Door with private origins. We will demonstrate **Public Access** in a separate step using the Development environment to prepare for the AZ-104 exam.
+> **Security Best Practice**: In production, we keep containers **Private** (no anonymous access) and use robust delivery mechanisms like Azure CDN or Front Door with private origins. Step 4.2.12 walks through the **public access** settings on the Development account for the AZ-104 exam - and shows why, in this subscription, they stay off.
 
 #### Azure Portal
 
@@ -719,38 +719,36 @@ Get-AzStorageBlob -Container "game-assets" -Context $ctx | Select-Object Name, A
 
 **Expected Result**: Blob uploaded to `game-assets/textures/test-asset.txt` with Hot tier.
 
-### Step 4.2.12: Configure Public Access (10 min)
+### Step 4.2.12: Public Access - the two switches, and why they stay off here (10 min)
 
 > [!NOTE]
-> **Exam Requirement**: Configuring public access is a **mandatory AZ-104 skill**. While we enforce private access in production for security, you **must** configure public access on the **Development** storage account to complete this lab.
+> **Exam Requirement**: Configuring anonymous (public) blob access is an **AZ-104 skill**, so you need to know where both switches are. In the SkyCraft subscription an Azure Policy **denies** `allowBlobPublicAccess = true`, so this step is a walk-through of the settings and of the policy refusal - the `public-demo` container is created **Private**, exactly as `bicep/main.bicep` and `scripts/Test-Lab.ps1` expect. Do not work around the policy: a learner who enables public access here ends up with a container `Test-Lab.ps1` fails, and on an unguarded subscription with an anonymously readable dev account.
 
-1. **Enable Public Access on Account** (Dev Only):
+1. **Find the account-level switch** (Dev):
    - Navigate to `devskycraftswcsa` → **Settings** → **Configuration**
-   - Set **Allow Blob anonymous access** to **Enabled**
-   - Click **Save**
+   - Locate **Allow Blob anonymous access** - it is **Disabled**, and `Deploy-Bicep.ps1` deploys it that way (`allowBlobPublicAccess: false`)
+   - Set it to **Enabled** and click **Save** to see what happens: the save is refused with a **RequestDisallowedByPolicy** error naming the subscription policy. Click **Discard**.
 
-2. **Create Public Container**:
+2. **Create the `public-demo` container - Private**:
    - Go to **Containers** → **+ Container**
    - Name: `public-demo`
-   - Anonymous access level: **Blob (anonymous read access for blobs only)**
+   - Anonymous access level: **Private (no anonymous access)** - the only level the dropdown offers while the account switch is off
    - Click **Create**
 
-3. **Upload Test Blob**:
-   - Open `public-demo` container
-   - Upload any small text file
-   - Click the uploaded blob to see details
-   - Copy the **URL** (e.g., `https://devskycraftswcsa.blob.core.windows.net/public-demo/file.txt`)
+3. **Prove the container is not anonymous**:
+   - Open `public-demo`, upload any small text file and copy its **URL** (e.g., `https://devskycraftswcsa.blob.core.windows.net/public-demo/file.txt`)
+   - Open the URL in an incognito/private browser window
+   - **Result**: `ResourceNotFound` / `PublicAccessNotPermitted` - the blob exists, but without a token or a role nothing is served
 
-4. **Test Access**:
-   - Open an incognito/private browser window
-   - Paste the URL
-   - **Result**: You should see the file content without logging in
+4. **See the container-level switch** (read-only here):
+   - `public-demo` → **Change access level**. The dialog lists **Private**, **Blob** and **Container**; with the account switch off the two public levels are greyed out. Close the dialog without changing anything.
 
-> **Takeaway**: Public access is controlled at **two levels**:
+> **Takeaway**: Public access is controlled at **two levels**, and both must be on for anonymous reads to work:
 >
-> 1. Storage Account (`AllowBlobPublicAccess`)
-> 2. Container (`PublicAccess` level)
->    Both must be enabled for anonymous access to work.
+> 1. Storage Account (`AllowBlobPublicAccess`) - the master switch; Azure Policy can pin it to `false` for a whole subscription, which is what this lab's subscription does
+> 2. Container (`PublicAccess` level: `Private` / `Blob` / `Container`) - only selectable when the account switch is on
+>
+> On the exam, be ready to configure both; in SkyCraft, `Test-Lab.ps1` asserts `AllowBlobPublicAccess = false` on both accounts and `public-demo` = `Private`.
 
 ![Configure Public Access](images/step-4.2.12.png)
 
@@ -961,7 +959,7 @@ az storage blob list \
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: Private access requires authentication for all blob access, preventing accidental data exposure. Public access (Blob or Container level) allows anonymous internet access, which could lead to data leaks, compliance violations, and unexpected egress costs. Only use public access for content explicitly intended for anonymous access (like CDN-served static assets).
+   **Answer**: Private access requires authentication for all blob access, preventing accidental data exposure. Public access (Blob or Container level) allows anonymous internet access, which could lead to data leaks, compliance violations, and unexpected egress costs. Only use public access for content explicitly intended for anonymous access (like CDN-served static assets) - and expect a governed subscription, like SkyCraft's, to deny the account-level switch outright through Azure Policy.
    </details>
 
 7. **How do you restore a soft-deleted container?**

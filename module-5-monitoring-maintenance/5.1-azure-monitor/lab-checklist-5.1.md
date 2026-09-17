@@ -30,10 +30,15 @@
 
 ### Alert Rules
 
-- [ ] Metric Alert: **Percentage CPU > 80%**
+- [ ] Metric Alert `skycraft-cpu-alert` in `platform-skycraft-swc-rg`: **Percentage CPU > 80%**, enabled, severity **2 (Warning)**, window **5 minutes**, evaluated every **1 minute**
 - [ ] Log Search Alert: (Optional) Heartbeat missing
-- [ ] Action Group: `skycraft-ops-ag` created (short name `SkyCraftOps`)
+- [ ] Action Group: `skycraft-ops-ag` created (short name `SkyCraftOps`), enabled, at least one email receiver
 - [ ] Target email matches your account for testing
+
+### Storage Diagnostics
+
+- [ ] Diagnostic setting `skycraft-storage-diag` on the **blob service** of `platformskycraftswcsa`
+- [ ] Categories `StorageRead` and `StorageWrite` enabled, destination `platform-skycraft-swc-law`
 
 ---
 
@@ -61,10 +66,23 @@ Heartbeat
 ### Verify Alert Rules
 
 ```azurecli
-# List all metric alerts in the subscription
-az monitor metrics alert list \
-  --query "[].{Name:name,Enabled:enabled,Threshold:criteria.threshold}" \
+# The lab's alert rule, by name, in the platform resource group
+az monitor metrics alert show \
+  --name skycraft-cpu-alert \
+  --resource-group platform-skycraft-swc-rg \
+  --query "{Name:name,Enabled:enabled,Severity:severity,Window:windowSize,Every:evaluationFrequency,Threshold:criteria.allOf[0].threshold}" \
   --output table
+```
+
+### Verify the Storage Diagnostic Setting
+
+```azurecli
+SA=$(az storage account show -g platform-skycraft-swc-rg -n platformskycraftswcsa --query id -o tsv)
+az monitor diagnostic-settings show \
+  --name skycraft-storage-diag \
+  --resource "$SA/blobServices/default" \
+  --query "{Workspace:workspaceId, Logs:logs[?enabled].category}" \
+  --output json
 ```
 
 ---
@@ -75,7 +93,8 @@ az monitor metrics alert list \
 | :--------------- | :----- | :------------------------------ |
 | **Central Logs** | [ ]    | LAW exists in Platform RG       |
 | **VM Telemetry** | [ ]    | KQL query returns Heartbeat     |
-| **CPU Alerts**   | [ ]    | Alert rule listed in Monitor    |
+| **CPU Alerts**   | [ ]    | `skycraft-cpu-alert` listed in Monitor |
+| **Storage Logs** | [ ]    | `skycraft-storage-diag` on the blob service |
 | **Dashboard**    | [ ]    | Ops Dashboard visible in Portal |
 
 ---
@@ -108,7 +127,8 @@ az monitor metrics alert list \
 
 - [ ] Log Analytics Workspace correctly deployed
 - [ ] AMA Agent active and reporting to LAW
-- [ ] CPU Threshold alert configured
+- [ ] CPU Threshold alert `skycraft-cpu-alert` configured
+- [ ] Storage diagnostic setting `skycraft-storage-diag` streaming to the workspace
 - [ ] Central dashboard created
 - [ ] All reflection questions answered
 - [ ] Ready to proceed to Lab 5.2

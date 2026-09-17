@@ -57,8 +57,9 @@ You'll implement comprehensive network security on the existing hub-spoke topolo
 Before starting this lab:
 
 - [ ] Completed Lab 2.1 (Virtual Networks and Peering)
-- [ ] Three VNets exist: platform-skycraft-swc-vnet, dev-skycraft-swc-vnet, prod-skycraft-swc-vnet
+- [ ] Three VNets exist: platform-skycraft-swc-vnet, dev-skycraft-swc-vnet, prod-skycraft-swc-vnet - `bicep/main.bicep` attaches the NSGs to their subnets and Bastion to the hub's `AzureBastionSubnet`, so all three must be in place
 - [ ] VNet peering connections operational (hub-to-dev, hub-to-prod)
+- [ ] Decide on Bastion before running `scripts/Deploy-Bicep.ps1`: it asks `Do you want to deploy Azure Bastion? (y/N)` and defaults to **no**, because Bastion is the one resource in the course with a standing hourly cost. Section 4 is optional for the automation path; the portal steps deploy it explicitly
 - [ ] Owner or Contributor role at subscription level
 - [ ] Understanding of TCP/IP ports and network security concepts
 
