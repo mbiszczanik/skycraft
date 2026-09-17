@@ -55,6 +55,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Lab 3.1's suite compiles its templates through `az bicep build`. Installed up front,
+      # as the bicep job does, rather than left to the CLI's first-use auto-install inside a
+      # test case.
+      - name: Install Bicep CLI
+        run: az bicep install
+
       # The outcome is decided here rather than left to Pester's own `-CI` exit. GitHub runs
       # this step as `pwsh -command`, whose exit code is whatever the host was last told to
       # use - and the suite itself runs tools/Invoke-LabCycle.ps1 in-process, which ends with
@@ -66,9 +72,27 @@ jobs:
         run: |
           Install-Module Pester -MinimumVersion 5.5 -MaximumVersion 5.99 -Force -Scope CurrentUser
 
+          # Lab-local suites (module-*/**/tests/*.Tests.ps1) run alongside the repo-wide ones
+          # in tests/. They only ever ran when someone invoked them by hand, which is how the
+          # Module 1 README suite went on asserting a Mermaid block after ADR-0004 had
+          # replaced it, unnoticed (#77). docs/powershell-standards.md section 6 states the rule.
+          #
+          # Module directories first, then recurse: `Get-ChildItem -Path 'module-*' -Recurse -File
+          # -Filter` returns nothing at all on pwsh 7.6 (the wildcard path and -File do not
+          # combine), and an empty list here would pass as a green check.
+          $labSuites = @(Get-ChildItem -Directory -Filter 'module-*' | Get-ChildItem -Recurse -File -Filter '*.Tests.ps1' | ForEach-Object FullName)
+          Write-Host "Lab-local suites: $($labSuites.Count)"
+          $labSuites | ForEach-Object { Write-Host "  $_" }
+
+          if ($labSuites.Count -eq 0) {
+              Write-Host '::error::No lab-local Pester suite was discovered - the module-* discovery is broken.'
+              $Host.SetShouldExit(1)
+              exit 1
+          }
+
           # -PassThru rather than a [PesterConfiguration] literal: Install-Module does not
           # load the assembly, so the type is unresolvable at parse time in a fresh session.
-          $result = Invoke-Pester -Path ./tests -PassThru
+          $result = Invoke-Pester -Path (@('./tests') + $labSuites) -PassThru
 
           if ($null -eq $result) {
               Write-Host '::error::Invoke-Pester returned no result object - the run did not complete.'
