@@ -6,8 +6,8 @@
 
 | Decision | Choice in this lab | Alternatives considered | Why this choice (in a learning context) |
 |---|---|---|---|
-| Container isolation | Production: 4 private containers; Dev: 1 public container | All private with lifecycle, all public with RBAC | Mirrors real scenarios: prod stores game-assets, backups, configs, logs (all private); dev has public demo asset for student learning. Public access in dev teaches the risk. |
-| Public access model | Account-level public access (Dev only) | Container-level public access | Account-level is the least-secure option; Lab 4.4 teaches disabling it. Container-level is more granular (not shown here). |
+| Container isolation | Production: 4 private containers; Dev: 1 container (`public-demo`), also private | All private with lifecycle, all public with RBAC | Mirrors real scenarios: prod stores game-assets, backups, configs, logs (all private); dev carries the container the AZ-104 public-access walk-through uses. Its name records the intent; the subscription policy decides the outcome. |
+| Public access model | Both switches shown, both left off: `allowBlobPublicAccess: false` on every account, `publicAccess: 'None'` on every container | Account-level public access on Dev (the pre-v0.7 design) | The subscription's Azure Policy denies `allowBlobPublicAccess = true`, so the lab teaches the two-level model through the policy refusal (guide Step 4.2.12) instead of by opening the dev account. Lab 4.4 then hardens the accounts further. |
 | Lifecycle tiers | Prod logs: Hot→Cool (30d)→Cold (90d)→Archive (180d)→Delete (365d); backups: Archive (7d) | All tiers kept Hot, or delete after X days | Tiering teaches cost optimization: Cool/Cold/Archive are cheaper per-GB but have retrieval latency. Backups → Archive quickly (7d) reflects backup storage model. Logs aging to deletion (365d) teaches retention policies. |
 | Blob versioning | Enabled (Prod only) | Disabled, or versioning with immutable snapshots | Versioning enables rollback of accidental overwrites; disabled in Dev (less critical). Production would enable for game-assets and configs. |
 | Lifecycle filters | Prefix matching on `player-backups/` | No prefix filtering, or wildcard patterns | Prefix filtering teaches selective rules; backups in a dedicated prefix is a real pattern. |
@@ -27,7 +27,7 @@
 - **Dominant pillar:** Cost Optimization & Compliance
 - **Cost Optimization:** Lifecycle policies tiering logs down automatically reduce storage costs by 60–80%; Archive tier at €0.004/GB/month vs Hot at €0.018/GB/month.
 - **Reliability:** Versioning (Prod) enables rollback; multi-region replication would be next step.
-- **Security:** Public access in Dev is intentional teaching tool; Prod is fully private. RBAC/SAS token controls not shown here (Lab 4.4).
+- **Security:** Every account has `allowBlobPublicAccess: false` and every container is private, Dev included; the public-access walk-through in the guide is a read-only tour of the switches and of the policy that pins them. RBAC/SAS token controls not shown here (Lab 4.4).
 - **Compliance:** 365-day retention before deletion reflects audit requirements; immutable storage not yet needed.
 
 ## 4. Cost / FinOps note
@@ -37,7 +37,7 @@
   - Prod Cool (30% of 1 TB, assume 40 days): ~€3
   - Prod Cold (15% of 1 TB, assume 120 days): ~€0.30
   - Prod Archive (5% of 1 TB, assume 270 days): ~€0.05
-  - Dev Hot (100 GB public demo): ~€1.80
+  - Dev Hot (100 GB `public-demo`): ~€1.80
   - **Total: ~€23/month** (vs ~€36 without tiering)
   - **Savings: ~€13/month (~35% reduction) from Hot-only**
 - **Rehydration costs:** If retrieving 1 GB from Archive: ~€0.02 retrieval + Standard re-hydration latency (hours). Communicate this in lab guide.

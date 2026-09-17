@@ -73,8 +73,8 @@ You'll create Infrastructure as Code templates to automate SkyCraft deployment:
 
 Before starting this lab:
 
-- [ ] Completed Module 2 (Virtual Networking)
-- [ ] Existing resources: 3 VNets, NSGs, Load Balancers deployed
+- [ ] Completed Module 2 (Virtual Networking) - Section 2 exports the ARM templates of the VNets, NSGs and load balancers Module 2 created, so they should exist for that exercise
+- [ ] Nothing has to pre-exist for the **deployment** itself: `scripts/Deploy-Bicep.ps1` deploys `bicep/main.bicep` at subscription scope, and the template creates the three resource groups, the NSGs, the hub and dev VNets and the dev load balancer (`tools/lab-cycle-manifest.psd1` lists this lab as depending on 1.2 only). Re-running it over Module 2's resources is an idempotent update.
 - [ ] Azure CLI installed (version 2.50.0 or later)
 - [ ] Bicep CLI installed (`az bicep install`)
 - [ ] Visual Studio Code installed (recommended)
