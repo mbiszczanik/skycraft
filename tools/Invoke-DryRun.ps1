@@ -14,6 +14,10 @@
       Bicep       'az bicep build' over every Bicep entry point. Files under a 'modules'
                   folder are skipped - their callers compile them transitively.
       BicepParams 'az bicep build-params' over every *.bicepparam file.
+      Pester      Invoke-Pester over tests/ and every module-*/**/tests/*.Tests.ps1, the same
+                  set the CI job runs. Any failed test, block or container fails the gate, and
+                  so does an empty discovery - a gate that found nothing to run is broken, not
+                  green.
 
     Every selected check runs to completion even when an earlier one fails, so a single
     run reports every problem instead of only the first. The script prints a consolidated
@@ -22,13 +26,15 @@
     Checks that need a live subscription are deliberately out of scope: 'az deployment ...
     what-if', 'Test-Lab.ps1' and 'Remove-LabResource.ps1' all require 'az login' plus
     existing resources. See docs/dry-run-harness.md for per-lab copy-paste commands.
+    markdownlint and gitleaks need tooling outside PowerShell and stay in CI.
 
 .PARAMETER RepoRoot
     Repository root to scan. Defaults to the parent of the 'tools' folder holding this script.
 
 .PARAMETER Check
-    Which checks to run. Defaults to all four. Use it to skip a check whose tooling is not
-    installed locally, for example '-Check Parse,Analyzer' on a machine without the Azure CLI.
+    Which checks to run. Defaults to all five. Use it to skip a check whose tooling is not
+    installed locally, for example '-Check Parse,Analyzer,Pester' on a machine without the
+    Azure CLI.
     Checks that are not selected are reported as SKIPPED in the summary, so a partial run
     can never be mistaken for a full one.
 
@@ -43,10 +49,10 @@
 .EXAMPLE
     .\tools\Invoke-DryRun.ps1
 
-    Runs all four checks over the whole repository and exits non-zero if any of them failed.
+    Runs all five checks over the whole repository and exits non-zero if any of them failed.
 
 .EXAMPLE
-    .\tools\Invoke-DryRun.ps1 -Check Parse,Analyzer
+    .\tools\Invoke-DryRun.ps1 -Check Parse,Analyzer,Pester
 
     Runs only the PowerShell checks - useful on a machine without the Azure CLI installed.
 
@@ -60,7 +66,8 @@
     Date: 2026-08-30
 
     This script never authenticates to Azure and never deploys anything. It only reads
-    files and shells out to 'az bicep', which is a purely local compiler.
+    files, shells out to 'az bicep', which is a purely local compiler, and runs Pester
+    suites that themselves need no Azure sign-in.
 #>
 
 #Requires -Version 7.0
@@ -72,8 +79,8 @@ param(
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
 
     [Parameter(Mandatory = $false)]
-    [ValidateSet('Parse', 'Analyzer', 'Bicep', 'BicepParams')]
-    [string[]]$Check = @('Parse', 'Analyzer', 'Bicep', 'BicepParams'),
+    [ValidateSet('Parse', 'Analyzer', 'Bicep', 'BicepParams', 'Pester')]
+    [string[]]$Check = @('Parse', 'Analyzer', 'Bicep', 'BicepParams', 'Pester'),
 
     [Parameter(Mandatory = $false)]
     [string[]]$ExcludeDirectory = @('.git', '.worktrees', 'lab-outputs', 'node_modules', 'scratch', 'temp', 'test-results')
@@ -355,7 +362,7 @@ Write-Host "Repository : $RepoRoot" -ForegroundColor Gray
 Write-Host "Checks     : $($Check -join ', ')" -ForegroundColor Gray
 Write-Host 'This gate never authenticates to Azure and never deploys anything.' -ForegroundColor Gray
 
-$allChecks = @('Parse', 'Analyzer', 'Bicep', 'BicepParams')
+$allChecks = @('Parse', 'Analyzer', 'Bicep', 'BicepParams', 'Pester')
 $results = [System.Collections.Generic.List[pscustomobject]]::new()
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('skycraft-dryrun-' + [guid]::NewGuid().ToString('n'))
 
@@ -377,7 +384,7 @@ try {
         switch ($name) {
 
             'Parse' {
-                Write-DryRunHeader -Title 'Check 1/4: PowerShell parse'
+                Write-DryRunHeader -Title 'Check 1/5: PowerShell parse'
 
                 $psFiles = @(Get-DryRunFile -Root $RepoRoot -Extension '.ps1', '.psm1', '.psd1' -ExcludeName $ExcludeDirectory)
                 $itemCount = $psFiles.Count
@@ -403,7 +410,7 @@ try {
             }
 
             'Analyzer' {
-                Write-DryRunHeader -Title 'Check 2/4: PSScriptAnalyzer'
+                Write-DryRunHeader -Title 'Check 2/5: PSScriptAnalyzer'
 
                 $settingsFile = Join-Path $RepoRoot 'PSScriptAnalyzerSettings.psd1'
 
@@ -445,7 +452,7 @@ try {
             }
 
             'Bicep' {
-                Write-DryRunHeader -Title 'Check 3/4: az bicep build (entry points)'
+                Write-DryRunHeader -Title 'Check 3/5: az bicep build (entry points)'
 
                 # Templates under a 'modules' folder are compiled transitively by their caller,
                 # exactly as the Lint workflow filters them out.
@@ -471,7 +478,7 @@ try {
             }
 
             'BicepParams' {
-                Write-DryRunHeader -Title 'Check 4/4: az bicep build-params'
+                Write-DryRunHeader -Title 'Check 4/5: az bicep build-params'
 
                 $paramFiles = @(Get-DryRunFile -Root $RepoRoot -Extension '.bicepparam' -ExcludeName $ExcludeDirectory)
 
@@ -489,6 +496,66 @@ try {
 
                     foreach ($line in (Invoke-DryRunBicepBuild -File $paramFiles -Command 'build-params' -OutputDirectory $paramDirectory -Root $RepoRoot)) {
                         $failures.Add($line)
+                    }
+                }
+            }
+
+            'Pester' {
+                Write-DryRunHeader -Title 'Check 5/5: Pester (repository standards and lab-local suites)'
+
+                # The same two sets the CI job runs: everything under tests/, plus the lab-local
+                # suites at module-*/**/tests/*.Tests.ps1 that only ever ran by hand before #77.
+                $testsDir = Join-Path $RepoRoot 'tests'
+                $repoWideSuites = @(
+                    if (Test-Path -LiteralPath $testsDir) {
+                        Get-ChildItem -LiteralPath $testsDir -Recurse -File -Filter '*.Tests.ps1' |
+                            Where-Object { -not (Test-DryRunExcludedPath -Path $_.FullName -Root $RepoRoot -ExcludeName $ExcludeDirectory) }
+                    }
+                )
+                # Module directories first, then recurse: 'Get-ChildItem -Path module-* -Recurse -File
+                # -Filter' returns nothing at all on pwsh 7.6, and an empty list would pass as green.
+                $labSuites = @(
+                    Get-ChildItem -LiteralPath $RepoRoot -Directory -Filter 'module-*' |
+                        Get-ChildItem -Recurse -File -Filter '*.Tests.ps1' |
+                        Where-Object { -not (Test-DryRunExcludedPath -Path $_.FullName -Root $RepoRoot -ExcludeName $ExcludeDirectory) }
+                )
+                $suites = @($repoWideSuites + $labSuites | Sort-Object FullName)
+                $itemCount = $suites.Count
+
+                $pester = Get-Module -ListAvailable -Name Pester |
+                    Where-Object { $_.Version -ge [version]'5.5.0' -and $_.Version -lt [version]'6.0.0' } |
+                    Sort-Object Version -Descending | Select-Object -First 1
+
+                if ($null -eq $pester) {
+                    $failures.Add("Pester 5.5+ is not installed, so $($suites.Count) test file(s) were NOT run.")
+                    $failures.Add('    Install-Module Pester -MinimumVersion 5.5 -MaximumVersion 5.99 -Scope CurrentUser')
+                    $failures.Add('    Or skip this check explicitly with: -Check Parse,Analyzer,Bicep,BicepParams')
+                }
+                elseif ($suites.Count -eq 0) {
+                    $failures.Add("No *.Tests.ps1 was found under $testsDir or module-*/ - the discovery is broken, not the tests.")
+                }
+                else {
+                    Import-Module Pester -RequiredVersion $pester.Version
+                    Write-Host "Running $($repoWideSuites.Count) repo-wide and $($labSuites.Count) lab-local test file(s)..." -ForegroundColor Yellow
+
+                    # In-process, as CI runs it. The suite calls $Host.SetShouldExit(0) on the way
+                    # through (tests/LabCycle.Tests.ps1 runs the orchestrators with '&'), which is
+                    # exactly why this script's failure exit sets the host code itself (#128).
+                    $run = Invoke-Pester -Path @($suites.FullName) -PassThru
+
+                    if ($null -eq $run) {
+                        $failures.Add('Invoke-Pester returned no result object - the run did not complete.')
+                    }
+                    else {
+                        $failedTotal = $run.FailedCount + $run.FailedBlocksCount + $run.FailedContainersCount
+                        $note = "$($run.PassedCount) passed, $($run.FailedCount) failed"
+
+                        foreach ($test in @($run.Failed)) {
+                            $failures.Add(('{0}: {1}' -f (Get-DryRunRelativePath -Path $test.ScriptBlock.File -Root $RepoRoot), $test.ExpandedPath))
+                        }
+                        if ($failedTotal -gt $failures.Count) {
+                            $failures.Add("$($run.FailedBlocksCount) block(s) and $($run.FailedContainersCount) container(s) failed to run - see the Pester output above.")
+                        }
                     }
                 }
             }
@@ -555,8 +622,8 @@ if ($skippedChecks.Count -gt 0) {
 
 Write-Host ''
 Write-Host 'Out of scope here (need Azure or extra tooling): az deployment what-if, Test-Lab.ps1,' -ForegroundColor Gray
-Write-Host 'Remove-LabResource.ps1, Pester, markdownlint, gitleaks. See docs/dry-run-harness.md' -ForegroundColor Gray
-Write-Host 'for the copy-paste commands, per lab.' -ForegroundColor Gray
+Write-Host 'Remove-LabResource.ps1, markdownlint, gitleaks. See docs/dry-run-harness.md for the' -ForegroundColor Gray
+Write-Host 'copy-paste commands, per lab.' -ForegroundColor Gray
 
 if ($failedChecks.Count -gt 0) {
     Write-Host ''
@@ -566,7 +633,7 @@ if ($failedChecks.Count -gt 0) {
 }
 
 Write-Host ''
-Write-Host 'Dry run passed. CI still runs Pester, markdownlint and gitleaks on top of this.' -ForegroundColor Green
+Write-Host 'Dry run passed. CI still runs markdownlint and gitleaks on top of this.' -ForegroundColor Green
 exit 0
 
 #endregion Summary
