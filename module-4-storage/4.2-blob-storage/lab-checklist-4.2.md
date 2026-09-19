@@ -9,12 +9,12 @@
 - [ ] Public access level: **Private (no anonymous access)**
 - [ ] Default access tier: **Hot**
 
-### public-demo Container (Public - Dev Only)
+### public-demo Container (Dev - Private by subscription policy)
 
 - [ ] Container name: `public-demo`
 - [ ] Location: **dev-skycraft-swc-rg / devskycraftswcsa**
-- [ ] Public access level: **Blob (anonymous read access for blobs only)**
-- [ ] Test blob accessible via public URL
+- [ ] Public access level: **Private (no anonymous access)** - the subscription's Azure Policy denies `allowBlobPublicAccess = true`, so the dev account stays at **Allow Blob anonymous access = Disabled** and no container can be made public (guide Step 4.2.12)
+- [ ] Test blob **not** readable from an incognito browser (`PublicAccessNotPermitted` / `ResourceNotFound`)
 
 ### player-backups Container (Private)
 
@@ -108,7 +108,7 @@ az storage container list \
 # server-config
 # game-logs
 
-# Verify Public Demo (Development)
+# Verify public-demo (Development) - private, and the account switch is off
 az storage container list \
   --account-name devskycraftswcsa \
   --auth-mode login \
@@ -118,7 +118,15 @@ az storage container list \
 # Expected output:
 # Name              PublicAccess
 # ----------------  -------------
-# public-demo       blob
+# public-demo       None
+
+az storage account show \
+  --name devskycraftswcsa \
+  --resource-group dev-skycraft-swc-rg \
+  --query allowBlobPublicAccess
+
+# Expected output:
+# false
 ```
 
 ### Verify Containers (PowerShell)
@@ -136,14 +144,15 @@ Get-AzStorageContainer -Context $ctx | Select-Object Name, PublicAccess | Format
 # server-config     Off
 # game-logs         Off
 
-# Verify Public Demo (Development)
-$devCtx = (Get-AzStorageAccount -ResourceGroupName dev-skycraft-swc-rg -Name devskycraftswcsa).Context
-Get-AzStorageContainer -Context $devCtx -Name "public-demo" | Select-Object Name, PublicAccess | Format-Table
+# Verify public-demo (Development) - private, and the account switch is off
+$devSa  = Get-AzStorageAccount -ResourceGroupName dev-skycraft-swc-rg -Name devskycraftswcsa
+$devSa.AllowBlobPublicAccess           # False
+Get-AzStorageContainer -Context $devSa.Context -Name "public-demo" | Select-Object Name, PublicAccess | Format-Table
 
 # Expected output:
 # Name              PublicAccess
 # ----              ------------
-# public-demo       Blob
+# public-demo       Off
 ```
 
 ### Verify Data Protection Settings (Azure CLI)
@@ -268,7 +277,7 @@ az storage blob list \
 | player-backups | Private       | Archive (7d)  | archive-backups | ✅     |
 | server-config  | Private       | Hot           | None            | ✅     |
 | game-logs      | Private       | Cool→Archive  | tier-game-logs  | ✅     |
-| public-demo    | Blob (public) | Hot           | None            | ✅     |
+| public-demo    | Private (policy-enforced) | Hot | None          | ✅     |
 
 ### Data Protection Summary
 
@@ -365,7 +374,7 @@ az storage blob list \
 
 - [ ] All four containers created with correct naming
 - [ ] `game-assets` is **Private** (Production)
-- [ ] `public-demo` has blob-level public access (Development)
+- [ ] `public-demo` is **Private** and `AllowBlobPublicAccess` is **false** on `devskycraftswcsa` (Development)
 - [ ] Soft delete enabled for blobs (7 days)
 - [ ] Soft delete enabled for containers (7 days)
 - [ ] Blob versioning enabled

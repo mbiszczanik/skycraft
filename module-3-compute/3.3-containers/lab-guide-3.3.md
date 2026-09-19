@@ -38,7 +38,8 @@ You will deploy a containerized environment for the SkyCraft authentication serv
 
 Before starting this lab:
 
-- [ ] Completed Lab 3.1 and 3.2 (recommended for Resource Group structure).
+- [ ] Resource group `dev-skycraft-swc-rg` (Lab 1.2). Nothing else from an earlier lab is required: the containers here use no VNet, and `scripts/Deploy-Bicep.ps1` creates the resource group if it is missing and bootstraps the registry and the image itself (`tools/lab-cycle-manifest.psd1` lists this lab as depending on 1.2 only).
+- [ ] Labs 3.1 and 3.2 completed - recommended for context, not a dependency.
 - [ ] **Owner** or **Contributor** role on the subscription.
 - [ ] Azure CLI installed or access to Cloud Shell.
 
@@ -187,13 +188,16 @@ We will deploy the "WorldServer" component here to take advantage of scaling cap
 1. Search for **Container Apps** in the portal and click **+ Create**.
 2. On the **Basics** tab:
    - **Resource group**: `dev-skycraft-swc-rg`
-   - **Container app name**: `dev-skycraft-swc-aca-world`
+   - **Container app name**: `dev-skycraft-swc-aca-world-02`
    - **Region**: **Sweden Central**
    - **\*Deployment source**: **Container Image**
 3. Under **Container Apps Environment**, click **Create new**.
    - **Region**: **Sweden Central**
-   - **Environment name**: `dev-skycraft-swc-cae`
+   - **Environment name**: `dev-skycraft-swc-cae-02`
    - Click **Create**.
+
+> [!NOTE]
+> The `-02` suffix is deliberate. A Container Apps environment names its infrastructure resource group `ME_<environment-name>` and that name is immutable, so the first environment's leftovers cannot be redeployed onto; `bicep/main.bicep`, `scripts/Test-Lab.ps1` and `scripts/Remove-LabResource.ps1` all use `dev-skycraft-swc-cae-02` / `dev-skycraft-swc-aca-world-02` (see `ARCHITECTURE.md` §5).
 
 ![Create Container Apps Environment](./images/step-3.3.6.png)
 
@@ -233,7 +237,7 @@ We will deploy the "WorldServer" component here to take advantage of scaling cap
 
 ### Step 3.3.9: Configure Scaling
 
-1. Go to your **dev-skycraft-swc-aca-world** Container App.
+1. Go to your **dev-skycraft-swc-aca-world-02** Container App.
 2. On the left menu, select **Scale**.
 3. Click **Edit and deploy**.
 4. In the **Scale** tab, set:
@@ -260,7 +264,7 @@ Quick verification:
 
 - [ ] **ACR** `devskycraftswcacr01` created and contains `skycraft-auth:v1`
 - [ ] **ACI** `dev-skycraft-swc-aci-auth` is running and accessible via FQDN
-- [ ] **ACA** `dev-skycraft-swc-aca-world` is deployed in environment `dev-skycraft-swc-cae`
+- [ ] **ACA** `dev-skycraft-swc-aca-world-02` is deployed in environment `dev-skycraft-swc-cae-02`
 - [ ] Scaling rules configured for ACA
 
 For detailed verification, see [lab-checklist-3.3.md](lab-checklist-3.3.md).
