@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 1.2 - RBAC Assignments Orchestrator
 DESCRIPTION: Orchestrates role assignments for SkyCraft users and groups via AVM
-EXAMPLE: az deployment sub create --location swedencentral --template-file role-assignments.bicep
+EXAMPLE: New-AzSubscriptionDeployment -Location swedencentral -TemplateFile role-assignments.bicep -parAdminPrincipalId <objectId> -parDeveloperGroupPrincipalId <objectId> -parTesterGroupPrincipalId <objectId> -parPartnerPrincipalId <objectId>
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.3.0
 DEPLOYMENT: New-AzSubscriptionDeployment -TemplateFile role-assignments.bicep -par<Principal>Id ... (alternative: .\scripts\New-LabRoleAssignment.ps1 via Az cmdlets)

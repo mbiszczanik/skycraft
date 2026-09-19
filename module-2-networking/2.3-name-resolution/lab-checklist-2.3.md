@@ -208,170 +208,193 @@
 
 ## 🔍 Validation Commands
 
-Run these Azure CLI commands to validate your lab setup:
+Run these Az PowerShell commands to validate your lab setup:
 
 ### Login and Set Context
 
-```azurecli
+```powershell
 # Login to Azure
-az login
+Connect-AzAccount
 
 # List subscriptions
-az account list --output table
+Get-AzSubscription | Select-Object Name, Id, State | Format-Table -AutoSize
 
 # Set subscription context
-az account set --subscription "YOUR-SUBSCRIPTION-NAME"
+Set-AzContext -SubscriptionName "YOUR-SUBSCRIPTION-NAME"
 
 # Verify current subscription
-az account show --query "{Name:name, SubscriptionId:id}" --output table
+Get-AzContext | Select-Object @{N='Name';E={$_.Subscription.Name}}, @{N='SubscriptionId';E={$_.Subscription.Id}}
 ```
 
 ### Verify Public DNS Zone
 
-```azurecli
+```powershell
 # List DNS zones
-az network dns zone list   --query "[].{Name:name,ResourceGroup:resourceGroup,NumberOfRecordSets:numberOfRecordSets}"   --output table
+Get-AzDnsZone |
+    Select-Object Name, ResourceGroupName, NumberOfRecordSets |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                    ResourceGroup            NumberOfRecordSets
-# ----------------------  ----------------------   ------------------
+# Name                    ResourceGroupName        NumberOfRecordSets
+# ----                    -----------------        ------------------
 # skycraft.example.com    platform-skycraft-swc-rg 5
 
 # List DNS records in zone
-az network dns record-set list   --resource-group platform-skycraft-swc-rg   --zone-name skycraft.example.com   --query "[].{Name:name,Type:type,TTL:ttl}"   --output table
+Get-AzDnsRecordSet -ResourceGroupName platform-skycraft-swc-rg -ZoneName skycraft.example.com |
+    Select-Object Name, RecordType, Ttl |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name  Type   TTL
-# ----  -----  ----
-# @     NS     172800
-# @     SOA    3600
-# dev   A      300
-# play  A      300
-# game  CNAME  3600
+# Name  RecordType Ttl
+# ----  ---------- ---
+# @     NS         172800
+# @     SOA        3600
+# dev   A          300
+# play  A          300
+# game  CNAME      3600
 
 # Get specific A record
-az network dns record-set a show   --resource-group platform-skycraft-swc-rg   --zone-name skycraft.example.com   --name dev   --query "{Name:name,TTL:ttl,IPs:aRecords[].ipv4Address}"   --output json
+Get-AzDnsRecordSet -ResourceGroupName platform-skycraft-swc-rg -ZoneName skycraft.example.com -Name dev -RecordType A |
+    Select-Object Name, Ttl, @{N='IPs';E={$_.Records.Ipv4Address -join ', '}}
 ```
 
 ### Verify Private DNS Zone
 
-```azurecli
+```powershell
 # List Private DNS zones
-az network private-dns zone list   --query "[].{Name:name,ResourceGroup:resourceGroup,NumberOfRecordSets:numberOfRecordSets,NumberOfVNetLinks:numberOfVirtualNetworkLinks}"   --output table
+Get-AzPrivateDnsZone |
+    Select-Object Name, ResourceGroupName, NumberOfRecordSets, NumberOfVirtualNetworkLinks |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name               ResourceGroup            NumberOfRecordSets  NumberOfVNetLinks
-# -----------------  ----------------------   ------------------  -----------------
-# skycraft.internal  platform-skycraft-swc-rg 4                   3
+# Name               ResourceGroupName        NumberOfRecordSets NumberOfVirtualNetworkLinks
+# ----               -----------------        ------------------ ---------------------------
+# skycraft.internal  platform-skycraft-swc-rg 4                  3
 
 # List virtual network links
-az network private-dns link vnet list   --resource-group platform-skycraft-swc-rg   --zone-name skycraft.internal   --query "[].{Name:name,VNet:virtualNetwork.id,RegistrationEnabled:registrationEnabled,ProvisioningState:provisioningState}"   --output table
+Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName platform-skycraft-swc-rg -ZoneName skycraft.internal |
+    Select-Object Name, @{N='VNet';E={$_.VirtualNetworkId.Split('/')[-1]}}, RegistrationEnabled, ProvisioningState |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name            VNet                                           RegistrationEnabled  ProvisioningState
-# --------------  ---------------------------------------------  -------------------  -----------------
-# hub-vnet-link   /subscriptions/.../platform-skycraft-swc-vnet  False                Succeeded
-# dev-vnet-link   /subscriptions/.../dev-skycraft-swc-vnet       True                 Succeeded
-# prod-vnet-link  /subscriptions/.../prod-skycraft-swc-vnet      True                 Succeeded
+# Name            VNet                       RegistrationEnabled ProvisioningState
+# ----            ----                       ------------------- -----------------
+# hub-vnet-link   platform-skycraft-swc-vnet False               Succeeded
+# dev-vnet-link   dev-skycraft-swc-vnet      True                Succeeded
+# prod-vnet-link  prod-skycraft-swc-vnet     True                Succeeded
 
 # List records in private zone
-az network private-dns record-set list   --resource-group platform-skycraft-swc-rg   --zone-name skycraft.internal   --query "[].{Name:name,Type:type,TTL:ttl}"   --output table
+Get-AzPrivateDnsRecordSet -ResourceGroupName platform-skycraft-swc-rg -ZoneName skycraft.internal |
+    Select-Object Name, RecordType, Ttl |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name     Type  TTL
-# -------  ----  ---
-# @        SOA   3600
-# dev-db   A     300
-# prod-db  A     300
+# Name     RecordType Ttl
+# ----     ---------- ---
+# @        SOA        3600
+# dev-db   A          300
+# prod-db  A          300
 ```
 
 ### Verify Load Balancers
 
-```azurecli
+```powershell
 # List all load balancers
-az network lb list   --query "[].{Name:name,ResourceGroup:resourceGroup,SKU:sku.name,Type:frontendIpConfigurations[0].privateIpAllocationMethod}"   --output table
+Get-AzLoadBalancer |
+    Select-Object Name, ResourceGroupName, @{N='SKU';E={$_.Sku.Name}},
+        @{N='Type';E={if ($_.FrontendIpConfigurations[0].PublicIpAddress) { 'Public' } else { 'Internal' }}} |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                   ResourceGroup            SKU       Type
-# ---------------------  ----------------------   --------  ----
-# dev-skycraft-swc-lb    dev-skycraft-swc-rg      Standard  N/A
-# prod-skycraft-swc-lb   prod-skycraft-swc-rg     Standard  N/A
+# Name                   ResourceGroupName        SKU      Type
+# ----                   -----------------        ---      ----
+# dev-skycraft-swc-lb    dev-skycraft-swc-rg      Standard Public
+# prod-skycraft-swc-lb   prod-skycraft-swc-rg     Standard Public
 ```
 
 ### Verify Dev Load Balancer Details
 
-```azurecli
+```powershell
+$lb = Get-AzLoadBalancer -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-lb
+
 # Show dev load balancer frontend IP
-az network lb frontend-ip show   --resource-group dev-skycraft-swc-rg   --lb-name dev-skycraft-swc-lb   --name dev-skycraft-swc-lb-frontend   --query "{Name:name,PublicIP:publicIpAddress.id}"   --output json
+$lb.FrontendIpConfigurations |
+    Select-Object Name, @{N='PublicIP';E={$_.PublicIpAddress.Id.Split('/')[-1]}}
 
 # List backend pools
-az network lb address-pool list   --resource-group dev-skycraft-swc-rg   --lb-name dev-skycraft-swc-lb   --query "[].{Name:name,BackendIPConfigurations:length(backendIpConfigurations)}"   --output table
+$lb.BackendAddressPools |
+    Select-Object Name, @{N='BackendIPConfigurations';E={$_.BackendIpConfigurations.Count}} |
+    Format-Table -AutoSize
 
 # Expected output:
 # Name                          BackendIPConfigurations
-# ----------------------------  -----------------------
+# ----                          -----------------------
 # dev-skycraft-swc-lb-be-world  0
 # dev-skycraft-swc-lb-be-auth   0
 
 # List health probes
-az network lb probe list   --resource-group dev-skycraft-swc-rg   --lb-name dev-skycraft-swc-lb   --query "[].{Name:name,Protocol:protocol,Port:port,Interval:intervalInSeconds,Threshold:numberOfProbes}"   --output table
+$lb.Probes |
+    Select-Object Name, Protocol, Port, IntervalInSeconds, NumberOfProbes |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                             Protocol  Port  Interval  Threshold
-# -------------------------------  --------  ----  --------  ---------
-# dev-skycraft-swc-lb-probe-world  Tcp       8085  15        2
-# dev-skycraft-swc-lb-probe-auth   Tcp       3724  15        2
+# Name                             Protocol Port IntervalInSeconds NumberOfProbes
+# ----                             -------- ---- ----------------- --------------
+# dev-skycraft-swc-lb-probe-world  Tcp      8085 15                2
+# dev-skycraft-swc-lb-probe-auth   Tcp      3724 15                2
 
 # List load balancing rules
-az network lb rule list   --resource-group dev-skycraft-swc-rg   --lb-name dev-skycraft-swc-lb   --query "[].{Name:name,Protocol:protocol,FrontendPort:frontendPort,BackendPort:backendPort,Persistence:loadDistribution}"   --output table
+$lb.LoadBalancingRules |
+    Select-Object Name, Protocol, FrontendPort, BackendPort, LoadDistribution |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                            Protocol  FrontendPort  BackendPort  Persistence
-# ------------------------------  --------  ------------  -----------  -----------
-# dev-skycraft-swc-lb-rule-world  Tcp       8085          8085         Default
-# dev-skycraft-swc-lb-rule-auth   Tcp       3724          3724         Default
+# Name                            Protocol FrontendPort BackendPort LoadDistribution
+# ----                            -------- ------------ ----------- ----------------
+# dev-skycraft-swc-lb-rule-world  Tcp      8085         8085        Default
+# dev-skycraft-swc-lb-rule-auth   Tcp      3724         3724        Default
 ```
 
 ### Verify Production Load Balancer
 
-```azurecli
+```powershell
 # Show prod load balancer configuration (similar structure to dev)
-az network lb show   --resource-group prod-skycraft-swc-rg   --name prod-skycraft-swc-lb   --query "{Name:name,SKU:sku.name,BackendPools:length(backendAddressPools),Probes:length(probes),Rules:length(loadBalancingRules)}"   --output json
+Get-AzLoadBalancer -ResourceGroupName prod-skycraft-swc-rg -Name prod-skycraft-swc-lb |
+    Select-Object Name, @{N='SKU';E={$_.Sku.Name}},
+        @{N='BackendPools';E={$_.BackendAddressPools.Count}},
+        @{N='Probes';E={$_.Probes.Count}},
+        @{N='Rules';E={$_.LoadBalancingRules.Count}}
 
 # Expected output:
-# {
-#   "BackendPools": 2,
-#   "Name": "prod-skycraft-swc-lb",
-#   "Probes": 2,
-#   "Rules": 2,
-#   "SKU": "Standard"
-# }
+# Name                 SKU      BackendPools Probes Rules
+# ----                 ---      ------------ ------ -----
+# prod-skycraft-swc-lb Standard 2            2      2
 ```
 
 ### Verify Tags
 
-```azurecli
+```powershell
 # Check tags on DNS zone
-az network dns zone show   --resource-group platform-skycraft-swc-rg   --name skycraft.example.com   --query tags   --output json
+(Get-AzDnsZone -ResourceGroupName platform-skycraft-swc-rg -Name skycraft.example.com).Tags
 
 # Expected output:
-# {
-#   "CostCenter": "MSDN",
-#   "Environment": "Platform",
-#   "Owner": "mbiszczanik",
-#   "Project": "SkyCraft"
-# }
+# Name        Value
+# ----        -----
+# CostCenter  MSDN
+# Environment Platform
+# Owner       mbiszczanik
+# Project     SkyCraft
 
 # Check tags on dev load balancer
-az network lb show   --resource-group dev-skycraft-swc-rg   --name dev-skycraft-swc-lb   --query tags   --output json
+(Get-AzLoadBalancer -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-lb).Tag
 
 # Expected output:
-# {
-#   "CostCenter": "MSDN",
-#   "Environment": "Development",
-#   "Owner": "mbiszczanik",
-#   "Project": "SkyCraft"
-# }
+# Name        Value
+# ----        -----
+# CostCenter  MSDN
+# Environment Development
+# Owner       mbiszczanik
+# Project     SkyCraft
 ```
 
 ---

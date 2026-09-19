@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 3.3 - Container Registry bootstrap
 DESCRIPTION: Deploys only the Container Registry (same configuration as main.bicep) so Deploy-Bicep.ps1 can import the image before the orchestrator deploys ACI and Container Apps
-EXAMPLE: az deployment group create --resource-group dev-skycraft-swc-rg --template-file acr.bicep
+EXAMPLE: New-AzResourceGroupDeployment -ResourceGroupName dev-skycraft-swc-rg -TemplateFile acr.bicep (Deploy-Bicep.ps1 runs this as Phase 1)
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.1.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1 (Phase 1)

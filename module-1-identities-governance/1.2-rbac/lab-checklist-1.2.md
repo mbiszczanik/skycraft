@@ -94,24 +94,33 @@ Execute these validation steps to confirm success:
 
 ### Step 1: List all resource groups
 
-```azcli
-az group list --query "[].{Name:name,Location:location}" -o table
+```powershell
+Get-AzResourceGroup |
+    Select-Object ResourceGroupName, Location |
+    Format-Table -AutoSize
 ```
 
 ### Step 2: Check role assignments at subscription level
 
-```azcli
-az role assignment list --scope /subscriptions/[YOUR-SUBSCRIPTION-ID] --query "[].{Principal:principalName,Role:roleDefinitionName,Scope:scope}" -o table
+```powershell
+$subscriptionId = (Get-AzContext).Subscription.Id
+Get-AzRoleAssignment -Scope "/subscriptions/$subscriptionId" |
+    Select-Object DisplayName, RoleDefinitionName, Scope |
+    Format-Table -AutoSize
 ```
 
 ### Step 3: Check role assignments for dev-skycraft-swc-rg
-```azcli
-az role assignment list --resource-group dev-skycraft-swc-rg --query "[].{Principal:principalName,Role:roleDefinitionName}" -o table
+```powershell
+Get-AzRoleAssignment -ResourceGroupName dev-skycraft-swc-rg |
+    Select-Object DisplayName, RoleDefinitionName |
+    Format-Table -AutoSize
 ```
 
 ### Step 4: Check specific user's roles
-```azcli
-az role assignment list --assignee skycraft-dev@[yourtenant].onmicrosoft.com --query "[].{Role:roleDefinitionName,Scope:scope}" -o table
+```powershell
+Get-AzRoleAssignment -SignInName 'skycraft-dev@[yourtenant].onmicrosoft.com' |
+    Select-Object RoleDefinitionName, Scope |
+    Format-Table -AutoSize
 ```
 
 **Expected Output**:

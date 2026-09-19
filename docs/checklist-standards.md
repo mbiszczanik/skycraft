@@ -42,7 +42,7 @@ Every checklist must follow this exact structure:
 
 ## 🔍 Validation Commands
 
-[Azure CLI/PowerShell commands to verify deployment]
+[Az PowerShell commands to verify deployment]
 
 ## 📊 [Summary Table]
 
@@ -124,35 +124,22 @@ Every checklist must follow this exact structure:
 
 ### 3.2 Validation Commands
 
-**Purpose**: Provide copy-paste Azure CLI **and PowerShell** commands that students/instructors can run to verify deployment. Both tools are tested on the AZ-104 exam, so students must practice both.
+**Purpose**: Provide copy-paste **Az PowerShell** commands that students/instructors can run to verify deployment. Checklists are operational, not educational: they must run against the same Azure context the lab's `Deploy-Bicep.ps1` / `Test-Lab.ps1` used, and on a workstation where the `az` CLI is signed in to a different subscription an `az` block silently checks the wrong one (see [powershell-standards.md](powershell-standards.md) section 5). The AZ-104 "learn both tools" goal belongs in the lab guide, which teaches Portal, CLI and PowerShell side by side ([lab-guide-standards.md](lab-guide-standards.md)).
 
 **Structure**:
 
 ````markdown
 ## 🔍 Validation Commands
 
-Run these commands to validate your lab setup:
+Run these Az PowerShell commands to validate your lab setup:
 
-### Verify [Resource Type] (Azure CLI)
-
-```azurecli
-# List all VNets
-az network vnet list \
-  --query "[].{Name:name,ResourceGroup:resourceGroup,AddressSpace:addressSpace.addressPrefixes[0]}" \
-  --output table
-
-# Expected output:
-# Name                       ResourceGroup            AddressSpace
-# ------------------------   ----------------------   -------------
-# platform-skycraft-swc-vnet platform-skycraft-swc-rg 10.0.0.0/16
-```
-
-### Verify [Resource Type] (PowerShell)
+### Verify [Resource Type]
 
 ```powershell
+# List all VNets
 Get-AzVirtualNetwork |
   Select-Object Name, ResourceGroupName, @{N='AddressSpace';E={$_.AddressSpace.AddressPrefixes -join ', '}} |
-  Format-Table
+  Format-Table -AutoSize
 
 # Expected output:
 # Name                       ResourceGroupName        AddressSpace
@@ -163,12 +150,13 @@ Get-AzVirtualNetwork |
 
 **Requirements**:
 
-- Always include expected output for both CLI and PowerShell
-- Use `--query` (CLI) and `Select-Object` (PS) to filter relevant fields
-- Use `--output table` (CLI) and `Format-Table` (PS) for readability
+- Always include expected output
+- Use `Select-Object` (calculated properties for nested values) to filter relevant fields
+- Use `Format-Table -AutoSize` for readability
 - Group commands by resource type
 - Include comments explaining what each command checks
 - Include **connectivity tests** where applicable (e.g., `Test-NetConnection` for port checks)
+- No `az` commands in a checklist code fence - `tests/Docs-Az-PowerShell.Tests.ps1` enforces this. Where a lab genuinely has no Az cmdlet (e.g. `bicep build`, Graph cmdlets for Entra), use the standalone tool or `Microsoft.Graph` cmdlets, not `az`
 
 ---
 
@@ -440,15 +428,15 @@ Copy this template when creating a new checklist:
 
 ## 🔍 Validation Commands
 
-Run these Azure CLI commands to validate your lab setup:
+Run these Az PowerShell commands to validate your lab setup:
 
 ### Verify [Resource Type]
 
-```azurecli
+```powershell
 # Command description
-az [command] \
-  --query "[].{Field:property}" \
-  --output table
+Get-Az[Resource] |
+  Select-Object Field, @{N='Nested';E={$_.Property.Nested}} |
+  Format-Table -AutoSize
 
 # Expected output:
 # [Show expected table output]

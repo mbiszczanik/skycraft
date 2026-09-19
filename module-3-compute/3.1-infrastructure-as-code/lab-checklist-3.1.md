@@ -4,7 +4,7 @@
 
 ### Bicep Tools Installation
 - [ ] Bicep CLI installed and verified
-  - Command used: `az bicep version`
+  - Command used: `bicep --version` (the standalone Bicep CLI that Az PowerShell deployments use)
   - Version installed: [Record version: ____________]
 
 - [ ] VS Code installed
@@ -49,7 +49,7 @@
 - [ ] **first-resource.bicep** created
   - Contains: Parameter, variable, resource, output
   - Resource type: [Type: ____________]
-  - Successfully built with `az bicep build`
+  - Successfully built with `bicep build`
 
 - [ ] **main.bicep** created
   - Target scope: `subscription`
@@ -136,7 +136,7 @@
 ## ✅ ARM to Bicep Conversion
 
 ### Decompilation Process
-- [ ] Decompiled ARM template using `az bicep decompile --file template.json`
+- [ ] Decompiled ARM template using `bicep decompile template.json`
 - [ ] Decompiled file created: `template.bicep`
 - [ ] Reviewed decompiled Bicep for issues
   - [ ] Long parameter names identified
@@ -149,14 +149,14 @@
 - [ ] Added `@allowed()` decorators where appropriate
 - [ ] Extracted hardcoded values to parameters
 - [ ] Added outputs for important resource IDs
-- [ ] Tested cleaned Bicep with `az bicep build`
+- [ ] Tested cleaned Bicep with `bicep build`
 
 ---
 
 ## ✅ Template Validation and Deployment
 
 ### Bicep Build Validation
-- [ ] Successfully built main.bicep: `az bicep build --file main.bicep`
+- [ ] Successfully built main.bicep: `bicep build main.bicep`
   - Output file created: `main.json` (ARM template)
   - No errors or warnings
 
@@ -165,16 +165,16 @@
 
 ### Template Validation
 - [ ] Validated deployment without deploying:
-  ```bash
-  az deployment sub validate     --location swedencentral     --template-file main.bicep     --parameters dev.bicepparam
+  ```powershell
+  Test-AzSubscriptionDeployment -Location swedencentral -TemplateFile main.bicep -TemplateParameterFile parameters\dev.bicepparam
   ```
   - Validation result: [✅ Success / ❌ Failed]
   - Validation date/time: [Record: ____________]
 
 ### What-If Analysis
 - [ ] Ran what-if analysis:
-  ```bash
-  az deployment sub what-if     --location swedencentral     --template-file main.bicep     --parameters dev.bicepparam
+  ```powershell
+  .\scripts\Deploy-Bicep.ps1 -Environment dev -WhatIf
   ```
   - Resources to create: [Number: ______]
   - Resources to modify: [Number: ______]
@@ -186,8 +186,9 @@
 
 ### Deployment Execution
 - [ ] Deployed Bicep template successfully:
-  ```bash
-  az deployment sub create     --name "SkyCraft-Dev-YYYYMMDD-HHMMSS"     --location swedencentral     --template-file main.bicep     --parameters dev.bicepparam
+  ```powershell
+  .\scripts\Deploy-Bicep.ps1 -Environment dev
+  # Deployment name follows the pattern SkyCraft-dev-YYYYMMDD-HHmm
   ```
   - Deployment name: [Record: ____________]
   - Deployment start time: [Record: ____________]
@@ -259,58 +260,67 @@ Run these commands and document the results:
 
 ### Bicep CLI Validation
 
-```bash
+```powershell
 # Verify Bicep CLI version
-az bicep version
+bicep --version
 
 # Expected output: Bicep CLI version 0.24.24 (or later)
 # Your version: ________________
 ```
 
-```bash
+```powershell
 # Build Bicep to ARM
-az bicep build --file main.bicep
+bicep build main.bicep
 
-# Expected output: "Build succeeded"
+# Expected output: no errors, main.json written next to main.bicep
 # Result: ________________
 ```
 
-```bash
+```powershell
 # List all Bicep files in directory
-find . -name "*.bicep" -type f
+Get-ChildItem -Recurse -Filter *.bicep | Select-Object -ExpandProperty FullName
 
-# Expected files:
-# ./main.bicep
-# ./first-resource.bicep
-# ./modules/network.bicep
-# ./modules/nsg.bicep
-# ./modules/loadbalancer.bicep
-# ./modules/publicip.bicep
+# Expected output:
+# main.bicep
+# modules/network.bicep
+# modules/nsg.bicep
+# modules/loadbalancer.bicep
+# modules/publicip.bicep
 
 # Your files: ________________
 ```
 
 ### Deployment Validation
 
-```bash
+```powershell
 # List subscription deployments
-az deployment sub list   --query "[?contains(name, 'SkyCraft')].{Name:name,State:properties.provisioningState,Timestamp:properties.timestamp}"   --output table
+Get-AzSubscriptionDeployment |
+    Where-Object { $_.DeploymentName -like 'SkyCraft*' } |
+    Select-Object DeploymentName, ProvisioningState, Timestamp |
+    Format-Table -AutoSize
 
 # Expected output: At least one SkyCraft deployment with Succeeded state
 ```
 
-```bash
+```powershell
 # Show specific deployment details
-az deployment sub show   --name "YOUR-DEPLOYMENT-NAME"   --query "{Name:name,State:properties.provisioningState,Duration:properties.duration,ResourceGroups:properties.outputResources[?type=='Microsoft.Resources/resourceGroups'].id}"   --output json
+$deployment = Get-AzSubscriptionDeployment -Name "YOUR-DEPLOYMENT-NAME"
+$deployment | Select-Object DeploymentName, ProvisioningState, Timestamp
+Get-AzSubscriptionDeploymentOperation -DeploymentName $deployment.DeploymentName |
+    Where-Object { $_.TargetResource -like '*/resourceGroups/*' } |
+    Select-Object -ExpandProperty TargetResource
 
 # Document your deployment name: ________________
 ```
 
 ### Resource Group Validation
 
-```bash
+```powershell
 # List all SkyCraft resource groups
-az group list   --query "[?contains(name, 'skycraft')].{Name:name,Location:location,State:properties.provisioningState,Tags:tags}"   --output table
+Get-AzResourceGroup |
+    Where-Object { $_.ResourceGroupName -like '*skycraft*' } |
+    Select-Object ResourceGroupName, Location, ProvisioningState, @{N='Tags';E={($_.Tags.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ', '}} |
+    Format-Table -AutoSize
 
 # Expected output: 3 resource groups (platform, dev, prod)
 # Your count: ________________
@@ -318,25 +328,34 @@ az group list   --query "[?contains(name, 'skycraft')].{Name:name,Location:locat
 
 ### Network Resources Validation
 
-```bash
+```powershell
 # List VNets in dev resource group
-az network vnet list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,AddressSpace:addressSpace.addressPrefixes[0],Subnets:length(subnets),State:provisioningState}"   --output table
+Get-AzVirtualNetwork -ResourceGroupName dev-skycraft-swc-rg |
+    Select-Object Name, @{N='AddressSpace';E={$_.AddressSpace.AddressPrefixes[0]}}, @{N='Subnets';E={$_.Subnets.Count}}, ProvisioningState |
+    Format-Table -AutoSize
 
 # Expected output: 1 VNet with 4 subnets
 # Your result: ________________
 ```
 
-```bash
+```powershell
 # List NSGs in dev resource group
-az network nsg list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,Rules:length(securityRules),Location:location}"   --output table
+Get-AzNetworkSecurityGroup -ResourceGroupName dev-skycraft-swc-rg |
+    Select-Object Name, @{N='Rules';E={$_.SecurityRules.Count}}, Location |
+    Format-Table -AutoSize
 
 # Expected output: 2-3 NSGs with configured rules
 # Your result: ________________
 ```
 
-```bash
+```powershell
 # List load balancers
-az network lb list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,SKU:sku.name,BackendPools:length(backendAddressPools),Probes:length(probes),Rules:length(loadBalancingRules)}"   --output table
+Get-AzLoadBalancer -ResourceGroupName dev-skycraft-swc-rg |
+    Select-Object Name, @{N='SKU';E={$_.Sku.Name}},
+        @{N='BackendPools';E={$_.BackendAddressPools.Count}},
+        @{N='Probes';E={$_.Probes.Count}},
+        @{N='Rules';E={$_.LoadBalancingRules.Count}} |
+    Format-Table -AutoSize
 
 # Expected output: 1 load balancer (Standard SKU) with 2 backend pools, 2 probes, 2 rules
 # Your result: ________________
@@ -344,23 +363,23 @@ az network lb list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:na
 
 ### Bicep Module Validation
 
-```bash
+```powershell
 # Validate network module independently
-az bicep build --file modules/network.bicep
+bicep build modules/network.bicep
 
 # Result: ________________
 ```
 
-```bash
+```powershell
 # Validate NSG module independently
-az bicep build --file modules/nsg.bicep
+bicep build modules/nsg.bicep
 
 # Result: ________________
 ```
 
-```bash
+```powershell
 # Validate load balancer module independently
-az bicep build --file modules/loadbalancer.bicep
+bicep build modules/loadbalancer.bicep
 
 # Result: ________________
 ```
@@ -561,8 +580,8 @@ _________________________________________________________________
 - [ ] Created 4 Bicep modules (network, NSG, load balancer, public IP)
 - [ ] Created main.bicep orchestrator with subscription scope
 - [ ] Created parameter files for dev and prod environments
-- [ ] Successfully built Bicep to ARM with `az bicep build`
-- [ ] Validated template with `az deployment sub validate`
+- [ ] Successfully built Bicep to ARM with `bicep build`
+- [ ] Validated template with `Test-AzSubscriptionDeployment`
 - [ ] Previewed changes with what-if analysis
 - [ ] Deployed infrastructure using Bicep template
 - [ ] Verified all resources created successfully

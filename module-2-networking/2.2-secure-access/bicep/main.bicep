@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 2.2 - Secure Access (NSG/ASG/Bastion)
 DESCRIPTION: Deploys the Dev/Prod ASGs and NSGs, attaches the NSGs (and service endpoints) to the spoke subnets, and deploys the Hub NSG and the optional Azure Bastion via AVM (requires the Lab 2.1 virtual networks to exist)
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
+EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.3.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1

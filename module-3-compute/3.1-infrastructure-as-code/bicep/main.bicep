@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 3.1 - Infrastructure as Code Orchestrator
 DESCRIPTION: Orchestrates SkyCraft Lab 3.1 (resource groups, hub and dev VNets, NSGs, public IP, load balancer) with hand-written local modules - writing them is this lab's learning objective (docs/bicep-standards.md section 8.2)
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep --parameters parameters/dev.bicepparam
+EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev (selects parameters/dev.bicepparam; -Environment prod selects parameters/prod.bicepparam)
 AUTHOR/S: Marcin Biszczanik
 VERSION: 1.1.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1

@@ -91,46 +91,47 @@
 
 ## 🔍 Validation Commands
 
+Run these Az PowerShell commands to validate your lab setup:
+
 ### Verify All Storage Accounts Exist
 
-```azurecli
+```powershell
 # List all SkyCraft storage accounts with key properties
-az storage account list \
-  --query "[?contains(name,'skycraft')].{Name:name,ResourceGroup:resourceGroup,SKU:sku.name,Location:location,TLS:minimumTlsVersion}" \
-  --output table
+Get-AzStorageAccount |
+    Where-Object { $_.StorageAccountName -like '*skycraft*' } |
+    Select-Object StorageAccountName, ResourceGroupName, @{N='SKU';E={$_.Sku.Name}}, Location, MinimumTlsVersion |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                    ResourceGroup             SKU            Location       TLS
-# ----------------------  ------------------------  -------------  -------------  ------
+# StorageAccountName      ResourceGroupName         SKU            Location       MinimumTlsVersion
+# ------------------      -----------------         ---            --------       -----------------
 # platformskycraftswcsa   platform-skycraft-swc-rg  Standard_GRS   swedencentral  TLS1_2
 # devskycraftswcsa        dev-skycraft-swc-rg       Standard_LRS   swedencentral  TLS1_2
-# prodskycraftswcsa       prod-skycraft-swc-rg      Standard_GRS  swedencentral  TLS1_2
+# prodskycraftswcsa       prod-skycraft-swc-rg      Standard_GRS   swedencentral  TLS1_2
 ```
 
 ### Verify Security Settings
 
-```azurecli
+```powershell
 # Check production storage account security settings
-az storage account show \
-  --name prodskycraftswcsa \
-  --resource-group prod-skycraft-swc-rg \
-  --query "{Name:name,TLS:minimumTlsVersion,PublicAccess:allowBlobPublicAccess,SecureTransfer:enableHttpsTrafficOnly}" \
-  --output table
+Get-AzStorageAccount -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa |
+    Select-Object StorageAccountName, MinimumTlsVersion, AllowBlobPublicAccess, EnableHttpsTrafficOnly |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                 TLS     PublicAccess    SecureTransfer
-# -------------------  ------  --------------  ---------------
-# prodskycraftswcsa    TLS1_2  false           true
+# StorageAccountName   MinimumTlsVersion  AllowBlobPublicAccess  EnableHttpsTrafficOnly
+# ------------------   -----------------  ---------------------  ----------------------
+# prodskycraftswcsa    TLS1_2             False                  True
 ```
 
 ### Verify Redundancy Configuration
 
-```azurecli
+```powershell
 # Check redundancy for each account
-for sa in platformskycraftswcsa devskycraftswcsa prodskycraftswcsa; do
-  echo "=== $sa ==="
-  az storage account show --name $sa --query "{Name:name,SKU:sku.name,Kind:kind}" --output table
-done
+Get-AzStorageAccount |
+    Where-Object { $_.StorageAccountName -in 'platformskycraftswcsa', 'devskycraftswcsa', 'prodskycraftswcsa' } |
+    Select-Object StorageAccountName, @{N='SKU';E={$_.Sku.Name}}, Kind |
+    Format-Table -AutoSize
 
 # Expected SKUs:
 # platformskycraftswcsa: Standard_GRS
@@ -140,37 +141,34 @@ done
 
 ### Verify Tags
 
-```azurecli
+```powershell
 # Check tags on each storage account
-az storage account show \
-  --name prodskycraftswcsa \
-  --resource-group prod-skycraft-swc-rg \
-  --query "tags" \
-  --output json
+(Get-AzStorageAccount -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa).Tags
 
 # Expected output:
-# {
-#   "CostCenter": "MSDN",
-#   "Owner": "mbiszczanik",
-#   "Environment": "Production",
-#   "Project": "SkyCraft"
-# }
+# Name        Value
+# ----        -----
+# CostCenter  MSDN
+# Owner       mbiszczanik
+# Environment Production
+# Project     SkyCraft
 ```
 
 ### Verify Encryption Settings
 
-```azurecli
+```powershell
 # Check encryption configuration
-az storage account show \
-  --name prodskycraftswcsa \
-  --resource-group prod-skycraft-swc-rg \
-  --query "encryption.{KeySource:keySource,BlobEncryption:services.blob.enabled,FileEncryption:services.file.enabled}" \
-  --output table
+$encryption = (Get-AzStorageAccount -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa).Encryption
+[pscustomobject]@{
+    KeySource      = $encryption.KeySource
+    BlobEncryption = $encryption.Services.Blob.Enabled
+    FileEncryption = $encryption.Services.File.Enabled
+}
 
 # Expected output:
 # KeySource          BlobEncryption    FileEncryption
-# -----------------  ----------------  ----------------
-# Microsoft.Storage  true              true
+# ---------          --------------    --------------
+# Microsoft.Storage  True              True
 ```
 
 ---
