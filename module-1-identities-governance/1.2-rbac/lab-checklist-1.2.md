@@ -88,6 +88,24 @@
 
 ---
 
+## 🤖 Automation (optional)
+
+The portal steps above have two scripted equivalents in `scripts/`. Pick one per subscription: each skips assignments that already exist, but the Bicep template cannot adopt assignments the imperative script created.
+
+- [ ] Declarative - resource groups and the five role assignments from `bicep/role-assignments.bicep`, with principal IDs resolved from Entra ID:
+  ```powershell
+  .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments -WhatIf   # preview
+  .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments           # deploy
+  ```
+- [ ] Imperative - the same five assignments through `New-AzRoleAssignment`:
+  ```powershell
+  .\scripts\Deploy-Bicep.ps1              # resource groups only
+  .\scripts\New-LabRoleAssignment.ps1
+  ```
+- [ ] Validated with `.\scripts\Test-Lab.ps1`
+
+---
+
 ## 🔍 Validation Steps
 
 Execute these validation steps to confirm success:
