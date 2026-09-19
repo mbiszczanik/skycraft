@@ -256,13 +256,30 @@ Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1
 
 ### Pester (Repository Standards Tests)
 
-Repo-wide conventions are enforced by **Pester 5** tests in [`tests/`](../tests/) (API version policy, CBH coverage, README casing, etc.). Run them before pushing:
+Repo-wide conventions are enforced by **Pester 5** tests in [`tests/`](../tests/) (API version policy, CBH coverage, README casing, etc.). Run them — together with the lab-local suites described below — before pushing:
 
 ```powershell
-Invoke-Pester -Path .\tests
+Invoke-Pester -Path (@('.\tests') + (Get-ChildItem -Directory -Filter 'module-*' | Get-ChildItem -Recurse -File -Filter '*.Tests.ps1').FullName)
 ```
 
+(Module directories first, then recurse — `Get-ChildItem -Path 'module-*' -Recurse -File -Filter '*.Tests.ps1'` silently returns nothing on pwsh 7.6.)
+
 New repo-wide rules should be added as Pester tests, not as manual checklist items. Lab-level `Test-Lab.ps1` scripts intentionally remain procedural — see [Section 7.2](#72-procedural-test-labps1-scripts).
+
+#### Where a suite lives
+
+A Pester suite has exactly two valid homes, chosen by what it exercises — not by whether it should run in CI, because CI runs both:
+
+| Suite exercises | Location | Example |
+| --- | --- | --- |
+| A rule that applies across the repository (every script, every README, every Bicep file) | `tests/` | `tests/Cbh-Coverage.Tests.ps1` |
+| The files of one lab only (its scripts, its Bicep, its README) | `<lab>/tests/` (or `<module>/tests/` for a module-level README) | `module-3-compute/3.1-infrastructure-as-code/tests/Standards.Tests.ps1` |
+
+The `pester` job in [`lint.yml`](../.github/workflows/lint.yml) runs `tests/` **and** every `module-*/**/tests/*.Tests.ps1`, so a lab-local suite gates merges exactly like a repo-wide one (#77). A suite placed anywhere else is never run — [`tests/Pester-Discovery.Tests.ps1`](../tests/Pester-Discovery.Tests.ps1) fails when one appears.
+
+Because every suite runs on the `ubuntu-latest` runner without an Azure login, each one must be **CI-safe**: no `Connect-Az*` / `Connect-MgGraph`, no absolute Windows paths, paths built with `Join-Path` from `$PSScriptRoot`, and any tooling it shells out to (`az bicep`, `pwsh`) present on the runner. A suite that needs live Azure belongs in a lab's `Test-Lab.ps1`, not in Pester.
+
+A lab-local suite must not restate a repo-wide rule: when a `tests/` suite comes to cover the same check, delete the lab-local copy. Module 1's `Readme-Architecture.Tests.ps1` was removed for that reason — it required a Mermaid block while `tests/Module-Readme-L004.Tests.ps1` forbids one (ADR-0004), and nothing ran it to notice.
 
 ## 7. Conscious Divergences from Microsoft Guidance
 

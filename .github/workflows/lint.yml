@@ -30,7 +30,10 @@ jobs:
                       }
                   }
               }
-          if ($failed) { exit 1 }
+          if ($failed) {
+              $Host.SetShouldExit(1)
+              exit 1
+          }
           Write-Host 'All PowerShell files parse.'
 
       - name: Run PSScriptAnalyzer
@@ -41,7 +44,10 @@ jobs:
           $results | Format-Table RuleName, Severity, ScriptName, Line, Message -AutoSize | Out-String -Width 200 | Write-Host
           $errors = @($results | Where-Object Severity -eq 'Error')
           Write-Host "Errors: $($errors.Count), Warnings: $(@($results | Where-Object Severity -eq 'Warning').Count)"
-          if ($errors.Count -gt 0) { exit 1 }
+          if ($errors.Count -gt 0) {
+              $Host.SetShouldExit(1)
+              exit 1
+          }
 
   pester:
     name: Repository Standards (Pester)
@@ -49,11 +55,58 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Lab 3.1's suite compiles its templates through `az bicep build`. Installed up front,
+      # as the bicep job does, rather than left to the CLI's first-use auto-install inside a
+      # test case.
+      - name: Install Bicep CLI
+        run: az bicep install
+
+      # The outcome is decided here rather than left to Pester's own `-CI` exit. GitHub runs
+      # this step as `pwsh -command`, whose exit code is whatever the host was last told to
+      # use - and the suite itself runs tools/Invoke-LabCycle.ps1 in-process, which ends with
+      # $Host.SetShouldExit(0). That pins the step to 0 and swallows any later `exit`, which
+      # is how 5 failing tests passed as a green check (#128). Setting the code on the host
+      # immediately before the `exit` is the same guard the lab scripts carry for #104.
       - name: Run Pester tests
         shell: pwsh
         run: |
           Install-Module Pester -MinimumVersion 5.5 -MaximumVersion 5.99 -Force -Scope CurrentUser
-          Invoke-Pester -Path ./tests -CI
+
+          # Lab-local suites (module-*/**/tests/*.Tests.ps1) run alongside the repo-wide ones
+          # in tests/. They only ever ran when someone invoked them by hand, which is how the
+          # Module 1 README suite went on asserting a Mermaid block after ADR-0004 had
+          # replaced it, unnoticed (#77). docs/powershell-standards.md section 6 states the rule.
+          #
+          # Module directories first, then recurse: `Get-ChildItem -Path 'module-*' -Recurse -File
+          # -Filter` returns nothing at all on pwsh 7.6 (the wildcard path and -File do not
+          # combine), and an empty list here would pass as a green check.
+          $labSuites = @(Get-ChildItem -Directory -Filter 'module-*' | Get-ChildItem -Recurse -File -Filter '*.Tests.ps1' | ForEach-Object FullName)
+          Write-Host "Lab-local suites: $($labSuites.Count)"
+          $labSuites | ForEach-Object { Write-Host "  $_" }
+
+          if ($labSuites.Count -eq 0) {
+              Write-Host '::error::No lab-local Pester suite was discovered - the module-* discovery is broken.'
+              $Host.SetShouldExit(1)
+              exit 1
+          }
+
+          # -PassThru rather than a [PesterConfiguration] literal: Install-Module does not
+          # load the assembly, so the type is unresolvable at parse time in a fresh session.
+          $result = Invoke-Pester -Path (@('./tests') + $labSuites) -PassThru
+
+          if ($null -eq $result) {
+              Write-Host '::error::Invoke-Pester returned no result object - the run did not complete.'
+              $Host.SetShouldExit(1)
+              exit 1
+          }
+
+          Write-Host "Passed: $($result.PassedCount), Failed: $($result.FailedCount), Skipped: $($result.SkippedCount)"
+
+          if ($result.FailedCount -gt 0 -or $result.FailedBlocksCount -gt 0 -or $result.FailedContainersCount -gt 0) {
+              Write-Host "::error::Pester reported $($result.FailedCount) failed test(s)."
+              $Host.SetShouldExit(1)
+              exit 1
+          }
 
   bicep:
     name: Bicep Build (Linter)
@@ -74,7 +127,10 @@ jobs:
               if ($LASTEXITCODE -ne 0) { $failed = $true }
               Write-Host '::endgroup::'
           }
-          if ($failed) { exit 1 }
+          if ($failed) {
+              $Host.SetShouldExit(1)
+              exit 1
+          }
 
       - name: Build all Bicep parameter files
         shell: pwsh
@@ -86,7 +142,10 @@ jobs:
               if ($LASTEXITCODE -ne 0) { $failed = $true }
               Write-Host '::endgroup::'
           }
-          if ($failed) { exit 1 }
+          if ($failed) {
+              $Host.SetShouldExit(1)
+              exit 1
+          }
 
   markdownlint:
     name: Markdownlint
