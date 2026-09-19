@@ -114,7 +114,7 @@ which a raw command against the checked-in parameter file cannot always reproduc
 - **Lab 4.4**: `parClientIp` is auto-detected by the script; a raw what-if previews an empty firewall rule instead.
 
 The raw `az deployment sub what-if` form is still listed where the script does not cover a template:
-Lab 1.2's `role-assignments.bicep` and Lab 3.3's resource-group-scope `acr.bicep` bootstrap.
+Lab 3.3's resource-group-scope `acr.bicep` bootstrap.
 
 All commands are written to be run from the repository root.
 
@@ -128,11 +128,9 @@ All commands are written to be run from the repository root.
 # Lab 1.2 - RBAC
 .\module-1-identities-governance\1.2-rbac\scripts\Deploy-Bicep.ps1 -WhatIf
 # role-assignments.bicep has no parameter file: its four principal IDs are Entra object IDs
-# that only exist once Lab 1.1 has run, so pass them explicitly.
-az deployment sub what-if --location swedencentral `
-    --template-file module-1-identities-governance/1.2-rbac/bicep/role-assignments.bicep `
-    --parameters parAdminPrincipalId=<object-id> parDeveloperGroupPrincipalId=<object-id> `
-                 parTesterGroupPrincipalId=<object-id> parPartnerPrincipalId=<object-id>
+# that only exist once Lab 1.1 has run. -IncludeRoleAssignments resolves them from the
+# directory and previews that template too (the three resource groups must already exist).
+.\module-1-identities-governance\1.2-rbac\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments -WhatIf
 .\module-1-identities-governance\1.2-rbac\scripts\Test-Lab.ps1
 .\module-1-identities-governance\1.2-rbac\scripts\Remove-LabResource.ps1 -WhatIf
 
