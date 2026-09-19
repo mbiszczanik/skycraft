@@ -9,12 +9,12 @@
 - [ ] Public access level: **Private (no anonymous access)**
 - [ ] Default access tier: **Hot**
 
-### public-demo Container (Dev - Private by subscription policy)
+### public-demo Container (Public - Dev Only)
 
 - [ ] Container name: `public-demo`
 - [ ] Location: **dev-skycraft-swc-rg / devskycraftswcsa**
-- [ ] Public access level: **Private (no anonymous access)** - the subscription's Azure Policy denies `allowBlobPublicAccess = true`, so the dev account stays at **Allow Blob anonymous access = Disabled** and no container can be made public (guide Step 4.2.12)
-- [ ] Test blob **not** readable from an incognito browser (`PublicAccessNotPermitted` / `ResourceNotFound`)
+- [ ] Public access level: **Blob (anonymous read access for blobs only)**
+- [ ] Test blob accessible via public URL
 
 ### player-backups Container (Private)
 
@@ -90,46 +90,9 @@
 
 ## 🔍 Validation Commands
 
-### Verify Containers (Azure CLI)
+Run these Az PowerShell commands to validate your lab setup:
 
-```azurecli
-# List all containers with access levels (Production)
-az storage container list \
-  --account-name prodskycraftswcsa \
-  --auth-mode login \
-  --query "[].{Name:name,PublicAccess:properties.publicAccess}" \
-  --output table
-
-# Expected output:
-# Name              PublicAccess
-# ----------------  -------------
-# game-assets
-# player-backups
-# server-config
-# game-logs
-
-# Verify public-demo (Development) - private, and the account switch is off
-az storage container list \
-  --account-name devskycraftswcsa \
-  --auth-mode login \
-  --query "[].{Name:name,PublicAccess:properties.publicAccess}" \
-  --output table
-
-# Expected output:
-# Name              PublicAccess
-# ----------------  -------------
-# public-demo       None
-
-az storage account show \
-  --name devskycraftswcsa \
-  --resource-group dev-skycraft-swc-rg \
-  --query allowBlobPublicAccess
-
-# Expected output:
-# false
-```
-
-### Verify Containers (PowerShell)
+### Verify Containers
 
 ```powershell
 # List all containers (Production)
@@ -155,31 +118,7 @@ Get-AzStorageContainer -Context $devSa.Context -Name "public-demo" | Select-Obje
 # public-demo       Off
 ```
 
-### Verify Data Protection Settings (Azure CLI)
-
-```azurecli
-# Check blob service properties
-az storage account blob-service-properties show \
-  --account-name prodskycraftswcsa \
-  --resource-group prod-skycraft-swc-rg \
-  --query "{BlobSoftDelete:deleteRetentionPolicy,ContainerSoftDelete:containerDeleteRetentionPolicy,Versioning:isVersioningEnabled}" \
-  --output json
-
-# Expected output:
-# {
-#   "BlobSoftDelete": {
-#     "days": 7,
-#     "enabled": true
-#   },
-#   "ContainerSoftDelete": {
-#     "days": 7,
-#     "enabled": true
-#   },
-#   "Versioning": true
-# }
-```
-
-### Verify Data Protection (PowerShell)
+### Verify Data Protection
 
 ```powershell
 # Check blob service properties
@@ -200,24 +139,7 @@ $props = Get-AzStorageBlobServiceProperty -ResourceGroupName prod-skycraft-swc-r
 # VersioningEnabled        : True
 ```
 
-### Verify Lifecycle Policies (Azure CLI)
-
-```azurecli
-# List lifecycle management policies
-az storage account management-policy show \
-  --account-name prodskycraftswcsa \
-  --resource-group prod-skycraft-swc-rg \
-  --query "policy.rules[].{Name:name,Enabled:enabled,Type:type}" \
-  --output table
-
-# Expected output:
-# Name               Enabled    Type
-# -----------------  ---------  ---------
-# tier-game-logs     True       Lifecycle
-# archive-backups    True       Lifecycle
-```
-
-### Verify Lifecycle Policies (PowerShell)
+### Verify Lifecycle Policies
 
 ```powershell
 # List lifecycle policies
@@ -231,38 +153,32 @@ $policy.Rules | Select-Object Name, Enabled, Type | Format-Table
 # archive-backups  True    Lifecycle
 ```
 
-### Verify Test Blob (Azure CLI)
+### Verify Test Blob
 
-```azurecli
+```powershell
 # List blobs in game-assets
-az storage blob list \
-  --account-name prodskycraftswcsa \
-  --container-name game-assets \
-  --auth-mode login \
-  --query "[].{Name:name,Tier:properties.blobTier,Size:properties.contentLength}" \
-  --output table
+$ctx = (Get-AzStorageAccount -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa).Context
+Get-AzStorageBlob -Container game-assets -Context $ctx |
+    Select-Object Name, AccessTier, Length |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                          Tier    Size
-# ----------------------------  ------  ------
-# textures/test-asset.txt       Hot     XX
+# Name                          AccessTier  Length
+# ----                          ----------  ------
+# textures/test-asset.txt       Hot         XX
 ```
 
-### Verify Blob Versioning (Azure CLI)
+### Verify Blob Versioning
 
-```azurecli
+```powershell
 # List blob versions
-az storage blob list \
-  --account-name prodskycraftswcsa \
-  --container-name game-assets \
-  --include v \
-  --auth-mode login \
-  --query "[?name=='textures/test-asset.txt'].{Name:name,VersionId:versionId,Current:isCurrentVersion}" \
-  --output table
+Get-AzStorageBlob -Container game-assets -Prefix 'textures/test-asset.txt' -IncludeVersion -Context $ctx |
+    Select-Object Name, VersionId, IsLatestVersion |
+    Format-Table -AutoSize
 
 # Expected output (if overwritten):
-# Name                          VersionId                              Current
-# ----------------------------  -------------------------------------  --------
+# Name                          VersionId                              IsLatestVersion
+# ----                          ---------                              ---------------
 # textures/test-asset.txt       2026-02-06T15:30:00.0000000Z
 # textures/test-asset.txt       2026-02-06T15:35:00.0000000Z           True
 ```
@@ -277,7 +193,7 @@ az storage blob list \
 | player-backups | Private       | Archive (7d)  | archive-backups | ✅     |
 | server-config  | Private       | Hot           | None            | ✅     |
 | game-logs      | Private       | Cool→Archive  | tier-game-logs  | ✅     |
-| public-demo    | Private (policy-enforced) | Hot | None          | ✅     |
+| public-demo    | Blob (public) | Hot           | None            | ✅     |
 
 ### Data Protection Summary
 
@@ -374,7 +290,7 @@ az storage blob list \
 
 - [ ] All four containers created with correct naming
 - [ ] `game-assets` is **Private** (Production)
-- [ ] `public-demo` is **Private** and `AllowBlobPublicAccess` is **false** on `devskycraftswcsa` (Development)
+- [ ] `public-demo` has blob-level public access (Development)
 - [ ] Soft delete enabled for blobs (7 days)
 - [ ] Soft delete enabled for containers (7 days)
 - [ ] Blob versioning enabled

@@ -42,30 +42,27 @@
 
 ## 🔍 Validation Commands
 
-Run these Azure CLI commands to validate your lab setup:
+Run these Az PowerShell commands to validate your lab setup:
 
 ### 1. Verify Storage Firewall Rules
 
-```azurecli
-az storage account show \
-  --name prodskycraftswcsa \
-  --resource-group prod-skycraft-swc-rg \
-  --query "networkRuleSet" \
-  --output yaml
+```powershell
+Get-AzStorageAccountNetworkRuleSet -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa |
+    Format-List DefaultAction, Bypass, @{N='VirtualNetworkRules';E={$_.VirtualNetworkRules.VirtualNetworkResourceId}}, @{N='IpRules';E={$_.IpRules.IPAddressOrRange}}
 ```
 
 ### 2. Verify Stored Access Policy
 
-```azurecli
-az storage container policy list \
-  --account-name prodskycraftswcsa \
-  --container-name dev-assets \
-  --output table
+```powershell
+$context = (Get-AzStorageAccount -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa).Context
+Get-AzStorageContainerStoredAccessPolicy -Container dev-assets -Context $context |
+    Select-Object Policy, Permission, ExpiryTime |
+    Format-Table -AutoSize
 
 # Expected Output:
-# Name              Permissions    Expiry
-# ----------------  -------------  -------------------------
-# DevRevokePolicy   rl             202X-XX-XXTXX:XX:XX+00:00
+# Policy            Permission    ExpiryTime
+# ------            ----------    ----------
+# DevRevokePolicy   rl            202X-XX-XX XX:XX:XX +00:00
 ```
 
 ---

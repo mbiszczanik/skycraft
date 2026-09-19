@@ -74,26 +74,36 @@ For **Malfurion Stormrage**, verify:
 
 Execute these validation steps to confirm success:
 
-### Step 1: List all users in Azure CLI
+### Step 1: List all users with Microsoft Graph PowerShell
 
-```azcli
-az ad user list --query "[].{UPN:userPrincipalName,DisplayName:displayName}" -o table
+```powershell
+# Sign in with the read scopes the lab needs
+Connect-MgGraph -Scopes 'User.Read.All', 'Group.Read.All'
+
+Get-MgUser -All |
+    Select-Object UserPrincipalName, DisplayName |
+    Format-Table -AutoSize
 ```
 
 **Expected Output**: Shows 4 users (3 internal + 1 guest)
 
 ### Step 2: List all groups
 
-```azcli
-az ad group list --query "[].{Name:displayName,ID:id}" -o table
+```powershell
+Get-MgGroup -All |
+    Select-Object DisplayName, Id |
+    Format-Table -AutoSize
 ```
 
 **Expected Output**: Shows 3 groups
 
 ### Step 3: Get group members
 
-```azcli
-az ad group member list --group SkyCraft-Admins --query "[].{DisplayName:displayName}" -o
+```powershell
+$group = Get-MgGroup -Filter "displayName eq 'SkyCraft-Admins'"
+Get-MgGroupMember -GroupId $group.Id |
+    Select-Object @{N='DisplayName';E={$_.AdditionalProperties.displayName}} |
+    Format-Table -AutoSize
 ```
 
 **Expected Output**: Shows Malfurion Stormrage

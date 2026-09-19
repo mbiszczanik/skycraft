@@ -17,7 +17,7 @@ Every Bicep file must start with a standardized header block. This ensures that 
 /*=====================================================
 SUMMARY: [Module Name] - [Short Description]
 DESCRIPTION: [Detailed description of what this template deploys]
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
+EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: [Name]
 VERSION: [X.Y.Z]
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
@@ -333,7 +333,7 @@ Copy and paste these templates to start a new file.
 /*=====================================================
 SUMMARY: [Lab Name] - Orchestrator
 DESCRIPTION: Orchestrates deployment for [Lab Name]
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
+EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: [Your Name]
 VERSION: 0.1.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1

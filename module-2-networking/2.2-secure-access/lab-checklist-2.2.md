@@ -220,159 +220,179 @@
 
 ## 🔍 Validation Commands
 
-Run these Azure CLI commands to validate your lab setup:
+Run these Az PowerShell commands to validate your lab setup:
 
 ### Login and Set Context
 
-```azurecli
+```powershell
 # Login to Azure
-az login
+Connect-AzAccount
 
 # List subscriptions
-az account list --output table
+Get-AzSubscription | Select-Object Name, Id, State | Format-Table -AutoSize
 
 # Set subscription context
-az account set --subscription "YOUR-SUBSCRIPTION-NAME"
+Set-AzContext -SubscriptionName "YOUR-SUBSCRIPTION-NAME"
 
 # Verify current subscription
-az account show --query "{Name:name, SubscriptionId:id}" --output table
+Get-AzContext | Select-Object @{N='Name';E={$_.Subscription.Name}}, @{N='SubscriptionId';E={$_.Subscription.Id}}
 ```
 
 ### Verify Azure Bastion
 
-```azurecli
+```powershell
 # List Bastion hosts
-az network bastion list   --resource-group platform-skycraft-swc-rg   --query "[].{Name:name,Location:location,ProvisioningState:provisioningState,VNet:virtualNetwork.id}"   --output table
+Get-AzBastion -ResourceGroupName platform-skycraft-swc-rg |
+    Select-Object Name, Location, ProvisioningState,
+        @{N='VNet';E={($_.IpConfigurations[0].Subnet.Id -split '/subnets/')[0].Split('/')[-1]}} |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                      Location       ProvisioningState  VNet
-# ------------------------  -------------  -----------------  ------------------------------------
-# platform-skycraft-swc-bas Sweden Central Succeeded          /subscriptions/.../platform-skycraft-swc-vnet
+# Name                      Location      ProvisioningState VNet
+# platform-skycraft-swc-bas swedencentral Succeeded         platform-skycraft-swc-vnet
 
 # Show Bastion details
-az network bastion show   --resource-group platform-skycraft-swc-rg   --name platform-skycraft-swc-bas   --query "{Name:name,Tier:sku.name,PublicIP:ipConfigurations[0].publicIpAddress.id}"   --output json
+$bastion = Get-AzBastion -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-bas
+$bastion | Select-Object Name, @{N='Tier';E={$_.Sku.Name}}, @{N='PublicIP';E={$_.IpConfigurations[0].PublicIpAddress.Id}}
 ```
 
 ### Verify Network Security Groups
 
-```azurecli
+```powershell
 # List all NSGs
-az network nsg list   --query "[].{Name:name,ResourceGroup:resourceGroup,Location:location,Subnets:length(subnets)}"   --output table
+Get-AzNetworkSecurityGroup |
+    Select-Object Name, ResourceGroupName, Location, @{N='Subnets';E={$_.Subnets.Count}} |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                          ResourceGroup            Location       Subnets
-# ----------------------------  ----------------------   -------------  -------
-# dev-skycraft-swc-auth-nsg     dev-skycraft-swc-rg      Sweden Central 1
-# dev-skycraft-swc-world-nsg    dev-skycraft-swc-rg      Sweden Central 1
-# dev-skycraft-swc-db-nsg       dev-skycraft-swc-rg      Sweden Central 1
-# prod-skycraft-swc-auth-nsg    prod-skycraft-swc-rg     Sweden Central 1
-# prod-skycraft-swc-world-nsg   prod-skycraft-swc-rg     Sweden Central 1
-# prod-skycraft-swc-db-nsg      prod-skycraft-swc-rg     Sweden Central 1
+# Name                          ResourceGroupName        Location      Subnets
+# dev-skycraft-swc-auth-nsg     dev-skycraft-swc-rg      swedencentral 1
+# dev-skycraft-swc-world-nsg    dev-skycraft-swc-rg      swedencentral 1
+# dev-skycraft-swc-db-nsg       dev-skycraft-swc-rg      swedencentral 1
+# prod-skycraft-swc-auth-nsg    prod-skycraft-swc-rg     swedencentral 1
+# prod-skycraft-swc-world-nsg   prod-skycraft-swc-rg     swedencentral 1
+# prod-skycraft-swc-db-nsg      prod-skycraft-swc-rg     swedencentral 1
 ```
 
 ### Verify NSG Rules (Dev Auth NSG)
 
-```azurecli
+```powershell
 # List custom inbound rules for dev auth NSG
-az network nsg rule list   --resource-group dev-skycraft-swc-rg   --nsg-name dev-skycraft-swc-auth-nsg   --query "[?priority<1000].{Priority:priority,Name:name,Port:destinationPortRange,Source:sourceAddressPrefix,Action:access}"   --output table
+Get-AzNetworkSecurityGroup -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-nsg |
+    Get-AzNetworkSecurityRuleConfig |
+    Where-Object { $_.Priority -lt 1000 } |
+    Select-Object Priority, Name,
+        @{N='Port';E={$_.DestinationPortRange -join ','}},
+        @{N='Source';E={$_.SourceAddressPrefix -join ','}},
+        Access |
+    Sort-Object Priority |
+    Format-Table -AutoSize
 
 # Expected output:
-# Priority  Name                      Port  Source       Action
-# --------  ------------------------  ----  -----------  ------
-# 100       Allow-SSH-From-Bastion    22    10.0.0.0/26  Allow
-# 110       Allow-Auth-GamePort       3724  *            Allow
+# Priority Name                   Port Source      Access
+#      100 Allow-SSH-From-Bastion 22   10.0.0.0/26 Allow
+#      110 Allow-Auth-GamePort    3724 *           Allow
 ```
 
 ### Verify NSG Subnet Associations
 
-```azurecli
+```powershell
 # Check which subnet is associated with dev auth NSG
-az network nsg show   --resource-group dev-skycraft-swc-rg   --name dev-skycraft-swc-auth-nsg   --query "{NSG:name,AssociatedSubnets:subnets[].id}"   --output json
+$nsg = Get-AzNetworkSecurityGroup -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-nsg
+$nsg | Select-Object Name, @{N='AssociatedSubnets';E={$_.Subnets.Id}}
 
 # Verify all dev NSG associations
-az network vnet subnet list   --resource-group dev-skycraft-swc-rg   --vnet-name dev-skycraft-swc-vnet   --query "[].{Subnet:name,AddressPrefix:addressPrefix,NSG:networkSecurityGroup.id}"   --output table
+$vnet = Get-AzVirtualNetwork -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-vnet
+$vnet.Subnets |
+    Select-Object Name, @{N='AddressPrefix';E={$_.AddressPrefix -join ','}},
+        @{N='NSG';E={$_.NetworkSecurityGroup.Id.Split('/')[-1]}} |
+    Format-Table -AutoSize
 
 # Expected output:
-# Subnet         AddressPrefix  NSG
-# -------------  -------------  ------------------------------------------------
-# AuthSubnet     10.1.1.0/24    /subscriptions/.../dev-skycraft-swc-auth-nsg
-# WorldSubnet    10.1.2.0/24    /subscriptions/.../dev-skycraft-swc-world-nsg
-# DatabaseSubnet 10.1.3.0/24    /subscriptions/.../dev-skycraft-swc-db-nsg
+# Name           AddressPrefix NSG
+# AuthSubnet     10.1.1.0/24   dev-skycraft-swc-auth-nsg
+# WorldSubnet    10.1.2.0/24   dev-skycraft-swc-world-nsg
+# DatabaseSubnet 10.1.3.0/24   dev-skycraft-swc-db-nsg
 ```
 
 ### Verify Application Security Groups
 
-```azurecli
+```powershell
 # List all ASGs
-az network asg list   --query "[].{Name:name,ResourceGroup:resourceGroup,Location:location}"   --output table
+Get-AzApplicationSecurityGroup |
+    Select-Object Name, ResourceGroupName, Location |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                         ResourceGroup            Location
-# ---------------------------  ----------------------   -------------
-# dev-skycraft-swc-asg-auth    dev-skycraft-swc-rg      Sweden Central
-# dev-skycraft-swc-asg-world   dev-skycraft-swc-rg      Sweden Central
-# dev-skycraft-swc-asg-db      dev-skycraft-swc-rg      Sweden Central
+# Name                         ResourceGroupName        Location
+# dev-skycraft-swc-asg-auth    dev-skycraft-swc-rg      swedencentral
+# dev-skycraft-swc-asg-world   dev-skycraft-swc-rg      swedencentral
+# dev-skycraft-swc-asg-db      dev-skycraft-swc-rg      swedencentral
 ```
 
 ### Verify Service Endpoints
 
-```azurecli
+```powershell
 # Check service endpoints on dev database subnet
-az network vnet subnet show   --resource-group dev-skycraft-swc-rg   --vnet-name dev-skycraft-swc-vnet   --name DatabaseSubnet   --query "{Subnet:name,ServiceEndpoints:serviceEndpoints[].service}"   --output json
+$devVnet = Get-AzVirtualNetwork -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-vnet
+Get-AzVirtualNetworkSubnetConfig -VirtualNetwork $devVnet -Name DatabaseSubnet |
+    Select-Object Name, @{N='ServiceEndpoints';E={$_.ServiceEndpoints.Service -join ', '}}
 
 # Expected output:
-# {
-#   "Subnet": "DatabaseSubnet",
-#   "ServiceEndpoints": [
-#     "Microsoft.Sql",
-#     "Microsoft.Storage"
-#   ]
-# }
+# Name           ServiceEndpoints
+# DatabaseSubnet Microsoft.Sql, Microsoft.Storage
 
 # Check service endpoints on prod database subnet
-az network vnet subnet show   --resource-group prod-skycraft-swc-rg   --vnet-name prod-skycraft-swc-vnet   --name DatabaseSubnet   --query "{Subnet:name,ServiceEndpoints:serviceEndpoints[].service}"   --output json
+$prodVnet = Get-AzVirtualNetwork -ResourceGroupName prod-skycraft-swc-rg -Name prod-skycraft-swc-vnet
+Get-AzVirtualNetworkSubnetConfig -VirtualNetwork $prodVnet -Name DatabaseSubnet |
+    Select-Object Name, @{N='ServiceEndpoints';E={$_.ServiceEndpoints.Service -join ', '}}
 
 # Check the Microsoft.Storage endpoint on both world subnets - Lab 4.4 cannot deploy without it
-az network vnet subnet show   --resource-group dev-skycraft-swc-rg   --vnet-name dev-skycraft-swc-vnet   --name WorldSubnet   --query "{Subnet:name,ServiceEndpoints:serviceEndpoints[].service}"   --output json
-az network vnet subnet show   --resource-group prod-skycraft-swc-rg   --vnet-name prod-skycraft-swc-vnet   --name WorldSubnet   --query "{Subnet:name,ServiceEndpoints:serviceEndpoints[].service}"   --output json
+foreach ($vnet in $devVnet, $prodVnet) {
+    Get-AzVirtualNetworkSubnetConfig -VirtualNetwork $vnet -Name WorldSubnet |
+        Select-Object Name, @{N='ServiceEndpoints';E={$_.ServiceEndpoints.Service -join ', '}}
+}
 
 # Expected output for each:
-# {
-#   "Subnet": "WorldSubnet",
-#   "ServiceEndpoints": [
-#     "Microsoft.Storage"
-#   ]
-# }
+# Name        ServiceEndpoints
+# WorldSubnet Microsoft.Storage
 ```
 
 ### Verify Tags on NSGs
 
-```azurecli
+```powershell
 # Check tags on dev auth NSG
-az network nsg show   --resource-group dev-skycraft-swc-rg   --name dev-skycraft-swc-auth-nsg   --query tags   --output json
+(Get-AzNetworkSecurityGroup -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-nsg).Tag
 
 # Expected output:
-# {
-#   "CostCenter": "MSDN",
-#   "Environment": "Development",
-#   "Owner": "mbiszczanik",
-#   "Project": "SkyCraft"
-# }
+# Name        Value
+# ----        -----
+# CostCenter  MSDN
+# Environment Development
+# Owner       mbiszczanik
+# Project     SkyCraft
 
 # Check tags on all NSGs
-az network nsg list   --query "[].{Name:name,Environment:tags.Environment,Project:tags.Project,CostCenter:tags.CostCenter,Owner:tags.Owner}"   --output table
+Get-AzNetworkSecurityGroup |
+    Select-Object Name,
+        @{N='Environment';E={$_.Tag['Environment']}},
+        @{N='Project';E={$_.Tag['Project']}},
+        @{N='CostCenter';E={$_.Tag['CostCenter']}},
+        @{N='Owner';E={$_.Tag['Owner']}} |
+    Format-Table -AutoSize
 ```
 
 ### Verify Bastion Public IP
 
-```azurecli
+```powershell
 # Check public IP used by Bastion
-az network public-ip show   --resource-group platform-skycraft-swc-rg   --name platform-skycraft-swc-bas-pip   --query "{Name:name,IP:ipAddress,SKU:sku.name,Allocation:publicIpAllocationMethod}"   --output table
+Get-AzPublicIpAddress -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-bas-pip |
+    Select-Object Name, IpAddress, @{N='SKU';E={$_.Sku.Name}}, PublicIpAllocationMethod |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                           IP              SKU       Allocation
-# -----------------------------  --------------  --------  ----------
-# platform-skycraft-swc-bas-pip  [Public IP]     Standard  Static
+# Name                          IpAddress   SKU      PublicIpAllocationMethod
+# platform-skycraft-swc-bas-pip [Public IP] Standard Static
 ```
 
 ---

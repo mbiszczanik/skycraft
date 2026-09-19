@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 3.2 - Virtual Machines Orchestrator
 DESCRIPTION: Deploys the Auth and World Linux VMs (NICs via the AVM VM module), the World data disk and the optional Key Vault for Azure Disk Encryption into the Lab 3.1 network, via Azure Verified Modules
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep --parameters parEnvironment=dev parSshPublicKey="ssh-rsa ..."
+EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev -SshKeyPath $HOME\.ssh\skycraft-dev.pub
 AUTHOR/S: Marcin Biszczanik
 VERSION: 1.1.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1

@@ -156,13 +156,11 @@
 
 ### VMSS Validation Commands
 
-```azurecli
+```powershell
 # List VMSS instances
-az vmss list-instances \
-  --resource-group prod-skycraft-swc-rg \
-  --name prod-skycraft-swc-world-vmss \
-  --query "[].{Name:name,Zone:zones[0],State:provisioningState}" \
-  --output table
+Get-AzVmssVM -ResourceGroupName prod-skycraft-swc-rg -VMScaleSetName prod-skycraft-swc-world-vmss |
+    Select-Object Name, @{N='Zone';E={$_.Zones -join ','}}, ProvisioningState |
+    Format-Table -AutoSize
 ```
 
 ### VMSS Cleanup
@@ -173,131 +171,112 @@ az vmss list-instances \
 
 ## 🔍 Validation Commands
 
-Run these Azure CLI commands to validate your lab setup:
+Run these Az PowerShell commands to validate your lab setup:
 
 ### Login and Set Context
 
-```azurecli
+```powershell
 # Login to Azure
-az login
+Connect-AzAccount
 
 # Set subscription context
-az account set --subscription "YOUR-SUBSCRIPTION-NAME"
+Set-AzContext -SubscriptionName "YOUR-SUBSCRIPTION-NAME"
 ```
 
 ### Verify Virtual Machines
 
-```azurecli
+```powershell
 # List all VMs in dev resource group
-az vm list \
-  --resource-group dev-skycraft-swc-rg \
-  --query "[].{Name:name,Size:hardwareProfile.vmSize,Zone:zones[0],State:powerState}" \
-  --output table
+Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Status |
+    Select-Object Name, @{N='Size';E={$_.HardwareProfile.VmSize}}, @{N='Zone';E={$_.Zones -join ','}}, PowerState |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                        Size              Zone  State
-# --------------------------  ----------------  ----  ---------
+# Name                        Size              Zone  PowerState
+# ----                        ----              ----  ----------
 # dev-skycraft-swc-auth-vm    Standard_B2ls_v2  1     VM running
 # dev-skycraft-swc-world-vm   Standard_B2ls_v2  2     VM running
 ```
 
 ### Verify VM Network Configuration
 
-```azurecli
-# Show Authserver VM network details
-az vm show \
-  --name dev-skycraft-swc-auth-vm \
-  --resource-group dev-skycraft-swc-rg \
-  --query "{Name:name,Zone:zones[0],PrivateIP:privateIps}" \
-  --output table
-
-# Show Worldserver VM network details
-az vm show \
-  --name dev-skycraft-swc-world-vm \
-  --resource-group dev-skycraft-swc-rg \
-  --query "{Name:name,Zone:zones[0],PrivateIP:privateIps}" \
-  --output table
+```powershell
+# Show private IPs of both VMs
+foreach ($vmName in 'dev-skycraft-swc-auth-vm', 'dev-skycraft-swc-world-vm') {
+    $vm = Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name $vmName
+    $nic = Get-AzNetworkInterface -ResourceId $vm.NetworkProfile.NetworkInterfaces[0].Id
+    [pscustomobject]@{
+        Name      = $vm.Name
+        Zone      = $vm.Zones -join ','
+        PrivateIP = $nic.IpConfigurations[0].PrivateIpAddress
+    }
+}
 ```
 
 ### Verify Disk Encryption Status
 
-> **Note**: Azure Disk Encryption for Linux VMs requires **8 GB RAM** and is enabled via Azure CLI (not Portal). VMs must be temporarily resized to `Standard_B2s_v2` for encryption.
+> **Note**: Azure Disk Encryption for Linux VMs requires **8 GB RAM** and is enabled from PowerShell or the CLI (not the Portal). VMs must be temporarily resized to `Standard_B2s_v2` for encryption - `Enable-Encryption.ps1` does the resize, encryption and resize back for you.
 
-```azurecli
+```powershell
 # Check encryption status for both VMs
-az vm encryption show \
-  --name dev-skycraft-swc-auth-vm \
-  --resource-group dev-skycraft-swc-rg
+Get-AzVMDiskEncryptionStatus -ResourceGroupName dev-skycraft-swc-rg -VMName dev-skycraft-swc-auth-vm
+Get-AzVMDiskEncryptionStatus -ResourceGroupName dev-skycraft-swc-rg -VMName dev-skycraft-swc-world-vm
 
-az vm encryption show \
-  --name dev-skycraft-swc-world-vm \
-  --resource-group dev-skycraft-swc-rg
-
-# Expected output:
-# Status                  Message
-# ----------------------  ------------------------------------
-# Provisioning succeeded  Encryption succeeded for all volumes
+# Expected output (per VM):
+# OsVolumeEncrypted   : Encrypted
+# DataVolumesEncrypted: Encrypted
+# ProgressMessage     : Encryption succeeded for all volumes
 ```
 
 ### (Optional) Verify Encryption at Host
 
-```azurecli
+```powershell
 # Check Encryption at Host status
-az vm show \
-  --name dev-skycraft-swc-auth-vm \
-  --resource-group dev-skycraft-swc-rg \
-  --query "securityProfile.encryptionAtHost" \
-  --output tsv
+(Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-vm).SecurityProfile.EncryptionAtHost
 
-# Expected output: true (if enabled)
+# Expected output: True (if enabled)
 ```
 
 ### Verify Data Disk Attachment
 
-```azurecli
+```powershell
 # List disks attached to Worldserver
-az vm show \
-  --name dev-skycraft-swc-world-vm \
-  --resource-group dev-skycraft-swc-rg \
-  --query "storageProfile.dataDisks[].{Name:name,Size:diskSizeGb,Lun:lun}" \
-  --output table
+(Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-world-vm).StorageProfile.DataDisks |
+    Select-Object Name, DiskSizeGB, Lun |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                              Size  Lun
-# --------------------------------  ----  ---
-# dev-skycraft-swc-world-vm-data    64    0
+# Name                              DiskSizeGB  Lun
+# ----                              ----------  ---
+# dev-skycraft-swc-world-vm-data    64          0
 ```
 
 ### Verify Load Balancer Backend Pools
 
-```azurecli
+```powershell
 # List backend pool members
-az network lb address-pool list \
-  --lb-name dev-skycraft-swc-lb \
-  --resource-group dev-skycraft-swc-rg \
-  --query "[].{Name:name,BackendIPConfigs:length(backendIpConfigurations)}" \
-  --output table
+(Get-AzLoadBalancer -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-lb).BackendAddressPools |
+    Select-Object Name, @{N='BackendIPConfigs';E={$_.BackendIpConfigurations.Count}} |
+    Format-Table -AutoSize
 
 # Expected output:
 # Name                             BackendIPConfigs
-# -------------------------------  ----------------
+# ----                             ----------------
 # dev-skycraft-swc-lb-be-auth      1
 # dev-skycraft-swc-lb-be-world     1
 ```
 
 ### Verify Key Vault
 
-```azurecli
+```powershell
 # Show Key Vault details
-az keyvault show \
-  --name dev-skycraft-swc-kv \
-  --resource-group dev-skycraft-swc-rg \
-  --query "{Name:name,Location:location,EnabledForDiskEncryption:properties.enabledForDiskEncryption}" \
-  --output table
+Get-AzKeyVault -ResourceGroupName dev-skycraft-swc-rg -VaultName dev-skycraft-swc-kv |
+    Select-Object VaultName, Location, EnabledForDiskEncryption |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                 Location       EnabledForDiskEncryption
-# -------------------  -------------  -------------------------
+# VaultName            Location       EnabledForDiskEncryption
+# ---------            --------       ------------------------
 # dev-skycraft-swc-kv  swedencentral  True
 ```
 

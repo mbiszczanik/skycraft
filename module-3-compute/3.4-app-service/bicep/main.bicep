@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 3.4 - App Service Orchestrator
 DESCRIPTION: Deploys the Linux App Service Plan (P0v4), the Node web app with a staging slot and regional VNet integration, and the CPU autoscale setting for SkyCraft Lab 3.4 via Azure Verified Modules (autoscale via a local fallback module)
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep
+EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.2.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
