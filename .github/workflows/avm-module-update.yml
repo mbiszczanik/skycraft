@@ -1,0 +1,42 @@
+name: AVM Module Update Check
+
+# Dependabot does not read Bicep registry references, so the 'br/public:avm/...' pins
+# have no update signal of their own (issue #82). This is the quarterly review:
+# tools/Get-AvmModuleUpdate.ps1 lists every pin next to the newest version the registry
+# publishes, the table lands in the job summary, and -FailOnBehind makes a run with
+# anything to review a red one - GitHub notifies the repository owner of a failed
+# scheduled run, which is the whole signal. A pin the registry does not publish at all
+# fails regardless.
+#
+# Upgrading is a normal PR: every reference plus the catalogue in
+# docs/bicep-standards.md section 4.4, which tests/Avm-Module-Pinning.Tests.ps1 guards.
+
+on:
+  schedule:
+    # 06:00 UTC on the first day of each quarter.
+    - cron: '0 6 1 1,4,7,10 *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Compare pins with br/public
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: List pinned AVM modules against the registry
+        shell: pwsh
+        run: |
+          $table = ./tools/Get-AvmModuleUpdate.ps1 -Format Markdown -FailOnBehind
+          $code  = $LASTEXITCODE
+
+          $table | Write-Host
+          @('## AVM module pins vs br/public', '') + $table | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+          if ($code -ne 0) {
+              $Host.SetShouldExit(1)
+              exit 1
+          }

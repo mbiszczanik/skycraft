@@ -41,6 +41,43 @@ All new labs and scripts must include validation steps.
 - **PowerShell**: Use `Test-Lab.ps1` scripts for Pester-like validation.
 - **Documentation**: Ensure all links work and screenshots are placed in the correct `images/` directory.
 
+## 🚀 Releases
+
+`CHANGELOG.md` is the single source of truth for versions. A release is the merge to
+`main` that moves the `## [Unreleased]` items under a new `## [X.Y.Z] - YYYY-MM-DD`
+heading; nothing else is typed anywhere.
+
+- **What happens automatically**: the [Release workflow](.github/workflows/release.yml)
+  runs on every push to `main` that changes `CHANGELOG.md`. It reads the topmost
+  released section, and if the matching `vX.Y.Z` release does not exist yet it creates
+  the tag on the merge commit and the GitHub Release with that section as the notes.
+  A CHANGELOG edit that adds no new version finds the release already published and
+  does nothing.
+- **To cut a release**: in the PR, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`
+  (adding a fresh empty `## [Unreleased]` above it), bump nothing else, and merge.
+- **To check before merging**: `.\tools\Publish-Release.ps1 -WhatIf` prints the version,
+  the target commit and the exact notes the workflow would publish.
+- **To backfill or run by hand** (a missed release, a workflow outage):
+  `.\tools\Publish-Release.ps1 -Target <merge-commit-sha>` with `gh auth login` done.
+  The script is idempotent - it never edits or deletes an existing release or tag.
+
+The reasoning is in [ADR-0005](docs/adr/0005-release-from-changelog.md).
+
+## 📦 AVM module versions
+
+The Bicep templates consume [Azure Verified Modules](https://aka.ms/avm) pinned to exact
+versions, and Dependabot does not read Bicep registry references, so the pins have no
+update signal of their own. Two things stand in for it:
+
+- `.\tools\Get-AvmModuleUpdate.ps1` lists every pin next to the newest version
+  `br/public` publishes. The [AVM Module Update Check workflow](.github/workflows/avm-module-update.yml)
+  runs it on the first day of each quarter and fails - which notifies the maintainer -
+  when any module has a newer version. Run it by hand any time; it needs no Azure login.
+- Upgrading a module is a normal PR: update every reference **and** the catalogue in
+  [docs/bicep-standards.md §4.4](docs/bicep-standards.md#44-avm-version-catalogue) together.
+  `tests/Avm-Module-Pinning.Tests.ps1` and `tests/Avm-Module-Update.Tests.ps1` fail the
+  PR if either side is left behind or a pin is not published.
+
 ## 🐛 Reporting Issues
 
 If you find a bug or have a suggestion, please open an Issue using the provided templates. Include:

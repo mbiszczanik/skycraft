@@ -141,7 +141,9 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 | `avm/res/web/site` | `0.24.0` | Lab 3.4 |
 
 > [!NOTE]
-> The catalogue is complete for issue #62 v2 (all five modules converted). Upgrading a module means updating every reference and this table in the same PR.
+> The catalogue is complete for issue #62 v2 (all five modules converted). Upgrading a module means updating every reference and this table in the same PR - `tests/Avm-Module-Update.Tests.ps1` fails the PR when the table and the templates disagree, or when a pinned version is not published on `br/public`.
+
+To see which modules have a newer version, run `.\tools\Get-AvmModuleUpdate.ps1` (no Azure login needed). The `AVM Module Update Check` workflow runs the same comparison on the first day of each quarter, because Dependabot does not read Bicep registry references (issue #82).
 
 ### 4.5 Lab-Friction Overrides
 

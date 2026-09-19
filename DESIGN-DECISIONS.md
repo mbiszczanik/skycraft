@@ -231,10 +231,14 @@ lab; this section is the architect's view in one place.
   Hand-written modules remain only where no `Available` AVM module exists
   (tags, autoscale settings) — and in Lab 3.1, where writing modules by hand
   *is* the learning objective.
-- **Production gap:** No private registry mirror of AVM modules, no automated
-  AVM version-update pipeline (Dependabot does not cover Bicep registries),
-  and lab-friction overrides (soft delete disabled on Key Vault and Recovery
-  Services Vault) that a production deployment must never copy.
+- **Production gap:** No private registry mirror of AVM modules, and
+  lab-friction overrides (soft delete disabled on Key Vault and Recovery
+  Services Vault) that a production deployment must never copy. Dependabot
+  does not cover Bicep registries, so version updates are a quarterly review
+  rather than a pipeline: `tools/Get-AvmModuleUpdate.ps1` compares every pin
+  with what `br/public` publishes, and the `AVM Module Update Check` workflow
+  runs it each quarter and fails when anything is behind (issue #82). A
+  production team would turn that review into automated upgrade PRs.
 - **Why it matters:** This is a deliberate educational stance: the course
   teaches consuming verified building blocks the way production teams do,
   not authoring expert-level IaC from scratch. The student reads AVM
