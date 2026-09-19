@@ -1,10 +1,10 @@
 /*=====================================================
 SUMMARY: Lab 1.2 - RBAC Assignments Orchestrator
 DESCRIPTION: Orchestrates role assignments for SkyCraft users and groups via AVM
-EXAMPLE: New-AzSubscriptionDeployment -Location swedencentral -TemplateFile role-assignments.bicep -parAdminPrincipalId <objectId> -parDeveloperGroupPrincipalId <objectId> -parTesterGroupPrincipalId <objectId> -parPartnerPrincipalId <objectId>
+EXAMPLE: .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.3.0
-DEPLOYMENT: New-AzSubscriptionDeployment -TemplateFile role-assignments.bicep -par<Principal>Id ... (alternative: .\scripts\New-LabRoleAssignment.ps1 via Az cmdlets)
+VERSION: 0.4.0
+DEPLOYMENT: .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments (resolves the four principal IDs from Entra ID and passes them as overrides; the template has no .bicepparam because object IDs are tenant-specific). Imperative alternative: .\scripts\New-LabRoleAssignment.ps1 via New-AzRoleAssignment.
 ======================================================*/
 
 targetScope = 'subscription'
