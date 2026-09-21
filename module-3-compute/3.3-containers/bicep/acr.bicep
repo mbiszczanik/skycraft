@@ -24,10 +24,11 @@ param parEnvironment string = 'dev'
 @minLength(1)
 param parOwner string = 'mbiszczanik'
 
+// Keep in sync with parAcrName in main.bicep (#121)
 @description('Name of the Container Registry (alphanumeric, globally unique)')
 @minLength(5)
 @maxLength(50)
-param parAcrName string = 'devskycraftswcacr01'
+param parAcrName string = '${parEnvironment}skycraftswcacr01'
 
 /*******************
 *    Variables     *
