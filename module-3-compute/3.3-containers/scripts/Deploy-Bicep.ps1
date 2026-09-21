@@ -16,11 +16,17 @@
 .PARAMETER Location
     The Azure region deployment target. Default: 'swedencentral'
 
-.PARAMETER ResourceGroupName
-    The resource group name. Default: 'dev-skycraft-swc-rg'
-
 .PARAMETER Environment
-    The environment tag. Default: 'dev'
+    The environment to deploy: dev, prod or platform. Default: 'dev'. It sets the Environment
+    tag and the prefix of every resource name (#121): the resource group, the registry, and -
+    inside main.bicep - the container instance, the Container Apps environment and the app.
+
+.PARAMETER ResourceGroupName
+    The resource group name. Default: '<Environment>-skycraft-swc-rg'
+
+.PARAMETER AcrName
+    The container registry name. Default: '<Environment>skycraftswcacr01'. Registry names are
+    global, so override this on a collision; the same value is passed to acr.bicep and main.bicep.
 
 .PARAMETER WhatIf
     Previews the main.bicep deployment with the ARM what-if API and exits. Nothing is created
@@ -29,7 +35,12 @@
 
 .EXAMPLE
     .\Deploy-Bicep.ps1
-    Deploys to default resource groups.
+    Deploys the dev resources into dev-skycraft-swc-rg.
+
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -Environment prod
+    Deploys prodskycraftswcacr01, prod-skycraft-swc-aci-auth, prod-skycraft-swc-cae-02 and
+    prod-skycraft-swc-aca-world into prod-skycraft-swc-rg.
 
 .EXAMPLE
     .\Deploy-Bicep.ps1 -WhatIf
@@ -52,12 +63,17 @@ param(
     [string]$Location = 'swedencentral',
 
     [Parameter(Mandatory = $false)]
-    [ValidateNotNullOrEmpty()]
-    [string]$ResourceGroupName = 'dev-skycraft-swc-rg',
-
-    [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prod', 'platform')]
     [string]$Environment = 'dev',
+
+    # Defaults below read $Environment, so it must be declared first.
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$ResourceGroupName = "$Environment-skycraft-swc-rg",
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$AcrName = "${Environment}skycraftswcacr01",
 
     [Parameter(Mandatory = $false)]
     [switch]$WhatIf
@@ -75,13 +91,15 @@ if (-not $context) {
     exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
+Write-Host "  Environment:    $Environment" -ForegroundColor Gray
+Write-Host "  Resource Group: $ResourceGroupName" -ForegroundColor Gray
+Write-Host "  Registry:       $AcrName" -ForegroundColor Gray
 
 # Define paths
 $bicepPath = Join-Path $PSScriptRoot "..\bicep"
 $mainBicep = Join-Path $bicepPath "main.bicep"
 $acrBicep = Join-Path $bicepPath "acr.bicep"
-$deploymentName = "Lab-3.3-Containers"
-$acrName = "devskycraftswcacr01" # Should match main.bicep default or param
+$deploymentName = "Lab-3.3-Containers-$Environment"
 
 if (-not (Test-Path $mainBicep)) {
     Write-Host "[ERROR] Bicep file not found: $mainBicep" -ForegroundColor Red
@@ -97,7 +115,7 @@ $deployParams = @{
         parLocation          = $Location
         parResourceGroupName = $ResourceGroupName
         parEnvironment       = $Environment
-        parAcrName           = $acrName
+        parAcrName           = $AcrName
     }
     ErrorAction             = 'Stop'
 }
@@ -133,10 +151,10 @@ Write-Host "`n=== Phase 1: Bootstrapping Prerequisites ===" -ForegroundColor Cya
 
 # Check if we need to bootstrap image
 $repoExists = $false
-$acrExists = Get-AzContainerRegistry -ResourceGroupName $ResourceGroupName -Name $acrName -ErrorAction SilentlyContinue
+$acrExists = Get-AzContainerRegistry -ResourceGroupName $ResourceGroupName -Name $AcrName -ErrorAction SilentlyContinue
 if ($acrExists) {
     # Check if image exists
-    $repos = Get-AzContainerRegistryRepository -RegistryName $acrName -ErrorAction SilentlyContinue
+    $repos = Get-AzContainerRegistryRepository -RegistryName $AcrName -ErrorAction SilentlyContinue
     if ($repos -contains "skycraft-auth") {
         $repoExists = $true
         Write-Host "  -> ACR and Image already exist. Skipping bootstrap." -ForegroundColor Green
@@ -153,7 +171,7 @@ if (-not $repoExists) {
                 -TemplateFile $acrBicep `
                 -parLocation $Location `
                 -parEnvironment $Environment `
-                -parAcrName $acrName `
+                -parAcrName $AcrName `
                 -ErrorAction Stop
 
             if ($acrDeployment.ProvisioningState -ne 'Succeeded') {
@@ -171,7 +189,7 @@ if (-not $repoExists) {
     Write-Host "Building Container Image (This may take 1-2 mins)..." -ForegroundColor Yellow
     try {
         # Import prebuilt aci-helloworld from MCR instead of `az acr build` — Az PowerShell has no build-from-source cmdlet; functionally equivalent runnable web image.
-        Import-AzContainerRegistryImage -ResourceGroupName $ResourceGroupName -RegistryName $acrName `
+        Import-AzContainerRegistryImage -ResourceGroupName $ResourceGroupName -RegistryName $AcrName `
             -SourceRegistryUri 'mcr.microsoft.com' -SourceImage 'azuredocs/aci-helloworld:latest' `
             -TargetTag 'skycraft-auth:v1' -ErrorAction Stop | Out-Null
         Write-Host "  -> Image Build Success" -ForegroundColor Green

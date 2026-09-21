@@ -71,7 +71,7 @@ Before starting this lab:
 - [ ] Completed Lab 2.1 (Virtual Networks) - `dev-skycraft-swc-rg` and `dev-skycraft-swc-vnet` with the `AuthSubnet` and `WorldSubnet` subnets exist
 - [ ] Completed Lab 2.3 (Name Resolution) **or** Lab 3.1 - either one creates the load balancer `dev-skycraft-swc-lb` with its `dev-skycraft-swc-lb-be-auth` and `dev-skycraft-swc-lb-be-world` backend pools, which the VM NICs join
 - [ ] Completed Lab 3.1 (Infrastructure as Code) - Bicep knowledge (recommended; not a resource dependency when Lab 2.3 has run)
-- [ ] Optional: Lab 2.2's NSGs and Azure Bastion. The VMs deploy without them; Bastion (`platform-skycraft-swc-bas`) is only needed for the portal SSH sessions (Step 3.2.13 onwards, and Step 3.2.30) and is the one standing-cost resource in the course, so Lab 2.2's script leaves it off unless you answer `y`
+- [ ] Optional: Lab 2.2's NSGs and Azure Bastion. The VMs deploy without them; Bastion (`platform-skycraft-swc-bas`) is only needed for the portal SSH sessions (Step 3.2.14 onwards, and Step 3.2.32) and is the one standing-cost resource in the course, so Lab 2.2's script leaves it off unless you answer `y`
 - [ ] Contributor or Owner role at resource group level
 - [ ] SSH key pair generated (or ability to generate one)
 
@@ -452,7 +452,7 @@ Repeat the VM creation process for the Worldserver:
 
 ![Worldserver Networking](images/step-3.2.10.png)
 
-### Step 3.2.10: Configure Worldserver Management
+### Step 3.2.11: Configure Worldserver Management
 
 **Management tab**:
 
@@ -475,7 +475,7 @@ Repeat the VM creation process for the Worldserver:
 | OS guest diagnostics           | Leave default |
 | Application health monitoringh | Leave default |
 
-### Step 3.2.11: Configure Tags and Create Worldserver
+### Step 3.2.12: Configure Tags and Create Worldserver
 
 **Tags tab**:
 
@@ -494,7 +494,7 @@ Repeat the VM creation process for the Worldserver:
 - Connected to WorldSubnet
 - Added to load balancer backend pool for port 8085
 
-### Step 3.2.12: Verify Both VMs
+### Step 3.2.13: Verify Both VMs
 
 1. Navigate to **Virtual machines**
 2. Verify both VMs are listed and running:
@@ -511,7 +511,7 @@ Repeat the VM creation process for the Worldserver:
 
 **Expected Result**: Both VMs running in different availability zones, connected to respective load balancer backend pools.
 
-![Worldserver Backend Pools](images/step-3.2.12.png)
+![Worldserver Backend Pools](images/step-3.2.13.png)
 
 ---
 
@@ -532,7 +532,7 @@ The Worldserver VM needs additional storage for:
 - Ability to resize without OS changes
 - Can detach and attach to different VM if needed
 
-### Step 3.2.13: Add Data Disk to Worldserver VM
+### Step 3.2.14: Add Data Disk to Worldserver VM
 
 1. Navigate to **Virtual machines** → `dev-skycraft-swc-world-vm`
 2. In the left menu, click **Disks**
@@ -557,7 +557,7 @@ The Worldserver VM needs additional storage for:
 - Disk appears in the Data disks list with status "Attached"
 - Total: 1 OS disk + 1 Data disk
 
-### Step 3.2.14: Initialize Data Disk Inside VM
+### Step 3.2.15: Initialize Data Disk Inside VM
 
 The data disk is attached but not yet formatted. You need to connect to the VM via Azure Bastion and initialize it.
 
@@ -641,7 +641,7 @@ df -h /data
 - Mounted at `/data`
 - Configured for persistent mount after reboot
 
-### Step 3.2.15: Verify Data Disk Configuration
+### Step 3.2.16: Verify Data Disk Configuration
 
 ```bash
 # Verify disk is mounted
@@ -680,7 +680,7 @@ exit
 
 **For SkyCraft**: Encrypt all disks to protect player data and game configurations.
 
-### Step 3.2.16: Create Azure Key Vault for Encryption Keys
+### Step 3.2.17: Create Azure Key Vault for Encryption Keys
 
 1. Navigate to **Key vaults** → **+ Create**
 
@@ -694,7 +694,7 @@ exit
 | Region         | **Sweden Central**                      |
 | Pricing tier   | **Standard**                            |
 
-![Configure Azure Disk Encryption](./images/step-3.2.16.png)
+![Configure Azure Disk Encryption](./images/step-3.2.17.png)
 
 2. Click **Next: Access configuration**
 
@@ -733,10 +733,10 @@ exit
 
 **Expected Result**: Key vault `dev-skycraft-swc-kv` created with disk encryption enabled.
 
-### Step 3.2.17: Resize VMs for Azure Disk Encryption (step takes about 15-30 mins)
+### Step 3.2.18: Resize VMs for Azure Disk Encryption (step takes about 15-30 mins)
 
 > [!WARNING]
-> **Deprecation Notice**: Azure Disk Encryption (ADE) is scheduled for retirement on **September 15, 2028**. Microsoft recommends using **Encryption at Host** for new deployments. However, ADE is still part of the **AZ-104 exam** curriculum, so we cover it here for certification preparation. See [Step 3.2.20](#step-3220-optional-enable-encryption-at-host-best-practice) for the modern approach.
+> **Deprecation Notice**: Azure Disk Encryption (ADE) is scheduled for retirement on **September 15, 2028**. Microsoft recommends using **Encryption at Host** for new deployments. However, ADE is still part of the **AZ-104 exam** curriculum, so we cover it here for certification preparation. See [Step 3.2.21](#step-3221-optional-enable-encryption-at-host-best-practice) for the modern approach.
 
 Azure Disk Encryption for Linux VMs requires **8 GB RAM minimum** for OS disk encryption. Our `Standard_B2ls_v2` VMs have only 4 GB, so we temporarily resize them to their 8 GB sibling `Standard_B2s_v2`.
 
@@ -770,7 +770,7 @@ az vm resize \
 
 **Expected Result**: Both VMs running with `Standard_B2s_v2` size (2 vCPUs, 8 GB RAM).
 
-### Step 3.2.18: Enable Azure Disk Encryption on Both VMs
+### Step 3.2.19: Enable Azure Disk Encryption on Both VMs
 
 Azure Disk Encryption for Linux VMs must be enabled via **Azure CLI** or **PowerShell** (not available in Azure Portal for Linux).
 
@@ -808,7 +808,7 @@ az vm encryption enable \
 > [!CAUTION]
 > Do not interrupt the encryption process. The VM may be unavailable during encryption. Plan encryption during maintenance windows for production systems.
 
-### Step 3.2.19: Verify Disk Encryption and Resize Back
+### Step 3.2.20: Verify Disk Encryption and Resize Back
 
 1. Check encryption status for both VMs:
 
@@ -855,7 +855,7 @@ az vm resize --name dev-skycraft-swc-world-vm --resource-group dev-skycraft-swc-
 
 ---
 
-### Step 3.2.20: (Optional) Enable Encryption at Host (Best Practice)
+### Step 3.2.21: (Optional) Enable Encryption at Host (Best Practice)
 
 **Encryption at Host** is the modern, Microsoft-recommended approach for disk encryption. Unlike ADE, it:
 
@@ -952,7 +952,7 @@ az vm show \
 
 **For SkyCraft**: We use **Availability Zones** for maximum fault tolerance.
 
-### Step 3.2.20: Verify Availability Zone Distribution
+### Step 3.2.22: Verify Availability Zone Distribution
 
 Your VMs should already be in different zones:
 
@@ -972,7 +972,7 @@ az vm list \
 
 **Expected Result**: VMs are distributed across Zone 1 and Zone 2.
 
-### Step 3.2.21: Understand Zone-Redundant Load Balancing
+### Step 3.2.23: Understand Zone-Redundant Load Balancing
 
 Your Standard Load Balancer automatically distributes traffic across zones:
 
@@ -986,7 +986,7 @@ Your Standard Load Balancer automatically distributes traffic across zones:
 
 **Expected Result**: Load balancer configured for zone-redundant access.
 
-### Step 3.2.22: Test High Availability (Conceptual)
+### Step 3.2.24: Test High Availability (Conceptual)
 
 In a real scenario, you would test HA by:
 
@@ -1008,7 +1008,7 @@ For this lab, we'll document the expected behavior:
 
 ## 📖 Section 7: Manage VM Sizes (25 minutes)
 
-### Step 3.2.23: View Available VM Sizes
+### Step 3.2.25: View Available VM Sizes
 
 Before resizing, check available sizes:
 
@@ -1030,7 +1030,7 @@ az vm list-skus \
 # Standard_B4s_v2    4        16
 ```
 
-### Step 3.2.24: Resize Worldserver VM (Example)
+### Step 3.2.26: Resize Worldserver VM (Example)
 
 If player load increases, you might need to resize:
 
@@ -1051,7 +1051,7 @@ If player load increases, you might need to resize:
 8. Wait for resize to complete (1-2 minutes)
 9. Click **Start** to restart the VM
 
-![Resize Worldserver VM](./images/step-3.2.24.png)
+![Resize Worldserver VM](./images/step-3.2.26.png)
 
 **Expected Result**:
 
@@ -1059,7 +1059,7 @@ If player load increases, you might need to resize:
 - All data preserved
 - Network configuration retained
 
-### Step 3.2.25: Resize Back for Cost Optimization (Optional)
+### Step 3.2.27: Resize Back for Cost Optimization (Optional)
 
 For this lab, resize back to B2ls_v2 to minimize costs:
 
@@ -1073,7 +1073,7 @@ For this lab, resize back to B2ls_v2 to minimize costs:
 - Use Azure Advisor for right-sizing recommendations
 - Consider Reserved Instances for predictable workloads (up to 72% savings)
 
-### Step 3.2.26: Understand VM Size Constraints
+### Step 3.2.28: Understand VM Size Constraints
 
 Not all sizes are available in all zones or regions:
 
@@ -1116,7 +1116,7 @@ az vm list-skus \
 | **Variable Load**    | ❌ Manual scaling     | ✅ Auto-scaling    |
 | **Event-based**      | ❌ Slow response      | ✅ Rapid scale-out |
 
-### Step 3.2.27: Create a Virtual Machine Scale Set
+### Step 3.2.29: Create a Virtual Machine Scale Set
 
 1. In Azure Portal, search for **Virtual machine scale sets** and click **+ Create**
 
@@ -1141,7 +1141,7 @@ az vm list-skus \
 
 Click **Configure scaling options** to set autoscale rules:
 
-![Configure scaling options](./images/step-3.2.27a.png)
+![Configure scaling options](./images/step-3.2.29a.png)
 
 1. The **Default condition** is already created. Click **Edit** (pencil icon) to configure it:
 
@@ -1172,7 +1172,7 @@ Click **Configure scaling options** to set autoscale rules:
 | ------- | ----- |
 | Minutes | **5** |
 
-![Configure scaling options](./images/step-3.2.27b.png)
+![Configure scaling options](./images/step-3.2.29b.png)
 
 2. Click **Save** to close the condition editor
 3. Click **Save** to save the scaling configuration
@@ -1230,7 +1230,7 @@ Click **Configure scaling options** to set autoscale rules:
 > [!NOTE]
 > The VMSS instances will be added to the load balancer backend pool for automatic traffic distribution.
 
-![Create VMSS](./images/step-3.2.27c.png)
+![Create VMSS](./images/step-3.2.29c.png)
 
 5. Click **Next: Management**
 
@@ -1267,7 +1267,7 @@ Click **Configure scaling options** to set autoscale rules:
 
 **Expected Result**: VMSS created with 2 initial instances across availability zones.
 
-### Step 3.2.28: Verify VMSS Deployment
+### Step 3.2.30: Verify VMSS Deployment
 
 1. Navigate to **Virtual machine scale sets** → `prod-skycraft-swc-world-vmss`
 
@@ -1296,7 +1296,7 @@ az vmss list-instances \
 
 **Expected Result**: VMSS shows 2 running instances with autoscale configured.
 
-### Step 3.2.29: Test Manual Scaling
+### Step 3.2.31: Test Manual Scaling
 
 1. In the VMSS blade, click **Scaling**
 
@@ -1314,9 +1314,9 @@ az vmss list-instances \
 
 **Expected Result**: VMSS successfully scales from 2 → 3 → 2 instances.
 
-![Manual scale](./images/step-3.2.29.png)
+![Manual scale](./images/step-3.2.31.png)
 
-### Step 3.2.30: Connect to VMSS Instance via Bastion
+### Step 3.2.32: Connect to VMSS Instance via Bastion
 
 1. In the VMSS blade, click **Instances**
 
@@ -1333,7 +1333,7 @@ az vmss list-instances \
 
 **Expected Result**: Connected to VMSS instance via Bastion.
 
-### Step 3.2.31: Cleanup - Delete VMSS (Important for Cost)
+### Step 3.2.33: Cleanup - Delete VMSS (Important for Cost)
 
 > [!IMPORTANT]
 > VMSS instances incur costs. Delete the VMSS after completing this lab section to avoid unnecessary charges.

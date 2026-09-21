@@ -25,30 +25,36 @@ param parEnvironment string = 'dev'
 @minLength(1)
 param parOwner string = 'mbiszczanik'
 
+// Every name below takes its prefix from parEnvironment (#121), so `-Environment prod` deploys
+// prod-named resources; the parameters stay overridable because the registry name is global.
 @description('Resource Group Name')
 @minLength(1)
 @maxLength(90)
-param parResourceGroupName string = 'dev-skycraft-swc-rg'
+param parResourceGroupName string = '${parEnvironment}-skycraft-swc-rg'
 
 @description('Name of the Container Registry (alphanumeric, globally unique)')
 @minLength(5)
 @maxLength(50)
-param parAcrName string = 'devskycraftswcacr01'
+param parAcrName string = '${parEnvironment}skycraftswcacr01'
 
 @description('Name of the Container Instance')
 @minLength(1)
 @maxLength(63)
-param parAciName string = 'dev-skycraft-swc-aci-auth'
+param parAciName string = '${parEnvironment}-skycraft-swc-aci-auth'
 
+// The -02 suffix is load-bearing here: a Container Apps environment names its infrastructure
+// resource group ME_<name> and that name is immutable (lab guide, "Why -02").
 @description('Name of the Container Apps Environment')
 @minLength(1)
 @maxLength(60)
-param parCaeName string = 'dev-skycraft-swc-cae-02'
+param parCaeName string = '${parEnvironment}-skycraft-swc-cae-02'
 
+// No -02 on the app: nothing immutable hangs off its name, and with it the platform name
+// would run to 34 characters against the 32 a Container App allows.
 @description('Name of the Container App')
 @minLength(1)
 @maxLength(32)
-param parAcaName string = 'dev-skycraft-swc-aca-world-02'
+param parAcaName string = '${parEnvironment}-skycraft-swc-aca-world'
 
 @description('Image repository and tag to run (must exist in the registry)')
 @minLength(3)
