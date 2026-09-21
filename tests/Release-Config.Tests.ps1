@@ -13,9 +13,9 @@
          the types a contributor may use in a PR title.
 
     A type allowed by (2) but missing from (1) passes the merge gate and then vanishes
-    from the release notes with nothing to notice; the third test below makes the two
-    lists identical. The first two tests keep both JSON files parseable so a stray comma
-    cannot break the release workflow on main.
+    from the release notes with nothing to notice; the fourth test below makes the two
+    lists identical. The first three tests keep the JSON files parseable and version.txt
+    in step with the manifest, so a stray comma cannot break the release workflow on main.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Release-Config.Tests.ps1
@@ -34,7 +34,7 @@ BeforeAll {
 
     # The 'types' input is a YAML block scalar (types: |) with one type per indented line.
     # Read it line by line rather than with a YAML parser, which pwsh does not ship.
-    function script:Get-PrTitleAllowedType {
+    function Get-PrTitleAllowedType {
         param([string]$Path)
         $lines = Get-Content -LiteralPath $Path
         $start = -1
@@ -77,18 +77,18 @@ Describe 'release-please configuration - the files parse' {
 Describe 'release-please configuration - the PR-title check and the changelog sections agree' {
     It 'the PR-title check allows exactly the commit types release-please knows' {
         $config   = Get-Content -Raw -LiteralPath $script:ConfigPath | ConvertFrom-Json
-        $sections = @($config.'changelog-sections'.type)
+        $sections = @($config.'changelog-sections'.type | Where-Object { $_ })
         $allowed  = @(Get-PrTitleAllowedType -Path $script:PrTitlePath)
 
         $sections.Count | Should -BeGreaterThan 0 -Because 'an empty section list would hide every commit'
         $allowed.Count  | Should -BeGreaterThan 0 -Because "the 'types: |' block was not found in pr-title.yml"
-        Compare-Object -ReferenceObject $sections -DifferenceObject $allowed |
+        Compare-Object -ReferenceObject $sections -DifferenceObject $allowed -CaseSensitive |
             Should -BeNullOrEmpty -Because 'a type allowed in a PR title but unknown to release-please is dropped from the notes'
     }
 
     It 'the docs type is visible so documentation-only work produces a release' {
         $config = Get-Content -Raw -LiteralPath $script:ConfigPath | ConvertFrom-Json
-        $docs = $config.'changelog-sections' | Where-Object type -eq 'docs'
+        $docs = $config.'changelog-sections' | Where-Object type -ceq 'docs'
         $docs | Should -Not -BeNullOrEmpty
         [bool]$docs.hidden | Should -BeFalse
     }
