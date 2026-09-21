@@ -55,3 +55,4 @@ See `template.md`.
 | [0002](0002-branch-protection-rules.md) | Branch protection rules for `main` | Accepted |
 | [0003](0003-worktree-branch-discipline.md) | Use git worktrees for multi-commit work | Accepted |
 | [0004](0004-excalidraw-svg-for-lab-diagrams.md) | Author lab architecture diagrams in Excalidraw, commit as SVG | Accepted |
+| [0005](0005-release-from-changelog.md) | Release from the CHANGELOG head | Accepted |

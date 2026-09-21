@@ -1,0 +1,39 @@
+name: Release
+
+# Every versioned merge to main - one that adds a '## [X.Y.Z] - YYYY-MM-DD' section to
+# CHANGELOG.md - becomes the matching vX.Y.Z tag and GitHub Release, with that section
+# as the notes (issue #82). tools/Publish-Release.ps1 is idempotent: a CHANGELOG edit
+# that does not add a new head section finds the release already published and does
+# nothing, so this can safely run on every CHANGELOG change.
+#
+# workflow_dispatch is the backfill path: run it on main after a release was missed.
+
+on:
+  push:
+    branches: [main]
+    paths: [CHANGELOG.md]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish CHANGELOG head
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The step decides the outcome itself: GitHub runs `shell: pwsh` as `pwsh -command`,
+      # which reports the code the host was last told, so the guard before the exit is
+      # what makes a refused release a red run (#128).
+      - name: Publish the CHANGELOG head as a GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./tools/Publish-Release.ps1 | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+              $Host.SetShouldExit(1)
+              exit 1
+          }
