@@ -19,6 +19,7 @@ SkyCraft follows **GitHub Flow** (see [ADR-0001](docs/adr/0001-use-github-flow.m
 - All work happens on short-lived branches: `feature/*`, `fix/*`, `docs/*`, `chore/*`.
 - Changes land on `main` exclusively via Pull Request, **squash-merged** for linear history.
 - Branch protection rules on `main` are documented in [ADR-0002](docs/adr/0002-branch-protection-rules.md).
+- A PR that touches lab content (`module-*/`, `scripts/`, the lab cycle tooling in `tools/`) must declare its live verification in its body - `Live-verified: <what was run>` or `Live-verification: deferred -> #<issue>` - and a deferred PR is opened as a **draft** and links its issue with `Refs #N`, never `Closes #N`. The `Live Verification Declared` check enforces it; see [ADR-0006](docs/adr/0006-pr-live-verification-gate.md).
 
 For multi-commit work — and for any work driven by an automated agent — use a
 `git worktree` to isolate the feature from the main checkout (see
@@ -31,7 +32,7 @@ the exact commands).
 2.  **Create a Branch off `main`**: Use a descriptive name (e.g., `feature/lab-3.1-vm`, `fix/typo-lab-1.2`).
 3.  **Make Changes**: Implement your feature or fix.
 4.  **Verify**: Run `.\tools\Invoke-DryRun.ps1` (the offline gate that mirrors CI without needing `az login`), plus the relevant `Test-Lab.ps1` scripts to ensure no regressions.
-5.  **Submit a Pull Request against `main`**: Describe your changes clearly and link to any relevant issues. PRs are squash-merged.
+5.  **Submit a Pull Request against `main`**: Describe your changes clearly and link to any relevant issues. PRs are squash-merged. If you changed lab content, fill in the **Live verification** section of the template; if you could not run the live checks, open the PR as a draft, link the issue with `Refs #N`, and name the issue that tracks the live pass.
 
 ## 🧪 Testing
 
@@ -61,7 +62,7 @@ heading; nothing else is typed anywhere.
   `.\tools\Publish-Release.ps1 -Target <merge-commit-sha>` with `gh auth login` done.
   The script is idempotent - it never edits or deletes an existing release or tag.
 
-The reasoning is in [ADR-0005](docs/adr/0005-release-from-changelog.md).
+The reasoning is in [ADR-0006](docs/adr/0005-release-from-changelog.md).
 
 ## 📦 AVM module versions
 

@@ -1,0 +1,49 @@
+name: PR Gate
+
+# A pull request that touches lab content must say what live verification it ran, or which
+# issue tracks the one it deferred - and a deferred PR must not carry a closing keyword.
+# The decision lives in tools/Test-PrLiveVerification.ps1 (pinned by
+# tests/Pr-Live-Verification.Tests.ps1); this workflow only feeds it the PR body and the
+# changed paths. Rationale and the merge rule: docs/adr/0006-pr-live-verification-gate.md.
+#
+# 'edited' re-runs the check when the body changes, so a PR can be fixed by editing its
+# description; 'ready_for_review' re-runs it when a draft is promoted.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  live-verification:
+    name: Live Verification Declared
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Collect the PR body and its changed paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename' \
+            > "$RUNNER_TEMP/pr-files.txt"
+          echo "Changed paths: $(wc -l < "$RUNNER_TEMP/pr-files.txt")"
+
+      # The script sets $Host.SetShouldExit(1) before its own `exit 1` (the #128 guard for a
+      # `pwsh -command` step); the explicit check below is belt and braces.
+      - name: Check the declaration
+        shell: pwsh
+        run: |
+          ./tools/Test-PrLiveVerification.ps1 `
+            -BodyPath "$env:RUNNER_TEMP/pr-body.md" `
+            -ChangedFilePath "$env:RUNNER_TEMP/pr-files.txt"
+          if ($LASTEXITCODE -ne 0) {
+              $Host.SetShouldExit($LASTEXITCODE)
+              exit $LASTEXITCODE
+          }

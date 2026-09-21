@@ -92,6 +92,8 @@ gitleaks detect --source . --redact
 
 `az deployment ... what-if`, `Test-Lab.ps1` and `Remove-LabResource.ps1` all need `az login` plus, in most cases, resources that a previous lab created. They are deliberately **not** executed by the harness — a pre-push gate must not depend on the state of a subscription. Section 4 lists the commands to run by hand.
 
+What CI *does* enforce is that a PR touching lab content **says** whether they were run: the `Live Verification Declared` check ([`.github/workflows/pr-gate.yml`](../.github/workflows/pr-gate.yml), [ADR-0006](adr/0006-pr-live-verification-gate.md)) requires a `Live-verified: <what was run>` or `Live-verification: deferred -> #<issue>` line in the PR body. Run the same check locally on an open PR with `.\tools\Test-PrLiveVerification.ps1 -Body (gh pr view <n> --json body -q .body) -ChangedFile (gh pr diff <n> --name-only)`.
+
 ---
 
 ## 4. Live Verification Commands, Per Lab
