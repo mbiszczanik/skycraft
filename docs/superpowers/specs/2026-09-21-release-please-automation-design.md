@@ -137,7 +137,7 @@ Components and their single responsibility:
 - Steps: `actions/create-github-app-token@v3` with `client-id:
   ${{ secrets.RELEASE_APP_ID }}` and `private-key:
   ${{ secrets.RELEASE_APP_PRIVATE_KEY }}`, then
-  `googleapis/release-please-action@v4` with `token: ${{ steps.app-token.outputs.token }}`.
+  `googleapis/release-please-action@v5` with `token: ${{ steps.app-token.outputs.token }}`.
   Action versions pinned to a major tag, like the other workflows in the repo.
 - No pwsh steps, so `tests/Workflow-Exit-Gating.Tests.ps1` does not apply.
 

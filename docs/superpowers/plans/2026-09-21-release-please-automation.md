@@ -6,7 +6,7 @@
 
 **Architecture:** Two pull requests. PR 1 ships the pending `[Unreleased]` entries as 0.9.0 through the existing `release.yml` (its last run). PR 2 removes that tooling and adds `release-please.yml` (runs on push to `main` with a GitHub App token, opens/refreshes `chore(main): release X.Y.Z`, tags and publishes on merge), `pr-title.yml` (required check that enforces Conventional Commits PR titles), the release-please config/manifest, one Pester invariant test, ADR-0007 and doc updates. Between the PRs the maintainer creates the GitHub App and two secrets; after PR 2 the maintainer patches the squash settings and the ruleset.
 
-**Tech Stack:** GitHub Actions (`googleapis/release-please-action@v4`, `actions/create-github-app-token@v3`, `amannn/action-semantic-pull-request@v6`), GitHub App installation token, Pester 5, `gh` CLI, PowerShell 7.
+**Tech Stack:** GitHub Actions (`googleapis/release-please-action@v5`, `actions/create-github-app-token@v3`, `amannn/action-semantic-pull-request@v6`), GitHub App installation token, Pester 5, `gh` CLI, PowerShell 7.
 
 **Spec:** `docs/superpowers/specs/2026-09-21-release-please-automation-design.md`
 
@@ -495,7 +495,7 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Open or refresh the Release PR, or publish the merged one
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@v5
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json

@@ -1,0 +1,49 @@
+name: Release Please
+
+# Every push to main runs release-please. It reads the Conventional Commits titles since
+# the last tag, and when at least one of them is releasable it opens or refreshes the
+# Release PR "chore(main): release X.Y.Z" (bumping .release-please-manifest.json and
+# version.txt, prepending the CHANGELOG.md section). When the push *is* that Release PR
+# being merged, it creates the vX.Y.Z tag and the GitHub Release with the section as the
+# notes. Rationale: docs/adr/0007-release-with-release-please.md.
+#
+# The Release PR is opened with a GitHub App installation token, not GITHUB_TOKEN: events
+# raised with GITHUB_TOKEN do not start other workflows, so the required checks would never
+# run on the bot's PR. The App (skycraft-release) has Contents and Pull requests write
+# access on this repository and nothing else; its Client ID and private key are the two
+# repository secrets below.
+#
+# workflow_dispatch is the recovery path: release-please is idempotent, so re-running it
+# after a failed run finishes whatever was left (a missing tag, a stale Release PR).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint the release bot token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Open or refresh the Release PR, or publish the merged one
+        uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
