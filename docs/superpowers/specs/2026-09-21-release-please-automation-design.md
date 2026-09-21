@@ -131,7 +131,7 @@ Components and their single responsibility:
 ### `.github/workflows/release-please.yml`
 
 - Triggers: `push: branches: [main]` and `workflow_dispatch`.
-- `permissions: contents: write, pull-requests: write`.
+- `permissions: contents: read` (GITHUB_TOKEN unused; all writes via the App token).
 - `concurrency: { group: release-please }` so two quick merges to `main` queue
   instead of racing.
 - Steps: `actions/create-github-app-token@v3` with `client-id:

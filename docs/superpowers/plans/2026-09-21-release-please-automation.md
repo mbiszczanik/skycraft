@@ -453,7 +453,7 @@ git commit -m "chore: configure release-please for the root package at 0.9.0"
 ```yaml
 name: Release Please
 
-# Every push to main runs release-please. It reads the Conventional Commits titles since
+# Every push to main queues release-please (one run at a time, see concurrency below). It reads the Conventional Commits titles since
 # the last tag, and when at least one of them is releasable it opens or refreshes the
 # Release PR "chore(main): release X.Y.Z" (bumping .release-please-manifest.json and
 # version.txt, prepending the CHANGELOG.md section). When the push *is* that Release PR
@@ -474,9 +474,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# GITHUB_TOKEN is deliberately read-only: every write goes through the App token, so a
+# dropped or broken `token:` on the release-please step fails with 403 instead of silently
+# opening a Release PR that never runs its checks.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: release-please
