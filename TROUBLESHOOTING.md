@@ -14,6 +14,12 @@ This guide addresses common issues encountered while setting up or running the S
 2.  **Switch Context**: Use `Connect-AzAccount -TenantId <TargetTenantId>` to switch your subscription context if possible.
 3.  **Cross-Tenant Setup**: If using a separate subscription (e.g., MSDN) and a separate Entra ID (e.g., Developer Program), you must add the "Service Principal" or "User" as a B2B Guest in the subscription's tenant to verify role assignments.
 
+### "RoleAssignmentExists" from Lab 1.2 `Deploy-Bicep.ps1 -IncludeRoleAssignments`
+
+**Symptoms**: The role-assignments deployment fails with `RoleAssignmentExists` although `Test-Lab.ps1` reports every assignment present.
+**Cause**: Azure allows one assignment per (scope, role, principal). `New-LabRoleAssignment.ps1` and the portal create assignments under random names; `role-assignments.bicep` names its own with `guid(scope, role, principal)` and cannot adopt one that already exists under another name. The script skips the template when all five assignments exist, so this appears only when some of them were created outside the template.
+**Solution**: Either keep using `New-LabRoleAssignment.ps1` (it skips what exists) or remove the foreign assignments with `Remove-AzRoleAssignment` and re-run the deployment. Deleting the three resource groups removes their RG-scoped assignments; the subscription-scoped Owner assignment must be removed by hand.
+
 ### "Insufficient Privileges" for Graph
 
 **Symptoms**: Scripts dealing with Entra ID Users/Groups fail with "Insufficient privileges to complete the operation".

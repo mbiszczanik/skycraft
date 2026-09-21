@@ -5,6 +5,12 @@
 .DESCRIPTION
     This script assigns the required Azure RBAC roles to the Warcraft-themed users and groups.
     It resolves users via Microsoft Graph and assigns roles via Azure PowerShell.
+
+    This is the imperative path. The declarative equivalent is bicep/role-assignments.bicep,
+    deployed by Deploy-Bicep.ps1 -IncludeRoleAssignments, which creates the same five assignments
+    under names derived from guid(scope, role, principal). Pick one path per subscription: this
+    script skips an assignment that already exists, whichever path created it, but the template
+    cannot adopt an assignment this script created (ARM answers RoleAssignmentExists).
     
     Assignments:
     - Malfurion Stormrage -> Owner (Subscription)
@@ -13,7 +19,7 @@
     - Illidan Stormrage   -> Reader (platform-skycraft-swc-rg)
 
 .EXAMPLE
-    .\Assign-Roles.ps1
+    .\New-LabRoleAssignment.ps1
     Assigns roles to the current subscription.
 
 .NOTES

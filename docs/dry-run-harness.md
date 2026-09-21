@@ -4,7 +4,7 @@
 
 [`tools/Invoke-DryRun.ps1`](../tools/Invoke-DryRun.ps1) is the single local gate to run before pushing. It mirrors every check in the [Lint workflow](../.github/workflows/lint.yml) that works **without `az login`** and **without any deployed Azure resources**, so a broken push is caught on the dev box instead of in CI.
 
-The harness never authenticates to Azure and never deploys anything. It reads files and shells out to `az bicep`, which is a purely local compiler.
+The harness never authenticates to Azure and never deploys anything. It reads files, shells out to `az bicep`, which is a purely local compiler, and runs the Pester suites, which need no Azure sign-in either.
 
 ---
 
@@ -17,7 +17,7 @@ The harness never authenticates to Azure and never deploys anything. It reads fi
 
 Exit code `0` means every selected check passed. Exit code `1` means at least one check reported problems; every problem is listed under a `=== Failures ===` heading before the summary.
 
-A full run takes roughly **8-10 minutes** on a typical dev box, dominated by PSScriptAnalyzer (~3 min) and the two Bicep compile passes (~3 min each, because every AVM module is restored from the public registry on a cold cache).
+A full run takes roughly **10-12 minutes** on a typical dev box, dominated by PSScriptAnalyzer (~3 min) and the two Bicep compile passes (~3 min each, because every AVM module is restored from the public registry on a cold cache). The Pester suites add about 1.5 minutes.
 
 ---
 
@@ -29,6 +29,7 @@ A full run takes roughly **8-10 minutes** on a typical dev box, dominated by PSS
 | `Analyzer` | *Run PSScriptAnalyzer* | `Invoke-ScriptAnalyzer` with [`PSScriptAnalyzerSettings.psd1`](../PSScriptAnalyzerSettings.psd1) returns a finding of severity `Error`. Warnings are printed and counted but do not fail the gate, exactly as in CI. |
 | `Bicep` | *Build all Bicep entry points* | `az bicep build` fails for any `*.bicep` outside a `modules` folder. Templates under `modules` are compiled transitively by their caller. |
 | `BicepParams` | *Build all Bicep parameter files* | `az bicep build-params` fails for any `*.bicepparam`. |
+| `Pester` | *Repository Standards (Pester)* | `Invoke-Pester` over `tests/` and every `module-*/**/tests/*.Tests.ps1` reports a failed test, block or container. An empty discovery also fails: a gate that found nothing to run is broken, not green. |
 
 Every selected check runs to completion even when an earlier one fails, so a single run reports every problem instead of only the first.
 
@@ -39,14 +40,15 @@ Every selected check runs to completion even when an earlier one fails, so a sin
 | PowerShell 7.0+ | all checks | <https://aka.ms/powershell> |
 | PSScriptAnalyzer | `Analyzer` | `Install-Module PSScriptAnalyzer -Scope CurrentUser` |
 | Azure CLI + Bicep | `Bicep`, `BicepParams` | <https://aka.ms/installazurecli>, then `az bicep install` |
+| Pester 5.5+ | `Pester` | `Install-Module Pester -MinimumVersion 5.5 -MaximumVersion 5.99 -Scope CurrentUser` |
 
-If PSScriptAnalyzer or the Azure CLI is missing, the affected check **fails** with an install hint rather than passing quietly. A gate that reports green for work it never did is worse than no gate at all. To run a genuine subset, select it explicitly with `-Check` — anything not selected is reported as `SKIP` in the summary and called out again underneath it.
+If PSScriptAnalyzer, the Azure CLI or Pester is missing, the affected check **fails** with an install hint rather than passing quietly. A gate that reports green for work it never did is worse than no gate at all. To run a genuine subset, select it explicitly with `-Check` — anything not selected is reported as `SKIP` in the summary and called out again underneath it.
 
 ### 2.2 Running a Subset
 
 ```powershell
 # PowerShell checks only - no Azure CLI on this machine
-.\tools\Invoke-DryRun.ps1 -Check Parse,Analyzer
+.\tools\Invoke-DryRun.ps1 -Check Parse,Analyzer,Pester
 
 # Bicep only, echoing each file as it is compiled
 .\tools\Invoke-DryRun.ps1 -Check Bicep,BicepParams -Verbose
@@ -67,6 +69,7 @@ Parse        PASS        77         0       3.0s
 Analyzer     PASS        77         0     202.4s  14 warning(s)
 Bicep        PASS        18         0     174.2s
 BicepParams  PASS        17         0     169.6s
+Pester       PASS        24         0      89.6s  1862 passed, 0 failed
 ```
 
 ---
@@ -75,12 +78,9 @@ BicepParams  PASS        17         0     169.6s
 
 ### 3.1 CI jobs that need extra tooling
 
-These need no Azure authentication but are outside the harness's scope. Run them locally when you have the tooling:
+These need no Azure authentication but need tooling outside PowerShell, so they stay in CI. Run them locally when you have it:
 
 ```powershell
-# Repository standards (Pester 5)
-Invoke-Pester -Path .\tests
-
 # Markdown lint (Node.js)
 npx markdownlint-cli2 --config .markdownlint.jsonc "**/*.md" "!node_modules"
 
@@ -114,7 +114,7 @@ which a raw command against the checked-in parameter file cannot always reproduc
 - **Lab 4.4**: `parClientIp` is auto-detected by the script; a raw what-if previews an empty firewall rule instead.
 
 The raw `az deployment sub what-if` form is still listed where the script does not cover a template:
-Lab 1.2's `role-assignments.bicep` and Lab 3.3's resource-group-scope `acr.bicep` bootstrap.
+Lab 3.3's resource-group-scope `acr.bicep` bootstrap.
 
 All commands are written to be run from the repository root.
 
@@ -128,11 +128,9 @@ All commands are written to be run from the repository root.
 # Lab 1.2 - RBAC
 .\module-1-identities-governance\1.2-rbac\scripts\Deploy-Bicep.ps1 -WhatIf
 # role-assignments.bicep has no parameter file: its four principal IDs are Entra object IDs
-# that only exist once Lab 1.1 has run, so pass them explicitly.
-az deployment sub what-if --location swedencentral `
-    --template-file module-1-identities-governance/1.2-rbac/bicep/role-assignments.bicep `
-    --parameters parAdminPrincipalId=<object-id> parDeveloperGroupPrincipalId=<object-id> `
-                 parTesterGroupPrincipalId=<object-id> parPartnerPrincipalId=<object-id>
+# that only exist once Lab 1.1 has run. -IncludeRoleAssignments resolves them from the
+# directory and previews that template too (the three resource groups must already exist).
+.\module-1-identities-governance\1.2-rbac\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments -WhatIf
 .\module-1-identities-governance\1.2-rbac\scripts\Test-Lab.ps1
 .\module-1-identities-governance\1.2-rbac\scripts\Remove-LabResource.ps1 -WhatIf
 
