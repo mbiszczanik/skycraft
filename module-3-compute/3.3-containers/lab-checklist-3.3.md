@@ -32,7 +32,7 @@
 
 ### Environment & App
 - [ ] Environment name: `dev-skycraft-swc-cae-02`
-- [ ] App name: `dev-skycraft-swc-aca-world-02`
+- [ ] App name: `dev-skycraft-swc-aca-world`
 - [ ] Ingress: **Enabled** (Target port 80)
 - [ ] Visibility: **External**
 
@@ -81,7 +81,7 @@ Get-AzContainerGroup -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-s
 
 ```powershell
 # Check ACA ingress and provisioning
-Get-AzContainerApp -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-aca-world-02 |
+Get-AzContainerApp -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-aca-world |
     Select-Object Name, ProvisioningState, @{N='FQDN';E={$_.IngressFqdn}} |
     Format-Table -AutoSize
 ```
@@ -94,7 +94,7 @@ Get-AzContainerApp -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc
 |-----------|------|------|-------|--------|
 | **Registry** | `devskycraftswcacr01` | ACR | N/A | ✅ |
 | **Auth Service** | `dev-skycraft-swc-aci-auth` | ACI | `skycraft-auth:v1` | ✅ |
-| **World Service** | `dev-skycraft-swc-aca-world-02` | ACA | `skycraft-auth:v1` | ✅ |
+| **World Service** | `dev-skycraft-swc-aca-world` | ACA | `skycraft-auth:v1` | ✅ |
 
 ---
 
