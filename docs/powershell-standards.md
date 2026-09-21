@@ -281,6 +281,30 @@ Because every suite runs on the `ubuntu-latest` runner without an Azure login, e
 
 A lab-local suite must not restate a repo-wide rule: when a `tests/` suite comes to cover the same check, delete the lab-local copy. Module 1's `Readme-Architecture.Tests.ps1` was removed for that reason — it required a Mermaid block while `tests/Module-Readme-L004.Tests.ps1` forbids one (ADR-0004), and nothing ran it to notice.
 
+#### Suites that run a lab script in a child process
+
+A suite that executes a real lab script — `Remove-LabResource.ps1` above all, since every one of them is destructive — in a child `pwsh` must run it through [`tests/Support/LabScriptStub.psm1`](../tests/Support/LabScriptStub.psm1) (#112). CI-safe is not enough here: the suite also runs on a developer's box through `tools/Invoke-DryRun.ps1`, where Az is installed and `Get-AzContext` returns a real subscription, and a stub that is silently not in effect is a real teardown, not a red test.
+
+Two PowerShell behaviours make the obvious approaches fail without an error:
+
+- **`PSModulePath` is not an isolation mechanism.** pwsh 7 prepends the CurrentUser and AllUsers module directories to any inherited `PSModulePath`, so a stub directory placed first by the parent is not first in the child and an installed Az wins resolution.
+- **Importing a stub module before the script is not enough.** The script's `#Requires -Modules` line imports the real modules *after* the stub, and among same-kind commands the later import wins. Modules that export cmdlets stay shadowed (a function outranks a cmdlet); autorest-generated modules such as `Az.DataProtection` export functions, so theirs replace the stub's. The session is half real.
+
+The helper therefore does, inside the child and in this order: import every module the script requires, import the stub **last**, assert that every stubbed command's `Source` is the stub module, and `exit 99` without running the script if any is not. It also writes manifest-only `Az.*` placeholders so `#Requires -Modules` is satisfiable on the `ubuntu-latest` runner, which installs no Az. The stub must export **functions** (not aliases or cmdlets), listed explicitly in the manifest, and `-RequiredModule` must be the script's `#Requires -Modules` line exactly — a module missing from that list is the second failure above, one lab at a time.
+
+```powershell
+Import-Module (Join-Path $PSScriptRoot '..' '..' '..' 'tests' 'Support' 'LabScriptStub.psm1') -Force
+
+$stub = Initialize-LabScriptStub -Name 'SkyCraftAzStub' -Command $stubCommands -Body $stubBody `
+    -RequiredModule 'Az.Accounts', 'Az.Resources'
+$run  = Invoke-LabScriptWithStub -Stub $stub -ScriptPath $scriptPath -ArgumentList '-Force'
+
+$run.Refused  | Should -BeFalse   # 99 = the child refused; the stub was not in effect
+$run.ExitCode | Should -Be 0
+```
+
+[`tests/Lab-Script-Harness-Guard.Tests.ps1`](../tests/Lab-Script-Harness-Guard.Tests.ps1) fails any suite that launches `pwsh` at a lab script without the helper (or without the same `Source` assertion and `exit 99` inline), and proves the refusal fires. The reference consumer is [Lab 5.2's `Remove-LabResource.Tests.ps1`](../module-5-monitoring-maintenance/5.2-business-continuity/tests/Remove-LabResource.Tests.ps1). A suite that only needs a script's pure helper functions should lift them from the AST instead (`tests/Lab53-Cleanup-Logic.Tests.ps1`) and never execute the script body at all.
+
 ## 7. Conscious Divergences from Microsoft Guidance
 
 These are deliberate decisions where SkyCraft departs from the official Microsoft gold path, trading production-grade convention for the learning experience. **Do not "fix" these in code review** — if you want to change one, update this document first.
