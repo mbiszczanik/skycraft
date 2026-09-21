@@ -189,6 +189,10 @@ bicep build-params .\module-3-compute\3.3-containers\bicep\parameters\main.bicep
 .\scripts\Invoke-ResourceAudit.ps1                                                    # live, read-only
 ```
 
+## Implementation Status (2026-09-21)
+
+Implemented on `fix/lab-3.3-environment-names` as specified, with one deviation: `Deploy-Bicep.ps1`'s subscription deployment name is now `Lab-3.3-Containers-<Environment>` (was `Lab-3.3-Containers`), mirroring Lab 3.4's `deploy-lab3.4-$Environment`, so prod and dev runs keep separate deployment records. Verified offline: 1985/1985 repo-root and 75/75 lab-local Pester cases (65 new in `tests/Lab33-Environment-Names.Tests.ps1`), `tools/Invoke-DryRun.ps1` parse/analyzer/bicep/bicepparams all PASS, markdownlint clean. Verified live, read-only: `Deploy-Bicep.ps1 -Environment prod -WhatIf` resolves `prod-skycraft-swc-rg`, `prodskycraftswcacr01`, `prod-skycraft-swc-aci-auth`, `prod-skycraft-swc-cae-02`, `prod-skycraft-swc-aca-world` and exits 0. At implementation time the subscription held no lab resource group and no container resource at all, so the eight old-scheme orphans and the dev `-aca-world-02` app listed under Risks no longer need removing; the `-AcaName` override remains for any future case. Still outstanding: one full dev cycle (deploy, `Test-Lab.ps1`, teardown) - the PR stays draft with `Refs #121` until it has run.
+
 ## Implementation Plan
 
 1. Branch `fix/lab-3.3-environment-names` from `main`.

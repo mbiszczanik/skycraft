@@ -307,17 +307,29 @@ Describe 'Resource audit - regression guards for issue #116' {
         Test-LabResourceKnown -Name $_ -KnownName $script:RealKnown | Should -BeTrue
     }
 
-    # Lab 3.3 spells every container name for dev and for nothing else -
-    # parAcrName defaults to 'devskycraftswcacr01', parCaeName to
-    # 'dev-skycraft-swc-cae-02' - and the repository carries no prod or platform
-    # value for any of them. A prod-named registry sitting in a lab resource group
-    # is therefore a resource this repository cannot have deployed, and the audit
-    # is right to say so; the live run found eight such container resources. This
-    # guard characterises the lab as it stands - if Lab 3.3 ever learns prod and
-    # platform names, this guard should go with it.
-    It 'does not recognise <_>, a container name spelled only for dev' -ForEach @(
+    # Lab 3.3 once spelled every container name for dev and for nothing else, and
+    # the live run found eight prod and platform container resources the audit
+    # could not account for (#121). The lab now composes its names from
+    # parEnvironment - '${parEnvironment}skycraftswcacr01' in the template,
+    # "$Environment-skycraft-swc-cae-02" in the scripts - so every environment
+    # the @allowed set declares is a name the repository can produce.
+    It 'recognises <_>, a Lab 3.3 container name composed from the environment' -ForEach @(
         'prodskycraftswcacr01'
+        'platformskycraftswcacr01'
+        'prod-skycraft-swc-aci-auth'
         'platform-skycraft-swc-cae-02'
+        'platform-skycraft-swc-aca-world'
+    ) {
+        Test-LabResourceKnown -Name $_ -KnownName $script:RealKnown | Should -BeTrue
+    }
+
+    # The two container apps the pre-#121 branch deployed by hand carry the old
+    # scheme - '-aca-world-02', and '-aca-02' where 34 characters would not fit
+    # the 32 a Container App allows. No source produces either any more, so
+    # they stay flagged until they are torn down with an explicit -AcaName.
+    It 'does not recognise <_>, a container app named under the old Lab 3.3 scheme' -ForEach @(
+        'prod-skycraft-swc-aca-world-02'
+        'platform-skycraft-swc-aca-02'
     ) {
         Test-LabResourceKnown -Name $_ -KnownName $script:RealKnown | Should -BeFalse
     }

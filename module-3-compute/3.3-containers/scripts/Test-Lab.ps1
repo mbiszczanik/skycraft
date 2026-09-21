@@ -8,12 +8,32 @@
     - Azure Container Instance (ACI) running state and accessibility.
     - Azure Container Apps (ACA) running state, scaling config, and accessibility.
 
+.PARAMETER Environment
+    The environment to validate: dev, prod or platform. Default: 'dev'. Every resource name
+    below defaults to the prefix this selects (#121), matching what Deploy-Bicep.ps1 deploys.
+
 .PARAMETER ResourceGroupName
-    The resource group name. Default: 'dev-skycraft-swc-rg'
+    The resource group name. Default: '<Environment>-skycraft-swc-rg'
+
+.PARAMETER AcrName
+    The container registry name. Default: '<Environment>skycraftswcacr01'
+
+.PARAMETER AciName
+    The container instance name. Default: '<Environment>-skycraft-swc-aci-auth'
+
+.PARAMETER CaeName
+    The Container Apps environment name. Default: '<Environment>-skycraft-swc-cae-02'
+
+.PARAMETER AcaName
+    The container app name. Default: '<Environment>-skycraft-swc-aca-world'
 
 .EXAMPLE
     .\Test-Lab.ps1
-    Runs all validation checks and outputs results.
+    Runs all validation checks against the dev resources and outputs results.
+
+.EXAMPLE
+    .\Test-Lab.ps1 -Environment prod
+    Validates the prod resources in prod-skycraft-swc-rg.
 
 .NOTES
     Project: SkyCraft
@@ -28,8 +48,29 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateSet('dev', 'prod', 'platform')]
+    [string]$Environment = 'dev',
+
+    # Defaults below read $Environment, so it must be declared first.
+    [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$ResourceGroupName = 'dev-skycraft-swc-rg'
+    [string]$ResourceGroupName = "$Environment-skycraft-swc-rg",
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$AcrName = "${Environment}skycraftswcacr01",
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$AciName = "$Environment-skycraft-swc-aci-auth",
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$CaeName = "$Environment-skycraft-swc-cae-02",
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$AcaName = "$Environment-skycraft-swc-aca-world"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,16 +86,16 @@ if (-not $context) {
     exit 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
+Write-Host "Environment: $Environment (resource group $ResourceGroupName)" -ForegroundColor Gray
 
 # 1. Validate ACR
 Write-Host "`n=== 1. Validating Azure Container Registry ===" -ForegroundColor Cyan
-$acrName = "devskycraftswcacr01"
 $imageName = "skycraft-auth"
 $imageTag = "v1"
 
-$acr = Get-AzContainerRegistry -ResourceGroupName $ResourceGroupName -Name $acrName -ErrorAction SilentlyContinue
+$acr = Get-AzContainerRegistry -ResourceGroupName $ResourceGroupName -Name $AcrName -ErrorAction SilentlyContinue
 if ($acr) {
-    Write-Host "[OK] ACR found: $acrName" -ForegroundColor Green
+    Write-Host "[OK] ACR found: $AcrName" -ForegroundColor Green
 
     if ($acr.SkuName -eq "Standard") {
         Write-Host "  - SKU Standard verified" -ForegroundColor Green
@@ -71,7 +112,7 @@ if ($acr) {
     }
 
     # Check Image
-    $repos = Get-AzContainerRegistryRepository -RegistryName $acrName -ErrorAction SilentlyContinue
+    $repos = Get-AzContainerRegistryRepository -RegistryName $AcrName -ErrorAction SilentlyContinue
     if ($repos -contains $imageName) {
         Write-Host "  - [OK] Repository '$imageName' found" -ForegroundColor Green
     } else {
@@ -79,17 +120,16 @@ if ($acr) {
         $failCount++
     }
 } else {
-    Write-Host "[FAIL] ACR $acrName not found" -ForegroundColor Red
+    Write-Host "[FAIL] ACR $AcrName not found" -ForegroundColor Red
     $failCount++
 }
 
 # 2. Validate ACI
 Write-Host "`n=== 2. Validating Azure Container Instance ===" -ForegroundColor Cyan
-$aciName = "dev-skycraft-swc-aci-auth"
 
 try {
-    $aci = Get-AzContainerGroup -ResourceGroupName $ResourceGroupName -Name $aciName -ErrorAction Stop
-    Write-Host "[OK] ACI found: $aciName" -ForegroundColor Green
+    $aci = Get-AzContainerGroup -ResourceGroupName $ResourceGroupName -Name $AciName -ErrorAction Stop
+    Write-Host "[OK] ACI found: $AciName" -ForegroundColor Green
 
     if ($aci.ProvisioningState -eq "Succeeded") {
         Write-Host "  - Provisioning State: Succeeded" -ForegroundColor Green
@@ -107,19 +147,17 @@ try {
     }
 
 } catch {
-    Write-Host "[FAIL] ACI $aciName not found" -ForegroundColor Red
+    Write-Host "[FAIL] ACI $AciName not found" -ForegroundColor Red
     $failCount++
 }
 
 # 3. Validate ACA
 Write-Host "`n=== 3. Validating Azure Container Apps ===" -ForegroundColor Cyan
-$acaName = "dev-skycraft-swc-aca-world-02"
-$caeName = "dev-skycraft-swc-cae-02"
 
 # Generic ARM lookup (no native Az cmdlet for Container Apps in base modules)
-$aca = Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.App/containerApps' -Name $acaName -ExpandProperties -ErrorAction SilentlyContinue
+$aca = Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.App/containerApps' -Name $AcaName -ExpandProperties -ErrorAction SilentlyContinue
 if ($aca) {
-    Write-Host "[OK] ACA found: $acaName" -ForegroundColor Green
+    Write-Host "[OK] ACA found: $AcaName" -ForegroundColor Green
     $props = $aca.Properties
 
     if ($props.provisioningState -eq "Succeeded") {
@@ -158,15 +196,15 @@ if ($aca) {
 
     # Validate Environment
     $envId = $props.managedEnvironmentId
-    if ($envId -match $caeName) {
-        Write-Host "  - Managed Environment '$caeName' verified" -ForegroundColor Green
+    if ($envId -match $CaeName) {
+        Write-Host "  - Managed Environment '$CaeName' verified" -ForegroundColor Green
     } else {
         Write-Host "  - [FAIL] Managed Environment mismatch. Found: $envId" -ForegroundColor Red
         $failCount++
     }
 
 } else {
-    Write-Host "[FAIL] ACA $acaName not found" -ForegroundColor Red
+    Write-Host "[FAIL] ACA $AcaName not found" -ForegroundColor Red
     $failCount++
 }
 
