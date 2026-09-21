@@ -1,0 +1,39 @@
+name: PR Title
+
+# The title of a pull request is the squash-commit title on main (repository setting
+# squash_merge_commit_title = PR_TITLE), and release-please builds the version bump and
+# the release notes from those titles (docs/adr/0007-release-with-release-please.md).
+# A title outside the Conventional Commits form would be silently ignored by the bot, so
+# this check refuses it before merge. The allowed types are exactly the ones listed in
+# release-please-config.json; tests/Release-Config.Tests.ps1 keeps the two lists equal.
+#
+# 'edited' re-runs the check when the title changes, so a PR is fixed by editing it.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr-title:
+    name: PR Title (Conventional Commits)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            revert
+            docs
+            test
+            chore
+            ci
+            refactor
+            build
+          requireScope: false
