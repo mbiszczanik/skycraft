@@ -492,7 +492,7 @@ Create public IPs for future load balancers (used in Lab 2.3):
 
 ## 📖 Section 6: Test and Verify Connectivity (30 minutes)
 
-### Step 2.1.14: Verify VNet Configuration
+### Step 2.1.13: Verify VNet Configuration
 
 1. Navigate to **Virtual networks**
 2. Click **platform-skycraft-swc-vnet**
@@ -508,7 +508,7 @@ Create public IPs for future load balancers (used in Lab 2.3):
 
 **Expected Result**: All VNets configured correctly with proper address spaces, subnets, and peering connections.
 
-### Step 2.1.15: Use Azure Network Watcher Topology
+### Step 2.1.14: Use Azure Network Watcher Topology
 
 1. Search for **"Network Watcher"** in Azure Portal
 2. Click **Network Watcher** service
@@ -516,7 +516,7 @@ Create public IPs for future load balancers (used in Lab 2.3):
 4. In left menu, click **Topology**
 5. Hover your mouse over Sweden Central on the Geo Map and then press Expand:
 
-![Network Watcher Topology](./images/step-2.1.15.png)
+![Network Watcher Topology](./images/step-2.1.14.png)
 
 **Expected View**: Visual diagram showing hub VNet with peering connections to spoke VNets.
 
@@ -525,7 +525,7 @@ Create public IPs for future load balancers (used in Lab 2.3):
 
 **Expected Result**: Topology diagram displays your hub-spoke architecture visually.
 
-### Step 2.1.16: Test Connectivity (Conceptual)
+### Step 2.1.15: Test Connectivity (Conceptual)
 
 Since we haven't deployed VMs yet, document the expected connectivity:
 
