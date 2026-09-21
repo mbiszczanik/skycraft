@@ -36,7 +36,9 @@ Protection rules for `main` are:
   review threads must be closed.
 - **Require status checks to pass** — enabled. The required checks are
   `PSScriptAnalyzer`, `Repository Standards (Pester)`, and `Bicep Build
-  (Linter)`, defined in `.github/workflows/lint.yml`.
+  (Linter)`, defined in `.github/workflows/lint.yml`, plus `Live
+  Verification Declared` from `.github/workflows/pr-gate.yml`
+  (ADR-0006, 2026-09-21).
 - **Require approvals** — **disabled**, with the explicit understanding
   that external contributors still need maintainer approval because only
   the maintainer has merge permission. If/when a second maintainer joins,
