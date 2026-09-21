@@ -94,6 +94,8 @@ gitleaks detect --source . --redact
 
 What CI *does* enforce is that a PR touching lab content **says** whether they were run: the `Live Verification Declared` check ([`.github/workflows/pr-gate.yml`](../.github/workflows/pr-gate.yml), [ADR-0006](adr/0006-pr-live-verification-gate.md)) requires a `Live-verified: <what was run>` or `Live-verification: deferred -> #<issue>` line in the PR body. Run the same check locally on an open PR with `.\tools\Test-PrLiveVerification.ps1 -Body (gh pr view <n> --json body -q .body) -ChangedFile (gh pr diff <n> --name-only)`.
 
+One qualification. The `Pester` check runs the lab-local suites in-process on your box, and a suite that exercises a lab script in a child `pwsh` (Lab 5.2's `Remove-LabResource.Tests.ps1`) does so with your installed Az and your current `Get-AzContext` in reach. Those suites must go through `tests/Support/LabScriptStub.psm1`, which refuses to run the script unless every Az command it calls resolves to the stub — see [PowerShell standards §6](powershell-standards.md#suites-that-run-a-lab-script-in-a-child-process) and issue #112. A refusal shows up as a failed test with exit code 99 in its message, never as a live teardown.
+
 ---
 
 ## 4. Live Verification Commands, Per Lab

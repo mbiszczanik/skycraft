@@ -23,13 +23,11 @@
       4. The orphaned restore point collection and its emptied AzureBackupRG_* group are removed.
       5. A stale Az.RecoveryServices is diagnosed before the delete is attempted.
 
-    No Azure connection is needed, and none is used. The stubs are imported explicitly rather
-    than placed on PSModulePath: pwsh prepends the user and shared module directories to any
-    inherited PSModulePath, so a real Az installation would always win command resolution and
-    the child would run the teardown against the live subscription. Importing a module whose
-    exported functions carry the Az command names shadows the real cmdlets instead (functions
-    take precedence over cmdlets), and the child aborts with exit 99 if that shadowing is not in
-    effect - the tests fail rather than touching real resources.
+    No Azure connection is needed, and none is used. The script runs through
+    tests/Support/LabScriptStub.psm1 (issue #112), which imports the real Az modules first, the
+    stub module last, and aborts the child with exit 99 unless every stubbed command resolves to
+    the stub - the tests fail rather than touching real resources. The module's description
+    records why PSModulePath and a plain 'Import-Module stub' are not enough.
 
 .EXAMPLE
     Invoke-Pester -Path .\Remove-LabResource.Tests.ps1
@@ -43,8 +41,12 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
 BeforeAll {
+    Import-Module (Join-Path $PSScriptRoot '..' '..' '..' 'tests' 'Support' 'LabScriptStub.psm1') -Force
+
     $script:ScriptPath     = (Resolve-Path (Join-Path $PSScriptRoot '..' 'scripts' 'Remove-LabResource.ps1')).Path
     $script:StubModuleName = 'SkyCraftAzStub'
+    # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
+    $script:RequiredModules = @('Az.Accounts', 'Az.RecoveryServices', 'Az.DataProtection', 'Az.Resources', 'Az.Storage')
 
     # Exported explicitly: a manifest with FunctionsToExport = '*' leaves the export list to the
     # module analyser, which infers it with a lightweight scan and can stop partway through.
@@ -228,117 +230,51 @@ function Remove-AzResourceGroup {
 }
 '@
 
-    # Writes the stub module to a throwaway directory and returns its manifest path. Alongside it,
-    # empty Az.* modules are written to a 'modules' subdirectory that is added to PSModulePath:
-    # they exist only so the script's #Requires -Modules line is satisfied on a runner with no Az
-    # installed (CI does not install it). They never win command resolution - the explicitly
-    # imported stub does that - so behaviour is the same with or without a real Az.
-    function Initialize-StubModule {
-        $dir = Join-Path ([System.IO.Path]::GetTempPath()) ('skycraft-52-' + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
-        Set-Content -LiteralPath (Join-Path $dir "$script:StubModuleName.psm1") -Value $script:StubBody -Encoding utf8
-        $manifest = Join-Path $dir "$script:StubModuleName.psd1"
-        New-ModuleManifest -Path $manifest `
-            -RootModule "$script:StubModuleName.psm1" `
-            -ModuleVersion '1.0.0' `
-            -FunctionsToExport $script:StubCommands
-
-        foreach ($required in 'Az.Accounts', 'Az.RecoveryServices', 'Az.DataProtection', 'Az.Resources', 'Az.Storage') {
-            $requiredDir = Join-Path $dir 'modules' $required '1.0.0'
-            New-Item -ItemType Directory -Path $requiredDir -Force | Out-Null
-            New-ModuleManifest -Path (Join-Path $requiredDir "$required.psd1") `
-                -ModuleVersion '1.0.0' `
-                -FunctionsToExport @()
-        }
-        return $manifest
-    }
-
-    # Runs the real script in a child process with the stubs shadowing the Az cmdlets, and
-    # returns the exit code it hands back to the caller.
+    # Runs the real script in a child process with the stubs shadowing the Az cmdlets (see
+    # tests/Support/LabScriptStub.psm1 for the ordering that makes that hold), and returns the
+    # exit code it hands back to the caller together with the stub's call log.
     function Invoke-CleanupScript {
         param(
-            [string]$Manifest,
+            [pscustomobject]$Stub,
             [string[]]$Fail = @(),
             [string]$RecoveryServicesVersion = '7.7.1',
             [switch]$Empty,
             [switch]$NoFriendlyName
         )
 
-        $logPath = Join-Path (Split-Path -Parent $Manifest) 'calls.log'
+        $logPath = Join-Path $Stub.Directory 'calls.log'
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
 
-        # The real Az modules are imported first, on purpose. The script's #Requires -Modules line
-        # imports whatever is installed, and Az.DataProtection is autorest-generated, so it
-        # exports *functions* - which would shadow same-named stub functions imported earlier
-        # (the cmdlet-based modules would not). Loading them up front and importing the stub last
-        # keeps the stub on top of both kinds.
-        #
-        # The child then aborts with 99 unless every stubbed command resolves to the stub module,
-        # so a broken harness can never fall through and run a real teardown.
-        $required = "'" + (@('Az.Accounts', 'Az.RecoveryServices', 'Az.DataProtection', 'Az.Resources', 'Az.Storage') -join "','") + "'"
-        $shadowed = "'" + ($script:StubCommands -join "','") + "'"
-        $childCommand = @"
-foreach (`$m in @($required)) { Import-Module `$m -ErrorAction SilentlyContinue }
-Import-Module '$Manifest' -Force
-`$notShadowed = @($shadowed) | Where-Object { (Get-Command `$_ -ErrorAction SilentlyContinue).Source -ne '$script:StubModuleName' }
-if (`$notShadowed) {
-    Write-Host "[HARNESS] Az stubs are not in effect for: `$(`$notShadowed -join ', ') - refusing to run."
-    exit 99
-}
-`$global:LASTEXITCODE = 0
-& '$script:ScriptPath' -Force
-exit `$LASTEXITCODE
-"@
-
-        $saved = @{
-            Fail       = $env:SKYCRAFT_STUB_FAIL
-            Empty      = $env:SKYCRAFT_STUB_EMPTY
-            Log        = $env:SKYCRAFT_STUB_LOG
-            RsVersion  = $env:SKYCRAFT_STUB_RSVERSION
-            NoFriendly = $env:SKYCRAFT_STUB_NOFRIENDLY
-            ModulePath = $env:PSModulePath
-        }
-        try {
-            $env:SKYCRAFT_STUB_FAIL      = $Fail -join ','
-            $env:SKYCRAFT_STUB_EMPTY     = if ($Empty) { '1' } else { '0' }
-            $env:SKYCRAFT_STUB_LOG       = $logPath
-            $env:SKYCRAFT_STUB_RSVERSION = $RecoveryServicesVersion
-            $env:SKYCRAFT_STUB_NOFRIENDLY = if ($NoFriendlyName) { '1' } else { '0' }
-            # Only so the placeholder Az.* modules are discoverable when no real Az is installed.
-            $env:PSModulePath = (Join-Path (Split-Path -Parent $Manifest) 'modules') +
-                                [System.IO.Path]::PathSeparator + $env:PSModulePath
-
-            $output = & pwsh -NoProfile -NonInteractive -Command $childCommand 2>&1
-            $code   = $LASTEXITCODE
-        } finally {
-            $env:SKYCRAFT_STUB_FAIL      = $saved.Fail
-            $env:SKYCRAFT_STUB_EMPTY     = $saved.Empty
-            $env:SKYCRAFT_STUB_LOG       = $saved.Log
-            $env:SKYCRAFT_STUB_RSVERSION = $saved.RsVersion
-            $env:SKYCRAFT_STUB_NOFRIENDLY = $saved.NoFriendly
-            $env:PSModulePath            = $saved.ModulePath
+        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList '-Force' -Environment @{
+            SKYCRAFT_STUB_FAIL       = $Fail -join ','
+            SKYCRAFT_STUB_EMPTY      = if ($Empty) { '1' } else { '0' }
+            SKYCRAFT_STUB_LOG        = $logPath
+            SKYCRAFT_STUB_RSVERSION  = $RecoveryServicesVersion
+            SKYCRAFT_STUB_NOFRIENDLY = if ($NoFriendlyName) { '1' } else { '0' }
         }
 
         $calls = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { @() }
         return [pscustomobject]@{
-            ExitCode = $code
-            Output   = ($output | Out-String)
+            ExitCode = $run.ExitCode
+            Refused  = $run.Refused
+            Output   = $run.Output
             Calls    = $calls
         }
     }
 
-    $script:Manifest = Initialize-StubModule
-    $script:StubDir  = Split-Path -Parent $script:Manifest
+    $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
+        -Body $script:StubBody -RequiredModule $script:RequiredModules
+    $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs
     # several seconds.
-    $script:Clean       = Invoke-CleanupScript -Manifest $script:Manifest
-    $script:Nothing     = Invoke-CleanupScript -Manifest $script:Manifest -Empty
-    $script:VaultStuck  = Invoke-CleanupScript -Manifest $script:Manifest -Fail 'Remove-AzRecoveryServicesVault'
-    $script:TwoStuck    = Invoke-CleanupScript -Manifest $script:Manifest -Fail 'Remove-AzDataProtectionBackupInstance', 'Remove-AzRecoveryServicesVault'
-    $script:FirstStuck  = Invoke-CleanupScript -Manifest $script:Manifest -Fail 'Remove-AzDataProtectionBackupInstance'
-    $script:StaleModule = Invoke-CleanupScript -Manifest $script:Manifest -RecoveryServicesVersion '7.1.0'
-    $script:NoFriendly  = Invoke-CleanupScript -Manifest $script:Manifest -NoFriendlyName
+    $script:Clean       = Invoke-CleanupScript -Stub $script:Stub
+    $script:Nothing     = Invoke-CleanupScript -Stub $script:Stub -Empty
+    $script:VaultStuck  = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzRecoveryServicesVault'
+    $script:TwoStuck    = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzDataProtectionBackupInstance', 'Remove-AzRecoveryServicesVault'
+    $script:FirstStuck  = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzDataProtectionBackupInstance'
+    $script:StaleModule = Invoke-CleanupScript -Stub $script:Stub -RecoveryServicesVersion '7.1.0'
+    $script:NoFriendly  = Invoke-CleanupScript -Stub $script:Stub -NoFriendlyName
 }
 
 AfterAll {
@@ -348,9 +284,11 @@ AfterAll {
 Describe 'Lab 5.2 Remove-LabResource.ps1 - test harness' {
 
     It 'shadows the real Az cmdlets instead of touching Azure' {
-        # Exit 99 is the child refusing to run; anything else means the stubs were in effect.
-        foreach ($run in @($script:Clean, $script:Nothing, $script:VaultStuck, $script:StaleModule)) {
-            $run.ExitCode | Should -Not -Be 99 -Because "the harness must never fall through to the real Az cmdlets: $($run.Output)"
+        # Refused is the child exiting 99 before the script ran; anything else means the stubs
+        # were in effect. Asserted on every scenario: a refusal in one of them is a half-stubbed
+        # session, not a scenario-specific failure.
+        foreach ($run in @($script:Clean, $script:Nothing, $script:VaultStuck, $script:TwoStuck, $script:FirstStuck, $script:StaleModule, $script:NoFriendly)) {
+            $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az cmdlets (exit $($run.ExitCode)): $($run.Output)"
         }
     }
 }
