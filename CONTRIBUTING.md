@@ -48,10 +48,13 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
 The title of your pull request is the squash-commit title on `main`, and the bot reads
 those titles to decide the next version and to write the release notes.
 
-- **Title your PR as a Conventional Commit**: `type(scope): subject`, lowercase subject,
-  scope optional (e.g. `docs(5.2): say how Deploy-Bicep.ps1 creates backup policies`).
-  The `PR Title (Conventional Commits)` check refuses anything else. Allowed types and
-  what they do while the project is at `0.y.z`:
+- **Title your PR as a Conventional Commit**: `type(scope): subject`, scope optional,
+  subject lowercase by convention (e.g. `docs(5.2): say how Deploy-Bicep.ps1 creates
+  backup policies`). The `PR Title (Conventional Commits)` check refuses a title that is
+  not in that form or whose type is not in the table below; it does not check the
+  subject's case, so keep it lowercase yourself. Do not start a paragraph of the PR
+  description with `type: ` either: the bot reads it as a second commit. Allowed types
+  and what they do while the project is at `0.y.z`:
 
   | Type | Version bump | In the release notes |
   |---|---|---|
@@ -68,16 +71,21 @@ those titles to decide the next version and to write the release notes.
   the notes. Nothing to type anywhere.
 - **To cut a release**: merge the open `chore(main): release X.Y.Z` pull request.
 - **To force a version** (for example the jump to 1.0.0): merge a PR whose description
-  carries the footer `Release-As: 1.0.0`. Hand edits to the Release PR are overwritten
-  the next time the bot refreshes it.
+  **ends** with the line `Release-As: 1.0.0`, on its own after the pre-merge checklist;
+  the bot only reads footers from the last block of the description, so one placed
+  under *Summary* is ignored. Hand edits to the Release PR are overwritten on the bot's
+  next run (every push to `main`), so do not bump the version there.
 - **If a run failed** (an API error after the Release PR merged, a stale Release PR):
   re-run the workflow from the Actions tab (`workflow_dispatch`); release-please is
-  idempotent and finishes what was left.
+  idempotent and finishes what was left. If it aborts with "untagged, merged release PRs
+  outstanding", remove the `autorelease: pending` label from the already-released PR
+  and re-run.
 - **If the run fails on the token step**: the GitHub App `skycraft-release` key or
   Client ID is missing or was rotated. On the App's page generate a new private key,
   then `gh secret set RELEASE_APP_PRIVATE_KEY --repo mbiszczanik/skycraft < key.pem`
-  (and `gh secret set RELEASE_APP_ID --body "<Client ID>"` if that changed), delete the
-  local `.pem`, and re-run the workflow.
+  (and `gh secret set RELEASE_APP_ID --repo mbiszczanik/skycraft --body "<Client ID>"`
+  if that changed), delete the local `.pem`, re-run the workflow, and once it is green
+  delete the old key on the App's page.
 
 Sections up to 0.9.0 in `CHANGELOG.md` were written by hand in Keep a Changelog form and
 stay as they are. The reasoning is in [ADR-0007](docs/adr/0007-release-with-release-please.md).
