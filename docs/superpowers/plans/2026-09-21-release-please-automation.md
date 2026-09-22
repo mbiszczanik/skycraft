@@ -453,19 +453,19 @@ git commit -m "chore: configure release-please for the root package at 0.9.0"
 ```yaml
 name: Release Please
 
-# Every push to main queues release-please (one run at a time, see concurrency below). It reads the Conventional Commits titles since
-# the last tag, and when at least one of them is releasable it opens or refreshes the
-# Release PR "chore(main): release X.Y.Z" (bumping .release-please-manifest.json and
-# version.txt, prepending the CHANGELOG.md section). When the push *is* that Release PR
-# being merged, it creates the vX.Y.Z tag and the GitHub Release with the section as the
-# notes. Rationale: docs/adr/0007-release-with-release-please.md.
+# Every push to main queues release-please (one run at a time, see concurrency below).
+# It reads the Conventional Commits titles since the last tag, and when at least one of
+# them is releasable it opens or refreshes the Release PR "chore(main): release X.Y.Z"
+# (bumping .release-please-manifest.json and version.txt, prepending the CHANGELOG.md
+# section). When the push *is* that Release PR being merged, it creates the vX.Y.Z tag
+# and the GitHub Release with the section as the notes.
+# Rationale: docs/adr/0007-release-with-release-please.md.
 #
 # The Release PR is opened with a GitHub App installation token, not GITHUB_TOKEN: a PR
 # raised with GITHUB_TOKEN gets its workflow runs only after a maintainer clicks "Approve
 # workflows to run", so its required checks would wait on a click every time. The App
-# (skycraft-release) has Contents and Pull requests write
-# access on this repository and nothing else; its Client ID and private key are the two
-# repository secrets below.
+# (skycraft-release) has Contents and Pull requests write access on this repository and
+# nothing else; its Client ID and private key are the two repository secrets below.
 #
 # workflow_dispatch is the recovery path: release-please is idempotent, so re-running it
 # after a failed run finishes whatever was left (a missing tag, a stale Release PR).
@@ -782,9 +782,14 @@ those titles to decide the next version and to write the release notes.
 - **To force a version** (for example the jump to 1.0.0): merge a PR whose description
   carries the footer `Release-As: 1.0.0`. Hand edits to the Release PR are overwritten
   the next time the bot refreshes it.
-- **If a run failed** (a missing secret, an API error after the Release PR merged):
+- **If a run failed** (an API error after the Release PR merged, a stale Release PR):
   re-run the workflow from the Actions tab (`workflow_dispatch`); release-please is
   idempotent and finishes what was left.
+- **If the run fails on the token step**: the GitHub App `skycraft-release` key or
+  Client ID is missing or was rotated. On the App's page generate a new private key,
+  then `gh secret set RELEASE_APP_PRIVATE_KEY --repo mbiszczanik/skycraft < key.pem`
+  (and `gh secret set RELEASE_APP_ID --body "<Client ID>"` if that changed), delete the
+  local `.pem`, and re-run the workflow.
 
 Sections up to 0.9.0 in `CHANGELOG.md` were written by hand in Keep a Changelog form and
 stay as they are. The reasoning is in [ADR-0007](docs/adr/0007-release-with-release-please.md).

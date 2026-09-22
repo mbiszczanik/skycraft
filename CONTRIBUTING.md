@@ -32,7 +32,7 @@ the exact commands).
 2.  **Create a Branch off `main`**: Use a descriptive name (e.g., `feature/lab-3.1-vm`, `fix/typo-lab-1.2`).
 3.  **Make Changes**: Implement your feature or fix.
 4.  **Verify**: Run `.\tools\Invoke-DryRun.ps1` (the offline gate that mirrors CI without needing `az login`), plus the relevant `Test-Lab.ps1` scripts to ensure no regressions.
-5.  **Submit a Pull Request against `main`**: Describe your changes clearly and link to any relevant issues. PRs are squash-merged. If you changed lab content, fill in the **Live verification** section of the template; if you could not run the live checks, open the PR as a draft, link the issue with `Refs #N`, and name the issue that tracks the live pass.
+5.  **Submit a Pull Request against `main`**: Title it as a Conventional Commit (see the Releases section below); the title becomes the squash-commit title and a line in the release notes. Describe your changes clearly and link to any relevant issues. PRs are squash-merged. If you changed lab content, fill in the **Live verification** section of the template; if you could not run the live checks, open the PR as a draft, link the issue with `Refs #N`, and name the issue that tracks the live pass.
 
 ## 🧪 Testing
 
@@ -44,25 +44,43 @@ All new labs and scripts must include validation steps.
 
 ## 🚀 Releases
 
-`CHANGELOG.md` is the single source of truth for versions. A release is the merge to
-`main` that moves the `## [Unreleased]` items under a new `## [X.Y.Z] - YYYY-MM-DD`
-heading; nothing else is typed anywhere.
+Releases are automated with [release-please](https://github.com/googleapis/release-please).
+The title of your pull request is the squash-commit title on `main`, and the bot reads
+those titles to decide the next version and to write the release notes.
 
-- **What happens automatically**: the [Release workflow](.github/workflows/release.yml)
-  runs on every push to `main` that changes `CHANGELOG.md`. It reads the topmost
-  released section, and if the matching `vX.Y.Z` release does not exist yet it creates
-  the tag on the merge commit and the GitHub Release with that section as the notes.
-  A CHANGELOG edit that adds no new version finds the release already published and
-  does nothing.
-- **To cut a release**: in the PR, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`
-  (adding a fresh empty `## [Unreleased]` above it), bump nothing else, and merge.
-- **To check before merging**: `.\tools\Publish-Release.ps1 -WhatIf` prints the version,
-  the target commit and the exact notes the workflow would publish.
-- **To backfill or run by hand** (a missed release, a workflow outage):
-  `.\tools\Publish-Release.ps1 -Target <merge-commit-sha>` with `gh auth login` done.
-  The script is idempotent - it never edits or deletes an existing release or tag.
+- **Title your PR as a Conventional Commit**: `type(scope): subject`, lowercase subject,
+  scope optional (e.g. `docs(5.2): say how Deploy-Bicep.ps1 creates backup policies`).
+  The `PR Title (Conventional Commits)` check refuses anything else. Allowed types and
+  what they do while the project is at `0.y.z`:
 
-The reasoning is in [ADR-0006](docs/adr/0005-release-from-changelog.md).
+  | Type | Version bump | In the release notes |
+  |---|---|---|
+  | `fix`, `perf`, `revert`, `docs` | patch | yes |
+  | `feat` | minor | yes |
+  | `feat!` / `BREAKING CHANGE:` footer in the PR description | minor | yes |
+  | `test`, `chore`, `ci`, `refactor`, `build` | none | no |
+
+- **What happens automatically**: after every merge to `main` the
+  [Release Please workflow](.github/workflows/release-please.yml) opens or refreshes a
+  pull request titled `chore(main): release X.Y.Z` that bumps `version.txt`,
+  `.release-please-manifest.json` and prepends the new section to `CHANGELOG.md`.
+  Merging that PR creates the `vX.Y.Z` tag and the GitHub Release with the section as
+  the notes. Nothing to type anywhere.
+- **To cut a release**: merge the open `chore(main): release X.Y.Z` pull request.
+- **To force a version** (for example the jump to 1.0.0): merge a PR whose description
+  carries the footer `Release-As: 1.0.0`. Hand edits to the Release PR are overwritten
+  the next time the bot refreshes it.
+- **If a run failed** (an API error after the Release PR merged, a stale Release PR):
+  re-run the workflow from the Actions tab (`workflow_dispatch`); release-please is
+  idempotent and finishes what was left.
+- **If the run fails on the token step**: the GitHub App `skycraft-release` key or
+  Client ID is missing or was rotated. On the App's page generate a new private key,
+  then `gh secret set RELEASE_APP_PRIVATE_KEY --repo mbiszczanik/skycraft < key.pem`
+  (and `gh secret set RELEASE_APP_ID --body "<Client ID>"` if that changed), delete the
+  local `.pem`, and re-run the workflow.
+
+Sections up to 0.9.0 in `CHANGELOG.md` were written by hand in Keep a Changelog form and
+stay as they are. The reasoning is in [ADR-0007](docs/adr/0007-release-with-release-please.md).
 
 ## 📦 AVM module versions
 

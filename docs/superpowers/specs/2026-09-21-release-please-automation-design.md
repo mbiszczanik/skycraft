@@ -91,7 +91,7 @@ Components and their single responsibility:
 | `.github/workflows/release-please.yml` | Run release-please on every push to `main` (and on demand) with the App token | `actions/create-github-app-token`, `googleapis/release-please-action`, secrets |
 | `release-please-config.json` | Bump rules, changelog sections, tag format | release-please config schema |
 | `.release-please-manifest.json` | Last released version per path (`"."`) | maintained by the bot after bootstrap |
-| `version.txt` | Version file the `simple` release type maintains; created by the first Release PR | maintained by the bot |
+| `version.txt` | Version file the `simple` release type maintains; committed at `0.9.0` in PR 2 because the bot only updates an existing file | maintained by the bot |
 | `tests/Release-Config.Tests.ps1` | Keep the PR-title type list and the changelog-section type list identical; JSON validity | Pester |
 | GitHub App `skycraft-release` | Identity whose token lets the Release PR trigger CI | created manually once |
 
