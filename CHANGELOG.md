@@ -9,6 +9,13 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1](https://github.com/mbiszczanik/skycraft/compare/v0.10.0...v0.10.1) (2026-09-22)
+
+
+### Documentation
+
+* record Markdownlint and gitleaks as required checks (ADR-0002) ([#162](https://github.com/mbiszczanik/skycraft/issues/162)) ([b3b5c41](https://github.com/mbiszczanik/skycraft/commit/b3b5c4127058d3e92a65119fbe36c1bab716be9c))
+
 ## [0.10.0](https://github.com/mbiszczanik/skycraft/compare/v0.9.0...v0.10.0) (2026-09-22)
 
 
