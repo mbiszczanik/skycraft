@@ -409,7 +409,7 @@ Complete this checklist to verify successful lab completion:
 
 - [ ] SkyCraft-Testers group has **Reader** role
 
-### Resource Group-Level Assignments (rg-skycraft-shared)
+### Resource Group-Level Assignments (platform-skycraft-swc-rg)
 
 - [ ] Illidan Stormrage has **Reader** role
 
@@ -421,11 +421,6 @@ Complete this checklist to verify successful lab completion:
 - [ ] Understand the difference between subscription and resource group scope
 
 **For detailed verification**, see [lab-checklist-1.2.md](lab-checklist-1.2.md)
-
-- [ ] Checked access for Khadgar Archmage (shows Contributor via group)
-- [ ] Checked access for Chromie Timewalker (shows Reader via group)
-- [ ] Reviewed role assignments in all three resource groups
-- [ ] Understand the difference between subscription and resource group scope
 
 ---
 
