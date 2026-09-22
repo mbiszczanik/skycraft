@@ -51,18 +51,33 @@ This module layers observability and recovery on top of the existing SkyCraft in
 Before starting, ensure you have:
 
 - [ ] Completed **Modules 1–4** (identity, networking, compute, storage)
-- [ ] At least one running VM in `dev-skycraft-swc-rg` or `prod-skycraft-swc-rg`
-- [ ] Production storage account deployed in `prod-skycraft-swc-rg`
-- [ ] Azure CLI `>= 2.40` and Bicep CLI installed locally
+- [ ] `platform-skycraft-swc-rg` with the Lab 4.1 storage account `platformskycraftswcsa`
+- [ ] At least one running SkyCraft VM — Lab 5.3 needs two distinct ones
+- [ ] `prod-skycraft-swc-vnet` in `prod-skycraft-swc-rg` (Lab 5.3 flow logs)
+- [ ] Bicep CLI on `PATH` — Az PowerShell compiles `main.bicep` through it
 - [ ] PowerShell 7+ and the `Az` module (`Install-Module Az -Scope CurrentUser`)
+- [ ] Azure CLI — optional, only for the CLI path shown in the lab guides
 - [ ] **Contributor** role on the SkyCraft subscription (required for diagnostic settings + backup policies)
 
-**Verify Module 4 completion** — these names will be referenced by diagnostic settings in Lab 5.1:
+**Verify the earlier modules** — these are the resources each `Deploy-Bicep.ps1` resolves before it deploys:
 
-```bash
-az vm list --query "[?starts_with(name, 'prod-skycraft')].name" -o tsv
-az storage account list --query "[?starts_with(name, 'prodskycraft')].name" -o tsv
-az network vnet list --query "[?starts_with(name, 'prod-skycraft')].name" -o tsv
+```powershell
+# Platform RG - every Lab 5.x deployment hard-fails without it
+Get-AzResourceGroup -Name platform-skycraft-swc-rg |
+    Select-Object ResourceGroupName, Location | Format-Table -AutoSize
+
+# Lab 4.1 storage account - Labs 5.1 and 5.3 stream diagnostics to it
+Get-AzStorageAccount -ResourceGroupName platform-skycraft-swc-rg -Name platformskycraftswcsa |
+    Select-Object StorageAccountName, ResourceGroupName | Format-Table -AutoSize
+
+# Lab 3.2 VMs - Labs 5.1/5.2 take the first one they find, Lab 5.3 needs two
+'dev-skycraft-swc-rg', 'prod-skycraft-swc-rg' |
+    ForEach-Object { Get-AzVM -ResourceGroupName $_ -ErrorAction SilentlyContinue } |
+    Select-Object Name, ResourceGroupName | Format-Table -AutoSize
+
+# Lab 2.1 production VNet - Lab 5.3 attaches the flow log to it
+Get-AzVirtualNetwork -ResourceGroupName prod-skycraft-swc-rg -Name prod-skycraft-swc-vnet |
+    Select-Object Name, ResourceGroupName | Format-Table -AutoSize
 ```
 
 ---
