@@ -35,10 +35,15 @@ Protection rules for `main` are:
 - **Require conversation resolution before merging** — enabled. All
   review threads must be closed.
 - **Require status checks to pass** — enabled. The required checks are
-  `PSScriptAnalyzer`, `Repository Standards (Pester)`, and `Bicep Build
-  (Linter)`, defined in `.github/workflows/lint.yml`, plus `Live
-  Verification Declared` from `.github/workflows/pr-gate.yml`
-  (ADR-0006, 2026-09-21).
+  `PSScriptAnalyzer`, `Repository Standards (Pester)`, `Bicep Build
+  (Linter)`, `Markdownlint` and `Secret Scan (gitleaks)`, defined in
+  `.github/workflows/lint.yml`, plus `Live Verification Declared` from
+  `.github/workflows/pr-gate.yml` (ADR-0006, 2026-09-21) and `PR Title
+  (Conventional Commits)` from `.github/workflows/pr-title.yml`
+  (ADR-0007, 2026-09-21). `Markdownlint` and `Secret Scan (gitleaks)`
+  had been advisory since they were added; they became required on
+  2026-09-22, once the generated `CHANGELOG.md` was out of markdownlint's
+  scope.
 - **Require approvals** — **disabled**, with the explicit understanding
   that external contributors still need maintainer approval because only
   the maintainer has merge permission. If/when a second maintainer joins,
