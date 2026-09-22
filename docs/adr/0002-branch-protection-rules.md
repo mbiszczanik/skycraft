@@ -38,7 +38,8 @@ Protection rules for `main` are:
   `PSScriptAnalyzer`, `Repository Standards (Pester)`, and `Bicep Build
   (Linter)`, defined in `.github/workflows/lint.yml`, plus `Live
   Verification Declared` from `.github/workflows/pr-gate.yml`
-  (ADR-0006, 2026-09-21).
+  (ADR-0006, 2026-09-21) and `PR Title (Conventional Commits)` from
+  `.github/workflows/pr-title.yml` (ADR-0007, 2026-09-21).
 - **Require approvals** — **disabled**, with the explicit understanding
   that external contributors still need maintainer approval because only
   the maintainer has merge permission. If/when a second maintainer joins,
