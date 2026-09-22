@@ -55,6 +55,6 @@ See `template.md`.
 | [0002](0002-branch-protection-rules.md) | Branch protection rules for `main` | Accepted |
 | [0003](0003-worktree-branch-discipline.md) | Use git worktrees for multi-commit work | Accepted |
 | [0004](0004-excalidraw-svg-for-lab-diagrams.md) | Author lab architecture diagrams in Excalidraw, commit as SVG | Accepted |
-| [0005](0005-release-from-changelog.md) | Release from the CHANGELOG head | Superseded by 0007 |
+| [0005](0005-release-from-changelog.md) | Release from the CHANGELOG head | Superseded by [ADR-0007](0007-release-with-release-please.md) |
 | [0006](0006-pr-live-verification-gate.md) | A lab-content PR declares its live verification before it can merge | Accepted |
 | [0007](0007-release-with-release-please.md) | Release with release-please from Conventional Commits PR titles | Accepted |

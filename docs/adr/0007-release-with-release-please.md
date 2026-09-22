@@ -19,15 +19,18 @@ release), delivered either continuously on every merge (semantic-release,
 which refuses `0.x` versions) or through a bot-maintained **Release PR**
 that a human merges when ready (release-please, changesets). Azure Verified
 Modules enforce Conventional Commits on PR titles and squash-merge. Pre-1.0,
-SemVer's own FAQ and AVM SNFR17 bump the minor version for breaking changes.
+SemVer's own FAQ increments the minor version for every `0.y.z` release,
+and AVM SNFR17 bumps the minor version for breaking changes and features.
 
 Constraints that shaped the choice:
 
 - `main` is protected with no bypass actors (ADR-0002); a bot cannot push
   to it, it has to open a pull request that passes the required checks.
-- A pull request opened with `GITHUB_TOKEN` starts no workflows, so its
-  required checks would never run. The documented remedy is a personal
-  access token (expires within a year) or a GitHub App installation token.
+- A pull request opened with `GITHUB_TOKEN` gets its workflow runs only
+  after a maintainer clicks *Approve workflows to run* (before mid-2026 it
+  got none at all), so every Release PR would wait on a manual click before
+  its required checks start. GitHub's documented remedy is a personal
+  access token or a GitHub App installation token.
 - Squash merges are the only merge method, so every commit on `main` has
   exactly one title, and that title is chosen in the PR.
 
@@ -47,7 +50,9 @@ Constraints that shaped the choice:
 - **The bot authenticates as the GitHub App `skycraft-release`** (Contents
   and Pull requests write on this repository only) through
   `actions/create-github-app-token`, so its Release PR runs the same required
-  checks as any other PR. The ruleset keeps zero bypass actors.
+  checks as any other PR without a manual approval. The App's Client ID and
+  private key are the repository secrets `RELEASE_APP_ID` and
+  `RELEASE_APP_PRIVATE_KEY`. The ruleset keeps zero bypass actors.
 - **PR titles are the release notes.** The repository setting
   `squash_merge_commit_title` is `PR_TITLE` and `squash_merge_commit_message`
   is `PR_BODY`, and the required check `PR Title (Conventional Commits)`
@@ -72,9 +77,10 @@ Constraints that shaped the choice:
 **What we give up / accept as cost:**
 
 - Release notes are PR titles, one line each, grouped by type. The prose
-  changelog entries of 0.4.0-0.9.0 are not coming back; Keep a Changelog
-  calls generated logs a bad idea and we accept that trade for zero manual
-  work. Title quality is now part of PR review.
+  changelog entries of 0.4.0 to 0.9.0 are not coming back; Keep a Changelog
+  calls commit-log diffs a bad idea, and typed PR titles are only a step
+  above that. We accept that trade for zero manual work; title quality is
+  now part of PR review.
 - A dependency on a Node-based action and on a GitHub App whose private key
   lives in a repository secret. If the secret is lost, releases stop until it
   is regenerated; nothing else breaks.
@@ -82,7 +88,7 @@ Constraints that shaped the choice:
   no longer land in the squash body. A `BREAKING CHANGE:` footer has to be
   written in the PR description on purpose.
 
-**Follow-up tasks:**
+**What we must do as a follow-up:**
 
 - Repository settings and the ruleset are changed by hand right after this
   ADR merges (`squash_merge_commit_title`, `squash_merge_commit_message`,
@@ -101,5 +107,5 @@ Constraints that shaped the choice:
 - **Bot pushes to `main` as a ruleset bypass actor.** Skips the required
   checks on the release commit and reverses ADR-0002; rejected.
 - **Fine-grained PAT instead of a GitHub App.** Fewer setup steps, but the
-  token expires within a year and the bot's work would be attributed to the
-  maintainer; rejected.
+  token is bound to the maintainer's account: the bot's work is attributed
+  to them, the token is rotated by hand and dies with the account; rejected.

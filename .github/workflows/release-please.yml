@@ -7,9 +7,10 @@ name: Release Please
 # being merged, it creates the vX.Y.Z tag and the GitHub Release with the section as the
 # notes. Rationale: docs/adr/0007-release-with-release-please.md.
 #
-# The Release PR is opened with a GitHub App installation token, not GITHUB_TOKEN: events
-# raised with GITHUB_TOKEN do not start other workflows, so the required checks would never
-# run on the bot's PR. The App (skycraft-release) has Contents and Pull requests write
+# The Release PR is opened with a GitHub App installation token, not GITHUB_TOKEN: a PR
+# raised with GITHUB_TOKEN gets its workflow runs only after a maintainer clicks "Approve
+# workflows to run", so its required checks would wait on a click every time. The App
+# (skycraft-release) has Contents and Pull requests write
 # access on this repository and nothing else; its Client ID and private key are the two
 # repository secrets below.
 #
