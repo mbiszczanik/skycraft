@@ -1,6 +1,6 @@
 # ADR-0005: Release from the CHANGELOG head
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0007](0007-release-with-release-please.md)
 - **Date:** 2026-09-19
 - **Deciders:** @mbiszczanik
 
