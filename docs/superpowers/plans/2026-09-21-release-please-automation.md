@@ -765,7 +765,7 @@ those titles to decide the next version and to write the release notes.
   backup policies`). The `PR Title (Conventional Commits)` check refuses a title that is
   not in that form or whose type is not in the table below; it does not check the
   subject's case, so keep it lowercase yourself. Do not start a paragraph of the PR
-  description with `type: ` either: the bot reads it as a second commit. Allowed types
+  description with a `type:` prefix either: the bot reads it as a second commit. Allowed types
   and what they do while the project is at `0.y.z`:
 
   | Type | Version bump | In the release notes |
@@ -848,7 +848,7 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 
 ```
 
-Line 8 must remain `## [0.9.0] - 2026-09-21` (from PR 1): release-please inserts the new section directly under the intro, before the first `## ` heading.
+Line 8 must remain `## [0.9.0] - 2026-09-21` (from PR 1): release-please inserts the new section directly under the intro, before the first `##` heading.
 
 - [ ] **Step 4: Correct the spec's `version.txt` row**
 
