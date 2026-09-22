@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 3.1 - Dev Parameters
 DESCRIPTION: Parameter values for Development Environment
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep --parameters parameters/dev.bicepparam
+EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev
 AUTHOR/S: Marcin Biszczanik
 VERSION: 1.1.0
 ======================================================*/

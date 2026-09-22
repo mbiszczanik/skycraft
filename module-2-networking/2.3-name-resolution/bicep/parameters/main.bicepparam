@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 2.3 - DNS and Load Balancing Parameters
 DESCRIPTION: Default parameter set for main.bicep
-EXAMPLE: az deployment sub create --location swedencentral --template-file ../main.bicep --parameters main.bicepparam
+EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.1.0
 ======================================================*/

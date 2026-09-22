@@ -55,9 +55,9 @@ Before starting this lab:
 
 **Verify prerequisites**:
 
-```azurecli
-az group show --name dev-skycraft-swc-rg
-az network vnet show --name dev-skycraft-swc-vnet --resource-group dev-skycraft-swc-rg
+```powershell
+Get-AzResourceGroup -Name dev-skycraft-swc-rg
+Get-AzVirtualNetwork -Name dev-skycraft-swc-vnet -ResourceGroupName dev-skycraft-swc-rg
 ```
 
 ---
@@ -189,18 +189,19 @@ On your local machine, create a file named `index.html` with the following conte
 Azure App Service supports simple deployment by uploading a ZIP file.
 
 1. Compress `index.html` into a zip file named `dashboard.zip`.
-2. Use Azure CLI (Cloud Shell) to deploy. You need to upload the zip to Cloud Shell first, or run this from your local terminal if you have Azure CLI installed.
+2. Deploy the zip with Az PowerShell. Run this from the folder that holds `dashboard.zip` — either your local PowerShell 7 session or Cloud Shell (PowerShell).
 
 **If using Cloud Shell**:
 
-1. Upload `dashboard.zip` using the **Upload/Download files** icon.
+1. Switch Cloud Shell to **PowerShell** and upload `dashboard.zip` using the **Upload/Download files** icon.
 2. Run:
 
-```azurecli
-az webapp deploy source config-zip \
-  --resource-group dev-skycraft-swc-rg \
-  --name dev-skycraft-swc-app01 \
-  --src dashboard.zip
+```powershell
+Publish-AzWebApp `
+  -ResourceGroupName dev-skycraft-swc-rg `
+  -Name dev-skycraft-swc-app01 `
+  -ArchivePath (Resolve-Path .\dashboard.zip) `
+  -Force
 ```
 
 > [!TIP]
@@ -234,16 +235,18 @@ Deployment slots allow you to deploy different versions of your app (e.g., "Stag
 3. Zip it as `dashboard-v2.zip`.
 4. Deploy to the **staging** slot:
 
-```azurecli
-az webapp deploy source config-zip \
-  --resource-group dev-skycraft-swc-rg \
-  --name dev-skycraft-swc-app01 \
-  --slot staging \
-  --src dashboard-v2.zip
+```powershell
+Publish-AzWebApp `
+  -ResourceGroupName dev-skycraft-swc-rg `
+  -Name dev-skycraft-swc-app01 `
+  -Slot staging `
+  -ArchivePath (Resolve-Path .\dashboard-v2.zip) `
+  -Force
 ```
 
 > [!TIP]
-> If you using PowerShell you should use **`** instead \ in the code
+> The backtick (`` ` ``) at the end of each line is PowerShell's line-continuation
+> character. You can also drop the backticks and write the whole call on one line.
 
 **Expected Result**:
 

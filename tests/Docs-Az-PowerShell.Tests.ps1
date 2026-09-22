@@ -11,6 +11,7 @@
 
     Guarded surfaces:
       - the EXAMPLE line of every Bicep file header (module-*/**/bicep/*.bicep)
+        AND every parameter file header (module-*/**/bicep/**/*.bicepparam)
         names the Deploy-Bicep.ps1 script or an Az cmdlet - never
         `az deployment ... create`, which contradicts the DEPLOYMENT line below it
       - docs/bicep-standards.md carries no `az deployment` header template for
@@ -18,9 +19,24 @@
       - lab checklists (module-*/**/lab-checklist-*.md) contain no az CLI code
         fence (```azurecli / ```azcli) and no `az ...` command line inside any
         fence
+      - lab guides (module-*/**/lab-guide-*.md) contain none of a fixed list of
+        *operational* az verbs - the ones that deploy, export or delete the
+        lab's own infrastructure (issue #141)
 
-    Lab guides are deliberately out of scope: docs/lab-guide-standards.md asks
-    them to teach Portal, CLI and PowerShell side by side.
+    Lab guides are otherwise deliberately out of scope: docs/lab-guide-standards.md
+    asks them to teach Portal, CLI and PowerShell side by side, so `az vm resize`,
+    `az storage ...` and the "Option 2: Azure CLI" blocks stay. The rule below is
+    a verb allowlist rather than a heading-scoped rule on purpose: the
+    `#### Option 2: Azure CLI` heading exists in only three guides, and the
+    operational blocks this guards were fenced ```bash, not ```azurecli, so
+    neither a heading nor a fence-language rule would catch them without firing
+    on the multi-modal sections.
+
+    `az bicep` and `az acr build` are NOT listed. `az bicep build|decompile` is a
+    local compile that never contacts a subscription (and powershell-standards.md
+    section 5 names `az bicep` an accepted exception); `az acr build` has no Az
+    PowerShell equivalent - no cmdlet builds an image from source - and is marked
+    in lab-guide-3.3.md as the documented exception.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Docs-Az-PowerShell.Tests.ps1
@@ -41,13 +57,22 @@ function ConvertTo-RepoCase {
     }
 }
 
-$BicepCases = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.bicep' |
+# -Filter '*.bicep' does not match '*.bicepparam', which is how 16 parameter-file
+# headers kept an `az deployment sub create` EXAMPLE line through #134 (#141).
+# Both extensions are collected here.
+$BicepCases = Get-ChildItem -Path $RepoRoot -Recurse -File |
+    Where-Object { $_.Extension -in '.bicep', '.bicepparam' } |
     Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^module-\d.*/bicep/' } |
     ForEach-Object { ConvertTo-RepoCase $_ }
 
 $ChecklistCases = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter 'lab-checklist-*.md' |
     Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^module-\d' } |
     ForEach-Object { ConvertTo-RepoCase $_ }
+
+$GuideCases = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter 'lab-guide-*.md' |
+    Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^module-\d' } |
+    ForEach-Object { ConvertTo-RepoCase $_ }
+
 
 $StandardsCase = @(ConvertTo-RepoCase (Get-Item (Join-Path $RepoRoot 'docs\bicep-standards.md')))
 
@@ -79,5 +104,41 @@ Describe 'SkyCraft docs - checklists validate with Az PowerShell' {
             [regex]::Matches($fence.Groups[1].Value, '(?m)^\s*az\s+[a-z]') | ForEach-Object { $_.Value.Trim() }
         }
         @($offenders) | Should -BeNullOrEmpty -Because "the az CLI can be signed in to a different subscription than Az PowerShell; found: $($offenders -join '; ')"
+    }
+}
+
+Describe 'SkyCraft docs - lab guides deploy with Az PowerShell' {
+
+    BeforeAll {
+        # Defined here, not at file scope: Pester 5 discovers and runs in separate
+        # phases, and a file-scope variable is $null during the run phase. An empty
+        # pattern would match at every position and report thousands of blank hits.
+        #
+        # Operational az verbs: they deploy, export or delete the lab's own
+        # infrastructure, so they must run in the Az PowerShell context the lab's
+        # scripts use. Teaching verbs (az vm, az storage, az monitor, ...) are
+        # absent by design - see the DESCRIPTION block.
+        $script:OperationalAzPattern = '(?m)^\s*az\s+(' +
+            'deployment\s+(sub|group|mg|tenant)\s+(create|what-if|validate|show|list)' +
+            '|group\s+(create|delete|export)' +
+            '|webapp\s+deploy' +
+            ')\b'
+    }
+
+    It 'the operational-verb pattern is not empty' {
+        # A blank pattern silently passes nothing and fails everything.
+        $script:OperationalAzPattern | Should -Not -BeNullOrEmpty
+    }
+
+    It 'collected at least one lab guide' {
+        # Get-ChildItem -Path 'module-*' -Recurse -File -Filter returns nothing on
+        # pwsh 7.6; an empty case list would pass this suite on zero tests.
+        @($GuideCases).Count | Should -BeGreaterThan 0
+    }
+
+    It "'<file>' has no operational az command" -ForEach $GuideCases {
+        $text = Get-Content -Raw -LiteralPath $path
+        $offenders = [regex]::Matches($text, $script:OperationalAzPattern) | ForEach-Object { $_.Value.Trim() }
+        @($offenders) | Should -BeNullOrEmpty -Because "deploying, exporting or deleting the lab's own resources must use the lab's scripts / Az cmdlets - the az CLI can be signed in to a different subscription (docs/powershell-standards.md section 5); found: $($offenders -join '; ')"
     }
 }

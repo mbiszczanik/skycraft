@@ -79,18 +79,19 @@ The first two are the gates in `scripts/Deploy-Bicep.ps1` (`[2/5] Checking prere
 
 **Verify prerequisites**:
 
-```azurecli
+```powershell
 # Check resource groups exist
-az group show --name dev-skycraft-swc-rg --query "name" --output tsv
+(Get-AzResourceGroup -Name dev-skycraft-swc-rg).ResourceGroupName
 
 # Check VNet exists
-az network vnet show --name dev-skycraft-swc-vnet --resource-group dev-skycraft-swc-rg --query "name" --output tsv
+$vnet = Get-AzVirtualNetwork -Name dev-skycraft-swc-vnet -ResourceGroupName dev-skycraft-swc-rg
+$vnet.Name
 
 # Check subnets exist
-az network vnet subnet list --vnet-name dev-skycraft-swc-vnet --resource-group dev-skycraft-swc-rg --query "[].name" --output tsv
+$vnet.Subnets.Name
 
 # Check the load balancer and its backend pools exist (Lab 2.3 or 3.1)
-az network lb address-pool list --lb-name dev-skycraft-swc-lb --resource-group dev-skycraft-swc-rg --query "[].name" --output tsv
+(Get-AzLoadBalancer -Name dev-skycraft-swc-lb -ResourceGroupName dev-skycraft-swc-rg).BackendAddressPools.Name
 ```
 
 ---

@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 3.4 - Parameters
 DESCRIPTION: Parameter values for the Development environment (the defaults of main.bicep, pinned)
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep --parameters parameters/main.bicepparam
+EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
 VERSION: 1.0.0
 ======================================================*/

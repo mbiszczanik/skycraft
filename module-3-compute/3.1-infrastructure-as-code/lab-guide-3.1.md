@@ -114,7 +114,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
   }
 }
 
-// Deploy: az deployment group create --template-file network.bicep
+// Deploy: New-AzResourceGroupDeployment -ResourceGroupName <name> -TemplateFile network.bicep
 ```
 
 ### IaC Benefits
@@ -1312,30 +1312,62 @@ output ipAddress string = publicIp.properties.ipAddress
 
 ## 📖 Section 7: Deploy and Validate Bicep Templates (30 minutes)
 
+> [!IMPORTANT]
+> The steps in this section are **operational**, not multi-modal teaching: they
+> deploy and tear down the lab's own infrastructure. They use Az PowerShell and
+> the lab's scripts under `scripts/`, because the az CLI and Az PowerShell can be
+> signed in to **different subscriptions** — a raw `az deployment` pasted here can
+> silently create resources in the wrong one. See
+> [powershell-standards.md](../../docs/powershell-standards.md) §5.
+>
+> Run everything below from the lab folder
+> (`module-3-compute/3.1-infrastructure-as-code`), and confirm your context first:
+>
+> ```powershell
+> (Get-AzContext).Subscription.Name
+> ```
+
 ### Step 3.1.17: Validate Bicep Template
 
 Before deploying, always validate:
 
-```bash
+```powershell
 # Build Bicep to ARM (checks for syntax errors)
-az bicep build --file main.bicep
+az bicep build --file .\bicep\main.bicep --outfile .\bicep\main.json
 
 # Expected output: "Build succeeded"
-# Creates main.json (ARM template)
+# Creates bicep/main.json (ARM template)
 
 # Validate deployment (doesn't actually deploy)
-az deployment sub validate   --location swedencentral   --template-file main.bicep   --parameters dev.bicepparam
+Test-AzSubscriptionDeployment `
+  -Location swedencentral `
+  -TemplateFile .\bicep\main.bicep `
+  -TemplateParameterFile .\bicep\parameters\dev.bicepparam
 
-# Expected output: Validation successful
+# Expected output: nothing. Validation errors come back as objects; an empty
+# result means the template validated cleanly.
 ```
+
+> [!NOTE]
+> `az bicep build` is the one az CLI command kept in this section. It is a
+> **local compile** — it never contacts your subscription, so it cannot hit the
+> wrong one, and `powershell-standards.md` §5 names `az bicep` as an accepted
+> exception. `--outfile` is deliberate: `az bicep build --stdout` crashes with a
+> `UnicodeEncodeError` on a Windows console that is not UTF-8 as soon as a
+> template pulls in an AVM module (see
+> [dry-run-harness.md](../../docs/dry-run-harness.md)).
 
 ### Step 3.1.18: Preview Changes with What-If
 
 **What-If** shows what will change before deployment:
 
-```bash
-az deployment sub what-if   --location swedencentral   --template-file main.bicep   --parameters dev.bicepparam
+```powershell
+.\scripts\Deploy-Bicep.ps1 -Environment dev -WhatIf
 ```
+
+The script builds one parameter set and previews it with
+`Get-AzSubscriptionDeploymentWhatIfResult` — the same arguments the real
+deployment would use, so the preview cannot drift from the deploy.
 
 **Expected Output**:
 
@@ -1373,70 +1405,97 @@ Resource changes: 15 to create, 0 to modify, 0 to delete.
 
 Deploy to Azure:
 
-```bash
+```powershell
 # Deploy to subscription scope
-az deployment sub create   --name "SkyCraft-Dev-$(date +%Y%m%d-%H%M%S)"   --location swedencentral   --template-file main.bicep   --parameters dev.bicepparam   --confirm-with-what-if
-
-# The --confirm-with-what-if flag shows what-if and prompts for confirmation
+.\scripts\Deploy-Bicep.ps1 -Environment dev
 ```
+
+Review the `-WhatIf` output from the previous step first — that is your
+confirmation gate. The script names the deployment `SkyCraft-dev-<yyyyMMdd-HHmm>`
+for you.
 
 **Deployment Process**:
 
-1. Bicep transpiles to ARM JSON
-2. ARM validates template
-3. Shows what-if preview
-4. Asks for confirmation: `Are you sure? (y/N)`
+1. The script verifies you have an Az context (`Get-AzContext`)
+2. Bicep transpiles to ARM JSON
+3. ARM validates template
+4. `New-AzSubscriptionDeployment` submits the deployment
 5. Creates resource groups
 6. Deploys resources in parallel (where possible)
-7. Shows deployment progress
+7. Prints the deployment outputs on success, and exits non-zero on failure
 
 **Expected Duration**: 3-5 minutes for network infrastructure
 
 ### Step 3.1.20: Monitor Deployment Progress
 
-```bash
+```powershell
 # Watch deployment status
-az deployment sub show   --name "SkyCraft-Dev-20260112-205000"   --query "{Name:name,State:properties.provisioningState,Duration:properties.duration}"   --output table
+Get-AzSubscriptionDeployment -Name 'SkyCraft-dev-20260112-2050' |
+  Select-Object DeploymentName, ProvisioningState, Timestamp
 
-# List all deployments
-az deployment sub list   --query "[].{Name:name,State:properties.provisioningState,Timestamp:properties.timestamp}"   --output table
+# List all deployments (most recent first)
+Get-AzSubscriptionDeployment |
+  Sort-Object Timestamp -Descending |
+  Select-Object DeploymentName, ProvisioningState, Timestamp -First 10 |
+  Format-Table -AutoSize
 ```
 
 ### Step 3.1.21: Verify Deployed Resources
 
-```bash
+The lab ships a validation script that checks the resource groups, VNets and
+subnets, NSGs and their rules, and the load balancers and public IPs in one pass:
+
+```powershell
+.\scripts\Test-Lab.ps1 -Environment dev
+```
+
+To inspect the same resources by hand:
+
+```powershell
 # List resource groups created
-az group list   --query "[?contains(name, 'skycraft')].{Name:name,Location:location,State:properties.provisioningState}"   --output table
+Get-AzResourceGroup |
+  Where-Object ResourceGroupName -like '*skycraft*' |
+  Select-Object ResourceGroupName, Location, ProvisioningState |
+  Format-Table -AutoSize
 
 # Expected output:
-# Name                        Location       State
-# --------------------------  -------------  ---------
-# platform-skycraft-swc-rg    swedencentral  Succeeded
-# dev-skycraft-swc-rg         swedencentral  Succeeded
-# prod-skycraft-swc-rg        swedencentral  Succeeded
+# ResourceGroupName         Location       ProvisioningState
+# ------------------------  -------------  -----------------
+# platform-skycraft-swc-rg  swedencentral  Succeeded
+# dev-skycraft-swc-rg       swedencentral  Succeeded
+# prod-skycraft-swc-rg      swedencentral  Succeeded
 
 # List VNets in dev resource group
-az network vnet list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,AddressSpace:addressSpace.addressPrefixes[0],Subnets:length(subnets)}"   --output table
+Get-AzVirtualNetwork -ResourceGroupName dev-skycraft-swc-rg |
+  Select-Object Name,
+    @{N = 'AddressSpace'; E = { $_.AddressSpace.AddressPrefixes[0] } },
+    @{N = 'Subnets'; E = { $_.Subnets.Count } } |
+  Format-Table -AutoSize
 
 # Expected output:
-# Name                    AddressSpace  Subnets
-# ----------------------  ------------  -------
-# dev-skycraft-swc-vnet   10.1.0.0/16   3
+# Name                   AddressSpace  Subnets
+# ---------------------  ------------  -------
+# dev-skycraft-swc-vnet  10.1.0.0/16   3
 
 # Verify load balancer
-az network lb list   --resource-group dev-skycraft-swc-rg   --query "[].{Name:name,SKU:sku.name,BackendPools:length(backendAddressPools)}"   --output table
+Get-AzLoadBalancer -ResourceGroupName dev-skycraft-swc-rg |
+  Select-Object Name,
+    @{N = 'SKU'; E = { $_.Sku.Name } },
+    @{N = 'BackendPools'; E = { $_.BackendAddressPools.Count } } |
+  Format-Table -AutoSize
 
 # Expected output:
-# Name                   SKU       BackendPools
-# ---------------------  --------  ------------
-# dev-skycraft-swc-lb    Standard  2
+# Name                 SKU       BackendPools
+# -------------------  --------  ------------
+# dev-skycraft-swc-lb  Standard  2
 ```
 
 ### Step 3.1.22: View Deployment Outputs
 
-```bash
+```powershell
 # Get deployment outputs
-az deployment sub show   --name "SkyCraft-Dev-20260112-205000"   --query "properties.outputs"   --output json
+(Get-AzSubscriptionDeployment -Name 'SkyCraft-dev-20260112-2050').Outputs |
+  ConvertTo-Json -Depth 5
 
 # Expected output:
 # {
@@ -1459,29 +1518,35 @@ az deployment sub show   --name "SkyCraft-Dev-20260112-205000"   --query "proper
 
 After deployment, export to compare:
 
-```bash
-# Export resource group as ARM template
-az group export   --name dev-skycraft-swc-rg   --output json > deployed-template.json
+```powershell
+# Export resource group as ARM template (wraps Export-AzResourceGroup)
+.\scripts\Export-ARM.ps1 -ResourceGroup dev-skycraft-swc-rg -OutputFile deployed-template.json
 
-# Convert to Bicep to see clean version
+# Convert to Bicep to see clean version (local file operation - no subscription touched)
 az bicep decompile --file deployed-template.json
 
-# Compare with your original main.bicep
+# Compare with your original bicep/main.bicep
 ```
 
 ### Step 3.1.24: Clean Up (Optional)
 
 If you want to test redeployment:
 
-```bash
-# Delete resource groups (careful!)
-az group delete --name dev-skycraft-swc-rg --yes --no-wait
-az group delete --name prod-skycraft-swc-rg --yes --no-wait
-az group delete --name platform-skycraft-swc-rg --yes --no-wait
+```powershell
+# Preview what would be deleted - nothing is removed
+.\scripts\Remove-LabResource.ps1 -Environment all -WhatIf
+
+# Delete the Platform, Dev and Prod resource groups (careful!)
+.\scripts\Remove-LabResource.ps1 -Environment all
 
 # Redeploy from scratch using Bicep
-az deployment sub create   --name "SkyCraft-Redeploy-$(date +%Y%m%d-%H%M%S)"   --location swedencentral   --template-file main.bicep   --parameters dev.bicepparam
+.\scripts\Deploy-Bicep.ps1 -Environment dev
 ```
+
+> [!WARNING]
+> `Remove-LabResource.ps1` is destructive. It supports `-WhatIf` and `-Confirm`
+> ([powershell-standards.md](../../docs/powershell-standards.md) §5) — preview
+> first, and pass `-Force` only when you are sure.
 
 ---
 
@@ -1532,7 +1597,7 @@ Quick verification before proceeding:
 ### Deployment and Validation
 
 - [ ] Built Bicep to ARM (`az bicep build`)
-- [ ] Validated template (`az deployment sub validate`)
+- [ ] Validated template (`Test-AzSubscriptionDeployment`)
 - [ ] Previewed changes with what-if analysis
 - [ ] Deployed Bicep template successfully
 - [ ] Verified deployed resources in Azure Portal
@@ -1555,7 +1620,7 @@ Test your understanding with these questions:
 
    **1. Repeatability**: Deploy identical environments every time
    - Manual: "What did I click last time?"
-   - IaC: `az deployment create` always produces same result
+   - IaC: `.\scripts\Deploy-Bicep.ps1` always produces the same result
 
    **2. Version Control**: Track infrastructure changes in Git
    - See who changed what and when
@@ -1701,7 +1766,7 @@ Test your understanding with these questions:
    - Deploys to a **single existing resource group**
    - Can create: VNets, VMs, Storage, Load Balancers, etc.
    - Cannot create: Resource groups, subscriptions
-   - Deployment command: `az deployment group create --resource-group <name>`
+   - Deployment cmdlet: `New-AzResourceGroupDeployment -ResourceGroupName <name>`
 
    **2. Subscription Scope**
 
@@ -1723,7 +1788,7 @@ Test your understanding with these questions:
    - Deploys to **subscription level**
    - Can create: Resource groups, policy assignments, role assignments
    - Can deploy modules to specific resource groups
-   - Deployment command: `az deployment sub create --location <region>`
+   - Deployment cmdlet: `New-AzSubscriptionDeployment -Location <region>`
 
    **Other Scopes**:
    - `managementGroup`: Deploy across multiple subscriptions
@@ -1815,9 +1880,11 @@ Test your understanding with these questions:
 
    **Command**:
 
-   ```bash
-   az deployment sub what-if      --location swedencentral      --template-file main.bicep      --parameters dev.bicepparam
+   ```powershell
+   .\scripts\Deploy-Bicep.ps1 -Environment dev -WhatIf
    ```
+
+   The script wraps `Get-AzSubscriptionDeploymentWhatIfResult`.
 
    **Output Shows**:
 
@@ -1881,26 +1948,37 @@ Test your understanding with these questions:
    ```bicep
    // swedencentral.bicepparam
    using './main.bicep'
-   param location = 'swedencentral'
-   param environment = 'prod-se'
+   param parLocation = 'swedencentral'
+   param parEnvironment = 'prod-se'
    ```
 
    ```bicep
    // northeurope.bicepparam
    using './main.bicep'
-   param location = 'northeurope'
-   param environment = 'prod-ne'
+   param parLocation = 'northeurope'
+   param parEnvironment = 'prod-ne'
    ```
 
    Deploy:
 
-   ```bash
+   ```powershell
    # Deploy to Sweden Central
-   az deployment sub create      --location swedencentral      --template-file main.bicep      --parameters swedencentral.bicepparam
+   New-AzSubscriptionDeployment -Location swedencentral `
+     -TemplateFile .\bicep\main.bicep `
+     -TemplateParameterFile .\bicep\parameters\swedencentral.bicepparam
 
    # Deploy to North Europe
-   az deployment sub create      --location northeurope      --template-file main.bicep      --parameters northeurope.bicepparam
+   New-AzSubscriptionDeployment -Location northeurope `
+     -TemplateFile .\bicep\main.bicep `
+     -TemplateParameterFile .\bicep\parameters\northeurope.bicepparam
    ```
+
+   > [!NOTE]
+   > **Conceptual answer.** This lab ships `dev.bicepparam` and
+   > `prod.bicepparam`, not per-region parameter files. The commands above
+   > illustrate the pattern; they will not run against this repo as written.
+   > The lab's real deployment path is
+   > `.\scripts\Deploy-Bicep.ps1 -Environment dev|prod -Location swedencentral|northeurope`.
 
    **Approach 2: Loop Over Regions** (Advanced)
 
@@ -1924,17 +2002,26 @@ Test your understanding with these questions:
 
    **Approach 3: Separate Deployments with Script**
 
-   ```bash
-   #!/bin/bash
-   # deploy-multi-region.sh
+   ```powershell
+   # Deploy-MultiRegion.ps1
 
-   REGIONS=("swedencentral" "northeurope")
+   $regions = @('swedencentral', 'northeurope')
 
-   for REGION in "${REGIONS[@]}"; do
-     echo "Deploying to $REGION..."
-     az deployment sub create        --name "SkyCraft-$REGION-$(date +%Y%m%d)"        --location "$REGION"        --template-file main.bicep        --parameters location="$REGION" environment="prod-${REGION:0:2}"
-   done
+   foreach ($region in $regions) {
+       Write-Host "Deploying to $region..."
+       New-AzSubscriptionDeployment `
+         -Name "SkyCraft-$region-$(Get-Date -Format 'yyyyMMdd')" `
+         -Location $region `
+         -TemplateFile .\bicep\main.bicep `
+         -TemplateParameterObject @{
+             parLocation    = $region
+             parEnvironment = "prod-$($region.Substring(0, 2))"
+         }
+   }
    ```
+
+   > [!NOTE]
+   > **Conceptual answer** - this loop is not a script shipped with the lab.
 
    **For SkyCraft Multi-Region**:
    - Primary region: Sweden Central (main production)
@@ -2007,7 +2094,7 @@ Test your understanding with these questions:
 
 - Check deployment scope matches expected (subscription vs resource group)
 - Verify resource group was created if using subscription scope
-- Review deployment details: `az deployment sub show --name <deployment-name>`
+- Review deployment details: `Get-AzSubscriptionDeployment -Name <deployment-name>`
 - Check if deployment created resources in different subscription/resource group than expected
 - Look for `condition` properties that may have skipped resource creation
 
@@ -2083,7 +2170,7 @@ output vnetId string = existingVnet.id
 - ✅ Created reusable Bicep modules (network, NSG, load balancer, public IP)
 - ✅ Built complete infrastructure template with main.bicep orchestrator
 - ✅ Created parameter files for dev and prod environments
-- ✅ Validated templates with `az bicep build` and `validate`
+- ✅ Validated templates with `az bicep build` and `Test-AzSubscriptionDeployment`
 - ✅ Previewed changes with `what-if` analysis
 - ✅ Deployed infrastructure using Bicep templates
 - ✅ Verified deployed resources and outputs

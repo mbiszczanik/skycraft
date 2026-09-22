@@ -728,9 +728,17 @@ Test your understanding with these questions:
 
 **Solution**:
 
-```azurecli
-# Enable Network Watcher for Sweden Central
-az network watcher configure   --resource-group NetworkWatcherRG   --locations swedencentral   --enabled true
+```powershell
+# Check whether a Network Watcher already exists for the region
+Get-AzNetworkWatcher -Location swedencentral -ErrorAction SilentlyContinue
+
+# If none is returned, create one. Unlike `az network watcher configure`, the
+# cmdlet does not create the resource group implicitly, so make it first.
+New-AzResourceGroup -Name NetworkWatcherRG -Location swedencentral -Force
+New-AzNetworkWatcher `
+  -Name NetworkWatcher_swedencentral `
+  -ResourceGroupName NetworkWatcherRG `
+  -Location swedencentral
 ```
 
 Wait 2-3 minutes, then refresh Azure Portal.
