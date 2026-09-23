@@ -62,22 +62,29 @@ Before starting, ensure you have:
 **Verify the earlier modules** — these are the resources each `Deploy-Bicep.ps1` resolves before it deploys:
 
 ```powershell
-# Platform RG - every Lab 5.x deployment hard-fails without it
-Get-AzResourceGroup -Name platform-skycraft-swc-rg |
-    Select-Object ResourceGroupName, Location | Format-Table -AutoSize
+# One row per prerequisite. MISSING is the expected answer before the earlier
+# module is done, not an error - so every lookup is scoped and non-throwing.
+$platformRg = 'platform-skycraft-swc-rg'
+$prodRg     = 'prod-skycraft-swc-rg'
+$devRg      = 'dev-skycraft-swc-rg'
 
-# Lab 4.1 storage account - Labs 5.1 and 5.3 stream diagnostics to it
-Get-AzStorageAccount -ResourceGroupName platform-skycraft-swc-rg -Name platformskycraftswcsa |
-    Select-Object StorageAccountName, ResourceGroupName | Format-Table -AutoSize
+$found = [ordered]@{
+    # Every Lab 5.x deployment hard-fails without the platform resource group
+    'Platform RG (Lab 1.2)'      = (Get-AzResourceGroup -Name $platformRg -ErrorAction SilentlyContinue).ResourceGroupName
+    # Labs 5.1 and 5.3 stream diagnostics to the Lab 4.1 platform account
+    'Platform storage (Lab 4.1)' = (Get-AzStorageAccount -ResourceGroupName $platformRg -Name platformskycraftswcsa -ErrorAction SilentlyContinue).StorageAccountName
+    # Labs 5.1/5.2 take the first VM they find; Lab 5.3 needs two distinct ones
+    'VMs (Lab 3.2)'              = (@($devRg, $prodRg | ForEach-Object { Get-AzVM -ResourceGroupName $_ -ErrorAction SilentlyContinue }).Name -join ', ')
+    # Lab 5.3 attaches the flow log to the Lab 2.1 production VNet
+    'Prod VNet (Lab 2.1)'        = (Get-AzVirtualNetwork -ResourceGroupName $prodRg -Name prod-skycraft-swc-vnet -ErrorAction SilentlyContinue).Name
+}
 
-# Lab 3.2 VMs - Labs 5.1/5.2 take the first one they find, Lab 5.3 needs two
-'dev-skycraft-swc-rg', 'prod-skycraft-swc-rg' |
-    ForEach-Object { Get-AzVM -ResourceGroupName $_ -ErrorAction SilentlyContinue } |
-    Select-Object Name, ResourceGroupName | Format-Table -AutoSize
-
-# Lab 2.1 production VNet - Lab 5.3 attaches the flow log to it
-Get-AzVirtualNetwork -ResourceGroupName prod-skycraft-swc-rg -Name prod-skycraft-swc-vnet |
-    Select-Object Name, ResourceGroupName | Format-Table -AutoSize
+$found.GetEnumerator() | ForEach-Object {
+    [pscustomobject]@{
+        Prerequisite = $_.Key
+        Found        = if ($_.Value) { $_.Value } else { 'MISSING' }
+    }
+} | Format-Table -AutoSize
 ```
 
 ---
