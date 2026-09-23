@@ -9,6 +9,14 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2](https://github.com/mbiszczanik/skycraft/compare/v0.10.1...v0.10.2) (2026-09-23)
+
+
+### Documentation
+
+* **lab-guides:** deploy and validate with Az PowerShell, not the az CLI ([#141](https://github.com/mbiszczanik/skycraft/issues/141)) ([#165](https://github.com/mbiszczanik/skycraft/issues/165)) ([f67341f](https://github.com/mbiszczanik/skycraft/commit/f67341fde17709827384e6d0fd8aa7c2b404f5ce))
+* verify Module 5 prerequisites with Az PowerShell and the right resources ([#142](https://github.com/mbiszczanik/skycraft/issues/142)) ([#164](https://github.com/mbiszczanik/skycraft/issues/164)) ([11d05d5](https://github.com/mbiszczanik/skycraft/commit/11d05d5168990a2338f548192d360ccde4e5eaa1))
+
 ## [0.10.1](https://github.com/mbiszczanik/skycraft/compare/v0.10.0...v0.10.1) (2026-09-22)
 
 
