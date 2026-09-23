@@ -9,6 +9,13 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.3](https://github.com/mbiszczanik/skycraft/compare/v0.10.2...v0.10.3) (2026-09-23)
+
+
+### Bug Fixes
+
+* **docs:** name the hub resource group consistently in Lab 1.2 and DESIGN-DECISIONS ([#131](https://github.com/mbiszczanik/skycraft/issues/131)) ([#168](https://github.com/mbiszczanik/skycraft/issues/168)) ([18ce02c](https://github.com/mbiszczanik/skycraft/commit/18ce02c7430d3134d8fc91399342d72384bc1a60))
+
 ## [0.10.2](https://github.com/mbiszczanik/skycraft/compare/v0.10.1...v0.10.2) (2026-09-23)
 
 
