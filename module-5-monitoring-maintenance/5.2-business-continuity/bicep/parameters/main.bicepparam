@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 5.2 - Parameters
 DESCRIPTION: Assigns the parameters the CI "bicep build-params" check requires. The workspace resource ID comes from an environment variable, with a well-formed placeholder (zero subscription GUID) as the default; Deploy-Bicep.ps1 resolves the real value from Azure and passes it directly instead of using this file
-EXAMPLE: az deployment sub create --location swedencentral --template-file ../main.bicep --parameters main.bicepparam
+EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
 VERSION: 1.0.0
 ======================================================*/

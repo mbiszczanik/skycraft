@@ -125,17 +125,22 @@ Before starting this lab:
 - [ ] [REQUIRED_ROLE — e.g. Contributor or Owner role at subscription level]
 - [ ] Understanding of [CONCEPT_PREREQUISITES — e.g. cloud storage concepts]
 
-<!-- OPTIONAL: CLI verification block -->
+<!-- OPTIONAL: prerequisite verification block -->
+<!-- Az PowerShell, not az CLI: this block is operational (it checks the lab can run),  -->
+<!-- not educational. See docs/powershell-standards.md section 5 - on a workstation     -->
+<!-- where the az CLI is signed in to a different subscription than Az PowerShell, an   -->
+<!-- `az` block here silently checks the wrong one. Multi-modal Portal/CLI/PowerShell   -->
+<!-- teaching belongs in the Configuration sections below.                              -->
 
 **Verify prerequisites**:
 
-```azurecli
+```powershell
 # [VERIFICATION_DESCRIPTION]
 [VERIFICATION_COMMAND_1]
 
 # [VERIFICATION_DESCRIPTION]
 [VERIFICATION_COMMAND_2]
-````
+```
 
 ---
 

@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 3.1 - Prod Parameters
 DESCRIPTION: Parameter values for Production Environment
-EXAMPLE: az deployment sub create --location swedencentral --template-file main.bicep --parameters parameters/prod.bicepparam
+EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment prod
 AUTHOR/S: Marcin Biszczanik
 VERSION: 1.1.0
 ======================================================*/

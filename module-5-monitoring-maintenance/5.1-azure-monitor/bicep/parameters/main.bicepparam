@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 5.1 - Parameters
 DESCRIPTION: Assigns the parameters the CI "bicep build-params" check requires. The three run-time values (ops e-mail, monitored VM and platform storage account resource IDs) come from environment variables, with well-formed placeholders (zero subscription GUID) as defaults; Deploy-Bicep.ps1 resolves the real values from Azure and passes them directly instead of using this file
-EXAMPLE: az deployment sub create --location swedencentral --template-file ../main.bicep --parameters main.bicepparam
+EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
 VERSION: 1.0.0
 ======================================================*/

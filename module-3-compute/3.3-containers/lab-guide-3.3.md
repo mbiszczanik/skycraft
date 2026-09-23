@@ -104,10 +104,32 @@ We will use **ACR Tasks** to build a container image directly in Azure without n
 2. Run the following command to build an image from a public GitHub Dockerfile and push it to your registry. Replace `[your-acr-name]` with your actual registry name.
 
 ```azurecli
-az acr build --registry [your-acr-name] --image skycraft-auth:v1 https://github.com/Azure-Samples/aci-helloworld.git
+az acr build --registry [your-acr-name] --image skycraft-auth:v1 --output json https://github.com/Azure-Samples/aci-helloworld.git
 ```
 
 > **Why this works**: `az acr build` streams the build context to Azure, builds the image on Azure's infrastructure, and pushes it to your registry automatically.
+
+> [!NOTE]
+> **This is the documented az CLI exception.** Every other operational command in
+> this course is Az PowerShell ([powershell-standards.md](../../docs/powershell-standards.md)
+> §5), because the az CLI and Az PowerShell can be signed in to different
+> subscriptions. `az acr build` stays because Az PowerShell has **no cmdlet that
+> builds an image from source** — there is no equivalent to swap in.
+>
+> Before running it, confirm the az CLI is on the same subscription as your
+> Az PowerShell session:
+>
+> ```powershell
+> az account show --output json | ConvertFrom-Json | Select-Object -ExpandProperty id
+> (Get-AzContext).Subscription.Id   # these two must match
+> ```
+>
+> The lab's `scripts/Deploy-Bicep.ps1` does **not** run this command. Because it
+> has no cmdlet to call, it imports the same prebuilt image from Microsoft
+> Container Registry instead (`Import-AzContainerRegistryImage` with
+> `mcr.microsoft.com/azuredocs/aci-helloworld:latest`), which produces a
+> functionally equivalent runnable web image. Run this step by hand to learn ACR
+> Tasks; run the script to provision the lab.
 
 **Expected Result**:
 
