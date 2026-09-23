@@ -75,7 +75,7 @@ lab; this section is the architect's view in one place.
 
 - **Lab:** `{environment}-{project}-{region-code}-{resource-type-suffix}`
   enforced uniformly. Examples: `prod-skycraft-swc-vnet`,
-  `dev-skycraft-swc-rg`, `plat-skycraft-swc-nsg-auth`. Codified in
+  `dev-skycraft-swc-rg`, `platform-skycraft-swc-asg-auth`. Codified in
   [docs/bicep-standards.md](docs/bicep-standards.md).
 - **Production gap:** No automated linter / policy enforcement of the naming
   scheme; deviations rely on PR review.
