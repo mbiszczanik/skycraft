@@ -7,6 +7,11 @@
     subscription, which is what makes the suite runnable in CI and on a machine that has never
     logged in. Anything that would reach Azure goes through one of the engine's injectable probes.
 
+    And that is enforced, not assumed (#152). The file runs the orchestrators in-process, often on
+    a machine that IS logged in, and their defaults are the real thing. BeforeAll poisons every
+    probe and runner default and every Az command they name; a poison records its name before it
+    throws, and the last test fails if anything reached one.
+
     Three kinds of test, and the split matters:
 
       MANIFEST INTEGRITY - the manifest is data, and data that disagrees with the scripts it
@@ -122,6 +127,17 @@ $ToolScriptCases = @(
     @{ Name = 'Invoke-LabScript.ps1'; Path = (Join-Path $ToolsDir 'Invoke-LabScript.ps1') }
 )
 
+# What the isolation guard in BeforeAll has to poison (#152), read from the orchestrators' own AST
+# so the case lists grow when they do. The guard is installed in BeforeAll; these only give each
+# poisoned name its own case, so a failure names it.
+Import-Module (Join-Path (Join-Path $PSScriptRoot 'Support') 'LabCycleIsolation.psm1') -Force
+$OrchestratorPaths = @((Join-Path $ToolsDir 'Invoke-LabCycle.ps1'), (Join-Path $ToolsDir 'Remove-LabCycle.ps1'))
+$AzCommandCases = @(
+    Get-LabCycleAzCommand -Path ($OrchestratorPaths + (Join-Path $ToolsDir 'LabCycle.psm1')) |
+        ForEach-Object { @{ Name = $_ } }
+)
+$PoisonedParameterCases = @(Get-LabCycleScriptblockParameter -Path $OrchestratorPaths | ForEach-Object { @{ Key = $_.Key } })
+
 BeforeAll {
     $script:RepoRoot     = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     $script:ToolsDir     = Join-Path $script:RepoRoot 'tools'
@@ -130,6 +146,83 @@ BeforeAll {
     $script:LivePhases   = @($script:Manifest.Phases | Where-Object { -not $_.Excluded })
 
     Import-Module (Join-Path $script:ToolsDir 'LabCycle.psm1') -Force
+
+    # -- Isolation guard (#152) -------------------------------------------------------------------
+    # Every orchestrator call in this file overrides the probes that reach Azure, and nothing but
+    # care made that true. The DEFAULTS are Remove-AzResourceGroup -Force, Get-AzContext, and
+    # runners that start the real lab scripts in a child pwsh; and tools/Invoke-DryRun.ps1
+    # -Check Pester runs this file in-process on a developer box that is signed in. A call that
+    # forgot one override would have deleted a resource group, not failed a test.
+    #
+    # Two layers, each covering something the other cannot reach:
+    #
+    #   1. Every [scriptblock] parameter of both orchestrators gets a poisoned default through
+    #      $PSDefaultParameterValues. An explicit or splatted value still wins, so no existing
+    #      test changes meaning; a forgotten one gets the poison instead of the real default. This
+    #      is the only layer that covers the runners, whose real default is a child process that
+    #      no in-process stub reaches - and the handoff from Invoke-LabCycle.ps1 to the real
+    #      Remove-LabCycle.ps1, which passes no probes at all.
+    #   2. Every Az command the orchestrators and LabCycle.psm1 name is shadowed by a global
+    #      function. A function outranks a cmdlet, including when called from inside the module,
+    #      which is where Test-LabCyclePreflight calls Get-AzKeyVault and Invoke-AzRestMethod with
+    #      no parameter to override. None of the names is an alias today; an alias would outrank
+    #      the function, which is why the first Describe checks resolution rather than assuming it.
+    #
+    # A poison RECORDS before it throws, because throwing is not enough: Remove-LabCycle.ps1 calls
+    # the remover inside try/catch and reports the error as a failed sweep entry, so a test that
+    # does not look at the exit code would stay green. The last Describe asserts the ledger empty.
+    Import-Module (Join-Path (Join-Path $PSScriptRoot 'Support') 'LabCycleIsolation.psm1') -Force
+
+    $script:PoisonLedger = [System.Collections.Generic.List[string]]::new()
+    function Get-Poison {
+        param([Parameter(Mandatory)][string]$Name)
+        # Copied to locals so GetNewClosure captures them; a closure over the parameter itself
+        # works too, but the analyzer cannot see the use and reports it unused.
+        $ledger = $script:PoisonLedger
+        $label  = $Name
+        { $ledger.Add($label); throw "LabCycle.Tests reached '$label', a real default that talks to Azure or starts a lab script. Override it in the call." }.GetNewClosure()
+    }
+
+    function Measure-PoisonHit {
+        <#
+            Runs an action that is EXPECTED to reach a poison, and returns the names it reached.
+            Removes them from the ledger again, so a deliberate hit here is not reported as an
+            accidental one by the check at the end of the file.
+        #>
+        param([Parameter(Mandatory)][scriptblock]$Action)
+
+        $before = $script:PoisonLedger.Count
+        try { & $Action *> $null } catch { $null = $_ }
+        $hits = @($script:PoisonLedger.GetRange($before, $script:PoisonLedger.Count - $before))
+        $script:PoisonLedger.RemoveRange($before, $hits.Count)
+        , $hits
+    }
+
+    $orchestrators = @((Join-Path $script:ToolsDir 'Invoke-LabCycle.ps1'), (Join-Path $script:ToolsDir 'Remove-LabCycle.ps1'))
+
+    # Layer 1. The developer's own global defaults are copied in first, so they still apply; the
+    # copy lives in this file's scope and goes away with it.
+    #
+    # Each entry is a scriptblock that RETURNS the poison, not the poison itself. PowerShell
+    # evaluates a scriptblock found in $PSDefaultParameterValues at bind time, for every parameter
+    # the call left unbound, and binds the result. Registered bare, the poison fired on binding -
+    # for SleepRunner on every engine call, although only a retry ever sleeps. Measured, not read.
+    $defaults = @{}
+    foreach ($key in @($global:PSDefaultParameterValues.Keys)) { $defaults[$key] = $global:PSDefaultParameterValues[$key] }
+    $script:PoisonedParameters = @(Get-LabCycleScriptblockParameter -Path $orchestrators | ForEach-Object { $_.Key })
+    foreach ($key in $script:PoisonedParameters) {
+        $poison = Get-Poison -Name $key
+        $defaults[$key] = { $poison }.GetNewClosure()
+    }
+    $script:PSDefaultParameterValues = $defaults
+
+    # Layer 2. Global, because LabCycle.psm1 resolves commands from its own session state, which
+    # sees the global scope and not this one. Removed in AfterAll; a module function this shadows
+    # (Az.DataProtection exports functions) resolves again once the shadow is gone.
+    $script:AzCommands = @(Get-LabCycleAzCommand -Path ($orchestrators + (Join-Path $script:ToolsDir 'LabCycle.psm1')))
+    foreach ($name in $script:AzCommands) {
+        Set-Item -LiteralPath "Function:\global:$name" -Value (Get-Poison -Name $name)
+    }
 
     # Re-declared for the run phase. Pester 5 executes this file once to discover and again to run,
     # and a file-level variable set during discovery is not what an It body reads.
@@ -208,6 +301,110 @@ BeforeAll {
 AfterAll {
     if ($script:Scratch -and (Test-Path -LiteralPath $script:Scratch)) {
         Remove-Item -LiteralPath $script:Scratch -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    # The Az shadows are global and would outlive the run in an in-process Invoke-Pester. Removed
+    # WITHOUT the 'global:' qualifier: Remove-Item ignores it on the Function drive and removes
+    # nothing, silently. Unqualified, it removes the nearest definition, which from here is the
+    # shadow; a module function it hid (Az.DataProtection) resolves again afterwards. Measured.
+    foreach ($name in @($script:AzCommands)) {
+        Remove-Item -LiteralPath "Function:\$name" -ErrorAction SilentlyContinue
+    }
+}
+
+# =============================================================================================
+# Isolation - runs first, so a guard that failed to install is reported before anything relies
+# on it (#152)
+# =============================================================================================
+
+Describe 'Isolation - the suite cannot reach Azure' {
+    It 'shadows <Name>, which the orchestrators call, with a stub that records and throws' -ForEach $AzCommandCases {
+        (Get-Command -Name $Name).CommandType | Should -Be 'Function' -Because 'an alias or a cmdlet here means the real Az command wins'
+
+        # Resolved again from inside LabCycle.psm1, whose own calls see the global scope and not
+        # this file's.
+        $module = @(Get-Module -Name LabCycle)[0]
+        (& $module { param($n) (Get-Command -Name $n).CommandType } $Name) | Should -Be 'Function'
+
+        $hits = Measure-PoisonHit { & $Name }
+        $hits | Should -Be @($Name)
+    }
+
+    It 'gives <Key> a poisoned default that fires on use, not on binding' -ForEach $PoisonedParameterCases {
+        # What binding sees: the wrapper runs, records nothing, and hands back the poison.
+        $bound = Measure-PoisonHit { $script:BoundDefault = & $PSDefaultParameterValues[$Key] }
+        $bound | Should -BeNullOrEmpty -Because 'a default that fired on binding would fail every call that leaves the parameter unused'
+        $script:BoundDefault | Should -BeOfType [scriptblock]
+
+        # What the orchestrator gets if it calls that default.
+        $used = Measure-PoisonHit { & $script:BoundDefault }
+        $used | Should -Be @($Key)
+    }
+
+    It 'derives a surface that includes what the issue was about, so the cases above cannot pass by vacuity' {
+        # Read from the run-phase copies: the -ForEach lists above are discovery-time state, and
+        # an It body does not see them.
+        $script:AzCommands | Should -Contain 'Remove-AzResourceGroup'
+        $script:AzCommands | Should -Contain 'Get-AzContext'
+        foreach ($key in 'Remove-LabCycle.ps1:ResourceGroupRemover', 'Remove-LabCycle.ps1:TeardownRunner',
+                         'Remove-LabCycle.ps1:ContextProbe', 'Invoke-LabCycle.ps1:PhaseRunner',
+                         'Invoke-LabCycle.ps1:PreflightRunner', 'Invoke-LabCycle.ps1:ContextProbe') {
+            $script:PoisonedParameters | Should -Contain $key
+        }
+    }
+
+    It 'a Remove-LabCycle.ps1 call that forgets -ResourceGroupRemover reaches the poison, not Remove-AzResourceGroup' {
+        # The exact failure #152 describes. Remove-LabCycle.ps1 catches the remover's error and
+        # reports it as a failed sweep entry, so this is also the proof that the ledger - not the
+        # throw - is what makes the miss visible.
+        $manifest = New-FixtureManifest -Body @'
+@{
+    Phases = @()
+    SoftDeleteGuards = @()
+    CompileOnly = @()
+    Teardowns = @()
+    ResidualSweep = @{ BackupResourceGroupPrefix = 'AzureBackupRG_'; AssertAbsent = @(); ResourceGroups = @('fixture-rg') }
+    ToolingFloor = @{ AzCli = '2.75.0'; AzPowerShell = '7.5.0' }
+}
+'@
+        $hits = Measure-PoisonHit {
+            & $script:RemoveCycle -SubscriptionId 'fixture-subscription' -ManifestPath $manifest -Confirm:$false `
+                -LogDirectory $script:OfflinePaths.LogDirectory -ResultsPath $script:OfflinePaths.ResultsPath `
+                -ContextProbe $script:GoodContext -ToolingFloorRunner { @() } -TeardownRunner { 0 } `
+                -BackupResourceGroupProbe { @() } -ResourceGroupProbe { 'still here' } -VaultProbe { $null }
+        }
+
+        $hits | Should -Contain 'Remove-LabCycle.ps1:ResourceGroupRemover'
+        $hits | Should -Not -Contain 'Remove-AzResourceGroup' -Because 'the parameter poison has to stop it before the Az layer is needed'
+    }
+
+    It 'an Invoke-LabCycle.ps1 call that forgets -SkipCleanup reaches the real teardown''s poisons, not Azure' {
+        # The handoff passes the teardown no probes at all, so without the guard the real
+        # Remove-LabCycle.ps1 would run on its real defaults.
+        $manifest = New-FixtureManifest -Body @'
+@{
+    Phases = @(
+        @{ Id = 'a'; Lab = 'module-1-identities-governance/1.2-rbac'; ParamFile = 'x'; Deploy = @{}; PostDeploy = $null; Test = @{}; DependsOn = @(); TimeoutMs = 1000; Excluded = $null }
+    )
+    SoftDeleteGuards = @()
+    CompileOnly = @()
+    Teardowns = @()
+    ResidualSweep = @{ BackupResourceGroupPrefix = 'AzureBackupRG_'; AssertAbsent = @(); ResourceGroups = @('fixture-rg') }
+    ToolingFloor = @{ AzCli = '2.75.0'; AzPowerShell = '7.5.0' }
+}
+'@
+        # Own lock and state paths: this run is expected to die half way, and a lock it leaves
+        # behind must not be the one every other engine test checks.
+        $paths = @{} + $script:OfflinePaths
+        $paths.LockPath  = Join-Path $script:Scratch "lock-$([guid]::NewGuid().ToString('N')).json"
+        $paths.StatePath = Join-Path $script:Scratch "state-$([guid]::NewGuid().ToString('N')).json"
+
+        $hits = Measure-PoisonHit {
+            & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $manifest `
+                -PhaseRunner { 0 } -PreflightRunner { @() } -ContextProbe $script:GoodContext -Yes @paths
+        }
+
+        @($hits | Where-Object { $_ -like 'Remove-LabCycle.ps1:*' }).Count | Should -BeGreaterThan 0
+        @($hits | Where-Object { $_ -like '*-Az*' }) | Should -BeNullOrEmpty
     }
 }
 
@@ -1564,5 +1761,13 @@ Describe 'The offline suite must not write into the repository' {
         # failure mode that makes a green suite worth less than no suite.
         @($script:RunArtefacts).Count | Should -BeGreaterThan 0
         $script:ArtefactsBefore.Keys.Count | Should -Be @($script:RunArtefacts).Count
+    }
+}
+
+Describe 'Isolation - no test reached a real default' {
+    It 'recorded no poison hit anywhere in the suite' {
+        # Last in the file on purpose. A forgotten override inside a try/catch in the orchestrator
+        # does not fail the test that made it; it lands here, named (#152).
+        $script:PoisonLedger | Should -BeNullOrEmpty -Because 'every orchestrator call has to override every probe and runner, or a developer box that is signed in runs the real one'
     }
 }
