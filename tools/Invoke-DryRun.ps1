@@ -5,7 +5,7 @@
 .DESCRIPTION
     Invoke-DryRun.ps1 is the local pre-push gate for SkyCraft. It mirrors the parts of
     the Lint workflow (.github/workflows/lint.yml) that a developer machine can run
-    without 'az login' and without any deployed Azure resources:
+    without an Azure sign-in and without any deployed Azure resources:
 
       Parse       Every *.ps1 / *.psm1 / *.psd1 is parsed with the PowerShell parser.
                   A syntax error is invisible to PSScriptAnalyzer, so this runs first.
@@ -23,8 +23,8 @@
     run reports every problem instead of only the first. The script prints a consolidated
     summary and exits non-zero if any selected check failed.
 
-    Checks that need a live subscription are deliberately out of scope: 'az deployment ...
-    what-if', 'Test-Lab.ps1' and 'Remove-LabResource.ps1' all require 'az login' plus
+    Checks that need a live subscription are deliberately out of scope: 'Deploy-Bicep.ps1
+    -WhatIf', 'Test-Lab.ps1' and 'Remove-LabResource.ps1' all require Connect-AzAccount plus
     existing resources. See docs/dry-run-harness.md for per-lab copy-paste commands.
     markdownlint and gitleaks need tooling outside PowerShell and stay in CI.
 
@@ -621,7 +621,7 @@ if ($skippedChecks.Count -gt 0) {
 }
 
 Write-Host ''
-Write-Host 'Out of scope here (need Azure or extra tooling): az deployment what-if, Test-Lab.ps1,' -ForegroundColor Gray
+Write-Host 'Out of scope here (need Azure or extra tooling): Deploy-Bicep.ps1 -WhatIf, Test-Lab.ps1,' -ForegroundColor Gray
 Write-Host 'Remove-LabResource.ps1, markdownlint, gitleaks. See docs/dry-run-harness.md for the' -ForegroundColor Gray
 Write-Host 'copy-paste commands, per lab.' -ForegroundColor Gray
 
