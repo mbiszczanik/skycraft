@@ -9,6 +9,13 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.4](https://github.com/mbiszczanik/skycraft/compare/v0.10.3...v0.10.4) (2026-09-27)
+
+
+### Documentation
+
+* **dry-run:** frame live verification around Az PowerShell, not az login ([#143](https://github.com/mbiszczanik/skycraft/issues/143)) ([#171](https://github.com/mbiszczanik/skycraft/issues/171)) ([59c992f](https://github.com/mbiszczanik/skycraft/commit/59c992fabd8ffdfa2f2dea1317f4d874af60a9b0))
+
 ## [0.10.3](https://github.com/mbiszczanik/skycraft/compare/v0.10.2...v0.10.3) (2026-09-23)
 
 
