@@ -9,12 +9,12 @@
 - [ ] Public access level: **Private (no anonymous access)**
 - [ ] Default access tier: **Hot**
 
-### public-demo Container (Public - Dev Only)
+### public-demo Container (Private - Dev Only)
 
 - [ ] Container name: `public-demo`
 - [ ] Location: **dev-skycraft-swc-rg / devskycraftswcsa**
-- [ ] Public access level: **Blob (anonymous read access for blobs only)**
-- [ ] Test blob accessible via public URL
+- [ ] Anonymous access level: **Private (no anonymous access)** - Blob/Container are unavailable while the account switch is off
+- [ ] Anonymous request to a test blob URL is refused with `PublicAccessNotPermitted`
 
 ### player-backups Container (Private)
 
@@ -193,7 +193,7 @@ Get-AzStorageBlob -Container game-assets -Prefix 'textures/test-asset.txt' -Incl
 | player-backups | Private       | Archive (7d)  | archive-backups | ✅     |
 | server-config  | Private       | Hot           | None            | ✅     |
 | game-logs      | Private       | Cool→Archive  | tier-game-logs  | ✅     |
-| public-demo    | Blob (public) | Hot           | None            | ✅     |
+| public-demo    | Private       | Hot           | None            | ✅     |
 
 ### Data Protection Summary
 
@@ -288,9 +288,9 @@ Get-AzStorageBlob -Container game-assets -Prefix 'textures/test-asset.txt' -Incl
 
 **All Verification Items Complete**:
 
-- [ ] All four containers created with correct naming
+- [ ] All five containers created with correct naming
 - [ ] `game-assets` is **Private** (Production)
-- [ ] `public-demo` has blob-level public access (Development)
+- [ ] `public-demo` is **Private** (Development) and the account's AllowBlobPublicAccess is False
 - [ ] Soft delete enabled for blobs (7 days)
 - [ ] Soft delete enabled for containers (7 days)
 - [ ] Blob versioning enabled

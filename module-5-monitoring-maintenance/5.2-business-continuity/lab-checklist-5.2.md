@@ -92,7 +92,7 @@
 
 ## ✅ Backup Reports Verification
 
-- [ ] Diagnostic setting `rsv-backup-reports-diag` on `platform-skycraft-swc-rsv` → workspace `platform-skycraft-swc-law` (categories `AzureBackupReport`, `CoreAzureBackup`, `AddonAzureBackupJobs`, `AddonAzureBackupPolicy`, `AddonAzureBackupProtectedInstance`)
+- [ ] Diagnostic setting `rsv-backup-reports-diag` on `platform-skycraft-swc-rsv` → workspace `platform-skycraft-swc-law` (resource-specific categories `CoreAzureBackup`, `AddonAzureBackupJobs`, `AddonAzureBackupPolicy`, `AddonAzureBackupStorage`, `AddonAzureBackupProtectedInstance`, `AzureBackupOperations`; not the legacy `AzureBackupReport`)
 - [ ] Diagnostic setting `bv-backup-reports-diag` on `platform-skycraft-swc-bv` → workspace `platform-skycraft-swc-law` (the four `CoreAzureBackup`/`Addon*` categories)
 - [ ] Backup Instances report in Backup center shows all protected items (up to 24 h after the settings exist)
 

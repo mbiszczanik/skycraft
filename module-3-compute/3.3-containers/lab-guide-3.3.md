@@ -41,7 +41,8 @@ Before starting this lab:
 - [ ] Resource group `dev-skycraft-swc-rg` (Lab 1.2). Nothing else from an earlier lab is required: the containers here use no VNet, and `scripts/Deploy-Bicep.ps1` creates the resource group if it is missing and bootstraps the registry and the image itself (`tools/lab-cycle-manifest.psd1` lists this lab as depending on 1.2 only).
 - [ ] Labs 3.1 and 3.2 completed - recommended for context, not a dependency.
 - [ ] **Owner** or **Contributor** role on the subscription.
-- [ ] Azure CLI installed or access to Cloud Shell.
+- [ ] PowerShell 7+ and the `Az` module (Az.Accounts, Az.Resources, Az.ContainerRegistry).
+- [ ] Bicep CLI on `PATH` - Az PowerShell compiles `main.bicep` through it.
 
 ---
 

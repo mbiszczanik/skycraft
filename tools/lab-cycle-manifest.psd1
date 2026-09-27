@@ -46,7 +46,8 @@
       [ERROR] and exits 1. All of module 5, read on 2026-08-30 against this tree:
         5.1 gates on the platform resource group, on at least one lab-3.2 VM, and on a storage
             account in the platform group;
-        5.2 gates on the platform resource group and on 5.1's Log Analytics workspace;
+        5.2 gates on the platform resource group and on 5.1's Log Analytics workspace, and its
+            PostDeploy on lab 4.1's prod storage account;
         5.3 gates on the platform resource group, lab 2.1's prod VNet, lab 4.1's platform storage
             account, 5.1's workspace, and on TWO distinct lab-3.2 VMs for Connection Monitor.
       Those phases carry a 'gate:' note. Note that 5.1's and 5.3's VM checks are gates in this
@@ -203,10 +204,13 @@
             Deploy       = @{ Force = $true }
             PostDeploy   = $null
             Test         = @{}
-            DependsOn    = @('2.1')
+            DependsOn    = @('2.3')
             TimeoutMs    = 2400000
             StdinAnswers = $null
             Excluded     = $null
+            # gate: verified - exits 1 on a missing $HOME\.ssh\skycraft-dev.pub, dev resource
+            # group, dev VNet or dev-skycraft-swc-lb. The load balancer comes from Lab 2.3 or 3.1;
+            # the manifest cannot express OR, and 2.3 (which implies 2.1) matches the measured order.
         }
         @{
             Id           = '3.3'
@@ -327,12 +331,13 @@
             # deploys correctly and then fails its own check.
             PostDeploy   = @{ Script = 'New-LabBlobBackup.ps1'; Arguments = @{} }
             Test         = @{}
-            DependsOn    = @('5.1')
+            DependsOn    = @('4.1', '5.1')
             TimeoutMs    = 1800000
             StdinAnswers = $null
             Excluded     = $null
             # gate: verified - exits 1 on a missing platform resource group or a missing 5.1
-            # workspace. Its VM check only warns.
+            # workspace; its PostDeploy New-LabBlobBackup.ps1 exits 1 on a missing 4.1
+            # prodskycraftswcsa (needs 4.1 -All). Its VM check only warns.
             #
             # This is the lab that creates the Recovery Services Vault. See Remove-LabCycle.ps1 and
             # TROUBLESHOOTING.md for why its teardown needs a minimum az CLI / Az PowerShell.

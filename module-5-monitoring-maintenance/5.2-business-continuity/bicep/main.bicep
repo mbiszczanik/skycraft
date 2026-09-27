@@ -46,7 +46,9 @@ var varBvName = 'platform-skycraft-swc-bv'
 var varRsvDiagName = 'rsv-backup-reports-diag'
 var varBvDiagName = 'bv-backup-reports-diag'
 
-// Resource-specific Backup Reports tables; the Recovery Services Vault additionally emits AzureBackupReport
+// Resource-specific Backup Reports tables shared by both vault types. The Recovery Services Vault
+// additionally emits AddonAzureBackupStorage and AzureBackupOperations - Backup Reports needs all six.
+// The legacy AzureBackupReport event is left out: it flows only in AzureDiagnostics mode, never to Dedicated tables.
 var varBackupLogCategories = [
   'CoreAzureBackup'
   'AddonAzureBackupJobs'
@@ -55,7 +57,7 @@ var varBackupLogCategories = [
 ]
 
 var varRsvLogCategoriesAndGroups = [
-  for category in concat(varBackupLogCategories, ['AzureBackupReport']): {
+  for category in concat(varBackupLogCategories, ['AddonAzureBackupStorage', 'AzureBackupOperations']): {
     category: category
   }
 ]

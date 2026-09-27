@@ -75,8 +75,9 @@ Before starting this lab:
 
 - [ ] Completed Module 2 (Virtual Networking) - Section 2 exports the ARM templates of the VNets, NSGs and load balancers Module 2 created, so they should exist for that exercise
 - [ ] Nothing has to pre-exist for the **deployment** itself: `scripts/Deploy-Bicep.ps1` deploys `bicep/main.bicep` at subscription scope, and the template creates the three resource groups, the NSGs, the hub and dev VNets and the dev load balancer (`tools/lab-cycle-manifest.psd1` lists this lab as depending on 1.2 only). Re-running it over Module 2's resources is an idempotent update.
-- [ ] Azure CLI installed (version 2.50.0 or later)
-- [ ] Bicep CLI installed (`az bicep install`)
+- [ ] PowerShell 7+ and the `Az` module (Az.Accounts, Az.Resources) - `scripts/Deploy-Bicep.ps1` deploys with Az PowerShell
+- [ ] Bicep CLI on `PATH` (standalone install, e.g. `winget install -e --id Microsoft.Bicep`; verify with `bicep --version`) - the copy `az bicep install` adds is not visible to Az PowerShell
+- [ ] Azure CLI 2.50.0 or later - optional, only for the `az bicep build` / `decompile` exercises
 - [ ] Visual Studio Code installed (recommended)
 - [ ] VS Code extensions: Bicep, Azure Account
 - [ ] Git installed (for version control best practices)

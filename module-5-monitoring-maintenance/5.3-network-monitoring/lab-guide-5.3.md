@@ -147,35 +147,38 @@ The flow log is a child of the regional Network Watcher `NetworkWatcher_swedence
 
 1. In **Network Watcher**, go to **Logs** → **Flow logs** → **+ Create**.
 2. **Basics**:
-   - Flow log type: **Virtual network**
-   - Target resource: `prod-skycraft-swc-vnet`
+   - Flow log type: **Virtual network** → **+ Select target resource** → **Virtual network** → `prod-skycraft-swc-vnet` → **Confirm selection**
    - Flow log name: `prod-skycraft-swc-vnet-flowlog`
    - Storage account: `platformskycraftswcsa`
    - Retention (days): **7**
-3. **Analytics**:
-   - Flow logs version: **Version 2**
-   - Enable **Traffic Analytics**
-   - Processing interval: **Every 10 mins**
+3. **Analytics** (VNet flow logs are always format version 2; there is no version field):
+   - **Enable traffic analytics**: checked
+   - Traffic analytics processing interval: **Every 10 mins**
    - Log Analytics workspace: `platform-skycraft-swc-law`
 4. **Tags**: `Project = SkyCraft`, `Environment = Production`, `CostCenter = MSDN`, `Owner = <your name>`.
 5. Click **Review + create** → **Create**.
 
 #### Azure CLI
 
+`--storage-account` and `--workspace` take full resource IDs here: given a bare name, the CLI looks for it in `--resource-group` (the VNet's group), but both live in `platform-skycraft-swc-rg`.
+
 ```azurecli
+SA=$(az storage account show -g platform-skycraft-swc-rg -n platformskycraftswcsa --query id -o tsv)
+LAW=$(az monitor log-analytics workspace show -g platform-skycraft-swc-rg -n platform-skycraft-swc-law --query id -o tsv)
+
 az network watcher flow-log create \
   --name prod-skycraft-swc-vnet-flowlog \
   --location swedencentral \
   --vnet prod-skycraft-swc-vnet \
   --resource-group prod-skycraft-swc-rg \
-  --storage-account platformskycraftswcsa \
+  --storage-account "$SA" \
   --enabled true \
   --format JSON --log-version 2 \
   --retention 7 \
   --traffic-analytics true \
-  --workspace platform-skycraft-swc-law \
+  --workspace "$LAW" \
   --interval 10 \
-  --tags Project=SkyCraft Environment=Production CostCenter=MSDN
+  --tags Project=SkyCraft Environment=Production CostCenter=MSDN Owner="<your name>"
 ```
 
 #### Azure PowerShell
@@ -190,7 +193,7 @@ New-AzNetworkWatcherFlowLog -NetworkWatcher $nw -Name prod-skycraft-swc-vnet-flo
   -TargetResourceId $vnet.Id -StorageId $sa.Id -Enabled $true `
   -FormatType Json -FormatVersion 2 -EnableRetention $true -RetentionPolicyDays 7 `
   -EnableTrafficAnalytics -TrafficAnalyticsWorkspaceId $law.ResourceId -TrafficAnalyticsInterval 10 `
-  -Tag @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN' }
+  -Tag @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN'; Owner = '<your name>' }
 ```
 
 **Expected Result**: `prod-skycraft-swc-vnet-flowlog` shows **Enabled** under Flow logs with `prod-skycraft-swc-vnet` as its target. After 10-20 minutes, **Traffic Analytics** in Network Watcher shows the first flows between the hub and the spokes.
@@ -201,11 +204,11 @@ New-AzNetworkWatcherFlowLog -NetworkWatcher $nw -Name prod-skycraft-swc-vnet-flo
 
 ### What is Connection Monitor?
 
-**Connection Troubleshoot** (Section 4) is a one-off probe. **Connection Monitor** runs the same probe on a schedule from an agent on the source VM, records reachability, latency and the hop-by-hop path to a Log Analytics workspace, and can alert when checks fail. The lab creates one monitor, `skycraft-hub-spoke-cm`, that probes SSH from the hub-facing production VM to the development auth server every five minutes.
+**Connection Troubleshoot** (Section 4) is a one-off probe. **Connection Monitor** runs the same probe on a schedule from an agent on the source VM, records reachability, latency and the hop-by-hop path to a Log Analytics workspace, and can alert when checks fail. The lab creates one monitor, `skycraft-hub-spoke-cm`, that probes SSH from the production spoke VM (or, in a dev-only environment, the dev world VM) to the development auth server every five minutes.
 
 ### Step 5.3.6: Create the Connection Monitor
 
-Both endpoint VMs need the **NetworkWatcherAgent** extension; the portal offers to install it when you pick a VM endpoint, and `Deploy-Bicep.ps1` installs it before creating the monitor.
+Both endpoint VMs need the **NetworkWatcherAgent** extension, and no earlier lab installs it. The portal offers to install it when you pick a VM endpoint, and `Deploy-Bicep.ps1` installs it before creating the monitor; the CLI and PowerShell paths below install it explicitly first, because creating a monitor with an agent-less VM endpoint fails with `NetworkWatcherVmExtensionNotInstalled`. The extension is tagged `Project = SkyCraft` so that `Remove-LabResource.ps1` removes it again - a portal-installed agent is untagged and survives cleanup.
 
 #### Azure Portal
 
@@ -214,54 +217,81 @@ Both endpoint VMs need the **NetworkWatcherAgent** extension; the portal offers 
    - Connection Monitor Name: `skycraft-hub-spoke-cm`
    - Region: **Sweden Central**
    - Workspace configuration: **Use workspace created by connection monitor** *unchecked* → select `platform-skycraft-swc-law`
-3. **Test groups** → **+ Add test group**:
-   - Name: `hub-spoke-ssh`
-   - **Sources** → **Azure endpoints** → pick `prod-skycraft-swc-auth-vm` and name the endpoint `prod-auth-source`
+3. **Test groups** → **+ Add test group** → Test group name: `hub-spoke-ssh`
+   - **+ Add sources** → **Azure endpoints** → select `prod-skycraft-swc-auth-vm` → **Add endpoints**. The endpoint is named after the VM; select it in the test group view and rename it `prod-auth-source`.
      - **Fallback** — if only the dev environment exists: pick `dev-skycraft-swc-world-vm` instead (the deployment script makes the same substitution)
-   - **Destinations** → **Azure endpoints** → pick `dev-skycraft-swc-auth-vm` and name the endpoint `dev-auth-destination`
-   - **Test configurations** → **+ Add**: name `tcp-22-every-5m`, protocol **TCP**, destination port **22**, test frequency **Every 5 minutes**, checks failed threshold **10 %**, round-trip time threshold **100 ms**, trace route **enabled**
-4. **Tags**: `Project = SkyCraft`, `Environment = Production`, `CostCenter = MSDN`, `Owner = <your name>`.
-5. Click **Review + create** → **Create**.
+   - **+ Add destinations** → **Azure endpoints** → select `dev-skycraft-swc-auth-vm` → **Add endpoints**, and rename it `dev-auth-destination` (`Test-Lab.ps1` looks the destination up by this name).
+   - **Add Test configuration** → **New configuration**: name `tcp-22-every-5m`, Protocol **TCP**, Destination port **22**, Test Frequency **Every 5 minutes**, Checks failed **10** %, Round trip time **100** ms, **Disable traceroute** unchecked → **Add Test configuration** → **Add Test Group**.
+4. **Create alert**: leave unchecked. Click **Review + create** → **Create**.
+5. The wizard has no Tags tab, and `Test-Lab.ps1` checks the monitor's `Project` and `CostCenter` tags, so tag it from Cloud Shell (PowerShell):
+
+   ```powershell
+   Update-AzTag -ResourceId (Get-AzNetworkWatcherConnectionMonitor -Location swedencentral -Name skycraft-hub-spoke-cm).Id `
+     -Tag @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN'; Owner = '<your name>' } -Operation Merge
+   ```
 
 #### Azure CLI
 
 ```azurecli
+# Dev-only environment: use -g dev-skycraft-swc-rg -n dev-skycraft-swc-world-vm for the source
+SRC=$(az vm show -g prod-skycraft-swc-rg -n prod-skycraft-swc-auth-vm --query id -o tsv)
+DST=$(az vm show -g dev-skycraft-swc-rg -n dev-skycraft-swc-auth-vm --query id -o tsv)
+
+# Install the agent on both endpoints and tag it so the lab cleanup removes it
+for VM in "$SRC" "$DST"; do
+  az vm extension set --ids "$VM" --publisher Microsoft.Azure.NetworkWatcher --name NetworkWatcherAgentLinux --version 1.4
+  az resource tag --is-incremental --tags Project=SkyCraft --ids "$VM/extensions/NetworkWatcherAgentLinux"
+done
+
 az network watcher connection-monitor create \
   --name skycraft-hub-spoke-cm \
   --location swedencentral \
-  --endpoint-source-name prod-auth-source \
-  --endpoint-source-resource-id $(az vm show -g prod-skycraft-swc-rg -n prod-skycraft-swc-auth-vm --query id -o tsv) \
-  --endpoint-dest-name dev-auth-destination \
-  --endpoint-dest-resource-id $(az vm show -g dev-skycraft-swc-rg -n dev-skycraft-swc-auth-vm --query id -o tsv) \
+  --endpoint-source-name prod-auth-source --endpoint-source-type AzureVM \
+  --endpoint-source-resource-id "$SRC" \
+  --endpoint-dest-name dev-auth-destination --endpoint-dest-type AzureVM \
+  --endpoint-dest-resource-id "$DST" \
   --test-config-name tcp-22-every-5m \
   --protocol Tcp --tcp-port 22 --frequency 300 \
   --threshold-failed-percent 10 --threshold-round-trip-time 100 \
   --test-group-name hub-spoke-ssh \
   --workspace-ids $(az monitor log-analytics workspace show -g platform-skycraft-swc-rg -n platform-skycraft-swc-law --query id -o tsv) \
-  --tags Project=SkyCraft Environment=Production CostCenter=MSDN
+  --tags Project=SkyCraft Environment=Production CostCenter=MSDN Owner="<your name>"
 ```
 
 #### Azure PowerShell
 
 ```powershell
 $nw  = Get-AzNetworkWatcher -Location swedencentral
-$src = Get-AzVM -Name prod-skycraft-swc-auth-vm -ResourceGroupName prod-skycraft-swc-rg   # or dev-skycraft-swc-world-vm
+# Falls back to the dev world VM when the prod environment does not exist
+$src = (Get-AzVM -Name prod-skycraft-swc-auth-vm -ResourceGroupName prod-skycraft-swc-rg -ErrorAction SilentlyContinue) ??
+       (Get-AzVM -Name dev-skycraft-swc-world-vm -ResourceGroupName dev-skycraft-swc-rg)
 $dst = Get-AzVM -Name dev-skycraft-swc-auth-vm  -ResourceGroupName dev-skycraft-swc-rg
 $law = Get-AzOperationalInsightsWorkspace -Name platform-skycraft-swc-law -ResourceGroupName platform-skycraft-swc-rg
+
+# Install the agent on both endpoints; New-AzResource (not Set-AzVMExtension, which has no -Tag)
+# so the extension carries the tag the lab cleanup selects on
+foreach ($vm in $src, $dst) {
+  New-AzResource -ResourceId "$($vm.Id)/extensions/NetworkWatcherAgentLinux" -Location $vm.Location `
+    -Properties @{ publisher = 'Microsoft.Azure.NetworkWatcher'; type = 'NetworkWatcherAgentLinux'; typeHandlerVersion = '1.4'; autoUpgradeMinorVersion = $true } `
+    -Tag @{ Project = 'SkyCraft' } -Force
+}
 
 $srcEp = New-AzNetworkWatcherConnectionMonitorEndpointObject -Name prod-auth-source     -AzureVM -ResourceId $src.Id
 $dstEp = New-AzNetworkWatcherConnectionMonitorEndpointObject -Name dev-auth-destination -AzureVM -ResourceId $dst.Id
 $tcp   = New-AzNetworkWatcherConnectionMonitorProtocolConfigurationObject -TcpProtocol -Port 22
 $cfg   = New-AzNetworkWatcherConnectionMonitorTestConfigurationObject -Name tcp-22-every-5m -TestFrequencySec 300 `
-           -ProtocolConfiguration $tcp -ChecksFailedPercent 10 -RoundTripTimeMs 100
+           -ProtocolConfiguration $tcp -SuccessThresholdChecksFailedPercent 10 -SuccessThresholdRoundTripTimeMs 100
 $grp   = New-AzNetworkWatcherConnectionMonitorTestGroupObject -Name hub-spoke-ssh -TestConfiguration $cfg -Source $srcEp -Destination $dstEp
 $out   = New-AzNetworkWatcherConnectionMonitorOutputObject -WorkspaceResourceId $law.ResourceId
 
 New-AzNetworkWatcherConnectionMonitor -NetworkWatcher $nw -Name skycraft-hub-spoke-cm -TestGroup $grp -Output $out `
-  -Tag @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN' }
+  -Tag @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN'; Owner = '<your name>' }
 ```
 
-**Expected Result**: `skycraft-hub-spoke-cm` appears under Connection monitor with monitoring status **Running**; within 10 minutes the `hub-spoke-ssh` test group reports **Pass** for `tcp-22-every-5m`, and `NWConnectionMonitorTestResult` in `platform-skycraft-swc-law` starts receiving rows.
+**Expected Result**: `skycraft-hub-spoke-cm` appears under Connection monitor with monitoring status **Running**, and `NWConnectionMonitorTestResult` in `platform-skycraft-swc-law` starts receiving rows within about 10 minutes. What `hub-spoke-ssh` reports depends on the source:
+
+- **Dev fallback source** (`dev-skycraft-swc-world-vm`): **Pass** - source and destination share `dev-skycraft-swc-vnet`.
+- **Production source** (`prod-skycraft-swc-auth-vm`): **Fail**. The prod and dev spokes are each peered only to the hub, and VNet peering is not transitive, so traffic to the dev `AuthSubnet` (`10.1.1.0/24`) matches the system route `10.0.0.0/8 → None` and is dropped. Confirm it with **Next hop** (Step 5.3.2) from `prod-skycraft-swc-auth-vm` to the private IP of `dev-skycraft-swc-auth-vm`: this is the monitor doing its job, not a broken lab. Issue #178 tracks the route the lab should provide.
 
 **Preview - the AVM module call the Bicep path makes** (`bicep/main.bicep`; version pinned in `docs/bicep-standards.md` §4.4). Both resources of this lab are children of the Network Watcher module:
 
@@ -308,7 +338,7 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 
 **Symptom**: `Flow log 'prod-skycraft-swc-vnet-flowlog' exists` or `Connection Monitor 'skycraft-hub-spoke-cm' exists` reports FAIL.
 
-**Root Cause**: The validation script looks the resources up **by name** under `NetworkWatcher_swedencentral`. A flow log or monitor created with a different name, or the monitor created with a workspace other than `platform-skycraft-swc-law`, is a different resource to the script.
+**Root Cause**: The validation script looks the resources up **by name** under `NetworkWatcher_swedencentral` in `NetworkWatcherRG`, and the destination endpoint by the name `dev-auth-destination`. A flow log, monitor or endpoint created under a different name, or a monitor without the `Project = SkyCraft` and `CostCenter = MSDN` tags (the portal wizard cannot set them - see Step 5.3.6, item 5), fails the check.
 
 **Solution**: Use the exact names from Steps 5.3.5 and 5.3.6, or run `scripts/Deploy-Bicep.ps1`, which is idempotent and produces the same resources.
 
@@ -316,9 +346,9 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 
 **Symptom**: The test group stays **Indeterminate** and the endpoint carries a warning.
 
-**Root Cause**: Connection Monitor probes from the **NetworkWatcherAgent** VM extension; a VM created outside Lab 3.2's script does not have it.
+**Root Cause**: Connection Monitor probes from the **NetworkWatcherAgent** VM extension, and no earlier lab installs it - Lab 3.2's VMs come without it.
 
-**Solution**: Install the extension on both endpoint VMs (`az vm extension set --publisher Microsoft.Azure.NetworkWatcher --name NetworkWatcherAgentLinux ...`) or re-run `Deploy-Bicep.ps1`, which installs it before creating the monitor.
+**Solution**: Install the extension on both endpoint VMs with the loop at the top of the Step 5.3.6 CLI or PowerShell block, or re-run `Deploy-Bicep.ps1`, which installs it before creating the monitor.
 
 ---
 
