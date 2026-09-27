@@ -49,9 +49,17 @@
         5.2 gates on the platform resource group and on 5.1's Log Analytics workspace;
         5.3 gates on the platform resource group, lab 2.1's prod VNet, lab 4.1's platform storage
             account, 5.1's workspace, and on TWO distinct lab-3.2 VMs for Connection Monitor.
-      Those phases carry a 'gate:' note. Note that 5.1's and 5.3's VM checks are gates in this
-      tree - they exit 1 - which is a change from the pre-AVM scripts, where a missing VM only
-      warned.
+      And lab 3.2, read on 2026-09-27 after issue #166 caught its load-balancer edge missing:
+        3.2 gates on lab 2.1's dev resource group and VNet, and on the dev load balancer that
+            2.3 (or 3.1) creates.
+      Those phases carry a 'gate:' note, and tests/LabCycle.Tests.ps1 pins every gate edge. Note
+      that 5.1's and 5.3's VM checks are gates in this tree - they exit 1 - which is a change
+      from the pre-AVM scripts, where a missing VM only warned.
+
+      The same 2026-09-27 sweep read every other Deploy-Bicep.ps1 preflight and found no further
+      hard gate. Lab 1.2's check for the lab-1.1 Entra principals is the only one, and it is
+      unreachable in the cycle: it runs only under -IncludeRoleAssignments, which the phase does
+      not pass.
 
       DECLARED - follows each lab's stated prerequisites, with no gate read to confirm it.
       Everything else. Reasonable, and re-tested by every live run.
@@ -203,10 +211,14 @@
             Deploy       = @{ Force = $true }
             PostDeploy   = $null
             Test         = @{}
-            DependsOn    = @('2.1')
+            DependsOn    = @('2.1', '2.3')
             TimeoutMs    = 2400000
             StdinAnswers = $null
             Excluded     = $null
+            # gate: verified - exits 1 on a missing dev resource group or VNet (2.1) and on a
+            # missing load balancer 'dev-skycraft-swc-lb'. The gate accepts 2.3 or 3.1 - both
+            # create it - but DependsOn is an AND-list, so it names 2.3: the earliest lab in the
+            # cycle to create it, and the one a full cycle relies on. 3.1 only redeploys it (#166).
         }
         @{
             Id           = '3.3'

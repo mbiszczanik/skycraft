@@ -303,6 +303,25 @@ Describe 'Manifest - the dependency graph is sound' {
             }
         }
     }
+
+    # Every edge a deploy script enforces with a hard gate ([ERROR] plus exit 1), from the sweep of
+    # all sixteen Deploy-Bicep.ps1 preflights. A gate missing from DependsOn does not break a full
+    # cycle - the order happens to satisfy it - but when the prerequisite fails, the dependent
+    # phase runs anyway and dies on a resource name instead of being skipped (#166).
+    It "declares the gate edge <Lab> -> <Dependency>" -ForEach @(
+        @{ Lab = '3.2'; Dependency = '2.1' }   # dev VNet
+        @{ Lab = '3.2'; Dependency = '2.3' }   # load balancer 'dev-skycraft-swc-lb' (or 3.1)
+        @{ Lab = '5.1'; Dependency = '3.2' }
+        @{ Lab = '5.1'; Dependency = '4.1' }
+        @{ Lab = '5.2'; Dependency = '5.1' }
+        @{ Lab = '5.3'; Dependency = '2.1' }
+        @{ Lab = '5.3'; Dependency = '3.2' }
+        @{ Lab = '5.3'; Dependency = '4.1' }
+        @{ Lab = '5.3'; Dependency = '5.1' }
+    ) {
+        $phase = $script:Manifest.Phases | Where-Object { $_.Id -eq $Lab }
+        @($phase.DependsOn) | Should -Contain $Dependency -Because "lab $Lab's deploy script exits 1 without what $Dependency creates"
+    }
 }
 
 Describe 'Manifest - teardown covers what the cycle deploys' {
