@@ -270,8 +270,8 @@ Backup reports are built from **diagnostic settings** on the vaults: each vault 
 
 1. Open `platform-skycraft-swc-bv` → **Monitoring** → **Diagnostic settings** → **+ Add diagnostic setting**.
 2. Diagnostic setting name: `bv-backup-reports-diag`
-3. Logs: **Core Azure Backup Data**, **Addon Azure Backup Job Data**, **Addon Azure Backup Policy Data**, **Addon Azure Backup Protected Instance Data** (a Backup Vault has neither the legacy `AzureBackupReport` event nor `AddonAzureBackupStorage` - its storage data is already in Core and Protected Instance). The portal also lists **Health**; leave it unchecked - Backup reports does not use it, and the Bicep path does not enable it.
-4. Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`. Backup Vault logs always land in resource-specific tables; if the portal shows a **Resource specific** toggle, select it.
+3. Logs: **Core Azure Backup Data**, **Addon Azure Backup Job Data**, **Addon Azure Backup Policy Data**, **Addon Azure Backup Protected Instance Data** (a Backup Vault has neither the legacy `AzureBackupReport` event nor `AddonAzureBackupStorage` - its storage data is already in Core and Protected Instance). Leave the **Health** metric (under **Metrics**) unchecked - Backup reports does not use it, and the Bicep path does not enable it.
+4. Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`. There is no destination-table toggle here: Backup Vault logs always land in resource-specific tables.
 5. Click **Save**.
 
 #### Azure CLI
@@ -316,7 +316,9 @@ New-AzDiagnosticSetting -Name bv-backup-reports-diag  -ResourceId $bv.Id  -Works
 ### Step 5.2.9: Review Alerts
 
 1. In **Backup center**, click **Alerts**.
-2. Verify if any Critical or Warning alerts exist (e.g., from failed test backups).
+2. Verify if any Critical or Warning alerts exist. After a fresh deployment expect two built-in alerts on `platform-skycraft-swc-rsv`:
+   - **Modify policy with shorter retention** (0 - Critical) - raised because `Deploy-Bicep.ps1` shortens instant-restore retention to 2 days after creating the Enhanced policy. Expected; it is a security alert about the change, not a failure.
+   - **Backup Failure** (1 - Error) - if Lab 1.3's policies are in force, the initial backup is refused (see Troubleshooting, Issue 2).
 3. Configure a notification rule to email `admins@skycraft.com` for Critical alerts.
 
 ---
@@ -362,6 +364,14 @@ Instead of restoring the whole VM, we can mount a specific recovery point as a d
 
 - Ensure `Microsoft.RecoveryServices` provider is registered in your subscription.
 - Navigate to **Subscription** → **Resource Providers** → Register `Microsoft.RecoveryServices`.
+
+### Issue 2: The VM backup job fails with `UserErrorRequestDisallowedByPolicy`
+
+**Symptom**: The initial backup of `dev-skycraft-swc-auth-vm` ends **Failed** within seconds with error 400211, *An invalid policy is configured on the VM which is preventing Snapshot operation*, and Backup center raises a **Backup Failure** alert. `Test-Lab.ps1` still passes, because it checks the configuration, not the job.
+
+**Root Cause**: For instant restore, Azure Backup creates a resource group `AzureBackupRG_swedencentral_1` for the restore-point collection - without tags. Lab 1.3's `Require-Environment-Tag-RG` assignment denies untagged resource groups, so the snapshot never starts. The Activity Log shows the refusal as `Microsoft.Authorization/policies/deny/action` on that group.
+
+**Solution**: Tracked in issue #184 (a pre-created, tagged instant-restore resource group named in the backup policy). Until then there is no recovery point, so Step 5.2.10 cannot be completed on a subscription where Lab 1.3's policies are assigned. Do not delete the assignment: Lab 1.3's `Test-Lab.ps1` checks it.
 
 ---
 
