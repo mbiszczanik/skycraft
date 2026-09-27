@@ -9,6 +9,13 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.6](https://github.com/mbiszczanik/skycraft/compare/v0.10.5...v0.10.6) (2026-09-27)
+
+
+### Documentation
+
+* **lab-guides:** reconcile the [#153](https://github.com/mbiszczanik/skycraft/issues/153) guide steps with the automation and the real cmdlets ([#179](https://github.com/mbiszczanik/skycraft/issues/179)) ([783b2b3](https://github.com/mbiszczanik/skycraft/commit/783b2b3027fc6fdcc88b6e4c3dc00633f36b057d)), closes [#178](https://github.com/mbiszczanik/skycraft/issues/178)
+
 ## [0.10.5](https://github.com/mbiszczanik/skycraft/compare/v0.10.4...v0.10.5) (2026-09-27)
 
 
