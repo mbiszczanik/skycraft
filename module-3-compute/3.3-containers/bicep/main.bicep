@@ -110,7 +110,7 @@ module modResourceGroup 'br/public:avm/res/resources/resource-group:0.4.4' = {
 }
 
 // 1. Container Registry (Standard, admin user on - the lab's credential model)
-module modAcr 'br/public:avm/res/container-registry/registry:0.13.0' = {
+module modAcr 'br/public:avm/res/container-registry/registry:0.13.1' = {
   name: 'acr-deployment'
   scope: resRg
   params: {
@@ -132,7 +132,7 @@ module modAcr 'br/public:avm/res/container-registry/registry:0.13.0' = {
 }
 
 // 2. Container Instance (public IP, port 80)
-module modAci 'br/public:avm/res/container-instance/container-group:0.7.0' = {
+module modAci 'br/public:avm/res/container-instance/container-group:0.7.1' = {
   name: 'aci-deployment'
   scope: resRg
   params: {
@@ -182,7 +182,7 @@ module modAci 'br/public:avm/res/container-instance/container-group:0.7.0' = {
 }
 
 // 3. Container Apps environment (consumption, Azure Monitor logs)
-module modCae 'br/public:avm/res/app/managed-environment:0.15.0' = {
+module modCae 'br/public:avm/res/app/managed-environment:0.16.0' = {
   name: 'cae-deployment'
   scope: resRg
   params: {

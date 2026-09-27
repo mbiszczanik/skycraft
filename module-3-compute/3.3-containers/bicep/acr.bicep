@@ -51,7 +51,7 @@ var varCommonTags = {
 *******************/
 
 // Keep in sync with modAcr in main.bicep
-module modAcr 'br/public:avm/res/container-registry/registry:0.13.0' = {
+module modAcr 'br/public:avm/res/container-registry/registry:0.13.1' = {
   name: 'acr-bootstrap-deployment'
   params: {
     name: toLower(parAcrName)
