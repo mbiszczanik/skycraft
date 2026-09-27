@@ -9,6 +9,13 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.5](https://github.com/mbiszczanik/skycraft/compare/v0.10.4...v0.10.5) (2026-09-27)
+
+
+### Bug Fixes
+
+* **ci:** exempt lab-local test suites from the live-verification gate ([#156](https://github.com/mbiszczanik/skycraft/issues/156)) ([#175](https://github.com/mbiszczanik/skycraft/issues/175)) ([78177e0](https://github.com/mbiszczanik/skycraft/commit/78177e062b2008ee500d01dce84dc8c70a42e648))
+
 ## [0.10.4](https://github.com/mbiszczanik/skycraft/compare/v0.10.3...v0.10.4) (2026-09-27)
 
 
