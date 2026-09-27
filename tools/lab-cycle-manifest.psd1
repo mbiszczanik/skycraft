@@ -54,9 +54,9 @@
         3.2 gates on lab 2.1's dev resource group and VNet, and on the dev load balancer that
             2.3 (or 3.1) creates. DependsOn names only 2.3, which reaches 2.1 through its own edge.
       Those phases carry a 'gate:' note, and tests/LabCycle.Tests.ps1 pins every gate edge,
-      direct or reached through another phase. Note
-      that 5.1's and 5.3's VM checks are gates in this tree - they exit 1 - which is a change
-      from the pre-AVM scripts, where a missing VM only warned.
+      direct or reached through another phase. Note that 5.1's and 5.3's VM checks are gates in
+      this tree - they exit 1 - which is a change from the pre-AVM scripts, where a missing VM
+      only warned.
 
       The same 2026-09-27 sweep read every other Deploy-Bicep.ps1 preflight and found no further
       hard gate. Lab 1.2's check for the lab-1.1 Entra principals is the only one, and it is
