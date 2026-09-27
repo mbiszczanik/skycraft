@@ -350,6 +350,14 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 
 **Solution**: Install the extension on both endpoint VMs with the loop at the top of the Step 5.3.6 CLI or PowerShell block, or re-run `Deploy-Bicep.ps1`, which installs it before creating the monitor.
 
+### Issue 4: Enabling Traffic Analytics fails with `TARequestDisallowedByPolicy`
+
+**Symptom**: Creating the flow log (Step 5.3.5, any path) fails with *The enablement of Traffic Analytics is blocked due to the user's policy restrictions: "RequestDisallowedByPolicy ... policyAssignments/Enforce-Project-Tag"*, and the flow log is left in the **Failed** state.
+
+**Root Cause**: When Traffic Analytics is enabled it creates its own data collection endpoint and rule, `NWTA-<workspace-guid>...`, in the workspace's resource group (`platform-skycraft-swc-rg`) - without tags. Lab 1.3's `Enforce-Project-Tag` assignment denies every untagged resource, so the pair is refused.
+
+**Solution**: Tracked in issue #182. Until it lands, the lab has no supported workaround that keeps Lab 1.3's policy intact. Do not delete the assignment: it is what Lab 1.3's `Test-Lab.ps1` checks.
+
 ---
 
 ## 🎓 Knowledge Check
