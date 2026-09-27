@@ -9,6 +9,13 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.7](https://github.com/mbiszczanik/skycraft/compare/v0.10.6...v0.10.7) (2026-09-27)
+
+
+### Bug Fixes
+
+* **lab-5.2:** Enhanced-policy schedule check, plus [#153](https://github.com/mbiszczanik/skycraft/issues/153) live-cycle guide corrections ([#183](https://github.com/mbiszczanik/skycraft/issues/183)) ([f7783b0](https://github.com/mbiszczanik/skycraft/commit/f7783b00025dbf5330df42b87c948434bc8537ee)), closes [#182](https://github.com/mbiszczanik/skycraft/issues/182) [#184](https://github.com/mbiszczanik/skycraft/issues/184)
+
 ## [0.10.6](https://github.com/mbiszczanik/skycraft/compare/v0.10.5...v0.10.6) (2026-09-27)
 
 
