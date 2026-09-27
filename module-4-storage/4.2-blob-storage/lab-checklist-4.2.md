@@ -13,7 +13,7 @@
 
 - [ ] Container name: `public-demo`
 - [ ] Location: **dev-skycraft-swc-rg / devskycraftswcsa**
-- [ ] Anonymous access level: **Private (no anonymous access)** - Blob/Container are unavailable while the account switch is off
+- [ ] Anonymous access level: **Private (no anonymous access)** - the portal still offers Blob/Container; leave it at Private
 - [ ] Anonymous request to a test blob URL is refused with `PublicAccessNotPermitted`
 
 ### player-backups Container (Private)

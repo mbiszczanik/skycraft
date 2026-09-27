@@ -732,7 +732,7 @@ Get-AzStorageBlob -Container "game-assets" -Context $ctx | Select-Object Name, A
 2. **Create the `public-demo` container - Private**:
    - Go to **Containers** → **+ Container**
    - Name: `public-demo`
-   - Anonymous access level: **Private (no anonymous access)** - the dropdown is locked to Private while the account switch is off
+   - Anonymous access level: **Private (no anonymous access)** - the dropdown still offers Blob and Container, but leave it at Private
    - Click **Create**
 
 3. **Prove the container is not anonymous**:
@@ -741,12 +741,12 @@ Get-AzStorageBlob -Container "game-assets" -Context $ctx | Select-Object Name, A
    - **Result**: `PublicAccessNotPermitted` (HTTP 409, *Public access is not permitted on this storage account.*) - the account switch overrides every container. You would see `ResourceNotFound` (404) instead only if the account switch were **on** and the container still **Private**.
 
 4. **See the container-level switch** (read-only here):
-   - `public-demo` → **Change access level**. With the account switch off, the **Anonymous access level** dropdown is disabled, so **Blob** and **Container** (the two public levels) cannot be chosen. Close the dialog without changing anything.
+   - `public-demo` → **Change access level**. The **Anonymous access level** dropdown lists **Private (no anonymous access)**, **Blob (anonymous read access for blobs only)** and **Container (anonymous read access for containers and blobs)** - the portal offers all three even with the account switch off. The account switch is what makes a public level ineffective: a blob URL keeps returning `PublicAccessNotPermitted` until the account allows anonymous access. Close the dialog without changing anything; a container left at Blob or Container fails `Test-Lab.ps1`.
 
 > **Takeaway**: Public access is controlled at **two levels**, and both must be on for anonymous reads to work:
 >
 > 1. Storage Account (`AllowBlobPublicAccess`) - the master switch; Azure Policy can pin it to `false` for a whole subscription (the course itself does not assign that policy)
-> 2. Container (`PublicAccess` level: `Private` / `Blob` / `Container`) - only selectable when the account switch is on
+> 2. Container (`PublicAccess` level: `Private` / `Blob` / `Container`) - only takes effect when the account switch is on
 >
 > On the exam, be ready to configure both; in SkyCraft, `Test-Lab.ps1` asserts `AllowBlobPublicAccess = false` on both accounts and `public-demo` = `Private`.
 

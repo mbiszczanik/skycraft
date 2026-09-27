@@ -155,7 +155,7 @@ Perf
 The alert rule and its action group are **platform** resources - they live in `platform-skycraft-swc-rg` next to the workspace, even though the rule watches a dev VM. Whichever blade you start from, the portal defaults the rule's resource group to the target VM's group (`dev-skycraft-swc-rg`), so set **Details** → **Resource group** to `platform-skycraft-swc-rg` explicitly; `scripts/Test-Lab.ps1` looks for `skycraft-cpu-alert` there by name.
 
 1. Navigate to **Monitor** → **Alerts** → **+ Create** → **Alert rule**.
-2. **Scope** → **+ Select scope** → expand `dev-skycraft-swc-rg` and check `dev-skycraft-swc-auth-vm` (or `prod-skycraft-swc-auth-vm` under `prod-skycraft-swc-rg` if only the prod environment exists) → **Apply**.
+2. **Scope**: leave Scope level at **Subscription** → **+ Select scope** → expand `dev-skycraft-swc-rg` and check `dev-skycraft-swc-auth-vm` (or `prod-skycraft-swc-auth-vm` under `prod-skycraft-swc-rg` if only the prod environment exists) → **Apply**.
 3. **Condition** → **Signal name**: **Percentage CPU**. Configure the logic:
    - Threshold: **Static**
    - Aggregation type: **Average**
