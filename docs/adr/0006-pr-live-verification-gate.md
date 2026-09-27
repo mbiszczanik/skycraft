@@ -40,9 +40,12 @@ would be tracked rather than forgotten.
 
    "Lab content" is any path under `module-*/`, `scripts/`, or the lab
    cycle tooling in `tools/` (`Invoke-LabCycle.ps1`, `Remove-LabCycle.ps1`,
-   `Invoke-LabScript.ps1`, `LabCycle.psm1`, `lab-cycle-manifest.psd1`).
-   PRs that touch only tests, docs outside the labs, CI or the gate itself
-   are not gated.
+   `Invoke-LabScript.ps1`, `LabCycle.psm1`, `lab-cycle-manifest.psd1`),
+   except a lab's own `tests/` directory. PRs that touch only tests - the
+   repo-wide `tests/` or a lab-local `module-*/**/tests/` suite, which
+   stubs Az and runs in CI - docs outside the labs, CI or the gate itself
+   are not gated. Docs inside a lab (its guide, README, checklists) stay
+   gated: following the guide live is their acceptance criterion (#132).
 
 2. **A deferred PR must not close the issue it addresses.** With
    `Live-verification: deferred -> #N` in the body, a GitHub closing

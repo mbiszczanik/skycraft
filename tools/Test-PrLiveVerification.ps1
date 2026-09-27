@@ -68,10 +68,12 @@ $ErrorActionPreference = 'Stop'
 
 # Lab content and the tooling that deploys it: anything a live cycle exercises. The gate script,
 # the dry-run harness and the tests are not in scope - nothing about them can be verified live.
+# That includes a lab's own tests/ directory: its Pester suites stub Az and run in CI (issue #156).
 function Test-GatedPath {
     param([Parameter(Mandatory)][string]$Path)
 
     $normalized = $Path -replace '\\', '/'
+    if ($normalized -match '^module-\d[^/]*/(?:[^/]+/)*tests/') { return $false }
     return [bool]($normalized -match '^(module-\d[^/]*/|scripts/|tools/(Invoke-LabCycle\.ps1|Remove-LabCycle\.ps1|Invoke-LabScript\.ps1|LabCycle\.psm1|lab-cycle-manifest\.psd1)$)')
 }
 
