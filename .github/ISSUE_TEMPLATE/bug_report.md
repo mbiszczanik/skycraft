@@ -38,7 +38,7 @@ assignees: ""
 - **OS:** <!-- e.g. Windows 11 23H2 / macOS 14 / Ubuntu 22.04 -->
 - **PowerShell version:** <!-- output of $PSVersionTable.PSVersion -->
 - **Az CLI version:** <!-- output of `az version` -->
-- **Bicep CLI version:** <!-- output of `az bicep version` -->
+- **Bicep CLI version:** <!-- output of `bicep --version` -->
 - **Azure region:** <!-- e.g. swedencentral -->
 
 ## Logs / output
