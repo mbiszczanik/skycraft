@@ -2,7 +2,7 @@
 
 > **Source of Truth** for local pre-push verification.
 
-[`tools/Invoke-DryRun.ps1`](../tools/Invoke-DryRun.ps1) is the single local gate to run before pushing. It mirrors every check in the [Lint workflow](../.github/workflows/lint.yml) that works **without `az login`** and **without any deployed Azure resources**, so a broken push is caught on the dev box instead of in CI.
+[`tools/Invoke-DryRun.ps1`](../tools/Invoke-DryRun.ps1) is the single local gate to run before pushing. It mirrors every check in the [Lint workflow](../.github/workflows/lint.yml) that works **without an Azure sign-in** and **without any deployed Azure resources**, so a broken push is caught on the dev box instead of in CI.
 
 The harness never authenticates to Azure and never deploys anything. It reads files, shells out to `az bicep`, which is a purely local compiler, and runs the Pester suites, which need no Azure sign-in either.
 
@@ -90,7 +90,7 @@ gitleaks detect --source . --redact
 
 ### 3.2 Live Azure verification
 
-`az deployment ... what-if`, `Test-Lab.ps1` and `Remove-LabResource.ps1` all need `az login` plus, in most cases, resources that a previous lab created. They are deliberately **not** executed by the harness — a pre-push gate must not depend on the state of a subscription. Section 4 lists the commands to run by hand.
+`Deploy-Bicep.ps1 -WhatIf`, `Test-Lab.ps1` and `Remove-LabResource.ps1` all need an Az PowerShell session (`Connect-AzAccount`; Lab 1.1 uses `Connect-MgGraph` instead) plus, in most cases, resources that a previous lab created. They are deliberately **not** executed by the harness — a pre-push gate must not depend on the state of a subscription. Section 4 lists the commands to run by hand.
 
 What CI *does* enforce is that a PR touching lab content **says** whether they were run: the `Live Verification Declared` check ([`.github/workflows/pr-gate.yml`](../.github/workflows/pr-gate.yml), [ADR-0006](adr/0006-pr-live-verification-gate.md)) requires a `Live-verified: <what was run>` or `Live-verification: deferred -> #<issue>` line in the PR body. Run the same check locally on an open PR with `.\tools\Test-PrLiveVerification.ps1 -Body (gh pr view <n> --json body -q .body) -ChangedFile (gh pr diff <n> --name-only)`.
 
@@ -100,16 +100,16 @@ One qualification. The `Pester` check runs the lab-local suites in-process on yo
 
 ## 4. Live Verification Commands, Per Lab
 
-Run these only when you actually want to check a lab against Azure. They all require `az login` (and `Connect-AzAccount` for the `Az` PowerShell paths) against the SkyCraft subscription.
+Run these only when you actually want to check a lab against Azure. They are all Az PowerShell paths and require `Connect-AzAccount` against the SkyCraft subscription (Lab 1.1 talks to Microsoft Graph and needs `Connect-MgGraph` instead). None of them needs the `az` CLI to be signed in.
 
 Two things to know before copying anything below:
 
-- **`az deployment sub what-if` is read-only.** It previews the change set and deploys nothing.
+- **`Deploy-Bicep.ps1 -WhatIf` is read-only.** It calls `Get-AzSubscriptionDeploymentWhatIfResult`, previews the change set and deploys nothing.
 - **Labs are cumulative.** A what-if for a later lab reports the resources an earlier lab was supposed to create as missing if that lab was never deployed. Work through a module in order.
 
 Every lab's `Deploy-Bicep.ps1` now takes a `-WhatIf` switch (issue #74) that runs
 `Get-AzSubscriptionDeploymentWhatIfResult` with the same arguments the real deployment would use,
-prints the ARM change set and exits 0 without deploying. **Prefer it over a raw `az` command**: it
+prints the ARM change set and exits 0 without deploying. **Prefer it over a raw what-if cmdlet**: it
 previews exactly what the script would send, including the values the script resolves at run time,
 which a raw command against the checked-in parameter file cannot always reproduce:
 
@@ -117,7 +117,7 @@ which a raw command against the checked-in parameter file cannot always reproduc
 - **Lab 3.2**: `parSshPublicKey` is read from the `SKYCRAFT_SSH_PUBLIC_KEY` environment variable and defaults to empty. `Deploy-Bicep.ps1` supplies the key directly.
 - **Lab 4.4**: `parClientIp` is auto-detected by the script; a raw what-if previews an empty firewall rule instead.
 
-The raw `az deployment sub what-if` form is still listed where the script does not cover a template:
+A raw what-if cmdlet is still listed where the script does not cover a template:
 Lab 3.3's resource-group-scope `acr.bicep` bootstrap.
 
 All commands are written to be run from the repository root.
@@ -180,8 +180,8 @@ All commands are written to be run from the repository root.
 # Lab 3.3 - Containers (-WhatIf previews main.bicep only; the ACR bootstrap is skipped, not simulated)
 .\module-3-compute\3.3-containers\scripts\Deploy-Bicep.ps1 -WhatIf
 # acr.bicep is the resource-group-scope bootstrap that Deploy-Bicep.ps1 runs first:
-az deployment group what-if --resource-group dev-skycraft-swc-rg `
-    --template-file module-3-compute/3.3-containers/bicep/acr.bicep
+Get-AzResourceGroupDeploymentWhatIfResult -ResourceGroupName dev-skycraft-swc-rg `
+    -TemplateFile module-3-compute/3.3-containers/bicep/acr.bicep
 .\module-3-compute\3.3-containers\scripts\Test-Lab.ps1
 .\module-3-compute\3.3-containers\scripts\Remove-LabResource.ps1 -WhatIf
 
