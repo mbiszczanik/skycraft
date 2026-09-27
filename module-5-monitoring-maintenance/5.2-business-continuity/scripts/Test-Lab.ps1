@@ -175,7 +175,14 @@ Invoke-Test "Policy instant restore retention is 2 days" {
 
 Invoke-Test "Policy schedule time contains 02:00 UTC" {
     if (-not $rsvPolicy) { return $false }
-    $times = $rsvPolicy.SchedulePolicy.ScheduleRunTimes
+    # The Enhanced policy (#113) returns a SimpleSchedulePolicyV2, which nests the run times under
+    # DailySchedule; a Standard SimpleSchedulePolicy exposes them flat. Read whichever is populated.
+    $schedule = $rsvPolicy.SchedulePolicy
+    $times = @(if ($schedule.PSObject.Properties['DailySchedule'] -and $schedule.DailySchedule) {
+            $schedule.DailySchedule.ScheduleRunTimes
+        } else {
+            $schedule.ScheduleRunTimes
+        }) | Where-Object { $null -ne $_ }
     # ScheduleRunTimes are stored as UTC DateTime values — normalize and compare the time-of-day
     return ($null -ne ($times | Where-Object {
         ([datetime]::SpecifyKind([datetime]$_, [System.DateTimeKind]::Utc)).ToString('HH:mm') -eq '02:00'
