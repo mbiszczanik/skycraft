@@ -152,7 +152,7 @@ Perf
 
 ### Step 5.1.5: Create a Metric Alert (CPU > 80%)
 
-The alert rule and its action group are **platform** resources - they live in `platform-skycraft-swc-rg` next to the workspace, even though the rule watches a dev VM. Create them from Azure Monitor rather than from the VM blade so they land in the right resource group; `scripts/Test-Lab.ps1` looks for `skycraft-cpu-alert` there by name.
+The alert rule and its action group are **platform** resources - they live in `platform-skycraft-swc-rg` next to the workspace, even though the rule watches a dev VM. Whichever blade you start from, the portal defaults the rule's resource group to the target VM's group (`dev-skycraft-swc-rg`), so set **Details** → **Resource group** to `platform-skycraft-swc-rg` explicitly; `scripts/Test-Lab.ps1` looks for `skycraft-cpu-alert` there by name.
 
 1. Navigate to **Monitor** → **Alerts** → **+ Create** → **Alert rule**.
 2. **Scope**: select `dev-skycraft-swc-auth-vm` (or `prod-skycraft-swc-auth-vm` if only the prod environment exists).
@@ -167,12 +167,12 @@ The alert rule and its action group are **platform** resources - they live in `p
    - Resource group: `platform-skycraft-swc-rg`
    - Action group name: `skycraft-ops-ag`
    - Display name: `SkyCraftOps`
-   - Notification: **Email/SMS message/Push/Voice** (enter your email)
+   - Notification: type **Email/SMS message/Push/Voice**, name `ops-email` (enter your email)
 5. **Details**:
    - Resource group: `platform-skycraft-swc-rg`
    - Severity: **2 - Warning**
    - Alert rule name: `skycraft-cpu-alert`
-   - Enable upon creation: **checked**
+   - **Advanced options** → Enable upon creation: **checked**
 6. **Tags**: `Project = SkyCraft`, `Environment = Platform`, `CostCenter = MSDN`.
 7. Click **Review + create** → **Create**.
 
@@ -182,7 +182,8 @@ The alert rule and its action group are **platform** resources - they live in `p
 az monitor action-group create \
   --name skycraft-ops-ag --short-name SkyCraftOps \
   --resource-group platform-skycraft-swc-rg \
-  --action email ops you@example.com
+  --action email ops-email you@example.com \
+  --tags Project=SkyCraft Environment=Platform CostCenter=MSDN
 
 az monitor metrics alert create \
   --name skycraft-cpu-alert \
@@ -197,8 +198,10 @@ az monitor metrics alert create \
 #### Azure PowerShell
 
 ```powershell
-$email = New-AzActionGroupEmailReceiverObject -Name ops -EmailAddress you@example.com
-$ag = New-AzActionGroup -Name skycraft-ops-ag -ShortName SkyCraftOps -ResourceGroupName platform-skycraft-swc-rg -Location Global -EmailReceiver $email
+$email = New-AzActionGroupEmailReceiverObject -Name ops-email -EmailAddress you@example.com
+# -Enabled is a switch that defaults to off; Test-Lab.ps1 asserts the group is enabled
+$ag = New-AzActionGroup -Name skycraft-ops-ag -ShortName SkyCraftOps -ResourceGroupName platform-skycraft-swc-rg -Location Global -EmailReceiver $email -Enabled `
+  -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN' }
 
 $vm = Get-AzVM -Name dev-skycraft-swc-auth-vm -ResourceGroupName dev-skycraft-swc-rg
 $criteria = New-AzMetricAlertRuleV2Criteria -MetricName 'Percentage CPU' -MetricNamespace 'Microsoft.Compute/virtualMachines' `
@@ -208,6 +211,10 @@ Add-AzMetricAlertRuleV2 -Name skycraft-cpu-alert -ResourceGroupName platform-sky
   -TargetResourceId $vm.Id -Condition $criteria -ActionGroupId $ag.Id `
   -WindowSize 00:05:00 -Frequency 00:01:00 -Severity 2 `
   -Description 'CPU > 80% on SkyCraft VM'
+
+# Add-AzMetricAlertRuleV2 has no -Tag parameter; tag the rule afterwards
+Update-AzTag -ResourceId (Get-AzMetricAlertRuleV2 -ResourceGroupName platform-skycraft-swc-rg -Name skycraft-cpu-alert).Id `
+  -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN' } -Operation Merge
 ```
 
 **Expected Result**: `skycraft-cpu-alert` is listed under **Monitor** → **Alerts** → **Alert rules** in `platform-skycraft-swc-rg`, enabled, severity 2, with `skycraft-ops-ag` as its action.
@@ -223,7 +230,7 @@ Add-AzMetricAlertRuleV2 -Name skycraft-cpu-alert -ResourceGroupName platform-sky
 Beyond VM telemetry, this lab also routes the **platform storage account's blob logs** to the workspace, centralizing storage access auditing alongside VM metrics and logs. The setting is attached to the **blob service** of the account, not to the account itself.
 
 1. Navigate to **Storage accounts** → `platformskycraftswcsa` → **Monitoring** → **Diagnostic settings**.
-2. Select **blob** in the resource tree, then **+ Add diagnostic setting**.
+2. In the list of resources, select **blob**, then **+ Add diagnostic setting**.
 3. Diagnostic setting name: `skycraft-storage-diag`
 4. Logs: **StorageRead** and **StorageWrite**.
 5. Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`.
@@ -250,7 +257,13 @@ $logs = 'StorageRead', 'StorageWrite' | ForEach-Object { New-AzDiagnosticSetting
 New-AzDiagnosticSetting -Name skycraft-storage-diag -ResourceId "$($sa.Id)/blobServices/default" -WorkspaceId $law.ResourceId -Log $logs
 ```
 
-**Expected Result**: `skycraft-storage-diag` appears under the blob service's diagnostic settings; within 15 minutes `StorageBlobLogs` in the workspace returns rows for every read and write against the platform account.
+**Expected Result**: `skycraft-storage-diag` appears under the **blob** service's diagnostic settings. Nothing is logged until there is blob traffic - open a container of `platformskycraftswcsa` in **Storage browser** to generate some - and rows then appear in the workspace within about 15 minutes. Storage logs requests on a best-effort basis, so expect most requests rather than every one:
+
+```kusto
+StorageBlobLogs
+| where AccountName == "platformskycraftswcsa"
+| summarize Requests = count() by Category, OperationName
+```
 
 **Preview - the AVM module calls the Bicep path makes** (`bicep/main.bicep`; versions pinned in `docs/bicep-standards.md` §4.4):
 

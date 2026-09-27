@@ -58,7 +58,9 @@ Before starting this lab:
 - [ ] Resource group `platform-skycraft-swc-rg` exists (Lab 1.2)
 - [ ] **Section 4 only** (portal, not automated): quota for 2 vCPUs in **Norway East** for the Site Recovery test failover
 
-The first four are the checks `scripts/Deploy-Bicep.ps1` and `scripts/New-LabBlobBackup.ps1` perform before deploying; the cheapest chain that satisfies them is 1.2 → 3.2 (dev) → 4.1 `-All` → 5.1 → 5.2 (see `tools/lab-cycle-manifest.psd1`).
+The first four are what the scripts check: `scripts/Deploy-Bicep.ps1` stops on a missing resource group or workspace and only warns about the VM at step [7/7], after the deployment; `scripts/New-LabBlobBackup.ps1` stops on a missing storage account. The shortest chain that also satisfies the gates of the labs it runs is 1.2 → 2.1 → 2.3 → 3.2 (dev, needs `~/.ssh/skycraft-dev.pub`) → 4.1 `-All` → 5.1 → 5.2 (see `tools/lab-cycle-manifest.psd1`).
+
+Both scripts also need PowerShell 7 with Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights and Az.Storage, a signed-in `Connect-AzAccount` context, permission to register the `Microsoft.RecoveryServices` and `Microsoft.DataProtection` resource providers (`Deploy-Bicep.ps1` registers them if needed), and **Owner** or **User Access Administrator** on `prodskycraftswcsa` (`New-LabBlobBackup.ps1` assigns the Backup Vault identity two roles there).
 
 ---
 
@@ -245,16 +247,22 @@ The Backup Vault uses its **system-assigned managed identity** to read and prote
 
 Backup reports are built from **diagnostic settings** on the vaults: each vault streams its backup logs to a Log Analytics workspace, and Backup center renders the workbooks from that data. Create one diagnostic setting per vault, with the names below - `scripts/Test-Lab.ps1` looks them up by name.
 
+> [!NOTE]
+> If `Deploy-Bicep.ps1` has already run, both settings exist: open them with **Edit setting** instead of adding new ones. Azure refuses a second setting that sends an overlapping category to the same workspace. A `rsv-backup-reports-diag` left by an older version of this lab still carries the legacy `AzureBackupReport` category - uncheck it and check the two missing ones; re-running `Deploy-Bicep.ps1` replaces the category list the same way.
+
 **a. Recovery Services Vault → `rsv-backup-reports-diag`**
 
 1. Open `platform-skycraft-swc-rsv` → **Monitoring** → **Diagnostic settings** → **+ Add diagnostic setting**.
 2. Diagnostic setting name: `rsv-backup-reports-diag`
 3. Logs - select the categories:
-   - **Azure Backup Reporting Data** (`AzureBackupReport`)
    - **Core Azure Backup Data** (`CoreAzureBackup`)
    - **Addon Azure Backup Job Data** (`AddonAzureBackupJobs`)
    - **Addon Azure Backup Policy Data** (`AddonAzureBackupPolicy`)
+   - **Addon Azure Backup Storage Data** (`AddonAzureBackupStorage`)
    - **Addon Azure Backup Protected Instance Data** (`AddonAzureBackupProtectedInstance`)
+   - **Azure Backup Operations** (`AzureBackupOperations`)
+
+   Backup reports needs all six. Leave **Azure Backup Reporting Data** (`AzureBackupReport`) unchecked: it is the legacy event, it flows only in **Azure diagnostics** mode, and with **Resource specific** selected it sends no data.
 4. Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`, destination table **Resource specific**.
 5. Click **Save**.
 
@@ -262,8 +270,8 @@ Backup reports are built from **diagnostic settings** on the vaults: each vault 
 
 1. Open `platform-skycraft-swc-bv` → **Monitoring** → **Diagnostic settings** → **+ Add diagnostic setting**.
 2. Diagnostic setting name: `bv-backup-reports-diag`
-3. Logs: **Core Azure Backup Data**, **Addon Azure Backup Job Data**, **Addon Azure Backup Policy Data**, **Addon Azure Backup Protected Instance Data** (the Backup Vault has no `AzureBackupReport` category).
-4. Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`, **Resource specific**.
+3. Logs: **Core Azure Backup Data**, **Addon Azure Backup Job Data**, **Addon Azure Backup Policy Data**, **Addon Azure Backup Protected Instance Data** (a Backup Vault has neither the legacy `AzureBackupReport` event nor `AddonAzureBackupStorage` - its storage data is already in Core and Protected Instance).
+4. Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`. Backup Vault logs always land in resource-specific tables; if the portal shows a **Resource specific** toggle, select it.
 5. Click **Save**.
 
 #### Azure CLI
@@ -275,7 +283,7 @@ BV=$(az dataprotection backup-vault show -g platform-skycraft-swc-rg -v platform
 
 az monitor diagnostic-settings create --name rsv-backup-reports-diag --resource "$RSV" \
   --workspace "$LAW" --export-to-resource-specific true \
-  --logs '[{"category":"AzureBackupReport","enabled":true},{"category":"CoreAzureBackup","enabled":true},{"category":"AddonAzureBackupJobs","enabled":true},{"category":"AddonAzureBackupPolicy","enabled":true},{"category":"AddonAzureBackupProtectedInstance","enabled":true}]'
+  --logs '[{"category":"CoreAzureBackup","enabled":true},{"category":"AddonAzureBackupJobs","enabled":true},{"category":"AddonAzureBackupPolicy","enabled":true},{"category":"AddonAzureBackupStorage","enabled":true},{"category":"AddonAzureBackupProtectedInstance","enabled":true},{"category":"AzureBackupOperations","enabled":true}]'
 
 az monitor diagnostic-settings create --name bv-backup-reports-diag --resource "$BV" \
   --workspace "$LAW" --export-to-resource-specific true \
@@ -290,7 +298,7 @@ $rsv = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-swc-rg -
 $bv  = Get-AzDataProtectionBackupVault -ResourceGroupName platform-skycraft-swc-rg -VaultName platform-skycraft-swc-bv
 
 $core = 'CoreAzureBackup', 'AddonAzureBackupJobs', 'AddonAzureBackupPolicy', 'AddonAzureBackupProtectedInstance'
-$rsvLogs = ($core + 'AzureBackupReport') | ForEach-Object { New-AzDiagnosticSettingLogSettingsObject -Category $_ -Enabled $true }
+$rsvLogs = ($core + 'AddonAzureBackupStorage', 'AzureBackupOperations') | ForEach-Object { New-AzDiagnosticSettingLogSettingsObject -Category $_ -Enabled $true }
 $bvLogs  = $core | ForEach-Object { New-AzDiagnosticSettingLogSettingsObject -Category $_ -Enabled $true }
 
 New-AzDiagnosticSetting -Name rsv-backup-reports-diag -ResourceId $rsv.ID -WorkspaceId $law.ResourceId -LogAnalyticsDestinationType Dedicated -Log $rsvLogs

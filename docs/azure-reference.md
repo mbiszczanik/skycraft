@@ -89,7 +89,7 @@ We strictly follow the Azure Resource Naming recommendations with specific patte
 
 ### 4.3 Public Access (D003)
 
-- **Development**: Public Blob Access **Allowed** (for exam prep skills).
+- **Development**: Public Blob Access **Disabled** (`allowBlobPublicAccess: false`); Lab 4.2 Step 4.2.12 tours both switches without enabling them.
 - **Production**: Public Blob Access **Disabled** (enterprise security best practice).
 
 ---

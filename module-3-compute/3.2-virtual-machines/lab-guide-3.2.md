@@ -68,14 +68,16 @@ You'll deploy this VM infrastructure for SkyCraft game servers:
 
 Before starting this lab:
 
-- [ ] Completed Lab 2.1 (Virtual Networks) - `dev-skycraft-swc-rg` and `dev-skycraft-swc-vnet` with the `AuthSubnet` and `WorldSubnet` subnets exist
+- [ ] Completed Lab 2.1 (Virtual Networks) **or** Lab 3.1 - either one creates `dev-skycraft-swc-rg` and `dev-skycraft-swc-vnet` with the `AuthSubnet` and `WorldSubnet` subnets
 - [ ] Completed Lab 2.3 (Name Resolution) **or** Lab 3.1 - either one creates the load balancer `dev-skycraft-swc-lb` with its `dev-skycraft-swc-lb-be-auth` and `dev-skycraft-swc-lb-be-world` backend pools, which the VM NICs join
 - [ ] Completed Lab 3.1 (Infrastructure as Code) - Bicep knowledge (recommended; not a resource dependency when Lab 2.3 has run)
 - [ ] Optional: Lab 2.2's NSGs and Azure Bastion. The VMs deploy without them; Bastion (`platform-skycraft-swc-bas`) is only needed for the portal SSH sessions (Step 3.2.14 onwards, and Step 3.2.32) and is the one standing-cost resource in the course, so Lab 2.2's script leaves it off unless you answer `y`
-- [ ] Contributor or Owner role at resource group level
-- [ ] SSH key pair generated (or ability to generate one)
+- [ ] Contributor or Owner role on the subscription (`Deploy-Bicep.ps1` runs a subscription-scope deployment)
+- [ ] SSH key pair at `$HOME\.ssh\skycraft-dev` / `skycraft-dev.pub` - the deploy script exits if the `.pub` file is missing
+- [ ] PowerShell 7+ and the `Az` module (Az.Accounts, Az.Resources, Az.Network, Az.Compute)
+- [ ] Bicep CLI on `PATH` - Az PowerShell compiles `main.bicep` through it
 
-The first two are the gates in `scripts/Deploy-Bicep.ps1` (`[2/5] Checking prerequisites`): resource group, VNet and load balancer, each looked up by name. `tools/lab-cycle-manifest.psd1` runs this lab after 1.2 → 2.1 → 2.3.
+The gates in `scripts/Deploy-Bicep.ps1` are the SSH public key at `$HOME\.ssh\skycraft-dev.pub` (`[1/5]`, override with `-SshKeyPath`) and the resource group, VNet and load balancer (`[2/5] Checking prerequisites`), each looked up by name. `tools/lab-cycle-manifest.psd1` declares this lab as depending on Lab 2.3.
 
 **Verify prerequisites**:
 
