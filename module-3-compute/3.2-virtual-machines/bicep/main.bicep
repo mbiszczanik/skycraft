@@ -132,7 +132,7 @@ resource resLbPoolWorld 'Microsoft.Network/loadBalancers/backendAddressPools@202
 *******************/
 
 // Key Vault for Azure Disk Encryption (only with that strategy)
-module modKeyVault 'br/public:avm/res/key-vault/vault:0.14.0' = if (parEncryptionStrategy == 'AzureDiskEncryption') {
+module modKeyVault 'br/public:avm/res/key-vault/vault:0.14.2' = if (parEncryptionStrategy == 'AzureDiskEncryption') {
   name: 'keyvault-deployment'
   scope: resRg
   params: {

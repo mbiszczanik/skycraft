@@ -110,19 +110,19 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 | AVM module | Pinned version | Used in |
 | :--- | :--- | :--- |
 | `avm/res/app/container-app` | `0.23.0` | Lab 3.3 |
-| `avm/res/app/managed-environment` | `0.15.0` | Lab 3.3 |
+| `avm/res/app/managed-environment` | `0.16.0` | Lab 3.3 |
 | `avm/res/authorization/policy-assignment/sub-scope` | `0.1.0` | Lab 1.3 |
 | `avm/res/authorization/role-assignment/rg-scope` | `0.1.1` | Lab 1.2 |
 | `avm/res/authorization/role-assignment/sub-scope` | `0.1.1` | Lab 1.2 |
 | `avm/res/compute/disk` | `0.6.1` | Lab 3.2 |
 | `avm/res/compute/virtual-machine` | `0.22.3` | Lab 3.2 |
-| `avm/res/container-instance/container-group` | `0.7.0` | Lab 3.3 |
-| `avm/res/container-registry/registry` | `0.13.0` | Lab 3.3 |
+| `avm/res/container-instance/container-group` | `0.7.1` | Lab 3.3 |
+| `avm/res/container-registry/registry` | `0.13.1` | Lab 3.3 |
 | `avm/res/data-protection/backup-vault` | `0.13.2` | Lab 5.2 |
 | `avm/res/insights/action-group` | `0.8.0` | Lab 5.1 |
 | `avm/res/insights/data-collection-rule` | `0.11.0` | Lab 5.1 |
 | `avm/res/insights/metric-alert` | `0.4.1` | Lab 5.1 |
-| `avm/res/key-vault/vault` | `0.14.0` | Lab 3.2 |
+| `avm/res/key-vault/vault` | `0.14.2` | Lab 3.2 |
 | `avm/res/network/application-security-group` | `0.2.2` | Lab 2.2 |
 | `avm/res/network/bastion-host` | `0.8.2` | Lab 2.2 |
 | `avm/res/network/dns-zone` | `0.6.2` | Lab 2.3 |
