@@ -500,6 +500,27 @@ Describe 'Manifest - the dependency graph is sound' {
             }
         }
     }
+
+    # Every edge a lab enforces with a hard gate ([ERROR] plus exit 1), from the sweep of all
+    # sixteen Deploy-Bicep.ps1 preflights and the PostDeploy scripts. A gate missing from the graph
+    # does not break a full cycle - the order happens to satisfy it - but when the prerequisite
+    # fails, the dependent phase runs anyway and dies on a resource name instead of being skipped
+    # (#166). Asked of Get-DependentPhase, the function the orchestrator skips by, so an edge
+    # reached through another phase (3.2 reaches 2.1 through 2.3) counts, exactly as it does live.
+    It "skips <Lab> when <Dependency>, which its gate needs, fails" -ForEach @(
+        @{ Lab = '3.2'; Dependency = '2.1' }   # dev resource group and VNet
+        @{ Lab = '3.2'; Dependency = '2.3' }   # load balancer 'dev-skycraft-swc-lb' (or 3.1)
+        @{ Lab = '5.1'; Dependency = '3.2' }
+        @{ Lab = '5.1'; Dependency = '4.1' }
+        @{ Lab = '5.2'; Dependency = '4.1' }   # PostDeploy New-LabBlobBackup.ps1
+        @{ Lab = '5.2'; Dependency = '5.1' }
+        @{ Lab = '5.3'; Dependency = '2.1' }
+        @{ Lab = '5.3'; Dependency = '3.2' }
+        @{ Lab = '5.3'; Dependency = '4.1' }
+        @{ Lab = '5.3'; Dependency = '5.1' }
+    ) {
+        @(Get-DependentPhase -Phases $script:LivePhases -Id $Dependency) | Should -Contain $Lab -Because "lab $Lab exits 1 without what $Dependency creates"
+    }
 }
 
 Describe 'Manifest - teardown covers what the cycle deploys' {
