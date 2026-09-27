@@ -9,7 +9,7 @@
       - Resource API versions pinned to 2023-11-01 (network stack) or 2023-07-01 (RG)
       - No preview API versions
       - CostCenter tag present in main.bicep
-      - Compiles successfully via 'az bicep build'
+      - Compiles successfully via 'bicep build' (resolved by tools/BicepCli.psm1)
 
 .EXAMPLE
     Invoke-Pester -Path .\Standards.Tests.ps1
@@ -106,8 +106,14 @@ Describe 'Lab 3.1 Bicep - CostCenter tag coverage' {
 }
 
 Describe 'Lab 3.1 Bicep - compilation' {
-    It "'<file>' compiles via 'az bicep build'" -ForEach $AllCases {
-        $null = & az bicep build --file $path --stdout 2>&1
+    BeforeAll {
+        # The same compiler the deploy scripts use - see tools/BicepCli.psm1 (#144).
+        Import-Module (Join-Path $PSScriptRoot '..' '..' '..' 'tools' 'BicepCli.psm1') -Force
+        $script:Bicep = Get-BicepCliPath
+    }
+
+    It "'<file>' compiles via 'bicep build'" -ForEach $AllCases {
+        $null = & $script:Bicep build $path --stdout 2>&1
         $LASTEXITCODE | Should -Be 0 -Because "'$file' must compile without errors"
     }
 }

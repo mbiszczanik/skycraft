@@ -4,7 +4,7 @@
 
 [`tools/Invoke-DryRun.ps1`](../tools/Invoke-DryRun.ps1) is the single local gate to run before pushing. It mirrors every check in the [Lint workflow](../.github/workflows/lint.yml) that works **without an Azure sign-in** and **without any deployed Azure resources**, so a broken push is caught on the dev box instead of in CI.
 
-The harness never authenticates to Azure and never deploys anything. It reads files, shells out to `az bicep`, which is a purely local compiler, and runs the Pester suites, which need no Azure sign-in either.
+The harness never authenticates to Azure and never deploys anything. It reads files, shells out to the Bicep CLI, which is a purely local compiler, and runs the Pester suites, which need no Azure sign-in either.
 
 ---
 
@@ -27,8 +27,8 @@ A full run takes roughly **10-12 minutes** on a typical dev box, dominated by PS
 | --- | --- | --- |
 | `Parse` | *Verify every PowerShell file parses* | Any `*.ps1` / `*.psm1` / `*.psd1` has a syntax error. Runs first, because PSScriptAnalyzer reports **no** errors for a file it cannot parse. |
 | `Analyzer` | *Run PSScriptAnalyzer* | `Invoke-ScriptAnalyzer` with [`PSScriptAnalyzerSettings.psd1`](../PSScriptAnalyzerSettings.psd1) returns a finding of severity `Error`. Warnings are printed and counted but do not fail the gate, exactly as in CI. |
-| `Bicep` | *Build all Bicep entry points* | `az bicep build` fails for any `*.bicep` outside a `modules` folder. Templates under `modules` are compiled transitively by their caller. |
-| `BicepParams` | *Build all Bicep parameter files* | `az bicep build-params` fails for any `*.bicepparam`. |
+| `Bicep` | *Build all Bicep entry points* | `bicep build` fails for any `*.bicep` outside a `modules` folder. Templates under `modules` are compiled transitively by their caller. |
+| `BicepParams` | *Build all Bicep parameter files* | `bicep build-params` fails for any `*.bicepparam`. |
 | `Pester` | *Repository Standards (Pester)* | `Invoke-Pester` over `tests/` and every `module-*/**/tests/*.Tests.ps1` reports a failed test, block or container. An empty discovery also fails: a gate that found nothing to run is broken, not green. |
 
 Every selected check runs to completion even when an earlier one fails, so a single run reports every problem instead of only the first.
@@ -39,16 +39,16 @@ Every selected check runs to completion even when an earlier one fails, so a sin
 | --- | --- | --- |
 | PowerShell 7.0+ | all checks | <https://aka.ms/powershell> |
 | PSScriptAnalyzer | `Analyzer` | `Install-Module PSScriptAnalyzer -Scope CurrentUser` |
-| Azure CLI + Bicep | `Bicep`, `BicepParams` | <https://aka.ms/installazurecli>, then `az bicep install` |
+| Bicep CLI | `Bicep`, `BicepParams`, and the compile cases in `Pester` | <https://aka.ms/bicep-install> (standalone, on PATH). A copy installed with `az bicep install` also works, as a fallback. |
 | Pester 5.5+ | `Pester` | `Install-Module Pester -MinimumVersion 5.5 -MaximumVersion 5.99 -Scope CurrentUser` |
 
-If PSScriptAnalyzer, the Azure CLI or Pester is missing, the affected check **fails** with an install hint rather than passing quietly. A gate that reports green for work it never did is worse than no gate at all. To run a genuine subset, select it explicitly with `-Check` — anything not selected is reported as `SKIP` in the summary and called out again underneath it.
+If PSScriptAnalyzer, the Bicep CLI or Pester is missing, the affected check **fails** with an install hint rather than passing quietly. A gate that reports green for work it never did is worse than no gate at all. To run a genuine subset, select it explicitly with `-Check` — anything not selected is reported as `SKIP` in the summary and called out again underneath it.
 
 ### 2.2 Running a Subset
 
 ```powershell
-# PowerShell checks only - no Azure CLI on this machine
-.\tools\Invoke-DryRun.ps1 -Check Parse,Analyzer,Pester
+# Static PowerShell checks only - no Bicep CLI on this machine
+.\tools\Invoke-DryRun.ps1 -Check Parse,Analyzer
 
 # Bicep only, echoing each file as it is compiled
 .\tools\Invoke-DryRun.ps1 -Check Bicep,BicepParams -Verbose
@@ -244,11 +244,11 @@ Every Module 5 lab resolves resource IDs from Azure at run time, so the deploy s
 
 ### 5.1 Why `--outfile` and not `--stdout`
 
-The harness compiles to a throwaway file (`az bicep build --file <f> --outfile <tmp>`) rather than piping to `--stdout`, which is what the Lint workflow does.
+The harness compiles to a throwaway file (`bicep build <f> --outfile <tmp>`) rather than piping to `--stdout`, which is what the Lint workflow does.
 
-On a Windows console that is not UTF-8, `az bicep build --stdout` dies with `UnicodeEncodeError: 'charmap' codec can't encode character` as soon as a template pulls in an AVM module whose metadata contains a non-ANSI character. `PYTHONIOENCODING=utf-8` does not help, because the Azure CLI's bundled Python ignores it. Writing to a file bypasses the console encoding entirely. CI runs on Ubuntu with a UTF-8 locale and is unaffected, which is why the workflow can keep using `--stdout`.
+The harness used to compile through `az bicep`, and on a Windows console that is not UTF-8 `az bicep build --stdout` dies with `UnicodeEncodeError: 'charmap' codec can't encode character` as soon as a template pulls in an AVM module whose metadata contains a non-ANSI character (Lab 2.3's `dns-zone` does). `PYTHONIOENCODING=utf-8` does not help, because the Azure CLI's bundled Python ignores it. The standalone CLI the harness now resolves (#144) writes `--stdout` without going through Python and does not crash, which is why the Pester compile cases use `--stdout`. `--outfile` stays in the harness anyway: it keeps the gate independent of the console encoding whichever binary is in use.
 
-Do not "simplify" the harness back to `--stdout`.
+**Which binary.** [`tools/BicepCli.psm1`](../tools/BicepCli.psm1) resolves the compiler for the harness and for the Pester suites that compile templates: the `bicep` on PATH first, because `New-AzSubscriptionDeployment` and `New-AzResourceGroupDeployment` compile through that binary when `Deploy-Bicep.ps1` runs; then the copy `az bicep install` keeps under `~/.azure/bin` (or `$env:AZURE_CONFIG_DIR/bin`), so a machine with only the Azure CLI still works. The harness prints the resolved path and version at start-up. If that version differs from the one `az bicep version` reports, the deploys follow the PATH one. `tests/Bicep-Cli.Tests.ps1` fails any PowerShell file or workflow that calls `az bicep` again.
 
 ### 5.2 Excluded directories
 

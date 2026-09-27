@@ -11,8 +11,8 @@
     notice. Two things have to stay true for that not to recur:
 
       1. The workflow's Pester step discovers module-*/**/tests/*.Tests.ps1 in addition to
-         tests/, and installs the Bicep CLI first because Lab 3.1's suite compiles through
-         'az bicep build'.
+         tests/, and installs the standalone Bicep CLI first because Lab 3.1's suite compiles
+         through 'bicep build' (#144).
       2. Every tracked *.Tests.ps1 sits in one of those two places. A suite anywhere else
          would match neither path and would never run.
 
@@ -86,8 +86,11 @@ Describe 'Pester discovery - the workflow runs both locations' {
         $found | Should -Be $expected
     }
 
-    It 'installs the Bicep CLI before the suites run (Lab 3.1 compiles through az bicep build)' {
-        $script:PesterJob | Should -Match 'az bicep install'
-        $script:PesterJob.IndexOf('az bicep install') | Should -BeLessThan $script:PesterJob.IndexOf('Invoke-Pester')
+    It 'installs the standalone Bicep CLI before the suites run (Lab 3.1 compiles through bicep build)' {
+        # The release binary on PATH, not 'az bicep install': that copy lives under ~/.azure/bin,
+        # where only the Azure CLI looks, so the suites would compile with a different binary
+        # than the deploy scripts do (#144).
+        $script:PesterJob | Should -Match 'releases/latest/download/bicep-linux-x64'
+        $script:PesterJob.IndexOf('bicep-linux-x64') | Should -BeLessThan $script:PesterJob.IndexOf('Invoke-Pester')
     }
 }
