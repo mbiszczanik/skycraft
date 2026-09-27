@@ -63,6 +63,13 @@ Describe 'Test-GatedPath: which changed files put a PR under the gate' {
         @{ path = 'tools/lab-cycle-manifest.psd1';                                             gated = $true }
         @{ path = 'tools/Invoke-LabCycle.ps1';                                                 gated = $true }
         @{ path = 'tools/LabCycle.psm1';                                                       gated = $true }
+        # A lab-local Pester suite stubs Az and runs in CI (lint.yml) - nothing about it can be
+        # verified live, so it is out of scope like tests/ (issue #156). Its lab's scripts are not.
+        @{ path = 'module-5-monitoring-maintenance/5.2-business-continuity/tests/Remove-LabResource.Tests.ps1';  gated = $false }
+        @{ path = 'module-1-identities-governance/1.2-rbac/tests/RoleAssignments-DeployPath.Tests.ps1';         gated = $false }
+        @{ path = 'module-3-compute\3.3-containers\tests\Remove-LabResource.Tests.ps1';                        gated = $false }
+        @{ path = 'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Remove-LabResource.ps1';     gated = $true }
+        @{ path = 'module-4-storage/4.2-blob-storage/bicep/tests.bicep';                                         gated = $true }
         @{ path = 'tools/Test-PrLiveVerification.ps1';                                         gated = $false }
         @{ path = 'tools/Invoke-DryRun.ps1';                                                   gated = $false }
         @{ path = 'tests/Pr-Live-Verification.Tests.ps1';                                      gated = $false }
@@ -91,6 +98,28 @@ Describe 'Get-PrGateVerdict' {
         $v.Gated  | Should -BeTrue
         $v.Pass   | Should -BeFalse
         $v.Reason | Should -Match 'Live-verified|Live-verification'
+    }
+
+    It 'passes a PR that touches only a lab-local test suite, tests/ and docs, with no declaration (PR #151)' {
+        $files = @(
+            'module-5-monitoring-maintenance/5.2-business-continuity/tests/Remove-LabResource.Tests.ps1'
+            'tests/Lab-Script-Harness-Guard.Tests.ps1'
+            'docs/powershell-standards.md'
+            'CHANGELOG.md'
+        )
+        $v = Get-PrGateVerdict -ChangedFile $files -Body "## Summary`nSuite fixes.`n`nCloses #112"
+        $v.Gated | Should -BeFalse
+        $v.Pass  | Should -BeTrue
+    }
+
+    It 'still fails a PR that changes a lab-local suite together with the lab script it covers' {
+        $files = @(
+            'module-5-monitoring-maintenance/5.2-business-continuity/tests/Remove-LabResource.Tests.ps1'
+            'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Remove-LabResource.ps1'
+        )
+        $v = Get-PrGateVerdict -ChangedFile $files -Body 'Closes #112'
+        $v.Gated | Should -BeTrue
+        $v.Pass  | Should -BeFalse
     }
 
     It 'passes a gated PR that declares what it verified' {

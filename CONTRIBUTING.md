@@ -19,7 +19,7 @@ SkyCraft follows **GitHub Flow** (see [ADR-0001](docs/adr/0001-use-github-flow.m
 - All work happens on short-lived branches: `feature/*`, `fix/*`, `docs/*`, `chore/*`.
 - Changes land on `main` exclusively via Pull Request, **squash-merged** for linear history.
 - Branch protection rules on `main` are documented in [ADR-0002](docs/adr/0002-branch-protection-rules.md).
-- A PR that touches lab content (`module-*/`, `scripts/`, the lab cycle tooling in `tools/`) must declare its live verification in its body - `Live-verified: <what was run>` or `Live-verification: deferred -> #<issue>` - and a deferred PR is opened as a **draft** and links its issue with `Refs #N`, never `Closes #N`. The `Live Verification Declared` check enforces it; see [ADR-0006](docs/adr/0006-pr-live-verification-gate.md).
+- A PR that touches lab content (`module-*/` except a lab's own `tests/`, `scripts/`, the lab cycle tooling in `tools/`) must declare its live verification in its body - `Live-verified: <what was run>` or `Live-verification: deferred -> #<issue>` - and a deferred PR is opened as a **draft** and links its issue with `Refs #N`, never `Closes #N`. The `Live Verification Declared` check enforces it; see [ADR-0006](docs/adr/0006-pr-live-verification-gate.md).
 
 For multi-commit work — and for any work driven by an automated agent — use a
 `git worktree` to isolate the feature from the main checkout (see
