@@ -215,15 +215,16 @@ Both endpoint VMs need the **NetworkWatcherAgent** extension, and no earlier lab
 1. In **Network Watcher**, go to **Monitoring** → **Connection monitor** → **+ Create**.
 2. **Basics**:
    - Connection Monitor Name: `skycraft-hub-spoke-cm`
-   - Region: **Sweden Central**
-   - Workspace configuration: **Use workspace created by connection monitor** *unchecked* → select `platform-skycraft-swc-law`
+   - Subscription: yours
+   - Region: **Sweden Central** (the wizard defaults to East US; the region picks the Network Watcher, and `Test-Lab.ps1` looks under `NetworkWatcher_swedencentral`)
 3. **Test groups** → **+ Add test group** → Test group name: `hub-spoke-ssh`
    - **+ Add sources** → **Azure endpoints** → select `prod-skycraft-swc-auth-vm` → **Add endpoints**. The endpoint is named after the VM; select it in the test group view and rename it `prod-auth-source`.
      - **Fallback** — if only the dev environment exists: pick `dev-skycraft-swc-world-vm` instead (the deployment script makes the same substitution)
    - **+ Add destinations** → **Azure endpoints** → select `dev-skycraft-swc-auth-vm` → **Add endpoints**, and rename it `dev-auth-destination` (`Test-Lab.ps1` looks the destination up by this name).
    - **Add Test configuration** → **New configuration**: name `tcp-22-every-5m`, Protocol **TCP**, Destination port **22**, Test Frequency **Every 5 minutes**, Checks failed **10** %, Round trip time **100** ms, **Disable traceroute** unchecked → **Add Test configuration** → **Add Test Group**.
-4. **Create alert**: leave unchecked. Click **Review + create** → **Create**.
-5. The wizard has no Tags tab, and `Test-Lab.ps1` checks the monitor's `Project` and `CostCenter` tags, so tag it from Cloud Shell (PowerShell):
+4. **Workspace**: uncheck **Use workspace created by connection monitor** and select `platform-skycraft-swc-law`.
+5. **Create alert**: leave unchecked. Click **Review + create** → **Create**.
+6. The wizard has no Tags tab, and `Test-Lab.ps1` checks the monitor's `Project` and `CostCenter` tags, so tag it from Cloud Shell (PowerShell):
 
    ```powershell
    Update-AzTag -ResourceId (Get-AzNetworkWatcherConnectionMonitor -Location swedencentral -Name skycraft-hub-spoke-cm).Id `
@@ -338,7 +339,7 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 
 **Symptom**: `Flow log 'prod-skycraft-swc-vnet-flowlog' exists` or `Connection Monitor 'skycraft-hub-spoke-cm' exists` reports FAIL.
 
-**Root Cause**: The validation script looks the resources up **by name** under `NetworkWatcher_swedencentral` in `NetworkWatcherRG`, and the destination endpoint by the name `dev-auth-destination`. A flow log, monitor or endpoint created under a different name, or a monitor without the `Project = SkyCraft` and `CostCenter = MSDN` tags (the portal wizard cannot set them - see Step 5.3.6, item 5), fails the check.
+**Root Cause**: The validation script looks the resources up **by name** under `NetworkWatcher_swedencentral` in `NetworkWatcherRG`, and the destination endpoint by the name `dev-auth-destination`. A flow log, monitor or endpoint created under a different name, or a monitor without the `Project = SkyCraft` and `CostCenter = MSDN` tags (the portal wizard cannot set them - see Step 5.3.6, item 6), fails the check.
 
 **Solution**: Use the exact names from Steps 5.3.5 and 5.3.6, or run `scripts/Deploy-Bicep.ps1`, which is idempotent and produces the same resources.
 
