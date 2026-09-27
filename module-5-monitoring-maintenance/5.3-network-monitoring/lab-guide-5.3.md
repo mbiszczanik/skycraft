@@ -291,7 +291,7 @@ New-AzNetworkWatcherConnectionMonitor -NetworkWatcher $nw -Name skycraft-hub-spo
 **Expected Result**: `skycraft-hub-spoke-cm` appears under Connection monitor with monitoring status **Running**, and `NWConnectionMonitorTestResult` in `platform-skycraft-swc-law` starts receiving rows within about 10 minutes. What `hub-spoke-ssh` reports depends on the source:
 
 - **Dev fallback source** (`dev-skycraft-swc-world-vm`): **Pass** - source and destination share `dev-skycraft-swc-vnet`.
-- **Production source** (`prod-skycraft-swc-auth-vm`): **Fail**. The prod and dev spokes are each peered only to the hub, and VNet peering is not transitive, so traffic to `10.1.1.4` matches the system route `10.0.0.0/8 → None` and is dropped. Confirm it with **Next hop** (Section 4) from `prod-skycraft-swc-auth-vm`: this is the monitor doing its job, not a broken lab.
+- **Production source** (`prod-skycraft-swc-auth-vm`): **Fail**. The prod and dev spokes are each peered only to the hub, and VNet peering is not transitive, so traffic to the dev `AuthSubnet` (`10.1.1.0/24`) matches the system route `10.0.0.0/8 → None` and is dropped. Confirm it with **Next hop** (Step 5.3.2) from `prod-skycraft-swc-auth-vm` to the private IP of `dev-skycraft-swc-auth-vm`: this is the monitor doing its job, not a broken lab. Issue #178 tracks the route the lab should provide.
 
 **Preview - the AVM module call the Bicep path makes** (`bicep/main.bicep`; version pinned in `docs/bicep-standards.md` §4.4). Both resources of this lab are children of the Network Watcher module:
 
