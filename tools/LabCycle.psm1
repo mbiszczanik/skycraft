@@ -1011,8 +1011,10 @@ function Test-LabCyclePreflight {
           3. tools on PATH  standalone bicep, because Az PowerShell compiles .bicep client-side by
                             shelling out to a bare 'bicep' and 'az bicep install' puts its copy
                             where only the CLI can see it; pwsh, because every phase is a pwsh
-                            child; az, because the deploy scripts call az bicep build-params
-          4. az bicep       and that the subcommand works, not merely that az exists
+                            child; az, because lab 3.3 builds its image with 'az acr build' and
+                            the teardown clears protected items with 'az backup'
+          4. bicep runs     and reports its version, not merely that a file named bicep exists.
+                            The version is the one every deployment in the run compiles with
           5. ssh key        ~/.ssh/skycraft-dev.pub, which lab 3.2 requires
           6. run lock       no live process is already running a cycle
           7. leftovers      soft-deleted resources holding names this run needs. A reserved Log
@@ -1040,8 +1042,8 @@ function Test-LabCyclePreflight {
     .PARAMETER CommandProbe
         Given a command name, returns something truthy when it is on PATH.
 
-    .PARAMETER AzBicepProbe
-        Returns true when az bicep works.
+    .PARAMETER BicepVersionProbe
+        Returns the 'bicep --version' line of the bicep on PATH, or $null when it does not run.
 
     .PARAMETER LeftoverProbe
         Given the guards, returns what is soft-deleted and in the way. Reported, never purged:
@@ -1069,7 +1071,7 @@ function Test-LabCyclePreflight {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'LockPath', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'ContextProbe', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'CommandProbe', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'AzBicepProbe', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'BicepVersionProbe', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'LeftoverProbe', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'PermissionProbe', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'CanaryProbe', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
@@ -1095,9 +1097,10 @@ function Test-LabCyclePreflight {
         [scriptblock]$CommandProbe = { param($Name) Get-Command $Name -ErrorAction SilentlyContinue },
 
         [Parameter()]
-        [scriptblock]$AzBicepProbe = {
-            & az bicep version *> $null
-            $LASTEXITCODE -eq 0
+        [scriptblock]$BicepVersionProbe = {
+            $raw = & bicep --version 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $raw) { return $null }
+            "$raw".Trim()
         },
 
         [Parameter()]
@@ -1176,8 +1179,9 @@ function Test-LabCyclePreflight {
         }
 
         {
-            if (& $AzBicepProbe) { ConvertTo-CheckResult -Name 'az bicep' -Ok $true -Detail 'az bicep works' }
-            else { ConvertTo-CheckResult -Name 'az bicep' -Ok $false -Detail "'az bicep' does not work, and every deploy script compiles its parameter file with 'az bicep build-params'." }
+            $bicepVersion = & $BicepVersionProbe
+            if ($bicepVersion) { ConvertTo-CheckResult -Name 'bicep runs' -Ok $true -Detail $bicepVersion }
+            else { ConvertTo-CheckResult -Name 'bicep runs' -Ok $false -Detail "'bicep --version' failed, and every deployment compiles its template through the bicep on PATH." }
         }
 
         {

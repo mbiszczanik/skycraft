@@ -40,6 +40,6 @@ Live-verified:
 - [ ] `Test-Lab.ps1` passes for affected lab(s) - and the **Live verification** line above says so, or names the issue that tracks it
 - [ ] PSScriptAnalyzer reports 0 errors (`Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1`)
 - [ ] Pester suite green (`Invoke-Pester ./tests -CI`)
-- [ ] All Bicep entry points build (`az bicep build`)
+- [ ] All Bicep entry points build (`bicep build`, or `.\tools\Invoke-DryRun.ps1 -Check Bicep,BicepParams`)
 - [ ] Docs/links updated; directory names match exactly
 - [ ] Follows PowerShell & Bicep conventions (CBH, prefixes, required tags)

@@ -8,7 +8,7 @@
     file in module-*/ and asserts:
       - no resource or existing-resource declaration uses a '-preview' suffix
       - no API version date is from the future (later than today)
-      - each file still compiles under 'az bicep build'
+      - each file still compiles under 'bicep build' (resolved by tools/BicepCli.psm1)
 
     A sibling regression test guards the specific bleeding-edge versions that were
     previously in the repo so they do not creep back in.
@@ -97,8 +97,14 @@ Describe 'Bicep - module-3.3 and module-3.4 still compile' {
         @{ file = 'module-3-compute/3.4-app-service/bicep/modules/autoscale.bicep' ; path = (Join-Path $RepoRoot 'module-3-compute/3.4-app-service/bicep/modules/autoscale.bicep') }
     )
 
-    It "'<file>' compiles via 'az bicep build'" -ForEach $FixedModules {
-        $null = & az bicep build --file $path --stdout 2>&1
+    BeforeAll {
+        # The same compiler the deploy scripts use - see tools/BicepCli.psm1 (#144).
+        Import-Module (Join-Path $PSScriptRoot '..' 'tools' 'BicepCli.psm1') -Force
+        $script:Bicep = Get-BicepCliPath
+    }
+
+    It "'<file>' compiles via 'bicep build'" -ForEach $FixedModules {
+        $null = & $script:Bicep build $path --stdout 2>&1
         $LASTEXITCODE | Should -Be 0 -Because "'$file' must compile without errors after API downgrade"
     }
 }

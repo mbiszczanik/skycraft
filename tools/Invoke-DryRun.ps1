@@ -5,15 +5,19 @@
 .DESCRIPTION
     Invoke-DryRun.ps1 is the local pre-push gate for SkyCraft. It mirrors the parts of
     the Lint workflow (.github/workflows/lint.yml) that a developer machine can run
-    without 'az login' and without any deployed Azure resources:
+    without an Azure sign-in and without any deployed Azure resources:
 
       Parse       Every *.ps1 / *.psm1 / *.psd1 is parsed with the PowerShell parser.
                   A syntax error is invisible to PSScriptAnalyzer, so this runs first.
       Analyzer    Invoke-ScriptAnalyzer over the repository with PSScriptAnalyzerSettings.psd1.
                   Only 'Error' severity fails the gate; warnings are counted and listed.
-      Bicep       'az bicep build' over every Bicep entry point. Files under a 'modules'
+      Bicep       'bicep build' over every Bicep entry point. Files under a 'modules'
                   folder are skipped - their callers compile them transitively.
-      BicepParams 'az bicep build-params' over every *.bicepparam file.
+      BicepParams 'bicep build-params' over every *.bicepparam file.
+
+    Both Bicep checks compile with the executable tools/BicepCli.psm1 resolves: the 'bicep'
+    on PATH, which is the one the deploy scripts compile with, falling back to the copy
+    'az bicep install' manages. The resolved path and version are printed with each check.
       Pester      Invoke-Pester over tests/ and every module-*/**/tests/*.Tests.ps1, the same
                   set the CI job runs. Any failed test, block or container fails the gate, and
                   so does an empty discovery - a gate that found nothing to run is broken, not
@@ -23,8 +27,8 @@
     run reports every problem instead of only the first. The script prints a consolidated
     summary and exits non-zero if any selected check failed.
 
-    Checks that need a live subscription are deliberately out of scope: 'az deployment ...
-    what-if', 'Test-Lab.ps1' and 'Remove-LabResource.ps1' all require 'az login' plus
+    Checks that need a live subscription are deliberately out of scope: 'Deploy-Bicep.ps1
+    -WhatIf', 'Test-Lab.ps1' and 'Remove-LabResource.ps1' all require Connect-AzAccount plus
     existing resources. See docs/dry-run-harness.md for per-lab copy-paste commands.
     markdownlint and gitleaks need tooling outside PowerShell and stay in CI.
 
@@ -33,8 +37,8 @@
 
 .PARAMETER Check
     Which checks to run. Defaults to all five. Use it to skip a check whose tooling is not
-    installed locally, for example '-Check Parse,Analyzer,Pester' on a machine without the
-    Azure CLI.
+    installed locally, for example '-Check Parse,Analyzer' on a machine without the Bicep
+    CLI (the Pester suites compile templates too).
     Checks that are not selected are reported as SKIPPED in the summary, so a partial run
     can never be mistaken for a full one.
 
@@ -52,9 +56,9 @@
     Runs all five checks over the whole repository and exits non-zero if any of them failed.
 
 .EXAMPLE
-    .\tools\Invoke-DryRun.ps1 -Check Parse,Analyzer,Pester
+    .\tools\Invoke-DryRun.ps1 -Check Parse,Analyzer
 
-    Runs only the PowerShell checks - useful on a machine without the Azure CLI installed.
+    Runs only the static PowerShell checks - useful on a machine without the Bicep CLI installed.
 
 .EXAMPLE
     .\tools\Invoke-DryRun.ps1 -Check Bicep,BicepParams -Verbose
@@ -66,7 +70,7 @@
     Date: 2026-08-30
 
     This script never authenticates to Azure and never deploys anything. It only reads
-    files, shells out to 'az bicep', which is a purely local compiler, and runs Pester
+    files, shells out to the Bicep CLI, which is a purely local compiler, and runs Pester
     suites that themselves need no Azure sign-in.
 #>
 
@@ -88,10 +92,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# 'az' reports failure through $LASTEXITCODE. Without this, PowerShell 7.4+ turns a
+# 'bicep' reports failure through $LASTEXITCODE. Without this, PowerShell 7.4+ turns a
 # non-zero native exit into a terminating error and aborts the loop that is collecting
 # the very failures this gate exists to report.
 $PSNativeCommandUseErrorActionPreference = $false
+
+Import-Module (Join-Path $PSScriptRoot 'BicepCli.psm1') -Force
 
 #region Helpers
 
@@ -290,17 +296,21 @@ function Write-DryRunHeader {
 function Invoke-DryRunBicepBuild {
     <#
     .SYNOPSIS
-        Compiles a set of Bicep or .bicepparam files with the Azure CLI and returns the failures.
+        Compiles a set of Bicep or .bicepparam files with the Bicep CLI and returns the failures.
 
     .DESCRIPTION
-        Shells out to 'az bicep build' / 'az bicep build-params' once per file, writing the
+        Shells out to '<bicep> build' / '<bicep> build-params' once per file, writing the
         compiled JSON to a throwaway file.
 
-        The compiled JSON deliberately goes to --outfile rather than --stdout: on a Windows
-        console that is not UTF-8, 'az bicep build --stdout' dies with a UnicodeEncodeError
-        as soon as a template pulls in an AVM module whose metadata contains a non-ANSI
-        character. Writing to a file bypasses the console encoding entirely. Do not
-        "simplify" this back to --stdout.
+        The compiled JSON goes to --outfile rather than --stdout so it never passes through
+        the console encoding. That was load-bearing while this gate compiled through
+        'az bicep': its bundled Python dies with a UnicodeEncodeError on a non-UTF-8 Windows
+        console as soon as a template pulls in an AVM module with non-ANSI metadata. The
+        standalone CLI does not, but a file keeps the gate independent of whichever binary
+        the resolver falls back to.
+
+    .PARAMETER BicepPath
+        The Bicep executable, as returned by Get-BicepCliPath.
 
     .NOTES
         Project: SkyCraft
@@ -311,6 +321,10 @@ function Invoke-DryRunBicepBuild {
         [Parameter(Mandatory = $true)]
         [AllowEmptyCollection()]
         [System.IO.FileInfo[]]$File,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$BicepPath,
 
         [Parameter(Mandatory = $true)]
         [ValidateSet('build', 'build-params')]
@@ -334,10 +348,10 @@ function Invoke-DryRunBicepBuild {
         Write-Host ('  [{0,3}/{1}] {2}' -f $index, $File.Count, $relative) -ForegroundColor Gray
 
         $outFile = Join-Path $OutputDirectory ('{0:d3}.json' -f $index)
-        $output = & az bicep $Command --file $item.FullName --outfile $outFile 2>&1
+        $output = & $BicepPath $Command $item.FullName --outfile $outFile 2>&1
 
         if ($LASTEXITCODE -ne 0) {
-            $failures.Add("${relative}: az bicep $Command failed (exit $LASTEXITCODE)")
+            $failures.Add("${relative}: bicep $Command failed (exit $LASTEXITCODE)")
             $detail = ($output | Out-String).Trim()
             if ($detail) {
                 foreach ($line in ($detail -split '\r?\n')) {
@@ -360,6 +374,21 @@ $RepoRoot = (Get-Item -LiteralPath $RepoRoot -Force).FullName.TrimEnd('\', '/')
 Write-Host '=== SkyCraft offline dry run ===' -ForegroundColor Cyan
 Write-Host "Repository : $RepoRoot" -ForegroundColor Gray
 Write-Host "Checks     : $($Check -join ', ')" -ForegroundColor Gray
+
+# Resolved once for both Bicep checks. The version is printed because it is the point of
+# the resolver (#144): it should match what 'Deploy-Bicep.ps1' compiles with.
+$bicepPath = $null
+$bicepError = $null
+if ($Check -contains 'Bicep' -or $Check -contains 'BicepParams') {
+    try {
+        $bicepPath = Get-BicepCliPath
+        Write-Host "Bicep CLI  : $bicepPath ($((& $bicepPath --version 2>&1 | Out-String).Trim()))" -ForegroundColor Gray
+    }
+    catch {
+        $bicepError = $_.Exception.Message
+    }
+}
+
 Write-Host 'This gate never authenticates to Azure and never deploys anything.' -ForegroundColor Gray
 
 $allChecks = @('Parse', 'Analyzer', 'Bicep', 'BicepParams', 'Pester')
@@ -452,16 +481,15 @@ try {
             }
 
             'Bicep' {
-                Write-DryRunHeader -Title 'Check 3/5: az bicep build (entry points)'
+                Write-DryRunHeader -Title 'Check 3/5: bicep build (entry points)'
 
                 # Templates under a 'modules' folder are compiled transitively by their caller,
                 # exactly as the Lint workflow filters them out.
                 $bicepFiles = @(Get-DryRunFile -Root $RepoRoot -Extension '.bicep' -ExcludeName $ExcludeDirectory |
                                 Where-Object { $_.FullName -notmatch '[\\/]modules[\\/]' })
 
-                if (-not (Get-Command -Name az -CommandType Application -ErrorAction SilentlyContinue)) {
-                    $failures.Add("Azure CLI ('az') was not found on PATH, so $($bicepFiles.Count) template(s) were NOT compiled.")
-                    $failures.Add('    Install it from https://aka.ms/installazurecli, then run: az bicep install')
+                if (-not $bicepPath) {
+                    $failures.Add("$bicepError So $($bicepFiles.Count) template(s) were NOT compiled.")
                     $failures.Add('    Or skip this check explicitly with: -Check Parse,Analyzer')
                 }
                 else {
@@ -471,20 +499,19 @@ try {
                     $buildDirectory = Join-Path $tempRoot 'bicep'
                     New-Item -ItemType Directory -Path $buildDirectory -Force | Out-Null
 
-                    foreach ($line in (Invoke-DryRunBicepBuild -File $bicepFiles -Command 'build' -OutputDirectory $buildDirectory -Root $RepoRoot)) {
+                    foreach ($line in (Invoke-DryRunBicepBuild -File $bicepFiles -BicepPath $bicepPath -Command 'build' -OutputDirectory $buildDirectory -Root $RepoRoot)) {
                         $failures.Add($line)
                     }
                 }
             }
 
             'BicepParams' {
-                Write-DryRunHeader -Title 'Check 4/5: az bicep build-params'
+                Write-DryRunHeader -Title 'Check 4/5: bicep build-params'
 
                 $paramFiles = @(Get-DryRunFile -Root $RepoRoot -Extension '.bicepparam' -ExcludeName $ExcludeDirectory)
 
-                if (-not (Get-Command -Name az -CommandType Application -ErrorAction SilentlyContinue)) {
-                    $failures.Add("Azure CLI ('az') was not found on PATH, so $($paramFiles.Count) parameter file(s) were NOT compiled.")
-                    $failures.Add('    Install it from https://aka.ms/installazurecli, then run: az bicep install')
+                if (-not $bicepPath) {
+                    $failures.Add("$bicepError So $($paramFiles.Count) parameter file(s) were NOT compiled.")
                     $failures.Add('    Or skip this check explicitly with: -Check Parse,Analyzer')
                 }
                 else {
@@ -494,7 +521,7 @@ try {
                     $paramDirectory = Join-Path $tempRoot 'bicepparam'
                     New-Item -ItemType Directory -Path $paramDirectory -Force | Out-Null
 
-                    foreach ($line in (Invoke-DryRunBicepBuild -File $paramFiles -Command 'build-params' -OutputDirectory $paramDirectory -Root $RepoRoot)) {
+                    foreach ($line in (Invoke-DryRunBicepBuild -File $paramFiles -BicepPath $bicepPath -Command 'build-params' -OutputDirectory $paramDirectory -Root $RepoRoot)) {
                         $failures.Add($line)
                     }
                 }
@@ -621,7 +648,7 @@ if ($skippedChecks.Count -gt 0) {
 }
 
 Write-Host ''
-Write-Host 'Out of scope here (need Azure or extra tooling): az deployment what-if, Test-Lab.ps1,' -ForegroundColor Gray
+Write-Host 'Out of scope here (need Azure or extra tooling): Deploy-Bicep.ps1 -WhatIf, Test-Lab.ps1,' -ForegroundColor Gray
 Write-Host 'Remove-LabResource.ps1, markdownlint, gitleaks. See docs/dry-run-harness.md for the' -ForegroundColor Gray
 Write-Host 'copy-paste commands, per lab.' -ForegroundColor Gray
 

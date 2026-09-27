@@ -55,11 +55,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Lab 3.1's suite compiles its templates through `az bicep build`. Installed up front,
-      # as the bicep job does, rather than left to the CLI's first-use auto-install inside a
-      # test case.
+      # Lab 3.1's and the API-version suites compile templates through tools/BicepCli.psm1,
+      # which takes the `bicep` on PATH - the binary the deploy scripts compile with. The
+      # standalone release, not `az bicep install`: that copy lives under ~/.azure/bin where
+      # only the Azure CLI looks, a second toolchain that can be a second version (#144).
       - name: Install Bicep CLI
-        run: az bicep install
+        run: |
+          curl -fsSLo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x ./bicep
+          sudo mv ./bicep /usr/local/bin/bicep
+          bicep --version
 
       # The outcome is decided here rather than left to Pester's own `-CI` exit. GitHub runs
       # this step as `pwsh -command`, whose exit code is whatever the host was last told to
@@ -114,8 +119,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Same standalone install as the pester job, for the same reason (#144).
       - name: Install Bicep CLI
-        run: az bicep install
+        run: |
+          curl -fsSLo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x ./bicep
+          sudo mv ./bicep /usr/local/bin/bicep
+          bicep --version
 
       - name: Build all Bicep entry points
         shell: pwsh
@@ -123,7 +133,7 @@ jobs:
           $failed = $false
           Get-ChildItem -Recurse -Filter '*.bicep' | Where-Object FullName -NotMatch '[\\/]modules[\\/]' | ForEach-Object {
               Write-Host "::group::$($_.FullName)"
-              az bicep build --file $_.FullName --stdout 1>$null
+              bicep build $_.FullName --stdout 1>$null
               if ($LASTEXITCODE -ne 0) { $failed = $true }
               Write-Host '::endgroup::'
           }
@@ -138,7 +148,7 @@ jobs:
           $failed = $false
           Get-ChildItem -Recurse -Filter '*.bicepparam' | ForEach-Object {
               Write-Host "::group::$($_.FullName)"
-              az bicep build-params --file $_.FullName --stdout 1>$null
+              bicep build-params $_.FullName --stdout 1>$null
               if ($LASTEXITCODE -ne 0) { $failed = $true }
               Write-Host '::endgroup::'
           }
