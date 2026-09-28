@@ -9,6 +9,13 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.8](https://github.com/mbiszczanik/skycraft/compare/v0.10.7...v0.10.8) (2026-09-28)
+
+
+### Documentation
+
+* **lab-3.2:** add SSH key stored in Azure as option B ([#170](https://github.com/mbiszczanik/skycraft/issues/170)) ([#186](https://github.com/mbiszczanik/skycraft/issues/186)) ([94f162e](https://github.com/mbiszczanik/skycraft/commit/94f162e0bfd146fac4864c6017858aa1a5ceeb3b))
+
 ## [0.10.7](https://github.com/mbiszczanik/skycraft/compare/v0.10.6...v0.10.7) (2026-09-27)
 
 
