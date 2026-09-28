@@ -73,7 +73,7 @@ Before starting this lab:
 - [ ] Completed Lab 3.1 (Infrastructure as Code) - Bicep knowledge (recommended; not a resource dependency when Lab 2.3 has run)
 - [ ] Optional: Lab 2.2's NSGs and Azure Bastion. The VMs deploy without them; Bastion (`platform-skycraft-swc-bas`) is only needed for the portal SSH sessions (Step 3.2.14 onwards, and Step 3.2.32) and is the one standing-cost resource in the course, so Lab 2.2's script leaves it off unless you answer `y`
 - [ ] Contributor or Owner role on the subscription (`Deploy-Bicep.ps1` runs a subscription-scope deployment)
-- [ ] SSH key pair at `$HOME\.ssh\skycraft-dev` / `skycraft-dev.pub` - the deploy script exits if the `.pub` file is missing
+- [ ] SSH key from Step 3.2.1 (option A or option B). The deploy script reads the public key from `$HOME\.ssh\skycraft-dev.pub` and exits if the file is missing; with option B, export the stored key to a file and pass it with `-SshKeyPath` (Step 3.2.1 shows the commands)
 - [ ] PowerShell 7+ and the `Az` module (Az.Accounts, Az.Resources, Az.Network, Az.Compute)
 - [ ] Bicep CLI on `PATH` - Az PowerShell compiles `main.bicep` through it
 
@@ -204,7 +204,19 @@ The NSG rules created in Lab 2.2 allow SSH (port 22) from the Bastion subnet (10
 
 ### Step 3.2.1: Generate SSH Key Pair
 
-Generate an SSH key pair for secure authentication. **The public key is added to the VM during creation. The private key is provided through Azure Bastion's web UI when connecting.**
+Every VM in this lab uses SSH key authentication. **The public key is added to the VM during creation. The private key is provided through Azure Bastion's web UI when connecting.** Choose where the key pair lives:
+
+| | Option A: local key pair (`ssh-keygen`) | Option B: SSH key stored in Azure |
+| --- | --- | --- |
+| Public key | `skycraft-dev.pub` on your computer | Azure resource `platform-skycraft-swc-ssh` (`Microsoft.Compute/sshPublicKeys`) in `platform-skycraft-swc-rg` |
+| Private key | `skycraft-dev` on your computer | `platform-skycraft-swc-ssh.pem`, downloaded **once** when the key is created; Azure does not keep it |
+| VM wizard | **Use existing public key**, paste the `.pub` contents | **Use existing key stored in Azure**, pick the key from the list |
+| Works from another computer | Only if you copy the `.pub` file | Yes: any VM wizard in the subscription lists the key |
+| Bicep solution | Used as is by `scripts/Deploy-Bicep.ps1` | Export the public key to a `.pub` file and pass it with `-SshKeyPath` (below) |
+
+> **SkyCraft Choice**: The Bicep solution for this lab uses **option A**: `Deploy-Bicep.ps1` reads `$HOME\.ssh\skycraft-dev.pub` and passes it to `main.bicep` as `parSshPublicKey`. Option B fits a team or a classroom, where people deploy from different computers and nobody should need a key file just to create a VM.
+
+#### Option A: Generate the key pair locally
 
 **Windows (PowerShell)**:
 
@@ -234,13 +246,78 @@ cat ~/.ssh/skycraft-dev.pub
 - `skycraft-dev` (private key - keep secure!)
 - `skycraft-dev.pub` (public key - will be added to VM)
 
+#### Option B: Store the key in Azure
+
+The key goes into the platform resource group because that group outlives the environment groups: deleting `dev-skycraft-swc-rg` or `prod-skycraft-swc-rg` leaves the key in place. An SSH key resource has no cost.
+
+1. In Azure Portal, search for **SSH keys** and click **+ Create**
+2. Fill in the **Basics** tab:
+
+| Field                 | Value                                                  |
+| --------------------- | ------------------------------------------------------ |
+| Subscription          | [Your subscription]                                    |
+| Resource group        | `platform-skycraft-swc-rg`                             |
+| Region                | **Sweden Central** (read-only, taken from the resource group) |
+| Key pair name         | `platform-skycraft-swc-ssh`                            |
+| SSH public key source | **Generate new key pair**                              |
+| SSH Key Type          | **RSA SSH Format**                                     |
+
+![Create an SSH key in Azure Portal](images/step-3.2.1b.png)
+
+3. Click **Next: Tags** and add the platform tags. Lab 1.3's `Enforce-Project-Tag` policy denies any resource without `Project` = `SkyCraft`, and the key is a resource. Without the tags, **Review + create** stops at "Validation failed" with `RequestDisallowedByPolicy` (policy **Enforce Project Tag Value**):
+
+| Name        | Value       |
+| ----------- | ----------- |
+| Project     | SkyCraft    |
+| Environment | Platform    |
+| CostCenter  | MSDN        |
+| Owner       | [Your name] |
+
+4. Click **Review + create** → **Create**
+5. In the **Generate new key pair** pop-up, click **Download private key and create resource**. The browser saves `platform-skycraft-swc-ssh.pem`
+
+![Download the private key when creating the SSH key](images/step-3.2.1c.png)
+
+> [!IMPORTANT]
+> The `.pem` file is offered for download **only once**. If you lose it, delete the key resource and create a new one. On a shared computer, move the file to your own storage and delete it from the Downloads folder.
+
+**To use the Bicep solution with option B**, export the stored public key to its own file and point `Deploy-Bicep.ps1` at it with `-SshKeyPath`. A separate file name keeps an option A `skycraft-dev.pub`, if you have one, intact:
+
+```powershell
+mkdir "$HOME\.ssh" -Force
+(Get-AzSshKey -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-ssh).publicKey |
+    Set-Content "$HOME\.ssh\platform-skycraft-swc-ssh.pub"
+
+.\scripts\Deploy-Bicep.ps1 -Environment dev -SshKeyPath "$HOME\.ssh\platform-skycraft-swc-ssh.pub"
+```
+
+In your own Bicep you can skip the file and read the key where it lives, with an `existing` resource (the scope below assumes a subscription-scope template such as `main.bicep`):
+
+```bicep
+resource sshKey 'Microsoft.Compute/sshPublicKeys@2024-07-01' existing = {
+  name: 'platform-skycraft-swc-ssh'
+  scope: resourceGroup('platform-skycraft-swc-rg')
+}
+
+// In the VM's osProfile.linuxConfiguration.ssh.publicKeys:
+// keyData: sshKey.properties.publicKey
+```
+
+**Expected Result**: `platform-skycraft-swc-ssh` appears under **SSH keys** in `platform-skycraft-swc-rg`, and `platform-skycraft-swc-ssh.pem` is saved on your computer.
+
 > [!IMPORTANT]
 > Never share your private key. Store it securely and backup if needed.
 
+> [!NOTE]
+> The rest of this lab names the files from option A (`skycraft-dev`, `skycraft-dev.pub`). With option B, pick **Use existing key stored in Azure** → `platform-skycraft-swc-ssh` wherever a step asks for the public key, and use `platform-skycraft-swc-ssh.pem` wherever it asks for the private key.
+
 ### Step 3.2.2: Create Authserver VM via Azure Portal
 
-1. In Azure Portal, navigate to **Virtual machines**
-2. Click **+ Create** → **Azure virtual machine**
+1. In Azure Portal, search for **Virtual machines**. The portal opens the list inside **Compute infrastructure** (**Infrastructure** → **Virtual machines**)
+2. Click **+ Create** → **Virtual machine**
+
+> [!NOTE]
+> The portal may open a preview of a new Create-VM experience (a banner at the top of the Basics tab says so). Some field names there differ from the tables below; the banner's **Click here to access the previous experience** link switches back.
 
 **Basics tab**:
 
@@ -257,7 +334,7 @@ cat ~/.ssh/skycraft-dev.pub
 | VM architecture      | x64                                          |
 | Size                 | **Standard_B2ls_v2** (2 vCPUs, 4 GiB memory) |
 
-3. Click **See all sizes** if B2ls_v2 is not visible, search for "B2ls_v2"
+3. Click **See all sizes** if B2ls_v2 is not visible, search for "B2ls_v2". Likewise, if the **Image** list offers only other Ubuntu versions, click **See all images** and pick **Ubuntu Server 22.04 LTS - x64 Gen2** from the Ubuntu 22.04 LTS offer
 
 **Administrator account**:
 
@@ -267,6 +344,13 @@ cat ~/.ssh/skycraft-dev.pub
 | Username              | `azureuser`                          |
 | SSH public key source | **Use existing public key**          |
 | SSH public key        | [Paste contents of skycraft-dev.pub] |
+
+With option B from Step 3.2.1, set **SSH public key source** to **Use existing key stored in Azure** and **Stored keys** to `platform-skycraft-swc-ssh`. The list shows every SSH key in the subscription, grouped by resource group, whatever group the VM goes to.
+
+![Stored SSH key in the VM wizard](images/step-3.2.2b.png)
+
+> [!WARNING]
+> Do not pick **Generate new key pair** in the VM wizard. It creates a second key resource (`dev-skycraft-swc-auth-vm_key`) in the VM's resource group, which is deleted along with that group, and the VM ends up with a different key from the one in Step 3.2.1.
 
 **Inbound port rules**:
 
@@ -407,7 +491,7 @@ cat ~/.ssh/skycraft-dev.pub
 
 Repeat the VM creation process for the Worldserver:
 
-1. Navigate to **Virtual machines** → **+ Create** → **Azure virtual machine**
+1. Navigate to **Virtual machines** → **+ Create** → **Virtual machine**
 
 **Basics tab**:
 
@@ -422,7 +506,7 @@ Repeat the VM creation process for the Worldserver:
 | Size                 | **Standard_B2ls_v2**                    |
 | Authentication type  | **SSH public key**                      |
 | Username             | `azureuser`                             |
-| SSH public key       | [Same public key as Authserver]         |
+| SSH public key       | [Same key as Authserver: pasted `.pub` (option A) or stored key `platform-skycraft-swc-ssh` (option B)] |
 | Public inbound ports | **None**                                |
 
 > [!NOTE]
@@ -576,7 +660,7 @@ The data disk is attached but not yet formatted. You need to connect to the VM v
 | ------------------- | ---------------------------------------------------------------------- |
 | Authentication Type | **SSH Private Key from Local File**                                    |
 | Username            | `azureuser`                                                            |
-| Local File          | Browse to your private key file (`skycraft-dev` or `skycraft-dev.pem`) |
+| Local File          | Browse to your private key file (`skycraft-dev` for option A, `platform-skycraft-swc-ssh.pem` for option B) |
 
 6. Click **Connect**
 
@@ -1195,7 +1279,7 @@ Click **Configure scaling options** to set autoscale rules:
 | Authentication type   | **SSH public key**                |
 | Username              | `azureuser`                       |
 | SSH public key source | **Use existing public key**       |
-| SSH public key        | Paste your `skycraft-dev.pub` key |
+| SSH public key        | Paste your `skycraft-dev.pub` key (option B: **Use existing key stored in Azure** → `platform-skycraft-swc-ssh`) |
 
 2. Click **Next: Spot**
 
@@ -1330,7 +1414,7 @@ az vmss list-instances \
 4. Enter credentials:
    - **Username**: `azureuser`
    - **Authentication Type**: SSH Private Key from Local File
-   - Select your `skycraft-dev` private key file
+   - Select your private key file (`skycraft-dev`, or `platform-skycraft-swc-ssh.pem` with option B)
 
 5. Click **Connect**
 
@@ -1736,6 +1820,20 @@ sudo reboot
 - For this lab, VMs won't have applications yet - this is expected
 - To test temporarily, run: `nc -l 3724` on Authserver VM
 - Check NSG allows inbound on probe port from Azure Load Balancer
+
+### Issue 7: `SSH key <name> does not exist!` when scripting option B
+
+**Symptom**: `az vm create --ssh-key-name platform-skycraft-swc-ssh` fails with `ERROR: SSH key platform-skycraft-swc-ssh does not exist!`, although the portal wizard lists the key
+
+**Cause**: The portal lists SSH keys for the whole subscription, but `--ssh-key-name` looks only in the VM's own resource group. The key from Step 3.2.1 option B lives in `platform-skycraft-swc-rg`.
+
+**Solution**: Read the public key and pass its value instead of its name:
+
+```powershell
+$publicKey = (Get-AzSshKey -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-ssh).publicKey
+```
+
+Pass `$publicKey` to `az vm create --ssh-key-values`, to `Add-AzVMSshPublicKey -KeyData`, or export it to a file for `Deploy-Bicep.ps1 -SshKeyPath` (Step 3.2.1).
 
 ---
 
