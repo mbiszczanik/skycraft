@@ -422,9 +422,12 @@ if ($WhatIf) {
     if ($vmItem) {
         try {
             $recoveryPoints = @(Get-AzRecoveryServicesBackupRecoveryPoint -Item $vmItem -VaultId $vault.ID -ErrorAction SilentlyContinue)
+            # -Operation Backup: enabling protection or changing the policy (step [6/7]) starts a
+            # ConfigureBackup job, and mistaking that for a running backup would skip the backup.
             $job = Get-AzRecoveryServicesBackupJob `
                 -VaultId $vault.ID `
                 -BackupManagementType AzureVM `
+                -Operation Backup `
                 -Status InProgress `
                 -ErrorAction SilentlyContinue |
                 Where-Object { $_.WorkloadName -eq $vmName } |
@@ -445,20 +448,23 @@ if ($WhatIf) {
 
             if ($job) {
                 $deadline = (Get-Date).AddMinutes(3)
-                while ($job.Status -eq 'InProgress' -and (Get-Date) -lt $deadline) {
+                $jobId = $job.JobId
+                while ($job -and $job.Status -eq 'InProgress' -and (Get-Date) -lt $deadline) {
                     Start-Sleep -Seconds 15
-                    $job = Get-AzRecoveryServicesBackupJob -JobId $job.JobId -VaultId $vault.ID
+                    $job = Get-AzRecoveryServicesBackupJob -JobId $jobId -VaultId $vault.ID -ErrorAction SilentlyContinue
                 }
 
-                if ($job.Status -eq 'Failed') {
+                if (-not $job) {
+                    Write-Host "  [WARNING] Lost track of backup job $jobId - check Backup jobs in the vault" -ForegroundColor Yellow
+                } elseif ($job.Status -eq 'Failed') {
                     $script:deployFailures++
                     Write-Host "  [ERROR] Backup job for $vmName failed:" -ForegroundColor Red
-                    $detail = Get-AzRecoveryServicesBackupJobDetail -JobId $job.JobId -VaultId $vault.ID -ErrorAction SilentlyContinue
+                    $detail = Get-AzRecoveryServicesBackupJobDetail -JobId $jobId -VaultId $vault.ID -ErrorAction SilentlyContinue
                     foreach ($err in @($detail.ErrorDetails)) {
                         if ($err) { Write-Host "    $($err.ErrorCode): $($err.ErrorMessage)" -ForegroundColor Red }
                     }
-                    Write-Host "    UserErrorRequestDisallowedByPolicy means an Azure Policy deny refused a resource" -ForegroundColor Gray
-                    Write-Host "    Azure Backup creates for the snapshot - see lab-guide-5.2.md, Troubleshooting, Issue 2." -ForegroundColor Gray
+                    Write-Host "    400211 (UserErrorRequestDisallowedByPolicy) means an Azure Policy deny refused a" -ForegroundColor Gray
+                    Write-Host "    resource Azure Backup creates for the snapshot - see lab-guide-5.2.md, Troubleshooting, Issue 2." -ForegroundColor Gray
                 } elseif ($job.Status -eq 'InProgress') {
                     Write-Host "  ✓ Backup job for $vmName is running (the vault transfer takes a while - check Backup jobs)" -ForegroundColor Green
                 } else {
@@ -470,6 +476,10 @@ if ($WhatIf) {
             Write-Host "  [ERROR] Could not run the initial backup of ${vmName}: $_" -ForegroundColor Red
             Write-Host "    Trigger it manually: vault -> Backup items -> Azure Virtual Machine -> Backup now (Step 5.2.3)" -ForegroundColor Gray
         }
+    } elseif ($vm) {
+        # Protection was just enabled, but the vault does not list the item yet.
+        Write-Host "  [WARNING] $vmName is protected but not listed as a backup item yet - no initial backup was triggered." -ForegroundColor Yellow
+        Write-Host "    Re-run this script in a few minutes, or use Backup now (Step 5.2.3)." -ForegroundColor Gray
     }
 
     Write-Host "`n  Next Steps:" -ForegroundColor Cyan

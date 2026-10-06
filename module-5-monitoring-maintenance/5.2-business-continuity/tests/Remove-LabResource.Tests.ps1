@@ -282,6 +282,7 @@ function Remove-AzResourceGroup {
     $script:StaleModule = Invoke-CleanupScript -Stub $script:Stub -RecoveryServicesVersion '7.1.0'
     $script:NoFriendly  = Invoke-CleanupScript -Stub $script:Stub -NoFriendlyName
     $script:SnapshotRgStuck = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzResourceGroup:platform-skycraft-swc-rpc1-rg'
+    $script:StillProtected  = Invoke-CleanupScript -Stub $script:Stub -Fail 'Disable-AzRecoveryServicesBackupProtection'
 }
 
 AfterAll {
@@ -294,7 +295,7 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - test harness' {
         # Refused is the child exiting 99 before the script ran; anything else means the stubs
         # were in effect. Asserted on every scenario: a refusal in one of them is a half-stubbed
         # session, not a scenario-specific failure.
-        foreach ($run in @($script:Clean, $script:Nothing, $script:VaultStuck, $script:TwoStuck, $script:FirstStuck, $script:StaleModule, $script:NoFriendly, $script:SnapshotRgStuck)) {
+        foreach ($run in @($script:Clean, $script:Nothing, $script:VaultStuck, $script:TwoStuck, $script:FirstStuck, $script:StaleModule, $script:NoFriendly, $script:SnapshotRgStuck, $script:StillProtected)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az cmdlets (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -393,6 +394,14 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - instant-restore snapshot resource gro
         $script:SnapshotRgStuck.ExitCode | Should -Be 1 -Because "a surviving snapshot group must not look like a clean cleanup; output was:`n$($script:SnapshotRgStuck.Output)"
         $script:SnapshotRgStuck.Output   | Should -Match "\[ERROR\] Could not delete snapshot resource group 'platform-skycraft-swc-rpc1-rg'"
         $script:SnapshotRgStuck.Output   | Should -Match 'Cleanup finished with 1 failure\(s\)'
+    }
+
+    It 'keeps the snapshot group while a VM is still protected' {
+        # Deleting it under a live protected item lets the next backup recreate it untagged,
+        # which Lab 1.3 denies - the failure #184 removed.
+        $script:StillProtected.Calls    | Should -Not -Contain 'Remove-AzResourceGroup:platform-skycraft-swc-rpc1-rg'
+        $script:StillProtected.Output   | Should -Match 'platform-skycraft-swc-rpc1-rg left in place - a VM is still protected'
+        $script:StillProtected.ExitCode | Should -Be 1
     }
 }
 

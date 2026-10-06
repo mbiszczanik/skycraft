@@ -79,6 +79,8 @@ $rsvMinModuleVersion = [version]'7.5.0'
 
 # Counts resources that exist but could not be deleted. Absent resources are not failures.
 $script:cleanupFailures = 0
+# Set when a VM backup item could not be stopped; the snapshot group must then survive (step 6).
+$script:protectionStillOn = $false
 
 # Roles granted to the Backup Vault identity by New-LabBlobBackup.ps1 (must be revoked here)
 $backupRoles = @(
@@ -295,6 +297,7 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'VmBackupItem' })
         Write-Host "  ✓ Protection disabled and backup data deleted" -ForegroundColor Green
     } catch {
         $script:cleanupFailures++
+        $script:protectionStillOn = $true
         Write-Host "  [ERROR] Could not disable backup protection for '$($r.FriendlyName)': $_" -ForegroundColor Red
         Write-Host "    Manual cleanup may be required via Azure Portal." -ForegroundColor Gray
     }
@@ -320,8 +323,13 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RSV' }) {
 }
 
 # 6. Delete the snapshot resource group. After the protection is gone, nothing but the released
-#    restore point collection is left in it.
+#    restore point collection is left in it. While a VM is still protected the group stays: the
+#    next backup would recreate it untagged, and Lab 1.3's policy would deny that group again.
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'SnapshotResourceGroup' }) {
+    if ($script:protectionStillOn) {
+        Write-Host "  [INFO] $($r.Name) left in place - a VM is still protected (see the [ERROR] above)." -ForegroundColor Gray
+        continue
+    }
     if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete instant-restore snapshot resource group')) { continue }
     Write-Host "  Deleting snapshot resource group: $($r.Name)..." -ForegroundColor Gray
     try {

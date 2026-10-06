@@ -133,11 +133,11 @@ Azure Backup keeps a VM's instant-restore snapshots in a resource group of their
 
 1. Search for **Resource groups** → **+ Create**, and create the snapshot group:
 
-| Field          | Value                                                                              |
-| :------------- | :--------------------------------------------------------------------------------- |
-| Resource group | `platform-skycraft-swc-rpc1-rg`                                                    |
-| Region         | **Sweden Central**                                                                 |
-| Tags           | `Project` = `SkyCraft`, `Environment` = `Platform`, `CostCenter` = `MSDN`, `Owner` = your name |
+   | Field          | Value                                                                                          |
+   | :------------- | :--------------------------------------------------------------------------------------------- |
+   | Resource group | `platform-skycraft-swc-rpc1-rg`                                                                |
+   | Region         | **Sweden Central**                                                                             |
+   | Tags           | `Project` = `SkyCraft`, `Environment` = `Platform`, `CostCenter` = `MSDN`, `Owner` = your name |
 
    Do **not** lock this group. Azure Backup deletes expired snapshots from it, and a lock makes backups fail with `UserErrorRpCollectionLimitReached`. This is also why the snapshots do not go into `platform-skycraft-swc-rg`, which Lab 1.3 locks.
 

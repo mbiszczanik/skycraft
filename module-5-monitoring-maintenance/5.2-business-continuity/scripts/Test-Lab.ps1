@@ -271,9 +271,10 @@ if (-not $devVm) {
         Get-AzRecoveryServicesBackupJob `
             -VaultId $rsv.ID `
             -BackupManagementType AzureVM `
+            -Operation Backup `
             -From ((Get-Date).ToUniversalTime().AddDays(-7)) `
             -ErrorAction SilentlyContinue |
-            Where-Object { $_.WorkloadName -eq $vmName -and $_.Operation -like 'Backup*' } |
+            Where-Object { $_.WorkloadName -eq $vmName } |
             Sort-Object StartTime -Descending |
             Select-Object -First 1
     } else { $null }
@@ -285,8 +286,9 @@ if (-not $devVm) {
         }
         if ($lastJob.Status -eq 'Failed') {
             $detail = Get-AzRecoveryServicesBackupJobDetail -JobId $lastJob.JobId -VaultId $rsv.ID -ErrorAction SilentlyContinue
-            $codes = @($detail.ErrorDetails | ForEach-Object { $_.ErrorCode }) -join ', '
-            Write-Host " ($codes - see lab-guide-5.2.md, Troubleshooting)" -NoNewline -ForegroundColor Gray
+            # ErrorCode is numeric (400211); the message is what names the cause.
+            $jobErrors = @($detail.ErrorDetails | ForEach-Object { "$($_.ErrorCode): $($_.ErrorMessage)" }) -join '; '
+            Write-Host " ($jobErrors - see lab-guide-5.2.md, Troubleshooting)" -NoNewline -ForegroundColor Gray
             return $false
         }
         return ($lastJob.Status -in @('InProgress', 'Completed', 'CompletedWithWarnings'))

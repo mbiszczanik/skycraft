@@ -262,8 +262,10 @@ Describe 'SkyCraft PowerShell - Lab 5.2 VM backup survives Lab 1.3 (#184)' {
     It "'<file>' names the snapshot resource group when it creates the VM backup policy" -ForEach $Lab52DeployCase {
         # Without it Azure Backup creates an untagged AzureBackupRG_* group, which Lab 1.3 denies.
         $content = Get-Content -Raw -LiteralPath $path
-        $content | Should -Match '(?s)New-AzRecoveryServicesBackupProtectionPolicy.{0,600}-BackupSnapshotResourceGroup \$snapshotRgPrefix'
-        $content | Should -Match '-BackupSnapshotResourceGroupSuffix \$snapshotRgSuffix'
+        # Scoped to the New- call itself (up to its Out-Null), so the Set- calls further down
+        # cannot satisfy the guard on its behalf.
+        $content | Should -Match '(?s)New-AzRecoveryServicesBackupProtectionPolicy(?:(?!Out-Null).)*-BackupSnapshotResourceGroup \$snapshotRgPrefix'
+        $content | Should -Match '(?s)New-AzRecoveryServicesBackupProtectionPolicy(?:(?!Out-Null).)*-BackupSnapshotResourceGroupSuffix \$snapshotRgSuffix'
     }
 
     It "'<file>' points an existing policy at the snapshot resource group" -ForEach $Lab52DeployCase {
