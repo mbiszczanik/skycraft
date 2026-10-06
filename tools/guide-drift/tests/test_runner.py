@@ -651,13 +651,15 @@ class ScreenNode(FakeElement):
     the section fail first, as for a result the Portal re-renders; `tree`: its accessibility
     snapshot; `tag` and `text`: its HTML tag and its value or text; `fill_fail`: what fill()
     raises; `shown`: whether it is visible; `read_only`: what READ_ONLY_JS answers; `later`:
-    (n, text), the text it shows after n more reads, as a field the Portal updates late."""
+    (n, text), the text it shows after n more reads, as a field the Portal updates late;
+    `in_header`: whether it sits in a table or grid header (a column's sort button)."""
 
     def __init__(self, interactive: bool = True, on_click=None, on_fill=None, attrs=None, children=None,
                  rect=None, section=("", "", ""), unreadable: int = 0, tree: str = "", tag: str = "div",
                  text: str = "", fill_fail: Exception | None = None, shown: bool = True,
-                 read_only: bool = False) -> None:
+                 read_only: bool = False, in_header: bool = False) -> None:
         super().__init__()
+        self.in_header = in_header
         self.fill_fail = fill_fail
         self.shown = shown
         self.read_only = read_only
@@ -697,6 +699,12 @@ class ScreenNode(FakeElement):
             return None if popups is None else not any(self is p for p in popups)
         if script == run.READ_ONLY_JS:
             return self.read_only
+        if script == run.FIELD_CANDIDATE_JS:            # what the browser answers, in Python
+            role = self.attrs.get("role", "")
+            plain_button = role == "button" or (not role and self.tag == "button")
+            opens_list = (self.attrs.get("aria-haspopup", "").lower() in ("listbox", "menu", "true")
+                          or "aria-expanded" in self.attrs)
+            return not self.in_header and (not plain_button or opens_list)
         if "tagName" in script:                     # fill_field: [tag, type]
             return [self.tag, self.attrs.get("type", "")]
         raise NotImplementedError(script)
@@ -1049,6 +1057,26 @@ class FindOnScreenTests(RunnerTestCase):
         domain.on_click = lambda: screen.add(("option", "contoso.onmicrosoft.com", option))
         record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
         self.assertEqual((record["outcome"], option.clicked, local.filled), ("match", 1, ["malfurion.stormrage"]))
+
+    def test_a_column_sort_button_or_a_plain_button_is_never_a_field(self) -> None:
+        # Step 1.1.4 on the Users list: the 'User principal name' column header sorts the list.
+        for role, node in (("label", ScreenNode(tag="button", in_header=True)),       # sort button
+                           ("label", ScreenNode(tag="button")),                       # plain button
+                           ("label", ScreenNode(attrs={"role": "button"})),           # role=button
+                           ("combobox", ScreenNode(attrs={"role": "combobox"}, in_header=True))):
+            with self.subTest(role=role, attrs=node.attrs, in_header=node.in_header):
+                screen = Screen((role, "User principal name", node))
+                record, r = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
+                self.assertEqual((record["outcome"], node.clicked, len(r.ask.prompts)), ("unknown", 0, 1))
+                self.assertEqual(record["observed"], "no answer (input closed)")   # asked, not 'option not found'
+
+    def test_a_button_that_opens_a_list_is_a_field(self) -> None:
+        for attrs in ({"aria-haspopup": "listbox"}, {"aria-haspopup": "true"}, {"aria-haspopup": "menu"},
+                      {"aria-expanded": "false"}):
+            with self.subTest(attrs=attrs):
+                dropdown = ScreenNode(tag="button", attrs=attrs)
+                with mock.patch.object(run, "all_frames", lambda page: [Screen(("label", "Group type", dropdown))]):
+                    self.assertIs(run.find_exact(FakePage(), "Group type", field=True), dropdown)
 
     def test_a_read_only_field_is_unknown_at_once(self) -> None:
         field = ScreenNode(tag="input", read_only=True)

@@ -120,6 +120,17 @@ CONTROL_TAGS = ("input", "textarea", "select", "button")
 CONTROL_ROLES = ("textbox", "searchbox", "combobox", "spinbutton", "slider", "checkbox", "radio",
                  "switch", "button", "listbox")
 CONTROL_JS = "e => [e.tagName.toLowerCase(), e.getAttribute('role') || '', e.isContentEditable]"
+# Whether a labelled element can be a form field at all: nothing in a table or grid header (a
+# column's sort button is named after the column, 'User principal name' on the Users list), and
+# a plain button only when it opens a list (aria-haspopup listbox, menu or true, or aria-expanded).
+FIELD_CANDIDATE_JS = r"""e => {
+  if (e.closest('th, thead, [role=columnheader], [role=rowheader]')) return false;
+  const role = e.getAttribute('role') || '';
+  const plainButton = role === 'button' || (!role && e.tagName.toLowerCase() === 'button');
+  if (!plainButton) return true;
+  const popup = (e.getAttribute('aria-haspopup') || '').toLowerCase();
+  return ['listbox', 'menu', 'true'].includes(popup) || e.hasAttribute('aria-expanded');
+}"""
 # Never acted on unless the guide itself names such an element: a wrong replay or a mistyped
 # number must not delete a user or sign the person out halfway through a lab.
 DESTRUCTIVE = re.compile(r"\b(delete|remove|reset|revoke|disable|block|purge|sign out)\b", re.IGNORECASE)
@@ -301,6 +312,16 @@ def is_control(element: Locator) -> bool:
     return tag in CONTROL_TAGS or role in CONTROL_ROLES or bool(editable)
 
 
+def can_be_field(element: Locator) -> bool:
+    """Whether the element can be a form field (FIELD_CANDIDATE_JS). One that cannot be inspected
+    still counts: dropping it could turn two matches into one, and the runner would act on a
+    guess."""
+    try:
+        return bool(element.evaluate(FIELD_CANDIDATE_JS, timeout=1000))
+    except PlaywrightError:
+        return True
+
+
 def is_read_only(element: Locator) -> bool:
     """Whether the text field is read-only (READ_ONLY_JS). One that cannot be inspected is not:
     fill() then reports what went wrong."""
@@ -323,19 +344,24 @@ def find_field(page: Page, label: str) -> Locator | None:
     and nothing else. A labelled container that is not a control itself gives way to a control
     of the label (another labelled element, or a text box of that name), unless it holds a combo
     box: the Portal's 'User principal name' is a <div aria-label> around a text box, an '@' and
-    a domain combo box, and fill_field splits the value over those parts. An ambiguous match
-    raises Ambiguous."""
-    labelled = visible_across_frames(page, lambda f: f.get_by_label(label, exact=True))
+    a domain combo box, and fill_field splits the value over those parts. Only elements that can
+    be a field count (can_be_field): a list's column header or a plain button of the label's
+    name is never taken for the field, so the field is not found and the person decides. An
+    ambiguous match raises Ambiguous."""
+    def fields(make_locator: Callable[[Frame], Locator]) -> list[Locator]:
+        return [element for element in visible_across_frames(page, make_locator) if can_be_field(element)]
+
+    labelled = fields(lambda f: f.get_by_label(label, exact=True))
     if labelled:
         controls = [element for element in labelled if is_control(element)]
         containers = [element for element in labelled if not any(element is c for c in controls)]
         composite = [element for element in containers if parts_of(element, "combobox")]
         if composite or controls:
             return only_one(composite or controls)
-        textbox = unique_visible(page, lambda f: f.get_by_role("textbox", name=label, exact=True))
+        textbox = only_one(fields(lambda f: f.get_by_role("textbox", name=label, exact=True)))
         return textbox or only_one(containers)
     for role in FIELD_ROLES:
-        element = unique_visible(page, lambda f, role=role: f.get_by_role(role, name=label, exact=True))
+        element = only_one(fields(lambda f, role=role: f.get_by_role(role, name=label, exact=True)))
         if element is not None:
             return element
     return None
