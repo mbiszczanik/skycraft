@@ -86,6 +86,13 @@ those titles to decide the next version and to write the release notes.
   (and `gh secret set RELEASE_APP_ID --repo mbiszczanik/skycraft --body "<Client ID>"`
   if that changed), delete the local `.pem`, re-run the workflow, and once it is green
   delete the old key on the App's page.
+- **If the App itself is gone**: create a new GitHub App under Settings → Developer
+  settings → GitHub Apps, named `skycraft-release`, webhook **Active** unticked,
+  repository permissions **Contents** and **Pull requests** set to *Read and write* and
+  nothing else, installable *Only on this account*. Install it on `mbiszczanik/skycraft`
+  only, generate a private key and set both secrets as above; `RELEASE_APP_ID` takes the
+  App's **Client ID** from its *General* page, not the numeric App ID. Do not add the App
+  to the ruleset's bypass list: its Release PR passes the required checks like any other.
 
 Sections up to 0.9.0 in `CHANGELOG.md` were written by hand in Keep a Changelog form and
 stay as they are. The reasoning is in [ADR-0007](docs/adr/0007-release-with-release-please.md).
