@@ -23,8 +23,9 @@ Portal's global search, and the result named exactly X in its dropdown is opened
 entry, never Marketplace or Documentation); when that fails, the dropdown's accessibility tree
 is kept as search-<step>.aria.txt in the run folder. Plain text counts only when it
 is, or sits inside, a link, button or other interactive element. A label is looked for until
-FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; before it is
-reported as not found, the blade menu's collapsed groups are opened once ('Expand all headers').
+FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; when SETTLE_MS of
+that finds nothing, the blade menu's collapsed groups are opened once ('Expand all headers') and
+the looking goes on to the same deadline.
 
 When a step does not go through, the person chooses: finish it by hand and continue, skip the
 rest of the lab, or stop and keep the state. --state records the completed steps and the step a
@@ -1044,28 +1045,40 @@ class Runner:
                    and self.redactor.restore(c.name).casefold() == wanted.casefold()]
         return matches[0] if len(matches) == 1 and matches[0].count == 1 else None
 
-    def find_after_expanding(self, label: str) -> Locator | None:
-        """The element named `label` after opening every collapsed group of the blade's menu, or
-        None. Entra ID blades fold menu entries into groups ('Manage', 'Monitoring'), so a link
-        such as 'Users' is not on screen until its group opens. The blade's 'Expand all headers'
-        button opens them all; it is clicked at most once per item (run_step resets the flag),
-        and only when exactly one is visible. Raises Ambiguous as find_exact does."""
+    def looking_for(self, label: str, kind: str) -> Callable[[], Locator | None]:
+        """One look for `label` (find_exact), for in_time to repeat. For a navigation or action
+        item, once looks have found nothing for SETTLE_MS, the blade menu's collapsed groups are
+        opened (expand_menu_groups) and the looks go on to the same deadline, so a label that
+        only an open group shows costs a moment, not the whole FIND_TIMEOUT_MS."""
+        started = time.monotonic()
+
+        def look() -> Locator | None:
+            element = find_exact(self.page, label, field=(kind == "field"))
+            if (element is None and kind in ("navigation", "action")
+                    and time.monotonic() - started >= SETTLE_MS / 1000):
+                self.expand_menu_groups(label)
+            return element
+        return look
+
+    def expand_menu_groups(self, label: str) -> None:
+        """Open every collapsed group of the blade's menu with its 'Expand all headers' button.
+        Entra ID blades fold menu entries into groups ('Manage', 'Monitoring'), so a link such as
+        'Users' is not on screen until its group opens. The button is clicked at most once per
+        item (run_step resets the flag), and only when exactly one is visible."""
         if self.expanded:
-            return None
+            return
         try:
             button = unique_visible(self.page, lambda f: f.get_by_role("button", name=EXPAND_ALL, exact=True))
         except Ambiguous:
-            return None
+            return
         if button is None:
-            return None
+            return
         self.expanded = True
         try:
             button.click(timeout=FIND_TIMEOUT_MS)
         except PlaywrightError:
-            return None
-        self.page.wait_for_timeout(SETTLE_MS)
+            return
         print(f"Opened the menu groups ('{EXPAND_ALL}') to look for '{label}' again.")
-        return find_exact(self.page, label)
 
     def save_search_tree(self, step: dict, tree: str) -> None:
         """Keep the search dropdown's accessibility tree, redacted, as search-<step>.aria.txt in
@@ -1083,9 +1096,7 @@ class Runner:
             if kind == "search":
                 element = search_portal(self.page, label, diagnose=lambda tree: self.save_search_tree(step, tree))
             else:
-                element = in_time(self.page, lambda: find_exact(self.page, label, field=(kind == "field")))
-                if element is None and kind in ("navigation", "action"):
-                    element = self.find_after_expanding(label)
+                element = in_time(self.page, self.looking_for(label, kind))
         except Ambiguous as error:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
             return record

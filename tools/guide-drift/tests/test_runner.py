@@ -297,12 +297,13 @@ class FakePage:
         self.closed = closed
         self.main_frame = Screen()       # an empty screen unless a test patches run.all_frames
         self.frames = [self.main_frame]
+        self.now = 0.0                   # seconds; only waits move it (FindOnScreenTests' clock)
 
     def is_closed(self) -> bool:
         return self.closed
 
     def wait_for_timeout(self, ms) -> None:
-        pass
+        self.now += ms / 1000
 
     def screenshot(self, path, full_page=False) -> None:
         pass
@@ -859,9 +860,8 @@ class FindOnScreenTests(RunnerTestCase):
             value=None):
         r = runner or run.Runner(page or FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
         step = {"id": "9.9.1", "title": "One", "items": [item], "images": []}
-        clock = iter(range(0, 1_000_000, 3))               # 3 s pass between every look at the clock
         with mock.patch.object(run, "all_frames", lambda page: [screen]), \
-                mock.patch.object(run.time, "monotonic", lambda: next(clock)), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
                 mock.patch.object(run, "candidates_on_screen", return_value=list(candidates)):
             return self.quietly(lambda: r.act_on_label(step, item, label, value)), r
 
@@ -1267,11 +1267,27 @@ class FindOnScreenTests(RunnerTestCase):
                 "items": [{"kind": "action", "labels": ["Users"], "line": 1},
                           {"kind": "action", "labels": ["Groups"], "line": 2}]}
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
-        clock = iter(range(0, 1_000_000, 3))
         with mock.patch.object(run, "all_frames", lambda page: [screen]), \
-                mock.patch.object(run.time, "monotonic", lambda: next(clock)):
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now):
             self.assertTrue(self.quietly(lambda: r.run_step(step)))
         self.assertEqual(expand.clicked, 2)
+
+    def test_a_label_behind_a_collapsed_group_is_found_soon_after_expanding(self) -> None:
+        users = ScreenNode()
+        screen = Screen()
+        expand = ScreenNode(on_click=lambda: screen.add(("link", "Users", users)))
+        screen.add(("button", "Expand all headers", expand))
+        record, r = self.act(screen, self.NAVIGATION, "Users")
+        self.assertEqual((record["outcome"], users.clicked, expand.clicked, r.ask.prompts), ("match", 1, 1, []))
+        found_at = r.page.now - run.SETTLE_MS / 1000                       # clicking Users waits SETTLE_MS
+        self.assertLess(found_at, run.SETTLE_MS / 1000 + 0.6)            # not the whole FIND_TIMEOUT_MS
+
+    def test_a_label_that_never_appears_expands_once_and_asks_at_the_deadline(self) -> None:
+        expand = ScreenNode()
+        screen = Screen(("button", "Expand all headers", expand))
+        record, r = self.act(screen, self.NAVIGATION, "Users")
+        self.assertEqual((record["outcome"], expand.clicked, len(r.ask.prompts)), ("unknown", 1, 1))
+        self.assertGreaterEqual(r.page.now, run.FIND_TIMEOUT_MS / 1000)
 
     class LoadingPage(FakePage):
         """A page whose blade is still rendering: `on_wait(n)` runs at its n-th wait."""
@@ -1282,6 +1298,7 @@ class FindOnScreenTests(RunnerTestCase):
             self.on_wait = on_wait
 
         def wait_for_timeout(self, ms) -> None:
+            super().wait_for_timeout(ms)
             self.waits += 1
             self.on_wait(self.waits)
 
