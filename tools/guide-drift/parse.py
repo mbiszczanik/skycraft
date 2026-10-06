@@ -10,8 +10,8 @@ without a browser. Rules (issue #189):
     counts.
   * Where a step has '#### Option N:' headings, only the Option 1 body is read, plus the
     step's '**Expected Result**' line wherever it sits (the standard puts it after Option 3).
-  * Bold spans in list items are UI labels. A list item containing an arrow chain (A -> B) is
-    one 'navigation' item with several labels; otherwise it is an 'action' item.
+  * Bold spans in list items are UI labels. A list item containing a chain (A → B, A -> B or
+    A > B) is one 'navigation' item with several labels; otherwise it is an 'action' item.
   * Bold spans that are not UI elements are dropped by NON_UI_BOLD and by the colon rule
     (bold text ending with ':' is a caption, not a label).
   * 'Field | Value' tables become 'field' items; backticks and bold are stripped from the value.
@@ -39,7 +39,7 @@ EXPECTED = re.compile(r"^\*\*Expected Result\*\*\s*:\s*(?P<text>.+?)\s*$")
 TABLE_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$")
 TABLE_SEPARATOR = re.compile(r"^\s*\|?\s*:?-{2,}")
 IMAGE = re.compile(r"!\[[^\]]*\]\(\s*\.?/?(?P<path>images/[^)\s]+)\s*\)")
-ARROW = "→"
+CHAIN = re.compile(r"→|->|\s>\s")   # navigation chain separators: arrow, ASCII arrow, " > "
 
 NON_UI_BOLD = {
     "Expected Result", "Note", "Tip", "Important", "Warning", "Why", "SkyCraft Choice",
@@ -166,7 +166,7 @@ def parse_items(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, li
         labels = [l for l in labels if is_ui_label(l)]
         if not labels:
             continue
-        kind = "navigation" if ARROW in li.group("text") and len(labels) > 1 else "action"
+        kind = "navigation" if CHAIN.search(li.group("text")) and len(labels) > 1 else "action"
         items.append({"kind": kind, "labels": labels, "line": number})
     return items, expected, images
 
@@ -207,8 +207,11 @@ def main(argv: list[str] | None = None) -> int:
     payload = json.dumps(result, indent=2, ensure_ascii=False)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(payload + "\n", encoding="utf-8")
+        with args.out.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(payload + "\n")
     else:
+        # A piped stdout on Windows defaults to the locale code page; the JSON is always UTF-8.
+        sys.stdout.reconfigure(encoding="utf-8")
         print(payload)
     return 0
 

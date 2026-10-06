@@ -40,19 +40,23 @@ BeforeAll {
     # Parses markdown text through a temp file and returns the steps object. Images are resolved
     # relative to the temp file's directory, so fixtures that need images create them beside it.
     function ConvertFrom-GuideFixture {
-        param([string]$Markdown, [string]$Directory = (Join-Path ([System.IO.Path]::GetTempPath()) ("guide-drift-" + [guid]::NewGuid())))
+        param([string]$Markdown, [string]$Directory = (Join-Path $TestDrive ("guide-" + [guid]::NewGuid())))
         New-Item -ItemType Directory -Path $Directory -Force | Out-Null
         $guide = Join-Path $Directory 'lab-guide-9.9.md'
+        $out   = Join-Path $Directory 'steps.json'
+        $err   = Join-Path $Directory 'stderr.txt'
         Set-Content -LiteralPath $guide -Value $Markdown -Encoding utf8 -NoNewline
-        $json = & $script:Python $script:Parser $guide 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "parse.py failed: $json" }
-        ($json -join "`n") | ConvertFrom-Json
+        # The JSON goes through --out and is read back as UTF-8: a piped stdout is re-encoded
+        # by the console code page on Windows, which this test must not depend on.
+        & $script:Python $script:Parser $guide --out $out 2> $err
+        if ($LASTEXITCODE -ne 0) { throw "parse.py failed ($LASTEXITCODE): $(Get-Content -Raw -LiteralPath $err)" }
+        Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
     }
 
     $script:CoreFixture = @'
 # Lab 9.9: Fixture
 
-**Situation**: bold outside any step is ignored.
+- Click **Situation** before any step
 
 ### Step 9.9.1: Navigate and act
 
@@ -60,9 +64,14 @@ BeforeAll {
 2. Click **+ New user** → **Create new user**
 3. Search for **"Microsoft Entra ID"** in the search bar
 4. **Note**: a **Tip** is not a UI element, nor is **Important** or **Why** or **SkyCraft Choice** or **Remember:**
+5. Search for **“Curly Label”**
+6. Click **Save** -> **Close**
+7. Open **Settings** > **Advanced**
 
 ```powershell
 Write-Host "**InFence** is never read"
+1. Click **InFence**
+### Step 9.9.8: Fake
 ```
 
 **Expected Result**: New user appears in the list.
@@ -110,11 +119,20 @@ Describe 'parse.py - step sections' {
         @($script:Core.steps[0].items[1].labels) | Should -Be @('+ New user', 'Create new user')
         @($script:Core.steps[0].items[2].labels) | Should -Be @('Microsoft Entra ID')
         $script:Core.steps[0].items[2].kind | Should -Be 'action'
+        @($script:Core.steps[0].items[3].labels) | Should -Be @('Curly Label')
+    }
+
+    It 'treats the ASCII arrow and " > " as chain separators too' {
+        foreach ($i in 4, 5) {
+            $script:Core.steps[0].items[$i].kind | Should -Be 'navigation'
+        }
+        @($script:Core.steps[0].items[4].labels) | Should -Be @('Save', 'Close')
+        @($script:Core.steps[0].items[5].labels) | Should -Be @('Settings', 'Advanced')
     }
 
     It 'drops bold spans that are not UI elements, and bold inside code fences' {
         $labels = @($script:Core.steps[0].items | ForEach-Object { $_.labels })
-        @($script:Core.steps[0].items).Count | Should -Be 3 -Because 'the Note item has no UI label left and is dropped'
+        @($script:Core.steps[0].items).Count | Should -Be 6 -Because 'the Note item has no UI label left and is dropped'
         foreach ($notUi in 'Note', 'Tip', 'Important', 'Why', 'SkyCraft Choice', 'Remember:', 'InFence', 'Expected Result') {
             $labels | Should -Not -Contain $notUi
         }
