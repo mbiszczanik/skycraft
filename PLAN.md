@@ -2343,7 +2343,7 @@ Create `tools/Invoke-GuideDrift.ps1`:
     that are not UI elements lives in parse.py), opens Chromium through tools/guide-drift/run.py
     on the Entra ID overview of the tenant of -SubscriptionId, waits for you to sign in (until
     the overview shows 'Tenant ID'), refuses to start unless the Portal is in English and the
-    overview shows that tenant's id or domain, then performs every portal step for real: later
+    overview shows that tenant's id, then performs every portal step for real: later
     steps depend on what earlier ones created. It never clicks one of several matching elements,
     and never an element named Delete, Remove, Reset password, Revoke, Disable or Sign out unless
     the guide's own label says so. Every check ends as match, drift (blocking, misleading or
@@ -2456,6 +2456,12 @@ $toolDir   = Join-Path $PSScriptRoot 'guide-drift'
 $statePath = Join-Path $PSScriptRoot '.guide-drift-state.json'
 $authPath  = Join-Path $PSScriptRoot '.guide-drift-auth.json'
 $runId     = Get-Date -Format 'yyyyMMdd-HHmmss'
+if ($Resume -and (Test-Path -LiteralPath $statePath)) {
+    # One run across -Resume: run.py appends to the run folder the state names, so the summary
+    # and the exit code cover everything found before the stop.
+    $previousRunId = (Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json).runId
+    if ($previousRunId) { $runId = $previousRunId }
+}
 
 Write-Host "=== Guide drift: lab $Lab ===" -ForegroundColor Cyan
 
@@ -2668,13 +2674,14 @@ field) for the separate guide PR.
 
 - [ ] **Step 2: Confirm what only the live Portal can show**
 
-Write the answer to each in the PR description; fix `run.py` where one is wrong, then continue
-with `-Resume`:
+Write the answer to each in the PR description and fix `run.py` where one is wrong. Items 1-3
+happen before the first step, so re-run without `-Resume`; for items 4-7 continue with
+`-Resume`:
 
 1. Sign-in: the browser lands on the Entra overview after sign-in, and the run waits until it
    shows "Tenant ID" (not before sign-in completes, also with an expired saved session).
-2. Tenant guard: it passes on the right tenant, and refuses when the session is switched to
-   another directory (try once).
+2. Tenant guard: it passes on the right tenant (the overview shows its Tenant ID as text or a
+   read-only box), and refuses when the session is switched to another directory (try once).
 3. Language guard: `document.documentElement.lang` is `en`/`en-us`; switch the account to
    another language once and confirm the run refuses to start (exit 254).
 4. Earlier blades: are `Save`, `Create` and `Groups` reported ambiguous, and are blades parked
@@ -2701,7 +2708,8 @@ with `-Resume`:
 ```
 
 Expected: the run asks nothing it was told in Step 1, except the 1.1.7 failure prompt (a guide
-gap, answered `c` again); the summary matches Step 1's; the exit code equals the number of
+gap, answered `c` again); the summary matches Step 1's final summary (a run continued with
+`-Resume` keeps one run folder and one summary); the exit code equals the number of
 blocking drifts plus unknowns in the summary.
 
 - [ ] **Step 5: Verify the recording and the tree**
