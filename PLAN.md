@@ -2345,8 +2345,8 @@ Create `tools/Invoke-GuideDrift.ps1`:
     the overview shows 'Tenant ID'), refuses to start unless the Portal is in English and the
     overview shows that tenant's id, then performs every portal step for real: later
     steps depend on what earlier ones created. It never clicks one of several matching elements,
-    and never an element named Delete, Remove, Reset password, Revoke, Disable or Sign out unless
-    the guide's own label says so. Every check ends as match, drift (blocking, misleading or
+    and never an element whose name contains delete, remove, reset, revoke, disable, block, purge
+    or sign out unless the guide's own label contains that word too. Every check ends as match, drift (blocking, misleading or
     cosmetic), unknown or skipped, so 'could not check' is never reported as 'fine'.
 
     SUPERVISED FIRST, RECORDED ALWAYS. When a label is not on screen the run stops and asks you,
@@ -2459,8 +2459,13 @@ $runId     = Get-Date -Format 'yyyyMMdd-HHmmss'
 if ($Resume -and (Test-Path -LiteralPath $statePath)) {
     # One run across -Resume: run.py appends to the run folder the state names, so the summary
     # and the exit code cover everything found before the stop.
-    $previousRunId = (Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json).runId
-    if ($previousRunId) { $runId = $previousRunId }
+    try {
+        $previousRunId = (Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json).runId
+        if ($previousRunId) { $runId = $previousRunId }
+    } catch {
+        # An unreadable state file is run.py's to report (exit 254 with what to do); keep the new id.
+        Write-Verbose "State file unreadable: $($_.Exception.Message)"
+    }
 }
 
 Write-Host "=== Guide drift: lab $Lab ===" -ForegroundColor Cyan
