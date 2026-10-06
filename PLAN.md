@@ -2667,8 +2667,8 @@ $env:SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL = '<address you control>'
 ./tools/Invoke-GuideDrift.ps1 -SubscriptionId <rehearsal subscription id> -Lab 1.1
 ```
 
-For `Azure Portal` in step 1.1.1 (a URL, not a button) answer `i`. For Expected Results, type the
-text to look for (`Malfurion Stormrage` in 1.1.2, `SkyCraft-Admins` in 1.1.6).
+For Expected Results, type the text to look for (`Malfurion Stormrage` in 1.1.2,
+`SkyCraft-Admins` in 1.1.6). (`Azure Portal` in 1.1.1 is already dropped by the parser.)
 
 Two places where the parser cannot read lab 1.1 as written are known before the run: the
 invitation message of 1.1.5 is a blockquote (not read; the invitation is sent without it), and
@@ -2773,10 +2773,32 @@ git push -u origin feature/guide-drift
 gh pr create --repo mbiszczanik/skycraft --title "feat(guide-drift): check portal steps of lab guides against the live Azure Portal" --body-file <body.md>
 ```
 
-PR body follows `.github/PULL_REQUEST_TEMPLATE.md`: `Closes #189`; `Live-verified: lab 1.1,
-guide drift run <run id>, <date>` (the run from Task 12); type of change "CI / tooling / chore";
-the summary.md of the run pasted as the findings list; no screenshots (they are not anonymised).
-No "Generated with" footer, no Co-Authored-By.
+PR title: `feat(guide-drift): check lab guide portal steps against the live Azure Portal (#189)`.
+PR body follows `.github/PULL_REQUEST_TEMPLATE.md`:
+
+- `Closes #189`; `Live-verified: Invoke-GuideDrift lab 1.1, run <run id>, <date>, rehearsal
+  tenant` (the run from Task 12). If Task 12 could not complete: open as a draft with
+  `Live-verification: deferred -> #<issue>` and `Refs #189`, not `Closes`.
+- Type of change "CI / tooling / chore".
+- What was added beyond the spec: recording.py redaction, Python unit tests run by
+  `tests/Guide-Drift-Python.Tests.ps1`, exit codes 254/255/1, the failure and resume prompts,
+  the destructive-name deny-list, cleanup only after a finished run, the Graph tenant pin.
+- The answers to Task 12 Step 2 items 1-12.
+- The run's summary.md as the findings list, and the guide findings for a separate (gated) PR:
+  1.1.7's member is not bold; 1.1.5's invitation message is a blockquote; plus anything the run
+  found.
+- What the run leaves in the tenant (the invited guest, the SSPR scope, the licence).
+- No screenshots (they are not anonymised). No "Generated with" footer, no Co-Authored-By.
+
+- [ ] **Step 3: Revise issue #189 to what was built**
+
+Only after the maintainer approves the text. Per the maintainer's rule, revise the issue body
+instead of appending: update "How a run works" (guards, cleanup scope and finished-run rule,
+deny-list), "Parser" (list-item fields, tags, Option A, HTML comments, known gaps in parse.py's
+header), "Supervised first" (decide signature, redaction, environment-reference overrides),
+"What a run leaves behind" (exit codes 0-250/254/255/1), "Files", "Tests" (Python unit tests)
+and "To confirm" (answered by Task 12). The final review's proposed replacement text is the
+starting point.
 
 The PR touches `tools/` files that are not on the gate's list in
 `tools/Test-PrLiveVerification.ps1`, so the `Live Verification Declared` check will pass as "not
