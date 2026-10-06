@@ -11,8 +11,9 @@ without a browser. Rules (issue #189):
     fence closes only on a run of its own character at least as long as the opener, followed by
     nothing but whitespace, so a 4-backtick fence can quote a 3-backtick one.
   * Where a step has '#### Option 1:' or '#### Option A:' headings, only the first option's
-    body is read. Its own '**Expected Result**' wins; when it has none, the first Expected Result
-    anywhere in the step is taken (the standard puts a single one after Option 3).
+    body is read. The Expected Result is the first one outside any option's body or in the first
+    option; when there is none, the first one in another option (the standard puts a single
+    one after Option 3).
   * '**Expected Result**' may be a list item and may carry a qualifier before the colon
     ('**Expected Result** (if ...):'). When nothing follows the colon, the list right after it
     is the result: its items joined with '; ', markup stripped, and never read as steps. The
@@ -41,7 +42,8 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
   * The first-option rule skips 3.2.1's Portal path, because its Option A is CLI-only.
   * A caption label whose value holds bold spans turns them into actions (4.2:741).
   * Instructions after a field value are lost (5.3:225).
-  * Text before the first option heading is dropped.
+  * Text before the first option heading, and items under a non-option '####' heading after
+    the options, are dropped.
   * NON_UI_BOLD is one global list, so a caption from one lab can hide a real label in another.
 
 Usage: python parse.py <path/to/lab-guide-X.Y.md> [--out steps.json] [--repo-root <dir>]
