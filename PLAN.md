@@ -1539,6 +1539,7 @@ import json
 import os
 import re
 import sys
+import traceback
 from pathlib import Path
 
 from playwright.sync_api import Page, Frame, TimeoutError as PlaywrightTimeout, sync_playwright
@@ -1863,16 +1864,17 @@ class Runner:
         if decision is None:
             candidates = candidates_on_screen(self.page)
             decision = decide(step, item, label, candidates, self.deciders)
-            entry = decision.to_recording(rejected_candidates(candidates, label, decision.name), now())
-            if decision.decided_by == "human" and entry is not None:
-                self.step_entry(step)["labels"][label] = entry
-                self.save_recording()
             if decision.name and decision.severity != "blocking":
                 try:
                     element = find_by_name(self.page, decision.role, decision.name)
                 except Ambiguous as error:
+                    # Not recorded: replay must never inherit a choice the runner refused to act on.
                     record.update(outcome="unknown", observed=f"ambiguous: {error} named '{decision.name}'")
                     return record
+            entry = decision.to_recording(rejected_candidates(candidates, label, decision.name), now())
+            if decision.decided_by == "human" and entry is not None:
+                self.step_entry(step)["labels"][label] = entry
+                self.save_recording()
         if decision.kind == "ignore":
             record.update(outcome="match", observed=None)
             return record
@@ -2157,19 +2159,30 @@ def main(argv: list[str] | None = None) -> int:
     with sync_playwright() as pw:
         try:
             browser, page = open_portal(pw, args, recording)
-        except SystemExit as stop:          # a guard: wrong language or tenant
-            print(stop)
+        except (SystemExit, KeyboardInterrupt) as stop:   # a guard, or Ctrl+C while signing in
+            print(stop or "Interrupted before the first step.")
             return NOT_STARTED
         runner = Runner(page, steps, recording, args)
         try:
             return runner.run()
-        except (KeyboardInterrupt, SystemExit) as stop:
-            runner.finish()
+        except BaseException as stop:       # noqa: BLE001 - every way out must keep -Resume possible
+            # Ctrl+C, a closed browser window (Playwright Error 'Target closed'), EOF at a prompt
+            # or a bug: exit 1 would read as 'one finding' and the entry point would clean up what
+            # -Resume needs. Print what happened, keep the state, and say so.
+            if not isinstance(stop, (KeyboardInterrupt, SystemExit)):
+                traceback.print_exc()
+            try:
+                runner.finish()
+            except Exception:               # noqa: BLE001 - the summary is best effort here
+                traceback.print_exc()
             print(f"\nStopped ({type(stop).__name__}: {stop}). Progress is in {args.state}; "
                   "re-run with -Resume.")
             return ABORTED
         finally:
-            browser.close()
+            try:
+                browser.close()
+            except Exception:               # noqa: BLE001 - the window may already be gone
+                pass
 
 
 if __name__ == "__main__":
