@@ -2340,10 +2340,13 @@ Create `tools/Invoke-GuideDrift.ps1`:
 
     WHAT A RUN DOES. Parses the guide with tools/guide-drift/parse.py (only '### Step' sections,
     outside code fences, Option 1 where Option headings exist; the fixed list of bold captions
-    that are not UI elements lives in parse.py), opens Chromium through tools/guide-drift/run.py,
-    waits for you to sign in, refuses to start unless the Portal is in English and shows the
-    tenant of -SubscriptionId, then performs every portal step for real: later steps depend on
-    what earlier ones created. Every check ends as match, drift (blocking, misleading or
+    that are not UI elements lives in parse.py), opens Chromium through tools/guide-drift/run.py
+    on the Entra ID overview of the tenant of -SubscriptionId, waits for you to sign in (until
+    the overview shows 'Tenant ID'), refuses to start unless the Portal is in English and the
+    overview shows that tenant's id or domain, then performs every portal step for real: later
+    steps depend on what earlier ones created. It never clicks one of several matching elements,
+    and never an element named Delete, Remove, Reset password, Revoke, Disable or Sign out unless
+    the guide's own label says so. Every check ends as match, drift (blocking, misleading or
     cosmetic), unknown or skipped, so 'could not check' is never reported as 'fine'.
 
     SUPERVISED FIRST, RECORDED ALWAYS. When a label is not on screen the run stops and asks you,
@@ -2364,9 +2367,16 @@ Create `tools/Invoke-GuideDrift.ps1`:
     ${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}, which this script sets from the tenant's default domain.
     Set SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL to an address you control before running lab 1.1.
 
+    WHEN A STEP FAILS the run asks: c = you did it by hand, continue; s = skip the rest and
+    finish; q = stop and keep the state (exit 255; continue with -Resume). On -Resume it shows the
+    previous step's view and asks whether the step in flight finished (y), must be redone (n) or
+    skipped (s).
+
     CLEANUP IS THE LAB'S OWN. This script has no deletion logic. Unless -SkipCleanup, lab 1.1
     hands off to its scripts/Remove-LabResource.ps1 -Force (Microsoft Graph), every other lab to
-    tools/Remove-LabCycle.ps1 with the same -SubscriptionId.
+    tools/Remove-LabCycle.ps1 with the same -SubscriptionId. There is no cleanup after a run
+    that did not start (254) or was stopped with its state kept (255): -Resume needs what it
+    created.
 
 .PARAMETER SubscriptionId
     The subscription whose tenant the run is for. Mandatory and compared by id against the Az
@@ -2380,7 +2390,8 @@ Create `tools/Invoke-GuideDrift.ps1`:
     Start at this step id ('1.1.6'), assuming earlier steps were done by hand.
 
 .PARAMETER Resume
-    Continue the previous run from tools/.guide-drift-state.json.
+    Continue the previous run from tools/.guide-drift-state.json, starting at the step that was
+    in flight or failed. A finished run, or a state file of another lab, is refused (exit 254).
 
 .PARAMETER LogDirectory
     Where run folders are written. Defaults to tools/guide-drift-logs.
@@ -2615,11 +2626,28 @@ git commit -m "docs(contributing): name the guide drift tool and the recording r
 
 ### Task 12: First supervised run of lab 1.1 (live verification)
 
-This is the PR's live verification under ADR-0006. It needs: the dedicated run account signed
-in to the Portal with its language set to English; `Connect-AzAccount` on the rehearsal
-subscription; `SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL` set to an address the maintainer controls;
-Microsoft Graph sign-in for the cleanup script. Lab 1.1 creates 3 users, 1 guest invitation and
-3 groups, all removed by `Remove-LabResource.ps1 -Force` at the end.
+This is the PR's live verification under ADR-0006. It needs: the dedicated run account, with its
+Portal language set to English; `Connect-AzAccount` on the rehearsal subscription;
+`SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL` set to an address the maintainer controls (step 1.1.5 really
+sends the invitation there); Microsoft Graph sign-in for the cleanup script. Lab 1.1 creates 3
+users, 1 guest invitation and 3 groups, and changes two tenant-wide settings (a license
+assignment in 1.1.11, self-service password reset for **All** users in 1.1.12); the users,
+guest and groups are removed by `Remove-LabResource.ps1 -Force` at the end, the two settings are
+not. Use a tenant where that is acceptable.
+
+How the run talks to you (from Tasks 8-10):
+
+- **A label is not on screen:** pick a number (renamed element), `c <number>` (cosmetic
+  difference), `g` (gone, blocking), `i` (not a UI element), `u <why>` (cannot tell).
+- **An Expected Result is asked once:** type text to look for, or press Enter when nothing on
+  screen states it.
+- **A step fails:** `c` = you did it by hand, mark it done and continue; `s` = skip the rest and
+  finish (cleanup runs); `q` = stop and keep the state (exit 255, no cleanup; continue later
+  with `-Resume`).
+- **`-Resume` with a step in flight:** it shows the previous step's view; answer `y` (the step
+  finished, mark it done), `n` (redo it from its first item) or `s` (skip it).
+- **Exit codes:** 0-250 = blocking drifts + unknowns; 254 = did not start (message says why);
+  255 = stopped with state kept.
 
 - [ ] **Step 1: Run supervised**
 
@@ -2628,49 +2656,68 @@ $env:SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL = '<address you control>'
 ./tools/Invoke-GuideDrift.ps1 -SubscriptionId <rehearsal subscription id> -Lab 1.1
 ```
 
-Answer every prompt. For a label that is not a Portal element (`Azure Portal` in step 1.1.1 is a
-URL, not a button), answer `i`. For a renamed label, pick the number. For an Expected Result
-prompt, type the text to look for (`Malfurion Stormrage` in 1.1.2, `SkyCraft-Admins` in 1.1.6)
-or press Enter when nothing on screen states it.
+For `Azure Portal` in step 1.1.1 (a URL, not a button) answer `i`. For Expected Results, type the
+text to look for (`Malfurion Stormrage` in 1.1.2, `SkyCraft-Admins` in 1.1.6).
 
-- [ ] **Step 2: Fix what the run shows, in the right place**
+Two places where the parser cannot read lab 1.1 as written are known before the run: the
+invitation message of 1.1.5 is a blockquote (not read; the invitation is sent without it), and
+the member to select in 1.1.7 (`- Malfurion Stormrage`) is not bold, so **Select** is reached
+with nobody selected and the step fails. When it does, select the member and click **Select** by
+hand, then answer `c`. List both as guide findings (bold the member name; keep the message as a
+field) for the separate guide PR.
 
-- A guard or selector that does not work on the live Portal (the account-menu button name in
-  `guard_tenant`, the sign-in detection in `wait_for_sign_in`): fix in `run.py`, re-run with
-  `-Resume`.
+- [ ] **Step 2: Confirm what only the live Portal can show**
+
+Write the answer to each in the PR description; fix `run.py` where one is wrong, then continue
+with `-Resume`:
+
+1. Sign-in: the browser lands on the Entra overview after sign-in, and the run waits until it
+   shows "Tenant ID" (not before sign-in completes, also with an expired saved session).
+2. Tenant guard: it passes on the right tenant, and refuses when the session is switched to
+   another directory (try once).
+3. Language guard: `document.documentElement.lang` is `en`/`en-us`; switch the account to
+   another language once and confirm the run refuses to start (exit 254).
+4. Earlier blades: are `Save`, `Create` and `Groups` reported ambiguous, and are blades parked
+   off to the side ignored?
+5. Forms: the roles of User principal name (prefix input and domain dropdown), Group type,
+   Membership type (disabled?) and Password (disabled under auto-generate); fields already at
+   their value are reported "already set".
+6. Result checks: expected results appear within 15 s, and none is asked for a failed step.
+7. Interruption: Ctrl+C mid-run exits 255 without cleanup, and `-Resume` continues correctly.
+
+- [ ] **Step 3: Fix what the run shows, in the right place**
+
+- A selector, guard or prompt that does not work on the live Portal: fix in `run.py` (with a unit
+  test where it is logic, not Portal shape), re-run with `-Resume`.
 - A bold caption parsed as a label: add it to `NON_UI_BOLD` in `parse.py` and re-run the parser
   tests.
-- Two places where the parser cannot read lab 1.1 as written, known before the run: the
-  invitation message of 1.1.5 is a blockquote (not read; the invitation is sent without it),
-  and the member to select in 1.1.7 (`- Malfurion Stormrage`) is not bold, so the run reaches
-  **Select** with nobody selected. Do the selection by hand when the run stops there, record
-  the step's outcome as it is, and list both as guide findings (bold the member name; keep the
-  message as a field) for the separate guide PR.
 - A real drift in the guide: do **not** fix the guide in this PR. Record it; it becomes the first
   finding the tool reports, and the guide fix is its own PR with its own fresh screenshot.
 
-- [ ] **Step 3: Re-run to prove replay**
+- [ ] **Step 4: Re-run to prove replay**
 
 ```powershell
 ./tools/Invoke-GuideDrift.ps1 -SubscriptionId <rehearsal subscription id> -Lab 1.1
 ```
 
-Expected: the run asks nothing it was told in Step 1; the summary matches Step 1's; exit code
-equals the number of blocking drifts plus unknowns from the summary.
+Expected: the run asks nothing it was told in Step 1, except the 1.1.7 failure prompt (a guide
+gap, answered `c` again); the summary matches Step 1's; the exit code equals the number of
+blocking drifts plus unknowns in the summary.
 
-- [ ] **Step 4: Verify the recording and the tree**
+- [ ] **Step 5: Verify the recording and the tree**
 
 ```powershell
 Invoke-Pester -Path ./tests -Output Normal
 git status --short
 ```
 
-Expected: green; `git status` shows only `tools/guide-drift/recordings/lab-1.1.json` modified
-(the logs, state and auth files are ignored). Open the recording and confirm no e-mail address,
-no UPN and no GUID beyond what the Portal view URLs carry is in it; strip query strings from
-`viewUrl` values if they contain tokens.
+Expected: green (the recording test is the privacy backstop: no e-mail address, tenant domain,
+GUID, guest UPN, or `viewUrl` with a tenant pin or query); `git status` shows only
+`tools/guide-drift/recordings/lab-1.1.json` modified (logs, state and auth files are ignored).
+Read the recording once yourself for anything a regex cannot catch: the run account's display
+name, the directory name, the tenant prefix in `rejected` lists.
 
-- [ ] **Step 5: Commit the recording and tick this plan**
+- [ ] **Step 6: Commit the recording and tick this plan**
 
 ```powershell
 git add tools/guide-drift/recordings/lab-1.1.json PLAN.md
