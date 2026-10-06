@@ -62,7 +62,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import struct
 import sys
 from pathlib import Path
 
@@ -205,18 +204,6 @@ def strip_value_markup(text: str) -> str:
     text = text.strip()
     text = BOLD.sub(lambda m: unescape(m.group("text")), text)
     return text.replace("`", "").strip()      # code spans anywhere, not only around the value
-
-
-def png_width(path: Path) -> int | None:
-    """Width from the IHDR chunk; None when the file is not a PNG."""
-    try:
-        with path.open("rb") as handle:
-            head = handle.read(24)
-    except OSError:
-        return None
-    if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n":
-        return None
-    return struct.unpack(">I", head[16:20])[0]
 
 
 def split_steps(lines: list[str]) -> list[dict]:
@@ -400,15 +387,8 @@ def parse_guide(guide: Path, repo_root: Path | None = None) -> dict:
             "id": raw["id"], "title": raw["title"], "line": raw["line"],
             "portal": bool(items), "items": items, "expected": expected, "images": images,
         })
-    images_dir = guide.parent / "images"
-    all_images = []
-    if images_dir.is_dir():
-        for png in sorted(images_dir.glob("*.png")):
-            width = png_width(png)
-            if width is not None:
-                all_images.append({"path": f"images/{png.name}", "width": width})
     guide_rel = guide.relative_to(repo_root).as_posix() if repo_root else guide.as_posix()
-    return {"lab": lab, "guide": guide_rel, "images": all_images, "steps": steps}
+    return {"lab": lab, "guide": guide_rel, "steps": steps}
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -79,7 +79,6 @@ CONTRIBUTING.md                               + one sentence: a guide edit that 
 {
   "lab": "1.1",
   "guide": "module-1-identities-governance/1.1-entra-users-groups/lab-guide-1.1.md",
-  "images": [ { "path": "images/Step-1.1.7.png", "width": 2279 } ],
   "steps": [
     {
       "id": "1.1.6",
@@ -104,8 +103,9 @@ A `Name | Value` or `Tag | Value` table is a list of tags, not labelled fields: 
 Portal's Tags grid by row (Task 4 parses it, Task 8 fills it).
 
 `line` is 1-based and points at the guide line the item came from, so a proposed edit can name it.
-`images` at the root is every `*.png` under the guide's `images/` directory with its pixel width;
-`images` per step is the paths referenced inside that step's section.
+`images` per step is the paths referenced inside that step's section. (A root `images` list of
+every PNG with its pixel width fed the screenshot width check, which was dropped: guide
+screenshots have no width limit; the 1722 px rule binds only skill-generated graphics.)
 
 **Recording** (`tools/guide-drift/recordings/lab-X.Y.json`, committed):
 
@@ -161,10 +161,10 @@ observable, or `{ "text": "..." }` for text the runner looks for after the step.
   "screenshot": "Step-1.1.6.png" }
 ```
 
-`kind` is `navigation | action | search | field | tag | result | screenshot | readability`. `outcome` is
+`kind` is `navigation | action | search | field | tag | result | screenshot`. `outcome` is
 `match | drift | unknown | skipped`. `severity` is `blocking | misleading | cosmetic | null`.
-`category` is `stale` (a `screenshot` record for a step that has both an image and a drift) or
-`unreadable` (a `readability` record for an image wider than 1722 px), otherwise `null`. Exit code
+`category` is `stale` (a `screenshot` record for a step that has both an image and a drift),
+otherwise `null`. Guide screenshots have no width limit, so there is no width check. Exit code
 of the run = count of `blocking` drifts + count of `unknown`, capped at 250.
 
 **Decision** (`decide.py`):
@@ -655,6 +655,10 @@ git commit -m "feat(guide-drift): parse lab guide steps into labels, chains and 
 ---
 
 ### Task 3: Parser: form tables only, HTML comments, images and widths
+
+> Later change: the root list of PNG widths below fed the screenshot width check, which was
+> dropped (guide screenshots have no width limit). parse.py no longer reads PNG widths, and the
+> width tests were removed with it.
 
 **Files:**
 
@@ -2130,14 +2134,6 @@ Append to `tools/guide-drift/run.py`:
         record.update(outcome="skipped", skippedBecause=because)
         self.write(record)
 
-    def readability(self) -> None:
-        for image in self.steps["images"]:
-            if image["width"] > 1722:
-                record = self.new_record({"id": "-"}, "readability", image["path"])
-                record.update(outcome="drift", category="unreadable", observed=f"{image['width']} px wide",
-                              screenshot=None)
-                self.write(record)
-
     # -- state and resume -------------------------------------------------------------------
 
     def save_state(self, completed: list[str], in_flight: str | None) -> None:
@@ -2160,7 +2156,6 @@ Append to `tools/guide-drift/run.py`:
         state = self.load_state() if self.args.resume else {"completed": [], "inFlight": None}
         completed = list(state["completed"])
         started = self.args.from_step is None and not self.args.resume
-        self.readability()
         for step in self.steps["steps"]:
             if not step["portal"]:
                 continue
@@ -2186,14 +2181,12 @@ Append to `tools/guide-drift/run.py`:
 
     def finish(self) -> int:
         by_severity: dict[str, list[dict]] = {"blocking": [], "misleading": [], "cosmetic": []}
-        unknown, skipped, stale, unreadable, edits = [], [], [], [], []
+        unknown, skipped, stale, edits = [], [], [], []
         for r in self.records:
             if r["outcome"] == "drift" and r["severity"]:
                 by_severity[r["severity"]].append(r)
             elif r["outcome"] == "drift" and r["category"] == "stale":
                 stale.append(r)
-            elif r["outcome"] == "drift" and r["category"] == "unreadable":
-                unreadable.append(r)
             elif r["outcome"] == "unknown":
                 unknown.append(r)
             elif r["outcome"] == "skipped":
@@ -2213,9 +2206,6 @@ Append to `tools/guide-drift/run.py`:
         lines.append("")
         lines.append(f"## stale screenshots ({len(stale)})")
         lines += [f"- step {r['step']}: {r['observed']}" for r in stale] or ["- none"]
-        lines.append("")
-        lines.append(f"## unreadable screenshots, wider than 1722 px ({len(unreadable)})")
-        lines += [f"- {r['label']}: {r['observed']}" for r in unreadable] or ["- none"]
         lines.append("")
         lines.append(f"## proposed edits ({len(edits)})")
         for r in edits:
@@ -2839,7 +2829,7 @@ gated"; the `Live-verified` line is still written, because the run is the PR's e
 | Performs the lab for real; cleanup is the lab's own script; no deletion logic | 8, 10 |
 | Parser: Step sections only, fences skipped, Option 1 only, chains, tables, Expected Result, images, non-UI bold list, `portal: false` | 2, 3, 4 |
 | Outcomes match/drift/unknown/skipped; severities blocking/misleading/cosmetic | 5, 8, 9 |
-| Stale and unreadable (>1722 px) screenshots as separate categories | 9 (`screenshot`, `readability`) |
+| Stale screenshots as a separate category (no width check: guide screenshots have no width limit) | 9 (`screenshot`) |
 | Supervised first, recorded always; rejected candidates and who decided | 5, 8 |
 | `decide(step_text, label, candidates)` with replay and human; extension point for #190 | 5 |
 | Value overrides (1.1.5 guest address) set at the first run, never literal in the repo | 6, 12 |

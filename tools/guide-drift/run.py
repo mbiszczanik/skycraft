@@ -991,7 +991,6 @@ class Runner:
                                  getattr(args, "tenant_name", ""))
         self.records: list[dict] = self.earlier_results() if args.resume else []
         self.first_failure: str | None = None   # the step every later step is skipped because of
-        self.begun = bool(self.records)         # whether a step was started (and images checked)
         self.expanded = False                   # whether the current item opened the menu groups
 
     def earlier_results(self) -> list[dict]:
@@ -1296,14 +1295,6 @@ class Runner:
         record.update(outcome="skipped", skippedBecause=because)
         self.write(record)
 
-    def readability(self) -> None:
-        for image in self.steps["images"]:
-            if image["width"] > 1722:
-                record = self.new_record({"id": "-"}, "readability", image["path"])
-                record.update(outcome="drift", category="unreadable", observed=f"{image['width']} px wide",
-                              screenshot=None)
-                self.write(record)
-
     # -- state and resume -------------------------------------------------------------------
 
     def save_state(self, completed: list[str], in_flight: str | None, finished: bool = False) -> None:
@@ -1363,9 +1354,6 @@ class Runner:
             if self.first_failure:
                 self.skip_step(step, self.first_failure)
                 continue
-            if not self.begun:
-                self.begun = True
-                self.readability()
             self.save_state(completed, step["id"])
             # A step redone after -Resume replaces what its stopped attempt found (its screenshot
             # is overwritten too); results.jsonl keeps both attempts.
@@ -1413,14 +1401,12 @@ class Runner:
 
     def finish(self) -> int:
         by_severity: dict[str, list[dict]] = {"blocking": [], "misleading": [], "cosmetic": []}
-        unknown, skipped, stale, unreadable, edits = [], [], [], [], []
+        unknown, skipped, stale, edits = [], [], [], []
         for r in self.records:
             if r["outcome"] == "drift" and r["severity"]:
                 by_severity[r["severity"]].append(r)
             elif r["outcome"] == "drift" and r["category"] == "stale":
                 stale.append(r)
-            elif r["outcome"] == "drift" and r["category"] == "unreadable":
-                unreadable.append(r)
             elif r["outcome"] == "unknown":
                 unknown.append(r)
             elif r["outcome"] == "skipped":
@@ -1451,9 +1437,6 @@ class Runner:
         lines.append("")
         lines.append(f"## stale screenshots ({len(stale)})")
         lines += [f"- step {r['step']}: {r['observed']}" for r in stale] or ["- none"]
-        lines.append("")
-        lines.append(f"## unreadable screenshots, wider than 1722 px ({len(unreadable)})")
-        lines += [f"- {r['label']}: {r['observed']}" for r in unreadable] or ["- none"]
         lines.append("")
         lines.append(f"## proposed edits ({len(edits)})")
         for r in edits:

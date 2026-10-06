@@ -12,7 +12,7 @@
       step's Expected Result); bold spans that are not UI elements are dropped; 'A -> B' chains
       become navigation; 'Search for **X**' becomes a search of the Portal;
       '- **Label**: value' list items and Field | Value tables become fields,
-      Name | Value and Tag | Value tables become tags; images are collected with their width.
+      Name | Value and Tag | Value tables become tags; the images a step references are collected.
 
       THE 17 GUIDES - every module-*/X.Y-*/lab-guide-X.Y.md parses, its step ids match its
       headings in order, and no label or value carries markup or comment residue. This does NOT
@@ -187,18 +187,6 @@ Describe 'parse.py - step sections' {
 
 Describe 'parse.py - form tables, HTML comments and images' {
     BeforeAll {
-        # A PNG header is enough: parse.py reads the width from IHDR (bytes 16..19) and never decodes.
-        function New-PngFixture {
-            [CmdletBinding()]
-            [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Test helper writing a PNG header into TestDrive')]
-            param([string]$Path, [int]$Width)
-            $widthBytes = [System.BitConverter]::GetBytes([int32]$Width)
-            [array]::Reverse($widthBytes)   # IHDR is big-endian
-            $bytes = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 0x49, 0x48, 0x44, 0x52) +
-                     $widthBytes + [byte[]](0, 0, 0, 1, 8, 2, 0, 0, 0)
-            [System.IO.File]::WriteAllBytes($Path, $bytes)
-        }
-
         $tableFixture = @'
 # Lab 9.9: Tables
 
@@ -246,9 +234,6 @@ Describe 'parse.py - form tables, HTML comments and images' {
 1. Click **Review + create**
 '@
         $dir = Join-Path $TestDrive 'tables'
-        New-Item -ItemType Directory -Path (Join-Path $dir 'images') -Force | Out-Null
-        New-PngFixture -Path (Join-Path $dir 'images/Step-9.9.1.png') -Width 861
-        New-PngFixture -Path (Join-Path $dir 'images/Step-9.9.1b.png') -Width 2279
         $script:Table = ConvertFrom-GuideFixture -Markdown $tableFixture -Directory $dir
     }
 
@@ -294,13 +279,6 @@ Describe 'parse.py - form tables, HTML comments and images' {
 
     It 'collects the images a step references, with and without "./"' {
         @($script:Table.steps[0].images) | Should -Be @('images/Step-9.9.1.png', 'images/Step-9.9.1b.png')
-    }
-
-    It 'lists every PNG under images/ with its pixel width' {
-        $widths = @{}
-        foreach ($image in $script:Table.images) { $widths[$image.path] = $image.width }
-        $widths['images/Step-9.9.1.png']  | Should -Be 861
-        $widths['images/Step-9.9.1b.png'] | Should -Be 2279
     }
 }
 
@@ -564,10 +542,6 @@ Describe 'parse.py - lab 1.1, the first recorded lab' {
 
     It 'marks every one of the 14 steps as portal' {
         @($script:Lab11.steps | Where-Object portal).Count | Should -Be 14
-    }
-
-    It 'lists Step-1.1.7.png as 2279 px wide' {
-        ($script:Lab11.images | Where-Object path -eq 'images/Step-1.1.7.png').width | Should -Be 2279
     }
 }
 

@@ -43,7 +43,6 @@ LAB = "9.9"
 STEPS = {
     "lab": LAB,
     "guide": "guide.md",
-    "images": [{"path": "images/Step-9.9.2.png", "width": 2000}, {"path": "images/ok.png", "width": 800}],
     "steps": [
         {"id": "9.9.1", "title": "One", "portal": True, "items": [], "expected": None, "images": []},
         {"id": "9.9.2", "title": "Two", "portal": True, "items": [], "expected": None, "images": []},
@@ -128,7 +127,6 @@ class RunBookkeepingTests(RunnerTestCase):
         self.assertEqual(self.state()["completed"], ["9.9.1", "9.9.2", "9.9.4", "9.9.5"])
         self.assertIsNone(self.state()["inFlight"])
         self.assertTrue(self.state()["finished"])
-        self.assertEqual([x["label"] for x in r.records if x["kind"] == "readability"], ["images/Step-9.9.2.png"])
 
     def test_skip_the_rest_keeps_the_failed_step_out_of_completed(self) -> None:
         r = self.runner(answers=["s"], failing={"9.9.2"})
@@ -206,7 +204,7 @@ class RunBookkeepingTests(RunnerTestCase):
         r = self.runner(answers=[], resume=True)
         self.assertEqual(self.quietly(lambda: r.run(state)), run.NOT_STARTED)
         self.assertEqual(r.ran, [])
-        self.assertEqual(r.records, [])            # not even the readability check
+        self.assertEqual(r.records, [])
         self.assertFalse((self.tmp / "state.json").exists())
 
     def test_resume_without_a_step_in_flight_starts_at_the_first_step_not_completed(self) -> None:
@@ -447,7 +445,6 @@ class SummaryTests(RunnerTestCase):
         self.assertIsNone(self.r.proposed_edit(99, "+ New group", "New group"))
 
     def test_finish_lists_every_section_and_counts_blocking_and_unknown(self) -> None:
-        self.r.readability()
         self.add("action", "+ New group", outcome="drift", severity="misleading", observed="New group",
                  proposedEdit={"line": 3, "old": "2. Click **+ New group**", "new": "2. Click **New group**"})
         self.add("action", "Groups", outcome="drift", severity="cosmetic", observed="groups")
@@ -460,10 +457,10 @@ class SummaryTests(RunnerTestCase):
         summary = (self.r.run_dir / "summary.md").read_text(encoding="utf-8")
         for line in ("## blocking (1)", "**Gone**: gone from the Portal", "## misleading (1)", "## cosmetic (1)",
                      "## unknown (1)", "## skipped (1)", "- step 9.9.2 because step 9.9.1 failed",
-                     "## stale screenshots (1)", "## unreadable screenshots, wider than 1722 px (1)",
-                     "images/Step-9.9.2.png: 2000 px wide", "## proposed edits (1)", "guide.md:3",
-                     "## no portal part (1)\n- step 9.9.3: Check"):
+                     "## stale screenshots (1)", "- step 9.9.2: images/Step-9.9.2.png", "## proposed edits (1)",
+                     "guide.md:3", "## no portal part (1)\n- step 9.9.3: Check"):
             self.assertIn(line, summary)
+        self.assertNotIn("unreadable", summary)                         # no width limit on screenshots
 
     def test_tenant_name_is_an_optional_argument_the_redactor_uses(self) -> None:
         base = ["--steps", "s", "--recording", "r", "--log-dir", "l", "--run-id", "i", "--tenant-id", "t",
@@ -502,7 +499,6 @@ class OneRunAcrossResumeTests(RunnerTestCase):
         self.assertEqual(self.quietly(lambda: r.run(state)), 1)
         self.assertIn("- step 9.9.4 action **Missing button**: not found", self.summary())
         self.assertFalse((self.tmp / "logs" / "second").exists())
-        self.assertEqual(sum(1 for x in r.records if x["kind"] == "readability"), 1)   # not checked twice
         self.assertEqual(self.state()["runId"], "first")
 
     def test_a_step_done_by_hand_keeps_its_findings_across_a_stop(self) -> None:
