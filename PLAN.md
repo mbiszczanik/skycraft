@@ -2695,7 +2695,23 @@ happen before the first step, so re-run without `-Resume`; for items 4-7 continu
    Membership type (disabled?) and Password (disabled under auto-generate); fields already at
    their value are reported "already set".
 6. Result checks: expected results appear within 15 s, and none is asked for a failed step.
-7. Interruption: Ctrl+C mid-run exits 255 without cleanup, and `-Resume` continues correctly.
+7. Interruption: Ctrl+C mid-run exits 255 without cleanup, `-Resume` continues correctly, and
+   `SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX` and `SKYCRAFT_GRAPH_TENANT_ID` are restored afterwards.
+   Report the exit code the calling shell sees.
+8. Finish and cleanup: a run that ends normally (fresh, and once continued with `-Resume`) leaves
+   the state `finished: true` with its run id, so cleanup runs; answering `s` at a failed step
+   runs cleanup, `q` exits 255 without it.
+9. Graph tenant: the cleanup (a child `pwsh`) completes its Graph sign-in and its "Connected to
+   Tenant" line shows the run's tenant id. Once, with `SKYCRAFT_GRAPH_TENANT_ID` preset to
+   another tenant, confirm cleanup is skipped with a warning.
+10. Domains: the run creates users on the tenant's initial `*.onmicrosoft.com` domain, while the
+    lab's `Remove-LabResource.ps1` deletes `user@<default domain>`; confirm the rehearsal
+    tenant's default domain is its `*.onmicrosoft.com` domain, or cleanup misses the users.
+11. Guest: the invited guest survives cleanup (the lab script deletes a different address);
+    note what 1.1.5 does on the replay run when the guest already exists, and remove the guest
+    by hand at the end.
+12. Tenant-wide settings: revert the self-service password reset scope (1.1.12) and the licence
+    assignment (1.1.11) by hand.
 
 - [ ] **Step 3: Fix what the run shows, in the right place**
 
