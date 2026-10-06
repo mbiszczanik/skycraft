@@ -27,7 +27,7 @@ Deleted in the PR's last commit. Spec: issue #184.
 - [x] 5. `tests/Script-Standards.Tests.ps1`: guards for steps 2-4.
 - [x] 6. `tools/lab-cycle-manifest.psd1`, `tools/Remove-LabCycle.ps1`, `tests/LabCycle.Tests.ps1`:
       the snapshot group joins the residual sweep.
-- [ ] 7. Docs: lab guide (5.2.2, 5.2.3, 5.2.9, Troubleshooting), checklist, ARCHITECTURE,
+- [x] 7. Docs: lab guide (5.2.2, 5.2.3, 5.2.9, Troubleshooting), checklist, ARCHITECTURE,
       TROUBLESHOOTING.md.
 - [ ] 8. Offline gate: Pester suites, PSScriptAnalyzer, bicep build/build-params, PR gate check.
 - [ ] 9. Draft PR, `Refs #184`, live verification deferred; delete this file.

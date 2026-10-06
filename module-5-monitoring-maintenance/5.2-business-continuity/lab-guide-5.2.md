@@ -129,18 +129,33 @@ The Backup Vault uses `avm/res/data-protection/backup-vault:0.13.2` the same way
 
 ### Step 5.2.2: Create a Production Policy
 
-1. Inside the vault, go to **Manage** → **Backup policies**.
-2. Click **+ Add** → **Azure Virtual Machine**.
-3. Policy Name: `SkyCraft-Daily-Prod`.
-4. Policy sub-type: **Enhanced**. Azure defaults VM deployments to Trusted Launch, and a
+Azure Backup keeps a VM's instant-restore snapshots in a resource group of their own, outside the VM's group. Left to itself, it creates `AzureBackupRG_swedencentral_1` **without tags**, and Lab 1.3's `Require-Environment-Tag-RG` assignment denies that group, so every backup fails. Create the group yourself, with the SkyCraft tags, and name it in the policy.
+
+1. Search for **Resource groups** → **+ Create**, and create the snapshot group:
+
+| Field          | Value                                                                              |
+| :------------- | :--------------------------------------------------------------------------------- |
+| Resource group | `platform-skycraft-swc-rpc1-rg`                                                    |
+| Region         | **Sweden Central**                                                                 |
+| Tags           | `Project` = `SkyCraft`, `Environment` = `Platform`, `CostCenter` = `MSDN`, `Owner` = your name |
+
+   Do **not** lock this group. Azure Backup deletes expired snapshots from it, and a lock makes backups fail with `UserErrorRpCollectionLimitReached`. This is also why the snapshots do not go into `platform-skycraft-swc-rg`, which Lab 1.3 locks.
+
+2. Inside the vault, go to **Manage** → **Backup policies**.
+3. Click **+ Add** → **Azure Virtual Machine**.
+4. Policy Name: `SkyCraft-Daily-Prod`.
+5. Policy sub-type: **Enhanced**. Azure defaults VM deployments to Trusted Launch, and a
    Standard policy cannot protect a Trusted Launch VM — it fails with
    `UserErrorThisVMBackupIsSupportedUsingEnhancedPolicy`. The sub-type cannot be changed
    after a VM is protected, so pick it now.
-5. Frequency: **Daily** at **02:00 AM**.
-6. Timezone: **(UTC) Coordinated Universal Time**.
-7. Instant Restore retention: **2 days** (Enhanced defaults to 7 — snapshots are billed).
-8. Retention of daily backup point: **30 days**.
-9. Click **Create**.
+6. Frequency: **Daily** at **02:00 AM**.
+7. Timezone: **(UTC) Coordinated Universal Time**.
+8. Instant Restore retention: **2 days** (Enhanced defaults to 7 — snapshots are billed).
+9. Under **Instant restore**, fill in **Azure Backup Resource Group**: name `platform-skycraft-swc-rpc`, suffix `-rg`. Azure Backup inserts a number between the two, starting at 1, so the snapshots land in `platform-skycraft-swc-rpc1-rg`, the group from step 1.
+10. Retention of daily backup point: **30 days**.
+11. Click **Create**.
+
+The Bicep path does the same: `bicep/main.bicep` creates the tagged group through `avm/res/resources/resource-group`, and `Deploy-Bicep.ps1` passes `-BackupSnapshotResourceGroup 'platform-skycraft-swc-rpc'` and `-BackupSnapshotResourceGroupSuffix '-rg'` to `New-AzRecoveryServicesBackupProtectionPolicy`. On a policy that already exists, it sets them with `Set-AzRecoveryServicesBackupProtectionPolicy`.
 
 ---
 
@@ -153,6 +168,10 @@ The Backup Vault uses `avm/res/data-protection/backup-vault:0.13.2` the same way
 5. Select the policy: `SkyCraft-Daily-Prod`.
 6. Select Virtual Machines: Find and select `dev-skycraft-swc-auth-vm`.
 7. Click **Enable Backup**.
+8. Run the first backup now instead of waiting for 02:00: **Protected items** → **Backup items** → **Azure Virtual Machine** → `dev-skycraft-swc-auth-vm` → **Backup now** → **OK**.
+9. Open **Monitoring** → **Backup jobs**. The **Take Snapshot** phase finishes within minutes, which gives Step 5.2.10 its recovery point. The job stays **In progress** until the transfer to the vault ends. A job that turns **Failed** within seconds with `UserErrorRequestDisallowedByPolicy` means a policy refused the snapshot group: see Troubleshooting, Issue 2.
+
+`Deploy-Bicep.ps1` triggers this backup itself whenever the VM has no recovery point yet, and fails if the job fails. `Test-Lab.ps1` fails if the latest backup job of the VM failed.
 
 > [!TIP]
 > The first backup is an **Initial Replica** (full backup). Subsequent backups are **Incrementals** (only changed blocks), making them faster and cheaper.
@@ -316,9 +335,10 @@ New-AzDiagnosticSetting -Name bv-backup-reports-diag  -ResourceId $bv.Id  -Works
 ### Step 5.2.9: Review Alerts
 
 1. In **Backup center**, click **Alerts**.
-2. Verify if any Critical or Warning alerts exist. After a fresh deployment expect two built-in alerts on `platform-skycraft-swc-rsv`:
+2. Verify if any Critical or Warning alerts exist. After a fresh deployment expect one built-in alert on `platform-skycraft-swc-rsv`:
    - **Modify policy with shorter retention** (0 - Critical) - raised because `Deploy-Bicep.ps1` shortens instant-restore retention to 2 days after creating the Enhanced policy. Expected; it is a security alert about the change, not a failure.
-   - **Backup Failure** (1 - Error) - if Lab 1.3's policies are in force, the initial backup is refused (see Troubleshooting, Issue 2).
+
+   A **Backup Failure** (1 - Error) alert is **not** expected. It means the VM has no recovery point; open the failed job under **Backup jobs** and see Troubleshooting, Issue 2.
 3. Configure a notification rule to email `admins@skycraft.com` for Critical alerts.
 
 ---
@@ -343,9 +363,9 @@ Instead of restoring the whole VM, we can mount a specific recovery point as a d
 ## ✅ Lab Checklist
 
 - [ ] Vault `platform-skycraft-swc-rsv` deployed and configured (LRS/GRS)
-- [ ] Backup policy `SkyCraft-Daily-Prod` created with 30-day retention
+- [ ] Backup policy `SkyCraft-Daily-Prod` created with 30-day retention, instant-restore snapshots in the tagged `platform-skycraft-swc-rpc1-rg`
 - [ ] `dev-skycraft-swc-auth-vm` registered for backup
-- [ ] Initial backup job triggered or completed
+- [ ] Initial backup job **In progress** or **Completed**, not **Failed**
 - [ ] Backup Vault `platform-skycraft-swc-bv` with `SkyCraft-Blob-Policy` protecting `prodskycraftswcsa`
 - [ ] Diagnostic settings `rsv-backup-reports-diag` and `bv-backup-reports-diag` send backup logs to `platform-skycraft-swc-law`
 - [ ] Detailed verification performed (see checklist)
@@ -367,11 +387,17 @@ Instead of restoring the whole VM, we can mount a specific recovery point as a d
 
 ### Issue 2: The VM backup job fails with `UserErrorRequestDisallowedByPolicy`
 
-**Symptom**: The initial backup of `dev-skycraft-swc-auth-vm` ends **Failed** within seconds with error 400211, *An invalid policy is configured on the VM which is preventing Snapshot operation*, and Backup center raises a **Backup Failure** alert. `Test-Lab.ps1` still passes, because it checks the configuration, not the job.
+**Symptom**: The backup of `dev-skycraft-swc-auth-vm` ends **Failed** within seconds with error 400211, *An invalid policy is configured on the VM which is preventing Snapshot operation*, and Backup center raises a **Backup Failure** alert. `Deploy-Bicep.ps1` and `Test-Lab.ps1` report the failed job.
 
-**Root Cause**: For instant restore, Azure Backup creates a resource group `AzureBackupRG_swedencentral_1` for the restore-point collection - without tags. Lab 1.3's `Require-Environment-Tag-RG` assignment denies untagged resource groups, so the snapshot never starts. The Activity Log shows the refusal as `Microsoft.Authorization/policies/deny/action` on that group.
+**Root Cause**: The backup policy names no snapshot resource group, so Azure Backup creates `AzureBackupRG_swedencentral_1` for the restore point collection, without tags. Lab 1.3's `Require-Environment-Tag-RG` assignment denies untagged resource groups, so the snapshot never starts. The Activity Log shows the refusal as `Microsoft.Authorization/policies/deny/action` on that group. A policy created before this lab named the group (issue #184) behaves this way.
 
-**Solution**: Tracked in issue #184 (a pre-created, tagged instant-restore resource group named in the backup policy). Until then there is no recovery point, so Step 5.2.10 cannot be completed on a subscription where Lab 1.3's policies are assigned. Do not delete the assignment: Lab 1.3's `Test-Lab.ps1` checks it.
+**Solution**: Give the policy a tagged snapshot group, as in Step 5.2.2:
+
+1. Create `platform-skycraft-swc-rpc1-rg` with the SkyCraft tags (Step 5.2.2, step 1), or re-run `Deploy-Bicep.ps1`, which creates the group and updates the existing policy for you.
+2. In the portal: **Backup policies** → `SkyCraft-Daily-Prod` → **Modify** → **Instant restore** → **Azure Backup Resource Group**: name `platform-skycraft-swc-rpc`, suffix `-rg` → **Update**.
+3. Run **Backup now** again (Step 5.2.3, step 8).
+
+If the job still fails with the same code, the Activity Log entry names the resource that was refused and the policy assignment that refused it. Do not delete Lab 1.3's assignments: Lab 1.3's `Test-Lab.ps1` checks them.
 
 ---
 
