@@ -1267,9 +1267,48 @@ class FindOnScreenTests(RunnerTestCase):
                 "items": [{"kind": "action", "labels": ["Users"], "line": 1},
                           {"kind": "action", "labels": ["Groups"], "line": 2}]}
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
-        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+        clock = iter(range(0, 1_000_000, 3))
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: next(clock)):
             self.assertTrue(self.quietly(lambda: r.run_step(step)))
         self.assertEqual(expand.clicked, 2)
+
+    class LoadingPage(FakePage):
+        """A page whose blade is still rendering: `on_wait(n)` runs at its n-th wait."""
+
+        def __init__(self, on_wait) -> None:
+            super().__init__()
+            self.waits = 0
+            self.on_wait = on_wait
+
+        def wait_for_timeout(self, ms) -> None:
+            self.waits += 1
+            self.on_wait(self.waits)
+
+    def test_an_element_that_renders_late_is_used_without_asking(self) -> None:
+        create = ScreenNode()
+        screen = Screen()
+        page = self.LoadingPage(lambda n: n == 2 and screen.add(("button", "Create", create)))
+        record, r = self.act(screen, {"kind": "action", "labels": ["Create"], "line": 1}, "Create", page=page)
+        self.assertEqual((record["outcome"], create.clicked, r.ask.prompts), ("match", 1, []))
+        self.assertEqual(page.waits - 1, 2)                       # found on the third look; then SETTLE_MS
+        field = ScreenNode(tag="input")
+        screen = Screen()
+        page = self.LoadingPage(lambda n: n == 2 and screen.add(("textbox", "Group name", field)))
+        record, r = self.act(screen, {"kind": "field", "label": "Group name", "value": "x", "line": 2},
+                             "Group name", page=page, value="SkyCraft-Admins")
+        self.assertEqual((record["outcome"], field.filled, r.ask.prompts), ("match", ["SkyCraft-Admins"], []))
+
+    def test_an_ambiguity_that_clears_before_the_deadline_is_not_reported(self) -> None:
+        kept, gone = ScreenNode(), ScreenNode()
+        screen = Screen(("button", "Create", kept), ("button", "Create", gone))
+        page = self.LoadingPage(lambda n: n == 1 and screen.entries.pop())   # the old blade goes away
+        record, _ = self.act(screen, {"kind": "action", "labels": ["Create"], "line": 1}, "Create", page=page)
+        self.assertEqual((record["outcome"], kept.clicked, gone.clicked), ("match", 1, 0))
+        screen = Screen(("button", "Create", ScreenNode()), ("button", "Create", ScreenNode()))
+        record, r = self.act(screen, {"kind": "action", "labels": ["Create"], "line": 1}, "Create")
+        self.assertEqual((record["outcome"], record["observed"], r.ask.prompts),
+                         ("unknown", "ambiguous: 2 visible elements match named 'Create'", []))
 
     def test_a_search_without_the_search_box_is_unknown(self) -> None:
         record, r = self.act(Screen(), self.SEARCH, "Microsoft Entra ID")

@@ -22,8 +22,9 @@ sign out, unless the guide's own label does too. A guide's 'Search for **X**' is
 Portal's global search, and the result named exactly X in its dropdown is opened (the Services
 entry, never Marketplace or Documentation); when that fails, the dropdown's accessibility tree
 is kept as search-<step>.aria.txt in the run folder. Plain text counts only when it
-is, or sits inside, a link, button or other interactive element; before a label is reported as
-not found, the blade menu's collapsed groups are opened once ('Expand all headers').
+is, or sits inside, a link, button or other interactive element. A label is looked for until
+FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; before it is
+reported as not found, the blade menu's collapsed groups are opened once ('Expand all headers').
 
 When a step does not go through, the person chooses: finish it by hand and continue, skip the
 rest of the lab, or stop and keep the state. --state records the completed steps and the step a
@@ -52,7 +53,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Callable
+from typing import Callable, TypeVar
 
 from playwright.sync_api import Browser, Error as PlaywrightError, Frame, Locator, Page, sync_playwright
 
@@ -60,6 +61,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
                        rejected_candidates, resolve_value, value_action, write_json)
+
+Found = TypeVar("Found")     # what in_time() looks for
 
 PORTAL = "https://portal.azure.com"
 ENTRA_OVERVIEW = "/view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Overview"
@@ -437,6 +440,30 @@ def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
     return element
 
 
+def in_time(page: Page, look: Callable[[], Found | None]) -> Found | None:
+    """What `look()` finds, asked every 250 ms until it finds something or FIND_TIMEOUT_MS has
+    passed; None then. A blade renders its controls a moment after its heading (step 1.1.9: the
+    New Group form showed only its title when 'Group type' was looked up), so one look before
+    the person is asked is not enough. An Ambiguous look is retried too, and raised only when it
+    lasts to the deadline. Raises PageClosed when the window is gone."""
+    deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
+    while True:
+        ambiguous: Ambiguous | None = None
+        try:
+            found = look()
+        except Ambiguous as error:
+            found, ambiguous = None, error
+        if found is not None:
+            return found
+        if time.monotonic() >= deadline:
+            if ambiguous is not None:
+                raise ambiguous
+            return None
+        if page.is_closed():
+            raise PageClosed("the browser window was closed")
+        page.wait_for_timeout(250)
+
+
 def by_id(element_id: str) -> str:
     """A CSS selector for the element with this id, whatever characters the id holds."""
     return '[id="' + element_id.replace("\\", "\\\\").replace('"', '\\"') + '"]'
@@ -559,7 +586,7 @@ def search_portal(page: Page, label: str, diagnose: Callable[[str], None] | None
     given the dropdown's accessibility tree; then None is returned (the person picks from the
     list still open on screen) or the last Ambiguous raised. Raises LookupError when the search
     box is not on screen, PageClosed when the window is gone."""
-    found = search_box(page)
+    found = in_time(page, lambda: search_box(page))
     if found is None:
         if page.is_closed():
             raise PageClosed("the browser window was closed")
@@ -1056,7 +1083,7 @@ class Runner:
             if kind == "search":
                 element = search_portal(self.page, label, diagnose=lambda tree: self.save_search_tree(step, tree))
             else:
-                element = find_exact(self.page, label, field=(kind == "field"))
+                element = in_time(self.page, lambda: find_exact(self.page, label, field=(kind == "field")))
                 if element is None and kind in ("navigation", "action"):
                     element = self.find_after_expanding(label)
         except Ambiguous as error:
