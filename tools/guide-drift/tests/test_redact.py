@@ -1,9 +1,7 @@
-"""Unit tests for the parts of run.py that keep tenant data out of the recording (issue #189).
+"""Unit tests for recording.py, which keeps tenant data out of the recording (issue #189).
 
-Redactor, env_secrets and rejected_candidates are pure, so they are tested without a browser.
-run.py imports Playwright at module level; the CI runner does not install it, so when it is
-missing a stub of playwright.sync_api is put in sys.modules before the import. Nothing here
-calls into Playwright.
+Redactor, env_secrets and rejected_candidates are pure and live outside run.py, so they are
+tested without a browser and without Playwright, which the CI runner does not install.
 
 Standard library unittest only; tests/Guide-Drift-Decide.Tests.ps1 runs this suite in CI.
 Run by hand from the repository root:
@@ -12,28 +10,14 @@ Run by hand from the repository root:
 """
 import os
 import sys
-import types
 import unittest
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-try:
-    import playwright.sync_api  # noqa: F401
-except ImportError:
-    class _StubTimeout(Exception):
-        """Stands in for playwright.sync_api.TimeoutError."""
-
-    _stub = types.ModuleType("playwright.sync_api")
-    _stub.Page = _stub.Frame = object
-    _stub.TimeoutError = _StubTimeout
-    _stub.sync_playwright = None
-    sys.modules["playwright"] = types.ModuleType("playwright")
-    sys.modules["playwright.sync_api"] = _stub
-
 from decide import Candidate  # noqa: E402
-from run import Redactor, env_secrets, rejected_candidates  # noqa: E402
+from recording import Redactor, env_secrets, rejected_candidates  # noqa: E402
 
 DOMAIN = "contoso.onmicrosoft.com"
 TENANT = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"

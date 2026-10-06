@@ -21,39 +21,28 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import difflib
 import json
-import os
 import re
 import sys
 import traceback
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from playwright.sync_api import Page, Frame, TimeoutError as PlaywrightTimeout, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).parent))
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
+from recording import (Redactor, env_secrets, missing_env, rejected_candidates,  # noqa: E402
+                       resolve_value, value_action)
 
 PORTAL = "https://portal.azure.com"
 SETTLE_MS = 1500
 FIND_TIMEOUT_MS = 8000
 CANDIDATE_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "textbox",
                    "combobox", "checkbox", "radio", "heading", "cell")
-ENV_REF = re.compile(r"\$\{(?P<name>[A-Z0-9_]+)\}")
 
 
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def expand_env(value: str) -> str:
-    def replace(m: re.Match) -> str:
-        name = m.group("name")
-        if name not in os.environ:
-            raise SystemExit(f"environment variable {name} is not set; the recording needs it")
-        return os.environ[name]
-    return ENV_REF.sub(replace, value)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -209,102 +198,6 @@ def find_by_name(page: Page, role: str | None, name: str):
 
 def candidates_on_screen(page: Page) -> list[Candidate]:
     return [Candidate(role=role, name=name, count=count) for role, name, count in aria_lines(page)]
-
-
-GUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
-
-
-class Redactor:
-    """Keeps tenant data out of the committed recording, which lives in a public repository.
-    The tenant's domain and id become tokens on the way into the recording and are restored on
-    the way out, so a recorded name such as 'malfurion.stormrage@[tenantdomain]' still finds its
-    element. tests/Guide-Drift-Recording.Tests.ps1 is the backstop: it fails on any literal
-    e-mail address, *.onmicrosoft.com domain or GUID in a recording."""
-
-    DOMAIN = "[tenantdomain]"
-    TENANT = "[tenantid]"
-
-    def __init__(self, domain: str, tenant_id: str, secrets: dict[str, str] | None = None) -> None:
-        # The Portal shows domains in lower case; restore() must give back what is on screen.
-        self.domain = domain.lower()
-        self.tenant_id = tenant_id.lower()
-        self._pairs: list[tuple[re.Pattern, str, str]] = []
-        # Secret values first (the guest address, also in the '_' form a guest UPN uses:
-        # 'me_example.com#EXT#@<tenant>'), then the tenant domain and id.
-        for token, value in (secrets or {}).items():
-            upn = value.replace("@", "_")
-            self._pairs.append((re.compile(re.escape(value), re.IGNORECASE), token, value))
-            # A distinct token for the UPN form, so restore() knows which form to give back.
-            self._pairs.append((re.compile(re.escape(upn), re.IGNORECASE), token[:-1] + "|upn}", upn))
-        self._pairs.append((re.compile(re.escape(self.domain), re.IGNORECASE), self.DOMAIN, self.domain))
-        self._pairs.append((re.compile(re.escape(self.tenant_id), re.IGNORECASE), self.TENANT, self.tenant_id))
-
-    def redact(self, text: str | None) -> str | None:
-        if text is None:
-            return None
-        for pattern, token, _ in self._pairs:
-            text = pattern.sub(token, text)
-        return text
-
-    def restore(self, text: str | None) -> str | None:
-        if text is None:
-            return None
-        for _, token, value in reversed(self._pairs):
-            text = text.replace(token, value)
-        return text
-
-    def view_url(self, url: str) -> str:
-        """The Portal view without the tenant pin ('#@<tenant>/'), query strings (before or inside
-        the fragment) or object ids: shown to the person on -Resume, never navigated to."""
-        parts = urlsplit(url)
-        fragment = re.sub(r"^@[^/]*/?", "", parts.fragment).split("?", 1)[0]
-        return self.redact(GUID.sub("<id>", f"{parts.scheme}://{parts.netloc}{parts.path}#{fragment}"))
-
-
-def env_secrets(recording: dict) -> dict[str, str]:
-    """'${NAME}' -> value for every environment reference in the recording whose value is an
-    address (contains '@'): the Redactor writes the token back wherever the value appears.
-    Short non-address values such as the tenant prefix are covered by the domain itself and
-    would otherwise clobber ordinary words."""
-    secrets = {}
-    for name in set(ENV_REF.findall(json.dumps(recording))):
-        value = os.environ.get(name, "")
-        if "@" in value:
-            secrets[f"${{{name}}}"] = value
-    return secrets
-
-
-def rejected_candidates(candidates: list[Candidate], label: str, chosen: str | None) -> list[str]:
-    """The 20 visible candidates most like the label, other than the chosen one, as 'role "name"':
-    the reference set issue #190 needs, without committing the whole screen to the recording.
-    Names with an '@' (user principal names, the signed-in account) or a GUID (object and
-    subscription ids) are left out entirely."""
-    others = [c for c in candidates if c.name != chosen and "@" not in c.name and not GUID.search(c.name)]
-    others.sort(key=lambda c: difflib.SequenceMatcher(None, c.name.lower(), label.lower()).ratio(),
-                reverse=True)
-    return [str(c) for c in others[:20]]
-
-
-def resolve_value(recording: dict, step: dict, label: str, value: str) -> str:
-    override = recording["steps"].get(step["id"], {}).get("valueOverrides", {}).get(label)
-    if override is not None:
-        return expand_env(override)
-    for placeholder, replacement in recording.get("placeholders", {}).items():
-        if placeholder in value:
-            value = value.replace(placeholder, expand_env(replacement))
-    return value
-
-
-BRACKET_TOKEN = re.compile(r"\[[^\]]+\]")
-
-
-def value_action(value: str) -> str:
-    """How to treat a field value once placeholders and overrides are applied: 'skip' when the
-    whole value is a bracketed instruction ('[Leave blank]' in 1.1.10), 'unresolved' when a
-    bracket token is left ('skycraft-auth-[uniqueID]'), otherwise 'type'."""
-    if re.fullmatch(r"\[[^\]]+\]", value.strip()):
-        return "skip"
-    return "unresolved" if BRACKET_TOKEN.search(value) else "type"
 
 
 def fill_field(page: Page, element, value: str) -> None:
@@ -639,12 +532,6 @@ class Runner:
 # Exit codes above the 250 cap of finish(), which Invoke-GuideDrift.ps1 reads as "not a count".
 NOT_STARTED = 254   # a precondition or guard stopped the run before the first step
 ABORTED = 255       # interrupted (Ctrl+C) or stopped mid-run; state kept for -Resume
-
-
-def missing_env(recording: dict) -> list[str]:
-    """Every ${NAME} the recording refers to that the environment does not set."""
-    names = set(ENV_REF.findall(json.dumps(recording)))
-    return sorted(name for name in names if name not in os.environ)
 
 
 def main(argv: list[str] | None = None) -> int:
