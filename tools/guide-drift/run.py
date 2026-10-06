@@ -563,7 +563,7 @@ class Runner:
             record.update(outcome="unknown", observed=f"'{decision.name}' chosen but not found on screen")
             return record
         acted_on = decision.name or label
-        if DESTRUCTIVE.match(acted_on) and not DESTRUCTIVE.match(label):
+        if DESTRUCTIVE.search(acted_on) and not DESTRUCTIVE.search(label):
             record.update(outcome="unknown", observed=f"refused: destructive element '{acted_on}'")
             return record
         note = None

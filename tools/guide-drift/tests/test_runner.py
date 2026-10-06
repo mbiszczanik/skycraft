@@ -284,7 +284,8 @@ class DecisionRecordingTests(RunnerTestCase):
     def act(self, answers, element, label="+ New group", exact=None):
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
         candidates = [run.Candidate("button", "New group"), run.Candidate("link", "Groups"),
-                      run.Candidate("button", "Delete group"), run.Candidate("link", "Contoso Ltd")]
+                      run.Candidate("button", "Delete group"), run.Candidate("link", "Contoso Ltd"),
+                      run.Candidate("menuitem", "Bulk delete")]
         with mock.patch.object(run, "find_exact", return_value=exact), \
                 mock.patch.object(run, "candidates_on_screen", return_value=candidates), \
                 mock.patch.object(run, "find_by_name", return_value=element) as self.find_by_name:
@@ -321,6 +322,18 @@ class DecisionRecordingTests(RunnerTestCase):
         self.assertEqual((element.clicked, labels), (0, {}))
         record, _ = self.act([], None, label="Delete", exact=element)    # the guide says Delete
         self.assertEqual((record["outcome"], element.clicked), ("match", 1))
+
+    def test_a_destructive_word_later_in_the_name_is_refused_too(self) -> None:
+        element = FakeElement()
+        record, labels = self.act(["5"], element)                         # 'Bulk delete'
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertIn("refused: destructive element 'Bulk delete'", record["observed"])
+        self.assertEqual((element.clicked, labels), (0, {}))
+
+    def test_a_guide_label_with_the_word_later_in_it_is_allowed(self) -> None:
+        element = FakeElement()
+        record, _ = self.act([], None, label="Password reset", exact=element)
+        self.assertEqual((record["outcome"], record["observed"], element.clicked), ("match", "Password reset", 1))
 
     def test_a_disabled_element_is_unknown_without_waiting(self) -> None:
         element = FakeElement(disabled=True)
