@@ -1364,6 +1364,16 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
         foreach ($step in @($parsed.steps)) {
             $labelsByStep[$step.id] = @($step.items | ForEach-Object { if ($_.kind -eq 'field') { $_.label } elseif ($_.kind -eq 'tag') { $_.name } else { $_.labels } })
         }
+        $malformed = @(
+            foreach ($prop in $recording.steps.PSObject.Properties) {
+                foreach ($entry in @($prop.Value.labels.PSObject.Properties)) {
+                    $d = $entry.Value
+                    if ($d.decision -notin 'use', 'ignore', 'gone') { "step $($prop.Name) label '$($entry.Name)': decision '$($d.decision)'" }
+                    if ($d.decision -eq 'use' -and (-not $d.name -or -not $d.role)) { "step $($prop.Name) label '$($entry.Name)': 'use' needs a name and a role" }
+                    if ($d.decision -eq 'use' -and $d.severity -and $d.severity -notin 'misleading', 'cosmetic') { "step $($prop.Name) label '$($entry.Name)': severity '$($d.severity)'" }
+                }
+            }
+        )
         $missing = @(
             foreach ($prop in $recording.steps.PSObject.Properties) {
                 $id = $prop.Name
@@ -1382,6 +1392,7 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
             guideExists = (Test-Path -LiteralPath $guidePath)
             labMatches  = ($recording.lab -eq $parsed.lab)
             missing     = $missing
+            malformed   = $malformed
             recording   = $recording
         }
     }
@@ -1398,6 +1409,14 @@ Describe 'Guide drift recordings - every one refers to a real guide' {
 
     It "'<file>' refers only to steps, labels and fields the parser finds in that guide" -ForEach $RecordingCases {
         $missing | Should -BeNullOrEmpty -Because ($missing -join '; ')
+    }
+}
+
+Describe 'Guide drift recordings - every decision is one replay can act on' {
+    It "'<file>' records only use (with name and role), ignore or gone decisions" -ForEach $RecordingCases {
+        # ReplayDecider treats anything else as no answer (or, without a role, as any role), so a
+        # hand edit that breaks the shape would silently send the run back to asking - or worse.
+        $malformed | Should -BeNullOrEmpty -Because ($malformed -join '; ')
     }
 }
 
@@ -1454,7 +1473,7 @@ Create `tools/guide-drift/recordings/lab-1.1.json`:
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `Invoke-Pester -Path ./tests/Guide-Drift-Recording.Tests.ps1 -Output Detailed`
-Expected: 6 passed.
+Expected: 7 passed.
 
 - [ ] **Step 5: Run the whole suite once**
 
@@ -1515,6 +1534,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import difflib
 import json
 import os
 import re
@@ -1567,9 +1587,12 @@ def all_frames(page: Page) -> list[Frame]:
     return [page.main_frame] + [f for f in page.frames if f is not page.main_frame]
 
 
-def aria_lines(page: Page) -> list[tuple[str, str]]:
-    """(role, name) of every named element the accessibility tree exposes, across frames."""
-    found: list[tuple[str, str]] = []
+def aria_lines(page: Page) -> list[tuple[str, str, int]]:
+    """(role, name, count) of every named element the accessibility tree exposes, across frames,
+    in first-seen order. count is how many elements share that role and name: the Portal keeps
+    earlier blades in the DOM, so 'Create' or 'Delete' often appears more than once, and a
+    candidate that stands for several elements must never be clicked by name alone."""
+    counts: dict[tuple[str, str], int] = {}
     for frame in all_frames(page):
         try:
             snapshot = frame.locator("body").aria_snapshot(timeout=2000)
@@ -1578,14 +1601,9 @@ def aria_lines(page: Page) -> list[tuple[str, str]]:
         for line in snapshot.splitlines():
             m = re.match(r'\s*-\s+(?P<role>[a-z]+)\s+"(?P<name>[^"]+)"', line)
             if m and m.group("role") in CANDIDATE_ROLES:
-                found.append((m.group("role"), m.group("name")))
-    seen: set[tuple[str, str]] = set()
-    unique = []
-    for item in found:
-        if item not in seen:
-            seen.add(item)
-            unique.append(item)
-    return unique[:300]
+                key = (m.group("role"), m.group("name"))
+                counts[key] = counts.get(key, 0) + 1
+    return [(role, name, count) for (role, name), count in counts.items()][:300]
 
 
 def wait_for_sign_in(page: Page, say=print) -> None:
@@ -1615,7 +1633,7 @@ def guard_tenant(page: Page, tenant_domain: str, tenant_id: str) -> str | None:
     try:
         menu.click(timeout=FIND_TIMEOUT_MS)
         page.wait_for_timeout(SETTLE_MS)
-        text = "\n".join(name for _, name in aria_lines(page)) + page.locator("body").inner_text(timeout=2000)
+        text = "\n".join(name for _, name, _ in aria_lines(page)) + page.locator("body").inner_text(timeout=2000)
         page.keyboard.press("Escape")
     except PlaywrightTimeout:
         return "Could not open the account menu to read the current directory."
@@ -1678,38 +1696,71 @@ Append to `tools/guide-drift/run.py`:
 ```python
 # --- finding and acting --------------------------------------------------------------------
 
-def find_exact(page: Page, label: str, field: bool = False):
-    """First visible element whose accessible name is exactly `label`, in any frame, or None."""
+class Ambiguous(LookupError):
+    """Several visible elements match. The runner never clicks one of them by guess: earlier
+    Portal blades stay in the DOM, and the first match in DOM order is often the wrong one."""
+
+
+def visible_in(locator) -> list:
+    found = []
+    for index in range(locator.count()):
+        element = locator.nth(index)
+        try:
+            if element.is_visible():
+                found.append(element)
+        except PlaywrightTimeout:
+            continue
+    return found
+
+
+def unique_visible(page: Page, make_locator):
+    """The one visible element `make_locator(frame)` matches across all frames, or None when there
+    is none; raises Ambiguous when there are several."""
+    found = []
     for frame in all_frames(page):
-        locators = []
-        if field:
-            locators.append(frame.get_by_label(label, exact=True))
-        for role in ("button", "link", "menuitem", "tab", "treeitem", "option", "checkbox", "radio"):
-            locators.append(frame.get_by_role(role, name=label, exact=True))
-        locators.append(frame.get_by_text(label, exact=True))
-        for locator in locators:
-            try:
-                candidate = locator.first
-                if candidate.count() > 0 and candidate.is_visible(timeout=500):
-                    return candidate
-            except PlaywrightTimeout:
-                continue
-    return None
+        found += visible_in(make_locator(frame))
+    if len(found) > 1:
+        raise Ambiguous(f"{len(found)} visible elements match")
+    return found[0] if found else None
+
+
+def find_exact(page: Page, label: str, field: bool = False):
+    """The visible element whose accessible name is exactly `label`: the field label first for a
+    field, then the interactive roles, then plain text. An ambiguous role match raises Ambiguous;
+    an ambiguous text match counts as not found, so the person picks a role-specific candidate."""
+    strategies = []
+    if field:
+        strategies.append(lambda f: f.get_by_label(label, exact=True))
+    for role in ("button", "link", "menuitem", "tab", "treeitem", "option", "checkbox", "radio"):
+        strategies.append(lambda f, role=role: f.get_by_role(role, name=label, exact=True))
+    for make_locator in strategies:
+        element = unique_visible(page, make_locator)
+        if element is not None:
+            return element
+    try:
+        return unique_visible(page, lambda f: f.get_by_text(label, exact=True))
+    except Ambiguous:
+        return None
 
 
 def find_by_name(page: Page, role: str | None, name: str):
-    for frame in all_frames(page):
-        locator = frame.get_by_role(role, name=name, exact=True).first if role else frame.get_by_text(name, exact=True).first
-        try:
-            if locator.count() > 0 and locator.is_visible(timeout=500):
-                return locator
-        except PlaywrightTimeout:
-            continue
-    return None
+    """The element a decision chose, by role and name. Raises Ambiguous rather than guess."""
+    if role:
+        return unique_visible(page, lambda f: f.get_by_role(role, name=name, exact=True))
+    return unique_visible(page, lambda f: f.get_by_text(name, exact=True))
 
 
 def candidates_on_screen(page: Page) -> list[Candidate]:
-    return [Candidate(role=role, name=name) for role, name in aria_lines(page)]
+    return [Candidate(role=role, name=name, count=count) for role, name, count in aria_lines(page)]
+
+
+def rejected_candidates(candidates: list[Candidate], label: str, chosen: str | None) -> list[str]:
+    """The 20 visible candidates most like the label, other than the chosen one, as 'role "name"':
+    the reference set issue #190 needs, without committing the whole screen to the recording."""
+    others = [c for c in candidates if c.name != chosen]
+    others.sort(key=lambda c: difflib.SequenceMatcher(None, c.name.lower(), label.lower()).ratio(),
+                reverse=True)
+    return [str(c) for c in others[:20]]
 
 
 def resolve_value(recording: dict, step: dict, label: str, value: str) -> str:
@@ -1799,22 +1850,29 @@ class Runner:
 
     # -- one label -------------------------------------------------------------------------
 
-    def act_on_label(self, step: dict, label: str, kind: str, line: int, value: str | None = None) -> dict:
+    def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None) -> dict:
         """Find the element the guide calls `label`, act on it, return the result record."""
+        kind, line = item["kind"], item["line"]
         record = self.new_record(step, kind, label)
-        element = find_exact(self.page, label, field=(kind == "field"))
+        try:
+            element = find_exact(self.page, label, field=(kind == "field"))
+        except Ambiguous as error:
+            record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
+            return record
         decision = Decision(kind="use", name=label, decided_by="exact") if element is not None else None
-        rejected: list[str] = []
         if decision is None:
             candidates = candidates_on_screen(self.page)
-            decision = decide(step, label, candidates, self.deciders)
-            rejected = [c.name for c in candidates if c.name != decision.name][:50]
-            entry = decision.to_recording(rejected, now())
+            decision = decide(step, item, label, candidates, self.deciders)
+            entry = decision.to_recording(rejected_candidates(candidates, label, decision.name), now())
             if decision.decided_by == "human" and entry is not None:
                 self.step_entry(step)["labels"][label] = entry
                 self.save_recording()
             if decision.name and decision.severity != "blocking":
-                element = find_by_name(self.page, decision.role, decision.name)
+                try:
+                    element = find_by_name(self.page, decision.role, decision.name)
+                except Ambiguous as error:
+                    record.update(outcome="unknown", observed=f"ambiguous: {error} named '{decision.name}'")
+                    return record
         if decision.kind == "ignore":
             record.update(outcome="match", observed=None)
             return record
@@ -1869,7 +1927,7 @@ class Runner:
                 value = resolve_value(self.recording, step, item["label"], item["value"])
                 action = value_action(value)
                 if action == "type":
-                    record = self.act_on_label(step, item["label"], "field", item["line"], value)
+                    record = self.act_on_label(step, item, item["label"], value)
                 else:
                     record = self.new_record(step, "field", item["label"])
                     if action == "skip":
@@ -1882,7 +1940,7 @@ class Runner:
             else:
                 records = []
                 for label in item["labels"]:
-                    records.append(self.act_on_label(step, label, item["kind"], item["line"]))
+                    records.append(self.act_on_label(step, item, label))
                     if records[-1]["outcome"] in ("unknown",) or records[-1].get("severity") == "blocking":
                         break
             for record in records:
@@ -2070,17 +2128,46 @@ Append to `tools/guide-drift/run.py`:
         return min(len(by_severity["blocking"]) + len(unknown), 250)
 
 
+# Exit codes above the 250 cap of finish(), which Invoke-GuideDrift.ps1 reads as "not a count".
+NOT_STARTED = 254   # a precondition or guard stopped the run before the first step
+ABORTED = 255       # interrupted (Ctrl+C) or stopped mid-run; state kept for -Resume
+
+
+def missing_env(recording: dict) -> list[str]:
+    """Every ${NAME} the recording refers to that the environment does not set."""
+    names = set(ENV_REF.findall(json.dumps(recording)))
+    return sorted(name for name in names if name not in os.environ)
+
+
 def main(argv: list[str] | None = None) -> int:
+    # Accessible names and guide text reach the console; a redirected stdout on Windows would
+    # otherwise use the ANSI code page and fail on the first arrow.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     args = parse_args(argv)
     args.repo_root = Path(__file__).resolve().parents[2]
     steps = json.loads(args.steps.read_text(encoding="utf-8"))
     recording = json.loads(args.recording.read_text(encoding="utf-8"))
     if recording.get("lab") != steps.get("lab"):
-        raise SystemExit(f"recording is for lab {recording.get('lab')}, steps are for lab {steps.get('lab')}")
+        print(f"Recording is for lab {recording.get('lab')}, steps are for lab {steps.get('lab')}.")
+        return NOT_STARTED
+    missing = missing_env(recording)
+    if missing:
+        print("Set these environment variables first: " + ", ".join(missing))
+        return NOT_STARTED
     with sync_playwright() as pw:
-        browser, page = open_portal(pw, args, recording)
         try:
-            return Runner(page, steps, recording, args).run()
+            browser, page = open_portal(pw, args, recording)
+        except SystemExit as stop:          # a guard: wrong language or tenant
+            print(stop)
+            return NOT_STARTED
+        runner = Runner(page, steps, recording, args)
+        try:
+            return runner.run()
+        except (KeyboardInterrupt, SystemExit) as stop:
+            runner.finish()
+            print(f"\nStopped ({type(stop).__name__}: {stop}). Progress is in {args.state}; "
+                  "re-run with -Resume.")
+            return ABORTED
         finally:
             browser.close()
 
@@ -2203,7 +2290,9 @@ Create `tools/Invoke-GuideDrift.ps1`:
 .NOTES
     Project: SkyCraft
     Issue:   #189
-    Exit code: blocking drifts + unknowns (0 = nothing to fix); 1 when a prerequisite is missing.
+    Exit code: blocking drifts + unknowns (0 = nothing to fix, capped at 250); 1 when a prerequisite
+    is missing; 254 when run.py stopped before the first step; 255 when it was interrupted
+    (state kept, nothing cleaned up: re-run with -Resume).
 #>
 
 #Requires -Version 7.0
@@ -2323,6 +2412,18 @@ Write-Host 'Starting the browser...' -ForegroundColor Yellow
 & $PythonPath @runArgs
 $runExit = $LASTEXITCODE
 
+# run.py reports a count of findings (0-250) or one of two codes that are not a count.
+$notStarted = 254   # a precondition or guard stopped it before the first step
+$aborted    = 255   # interrupted or stopped mid-run; the state file is kept for -Resume
+if ($runExit -eq $notStarted) {
+    Write-Host '[ERROR] The run did not start (see the message above). Nothing is cleaned up.' -ForegroundColor Red
+    exit $runExit
+}
+if ($runExit -eq $aborted) {
+    Write-Host "Run stopped before the end. Nothing is cleaned up, so it can continue: re-run with -Resume." -ForegroundColor Yellow
+    exit $runExit
+}
+
 # --- Cleanup: the lab's own script -----------------------------------------------------------
 if ($SkipCleanup) {
     Write-Host 'Skipping cleanup (-SkipCleanup).' -ForegroundColor Gray
@@ -2427,6 +2528,12 @@ or press Enter when nothing on screen states it.
   `-Resume`.
 - A bold caption parsed as a label: add it to `NON_UI_BOLD` in `parse.py` and re-run the parser
   tests.
+- Two places where the parser cannot read lab 1.1 as written, known before the run: the
+  invitation message of 1.1.5 is a blockquote (not read; the invitation is sent without it),
+  and the member to select in 1.1.7 (`- Malfurion Stormrage`) is not bold, so the run reaches
+  **Select** with nobody selected. Do the selection by hand when the run stops there, record
+  the step's outcome as it is, and list both as guide findings (bold the member name; keep the
+  message as a field) for the separate guide PR.
 - A real drift in the guide: do **not** fix the guide in this PR. Record it; it becomes the first
   finding the tool reports, and the guide fix is its own PR with its own fresh screenshot.
 
