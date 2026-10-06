@@ -1131,8 +1131,16 @@ class Runner:
 
     def ask_after_failure(self, step: dict) -> str:
         """'c' (done by hand), 's' (skip the rest) or 'q' (stop, keep the state). Closed input
-        means nobody is there to finish the lab by hand: 's'."""
-        print(f"\nStep {step['id']} did not go through (see above). What now?")
+        means nobody is there to finish the lab by hand: 's'. The reasons are printed first, one
+        line per record of the step that is not a match, redacted: results.jsonl is not where
+        the person looks."""
+        print(f"\nStep {step['id']} did not go through:")
+        for r in self.records:
+            if r["step"] == step["id"] and r["outcome"] != "match":
+                outcome = f"{r['outcome']} ({r['severity']})" if r.get("severity") else r["outcome"]
+                observed = (str(r["observed"]).strip().splitlines() or [""])[0] if r.get("observed") else "-"
+                print(self.redactor.redact(f"  {r['kind']} '{r['label']}': {outcome}: {observed}"))
+        print("What now?")
         while True:
             answer = self.prompt(self.FAILURE_PROMPT)
             if answer is None:

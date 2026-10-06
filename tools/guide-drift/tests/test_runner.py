@@ -154,6 +154,28 @@ class RunBookkeepingTests(RunnerTestCase):
         self.assertEqual(self.state()["completed"], ["9.9.1", "9.9.2", "9.9.4", "9.9.5"])
         self.assertEqual(len(r.ask.prompts), 2)     # 'x' is not an answer: asked again
 
+    def test_the_failure_prompt_lists_why_the_step_did_not_go_through(self) -> None:
+        r = self.runner(answers=["q"])
+        for kind, label, outcome, severity, observed in (
+                ("action", "Users", "match", None, "Users"),
+                ("field", "User principal name", "unknown", None,
+                 "Error: fill('a@contoso.onmicrosoft.com'): not an <input>\n  - waiting for get_by_label()"),
+                ("action", "Gone", "drift", "blocking", None)):
+            record = r.new_record({"id": "9.9.2"}, kind, label)
+            record.update(outcome=outcome, severity=severity, observed=observed)
+            r.records.append(record)
+        r.records.append(dict(r.new_record({"id": "9.9.1"}, "action", "Other step"), outcome="unknown"))
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(r.ask_after_failure({"id": "9.9.2"}), "q")
+        lines = out.getvalue().splitlines()
+        start = lines.index("Step 9.9.2 did not go through:")
+        self.assertEqual(lines[start + 1:start + 4], [
+            "  field 'User principal name': unknown: Error: fill('a@[tenantdomain]'): not an <input>",
+            "  action 'Gone': drift (blocking): -",
+            "What now?"])
+        self.assertNotIn("contoso.onmicrosoft.com", out.getvalue())
+
     def test_quit_stops_with_the_failed_step_as_the_resume_point(self) -> None:
         r = self.runner(answers=["q"], failing={"9.9.2"})
         self.assertEqual(self.quietly(r.run), run.ABORTED)
