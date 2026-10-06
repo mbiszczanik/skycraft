@@ -41,6 +41,7 @@ All new labs and scripts must include validation steps.
 - **Before pushing**: Run `.\tools\Invoke-DryRun.ps1`. It parses every PowerShell file, runs PSScriptAnalyzer, and compiles every Bicep template and parameter file — the whole offline half of CI, no Azure authentication required. See [docs/dry-run-harness.md](docs/dry-run-harness.md).
 - **PowerShell**: Use `Test-Lab.ps1` scripts for Pester-like validation.
 - **Documentation**: Ensure all links work and screenshots are placed in the correct `images/` directory.
+- **Portal steps**: when a lab is revised, `.\tools\Invoke-GuideDrift.ps1 -SubscriptionId <id> -Lab X.Y` performs its portal steps in a visible browser and reports what no longer matches the Portal. A guide edit that changes a portal label updates the lab's recording in `tools/guide-drift/recordings/` in the same PR (`tests/Guide-Drift-Recording.Tests.ps1` enforces it).
 
 ## 🚀 Releases
 

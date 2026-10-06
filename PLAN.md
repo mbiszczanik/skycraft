@@ -2613,7 +2613,7 @@ git commit -m "feat(guide-drift): entry point that parses, runs and hands off to
 
 - Modify: `CONTRIBUTING.md` (section "🧪 Testing", the bullet list after "All new labs and scripts must include validation steps.")
 
-- [ ] **Step 1: Add the sentence**
+- [x] **Step 1: Add the sentence**
 
 Append one bullet to the list in the Testing section:
 
@@ -2621,12 +2621,12 @@ Append one bullet to the list in the Testing section:
 - **Portal steps**: when a lab is revised, `.\tools\Invoke-GuideDrift.ps1 -SubscriptionId <id> -Lab X.Y` performs its portal steps in a visible browser and reports what no longer matches the Portal. A guide edit that changes a portal label updates the lab's recording in `tools/guide-drift/recordings/` in the same PR (`tests/Guide-Drift-Recording.Tests.ps1` enforces it).
 ```
 
-- [ ] **Step 2: Check links and lint**
+- [x] **Step 2: Check links and lint**
 
 Run: `Invoke-Pester -Path ./tests/Markdown-Links.Tests.ps1 -Output Normal`
 Expected: green (the bullet has no links).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```powershell
 git add CONTRIBUTING.md
