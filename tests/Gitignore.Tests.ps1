@@ -100,6 +100,7 @@ Describe '.gitignore - required ignore patterns' {
             'tools/.guide-drift-state.json'
             'tools/.guide-drift-auth.json'
             'tools/guide-drift/__pycache__/decide.cpython-312.pyc'
+            'tools/guide-drift/tests/__pycache__/test_decide.cpython-312.pyc'
         )
         Push-Location $script:RepoRoot
         try {

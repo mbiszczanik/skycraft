@@ -93,4 +93,4 @@ tools/.lab-cycle-state.json
 tools/guide-drift-logs/
 tools/.guide-drift-state.json
 tools/.guide-drift-auth.json
-tools/guide-drift/__pycache__/
+tools/guide-drift/**/__pycache__/
