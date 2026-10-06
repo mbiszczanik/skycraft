@@ -69,6 +69,7 @@ PORTAL = "https://portal.azure.com"
 ENTRA_OVERVIEW = "/view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Overview"
 SETTLE_MS = 1500
 FIND_TIMEOUT_MS = 8000
+CHECK_TIMEOUT_MS = 2000     # set_checked() before the label is tried, and the wait for its effect
 RESULT_TIMEOUT_S = 15
 CANDIDATE_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "textbox",
                    "combobox", "checkbox", "radio", "heading", "cell")
@@ -756,6 +757,47 @@ def fill_parts(page: Page, container: Locator, value: str) -> str | None:
                       f"and {len(comboboxes)} combo box(es)")
 
 
+def label_of(element: Locator) -> Locator | None:
+    """The label that belongs to a check box or radio: the closest <label> around it, or the
+    <label for=its id> anywhere in its document; None when it has none on screen."""
+    paths = ["ancestor::label[1]"]
+    element_id = element.get_attribute("id", timeout=1000) or ""
+    if element_id and "'" not in element_id:
+        paths.append(f"ancestor::*[last()]//label[@for='{element_id}']")
+    labels = visible_in(element.locator("xpath=" + " | ".join(paths)), None)
+    return labels[0] if labels else None
+
+
+def set_check_state(page: Page, element: Locator, checked: bool) -> None:
+    """Tick or clear the check box, radio or switch `element`. Fluent UI draws the tick mark
+    over the input ('ms-Checkbox-checkmark' inside its label), so set_checked() can time out on
+    an intercepted click; then the input's label is clicked once, which toggles it as a person's
+    click does, and the state is read until CHECK_TIMEOUT_MS has passed. The label is never
+    clicked twice: a second click would toggle it back. Raises LookupError when the state
+    cannot be set, PlaywrightError for any other failure."""
+    wanted = "checked" if checked else "unchecked"
+    try:
+        element.set_checked(checked, timeout=CHECK_TIMEOUT_MS)
+        return
+    except PlaywrightError as error:
+        reason = str(error)
+        if "intercepts pointer events" not in reason and "timeout" not in reason.lower():
+            raise
+    if element.is_checked(timeout=FIND_TIMEOUT_MS) == checked:     # the click went through late
+        return
+    label = label_of(element)
+    if label is None:
+        raise LookupError(f"the click to make it {wanted} was intercepted and it has no label to click "
+                          f"({reason.splitlines()[0]})")
+    label.click(timeout=FIND_TIMEOUT_MS)
+    deadline = time.monotonic() + CHECK_TIMEOUT_MS / 1000
+    while element.is_checked(timeout=FIND_TIMEOUT_MS) != checked:
+        if time.monotonic() >= deadline:
+            raise LookupError(f"its label was clicked to make it {wanted}, but it is still "
+                              f"{'unchecked' if checked else 'checked'}")
+        page.wait_for_timeout(250)
+
+
 def fill_field(page: Page, element: Locator, value: str) -> str | None:
     """Give the field `value`: tick or clear a checkbox or radio, pick an option, or type; a
     labelled container that is not a control itself is filled through its parts (fill_parts).
@@ -771,7 +813,7 @@ def fill_field(page: Page, element: Locator, value: str) -> str | None:
             raise LookupError(f"'{value}' is not a checkbox state")
         if element.is_checked(timeout=FIND_TIMEOUT_MS) == checked:
             return "already set"
-        element.set_checked(checked, timeout=FIND_TIMEOUT_MS)
+        set_check_state(page, element, checked)
     elif tag == "select":
         selected = element.evaluate("e => e.selectedIndex >= 0 ? e.options[e.selectedIndex].text.trim() : ''")
         if selected == value:

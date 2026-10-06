@@ -651,14 +651,20 @@ class ScreenNode(FakeElement):
     (n, text), the text it shows after n more reads, as a field the Portal updates late;
     `in_header`: whether it sits in a table or grid header (a column's sort button);
     `controls_role`: the role of the element its aria-controls or aria-owns names; `editable`:
-    contenteditable; `uninspectable`: FIELD_KIND_JS fails on it."""
+    contenteditable; `uninspectable`: FIELD_KIND_JS fails on it. As a check box: `checked`, its
+    state; `check_error`: what set_checked() raises (Fluent's tick mark intercepting the click);
+    `label`: the node label_of() finds for it."""
 
     def __init__(self, interactive: bool = True, on_click=None, on_fill=None, attrs=None, children=None,
                  rect=None, section=("", "", ""), unreadable: int = 0, tree: str = "", tag: str = "div",
                  text: str = "", fill_fail: Exception | None = None, shown: bool = True,
                  read_only: bool = False, in_header: bool = False, controls_role: str = "",
-                 editable: bool = False, uninspectable: bool = False) -> None:
+                 editable: bool = False, uninspectable: bool = False, checked: bool = False,
+                 check_error: Exception | None = None, label: "ScreenNode | None" = None) -> None:
         super().__init__()
+        self.checked = checked
+        self.check_error = check_error
+        self.label = label
         self.in_header = in_header
         self.controls_role = controls_role
         self.editable = editable
@@ -746,7 +752,17 @@ class ScreenNode(FakeElement):
         return self.children.get_by_text(text, exact=exact)
 
     def locator(self, selector: str):
+        if selector.startswith("xpath="):            # label_of(): the check box's label
+            return ScreenLocator([self.label] if self.label else [])
         return self.children.locator(selector)
+
+    def is_checked(self, timeout=None) -> bool:
+        return self.checked
+
+    def set_checked(self, checked: bool, timeout=None) -> None:
+        if self.check_error:
+            raise self.check_error
+        self.checked = checked
 
     def click(self, timeout=None) -> None:
         super().click(timeout)
@@ -1139,6 +1155,42 @@ class FindOnScreenTests(RunnerTestCase):
                 button = ScreenNode(tag="button", attrs=attrs, controls_role=controls_role)
                 with mock.patch.object(run, "all_frames", lambda page: [Screen(("label", "Group type", button))]):
                     self.assertIsNone(run.find_exact(FakePage(), "Group type", field=True))
+
+    PASSWORD = {"kind": "field", "label": "Auto-generate password", "value": "☐ Unchecked", "line": 7}
+    INTERCEPTED = run.PlaywrightError(
+        'Timeout 2000ms exceeded.\n  - <i data-icon-name="CheckMark" class="ms-Checkbox-checkmark"> from '
+        '<label for="checkbox-72" class="ms-Checkbox-label"> subtree intercepts pointer events')
+
+    def check_box(self, label_toggles: bool = True, has_label: bool = True, error=None):
+        """Step 1.1.2's Fluent UI check box, ticked, whose tick mark intercepts the click."""
+        box = ScreenNode(tag="input", attrs={"role": "checkbox", "type": "checkbox", "id": "checkbox-72"},
+                         checked=True, check_error=error or self.INTERCEPTED)
+        if has_label:
+            box.label = ScreenNode(on_click=(lambda: setattr(box, "checked", not box.checked)) if label_toggles else None)
+        return Screen(("checkbox", "Auto-generate password", box)), box
+
+    def test_an_intercepted_check_box_is_set_through_its_label_once(self) -> None:
+        screen, box = self.check_box()
+        record, r = self.act(screen, self.PASSWORD, "Auto-generate password", value="☐ Unchecked")
+        self.assertEqual((record["outcome"], box.checked, box.label.clicked, r.ask.prompts), ("match", False, 1, []))
+
+    def test_a_label_click_that_does_not_take_is_unknown_and_never_repeated(self) -> None:
+        screen, box = self.check_box(label_toggles=False)
+        record, _ = self.act(screen, self.PASSWORD, "Auto-generate password", value="☐ Unchecked")
+        self.assertEqual((record["outcome"], box.checked, box.label.clicked), ("unknown", True, 1))
+        self.assertIn("its label was clicked to make it unchecked, but it is still checked", record["observed"])
+
+    def test_an_intercepted_check_box_without_a_label_is_unknown(self) -> None:
+        screen, box = self.check_box(has_label=False)
+        record, _ = self.act(screen, self.PASSWORD, "Auto-generate password", value="☐ Unchecked")
+        self.assertEqual((record["outcome"], box.checked), ("unknown", True))
+        self.assertIn("was intercepted and it has no label to click (Timeout 2000ms exceeded.)", record["observed"])
+
+    def test_any_other_check_box_failure_does_not_click_the_label(self) -> None:
+        screen, box = self.check_box(error=run.PlaywrightError("Element is not attached to the DOM"))
+        record, _ = self.act(screen, self.PASSWORD, "Auto-generate password", value="☐ Unchecked")
+        self.assertEqual((record["outcome"], box.label.clicked), ("unknown", 0))
+        self.assertIn("Element is not attached to the DOM", record["observed"])
 
     def test_a_read_only_field_is_unknown_at_once(self) -> None:
         field = ScreenNode(tag="input", read_only=True)
