@@ -39,13 +39,15 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
 
   * A field whose label is not bold is misread: '- Lock type: **Delete**' becomes a click on
     "Delete", and '- Name: `x`' is dropped (#198).
-  * Code-span steps drop out of navigation chains: '**Virtual Networks** > `vnet` > **Subnets**' (#199).
+  * Code-span steps drop out of navigation chains:
+    '**Virtual Networks** > `vnet` > **Subnets**' (#199).
   * The first-option rule skips 3.2.1's Portal path, because its Option A is CLI-only (#201).
   * A caption label whose value holds bold spans turns them into actions (4.2:741, #203).
   * Instructions after a field value are lost (5.3:225, #203).
   * Text before the first option heading, and items under a non-option '####' heading after
     the options, are dropped (#203).
-  * NON_UI_BOLD is one global list, so a caption from one lab can hide a real label in another (#203).
+  * NON_UI_BOLD is one global list, so a caption from one lab can hide a real label in another
+    (#203).
 
 Usage: python parse.py <path/to/lab-guide-X.Y.md> [--out steps.json] [--repo-root <dir>]
 """
