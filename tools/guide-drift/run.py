@@ -80,12 +80,18 @@ INTERACTIVE = ("a, button, [role=link], [role=button], [role=menuitem], [role=tr
 # A blade menu's button that opens all its collapsed groups ('Manage', 'Monitoring', 'Help').
 EXPAND_ALL = "Expand all headers"
 # The global search's dropdown when the box names none in aria-controls or aria-owns: a popup of
-# these roles that appeared after typing (MARK_POPUPS_JS runs first, NEW_POPUP_JS asks), or that
-# starts within POPUP_GAP_PX of the box's bottom edge.
+# these roles that was not visible before typing (MARK_POPUPS_JS records the visible ones first,
+# NEW_POPUP_JS asks, UNMARK_POPUPS_JS forgets them after the search). Only when that record could
+# not be made does a popup that starts within POPUP_GAP_PX of the box's bottom edge count instead.
 POPUP_ROLES = "[role=listbox], [role=dialog], [role=menu], [role=tree], [role=grid]"
 POPUP_GAP_PX = 8
-MARK_POPUPS_JS = "selector => { window.__guideDriftPopups = new Set(document.querySelectorAll(selector)); }"
-NEW_POPUP_JS = "e => !!window.__guideDriftPopups && !window.__guideDriftPopups.has(e)"
+MARK_POPUPS_JS = ("selector => { window.__guideDriftPopups = new Set([...document.querySelectorAll(selector)]"
+                  ".filter(e => e.getClientRects().length > 0)); }")
+NEW_POPUP_JS = "e => window.__guideDriftPopups ? !window.__guideDriftPopups.has(e) : null"
+UNMARK_POPUPS_JS = "() => { delete window.__guideDriftPopups; }"
+# A text field the person cannot type into: fill() would wait out its whole timeout.
+READ_ONLY_JS = ("e => e.readOnly === true || e.hasAttribute('readonly') "
+                "|| e.getAttribute('aria-readonly') === 'true'")
 # Sections of the global search's dropdown: the service itself, an offer to buy, articles.
 SEARCH_PREFERRED = re.compile(r"^Services\b", re.IGNORECASE)
 SEARCH_EXCLUDED = re.compile(r"^(?:Marketplace|Documentation)\b", re.IGNORECASE)
@@ -174,6 +180,11 @@ class Ambiguous(LookupError):
 class PageClosed(Exception):
     """The browser window is gone. The run stops at once (ABORTED, state kept) rather than ask
     the person to choose among the candidates of an empty screen."""
+
+
+class ReadOnly(LookupError):
+    """The text field to type into is read-only (readonly, aria-readonly): reported at once
+    rather than after fill() has waited out its timeout."""
 
 
 def in_window_columns(element: Locator, viewport: dict | None) -> bool:
@@ -290,6 +301,15 @@ def is_control(element: Locator) -> bool:
     return tag in CONTROL_TAGS or role in CONTROL_ROLES or bool(editable)
 
 
+def is_read_only(element: Locator) -> bool:
+    """Whether the text field is read-only (READ_ONLY_JS). One that cannot be inspected is not:
+    fill() then reports what went wrong."""
+    try:
+        return bool(element.evaluate(READ_ONLY_JS, timeout=1000))
+    except PlaywrightError:
+        return False
+
+
 def parts_of(container: Locator, role: str) -> list[Locator]:
     """The visible elements of `role` inside `container`."""
     try:
@@ -365,9 +385,10 @@ def search_dropdown(page: Page, frame: Frame, box: Locator) -> Locator | None:
     """The list of results under the search box; None while there is none (the results are
     still loading). When the box names it in aria-controls or aria-owns, that element and nothing
     else. Otherwise the nearest visible popup (POPUP_ROLES) below the box and overlapping it
-    horizontally that either appeared after typing (search_portal marks the popups there before
-    it types) or starts within POPUP_GAP_PX of the box's bottom edge: a list or grid already on
-    the page is never taken for the results."""
+    horizontally that was not visible before typing (search_portal records the visible popups
+    before it types), so a list or grid already on the page is never taken for the results; only
+    when that record could not be made, one that starts within POPUP_GAP_PX of the box's bottom
+    edge."""
     try:
         owned = owned_ids(box)
         if owned:
@@ -386,7 +407,8 @@ def search_dropdown(page: Page, frame: Frame, box: Locator) -> Locator | None:
                     or rect["x"] + rect["width"] <= under["x"]):
                 continue
             distance = rect["y"] - (under["y"] + under["height"])
-            if abs(distance) > POPUP_GAP_PX and not popup.evaluate(NEW_POPUP_JS, timeout=1000):
+            new = popup.evaluate(NEW_POPUP_JS, timeout=1000)     # None: there is no record
+            if new is False or (new is None and abs(distance) > POPUP_GAP_PX):
                 continue
             if nearest is None or distance < nearest[0]:     # a tie keeps the outer popup
                 nearest = (distance, popup)
@@ -401,21 +423,26 @@ def search_result(label: str, root: object) -> Choose:
     to buy) and in 'Documentation' links; the section is the result's group name, or the nearest
     heading before it, either only when it is inside the dropdown. Results in Marketplace or
     Documentation never count. One result in Services wins; several there are Ambiguous. A
-    result with no identifiable section counts only when it is the only one left; several are
-    Ambiguous. Plain text counts only when the whole result it sits in reads `label`, not when it
-    is the highlighted part of a longer result ('Microsoft Entra ID Protection'). A result that
-    changes while it is read raises Ambiguous, so the caller looks again."""
+    result with no identifiable section never counts when another result has one (it cannot be
+    told apart from a Marketplace entry), and otherwise only when it is the only one left;
+    several are Ambiguous. Plain text counts only when the whole result it sits in reads `label`,
+    not when it is the highlighted part of a longer result ('Microsoft Entra ID Protection'). A
+    result that changes while it is read raises Ambiguous, so the caller looks again."""
     def choose(found: list[Locator], by_text: bool) -> Locator | None:
-        services: list[Locator] = []
-        others: list[Locator] = []
+        read: list[tuple[Locator, str, str]] = []
         for element in found:
             try:
                 group, heading, whole = element.evaluate(
                     RESULT_SECTION_JS, {"interactive": INTERACTIVE, "root": root}, timeout=1000)
             except PlaywrightError as error:
                 raise Ambiguous(f"a result changed while it was read ({type(error).__name__})") from error
-            section = group if SEARCH_SECTION.match(group) else heading
-            if SEARCH_EXCLUDED.match(section) or (by_text and whole != label):
+            read.append((element, group if SEARCH_SECTION.match(group) else heading, whole))
+        sectioned = any(section for _, section, _ in read)
+        services: list[Locator] = []
+        others: list[Locator] = []
+        for element, section, whole in read:
+            if (SEARCH_EXCLUDED.match(section) or (by_text and whole != label)
+                    or (sectioned and not section)):
                 continue
             (services if SEARCH_PREFERRED.match(section) else others).append(element)
         if len(services) > 1:
@@ -459,6 +486,18 @@ def search_portal(page: Page, label: str, diagnose: Callable[[str], None] | None
         frame.evaluate(MARK_POPUPS_JS, POPUP_ROLES)
     except PlaywrightError:         # then only a popup right under the box counts
         pass
+    try:
+        return search_results(page, frame, box, label, diagnose)
+    finally:
+        try:
+            frame.evaluate(UNMARK_POPUPS_JS)
+        except PlaywrightError:     # the page navigated or closed: the record went with it
+            pass
+
+
+def search_results(page: Page, frame: Frame, box: Locator, label: str,
+                   diagnose: Callable[[str], None] | None) -> Locator | None:
+    """search_portal once the popups on the page are recorded: type, then look for the result."""
     try:
         box.fill(label, timeout=FIND_TIMEOUT_MS)
     except PlaywrightError:
@@ -551,9 +590,9 @@ def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case:
     """Open the combo box or drop-down button `element` and pick the option named `value`;
     'already set' when it shows `value` already. With `ignore_case`, names are compared regardless
     of case (a domain). The options load as the Portal answers, so they are looked for until
-    FIND_TIMEOUT_MS has passed (find_option). Raises LookupError when no option has the name, or
-    when the element does not show `value` after the click; Ambiguous when several options
-    have the name."""
+    FIND_TIMEOUT_MS has passed (find_option), and so is the field's text after the click, which
+    the Portal may update late. Raises LookupError when no option has the name, or when the
+    element does not show `value` by then; Ambiguous when several options have the name."""
     def shows(text: str) -> bool:
         return text == value or (ignore_case and text.casefold() == value.casefold())
 
@@ -570,8 +609,11 @@ def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case:
     if option is None:
         raise LookupError(f"option '{value}' not found")
     option.click(timeout=FIND_TIMEOUT_MS)
-    page.wait_for_timeout(SETTLE_MS // 2)
+    deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
     shown = current_text(element, tag)
+    while not shows(shown) and time.monotonic() < deadline:
+        page.wait_for_timeout(250)
+        shown = current_text(element, tag)
     if not shows(shown):
         raise LookupError(f"option '{value}' was clicked, but the field shows '{shown}'")
     return None
@@ -630,6 +672,8 @@ def fill_field(page: Page, element: Locator, value: str) -> str | None:
     else:
         if current_text(element, tag) == value:
             return "already set"
+        if is_read_only(element):
+            raise ReadOnly("the field is read-only")
         element.fill(value, timeout=FIND_TIMEOUT_MS)
     page.wait_for_timeout(SETTLE_MS // 2)
     return None
@@ -992,6 +1036,9 @@ class Runner:
             else:
                 element.click(timeout=FIND_TIMEOUT_MS)
                 self.page.wait_for_timeout(SETTLE_MS)
+        except ReadOnly:
+            record.update(outcome="unknown", observed=f"read-only: '{acted_on}'")
+            return record
         except (PlaywrightError, LookupError) as error:
             record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
             return record

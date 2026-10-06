@@ -636,6 +636,11 @@ class GuardAndLookupTests(RunnerTestCase):
         self.assertEqual(sum("Still waiting" in line for line in said), 2)
 
 
+# The popups MARK_POPUPS_JS recorded as visible before the search was typed; None when there is
+# no record (never made, or deleted by UNMARK_POPUPS_JS). `made` counts the records.
+POPUP_RECORD: dict = {"popups": None, "made": 0}
+
+
 class ScreenNode(FakeElement):
     """One element of a Screen. `interactive`: whether plain text is, or sits inside, a link,
     button or other interactive element (what interactive_text() matches in the browser).
@@ -645,15 +650,18 @@ class ScreenNode(FakeElement):
     (group name, nearest heading, text of the whole result); `unreadable`: how many reads of
     the section fail first, as for a result the Portal re-renders; `tree`: its accessibility
     snapshot; `tag` and `text`: its HTML tag and its value or text; `fill_fail`: what fill()
-    raises. `preexisting`: whether it was on the page before the search box was typed into
-    (MARK_POPUPS_JS sets it)."""
+    raises; `shown`: whether it is visible; `read_only`: what READ_ONLY_JS answers; `later`:
+    (n, text), the text it shows after n more reads, as a field the Portal updates late."""
 
     def __init__(self, interactive: bool = True, on_click=None, on_fill=None, attrs=None, children=None,
                  rect=None, section=("", "", ""), unreadable: int = 0, tree: str = "", tag: str = "div",
-                 text: str = "", fill_fail: Exception | None = None) -> None:
+                 text: str = "", fill_fail: Exception | None = None, shown: bool = True,
+                 read_only: bool = False) -> None:
         super().__init__()
         self.fill_fail = fill_fail
-        self.preexisting = False
+        self.shown = shown
+        self.read_only = read_only
+        self.later: tuple[int, str] | None = None
         self.interactive = interactive
         self.on_click = on_click
         self.on_fill = on_fill
@@ -668,7 +676,7 @@ class ScreenNode(FakeElement):
         self.filled: list[str] = []
 
     def is_visible(self) -> bool:
-        return True
+        return self.shown
 
     def bounding_box(self, timeout=None) -> dict:
         return self.rect
@@ -685,7 +693,10 @@ class ScreenNode(FakeElement):
         if script == run.CONTROL_JS:
             return [self.tag, self.attrs.get("role", ""), False]
         if script == run.NEW_POPUP_JS:
-            return not self.preexisting
+            popups = POPUP_RECORD["popups"]
+            return None if popups is None else not any(self is p for p in popups)
+        if script == run.READ_ONLY_JS:
+            return self.read_only
         if "tagName" in script:                     # fill_field: [tag, type]
             return [self.tag, self.attrs.get("type", "")]
         raise NotImplementedError(script)
@@ -700,10 +711,15 @@ class ScreenNode(FakeElement):
         pass
 
     def inner_text(self, timeout=None) -> str:
+        if self.later:
+            reads, text = self.later
+            self.later = (reads - 1, text) if reads > 1 else None
+            if reads <= 1:
+                self.text = text
         return self.text
 
     def input_value(self, timeout=None) -> str:
-        return self.text
+        return self.inner_text(timeout)
 
     def get_by_role(self, role, name=None, exact=None):
         return self.children.get_by_role(role, name=name, exact=exact)
@@ -794,14 +810,20 @@ class Screen:
             return ScreenLocator([node for r, _, node in self.everything() if r in roles])
         raise NotImplementedError(selector)
 
+    mark_fails = False                   # MARK_POPUPS_JS raises, as on a page that just navigated
+
     def evaluate(self, script, arg=None):
-        """MARK_POPUPS_JS: what is a popup now was on the page before the search was typed."""
-        if script != run.MARK_POPUPS_JS:
+        """MARK_POPUPS_JS (record the visible popups in POPUP_RECORD) and UNMARK_POPUPS_JS."""
+        if script == run.MARK_POPUPS_JS:
+            if self.mark_fails:
+                raise run.PlaywrightError("Execution context was destroyed")
+            roles = re.findall(r"\[role=(\w+)\]", arg)
+            POPUP_RECORD["popups"] = [node for role, _, node in self.everything() if role in roles and node.shown]
+            POPUP_RECORD["made"] += 1
+        elif script == run.UNMARK_POPUPS_JS:
+            POPUP_RECORD["popups"] = None
+        else:
             raise NotImplementedError(script)
-        roles = re.findall(r"\[role=(\w+)\]", arg)
-        for role, _, node in self.everything():
-            if role in roles:
-                node.preexisting = True
 
 
 class FindOnScreenTests(RunnerTestCase):
@@ -810,6 +832,7 @@ class FindOnScreenTests(RunnerTestCase):
     def setUp(self) -> None:
         super().setUp()
         (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+        POPUP_RECORD.update(popups=None, made=0)
 
     def act(self, screen: Screen, item: dict, label: str, answers=(), candidates=(), runner=None, page=None,
             value=None):
@@ -877,6 +900,38 @@ class FindOnScreenTests(RunnerTestCase):
                 record, r = self.act(screen, self.SEARCH, self.ENTRA)
                 self.assertEqual((record["outcome"], in_grid.clicked, self.outside.clicked), ("unknown", 0, 0))
                 self.assertIn("no results list identified", self.tree_file().read_text(encoding="utf-8"))
+
+    def test_a_popup_hidden_before_typing_counts_as_new_and_the_record_is_deleted(self) -> None:
+        screen, box = self.search_screen(controls=False)
+        services = self.result("Services (67)")
+        dropdown = ScreenNode(shown=False, rect={"x": 470, "y": 120, "width": 400, "height": 600},
+                              children=Screen(("option", self.ENTRA, services)))
+        screen.add(("listbox", "", dropdown))                     # in the DOM, hidden, far from the box
+        box.on_fill = lambda: setattr(dropdown, "shown", True)
+        record, _ = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual((record["outcome"], services.clicked), ("match", 1))
+        self.assertEqual((POPUP_RECORD["made"], POPUP_RECORD["popups"]), (1, None))   # forgotten afterwards
+
+    def test_without_a_record_of_the_popups_only_one_right_under_the_box_counts(self) -> None:
+        for top, clicked in ((40, 1), (120, 0)):                    # the box's bottom edge is at 35
+            with self.subTest(top=top):
+                POPUP_RECORD.update(popups=None, made=0)
+                screen, box = self.search_screen(controls=False)
+                Screen.mark_fails = True
+                self.addCleanup(setattr, Screen, "mark_fails", False)
+                services = self.result("Services (67)")
+                dropdown = ScreenNode(rect={"x": 470, "y": top, "width": 400, "height": 600},
+                                      children=Screen(("option", self.ENTRA, services)))
+                box.on_fill = lambda dropdown=dropdown: screen.add(("listbox", "", dropdown))
+                self.act(screen, self.SEARCH, self.ENTRA)
+                self.assertEqual((services.clicked, POPUP_RECORD["made"]), (clicked, 0))
+
+    def test_a_result_without_a_section_never_counts_beside_one_with_a_section(self) -> None:
+        unsectioned, market = self.result(""), self.result("Marketplace (22)")
+        screen, _ = self.search_screen(("option", self.ENTRA, unsectioned), ("option", self.ENTRA, market))
+        record, _ = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual((record["outcome"], unsectioned.clicked, market.clicked), ("unknown", 0, 0))
+        self.assertTrue(self.tree_file().is_file())
 
     def test_one_result_without_a_section_is_taken(self) -> None:
         only = self.result("")
@@ -987,6 +1042,23 @@ class FindOnScreenTests(RunnerTestCase):
         record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
         self.assertEqual(record["outcome"], "unknown")
         self.assertIn("was clicked, but the field shows 'fabrikam.example'", record["observed"])
+
+    def test_a_domain_the_field_shows_late_is_waited_for(self) -> None:
+        screen, local, domain = self.upn_screen("fabrikam.example")
+        option = ScreenNode(on_click=lambda: setattr(domain, "later", (3, "contoso.onmicrosoft.com")))
+        domain.on_click = lambda: screen.add(("option", "contoso.onmicrosoft.com", option))
+        record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
+        self.assertEqual((record["outcome"], option.clicked, local.filled), ("match", 1, ["malfurion.stormrage"]))
+
+    def test_a_read_only_field_is_unknown_at_once(self) -> None:
+        field = ScreenNode(tag="input", read_only=True)
+        screen = Screen(("textbox", "Mail nickname", field))
+        record, _ = self.act(screen, dict(self.UPN, label="Mail nickname"), "Mail nickname", value="malfurion")
+        self.assertEqual((record["outcome"], record["observed"], field.filled),
+                         ("unknown", "read-only: 'Mail nickname'", []))
+        field.text = "malfurion"                                   # read-only, but already right
+        record, _ = self.act(screen, dict(self.UPN, label="Mail nickname"), "Mail nickname", value="malfurion")
+        self.assertEqual((record["outcome"], record["observed"]), ("match", "already set"))
 
     def test_a_domain_offered_twice_is_ambiguous(self) -> None:
         screen, local, _ = self.upn_screen("fabrikam.example", offered=["contoso.onmicrosoft.com"] * 2)
