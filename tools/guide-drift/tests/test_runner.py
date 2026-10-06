@@ -601,17 +601,54 @@ class ScreenNode(FakeElement):
     """One element of a Screen. `interactive`: whether plain text is, or sits inside, a link,
     button or other interactive element (what interactive_text() matches in the browser).
     `on_click` and `on_fill` change the screen, as opening a menu or typing into the search box
-    does."""
+    does. `attrs`: its HTML attributes (id, role, aria-controls); `children`: the Screen inside
+    it; `rect`: its bounding box; `section`: what RESULT_SECTION_JS reads for a search result
+    (group name, nearest heading, text of the whole result); `unreadable`: how many reads of
+    the section fail first, as for a result the Portal re-renders; `tree`: its accessibility
+    snapshot; `tag` and `text`: its HTML tag and its value or text."""
 
-    def __init__(self, interactive: bool = True, on_click=None, on_fill=None) -> None:
+    def __init__(self, interactive: bool = True, on_click=None, on_fill=None, attrs=None, children=None,
+                 rect=None, section=("", "", ""), unreadable: int = 0, tree: str = "", tag: str = "div",
+                 text: str = "") -> None:
         super().__init__()
         self.interactive = interactive
         self.on_click = on_click
         self.on_fill = on_fill
+        self.attrs = attrs or {}
+        self.children = children or Screen()
+        self.rect = rect or {"x": 0, "y": 0, "width": 100, "height": 20}
+        self.section = section
+        self.unreadable = unreadable
+        self.tree = tree
+        self.tag = tag
+        self.text = text
         self.filled: list[str] = []
 
     def is_visible(self) -> bool:
         return True
+
+    def bounding_box(self, timeout=None) -> dict:
+        return self.rect
+
+    def get_attribute(self, name, timeout=None):
+        return self.attrs.get(name)
+
+    def evaluate(self, script, arg=None, timeout=None):
+        if script == run.RESULT_SECTION_JS:
+            if self.unreadable:
+                self.unreadable -= 1
+                raise run.PlaywrightError("element was re-rendered")
+            return list(self.section)
+        raise NotImplementedError(script)
+
+    def aria_snapshot(self, timeout=None) -> str:
+        return self.tree
+
+    def get_by_role(self, role, name=None, exact=None):
+        return self.children.get_by_role(role, name=name, exact=exact)
+
+    def locator(self, selector: str):
+        return self.children.locator(selector)
 
     def click(self, timeout=None) -> None:
         super().click(timeout)
@@ -620,6 +657,7 @@ class ScreenNode(FakeElement):
 
     def fill(self, value, timeout=None) -> None:
         self.filled.append(value)
+        self.text = value
         if self.on_fill:
             self.on_fill()
 
@@ -636,19 +674,30 @@ class ScreenLocator:
 
 
 class Screen:
-    """The one frame of a FakePage: (role, name, node) entries, role 'text' for plain text and
-    'label' for a field's label. A name to look up is a string (exact) or a pattern (search)."""
+    """A frame of a FakePage, or what is inside a ScreenNode: (role, name, node) entries, role
+    'text' for plain text and 'label' for a field's label. Lookups see the children of every
+    node too, as a DOM query does. A name to look up is a string (exact), a pattern (search) or
+    None (any name)."""
 
-    def __init__(self, *entries) -> None:
+    TEXT_IS = re.compile(r':text-is\("((?:\\.|[^"\\])*)"\)')
+    ID = re.compile(r'^\[id="([^"]*)"\]$')
+
+    def __init__(self, *entries, tree: str = "") -> None:
         self.entries = list(entries)
+        self.tree = tree                 # the frame's accessibility snapshot ('body')
 
     def add(self, *entries) -> None:
         self.entries.extend(entries)
 
+    def everything(self):
+        for role, name, node in self.entries:
+            yield role, name, node
+            yield from node.children.everything()
+
     def _find(self, role: str, name) -> ScreenLocator:
         def hit(n: str) -> bool:
-            return n == name if isinstance(name, str) else bool(name.search(n))
-        return ScreenLocator([node for r, n, node in self.entries if r == role and hit(n)])
+            return name is None or (n == name if isinstance(name, str) else bool(name.search(n)))
+        return ScreenLocator([node for r, n, node in self.everything() if r == role and hit(n)])
 
     def get_by_role(self, role, name=None, exact=None) -> ScreenLocator:
         return self._find(role, name)
@@ -659,15 +708,23 @@ class Screen:
     def get_by_label(self, text, exact=None) -> ScreenLocator:
         return self._find("label", text)
 
-    TEXT_IS = re.compile(r':text-is\("((?:\\.|[^"\\])*)"\)')
-
     def locator(self, selector: str) -> ScreenLocator:
-        """interactive_text(): plain text entries whose node is interactive."""
+        """interactive_text() (plain text entries whose node is interactive), '[id="x"]', 'body'
+        and a list of '[role=x]' (POPUP_ROLES)."""
         m = self.TEXT_IS.search(selector)
-        if not m:
-            raise NotImplementedError(selector)
-        text = re.sub(r"\\(.)", r"\1", m.group(1))
-        return ScreenLocator([node for r, n, node in self.entries if r == "text" and n == text and node.interactive])
+        if m:
+            text = re.sub(r"\\(.)", r"\1", m.group(1))
+            return ScreenLocator([node for r, n, node in self.everything()
+                                  if r == "text" and n == text and node.interactive])
+        m = self.ID.match(selector)
+        if m:
+            return ScreenLocator([node for _, _, node in self.everything() if node.attrs.get("id") == m.group(1)])
+        if selector == "body":
+            return ScreenLocator([ScreenNode(tree=self.tree)])
+        roles = re.findall(r"\[role=(\w+)\]", selector)
+        if roles:
+            return ScreenLocator([node for r, _, node in self.everything() if r in roles])
+        raise NotImplementedError(selector)
 
 
 class FindOnScreenTests(RunnerTestCase):
@@ -677,8 +734,8 @@ class FindOnScreenTests(RunnerTestCase):
         super().setUp()
         (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
 
-    def act(self, screen: Screen, item: dict, label: str, answers=(), candidates=(), runner=None):
-        r = runner or run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
+    def act(self, screen: Screen, item: dict, label: str, answers=(), candidates=(), runner=None, page=None):
+        r = runner or run.Runner(page or FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
         step = {"id": "9.9.1", "title": "One", "items": [item], "images": []}
         clock = iter(range(0, 1_000_000, 3))               # 3 s pass between every look at the clock
         with mock.patch.object(run, "all_frames", lambda page: [screen]), \
@@ -688,30 +745,97 @@ class FindOnScreenTests(RunnerTestCase):
 
     SEARCH = {"kind": "search", "labels": ["Microsoft Entra ID"], "line": 2}
     SEARCH_BOX = "Search resources, services, and docs (G+/)"
+    ENTRA = "Microsoft Entra ID"
 
-    def test_a_search_types_the_label_and_opens_the_exact_result(self) -> None:
-        result = ScreenNode()
-        screen = Screen(("text", "Microsoft Entra ID", ScreenNode(interactive=False)))
-        box = ScreenNode(on_fill=lambda: screen.add(("option", "Microsoft Entra ID", result)))
+    def search_screen(self, *results, controls: bool = True, tree: str = "- listbox") -> tuple[Screen, ScreenNode]:
+        """A page with the global search box, a same-named link outside it (a favourite in the
+        portal menu), and, once something is typed, the dropdown holding `results`."""
+        self.outside = ScreenNode()
+        screen = Screen(("link", self.ENTRA, self.outside))
+        dropdown = ScreenNode(attrs={"id": "results"}, children=Screen(*results), tree=tree,
+                              rect={"x": 470, "y": 40, "width": 400, "height": 700})
+        box = ScreenNode(attrs={"aria-controls": "results"} if controls else {},
+                         on_fill=lambda: screen.add(("listbox", "", dropdown)),
+                         rect={"x": 470, "y": 5, "width": 400, "height": 30})
         screen.add(("combobox", self.SEARCH_BOX, box))
-        record, r = self.act(screen, self.SEARCH, "Microsoft Entra ID")
-        self.assertEqual(box.filled, ["Microsoft Entra ID"])
-        self.assertEqual((record["kind"], record["outcome"], record["observed"]), ("search", "match", "Microsoft Entra ID"))
-        self.assertEqual(result.clicked, 1)
+        return screen, box
+
+    @staticmethod
+    def result(heading: str, whole: str = "Microsoft Entra ID", **kwargs) -> ScreenNode:
+        return ScreenNode(section=("", heading, whole), **kwargs)
+
+    def tree_file(self) -> Path:
+        return self.tmp / "logs" / "test" / "search-9.9.1.aria.txt"
+
+    def test_a_search_opens_the_services_result_inside_the_dropdown(self) -> None:
+        market, services = self.result("Marketplace (22)"), self.result("Services (67)")
+        screen, box = self.search_screen(("option", self.ENTRA, market), ("option", self.ENTRA, services),
+                                         ("text", self.ENTRA, self.result("Documentation (99+)")))
+        record, r = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual(box.filled, [self.ENTRA])
+        self.assertEqual((record["kind"], record["outcome"], record["observed"]), ("search", "match", self.ENTRA))
+        self.assertEqual((services.clicked, market.clicked, self.outside.clicked), (1, 0, 0))
         self.assertEqual(r.ask.prompts, [])
+        self.assertFalse(self.tree_file().exists())
+
+    def test_without_aria_controls_the_results_are_the_popup_under_the_search_box(self) -> None:
+        services = self.result("Services (67)")
+        screen, _ = self.search_screen(("option", self.ENTRA, services), controls=False)
+        elsewhere = ScreenNode(rect={"x": 0, "y": 200, "width": 260, "height": 400},
+                               children=Screen(("option", self.ENTRA, self.result("Services"))))
+        screen.add(("listbox", "", elsewhere))                         # not under the box
+        record, _ = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual((record["outcome"], services.clicked), ("match", 1))
+
+    def test_without_sections_the_first_result_is_taken(self) -> None:
+        first, second = self.result(""), self.result("")
+        screen, _ = self.search_screen(("option", self.ENTRA, first), ("option", self.ENTRA, second))
+        record, _ = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual((record["outcome"], first.clicked, second.clicked), ("match", 1, 0))
+
+    def test_marketplace_and_highlighted_text_never_count_and_the_tree_is_kept(self) -> None:
+        protection = self.result("Services (67)", whole="Microsoft Entra ID Protection")
+        market = self.result("Marketplace (22)")
+        screen, _ = self.search_screen(("text", self.ENTRA, protection), ("option", self.ENTRA, market),
+                                       tree='- option "Admin" [ref=x]: admin@contoso.onmicrosoft.com')
+        record, r = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual((record["outcome"], len(r.ask.prompts)), ("unknown", 1))   # the person was asked
+        self.assertEqual((protection.clicked, market.clicked, self.outside.clicked), (0, 0, 0))
+        tree = self.tree_file().read_text(encoding="utf-8")
+        self.assertIn("# the search results", tree)
+        self.assertIn("admin@[tenantdomain]", tree)
+        self.assertNotIn("contoso.onmicrosoft.com", tree)
+
+    def test_two_results_in_services_stay_ambiguous_and_the_tree_is_kept(self) -> None:
+        one, two = self.result("Services (67)"), self.result("Services (67)")
+        screen, _ = self.search_screen(("option", self.ENTRA, one), ("option", self.ENTRA, two))
+        record, r = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertIn("ambiguous: 2 visible results in Services match", record["observed"])
+        self.assertEqual((one.clicked, two.clicked, r.ask.prompts), (0, 0, []))
+        self.assertTrue(self.tree_file().is_file())
+
+    def test_a_result_re_rendered_while_it_is_read_is_looked_up_again(self) -> None:
+        services = self.result("Services (67)", unreadable=1)
+        screen, _ = self.search_screen(("option", self.ENTRA, services))
+        record, _ = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual((record["outcome"], services.clicked), ("match", 1))
 
     def test_a_search_without_an_exact_result_asks_the_person_as_for_an_action(self) -> None:
-        renamed = ScreenNode()
-        screen = Screen()
-        box = ScreenNode(on_fill=lambda: screen.add(("option", "Entra ID", renamed)))
-        screen.add(("combobox", self.SEARCH_BOX, box))
-        record, r = self.act(screen, self.SEARCH, "Microsoft Entra ID", answers=["1"],
+        renamed = self.result("Services (67)", whole="Entra ID")
+        screen, _ = self.search_screen(("option", "Entra ID", renamed))
+        record, r = self.act(screen, self.SEARCH, self.ENTRA, answers=["1"],
                              candidates=[run.Candidate("option", "Entra ID")])
         self.assertEqual(len(r.ask.prompts), 1)
         self.assertEqual((record["kind"], record["outcome"], record["severity"], record["observed"]),
                          ("search", "drift", "misleading", "Entra ID"))
         self.assertEqual(renamed.clicked, 1)
-        self.assertEqual(self.recording["steps"]["9.9.1"]["labels"]["Microsoft Entra ID"]["name"], "Entra ID")
+        self.assertEqual(self.recording["steps"]["9.9.1"]["labels"][self.ENTRA]["name"], "Entra ID")
+        self.assertTrue(self.tree_file().is_file())
+
+    def test_a_closed_window_is_not_a_missing_search_box(self) -> None:
+        with self.assertRaises(run.PageClosed):
+            self.act(Screen(), self.SEARCH, self.ENTRA, page=FakePage(closed=True))
 
     def test_a_leading_plus_is_dropped_when_nothing_has_the_full_name(self) -> None:
         item = {"kind": "navigation", "labels": ["+ New user", "Create new user"], "line": 3}

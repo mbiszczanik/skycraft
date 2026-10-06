@@ -19,7 +19,9 @@ blades off to the left; below the fold is fine, it scrolls there first), and onl
 several matches are reported as unknown rather than guessed. It refuses to click or fill an
 element whose name contains the word delete, remove, reset, revoke, disable, block, purge or
 sign out, unless the guide's own label does too. A guide's 'Search for **X**' is typed into the
-Portal's global search, and the result named exactly X is opened. Plain text counts only when it
+Portal's global search, and the result named exactly X in its dropdown is opened (the Services
+entry, never Marketplace or Documentation); when that fails, the dropdown's accessibility tree
+is kept as search-<step>.aria.txt in the run folder. Plain text counts only when it
 is, or sits inside, a link, button or other interactive element; before a label is reported as
 not found, the blade menu's collapsed groups are opened once ('Expand all headers').
 
@@ -77,6 +79,27 @@ INTERACTIVE = ("a, button, [role=link], [role=button], [role=menuitem], [role=tr
                "[role=option], [role=checkbox], [role=radio]")
 # A blade menu's button that opens all its collapsed groups ('Manage', 'Monitoring', 'Help').
 EXPAND_ALL = "Expand all headers"
+# The global search's dropdown when the box names none in aria-controls or aria-owns.
+POPUP_ROLES = "[role=listbox], [role=dialog], [role=menu], [role=tree], [role=grid]"
+# Sections of the global search's dropdown: the service itself, an offer to buy, articles.
+SEARCH_PREFERRED = re.compile(r"^Services\b", re.IGNORECASE)
+SEARCH_EXCLUDED = re.compile(r"^(?:Marketplace|Documentation)\b", re.IGNORECASE)
+SEARCH_SECTION = re.compile(r"^(?:Services|Marketplace|Documentation)\b", re.IGNORECASE)
+# For one search result: [its group's name, the nearest heading before it, the text of the
+# whole result it is or sits in], each with whitespace normalised.
+RESULT_SECTION_JS = r"""(e, interactive) => {
+  const clean = t => (t || '').replace(/\s+/g, ' ').trim();
+  const group = e.closest('[role=group]');
+  let name = group ? group.getAttribute('aria-label') : '';
+  if (!name && group && group.getAttribute('aria-labelledby')) {
+    name = group.getAttribute('aria-labelledby').split(/\s+/)
+      .map(id => (document.getElementById(id) || {}).textContent).join(' ');
+  }
+  const heading = document.evaluate(
+    "preceding::*[self::h1 or self::h2 or self::h3 or self::h4 or self::h5 or self::h6 or @role='heading'][1]",
+    e, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+  return [clean(name), clean(heading && heading.textContent), clean((e.closest(interactive) || e).textContent)];
+}"""
 # Never acted on unless the guide itself names such an element: a wrong replay or a mistyped
 # number must not delete a user or sign the person out halfway through a lab.
 DESTRUCTIVE = re.compile(r"\b(delete|remove|reset|revoke|disable|block|purge|sign out)\b", re.IGNORECASE)
@@ -182,13 +205,18 @@ def visible_across_frames(page: Page, make_locator: Callable[[Frame], Locator],
     return found
 
 
-def unique_visible(page: Page, make_locator: Callable[[Frame], Locator]) -> Locator | None:
-    """The one visible element `make_locator(frame)` matches across all frames, or None when there
-    is none; raises Ambiguous when there are several."""
-    found = visible_across_frames(page, make_locator)
+def only_one(found: list[Locator], by_text: bool = False) -> Locator | None:
+    """The one element of `found`, or None when it is empty; raises Ambiguous when there are
+    several. The default choice of find_in_roles, whose signature `by_text` belongs to."""
     if len(found) > 1:
         raise Ambiguous(f"{len(found)} visible elements match")
     return found[0] if found else None
+
+
+def unique_visible(page: Page, make_locator: Callable[[Frame], Locator]) -> Locator | None:
+    """The one visible element `make_locator(frame)` matches across all frames, or None when there
+    is none; raises Ambiguous when there are several."""
+    return only_one(visible_across_frames(page, make_locator))
 
 
 def text_on_screen(page: Page, text: str) -> bool:
@@ -206,18 +234,33 @@ def interactive_text(scope: Frame | Locator, label: str) -> Locator:
     return scope.locator(f":is({INTERACTIVE}):text-is({quoted}), :is({INTERACTIVE}) :text-is({quoted})")
 
 
-def find_in_roles(page: Page, label: str, roles: tuple[str, ...]) -> Locator | None:
+# find_in_roles' choice among the visible matches of one role (by_text False) or of the text.
+Choose = Callable[[list[Locator], bool], "Locator | None"]
+
+
+def find_in_roles(page: Page, label: str, roles: tuple[str, ...], root: Locator | None = None,
+                  choose: Choose = only_one) -> Locator | None:
     """The visible element of the first of `roles` whose accessible name is exactly `label`, then
     plain text that is, or sits inside, an interactive element (interactive_text). Static text is
     never a match: the Entra overview's 'Basic information' table has a 'Users' caption, and
-    clicking it navigates nowhere. An ambiguous role match raises Ambiguous; an ambiguous text
+    clicking it navigates nowhere. Every frame is searched, or only inside `root` when it is
+    given (the global search's results). `choose` picks among the matches of one role, or of the
+    text: by default there must be at most one, and several raise Ambiguous. An ambiguous text
     match counts as not found, so the person picks a role-specific candidate."""
+    def matches(make_locator: Callable[[Frame | Locator], Locator]) -> list[Locator]:
+        if root is None:
+            return visible_across_frames(page, make_locator)
+        try:
+            return visible_in(make_locator(root), page.viewport_size)
+        except PlaywrightError:     # the results went away while the Portal reloaded them
+            return []
+
     for role in roles:
-        element = unique_visible(page, lambda f, role=role: f.get_by_role(role, name=label, exact=True))
+        element = choose(matches(lambda s, role=role: s.get_by_role(role, name=label, exact=True)), False)
         if element is not None:
             return element
     try:
-        return unique_visible(page, lambda f: interactive_text(f, label))
+        return choose(matches(lambda s: interactive_text(s, label)), True)
     except Ambiguous:
         return None
 
@@ -248,23 +291,127 @@ def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
     return element
 
 
-def search_portal(page: Page, label: str) -> Locator | None:
-    """Type `label` into the Portal's global search and return the result whose accessible name
-    is exactly `label`: an option, link, button or menu item, then plain text. The results load
-    as the Portal answers, so they are looked for until FIND_TIMEOUT_MS has passed; None when no
-    exact result came, and the person picks from the list still open on screen. Raises
-    LookupError when the search box is not on screen, Ambiguous when several results match."""
-    box = unique_visible(page, lambda f: f.get_by_role("combobox", name=SEARCH_BOX))
-    if box is None:
+def search_box(page: Page) -> tuple[Frame, Locator] | None:
+    """The Portal's global search box and the frame it is in; None when it is not on screen.
+    Raises Ambiguous when there are several."""
+    found: list[tuple[Frame, Locator]] = []
+    for frame in all_frames(page):
+        try:
+            found += [(frame, box) for box in visible_in(frame.get_by_role("combobox", name=SEARCH_BOX),
+                                                         page.viewport_size)]
+        except PlaywrightError:     # the frame detached or navigated
+            continue
+    if len(found) > 1:
+        raise Ambiguous(f"{len(found)} visible search boxes")
+    return found[0] if found else None
+
+
+def search_dropdown(page: Page, frame: Frame, box: Locator) -> Locator | None:
+    """The list of results under the search box: the element the box names in aria-controls or
+    aria-owns; failing that, the visible popup (POPUP_ROLES) nearest below the box and overlapping
+    it horizontally. None while there is none: the results are still loading."""
+    try:
+        owned = (box.get_attribute("aria-controls", timeout=1000)
+                 or box.get_attribute("aria-owns", timeout=1000) or "")
+        for owned_id in owned.split():
+            found = visible_in(frame.locator('[id="' + owned_id.replace('"', '\\"') + '"]'), None)
+            if len(found) == 1:
+                return found[0]
+        under = box.bounding_box(timeout=1000)
+        if under is None:
+            return None
+        nearest: tuple[float, Locator] | None = None
+        for popup in visible_in(frame.locator(POPUP_ROLES), page.viewport_size):
+            rect = popup.bounding_box(timeout=1000)
+            if (rect is None or rect["y"] < under["y"] or rect["x"] >= under["x"] + under["width"]
+                    or rect["x"] + rect["width"] <= under["x"]):
+                continue
+            distance = rect["y"] - (under["y"] + under["height"])
+            if nearest is None or distance < nearest[0]:     # a tie keeps the outer popup
+                nearest = (distance, popup)
+        return nearest[1] if nearest else None
+    except PlaywrightError:     # the box or the popup went away mid-check
+        return None
+
+
+def search_result(label: str) -> Choose:
+    """find_in_roles' choice among exact results in the search dropdown. The Portal lists a
+    service under 'Services' and again under 'Marketplace' (an offer to buy) and in
+    'Documentation' links; the section is the result's group name, or the nearest heading before
+    it. Results in Marketplace or Documentation never count. One result in Services wins;
+    several there are Ambiguous. Without an identifiable Services section, the first remaining
+    result in document order is taken (Services is listed first). Plain text counts only when
+    the whole result it sits in reads `label`, not when it is the highlighted part of a longer
+    result ('Microsoft Entra ID Protection'). A result that changes while it is read raises
+    Ambiguous, so the caller looks again."""
+    def choose(found: list[Locator], by_text: bool) -> Locator | None:
+        services: list[Locator] = []
+        others: list[Locator] = []
+        for element in found:
+            try:
+                group, heading, whole = element.evaluate(RESULT_SECTION_JS, INTERACTIVE, timeout=1000)
+            except PlaywrightError as error:
+                raise Ambiguous(f"a result changed while it was read ({type(error).__name__})") from error
+            section = group if SEARCH_SECTION.match(group) else heading
+            if SEARCH_EXCLUDED.match(section) or (by_text and whole != label):
+                continue
+            (services if SEARCH_PREFERRED.match(section) else others).append(element)
+        if len(services) > 1:
+            raise Ambiguous(f"{len(services)} visible results in Services match")
+        if services:
+            return services[0]
+        return others[0] if others else None
+    return choose
+
+
+def tree_of(dropdown: Locator | None, frame: Frame) -> str:
+    """The accessibility tree of the search results, or of the whole frame when no results list
+    was identified: what the next run's fix needs to see."""
+    target, what = ((dropdown, "the search results") if dropdown is not None
+                    else (frame.locator("body"), "no results list identified; the whole frame"))
+    try:
+        return f"# {what}\n{target.aria_snapshot(timeout=2000)}"
+    except PlaywrightError as error:
+        return f"# {what}: no snapshot ({type(error).__name__}: {error})"
+
+
+def search_portal(page: Page, label: str, diagnose: Callable[[str], None] | None = None) -> Locator | None:
+    """Type `label` into the Portal's global search and return the result named exactly `label`
+    in its dropdown (search_dropdown, search_result): an option, link, button or menu item, then
+    plain text. Nothing outside the dropdown counts, so a same-named link already on the page (a
+    favourite in the portal menu, a tile on Home) is never clicked. The results load as the
+    Portal answers, so they are looked for until FIND_TIMEOUT_MS has passed; an ambiguous look
+    is retried too. When there is no exact result, or the last look was ambiguous, `diagnose` is
+    given the dropdown's accessibility tree; then None is returned (the person picks from the
+    list still open on screen) or the last Ambiguous raised. Raises LookupError when the search
+    box is not on screen, PageClosed when the window is gone."""
+    found = search_box(page)
+    if found is None:
+        if page.is_closed():
+            raise PageClosed("the browser window was closed")
         raise LookupError("the Portal's search box is not on screen")
+    frame, box = found
     box.fill(label, timeout=FIND_TIMEOUT_MS)
     page.wait_for_timeout(SETTLE_MS)
     deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
     while True:
-        result = find_in_roles(page, label, RESULT_ROLES)
-        if result is not None or time.monotonic() >= deadline:
-            return result
+        dropdown = search_dropdown(page, frame, box)
+        ambiguous: Ambiguous | None = None
+        if dropdown is not None:
+            try:
+                result = find_in_roles(page, label, RESULT_ROLES, root=dropdown, choose=search_result(label))
+            except Ambiguous as error:
+                ambiguous, result = error, None
+            if result is not None:
+                return result
+        if time.monotonic() >= deadline:
+            break
         page.wait_for_timeout(500)
+    if diagnose is not None:
+        diagnose(tree_of(dropdown, frame))
+    if ambiguous is not None:
+        raise ambiguous
+    return None
 
 
 def find_by_name(page: Page, role: str | None, name: str | re.Pattern[str]) -> Locator | None:
@@ -598,13 +745,21 @@ class Runner:
         print(f"Opened the menu groups ('{EXPAND_ALL}') to look for '{label}' again.")
         return find_exact(self.page, label)
 
+    def save_search_tree(self, step: dict, tree: str) -> None:
+        """Keep the search dropdown's accessibility tree, redacted, as search-<step>.aria.txt in
+        the run folder: a search that found no single result shows there what the Portal
+        offered, so the lookup can be fixed without another live run."""
+        path = self.run_dir / f"search-{step['id']}.aria.txt"
+        path.write_text(self.redactor.redact(tree) + "\n", encoding="utf-8")
+        print(f"The search results' structure is in {path}")
+
     def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None) -> dict:
         """Find the element the guide calls `label`, act on it, return the result record."""
         kind, line = item["kind"], item["line"]
         record = self.new_record(step, kind, label)
         try:
             if kind == "search":
-                element = search_portal(self.page, label)
+                element = search_portal(self.page, label, diagnose=lambda tree: self.save_search_tree(step, tree))
             else:
                 element = find_exact(self.page, label, field=(kind == "field"))
                 if element is None and kind in ("navigation", "action"):
