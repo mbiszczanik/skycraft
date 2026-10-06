@@ -120,6 +120,12 @@ CONTROL_TAGS = ("input", "textarea", "select", "button")
 CONTROL_ROLES = ("textbox", "searchbox", "combobox", "spinbutton", "slider", "checkbox", "radio",
                  "switch", "button", "listbox")
 CONTROL_JS = "e => [e.tagName.toLowerCase(), e.getAttribute('role') || '', e.isContentEditable]"
+# What a field candidate is (field_kind): [tag, role attribute, type attribute, aria-haspopup].
+FIELD_KIND_JS = ("e => [e.tagName.toLowerCase(), e.getAttribute('role') || '', "
+                 "(e.getAttribute('type') || '').toLowerCase(), (e.getAttribute('aria-haspopup') || '').toLowerCase()]")
+VALUE_ROLES = ("textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "listbox", "spinbutton",
+               "slider")
+NOT_VALUE_INPUTS = ("button", "submit", "reset", "image", "hidden")
 # Whether a labelled element can be a form field at all: nothing in a table or grid header (a
 # column's sort button is named after the column, 'User principal name' on the Users list), and
 # a plain button only when it opens a list (aria-haspopup listbox, menu or true, or aria-expanded).
@@ -312,6 +318,42 @@ def is_control(element: Locator) -> bool:
     return tag in CONTROL_TAGS or role in CONTROL_ROLES or bool(editable)
 
 
+def field_kind(element: Locator) -> tuple[str, str | None]:
+    """(what the element is, for a message: its role, or its tag; and its tier for one_field):
+    'value' for an element that takes a value itself (a text box or text area, a select, a combo
+    box, check box, radio, switch, list box, spin button or slider), 'dropdown' for a button
+    that opens a list (aria-haspopup listbox, menu or true), None for anything else, such as the
+    info icon next to a label. An element that cannot be inspected is '?', with no tier."""
+    try:
+        tag, role, input_type, popup = element.evaluate(FIELD_KIND_JS, timeout=1000)
+    except PlaywrightError:
+        return "?", None
+    what = role or (f"{tag}[type={input_type}]" if tag == "input" and input_type else tag)
+    if role in VALUE_ROLES or (not role and (tag in ("textarea", "select")
+                                             or (tag == "input" and input_type not in NOT_VALUE_INPUTS))):
+        return what, "value"
+    if (role == "button" or (not role and tag == "button")) and popup in ("listbox", "menu", "true"):
+        return what, "dropdown"
+    return what, None
+
+
+def one_field(found: list[Locator]) -> Locator | None:
+    """The field among the elements a label matches: the only one, or else the only one that
+    takes a value, or else the only button that opens a list (field_kind). Fluent UI forms put
+    more than the field under a label ('Group description' and its info icon). Raises Ambiguous
+    naming what matched ('textarea, button'), so a live run shows what collided."""
+    if len(found) <= 1:
+        return found[0] if found else None
+    kinds = [field_kind(element) for element in found]
+    for tier in ("value", "dropdown"):
+        picked = [element for element, (_, kind) in zip(found, kinds) if kind == tier]
+        if len(picked) == 1:
+            return picked[0]
+        if picked:
+            break
+    raise Ambiguous(f"{len(found)} visible elements match ({', '.join(what for what, _ in kinds)})")
+
+
 def can_be_field(element: Locator) -> bool:
     """Whether the element can be a form field (FIELD_CANDIDATE_JS). One that cannot be inspected
     still counts: dropping it could turn two matches into one, and the runner would act on a
@@ -346,8 +388,9 @@ def find_field(page: Page, label: str) -> Locator | None:
     box: the Portal's 'User principal name' is a <div aria-label> around a text box, an '@' and
     a domain combo box, and fill_field splits the value over those parts. Only elements that can
     be a field count (can_be_field): a list's column header or a plain button of the label's
-    name is never taken for the field, so the field is not found and the person decides. An
-    ambiguous match raises Ambiguous."""
+    name is never taken for the field, so the field is not found and the person decides. Of
+    several matches, the one that takes a value wins (one_field). An ambiguous match raises
+    Ambiguous."""
     def fields(make_locator: Callable[[Frame], Locator]) -> list[Locator]:
         return [element for element in visible_across_frames(page, make_locator) if can_be_field(element)]
 
@@ -357,11 +400,11 @@ def find_field(page: Page, label: str) -> Locator | None:
         containers = [element for element in labelled if not any(element is c for c in controls)]
         composite = [element for element in containers if parts_of(element, "combobox")]
         if composite or controls:
-            return only_one(composite or controls)
-        textbox = only_one(fields(lambda f: f.get_by_role("textbox", name=label, exact=True)))
-        return textbox or only_one(containers)
+            return one_field(composite or controls)
+        textbox = one_field(fields(lambda f: f.get_by_role("textbox", name=label, exact=True)))
+        return textbox or one_field(containers)
     for role in FIELD_ROLES:
-        element = only_one(fields(lambda f, role=role: f.get_by_role(role, name=label, exact=True)))
+        element = one_field(fields(lambda f, role=role: f.get_by_role(role, name=label, exact=True)))
         if element is not None:
             return element
     return None

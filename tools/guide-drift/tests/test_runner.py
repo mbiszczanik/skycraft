@@ -699,6 +699,9 @@ class ScreenNode(FakeElement):
             return None if popups is None else not any(self is p for p in popups)
         if script == run.READ_ONLY_JS:
             return self.read_only
+        if script == run.FIELD_KIND_JS:
+            return [self.tag, self.attrs.get("role", ""), self.attrs.get("type", "").lower(),
+                    self.attrs.get("aria-haspopup", "").lower()]
         if script == run.FIELD_CANDIDATE_JS:            # what the browser answers, in Python
             role = self.attrs.get("role", "")
             plain_button = role == "button" or (not role and self.tag == "button")
@@ -1069,6 +1072,35 @@ class FindOnScreenTests(RunnerTestCase):
                 record, r = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
                 self.assertEqual((record["outcome"], node.clicked, len(r.ask.prompts)), ("unknown", 0, 1))
                 self.assertEqual(record["observed"], "no answer (input closed)")   # asked, not 'option not found'
+
+    DESCRIPTION = {"kind": "field", "label": "Group description", "value": "x", "line": 6}
+
+    def test_of_several_labelled_elements_the_one_that_takes_a_value_is_the_field(self) -> None:
+        # Step 1.1.6, New Group: the text area and the info icon next to its label share the name.
+        for info in (ScreenNode(tag="button", attrs={"aria-expanded": "false"}),   # a callout button
+                     ScreenNode(tag="i"),                                           # an icon container
+                     ScreenNode(tag="button", attrs={"aria-haspopup": "true"})):   # opens a callout
+            with self.subTest(info=info.attrs, tag=info.tag):
+                area = ScreenNode(tag="textarea")
+                screen = Screen(("label", "Group description", area), ("label", "Group description", info))
+                record, _ = self.act(screen, self.DESCRIPTION, "Group description", value="Admins of SkyCraft")
+                self.assertEqual((record["outcome"], area.filled, info.clicked), ("match", ["Admins of SkyCraft"], 0))
+
+    def test_a_button_that_opens_a_list_wins_only_when_nothing_takes_a_value(self) -> None:
+        dropdown = ScreenNode(tag="button", attrs={"aria-haspopup": "listbox"})
+        icon = ScreenNode(tag="button", attrs={"aria-expanded": "false"})
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(("label", "Group type", dropdown),
+                                                                     ("label", "Group type", icon))]):
+            self.assertIs(run.find_exact(FakePage(), "Group type", field=True), dropdown)
+
+    def test_two_fields_of_one_label_stay_ambiguous_and_say_what_they_are(self) -> None:
+        screen = Screen(("label", "Group description", ScreenNode(tag="textarea")),
+                        ("label", "Group description", ScreenNode(tag="input", attrs={"type": "text"})),
+                        ("label", "Group description", ScreenNode(tag="button", attrs={"aria-expanded": "false"})))
+        record, _ = self.act(screen, self.DESCRIPTION, "Group description", value="x")
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertEqual(record["observed"], "ambiguous: 3 visible elements match (textarea, input[type=text], button) "
+                                             "named 'Group description'")
 
     def test_a_button_that_opens_a_list_is_a_field(self) -> None:
         for attrs in ({"aria-haspopup": "listbox"}, {"aria-haspopup": "true"}, {"aria-haspopup": "menu"},
