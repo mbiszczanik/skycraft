@@ -7,16 +7,28 @@ without a browser. Rules (issue #189):
   * Only '### Step X.Y.N: Title' sections are read. Text before the first step and after the
     last step's section (the next '##' or '###' heading) is ignored.
   * Fenced code blocks and HTML comments (<!-- ... -->, also across lines) are removed first, so a
-    heading or a bold span quoted in a snippet or commented out never counts.
-  * Where a step has '#### Option N:' headings, only the Option 1 body is read, plus the
-    step's '**Expected Result**' line wherever it sits (the standard puts it after Option 3).
+    heading or a bold span quoted in a snippet or commented out never counts. As in CommonMark, a
+    fence closes only on a run of its own character at least as long as the opener, followed by
+    nothing but whitespace, so a 4-backtick fence can quote a 3-backtick one.
+  * Where a step has '#### Option 1:' or '#### Option A:' headings, only the first option's
+    body is read. Its own '**Expected Result**' wins; when it has none, the first Expected Result
+    anywhere in the step is taken (the standard puts a single one after Option 3).
+  * '**Expected Result**' may be a list item and may carry a qualifier before the colon
+    ('**Expected Result** (if ...):'). The first one in a step is kept.
   * Bold spans in list items are UI labels. A list item containing a chain (A → B, A -> B or
     A > B) is one 'navigation' item with several labels; otherwise it is an 'action' item.
+    '\\*' inside bold is a literal asterisk; a leading '*' (the Portal's required-field marker)
+    is dropped from a label.
+  * A list item '**Label**: value' is a 'field' item when Label is a UI label. A field whose
+    value is prose rather than a literal ("Click the ... button", "1 month from now") is typed
+    as written; the recording's valueOverrides is where a supervised run supplies the literal.
   * Bold spans that are not UI elements are dropped by NON_UI_BOLD and by the colon rule
     (bold text ending with ':' is a caption, not a label).
-  * Tables whose second header cell is 'Value' and whose first is Field, Name, Tag, Property or
-    Setting (Field | Value, Name | Value, ...) become 'field' items; backticks and bold are stripped from label and value. Every other table
-    is informational and is not read.
+  * Tables whose second header cell is 'Value' are forms. When the first header is Field,
+    Property or Setting, each row becomes a 'field' item (label, value). When it is Name or Tag,
+    each row becomes a 'tag' item (name, value), typed into the Portal's Tags grid by row rather
+    than looked up as a labelled control. Backticks and bold are stripped from both cells.
+    Every other table is informational and is not read.
   * A step with no item left is emitted with portal=false and is not checked by the runner.
 
 Usage: python parse.py <path/to/lab-guide-X.Y.md> [--out steps.json]
@@ -32,19 +44,24 @@ from pathlib import Path
 
 STEP_HEADING = re.compile(r"^###\s+Step\s+(?P<id>\d+\.\d+\.\d+):\s*(?P<title>.+?)\s*$")
 SECTION_END = re.compile(r"^#{1,3}\s")
-OPTION_HEADING = re.compile(r"^####\s+Option\s+(?P<n>\d+)\b")
+OPTION_HEADING = re.compile(r"^####\s+Option\s+(?P<n>\d+|[A-Z])\b")
+FIRST_OPTIONS = {"1", "A"}
 SUBHEADING = re.compile(r"^####\s")
-FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
+FENCE = re.compile(r"^[ \t]*(?P<run>`{3,}|~{3,})(?P<info>.*)$")
 LIST_ITEM = re.compile(r"^\s*(?:\d+\.|[-*])\s+(?P<text>.+)$")
-BOLD = re.compile(r"\*\*(?P<text>[^*]+?)\*\*")
-EXPECTED = re.compile(r"^\*\*Expected Result\*\*\s*:\s*(?P<text>.+?)\s*$")
+BOLD = re.compile(r"\*\*(?P<text>(?:\\\*|[^*])+?)\*\*")   # '\*' inside bold is a literal '*'
+LIST_FIELD = re.compile(r"^\*\*(?P<label>(?:\\\*|[^*])+?)\*\*\s*:\s*(?P<value>.+)$")
+EXPECTED = re.compile(
+    r"^\s*(?:(?:[-*]|\d+\.)\s+)?\*\*Expected Result\*\*[^:]*:\s*(?P<text>.+?)\s*$")
 TABLE_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$")
-SEPARATOR_CELL = re.compile(r"^:?-{2,}:?$")   # every cell of a separator row; "--name" is not one
+SEPARATOR_CELL = re.compile(r"^:?-+:?$")   # every non-empty cell of a separator row; not "--name"
 IMAGE = re.compile(r"!\[[^\]]*\]\(\s*\.?/?(?P<path>images/[^)\s]+)\s*\)")
 CHAIN = re.compile(r"→|->|\s>\s")   # navigation chain separators: arrow, ASCII arrow, " > "
 
-# A table is a form when its header is '<one of these> | Value'. 'Parameter | Value' lists CLI flags.
-FORM_FIRST_HEADERS = {"field", "name", "tag", "property", "setting"}
+# A table is a form when its header is '<one of these> | Value'.
+# 'Parameter | Value' lists CLI flags and is not a form.
+FIELD_FIRST_HEADERS = {"field", "property", "setting"}   # rows become 'field' items
+TAG_FIRST_HEADERS = {"name", "tag"}                        # rows become 'tag' items
 
 NON_UI_BOLD = {
     "Expected Result", "Note", "Tip", "Important", "Warning", "Why", "SkyCraft Choice",
@@ -63,17 +80,18 @@ def strip_hidden(lines: list[str]) -> list[str]:
     is partly commented keeps the text outside the comment.
     """
     out: list[str] = []
-    fence: str | None = None
+    fence: str | None = None          # the opening run, e.g. "````"
     in_comment = False
     for line in lines:
         if not in_comment:
             m = FENCE.match(line)
             if fence is None and m:
-                fence = m.group(1)[0]
+                fence = m.group("run")
                 out.append("")
                 continue
             if fence is not None:
-                if m and m.group(1)[0] == fence:
+                if (m and m.group("run")[0] == fence[0] and len(m.group("run")) >= len(fence)
+                        and not m.group("info").strip()):
                     fence = None
                 out.append("")
                 continue
@@ -109,8 +127,12 @@ def strip_hidden(lines: list[str]) -> list[str]:
     return out
 
 
+def unescape(text: str) -> str:
+    return text.replace("\\*", "*")
+
+
 def clean_label(text: str) -> str:
-    text = text.strip()
+    text = text.strip().lstrip("*").strip()      # a leading '*' is the Portal's required marker
     if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'“”":
         text = text[1:-1].strip()
     return text.strip("“”\"'").strip()
@@ -122,8 +144,8 @@ def is_ui_label(text: str) -> bool:
 
 def strip_value_markup(text: str) -> str:
     text = text.strip()
-    text = BOLD.sub(lambda m: m.group("text"), text)
-    return text.strip("`").strip()
+    text = BOLD.sub(lambda m: unescape(m.group("text")), text)
+    return text.replace("`", "").strip()      # code spans anywhere, not only around the value
 
 
 def png_width(path: Path) -> int | None:
@@ -157,23 +179,30 @@ def split_steps(lines: list[str]) -> list[dict]:
 
 
 def option_one_body(body: list[tuple[int, str]]) -> list[tuple[int, str]]:
-    """The whole body when there are no Option headings; otherwise Option 1 only, plus the
-    Expected Result line from anywhere in the step."""
+    """The whole body when there are no Option headings. Otherwise the first option (1 or A),
+    plus Expected Result lines outside the other options' bodies; when none of those exists,
+    the first Expected Result anywhere in the step."""
     has_options = any(OPTION_HEADING.match(line) for _, line in body)
     if not has_options:
         return body
     kept: list[tuple[int, str]] = []
-    inside = False
+    first_expected: tuple[int, str] | None = None
+    region = "outside"                    # "outside" | "first" | "other"
     for number, line in body:
         m = OPTION_HEADING.match(line)
         if m:
-            inside = m.group("n") == "1"
+            region = "first" if m.group("n") in FIRST_OPTIONS else "other"
             continue
         if SUBHEADING.match(line):
-            inside = False
+            region = "outside"
             continue
-        if inside or EXPECTED.match(line):
+        is_expected = bool(EXPECTED.match(line))
+        if is_expected and first_expected is None:
+            first_expected = (number, line)
+        if region == "first" or (is_expected and region == "outside"):
             kept.append((number, line))
+    if first_expected is not None and not any(EXPECTED.match(line) for _, line in kept):
+        kept = sorted(kept + [first_expected])
     return kept
 
 
@@ -182,36 +211,53 @@ def parse_items(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, li
     expected: str | None = None
     images: list[str] = []
     in_table = False
-    is_form = False
+    form: str | None = None               # "field", "tag" or None (informational) for this table
     for number, line in body:
         if line == HIDDEN:
             continue                      # a commented-out line neither ends nor extends a table
         e = EXPECTED.match(line)
         if e:
-            expected = e.group("text")
+            if expected is None:
+                expected = e.group("text")    # the first one in the step wins
             continue
         for img in IMAGE.finditer(line):
             images.append(img.group("path"))
         row = TABLE_ROW.match(line)
         if row:
             cells = [c.strip() for c in row.group("cells").split("|")]
-            if all(SEPARATOR_CELL.match(c) for c in cells):
+            filled = [c for c in cells if c]
+            if filled and all(SEPARATOR_CELL.match(c) for c in filled):
                 continue
             if not in_table:
                 in_table = True          # header row: a form only when the second cell is "Value"
-                is_form = (len(cells) >= 2 and strip_value_markup(cells[1]).lower() == "value"
-                           and strip_value_markup(cells[0]).lower() in FORM_FIRST_HEADERS)
+                first = strip_value_markup(cells[0]).lower()
+                form = None
+                if len(cells) >= 2 and strip_value_markup(cells[1]).lower() == "value":
+                    if first in FIELD_FIRST_HEADERS:
+                        form = "field"
+                    elif first in TAG_FIRST_HEADERS:
+                        form = "tag"
                 continue
-            if is_form and len(cells) >= 2 and cells[0]:
-                label = clean_label(strip_value_markup(cells[0]))
-                items.append({"kind": "field", "label": label,
+            if form and len(cells) >= 2 and cells[0]:
+                key = "label" if form == "field" else "name"
+                items.append({"kind": form, key: clean_label(strip_value_markup(cells[0])),
                               "value": strip_value_markup(cells[1]), "line": number})
             continue
         in_table = False
         li = LIST_ITEM.match(line)
         if not li:
             continue
-        labels = [clean_label(b.group("text")) for b in BOLD.finditer(li.group("text"))]
+        f = LIST_FIELD.match(li.group("text"))
+        if f:
+            label = clean_label(unescape(f.group("label")))
+            if is_ui_label(label):
+                value = f.group("value").strip()
+                if value.endswith("."):
+                    value = value[:-1]             # before the markup, so "`staging`." works
+                value = strip_value_markup(value)
+                items.append({"kind": "field", "label": label, "value": value, "line": number})
+                continue
+        labels = [clean_label(unescape(b.group("text"))) for b in BOLD.finditer(li.group("text"))]
         labels = [l for l in labels if is_ui_label(l)]
         if not labels:
             continue

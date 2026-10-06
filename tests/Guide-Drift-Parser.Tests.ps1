@@ -8,9 +8,10 @@
 
       FIXTURES - small guides written here, parsed through a temp file, asserting the rules of
       issue #189: only '### Step X.Y.N:' sections are read; fenced code is skipped; where a step
-      has '#### Option N:' headings only Option 1 is read (plus the step's Expected Result);
-      bold spans that are not UI elements are dropped; 'A -> B' chains become navigation;
-      Field | Value tables become fields; images are collected with their pixel width.
+      has '#### Option 1:' or '#### Option A:' headings only the first option is read (plus the
+      step's Expected Result); bold spans that are not UI elements are dropped; 'A -> B' chains
+      become navigation; '- **Label**: value' list items and Field | Value tables become fields,
+      Name | Value and Tag | Value tables become tags; images are collected with their width.
 
       THE 17 GUIDES - every module-*/X.Y-*/lab-guide-X.Y.md parses, its step ids match its
       headings in order, and every step marked portal has at least one label. This does NOT
@@ -187,6 +188,7 @@ Describe 'parse.py - form tables, HTML comments and images' {
 <!-- | Hidden field | never read | -->
 | Tier              | **Hot**                   |
 | Region <!-- was: Location --> | Sweden Central |
+| --sku             | Standard_LRS              |
 
 3. Click **Create**
 
@@ -211,9 +213,9 @@ Describe 'parse.py - form tables, HTML comments and images' {
 | --------- | ----- | ----------- |
 | --name    | x     | flag        |
 
-| Name   | Value        | Notes                       |
-| ------ | ------------ | --------------------------- |
-| Region | `westeurope` | three columns, still a form |
+| Setting | Value        | Notes                       |
+| ------- | ------------ | --------------------------- |
+| Region  | `westeurope` | three columns, still a form |
 
 1. Click **Review + create**
 '@
@@ -226,13 +228,13 @@ Describe 'parse.py - form tables, HTML comments and images' {
 
     It 'turns Field | Value rows into fields, stripping markup from label and value' {
         $fields = @($script:Table.steps[0].items | Where-Object kind -eq 'field')
-        @($fields.label) | Should -Be @('Group type', 'Group name', 'Tier', 'Region')
-        @($fields.value) | Should -Be @('Security', 'SkyCraft-Admins', 'Hot', 'Sweden Central')
+        @($fields.label) | Should -Be @('Group type', 'Group name', 'Tier', 'Region', '--sku') -Because 'a dash-led cell is a value, not a separator row'
+        @($fields.value) | Should -Be @('Security', 'SkyCraft-Admins', 'Hot', 'Sweden Central', 'Standard_LRS')
     }
 
     It 'keeps actions before and after the table in document order' {
-        @($script:Table.steps[0].items.kind) | Should -Be @('action', 'field', 'field', 'field', 'field', 'action')
-        @($script:Table.steps[0].items[5].labels) | Should -Be @('Create')
+        @($script:Table.steps[0].items.kind) | Should -Be @('action', 'field', 'field', 'field', 'field', 'field', 'action')
+        @($script:Table.steps[0].items[6].labels) | Should -Be @('Create')
     }
 
     It 'never reads text inside an HTML comment' {
@@ -259,6 +261,11 @@ Describe 'parse.py - form tables, HTML comments and images' {
         @($guide.steps[0].items.labels) | Should -Be @('First', 'Second', 'Third', 'Fourth')
     }
 
+    It 'reads a separator row of single dashes, or with a trailing empty cell, as a separator' {
+        $guide = ConvertFrom-GuideFixture -Markdown "### Step 9.9.1: Separators`n`n1. Click **Open**`n`n| Field | Value | |`n| :- | -: | |`n| Tier | Hot | |`n"
+        @(($guide.steps[0].items | Where-Object kind -eq 'field').label) | Should -Be @('Tier')
+    }
+
     It 'collects the images a step references, with and without "./"' {
         @($script:Table.steps[0].images) | Should -Be @('images/Step-9.9.1.png', 'images/Step-9.9.1b.png')
     }
@@ -268,5 +275,109 @@ Describe 'parse.py - form tables, HTML comments and images' {
         foreach ($image in $script:Table.images) { $widths[$image.path] = $image.width }
         $widths['images/Step-9.9.1.png']  | Should -Be 861
         $widths['images/Step-9.9.1b.png'] | Should -Be 2279
+    }
+}
+
+Describe 'parse.py - forms and markers found in the real guides' {
+    BeforeAll {
+        $fixture = @'
+# Lab 9.9: Real-guide shapes
+
+### Step 9.9.1: List-item fields
+
+1. Click **+ Create** → **Container App**
+2. On the **Basics** tab:
+   - **Resource group**: `dev-skycraft-swc-rg`
+   - **Region**: **Sweden Central**
+   - **\*Deployment source**: **Container Image**
+   - **Note**: this is a caption, not a field
+3. **Expected Result**: The app is created.
+
+**Expected Result** (if the quota allows): A second result that must not win.
+
+### Step 9.9.2: Lettered options
+
+#### Option A: Portal
+
+1. Click **Generate new key pair**
+
+**Expected Result**: Option A result.
+
+#### Option B: Store the key in Azure
+
+1. Click **OnlyInOptionB**
+
+**Expected Result**: Option B result.
+
+### Step 9.9.3: Long fences
+
+````markdown
+```bash
+1. Click **LeakedFromFence**
+```
+1. Click **LeakedFromFence**
+````
+
+1. Click **AfterFence**
+
+### Step 9.9.4: Tags
+
+1. Click **Tags**
+
+| Name        | Value         |
+| ----------- | ------------- |
+| Environment | `Development` |
+| Project     | SkyCraft      |
+
+| Field | Value  |
+| ----- | ------ |
+| Owner | `ops`  |
+'@
+        $script:Real = ConvertFrom-GuideFixture -Markdown $fixture
+    }
+
+    It 'reads "- **Label**: value" list items as fields' {
+        $fields = @($script:Real.steps[0].items | Where-Object kind -eq 'field')
+        @($fields.label) | Should -Be @('Resource group', 'Region', 'Deployment source')
+        @($fields.value) | Should -Be @('dev-skycraft-swc-rg', 'Sweden Central', 'Container Image')
+    }
+
+    It 'strips code spans and a final full stop from list-item field values' {
+        $guide = ConvertFrom-GuideFixture -Markdown "### Step 9.9.1: Values`n`n- **Source**: ``staging``.`n- **Stored access policy**: Select ``DevRevokePolicy```n"
+        @($guide.steps[0].items.value) | Should -Be @('staging', 'Select DevRevokePolicy')
+    }
+
+    It 'does not turn a caption such as **Note** into a field' {
+        @($script:Real.steps[0].items | Where-Object { $_.kind -eq 'field' -and $_.label -eq 'Note' }) | Should -BeNullOrEmpty
+    }
+
+    It 'keeps chains and actions around list-item fields' {
+        @($script:Real.steps[0].items[0].labels) | Should -Be @('+ Create', 'Container App')
+        $script:Real.steps[0].items[0].kind | Should -Be 'navigation'
+        @($script:Real.steps[0].items[1].labels) | Should -Be @('Basics')
+    }
+
+    It 'takes the first Expected Result, including one written as a list item' {
+        $script:Real.steps[0].expected | Should -Be 'The app is created.'
+    }
+
+    It 'reads only Option A of a lettered-option step, and its own Expected Result' {
+        $labels = @($script:Real.steps[1].items | ForEach-Object { $_.labels })
+        $labels | Should -Be @('Generate new key pair')
+        $script:Real.steps[1].expected | Should -Be 'Option A result.'
+    }
+
+    It 'reads Name | Value and Tag | Value tables as tag pairs, and Field | Value as fields' {
+        $items = @($script:Real.steps[3].items)
+        @($items.kind) | Should -Be @('action', 'tag', 'tag', 'field')
+        @(($items | Where-Object kind -eq 'tag').name)  | Should -Be @('Environment', 'Project')
+        @(($items | Where-Object kind -eq 'tag').value) | Should -Be @('Development', 'SkyCraft')
+        ($items | Where-Object kind -eq 'field').label  | Should -Be 'Owner'
+    }
+
+    It 'closes a fence only on a run at least as long as its opener' {
+        $labels = @($script:Real.steps[2].items | ForEach-Object { $_.labels })
+        $labels | Should -Not -Contain 'LeakedFromFence'
+        $labels | Should -Contain 'AfterFence'
     }
 }

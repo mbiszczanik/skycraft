@@ -849,7 +849,7 @@ piped stdout is decoded with the console code page and real guides contain `→`
 `$TestDrive` exists only in the run phase; at discovery use a temp file from
 `[System.IO.Path]::GetTempFileName()` and delete it.
 
-- [ ] **Step 1: Write the failing fixture tests**
+- [x] **Step 1: Write the failing fixture tests**
 
 Append to `tests/Guide-Drift-Parser.Tests.ps1`:
 
@@ -957,13 +957,13 @@ echo inner
 Note the five-backtick fence around this block in the plan: the fixture itself contains a
 four-backtick and a three-backtick fence. The PowerShell here-string carries them verbatim.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pwsh -NoProfile -Command "Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed"`
 Expected: every new test except possibly `does not turn a caption` fails, each for the gap in
 the table above. Quote the failures.
 
-- [ ] **Step 3: Implement in parse.py**
+- [x] **Step 3: Implement in parse.py**
 
 1. `BOLD`: accept an escaped asterisk inside bold, `\*\*(?P<text>(?:\\\*|[^*])+?)\*\*`, and
    unescape `\*` to `*` in the captured text. In `clean_label`, strip a leading `*` (the
@@ -993,12 +993,12 @@ the table above. Quote the failures.
    whose fence run uses the same character, is at least as long, and is followed only by
    whitespace (no info string).
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pwsh -NoProfile -Command "Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed"`
 Expected: all green, including every Task 2 and Task 3 test.
 
-- [ ] **Step 5: Commit the parser hardening**
+- [x] **Step 5: Commit the parser hardening**
 
 ```powershell
 git add tests/Guide-Drift-Parser.Tests.ps1 tools/guide-drift/parse.py PLAN.md
