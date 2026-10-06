@@ -1695,7 +1695,7 @@ git commit -m "feat(guide-drift): open the Portal, wait for sign-in, guard langu
 
 - Modify: `tools/guide-drift/run.py` (append)
 
-- [ ] **Step 1: Append element lookup and step execution**
+- [x] **Step 1: Append element lookup and step execution**
 
 Append to `tools/guide-drift/run.py`:
 
@@ -2033,7 +2033,7 @@ class Runner:
             self.failed_steps[step["id"]] = step["id"]
 ```
 
-- [ ] **Step 2: Forbid the guest UPN form in recordings**
+- [x] **Step 2: Forbid the guest UPN form in recordings**
 
 In `tests/Guide-Drift-Recording.Tests.ps1`, the privacy checks catch an e-mail address but not
 a guest user principal name (`me_example.com#EXT#@[tenantdomain]` after redaction). Add one
@@ -2041,7 +2041,7 @@ a guest user principal name (`me_example.com#EXT#@[tenantdomain]` after redactio
 (`($raw -match '#EXT#') | Should -BeFalse -Because ...`), prove it fails with a temporary
 `#EXT#` in the seed, revert, and run the file.
 
-- [ ] **Step 3: Unit-test the Redactor without a browser**
+- [x] **Step 3: Unit-test the Redactor without a browser**
 
 `Redactor`, `env_secrets` and `rejected_candidates` are pure. Add
 `tools/guide-drift/tests/test_redact.py` (stdlib unittest, run by the existing
@@ -2055,13 +2055,13 @@ restore; a guest UPN `me_example.com#EXT#@contoso.onmicrosoft.com` with the secr
 gives `https://portal.azure.com/#view/Blade/id/<id>`; `rejected_candidates` drops names with
 `@` or a GUID and keeps at most 20, most similar first. Run the Pester wrapper.
 
-- [ ] **Step 4: Check it still imports**
+- [x] **Step 4: Check it still imports**
 
 Run: `python -c "import sys; sys.path.insert(0,'tools/guide-drift'); import run; print('ok')"`
 Expected: `ok` (the methods `new_record`, `write`, `check_result`, `screenshot` come in Task 9;
 Python resolves them at call time, so the import succeeds).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add tools/guide-drift/run.py tools/guide-drift/tests/test_redact.py tests/Guide-Drift-Recording.Tests.ps1 PLAN.md

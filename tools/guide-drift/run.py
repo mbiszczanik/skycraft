@@ -149,3 +149,335 @@ def open_portal(pw, args: argparse.Namespace, recording: dict) -> tuple[object, 
             browser.close()
             raise SystemExit(f"GUARD FAILED: {guard}")
     return browser, page
+
+
+# --- finding and acting --------------------------------------------------------------------
+
+class Ambiguous(LookupError):
+    """Several visible elements match. The runner never clicks one of them by guess: earlier
+    Portal blades stay in the DOM, and the first match in DOM order is often the wrong one."""
+
+
+def visible_in(locator) -> list:
+    found = []
+    for index in range(locator.count()):
+        element = locator.nth(index)
+        try:
+            if element.is_visible():
+                found.append(element)
+        except PlaywrightTimeout:
+            continue
+    return found
+
+
+def unique_visible(page: Page, make_locator):
+    """The one visible element `make_locator(frame)` matches across all frames, or None when there
+    is none; raises Ambiguous when there are several."""
+    found = []
+    for frame in all_frames(page):
+        found += visible_in(make_locator(frame))
+    if len(found) > 1:
+        raise Ambiguous(f"{len(found)} visible elements match")
+    return found[0] if found else None
+
+
+def find_exact(page: Page, label: str, field: bool = False):
+    """The visible element whose accessible name is exactly `label`: the field label first for a
+    field, then the interactive roles, then plain text. An ambiguous role match raises Ambiguous;
+    an ambiguous text match counts as not found, so the person picks a role-specific candidate."""
+    strategies = []
+    if field:
+        strategies.append(lambda f: f.get_by_label(label, exact=True))
+    for role in ("button", "link", "menuitem", "tab", "treeitem", "option", "checkbox", "radio"):
+        strategies.append(lambda f, role=role: f.get_by_role(role, name=label, exact=True))
+    for make_locator in strategies:
+        element = unique_visible(page, make_locator)
+        if element is not None:
+            return element
+    try:
+        return unique_visible(page, lambda f: f.get_by_text(label, exact=True))
+    except Ambiguous:
+        return None
+
+
+def find_by_name(page: Page, role: str | None, name: str):
+    """The element a decision chose, by role and name. Raises Ambiguous rather than guess."""
+    if role:
+        return unique_visible(page, lambda f: f.get_by_role(role, name=name, exact=True))
+    return unique_visible(page, lambda f: f.get_by_text(name, exact=True))
+
+
+def candidates_on_screen(page: Page) -> list[Candidate]:
+    return [Candidate(role=role, name=name, count=count) for role, name, count in aria_lines(page)]
+
+
+GUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
+
+
+class Redactor:
+    """Keeps tenant data out of the committed recording, which lives in a public repository.
+    The tenant's domain and id become tokens on the way into the recording and are restored on
+    the way out, so a recorded name such as 'malfurion.stormrage@[tenantdomain]' still finds its
+    element. tests/Guide-Drift-Recording.Tests.ps1 is the backstop: it fails on any literal
+    e-mail address, *.onmicrosoft.com domain or GUID in a recording."""
+
+    DOMAIN = "[tenantdomain]"
+    TENANT = "[tenantid]"
+
+    def __init__(self, domain: str, tenant_id: str, secrets: dict[str, str] | None = None) -> None:
+        # The Portal shows domains in lower case; restore() must give back what is on screen.
+        self.domain = domain.lower()
+        self.tenant_id = tenant_id.lower()
+        self._pairs: list[tuple[re.Pattern, str, str]] = []
+        # Secret values first (the guest address, also in the '_' form a guest UPN uses:
+        # 'me_example.com#EXT#@<tenant>'), then the tenant domain and id.
+        for token, value in (secrets or {}).items():
+            upn = value.replace("@", "_")
+            self._pairs.append((re.compile(re.escape(value), re.IGNORECASE), token, value))
+            # A distinct token for the UPN form, so restore() knows which form to give back.
+            self._pairs.append((re.compile(re.escape(upn), re.IGNORECASE), token[:-1] + "|upn}", upn))
+        self._pairs.append((re.compile(re.escape(self.domain), re.IGNORECASE), self.DOMAIN, self.domain))
+        self._pairs.append((re.compile(re.escape(self.tenant_id), re.IGNORECASE), self.TENANT, self.tenant_id))
+
+    def redact(self, text: str | None) -> str | None:
+        if text is None:
+            return None
+        for pattern, token, _ in self._pairs:
+            text = pattern.sub(token, text)
+        return text
+
+    def restore(self, text: str | None) -> str | None:
+        if text is None:
+            return None
+        for _, token, value in reversed(self._pairs):
+            text = text.replace(token, value)
+        return text
+
+    def view_url(self, url: str) -> str:
+        """The Portal view without the tenant pin ('#@<tenant>/'), query strings (before or inside
+        the fragment) or object ids: shown to the person on -Resume, never navigated to."""
+        parts = urlsplit(url)
+        fragment = re.sub(r"^@[^/]*/?", "", parts.fragment).split("?", 1)[0]
+        return self.redact(GUID.sub("<id>", f"{parts.scheme}://{parts.netloc}{parts.path}#{fragment}"))
+
+
+def env_secrets(recording: dict) -> dict[str, str]:
+    """'${NAME}' -> value for every environment reference in the recording whose value is an
+    address (contains '@'): the Redactor writes the token back wherever the value appears.
+    Short non-address values such as the tenant prefix are covered by the domain itself and
+    would otherwise clobber ordinary words."""
+    secrets = {}
+    for name in set(ENV_REF.findall(json.dumps(recording))):
+        value = os.environ.get(name, "")
+        if "@" in value:
+            secrets[f"${{{name}}}"] = value
+    return secrets
+
+
+def rejected_candidates(candidates: list[Candidate], label: str, chosen: str | None) -> list[str]:
+    """The 20 visible candidates most like the label, other than the chosen one, as 'role "name"':
+    the reference set issue #190 needs, without committing the whole screen to the recording.
+    Names with an '@' (user principal names, the signed-in account) or a GUID (object and
+    subscription ids) are left out entirely."""
+    others = [c for c in candidates if c.name != chosen and "@" not in c.name and not GUID.search(c.name)]
+    others.sort(key=lambda c: difflib.SequenceMatcher(None, c.name.lower(), label.lower()).ratio(),
+                reverse=True)
+    return [str(c) for c in others[:20]]
+
+
+def resolve_value(recording: dict, step: dict, label: str, value: str) -> str:
+    override = recording["steps"].get(step["id"], {}).get("valueOverrides", {}).get(label)
+    if override is not None:
+        return expand_env(override)
+    for placeholder, replacement in recording.get("placeholders", {}).items():
+        if placeholder in value:
+            value = value.replace(placeholder, expand_env(replacement))
+    return value
+
+
+BRACKET_TOKEN = re.compile(r"\[[^\]]+\]")
+
+
+def value_action(value: str) -> str:
+    """How to treat a field value once placeholders and overrides are applied: 'skip' when the
+    whole value is a bracketed instruction ('[Leave blank]' in 1.1.10), 'unresolved' when a
+    bracket token is left ('skycraft-auth-[uniqueID]'), otherwise 'type'."""
+    if re.fullmatch(r"\[[^\]]+\]", value.strip()):
+        return "skip"
+    return "unresolved" if BRACKET_TOKEN.search(value) else "type"
+
+
+def fill_field(page: Page, element, value: str) -> None:
+    role = element.get_attribute("role") or ""
+    tag = element.evaluate("e => e.tagName.toLowerCase()")
+    if role in ("combobox", "button") or tag in ("button", "select"):
+        element.click()
+        page.wait_for_timeout(SETTLE_MS // 2)
+        option = find_by_name(page, "option", value) or find_by_name(page, None, value)
+        if option is None:
+            raise LookupError(f"option '{value}' not found")
+        option.click()
+    else:
+        element.fill(value)
+    page.wait_for_timeout(SETTLE_MS // 2)
+
+
+def fill_tag(page: Page, name: str, value: str) -> None:
+    """The Portal's Tags grid ends with an empty row whose inputs are named 'Name' and 'Value';
+    typing into it adds the next empty row. Fill the last of each. The exact roles are confirmed
+    in the first supervised run (Task 12); until then a miss is reported as unknown, not guessed."""
+    for frame in all_frames(page):
+        names = frame.get_by_role("combobox", name="Name", exact=True)
+        if names.count() == 0:
+            names = frame.get_by_label("Name", exact=True)
+        values = frame.get_by_role("combobox", name="Value", exact=True)
+        if values.count() == 0:
+            values = frame.get_by_label("Value", exact=True)
+        if names.count() > 0 and values.count() > 0:
+            names.last.fill(name)
+            page.wait_for_timeout(SETTLE_MS // 2)
+            values.last.fill(value)
+            page.wait_for_timeout(SETTLE_MS // 2)
+            return
+    raise LookupError("Tags grid not found (no inputs named 'Name' and 'Value')")
+
+
+class Runner:
+    def __init__(self, page: Page, steps: dict, recording: dict, args: argparse.Namespace) -> None:
+        self.page = page
+        self.steps = steps
+        self.recording = recording
+        self.args = args
+        self.run_dir = args.log_dir / args.run_id
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.results_path = self.run_dir / "results.jsonl"
+        self.deciders = [ReplayDecider(recording), HumanDecider()]
+        self.redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording))
+        self.records: list[dict] = []
+        self.failed_steps: dict[str, str] = {}   # step id -> why (for skippedBecause)
+
+    # -- recording -------------------------------------------------------------------------
+
+    def step_entry(self, step: dict) -> dict:
+        entry = self.recording["steps"].setdefault(step["id"], {})
+        entry.setdefault("valueOverrides", {})
+        entry.setdefault("viewUrl", None)
+        entry.setdefault("result", None)
+        entry.setdefault("labels", {})
+        return entry
+
+    def save_recording(self) -> None:
+        self.args.recording.write_text(json.dumps(self.recording, indent=2, ensure_ascii=False) + "\n",
+                                       encoding="utf-8")
+
+    # -- one label -------------------------------------------------------------------------
+
+    def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None) -> dict:
+        """Find the element the guide calls `label`, act on it, return the result record."""
+        kind, line = item["kind"], item["line"]
+        record = self.new_record(step, kind, label)
+        try:
+            element = find_exact(self.page, label, field=(kind == "field"))
+        except Ambiguous as error:
+            record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
+            return record
+        decision = Decision(kind="use", name=label, decided_by="exact") if element is not None else None
+        if decision is None:
+            # Names are redacted before anyone sees them, so the person, the recording and replay
+            # all work with '[tenantdomain]' and the element is found by the restored name.
+            candidates = [Candidate(role=c.role, name=self.redactor.redact(c.name), count=c.count)
+                          for c in candidates_on_screen(self.page)]
+            decision = decide(step, item, label, candidates, self.deciders)
+            if decision.name and decision.severity != "blocking":
+                try:
+                    element = find_by_name(self.page, decision.role, self.redactor.restore(decision.name))
+                except Ambiguous as error:
+                    # Not recorded: replay must never inherit a choice the runner refused to act on.
+                    record.update(outcome="unknown", observed=f"ambiguous: {error} named '{decision.name}'")
+                    return record
+            entry = decision.to_recording(rejected_candidates(candidates, label, decision.name), now())
+            if decision.decided_by == "human" and entry is not None:
+                self.step_entry(step)["labels"][label] = entry
+                self.save_recording()
+        if decision.kind == "ignore":
+            record.update(outcome="match", observed=None)
+            return record
+        if decision.kind == "unknown":
+            record.update(outcome="unknown", observed=decision.reason)
+            return record
+        if decision.severity == "blocking":
+            record.update(outcome="drift", severity="blocking", observed=None)
+            return record
+        if element is None:
+            record.update(outcome="unknown", observed=f"'{decision.name}' chosen but not found on screen")
+            return record
+        try:
+            if kind == "field":
+                fill_field(self.page, element, value or "")
+            else:
+                element.click(timeout=FIND_TIMEOUT_MS)
+                self.page.wait_for_timeout(SETTLE_MS)
+        except (PlaywrightTimeout, LookupError) as error:
+            record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
+            return record
+        if decision.kind == "drift":      # misleading or cosmetic: acted on, under a different name
+            record.update(outcome="drift", severity=decision.severity, observed=decision.name,
+                          proposedEdit=self.proposed_edit(line, label, decision.name))
+        else:
+            record.update(outcome="match", observed=decision.name)
+        return record
+
+    def proposed_edit(self, line: int, old_label: str, new_label: str) -> dict | None:
+        guide_lines = (Path(self.args.repo_root) / self.steps["guide"]).read_text(encoding="utf-8-sig").splitlines()
+        if not (1 <= line <= len(guide_lines)):
+            return None
+        old = guide_lines[line - 1]
+        return {"line": line, "old": old, "new": old.replace(f"**{old_label}**", f"**{new_label}**")}
+
+    # -- one step --------------------------------------------------------------------------
+
+    def run_step(self, step: dict) -> None:
+        print(f"\n=== Step {step['id']}: {step['title']} ===")
+        entry = self.step_entry(step)
+        step_failed = False
+        for item in step["items"]:
+            if item["kind"] == "tag":
+                record = self.new_record(step, "tag", item["name"])
+                try:
+                    fill_tag(self.page, item["name"], resolve_value(self.recording, step, item["name"], item["value"]))
+                    record.update(outcome="match", observed=item["value"])
+                except (PlaywrightTimeout, LookupError) as error:
+                    record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
+                records = [record]
+            elif item["kind"] == "field":
+                value = resolve_value(self.recording, step, item["label"], item["value"])
+                action = value_action(value)
+                if action == "type":
+                    record = self.act_on_label(step, item, item["label"], value)
+                else:
+                    record = self.new_record(step, "field", item["label"])
+                    if action == "skip":
+                        record.update(outcome="match", observed=f"left as is: {value}")
+                    else:
+                        record.update(outcome="unknown",
+                                      observed=f"value '{value}' has an unresolved [token]; add a "
+                                               "placeholder or a valueOverride to the recording")
+                records = [record]
+            else:
+                records = []
+                for label in item["labels"]:
+                    records.append(self.act_on_label(step, item, label))
+                    if records[-1]["outcome"] in ("unknown",) or records[-1].get("severity") == "blocking":
+                        break
+            for record in records:
+                self.write(record)
+                if record["outcome"] == "unknown" or record.get("severity") == "blocking":
+                    step_failed = True
+            if step_failed:
+                break
+        self.check_result(step, entry)
+        entry["viewUrl"] = self.redactor.view_url(self.page.url)
+        self.save_recording()
+        self.write(self.screenshot(step))
+        if step_failed:
+            self.failed_steps[step["id"]] = step["id"]

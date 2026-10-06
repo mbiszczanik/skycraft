@@ -177,6 +177,13 @@ Describe 'Guide drift recordings - nothing tenant-specific is literal (this repo
         ($raw -match '[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}') | Should -BeFalse -Because 'a tenant, subscription or object id must not be recorded'
     }
 
+    It "'<file>' contains no guest user principal name" -ForEach $RecordingCases {
+        # A guest UPN ('me_example.com#EXT#@[tenantdomain]') passes the e-mail check once the
+        # tenant domain is redacted, yet still names a real person; the runner records it as
+        # ${NAME|upn} instead.
+        ($raw -match '#EXT#') | Should -BeFalse -Because 'a guest address belongs in the environment (${NAME}), not in a public file'
+    }
+
     It "'<file>' records only portal.azure.com blade addresses without query or tenant" -ForEach $RecordingCases {
         $badUrls | Should -BeNullOrEmpty -Because ($badUrls -join '; ')
     }
