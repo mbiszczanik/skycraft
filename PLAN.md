@@ -1160,7 +1160,7 @@ git commit -m "test(guide-drift): parse all 17 guides and pin lab 1.1's shape"
 Not unit-tested in the first version (issue #189, Tests section); verified by the supervised run
 in Task 12. Keep it small enough to read.
 
-- [ ] **Step 1: Write decide.py**
+- [x] **Step 1: Write decide.py**
 
 ```python
 #!/usr/bin/env python3
@@ -1284,12 +1284,12 @@ def decide(step: dict, label: str, candidates: list[Candidate], deciders) -> Dec
     return Decision(kind="unknown", reason="no decider answered", decided_by="replay")
 ```
 
-- [ ] **Step 2: Check it imports**
+- [x] **Step 2: Check it imports**
 
 Run: `python -c "import sys; sys.path.insert(0,'tools/guide-drift'); import decide; print(decide.Decision('use'))"`
 Expected: `Decision(kind='use', name=None, role=None, severity=None, reason=None, decided_by='human')`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```powershell
 git add tools/guide-drift/decide.py
