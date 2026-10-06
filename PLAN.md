@@ -2076,7 +2076,7 @@ git commit -m "feat(guide-drift): find labelled elements, perform steps, ask at 
 
 - Modify: `tools/guide-drift/run.py` (append)
 
-- [ ] **Step 1: Append results, resume and main**
+- [x] **Step 1: Append results, resume and main**
 
 Append to `tools/guide-drift/run.py`:
 
@@ -2288,7 +2288,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 2: Import check and a dry parse of lab 1.1**
+- [x] **Step 2: Import check and a dry parse of lab 1.1**
 
 ```powershell
 python -c "import sys; sys.path.insert(0,'tools/guide-drift'); import run; print('ok')"
@@ -2298,7 +2298,7 @@ python tools/guide-drift/parse.py module-1-identities-governance/1.1-entra-users
 Expected: `ok`, and a steps file with 14 steps. Every step after a failed one is recorded
 `skipped` with that step's id: in a portal lab each step builds on the one before it.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```powershell
 git add tools/guide-drift/run.py

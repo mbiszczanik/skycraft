@@ -481,3 +481,215 @@ class Runner:
         self.write(self.screenshot(step))
         if step_failed:
             self.failed_steps[step["id"]] = step["id"]
+
+    # -- results ---------------------------------------------------------------------------
+
+    def new_record(self, step: dict, kind: str, label: str | None) -> dict:
+        return {"runId": self.args.run_id, "at": now(), "lab": self.steps["lab"], "step": step["id"],
+                "kind": kind, "label": label, "outcome": None, "severity": None, "category": None,
+                "skippedBecause": None, "observed": None, "proposedEdit": None,
+                "screenshot": f"Step-{step['id']}.png"}
+
+    def write(self, record: dict) -> None:
+        self.records.append(record)
+        with self.results_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def check_result(self, step: dict, entry: dict) -> None:
+        if not step.get("expected"):
+            return
+        if entry["result"] is None and "result" not in entry.get("asked", []):
+            print(f'Expected Result: "{step["expected"]}"')
+            answer = input("Text to look for on screen (Enter = not observable): ").strip()
+            entry["result"] = {"text": self.redactor.redact(answer)} if answer else None
+            entry.setdefault("asked", []).append("result")
+            self.save_recording()
+        if not entry["result"]:
+            return
+        record = self.new_record(step, "result", entry["result"]["text"])
+        # Presence, not a unique element: a created group's name shows in the list and the
+        # breadcrumb at once, and either proves the result.
+        text = self.redactor.restore(entry["result"]["text"])
+        found = any(visible_in(frame.get_by_text(text, exact=False)) for frame in all_frames(self.page))
+        record.update(outcome="match" if found else "drift", severity=None if found else "misleading",
+                      observed=None if found else "text not on screen")
+        self.write(record)
+
+    def screenshot(self, step: dict) -> dict:
+        path = self.run_dir / f"Step-{step['id']}.png"
+        self.page.screenshot(path=str(path), full_page=False)
+        record = self.new_record(step, "screenshot", None)
+        drifted = any(r["step"] == step["id"] and r["outcome"] == "drift" for r in self.records)
+        if step["images"] and drifted:
+            record.update(outcome="drift", category="stale", observed=", ".join(step["images"]))
+        else:
+            record.update(outcome="match")
+        return record
+
+    def skip_step(self, step: dict, because: str) -> None:
+        record = self.new_record(step, "action", None)
+        record.update(outcome="skipped", skippedBecause=because)
+        self.write(record)
+
+    def readability(self) -> None:
+        for image in self.steps["images"]:
+            if image["width"] > 1722:
+                record = self.new_record({"id": "-"}, "readability", image["path"])
+                record.update(outcome="drift", category="unreadable", observed=f"{image['width']} px wide",
+                              screenshot=None)
+                self.write(record)
+
+    # -- state and resume -------------------------------------------------------------------
+
+    def save_state(self, completed: list[str], in_flight: str | None) -> None:
+        self.args.state.write_text(json.dumps({"runId": self.args.run_id, "lab": self.steps["lab"],
+                                               "completed": completed, "inFlight": in_flight}, indent=2),
+                                   encoding="utf-8")
+
+    def load_state(self) -> dict:
+        if not self.args.state.is_file():
+            return {"completed": [], "inFlight": None}
+        state = json.loads(self.args.state.read_text(encoding="utf-8"))
+        if state.get("lab") != self.steps["lab"]:
+            raise SystemExit(f"state at {self.args.state} belongs to lab {state.get('lab')}, not {self.steps['lab']}")
+        return state
+
+    # -- the run ---------------------------------------------------------------------------
+
+    def run(self) -> int:
+        completed: list[str] = []
+        state = self.load_state() if self.args.resume else {"completed": [], "inFlight": None}
+        completed = list(state["completed"])
+        started = self.args.from_step is None and not self.args.resume
+        self.readability()
+        for step in self.steps["steps"]:
+            if not step["portal"]:
+                continue
+            if step["id"] in completed:
+                continue
+            if not started:
+                if step["id"] == self.args.from_step or step["id"] == state.get("inFlight"):
+                    started = True
+                    url = self.recording["steps"].get(step["id"], {}).get("viewUrl")
+                    print(f"Resuming at step {step['id']}. Bring the Portal to this view, then press Enter:\n  {url or '(no view recorded yet)'}")
+                    input()
+                else:
+                    continue
+            prior = [self.failed_steps[i] for i in self.failed_steps]
+            if prior:
+                self.skip_step(step, prior[0])
+                continue
+            self.save_state(completed, step["id"])
+            self.run_step(step)
+            completed.append(step["id"])
+            self.save_state(completed, None)
+        if not started:
+            # --from-step names no portal step, or -Resume found no step in flight: nothing ran,
+            # and a finished run's exit code 0 would read as 'no drift'.
+            print(f"No step to start from (--from-step {self.args.from_step}, in flight "
+                  f"{state.get('inFlight')}); nothing was run.")
+            return NOT_STARTED
+        return self.finish()
+
+    def finish(self) -> int:
+        by_severity: dict[str, list[dict]] = {"blocking": [], "misleading": [], "cosmetic": []}
+        unknown, skipped, stale, unreadable, edits = [], [], [], [], []
+        for r in self.records:
+            if r["outcome"] == "drift" and r["severity"]:
+                by_severity[r["severity"]].append(r)
+            elif r["outcome"] == "drift" and r["category"] == "stale":
+                stale.append(r)
+            elif r["outcome"] == "drift" and r["category"] == "unreadable":
+                unreadable.append(r)
+            elif r["outcome"] == "unknown":
+                unknown.append(r)
+            elif r["outcome"] == "skipped":
+                skipped.append(r)
+            if r.get("proposedEdit"):
+                edits.append(r)
+        lines = [f"# Guide drift run {self.args.run_id} - lab {self.steps['lab']}", ""]
+        for severity, items in by_severity.items():
+            lines.append(f"## {severity} ({len(items)})")
+            lines += [f"- step {r['step']} {r['kind']} **{r['label']}**: observed {r['observed']!r}" for r in items] or ["- none"]
+            lines.append("")
+        lines.append(f"## unknown ({len(unknown)})")
+        lines += [f"- step {r['step']} {r['kind']} **{r['label']}**: {r['observed']}" for r in unknown] or ["- none"]
+        lines.append("")
+        lines.append(f"## skipped ({len(skipped)})")
+        lines += [f"- step {r['step']} because step {r['skippedBecause']} failed" for r in skipped] or ["- none"]
+        lines.append("")
+        lines.append(f"## stale screenshots ({len(stale)})")
+        lines += [f"- step {r['step']}: {r['observed']}" for r in stale] or ["- none"]
+        lines.append("")
+        lines.append(f"## unreadable screenshots, wider than 1722 px ({len(unreadable)})")
+        lines += [f"- {r['label']}: {r['observed']}" for r in unreadable] or ["- none"]
+        lines.append("")
+        lines.append(f"## proposed edits ({len(edits)})")
+        for r in edits:
+            e = r["proposedEdit"]
+            lines += [f"- {self.steps['guide']}:{e['line']}", f"  - old: `{e['old']}`", f"  - new: `{e['new']}`"]
+        lines.append("")
+        lines.append(f"Screenshots and results: {self.run_dir}")
+        summary = "\n".join(lines)
+        (self.run_dir / "summary.md").write_text(summary + "\n", encoding="utf-8")
+        print("\n" + summary)
+        return min(len(by_severity["blocking"]) + len(unknown), 250)
+
+
+# Exit codes above the 250 cap of finish(), which Invoke-GuideDrift.ps1 reads as "not a count".
+NOT_STARTED = 254   # a precondition or guard stopped the run before the first step
+ABORTED = 255       # interrupted (Ctrl+C) or stopped mid-run; state kept for -Resume
+
+
+def missing_env(recording: dict) -> list[str]:
+    """Every ${NAME} the recording refers to that the environment does not set."""
+    names = set(ENV_REF.findall(json.dumps(recording)))
+    return sorted(name for name in names if name not in os.environ)
+
+
+def main(argv: list[str] | None = None) -> int:
+    # Accessible names and guide text reach the console; a redirected stdout on Windows would
+    # otherwise use the ANSI code page and fail on the first arrow.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    args = parse_args(argv)
+    args.repo_root = Path(__file__).resolve().parents[2]
+    steps = json.loads(args.steps.read_text(encoding="utf-8"))
+    recording = json.loads(args.recording.read_text(encoding="utf-8"))
+    if recording.get("lab") != steps.get("lab"):
+        print(f"Recording is for lab {recording.get('lab')}, steps are for lab {steps.get('lab')}.")
+        return NOT_STARTED
+    missing = missing_env(recording)
+    if missing:
+        print("Set these environment variables first: " + ", ".join(missing))
+        return NOT_STARTED
+    with sync_playwright() as pw:
+        try:
+            browser, page = open_portal(pw, args, recording)
+        except (SystemExit, KeyboardInterrupt) as stop:   # a guard, or Ctrl+C while signing in
+            print(str(stop) or "Interrupted before the first step.")
+            return NOT_STARTED
+        runner = Runner(page, steps, recording, args)
+        try:
+            return runner.run()
+        except BaseException as stop:       # noqa: BLE001 - every way out must keep -Resume possible
+            # Ctrl+C, a closed browser window (Playwright Error 'Target closed'), EOF at a prompt
+            # or a bug: exit 1 would read as 'one finding' and the entry point would clean up what
+            # -Resume needs. Print what happened, keep the state, and say so.
+            if not isinstance(stop, (KeyboardInterrupt, SystemExit)):
+                traceback.print_exc()
+            try:
+                runner.finish()
+            except Exception:               # noqa: BLE001 - the summary is best effort here
+                traceback.print_exc()
+            print(f"\nStopped ({type(stop).__name__}: {stop}). Progress is in {args.state}; "
+                  "re-run with -Resume.")
+            return ABORTED
+        finally:
+            try:
+                browser.close()
+            except Exception:               # noqa: BLE001 - the window may already be gone
+                pass
+
+
+if __name__ == "__main__":
+    sys.exit(main())
