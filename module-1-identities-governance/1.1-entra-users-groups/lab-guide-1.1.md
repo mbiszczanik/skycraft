@@ -6,7 +6,7 @@ By completing this lab, you will:
 
 - Create individual users in Microsoft Entra ID
 - Create security groups and assign members
-- Manage user properties and licenses
+- Manage user properties and review licenses
 - Understand delegated administration
 - Set up the identity structure for the SkyCraft team
 
@@ -41,7 +41,7 @@ You'll set up the following identity structure in Microsoft Entra ID:
 
 - **Section 1**: Create individual users (45 min)
 - **Section 2**: Create security groups (30 min)
-- **Section 3**: Assign licenses and properties (30 min)
+- **Section 3**: Update user properties and review licenses (30 min)
 - **Section 4**: Set up external access (15 min)
 - **Hands-on Practice**: Recreate from scratch (30 min)
 - **Validation**: Complete checklist (30 min)
@@ -52,7 +52,6 @@ You'll set up the following identity structure in Microsoft Entra ID:
 
 - [ ] Azure Portal access
 - [ ] Global Administrator or User Administrator role
-- [ ] Tenant with at least 5 user licenses available
 - [ ] Understanding of user vs. group concepts
 
 ---
@@ -62,24 +61,25 @@ You'll set up the following identity structure in Microsoft Entra ID:
 ### Step 1.1.1: Access Microsoft Entra ID
 
 1. Open **Azure Portal** (https://portal.azure.com)
-2. Search for **"Microsoft Entra ID"** in the search bar
+2. Search for **Microsoft Entra ID** in the search bar
 3. Click on the result to open the Entra ID admin center
 
 **Expected Result**: You see the Entra ID dashboard with options for Users, Groups, and Roles.
 
 ### Step 1.1.2: Create First User (Malfurion Stormrage)
 
-1. In the left sidebar, click **Users** → **All users**
+1. In the left menu, open the Manage group and click **Users** → **All users**
 2. Click **+ New user** → **Create new user**
-3. Fill in the following details:
+3. Fill in the following details (clear Auto-generate password first, or the password field stays read-only):
 
-| Field               | Value                                            |
-| ------------------- | ------------------------------------------------ |
-| User principal name | malfurion.stormrage@[yourtenant].onmicrosoft.com |
-| Display name        | Malfurion Stormrage                              |
-| Password (initial)  | LoveAzeroth!2004                                 |
+| Field                  | Value                                            |
+| ---------------------- | ------------------------------------------------ |
+| User principal name    | malfurion.stormrage@[yourtenant].onmicrosoft.com |
+| Display name           | Malfurion Stormrage                              |
+| Auto-generate password | ☐ Unchecked                                      |
+| Password               | LoveAzeroth!2004                                 |
 
-4. Click **Create**
+4. Click **Review + create**, then **Create**
 
 **Expected Result**: New user appears in the user list with "Malfurion Stormrage" display name.
 
@@ -90,39 +90,42 @@ You'll set up the following identity structure in Microsoft Entra ID:
 1. Click **+ New user** → **Create new user**
 2. Fill in the details:
 
-| Field               | Value                                         |
-| ------------------- | --------------------------------------------- |
-| User principal name | khadgar.archmage@[yourtenant].onmicrosoft.com |
-| Display name        | Khadgar Archmage                              |
-| Password            | LoveAzeroth!2004                              |
+| Field                  | Value                                         |
+| ---------------------- | --------------------------------------------- |
+| User principal name    | khadgar.archmage@[yourtenant].onmicrosoft.com |
+| Display name           | Khadgar Archmage                              |
+| Auto-generate password | ☐ Unchecked                                   |
+| Password               | LoveAzeroth!2004                              |
 
-3. Click **Create**
+3. Click **Review + create**, then **Create**
 
 ### Step 1.1.4: Create Third User (Chromie Timewalker)
 
-Repeat the process with:
+1. Click **+ New user** → **Create new user**
+2. Fill in the details:
 
-| Field               | Value                                           |
-| ------------------- | ----------------------------------------------- |
-| User principal name | chromie.timewalker@[yourtenant].onmicrosoft.com |
-| Display name        | Chromie Timewalker                              |
-| Password            | LoveAzeroth!2004                                |
+| Field                  | Value                                           |
+| ---------------------- | ----------------------------------------------- |
+| User principal name    | chromie.timewalker@[yourtenant].onmicrosoft.com |
+| Display name           | Chromie Timewalker                              |
+| Auto-generate password | ☐ Unchecked                                     |
+| Password               | LoveAzeroth!2004                                |
+
+3. Click **Review + create**, then **Create**
 
 ### Step 1.1.5: Create Guest User (Illidan Stormrage)
 
 1. Click **+ New user** → **Invite external user**
 2. Fill in:
 
-| Field        | Value                   |
-| ------------ | ----------------------- |
-| Email        | istormrage@illidari.com |
-| Display name | Illidan Stormrage       |
+| Field               | Value                                                                                                                      |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Email               | istormrage@illidari.com                                                                                                    |
+| Display name        | Illidan Stormrage                                                                                                          |
+| Send invite message | ✅ Checked                                                                                                                 |
+| Message             | Welcome to the SkyCraft deployment project. Please accept this invitation to collaborate on our infrastructure deployment. |
 
-3. Add custom invitation message:
-
-   > "Welcome to the SkyCraft deployment project. Please accept this invitation to collaborate on our infrastructure deployment."
-
-4. Click **Invite**
+3. Click **Review + invite**, then **Invite**
 
 **Expected Result**: Invitation email sent to external partner.
 
@@ -132,11 +135,14 @@ Repeat the process with:
 
 ## 📖 Section 2: Create Security Groups (30 minutes)
 
+You add each group's member in the New Group form, before you create the group.
+
 ### Step 1.1.6: Create First Group (Admins)
 
-1. In left sidebar, click **Groups** → **All groups**
-2. Click **+ New group**
-3. Fill in:
+1. Search for **Microsoft Entra ID** in the top search bar
+2. Open it from the results, then in the left menu open the Manage group and click **Groups** → **All groups**
+3. Click **+ New group**
+4. Fill in (do not click Create yet; the member comes next):
 
 | Field             | Value                                           |
 | ----------------- | ----------------------------------------------- |
@@ -145,24 +151,21 @@ Repeat the process with:
 | Group description | Administrative team for SkyCraft infrastructure |
 | Membership type   | Assigned                                        |
 
+### Step 1.1.7: Add Member to Admin Group and Create It
+
+1. Under Members, click **No members selected**
+2. Search for and select **Malfurion Stormrage**
+3. Click **Select**
 4. Click **Create**
 
-### Step 1.1.7: Add Members to Admin Group
-
-1. Open the **SkyCraft-Admins** group
-2. Click **Members** → **+ Add members**
-3. Search for and select:
-   - Malfurion Stormrage
-4. Click **Select**
-
-**Expected Result**: Malfurion Stormrage now appears in group members.
+**Expected Result**: SkyCraft-Admins appears in All groups with Membership type Assigned.
 
 ![Add Members to Admin Group](./images/Step-1.1.7.png)
 
 ### Step 1.1.8: Create Second Group (Developers)
 
 1. Click **+ New group**
-2. Create group with details:
+2. Fill in:
 
 | Field             | Value                                    |
 | ----------------- | ---------------------------------------- |
@@ -171,12 +174,15 @@ Repeat the process with:
 | Group description | Development team for SkyCraft deployment |
 | Membership type   | Assigned                                 |
 
-3. Add member: **Khadgar Archmage**
+3. Under Members, click **No members selected**
+4. Search for and select **Khadgar Archmage**
+5. Click **Select**
+6. Click **Create**
 
 ### Step 1.1.9: Create Third Group (Testers)
 
 1. Click **+ New group**
-2. Create group:
+2. Fill in:
 
 | Field             | Value                       |
 | ----------------- | --------------------------- |
@@ -185,51 +191,57 @@ Repeat the process with:
 | Group description | Testing and monitoring team |
 | Membership type   | Assigned                    |
 
-3. Add member: **Chromie Timewalker**
+3. Under Members, click **No members selected**
+4. Search for and select **Chromie Timewalker**
+5. Click **Select**
+6. Click **Create**
 
 **Expected Result**: Three security groups created with appropriate members.
 
-![Add Members to Admin Group](./images/Step-1.1.9.png)
+![SkyCraft groups in All groups](./images/Step-1.1.9.png)
 
 ---
 
-## 📖 Section 3: Manage User Properties and Licenses (30 minutes)
+## 📖 Section 3: Update User Properties and Review Licenses (30 minutes)
 
 ![Manage User Properties and Licenses](./images/Step-1.1.10a.png)
 
 ### Step 1.1.10: Configure User Properties
 
-1. Open **All Users** and click on **Malfurion Stormrage**
-2. In the **Manage** section, click **Properties**
-3. Update the following:
+1. Search for **Microsoft Entra ID** in the top search bar
+2. Open it from the results, then in the left menu open the Manage group and click **Users** → **All users**
+3. Click **Malfurion Stormrage**
+4. Click **Edit properties**
+5. On the **Job Information** tab, update the following:
 
-| Property   | Value                        |
-| ---------- | ---------------------------- |
-| Job title  | Cloud Infrastructure Manager |
-| Department | IT Operations                |
-| Office     | Remote                       |
-| Manager    | [Leave blank]                |
+| Property        | Value                        |
+| --------------- | ---------------------------- |
+| Job title       | Cloud Infrastructure Manager |
+| Company name    | SkyCraft                     |
+| Department      | IT Operations                |
+| Office location | Remote                       |
 
-4. Click **Save**
+6. Click **Save**
+
+**Expected Result**: Malfurion Stormrage's profile shows Job title Cloud Infrastructure Manager, Company name SkyCraft, Department IT Operations and Office location Remote.
 
 ![Manage User Properties and Licenses](./images/Step-1.1.10b.png)
 
 ### Step 1.1.11: Review License Information
 
-1. Click **Licenses** in the admin user's profile
+1. In Malfurion Stormrage's profile, click **Licenses** in the left menu
 2. Note the current license status
-3. If licenses are available, click **+ Assignments**
-4. Select a license (e.g., Azure AD Premium P1)
-5. Click **Save**
 
-**Expected Result**: License assignment shows in the user's profile.
+The blade only lists licenses: assignments are added and removed in the Microsoft 365 admin center, which its link opens. You do not assign a license in this lab.
+
+**Expected Result**: You can see which licenses, if any, are assigned to the user.
 
 ### Step 1.1.12: Configure SSPR (Self-Service Password Reset)
 
-1. Go back to **Microsoft Entra ID** home page
-2. Click **Password reset** in the left sidebar
-3. Click **All** to enable for all users
-4. Click **Save**
+1. Search for **Microsoft Entra ID** in the top search bar
+2. Open it from the results, then in the left menu open the Manage group and click **Password reset**
+3. Under "Self service password reset enabled", click **All** to enable for all users
+4. Click **Save** (if All was already selected, Save stays unavailable: there is nothing to save)
 
 **Expected Result**: All users can now reset their own passwords using SSPR.
 
@@ -242,17 +254,21 @@ Repeat the process with:
 ### Step 1.1.13: Accept Guest Invitation (Simulated)
 
 1. In production, the external partner would receive an email
-2. They would click the invitation link and sign in
-3. For this lab, navigate to **All Users** and verify the guest user status
+2. They would click the invitation link and sign in; for this lab, you check the guest yourself
+3. Search for **Microsoft Entra ID** in the top search bar
+4. Open it from the results, then in the left menu open the Manage group and click **Users** → **All users**
+5. Find Illidan Stormrage and check the User type column
 
-**Expected Result**: Guest user appears in the user list with "Guest" designation.
+**Expected Result**: Guest user appears in the user list with "Guest" in the User type column.
 
 ### Step 1.1.14: Review B2B Collaboration Settings
 
-1. Go back to Microsoft Entra ID home page
-2. Click **External Identities** in left sidebar
-3. Click **External Collaboration Settings**
+1. Search for **Microsoft Entra ID** in the top search bar
+2. Open it from the results, then in the left menu open the Manage group and click **External Identities**
+3. Click **External collaboration settings**
 4. Review the current settings for guest access
+
+**Expected Result**: You see the guest user access and guest invite settings of your tenant.
 
 ![Review B2B Collaboration Settings](./images/Step-1.1.14.png)
 
@@ -267,9 +283,9 @@ Complete this checklist to verify you've successfully completed the lab:
 - [ ] Created 3 security groups (Admins, Developers, Testers)
 - [ ] Added appropriate users to each group
 - [ ] Updated user properties (job title, department)
-- [ ] Assigned licenses to at least one user
+- [ ] Reviewed the license status of a user
 - [ ] Enabled SSPR for all users
-- [ ] All 4 users appear in the "All Users" list
+- [ ] All 4 users appear in the "All users" list
 - [ ] All 3 groups appear with correct members
 - [ ] No errors in the audit log
 
@@ -287,10 +303,10 @@ Complete this checklist to verify you've successfully completed the lab:
 - **Solution**: Ensure group creation is enabled in security defaults
 - **Fix**: Entra ID → Security defaults → Turn off security defaults (if needed)
 
-**Issue**: License assignment fails
+**Issue**: The user's **Licenses** blade has no **+ Assignments** button
 
-- **Solution**: Verify licenses are available in your tenant
-- **Check**: Entra ID → Licenses → All products → View available licenses
+- **Cause**: License assignments moved to the Microsoft 365 admin center; the blade in Microsoft Entra ID only lists them
+- **Solution**: Nothing to do for this lab (step 1.1.11 only reviews the license status); assign licenses in the Microsoft 365 admin center when you need them
 
 **Issue**: The lab scripts stop at "Checking Microsoft Graph connection..." and never come back
 
@@ -336,7 +352,7 @@ Answer these questions to verify understanding:
 
 - ✅ Created identity structure for SkyCraft team (4 users, 3 groups)
 - ✅ Organized team into logical security groups
-- ✅ Configured user properties and licenses
+- ✅ Configured user properties and reviewed license status
 - ✅ Enabled self-service password reset
 - ✅ Established external collaboration framework
 
