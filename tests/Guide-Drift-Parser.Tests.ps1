@@ -527,12 +527,18 @@ Describe 'parse.py - lab 1.1, the first recorded lab' {
         @($step.items[0].labels) | Should -Be @('Microsoft Entra ID')
     }
 
-    It 'reads step 1.1.6 as navigation, action, four fields and Create' {
+    It 'reads step 1.1.6 as the way back to Entra, + New group and four fields' {
         $step = $script:Lab11.steps | Where-Object id -eq '1.1.6'
-        @($step.items.kind) | Should -Be @('navigation', 'action', 'field', 'field', 'field', 'field', 'action')
-        @($step.items[0].labels) | Should -Be @('Groups', 'All groups')
-        @($step.items[1].labels) | Should -Be @('+ New group')
+        @($step.items.kind) | Should -Be @('search', 'navigation', 'action', 'field', 'field', 'field', 'field')
+        @($step.items[0].labels) | Should -Be @('Microsoft Entra ID')
+        @($step.items[1].labels) | Should -Be @('Groups', 'All groups')
+        @($step.items[2].labels) | Should -Be @('+ New group')
         @(($step.items | Where-Object kind -eq 'field').label) | Should -Be @('Group type', 'Group name', 'Group description', 'Membership type')
+    }
+
+    It 'reads step 1.1.7 as picking the member in the New Group form, then Create' {
+        $step = $script:Lab11.steps | Where-Object id -eq '1.1.7'
+        @($step.items | ForEach-Object { $_.labels }) | Should -Be @('No members selected', 'Malfurion Stormrage', 'Select', 'Create')
     }
 
     It 'keeps the guest invitation value of step 1.1.5 verbatim for the recording to override' {

@@ -2761,7 +2761,7 @@ git commit -m "feat(guide-drift): record the first supervised run of lab 1.1"
 
 ### Task 13: Pull request
 
-- [ ] **Step 0: Rebase on the lab 1.1 guide fix (#215) and update the recording**
+- [x] **Step 0: Rebase on the lab 1.1 guide fix (#215) and update the recording**
 
 Once #215 is merged, rebase this branch on `main` and update
 `tools/guide-drift/recordings/lab-1.1.json`: drop the 1.1.10 `Manage` and 1.1.11 `+ Assignments`
