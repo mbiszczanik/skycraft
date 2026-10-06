@@ -160,7 +160,8 @@ class RunBookkeepingTests(RunnerTestCase):
                 ("action", "Users", "match", None, "Users"),
                 ("field", "User principal name", "unknown", None,
                  "Error: fill('a@contoso.onmicrosoft.com'): not an <input>\n  - waiting for get_by_label()"),
-                ("action", "Gone", "drift", "blocking", None)):
+                ("action", "Gone", "drift", "blocking", None),
+                ("screenshot", None, "drift", None, "images/Step-9.9.2.png")):
             record = r.new_record({"id": "9.9.2"}, kind, label)
             record.update(outcome=outcome, severity=severity, observed=observed)
             r.records.append(record)
@@ -170,9 +171,10 @@ class RunBookkeepingTests(RunnerTestCase):
             self.assertEqual(r.ask_after_failure({"id": "9.9.2"}), "q")
         lines = out.getvalue().splitlines()
         start = lines.index("Step 9.9.2 did not go through:")
-        self.assertEqual(lines[start + 1:start + 4], [
+        self.assertEqual(lines[start + 1:start + 5], [
             "  field 'User principal name': unknown: Error: fill('a@[tenantdomain]'): not an <input>",
             "  action 'Gone': drift (blocking): -",
+            "  screenshot: drift: images/Step-9.9.2.png",                 # no label: the kind alone
             "What now?"])
         self.assertNotIn("contoso.onmicrosoft.com", out.getvalue())
 
@@ -642,12 +644,16 @@ class ScreenNode(FakeElement):
     it; `rect`: its bounding box; `section`: what RESULT_SECTION_JS reads for a search result
     (group name, nearest heading, text of the whole result); `unreadable`: how many reads of
     the section fail first, as for a result the Portal re-renders; `tree`: its accessibility
-    snapshot; `tag` and `text`: its HTML tag and its value or text."""
+    snapshot; `tag` and `text`: its HTML tag and its value or text; `fill_fail`: what fill()
+    raises. `preexisting`: whether it was on the page before the search box was typed into
+    (MARK_POPUPS_JS sets it)."""
 
     def __init__(self, interactive: bool = True, on_click=None, on_fill=None, attrs=None, children=None,
                  rect=None, section=("", "", ""), unreadable: int = 0, tree: str = "", tag: str = "div",
-                 text: str = "") -> None:
+                 text: str = "", fill_fail: Exception | None = None) -> None:
         super().__init__()
+        self.fill_fail = fill_fail
+        self.preexisting = False
         self.interactive = interactive
         self.on_click = on_click
         self.on_fill = on_fill
@@ -678,12 +684,20 @@ class ScreenNode(FakeElement):
             return list(self.section)
         if script == run.CONTROL_JS:
             return [self.tag, self.attrs.get("role", ""), False]
+        if script == run.NEW_POPUP_JS:
+            return not self.preexisting
         if "tagName" in script:                     # fill_field: [tag, type]
             return [self.tag, self.attrs.get("type", "")]
         raise NotImplementedError(script)
 
     def aria_snapshot(self, timeout=None) -> str:
         return self.tree
+
+    def element_handle(self, timeout=None):
+        return self
+
+    def dispose(self) -> None:
+        pass
 
     def inner_text(self, timeout=None) -> str:
         return self.text
@@ -694,6 +708,9 @@ class ScreenNode(FakeElement):
     def get_by_role(self, role, name=None, exact=None):
         return self.children.get_by_role(role, name=name, exact=exact)
 
+    def get_by_text(self, text, exact=None):
+        return self.children.get_by_text(text, exact=exact)
+
     def locator(self, selector: str):
         return self.children.locator(selector)
 
@@ -703,6 +720,8 @@ class ScreenNode(FakeElement):
             self.on_click()
 
     def fill(self, value, timeout=None) -> None:
+        if self.fill_fail:
+            raise self.fill_fail
         self.filled.append(value)
         self.text = value
         if self.on_fill:
@@ -719,14 +738,19 @@ class ScreenLocator:
     def nth(self, index: int):
         return self.nodes[index]
 
+    def aria_snapshot(self, timeout=None) -> str:
+        return self.nodes[0].aria_snapshot(timeout)
+
+    def and_(self, other: "ScreenLocator") -> "ScreenLocator":
+        return ScreenLocator([node for node in self.nodes if any(node is o for o in other.nodes)])
+
 
 class Screen:
     """A frame of a FakePage, or what is inside a ScreenNode: (role, name, node) entries, role
-    'text' for plain text and 'label' for a field's label. Lookups see the children of every
-    node too, as a DOM query does. A name to look up is a string (exact), a pattern (search) or
-    None (any name)."""
+    'text' for plain text (the name is its whole text, child elements included, as get_by_text
+    reads it) and 'label' for a field's label. Lookups see the children of every node too, as a
+    DOM query does. A name to look up is a string (exact), a pattern (search) or None (any)."""
 
-    TEXT_IS = re.compile(r':text-is\("((?:\\.|[^"\\])*)"\)')
     ID = re.compile(r'^\[id="([^"]*)"\]$')
 
     def __init__(self, *entries, tree: str = "") -> None:
@@ -756,13 +780,10 @@ class Screen:
         return self._find("label", text)
 
     def locator(self, selector: str) -> ScreenLocator:
-        """interactive_text() (plain text entries whose node is interactive), '[id="x"]', 'body'
-        and a list of '[role=x]' (POPUP_ROLES)."""
-        m = self.TEXT_IS.search(selector)
-        if m:
-            text = re.sub(r"\\(.)", r"\1", m.group(1))
-            return ScreenLocator([node for r, n, node in self.everything()
-                                  if r == "text" and n == text and node.interactive])
+        """interactive_text()'s constraint (every interactive node), '[id="x"]', 'body' and a
+        list of '[role=x]' (POPUP_ROLES)."""
+        if selector.startswith(":is("):
+            return ScreenLocator([node for _, _, node in self.everything() if node.interactive])
         m = self.ID.match(selector)
         if m:
             return ScreenLocator([node for _, _, node in self.everything() if node.attrs.get("id") == m.group(1)])
@@ -772,6 +793,15 @@ class Screen:
         if roles:
             return ScreenLocator([node for r, _, node in self.everything() if r in roles])
         raise NotImplementedError(selector)
+
+    def evaluate(self, script, arg=None):
+        """MARK_POPUPS_JS: what is a popup now was on the page before the search was typed."""
+        if script != run.MARK_POPUPS_JS:
+            raise NotImplementedError(script)
+        roles = re.findall(r"\[role=(\w+)\]", arg)
+        for role, _, node in self.everything():
+            if role in roles:
+                node.preexisting = True
 
 
 class FindOnScreenTests(RunnerTestCase):
@@ -835,11 +865,40 @@ class FindOnScreenTests(RunnerTestCase):
         record, _ = self.act(screen, self.SEARCH, self.ENTRA)
         self.assertEqual((record["outcome"], services.clicked), ("match", 1))
 
-    def test_without_sections_the_first_result_is_taken(self) -> None:
+    def test_a_list_already_on_the_page_is_never_taken_for_the_results(self) -> None:
+        for controls in (True, False):
+            with self.subTest(controls=controls):
+                screen, box = self.search_screen(controls=controls)
+                box.on_fill = None                                         # the dropdown has not rendered yet
+                in_grid = ScreenNode()
+                grid = ScreenNode(rect={"x": 470, "y": 300, "width": 900, "height": 400},
+                                  children=Screen(("option", self.ENTRA, in_grid)))
+                screen.add(("grid", "", grid))                              # below the box, overlapping it
+                record, r = self.act(screen, self.SEARCH, self.ENTRA)
+                self.assertEqual((record["outcome"], in_grid.clicked, self.outside.clicked), ("unknown", 0, 0))
+                self.assertIn("no results list identified", self.tree_file().read_text(encoding="utf-8"))
+
+    def test_one_result_without_a_section_is_taken(self) -> None:
+        only = self.result("")
+        screen, _ = self.search_screen(("option", self.ENTRA, only))
+        record, _ = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual((record["outcome"], only.clicked), ("match", 1))
+
+    def test_several_results_without_a_section_are_ambiguous(self) -> None:
         first, second = self.result(""), self.result("")
         screen, _ = self.search_screen(("option", self.ENTRA, first), ("option", self.ENTRA, second))
         record, _ = self.act(screen, self.SEARCH, self.ENTRA)
-        self.assertEqual((record["outcome"], first.clicked, second.clicked), ("match", 1, 0))
+        self.assertEqual((record["outcome"], first.clicked, second.clicked), ("unknown", 0, 0))
+        self.assertIn("ambiguous: 2 visible results match, none of them under Services", record["observed"])
+        self.assertTrue(self.tree_file().is_file())
+
+    def test_a_window_closed_while_typing_the_search_stops_the_run(self) -> None:
+        screen, box = self.search_screen()
+        box.fill_fail = run.PlaywrightError("Target page, context or browser has been closed")
+        page = FakePage()
+        page.is_closed = lambda: True
+        with self.assertRaises(run.PageClosed):
+            self.act(screen, self.SEARCH, self.ENTRA, page=page)
 
     def test_marketplace_and_highlighted_text_never_count_and_the_tree_is_kept(self) -> None:
         protection = self.result("Services (67)", whole="Microsoft Entra ID Protection")
@@ -916,11 +975,37 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual((record["outcome"], local.filled, domain.clicked), ("match", ["malfurion.stormrage"], 1))
         self.assertEqual(domain.text, "CONTOSO.onmicrosoft.com")
 
-    def test_a_domain_not_offered_is_unknown(self) -> None:
-        screen, _, domain = self.upn_screen("fabrikam.example", offered=["fabrikam.example"])
+    def test_a_domain_not_offered_is_unknown_and_nothing_is_typed(self) -> None:
+        screen, local, _ = self.upn_screen("fabrikam.example", offered=["fabrikam.example"])
+        record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
+        self.assertEqual((record["outcome"], local.filled), ("unknown", []))     # the domain comes first
+        self.assertIn("the domain combo box: option 'contoso.onmicrosoft.com' not found", record["observed"])
+
+    def test_a_domain_option_that_does_not_take_is_unknown(self) -> None:
+        screen, _, domain = self.upn_screen("fabrikam.example", offered=["contoso.onmicrosoft.com"])
+        domain.on_click = lambda: screen.add(("option", "contoso.onmicrosoft.com", ScreenNode()))   # clicking it changes nothing
         record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
         self.assertEqual(record["outcome"], "unknown")
-        self.assertIn("the domain combo box does not offer 'contoso.onmicrosoft.com'", record["observed"])
+        self.assertIn("was clicked, but the field shows 'fabrikam.example'", record["observed"])
+
+    def test_a_domain_offered_twice_is_ambiguous(self) -> None:
+        screen, local, _ = self.upn_screen("fabrikam.example", offered=["contoso.onmicrosoft.com"] * 2)
+        record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
+        self.assertEqual((record["outcome"], local.filled), ("unknown", []))
+        self.assertTrue(record["observed"].startswith("Ambiguous: 2 visible elements match"), record["observed"])
+
+    def test_options_are_looked_up_in_the_list_the_combo_box_controls(self) -> None:
+        screen, local, domain = self.upn_screen("fabrikam.example")
+        elsewhere = ScreenNode()
+        screen.add(("option", "contoso.onmicrosoft.com", elsewhere))       # another list on the page
+        in_list = ScreenNode(on_click=lambda: setattr(domain, "text", "contoso.onmicrosoft.com"))
+        listbox = ScreenNode(attrs={"id": "domains"}, children=Screen())
+        domain.attrs["aria-controls"] = "domains"
+        domain.on_click = lambda: (screen.add(("listbox", "", listbox)),
+                                   listbox.children.add(("option", "contoso.onmicrosoft.com", in_list)))
+        record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
+        self.assertEqual((record["outcome"], in_list.clicked, elsewhere.clicked), ("match", 1, 0))
+        self.assertEqual(local.filled, ["malfurion.stormrage"])
 
     def test_a_labelled_container_with_one_text_box_fills_it(self) -> None:
         inner = ScreenNode(tag="input")
@@ -942,6 +1027,11 @@ class FindOnScreenTests(RunnerTestCase):
                 screen = Screen(("label", "Display name", container), (second, "Display name", input_))
                 record, _ = self.act(screen, dict(self.UPN, label="Display name"), "Display name", value="Malfurion")
                 self.assertEqual((record["outcome"], input_.filled), ("match", ["Malfurion"]))
+        input_ = ScreenNode(tag="input")                  # two labelled containers: the text box still decides
+        screen = Screen(("label", "Display name", ScreenNode()), ("label", "Display name", ScreenNode()),
+                        ("textbox", "Display name", input_))
+        record, _ = self.act(screen, dict(self.UPN, label="Display name"), "Display name", value="Malfurion")
+        self.assertEqual((record["outcome"], input_.filled), ("match", ["Malfurion"]))
 
     def test_a_leading_plus_is_dropped_when_nothing_has_the_full_name(self) -> None:
         item = {"kind": "navigation", "labels": ["+ New user", "Create new user"], "line": 3}
@@ -966,9 +1056,15 @@ class FindOnScreenTests(RunnerTestCase):
         with mock.patch.object(run, "all_frames", lambda page: [Screen(("text", "Users", link_text),
                                                                      ("text", "Users", ScreenNode()))]):
             self.assertIsNone(run.find_exact(FakePage(), "Users"))          # two links: not found, not a guess
-        quoted = ScreenNode()
-        self.assertEqual(run.interactive_text(Screen(("text", 'Say "hi" \\ bye', quoted)), 'Say "hi" \\ bye').nodes,
-                         [quoted])                                          # quotes and backslashes escaped
+        # '<a>Users<span> (preview)</span></a>': the whole text is not 'Users', whatever its own text node says.
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(("text", "Users (preview)", link_text))]):
+            self.assertIsNone(run.find_exact(FakePage(), "Users"))
+        captured = []
+        scope = Screen(("text", "Users", link_text))
+        with mock.patch.object(Screen, "get_by_text", lambda self, text, exact=None: captured.append((text, exact))
+                               or Screen._find(self, "text", text)):
+            self.assertEqual(run.interactive_text(scope, "Users").nodes, [link_text])
+        self.assertEqual(captured, [("Users", True)])                       # get_by_text, exact: the whole text
 
     NAVIGATION = {"kind": "navigation", "labels": ["Users", "All users"], "line": 1}
 

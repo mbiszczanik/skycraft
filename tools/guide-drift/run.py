@@ -79,26 +79,34 @@ INTERACTIVE = ("a, button, [role=link], [role=button], [role=menuitem], [role=tr
                "[role=option], [role=checkbox], [role=radio]")
 # A blade menu's button that opens all its collapsed groups ('Manage', 'Monitoring', 'Help').
 EXPAND_ALL = "Expand all headers"
-# The global search's dropdown when the box names none in aria-controls or aria-owns.
+# The global search's dropdown when the box names none in aria-controls or aria-owns: a popup of
+# these roles that appeared after typing (MARK_POPUPS_JS runs first, NEW_POPUP_JS asks), or that
+# starts within POPUP_GAP_PX of the box's bottom edge.
 POPUP_ROLES = "[role=listbox], [role=dialog], [role=menu], [role=tree], [role=grid]"
+POPUP_GAP_PX = 8
+MARK_POPUPS_JS = "selector => { window.__guideDriftPopups = new Set(document.querySelectorAll(selector)); }"
+NEW_POPUP_JS = "e => !!window.__guideDriftPopups && !window.__guideDriftPopups.has(e)"
 # Sections of the global search's dropdown: the service itself, an offer to buy, articles.
 SEARCH_PREFERRED = re.compile(r"^Services\b", re.IGNORECASE)
 SEARCH_EXCLUDED = re.compile(r"^(?:Marketplace|Documentation)\b", re.IGNORECASE)
 SEARCH_SECTION = re.compile(r"^(?:Services|Marketplace|Documentation)\b", re.IGNORECASE)
-# For one search result: [its group's name, the nearest heading before it, the text of the
-# whole result it is or sits in], each with whitespace normalised.
-RESULT_SECTION_JS = r"""(e, interactive) => {
+# For one search result inside the dropdown `root`: [its group's name, the nearest heading before
+# it, the text of the whole result it is or sits in], each with whitespace normalised. A group or
+# heading outside the dropdown (the page's own title) is no section: ''.
+RESULT_SECTION_JS = r"""(e, {interactive, root}) => {
   const clean = t => (t || '').replace(/\s+/g, ' ').trim();
+  const inside = n => !!n && root.contains(n);
   const group = e.closest('[role=group]');
-  let name = group ? group.getAttribute('aria-label') : '';
-  if (!name && group && group.getAttribute('aria-labelledby')) {
+  let name = inside(group) ? group.getAttribute('aria-label') : '';
+  if (!name && inside(group) && group.getAttribute('aria-labelledby')) {
     name = group.getAttribute('aria-labelledby').split(/\s+/)
       .map(id => (document.getElementById(id) || {}).textContent).join(' ');
   }
   const heading = document.evaluate(
     "preceding::*[self::h1 or self::h2 or self::h3 or self::h4 or self::h5 or self::h6 or @role='heading'][1]",
     e, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-  return [clean(name), clean(heading && heading.textContent), clean((e.closest(interactive) || e).textContent)];
+  return [clean(name), clean(inside(heading) ? heading.textContent : ''),
+          clean((e.closest(interactive) || e).textContent)];
 }"""
 # An element that takes a value itself; a labelled element that is none of these is a container
 # (find_field, fill_parts). CONTROL_JS reads [tag, role attribute, contenteditable].
@@ -232,12 +240,12 @@ def text_on_screen(page: Page, text: str) -> bool:
 
 
 def interactive_text(scope: Frame | Locator, label: str) -> Locator:
-    """Plain text `label` (exact, whitespace normalised) that is, or sits inside, an interactive
-    element (INTERACTIVE); clicking the text clicks that element. The constraint is part of the
-    locator rather than a check after it, so a re-render between count() and nth(k) cannot move
-    a match onto a static caption."""
-    quoted = '"' + label.replace("\\", "\\\\").replace('"', '\\"') + '"'
-    return scope.locator(f":is({INTERACTIVE}):text-is({quoted}), :is({INTERACTIVE}) :text-is({quoted})")
+    """Text whose whole text is `label` (get_by_text, exact: whitespace normalised, child elements
+    included, so '<a>Users<span> (preview)</span></a>' is not 'Users') and that is, or sits
+    inside, an interactive element (INTERACTIVE); clicking the text clicks that element. The
+    constraint is part of the locator rather than a check after it, so a re-render between
+    count() and nth(k) cannot move a match onto a static caption."""
+    return scope.get_by_text(label, exact=True).and_(scope.locator(f":is({INTERACTIVE}), :is({INTERACTIVE}) *"))
 
 
 # find_in_roles' choice among the visible matches of one role (by_text False) or of the text.
@@ -293,7 +301,7 @@ def parts_of(container: Locator, role: str) -> list[Locator]:
 def find_field(page: Page, label: str) -> Locator | None:
     """The element the label belongs to, or a textbox, combobox, checkbox or radio of that name,
     and nothing else. A labelled container that is not a control itself gives way to a control
-    of the label (a text box of that name, or another labelled element), unless it holds a combo
+    of the label (another labelled element, or a text box of that name), unless it holds a combo
     box: the Portal's 'User principal name' is a <div aria-label> around a text box, an '@' and
     a domain combo box, and fill_field splits the value over those parts. An ambiguous match
     raises Ambiguous."""
@@ -302,11 +310,10 @@ def find_field(page: Page, label: str) -> Locator | None:
         controls = [element for element in labelled if is_control(element)]
         containers = [element for element in labelled if not any(element is c for c in controls)]
         composite = [element for element in containers if parts_of(element, "combobox")]
-        chosen = only_one(composite or controls or containers)
         if composite or controls:
-            return chosen
+            return only_one(composite or controls)
         textbox = unique_visible(page, lambda f: f.get_by_role("textbox", name=label, exact=True))
-        return textbox or chosen
+        return textbox or only_one(containers)
     for role in FIELD_ROLES:
         element = unique_visible(page, lambda f, role=role: f.get_by_role(role, name=label, exact=True))
         if element is not None:
@@ -327,6 +334,18 @@ def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
     return element
 
 
+def by_id(element_id: str) -> str:
+    """A CSS selector for the element with this id, whatever characters the id holds."""
+    return '[id="' + element_id.replace("\\", "\\\\").replace('"', '\\"') + '"]'
+
+
+def owned_ids(element: Locator) -> list[str]:
+    """The ids the element names in aria-controls, or else in aria-owns."""
+    owned = (element.get_attribute("aria-controls", timeout=1000)
+             or element.get_attribute("aria-owns", timeout=1000) or "")
+    return owned.split()
+
+
 def search_box(page: Page) -> tuple[Frame, Locator] | None:
     """The Portal's global search box and the frame it is in; None when it is not on screen.
     Raises Ambiguous when there are several."""
@@ -343,16 +362,20 @@ def search_box(page: Page) -> tuple[Frame, Locator] | None:
 
 
 def search_dropdown(page: Page, frame: Frame, box: Locator) -> Locator | None:
-    """The list of results under the search box: the element the box names in aria-controls or
-    aria-owns; failing that, the visible popup (POPUP_ROLES) nearest below the box and overlapping
-    it horizontally. None while there is none: the results are still loading."""
+    """The list of results under the search box; None while there is none (the results are
+    still loading). When the box names it in aria-controls or aria-owns, that element and nothing
+    else. Otherwise the nearest visible popup (POPUP_ROLES) below the box and overlapping it
+    horizontally that either appeared after typing (search_portal marks the popups there before
+    it types) or starts within POPUP_GAP_PX of the box's bottom edge: a list or grid already on
+    the page is never taken for the results."""
     try:
-        owned = (box.get_attribute("aria-controls", timeout=1000)
-                 or box.get_attribute("aria-owns", timeout=1000) or "")
-        for owned_id in owned.split():
-            found = visible_in(frame.locator('[id="' + owned_id.replace('"', '\\"') + '"]'), None)
-            if len(found) == 1:
-                return found[0]
+        owned = owned_ids(box)
+        if owned:
+            for owned_id in owned:
+                found = visible_in(frame.locator(by_id(owned_id)), None)
+                if len(found) == 1:
+                    return found[0]
+            return None
         under = box.bounding_box(timeout=1000)
         if under is None:
             return None
@@ -363,6 +386,8 @@ def search_dropdown(page: Page, frame: Frame, box: Locator) -> Locator | None:
                     or rect["x"] + rect["width"] <= under["x"]):
                 continue
             distance = rect["y"] - (under["y"] + under["height"])
+            if abs(distance) > POPUP_GAP_PX and not popup.evaluate(NEW_POPUP_JS, timeout=1000):
+                continue
             if nearest is None or distance < nearest[0]:     # a tie keeps the outer popup
                 nearest = (distance, popup)
         return nearest[1] if nearest else None
@@ -370,22 +395,23 @@ def search_dropdown(page: Page, frame: Frame, box: Locator) -> Locator | None:
         return None
 
 
-def search_result(label: str) -> Choose:
-    """find_in_roles' choice among exact results in the search dropdown. The Portal lists a
-    service under 'Services' and again under 'Marketplace' (an offer to buy) and in
-    'Documentation' links; the section is the result's group name, or the nearest heading before
-    it. Results in Marketplace or Documentation never count. One result in Services wins;
-    several there are Ambiguous. Without an identifiable Services section, the first remaining
-    result in document order is taken (Services is listed first). Plain text counts only when
-    the whole result it sits in reads `label`, not when it is the highlighted part of a longer
-    result ('Microsoft Entra ID Protection'). A result that changes while it is read raises
-    Ambiguous, so the caller looks again."""
+def search_result(label: str, root: object) -> Choose:
+    """find_in_roles' choice among exact results in the search dropdown `root` (an element
+    handle). The Portal lists a service under 'Services' and again under 'Marketplace' (an offer
+    to buy) and in 'Documentation' links; the section is the result's group name, or the nearest
+    heading before it, either only when it is inside the dropdown. Results in Marketplace or
+    Documentation never count. One result in Services wins; several there are Ambiguous. A
+    result with no identifiable section counts only when it is the only one left; several are
+    Ambiguous. Plain text counts only when the whole result it sits in reads `label`, not when it
+    is the highlighted part of a longer result ('Microsoft Entra ID Protection'). A result that
+    changes while it is read raises Ambiguous, so the caller looks again."""
     def choose(found: list[Locator], by_text: bool) -> Locator | None:
         services: list[Locator] = []
         others: list[Locator] = []
         for element in found:
             try:
-                group, heading, whole = element.evaluate(RESULT_SECTION_JS, INTERACTIVE, timeout=1000)
+                group, heading, whole = element.evaluate(
+                    RESULT_SECTION_JS, {"interactive": INTERACTIVE, "root": root}, timeout=1000)
             except PlaywrightError as error:
                 raise Ambiguous(f"a result changed while it was read ({type(error).__name__})") from error
             section = group if SEARCH_SECTION.match(group) else heading
@@ -396,6 +422,8 @@ def search_result(label: str) -> Choose:
             raise Ambiguous(f"{len(services)} visible results in Services match")
         if services:
             return services[0]
+        if len(others) > 1:
+            raise Ambiguous(f"{len(others)} visible results match, none of them under Services")
         return others[0] if others else None
     return choose
 
@@ -427,17 +455,34 @@ def search_portal(page: Page, label: str, diagnose: Callable[[str], None] | None
             raise PageClosed("the browser window was closed")
         raise LookupError("the Portal's search box is not on screen")
     frame, box = found
-    box.fill(label, timeout=FIND_TIMEOUT_MS)
+    try:
+        frame.evaluate(MARK_POPUPS_JS, POPUP_ROLES)
+    except PlaywrightError:         # then only a popup right under the box counts
+        pass
+    try:
+        box.fill(label, timeout=FIND_TIMEOUT_MS)
+    except PlaywrightError:
+        if page.is_closed():
+            raise PageClosed("the browser window was closed") from None
+        raise
     page.wait_for_timeout(SETTLE_MS)
     deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
     while True:
         dropdown = search_dropdown(page, frame, box)
         ambiguous: Ambiguous | None = None
         if dropdown is not None:
+            result = None
             try:
-                result = find_in_roles(page, label, RESULT_ROLES, root=dropdown, choose=search_result(label))
+                root = dropdown.element_handle(timeout=1000)
+                try:
+                    result = find_in_roles(page, label, RESULT_ROLES, root=dropdown,
+                                           choose=search_result(label, root))
+                finally:
+                    root.dispose()
             except Ambiguous as error:
-                ambiguous, result = error, None
+                ambiguous = error
+            except PlaywrightError:     # the dropdown went away while the Portal reloaded it
+                pass
             if result is not None:
                 return result
         if time.monotonic() >= deadline:
@@ -480,43 +525,79 @@ def current_text(element: Locator, tag: str) -> str:
     return element.inner_text(timeout=FIND_TIMEOUT_MS).strip()
 
 
+def find_option(page: Page, element: Locator, name: str | re.Pattern[str]) -> Locator | None:
+    """The option called `name` of the open combo box `element`: inside the listbox it names in
+    aria-controls or aria-owns, when that is on screen; otherwise anywhere on screen. Raises
+    Ambiguous when several options have the name."""
+    try:
+        owned = owned_ids(element)
+    except PlaywrightError:
+        owned = []
+    for owned_id in owned:
+        try:
+            listbox = unique_visible(page, lambda f, owned_id=owned_id: f.locator(by_id(owned_id)))
+        except Ambiguous:
+            continue
+        if listbox is not None:
+            try:
+                return only_one(visible_in(listbox.get_by_role("option", name=name, exact=True),
+                                           page.viewport_size))
+            except PlaywrightError:     # the list closed or reloaded: look again
+                return None
+    return find_by_name(page, "option", name)
+
+
 def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case: bool = False) -> str | None:
     """Open the combo box or drop-down button `element` and pick the option named `value`;
     'already set' when it shows `value` already. With `ignore_case`, names are compared regardless
-    of case (a domain). Raises LookupError when no option has the name."""
-    shown = current_text(element, tag)
-    if shown == value or (ignore_case and shown.casefold() == value.casefold()):
+    of case (a domain). The options load as the Portal answers, so they are looked for until
+    FIND_TIMEOUT_MS has passed (find_option). Raises LookupError when no option has the name, or
+    when the element does not show `value` after the click; Ambiguous when several options
+    have the name."""
+    def shows(text: str) -> bool:
+        return text == value or (ignore_case and text.casefold() == value.casefold())
+
+    if shows(current_text(element, tag)):
         return "already set"
     element.click(timeout=FIND_TIMEOUT_MS)
     page.wait_for_timeout(SETTLE_MS // 2)
     name = re.compile("^" + re.escape(value) + "$", re.IGNORECASE) if ignore_case else value
-    option = find_by_name(page, "option", name)
+    deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
+    option = find_option(page, element, name)
+    while option is None and time.monotonic() < deadline:
+        page.wait_for_timeout(250)
+        option = find_option(page, element, name)
     if option is None:
         raise LookupError(f"option '{value}' not found")
     option.click(timeout=FIND_TIMEOUT_MS)
+    page.wait_for_timeout(SETTLE_MS // 2)
+    shown = current_text(element, tag)
+    if not shows(shown):
+        raise LookupError(f"option '{value}' was clicked, but the field shows '{shown}'")
     return None
 
 
 def fill_parts(page: Page, container: Locator, value: str) -> str | None:
     """Give `value` to a labelled container that is not a control itself (find_field). With one
     text box and nothing else, the text box gets the value. With one text box and one combo box
-    and an '@' in the value (the Portal's user principal name: name, '@', domain), the text box
-    gets the part before the last '@', and the combo box must show the part after it, compared
-    regardless of case; when it does not, the domain is picked from its options. 'already set'
-    when every part held its value before. Raises LookupError for any other container, or when
-    the domain is not offered."""
+    and an '@' in the value (the Portal's user principal name: name, '@', domain), the combo box
+    must show the part after the last '@', compared regardless of case (when it does not, the
+    domain is picked from its options), and then the text box gets the part before it.
+    'already set' when every part held its value before. Raises LookupError for any other
+    container, or when the domain cannot be picked; Ambiguous when several options carry it."""
     textboxes, comboboxes = parts_of(container, "textbox"), parts_of(container, "combobox")
     if len(textboxes) == 1 and not comboboxes:
         return fill_field(page, textboxes[0], value)
     if len(textboxes) == 1 and len(comboboxes) == 1 and "@" in value:
         local, domain = value.rsplit("@", 1)
-        typed = fill_field(page, textboxes[0], local)
         try:
             tag = comboboxes[0].evaluate(CONTROL_JS, timeout=FIND_TIMEOUT_MS)[0]
             picked = pick_option(page, comboboxes[0], tag, domain, ignore_case=True)
+        except Ambiguous:
+            raise
         except LookupError as error:
-            raise LookupError(f"the domain combo box does not offer '{domain}' ({error})") from error
-        page.wait_for_timeout(SETTLE_MS // 2)
+            raise LookupError(f"the domain combo box: {error}") from error
+        typed = fill_field(page, textboxes[0], local)
         return "already set" if typed and picked else None
     raise LookupError(f"the labelled element is not a field: it holds {len(textboxes)} text box(es) "
                       f"and {len(comboboxes)} combo box(es)")
@@ -1151,7 +1232,8 @@ class Runner:
             if r["step"] == step["id"] and r["outcome"] != "match":
                 outcome = f"{r['outcome']} ({r['severity']})" if r.get("severity") else r["outcome"]
                 observed = (str(r["observed"]).strip().splitlines() or [""])[0] if r.get("observed") else "-"
-                print(self.redactor.redact(f"  {r['kind']} '{r['label']}': {outcome}: {observed}"))
+                what = f"{r['kind']} '{r['label']}'" if r.get("label") else r["kind"]
+                print(self.redactor.redact(f"  {what}: {outcome}: {observed}"))
         print("What now?")
         while True:
             answer = self.prompt(self.FAILURE_PROMPT)
