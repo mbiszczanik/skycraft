@@ -2771,6 +2771,14 @@ git commit -m "feat(guide-drift): record the first supervised run of lab 1.1"
 
 ### Task 13: Pull request
 
+- [ ] **Step 0: Rebase on the lab 1.1 guide fix (#215) and update the recording**
+
+Once #215 is merged, rebase this branch on `main` and update
+`tools/guide-drift/recordings/lab-1.1.json`: drop the 1.1.10 `Manage` and 1.1.11 `+ Assignments`
+decisions (those lines are gone from the guide), and the 1.1.7 `viewUrl` and result (the step now
+ends on All groups). Re-run the parser and recording Pester files; a replay run of lab 1.1 against
+the fixed guide is the natural next live check.
+
 - [ ] **Step 1: Delete PLAN.md in the last commit**
 
 ```powershell
