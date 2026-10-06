@@ -1722,6 +1722,19 @@ def resolve_value(recording: dict, step: dict, label: str, value: str) -> str:
     return value
 
 
+
+BRACKET_TOKEN = re.compile(r"\[[^\]]+\]")
+
+
+def value_action(value: str) -> str:
+    """How to treat a field value once placeholders and overrides are applied: 'skip' when the
+    whole value is a bracketed instruction ('[Leave blank]' in 1.1.10), 'unresolved' when a
+    bracket token is left ('skycraft-auth-[uniqueID]'), otherwise 'type'."""
+    if re.fullmatch(r"\[[^\]]+\]", value.strip()):
+        return "skip"
+    return "unresolved" if BRACKET_TOKEN.search(value) else "type"
+
+
 def fill_field(page: Page, element, value: str) -> None:
     role = element.get_attribute("role") or ""
     tag = element.evaluate("e => e.tagName.toLowerCase()")
@@ -1854,7 +1867,17 @@ class Runner:
                 records = [record]
             elif item["kind"] == "field":
                 value = resolve_value(self.recording, step, item["label"], item["value"])
-                record = self.act_on_label(step, item["label"], "field", item["line"], value)
+                action = value_action(value)
+                if action == "type":
+                    record = self.act_on_label(step, item["label"], "field", item["line"], value)
+                else:
+                    record = self.new_record(step, "field", item["label"])
+                    if action == "skip":
+                        record.update(outcome="match", observed=f"left as is: {value}")
+                    else:
+                        record.update(outcome="unknown",
+                                      observed=f"value '{value}' has an unresolved [token]; add a "
+                                               "placeholder or a valueOverride to the recording")
                 records = [record]
             else:
                 records = []
