@@ -14,7 +14,9 @@ without a browser. Rules (issue #189):
     body is read. Its own '**Expected Result**' wins; when it has none, the first Expected Result
     anywhere in the step is taken (the standard puts a single one after Option 3).
   * '**Expected Result**' may be a list item and may carry a qualifier before the colon
-    ('**Expected Result** (if ...):'). The first one in a step is kept.
+    ('**Expected Result** (if ...):'). When nothing follows the colon, the list right after it
+    is the result: its items joined with '; ', markup stripped, and never read as steps. The
+    first one in a step is kept.
   * Bold spans in list items are UI labels. A list item containing a chain (A → B, A -> B or
     A > B) is one 'navigation' item with several labels; otherwise it is an 'action' item.
     '\\*' inside bold is a literal asterisk; a leading '*' (the Portal's required-field marker)
@@ -31,7 +33,18 @@ without a browser. Rules (issue #189):
     Every other table is informational and is not read.
   * A step with no item left is emitted with portal=false and is not checked by the runner.
 
-Usage: python parse.py <path/to/lab-guide-X.Y.md> [--out steps.json]
+Known gaps. Spec #189 records only lab 1.1; fix these before another lab is recorded:
+
+  * A field whose label is not bold is misread: '- Lock type: **Delete**' becomes a click on
+    "Delete", and '- Name: `x`' is dropped.
+  * Code-span steps drop out of navigation chains: '**Virtual Networks** > `vnet` > **Subnets**'.
+  * The first-option rule skips 3.2.1's Portal path, because its Option A is CLI-only.
+  * A caption label whose value holds bold spans turns them into actions (4.2:741).
+  * Instructions after a field value are lost (5.3:225).
+  * Text before the first option heading is dropped.
+  * NON_UI_BOLD is one global list, so a caption from one lab can hide a real label in another.
+
+Usage: python parse.py <path/to/lab-guide-X.Y.md> [--out steps.json] [--repo-root <dir>]
 """
 from __future__ import annotations
 
@@ -42,7 +55,9 @@ import struct
 import sys
 from pathlib import Path
 
-STEP_HEADING = re.compile(r"^###\s+Step\s+(?P<id>\d+\.\d+\.\d+):\s*(?P<title>.+?)\s*$")
+# Patterns that capture to the end of a line use '.*' and strip in code: a lazy '.+?' followed
+# by '\s*$' is quadratic on a long line (a 100,000-character line took 72 seconds).
+STEP_HEADING = re.compile(r"^###\s+Step\s+(?P<id>\d+\.\d+\.\d+):(?P<title>.*)$")
 SECTION_END = re.compile(r"^#{1,3}\s")
 OPTION_HEADING = re.compile(r"^####\s+Option\s+(?P<n>\d+|[A-Z])\b")
 FIRST_OPTIONS = {"1", "A"}
@@ -51,8 +66,7 @@ FENCE = re.compile(r"^[ \t]*(?P<run>`{3,}|~{3,})(?P<info>.*)$")
 LIST_ITEM = re.compile(r"^\s*(?:\d+\.|[-*])\s+(?P<text>.+)$")
 BOLD = re.compile(r"\*\*(?P<text>(?:\\\*|[^*])+?)\*\*")   # '\*' inside bold is a literal '*'
 LIST_FIELD = re.compile(r"^\*\*(?P<label>(?:\\\*|[^*])+?)\*\*\s*:\s*(?P<value>.+)$")
-EXPECTED = re.compile(
-    r"^\s*(?:(?:[-*]|\d+\.)\s+)?\*\*Expected Result\*\*[^:]*:\s*(?P<text>.+?)\s*$")
+EXPECTED = re.compile(r"^\s*(?:(?:[-*]|\d+\.)\s+)?\*\*Expected Result\*\*[^:]*:(?P<text>.*)$")
 TABLE_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$")
 SEPARATOR_CELL = re.compile(r"^:?-+:?$")   # every non-empty cell of a separator row; not "--name"
 IMAGE = re.compile(r"!\[[^\]]*\]\(\s*\.?/?(?P<path>images/[^)\s]+)\s*\)")
@@ -163,8 +177,6 @@ def unescape(text: str) -> str:
 
 def clean_label(text: str) -> str:
     text = text.strip().lstrip("*").strip()      # a leading '*' is the Portal's required marker
-    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'“”":
-        text = text[1:-1].strip()
     return text.strip("“”\"'").strip()
 
 
@@ -197,7 +209,8 @@ def split_steps(lines: list[str]) -> list[dict]:
     for number, line in enumerate(lines, start=1):
         m = STEP_HEADING.match(line)
         if m:
-            current = {"id": m.group("id"), "title": m.group("title"), "line": number, "body": []}
+            current = {"id": m.group("id"), "title": m.group("title").strip(), "line": number,
+                       "body": []}
             steps.append(current)
             continue
         if current is not None and SECTION_END.match(line):
@@ -208,50 +221,131 @@ def split_steps(lines: list[str]) -> list[dict]:
     return steps
 
 
-def option_one_body(body: list[tuple[int, str]]) -> list[tuple[int, str]]:
-    """The whole body when there are no Option headings. Otherwise the first option (1 or A),
-    plus Expected Result lines outside the other options' bodies; when none of those exists,
-    the first Expected Result anywhere in the step."""
-    has_options = any(OPTION_HEADING.match(line) for _, line in body)
-    if not has_options:
-        return body
-    kept: list[tuple[int, str]] = []
-    first_expected: tuple[int, str] | None = None
-    region = "outside"                    # "outside" | "first" | "other"
-    for number, line in body:
+def option_regions(body: list[tuple[int, str]]) -> list[str]:
+    """Where each body line sits: 'step' for every line when the step has no Option headings;
+    otherwise 'first' (the Option 1 or A body), 'other' (another option's body), 'outside'
+    (before the first option, or under another '####' heading) or 'heading'."""
+    if not any(OPTION_HEADING.match(line) for _, line in body):
+        return ["step"] * len(body)
+    regions: list[str] = []
+    region = "outside"
+    for _, line in body:
         m = OPTION_HEADING.match(line)
         if m:
             region = "first" if m.group("n") in FIRST_OPTIONS else "other"
-            continue
-        if SUBHEADING.match(line):
+            regions.append("heading")
+        elif SUBHEADING.match(line):
             region = "outside"
-            continue
-        is_expected = bool(EXPECTED.match(line))
-        if is_expected and first_expected is None:
-            first_expected = (number, line)
-        if region == "first" or (is_expected and region == "outside"):
-            kept.append((number, line))
-    if first_expected is not None and not any(EXPECTED.match(line) for _, line in kept):
-        kept = sorted(kept + [first_expected])
-    return kept
+            regions.append("heading")
+        else:
+            regions.append(region)
+    return regions
 
 
-def parse_items(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, list[str]]:
-    items: list[dict] = []
+def expected_text(body: list[tuple[int, str]], index: int) -> tuple[str, int]:
+    """The text of the Expected Result on body[index], and the index of the first line after it.
+
+    The text is what follows the colon. When nothing does, it is the list right after the line
+    (blank lines between are allowed): its items joined with '; ', markup stripped as for values.
+    """
+    text = EXPECTED.match(body[index][1]).group("text").strip()
+    if text:
+        return text, index + 1
+    position = index + 1
+    while position < len(body) and (body[position][1] == HIDDEN or not body[position][1].strip()):
+        position += 1
+    parts: list[str] = []
+    after = index + 1
+    while position < len(body):
+        line = body[position][1]
+        if line != HIDDEN:
+            li = LIST_ITEM.match(line)
+            if not li:
+                break
+            parts.append(strip_value_markup(li.group("text")))
+            after = position + 1
+        position += 1
+    return "; ".join(parts), after
+
+
+def read_step(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, list[str]]:
+    """Items, Expected Result and images of one step section.
+
+    Items come from the whole body, or from the first option only. The Expected Result is the
+    first one in the step that is not inside another option's body; when there is none, the
+    first one anywhere (the standard puts a single one after Option 3).
+    """
+    regions = option_regions(body)
+    item_lines: list[tuple[int, str]] = []
     expected: str | None = None
+    fallback: str | None = None
+    index = 0
+    while index < len(body):
+        if EXPECTED.match(body[index][1]):
+            text, after = expected_text(body, index)
+            if text and regions[index] != "other" and expected is None:
+                expected = text
+            elif text and fallback is None:
+                fallback = text
+            index = after
+            continue
+        if regions[index] in ("step", "first"):
+            item_lines.append(body[index])
+        index += 1
+    items, images = parse_items(item_lines)
+    return items, expected if expected is not None else fallback, images
+
+
+def table_form(header: list[str]) -> str | None:
+    """'field' or 'tag' when a table's header row makes it a form; None for any other table."""
+    if len(header) < 2 or strip_value_markup(header[1]).lower() != "value":
+        return None
+    first = strip_value_markup(header[0]).lower()
+    if first in FIELD_FIRST_HEADERS:
+        return "field"
+    if first in TAG_FIRST_HEADERS:
+        return "tag"
+    return None
+
+
+def table_row_item(cells: list[str], form: str | None, number: int) -> dict | None:
+    """The field or tag item for one data row of a form table; None for any other row."""
+    if not form or len(cells) < 2 or not cells[0]:
+        return None
+    key = "label" if form == "field" else "name"
+    return {"kind": form, key: clean_label(strip_value_markup(cells[0])),
+            "value": strip_value_markup(cells[1]), "line": number}
+
+
+def list_item(text: str, number: int) -> dict | None:
+    """The field, navigation or action item for the text of one list item; None for none."""
+    f = LIST_FIELD.match(text)
+    if f:
+        label = clean_label(unescape(f.group("label")))
+        if is_ui_label(label):
+            value = f.group("value").strip()
+            if value.endswith("."):
+                value = value[:-1]                 # before the markup, so "`staging`." works
+            return {"kind": "field", "label": label, "value": strip_value_markup(value),
+                    "line": number}
+    labels = [clean_label(unescape(b.group("text"))) for b in BOLD.finditer(text)]
+    labels = [label for label in labels if is_ui_label(label)]
+    if not labels:
+        return None
+    kind = "navigation" if CHAIN.search(text) and len(labels) > 1 else "action"
+    return {"kind": kind, "labels": labels, "line": number}
+
+
+def parse_items(lines: list[tuple[int, str]]) -> tuple[list[dict], list[str]]:
+    """Items and image paths of the lines a step is read from, in document order."""
+    items: list[dict] = []
     images: list[str] = []
     in_table = False
     form: str | None = None               # "field", "tag" or None (informational) for this table
-    for number, line in body:
+    for number, line in lines:
         if line == HIDDEN:
             continue                      # a commented-out line neither ends nor extends a table
-        e = EXPECTED.match(line)
-        if e:
-            if expected is None:
-                expected = e.group("text")    # the first one in the step wins
-            continue
-        for img in IMAGE.finditer(line):
-            images.append(img.group("path"))
+        images.extend(img.group("path") for img in IMAGE.finditer(line))
         row = TABLE_ROW.match(line)
         if row:
             cells = [c.strip() for c in row.group("cells").split("|")]
@@ -259,41 +353,16 @@ def parse_items(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, li
             if filled and all(SEPARATOR_CELL.match(c) for c in filled):
                 continue
             if not in_table:
-                in_table = True          # header row: a form only when the second cell is "Value"
-                first = strip_value_markup(cells[0]).lower()
-                form = None
-                if len(cells) >= 2 and strip_value_markup(cells[1]).lower() == "value":
-                    if first in FIELD_FIRST_HEADERS:
-                        form = "field"
-                    elif first in TAG_FIRST_HEADERS:
-                        form = "tag"
+                in_table, form = True, table_form(cells)   # the header row
                 continue
-            if form and len(cells) >= 2 and cells[0]:
-                key = "label" if form == "field" else "name"
-                items.append({"kind": form, key: clean_label(strip_value_markup(cells[0])),
-                              "value": strip_value_markup(cells[1]), "line": number})
-            continue
-        in_table = False
-        li = LIST_ITEM.match(line)
-        if not li:
-            continue
-        f = LIST_FIELD.match(li.group("text"))
-        if f:
-            label = clean_label(unescape(f.group("label")))
-            if is_ui_label(label):
-                value = f.group("value").strip()
-                if value.endswith("."):
-                    value = value[:-1]             # before the markup, so "`staging`." works
-                value = strip_value_markup(value)
-                items.append({"kind": "field", "label": label, "value": value, "line": number})
-                continue
-        labels = [clean_label(unescape(b.group("text"))) for b in BOLD.finditer(li.group("text"))]
-        labels = [l for l in labels if is_ui_label(l)]
-        if not labels:
-            continue
-        kind = "navigation" if CHAIN.search(li.group("text")) and len(labels) > 1 else "action"
-        items.append({"kind": kind, "labels": labels, "line": number})
-    return items, expected, images
+            item = table_row_item(cells, form, number)
+        else:
+            in_table = False
+            li = LIST_ITEM.match(line)
+            item = list_item(li.group("text"), number) if li else None
+        if item:
+            items.append(item)
+    return items, images
 
 
 def parse_guide(guide: Path, repo_root: Path | None = None) -> dict:
@@ -303,7 +372,7 @@ def parse_guide(guide: Path, repo_root: Path | None = None) -> dict:
     lab = lab_match.group(1) if lab_match else ""
     steps = []
     for raw in split_steps(lines):
-        items, expected, images = parse_items(option_one_body(raw["body"]))
+        items, expected, images = read_step(raw["body"])
         steps.append({
             "id": raw["id"], "title": raw["title"], "line": raw["line"],
             "portal": bool(items), "items": items, "expected": expected, "images": images,

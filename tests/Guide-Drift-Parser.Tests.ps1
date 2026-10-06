@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Pester 5 tests for tools/guide-drift/parse.py, the guide-to-steps parser of the guide drift tool.
 
@@ -14,7 +14,7 @@
       Name | Value and Tag | Value tables become tags; images are collected with their width.
 
       THE 17 GUIDES - every module-*/X.Y-*/lab-guide-X.Y.md parses, its step ids match its
-      headings in order, and every step marked portal has at least one label. This does NOT
+      headings in order, and no label or value carries markup or comment residue. This does NOT
       enforce the multi-modal structure of docs/lab-guide-standards.md section 5; only 3 guides
       use it today.
 
@@ -165,6 +165,8 @@ Describe 'parse.py - form tables, HTML comments and images' {
     BeforeAll {
         # A PNG header is enough: parse.py reads the width from IHDR (bytes 16..19) and never decodes.
         function New-PngFixture {
+            [CmdletBinding()]
+            [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Test helper writing a PNG header into TestDrive')]
             param([string]$Path, [int]$Width)
             $widthBytes = [System.BitConverter]::GetBytes([int32]$Width)
             [array]::Reverse($widthBytes)   # IHDR is big-endian
@@ -382,11 +384,68 @@ Describe 'parse.py - forms and markers found in the real guides' {
     }
 }
 
+Describe 'parse.py - Expected Result written as a list or with a qualifier' {
+    BeforeAll {
+        $fixture = @'
+# Lab 9.9: Expected Result shapes
+
+### Step 9.9.1: Result as a list
+
+1. Click **Create**
+
+**Expected Result**:
+
+- Deployment **succeeds**
+- Open **Services** -> **Repositories** and see `skycraft-auth`
+
+Then continue:
+
+1. Click **Next**
+
+### Step 9.9.2: Result with a qualifier
+
+1. Click **Save**
+
+**Expected Result** (if the quota allows): The share is saved.
+'@
+        $script:Results = ConvertFrom-GuideFixture -Markdown $fixture
+    }
+
+    It 'joins the list after an empty Expected Result into its text, markup stripped' {
+        $script:Results.steps[0].expected | Should -Be 'Deployment succeeds; Open Services -> Repositories and see skycraft-auth'
+    }
+
+    It 'does not read the Expected Result list as steps' {
+        @($script:Results.steps[0].items | ForEach-Object { $_.labels }) | Should -Be @('Create', 'Next')
+    }
+
+    It 'reads an Expected Result with a qualifier before the colon' {
+        $script:Results.steps[1].expected | Should -Be 'The share is saved.'
+    }
+}
+
 # Discovery-time state for the per-guide cases. The file-level BeforeAll does not run at
 # discovery, so these are defined here at file scope, as Guide-Step-Numbering.Tests.ps1 does.
 $DiscoveryRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $DiscoveryParser   = Join-Path $DiscoveryRepoRoot 'tools/guide-drift/parse.py'
 $DiscoveryPython   = if ($IsWindows) { 'python' } else { 'python3' }
+
+# Drops fenced code the way parse.py does: a fence closes only on a run of its own character at
+# least as long as the opener, with nothing after the run but whitespace.
+function ConvertTo-UnfencedText {
+    param([string]$Text)
+    $fence = $null
+    $kept = foreach ($line in ($Text -split '\r?\n')) {
+        $m = [regex]::Match($line, '^[ \t]*(`{3,}|~{3,})(.*)$')
+        if ($null -eq $fence) {
+            if ($m.Success) { $fence = $m.Groups[1].Value } else { $line }
+        } elseif ($m.Success -and $m.Groups[1].Value[0] -eq $fence[0] -and
+                  $m.Groups[1].Value.Length -ge $fence.Length -and -not $m.Groups[2].Value.Trim()) {
+            $fence = $null
+        }
+    }
+    $kept -join "`n"
+}
 
 # The step regex is the one tests/Guide-Step-Numbering.Tests.ps1 uses, narrowed to '###', so the
 # parser is held to the same reading of a guide as the numbering test.
@@ -398,7 +457,7 @@ $GuideCases = Get-ChildItem -Path $DiscoveryRepoRoot -Directory -Filter 'module-
         $guide = Join-Path $_.FullName "lab-guide-$num.md"
         if (-not (Test-Path -LiteralPath $guide)) { return }
         $text  = Get-Content -Raw -LiteralPath $guide
-        $text  = [regex]::Replace($text, '(?ms)^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1[ \t]*\r?$', '')
+        $text  = ConvertTo-UnfencedText -Text $text
         # Closed HTML comments only (non-greedy): an unclosed '<!--' leaves later headings counted
         # here while the parser hides them, so the id comparison below catches it.
         $text  = [regex]::Replace($text, '(?s)<!--.*?-->', '')
@@ -409,15 +468,23 @@ $GuideCases = Get-ChildItem -Path $DiscoveryRepoRoot -Directory -Filter 'module-
             $exit   = $LASTEXITCODE
             $parsed = if ($exit -eq 0) { Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json }
         } finally { Remove-Item -LiteralPath $out -ErrorAction SilentlyContinue }
-        $fieldLabels = @($parsed.steps | ForEach-Object { $_.items } | Where-Object kind -eq 'field' | ForEach-Object label)
+        # Every text the runner acts on: action and navigation labels, field labels and values,
+        # tag names and values.
+        $texts = @($parsed.steps | ForEach-Object { $_.items } | ForEach-Object {
+            $item = $_
+            switch ($item.kind) {
+                'field' { $item.label; $item.value }
+                'tag'   { $item.name; $item.value }
+                default { $item.labels }
+            }
+        })
         @{
             lab         = $num
             exitCode    = $exit
             output      = ($stderr -join "`n")
             headingIds  = $headingIds
             parsedIds   = @($parsed.steps.id)
-            emptyPortal = @($parsed.steps | Where-Object { $_.portal -and @($_.items).Count -eq 0 } | ForEach-Object id)
-            badFields   = @($fieldLabels | Where-Object { $_ -match '^<!--|`|\*\*' })
+            residue     = @($texts | Where-Object { $_ -match '\*\*|`|<!--' })
             guidePath   = $parsed.guide
         }
     }
@@ -439,12 +506,8 @@ Describe 'parse.py - every lab guide' {
         $guidePath | Should -Match "^module-\d[^/]*/\d+\.\d+-[^/]+/lab-guide-$lab\.md$"
     }
 
-    It "'<lab>' never marks a step portal without a label" -ForEach $GuideCases {
-        $emptyPortal | Should -BeNullOrEmpty
-    }
-
-    It "'<lab>' yields field labels without markup or comment residue" -ForEach $GuideCases {
-        $badFields | Should -BeNullOrEmpty
+    It "'<lab>' yields labels and values without markup or comment residue" -ForEach $GuideCases {
+        $residue | Should -BeNullOrEmpty
     }
 }
 
