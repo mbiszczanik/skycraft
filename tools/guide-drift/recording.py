@@ -196,6 +196,20 @@ def resolve_value(recording: dict, step: dict, label: str, value: str) -> str:
 BRACKET_TOKEN = re.compile(r"\[[^\]]+\]")
 
 
+# Checkbox and toggle states as the guides write them: '✅ Checked', '❌ Unchecked', '☐',
+# 'Enabled', `Uncheck`, 'leave unchecked'. Matched per word, not as the whole value.
+CHECKED_WORDS = {"✅", "✔", "checked", "check", "enabled", "yes", "on", "true"}
+UNCHECKED_WORDS = {"☐", "❌", "✗", "unchecked", "uncheck", "disabled", "no", "off", "false"}
+
+
+def checkbox_state(value: str) -> bool | None:
+    """True or False for a checkbox or toggle value, None when it states neither or both
+    ('Leave default', 'Checked or unchecked'), so the runner reports it instead of guessing."""
+    words = set(re.findall(r"[✅✔☐❌✗]|[a-z]+", value.casefold()))
+    on, off = bool(words & CHECKED_WORDS), bool(words & UNCHECKED_WORDS)
+    return on if on != off else None
+
+
 def value_action(value: str) -> str:
     """How to treat a field value once placeholders and overrides are applied: 'skip' when the
     whole value is a bracketed instruction ('[Leave blank]' in 1.1.10), 'unresolved' when a

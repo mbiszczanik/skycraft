@@ -226,5 +226,26 @@ class WriteJsonTests(unittest.TestCase):
                          (recording.REPLACE_ATTEMPTS, recording.REPLACE_ATTEMPTS - 1))
 
 
+
+class CheckboxStateTests(unittest.TestCase):
+    """The guides write checkbox values with a mark and a word; the whole value never matched a
+    single word, so '✅ Checked' used to be reported as 'not a checkbox state'."""
+
+    def test_checked_forms(self):
+        for value in ("✅ Checked", "✅", "Checked", "checked", "Enabled", "Yes", "On", "✔ Enabled"):
+            with self.subTest(value=value):
+                self.assertIs(recording.checkbox_state(value), True)
+
+    def test_unchecked_forms(self):
+        for value in ("❌ Unchecked", "☐ Unchecked", "☐", "Uncheck", "leave unchecked", "Disabled", "No", "Off"):
+            with self.subTest(value=value):
+                self.assertIs(recording.checkbox_state(value), False)
+
+    def test_neither_or_both_is_none(self):
+        for value in ("Leave default", "Standard_LRS", "", "Checked or unchecked"):
+            with self.subTest(value=value):
+                self.assertIsNone(recording.checkbox_state(value))
+
+
 if __name__ == "__main__":
     unittest.main()

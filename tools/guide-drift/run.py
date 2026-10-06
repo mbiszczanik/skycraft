@@ -53,8 +53,8 @@ from playwright.sync_api import Browser, Error as PlaywrightError, Frame, Locato
 
 sys.path.insert(0, str(Path(__file__).parent))
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
-from recording import (Redactor, env_secrets, missing_env, rejected_candidates,  # noqa: E402
-                       resolve_value, value_action, write_json)
+from recording import (Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
+                       rejected_candidates, resolve_value, value_action, write_json)
 
 PORTAL = "https://portal.azure.com"
 ENTRA_OVERVIEW = "/view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Overview"
@@ -67,8 +67,6 @@ FIELD_ROLES = ("textbox", "combobox", "checkbox", "radio")
 # Never acted on unless the guide itself names such an element: a wrong replay or a mistyped
 # number must not delete a user or sign the person out halfway through a lab.
 DESTRUCTIVE = re.compile(r"\b(delete|remove|reset|revoke|disable|block|purge|sign out)\b", re.IGNORECASE)
-CHECKED = {"✅", "checked", "enabled", "yes", "on"}        # ✅ is the guides' check mark
-UNCHECKED = {"☐", "unchecked", "disabled", "no", "off"}   # ☐ is the guides' empty box
 
 
 def now() -> str:
@@ -236,10 +234,9 @@ def fill_field(page: Page, element: Locator, value: str) -> str | None:
     role = element.get_attribute("role", timeout=FIND_TIMEOUT_MS) or ""
     tag, input_type = element.evaluate("e => [e.tagName.toLowerCase(), (e.getAttribute('type') || '').toLowerCase()]")
     if role in ("checkbox", "radio", "switch") or (tag == "input" and input_type in ("checkbox", "radio")):
-        wanted = value.strip().casefold()
-        if wanted not in CHECKED | UNCHECKED:
+        checked = checkbox_state(value)
+        if checked is None:
             raise LookupError(f"'{value}' is not a checkbox state")
-        checked = wanted in CHECKED
         if element.is_checked(timeout=FIND_TIMEOUT_MS) == checked:
             return "already set"
         element.set_checked(checked, timeout=FIND_TIMEOUT_MS)
