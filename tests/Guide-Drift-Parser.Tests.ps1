@@ -10,7 +10,8 @@
       issue #189: only '### Step X.Y.N:' sections are read; fenced code is skipped; where a step
       has '#### Option 1:' or '#### Option A:' headings only the first option is read (plus the
       step's Expected Result); bold spans that are not UI elements are dropped; 'A -> B' chains
-      become navigation; '- **Label**: value' list items and Field | Value tables become fields,
+      become navigation; 'Search for **X**' becomes a search of the Portal;
+      '- **Label**: value' list items and Field | Value tables become fields,
       Name | Value and Tag | Value tables become tags; images are collected with their width.
 
       THE 17 GUIDES - every module-*/X.Y-*/lab-guide-X.Y.md parses, its step ids match its
@@ -119,8 +120,31 @@ Describe 'parse.py - step sections' {
     It 'keeps a leading "+" in a label and strips surrounding quotes' {
         @($script:Core.steps[0].items[1].labels) | Should -Be @('+ New user', 'Create new user')
         @($script:Core.steps[0].items[2].labels) | Should -Be @('Microsoft Entra ID')
-        $script:Core.steps[0].items[2].kind | Should -Be 'action'
         @($script:Core.steps[0].items[3].labels) | Should -Be @('Curly Label')
+    }
+
+    It 'reads "Search for **X**" as one search item, with or without where to search' {
+        foreach ($i in 2, 3) {
+            $script:Core.steps[0].items[$i].kind | Should -Be 'search'
+        }
+    }
+
+    It 'reads "Search for" only at the start of the item and only before the first bold' {
+        $guide = ConvertFrom-GuideFixture -Markdown (@(
+                '### Step 9.9.1: Searches',
+                '',
+                '1. search for **Backup vaults**.',
+                '2. In Azure Portal, search for **Policy**',
+                '3. Open **Settings** and search for **Advanced**',
+                '4. Search for **Container Apps** in the portal and click **+ Create**.',
+                '5. Search for **"Khadgar Archmage"** (individual user)',
+                '6. Search for the **Owner** role',
+                '7. Search for **Network Watcher** in Azure Portal'
+            ) -join "`n")
+        @($guide.steps[0].items.kind) | Should -Be @('search', 'action', 'action', 'action', 'action', 'action', 'search')
+        @($guide.steps[0].items[0].labels) | Should -Be @('Backup vaults')
+        @($guide.steps[0].items[3].labels) | Should -Be @('Container Apps', '+ Create')
+        @($guide.steps[0].items[6].labels) | Should -Be @('Network Watcher')
     }
 
     It 'treats the ASCII arrow and " > " as chain separators too' {
@@ -517,6 +541,12 @@ Describe 'parse.py - lab 1.1, the first recorded lab' {
         $out   = Join-Path $TestDrive 'lab-1.1.json'
         & $script:Python $script:Parser $guide --out $out --repo-root $script:RepoRoot
         $script:Lab11 = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+    }
+
+    It 'reads step 1.1.1 as one search for Microsoft Entra ID' {
+        $step = $script:Lab11.steps | Where-Object id -eq '1.1.1'
+        @($step.items.kind) | Should -Be @('search')
+        @($step.items[0].labels) | Should -Be @('Microsoft Entra ID')
     }
 
     It 'reads step 1.1.6 as navigation, action, four fields and Create' {

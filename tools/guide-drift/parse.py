@@ -22,6 +22,10 @@ without a browser. Rules (issue #189):
     A > B) is one 'navigation' item with several labels; otherwise it is an 'action' item.
     '\\*' inside bold is a literal asterisk; a leading '*' (the Portal's required-field marker)
     is dropped from a label.
+  * A list item 'Search for **X**', optionally followed by where to search ('in the search
+    bar', 'in the Azure Portal search', 'in the portal') and a full stop, is one 'search' item
+    with the label X: the runner types X into the Portal's global search and opens the result.
+    Anything else after the bold ('and click **+ Create**') leaves the item an action.
   * A list item '**Label**: value' is a 'field' item when Label is a UI label. A field whose
     value is prose rather than a literal ("Click the ... button", "1 month from now") is typed
     as written; the recording's valueOverrides is where a supervised run supplies the literal.
@@ -48,6 +52,8 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     the options, are dropped (#203).
   * NON_UI_BOLD is one global list, so a caption from one lab can hide a real label in another
     (#203).
+  * A search inside a blade ('Search for **"Owner"**' in 1.2's role assignment) reads as the
+    Portal's global search (#204).
 
 Usage: python parse.py <path/to/lab-guide-X.Y.md> [--out steps.json] [--repo-root <dir>]
 """
@@ -76,6 +82,12 @@ TABLE_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$")
 SEPARATOR_CELL = re.compile(r"^:?-+:?$")   # every non-empty cell of a separator row; not "--name"
 IMAGE = re.compile(r"!\[[^\]]*\]\(\s*\.?/?(?P<path>images/[^)\s]+)\s*\)")
 CHAIN = re.compile(r"→|->|\s>\s")   # navigation chain separators: arrow, ASCII arrow, " > "
+# 'Search for **X**' and nothing after it but where to search and a full stop.
+SEARCH_FOR = re.compile(
+    r"^Search\s+for\s+\*\*(?P<label>(?:\\\*|[^*])+?)\*\*"
+    r"(?:\s+in\s+(?:the\s+)?(?:(?:top|global)\s+)?"
+    r"(?:(?:Azure\s+)?Portal(?:\s+search(?:\s+(?:bar|box))?)?|search(?:\s+(?:bar|box))?))?"
+    r"\s*\.?\s*$", re.IGNORECASE)
 
 # A table is a form when its header is '<one of these> | Value'.
 # 'Parameter | Value' lists CLI flags and is not a form.
@@ -323,7 +335,13 @@ def table_row_item(cells: list[str], form: str | None, number: int) -> dict | No
 
 
 def list_item(text: str, number: int) -> dict | None:
-    """The field, navigation or action item for the text of one list item; None for none."""
+    """The field, search, navigation or action item for the text of one list item; None for
+    none."""
+    s = SEARCH_FOR.match(text.strip())
+    if s:
+        label = clean_label(unescape(s.group("label")))
+        if is_ui_label(label):
+            return {"kind": "search", "labels": [label], "line": number}
     f = LIST_FIELD.match(text)
     if f:
         label = clean_label(unescape(f.group("label")))

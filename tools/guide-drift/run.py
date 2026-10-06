@@ -18,7 +18,8 @@ The runner acts only on a visible element within the window's width (the Portal 
 blades off to the left; below the fold is fine, it scrolls there first), and only on one:
 several matches are reported as unknown rather than guessed. It refuses to click or fill an
 element whose name contains the word delete, remove, reset, revoke, disable, block, purge or
-sign out, unless the guide's own label does too.
+sign out, unless the guide's own label does too. A guide's 'Search for **X**' is typed into the
+Portal's global search, and the result named exactly X is opened.
 
 When a step does not go through, the person chooses: finish it by hand and continue, skip the
 rest of the lab, or stop and keep the state. --state records the completed steps and the step a
@@ -64,6 +65,10 @@ RESULT_TIMEOUT_S = 15
 CANDIDATE_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "textbox",
                    "combobox", "checkbox", "radio", "heading", "cell")
 FIELD_ROLES = ("textbox", "combobox", "checkbox", "radio")
+ACTION_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "checkbox", "radio")
+RESULT_ROLES = ("option", "link", "button", "menuitem")    # entries of the global search's results
+# The Portal's global search box, named "Search resources, services, and docs (G+/)".
+SEARCH_BOX = re.compile(r"^Search resources")
 # Never acted on unless the guide itself names such an element: a wrong replay or a mistyped
 # number must not delete a user or sign the person out halfway through a lab.
 DESTRUCTIVE = re.compile(r"\b(delete|remove|reset|revoke|disable|block|purge|sign out)\b", re.IGNORECASE)
@@ -184,29 +189,53 @@ def text_on_screen(page: Page, text: str) -> bool:
     return bool(visible_across_frames(page, lambda f: f.get_by_text(text, exact=False), anywhere=True))
 
 
+def find_in_roles(page: Page, label: str, roles: tuple[str, ...]) -> Locator | None:
+    """The visible element of the first of `roles` whose accessible name is exactly `label`, then
+    plain text. An ambiguous role match raises Ambiguous; an ambiguous text match counts as not
+    found, so the person picks a role-specific candidate."""
+    for role in roles:
+        element = unique_visible(page, lambda f, role=role: f.get_by_role(role, name=label, exact=True))
+        if element is not None:
+            return element
+    try:
+        return unique_visible(page, lambda f: f.get_by_text(label, exact=True))
+    except Ambiguous:
+        return None
+
+
 def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
     """The visible element whose accessible name is exactly `label`. For a field: the element the
     label belongs to, or a textbox, combobox, checkbox or radio of that name, and nothing else.
-    Otherwise: the interactive roles, then plain text. An ambiguous role match raises Ambiguous;
-    an ambiguous text match counts as not found, so the person picks a role-specific candidate."""
-    strategies: list[Callable[[Frame], Locator]] = []
-    if field:
-        strategies.append(lambda f: f.get_by_label(label, exact=True))
-        roles = FIELD_ROLES
-    else:
-        roles = ("button", "link", "menuitem", "tab", "treeitem", "option", "checkbox", "radio")
-    for role in roles:
+    Otherwise: the interactive roles, then plain text (find_in_roles)."""
+    if not field:
+        return find_in_roles(page, label, ACTION_ROLES)
+    strategies: list[Callable[[Frame], Locator]] = [lambda f: f.get_by_label(label, exact=True)]
+    for role in FIELD_ROLES:
         strategies.append(lambda f, role=role: f.get_by_role(role, name=label, exact=True))
     for make_locator in strategies:
         element = unique_visible(page, make_locator)
         if element is not None:
             return element
-    if field:
-        return None
-    try:
-        return unique_visible(page, lambda f: f.get_by_text(label, exact=True))
-    except Ambiguous:
-        return None
+    return None
+
+
+def search_portal(page: Page, label: str) -> Locator | None:
+    """Type `label` into the Portal's global search and return the result whose accessible name
+    is exactly `label`: an option, link, button or menu item, then plain text. The results load
+    as the Portal answers, so they are looked for until FIND_TIMEOUT_MS has passed; None when no
+    exact result came, and the person picks from the list still open on screen. Raises
+    LookupError when the search box is not on screen, Ambiguous when several results match."""
+    box = unique_visible(page, lambda f: f.get_by_role("combobox", name=SEARCH_BOX))
+    if box is None:
+        raise LookupError("the Portal's search box is not on screen")
+    box.fill(label, timeout=FIND_TIMEOUT_MS)
+    page.wait_for_timeout(SETTLE_MS)
+    deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
+    while True:
+        result = find_in_roles(page, label, RESULT_ROLES)
+        if result is not None or time.monotonic() >= deadline:
+            return result
+        page.wait_for_timeout(500)
 
 
 def find_by_name(page: Page, role: str | None, name: str | re.Pattern[str]) -> Locator | None:
@@ -521,9 +550,15 @@ class Runner:
         kind, line = item["kind"], item["line"]
         record = self.new_record(step, kind, label)
         try:
-            element = find_exact(self.page, label, field=(kind == "field"))
+            if kind == "search":
+                element = search_portal(self.page, label)
+            else:
+                element = find_exact(self.page, label, field=(kind == "field"))
         except Ambiguous as error:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
+            return record
+        except (PlaywrightError, LookupError) as error:     # the search box is missing or cannot be typed in
+            record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
             return record
         decision = Decision(kind="use", name=label, decided_by="exact") if element is not None else None
         pending = None     # a person's use/drift decision, recorded only once the action succeeded

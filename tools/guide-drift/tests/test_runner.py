@@ -260,6 +260,7 @@ class FakeElement:
 
 class FakePage:
     url = "https://portal.azure.com/#@contoso.onmicrosoft.com/view/Two?x=1"
+    viewport_size = None             # visible_in() then skips the window-column check
 
     def __init__(self, closed: bool = False) -> None:
         self.closed = closed
@@ -590,6 +591,121 @@ class GuardAndLookupTests(RunnerTestCase):
                                   if page.url.startswith(run.PORTAL) else []):
             run.wait_for_sign_in(Page(), "t", say=said.append)
         self.assertEqual(sum("Still waiting" in line for line in said), 2)
+
+
+class ScreenNode(FakeElement):
+    """One element of a Screen. `interactive`: whether it is, or sits inside, a link, button or
+    other interactive element (what Element.closest() answers in the browser). `on_click` and
+    `on_fill` change the screen, as opening a menu or typing into the search box does."""
+
+    def __init__(self, interactive: bool = True, on_click=None, on_fill=None) -> None:
+        super().__init__()
+        self.interactive = interactive
+        self.on_click = on_click
+        self.on_fill = on_fill
+        self.filled: list[str] = []
+
+    def is_visible(self) -> bool:
+        return True
+
+    def evaluate(self, script, arg=None):
+        return self.interactive
+
+    def click(self, timeout=None) -> None:
+        super().click(timeout)
+        if self.on_click:
+            self.on_click()
+
+    def fill(self, value, timeout=None) -> None:
+        self.filled.append(value)
+        if self.on_fill:
+            self.on_fill()
+
+
+class ScreenLocator:
+    def __init__(self, nodes: list) -> None:
+        self.nodes = nodes
+
+    def count(self) -> int:
+        return len(self.nodes)
+
+    def nth(self, index: int):
+        return self.nodes[index]
+
+
+class Screen:
+    """The one frame of a FakePage: (role, name, node) entries, role 'text' for plain text and
+    'label' for a field's label. A name to look up is a string (exact) or a pattern (search)."""
+
+    def __init__(self, *entries) -> None:
+        self.entries = list(entries)
+
+    def add(self, *entries) -> None:
+        self.entries.extend(entries)
+
+    def _find(self, role: str, name) -> ScreenLocator:
+        def hit(n: str) -> bool:
+            return n == name if isinstance(name, str) else bool(name.search(n))
+        return ScreenLocator([node for r, n, node in self.entries if r == role and hit(n)])
+
+    def get_by_role(self, role, name=None, exact=None) -> ScreenLocator:
+        return self._find(role, name)
+
+    def get_by_text(self, text, exact=None) -> ScreenLocator:
+        return self._find("text", text)
+
+    def get_by_label(self, text, exact=None) -> ScreenLocator:
+        return self._find("label", text)
+
+
+class FindOnScreenTests(RunnerTestCase):
+    """act_on_label against a Screen: how the runner finds what the guide names."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+
+    def act(self, screen: Screen, item: dict, label: str, answers=(), candidates=()):
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
+        step = {"id": "9.9.1", "title": "One", "items": [item], "images": []}
+        clock = iter(range(0, 1_000_000, 3))               # 3 s pass between every look at the clock
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: next(clock)), \
+                mock.patch.object(run, "candidates_on_screen", return_value=list(candidates)):
+            return self.quietly(lambda: r.act_on_label(step, item, label)), r
+
+    SEARCH = {"kind": "search", "labels": ["Microsoft Entra ID"], "line": 2}
+    SEARCH_BOX = "Search resources, services, and docs (G+/)"
+
+    def test_a_search_types_the_label_and_opens_the_exact_result(self) -> None:
+        result = ScreenNode()
+        screen = Screen(("text", "Microsoft Entra ID", ScreenNode(interactive=False)))
+        box = ScreenNode(on_fill=lambda: screen.add(("option", "Microsoft Entra ID", result)))
+        screen.add(("combobox", self.SEARCH_BOX, box))
+        record, r = self.act(screen, self.SEARCH, "Microsoft Entra ID")
+        self.assertEqual(box.filled, ["Microsoft Entra ID"])
+        self.assertEqual((record["kind"], record["outcome"], record["observed"]), ("search", "match", "Microsoft Entra ID"))
+        self.assertEqual(result.clicked, 1)
+        self.assertEqual(r.ask.prompts, [])
+
+    def test_a_search_without_an_exact_result_asks_the_person_as_for_an_action(self) -> None:
+        renamed = ScreenNode()
+        screen = Screen()
+        box = ScreenNode(on_fill=lambda: screen.add(("option", "Entra ID", renamed)))
+        screen.add(("combobox", self.SEARCH_BOX, box))
+        record, r = self.act(screen, self.SEARCH, "Microsoft Entra ID", answers=["1"],
+                             candidates=[run.Candidate("option", "Entra ID")])
+        self.assertEqual(len(r.ask.prompts), 1)
+        self.assertEqual((record["kind"], record["outcome"], record["severity"], record["observed"]),
+                         ("search", "drift", "misleading", "Entra ID"))
+        self.assertEqual(renamed.clicked, 1)
+        self.assertEqual(self.recording["steps"]["9.9.1"]["labels"]["Microsoft Entra ID"]["name"], "Entra ID")
+
+    def test_a_search_without_the_search_box_is_unknown(self) -> None:
+        record, r = self.act(Screen(), self.SEARCH, "Microsoft Entra ID")
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertIn("search box is not on screen", record["observed"])
+        self.assertEqual(r.ask.prompts, [])
 
 
 class StopTests(RunnerTestCase):
