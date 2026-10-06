@@ -701,6 +701,19 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual(renamed.clicked, 1)
         self.assertEqual(self.recording["steps"]["9.9.1"]["labels"]["Microsoft Entra ID"]["name"], "Entra ID")
 
+    def test_a_leading_plus_is_dropped_when_nothing_has_the_full_name(self) -> None:
+        item = {"kind": "navigation", "labels": ["+ New user", "Create new user"], "line": 3}
+        toolbar = ScreenNode()
+        record, r = self.act(Screen(("menuitem", "New user", toolbar)), item, "+ New user")
+        self.assertEqual((record["outcome"], record["severity"], record["observed"]), ("match", None, "+ New user"))
+        self.assertEqual((toolbar.clicked, r.ask.prompts), (1, []))
+        self.assertEqual(self.recording["steps"]["9.9.1"]["labels"], {})     # exact: nothing to record
+        full, bare = ScreenNode(), ScreenNode()
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(("button", "+ Add", full), ("button", "Add", bare))]):
+            self.assertIs(run.find_exact(FakePage(), "+ Add"), full)       # the full name first
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(("button", "+", bare))]):
+            self.assertIs(run.find_exact(FakePage(), "+"), bare)           # nothing left to look up
+
     def test_a_search_without_the_search_box_is_unknown(self) -> None:
         record, r = self.act(Screen(), self.SEARCH, "Microsoft Entra ID")
         self.assertEqual(record["outcome"], "unknown")

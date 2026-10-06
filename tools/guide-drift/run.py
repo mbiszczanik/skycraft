@@ -69,6 +69,7 @@ ACTION_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "chec
 RESULT_ROLES = ("option", "link", "button", "menuitem")    # entries of the global search's results
 # The Portal's global search box, named "Search resources, services, and docs (G+/)".
 SEARCH_BOX = re.compile(r"^Search resources")
+LEADING_PLUS = re.compile(r"^\s*\+\s*")   # '+ New user': the Portal names the item 'New user'
 # Never acted on unless the guide itself names such an element: a wrong replay or a mistyped
 # number must not delete a user or sign the person out halfway through a lab.
 DESTRUCTIVE = re.compile(r"\b(delete|remove|reset|revoke|disable|block|purge|sign out)\b", re.IGNORECASE)
@@ -203,12 +204,9 @@ def find_in_roles(page: Page, label: str, roles: tuple[str, ...]) -> Locator | N
         return None
 
 
-def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
-    """The visible element whose accessible name is exactly `label`. For a field: the element the
-    label belongs to, or a textbox, combobox, checkbox or radio of that name, and nothing else.
-    Otherwise: the interactive roles, then plain text (find_in_roles)."""
-    if not field:
-        return find_in_roles(page, label, ACTION_ROLES)
+def find_field(page: Page, label: str) -> Locator | None:
+    """The element the label belongs to, or a textbox, combobox, checkbox or radio of that name,
+    and nothing else. An ambiguous match raises Ambiguous."""
     strategies: list[Callable[[Frame], Locator]] = [lambda f: f.get_by_label(label, exact=True)]
     for role in FIELD_ROLES:
         strategies.append(lambda f, role=role: f.get_by_role(role, name=label, exact=True))
@@ -217,6 +215,19 @@ def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
         if element is not None:
             return element
     return None
+
+
+def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
+    """The visible element whose accessible name is exactly `label`: for a field, find_field;
+    otherwise the interactive roles, then plain text (find_in_roles). When nothing has the name
+    and the label starts with '+' ('+ New user'), it is looked up again without the '+': the
+    Portal draws the '+' as an icon, so the toolbar item is named 'New user'. That is still the
+    element the guide names, not drift."""
+    element = find_field(page, label) if field else find_in_roles(page, label, ACTION_ROLES)
+    bare = LEADING_PLUS.sub("", label, count=1)
+    if element is None and bare and bare != label:
+        return find_exact(page, bare, field)
+    return element
 
 
 def search_portal(page: Page, label: str) -> Locator | None:
