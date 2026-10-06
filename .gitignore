@@ -83,3 +83,9 @@ tools/lab-cycle-logs/
 tools/lab-cycle-report.md
 tools/.lab-cycle-lock.json
 tools/.lab-cycle-state.json
+
+# Guide drift run artefacts (issue #189): screenshots and results carry tenant names, UPNs and
+# the subscription id; the auth file is a browser session. Recordings are committed, these are not.
+tools/guide-drift-logs/
+tools/.guide-drift-state.json
+tools/.guide-drift-auth.json

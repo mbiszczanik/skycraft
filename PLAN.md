@@ -177,7 +177,7 @@ class Decision:
 - Modify: `.gitignore` (after line 85, the lab cycle block)
 - Modify: `tests/Gitignore.Tests.ps1` (inside `Describe '.gitignore - required ignore patterns'`)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add after the `It 'ignores every lab cycle run artefact'` block in `tests/Gitignore.Tests.ps1`:
 
@@ -209,12 +209,12 @@ And extend the `foreach ($tracked in ...)` list in `It 'does not ignore the orch
                                  'tools/Invoke-GuideDrift.ps1', 'tools/guide-drift/parse.py', 'tools/guide-drift/recordings/lab-1.1.json') {
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `Invoke-Pester -Path ./tests/Gitignore.Tests.ps1 -Output Detailed`
 Expected: `ignores every guide drift run artefact` FAILS (exit code 1 from `git check-ignore`).
 
-- [ ] **Step 3: Add the patterns**
+- [x] **Step 3: Add the patterns**
 
 Append to `.gitignore` directly after the `tools/.lab-cycle-state.json` line:
 
@@ -227,13 +227,13 @@ tools/.guide-drift-state.json
 tools/.guide-drift-auth.json
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `Invoke-Pester -Path ./tests/Gitignore.Tests.ps1 -Output Detailed`
 Expected: all green, including `does not ignore the orchestrator itself` (the three new tracked
 paths do not exist yet, but `git check-ignore` answers from patterns, not from the tree).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add .gitignore tests/Gitignore.Tests.ps1
