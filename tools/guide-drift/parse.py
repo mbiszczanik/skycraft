@@ -6,15 +6,17 @@ without a browser. Rules (issue #189):
 
   * Only '### Step X.Y.N: Title' sections are read. Text before the first step and after the
     last step's section (the next '##' or '###' heading) is ignored.
-  * Fenced code blocks are removed first, so a heading or a bold span quoted in a snippet never
-    counts.
+  * Fenced code blocks and HTML comments (<!-- ... -->, also across lines) are removed first, so a
+    heading or a bold span quoted in a snippet or commented out never counts.
   * Where a step has '#### Option N:' headings, only the Option 1 body is read, plus the
     step's '**Expected Result**' line wherever it sits (the standard puts it after Option 3).
   * Bold spans in list items are UI labels. A list item containing a chain (A → B, A -> B or
     A > B) is one 'navigation' item with several labels; otherwise it is an 'action' item.
   * Bold spans that are not UI elements are dropped by NON_UI_BOLD and by the colon rule
     (bold text ending with ':' is a caption, not a label).
-  * 'Field | Value' tables become 'field' items; backticks and bold are stripped from the value.
+  * Tables whose second header cell is 'Value' (Field | Value, Name | Value, Tag | Value, ...)
+    become 'field' items; backticks and bold are stripped from label and value. Every other table
+    is informational and is not read.
   * A step with no item left is emitted with portal=false and is not checked by the runner.
 
 Usage: python parse.py <path/to/lab-guide-X.Y.md> [--out steps.json]
@@ -46,22 +48,55 @@ NON_UI_BOLD = {
 }
 
 
-def strip_fences(lines: list[str]) -> list[str]:
-    """Blank out fenced code blocks, keeping line numbers stable."""
+# Stands in for a line that held nothing but an HTML comment. Unlike "" it does not end a table,
+# so a commented-out row in the middle of a form table leaves the rest of the table readable.
+HIDDEN = chr(0)
+
+
+def strip_hidden(lines: list[str]) -> list[str]:
+    """Blank out fenced code blocks and HTML comments, keeping line numbers stable.
+
+    A fenced line becomes "". A line that held only comment text becomes HIDDEN; a line that
+    is partly commented keeps the text outside the comment.
+    """
     out: list[str] = []
     fence: str | None = None
+    in_comment = False
     for line in lines:
-        m = FENCE.match(line)
-        if fence is None and m:
-            fence = m.group(1)[0]
-            out.append("")
-            continue
-        if fence is not None:
-            if m and m.group(1)[0] == fence:
-                fence = None
-            out.append("")
-            continue
-        out.append(line)
+        if not in_comment:
+            m = FENCE.match(line)
+            if fence is None and m:
+                fence = m.group(1)[0]
+                out.append("")
+                continue
+            if fence is not None:
+                if m and m.group(1)[0] == fence:
+                    fence = None
+                out.append("")
+                continue
+        kept: list[str] = []
+        position = 0
+        touched = in_comment
+        while position < len(line):
+            if in_comment:
+                close = line.find("-->", position)
+                if close < 0:
+                    position = len(line)
+                else:
+                    in_comment = False
+                    position = close + 3
+            else:
+                open_at = line.find("<!--", position)
+                if open_at < 0:
+                    kept.append(line[position:])
+                    position = len(line)
+                else:
+                    kept.append(line[position:open_at])
+                    in_comment = True
+                    touched = True
+                    position = open_at + 4
+        text = "".join(kept)
+        out.append(HIDDEN if touched and not text.strip() else text)
     return out
 
 
@@ -138,6 +173,7 @@ def parse_items(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, li
     expected: str | None = None
     images: list[str] = []
     in_table = False
+    is_form = False
     for number, line in body:
         e = EXPECTED.match(line)
         if e:
@@ -145,16 +181,19 @@ def parse_items(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, li
             continue
         for img in IMAGE.finditer(line):
             images.append(img.group("path"))
+        if line == HIDDEN:
+            continue                      # a commented-out line neither ends nor extends a table
         row = TABLE_ROW.match(line)
         if row:
             cells = [c.strip() for c in row.group("cells").split("|")]
             if TABLE_SEPARATOR.match(line):
                 continue
             if not in_table:
-                in_table = True          # header row: Field | Value, Property | Value
+                in_table = True          # header row: a form only when the second cell is "Value"
+                is_form = len(cells) >= 2 and strip_value_markup(cells[1]).lower() == "value"
                 continue
-            if len(cells) >= 2 and cells[0]:
-                label = clean_label(BOLD.sub(lambda m: m.group("text"), cells[0]))
+            if is_form and len(cells) >= 2 and cells[0]:
+                label = clean_label(strip_value_markup(cells[0]))
                 items.append({"kind": "field", "label": label,
                               "value": strip_value_markup(cells[1]), "line": number})
             continue
@@ -173,7 +212,7 @@ def parse_items(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, li
 
 def parse_guide(guide: Path, repo_root: Path | None = None) -> dict:
     text = guide.read_text(encoding="utf-8-sig")
-    lines = strip_fences(text.splitlines())
+    lines = strip_hidden(text.splitlines())
     lab_match = re.search(r"lab-guide-(\d+\.\d+)\.md$", guide.name)
     lab = lab_match.group(1) if lab_match else ""
     steps = []

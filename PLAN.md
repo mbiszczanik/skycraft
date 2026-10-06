@@ -672,7 +672,7 @@ defining `ConvertFrom-GuideFixture` (it takes `-Markdown` and an optional `-Dire
 it. Use `$TestDrive` for temporary files. Check the helper's actual signature in the file before
 using it.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/Guide-Drift-Parser.Tests.ps1`:
 
@@ -773,7 +773,7 @@ Describe 'parse.py - form tables, HTML comments and images' {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail for the right reasons**
+- [x] **Step 2: Run the tests to verify they fail for the right reasons**
 
 Run: `pwsh -NoProfile -Command "Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed"`
 Expected: the earlier tests still pass; in the new Describe, `turns Field | Value rows` fails
@@ -781,7 +781,7 @@ Expected: the earlier tests still pass; in the new Describe, `turns Field | Valu
 `treats only tables whose second header is "Value"` fails (informational rows become fields).
 The image tests pass already. Quote the failures in your report.
 
-- [ ] **Step 3: Implement in parse.py**
+- [x] **Step 3: Implement in parse.py**
 
 1. HTML comments: extend `strip_fences` (rename it `strip_hidden`, update its caller and
    docstring) so that, outside fenced code, any text between `<!--` and `-->` is blanked,
@@ -797,7 +797,7 @@ The image tests pass already. Quote the failures in your report.
    cell is 'Value' (Field | Value, Name | Value, Tag | Value, ...)", and say that HTML comments
    are removed together with fenced code.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pwsh -NoProfile -Command "Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed"`
 Expected: all green.
@@ -806,7 +806,7 @@ Then confirm the real guide kept its forms: parse lab 1.1 with `--out` and check
 still has the fields `Group type`, `Group name`, `Group description`, `Membership type`, and
 step 1.1.10 has `Job title`, `Department`, `Office`, `Manager` (header `Property | Value`).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add tests/Guide-Drift-Parser.Tests.ps1 tools/guide-drift/parse.py PLAN.md

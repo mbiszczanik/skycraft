@@ -159,3 +159,98 @@ Describe 'parse.py - step sections' {
         $all | Should -Not -Contain 'NotAStep'
     }
 }
+
+Describe 'parse.py - form tables, HTML comments and images' {
+    BeforeAll {
+        # A PNG header is enough: parse.py reads the width from IHDR (bytes 16..19) and never decodes.
+        function New-PngFixture {
+            param([string]$Path, [int]$Width)
+            $widthBytes = [System.BitConverter]::GetBytes([int32]$Width)
+            [array]::Reverse($widthBytes)   # IHDR is big-endian
+            $bytes = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 0x49, 0x48, 0x44, 0x52) +
+                     $widthBytes + [byte[]](0, 0, 0, 1, 8, 2, 0, 0, 0)
+            [System.IO.File]::WriteAllBytes($Path, $bytes)
+        }
+
+        $tableFixture = @'
+# Lab 9.9: Tables
+
+### Step 9.9.1: Fill a form
+
+1. Click **+ New group**
+2. Fill in:
+
+| Field             | Value                     |
+| ----------------- | ------------------------- |
+| Group type        | Security                  |
+| `Group name`      | `SkyCraft-Admins`         |
+<!-- | Hidden field | never read | -->
+| Tier              | **Hot**                   |
+
+3. Click **Create**
+
+<!--
+1. Click **CommentedOut**
+-->
+
+![Create group](./images/Step-9.9.1.png)
+![Other](images/Step-9.9.1b.png)
+
+### Step 9.9.2: Informational tables are not forms
+
+| Subnet Name | Starting Address | Size |
+| ----------- | ---------------- | ---- |
+| AppSubnet   | 10.0.1.0         | /24  |
+
+| Property  | Expected Value |
+| --------- | -------------- |
+| Location  | swedencentral  |
+
+| Name   | Value        | Notes                       |
+| ------ | ------------ | --------------------------- |
+| Region | `westeurope` | three columns, still a form |
+
+1. Click **Review + create**
+'@
+        $dir = Join-Path $TestDrive 'tables'
+        New-Item -ItemType Directory -Path (Join-Path $dir 'images') -Force | Out-Null
+        New-PngFixture -Path (Join-Path $dir 'images/Step-9.9.1.png') -Width 861
+        New-PngFixture -Path (Join-Path $dir 'images/Step-9.9.1b.png') -Width 2279
+        $script:Table = ConvertFrom-GuideFixture -Markdown $tableFixture -Directory $dir
+    }
+
+    It 'turns Field | Value rows into fields, stripping markup from label and value' {
+        $fields = @($script:Table.steps[0].items | Where-Object kind -eq 'field')
+        @($fields.label) | Should -Be @('Group type', 'Group name', 'Tier')
+        @($fields.value) | Should -Be @('Security', 'SkyCraft-Admins', 'Hot')
+    }
+
+    It 'keeps actions before and after the table in document order' {
+        @($script:Table.steps[0].items.kind) | Should -Be @('action', 'field', 'field', 'field', 'action')
+        @($script:Table.steps[0].items[4].labels) | Should -Be @('Create')
+    }
+
+    It 'never reads text inside an HTML comment' {
+        $all = @($script:Table.steps | ForEach-Object { $_.items } | ForEach-Object { if ($_.kind -eq 'field') { $_.label } else { $_.labels } })
+        $all | Should -Not -Contain 'Hidden field'
+        $all | Should -Not -Contain 'CommentedOut'
+        @($all | Where-Object { $_ -like '<!--*' }) | Should -BeNullOrEmpty
+    }
+
+    It 'treats only tables whose second header is "Value" as forms' {
+        $fields = @($script:Table.steps[1].items | Where-Object kind -eq 'field')
+        @($fields.label) | Should -Be @('Region') -Because 'Subnet Name | Starting Address and Property | Expected Value are informational'
+        $fields[0].value | Should -Be 'westeurope'
+    }
+
+    It 'collects the images a step references, with and without "./"' {
+        @($script:Table.steps[0].images) | Should -Be @('images/Step-9.9.1.png', 'images/Step-9.9.1b.png')
+    }
+
+    It 'lists every PNG under images/ with its pixel width' {
+        $widths = @{}
+        foreach ($image in $script:Table.images) { $widths[$image.path] = $image.width }
+        $widths['images/Step-9.9.1.png']  | Should -Be 861
+        $widths['images/Step-9.9.1b.png'] | Should -Be 2279
+    }
+}
