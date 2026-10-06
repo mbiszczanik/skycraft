@@ -99,6 +99,8 @@ Describe '.gitignore - required ignore patterns' {
             'tools/guide-drift-logs/20261007-100000/Step-1.1.6.png'
             'tools/.guide-drift-state.json'
             'tools/.guide-drift-auth.json'
+            'tools/.guide-drift-state.json.tmp'
+            'tools/guide-drift/recordings/lab-1.1.json.tmp'
             'tools/guide-drift/__pycache__/decide.cpython-312.pyc'
             'tools/guide-drift/tests/__pycache__/test_decide.cpython-312.pyc'
         )

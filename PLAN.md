@@ -2316,12 +2316,12 @@ git commit -m "feat(guide-drift): write results, screenshots, state, summary and
 `tests/Script-Standards.Tests.ps1` and `tests/Cbh-Coverage.Tests.ps1` pick up every `tools/*.ps1`
 automatically; running them is the test for this task.
 
-- [ ] **Step 1: Run the standards tests to see the file is not there yet**
+- [x] **Step 1: Run the standards tests to see the file is not there yet**
 
 Run: `Invoke-Pester -Path ./tests/Script-Standards.Tests.ps1, ./tests/Cbh-Coverage.Tests.ps1 -Output Normal`
 Expected: green, with no `Invoke-GuideDrift.ps1` case listed.
 
-- [ ] **Step 2: Write the entry point**
+- [x] **Step 2: Write the entry point**
 
 Create `tools/Invoke-GuideDrift.ps1`:
 
@@ -2581,7 +2581,7 @@ if ($runExit -eq 0) {
 exit $runExit
 ```
 
-- [ ] **Step 3: Run the standards tests and the dry run**
+- [x] **Step 3: Run the standards tests and the dry run**
 
 ```powershell
 Invoke-Pester -Path ./tests/Script-Standards.Tests.ps1, ./tests/Cbh-Coverage.Tests.ps1 -Output Normal
@@ -2592,13 +2592,13 @@ Expected: green; PSScriptAnalyzer reports 0 errors and 0 warnings for the new fi
 `$runExit` as unused or `Write-Host`, the former means a typo, the latter is excluded by
 `PSScriptAnalyzerSettings.psd1`.
 
-- [ ] **Step 4: Run the whole suite**
+- [x] **Step 4: Run the whole suite**
 
 Run: `Invoke-Pester -Path ./tests -Output Normal`
 Expected: green. `Gitignore.Tests.ps1` now finds `tools/Invoke-GuideDrift.ps1` tracked after the
 commit below; run it again after committing.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add tools/Invoke-GuideDrift.ps1

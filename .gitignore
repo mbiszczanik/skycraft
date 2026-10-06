@@ -94,3 +94,6 @@ tools/guide-drift-logs/
 tools/.guide-drift-state.json
 tools/.guide-drift-auth.json
 tools/guide-drift/**/__pycache__/
+# Atomic writes (state, recording) leave <file>.json.tmp behind when interrupted.
+tools/.guide-drift-*.json.tmp
+tools/guide-drift/**/*.json.tmp
