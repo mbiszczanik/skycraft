@@ -652,14 +652,20 @@ class ScreenNode(FakeElement):
     snapshot; `tag` and `text`: its HTML tag and its value or text; `fill_fail`: what fill()
     raises; `shown`: whether it is visible; `read_only`: what READ_ONLY_JS answers; `later`:
     (n, text), the text it shows after n more reads, as a field the Portal updates late;
-    `in_header`: whether it sits in a table or grid header (a column's sort button)."""
+    `in_header`: whether it sits in a table or grid header (a column's sort button);
+    `controls_role`: the role of the element its aria-controls or aria-owns names; `editable`:
+    contenteditable; `uninspectable`: FIELD_KIND_JS fails on it."""
 
     def __init__(self, interactive: bool = True, on_click=None, on_fill=None, attrs=None, children=None,
                  rect=None, section=("", "", ""), unreadable: int = 0, tree: str = "", tag: str = "div",
                  text: str = "", fill_fail: Exception | None = None, shown: bool = True,
-                 read_only: bool = False, in_header: bool = False) -> None:
+                 read_only: bool = False, in_header: bool = False, controls_role: str = "",
+                 editable: bool = False, uninspectable: bool = False) -> None:
         super().__init__()
         self.in_header = in_header
+        self.controls_role = controls_role
+        self.editable = editable
+        self.uninspectable = uninspectable
         self.fill_fail = fill_fail
         self.shown = shown
         self.read_only = read_only
@@ -693,20 +699,24 @@ class ScreenNode(FakeElement):
                 raise run.PlaywrightError("element was re-rendered")
             return list(self.section)
         if script == run.CONTROL_JS:
-            return [self.tag, self.attrs.get("role", ""), False]
+            return [self.tag, self.attrs.get("role", ""), self.editable]
         if script == run.NEW_POPUP_JS:
             popups = POPUP_RECORD["popups"]
             return None if popups is None else not any(self is p for p in popups)
         if script == run.READ_ONLY_JS:
             return self.read_only
         if script == run.FIELD_KIND_JS:
+            if self.uninspectable:
+                raise run.PlaywrightError("element was detached")
             return [self.tag, self.attrs.get("role", ""), self.attrs.get("type", "").lower(),
-                    self.attrs.get("aria-haspopup", "").lower()]
+                    self.attrs.get("aria-haspopup", "").lower(), self.editable]
         if script == run.FIELD_CANDIDATE_JS:            # what the browser answers, in Python
             role = self.attrs.get("role", "")
             plain_button = role == "button" or (not role and self.tag == "button")
+            names_list = (bool(self.attrs.get("aria-controls") or self.attrs.get("aria-owns"))
+                          and self.controls_role in ("listbox", "menu"))
             opens_list = (self.attrs.get("aria-haspopup", "").lower() in ("listbox", "menu", "true")
-                          or "aria-expanded" in self.attrs)
+                          or ("aria-expanded" in self.attrs and names_list))
             return not self.in_header and (not plain_button or opens_list)
         if "tagName" in script:                     # fill_field: [tag, type]
             return [self.tag, self.attrs.get("type", "")]
@@ -1096,19 +1106,43 @@ class FindOnScreenTests(RunnerTestCase):
     def test_two_fields_of_one_label_stay_ambiguous_and_say_what_they_are(self) -> None:
         screen = Screen(("label", "Group description", ScreenNode(tag="textarea")),
                         ("label", "Group description", ScreenNode(tag="input", attrs={"type": "text"})),
-                        ("label", "Group description", ScreenNode(tag="button", attrs={"aria-expanded": "false"})))
+                        ("label", "Group description", ScreenNode(tag="button", attrs={"aria-haspopup": "true"})))
         record, _ = self.act(screen, self.DESCRIPTION, "Group description", value="x")
         self.assertEqual(record["outcome"], "unknown")
         self.assertEqual(record["observed"], "ambiguous: 3 visible elements match (textarea, input[type=text], button) "
                                              "named 'Group description'")
 
+    def test_an_element_that_cannot_be_inspected_keeps_the_match_ambiguous(self) -> None:
+        screen = Screen(("label", "Group description", ScreenNode(tag="textarea")),
+                        ("label", "Group description", ScreenNode(tag="input", uninspectable=True)))
+        record, _ = self.act(screen, self.DESCRIPTION, "Group description", value="x")
+        self.assertEqual((record["outcome"], record["observed"]),
+                         ("unknown", "ambiguous: 2 visible elements match (textarea, ?) named 'Group description'"))
+
+    def test_a_contenteditable_element_takes_a_value(self) -> None:
+        editor = ScreenNode(editable=True)
+        callout = ScreenNode(tag="button", attrs={"aria-haspopup": "true"})
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(("label", "Group description", editor),
+                                                                     ("label", "Group description", callout))]):
+            self.assertIs(run.find_exact(FakePage(), "Group description", field=True), editor)
+
     def test_a_button_that_opens_a_list_is_a_field(self) -> None:
-        for attrs in ({"aria-haspopup": "listbox"}, {"aria-haspopup": "true"}, {"aria-haspopup": "menu"},
-                      {"aria-expanded": "false"}):
+        for attrs, controls_role in (({"aria-haspopup": "listbox"}, ""), ({"aria-haspopup": "true"}, ""),
+                                     ({"aria-haspopup": "menu"}, ""),
+                                     ({"aria-expanded": "false", "aria-controls": "list"}, "listbox"),
+                                     ({"aria-expanded": "false", "aria-owns": "list"}, "menu")):
             with self.subTest(attrs=attrs):
-                dropdown = ScreenNode(tag="button", attrs=attrs)
+                dropdown = ScreenNode(tag="button", attrs=attrs, controls_role=controls_role)
                 with mock.patch.object(run, "all_frames", lambda page: [Screen(("label", "Group type", dropdown))]):
                     self.assertIs(run.find_exact(FakePage(), "Group type", field=True), dropdown)
+
+    def test_aria_expanded_alone_does_not_make_a_button_a_field(self) -> None:
+        for attrs, controls_role in (({"aria-expanded": "false"}, ""),                         # an info callout
+                                     ({"aria-expanded": "false", "aria-controls": "tip"}, "dialog")):
+            with self.subTest(attrs=attrs):
+                button = ScreenNode(tag="button", attrs=attrs, controls_role=controls_role)
+                with mock.patch.object(run, "all_frames", lambda page: [Screen(("label", "Group type", button))]):
+                    self.assertIsNone(run.find_exact(FakePage(), "Group type", field=True))
 
     def test_a_read_only_field_is_unknown_at_once(self) -> None:
         field = ScreenNode(tag="input", read_only=True)

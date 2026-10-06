@@ -120,22 +120,33 @@ CONTROL_TAGS = ("input", "textarea", "select", "button")
 CONTROL_ROLES = ("textbox", "searchbox", "combobox", "spinbutton", "slider", "checkbox", "radio",
                  "switch", "button", "listbox")
 CONTROL_JS = "e => [e.tagName.toLowerCase(), e.getAttribute('role') || '', e.isContentEditable]"
-# What a field candidate is (field_kind): [tag, role attribute, type attribute, aria-haspopup].
+# What a field candidate is (field_kind): [tag, role attribute, type attribute, aria-haspopup,
+# contenteditable].
 FIELD_KIND_JS = ("e => [e.tagName.toLowerCase(), e.getAttribute('role') || '', "
-                 "(e.getAttribute('type') || '').toLowerCase(), (e.getAttribute('aria-haspopup') || '').toLowerCase()]")
+                 "(e.getAttribute('type') || '').toLowerCase(), (e.getAttribute('aria-haspopup') || '').toLowerCase(), "
+                 "e.isContentEditable]")
 VALUE_ROLES = ("textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "listbox", "spinbutton",
                "slider")
 NOT_VALUE_INPUTS = ("button", "submit", "reset", "image", "hidden")
 # Whether a labelled element can be a form field at all: nothing in a table or grid header (a
 # column's sort button is named after the column, 'User principal name' on the Users list), and
-# a plain button only when it opens a list (aria-haspopup listbox, menu or true, or aria-expanded).
+# a plain button only when it opens a list: aria-haspopup listbox, menu or true, or aria-expanded
+# together with aria-controls or aria-owns naming a listbox or menu (aria-expanded alone is what
+# an info icon's callout button has too).
 FIELD_CANDIDATE_JS = r"""e => {
   if (e.closest('th, thead, [role=columnheader], [role=rowheader]')) return false;
   const role = e.getAttribute('role') || '';
   const plainButton = role === 'button' || (!role && e.tagName.toLowerCase() === 'button');
   if (!plainButton) return true;
   const popup = (e.getAttribute('aria-haspopup') || '').toLowerCase();
-  return ['listbox', 'menu', 'true'].includes(popup) || e.hasAttribute('aria-expanded');
+  if (['listbox', 'menu', 'true'].includes(popup)) return true;
+  if (!e.hasAttribute('aria-expanded')) return false;
+  const ids = ((e.getAttribute('aria-controls') || '') + ' ' + (e.getAttribute('aria-owns') || ''))
+    .split(/\s+/).filter(Boolean);
+  return ids.some(id => {
+    const target = document.getElementById(id);
+    return !!target && ['listbox', 'menu'].includes(target.getAttribute('role'));
+  });
 }"""
 # Never acted on unless the guide itself names such an element: a wrong replay or a mistyped
 # number must not delete a user or sign the person out halfway through a lab.
@@ -321,16 +332,17 @@ def is_control(element: Locator) -> bool:
 def field_kind(element: Locator) -> tuple[str, str | None]:
     """(what the element is, for a message: its role, or its tag; and its tier for one_field):
     'value' for an element that takes a value itself (a text box or text area, a select, a combo
-    box, check box, radio, switch, list box, spin button or slider), 'dropdown' for a button
-    that opens a list (aria-haspopup listbox, menu or true), None for anything else, such as the
-    info icon next to a label. An element that cannot be inspected is '?', with no tier."""
+    box, check box, radio, switch, list box, spin button or slider, or contenteditable), 'dropdown'
+    for a button that opens a list (aria-haspopup listbox, menu or true), None for anything else,
+    such as the info icon next to a label. An element that cannot be inspected is '?', with no
+    tier."""
     try:
-        tag, role, input_type, popup = element.evaluate(FIELD_KIND_JS, timeout=1000)
+        tag, role, input_type, popup, editable = element.evaluate(FIELD_KIND_JS, timeout=1000)
     except PlaywrightError:
         return "?", None
     what = role or (f"{tag}[type={input_type}]" if tag == "input" and input_type else tag)
-    if role in VALUE_ROLES or (not role and (tag in ("textarea", "select")
-                                             or (tag == "input" and input_type not in NOT_VALUE_INPUTS))):
+    if editable or role in VALUE_ROLES or (not role and (tag in ("textarea", "select")
+                                                         or (tag == "input" and input_type not in NOT_VALUE_INPUTS))):
         return what, "value"
     if (role == "button" or (not role and tag == "button")) and popup in ("listbox", "menu", "true"):
         return what, "dropdown"
@@ -341,11 +353,13 @@ def one_field(found: list[Locator]) -> Locator | None:
     """The field among the elements a label matches: the only one, or else the only one that
     takes a value, or else the only button that opens a list (field_kind). Fluent UI forms put
     more than the field under a label ('Group description' and its info icon). Raises Ambiguous
-    naming what matched ('textarea, button'), so a live run shows what collided."""
+    naming what matched ('textarea, button'), so a live run shows what collided, and whenever
+    one of them could not be inspected: it may be the field, and dropping it would be a guess."""
     if len(found) <= 1:
         return found[0] if found else None
     kinds = [field_kind(element) for element in found]
-    for tier in ("value", "dropdown"):
+    inspected = all(what != "?" for what, _ in kinds)
+    for tier in ("value", "dropdown") if inspected else ():
         picked = [element for element, (_, kind) in zip(found, kinds) if kind == tier]
         if len(picked) == 1:
             return picked[0]
