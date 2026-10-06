@@ -9,6 +9,13 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.9](https://github.com/mbiszczanik/skycraft/compare/v0.10.8...v0.10.9) (2026-10-06)
+
+
+### Documentation
+
+* remove the stale release-please spec and plan ([#191](https://github.com/mbiszczanik/skycraft/issues/191)) ([f62cb3a](https://github.com/mbiszczanik/skycraft/commit/f62cb3a79e31af05c4091551b23e1f378b7510e1))
+
 ## [0.10.8](https://github.com/mbiszczanik/skycraft/compare/v0.10.7...v0.10.8) (2026-09-28)
 
 
