@@ -4,15 +4,19 @@
     typo patterns that were removed.
 
 .DESCRIPTION
-    Guards the repo against two regressions:
+    Guards the repo against three regressions:
       1. The '*.agent' and '*.github' patterns that were in .gitignore ignored
          files literally ending in '.agent' / '.github' (no matching use case in
          this repo, and '*.github' was most likely meant to be '.github/').
          They must not come back.
       2. The session scratch directory ('.patches/') must stay ignored so a
          clean 'git status' does not show transient working state.
+      3. Tool run artefacts (lab cycle and guide drift) must stay ignored while
+         the tools' source stays tracked. The tracked check passes --no-index,
+         because 'git check-ignore' otherwise skips tracked files and would
+         always report them as not ignored, so it could never fail.
 
-    For (2) the test uses 'git check-ignore' rather than regexing the file, so
+    For (2) and (3) the test uses 'git check-ignore' rather than regexing the file, so
     it catches real matching behaviour including negations.
 
 .EXAMPLE
@@ -80,7 +84,7 @@ Describe '.gitignore - required ignore patterns' {
         Push-Location $script:RepoRoot
         try {
             foreach ($artefact in $artefacts) {
-                git check-ignore -q $artefact
+                git check-ignore -q --no-index $artefact
                 $LASTEXITCODE | Should -Be 0 -Because "$artefact is a run artefact and must never reach history"
             }
         } finally { Pop-Location }
@@ -95,24 +99,25 @@ Describe '.gitignore - required ignore patterns' {
             'tools/guide-drift-logs/20261007-100000/Step-1.1.6.png'
             'tools/.guide-drift-state.json'
             'tools/.guide-drift-auth.json'
+            'tools/guide-drift/__pycache__/decide.cpython-312.pyc'
         )
         Push-Location $script:RepoRoot
         try {
             foreach ($artefact in $artefacts) {
-                git check-ignore -q $artefact
+                git check-ignore -q --no-index $artefact
                 $LASTEXITCODE | Should -Be 0 -Because "$artefact is a run artefact and must never reach history"
             }
         } finally { Pop-Location }
     }
 
-    It 'does not ignore the orchestrator itself' {
+    It 'does not ignore the tools'' source files' {
         # The other half of the rule. A pattern broad enough to swallow tools/*.ps1 would leave the
         # orchestrator untracked, and the mistake would only surface on a fresh clone.
         Push-Location $script:RepoRoot
         try {
             foreach ($tracked in 'tools/Invoke-LabCycle.ps1', 'tools/Remove-LabCycle.ps1', 'tools/lab-cycle-manifest.psd1',
                                  'tools/Invoke-GuideDrift.ps1', 'tools/guide-drift/parse.py', 'tools/guide-drift/recordings/lab-1.1.json') {
-                git check-ignore -q $tracked
+                git check-ignore -q --no-index $tracked
                 $LASTEXITCODE | Should -Be 1 -Because "$tracked is source and must stay tracked"
             }
         } finally { Pop-Location }
