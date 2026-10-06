@@ -9,6 +9,13 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.10](https://github.com/mbiszczanik/skycraft/compare/v0.10.9...v0.10.10) (2026-10-06)
+
+
+### Documentation
+
+* **lab-1.1:** bring the guide in line with the Azure Portal ([#215](https://github.com/mbiszczanik/skycraft/issues/215)) ([f638a68](https://github.com/mbiszczanik/skycraft/commit/f638a6881eb15380f3aacbe45b3d6df6485eedf9))
+
 ## [0.10.9](https://github.com/mbiszczanik/skycraft/compare/v0.10.8...v0.10.9) (2026-10-06)
 
 
