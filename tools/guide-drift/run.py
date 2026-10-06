@@ -197,29 +197,29 @@ def text_on_screen(page: Page, text: str) -> bool:
     return bool(visible_across_frames(page, lambda f: f.get_by_text(text, exact=False), anywhere=True))
 
 
-def inside_interactive(element: Locator) -> bool:
-    """Whether the element is, or sits inside, something a click acts on (INTERACTIVE). An
-    element that cannot be inspected (it went away mid-check) counts, as in visible_in()."""
-    try:
-        return bool(element.evaluate("(e, selector) => e.closest(selector) !== null", INTERACTIVE,
-                                     timeout=1000))
-    except PlaywrightError:
-        return True
+def interactive_text(scope: Frame | Locator, label: str) -> Locator:
+    """Plain text `label` (exact, whitespace normalised) that is, or sits inside, an interactive
+    element (INTERACTIVE); clicking the text clicks that element. The constraint is part of the
+    locator rather than a check after it, so a re-render between count() and nth(k) cannot move
+    a match onto a static caption."""
+    quoted = '"' + label.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return scope.locator(f":is({INTERACTIVE}):text-is({quoted}), :is({INTERACTIVE}) :text-is({quoted})")
 
 
 def find_in_roles(page: Page, label: str, roles: tuple[str, ...]) -> Locator | None:
     """The visible element of the first of `roles` whose accessible name is exactly `label`, then
-    plain text that is, or sits inside, an interactive element: clicking the text clicks that
-    element. Static text is never a match: the Entra overview's 'Basic information' table has a
-    'Users' caption, and clicking it navigates nowhere. An ambiguous role match raises Ambiguous;
-    an ambiguous text match counts as not found, so the person picks a role-specific candidate."""
+    plain text that is, or sits inside, an interactive element (interactive_text). Static text is
+    never a match: the Entra overview's 'Basic information' table has a 'Users' caption, and
+    clicking it navigates nowhere. An ambiguous role match raises Ambiguous; an ambiguous text
+    match counts as not found, so the person picks a role-specific candidate."""
     for role in roles:
         element = unique_visible(page, lambda f, role=role: f.get_by_role(role, name=label, exact=True))
         if element is not None:
             return element
-    texts = [element for element in visible_across_frames(page, lambda f: f.get_by_text(label, exact=True))
-             if inside_interactive(element)]
-    return texts[0] if len(texts) == 1 else None
+    try:
+        return unique_visible(page, lambda f: interactive_text(f, label))
+    except Ambiguous:
+        return None
 
 
 def find_field(page: Page, label: str) -> Locator | None:

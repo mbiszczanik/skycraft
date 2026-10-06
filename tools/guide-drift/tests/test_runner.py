@@ -13,6 +13,7 @@ repository root:
 import argparse
 import io
 import json
+import re
 import sys
 import tempfile
 import types
@@ -597,9 +598,10 @@ class GuardAndLookupTests(RunnerTestCase):
 
 
 class ScreenNode(FakeElement):
-    """One element of a Screen. `interactive`: whether it is, or sits inside, a link, button or
-    other interactive element (what Element.closest() answers in the browser). `on_click` and
-    `on_fill` change the screen, as opening a menu or typing into the search box does."""
+    """One element of a Screen. `interactive`: whether plain text is, or sits inside, a link,
+    button or other interactive element (what interactive_text() matches in the browser).
+    `on_click` and `on_fill` change the screen, as opening a menu or typing into the search box
+    does."""
 
     def __init__(self, interactive: bool = True, on_click=None, on_fill=None) -> None:
         super().__init__()
@@ -610,9 +612,6 @@ class ScreenNode(FakeElement):
 
     def is_visible(self) -> bool:
         return True
-
-    def evaluate(self, script, arg=None, timeout=None):
-        return self.interactive
 
     def click(self, timeout=None) -> None:
         super().click(timeout)
@@ -659,6 +658,16 @@ class Screen:
 
     def get_by_label(self, text, exact=None) -> ScreenLocator:
         return self._find("label", text)
+
+    TEXT_IS = re.compile(r':text-is\("((?:\\.|[^"\\])*)"\)')
+
+    def locator(self, selector: str) -> ScreenLocator:
+        """interactive_text(): plain text entries whose node is interactive."""
+        m = self.TEXT_IS.search(selector)
+        if not m:
+            raise NotImplementedError(selector)
+        text = re.sub(r"\\(.)", r"\1", m.group(1))
+        return ScreenLocator([node for r, n, node in self.entries if r == "text" and n == text and node.interactive])
 
 
 class FindOnScreenTests(RunnerTestCase):
@@ -727,6 +736,9 @@ class FindOnScreenTests(RunnerTestCase):
         with mock.patch.object(run, "all_frames", lambda page: [Screen(("text", "Users", link_text),
                                                                      ("text", "Users", ScreenNode()))]):
             self.assertIsNone(run.find_exact(FakePage(), "Users"))          # two links: not found, not a guess
+        quoted = ScreenNode()
+        self.assertEqual(run.interactive_text(Screen(("text", 'Say "hi" \\ bye', quoted)), 'Say "hi" \\ bye').nodes,
+                         [quoted])                                          # quotes and backslashes escaped
 
     NAVIGATION = {"kind": "navigation", "labels": ["Users", "All users"], "line": 1}
 
