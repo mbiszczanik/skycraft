@@ -2638,7 +2638,9 @@ git commit -m "docs(contributing): name the guide drift tool and the recording r
 ### Task 12: First supervised run of lab 1.1 (live verification)
 
 This is the PR's live verification under ADR-0006. It needs: the dedicated run account, with its
-Portal language set to English; `Connect-AzAccount` on the rehearsal subscription;
+Portal language set to English; `Connect-AzAccount -TenantId <lab tenant id>` to the lab tenant
+(an Entra-only tenant without a subscription is fine; never the tenant of the rehearsal
+subscription, which is a corporate directory);
 `SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL` set to an address the maintainer controls (step 1.1.5 really
 sends the invitation there); Microsoft Graph sign-in for the cleanup script. Lab 1.1 creates 3
 users, 1 guest invitation and 3 groups, and changes two tenant-wide settings (a license
@@ -2664,7 +2666,7 @@ How the run talks to you (from Tasks 8-10):
 
 ```powershell
 $env:SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL = '<address you control>'
-./tools/Invoke-GuideDrift.ps1 -SubscriptionId <rehearsal subscription id> -Lab 1.1
+pwsh -File ./tools/Invoke-GuideDrift.ps1 -TenantId <lab tenant id> -Lab 1.1
 ```
 
 For Expected Results, type the text to look for (`Malfurion Stormrage` in 1.1.2,
@@ -2725,7 +2727,7 @@ happen before the first step, so re-run without `-Resume`; for items 4-7 continu
 - [ ] **Step 4: Re-run to prove replay**
 
 ```powershell
-./tools/Invoke-GuideDrift.ps1 -SubscriptionId <rehearsal subscription id> -Lab 1.1
+pwsh -File ./tools/Invoke-GuideDrift.ps1 -TenantId <lab tenant id> -Lab 1.1
 ```
 
 Expected: the run asks nothing it was told in Step 1, except the 1.1.7 failure prompt (a guide
