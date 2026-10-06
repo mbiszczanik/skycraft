@@ -13,7 +13,7 @@
     WHAT A RUN DOES. Parses the guide with tools/guide-drift/parse.py (only '### Step' sections,
     outside code fences, Option 1 where Option headings exist; the fixed list of bold captions
     that are not UI elements lives in parse.py), opens Chromium through tools/guide-drift/run.py
-    on the Entra ID overview of the tenant of -SubscriptionId, waits for you to sign in (until
+    on the Entra ID overview of the tenant of -SubscriptionId (or of -TenantId), waits for you to sign in (until
     the overview shows 'Tenant ID'), refuses to start unless the Portal is in English and the
     overview shows that tenant's id, then performs every portal step for real: later
     steps depend on what earlier ones created. It never clicks one of several matching elements,
@@ -22,7 +22,14 @@
     drift (blocking, misleading or cosmetic), unknown or skipped, so 'could not check' is never
     reported as 'fine'.
 
-    THE RUN MAKES REAL CHANGES in the tenant of -SubscriptionId: it creates users, a guest
+    TENANT MODE. A lab that touches only Microsoft Entra ID (today 1.1) needs no subscription, and
+    the tenant of a subscription may be a directory where the lab must not run: users, a guest and
+    self-service password reset for all users do not belong in a corporate tenant. -TenantId runs
+    such a lab against a tenant that has no subscription, after Connect-AzAccount -TenantId. A lab
+    that deploys Azure resources (a phase of tools/lab-cycle-manifest.psd1) is refused in this
+    mode: it needs -SubscriptionId.
+
+    THE RUN MAKES REAL CHANGES in the tenant of -SubscriptionId or -TenantId: it creates users, a guest
     invitation and groups, and changes tenant settings, exactly as the guide says. Use a tenant
     where that is acceptable.
 
@@ -58,8 +65,8 @@
         with SKYCRAFT_GRAPH_TENANT_ID set to the run's tenant so that its Graph sign-in is
         pinned to it. If SKYCRAFT_GRAPH_TENANT_ID is already set to another tenant, cleanup is
         skipped with a warning instead of deleting by name in the wrong tenant.
-      - any other lab: tools/Remove-LabCycle.ps1 -Labs <lab>, that lab only, with the same
-        -SubscriptionId.
+      - any other lab (-SubscriptionId only): tools/Remove-LabCycle.ps1 -Labs <lab>, that lab
+        only, with the same -SubscriptionId.
     There is no cleanup after a run that did not start (254), was stopped with its state kept
     (255) or did not finish: -Resume needs what it created.
 
@@ -79,6 +86,13 @@
     context through Test-LabCycleSubscription, for the reason Invoke-LabCycle.ps1 gives
     (2026-08-02). The tenant id, its initial *.onmicrosoft.com domain and its display name are
     read from it; the display name is kept out of the recording as '[tenantname]'.
+
+.PARAMETER TenantId
+    The tenant to run an Entra-only lab against, when it has no subscription (tenant mode, see
+    above). Compared by id against the Az context, like -SubscriptionId: run
+    Connect-AzAccount -TenantId <id> first (an account without a subscription is fine). Not
+    allowed for a lab that deploys Azure resources, and not together with -SubscriptionId. Its
+    initial *.onmicrosoft.com domain and display name are read with Get-AzTenant.
 
 .PARAMETER Lab
     The lab to run, as 'X.Y'. Resolves module-*/X.Y-*/lab-guide-X.Y.md. Only labs with a
@@ -110,6 +124,10 @@
     Performs lab 1.1 supervised, then removes its users and groups.
 
 .EXAMPLE
+    pwsh -File .\tools\Invoke-GuideDrift.ps1 -TenantId 00000000-0000-0000-0000-000000000000 -Lab 1.1
+    Performs lab 1.1 in a tenant that has no subscription, then removes its users and groups.
+
+.EXAMPLE
     .\tools\Invoke-GuideDrift.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000 -Lab 1.1 -Resume -SkipCleanup
     Continues an interrupted run and leaves the resources for inspection.
 
@@ -131,11 +149,15 @@
 #Requires -Version 7.0
 #Requires -Modules Az.Accounts
 
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Subscription')]
 param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = 'Subscription')]
     [ValidatePattern('^[0-9a-fA-F-]{36}$')]
     [string]$SubscriptionId,
+
+    [Parameter(Mandatory = $true, ParameterSetName = 'Tenant')]
+    [ValidatePattern('^[0-9a-fA-F-]{36}$')]
+    [string]$TenantId,
 
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^\d+\.\d+$')]
@@ -195,6 +217,17 @@ if (-not $guide -or -not (Test-Path -LiteralPath $guide)) {
     $Host.SetShouldExit(1)
     exit 1
 }
+# --- Tenant mode: only for a lab that creates nothing in a subscription ---------------------------
+$tenantMode = $PSCmdlet.ParameterSetName -eq 'Tenant'
+if ($tenantMode) {
+    $manifest = Import-PowerShellDataFile -LiteralPath (Join-Path $PSScriptRoot 'lab-cycle-manifest.psd1')
+    if (@($manifest.Phases | Where-Object { $_.Id -eq $Lab }).Count -gt 0) {
+        Write-Host "[ERROR] Lab $Lab deploys Azure resources; run it with -SubscriptionId." -ForegroundColor Red
+        $Host.SetShouldExit(1)
+        exit 1
+    }
+}
+
 $recording = Join-Path $toolDir "recordings/lab-$Lab.json"
 if (-not (Test-Path -LiteralPath $recording)) {
     Write-Host "[ERROR] No recording at $recording. Create one from the lab 1.1 seed shape before the first supervised run." -ForegroundColor Red
@@ -226,6 +259,11 @@ if (-not $SkipCleanup) {
             $Host.SetShouldExit(1)
             exit 1
         }
+    } elseif ($tenantMode) {
+        # Remove-LabCycle.ps1 works on a subscription, and there is none here.
+        Write-Host "[ERROR] Lab $Lab has no cleanup that works without a subscription. Pass -SkipCleanup and remove what the run creates by hand." -ForegroundColor Red
+        $Host.SetShouldExit(1)
+        exit 1
     } else {
         $cleanupScript = Join-Path $PSScriptRoot 'Remove-LabCycle.ps1'
         if (-not (Test-Path -LiteralPath $cleanupScript)) {
@@ -261,14 +299,26 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # --- Subscription and tenant ----------------------------------------------------------------
-$check = Test-LabCycleSubscription -SubscriptionId $SubscriptionId
-if (-not $check.Ok) {
-    Write-Host "[ERROR] $($check.Detail)" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+if ($tenantMode) {
+    # Compared by id, like the subscription: a tenant name or a stale context proves nothing.
+    $azContext = Get-AzContext
+    if (-not $azContext -or [string]$azContext.Tenant.Id -ine $TenantId) {
+        Write-Host "[ERROR] The Azure context is $(if ($azContext) { "in tenant $($azContext.Tenant.Id)" } else { 'missing' }), not in $TenantId." -ForegroundColor Red
+        Write-Host "        Run Connect-AzAccount -TenantId $TenantId first (an account without a subscription is fine)." -ForegroundColor Yellow
+        $Host.SetShouldExit(1)
+        exit 1
+    }
+    $check = [pscustomobject]@{ Ok = $true; Detail = '(none: tenant mode)' }
+} else {
+    $check = Test-LabCycleSubscription -SubscriptionId $SubscriptionId
+    if (-not $check.Ok) {
+        Write-Host "[ERROR] $($check.Detail)" -ForegroundColor Red
+        $Host.SetShouldExit(1)
+        exit 1
+    }
 }
 try {
-    $tenantId = (Get-AzContext).Tenant.Id
+    $tenantId = if ($tenantMode) { $TenantId } else { (Get-AzContext).Tenant.Id }
     $tenant   = Get-AzTenant -TenantId $tenantId
 }
 catch {
