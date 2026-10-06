@@ -65,6 +65,36 @@ TAG_FIRST_HEADERS = {"name", "tag"}                        # rows become 'tag' i
 
 NON_UI_BOLD = {
     "Expected Result", "Note", "Tip", "Important", "Warning", "Why", "SkyCraft Choice",
+    # Captions and prose emphasis found in the guides, each with the lab it came from. Only text
+    # that is clearly not a Portal element is listed; a supervised run answers the rest once.
+    "Azure Portal",                            # 1.1-5.2: "Open **Azure Portal**", the site itself
+    "group",                                   # 1.2: "Select the **group** (not individual users)"
+    "WITHOUT",                                 # 1.3: emphasis
+    "resource",                                # 1.3: "Locks at **resource** level"
+    "fully private",                           # 2.2: emphasis
+    "private IP",                              # 2.2: emphasis
+    "Install Bicep CLI",                       # 3.1: caption of a local-tools step
+    "Install VS Code Extension",               # 3.1: caption of a local-tools step
+    "Review generated Bicep file",             # 3.1: caption
+    "(Optional)",                              # 3.2: caption
+    "zone-redundant by default",               # 3.2: emphasis
+    "Simulating zone failure",                 # 3.2: caption in a conceptual step
+    "Verifying traffic routing",               # 3.2: caption in a conceptual step
+    "Restoring service",                       # 3.2: caption in a conceptual step
+    "Version: 2.0 (Staging)",                  # 3.4: text of the local index.html
+    "Blue",                                    # 3.4: colour of the local index.html
+    "Validation",                              # 3.4: caption ("**Validation**: Add the TXT ...")
+    "Bind",                                    # 3.4: caption ("**Bind**: Once validated, ...")
+    "always enabled",                          # 4.1: emphasis
+    "Find the account-level switch",           # 4.2: caption
+    "Create the `public-demo` container - Private",  # 4.2: caption
+    "Prove the container is not anonymous",    # 4.2: caption
+    "Result",                                  # 4.2: caption ("**Result**: PublicAccess...")
+    "See the container-level switch",          # 4.2: caption
+    "backup instance",                         # 5.2: emphasis
+    "Fallback",                                # 5.3: caption
+    "Dev fallback source",                     # 5.3: caption of an expected outcome
+    "Production source",                       # 5.3: caption of an expected outcome
 }
 
 

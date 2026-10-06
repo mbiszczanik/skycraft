@@ -381,3 +381,99 @@ Describe 'parse.py - forms and markers found in the real guides' {
         $labels | Should -Contain 'AfterFence'
     }
 }
+
+# Discovery-time state for the per-guide cases. The file-level BeforeAll does not run at
+# discovery, so these are defined here at file scope, as Guide-Step-Numbering.Tests.ps1 does.
+$DiscoveryRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$DiscoveryParser   = Join-Path $DiscoveryRepoRoot 'tools/guide-drift/parse.py'
+$DiscoveryPython   = if ($IsWindows) { 'python' } else { 'python3' }
+
+# The step regex is the one tests/Guide-Step-Numbering.Tests.ps1 uses, narrowed to '###', so the
+# parser is held to the same reading of a guide as the numbering test.
+$GuideCases = Get-ChildItem -Path $DiscoveryRepoRoot -Directory -Filter 'module-*' |
+    Get-ChildItem -Directory |
+    Where-Object { $_.Name -match '^\d+\.\d+-' } |
+    ForEach-Object {
+        $num   = [regex]::Match($_.Name, '^\d+\.\d+').Value
+        $guide = Join-Path $_.FullName "lab-guide-$num.md"
+        if (-not (Test-Path -LiteralPath $guide)) { return }
+        $text  = Get-Content -Raw -LiteralPath $guide
+        $text  = [regex]::Replace($text, '(?ms)^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1[ \t]*\r?$', '')
+        # Closed HTML comments only (non-greedy): an unclosed '<!--' leaves later headings counted
+        # here while the parser hides them, so the id comparison below catches it.
+        $text  = [regex]::Replace($text, '(?s)<!--.*?-->', '')
+        $headingIds = @([regex]::Matches($text, '(?m)^###[ \t]+Step[ \t]+(\d+\.\d+\.\d+):') | ForEach-Object { $_.Groups[1].Value })
+        $out = [System.IO.Path]::GetTempFileName()
+        try {
+            $stderr = & $DiscoveryPython $DiscoveryParser $guide --out $out --repo-root $DiscoveryRepoRoot 2>&1
+            $exit   = $LASTEXITCODE
+            $parsed = if ($exit -eq 0) { Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json }
+        } finally { Remove-Item -LiteralPath $out -ErrorAction SilentlyContinue }
+        $fieldLabels = @($parsed.steps | ForEach-Object { $_.items } | Where-Object kind -eq 'field' | ForEach-Object label)
+        @{
+            lab         = $num
+            exitCode    = $exit
+            output      = ($stderr -join "`n")
+            headingIds  = $headingIds
+            parsedIds   = @($parsed.steps.id)
+            emptyPortal = @($parsed.steps | Where-Object { $_.portal -and @($_.items).Count -eq 0 } | ForEach-Object id)
+            badFields   = @($fieldLabels | Where-Object { $_ -match '^<!--|`|\*\*' })
+            guidePath   = $parsed.guide
+        }
+    }
+
+Describe 'parse.py - every lab guide' {
+    It 'has guides to check' -ForEach @(@{ count = @($GuideCases).Count }) {
+        $count | Should -Be 17
+    }
+
+    It "'<lab>' parses" -ForEach $GuideCases {
+        $exitCode | Should -Be 0 -Because $output
+    }
+
+    It "'<lab>' yields the same step ids as its headings, in order" -ForEach $GuideCases {
+        $parsedIds | Should -Be $headingIds
+    }
+
+    It "'<lab>' reports a guide path relative to the repo root" -ForEach $GuideCases {
+        $guidePath | Should -Match "^module-\d[^/]*/\d+\.\d+-[^/]+/lab-guide-$lab\.md$"
+    }
+
+    It "'<lab>' never marks a step portal without a label" -ForEach $GuideCases {
+        $emptyPortal | Should -BeNullOrEmpty
+    }
+
+    It "'<lab>' yields field labels without markup or comment residue" -ForEach $GuideCases {
+        $badFields | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'parse.py - lab 1.1, the first recorded lab' {
+    BeforeAll {
+        $guide = Join-Path $script:RepoRoot 'module-1-identities-governance/1.1-entra-users-groups/lab-guide-1.1.md'
+        $out   = Join-Path $TestDrive 'lab-1.1.json'
+        & $script:Python $script:Parser $guide --out $out --repo-root $script:RepoRoot
+        $script:Lab11 = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+    }
+
+    It 'reads step 1.1.6 as navigation, action, four fields and Create' {
+        $step = $script:Lab11.steps | Where-Object id -eq '1.1.6'
+        @($step.items.kind) | Should -Be @('navigation', 'action', 'field', 'field', 'field', 'field', 'action')
+        @($step.items[0].labels) | Should -Be @('Groups', 'All groups')
+        @($step.items[1].labels) | Should -Be @('+ New group')
+        @(($step.items | Where-Object kind -eq 'field').label) | Should -Be @('Group type', 'Group name', 'Group description', 'Membership type')
+    }
+
+    It 'keeps the guest invitation value of step 1.1.5 verbatim for the recording to override' {
+        $email = ($script:Lab11.steps | Where-Object id -eq '1.1.5').items | Where-Object label -eq 'Email'
+        $email.value | Should -Be 'istormrage@illidari.com'
+    }
+
+    It 'marks every one of the 14 steps as portal' {
+        @($script:Lab11.steps | Where-Object portal).Count | Should -Be 14
+    }
+
+    It 'lists Step-1.1.7.png as 2279 px wide' {
+        ($script:Lab11.images | Where-Object path -eq 'images/Step-1.1.7.png').width | Should -Be 2279
+    }
+}

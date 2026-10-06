@@ -1005,7 +1005,7 @@ git add tests/Guide-Drift-Parser.Tests.ps1 tools/guide-drift/parse.py PLAN.md
 git commit -m "feat(guide-drift): read list-item fields, lettered options and long fences from guides"
 ```
 
-- [ ] **Step 6: Write the 17-guide tests**
+- [x] **Step 6: Write the 17-guide tests**
 
 Append to `tests/Guide-Drift-Parser.Tests.ps1`:
 
@@ -1110,12 +1110,12 @@ Describe 'parse.py - lab 1.1, the first recorded lab' {
 Check the names the file-level `BeforeAll` actually defines (`$script:RepoRoot`,
 `$script:Python`, `$script:Parser` after Task 2's fix) and use those.
 
-- [ ] **Step 7: Run the tests**
+- [x] **Step 7: Run the tests**
 
 Run: `pwsh -NoProfile -Command "Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed"`
 Expected: the lab 1.1 Describe passes. Per-guide failures, if any, show what the next step fixes.
 
-- [ ] **Step 8: Grow NON_UI_BOLD from what the guides show**
+- [x] **Step 8: Grow NON_UI_BOLD from what the guides show**
 
 Dump every label the parser extracts, through `--out` (never stdout):
 
@@ -1136,13 +1136,13 @@ things like `Solution`, `Cause`, `Check`, `Fix`, `Q`, `A`, `Situation`, `Your Ta
 Portal names; when unsure, leave it in (a supervised run answers `i` for it once, and the
 recording keeps that). Put the full list you saw, and which entries you added, in your report.
 
-- [ ] **Step 9: Run the tests to verify they pass**
+- [x] **Step 9: Run the tests to verify they pass**
 
 Run: `pwsh -NoProfile -Command "Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed"`
 Expected: all green, 17 guides. Also run it once with `PYTHONIOENCODING` removed and the
 console code page set to 852, as in Task 2's fix, and confirm green.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```powershell
 git add tests/Guide-Drift-Parser.Tests.ps1 tools/guide-drift/parse.py PLAN.md
