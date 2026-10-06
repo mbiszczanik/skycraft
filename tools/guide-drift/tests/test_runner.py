@@ -1,6 +1,7 @@
 """Unit tests for run.py's bookkeeping: state, resume, failure handling, recording of decisions
-(issue #189). No browser: the page is a small fake, and run_step is scripted where only the
-order of steps matters.
+(issue #189), and how it finds what a guide names (search, '+' labels, plain text, collapsed
+menu groups). No browser: the page is a small fake (Screen stands in for a frame), and run_step
+is scripted where only the order of steps matters.
 
 run.py imports Playwright at module level and the CI runner does not install it, so a minimal
 stub of playwright.sync_api is put in sys.modules when the real one is missing. Nothing here
@@ -264,6 +265,8 @@ class FakePage:
 
     def __init__(self, closed: bool = False) -> None:
         self.closed = closed
+        self.main_frame = Screen()       # an empty screen unless a test patches run.all_frames
+        self.frames = [self.main_frame]
 
     def is_closed(self) -> bool:
         return self.closed
@@ -608,7 +611,7 @@ class ScreenNode(FakeElement):
     def is_visible(self) -> bool:
         return True
 
-    def evaluate(self, script, arg=None):
+    def evaluate(self, script, arg=None, timeout=None):
         return self.interactive
 
     def click(self, timeout=None) -> None:
@@ -665,8 +668,8 @@ class FindOnScreenTests(RunnerTestCase):
         super().setUp()
         (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
 
-    def act(self, screen: Screen, item: dict, label: str, answers=(), candidates=()):
-        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
+    def act(self, screen: Screen, item: dict, label: str, answers=(), candidates=(), runner=None):
+        r = runner or run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
         step = {"id": "9.9.1", "title": "One", "items": [item], "images": []}
         clock = iter(range(0, 1_000_000, 3))               # 3 s pass between every look at the clock
         with mock.patch.object(run, "all_frames", lambda page: [screen]), \
@@ -713,6 +716,56 @@ class FindOnScreenTests(RunnerTestCase):
             self.assertIs(run.find_exact(FakePage(), "+ Add"), full)       # the full name first
         with mock.patch.object(run, "all_frames", lambda page: [Screen(("button", "+", bare))]):
             self.assertIs(run.find_exact(FakePage(), "+"), bare)           # nothing left to look up
+
+    def test_plain_text_counts_only_inside_an_interactive_element(self) -> None:
+        caption, link_text = ScreenNode(interactive=False), ScreenNode(interactive=True)
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(("text", "Users", caption))]):
+            self.assertIsNone(run.find_exact(FakePage(), "Users"))          # the overview's static caption
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(("text", "Users", caption),
+                                                                     ("text", "Users", link_text))]):
+            self.assertIs(run.find_exact(FakePage(), "Users"), link_text)   # the caption does not make it two
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(("text", "Users", link_text),
+                                                                     ("text", "Users", ScreenNode()))]):
+            self.assertIsNone(run.find_exact(FakePage(), "Users"))          # two links: not found, not a guess
+
+    NAVIGATION = {"kind": "navigation", "labels": ["Users", "All users"], "line": 1}
+
+    def test_collapsed_menu_groups_are_expanded_once_before_the_person_is_asked(self) -> None:
+        users, all_users = ScreenNode(), ScreenNode()
+        screen = Screen(("text", "Users", ScreenNode(interactive=False)))
+        expand = ScreenNode(on_click=lambda: screen.add(("link", "Users", users)))
+        screen.add(("button", "Expand all headers", expand), ("button", "Toggle Manage", ScreenNode()))
+        record, r = self.act(screen, self.NAVIGATION, "Users")
+        self.assertEqual((record["outcome"], record["observed"]), ("match", "Users"))
+        self.assertEqual((expand.clicked, users.clicked, r.ask.prompts), (1, 1, []))
+        self.assertEqual(self.recording["steps"]["9.9.1"]["labels"], {})     # exact: nothing to record
+        # The same item's next label is not on screen: no second expansion, the person is asked.
+        record, r = self.act(screen, self.NAVIGATION, "All users", runner=r)
+        self.assertEqual((record["outcome"], expand.clicked, len(r.ask.prompts)), ("unknown", 1, 1))
+        screen.add(("link", "All users", all_users))
+        record, _ = self.act(screen, self.NAVIGATION, "All users", runner=r)
+        self.assertEqual((record["outcome"], all_users.clicked), ("match", 1))
+        self.assertIsNone(run.DESTRUCTIVE.search(run.EXPAND_ALL))
+
+    def test_without_an_expand_button_the_person_is_asked_at_once(self) -> None:
+        toggle = ScreenNode()
+        screen = Screen(("text", "Users", ScreenNode(interactive=False)), ("button", "Toggle Manage", toggle))
+        record, r = self.act(screen, self.NAVIGATION, "Users", candidates=[run.Candidate("button", "Toggle Manage")])
+        self.assertEqual((record["outcome"], toggle.clicked, len(r.ask.prompts)), ("unknown", 0, 1))
+        self.assertFalse(r.expanded)
+
+    def test_every_item_of_a_step_may_expand_the_menu_once(self) -> None:
+        links = [("link", "Users", ScreenNode()), ("link", "Groups", ScreenNode())]
+        screen = Screen()
+        expand = ScreenNode(on_click=lambda: screen.add(links.pop(0)))
+        screen.add(("button", "Expand all headers", expand))
+        step = {"id": "9.9.1", "title": "One", "expected": None, "images": [],
+                "items": [{"kind": "action", "labels": ["Users"], "line": 1},
+                          {"kind": "action", "labels": ["Groups"], "line": 2}]}
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertTrue(self.quietly(lambda: r.run_step(step)))
+        self.assertEqual(expand.clicked, 2)
 
     def test_a_search_without_the_search_box_is_unknown(self) -> None:
         record, r = self.act(Screen(), self.SEARCH, "Microsoft Entra ID")

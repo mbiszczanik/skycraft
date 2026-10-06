@@ -19,7 +19,9 @@ blades off to the left; below the fold is fine, it scrolls there first), and onl
 several matches are reported as unknown rather than guessed. It refuses to click or fill an
 element whose name contains the word delete, remove, reset, revoke, disable, block, purge or
 sign out, unless the guide's own label does too. A guide's 'Search for **X**' is typed into the
-Portal's global search, and the result named exactly X is opened.
+Portal's global search, and the result named exactly X is opened. Plain text counts only when it
+is, or sits inside, a link, button or other interactive element; before a label is reported as
+not found, the blade menu's collapsed groups are opened once ('Expand all headers').
 
 When a step does not go through, the person chooses: finish it by hand and continue, skip the
 rest of the lab, or stop and keep the state. --state records the completed steps and the step a
@@ -70,6 +72,11 @@ RESULT_ROLES = ("option", "link", "button", "menuitem")    # entries of the glob
 # The Portal's global search box, named "Search resources, services, and docs (G+/)".
 SEARCH_BOX = re.compile(r"^Search resources")
 LEADING_PLUS = re.compile(r"^\s*\+\s*")   # '+ New user': the Portal names the item 'New user'
+# What plain text must be, or sit inside, to count as the element a guide label names.
+INTERACTIVE = ("a, button, [role=link], [role=button], [role=menuitem], [role=treeitem], [role=tab], "
+               "[role=option], [role=checkbox], [role=radio]")
+# A blade menu's button that opens all its collapsed groups ('Manage', 'Monitoring', 'Help').
+EXPAND_ALL = "Expand all headers"
 # Never acted on unless the guide itself names such an element: a wrong replay or a mistyped
 # number must not delete a user or sign the person out halfway through a lab.
 DESTRUCTIVE = re.compile(r"\b(delete|remove|reset|revoke|disable|block|purge|sign out)\b", re.IGNORECASE)
@@ -190,18 +197,29 @@ def text_on_screen(page: Page, text: str) -> bool:
     return bool(visible_across_frames(page, lambda f: f.get_by_text(text, exact=False), anywhere=True))
 
 
+def inside_interactive(element: Locator) -> bool:
+    """Whether the element is, or sits inside, something a click acts on (INTERACTIVE). An
+    element that cannot be inspected (it went away mid-check) counts, as in visible_in()."""
+    try:
+        return bool(element.evaluate("(e, selector) => e.closest(selector) !== null", INTERACTIVE,
+                                     timeout=1000))
+    except PlaywrightError:
+        return True
+
+
 def find_in_roles(page: Page, label: str, roles: tuple[str, ...]) -> Locator | None:
     """The visible element of the first of `roles` whose accessible name is exactly `label`, then
-    plain text. An ambiguous role match raises Ambiguous; an ambiguous text match counts as not
-    found, so the person picks a role-specific candidate."""
+    plain text that is, or sits inside, an interactive element: clicking the text clicks that
+    element. Static text is never a match: the Entra overview's 'Basic information' table has a
+    'Users' caption, and clicking it navigates nowhere. An ambiguous role match raises Ambiguous;
+    an ambiguous text match counts as not found, so the person picks a role-specific candidate."""
     for role in roles:
         element = unique_visible(page, lambda f, role=role: f.get_by_role(role, name=label, exact=True))
         if element is not None:
             return element
-    try:
-        return unique_visible(page, lambda f: f.get_by_text(label, exact=True))
-    except Ambiguous:
-        return None
+    texts = [element for element in visible_across_frames(page, lambda f: f.get_by_text(label, exact=True))
+             if inside_interactive(element)]
+    return texts[0] if len(texts) == 1 else None
 
 
 def find_field(page: Page, label: str) -> Locator | None:
@@ -504,6 +522,7 @@ class Runner:
         self.records: list[dict] = self.earlier_results() if args.resume else []
         self.first_failure: str | None = None   # the step every later step is skipped because of
         self.begun = bool(self.records)         # whether a step was started (and images checked)
+        self.expanded = False                   # whether the current item opened the menu groups
 
     def earlier_results(self) -> list[dict]:
         """The records the stopped part of this run wrote. A last line cut short by a crash is
@@ -556,6 +575,29 @@ class Runner:
                    and self.redactor.restore(c.name).casefold() == wanted.casefold()]
         return matches[0] if len(matches) == 1 and matches[0].count == 1 else None
 
+    def find_after_expanding(self, label: str) -> Locator | None:
+        """The element named `label` after opening every collapsed group of the blade's menu, or
+        None. Entra ID blades fold menu entries into groups ('Manage', 'Monitoring'), so a link
+        such as 'Users' is not on screen until its group opens. The blade's 'Expand all headers'
+        button opens them all; it is clicked at most once per item (run_step resets the flag),
+        and only when exactly one is visible. Raises Ambiguous as find_exact does."""
+        if self.expanded:
+            return None
+        try:
+            button = unique_visible(self.page, lambda f: f.get_by_role("button", name=EXPAND_ALL, exact=True))
+        except Ambiguous:
+            return None
+        if button is None:
+            return None
+        self.expanded = True
+        try:
+            button.click(timeout=FIND_TIMEOUT_MS)
+        except PlaywrightError:
+            return None
+        self.page.wait_for_timeout(SETTLE_MS)
+        print(f"Opened the menu groups ('{EXPAND_ALL}') to look for '{label}' again.")
+        return find_exact(self.page, label)
+
     def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None) -> dict:
         """Find the element the guide calls `label`, act on it, return the result record."""
         kind, line = item["kind"], item["line"]
@@ -565,6 +607,8 @@ class Runner:
                 element = search_portal(self.page, label)
             else:
                 element = find_exact(self.page, label, field=(kind == "field"))
+                if element is None and kind in ("navigation", "action"):
+                    element = self.find_after_expanding(label)
         except Ambiguous as error:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
             return record
@@ -658,6 +702,7 @@ class Runner:
         entry = self.step_entry(step)
         step_failed = False
         for item in step["items"]:
+            self.expanded = False
             if item["kind"] == "tag":
                 record = self.new_record(step, "tag", item["name"])
                 try:
