@@ -70,6 +70,7 @@ ENTRA_OVERVIEW = "/view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Overview"
 SETTLE_MS = 1500
 FIND_TIMEOUT_MS = 8000
 CHECK_TIMEOUT_MS = 2000     # set_checked() before the label is tried, and the wait for its effect
+LATE_CLICK_MS = 750         # how long an intercepted set_checked() may take to show, before the label
 RESULT_TIMEOUT_S = 15
 CANDIDATE_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "textbox",
                    "combobox", "checkbox", "radio", "heading", "cell")
@@ -153,6 +154,8 @@ FIELD_CANDIDATE_JS = r"""e => {
     return !!target && ['listbox', 'menu'].includes(target.getAttribute('role'));
   });
 }"""
+# For a check box's label (label_of): [whether it belongs to the input, whether it holds a link].
+LABEL_CHECK_JS = "(label, input) => [label.control === input, label.querySelector('a') !== null]"
 # Never acted on unless the guide itself names such an element: a wrong replay or a mistyped
 # number must not delete a user or sign the person out halfway through a lab.
 DESTRUCTIVE = re.compile(r"\b(delete|remove|reset|revoke|disable|block|purge|sign out)\b", re.IGNORECASE)
@@ -757,24 +760,40 @@ def fill_parts(page: Page, container: Locator, value: str) -> str | None:
                       f"and {len(comboboxes)} combo box(es)")
 
 
-def label_of(element: Locator) -> Locator | None:
-    """The label that belongs to a check box or radio: the closest <label> around it, or the
-    <label for=its id> anywhere in its document; None when it has none on screen."""
+def label_of(element: Locator) -> Locator:
+    """The one label to click for a check box or radio: the closest <label> around it, or the
+    <label for=its id> anywhere in its document. It must be the only one on screen, belong to
+    this input (label.control) and hold no link, which a click could follow. Raises LookupError
+    saying which of these failed."""
     paths = ["ancestor::label[1]"]
     element_id = element.get_attribute("id", timeout=1000) or ""
     if element_id and "'" not in element_id:
         paths.append(f"ancestor::*[last()]//label[@for='{element_id}']")
     labels = visible_in(element.locator("xpath=" + " | ".join(paths)), None)
-    return labels[0] if labels else None
+    if not labels:
+        raise LookupError("it has no label to click")
+    if len(labels) > 1:
+        raise LookupError(f"it has {len(labels)} labels on screen, not one")
+    handle = element.element_handle(timeout=1000)
+    try:
+        belongs, has_link = labels[0].evaluate(LABEL_CHECK_JS, handle, timeout=1000)
+    finally:
+        handle.dispose()
+    if not belongs:
+        raise LookupError("its label belongs to another control")
+    if has_link:
+        raise LookupError("its label holds a link, which a click could follow")
+    return labels[0]
 
 
 def set_check_state(page: Page, element: Locator, checked: bool) -> None:
     """Tick or clear the check box, radio or switch `element`. Fluent UI draws the tick mark
     over the input ('ms-Checkbox-checkmark' inside its label), so set_checked() can time out on
-    an intercepted click; then the input's label is clicked once, which toggles it as a person's
-    click does, and the state is read until CHECK_TIMEOUT_MS has passed. The label is never
-    clicked twice: a second click would toggle it back. Raises LookupError when the state
-    cannot be set, PlaywrightError for any other failure."""
+    an intercepted click. Then the state is read for LATE_CLICK_MS, in case the click went
+    through late, and only if it is still wrong is the input's label (label_of) clicked once,
+    which toggles it as a person's click does; the state is then read until CHECK_TIMEOUT_MS has
+    passed. The label is never clicked twice: a second click would toggle it back. Raises
+    LookupError when the state cannot be set, PlaywrightError for any other failure."""
     wanted = "checked" if checked else "unchecked"
     try:
         element.set_checked(checked, timeout=CHECK_TIMEOUT_MS)
@@ -783,19 +802,27 @@ def set_check_state(page: Page, element: Locator, checked: bool) -> None:
         reason = str(error)
         if "intercepts pointer events" not in reason and "timeout" not in reason.lower():
             raise
-    if element.is_checked(timeout=FIND_TIMEOUT_MS) == checked:     # the click went through late
+    if state_within(page, element, checked, LATE_CLICK_MS):     # the click went through late
         return
-    label = label_of(element)
-    if label is None:
-        raise LookupError(f"the click to make it {wanted} was intercepted and it has no label to click "
-                          f"({reason.splitlines()[0]})")
+    try:
+        label = label_of(element)
+    except LookupError as error:
+        raise LookupError(f"the click to make it {wanted} was intercepted ({reason.splitlines()[0]}), "
+                          f"and {error}") from None
     label.click(timeout=FIND_TIMEOUT_MS)
-    deadline = time.monotonic() + CHECK_TIMEOUT_MS / 1000
+    if not state_within(page, element, checked, CHECK_TIMEOUT_MS):
+        raise LookupError(f"its label was clicked to make it {wanted}, but it is still "
+                          f"{'unchecked' if checked else 'checked'}")
+
+
+def state_within(page: Page, element: Locator, checked: bool, ms: int) -> bool:
+    """Whether the check box shows `checked` within `ms`, read every 250 ms."""
+    deadline = time.monotonic() + ms / 1000
     while element.is_checked(timeout=FIND_TIMEOUT_MS) != checked:
         if time.monotonic() >= deadline:
-            raise LookupError(f"its label was clicked to make it {wanted}, but it is still "
-                              f"{'unchecked' if checked else 'checked'}")
+            return False
         page.wait_for_timeout(250)
+    return True
 
 
 def fill_field(page: Page, element: Locator, value: str) -> str | None:
