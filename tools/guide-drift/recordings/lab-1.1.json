@@ -1,0 +1,17 @@
+{
+  "lab": "1.1",
+  "guide": "module-1-identities-governance/1.1-entra-users-groups/lab-guide-1.1.md",
+  "portalLanguage": "en",
+  "viewport": [1440, 900],
+  "placeholders": {
+    "[yourtenant]": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}"
+  },
+  "steps": {
+    "1.1.5": {
+      "valueOverrides": { "Email": "${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}" },
+      "viewUrl": null,
+      "result": null,
+      "labels": {}
+    }
+  }
+}

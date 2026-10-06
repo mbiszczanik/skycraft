@@ -1313,7 +1313,7 @@ file scope during discovery, which is correct. Anything else an `It` block reads
 `BeforeAll` (`$script:` variables), as the second Describe already does. Commands below use
 `pwsh -NoProfile -Command "Invoke-Pester ..."` from the worktree root.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/Guide-Drift-Recording.Tests.ps1`:
 
@@ -1441,12 +1441,12 @@ Describe 'Guide drift recording for lab 1.1 - nothing tenant-specific is literal
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `Invoke-Pester -Path ./tests/Guide-Drift-Recording.Tests.ps1 -Output Detailed`
 Expected: `has recordings to check` fails (0 recordings).
 
-- [ ] **Step 3: Write the seed recording**
+- [x] **Step 3: Write the seed recording**
 
 Create `tools/guide-drift/recordings/lab-1.1.json`:
 
@@ -1470,18 +1470,18 @@ Create `tools/guide-drift/recordings/lab-1.1.json`:
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `Invoke-Pester -Path ./tests/Guide-Drift-Recording.Tests.ps1 -Output Detailed`
 Expected: 7 passed.
 
-- [ ] **Step 5: Run the whole suite once**
+- [x] **Step 5: Run the whole suite once**
 
 Run: `Invoke-Pester -Path ./tests -Output Normal`
 Expected: green. `Pester-Discovery.Tests.ps1` accepts the two new suites because they sit in
 `tests/`. `Markdown-Links.Tests.ps1` scans `PLAN.md` too: it contains no relative links.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add tools/guide-drift/recordings/lab-1.1.json tests/Guide-Drift-Recording.Tests.ps1 PLAN.md
