@@ -14,8 +14,8 @@ without a browser. Rules (issue #189):
     A > B) is one 'navigation' item with several labels; otherwise it is an 'action' item.
   * Bold spans that are not UI elements are dropped by NON_UI_BOLD and by the colon rule
     (bold text ending with ':' is a caption, not a label).
-  * Tables whose second header cell is 'Value' (Field | Value, Name | Value, Tag | Value, ...)
-    become 'field' items; backticks and bold are stripped from label and value. Every other table
+  * Tables whose second header cell is 'Value' and whose first is Field, Name, Tag, Property or
+    Setting (Field | Value, Name | Value, ...) become 'field' items; backticks and bold are stripped from label and value. Every other table
     is informational and is not read.
   * A step with no item left is emitted with portal=false and is not checked by the runner.
 
@@ -39,9 +39,12 @@ LIST_ITEM = re.compile(r"^\s*(?:\d+\.|[-*])\s+(?P<text>.+)$")
 BOLD = re.compile(r"\*\*(?P<text>[^*]+?)\*\*")
 EXPECTED = re.compile(r"^\*\*Expected Result\*\*\s*:\s*(?P<text>.+?)\s*$")
 TABLE_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$")
-TABLE_SEPARATOR = re.compile(r"^\s*\|?\s*:?-{2,}")
+SEPARATOR_CELL = re.compile(r"^:?-{2,}:?$")   # every cell of a separator row; "--name" is not one
 IMAGE = re.compile(r"!\[[^\]]*\]\(\s*\.?/?(?P<path>images/[^)\s]+)\s*\)")
 CHAIN = re.compile(r"→|->|\s>\s")   # navigation chain separators: arrow, ASCII arrow, " > "
+
+# A table is a form when its header is '<one of these> | Value'. 'Parameter | Value' lists CLI flags.
+FORM_FIRST_HEADERS = {"field", "name", "tag", "property", "setting"}
 
 NON_UI_BOLD = {
     "Expected Result", "Note", "Tip", "Important", "Warning", "Why", "SkyCraft Choice",
@@ -95,6 +98,12 @@ def strip_hidden(lines: list[str]) -> list[str]:
                     in_comment = True
                     touched = True
                     position = open_at + 4
+                    # '<!-->' and '<!--->' are complete, empty comments (HTML spec)
+                    for abrupt in (">", "->"):
+                        if line.startswith(abrupt, position):
+                            in_comment = False
+                            position += len(abrupt)
+                            break
         text = "".join(kept)
         out.append(HIDDEN if touched and not text.strip() else text)
     return out
@@ -175,22 +184,23 @@ def parse_items(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, li
     in_table = False
     is_form = False
     for number, line in body:
+        if line == HIDDEN:
+            continue                      # a commented-out line neither ends nor extends a table
         e = EXPECTED.match(line)
         if e:
             expected = e.group("text")
             continue
         for img in IMAGE.finditer(line):
             images.append(img.group("path"))
-        if line == HIDDEN:
-            continue                      # a commented-out line neither ends nor extends a table
         row = TABLE_ROW.match(line)
         if row:
             cells = [c.strip() for c in row.group("cells").split("|")]
-            if TABLE_SEPARATOR.match(line):
+            if all(SEPARATOR_CELL.match(c) for c in cells):
                 continue
             if not in_table:
                 in_table = True          # header row: a form only when the second cell is "Value"
-                is_form = len(cells) >= 2 and strip_value_markup(cells[1]).lower() == "value"
+                is_form = (len(cells) >= 2 and strip_value_markup(cells[1]).lower() == "value"
+                           and strip_value_markup(cells[0]).lower() in FORM_FIRST_HEADERS)
                 continue
             if is_form and len(cells) >= 2 and cells[0]:
                 label = clean_label(strip_value_markup(cells[0]))

@@ -186,6 +186,7 @@ Describe 'parse.py - form tables, HTML comments and images' {
 | `Group name`      | `SkyCraft-Admins`         |
 <!-- | Hidden field | never read | -->
 | Tier              | **Hot**                   |
+| Region <!-- was: Location --> | Sweden Central |
 
 3. Click **Create**
 
@@ -206,6 +207,10 @@ Describe 'parse.py - form tables, HTML comments and images' {
 | --------- | -------------- |
 | Location  | swedencentral  |
 
+| Parameter | Value | Description |
+| --------- | ----- | ----------- |
+| --name    | x     | flag        |
+
 | Name   | Value        | Notes                       |
 | ------ | ------------ | --------------------------- |
 | Region | `westeurope` | three columns, still a form |
@@ -221,13 +226,13 @@ Describe 'parse.py - form tables, HTML comments and images' {
 
     It 'turns Field | Value rows into fields, stripping markup from label and value' {
         $fields = @($script:Table.steps[0].items | Where-Object kind -eq 'field')
-        @($fields.label) | Should -Be @('Group type', 'Group name', 'Tier')
-        @($fields.value) | Should -Be @('Security', 'SkyCraft-Admins', 'Hot')
+        @($fields.label) | Should -Be @('Group type', 'Group name', 'Tier', 'Region')
+        @($fields.value) | Should -Be @('Security', 'SkyCraft-Admins', 'Hot', 'Sweden Central')
     }
 
     It 'keeps actions before and after the table in document order' {
-        @($script:Table.steps[0].items.kind) | Should -Be @('action', 'field', 'field', 'field', 'action')
-        @($script:Table.steps[0].items[4].labels) | Should -Be @('Create')
+        @($script:Table.steps[0].items.kind) | Should -Be @('action', 'field', 'field', 'field', 'field', 'action')
+        @($script:Table.steps[0].items[5].labels) | Should -Be @('Create')
     }
 
     It 'never reads text inside an HTML comment' {
@@ -241,6 +246,17 @@ Describe 'parse.py - form tables, HTML comments and images' {
         $fields = @($script:Table.steps[1].items | Where-Object kind -eq 'field')
         @($fields.label) | Should -Be @('Region') -Because 'Subnet Name | Starting Address and Property | Expected Value are informational'
         $fields[0].value | Should -Be 'westeurope'
+    }
+
+    It 'does not read a Parameter | Value table (CLI flags) as a form' {
+        $fields = @($script:Table.steps[1].items | Where-Object kind -eq 'field')
+        @($fields.label) | Should -Be @('Region')
+        @($fields.label) | Should -Not -Contain '--name'
+    }
+
+    It 'reads an empty HTML comment as a complete comment, not an opener' {
+        $guide = ConvertFrom-GuideFixture -Markdown "### Step 9.9.1: Empty comments`n`n1. Click **First** <!--> and **Second** <!---> then **Third**`n2. Click **Fourth**`n"
+        @($guide.steps[0].items.labels) | Should -Be @('First', 'Second', 'Third', 'Fourth')
     }
 
     It 'collects the images a step references, with and without "./"' {
