@@ -476,6 +476,37 @@ class GuardAndLookupTests(RunnerTestCase):
         self.assertIn("contoso.onmicrosoft.com", tree)
         self.assertIn("tenant id", tree)
 
+    def guard(self, visible_text: str, snapshot: str) -> str | None:
+        """guard_tenant on a page whose visible text is `visible_text` and whose one frame has
+        the accessibility snapshot `snapshot`; the clock runs out after the first look."""
+        class Frame:
+            def locator(self, selector):
+                return self
+
+            def aria_snapshot(self, timeout=None) -> str:
+                return snapshot
+
+        class Page:
+            def wait_for_timeout(self, ms) -> None:
+                pass
+
+        clock = iter(range(0, 1000, 11))
+        with mock.patch.object(run.time, "monotonic", lambda: next(clock)), \
+                mock.patch.object(run, "all_frames", lambda page: [Frame()]), \
+                mock.patch.object(run, "text_on_screen", lambda page, text: text.lower() in visible_text.lower()):
+            return run.guard_tenant(Page(), "contoso.onmicrosoft.com", "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d")
+
+    def test_the_tenant_guard_accepts_the_tenant_id_as_text_or_text_box_value(self) -> None:
+        self.assertIsNone(self.guard("Tenant ID 0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", ""))
+        self.assertIsNone(self.guard("Tenant ID", '- textbox "Tenant ID": 0A1B2C3D-4E5F-4A6B-8C7D-9E0F1A2B3C4D'))
+
+    def test_the_tenant_guard_never_accepts_the_domain(self) -> None:
+        # The header shows the signed-in account, home domain included, in whatever directory.
+        failure = self.guard("admin@contoso.onmicrosoft.com Tenant ID 11111111-2222-3333-4444-555555555555",
+                             "- text: admin@contoso.onmicrosoft.com\n"
+                             '- textbox "Primary domain": contoso.onmicrosoft.com')
+        self.assertIn("does not show tenant ID 0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", failure)
+
     def test_destructive_words_anywhere_in_the_name(self) -> None:
         for name in ("Delete", "Delete group", "Bulk delete", "Reset password", "Block sign in", "Purge",
                      "Sign out", "Remove member"):

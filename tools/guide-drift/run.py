@@ -5,8 +5,9 @@ Driven by tools/Invoke-GuideDrift.ps1, which resolves the tenant and parses the 
 Opens Chromium headed at 1440x900 on the Microsoft Entra ID overview of the tenant and waits,
 without a timeout, until the overview shows its 'Tenant ID' field: the person signs in there
 (multi-factor included; there is no unattended sign-in). The run then refuses to start unless
-the Portal is in English and the overview shows the expected tenant id or domain. Only then is
-the browser session saved to --auth-state, so the next run skips the password.
+the Portal is in English and the overview shows the expected tenant ID (the domain is no proof:
+the account's own address in the header carries it in any directory). Only then is the browser
+session saved to --auth-state, so the next run skips the password.
 
 Everything a run leaves behind goes under --log-dir/<run id>/ and is gitignored:
 results.jsonl (one record per check, appended as the run goes), Step-X.Y.N.png (full window,
@@ -332,13 +333,15 @@ def tree_text(snapshot: str) -> str:
 
 
 def guard_tenant(page: Page, tenant_domain: str, tenant_id: str) -> str | None:
-    """The Entra overview open since sign-in shows the directory's tenant id and primary domain;
-    one of them must be the expected tenant's. The id may sit in a read-only text box, which plain
-    text search misses, so the text and text box values of every frame's accessibility tree are
-    read as well."""
+    """The Entra overview open since sign-in shows the directory's tenant id; it must be the
+    expected one. Only the id counts: the domain is no proof, because the signed-in account's
+    address in the Portal header carries its home domain while another directory is shown.
+    `tenant_domain` only names the tenant in the message. The id may sit in a read-only text box,
+    which plain text search misses, so the text and text box values of every frame's
+    accessibility tree are read as well."""
     deadline = time.monotonic() + 10
     while True:
-        if text_on_screen(page, tenant_id) or text_on_screen(page, tenant_domain):
+        if text_on_screen(page, tenant_id):
             return None
         tree = ""
         for frame in all_frames(page):
@@ -346,11 +349,11 @@ def guard_tenant(page: Page, tenant_domain: str, tenant_id: str) -> str | None:
                 tree += tree_text(frame.locator("body").aria_snapshot(timeout=2000)) + "\n"
             except PlaywrightError:
                 continue
-        if tenant_id.lower() in tree or tenant_domain.lower() in tree:
+        if tenant_id.lower() in tree:
             return None
         if time.monotonic() >= deadline:
-            return (f"The Microsoft Entra ID overview does not show tenant {tenant_id} ({tenant_domain}). "
-                    "Switch directory and re-run.")
+            return (f"The Microsoft Entra ID overview does not show tenant ID {tenant_id} "
+                    f"(expected directory {tenant_domain}). Switch directory and re-run.")
         page.wait_for_timeout(1000)
 
 
