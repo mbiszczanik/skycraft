@@ -161,7 +161,7 @@ observable, or `{ "text": "..." }` for text the runner looks for after the step.
   "screenshot": "Step-1.1.6.png" }
 ```
 
-`kind` is `navigation | action | field | tag | result | screenshot | readability`. `outcome` is
+`kind` is `navigation | action | search | field | tag | result | screenshot | readability`. `outcome` is
 `match | drift | unknown | skipped`. `severity` is `blocking | misleading | cosmetic | null`.
 `category` is `stale` (a `screenshot` record for a step that has both an image and a drift) or
 `unreadable` (a `readability` record for an image wider than 1722 px), otherwise `null`. Exit code
@@ -2662,7 +2662,7 @@ How the run talks to you (from Tasks 8-10):
 - **Exit codes:** 0-250 = blocking drifts + unknowns; 254 = did not start (message says why);
   255 = stopped with state kept.
 
-- [ ] **Step 1: Run supervised**
+- [x] **Step 1: Run supervised** (2026-10-06, run 20261006-184524, exit 14; see the live notes below)
 
 ```powershell
 $env:SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL = '<address you control>'
@@ -2678,6 +2678,18 @@ the member to select in 1.1.7 (`- Malfurion Stormrage`) is not bold, so **Select
 with nobody selected and the step fails. When it does, select the member and click **Select** by
 hand, then answer `c`. List both as guide findings (bold the member name; keep the message as a
 field) for the separate guide PR.
+
+Live notes from the first run (Entra-only lab tenant, tenant mode):
+
+- Runner defects found and fixed on the branch (c4e798d..eeff80c): global "Search for **X**",
+  "+" icon labels, static captions and collapsed menu groups, composite UPN field, failure
+  reasons printed, greyed-out menu items, search dropdown scoping, read-only inputs, column sort
+  buttons taken for fields, several elements under one label, blades still loading.
+- The `+ New group` example above is now an exact match (the "+" is dropped), not drift.
+- Guide and tool findings still open are filed as issues (Task 12 Step 4).
+- The recording keeps the decisions for 1.1.5 (Email), 1.1.10 (Manage gone), 1.1.11
+  (+ Assignments gone) and 1.1.12 (Entra home via the tenant breadcrumb); a workaround for
+  1.1.10 "All Users" was removed by hand.
 
 - [ ] **Step 2: Confirm what only the live Portal can show**
 
