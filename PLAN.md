@@ -25,8 +25,12 @@ for `aria_snapshot`) for the runner. Az.Accounts for the subscription check. Not
 **Conventions that apply:** `docs/powershell-standards.md` (comment-based help with `.SYNOPSIS`,
 `.DESCRIPTION`, `.NOTES`; `#Requires -Version 7.0`; `[CmdletBinding()]`;
 `$ErrorActionPreference = 'Stop'`; no aliases), enforced for every `tools/*.ps1` by
-`tests/Script-Standards.Tests.ps1` and `tests/Cbh-Coverage.Tests.ps1`. Pester test files compute
-`-ForEach` cases at discovery time (file scope), never in `BeforeAll`. Commit titles are
+`tests/Script-Standards.Tests.ps1` and `tests/Cbh-Coverage.Tests.ps1`. Pester 5 test files compute
+`-ForEach` case data at discovery time (file scope); everything else an `It` block reads
+(fixtures, helpers, parsed results) comes from a `BeforeAll` as `$script:` variables, because
+file-scope variables are not visible in the run phase. Parser output is always read through
+`--out <file>` with `Get-Content -Raw -Encoding utf8`, never from stdout: on Windows a piped
+stdout is decoded with the console code page, and guides contain `→`, `✅`, `☐`. Commit titles are
 Conventional Commits (release-please). Every artifact is in English. No `Co-Authored-By` lines.
 All work happens in the worktree `C:\2_Areas\Repositories\mbiszczanik\skycraft-guide-drift`
 (branch `feature/guide-drift`, created from `origin/main` at `7f7622f`, upstream unset); never
@@ -642,19 +646,50 @@ git commit -m "feat(guide-drift): parse lab guide steps into labels, chains and 
 
 ---
 
-### Task 3: Parser: tables, images and widths
+### Task 3: Parser: form tables only, HTML comments, images and widths
 
 **Files:**
 
 - Modify: `tests/Guide-Drift-Parser.Tests.ps1` (append a Describe)
-- Modify: `tools/guide-drift/parse.py` only if a test fails
+- Modify: `tools/guide-drift/parse.py`
 
-- [ ] **Step 1: Write the tests**
+**Why this task changed after review of Task 2.** The Task 2 parser turns *every* table into
+`field` items. A survey of the 17 guides shows ~70 table shapes, of which only these are forms a
+learner fills in: `Field | Value` (108), `Name | Value` (15), `Tag | Value` (3),
+`Property | Value` (1), `Parameter | Value | ...` (1), `Field | Value | Notes` (1). Everything
+else is informational (`Subnet Name | Starting Address | Size`, `Issue | Why It Happens | Fix`,
+`Scenario | Expected Behavior`, `Property | Expected Value`, ...), and the runner would try to type
+into it. Rule: **a table is a form only when its second header cell, with markup stripped, is
+exactly `Value` (case-insensitive)**. Also: a commented-out row in 4.1.8 currently yields the field
+label `<!--`; HTML comments are invisible to learners and must be removed like fenced code; and
+field labels keep backticks today (values already strip them).
 
-Append to `tests/Guide-Drift-Parser.Tests.ps1`, before the final line:
+**Pester 5 scoping (learned in Task 2).** File-scope variables and functions are visible during
+discovery only; `It` blocks cannot see them. Fixtures and helpers that `It` blocks use go in a
+`BeforeAll` and are stored as `$script:` variables. The file already has a file-level `BeforeAll`
+defining `ConvertFrom-GuideFixture` (it takes `-Markdown` and an optional `-Directory`, runs
+`parse.py <guide> --out <tmp>` and reads the JSON as UTF-8); a Describe-level `BeforeAll` can call
+it. Use `$TestDrive` for temporary files. Check the helper's actual signature in the file before
+using it.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/Guide-Drift-Parser.Tests.ps1`:
 
 ```powershell
-$TableFixture = @'
+Describe 'parse.py - form tables, HTML comments and images' {
+    BeforeAll {
+        # A PNG header is enough: parse.py reads the width from IHDR (bytes 16..19) and never decodes.
+        function New-PngFixture {
+            param([string]$Path, [int]$Width)
+            $widthBytes = [System.BitConverter]::GetBytes([int32]$Width)
+            [array]::Reverse($widthBytes)   # IHDR is big-endian
+            $bytes = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 0x49, 0x48, 0x44, 0x52) +
+                     $widthBytes + [byte[]](0, 0, 0, 1, 8, 2, 0, 0, 0)
+            [System.IO.File]::WriteAllBytes($Path, $bytes)
+        }
+
+        $tableFixture = @'
 # Lab 9.9: Tables
 
 ### Step 9.9.1: Fill a form
@@ -665,84 +700,294 @@ $TableFixture = @'
 | Field             | Value                     |
 | ----------------- | ------------------------- |
 | Group type        | Security                  |
-| Group name        | `SkyCraft-Admins`         |
+| `Group name`      | `SkyCraft-Admins`         |
+<!-- | Hidden field | never read | -->
 | Tier              | **Hot**                   |
 
 3. Click **Create**
 
+<!--
+1. Click **CommentedOut**
+-->
+
 ![Create group](./images/Step-9.9.1.png)
 ![Other](images/Step-9.9.1b.png)
+
+### Step 9.9.2: Informational tables are not forms
+
+| Subnet Name | Starting Address | Size |
+| ----------- | ---------------- | ---- |
+| AppSubnet   | 10.0.1.0         | /24  |
+
+| Property  | Expected Value |
+| --------- | -------------- |
+| Location  | swedencentral  |
+
+| Name   | Value        | Notes                       |
+| ------ | ------------ | --------------------------- |
+| Region | `westeurope` | three columns, still a form |
+
+1. Click **Review + create**
 '@
+        $dir = Join-Path $TestDrive 'tables'
+        New-Item -ItemType Directory -Path (Join-Path $dir 'images') -Force | Out-Null
+        New-PngFixture -Path (Join-Path $dir 'images/Step-9.9.1.png') -Width 861
+        New-PngFixture -Path (Join-Path $dir 'images/Step-9.9.1b.png') -Width 2279
+        $script:Table = ConvertFrom-GuideFixture -Markdown $tableFixture -Directory $dir
+    }
 
-# A 1x1 PNG header is enough: parse.py reads the width from IHDR (bytes 16..19) and never decodes.
-function New-PngFixture {
-    param([string]$Path, [int]$Width)
-    $bytes = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 0x49, 0x48, 0x44, 0x52) +
-             [byte[]]([System.BitConverter]::GetBytes([int32]$Width)[3..0]) + [byte[]](0, 0, 0, 1, 8, 2, 0, 0, 0)
-    [System.IO.File]::WriteAllBytes($Path, $bytes)
-}
-
-$TableDir = Join-Path ([System.IO.Path]::GetTempPath()) ("guide-drift-" + [guid]::NewGuid())
-New-Item -ItemType Directory -Path (Join-Path $TableDir 'images') -Force | Out-Null
-New-PngFixture -Path (Join-Path $TableDir 'images/Step-9.9.1.png') -Width 861
-New-PngFixture -Path (Join-Path $TableDir 'images/Step-9.9.1b.png') -Width 2279
-$Table = ConvertFrom-GuideFixture -Markdown $TableFixture -Directory $TableDir
-
-Describe 'parse.py - tables and images' {
-    It 'turns Field | Value rows into field items with markup stripped from the value' {
-        $fields = @($Table.steps[0].items | Where-Object kind -eq 'field')
+    It 'turns Field | Value rows into fields, stripping markup from label and value' {
+        $fields = @($script:Table.steps[0].items | Where-Object kind -eq 'field')
         @($fields.label) | Should -Be @('Group type', 'Group name', 'Tier')
         @($fields.value) | Should -Be @('Security', 'SkyCraft-Admins', 'Hot')
     }
 
     It 'keeps actions before and after the table in document order' {
-        @($Table.steps[0].items.kind) | Should -Be @('action', 'field', 'field', 'field', 'action')
-        @($Table.steps[0].items[4].labels) | Should -Be @('Create')
+        @($script:Table.steps[0].items.kind) | Should -Be @('action', 'field', 'field', 'field', 'action')
+        @($script:Table.steps[0].items[4].labels) | Should -Be @('Create')
+    }
+
+    It 'never reads text inside an HTML comment' {
+        $all = @($script:Table.steps | ForEach-Object { $_.items } | ForEach-Object { if ($_.kind -eq 'field') { $_.label } else { $_.labels } })
+        $all | Should -Not -Contain 'Hidden field'
+        $all | Should -Not -Contain 'CommentedOut'
+        @($all | Where-Object { $_ -like '<!--*' }) | Should -BeNullOrEmpty
+    }
+
+    It 'treats only tables whose second header is "Value" as forms' {
+        $fields = @($script:Table.steps[1].items | Where-Object kind -eq 'field')
+        @($fields.label) | Should -Be @('Region') -Because 'Subnet Name | Starting Address and Property | Expected Value are informational'
+        $fields[0].value | Should -Be 'westeurope'
     }
 
     It 'collects the images a step references, with and without "./"' {
-        @($Table.steps[0].images) | Should -Be @('images/Step-9.9.1.png', 'images/Step-9.9.1b.png')
+        @($script:Table.steps[0].images) | Should -Be @('images/Step-9.9.1.png', 'images/Step-9.9.1b.png')
     }
 
     It 'lists every PNG under images/ with its pixel width' {
         $widths = @{}
-        foreach ($image in $Table.images) { $widths[$image.path] = $image.width }
+        foreach ($image in $script:Table.images) { $widths[$image.path] = $image.width }
         $widths['images/Step-9.9.1.png']  | Should -Be 861
         $widths['images/Step-9.9.1b.png'] | Should -Be 2279
     }
 }
 ```
 
-- [ ] **Step 2: Run the tests**
+- [ ] **Step 2: Run the tests to verify they fail for the right reasons**
 
-Run: `Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed`
-Expected: all green. The parser from Task 2 already implements tables and images; this task pins
-them. If `Tier` comes back as `**Hot**`, `strip_value_markup` is not applied to the value.
+Run: `pwsh -NoProfile -Command "Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed"`
+Expected: the earlier tests still pass; in the new Describe, `turns Field | Value rows` fails
+(label `` `Group name` `` keeps backticks), `never reads text inside an HTML comment` fails, and
+`treats only tables whose second header is "Value"` fails (informational rows become fields).
+The image tests pass already. Quote the failures in your report.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Implement in parse.py**
+
+1. HTML comments: extend `strip_fences` (rename it `strip_hidden`, update its caller and
+   docstring) so that, outside fenced code, any text between `<!--` and `-->` is blanked,
+   including comments spanning several lines and a comment that occupies part of a line. Line
+   numbers must stay stable (a fully hidden line becomes `""`; a partly commented line keeps
+   the text outside the comment).
+2. Form tables: in `parse_items`, when a table's header row is read, decide whether it is a
+   form: the second header cell, after `strip_value_markup`, equals `value` case-insensitively.
+   Rows of a non-form table are skipped. A blank or non-table line ends a table, as now.
+3. Field labels: pass the first cell through `strip_value_markup` and then `clean_label`, so
+   backticks and bold are removed from labels as from values.
+4. Update the module docstring: "'Field | Value' tables" becomes "tables whose second header
+   cell is 'Value' (Field | Value, Name | Value, Tag | Value, ...)", and say that HTML comments
+   are removed together with fenced code.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `pwsh -NoProfile -Command "Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed"`
+Expected: all green.
+
+Then confirm the real guide kept its forms: parse lab 1.1 with `--out` and check step 1.1.6
+still has the fields `Group type`, `Group name`, `Group description`, `Membership type`, and
+step 1.1.10 has `Job title`, `Department`, `Office`, `Manager` (header `Property | Value`).
+
+- [ ] **Step 5: Commit**
 
 ```powershell
-git add tests/Guide-Drift-Parser.Tests.ps1 tools/guide-drift/parse.py
-git commit -m "test(guide-drift): pin table fields and image widths in the parser"
+git add tests/Guide-Drift-Parser.Tests.ps1 tools/guide-drift/parse.py PLAN.md
+git commit -m "feat(guide-drift): read only form tables and ignore HTML comments in guides"
 ```
 
 ---
 
-### Task 4: Parser against all 17 guides
+### Task 4: Parser: real-guide forms, then all 17 guides
 
 **Files:**
 
-- Modify: `tests/Guide-Drift-Parser.Tests.ps1` (append a Describe)
-- Modify: `tools/guide-drift/parse.py` (NON_UI_BOLD grows if a guide shows a new caption)
+- Modify: `tests/Guide-Drift-Parser.Tests.ps1` (append Describes)
+- Modify: `tools/guide-drift/parse.py`
 
-- [ ] **Step 1: Write the tests**
+**Why this task changed after review of Task 2.** Running the parser over the 17 real guides
+showed these gaps, each with a real example:
+
+| Gap | Real example | Today |
+|---|---|---|
+| Fields written as list items `- **Label**: value` (104 in-step items, 3.3/3.4/1.3/5.x) | 3.3:215 `- **Region**: **Sweden Central**` | becomes an action that clicks both bold spans |
+| Escaped asterisk in bold, Portal's required-field marker | 3.3:216 `**\*Deployment source**: **Container Image**` | whole item dropped |
+| Expected Result inside a list item, or with a qualifier before the colon | 1.3:144 `6. **Expected Result**: Shows ...`; 2.2:607 `**Expected Result** (if ...):` | missed |
+| Several Expected Results in one step (one per option) | probe | the last one wins; Option 1's should |
+| Lettered options | 3.2:219 `#### Option A:` / `#### Option B:` | both options read |
+| Fence closing | a 4-backtick fence containing a 3-backtick one | inner content leaks; CommonMark closes only on a run of the same character at least as long as the opener, followed by nothing but whitespace |
+
+**Pester 5 scoping and encoding (learned in Task 2).** `-ForEach` case data is built at file
+scope during discovery, so anything the case list needs (repo root, interpreter, parser path, a
+discovery-time helper) must be defined at file scope, as `tests/Guide-Step-Numbering.Tests.ps1`
+does; the file-level `BeforeAll` from Task 2 is not run at discovery. Values `It` blocks need
+beyond the case data go in a `BeforeAll` as `$script:` variables. Always read parser output
+through `--out <file>` and `Get-Content -Raw -Encoding utf8`, never from stdout: on Windows a
+piped stdout is decoded with the console code page and real guides contain `→`, `✅`, `☐`.
+`$TestDrive` exists only in the run phase; at discovery use a temp file from
+`[System.IO.Path]::GetTempFileName()` and delete it.
+
+- [ ] **Step 1: Write the failing fixture tests**
+
+Append to `tests/Guide-Drift-Parser.Tests.ps1`:
+
+`````powershell
+Describe 'parse.py - forms and markers found in the real guides' {
+    BeforeAll {
+        $fixture = @'
+# Lab 9.9: Real-guide shapes
+
+### Step 9.9.1: List-item fields
+
+1. Click **+ Create** → **Container App**
+2. On the **Basics** tab:
+   - **Resource group**: `dev-skycraft-swc-rg`
+   - **Region**: **Sweden Central**
+   - **\*Deployment source**: **Container Image**
+   - **Note**: this is a caption, not a field
+3. **Expected Result**: The app is created.
+
+**Expected Result** (if the quota allows): A second result that must not win.
+
+### Step 9.9.2: Lettered options
+
+#### Option A: Portal
+
+1. Click **Generate new key pair**
+
+**Expected Result**: Option A result.
+
+#### Option B: Store the key in Azure
+
+1. Click **OnlyInOptionB**
+
+**Expected Result**: Option B result.
+
+### Step 9.9.3: Long fences
+
+````markdown
+```bash
+echo inner
+```
+1. Click **LeakedFromFence**
+````
+
+1. Click **AfterFence**
+'@
+        $script:Real = ConvertFrom-GuideFixture -Markdown $fixture
+    }
+
+    It 'reads "- **Label**: value" list items as fields' {
+        $fields = @($script:Real.steps[0].items | Where-Object kind -eq 'field')
+        @($fields.label) | Should -Be @('Resource group', 'Region', 'Deployment source')
+        @($fields.value) | Should -Be @('dev-skycraft-swc-rg', 'Sweden Central', 'Container Image')
+    }
+
+    It 'does not turn a caption such as **Note** into a field' {
+        @($script:Real.steps[0].items | Where-Object { $_.kind -eq 'field' -and $_.label -eq 'Note' }) | Should -BeNullOrEmpty
+    }
+
+    It 'keeps chains and actions around list-item fields' {
+        @($script:Real.steps[0].items[0].labels) | Should -Be @('+ Create', 'Container App')
+        $script:Real.steps[0].items[0].kind | Should -Be 'navigation'
+        @($script:Real.steps[0].items[1].labels) | Should -Be @('Basics')
+    }
+
+    It 'takes the first Expected Result, including one written as a list item' {
+        $script:Real.steps[0].expected | Should -Be 'The app is created.'
+    }
+
+    It 'reads only Option A of a lettered-option step, and its own Expected Result' {
+        $labels = @($script:Real.steps[1].items | ForEach-Object { $_.labels })
+        $labels | Should -Be @('Generate new key pair')
+        $script:Real.steps[1].expected | Should -Be 'Option A result.'
+    }
+
+    It 'closes a fence only on a run at least as long as its opener' {
+        $labels = @($script:Real.steps[2].items | ForEach-Object { $_.labels })
+        $labels | Should -Not -Contain 'LeakedFromFence'
+        $labels | Should -Contain 'AfterFence'
+    }
+}
+`````
+
+Note the five-backtick fence around this block in the plan: the fixture itself contains a
+four-backtick and a three-backtick fence. The PowerShell here-string carries them verbatim.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `pwsh -NoProfile -Command "Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed"`
+Expected: every new test except possibly `does not turn a caption` fails, each for the gap in
+the table above. Quote the failures.
+
+- [ ] **Step 3: Implement in parse.py**
+
+1. `BOLD`: accept an escaped asterisk inside bold, `\*\*(?P<text>(?:\\\*|[^*])+?)\*\*`, and
+   unescape `\*` to `*` in the captured text. In `clean_label`, strip a leading `*` (the
+   Portal's required-field marker) and surrounding whitespace.
+2. List-item fields: before the action/navigation branch, if the list item text matches
+   `^\*\*(?P<label>(?:\\\*|[^*])+?)\*\*\s*:\s*(?P<value>.+)$` and the cleaned label is a UI label
+   (`is_ui_label`), emit `{"kind": "field", "label": <clean label>, "value": <value through
+   strip_value_markup, trailing '.' removed>, "line": n}`. If the label is `Expected Result`,
+   treat the line as the Expected Result (rule 3). Otherwise fall through to the existing
+   bold-span handling, which drops captions.
+   Add to the module docstring: a field whose value is prose rather than a literal ("Click the
+   ... button", "1 month from now") is typed as written; the recording's `valueOverrides` is
+   where a supervised run supplies the literal.
+3. Expected Result: match `^\s*(?:(?:[-*]|\d+\.)\s+)?\*\*Expected Result\*\*[^:]*:\s*(?P<text>.+?)\s*$`
+   and keep the FIRST match in the step (do not overwrite).
+4. Options: `OPTION_HEADING` accepts `#### Option 1:` and `#### Option A:`; the first option is
+   `1` or `A`. With options present, keep the Option-1/A body plus Expected Result lines from
+   outside the other options' bodies OR, when Option 1/A has none, the first Expected Result
+   anywhere in the step (the standard places a single one after Option 3). Make the
+   `Option A result.` test and the Task 2 `Share appears.` test both pass.
+5. Fences: in `strip_hidden`, record the opener's character and run length; close only on a line
+   whose fence run uses the same character, is at least as long, and is followed only by
+   whitespace (no info string).
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `pwsh -NoProfile -Command "Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed"`
+Expected: all green, including every Task 2 and Task 3 test.
+
+- [ ] **Step 5: Commit the parser hardening**
+
+```powershell
+git add tests/Guide-Drift-Parser.Tests.ps1 tools/guide-drift/parse.py PLAN.md
+git commit -m "feat(guide-drift): read list-item fields, lettered options and long fences from guides"
+```
+
+- [ ] **Step 6: Write the 17-guide tests**
 
 Append to `tests/Guide-Drift-Parser.Tests.ps1`:
 
 ```powershell
+# Discovery-time state for the per-guide cases. The file-level BeforeAll does not run at
+# discovery, so these are defined here at file scope, as Guide-Step-Numbering.Tests.ps1 does.
+$DiscoveryRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$DiscoveryParser   = Join-Path $DiscoveryRepoRoot 'tools/guide-drift/parse.py'
+$DiscoveryPython   = if ($IsWindows) { 'python' } else { 'python3' }
+
 # The step regex is the one tests/Guide-Step-Numbering.Tests.ps1 uses, narrowed to '###', so the
 # parser is held to the same reading of a guide as the numbering test.
-$GuideCases = Get-ChildItem -Path $RepoRoot -Directory -Filter 'module-*' |
+$GuideCases = Get-ChildItem -Path $DiscoveryRepoRoot -Directory -Filter 'module-*' |
     Get-ChildItem -Directory |
     Where-Object { $_.Name -match '^\d+\.\d+-' } |
     ForEach-Object {
@@ -752,15 +997,21 @@ $GuideCases = Get-ChildItem -Path $RepoRoot -Directory -Filter 'module-*' |
         $text  = Get-Content -Raw -LiteralPath $guide
         $text  = [regex]::Replace($text, '(?ms)^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1[ \t]*\r?$', '')
         $headingIds = @([regex]::Matches($text, '(?m)^###[ \t]+Step[ \t]+(\d+\.\d+\.\d+):') | ForEach-Object { $_.Groups[1].Value })
-        $json = & $Python $Parser $guide --repo-root $RepoRoot 2>&1
-        $parsed = if ($LASTEXITCODE -eq 0) { ($json -join "`n") | ConvertFrom-Json } else { $null }
+        $out = [System.IO.Path]::GetTempFileName()
+        try {
+            $stderr = & $DiscoveryPython $DiscoveryParser $guide --out $out --repo-root $DiscoveryRepoRoot 2>&1
+            $exit   = $LASTEXITCODE
+            $parsed = if ($exit -eq 0) { Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json }
+        } finally { Remove-Item -LiteralPath $out -ErrorAction SilentlyContinue }
+        $fieldLabels = @($parsed.steps | ForEach-Object { $_.items } | Where-Object kind -eq 'field' | ForEach-Object label)
         @{
             lab         = $num
-            exitCode    = $LASTEXITCODE
-            output      = ($json -join "`n")
+            exitCode    = $exit
+            output      = ($stderr -join "`n")
             headingIds  = $headingIds
             parsedIds   = @($parsed.steps.id)
             emptyPortal = @($parsed.steps | Where-Object { $_.portal -and @($_.items).Count -eq 0 } | ForEach-Object id)
+            badFields   = @($fieldLabels | Where-Object { $_ -match '^<!--|`|\*\*' })
             guidePath   = $parsed.guide
         }
     }
@@ -785,14 +1036,18 @@ Describe 'parse.py - every lab guide' {
     It "'<lab>' never marks a step portal without a label" -ForEach $GuideCases {
         $emptyPortal | Should -BeNullOrEmpty
     }
+
+    It "'<lab>' yields field labels without markup or comment residue" -ForEach $GuideCases {
+        $badFields | Should -BeNullOrEmpty
+    }
 }
 
 Describe 'parse.py - lab 1.1, the first recorded lab' {
     BeforeAll {
-        $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-        $python   = if ($IsWindows) { 'python' } else { 'python3' }
-        $guide    = Join-Path $repoRoot 'module-1-identities-governance/1.1-entra-users-groups/lab-guide-1.1.md'
-        $script:Lab11 = (& $python (Join-Path $repoRoot 'tools/guide-drift/parse.py') $guide --repo-root $repoRoot) -join "`n" | ConvertFrom-Json
+        $guide = Join-Path $script:RepoRoot 'module-1-identities-governance/1.1-entra-users-groups/lab-guide-1.1.md'
+        $out   = Join-Path $TestDrive 'lab-1.1.json'
+        & $script:Python $script:Parser $guide --out $out --repo-root $script:RepoRoot
+        $script:Lab11 = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
     }
 
     It 'reads step 1.1.6 as navigation, action, four fields and Create' {
@@ -818,39 +1073,45 @@ Describe 'parse.py - lab 1.1, the first recorded lab' {
 }
 ```
 
-- [ ] **Step 2: Run the tests**
+Check the names the file-level `BeforeAll` actually defines (`$script:RepoRoot`,
+`$script:Python`, `$script:Parser` after Task 2's fix) and use those.
 
-Run: `Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed`
-Expected: the 17-guide cases pass or fail per guide. Step 1.1.13 ("navigate to **All Users**")
-and 1.1.14 ("Click **External Identities**") have labels, so all 14 steps of 1.1 are portal.
+- [ ] **Step 7: Run the tests**
 
-- [ ] **Step 3: Grow NON_UI_BOLD from what failed**
+Run: `pwsh -NoProfile -Command "Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed"`
+Expected: the lab 1.1 Describe passes. Per-guide failures, if any, show what the next step fixes.
 
-For every guide that fails `never marks a step portal without a label`, or whose output shows a
-bold caption as a label, run:
+- [ ] **Step 8: Grow NON_UI_BOLD from what the guides show**
+
+Dump every label the parser extracts, through `--out` (never stdout):
 
 ```powershell
 $py = if ($IsWindows) { 'python' } else { 'python3' }
+$tmp = [System.IO.Path]::GetTempFileName()
 Get-ChildItem module-*/*/lab-guide-*.md | ForEach-Object {
-    (& $py tools/guide-drift/parse.py $_.FullName | ConvertFrom-Json).steps.items.labels
+    & $py tools/guide-drift/parse.py $_.FullName --out $tmp
+    (Get-Content -Raw -Encoding utf8 $tmp | ConvertFrom-Json).steps.items |
+        ForEach-Object { if ($_.kind -eq 'field') { $_.label } else { $_.labels } }
 } | Sort-Object -Unique
+Remove-Item $tmp
 ```
 
-Read the list once. Add every entry that is a caption rather than a Portal element (examples of
-what to expect: `Solution`, `Cause`, `Check`, `Fix`, `Q`, `A`, `Situation`, `Your Task`) to
+Read the list once. Add every entry that is a caption rather than a Portal element (expect
+things like `Solution`, `Cause`, `Check`, `Fix`, `Q`, `A`, `Situation`, `Your Task`) to
 `NON_UI_BOLD` in `parse.py`, each with the lab it came from in a trailing comment. Do not add
-Portal names. Record the final list in the `.DESCRIPTION` of `Invoke-GuideDrift.ps1` in Task 10
-as "the fixed list lives in parse.py".
+Portal names; when unsure, leave it in (a supervised run answers `i` for it once, and the
+recording keeps that). Put the full list you saw, and which entries you added, in your report.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 9: Run the tests to verify they pass**
 
-Run: `Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed`
-Expected: all green, 17 guides.
+Run: `pwsh -NoProfile -Command "Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed"`
+Expected: all green, 17 guides. Also run it once with `PYTHONIOENCODING` removed and the
+console code page set to 852, as in Task 2's fix, and confirm green.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 10: Commit**
 
 ```powershell
-git add tests/Guide-Drift-Parser.Tests.ps1 tools/guide-drift/parse.py
+git add tests/Guide-Drift-Parser.Tests.ps1 tools/guide-drift/parse.py PLAN.md
 git commit -m "test(guide-drift): parse all 17 guides and pin lab 1.1's shape"
 ```
 
@@ -1013,6 +1274,11 @@ git commit -m "feat(guide-drift): decision boundary with replay and ask-the-pers
 The seed holds only what must exist before the first run: the tenant placeholder and the guest
 address override. Labels are filled by the supervised run in Task 12.
 
+**Pester 5 scoping (learned in Task 2).** `$RecordingCases` is `-ForEach` data and is built at
+file scope during discovery, which is correct. Anything else an `It` block reads must come from a
+`BeforeAll` (`$script:` variables), as the second Describe already does. Commands below use
+`pwsh -NoProfile -Command "Invoke-Pester ..."` from the worktree root.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `tests/Guide-Drift-Recording.Tests.ps1`:
@@ -1050,8 +1316,15 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
     ForEach-Object {
         $recording = Get-Content -Raw -LiteralPath $_.FullName | ConvertFrom-Json
         $guidePath = Join-Path $RepoRoot $recording.guide
-        $parsed    = if (Test-Path -LiteralPath $guidePath) {
-            (& $Python $Parser $guidePath --repo-root $RepoRoot) -join "`n" | ConvertFrom-Json
+        # Read through --out, never stdout: on Windows a piped stdout is decoded with the console
+        # code page, and guides contain characters outside it (see Guide-Drift-Parser.Tests.ps1).
+        $parsed = $null
+        if (Test-Path -LiteralPath $guidePath) {
+            $out = [System.IO.Path]::GetTempFileName()
+            try {
+                & $Python $Parser $guidePath --out $out --repo-root $RepoRoot
+                if ($LASTEXITCODE -eq 0) { $parsed = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json }
+            } finally { Remove-Item -LiteralPath $out -ErrorAction SilentlyContinue }
         }
         $labelsByStep = @{}
         foreach ($step in @($parsed.steps)) {
@@ -1158,7 +1431,7 @@ Expected: green. `Pester-Discovery.Tests.ps1` accepts the two new suites because
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add tools/guide-drift/recordings/lab-1.1.json tests/Guide-Drift-Recording.Tests.ps1
+git add tools/guide-drift/recordings/lab-1.1.json tests/Guide-Drift-Recording.Tests.ps1 PLAN.md
 git commit -m "feat(guide-drift): seed the lab 1.1 recording and test recordings against the parser"
 ```
 
