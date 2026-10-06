@@ -252,7 +252,7 @@ git commit -m "chore(guide-drift): gitignore the run artefacts of the guide drif
 The parser is a command line tool: `python parse.py <guide.md>` prints the steps JSON to stdout.
 The tests write a fixture guide to a temp file, call the parser, and read the JSON back.
 
-- [ ] **Step 1: Write the failing fixture tests**
+- [x] **Step 1: Write the failing fixture tests**
 
 Create `tests/Guide-Drift-Parser.Tests.ps1` (four backticks below because the fixture itself
 contains a code fence):
@@ -398,12 +398,12 @@ Describe 'parse.py - step sections' {
 }
 ````
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed`
 Expected: discovery throws `parse.py failed` (file not found). That is the failing state.
 
-- [ ] **Step 3: Write the parser core**
+- [x] **Step 3: Write the parser core**
 
 Create `tools/guide-drift/parse.py`:
 
@@ -627,13 +627,13 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `Invoke-Pester -Path ./tests/Guide-Drift-Parser.Tests.ps1 -Output Detailed`
 Expected: 8 passed. If `Microsoft Entra ID` comes back with quotes, check `clean_label`
 handles the curly quotes the guide uses (`“ ”`) as well as straight ones.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add tools/guide-drift/parse.py tests/Guide-Drift-Parser.Tests.ps1
