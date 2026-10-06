@@ -12,6 +12,7 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   resolve_value        a field value with the recording's placeholders and overrides applied
   value_action         type it, leave it ('[Leave blank]'), or report an unresolved [token]
   rejected_candidates  the reference set of candidates not chosen, without tenant data
+  write_json           writes the recording or the state file atomically
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import difflib
 import json
 import os
 import re
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from decide import Candidate
@@ -39,6 +41,14 @@ def missing_env(recording: dict) -> list[str]:
     """Every ${NAME} the recording refers to that the environment does not set."""
     names = set(ENV_REF.findall(json.dumps(recording)))
     return sorted(name for name in names if name not in os.environ)
+
+
+def write_json(path: Path, data: dict) -> None:
+    """Write `data` as indented UTF-8 JSON through a temporary file and os.replace, so Ctrl+C or
+    a closed window mid-write never leaves a truncated recording or state file behind."""
+    temp = path.with_name(path.name + ".tmp")
+    temp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(temp, path)
 
 
 GUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")

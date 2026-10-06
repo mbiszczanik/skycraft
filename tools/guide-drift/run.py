@@ -12,6 +12,15 @@ results.jsonl (one record per check, appended as the run goes), Step-X.Y.N.png (
 for manual cropping and anonymisation), summary.md. Only the recording is written back into
 the repository.
 
+When a step does not go through, the person chooses: finish it by hand and continue, skip the
+rest of the lab, or stop and keep the state. --state records the completed steps and the step a
+-Resume starts at (the one in progress, or the one that failed); a resume first asks whether
+that step finished. A run that ends normally marks the state finished, and it cannot be resumed.
+
+Exit code: blocking drifts plus unknowns, capped at 250, when the run ends normally; 254 when a
+precondition, a guard or the state stopped it before the first step; 255 when it stopped mid-run
+(Ctrl+C, 'q', a closed window, a crash) with the state kept for -Resume, so nothing is cleaned up.
+
 Usage (normally via Invoke-GuideDrift.ps1):
   python run.py --steps steps.json --recording recordings/lab-1.1.json --log-dir <dir>
                 --run-id 20261007-100000 --tenant-id <guid> --tenant-domain contoso.onmicrosoft.com
@@ -26,13 +35,14 @@ import re
 import sys
 import traceback
 from pathlib import Path
+from typing import Callable
 
 from playwright.sync_api import Page, Frame, TimeoutError as PlaywrightTimeout, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).parent))
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (Redactor, env_secrets, missing_env, rejected_candidates,  # noqa: E402
-                       resolve_value, value_action)
+                       resolve_value, value_action, write_json)
 
 PORTAL = "https://portal.azure.com"
 SETTLE_MS = 1500
@@ -235,19 +245,88 @@ def fill_tag(page: Page, name: str, value: str) -> None:
     raise LookupError("Tags grid not found (no inputs named 'Name' and 'Value')")
 
 
+# Exit codes above the 250 cap of finish(), which Invoke-GuideDrift.ps1 reads as "not a count".
+NOT_STARTED = 254   # a precondition, a guard or the state stopped the run before the first step
+ABORTED = 255       # interrupted (Ctrl+C), stopped at the person's request ('q') or crashed mid-run;
+                    # the state is kept for -Resume, so the entry point must not clean up
+
+
+class StateError(Exception):
+    """The state file cannot be resumed from. main() reports it before the browser opens."""
+
+
+def load_state(path: Path, lab: str) -> dict:
+    """The state of an earlier, unfinished run of `lab`, for -Resume."""
+    if not path.is_file():
+        raise StateError(f"There is no state to resume from at {path}")
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise StateError(f"The state at {path} cannot be read ({error})") from error
+    if not isinstance(state, dict) or not isinstance(state.get("completed"), list):
+        raise StateError(f"The state at {path} is not a guide drift state")
+    if state.get("lab") != lab:
+        raise StateError(f"The state at {path} belongs to lab {state.get('lab')}, not {lab}")
+    if state.get("finished"):
+        raise StateError(f"The run in {path} finished; there is nothing to resume")
+    return state
+
+
+def start_point(portal_ids: list[str], state: dict, from_step: str | None, resume: bool) -> tuple[int, bool]:
+    """(index into portal_ids where the run starts, whether that step was in flight when the last
+    run stopped). Raises ValueError when there is nowhere to start."""
+    if from_step is not None:
+        if from_step not in portal_ids:
+            raise ValueError(f"--from-step {from_step} is not a portal step of this lab "
+                             f"({', '.join(portal_ids)})")
+        return portal_ids.index(from_step), False
+    if not resume:
+        return 0, False
+    in_flight = state.get("inFlight")
+    if in_flight is not None:
+        if in_flight not in portal_ids:
+            raise ValueError(f"The step in flight, {in_flight}, is not a portal step of this lab")
+        return portal_ids.index(in_flight), True
+    for index, step_id in enumerate(portal_ids):
+        if step_id not in state["completed"]:
+            return index, False
+    raise ValueError("Every step in the state is completed; there is nothing to resume")
+
+
 class Runner:
-    def __init__(self, page: Page, steps: dict, recording: dict, args: argparse.Namespace) -> None:
+    FAILURE_PROMPT = (
+        "  c  I did it by hand: mark the step done and continue\n"
+        "  s  skip the rest of the lab and finish (the entry point then cleans up)\n"
+        "  q  stop here and keep the state for -Resume (no clean-up)\n> "
+    )
+    RESUME_PROMPT = (
+        "  y  it finished: mark it done and continue (leave the Portal where the step ended)\n"
+        "  n  it did not: bring the Portal back to the view above, then redo it from its first item\n"
+        "  s  skip it and continue with the next step\n> "
+    )
+
+    def __init__(self, page: Page, steps: dict, recording: dict, args: argparse.Namespace,
+                 ask: Callable[[str], str] = input) -> None:
         self.page = page
         self.steps = steps
         self.recording = recording
         self.args = args
+        self.ask = ask
         self.run_dir = args.log_dir / args.run_id
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.results_path = self.run_dir / "results.jsonl"
-        self.deciders = [ReplayDecider(recording), HumanDecider()]
+        self.deciders = [ReplayDecider(recording), HumanDecider(ask=lambda text: self.ask(text))]
         self.redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording))
         self.records: list[dict] = []
-        self.failed_steps: dict[str, str] = {}   # step id -> why (for skippedBecause)
+        self.first_failure: str | None = None   # the step every later step is skipped because of
+        self.begun = False                      # whether a step has been started in this run
+
+    def prompt(self, text: str) -> str | None:
+        """One line from the person, stripped; None when input is closed."""
+        try:
+            return self.ask(text).strip()
+        except EOFError:
+            return None
 
     # -- recording -------------------------------------------------------------------------
 
@@ -260,8 +339,12 @@ class Runner:
         return entry
 
     def save_recording(self) -> None:
-        self.args.recording.write_text(json.dumps(self.recording, indent=2, ensure_ascii=False) + "\n",
-                                       encoding="utf-8")
+        write_json(self.args.recording, self.recording)
+
+    def remember(self, step: dict, label: str, entry: dict | None) -> None:
+        if entry is not None:
+            self.step_entry(step)["labels"][label] = entry
+            self.save_recording()
 
     # -- one label -------------------------------------------------------------------------
 
@@ -275,23 +358,25 @@ class Runner:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
             return record
         decision = Decision(kind="use", name=label, decided_by="exact") if element is not None else None
+        pending = None     # a person's use/drift decision, recorded only once the action succeeded
         if decision is None:
             # Names are redacted before anyone sees them, so the person, the recording and replay
             # all work with '[tenantdomain]' and the element is found by the restored name.
             candidates = [Candidate(role=c.role, name=self.redactor.redact(c.name), count=c.count)
                           for c in candidates_on_screen(self.page)]
             decision = decide(step, item, label, candidates, self.deciders)
+            if decision.decided_by == "human":
+                entry = decision.to_recording(rejected_candidates(candidates, label, decision.name), now())
+                if decision.kind == "ignore" or decision.severity == "blocking":
+                    self.remember(step, label, entry)     # nothing to act on: record at once
+                else:
+                    pending = entry
             if decision.name and decision.severity != "blocking":
                 try:
                     element = find_by_name(self.page, decision.role, self.redactor.restore(decision.name))
                 except Ambiguous as error:
-                    # Not recorded: replay must never inherit a choice the runner refused to act on.
                     record.update(outcome="unknown", observed=f"ambiguous: {error} named '{decision.name}'")
                     return record
-            entry = decision.to_recording(rejected_candidates(candidates, label, decision.name), now())
-            if decision.decided_by == "human" and entry is not None:
-                self.step_entry(step)["labels"][label] = entry
-                self.save_recording()
         if decision.kind == "ignore":
             record.update(outcome="match", observed=None)
             return record
@@ -313,6 +398,8 @@ class Runner:
         except (PlaywrightTimeout, LookupError) as error:
             record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
             return record
+        # Replay must never inherit a choice the runner could not act on.
+        self.remember(step, label, pending)
         if decision.kind == "drift":      # misleading or cosmetic: acted on, under a different name
             record.update(outcome="drift", severity=decision.severity, observed=decision.name,
                           proposedEdit=self.proposed_edit(line, label, decision.name))
@@ -329,7 +416,9 @@ class Runner:
 
     # -- one step --------------------------------------------------------------------------
 
-    def run_step(self, step: dict) -> None:
+    def run_step(self, step: dict) -> bool:
+        """Perform one step; True when every item went through. A failed step keeps the view
+        URL of its last good run and is not checked for its expected result."""
         print(f"\n=== Step {step['id']}: {step['title']} ===")
         entry = self.step_entry(step)
         step_failed = False
@@ -360,7 +449,7 @@ class Runner:
                 records = []
                 for label in item["labels"]:
                     records.append(self.act_on_label(step, item, label))
-                    if records[-1]["outcome"] in ("unknown",) or records[-1].get("severity") == "blocking":
+                    if records[-1]["outcome"] == "unknown" or records[-1].get("severity") == "blocking":
                         break
             for record in records:
                 self.write(record)
@@ -368,12 +457,12 @@ class Runner:
                     step_failed = True
             if step_failed:
                 break
-        self.check_result(step, entry)
-        entry["viewUrl"] = self.redactor.view_url(self.page.url)
-        self.save_recording()
+        if not step_failed:
+            self.check_result(step, entry)
+            entry["viewUrl"] = self.redactor.view_url(self.page.url)
+            self.save_recording()
         self.write(self.screenshot(step))
-        if step_failed:
-            self.failed_steps[step["id"]] = step["id"]
+        return not step_failed
 
     # -- results ---------------------------------------------------------------------------
 
@@ -393,7 +482,9 @@ class Runner:
             return
         if entry["result"] is None and "result" not in entry.get("asked", []):
             print(f'Expected Result: "{step["expected"]}"')
-            answer = input("Text to look for on screen (Enter = not observable): ").strip()
+            answer = self.prompt("Text to look for on screen (Enter = not observable): ")
+            if answer is None:          # input closed: ask again next time
+                return
             entry["result"] = {"text": self.redactor.redact(answer)} if answer else None
             entry.setdefault("asked", []).append("result")
             self.save_recording()
@@ -434,55 +525,92 @@ class Runner:
 
     # -- state and resume -------------------------------------------------------------------
 
-    def save_state(self, completed: list[str], in_flight: str | None) -> None:
-        self.args.state.write_text(json.dumps({"runId": self.args.run_id, "lab": self.steps["lab"],
-                                               "completed": completed, "inFlight": in_flight}, indent=2),
-                                   encoding="utf-8")
+    def save_state(self, completed: list[str], in_flight: str | None, finished: bool = False) -> None:
+        """completed: steps done (or deliberately skipped) that a resume passes over. in_flight:
+        the step a resume starts at: the step being performed, or the step that failed.
+        finished: the run ended normally, so there is nothing to resume."""
+        write_json(self.args.state, {"runId": self.args.run_id, "lab": self.steps["lab"],
+                                     "completed": completed, "inFlight": in_flight,
+                                     "finished": finished})
 
-    def load_state(self) -> dict:
-        if not self.args.state.is_file():
-            return {"completed": [], "inFlight": None}
-        state = json.loads(self.args.state.read_text(encoding="utf-8"))
-        if state.get("lab") != self.steps["lab"]:
-            raise SystemExit(f"state at {self.args.state} belongs to lab {state.get('lab')}, not {self.steps['lab']}")
-        return state
+    def view_before(self, portal: list[dict], index: int) -> str:
+        if index == 0:
+            return "(the lab's first step: start from the Portal home page)"
+        previous = portal[index - 1]["id"]
+        url = self.recording["steps"].get(previous, {}).get("viewUrl")
+        return url or f"(no view recorded for step {previous})"
 
     # -- the run ---------------------------------------------------------------------------
 
-    def run(self) -> int:
-        completed: list[str] = []
-        state = self.load_state() if self.args.resume else {"completed": [], "inFlight": None}
-        completed = list(state["completed"])
-        started = self.args.from_step is None and not self.args.resume
-        self.readability()
-        for step in self.steps["steps"]:
-            if not step["portal"]:
-                continue
+    def run(self, state: dict | None = None) -> int:
+        state = state or {"completed": [], "inFlight": None}
+        completed = list(state.get("completed", []))
+        portal = [step for step in self.steps["steps"] if step["portal"]]
+        try:
+            start, in_flight = start_point([s["id"] for s in portal], state, self.args.from_step, self.args.resume)
+        except ValueError as error:
+            print(error)
+            return NOT_STARTED
+        first = portal[start]
+        if in_flight:
+            print(f"\nStep {first['id']} ({first['title']}) was in progress when the last run stopped.\n"
+                  f"The step before it ended on this view:\n  {self.view_before(portal, start)}\n"
+                  f"Did step {first['id']} finish?")
+            answer = None
+            while answer not in ("y", "n", "s"):
+                answer = self.prompt(self.RESUME_PROMPT)
+                if answer is None:
+                    print("No answer (input closed); nothing was run.")
+                    return NOT_STARTED
+            if answer in ("y", "s"):
+                completed.append(first["id"])
+                if answer == "s":
+                    self.skip_step(first, first["id"])
+                self.save_state(completed, None)
+        elif start > 0 or self.args.resume:
+            print(f"\nStarting at step {first['id']} ({first['title']}). Bring the Portal to the view "
+                  f"the step before it ended on, then press Enter:\n  {self.view_before(portal, start)}")
+            if self.prompt("> ") is None:
+                print("No answer (input closed); nothing was run.")
+                return NOT_STARTED
+        for step in portal[start:]:
             if step["id"] in completed:
                 continue
-            if not started:
-                if step["id"] == self.args.from_step or step["id"] == state.get("inFlight"):
-                    started = True
-                    url = self.recording["steps"].get(step["id"], {}).get("viewUrl")
-                    print(f"Resuming at step {step['id']}. Bring the Portal to this view, then press Enter:\n  {url or '(no view recorded yet)'}")
-                    input()
-                else:
-                    continue
-            prior = [self.failed_steps[i] for i in self.failed_steps]
-            if prior:
-                self.skip_step(step, prior[0])
+            if self.first_failure:
+                self.skip_step(step, self.first_failure)
                 continue
+            if not self.begun:
+                self.begun = True
+                self.readability()
             self.save_state(completed, step["id"])
-            self.run_step(step)
-            completed.append(step["id"])
-            self.save_state(completed, None)
-        if not started:
-            # --from-step names no portal step, or -Resume found no step in flight: nothing ran,
-            # and a finished run's exit code 0 would read as 'no drift'.
-            print(f"No step to start from (--from-step {self.args.from_step}, in flight "
-                  f"{state.get('inFlight')}); nothing was run.")
-            return NOT_STARTED
+            if self.run_step(step):
+                completed.append(step["id"])
+                self.save_state(completed, None)
+                continue
+            answer = self.ask_after_failure(step)
+            if answer == "c":
+                completed.append(step["id"])
+                self.save_state(completed, None)
+            elif answer == "s":
+                self.first_failure = step["id"]     # the state keeps it in flight
+            else:
+                self.finish()
+                print(f"\nStopped at step {step['id']}. Progress is in {self.args.state}; re-run with -Resume.")
+                return ABORTED
+        self.save_state(completed, self.first_failure, finished=True)
         return self.finish()
+
+    def ask_after_failure(self, step: dict) -> str:
+        """'c' (done by hand), 's' (skip the rest) or 'q' (stop, keep the state). Closed input
+        means nobody is there to finish the lab by hand: 's'."""
+        print(f"\nStep {step['id']} did not go through (see above). What now?")
+        while True:
+            answer = self.prompt(self.FAILURE_PROMPT)
+            if answer is None:
+                return "s"
+            if answer in ("c", "s", "q"):
+                return answer
+            print("Answer c, s or q.")
 
     def finish(self) -> int:
         by_severity: dict[str, list[dict]] = {"blocking": [], "misleading": [], "cosmetic": []}
@@ -509,7 +637,8 @@ class Runner:
         lines += [f"- step {r['step']} {r['kind']} **{r['label']}**: {r['observed']}" for r in unknown] or ["- none"]
         lines.append("")
         lines.append(f"## skipped ({len(skipped)})")
-        lines += [f"- step {r['step']} because step {r['skippedBecause']} failed" for r in skipped] or ["- none"]
+        lines += [f"- step {r['step']} skipped on resume" if r["skippedBecause"] == r["step"]
+                  else f"- step {r['step']} because step {r['skippedBecause']} failed" for r in skipped] or ["- none"]
         lines.append("")
         lines.append(f"## stale screenshots ({len(stale)})")
         lines += [f"- step {r['step']}: {r['observed']}" for r in stale] or ["- none"]
@@ -529,11 +658,6 @@ class Runner:
         return min(len(by_severity["blocking"]) + len(unknown), 250)
 
 
-# Exit codes above the 250 cap of finish(), which Invoke-GuideDrift.ps1 reads as "not a count".
-NOT_STARTED = 254   # a precondition or guard stopped the run before the first step
-ABORTED = 255       # interrupted (Ctrl+C) or stopped mid-run; state kept for -Resume
-
-
 def main(argv: list[str] | None = None) -> int:
     # Accessible names and guide text reach the console; a redirected stdout on Windows would
     # otherwise use the ANSI code page and fail on the first arrow.
@@ -549,6 +673,19 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         print("Set these environment variables first: " + ", ".join(missing))
         return NOT_STARTED
+    # Everything that can refuse the run is checked before the browser opens and the person signs in.
+    state = {"completed": [], "inFlight": None}
+    if args.resume:
+        try:
+            state = load_state(args.state, steps["lab"])
+        except StateError as error:
+            print(f"{error}. Delete {args.state} or run without -Resume.")
+            return NOT_STARTED
+    try:
+        start_point([s["id"] for s in steps["steps"] if s["portal"]], state, args.from_step, args.resume)
+    except ValueError as error:
+        print(error)
+        return NOT_STARTED
     with sync_playwright() as pw:
         try:
             browser, page = open_portal(pw, args, recording)
@@ -557,11 +694,11 @@ def main(argv: list[str] | None = None) -> int:
             return NOT_STARTED
         runner = Runner(page, steps, recording, args)
         try:
-            return runner.run()
+            return runner.run(state)
         except BaseException as stop:       # noqa: BLE001 - every way out must keep -Resume possible
-            # Ctrl+C, a closed browser window (Playwright Error 'Target closed'), EOF at a prompt
-            # or a bug: exit 1 would read as 'one finding' and the entry point would clean up what
-            # -Resume needs. Print what happened, keep the state, and say so.
+            # Ctrl+C, a closed browser window (Playwright Error 'Target closed') or a bug: exit 1
+            # would read as 'one finding' and the entry point would clean up what -Resume needs.
+            # Print what happened, keep the state, and say so.
             if not isinstance(stop, (KeyboardInterrupt, SystemExit)):
                 traceback.print_exc()
             try:
