@@ -4,7 +4,8 @@ order of steps matters.
 
 run.py imports Playwright at module level and the CI runner does not install it, so a minimal
 stub of playwright.sync_api is put in sys.modules when the real one is missing. Nothing here
-calls into Playwright. Run from the repository root:
+calls into Playwright. tests/Guide-Drift-Python.Tests.ps1 runs this suite in CI. Run from the
+repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
 """
@@ -133,7 +134,7 @@ class RunBookkeepingTests(RunnerTestCase):
         self.assertEqual(r.ran, ["9.9.1", "9.9.2"])
         self.assertEqual(r.first_failure, "9.9.2")
         self.assertEqual(self.state(), {"runId": "test", "lab": LAB, "completed": ["9.9.1"],
-                                        "inFlight": "9.9.2", "finished": True})
+                                        "inFlight": "9.9.2", "finished": True, "logDir": str((self.tmp / "logs").resolve())})
         skipped = [(x["step"], x["skippedBecause"]) for x in r.records if x["outcome"] == "skipped"]
         self.assertEqual(skipped, [("9.9.4", "9.9.2"), ("9.9.5", "9.9.2")])
 
@@ -156,7 +157,7 @@ class RunBookkeepingTests(RunnerTestCase):
         self.assertEqual(self.quietly(r.run), run.ABORTED)
         self.assertEqual(r.ran, ["9.9.1", "9.9.2"])
         self.assertEqual(self.state(), {"runId": "test", "lab": LAB, "completed": ["9.9.1"],
-                                        "inFlight": "9.9.2", "finished": False})
+                                        "inFlight": "9.9.2", "finished": False, "logDir": str((self.tmp / "logs").resolve())})
         self.assertTrue((r.run_dir / "summary.md").is_file())
 
     def test_resume_asks_about_the_step_in_flight_and_shows_the_view_before_it(self) -> None:
@@ -415,8 +416,17 @@ class SummaryTests(RunnerTestCase):
         for line in ("## blocking (1)", "**Gone**: gone from the Portal", "## misleading (1)", "## cosmetic (1)",
                      "## unknown (1)", "## skipped (1)", "- step 9.9.2 because step 9.9.1 failed",
                      "## stale screenshots (1)", "## unreadable screenshots, wider than 1722 px (1)",
-                     "images/Step-9.9.2.png: 2000 px wide", "## proposed edits (1)", "guide.md:3"):
+                     "images/Step-9.9.2.png: 2000 px wide", "## proposed edits (1)", "guide.md:3",
+                     "## no portal part (1)\n- step 9.9.3: Check"):
             self.assertIn(line, summary)
+
+    def test_tenant_name_is_an_optional_argument_the_redactor_uses(self) -> None:
+        base = ["--steps", "s", "--recording", "r", "--log-dir", "l", "--run-id", "i", "--tenant-id", "t",
+                "--tenant-domain", "contoso.onmicrosoft.com", "--state", "st", "--auth-state", "a"]
+        self.assertEqual(run.parse_args(base).tenant_name, "")
+        args = self.args(tenant_name="Contoso Ltd")
+        r = ScriptedRunner(None, STEPS, self.recording, args, ask=Answers())
+        self.assertEqual(r.redactor.redact("Contoso Ltd"), "[tenantname]")
 
     def test_finish_says_none_for_empty_sections_and_caps_the_exit_code(self) -> None:
         self.assertEqual(self.quietly(self.r.finish), 0)

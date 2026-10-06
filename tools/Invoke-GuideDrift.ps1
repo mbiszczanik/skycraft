@@ -68,13 +68,17 @@
     run invited (the address in SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL, a different one), and it does
     not revert the self-service password reset scope (step 1.1.12) or the licence assignment
     (step 1.1.11). Remove those by hand, or use a tenant where leaving them is acceptable.
+    It also looks the three users up on the tenant's DEFAULT domain, while the run creates them
+    on the initial *.onmicrosoft.com domain (the guide's '[yourtenant].onmicrosoft.com'): in a
+    tenant whose default domain is a custom one, the users stay and must be deleted by hand.
     The prerequisites of the cleanup are checked before the browser opens: missing
     Microsoft.Graph modules stop the run with exit 1, unless -SkipCleanup.
 
 .PARAMETER SubscriptionId
     The subscription whose tenant the run is for. Mandatory and compared by id against the Az
     context through Test-LabCycleSubscription, for the reason Invoke-LabCycle.ps1 gives
-    (2026-08-02). The tenant id and its initial *.onmicrosoft.com domain are read from it.
+    (2026-08-02). The tenant id, its initial *.onmicrosoft.com domain and its display name are
+    read from it; the display name is kept out of the recording as '[tenantname]'.
 
 .PARAMETER Lab
     The lab to run, as 'X.Y'. Resolves module-*/X.Y-*/lab-guide-X.Y.md. Only labs with a
@@ -86,10 +90,13 @@
 .PARAMETER Resume
     Continue the previous run from tools/.guide-drift-state.json, starting at the step that was
     in flight or failed. A finished run, or a state file of another lab, is refused (exit 254).
+    The run continues in its own folder: the state records the absolute log directory of the
+    stopped run, and -Resume uses it whatever -LogDirectory says.
 
 .PARAMETER LogDirectory
     Where run folders are written. Defaults to tools/guide-drift-logs. Resolved to an absolute
-    path against the current directory.
+    path against the current directory. Ignored with -Resume when the state names the stopped
+    run's directory (see -Resume).
 
 .PARAMETER SkipCleanup
     Leave what the run created in place, and skip the check of the cleanup's prerequisites.
@@ -110,11 +117,15 @@
     Project: SkyCraft
     Issue:   #189
     Exit code: blocking drifts + unknowns (0 = nothing to fix, capped at 250); 1 when a prerequisite
-    is missing or parse.py fails; 254 when run.py stopped before the first step, or -Resume has no
-    unfinished state of this lab to continue; 255 when it was interrupted (state kept, nothing
-    cleaned up: re-run with -Resume).
+    is missing, parse.py fails, or run.py crashes before the state confirms the run finished
+    (Python's own exit 1; nothing is cleaned up and the state is kept); 254 when run.py stopped
+    before the first step, or -Resume has no unfinished state of this lab to continue; 255 when it
+    was interrupted (state kept, nothing cleaned up: re-run with -Resume).
     A cleanup that fails or is skipped does not change the exit code, as in Invoke-LabCycle.ps1:
     it is reported as a warning, and the code stays the count of findings.
+    Like the other tools/*.ps1 entry points, the script ends the host process with its exit code
+    ($Host.SetShouldExit, then exit). Dot-sourced or run inside an interactive session it closes
+    that session: start it with 'pwsh -File', or read the run folder's summary.md afterwards.
 #>
 
 #Requires -Version 7.0
@@ -272,6 +283,8 @@ if (-not $tenantId -or -not $domain) {
     $Host.SetShouldExit(1)
     exit 1
 }
+# The display name ('Contoso Ltd'), shown by the Portal; run.py keeps it out of the recording.
+$tenantName = [string]$tenant.Name
 
 # --- Which run this is ---------------------------------------------------------------------
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -290,6 +303,13 @@ if ($Resume) {
         exit $notStarted
     }
     $runId = [string]$previous.runId
+    # The stopped run's folder, wherever -LogDirectory points now: run.py records it in the state.
+    if ($previous.logDir -and [string]$previous.logDir -ne $LogDirectory) {
+        if ($PSBoundParameters.ContainsKey('LogDirectory')) {
+            Write-Host "[WARNING] -LogDirectory $LogDirectory is ignored: run $runId continues in $($previous.logDir)." -ForegroundColor Yellow
+        }
+        $LogDirectory = [string]$previous.logDir
+    }
 }
 
 # Cleanup of lab 1.1 deletes by name through Microsoft Graph, so it must sign in to the run's own
@@ -334,6 +354,8 @@ try {
         '--state', $statePath
         '--auth-state', $authPath
     )
+    # Not passed when empty: an empty native argument is easy to lose on the way to Python.
+    if ($tenantName) { $runArgs += @('--tenant-name', $tenantName) }
     if ($FromStep) { $runArgs += @('--from-step', $FromStep) }
     if ($Resume)   { $runArgs += '--resume' }
 

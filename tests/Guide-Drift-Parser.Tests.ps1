@@ -540,3 +540,78 @@ Describe 'parse.py - lab 1.1, the first recorded lab' {
         ($script:Lab11.images | Where-Object path -eq 'images/Step-1.1.7.png').width | Should -Be 2279
     }
 }
+
+
+Describe 'parse.py - only the first option of a step is read, in every lab guide' {
+    BeforeAll {
+        # Bold spans of each step, by where they sit: 'first' (before the first Option heading, or
+        # in Option 1 or A) and 'other' (Option 2, B or later, up to the next step). Fenced code is
+        # skipped as parse.py skips it; 'Expected Result' is a caption, not a label. A bold span
+        # that only another option uses must never reach the parser's labels, fields or tags.
+        # Lab 4.3 has Option headings in every step but its other options hold only code; today
+        # the check bites in 3.2.1, whose Option A is CLI-only and whose Option B is the Portal.
+        $script:OtherOnly = [System.Collections.Generic.List[hashtable]]::new()
+        $script:Parsed = @{}
+        $guides = Get-ChildItem -Path $script:RepoRoot -Directory -Filter 'module-*' |
+            Get-ChildItem -Directory | Where-Object { $_.Name -match '^\d+\.\d+-' } |
+            ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Filter 'lab-guide-*.md' }
+        foreach ($guide in $guides) {
+            $lab = [regex]::Match($guide.Name, '\d+\.\d+').Value
+            $out = Join-Path $TestDrive "lab-$lab.json"
+            & $script:Python $script:Parser $guide.FullName --out $out --repo-root $script:RepoRoot
+            $script:Parsed[$lab] = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+
+            $first = @{}; $other = @{}
+            $step = $null; $zone = 'first'; $fence = $null
+            foreach ($line in (Get-Content -LiteralPath $guide.FullName -Encoding utf8)) {
+                $m = [regex]::Match($line, '^[ \t]*(`{3,}|~{3,})(.*)$')
+                if ($null -eq $fence) {
+                    if ($m.Success) { $fence = $m.Groups[1].Value; continue }
+                } else {
+                    if ($m.Success -and $m.Groups[1].Value[0] -eq $fence[0] -and
+                        $m.Groups[1].Value.Length -ge $fence.Length -and -not $m.Groups[2].Value.Trim()) { $fence = $null }
+                    continue
+                }
+                if ($line -match '^###\s+Step\s+(\d+\.\d+\.\d+):') {
+                    $step = $Matches[1]; $zone = 'first'
+                    $first[$step] = [System.Collections.Generic.List[string]]::new()
+                    $other[$step] = [System.Collections.Generic.List[string]]::new()
+                    continue
+                }
+                if ($line -match '^##\s') { $step = $null; continue }
+                if (-not $step) { continue }
+                if ($line -match '^####\s+Option\s+(\d+|[A-Z])\b') {
+                    $zone = if ($Matches[1] -in '1', 'A') { 'first' } else { 'other' }
+                    continue
+                }
+                foreach ($bold in [regex]::Matches($line, '\*\*(.+?)\*\*')) {
+                    if ($zone -eq 'first') { $first[$step].Add($bold.Groups[1].Value) } else { $other[$step].Add($bold.Groups[1].Value) }
+                }
+            }
+            foreach ($id in $other.Keys) {
+                foreach ($bold in ($other[$id] | Select-Object -Unique)) {
+                    if ($bold -cne 'Expected Result' -and $first[$id] -cnotcontains $bold) {
+                        $script:OtherOnly.Add(@{ lab = $lab; step = $id; bold = $bold })
+                    }
+                }
+            }
+        }
+    }
+
+    It 'finds bold text that only a later option uses, in lab 4.3 and in step 3.2.1' {
+        @($script:OtherOnly | Where-Object { $_.lab -eq '4.3' }).Count | Should -BeGreaterThan 0
+        @($script:OtherOnly | Where-Object { $_.step -eq '3.2.1' }).Count | Should -BeGreaterThan 0
+    }
+
+    It 'reads no label, field or tag from the body of Option 2, B or later' {
+        $leaks = @(foreach ($case in $script:OtherOnly) {
+                $parsedStep = $script:Parsed[$case.lab].steps | Where-Object id -eq $case.step
+                $texts = @($parsedStep.items | ForEach-Object {
+                        $item = $_      # inside switch, $_ is the kind, not the item
+                        switch ($item.kind) { 'field' { $item.label } 'tag' { $item.name } default { $item.labels } }
+                    })
+                if ($texts -ccontains $case.bold) { "step $($case.step): '$($case.bold)'" }
+            })
+        $leaks | Should -BeNullOrEmpty -Because ($leaks -join '; ')
+    }
+}

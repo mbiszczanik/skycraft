@@ -82,20 +82,23 @@ class Redactor:
     the way out, so a recorded name such as 'malfurion.stormrage@[tenantdomain]' still finds its
     element. The tenant prefix (the domain's first label, as in a directory named 'contoso')
     becomes '[yourtenant]', the guides' own placeholder, when it is at least 4 characters long;
-    a shorter one would clobber ordinary words. tests/Guide-Drift-Recording.Tests.ps1 is the
-    backstop: it fails on any literal e-mail address, *.onmicrosoft.com domain, guest user
-    principal name or GUID in a recording.
+    a shorter one would clobber ordinary words. The tenant's display name ('Contoso Ltd', shown
+    in the directory switcher and on the Entra overview) becomes '[tenantname]' under the same
+    rule. tests/Guide-Drift-Recording.Tests.ps1 is the backstop: it fails on any literal e-mail
+    address, *.onmicrosoft.com domain, guest user principal name or GUID in a recording.
 
-    Restored values are lower case, as the Portal shows domains and ids; a display name that
-    spells the prefix in another case ('Contoso') comes back as 'contoso'. matcher() therefore
-    matches a restored name regardless of case."""
+    Restored values are lower case, as the Portal shows domains and ids (the display name comes
+    back as given); a display name that spells the prefix in another case ('Contoso') comes back
+    as 'contoso'. matcher() therefore matches a restored name regardless of case."""
 
     DOMAIN = "[tenantdomain]"
     TENANT = "[tenantid]"
+    NAME = "[tenantname]"
     PREFIX = "[yourtenant]"
     PREFIX_MIN = 4
 
-    def __init__(self, domain: str, tenant_id: str, secrets: dict[str, str] | None = None) -> None:
+    def __init__(self, domain: str, tenant_id: str, secrets: dict[str, str] | None = None,
+                 tenant_name: str = "") -> None:
         # The Portal shows domains in lower case; restore() must give back what is on screen.
         self.domain = domain.lower()
         self.tenant_id = tenant_id.lower()
@@ -109,8 +112,14 @@ class Redactor:
             self._pairs.append((re.compile(re.escape(upn), re.IGNORECASE), token[:-1] + "|upn}", upn))
         self._pairs.append((re.compile(re.escape(self.domain), re.IGNORECASE), self.DOMAIN, self.domain))
         self._pairs.append((re.compile(re.escape(self.tenant_id), re.IGNORECASE), self.TENANT, self.tenant_id))
-        # Last, so the full domain is already a token. Bounded by anything but a letter, digit,
-        # '_' or '-': 'contoso Ltd' is redacted, 'contoso-admins' and 'contosoville' are not.
+        # The display name and the prefix are bounded by anything but a letter, digit, '_' or '-':
+        # 'contoso Ltd' is redacted, 'contoso-admins' and 'contosoville' are not. The display name
+        # goes first, as it often contains the prefix ('Contoso Ltd' in contoso.onmicrosoft.com).
+        name = tenant_name.strip()
+        if len(name) >= self.PREFIX_MIN:
+            self._pairs.append((re.compile(rf"(?<![\w-]){re.escape(name)}(?![\w-])", re.IGNORECASE),
+                                self.NAME, name))
+        # Last, so the full domain is already a token.
         prefix = self.domain.split(".", 1)[0]
         if len(prefix) >= self.PREFIX_MIN:
             self._pairs.append((re.compile(rf"(?<![\w-]){re.escape(prefix)}(?![\w-])", re.IGNORECASE),
@@ -164,9 +173,11 @@ def env_secrets(recording: dict) -> dict[str, str]:
 def rejected_candidates(candidates: list[Candidate], label: str, chosen: str | None) -> list[str]:
     """The 20 visible candidates most like the label, other than the chosen one, as 'role "name"':
     the reference set issue #190 needs, without committing the whole screen to the recording.
-    Names with an '@' (user principal names, the signed-in account) or a GUID (object and
-    subscription ids) are left out entirely."""
-    others = [c for c in candidates if c.name != chosen and "@" not in c.name and not GUID.search(c.name)]
+    Left out entirely: table cells (user data: display names, user principal names), names with
+    an '@' (user principal names, the signed-in account) and names with a GUID (object and
+    subscription ids)."""
+    others = [c for c in candidates if c.name != chosen and c.role != "cell"
+              and "@" not in c.name and not GUID.search(c.name)]
     others.sort(key=lambda c: difflib.SequenceMatcher(None, c.name.lower(), label.lower()).ratio(),
                 reverse=True)
     return [str(c) for c in others[:20]]

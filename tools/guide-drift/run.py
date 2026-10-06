@@ -34,7 +34,8 @@ precondition, a guard or the state stopped it before the first step; 255 when it
 Usage (normally via Invoke-GuideDrift.ps1):
   python run.py --steps steps.json --recording recordings/lab-1.1.json --log-dir <dir>
                 --run-id 20261007-100000 --tenant-id <guid> --tenant-domain contoso.onmicrosoft.com
-                --state <path> --auth-state <path> [--from-step 1.1.6] [--resume]
+                --state <path> --auth-state <path> [--tenant-name "Contoso Ltd"]
+                [--from-step 1.1.6] [--resume]
 """
 from __future__ import annotations
 
@@ -82,6 +83,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--run-id", required=True)
     p.add_argument("--tenant-id", required=True)
     p.add_argument("--tenant-domain", required=True)
+    p.add_argument("--tenant-name", default="",
+                   help="the tenant's display name, kept out of the recording as [tenantname]")
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--auth-state", type=Path, required=True)
     p.add_argument("--from-step")
@@ -459,7 +462,8 @@ class Runner:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.results_path = self.run_dir / "results.jsonl"
         self.deciders = [ReplayDecider(recording), HumanDecider(ask=lambda text: self.ask(text))]
-        self.redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording))
+        self.redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording),
+                                 getattr(args, "tenant_name", ""))
         self.records: list[dict] = self.earlier_results() if args.resume else []
         self.first_failure: str | None = None   # the step every later step is skipped because of
         self.begun = bool(self.records)         # whether a step was started (and images checked)
@@ -726,10 +730,12 @@ class Runner:
     def save_state(self, completed: list[str], in_flight: str | None, finished: bool = False) -> None:
         """completed: steps done (or deliberately skipped) that a resume passes over. in_flight:
         the step a resume starts at: the step being performed, or the step that failed.
-        finished: the run ended normally, so there is nothing to resume."""
+        finished: the run ended normally, so there is nothing to resume. logDir: the absolute
+        --log-dir, so that Invoke-GuideDrift.ps1 -Resume finds this run's folder again whatever
+        -LogDirectory it is given."""
         write_json(self.args.state, {"runId": self.args.run_id, "lab": self.steps["lab"],
                                      "completed": completed, "inFlight": in_flight,
-                                     "finished": finished})
+                                     "finished": finished, "logDir": str(Path(self.args.log_dir).resolve())})
 
     def view_before(self, portal: list[dict], index: int) -> str:
         if index == 0:
@@ -850,6 +856,10 @@ class Runner:
         by_hand = [r for r in self.records if r["outcome"] == "match" and r["observed"] == "done by hand"]
         lines.append(f"## done by hand ({len(by_hand)})")
         lines += [f"- step {r['step']}" for r in by_hand] or ["- none"]
+        lines.append("")
+        no_portal = [s for s in self.steps["steps"] if not s["portal"]]
+        lines.append(f"## no portal part ({len(no_portal)})")
+        lines += [f"- step {s['id']}: {s['title']} (not checked: no UI element in the step)" for s in no_portal] or ["- none"]
         lines.append("")
         lines.append(f"## stale screenshots ({len(stale)})")
         lines += [f"- step {r['step']}: {r['observed']}" for r in stale] or ["- none"]

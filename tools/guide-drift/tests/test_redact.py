@@ -3,7 +3,7 @@
 Redactor, env_secrets and rejected_candidates are pure and live outside run.py, so they are
 tested without a browser and without Playwright, which the CI runner does not install.
 
-Standard library unittest only; tests/Guide-Drift-Decide.Tests.ps1 runs this suite in CI.
+Standard library unittest only; tests/Guide-Drift-Python.Tests.ps1 runs this suite in CI.
 Run by hand from the repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
@@ -72,6 +72,24 @@ class RedactorTests(unittest.TestCase):
     def test_short_tenant_prefix_is_not_redacted(self) -> None:
         redactor = Redactor("abc.onmicrosoft.com", TENANT)
         self.assertEqual(redactor.redact("abc and abc.onmicrosoft.com"), "abc and [tenantdomain]")
+
+    def test_tenant_display_name_becomes_a_token_and_restores_as_given(self) -> None:
+        redactor = Redactor(DOMAIN, TENANT, tenant_name="Northwind Traders")
+        redacted = redactor.redact("Switch to NORTHWIND TRADERS (Northwind Traders-Archive)")
+        # Case-insensitive, and only as a whole name: '-Archive' makes it another directory's name.
+        self.assertEqual(redacted, "Switch to [tenantname] (Northwind Traders-Archive)")
+        self.assertEqual(redactor.restore("[tenantname] overview"), "Northwind Traders overview")
+        self.assertIsNotNone(redactor.matcher("[tenantname]").search("NORTHWIND TRADERS"))
+
+    def test_tenant_display_name_is_redacted_before_the_prefix_it_contains(self) -> None:
+        redactor = Redactor(DOMAIN, TENANT, tenant_name="Contoso Ltd")
+        self.assertEqual(redactor.redact("Contoso Ltd and Contoso"), "[tenantname] and [yourtenant]")
+        self.assertEqual(redactor.restore("[tenantname] and [yourtenant]"), "Contoso Ltd and contoso")
+
+    def test_short_or_missing_display_name_is_not_redacted(self) -> None:
+        for name in ("", "  ", "Abc"):
+            with self.subTest(name=name):
+                self.assertEqual(Redactor(DOMAIN, TENANT, tenant_name=name).redact("Abc corp"), "Abc corp")
 
     def test_guest_upn_becomes_the_upn_token_and_restores(self) -> None:
         upn = f"me_example.com#EXT#@{DOMAIN}"
@@ -159,10 +177,15 @@ class RejectedCandidatesTests(unittest.TestCase):
     def test_drops_addresses_guids_and_the_chosen_name(self) -> None:
         candidates = [Candidate("button", "New group"), Candidate("button", "New user"),
                       Candidate("link", f"admin@{DOMAIN}"),
-                      Candidate("cell", "11111111-2222-3333-4444-555555555555"),
+                      Candidate("link", "11111111-2222-3333-4444-555555555555"),
                       Candidate("tab", "Groups")]
         rejected = rejected_candidates(candidates, "+ New group", "New group")
         self.assertEqual(sorted(rejected), sorted(['button "New user"', 'tab "Groups"']))
+
+    def test_drops_table_cells_which_hold_user_data(self) -> None:
+        candidates = [Candidate("cell", "Malfurion Stormrage"), Candidate("cell", "New group members"),
+                      Candidate("button", "New user")]
+        self.assertEqual(rejected_candidates(candidates, "+ New group", None), ['button "New user"'])
 
     def test_keeps_at_most_twenty_most_similar_first(self) -> None:
         candidates = [Candidate("button", f"Unrelated thing {i}") for i in range(30)]

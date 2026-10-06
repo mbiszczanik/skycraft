@@ -1,6 +1,6 @@
 """Unit tests for decide.py, the decision boundary of the guide drift tool (issue #189).
 
-Standard library unittest only; tests/Guide-Drift-Decide.Tests.ps1 runs this suite in CI.
+Standard library unittest only; tests/Guide-Drift-Python.Tests.ps1 runs this suite in CI.
 Run by hand from the repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
