@@ -8,10 +8,16 @@
     - VM Backup Policy (SkyCraft-Daily-Prod): Enhanced subtype, daily 02:00 UTC,
       30-day retention, 2-day instant restore. Enhanced is required because Azure
       defaults VM deployments to Trusted Launch, which a Standard policy cannot protect.
+      The policy stores its instant-restore snapshots in platform-skycraft-swc-rpc1-rg.
+    - Instant-restore snapshot resource group (platform-skycraft-swc-rpc1-rg), tagged, so
+      Azure Backup does not create an untagged AzureBackupRG_* group that Lab 1.3's
+      Require-Environment-Tag-RG policy denies (issue #184)
     - Backup Vault (platform-skycraft-swc-bv) with LRS and system-assigned identity
     - Blob Backup Policy (SkyCraft-Blob-Policy): 30-day operational retention
     - Diagnostic settings for both vaults -> Log Analytics Workspace
-    - VM backup protection enabled on dev-skycraft-swc-auth-vm (when present)
+    - VM backup protection enabled on dev-skycraft-swc-auth-vm (when present), plus an
+      on-demand backup whenever the VM has no recovery point yet. A backup job that fails
+      within the first minutes counts as a deployment failure.
 
     After deployment:
     1. Run .\New-LabBlobBackup.ps1 to assign RBAC roles and configure blob
@@ -39,8 +45,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.0.0
-    Date: 2026-04-06
+    Version: 1.1.0
+    Date: 2026-10-06
 #>
 
 #Requires -Version 7.0
@@ -172,10 +178,16 @@ if ($WhatIf) {
     Write-Host "  ✓ Vaults deployed successfully!" -ForegroundColor Green
     $rsvId = $deployment.Outputs['outRsvId'].Value
     $bvPrincipalId = $deployment.Outputs['outBvPrincipalId'].Value
+    # The VM backup policy names the snapshot group by prefix and suffix; Azure Backup inserts the
+    # number. The template owns all three values, so the policy cannot drift from the group.
+    $snapshotRgName   = $deployment.Outputs['outSnapshotRgName'].Value
+    $snapshotRgPrefix = $deployment.Outputs['outSnapshotRgPrefix'].Value
+    $snapshotRgSuffix = $deployment.Outputs['outSnapshotRgSuffix'].Value
 
     Write-Host "    RSV ID:          $rsvId"
     Write-Host "    Backup Vault ID: $($deployment.Outputs['outBvId'].Value)"
     Write-Host "    BV Principal ID: $bvPrincipalId"
+    Write-Host "    Snapshot RG:     $snapshotRgName"
 
     # Resolve the Recovery Services Vault object for the backup cmdlets below
     $vault = Get-AzRecoveryServicesVault -ResourceGroupName $platformRg -Name 'platform-skycraft-swc-rsv' -ErrorAction SilentlyContinue
@@ -219,6 +231,25 @@ if ($WhatIf) {
         ).Name
         if ($enhancedPolicyNames -contains 'SkyCraft-Daily-Prod') {
             Write-Host "  ✓ Policy 'SkyCraft-Daily-Prod' already exists in RSV (Enhanced)" -ForegroundColor Green
+            # A policy created before issue #184 names no snapshot group, so Azure Backup keeps
+            # creating an untagged AzureBackupRG_* group that Lab 1.3's policy denies. Point it at
+            # the tagged group; recovery points already taken stay where they are and expire.
+            if ($existingRsvPolicy.AzureBackupRGName -ne $snapshotRgPrefix -or
+                "$($existingRsvPolicy.AzureBackupRGNameSuffix)" -ne $snapshotRgSuffix) {
+                try {
+                    Set-AzRecoveryServicesBackupProtectionPolicy `
+                        -Policy $existingRsvPolicy `
+                        -BackupSnapshotResourceGroup $snapshotRgPrefix `
+                        -BackupSnapshotResourceGroupSuffix $snapshotRgSuffix `
+                        -VaultId $vault.ID | Out-Null
+                    Write-Host "  ✓ Policy now stores instant-restore snapshots in $snapshotRgName" -ForegroundColor Green
+                } catch {
+                    $script:deployFailures++
+                    Write-Host "  [ERROR] Could not point the policy at snapshot group '$snapshotRgName': $_" -ForegroundColor Red
+                }
+            } else {
+                Write-Host "  ✓ Instant-restore snapshots go to $snapshotRgName" -ForegroundColor Green
+            }
         } else {
             $script:deployFailures++
             Write-Host "  [ERROR] Policy 'SkyCraft-Daily-Prod' exists but is a Standard policy." -ForegroundColor Red
@@ -254,22 +285,32 @@ if ($WhatIf) {
             $retentionPolicy.DailySchedule.RetentionTimes.Clear()
             $retentionPolicy.DailySchedule.RetentionTimes.Add($runTimeUtc)
 
+            # The snapshot group is named here, at creation: without it Azure Backup creates an
+            # untagged AzureBackupRG_<region>_<n> group, which Lab 1.3's Require-Environment-Tag-RG
+            # denies, and every backup fails with UserErrorRequestDisallowedByPolicy (#184).
             New-AzRecoveryServicesBackupProtectionPolicy `
                 -Name 'SkyCraft-Daily-Prod' `
                 -WorkloadType AzureVM `
                 -BackupManagementType AzureVM `
                 -SchedulePolicy $schedulePolicy `
                 -RetentionPolicy $retentionPolicy `
+                -BackupSnapshotResourceGroup $snapshotRgPrefix `
+                -BackupSnapshotResourceGroupSuffix $snapshotRgSuffix `
                 -VaultId $vault.ID | Out-Null
 
             # Enhanced keeps instant-restore snapshots for 7 days by default, where Standard kept
             # 2. Snapshots are billed, so pull it back to 2 and keep the cost estimate in
-            # ARCHITECTURE.md honest.
+            # ARCHITECTURE.md honest. The snapshot group is passed again so this update cannot
+            # drop it.
             $createdPolicy = Get-AzRecoveryServicesBackupProtectionPolicy -Name 'SkyCraft-Daily-Prod' -VaultId $vault.ID
             $createdPolicy.SnapshotRetentionInDays = 2
-            Set-AzRecoveryServicesBackupProtectionPolicy -Policy $createdPolicy -VaultId $vault.ID | Out-Null
+            Set-AzRecoveryServicesBackupProtectionPolicy `
+                -Policy $createdPolicy `
+                -BackupSnapshotResourceGroup $snapshotRgPrefix `
+                -BackupSnapshotResourceGroupSuffix $snapshotRgSuffix `
+                -VaultId $vault.ID | Out-Null
 
-            Write-Host "  ✓ Policy 'SkyCraft-Daily-Prod' created (Enhanced, daily 02:00 UTC, 30-day retention)" -ForegroundColor Green
+            Write-Host "  ✓ Policy 'SkyCraft-Daily-Prod' created (Enhanced, daily 02:00 UTC, 30-day retention, snapshots in $snapshotRgName)" -ForegroundColor Green
         } catch {
             $script:deployFailures++
             Write-Host "  [ERROR] Failed to create RSV policy: $_" -ForegroundColor Red
@@ -353,23 +394,13 @@ if ($WhatIf) {
                     -Policy $protectionPolicy `
                     -VaultId $vault.ID | Out-Null
                 Write-Host "  ✓ VM backup protection enabled for $vmName" -ForegroundColor Green
-                Write-Host "  Triggering initial on-demand backup..." -ForegroundColor Gray
-                $container = Get-AzRecoveryServicesBackupContainer `
-                    -ContainerType AzureVM `
-                    -FriendlyName $vmName `
+                $vmItem = Get-AzRecoveryServicesBackupItem `
                     -VaultId $vault.ID `
-                    -ErrorAction SilentlyContinue
-                if ($container) {
-                    $backupItem = Get-AzRecoveryServicesBackupItem `
-                        -Container $container `
-                        -WorkloadType AzureVM `
-                        -VaultId $vault.ID
-                    Backup-AzRecoveryServicesBackupItem `
-                        -Item $backupItem `
-                        -VaultId $vault.ID `
-                        -ExpiryDateTimeUTC ((Get-Date).AddDays(30).ToUniversalTime()) | Out-Null
-                    Write-Host "  ✓ Initial backup triggered (runs in background — check Backup jobs in portal)" -ForegroundColor Green
-                }
+                    -BackupManagementType AzureVM `
+                    -WorkloadType AzureVM `
+                    -ErrorAction SilentlyContinue | Where-Object {
+                        $_.FriendlyName -eq $vmName -or ($_.ContainerName -split ';')[-1] -eq $vmName
+                    }
             } catch {
                 $script:deployFailures++
                 Write-Host "  [ERROR] Could not enable VM backup: $_" -ForegroundColor Red
@@ -377,6 +408,67 @@ if ($WhatIf) {
                 Write-Host "    holds a Standard 'SkyCraft-Daily-Prod' from an earlier run - see step [6/7]." -ForegroundColor Gray
                 Write-Host "    Enable manually: Enable-AzRecoveryServicesBackupProtection (Step 5.2.3)" -ForegroundColor Gray
             }
+        }
+    }
+
+    # ── Initial backup and its outcome ────────────────────────────────────
+    # Protection alone proves nothing: after Lab 1.3 every job used to fail in seconds with
+    # UserErrorRequestDisallowedByPolicy while this script reported success (#184). So a VM
+    # without a recovery point gets an on-demand backup on every run - not only the run that
+    # enabled protection, or a failed first job would never be retried - and the job is watched
+    # long enough to catch a fast failure. The vault transfer takes far longer than that; a job
+    # still running when the watch ends is reported, not waited for.
+    $vmItem = $vmItem | Select-Object -First 1
+    if ($vmItem) {
+        try {
+            $recoveryPoints = @(Get-AzRecoveryServicesBackupRecoveryPoint -Item $vmItem -VaultId $vault.ID -ErrorAction SilentlyContinue)
+            $job = Get-AzRecoveryServicesBackupJob `
+                -VaultId $vault.ID `
+                -BackupManagementType AzureVM `
+                -Status InProgress `
+                -ErrorAction SilentlyContinue |
+                Where-Object { $_.WorkloadName -eq $vmName } |
+                Select-Object -First 1
+
+            if ($recoveryPoints.Count -gt 0) {
+                Write-Host "  ✓ $vmName has $($recoveryPoints.Count) recovery point(s) - no on-demand backup needed" -ForegroundColor Green
+                $job = $null
+            } elseif ($job) {
+                Write-Host "  ✓ A backup job for $vmName is already running (started $($job.StartTime) UTC)" -ForegroundColor Green
+            } else {
+                Write-Host "  Triggering on-demand backup (no recovery point yet)..." -ForegroundColor Gray
+                $job = Backup-AzRecoveryServicesBackupItem `
+                    -Item $vmItem `
+                    -VaultId $vault.ID `
+                    -ExpiryDateTimeUTC ((Get-Date).AddDays(30).ToUniversalTime())
+            }
+
+            if ($job) {
+                $deadline = (Get-Date).AddMinutes(3)
+                while ($job.Status -eq 'InProgress' -and (Get-Date) -lt $deadline) {
+                    Start-Sleep -Seconds 15
+                    $job = Get-AzRecoveryServicesBackupJob -JobId $job.JobId -VaultId $vault.ID
+                }
+
+                if ($job.Status -eq 'Failed') {
+                    $script:deployFailures++
+                    Write-Host "  [ERROR] Backup job for $vmName failed:" -ForegroundColor Red
+                    $detail = Get-AzRecoveryServicesBackupJobDetail -JobId $job.JobId -VaultId $vault.ID -ErrorAction SilentlyContinue
+                    foreach ($err in @($detail.ErrorDetails)) {
+                        if ($err) { Write-Host "    $($err.ErrorCode): $($err.ErrorMessage)" -ForegroundColor Red }
+                    }
+                    Write-Host "    UserErrorRequestDisallowedByPolicy means an Azure Policy deny refused a resource" -ForegroundColor Gray
+                    Write-Host "    Azure Backup creates for the snapshot - see lab-guide-5.2.md, Troubleshooting, Issue 2." -ForegroundColor Gray
+                } elseif ($job.Status -eq 'InProgress') {
+                    Write-Host "  ✓ Backup job for $vmName is running (the vault transfer takes a while - check Backup jobs)" -ForegroundColor Green
+                } else {
+                    Write-Host "  ✓ Backup job for ${vmName}: $($job.Status)" -ForegroundColor Green
+                }
+            }
+        } catch {
+            $script:deployFailures++
+            Write-Host "  [ERROR] Could not run the initial backup of ${vmName}: $_" -ForegroundColor Red
+            Write-Host "    Trigger it manually: vault -> Backup items -> Azure Virtual Machine -> Backup now (Step 5.2.3)" -ForegroundColor Gray
         }
     }
 

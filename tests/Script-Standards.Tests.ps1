@@ -121,6 +121,15 @@ $Lab52DeployCase = @(
     }
 )
 
+# Regression guard for issue #184 (every VM backup was denied by Lab 1.3's tag policy while the
+# lab's validator, which checked configuration only, stayed green)
+$Lab52TestCase = @(
+    @{
+        file = 'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Test-Lab.ps1'
+        path = (Join-Path $RepoRoot 'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Test-Lab.ps1')
+    }
+)
+
 Describe 'SkyCraft PowerShell - script standards' {
 
     It "'<file>' sets `$ErrorActionPreference = 'Stop'" -ForEach $ScriptCases {
@@ -239,6 +248,41 @@ Describe 'SkyCraft PowerShell - Lab 5.2 cleanup cannot mask a failure' {
         $content = Get-Content -Raw -LiteralPath $path
         $content | Should -Match 'Microsoft\.Compute/restorePointCollections'
         $content | Should -Match 'AzureBackupRG_'
+    }
+
+    It "'<file>' removes the instant-restore snapshot resource group the policy names (#184)" -ForEach $Lab52CleanupCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match "'platform-skycraft-swc-rpc\*-rg'"
+        $content | Should -Match '\[ERROR\] Could not delete snapshot resource group'
+    }
+}
+
+Describe 'SkyCraft PowerShell - Lab 5.2 VM backup survives Lab 1.3 (#184)' {
+
+    It "'<file>' names the snapshot resource group when it creates the VM backup policy" -ForEach $Lab52DeployCase {
+        # Without it Azure Backup creates an untagged AzureBackupRG_* group, which Lab 1.3 denies.
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match '(?s)New-AzRecoveryServicesBackupProtectionPolicy.{0,600}-BackupSnapshotResourceGroup \$snapshotRgPrefix'
+        $content | Should -Match '-BackupSnapshotResourceGroupSuffix \$snapshotRgSuffix'
+    }
+
+    It "'<file>' points an existing policy at the snapshot resource group" -ForEach $Lab52DeployCase {
+        # A policy created before #184 stays in the vault across re-runs; creating-only would never fix it.
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match '\$existingRsvPolicy\.AzureBackupRGName -ne \$snapshotRgPrefix'
+    }
+
+    It "'<file>' counts a failed initial backup job as a deployment failure" -ForEach $Lab52DeployCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match 'Get-AzRecoveryServicesBackupJob -JobId'
+        $content | Should -Match "(?s)if \(\`$job\.Status -eq 'Failed'\) \{\s*\`$script:deployFailures\+\+"
+    }
+
+    It "'<file>' checks the backup job outcome, not only the configuration" -ForEach $Lab52TestCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match 'Get-AzRecoveryServicesBackupJob'
+        $content | Should -Match "Status -eq 'Failed'"
+        $content | Should -Match 'instantRPDetails'
     }
 }
 

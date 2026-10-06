@@ -45,8 +45,9 @@
 
     WHAT THIS SCRIPT DELETES, AND WHAT IT ONLY CHECKS.
 
-      It deletes the three lab resource groups, last and in parallel, once every lab teardown has
-      run against them. That is all it deletes.
+      It deletes the lab resource groups the manifest lists - the three environment groups and lab
+      5.2's instant-restore snapshot group (#184) - last and in parallel, once every lab teardown
+      has run against them. That is all it deletes.
 
       AzureBackupRG_<region>_<n> is CHECKED, NOT DELETED, and the distinction is the whole point.
       Azure creates that group itself: while a VM is protected, the Recovery Services Vault parks a
@@ -55,7 +56,8 @@
       carefully than a sweep here could: THE GROUP IS SHARED. It can hold restore point collections
       belonging to protected VMs that have nothing to do with SkyCraft, so lab 5.2 removes only
       collections named 'AzureBackup_*skycraft*' and deletes the group only if that leaves it
-      empty.
+      empty. Since #184 lab 5.2's backup policy sends its snapshots to its own tagged group
+      instead, so only a policy created before that fix still leaves anything here.
 
       An earlier version of this script deleted any AzureBackupRG_* group whose contents were
       restore point collections and nothing else. That looks equivalent and is not: it does not ask
@@ -70,7 +72,7 @@
       children from inside it, which is the correct scope.
 
     THEN IT CHECKS. Issue #73 is explicit that a surviving vault is a failure rather than expected
-    residue, so the vaults are asserted absent rather than reported. So are the three lab resource
+    residue, so the vaults are asserted absent rather than reported. So are the lab resource
     groups, and any SkyCraft restore point collection still parked in an AzureBackupRG_* group. An
     assertion that fails is counted like a teardown failure and leaves through the exit code,
     because a teardown that says it worked while the subscription disagrees is the exact failure
@@ -229,8 +231,8 @@ param(
     [scriptblock]$ResourceGroupRemover = {
         param($Name)
         # -Force suppresses Az's own confirmation, which this script has already answered through
-        # ShouldProcess. -AsJob starts the delete and returns: the three lab groups are independent
-        # and deleting them one after another is three sequential multi-minute waits for no reason.
+        # ShouldProcess. -AsJob starts the delete and returns: the lab groups are independent and
+        # deleting them one after another is sequential multi-minute waits for no reason.
         # The jobs are waited on below, because the assertions that follow have to mean something.
         Remove-AzResourceGroup -Name $Name -Force -AsJob
     },
@@ -438,7 +440,7 @@ else {
     # it and filters by ownership, which this script cannot do as safely on a shared group. It is
     # asserted below instead.
 
-    # The three lab resource groups, last and in parallel. Each is independent of the others, and
+    # The lab resource groups, last and in parallel. Each is independent of the others, and
     # a resource group delete is minutes rather than seconds. These are the only things this script
     # deletes directly.
     $jobs = @()

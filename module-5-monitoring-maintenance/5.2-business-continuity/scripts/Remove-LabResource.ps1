@@ -10,8 +10,12 @@
     3. Backup Vault (platform-skycraft-swc-bv)
     4. VM backup protection item with data deletion
     5. Recovery Services Vault (platform-skycraft-swc-rsv)
-    6. Orphaned Azure Backup restore point collections and the AzureBackupRG_<location>_*
-       resource groups that held them, once those groups are empty
+    6. The instant-restore snapshot resource group platform-skycraft-swc-rpc<n>-rg, with the
+       restore point collection inside it. SkyCraft owns it (main.bicep creates it and the VM
+       backup policy names it, issue #184), so it is deleted outright.
+    7. Orphaned Azure Backup restore point collections and the AzureBackupRG_<location>_*
+       resource groups that held them, once those groups are empty. Only a policy created
+       before issue #184 leaves these behind.
 
     Notes:
     - The role assignments are removed before the Backup Vault so its managed
@@ -44,8 +48,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.1.0
-    Date: 2026-08-29
+    Version: 1.2.0
+    Date: 2026-10-06
 #>
 
 #Requires -Version 7.0
@@ -66,6 +70,9 @@ $rsvName        = 'platform-skycraft-swc-rsv'
 $bvName         = 'platform-skycraft-swc-bv'
 $storageAccount = 'prodskycraftswcsa'
 $location       = 'swedencentral'
+# Azure Backup names the snapshot group <prefix><n><suffix>; main.bicep creates n = 1, and the
+# service adds n = 2, 3, ... only when one group fills up. The pattern covers all of them.
+$snapshotRgPattern = 'platform-skycraft-swc-rpc*-rg'
 
 # Minimum Az.RecoveryServices for the one-pass vault delete (see the prerequisite check below).
 $rsvMinModuleVersion = [version]'7.5.0'
@@ -169,6 +176,15 @@ if ($rsvExists) {
     }
     $resourcesToDelete.Add(@{ Type = 'RSV'; Name = $rsvName })
     Write-Host "  - Recovery Services Vault: $rsvName" -ForegroundColor Gray
+}
+
+# The instant-restore snapshot group the VM backup policy names (#184). Unlike AzureBackupRG_*,
+# nothing outside this lab writes to it, so it goes as a whole - restore point collection included.
+$snapshotRgs = Get-AzResourceGroup -ErrorAction SilentlyContinue |
+               Where-Object { $_.ResourceGroupName -like $snapshotRgPattern }
+foreach ($snapshotRg in $snapshotRgs) {
+    $resourcesToDelete.Add(@{ Type = 'SnapshotResourceGroup'; Name = $snapshotRg.ResourceGroupName })
+    Write-Host "  - Snapshot resource group: $($snapshotRg.ResourceGroupName)" -ForegroundColor Gray
 }
 
 # Azure Backup provisions AzureBackupRG_<location>_<n> next to the protected VM and parks a
@@ -303,7 +319,22 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RSV' }) {
     }
 }
 
-# 6. Delete the orphaned Azure Backup restore point collections and, once they are gone, the
+# 6. Delete the snapshot resource group. After the protection is gone, nothing but the released
+#    restore point collection is left in it.
+foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'SnapshotResourceGroup' }) {
+    if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete instant-restore snapshot resource group')) { continue }
+    Write-Host "  Deleting snapshot resource group: $($r.Name)..." -ForegroundColor Gray
+    try {
+        Remove-AzResourceGroup -Name $r.Name -Force -ErrorAction Stop | Out-Null
+        Write-Host "  ✓ Deleted" -ForegroundColor Green
+    } catch {
+        $script:cleanupFailures++
+        Write-Host "  [ERROR] Could not delete snapshot resource group '$($r.Name)': $_" -ForegroundColor Red
+        Write-Host "    A resource lock on the group blocks the delete - the lab never sets one." -ForegroundColor Gray
+    }
+}
+
+# 7. Delete the orphaned Azure Backup restore point collections and, once they are gone, the
 #    AzureBackupRG_<location>_* groups that held them.
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RestorePointCollection' }) {
     if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete orphaned restore point collection')) { continue }
