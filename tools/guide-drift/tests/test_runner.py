@@ -25,15 +25,11 @@ try:
     import playwright.sync_api  # noqa: F401
 except ImportError:
     class _StubError(Exception):
-        """Stands in for playwright.sync_api.Error."""
-
-    class _StubTimeout(_StubError):
-        """Stands in for playwright.sync_api.TimeoutError."""
+        """Stands in for playwright.sync_api.Error (TimeoutError is a subclass of it)."""
 
     _stub = types.ModuleType("playwright.sync_api")
     _stub.Browser = _stub.Frame = _stub.Locator = _stub.Page = object
     _stub.Error = _StubError
-    _stub.TimeoutError = _StubTimeout
     _stub.sync_playwright = None
     sys.modules["playwright"] = types.ModuleType("playwright")
     sys.modules["playwright.sync_api"] = _stub
@@ -231,8 +227,9 @@ class StateTests(RunnerTestCase):
 
 
 class FakeElement:
-    def __init__(self, fail: Exception | None = None) -> None:
+    def __init__(self, fail: Exception | None = None, disabled: bool = False) -> None:
         self.fail = fail
+        self.disabled = disabled
         self.clicked = 0
 
     def click(self, timeout=None) -> None:
@@ -240,8 +237,8 @@ class FakeElement:
             raise self.fail
         self.clicked += 1
 
-    def is_enabled(self, timeout=None) -> bool:
-        return True
+    def is_disabled(self, timeout=None) -> bool:
+        return self.disabled
 
 
 class FakePage:
@@ -262,15 +259,31 @@ class DecisionRecordingTests(RunnerTestCase):
         super().setUp()
         (self.tmp / "guide.md").write_text("# Lab\n\n2. Click **+ New group**\n", encoding="utf-8")
 
-    def act(self, answers, element):
+    def act(self, answers, element, label="+ New group", exact=None):
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
-        candidates = [run.Candidate("button", "New group"), run.Candidate("link", "Groups")]
-        with mock.patch.object(run, "find_exact", return_value=None), \
+        candidates = [run.Candidate("button", "New group"), run.Candidate("link", "Groups"),
+                      run.Candidate("button", "Delete group")]
+        with mock.patch.object(run, "find_exact", return_value=exact), \
                 mock.patch.object(run, "candidates_on_screen", return_value=candidates), \
                 mock.patch.object(run, "find_by_name", return_value=element):
-            record = self.quietly(lambda: r.act_on_label(self.STEP, self.STEP["items"][0], "+ New group"))
+            record = self.quietly(lambda: r.act_on_label(self.STEP, self.STEP["items"][0], label))
         saved = json.loads((self.tmp / "rec.json").read_text(encoding="utf-8"))
         return record, saved["steps"].get("9.9.1", {}).get("labels", {})
+
+    def test_a_destructive_element_is_refused_unless_the_guide_names_one(self) -> None:
+        element = FakeElement()
+        record, labels = self.act(["3"], element)
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertIn("refused: destructive element 'Delete group'", record["observed"])
+        self.assertEqual((element.clicked, labels), (0, {}))
+        record, _ = self.act([], None, label="Delete", exact=element)    # the guide says Delete
+        self.assertEqual((record["outcome"], element.clicked), ("match", 1))
+
+    def test_a_disabled_element_is_unknown_without_waiting(self) -> None:
+        element = FakeElement(disabled=True)
+        record, labels = self.act(["1"], element)
+        self.assertEqual((record["outcome"], record["observed"]), ("unknown", "disabled: 'New group'"))
+        self.assertEqual((element.clicked, labels), (0, {}))
 
     def test_a_chosen_element_is_recorded_once_the_click_went_through(self) -> None:
         record, labels = self.act(["1"], FakeElement())
@@ -279,7 +292,7 @@ class DecisionRecordingTests(RunnerTestCase):
         self.assertEqual(labels["+ New group"]["name"], "New group")
 
     def test_a_chosen_element_whose_click_failed_is_not_recorded(self) -> None:
-        record, labels = self.act(["1"], FakeElement(fail=run.PlaywrightTimeout("timed out")))
+        record, labels = self.act(["1"], FakeElement(fail=run.PlaywrightError("timed out")))
         self.assertEqual(record["outcome"], "unknown")
         self.assertNotIn("+ New group", labels)
 
@@ -312,6 +325,50 @@ class DecisionRecordingTests(RunnerTestCase):
             self.assertTrue(self.quietly(lambda: r.run_step(self.STEP)))
         check.assert_called_once()
         self.assertEqual(self.recording["steps"]["9.9.1"]["viewUrl"], "https://portal.azure.com/#view/Two")
+
+
+class SummaryTests(RunnerTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n\n2. Click **+ New group**\n3. Open the blade\n", encoding="utf-8")
+        self.r = self.runner()
+
+    def add(self, kind, label, **fields) -> None:
+        record = self.r.new_record({"id": "9.9.2"}, kind, label)
+        record.update(fields)
+        self.r.records.append(record)
+
+    def test_proposed_edit_replaces_the_bold_label_or_proposes_nothing(self) -> None:
+        self.assertEqual(self.r.proposed_edit(3, "+ New group", "New group"),
+                         {"line": 3, "old": "2. Click **+ New group**", "new": "2. Click **New group**"})
+        self.assertIsNone(self.r.proposed_edit(4, "Blade", "Blades"))      # not in bold on that line
+        self.assertIsNone(self.r.proposed_edit(99, "+ New group", "New group"))
+
+    def test_finish_lists_every_section_and_counts_blocking_and_unknown(self) -> None:
+        self.r.readability()
+        self.add("action", "+ New group", outcome="drift", severity="misleading", observed="New group",
+                 proposedEdit={"line": 3, "old": "2. Click **+ New group**", "new": "2. Click **New group**"})
+        self.add("action", "Groups", outcome="drift", severity="cosmetic", observed="groups")
+        self.add("action", "Gone", outcome="drift", severity="blocking")
+        self.add("field", "Group type", outcome="unknown", observed="ambiguous: 2 visible elements match")
+        self.add("screenshot", None, outcome="drift", category="stale", observed="images/Step-9.9.2.png")
+        self.add("action", None, outcome="skipped", skippedBecause="9.9.1")
+        self.add("action", "OK", outcome="match", observed="OK")
+        self.assertEqual(self.quietly(self.r.finish), 2)
+        summary = (self.r.run_dir / "summary.md").read_text(encoding="utf-8")
+        for line in ("## blocking (1)", "**Gone**: gone from the Portal", "## misleading (1)", "## cosmetic (1)",
+                     "## unknown (1)", "## skipped (1)", "- step 9.9.2 because step 9.9.1 failed",
+                     "## stale screenshots (1)", "## unreadable screenshots, wider than 1722 px (1)",
+                     "images/Step-9.9.2.png: 2000 px wide", "## proposed edits (1)", "guide.md:3"):
+            self.assertIn(line, summary)
+
+    def test_finish_says_none_for_empty_sections_and_caps_the_exit_code(self) -> None:
+        self.assertEqual(self.quietly(self.r.finish), 0)
+        summary = (self.r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## proposed edits (0)\n- none", summary)
+        for _ in range(300):
+            self.add("action", "x", outcome="unknown", observed="not found")
+        self.assertEqual(self.quietly(self.r.finish), 250)
 
 
 if __name__ == "__main__":

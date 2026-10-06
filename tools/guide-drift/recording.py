@@ -25,7 +25,14 @@ from urllib.parse import urlsplit
 
 from decide import Candidate
 
-ENV_REF = re.compile(r"\$\{(?P<name>[A-Z0-9_]+)\}")
+# '${NAME}', or '${NAME|upn}' for the guest user principal name form of an address (the
+# Redactor writes that form; see Redactor.__init__).
+ENV_REF = re.compile(r"\$\{(?P<name>[A-Z0-9_]+)(?P<upn>\|upn)?\}")
+
+
+def env_names(recording: dict) -> set[str]:
+    """The NAME of every '${NAME}' or '${NAME|upn}' the recording refers to."""
+    return {m.group("name") for m in ENV_REF.finditer(json.dumps(recording))}
 
 
 def expand_env(value: str) -> str:
@@ -33,14 +40,13 @@ def expand_env(value: str) -> str:
         name = m.group("name")
         if name not in os.environ:
             raise SystemExit(f"environment variable {name} is not set; the recording needs it")
-        return os.environ[name]
+        return os.environ[name].replace("@", "_") if m.group("upn") else os.environ[name]
     return ENV_REF.sub(replace, value)
 
 
 def missing_env(recording: dict) -> list[str]:
     """Every ${NAME} the recording refers to that the environment does not set."""
-    names = set(ENV_REF.findall(json.dumps(recording)))
-    return sorted(name for name in names if name not in os.environ)
+    return sorted(name for name in env_names(recording) if name not in os.environ)
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -58,11 +64,19 @@ class Redactor:
     """Keeps tenant data out of the committed recording, which lives in a public repository.
     The tenant's domain and id become tokens on the way into the recording and are restored on
     the way out, so a recorded name such as 'malfurion.stormrage@[tenantdomain]' still finds its
-    element. tests/Guide-Drift-Recording.Tests.ps1 is the backstop: it fails on any literal
-    e-mail address, *.onmicrosoft.com domain or GUID in a recording."""
+    element. The tenant prefix (the domain's first label, as in a directory named 'contoso')
+    becomes '[yourtenant]', the guides' own placeholder, when it is at least 4 characters long;
+    a shorter one would clobber ordinary words. tests/Guide-Drift-Recording.Tests.ps1 is the
+    backstop: it fails on any literal e-mail address, *.onmicrosoft.com domain, guest user
+    principal name or GUID in a recording.
+
+    Restored values are lower case, as the Portal shows domains and ids; a display name that
+    spells the prefix in another case ('Contoso') comes back as 'contoso'."""
 
     DOMAIN = "[tenantdomain]"
     TENANT = "[tenantid]"
+    PREFIX = "[yourtenant]"
+    PREFIX_MIN = 4
 
     def __init__(self, domain: str, tenant_id: str, secrets: dict[str, str] | None = None) -> None:
         # The Portal shows domains in lower case; restore() must give back what is on screen.
@@ -78,6 +92,12 @@ class Redactor:
             self._pairs.append((re.compile(re.escape(upn), re.IGNORECASE), token[:-1] + "|upn}", upn))
         self._pairs.append((re.compile(re.escape(self.domain), re.IGNORECASE), self.DOMAIN, self.domain))
         self._pairs.append((re.compile(re.escape(self.tenant_id), re.IGNORECASE), self.TENANT, self.tenant_id))
+        # Last, so the full domain is already a token. Bounded by anything but a letter, digit,
+        # '_' or '-': 'contoso Ltd' is redacted, 'contoso-admins' and 'contosoville' are not.
+        prefix = self.domain.split(".", 1)[0]
+        if len(prefix) >= self.PREFIX_MIN:
+            self._pairs.append((re.compile(rf"(?<![\w-]){re.escape(prefix)}(?![\w-])", re.IGNORECASE),
+                                self.PREFIX, prefix))
 
     def redact(self, text: str | None) -> str | None:
         if text is None:
@@ -107,7 +127,7 @@ def env_secrets(recording: dict) -> dict[str, str]:
     Short non-address values such as the tenant prefix are covered by the domain itself and
     would otherwise clobber ordinary words."""
     secrets = {}
-    for name in set(ENV_REF.findall(json.dumps(recording))):
+    for name in env_names(recording):
         value = os.environ.get(name, "")
         if "@" in value:
             secrets[f"${{{name}}}"] = value

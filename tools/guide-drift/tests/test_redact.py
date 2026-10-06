@@ -17,7 +17,8 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from decide import Candidate  # noqa: E402
-from recording import Redactor, env_secrets, rejected_candidates  # noqa: E402
+from recording import (Redactor, env_secrets, expand_env, missing_env,  # noqa: E402
+                       rejected_candidates, resolve_value, value_action)
 
 DOMAIN = "contoso.onmicrosoft.com"
 TENANT = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -40,6 +41,20 @@ class RedactorTests(unittest.TestCase):
         redacted = redactor.redact(f"admin@CONTOSO.onmicrosoft.COM {TENANT.upper()}")
         self.assertEqual(redacted, "admin@[tenantdomain] [tenantid]")
         self.assertEqual(redactor.restore(redacted), f"admin@{DOMAIN} {TENANT}")
+
+    def test_tenant_prefix_becomes_the_guides_placeholder_and_restores(self) -> None:
+        redacted = self.redactor.redact(f"Contoso directory, admin@{DOMAIN}")
+        self.assertEqual(redacted, "[yourtenant] directory, admin@[tenantdomain]")
+        self.assertEqual(self.redactor.restore(redacted), f"contoso directory, admin@{DOMAIN}")
+
+    def test_tenant_prefix_inside_a_longer_name_is_left_alone(self) -> None:
+        for text in ("contoso-admins", "contosoville", "my_contoso", "SkyCraft-Contoso-RG"):
+            with self.subTest(text=text):
+                self.assertEqual(self.redactor.redact(text), text)
+
+    def test_short_tenant_prefix_is_not_redacted(self) -> None:
+        redactor = Redactor("abc.onmicrosoft.com", TENANT)
+        self.assertEqual(redactor.redact("abc and abc.onmicrosoft.com"), "abc and [tenantdomain]")
 
     def test_guest_upn_becomes_the_upn_token_and_restores(self) -> None:
         upn = f"me_example.com#EXT#@{DOMAIN}"
@@ -75,6 +90,52 @@ class EnvSecretsTests(unittest.TestCase):
         recording = {"steps": {"1.1.5": {"valueOverrides": {"Email": TOKEN}}}}
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(env_secrets(recording), {})
+
+    def test_a_recorded_upn_token_counts_as_a_reference(self) -> None:
+        # A recording whose only mention of the guest is a redacted UPN still needs the variable,
+        # or restore() could not find the guest's row again.
+        recording = {"steps": {"1.1.6": {"labels": {"x": {"name": f"{UPN_TOKEN}#EXT#@[tenantdomain]"}}}}}
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(missing_env(recording), ["SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL"])
+        with mock.patch.dict(os.environ, {"SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL": "me@example.com"}):
+            self.assertEqual(env_secrets(recording), {TOKEN: "me@example.com"})
+
+
+class ValueTests(unittest.TestCase):
+    RECORDING = {"placeholders": {"[yourtenant]": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}"},
+                 "steps": {"1.1.5": {"valueOverrides": {"Email": TOKEN}}}}
+    ENV = {"SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX": "contoso", "SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL": "me@example.com"}
+
+    def test_expand_env_gives_the_address_or_its_upn_form(self) -> None:
+        with mock.patch.dict(os.environ, self.ENV):
+            self.assertEqual(expand_env(f"{TOKEN} / {UPN_TOKEN}"), "me@example.com / me_example.com")
+
+    def test_expand_env_stops_on_a_missing_variable(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(SystemExit, "GUEST_EMAIL"):
+            expand_env(TOKEN)
+
+    def test_missing_env_lists_unset_names_sorted(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(missing_env(self.RECORDING),
+                             ["SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL", "SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX"])
+        with mock.patch.dict(os.environ, self.ENV):
+            self.assertEqual(missing_env(self.RECORDING), [])
+
+    def test_resolve_value_applies_overrides_then_placeholders(self) -> None:
+        with mock.patch.dict(os.environ, self.ENV):
+            self.assertEqual(resolve_value(self.RECORDING, {"id": "1.1.5"}, "Email", "guest@example.org"),
+                             "me@example.com")
+            self.assertEqual(resolve_value(self.RECORDING, {"id": "1.1.2"}, "User principal name",
+                                           "malfurion.stormrage@[yourtenant].onmicrosoft.com"),
+                             "malfurion.stormrage@contoso.onmicrosoft.com")
+            self.assertEqual(resolve_value(self.RECORDING, {"id": "1.1.6"}, "Group name", "SkyCraft-Admins"),
+                             "SkyCraft-Admins")
+
+    def test_value_action(self) -> None:
+        for value, action in (("[Leave blank]", "skip"), (" [Leave blank] ", "skip"),
+                              ("skycraft-auth-[uniqueID]", "unresolved"), ("SkyCraft-Admins", "type"), ("", "type")):
+            with self.subTest(value=value):
+                self.assertEqual(value_action(value), action)
 
 
 class RejectedCandidatesTests(unittest.TestCase):
