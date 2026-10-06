@@ -1545,6 +1545,7 @@ import re
 import sys
 import traceback
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Page, Frame, TimeoutError as PlaywrightTimeout, sync_playwright
 
@@ -1772,35 +1773,62 @@ class Redactor:
     DOMAIN = "[tenantdomain]"
     TENANT = "[tenantid]"
 
-    def __init__(self, domain: str, tenant_id: str) -> None:
-        self.domain = domain
-        self.tenant_id = tenant_id
-        self._domain_re = re.compile(re.escape(domain), re.IGNORECASE)
-        self._tenant_re = re.compile(re.escape(tenant_id), re.IGNORECASE)
+    def __init__(self, domain: str, tenant_id: str, secrets: dict[str, str] | None = None) -> None:
+        # The Portal shows domains in lower case; restore() must give back what is on screen.
+        self.domain = domain.lower()
+        self.tenant_id = tenant_id.lower()
+        self._pairs: list[tuple[re.Pattern, str, str]] = []
+        # Secret values first (the guest address, also in the '_' form a guest UPN uses:
+        # 'me_example.com#EXT#@<tenant>'), then the tenant domain and id.
+        for token, value in (secrets or {}).items():
+            upn = value.replace("@", "_")
+            self._pairs.append((re.compile(re.escape(value), re.IGNORECASE), token, value))
+            # A distinct token for the UPN form, so restore() knows which form to give back.
+            self._pairs.append((re.compile(re.escape(upn), re.IGNORECASE), token[:-1] + "|upn}", upn))
+        self._pairs.append((re.compile(re.escape(self.domain), re.IGNORECASE), self.DOMAIN, self.domain))
+        self._pairs.append((re.compile(re.escape(self.tenant_id), re.IGNORECASE), self.TENANT, self.tenant_id))
 
     def redact(self, text: str | None) -> str | None:
         if text is None:
             return None
-        return self._tenant_re.sub(self.TENANT, self._domain_re.sub(self.DOMAIN, text))
+        for pattern, token, _ in self._pairs:
+            text = pattern.sub(token, text)
+        return text
 
     def restore(self, text: str | None) -> str | None:
         if text is None:
             return None
-        return text.replace(self.DOMAIN, self.domain).replace(self.TENANT, self.tenant_id)
+        for _, token, value in reversed(self._pairs):
+            text = text.replace(token, value)
+        return text
 
     def view_url(self, url: str) -> str:
-        """The Portal view without the tenant pin ('#@<tenant>/'), query strings or object ids:
-        it is shown to the person on -Resume, never navigated to automatically."""
-        url = re.sub(r"#@[^/]*/?", "#", url)
-        url = url.split("?", 1)[0]
-        return self.redact(GUID.sub("<id>", url))
+        """The Portal view without the tenant pin ('#@<tenant>/'), query strings (before or inside
+        the fragment) or object ids: shown to the person on -Resume, never navigated to."""
+        parts = urlsplit(url)
+        fragment = re.sub(r"^@[^/]*/?", "", parts.fragment).split("?", 1)[0]
+        return self.redact(GUID.sub("<id>", f"{parts.scheme}://{parts.netloc}{parts.path}#{fragment}"))
+
+
+def env_secrets(recording: dict) -> dict[str, str]:
+    """'${NAME}' -> value for every environment reference in the recording whose value is an
+    address (contains '@'): the Redactor writes the token back wherever the value appears.
+    Short non-address values such as the tenant prefix are covered by the domain itself and
+    would otherwise clobber ordinary words."""
+    secrets = {}
+    for name in set(ENV_REF.findall(json.dumps(recording))):
+        value = os.environ.get(name, "")
+        if "@" in value:
+            secrets[f"${{{name}}}"] = value
+    return secrets
 
 
 def rejected_candidates(candidates: list[Candidate], label: str, chosen: str | None) -> list[str]:
     """The 20 visible candidates most like the label, other than the chosen one, as 'role "name"':
     the reference set issue #190 needs, without committing the whole screen to the recording.
-    Names with an '@' (user principal names, the signed-in account) are left out entirely."""
-    others = [c for c in candidates if c.name != chosen and "@" not in c.name]
+    Names with an '@' (user principal names, the signed-in account) or a GUID (object and
+    subscription ids) are left out entirely."""
+    others = [c for c in candidates if c.name != chosen and "@" not in c.name and not GUID.search(c.name)]
     others.sort(key=lambda c: difflib.SequenceMatcher(None, c.name.lower(), label.lower()).ratio(),
                 reverse=True)
     return [str(c) for c in others[:20]]
@@ -1874,7 +1902,7 @@ class Runner:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.results_path = self.run_dir / "results.jsonl"
         self.deciders = [ReplayDecider(recording), HumanDecider()]
-        self.redactor = Redactor(args.tenant_domain, args.tenant_id)
+        self.redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording))
         self.records: list[dict] = []
         self.failed_steps: dict[str, str] = {}   # step id -> why (for skippedBecause)
 
@@ -2005,16 +2033,38 @@ class Runner:
             self.failed_steps[step["id"]] = step["id"]
 ```
 
-- [ ] **Step 2: Check it still imports**
+- [ ] **Step 2: Forbid the guest UPN form in recordings**
+
+In `tests/Guide-Drift-Recording.Tests.ps1`, the privacy checks catch an e-mail address but not
+a guest user principal name (`me_example.com#EXT#@[tenantdomain]` after redaction). Add one
+`-ForEach $RecordingCases` It in the same boolean style as the others
+(`($raw -match '#EXT#') | Should -BeFalse -Because ...`), prove it fails with a temporary
+`#EXT#` in the seed, revert, and run the file.
+
+- [ ] **Step 3: Unit-test the Redactor without a browser**
+
+`Redactor`, `env_secrets` and `rejected_candidates` are pure. Add
+`tools/guide-drift/tests/test_redact.py` (stdlib unittest, run by the existing
+`tests/Guide-Drift-Decide.Tests.ps1` discovery; import run.py's helpers without Playwright by
+stubbing `playwright.sync_api` in `sys.modules` before the import if Playwright is not
+installed). Cover: domain and tenant id round-trip, case-insensitive redaction with lower-case
+restore; a guest UPN `me_example.com#EXT#@contoso.onmicrosoft.com` with the secret
+`me@example.com` becomes `${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL|upn}#EXT#@[tenantdomain]` and restores, and
+`me@example.com` itself becomes `${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}` and restores;
+`view_url` on `https://portal.azure.com/?feature.x=1#@contoso.onmicrosoft.com/view/Blade/id/<a GUID>?q=1`
+gives `https://portal.azure.com/#view/Blade/id/<id>`; `rejected_candidates` drops names with
+`@` or a GUID and keeps at most 20, most similar first. Run the Pester wrapper.
+
+- [ ] **Step 4: Check it still imports**
 
 Run: `python -c "import sys; sys.path.insert(0,'tools/guide-drift'); import run; print('ok')"`
 Expected: `ok` (the methods `new_record`, `write`, `check_result`, `screenshot` come in Task 9;
 Python resolves them at call time, so the import succeeds).
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Commit**
 
 ```powershell
-git add tools/guide-drift/run.py
+git add tools/guide-drift/run.py tools/guide-drift/tests/test_redact.py tests/Guide-Drift-Recording.Tests.ps1 PLAN.md
 git commit -m "feat(guide-drift): find labelled elements, perform steps, ask at the boundary"
 ```
 
