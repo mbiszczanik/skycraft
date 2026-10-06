@@ -100,6 +100,12 @@ RESULT_SECTION_JS = r"""(e, interactive) => {
     e, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
   return [clean(name), clean(heading && heading.textContent), clean((e.closest(interactive) || e).textContent)];
 }"""
+# An element that takes a value itself; a labelled element that is none of these is a container
+# (find_field, fill_parts). CONTROL_JS reads [tag, role attribute, contenteditable].
+CONTROL_TAGS = ("input", "textarea", "select", "button")
+CONTROL_ROLES = ("textbox", "searchbox", "combobox", "spinbutton", "slider", "checkbox", "radio",
+                 "switch", "button", "listbox")
+CONTROL_JS = "e => [e.tagName.toLowerCase(), e.getAttribute('role') || '', e.isContentEditable]"
 # Never acted on unless the guide itself names such an element: a wrong replay or a mistyped
 # number must not delete a user or sign the person out halfway through a lab.
 DESTRUCTIVE = re.compile(r"\b(delete|remove|reset|revoke|disable|block|purge|sign out)\b", re.IGNORECASE)
@@ -265,14 +271,44 @@ def find_in_roles(page: Page, label: str, roles: tuple[str, ...], root: Locator 
         return None
 
 
+def is_control(element: Locator) -> bool:
+    """Whether the element takes a value itself (CONTROL_TAGS, CONTROL_ROLES, contenteditable)
+    rather than being a container labelled for one. An element that cannot be inspected counts
+    as a control: it is acted on as before, and the error that follows is reported."""
+    try:
+        tag, role, editable = element.evaluate(CONTROL_JS, timeout=1000)
+    except PlaywrightError:
+        return True
+    return tag in CONTROL_TAGS or role in CONTROL_ROLES or bool(editable)
+
+
+def parts_of(container: Locator, role: str) -> list[Locator]:
+    """The visible elements of `role` inside `container`."""
+    try:
+        return visible_in(container.get_by_role(role), None)
+    except PlaywrightError:     # the container went away
+        return []
+
+
 def find_field(page: Page, label: str) -> Locator | None:
     """The element the label belongs to, or a textbox, combobox, checkbox or radio of that name,
-    and nothing else. An ambiguous match raises Ambiguous."""
-    strategies: list[Callable[[Frame], Locator]] = [lambda f: f.get_by_label(label, exact=True)]
+    and nothing else. A labelled container that is not a control itself gives way to a control
+    of the label (a text box of that name, or another labelled element), unless it holds a combo
+    box: the Portal's 'User principal name' is a <div aria-label> around a text box, an '@' and
+    a domain combo box, and fill_field splits the value over those parts. An ambiguous match
+    raises Ambiguous."""
+    labelled = visible_across_frames(page, lambda f: f.get_by_label(label, exact=True))
+    if labelled:
+        controls = [element for element in labelled if is_control(element)]
+        containers = [element for element in labelled if not any(element is c for c in controls)]
+        composite = [element for element in containers if parts_of(element, "combobox")]
+        chosen = only_one(composite or controls or containers)
+        if composite or controls:
+            return chosen
+        textbox = unique_visible(page, lambda f: f.get_by_role("textbox", name=label, exact=True))
+        return textbox or chosen
     for role in FIELD_ROLES:
-        strategies.append(lambda f, role=role: f.get_by_role(role, name=label, exact=True))
-    for make_locator in strategies:
-        element = unique_visible(page, make_locator)
+        element = unique_visible(page, lambda f, role=role: f.get_by_role(role, name=label, exact=True))
         if element is not None:
             return element
     return None
@@ -432,10 +468,55 @@ def current_text(element: Locator, tag: str) -> str:
     return element.inner_text(timeout=FIND_TIMEOUT_MS).strip()
 
 
+def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case: bool = False) -> str | None:
+    """Open the combo box or drop-down button `element` and pick the option named `value`;
+    'already set' when it shows `value` already. With `ignore_case`, names are compared regardless
+    of case (a domain). Raises LookupError when no option has the name."""
+    shown = current_text(element, tag)
+    if shown == value or (ignore_case and shown.casefold() == value.casefold()):
+        return "already set"
+    element.click(timeout=FIND_TIMEOUT_MS)
+    page.wait_for_timeout(SETTLE_MS // 2)
+    name = re.compile("^" + re.escape(value) + "$", re.IGNORECASE) if ignore_case else value
+    option = find_by_name(page, "option", name)
+    if option is None:
+        raise LookupError(f"option '{value}' not found")
+    option.click(timeout=FIND_TIMEOUT_MS)
+    return None
+
+
+def fill_parts(page: Page, container: Locator, value: str) -> str | None:
+    """Give `value` to a labelled container that is not a control itself (find_field). With one
+    text box and nothing else, the text box gets the value. With one text box and one combo box
+    and an '@' in the value (the Portal's user principal name: name, '@', domain), the text box
+    gets the part before the last '@', and the combo box must show the part after it, compared
+    regardless of case; when it does not, the domain is picked from its options. 'already set'
+    when every part held its value before. Raises LookupError for any other container, or when
+    the domain is not offered."""
+    textboxes, comboboxes = parts_of(container, "textbox"), parts_of(container, "combobox")
+    if len(textboxes) == 1 and not comboboxes:
+        return fill_field(page, textboxes[0], value)
+    if len(textboxes) == 1 and len(comboboxes) == 1 and "@" in value:
+        local, domain = value.rsplit("@", 1)
+        typed = fill_field(page, textboxes[0], local)
+        try:
+            tag = comboboxes[0].evaluate(CONTROL_JS, timeout=FIND_TIMEOUT_MS)[0]
+            picked = pick_option(page, comboboxes[0], tag, domain, ignore_case=True)
+        except LookupError as error:
+            raise LookupError(f"the domain combo box does not offer '{domain}' ({error})") from error
+        page.wait_for_timeout(SETTLE_MS // 2)
+        return "already set" if typed and picked else None
+    raise LookupError(f"the labelled element is not a field: it holds {len(textboxes)} text box(es) "
+                      f"and {len(comboboxes)} combo box(es)")
+
+
 def fill_field(page: Page, element: Locator, value: str) -> str | None:
-    """Give the field `value`: tick or clear a checkbox or radio, pick an option, or type. Returns
-    'already set' when the field held the value before, and does nothing then. Raises LookupError
-    when the value cannot be applied (not a checkbox state, no such option)."""
+    """Give the field `value`: tick or clear a checkbox or radio, pick an option, or type; a
+    labelled container that is not a control itself is filled through its parts (fill_parts).
+    Returns 'already set' when the field held the value before, and does nothing then. Raises
+    LookupError when the value cannot be applied (not a checkbox state, no such option)."""
+    if not is_control(element):
+        return fill_parts(page, element, value)
     role = element.get_attribute("role", timeout=FIND_TIMEOUT_MS) or ""
     tag, input_type = element.evaluate("e => [e.tagName.toLowerCase(), (e.getAttribute('type') || '').toLowerCase()]")
     if role in ("checkbox", "radio", "switch") or (tag == "input" and input_type in ("checkbox", "radio")):
@@ -451,14 +532,8 @@ def fill_field(page: Page, element: Locator, value: str) -> str | None:
             return "already set"
         element.select_option(value, timeout=FIND_TIMEOUT_MS)   # an option whose value or label is `value`
     elif role in ("combobox", "button") or tag == "button":
-        if current_text(element, tag) == value:
+        if pick_option(page, element, tag, value):
             return "already set"
-        element.click(timeout=FIND_TIMEOUT_MS)
-        page.wait_for_timeout(SETTLE_MS // 2)
-        option = find_by_name(page, "option", value)
-        if option is None:
-            raise LookupError(f"option '{value}' not found")
-        option.click(timeout=FIND_TIMEOUT_MS)
     else:
         if current_text(element, tag) == value:
             return "already set"

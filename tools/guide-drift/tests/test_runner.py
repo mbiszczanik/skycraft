@@ -639,10 +639,20 @@ class ScreenNode(FakeElement):
                 self.unreadable -= 1
                 raise run.PlaywrightError("element was re-rendered")
             return list(self.section)
+        if script == run.CONTROL_JS:
+            return [self.tag, self.attrs.get("role", ""), False]
+        if "tagName" in script:                     # fill_field: [tag, type]
+            return [self.tag, self.attrs.get("type", "")]
         raise NotImplementedError(script)
 
     def aria_snapshot(self, timeout=None) -> str:
         return self.tree
+
+    def inner_text(self, timeout=None) -> str:
+        return self.text
+
+    def input_value(self, timeout=None) -> str:
+        return self.text
 
     def get_by_role(self, role, name=None, exact=None):
         return self.children.get_by_role(role, name=name, exact=exact)
@@ -734,14 +744,15 @@ class FindOnScreenTests(RunnerTestCase):
         super().setUp()
         (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
 
-    def act(self, screen: Screen, item: dict, label: str, answers=(), candidates=(), runner=None, page=None):
+    def act(self, screen: Screen, item: dict, label: str, answers=(), candidates=(), runner=None, page=None,
+            value=None):
         r = runner or run.Runner(page or FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
         step = {"id": "9.9.1", "title": "One", "items": [item], "images": []}
         clock = iter(range(0, 1_000_000, 3))               # 3 s pass between every look at the clock
         with mock.patch.object(run, "all_frames", lambda page: [screen]), \
                 mock.patch.object(run.time, "monotonic", lambda: next(clock)), \
                 mock.patch.object(run, "candidates_on_screen", return_value=list(candidates)):
-            return self.quietly(lambda: r.act_on_label(step, item, label)), r
+            return self.quietly(lambda: r.act_on_label(step, item, label, value)), r
 
     SEARCH = {"kind": "search", "labels": ["Microsoft Entra ID"], "line": 2}
     SEARCH_BOX = "Search resources, services, and docs (G+/)"
@@ -836,6 +847,64 @@ class FindOnScreenTests(RunnerTestCase):
     def test_a_closed_window_is_not_a_missing_search_box(self) -> None:
         with self.assertRaises(run.PageClosed):
             self.act(Screen(), self.SEARCH, self.ENTRA, page=FakePage(closed=True))
+
+    UPN = {"kind": "field", "label": "User principal name", "value": "x", "line": 4}
+    UPN_VALUE = "malfurion.stormrage@contoso.onmicrosoft.com"
+
+    def upn_screen(self, shown: str, offered=()) -> tuple[Screen, ScreenNode, ScreenNode]:
+        """The Portal's 'User principal name': a labelled <div> holding a text box, an '@' and a
+        domain combo box showing `shown`; opening the combo box lists `offered`."""
+        local = ScreenNode(tag="input")
+        domain = ScreenNode(attrs={"role": "combobox"}, text=shown)
+        screen = Screen()
+
+        def open_list() -> None:
+            for name in offered:
+                screen.add(("option", name, ScreenNode(on_click=lambda name=name: setattr(domain, "text", name))))
+        domain.on_click = open_list
+        container = ScreenNode(children=Screen(("textbox", "", local), ("text", "@", ScreenNode(interactive=False)),
+                                               ("combobox", "", domain)))
+        screen.add(("label", "User principal name", container),
+                   ("textbox", "User principal name", local))   # the container still wins: it holds the domain
+        return screen, local, domain
+
+    def test_a_user_principal_name_is_split_over_name_and_domain(self) -> None:
+        screen, local, domain = self.upn_screen("Contoso.onmicrosoft.com")    # preselected, other case
+        record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
+        self.assertEqual((record["outcome"], local.filled, domain.clicked), ("match", ["malfurion.stormrage"], 0))
+
+    def test_a_domain_not_shown_is_picked_from_the_combo_box(self) -> None:
+        screen, local, domain = self.upn_screen("fabrikam.example", offered=["fabrikam.example", "CONTOSO.onmicrosoft.com"])
+        record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
+        self.assertEqual((record["outcome"], local.filled, domain.clicked), ("match", ["malfurion.stormrage"], 1))
+        self.assertEqual(domain.text, "CONTOSO.onmicrosoft.com")
+
+    def test_a_domain_not_offered_is_unknown(self) -> None:
+        screen, _, domain = self.upn_screen("fabrikam.example", offered=["fabrikam.example"])
+        record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertIn("the domain combo box does not offer 'contoso.onmicrosoft.com'", record["observed"])
+
+    def test_a_labelled_container_with_one_text_box_fills_it(self) -> None:
+        inner = ScreenNode(tag="input")
+        screen = Screen(("label", "Display name", ScreenNode(children=Screen(("textbox", "", inner)))))
+        record, _ = self.act(screen, dict(self.UPN, label="Display name"), "Display name", value="Malfurion")
+        self.assertEqual((record["outcome"], inner.filled), ("match", ["Malfurion"]))
+
+    def test_any_other_labelled_container_is_unknown(self) -> None:
+        screen = Screen(("label", "Display name", ScreenNode(children=Screen(("textbox", "", ScreenNode(tag="input")),
+                                                                             ("textbox", "", ScreenNode(tag="input"))))))
+        record, _ = self.act(screen, dict(self.UPN, label="Display name"), "Display name", value="Malfurion")
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertIn("holds 2 text box(es) and 0 combo box(es)", record["observed"])
+
+    def test_a_text_box_of_the_label_is_preferred_to_a_container(self) -> None:
+        for second in ("textbox", "label"):          # named by role, or labelled as well
+            with self.subTest(second=second):
+                container, input_ = ScreenNode(), ScreenNode(tag="input")
+                screen = Screen(("label", "Display name", container), (second, "Display name", input_))
+                record, _ = self.act(screen, dict(self.UPN, label="Display name"), "Display name", value="Malfurion")
+                self.assertEqual((record["outcome"], input_.filled), ("match", ["Malfurion"]))
 
     def test_a_leading_plus_is_dropped_when_nothing_has_the_full_name(self) -> None:
         item = {"kind": "navigation", "labels": ["+ New user", "Create new user"], "line": 3}
