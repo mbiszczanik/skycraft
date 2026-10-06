@@ -46,25 +46,25 @@ For **Malfurion Stormrage**, verify:
 
 - [ ] Job title: Cloud Infrastructure Manager
 - [ ] Department: IT Operations
-- [ ] Office: Remote
-- [ ] Usage location: Set correctly
+- [ ] Company name: SkyCraft
+- [ ] Office location: Remote
 
 ---
 
 ## ✅ License & Feature Verification
 
-- [ ] At least one user has a license assigned
+- [ ] The license status of a user was reviewed (no assignment in this lab)
 - [ ] SSPR (Self-Service Password Reset) enabled
-- [ ] All users appear in "All Users" list
-- [ ] All groups appear in "All Groups" list
+- [ ] All users appear in "All users" list
+- [ ] All groups appear in "All groups" list
 
 ---
 
 ## ✅ Portal Navigation
 
 - [ ] Can access Entra ID from Azure Portal
-- [ ] Can navigate Users → All Users
-- [ ] Can navigate Groups → All Groups
+- [ ] Can navigate Users → All users
+- [ ] Can navigate Groups → All groups
 - [ ] Can access user properties
 - [ ] Can manage group memberships
 
