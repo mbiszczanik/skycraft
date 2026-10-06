@@ -71,7 +71,8 @@ class Redactor:
     principal name or GUID in a recording.
 
     Restored values are lower case, as the Portal shows domains and ids; a display name that
-    spells the prefix in another case ('Contoso') comes back as 'contoso'."""
+    spells the prefix in another case ('Contoso') comes back as 'contoso'. matcher() therefore
+    matches a restored name regardless of case."""
 
     DOMAIN = "[tenantdomain]"
     TENANT = "[tenantid]"
@@ -112,6 +113,16 @@ class Redactor:
         for _, token, value in reversed(self._pairs):
             text = text.replace(token, value)
         return text
+
+    def matcher(self, name: str) -> str | re.Pattern[str]:
+        """What to look a recorded name up by on screen. A name without tokens is returned as it
+        is, for an exact, case-sensitive match. A name restore() changed becomes a whole-string,
+        case-insensitive pattern, because the restored value is lower case and the screen may
+        not be: '[yourtenant] Ltd' must find 'Contoso Ltd'."""
+        restored = self.restore(name)
+        if restored == name:
+            return name
+        return re.compile("^" + re.escape(restored) + "$", re.IGNORECASE)
 
     def view_url(self, url: str) -> str:
         """The Portal view without the tenant pin ('#@<tenant>/'), query strings (before or inside

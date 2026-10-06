@@ -13,8 +13,9 @@ results.jsonl (one record per check, appended as the run goes), Step-X.Y.N.png (
 for manual cropping and anonymisation), summary.md. Only the recording is written back into
 the repository.
 
-The runner acts only on an element it can see in the window, and only on one: several matches
-are reported as unknown rather than guessed. It refuses to click or fill an element whose name
+The runner acts only on a visible element within the window's width (the Portal parks earlier
+blades off to the left; below the fold is fine, it scrolls there first), and only on one:
+several matches are reported as unknown rather than guessed. It refuses to click or fill an element whose name
 starts with Delete, Remove, Reset password, Revoke, Disable or Sign out unless the guide's own
 label does too.
 
@@ -116,34 +117,38 @@ class Ambiguous(LookupError):
     Portal blades stay in the DOM, and the first match in DOM order is often the wrong one."""
 
 
-def in_viewport(element: Locator, viewport: dict | None) -> bool:
-    """Whether any part of the element is inside the window. A blade the Portal has slid out of
-    view is still 'visible' to the DOM; it is not on screen, and acting on it is a guess."""
+def in_window_columns(element: Locator, viewport: dict | None) -> bool:
+    """Whether the element overlaps the window horizontally. The Portal parks earlier blades off
+    to the side (far left), where the DOM still calls them visible; acting on one is a guess.
+    Vertical position does not count: long forms and lists scroll, and the runner scrolls an
+    element into view before acting on it."""
+    if viewport is None:
+        return True
     box = element.bounding_box(timeout=1000)
     if box is None:
         return False
-    if viewport is None:
-        return True
-    return (box["x"] < viewport["width"] and box["x"] + box["width"] > 0
-            and box["y"] < viewport["height"] and box["y"] + box["height"] > 0)
+    return box["x"] + box["width"] > 0 and box["x"] < viewport["width"]
 
 
 def visible_in(locator: Locator, viewport: dict | None) -> list[Locator]:
-    """The elements of `locator` that are visible and inside the window. is_visible() does not
-    wait; a frame that goes away meanwhile raises PlaywrightError, which callers handle per frame."""
+    """The elements of `locator` that are visible and, when `viewport` is given, overlap the
+    window horizontally. is_visible() does not wait; a frame that goes away meanwhile raises
+    PlaywrightError, which callers handle per frame."""
     found = []
     for index in range(locator.count()):
         element = locator.nth(index)
-        if element.is_visible() and in_viewport(element, viewport):
+        if element.is_visible() and in_window_columns(element, viewport):
             found.append(element)
     return found
 
 
-def visible_across_frames(page: Page, make_locator: Callable[[Frame], Locator]) -> list[Locator]:
+def visible_across_frames(page: Page, make_locator: Callable[[Frame], Locator],
+                          anywhere: bool = False) -> list[Locator]:
+    """Visible matches in every frame; outside the window's columns too when `anywhere`."""
     found: list[Locator] = []
     for frame in all_frames(page):
         try:
-            found += visible_in(make_locator(frame), page.viewport_size)
+            found += visible_in(make_locator(frame), None if anywhere else page.viewport_size)
         except PlaywrightError:     # the frame detached or navigated: nothing to act on there
             continue
     return found
@@ -159,7 +164,9 @@ def unique_visible(page: Page, make_locator: Callable[[Frame], Locator]) -> Loca
 
 
 def text_on_screen(page: Page, text: str) -> bool:
-    return bool(visible_across_frames(page, lambda f: f.get_by_text(text, exact=False)))
+    """Whether the text is visible anywhere on the page: presence, not position, so a created
+    group listed below the fold still counts."""
+    return bool(visible_across_frames(page, lambda f: f.get_by_text(text, exact=False), anywhere=True))
 
 
 def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
@@ -187,8 +194,9 @@ def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
         return None
 
 
-def find_by_name(page: Page, role: str | None, name: str) -> Locator | None:
-    """The element a decision chose, by role and name. Raises Ambiguous rather than guess."""
+def find_by_name(page: Page, role: str | None, name: str | re.Pattern[str]) -> Locator | None:
+    """The element a decision chose, by role and name: a string matches exactly and case-
+    sensitively, a pattern (Redactor.matcher) as written. Raises Ambiguous rather than guess."""
     if role:
         return unique_visible(page, lambda f: f.get_by_role(role, name=name, exact=True))
     return unique_visible(page, lambda f: f.get_by_text(name, exact=True))
@@ -470,7 +478,7 @@ class Runner:
                     pending = entry
             if decision.name and decision.severity != "blocking":
                 try:
-                    element = find_by_name(self.page, decision.role, self.redactor.restore(decision.name))
+                    element = find_by_name(self.page, decision.role, self.redactor.matcher(decision.name))
                 except Ambiguous as error:
                     record.update(outcome="unknown", observed=f"ambiguous: {error} named '{decision.name}'")
                     return record
@@ -492,6 +500,8 @@ class Runner:
             return record
         note = None
         try:
+            # Found anywhere in the window's columns, maybe below the fold: bring it into view first.
+            element.scroll_into_view_if_needed(timeout=FIND_TIMEOUT_MS)
             if element.is_disabled(timeout=FIND_TIMEOUT_MS):     # do not wait out a disabled control
                 record.update(outcome="unknown", observed=f"disabled: '{acted_on}'")
                 return record

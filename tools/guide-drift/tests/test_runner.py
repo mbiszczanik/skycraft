@@ -231,8 +231,13 @@ class FakeElement:
         self.fail = fail
         self.disabled = disabled
         self.clicked = 0
+        self.calls: list[str] = []
+
+    def scroll_into_view_if_needed(self, timeout=None) -> None:
+        self.calls.append("scroll")
 
     def click(self, timeout=None) -> None:
+        self.calls.append("click")
         if self.fail:
             raise self.fail
         self.clicked += 1
@@ -262,13 +267,27 @@ class DecisionRecordingTests(RunnerTestCase):
     def act(self, answers, element, label="+ New group", exact=None):
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
         candidates = [run.Candidate("button", "New group"), run.Candidate("link", "Groups"),
-                      run.Candidate("button", "Delete group")]
+                      run.Candidate("button", "Delete group"), run.Candidate("link", "Contoso Ltd")]
         with mock.patch.object(run, "find_exact", return_value=exact), \
                 mock.patch.object(run, "candidates_on_screen", return_value=candidates), \
-                mock.patch.object(run, "find_by_name", return_value=element):
+                mock.patch.object(run, "find_by_name", return_value=element) as self.find_by_name:
             record = self.quietly(lambda: r.act_on_label(self.STEP, self.STEP["items"][0], label))
         saved = json.loads((self.tmp / "rec.json").read_text(encoding="utf-8"))
         return record, saved["steps"].get("9.9.1", {}).get("labels", {})
+
+    def test_the_element_is_scrolled_into_view_before_the_click(self) -> None:
+        element = FakeElement()
+        self.act(["1"], element)
+        self.assertEqual(element.calls, ["scroll", "click"])
+        self.assertEqual(self.find_by_name.call_args.args[1:], ("button", "New group"))   # plain: exact
+
+    def test_a_redacted_choice_is_looked_up_regardless_of_case(self) -> None:
+        record, labels = self.act(["4"], FakeElement())
+        self.assertEqual(labels["+ New group"]["name"], "[yourtenant] Ltd")    # what the recording keeps
+        role, name = self.find_by_name.call_args.args[1:]
+        self.assertEqual(role, "link")
+        self.assertIsNotNone(name.search("Contoso Ltd"))                      # what the screen shows
+        self.assertIsNone(name.search("Contoso Ltd 2"))
 
     def test_a_destructive_element_is_refused_unless_the_guide_names_one(self) -> None:
         element = FakeElement()

@@ -52,6 +52,19 @@ class RedactorTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.redactor.redact(text), text)
 
+    def test_matcher_keeps_plain_names_exact(self) -> None:
+        self.assertEqual(self.redactor.matcher("New group"), "New group")
+
+    def test_matcher_matches_a_restored_name_whole_and_regardless_of_case(self) -> None:
+        pattern = self.redactor.matcher("[yourtenant] Ltd")
+        for name in ("Contoso Ltd", "contoso ltd", "CONTOSO LTD"):
+            with self.subTest(name=name):
+                self.assertIsNotNone(pattern.search(name))
+        for name in ("Contoso Ltd 2", "My Contoso Ltd"):
+            with self.subTest(name=name):
+                self.assertIsNone(pattern.search(name))
+        self.assertIsNotNone(self.redactor.matcher(f"{TOKEN} (Guest)").search("Me@Example.com (Guest)"))
+
     def test_short_tenant_prefix_is_not_redacted(self) -> None:
         redactor = Redactor("abc.onmicrosoft.com", TENANT)
         self.assertEqual(redactor.redact("abc and abc.onmicrosoft.com"), "abc and [tenantdomain]")
