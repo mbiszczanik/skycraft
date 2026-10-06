@@ -1504,13 +1504,13 @@ git commit -m "feat(guide-drift): seed the lab 1.1 recording and test recordings
 Local prerequisite, once: `python -m pip install -r tools/guide-drift/requirements.txt` and
 `python -m playwright install chromium`.
 
-- [ ] **Step 1: requirements.txt**
+- [x] **Step 1: requirements.txt**
 
 ```text
 playwright>=1.49
 ```
 
-- [ ] **Step 2: Write run.py: arguments, browser, sign-in, guards**
+- [x] **Step 2: Write run.py: arguments, browser, sign-in, guards**
 
 Create `tools/guide-drift/run.py`:
 
@@ -1668,7 +1668,7 @@ def open_portal(pw, args: argparse.Namespace, recording: dict) -> tuple[object, 
     return browser, page
 ```
 
-- [ ] **Step 3: Smoke-test the sign-in and guards by hand**
+- [x] **Step 3: Smoke-test the sign-in and guards by hand**
 
 Run from the worktree root, with the subscription's tenant values at hand (the entry point will
 compute these in Task 10; for now paste them):
@@ -1680,7 +1680,7 @@ python -c "import sys; sys.path.insert(0,'tools/guide-drift'); import run; print
 Expected: `imports ok`. If `aria_snapshot` is missing, Playwright is older than 1.49:
 `python -m pip install -U playwright; python -m playwright install chromium`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```powershell
 git add tools/guide-drift/requirements.txt tools/guide-drift/run.py
