@@ -2784,9 +2784,9 @@ PR body follows `.github/PULL_REQUEST_TEMPLATE.md`:
   `tests/Guide-Drift-Python.Tests.ps1`, exit codes 254/255/1, the failure and resume prompts,
   the destructive-name deny-list, cleanup only after a finished run, the Graph tenant pin.
 - The answers to Task 12 Step 2 items 1-12.
-- The run's summary.md as the findings list, and the guide findings for a separate (gated) PR:
-  1.1.7's member is not bold; 1.1.5's invitation message is a blockquote; plus anything the run
-  found.
+- The run's summary.md as the findings list. Guide and lab-script findings are filed as their
+  own issues (#193-#197; lab 1.1: #193, #194, #195); file anything new the run finds the same way.
+  Follow-ups to the tool: #198-#203, and #204 for recording labs 1.2-3.2.
 - What the run leaves in the tenant (the invited guest, the SSPR scope, the licence).
 - No screenshots (they are not anonymised). No "Generated with" footer, no Co-Authored-By.
 
