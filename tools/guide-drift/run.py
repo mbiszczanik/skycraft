@@ -450,6 +450,18 @@ def search_portal(page: Page, label: str, diagnose: Callable[[str], None] | None
     return None
 
 
+def stays_disabled(page: Page, element: Locator) -> bool:
+    """Whether the element is still disabled after FIND_TIMEOUT_MS. The Portal greys controls out
+    for a moment while a blade loads ('Create new user' under '+ New user'), so one look is not
+    enough; is_disabled() itself returns at once, so it is asked again every 250 ms."""
+    deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
+    while element.is_disabled(timeout=FIND_TIMEOUT_MS):
+        if time.monotonic() >= deadline:
+            return True
+        page.wait_for_timeout(250)
+    return False
+
+
 def find_by_name(page: Page, role: str | None, name: str | re.Pattern[str]) -> Locator | None:
     """The element a decision chose, by role and name: a string matches exactly and case-
     sensitively, a pattern (Redactor.matcher) as written. Raises Ambiguous rather than guess."""
@@ -891,7 +903,7 @@ class Runner:
         try:
             # Found anywhere in the window's columns, maybe below the fold: bring it into view first.
             element.scroll_into_view_if_needed(timeout=FIND_TIMEOUT_MS)
-            if element.is_disabled(timeout=FIND_TIMEOUT_MS):     # do not wait out a disabled control
+            if stays_disabled(self.page, element):     # never click() into a 30 s Playwright wait
                 record.update(outcome="unknown", observed=f"disabled: '{acted_on}'")
                 return record
             if kind == "field":

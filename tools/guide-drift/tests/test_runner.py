@@ -263,9 +263,10 @@ class StateTests(RunnerTestCase):
 
 
 class FakeElement:
-    def __init__(self, fail: Exception | None = None, disabled: bool = False) -> None:
+    def __init__(self, fail: Exception | None = None, disabled: bool = False, disabled_for: int = 0) -> None:
         self.fail = fail
-        self.disabled = disabled
+        self.disabled = disabled              # for good
+        self.disabled_for = disabled_for      # for this many looks, as while a blade loads
         self.clicked = 0
         self.calls: list[str] = []
 
@@ -279,6 +280,10 @@ class FakeElement:
         self.clicked += 1
 
     def is_disabled(self, timeout=None) -> bool:
+        self.calls.append("is_disabled")
+        if self.disabled_for:
+            self.disabled_for -= 1
+            return True
         return self.disabled
 
 
@@ -314,8 +319,10 @@ class DecisionRecordingTests(RunnerTestCase):
         candidates = [run.Candidate("button", "New group"), run.Candidate("link", "Groups"),
                       run.Candidate("button", "Delete group"), run.Candidate("link", "Contoso Ltd"),
                       run.Candidate("menuitem", "Bulk delete")]
+        clock = iter(range(0, 1_000_000, 1))               # 1 s passes between every look at the clock
         with mock.patch.object(run, "find_exact", return_value=exact), \
                 mock.patch.object(run, "candidates_on_screen", return_value=candidates), \
+                mock.patch.object(run.time, "monotonic", lambda: next(clock)), \
                 mock.patch.object(run, "find_by_name", return_value=element) as self.find_by_name:
             record = self.quietly(lambda: r.act_on_label(self.STEP, self.STEP["items"][0], label))
         saved = json.loads((self.tmp / "rec.json").read_text(encoding="utf-8"))
@@ -324,7 +331,7 @@ class DecisionRecordingTests(RunnerTestCase):
     def test_the_element_is_scrolled_into_view_before_the_click(self) -> None:
         element = FakeElement()
         self.act(["1"], element)
-        self.assertEqual(element.calls, ["scroll", "click"])
+        self.assertEqual(element.calls, ["scroll", "is_disabled", "click"])
         self.assertEqual(self.find_by_name.call_args.args[1:], ("button", "New group"))   # plain: exact
 
     def test_a_name_that_is_the_label_once_restored_needs_no_decision(self) -> None:
@@ -363,11 +370,19 @@ class DecisionRecordingTests(RunnerTestCase):
         record, _ = self.act([], None, label="Password reset", exact=element)
         self.assertEqual((record["outcome"], record["observed"], element.clicked), ("match", "Password reset", 1))
 
-    def test_a_disabled_element_is_unknown_without_waiting(self) -> None:
+    def test_an_element_that_stays_disabled_is_unknown_without_a_click(self) -> None:
         element = FakeElement(disabled=True)
         record, labels = self.act(["1"], element)
         self.assertEqual((record["outcome"], record["observed"]), ("unknown", "disabled: 'New group'"))
         self.assertEqual((element.clicked, labels), (0, {}))
+        self.assertGreater(element.calls.count("is_disabled"), 1)               # asked again until the deadline
+        self.assertNotIn("click", element.calls)
+
+    def test_an_element_greyed_out_while_the_blade_loads_is_clicked_once_enabled(self) -> None:
+        element = FakeElement(disabled_for=3)
+        record, _ = self.act(["1"], element)
+        self.assertEqual((record["outcome"], element.clicked), ("drift", 1))     # 'New group' for '+ New group'
+        self.assertEqual(element.calls, ["scroll"] + ["is_disabled"] * 4 + ["click"])
 
     def test_a_chosen_element_is_recorded_once_the_click_went_through(self) -> None:
         record, labels = self.act(["1"], FakeElement())
