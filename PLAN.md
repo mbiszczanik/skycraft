@@ -99,6 +99,10 @@ CONTRIBUTING.md                               + one sentence: a guide edit that 
 }
 ```
 
+A `Name | Value` or `Tag | Value` table is a list of tags, not labelled fields: each row is
+`{ "kind": "tag", "name": "Environment", "value": "Development", "line": 200 }`, typed into the
+Portal's Tags grid by row (Task 4 parses it, Task 8 fills it).
+
 `line` is 1-based and points at the guide line the item came from, so a proposed edit can name it.
 `images` at the root is every `*.png` under the guide's `images/` directory with its pixel width;
 `images` per step is the paths referenced inside that step's section.
@@ -153,7 +157,7 @@ observable, or `{ "text": "..." }` for text the runner looks for after the step.
   "screenshot": "Step-1.1.6.png" }
 ```
 
-`kind` is `navigation | action | field | result | screenshot | readability`. `outcome` is
+`kind` is `navigation | action | field | tag | result | screenshot | readability`. `outcome` is
 `match | drift | unknown | skipped`. `severity` is `blocking | misleading | cosmetic | null`.
 `category` is `stale` (a `screenshot` record for a step that has both an image and a drift) or
 `unreadable` (a `readability` record for an image wider than 1722 px), otherwise `null`. Exit code
@@ -832,6 +836,7 @@ showed these gaps, each with a real example:
 | Expected Result inside a list item, or with a qualifier before the colon | 1.3:144 `6. **Expected Result**: Shows ...`; 2.2:607 `**Expected Result** (if ...):` | missed |
 | Several Expected Results in one step (one per option) | probe | the last one wins; Option 1's should |
 | Lettered options | 3.2:219 `#### Option A:` / `#### Option B:` | both options read |
+| Tag tables: every `Name \| Value` and `Tag \| Value` table (72 fields in 8 guides) follows "click **Tags**" | 1.3 `Add the following tags: \| Name \| Value \| Environment \| Development \|` | emitted as fields labelled `Environment`, `Project`; the runner would look for a control with that label 72 times |
 | Fence closing | a 4-backtick fence containing a 3-backtick one | inner content leaks; CommonMark closes only on a run of the same character at least as long as the opener, followed by nothing but whitespace |
 
 **Pester 5 scoping and encoding (learned in Task 2).** `-ForEach` case data is built at file
@@ -890,6 +895,19 @@ echo inner
 ````
 
 1. Click **AfterFence**
+
+### Step 9.9.4: Tags
+
+1. Click **Tags**
+
+| Name        | Value         |
+| ----------- | ------------- |
+| Environment | `Development` |
+| Project     | SkyCraft      |
+
+| Field | Value  |
+| ----- | ------ |
+| Owner | `ops`  |
 '@
         $script:Real = ConvertFrom-GuideFixture -Markdown $fixture
     }
@@ -918,6 +936,14 @@ echo inner
         $labels = @($script:Real.steps[1].items | ForEach-Object { $_.labels })
         $labels | Should -Be @('Generate new key pair')
         $script:Real.steps[1].expected | Should -Be 'Option A result.'
+    }
+
+    It 'reads Name | Value and Tag | Value tables as tag pairs, and Field | Value as fields' {
+        $items = @($script:Real.steps[3].items)
+        @($items.kind) | Should -Be @('action', 'tag', 'tag', 'field')
+        @(($items | Where-Object kind -eq 'tag').name)  | Should -Be @('Environment', 'Project')
+        @(($items | Where-Object kind -eq 'tag').value) | Should -Be @('Development', 'SkyCraft')
+        ($items | Where-Object kind -eq 'field').label  | Should -Be 'Owner'
     }
 
     It 'closes a fence only on a run at least as long as its opener' {
@@ -958,7 +984,12 @@ the table above. Quote the failures.
    outside the other options' bodies OR, when Option 1/A has none, the first Expected Result
    anywhere in the step (the standard places a single one after Option 3). Make the
    `Option A result.` test and the Task 2 `Share appears.` test both pass.
-5. Fences: in `strip_hidden`, record the opener's character and run length; close only on a line
+5. Tags: a form table whose first header cell (markup stripped, case-insensitive) is `name` or
+   `tag` emits `{"kind": "tag", "name": <first cell, cleaned like a label>, "value": <second
+   cell through strip_value_markup>, "line": n}` per row; `field`, `property` and `setting`
+   tables keep emitting fields. A step whose only items are tags is still `portal: true`.
+   Document the tag kind in the module docstring.
+6. Fences: in `strip_hidden`, record the opener's character and run length; close only on a line
    whose fence run uses the same character, is at least as long, and is followed only by
    whitespace (no info string).
 
@@ -996,6 +1027,9 @@ $GuideCases = Get-ChildItem -Path $DiscoveryRepoRoot -Directory -Filter 'module-
         if (-not (Test-Path -LiteralPath $guide)) { return }
         $text  = Get-Content -Raw -LiteralPath $guide
         $text  = [regex]::Replace($text, '(?ms)^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1[ \t]*\r?$', '')
+        # Closed HTML comments only (non-greedy): an unclosed '<!--' leaves later headings counted
+        # here while the parser hides them, so the id comparison below catches it.
+        $text  = [regex]::Replace($text, '(?s)<!--.*?-->', '')
         $headingIds = @([regex]::Matches($text, '(?m)^###[ \t]+Step[ \t]+(\d+\.\d+\.\d+):') | ForEach-Object { $_.Groups[1].Value })
         $out = [System.IO.Path]::GetTempFileName()
         try {
@@ -1328,7 +1362,7 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
         }
         $labelsByStep = @{}
         foreach ($step in @($parsed.steps)) {
-            $labelsByStep[$step.id] = @($step.items | ForEach-Object { if ($_.kind -eq 'field') { $_.label } else { $_.labels } })
+            $labelsByStep[$step.id] = @($step.items | ForEach-Object { if ($_.kind -eq 'field') { $_.label } elseif ($_.kind -eq 'tag') { $_.name } else { $_.labels } })
         }
         $missing = @(
             foreach ($prop in $recording.steps.PSObject.Properties) {
@@ -1703,6 +1737,26 @@ def fill_field(page: Page, element, value: str) -> None:
     page.wait_for_timeout(SETTLE_MS // 2)
 
 
+def fill_tag(page: Page, name: str, value: str) -> None:
+    """The Portal's Tags grid ends with an empty row whose inputs are named 'Name' and 'Value';
+    typing into it adds the next empty row. Fill the last of each. The exact roles are confirmed
+    in the first supervised run (Task 12); until then a miss is reported as unknown, not guessed."""
+    for frame in all_frames(page):
+        names = frame.get_by_role("combobox", name="Name", exact=True)
+        if names.count() == 0:
+            names = frame.get_by_label("Name", exact=True)
+        values = frame.get_by_role("combobox", name="Value", exact=True)
+        if values.count() == 0:
+            values = frame.get_by_label("Value", exact=True)
+        if names.count() > 0 and values.count() > 0:
+            names.last.fill(name)
+            page.wait_for_timeout(SETTLE_MS // 2)
+            values.last.fill(value)
+            page.wait_for_timeout(SETTLE_MS // 2)
+            return
+    raise LookupError("Tags grid not found (no inputs named 'Name' and 'Value')")
+
+
 class Runner:
     def __init__(self, page: Page, steps: dict, recording: dict, args: argparse.Namespace) -> None:
         self.page = page
@@ -1790,7 +1844,15 @@ class Runner:
         entry = self.step_entry(step)
         step_failed = False
         for item in step["items"]:
-            if item["kind"] == "field":
+            if item["kind"] == "tag":
+                record = self.new_record(step, "tag", item["name"])
+                try:
+                    fill_tag(self.page, item["name"], resolve_value(self.recording, step, item["name"], item["value"]))
+                    record.update(outcome="match", observed=item["value"])
+                except (PlaywrightTimeout, LookupError) as error:
+                    record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
+                records = [record]
+            elif item["kind"] == "field":
                 value = resolve_value(self.recording, step, item["label"], item["value"])
                 record = self.act_on_label(step, item["label"], "field", item["line"], value)
                 records = [record]
