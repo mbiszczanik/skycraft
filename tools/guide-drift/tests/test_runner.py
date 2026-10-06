@@ -66,15 +66,26 @@ class Answers:
 
 
 class ScriptedRunner(run.Runner):
-    """run_step succeeds unless the step id is in `failing`; records the order of steps run."""
+    """run_step succeeds unless the step id is in `failing` (fails quietly) or `unknown` (writes
+    an unknown record and fails); a step in `interrupt` raises KeyboardInterrupt, as Ctrl+C
+    would. Records the order of steps run."""
 
-    def __init__(self, *args, failing=(), **kwargs) -> None:
+    def __init__(self, *args, failing=(), unknown=(), interrupt=(), **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.failing = set(failing)
+        self.unknown = set(unknown)
+        self.interrupt = set(interrupt)
         self.ran: list[str] = []
 
     def run_step(self, step: dict) -> bool:
         self.ran.append(step["id"])
+        if step["id"] in self.interrupt:
+            raise KeyboardInterrupt
+        if step["id"] in self.unknown:
+            record = self.new_record(step, "action", "Missing button")
+            record.update(outcome="unknown", observed="not found")
+            self.write(record)
+            return False
         return step["id"] not in self.failing
 
 
@@ -94,9 +105,9 @@ class RunnerTestCase(unittest.TestCase):
         values.update(overrides)
         return argparse.Namespace(**values)
 
-    def runner(self, answers=(), failing=(), **overrides) -> ScriptedRunner:
-        return ScriptedRunner(None, STEPS, self.recording, self.args(**overrides),
-                              ask=Answers(*answers), failing=failing)
+    def runner(self, answers=(), failing=(), unknown=(), interrupt=(), state=None, **overrides) -> ScriptedRunner:
+        return ScriptedRunner(None, STEPS, self.recording, self.args(**overrides), ask=Answers(*answers),
+                              state=state, failing=failing, unknown=unknown, interrupt=interrupt)
 
     def quietly(self, call):
         with redirect_stdout(io.StringIO()):
@@ -249,6 +260,12 @@ class FakeElement:
 class FakePage:
     url = "https://portal.azure.com/#@contoso.onmicrosoft.com/view/Two?x=1"
 
+    def __init__(self, closed: bool = False) -> None:
+        self.closed = closed
+
+    def is_closed(self) -> bool:
+        return self.closed
+
     def wait_for_timeout(self, ms) -> None:
         pass
 
@@ -280,6 +297,13 @@ class DecisionRecordingTests(RunnerTestCase):
         self.act(["1"], element)
         self.assertEqual(element.calls, ["scroll", "click"])
         self.assertEqual(self.find_by_name.call_args.args[1:], ("button", "New group"))   # plain: exact
+
+    def test_a_name_that_is_the_label_once_restored_needs_no_decision(self) -> None:
+        element = FakeElement()
+        record, labels = self.act([], element, label="Contoso Ltd")     # no answers: a prompt would fail
+        self.assertEqual((record["outcome"], record["severity"]), ("match", None))
+        self.assertEqual((element.clicked, labels), (1, {}))             # exact: nothing to record
+        self.assertIsNotNone(self.find_by_name.call_args.args[2].search("Contoso Ltd"))
 
     def test_a_redacted_choice_is_looked_up_regardless_of_case(self) -> None:
         record, labels = self.act(["4"], FakeElement())
@@ -388,6 +412,163 @@ class SummaryTests(RunnerTestCase):
         for _ in range(300):
             self.add("action", "x", outcome="unknown", observed="not found")
         self.assertEqual(self.quietly(self.r.finish), 250)
+
+
+class OneRunAcrossResumeTests(RunnerTestCase):
+    def stopped_run(self, **script) -> dict:
+        r = self.runner(run_id="first", **script)
+        try:
+            self.quietly(r.run)
+        except KeyboardInterrupt:
+            pass                     # main() would return ABORTED here, with the state kept
+        return run.load_state(self.tmp / "state.json", LAB)
+
+    def summary(self) -> str:
+        return (self.tmp / "logs" / "first" / "summary.md").read_text(encoding="utf-8")
+
+    def test_a_resumed_run_counts_and_lists_what_the_stopped_part_found(self) -> None:
+        state = self.stopped_run(answers=["q"], unknown={"9.9.4"})       # step 3 of the portal steps
+        self.assertEqual((state["runId"], state["inFlight"]), ("first", "9.9.4"))
+        r = self.runner(answers=["y"], resume=True, run_id="second", state=state)
+        self.assertEqual(r.run_dir, self.tmp / "logs" / "first")
+        self.assertEqual(self.quietly(lambda: r.run(state)), 1)
+        self.assertIn("- step 9.9.4 action **Missing button**: not found", self.summary())
+        self.assertFalse((self.tmp / "logs" / "second").exists())
+        self.assertEqual(sum(1 for x in r.records if x["kind"] == "readability"), 1)   # not checked twice
+        self.assertEqual(self.state()["runId"], "first")
+
+    def test_a_step_done_by_hand_keeps_its_findings_across_a_stop(self) -> None:
+        state = self.stopped_run(answers=["c"], unknown={"9.9.4"}, interrupt={"9.9.5"})
+        self.assertEqual((state["completed"], state["inFlight"]), (["9.9.1", "9.9.2", "9.9.4"], "9.9.5"))
+        r = self.runner(answers=["n"], resume=True, run_id="second", state=state)
+        self.assertEqual(self.quietly(lambda: r.run(state)), 1)
+        summary = self.summary()
+        self.assertIn("- step 9.9.4 action **Missing button**: not found", summary)
+        self.assertIn("## done by hand (1)\n- step 9.9.4", summary)
+
+    def test_a_redone_step_replaces_its_stopped_attempt(self) -> None:
+        state = self.stopped_run(answers=["q"], unknown={"9.9.4"})
+        r = self.runner(answers=["n"], resume=True, run_id="second", state=state)
+        self.assertEqual(self.quietly(lambda: r.run(state)), 0)
+        self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+        results = (self.tmp / "logs" / "first" / "results.jsonl").read_text(encoding="utf-8")
+        self.assertIn('"outcome": "unknown"', results)      # the file keeps both attempts
+
+    def test_a_cut_short_last_line_is_skipped(self) -> None:
+        folder = self.tmp / "logs" / "first"
+        folder.mkdir(parents=True)
+        (folder / "results.jsonl").write_text('{"step": "9.9.1", "outcome": "match", "kind": "action"}\n{"step": "9.9',
+                                               encoding="utf-8")
+        r = self.runner(resume=True, state={"runId": "first", "lab": LAB, "completed": [], "inFlight": None})
+        self.assertEqual([x["step"] for x in r.records], ["9.9.1"])
+
+
+class GuardAndLookupTests(RunnerTestCase):
+    def test_tree_text_reads_text_and_text_boxes_but_never_link_targets(self) -> None:
+        snapshot = ('- link "Switch directory":\n'
+                    '  - /url: "#@0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/view/Overview"\n'
+                    '- text: Tenant ID\n'
+                    '- textbox "Tenant ID" [disabled]: 11111111-2222-3333-4444-555555555555\n'
+                    '- textbox "Primary domain": "Contoso.onmicrosoft.com"\n')
+        tree = run.tree_text(snapshot)
+        self.assertNotIn("0a1b2c3d", tree)
+        self.assertIn("11111111-2222-3333-4444-555555555555", tree)
+        self.assertIn("contoso.onmicrosoft.com", tree)
+        self.assertIn("tenant id", tree)
+
+    def test_destructive_words_anywhere_in_the_name(self) -> None:
+        for name in ("Delete", "Delete group", "Bulk delete", "Reset password", "Block sign in", "Purge",
+                     "Sign out", "Remove member"):
+            with self.subTest(name=name):
+                self.assertIsNotNone(run.DESTRUCTIVE.search(name))
+        for name in ("Deleted users", "New group", "Blocked", "Signed out", "Removal policy"):
+            with self.subTest(name=name):
+                self.assertIsNone(run.DESTRUCTIVE.search(name))
+
+    def test_an_element_that_cannot_be_inspected_still_counts(self) -> None:
+        class Element:
+            def __init__(self, fails: bool) -> None:
+                self.fails = fails
+
+            def is_visible(self) -> bool:
+                if self.fails:
+                    raise run.PlaywrightError("element went away")
+                return True
+
+            def bounding_box(self, timeout=None) -> dict:
+                return {"x": 10, "y": 5000, "width": 50, "height": 20}
+
+        class Locator:
+            items = [Element(False), Element(True)]
+
+            def count(self) -> int:
+                return len(self.items)
+
+            def nth(self, index: int):
+                return self.items[index]
+
+        self.assertEqual(len(run.visible_in(Locator(), {"width": 1440, "height": 900})), 2)
+
+    def test_same_after_restore(self) -> None:
+        r = self.runner()
+        tenant = run.Candidate("link", "[yourtenant] Ltd")
+        self.assertIs(r.same_after_restore([run.Candidate("button", "New group"), tenant], "Contoso Ltd"), tenant)
+        upn = run.Candidate("cell", "khadgar.archmage@[tenantdomain]")
+        self.assertIs(r.same_after_restore([upn], "khadgar.archmage@[yourtenant].onmicrosoft.com"), upn)
+        self.assertIsNone(r.same_after_restore([run.Candidate("button", "New Group")], "New group"))   # plain case
+        self.assertIsNone(r.same_after_restore([tenant, run.Candidate("cell", "[yourtenant] Ltd")], "Contoso Ltd"))
+        self.assertIsNone(r.same_after_restore([run.Candidate("link", "[yourtenant] Ltd", count=2)], "Contoso Ltd"))
+
+    def test_wait_for_sign_in_says_it_is_still_waiting_every_minute(self) -> None:
+        class Page:
+            url = "https://login.microsoftonline.com/common/oauth2"
+            waits = 0
+
+            def wait_for_timeout(self, ms) -> None:
+                self.waits += 1
+                if self.waits == 4:
+                    self.url = "https://portal.azure.com/#view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Overview"
+
+        clock = iter(range(0, 10_000, 31))                  # 31 s pass between every look at the clock
+        said: list[str] = []
+        with mock.patch.object(run.time, "monotonic", lambda: next(clock)), \
+                mock.patch.object(run, "visible_across_frames", lambda page, make, anywhere=False: ["Tenant ID"]
+                                  if page.url.startswith(run.PORTAL) else []):
+            run.wait_for_sign_in(Page(), "t", say=said.append)
+        self.assertEqual(sum("Still waiting" in line for line in said), 2)
+
+
+class StopTests(RunnerTestCase):
+    def test_a_closed_window_stops_before_the_candidate_prompt(self) -> None:
+        r = run.Runner(FakePage(closed=True), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "items": [], "images": []}
+        with mock.patch.object(run, "find_exact", return_value=None), self.assertRaises(run.PageClosed):
+            r.act_on_label(step, {"kind": "action", "line": 1}, "+ New group")
+        self.assertEqual(r.ask.prompts, [])
+
+    def test_main_reports_a_failure_to_open_the_portal_as_not_started(self) -> None:
+        steps = dict(STEPS)
+        (self.tmp / "steps.json").write_text(json.dumps(steps), encoding="utf-8")
+        argv = ["--steps", str(self.tmp / "steps.json"), "--recording", str(self.tmp / "rec.json"),
+                "--log-dir", str(self.tmp / "logs"), "--run-id", "x", "--tenant-id", "t", "--tenant-domain", "d",
+                "--state", str(self.tmp / "state.json"), "--auth-state", str(self.tmp / "auth.json")]
+
+        class Playwright:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc) -> bool:
+                return False
+
+        class Console(io.StringIO):
+            def reconfigure(self, **kwargs) -> None:
+                pass
+
+        out = Console()
+        with mock.patch.object(run, "sync_playwright", Playwright), \
+                mock.patch.object(run, "open_portal", side_effect=OSError("disk full")), redirect_stdout(out):
+            self.assertEqual(run.main(argv), run.NOT_STARTED)
+        self.assertIn("Could not open the Portal: OSError: disk full", out.getvalue())
 
 
 if __name__ == "__main__":

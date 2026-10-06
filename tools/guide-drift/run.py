@@ -15,14 +15,16 @@ the repository.
 
 The runner acts only on a visible element within the window's width (the Portal parks earlier
 blades off to the left; below the fold is fine, it scrolls there first), and only on one:
-several matches are reported as unknown rather than guessed. It refuses to click or fill an element whose name
-starts with Delete, Remove, Reset password, Revoke, Disable or Sign out unless the guide's own
-label does too.
+several matches are reported as unknown rather than guessed. It refuses to click or fill an
+element whose name contains the word delete, remove, reset, revoke, disable, block, purge or
+sign out, unless the guide's own label does too.
 
 When a step does not go through, the person chooses: finish it by hand and continue, skip the
 rest of the lab, or stop and keep the state. --state records the completed steps and the step a
 -Resume starts at (the one in progress, or the one that failed); a resume first asks whether
 that step finished. A run that ends normally marks the state finished, and it cannot be resumed.
+A resumed run is the same run: it keeps the state's run id (ignoring --run-id), writes into the
+same --log-dir/<run id>/ folder, and its summary and exit code cover every step of both parts.
 
 Exit code: blocking drifts plus unknowns, capped at 250, when the run ends normally; 254 when a
 precondition, a guard or the state stopped it before the first step; 255 when it stopped mid-run
@@ -62,7 +64,7 @@ CANDIDATE_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "t
 FIELD_ROLES = ("textbox", "combobox", "checkbox", "radio")
 # Never acted on unless the guide itself names such an element: a wrong replay or a mistyped
 # number must not delete a user or sign the person out halfway through a lab.
-DESTRUCTIVE = re.compile(r"^(Delete|Remove|Reset password|Revoke|Disable|Sign out)", re.IGNORECASE)
+DESTRUCTIVE = re.compile(r"\b(delete|remove|reset|revoke|disable|block|purge|sign out)\b", re.IGNORECASE)
 CHECKED = {"✅", "checked", "enabled", "yes", "on"}        # ✅ is the guides' check mark
 UNCHECKED = {"☐", "unchecked", "disabled", "no", "off"}   # ☐ is the guides' empty box
 
@@ -117,6 +119,11 @@ class Ambiguous(LookupError):
     Portal blades stay in the DOM, and the first match in DOM order is often the wrong one."""
 
 
+class PageClosed(Exception):
+    """The browser window is gone. The run stops at once (ABORTED, state kept) rather than ask
+    the person to choose among the candidates of an empty screen."""
+
+
 def in_window_columns(element: Locator, viewport: dict | None) -> bool:
     """Whether the element overlaps the window horizontally. The Portal parks earlier blades off
     to the side (far left), where the DOM still calls them visible; acting on one is a guess.
@@ -132,12 +139,18 @@ def in_window_columns(element: Locator, viewport: dict | None) -> bool:
 
 def visible_in(locator: Locator, viewport: dict | None) -> list[Locator]:
     """The elements of `locator` that are visible and, when `viewport` is given, overlap the
-    window horizontally. is_visible() does not wait; a frame that goes away meanwhile raises
-    PlaywrightError, which callers handle per frame."""
+    window horizontally. is_visible() does not wait. An element that cannot be inspected (it
+    went away mid-check) still counts: dropping it could turn two matches into one, and the
+    runner would act on a guess. A frame that goes away raises PlaywrightError from count(),
+    which callers handle per frame."""
     found = []
     for index in range(locator.count()):
         element = locator.nth(index)
-        if element.is_visible() and in_window_columns(element, viewport):
+        try:
+            counts = element.is_visible() and in_window_columns(element, viewport)
+        except PlaywrightError:
+            counts = True
+        if counts:
             found.append(element)
     return found
 
@@ -282,7 +295,7 @@ def wait_for_sign_in(page: Page, tenant_id: str, say: Callable[[str], None] = pr
     say("Sign in to the Portal in the browser window. Waiting (no timeout) for the "
         "Microsoft Entra ID overview to show the Tenant ID...")
     overview = f"{PORTAL}/#@{tenant_id}{ENTRA_OVERVIEW}"
-    last_goto = time.monotonic()
+    last_goto = last_note = time.monotonic()
     while True:
         on_portal = page.url.startswith(PORTAL) and "#" in page.url
         if on_portal and visible_across_frames(page, lambda f: f.get_by_text("Tenant ID", exact=True)):
@@ -290,6 +303,9 @@ def wait_for_sign_in(page: Page, tenant_id: str, say: Callable[[str], None] = pr
         if on_portal and "ActiveDirectoryMenuBlade" not in page.url and time.monotonic() - last_goto > 10:
             page.goto(overview, wait_until="domcontentloaded")
             last_goto = time.monotonic()
+        if time.monotonic() - last_note >= 60:
+            say("Still waiting for sign-in; press Ctrl+C if the browser shows an error.")
+            last_note = time.monotonic()
         page.wait_for_timeout(2000)
 
 
@@ -300,10 +316,26 @@ def guard_language(page: Page) -> str | None:
     return None
 
 
+TREE_VALUE = re.compile(r'^\s*-\s+(?:text|textbox(?:\s+"[^"]*")?(?:\s+\[[^\]]*\])*):\s*(?P<value>.+)$')
+
+
+def tree_text(snapshot: str) -> str:
+    """The text and text box values of an accessibility snapshot, in lower case, one per line.
+    Nothing else: a link's '/url' line can carry the '#@<tenant>' pin of any tenant, and a
+    name is not what the page says the tenant is."""
+    values = []
+    for line in snapshot.splitlines():
+        m = TREE_VALUE.match(line)
+        if m:
+            values.append(m.group("value").strip().strip('"'))
+    return "\n".join(values).lower()
+
+
 def guard_tenant(page: Page, tenant_domain: str, tenant_id: str) -> str | None:
     """The Entra overview open since sign-in shows the directory's tenant id and primary domain;
     one of them must be the expected tenant's. The id may sit in a read-only text box, which plain
-    text search misses, so the accessibility tree of every frame is read as well."""
+    text search misses, so the text and text box values of every frame's accessibility tree are
+    read as well."""
     deadline = time.monotonic() + 10
     while True:
         if text_on_screen(page, tenant_id) or text_on_screen(page, tenant_domain):
@@ -311,7 +343,7 @@ def guard_tenant(page: Page, tenant_domain: str, tenant_id: str) -> str | None:
         tree = ""
         for frame in all_frames(page):
             try:
-                tree += frame.locator("body").aria_snapshot(timeout=2000).lower()
+                tree += tree_text(frame.locator("body").aria_snapshot(timeout=2000)) + "\n"
             except PlaywrightError:
                 continue
         if tenant_id.lower() in tree or tenant_domain.lower() in tree:
@@ -411,20 +443,36 @@ class Runner:
     )
 
     def __init__(self, page: Page, steps: dict, recording: dict, args: argparse.Namespace,
-                 ask: Callable[[str], str] = input) -> None:
+                 ask: Callable[[str], str] = input, state: dict | None = None) -> None:
         self.page = page
         self.steps = steps
         self.recording = recording
         self.args = args
         self.ask = ask
+        if args.resume and state and state.get("runId"):
+            # A resumed run is the same run: its folder, its results and one summary for both parts.
+            args.run_id = state["runId"]
         self.run_dir = args.log_dir / args.run_id
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.results_path = self.run_dir / "results.jsonl"
         self.deciders = [ReplayDecider(recording), HumanDecider(ask=lambda text: self.ask(text))]
         self.redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording))
-        self.records: list[dict] = []
+        self.records: list[dict] = self.earlier_results() if args.resume else []
         self.first_failure: str | None = None   # the step every later step is skipped because of
-        self.begun = False                      # whether a step has been started in this run
+        self.begun = bool(self.records)         # whether a step was started (and images checked)
+
+    def earlier_results(self) -> list[dict]:
+        """The records the stopped part of this run wrote. A last line cut short by a crash is
+        skipped."""
+        if not self.results_path.is_file():
+            return []
+        records = []
+        for line in self.results_path.read_text(encoding="utf-8").splitlines():
+            try:
+                records.append(json.loads(line))
+            except ValueError:
+                continue
+        return records
 
     def prompt(self, text: str) -> str | None:
         """One line from the person, stripped; None when input is closed."""
@@ -453,6 +501,17 @@ class Runner:
 
     # -- one label -------------------------------------------------------------------------
 
+    def same_after_restore(self, candidates: list[Candidate], label: str) -> Candidate | None:
+        """The one candidate that is the label once tokens are restored, ignoring case: the
+        guide's '[yourtenant]' and the screen's 'Contoso' are the same thing, and the deciders,
+        which compare redacted names, would report it as drift. Only names with a token count;
+        a plain difference in case is still for the deciders to judge."""
+        wanted = self.redactor.restore(label)
+        matches = [c for c in candidates
+                   if (self.redactor.restore(c.name) != c.name or wanted != label)
+                   and self.redactor.restore(c.name).casefold() == wanted.casefold()]
+        return matches[0] if len(matches) == 1 and matches[0].count == 1 else None
+
     def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None) -> dict:
         """Find the element the guide calls `label`, act on it, return the result record."""
         kind, line = item["kind"], item["line"]
@@ -467,9 +526,15 @@ class Runner:
         if decision is None:
             # Names are redacted before anyone sees them, so the person, the recording and replay
             # all work with '[tenantdomain]' and the element is found by the restored name.
+            if self.page.is_closed():
+                raise PageClosed("the browser window was closed")
             candidates = [Candidate(role=c.role, name=self.redactor.redact(c.name), count=c.count)
                           for c in candidates_on_screen(self.page)]
-            decision = decide(step, item, label, candidates, self.deciders)
+            same = self.same_after_restore(candidates, label)
+            if same is not None:
+                decision = Decision(kind="use", name=same.name, role=same.role, decided_by="exact")
+            else:
+                decision = decide(step, item, label, candidates, self.deciders)
             if decision.decided_by == "human":
                 entry = decision.to_recording(rejected_candidates(candidates, label, decision.name), now())
                 if decision.kind == "ignore" or decision.severity == "blocking":
@@ -538,6 +603,8 @@ class Runner:
         """Perform one step; True when every item went through. A failed step keeps the view
         URL of its last good run and is not checked for its expected result."""
         print(f"\n=== Step {step['id']}: {step['title']} ===")
+        if self.page.is_closed():
+            raise PageClosed("the browser window was closed")
         entry = self.step_entry(step)
         step_failed = False
         for item in step["items"]:
@@ -679,6 +746,7 @@ class Runner:
         except ValueError as error:
             print(error)
             return NOT_STARTED
+        print(f"Run folder: {self.run_dir}")
         first = portal[start]
         if in_flight:
             print(f"\nStep {first['id']} ({first['title']}) was in progress when the last run stopped.\n"
@@ -711,12 +779,18 @@ class Runner:
                 self.begun = True
                 self.readability()
             self.save_state(completed, step["id"])
+            # A step redone after -Resume replaces what its stopped attempt found (its screenshot
+            # is overwritten too); results.jsonl keeps both attempts.
+            self.records = [r for r in self.records if r["step"] != step["id"]]
             if self.run_step(step):
                 completed.append(step["id"])
                 self.save_state(completed, None)
                 continue
             answer = self.ask_after_failure(step)
             if answer == "c":
+                record = self.new_record(step, "action", None)
+                record.update(outcome="match", observed="done by hand")
+                self.write(record)
                 completed.append(step["id"])
                 self.save_state(completed, None)
             elif answer == "s":
@@ -769,6 +843,10 @@ class Runner:
         lines.append(f"## skipped ({len(skipped)})")
         lines += [f"- step {r['step']} skipped on resume" if r["skippedBecause"] == r["step"]
                   else f"- step {r['step']} because step {r['skippedBecause']} failed" for r in skipped] or ["- none"]
+        lines.append("")
+        by_hand = [r for r in self.records if r["outcome"] == "match" and r["observed"] == "done by hand"]
+        lines.append(f"## done by hand ({len(by_hand)})")
+        lines += [f"- step {r['step']}" for r in by_hand] or ["- none"]
         lines.append("")
         lines.append(f"## stale screenshots ({len(stale)})")
         lines += [f"- step {r['step']}: {r['observed']}" for r in stale] or ["- none"]
@@ -827,14 +905,17 @@ def main(argv: list[str] | None = None) -> int:
         except PlaywrightError as error:    # Chromium missing, or the window closed while signing in
             print(f"The browser stopped before the first step: {error}")
             return NOT_STARTED
-        runner = Runner(page, steps, recording, args)
+        except Exception as error:          # noqa: BLE001 - e.g. OSError saving --auth-state
+            print(f"Could not open the Portal: {type(error).__name__}: {error}")
+            return NOT_STARTED
+        runner = Runner(page, steps, recording, args, state=state)
         try:
             return runner.run(state)
         except BaseException as stop:       # noqa: BLE001 - every way out must keep -Resume possible
             # Ctrl+C, a closed browser window (Playwright Error 'Target closed') or a bug: exit 1
             # would read as 'one finding' and the entry point would clean up what -Resume needs.
             # Print what happened, keep the state, and say so.
-            if not isinstance(stop, (KeyboardInterrupt, SystemExit)):
+            if not isinstance(stop, (KeyboardInterrupt, SystemExit, PageClosed)):
                 traceback.print_exc()
             try:
                 runner.finish()

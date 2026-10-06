@@ -20,6 +20,7 @@ import difflib
 import json
 import os
 import re
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -49,12 +50,27 @@ def missing_env(recording: dict) -> list[str]:
     return sorted(name for name in env_names(recording) if name not in os.environ)
 
 
+REPLACE_ATTEMPTS = 20
+REPLACE_PAUSE_S = 0.05
+
+
 def write_json(path: Path, data: dict) -> None:
     """Write `data` as indented UTF-8 JSON through a temporary file and os.replace, so Ctrl+C or
-    a closed window mid-write never leaves a truncated recording or state file behind."""
+    a closed window mid-write never leaves a truncated recording or state file behind.
+
+    On Windows, replacing a file that was replaced a moment ago can fail with PermissionError
+    (WinError 5) while an antivirus scanner or the search indexer still holds it open. The
+    replace is retried for about a second before the error is raised."""
     temp = path.with_name(path.name + ".tmp")
     temp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(temp, path)
+    for attempt in range(1, REPLACE_ATTEMPTS + 1):
+        try:
+            os.replace(temp, path)
+            return
+        except PermissionError:
+            if attempt == REPLACE_ATTEMPTS:
+                raise
+            time.sleep(REPLACE_PAUSE_S)
 
 
 GUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")

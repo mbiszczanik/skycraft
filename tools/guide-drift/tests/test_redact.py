@@ -8,17 +8,21 @@ Run by hand from the repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
 """
+import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import recording  # noqa: E402
 from decide import Candidate  # noqa: E402
 from recording import (Redactor, env_secrets, expand_env, missing_env,  # noqa: E402
-                       rejected_candidates, resolve_value, value_action)
+                       rejected_candidates, resolve_value, value_action, write_json)
 
 DOMAIN = "contoso.onmicrosoft.com"
 TENANT = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -166,6 +170,37 @@ class RejectedCandidatesTests(unittest.TestCase):
         rejected = rejected_candidates(candidates, "+ New group", None)
         self.assertEqual(len(rejected), 20)
         self.assertEqual(rejected[0], 'button "New groups"')
+
+
+class WriteJsonTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.path = self.tmp / "state.json"
+
+    def test_a_replace_blocked_for_a_moment_is_retried(self) -> None:
+        real_replace = os.replace
+        calls = []
+
+        def replace(source, target):
+            calls.append(target)
+            if len(calls) <= 2:          # an antivirus scanner holds the file twice
+                raise PermissionError(5, "Access is denied")
+            real_replace(source, target)
+
+        with mock.patch.object(recording.os, "replace", replace), \
+                mock.patch.object(recording.time, "sleep") as sleep:
+            write_json(self.path, {"a": 1})
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), {"a": 1})
+        self.assertEqual((len(calls), sleep.call_count), (3, 2))
+        self.assertFalse((self.tmp / "state.json.tmp").exists())
+
+    def test_a_replace_that_stays_blocked_raises(self) -> None:
+        with mock.patch.object(recording.os, "replace", side_effect=PermissionError(5, "Access is denied")) as replace, \
+                mock.patch.object(recording.time, "sleep") as sleep, self.assertRaises(PermissionError):
+            write_json(self.path, {"a": 1})
+        self.assertEqual((replace.call_count, sleep.call_count),
+                         (recording.REPLACE_ATTEMPTS, recording.REPLACE_ATTEMPTS - 1))
 
 
 if __name__ == "__main__":
