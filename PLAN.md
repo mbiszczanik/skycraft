@@ -144,7 +144,11 @@ maintainer's guest address and tenant prefix out of this public repository. `lab
 the guide's label text; `decision` is `use` (act on the element named `name`; when `name`
 differs from the label the recorded `severity`, misleading or cosmetic, is reported as drift),
 `ignore` (the bold text is not a UI element in this step) or `gone` (the element no longer
-exists; replay reports blocking drift without asking). An `unknown` answer is never recorded. `result` is `null` when the expected result names nothing
+exists; replay reports blocking drift without asking). An `unknown` answer is never recorded. `asked` lists the questions already put to the person for this step (today only `"result"`), so
+an answer of "nothing observable" is not asked again. Names and texts in a recording carry
+`[tenantdomain]` and `[tenantid]` instead of the real values (the runner's `Redactor`), and
+`viewUrl` has no tenant pin, query string or object id.
+`result` is `null` when the expected result names nothing
 observable, or `{ "text": "..." }` for text the runner looks for after the step.
 
 **Result record** (`<log dir>/<run id>/results.jsonl`, one line per check):
@@ -1755,10 +1759,48 @@ def candidates_on_screen(page: Page) -> list[Candidate]:
     return [Candidate(role=role, name=name, count=count) for role, name, count in aria_lines(page)]
 
 
+GUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
+
+
+class Redactor:
+    """Keeps tenant data out of the committed recording, which lives in a public repository.
+    The tenant's domain and id become tokens on the way into the recording and are restored on
+    the way out, so a recorded name such as 'malfurion.stormrage@[tenantdomain]' still finds its
+    element. tests/Guide-Drift-Recording.Tests.ps1 is the backstop: it fails on any literal
+    e-mail address, *.onmicrosoft.com domain or GUID in a recording."""
+
+    DOMAIN = "[tenantdomain]"
+    TENANT = "[tenantid]"
+
+    def __init__(self, domain: str, tenant_id: str) -> None:
+        self.domain = domain
+        self.tenant_id = tenant_id
+        self._domain_re = re.compile(re.escape(domain), re.IGNORECASE)
+        self._tenant_re = re.compile(re.escape(tenant_id), re.IGNORECASE)
+
+    def redact(self, text: str | None) -> str | None:
+        if text is None:
+            return None
+        return self._tenant_re.sub(self.TENANT, self._domain_re.sub(self.DOMAIN, text))
+
+    def restore(self, text: str | None) -> str | None:
+        if text is None:
+            return None
+        return text.replace(self.DOMAIN, self.domain).replace(self.TENANT, self.tenant_id)
+
+    def view_url(self, url: str) -> str:
+        """The Portal view without the tenant pin ('#@<tenant>/'), query strings or object ids:
+        it is shown to the person on -Resume, never navigated to automatically."""
+        url = re.sub(r"#@[^/]*/?", "#", url)
+        url = url.split("?", 1)[0]
+        return self.redact(GUID.sub("<id>", url))
+
+
 def rejected_candidates(candidates: list[Candidate], label: str, chosen: str | None) -> list[str]:
     """The 20 visible candidates most like the label, other than the chosen one, as 'role "name"':
-    the reference set issue #190 needs, without committing the whole screen to the recording."""
-    others = [c for c in candidates if c.name != chosen]
+    the reference set issue #190 needs, without committing the whole screen to the recording.
+    Names with an '@' (user principal names, the signed-in account) are left out entirely."""
+    others = [c for c in candidates if c.name != chosen and "@" not in c.name]
     others.sort(key=lambda c: difflib.SequenceMatcher(None, c.name.lower(), label.lower()).ratio(),
                 reverse=True)
     return [str(c) for c in others[:20]]
@@ -1832,6 +1874,7 @@ class Runner:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.results_path = self.run_dir / "results.jsonl"
         self.deciders = [ReplayDecider(recording), HumanDecider()]
+        self.redactor = Redactor(args.tenant_domain, args.tenant_id)
         self.records: list[dict] = []
         self.failed_steps: dict[str, str] = {}   # step id -> why (for skippedBecause)
 
@@ -1862,11 +1905,14 @@ class Runner:
             return record
         decision = Decision(kind="use", name=label, decided_by="exact") if element is not None else None
         if decision is None:
-            candidates = candidates_on_screen(self.page)
+            # Names are redacted before anyone sees them, so the person, the recording and replay
+            # all work with '[tenantdomain]' and the element is found by the restored name.
+            candidates = [Candidate(role=c.role, name=self.redactor.redact(c.name), count=c.count)
+                          for c in candidates_on_screen(self.page)]
             decision = decide(step, item, label, candidates, self.deciders)
             if decision.name and decision.severity != "blocking":
                 try:
-                    element = find_by_name(self.page, decision.role, decision.name)
+                    element = find_by_name(self.page, decision.role, self.redactor.restore(decision.name))
                 except Ambiguous as error:
                     # Not recorded: replay must never inherit a choice the runner refused to act on.
                     record.update(outcome="unknown", observed=f"ambiguous: {error} named '{decision.name}'")
@@ -1952,7 +1998,7 @@ class Runner:
             if step_failed:
                 break
         self.check_result(step, entry)
-        entry["viewUrl"] = self.page.url
+        entry["viewUrl"] = self.redactor.view_url(self.page.url)
         self.save_recording()
         self.write(self.screenshot(step))
         if step_failed:
@@ -2004,13 +2050,16 @@ Append to `tools/guide-drift/run.py`:
         if entry["result"] is None and "result" not in entry.get("asked", []):
             print(f'Expected Result: "{step["expected"]}"')
             answer = input("Text to look for on screen (Enter = not observable): ").strip()
-            entry["result"] = {"text": answer} if answer else None
+            entry["result"] = {"text": self.redactor.redact(answer)} if answer else None
             entry.setdefault("asked", []).append("result")
             self.save_recording()
         if not entry["result"]:
             return
         record = self.new_record(step, "result", entry["result"]["text"])
-        found = find_by_name(self.page, None, entry["result"]["text"]) is not None
+        # Presence, not a unique element: a created group's name shows in the list and the
+        # breadcrumb at once, and either proves the result.
+        text = self.redactor.restore(entry["result"]["text"])
+        found = any(visible_in(frame.get_by_text(text, exact=False)) for frame in all_frames(self.page))
         record.update(outcome="match" if found else "drift", severity=None if found else "misleading",
                       observed=None if found else "text not on screen")
         self.write(record)
