@@ -782,6 +782,10 @@ class ScreenNode(FakeElement):
         if self.on_click:
             self.on_click()
 
+    def clear(self, timeout=None) -> None:
+        self.calls.append("clear")
+        self.text = ""
+
     def fill(self, value, timeout=None) -> None:
         if self.fill_fail:
             raise self.fill_fail
@@ -1044,6 +1048,54 @@ class FindOnScreenTests(RunnerTestCase):
     def test_a_closed_window_is_not_a_missing_search_box(self) -> None:
         with self.assertRaises(run.PageClosed):
             self.act(Screen(), self.SEARCH, self.ENTRA, page=FakePage(closed=True))
+
+    @staticmethod
+    def box(role: str, name: str = "", placeholder: str = "", top: bool = False) -> dict:
+        return {"role": role, "name": name, "placeholder": placeholder, "global": top}
+
+    def test_the_blade_search_box_is_the_only_one_besides_the_top_search(self) -> None:
+        top = self.box("searchbox", "Search resources, services, and docs (G+/)", top=True)
+        for boxes, expected in (
+                ([top, self.box("textbox", "Display name"), self.box("searchbox", "Search by role name")], (2, None)),
+                ([self.box("textbox", "", "Filter by name"), self.box("textbox", "Group name")], (0, None)),
+                ([self.box("textbox", "Search members")], (0, None)),
+                ([top, self.box("textbox", "Display name")], (None, "no search box on the open blade")),
+                ([], (None, "no search box on the open blade")),
+                ([self.box("searchbox", "Search"), top, self.box("textbox", "", "Filter items")],
+                 (None, "ambiguous: 2 search boxes ('Search', 'Filter items')"))):
+            with self.subTest(boxes=boxes):
+                self.assertEqual(run.choose_search_box(boxes), expected)
+
+    BLADE_SEARCH = {"kind": "search", "labels": ["Owner"], "scope": "blade", "line": 191}
+
+    def test_a_blade_search_types_into_its_box_and_checks_the_result_without_clicking_it(self) -> None:
+        owner = ScreenNode()
+        screen = Screen()
+        box = ScreenNode(tag="input", tree='- searchbox "Search by role name, description, or ID"', text="old",
+                         on_fill=lambda: screen.add(("text", "Owner", owner)))
+        screen.add(("searchbox", "Search by role name, description, or ID", box),
+                   ("textbox", "Display name", ScreenNode(tag="input", tree='- textbox "Display name"')))
+        record, r = self.act(screen, self.BLADE_SEARCH, "Owner")
+        self.assertEqual((record["kind"], record["outcome"], record["observed"]), ("search", "match", "Owner"))
+        self.assertEqual((box.calls[:1], box.filled, owner.clicked, r.ask.prompts), (["clear"], ["Owner"], 0, []))
+
+    def test_a_blade_search_without_a_result_or_a_box_or_with_two_boxes_is_unknown(self) -> None:
+        box = ScreenNode(tag="input", tree='- searchbox "Search"')
+        record, _ = self.act(Screen(("searchbox", "Search", box)), self.BLADE_SEARCH, "Owner")
+        self.assertEqual((record["outcome"], record["observed"]), ("unknown", "no result for 'Owner' after the search"))
+        record, _ = self.act(Screen(("textbox", "Display name", ScreenNode(tree='- textbox "Display name"'))),
+                             self.BLADE_SEARCH, "Owner")
+        self.assertEqual((record["outcome"], record["observed"]), ("unknown", "no search box on the open blade"))
+        two = Screen(("searchbox", "Search", ScreenNode(tree='- searchbox "Search"')),
+                     ("textbox", "Filter", ScreenNode(tree='- textbox "Filter by name"')))
+        record, r = self.act(two, self.BLADE_SEARCH, "Owner")
+        self.assertEqual((record["outcome"], record["observed"], r.ask.prompts),
+                         ("unknown", "ambiguous: 2 search boxes ('Search', 'Filter by name')", []))
+
+    def test_a_search_without_a_scope_is_the_global_search(self) -> None:
+        self.assertNotIn("scope", self.SEARCH)                               # steps.json from before scopes
+        record, _ = self.act(Screen(), self.SEARCH, self.ENTRA)
+        self.assertIn("search box is not on screen", record["observed"])     # search_portal's own reason
 
     UPN = {"kind": "field", "label": "User principal name", "value": "x", "line": 4}
     UPN_VALUE = "malfurion.stormrage@contoso.onmicrosoft.com"

@@ -21,7 +21,10 @@ element whose name contains the word delete, remove, reset, revoke, disable, blo
 sign out, unless the guide's own label does too. A guide's 'Search for **X**' is typed into the
 Portal's global search, and the result named exactly X in its dropdown is opened (the Services
 entry, never Marketplace or Documentation); when that fails, the dropdown's accessibility tree
-is kept as search-<step>.aria.txt in the run folder. Plain text counts only when it
+is kept as search-<step>.aria.txt in the run folder. A search inside a blade ('Search for
+**"Owner"**' in a role assignment, scope 'blade') is typed into that blade's own search box, the
+only one on screen besides the top one, and the result is checked for, not clicked: the guide's
+next item clicks it. Plain text counts only when it
 is, or sits inside, a link, button or other interactive element. A label is looked for until
 FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; when SETTLE_MS of
 that finds nothing, the blade menu's collapsed groups are opened once ('Expand all headers') and
@@ -79,6 +82,11 @@ ACTION_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "chec
 RESULT_ROLES = ("option", "link", "button", "menuitem")    # entries of the global search's results
 # The Portal's global search box, named "Search resources, services, and docs (G+/)".
 SEARCH_BOX = re.compile(r"^Search resources")
+# A blade's own search box (search scope 'blade'): a search box, or a text box whose accessible
+# name or placeholder says search or filter.
+BLADE_SEARCH_NAME = re.compile(r"search|filter", re.IGNORECASE)
+# The role and accessible name on the first line of an element's aria_snapshot().
+ARIA_FIRST_LINE = re.compile(r'^\s*-\s+(?P<role>[a-z]+)(?:\s+"(?P<name>(?:[^"\\]|\\.)*)")?')
 LEADING_PLUS = re.compile(r"^\s*\+\s*")   # '+ New user': the Portal names the item 'New user'
 # What plain text must be, or sit inside, to count as the element a guide label names.
 INTERACTIVE = ("a, button, [role=link], [role=button], [role=menuitem], [role=treeitem], [role=tab], "
@@ -445,13 +453,13 @@ def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
     return element
 
 
-def in_time(page: Page, look: Callable[[], Found | None]) -> Found | None:
-    """What `look()` finds, asked every 250 ms until it finds something or FIND_TIMEOUT_MS has
-    passed; None then. A blade renders its controls a moment after its heading (step 1.1.9: the
-    New Group form showed only its title when 'Group type' was looked up), so one look before
+def in_time(page: Page, look: Callable[[], Found | None], ms: int = FIND_TIMEOUT_MS) -> Found | None:
+    """What `look()` finds, asked every 250 ms until it finds something or `ms` (FIND_TIMEOUT_MS)
+    has passed; None then. A blade renders its controls a moment after its heading (step 1.1.9:
+    the New Group form showed only its title when 'Group type' was looked up), so one look before
     the person is asked is not enough. An Ambiguous look is retried too, and raised only when it
     lasts to the deadline. Raises PageClosed when the window is gone."""
-    deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
+    deadline = time.monotonic() + ms / 1000
     while True:
         ambiguous: Ambiguous | None = None
         try:
@@ -647,6 +655,56 @@ def search_results(page: Page, frame: Frame, box: Locator, label: str,
     if ambiguous is not None:
         raise ambiguous
     return None
+
+
+def choose_search_box(boxes: list[dict]) -> tuple[int | None, str | None]:
+    """Which of `boxes` is the open blade's or pane's own search box. Each box is a descriptor:
+    'role' ('searchbox' or 'textbox'), 'name' (accessible name), 'placeholder' and 'global'
+    (it is the Portal's top search box, the one search_box() finds). A search box counts, and a
+    text box whose name or placeholder says search or filter; the top search box never does.
+    Returns (index, None), or (None, why): 'no search box on the open blade', or 'ambiguous: N
+    search boxes (names)'. The Portal offers no marker the runner could rely on for the blade or
+    pane opened last, so several boxes are never narrowed down by guess; blades parked off to
+    the left are already left out (visible_in)."""
+    candidates = [index for index, box in enumerate(boxes)
+                  if not box["global"] and (box["role"] == "searchbox" or (
+                      box["role"] == "textbox"
+                      and BLADE_SEARCH_NAME.search(f"{box['name']} {box['placeholder']}")))]
+    if not candidates:
+        return None, "no search box on the open blade"
+    if len(candidates) > 1:
+        names = ", ".join(f"'{boxes[i]['name'] or boxes[i]['placeholder'] or '(no name)'}'" for i in candidates)
+        return None, f"ambiguous: {len(candidates)} search boxes ({names})"
+    return candidates[0], None
+
+
+def accessible_name(element: Locator) -> str:
+    """The element's accessible name, as the first line of its aria_snapshot() gives it."""
+    m = ARIA_FIRST_LINE.match(element.aria_snapshot(timeout=1000))
+    return (m.group("name") or "") if m else ""
+
+
+def blade_search_boxes(page: Page) -> list[tuple[Locator, dict]]:
+    """Every visible search box and text box in the window's columns, in every frame, with its
+    descriptor for choose_search_box. 'global' marks the Portal's top search box (search_box's
+    locator, compared by identity in its frame). An element that cannot be read raises
+    Ambiguous, so in_time looks again rather than choose among the rest."""
+    found: list[tuple[Locator, dict]] = []
+    for frame in all_frames(page):
+        try:
+            tops = [top.element_handle(timeout=1000)
+                    for top in visible_in(frame.get_by_role("combobox", name=SEARCH_BOX), page.viewport_size)]
+            for role in ("searchbox", "textbox"):
+                for element in visible_in(frame.get_by_role(role), page.viewport_size):
+                    found.append((element, {
+                        "role": role, "name": accessible_name(element),
+                        "placeholder": element.get_attribute("placeholder", timeout=1000) or "",
+                        "global": any(element.evaluate("(e, top) => e === top", top, timeout=1000) for top in tops)}))
+            for top in tops:
+                top.dispose()
+        except PlaywrightError as error:
+            raise Ambiguous(f"a search box changed while it was read ({type(error).__name__})") from error
+    return found
 
 
 def stays_disabled(page: Page, element: Locator) -> bool:
@@ -1156,10 +1214,47 @@ class Runner:
         path.write_text(self.redactor.redact(tree) + "\n", encoding="utf-8")
         print(f"The search results' structure is in {path}")
 
+    def search_in_blade(self, label: str, record: dict) -> dict:
+        """A search item of scope 'blade' ('Search for **"Owner"**' in a role assignment): type
+        `label` into the open blade's or pane's own search box (choose_search_box), cleared
+        first, and wait up to RESULT_TIMEOUT_S for a visible element whose text is `label`. The
+        result is not clicked: the guide's next item does that. Returns `record` with outcome
+        match, or unknown with the reason (no search box, several, no result)."""
+        def look() -> Locator | None:
+            boxes = blade_search_boxes(self.page)
+            index, why = choose_search_box([descriptor for _, descriptor in boxes])
+            if why and why.startswith("ambiguous"):
+                raise Ambiguous(why)
+            return boxes[index][0] if index is not None else None
+
+        try:
+            box = in_time(self.page, look)
+            if box is None:
+                record.update(outcome="unknown", observed="no search box on the open blade")
+                return record
+            box.clear(timeout=FIND_TIMEOUT_MS)
+            box.fill(label, timeout=FIND_TIMEOUT_MS)
+            # A text node: the box's own value is not one, so only a result can match.
+            listed = in_time(self.page, lambda: visible_across_frames(
+                self.page, lambda f: f.get_by_text(label, exact=True)) or None, ms=RESULT_TIMEOUT_S * 1000)
+        except Ambiguous as error:
+            record.update(outcome="unknown", observed=str(error))
+            return record
+        except (PlaywrightError, LookupError) as error:
+            record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
+            return record
+        if listed:
+            record.update(outcome="match", observed=label)
+        else:
+            record.update(outcome="unknown", observed=f"no result for '{label}' after the search")
+        return record
+
     def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None) -> dict:
         """Find the element the guide calls `label`, act on it, return the result record."""
         kind, line = item["kind"], item["line"]
         record = self.new_record(step, kind, label)
+        if kind == "search" and item.get("scope") == "blade":
+            return self.search_in_blade(label, record)
         try:
             if kind == "search":
                 element = search_portal(self.page, label, diagnose=lambda tree: self.save_search_tree(step, tree))
