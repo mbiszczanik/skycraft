@@ -14,7 +14,7 @@
       "valueOverrides": {
         "Email": "${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}"
       },
-      "viewUrl": null,
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/InviteUser.ReactView/tenantType/AAD",
       "result": null,
       "labels": {
         "Email": {
@@ -47,13 +47,221 @@
           "decidedBy": "human",
           "at": "2026-10-06T17:18:04Z"
         }
-      }
+      },
+      "asked": [
+        "result"
+      ]
     },
     "1.1.1": {
       "valueOverrides": {},
       "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Overview",
       "result": {
         "text": "Users"
+      },
+      "labels": {},
+      "asked": [
+        "result"
+      ]
+    },
+    "1.1.2": {
+      "valueOverrides": {},
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/AllUsers",
+      "result": {
+        "text": "Malfurion Stormrage"
+      },
+      "labels": {},
+      "asked": [
+        "result"
+      ]
+    },
+    "1.1.3": {
+      "valueOverrides": {},
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/AllUsers",
+      "result": null,
+      "labels": {}
+    },
+    "1.1.4": {
+      "valueOverrides": {},
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/AllUsers",
+      "result": null,
+      "labels": {}
+    },
+    "1.1.6": {
+      "valueOverrides": {},
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_IAM/AddGroup.ReactView",
+      "result": null,
+      "labels": {}
+    },
+    "1.1.7": {
+      "valueOverrides": {},
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups",
+      "result": {
+        "text": "SkyCraft-Admins"
+      },
+      "labels": {
+        "Malfurion Stormrage": {
+          "decision": "use",
+          "role": "checkbox",
+          "name": "Select row Malfurion Stormrage",
+          "severity": "cosmetic",
+          "rejected": [
+            "checkbox \"Select row Illidan Stormrage\"",
+            "button \"Information\"",
+            "button \"Group type information\"",
+            "button \"Group description information\"",
+            "button \"Reset selection to default\"",
+            "button \"Membership type information\"",
+            "checkbox \"Select row Azure Resource Manager\"",
+            "button \"Group name information\"",
+            "checkbox \"Select row Marcin Biszczanik\"",
+            "button \"Cloud Shell\"",
+            "checkbox \"Select row Common Data Service License Management\"",
+            "button \"Notifications\"",
+            "button \"Skip to main content\"",
+            "button \"More content actions\"",
+            "checkbox \"Select row Microsoft Azure Signup Portal\"",
+            "checkbox \"Select row Khadgar Archmage\"",
+            "checkbox \"Select row IAMTenantCrawler\"",
+            "checkbox \"Select row Azure Multi-Factor Auth Client\"",
+            "checkbox \"Select row Microsoft Intune SCCM Connector\"",
+            "heading \"Microsoft Azure\""
+          ],
+          "decidedBy": "human",
+          "at": "2026-10-06T19:36:12Z"
+        }
+      },
+      "asked": [
+        "result"
+      ]
+    },
+    "1.1.8": {
+      "valueOverrides": {},
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_IAM/AddGroup.ReactView",
+      "result": null,
+      "labels": {
+        "Khadgar Archmage": {
+          "decision": "use",
+          "role": "checkbox",
+          "name": "Select row Khadgar Archmage",
+          "severity": "cosmetic",
+          "rejected": [
+            "textbox \"Group name\"",
+            "heading \"Add members\"",
+            "button \"Group name information\"",
+            "checkbox \"Select row Azure Resource Manager\"",
+            "heading \"Microsoft Azure\"",
+            "link \"Microsoft Azure\"",
+            "button \"Group type information\"",
+            "button \"Show portal menu\"",
+            "combobox \"Group type\"",
+            "link \"Home\"",
+            "button \"Name\"",
+            "link \"Groups | All groups\"",
+            "checkbox \"Select row Microsoft Approval Management\"",
+            "button \"Skip to main content\"",
+            "button \"Cancel\"",
+            "button \"Group description information\"",
+            "checkbox \"Select row Chromie Timewalker\"",
+            "checkbox \"Select row M365 App Management Service\"",
+            "tab \"Enterprise applications\"",
+            "checkbox \"Select row AADReporting\""
+          ],
+          "decidedBy": "human",
+          "at": "2026-10-06T19:37:57Z"
+        }
+      }
+    },
+    "1.1.9": {
+      "valueOverrides": {},
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups",
+      "result": {
+        "text": "SkyCraft-Testers"
+      },
+      "labels": {
+        "Chromie Timewalker": {
+          "decision": "use",
+          "role": "checkbox",
+          "name": "Select row Chromie Timewalker",
+          "severity": "cosmetic",
+          "rejected": [
+            "button \"Create\"",
+            "button \"Close content 'Add members'\"",
+            "checkbox \"Select row Customer Service Trial PVA\"",
+            "button \"Close content 'New Group'\"",
+            "checkbox \"Select row Dataverse\"",
+            "link \"Home\"",
+            "checkbox \"Select row Customer Service Trial PVA - readonly\"",
+            "checkbox \"Select row Microsoft B2B Admin Worker\"",
+            "button \"Reset selection to default\"",
+            "checkbox \"Select row Azure Virtual Desktop\"",
+            "combobox \"Group type\"",
+            "textbox \"Group name\"",
+            "checkbox \"Select row IAMTenantCrawler\"",
+            "button \"Show portal menu\"",
+            "checkbox \"Select row Azure Resource Manager\"",
+            "checkbox \"Select row Microsoft Flow Service\"",
+            "button \"clear\"",
+            "heading \"Add members\"",
+            "checkbox \"Select row Microsoft Azure Signup Portal\"",
+            "checkbox \"Select row Meeting Migration Service\""
+          ],
+          "decidedBy": "human",
+          "at": "2026-10-06T19:38:51Z"
+        }
+      },
+      "asked": [
+        "result"
+      ]
+    },
+    "1.1.10": {
+      "valueOverrides": {},
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/<id>/hidePreviewBanner~/true",
+      "result": {
+        "text": "Cloud Infrastructure Manager"
+      },
+      "labels": {},
+      "asked": [
+        "result"
+      ]
+    },
+    "1.1.11": {
+      "valueOverrides": {},
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/Licenses/userId/<id>/hidePreviewBanner~/true",
+      "result": {
+        "text": "Licenses"
+      },
+      "labels": {},
+      "asked": [
+        "result"
+      ]
+    },
+    "1.1.12": {
+      "valueOverrides": {},
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_IAM/PasswordResetMenuBlade/~/Properties",
+      "result": {
+        "text": "Self service password reset enabled"
+      },
+      "labels": {},
+      "asked": [
+        "result"
+      ]
+    },
+    "1.1.13": {
+      "valueOverrides": {},
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/AllUsers",
+      "result": {
+        "text": "Guest"
+      },
+      "labels": {},
+      "asked": [
+        "result"
+      ]
+    },
+    "1.1.14": {
+      "valueOverrides": {},
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_IAM/CompanyRelationshipsMenuBlade/~/Settings",
+      "result": {
+        "text": "Guest user access"
       },
       "labels": {},
       "asked": [
