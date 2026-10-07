@@ -461,6 +461,18 @@ class SummaryTests(RunnerTestCase):
                      "guide.md:3", "## no portal part (1)\n- step 9.9.3: Check"):
             self.assertIn(line, summary)
         self.assertNotIn("unreadable", summary)                         # no width limit on screenshots
+        self.assertIn("## unknown (1)\n- step 9.9.2 field **Group type**: ambiguous: 2 visible elements match\n\n"
+                      "## unconfirmed searches (0)\n- none\n\n## skipped (1)", summary)
+
+    def test_finish_lists_unconfirmed_searches_after_unknown_without_counting_them(self) -> None:
+        observed = run.search_outcome("Owner", before=True, after=True)[1]
+        self.add("search", "Owner", outcome="match", observed=observed)
+        self.add("search", "Reader", outcome="match", observed="Reader")          # confirmed: not listed
+        self.assertEqual(self.quietly(self.r.finish), 0)
+        summary = (self.r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## unknown (0)\n- none\n\n## unconfirmed searches (1)\n"
+                      f"- step 9.9.2 **Owner**: {observed}\n\n## skipped (0)", summary)
+        self.assertNotIn("**Reader**", summary)
 
     def test_tenant_name_is_an_optional_argument_the_redactor_uses(self) -> None:
         base = ["--steps", "s", "--recording", "r", "--log-dir", "l", "--run-id", "i", "--tenant-id", "t",
@@ -1096,6 +1108,15 @@ class FindOnScreenTests(RunnerTestCase):
         screen = Screen(("text", "Owner", ScreenNode()), ("searchbox", "Search", box), ("grid", "", results))
         record, _ = self.act(screen, self.BLADE_SEARCH, "Owner")
         self.assertEqual((record["outcome"], record["observed"]), ("match", "Owner"))   # the title outside is not it
+
+    def test_a_blade_search_reads_the_list_only_once_it_has_settled(self) -> None:
+        screen = Screen()
+        box = ScreenNode(tag="input", tree='- searchbox "Search"')
+        screen.add(("searchbox", "Search", box))
+        page = self.LoadingPage(lambda n: n == 1 and screen.add(("text", "Owner", ScreenNode())))  # rows render late
+        record, _ = self.act(screen, self.BLADE_SEARCH, "Owner", page=page)
+        self.assertIn(run.UNCONFIRMED, record["observed"])                 # read as listed before the search
+        self.assertGreaterEqual(page.now, run.SETTLE_MS / 1000)
 
     def test_the_top_bars_search_box_is_never_a_blades(self) -> None:
         top = ScreenNode(tag="input", tree='- searchbox "Search"')

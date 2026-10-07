@@ -735,6 +735,11 @@ def listed(page: Page, box: Locator, label: str) -> bool:
         return False
 
 
+# The end of a blade search's observation when the label was listed before it too; finish()
+# lists such matches under "unconfirmed searches".
+UNCONFIRMED = "the search's effect is not confirmed"
+
+
 def search_outcome(label: str, before: bool, after: bool) -> tuple[str, str]:
     """(outcome, observed) of a blade search from whether `label` was listed before and after
     it. Listed only after: match. Listed before too: match, but the observation says the
@@ -743,7 +748,7 @@ def search_outcome(label: str, before: bool, after: bool) -> tuple[str, str]:
     if not after:
         return "unknown", f"no result for '{label}' after the search"
     if before:
-        return "match", f"'{label}' was listed before the search too; the search's effect is not confirmed"
+        return "match", f"'{label}' was listed before the search too; {UNCONFIRMED}"
     return "match", label
 
 
@@ -1274,6 +1279,7 @@ class Runner:
             if box is None:
                 record.update(outcome="unknown", observed="no search box on the open blade")
                 return record
+            self.page.wait_for_timeout(SETTLE_MS)       # a list still rendering is not 'not listed'
             before = listed(self.page, box, label)
             box.fill(label, timeout=FIND_TIMEOUT_MS)
             after = bool(in_time(self.page, lambda: listed(self.page, box, label) or None,
@@ -1625,6 +1631,12 @@ class Runner:
             lines.append("")
         lines.append(f"## unknown ({len(unknown)})")
         lines += [f"- step {r['step']} {r['kind']} **{r['label']}**: {r['observed']}" for r in unknown] or ["- none"]
+        lines.append("")
+        # Matches, so not counted in the exit code, but a reviewer must see them: the label was
+        # on screen before the blade search too (search_outcome).
+        unconfirmed = [r for r in self.records if r["outcome"] == "match" and UNCONFIRMED in (r["observed"] or "")]
+        lines.append(f"## unconfirmed searches ({len(unconfirmed)})")
+        lines += [f"- step {r['step']} **{r['label']}**: {r['observed']}" for r in unconfirmed] or ["- none"]
         lines.append("")
         lines.append(f"## skipped ({len(skipped)})")
         lines += [f"- step {r['step']} skipped on resume" if r["skippedBecause"] == r["step"]
