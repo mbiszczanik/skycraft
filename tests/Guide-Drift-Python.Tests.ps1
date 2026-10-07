@@ -6,10 +6,12 @@
     The guide drift tool is Python, and the repository has no pytest, so its unit tests are
     stdlib unittest files under tools/guide-drift/tests/: test_decide.py (decide.py, the boundary
     every "label not found" decision passes through), test_redact.py (recording.py: redaction,
-    environment references, values, atomic writes) and test_runner.py (run.py's bookkeeping:
-    state, resume, failure prompts, decisions, summary). This file discovers and runs all of them
-    as one It, so the existing CI job, which runs every Pester file under tests/, covers them on
-    the ubuntu-latest runner without a new step and without Playwright (test_runner.py stubs it).
+    environment references, values, atomic writes), test_parse.py (parse.py: which searches are
+    the Portal's and which a blade's) and test_runner.py (run.py's bookkeeping: state, resume,
+    failure prompts, decisions, summary, and finding what a guide names). This file discovers and
+    runs all of them as one It, so the existing CI job, which runs every Pester file under tests/,
+    covers them on the ubuntu-latest runner without a new step and without Playwright
+    (test_runner.py stubs it).
     Python is started with -B so that no __pycache__ is written into the working tree.
 
 .EXAMPLE

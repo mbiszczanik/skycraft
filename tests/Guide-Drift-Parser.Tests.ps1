@@ -127,9 +127,11 @@ Describe 'parse.py - step sections' {
         foreach ($i in 2, 3) {
             $script:Core.steps[0].items[$i].kind | Should -Be 'search'
         }
+        $script:Core.steps[0].items[2].scope | Should -Be 'global' -Because 'it says "in the search bar"'
+        $script:Core.steps[0].items[3].scope | Should -Be 'blade' -Because 'it names no Portal search'
     }
 
-    It 'reads "Search for" only at the start of the item and only before the first bold' {
+    It 'reads "Search for" only at the start of the item, after "In Azure Portal,", and only before the first bold' {
         $guide = ConvertFrom-GuideFixture -Markdown (@(
                 '### Step 9.9.1: Searches',
                 '',
@@ -141,8 +143,10 @@ Describe 'parse.py - step sections' {
                 '6. Search for the **Owner** role',
                 '7. Search for **Network Watcher** in Azure Portal'
             ) -join "`n")
-        @($guide.steps[0].items.kind) | Should -Be @('search', 'action', 'action', 'action', 'action', 'action', 'search')
+        @($guide.steps[0].items.kind) | Should -Be @('search', 'search', 'action', 'action', 'action', 'action', 'search')
         @($guide.steps[0].items[0].labels) | Should -Be @('Backup vaults')
+        @($guide.steps[0].items[1].labels) | Should -Be @('Policy')
+        @($guide.steps[0].items | Where-Object kind -eq 'search' | ForEach-Object { $_.scope }) | Should -Be @('blade', 'global', 'global')
         @($guide.steps[0].items[3].labels) | Should -Be @('Container Apps', '+ Create')
         @($guide.steps[0].items[6].labels) | Should -Be @('Network Watcher')
     }
@@ -525,6 +529,13 @@ Describe 'parse.py - lab 1.1, the first recorded lab' {
         $step = $script:Lab11.steps | Where-Object id -eq '1.1.1'
         @($step.items.kind) | Should -Be @('search')
         @($step.items[0].labels) | Should -Be @('Microsoft Entra ID')
+        $step.items[0].scope | Should -Be 'global'
+    }
+
+    It 'reads every search of lab 1.1 as the Portal''s global search' {
+        $searches = @($script:Lab11.steps | ForEach-Object { $_.items } | Where-Object kind -eq 'search')
+        $searches.Count | Should -BeGreaterThan 0
+        @($searches | Where-Object scope -ne 'global') | Should -BeNullOrEmpty
     }
 
     It 'reads step 1.1.6 as the way back to Entra, + New group and four fields' {
@@ -551,6 +562,28 @@ Describe 'parse.py - lab 1.1, the first recorded lab' {
     }
 }
 
+
+Describe 'parse.py - lab 1.2, global and in-blade searches' {
+    BeforeAll {
+        $guide = Join-Path $script:RepoRoot 'module-1-identities-governance/1.2-rbac/lab-guide-1.2.md'
+        $out   = Join-Path $TestDrive 'lab-1.2.json'
+        & $script:Python $script:Parser $guide --out $out --repo-root $script:RepoRoot
+        $script:Lab12 = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+    }
+
+    It 'reads "In **Azure Portal**, search for" in step 1.2.1 as the global search for Resource groups' {
+        $item = ($script:Lab12.steps | Where-Object id -eq '1.2.1').items[0]
+        $item.kind | Should -Be 'search'
+        $item.scope | Should -Be 'global'
+        @($item.labels) | Should -Be @('Resource groups')
+    }
+
+    It 'reads the role and member searches of step 1.2.4 as searches in the open blade' {
+        $searches = @(($script:Lab12.steps | Where-Object id -eq '1.2.4').items | Where-Object kind -eq 'search')
+        @($searches | ForEach-Object { $_.labels }) | Should -Be @('Owner', 'Malfurion Stormrage')
+        @($searches.scope) | Should -Be @('blade', 'blade')
+    }
+}
 
 Describe 'parse.py - only the first option of a step is read, in every lab guide' {
     BeforeAll {
