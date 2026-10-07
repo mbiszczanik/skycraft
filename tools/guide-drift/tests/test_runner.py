@@ -669,6 +669,7 @@ class ScreenNode(FakeElement):
         self.has_link = has_link
         self.more_labels: list = []
         self.flips_after: int | None = None
+        self.in_top_bar = False             # inside the Portal's top bar, [role=banner]
         self.checked = checked
         self.check_error = check_error
         self.label = label
@@ -717,6 +718,8 @@ class ScreenNode(FakeElement):
             return self.read_only
         if script == run.LABEL_CHECK_JS:
             return [self.label_for is arg, self.has_link]
+        if script == run.IN_TOP_BAR_JS:
+            return self.in_top_bar
         if script == run.FIELD_KIND_JS:
             if self.uninspectable:
                 raise run.PlaywrightError("element was detached")
@@ -781,10 +784,6 @@ class ScreenNode(FakeElement):
         super().click(timeout)
         if self.on_click:
             self.on_click()
-
-    def clear(self, timeout=None) -> None:
-        self.calls.append("clear")
-        self.text = ""
 
     def fill(self, value, timeout=None) -> None:
         if self.fill_fail:
@@ -1054,8 +1053,11 @@ class FindOnScreenTests(RunnerTestCase):
         return {"role": role, "name": name, "placeholder": placeholder, "global": top}
 
     def test_the_blade_search_box_is_the_only_one_besides_the_top_search(self) -> None:
-        top = self.box("searchbox", "Search resources, services, and docs (G+/)", top=True)
+        top = self.box("searchbox", "Search", top=True)                       # in the top bar
+        named_top = self.box("searchbox", "Search resources, services, and docs (G+/)")
         for boxes, expected in (
+                ([named_top, self.box("searchbox", "Search by role name")], (1, None)),
+                ([named_top], (None, "no search box on the open blade")),
                 ([top, self.box("textbox", "Display name"), self.box("searchbox", "Search by role name")], (2, None)),
                 ([self.box("textbox", "", "Filter by name"), self.box("textbox", "Group name")], (0, None)),
                 ([self.box("textbox", "Search members")], (0, None)),
@@ -1077,7 +1079,38 @@ class FindOnScreenTests(RunnerTestCase):
                    ("textbox", "Display name", ScreenNode(tag="input", tree='- textbox "Display name"')))
         record, r = self.act(screen, self.BLADE_SEARCH, "Owner")
         self.assertEqual((record["kind"], record["outcome"], record["observed"]), ("search", "match", "Owner"))
-        self.assertEqual((box.calls[:1], box.filled, owner.clicked, r.ask.prompts), (["clear"], ["Owner"], 0, []))
+        self.assertEqual((box.filled, owner.clicked, r.ask.prompts), (["Owner"], 0, []))
+
+    def test_a_blade_search_does_not_take_text_listed_before_it_for_its_result(self) -> None:
+        screen = Screen(("text", "Owner", ScreenNode()))                        # an unfiltered list's row
+        box = ScreenNode(tag="input", tree='- searchbox "Search"')
+        screen.add(("searchbox", "Search", box))
+        record, _ = self.act(screen, self.BLADE_SEARCH, "Owner")
+        self.assertEqual((record["outcome"], record["observed"]),
+                         ("match", "'Owner' was listed before the search too; the search's effect is not confirmed"))
+
+    def test_a_blade_search_with_a_results_list_looks_only_there(self) -> None:
+        results = ScreenNode(attrs={"id": "roles"})
+        box = ScreenNode(tag="input", tree='- searchbox "Search"', attrs={"aria-controls": "roles"},
+                         on_fill=lambda: results.children.add(("text", "Owner", ScreenNode())))
+        screen = Screen(("text", "Owner", ScreenNode()), ("searchbox", "Search", box), ("grid", "", results))
+        record, _ = self.act(screen, self.BLADE_SEARCH, "Owner")
+        self.assertEqual((record["outcome"], record["observed"]), ("match", "Owner"))   # the title outside is not it
+
+    def test_the_top_bars_search_box_is_never_a_blades(self) -> None:
+        top = ScreenNode(tag="input", tree='- searchbox "Search"')
+        top.in_top_bar = True
+        record, _ = self.act(Screen(("searchbox", "Search", top)), self.BLADE_SEARCH, "Owner")
+        self.assertEqual((record["outcome"], record["observed"], top.filled),
+                         ("unknown", "no search box on the open blade", []))
+
+    def test_search_outcome(self) -> None:
+        self.assertEqual(run.search_outcome("Owner", before=False, after=True), ("match", "Owner"))
+        self.assertEqual(run.search_outcome("Owner", before=True, after=True),
+                         ("match", "'Owner' was listed before the search too; the search's effect is not confirmed"))
+        for before in (False, True):
+            self.assertEqual(run.search_outcome("Owner", before=before, after=False),
+                             ("unknown", "no result for 'Owner' after the search"))
 
     def test_a_blade_search_without_a_result_or_a_box_or_with_two_boxes_is_unknown(self) -> None:
         box = ScreenNode(tag="input", tree='- searchbox "Search"')

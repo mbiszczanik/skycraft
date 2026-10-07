@@ -85,6 +85,7 @@ SEARCH_BOX = re.compile(r"^Search resources")
 # A blade's own search box (search scope 'blade'): a search box, or a text box whose accessible
 # name or placeholder says search or filter.
 BLADE_SEARCH_NAME = re.compile(r"search|filter", re.IGNORECASE)
+IN_TOP_BAR_JS = "e => e.closest('[role=banner]') !== null"     # the Portal's top bar, not a blade
 # The role and accessible name on the first line of an element's aria_snapshot().
 ARIA_FIRST_LINE = re.compile(r'^\s*-\s+(?P<role>[a-z]+)(?:\s+"(?P<name>(?:[^"\\]|\\.)*)")?')
 LEADING_PLUS = re.compile(r"^\s*\+\s*")   # '+ New user': the Portal names the item 'New user'
@@ -659,15 +660,16 @@ def search_results(page: Page, frame: Frame, box: Locator, label: str,
 
 def choose_search_box(boxes: list[dict]) -> tuple[int | None, str | None]:
     """Which of `boxes` is the open blade's or pane's own search box. Each box is a descriptor:
-    'role' ('searchbox' or 'textbox'), 'name' (accessible name), 'placeholder' and 'global'
-    (it is the Portal's top search box, the one search_box() finds). A search box counts, and a
-    text box whose name or placeholder says search or filter; the top search box never does.
+    'role' ('searchbox' or 'textbox'), 'name' (accessible name), 'placeholder' and 'global' (it
+    sits in the Portal's top bar, [role=banner]). A search box counts, and a text box whose name
+    or placeholder says search or filter; the Portal's top search box never does, whatever its
+    role: it is in the top bar, or named like it (SEARCH_BOX).
     Returns (index, None), or (None, why): 'no search box on the open blade', or 'ambiguous: N
     search boxes (names)'. The Portal offers no marker the runner could rely on for the blade or
     pane opened last, so several boxes are never narrowed down by guess; blades parked off to
     the left are already left out (visible_in)."""
     candidates = [index for index, box in enumerate(boxes)
-                  if not box["global"] and (box["role"] == "searchbox" or (
+                  if not box["global"] and not SEARCH_BOX.match(box["name"]) and (box["role"] == "searchbox" or (
                       box["role"] == "textbox"
                       and BLADE_SEARCH_NAME.search(f"{box['name']} {box['placeholder']}")))]
     if not candidates:
@@ -686,25 +688,63 @@ def accessible_name(element: Locator) -> str:
 
 def blade_search_boxes(page: Page) -> list[tuple[Locator, dict]]:
     """Every visible search box and text box in the window's columns, in every frame, with its
-    descriptor for choose_search_box. 'global' marks the Portal's top search box (search_box's
-    locator, compared by identity in its frame). An element that cannot be read raises
-    Ambiguous, so in_time looks again rather than choose among the rest."""
+    descriptor for choose_search_box; 'global' marks one in the Portal's top bar ([role=banner]).
+    An element that cannot be read raises Ambiguous, so in_time looks again rather than choose
+    among the rest."""
     found: list[tuple[Locator, dict]] = []
     for frame in all_frames(page):
         try:
-            tops = [top.element_handle(timeout=1000)
-                    for top in visible_in(frame.get_by_role("combobox", name=SEARCH_BOX), page.viewport_size)]
             for role in ("searchbox", "textbox"):
                 for element in visible_in(frame.get_by_role(role), page.viewport_size):
                     found.append((element, {
                         "role": role, "name": accessible_name(element),
                         "placeholder": element.get_attribute("placeholder", timeout=1000) or "",
-                        "global": any(element.evaluate("(e, top) => e === top", top, timeout=1000) for top in tops)}))
-            for top in tops:
-                top.dispose()
+                        "global": bool(element.evaluate(IN_TOP_BAR_JS, timeout=1000))}))
         except PlaywrightError as error:
             raise Ambiguous(f"a search box changed while it was read ({type(error).__name__})") from error
     return found
+
+
+def results_of(page: Page, box: Locator) -> Locator | None:
+    """The visible element the search box names in aria-controls or aria-owns (its results
+    list), or None when it names none or that element is not on screen."""
+    try:
+        owned = owned_ids(box)
+    except PlaywrightError:
+        return None
+    for owned_id in owned:
+        try:
+            area = unique_visible(page, lambda f, owned_id=owned_id: f.locator(by_id(owned_id)))
+        except Ambiguous:
+            continue
+        if area is not None:
+            return area
+    return None
+
+
+def listed(page: Page, box: Locator, label: str) -> bool:
+    """Whether a visible element's text is exactly `label`: inside the box's results list when it
+    names one (results_of), else anywhere in the window. The box's own value is not a text node,
+    so typing `label` does not list it."""
+    area = results_of(page, box)
+    if area is None:
+        return bool(visible_across_frames(page, lambda f: f.get_by_text(label, exact=True)))
+    try:
+        return bool(visible_in(area.get_by_text(label, exact=True), page.viewport_size))
+    except PlaywrightError:     # the list went away while the blade reloaded it
+        return False
+
+
+def search_outcome(label: str, before: bool, after: bool) -> tuple[str, str]:
+    """(outcome, observed) of a blade search from whether `label` was listed before and after
+    it. Listed only after: match. Listed before too: match, but the observation says the
+    search's effect is not confirmed, since an unfiltered list, a breadcrumb or a title already
+    showed it. Not listed after: unknown."""
+    if not after:
+        return "unknown", f"no result for '{label}' after the search"
+    if before:
+        return "match", f"'{label}' was listed before the search too; the search's effect is not confirmed"
+    return "match", label
 
 
 def stays_disabled(page: Page, element: Locator) -> bool:
@@ -1216,10 +1256,12 @@ class Runner:
 
     def search_in_blade(self, label: str, record: dict) -> dict:
         """A search item of scope 'blade' ('Search for **"Owner"**' in a role assignment): type
-        `label` into the open blade's or pane's own search box (choose_search_box), cleared
-        first, and wait up to RESULT_TIMEOUT_S for a visible element whose text is `label`. The
-        result is not clicked: the guide's next item does that. Returns `record` with outcome
-        match, or unknown with the reason (no search box, several, no result)."""
+        `label` into the open blade's or pane's own search box (choose_search_box) and wait up to
+        RESULT_TIMEOUT_S for a visible element whose text is `label` (listed). Whether it was
+        listed before the search is read first, so a search that changed nothing is not taken
+        for a result (search_outcome). The result is not clicked: the guide's next item does
+        that. Returns `record` with outcome match, or unknown with the reason (no search box,
+        several, no result)."""
         def look() -> Locator | None:
             boxes = blade_search_boxes(self.page)
             index, why = choose_search_box([descriptor for _, descriptor in boxes])
@@ -1232,21 +1274,18 @@ class Runner:
             if box is None:
                 record.update(outcome="unknown", observed="no search box on the open blade")
                 return record
-            box.clear(timeout=FIND_TIMEOUT_MS)
+            before = listed(self.page, box, label)
             box.fill(label, timeout=FIND_TIMEOUT_MS)
-            # A text node: the box's own value is not one, so only a result can match.
-            listed = in_time(self.page, lambda: visible_across_frames(
-                self.page, lambda f: f.get_by_text(label, exact=True)) or None, ms=RESULT_TIMEOUT_S * 1000)
+            after = bool(in_time(self.page, lambda: listed(self.page, box, label) or None,
+                                 ms=RESULT_TIMEOUT_S * 1000))
         except Ambiguous as error:
             record.update(outcome="unknown", observed=str(error))
             return record
         except (PlaywrightError, LookupError) as error:
             record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
             return record
-        if listed:
-            record.update(outcome="match", observed=label)
-        else:
-            record.update(outcome="unknown", observed=f"no result for '{label}' after the search")
+        outcome, observed = search_outcome(label, before, after)
+        record.update(outcome=outcome, observed=observed)
         return record
 
     def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None) -> dict:
