@@ -2681,7 +2681,7 @@ Live notes from the first run (Entra-only lab tenant, tenant mode):
   (+ Assignments gone) and 1.1.12 (Entra home via the tenant breadcrumb); a workaround for
   1.1.10 "All Users" was removed by hand.
 
-- [ ] **Step 2: Confirm what only the live Portal can show**
+- [x] **Step 2: Confirm what only the live Portal can show** (2026-10-06/07; answers below the list)
 
 Write the answer to each in the PR description and fix `run.py` where one is wrong. Items 1-3
 happen before the first step, so re-run without `-Resume`; for items 4-7 continue with
@@ -2717,7 +2717,36 @@ happen before the first step, so re-run without `-Resume`; for items 4-7 continu
 12. Tenant-wide settings: revert the self-service password reset scope (1.1.12) and the licence
     assignment (1.1.11) by hand.
 
-- [ ] **Step 3: Fix what the run shows, in the right place**
+Answers (runs 20261006-184524 first, 20261006-212711 replay, 20261007-* checks):
+
+1. Confirmed, with a fresh sign-in after deleting the saved session (20261007-110322, exit 0);
+   the session is saved only after the guards pass.
+2. Passes on the right tenant. Another directory cannot be reached: the `#@<tenant>` pin makes
+   sign-in with an account of another tenant fail with AADSTS50020; closing the window exits 254
+   and saves no session.
+3. Not met, accepted: with a saved English session the guard reads `lang="en"` before the Portal
+   applies the account's language, so a run against a Portal switched to Polish started and failed
+   at its first step (20261007-173639). Closed as not planned (#219): the tool is used with an
+   English Portal only.
+4. The first run reported "Group description" ambiguous (two elements); fixed by the field tiers
+   in `one_field`. The replay reported nothing ambiguous; parked blades were not picked.
+5. The UPN prefix and domain are filled as one composite field; Group type, Membership type and
+   Send invite message are reported "already set"; disabled and read-only controls are reported
+   as such (fixed: a blade still loading was taken for a disabled button).
+6. Every Expected Result of the replay was found; none was asked after a failed step. Four are
+   misleading on the Portal (the list needs Refresh, 1.1.10 lands on Overview): #218.
+7. `q` exits 255 with state kept (first run and 20261007-173639); `-Resume` with `y`/`n` continued
+   correctly. Ctrl+C mid-run and the restored environment variables were not exercised live
+   (covered by the Pester tests).
+8. The replay ended `finished: true` and cleanup ran. `s` was not exercised live.
+9. The child `pwsh` cleanup connected to Graph with "Connected to Tenant: <the run's tenant>".
+   The preset-to-another-tenant skip was not exercised live (covered by the Pester tests).
+10. The lab tenant's default domain is its `*.onmicrosoft.com` domain; cleanup removed the users.
+11. The guest survives cleanup (#193) and was removed by hand after both runs.
+12. SSPR scope reverted to None by hand. After #215, 1.1.11 only reviews licences, so nothing to
+    revert there.
+
+- [x] **Step 3: Fix what the run shows, in the right place** (runner fixes c4e798d..22f91b0; guide drift fixed in #215)
 
 - A selector, guard or prompt that does not work on the live Portal: fix in `run.py` (with a unit
   test where it is logic, not Portal shape), re-run with `-Resume`.
@@ -2726,7 +2755,7 @@ happen before the first step, so re-run without `-Resume`; for items 4-7 continu
 - A real drift in the guide: do **not** fix the guide in this PR. Record it; it becomes the first
   finding the tool reports, and the guide fix is its own PR with its own fresh screenshot.
 
-- [ ] **Step 4: Re-run to prove replay**
+- [x] **Step 4: Re-run to prove replay** (2026-10-06, run 20261006-212711 on the guide after #215: all 14 steps automated, exit 0)
 
 ```powershell
 pwsh -File ./tools/Invoke-GuideDrift.ps1 -TenantId <lab tenant id> -Lab 1.1
@@ -2737,7 +2766,7 @@ gap, answered `c` again); the summary matches Step 1's final summary (a run cont
 `-Resume` keeps one run folder and one summary); the exit code equals the number of
 blocking drifts plus unknowns in the summary.
 
-- [ ] **Step 5: Verify the recording and the tree**
+- [x] **Step 5: Verify the recording and the tree** (Python 154 OK, Guide-Drift Pester 118 passed; recording read by hand)
 
 ```powershell
 Invoke-Pester -Path ./tests -Output Normal
@@ -2750,7 +2779,7 @@ GUID, guest UPN, or `viewUrl` with a tenant pin or query); `git status` shows on
 Read the recording once yourself for anything a regex cannot catch: the run account's display
 name, the directory name, the tenant prefix in `rejected` lists.
 
-- [ ] **Step 6: Commit the recording and tick this plan**
+- [x] **Step 6: Commit the recording and tick this plan** (fdf2533, replay recording 9eaa664)
 
 ```powershell
 git add tools/guide-drift/recordings/lab-1.1.json PLAN.md
