@@ -305,22 +305,20 @@ catch {
     exit 1
 }
 
-# Resolve Domain
-Write-Host "Resolving default domain..." -ForegroundColor Yellow
+# Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain, the one the guide's
+# '<name>@[yourtenant].onmicrosoft.com' means (issue #193). Not the default domain, which in a
+# tenant with a custom default domain names users the guide never creates, and no guess when the
+# lookup fails: Test-Lab.ps1 and Remove-LabResource.ps1 resolve it the same way.
+Write-Host "Resolving the initial domain..." -ForegroundColor Yellow
 try {
-    $mgDomain = Get-MgDomain | Where-Object { $_.IsDefault }
-    if ($mgDomain) {
-        $domain = $mgDomain.Id
-        Write-Host "  -> Use Default Domain: $domain" -ForegroundColor Green
-    }
-    else {
-        $domain = "onmicrosoft.com"
-        Write-Host "  -> [WARNING] Default domain not found. Using '$domain'." -ForegroundColor Yellow
-    }
+    $domain = Get-MgDomain -ErrorAction Stop | Where-Object { $_.IsInitial } | Select-Object -First 1 -ExpandProperty Id
+    if (-not $domain) { throw 'the tenant lists no domain marked IsInitial' }
+    Write-Host "  -> Initial domain: $domain" -ForegroundColor Green
 }
 catch {
-    $domain = "onmicrosoft.com"
-    Write-Host "  -> [ERROR] Failed to get domain: $_. Using '$domain'." -ForegroundColor Red
+    Write-Host "  -> [ERROR] Could not determine the tenant's initial *.onmicrosoft.com domain: $_" -ForegroundColor Red
+    $Host.SetShouldExit(1)
+    exit 1
 }
 
 # Define Users (Warcraft Theme)
@@ -387,7 +385,7 @@ Write-Host "`n=== Inviting Guest User ===" -ForegroundColor Cyan
 $guestUsers = @(
     @{
         DisplayName = "Illidan Stormrage"
-        Email       = "illidan@externalcompany.com" # Simulated external email
+        Email       = "istormrage@illidari.com" # The address the guide invites in step 1.1.5
         Message     = "You are not prepared... to miss this collaboration."
     }
 )

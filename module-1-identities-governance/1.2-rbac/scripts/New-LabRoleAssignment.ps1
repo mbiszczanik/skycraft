@@ -129,7 +129,7 @@ $assignments = @(
     # Illidan -> Reader on Platform RG
     @{
         Type           = "Guest"
-        PrincipalName  = "illidan@externalcompany.com" # Search by mail
+        PrincipalName  = "istormrage@illidari.com" # Search by mail
         Role           = "Reader"
         Scope          = "/subscriptions/$subscriptionId/resourceGroups/platform-skycraft-swc-rg"
         ScopeName      = "platform-skycraft-swc-rg"

@@ -246,29 +246,36 @@ catch {
     exit 1
 }
 
-# Get Default Domain
+# Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain, the one the guide's
+# '<name>@[yourtenant].onmicrosoft.com' means (issue #193). Not the default domain, and no guess
+# when the lookup fails - a guessed domain reports users the learner did create as missing.
 try {
-    $domain = (Get-MgDomain | Where-Object { $_.IsDefault }).Id
-    Write-Host "Default Domain: $domain" -ForegroundColor Gray
+    $domain = Get-MgDomain -ErrorAction Stop | Where-Object { $_.IsInitial } | Select-Object -First 1 -ExpandProperty Id
+    if (-not $domain) { throw 'the tenant lists no domain marked IsInitial' }
+    Write-Host "Initial domain: $domain" -ForegroundColor Gray
 }
 catch {
-    $domain = "onmicrosoft.com"
-    Write-Host "  -> [WARNING] Failed to detect domain. using $domain" -ForegroundColor Yellow
+    Write-Host "  -> [ERROR] Could not determine the tenant's initial *.onmicrosoft.com domain: $_" -ForegroundColor Red
+    $Host.SetShouldExit(1)
+    exit 1
 }
+
+# The guest the guide invites in step 1.1.5 (and New-LabUser.ps1 invites).
+$guestEmail = "istormrage@illidari.com"
 
 # Define Expected Users (Warcraft Theme)
 $expectedUsers = @(
     "malfurion.stormrage@$domain"
     "khadgar.archmage@$domain"
     "chromie.timewalker@$domain"
-    "illidan@externalcompany.com" # Guest user (invited by New-LabUser.ps1)
+    $guestEmail
 )
 
 # Validate Users
 Write-Host "`n=== Validating Users ===" -ForegroundColor Cyan
 foreach ($upn in $expectedUsers) {
-    # Special handling for Guest User filtering
-    if ($upn -like "*@externalcompany.com") {
+    # A guest's user principal name is rewritten on invitation, so the guest is found by mail.
+    if ($upn -eq $guestEmail) {
          $filter = "Mail eq '$upn'"
     } else {
          $filter = "UserPrincipalName eq '$upn'"

@@ -75,15 +75,12 @@
     There is no cleanup after a run that did not start (254), was stopped with its state kept
     (255) or did not finish: -Resume needs what it created.
 
-    WHAT LAB 1.1'S CLEANUP DOES NOT UNDO. It deletes the three users, the guest
-    illidan@externalcompany.com and the three SkyCraft groups. It does not remove the guest the
-    run invited (the address in SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL, a different one), and it does
-    not revert the self-service password reset scope (step 1.1.12). Remove those by hand, or use
-    a tenant where leaving them is acceptable. (Step 1.1.11 only reviews licences.)
-    It also looks the three users up on the tenant's DEFAULT domain, while the run creates them
-    on the initial *.onmicrosoft.com domain (the guide's '[yourtenant].onmicrosoft.com'): in a
-    tenant whose default domain is a custom one, the users stay and must be deleted by hand.
-    The prerequisites of the cleanup are checked before the browser opens: missing
+    WHAT LAB 1.1'S CLEANUP DOES NOT UNDO. It deletes the three users (on the tenant's initial
+    *.onmicrosoft.com domain, where the run creates them), the guest the guide names in step 1.1.5
+    and the three SkyCraft groups. It does not remove the guest the run invited (the address in
+    SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL, which replaces the guide's), and it does not revert the
+    self-service password reset scope (step 1.1.12). Remove those by hand, or use a tenant where
+    leaving them is acceptable. (Step 1.1.11 only reviews licences.) The prerequisites of the cleanup are checked before the browser opens: missing
     Microsoft.Graph modules stop the run with exit 1, unless -SkipCleanup.
 
 .PARAMETER SubscriptionId

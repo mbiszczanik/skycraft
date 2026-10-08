@@ -13,9 +13,13 @@
     cannot mistake objects left behind for a clean cleanup (issue #194, the Lab 5.2 fix of #105).
     An object that does not exist is not a failure.
 
+    The users are looked up on the tenant's initial *.onmicrosoft.com domain, the one the guide
+    creates them on, and the guest by the address the guide invites (issue #193).
+
     Exit codes:
       0  every object that exists was deleted (or -WhatIf / a declined prompt skipped it)
-      1  Microsoft Graph sign-in failed (nothing was deleted), or at least one deletion failed
+      1  Microsoft Graph sign-in failed or the initial domain could not be determined (nothing
+         was deleted), or at least one deletion failed
 
     Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
     "pwsh -File" for any script that declares #Requires -Modules for a module it has to
@@ -273,14 +277,19 @@ catch {
     exit 1
 }
 
-# Resolve Domain
+# Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain, the one the guide's
+# '<name>@[yourtenant].onmicrosoft.com' means (issue #193). Not the default domain, which in a
+# tenant with a custom default domain leaves the guide's users in place, and no guess when the
+# lookup fails: nothing is deleted by a name this script could not work out.
 try {
-    $domain = (Get-MgDomain | Where-Object { $_.IsDefault }).Id
-    Write-Host "Default Domain: $domain" -ForegroundColor Gray
+    $domain = Get-MgDomain -ErrorAction Stop | Where-Object { $_.IsInitial } | Select-Object -First 1 -ExpandProperty Id
+    if (-not $domain) { throw 'the tenant lists no domain marked IsInitial' }
+    Write-Host "Initial domain: $domain" -ForegroundColor Gray
 }
 catch {
-    $domain = "onmicrosoft.com"
-    Write-Host "  -> [WARNING] Failed to detect domain. using $domain" -ForegroundColor Yellow
+    Write-Host "  -> [ERROR] Could not determine the tenant's initial *.onmicrosoft.com domain: $_" -ForegroundColor Red
+    $Host.SetShouldExit(1)
+    exit 1
 }
 
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
@@ -318,7 +327,7 @@ foreach ($upn in $usersToDelete) {
 
 # Cleanup Guest
 Write-Host "`nDeleting Guest User..." -ForegroundColor Yellow
-$guestEmail = "illidan@externalcompany.com"
+$guestEmail = "istormrage@illidari.com" # The address the guide invites in step 1.1.5
 try {
     # Find guest by mail
     $guest = Get-MgUser -Filter "Mail eq '$guestEmail'" -ErrorAction SilentlyContinue

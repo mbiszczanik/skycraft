@@ -20,7 +20,7 @@
 ### External User
 
 - [ ] **Illidan Stormrage** invited
-  - Email: illidan@externalcompany.com
+  - Email: istormrage@illidari.com
   - Type: Guest
   - Status: Invitation Pending (or Accepted)
 
