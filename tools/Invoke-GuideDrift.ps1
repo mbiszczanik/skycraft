@@ -54,10 +54,14 @@
     *.onmicrosoft.com domain (and restores afterwards). Set SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL to an
     address you control before running lab 1.1.
 
-    WHEN A STEP FAILS the run asks: c = you did it by hand, continue; s = skip the rest and
-    finish; q = stop and keep the state (exit 255; continue with -Resume). On -Resume it shows the
-    previous step's view and asks whether the step in flight finished (y), must be redone (n) or
-    skipped (s).
+    WHEN A STEP FAILS the run asks: c = you did it by hand, continue; s = skip this step and
+    continue with the next one (it asks for the reason, which summary.md lists under 'skipped';
+    the step's findings still count in the exit code, and a later step that needed it may fail
+    and is asked about in turn); e = end the lab: skip the rest and finish; q = stop and keep the
+    state (exit 255; continue with -Resume). Closed input ends the lab. A run that went on past a
+    skipped step, or ended with e, is finished, so cleanup runs. On -Resume it shows the previous
+    step's view and asks whether the step in flight finished (y), must be redone (n) or is skipped
+    (s); a step skipped with s before the stop is passed over.
 
     CLEANUP IS THE LAB'S OWN, AND ONLY AFTER A FINISHED RUN. This script has no deletion logic.
     Unless -SkipCleanup, and only when run.py ended normally and the state file confirms it

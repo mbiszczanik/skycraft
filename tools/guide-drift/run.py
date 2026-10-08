@@ -30,10 +30,15 @@ FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; w
 that finds nothing, the blade menu's collapsed groups are opened once ('Expand all headers') and
 the looking goes on to the same deadline.
 
-When a step does not go through, the person chooses: finish it by hand and continue, skip the
-rest of the lab, or stop and keep the state. --state records the completed steps and the step a
--Resume starts at (the one in progress, or the one that failed); a resume first asks whether
-that step finished. A run that ends normally marks the state finished, and it cannot be resumed.
+When a step does not go through, the person chooses: c, finish it by hand and continue; s, skip
+this step and continue with the next one, giving the reason, which the summary lists under
+'skipped' (the step's own findings stay counted, and a later step that needed it may fail too
+and is asked about the same way); e, end the lab: skip the rest and finish; or q, stop and keep
+the state. Closed input ends the lab. --state records the completed steps (a skipped step
+among them, so a resume passes over it) and the step a -Resume starts at (the one in progress,
+or the one that failed); a resume first asks whether that step finished (y), must be redone (n)
+or is skipped (s, as above but without a reason). A run that ends normally, whatever was
+skipped, marks the state finished, and it cannot be resumed.
 A resumed run is the same run: it keeps the state's run id (ignoring --run-id), writes into the
 same --log-dir/<run id>/ folder, and its summary and exit code cover every step of both parts.
 
@@ -1134,11 +1139,14 @@ def start_point(portal_ids: list[str], state: dict, from_step: str | None, resum
 
 
 class Runner:
+    # A letter means the same in both prompts: 's' skips one step and the run goes on.
     FAILURE_PROMPT = (
         "  c  I did it by hand: mark the step done and continue\n"
-        "  s  skip the rest of the lab and finish (the entry point then cleans up)\n"
+        "  s  skip this step and continue with the next step (you give the reason)\n"
+        "  e  end the lab: skip the rest of the lab and finish (the entry point then cleans up)\n"
         "  q  stop here and keep the state for -Resume (no clean-up)\n> "
     )
+    REASON_PROMPT = "Why is the step skipped? (goes into the summary)\n> "
     RESUME_PROMPT = (
         "  y  it finished: mark it done and continue (leave the Portal where the step ended)\n"
         "  n  it did not: bring the Portal back to the view above, then redo it from its first item\n"
@@ -1499,9 +1507,12 @@ class Runner:
             record.update(outcome="match")
         return record
 
-    def skip_step(self, step: dict, because: str) -> None:
+    def skip_step(self, step: dict, because: str, reason: str | None = None) -> None:
+        """A 'skipped' record. because: the step whose failure caused the skip, or the step
+        itself when the person skipped it (on resume, or after it failed). reason: why the
+        person skipped a step that failed, kept as observed; on resume there is none."""
         record = self.new_record(step, "action", None)
-        record.update(outcome="skipped", skippedBecause=because)
+        record.update(outcome="skipped", skippedBecause=because, observed=reason)
         self.write(record)
 
     # -- state and resume -------------------------------------------------------------------
@@ -1572,6 +1583,9 @@ class Runner:
                 self.save_state(completed, None)
                 continue
             answer = self.ask_after_failure(step)
+            reason = self.ask_skip_reason() if answer == "s" else None
+            if answer == "s" and reason is None:    # input closed: nobody is there to go on
+                answer = "e"
             if answer == "c":
                 record = self.new_record(step, "action", None)
                 record.update(outcome="match", observed="done by hand")
@@ -1579,6 +1593,11 @@ class Runner:
                 completed.append(step["id"])
                 self.save_state(completed, None)
             elif answer == "s":
+                # Its findings stay counted; a resume passes over it, as over a step skipped there.
+                self.skip_step(step, step["id"], self.redactor.redact(reason))
+                completed.append(step["id"])
+                self.save_state(completed, None)
+            elif answer == "e":
                 self.first_failure = step["id"]     # the state keeps it in flight
             else:
                 self.finish()
@@ -1588,10 +1607,10 @@ class Runner:
         return self.finish()
 
     def ask_after_failure(self, step: dict) -> str:
-        """'c' (done by hand), 's' (skip the rest) or 'q' (stop, keep the state). Closed input
-        means nobody is there to finish the lab by hand: 's'. The reasons are printed first, one
-        line per record of the step that is not a match, redacted: results.jsonl is not where
-        the person looks."""
+        """'c' (done by hand), 's' (skip this step), 'e' (end the lab: skip the rest) or 'q'
+        (stop, keep the state). Closed input means nobody is there to finish the lab by hand:
+        'e'. The reasons are printed first, one line per record of the step that is not a
+        match, redacted: results.jsonl is not where the person looks."""
         print(f"\nStep {step['id']} did not go through:")
         for r in self.records:
             if r["step"] == step["id"] and r["outcome"] != "match":
@@ -1603,10 +1622,19 @@ class Runner:
         while True:
             answer = self.prompt(self.FAILURE_PROMPT)
             if answer is None:
-                return "s"
-            if answer in ("c", "s", "q"):
+                return "e"
+            if answer in ("c", "s", "e", "q"):
                 return answer
-            print("Answer c, s or q.")
+            print("Answer c, s, e or q.")
+
+    def ask_skip_reason(self) -> str | None:
+        """Why the person skips a step that failed ('no spare licences in this tenant'), for the
+        summary; asked again while empty. None when input is closed."""
+        while True:
+            reason = self.prompt(self.REASON_PROMPT)
+            if reason is None or reason:
+                return reason
+            print("A reason is needed: the summary says why the step was not checked.")
 
     def finish(self) -> int:
         by_severity: dict[str, list[dict]] = {"blocking": [], "misleading": [], "cosmetic": []}
@@ -1639,8 +1667,7 @@ class Runner:
         lines += [f"- step {r['step']} **{r['label']}**: {r['observed']}" for r in unconfirmed] or ["- none"]
         lines.append("")
         lines.append(f"## skipped ({len(skipped)})")
-        lines += [f"- step {r['step']} skipped on resume" if r["skippedBecause"] == r["step"]
-                  else f"- step {r['step']} because step {r['skippedBecause']} failed" for r in skipped] or ["- none"]
+        lines += [self.skipped_line(r) for r in skipped] or ["- none"]
         lines.append("")
         by_hand = [r for r in self.records if r["outcome"] == "match" and r["observed"] == "done by hand"]
         lines.append(f"## done by hand ({len(by_hand)})")
@@ -1665,6 +1692,17 @@ class Runner:
         (self.run_dir / "summary.md").write_text(summary + "\n", encoding="utf-8")
         print("\n" + summary)
         return min(len(by_severity["blocking"]) + len(unknown), 250)
+
+    @staticmethod
+    def skipped_line(record: dict) -> str:
+        """A 'skipped' record in the summary (skip_step): skipped by the person after it failed,
+        with their reason; skipped on resume; or skipped because an earlier step failed and the
+        person ended the lab there."""
+        if record["skippedBecause"] != record["step"]:
+            return f"- step {record['step']} because step {record['skippedBecause']} failed"
+        if record.get("observed"):
+            return f"- step {record['step']} skipped after it failed: {record['observed']}"
+        return f"- step {record['step']} skipped on resume"
 
 
 def main(argv: list[str] | None = None) -> int:
