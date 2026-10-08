@@ -1,6 +1,7 @@
-"""Unit tests for parse.py's reading of one list item (issue #189): which searches are the
-Portal's global search and which are a blade's own search box. The full guides and the other
-parser rules are covered by tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
+"""Unit tests for parse.py's reading of one list item: which searches are the Portal's global
+search and which are a blade's own search box (issue #189), and which '- Label: value' items with
+a plain label are fields (issue #198). The full guides and the other parser rules are covered by
+tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
 """
@@ -41,6 +42,90 @@ class SearchScopeTests(unittest.TestCase):
                              ("Open **Settings** and search for **Advanced**", ["Settings", "Advanced"])):
             with self.subTest(text=text):
                 self.assertEqual(self.item(text), {"kind": "action", "labels": labels, "line": 7})
+
+
+class PlainLabelFieldTests(unittest.TestCase):
+    """'- Label: value' with a plain label is a field when the value starts with a bold or code
+    span (#198). Most texts here are list items from the guides."""
+
+    def item(self, text: str) -> dict | None:
+        return parse.list_item(text, 7)
+
+    def field(self, label: str, value: str) -> dict:
+        return {"kind": "field", "label": label, "value": value, "line": 7}
+
+    def test_a_bold_or_code_value_makes_a_field(self) -> None:
+        for text, label, value in (("Lock type: **Delete**", "Lock type", "Delete"),
+                                   ("Name: `rg-test-no-tag`", "Name", "rg-test-no-tag"),
+                                   ("Retention (days): **7**", "Retention (days)", "7"),
+                                   ("Check every: **1 minute**", "Check every", "1 minute"),
+                                   ("Type: **Virtual Machine**", "Type", "Virtual Machine"),
+                                   ("Resource: `dev-skycraft-swc-auth-vm`", "Resource", "dev-skycraft-swc-auth-vm")):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), self.field(label, value))
+
+    def test_the_value_is_the_span_and_a_remark_after_it_is_dropped(self) -> None:
+        for text, label, value in (("Name: `staging`.", "Name", "staging"),
+                                   ("Public IP: `prod-skycraft-swc-lb-pip` (use existing)", "Public IP", "prod-skycraft-swc-lb-pip"),
+                                   ("Remote IP: **8.8.8.8** (Example external IP)", "Remote IP", "8.8.8.8"),
+                                   ("Policy sub-type: **Enhanced**. Azure defaults VM deployments to Trusted Launch, and a", "Policy sub-type", "Enhanced"),
+                                   ("Anonymous access level: **Private (no anonymous access)** - the dropdown still offers Blob and Container, but leave it at Private",
+                                    "Anonymous access level", "Private (no anonymous access)"),
+                                   ("Region: **Sweden Central** (the wizard defaults to East US; `Test-Lab.ps1` looks under `NetworkWatcher_swedencentral`)",
+                                    "Region", "Sweden Central"),
+                                   ("Resource: `prod-skycraft-swc-auth-vm` *(if Lab 3.2 prod environment was deployed)*", "Resource", "prod-skycraft-swc-auth-vm")):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), self.field(label, value))
+
+    def test_a_plain_text_value_is_not_a_field(self) -> None:
+        # Nearly every plain value in the guides is a line of a list to check, not a form.
+        for text in ("Name: Malfurion Stormrage",
+                     "Address space: 10.0.0.0/16",
+                     "Compliance state: Compliant, Non-compliant, Not started",
+                     "Priority 100: Allow SSH (22) from Bastion (10.0.0.0/26)",
+                     "Subscription: yours",
+                     "Source ASG: Select `dev-skycraft-swc-asg-auth` and `dev-skycraft-swc-asg-world`"):
+            with self.subTest(text=text):
+                self.assertIsNone(self.item(text))
+
+    def test_an_instruction_before_the_colon_is_not_a_label(self) -> None:
+        for text, expected in (("Enter: `10.0.0.0/16`", None),
+                               ("Add tag: `Environment` = `Test`", None),
+                               ("Select your VM: `dev-skycraft-swc-auth-vm`.", None),
+                               ("Choose resource group: `prod-skycraft-swc-rg`", None),
+                               ("Create new private DNS zone: `privatelink.blob.core.windows.net`", None),
+                               ("Link to VNet: `prod-skycraft-swc-vnet`", None),
+                               ("Type the VMSS name to confirm: `prod-skycraft-swc-world-vmss`", None),
+                               ("Navigate to the newly created NSG: **dev-skycraft-swc-auth-nsg**",
+                                {"kind": "action", "labels": ["dev-skycraft-swc-auth-nsg"], "line": 7}),
+                               ('Search for: **"Require a tag on resource groups"**',
+                                {"kind": "action", "labels": ["Require a tag on resource groups"], "line": 7})):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), expected)
+
+    def test_captions_and_prose_are_not_fields(self) -> None:
+        for text in ("Example: `skycraft-auth-123.swedencentral.azurecontainer.io`",
+                     "Note: `this` is a caption",
+                     "_Note: This subnet was created in Lab 2.1 specifically for this purpose._",
+                     "Download from [https://azure.microsoft.com/features/storage-explorer/](https://azure.microsoft.com/features/storage-explorer/)",
+                     "See https://`example`",
+                     "Once the deployment finishes the Portal shows its name: `skycraft-vm`"):
+            with self.subTest(text=text):
+                self.assertIsNone(self.item(text))
+
+    def test_several_bold_spans_or_a_chain_after_the_label_stay_clicks(self) -> None:
+        for text, kind, labels in (("Logs: **StorageRead** and **StorageWrite**.", "action", ["StorageRead", "StorageWrite"]),
+                                   ("Frequency: **Daily** at **02:00 AM**.", "action", ["Daily", "02:00 AM"]),
+                                   ("Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`.",
+                                    "action", ["Send to Log Analytics workspace"]),
+                                   ("Flow log type: **Virtual network** → **+ Select target resource** → **Confirm selection**",
+                                    "navigation", ["Virtual network", "+ Select target resource", "Confirm selection"])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), {"kind": kind, "labels": labels, "line": 7})
+
+    def test_a_bold_label_still_takes_the_whole_value(self) -> None:
+        self.assertEqual(self.item("**Policy enforcement**: Enabled"), self.field("Policy enforcement", "Enabled"))
+        self.assertEqual(self.item("**Region**: **Sweden Central** (recommended)"), self.field("Region", "Sweden Central (recommended)"))
 
 
 if __name__ == "__main__":
