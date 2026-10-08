@@ -11,7 +11,8 @@
       has '#### Option 1:' or '#### Option A:' headings only the first option is read (plus the
       step's Expected Result); bold spans that are not UI elements are dropped; 'A -> B' chains
       become navigation; 'Search for **X**' becomes a search of the Portal;
-      '- **Label**: value' list items and Field | Value tables become fields,
+      '- **Label**: value' list items and Field | Value tables become fields, and so does
+      '- Label: value' when the value is a bold or code span (#198);
       Name | Value and Tag | Value tables become tags; the images a step references are collected.
 
       THE 17 GUIDES - every module-*/X.Y-*/lab-guide-X.Y.md parses, its step ids match its
@@ -359,6 +360,30 @@ Describe 'parse.py - forms and markers found in the real guides' {
         @($script:Real.steps[0].items | Where-Object { $_.kind -eq 'field' -and $_.label -eq 'Note' }) | Should -BeNullOrEmpty
     }
 
+    It 'reads "- Label: value" with a plain label as a field when the value is a bold or code span (#198)' {
+        $guide = ConvertFrom-GuideFixture -Markdown (@(
+                '### Step 9.9.1: Plain labels',
+                '',
+                '1. Click **Locks** → **+ Add**',
+                '2. Create lock:',
+                '   - Lock name: `lock-no-delete-platform`',
+                '   - Lock type: **Delete**',
+                '   - Public IP: `prod-skycraft-swc-lb-pip` (use existing)',
+                '   - Address space: 10.0.0.0/16',
+                '   - Select your VM: `dev-skycraft-swc-auth-vm`.',
+                '   - Note: `this` is a caption',
+                '   - Logs: **StorageRead** and **StorageWrite**.',
+                '3. Click **OK**'
+            ) -join "`n")
+        $items = @($guide.steps[0].items)
+        @($items.kind) | Should -Be @('navigation', 'field', 'field', 'field', 'action', 'action')
+        $fields = @($items | Where-Object kind -eq 'field')
+        @($fields.label) | Should -Be @('Lock name', 'Lock type', 'Public IP')
+        @($fields.value) | Should -Be @('lock-no-delete-platform', 'Delete', 'prod-skycraft-swc-lb-pip') -Because 'a remark after the span is not part of the value'
+        @($items[4].labels) | Should -Be @('StorageRead', 'StorageWrite') -Because 'several bold spans after a plain label stay clicks'
+        @($items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Delete' -Because 'the value of a field is never clicked'
+    }
+
     It 'keeps chains and actions around list-item fields' {
         @($script:Real.steps[0].items[0].labels) | Should -Be @('+ Create', 'Container App')
         $script:Real.steps[0].items[0].kind | Should -Be 'navigation'
@@ -582,6 +607,23 @@ Describe 'parse.py - lab 1.2, global and in-blade searches' {
         $searches = @(($script:Lab12.steps | Where-Object id -eq '1.2.4').items | Where-Object kind -eq 'search')
         @($searches | ForEach-Object { $_.labels }) | Should -Be @('Owner', 'Malfurion Stormrage')
         @($searches.scope) | Should -Be @('blade', 'blade')
+    }
+}
+
+Describe 'parse.py - lab 1.3, a lock type is a field, not a click on Delete' {
+    BeforeAll {
+        $guide = Join-Path $script:RepoRoot 'module-1-identities-governance/1.3-governance/lab-guide-1.3.md'
+        $out   = Join-Path $TestDrive 'lab-1.3.json'
+        & $script:Python $script:Parser $guide --out $out --repo-root $script:RepoRoot
+        $script:Lab13 = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+    }
+
+    It 'reads step 1.3.12 as the lock form: name, type and notes as fields' {
+        $step = $script:Lab13.steps | Where-Object id -eq '1.3.12'
+        @($step.items.kind) | Should -Be @('action', 'navigation', 'field', 'field', 'field', 'action')
+        @(($step.items | Where-Object kind -eq 'field').label) | Should -Be @('Lock name', 'Lock type', 'Notes')
+        ($step.items | Where-Object label -eq 'Lock type').value | Should -Be 'Delete'
+        @($step.items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Delete'
     }
 }
 

@@ -128,8 +128,8 @@ class RunBookkeepingTests(RunnerTestCase):
         self.assertIsNone(self.state()["inFlight"])
         self.assertTrue(self.state()["finished"])
 
-    def test_skip_the_rest_keeps_the_failed_step_out_of_completed(self) -> None:
-        r = self.runner(answers=["s"], failing={"9.9.2"})
+    def test_end_the_lab_keeps_the_failed_step_out_of_completed(self) -> None:
+        r = self.runner(answers=["e"], failing={"9.9.2"})
         self.assertEqual(self.quietly(r.run), 0)
         self.assertEqual(r.ran, ["9.9.1", "9.9.2"])
         self.assertEqual(r.first_failure, "9.9.2")
@@ -144,6 +144,62 @@ class RunBookkeepingTests(RunnerTestCase):
         self.assertEqual(r.ran, ["9.9.1"])
         self.assertEqual(self.state()["inFlight"], "9.9.1")
         self.assertTrue(self.state()["finished"])
+
+    def test_skip_this_step_records_the_reason_and_continues_with_the_next(self) -> None:
+        r = self.runner(answers=["s", "", "no spare licences"], unknown={"9.9.2"})
+        self.assertEqual(self.quietly(r.run), 1)        # the failure that caused the skip still counts
+        self.assertEqual(r.ran, ["9.9.1", "9.9.2", "9.9.4", "9.9.5"])
+        self.assertIsNone(r.first_failure)
+        self.assertEqual(self.state()["completed"], ["9.9.1", "9.9.2", "9.9.4", "9.9.5"])
+        self.assertIsNone(self.state()["inFlight"])
+        self.assertTrue(self.state()["finished"])       # a finished run: the entry point cleans up
+        skipped = [(x["step"], x["skippedBecause"], x["observed"]) for x in r.records if x["outcome"] == "skipped"]
+        self.assertEqual(skipped, [("9.9.2", "9.9.2", "no spare licences")])
+        self.assertEqual(r.ask.prompts[1:], [run.Runner.REASON_PROMPT] * 2)     # an empty reason: asked again
+        results = (r.run_dir / "results.jsonl").read_text(encoding="utf-8")
+        self.assertIn('"outcome": "skipped"', results)
+        summary = (r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## unknown (1)\n- step 9.9.2 action **Missing button**: not found", summary)
+        self.assertIn("## skipped (1)\n- step 9.9.2 skipped after it failed: no spare licences\n", summary)
+
+    def test_every_failed_step_after_a_skip_gets_the_same_prompt(self) -> None:
+        r = self.runner(answers=["s", "optional in this tenant", "e"], failing={"9.9.2", "9.9.4"})
+        self.assertEqual(self.quietly(r.run), 0)
+        self.assertEqual(r.ran, ["9.9.1", "9.9.2", "9.9.4"])
+        self.assertEqual([p for p in r.ask.prompts if p == run.Runner.FAILURE_PROMPT], [run.Runner.FAILURE_PROMPT] * 2)
+        skipped = [(x["step"], x["skippedBecause"]) for x in r.records if x["outcome"] == "skipped"]
+        self.assertEqual(skipped, [("9.9.2", "9.9.2"), ("9.9.5", "9.9.4")])
+        self.assertEqual((self.state()["completed"], self.state()["inFlight"]), (["9.9.1", "9.9.2"], "9.9.4"))
+        summary = (r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("- step 9.9.2 skipped after it failed: optional in this tenant\n"
+                      "- step 9.9.5 because step 9.9.4 failed", summary)
+
+    def test_closed_input_at_the_reason_prompt_ends_the_lab(self) -> None:
+        r = self.runner(answers=["s"], failing={"9.9.2"})
+        self.assertEqual(self.quietly(r.run), 0)
+        self.assertEqual(r.ran, ["9.9.1", "9.9.2"])
+        self.assertEqual(r.first_failure, "9.9.2")
+        self.assertEqual((self.state()["completed"], self.state()["inFlight"]), (["9.9.1"], "9.9.2"))
+        self.assertTrue(self.state()["finished"])
+
+    def test_the_reason_for_a_skip_is_redacted(self) -> None:
+        r = self.runner(answers=["s", "contoso.onmicrosoft.com has no licences"], failing={"9.9.2"})
+        self.quietly(r.run)
+        self.assertEqual([x["observed"] for x in r.records if x["outcome"] == "skipped"],
+                         ["[tenantdomain] has no licences"])
+
+    def test_s_skips_one_step_in_both_prompts(self) -> None:
+        def line(prompt: str, letter: str) -> str:
+            return next(text for text in prompt.splitlines() if text.startswith(f"  {letter}  "))
+        for prompt in (run.Runner.FAILURE_PROMPT, run.Runner.RESUME_PROMPT):
+            with self.subTest(prompt=prompt):
+                self.assertIn("continue with the next step", line(prompt, "s"))
+        self.assertIn("skip the rest of the lab", line(run.Runner.FAILURE_PROMPT, "e"))
+        r = self.runner(answers=["x", "q"])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(r.ask_after_failure({"id": "9.9.2"}), "q")
+        self.assertIn("Answer c, s, e or q.", out.getvalue())
 
     def test_done_by_hand_marks_the_step_done_and_continues(self) -> None:
         r = self.runner(answers=["x", "c"], failing={"9.9.2"})
@@ -464,6 +520,14 @@ class SummaryTests(RunnerTestCase):
         self.assertIn("## unknown (1)\n- step 9.9.2 field **Group type**: ambiguous: 2 visible elements match\n\n"
                       "## unconfirmed searches (0)\n- none\n\n## skipped (1)", summary)
 
+    def test_finish_tells_a_step_skipped_after_it_failed_from_one_skipped_on_resume(self) -> None:
+        self.add("action", None, outcome="skipped", skippedBecause="9.9.2", observed="no spare licences")
+        self.add("action", None, outcome="skipped", skippedBecause="9.9.2")
+        self.assertEqual(self.quietly(self.r.finish), 0)        # a skip is no finding of its own
+        summary = (self.r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## skipped (2)\n- step 9.9.2 skipped after it failed: no spare licences\n"
+                      "- step 9.9.2 skipped on resume\n", summary)
+
     def test_finish_lists_unconfirmed_searches_after_unknown_without_counting_them(self) -> None:
         observed = run.search_outcome("Owner", before=True, after=True)[1]
         self.add("search", "Owner", outcome="match", observed=observed)
@@ -521,6 +585,17 @@ class OneRunAcrossResumeTests(RunnerTestCase):
         summary = self.summary()
         self.assertIn("- step 9.9.4 action **Missing button**: not found", summary)
         self.assertIn("## done by hand (1)\n- step 9.9.4", summary)
+
+    def test_a_step_skipped_after_it_failed_is_passed_over_and_listed_after_a_stop(self) -> None:
+        state = self.stopped_run(answers=["s", "no spare licences", "q"], unknown={"9.9.2", "9.9.4"})
+        self.assertEqual((state["completed"], state["inFlight"]), (["9.9.1", "9.9.2"], "9.9.4"))
+        r = self.runner(answers=["y"], resume=True, run_id="second", state=state)
+        self.assertEqual(self.quietly(lambda: r.run(state)), 2)
+        self.assertEqual(r.ran, ["9.9.5"])
+        self.assertTrue(self.state()["finished"])
+        summary = self.summary()
+        self.assertIn("## unknown (2)", summary)
+        self.assertIn("## skipped (1)\n- step 9.9.2 skipped after it failed: no spare licences\n", summary)
 
     def test_a_redone_step_replaces_its_stopped_attempt(self) -> None:
         state = self.stopped_run(answers=["q"], unknown={"9.9.4"})
