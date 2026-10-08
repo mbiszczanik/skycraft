@@ -11,8 +11,9 @@ session saved to --auth-state, so the next run skips the password.
 
 Everything a run leaves behind goes under --log-dir/<run id>/ and is gitignored:
 results.jsonl (one record per check, appended as the run goes), Step-X.Y.N.png (full window,
-for manual cropping and anonymisation), summary.md. Only the recording is written back into
-the repository.
+for manual cropping and anonymisation), summary.md, and blade-<step>-<line>.aria.txt for a label that
+was not found (the outline the loading check read, redacted). Only the recording is written back
+into the repository.
 
 The runner acts only on a visible element within the window's width (the Portal parks earlier
 blades off to the left; below the fold is fine, it scrolls there first), and only on one:
@@ -28,7 +29,11 @@ next item clicks it. Plain text counts only when it
 is, or sits inside, a link, button or other interactive element. A label is looked for until
 FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; when SETTLE_MS of
 that finds nothing, the blade menu's collapsed groups are opened once ('Expand all headers') and
-the looking goes on to the same deadline.
+the looking goes on to the same deadline. When the deadline passes while a blade is still
+loading (blade_still_loading: a close button reads "Close content 'undefined'", or the newest
+blade's title heading has no content after it), the console says so once and the label is looked
+for up to BLADE_LOAD_TIMEOUT_MS more (BLADE_EMPTY_TIMEOUT_MS for a titled blade); once the blade
+has rendered, it is looked for FIND_TIMEOUT_MS again. Only then is the person asked.
 
 When a step does not go through, the person chooses: c, finish it by hand and continue; s, skip
 this step and continue with the next one, giving the reason, which the summary lists under
@@ -80,6 +85,25 @@ FIND_TIMEOUT_MS = 8000
 CHECK_TIMEOUT_MS = 2000     # set_checked() before the label is tried, and the wait for its effect
 LATE_CLICK_MS = 750         # how long an intercepted set_checked() may take to show, before the label
 RESULT_TIMEOUT_S = 15
+# How much longer a label is looked for while the newest blade is still loading (issue #233): on a
+# slow Portal a blade's frame opens well before its form or list does.
+BLADE_LOAD_TIMEOUT_MS = 60000
+# The same for a blade whose title is there but whose content is not: a blade that has nothing
+# but its title and buttons for good (a read-only summary) costs this much, not a minute.
+BLADE_EMPTY_TIMEOUT_MS = 20000
+# A blade's or pane's close button, named after its title: "Close content 'New Group'". The title
+# reads 'undefined' while the blade's content is still loading.
+BLADE_CLOSE = re.compile(r"^Close content '(?P<title>.*)'$")
+UNTITLED_BLADE = "undefined"
+# What blade_still_loading() answers: a close button titled 'undefined', or a titled blade with no
+# content after its heading.
+BLADE_UNTITLED, BLADE_EMPTY = "untitled", "empty"
+# What a rendered blade shows after its title: form controls, list rows, tabs, tables, prose.
+# Buttons, links and bare text do not count, as the blade's header has them (Maximize, Close)
+# before anything else renders.
+BLADE_CONTENT_ROLES = ("textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "spinbutton",
+                       "slider", "listbox", "row", "tab", "tabpanel", "table", "grid", "paragraph",
+                       "term", "definition")
 CANDIDATE_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "textbox",
                    "combobox", "checkbox", "radio", "heading", "cell")
 FIELD_ROLES = ("textbox", "combobox", "checkbox", "radio")
@@ -201,6 +225,51 @@ def all_frames(page: Page) -> list[Frame]:
     return [page.main_frame] + [f for f in page.frames if f is not page.main_frame]
 
 
+def aria_outline(page: Page) -> list[tuple[str, str]]:
+    """(role, name) of every element line of the accessibility tree, across frames (main frame
+    first), in tree order; the name is '' when the element has none. What blade_still_loading()
+    reads. A child frame whose iframe lies outside the window's columns is left out: Entra ID
+    blades render in iframes and the Portal parks earlier ones off to the left, where their rows
+    would follow the new blade's heading and pass for its content. So is a frame that cannot be
+    read."""
+    outline: list[tuple[str, str]] = []
+    frames = all_frames(page)
+    for frame in frames:
+        if frame is not frames[0] and not frame_in_window(frame, page.viewport_size):
+            continue
+        try:
+            snapshot = frame.locator("body").aria_snapshot(timeout=2000)
+        except PlaywrightError:     # timed out, or the frame went away while the Portal navigated
+            continue
+        for line in snapshot.splitlines():
+            m = ARIA_FIRST_LINE.match(line)
+            if m:
+                outline.append((m.group("role"), m.group("name") or ""))
+    return outline
+
+
+def blade_still_loading(outline: list[tuple[str, str]]) -> str | None:
+    """Whether a blade's frame is open while its content has not rendered yet (issue #233), from
+    aria_outline(): BLADE_UNTITLED when any close button reads "Close content 'undefined'";
+    BLADE_EMPTY when the newest blade (the one whose "Close content '<title>'" button comes last)
+    has a heading named after its title but no content (BLADE_CONTENT_ROLES) after the later of
+    the two; None otherwise. The top bar's search box and an older blade's fields come before
+    them, so they do not count. Without a close button, or without the title heading, nothing is
+    said to be loading and the lookup keeps its normal time."""
+    closes = [(index, m.group("title")) for index, (role, name) in enumerate(outline)
+              if role == "button" and (m := BLADE_CLOSE.match(name))]
+    if not closes:
+        return None
+    if any(title == UNTITLED_BLADE for _, title in closes):
+        return BLADE_UNTITLED
+    close_at, title = closes[-1]
+    headings = [index for index, (role, name) in enumerate(outline) if role == "heading" and name == title]
+    if not headings:
+        return None
+    start = max(close_at, headings[-1])
+    return None if any(role in BLADE_CONTENT_ROLES for role, _ in outline[start + 1:]) else BLADE_EMPTY
+
+
 def aria_lines(page: Page) -> list[tuple[str, str, int]]:
     """(role, name, count) of every named element the accessibility tree exposes, across frames,
     in first-seen order. count is how many elements share that role and name: the Portal keeps
@@ -244,10 +313,30 @@ def in_window_columns(element: Locator, viewport: dict | None) -> bool:
     element into view before acting on it."""
     if viewport is None:
         return True
-    box = element.bounding_box(timeout=1000)
+    return overlaps_columns(element.bounding_box(timeout=1000), viewport)
+
+
+def overlaps_columns(box: dict | None, viewport: dict) -> bool:
+    """Whether a bounding box (None: not rendered) overlaps the window's columns."""
     if box is None:
         return False
     return box["x"] + box["width"] > 0 and box["x"] < viewport["width"]
+
+
+def frame_in_window(frame: Frame, viewport: dict | None) -> bool:
+    """Whether a child frame's iframe overlaps the window's columns, as in_window_columns() asks
+    of an element; the iframe is an ElementHandle, whose bounding_box() takes no timeout. A frame
+    whose iframe cannot be read (it went away) does not count."""
+    if viewport is None:
+        return True
+    try:
+        iframe = frame.frame_element()
+        try:
+            return overlaps_columns(iframe.bounding_box(), viewport)
+        finally:
+            iframe.dispose()
+    except PlaywrightError:
+        return False
 
 
 def visible_in(locator: Locator, viewport: dict | None) -> list[Locator]:
@@ -1239,6 +1328,61 @@ class Runner:
             return element
         return look
 
+    def wait_for_blade(self, step: dict, item: dict, label: str,
+                       look: Callable[[], Locator | None]) -> Locator | None:
+        """After `look` found nothing for FIND_TIMEOUT_MS: when a blade is still loading
+        (blade_still_loading), say so once and go on looking until it has rendered or its limit
+        has passed (BLADE_LOAD_TIMEOUT_MS while a title reads 'undefined', BLADE_EMPTY_TIMEOUT_MS
+        for a titled blade without content); once it has rendered, look for FIND_TIMEOUT_MS again,
+        as its controls come a moment after it. None at once when no blade is loading, so a label
+        missing from a rendered blade is asked about after the normal time (issue #233). Whenever
+        the label is still not found, the outline is kept (save_blade_outline)."""
+        outline = aria_outline(self.page)
+        loading = blade_still_loading(outline)
+        if loading is None:
+            self.save_blade_outline(step, item, label, outline)
+            return None
+        limit = BLADE_LOAD_TIMEOUT_MS if loading == BLADE_UNTITLED else BLADE_EMPTY_TIMEOUT_MS
+        print(f"The blade is still loading: waiting up to {limit // 1000} s for it "
+              f"before asking about '{label}'.")
+        rendered = object()     # what the look below returns once the blade has rendered
+
+        def look_while_loading() -> Locator | object | None:
+            try:
+                element = look()
+            except Ambiguous:
+                # Several matches on a rendered blade are the normal lookup's to report, after
+                # FIND_TIMEOUT_MS, not after the whole limit.
+                if blade_still_loading(aria_outline(self.page)) is not None:
+                    raise
+                return rendered
+            if element is not None:
+                return element
+            return None if blade_still_loading(aria_outline(self.page)) is not None else rendered
+
+        found = in_time(self.page, look_while_loading, ms=limit)
+        if found is rendered:
+            found = in_time(self.page, look)
+        if found is None:
+            self.save_blade_outline(step, item, label)
+        return found
+
+    def save_blade_outline(self, step: dict, item: dict, label: str,
+                           outline: list[tuple[str, str]] | None = None) -> None:
+        """Keep what blade_still_loading() read (`outline`, or a fresh aria_outline()), redacted,
+        as blade-<step>-<guide line>.aria.txt in the run folder, one '<role> "<name>"' per line: a
+        label that was not found shows there whether the blade was taken for loaded, so the check
+        can be tuned without another live run. Not for a label the recording already holds a
+        decision for: replay settles it, and the person is not asked."""
+        if self.page.is_closed() or label in self.recording["steps"].get(step["id"], {}).get("labels", {}):
+            return
+        if outline is None:
+            outline = aria_outline(self.page)
+        lines = [f'{role} "{name}"' if name else role for role, name in outline]
+        path = self.run_dir / f"blade-{step['id']}-{item.get('line')}.aria.txt"
+        path.write_text(self.redactor.redact("\n".join(lines)) + "\n", encoding="utf-8")
+        print(f"The blade's outline is in {path}")
+
     def expand_menu_groups(self, label: str) -> None:
         """Open every collapsed group of the blade's menu with its 'Expand all headers' button.
         Entra ID blades fold menu entries into groups ('Manage', 'Monitoring'), so a link such as
@@ -1312,7 +1456,10 @@ class Runner:
             if kind == "search":
                 element = search_portal(self.page, label, diagnose=lambda tree: self.save_search_tree(step, tree))
             else:
-                element = in_time(self.page, self.looking_for(label, kind))
+                look = self.looking_for(label, kind)
+                element = in_time(self.page, look)
+                if element is None:
+                    element = self.wait_for_blade(step, item, label, look)
         except Ambiguous as error:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
             return record
