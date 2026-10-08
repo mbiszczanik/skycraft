@@ -33,6 +33,17 @@ without a browser. Rules (issue #189):
   * A list item '**Label**: value' is a 'field' item when Label is a UI label. A field whose
     value is prose rather than a literal ("Click the ... button", "1 month from now") is typed
     as written; the recording's valueOverrides is where a supervised run supplies the literal.
+  * A list item 'Label: value' whose label is plain text is a 'field' item too (#198) when the
+    value starts with one bold or code span: 'Lock type: **Delete**', 'Name: `x` (use
+    existing)'. The value is that span, its markup stripped as for any value; a remark after it
+    is dropped. The item is read as any other list item instead when the value is plain text
+    (in the guides, a line of a list to check: 'Address space: 10.0.0.0/16'); when another bold
+    span or a chain follows the span ('Logs: **A** and **B**' stays a click on each); when the
+    label starts with an instruction (INSTRUCTION: 'Select your VM:', 'Add tag:', 'Enter:',
+    'Search for:'); and when the label is a caption (NON_UI_BOLD: 'Note:', 'Example:'), is
+    longer than six words, does not start with a letter, or holds anything but letters (of any
+    script), digits, spaces and '()/&-'. An underscore is excluded: it marks italics
+    ('_Note_:') or an identifier, not a Portal label.
   * Bold spans that are not UI elements are dropped by NON_UI_BOLD and by the colon rule
     (bold text ending with ':' is a caption, not a label).
   * Tables whose second header cell is 'Value' are forms. When the first header is Field,
@@ -45,8 +56,11 @@ without a browser. Rules (issue #189):
 Known gaps. Spec #189 records only lab 1.1; fix these before another lab is recorded
 (#204 tracks labs 1.2-3.2):
 
-  * A field whose label is not bold is misread: '- Lock type: **Delete**' becomes a click on
-    "Delete", and '- Name: `x`' is dropped (#198).
+  * Of the list items whose label is not bold, only 'Label: **value**' and 'Label: `value`'
+    are read as fields (#198). An instruction before the colon is dropped ('Select your VM:
+    `x`', 'Choose resource group: `x`'), and two values or a chain after a plain label stay
+    clicks ('Frequency: **Daily** at **02:00 AM**', 'Destination: **Send to Log Analytics
+    workspace** → `law`').
   * Code-span steps drop out of navigation chains:
     '**Virtual Networks** > `vnet` > **Subnets**' (#199).
   * The first-option rule skips 3.2.1's Portal path, because its Option A is CLI-only (#201).
@@ -78,6 +92,20 @@ FENCE = re.compile(r"^[ \t]*(?P<run>`{3,}|~{3,})(?P<info>.*)$")
 LIST_ITEM = re.compile(r"^\s*(?:\d+\.|[-*])\s+(?P<text>.+)$")
 BOLD = re.compile(r"\*\*(?P<text>(?:\\\*|[^*])+?)\*\*")   # '\*' inside bold is a literal '*'
 LIST_FIELD = re.compile(r"^\*\*(?P<label>(?:\\\*|[^*])+?)\*\*\s*:\s*(?P<value>.+)$")
+# 'Label: **value**' or 'Label: `value`' with a plain label (#198). The label starts with a
+# letter and holds letters of any script, digits, spaces and '()/&-', never '_' ([^\W_] is a
+# letter or digit). It is greedy, so a line with no colon fails in linear time. A space must
+# follow the colon, so 'https://' never splits there.
+PLAIN_FIELD = re.compile(
+    r"^(?P<label>[^\W\d_](?:[^\W_]|[ ()/&-])*):\s+"
+    r"(?P<span>\*\*(?:\\\*|[^*])+?\*\*|`[^`]+`)(?P<rest>.*)$")
+PLAIN_LABEL_MAX_WORDS = 6      # the longest plain label in the guides has five words
+# A plain label that starts with one of these is an instruction ('Select your VM: `x`'), not a
+# Portal label. 'Type' alone is the Portal's Type field (5.3), while 'Type the VMSS name to
+# confirm: `x`' is an instruction (3.2). 'Check' is not listed: 'Check every' is a field (5.1).
+INSTRUCTION = re.compile(
+    r"^(?:Add|Choose|Click|Create|Delete|Download|Enter|Go|Link|Navigate|Open|Remove|Run|Search"
+    r"|Select|Wait|Type\s)\b", re.IGNORECASE)
 EXPECTED = re.compile(r"^\s*(?:(?:[-*]|\d+\.)\s+)?\*\*Expected Result\*\*[^:]*:(?P<text>.*)$")
 TABLE_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$")
 SEPARATOR_CELL = re.compile(r"^:?-+:?$")   # every non-empty cell of a separator row; not "--name"
@@ -131,6 +159,7 @@ NON_UI_BOLD = {
     "Fallback",                                # 5.3: caption
     "Dev fallback source",                     # 5.3: caption of an expected outcome
     "Production source",                       # 5.3: caption of an expected outcome
+    "Example",                                 # 3.3: caption ("Example: `skycraft-auth-...`")
 }
 
 
@@ -327,6 +356,22 @@ def table_row_item(cells: list[str], form: str | None, number: int) -> dict | No
             "value": strip_value_markup(cells[1]), "line": number}
 
 
+def plain_field(text: str, number: int) -> dict | None:
+    """The field item for 'Label: **value**' or 'Label: `value`' whose label is plain text
+    (#198); None for any other item. The rules are in the module docstring."""
+    m = PLAIN_FIELD.match(text)
+    if not m:
+        return None
+    label = m.group("label").strip()
+    if (not is_ui_label(label) or INSTRUCTION.match(label)
+            or len(label.split()) > PLAIN_LABEL_MAX_WORDS):
+        return None
+    if BOLD.search(m.group("rest")) or CHAIN.search(m.group("rest")):
+        return None                                # two values or a chain: read as actions
+    return {"kind": "field", "label": label, "value": strip_value_markup(m.group("span")),
+            "line": number}
+
+
 def list_item(text: str, number: int) -> dict | None:
     """The field, search, navigation or action item for the text of one list item; None for
     none."""
@@ -346,6 +391,9 @@ def list_item(text: str, number: int) -> dict | None:
                 value = value[:-1]                 # before the markup, so "`staging`." works
             return {"kind": "field", "label": label, "value": strip_value_markup(value),
                     "line": number}
+    field = plain_field(text.strip(), number)
+    if field:
+        return field
     labels = [clean_label(unescape(b.group("text"))) for b in BOLD.finditer(text)]
     labels = [label for label in labels if is_ui_label(label)]
     if not labels:
