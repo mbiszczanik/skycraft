@@ -225,7 +225,7 @@ You add each group's member in the New Group form, before you create the group.
 | Office location | Remote                       |
 
 6. Click **Save**
-7. When the Portal returns to the user's overview, click the **Properties** tab (the first tab does not show the job information)
+7. When the Portal returns to the user's overview, click the **Properties** tab (the Overview tab does not show the job information)
 
 **Expected Result**: On the Properties tab, Malfurion Stormrage's profile shows Job title Cloud Infrastructure Manager, Company name SkyCraft, Department IT Operations and Office location Remote.
 
