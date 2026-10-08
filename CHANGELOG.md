@@ -9,6 +9,27 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0](https://github.com/mbiszczanik/skycraft/compare/v0.11.0...v0.12.0) (2026-10-08)
+
+
+### Features
+
+* **guide-drift:** read list fields whose label is not bold ([#226](https://github.com/mbiszczanik/skycraft/issues/226)) ([08c1376](https://github.com/mbiszczanik/skycraft/commit/08c137653b7874eab8d7ff245c76ffbb99e4c0ba))
+* **guide-drift:** skip only the failed step and continue ([#223](https://github.com/mbiszczanik/skycraft/issues/223)) ([158ae47](https://github.com/mbiszczanik/skycraft/commit/158ae474767d94c38e439257e01d0d0bebd8424f))
+* **guide-drift:** tell typed values from instructions ([#239](https://github.com/mbiszczanik/skycraft/issues/239)) ([6f2d713](https://github.com/mbiszczanik/skycraft/commit/6f2d7134d0c9f7848a2279eafad8230c8c7dc0df))
+* **guide-drift:** wait for a blade that is still loading instead of asking ([#240](https://github.com/mbiszczanik/skycraft/issues/240)) ([6e3b4ea](https://github.com/mbiszczanik/skycraft/commit/6e3b4eaa17b8efadf3167e2abb0ecc5239c80e1f))
+
+
+### Bug Fixes
+
+* **lab-1.1:** align the lab scripts with the guide's guest and domain, and count failed lookups ([#243](https://github.com/mbiszczanik/skycraft/issues/243)) ([bfa8e4c](https://github.com/mbiszczanik/skycraft/commit/bfa8e4cdd454f045f72db1ba5a0f3f6a80d7cbef))
+* **lab-1.1:** exit 1 when the cleanup could not delete a user, guest or group ([#234](https://github.com/mbiszczanik/skycraft/issues/234)) ([cbe5c38](https://github.com/mbiszczanik/skycraft/commit/cbe5c388113775224bf7c9d6d7ebcd8f4f91098c))
+
+
+### Documentation
+
+* **lab-1.1:** name the action that shows four Expected Results ([#245](https://github.com/mbiszczanik/skycraft/issues/245)) ([1f6e405](https://github.com/mbiszczanik/skycraft/commit/1f6e40542effd1ff7eeb0f7e8197b698bd5c4fd9))
+
 ## [0.11.0](https://github.com/mbiszczanik/skycraft/compare/v0.10.10...v0.11.0) (2026-10-08)
 
 
