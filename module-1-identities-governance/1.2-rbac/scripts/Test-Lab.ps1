@@ -61,7 +61,7 @@ $checks = @(
     @{ Name="Developers Group";  Principal="SkyCraft-Developers";  Role="Contributor"; Scope="/subscriptions/$subId/resourceGroups/dev-skycraft-swc-rg" }
     @{ Name="Testers Group (Dev)"; Principal="SkyCraft-Testers";   Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/dev-skycraft-swc-rg" }
     @{ Name="Testers Group (Prod)"; Principal="SkyCraft-Testers";  Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/prod-skycraft-swc-rg" }
-    @{ Name="External Partner";  Principal="istormrage[@_]";      Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/platform-skycraft-swc-rg" }
+    @{ Name="External Partner";  Principal="^istormrage[@_]";     Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/platform-skycraft-swc-rg" }
 )
 
 foreach ($check in $checks) {

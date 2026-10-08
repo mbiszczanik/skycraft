@@ -70,7 +70,8 @@ Describe 'Lab 1.1 guest address - one address everywhere (#193)' {
 
     It 'Lab 1.2 Test-Lab.ps1 looks for the External Partner by the guide''s guest' {
         # A guest's sign-in name is rewritten to <alias>_<domain>#EXT#@<tenant>, hence the [@_].
+        # Anchored with ^, so a sign-in name that merely contains the alias does not count.
         $text = Get-FileText (Join-Path $script:Lab12 'scripts' 'Test-Lab.ps1')
-        $text | Should -Match ('Name="External Partner";\s*Principal="' + [regex]::Escape($script:GuestAlias) + '\[@_\]"')
+        $text | Should -Match ('Name="External Partner";\s*Principal="\^' + [regex]::Escape($script:GuestAlias) + '\[@_\]"')
     }
 }

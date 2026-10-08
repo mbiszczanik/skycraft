@@ -80,8 +80,9 @@
     and the three SkyCraft groups. It does not remove the guest the run invited (the address in
     SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL, which replaces the guide's), and it does not revert the
     self-service password reset scope (step 1.1.12). Remove those by hand, or use a tenant where
-    leaving them is acceptable. (Step 1.1.11 only reviews licences.) The prerequisites of the cleanup are checked before the browser opens: missing
-    Microsoft.Graph modules stop the run with exit 1, unless -SkipCleanup.
+    leaving them is acceptable. (Step 1.1.11 only reviews licences.) The prerequisites of the
+    cleanup are checked before the browser opens: missing Microsoft.Graph modules stop the run
+    with exit 1, unless -SkipCleanup.
 
 .PARAMETER SubscriptionId
     The subscription whose tenant the run is for. Mandatory and compared by id against the Az

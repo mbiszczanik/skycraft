@@ -81,7 +81,7 @@ foreach ($role in 'User.ReadWrite.All', 'Group.ReadWrite.All', 'Domain.Read.All'
 az ad app permission admin-consent --id $appId
 ```
 
-That is the **minimum** set: `User.ReadWrite.All` creates and deletes the three internal users, `Group.ReadWrite.All` covers the groups and their memberships, `Domain.Read.All` resolves the tenant's default domain, and `User.Invite.All` invites the guest. `Directory.ReadWrite.All` — which the interactive sign-in asks for, and which the lab guide's portal steps rely on — is **not** required app-only; do not grant it to this principal.
+That is the **minimum** set: `User.ReadWrite.All` creates and deletes the three internal users, `Group.ReadWrite.All` covers the groups and their memberships, `Domain.Read.All` resolves the tenant's initial `*.onmicrosoft.com` domain, and `User.Invite.All` invites the guest. `Directory.ReadWrite.All` — which the interactive sign-in asks for, and which the lab guide's portal steps rely on — is **not** required app-only; do not grant it to this principal.
 
 Then create a credential. A certificate is preferred: it never sits in an environment variable, and it cannot be leaked by an environment dump or a transcript.
 
