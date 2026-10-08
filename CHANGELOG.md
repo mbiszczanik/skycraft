@@ -9,6 +9,18 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0](https://github.com/mbiszczanik/skycraft/compare/v0.10.10...v0.11.0) (2026-10-08)
+
+
+### Features
+
+* **guide-drift:** check lab guide portal steps against the live Azure Portal ([#189](https://github.com/mbiszczanik/skycraft/issues/189)) ([#220](https://github.com/mbiszczanik/skycraft/issues/220)) ([8c57f7e](https://github.com/mbiszczanik/skycraft/commit/8c57f7e19915067ea137f008c5983fa12c49f9f8))
+
+
+### Bug Fixes
+
+* **lab-5.2:** keep VM backup snapshots in a tagged group Lab 1.3 allows ([#216](https://github.com/mbiszczanik/skycraft/issues/216)) ([cdf27fd](https://github.com/mbiszczanik/skycraft/commit/cdf27fdc840975eba60e9e0d393dbe8f28a805c8))
+
 ## [0.10.10](https://github.com/mbiszczanik/skycraft/compare/v0.10.9...v0.10.10) (2026-10-06)
 
 
