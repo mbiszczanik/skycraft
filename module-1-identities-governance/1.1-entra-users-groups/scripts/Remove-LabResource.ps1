@@ -20,6 +20,8 @@
     Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
     "pwsh -File" for any script that declares #Requires -Modules for a module it has to
     auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+    A caller that dot-sources this script, or runs "& .\Remove-LabResource.ps1" with further
+    statements after it, still ends with its own exit code rather than this one.
 
 .PARAMETER Force
     Skip the confirmation prompt.

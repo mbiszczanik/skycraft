@@ -108,7 +108,7 @@ function Disconnect-MgGraph {
 function Get-MgDomain {
     [CmdletBinding()]
     param([Parameter(ValueFromRemainingArguments)]$Rest)
-    [pscustomobject]@{ Id = 'contoso.example'; IsDefault = $true }
+    [pscustomobject]@{ Id = 'contoso.example'; IsDefault = $true; IsInitial = $true }
 }
 
 function Get-MgUser {
