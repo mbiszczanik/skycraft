@@ -11,11 +11,17 @@
     rest. A deletion that fails is reported as [ERROR] with the Microsoft Graph error message and
     counted; if any failed, the script exits 1 once all of them have been attempted, so a caller
     cannot mistake objects left behind for a clean cleanup (issue #194, the Lab 5.2 fix of #105).
-    An object that does not exist is not a failure.
+    An object that does not exist is not a failure. A lookup that fails with an error (a 403,
+    throttling) is: it cannot tell whether the object is gone, so it is reported as [ERROR] and
+    counted the same way (issue #227). Only a lookup that succeeds and finds nothing is "not found".
+
+    The users are looked up on the tenant's initial *.onmicrosoft.com domain, the one the guide
+    creates them on, and the guest by the address the guide invites (issue #193).
 
     Exit codes:
       0  every object that exists was deleted (or -WhatIf / a declined prompt skipped it)
-      1  Microsoft Graph sign-in failed (nothing was deleted), or at least one deletion failed
+      1  Microsoft Graph sign-in failed or the initial domain could not be determined (nothing
+         was deleted), or at least one lookup or deletion failed
 
     Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
     "pwsh -File" for any script that declares #Requires -Modules for a module it has to
@@ -273,19 +279,30 @@ catch {
     exit 1
 }
 
-# Resolve Domain
+# Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain, the one the guide's
+# '<name>@[yourtenant].onmicrosoft.com' means (issue #193). Not the default domain, which in a
+# tenant with a custom default domain leaves the guide's users in place, and no guess when the
+# lookup fails: nothing is deleted by a name this script could not work out.
 try {
-    $domain = (Get-MgDomain | Where-Object { $_.IsDefault }).Id
-    Write-Host "Default Domain: $domain" -ForegroundColor Gray
+    $domain = Get-MgDomain -ErrorAction Stop | Where-Object { $_.IsInitial } | Select-Object -First 1 -ExpandProperty Id
+    if (-not $domain) { throw 'the tenant lists no domain marked IsInitial' }
+    Write-Host "Initial domain: $domain" -ForegroundColor Gray
 }
 catch {
-    $domain = "onmicrosoft.com"
-    Write-Host "  -> [WARNING] Failed to detect domain. using $domain" -ForegroundColor Yellow
+    Write-Host "  -> [ERROR] Could not determine the tenant's initial *.onmicrosoft.com domain: $_" -ForegroundColor Red
+    $Host.SetShouldExit(1)
+    exit 1
 }
 
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
 
-# Counts objects that exist but could not be deleted. Absent objects are not failures.
+# Counts objects that could not be looked up, and objects that exist but could not be deleted.
+# Absent objects are not failures.
+#
+# Each lookup is a filter query: one that succeeds and returns nothing is the only "not found".
+# A lookup that fails (a 403 without User.Read.All, throttling, a transient Graph error) says
+# nothing about whether the object is gone, so it is an [ERROR] counted like a failed deletion,
+# never "not found" (issue #227) - hence -ErrorAction Stop, not SilentlyContinue, on every lookup.
 $script:cleanupFailures = 0
 
 # Cleanup Users
@@ -299,15 +316,23 @@ Write-Host "Deleting Internal Users..." -ForegroundColor Yellow
 
 foreach ($upn in $usersToDelete) {
     try {
-        $user = Get-MgUser -Filter "UserPrincipalName eq '$upn'" -ErrorAction SilentlyContinue
-        if ($user) {
-            if ($PSCmdlet.ShouldProcess($upn, 'Remove user')) {
-                Remove-MgUser -UserId $user.Id -ErrorAction Stop
-                Write-Host "  -> [SUCCESS] Deleted user: $upn" -ForegroundColor Green
-            }
-        }
-        else {
-            Write-Host "  -> [INFO] User not found: $upn" -ForegroundColor Gray
+        $user = Get-MgUser -Filter "UserPrincipalName eq '$upn'" -ErrorAction Stop
+    }
+    catch {
+        $script:cleanupFailures++
+        Write-Host "  -> [ERROR] Could not look up user $($upn): $_" -ForegroundColor Red
+        continue
+    }
+
+    if (-not $user) {
+        Write-Host "  -> [INFO] User not found: $upn" -ForegroundColor Gray
+        continue
+    }
+
+    try {
+        if ($PSCmdlet.ShouldProcess($upn, 'Remove user')) {
+            Remove-MgUser -UserId $user.Id -ErrorAction Stop
+            Write-Host "  -> [SUCCESS] Deleted user: $upn" -ForegroundColor Green
         }
     }
     catch {
@@ -318,23 +343,33 @@ foreach ($upn in $usersToDelete) {
 
 # Cleanup Guest
 Write-Host "`nDeleting Guest User..." -ForegroundColor Yellow
-$guestEmail = "illidan@externalcompany.com"
+$guestEmail = "istormrage@illidari.com" # The address the guide invites in step 1.1.5
+$guest = $null
+$guestLookedUp = $false
 try {
-    # Find guest by mail
-    $guest = Get-MgUser -Filter "Mail eq '$guestEmail'" -ErrorAction SilentlyContinue
-    if ($guest) {
+    # Find guest by mail: a guest's user principal name is rewritten on invitation.
+    $guest = Get-MgUser -Filter "Mail eq '$guestEmail'" -ErrorAction Stop
+    $guestLookedUp = $true
+}
+catch {
+    $script:cleanupFailures++
+    Write-Host "  -> [ERROR] Could not look up guest $($guestEmail): $_" -ForegroundColor Red
+}
+
+if ($guestLookedUp -and -not $guest) {
+    Write-Host "  -> [INFO] Guest not found: $guestEmail" -ForegroundColor Gray
+}
+elseif ($guest) {
+    try {
         if ($PSCmdlet.ShouldProcess($guestEmail, 'Remove guest user')) {
             Remove-MgUser -UserId $guest.Id -ErrorAction Stop
             Write-Host "  -> [SUCCESS] Deleted guest: $guestEmail" -ForegroundColor Green
         }
     }
-    else {
-        Write-Host "  -> [INFO] Guest not found: $guestEmail" -ForegroundColor Gray
+    catch {
+        $script:cleanupFailures++
+        Write-Host "  -> [ERROR] Failed to delete guest $($guestEmail): $_" -ForegroundColor Red
     }
-}
-catch {
-    $script:cleanupFailures++
-    Write-Host "  -> [ERROR] Failed to delete guest $($guestEmail): $_" -ForegroundColor Red
 }
 
 # Cleanup Groups
@@ -347,15 +382,23 @@ $groupsToDelete = @(
 
 foreach ($groupName in $groupsToDelete) {
     try {
-        $group = Get-MgGroup -Filter "DisplayName eq '$groupName'" -ErrorAction SilentlyContinue
-        if ($group) {
-            if ($PSCmdlet.ShouldProcess($groupName, 'Remove group')) {
-                Remove-MgGroup -GroupId $group.Id -ErrorAction Stop
-                Write-Host "  -> [SUCCESS] Deleted group: $groupName" -ForegroundColor Green
-            }
-        }
-        else {
-            Write-Host "  -> [INFO] Group not found: $groupName" -ForegroundColor Gray
+        $group = Get-MgGroup -Filter "DisplayName eq '$groupName'" -ErrorAction Stop
+    }
+    catch {
+        $script:cleanupFailures++
+        Write-Host "  -> [ERROR] Could not look up group $($groupName): $_" -ForegroundColor Red
+        continue
+    }
+
+    if (-not $group) {
+        Write-Host "  -> [INFO] Group not found: $groupName" -ForegroundColor Gray
+        continue
+    }
+
+    try {
+        if ($PSCmdlet.ShouldProcess($groupName, 'Remove group')) {
+            Remove-MgGroup -GroupId $group.Id -ErrorAction Stop
+            Write-Host "  -> [SUCCESS] Deleted group: $groupName" -ForegroundColor Green
         }
     }
     catch {

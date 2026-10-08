@@ -143,7 +143,7 @@ if ($IncludeRoleAssignments) {
             parAdminPrincipalId          = Resolve-LabPrincipalId -Type User  -Name 'malfurion.stormrage'
             parDeveloperGroupPrincipalId = Resolve-LabPrincipalId -Type Group -Name 'SkyCraft-Developers'
             parTesterGroupPrincipalId    = Resolve-LabPrincipalId -Type Group -Name 'SkyCraft-Testers'
-            parPartnerPrincipalId        = Resolve-LabPrincipalId -Type Guest -Name 'illidan@externalcompany.com'
+            parPartnerPrincipalId        = Resolve-LabPrincipalId -Type Guest -Name 'istormrage@illidari.com'
         }
         foreach ($entry in $principal.GetEnumerator()) {
             Write-Host "  $($entry.Key): $($entry.Value)" -ForegroundColor Gray

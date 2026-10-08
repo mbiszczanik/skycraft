@@ -134,9 +134,9 @@ Describe 'Lab 1.2 - Resolve-LabPrincipalId refuses to guess' {
     }
 
     It 'resolves a guest by mail, because a guest''s userPrincipalName is rewritten on invitation' {
-        Mock Get-AzADUser { [pscustomobject]@{ Id = 'cccccccc-0000-0000-0000-000000000003'; Mail = 'illidan@externalcompany.com' } }
-        Resolve-LabPrincipalId -Type Guest -Name 'illidan@externalcompany.com' | Should -Be 'cccccccc-0000-0000-0000-000000000003'
-        Should -Invoke Get-AzADUser -Times 1 -Exactly -ParameterFilter { $Filter -eq "mail eq 'illidan@externalcompany.com'" }
+        Mock Get-AzADUser { [pscustomobject]@{ Id = 'cccccccc-0000-0000-0000-000000000003'; Mail = 'istormrage@illidari.com' } }
+        Resolve-LabPrincipalId -Type Guest -Name 'istormrage@illidari.com' | Should -Be 'cccccccc-0000-0000-0000-000000000003'
+        Should -Invoke Get-AzADUser -Times 1 -Exactly -ParameterFilter { $Filter -eq "mail eq 'istormrage@illidari.com'" }
     }
 
     It 'throws, naming Lab 1.1, when the principal does not exist' {

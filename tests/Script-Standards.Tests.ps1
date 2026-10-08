@@ -294,6 +294,15 @@ Describe 'SkyCraft PowerShell - Lab 1.1 cleanup cannot mask a failure (#194)' {
         $content = Get-Content -Raw -LiteralPath $path
         $content | Should -Match '(?s)\[ERROR\] Failed to connect to Microsoft Graph[^\r\n]*[\r\n]+\s*\$Host\.SetShouldExit\(1\)[\r\n]+\s*exit 1'
     }
+
+    It "'<file>' does not read a failed lookup as 'not found' (#227)" -ForEach $Lab11CleanupCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        # SilentlyContinue turns a 403 or a throttled lookup into an empty result.
+        $content | Should -Not -Match 'Get-Mg(User|Group)\b[^\r\n]*-ErrorAction SilentlyContinue'
+        foreach ($kind in 'user', 'guest', 'group') {
+            $content | Should -Match ('(?s)catch \{\s*\$script:cleanupFailures\+\+\s*Write-Host "  -> \[ERROR\] Could not look up ' + $kind)
+        }
+    }
 }
 
 Describe 'SkyCraft PowerShell - Lab 5.2 VM backup survives Lab 1.3 (#184)' {

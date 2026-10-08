@@ -15,6 +15,10 @@
          message - and every failure is counted.
       3. A failure does not stop the run: the later deletions are still attempted.
       4. A failed Microsoft Graph sign-in still exits 1 before anything is looked up.
+      5. A lookup that fails with an error is an [ERROR], counted like a failed deletion, so the
+         run exits 1 (issue #227). Only a lookup that succeeds and returns nothing is "not found".
+         The stub reports a failed lookup with Write-Error, as the Graph cmdlets do, so a script
+         that passes -ErrorAction SilentlyContinue swallows it - the defect #227 describes.
 
     Scope limit, as in Lab 5.2's suite: the child is launched with -Command, so these tests prove
     the failure counter reaches `exit`, not that `pwsh -File` carries the code out of the process.
@@ -81,6 +85,14 @@ function Invoke-StubGate {
     if (@($env:SKYCRAFT_STUB_FAIL -split ',') -contains $Name) { throw "stub failure: $Name" }
 }
 
+# Whether the lookup named here should fail. The lookup itself reports the failure with
+# Write-Error, as the Graph cmdlets do, so the caller's -ErrorAction decides what happens to it.
+function Test-StubLookupFails {
+    param([string]$Name)
+    Write-StubCall -Name $Name
+    return (@($env:SKYCRAFT_STUB_FAIL -split ',') -contains $Name)
+}
+
 function Test-StubEmpty { return $env:SKYCRAFT_STUB_EMPTY -eq '1' }
 
 function Get-MgContext {
@@ -115,8 +127,9 @@ function Get-MgUser {
     [CmdletBinding()]
     param([string]$Filter, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name 'Get-MgUser'
-    if (Test-StubEmpty) { return }
     $kind = if ($Filter -match '^\s*Mail\b') { 'guest' } else { 'member' }
+    if (Test-StubLookupFails -Name "Get-MgUser:$kind") { Write-Error "stub lookup failure: Get-MgUser:$kind"; return }
+    if (Test-StubEmpty) { return }
     [pscustomobject]@{ Id = $kind }
 }
 
@@ -130,6 +143,7 @@ function Remove-MgUser {
 function Get-MgGroup {
     [CmdletBinding()]
     param([string]$Filter, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if (Test-StubLookupFails -Name 'Get-MgGroup') { Write-Error 'stub lookup failure: Get-MgGroup'; return }
     if (Test-StubEmpty) { return }
     [pscustomobject]@{ Id = 'group' }
 }
@@ -190,6 +204,15 @@ function Remove-MgGroup {
     $script:GuestStuck   = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-MgUser:guest'
     $script:MembersStuck = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-MgUser:member'
     $script:SignInFails  = Invoke-CleanupScript -Stub $script:Stub -NoContext -Fail 'Connect-MgGraph'
+    $script:MembersUnreadable = Invoke-CleanupScript -Stub $script:Stub -Fail 'Get-MgUser:member'
+    $script:GuestUnreadable   = Invoke-CleanupScript -Stub $script:Stub -Fail 'Get-MgUser:guest'
+    $script:GroupsUnreadable  = Invoke-CleanupScript -Stub $script:Stub -Fail 'Get-MgGroup'
+
+    $script:AllRuns = @(
+        $script:Clean, $script:Nothing, $script:Preview, $script:GroupsStuck, $script:GuestStuck,
+        $script:MembersStuck, $script:SignInFails, $script:MembersUnreadable, $script:GuestUnreadable,
+        $script:GroupsUnreadable
+    )
 }
 
 AfterAll {
@@ -201,7 +224,7 @@ Describe 'Lab 1.1 Remove-LabResource.ps1 - test harness' {
     It 'shadows the real Microsoft Graph commands instead of touching a tenant' {
         # Refused is the child exiting 99 before the script ran. Asserted on every scenario: a
         # refusal in one of them is a half-stubbed session, not a scenario-specific failure.
-        foreach ($run in @($script:Clean, $script:Nothing, $script:Preview, $script:GroupsStuck, $script:GuestStuck, $script:MembersStuck, $script:SignInFails)) {
+        foreach ($run in $script:AllRuns) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Graph commands (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -259,5 +282,48 @@ Describe 'Lab 1.1 Remove-LabResource.ps1 - exit code contract (#194)' {
         $script:SignInFails.ExitCode | Should -Be 1 -Because "output was:`n$($script:SignInFails.Output)"
         $script:SignInFails.Output | Should -Match '\[ERROR\] Failed to connect to Microsoft Graph'
         $script:SignInFails.Calls | Should -Not -Contain 'Get-MgUser'
+    }
+}
+
+Describe 'Lab 1.1 Remove-LabResource.ps1 - a failed lookup is not "not found" (#227)' {
+
+    It 'reports a lookup that found nothing as not found, and exits 0' {
+        $script:Nothing.Output | Should -Match '\[INFO\] User not found'
+        $script:Nothing.Output | Should -Match '\[INFO\] Guest not found'
+        $script:Nothing.Output | Should -Match '\[INFO\] Group not found'
+        $script:Nothing.Output | Should -Not -Match '\[ERROR\]'
+    }
+
+    It 'exits 1 when the users cannot be looked up, and still goes on to the guest and the groups' {
+        $run = $script:MembersUnreadable
+        $run.ExitCode | Should -Be 1 -Because "a user that may still exist must not look like a clean cleanup; output was:`n$($run.Output)"
+        ([regex]::Matches($run.Output, '\[ERROR\] Could not look up user')).Count | Should -Be 3
+        $run.Output | Should -Not -Match '\[INFO\] User not found'
+        $run.Output | Should -Match 'Cleanup finished with 3 failure\(s\)'
+        $run.Calls | Should -Contain 'Remove-MgUser:guest'
+        @($run.Calls | Where-Object { $_ -eq 'Remove-MgGroup' }).Count | Should -Be 3
+    }
+
+    It 'exits 1 when the guest cannot be looked up, and still deletes the groups' {
+        $run = $script:GuestUnreadable
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Could not look up guest'
+        $run.Output | Should -Not -Match '\[INFO\] Guest not found'
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls | Should -Not -Contain 'Remove-MgUser:guest'
+        @($run.Calls | Where-Object { $_ -eq 'Remove-MgGroup' }).Count | Should -Be 3
+    }
+
+    It 'exits 1 when the groups cannot be looked up' {
+        $run = $script:GroupsUnreadable
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        ([regex]::Matches($run.Output, '\[ERROR\] Could not look up group')).Count | Should -Be 3
+        $run.Output | Should -Not -Match '\[INFO\] Group not found'
+        $run.Output | Should -Match 'Cleanup finished with 3 failure\(s\)'
+        $run.Calls | Should -Not -Contain 'Remove-MgGroup'
+    }
+
+    It 'carries the Microsoft Graph error into the [ERROR] line' {
+        $script:GuestUnreadable.Output | Should -Match '\[ERROR\] Could not look up guest [^\r\n]*stub lookup failure: Get-MgUser:guest'
     }
 }

@@ -82,14 +82,19 @@ catch {
     exit 1
 }
 
-# 3. Resolve Default Domain
+# 3. Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain, where Lab 1.1
+# creates them (issue #237, the Lab 1.2 twin of #193). Not the default domain, which in a tenant
+# with a custom default domain names users Lab 1.1 never created, and no guess when the lookup
+# fails. Lab 1.1's New-LabUser.ps1, Test-Lab.ps1 and Remove-LabResource.ps1 resolve it the same way.
 try {
-    $domain = (Get-MgDomain | Where-Object { $_.IsDefault }).Id
-    Write-Host "Default Domain: $domain" -ForegroundColor Gray
+    $domain = Get-MgDomain -ErrorAction Stop | Where-Object { $_.IsInitial } | Select-Object -First 1 -ExpandProperty Id
+    if (-not $domain) { throw 'the tenant lists no domain marked IsInitial' }
+    Write-Host "Initial domain: $domain" -ForegroundColor Gray
 }
 catch {
-    $domain = "onmicrosoft.com"
-    Write-Host "  -> [WARNING] Failed to detect domain, using fallback: $domain" -ForegroundColor Yellow
+    Write-Host "  -> [ERROR] Could not determine the tenant's initial *.onmicrosoft.com domain: $_" -ForegroundColor Red
+    $Host.SetShouldExit(1)
+    exit 1
 }
 
 # 4. Define Assignments
@@ -129,7 +134,7 @@ $assignments = @(
     # Illidan -> Reader on Platform RG
     @{
         Type           = "Guest"
-        PrincipalName  = "illidan@externalcompany.com" # Search by mail
+        PrincipalName  = "istormrage@illidari.com" # Search by mail
         Role           = "Reader"
         Scope          = "/subscriptions/$subscriptionId/resourceGroups/platform-skycraft-swc-rg"
         ScopeName      = "platform-skycraft-swc-rg"
