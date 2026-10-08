@@ -7,6 +7,22 @@
     as well as the security groups (Admins, Developers, Testers).
     It prompts for confirmation unless -Force is used.
 
+    Every deletion continues on error, so one object that cannot be deleted does not strand the
+    rest. A deletion that fails is reported as [ERROR] with the Microsoft Graph error message and
+    counted; if any failed, the script exits 1 once all of them have been attempted, so a caller
+    cannot mistake objects left behind for a clean cleanup (issue #194, the Lab 5.2 fix of #105).
+    An object that does not exist is not a failure.
+
+    Exit codes:
+      0  every object that exists was deleted (or -WhatIf / a declined prompt skipped it)
+      1  Microsoft Graph sign-in failed (nothing was deleted), or at least one deletion failed
+
+    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
+    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
+    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+    A caller that dot-sources this script, or runs "& .\Remove-LabResource.ps1" with further
+    statements after it, still ends with its own exit code rather than this one.
+
 .PARAMETER Force
     Skip the confirmation prompt.
 
@@ -269,6 +285,9 @@ catch {
 
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
 
+# Counts objects that exist but could not be deleted. Absent objects are not failures.
+$script:cleanupFailures = 0
+
 # Cleanup Users
 $usersToDelete = @(
     "malfurion.stormrage@$domain"
@@ -292,6 +311,7 @@ foreach ($upn in $usersToDelete) {
         }
     }
     catch {
+        $script:cleanupFailures++
         Write-Host "  -> [ERROR] Failed to delete user $($upn): $_" -ForegroundColor Red
     }
 }
@@ -313,6 +333,7 @@ try {
     }
 }
 catch {
+    $script:cleanupFailures++
     Write-Host "  -> [ERROR] Failed to delete guest $($guestEmail): $_" -ForegroundColor Red
 }
 
@@ -338,8 +359,16 @@ foreach ($groupName in $groupsToDelete) {
         }
     }
     catch {
+        $script:cleanupFailures++
         Write-Host "  -> [ERROR] Failed to delete group $($groupName): $_" -ForegroundColor Red
     }
+}
+
+if ($script:cleanupFailures -gt 0) {
+    Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s)." -ForegroundColor Red
+    Write-Host "  See the [ERROR] lines above - this run exits 1, nothing was masked." -ForegroundColor Gray
+    $Host.SetShouldExit(1)
+    exit 1
 }
 
 Write-Host "`nCleanup Complete." -ForegroundColor Green

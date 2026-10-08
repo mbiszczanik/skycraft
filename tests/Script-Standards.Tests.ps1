@@ -113,6 +113,15 @@ $Lab52CleanupCase = @(
     }
 )
 
+# Regression guard for issue #194 (Lab 1.1 cleanup reported failed deletions but exited 0 - the
+# defect #105 fixed for Lab 5.2)
+$Lab11CleanupCase = @(
+    @{
+        file = 'module-1-identities-governance/1.1-entra-users-groups/scripts/Remove-LabResource.ps1'
+        path = (Join-Path $RepoRoot 'module-1-identities-governance/1.1-entra-users-groups/scripts/Remove-LabResource.ps1')
+    }
+)
+
 # Regression guard for issue #113 (Lab 5.2 deploy used a Standard policy and masked the failure)
 $Lab52DeployCase = @(
     @{
@@ -254,6 +263,36 @@ Describe 'SkyCraft PowerShell - Lab 5.2 cleanup cannot mask a failure' {
         $content = Get-Content -Raw -LiteralPath $path
         $content | Should -Match "'platform-skycraft-swc-rpc\*-rg'"
         $content | Should -Match '\[ERROR\] Could not delete snapshot resource group'
+    }
+}
+
+Describe 'SkyCraft PowerShell - Lab 1.1 cleanup cannot mask a failure (#194)' {
+
+    It "'<file>' counts every failed user, guest and group deletion" -ForEach $Lab11CleanupCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match '\$script:cleanupFailures\s*=\s*0'
+        # One increment in each deletion's catch: users, the guest, groups.
+        $content | Should -Match '(?s)catch \{\s*\$script:cleanupFailures\+\+\s*Write-Host "  -> \[ERROR\] Failed to delete user'
+        $content | Should -Match '(?s)catch \{\s*\$script:cleanupFailures\+\+\s*Write-Host "  -> \[ERROR\] Failed to delete guest'
+        $content | Should -Match '(?s)catch \{\s*\$script:cleanupFailures\+\+\s*Write-Host "  -> \[ERROR\] Failed to delete group'
+    }
+
+    It "'<file>' exits non-zero when a deletion failed, after attempting them all" -ForEach $Lab11CleanupCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match '(?s)if \(\$script:cleanupFailures -gt 0\)\s*\{.*?\$Host\.SetShouldExit\(1\)\s*exit 1'
+        # The verdict comes after the last deletion loop, not inside it.
+        $content.LastIndexOf('if ($script:cleanupFailures -gt 0)') |
+            Should -BeGreaterThan $content.LastIndexOf('Remove-MgGroup')
+    }
+
+    It "'<file>' reports a failed deletion as [ERROR], not [WARNING]" -ForEach $Lab11CleanupCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Not -Match '\[WARNING\] Failed to delete'
+    }
+
+    It "'<file>' still exits 1 when the Microsoft Graph sign-in fails" -ForEach $Lab11CleanupCase {
+        $content = Get-Content -Raw -LiteralPath $path
+        $content | Should -Match '(?s)\[ERROR\] Failed to connect to Microsoft Graph[^\r\n]*[\r\n]+\s*\$Host\.SetShouldExit\(1\)[\r\n]+\s*exit 1'
     }
 }
 
