@@ -69,7 +69,7 @@ from playwright.sync_api import Browser, Error as PlaywrightError, Frame, Locato
 sys.path.insert(0, str(Path(__file__).parent))
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
-                       rejected_candidates, resolve_value, value_action, write_json)
+                       field_action, rejected_candidates, resolve_value, write_json)
 
 Found = TypeVar("Found")     # what in_time() looks for
 
@@ -1419,14 +1419,17 @@ class Runner:
                     record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
                 records = [record]
             elif item["kind"] == "field":
-                value = resolve_value(self.recording, step, item["label"], item["value"])
-                action = value_action(value)
+                action, value = field_action(self.recording, step, item)
                 if action == "type":
                     record = self.act_on_label(step, item, item["label"], value)
                 else:
                     record = self.new_record(step, "field", item["label"])
                     if action == "skip":
                         record.update(outcome="match", observed=f"left as is: {value}")
+                    elif action == "instruction":     # the guide's own text: no tenant data
+                        record.update(outcome="unknown",
+                                      observed=f"value '{item['value']}' is an instruction, not text to "
+                                               "type; add a valueOverride for this field to the recording")
                     else:
                         record.update(outcome="unknown",
                                       observed=f"value '{value}' has an unresolved [token]; add a "

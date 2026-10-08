@@ -12,7 +12,8 @@
       step's Expected Result); bold spans that are not UI elements are dropped; 'A -> B' chains
       become navigation; 'Search for **X**' becomes a search of the Portal;
       '- **Label**: value' list items and Field | Value tables become fields, and so does
-      '- Label: value' when the value is a bold or code span (#198);
+      '- Label: value' when the value is a bold or code span (#198); a field value that is an
+      instruction or holds a bracket token is marked literal: false (#202);
       Name | Value and Tag | Value tables become tags; the images a step references are collected.
 
       THE 17 GUIDES - every module-*/X.Y-*/lab-guide-X.Y.md parses, its step ids match its
@@ -582,8 +583,47 @@ Describe 'parse.py - lab 1.1, the first recorded lab' {
         $email.value | Should -Be 'istormrage@illidari.com'
     }
 
+    It 'marks only the three [yourtenant] addresses literal: false, for the recording''s placeholder to resolve (#202)' {
+        $marked = @($script:Lab11.steps | ForEach-Object { $_.items } | Where-Object { $_.kind -eq 'field' -and $_.literal -eq $false })
+        @($marked.value) | Should -Be @('malfurion.stormrage@[yourtenant].onmicrosoft.com',
+            'khadgar.archmage@[yourtenant].onmicrosoft.com', 'chromie.timewalker@[yourtenant].onmicrosoft.com')
+    }
+
     It 'marks every one of the 14 steps as portal' {
         @($script:Lab11.steps | Where-Object portal).Count | Should -Be 14
+    }
+}
+
+Describe 'parse.py - values that are instructions, placeholders or check box states (#202)' {
+    BeforeAll {
+        # The field a guide gives `label` in step `stepId`.
+        function Get-GuideField {
+            param([string]$Guide, [string]$StepId, [string]$Label)
+            $out = Join-Path $TestDrive ([guid]::NewGuid().ToString() + '.json')
+            & $script:Python $script:Parser (Join-Path $script:RepoRoot $Guide) --out $out --repo-root $script:RepoRoot
+            $steps = (Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json).steps
+            @(($steps | Where-Object id -eq $StepId).items | Where-Object { $_.kind -eq 'field' -and $_.label -ceq $Label })[0]
+        }
+    }
+
+    It "marks '<label>' of step <step> literal: false" -ForEach @(
+        @{ guide = 'module-1-identities-governance/1.3-governance/lab-guide-1.3.md'; step = '1.3.5'; label = 'Scope'; value = 'Click the "..." button' }
+        @{ guide = 'module-1-identities-governance/1.3-governance/lab-guide-1.3.md'; step = '1.3.8'; label = 'Allowed locations'; value = 'Select:' }
+        @{ guide = 'module-2-networking/2.3-name-resolution/lab-guide-2.3.md'; step = '2.3.2'; label = 'IP address'; value = '[IP of dev-skycraft-swc-lb-pip]' }
+    ) {
+        $field = Get-GuideField -Guide $guide -StepId $step -Label $label
+        $field.value   | Should -Be $value
+        $field.literal | Should -BeFalse
+        $field.PSObject.Properties.Name | Should -Contain 'literal'
+    }
+
+    It "keeps the check box state '<value>' of step <step> a literal, for the runner to apply to the check box" -ForEach @(
+        @{ guide = 'module-3-compute/3.3-containers/lab-guide-3.3.md'; step = '3.3.8'; label = 'Insecure connections'; value = 'Uncheck' }
+        @{ guide = 'module-5-monitoring-maintenance/5.3-network-monitoring/lab-guide-5.3.md'; step = '5.3.5'; label = 'Enable traffic analytics'; value = 'checked' }
+    ) {
+        $field = Get-GuideField -Guide $guide -StepId $step -Label $label
+        $field.value | Should -Be $value
+        $field.PSObject.Properties.Name | Should -Not -Contain 'literal'
     }
 }
 

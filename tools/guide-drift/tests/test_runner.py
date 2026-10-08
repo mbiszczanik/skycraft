@@ -1599,6 +1599,44 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual(r.ask.prompts, [])
 
 
+class FieldValueTests(RunnerTestCase):
+    """A field value parse.py marked '"literal": false' is never typed unless the recording
+    resolves it (#202); the step fails on it like on any unknown, so the person is asked."""
+
+    SCOPE = {"kind": "field", "label": "Scope", "value": 'Click the "..." button', "line": 3, "literal": False}
+
+    def run_field(self, item: dict) -> tuple[bool, run.Runner, mock.MagicMock]:
+        step = {"id": "9.9.1", "title": "One", "expected": None, "images": [], "items": [item]}
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        match = r.new_record(step, "field", item["label"])
+        match.update(outcome="match")
+        with mock.patch.object(run.Runner, "act_on_label", return_value=match) as act,                 mock.patch.object(run.Runner, "check_result"):
+            done = self.quietly(lambda: r.run_step(step))
+        return done, r, act
+
+    def test_an_instruction_without_an_override_is_unknown_and_not_typed(self) -> None:
+        done, r, act = self.run_field(self.SCOPE)
+        self.assertFalse(done)
+        act.assert_not_called()
+        field = [record for record in r.records if record["kind"] == "field"]
+        self.assertEqual([(record["label"], record["outcome"]) for record in field], [("Scope", "unknown")])
+        self.assertEqual(field[0]["observed"], "value 'Click the \"...\" button' is an instruction, not text to "
+                                               "type; add a valueOverride for this field to the recording")
+
+    def test_with_an_override_the_override_is_typed(self) -> None:
+        self.recording["steps"]["9.9.1"]["valueOverrides"]["Scope"] = "dev-skycraft-swc-rg"
+        done, _, act = self.run_field(self.SCOPE)
+        self.assertTrue(done)
+        self.assertEqual(act.call_args.args[-1], "dev-skycraft-swc-rg")
+
+    def test_a_bracket_token_a_placeholder_resolves_is_typed(self) -> None:
+        self.recording["placeholders"]["[yourtenant]"] = "contoso"
+        done, _, act = self.run_field({"kind": "field", "label": "User principal name", "line": 3, "literal": False,
+                                       "value": "malfurion.stormrage@[yourtenant].onmicrosoft.com"})
+        self.assertTrue(done)
+        self.assertEqual(act.call_args.args[-1], "malfurion.stormrage@contoso.onmicrosoft.com")
+
+
 class StopTests(RunnerTestCase):
     def test_a_closed_window_stops_before_the_candidate_prompt(self) -> None:
         r = run.Runner(FakePage(closed=True), STEPS, self.recording, self.args(), ask=Answers())

@@ -1,6 +1,7 @@
 """Unit tests for parse.py's reading of one list item: which searches are the Portal's global
-search and which are a blade's own search box (issue #189), and which '- Label: value' items with
-a plain label are fields (issue #198). The full guides and the other parser rules are covered by
+search and which are a blade's own search box (issue #189), which '- Label: value' items with
+a plain label are fields (issue #198), and which field values are not text to type (issue #202).
+The full guides and the other parser rules are covered by
 tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
@@ -136,6 +137,75 @@ class PlainLabelFieldTests(unittest.TestCase):
     def test_a_bold_label_still_takes_the_whole_value(self) -> None:
         self.assertEqual(self.item("**Policy enforcement**: Enabled"), self.field("Policy enforcement", "Enabled"))
         self.assertEqual(self.item("**Region**: **Sweden Central** (recommended)"), self.field("Region", "Sweden Central (recommended)"))
+
+
+class LiteralValueTests(unittest.TestCase):
+    """A field value that is an instruction or a placeholder is marked '"literal": false' (#202).
+    The values are the guides' own, from the lab named."""
+
+    INSTRUCTIONS = (
+        'Click the "..." button',                                        # 1.3.5
+        'Search for "Allowed locations"',                                # 1.3.8
+        "Select:",                                                       # 1.3.8, a list follows
+        "(leave blank for now)",                                         # 1.3.15
+        "Enter your email address",                                      # 1.3.15
+        "[IP of dev-skycraft-swc-lb-pip]",                               # 2.3.2
+        "[Your subscription]",                                           # 1.2-3.2
+        "Your subscription",                                             # 1.3, 3.2-4.1
+        "malfurion.stormrage@[yourtenant].onmicrosoft.com",              # 1.1, placeholder
+        "skycraft-auth-[uniqueID] (must be globally unique in the region)",  # 3.3.4
+        "Leave default",                                                 # 3.2.5
+        "Browse to your private key file (skycraft-dev for option A)",   # 3.2.15
+        "Paste your skycraft-dev.pub key",                               # 3.2.29
+        "Create a container named app-backups",                          # 3.4.13
+        "Select DevRevokePolicy",                                        # 4.4.4
+        "uncheck Use workspace created by connection monitor and select platform-skycraft-swc-law",  # 5.3.6
+        "leave unchecked. Click Review + create → Create",               # 5.3.6
+    )
+    LITERALS = (
+        "SkyCraft-Admins", "Sweden Central (or your preferred region)", "",
+        # check box states, applied to a check box (fill_field), never typed
+        "Uncheck", "checked", "Check", "✅ Checked", "☐ Unchecked", "❌ Disabled (for dev, you may enable)",
+        # the Portal's own options, which start with a verb
+        "Create new", "Disable", "Allow", "Enable public access from all networks", "Use existing public key",
+        "Apply rule to all blobs in your storage account", "Do not clone settings", "Limit blobs with filters",
+        "Scale based on a metric", "Increase count by", "Selected networks",
+    )
+
+    def test_instructions_and_placeholders_are_not_literal(self) -> None:
+        for value in self.INSTRUCTIONS:
+            with self.subTest(value=value):
+                self.assertFalse(parse.value_is_literal(value))
+
+    def test_values_to_type_or_pick_and_check_box_states_are_literal(self) -> None:
+        for value in self.LITERALS:
+            with self.subTest(value=value):
+                self.assertTrue(parse.value_is_literal(value))
+
+    def test_a_list_item_field_carries_the_mark_only_when_it_is_not_literal(self) -> None:
+        for text, label, value, literal in (('**Scope**: Click the "..." button', "Scope", 'Click the "..." button', False),
+                                            ("**Allowed locations**: Select:", "Allowed locations", "Select:", False),
+                                            ("**Stored access policy**: Select `DevRevokePolicy`.", "Stored access policy",
+                                             "Select DevRevokePolicy", False),
+                                            ("**Insecure connections** : `Uncheck`", "Insecure connections", "Uncheck", True),
+                                            ("**Enable traffic analytics**: checked", "Enable traffic analytics", "checked", True),
+                                            ("Lock type: **Delete**", "Lock type", "Delete", True)):
+            with self.subTest(text=text):
+                expected = {"kind": "field", "label": label, "value": value, "line": 7}
+                if not literal:
+                    expected["literal"] = False
+                self.assertEqual(parse.list_item(text, 7), expected)
+
+    def test_a_form_table_row_carries_the_mark_and_a_tag_row_never_does(self) -> None:
+        lines = list(enumerate(["| Field | Value |", "| --- | --- |", "| Name | `dev` |",
+                                "| IP address | [IP of dev-skycraft-swc-lb-pip] |", "",
+                                "| Tag | Value |", "| --- | --- |", "| Owner | [your name] |"], start=1))
+        items, _ = parse.parse_items(lines)
+        self.assertEqual(items, [
+            {"kind": "field", "label": "Name", "value": "dev", "line": 3},
+            {"kind": "field", "label": "IP address", "value": "[IP of dev-skycraft-swc-lb-pip]", "line": 4,
+             "literal": False},
+            {"kind": "tag", "name": "Owner", "value": "[your name]", "line": 8}])
 
 
 if __name__ == "__main__":

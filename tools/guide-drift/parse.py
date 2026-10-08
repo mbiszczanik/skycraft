@@ -30,9 +30,24 @@ without a browser. Rules (issue #189):
     'global search'. Otherwise the scope is 'blade': X is typed into the open blade's or pane's
     own search box ('Search for **"Owner"**' in a role assignment). Anything else after the bold
     ('and click **+ Create**', 'Search for and select **X**') leaves the item an action.
-  * A list item '**Label**: value' is a 'field' item when Label is a UI label. A field whose
-    value is prose rather than a literal ("Click the ... button", "1 month from now") is typed
-    as written; the recording's valueOverrides is where a supervised run supplies the literal.
+  * A list item '**Label**: value' is a 'field' item when Label is a UI label.
+  * A field whose value is not text to type or pick as written carries '"literal": false'
+    (value_is_literal, #202): the value starts with an instruction verb (VALUE_INSTRUCTION:
+    'Click the "..." button', 'Search for "Allowed locations"', 'Leave default'; also inside an
+    opening parenthesis, '(leave blank for now)'), ends with a colon ('Select:' before a list),
+    starts with 'Your' (a placeholder without brackets: 'Your subscription') or holds a bracket
+    token ('[IP of dev-skycraft-swc-lb-pip]', 'malfurion.stormrage@[yourtenant].onmicrosoft.com').
+    The runner types such a value only once the recording's valueOverrides gives the field a
+    value, or its placeholders turn the value into a literal ('[yourtenant]'); otherwise it
+    reports the field as unknown. tests/Guide-Drift-Recording.Tests.ps1 requires the same of
+    every recorded lab. A check box state is a literal: 'checked', '✅ Checked', 'Uncheck'; the
+    runner reads it (recording.checkbox_state) and ticks or clears the check box the label
+    names rather than typing it. Check and Uncheck are instructions only when
+    something follows them ('uncheck Use workspace created by connection monitor and select
+    ...'). Words the Portal's own options start with in the guides are not instruction verbs:
+    'Allow', 'Apply rule to all blobs ...', 'Disable', 'Do not clone settings', 'Enable public
+    access ...', 'Increase count by', 'Limit blobs with filters', 'Scale based on a metric',
+    'Use existing public key' and 'Create new' ('Create a container named ...' is an instruction).
   * A list item 'Label: value' whose label is plain text is a 'field' item too (#198) when the
     value starts with one bold or code span: 'Lock type: **Delete**', 'Name: `x` (use
     existing)'. The value is that span, its markup stripped as for any value; a remark after it
@@ -70,6 +85,12 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     the options, are dropped (#203).
   * NON_UI_BOLD is one global list, so a caption from one lab can hide a real label in another
     (#203).
+  * Some values that are not text to type still read as literal (#202): 'empty' (3.3.7),
+    'Default (30 GiB)' (3.2.3), relative times ('1 month from now', 'Current time'), a list of
+    tag pairs in one field ('Tags: Project = SkyCraft, ...', 5.1-5.3) and an angle-bracket
+    placeholder ('Owner = <your name>', 5.3). A table row with an empty value that captions the
+    rows below it ('**Remote virtual network**', 2.1.9) is a field with an empty value.
+  * Only field values are checked for instructions; a tag value is typed as written.
 
 Usage: python parse.py <path/to/lab-guide-X.Y.md> [--out steps.json] [--repo-root <dir>]
 """
@@ -106,6 +127,14 @@ PLAIN_LABEL_MAX_WORDS = 6      # the longest plain label in the guides has five 
 INSTRUCTION = re.compile(
     r"^(?:Add|Choose|Click|Create|Delete|Download|Enter|Go|Link|Navigate|Open|Remove|Run|Search"
     r"|Select|Wait|Type\s)\b", re.IGNORECASE)
+# A field value that starts with one of these, after an optional '(', is an instruction, not
+# text to type (value_is_literal). Check and Uncheck count only with something after them: alone
+# they are a check box state. 'Create new' is the Portal's own option (2.2.10).
+VALUE_INSTRUCTION = re.compile(
+    r"^\(?\s*(?:Browse|Choose|Click|Enter|Leave|Paste|Search|Select|Type|Create(?!\s+new\b)"
+    r"|(?:Un)?check(?=\s+\S))\b", re.IGNORECASE)
+YOUR = re.compile(r"^Your\s", re.IGNORECASE)     # 'Your subscription': a placeholder without brackets
+BRACKET_TOKEN = re.compile(r"\[[^\]]+\]")        # '[yourtenant]', '[IP of dev-skycraft-swc-lb-pip]'
 EXPECTED = re.compile(r"^\s*(?:(?:[-*]|\d+\.)\s+)?\*\*Expected Result\*\*[^:]*:(?P<text>.*)$")
 TABLE_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$")
 SEPARATOR_CELL = re.compile(r"^:?-+:?$")   # every non-empty cell of a separator row; not "--name"
@@ -241,6 +270,23 @@ def strip_value_markup(text: str) -> str:
     return text.replace("`", "").strip()      # code spans anywhere, not only around the value
 
 
+def value_is_literal(value: str) -> bool:
+    """Whether a field value is text to type or pick as written (#202). False when it starts with
+    an instruction verb (VALUE_INSTRUCTION) or with 'Your', ends with a colon, or holds a bracket
+    token; the rules are in the module docstring."""
+    text = value.strip()
+    return not (VALUE_INSTRUCTION.match(text) or YOUR.match(text) or text.endswith(":")
+                or BRACKET_TOKEN.search(text))
+
+
+def field_item(label: str, value: str, number: int) -> dict:
+    """A 'field' item; '"literal": false' is added when the value is not text to type."""
+    item = {"kind": "field", "label": label, "value": value, "line": number}
+    if not value_is_literal(value):
+        item["literal"] = False
+    return item
+
+
 def split_steps(lines: list[str]) -> list[dict]:
     """Return raw step sections: id, title, heading line (1-based) and body lines with numbers."""
     steps: list[dict] = []
@@ -351,9 +397,10 @@ def table_row_item(cells: list[str], form: str | None, number: int) -> dict | No
     """The field or tag item for one data row of a form table; None for any other row."""
     if not form or len(cells) < 2 or not cells[0]:
         return None
-    key = "label" if form == "field" else "name"
-    return {"kind": form, key: clean_label(strip_value_markup(cells[0])),
-            "value": strip_value_markup(cells[1]), "line": number}
+    key, value = clean_label(strip_value_markup(cells[0])), strip_value_markup(cells[1])
+    if form == "field":
+        return field_item(key, value, number)
+    return {"kind": "tag", "name": key, "value": value, "line": number}
 
 
 def plain_field(text: str, number: int) -> dict | None:
@@ -368,8 +415,7 @@ def plain_field(text: str, number: int) -> dict | None:
         return None
     if BOLD.search(m.group("rest")) or CHAIN.search(m.group("rest")):
         return None                                # two values or a chain: read as actions
-    return {"kind": "field", "label": label, "value": strip_value_markup(m.group("span")),
-            "line": number}
+    return field_item(label, strip_value_markup(m.group("span")), number)
 
 
 def list_item(text: str, number: int) -> dict | None:
@@ -389,8 +435,7 @@ def list_item(text: str, number: int) -> dict | None:
             value = f.group("value").strip()
             if value.endswith("."):
                 value = value[:-1]                 # before the markup, so "`staging`." works
-            return {"kind": "field", "label": label, "value": strip_value_markup(value),
-                    "line": number}
+            return field_item(label, strip_value_markup(value), number)
     field = plain_field(text.strip(), number)
     if field:
         return field
