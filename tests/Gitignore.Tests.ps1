@@ -97,6 +97,7 @@ Describe '.gitignore - required ignore patterns' {
         $artefacts = @(
             'tools/guide-drift-logs/20261007-100000/results.jsonl'
             'tools/guide-drift-logs/20261007-100000/Step-1.1.6.png'
+            'tools/guide-drift-logs/20261007-100000/blade-1.1.4.aria.txt'
             'tools/.guide-drift-state.json'
             'tools/.guide-drift-auth.json'
             'tools/.guide-drift-state.json.tmp'
