@@ -11,10 +11,11 @@
 
     A field value parse.py marks '"literal": false' (an instruction such as 'Click the "..."
     button', or a value with a bracket token) is never typed by the runner unless the recording
-    resolves it (issue #202). So for every field of the guide with that mark, the recording must
-    give the field a valueOverride, or placeholders that make the value a literal by parse.py's
-    own rule (value_is_literal) - for '[yourtenant]' in an address, a placeholder for the token.
-    A guide edit that adds such a value fails here instead of in a live run.
+    resolves it (issue #202). So for every field of the guide with that mark, the runner's own
+    decision (recording.field_action) must be to type it: the recording gives the field a
+    valueOverride, or placeholders that make the value a literal - for '[yourtenant]' in an
+    address, a placeholder for the token. A guide edit that adds such a value fails here
+    instead of in a live run.
 
     It also keeps tenant data out of this public repository: for every recording, no e-mail
     address, tenant domain or GUID, and only query-free portal.azure.com blade addresses; for lab
@@ -33,10 +34,27 @@
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Parser   = Join-Path $RepoRoot 'tools/guide-drift/parse.py'
 $Python   = if ($IsWindows) { 'python' } else { 'python3' }
-# Prints, as a JSON array, parse.value_is_literal() of each string in the JSON array file argv[2],
-# so this suite applies the parser's own rule rather than a copy of it.
-$LiteralCheck = 'import json, sys; sys.path.insert(0, sys.argv[1]); from parse import value_is_literal; ' +
-    'print(json.dumps([value_is_literal(v) for v in json.loads(open(sys.argv[2], ''rb'').read())]))'
+# Prints, as a JSON array, every field of the parsed guide (argv[3]) that is marked
+# '"literal": false' and that recording.field_action - the runner's own decision - would report
+# rather than type with the recording (argv[2]). Each '${NAME}' the recording refers to is set to
+# a dummy value first, as the environment is not set here and expand_env stops on a missing name.
+$FieldActionCheck = @'
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from recording import env_names, field_action
+recording = json.loads(Path(sys.argv[2]).read_bytes())
+steps = json.loads(Path(sys.argv[3]).read_bytes())['steps']
+os.environ.update({name: 'guide-drift-test' for name in env_names(recording)})
+reported = []
+for step in steps:
+    for item in step['items']:
+        if item['kind'] == 'field' and item.get('literal', True) is False:
+            action = field_action(recording, step, item)[0]
+            if action in ('instruction', 'unresolved'):
+                reported.append({'step': step['id'], 'label': item['label'], 'value': item['value'], 'action': action})
+print(json.dumps(reported))
+'@
 
 $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/recordings') -Filter 'lab-*.json' |
     ForEach-Object {
@@ -46,12 +64,21 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
         $guidePath = Join-Path $RepoRoot $recording.guide
         # Read through --out, never stdout: on Windows a piped stdout is decoded with the console
         # code page, and guides contain characters outside it (see Guide-Drift-Parser.Tests.ps1).
-        $parsed = $null
+        $parsed   = $null
+        $reported = @()
         if (Test-Path -LiteralPath $guidePath) {
             $out = [System.IO.Path]::GetTempFileName()
             try {
                 & $Python $Parser $guidePath --out $out --repo-root $RepoRoot
-                if ($LASTEXITCODE -eq 0) { $parsed = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json }
+                if ($LASTEXITCODE -eq 0) {
+                    $parsed = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+                    # json.dumps escapes non-ASCII, so the console code page cannot garble stdout.
+                    $reportedJson = & $Python -B -c $FieldActionCheck (Join-Path $RepoRoot 'tools/guide-drift') $file.FullName $out
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "the field_action check of '$($file.Name)' failed (python exit code $LASTEXITCODE)"
+                    }
+                    $reported = @(($reportedJson -join "`n") | ConvertFrom-Json)
+                }
             } finally { Remove-Item -LiteralPath $out -ErrorAction SilentlyContinue }
         }
 
@@ -121,40 +148,12 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
         )
 
         # Every field the guide marks '"literal": false' needs a valueOverride, or placeholders
-        # that leave a literal (#202). The placeholders are applied as written ('${NAME}'), as
-        # the environment is not set here; parse.py decides what is literal.
-        $unresolved = @()
-        if ($parsed) {
-            $pending = [System.Collections.Generic.List[object]]::new()
-            foreach ($step in @($parsed.steps)) {
-                foreach ($item in @($step.items)) {
-                    if ($item.kind -ne 'field' -or $item.literal -ne $false) { continue }
-                    $overrides = if ($recording.steps.PSObject.Properties.Name -ccontains $step.id) { $recording.steps.($step.id).valueOverrides }
-                    if ($null -ne $overrides -and @($overrides.PSObject.Properties.Name) -ccontains $item.label) { continue }
-                    $value = [string]$item.value
-                    if ($null -ne $recording.placeholders) {
-                        foreach ($placeholder in @($recording.placeholders.PSObject.Properties)) {
-                            $value = $value.Replace($placeholder.Name, [string]$placeholder.Value)
-                        }
-                    }
-                    $pending.Add([pscustomobject]@{ step = $step.id; label = $item.label; guideValue = [string]$item.value; value = $value })
-                }
+        # that leave a literal (#202): field_action, run in Python above, reports the others.
+        $unresolved = @(
+            foreach ($field in $reported) {
+                "step $($field.step) field '$($field.label)': '$($field.value)' would be reported as $($field.action), not typed; add a valueOverride, or a placeholder for each [token]"
             }
-            if ($pending.Count -gt 0) {
-                $valuesFile = [System.IO.Path]::GetTempFileName()
-                try {
-                    ConvertTo-Json -InputObject @($pending.value) | Set-Content -Encoding utf8 -LiteralPath $valuesFile
-                    $literal = @(& $Python -B -c $LiteralCheck (Join-Path $RepoRoot 'tools/guide-drift') $valuesFile | ConvertFrom-Json)
-                } finally { Remove-Item -LiteralPath $valuesFile -ErrorAction SilentlyContinue }
-                $unresolved = @(
-                    for ($i = 0; $i -lt $pending.Count; $i++) {
-                        if ($literal[$i] -ne $true) {
-                            "step $($pending[$i].step) field '$($pending[$i].label)': '$($pending[$i].guideValue)' is not a literal; add a valueOverride, or a placeholder for each [token]"
-                        }
-                    }
-                )
-            }
-        }
+        )
 
         # A recorded address is the Portal's URL for a blade. The runner redacts tenant domain,
         # tenant id, GUIDs and query strings before it saves one; this is the backstop.

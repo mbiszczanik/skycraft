@@ -42,9 +42,9 @@ without a browser. Rules (issue #189):
     reports the field as unknown. tests/Guide-Drift-Recording.Tests.ps1 requires the same of
     every recorded lab. A check box state is a literal: 'checked', '✅ Checked', 'Uncheck'; the
     runner reads it (recording.checkbox_state) and ticks or clears the check box the label
-    names rather than typing it. Check and Uncheck are instructions only when
-    something follows them ('uncheck Use workspace created by connection monitor and select
-    ...'). Words the Portal's own options start with in the guides are not instruction verbs:
+    names rather than typing it. So is a bare 'Leave checked' or 'Leave unchecked'. Check and
+    Uncheck are instructions only when a word follows them ('uncheck Use workspace created by
+    connection monitor and select ...'), not a remark ('Uncheck (default)'). Words the Portal's own options start with in the guides are not instruction verbs:
     'Allow', 'Apply rule to all blobs ...', 'Disable', 'Do not clone settings', 'Enable public
     access ...', 'Increase count by', 'Limit blobs with filters', 'Scale based on a metric',
     'Use existing public key' and 'Create new' ('Create a container named ...' is an instruction).
@@ -85,7 +85,8 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     the options, are dropped (#203).
   * NON_UI_BOLD is one global list, so a caption from one lab can hide a real label in another
     (#203).
-  * Some values that are not text to type still read as literal (#202): 'empty' (3.3.7),
+  * Some values that are not text to type still read as literal; #202 does not cover them, and
+    each is found when its lab is recorded (#204): 'empty' (3.3.7),
     'Default (30 GiB)' (3.2.3), relative times ('1 month from now', 'Current time'), a list of
     tag pairs in one field ('Tags: Project = SkyCraft, ...', 5.1-5.3) and an angle-bracket
     placeholder ('Owner = <your name>', 5.3). A table row with an empty value that captions the
@@ -128,11 +129,13 @@ INSTRUCTION = re.compile(
     r"^(?:Add|Choose|Click|Create|Delete|Download|Enter|Go|Link|Navigate|Open|Remove|Run|Search"
     r"|Select|Wait|Type\s)\b", re.IGNORECASE)
 # A field value that starts with one of these, after an optional '(', is an instruction, not
-# text to type (value_is_literal). Check and Uncheck count only with something after them: alone
-# they are a check box state. 'Create new' is the Portal's own option (2.2.10).
+# text to type (value_is_literal). Check and Uncheck count only with a word after them, not a
+# remark ('Uncheck (default)'): alone they are a check box state. So is a bare 'Leave checked'
+# or 'Leave unchecked'; 'Leave default' is an instruction. 'Create new' is the Portal's own
+# option (2.2.10).
 VALUE_INSTRUCTION = re.compile(
-    r"^\(?\s*(?:Browse|Choose|Click|Enter|Leave|Paste|Search|Select|Type|Create(?!\s+new\b)"
-    r"|(?:Un)?check(?=\s+\S))\b", re.IGNORECASE)
+    r"^\(?\s*(?:Browse|Choose|Click|Enter|Leave(?!\s+(?:un)?checked\s*$)|Paste|Search|Select|Type"
+    r"|Create(?!\s+new\b)|(?:Un)?check(?=\s+[^\s(]))\b", re.IGNORECASE)
 YOUR = re.compile(r"^Your\s", re.IGNORECASE)     # 'Your subscription': a placeholder without brackets
 BRACKET_TOKEN = re.compile(r"\[[^\]]+\]")        # '[yourtenant]', '[IP of dev-skycraft-swc-lb-pip]'
 EXPECTED = re.compile(r"^\s*(?:(?:[-*]|\d+\.)\s+)?\*\*Expected Result\*\*[^:]*:(?P<text>.*)$")

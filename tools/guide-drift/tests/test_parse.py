@@ -161,11 +161,15 @@ class LiteralValueTests(unittest.TestCase):
         "Select DevRevokePolicy",                                        # 4.4.4
         "uncheck Use workspace created by connection monitor and select platform-skycraft-swc-law",  # 5.3.6
         "leave unchecked. Click Review + create → Create",               # 5.3.6
+        "Leave checked and select platform-skycraft-swc-law",            # more after the state
+        "Check Enable auto-shutdown",                                     # a word after the verb
     )
     LITERALS = (
         "SkyCraft-Admins", "Sweden Central (or your preferred region)", "",
         # check box states, applied to a check box (fill_field), never typed
         "Uncheck", "checked", "Check", "✅ Checked", "☐ Unchecked", "❌ Disabled (for dev, you may enable)",
+        "Leave checked", "leave unchecked", "Leave Unchecked ",             # a bare 'leave' state
+        "Uncheck (default)", "Check (recommended)",                       # a remark, not a word, after the verb
         # the Portal's own options, which start with a verb
         "Create new", "Disable", "Allow", "Enable public access from all networks", "Use existing public key",
         "Apply rule to all blobs in your storage account", "Do not clone settings", "Limit blobs with filters",

@@ -1610,7 +1610,8 @@ class FieldValueTests(RunnerTestCase):
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
         match = r.new_record(step, "field", item["label"])
         match.update(outcome="match")
-        with mock.patch.object(run.Runner, "act_on_label", return_value=match) as act,                 mock.patch.object(run.Runner, "check_result"):
+        with mock.patch.object(run.Runner, "act_on_label", return_value=match) as act, \
+                mock.patch.object(run.Runner, "check_result"):
             done = self.quietly(lambda: r.run_step(step))
         return done, r, act
 
