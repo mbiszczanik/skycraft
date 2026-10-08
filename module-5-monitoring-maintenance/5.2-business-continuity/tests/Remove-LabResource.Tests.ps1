@@ -22,6 +22,8 @@
       3. The Recovery Services Vault failure hint names the tooling requirement first.
       4. The orphaned restore point collection and its emptied AzureBackupRG_* group are removed.
       5. A stale Az.RecoveryServices is diagnosed before the delete is attempted.
+      6. The SkyCraft-owned snapshot resource group (issue #184) is deleted as a whole, and a
+         failure to delete it is counted.
 
     No Azure connection is needed, and none is used. The script runs through
     tests/Support/LabScriptStub.psm1 (issue #112), which imports the real Az modules first, the
@@ -201,6 +203,7 @@ function Get-AzResourceGroup {
     if (Test-StubEmpty) { return }
     [pscustomobject]@{ ResourceGroupName = 'AzureBackupRG_swedencentral_1'; Location = 'swedencentral' }
     [pscustomobject]@{ ResourceGroupName = 'platform-skycraft-swc-rg';      Location = 'swedencentral' }
+    [pscustomobject]@{ ResourceGroupName = 'platform-skycraft-swc-rpc1-rg'; Location = 'swedencentral' }
 }
 
 function Get-AzResource {
@@ -223,10 +226,13 @@ function Remove-AzResource {
     Invoke-StubGate -Name 'Remove-AzResource'
 }
 
+# Logged twice: the bare name keeps the generic assertions simple, and the name with the group
+# tells the snapshot group from the AzureBackupRG_* one - and lets a scenario fail just one of them.
 function Remove-AzResourceGroup {
     [CmdletBinding()]
     param($Name, [switch]$Force)
-    Invoke-StubGate -Name 'Remove-AzResourceGroup'
+    Write-StubCall -Name 'Remove-AzResourceGroup'
+    Invoke-StubGate -Name "Remove-AzResourceGroup:$Name"
 }
 '@
 
@@ -275,6 +281,8 @@ function Remove-AzResourceGroup {
     $script:FirstStuck  = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzDataProtectionBackupInstance'
     $script:StaleModule = Invoke-CleanupScript -Stub $script:Stub -RecoveryServicesVersion '7.1.0'
     $script:NoFriendly  = Invoke-CleanupScript -Stub $script:Stub -NoFriendlyName
+    $script:SnapshotRgStuck = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzResourceGroup:platform-skycraft-swc-rpc1-rg'
+    $script:StillProtected  = Invoke-CleanupScript -Stub $script:Stub -Fail 'Disable-AzRecoveryServicesBackupProtection'
 }
 
 AfterAll {
@@ -287,7 +295,7 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - test harness' {
         # Refused is the child exiting 99 before the script ran; anything else means the stubs
         # were in effect. Asserted on every scenario: a refusal in one of them is a half-stubbed
         # session, not a scenario-specific failure.
-        foreach ($run in @($script:Clean, $script:Nothing, $script:VaultStuck, $script:TwoStuck, $script:FirstStuck, $script:StaleModule, $script:NoFriendly)) {
+        foreach ($run in @($script:Clean, $script:Nothing, $script:VaultStuck, $script:TwoStuck, $script:FirstStuck, $script:StaleModule, $script:NoFriendly, $script:SnapshotRgStuck, $script:StillProtected)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az cmdlets (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -367,6 +375,33 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - orphaned Azure Backup residue' {
 
     It 'leaves resource groups that are not Azure Backup residue alone' {
         $script:Clean.Output | Should -Not -Match 'Azure Backup resource group: platform-skycraft-swc-rg'
+        $script:Clean.Calls  | Should -Not -Contain 'Remove-AzResourceGroup:platform-skycraft-swc-rg'
+    }
+}
+
+Describe 'Lab 5.2 Remove-LabResource.ps1 - instant-restore snapshot resource group (#184)' {
+
+    It 'deletes the SkyCraft-owned snapshot group as a whole' {
+        $script:Clean.Calls  | Should -Contain 'Remove-AzResourceGroup:platform-skycraft-swc-rpc1-rg'
+        $script:Clean.Output | Should -Match 'Deleting snapshot resource group: platform-skycraft-swc-rpc1-rg'
+    }
+
+    It 'still clears the legacy AzureBackupRG_* group a pre-#184 policy left behind' {
+        $script:Clean.Calls | Should -Contain 'Remove-AzResourceGroup:AzureBackupRG_swedencentral_1'
+    }
+
+    It 'counts a snapshot group it could not delete and exits 1' {
+        $script:SnapshotRgStuck.ExitCode | Should -Be 1 -Because "a surviving snapshot group must not look like a clean cleanup; output was:`n$($script:SnapshotRgStuck.Output)"
+        $script:SnapshotRgStuck.Output   | Should -Match "\[ERROR\] Could not delete snapshot resource group 'platform-skycraft-swc-rpc1-rg'"
+        $script:SnapshotRgStuck.Output   | Should -Match 'Cleanup finished with 1 failure\(s\)'
+    }
+
+    It 'keeps the snapshot group while a VM is still protected' {
+        # Deleting it under a live protected item lets the next backup recreate it untagged,
+        # which Lab 1.3 denies - the failure #184 removed.
+        $script:StillProtected.Calls    | Should -Not -Contain 'Remove-AzResourceGroup:platform-skycraft-swc-rpc1-rg'
+        $script:StillProtected.Output   | Should -Match 'platform-skycraft-swc-rpc1-rg left in place - a VM is still protected'
+        $script:StillProtected.ExitCode | Should -Be 1
     }
 }
 

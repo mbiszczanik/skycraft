@@ -243,6 +243,11 @@ Update-Module -Name Az -Force
 Recovery Services Vault parks a `Microsoft.Compute/restorePointCollections` in it, and both the
 collection and the group outlive the vault.
 
+**SkyCraft no longer creates it.** Since issue #184, lab 5.2's backup policy keeps its snapshots
+in its own tagged group, `platform-skycraft-swc-rpc1-rg`, which lab 5.2's teardown deletes whole
+and the cycle sweep asserts absent. Only a `SkyCraft-Daily-Prod` policy created before that fix
+still writes here, and `Deploy-Bicep.ps1` repoints such a policy on its next run.
+
 **The group is shared.** It holds restore point collections for *every* protected VM in that
 region, including workloads that have nothing to do with SkyCraft. So the question is never "is the
 group gone" — it is "is *our* collection gone".

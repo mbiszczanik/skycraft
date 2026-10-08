@@ -249,6 +249,21 @@ Describe 'Resource audit - regression guards for issue #116' {
         Test-LabResourceKnown -Name 'dev-skycraft-swc-rg' -KnownName $script:RealKnown | Should -BeTrue
     }
 
+    # Issue #184 made Lab 5.2's instant-restore snapshot group a group the repository names,
+    # so the audit now reads everything in it - including the restore point collection Azure
+    # Backup creates there and names after the protected VM.
+    It 'recognises Lab 5.2 snapshot resource group' {
+        Test-LabResourceKnown -Name 'platform-skycraft-swc-rpc1-rg' -KnownName $script:RealKnown | Should -BeTrue
+    }
+
+    It 'recognises the restore point collection Azure Backup keeps for a lab VM' {
+        Test-LabResourceKnown -Name 'AzureBackup_dev-skycraft-swc-auth-vm_7702140526018345310' -KnownName $script:RealKnown | Should -BeTrue
+    }
+
+    It 'still flags a restore point collection for a VM no lab deploys' {
+        Test-LabResourceKnown -Name 'AzureBackup_prod-skycraft-swc-traffic-vm_7702140526018345310' -KnownName $script:RealKnown | Should -BeFalse
+    }
+
     # Found by the live cycle deploy. Lab 3.1 names its NSGs by passing a literal
     # straight into a module argument - parNsgName: 'auth-nsg' - rather than
     # declaring a variable for it. Those two names carry no project token and no

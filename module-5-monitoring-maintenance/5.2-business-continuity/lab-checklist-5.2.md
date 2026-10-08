@@ -32,7 +32,14 @@
 - [x] Backup frequency: **Daily**
 - [x] Backup time: **02:00 AM UTC**
 - [x] Instant Restore retention: **2 days**
+- [x] Azure Backup Resource Group: name `platform-skycraft-swc-rpc`, suffix `-rg`
 - [x] Daily backup retention: **30 days**
+
+### Instant-Restore Snapshot Resource Group
+
+- [x] Resource group `platform-skycraft-swc-rpc1-rg` in **Sweden Central**
+- [x] Tags: `Project` = `SkyCraft`, `Environment` = `Platform`, `CostCenter` = `MSDN`, `Owner` set
+- [x] No resource lock on the group (Azure Backup deletes expired snapshots from it)
 
 ### Blob Backup Policy
 
@@ -48,7 +55,7 @@
 
 - [x] VM `dev-skycraft-swc-auth-vm` listed under **Backup items** → Azure Virtual Machine
 - [x] Policy assigned: `SkyCraft-Daily-Prod`
-- [x] Initial backup triggered (status: **Completed** or **In progress**)
+- [x] Initial backup triggered (status: **Completed** or **In progress**, never **Failed** - a failure here is Troubleshooting, Issue 2 in the lab guide)
 - [x] Last backup status: **Success** (once completed)
 
 ---

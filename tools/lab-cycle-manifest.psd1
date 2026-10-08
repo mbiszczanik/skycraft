@@ -483,10 +483,16 @@
 
         # Deleted last, after every lab teardown has run against them. Emptied by the per-lab
         # scripts; removed here so the subscription is left as the cycle found it.
+        #
+        # platform-skycraft-swc-rpc1-rg is lab 5.2's instant-restore snapshot group (#184). Lab
+        # 5.2's own teardown deletes it, so here it is normally "already gone"; listing it makes a
+        # surviving one an assertion failure rather than a silent leftover. Unlike AzureBackupRG_*
+        # it is SkyCraft's alone - the VM backup policy names it and nothing else writes to it.
         ResourceGroups = @(
             'dev-skycraft-swc-rg'
             'prod-skycraft-swc-rg'
             'platform-skycraft-swc-rg'
+            'platform-skycraft-swc-rpc1-rg'
         )
     }
 
