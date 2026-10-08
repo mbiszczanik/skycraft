@@ -44,10 +44,11 @@
     record per check, appended as the run goes), a full-window screenshot of every step,
     summary.md, for a 'Search for' step that found no single result, search-<step>.aria.txt
     (the search dropdown's accessibility tree, redacted) and, for a label that was not found,
-    blade-<step>.aria.txt (the outline the blade loading check read, redacted). Screenshots
-    show the tenant name, user principal names and the subscription id, so nothing is copied
-    into a guide's images/ folder: crop and anonymise by hand. The saved browser session
-    (tools/.guide-drift-auth.json) is a sign-in. All of it is gitignored and asserted by tests/Gitignore.Tests.ps1.
+    blade-<step>-<guide line>.aria.txt (the outline the blade loading check read, redacted).
+    Screenshots show the tenant name, user principal names and the subscription id, so nothing
+    is copied into a guide's images/ folder: crop and anonymise by hand. The saved browser
+    session (tools/.guide-drift-auth.json) is a sign-in. All of it is gitignored and asserted
+    by tests/Gitignore.Tests.ps1.
 
     VALUES THAT MUST NOT BE LITERAL. Step 1.1.5 invites a guest; the recording overrides that
     address with ${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}, and '[yourtenant]' with

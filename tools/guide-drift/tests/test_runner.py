@@ -1710,8 +1710,11 @@ class FindOnScreenTests(RunnerTestCase):
     def waiting_lines(said) -> list[str]:
         return [str(c.args[0]) for c in said.call_args_list if c.args and "still loading" in str(c.args[0])]
 
-    def blade_outline(self) -> str:
-        return (self.tmp / "logs" / "test" / "blade-9.9.1.aria.txt").read_text(encoding="utf-8")
+    def blade_outline(self, line: int) -> str:
+        """The outline kept for the item on guide line `line` of step 9.9.1, the only one kept."""
+        kept = sorted((self.tmp / "logs" / "test").glob("blade-*.aria.txt"))
+        self.assertEqual([path.name for path in kept], [f"blade-9.9.1-{line}.aria.txt"])
+        return kept[0].read_text(encoding="utf-8")
 
     def test_a_label_on_a_blade_still_loading_is_waited_for_beyond_the_lookup_time(self) -> None:
         field = ScreenNode(tag="input")
@@ -1734,19 +1737,40 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual(len(waiting), 1)                                   # said once, not every look
         self.assertIn("User principal name", waiting[0])
         self.assertIn(f"{run.BLADE_EMPTY_TIMEOUT_MS // 1000} s", waiting[0])
-        self.assertFalse((self.tmp / "logs" / "test" / "blade-9.9.1.aria.txt").exists())   # found: nothing kept
+        self.assertEqual(list((self.tmp / "logs" / "test").glob("blade-*")), [])     # found: nothing kept
 
     def test_a_label_missing_from_a_rendered_blade_is_asked_about_after_the_normal_time(self) -> None:
         screen = Screen(("textbox", "Group name", ScreenNode(tag="input")),
                         tree=self.TOP_BAR + self.NEW_GROUP + '- textbox "Group name"\n')
         item = {"kind": "field", "label": "Group type", "value": "Security", "line": 2}
-        with mock.patch("builtins.print") as said:
+        outline = mock.Mock(side_effect=run.aria_outline)
+        with mock.patch("builtins.print") as said, mock.patch.object(run, "aria_outline", outline):
             record, r = self.act(screen, item, "Group type", value="Security")
         self.assertEqual((record["outcome"], len(r.ask.prompts)), ("unknown", 1))
         self.assertLess(r.page.now, run.FIND_TIMEOUT_MS / 1000 + 1)
         self.assertFalse(self.waiting_lines(said))
-        self.assertTrue(self.blade_outline().endswith(                     # what the check read
+        self.assertEqual(outline.call_count, 1)                            # the outline read is the one kept
+        self.assertTrue(self.blade_outline(2).endswith(                    # what the check read
             'heading "New Group"\nbutton "Close content \'New Group\'"\ntextbox "Group name"\n'))
+
+    def test_no_outline_is_kept_for_a_label_the_recording_has_a_decision_for(self) -> None:
+        screen = Screen(tree=self.TOP_BAR + self.NEW_GROUP + '- textbox "Group name"\n')
+        self.recording["steps"]["9.9.1"]["labels"]["Group type"] = {"decision": "gone", "at": "2026-10-08T10:00:00Z"}
+        item = {"kind": "field", "label": "Group type", "value": "Security", "line": 2}
+        with mock.patch("builtins.print") as said:
+            record, r = self.act(screen, item, "Group type", value="Security")
+        self.assertEqual((record["outcome"], record["severity"], r.ask.prompts), ("drift", "blocking", []))
+        self.assertEqual(list((self.tmp / "logs" / "test").glob("blade-*")), [])
+        self.assertFalse([c for c in said.call_args_list if c.args and "outline" in str(c.args[0])])
+
+    def test_each_item_of_a_step_keeps_its_own_outline(self) -> None:
+        screen = Screen(tree=self.TOP_BAR + self.NEW_GROUP + '- textbox "Group name"\n')
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        for line, label in ((3, "Group type"), (4, "Membership type")):
+            with mock.patch("builtins.print"):
+                self.act(screen, {"kind": "field", "label": label, "value": "x", "line": line}, label, runner=r)
+        self.assertEqual(sorted(path.name for path in (self.tmp / "logs" / "test").glob("blade-*")),
+                         ["blade-9.9.1-3.aria.txt", "blade-9.9.1-4.aria.txt"])
 
     def test_a_blade_that_never_gets_its_title_is_asked_about_after_the_longer_limit(self) -> None:
         screen = Screen(tree=self.TOP_BAR + "- button \"Close content 'undefined'\"\n")
@@ -1757,7 +1781,7 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertGreaterEqual(r.page.now, limit)
         self.assertLess(r.page.now, limit + 1)
         self.assertEqual(len(self.waiting_lines(said)), 1)
-        self.assertIn("button \"Close content 'undefined'\"", self.blade_outline())
+        self.assertIn("button \"Close content 'undefined'\"", self.blade_outline(1))
 
     def test_a_titled_blade_that_stays_empty_is_asked_about_after_the_grace_limit(self) -> None:
         screen = Screen(tree=self.TOP_BAR + self.NEW_GROUP)
@@ -1767,7 +1791,7 @@ class FindOnScreenTests(RunnerTestCase):
         limit = (run.FIND_TIMEOUT_MS + run.BLADE_EMPTY_TIMEOUT_MS) / 1000
         self.assertGreaterEqual(r.page.now, limit)
         self.assertLess(r.page.now, limit + 1)
-        self.assertIn('heading "New Group"', self.blade_outline())
+        self.assertIn('heading "New Group"', self.blade_outline(1))
 
     def test_a_blade_that_renders_without_the_label_is_asked_about_after_one_more_lookup(self) -> None:
         screen = Screen(tree=self.TOP_BAR + self.NEW_GROUP)

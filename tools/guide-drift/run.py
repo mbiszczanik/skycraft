@@ -11,7 +11,7 @@ session saved to --auth-state, so the next run skips the password.
 
 Everything a run leaves behind goes under --log-dir/<run id>/ and is gitignored:
 results.jsonl (one record per check, appended as the run goes), Step-X.Y.N.png (full window,
-for manual cropping and anonymisation), summary.md, and blade-<step>.aria.txt for a label that
+for manual cropping and anonymisation), summary.md, and blade-<step>-<line>.aria.txt for a label that
 was not found (the outline the loading check read, redacted). Only the recording is written back
 into the repository.
 
@@ -1328,17 +1328,19 @@ class Runner:
             return element
         return look
 
-    def wait_for_blade(self, step: dict, label: str, look: Callable[[], Locator | None]) -> Locator | None:
+    def wait_for_blade(self, step: dict, item: dict, label: str,
+                       look: Callable[[], Locator | None]) -> Locator | None:
         """After `look` found nothing for FIND_TIMEOUT_MS: when a blade is still loading
         (blade_still_loading), say so once and go on looking until it has rendered or its limit
         has passed (BLADE_LOAD_TIMEOUT_MS while a title reads 'undefined', BLADE_EMPTY_TIMEOUT_MS
         for a titled blade without content); once it has rendered, look for FIND_TIMEOUT_MS again,
         as its controls come a moment after it. None at once when no blade is loading, so a label
         missing from a rendered blade is asked about after the normal time (issue #233). Whenever
-        the label is still not found, the outline is kept as blade-<step>.aria.txt."""
-        loading = blade_still_loading(aria_outline(self.page))
+        the label is still not found, the outline is kept (save_blade_outline)."""
+        outline = aria_outline(self.page)
+        loading = blade_still_loading(outline)
         if loading is None:
-            self.save_blade_outline(step)
+            self.save_blade_outline(step, item, label, outline)
             return None
         limit = BLADE_LOAD_TIMEOUT_MS if loading == BLADE_UNTITLED else BLADE_EMPTY_TIMEOUT_MS
         print(f"The blade is still loading: waiting up to {limit // 1000} s for it "
@@ -1362,17 +1364,22 @@ class Runner:
         if found is rendered:
             found = in_time(self.page, look)
         if found is None:
-            self.save_blade_outline(step)
+            self.save_blade_outline(step, item, label)
         return found
 
-    def save_blade_outline(self, step: dict) -> None:
-        """Keep what blade_still_loading() reads, redacted, as blade-<step>.aria.txt in the run
-        folder (one '<role> "<name>"' per line): a label that was not found shows there whether
-        the blade was taken for loaded, so the check can be tuned without another live run."""
-        if self.page.is_closed():
+    def save_blade_outline(self, step: dict, item: dict, label: str,
+                           outline: list[tuple[str, str]] | None = None) -> None:
+        """Keep what blade_still_loading() read (`outline`, or a fresh aria_outline()), redacted,
+        as blade-<step>-<guide line>.aria.txt in the run folder, one '<role> "<name>"' per line: a
+        label that was not found shows there whether the blade was taken for loaded, so the check
+        can be tuned without another live run. Not for a label the recording already holds a
+        decision for: replay settles it, and the person is not asked."""
+        if self.page.is_closed() or label in self.recording["steps"].get(step["id"], {}).get("labels", {}):
             return
-        lines = [f'{role} "{name}"' if name else role for role, name in aria_outline(self.page)]
-        path = self.run_dir / f"blade-{step['id']}.aria.txt"
+        if outline is None:
+            outline = aria_outline(self.page)
+        lines = [f'{role} "{name}"' if name else role for role, name in outline]
+        path = self.run_dir / f"blade-{step['id']}-{item.get('line')}.aria.txt"
         path.write_text(self.redactor.redact("\n".join(lines)) + "\n", encoding="utf-8")
         print(f"The blade's outline is in {path}")
 
@@ -1452,7 +1459,7 @@ class Runner:
                 look = self.looking_for(label, kind)
                 element = in_time(self.page, look)
                 if element is None:
-                    element = self.wait_for_blade(step, label, look)
+                    element = self.wait_for_blade(step, item, label, look)
         except Ambiguous as error:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
             return record
