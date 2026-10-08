@@ -77,6 +77,16 @@ class PlainLabelFieldTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.item(text), self.field(label, value))
 
+    def test_a_bold_value_loses_code_marks_as_with_a_bold_label(self) -> None:
+        self.assertEqual(self.item("Name: **`dev-skycraft-swc-rg`**"), self.field("Name", "dev-skycraft-swc-rg"))
+        self.assertEqual(self.item("**Name**: **`dev-skycraft-swc-rg`**"), self.field("Name", "dev-skycraft-swc-rg"))
+
+    def test_a_label_with_an_underscore_is_not_a_plain_label(self) -> None:
+        # An underscore marks italics ('_Note_:') or an identifier, never a Portal label.
+        for text in ("_Note_: `this` is a caption", "resource_group: `dev-skycraft-swc-rg`"):
+            with self.subTest(text=text):
+                self.assertIsNone(self.item(text))
+
     def test_a_plain_text_value_is_not_a_field(self) -> None:
         # Nearly every plain value in the guides is a line of a list to check, not a form.
         for text in ("Name: Malfurion Stormrage",
