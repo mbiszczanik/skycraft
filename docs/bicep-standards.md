@@ -135,7 +135,7 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 | `avm/res/network/virtual-network/subnet` | `0.2.0` | Lab 2.2 |
 | `avm/res/operational-insights/workspace` | `0.16.1` | Lab 5.1 |
 | `avm/res/recovery-services/vault` | `0.13.0` | Lab 5.2 |
-| `avm/res/resources/resource-group` | `0.4.4` | Labs 1.2, 1.3, 3.3 |
+| `avm/res/resources/resource-group` | `0.4.4` | Labs 1.2, 1.3, 3.3, 5.2 |
 | `avm/res/storage/storage-account` | `0.33.0` | Labs 4.1, 4.2, 4.3, 4.4 |
 | `avm/res/web/serverfarm` | `0.7.0` | Lab 3.4 |
 | `avm/res/web/site` | `0.24.0` | Lab 3.4 |

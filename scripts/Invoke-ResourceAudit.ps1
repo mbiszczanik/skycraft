@@ -319,6 +319,11 @@ function Test-LabResourceKnown {
     # segment is tested separately, and all of them have to be accounted for: a drifted
     # slot under a legitimate site is still drift.
     foreach ($segment in $Name.Split('/')) {
+        # Azure Backup keeps a protected VM's instant-restore snapshots in a restore point
+        # collection it names AzureBackup_<vm>_<number>, inside Lab 5.2's snapshot resource
+        # group (#184). The collection is accounted for exactly when its VM is.
+        $collection = [regex]::Match($segment, '^AzureBackup_(.+)_\d+$')
+        if ($collection.Success) { $segment = $collection.Groups[1].Value }
         if ($KnownName -notcontains $segment) { return $false }
     }
 

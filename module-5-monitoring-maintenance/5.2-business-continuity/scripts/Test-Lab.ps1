@@ -5,8 +5,12 @@
 .DESCRIPTION
     Verifies all Lab 5.2 BCDR resources are deployed and correctly configured:
     - Recovery Services Vault (platform-skycraft-swc-rsv): exists, LRS, required tags
-    - VM Backup Policy (SkyCraft-Daily-Prod): daily schedule, 30-day retention
-    - VM backup protection enabled on dev-skycraft-swc-auth-vm (skipped if VM absent)
+    - VM Backup Policy (SkyCraft-Daily-Prod): daily schedule, 30-day retention, instant-restore
+      snapshots in platform-skycraft-swc-rpc1-rg
+    - Snapshot resource group (platform-skycraft-swc-rpc1-rg): exists, tagged, not locked
+    - VM backup protection enabled on dev-skycraft-swc-auth-vm (skipped if VM absent), and
+      its latest backup job did not fail - configuration alone stayed green while every
+      backup was refused by policy (issue #184)
     - Backup Vault (platform-skycraft-swc-bv): exists, LRS, system-assigned identity
     - Blob Backup Policy (SkyCraft-Blob-Policy): AzureBlob datasource, 30-day retention
     - Blob backup instance configured for prodskycraftswcsa
@@ -24,8 +28,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.0.0
-    Date: 2026-04-06
+    Version: 1.1.0
+    Date: 2026-10-06
 #>
 
 #Requires -Version 7.0
@@ -43,6 +47,10 @@ $bvName         = 'platform-skycraft-swc-bv'
 $vmName         = 'dev-skycraft-swc-auth-vm'
 $vmRg           = 'dev-skycraft-swc-rg'
 $storageAccount = 'prodskycraftswcsa'
+# Azure Backup names the snapshot group <prefix><n><suffix>; main.bicep creates n = 1.
+$snapshotRgPrefix = 'platform-skycraft-swc-rpc'
+$snapshotRgSuffix = '-rg'
+$snapshotRgName   = "${snapshotRgPrefix}1${snapshotRgSuffix}"
 
 $passCount = 0
 $failCount = 0
@@ -189,6 +197,43 @@ Invoke-Test "Policy schedule time contains 02:00 UTC" {
     }))
 }
 
+Invoke-Test "Policy stores instant-restore snapshots in '$snapshotRgName'" {
+    if (-not $rsvPolicy -or -not $rsv) { return $false }
+    # Without a named group Azure Backup creates an untagged AzureBackupRG_* group, which Lab 1.3's
+    # Require-Environment-Tag-RG denies (#184). Raw ARM first, typed properties as the fallback.
+    $pol = Get-AzResource -ResourceId "$($rsv.ID)/backupPolicies/SkyCraft-Daily-Prod" -ApiVersion '2023-06-01' -ExpandProperties -ErrorAction SilentlyContinue
+    $details = if ($pol) { $pol.Properties.instantRPDetails } else { $null }
+    if ($details -and $details.azureBackupRGNamePrefix) {
+        return ($details.azureBackupRGNamePrefix -eq $snapshotRgPrefix -and "$($details.azureBackupRGNameSuffix)" -eq $snapshotRgSuffix)
+    }
+    return ($rsvPolicy.AzureBackupRGName -eq $snapshotRgPrefix -and "$($rsvPolicy.AzureBackupRGNameSuffix)" -eq $snapshotRgSuffix)
+}
+
+# ============================================================================
+# Snapshot Resource Group Tests
+# ============================================================================
+Write-Host ""
+Write-Host "[Snapshot Resource Group]" -ForegroundColor Yellow
+
+$snapshotRg = Get-AzResourceGroup -Name $snapshotRgName -ErrorAction SilentlyContinue
+
+Invoke-Test "Resource group '$snapshotRgName' exists" {
+    return ($null -ne $snapshotRg)
+}
+
+Invoke-Test "Snapshot RG tag 'Environment' = 'Platform' (Lab 1.3 denies an RG without it)" {
+    return ($null -ne $snapshotRg -and $snapshotRg.Tags.Environment -eq 'Platform')
+}
+
+Invoke-Test "Snapshot RG tag 'Project' = 'SkyCraft'" {
+    return ($null -ne $snapshotRg -and $snapshotRg.Tags.Project -eq 'SkyCraft')
+}
+
+Invoke-Test "Snapshot RG has no resource lock (a lock blocks restore-point cleanup)" {
+    if (-not $snapshotRg) { return $false }
+    return (@(Get-AzResourceLock -ResourceGroupName $snapshotRgName -ErrorAction SilentlyContinue).Count -eq 0)
+}
+
 # ============================================================================
 # VM Backup Protection Tests
 # ============================================================================
@@ -217,6 +262,36 @@ if (-not $devVm) {
         if (-not $rsv) { return $false }
         $item = $vmItems | Where-Object { $_.Name -like "*$vmName" }
         return ($null -ne $item -and $item.ProtectionPolicyName -eq 'SkyCraft-Daily-Prod')
+    }
+
+    # The checks above are configuration. This one is the outcome: after Lab 1.3 every job failed
+    # in seconds while the lab stayed green (#184). InProgress passes - Deploy-Bicep.ps1 triggers
+    # the backup just before this runs, and the vault transfer takes far longer than the test.
+    $lastJob = if ($rsv) {
+        Get-AzRecoveryServicesBackupJob `
+            -VaultId $rsv.ID `
+            -BackupManagementType AzureVM `
+            -Operation Backup `
+            -From ((Get-Date).ToUniversalTime().AddDays(-7)) `
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.WorkloadName -eq $vmName } |
+            Sort-Object StartTime -Descending |
+            Select-Object -First 1
+    } else { $null }
+
+    Invoke-Test "Latest backup job for '$vmName' has not failed" {
+        if (-not $lastJob) {
+            Write-Host " (no backup job in the last 7 days - run Backup now, Step 5.2.3)" -NoNewline -ForegroundColor Gray
+            return $false
+        }
+        if ($lastJob.Status -eq 'Failed') {
+            $detail = Get-AzRecoveryServicesBackupJobDetail -JobId $lastJob.JobId -VaultId $rsv.ID -ErrorAction SilentlyContinue
+            # ErrorCode is numeric (400211); the message is what names the cause.
+            $jobErrors = @($detail.ErrorDetails | ForEach-Object { "$($_.ErrorCode): $($_.ErrorMessage)" }) -join '; '
+            Write-Host " ($jobErrors - see lab-guide-5.2.md, Troubleshooting)" -NoNewline -ForegroundColor Gray
+            return $false
+        }
+        return ($lastJob.Status -in @('InProgress', 'Completed', 'CompletedWithWarnings'))
     }
 }
 

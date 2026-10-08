@@ -1,9 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 5.2 - Business Continuity & Disaster Recovery - Orchestrator
-DESCRIPTION: Deploys the SkyCraft BCDR vaults into platform-skycraft-swc-rg through Azure Verified Modules - the Recovery Services Vault for VM backup (LRS, platform-enforced AlwaysON soft delete, backup-report diagnostics) and the Backup Vault for blob backup (LRS, system-assigned identity) - plus the Backup Vault's diagnostic setting through a local fallback module. Backup policies are created by Deploy-Bicep.ps1 (docs/bicep-standards.md section 10.4)
+DESCRIPTION: Deploys the SkyCraft BCDR vaults into platform-skycraft-swc-rg through Azure Verified Modules - the Recovery Services Vault for VM backup (LRS, platform-enforced AlwaysON soft delete, backup-report diagnostics) and the Backup Vault for blob backup (LRS, system-assigned identity) - plus the Backup Vault's diagnostic setting through a local fallback module, and the tagged resource group that holds the VM's instant-restore snapshots. Backup policies are created by Deploy-Bicep.ps1 (docs/bicep-standards.md section 10.4)
 EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
-VERSION: 2.0.0
+VERSION: 2.1.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -45,6 +45,12 @@ var varRsvName = 'platform-skycraft-swc-rsv'
 var varBvName = 'platform-skycraft-swc-bv'
 var varRsvDiagName = 'rsv-backup-reports-diag'
 var varBvDiagName = 'bv-backup-reports-diag'
+
+// Instant-restore snapshot group. Azure Backup names it <prefix><n><suffix> with n starting at 1,
+// so the VM backup policy carries the prefix and suffix and this template creates the n = 1 group.
+var varSnapshotRgPrefix = 'platform-skycraft-swc-rpc'
+var varSnapshotRgSuffix = '-rg'
+var varSnapshotRgName = '${varSnapshotRgPrefix}1${varSnapshotRgSuffix}'
 
 // Resource-specific Backup Reports tables shared by both vault types. The Recovery Services Vault
 // additionally emits AddonAzureBackupStorage and AzureBackupOperations - Backup Reports needs all six.
@@ -137,6 +143,21 @@ module modBackupVaultDiagnostics 'modules/backup-vault-diagnostics.bicep' = {
   }
 }
 
+// 4. Instant-restore snapshot resource group. Without one named in the VM backup policy, Azure Backup
+//    creates AzureBackupRG_<region>_<n> itself, untagged, and Lab 1.3's Require-Environment-Tag-RG
+//    denies it - every backup then fails with UserErrorRequestDisallowedByPolicy (issue #184).
+//    Deliberately not platform-skycraft-swc-rg and deliberately unlocked: Lab 1.3 locks that group
+//    CanNotDelete, and a lock on the snapshot group blocks restore-point garbage collection
+//    (UserErrorRpCollectionLimitReached).
+module modSnapshotResourceGroup 'br/public:avm/res/resources/resource-group:0.4.4' = {
+  name: 'bcdr-snapshot-rg-deployment'
+  params: {
+    name: varSnapshotRgName
+    location: parLocation
+    tags: varCommonTags
+  }
+}
+
 /******************
 *     Outputs     *
 ******************/
@@ -149,3 +170,12 @@ output outBvId string = modBackupVault.outputs.resourceId
 
 @description('Object ID of the Backup Vault system-assigned managed identity')
 output outBvPrincipalId string = modBackupVault.outputs.?systemAssignedMIPrincipalId ?? ''
+
+@description('Name of the instant-restore snapshot resource group')
+output outSnapshotRgName string = modSnapshotResourceGroup.outputs.name
+
+@description('Snapshot resource group name prefix for the VM backup policy (Azure Backup appends the number)')
+output outSnapshotRgPrefix string = varSnapshotRgPrefix
+
+@description('Snapshot resource group name suffix for the VM backup policy')
+output outSnapshotRgSuffix string = varSnapshotRgSuffix

@@ -586,13 +586,16 @@ Describe 'Manifest - what the cycle deletes, and what it only checks' {
         $script:Manifest.ResidualSweep.BackupResourceGroupPrefix | Should -Be 'AzureBackupRG_'
     }
 
-    It 'lists only the three lab resource groups as things to delete' {
+    It 'lists only the lab resource groups as things to delete' {
         # The blast radius, asserted. Anything else appearing here is a resource group this cycle
         # would start deleting, and that is worth noticing in review rather than in production.
+        # The fourth is lab 5.2's own instant-restore snapshot group (#184): SkyCraft creates it
+        # and the backup policy names it, so - unlike AzureBackupRG_* - nothing else lives there.
         @($script:Manifest.ResidualSweep.ResourceGroups) | Should -Be @(
             'dev-skycraft-swc-rg'
             'prod-skycraft-swc-rg'
             'platform-skycraft-swc-rg'
+            'platform-skycraft-swc-rpc1-rg'
         )
     }
 
