@@ -80,8 +80,9 @@ You'll set up the following identity structure in Microsoft Entra ID:
 | Password               | LoveAzeroth!2004                                 |
 
 4. Click **Review + create**, then **Create**
+5. When the Portal returns to All users, click **Refresh** (the list may not show the new user yet)
 
-**Expected Result**: New user appears in the user list with "Malfurion Stormrage" display name.
+**Expected Result**: Malfurion Stormrage appears in the All users list.
 
 ![Create First User](./images/Step-1.1.2.png)
 
@@ -157,6 +158,7 @@ You add each group's member in the New Group form, before you create the group.
 2. Search for and select **Malfurion Stormrage**
 3. Click **Select**
 4. Click **Create**
+5. When the Portal returns to All groups, click **Refresh** (the list may not show the new group yet)
 
 **Expected Result**: SkyCraft-Admins appears in All groups with Membership type Assigned.
 
@@ -195,8 +197,9 @@ You add each group's member in the New Group form, before you create the group.
 4. Search for and select **Chromie Timewalker**
 5. Click **Select**
 6. Click **Create**
+7. When the Portal returns to All groups, click **Refresh** (the list may not show the new group yet)
 
-**Expected Result**: Three security groups created with appropriate members.
+**Expected Result**: SkyCraft-Admins, SkyCraft-Developers and SkyCraft-Testers appear in All groups.
 
 ![SkyCraft groups in All groups](./images/Step-1.1.9.png)
 
@@ -222,8 +225,9 @@ You add each group's member in the New Group form, before you create the group.
 | Office location | Remote                       |
 
 6. Click **Save**
+7. When the Portal returns to the user's overview, click the **Properties** tab (the Overview tab does not show the job information)
 
-**Expected Result**: Malfurion Stormrage's profile shows Job title Cloud Infrastructure Manager, Company name SkyCraft, Department IT Operations and Office location Remote.
+**Expected Result**: On the Properties tab, Malfurion Stormrage's profile shows Job title Cloud Infrastructure Manager, Company name SkyCraft, Department IT Operations and Office location Remote.
 
 ![Manage User Properties and Licenses](./images/Step-1.1.10b.png)
 
