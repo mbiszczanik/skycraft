@@ -11,6 +11,10 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   missing_env          the '${NAME}' references the environment does not set
   resolve_value        a field value with the recording's placeholders and overrides applied
   value_action         type it, leave it ('[Leave blank]'), or report an unresolved [token]
+  field_action         what to do with a field item and the value to do it with: as above, or
+                       report a value parse.py marked '"literal": false' that the recording
+                       does not resolve (#202)
+  checkbox_state       the check box state a field value names, if any
   rejected_candidates  the reference set of candidates not chosen, without tenant data
   write_json           writes the recording or the state file atomically
 """
@@ -25,6 +29,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from decide import Candidate
+from parse import BRACKET_TOKEN, value_is_literal
 
 # '${NAME}', or '${NAME|upn}' for the guest user principal name form of an address (the
 # Redactor writes that form; see Redactor.__init__).
@@ -183,8 +188,13 @@ def rejected_candidates(candidates: list[Candidate], label: str, chosen: str | N
     return [str(c) for c in others[:20]]
 
 
+def value_override(recording: dict, step: dict, label: str) -> str | None:
+    """The recording's valueOverrides entry for `label` in `step`, as written; None when none."""
+    return recording["steps"].get(step["id"], {}).get("valueOverrides", {}).get(label)
+
+
 def resolve_value(recording: dict, step: dict, label: str, value: str) -> str:
-    override = recording["steps"].get(step["id"], {}).get("valueOverrides", {}).get(label)
+    override = value_override(recording, step, label)
     if override is not None:
         return expand_env(override)
     for placeholder, replacement in recording.get("placeholders", {}).items():
@@ -193,27 +203,46 @@ def resolve_value(recording: dict, step: dict, label: str, value: str) -> str:
     return value
 
 
-BRACKET_TOKEN = re.compile(r"\[[^\]]+\]")
-
-
 # Checkbox and toggle states as the guides write them: '✅ Checked', '❌ Unchecked', '☐',
 # 'Enabled', `Uncheck`, 'leave unchecked'. Matched per word, not as the whole value.
 CHECKED_WORDS = {"✅", "✔", "checked", "check", "enabled", "yes", "on", "true"}
 UNCHECKED_WORDS = {"☐", "❌", "✗", "unchecked", "uncheck", "disabled", "no", "off", "false"}
 
 
+# A remark after a state: '✅ Checked (or uncheck if already have Defender)' (3.2.5).
+REMARK = re.compile(r"\([^()]*\)")
+
+
 def checkbox_state(value: str) -> bool | None:
     """True or False for a checkbox or toggle value, None when it states neither or both
-    ('Leave default', 'Checked or unchecked'), so the runner reports it instead of guessing."""
-    words = set(re.findall(r"[✅✔☐❌✗]|[a-z]+", value.casefold()))
+    ('Leave default', 'Checked or unchecked'), so the runner reports it instead of guessing. A
+    remark in parentheses is not read."""
+    words = set(re.findall(r"[✅✔☐❌✗]|[a-z]+", REMARK.sub(" ", value).casefold()))
     on, off = bool(words & CHECKED_WORDS), bool(words & UNCHECKED_WORDS)
     return on if on != off else None
 
 
 def value_action(value: str) -> str:
     """How to treat a field value once placeholders and overrides are applied: 'skip' when the
-    whole value is a bracketed instruction ('[Leave blank]' in 1.1.10), 'unresolved' when a
-    bracket token is left ('skycraft-auth-[uniqueID]'), otherwise 'type'."""
+    whole value is a bracketed instruction (an override '[Leave blank]' leaves the field as it
+    is), 'unresolved' when a bracket token is left ('skycraft-auth-[uniqueID]'), otherwise
+    'type'."""
     if re.fullmatch(r"\[[^\]]+\]", value.strip()):
         return "skip"
     return "unresolved" if BRACKET_TOKEN.search(value) else "type"
+
+
+def field_action(recording: dict, step: dict, item: dict) -> tuple[str, str]:
+    """What the runner does with a field item, and the value it does it with (#202).
+
+    The value is the recording's valueOverrides entry for the field, or else the guide's value
+    with the recording's placeholders applied (resolve_value). An override, and a value parse.py
+    did not mark '"literal": false', go to value_action. A value it did mark is typed only when
+    the placeholders made it a literal ('[yourtenant]' in an address); otherwise the action is
+    'unresolved' when a bracket token is left and 'instruction' when it is still prose ('Click
+    the "..." button', 'Select:'), and the runner reports the field instead of typing it."""
+    value = resolve_value(recording, step, item["label"], item["value"])
+    if (item.get("literal", True) is False and value_override(recording, step, item["label"]) is None
+            and not value_is_literal(value)):
+        return ("unresolved" if BRACKET_TOKEN.search(value) else "instruction"), value
+    return value_action(value), value

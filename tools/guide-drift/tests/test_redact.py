@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import recording  # noqa: E402
 from decide import Candidate  # noqa: E402
-from recording import (Redactor, env_secrets, expand_env, missing_env,  # noqa: E402
+from recording import (Redactor, env_secrets, expand_env, field_action, missing_env,  # noqa: E402
                        rejected_candidates, resolve_value, value_action, write_json)
 
 DOMAIN = "contoso.onmicrosoft.com"
@@ -173,6 +173,47 @@ class ValueTests(unittest.TestCase):
                 self.assertEqual(value_action(value), action)
 
 
+class FieldActionTests(unittest.TestCase):
+    """A field value parse.py marked '"literal": false' is typed only when the recording resolves
+    it (#202): an override for the field, or placeholders that leave a literal."""
+
+    RECORDING = {"placeholders": {"[yourtenant]": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}"},
+                 "steps": {"1.3.5": {"valueOverrides": {"Policy definition": "Require a tag on resource groups",
+                                                        "Action group": "[Leave blank]"}}}}
+    ENV = {"SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX": "contoso"}
+
+    def action(self, step: str, label: str, value: str, literal: bool = False) -> tuple[str, str]:
+        item = {"kind": "field", "label": label, "value": value, "line": 7}
+        if not literal:
+            item["literal"] = False
+        with mock.patch.dict(os.environ, self.ENV):
+            return field_action(self.RECORDING, {"id": step}, item)
+
+    def test_an_instruction_without_an_override_is_reported_not_typed(self) -> None:
+        self.assertEqual(self.action("1.3.5", "Scope", 'Click the "..." button'),
+                         ("instruction", 'Click the "..." button'))
+        self.assertEqual(self.action("1.3.8", "Allowed locations", "Select:"), ("instruction", "Select:"))
+
+    def test_a_bracket_token_without_an_override_or_placeholder_is_unresolved(self) -> None:
+        # A whole bracketed value used to be left as is and counted as a match.
+        for value in ("[IP of dev-skycraft-swc-lb-pip]", "skycraft-auth-[uniqueID] (must be globally unique)"):
+            with self.subTest(value=value):
+                self.assertEqual(self.action("2.3.2", "IP address", value), ("unresolved", value))
+
+    def test_an_override_is_taken_as_written(self) -> None:
+        self.assertEqual(self.action("1.3.5", "Policy definition", 'Click the "..." button'),
+                         ("type", "Require a tag on resource groups"))
+        self.assertEqual(self.action("1.3.5", "Action group", "(leave blank for now)"), ("skip", "[Leave blank]"))
+
+    def test_placeholders_that_leave_a_literal_make_it_typed(self) -> None:
+        self.assertEqual(self.action("1.1.2", "User principal name", "malfurion.stormrage@[yourtenant].onmicrosoft.com"),
+                         ("type", "malfurion.stormrage@contoso.onmicrosoft.com"))
+
+    def test_a_literal_value_goes_to_value_action(self) -> None:
+        self.assertEqual(self.action("1.1.6", "Group name", "SkyCraft-Admins", literal=True), ("type", "SkyCraft-Admins"))
+        self.assertEqual(self.action("3.3.8", "Insecure connections", "Uncheck", literal=True), ("type", "Uncheck"))
+
+
 class RejectedCandidatesTests(unittest.TestCase):
     def test_drops_addresses_guids_and_the_chosen_name(self) -> None:
         candidates = [Candidate("button", "New group"), Candidate("button", "New user"),
@@ -232,12 +273,14 @@ class CheckboxStateTests(unittest.TestCase):
     single word, so '✅ Checked' used to be reported as 'not a checkbox state'."""
 
     def test_checked_forms(self):
-        for value in ("✅ Checked", "✅", "Checked", "checked", "Enabled", "Yes", "On", "✔ Enabled"):
+        for value in ("✅ Checked", "✅", "Checked", "checked", "Enabled", "Yes", "On", "✔ Enabled",
+                      "✅ Checked (or uncheck if already have Defender)", "☑ Checked (VMs will auto-register)"):
             with self.subTest(value=value):
                 self.assertIs(recording.checkbox_state(value), True)
 
     def test_unchecked_forms(self):
-        for value in ("❌ Unchecked", "☐ Unchecked", "☐", "Uncheck", "leave unchecked", "Disabled", "No", "Off"):
+        for value in ("❌ Unchecked", "☐ Unchecked", "☐", "Uncheck", "leave unchecked", "Disabled", "No", "Off",
+                      "☐ Unchecked (no VMs in hub)"):
             with self.subTest(value=value):
                 self.assertIs(recording.checkbox_state(value), False)
 
