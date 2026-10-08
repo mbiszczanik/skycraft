@@ -28,7 +28,11 @@ next item clicks it. Plain text counts only when it
 is, or sits inside, a link, button or other interactive element. A label is looked for until
 FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; when SETTLE_MS of
 that finds nothing, the blade menu's collapsed groups are opened once ('Expand all headers') and
-the looking goes on to the same deadline.
+the looking goes on to the same deadline. When the deadline passes while the newest blade is
+still loading (its close button reads "Close content 'undefined'", or its title heading has no
+form control or list row after it: blade_still_loading), the console says so once and the label
+is looked for up to BLADE_LOAD_TIMEOUT_MS more; once the blade has rendered, it is looked for
+FIND_TIMEOUT_MS again. Only then is the person asked.
 
 When a step does not go through, the person chooses: c, finish it by hand and continue; s, skip
 this step and continue with the next one, giving the reason, which the summary lists under
@@ -80,6 +84,17 @@ FIND_TIMEOUT_MS = 8000
 CHECK_TIMEOUT_MS = 2000     # set_checked() before the label is tried, and the wait for its effect
 LATE_CLICK_MS = 750         # how long an intercepted set_checked() may take to show, before the label
 RESULT_TIMEOUT_S = 15
+# How much longer a label is looked for while the newest blade is still loading (issue #233): on a
+# slow Portal a blade's frame opens well before its form or list does.
+BLADE_LOAD_TIMEOUT_MS = 60000
+# A blade's or pane's close button, named after its title: "Close content 'New Group'". The title
+# reads 'undefined' while the blade's content is still loading.
+BLADE_CLOSE = re.compile(r"^Close content '(?P<title>.*)'$")
+UNTITLED_BLADE = "undefined"
+# What a rendered blade shows after its title: a form control or a list row. Buttons and links do
+# not count, as the blade's header has them (Maximize, Close) before anything else renders.
+BLADE_CONTENT_ROLES = ("textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "spinbutton",
+                       "slider", "listbox", "row")
 CANDIDATE_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "textbox",
                    "combobox", "checkbox", "radio", "heading", "cell")
 FIELD_ROLES = ("textbox", "combobox", "checkbox", "radio")
@@ -199,6 +214,45 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def all_frames(page: Page) -> list[Frame]:
     """Main frame first, then every child frame: Entra ID blades render inside iframes."""
     return [page.main_frame] + [f for f in page.frames if f is not page.main_frame]
+
+
+def aria_outline(page: Page) -> list[tuple[str, str]]:
+    """(role, name) of every element line of the accessibility tree, across frames (main frame
+    first), in tree order; the name is '' when the element has none. A frame that cannot be read
+    is left out. What blade_still_loading() reads."""
+    outline: list[tuple[str, str]] = []
+    for frame in all_frames(page):
+        try:
+            snapshot = frame.locator("body").aria_snapshot(timeout=2000)
+        except PlaywrightError:     # timed out, or the frame went away while the Portal navigated
+            continue
+        for line in snapshot.splitlines():
+            m = ARIA_FIRST_LINE.match(line)
+            if m:
+                outline.append((m.group("role"), m.group("name") or ""))
+    return outline
+
+
+def blade_still_loading(outline: list[tuple[str, str]]) -> bool:
+    """Whether the newest blade's frame is open while its content has not rendered yet (issue
+    #233), from aria_outline(). The newest blade is the one whose close button ("Close content
+    '<title>'") comes last. It is loading when that title is still 'undefined', or when a heading
+    named after the title is on screen but no form control or list row (BLADE_CONTENT_ROLES)
+    follows the later of the two. The top bar's search box and an older blade's fields come
+    before them, so they do not count. Without a close button, or without the title heading,
+    nothing is said to be loading and the lookup keeps its normal time."""
+    closes = [(index, m.group("title")) for index, (role, name) in enumerate(outline)
+              if role == "button" and (m := BLADE_CLOSE.match(name))]
+    if not closes:
+        return False
+    close_at, title = closes[-1]
+    if title == UNTITLED_BLADE:
+        return True
+    headings = [index for index, (role, name) in enumerate(outline) if role == "heading" and name == title]
+    if not headings:
+        return False
+    start = max(close_at, headings[-1])
+    return not any(role in BLADE_CONTENT_ROLES for role, _ in outline[start + 1:])
 
 
 def aria_lines(page: Page) -> list[tuple[str, str, int]]:
@@ -1239,6 +1293,29 @@ class Runner:
             return element
         return look
 
+    def wait_for_blade(self, label: str, look: Callable[[], Locator | None]) -> Locator | None:
+        """After `look` found nothing for FIND_TIMEOUT_MS: when the newest blade is still loading
+        (blade_still_loading), say so once and go on looking until it has rendered or
+        BLADE_LOAD_TIMEOUT_MS has passed; once it has rendered, look for FIND_TIMEOUT_MS again, as
+        its controls come a moment after it. None at once when no blade is loading, so a label
+        missing from a rendered blade is asked about after the normal time (issue #233)."""
+        if not blade_still_loading(aria_outline(self.page)):
+            return None
+        print(f"The blade is still loading: waiting up to {BLADE_LOAD_TIMEOUT_MS // 1000} s for it "
+              f"before asking about '{label}'.")
+        rendered = object()     # what the look below returns once the blade has rendered
+
+        def look_while_loading() -> Locator | object | None:
+            element = look()
+            if element is not None:
+                return element
+            return None if blade_still_loading(aria_outline(self.page)) else rendered
+
+        found = in_time(self.page, look_while_loading, ms=BLADE_LOAD_TIMEOUT_MS)
+        if found is rendered:
+            return in_time(self.page, look)
+        return found
+
     def expand_menu_groups(self, label: str) -> None:
         """Open every collapsed group of the blade's menu with its 'Expand all headers' button.
         Entra ID blades fold menu entries into groups ('Manage', 'Monitoring'), so a link such as
@@ -1312,7 +1389,10 @@ class Runner:
             if kind == "search":
                 element = search_portal(self.page, label, diagnose=lambda tree: self.save_search_tree(step, tree))
             else:
-                element = in_time(self.page, self.looking_for(label, kind))
+                look = self.looking_for(label, kind)
+                element = in_time(self.page, look)
+                if element is None:
+                    element = self.wait_for_blade(label, look)
         except Ambiguous as error:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
             return record

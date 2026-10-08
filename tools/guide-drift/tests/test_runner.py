@@ -1,6 +1,6 @@
 """Unit tests for run.py's bookkeeping: state, resume, failure handling, recording of decisions
 (issue #189), and how it finds what a guide names (search, '+' labels, plain text, collapsed
-menu groups). No browser: the page is a small fake (Screen stands in for a frame), and run_step
+menu groups, a blade still loading). No browser: the page is a small fake (Screen stands in for a frame), and run_step
 is scripted where only the order of steps matters.
 
 run.py imports Playwright at module level and the CI runner does not install it, so a minimal
@@ -718,6 +718,66 @@ class GuardAndLookupTests(RunnerTestCase):
                                   if page.url.startswith(run.PORTAL) else []):
             run.wait_for_sign_in(Page(), "t", say=said.append)
         self.assertEqual(sum("Still waiting" in line for line in said), 2)
+
+
+class BladeStillLoadingTests(unittest.TestCase):
+    """blade_still_loading: whether the newest blade's frame is open while its content is not
+    rendered yet (issue #233), from the accessibility outline (role, name) in tree order."""
+
+    TOP_BAR = [("banner", ""), ("link", "Microsoft Azure"),
+               ("combobox", "Search resources, services, and docs (G+/)"), ("button", "Settings")]
+    USERS = [("heading", "Users"), ("button", "Close content 'Users'"), ("searchbox", "Search"),
+             ("row", "Name User principal name")]
+
+    def test_a_blade_whose_title_is_undefined_is_loading(self) -> None:
+        self.assertTrue(run.blade_still_loading(self.TOP_BAR + [("button", "Close content 'undefined'")]))
+        self.assertTrue(run.blade_still_loading(self.TOP_BAR + self.USERS + [("button", "Close content 'undefined'")]))
+
+    def test_a_titled_blade_with_no_controls_after_its_heading_is_loading(self) -> None:
+        for header in ([("heading", "Create new user"), ("button", "Close content 'Create new user'")],
+                       [("button", "Close content 'Create new user'"), ("heading", "Create new user")]):
+            with self.subTest(header=header):
+                self.assertTrue(run.blade_still_loading(
+                    self.TOP_BAR + self.USERS + header + [("button", "Maximize"), ("text", "")]))
+
+    def test_a_blade_with_controls_after_its_heading_is_rendered(self) -> None:
+        header = [("heading", "New Group"), ("button", "Close content 'New Group'")]
+        for role in ("textbox", "searchbox", "combobox", "checkbox", "radio", "row"):
+            with self.subTest(role=role):
+                self.assertFalse(run.blade_still_loading(self.TOP_BAR + header + [("heading", "Basics"), (role, "x")]))
+
+    def test_controls_of_the_top_bar_or_an_older_blade_do_not_count(self) -> None:
+        outline = (self.TOP_BAR + [("heading", "New Group"), ("button", "Close content 'New Group'"),
+                                   ("textbox", "Group name"), ("heading", "Add members"),
+                                   ("button", "Close content 'Add members'")])
+        self.assertTrue(run.blade_still_loading(outline))
+
+    def test_without_a_titled_blade_frame_nothing_is_loading(self) -> None:
+        self.assertFalse(run.blade_still_loading([]))
+        self.assertFalse(run.blade_still_loading(self.TOP_BAR))
+        self.assertFalse(run.blade_still_loading(self.TOP_BAR + [("heading", "Overview")]))      # no frame
+        self.assertFalse(run.blade_still_loading(self.TOP_BAR + [("button", "Close content 'Users'")]))  # no heading
+
+    def test_the_outline_lists_every_line_of_every_frame_in_order(self) -> None:
+        class Frame:
+            def __init__(self, snapshot: str | None) -> None:
+                self.snapshot = snapshot
+
+            def locator(self, selector):
+                return self
+
+            def aria_snapshot(self, timeout=None) -> str:
+                if self.snapshot is None:
+                    raise run.PlaywrightError("frame was detached")
+                return self.snapshot
+
+        frames = [Frame('- banner:\n  - button "Settings"\n- heading "New Group" [level=2]\n'),
+                  Frame(None),
+                  Frame('- textbox "Group name"\n- text: Owners\n  - /url: "#x"\n- button "Say \\"hi\\""\n')]
+        with mock.patch.object(run, "all_frames", lambda page: frames):
+            outline = run.aria_outline(object())
+        self.assertEqual(outline, [("banner", ""), ("button", "Settings"), ("heading", "New Group"),
+                                   ("textbox", "Group name"), ("text", ""), ("button", 'Say \\"hi\\"')])
 
 
 # The popups MARK_POPUPS_JS recorded as visible before the search was typed; None when there is
@@ -1591,6 +1651,70 @@ class FindOnScreenTests(RunnerTestCase):
         record, r = self.act(screen, {"kind": "action", "labels": ["Create"], "line": 1}, "Create")
         self.assertEqual((record["outcome"], record["observed"], r.ask.prompts),
                          ("unknown", "ambiguous: 2 visible elements match named 'Create'", []))
+
+    TOP_BAR = ('- banner:\n'
+               '  - link "Microsoft Azure"\n'
+               '  - combobox "Search resources, services, and docs (G+/)"\n'
+               '  - button "Settings"\n')
+
+    def test_a_label_on_a_blade_still_loading_is_waited_for_beyond_the_lookup_time(self) -> None:
+        field = ScreenNode(tag="input")
+        screen = Screen(tree=self.TOP_BAR + '- heading "Create new user" [level=2]\n'
+                                            "- button \"Close content 'Create new user'\"\n")
+        rendered_at = run.FIND_TIMEOUT_MS / 1000 + 20                     # well past the normal lookup
+
+        def render(_waits: int) -> None:
+            if page.now >= rendered_at and not screen.entries:
+                screen.add(("textbox", "User principal name", field))
+                screen.tree += '- textbox "User principal name"\n'
+
+        page = self.LoadingPage(render)
+        item = {"kind": "field", "label": "User principal name", "value": "x", "line": 2}
+        with mock.patch("builtins.print") as said:
+            record, r = self.act(screen, item, "User principal name", page=page, value="khadgar")
+        self.assertEqual((record["outcome"], field.filled, r.ask.prompts), ("match", ["khadgar"], []))
+        self.assertGreaterEqual(page.now, rendered_at)
+        waiting = [c for c in said.call_args_list if "still loading" in str(c.args[0])]
+        self.assertEqual(len(waiting), 1)                                   # said once, not every look
+        self.assertIn("User principal name", str(waiting[0].args[0]))
+
+    def test_a_label_missing_from_a_rendered_blade_is_asked_about_after_the_normal_time(self) -> None:
+        screen = Screen(("textbox", "Group name", ScreenNode(tag="input")),
+                        tree=self.TOP_BAR + '- heading "New Group" [level=2]\n'
+                                            "- button \"Close content 'New Group'\"\n"
+                                            '- textbox "Group name"\n')
+        item = {"kind": "field", "label": "Group type", "value": "Security", "line": 2}
+        with mock.patch("builtins.print") as said:
+            record, r = self.act(screen, item, "Group type", value="Security")
+        self.assertEqual((record["outcome"], len(r.ask.prompts)), ("unknown", 1))
+        self.assertLess(r.page.now, run.FIND_TIMEOUT_MS / 1000 + 1)
+        self.assertFalse([c for c in said.call_args_list if "still loading" in str(c.args[0])])
+
+    def test_a_blade_that_never_renders_is_asked_about_after_the_longer_limit(self) -> None:
+        screen = Screen(tree=self.TOP_BAR + "- button \"Close content 'undefined'\"\n")
+        with mock.patch("builtins.print") as said:
+            record, r = self.act(screen, {"kind": "action", "labels": ["Create"], "line": 1}, "Create")
+        self.assertEqual((record["outcome"], len(r.ask.prompts)), ("unknown", 1))
+        limit = (run.FIND_TIMEOUT_MS + run.BLADE_LOAD_TIMEOUT_MS) / 1000
+        self.assertGreaterEqual(r.page.now, limit)
+        self.assertLess(r.page.now, limit + 1)
+        self.assertEqual(sum("still loading" in str(c.args[0]) for c in said.call_args_list), 1)
+
+    def test_a_blade_that_renders_without_the_label_is_asked_about_after_one_more_lookup(self) -> None:
+        screen = Screen(tree=self.TOP_BAR + '- heading "New Group" [level=2]\n'
+                                            "- button \"Close content 'New Group'\"\n")
+        rendered_at = run.FIND_TIMEOUT_MS / 1000 + 10
+
+        def render(_waits: int) -> None:
+            if page.now >= rendered_at and "textbox" not in screen.tree:
+                screen.tree += '- textbox "Group name"\n'
+
+        page = self.LoadingPage(render)
+        with mock.patch("builtins.print"):
+            record, r = self.act(screen, {"kind": "action", "labels": ["Create"], "line": 1}, "Create", page=page)
+        self.assertEqual((record["outcome"], len(r.ask.prompts)), ("unknown", 1))
+        self.assertGreaterEqual(page.now, rendered_at + run.FIND_TIMEOUT_MS / 1000)   # the normal time again
+        self.assertLess(page.now, rendered_at + run.FIND_TIMEOUT_MS / 1000 + 1)      # not the whole limit
 
     def test_a_search_without_the_search_box_is_unknown(self) -> None:
         record, r = self.act(Screen(), self.SEARCH, "Microsoft Entra ID")
