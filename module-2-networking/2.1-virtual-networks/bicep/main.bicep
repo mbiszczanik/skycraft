@@ -1,13 +1,29 @@
 /*=====================================================
 SUMMARY: Lab 2.1 - Virtual Networks
-DESCRIPTION: Orchestrates the Hub VNet, the Dev/Prod Spoke VNets, the Hub-Spoke peerings and the Load Balancer Public IPs via AVM (requires the Lab 1.2 resource groups to exist)
+DESCRIPTION: Orchestrates the Hub VNet, the Dev/Prod Spoke VNets, the Hub-Spoke peerings and the Load Balancer Public IPs via AVM (requires the Lab 1.2 resource groups to exist). Subnets and public IPs that already exist are left untouched (see parExistingSubnets).
 EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.3.0
+VERSION: 0.4.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
 targetScope = 'subscription'
+
+/*******************
+*      Types       *
+*******************/
+
+@description('Names of the subnets that already exist, per VNet')
+type existingSubnetsType = {
+  @description('Subnets of the hub VNet')
+  hub: string[]
+
+  @description('Subnets of the dev VNet')
+  dev: string[]
+
+  @description('Subnets of the prod VNet')
+  prod: string[]
+}
 
 /*******************
 *    Parameters    *
@@ -54,6 +70,30 @@ param parVnetNameDev string = 'dev-skycraft-swc-vnet'
 @maxLength(64)
 param parVnetNameProd string = 'prod-skycraft-swc-vnet'
 
+// Re-running this lab must not reset what later labs set on its resources (issue #188). A subnet
+// that exists is therefore left out of the deployment: re-declaring it would detach the NSGs and
+// service endpoints Lab 2.2 attaches, and rename an App Service delegation that the portal created
+// as 'delegation' (the AVM module names it after the service and cannot be told otherwise). The
+// VNet itself is still deployed (address space, tags, peerings): the Virtual Network API keeps the
+// subnets a VNet update does not list, and the AVM module never lists them, so an omitted subnet
+// stays exactly as it is. scripts/Deploy-Bicep.ps1 fills this from a lookup; the default is a
+// first deployment, in which every subnet is declared.
+@description('Subnets that already exist, per VNet. They are left out of the deployment so a re-run keeps the settings later labs added. Filled by scripts/Deploy-Bicep.ps1.')
+param parExistingSubnets existingSubnetsType = {
+  hub: []
+  dev: []
+  prod: []
+}
+
+// Zones and SKU are fixed when a public IP is created, so there is nothing this lab could update
+// on an existing one - and one created without zones (portal, Deploy-Networking.ps1) makes a
+// redeploy of the zone-redundant declaration fail. An existing public IP is left untouched.
+@description('True when dev-skycraft-swc-lb-pip already exists (filled by scripts/Deploy-Bicep.ps1). It is then left untouched.')
+param parDevLbPipExists bool = false
+
+@description('True when prod-skycraft-swc-lb-pip already exists (filled by scripts/Deploy-Bicep.ps1). It is then left untouched.')
+param parProdLbPipExists bool = false
+
 /*******************
 *    Variables     *
 *******************/
@@ -80,16 +120,21 @@ var varTagsProd = {
 }
 
 // Address plan (ARCHITECTURE.md; subnet names are the contract for Labs 2.2, 3.x and 4.4 -
-// see docs/bicep-standards.md Section 10.2)
+// see docs/bicep-standards.md Section 10.2).
+// privateEndpointNetworkPolicies is set explicitly (docs/bicep-standards.md Section 4.5): left
+// unset, the AVM subnet module sends nothing and the API applies 'Enabled', while the portal and
+// the other labs' subnets carry 'Disabled'.
 var varHubAddressPrefix = '10.0.0.0/16'
 var varHubSubnets = [
   {
     name: 'AzureBastionSubnet'
     addressPrefix: '10.0.0.0/26'
+    privateEndpointNetworkPolicies: 'Disabled'
   }
   {
     name: 'GatewaySubnet'
     addressPrefix: '10.0.1.0/27'
+    privateEndpointNetworkPolicies: 'Disabled'
   }
 ]
 
@@ -98,19 +143,23 @@ var varDevSubnets = [
   {
     name: 'AuthSubnet'
     addressPrefix: '10.1.1.0/24'
+    privateEndpointNetworkPolicies: 'Disabled'
   }
   {
     name: 'WorldSubnet'
     addressPrefix: '10.1.2.0/24'
+    privateEndpointNetworkPolicies: 'Disabled'
   }
   {
     name: 'DatabaseSubnet'
     addressPrefix: '10.1.3.0/24'
+    privateEndpointNetworkPolicies: 'Disabled'
   }
   {
     name: 'AppServiceSubnet'
     addressPrefix: '10.1.4.0/24'
     delegation: 'Microsoft.Web/serverFarms'
+    privateEndpointNetworkPolicies: 'Disabled'
   }
 ]
 
@@ -119,21 +168,30 @@ var varProdSubnets = [
   {
     name: 'AuthSubnet'
     addressPrefix: '10.2.1.0/24'
+    privateEndpointNetworkPolicies: 'Disabled'
   }
   {
     name: 'WorldSubnet'
     addressPrefix: '10.2.2.0/24'
+    privateEndpointNetworkPolicies: 'Disabled'
   }
   {
     name: 'DatabaseSubnet'
     addressPrefix: '10.2.3.0/24'
+    privateEndpointNetworkPolicies: 'Disabled'
   }
   {
     name: 'AppServiceSubnet'
     addressPrefix: '10.2.4.0/24'
     delegation: 'Microsoft.Web/serverFarms'
+    privateEndpointNetworkPolicies: 'Disabled'
   }
 ]
+
+// Only the subnets that do not exist yet are deployed (see parExistingSubnets).
+var varHubSubnetsToDeploy = filter(varHubSubnets, subnet => !contains(parExistingSubnets.hub, subnet.name))
+var varDevSubnetsToDeploy = filter(varDevSubnets, subnet => !contains(parExistingSubnets.dev, subnet.name))
+var varProdSubnetsToDeploy = filter(varProdSubnets, subnet => !contains(parExistingSubnets.prod, subnet.name))
 
 var varPipNameDevLb = 'dev-skycraft-swc-lb-pip'
 var varPipNameProdLb = 'prod-skycraft-swc-lb-pip'
@@ -159,8 +217,8 @@ resource resRgProd 'Microsoft.Resources/resourceGroups@2023-07-01' existing = {
 *     Modules      *
 *******************/
 
-// 1. Spoke VNets. NSG associations are applied later by Lab 2.2; re-running this template
-//    after Lab 2.2 re-declares the subnets without NSGs or service endpoints - run the labs in order.
+// 1. Spoke VNets. Lab 2.2 later attaches the NSGs and service endpoints to Auth/World/Database;
+//    a re-run leaves those subnets out (parExistingSubnets), so it does not detach them.
 module modVnetDev 'br/public:avm/res/network/virtual-network:0.10.2' = {
   name: 'dev-vnet-deployment'
   scope: resRgDev
@@ -171,7 +229,7 @@ module modVnetDev 'br/public:avm/res/network/virtual-network:0.10.2' = {
     addressPrefixes: [
       varDevAddressPrefix
     ]
-    subnets: varDevSubnets
+    subnets: varDevSubnetsToDeploy
   }
 }
 
@@ -185,7 +243,7 @@ module modVnetProd 'br/public:avm/res/network/virtual-network:0.10.2' = {
     addressPrefixes: [
       varProdAddressPrefix
     ]
-    subnets: varProdSubnets
+    subnets: varProdSubnetsToDeploy
   }
 }
 
@@ -193,6 +251,9 @@ module modVnetProd 'br/public:avm/res/network/virtual-network:0.10.2' = {
 //    the reverse (spoke-to-hub) peering inside the spoke's resource group, so all four peering
 //    links are declared in one place. Referencing the spoke outputs orders the deployment.
 //    The names are the ones Test-Lab.ps1 expects (hub-to-dev, dev-to-hub, hub-to-prod, prod-to-hub).
+//    doNotVerifyRemoteGateways is set explicitly (docs/bicep-standards.md Section 4.5): the AVM
+//    peering module defaults it to true, while Azure, the portal and Az PowerShell create peerings
+//    with false, so a re-run over a peering made any other way would modify it.
 module modVnetHub 'br/public:avm/res/network/virtual-network:0.10.2' = {
   name: 'hub-vnet-deployment'
   scope: resRgPlatform
@@ -203,7 +264,7 @@ module modVnetHub 'br/public:avm/res/network/virtual-network:0.10.2' = {
     addressPrefixes: [
       varHubAddressPrefix
     ]
-    subnets: varHubSubnets
+    subnets: varHubSubnetsToDeploy
     peerings: [
       {
         name: 'hub-to-dev'
@@ -212,12 +273,14 @@ module modVnetHub 'br/public:avm/res/network/virtual-network:0.10.2' = {
         allowForwardedTraffic: true
         allowGatewayTransit: false
         useRemoteGateways: false
+        doNotVerifyRemoteGateways: false
         remotePeeringEnabled: true
         remotePeeringName: 'dev-to-hub'
         remotePeeringAllowVirtualNetworkAccess: true
         remotePeeringAllowForwardedTraffic: true
         remotePeeringAllowGatewayTransit: false
         remotePeeringUseRemoteGateways: false
+        remotePeeringDoNotVerifyRemoteGateways: false
       }
       {
         name: 'hub-to-prod'
@@ -226,12 +289,14 @@ module modVnetHub 'br/public:avm/res/network/virtual-network:0.10.2' = {
         allowForwardedTraffic: true
         allowGatewayTransit: false
         useRemoteGateways: false
+        doNotVerifyRemoteGateways: false
         remotePeeringEnabled: true
         remotePeeringName: 'prod-to-hub'
         remotePeeringAllowVirtualNetworkAccess: true
         remotePeeringAllowForwardedTraffic: true
         remotePeeringAllowGatewayTransit: false
         remotePeeringUseRemoteGateways: false
+        remotePeeringDoNotVerifyRemoteGateways: false
       }
     ]
   }
@@ -239,7 +304,8 @@ module modVnetHub 'br/public:avm/res/network/virtual-network:0.10.2' = {
 
 // 3. Public IPs reserved for the Lab 2.3 load balancers: Standard SKU, static, zone-redundant
 //    (AVM default availabilityZones [1, 2, 3] - also the portal default for Standard SKU).
-module modPipDevLb 'br/public:avm/res/network/public-ip-address:0.13.0' = {
+//    Created only when missing (see parDevLbPipExists).
+module modPipDevLb 'br/public:avm/res/network/public-ip-address:0.13.0' = if (!parDevLbPipExists) {
   name: 'dev-lb-pip-deployment'
   scope: resRgDev
   params: {
@@ -251,7 +317,7 @@ module modPipDevLb 'br/public:avm/res/network/public-ip-address:0.13.0' = {
   }
 }
 
-module modPipProdLb 'br/public:avm/res/network/public-ip-address:0.13.0' = {
+module modPipProdLb 'br/public:avm/res/network/public-ip-address:0.13.0' = if (!parProdLbPipExists) {
   name: 'prod-lb-pip-deployment'
   scope: resRgProd
   params: {
