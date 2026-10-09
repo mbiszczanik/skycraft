@@ -229,6 +229,14 @@ function Connect-LabGraph {
         [string]$TenantId
     )
 
+    # A context is signed in only when it names a tenant and an identity - an account, or an app
+    # name app-only. Connect-MgGraph can leave one that names neither and still return without an
+    # error: a delegated sign-in for scopes the account has never consented to does exactly that,
+    # with no consent prompt (issue #242). Accepting it printed "Connected to Tenant:  as", and
+    # every Graph call after it failed with "Authentication needed". One test, used for both the
+    # context reused below and the one a sign-in leaves.
+    $isSignedIn = { param($context) [bool]($context -and $context.TenantId -and ($context.Account -or $context.AppName)) }
+
     $plan = Get-LabGraphAuthPlan -Scope $Scope -TenantId $TenantId
 
     if ($plan.Mode -eq 'Blocked') { throw $plan.Reason }
@@ -236,8 +244,9 @@ function Connect-LabGraph {
     if ($plan.Mode -eq 'Interactive') {
         # Reuse a signed-in context, which is what a learner running the lab expects. Note this is
         # only reached when no service principal is configured: an unattended run never gets here.
+        # A partial one is not reused: the sign-in below replaces it.
         $existingContext = Get-MgContext
-        if ($existingContext -and (-not $plan.TenantId -or $existingContext.TenantId -eq $plan.TenantId)) {
+        if ((& $isSignedIn $existingContext) -and (-not $plan.TenantId -or $existingContext.TenantId -eq $plan.TenantId)) {
             return $existingContext
         }
     }
@@ -252,7 +261,12 @@ function Connect-LabGraph {
     $connectParameter = $plan.ConnectParameter
     Connect-MgGraph @connectParameter
 
-    return Get-MgContext
+    $context = Get-MgContext
+    if (-not (& $isSignedIn $context)) {
+        throw "Microsoft Graph sign-in did not complete: Connect-MgGraph returned without an error but left no signed-in account or tenant. A likely cause is missing consent for the permissions this script requests ($($Scope -join ', ')), or for the app registration's application permissions when signing in app-only. See TROUBLESHOOTING.md."
+    }
+
+    return $context
 }
 
 function New-LabRandomPassword {

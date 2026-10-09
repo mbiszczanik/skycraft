@@ -11,7 +11,8 @@
     It never runs in CI (issue #189).
 
     WHAT A RUN DOES. Parses the guide with tools/guide-drift/parse.py (only '### Step' sections,
-    outside code fences, Option 1 where Option headings exist; the fixed list of bold captions
+    outside code fences, and where Option headings exist the first option with a portal part,
+    which steps.json names in the step's "option"; the fixed list of bold captions
     that are not UI elements lives in parse.py), opens Chromium through tools/guide-drift/run.py
     on the Entra ID overview of the tenant of -SubscriptionId (or of -TenantId), waits for you to sign in (until
     the overview shows 'Tenant ID'), refuses to start unless the Portal is in English and the
@@ -43,6 +44,19 @@
     opens the chain, from the Portal's global search; when it is not found under that exact name,
     the step fails as blocking drift of the step (missing-resource), with no proposed guide edit
     (issue #199).
+
+    STEPS THE RECORDING SKIPS. A step that is optional or conceptual by its heading and would
+    create resources, or that follows the other option of a lettered pair, is left out by
+    '"skip": "<reason>"' in its entry of the recording (issue #200). The run never performs it,
+    lists it in summary.md under 'skipped' with that reason and goes on with the next step; a
+    resume passes over it, and does not ask about a step that was in flight when the run stopped
+    and is skipped in the recording since. The next step starts on the view the step before the
+    skip ended on, without the blade the skipped step would have opened or the resources it would
+    have created, so a later step that needed them fails: skip only a step whose blade and
+    resources no later step needs, or skip those later steps too. The skip wins over the rest of
+    the entry, which is kept (and still checked by tests/Guide-Drift-Recording.Tests.ps1) for the
+    day the skip is removed. The reason must be a non-empty string and the step one the guide has,
+    with a portal part; the run refuses to start (254) on a skip without a reason.
 
     WHAT A RUN LEAVES BEHIND, AND WHY IT IS GITIGNORED. -LogDirectory/<run id>/ holds
     steps.json (the parsed guide; parse.py failing stops the run with exit 1), results.jsonl (one

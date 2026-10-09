@@ -77,8 +77,9 @@ Execute these validation steps to confirm success:
 ### Step 1: List all users with Microsoft Graph PowerShell
 
 ```powershell
-# Sign in with the read scopes the lab needs
-Connect-MgGraph -Scopes 'User.Read.All', 'Group.Read.All'
+# Sign in with scopes the lab's scripts already use: each ReadWrite scope includes
+# its Read counterpart, and the Read.All scopes may never have been consented
+Connect-MgGraph -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All'
 
 Get-MgUser -All |
     Select-Object UserPrincipalName, DisplayName |

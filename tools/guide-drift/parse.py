@@ -10,10 +10,16 @@ without a browser. Rules (issue #189):
     heading or a bold span quoted in a snippet or commented out never counts. As in CommonMark, a
     fence closes only on a run of its own character at least as long as the opener, followed by
     nothing but whitespace, so a 4-backtick fence can quote a 3-backtick one.
-  * Where a step has '#### Option 1:' or '#### Option A:' headings, only the first option's
-    body is read. The Expected Result is the first one outside any option's body or in the first
-    option; when there is none, the first one in another option (the standard puts a single
-    one after Option 3).
+  * Where a step has '#### Option 1:' or '#### Option A:' headings, only one option's body is
+    read: the first option whose body yields at least one item, or the first option when none
+    does (#201: 3.2.1's Option A is CLI-only, its Option B is the Portal path). The step's
+    "option" is that option's name as its heading gives it ('1', 'A', 'B'); only a step with
+    Option headings carries the key, so the steps.json of a run tells its reader, and the
+    reviewer of a recording, which path was read. The Expected Result is the first one outside
+    any option's body or in the option read; when there is none, the first one in a later
+    option (the standard puts a single one after Option 3). An earlier option's Expected Result
+    describes that option's path and is never taken: Option B read without one of its own
+    has none, not Option A's.
   * '**Expected Result**' may be a list item and may carry a qualifier before the colon
     ('**Expected Result** (if ...):'). When nothing follows the colon, the list right after it
     is the result: its items joined with '; ', markup stripped, and never read as steps. When
@@ -35,8 +41,8 @@ without a browser. Rules (issue #189):
     The checks are not items, so 'Status: **Succeeded**' is never a field to fill; they are
     joined with '; ', markup stripped, and joined to the step's Expected Result, or are its
     Expected Result alone when it has none. The introducing line is read as any other item
-    (a click on **Configuration**). A check list is read where items are: one in another
-    option's body is dropped with it.
+    (a click on **Configuration**). A check list is read where items are: one in the body of
+    an option that is not read is dropped with it.
   * Checks are joined to an Expected Result text (join_checks) after a space when the text
     ends with '.', '!', '?' or ':' ('Bastion is operational. Status: Succeeded', 2.2.11), and
     after '; ' otherwise, so the text and the first check never meet as '.;' or ':;'. The
@@ -125,7 +131,10 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     (#199).
   * 'select `config.txt`' (4.3.6) is read as a resource, so the runner clicks the file's row,
     which may open the file rather than select it.
-  * The first-option rule skips 3.2.1's Portal path, because its Option A is CLI-only (#201).
+  * The option read is fixed by the guide, not chosen per run. 3.2.1 reads Option B, which
+    creates an SSH key resource, while the items of later 3.2 steps follow Option A (3.2.2
+    pastes skycraft-dev.pub); option B appears there only in prose notes, so a run of 3.2
+    needs 3.2.1 skipped in its recording (#200) or a per-step choice of option.
   * A caption label whose value holds bold spans turns them into actions (4.2:741, #203).
   * Instructions after a field value are lost (5.3:225, #203).
   * Text before the first option heading, and items under a non-option '####' heading after
@@ -163,7 +172,6 @@ from pathlib import Path
 STEP_HEADING = re.compile(r"^###\s+Step\s+(?P<id>\d+\.\d+\.\d+):(?P<title>.*)$")
 SECTION_END = re.compile(r"^#{1,3}\s")
 OPTION_HEADING = re.compile(r"^####\s+Option\s+(?P<n>\d+|[A-Z])\b")
-FIRST_OPTIONS = {"1", "A"}
 SUBHEADING = re.compile(r"^####\s")
 FENCE = re.compile(r"^[ \t]*(?P<run>`{3,}|~{3,})(?P<info>.*)$")
 LIST_ITEM = re.compile(r"^\s*(?:\d+\.|[-*])\s+(?P<text>.+)$")
@@ -381,25 +389,29 @@ def split_steps(lines: list[str]) -> list[dict]:
     return steps
 
 
-def option_regions(body: list[tuple[int, str]]) -> list[str]:
-    """Where each body line sits: 'step' for every line when the step has no Option headings;
-    otherwise 'first' (the Option 1 or A body), 'other' (another option's body), 'outside'
-    (before the first option, or under another '####' heading) or 'heading'."""
+def option_regions(body: list[tuple[int, str]]) -> tuple[list[str | int], list[str]]:
+    """Where each body line sits, and the name of each option ('1', 'A', 'B') in heading order.
+
+    A line is 'step' when the step has no Option headings; otherwise it is the index of the
+    option whose body holds it (0 for the first heading), 'outside' (before the first option,
+    or under another '####' heading) or 'heading'."""
     if not any(OPTION_HEADING.match(line) for _, line in body):
-        return ["step"] * len(body)
-    regions: list[str] = []
-    region = "outside"
+        return ["step"] * len(body), []
+    regions: list[str | int] = []
+    options: list[str] = []
+    region: str | int = "outside"
     for _, line in body:
         m = OPTION_HEADING.match(line)
         if m:
-            region = "first" if m.group("n") in FIRST_OPTIONS else "other"
+            region = len(options)
+            options.append(m.group("n"))
             regions.append("heading")
         elif SUBHEADING.match(line):
             region = "outside"
             regions.append("heading")
         else:
             regions.append(region)
-    return regions
+    return regions, options
 
 
 def following_list(body: list[tuple[int, str]], start: int) -> tuple[list[str], int]:
@@ -500,16 +512,35 @@ def check_list(body: list[tuple[int, str]], index: int) -> tuple[list[str], int]
     return parts, after
 
 
-def read_step(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, list[str]]:
-    """Items, Expected Result and images of one step section.
+def read_step(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, list[str], str | None]:
+    """Items, Expected Result and images of one step section, and the name of the option they
+    were read from ('1', 'A', 'B'; None when the step has no Option headings).
 
-    Items come from the whole body, or from the first option only. The Expected Result is the
-    first one in the step that is not inside another option's body; when there is none, the
-    first one anywhere (the standard puts a single one after Option 3). The items of a check
-    list are read where items are; they are joined to the Expected Result (join_checks) or,
-    when the step has none, are its Expected Result alone.
+    The option is the first one whose body yields at least one item, or the first one when none
+    does (#201): 3.2.1's Option A is CLI-only and its Option B is the Portal path.
     """
-    regions = option_regions(body)
+    regions, options = option_regions(body)
+    if not options:
+        return (*read_option(body, regions, None), None)
+    for index, name in enumerate(options):
+        read = read_option(body, regions, index)
+        if read[0]:
+            return (*read, name)
+    return (*read_option(body, regions, 0), options[0])
+
+
+def read_option(body: list[tuple[int, str]], regions: list[str | int],
+                chosen: int | None) -> tuple[list[dict], str | None, list[str]]:
+    """Items, Expected Result and images of one step section, read through the option at index
+    `chosen` of option_regions (None for a step without Option headings).
+
+    Items come from the whole body, or from the chosen option only. The Expected Result is the
+    first one in the step that is not inside another option's body; when there is none, the
+    first one in a later option (the standard puts a single one after Option 3), never one in
+    an earlier option, which describes that option's path. The items of a check list are read
+    where items are; they are joined to the Expected Result (join_checks) or, when the step has
+    none, are its Expected Result alone.
+    """
     item_lines: list[tuple[int, str]] = []
     expected: str | None = None
     fallback: str | None = None
@@ -518,13 +549,15 @@ def read_step(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, list
     while index < len(body):
         if EXPECTED.match(body[index][1]):
             text, after = expected_text(body, index)
-            if text and regions[index] != "other" and expected is None:
+            in_other = isinstance(regions[index], int) and regions[index] != chosen
+            earlier = in_other and chosen is not None and regions[index] < chosen
+            if text and not in_other and expected is None:
                 expected = text
-            elif text and fallback is None:
+            elif text and fallback is None and not earlier:
                 fallback = text
             index = after
             continue
-        if regions[index] in ("step", "first"):
+        if regions[index] == "step" or regions[index] == chosen:
             item_lines.append(body[index])     # the line that introduces a check list is read too
             found = check_list(body, index)
             if found and found[0]:
@@ -667,11 +700,12 @@ def parse_guide(guide: Path, repo_root: Path | None = None) -> dict:
     lab = lab_match.group(1) if lab_match else ""
     steps = []
     for raw in split_steps(lines):
-        items, expected, images = read_step(raw["body"])
-        steps.append({
-            "id": raw["id"], "title": raw["title"], "line": raw["line"],
-            "portal": bool(items), "items": items, "expected": expected, "images": images,
-        })
+        items, expected, images, option = read_step(raw["body"])
+        step = {"id": raw["id"], "title": raw["title"], "line": raw["line"]}
+        if option is not None:
+            step["option"] = option          # only a step with Option headings carries it
+        step.update(portal=bool(items), items=items, expected=expected, images=images)
+        steps.append(step)
     guide_rel = guide.relative_to(repo_root).as_posix() if repo_root else guide.as_posix()
     return {"lab": lab, "guide": guide_rel, "steps": steps}
 

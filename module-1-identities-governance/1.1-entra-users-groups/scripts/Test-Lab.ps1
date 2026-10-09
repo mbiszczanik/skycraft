@@ -12,6 +12,10 @@
     and also when it cannot sign in to Microsoft Graph or determine the tenant's initial domain,
     in which case no check runs (issue #241).
 
+    It signs in with the same Microsoft Graph scopes as Remove-LabResource.ps1, which
+    New-LabUser.ps1 requests too, so the consent given to the lab's setup covers the validator
+    (issue #242). A sign-in that returns without a Graph context is a failed sign-in.
+
 .EXAMPLE
     .\Test-Lab.ps1
     Runs the validation suite.
@@ -204,6 +208,14 @@ function Connect-LabGraph {
         [string]$TenantId
     )
 
+    # A context is signed in only when it names a tenant and an identity - an account, or an app
+    # name app-only. Connect-MgGraph can leave one that names neither and still return without an
+    # error: a delegated sign-in for scopes the account has never consented to does exactly that,
+    # with no consent prompt (issue #242). Accepting it printed "Connected to Tenant:  as", and
+    # every Graph call after it failed with "Authentication needed". One test, used for both the
+    # context reused below and the one a sign-in leaves.
+    $isSignedIn = { param($context) [bool]($context -and $context.TenantId -and ($context.Account -or $context.AppName)) }
+
     $plan = Get-LabGraphAuthPlan -Scope $Scope -TenantId $TenantId
 
     if ($plan.Mode -eq 'Blocked') { throw $plan.Reason }
@@ -211,8 +223,9 @@ function Connect-LabGraph {
     if ($plan.Mode -eq 'Interactive') {
         # Reuse a signed-in context, which is what a learner running the lab expects. Note this is
         # only reached when no service principal is configured: an unattended run never gets here.
+        # A partial one is not reused: the sign-in below replaces it.
         $existingContext = Get-MgContext
-        if ($existingContext -and (-not $plan.TenantId -or $existingContext.TenantId -eq $plan.TenantId)) {
+        if ((& $isSignedIn $existingContext) -and (-not $plan.TenantId -or $existingContext.TenantId -eq $plan.TenantId)) {
             return $existingContext
         }
     }
@@ -227,7 +240,12 @@ function Connect-LabGraph {
     $connectParameter = $plan.ConnectParameter
     Connect-MgGraph @connectParameter
 
-    return Get-MgContext
+    $context = Get-MgContext
+    if (-not (& $isSignedIn $context)) {
+        throw "Microsoft Graph sign-in did not complete: Connect-MgGraph returned without an error but left no signed-in account or tenant. A likely cause is missing consent for the permissions this script requests ($($Scope -join ', ')), or for the app registration's application permissions when signing in app-only. See TROUBLESHOOTING.md."
+    }
+
+    return $context
 }
 
 $ErrorActionPreference = 'Stop'
@@ -237,10 +255,15 @@ Write-Host "=== Lab 1.1 Validation Script ===" -ForegroundColor Cyan -Background
 # Check Microsoft Graph Connection
 try {
     Write-Host "`nChecking Microsoft Graph connection..." -ForegroundColor Yellow
+    # The ReadWrite scopes Remove-LabResource.ps1 requests (and New-LabUser.ps1 with them), although
+    # this script only reads: in Microsoft Graph each one includes its Read counterpart, so one
+    # consent covers all three scripts. The Read.All scopes this used to ask for are consented
+    # nowhere else in the lab, and in a tenant set up by its own scripts they were missing - the
+    # sign-in then returned no context and no prompt (issue #242).
     $mgContext = Connect-LabGraph -Scope @(
-        'User.Read.All'
-        'Group.Read.All'
-        'Directory.Read.All'
+        'User.ReadWrite.All'
+        'Group.ReadWrite.All'
+        'Directory.ReadWrite.All'
     )
     $identity = if ($mgContext.Account) { $mgContext.Account } else { $mgContext.AppName }
     Write-Host "Connected to Tenant: $($mgContext.TenantId) as $identity" -ForegroundColor Green

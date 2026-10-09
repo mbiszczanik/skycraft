@@ -19,10 +19,13 @@
          sign-in that had not completed, "Authentication needed" on every call) counts all ten
          checks as failed and exits 1.
       5. A failed Microsoft Graph sign-in exits 1 before anything is looked up.
-      6. A sign-in that "succeeds" without leaving a Graph context (issue #242) still exits 1 with
-         an [ERROR] line and runs no check. Asserted on the [ERROR] and the exit code only, not
-         on which step reports it, so the test holds both before and after #242 moves the
-         failure into Connect-LabGraph.
+      6. A sign-in that "succeeds" without leaving a Graph context (issue #242) is a failed
+         sign-in: Connect-LabGraph throws "sign-in did not complete", the script prints its
+         [ERROR] line and exits 1, never an empty "Connected to Tenant:  as" line, and nothing
+         is looked up - not even the domain.
+      7. The sign-in asks for the scopes the lab's setup and cleanup already consent to
+         (User/Group/Directory.ReadWrite.All), not the Read.All scopes nothing else in the lab
+         requests (issue #242).
 
     Scope limit, as in the cleanup suite next to this one: the child is launched with -Command,
     so these tests prove the failure counter reaches `exit`, not that `pwsh -File` carries the
@@ -86,6 +89,7 @@ BeforeAll {
     #   SKYCRAFT_STUB_NOCONTEXT    '1' leaves no Graph context: every Graph read then fails with
     #                              "Authentication needed", as the real cmdlets do
     #   SKYCRAFT_STUB_FAIL         'Connect-MgGraph' makes the sign-in throw
+    # Connect-MgGraph also logs the scopes it was asked for, as 'Connect-MgGraph:Scopes=a,b,c'.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 
@@ -130,8 +134,9 @@ function Get-MgContext {
 # without a context too - the shape issue #242 describes.
 function Connect-MgGraph {
     [CmdletBinding()]
-    param([Parameter(ValueFromRemainingArguments)]$Rest)
+    param([string[]]$Scopes, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name 'Connect-MgGraph'
+    Write-StubCall -Name "Connect-MgGraph:Scopes=$($Scopes -join ',')"
     if (Test-StubListed -Variable 'SKYCRAFT_STUB_FAIL' -Name 'Connect-MgGraph') { throw 'stub failure: Connect-MgGraph' }
 }
 
@@ -415,10 +420,31 @@ Describe 'Lab 1.1 Test-Lab.ps1 - a sign-in that fails is a failed validation' {
     It 'exits 1 with an [ERROR] when the sign-in leaves no Graph context, and runs no check (#242)' {
         $run = $script:NoContext
         $run.ExitCode | Should -Be 1 -Because "a sign-in that did not complete must not pass; output was:`n$($run.Output)"
-        $run.Output | Should -Match '\[ERROR\]'
+        $run.Output | Should -Match '\[ERROR\] Failed to connect to Microsoft Graph: [^\r\n]*sign-in did not complete'
+        $run.Output | Should -Not -Match 'Connected to Tenant'
         $run.Output | Should -Not -Match '\[OK\]'
         $run.Output | Should -Not -Match 'validation passed'
+        $run.Calls | Should -Contain 'Connect-MgGraph' -Because 'the empty context must be the one the sign-in left, not one it never tried to replace'
+        $run.Calls | Should -Not -Contain 'Get-MgDomain'
         $run.Calls | Should -Not -Contain 'Get-MgUser'
         $run.Calls | Should -Not -Contain 'Get-MgGroup'
+    }
+
+    It 'names the scopes it asked for in the error, as a hint at missing consent' {
+        $script:NoContext.Output | Should -Match 'consent for the permissions this script requests \(User\.ReadWrite\.All, Group\.ReadWrite\.All, Directory\.ReadWrite\.All\)'
+    }
+}
+
+Describe 'Lab 1.1 Test-Lab.ps1 - signs in with the scopes the lab already consents to (#242)' {
+
+    It 'requests User, Group and Directory ReadWrite.All, as the cleanup script does' {
+        # NoContext is the run that reaches Connect-MgGraph: every other one reuses the stub's
+        # signed-in context and never asks for scopes.
+        $logged = @($script:NoContext.Calls | Where-Object { $_ -like 'Connect-MgGraph:Scopes=*' })
+        $logged.Count | Should -Be 1 -Because "the sign-in must be attempted exactly once; calls were: $($script:NoContext.Calls -join ', ')"
+
+        $scopes = @(($logged[0] -replace '^Connect-MgGraph:Scopes=', '') -split ',' | Sort-Object)
+        # Exactly these: the Read.All scopes it used to ask for are consented nowhere else in the lab.
+        $scopes | Should -Be @('Directory.ReadWrite.All', 'Group.ReadWrite.All', 'User.ReadWrite.All')
     }
 }
