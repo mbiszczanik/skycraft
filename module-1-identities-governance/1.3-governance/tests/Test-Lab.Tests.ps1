@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Pester 5 tests for the Lab 1.3 validator's failure count and exit code.
+    Pester 5 tests for the Lab 1.3 validator's failure count, exit code and lock check.
 
 .DESCRIPTION
     Regression cover for issue #254. Test-Lab.ps1 printed [FAIL] for every check that failed and
@@ -18,6 +18,10 @@
       4. A run with no one signed in exits 1 before anything is looked up.
       5. Budgets are a manual check: their absence, or a budget lookup that fails, neither fails
          validation nor counts as a pass - and a failed lookup is not reported as "found".
+      6. A lock check passes only for the guide's lock: its name, level CanNotDelete, applied to
+         the group itself (issue #258). A ReadOnly lock, a lock under another name, a lock on a
+         resource inside the group, or a lock lookup that fails each fail that one check, and
+         the [FAIL] line says what was found.
 
     Scope limit, as in the Lab 1.1 suite: the child is launched with -Command, so these tests
     prove the failure counter reaches `exit`, not that `pwsh -File` carries the code out of the
@@ -58,8 +62,8 @@ BeforeAll {
 
     # Every Az command the script calls, recording its own invocation. By default the
     # subscription holds exactly what the lab builds: the three tagged resource groups, the three
-    # policy assignments, a lock on prod and platform, and one budget. Environment variables take
-    # pieces away, so one generated module serves every scenario:
+    # policy assignments, the guide's CanNotDelete lock on prod and platform, and one budget.
+    # Environment variables take pieces away, so one generated module serves every scenario:
     #   SKYCRAFT_STUB_NOCONTEXT       '1' leaves no Az context, as when no one is signed in
     #   SKYCRAFT_STUB_MISSINGRG       resource groups that do not exist: the group and lock
     #                                 lookups fail for them, as the real cmdlets do
@@ -68,6 +72,10 @@ BeforeAll {
     #   SKYCRAFT_STUB_MISSINGPOLICY   policy assignments (by name) that do not exist - an error
     #                                 from the real cmdlet, as here
     #   SKYCRAFT_STUB_NOLOCK          resource groups that carry no lock
+    #   SKYCRAFT_STUB_LOCKKIND        'group=kind' pairs that change the one lock a group returns:
+    #                                 'readonly' gives it level ReadOnly, 'wrongname' another
+    #                                 name, 'child' puts it on a resource inside the group, and
+    #                                 'fail' makes that group's lock lookup fail
     #   SKYCRAFT_STUB_LOOKUPFAIL      '1' makes every resource, policy and lock lookup fail
     #   SKYCRAFT_STUB_BUDGET          'none' returns no budget, 'fail' makes the lookup fail
     $script:StubBody = @'
@@ -85,6 +93,14 @@ function Test-StubListed {
 }
 
 function Test-StubLookupFail { return $env:SKYCRAFT_STUB_LOOKUPFAIL -eq '1' }
+
+function Get-StubLockKind {
+    param([string]$Name)
+    foreach ($pair in @($env:SKYCRAFT_STUB_LOCKKIND -split ',')) {
+        $group, $kind = $pair -split '=', 2
+        if ($group -and $group -eq $Name) { return $kind }
+    }
+}
 
 function Get-AzContext {
     [CmdletBinding()]
@@ -136,8 +152,27 @@ function Get-AzResourceLock {
         return
     }
     if (Test-StubListed -Variable 'SKYCRAFT_STUB_NOLOCK' -Name $ResourceGroupName) { return }
-    $suffix = ($ResourceGroupName -split '-')[0]
-    [pscustomobject]@{ Name = "lock-no-delete-$suffix"; Level = 'CanNotDelete' }
+    $kind = Get-StubLockKind -Name $ResourceGroupName
+    if ($kind -eq 'fail') { Write-Error "stub lookup failure: Get-AzResourceLock on $ResourceGroupName"; return }
+
+    $lockName = "lock-no-delete-$(($ResourceGroupName -split '-')[0])"
+    $level    = 'CanNotDelete'
+    $scope    = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/$ResourceGroupName"
+    switch ($kind) {
+        'readonly'  { $level = 'ReadOnly' }
+        'wrongname' { $lockName = 'my-lock' }
+        'child'     { $scope = "$scope/providers/Microsoft.Storage/storageAccounts/stubstorage" }
+    }
+    # Shaped like the real cmdlet's output: a generic object whose level and notes sit under
+    # Properties, with no top-level Level, and whose LockId says where the lock is applied.
+    $lockId = "$scope/providers/Microsoft.Authorization/locks/$lockName"
+    [pscustomobject]@{
+        Name              = $lockName
+        ResourceId        = $lockId
+        ResourceGroupName = $ResourceGroupName
+        LockId            = $lockId
+        Properties        = [pscustomobject]@{ level = $level; notes = 'Cannot delete resource or child resources.' }
+    }
 }
 
 function Get-AzConsumptionBudget {
@@ -162,6 +197,7 @@ function Get-AzConsumptionBudget {
             [string[]]$WrongTag = @(),
             [string[]]$MissingPolicy = @(),
             [string[]]$NoLock = @(),
+            [hashtable]$LockKind = @{},
             [ValidateSet('present', 'none', 'fail')]
             [string]$Budget = 'present',
             [switch]$LookupFail,
@@ -177,6 +213,7 @@ function Get-AzConsumptionBudget {
             SKYCRAFT_STUB_WRONGTAG      = $WrongTag -join ','
             SKYCRAFT_STUB_MISSINGPOLICY = $MissingPolicy -join ','
             SKYCRAFT_STUB_NOLOCK        = $NoLock -join ','
+            SKYCRAFT_STUB_LOCKKIND      = ($LockKind.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ','
             SKYCRAFT_STUB_BUDGET        = $Budget
             SKYCRAFT_STUB_LOOKUPFAIL    = if ($LookupFail) { '1' } else { '0' }
             SKYCRAFT_STUB_NOCONTEXT     = if ($NoContext) { '1' } else { '0' }
@@ -211,10 +248,15 @@ function Get-AzConsumptionBudget {
     $script:NoContext     = Invoke-ValidatorScript -Stub $script:Stub -NoContext
     $script:NoBudget      = Invoke-ValidatorScript -Stub $script:Stub -Budget 'none'
     $script:BudgetFails   = Invoke-ValidatorScript -Stub $script:Stub -Budget 'fail'
+    $script:LockReadOnly  = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'readonly' }
+    $script:LockWrongName = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'wrongname' }
+    $script:LockOnChild   = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'platform-skycraft-swc-rg' = 'child' }
+    $script:LockReadFails = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'fail' }
 
     $script:AllRuns = @(
         $script:AllPass, $script:PolicyMissing, $script:LockMissing, $script:WrongTag,
-        $script:NoTags, $script:RgMissing, $script:LookupsFail, $script:NoContext, $script:NoBudget, $script:BudgetFails
+        $script:NoTags, $script:RgMissing, $script:LookupsFail, $script:NoContext, $script:NoBudget, $script:BudgetFails,
+        $script:LockReadOnly, $script:LockWrongName, $script:LockOnChild, $script:LockReadFails
     )
 }
 
@@ -346,5 +388,58 @@ Describe 'Lab 1.3 Test-Lab.ps1 - budgets are a manual check, not counted' {
         $run.Output | Should -Not -Match 'Budget found'
         $run.Output | Should -Not -Match 'No budgets found'
         $run.Output | Should -Match 'Passed: 8\b'
+    }
+}
+
+Describe 'Lab 1.3 Test-Lab.ps1 - a lock check passes only for the guide''s lock (#258)' {
+
+    It 'passes the guide''s CanNotDelete lock on each group and names it' {
+        # The stub carries the level under Properties only, as the real cmdlet does: a check that
+        # read a top-level Level would print an empty level here.
+        $run = $script:AllPass
+        $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg : lock-no-delete-prod \(CanNotDelete\) \[OK\]'
+        $run.Output | Should -Match 'Lock on platform-skycraft-swc-rg : lock-no-delete-platform \(CanNotDelete\) \[OK\]'
+    }
+
+    It 'fails a ReadOnly lock under the guide''s name, and says which level it found' {
+        $run = $script:LockReadOnly
+        $run.ExitCode | Should -Be 1 -Because "a ReadOnly lock is not the lock step 1.3.10 creates; output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] lock-no-delete-prod has level ReadOnly\. Expected lock-no-delete-prod \(CanNotDelete\) on the group, step 1\.3\.10\.'
+        $run.FailLines | Should -Be 1
+        $run.OkLines | Should -Be 7
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'fails a lock under another name, and lists the locks the group carries' {
+        # Remove-LabResource.ps1 removes the guide's names only: a lock under any other name
+        # would pass the validator and then outlive the cleanup.
+        $run = $script:LockWrongName
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] No lock named lock-no-delete-prod; the group carries: my-lock \(CanNotDelete\)\.'
+        $run.FailLines | Should -Be 1
+        $run.OkLines | Should -Be 7
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'does not count a lock on a resource inside the group, and says where it found it' {
+        # Get-AzResourceLock -ResourceGroupName returns locks on child resources too; such a lock
+        # does not stop anyone deleting the group.
+        $run = $script:LockOnChild
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Lock on platform-skycraft-swc-rg \[FAIL\] Not found on the group itself; locks elsewhere do not count: lock-no-delete-platform \(CanNotDelete\) at /subscriptions/[^ ]+/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft\.Storage/storageAccounts/stubstorage\.'
+        $run.Output | Should -Match 'step 1\.3\.12\.'
+        $run.FailLines | Should -Be 1
+        $run.OkLines | Should -Be 7
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'counts a lock lookup that fails as a failed check, not as a missing lock' {
+        $run = $script:LockReadFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] Could not read locks: stub lookup failure: Get-AzResourceLock on prod-skycraft-swc-rg'
+        $run.Output | Should -Not -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] Not found'
+        $run.FailLines | Should -Be 1
+        $run.OkLines | Should -Be 7
+        $run.Output | Should -Match 'Failed: 1\b'
     }
 }
