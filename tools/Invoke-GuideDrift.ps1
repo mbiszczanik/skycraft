@@ -38,6 +38,11 @@
     is committed; later runs replay it and stop only where the Portal no longer matches it. That
     recording is the only thing a run writes into the repository. A guide edit that changes a
     portal label must update the recording in the same PR (tests/Guide-Drift-Recording.Tests.ps1).
+    A resource that a navigation chain names in a code span ('**Load balancers** ->
+    `dev-skycraft-swc-lb`') is never asked about: it is opened from the screen, or else, when it
+    opens the chain, from the Portal's global search; when it is not found under that exact name,
+    the step fails as blocking drift of the step (missing-resource), with no proposed guide edit
+    (issue #199).
 
     WHAT A RUN LEAVES BEHIND, AND WHY IT IS GITIGNORED. -LogDirectory/<run id>/ holds
     steps.json (the parsed guide; parse.py failing stops the run with exit 1), results.jsonl (one
