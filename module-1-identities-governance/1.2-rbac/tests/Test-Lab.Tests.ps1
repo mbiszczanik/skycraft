@@ -10,8 +10,9 @@
     stub of the Az commands it calls, and assert the observable contract:
 
       1. A run in which every check passes exits 0, and its summary says 0 failed.
-      2. A run in which one check fails - a missing resource group, a missing role assignment -
-         exits 1, and its summary states the count: exactly 1.
+      2. A run in which one role assignment is missing exits 1, and its summary states the
+         count: exactly 1. A missing resource group fails its own check and leaves the role
+         check at its scope with no assignment at all; both are counted: exactly 2.
       3. A run in which every role-assignment lookup fails with an error counts each of those
          checks as failed: a lookup that failed must not read as a pass.
       4. A run with no one signed in exits 1 before anything is looked up.
@@ -58,8 +59,9 @@ BeforeAll {
     # assignments. Environment variables take pieces away, so one generated module serves every
     # scenario:
     #   SKYCRAFT_STUB_NOCONTEXT       '1' leaves no Az context, as when no one is signed in
-    #   SKYCRAFT_STUB_MISSINGRG       resource groups (by name) the lookup fails for, as the real
-    #                                 cmdlet does for a group that does not exist
+    #   SKYCRAFT_STUB_MISSINGRG       resource groups (by name) that do not exist: the group
+    #                                 lookup fails, as the real cmdlet does, and the role lookup
+    #                                 at the group's scope returns no assignment at all
     #   SKYCRAFT_STUB_MISSINGROLE     role assignments left out, by key: owner, developers,
     #                                 testers-dev, testers-prod, partner
     #   SKYCRAFT_STUB_ROLELOOKUPFAIL  '1' makes every role-assignment lookup fail with an error
@@ -106,12 +108,14 @@ function Get-AzResourceGroup {
 
 # Returns what the real cmdlet returns for a scope: the assignments made there plus the ones
 # inherited from above. The operator's own Owner assignment on the subscription is always among
-# them, so a scope never comes back empty just because a lab assignment is missing.
+# them, so a scope never comes back empty just because a lab assignment is missing. The one
+# empty answer is a resource group that does not exist: nothing is assigned at its scope.
 function Get-AzRoleAssignment {
     [CmdletBinding()]
     param([string]$Scope, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name 'Get-AzRoleAssignment'
     if ($env:SKYCRAFT_STUB_ROLELOOKUPFAIL -eq '1') { Write-Error 'stub lookup failure: Get-AzRoleAssignment'; return }
+    if ($Scope -match '/resourceGroups/([^/]+)$' -and (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGRG' -Name $Matches[1])) { return }
 
     $sub = "/subscriptions/$script:SubId"
     [pscustomobject]@{ RoleDefinitionName = 'Owner'; SignInName = 'operator@contoso.example'; DisplayName = 'Operator' }
@@ -217,14 +221,18 @@ Describe 'Lab 1.2 Test-Lab.ps1 - failures are counted and set the exit code (#25
         $run.Output | Should -Not -Match 'validation failed'
     }
 
-    It 'exits 1 and reports 1 failed when one resource group is missing' {
+    It 'exits 1 and counts both the missing resource group and the empty scope it leaves' {
+        # The platform group holds only the External Partner assignment, so with the group gone
+        # that check meets a scope with no assignment at all - the "No assignments at scope"
+        # branch, which must be a counted [FAIL] like any other.
         $run = $script:RgMissing
         $run.ExitCode | Should -Be 1 -Because "a missing resource group must not look like a passed validation; output was:`n$($run.Output)"
         $run.Output | Should -Match '\[FAIL\] Resource Group missing or unreadable: platform-skycraft-swc-rg'
-        $run.FailLines | Should -Be 1
-        $run.Output | Should -Match 'Passed: 7\b'
-        $run.Output | Should -Match 'Failed: 1\b'
-        $run.Output | Should -Match 'validation failed: 1 check\(s\) failed'
+        $run.Output | Should -Match 'External Partner\.\.\. \[FAIL\] No assignments at scope'
+        $run.FailLines | Should -Be 2
+        $run.Output | Should -Match 'Passed: 6\b'
+        $run.Output | Should -Match 'Failed: 2\b'
+        $run.Output | Should -Match 'validation failed: 2 check\(s\) failed'
         $run.Output | Should -Not -Match 'validation passed'
     }
 

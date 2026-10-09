@@ -10,7 +10,9 @@
 
       1. A run in which every check passes exits 0, and its summary says 0 failed.
       2. A run in which one check fails - a missing policy assignment, a resource group without
-         a lock, a wrong Project tag - exits 1, and its summary states the count: exactly 1.
+         a lock, a wrong Project tag, a resource group with no tags at all - exits 1, and its
+         summary states the count: exactly 1. A missing resource group fails both checks that
+         read it, its tags and its lock: exactly 2.
       3. A run in which every lookup fails with an error counts each check as failed and exits 1:
          a lookup that failed must not read as a pass.
       4. A run with no one signed in exits 1 before anything is looked up.
@@ -59,6 +61,9 @@ BeforeAll {
     # policy assignments, a lock on prod and platform, and one budget. Environment variables take
     # pieces away, so one generated module serves every scenario:
     #   SKYCRAFT_STUB_NOCONTEXT       '1' leaves no Az context, as when no one is signed in
+    #   SKYCRAFT_STUB_MISSINGRG       resource groups that do not exist: the group and lock
+    #                                 lookups fail for them, as the real cmdlets do
+    #   SKYCRAFT_STUB_NOTAGS          resource groups that carry no tag at all
     #   SKYCRAFT_STUB_WRONGTAG        resource groups whose Project tag is not 'SkyCraft'
     #   SKYCRAFT_STUB_MISSINGPOLICY   policy assignments (by name) that do not exist - an error
     #                                 from the real cmdlet, as here
@@ -95,6 +100,13 @@ function Get-AzResourceGroup {
     param([string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name 'Get-AzResourceGroup'
     if (Test-StubLookupFail) { Write-Error 'stub lookup failure: Get-AzResourceGroup'; return }
+    if (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGRG' -Name $Name) {
+        Write-Error "Provided resource group does not exist. (stub: $Name)"
+        return
+    }
+    if (Test-StubListed -Variable 'SKYCRAFT_STUB_NOTAGS' -Name $Name) {
+        return [pscustomobject]@{ ResourceGroupName = $Name; Tags = $null }
+    }
     $project = if (Test-StubListed -Variable 'SKYCRAFT_STUB_WRONGTAG' -Name $Name) { 'SomethingElse' } else { 'SkyCraft' }
     [pscustomobject]@{
         ResourceGroupName = $Name
@@ -119,6 +131,10 @@ function Get-AzResourceLock {
     param([string]$ResourceGroupName, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name 'Get-AzResourceLock'
     if (Test-StubLookupFail) { Write-Error 'stub lookup failure: Get-AzResourceLock'; return }
+    if (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGRG' -Name $ResourceGroupName) {
+        Write-Error "Resource group '$ResourceGroupName' could not be found. (stub)"
+        return
+    }
     if (Test-StubListed -Variable 'SKYCRAFT_STUB_NOLOCK' -Name $ResourceGroupName) { return }
     $suffix = ($ResourceGroupName -split '-')[0]
     [pscustomobject]@{ Name = "lock-no-delete-$suffix"; Level = 'CanNotDelete' }
@@ -141,6 +157,8 @@ function Get-AzConsumptionBudget {
     function Invoke-ValidatorScript {
         param(
             [pscustomobject]$Stub,
+            [string[]]$MissingResourceGroup = @(),
+            [string[]]$NoTags = @(),
             [string[]]$WrongTag = @(),
             [string[]]$MissingPolicy = @(),
             [string[]]$NoLock = @(),
@@ -154,6 +172,8 @@ function Get-AzConsumptionBudget {
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
 
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
+            SKYCRAFT_STUB_MISSINGRG     = $MissingResourceGroup -join ','
+            SKYCRAFT_STUB_NOTAGS        = $NoTags -join ','
             SKYCRAFT_STUB_WRONGTAG      = $WrongTag -join ','
             SKYCRAFT_STUB_MISSINGPOLICY = $MissingPolicy -join ','
             SKYCRAFT_STUB_NOLOCK        = $NoLock -join ','
@@ -185,6 +205,8 @@ function Get-AzConsumptionBudget {
     $script:PolicyMissing = Invoke-ValidatorScript -Stub $script:Stub -MissingPolicy 'Enforce-Project-Tag'
     $script:LockMissing   = Invoke-ValidatorScript -Stub $script:Stub -NoLock 'platform-skycraft-swc-rg'
     $script:WrongTag      = Invoke-ValidatorScript -Stub $script:Stub -WrongTag 'prod-skycraft-swc-rg'
+    $script:NoTags        = Invoke-ValidatorScript -Stub $script:Stub -NoTags 'dev-skycraft-swc-rg'
+    $script:RgMissing     = Invoke-ValidatorScript -Stub $script:Stub -MissingResourceGroup 'prod-skycraft-swc-rg'
     $script:LookupsFail   = Invoke-ValidatorScript -Stub $script:Stub -LookupFail
     $script:NoContext     = Invoke-ValidatorScript -Stub $script:Stub -NoContext
     $script:NoBudget      = Invoke-ValidatorScript -Stub $script:Stub -Budget 'none'
@@ -192,7 +214,7 @@ function Get-AzConsumptionBudget {
 
     $script:AllRuns = @(
         $script:AllPass, $script:PolicyMissing, $script:LockMissing, $script:WrongTag,
-        $script:LookupsFail, $script:NoContext, $script:NoBudget, $script:BudgetFails
+        $script:NoTags, $script:RgMissing, $script:LookupsFail, $script:NoContext, $script:NoBudget, $script:BudgetFails
     )
 }
 
@@ -250,6 +272,29 @@ Describe 'Lab 1.3 Test-Lab.ps1 - failures are counted and set the exit code (#25
         $run.Output | Should -Match "Checking prod-skycraft-swc-rg\.\.\. \[FAIL\] Missing or incorrect 'Project' tag"
         $run.FailLines | Should -Be 1
         $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'exits 1 and reports 1 failed when a resource group carries no tags at all' {
+        $run = $script:NoTags
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Checking dev-skycraft-swc-rg\.\.\. \[FAIL\] No tags found'
+        $run.FailLines | Should -Be 1
+        $run.Output | Should -Match 'Passed: 7\b'
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'exits 1 and counts both checks that read a missing resource group, and nothing else' {
+        # One group gone, everything else in place - unlike the every-lookup-fails case below.
+        # prod carries a tag check and a lock check; both fail, and the other six still pass.
+        $run = $script:RgMissing
+        $run.ExitCode | Should -Be 1 -Because "a missing resource group must not look like a passed validation; output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Checking prod-skycraft-swc-rg\.\.\. \[FAIL\] Not found or unreadable'
+        $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] Could not read locks'
+        $run.FailLines | Should -Be 2
+        $run.OkLines | Should -Be 6
+        $run.Output | Should -Match 'Passed: 6\b'
+        $run.Output | Should -Match 'Failed: 2\b'
+        $run.Output | Should -Match 'validation failed: 2 check\(s\) failed'
     }
 
     It 'counts every check whose lookup fails with an error as failed, and exits 1' {
