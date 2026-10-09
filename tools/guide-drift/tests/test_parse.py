@@ -1,8 +1,9 @@
 """Unit tests for parse.py's reading of one list item: which searches are the Portal's global
 search and which are a blade's own search box (issue #189), which '- Label: value' items with
-a plain label are fields (issue #198), and which field values are not text to type (issue #202).
-The full guides and the other parser rules are covered by
-tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
+a plain label are fields (issue #198), which field values are not text to type (issue #202),
+and which lists are checks for the Expected Result rather than steps (issue #224). The full
+guides and the other parser rules are covered by tests/Guide-Drift-Parser.Tests.ps1. Run from
+the repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
 """
@@ -210,6 +211,221 @@ class LiteralValueTests(unittest.TestCase):
             {"kind": "field", "label": "IP address", "value": "[IP of dev-skycraft-swc-lb-pip]", "line": 4,
              "literal": False},
             {"kind": "tag", "name": "Owner", "value": "[your name]", "line": 8}])
+
+
+class CheckListTests(unittest.TestCase):
+    """A list introduced by 'verify:' or by an Expected Result whose text ends with a colon is a
+    list of checks (#224): its items are never step items and their text extends the step's
+    Expected Result. The fixtures copy the shapes of 2.2.11, 2.3.19, 4.1.2 and 4.1.11."""
+
+    def step(self, markdown: str) -> tuple[list[dict], str | None]:
+        """Items and Expected Result of the one step in markdown (its heading is line 1)."""
+        body = parse.split_steps(parse.strip_hidden(markdown.splitlines()))[0]["body"]
+        items, expected, _ = parse.read_step(body)
+        return items, expected
+
+    def test_the_nested_items_of_a_numbered_verify_item_are_checks_not_fields(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Verify\n"
+            "\n"
+            "1. Click **platform-skycraft-swc-bas**\n"
+            "2. Verify:\n"
+            "   - Status: **Succeeded**\n"
+            "   - Virtual network: `platform-skycraft-swc-vnet`\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["platform-skycraft-swc-bas"], "line": 3}])
+        self.assertEqual(expected, "Status: Succeeded; Virtual network: platform-skycraft-swc-vnet")
+
+    def test_in_x_verify_keeps_the_click_on_x(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Verify\n"
+            "\n"
+            "1. In **Configuration**, verify:\n"
+            "   - Allow Blob anonymous access: **Disabled**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Configuration"], "line": 3}])
+        self.assertEqual(expected, "Allow Blob anonymous access: Disabled")
+
+    def test_the_list_after_an_expected_result_ending_in_verify_follows_its_text(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Create\n"
+            "\n"
+            "1. Click **Create**\n"
+            "\n"
+            "**Expected Result**: Deployment succeeds. Navigate to the resource to verify:\n"
+            "\n"
+            "- Name: `platformskycraftswcsa`\n"
+            "- Location: Sweden Central\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Create"], "line": 3}])
+        self.assertEqual(expected, "Deployment succeeds. Navigate to the resource to verify: "
+                                   "Name: platformskycraftswcsa; Location: Sweden Central")
+
+    def test_an_expected_result_ending_in_a_colon_with_no_list_keeps_its_text(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Create\n"
+            "\n"
+            "**Expected Result**: Rows appear in the workspace:\n"
+            "\n"
+            "Then continue:\n"
+            "\n"
+            "1. Click **Next**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 7}])
+        self.assertEqual(expected, "Rows appear in the workspace:")
+
+    def test_the_checks_follow_an_expected_result_ending_in_a_full_stop_after_a_space(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Verify\n"
+            "\n"
+            "1. Click **Overview**\n"
+            "2. Verify:\n"
+            "   - Status: **Succeeded**\n"
+            "\n"
+            "**Expected Result**: Bastion is operational.\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Overview"], "line": 3}])
+        self.assertEqual(expected, "Bastion is operational. Status: Succeeded")
+
+    def test_checks_join_a_text_after_a_space_or_without_closing_punctuation_after_a_semicolon(self) -> None:
+        for text, joined in (("Bastion is operational.", "Bastion is operational. A; B"),
+                             ("Shows!", "Shows! A; B"), ("Is it running?", "Is it running? A; B"),
+                             ("Two files created:", "Two files created: A; B"),
+                             ("Bastion is operational", "Bastion is operational; A; B"),
+                             ("`skycraft-vm` is listed", "`skycraft-vm` is listed; A; B"),
+                             ("", "A; B"), (None, "A; B")):
+            with self.subTest(text=text):
+                self.assertEqual(parse.join_checks(text, ["A", "B"]), joined)
+        self.assertEqual(parse.join_checks("Bastion is operational.", []), "Bastion is operational.")
+        self.assertIsNone(parse.join_checks(None, []))
+
+    def test_a_verify_list_ends_at_the_next_numbered_item_even_after_a_blank_line(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Verify\n"
+            "\n"
+            "3. Verify:\n"
+            "\n"
+            "   - Virtual network links: 3\n"
+            "\n"
+            "   - Record sets: **2**\n"
+            "\n"
+            "4. Click **Record sets**\n"
+            "5. Name: **dev-db**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Record sets"], "line": 9},
+                                 {"kind": "field", "label": "Name", "value": "dev-db", "line": 10}])
+        self.assertEqual(expected, "Virtual network links: 3; Record sets: 2")
+
+    def test_a_verify_line_that_is_not_a_list_item_takes_the_list_right_after_it(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Verify\n"
+            "\n"
+            "Verify:\n"
+            "\n"
+            "- Status: **Succeeded**\n"
+            "\n"
+            "1. Click **Next**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 7}])
+        self.assertEqual(expected, "Status: Succeeded")
+
+    def test_verify_with_more_after_the_colon_or_inside_a_word_is_no_check_list(self) -> None:
+        for intro in ("Verify: **Public IP** → **SKU** shows Standard", "Reverify:", "Step2verify:",
+                      "pre_verify:"):
+            with self.subTest(intro=intro):
+                items, expected = self.step(
+                    "### Step 9.9.1: Verify\n\n"
+                    f"1. {intro}\n"
+                    "   - Status: **Succeeded**\n")
+                self.assertIn({"kind": "field", "label": "Status", "value": "Succeeded", "line": 4}, items)
+                self.assertIsNone(expected)
+
+    def test_a_list_after_a_nested_verify_line_ends_at_the_next_numbered_step(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: X\n"
+            "\n"
+            "1. Open **A**\n"
+            "\n"
+            "   Then verify:\n"
+            "   - a: **x**\n"
+            "   - b\n"
+            "2. Click **Next**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["A"], "line": 3},
+                                 {"kind": "action", "labels": ["Next"], "line": 8}])
+        self.assertEqual(expected, "a: x; b")
+
+    def test_a_list_after_a_nested_expected_result_ends_at_the_next_numbered_step(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: X\n"
+            "\n"
+            "1. Click **Go**\n"
+            "   - **Expected Result**: You see:\n"
+            "     - a\n"
+            "2. Click **Next**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Go"], "line": 3},
+                                 {"kind": "action", "labels": ["Next"], "line": 6}])
+        self.assertEqual(expected, "You see: a")
+
+    def test_a_list_ends_where_the_other_marker_kind_starts_at_its_indent(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: X\n"
+            "\n"
+            "**Expected Result**:\n"
+            "\n"
+            "- a\n"
+            "  1. nested, still part of the result\n"
+            "1. Click **Next**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 7}])
+        self.assertEqual(expected, "a; nested, still part of the result")
+
+    def test_an_expected_result_ends_a_check_list_and_is_read_as_usual(self) -> None:
+        for intro in ("1. Verify:", "Verify:"):
+            with self.subTest(intro=intro):
+                items, expected = self.step(
+                    "### Step 9.9.1: X\n"
+                    "\n"
+                    f"{intro}\n"
+                    "   - Status: **Succeeded**\n"
+                    "   - **Expected Result**: Bastion is up.\n"
+                    "2. Click **Next**\n")
+                self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 6}])
+                self.assertEqual(expected, "Bastion is up. Status: Succeeded")
+
+    def test_tab_indented_check_items_are_deeper_than_their_verify_item(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: X\n"
+            "\n"
+            "1. Verify:\n"
+            "\t- Status: **Succeeded**\n"
+            "\t- Subnet: `AzureBastionSubnet`\n"
+            "2. Click **Next**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 6}])
+        self.assertEqual(expected, "Status: Succeeded; Subnet: AzureBastionSubnet")
+
+    def test_a_commented_out_line_inside_a_check_list_neither_ends_nor_joins_it(self) -> None:
+        for intro, prefix in (("1. Verify:", ""), ("**Expected Result**: You see:", "You see: ")):
+            with self.subTest(intro=intro):
+                items, expected = self.step(
+                    "### Step 9.9.1: X\n"
+                    "\n"
+                    f"{intro}\n"
+                    "   - Status: **Succeeded**\n"
+                    "   <!-- - Old field: **value** -->\n"
+                    "   <!--\n"
+                    "   - Another: **value**\n"
+                    "   -->\n"
+                    "   - Subnet: `AzureBastionSubnet`\n"
+                    "2. Click **Next**\n")
+                self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 10}])
+                self.assertEqual(expected, prefix + "Status: Succeeded; Subnet: AzureBastionSubnet")
+
+    def test_a_verify_list_in_another_option_is_dropped_with_it(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Verify\n"
+            "\n"
+            "#### Option 1: Portal\n"
+            "\n"
+            "1. Click **Overview**\n"
+            "\n"
+            "#### Option 2: CLI\n"
+            "\n"
+            "1. Verify:\n"
+            "   - Status: **Succeeded**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Overview"], "line": 5}])
+        self.assertIsNone(expected)
 
 
 if __name__ == "__main__":

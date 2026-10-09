@@ -15,6 +15,8 @@
       '- Label: value' when the value is a bold or code span (#198); a field value that is an
       instruction or holds a bracket token is marked literal: false (#202);
       Name | Value and Tag | Value tables become tags; the images a step references are collected.
+      A list after 'verify:' or after an Expected Result ending in a colon holds checks for the
+      Expected Result, not steps (#224; pinned on labs 2.2 and 4.1, rules in test_parse.py).
 
       THE 17 GUIDES - every module-*/X.Y-*/lab-guide-X.Y.md parses, its step ids match its
       headings in order, and no label or value carries markup or comment residue. This does NOT
@@ -674,6 +676,43 @@ Describe 'parse.py - lab 1.3, a lock type is a field, not a click on Delete' {
         @(($step.items | Where-Object kind -eq 'field').label) | Should -Be @('Lock name', 'Lock type', 'Notes')
         ($step.items | Where-Object label -eq 'Lock type').value | Should -Be 'Delete'
         @($step.items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Delete'
+    }
+}
+
+Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#224)' {
+    BeforeAll {
+        $script:CheckLabs = @{}
+        foreach ($guide in 'module-2-networking/2.2-secure-access/lab-guide-2.2.md',
+                           'module-4-storage/4.1-storage-accounts/lab-guide-4.1.md') {
+            $lab = [regex]::Match($guide, 'lab-guide-(\d+\.\d+)\.md$').Groups[1].Value
+            $out = Join-Path $TestDrive "checks-$lab.json"
+            & $script:Python $script:Parser (Join-Path $script:RepoRoot $guide) --out $out --repo-root $script:RepoRoot
+            $script:CheckLabs[$lab] = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+        }
+    }
+
+    It 'reads step <id> as <labels> and the list to verify as its Expected Result' -ForEach @(
+        @{ lab = '2.2'; id = '2.2.11'; labels = @('Bastions', 'platform-skycraft-swc-bas')
+           expected = 'Bastion is operational and ready to provide secure connectivity to VMs in all peered VNets. Status: Succeeded; Virtual network: platform-skycraft-swc-vnet; Subnet: AzureBastionSubnet; Public IP: platform-skycraft-swc-bas-pip' }
+        @{ lab = '4.1'; id = '4.1.8'; labels = @('Security + networking', 'Encryption')
+           expected = 'Encryption type: Microsoft-managed keys; This is always enabled and cannot be disabled' }
+        @{ lab = '4.1'; id = '4.1.10'; labels = @('Configuration')
+           expected = 'Minimum TLS version: 1.2; Secure transfer required: Enabled' }
+        @{ lab = '4.1'; id = '4.1.11'; labels = @('Configuration')
+           expected = 'Allow Blob anonymous access: Disabled' }
+    ) {
+        $step = $script:CheckLabs[$lab].steps | Where-Object id -eq $id
+        @($step.items | Where-Object kind -eq 'field') | Should -BeNullOrEmpty
+        @($step.items | ForEach-Object { $_.labels }) | Should -Be $labels
+        $step.expected | Should -Be $expected
+    }
+
+    It 'reads the list after the Expected Result of step 4.1.2 into its text, not as a Name field' {
+        $step = $script:CheckLabs['4.1'].steps | Where-Object id -eq '4.1.2'
+        $step.expected | Should -Be ('Deployment succeeds in 30-60 seconds. Navigate to the resource to verify: ' +
+            'Name: platformskycraftswcsa; Location: Sweden Central; Replication: Geo-redundant storage (GRS); Access tier: Hot')
+        @($step.items | Where-Object { $_.kind -eq 'field' -and $_.label -ceq 'Name' }) | Should -BeNullOrEmpty
+        @($step.items)[-1].labels | Should -Be @('Create')
     }
 }
 
