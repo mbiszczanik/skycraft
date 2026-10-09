@@ -7,6 +7,11 @@
     and Guest user (Illidan) exist in the tenant. It also checks that the security groups
     (Admins, Developers, Testers) exist and have the correct members assigned.
 
+    Every check prints [OK] or [FAIL] and is counted. The summary states how many passed and how
+    many failed, and the script exits 0 only when none failed. It exits 1 when any check failed,
+    and also when it cannot sign in to Microsoft Graph or determine the tenant's initial domain,
+    in which case no check runs (issue #241).
+
 .EXAMPLE
     .\Test-Lab.ps1
     Runs the validation suite.
@@ -271,6 +276,13 @@ $expectedUsers = @(
     $guestEmail
 )
 
+# Every check below ends in exactly one [OK] or [FAIL], and each is counted here: the summary
+# states the counts and the exit code follows them (issue #241). Before that, a run in which every
+# check printed [FAIL] still ended "validation complete" with exit 0, so a caller reading the
+# exit code - and a learner reading the last line - could not tell it from a passing run.
+$passCount = 0
+$failCount = 0
+
 # Validate Users
 Write-Host "`n=== Validating Users ===" -ForegroundColor Cyan
 foreach ($upn in $expectedUsers) {
@@ -285,13 +297,16 @@ foreach ($upn in $expectedUsers) {
         $user = Get-MgUser -Filter $filter -ErrorAction Stop
         if ($user) {
             Write-Host "[OK] User found: $($user.DisplayName) ($upn)" -ForegroundColor Green
+            $passCount++
         }
         else {
             Write-Host "[FAIL] User missing: $upn" -ForegroundColor Red
+            $failCount++
         }
     }
     catch {
         Write-Host "[FAIL] Error checking user $($upn): $_" -ForegroundColor Red
+        $failCount++
     }
 }
 
@@ -311,6 +326,7 @@ foreach ($item in $expectedGroups) {
         $group = Get-MgGroup -Filter "DisplayName eq '$groupName'" -ErrorAction Stop
         if ($group) {
             Write-Host "[OK] Group exists: $groupName" -ForegroundColor Green
+            $passCount++
             
             # Check Members
             $members = Get-MgGroupMember -GroupId $group.Id -All -ErrorAction SilentlyContinue
@@ -329,24 +345,39 @@ foreach ($item in $expectedGroups) {
                 
                 if ($memberFound) {
                      Write-Host "  -> [OK] Verify: $($item.ExpectedMember) is a member." -ForegroundColor Green
+                     $passCount++
                 }
                 else {
                      Write-Host "  -> [FAIL] Verify: $($item.ExpectedMember) NOT found in group." -ForegroundColor Red
+                     $failCount++
                 }
             }
             else {
-                Write-Host "  -> [WARNING] No members found." -ForegroundColor Yellow
+                # An empty group is missing its expected member just as surely as a group holding
+                # someone else, so it fails the membership check rather than only warning.
+                Write-Host "  -> [FAIL] No members found - expected $($item.ExpectedMember)." -ForegroundColor Red
+                $failCount++
             }
         }
         else {
             Write-Host "[FAIL] Group missing: $groupName" -ForegroundColor Red
+            $failCount++
         }
     }
     catch {
         Write-Host "[FAIL] Error checking group: $groupName. $_" -ForegroundColor Red
+        $failCount++
     }
 }
 
 Write-Host "`n=== Validation Summary ===" -ForegroundColor Cyan
-Write-Host "Lab 1.1 validation complete" -ForegroundColor Green
+Write-Host "  Passed: $passCount" -ForegroundColor Green
+Write-Host "  Failed: $failCount" -ForegroundColor $(if ($failCount -gt 0) { 'Red' } else { 'Gray' })
 
+if ($failCount -gt 0) {
+    Write-Host "`nLab 1.1 validation failed: $failCount check(s) failed. See the [FAIL] lines above." -ForegroundColor Red
+    $Host.SetShouldExit(1)
+    exit 1
+}
+
+Write-Host "`nLab 1.1 validation passed: all $passCount checks passed." -ForegroundColor Green
