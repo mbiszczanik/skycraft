@@ -30,6 +30,14 @@
     that fails is reported as [ERROR] with the Azure error message and counted; if any step
     failed the script exits 1 - so a masked failure cannot be mistaken for a clean cleanup.
 
+    A resource that does not exist is not a failure. A lookup that fails with an error (a 403,
+    throttling, a transient ARM error) is: it cannot tell whether the resource is gone, so it is
+    reported as [ERROR] and counted the same way (issue #238, as #227 did for Lab 1.1). Only a
+    lookup that succeeds and finds nothing, or a getter that reports the resource as not found,
+    means "absent" - Test-LabNotFoundError tells the two apart. A resource whose dependants could
+    not be looked up stays where it is: the snapshot resource group survives a VM backup item
+    lookup that failed, and an AzureBackupRG_* group survives a failed check that it is empty.
+
     Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
     "pwsh -File" for any script that declares #Requires -Modules for a module it has to
     auto-import, and the process would exit 0 with the failure still on screen (issue #104).
@@ -48,8 +56,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.2.0
-    Date: 2026-10-06
+    Version: 1.3.0
+    Date: 2026-10-09
 #>
 
 #Requires -Version 7.0
@@ -77,9 +85,11 @@ $snapshotRgPattern = 'platform-skycraft-swc-rpc*-rg'
 # Minimum Az.RecoveryServices for the one-pass vault delete (see the prerequisite check below).
 $rsvMinModuleVersion = [version]'7.5.0'
 
-# Counts resources that exist but could not be deleted. Absent resources are not failures.
+# Counts lookups that failed and resources that exist but could not be deleted. Absent
+# resources are not failures.
 $script:cleanupFailures = 0
-# Set when a VM backup item could not be stopped; the snapshot group must then survive (step 6).
+# Set when a VM backup item could not be stopped, or the vault or its backup items could not be
+# looked up; the snapshot group must then survive (step 6).
 $script:protectionStillOn = $false
 
 # Roles granted to the Backup Vault identity by New-LabBlobBackup.ps1 (must be revoked here)
@@ -87,6 +97,77 @@ $backupRoles = @(
     @{ Name = 'Storage Blob Data Owner';            RoleId = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b' },
     @{ Name = 'Storage Account Backup Contributor'; RoleId = 'e5e2a7ff-d759-4cd2-bb51-3152d37e2eb1' }
 )
+
+# Whether a lookup's error says the resource does not exist, rather than that the lookup failed.
+# Every getter below reports a missing resource as an ARM 404, in one of these shapes:
+#   - Get-AzStorageAccount and Get-AzRecoveryServicesVault (CloudException): "The Resource
+#     '<type>/<name>' under resource group '<rg>' was not found.", code ResourceNotFound; when the
+#     group is gone as well, "Resource group '<rg>' could not be found.", code
+#     ResourceGroupNotFound; with no error body, "Operation returned an invalid status code
+#     'NotFound'". The exception carries the code in Body and the status in Response.
+#   - Get-AzDataProtectionBackupVault and -BackupInstance (generated cmdlets): the same ARM
+#     messages, with the code as the error id ("ResourceNotFound,Get-AzDataProtectionBackupVault").
+#   - Azure.Core clients: "Status: 404 (Not Found)" and "ErrorCode: ResourceNotFound".
+# The list getters - Get-AzResourceGroup, Get-AzResource, Get-AzRecoveryServicesBackupItem and
+# Get-AzRoleAssignment - return nothing when nothing matches; Get-AzResource still reports a
+# group that is gone as ResourceGroupNotFound. A missing subscription is a 404 too, but it means
+# the context is wrong, not that the resource is gone, so it never reads as "absent".
+function Test-LabNotFoundError {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    $evidence = [System.Collections.Generic.List[string]]::new()
+    $evidence.Add([string]$ErrorRecord)
+    $evidence.Add([string]$ErrorRecord.FullyQualifiedErrorId)
+    $status404 = $false
+    for ($exception = $ErrorRecord.Exception; $exception; $exception = $exception.InnerException) {
+        $evidence.Add([string]$exception.Message)
+        foreach ($code in @($exception.Body.Code, $exception.Body.Error.Code, $exception.ErrorCode)) {
+            if ($code) { $evidence.Add([string]$code) }
+        }
+        foreach ($status in @($exception.Response.StatusCode, $exception.Status)) {
+            if ("$status" -in @('404', 'NotFound')) { $status404 = $true }
+        }
+    }
+    $text = $evidence -join "`n"
+
+    if ($text -match 'SubscriptionNotFound|subscription .{0,80}(could not be|was not) found') { return $false }
+    if ($status404) { return $true }
+    return $text -match '\bResource(Group)?NotFound\b|was not found|Resource group .{0,100}could not be found|invalid status code ''NotFound''|\b404 \(Not Found\)'
+}
+
+# Runs one lookup with -ErrorAction Stop inside $Lookup, and returns what it found:
+#   Value     the lookup's output, as an array - empty when the resource is absent
+#   NotFound  the getter reported the resource as not found (Test-LabNotFoundError)
+#   Failed    the lookup failed any other way: it is reported as [ERROR] and counted, because it
+#             cannot tell whether the resource is gone, and the caller keeps its dependants
+function Invoke-LabLookup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Target,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Lookup
+    )
+
+    try {
+        $value = @(& $Lookup)
+        return [pscustomobject]@{ Value = $value; NotFound = $false; Failed = $false }
+    } catch {
+        if (Test-LabNotFoundError -ErrorRecord $_) {
+            return [pscustomobject]@{ Value = @(); NotFound = $true; Failed = $false }
+        }
+        $script:cleanupFailures++
+        Write-Host "  [ERROR] Could not look up $($Target): $_" -ForegroundColor Red
+        Write-Host "    A failed lookup is not 'absent': it may still exist, so this counts as a failure." -ForegroundColor Gray
+        return [pscustomobject]@{ Value = @(); NotFound = $false; Failed = $true }
+    }
+}
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Lab 5.2 - Resource Cleanup" -ForegroundColor Cyan
@@ -122,10 +203,17 @@ Write-Host "`nChecking resources to delete..." -ForegroundColor Yellow
 
 $resourcesToDelete = [System.Collections.Generic.List[hashtable]]::new()
 
-$bvExists = Get-AzDataProtectionBackupVault -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction SilentlyContinue
+# Every lookup below goes through Invoke-LabLookup: one that fails is an [ERROR] counted in
+# $script:cleanupFailures, never "absent" (issue #238).
+$bvLookup = Invoke-LabLookup -Target "Backup Vault $bvName" -Lookup {
+    Get-AzDataProtectionBackupVault -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction Stop
+}
+$bvExists = $bvLookup.Value | Select-Object -First 1
 if ($bvExists) {
-    $instances = Get-AzDataProtectionBackupInstance -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction SilentlyContinue
-    foreach ($inst in $instances) {
+    $instanceLookup = Invoke-LabLookup -Target "the blob backup instances in $bvName" -Lookup {
+        Get-AzDataProtectionBackupInstance -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction Stop
+    }
+    foreach ($inst in $instanceLookup.Value) {
         $resourcesToDelete.Add(@{ Type = 'BlobInstance'; Name = $inst.Name })
         Write-Host "  - Blob Backup Instance: $($inst.Name)" -ForegroundColor Gray
     }
@@ -133,7 +221,10 @@ if ($bvExists) {
     # Plan removal of the RBAC roles granted to the BV identity on the storage account.
     # Resolve the principalId now, while the vault (and its identity) still exists.
     $bvPrincipalId = $bvExists.IdentityPrincipalId
-    $storage = Get-AzStorageAccount -ResourceGroupName $prodRg -Name $storageAccount -ErrorAction SilentlyContinue
+    $storageLookup = Invoke-LabLookup -Target "storage account $storageAccount" -Lookup {
+        Get-AzStorageAccount -ResourceGroupName $prodRg -Name $storageAccount -ErrorAction Stop
+    }
+    $storage = $storageLookup.Value | Select-Object -First 1
     if ($bvPrincipalId -and $storage) {
         foreach ($role in $backupRoles) {
             $resourcesToDelete.Add(@{
@@ -151,39 +242,51 @@ if ($bvExists) {
     Write-Host "  - Backup Vault: $bvName" -ForegroundColor Gray
 }
 
-$rsvExists = Get-AzRecoveryServicesVault -ResourceGroupName $platformRg -Name $rsvName -ErrorAction SilentlyContinue
+$rsvLookup = Invoke-LabLookup -Target "Recovery Services Vault $rsvName" -Lookup {
+    Get-AzRecoveryServicesVault -ResourceGroupName $platformRg -Name $rsvName -ErrorAction Stop
+}
+# A vault that could not be looked up may still protect a VM, so step 6 keeps the snapshot group.
+if ($rsvLookup.Failed) { $script:protectionStillOn = $true }
+$rsvExists = $rsvLookup.Value | Select-Object -First 1
 if ($rsvExists) {
-    $vmItems = Get-AzRecoveryServicesBackupItem -VaultId $rsvExists.ID -BackupManagementType AzureVM -WorkloadType AzureVM -ErrorAction SilentlyContinue
-    if ($vmItems -and @($vmItems).Count -gt 0) {
-        foreach ($item in $vmItems) {
-            # FriendlyName comes back empty for some protected VMs, which left the progress
-            # lines and the ShouldProcess target blank during the live v0.8.0 verification.
-            # The container name carries the VM name as its last ';'-separated segment.
-            $displayName = if ($item.FriendlyName) {
-                $item.FriendlyName
-            } elseif ($item.ContainerName) {
-                ($item.ContainerName -split ';')[-1]
-            } else {
-                $item.Name
-            }
-            $resourcesToDelete.Add(@{
-                Type          = 'VmBackupItem'
-                Name          = $item.Name
-                ContainerName = $item.ContainerName
-                FriendlyName  = $displayName
-                Item          = $item
-            })
-            Write-Host "  - VM Backup Item: $displayName" -ForegroundColor Gray
+    $itemLookup = Invoke-LabLookup -Target "the VM backup items in $rsvName" -Lookup {
+        Get-AzRecoveryServicesBackupItem -VaultId $rsvExists.ID -BackupManagementType AzureVM -WorkloadType AzureVM -ErrorAction Stop
+    }
+    # The same holds for backup items that could not be listed: a VM may still be protected.
+    if ($itemLookup.Failed) { $script:protectionStillOn = $true }
+    foreach ($item in $itemLookup.Value) {
+        # FriendlyName comes back empty for some protected VMs, which left the progress
+        # lines and the ShouldProcess target blank during the live v0.8.0 verification.
+        # The container name carries the VM name as its last ';'-separated segment.
+        $displayName = if ($item.FriendlyName) {
+            $item.FriendlyName
+        } elseif ($item.ContainerName) {
+            ($item.ContainerName -split ';')[-1]
+        } else {
+            $item.Name
         }
+        $resourcesToDelete.Add(@{
+            Type          = 'VmBackupItem'
+            Name          = $item.Name
+            ContainerName = $item.ContainerName
+            FriendlyName  = $displayName
+            Item          = $item
+        })
+        Write-Host "  - VM Backup Item: $displayName" -ForegroundColor Gray
     }
     $resourcesToDelete.Add(@{ Type = 'RSV'; Name = $rsvName })
     Write-Host "  - Recovery Services Vault: $rsvName" -ForegroundColor Gray
 }
 
+# One listing serves both scans below. If it fails, neither group kind is planned: the run
+# exits 1 and a rerun picks them up.
+$rgLookup = Invoke-LabLookup -Target 'the resource groups in the subscription' -Lookup {
+    Get-AzResourceGroup -ErrorAction Stop
+}
+
 # The instant-restore snapshot group the VM backup policy names (#184). Unlike AzureBackupRG_*,
 # nothing outside this lab writes to it, so it goes as a whole - restore point collection included.
-$snapshotRgs = Get-AzResourceGroup -ErrorAction SilentlyContinue |
-               Where-Object { $_.ResourceGroupName -like $snapshotRgPattern }
+$snapshotRgs = $rgLookup.Value | Where-Object { $_.ResourceGroupName -like $snapshotRgPattern }
 foreach ($snapshotRg in $snapshotRgs) {
     $resourcesToDelete.Add(@{ Type = 'SnapshotResourceGroup'; Name = $snapshotRg.ResourceGroupName })
     Write-Host "  - Snapshot resource group: $($snapshotRg.ResourceGroupName)" -ForegroundColor Gray
@@ -193,11 +296,16 @@ foreach ($snapshotRg in $snapshotRgs) {
 # Microsoft.Compute/restorePointCollections container in it for instant-restore snapshots.
 # Disabling protection releases the snapshots, but the (now empty) container and its resource
 # group outlive the vault and had to be deleted by hand after the v0.8.0 cycle (#105).
-$backupRgCandidates = Get-AzResourceGroup -ErrorAction SilentlyContinue |
-                      Where-Object { $_.ResourceGroupName -like "AzureBackupRG_${location}_*" }
+$backupRgCandidates = $rgLookup.Value | Where-Object { $_.ResourceGroupName -like "AzureBackupRG_${location}_*" }
 foreach ($backupRg in $backupRgCandidates) {
-    $rgName      = $backupRg.ResourceGroupName
-    $rgResources = @(Get-AzResource -ResourceGroupName $rgName -ErrorAction SilentlyContinue)
+    $rgName           = $backupRg.ResourceGroupName
+    $rgResourceLookup = Invoke-LabLookup -Target "the resources in $rgName" -Lookup {
+        Get-AzResource -ResourceGroupName $rgName -ErrorAction Stop
+    }
+    # A group whose contents could not be listed is left alone (the [ERROR] is counted): an empty
+    # listing here would read as "empty group" and plan its delete. One that is gone is skipped.
+    if ($rgResourceLookup.Failed -or $rgResourceLookup.NotFound) { continue }
+    $rgResources = $rgResourceLookup.Value
 
     # Only SkyCraft's own collections: the group is shared, and an unrelated protected VM's
     # collection must survive this teardown.
@@ -223,16 +331,20 @@ foreach ($backupRg in $backupRgCandidates) {
 }
 
 if ($resourcesToDelete.Count -eq 0) {
-    Write-Host "`nNo Lab 5.2 resources found to delete." -ForegroundColor Green
-    exit 0
+    # "Nothing found" is only true when every lookup succeeded; otherwise the summary exits 1.
+    if ($script:cleanupFailures -eq 0) {
+        Write-Host "`nNo Lab 5.2 resources found to delete." -ForegroundColor Green
+        exit 0
+    }
+    Write-Host "`nNo Lab 5.2 resources found, but $($script:cleanupFailures) lookup(s) failed - see the [ERROR] lines above." -ForegroundColor Red
+} else {
+    # ── Confirm deletion (per-operation via ShouldProcess; pass -Force or -Confirm:$false to skip) ──
+    Write-Host "`n[WARNING] This will permanently delete the above resources." -ForegroundColor Yellow
+    Write-Host "  Ensure ASR replication has been removed via Azure Portal first." -ForegroundColor Gray
+    Write-Host "  VMs, VNets, and Storage Accounts will NOT be deleted." -ForegroundColor Gray
+
+    Write-Host "`nDeleting resources..." -ForegroundColor Yellow
 }
-
-# ── Confirm deletion (per-operation via ShouldProcess; pass -Force or -Confirm:$false to skip) ──
-Write-Host "`n[WARNING] This will permanently delete the above resources." -ForegroundColor Yellow
-Write-Host "  Ensure ASR replication has been removed via Azure Portal first." -ForegroundColor Gray
-Write-Host "  VMs, VNets, and Storage Accounts will NOT be deleted." -ForegroundColor Gray
-
-Write-Host "`nDeleting resources..." -ForegroundColor Yellow
 
 # 1. Delete Blob Backup Instances
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BlobInstance' }) {
@@ -255,9 +367,12 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BlobInstance' })
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RoleAssignment' }) {
     if (-not $PSCmdlet.ShouldProcess("$($r.Name) -> $storageAccount", 'Remove role assignment')) { continue }
     Write-Host "  Removing role assignment '$($r.Name)' on $storageAccount..." -ForegroundColor Gray
+    $assignmentLookup = Invoke-LabLookup -Target "role assignment '$($r.Name)' on $storageAccount" -Lookup {
+        Get-AzRoleAssignment -ObjectId $r.PrincipalId -RoleDefinitionId $r.RoleId -Scope $r.Scope -ErrorAction Stop
+    }
+    if ($assignmentLookup.Failed) { continue }
     try {
-        $existing = Get-AzRoleAssignment -ObjectId $r.PrincipalId -RoleDefinitionId $r.RoleId -Scope $r.Scope -ErrorAction SilentlyContinue
-        if ($existing) {
+        if ($assignmentLookup.Value.Count -gt 0) {
             Remove-AzRoleAssignment -ObjectId $r.PrincipalId -RoleDefinitionId $r.RoleId -Scope $r.Scope -ErrorAction Stop | Out-Null
             Write-Host "  ✓ Removed role assignment: $($r.Name)" -ForegroundColor Green
         } else {
@@ -323,11 +438,12 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RSV' }) {
 }
 
 # 6. Delete the snapshot resource group. After the protection is gone, nothing but the released
-#    restore point collection is left in it. While a VM is still protected the group stays: the
-#    next backup would recreate it untagged, and Lab 1.3's policy would deny that group again.
+#    restore point collection is left in it. While a VM is still protected - or may be, because
+#    the vault or its backup items could not be looked up - the group stays: the next backup
+#    would recreate it untagged, and Lab 1.3's policy would deny that group again.
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'SnapshotResourceGroup' }) {
     if ($script:protectionStillOn) {
-        Write-Host "  [INFO] $($r.Name) left in place - a VM is still protected (see the [ERROR] above)." -ForegroundColor Gray
+        Write-Host "  [INFO] $($r.Name) left in place - a VM may still be protected (see the [ERROR] above)." -ForegroundColor Gray
         continue
     }
     if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete instant-restore snapshot resource group')) { continue }
@@ -358,8 +474,20 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RestorePointColl
 
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BackupResourceGroup' }) {
     # Re-check emptiness: the group is shared infrastructure and Azure recreates it on demand,
-    # so it is only removed when nothing is left in it.
-    $remaining = @(Get-AzResource -ResourceGroupName $r.Name -ErrorAction SilentlyContinue)
+    # so it is only removed when nothing is left in it. A check that failed proves nothing - the
+    # group would be deleted with whatever it still holds - so the group stays.
+    $remainingLookup = Invoke-LabLookup -Target "the resources left in $($r.Name)" -Lookup {
+        Get-AzResource -ResourceGroupName $r.Name -ErrorAction Stop
+    }
+    if ($remainingLookup.Failed) {
+        Write-Host "  [INFO] $($r.Name) left in place - it could not be checked for other resources." -ForegroundColor Gray
+        continue
+    }
+    if ($remainingLookup.NotFound) {
+        Write-Host "  ✓ Azure Backup resource group already absent: $($r.Name)" -ForegroundColor Green
+        continue
+    }
+    $remaining = $remainingLookup.Value
     if ($remaining.Count -gt 0) {
         Write-Host "  [INFO] $($r.Name) still holds $($remaining.Count) resource(s) - left in place." -ForegroundColor Gray
         continue
