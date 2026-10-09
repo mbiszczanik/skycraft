@@ -320,44 +320,17 @@ $expectedGroups = @(
 # Validate Groups & Members
 Write-Host "`n=== Validating Groups & Memberships ===" -ForegroundColor Cyan
 
+# Two checks per group, always both: the group exists, and it holds its expected member. A group
+# that is missing or cannot be read fails its membership check too, so every run counts the same
+# ten checks and "Failed: N" always means N out of ten.
 foreach ($item in $expectedGroups) {
     $groupName = $item.Name
+    $group = $null
     try {
         $group = Get-MgGroup -Filter "DisplayName eq '$groupName'" -ErrorAction Stop
         if ($group) {
             Write-Host "[OK] Group exists: $groupName" -ForegroundColor Green
             $passCount++
-            
-            # Check Members
-            $members = Get-MgGroupMember -GroupId $group.Id -All -ErrorAction SilentlyContinue
-            if ($members) {
-                # Fetch full user details for members to get DisplayName
-                $memberFound = $false
-                foreach ($memberId in $members.Id) {
-                    $memberUser = Get-MgUser -UserId $memberId -ErrorAction SilentlyContinue
-                    if ($memberUser) {
-                        Write-Host "  -> Member: $($memberUser.DisplayName) ($($memberUser.UserPrincipalName))" -ForegroundColor Gray
-                        if ($memberUser.DisplayName -eq $item.ExpectedMember) {
-                            $memberFound = $true
-                        }
-                    }
-                }
-                
-                if ($memberFound) {
-                     Write-Host "  -> [OK] Verify: $($item.ExpectedMember) is a member." -ForegroundColor Green
-                     $passCount++
-                }
-                else {
-                     Write-Host "  -> [FAIL] Verify: $($item.ExpectedMember) NOT found in group." -ForegroundColor Red
-                     $failCount++
-                }
-            }
-            else {
-                # An empty group is missing its expected member just as surely as a group holding
-                # someone else, so it fails the membership check rather than only warning.
-                Write-Host "  -> [FAIL] No members found - expected $($item.ExpectedMember)." -ForegroundColor Red
-                $failCount++
-            }
         }
         else {
             Write-Host "[FAIL] Group missing: $groupName" -ForegroundColor Red
@@ -366,6 +339,50 @@ foreach ($item in $expectedGroups) {
     }
     catch {
         Write-Host "[FAIL] Error checking group: $groupName. $_" -ForegroundColor Red
+        $failCount++
+    }
+
+    if (-not $group) {
+        Write-Host "  -> [FAIL] Membership of $($groupName): group not found, so $($item.ExpectedMember) cannot be a member." -ForegroundColor Red
+        $failCount++
+        continue
+    }
+
+    # -ErrorAction Stop on both lookups: a refused or throttled read must not pass for an empty
+    # group or a missing member, so it is reported with the Graph error as one failed check.
+    try {
+        $members = Get-MgGroupMember -GroupId $group.Id -All -ErrorAction Stop
+        if ($members) {
+            # Fetch full user details for members to get DisplayName
+            $memberFound = $false
+            foreach ($memberId in $members.Id) {
+                $memberUser = Get-MgUser -UserId $memberId -ErrorAction Stop
+                if ($memberUser) {
+                    Write-Host "  -> Member: $($memberUser.DisplayName) ($($memberUser.UserPrincipalName))" -ForegroundColor Gray
+                    if ($memberUser.DisplayName -eq $item.ExpectedMember) {
+                        $memberFound = $true
+                    }
+                }
+            }
+
+            if ($memberFound) {
+                 Write-Host "  -> [OK] Verify: $($item.ExpectedMember) is a member." -ForegroundColor Green
+                 $passCount++
+            }
+            else {
+                 Write-Host "  -> [FAIL] Verify: $($item.ExpectedMember) NOT found in group." -ForegroundColor Red
+                 $failCount++
+            }
+        }
+        else {
+            # An empty group is missing its expected member just as surely as a group holding
+            # someone else, so it fails the membership check rather than only warning.
+            Write-Host "  -> [FAIL] No members found - expected $($item.ExpectedMember)." -ForegroundColor Red
+            $failCount++
+        }
+    }
+    catch {
+        Write-Host "  -> [FAIL] Error checking members of $($groupName): $_" -ForegroundColor Red
         $failCount++
     }
 }

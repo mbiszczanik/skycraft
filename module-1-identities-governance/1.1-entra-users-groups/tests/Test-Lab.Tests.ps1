@@ -11,12 +11,15 @@
 
       1. A run in which every check passes exits 0, and its summary says 0 failed.
       2. A run in which one check fails - a missing user, a group holding the wrong member, an
-         empty group - exits 1, and its summary states the count: exactly 1.
-      3. A run in which every lookup fails with an error (the live reproduction in #241: a Graph
-         sign-in that had not completed, "Authentication needed" on every call) counts each
-         failed check and exits 1.
-      4. A failed Microsoft Graph sign-in exits 1 before anything is looked up.
-      5. A sign-in that "succeeds" without leaving a Graph context (issue #242) still exits 1 with
+         empty group, a member list or a member that cannot be read - exits 1, and its summary
+         states the count: exactly 1. A read that fails is reported with the Graph error, never
+         as "No members found" or "NOT found in group".
+      3. A missing group fails its membership check too, so every run counts the same ten checks.
+      4. A run in which every lookup fails with an error (the live reproduction in #241: a Graph
+         sign-in that had not completed, "Authentication needed" on every call) counts all ten
+         checks as failed and exits 1.
+      5. A failed Microsoft Graph sign-in exits 1 before anything is looked up.
+      6. A sign-in that "succeeds" without leaving a Graph context (issue #242) still exits 1 with
          an [ERROR] line and runs no check. Asserted on the [ERROR] and the exit code only, not
          on which step reports it, so the test holds both before and after #242 moves the
          failure into Connect-LabGraph.
@@ -75,6 +78,8 @@ BeforeAll {
     #   SKYCRAFT_STUB_WRONGMEMBER  groups that hold someone other than their expected member
     #   SKYCRAFT_STUB_NOMEMBERS    groups that hold no member at all
     #   SKYCRAFT_STUB_LOOKUPFAIL   '1' makes every user and group lookup fail with an error
+    #   SKYCRAFT_STUB_MEMBERFAIL   groups whose member list fails to read with an error
+    #   SKYCRAFT_STUB_USERIDFAIL   members (by id) whose lookup by id fails with an error
     #   SKYCRAFT_STUB_NOCONTEXT    '1' leaves no Graph context: every Graph read then fails with
     #                              "Authentication needed", as the real cmdlets do
     #   SKYCRAFT_STUB_FAIL         'Connect-MgGraph' makes the sign-in throw
@@ -148,6 +153,7 @@ function Get-MgUser {
 
     # A member lookup by id, as the membership check makes.
     if ($UserId) {
+        if (Test-StubListed -Variable 'SKYCRAFT_STUB_USERIDFAIL' -Name $UserId) { Write-Error "stub lookup failure: Get-MgUser -UserId $UserId"; return }
         return [pscustomobject]@{
             Id                = $UserId
             DisplayName       = $script:DisplayName[$UserId]
@@ -180,6 +186,7 @@ function Get-MgGroupMember {
     [CmdletBinding()]
     param([string]$GroupId, [switch]$All, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name 'Get-MgGroupMember'
+    if (Test-StubListed -Variable 'SKYCRAFT_STUB_MEMBERFAIL' -Name $GroupId) { Write-Error "stub lookup failure: Get-MgGroupMember $GroupId"; return }
     if (Test-StubListed -Variable 'SKYCRAFT_STUB_NOMEMBERS' -Name $GroupId) { return }
     if (Test-StubListed -Variable 'SKYCRAFT_STUB_WRONGMEMBER' -Name $GroupId) { return [pscustomobject]@{ Id = 'someone.else' } }
     [pscustomobject]@{ Id = $script:GroupMember[$GroupId] }
@@ -194,6 +201,8 @@ function Get-MgGroupMember {
             [string[]]$Missing = @(),
             [string[]]$WrongMember = @(),
             [string[]]$NoMembers = @(),
+            [string[]]$MemberFail = @(),
+            [string[]]$UserIdFail = @(),
             [string[]]$Fail = @(),
             [switch]$LookupFail,
             [switch]$NoContext
@@ -206,6 +215,8 @@ function Get-MgGroupMember {
             SKYCRAFT_STUB_MISSING          = $Missing -join ','
             SKYCRAFT_STUB_WRONGMEMBER      = $WrongMember -join ','
             SKYCRAFT_STUB_NOMEMBERS        = $NoMembers -join ','
+            SKYCRAFT_STUB_MEMBERFAIL       = $MemberFail -join ','
+            SKYCRAFT_STUB_USERIDFAIL       = $UserIdFail -join ','
             SKYCRAFT_STUB_FAIL             = $Fail -join ','
             SKYCRAFT_STUB_LOOKUPFAIL       = if ($LookupFail) { '1' } else { '0' }
             SKYCRAFT_STUB_NOCONTEXT        = if ($NoContext) { '1' } else { '0' }
@@ -240,13 +251,17 @@ function Get-MgGroupMember {
     $script:GuestMissing = Invoke-ValidatorScript -Stub $script:Stub -Missing 'guest'
     $script:WrongMember  = Invoke-ValidatorScript -Stub $script:Stub -WrongMember 'SkyCraft-Testers'
     $script:EmptyGroup   = Invoke-ValidatorScript -Stub $script:Stub -NoMembers 'SkyCraft-Admins'
+    $script:GroupMissing = Invoke-ValidatorScript -Stub $script:Stub -Missing 'SkyCraft-Developers'
+    $script:MembersUnreadable = Invoke-ValidatorScript -Stub $script:Stub -MemberFail 'SkyCraft-Admins'
+    $script:MemberUnreadable  = Invoke-ValidatorScript -Stub $script:Stub -UserIdFail 'chromie.timewalker'
     $script:LookupsFail  = Invoke-ValidatorScript -Stub $script:Stub -LookupFail
     $script:SignInFails  = Invoke-ValidatorScript -Stub $script:Stub -NoContext -Fail 'Connect-MgGraph'
     $script:NoContext    = Invoke-ValidatorScript -Stub $script:Stub -NoContext
 
     $script:AllRuns = @(
         $script:AllPass, $script:UserMissing, $script:GuestMissing, $script:WrongMember,
-        $script:EmptyGroup, $script:LookupsFail, $script:SignInFails, $script:NoContext
+        $script:EmptyGroup, $script:GroupMissing, $script:MembersUnreadable, $script:MemberUnreadable,
+        $script:LookupsFail, $script:SignInFails, $script:NoContext
     )
 }
 
@@ -313,15 +328,45 @@ Describe 'Lab 1.1 Test-Lab.ps1 - failures are counted and set the exit code (#24
         $run.Output | Should -Match 'Failed: 1\b'
     }
 
+    It 'fails both checks of a missing group, so the total stays at ten' {
+        $run = $script:GroupMissing
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[FAIL\] Group missing: SkyCraft-Developers'
+        $run.Output | Should -Match '\[FAIL\] Membership of SkyCraft-Developers: group not found'
+        $run.FailLines | Should -Be 2
+        $run.Output | Should -Match 'Passed: 8\b'
+        $run.Output | Should -Match 'Failed: 2\b'
+    }
+
+    It 'reports a member list that cannot be read with the Graph error, as 1 failed check' {
+        $run = $script:MembersUnreadable
+        $run.ExitCode | Should -Be 1 -Because "a refused read must not pass for an empty group; output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[FAIL\] Error checking members of SkyCraft-Admins: [^\r\n]*stub lookup failure: Get-MgGroupMember'
+        $run.Output | Should -Not -Match 'No members found'
+        $run.FailLines | Should -Be 1
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'reports a member that cannot be looked up with the Graph error, as 1 failed check' {
+        $run = $script:MemberUnreadable
+        $run.ExitCode | Should -Be 1 -Because "a refused read must not pass for a missing member; output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[FAIL\] Error checking members of SkyCraft-Testers: [^\r\n]*stub lookup failure: Get-MgUser -UserId chromie\.timewalker'
+        $run.Output | Should -Not -Match 'NOT found in group'
+        $run.FailLines | Should -Be 1
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
     It 'counts every check whose lookup fails with an error, and exits 1 (the reproduction in #241)' {
         $run = $script:LookupsFail
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        # Four users and three groups; a group that cannot be read has no membership to check.
+        # Four users, three groups, and the three memberships of groups that could not be read.
         ([regex]::Matches($run.Output, '\[FAIL\] Error checking user')).Count | Should -Be 4
         ([regex]::Matches($run.Output, '\[FAIL\] Error checking group')).Count | Should -Be 3
+        ([regex]::Matches($run.Output, '\[FAIL\] Membership of [^:]+: group not found')).Count | Should -Be 3
+        $run.FailLines | Should -Be 10
         $run.Output | Should -Match 'Passed: 0\b'
-        $run.Output | Should -Match 'Failed: 7\b'
-        $run.Output | Should -Match 'validation failed: 7 check\(s\) failed'
+        $run.Output | Should -Match 'Failed: 10\b'
+        $run.Output | Should -Match 'validation failed: 10 check\(s\) failed'
         $run.Output | Should -Not -Match 'validation complete|validation passed'
     }
 }

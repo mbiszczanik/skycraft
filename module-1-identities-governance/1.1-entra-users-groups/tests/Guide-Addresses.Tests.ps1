@@ -311,12 +311,12 @@ Describe 'Lab 1.1 addresses - the scripts use the guide''s users and guest (#193
     }
 
     It 'Test-Lab.ps1 runs every check against a tenant whose default domain is a custom one' {
-        # The stub tenant is empty, so every user and group check fails - and since #241 a failed
-        # check is exit 1. What this asserts is that the domain step did not stop the run: no
-        # [ERROR], and all seven lookups counted as failed checks.
+        # The stub tenant is empty, so every user, group and membership check fails - and since
+        # #241 a failed check is exit 1. What this asserts is that the domain step did not stop
+        # the run: no [ERROR], and all ten checks counted as failed.
         $run = $script:Runs['Test-Lab.ps1']
         $run.Output | Should -Not -Match '\[ERROR\]' -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match 'Failed: 7\b'
+        $run.Output | Should -Match 'Failed: 10\b'
         $run.ExitCode | Should -Be 1 -Because "an empty tenant fails validation; output was:`n$($run.Output)"
     }
 }
