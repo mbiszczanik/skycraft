@@ -21,6 +21,9 @@
     nothing at all. Passing a value equal to the script's own default would be four more places to
     keep agreeing about a name, so a phase names only what it actually needs to change:
 
+      1.2  -SkipRoleAssignments
+                         on Test-Lab only. The phase deploys the resource groups and not the
+                         role assignments, so its validator checks only what the phase deployed.
       4.1  -All          deploys dev, prod and platform in one invocation. Its Test-Lab already
                          defaults to -Environment all, so the validator matches without an argument.
       5.1  -OpsEmail     mandatory on that script, and the only argument the orchestrator takes
@@ -107,19 +110,22 @@
             ParamFile    = 'bicep/parameters/resource-groups.bicepparam'
             Deploy       = @{}
             PostDeploy   = $null
-            Test         = @{}
+            Test         = @{ SkipRoleAssignments = $true }
             DependsOn    = @()
             TimeoutMs    = 1200000
             StdinAnswers = $null
             Excluded     = $null
             # The three resource groups every later lab deploys into. Root of the graph.
             #
-            # Its validator also checks role assignments for Entra principals that lab 1.1
-            # creates. That is left live rather than excluded: on a subscription whose identity
-            # can also see Entra ID the checks pass, and baking one tenant's identity split into
-            # the manifest would hide a real failure everywhere else. If those five checks fail on
-            # your subscription, see TROUBLESHOOTING.md - the split is an environment fact, not a
-            # lab defect.
+            # Its validator also checks five role assignments for the Entra principals lab 1.1
+            # creates. The phase does not create them: it deploys without -IncludeRoleAssignments
+            # and the cycle does not run lab 1.1, and this lab's teardown removes the Owner
+            # assignment while the resource-group deletes take the other four. Until #254 the
+            # validator exited 0 whatever it found, so those checks could fail without anyone seeing;
+            # now a failed check is exit 1, and checking them here would fail this phase and skip
+            # every phase after it. -SkipRoleAssignments limits the validator to the resource
+            # groups, which is all this phase deploys - the role checks still run, and still
+            # count, whenever a learner runs Test-Lab.ps1 without it.
         }
         @{
             Id           = '1.3'
