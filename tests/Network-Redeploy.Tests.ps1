@@ -195,6 +195,7 @@ Describe 'Lab 2.1 template - a re-run leaves what later labs set alone' {
         $module.properties.parameters.privateEndpointNetworkPolicies.value | Should -Match 'privateEndpointNetworkPolicies'
         $script:Template21.variables[$variable] | Should -Match ([regex]::Escape("parameters('parExistingSubnets').$vnet"))
         $script:Template21.variables[$variable] | Should -Match '^\[filter\('
+        $script:Template21.variables[$variable] | Should -Match 'toLower\(.*toLower\(' -Because 'Azure subnet names are case-insensitive, so a Portal-made Authsubnet must count as AuthSubnet'
     }
 
     It 'defaults parExistingSubnets to a first deployment' {

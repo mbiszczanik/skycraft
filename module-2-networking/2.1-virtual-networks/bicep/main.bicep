@@ -218,10 +218,11 @@ var varProdSubnets subnetSpecType[] = [
   }
 ]
 
-// The subnets an existing VNet still lacks (see parExistingSubnets).
-var varHubSubnetsToDeploy = filter(varHubSubnets, subnet => !contains(parExistingSubnets.hub, subnet.name))
-var varDevSubnetsToDeploy = filter(varDevSubnets, subnet => !contains(parExistingSubnets.dev, subnet.name))
-var varProdSubnetsToDeploy = filter(varProdSubnets, subnet => !contains(parExistingSubnets.prod, subnet.name))
+// The subnets an existing VNet still lacks (see parExistingSubnets). Azure subnet names are
+// case-insensitive, so 'Authsubnet' made in the Portal counts as AuthSubnet.
+var varHubSubnetsToDeploy = filter(varHubSubnets, subnet => !contains(map(parExistingSubnets.hub, name => toLower(name)), toLower(subnet.name)))
+var varDevSubnetsToDeploy = filter(varDevSubnets, subnet => !contains(map(parExistingSubnets.dev, name => toLower(name)), toLower(subnet.name)))
+var varProdSubnetsToDeploy = filter(varProdSubnets, subnet => !contains(map(parExistingSubnets.prod, name => toLower(name)), toLower(subnet.name)))
 
 // The VNet IDs by name, whether this deployment creates the VNets or they already stand - used as
 // peering targets and outputs. Built with resourceId() rather than 'existing' references, so that

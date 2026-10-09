@@ -43,8 +43,9 @@ param parProdVnetAddressPrefix string = '10.2.0.0/16'
 // with exactly what it declares (issue #188: redeploying the hub after Lab 2.1 removed hub-to-prod).
 // The network module lists every subnet and no peerings, so redeploying the hub or dev VNet after
 // Module 2 would remove hub-to-prod, hub-to-dev and dev-to-hub, and on the dev VNet would also swap
-// the subnet NSGs and drop the service endpoints Lab 2.2 attached. scripts/Deploy-Bicep.ps1 looks each VNet up
-// and sets these flags through the parameter files; a VNet that exists is then only referenced.
+// the subnet NSGs and drop the service endpoints Lab 2.2 attached. scripts/Deploy-Bicep.ps1 looks
+// each VNet up and sets these flags through the parameter files; a VNet that exists is then only
+// referenced.
 @description('True when the hub VNet already exists (set by scripts/Deploy-Bicep.ps1 from a lookup). The hub is then referenced, not redeployed, so its peerings survive.')
 param parHubVnetExists bool = false
 
