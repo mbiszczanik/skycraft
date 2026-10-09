@@ -17,6 +17,8 @@
       Name | Value and Tag | Value tables become tags; the images a step references are collected.
       A list after 'verify:' or after an Expected Result ending in a colon holds checks for the
       Expected Result, not steps (#224; pinned on labs 2.2 and 4.1, rules in test_parse.py).
+      A chain step that is one code span is a resource name among the chain's labels, its index
+      in "resources" (#199; pinned on labs 3.2 and 4.2, rules in test_parse.py).
 
       THE 17 GUIDES - every module-*/X.Y-*/lab-guide-X.Y.md parses, its step ids match its
       headings in order, and no label or value carries markup or comment residue. This does NOT
@@ -694,9 +696,9 @@ Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#
     It 'reads step <id> as <labels> and the list to verify as its Expected Result' -ForEach @(
         @{ lab = '2.2'; id = '2.2.11'; labels = @('Bastions', 'platform-skycraft-swc-bas')
            expected = 'Bastion is operational and ready to provide secure connectivity to VMs in all peered VNets. Status: Succeeded; Virtual network: platform-skycraft-swc-vnet; Subnet: AzureBastionSubnet; Public IP: platform-skycraft-swc-bas-pip' }
-        @{ lab = '4.1'; id = '4.1.8'; labels = @('Security + networking', 'Encryption')
+        @{ lab = '4.1'; id = '4.1.8'; labels = @('prodskycraftswcsa', 'Security + networking', 'Encryption')
            expected = 'Encryption type: Microsoft-managed keys; This is always enabled and cannot be disabled' }
-        @{ lab = '4.1'; id = '4.1.10'; labels = @('Configuration')
+        @{ lab = '4.1'; id = '4.1.10'; labels = @('prodskycraftswcsa', 'Configuration')
            expected = 'Minimum TLS version: 1.2; Secure transfer required: Enabled' }
         @{ lab = '4.1'; id = '4.1.11'; labels = @('Configuration')
            expected = 'Allow Blob anonymous access: Disabled' }
@@ -713,6 +715,41 @@ Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#
             'Name: platformskycraftswcsa; Location: Sweden Central; Replication: Geo-redundant storage (GRS); Access tier: Hot')
         @($step.items | Where-Object { $_.kind -eq 'field' -and $_.label -ceq 'Name' }) | Should -BeNullOrEmpty
         @($step.items)[-1].labels | Should -Be @('Create')
+    }
+}
+
+Describe 'parse.py - labs 3.2 and 4.2, resource names in navigation chains (#199)' {
+    BeforeAll {
+        $script:ChainLabs = @{}
+        foreach ($guide in 'module-3-compute/3.2-virtual-machines/lab-guide-3.2.md',
+                           'module-4-storage/4.2-blob-storage/lab-guide-4.2.md') {
+            $lab = [regex]::Match($guide, 'lab-guide-(\d+\.\d+)\.md$').Groups[1].Value
+            $out = Join-Path $TestDrive "chains-$lab.json"
+            & $script:Python $script:Parser (Join-Path $script:RepoRoot $guide) --out $out --repo-root $script:RepoRoot
+            $script:ChainLabs[$lab] = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+        }
+    }
+
+    It 'reads the chain of step <id> as <labels>, resource names at <resources>' -ForEach @(
+        @{ lab = '3.2'; id = '3.2.13'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Backend pools'); resources = @(1) }
+        @{ lab = '3.2'; id = '3.2.14'; labels = @('Virtual machines', 'dev-skycraft-swc-world-vm'); resources = @(1) }
+        @{ lab = '4.2'; id = '4.2.11'; labels = @('prodskycraftswcsa', 'Containers', 'game-assets'); resources = @(0, 2) }
+    ) {
+        $chains = @(($script:ChainLabs[$lab].steps | Where-Object id -eq $id).items |
+            Where-Object { $_.PSObject.Properties.Name -contains 'resources' })
+        $chains.Count | Should -Be 1
+        $chain = $chains[0]
+        $chain.kind | Should -Be 'navigation'
+        @($chain.labels) | Should -Be $labels
+        @($chain.resources) | Should -Be $resources
+    }
+
+    It 'adds "resources" only to an item that names a resource, so lab 1.1 reads as before' {
+        $guide = Join-Path $script:RepoRoot 'module-1-identities-governance/1.1-entra-users-groups/lab-guide-1.1.md'
+        $out   = Join-Path $TestDrive 'chains-1.1.json'
+        & $script:Python $script:Parser $guide --out $out --repo-root $script:RepoRoot
+        $items = @((Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json).steps | ForEach-Object { $_.items })
+        @($items | Where-Object { $_.PSObject.Properties.Name -contains 'resources' }) | Should -BeNullOrEmpty
     }
 }
 

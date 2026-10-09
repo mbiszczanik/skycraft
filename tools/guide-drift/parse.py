@@ -46,6 +46,19 @@ without a browser. Rules (issue #189):
     A > B) is one 'navigation' item with several labels; otherwise it is an 'action' item.
     '\\*' inside bold is a literal asterisk; a leading '*' (the Portal's required-field marker)
     is dropped from a label.
+  * A step of a chain (the text between two separators, or between a separator and the item's
+    start or end) that is one code span names a resource to open (#199): '**Load balancers** →
+    `dev-skycraft-swc-lb` → **Backend pools**' (3.2.13). It may follow 'Navigate to', 'Go to',
+    'Open' or 'Select' and be followed by a remark in parentheses and a full stop ('`scripts` (or
+    any container).', 4.4.3). The name, backticks stripped, is a label in its place among the
+    bold ones, and the item's '"resources"' lists the indices of such labels; only an item with a
+    resource name carries the key. A chain of two or more steps counts as a navigation
+    ('**Virtual machines** → `dev-skycraft-swc-world-vm`', 3.2.14); a resource name alone is no
+    item. A code span with more in its step is a value or prose, not a resource: 'Name:
+    `common`', 'select the modified `config.txt`', 'Open `skycraft-config` share' (4.3). Nor is
+    one in an item that starts with a plain label ('Destination: **Send to Log Analytics
+    workspace** → `law`', 5.1), whose chain is the label's value. A separator inside a bold or
+    code span ('`10.0.0.0/8 → None`') does not split a step.
   * A list item 'Search for **X**' or 'In Azure Portal, search for **X**', optionally followed
     by where to search ('in the search bar', 'in the Azure Portal search', 'in the portal') and
     a full stop, is one 'search' item with the label X. Its scope is 'global' (the runner types X
@@ -99,9 +112,13 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     are read as fields (#198). An instruction before the colon is dropped ('Select your VM:
     `x`', 'Choose resource group: `x`'), and two values or a chain after a plain label stay
     clicks ('Frequency: **Daily** at **02:00 AM**', 'Destination: **Send to Log Analytics
-    workspace** → `law`').
-  * Code-span steps drop out of navigation chains:
-    '**Virtual Networks** > `vnet` > **Subnets**' (#199).
+    workspace** → `law`'); such a chain names no resource, so 'Flow log type: ... → `vnet` →
+    **Confirm selection**' (5.3.5) does not pick the network.
+  * A code span with more words in its chain step names no resource, though some do: 'Browse to
+    `common/config.txt`' (4.3.6), 'pick the `platform-skycraft-swc-bv` Backup Vault' (5.2.5).
+  * The runner opens a resource name only from what is on screen, so a chain that starts with
+    one ('Navigate to `prodskycraftswcsa` → ...', 4.1-4.2) fails as a missing resource unless the
+    step before it ends on a list that shows it (#199).
   * The first-option rule skips 3.2.1's Portal path, because its Option A is CLI-only (#201).
   * A caption label whose value holds bold spans turns them into actions (4.2:741, #203).
   * Instructions after a field value are lost (5.3:225, #203).
@@ -150,9 +167,16 @@ LIST_FIELD = re.compile(r"^\*\*(?P<label>(?:\\\*|[^*])+?)\*\*\s*:\s*(?P<value>.+
 # letter and holds letters of any script, digits, spaces and '()/&-', never '_' ([^\W_] is a
 # letter or digit). It is greedy, so a line with no colon fails in linear time. A space must
 # follow the colon, so 'https://' never splits there.
-PLAIN_FIELD = re.compile(
-    r"^(?P<label>[^\W\d_](?:[^\W_]|[ ()/&-])*):\s+"
-    r"(?P<span>\*\*(?:\\\*|[^*])+?\*\*|`[^`]+`)(?P<rest>.*)$")
+PLAIN_LABEL = r"(?P<label>[^\W\d_](?:[^\W_]|[ ()/&-])*):\s+"
+PLAIN_FIELD = re.compile("^" + PLAIN_LABEL + r"(?P<span>\*\*(?:\\\*|[^*])+?\*\*|`[^`]+`)(?P<rest>.*)$")
+PLAIN_LABEL_START = re.compile("^" + PLAIN_LABEL)   # 'Destination: ...': a chain after it is a value
+CODE = re.compile(r"`(?P<text>[^`]+)`")
+# A step of a chain that names a resource to open (#199): one code span, after 'Navigate to',
+# 'Go to', 'Open' or 'Select' at most, and before nothing but a remark in parentheses and a full
+# stop. 'select the modified `config.txt`' (4.3.6) and 'Name: `common`' (4.3.4) are not.
+RESOURCE_STEP = re.compile(
+    r"^(?:(?:Navigate|Go)\s+to\s+|Open\s+|Select\s+)?`(?P<name>[^`]+)`\s*(?:\([^()]*\))?\s*\.?$",
+    re.IGNORECASE)
 PLAIN_LABEL_MAX_WORDS = 6      # the longest plain label in the guides has five words
 # A plain label that starts with one of these is an instruction ('Select your VM: `x`'), not a
 # Portal label. 'Type' alone is the Portal's Type field (5.3), while 'Type the VMSS name to
@@ -538,6 +562,24 @@ def plain_field(text: str, number: int) -> dict | None:
     return field_item(label, strip_value_markup(m.group("span")), number)
 
 
+def chain_resources(text: str) -> list[tuple[int, str]]:
+    """(offset, name) of each step of the chain in `text` that is a resource name (#199): a code
+    span on its own (RESOURCE_STEP). A separator inside a bold or code span does not end a step.
+    Nothing for an item that starts with a plain label ('Destination: **X** → `law`'), whose
+    chain is the label's value, not a way to a blade."""
+    if PLAIN_LABEL_START.match(text):
+        return []
+    masked = BOLD.sub(lambda m: "*" * len(m.group(0)), text)
+    masked = CODE.sub(lambda m: "`" + "x" * len(m.group("text")) + "`", masked)
+    bounds = [0] + [at for m in CHAIN.finditer(masked) for at in m.span()] + [len(text)]
+    found = []
+    for start, end in zip(bounds[::2], bounds[1::2]):
+        step = RESOURCE_STEP.match(text[start:end].strip())
+        if step:
+            found.append((text.index("`", start), step.group("name").strip()))
+    return found
+
+
 def list_item(text: str, number: int) -> dict | None:
     """The field, search, navigation or action item for the text of one list item; None for
     none."""
@@ -559,12 +601,22 @@ def list_item(text: str, number: int) -> dict | None:
     field = plain_field(text.strip(), number)
     if field:
         return field
-    labels = [clean_label(unescape(b.group("text"))) for b in BOLD.finditer(text)]
-    labels = [label for label in labels if is_ui_label(label)]
-    if not labels:
+    bold = [(b.start(), clean_label(unescape(b.group("text")))) for b in BOLD.finditer(text)]
+    bold = [(at, label) for at, label in bold if is_ui_label(label)]
+    chain = bool(CHAIN.search(text))
+    # A chain's bold labels and resource names, in the order they appear (#199).
+    steps = sorted([(at, label, False) for at, label in bold]
+                   + [(at, name, True) for at, name in (chain_resources(text) if chain else [])])
+    if chain and len(steps) > 1:
+        item = {"kind": "navigation", "labels": [label for _, label, _ in steps]}
+        resources = [index for index, (_, _, resource) in enumerate(steps) if resource]
+        if resources:
+            item["resources"] = resources
+        item["line"] = number
+        return item
+    if not bold:
         return None
-    kind = "navigation" if CHAIN.search(text) and len(labels) > 1 else "action"
-    return {"kind": kind, "labels": labels, "line": number}
+    return {"kind": "action", "labels": [label for _, label in bold], "line": number}
 
 
 def parse_items(lines: list[tuple[int, str]]) -> tuple[list[dict], list[str]]:

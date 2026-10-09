@@ -100,6 +100,8 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
                     })
                 foreach ($item in @($step.items)) {
                     if ($item.kind -in 'field', 'tag' -and $item.value) { $allValues.Add([string]$item.value) }
+                    # A resource name of a chain takes the placeholders too (#199).
+                    foreach ($index in @($item.resources | Where-Object { $null -ne $_ })) { $allValues.Add([string]@($item.labels)[$index]) }
                 }
             }
         }
@@ -142,7 +144,7 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
             }
             if ($parsed -and $null -ne $recording.placeholders) {
                 foreach ($key in @($recording.placeholders.PSObject.Properties | ForEach-Object { $_.Name })) {
-                    if (-not @($allValues | Where-Object { $_.Contains($key) })) { "placeholder '$key' appears in no field or tag value of the guide" }
+                    if (-not @($allValues | Where-Object { $_.Contains($key) })) { "placeholder '$key' appears in no field value, tag value or resource name of the guide" }
                 }
             }
         )
