@@ -11,7 +11,8 @@
     It never runs in CI (issue #189).
 
     WHAT A RUN DOES. Parses the guide with tools/guide-drift/parse.py (only '### Step' sections,
-    outside code fences, Option 1 where Option headings exist; the fixed list of bold captions
+    outside code fences, and where Option headings exist the first option with a portal part,
+    which steps.json names in the step's "option"; the fixed list of bold captions
     that are not UI elements lives in parse.py), opens Chromium through tools/guide-drift/run.py
     on the Entra ID overview of the tenant of -SubscriptionId (or of -TenantId), waits for you to sign in (until
     the overview shows 'Tenant ID'), refuses to start unless the Portal is in English and the
