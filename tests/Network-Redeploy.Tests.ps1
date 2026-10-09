@@ -38,6 +38,9 @@
       Lab 3.1  leaves an existing dev-skycraft-swc-lb-pip (zones cannot change; one made without
                zones made the deployment fail) and dev-skycraft-swc-lb (Lab 2.3's) alone,
                through SKYCRAFT_DEV_LB_PIP_EXISTS / SKYCRAFT_DEV_LB_EXISTS.
+      AppServiceSubnet  is delegated to Microsoft.Web/serverFarms on every Lab 2.1 path - the
+               template, Deploy-Networking.ps1 and the guide's portal steps - because a re-run
+               no longer touches an existing subnet and so cannot add a missing delegation.
 
     Three layers: the compiled templates (what ARM receives), the deploy scripts' decision
     helpers lifted from their AST, and both deploy scripts run end to end with -WhatIf in a child
@@ -360,6 +363,25 @@ Describe 'Lab 2.1 template - a re-run leaves what later labs set alone' {
         foreach ($output in 'outHubVnetId', 'outDevVnetId', 'outProdVnetId') {
             $script:Template21.outputs[$output].value | Should -Not -Match 'reference\('
         }
+    }
+}
+
+Describe 'AppServiceSubnet delegation - every Lab 2.1 path creates the same subnet' {
+
+    It 'Deploy-Networking.ps1 delegates both AppServiceSubnets to Microsoft.Web/serverFarms' {
+        $text = Get-Content -Raw -LiteralPath (Join-Path $script:Lab21 'scripts/Deploy-Networking.ps1')
+        $text | Should -Match "New-AzDelegation -Name 'Microsoft\.Web/serverFarms' -ServiceName 'Microsoft\.Web/serverFarms'" -Because 'the AVM subnet module names the delegation after its service'
+        $calls = [regex]::Matches($text, "New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet'[^\r\n]*")
+        $calls.Count | Should -Be 2
+        foreach ($call in $calls) { $call.Value | Should -Match '-Delegation \$appServiceDelegation' }
+    }
+
+    It "the guide's portal steps delegate the dev and prod AppServiceSubnet" {
+        $guide = Get-Content -Raw -LiteralPath (Join-Path $script:Lab21 'lab-guide-2.1.md')
+        $dev  = [regex]::Match($guide, '(?s)### Step 2\.1\.6:.*?### Step 2\.1\.7:').Value
+        $prod = [regex]::Match($guide, '(?s)### Step 2\.1\.8:.*?## ').Value
+        $dev  | Should -Match '\| Delegate subnet to a service \| `Microsoft\.Web/serverFarms` \|'
+        $prod | Should -Match '\*\*Delegate subnet to a service\*\* to `Microsoft\.Web/serverFarms`'
     }
 }
 
