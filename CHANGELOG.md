@@ -9,6 +9,13 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0](https://github.com/mbiszczanik/skycraft/compare/v0.12.0...v0.13.0) (2026-10-09)
+
+
+### Features
+
+* **guide-drift:** read Verify and Expected Result lists as checks, not fields ([#247](https://github.com/mbiszczanik/skycraft/issues/247)) ([5378d1c](https://github.com/mbiszczanik/skycraft/commit/5378d1c5e065009e21e895a2de84eafff416da0d))
+
 ## [0.12.0](https://github.com/mbiszczanik/skycraft/compare/v0.11.0...v0.12.0) (2026-10-08)
 
 
