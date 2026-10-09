@@ -38,13 +38,15 @@ has rendered, it is looked for FIND_TIMEOUT_MS again. Only then is the person as
 A resource a navigation chain names in a code span ('**Load balancers** -> `dev-skycraft-swc-lb`
 -> **Backend pools**', parse.py's "resources") is opened as the one visible link, grid cell or row
 of that exact name, once the recording's placeholders are filled; a name with a placeholder left
-is unknown. It is looked for as long as a label; when it is not on screen (a chain may start
-from anywhere: 'Navigate to `prodskycraftswcsa` -> ...'), the name is typed into the Portal's
-global search and the result named exactly so is opened, as for a 'Search for **X**' item.
-The person is never asked about it: when the search has no exact result either, the step fails
-with blocking drift in category 'missing-resource' and no proposed edit, as an earlier step,
-another lab or the view the run is on is at fault, not the guide's name (issue #199). Its
-screenshot is not marked stale for it.
+is unknown. It is looked for as long as a label. When it opens the chain and is not on screen
+(such a chain may start from anywhere: 'Navigate to `prodskycraftswcsa` -> ...'), the name is
+typed into the Portal's global search and the result named exactly so is opened, as for a
+'Search for **X**' item; a search that finds nothing is closed again. Later in a chain it is
+looked for on screen only: the label before it opened the list or picker it is in (an endpoint
+picker in a wizard, a vault's backup items), and a search would leave that. The person is never
+asked about it: when it is not found, the step fails with blocking drift in category
+'missing-resource' and no proposed edit, as an earlier step, another lab or the view the run is
+on is at fault, not the guide's name (issue #199). Its screenshot is not marked stale for it.
 
 When a step does not go through, the person chooses: c, finish it by hand and continue; s, skip
 this step and continue with the next one, giving the reason, which the summary lists under
@@ -772,6 +774,19 @@ def search_results(page: Page, frame: Frame, box: Locator, label: str,
     if ambiguous is not None:
         raise ambiguous
     return None
+
+
+def close_search(page: Page) -> None:
+    """Empty the Portal's global search box and press Escape, so a lookup that found nothing
+    leaves no dropdown open over the next step. Nothing happens when the box is gone, there are
+    several, or it cannot be typed in: the step has failed already."""
+    try:
+        found = search_box(page)
+        if found is not None:
+            found[1].fill("", timeout=FIND_TIMEOUT_MS)
+            found[1].press("Escape", timeout=FIND_TIMEOUT_MS)
+    except (PlaywrightError, Ambiguous):
+        pass
 
 
 def choose_search_box(boxes: list[dict]) -> tuple[int | None, str | None]:
@@ -1557,18 +1572,25 @@ class Runner:
             record.update(outcome="match", observed=note or decision.name)
         return record
 
-    def open_resource(self, step: dict, item: dict, name: str) -> dict:
+    def open_resource(self, step: dict, item: dict, name: str, at_start: bool = False) -> dict:
         """Open the resource `name` that a navigation chain names in a code span (#199): fill the
         recording's placeholders (resource_name), look for it as long as for a label (in_time,
-        then wait_for_blade) with find_resource, and click it. When it is not on screen, the
-        chain may start from anywhere ('Navigate to `prodskycraftswcsa` -> ...'), so the name is
-        typed into the Portal's global search and the result named exactly `name` is opened
-        (search_portal, as for a search item of scope 'global'). Returns the result record:
-        match; unknown for a placeholder left in the name, several matches on screen or in the
-        search, no search box or a failed click; or, when the search has no exact result either,
-        blocking drift in category MISSING_RESOURCE with no proposed edit. The deciders are never
-        asked and nothing is recorded: another element is no stand-in for a resource, and an
-        earlier step or lab that did not create it is no fault of the guide."""
+        then wait_for_blade) with find_resource, and click it.
+
+        `at_start`: the name opens the chain, before any label of the item. Such a chain may
+        start from anywhere ('Navigate to `prodskycraftswcsa` -> ...'), so when the name is not on
+        screen it is typed into the Portal's global search and the result named exactly `name` is
+        opened (search_portal, as for a search item of scope 'global'); a search without one is
+        closed again (close_search). Later in a chain the label before the name set where it is
+        listed (an endpoint picker in a Connection Monitor wizard, 5.3.6; a vault's backup items,
+        5.2.3), and a search would leave that view or open a same-named resource elsewhere, so it
+        is looked for on screen only.
+
+        Returns the result record: match; unknown for a placeholder left in the name, several
+        matches on screen or in the search, no search box or a failed click; or, when it is not
+        found, blocking drift in category MISSING_RESOURCE with no proposed edit. The deciders
+        are never asked and nothing is recorded: another element is no stand-in for a resource,
+        and an earlier step or lab that did not create it is no fault of the guide."""
         record = self.new_record(step, item["kind"], name)
         wanted = resource_name(self.recording, name)
         if wanted is None:
@@ -1583,14 +1605,21 @@ class Runner:
             element = in_time(self.page, look)
             if element is None:
                 element = self.wait_for_blade(step, item, name, look)
-            searched = element is None
+            searched = element is None and at_start
             if searched:
                 print(f"'{name}' is not on screen: looking it up in the Portal's search.")
-                element = search_portal(self.page, wanted, diagnose=lambda tree: self.save_search_tree(step, tree))
+                try:
+                    element = search_portal(self.page, wanted,
+                                            diagnose=lambda tree: self.save_search_tree(step, tree))
+                except Ambiguous:
+                    close_search(self.page)
+                    raise
+                if element is None:
+                    close_search(self.page)
             if element is None:
+                where = ", and no result of that name in the Portal's search" if searched else ""
                 record.update(outcome="drift", severity="blocking", category=MISSING_RESOURCE,
-                              observed=f"no link, cell or row named '{name}' on screen, "
-                                       "and no result of that name in the Portal's search")
+                              observed=f"no link, cell or row named '{name}' on screen{where}")
                 return record
             element.scroll_into_view_if_needed(timeout=FIND_TIMEOUT_MS)
             if stays_disabled(self.page, element):
@@ -1658,7 +1687,8 @@ class Runner:
                 records = []
                 resources = set(item.get("resources", ()))     # indices of resource names (#199)
                 for index, label in enumerate(item["labels"]):
-                    records.append(self.open_resource(step, item, label) if index in resources
+                    records.append(self.open_resource(step, item, label, at_start=(index == 0))
+                                   if index in resources
                                    else self.act_on_label(step, item, label))
                     if records[-1]["outcome"] == "unknown" or records[-1].get("severity") == "blocking":
                         break
@@ -1920,12 +1950,11 @@ class Runner:
     @staticmethod
     def drift_line(record: dict) -> str:
         """A drift record in the summary: what was observed instead of the label, or that the
-        label is gone from the Portal, or for a missing resource (#199) that neither the screen
-        nor the Portal's search had it, which is no fault of the guide."""
+        label is gone from the Portal, or for a missing resource (#199) where it was looked for,
+        which is no fault of the guide."""
         what = f"- step {record['step']} {record['kind']}"
         if record.get("category") == MISSING_RESOURCE:
-            return (f"{what} `{record['label']}`: resource neither on screen nor in the Portal's search "
-                    "(an earlier step or lab, or the view, not the guide)")
+            return f"{what} `{record['label']}`: {record['observed']} (an earlier step or lab, or the view, not the guide)"
         if record["severity"] == "blocking":
             return f"{what} **{record['label']}**: gone from the Portal"
         return f"{what} **{record['label']}**: observed {record['observed']!r}"

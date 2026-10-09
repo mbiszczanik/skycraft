@@ -8,6 +8,7 @@ parser rules are covered by tests/Guide-Drift-Parser.Tests.ps1. Run from the rep
     python -B -m unittest discover -s tools/guide-drift/tests -v
 """
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -205,12 +206,42 @@ class ChainResourceTests(unittest.TestCase):
                 self.assertEqual(self.item(text), {"kind": kind, "labels": labels, "line": 7})
 
     def test_a_separator_inside_a_code_or_bold_span_does_not_split_a_step(self) -> None:
-        self.assertEqual(self.item("Open **Effective routes** → `10.0.0.0/8 → None`"),
-                         self.navigation(["Effective routes", "10.0.0.0/8 → None"], [1]))
+        # Split at the arrow inside the second span, the step would be '`dev-skycraft-swc-lb` (traffic
+        # flows `lb' and name no resource.
+        self.assertEqual(self.item("**Load balancers** → `dev-skycraft-swc-lb` (traffic flows `lb → vm`)"),
+                         self.navigation(["Load balancers", "dev-skycraft-swc-lb"], [1]))
         self.assertEqual(self.item("Check that **Monitoring** shows `10.0.0.0/8 → None`"),
                          {"kind": "action", "labels": ["Monitoring"], "line": 7})
         self.assertEqual(self.item("**Settings > Advanced** → `dev-vm`"),
                          self.navigation(["Settings > Advanced", "dev-vm"], [1]))
+
+    def test_a_name_of_nothing_but_spaces_is_no_resource(self) -> None:
+        for text in ("Open **A** → ` `", "Open **A** → `\t`"):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), {"kind": "action", "labels": ["A"], "line": 7})
+
+    def test_a_label_that_ends_in_a_time_is_not_a_plain_label(self) -> None:
+        # 5.2.3: '02:00:' has no space after its first colon, so PLAIN_LABEL_START does not take
+        # the text before it for a plain label, and the VM stays a resource of the chain. A time
+        # written '2 AM:' would read as one, and the chain would name no resource.
+        self.assertEqual(self.item("Run the first backup now instead of waiting for 02:00: **Protected items** → "
+                                   "**Backup items** → **Azure Virtual Machine** → `dev-skycraft-swc-auth-vm` → "
+                                   "**Backup now** → **OK**."),
+                         self.navigation(["Protected items", "Backup items", "Azure Virtual Machine",
+                                          "dev-skycraft-swc-auth-vm", "Backup now", "OK"], [3]))
+
+    def test_a_long_step_is_read_in_linear_time(self) -> None:
+        # Two '\s*' around an optional group took about 300 s on the first of these (#199).
+        for space in (" ", "\t"):
+            for text in ("**A** → `x`" + space * 100_000 + "`y`",
+                         "**A** → `" + space * 100_000 + "x` junk",
+                         "**A** → `" + "x" * 100_000 + "` junk",
+                         "**A** → `x` (" + "y" * 100_000 + ")" + space * 100_000 + "junk",
+                         "**A** → Navigate" + space * 100_000 + "to" + space * 100_000 + "x"):
+                with self.subTest(space=repr(space), text=text[:12]):
+                    started = time.perf_counter()
+                    self.assertEqual(self.item(text), {"kind": "action", "labels": ["A"], "line": 7})
+                    self.assertLess(time.perf_counter() - started, 2)
 
 
 class LiteralValueTests(unittest.TestCase):

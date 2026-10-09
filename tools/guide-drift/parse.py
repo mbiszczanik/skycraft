@@ -50,9 +50,10 @@ without a browser. Rules (issue #189):
     start or end) that is one code span names a resource to open (#199): '**Load balancers** →
     `dev-skycraft-swc-lb` → **Backend pools**' (3.2.13). It may follow 'Navigate to', 'Go to',
     'Open' or 'Select' and be followed by a remark in parentheses and a full stop ('`scripts` (or
-    any container).', 4.4.3). The name, backticks stripped, is a label in its place among the
-    bold ones, and the item's '"resources"' lists the indices of such labels; only an item with a
-    resource name carries the key. A chain of two or more steps counts as a navigation
+    any container).', 4.4.3), and it must hold more than spaces. The name, backticks stripped,
+    is a label in its place among the bold ones, and the item's '"resources"' lists the indices
+    of such labels; only an item with a resource name carries the key. A chain of two or more
+    steps counts as a navigation
     ('**Virtual machines** → `dev-skycraft-swc-world-vm`', 3.2.14); a resource name alone is no
     item. A code span with more in its step is a value or prose, not a resource: 'Name:
     `common`', 'select the modified `config.txt`', 'Open `skycraft-config` share' (4.3). Nor is
@@ -116,11 +117,13 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     **Confirm selection**' (5.3.5) does not pick the network.
   * A code span with more words in its chain step names no resource, though some do: 'Browse to
     `common/config.txt`' (4.3.6), 'pick the `platform-skycraft-swc-bv` Backup Vault' (5.2.5).
-  * A resource name that is not on screen is looked up in the Portal's global search, which
-    finds Azure resources but not what lives inside one: a blob container ('game-assets',
-    4.2.11; 'public-demo', 4.2.12; 'scripts', 4.4.3) or a file share's folder or file
-    ('common', 'config.txt', 4.3.6). Such a name is reported as a missing resource whenever the
-    step before it did not leave it on screen (#199).
+  * A resource name that opens a chain and is not on screen is looked up in the Portal's global
+    search, which finds Azure resources but not what lives inside one: a blob container
+    ('public-demo', 4.2.12) or a file share ('skycraft-config', 4.3.6). Later in a chain a name
+    is looked for on screen only, where the label before it should have listed it: a container
+    ('game-assets', 4.2.11; 'scripts', 4.4.3) or a file share's folder or file ('common',
+    'config.txt', 4.3.6). Either is reported as a missing resource whenever it is not on screen
+    (#199).
   * 'select `config.txt`' (4.3.6) is read as a resource, so the runner clicks the file's row,
     which may open the file rather than select it.
   * The first-option rule skips 3.2.1's Portal path, because its Option A is CLI-only (#201).
@@ -173,13 +176,19 @@ LIST_FIELD = re.compile(r"^\*\*(?P<label>(?:\\\*|[^*])+?)\*\*\s*:\s*(?P<value>.+
 # follow the colon, so 'https://' never splits there.
 PLAIN_LABEL = r"(?P<label>[^\W\d_](?:[^\W_]|[ ()/&-])*):\s+"
 PLAIN_FIELD = re.compile("^" + PLAIN_LABEL + r"(?P<span>\*\*(?:\\\*|[^*])+?\*\*|`[^`]+`)(?P<rest>.*)$")
-PLAIN_LABEL_START = re.compile("^" + PLAIN_LABEL)   # 'Destination: ...': a chain after it is a value
+# 'Destination: ...': a chain after such a label is its value and names no resource. Only a colon
+# with a space after it ends a label, so 'waiting for 02:00: **Protected items** → ...' (5.2.3)
+# keeps its resource; the same text with '2 AM:' would lose it.
+PLAIN_LABEL_START = re.compile("^" + PLAIN_LABEL)
 CODE = re.compile(r"`(?P<text>[^`]+)`")
 # A step of a chain that names a resource to open (#199): one code span, after 'Navigate to',
 # 'Go to', 'Open' or 'Select' at most, and before nothing but a remark in parentheses and a full
-# stop. 'select the modified `config.txt`' (4.3.6) and 'Name: `common`' (4.3.4) are not.
+# stop. 'select the modified `config.txt`' (4.3.6) and 'Name: `common`' (4.3.4) are not. The name
+# holds a character other than a space. No two quantifiers that can match the same character
+# meet, so a step that fails does so in linear time (two '\s*' around an optional group took 300 s
+# on 100,000 spaces).
 RESOURCE_STEP = re.compile(
-    r"^(?:(?:Navigate|Go)\s+to\s+|Open\s+|Select\s+)?`(?P<name>[^`]+)`\s*(?:\([^()]*\))?\s*\.?$",
+    r"^(?:(?:Navigate|Go)\s+to\s+|Open\s+|Select\s+)?`(?P<name>\s*[^`\s][^`]*)`\s*(?:\([^()]*\)\s*)?\.?$",
     re.IGNORECASE)
 PLAIN_LABEL_MAX_WORDS = 6      # the longest plain label in the guides has five words
 # A plain label that starts with one of these is an instruction ('Select your VM: `x`'), not a

@@ -18,7 +18,7 @@
       A list after 'verify:' or after an Expected Result ending in a colon holds checks for the
       Expected Result, not steps (#224; pinned on labs 2.2 and 4.1, rules in test_parse.py).
       A chain step that is one code span is a resource name among the chain's labels, its index
-      in "resources" (#199; pinned on labs 3.2 and 4.2, rules in test_parse.py).
+      in "resources" (#199; pinned on labs 3.2, 4.2 and 5.2, rules in test_parse.py).
 
       THE 17 GUIDES - every module-*/X.Y-*/lab-guide-X.Y.md parses, its step ids match its
       headings in order, and no label or value carries markup or comment residue. This does NOT
@@ -718,11 +718,12 @@ Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#
     }
 }
 
-Describe 'parse.py - labs 3.2 and 4.2, resource names in navigation chains (#199)' {
+Describe 'parse.py - labs 3.2, 4.2 and 5.2, resource names in navigation chains (#199)' {
     BeforeAll {
         $script:ChainLabs = @{}
         foreach ($guide in 'module-3-compute/3.2-virtual-machines/lab-guide-3.2.md',
-                           'module-4-storage/4.2-blob-storage/lab-guide-4.2.md') {
+                           'module-4-storage/4.2-blob-storage/lab-guide-4.2.md',
+                           'module-5-monitoring-maintenance/5.2-business-continuity/lab-guide-5.2.md') {
             $lab = [regex]::Match($guide, 'lab-guide-(\d+\.\d+)\.md$').Groups[1].Value
             $out = Join-Path $TestDrive "chains-$lab.json"
             & $script:Python $script:Parser (Join-Path $script:RepoRoot $guide) --out $out --repo-root $script:RepoRoot
@@ -734,6 +735,9 @@ Describe 'parse.py - labs 3.2 and 4.2, resource names in navigation chains (#199
         @{ lab = '3.2'; id = '3.2.13'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Backend pools'); resources = @(1) }
         @{ lab = '3.2'; id = '3.2.14'; labels = @('Virtual machines', 'dev-skycraft-swc-world-vm'); resources = @(1) }
         @{ lab = '4.2'; id = '4.2.11'; labels = @('prodskycraftswcsa', 'Containers', 'game-assets'); resources = @(0, 2) }
+        # 'waiting for 02:00: **Protected items** -> ...': no space after the first colon, so the
+        # text before it is no plain label and the chain keeps its resource (PLAIN_LABEL_START).
+        @{ lab = '5.2'; id = '5.2.3'; labels = @('Protected items', 'Backup items', 'Azure Virtual Machine', 'dev-skycraft-swc-auth-vm', 'Backup now', 'OK'); resources = @(3) }
     ) {
         $chains = @(($script:ChainLabs[$lab].steps | Where-Object id -eq $id).items |
             Where-Object { $_.PSObject.Properties.Name -contains 'resources' })
