@@ -228,7 +228,7 @@ Get-AzResourceLock -ResourceGroupName platform-skycraft-swc-rg |
 ### Validate Budgets
 ========================================
 
-### List all budgets (requires the Az.Consumption module)
+### List all budgets (the cmdlet ships in the Az.Billing module)
 
 ```powershell
 Get-AzConsumptionBudget |
