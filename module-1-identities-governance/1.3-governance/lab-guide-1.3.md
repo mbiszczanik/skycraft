@@ -200,7 +200,9 @@ Before starting this lab:
 
 7. Click **Next**
 
-**Remediation tab** (skip for now): 8. Click **Next**
+**Remediation tab** (skip for now):
+
+8. Click **Next**
 
 **Non-compliance messages tab**:
 
