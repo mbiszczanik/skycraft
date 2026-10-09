@@ -22,6 +22,12 @@
     module: docs/powershell-standards.md 7.3 requires every lab folder to stay runnable and
     readable on its own.
 
+    Issue #242 adds two more. Connect-MgGraph can return without an error and without a context
+    (a delegated sign-in for scopes the account never consented to), so Connect-LabGraph - lifted
+    the same way, with the Graph commands replaced by plain functions - must throw on an empty
+    context rather than return it. And the validator must ask only for scopes the setup and
+    cleanup scripts ask for too, so the consent the lab already has covers it.
+
 .EXAMPLE
     Invoke-Pester -Path .\tests\Lab11-Graph-Auth.Tests.ps1
 
@@ -142,6 +148,126 @@ Describe 'Lab 1.1 Graph sign-in - the three scripts share one decision' {
         foreach ($module in $required) {
             $head | Should -Match ([regex]::Escape($module))
         }
+    }
+}
+
+Describe 'Lab 1.1 Graph sign-in - one consent covers all three scripts (#242)' {
+
+    BeforeAll {
+        # The string constants in the -Scope argument of the script's one Connect-LabGraph call.
+        function Get-RequestedScope {
+            param([string]$Name)
+
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:LabRoot $Name), [ref]$null, [ref]$null)
+            $calls = @($ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.CommandAst] -and
+                $node.GetCommandName() -eq 'Connect-LabGraph'
+            }, $true))
+            if ($calls.Count -ne 1) { throw "$Name calls Connect-LabGraph $($calls.Count) times, expected once." }
+
+            $elements = $calls[0].CommandElements
+            for ($i = 0; $i -lt $elements.Count - 1; $i++) {
+                if ($elements[$i] -is [System.Management.Automation.Language.CommandParameterAst] -and
+                    $elements[$i].ParameterName -eq 'Scope') {
+                    return @($elements[$i + 1].FindAll({
+                        $args[0] -is [System.Management.Automation.Language.StringConstantExpressionAst]
+                    }, $true).Value)
+                }
+            }
+            throw "$Name calls Connect-LabGraph without -Scope."
+        }
+
+        $script:SetupScope    = Get-RequestedScope -Name 'New-LabUser.ps1'
+        $script:CleanupScope  = Get-RequestedScope -Name 'Remove-LabResource.ps1'
+        $script:ValidateScope = Get-RequestedScope -Name 'Test-Lab.ps1'
+    }
+
+    It 'Test-Lab.ps1 requests scopes' {
+        $script:ValidateScope | Should -Not -BeNullOrEmpty
+    }
+
+    It 'Test-Lab.ps1 requests only scopes that New-LabUser.ps1 and Remove-LabResource.ps1 request too' {
+        # A scope only the validator asks for is a consent the lab's own setup never gave: in a
+        # tenant where it is missing, Connect-MgGraph returned no context and no prompt (#242).
+        foreach ($scope in $script:ValidateScope) {
+            $script:SetupScope   | Should -Contain $scope -Because "New-LabUser.ps1 must already have consented to $scope"
+            $script:CleanupScope | Should -Contain $scope -Because "Remove-LabResource.ps1 must already have consented to $scope"
+        }
+    }
+}
+
+Describe 'Connect-LabGraph - a sign-in that leaves no Graph context is a failed sign-in (#242)' {
+
+    BeforeAll {
+        # From New-LabUser.ps1, like Get-LabGraphAuthPlan above; the parity test makes it all three.
+        $connectAst = $script:FunctionByScript['New-LabUser.ps1'] |
+            Where-Object { $_.Name -eq 'Connect-LabGraph' }
+        . ([scriptblock]::Create($connectAst.Extent.Text))
+
+        # Plain functions in place of the SDK and of the plan, scoped to this Describe. Get-MgContext
+        # returns $script:ContextBefore until Connect-MgGraph has run, $script:ContextAfter after.
+        function Get-LabGraphAuthPlan { $script:Plan }
+        function Get-MgContext { if ($script:Connected) { $script:ContextAfter } else { $script:ContextBefore } }
+        function Connect-MgGraph { $script:Connected = $true }
+        function Disconnect-MgGraph { }
+
+        $script:InteractivePlan = [pscustomobject]@{
+            Mode             = 'Interactive'
+            Reason           = 'stub interactive plan'
+            TenantId         = $null
+            ConnectParameter = @{ Scopes = $script:Scope; ErrorAction = 'Stop' }
+        }
+        $script:AppOnlyPlan = [pscustomobject]@{
+            Mode             = 'ClientSecret'
+            Reason           = 'stub app-only plan'
+            TenantId         = $script:TenantId
+            ConnectParameter = @{ TenantId = $script:TenantId; ErrorAction = 'Stop' }
+        }
+    }
+
+    BeforeEach {
+        $script:Plan          = $script:InteractivePlan
+        $script:Connected     = $false
+        $script:ContextBefore = $null
+        $script:ContextAfter  = $null
+    }
+
+    It 'throws "sign-in did not complete" when Connect-MgGraph leaves no context' {
+        { Connect-LabGraph -Scope $script:Scope } | Should -Throw '*sign-in did not complete*'
+        $script:Connected | Should -BeTrue -Because 'the empty context must be the one the sign-in left'
+    }
+
+    It 'names the requested scopes in the error, as a hint at missing consent' {
+        { Connect-LabGraph -Scope $script:Scope } | Should -Throw '*consent*User.ReadWrite.All, Group.ReadWrite.All*'
+    }
+
+    It 'throws when the context has <case>' -ForEach @(
+        @{ case = 'no tenant';                   context = @{ TenantId = $null; Account = 'admin@contoso.example'; AppName = $null } }
+        @{ case = 'neither account nor app name'; context = @{ TenantId = '11111111-1111-1111-1111-111111111111'; Account = $null; AppName = $null } }
+    ) {
+        $script:ContextAfter = [pscustomobject]$context
+        { Connect-LabGraph -Scope $script:Scope } | Should -Throw '*sign-in did not complete*'
+    }
+
+    It 'returns the context a delegated sign-in leaves' {
+        $script:ContextAfter = [pscustomobject]@{ TenantId = $script:TenantId; Account = 'admin@contoso.example'; AppName = $null }
+        $context = Connect-LabGraph -Scope $script:Scope
+        $context.Account | Should -Be 'admin@contoso.example'
+    }
+
+    It 'returns the context an app-only sign-in leaves, which has an app name and no account' {
+        $script:Plan = $script:AppOnlyPlan
+        $script:ContextAfter = [pscustomobject]@{ TenantId = $script:TenantId; Account = $null; AppName = 'SkyCraft-Lab-Automation' }
+        $context = Connect-LabGraph -Scope $script:Scope
+        $context.AppName | Should -Be 'SkyCraft-Lab-Automation'
+    }
+
+    It 'still reuses a signed-in context without calling Connect-MgGraph' {
+        $script:ContextBefore = [pscustomobject]@{ TenantId = $script:TenantId; Account = 'admin@contoso.example'; AppName = $null }
+        $context = Connect-LabGraph -Scope $script:Scope
+        $context.Account     | Should -Be 'admin@contoso.example'
+        $script:Connected    | Should -BeFalse
     }
 }
 

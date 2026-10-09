@@ -254,7 +254,16 @@ function Connect-LabGraph {
     $connectParameter = $plan.ConnectParameter
     Connect-MgGraph @connectParameter
 
-    return Get-MgContext
+    # Connect-MgGraph can return with no error and no context at all - a delegated sign-in for
+    # scopes the account has never consented to does exactly that, with no consent prompt (issue
+    # #242). Returning that empty context printed "Connected to Tenant:  as", and every Graph call
+    # after it failed with "Authentication needed". An empty context is a failed sign-in.
+    $context = Get-MgContext
+    if (-not $context -or -not $context.TenantId -or -not ($context.Account -or $context.AppName)) {
+        throw "Microsoft Graph sign-in did not complete: Connect-MgGraph returned without an error but left no signed-in account or tenant. The usual cause is missing consent for the permissions this script requests ($($Scope -join ', ')), or for the app registration's application permissions when signing in app-only. See TROUBLESHOOTING.md."
+    }
+
+    return $context
 }
 
 $ErrorActionPreference = 'Stop'

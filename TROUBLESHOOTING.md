@@ -28,6 +28,17 @@ This guide addresses common issues encountered while setting up or running the S
 1.  Ensure you have the **User Administrator** or **Global Administrator** role in Entra ID.
 2.  Ensure you have granted consent to the Microsoft Graph PowerShell application.
 
+### Lab 1.1: "Microsoft Graph sign-in did not complete"
+
+**Symptoms**: `New-LabUser.ps1`, `Test-Lab.ps1` or `Remove-LabResource.ps1` in Lab 1.1 stop right after "Checking Microsoft Graph connection..." with `[ERROR] Failed to connect to Microsoft Graph: Microsoft Graph sign-in did not complete ...` and exit 1. No sign-in or consent prompt appeared.
+
+**Cause**: `Connect-MgGraph` returned without an error but also without a signed-in context. A delegated sign-in for scopes the account has never consented to can do exactly that. Before the scripts checked for it, they printed `Connected to Tenant:  as` with empty values and every Graph call after it failed with "Authentication needed" (issue #242).
+
+**Solution**:
+
+1.  Interactive sign-in: all three scripts request `User.ReadWrite.All`, `Group.ReadWrite.All` and `Directory.ReadWrite.All` (`New-LabUser.ps1` adds `Domain.Read.All` and `User.Invite.All`), so one consent covers the whole lab. Grant it by running `New-LabUser.ps1` first and accepting the consent prompt. Where the tenant requires admin consent, a Global Administrator signs in once with `Connect-MgGraph -Scopes` and the same scopes, and ticks **Consent on behalf of your organization** in the prompt.
+2.  App-only sign-in (`SKYCRAFT_GRAPH_*` set): check that the app registration holds the application permissions listed in [Creating the Lab 1.1 service principal](#creating-the-lab-11-service-principal) and that admin consent was granted for them.
+
 ### Lab 1.1 hangs at "Checking Microsoft Graph connection..."
 
 **Symptoms**: `New-LabUser.ps1`, `Test-Lab.ps1` or `Remove-LabResource.ps1` in Lab 1.1 print the connection banner and then sit there. Nothing times out, nothing fails; run under `tools/Invoke-LabCycle.ps1` the phase is eventually killed at its limit and reported `Failed(Timeout)`.
