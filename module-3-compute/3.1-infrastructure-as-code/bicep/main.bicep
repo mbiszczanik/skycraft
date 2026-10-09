@@ -54,13 +54,14 @@ param parDevVnetExists bool = false
 
 // Zones and SKU are fixed when a public IP is created, so redeploying the zone-redundant
 // declaration over a public IP made without zones (Deploy-Networking.ps1, the portal) fails. The
-// load balancer is the one Lab 2.3 builds with its own frontend, pools and rules; redeploying this
-// lab's declaration over it would replace them (issue #263). scripts/Deploy-Bicep.ps1 looks both
+// load balancer is the one Lab 2.3 builds, and a load balancer deployment replaces the whole
+// resource with what it declares, so redeploying this lab's declaration over it would overwrite
+// what Lab 2.3 set (issue #263). scripts/Deploy-Bicep.ps1 looks both
 // up and sets these flags through the parameter files; one that exists is then left untouched.
 @description('True when the dev load balancer public IP already exists (set by scripts/Deploy-Bicep.ps1 from a lookup). It is then left untouched.')
 param parDevLbPipExists bool = false
 
-@description('True when the dev load balancer already exists (set by scripts/Deploy-Bicep.ps1 from a lookup). It is then left untouched, so the frontend, pools and rules Lab 2.3 gave it survive.')
+@description('True when the dev load balancer already exists (set by scripts/Deploy-Bicep.ps1 from a lookup). It is then left untouched, so what Lab 2.3 set on it survives.')
 param parDevLbExists bool = false
 
 /*******************

@@ -160,7 +160,7 @@ Describe 'Lab 3.1 template - an existing VNet is referenced, not redeployed' {
         @{ name = 'devLoadBalancerDeployment'; flag = 'parDevLbExists' }
     ) {
         # #263: zones are fixed on a public IP, so a non-zonal one rejects the declaration, and the
-        # load balancer Lab 2.3 builds has its own frontend, pools and rules.
+        # load balancer is the one Lab 2.3 builds, which a redeploy would overwrite.
         $module = Get-TemplateResource -Template $script:Template31 -Name $name
         $module | Should -Not -BeNullOrEmpty
         $module.condition | Should -Be "[not(parameters('$flag'))]"

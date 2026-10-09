@@ -18,9 +18,9 @@
     The dev load balancer public IP (dev-skycraft-swc-lb-pip) and the dev load balancer
     (dev-skycraft-swc-lb) are looked up the same way and left untouched when they exist (issue
     #263): zones cannot change after a public IP is created, so one made without zones (by Lab
-    2.1's Deploy-Networking.ps1 or in the portal) would make the deployment fail, and the load
-    balancer Lab 2.3 builds has its own frontend, pools and rules that this lab's declaration
-    would replace.
+    2.1's Deploy-Networking.ps1 or in the portal) would make the deployment fail, and redeploying
+    this lab's declaration over the load balancer Lab 2.3 builds would replace what Lab 2.3 set
+    on it.
 
     The lookup results reach the parameter files through SKYCRAFT_HUB_VNET_EXISTS,
     SKYCRAFT_DEV_VNET_EXISTS, SKYCRAFT_DEV_LB_PIP_EXISTS and SKYCRAFT_DEV_LB_EXISTS, which the
@@ -133,7 +133,7 @@ $existenceFlags = [ordered]@{
     SKYCRAFT_HUB_VNET_EXISTS   = @{ Cmdlet = 'Get-AzVirtualNetwork'; ResourceGroup = 'platform-skycraft-swc-rg'; Name = 'platform-skycraft-swc-vnet'; Kept = 'referenced, not redeployed (its peerings stay)' }
     SKYCRAFT_DEV_VNET_EXISTS   = @{ Cmdlet = 'Get-AzVirtualNetwork'; ResourceGroup = 'dev-skycraft-swc-rg'; Name = 'dev-skycraft-swc-vnet'; Kept = 'referenced, not redeployed (its peerings stay)' }
     SKYCRAFT_DEV_LB_PIP_EXISTS = @{ Cmdlet = 'Get-AzPublicIpAddress'; ResourceGroup = 'dev-skycraft-swc-rg'; Name = 'dev-skycraft-swc-lb-pip'; Kept = 'left untouched (zones cannot change)' }
-    SKYCRAFT_DEV_LB_EXISTS     = @{ Cmdlet = 'Get-AzLoadBalancer'; ResourceGroup = 'dev-skycraft-swc-rg'; Name = 'dev-skycraft-swc-lb'; Kept = 'left untouched (its frontend, pools and rules stay)' }
+    SKYCRAFT_DEV_LB_EXISTS     = @{ Cmdlet = 'Get-AzLoadBalancer'; ResourceGroup = 'dev-skycraft-swc-rg'; Name = 'dev-skycraft-swc-lb'; Kept = 'left untouched (what Lab 2.3 set on it stays)' }
 }
 
 try {
