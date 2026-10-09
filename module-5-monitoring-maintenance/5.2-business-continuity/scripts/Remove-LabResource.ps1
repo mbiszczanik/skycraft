@@ -35,8 +35,14 @@
     reported as [ERROR] and counted the same way (issue #238, as #227 did for Lab 1.1). Only a
     lookup that succeeds and finds nothing, or a getter that reports the resource as not found,
     means "absent" - Test-LabNotFoundError tells the two apart. A resource whose dependants could
-    not be looked up stays where it is: the snapshot resource group survives a VM backup item
-    lookup that failed, and an AzureBackupRG_* group survives a failed check that it is empty.
+    not be looked up stays where it is:
+    - the snapshot resource group and SkyCraft's restore point collections in AzureBackupRG_*
+      survive a Recovery Services Vault or VM backup item lookup that failed, as they survive a
+      VM whose protection could not be stopped;
+    - the Backup Vault survives a blob backup instance, storage account or role assignment
+      lookup that failed, and a role assignment it could not remove, so its identity is still
+      there for a rerun to remove the assignments with;
+    - an AzureBackupRG_* group survives a failed check that it is empty.
 
     Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
     "pwsh -File" for any script that declares #Requires -Modules for a module it has to
@@ -91,6 +97,11 @@ $script:cleanupFailures = 0
 # Set when a VM backup item could not be stopped, or the vault or its backup items could not be
 # looked up; the snapshot group must then survive (step 6).
 $script:protectionStillOn = $false
+# Set when the vault's blob backup instances or its role assignments on the storage account could
+# not be looked up, or a role assignment could not be removed; the Backup Vault must then survive
+# (step 3). Deleting it takes its identity along, and an assignment left on the storage account
+# would be orphaned for good: a rerun finds no vault and exits 0.
+$script:backupVaultMustStay = $false
 
 # Roles granted to the Backup Vault identity by New-LabBlobBackup.ps1 (must be revoked here)
 $backupRoles = @(
@@ -129,7 +140,8 @@ function Test-LabNotFoundError {
         foreach ($code in @($exception.Body.Code, $exception.Body.Error.Code, $exception.ErrorCode)) {
             if ($code) { $evidence.Add([string]$code) }
         }
-        foreach ($status in @($exception.Response.StatusCode, $exception.Status)) {
+        # ResponseStatusCode: the generated cmdlets' RestException, which may carry no error body.
+        foreach ($status in @($exception.Response.StatusCode, $exception.ResponseStatusCode, $exception.Status)) {
             if ("$status" -in @('404', 'NotFound')) { $status404 = $true }
         }
     }
@@ -213,6 +225,7 @@ if ($bvExists) {
     $instanceLookup = Invoke-LabLookup -Target "the blob backup instances in $bvName" -Lookup {
         Get-AzDataProtectionBackupInstance -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction Stop
     }
+    if ($instanceLookup.Failed) { $script:backupVaultMustStay = $true }
     foreach ($inst in $instanceLookup.Value) {
         $resourcesToDelete.Add(@{ Type = 'BlobInstance'; Name = $inst.Name })
         Write-Host "  - Blob Backup Instance: $($inst.Name)" -ForegroundColor Gray
@@ -224,6 +237,8 @@ if ($bvExists) {
     $storageLookup = Invoke-LabLookup -Target "storage account $storageAccount" -Lookup {
         Get-AzStorageAccount -ResourceGroupName $prodRg -Name $storageAccount -ErrorAction Stop
     }
+    # Without the storage account the role assignments cannot be planned, so the vault stays.
+    if ($storageLookup.Failed) { $script:backupVaultMustStay = $true }
     $storage = $storageLookup.Value | Select-Object -First 1
     if ($bvPrincipalId -and $storage) {
         foreach ($role in $backupRoles) {
@@ -370,7 +385,10 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RoleAssignment' 
     $assignmentLookup = Invoke-LabLookup -Target "role assignment '$($r.Name)' on $storageAccount" -Lookup {
         Get-AzRoleAssignment -ObjectId $r.PrincipalId -RoleDefinitionId $r.RoleId -Scope $r.Scope -ErrorAction Stop
     }
-    if ($assignmentLookup.Failed) { continue }
+    if ($assignmentLookup.Failed) {
+        $script:backupVaultMustStay = $true
+        continue
+    }
     try {
         if ($assignmentLookup.Value.Count -gt 0) {
             Remove-AzRoleAssignment -ObjectId $r.PrincipalId -RoleDefinitionId $r.RoleId -Scope $r.Scope -ErrorAction Stop | Out-Null
@@ -380,12 +398,19 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RoleAssignment' 
         }
     } catch {
         $script:cleanupFailures++
+        $script:backupVaultMustStay = $true
         Write-Host "  [ERROR] Could not remove role assignment '$($r.Name)': $_" -ForegroundColor Red
     }
 }
 
-# 3. Delete Backup Vault
+# 3. Delete Backup Vault. While its blob backup instances or its role assignments could not be
+#    checked or removed, the vault stays: its identity is what a rerun needs to find and remove
+#    the assignments, and the [ERROR] above already makes this run exit 1.
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BackupVault' }) {
+    if ($script:backupVaultMustStay) {
+        Write-Host "  [INFO] $($r.Name) left in place - its backup instances or role assignments could not be checked or removed (see the [ERROR] above)." -ForegroundColor Gray
+        continue
+    }
     if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete backup vault')) { continue }
     Write-Host "  Deleting Backup Vault: $($r.Name)..." -ForegroundColor Gray
     try {
@@ -459,8 +484,14 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'SnapshotResource
 }
 
 # 7. Delete the orphaned Azure Backup restore point collections and, once they are gone, the
-#    AzureBackupRG_<location>_* groups that held them.
+#    AzureBackupRG_<location>_* groups that held them. The step 6 rule applies: while a VM may
+#    still be protected, its collection is live, so it stays - and so does the group, whose
+#    re-check below then finds it.
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RestorePointCollection' }) {
+    if ($script:protectionStillOn) {
+        Write-Host "  [INFO] $($r.Name) left in place - a VM may still be protected (see the [ERROR] above)." -ForegroundColor Gray
+        continue
+    }
     if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete orphaned restore point collection')) { continue }
     Write-Host "  Deleting restore point collection: $($r.Name)..." -ForegroundColor Gray
     try {

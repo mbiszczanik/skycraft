@@ -25,7 +25,9 @@
       6. The SkyCraft-owned snapshot resource group (issue #184) is deleted as a whole, and a
          failure to delete it is counted.
       7. A lookup that fails with an error is an [ERROR], counted like a failed deletion, so the
-         run exits 1, and what depends on it stays in place (issue #238). A lookup that finds
+         run exits 1, and what depends on it stays in place (issue #238): the snapshot group and
+         the restore point collections while a VM may still be protected, the Backup Vault while
+         its role assignments could not be checked or removed. A lookup that finds
          nothing, or a getter that reports the resource as not found, means "absent". The stub
          reports a failed lookup with Write-Error, as the Az getters do, so a script that passes
          -ErrorAction SilentlyContinue swallows it - the defect #238 describes. Which errors
@@ -345,7 +347,6 @@ function Remove-AzResourceGroup {
         'Get-AzDataProtectionBackupInstance=throttled'
         'Get-AzStorageAccount=denied'
         'Get-AzRecoveryServicesBackupItem=denied'
-        'Get-AzResource:recheck=denied'
     )
     $script:ListingDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
         'Get-AzResource:inventory=denied'
@@ -362,6 +363,9 @@ function Remove-AzResourceGroup {
     )
     $script:RoleNotFound = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzRoleAssignment=notfound'
     $script:VaultDenied  = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzRecoveryServicesVault=denied'
+    $script:RecheckDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzResource:recheck=denied'
+    $script:StorageDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzStorageAccount=denied'
+    $script:RoleStuck     = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzRoleAssignment'
 }
 
 AfterAll {
@@ -376,7 +380,8 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - test harness' {
         # session, not a scenario-specific failure.
         foreach ($run in @($script:Clean, $script:Nothing, $script:VaultStuck, $script:TwoStuck, $script:FirstStuck, $script:StaleModule, $script:NoFriendly, $script:SnapshotRgStuck, $script:StillProtected,
                 $script:TopLevelDenied, $script:DependantsFailed, $script:ListingDenied, $script:NotFound,
-                $script:DependantsNotFound, $script:RoleNotFound, $script:VaultDenied)) {
+                $script:DependantsNotFound, $script:RoleNotFound, $script:VaultDenied, $script:RecheckDenied,
+                $script:StorageDenied, $script:RoleStuck)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az cmdlets (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -524,16 +529,40 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - a failed lookup is not "absent" (#238
         $script:TopLevelDenied.Output | Should -Match '\[ERROR\] Could not look up Recovery Services Vault [^\r\n]*requests exceeded the limit'
     }
 
-    It 'counts every failed lookup of a dependant, and still deletes both vaults' {
+    It 'counts every failed lookup of a dependant' {
         $run = $script:DependantsFailed
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match '\[ERROR\] Could not look up the blob backup instances in platform-skycraft-swc-bv'
         $run.Output | Should -Match '\[ERROR\] Could not look up storage account prodskycraftswcsa'
         $run.Output | Should -Match '\[ERROR\] Could not look up the VM backup items in platform-skycraft-swc-rsv'
-        $run.Output | Should -Match '\[ERROR\] Could not look up the resources left in AzureBackupRG_swedencentral_1'
-        $run.Output | Should -Match 'Cleanup finished with 4 failure\(s\)'
+        $run.Output | Should -Match 'Cleanup finished with 3 failure\(s\)'
         $run.Calls  | Should -Not -Contain 'Remove-AzRoleAssignment'
-        $run.Calls  | Should -Contain 'Remove-AzDataProtectionBackupVault'
+        $run.Calls  | Should -Contain 'Remove-AzRecoveryServicesVault'
+    }
+
+    It 'keeps the Backup Vault when its backup instances or the storage account cannot be looked up' {
+        # Deleting the vault takes its identity along, and the role assignments on the storage
+        # account would be orphaned for good: a rerun finds no vault and exits 0.
+        $script:DependantsFailed.Calls  | Should -Not -Contain 'Remove-AzDataProtectionBackupVault'
+        $script:DependantsFailed.Output | Should -Match 'platform-skycraft-swc-bv left in place - its backup instances or role assignments could not be checked'
+        $script:StorageDenied.ExitCode  | Should -Be 1 -Because "output was:`n$($script:StorageDenied.Output)"
+        $script:StorageDenied.Output    | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $script:StorageDenied.Calls     | Should -Not -Contain 'Remove-AzDataProtectionBackupVault'
+        $script:StorageDenied.Output    | Should -Match 'platform-skycraft-swc-bv left in place'
+    }
+
+    It 'keeps the Backup Vault when a role assignment cannot be looked up' {
+        $script:ListingDenied.Calls  | Should -Not -Contain 'Remove-AzDataProtectionBackupVault'
+        $script:ListingDenied.Output | Should -Match 'platform-skycraft-swc-bv left in place'
+    }
+
+    It 'keeps the Backup Vault when a role assignment cannot be removed' {
+        $run = $script:RoleStuck
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        ([regex]::Matches($run.Output, "\[ERROR\] Could not remove role assignment")).Count | Should -Be 2
+        $run.Output | Should -Match 'Cleanup finished with 2 failure\(s\)'
+        $run.Calls  | Should -Not -Contain 'Remove-AzDataProtectionBackupVault'
+        $run.Output | Should -Match 'platform-skycraft-swc-bv left in place'
         $run.Calls  | Should -Contain 'Remove-AzRecoveryServicesVault'
     }
 
@@ -541,6 +570,15 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - a failed lookup is not "absent" (#238
         # A VM that may still be protected is the case #184 keeps the group for.
         $script:DependantsFailed.Calls  | Should -Not -Contain 'Remove-AzResourceGroup:platform-skycraft-swc-rpc1-rg'
         $script:DependantsFailed.Output | Should -Match 'platform-skycraft-swc-rpc1-rg left in place - a VM may still be protected'
+    }
+
+    It 'keeps the restore point collection, and so its AzureBackupRG_* group, while a VM may still be protected' {
+        foreach ($run in @($script:DependantsFailed, $script:VaultDenied, $script:StillProtected)) {
+            $run.Calls  | Should -Not -Contain 'Remove-AzResource'
+            $run.Calls  | Should -Not -Contain 'Remove-AzResourceGroup:AzureBackupRG_swedencentral_1'
+            $run.Output | Should -Match 'AzureBackup_dev-skycraft-swc-auth-vm_7702140526018345310 left in place - a VM may still be protected'
+            $run.Output | Should -Match 'AzureBackupRG_swedencentral_1 still holds 1 resource\(s\) - left in place'
+        }
     }
 
     It 'keeps the snapshot group when the Recovery Services Vault cannot be looked up' {
@@ -557,9 +595,13 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - a failed lookup is not "absent" (#238
     It 'does not delete an AzureBackupRG_* group it could not check for other resources' {
         # The defect at its worst: a failed re-check read as "empty", and the shared group was
         # deleted with whatever it still held.
-        $script:DependantsFailed.Calls  | Should -Contain 'Remove-AzResource'
-        $script:DependantsFailed.Calls  | Should -Not -Contain 'Remove-AzResourceGroup:AzureBackupRG_swedencentral_1'
-        $script:DependantsFailed.Output | Should -Match 'AzureBackupRG_swedencentral_1 left in place - it could not be checked'
+        $run = $script:RecheckDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Could not look up the resources left in AzureBackupRG_swedencentral_1'
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls  | Should -Contain 'Remove-AzResource'
+        $run.Calls  | Should -Not -Contain 'Remove-AzResourceGroup:AzureBackupRG_swedencentral_1'
+        $run.Output | Should -Match 'AzureBackupRG_swedencentral_1 left in place - it could not be checked'
     }
 
     It 'leaves an AzureBackupRG_* group alone when its contents cannot be listed' {
@@ -636,6 +678,7 @@ public class SkyCraftStubAzureException : System.Exception
     public object Body { get; set; }
     public object Response { get; set; }
     public int Status { get; set; }
+    public object ResponseStatusCode { get; set; }
 }
 '@
         }
@@ -647,14 +690,25 @@ public class SkyCraftStubAzureException : System.Exception
                 [string]$Code,
                 [object]$StatusCode,
                 [int]$Status,
+                [object]$ResponseStatusCode,
                 [switch]$Wrapped
             )
             $exception = [SkyCraftStubAzureException]::new($Message)
             if ($Code) { $exception.Body = [pscustomobject]@{ Code = $Code } }
             if ($null -ne $StatusCode) { $exception.Response = [pscustomobject]@{ StatusCode = $StatusCode } }
             if ($Status) { $exception.Status = $Status }
+            if ($null -ne $ResponseStatusCode) { $exception.ResponseStatusCode = $ResponseStatusCode }
             if ($Wrapped) { $exception = [System.Exception]::new('The lookup failed.', $exception) }
             [System.Management.Automation.ErrorRecord]::new($exception, $ErrorId, 'InvalidOperation', $null)
+        }
+
+        # What -ErrorAction Stop leaves of an error a generated cmdlet wrote without a usable error
+        # id: ActionPreferenceStopException, its message the original one behind a fixed prefix.
+        function Get-StopWrappedErrorFixture {
+            param([string]$Message)
+            $exception = [System.Management.Automation.ActionPreferenceStopException]::new(
+                'The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: ' + $Message)
+            [System.Management.Automation.ErrorRecord]::new($exception, '', 'OperationStopped', $null)
         }
     }
 
@@ -676,6 +730,10 @@ public class SkyCraftStubAzureException : System.Exception
            Record = { Get-LookupErrorFixture -Code 'ResourceNotFound' } }
         @{ Shape  = 'a 404 HTTP status on the response'
            Record = { Get-LookupErrorFixture -StatusCode ([System.Net.HttpStatusCode]::NotFound) } }
+        @{ Shape  = 'a 404 on a generated cmdlet RestException with no error body (ResponseStatusCode)'
+           Record = { Get-LookupErrorFixture -ResponseStatusCode ([System.Net.HttpStatusCode]::NotFound) } }
+        @{ Shape  = 'the -ErrorAction Stop wrapping of a generated cmdlet around a not-found, with no error id'
+           Record = { Get-StopWrappedErrorFixture -Message "The Resource 'Microsoft.DataProtection/backupVaults/platform-skycraft-swc-bv' under resource group 'platform-skycraft-swc-rg' was not found. For more details please go to https://aka.ms/ARMResourceNotFoundFix" } }
         @{ Shape  = 'an Azure.Core 404 status'
            Record = { Get-LookupErrorFixture -Status 404 } }
         @{ Shape  = 'the Azure.Core message (Status 404 Not Found)'
@@ -691,6 +749,10 @@ public class SkyCraftStubAzureException : System.Exception
            Record = { Get-LookupErrorFixture -ErrorId 'AuthorizationFailed' -Code 'AuthorizationFailed' -StatusCode ([System.Net.HttpStatusCode]::Forbidden) -Message "The client 'stub' does not have authorization to perform action 'Microsoft.RecoveryServices/vaults/read' over scope '/subscriptions/0' or the scope is invalid." } }
         @{ Shape  = 'a 429 throttling response'
            Record = { Get-LookupErrorFixture -ErrorId 'TooManyRequests' -Status 429 -Message "Number of 'read' requests for subscription '0' actor 'stub' exceeded. Please try again after '17' seconds." } }
+        @{ Shape  = 'a 403 on a generated cmdlet RestException (ResponseStatusCode)'
+           Record = { Get-LookupErrorFixture -ResponseStatusCode ([System.Net.HttpStatusCode]::Forbidden) } }
+        @{ Shape  = 'the -ErrorAction Stop wrapping of a generated cmdlet around a 403, with no error id'
+           Record = { Get-StopWrappedErrorFixture -Message "The client 'stub' with object id '0' does not have authorization to perform action 'Microsoft.DataProtection/backupVaults/read' over scope '/subscriptions/0' or the scope is invalid." } }
         @{ Shape  = 'a transient transport error'
            Record = { Get-LookupErrorFixture -Message 'An error occurred while sending the request.' } }
         @{ Shape  = 'a missing subscription, although ARM answers it with 404'
