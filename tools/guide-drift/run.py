@@ -64,9 +64,15 @@ A step whose recording entry carries '"skip": "<reason>"' (an optional or concep
 would create resources, or the other option of a lettered pair; issue #200) is never performed:
 the Portal is not touched for it, no screenshot is taken, and the summary lists it under
 'skipped' with that reason. It counts as completed, so a resume passes over it, and later steps
-run as usual. The skip wins over everything else the entry records: its decisions, value
+run as usual. The step after it therefore starts on the view the step before the skip ended on,
+without the blade the skipped step would have opened or the resources it would have created, and
+fails if it needed them: skip only a step whose blade and resources no later step needs, or skip
+those later steps too. The skip wins over everything else the entry records: its decisions, value
 overrides and result are kept, for the day the skip is removed, but not read. The reason must
-be a non-empty string (recording.skip_reason); the run refuses to start otherwise.
+be a non-empty string (recording.skip_reason); the run refuses to start otherwise. A step that
+was in flight when a run stopped and is skipped in the recording since (it failed, the person
+answered q and added the skip) is not asked about on -Resume: its stopped attempt's findings are
+dropped, as a redone step's are, and it is skipped like any other.
 
 Exit code: blocking drifts plus unknowns, capped at 250, when the run ends normally; 254 when a
 precondition, a guard or the state stopped it before the first step; 255 when it stopped mid-run
@@ -1819,6 +1825,15 @@ class Runner:
             return NOT_STARTED
         print(f"Run folder: {self.run_dir}")
         first = portal[start]
+        if in_flight and skip_reason(self.recording, first["id"]) is not None:
+            # Skipped in the recording since the run stopped (#200): whether it finished does not
+            # matter any more. Its stopped attempt is dropped, as a redo's is (results.jsonl keeps
+            # it), and the loop below writes the recorded skip; the person is asked for the view
+            # the first step that runs needs, as on any other resume.
+            print(f"\nStep {first['id']} ({first['title']}) was in progress when the last run stopped; "
+                  f"the recording now skips it.")
+            self.records = [r for r in self.records if r["step"] != first["id"]]
+            in_flight = False
         if in_flight:
             print(f"\nStep {first['id']} ({first['title']}) was in progress when the last run stopped.\n"
                   f"The step before it ended on this view:\n  {self.view_before(portal, start)}\n"
@@ -1835,11 +1850,20 @@ class Runner:
                     self.skip_step(first, first["id"])
                 self.save_state(completed, None)
         elif start > 0 or self.args.resume:
-            print(f"\nStarting at step {first['id']} ({first['title']}). Bring the Portal to the view "
-                  f"the step before it ended on, then press Enter:\n  {self.view_before(portal, start)}")
-            if self.prompt("> ") is None:
-                print("No answer (input closed); nothing was run.")
-                return NOT_STARTED
+            # The first step that will run: steps the recording skips are passed over (#200), and
+            # when every step left is skipped there is no view to bring the Portal to.
+            runs = next((i for i in range(start, len(portal)) if portal[i]["id"] not in completed
+                         and skip_reason(self.recording, portal[i]["id"]) is None), None)
+            if runs is not None:
+                passed = ("" if runs == start else f" (the recording skips step {first['id']})"
+                          if runs == start + 1 else
+                          f" (the recording skips steps {first['id']} to {portal[runs - 1]['id']})")
+                print(f"\nStarting at step {portal[runs]['id']} ({portal[runs]['title']}){passed}. Bring "
+                      f"the Portal to the view the step before it ended on, then press Enter:\n"
+                      f"  {self.view_before(portal, runs)}")
+                if self.prompt("> ") is None:
+                    print("No answer (input closed); nothing was run.")
+                    return NOT_STARTED
         for step in portal[start:]:
             if step["id"] in completed:
                 continue
@@ -1849,7 +1873,7 @@ class Runner:
                 # failed': the recording's reason is why the step is not checked either way.
                 self.skip_step(step, step["id"], reason, category=RECORDED_SKIP)
                 completed.append(step["id"])
-                self.save_state(completed, None)
+                self.save_state(completed, self.first_failure)     # an ended lab keeps its step in flight
                 continue
             if self.first_failure:
                 self.skip_step(step, self.first_failure)

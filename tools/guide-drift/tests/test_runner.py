@@ -699,6 +699,49 @@ class RecordedSkipTests(RunnerTestCase):
         self.assertEqual(r.ran, ["9.9.2", "9.9.5"])
         self.assertEqual(self.state()["completed"], ["9.9.1", "9.9.2", "9.9.4", "9.9.5"])
 
+    def test_a_step_in_flight_and_skipped_since_is_not_asked_about_and_its_findings_are_dropped(self) -> None:
+        # The step failed, the person stopped (q), added a skip to the recording and resumed.
+        first = self.runner(answers=["q"], unknown={"9.9.2"}, run_id="first")
+        self.assertEqual(self.quietly(first.run), run.ABORTED)
+        state = run.load_state(self.tmp / "state.json", LAB)
+        self.assertEqual(state["inFlight"], "9.9.2")
+        self.skip("9.9.2")
+        r = self.runner(answers=[""], resume=True, run_id="second", state=state)
+        self.assertEqual(self.quietly(lambda: r.run(state)), 0)     # the stopped attempt's unknown is gone
+        self.assertEqual(r.ask.prompts, ["> "])                     # the view, not 'did it finish?'
+        self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+        self.assertEqual([(x["step"], x["outcome"], x["category"]) for x in r.records if x["step"] == "9.9.2"],
+                         [("9.9.2", "skipped", run.RECORDED_SKIP)])
+        summary = (self.tmp / "logs" / "first" / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## unknown (0)", summary)
+        self.assertIn(f"## skipped (1)\n- step 9.9.2 skipped by the recording: {self.REASON}\n", summary)
+        self.assertEqual(self.state()["completed"], ["9.9.1", "9.9.2", "9.9.4", "9.9.5"])
+
+    def test_starting_at_a_skipped_step_names_the_first_step_that_runs(self) -> None:
+        self.skip("9.9.2")
+        r = self.runner(answers=[""], from_step="9.9.2")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(r.run(), 0)
+        self.assertIn("Starting at step 9.9.4 (Four) (the recording skips step 9.9.2). Bring the "
+                      "Portal to the view the step before it ended on, then press Enter:\n"
+                      "  https://portal.azure.com/#view/One", out.getvalue())
+        self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+        self.skip("9.9.4", "9.9.5")                                  # nothing left to run: no view to ask for
+        r = self.runner(from_step="9.9.2", run_id="all-skipped")
+        self.assertEqual(self.quietly(r.run), 0)
+        self.assertEqual((r.ran, r.ask.prompts), ([], []))
+
+    def test_a_skip_after_an_ended_lab_keeps_the_failed_step_in_flight(self) -> None:
+        self.skip("9.9.5")
+        r = self.runner(answers=["e"], failing={"9.9.2"})
+        saved: list[tuple[list[str], str | None]] = []
+        save_state = r.save_state
+        r.save_state = lambda completed, in_flight, finished=False: (
+            saved.append((list(completed), in_flight)), save_state(completed, in_flight, finished))
+        self.quietly(r.run)
+        self.assertEqual(saved[-2:], [(["9.9.1", "9.9.5"], "9.9.2"), (["9.9.1", "9.9.5"], "9.9.2")])
+
     def test_main_refuses_a_malformed_skip_before_the_browser_opens(self) -> None:
         (self.tmp / "steps.json").write_text(json.dumps(STEPS), encoding="utf-8")
         argv = ["--steps", str(self.tmp / "steps.json"), "--recording", str(self.tmp / "rec.json"),
