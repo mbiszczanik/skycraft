@@ -222,7 +222,9 @@ Before starting this lab:
    - Name: `rg-test-no-tag`
    - Click **Review + create**
 
-**Expected Result**: Creation is **allowed** (policy is not retroactive, only evaluates new operations).
+**Expected Result**: Creation is **denied** by `Require-Environment-Tag-RG`. **Review + create** stops at "Validation failed" with a `RequestDisallowedByPolicy` error that names the assignment, and `rg-test-no-tag` is not created. A policy evaluates every new create or update request. What it does not do is change resources that already exist: a resource group created before the assignment stays without the tag and is reported as non-compliant instead (Step 1.3.9).
+
+**Note**: If the creation succeeds, the assignment is not in effect yet - a new assignment can take up to about 30 minutes to apply. Delete `rg-test-no-tag`, wait a few minutes and try again until the creation is denied.
 
 ![Assign a Built-in Policy](./images/step-1.3.6a.png)
 
@@ -236,7 +238,7 @@ Before starting this lab:
 
 ![Assign a Built-in Policy](./images/step-1.3.6b.png)
 
-3. Delete the test resource group: `rg-test-with-tag`
+3. Delete the test resource group: `rg-test-with-tag` (the policy denied `rg-test-no-tag`, so it does not exist)
 
 ### Step 1.3.7: Assign Policy for Resource Naming Convention
 
@@ -698,7 +700,7 @@ Tenant Root Group
 
 **Solutions**:
 
-- Policies take 5-10 minutes to propagate
+- A new assignment can take up to about 30 minutes to take effect
 - Policy may be in "Audit" mode instead of "Deny" mode
 - Check **Policy enforcement** is set to "Enabled"
 - Review policy effect (should be "Deny" for enforcement)
