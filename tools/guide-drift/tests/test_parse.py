@@ -1,13 +1,14 @@
 """Unit tests for parse.py's reading of one list item: which searches are the Portal's global
 search and which are a blade's own search box (issue #189), which '- Label: value' items with
 a plain label are fields (issue #198), which field values are not text to type (issue #202),
-and which lists are checks for the Expected Result rather than steps (issue #224). The full
-guides and the other parser rules are covered by tests/Guide-Drift-Parser.Tests.ps1. Run from
-the repository root:
+which lists are checks for the Expected Result rather than steps (issue #224), and which code
+spans in a navigation chain are resources to open (issue #199). The full guides and the other
+parser rules are covered by tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
 """
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -138,6 +139,109 @@ class PlainLabelFieldTests(unittest.TestCase):
     def test_a_bold_label_still_takes_the_whole_value(self) -> None:
         self.assertEqual(self.item("**Policy enforcement**: Enabled"), self.field("Policy enforcement", "Enabled"))
         self.assertEqual(self.item("**Region**: **Sweden Central** (recommended)"), self.field("Region", "Sweden Central (recommended)"))
+
+
+class ChainResourceTests(unittest.TestCase):
+    """A chain step that is one code span names a resource to open (#199): a label in its place,
+    its index in '"resources"'. The texts are list items from the guides, from the lab named."""
+
+    def item(self, text: str) -> dict | None:
+        return parse.list_item(text, 7)
+
+    def navigation(self, labels: list[str], resources: list[int]) -> dict:
+        return {"kind": "navigation", "labels": labels, "resources": resources, "line": 7}
+
+    def test_a_code_span_step_is_a_resource_in_its_place_in_the_chain(self) -> None:
+        for text, labels, resources in (
+                ("Navigate to **Load balancers** → `dev-skycraft-swc-lb` → **Backend pools**",            # 3.2.13
+                 ["Load balancers", "dev-skycraft-swc-lb", "Backend pools"], [1]),
+                ("Navigate to `prodskycraftswcsa` → **Security + networking** → **Encryption**",          # 4.1.8
+                 ["prodskycraftswcsa", "Security + networking", "Encryption"], [0]),
+                ("Navigate to `prodskycraftswcsa` → **Containers** → `game-assets`",                      # 4.2.11
+                 ["prodskycraftswcsa", "Containers", "game-assets"], [0, 2]),
+                ("Navigate to **Virtual Networks** > `prod-skycraft-swc-vnet` > **Subnets**.",            # 4.4.1
+                 ["Virtual Networks", "prod-skycraft-swc-vnet", "Subnets"], [1]),
+                ("Go to **Data storage** > **Containers** > `scripts` (or any container).",              # 4.4.3
+                 ["Data storage", "Containers", "scripts"], [2]),
+                ("Open `platform-skycraft-swc-rsv` → **Monitoring** → **Diagnostic settings**",           # 5.2.8
+                 ["platform-skycraft-swc-rsv", "Monitoring", "Diagnostic settings"], [0]),
+                ("**+ Add sources** → **Azure endpoints** → select `prod-skycraft-swc-auth-vm` → **Add endpoints**.",  # 5.3.6
+                 ["+ Add sources", "Azure endpoints", "prod-skycraft-swc-auth-vm", "Add endpoints"], [2])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), self.navigation(labels, resources))
+
+    def test_one_bold_label_and_a_resource_make_a_navigation(self) -> None:
+        self.assertEqual(self.item("Navigate to **Virtual machines** → `dev-skycraft-swc-world-vm`"),     # 3.2.14
+                         self.navigation(["Virtual machines", "dev-skycraft-swc-world-vm"], [1]))
+        self.assertEqual(self.item("Open `skycraft-config` → `common` → select `config.txt`"),           # 4.3.6
+                         self.navigation(["skycraft-config", "common", "config.txt"], [0, 1, 2]))
+
+    def test_a_resource_name_alone_or_outside_a_chain_is_no_item(self) -> None:
+        for text in ("Navigate to `prodskycraftswcsa`",
+                     "Try to delete `dev-skycraft-swc-rg` → Should fail (Contributor can't delete RGs)",   # 1.2.13
+                     "`dev-skycraft-swc-rg` → Should succeed"):
+            with self.subTest(text=text):
+                self.assertIsNone(self.item(text))
+
+    def test_a_code_span_with_more_in_its_step_is_a_value_or_prose(self) -> None:
+        for text, kind, labels in (
+                ("Click **+ Add directory** → Name: `common` → **OK**", "navigation", ["+ Add directory", "OK"]),   # 4.3.4
+                ("Back in the Portal, click **Upload** → select the modified `config.txt` → check **Overwrite if "
+                 "files already exist** → **Upload**", "navigation", ["Upload", "Overwrite if files already exist", "Upload"]),
+                ("Browse to `common/config.txt` → click **⋯** → **Restore**", "navigation", ["⋯", "Restore"]),
+                ("Open `skycraft-config` share → **Connect**", "action", ["Connect"]),                            # 4.3.8
+                ("**Test groups** → **+ Add test group** → Test group name: `hub-spoke-ssh`",                     # 5.3.6
+                 "navigation", ["Test groups", "+ Add test group"])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), {"kind": kind, "labels": labels, "line": 7})
+
+    def test_the_chain_after_a_plain_label_names_no_resource(self) -> None:
+        for text, kind, labels in (
+                ("Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`.",              # 5.1.7
+                 "action", ["Send to Log Analytics workspace"]),
+                ("Flow log type: **Virtual network** → **+ Select target resource** → **Virtual network** → "
+                 "`prod-skycraft-swc-vnet` → **Confirm selection**",                                             # 5.3.5
+                 "navigation", ["Virtual network", "+ Select target resource", "Virtual network", "Confirm selection"])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), {"kind": kind, "labels": labels, "line": 7})
+
+    def test_a_separator_inside_a_code_or_bold_span_does_not_split_a_step(self) -> None:
+        # A split at the arrow inside the second code span would cut the step in the middle of that
+        # span, and the step would name no resource.
+        self.assertEqual(self.item("**Load balancers** → `dev-skycraft-swc-lb` (traffic flows `lb → vm`)"),
+                         self.navigation(["Load balancers", "dev-skycraft-swc-lb"], [1]))
+        self.assertEqual(self.item("Check that **Monitoring** shows `10.0.0.0/8 → None`"),
+                         {"kind": "action", "labels": ["Monitoring"], "line": 7})
+        self.assertEqual(self.item("**Settings > Advanced** → `dev-vm`"),
+                         self.navigation(["Settings > Advanced", "dev-vm"], [1]))
+
+    def test_a_name_of_nothing_but_spaces_is_no_resource(self) -> None:
+        for text in ("Open **A** → ` `", "Open **A** → `\t`"):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), {"kind": "action", "labels": ["A"], "line": 7})
+
+    def test_a_label_that_ends_in_a_time_is_not_a_plain_label(self) -> None:
+        # 5.2.3: '02:00:' has no space after its first colon, so PLAIN_LABEL_START does not take
+        # the text before it for a plain label, and the VM stays a resource of the chain. A time
+        # written '2 AM:' would read as one, and the chain would name no resource.
+        self.assertEqual(self.item("Run the first backup now instead of waiting for 02:00: **Protected items** → "
+                                   "**Backup items** → **Azure Virtual Machine** → `dev-skycraft-swc-auth-vm` → "
+                                   "**Backup now** → **OK**."),
+                         self.navigation(["Protected items", "Backup items", "Azure Virtual Machine",
+                                          "dev-skycraft-swc-auth-vm", "Backup now", "OK"], [3]))
+
+    def test_a_long_step_is_read_in_linear_time(self) -> None:
+        # Two '\s*' around an optional group took about 300 s on the first of these (#199).
+        for space in (" ", "\t"):
+            for text in ("**A** → `x`" + space * 100_000 + "`y`",
+                         "**A** → `" + space * 100_000 + "x` junk",
+                         "**A** → `" + "x" * 100_000 + "` junk",
+                         "**A** → `x` (" + "y" * 100_000 + ")" + space * 100_000 + "junk",
+                         "**A** → Navigate" + space * 100_000 + "to" + space * 100_000 + "x"):
+                with self.subTest(space=repr(space), text=text[:12]):
+                    started = time.perf_counter()
+                    self.assertEqual(self.item(text), {"kind": "action", "labels": ["A"], "line": 7})
+                    self.assertLess(time.perf_counter() - started, 2)
 
 
 class LiteralValueTests(unittest.TestCase):

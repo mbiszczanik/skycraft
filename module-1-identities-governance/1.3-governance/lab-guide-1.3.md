@@ -200,7 +200,9 @@ Before starting this lab:
 
 7. Click **Next**
 
-**Remediation tab** (skip for now): 8. Click **Next**
+**Remediation tab** (skip for now):
+
+8. Click **Next**
 
 **Non-compliance messages tab**:
 
@@ -567,8 +569,8 @@ Create a more specific budget for the production environment:
   - Click **Create new**
   - Choose resource group: `prod-skycraft-swc-rg`
 - **Action groups**:
-  - Action group name: `prod-skycraft-swc-rg`
-  - Display name: `Advisor-Cost-Recommendations`
+  - Action group name: `skycraft-advisor-ag`
+  - Display name: `SkyAdvisor` (the Portal allows at most 12 characters)
   - Fill tags accordingly to policies
   - Click **Review + Create**
 
