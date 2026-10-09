@@ -9,7 +9,8 @@
     Actions performed:
     1. Applies Tags to Resource Groups (Update-AzTag)
     2. Assigns Azure Policies at Subscription Scope (New-AzPolicyAssignment)
-    3. Creating Resource Locks (New-AzResourceLock)
+    3. Creating Resource Locks (New-AzResourceLock). A lock that already exists under the guide's
+       name but with another level is set to CanNotDelete, and the script says so (issue #258).
 
 .PARAMETER SubscriptionId
     Target Subscription ID. Defaults to current context.
@@ -158,8 +159,8 @@ foreach ($policy in $policies) {
 Write-Header "`n=== 3. Applying Locks (New-AzResourceLock) ==="
 
 $locks = @(
-    @{ RG = "prod-skycraft-swc-rg"; Name = "lock-no-delete-prod"; Notes = "Production protection" },
-    @{ RG = "platform-skycraft-swc-rg"; Name = "lock-no-delete-platform"; Notes = "Platform protection" }
+    @{ RG = "prod-skycraft-swc-rg"; Name = "lock-no-delete-prod"; Notes = "Cannot delete resource or child resources." },
+    @{ RG = "platform-skycraft-swc-rg"; Name = "lock-no-delete-platform"; Notes = "Cannot delete resource or child resources." }
 )
 
 foreach ($lock in $locks) {
@@ -169,10 +170,19 @@ foreach ($lock in $locks) {
     else {
         try {
             if (Get-AzResourceGroup -Name $lock.RG -ErrorAction SilentlyContinue) {
-                if (Get-AzResourceLock -ResourceGroupName $lock.RG -LockName $lock.Name -ErrorAction SilentlyContinue) {
+                # A lock under this name but with another level (say ReadOnly, made by hand) is not
+                # the lock the guide creates, and Test-Lab.ps1 fails it (issue #258). Rather than
+                # report it as present, overwrite it in place - New-AzResourceLock -Force on an
+                # existing name updates that lock - and say which level it had.
+                $existing = @(Get-AzResourceLock -ResourceGroupName $lock.RG -LockName $lock.Name -ErrorAction SilentlyContinue | Where-Object { $_ })
+                $existingLevels = @($existing | ForEach-Object { $_.Properties.level })
+                if ($existingLevels -contains 'CanNotDelete') {
                     Write-Success "Lock $($lock.Name) already exists."
                 }
                 else {
+                    if ($existing.Count -gt 0) {
+                        Write-Host "  -> [WARN] Lock $($lock.Name) exists with level $($existingLevels -join ', '); setting it to CanNotDelete." -ForegroundColor Yellow
+                    }
                     New-AzResourceLock `
                         -ResourceGroupName $lock.RG `
                         -LockName $lock.Name `
@@ -180,7 +190,12 @@ foreach ($lock in $locks) {
                         -LockNotes $lock.Notes `
                         -Force `
                         -ErrorAction Stop | Out-Null
-                    Write-Success "Locked $($lock.RG)"
+                    if ($existing.Count -gt 0) {
+                        Write-Success "Set $($lock.Name) on $($lock.RG) to CanNotDelete"
+                    }
+                    else {
+                        Write-Success "Locked $($lock.RG)"
+                    }
                 }
             }
             else {
