@@ -1349,6 +1349,12 @@ Test-AzSubscriptionDeployment `
 # result means the template validated cleanly.
 ```
 
+> [!WARNING]
+> Validate with the parameter file, but deploy only with `.\scripts\Deploy-Bicep.ps1`. Deployed
+> directly with `dev.bicepparam` (for example `New-AzSubscriptionDeployment`), the template does
+> not know which VNets already exist, so it redeploys the hub and dev VNets and removes the
+> peerings Lab 2.1 created.
+
 > [!NOTE]
 > `az bicep build` is the one az CLI command kept in this section. It is a
 > **local compile** — it never contacts your subscription, so it cannot hit the
@@ -1370,7 +1376,8 @@ The script builds one parameter set and previews it with
 `Get-AzSubscriptionDeploymentWhatIfResult` — the same arguments the real
 deployment would use, so the preview cannot drift from the deploy.
 
-**Expected Output**:
+**Expected Output** on a subscription where nothing from this lab exists yet (both VNets are
+created, each with its subnets):
 
 ```
 Resource changes: 15 to create, 0 to modify, 0 to delete.
@@ -1394,6 +1401,11 @@ Resource changes: 15 to create, 0 to modify, 0 to delete.
 + Microsoft.Network/publicIPAddresses
   ~ dev-skycraft-swc-lb-pip [Create]
 ```
+
+If you completed Module 2, the output looks different: the script reports that
+`platform-skycraft-swc-vnet` and `dev-skycraft-swc-vnet` already exist, so neither VNet appears
+in the what-if at all. Only `auth-nsg` and `world-nsg` are created; the resource groups, the dev
+public IP and the load balancer already exist and show as unchanged or modified.
 
 **Color Legend**:
 
@@ -1978,6 +1990,8 @@ Test your understanding with these questions:
    > **Conceptual answer.** This lab ships `dev.bicepparam` and
    > `prod.bicepparam`, not per-region parameter files. The commands above
    > illustrate the pattern; they will not run against this repo as written.
+   > Deploying `main.bicep` directly like this also redeploys the hub and dev VNets
+   > and removes their peerings; `Deploy-Bicep.ps1` is what prevents that.
    > The lab's real deployment path is
    > `.\scripts\Deploy-Bicep.ps1 -Environment dev|prod -Location swedencentral|northeurope`.
 

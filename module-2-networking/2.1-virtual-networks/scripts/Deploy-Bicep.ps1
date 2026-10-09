@@ -12,12 +12,17 @@
     The script is safe to re-run on a subscription where later labs already stand, for example
     to add the dev spoke next to an existing hub and prod (issue #188). Before deploying it looks
     up the three VNets and the two public IPs, and passes what it finds to the template:
-    - subnets that already exist are left out of the deployment, so the NSGs and service
-      endpoints Lab 2.2 attached, and an App Service delegation, stay as they are;
+    - a VNet that already exists is not redeployed. A VNet deployment removes the peerings it
+      does not list and replaces each subnet it does list with exactly what it declares; the AVM
+      VNet module lists no peerings, so redeploying would delete and recreate every peering, and
+      re-declared subnets would lose the NSGs and service endpoints Lab 2.2 attached (and a
+      portal-made App Service delegation would be renamed);
+    - only the subnets an existing VNet lacks are added, as child resources of that VNet;
     - public IPs that already exist are left untouched (zones and SKU cannot change after
       creation).
-    Missing subnets, VNets, public IPs and all four peerings are still deployed. A lookup that
-    fails for any reason other than "not found" stops the script before anything is deployed.
+    Missing VNets, subnets and public IPs, and all four peerings, are deployed; a peering that
+    already exists with the same settings is unchanged. A lookup that fails for any reason other
+    than "not found" stops the script before anything is deployed.
 
 .PARAMETER Location
     The Azure region deployment target. Default: 'swedencentral'
@@ -161,19 +166,21 @@ try {
         dev  = @{ ResourceGroup = $DevResourceGroup; Name = 'dev-skycraft-swc-vnet' }
         prod = @{ ResourceGroup = $ProdResourceGroup; Name = 'prod-skycraft-swc-vnet' }
     }
+    $vnetExists = @{}
     $existingSubnets = @{}
     foreach ($target in $vnetTargets.GetEnumerator()) {
         $vnet = Find-ExistingResource -Lookup {
             Get-AzVirtualNetwork -ResourceGroupName $target.Value.ResourceGroup -Name $target.Value.Name -ErrorAction Stop
         }
         $names = [string[]]@(Get-SubnetName -Vnet $vnet)
+        $vnetExists[$target.Key] = $null -ne $vnet
         $existingSubnets[$target.Key] = $names
         if ($null -eq $vnet) {
             Write-Host "  - $($target.Value.Name) not found: created with all its subnets." -ForegroundColor Gray
         }
         else {
             $kept = if ($names.Count -gt 0) { $names -join ', ' } else { 'none' }
-            Write-Host "  - $($target.Value.Name) exists; subnets left as they are: $kept" -ForegroundColor Gray
+            Write-Host "  - $($target.Value.Name) exists: not redeployed; existing subnets left as they are: $kept" -ForegroundColor Gray
         }
     }
 
@@ -195,6 +202,9 @@ try {
         parResourceGroupNameProd     = $ProdResourceGroup
         parResourceGroupNameDev      = $DevResourceGroup
         parResourceGroupNamePlatform = $PlatformResourceGroup
+        parHubVnetExists             = $vnetExists['hub']
+        parDevVnetExists             = $vnetExists['dev']
+        parProdVnetExists            = $vnetExists['prod']
         parExistingSubnets           = $existingSubnets
         parDevLbPipExists            = $pipExists['dev']
         parProdLbPipExists           = $pipExists['prod']

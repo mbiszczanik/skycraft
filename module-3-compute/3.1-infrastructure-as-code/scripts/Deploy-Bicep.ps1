@@ -8,9 +8,12 @@
 
     Before deploying it looks up the hub VNet (platform-skycraft-swc-vnet) and the dev VNet
     (dev-skycraft-swc-vnet). A VNet that already exists - after Module 2, or after an earlier run
-    of this lab - is referenced by the template instead of redeployed: redeploying a VNet replaces
-    its peerings, so it would remove hub-to-prod, hub-to-dev and dev-to-hub, and on the dev VNet it
-    would also swap the NSGs and service endpoints Lab 2.2 attached (issue #188). The lookup result
+    of this lab - is referenced by the template instead of redeployed. A VNet deployment removes the
+    peerings it does not list and replaces each subnet it does list with exactly what it declares,
+    and the lab's network module lists every subnet and no peerings: redeploying would remove
+    hub-to-prod, hub-to-dev and dev-to-hub, and on the dev VNet would also swap the NSGs and drop
+    the service endpoints Lab 2.2 attached (issue #188). Deploying main.bicep with a parameter file
+    directly, without this script, leaves the flags unset and does redeploy both VNets. The lookup result
     reaches the parameter files through SKYCRAFT_HUB_VNET_EXISTS and SKYCRAFT_DEV_VNET_EXISTS, which
     the script sets for the deployment and removes afterwards. A lookup that fails for any reason
     other than "not found" stops the script, so an unreadable VNet is never redeployed by mistake.

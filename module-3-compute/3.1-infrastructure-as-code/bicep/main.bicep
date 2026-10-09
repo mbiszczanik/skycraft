@@ -39,10 +39,11 @@ param parDevVnetAddressPrefix string = '10.1.0.0/16'
 @description('Prod VNet address space (reserved here; the prod spoke is built in Lab 2.1)')
 param parProdVnetAddressPrefix string = '10.2.0.0/16'
 
-// The network module declares a VNet with its subnets and no peerings, and ARM applies that as the
-// VNet's whole state: redeploying the hub after Lab 2.1 removed hub-to-prod (issue #188), and the
-// same happens to hub-to-dev and dev-to-hub. Redeploying the dev VNet would also swap the subnet
-// NSGs and drop the service endpoints Lab 2.2 attached. scripts/Deploy-Bicep.ps1 looks each VNet up
+// A VNet deployment removes the peerings it does not list, and replaces each subnet it does list
+// with exactly what it declares (issue #188: redeploying the hub after Lab 2.1 removed hub-to-prod).
+// The network module lists every subnet and no peerings, so redeploying the hub or dev VNet after
+// Module 2 would remove hub-to-prod, hub-to-dev and dev-to-hub, and on the dev VNet would also swap
+// the subnet NSGs and drop the service endpoints Lab 2.2 attached. scripts/Deploy-Bicep.ps1 looks each VNet up
 // and sets these flags through the parameter files; a VNet that exists is then only referenced.
 @description('True when the hub VNet already exists (set by scripts/Deploy-Bicep.ps1 from a lookup). The hub is then referenced, not redeployed, so its peerings survive.')
 param parHubVnetExists bool = false

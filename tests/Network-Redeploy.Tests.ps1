@@ -20,10 +20,14 @@
       Lab 3.1  deploys a VNet only when it does not exist. scripts/Deploy-Bicep.ps1 looks the hub
                and dev VNets up and hands the result to the parameter files through
                SKYCRAFT_HUB_VNET_EXISTS / SKYCRAFT_DEV_VNET_EXISTS.
-      Lab 2.1  leaves existing subnets and public IPs out of the deployment (parExistingSubnets,
-               parDevLbPipExists, parProdLbPipExists, filled by scripts/Deploy-Bicep.ps1), and
-               declares privateEndpointNetworkPolicies 'Disabled' and doNotVerifyRemoteGateways
-               false, the values Azure and the portal use.
+      Lab 2.1  does not redeploy a VNet that exists: a VNet deployment removes the peerings it
+               does not list (the AVM VNet module lists none) and replaces each subnet it lists.
+               It adds only the subnets an existing VNet lacks and the four peerings, as child
+               resources, and leaves existing public IPs alone (parHubVnetExists,
+               parDevVnetExists, parProdVnetExists, parExistingSubnets, parDevLbPipExists,
+               parProdLbPipExists, filled by scripts/Deploy-Bicep.ps1). It declares
+               privateEndpointNetworkPolicies 'Disabled' and doNotVerifyRemoteGateways false, the
+               values the portal uses.
 
     Three layers: the compiled templates (what ARM receives), the deploy scripts' decision
     helpers lifted from their AST, and both deploy scripts run end to end with -WhatIf in a child
@@ -167,13 +171,28 @@ Describe 'Lab 3.1 parameter files - the lookup reaches the template' {
 
 Describe 'Lab 2.1 template - a re-run leaves what later labs set alone' {
 
-    It "deploys only the '<vnet>' subnets that do not exist yet" -ForEach @(
-        @{ vnet = 'hub'; symbol = 'modVnetHub'; variable = 'varHubSubnetsToDeploy' }
-        @{ vnet = 'dev'; symbol = 'modVnetDev'; variable = 'varDevSubnetsToDeploy' }
-        @{ vnet = 'prod'; symbol = 'modVnetProd'; variable = 'varProdSubnetsToDeploy' }
+    It "deploys the '<vnet>' VNet through the AVM module only when it does not exist" -ForEach @(
+        @{ vnet = 'hub'; symbol = 'modVnetHub'; flag = 'parHubVnetExists'; variable = 'varHubSubnets' }
+        @{ vnet = 'dev'; symbol = 'modVnetDev'; flag = 'parDevVnetExists'; variable = 'varDevSubnets' }
+        @{ vnet = 'prod'; symbol = 'modVnetProd'; flag = 'parProdVnetExists'; variable = 'varProdSubnets' }
+    ) {
+        # A VNet deployment removes the peerings it does not list, and this module lists none.
+        $module = Get-TemplateResource -Template $script:Template21 -Symbol $symbol
+        $module.condition | Should -Be "[not(parameters('$flag'))]"
+        $module.properties.parameters.ContainsKey('peerings') | Should -BeFalse -Because 'peerings are child resources (modPeering), declared once for new and existing VNets'
+        $module.properties.parameters.subnets.value | Should -Be "[variables('$variable')]"
+        $script:Template21.parameters[$flag].defaultValue | Should -BeFalse
+    }
+
+    It "adds only the missing '<vnet>' subnets to an existing VNet, as child resources" -ForEach @(
+        @{ vnet = 'hub'; symbol = 'modSubnetHub'; flag = 'parHubVnetExists'; variable = 'varHubSubnetsToDeploy' }
+        @{ vnet = 'dev'; symbol = 'modSubnetDev'; flag = 'parDevVnetExists'; variable = 'varDevSubnetsToDeploy' }
+        @{ vnet = 'prod'; symbol = 'modSubnetProd'; flag = 'parProdVnetExists'; variable = 'varProdSubnetsToDeploy' }
     ) {
         $module = Get-TemplateResource -Template $script:Template21 -Symbol $symbol
-        $module.properties.parameters.subnets.value | Should -Be "[variables('$variable')]"
+        $module.copy.count | Should -Be "[length(if(parameters('$flag'), variables('$variable'), createArray()))]"
+        $module.copy.batchSize | Should -Be 1 -Because 'subnet updates on one VNet must not overlap'
+        $module.properties.parameters.privateEndpointNetworkPolicies.value | Should -Match 'privateEndpointNetworkPolicies'
         $script:Template21.variables[$variable] | Should -Match ([regex]::Escape("parameters('parExistingSubnets').$vnet"))
         $script:Template21.variables[$variable] | Should -Match '^\[filter\('
     }
@@ -190,14 +209,14 @@ Describe 'Lab 2.1 template - a re-run leaves what later labs set alone' {
         @{ variable = 'varDevSubnets' }
         @{ variable = 'varProdSubnets' }
     ) {
-        # Unset, the AVM subnet module sends nothing and the API applies 'Enabled'.
+        # Unset, the #188 what-if showed existing 'Disabled' subnets going to 'Enabled'.
         foreach ($subnet in $script:Template21.variables[$variable]) {
             $subnet.privateEndpointNetworkPolicies | Should -Be 'Disabled' -Because "$($subnet.name) must match the portal and the existing subnets"
         }
     }
 
     It "names the AppServiceSubnet delegation the way Lab 3.1's network module does" {
-        # The AVM module names a delegation after its service; Lab 3.1 does the same, so the two
+        # The AVM modules name a delegation after its service; Lab 3.1 does the same, so the two
         # labs never rename it on each other.
         foreach ($variable in 'varDevSubnets', 'varProdSubnets') {
             $app = $script:Template21.variables[$variable] | Where-Object { $_.name -eq 'AppServiceSubnet' }
@@ -207,18 +226,33 @@ Describe 'Lab 2.1 template - a re-run leaves what later labs set alone' {
             Should -Match 'name: subnet\.delegation!'
     }
 
-    It "declares doNotVerifyRemoteGateways false on both directions of '<peering>'" -ForEach @(
-        @{ peering = 'hub-to-dev' }
-        @{ peering = 'hub-to-prod' }
-    ) {
-        # The AVM peering module defaults it to true; Azure, the portal and Az PowerShell use false.
-        $hub = Get-TemplateResource -Template $script:Template21 -Symbol 'modVnetHub'
-        $entry = $hub.properties.parameters.peerings.value | Where-Object { $_.name -eq $peering }
-        $entry | Should -Not -BeNullOrEmpty
-        $entry.doNotVerifyRemoteGateways | Should -BeFalse
-        $entry.ContainsKey('doNotVerifyRemoteGateways') | Should -BeTrue
-        $entry.remotePeeringDoNotVerifyRemoteGateways | Should -BeFalse
-        $entry.ContainsKey('remotePeeringDoNotVerifyRemoteGateways') | Should -BeTrue
+    It 'declares all four peerings once, as child resources, for new and existing VNets alike' {
+        $names = @($script:Template21.variables.varPeerings | ForEach-Object { $_.name })
+        $names | Should -Be @('hub-to-dev', 'dev-to-hub', 'hub-to-prod', 'prod-to-hub')
+
+        $module = Get-TemplateResource -Template $script:Template21 -Symbol 'modPeering'
+        $module.condition | Should -BeNullOrEmpty -Because 'a re-run must create a missing peering whatever else exists'
+        $module.copy.count | Should -Be "[length(variables('varPeerings'))]"
+        $module.copy.batchSize | Should -Be 1
+    }
+
+    It 'keeps the peering settings and sets doNotVerifyRemoteGateways false' {
+        # The AVM peering module defaults it to true; the portal and Az PowerShell use false.
+        $p = (Get-TemplateResource -Template $script:Template21 -Symbol 'modPeering').properties.parameters
+        $p.ContainsKey('doNotVerifyRemoteGateways') | Should -BeTrue
+        $p.doNotVerifyRemoteGateways.value | Should -BeFalse
+        $p.allowVirtualNetworkAccess.value | Should -BeTrue
+        $p.allowForwardedTraffic.value     | Should -BeTrue
+        $p.allowGatewayTransit.value       | Should -BeFalse
+        $p.useRemoteGateways.value         | Should -BeFalse
+    }
+
+    It 'waits for every VNet and subnet deployment before peering' {
+        # The peering targets are IDs built by name, so nothing else orders the deployment.
+        $dependsOn = @((Get-TemplateResource -Template $script:Template21 -Symbol 'modPeering').dependsOn)
+        foreach ($symbol in 'modVnetHub', 'modVnetDev', 'modVnetProd', 'modSubnetHub', 'modSubnetDev', 'modSubnetProd') {
+            $dependsOn | Should -Contain $symbol
+        }
     }
 
     It "creates '<symbol>' only when the public IP does not exist" -ForEach @(
@@ -228,6 +262,12 @@ Describe 'Lab 2.1 template - a re-run leaves what later labs set alone' {
         # Zones are fixed at creation; a portal-made, non-zonal IP would reject the declaration.
         (Get-TemplateResource -Template $script:Template21 -Symbol $symbol).condition |
             Should -Be "[not(parameters('$flag'))]"
+    }
+
+    It 'builds the VNet ID outputs by name, not from the conditional modules' {
+        foreach ($output in 'outHubVnetId', 'outDevVnetId', 'outProdVnetId') {
+            $script:Template21.outputs[$output].value | Should -Not -Match 'reference\('
+        }
     }
 }
 
@@ -277,8 +317,10 @@ Describe 'Deploy-Bicep.ps1 -WhatIf against a stubbed subscription' {
         Import-Module (Join-Path $script:RepoRoot 'tests' 'Support' 'LabScriptStub.psm1') -Force
 
         # Scenario knobs: SKYCRAFT_STUB_EXISTING lists the resource names that exist,
-        # SKYCRAFT_STUB_DENY makes every lookup fail with an authorization error, and
-        # SKYCRAFT_STUB_LOG receives what the what-if call was given.
+        # SKYCRAFT_STUB_DENY makes every lookup fail with an authorization error,
+        # SKYCRAFT_STUB_WHATIF_FAIL makes the what-if call itself fail (after the lookups, so
+        # the 3.1 flags are already set), and SKYCRAFT_STUB_LOG receives what the what-if call
+        # was given.
         $script:StubBody = @'
 function Get-AzContext {
     [CmdletBinding()]
@@ -321,6 +363,7 @@ function Get-AzSubscriptionDeploymentWhatIfResult {
         HubVnetExists = $env:SKYCRAFT_HUB_VNET_EXISTS
         DevVnetExists = $env:SKYCRAFT_DEV_VNET_EXISTS
     } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $env:SKYCRAFT_STUB_LOG
+    if ($env:SKYCRAFT_STUB_WHATIF_FAIL -eq '1') { throw 'stub failure: what-if rejected the template' }
 }
 
 function New-AzSubscriptionDeployment {
@@ -336,16 +379,36 @@ function New-AzSubscriptionDeployment {
         $script:Stub = Initialize-LabScriptStub -Name 'SkyCraftAzStub188' -Command $script:Commands `
             -Body $script:StubBody -RequiredModule @('Az.Accounts', 'Az.Resources', 'Az.Network')
 
+        # The lab script runs through this wrapper, inside the stubbed child: once the script has
+        # returned - on success or after its own exit 1 - the wrapper records whether the 3.1
+        # flags are still set in that session, then hands the exit code back.
+        $script:Wrapper = Join-Path $script:Stub.Directory 'Invoke-AndRecordEnvironment.ps1'
+        Set-Content -LiteralPath $script:Wrapper -Encoding utf8 -Value @'
+param([string]$Target)
+& $Target -WhatIf
+$code = $LASTEXITCODE
+[ordered]@{
+    HubVnetExists = [System.Environment]::GetEnvironmentVariable('SKYCRAFT_HUB_VNET_EXISTS')
+    DevVnetExists = [System.Environment]::GetEnvironmentVariable('SKYCRAFT_DEV_VNET_EXISTS')
+} | ConvertTo-Json | Set-Content -LiteralPath $env:SKYCRAFT_STUB_ENVLOG
+exit $code
+'@
+
         function Invoke-DeployWhatIf {
-            param([string]$ScriptPath, [string[]]$Existing = @(), [switch]$Deny)
-            $log = Join-Path $script:Stub.Directory ('whatif-' + [guid]::NewGuid().ToString('N') + '.json')
-            $run = Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $ScriptPath -ArgumentList '-WhatIf' -Environment @{
-                SKYCRAFT_STUB_EXISTING = $Existing -join ','
-                SKYCRAFT_STUB_DENY     = if ($Deny) { '1' } else { '0' }
-                SKYCRAFT_STUB_LOG      = $log
+            param([string]$ScriptPath, [string[]]$Existing = @(), [switch]$Deny, [switch]$WhatIfFails)
+            $id  = [guid]::NewGuid().ToString('N')
+            $log = Join-Path $script:Stub.Directory "whatif-$id.json"
+            $envLog = Join-Path $script:Stub.Directory "env-$id.json"
+            $run = Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $script:Wrapper -ArgumentList '-Target', "'$ScriptPath'" -Environment @{
+                SKYCRAFT_STUB_EXISTING    = $Existing -join ','
+                SKYCRAFT_STUB_DENY        = if ($Deny) { '1' } else { '0' }
+                SKYCRAFT_STUB_WHATIF_FAIL = if ($WhatIfFails) { '1' } else { '0' }
+                SKYCRAFT_STUB_LOG         = $log
+                SKYCRAFT_STUB_ENVLOG      = $envLog
             }
-            $call = if (Test-Path -LiteralPath $log) { Get-Content -Raw -LiteralPath $log | ConvertFrom-Json -AsHashtable } else { $null }
-            [pscustomobject]@{ ExitCode = $run.ExitCode; Refused = $run.Refused; Output = $run.Output; WhatIf = $call }
+            $call  = if (Test-Path -LiteralPath $log) { Get-Content -Raw -LiteralPath $log | ConvertFrom-Json -AsHashtable } else { $null }
+            $after = if (Test-Path -LiteralPath $envLog) { Get-Content -Raw -LiteralPath $envLog | ConvertFrom-Json -AsHashtable } else { $null }
+            [pscustomobject]@{ ExitCode = $run.ExitCode; Refused = $run.Refused; Output = $run.Output; WhatIf = $call; After = $after }
         }
 
         $deploy21 = Join-Path $script:Lab21 'scripts/Deploy-Bicep.ps1'
@@ -360,6 +423,10 @@ function New-AzSubscriptionDeployment {
         $script:Lab31AfterM2 = Invoke-DeployWhatIf -ScriptPath $deploy31 -Existing @(
             'platform-skycraft-swc-vnet', 'dev-skycraft-swc-vnet')
         $script:Lab31Denied  = Invoke-DeployWhatIf -ScriptPath $deploy31 -Deny
+        $script:Lab31Failed  = Invoke-DeployWhatIf -ScriptPath $deploy31 -WhatIfFails -Existing @(
+            'platform-skycraft-swc-vnet', 'dev-skycraft-swc-vnet')
+        $script:AllRuns = @($script:Lab21Fresh, $script:Lab21AddDev, $script:Lab21Denied,
+            $script:Lab31Fresh, $script:Lab31AfterM2, $script:Lab31Denied, $script:Lab31Failed)
     }
 
     AfterAll {
@@ -367,7 +434,7 @@ function New-AzSubscriptionDeployment {
     }
 
     It 'never falls through to the real Az cmdlets' {
-        foreach ($run in $script:Lab21Fresh, $script:Lab21AddDev, $script:Lab21Denied, $script:Lab31Fresh, $script:Lab31AfterM2, $script:Lab31Denied) {
+        foreach ($run in $script:AllRuns) {
             $run.Refused | Should -BeFalse -Because "the harness must shadow Az (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -375,14 +442,20 @@ function New-AzSubscriptionDeployment {
     It 'Lab 2.1 declares everything on an empty subscription' {
         $script:Lab21Fresh.ExitCode | Should -Be 0 -Because $script:Lab21Fresh.Output
         $p = $script:Lab21Fresh.WhatIf.Parameters
+        $p.parHubVnetExists  | Should -BeFalse
+        $p.parDevVnetExists  | Should -BeFalse
+        $p.parProdVnetExists | Should -BeFalse
         foreach ($vnet in 'hub', 'dev', 'prod') { @($p.parExistingSubnets[$vnet]).Count | Should -Be 0 }
         $p.parDevLbPipExists  | Should -BeFalse
         $p.parProdLbPipExists | Should -BeFalse
     }
 
-    It 'Lab 2.1 adding dev leaves the hub and prod subnets and the prod public IP out' {
+    It 'Lab 2.1 adding dev does not redeploy the hub or prod VNet and leaves their subnets and the prod public IP out' {
         $script:Lab21AddDev.ExitCode | Should -Be 0 -Because $script:Lab21AddDev.Output
         $p = $script:Lab21AddDev.WhatIf.Parameters
+        $p.parHubVnetExists  | Should -BeTrue
+        $p.parProdVnetExists | Should -BeTrue
+        $p.parDevVnetExists  | Should -BeFalse
         @($p.parExistingSubnets.hub)  | Should -Be @('AzureBastionSubnet', 'GatewaySubnet')
         @($p.parExistingSubnets.prod) | Should -Be @('AuthSubnet', 'WorldSubnet', 'DatabaseSubnet', 'AppServiceSubnet')
         @($p.parExistingSubnets.dev).Count | Should -Be 0
@@ -413,5 +486,25 @@ function New-AzSubscriptionDeployment {
         $script:Lab31Denied.ExitCode | Should -Be 1
         $script:Lab31Denied.WhatIf   | Should -BeNullOrEmpty
         $script:Lab31Denied.Output   | Should -Match 'AuthorizationFailed'
+    }
+
+    It "Lab 3.1 removes the SKYCRAFT_*_EXISTS flags after the run ('<case>')" -ForEach @(
+        @{ case = 'succeeded'; run = 'Lab31AfterM2'; code = 0 }
+        @{ case = 'what-if failed'; run = 'Lab31Failed'; code = 1 }
+        @{ case = 'lookup denied'; run = 'Lab31Denied'; code = 1 }
+    ) {
+        # A later direct deployment in the same session must not inherit this run's flags.
+        $result = Get-Variable -Scope Script -Name $run -ValueOnly
+        $result.ExitCode | Should -Be $code -Because $result.Output
+        $result.After | Should -Not -BeNullOrEmpty -Because 'the wrapper must have recorded the environment after the script returned'
+        $result.After.HubVnetExists | Should -BeNullOrEmpty
+        $result.After.DevVnetExists | Should -BeNullOrEmpty
+    }
+
+    It 'Lab 3.1 had the flags set when the failing what-if ran' {
+        # Without this, the failure-path cleanup above would pass trivially.
+        $script:Lab31Failed.WhatIf.HubVnetExists | Should -Be 'true'
+        $script:Lab31Failed.WhatIf.DevVnetExists | Should -Be 'true'
+        $script:Lab31Failed.Output | Should -Match 'stub failure: what-if rejected the template'
     }
 }
