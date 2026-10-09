@@ -7,7 +7,9 @@
     (issue #189). A guide edit that renames a portal label must update the recording in the same
     PR, or the next run asks the person again for something already decided - or worse, replays
     a click on the wrong thing. This suite parses each recording's guide with parse.py and
-    requires every recorded step id and label to exist there.
+    requires every recorded step id and label to exist there, as a label the runner asks about:
+    a resource name that a navigation chain gives in a code span is opened by name and never
+    asked about, so a decision for one is rejected (issue #199).
 
     A field value parse.py marks '"literal": false' (an instruction such as 'Click the "..."
     button', or a value with a bracket token) is never typed by the runner unless the recording
@@ -26,7 +28,7 @@
 
 .NOTES
     Project: SkyCraft
-    Issue:   #189, #202
+    Issue:   #189, #199, #202
 #>
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
@@ -56,6 +58,54 @@ for step in steps:
 print(json.dumps(reported))
 '@
 
+# The labels of one parsed step: those run.py asks the decider about ('decided': navigation and
+# action labels and field labels; never tag names, which the runner does not look up by label),
+# or the resource names a chain gives in code spans ('resource', #199), which the runner opens by
+# name and never asks about, so a recorded decision for one would never be used.
+function Get-StepLabel {
+    param([object]$Step, [ValidateSet('decided', 'resource')][string]$Kind)
+    foreach ($item in @($Step.items)) {
+        if ($item.kind -eq 'tag') { continue }
+        if ($item.kind -eq 'field') {
+            if ($Kind -eq 'decided') { $item.label }
+            continue
+        }
+        $labels    = @($item.labels)
+        $resources = @($item.resources | Where-Object { $null -ne $_ })
+        for ($i = 0; $i -lt $labels.Count; $i++) {
+            if (($resources -contains $i) -eq ($Kind -eq 'resource')) { $labels[$i] }
+        }
+    }
+}
+
+# Why a recorded decision for $Label in the parsed $Step can never be used; nothing when it can.
+function Get-LabelProblem {
+    param([object]$Step, [string]$Label)
+    if (@(Get-StepLabel -Step $Step -Kind decided) -ccontains $Label) { return }
+    if (@(Get-StepLabel -Step $Step -Kind resource) -ccontains $Label) {
+        "step $($Step.id) label '$Label' is a resource name, which the runner opens by name and never asks about"
+    } else {
+        "step $($Step.id) label '$Label' is not in the guide"
+    }
+}
+
+# Get-LabelProblem on a parsed step with a chain that names a resource, an action, a field and a
+# tag. Computed here, at discovery: It blocks cannot call file-scope functions.
+$LabelFixture = [pscustomobject]@{ id = '9.9.1'; items = @(
+        [pscustomobject]@{ kind = 'navigation'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Backend pools'); resources = @(1) }
+        [pscustomobject]@{ kind = 'action'; labels = @('Save') }
+        [pscustomobject]@{ kind = 'field'; label = 'Name'; value = 'x' }
+        [pscustomobject]@{ kind = 'tag'; name = 'Project'; value = 'SkyCraft' }
+    )
+}
+$LabelRuleCases = @(
+    @{ label = 'Backend pools'; problem = '' }
+    @{ label = 'Save'; problem = '' }
+    @{ label = 'Name'; problem = '' }
+    @{ label = 'dev-skycraft-swc-lb'; problem = "step 9.9.1 label 'dev-skycraft-swc-lb' is a resource name, which the runner opens by name and never asks about" }
+    @{ label = 'Project'; problem = "step 9.9.1 label 'Project' is not in the guide" }
+) | ForEach-Object { $_.actual = @(Get-LabelProblem -Step $LabelFixture -Label $_.label) -join '; '; $_ }
+
 $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/recordings') -Filter 'lab-*.json' |
     ForEach-Object {
         $file      = $_
@@ -82,27 +132,22 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
             } finally { Remove-Item -LiteralPath $out -ErrorAction SilentlyContinue }
         }
 
-        # Per parsed step: the labels run.py asks the decider about (navigation/action labels and
-        # field labels; never tag names, the runner does not look tags up by label) and the keys a
-        # value override can name (field labels and tag names).
+        # Per parsed step: the step itself (its labels are checked by Get-LabelProblem), the keys a
+        # value override can name (field labels and tag names), and every text a placeholder can
+        # appear in (field and tag values, and resource names, #199).
         $stepById  = @{}
-        $actLabels = @{}
         $valueKeys = @{}
         $allValues = [System.Collections.Generic.List[string]]::new()
         if ($parsed) {
             foreach ($step in @($parsed.steps)) {
                 $stepById[$step.id] = $step
-                $actLabels[$step.id] = @($step.items | ForEach-Object {
-                        if ($_.kind -eq 'field') { $_.label } elseif ($_.kind -ne 'tag') { $_.labels }
-                    })
                 $valueKeys[$step.id] = @($step.items | ForEach-Object {
                         if ($_.kind -eq 'field') { $_.label } elseif ($_.kind -eq 'tag') { $_.name }
                     })
                 foreach ($item in @($step.items)) {
                     if ($item.kind -in 'field', 'tag' -and $item.value) { $allValues.Add([string]$item.value) }
-                    # A resource name of a chain takes the placeholders too (#199).
-                    foreach ($index in @($item.resources | Where-Object { $null -ne $_ })) { $allValues.Add([string]@($item.labels)[$index]) }
                 }
+                foreach ($name in @(Get-StepLabel -Step $step -Kind resource)) { $allValues.Add([string]$name) }
             }
         }
 
@@ -132,7 +177,7 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
                 $labelsObject = $prop.Value.labels
                 if ($null -ne $labelsObject) {
                     foreach ($label in @($labelsObject.PSObject.Properties | ForEach-Object { $_.Name })) {
-                        if ($actLabels[$id] -cnotcontains $label) { "step $id label '$label' is not in the guide" }
+                        Get-LabelProblem -Step $stepById[$id] -Label $label
                     }
                 }
                 $overrides = $prop.Value.valueOverrides
@@ -198,6 +243,14 @@ Describe 'Guide drift recordings - every one refers to a real guide' {
 
     It "'<file>' refers only to steps, labels, fields and placeholders the parser finds in that guide" -ForEach $RecordingCases {
         $missing | Should -BeNullOrEmpty -Because ($missing -join '; ')
+    }
+}
+
+Describe 'Guide drift recordings - a decision is recorded only for a label the runner asks about' {
+    It "reports a recorded decision for '<label>' as '<problem>' (empty: it can be replayed)" -ForEach $LabelRuleCases {
+        # A resource name (#199) is opened by name and never asked about, so a hand-written
+        # decision for it fails here instead of passing and never being replayed.
+        $actual | Should -Be $problem
     }
 }
 

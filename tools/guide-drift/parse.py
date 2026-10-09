@@ -116,9 +116,13 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     **Confirm selection**' (5.3.5) does not pick the network.
   * A code span with more words in its chain step names no resource, though some do: 'Browse to
     `common/config.txt`' (4.3.6), 'pick the `platform-skycraft-swc-bv` Backup Vault' (5.2.5).
-  * The runner opens a resource name only from what is on screen, so a chain that starts with
-    one ('Navigate to `prodskycraftswcsa` → ...', 4.1-4.2) fails as a missing resource unless the
-    step before it ends on a list that shows it (#199).
+  * A resource name that is not on screen is looked up in the Portal's global search, which
+    finds Azure resources but not what lives inside one: a blob container ('game-assets',
+    4.2.11; 'public-demo', 4.2.12; 'scripts', 4.4.3) or a file share's folder or file
+    ('common', 'config.txt', 4.3.6). Such a name is reported as a missing resource whenever the
+    step before it did not leave it on screen (#199).
+  * 'select `config.txt`' (4.3.6) is read as a resource, so the runner clicks the file's row,
+    which may open the file rather than select it.
   * The first-option rule skips 3.2.1's Portal path, because its Option A is CLI-only (#201).
   * A caption label whose value holds bold spans turns them into actions (4.2:741, #203).
   * Instructions after a field value are lost (5.3:225, #203).
