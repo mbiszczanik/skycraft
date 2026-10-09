@@ -1,9 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 3.1 - Infrastructure as Code Orchestrator
-DESCRIPTION: Orchestrates SkyCraft Lab 3.1 (resource groups, hub and dev VNets, NSGs, public IP, load balancer) with hand-written local modules - writing them is this lab's learning objective (docs/bicep-standards.md section 8.2). A VNet that already exists is referenced, not redeployed (see parHubVnetExists).
+DESCRIPTION: Orchestrates SkyCraft Lab 3.1 (resource groups, hub and dev VNets, NSGs, public IP, load balancer) with hand-written local modules - writing them is this lab's learning objective (docs/bicep-standards.md section 8.2). A VNet, the dev load balancer or its public IP that already exists is referenced, not redeployed (see parHubVnetExists, parDevLbPipExists).
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev (selects parameters/dev.bicepparam; -Environment prod selects parameters/prod.bicepparam)
 AUTHOR/S: Marcin Biszczanik
-VERSION: 1.2.0
+VERSION: 1.3.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -52,6 +52,17 @@ param parHubVnetExists bool = false
 @description('True when the dev VNet already exists (set by scripts/Deploy-Bicep.ps1 from a lookup). The dev VNet is then referenced, not redeployed, so its peering and the Lab 2.2 subnet settings survive.')
 param parDevVnetExists bool = false
 
+// Zones and SKU are fixed when a public IP is created, so redeploying the zone-redundant
+// declaration over a public IP made without zones (Deploy-Networking.ps1, the portal) fails. The
+// load balancer is the one Lab 2.3 builds with its own frontend, pools and rules; redeploying this
+// lab's declaration over it would replace them (issue #263). scripts/Deploy-Bicep.ps1 looks both
+// up and sets these flags through the parameter files; one that exists is then left untouched.
+@description('True when the dev load balancer public IP already exists (set by scripts/Deploy-Bicep.ps1 from a lookup). It is then left untouched.')
+param parDevLbPipExists bool = false
+
+@description('True when the dev load balancer already exists (set by scripts/Deploy-Bicep.ps1 from a lookup). It is then left untouched, so the frontend, pools and rules Lab 2.3 gave it survive.')
+param parDevLbExists bool = false
+
 /*******************
 *    Variables     *
 *******************/
@@ -78,6 +89,10 @@ var varDevPrefix = 'dev-${parProject}-${varLocationShortCode}'
 // The network module names its VNet '<prefix>-vnet'; the existing references below use the same names.
 var varHubVnetName = '${varPlatformPrefix}-vnet'
 var varDevVnetName = '${varDevPrefix}-vnet'
+
+// The load balancer module names its load balancer '<prefix>-lb'; the existing reference uses the same name.
+var varDevLbPipName = '${varDevPrefix}-lb-pip'
+var varDevLbName = '${varDevPrefix}-lb'
 
 /*******************
 *    Resources     *
@@ -111,6 +126,18 @@ resource resHubVnet 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
 
 resource resDevVnet 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
   name: varDevVnetName
+  scope: resDevRg
+}
+
+// The dev load balancer and its public IP by name, on the same terms: created below only when
+// missing (see parDevLbPipExists), read here for the load balancer's frontend and the outputs.
+resource resDevLbPip 'Microsoft.Network/publicIPAddresses@2023-11-01' existing = {
+  name: varDevLbPipName
+  scope: resDevRg
+}
+
+resource resDevLb 'Microsoft.Network/loadBalancers@2023-11-01' existing = {
+  name: varDevLbName
   scope: resDevRg
 }
 
@@ -246,12 +273,12 @@ module modDevVnet 'modules/network.bicep' = if (!parDevVnetExists) {
   }
 }
 
-// Public IP address
-module modDevLbPublicIp 'modules/publicip.bicep' = {
+// Public IP address - deployed only when it does not exist yet (see parDevLbPipExists)
+module modDevLbPublicIp 'modules/publicip.bicep' = if (!parDevLbPipExists) {
   name: 'devLbPublicIpDeployment'
   scope: resDevRg
   params: {
-    parPublicIpName: '${varDevPrefix}-lb-pip'
+    parPublicIpName: varDevLbPipName
     parLocation: parLocation
     parSku: 'Standard'
     parAllocationMethod: 'Static'
@@ -259,14 +286,15 @@ module modDevLbPublicIp 'modules/publicip.bicep' = {
   }
 }
 
-// Load balancer
-module modDevLoadBalancer 'modules/loadbalancer.bicep' = {
+// Load balancer - deployed only when it does not exist yet (see parDevLbExists). The frontend
+// takes the public IP by name, whether this deployment creates it or it already stands.
+module modDevLoadBalancer 'modules/loadbalancer.bicep' = if (!parDevLbExists) {
   name: 'devLoadBalancerDeployment'
   scope: resDevRg
   params: {
     parNamePrefix: varDevPrefix
     parLocation: parLocation
-    parPublicIpId: modDevLbPublicIp.outputs.outPublicIpId
+    parPublicIpId: resDevLbPip.id
     parBackendPools: [
       { name: '${varDevPrefix}-lb-be-world' }
       { name: '${varDevPrefix}-lb-be-auth' }
@@ -307,6 +335,12 @@ module modDevLoadBalancer 'modules/loadbalancer.bicep' = {
     ]
     parTags: varTagsDev
   }
+  // Genuine sequencing no symbolic reference expresses (docs/bicep-standards.md section 6.5): the
+  // public IP ID is built by name, so ARM would not otherwise wait for a public IP this
+  // deployment creates.
+  dependsOn: [
+    modDevLbPublicIp
+  ]
 }
 
 /******************
@@ -322,8 +356,10 @@ output outDevVnetId string = resDevVnet.id
 output outHubVnetDeployed bool = !parHubVnetExists
 output outDevVnetDeployed bool = !parDevVnetExists
 
-output outDevLoadBalancerId string = modDevLoadBalancer.outputs.outLoadBalancerId
-output outDevLoadBalancerPublicIp string = modDevLbPublicIp.outputs.outIpAddress
+output outDevLoadBalancerId string = resDevLb.id
+output outDevLoadBalancerPublicIp string = resDevLbPip.properties.ipAddress
+output outDevLbPublicIpDeployed bool = !parDevLbPipExists
+output outDevLoadBalancerDeployed bool = !parDevLbExists
 
 // Configuration echo (also keeps the parameter-file-only inputs referenced; no-unused-params is an error)
 output outConfigProdVnetPrefix string = parProdVnetAddressPrefix
