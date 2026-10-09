@@ -53,13 +53,12 @@ without a browser. Rules (issue #189):
     any container).', 4.4.3), and it must hold more than spaces. The name, backticks stripped,
     is a label in its place among the bold ones, and the item's '"resources"' lists the indices
     of such labels; only an item with a resource name carries the key. A chain of two or more
-    steps counts as a navigation
-    ('**Virtual machines** → `dev-skycraft-swc-world-vm`', 3.2.14); a resource name alone is no
-    item. A code span with more in its step is a value or prose, not a resource: 'Name:
-    `common`', 'select the modified `config.txt`', 'Open `skycraft-config` share' (4.3). Nor is
-    one in an item that starts with a plain label ('Destination: **Send to Log Analytics
-    workspace** → `law`', 5.1), whose chain is the label's value. A separator inside a bold or
-    code span ('`10.0.0.0/8 → None`') does not split a step.
+    steps counts as a navigation ('**Virtual machines** → `dev-skycraft-swc-world-vm`', 3.2.14);
+    a resource name alone is no item. A code span with more in its step is a value or prose, not
+    a resource: 'Name: `common`', 'select the modified `config.txt`', 'Open `skycraft-config`
+    share' (4.3). Nor is one in an item that starts with a plain label ('Destination: **Send to
+    Log Analytics workspace** → `law`', 5.1), whose chain is the label's value. A separator
+    inside a bold or code span ('`10.0.0.0/8 → None`') does not split a step.
   * A list item 'Search for **X**' or 'In Azure Portal, search for **X**', optionally followed
     by where to search ('in the search bar', 'in the Azure Portal search', 'in the portal') and
     a full stop, is one 'search' item with the label X. Its scope is 'global' (the runner types X

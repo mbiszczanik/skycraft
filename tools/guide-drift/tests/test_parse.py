@@ -206,8 +206,8 @@ class ChainResourceTests(unittest.TestCase):
                 self.assertEqual(self.item(text), {"kind": kind, "labels": labels, "line": 7})
 
     def test_a_separator_inside_a_code_or_bold_span_does_not_split_a_step(self) -> None:
-        # Split at the arrow inside the second span, the step would be '`dev-skycraft-swc-lb` (traffic
-        # flows `lb' and name no resource.
+        # A split at the arrow inside the second code span would cut the step in the middle of that
+        # span, and the step would name no resource.
         self.assertEqual(self.item("**Load balancers** → `dev-skycraft-swc-lb` (traffic flows `lb → vm`)"),
                          self.navigation(["Load balancers", "dev-skycraft-swc-lb"], [1]))
         self.assertEqual(self.item("Check that **Monitoring** shows `10.0.0.0/8 → None`"),
