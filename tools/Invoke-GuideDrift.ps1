@@ -44,6 +44,15 @@
     the step fails as blocking drift of the step (missing-resource), with no proposed guide edit
     (issue #199).
 
+    STEPS THE RECORDING SKIPS. A step that is optional or conceptual by its heading and would
+    create resources, or that follows the other option of a lettered pair, is left out by
+    '"skip": "<reason>"' in its entry of the recording (issue #200). The run never performs it,
+    lists it in summary.md under 'skipped' with that reason and goes on with the next step; a
+    resume passes over it. The skip wins over the rest of the entry, which is kept (and still
+    checked by tests/Guide-Drift-Recording.Tests.ps1) for the day the skip is removed. The reason
+    must be a non-empty string and the step one the guide has, with a portal part; the run
+    refuses to start (254) on a skip without a reason.
+
     WHAT A RUN LEAVES BEHIND, AND WHY IT IS GITIGNORED. -LogDirectory/<run id>/ holds
     steps.json (the parsed guide; parse.py failing stops the run with exit 1), results.jsonl (one
     record per check, appended as the run goes), a full-window screenshot of every step,
