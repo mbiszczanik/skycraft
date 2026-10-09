@@ -122,10 +122,10 @@
             # and the cycle does not run lab 1.1, and this lab's teardown removes the Owner
             # assignment while the resource-group deletes take the other four. Until #254 the
             # validator exited 0 whatever it found, so those checks could fail without anyone seeing;
-            # now a failed check is exit 1, and checking them here would fail this phase and skip
-            # every phase after it. -SkipRoleAssignments limits the validator to the resource
-            # groups, which is all this phase deploys - the role checks still run, and still
-            # count, whenever a learner runs Test-Lab.ps1 without it.
+            # now a failed check is exit 1, and checking them here would report this phase as
+            # Failed(Test) on every cycle for objects it never deploys. -SkipRoleAssignments limits
+            # the validator to the resource groups, which is all this phase deploys - the role
+            # checks still run, and still count, whenever a learner runs Test-Lab.ps1 without it.
         }
         @{
             Id           = '1.3'
