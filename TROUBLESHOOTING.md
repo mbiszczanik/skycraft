@@ -126,7 +126,7 @@ Rotation:
 
 - `az ad app credential reset --id $appId --years 1` issues a new secret. Without `--append` it **invalidates every existing credential** on the app — which is what you want for a compromised secret, and what you do not want mid-cycle.
 - Certificates expire too. Re-run the `New-SelfSignedCertificate` block with `--append`, update `SKYCRAFT_GRAPH_CERT_THUMBPRINT`, then remove the old credential.
-- After rotating, verify without touching the tenant's state: `pwsh -NoProfile -File .\module-1-identities-governance\1.1-entra-users-groups\scripts\Test-Lab.ps1`. It signs in and only reads.
+- After rotating, verify without touching the tenant's state: `pwsh -NoProfile -File .\module-1-identities-governance\1.1-entra-users-groups\scripts\Test-Lab.ps1`. It signs in and only reads. A working credential reaches `Connected to Tenant` with a tenant ID and the tenant's initial domain; a broken one stops with `[ERROR]` before any check runs. Any `[FAIL]` lines after that only mean the lab's users and groups are absent, so in a tenant where Lab 1.1 has not been done, an exit code of 1 is expected and says nothing about the credential.
 
 ## 💻 Environment Issues
 

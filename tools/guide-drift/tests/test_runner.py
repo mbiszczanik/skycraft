@@ -1,7 +1,8 @@
 """Unit tests for run.py's bookkeeping: state, resume, failure handling, recording of decisions
 (issue #189), and how it finds what a guide names (search, '+' labels, plain text, collapsed
-menu groups, a blade still loading). No browser: the page is a small fake (Screen stands in
-for a frame), and run_step is scripted where only the order of steps matters.
+menu groups, a blade still loading, a resource a chain names, #199). No browser: the page is a
+small fake (Screen stands in for a frame), and run_step is scripted where only the order of
+steps matters.
 
 run.py imports Playwright at module level and the CI runner does not install it, so a minimal
 stub of playwright.sync_api is put in sys.modules when the real one is missing. Nothing here
@@ -888,6 +889,7 @@ class ScreenNode(FakeElement):
         self.tag = tag
         self.text = text
         self.filled: list[str] = []
+        self.pressed: list[str] = []
 
     def is_visible(self) -> bool:
         return self.shown
@@ -987,6 +989,9 @@ class ScreenNode(FakeElement):
         self.text = value
         if self.on_fill:
             self.on_fill()
+
+    def press(self, key, timeout=None) -> None:
+        self.pressed.append(key)
 
 
 class ScreenLocator:
@@ -1829,6 +1834,184 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual(record["outcome"], "unknown")
         self.assertIn("search box is not on screen", record["observed"])
         self.assertEqual(r.ask.prompts, [])
+
+
+class ResourceTests(RunnerTestCase):
+    """A resource a navigation chain names in a code span (#199): opened as the one link, grid
+    cell or row of its exact name, or else, when it opens the chain, as the exact result of the
+    Portal's global search; never asked about; and blocking drift of the step, with no proposed
+    edit, when it is not found."""
+
+    LB = "dev-skycraft-swc-lb"
+    ITEM = {"kind": "navigation", "labels": ["Load balancers", LB, "Backend pools"], "resources": [1], "line": 594}
+    STEP = {"id": "9.9.1", "title": "One", "portal": True, "expected": None, "images": ["images/Step-9.9.1.png"],
+            "items": [ITEM]}
+
+    SEARCH_BOX = "Search resources, services, and docs (G+/)"
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+        POPUP_RECORD.update(popups=None, made=0)
+
+    def with_search(self, screen: Screen, *results) -> ScreenNode:
+        """Put the Portal's global search box on `screen`; once something is typed into it, its
+        dropdown holds `results`. Returns the box."""
+        dropdown = ScreenNode(attrs={"id": "results"}, children=Screen(*results), tree="- listbox")
+        box = ScreenNode(attrs={"aria-controls": "results"}, on_fill=lambda: screen.add(("listbox", "", dropdown)))
+        screen.add(("combobox", self.SEARCH_BOX, box))
+        return box
+
+    @staticmethod
+    def result(section: str, whole: str) -> ScreenNode:
+        return ScreenNode(section=("", section, whole))
+
+    def open(self, screen: Screen, name: str = LB, at_start: bool = True) -> tuple[dict, run.Runner, mock.MagicMock]:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=[]) as candidates:
+            record = self.quietly(lambda: r.open_resource(self.STEP, self.ITEM, name, at_start=at_start))
+        return record, r, candidates
+
+    def test_the_link_of_that_name_is_clicked_without_asking(self) -> None:
+        link, button = ScreenNode(), ScreenNode()
+        record, r, _ = self.open(Screen(("button", self.LB, button), ("link", self.LB, link)))
+        self.assertEqual((record["kind"], record["label"], record["outcome"]), ("navigation", self.LB, "match"))
+        self.assertEqual((link.clicked, button.clicked, r.ask.prompts), (1, 0, []))
+        self.assertEqual(self.recording["steps"]["9.9.1"]["labels"], {})        # nothing to replay
+
+    def test_a_grid_cell_or_a_row_of_that_name_counts_too(self) -> None:
+        for role in ("gridcell", "row"):
+            with self.subTest(role=role):
+                node = ScreenNode()
+                record, _, _ = self.open(Screen((role, self.LB, node), ("link", self.LB + "-pip", ScreenNode())))
+                self.assertEqual((record["outcome"], node.clicked), ("match", 1))
+
+    def test_a_resource_not_on_screen_is_opened_from_the_global_search(self) -> None:
+        screen = Screen(("link", self.LB + "-pip", ScreenNode()))
+        found, near = self.result("Resources", self.LB), self.result("Resources", self.LB + "-pip")
+        box = self.with_search(screen, ("option", self.LB, found), ("option", self.LB + "-pip", near))
+        record, r, candidates = self.open(screen)
+        self.assertEqual((record["outcome"], record["observed"]), ("match", "opened from the Portal's search"))
+        self.assertEqual((box.filled, box.pressed, found.clicked, near.clicked, r.ask.prompts),
+                         ([self.LB], [], 1, 0, []))                              # opened: nothing to close
+        self.assertGreaterEqual(r.page.now, run.FIND_TIMEOUT_MS / 1000)          # the screen first, as long as a label
+        candidates.assert_not_called()
+
+    def test_later_in_a_chain_a_resource_is_looked_for_on_screen_only(self) -> None:
+        # The label before it opened a picker or a list (5.3.6, 5.2.3): a search would leave it.
+        screen = Screen(("link", self.LB + "-pip", ScreenNode()))
+        found = self.result("Resources", self.LB)
+        box = self.with_search(screen, ("option", self.LB, found))
+        record, r, _ = self.open(screen, at_start=False)
+        self.assertEqual((record["outcome"], record["severity"], record["category"]),
+                         ("drift", "blocking", run.MISSING_RESOURCE))
+        self.assertEqual(record["observed"], f"no link, cell or row named '{self.LB}' on screen")
+        self.assertEqual((box.filled, found.clicked, r.ask.prompts), ([], 0, []))
+        self.assertFalse((self.tmp / "logs" / "test" / "search-9.9.1.aria.txt").exists())
+        on_screen = ScreenNode()
+        record, _, _ = self.open(Screen(("gridcell", self.LB, on_screen)), at_start=False)
+        self.assertEqual((record["outcome"], record["observed"], on_screen.clicked), ("match", None, 1))
+
+    def test_the_global_search_types_the_name_with_its_placeholders_filled(self) -> None:
+        self.recording["placeholders"]["[yourtenant]"] = "contoso"
+        screen = Screen()
+        vault = self.result("Resources", "contoso-skycraft-kv")
+        box = self.with_search(screen, ("option", "contoso-skycraft-kv", vault))
+        record, _, _ = self.open(screen, name="[yourtenant]-skycraft-kv")
+        self.assertEqual((record["outcome"], box.filled, vault.clicked), ("match", ["contoso-skycraft-kv"], 1))
+
+    def test_a_resource_neither_on_screen_nor_in_the_search_is_blocking_drift_of_the_step(self) -> None:
+        button = ScreenNode()
+        screen = Screen(("button", self.LB, button), ("link", self.LB + "-pip", ScreenNode()))
+        box = self.with_search(screen, ("option", self.LB + "-pip", self.result("Resources", self.LB + "-pip")))
+        record, r, candidates = self.open(screen)
+        self.assertEqual((record["outcome"], record["severity"], record["category"]),
+                         ("drift", "blocking", run.MISSING_RESOURCE))
+        self.assertEqual(record["observed"], f"no link, cell or row named '{self.LB}' on screen, "
+                                             "and no result of that name in the Portal's search")
+        self.assertIsNone(record["proposedEdit"])
+        self.assertEqual((r.ask.prompts, button.clicked), ([], 0))               # no candidate prompt, no stand-in
+        candidates.assert_not_called()
+        self.assertEqual(self.recording["steps"]["9.9.1"]["labels"], {})
+        self.assertTrue((self.tmp / "logs" / "test" / "blade-9.9.1-594.aria.txt").is_file())
+        self.assertTrue((self.tmp / "logs" / "test" / "search-9.9.1.aria.txt").is_file())
+        self.assertEqual((box.filled, box.pressed), ([self.LB, ""], ["Escape"]))   # the search is closed again
+
+    def test_several_exact_results_in_the_search_or_no_search_box_are_unknown(self) -> None:
+        screen = Screen()
+        first, second = self.result("Resources", self.LB), self.result("Resources", self.LB)
+        box = self.with_search(screen, ("option", self.LB, first), ("option", self.LB, second))
+        record, r, _ = self.open(screen)
+        self.assertEqual((record["outcome"], record["observed"]),
+                         ("unknown", f"ambiguous: 2 visible results match, none of them under Services named '{self.LB}'"))
+        self.assertEqual((first.clicked, second.clicked, r.ask.prompts), (0, 0, []))
+        self.assertEqual((box.filled, box.pressed), ([self.LB, ""], ["Escape"]))   # the search is closed again
+        record, _, _ = self.open(Screen())
+        self.assertEqual((record["outcome"], record["observed"]),
+                         ("unknown", "LookupError: the Portal's search box is not on screen"))
+
+    def test_two_resources_of_that_name_are_unknown_not_a_guess(self) -> None:
+        first, second = ScreenNode(), ScreenNode()
+        record, _, _ = self.open(Screen(("link", self.LB, first), ("link", self.LB, second)))
+        self.assertEqual((record["outcome"], record["observed"]),
+                         ("unknown", f"ambiguous: 2 visible elements match named '{self.LB}'"))
+        self.assertEqual((first.clicked, second.clicked), (0, 0))
+
+    def test_a_placeholder_is_filled_from_the_recording_and_one_left_is_unknown(self) -> None:
+        self.recording["placeholders"]["[yourtenant]"] = "contoso"
+        vault = ScreenNode()
+        record, _, _ = self.open(Screen(("link", "contoso-skycraft-kv", vault)), name="[yourtenant]-skycraft-kv")
+        self.assertEqual((record["outcome"], record["label"], vault.clicked), ("match", "[yourtenant]-skycraft-kv", 1))
+        literal = ScreenNode()
+        record, r, _ = self.open(Screen(("link", "skycraft-auth-[uniqueID]", literal)), name="skycraft-auth-[uniqueID]")
+        self.assertEqual((record["outcome"], literal.clicked, r.ask.prompts), ("unknown", 0, []))
+        self.assertEqual(record["observed"], "resource name 'skycraft-auth-[uniqueID]' has an unresolved placeholder; "
+                                             "add a placeholder to the recording")
+
+    def test_run_step_opens_the_resources_and_clicks_the_labels_in_order(self) -> None:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        done: list[tuple] = []
+
+        def acting(how: str, **fields):
+            def act(step, item, label, **where):
+                done.append((how, label, *where.values()))
+                record = r.new_record(step, item["kind"], label)
+                record.update(outcome="match", **fields)
+                return record
+            return act
+
+        with mock.patch.object(r, "act_on_label", side_effect=acting("label")), \
+                mock.patch.object(r, "open_resource", side_effect=acting("resource")):
+            self.assertTrue(self.quietly(lambda: r.run_step(self.STEP)))
+        self.assertEqual(done, [("label", "Load balancers"), ("resource", self.LB, False), ("label", "Backend pools")])
+        done.clear()
+        first = dict(self.ITEM, labels=[self.LB, "Backend pools"], resources=[0])
+        with mock.patch.object(r, "act_on_label", side_effect=acting("label")), \
+                mock.patch.object(r, "open_resource", side_effect=acting("resource")):
+            self.assertTrue(self.quietly(lambda: r.run_step(dict(self.STEP, items=[first]))))
+        self.assertEqual(done, [("resource", self.LB, True), ("label", "Backend pools")])   # at the start: searchable
+        done.clear()
+        missing = acting("resource", severity="blocking", category=run.MISSING_RESOURCE)
+        with mock.patch.object(r, "act_on_label", side_effect=acting("label")), \
+                mock.patch.object(r, "open_resource", side_effect=lambda *a, **k: dict(missing(*a, **k), outcome="drift")):
+            self.assertFalse(self.quietly(lambda: r.run_step(self.STEP)))
+        self.assertEqual(done, [("label", "Load balancers"), ("resource", self.LB, False)])   # the chain stops there
+        screenshot = [x for x in r.records if x["kind"] == "screenshot"][-1]
+        self.assertEqual((screenshot["outcome"], screenshot["category"]), ("match", None))   # the images are not stale
+
+    def test_the_summary_counts_a_missing_resource_as_blocking_and_proposes_no_edit(self) -> None:
+        r = self.runner()
+        record = r.new_record(self.STEP, "navigation", self.LB)
+        record.update(outcome="drift", severity="blocking", category=run.MISSING_RESOURCE,
+                      observed=f"no link, cell or row named '{self.LB}' on screen")
+        r.records.append(record)
+        self.assertEqual(self.quietly(r.finish), 1)
+        summary = (r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn(f"## blocking (1)\n- step 9.9.1 navigation `{self.LB}`: no link, cell or row named '{self.LB}' "
+                      "on screen (an earlier step or lab, or the view, not the guide)\n", summary)
+        self.assertIn("## proposed edits (0)\n- none", summary)
 
 
 class FieldValueTests(RunnerTestCase):
