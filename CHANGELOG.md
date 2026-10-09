@@ -9,6 +9,28 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0](https://github.com/mbiszczanik/skycraft/compare/v0.13.0...v0.14.0) (2026-10-09)
+
+
+### Features
+
+* **guide-drift:** open the resources a navigation chain names ([#256](https://github.com/mbiszczanik/skycraft/issues/256)) ([c8dbef6](https://github.com/mbiszczanik/skycraft/commit/c8dbef61aeb28b1b9677eb5374676a38e4648d52))
+
+
+### Bug Fixes
+
+* **lab-1.1:** count failed checks in Test-Lab.ps1 and exit 1 when any failed ([#262](https://github.com/mbiszczanik/skycraft/issues/262)) ([e98bc69](https://github.com/mbiszczanik/skycraft/commit/e98bc698767b5691c5d583f8ca128637d90caa5c))
+* **lab-5.2:** count a failed cleanup lookup instead of reading it as absent ([#260](https://github.com/mbiszczanik/skycraft/issues/260)) ([0f6c469](https://github.com/mbiszczanik/skycraft/commit/0f6c4691901c790fe547b540227d4bcecfcd7977))
+* **lab-cycle:** continue past a failed validation, stop only on a failed deploy ([#264](https://github.com/mbiszczanik/skycraft/issues/264)) ([5269060](https://github.com/mbiszczanik/skycraft/commit/5269060786e237d652e451d8d81b079745171e61))
+* **labs-1.2-1.3:** count failed checks in Test-Lab.ps1 and exit 1 when any failed ([#261](https://github.com/mbiszczanik/skycraft/issues/261)) ([48ecab0](https://github.com/mbiszczanik/skycraft/commit/48ecab0351d6b9be706c5004c2c92d584554c8bd))
+* **network:** keep later-lab state when Lab 2.1 or Lab 3.1 is re-run ([#265](https://github.com/mbiszczanik/skycraft/issues/265)) ([2ea5b34](https://github.com/mbiszczanik/skycraft/commit/2ea5b348c9afc294ba0b0eb4c1e9b5dc9d37164e))
+
+
+### Documentation
+
+* **lab-1.3:** give the Advisor alert's action group its own name ([#251](https://github.com/mbiszczanik/skycraft/issues/251)) ([05419df](https://github.com/mbiszczanik/skycraft/commit/05419df66758b4e603c9e5ce7567c5a137ca6620))
+* **labs-1.3-2.3:** put numbered steps glued to a caption on their own lines ([#249](https://github.com/mbiszczanik/skycraft/issues/249)) ([f5dbe47](https://github.com/mbiszczanik/skycraft/commit/f5dbe472f96950bb0515dec2fd0b31f6fe74e88d))
+
 ## [0.13.0](https://github.com/mbiszczanik/skycraft/compare/v0.12.0...v0.13.0) (2026-10-09)
 
 
