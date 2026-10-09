@@ -2,7 +2,7 @@
 SUMMARY: Lab 3.1 - Virtual Network Module
 DESCRIPTION: Deploys a Virtual Network with typed subnet definitions (optional NSG association and delegation) for SkyCraft Lab 3.1.
 AUTHOR/S: Marcin Biszczanik
-VERSION: 1.2.0
+VERSION: 1.3.0
 DEPLOYMENT: [Internal use via Orchestrator]
 ======================================================*/
 
@@ -65,6 +65,9 @@ resource resVnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
         networkSecurityGroup: empty(subnet.?nsgId) ? null : {
           id: subnet.nsgId!
         }
+        // Set explicitly, as Lab 2.1 does (docs/bicep-standards.md section 4.5): 'Disabled' is
+        // what the portal creates, so both labs create subnets the same way.
+        privateEndpointNetworkPolicies: 'Disabled'
         // The delegation is named after its service, exactly as the AVM subnet module used in
         // Lab 2.1 records it, so both labs describe the same subnet without a rename.
         delegations: empty(subnet.?delegation) ? null : [

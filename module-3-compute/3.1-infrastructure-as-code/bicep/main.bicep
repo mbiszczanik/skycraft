@@ -1,9 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 3.1 - Infrastructure as Code Orchestrator
-DESCRIPTION: Orchestrates SkyCraft Lab 3.1 (resource groups, hub and dev VNets, NSGs, public IP, load balancer) with hand-written local modules - writing them is this lab's learning objective (docs/bicep-standards.md section 8.2)
+DESCRIPTION: Orchestrates SkyCraft Lab 3.1 (resource groups, hub and dev VNets, NSGs, public IP, load balancer) with hand-written local modules - writing them is this lab's learning objective (docs/bicep-standards.md section 8.2). A VNet that already exists is referenced, not redeployed (see parHubVnetExists).
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev (selects parameters/dev.bicepparam; -Environment prod selects parameters/prod.bicepparam)
 AUTHOR/S: Marcin Biszczanik
-VERSION: 1.1.0
+VERSION: 1.2.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -39,6 +39,19 @@ param parDevVnetAddressPrefix string = '10.1.0.0/16'
 @description('Prod VNet address space (reserved here; the prod spoke is built in Lab 2.1)')
 param parProdVnetAddressPrefix string = '10.2.0.0/16'
 
+// A VNet deployment removes the peerings it does not list, and replaces each subnet it does list
+// with exactly what it declares (issue #188: redeploying the hub after Lab 2.1 removed hub-to-prod).
+// The network module lists every subnet and no peerings, so redeploying the hub or dev VNet after
+// Module 2 would remove hub-to-prod, hub-to-dev and dev-to-hub, and on the dev VNet would also swap
+// the subnet NSGs and drop the service endpoints Lab 2.2 attached. scripts/Deploy-Bicep.ps1 looks
+// each VNet up and sets these flags through the parameter files; a VNet that exists is then only
+// referenced.
+@description('True when the hub VNet already exists (set by scripts/Deploy-Bicep.ps1 from a lookup). The hub is then referenced, not redeployed, so its peerings survive.')
+param parHubVnetExists bool = false
+
+@description('True when the dev VNet already exists (set by scripts/Deploy-Bicep.ps1 from a lookup). The dev VNet is then referenced, not redeployed, so its peering and the Lab 2.2 subnet settings survive.')
+param parDevVnetExists bool = false
+
 /*******************
 *    Variables     *
 *******************/
@@ -62,6 +75,10 @@ var varProdRgName = 'prod-${parProject}-${varLocationShortCode}-rg'
 var varPlatformPrefix = 'platform-${parProject}-${varLocationShortCode}'
 var varDevPrefix = 'dev-${parProject}-${varLocationShortCode}'
 
+// The network module names its VNet '<prefix>-vnet'; the existing references below use the same names.
+var varHubVnetName = '${varPlatformPrefix}-vnet'
+var varDevVnetName = '${varDevPrefix}-vnet'
+
 /*******************
 *    Resources     *
 *******************/
@@ -83,6 +100,18 @@ resource resProdRg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
   name: varProdRgName
   location: parLocation
   tags: varTagsProd
+}
+
+// The VNets by name, whether this deployment creates them or they already stand. Only their IDs
+// are read (for the outputs), and an ID needs no lookup, so this works on a first deployment too.
+resource resHubVnet 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
+  name: varHubVnetName
+  scope: resPlatformRg
+}
+
+resource resDevVnet 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
+  name: varDevVnetName
+  scope: resDevRg
 }
 
 /*******************
@@ -158,15 +187,17 @@ module modDevWorldNsg 'modules/nsg.bicep' = {
   }
 }
 
-// Virtual networks
-module modHubVnet 'modules/network.bicep' = {
+// Virtual networks - deployed only when they do not exist yet (see parHubVnetExists)
+module modHubVnet 'modules/network.bicep' = if (!parHubVnetExists) {
   name: 'hubVnetDeployment'
   scope: resPlatformRg
   params: {
     parNamePrefix: varPlatformPrefix
     parLocation: parLocation
     parVnetAddressPrefix: parHubVnetAddressPrefix
-    // Same subnet layout as the Lab 2.1 hub, so re-running this lab after Module 2 changes nothing.
+    // Same subnet layout as the Lab 2.1 hub. Only used when this lab creates the hub: after
+    // Module 2 the hub exists and is referenced instead, because redeploying it would remove
+    // the peerings Lab 2.1 created.
     parSubnets: [
       {
         name: 'AzureBastionSubnet'
@@ -181,7 +212,7 @@ module modHubVnet 'modules/network.bicep' = {
   }
 }
 
-module modDevVnet 'modules/network.bicep' = {
+module modDevVnet 'modules/network.bicep' = if (!parDevVnetExists) {
   name: 'devVnetDeployment'
   scope: resDevRg
   params: {
@@ -204,8 +235,8 @@ module modDevVnet 'modules/network.bicep' = {
         addressPrefix: '10.1.3.0/24'
       }
       {
-        // Kept in sync with Lab 2.1's dev VNet so re-deploying 3.1 does not drop
-        // the App Service delegated subnet that Lab 3.4 integrates with.
+        // Same layout as Lab 2.1's dev VNet, so a dev VNet this lab creates still has the
+        // App Service delegated subnet that Lab 3.4 integrates with.
         name: 'AppServiceSubnet'
         addressPrefix: '10.1.4.0/24'
         delegation: 'Microsoft.Web/serverFarms'
@@ -286,8 +317,10 @@ output outPlatformResourceGroupName string = resPlatformRg.name
 output outDevResourceGroupName string = resDevRg.name
 output outProdResourceGroupName string = resProdRg.name
 
-output outHubVnetId string = modHubVnet.outputs.outVnetId
-output outDevVnetId string = modDevVnet.outputs.outVnetId
+output outHubVnetId string = resHubVnet.id
+output outDevVnetId string = resDevVnet.id
+output outHubVnetDeployed bool = !parHubVnetExists
+output outDevVnetDeployed bool = !parDevVnetExists
 
 output outDevLoadBalancerId string = modDevLoadBalancer.outputs.outLoadBalancerId
 output outDevLoadBalancerPublicIp string = modDevLbPublicIp.outputs.outIpAddress

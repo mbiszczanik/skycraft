@@ -74,8 +74,8 @@ You'll create Infrastructure as Code templates to automate SkyCraft deployment:
 Before starting this lab:
 
 - [ ] Completed Module 2 (Virtual Networking) - Section 2 exports the ARM templates of the VNets, NSGs and load balancers Module 2 created, so they should exist for that exercise
-- [ ] Nothing has to pre-exist for the **deployment** itself: `scripts/Deploy-Bicep.ps1` deploys `bicep/main.bicep` at subscription scope, and the template creates the three resource groups, the NSGs, the hub and dev VNets and the dev load balancer (`tools/lab-cycle-manifest.psd1` lists this lab as depending on 1.2 only). Re-running it over Module 2's resources is an idempotent update.
-- [ ] PowerShell 7+ and the `Az` module (Az.Accounts, Az.Resources) - `scripts/Deploy-Bicep.ps1` deploys with Az PowerShell
+- [ ] Nothing has to pre-exist for the **deployment** itself: `scripts/Deploy-Bicep.ps1` deploys `bicep/main.bicep` at subscription scope, and the template creates the three resource groups, the NSGs, the hub and dev VNets and the dev load balancer (`tools/lab-cycle-manifest.psd1` lists this lab as depending on 1.2 only). Re-running it after Module 2 does not redeploy the hub or dev VNet: the script looks both up first, and a VNet that already exists is only referenced, because redeploying it would remove the peerings Lab 2.1 created (and, on the dev VNet, the NSGs and service endpoints Lab 2.2 attached). The what-if then shows neither VNet as a change.
+- [ ] PowerShell 7+ and the `Az` module (Az.Accounts, Az.Resources, Az.Network) - `scripts/Deploy-Bicep.ps1` deploys with Az PowerShell
 - [ ] Bicep CLI on `PATH` (standalone install, e.g. `winget install -e --id Microsoft.Bicep`; verify with `bicep --version`) - the copy `az bicep install` adds is not visible to Az PowerShell
 - [ ] Azure CLI 2.50.0 or later - optional, only for the `az bicep build` / `decompile` exercises
 - [ ] Visual Studio Code installed (recommended)
@@ -1349,6 +1349,12 @@ Test-AzSubscriptionDeployment `
 # result means the template validated cleanly.
 ```
 
+> [!WARNING]
+> Validate with the parameter file, but deploy only with `.\scripts\Deploy-Bicep.ps1`. Deployed
+> directly with `dev.bicepparam` (for example `New-AzSubscriptionDeployment`), the template does
+> not know which VNets already exist, so it redeploys the hub and dev VNets and removes the
+> peerings Lab 2.1 created.
+
 > [!NOTE]
 > `az bicep build` is the one az CLI command kept in this section. It is a
 > **local compile** — it never contacts your subscription, so it cannot hit the
@@ -1370,7 +1376,8 @@ The script builds one parameter set and previews it with
 `Get-AzSubscriptionDeploymentWhatIfResult` — the same arguments the real
 deployment would use, so the preview cannot drift from the deploy.
 
-**Expected Output**:
+**Expected Output** on a subscription where nothing from this lab exists yet (both VNets are
+created, each with its subnets):
 
 ```
 Resource changes: 15 to create, 0 to modify, 0 to delete.
@@ -1394,6 +1401,11 @@ Resource changes: 15 to create, 0 to modify, 0 to delete.
 + Microsoft.Network/publicIPAddresses
   ~ dev-skycraft-swc-lb-pip [Create]
 ```
+
+If you completed Module 2, the output looks different: the script reports that
+`platform-skycraft-swc-vnet` and `dev-skycraft-swc-vnet` already exist, so neither VNet appears
+in the what-if at all. Only `auth-nsg` and `world-nsg` are created; the resource groups, the dev
+public IP and the load balancer already exist and show as unchanged or modified.
 
 **Color Legend**:
 
@@ -1978,6 +1990,8 @@ Test your understanding with these questions:
    > **Conceptual answer.** This lab ships `dev.bicepparam` and
    > `prod.bicepparam`, not per-region parameter files. The commands above
    > illustrate the pattern; they will not run against this repo as written.
+   > Deploying `main.bicep` directly like this also redeploys the hub and dev VNets
+   > and removes their peerings; `Deploy-Bicep.ps1` is what prevents that.
    > The lab's real deployment path is
    > `.\scripts\Deploy-Bicep.ps1 -Environment dev|prod -Location swedencentral|northeurope`.
 
