@@ -112,7 +112,7 @@ function Get-PhaseOrder {
 function Get-DependentPhase {
     <#
     .SYNOPSIS
-        Returns every phase reachable from the given id - what a failure takes down with it.
+        Returns every phase reachable from the given id - what a blocking failure takes down with it.
 
     .DESCRIPTION
         NOT USED BY THE ENGINE'S SKIP LOGIC, deliberately. The engine does not need it: walking the
@@ -120,6 +120,10 @@ function Get-DependentPhase {
         at a time, and that is simpler than precomputing reachability. This exists for the report,
         which needs the whole set at once - what a single failure cost the run - without re-walking
         the order.
+
+        Only a failure that blocks costs anything: Test-LabCycleStatusBlocksDependent decides that,
+        and a failed validation after a good deploy does not. This function answers the graph
+        question alone and knows nothing about statuses.
 
         Transitive, not just the immediate dependents. A phase two edges below a failure would
         deploy against resources that were never created, so it is skipped for the same reason
@@ -165,6 +169,112 @@ function Get-DependentPhase {
     }
 
     @($found)
+}
+
+# The two statuses a failed VALIDATION produces. Listed rather than matched by pattern, so the
+# blocking rule fails closed: a 'Failed(...)' status added later blocks its dependents until
+# someone decides here that it should not.
+$script:ValidationOnlyStatuses = @('Failed(Test)', 'Failed(Test,Timeout)')
+
+function Get-LabCycleFailedStatus {
+    <#
+    .SYNOPSIS
+        Names the status of a failed phase from the step that failed and whether it timed out.
+
+    .DESCRIPTION
+        THE BLOCKING RULE KEYS ON THE STEP, which is what issue #73 asked for and #259 restored.
+        A phase is Deploy, then an optional PostDeploy, then Test.
+
+          Deploy      'Failed', or 'Failed(Timeout)'. Nothing below it can be trusted to exist, so
+                      its dependents are skipped.
+          PostDeploy  The same two statuses, and they block for the same reason. A PostDeploy step
+                      creates part of the lab's end state (lab 5.2's is the blob backup instance
+                      its Bicep cannot create), and nothing records which of its resources a
+                      dependent reads, so the safe reading is that the lab did not finish deploying.
+          Test        'Failed(Test)', or 'Failed(Test,Timeout)'. The deploy and any PostDeploy
+                      succeeded, so everything the labs below need was created, and they are not
+                      blocked. The failure is still a failure: it is counted in the exit code and
+                      the report.
+
+        A timed-out validator does not block either. The deploy finished before the validator
+        started, so a hung check says nothing about what the dependents will find. A timeout in
+        Deploy or PostDeploy does block: the step was killed part-way, and what it left behind is
+        unknown.
+
+        Any other step name, or none, gets a blocking status. An unknown step is not evidence
+        that the deploy succeeded.
+
+    .PARAMETER FailedStep
+        The Kind of the step that returned non-zero: Deploy, PostDeploy or Test.
+
+    .PARAMETER TimedOut
+        The step was killed at the phase's TimeoutMs.
+
+    .EXAMPLE
+        Get-LabCycleFailedStatus -FailedStep Test -TimedOut
+        # Failed(Test,Timeout)
+
+    .NOTES
+        Project: SkyCraft
+        Issue:   #259
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter()]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$FailedStep,
+
+        [Parameter()]
+        [switch]$TimedOut
+    )
+
+    if ($FailedStep -eq 'Test') {
+        if ($TimedOut) { return 'Failed(Test,Timeout)' }
+        return 'Failed(Test)'
+    }
+    if ($TimedOut) { return 'Failed(Timeout)' }
+    'Failed'
+}
+
+function Test-LabCycleStatusBlocksDependent {
+    <#
+    .SYNOPSIS
+        Says whether a phase in this status stops the phases that depend on it from running.
+
+    .DESCRIPTION
+        True for a phase that was Skipped - what it would have created does not exist - and for
+        every Failed status except the validation-only ones that Get-LabCycleFailedStatus gives a
+        failed Test step. Everything else is false: Succeeded, DryRun, and a phase this run never
+        saw, which is how a dependency outside -Labs counts as already satisfied.
+
+        Used by the engine to decide what to skip and by the report to say what a failure cost, so
+        the two cannot disagree about which failures block.
+
+    .PARAMETER Status
+        The phase status, as the engine records it.
+
+    .EXAMPLE
+        Test-LabCycleStatusBlocksDependent -Status 'Failed(Test)'
+        # False: the deploy succeeded, so the labs below it are not blocked.
+
+    .NOTES
+        Project: SkyCraft
+        Issue:   #259
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter()]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$Status
+    )
+
+    if ($Status -eq 'Skipped') { return $true }
+    if ($Status -notlike 'Failed*') { return $false }
+    $Status -notin $script:ValidationOnlyStatuses
 }
 
 function Invoke-LabScriptProcess {
@@ -515,6 +625,13 @@ function Write-LabCycleReport {
     $lines.Add('')
     $lines.Add("- Succeeded: $(@($Phases | Where-Object { $_.Status -like 'Succeeded*' }).Count)")
     $lines.Add("- Failed: $($failed.Count)")
+    # Said in the summary, not only per phase further down: 'Failed: 3' on its own reads as three
+    # broken deployments and three stopped branches, and a reader who stops here should not have
+    # to work out from the table which of them blocked nothing.
+    $validationOnly = @($failed | Where-Object { -not (Test-LabCycleStatusBlocksDependent -Status $_.Status) })
+    if ($validationOnly.Count -gt 0) {
+        $lines.Add("  - of which failed validation after a successful deploy, so they do not block their dependents: $($validationOnly.Count)")
+    }
     $lines.Add("- Skipped: $($skipped.Count)")
     $lines.Add("- Excluded: $($excluded.Count)")
     $lines.Add('')
@@ -539,7 +656,10 @@ function Write-LabCycleReport {
         $safeId   = "$($phase.Id)" -replace '[^A-Za-z0-9._-]', '-'
         # 'Skipped' belongs with 'Excluded' and 'DryRun': all three ran no step, so none of them
         # wrote a transcript. Naming one anyway sends the reader to a file that does not exist.
-        $log      = if ($LogDirectory -and $phase.Status -notin 'Excluded', 'DryRun', 'Skipped') { "$safeId.deploy.log" } else { '-' }
+        # A failed phase names the transcript of the step that failed: for a Failed(Test) the
+        # deploy log is the one transcript that shows nothing wrong.
+        $logStep  = if ($phase.FailedStep) { "$($phase.FailedStep)".ToLowerInvariant() } else { 'deploy' }
+        $log      = if ($LogDirectory -and $phase.Status -notin 'Excluded', 'DryRun', 'Skipped') { "$safeId.$logStep.log" } else { '-' }
         $exit     = if ($null -ne $phase.ExitCode) { $phase.ExitCode } else { '-' }
         $attempts = if ($phase.Attempts) { $phase.Attempts } else { '-' }
         $lines.Add("| $($phase.Id) | $($phase.Lab) | $($phase.Status) | $exit | $attempts | $($phase.DurationMs) | $log |")
@@ -553,9 +673,21 @@ function Write-LabCycleReport {
         foreach ($phase in $failed) {
             # What the failure cost, stated rather than left to be derived. This is what
             # Get-DependentPhase is for: everything downstream never ran because of this phase.
-            $cost = @(Get-DependentPhase -Phases $LivePhases -Id $phase.Id) | Sort-Object
-            $costText = if ($cost.Count -gt 0) { "cost $($cost.Count) phase(s): $($cost -join ', ')" } else { 'cost no other phase' }
-            $lines.Add("- **$($phase.Id)** ($($phase.Lab)) - $($phase.Status), $($phase.FailedStep) exited $($phase.ExitCode); $costText")
+            # A failed validation after a good deploy blocks nothing, and listing its dependents
+            # here would send a reader to phases that have their own results above. Whether they
+            # ran is theirs to say - one may have been skipped for another cause, or sit outside
+            # -Labs - so this line claims only what this phase did.
+            if (Test-LabCycleStatusBlocksDependent -Status $phase.Status) {
+                $cost = @(Get-DependentPhase -Phases $LivePhases -Id $phase.Id) | Sort-Object
+                $costText = if ($cost.Count -gt 0) { "cost $($cost.Count) phase(s): $($cost -join ', ')" } else { 'cost no other phase' }
+            }
+            else {
+                $costText = 'the deploy succeeded, so this does not block its dependents'
+            }
+            # A killed step has no exit code of its own; the number recorded is the runner's
+            # sentinel, and printing it as 'exited' reads as the lab's answer.
+            $how = if ("$($phase.Status)" -like '*Timeout)') { 'timed out' } else { "exited $($phase.ExitCode)" }
+            $lines.Add("- **$($phase.Id)** ($($phase.Lab)) - $($phase.Status), $($phase.FailedStep) $how; $costText")
         }
     }
     $lines.Add('')
@@ -1442,7 +1574,8 @@ function Test-LabCycleToolingFloor {
     $results
 }
 
-Export-ModuleMember -Function Get-PhaseOrder, Get-DependentPhase, Invoke-LabScriptProcess,
+Export-ModuleMember -Function Get-PhaseOrder, Get-DependentPhase, Get-LabCycleFailedStatus,
+    Test-LabCycleStatusBlocksDependent, Invoke-LabScriptProcess,
     Test-LabCycleSubscription, Test-LabCyclePreflight, Test-LabCycleActionAllowed, Invoke-LabCycleCanary,
     Get-LabCycleLockOwner, New-LabCycleLock, Get-LabCycleFailureClass, Write-LabCycleReport,
     Write-LabCycleResultLine, Compare-LabCycleVersion, Test-LabCycleToolingFloor
