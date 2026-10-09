@@ -10,6 +10,8 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   env_secrets          the '${NAME}' references whose values are addresses (for the Redactor)
   missing_env          the '${NAME}' references the environment does not set
   resolve_value        a field value with the recording's placeholders and overrides applied
+  resource_name        a resource name of a navigation chain with the placeholders filled, or
+                       None when a placeholder is left (#199)
   value_action         type it, leave it ('[Leave blank]'), or report an unresolved [token]
   field_action         what to do with a field item and the value to do it with: as above, or
                        report a value parse.py marked '"literal": false' that the recording
@@ -197,10 +199,27 @@ def resolve_value(recording: dict, step: dict, label: str, value: str) -> str:
     override = value_override(recording, step, label)
     if override is not None:
         return expand_env(override)
+    return fill_placeholders(recording, value)
+
+
+def fill_placeholders(recording: dict, text: str) -> str:
+    """`text` with each of the recording's placeholders ('[yourtenant]') replaced."""
     for placeholder, replacement in recording.get("placeholders", {}).items():
-        if placeholder in value:
-            value = value.replace(placeholder, expand_env(replacement))
-    return value
+        if placeholder in text:
+            text = text.replace(placeholder, expand_env(replacement))
+    return text
+
+
+# What is left of a placeholder in a resource name: '[yourtenant]', '<your name>'.
+NAME_TOKEN = re.compile(r"\[[^\]]+\]|<[^<>]+>")
+
+
+def resource_name(recording: dict, name: str) -> str | None:
+    """The resource name a navigation chain gives in a code span (#199) with the recording's
+    placeholders filled; None when a bracket or angle-bracket token is left, so the runner
+    reports the step rather than looking for the token."""
+    name = fill_placeholders(recording, name)
+    return None if NAME_TOKEN.search(name) else name
 
 
 # Checkbox and toggle states as the guides write them: '✅ Checked', '❌ Unchecked', '☐',

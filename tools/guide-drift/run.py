@@ -35,6 +35,19 @@ blade's title heading has no content after it), the console says so once and the
 for up to BLADE_LOAD_TIMEOUT_MS more (BLADE_EMPTY_TIMEOUT_MS for a titled blade); once the blade
 has rendered, it is looked for FIND_TIMEOUT_MS again. Only then is the person asked.
 
+A resource a navigation chain names in a code span ('**Load balancers** -> `dev-skycraft-swc-lb`
+-> **Backend pools**', parse.py's "resources") is opened as the one visible link, grid cell or row
+of that exact name, once the recording's placeholders are filled; a name with a placeholder left
+is unknown. It is looked for as long as a label. When it opens the chain and is not on screen
+(such a chain may start from anywhere: 'Navigate to `prodskycraftswcsa` -> ...'), the name is
+typed into the Portal's global search and the result named exactly so is opened, as for a
+'Search for **X**' item; a search that finds nothing is closed again. Later in a chain it is
+looked for on screen only: the label before it opened the list or picker it is in (an endpoint
+picker in a wizard, a vault's backup items), and a search would leave that. The person is never
+asked about it: when it is not found, the step fails with blocking drift in category
+'missing-resource' and no proposed edit, as an earlier step, another lab or the view the run is
+on is at fault, not the guide's name (issue #199). Its screenshot is not marked stale for it.
+
 When a step does not go through, the person chooses: c, finish it by hand and continue; s, skip
 this step and continue with the next one, giving the reason, which the summary lists under
 'skipped' (the step's own findings stay counted, and a later step that needed it may fail too
@@ -74,7 +87,7 @@ from playwright.sync_api import Browser, Error as PlaywrightError, Frame, Locato
 sys.path.insert(0, str(Path(__file__).parent))
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
-                       field_action, rejected_candidates, resolve_value, write_json)
+                       field_action, rejected_candidates, resolve_value, resource_name, write_json)
 
 Found = TypeVar("Found")     # what in_time() looks for
 
@@ -109,6 +122,9 @@ CANDIDATE_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "t
 FIELD_ROLES = ("textbox", "combobox", "checkbox", "radio")
 ACTION_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "checkbox", "radio")
 RESULT_ROLES = ("option", "link", "button", "menuitem")    # entries of the global search's results
+# A resource in a Portal list: the link in its name cell, the cell, or the whole row (#199).
+RESOURCE_ROLES = ("link", "gridcell", "row")
+MISSING_RESOURCE = "missing-resource"    # the category of a resource that is not on screen
 # The Portal's global search box, named "Search resources, services, and docs (G+/)".
 SEARCH_BOX = re.compile(r"^Search resources")
 # A blade's own search box (search scope 'blade'): a search box, or a text box whose accessible
@@ -548,6 +564,14 @@ def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
     return element
 
 
+def find_resource(page: Page, name: str) -> Locator | None:
+    """The visible link, grid cell or row (RESOURCE_ROLES) whose accessible name is exactly
+    `name`, then plain text of that name that is, or sits inside, an interactive element
+    (find_in_roles): a resource a navigation chain names (#199). No '+' is dropped and no menu
+    group is opened: a resource is listed, it is not a toolbar or menu entry."""
+    return find_in_roles(page, name, RESOURCE_ROLES)
+
+
 def in_time(page: Page, look: Callable[[], Found | None], ms: int = FIND_TIMEOUT_MS) -> Found | None:
     """What `look()` finds, asked every 250 ms until it finds something or `ms` (FIND_TIMEOUT_MS)
     has passed; None then. A blade renders its controls a moment after its heading (step 1.1.9:
@@ -750,6 +774,19 @@ def search_results(page: Page, frame: Frame, box: Locator, label: str,
     if ambiguous is not None:
         raise ambiguous
     return None
+
+
+def close_search(page: Page) -> None:
+    """Empty the Portal's global search box and press Escape, so a lookup that found nothing
+    leaves no dropdown open over the next step. Nothing happens when the box is gone, there are
+    several, or it cannot be typed in: the step has failed already."""
+    try:
+        found = search_box(page)
+        if found is not None:
+            found[1].fill("", timeout=FIND_TIMEOUT_MS)
+            found[1].press("Escape", timeout=FIND_TIMEOUT_MS)
+    except (PlaywrightError, Ambiguous):
+        pass
 
 
 def choose_search_box(boxes: list[dict]) -> tuple[int | None, str | None]:
@@ -1535,6 +1572,70 @@ class Runner:
             record.update(outcome="match", observed=note or decision.name)
         return record
 
+    def open_resource(self, step: dict, item: dict, name: str, at_start: bool = False) -> dict:
+        """Open the resource `name` that a navigation chain names in a code span (#199): fill the
+        recording's placeholders (resource_name), look for it as long as for a label (in_time,
+        then wait_for_blade) with find_resource, and click it.
+
+        `at_start`: the name opens the chain, before any label of the item. Such a chain may
+        start from anywhere ('Navigate to `prodskycraftswcsa` -> ...'), so when the name is not on
+        screen it is typed into the Portal's global search and the result named exactly `name` is
+        opened (search_portal, as for a search item of scope 'global'); a search without one is
+        closed again (close_search). Later in a chain the label before the name set where it is
+        listed (an endpoint picker in a Connection Monitor wizard, 5.3.6; a vault's backup items,
+        5.2.3), and a search would leave that view or open a same-named resource elsewhere, so it
+        is looked for on screen only.
+
+        Returns the result record: match; unknown for a placeholder left in the name, several
+        matches on screen or in the search, no search box or a failed click; or, when it is not
+        found, blocking drift in category MISSING_RESOURCE with no proposed edit. The deciders
+        are never asked and nothing is recorded: another element is no stand-in for a resource,
+        and an earlier step or lab that did not create it is no fault of the guide."""
+        record = self.new_record(step, item["kind"], name)
+        wanted = resource_name(self.recording, name)
+        if wanted is None:
+            record.update(outcome="unknown", observed=f"resource name '{name}' has an unresolved placeholder; "
+                                                      "add a placeholder to the recording")
+            return record
+
+        def look() -> Locator | None:
+            return find_resource(self.page, wanted)
+
+        try:
+            element = in_time(self.page, look)
+            if element is None:
+                element = self.wait_for_blade(step, item, name, look)
+            searched = element is None and at_start
+            if searched:
+                print(f"'{name}' is not on screen: looking it up in the Portal's search.")
+                try:
+                    element = search_portal(self.page, wanted,
+                                            diagnose=lambda tree: self.save_search_tree(step, tree))
+                except Ambiguous:
+                    close_search(self.page)
+                    raise
+                if element is None:
+                    close_search(self.page)
+            if element is None:
+                where = ", and no result of that name in the Portal's search" if searched else ""
+                record.update(outcome="drift", severity="blocking", category=MISSING_RESOURCE,
+                              observed=f"no link, cell or row named '{name}' on screen{where}")
+                return record
+            element.scroll_into_view_if_needed(timeout=FIND_TIMEOUT_MS)
+            if stays_disabled(self.page, element):
+                record.update(outcome="unknown", observed=f"disabled: '{name}'")
+                return record
+            element.click(timeout=FIND_TIMEOUT_MS)
+            self.page.wait_for_timeout(SETTLE_MS)
+        except Ambiguous as error:
+            record.update(outcome="unknown", observed=f"ambiguous: {error} named '{name}'")
+            return record
+        except (PlaywrightError, LookupError) as error:
+            record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
+            return record
+        record.update(outcome="match", observed="opened from the Portal's search" if searched else None)
+        return record
+
     def proposed_edit(self, line: int, old_label: str, new_label: str) -> dict | None:
         """The guide line with the bold label replaced; None when the line is out of range or does
         not carry the label in bold, so there is nothing to change."""
@@ -1584,8 +1685,11 @@ class Runner:
                 records = [record]
             else:
                 records = []
-                for label in item["labels"]:
-                    records.append(self.act_on_label(step, item, label))
+                resources = set(item.get("resources", ()))     # indices of resource names (#199)
+                for index, label in enumerate(item["labels"]):
+                    records.append(self.open_resource(step, item, label, at_start=(index == 0))
+                                   if index in resources
+                                   else self.act_on_label(step, item, label))
                     if records[-1]["outcome"] == "unknown" or records[-1].get("severity") == "blocking":
                         break
             for record in records:
@@ -1650,7 +1754,9 @@ class Runner:
         path = self.run_dir / f"Step-{step['id']}.png"
         self.page.screenshot(path=str(path), full_page=False)
         record = self.new_record(step, "screenshot", None)
-        drifted = any(r["step"] == step["id"] and r["outcome"] == "drift" for r in self.records)
+        # A missing resource is no drift of the guide, so it does not make the guide's images stale.
+        drifted = any(r["step"] == step["id"] and r["outcome"] == "drift" and r.get("category") != MISSING_RESOURCE
+                      for r in self.records)
         if step["images"] and drifted:
             record.update(outcome="drift", category="stale", observed=", ".join(step["images"]))
         else:
@@ -1803,9 +1909,7 @@ class Runner:
         lines = [f"# Guide drift run {self.args.run_id} - lab {self.steps['lab']}", ""]
         for severity, items in by_severity.items():
             lines.append(f"## {severity} ({len(items)})")
-            lines += [f"- step {r['step']} {r['kind']} **{r['label']}**: "
-                      + ("gone from the Portal" if severity == "blocking" else f"observed {r['observed']!r}")
-                      for r in items] or ["- none"]
+            lines += [self.drift_line(r) for r in items] or ["- none"]
             lines.append("")
         lines.append(f"## unknown ({len(unknown)})")
         lines += [f"- step {r['step']} {r['kind']} **{r['label']}**: {r['observed']}" for r in unknown] or ["- none"]
@@ -1842,6 +1946,18 @@ class Runner:
         (self.run_dir / "summary.md").write_text(summary + "\n", encoding="utf-8")
         print("\n" + summary)
         return min(len(by_severity["blocking"]) + len(unknown), 250)
+
+    @staticmethod
+    def drift_line(record: dict) -> str:
+        """A drift record in the summary: what was observed instead of the label, or that the
+        label is gone from the Portal, or for a missing resource (#199) where it was looked for,
+        which is no fault of the guide."""
+        what = f"- step {record['step']} {record['kind']}"
+        if record.get("category") == MISSING_RESOURCE:
+            return f"{what} `{record['label']}`: {record['observed']} (an earlier step or lab, or the view, not the guide)"
+        if record["severity"] == "blocking":
+            return f"{what} **{record['label']}**: gone from the Portal"
+        return f"{what} **{record['label']}**: observed {record['observed']!r}"
 
     @staticmethod
     def skipped_line(record: dict) -> str:

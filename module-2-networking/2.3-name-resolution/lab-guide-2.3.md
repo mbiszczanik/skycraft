@@ -162,8 +162,9 @@ Before starting this lab:
 
 ### Step 2.3.2: Create DNS A Records for Dev Environment
 
-1. Navigate to **DNS zones** → **skycraft.example.com**
-2. Click **+ Record set**
+1. Navigate to **Public IP addresses** → **dev-skycraft-swc-lb-pip** and copy its IP address (e.g., 20.240.50.10)
+2. Navigate to **DNS zones** → **skycraft.example.com**
+3. Click **+ Record set**
 
 **Create record for dev load balancer**:
 
@@ -175,7 +176,7 @@ Before starting this lab:
 | TTL unit   | Seconds                         |
 | IP address | [IP of dev-skycraft-swc-lb-pip] |
 
-**To get the dev load balancer public IP**: 3. Open another tab: **Public IP addresses** → **dev-skycraft-swc-lb-pip** 4. Copy the IP address (e.g., 20.240.50.10) 5. Return to DNS zone and paste the IP 6. Click **OK**
+4. Click **OK**
 
 ![Step 2.3.2](./images/step-2.3.2.png)
 
@@ -183,7 +184,9 @@ Before starting this lab:
 
 ### Step 2.3.3: Create DNS A Record for Prod Environment
 
-1. Still in **skycraft.example.com**, click **+ Record set**
+1. Navigate to **Public IP addresses** → **prod-skycraft-swc-lb-pip** and copy its IP address
+2. Navigate to **DNS zones** → **skycraft.example.com**
+3. Click **+ Record set**
 
 **Create record for prod load balancer**:
 
@@ -195,8 +198,6 @@ Before starting this lab:
 | TTL unit   | Seconds                          |
 | IP address | [IP of prod-skycraft-swc-lb-pip] |
 
-2. Get prod public IP from **prod-skycraft-swc-lb-pip**
-3. Enter the IP address
 4. Click **OK**
 
 **Expected Result**: A record `play.skycraft.example.com` points to production load balancer.

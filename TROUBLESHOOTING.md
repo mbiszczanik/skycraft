@@ -126,7 +126,7 @@ Rotation:
 
 - `az ad app credential reset --id $appId --years 1` issues a new secret. Without `--append` it **invalidates every existing credential** on the app — which is what you want for a compromised secret, and what you do not want mid-cycle.
 - Certificates expire too. Re-run the `New-SelfSignedCertificate` block with `--append`, update `SKYCRAFT_GRAPH_CERT_THUMBPRINT`, then remove the old credential.
-- After rotating, verify without touching the tenant's state: `pwsh -NoProfile -File .\module-1-identities-governance\1.1-entra-users-groups\scripts\Test-Lab.ps1`. It signs in and only reads.
+- After rotating, verify without touching the tenant's state: `pwsh -NoProfile -File .\module-1-identities-governance\1.1-entra-users-groups\scripts\Test-Lab.ps1`. It signs in and only reads. A working credential reaches `Connected to Tenant` with a tenant ID and the tenant's initial domain; a broken one stops with `[ERROR]` before any check runs. Any `[FAIL]` lines after that only mean the lab's users and groups are absent, so in a tenant where Lab 1.1 has not been done, an exit code of 1 is expected and says nothing about the credential.
 
 ## 💻 Environment Issues
 
@@ -322,3 +322,20 @@ Two things make this visible if it recurs:
 > deployment parameter values each script echoes, and a deployment output can contain a connection
 > string or an access key. `.gitignore` keeps the whole `tools/lab-cycle-logs/` directory out of
 > history. Read a transcript before pasting it into an issue or a chat.
+
+### A phase is `Failed(Test)` and the labs below it were not skipped
+
+**This is intended** ([#259](https://github.com/mbiszczanik/skycraft/issues/259)). The lab deployed,
+and then its own `Test-Lab.ps1` failed a check. Everything the dependent labs build on was created,
+so the failure does not block them. A validator killed at its limit is `Failed(Test,Timeout)` and
+is treated the same way. A failed **Deploy** or **PostDeploy** step is plain `Failed` (or
+`Failed(Timeout)`), and that one does skip every lab below it.
+
+Both kinds count towards the exit code. Read `tools/lab-cycle-logs/<phase>.test.log` — the report's
+Transcript column points at it — for the check that failed.
+
+**`-Resume` re-runs the failed phase whole, deploy included, and everything below it**, even the
+labs that succeeded. Re-deploying a lab can undo what the labs below applied on top of it — Lab 2.1
+re-declares its subnets without the NSGs and service endpoints Lab 2.2 attached, and Lab 4.1 resets
+the network rules Lab 4.4 set — so a success recorded before the re-deploy no longer describes the
+subscription. A resume re-runs every phase with a dependency it processes again, all the way down.

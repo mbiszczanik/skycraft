@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import recording  # noqa: E402
 from decide import Candidate  # noqa: E402
 from recording import (Redactor, env_secrets, expand_env, field_action, missing_env,  # noqa: E402
-                       rejected_candidates, resolve_value, value_action, write_json)
+                       rejected_candidates, resolve_value, resource_name, value_action, write_json)
 
 DOMAIN = "contoso.onmicrosoft.com"
 TENANT = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -165,6 +165,13 @@ class ValueTests(unittest.TestCase):
                              "malfurion.stormrage@contoso.onmicrosoft.com")
             self.assertEqual(resolve_value(self.RECORDING, {"id": "1.1.6"}, "Group name", "SkyCraft-Admins"),
                              "SkyCraft-Admins")
+
+    def test_resource_name_fills_placeholders_or_is_none_while_a_token_is_left(self) -> None:
+        with mock.patch.dict(os.environ, self.ENV):
+            self.assertEqual(resource_name(self.RECORDING, "dev-skycraft-swc-lb"), "dev-skycraft-swc-lb")
+            self.assertEqual(resource_name(self.RECORDING, "[yourtenant]-skycraft-kv"), "contoso-skycraft-kv")
+            self.assertIsNone(resource_name(self.RECORDING, "skycraft-auth-[uniqueID]"))
+            self.assertIsNone(resource_name(self.RECORDING, "<your name>-vm"))
 
     def test_value_action(self) -> None:
         for value, action in (("[Leave blank]", "skip"), (" [Leave blank] ", "skip"),
