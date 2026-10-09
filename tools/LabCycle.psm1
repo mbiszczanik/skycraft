@@ -192,8 +192,9 @@ function Get-LabCycleFailedStatus {
                       its Bicep cannot create), and nothing records which of its resources a
                       dependent reads, so the safe reading is that the lab did not finish deploying.
           Test        'Failed(Test)', or 'Failed(Test,Timeout)'. The deploy and any PostDeploy
-                      succeeded, so everything the labs below need was created, and they run. The
-                      failure is still a failure: it is counted in the exit code and the report.
+                      succeeded, so everything the labs below need was created, and they are not
+                      blocked. The failure is still a failure: it is counted in the exit code and
+                      the report.
 
         A timed-out validator does not block either. The deploy finished before the validator
         started, so a hung check says nothing about what the dependents will find. A timeout in
@@ -256,7 +257,7 @@ function Test-LabCycleStatusBlocksDependent {
 
     .EXAMPLE
         Test-LabCycleStatusBlocksDependent -Status 'Failed(Test)'
-        # False: the deploy succeeded, so the labs below it run.
+        # False: the deploy succeeded, so the labs below it are not blocked.
 
     .NOTES
         Project: SkyCraft
@@ -626,10 +627,10 @@ function Write-LabCycleReport {
     $lines.Add("- Failed: $($failed.Count)")
     # Said in the summary, not only per phase further down: 'Failed: 3' on its own reads as three
     # broken deployments and three stopped branches, and a reader who stops here should not have
-    # to work out from the table which of them the run carried on past.
+    # to work out from the table which of them blocked nothing.
     $validationOnly = @($failed | Where-Object { -not (Test-LabCycleStatusBlocksDependent -Status $_.Status) })
     if ($validationOnly.Count -gt 0) {
-        $lines.Add("  - of which failed validation after a successful deploy, so their dependents still ran: $($validationOnly.Count)")
+        $lines.Add("  - of which failed validation after a successful deploy, so they do not block their dependents: $($validationOnly.Count)")
     }
     $lines.Add("- Skipped: $($skipped.Count)")
     $lines.Add("- Excluded: $($excluded.Count)")
@@ -672,16 +673,21 @@ function Write-LabCycleReport {
         foreach ($phase in $failed) {
             # What the failure cost, stated rather than left to be derived. This is what
             # Get-DependentPhase is for: everything downstream never ran because of this phase.
-            # A failed validation after a good deploy cost nothing - its dependents ran - and
-            # listing them here would send a reader to phases that have their own results above.
+            # A failed validation after a good deploy blocks nothing, and listing its dependents
+            # here would send a reader to phases that have their own results above. Whether they
+            # ran is theirs to say - one may have been skipped for another cause, or sit outside
+            # -Labs - so this line claims only what this phase did.
             if (Test-LabCycleStatusBlocksDependent -Status $phase.Status) {
                 $cost = @(Get-DependentPhase -Phases $LivePhases -Id $phase.Id) | Sort-Object
                 $costText = if ($cost.Count -gt 0) { "cost $($cost.Count) phase(s): $($cost -join ', ')" } else { 'cost no other phase' }
             }
             else {
-                $costText = 'the deploy succeeded, so its dependents still ran'
+                $costText = 'the deploy succeeded, so this does not block its dependents'
             }
-            $lines.Add("- **$($phase.Id)** ($($phase.Lab)) - $($phase.Status), $($phase.FailedStep) exited $($phase.ExitCode); $costText")
+            # A killed step has no exit code of its own; the number recorded is the runner's
+            # sentinel, and printing it as 'exited' reads as the lab's answer.
+            $how = if ("$($phase.Status)" -like '*Timeout)') { 'timed out' } else { "exited $($phase.ExitCode)" }
+            $lines.Add("- **$($phase.Id)** ($($phase.Lab)) - $($phase.Status), $($phase.FailedStep) $how; $costText")
         }
     }
     $lines.Add('')

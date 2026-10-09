@@ -21,7 +21,7 @@
       PostDeploy  Failed, Failed(Timeout)             skips its dependents: the step creates part
                                                       of the lab's end state, so the lab did not
                                                       finish deploying (FailedStep says which)
-      Test        Failed(Test), Failed(Test,Timeout)  its dependents run; still counted in the
+      Test        Failed(Test), Failed(Test,Timeout)  does not block its dependents; counted in the
                                                       exit code and listed in the report
 
     A failure the platform asked us to wait out - a 429, a 503, SkuNotAvailable, AllocationFailed -
@@ -41,7 +41,15 @@
     Succeeded, including anything left Running: that phase is neither finished nor untouched, and
     re-running an idempotent deploy is the only reconciliation available without asking Azure.
     A Failed(Test) phase is re-run whole, deploy included, because the fix for a failed check may
-    be in the template as easily as in the validator; its dependents that succeeded are not.
+    be in the template as easily as in the validator.
+
+    A recorded success is trusted only while nothing it depends on changes. Any phase with a
+    dependency that this run processes again - re-runs, or skips - is itself processed again,
+    and so on down the graph. Re-deploying a lab can undo what the labs below applied on top of it
+    (2.1 re-declares its subnets without 2.2's NSGs; 4.1 resets the network rules 4.4 set), and
+    since a Failed(Test) phase no longer blocks its dependents, that is the ordinary resume, not a
+    rare one. A resume after a failed validation therefore re-runs the failed phase and everything
+    below it.
 
     Results are appended to a JSONL file as each phase finishes, one object per line. That is the
     machine-readable history, and it is append-only for a reason: a run measured in hours that is
@@ -420,7 +428,12 @@ $stateWriter = {
 # asking Azure. Everything else is re-run because it did not finish - Failed(Test) included, and
 # whole rather than from its Test step: the fix for a failed check is as likely to be in the
 # template as in the validator, and only a re-deploy picks up the first.
-$resumed = @{}
+#
+# A recorded success is trusted only while nothing below it changes: a phase whose dependency is
+# run again in this run is run again too (see the loop). $processed records which phases this run
+# decided for itself rather than taking from the state file.
+$resumed   = @{}
+$processed = @{}
 if ($Resume -and (Test-Path -LiteralPath $StatePath)) {
     $previous = Get-Content -Raw -LiteralPath $StatePath | ConvertFrom-Json
 
@@ -431,7 +444,7 @@ if ($Resume -and (Test-Path -LiteralPath $StatePath)) {
     foreach ($property in @($previous.Phases.PSObject.Properties)) {
         if ($property.Value.Status -eq 'Succeeded') { $resumed[$property.Name] = $true }
     }
-    Write-Host "  -Resume: $($resumed.Count) phase(s) already succeeded and will not be run again" -ForegroundColor Gray
+    Write-Host "  -Resume: $($resumed.Count) phase(s) already succeeded and will not be run again unless something they depend on is" -ForegroundColor Gray
 }
 
 Write-Host ''
@@ -445,7 +458,7 @@ if ($selected) {
 }
 if ($Yes)         { Write-Host '  -Yes: the plan will not be confirmed before it runs' -ForegroundColor Gray }
 if ($SkipCleanup) { Write-Host '  -SkipCleanup: nothing will be torn down; every lab is left standing' -ForegroundColor Yellow }
-if ($Resume)      { Write-Host "  -Resume: continuing from $StatePath; phases that already succeeded will not be re-run" -ForegroundColor Gray }
+if ($Resume)      { Write-Host "  -Resume: continuing from $StatePath; phases that already succeeded will not be re-run unless a dependency is" -ForegroundColor Gray }
 Write-Host ''
 
 # -- Preflight -------------------------------------------------------------------------------
@@ -520,7 +533,20 @@ foreach ($id in $order) {
 
     # A phase a previous run finished is not run again, and is reported as Succeeded(Resumed)
     # rather than Succeeded - the report must not claim this run deployed something it did not.
-    if ($resumed[$id]) {
+    #
+    # UNLESS SOMETHING IT DEPENDS ON WAS PROCESSED AGAIN IN THIS RUN. Re-deploying a phase can undo
+    # what its dependents applied on top of it: lab 2.1 re-declares its subnets without the NSGs and
+    # service endpoints 2.2 attached, and 4.1 resets the network rules 4.4 set. A dependent reported
+    # Succeeded(Resumed) over that would describe an estate that no longer exists. Since #259 this is
+    # routine rather than rare - a Failed(Test) phase does not block its dependents, and the resume
+    # re-deploys the phase underneath them - so the distrust is the rule, not an edge case. The order
+    # is topological, so every dependency has been decided by the time this phase is reached, and
+    # $processed carries the distrust down the graph one edge at a time.
+    $rerunDependency = @($phase.DependsOn | Where-Object { $processed[$_] }) | Select-Object -First 1
+    if ($resumed[$id] -and $rerunDependency) {
+        Write-Host "  [RE-RUN] $id - succeeded in the run being resumed, but $rerunDependency is processed again in this one" -ForegroundColor Yellow
+    }
+    elseif ($resumed[$id]) {
         $status[$id] = 'Succeeded'
         $record = @{ Id = $id; Lab = $phase.Lab; Status = 'Succeeded(Resumed)'; ExitCode = 0; Cause = $null; FailedStep = $null; DurationMs = 0; Attempts = 0 }
         $results.Add($record)
@@ -528,6 +554,11 @@ foreach ($id in $order) {
         Write-Host "  [SKIP] $id - succeeded in the run being resumed" -ForegroundColor DarkGray
         continue
     }
+
+    # Everything past this point is decided by this run - run, skipped or planned - and so is not
+    # what the resumed state described. Marked before the outcome is known, because a skip is a
+    # change too: what a skipped phase would have created is not there to be trusted either.
+    $processed[$id] = $true
 
     # A phase is skipped when anything it depends on failed to deploy or was itself skipped. The
     # cause recorded is the phase that actually failed, not the intermediate one, so the report
@@ -671,7 +702,7 @@ foreach ($id in $order) {
         $results.Add($record)
         & $recordResult $record
         $how = if ($timedOut) { "timed out after $($phase.TimeoutMs)ms" } else { "exited $exitCode" }
-        $consequence = if (Test-LabCycleStatusBlocksDependent -Status $phaseStatus) { '' } else { '; the deploy succeeded, so its dependents still run' }
+        $consequence = if (Test-LabCycleStatusBlocksDependent -Status $phaseStatus) { '' } else { '; the deploy succeeded, so this does not block its dependents' }
         Write-Host "  [FAIL] $id - $failedStep $how$consequence" -ForegroundColor Red
     }
 

@@ -1188,6 +1188,21 @@ Describe 'Engine - stop on a failed deploy, continue past a failed validation (#
             param($Result, [string]$Id)
             $Result.Phases | Where-Object { $_.Id -eq $Id }
         }
+
+        # Two runs against one state file: the first with -FirstRunner, then a -Resume with
+        # -SecondRunner, which by default fails nothing. Returns the resume's result, the steps it
+        # ran and its exit code.
+        function Invoke-ResumedCycle {
+            param([hashtable]$FirstRunner, [hashtable]$SecondRunner = (Get-StepRunner -PhaseId 'none' -Kind 'none'))
+            $paths = @{} + $script:OfflinePaths
+            $paths.StatePath = Join-Path $script:Scratch "state-$([guid]::NewGuid().ToString('N')).json"
+            Invoke-StepCycle -Runner $FirstRunner.Runner -Paths $paths | Out-Null
+
+            $result = & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:StepManifest `
+                -PhaseRunner $SecondRunner.Runner -PreflightRunner { @() } -ContextProbe $script:GoodContext `
+                -Yes -SkipCleanup -Resume @paths
+            @{ Result = $result; Seen = $SecondRunner.Seen; Exit = $LASTEXITCODE }
+        }
     }
 
     It 'runs the dependents of a phase whose validation failed after a good deploy' {
@@ -1303,41 +1318,63 @@ Describe 'Engine - stop on a failed deploy, continue past a failed validation (#
         ($lines | Where-Object { $_.Id -eq 'first' }).FailedStep | Should -Be 'Test'
     }
 
-    It 'on -Resume, re-runs a Failed(Test) phase whole and leaves its succeeded dependents alone' {
-        $paths = @{} + $script:OfflinePaths
-        $paths.StatePath = Join-Path $script:Scratch "state-$([guid]::NewGuid().ToString('N')).json"
-        $first = Get-StepRunner -PhaseId 'first' -Kind 'Test'
-        Invoke-StepCycle -Runner $first.Runner -Paths $paths | Out-Null
-
-        $again = Get-StepRunner -PhaseId 'none' -Kind 'none'
-        $result = & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:StepManifest `
-            -PhaseRunner $again.Runner -PreflightRunner { @() } -ContextProbe $script:GoodContext `
-            -Yes -SkipCleanup -Resume @paths
-        $exit = $LASTEXITCODE
+    It 'on -Resume, re-runs a Failed(Test) phase whole, and its dependent that succeeded' {
+        # The dependent succeeded on top of the old deploy. Re-deploying underneath it can undo
+        # what it applied (2.1 re-declares subnets without 2.2's NSGs), so its recorded success
+        # no longer describes the subscription.
+        $run = Invoke-ResumedCycle -FirstRunner (Get-StepRunner -PhaseId 'first' -Kind 'Test')
 
         # Whole, deploy included: the fix for a failed check may be in the template.
-        @($again.Seen) | Should -Contain 'first:Deploy'
-        @($again.Seen) | Should -Contain 'first:Test'
-        @($again.Seen | Where-Object { $_ -like 'second:*' -or $_ -like 'third:*' }) | Should -BeNullOrEmpty
-        (Get-PhaseResult $result 'first').Status  | Should -Be 'Succeeded'
-        (Get-PhaseResult $result 'second').Status | Should -Be 'Succeeded(Resumed)'
-        $exit | Should -Be 0
+        @($run.Seen) | Should -Contain 'first:Deploy'
+        @($run.Seen) | Should -Contain 'first:Test'
+        @($run.Seen) | Should -Contain 'second:Deploy'
+        (Get-PhaseResult $run.Result 'first').Status  | Should -Be 'Succeeded'
+        (Get-PhaseResult $run.Result 'second').Status | Should -Be 'Succeeded' -Because 'it was run again, not resumed'
+        $run.Exit | Should -Be 0
+    }
+
+    It 'on -Resume, carries the re-run two edges down, and leaves an unrelated branch resumed' {
+        $run = Invoke-ResumedCycle -FirstRunner (Get-StepRunner -PhaseId 'first' -Kind 'Test')
+
+        @($run.Seen) | Should -Contain 'third:Deploy' -Because 'third depends on second, which this run re-ran'
+        (Get-PhaseResult $run.Result 'third').Status        | Should -Be 'Succeeded'
+        @($run.Seen | Where-Object { $_ -like 'staged:*' -or $_ -like 'after-staged:*' }) | Should -BeNullOrEmpty
+        (Get-PhaseResult $run.Result 'staged').Status       | Should -Be 'Succeeded(Resumed)'
+        (Get-PhaseResult $run.Result 'after-staged').Status | Should -Be 'Succeeded(Resumed)' -Because 'nothing it depends on was touched'
+    }
+
+    It 'on -Resume, skips a previously succeeded dependent when the re-run deploy now fails' {
+        # Not Succeeded(Resumed): what it was built on was just re-deployed, and that failed.
+        $run = Invoke-ResumedCycle -FirstRunner (Get-StepRunner -PhaseId 'first' -Kind 'Test') `
+                                   -SecondRunner (Get-StepRunner -PhaseId 'first' -Kind 'Deploy')
+
+        (Get-PhaseResult $run.Result 'first').Status  | Should -Be 'Failed'
+        (Get-PhaseResult $run.Result 'second').Status | Should -Be 'Skipped'
+        (Get-PhaseResult $run.Result 'third').Status  | Should -Be 'Skipped'
+        (Get-PhaseResult $run.Result 'third').Cause   | Should -Be 'first'
     }
 
     It 'on -Resume, re-runs what a failed deploy skipped' {
+        $run = Invoke-ResumedCycle -FirstRunner (Get-StepRunner -PhaseId 'first' -Kind 'Deploy')
+
+        @($run.Seen) | Should -Contain 'second:Deploy'
+        (Get-PhaseResult $run.Result 'third').Status  | Should -Be 'Succeeded'
+        (Get-PhaseResult $run.Result 'staged').Status | Should -Be 'Succeeded(Resumed)'
+    }
+
+    It 'says "timed out" in the report rather than printing the sentinel as an exit code, for <Kind>' -ForEach @(
+        @{ PhaseId = 'first';  Kind = 'Test';       Expected = 'Failed\(Test,Timeout\), Test timed out' }
+        @{ PhaseId = 'first';  Kind = 'Deploy';     Expected = 'Failed\(Timeout\), Deploy timed out' }
+        @{ PhaseId = 'staged'; Kind = 'PostDeploy'; Expected = 'Failed\(Timeout\), PostDeploy timed out' }
+    ) {
         $paths = @{} + $script:OfflinePaths
-        $paths.StatePath = Join-Path $script:Scratch "state-$([guid]::NewGuid().ToString('N')).json"
-        $first = Get-StepRunner -PhaseId 'first' -Kind 'Deploy'
-        Invoke-StepCycle -Runner $first.Runner -Paths $paths | Out-Null
+        $paths.ReportPath = Join-Path $script:Scratch "report-$([guid]::NewGuid().ToString('N')).md"
+        $fake = Get-StepRunner -PhaseId $PhaseId -Kind $Kind -TimedOut
+        Invoke-StepCycle -Runner $fake.Runner -Paths $paths | Out-Null
 
-        $again = Get-StepRunner -PhaseId 'none' -Kind 'none'
-        $result = & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:StepManifest `
-            -PhaseRunner $again.Runner -PreflightRunner { @() } -ContextProbe $script:GoodContext `
-            -Yes -SkipCleanup -Resume @paths
-
-        @($again.Seen) | Should -Contain 'second:Deploy'
-        (Get-PhaseResult $result 'third').Status  | Should -Be 'Succeeded'
-        (Get-PhaseResult $result 'staged').Status | Should -Be 'Succeeded(Resumed)'
+        $text = Get-Content -Raw -LiteralPath $paths.ReportPath
+        $text | Should -Match $Expected
+        $text | Should -Not -Match "$Kind exited"
     }
 
     It 'says in the report that a failed validation cost nothing, and points at the Test transcript' {
@@ -1347,9 +1384,9 @@ Describe 'Engine - stop on a failed deploy, continue past a failed validation (#
         Invoke-StepCycle -Runner $fake.Runner -Paths $paths | Out-Null
 
         $text = Get-Content -Raw -LiteralPath $paths.ReportPath
-        $text | Should -Match '\*\*first\*\* \([^)]+\) - Failed\(Test\), Test exited 1; the deploy succeeded, so its dependents still ran'
+        $text | Should -Match '\*\*first\*\* \([^)]+\) - Failed\(Test\), Test exited 1; the deploy succeeded, so this does not block its dependents'
         $text | Should -Not -Match 'cost 2 phase\(s\): second, third'
-        $text | Should -Match 'of which failed validation after a successful deploy, so their dependents still ran: 1'
+        $text | Should -Match 'of which failed validation after a successful deploy, so they do not block their dependents: 1'
         $text | Should -Match '\| first \|[^\r\n]*\| first\.test\.log \|'
     }
 
