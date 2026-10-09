@@ -5,8 +5,9 @@
 .DESCRIPTION
     Reads tools/lab-cycle-manifest.psd1, orders the phases so none precedes a dependency, and runs
     each one. A phase is deploy, then any post-deploy step, then validate; a non-zero exit at any
-    step fails the phase and skips everything downstream of it, naming the phase that caused each
-    skip. Independent branches of the graph carry on.
+    step fails the phase and ends it there. Whether the failure also skips everything downstream
+    depends on which step failed, and each skip names the phase that caused it. Independent
+    branches of the graph carry on either way.
 
     STOP ON A FAILED DEPLOY, CONTINUE PAST A FAILED VALIDATION - which is what issue #73 asks for,
     and both halves matter. A lab whose deployment failed has created nothing for the labs below it
@@ -15,6 +16,14 @@
     carries on and the failure is reported. The distinction lives in the graph rather than in the
     exit code: both count as failures, and the exit code is the count.
 
+    By step (Get-LabCycleFailedStatus in LabCycle.psm1 holds the rule, issue #259):
+      Deploy      Failed, Failed(Timeout)             skips its dependents
+      PostDeploy  Failed, Failed(Timeout)             skips its dependents: the step creates part
+                                                      of the lab's end state, so the lab did not
+                                                      finish deploying (FailedStep says which)
+      Test        Failed(Test), Failed(Test,Timeout)  its dependents run; still counted in the
+                                                      exit code and listed in the report
+
     A failure the platform asked us to wait out - a 429, a 503, SkuNotAvailable, AllocationFailed -
     is retried with backoff before the phase is declared failed. Nothing else is retried: a policy
     denial or a failing assertion cannot come out differently on a second attempt, and retrying it
@@ -22,12 +31,17 @@
 
     A phase killed at its timeout is reported Failed(Timeout) rather than Failed. One says the lab
     is broken, the other says our estimate was wrong, and they send an operator to different
-    places. For the graph they mean the same thing: both skip everything downstream.
+    places. For the graph they mean the same thing: both skip everything downstream. A validator
+    killed at the timeout is Failed(Test,Timeout) and, like Failed(Test), skips nothing: the deploy
+    had finished before the validator started, so a hung check says nothing about what the labs
+    below will find.
 
     State is written after every step and the in-flight phase is marked Running, so an interruption
     leaves the truth behind rather than a lie. -Resume re-runs everything that is not recorded
     Succeeded, including anything left Running: that phase is neither finished nor untouched, and
     re-running an idempotent deploy is the only reconciliation available without asking Azure.
+    A Failed(Test) phase is re-run whole, deploy included, because the fix for a failed check may
+    be in the template as easily as in the validator; its dependents that succeeded are not.
 
     Results are appended to a JSONL file as each phase finishes, one object per line. That is the
     machine-readable history, and it is append-only for a reason: a run measured in hours that is
@@ -403,7 +417,9 @@ $stateWriter = {
 # 'Succeeded' is the only status a resume trusts. 'Running' means the engine died holding that
 # phase: it is neither done - claiming so would skip a phase whose resources may be half-created -
 # nor untouched, and re-running an idempotent deploy is the only reconciliation available without
-# asking Azure. Everything else is re-run because it did not finish.
+# asking Azure. Everything else is re-run because it did not finish - Failed(Test) included, and
+# whole rather than from its Test step: the fix for a failed check is as likely to be in the
+# template as in the validator, and only a re-deploy picks up the first.
 $resumed = @{}
 if ($Resume -and (Test-Path -LiteralPath $StatePath)) {
     $previous = Get-Content -Raw -LiteralPath $StatePath | ConvertFrom-Json
@@ -513,13 +529,16 @@ foreach ($id in $order) {
         continue
     }
 
-    # A phase is skipped when anything it depends on did not succeed. The cause recorded is the
-    # phase that actually failed, not the intermediate one, so the report names the thing to fix:
-    # a dependency that was itself skipped carries its own cause forward.
+    # A phase is skipped when anything it depends on failed to deploy or was itself skipped. The
+    # cause recorded is the phase that actually failed, not the intermediate one, so the report
+    # names the thing to fix: a dependency that was itself skipped carries its own cause forward.
     #
-    # 'Failed*' rather than 'Failed', so a phase killed at its timeout blocks its dependents exactly
-    # as a failed one does. The status distinguishes them for the operator; the graph must not.
-    $blocker = @($phase.DependsOn | Where-Object { $status[$_] -like 'Failed*' -or $status[$_] -eq 'Skipped' }) | Select-Object -First 1
+    # A dependency that deployed and then failed its validator - Failed(Test), or
+    # Failed(Test,Timeout) - does NOT block (issue #259): what this phase builds on was created.
+    # A deploy killed at its timeout blocks exactly as a failed one does; the status distinguishes
+    # them for the operator, the graph must not. The rule lives in Test-LabCycleStatusBlocksDependent
+    # so the report's 'what it cost' cannot disagree with what was skipped here.
+    $blocker = @($phase.DependsOn | Where-Object { Test-LabCycleStatusBlocksDependent -Status $status[$_] }) | Select-Object -First 1
     if ($blocker) {
         $status[$id] = 'Skipped'
         $cause[$id]  = if ($cause.ContainsKey($blocker)) { $cause[$blocker] } else { $blocker }
@@ -539,7 +558,8 @@ foreach ($id in $order) {
 
     # Deploy, then any post-deploy step, then validate. The first non-zero code stops the phase:
     # validating a deployment that failed reports a second failure for one cause, and the report
-    # would then carry two entries for one broken lab.
+    # would then carry two entries for one broken lab. Test is always the last step, so stopping
+    # there costs nothing; what a Test failure means for the dependents is decided below, by step.
     #
     # The deploy arguments are copied rather than used in place, because -OpsEmail is merged into
     # them and the manifest hashtable would otherwise be mutated for the rest of the process.
@@ -641,15 +661,18 @@ foreach ($id in $order) {
     }
     else {
         # A killed phase and a failed one are different facts and send an operator to different
-        # places: one says the lab is broken, the other says our estimate was wrong.
-        $phaseStatus = if ($timedOut) { 'Failed(Timeout)' } else { 'Failed' }
+        # places: one says the lab is broken, the other says our estimate was wrong. Which step
+        # failed is a third fact, and the one the graph keys on: Failed(Test) and
+        # Failed(Test,Timeout) leave the dependents to run.
+        $phaseStatus = Get-LabCycleFailedStatus -FailedStep $failedStep -TimedOut:$timedOut
         $status[$id] = $phaseStatus
         $cause[$id]  = $id
         $record = @{ Id = $id; Lab = $phase.Lab; Status = $phaseStatus; ExitCode = $exitCode; Cause = $null; FailedStep = $failedStep; DurationMs = $durationMs; Attempts = $phaseAttempts }
         $results.Add($record)
         & $recordResult $record
         $how = if ($timedOut) { "timed out after $($phase.TimeoutMs)ms" } else { "exited $exitCode" }
-        Write-Host "  [FAIL] $id - $failedStep $how" -ForegroundColor Red
+        $consequence = if (Test-LabCycleStatusBlocksDependent -Status $phaseStatus) { '' } else { '; the deploy succeeded, so its dependents still run' }
+        Write-Host "  [FAIL] $id - $failedStep $how$consequence" -ForegroundColor Red
     }
 
     & $stateWriter
@@ -721,9 +744,11 @@ foreach ($phase in $excluded) {
     & $recordResult $record
 }
 
-# 'Failed*' rather than equality, the same convention as the blocker check. An equality test is
-# how a compound status added later - Failed(Quota), say - silently stops being counted.
+# 'Failed*' rather than equality. An equality test is how a compound status added later -
+# Failed(Quota), say - silently stops being counted. Failed(Test) is counted like any other
+# failure: that it did not block its dependents changes the graph, not the exit code.
 $failedCount  = @($results | Where-Object { $_.Status -like 'Failed*' }).Count
+$validationOnlyCount = @($results | Where-Object { $_.Status -like 'Failed*' -and -not (Test-LabCycleStatusBlocksDependent -Status $_.Status) }).Count
 $skippedCount = @($results | Where-Object { $_.Status -eq 'Skipped' }).Count
 
 # -- Coverage, split by what actually happened -----------------------------------------------
@@ -750,7 +775,8 @@ if ($DryRun) {
 }
 
 Write-Host ''
-Write-Host "  Succeeded $($succeeded.Count)  Failed $failedCount  Skipped $skippedCount  Excluded $($excluded.Count)" -ForegroundColor Cyan
+$validationOnlyText = if ($validationOnlyCount -gt 0) { " ($validationOnlyCount in validation only)" } else { '' }
+Write-Host "  Succeeded $($succeeded.Count)  Failed $failedCount$validationOnlyText  Skipped $skippedCount  Excluded $($excluded.Count)" -ForegroundColor Cyan
 Write-Host "  Coverage: $($coverage.Live) deployed and validated, $($coverage.DeployedNotValidated) deployed but not validated, $($coverage.Failed) failed, $($coverage.NotRun) never ran, $($coverage.CompileOnly) compile-only, $($coverage.Uncovered) unaccounted for" -ForegroundColor Cyan
 Write-Host ''
 
@@ -763,19 +789,21 @@ if (-not $DryRun) { Write-Host "  Results: $ResultsPath" -ForegroundColor Gray }
 Write-Host ''
 
 [pscustomobject]@{
-    RunId                = $runId
-    Order                = $order
-    Phases               = $results
-    FailedCount          = $failedCount
-    SkippedCount         = $skippedCount
-    Coverage             = $coverage
-    ReportPath           = $ReportPath
-    ResultsPath          = $ResultsPath
-    Teardowns            = $teardownResults
-    TeardownFailedCount  = @($teardownResults | Where-Object { $_.Status -eq 'Failed' }).Count
-    Assertions           = $teardownAssertions
-    AssertionFailedCount = @($teardownAssertions | Where-Object { -not $_.Ok }).Count
-    LeftBehind           = $leftBehind
+    RunId                 = $runId
+    Order                 = $order
+    Phases                = $results
+    FailedCount           = $failedCount
+    # The part of FailedCount that did not block any dependent: Failed(Test), Failed(Test,Timeout).
+    ValidationFailedCount = $validationOnlyCount
+    SkippedCount          = $skippedCount
+    Coverage              = $coverage
+    ReportPath            = $ReportPath
+    ResultsPath           = $ResultsPath
+    Teardowns             = $teardownResults
+    TeardownFailedCount   = @($teardownResults | Where-Object { $_.Status -eq 'Failed' }).Count
+    Assertions            = $teardownAssertions
+    AssertionFailedCount  = @($teardownAssertions | Where-Object { -not $_.Ok }).Count
+    LeftBehind            = $leftBehind
 }
 
 # THE LAST STATEMENT, AND THE POINT OF THE WHOLE PROJECT. A run that reports success while phases

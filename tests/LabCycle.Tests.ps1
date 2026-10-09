@@ -507,7 +507,7 @@ Describe 'Manifest - the dependency graph is sound' {
     # fails, the dependent phase runs anyway and dies on a resource name instead of being skipped
     # (#166). Asked of Get-DependentPhase, the function the orchestrator skips by, so an edge
     # reached through another phase (3.2 reaches 2.1 through 2.3) counts, exactly as it does live.
-    It "skips <Lab> when <Dependency>, which its gate needs, fails" -ForEach @(
+    It "skips <Lab> when <Dependency>, which its gate needs, fails to deploy" -ForEach @(
         @{ Lab = '3.2'; Dependency = '2.1' }   # dev resource group and VNet
         @{ Lab = '3.2'; Dependency = '2.3' }   # load balancer 'dev-skycraft-swc-lb' (or 3.1)
         @{ Lab = '5.1'; Dependency = '3.2' }
@@ -1091,6 +1091,277 @@ Describe 'Engine - runs phases in order and reports what happened' {
         { & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:ChainManifest `
             -PhaseRunner { 0 } -PreflightRunner { @() } -ContextProbe $drifting `
             -Yes -SkipCleanup @script:OfflinePaths } | Should -Throw '*drifted*'
+    }
+}
+
+Describe 'Failure status - the step that failed decides what it blocks (#259)' {
+    It 'calls a failed <Step> step <Expected><TimeoutText>' -ForEach @(
+        @{ Step = 'Deploy';     TimedOut = $false; Expected = 'Failed';               Blocks = $true;  TimeoutText = '' }
+        @{ Step = 'Deploy';     TimedOut = $true;  Expected = 'Failed(Timeout)';      Blocks = $true;  TimeoutText = ', when it timed out' }
+        @{ Step = 'PostDeploy'; TimedOut = $false; Expected = 'Failed';               Blocks = $true;  TimeoutText = '' }
+        @{ Step = 'PostDeploy'; TimedOut = $true;  Expected = 'Failed(Timeout)';      Blocks = $true;  TimeoutText = ', when it timed out' }
+        @{ Step = 'Test';       TimedOut = $false; Expected = 'Failed(Test)';         Blocks = $false; TimeoutText = '' }
+        @{ Step = 'Test';       TimedOut = $true;  Expected = 'Failed(Test,Timeout)'; Blocks = $false; TimeoutText = ', when it timed out' }
+    ) {
+        $status = Get-LabCycleFailedStatus -FailedStep $Step -TimedOut:$TimedOut
+        $status | Should -Be $Expected
+        Test-LabCycleStatusBlocksDependent -Status $status | Should -Be $Blocks
+    }
+
+    It 'gives a step it does not know a blocking status, because an unknown step is no evidence the deploy succeeded' {
+        Test-LabCycleStatusBlocksDependent -Status (Get-LabCycleFailedStatus -FailedStep 'Something') | Should -BeTrue
+        Test-LabCycleStatusBlocksDependent -Status (Get-LabCycleFailedStatus -FailedStep $null) | Should -BeTrue
+    }
+
+    It 'blocks on a Failed status added later, until someone decides it should not' {
+        # Fails closed: only the two validation statuses are let through by name.
+        Test-LabCycleStatusBlocksDependent -Status 'Failed(Quota)' | Should -BeTrue
+    }
+
+    It 'blocks on <Status>' -ForEach @(
+        @{ Status = 'Skipped' }
+        @{ Status = 'Failed' }
+        @{ Status = 'Failed(Timeout)' }
+    ) {
+        Test-LabCycleStatusBlocksDependent -Status $Status | Should -BeTrue
+    }
+
+    It 'does not block on <Label>' -ForEach @(
+        @{ Status = 'Succeeded'; Label = 'Succeeded' }
+        @{ Status = 'DryRun';    Label = 'DryRun' }
+        @{ Status = $null;       Label = 'a phase this run never saw, which is what -Labs relies on' }
+    ) {
+        Test-LabCycleStatusBlocksDependent -Status $Status | Should -BeFalse
+    }
+}
+
+Describe 'Engine - stop on a failed deploy, continue past a failed validation (#73, #259)' {
+    BeforeAll {
+        # 'second' depends on 'first', 'third' on 'second', so a skip that should have been a run
+        # shows up two edges down as well as one. 'staged' has a PostDeploy step, like lab 5.2,
+        # and 'after-staged' depends on it.
+        $script:StepManifest = New-FixtureManifest -Body @'
+@{
+    Phases = @(
+        @{ Id = 'first';        Lab = 'module-1-identities-governance/1.2-rbac'; ParamFile = 'x'; Deploy = @{}; PostDeploy = $null; Test = @{}; DependsOn = @();         TimeoutMs = 1000; Excluded = $null }
+        @{ Id = 'second';       Lab = 'module-1-identities-governance/1.3-governance'; ParamFile = 'x'; Deploy = @{}; PostDeploy = $null; Test = @{}; DependsOn = @('first'); TimeoutMs = 1000; Excluded = $null }
+        @{ Id = 'third';        Lab = 'module-2-networking/2.1-virtual-networks'; ParamFile = 'x'; Deploy = @{}; PostDeploy = $null; Test = @{}; DependsOn = @('second'); TimeoutMs = 1000; Excluded = $null }
+        @{ Id = 'staged';       Lab = 'module-5-monitoring-maintenance/5.2-business-continuity'; ParamFile = 'x'; Deploy = @{}; PostDeploy = @{ Script = 'New-LabBlobBackup.ps1'; Arguments = @{} }; Test = @{}; DependsOn = @(); TimeoutMs = 1000; Excluded = $null }
+        @{ Id = 'after-staged'; Lab = 'module-5-monitoring-maintenance/5.3-network-monitoring'; ParamFile = 'x'; Deploy = @{}; PostDeploy = $null; Test = @{}; DependsOn = @('staged'); TimeoutMs = 1000; Excluded = $null }
+    )
+    SoftDeleteGuards = @()
+    CompileOnly = @()
+    Teardowns = @()
+}
+'@
+
+        # A runner that fails one phase at one step and records every step it was asked to run.
+        # -TimedOut hands back the shape the real runner returns for a killed process.
+        # Parameters copied into locals before the closure, which PSScriptAnalyzer can follow.
+        function Get-StepRunner {
+            param([string]$PhaseId, [string]$Kind, [switch]$TimedOut, [string[]]$AlsoFailTest = @())
+            $seen = [System.Collections.Generic.List[string]]::new()
+            $failPhase = $PhaseId
+            $failKind = $Kind
+            $failTests = @($AlsoFailTest)
+            $killed = [bool]$TimedOut
+            $runner = {
+                param($Invocation)
+                $seen.Add("$($Invocation.Phase.Id):$($Invocation.Kind)")
+                $hit = ($Invocation.Phase.Id -eq $failPhase -and $Invocation.Kind -eq $failKind) -or
+                       ($Invocation.Kind -eq 'Test' -and $Invocation.Phase.Id -in $failTests)
+                if (-not $hit) { return 0 }
+                if ($killed) { return [pscustomobject]@{ ExitCode = 124; TimedOut = $true; Output = '' } }
+                1
+            }.GetNewClosure()
+            @{ Runner = $runner; Seen = $seen }
+        }
+
+        function Invoke-StepCycle {
+            param([scriptblock]$Runner, [hashtable]$Paths = $script:OfflinePaths)
+            & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:StepManifest `
+                -PhaseRunner $Runner -PreflightRunner { @() } -ContextProbe $script:GoodContext `
+                -Yes -SkipCleanup @Paths
+        }
+
+        function Get-PhaseResult {
+            param($Result, [string]$Id)
+            $Result.Phases | Where-Object { $_.Id -eq $Id }
+        }
+    }
+
+    It 'runs the dependents of a phase whose validation failed after a good deploy' {
+        $fake = Get-StepRunner -PhaseId 'first' -Kind 'Test'
+        $result = Invoke-StepCycle -Runner $fake.Runner
+
+        (Get-PhaseResult $result 'first').Status     | Should -Be 'Failed(Test)'
+        (Get-PhaseResult $result 'first').FailedStep | Should -Be 'Test'
+        (Get-PhaseResult $result 'second').Status    | Should -Be 'Succeeded' -Because 'everything second builds on was deployed'
+        (Get-PhaseResult $result 'third').Status     | Should -Be 'Succeeded'
+        @($fake.Seen) | Should -Contain 'second:Deploy'
+        @($fake.Seen) | Should -Contain 'third:Test'
+    }
+
+    It 'still counts a failed validation in the exit code and the result' {
+        $fake = Get-StepRunner -PhaseId 'first' -Kind 'Test'
+        $result = Invoke-StepCycle -Runner $fake.Runner
+        $exit = $LASTEXITCODE
+
+        $exit | Should -Be 1 -Because 'not blocking the graph is not the same as not failing'
+        $result.FailedCount           | Should -Be 1
+        $result.ValidationFailedCount | Should -Be 1
+        $result.SkippedCount          | Should -Be 0
+        $result.Coverage.Failed       | Should -Be 1
+    }
+
+    It 'counts every failed validation, which a run that carries on past them can now collect' {
+        $fake = Get-StepRunner -PhaseId 'first' -Kind 'Test' -AlsoFailTest 'second', 'third'
+        $result = Invoke-StepCycle -Runner $fake.Runner
+        $exit = $LASTEXITCODE
+
+        @($result.Phases | Where-Object { $_.Status -eq 'Failed(Test)' }).Count | Should -Be 3
+        $exit | Should -Be 3
+    }
+
+    It 'skips the dependents of a failed deploy, two edges down as well as one, and does not validate it' {
+        $fake = Get-StepRunner -PhaseId 'first' -Kind 'Deploy'
+        $result = Invoke-StepCycle -Runner $fake.Runner
+        $exit = $LASTEXITCODE
+
+        (Get-PhaseResult $result 'first').Status     | Should -Be 'Failed'
+        (Get-PhaseResult $result 'first').FailedStep | Should -Be 'Deploy'
+        (Get-PhaseResult $result 'second').Status    | Should -Be 'Skipped'
+        (Get-PhaseResult $result 'third').Status     | Should -Be 'Skipped'
+        (Get-PhaseResult $result 'third').Cause      | Should -Be 'first'
+        @($fake.Seen) | Should -Not -Contain 'first:Test'
+        @($fake.Seen) | Should -Not -Contain 'second:Deploy'
+        $result.ValidationFailedCount | Should -Be 0
+        $exit | Should -Be 1
+    }
+
+    It 'skips the dependents of a failed PostDeploy step, which is part of deploying the lab' {
+        $fake = Get-StepRunner -PhaseId 'staged' -Kind 'PostDeploy'
+        $result = Invoke-StepCycle -Runner $fake.Runner
+
+        (Get-PhaseResult $result 'staged').Status          | Should -Be 'Failed'
+        (Get-PhaseResult $result 'staged').FailedStep      | Should -Be 'PostDeploy'
+        (Get-PhaseResult $result 'after-staged').Status    | Should -Be 'Skipped'
+        (Get-PhaseResult $result 'after-staged').Cause     | Should -Be 'staged'
+        @($fake.Seen) | Should -Not -Contain 'staged:Test'
+    }
+
+    It 'runs the dependents of a phase whose PostDeploy succeeded and whose validation failed' {
+        $fake = Get-StepRunner -PhaseId 'staged' -Kind 'Test'
+        $result = Invoke-StepCycle -Runner $fake.Runner
+
+        (Get-PhaseResult $result 'staged').Status       | Should -Be 'Failed(Test)'
+        (Get-PhaseResult $result 'after-staged').Status | Should -Be 'Succeeded'
+        @($fake.Seen) | Should -Contain 'staged:PostDeploy'
+    }
+
+    It 'calls a validator killed at its timeout Failed(Test,Timeout), and runs the dependents' {
+        $fake = Get-StepRunner -PhaseId 'first' -Kind 'Test' -TimedOut
+        $result = Invoke-StepCycle -Runner $fake.Runner
+        $exit = $LASTEXITCODE
+
+        (Get-PhaseResult $result 'first').Status   | Should -Be 'Failed(Test,Timeout)'
+        (Get-PhaseResult $result 'first').ExitCode | Should -Be 124
+        (Get-PhaseResult $result 'second').Status  | Should -Be 'Succeeded' -Because 'the deploy finished before the validator started'
+        $exit | Should -Be 1
+    }
+
+    It 'calls a deploy killed at its timeout Failed(Timeout), and skips the dependents' {
+        $fake = Get-StepRunner -PhaseId 'first' -Kind 'Deploy' -TimedOut
+        $result = Invoke-StepCycle -Runner $fake.Runner
+
+        (Get-PhaseResult $result 'first').Status  | Should -Be 'Failed(Timeout)'
+        (Get-PhaseResult $result 'second').Status | Should -Be 'Skipped' -Because 'a deploy killed part-way left behind something unknown'
+        (Get-PhaseResult $result 'second').Cause  | Should -Be 'first'
+    }
+
+    It 'calls a PostDeploy step killed at its timeout Failed(Timeout), and skips the dependents' {
+        $fake = Get-StepRunner -PhaseId 'staged' -Kind 'PostDeploy' -TimedOut
+        $result = Invoke-StepCycle -Runner $fake.Runner
+
+        (Get-PhaseResult $result 'staged').Status       | Should -Be 'Failed(Timeout)'
+        (Get-PhaseResult $result 'after-staged').Status | Should -Be 'Skipped'
+    }
+
+    It 'writes Failed(Test) to the state file and the results file' {
+        $paths = @{} + $script:OfflinePaths
+        $paths.StatePath   = Join-Path $script:Scratch "state-$([guid]::NewGuid().ToString('N')).json"
+        $paths.ResultsPath = Join-Path $script:Scratch "results-$([guid]::NewGuid().ToString('N')).jsonl"
+        $fake = Get-StepRunner -PhaseId 'first' -Kind 'Test'
+        Invoke-StepCycle -Runner $fake.Runner -Paths $paths | Out-Null
+
+        $state = Get-Content -Raw -LiteralPath $paths.StatePath | ConvertFrom-Json
+        $state.Phases.first.Status  | Should -Be 'Failed(Test)'
+        $state.Phases.second.Status | Should -Be 'Succeeded'
+
+        $lines = @(Get-Content -LiteralPath $paths.ResultsPath | ForEach-Object { $_ | ConvertFrom-Json })
+        ($lines | Where-Object { $_.Id -eq 'first' }).Status     | Should -Be 'Failed(Test)'
+        ($lines | Where-Object { $_.Id -eq 'first' }).FailedStep | Should -Be 'Test'
+    }
+
+    It 'on -Resume, re-runs a Failed(Test) phase whole and leaves its succeeded dependents alone' {
+        $paths = @{} + $script:OfflinePaths
+        $paths.StatePath = Join-Path $script:Scratch "state-$([guid]::NewGuid().ToString('N')).json"
+        $first = Get-StepRunner -PhaseId 'first' -Kind 'Test'
+        Invoke-StepCycle -Runner $first.Runner -Paths $paths | Out-Null
+
+        $again = Get-StepRunner -PhaseId 'none' -Kind 'none'
+        $result = & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:StepManifest `
+            -PhaseRunner $again.Runner -PreflightRunner { @() } -ContextProbe $script:GoodContext `
+            -Yes -SkipCleanup -Resume @paths
+        $exit = $LASTEXITCODE
+
+        # Whole, deploy included: the fix for a failed check may be in the template.
+        @($again.Seen) | Should -Contain 'first:Deploy'
+        @($again.Seen) | Should -Contain 'first:Test'
+        @($again.Seen | Where-Object { $_ -like 'second:*' -or $_ -like 'third:*' }) | Should -BeNullOrEmpty
+        (Get-PhaseResult $result 'first').Status  | Should -Be 'Succeeded'
+        (Get-PhaseResult $result 'second').Status | Should -Be 'Succeeded(Resumed)'
+        $exit | Should -Be 0
+    }
+
+    It 'on -Resume, re-runs what a failed deploy skipped' {
+        $paths = @{} + $script:OfflinePaths
+        $paths.StatePath = Join-Path $script:Scratch "state-$([guid]::NewGuid().ToString('N')).json"
+        $first = Get-StepRunner -PhaseId 'first' -Kind 'Deploy'
+        Invoke-StepCycle -Runner $first.Runner -Paths $paths | Out-Null
+
+        $again = Get-StepRunner -PhaseId 'none' -Kind 'none'
+        $result = & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:StepManifest `
+            -PhaseRunner $again.Runner -PreflightRunner { @() } -ContextProbe $script:GoodContext `
+            -Yes -SkipCleanup -Resume @paths
+
+        @($again.Seen) | Should -Contain 'second:Deploy'
+        (Get-PhaseResult $result 'third').Status  | Should -Be 'Succeeded'
+        (Get-PhaseResult $result 'staged').Status | Should -Be 'Succeeded(Resumed)'
+    }
+
+    It 'says in the report that a failed validation cost nothing, and points at the Test transcript' {
+        $paths = @{} + $script:OfflinePaths
+        $paths.ReportPath = Join-Path $script:Scratch "report-$([guid]::NewGuid().ToString('N')).md"
+        $fake = Get-StepRunner -PhaseId 'first' -Kind 'Test'
+        Invoke-StepCycle -Runner $fake.Runner -Paths $paths | Out-Null
+
+        $text = Get-Content -Raw -LiteralPath $paths.ReportPath
+        $text | Should -Match '\*\*first\*\* \([^)]+\) - Failed\(Test\), Test exited 1; the deploy succeeded, so its dependents still ran'
+        $text | Should -Not -Match 'cost 2 phase\(s\): second, third'
+        $text | Should -Match 'of which failed validation after a successful deploy, so their dependents still ran: 1'
+        $text | Should -Match '\| first \|[^\r\n]*\| first\.test\.log \|'
+    }
+
+    It 'says in the report what a failed deploy cost, as before' {
+        $paths = @{} + $script:OfflinePaths
+        $paths.ReportPath = Join-Path $script:Scratch "report-$([guid]::NewGuid().ToString('N')).md"
+        $fake = Get-StepRunner -PhaseId 'first' -Kind 'Deploy'
+        Invoke-StepCycle -Runner $fake.Runner -Paths $paths | Out-Null
+
+        $text = Get-Content -Raw -LiteralPath $paths.ReportPath
+        $text | Should -Match '\*\*first\*\* \([^)]+\) - Failed, Deploy exited 1; cost 2 phase\(s\): second, third'
+        $text | Should -Not -Match 'of which failed validation'
     }
 }
 
