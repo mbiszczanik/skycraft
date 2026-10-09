@@ -8,8 +8,9 @@
 
       FIXTURES - small guides written here, parsed through a temp file, asserting the rules of
       issue #189: only '### Step X.Y.N:' sections are read; fenced code is skipped; where a step
-      has '#### Option 1:' or '#### Option A:' headings only the first option is read (plus the
-      step's Expected Result); bold spans that are not UI elements are dropped; 'A -> B' chains
+      has '#### Option 1:' or '#### Option A:' headings only one option is read (plus the step's
+      Expected Result), the first with an item, named in the step's "option" (#201; pinned on
+      lab 3.2, rules in test_parse.py); bold spans that are not UI elements are dropped; 'A -> B' chains
       become navigation; 'Search for **X**' becomes a search of the Portal;
       '- **Label**: value' list items and Field | Value tables become fields, and so does
       '- Label: value' when the value is a bold or code span (#198); a field value that is an
@@ -177,10 +178,12 @@ Describe 'parse.py - step sections' {
         $script:Core.steps[0].expected | Should -Be 'New user appears in the list.'
     }
 
-    It 'reads only Option 1 of a multi-option step, plus its Expected Result' {
+    It 'reads only Option 1 of a multi-option step, plus its Expected Result, and names it' {
         $labels = @($script:Core.steps[1].items | ForEach-Object { $_.labels })
         $labels | Should -Be @('Storage accounts', '+ File share')
         $script:Core.steps[1].expected | Should -Be 'Share appears.'
+        $script:Core.steps[1].option | Should -Be '1'
+        $script:Core.steps[0].PSObject.Properties.Name | Should -Not -Contain 'option'
     }
 
     It 'marks a step with no UI element as portal: false' {
@@ -403,6 +406,7 @@ Describe 'parse.py - forms and markers found in the real guides' {
         $labels = @($script:Real.steps[1].items | ForEach-Object { $_.labels })
         $labels | Should -Be @('Generate new key pair')
         $script:Real.steps[1].expected | Should -Be 'Option A result.'
+        $script:Real.steps[1].option | Should -Be 'A'
     }
 
     It 'reads Name | Value and Tag | Value tables as tag pairs, and Field | Value as fields' {
@@ -757,14 +761,14 @@ Describe 'parse.py - labs 3.2, 4.2 and 5.2, resource names in navigation chains 
     }
 }
 
-Describe 'parse.py - only the first option of a step is read, in every lab guide' {
+Describe 'parse.py - only one option of a step is read, in every lab guide (#201)' {
     BeforeAll {
-        # Bold spans of each step, by where they sit: 'first' (before the first Option heading, or
-        # in Option 1 or A) and 'other' (Option 2, B or later, up to the next step). Fenced code is
-        # skipped as parse.py skips it; 'Expected Result' is a caption, not a label. A bold span
-        # that only another option uses must never reach the parser's labels, fields or tags.
-        # Lab 4.3 has Option headings in every step but its other options hold only code; today
-        # the check bites in 3.2.1, whose Option A is CLI-only and whose Option B is the Portal.
+        # Bold spans of each step, by where they sit: 'read' (before the first Option heading, or
+        # in the option the parser names in the step's "option") and 'other' (any other option, up
+        # to the next step). Fenced code is skipped as parse.py skips it; 'Expected Result' is a
+        # caption, not a label. A bold span that only another option uses must never reach the
+        # parser's labels, fields or tags. Lab 4.3 has Option headings in every step but its other
+        # options hold only code; in 3.2.1 Option A is CLI-only, so Option B, the Portal, is read.
         $script:OtherOnly = [System.Collections.Generic.List[hashtable]]::new()
         $script:Parsed = @{}
         $guides = Get-ChildItem -Path $script:RepoRoot -Directory -Filter 'module-*' |
@@ -775,9 +779,13 @@ Describe 'parse.py - only the first option of a step is read, in every lab guide
             $out = Join-Path $TestDrive "lab-$lab.json"
             & $script:Python $script:Parser $guide.FullName --out $out --repo-root $script:RepoRoot
             $script:Parsed[$lab] = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+            $readOption = @{}
+            foreach ($parsedStep in $script:Parsed[$lab].steps) {
+                if ($parsedStep.PSObject.Properties.Name -contains 'option') { $readOption[$parsedStep.id] = $parsedStep.option }
+            }
 
-            $first = @{}; $other = @{}
-            $step = $null; $zone = 'first'; $fence = $null
+            $read = @{}; $other = @{}
+            $step = $null; $zone = 'read'; $fence = $null
             foreach ($line in (Get-Content -LiteralPath $guide.FullName -Encoding utf8)) {
                 $m = [regex]::Match($line, '^[ \t]*(`{3,}|~{3,})(.*)$')
                 if ($null -eq $fence) {
@@ -788,24 +796,24 @@ Describe 'parse.py - only the first option of a step is read, in every lab guide
                     continue
                 }
                 if ($line -match '^###\s+Step\s+(\d+\.\d+\.\d+):') {
-                    $step = $Matches[1]; $zone = 'first'
-                    $first[$step] = [System.Collections.Generic.List[string]]::new()
+                    $step = $Matches[1]; $zone = 'read'
+                    $read[$step] = [System.Collections.Generic.List[string]]::new()
                     $other[$step] = [System.Collections.Generic.List[string]]::new()
                     continue
                 }
                 if ($line -match '^##\s') { $step = $null; continue }
                 if (-not $step) { continue }
                 if ($line -match '^####\s+Option\s+(\d+|[A-Z])\b') {
-                    $zone = if ($Matches[1] -in '1', 'A') { 'first' } else { 'other' }
+                    $zone = if ($Matches[1] -ceq $readOption[$step]) { 'read' } else { 'other' }
                     continue
                 }
                 foreach ($bold in [regex]::Matches($line, '\*\*(.+?)\*\*')) {
-                    if ($zone -eq 'first') { $first[$step].Add($bold.Groups[1].Value) } else { $other[$step].Add($bold.Groups[1].Value) }
+                    if ($zone -eq 'read') { $read[$step].Add($bold.Groups[1].Value) } else { $other[$step].Add($bold.Groups[1].Value) }
                 }
             }
             foreach ($id in $other.Keys) {
                 foreach ($bold in ($other[$id] | Select-Object -Unique)) {
-                    if ($bold -cne 'Expected Result' -and $first[$id] -cnotcontains $bold) {
+                    if ($bold -cne 'Expected Result' -and $read[$id] -cnotcontains $bold) {
                         $script:OtherOnly.Add(@{ lab = $lab; step = $id; bold = $bold })
                     }
                 }
@@ -813,12 +821,34 @@ Describe 'parse.py - only the first option of a step is read, in every lab guide
         }
     }
 
-    It 'finds bold text that only a later option uses, in lab 4.3 and in step 3.2.1' {
+    It 'finds bold text that only an option not read uses, in lab 4.3 and in step 3.2.1' {
         @($script:OtherOnly | Where-Object { $_.lab -eq '4.3' }).Count | Should -BeGreaterThan 0
         @($script:OtherOnly | Where-Object { $_.step -eq '3.2.1' }).Count | Should -BeGreaterThan 0
     }
 
-    It 'reads no label, field or tag from the body of Option 2, B or later' {
+    It 'reads step 3.2.1 from Option B, the Portal path, because Option A has no portal part' {
+        $parsedStep = $script:Parsed['3.2'].steps | Where-Object id -eq '3.2.1'
+        $parsedStep.option | Should -Be 'B'
+        $parsedStep.portal | Should -BeTrue
+        @(@($parsedStep.items)[0].labels) | Should -Be @('SSH keys', '+ Create')
+        ($parsedStep.items | Where-Object { $_.kind -eq 'field' -and $_.label -eq 'Key pair name' }).value |
+            Should -Be 'platform-skycraft-swc-ssh'
+        $parsedStep.expected | Should -Match '^`platform-skycraft-swc-ssh` appears under \*\*SSH keys\*\*'
+    }
+
+    It 'reads the first option of every other step with Option headings, as each has a portal part' {
+        $notFirst = @(foreach ($lab in $script:Parsed.Keys) {
+                foreach ($parsedStep in $script:Parsed[$lab].steps) {
+                    if ($parsedStep.PSObject.Properties.Name -contains 'option' -and
+                        $parsedStep.option -notin '1', 'A' -and $parsedStep.id -ne '3.2.1') {
+                        "step $($parsedStep.id): option $($parsedStep.option)"
+                    }
+                }
+            })
+        $notFirst | Should -BeNullOrEmpty -Because ($notFirst -join '; ')
+    }
+
+    It 'reads no label, field or tag from the body of an option that is not read' {
         $leaks = @(foreach ($case in $script:OtherOnly) {
                 $parsedStep = $script:Parsed[$case.lab].steps | Where-Object id -eq $case.step
                 $texts = @($parsedStep.items | ForEach-Object {
