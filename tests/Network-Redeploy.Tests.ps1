@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Pester 5 test: re-running Lab 2.1 or Lab 3.1 leaves the networks later labs built intact.
+    Pester 5 test: re-running Lab 2.1, 2.2 or 3.1 leaves the networks later labs built intact.
 
 .DESCRIPTION
     Regression guard for issue #188. Both labs were unsafe to re-run on a subscription where hub
@@ -29,6 +29,16 @@
                privateEndpointNetworkPolicies 'Disabled' and doNotVerifyRemoteGateways false, the
                values the portal uses.
 
+    Issue #263 extends the same rule:
+
+      Lab 2.2  re-declares the Auth, World and Database subnets of both spokes (a subnet PUT
+               replaces the whole subnet), so it declares everything they carry: Lab 2.1's
+               address prefix and privateEndpointNetworkPolicies 'Disabled', and its own NSG and
+               service endpoints. Unset, the policy fell back to 'Enabled' on every re-run.
+      Lab 3.1  leaves an existing dev-skycraft-swc-lb-pip (zones cannot change; one made without
+               zones made the deployment fail) and dev-skycraft-swc-lb (Lab 2.3's) alone,
+               through SKYCRAFT_DEV_LB_PIP_EXISTS / SKYCRAFT_DEV_LB_EXISTS.
+
     Three layers: the compiled templates (what ARM receives), the deploy scripts' decision
     helpers lifted from their AST, and both deploy scripts run end to end with -WhatIf in a child
     pwsh whose Az cmdlets are stubs (tests/Support/LabScriptStub.psm1), so no Azure call is made.
@@ -38,7 +48,7 @@
 
 .NOTES
     Project: SkyCraft
-    Issue: #188
+    Issue: #188, #263
 #>
 
 #Requires -Version 7.0
@@ -47,6 +57,7 @@
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     $script:Lab21    = Join-Path $script:RepoRoot 'module-2-networking/2.1-virtual-networks'
+    $script:Lab22    = Join-Path $script:RepoRoot 'module-2-networking/2.2-secure-access'
     $script:Lab31    = Join-Path $script:RepoRoot 'module-3-compute/3.1-infrastructure-as-code'
 
     Import-Module (Join-Path $script:RepoRoot 'tools' 'BicepCli.psm1') -Force
@@ -98,6 +109,7 @@ BeforeAll {
     }
 
     $script:Template21 = ConvertFrom-BicepFile -Path (Join-Path $script:Lab21 'bicep/main.bicep') -Name 'lab21'
+    $script:Template22 = ConvertFrom-BicepFile -Path (Join-Path $script:Lab22 'bicep/main.bicep') -Name 'lab22'
     $script:Template31 = ConvertFrom-BicepFile -Path (Join-Path $script:Lab31 'bicep/main.bicep') -Name 'lab31'
 }
 
@@ -139,32 +151,111 @@ Describe 'Lab 3.1 template - an existing VNet is referenced, not redeployed' {
     It 'no longer claims that a re-run after Module 2 changes nothing' {
         Get-Content -Raw -LiteralPath (Join-Path $script:Lab31 'bicep/main.bicep') | Should -Not -Match 'changes nothing'
     }
+
+    It "deploys '<name>' only when '<flag>' is false" -ForEach @(
+        @{ name = 'devLbPublicIpDeployment'; flag = 'parDevLbPipExists' }
+        @{ name = 'devLoadBalancerDeployment'; flag = 'parDevLbExists' }
+    ) {
+        # #263: zones are fixed on a public IP, so a non-zonal one rejects the declaration, and the
+        # load balancer Lab 2.3 builds has its own frontend, pools and rules.
+        $module = Get-TemplateResource -Template $script:Template31 -Name $name
+        $module | Should -Not -BeNullOrEmpty
+        $module.condition | Should -Be "[not(parameters('$flag'))]"
+        $script:Template31.parameters[$flag].defaultValue | Should -BeFalse
+    }
+
+    It 'gives the load balancer its public IP by name, and waits for one this deployment creates' {
+        $lb = Get-TemplateResource -Template $script:Template31 -Name 'devLoadBalancerDeployment'
+        $lb.properties.parameters.parPublicIpId.value | Should -Match "publicIPAddresses', variables\('varDevLbPipName'\)"
+        $lb.properties.parameters.parPublicIpId.value | Should -Not -Match 'devLbPublicIpDeployment' -Because 'a reference to a module that did not run fails the deployment'
+        @($lb.dependsOn) -match 'devLbPublicIpDeployment' | Should -Not -BeNullOrEmpty -Because 'the ID is built by name, so nothing else orders the deployment'
+    }
+
+    It 'builds the load balancer outputs from the names, not from the conditional modules' {
+        $script:Template31.outputs.outDevLoadBalancerId.value | Should -Match "loadBalancers', variables\('varDevLbName'\)"
+        $script:Template31.outputs.outDevLoadBalancerPublicIp.value | Should -Match "publicIPAddresses', variables\('varDevLbPipName'\)"
+        foreach ($output in 'outDevLoadBalancerId', 'outDevLoadBalancerPublicIp') {
+            $script:Template31.outputs[$output].value | Should -Not -Match 'devLbPublicIpDeployment|devLoadBalancerDeployment'
+        }
+        $script:Template31.variables.varDevLbPipName | Should -Be "[format('{0}-lb-pip', variables('varDevPrefix'))]"
+        $script:Template31.variables.varDevLbName    | Should -Be "[format('{0}-lb', variables('varDevPrefix'))]"
+    }
 }
 
 Describe 'Lab 3.1 parameter files - the lookup reaches the template' {
 
-    It "'<file>' reads both flags from the environment Deploy-Bicep.ps1 sets" -ForEach @(
+    It "'<file>' reads every flag from the environment Deploy-Bicep.ps1 sets" -ForEach @(
         @{ file = 'dev.bicepparam' }
         @{ file = 'prod.bicepparam' }
     ) {
         $path = Join-Path $script:Lab31 "bicep/parameters/$file"
-        $saved = @{ hub = $env:SKYCRAFT_HUB_VNET_EXISTS; dev = $env:SKYCRAFT_DEV_VNET_EXISTS }
+        $flags = [ordered]@{
+            SKYCRAFT_HUB_VNET_EXISTS   = 'parHubVnetExists'
+            SKYCRAFT_DEV_VNET_EXISTS   = 'parDevVnetExists'
+            SKYCRAFT_DEV_LB_PIP_EXISTS = 'parDevLbPipExists'
+            SKYCRAFT_DEV_LB_EXISTS     = 'parDevLbExists'
+        }
+        $saved = @{}
+        foreach ($name in $flags.Keys) { $saved[$name] = [System.Environment]::GetEnvironmentVariable($name) }
         try {
-            $env:SKYCRAFT_HUB_VNET_EXISTS = $null
-            $env:SKYCRAFT_DEV_VNET_EXISTS = $null
+            foreach ($name in $flags.Keys) { Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue }
             $unset = ConvertFrom-BicepParamFile -Path $path -Name "$file-unset"
-            $unset.parHubVnetExists.value | Should -BeFalse
-            $unset.parDevVnetExists.value | Should -BeFalse
+            foreach ($param in $flags.Values) { $unset[$param].value | Should -BeFalse -Because "$param defaults to a first deployment" }
 
-            $env:SKYCRAFT_HUB_VNET_EXISTS = 'true'
-            $env:SKYCRAFT_DEV_VNET_EXISTS = 'false'
+            # Alternate true and false, so that a parameter reading the wrong variable shows up.
+            $expected = @{}
+            $i = 0
+            foreach ($name in $flags.Keys) {
+                $value = ($i++ % 2) -eq 0
+                $expected[$flags[$name]] = $value
+                Set-Item -Path "Env:$name" -Value $value.ToString().ToLowerInvariant()
+            }
             $set = ConvertFrom-BicepParamFile -Path $path -Name "$file-set"
-            $set.parHubVnetExists.value | Should -BeTrue
-            $set.parDevVnetExists.value | Should -BeFalse
+            foreach ($param in $flags.Values) { $set[$param].value | Should -Be $expected[$param] -Because "$param must follow its own variable" }
         }
         finally {
-            $env:SKYCRAFT_HUB_VNET_EXISTS = $saved.hub
-            $env:SKYCRAFT_DEV_VNET_EXISTS = $saved.dev
+            foreach ($name in $flags.Keys) {
+                if ($null -eq $saved[$name]) { Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue }
+                else { Set-Item -Path "Env:$name" -Value $saved[$name] }
+            }
+        }
+    }
+}
+
+Describe 'Lab 2.2 template - a re-run declares everything the spoke subnets carry' {
+
+    It "re-declares '<subnet>' with Lab 2.1's settings as well as its own" -ForEach @(
+        @{ subnet = 'AuthSubnet'; cidr = 'authSubnetCidr'; endpoints = @() }
+        @{ subnet = 'WorldSubnet'; cidr = 'worldSubnetCidr'; endpoints = @('Microsoft.Storage') }
+        @{ subnet = 'DatabaseSubnet'; cidr = 'dbSubnetCidr'; endpoints = @('Microsoft.Sql', 'Microsoft.Storage') }
+    ) {
+        # A subnet PUT replaces the whole subnet: anything left out goes back to the default.
+        $module = @($script:Template22.resources | Where-Object { $_.properties.parameters.name.value -eq $subnet })
+        $module.Count | Should -Be 1
+        $p = $module[0].properties.parameters
+        $p.privateEndpointNetworkPolicies.value | Should -Be 'Disabled' -Because 'unset, every re-run flipped the subnets to Enabled (#263)'
+        $p.addressPrefix.value | Should -Be "[variables('varSpokes')[copyIndex()].$cidr]"
+        $p.networkSecurityGroupResourceId.value | Should -Match 'nsg-'
+        @($p.serviceEndpoints.value | Where-Object { $_ }) | Should -Be $endpoints
+        foreach ($absent in 'delegation', 'routeTableResourceId', 'natGatewayResourceId') {
+            $p.ContainsKey($absent) | Should -BeFalse -Because "no lab sets $absent on $subnet; declaring one would add it"
+        }
+    }
+
+    It "uses Lab 2.1's address plan for the '<spoke>' subnets" -ForEach @(
+        @{ spoke = 'dev'; index = 0; variable = 'varDevSubnets' }
+        @{ spoke = 'prod'; index = 1; variable = 'varProdSubnets' }
+    ) {
+        $plan = @{}
+        foreach ($s in $script:Template21.variables[$variable]) { $plan[$s.name] = $s }
+        $entry = $script:Template22.variables.varSpokes[$index]
+        $entry.prefix | Should -Be $spoke
+        $entry.authSubnetCidr  | Should -Be $plan['AuthSubnet'].addressPrefix
+        $entry.worldSubnetCidr | Should -Be $plan['WorldSubnet'].addressPrefix
+        $entry.dbSubnetCidr    | Should -Be $plan['DatabaseSubnet'].addressPrefix
+        foreach ($name in 'AuthSubnet', 'WorldSubnet', 'DatabaseSubnet') {
+            $plan[$name].privateEndpointNetworkPolicies | Should -Be 'Disabled' -Because 'Lab 2.2 restates the value Lab 2.1 creates the subnet with'
+            $plan[$name].ContainsKey('delegation') | Should -BeFalse -Because 'Lab 2.2 declares no delegation on this subnet'
         }
     }
 }
@@ -355,14 +446,23 @@ function Get-AzPublicIpAddress {
     [pscustomobject]@{ Name = $Name }
 }
 
+function Get-AzLoadBalancer {
+    [CmdletBinding()]
+    param($ResourceGroupName, $Name)
+    Assert-StubLookup -ResourceGroupName $ResourceGroupName -Name $Name -Type 'Microsoft.Network/loadBalancers'
+    [pscustomobject]@{ Name = $Name }
+}
+
 function Get-AzSubscriptionDeploymentWhatIfResult {
     [CmdletBinding()]
     param($Name, $Location, $TemplateFile, $TemplateParameterFile, $TemplateParameterObject)
     [ordered]@{
         Parameters    = $TemplateParameterObject
         ParameterFile = $TemplateParameterFile
-        HubVnetExists = $env:SKYCRAFT_HUB_VNET_EXISTS
-        DevVnetExists = $env:SKYCRAFT_DEV_VNET_EXISTS
+        HubVnetExists  = $env:SKYCRAFT_HUB_VNET_EXISTS
+        DevVnetExists  = $env:SKYCRAFT_DEV_VNET_EXISTS
+        DevLbPipExists = $env:SKYCRAFT_DEV_LB_PIP_EXISTS
+        DevLbExists    = $env:SKYCRAFT_DEV_LB_EXISTS
     } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $env:SKYCRAFT_STUB_LOG
     if ($env:SKYCRAFT_STUB_WHATIF_FAIL -eq '1') { throw 'stub failure: what-if rejected the template' }
 }
@@ -374,7 +474,7 @@ function New-AzSubscriptionDeployment {
 }
 '@
         $script:Commands = @(
-            'Get-AzContext', 'Get-AzVirtualNetwork', 'Get-AzPublicIpAddress',
+            'Get-AzContext', 'Get-AzVirtualNetwork', 'Get-AzPublicIpAddress', 'Get-AzLoadBalancer',
             'Get-AzSubscriptionDeploymentWhatIfResult', 'New-AzSubscriptionDeployment'
         )
         $script:Stub = Initialize-LabScriptStub -Name 'SkyCraftAzStub188' -Command $script:Commands `
@@ -389,8 +489,10 @@ param([string]$Target)
 & $Target -WhatIf
 $code = $LASTEXITCODE
 [ordered]@{
-    HubVnetExists = [System.Environment]::GetEnvironmentVariable('SKYCRAFT_HUB_VNET_EXISTS')
-    DevVnetExists = [System.Environment]::GetEnvironmentVariable('SKYCRAFT_DEV_VNET_EXISTS')
+    HubVnetExists  = [System.Environment]::GetEnvironmentVariable('SKYCRAFT_HUB_VNET_EXISTS')
+    DevVnetExists  = [System.Environment]::GetEnvironmentVariable('SKYCRAFT_DEV_VNET_EXISTS')
+    DevLbPipExists = [System.Environment]::GetEnvironmentVariable('SKYCRAFT_DEV_LB_PIP_EXISTS')
+    DevLbExists    = [System.Environment]::GetEnvironmentVariable('SKYCRAFT_DEV_LB_EXISTS')
 } | ConvertTo-Json | Set-Content -LiteralPath $env:SKYCRAFT_STUB_ENVLOG
 exit $code
 '@
@@ -422,12 +524,14 @@ exit $code
         $script:Lab21Denied  = Invoke-DeployWhatIf -ScriptPath $deploy21 -Deny
         $script:Lab31Fresh   = Invoke-DeployWhatIf -ScriptPath $deploy31
         $script:Lab31AfterM2 = Invoke-DeployWhatIf -ScriptPath $deploy31 -Existing @(
-            'platform-skycraft-swc-vnet', 'dev-skycraft-swc-vnet')
+            'platform-skycraft-swc-vnet', 'dev-skycraft-swc-vnet', 'dev-skycraft-swc-lb-pip', 'dev-skycraft-swc-lb')
+        $script:Lab31After21 = Invoke-DeployWhatIf -ScriptPath $deploy31 -Existing @(
+            'platform-skycraft-swc-vnet', 'dev-skycraft-swc-vnet', 'dev-skycraft-swc-lb-pip')
         $script:Lab31Denied  = Invoke-DeployWhatIf -ScriptPath $deploy31 -Deny
         $script:Lab31Failed  = Invoke-DeployWhatIf -ScriptPath $deploy31 -WhatIfFails -Existing @(
             'platform-skycraft-swc-vnet', 'dev-skycraft-swc-vnet')
         $script:AllRuns = @($script:Lab21Fresh, $script:Lab21AddDev, $script:Lab21Denied,
-            $script:Lab31Fresh, $script:Lab31AfterM2, $script:Lab31Denied, $script:Lab31Failed)
+            $script:Lab31Fresh, $script:Lab31AfterM2, $script:Lab31After21, $script:Lab31Denied, $script:Lab31Failed)
     }
 
     AfterAll {
@@ -474,13 +578,23 @@ exit $code
         $script:Lab31Fresh.ExitCode | Should -Be 0 -Because $script:Lab31Fresh.Output
         $script:Lab31Fresh.WhatIf.HubVnetExists | Should -Be 'false'
         $script:Lab31Fresh.WhatIf.DevVnetExists | Should -Be 'false'
+        $script:Lab31Fresh.WhatIf.DevLbPipExists | Should -Be 'false'
+        $script:Lab31Fresh.WhatIf.DevLbExists | Should -Be 'false'
         $script:Lab31Fresh.WhatIf.ParameterFile | Should -Match 'dev\.bicepparam$'
     }
 
-    It 'Lab 3.1 after Module 2 references the hub and dev VNets instead of redeploying them' {
+    It 'Lab 3.1 after Module 2 references the hub and dev VNets and leaves the dev load balancer and its public IP alone' {
         $script:Lab31AfterM2.ExitCode | Should -Be 0 -Because $script:Lab31AfterM2.Output
         $script:Lab31AfterM2.WhatIf.HubVnetExists | Should -Be 'true'
         $script:Lab31AfterM2.WhatIf.DevVnetExists | Should -Be 'true'
+        $script:Lab31AfterM2.WhatIf.DevLbPipExists | Should -Be 'true'
+        $script:Lab31AfterM2.WhatIf.DevLbExists | Should -Be 'true'
+    }
+
+    It 'Lab 3.1 after Lab 2.1 alone builds the load balancer on the existing public IP' {
+        $script:Lab31After21.ExitCode | Should -Be 0 -Because $script:Lab31After21.Output
+        $script:Lab31After21.WhatIf.DevLbPipExists | Should -Be 'true'
+        $script:Lab31After21.WhatIf.DevLbExists | Should -Be 'false'
     }
 
     It 'Lab 3.1 stops before the what-if when a lookup is denied' {
@@ -500,12 +614,15 @@ exit $code
         $result.After | Should -Not -BeNullOrEmpty -Because 'the wrapper must have recorded the environment after the script returned'
         $result.After.HubVnetExists | Should -BeNullOrEmpty
         $result.After.DevVnetExists | Should -BeNullOrEmpty
+        $result.After.DevLbPipExists | Should -BeNullOrEmpty
+        $result.After.DevLbExists | Should -BeNullOrEmpty
     }
 
     It 'Lab 3.1 had the flags set when the failing what-if ran' {
         # Without this, the failure-path cleanup above would pass trivially.
         $script:Lab31Failed.WhatIf.HubVnetExists | Should -Be 'true'
         $script:Lab31Failed.WhatIf.DevVnetExists | Should -Be 'true'
+        $script:Lab31Failed.WhatIf.DevLbPipExists | Should -Be 'false'
         $script:Lab31Failed.Output | Should -Match 'stub failure: what-if rejected the template'
     }
 }
