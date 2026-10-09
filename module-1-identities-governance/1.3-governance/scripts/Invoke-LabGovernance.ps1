@@ -158,8 +158,8 @@ foreach ($policy in $policies) {
 Write-Header "`n=== 3. Applying Locks (New-AzResourceLock) ==="
 
 $locks = @(
-    @{ RG = "prod-skycraft-swc-rg"; Name = "lock-no-delete-prod"; Notes = "Production protection" },
-    @{ RG = "platform-skycraft-swc-rg"; Name = "lock-no-delete-platform"; Notes = "Platform protection" }
+    @{ RG = "prod-skycraft-swc-rg"; Name = "lock-no-delete-prod"; Notes = "Cannot delete resource or child resources." },
+    @{ RG = "platform-skycraft-swc-rg"; Name = "lock-no-delete-platform"; Notes = "Cannot delete resource or child resources." }
 )
 
 foreach ($lock in $locks) {
