@@ -1,13 +1,15 @@
 """Unit tests for parse.py's reading of one list item: which searches are the Portal's global
 search and which are a blade's own search box (issue #189), which '- Label: value' items with
 a plain label are fields (issue #198), which field values are not text to type (issue #202),
-which lists are checks for the Expected Result rather than steps (issue #224), and which code
-spans in a navigation chain are resources to open (issue #199). The full guides and the other
-parser rules are covered by tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
+which lists are checks for the Expected Result rather than steps (issue #224), which code
+spans in a navigation chain are resources to open (issue #199), and which option of a step is
+read (issue #201). The full guides and the other parser rules are covered by
+tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
 """
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -325,7 +327,7 @@ class CheckListTests(unittest.TestCase):
     def step(self, markdown: str) -> tuple[list[dict], str | None]:
         """Items and Expected Result of the one step in markdown (its heading is line 1)."""
         body = parse.split_steps(parse.strip_hidden(markdown.splitlines()))[0]["body"]
-        items, expected, _ = parse.read_step(body)
+        items, expected, _, _ = parse.read_step(body)
         return items, expected
 
     def test_the_nested_items_of_a_numbered_verify_item_are_checks_not_fields(self) -> None:
@@ -530,6 +532,92 @@ class CheckListTests(unittest.TestCase):
             "   - Status: **Succeeded**\n")
         self.assertEqual(items, [{"kind": "action", "labels": ["Overview"], "line": 5}])
         self.assertIsNone(expected)
+
+
+class OptionChoiceTests(unittest.TestCase):
+    """Of a step's '#### Option' headings, the first option whose body yields an item is read,
+    or the first option when none does (#201). The fixtures copy the shape of 3.2.1: a CLI-only
+    Option A and a Portal Option B, each with its own Expected Result."""
+
+    CLI = ("#### Option {name}: Generate the key pair locally\n"
+           "\n"
+           "```powershell\n"
+           "ssh-keygen -t rsa -b 4096 -f \"$HOME\\.ssh\\skycraft-dev\" -N \"\"\n"
+           "```\n"
+           "\n"
+           "**Expected Result**: Two files created.\n"
+           "\n")
+    PORTAL = ("#### Option {name}: Store the key in Azure\n"
+              "\n"
+              "1. In Azure Portal, search for **SSH keys** and click **+ Create**\n"
+              "\n"
+              "**Expected Result**: The key appears under **SSH keys**.\n"
+              "\n")
+
+    def step(self, markdown: str) -> tuple[list[dict], str | None, str | None]:
+        """Items, Expected Result and option read of the one step in markdown."""
+        body = parse.split_steps(parse.strip_hidden(markdown.splitlines()))[0]["body"]
+        items, expected, _, option = parse.read_step(body)
+        return items, expected, option
+
+    def labels(self, items: list[dict]) -> list[str]:
+        return [label for item in items for label in item["labels"]]
+
+    def test_an_option_with_no_item_gives_way_to_the_next_one_that_has_some(self) -> None:
+        items, expected, option = self.step(
+            "### Step 9.9.1: Generate SSH Key Pair\n\n" + self.CLI.format(name="A")
+            + self.PORTAL.format(name="B"))
+        self.assertEqual(self.labels(items), ["SSH keys", "+ Create"])
+        self.assertEqual(expected, "The key appears under **SSH keys**.")
+        self.assertEqual(option, "B")
+
+    def test_a_first_option_with_items_is_read_and_the_later_ones_are_not(self) -> None:
+        items, expected, option = self.step(
+            "### Step 9.9.1: Generate SSH Key Pair\n\n" + self.PORTAL.format(name="1")
+            + "#### Option 2: Also in the Portal\n\n1. Click **OnlyInOption2**\n")
+        self.assertEqual(self.labels(items), ["SSH keys", "+ Create"])
+        self.assertEqual(expected, "The key appears under **SSH keys**.")
+        self.assertEqual(option, "1")
+
+    def test_when_no_option_has_an_item_the_first_is_read_with_its_expected_result(self) -> None:
+        items, expected, option = self.step(
+            "### Step 9.9.1: Generate SSH Key Pair\n\n" + self.CLI.format(name="A")
+            + "#### Option B: Bash\n\n**Expected Result**: Option B result.\n")
+        self.assertEqual(items, [])
+        self.assertEqual(expected, "Two files created.")
+        self.assertEqual(option, "A")
+
+    def test_an_earlier_options_expected_result_is_never_the_read_options(self) -> None:
+        items, expected, option = self.step(
+            "### Step 9.9.1: Generate SSH Key Pair\n\n" + self.CLI.format(name="A")
+            + "#### Option B: Store the key in Azure\n\n"
+              "1. In Azure Portal, search for **SSH keys** and click **+ Create**\n")
+        self.assertEqual(self.labels(items), ["SSH keys", "+ Create"])
+        self.assertIsNone(expected)
+        self.assertEqual(option, "B")
+
+    def test_a_later_options_expected_result_is_the_fallback(self) -> None:
+        _, expected, option = self.step(
+            "### Step 9.9.1: X\n\n#### Option 1: Portal\n\n1. Click **Next**\n\n"
+            "#### Option 2: CLI\n\n**Expected Result**: The single result after the options.\n")
+        self.assertEqual(expected, "The single result after the options.")
+        self.assertEqual(option, "1")
+
+    def test_a_step_without_option_headings_names_no_option(self) -> None:
+        items, _, option = self.step("### Step 9.9.1: X\n\n1. Click **Next**\n")
+        self.assertEqual(self.labels(items), ["Next"])
+        self.assertIsNone(option)
+
+    def test_the_parsed_step_carries_option_only_when_the_step_has_option_headings(self) -> None:
+        markdown = ("### Step 9.9.1: Keys\n\n" + self.CLI.format(name="A") + self.PORTAL.format(name="B")
+                    + "### Step 9.9.2: Next\n\n1. Click **Next**\n")
+        with tempfile.TemporaryDirectory() as folder:
+            guide = Path(folder) / "lab-guide-9.9.md"
+            guide.write_text(markdown, encoding="utf-8")
+            steps = parse.parse_guide(guide)["steps"]
+        self.assertEqual(steps[0]["option"], "B")
+        self.assertTrue(steps[0]["portal"])
+        self.assertNotIn("option", steps[1])
 
 
 if __name__ == "__main__":

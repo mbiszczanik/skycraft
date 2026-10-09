@@ -14,7 +14,9 @@
       2. A run in which any deletion fails exits 1 - asserted on the exit code, not on the printed
          message - and every failure is counted.
       3. A failure does not stop the run: the later deletions are still attempted.
-      4. A failed Microsoft Graph sign-in still exits 1 before anything is looked up.
+      4. A failed Microsoft Graph sign-in still exits 1 before anything is looked up. So does a
+         sign-in that returns without an error but leaves no Graph context (issue #242), which
+         used to print "Connected to Tenant:  as" and go on to the deletions.
       5. A lookup that fails with an error is an [ERROR], counted like a failed deletion, so the
          run exits 1 (issue #227). Only a lookup that succeeds and returns nothing is "not found".
          The stub reports a failed lookup with Write-Error, as the Graph cmdlets do, so a script
@@ -204,6 +206,7 @@ function Remove-MgGroup {
     $script:GuestStuck   = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-MgUser:guest'
     $script:MembersStuck = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-MgUser:member'
     $script:SignInFails  = Invoke-CleanupScript -Stub $script:Stub -NoContext -Fail 'Connect-MgGraph'
+    $script:NoContext    = Invoke-CleanupScript -Stub $script:Stub -NoContext
     $script:MembersUnreadable = Invoke-CleanupScript -Stub $script:Stub -Fail 'Get-MgUser:member'
     $script:GuestUnreadable   = Invoke-CleanupScript -Stub $script:Stub -Fail 'Get-MgUser:guest'
     $script:GroupsUnreadable  = Invoke-CleanupScript -Stub $script:Stub -Fail 'Get-MgGroup'
@@ -211,7 +214,7 @@ function Remove-MgGroup {
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:Preview, $script:GroupsStuck, $script:GuestStuck,
         $script:MembersStuck, $script:SignInFails, $script:MembersUnreadable, $script:GuestUnreadable,
-        $script:GroupsUnreadable
+        $script:GroupsUnreadable, $script:NoContext
     )
 }
 
@@ -282,6 +285,17 @@ Describe 'Lab 1.1 Remove-LabResource.ps1 - exit code contract (#194)' {
         $script:SignInFails.ExitCode | Should -Be 1 -Because "output was:`n$($script:SignInFails.Output)"
         $script:SignInFails.Output | Should -Match '\[ERROR\] Failed to connect to Microsoft Graph'
         $script:SignInFails.Calls | Should -Not -Contain 'Get-MgUser'
+    }
+
+    It 'exits 1 when the sign-in leaves no Graph context, and deletes nothing (#242)' {
+        $run = $script:NoContext
+        $run.ExitCode | Should -Be 1 -Because "a sign-in that did not complete must not look like a cleanup; output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Failed to connect to Microsoft Graph: [^\r\n]*sign-in did not complete'
+        $run.Output | Should -Not -Match 'Connected to Tenant'
+        $run.Calls | Should -Contain 'Connect-MgGraph' -Because 'the empty context must be the one the sign-in left'
+        $run.Calls | Should -Not -Contain 'Get-MgUser'
+        $run.Calls | Should -Not -Contain 'Remove-MgUser'
+        $run.Calls | Should -Not -Contain 'Remove-MgGroup'
     }
 }
 
