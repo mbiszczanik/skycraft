@@ -80,6 +80,9 @@ BeforeAll {
     #   SKYCRAFT_STUB_LOOKUPFAIL   '1' makes every user and group lookup fail with an error
     #   SKYCRAFT_STUB_MEMBERFAIL   groups whose member list fails to read with an error
     #   SKYCRAFT_STUB_USERIDFAIL   members (by id) whose lookup by id fails with an error
+    #   SKYCRAFT_STUB_EXTRAMEMBER  groups that also hold a nested group and a service principal,
+    #                              listed before the expected user; their lookup by user id
+    #                              fails with a 404, as /users/{id} does for a non-user
     #   SKYCRAFT_STUB_NOCONTEXT    '1' leaves no Graph context: every Graph read then fails with
     #                              "Authentication needed", as the real cmdlets do
     #   SKYCRAFT_STUB_FAIL         'Connect-MgGraph' makes the sign-in throw
@@ -154,6 +157,7 @@ function Get-MgUser {
     # A member lookup by id, as the membership check makes.
     if ($UserId) {
         if (Test-StubListed -Variable 'SKYCRAFT_STUB_USERIDFAIL' -Name $UserId) { Write-Error "stub lookup failure: Get-MgUser -UserId $UserId"; return }
+        if (-not $script:DisplayName.ContainsKey($UserId)) { Write-Error "[Request_ResourceNotFound] Resource '$UserId' does not exist (stub 404)"; return }
         return [pscustomobject]@{
             Id                = $UserId
             DisplayName       = $script:DisplayName[$UserId]
@@ -182,14 +186,24 @@ function Get-MgGroup {
     [pscustomobject]@{ Id = $name; DisplayName = $name }
 }
 
+# A directoryObject as Get-MgGroupMember returns it: the derived type is only in AdditionalProperties.
+function New-StubMember {
+    param([string]$Id, [string]$Type = '#microsoft.graph.user')
+    [pscustomobject]@{ Id = $Id; AdditionalProperties = @{ '@odata.type' = $Type } }
+}
+
 function Get-MgGroupMember {
     [CmdletBinding()]
     param([string]$GroupId, [switch]$All, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name 'Get-MgGroupMember'
     if (Test-StubListed -Variable 'SKYCRAFT_STUB_MEMBERFAIL' -Name $GroupId) { Write-Error "stub lookup failure: Get-MgGroupMember $GroupId"; return }
     if (Test-StubListed -Variable 'SKYCRAFT_STUB_NOMEMBERS' -Name $GroupId) { return }
-    if (Test-StubListed -Variable 'SKYCRAFT_STUB_WRONGMEMBER' -Name $GroupId) { return [pscustomobject]@{ Id = 'someone.else' } }
-    [pscustomobject]@{ Id = $script:GroupMember[$GroupId] }
+    if (Test-StubListed -Variable 'SKYCRAFT_STUB_WRONGMEMBER' -Name $GroupId) { return New-StubMember -Id 'someone.else' }
+    if (Test-StubListed -Variable 'SKYCRAFT_STUB_EXTRAMEMBER' -Name $GroupId) {
+        New-StubMember -Id 'nested-group' -Type '#microsoft.graph.group'
+        New-StubMember -Id 'service-principal' -Type '#microsoft.graph.servicePrincipal'
+    }
+    New-StubMember -Id $script:GroupMember[$GroupId]
 }
 '@
 
@@ -203,6 +217,7 @@ function Get-MgGroupMember {
             [string[]]$NoMembers = @(),
             [string[]]$MemberFail = @(),
             [string[]]$UserIdFail = @(),
+            [string[]]$ExtraMember = @(),
             [string[]]$Fail = @(),
             [switch]$LookupFail,
             [switch]$NoContext
@@ -217,6 +232,7 @@ function Get-MgGroupMember {
             SKYCRAFT_STUB_NOMEMBERS        = $NoMembers -join ','
             SKYCRAFT_STUB_MEMBERFAIL       = $MemberFail -join ','
             SKYCRAFT_STUB_USERIDFAIL       = $UserIdFail -join ','
+            SKYCRAFT_STUB_EXTRAMEMBER      = $ExtraMember -join ','
             SKYCRAFT_STUB_FAIL             = $Fail -join ','
             SKYCRAFT_STUB_LOOKUPFAIL       = if ($LookupFail) { '1' } else { '0' }
             SKYCRAFT_STUB_NOCONTEXT        = if ($NoContext) { '1' } else { '0' }
@@ -254,6 +270,7 @@ function Get-MgGroupMember {
     $script:GroupMissing = Invoke-ValidatorScript -Stub $script:Stub -Missing 'SkyCraft-Developers'
     $script:MembersUnreadable = Invoke-ValidatorScript -Stub $script:Stub -MemberFail 'SkyCraft-Admins'
     $script:MemberUnreadable  = Invoke-ValidatorScript -Stub $script:Stub -UserIdFail 'chromie.timewalker'
+    $script:MixedMembers = Invoke-ValidatorScript -Stub $script:Stub -ExtraMember 'SkyCraft-Developers'
     $script:LookupsFail  = Invoke-ValidatorScript -Stub $script:Stub -LookupFail
     $script:SignInFails  = Invoke-ValidatorScript -Stub $script:Stub -NoContext -Fail 'Connect-MgGraph'
     $script:NoContext    = Invoke-ValidatorScript -Stub $script:Stub -NoContext
@@ -261,7 +278,7 @@ function Get-MgGroupMember {
     $script:AllRuns = @(
         $script:AllPass, $script:UserMissing, $script:GuestMissing, $script:WrongMember,
         $script:EmptyGroup, $script:GroupMissing, $script:MembersUnreadable, $script:MemberUnreadable,
-        $script:LookupsFail, $script:SignInFails, $script:NoContext
+        $script:MixedMembers, $script:LookupsFail, $script:SignInFails, $script:NoContext
     )
 }
 
@@ -332,7 +349,7 @@ Describe 'Lab 1.1 Test-Lab.ps1 - failures are counted and set the exit code (#24
         $run = $script:GroupMissing
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match '\[FAIL\] Group missing: SkyCraft-Developers'
-        $run.Output | Should -Match '\[FAIL\] Membership of SkyCraft-Developers: group not found'
+        $run.Output | Should -Match '\[FAIL\] Membership of SkyCraft-Developers: group not found or not readable'
         $run.FailLines | Should -Be 2
         $run.Output | Should -Match 'Passed: 8\b'
         $run.Output | Should -Match 'Failed: 2\b'
@@ -356,13 +373,27 @@ Describe 'Lab 1.1 Test-Lab.ps1 - failures are counted and set the exit code (#24
         $run.Output | Should -Match 'Failed: 1\b'
     }
 
+    It 'skips a nested group and a service principal held next to the expected user, and passes' {
+        # Neither has a /users/{id}; looking them up as users would 404 and fail a group that
+        # does hold its expected member.
+        $run = $script:MixedMembers
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'nested-group \(#microsoft\.graph\.group\) - not a user, skipped'
+        $run.Output | Should -Match 'service-principal \(#microsoft\.graph\.servicePrincipal\) - not a user, skipped'
+        $run.Output | Should -Match '\[OK\] Verify: Khadgar Archmage is a member'
+        $run.Output | Should -Not -Match 'Request_ResourceNotFound'
+        $run.FailLines | Should -Be 0
+        $run.Output | Should -Match 'Passed: 10\b'
+        $run.Output | Should -Match 'Failed: 0\b'
+    }
+
     It 'counts every check whose lookup fails with an error, and exits 1 (the reproduction in #241)' {
         $run = $script:LookupsFail
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         # Four users, three groups, and the three memberships of groups that could not be read.
         ([regex]::Matches($run.Output, '\[FAIL\] Error checking user')).Count | Should -Be 4
         ([regex]::Matches($run.Output, '\[FAIL\] Error checking group')).Count | Should -Be 3
-        ([regex]::Matches($run.Output, '\[FAIL\] Membership of [^:]+: group not found')).Count | Should -Be 3
+        ([regex]::Matches($run.Output, '\[FAIL\] Membership of [^:]+: group not found or not readable')).Count | Should -Be 3
         $run.FailLines | Should -Be 10
         $run.Output | Should -Match 'Passed: 0\b'
         $run.Output | Should -Match 'Failed: 10\b'

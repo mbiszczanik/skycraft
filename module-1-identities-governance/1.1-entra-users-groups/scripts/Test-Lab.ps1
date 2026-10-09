@@ -343,7 +343,7 @@ foreach ($item in $expectedGroups) {
     }
 
     if (-not $group) {
-        Write-Host "  -> [FAIL] Membership of $($groupName): group not found, so $($item.ExpectedMember) cannot be a member." -ForegroundColor Red
+        Write-Host "  -> [FAIL] Membership of $($groupName): group not found or not readable, so $($item.ExpectedMember) cannot be a member." -ForegroundColor Red
         $failCount++
         continue
     }
@@ -353,10 +353,19 @@ foreach ($item in $expectedGroups) {
     try {
         $members = Get-MgGroupMember -GroupId $group.Id -All -ErrorAction Stop
         if ($members) {
-            # Fetch full user details for members to get DisplayName
+            # Fetch full user details for members to get DisplayName. Only user members: a nested
+            # group, service principal or device has no /users/{id}, and its 404 must not fail a
+            # group that does hold the expected user. Get-MgGroupMember returns directoryObjects,
+            # whose derived type is in AdditionalProperties['@odata.type'].
             $memberFound = $false
-            foreach ($memberId in $members.Id) {
-                $memberUser = Get-MgUser -UserId $memberId -ErrorAction Stop
+            foreach ($member in $members) {
+                $memberType = $member.AdditionalProperties['@odata.type']
+                if ($memberType -ne '#microsoft.graph.user') {
+                    Write-Host "  -> Member: $($member.Id) ($memberType) - not a user, skipped" -ForegroundColor Gray
+                    continue
+                }
+
+                $memberUser = Get-MgUser -UserId $member.Id -ErrorAction Stop
                 if ($memberUser) {
                     Write-Host "  -> Member: $($memberUser.DisplayName) ($($memberUser.UserPrincipalName))" -ForegroundColor Gray
                     if ($memberUser.DisplayName -eq $item.ExpectedMember) {
