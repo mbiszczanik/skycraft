@@ -1486,10 +1486,10 @@ Get-AzVirtualNetwork -ResourceGroupName dev-skycraft-swc-rg |
     @{N = 'Subnets'; E = { $_.Subnets.Count } } |
   Format-Table -AutoSize
 
-# Expected output:
+# Expected output (AuthSubnet, WorldSubnet, DatabaseSubnet and AppServiceSubnet):
 # Name                   AddressSpace  Subnets
 # ---------------------  ------------  -------
-# dev-skycraft-swc-vnet  10.1.0.0/16   3
+# dev-skycraft-swc-vnet  10.1.0.0/16   4
 
 # Verify load balancer
 Get-AzLoadBalancer -ResourceGroupName dev-skycraft-swc-rg |
@@ -1506,27 +1506,43 @@ Get-AzLoadBalancer -ResourceGroupName dev-skycraft-swc-rg |
 
 ### Step 3.1.22: View Deployment Outputs
 
+The outputs are the `output` lines at the end of `bicep/main.bicep`; their names start with
+`out`.
+
 ```powershell
-# Get deployment outputs
-(Get-AzSubscriptionDeployment -Name 'SkyCraft-dev-20260112-2050').Outputs |
-  ConvertTo-Json -Depth 5
+# Get deployment outputs (use the deployment name Deploy-Bicep.ps1 printed)
+$outputs = (Get-AzSubscriptionDeployment -Name 'SkyCraft-dev-20260112-2050').Outputs
+
+# List the output names
+$outputs.Keys | Sort-Object
 
 # Expected output:
-# {
-#   "devLoadBalancerPublicIp": {
-#     "type": "String",
-#     "value": "20.240.50.10"
-#   },
-#   "devResourceGroupName": {
-#     "type": "String",
-#     "value": "dev-skycraft-swc-rg"
-#   },
-#   "devVnetId": {
-#     "type": "String",
-#     "value": "/subscriptions/.../dev-skycraft-swc-vnet"
-#   }
-# }
+# outConfigEnvironment
+# outConfigProdVnetPrefix
+# outDevLbPublicIpDeployed
+# outDevLoadBalancerDeployed
+# outDevLoadBalancerId
+# outDevLoadBalancerPublicIp
+# outDevResourceGroupName
+# outDevVnetDeployed
+# outDevVnetId
+# outHubVnetDeployed
+# outHubVnetId
+# outPlatformResourceGroupName
+# outProdResourceGroupName
+
+# Read single values
+$outputs['outDevLoadBalancerPublicIp'].Value
+$outputs['outDevVnetId'].Value
+
+# Expected output (your IP address and subscription ID differ):
+# 20.240.50.10
+# /subscriptions/.../resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Network/virtualNetworks/dev-skycraft-swc-vnet
 ```
+
+The four `...Deployed` outputs say whether this run created the hub VNet, the dev VNet, the dev
+load balancer and its public IP (`True`), or found them already in place and left them alone
+(`False`).
 
 ### Step 3.1.23: Export Updated ARM Template
 
