@@ -6,7 +6,7 @@
     Checks for the existence and correct configuration of:
     1. Resource Group Tags
     2. Policy Assignments
-    3. Resource Locks
+    3. Resource Locks (the guide's lock, by name and CanNotDelete level, on the group itself)
     4. Budgets (manual check)
 
     Every check in sections 1-3 prints [OK] or [FAIL] and is counted. The summary states how many
@@ -124,28 +124,69 @@ foreach ($policyName in $expectedPolicies) {
 }
 
 # 3. Validate Locks
-# One check per resource group: it passes when the group carries at least one lock, and every
-# lock found is listed on the same line.
+# One check per resource group: it passes only when the group itself carries the lock the guide
+# creates - this name, with level CanNotDelete (Lock type "Delete" in the portal). These are the
+# names Remove-LabResource.ps1 removes, so a lock under any other name or level would pass here
+# and then outlive the cleanup (issue #258). Get-AzResourceLock -ResourceGroupName also returns
+# locks on resources inside the group and on the subscription above it; neither is the lock the
+# guide asks for, so only a lock applied at the group's own scope counts. The lock notes are not
+# checked: the Bicep path sets them itself (lab-guide-1.3.md, step 1.3.10).
 Write-Host "`n=== 3. Validating Locks ===" -ForegroundColor Cyan
-$lockTargets = @("prod-skycraft-swc-rg", "platform-skycraft-swc-rg")
+$expectedLockLevel = "CanNotDelete"
+$lockTargets = @(
+    @{ RG = "prod-skycraft-swc-rg"; Lock = "lock-no-delete-prod"; Step = "1.3.10" },
+    @{ RG = "platform-skycraft-swc-rg"; Lock = "lock-no-delete-platform"; Step = "1.3.12" }
+)
 
-foreach ($rgName in $lockTargets) {
+foreach ($target in $lockTargets) {
+    $rgName = $target.RG
+    $expected = "Expected $($target.Lock) ($expectedLockLevel) on the group, step $($target.Step)."
     Write-Host "  Lock on $rgName" -NoNewline
     try {
         $locks = @(Get-AzResourceLock -ResourceGroupName $rgName -ErrorAction Stop | Where-Object { $_ })
-        if ($locks.Count -gt 0) {
-            $lockList = ($locks | ForEach-Object { "$($_.Name) ($($_.Level))" }) -join ', '
-            Write-Host " : $lockList" -NoNewline
-            Write-Host " [OK]" -ForegroundColor Green
-            $passCount++
-        }
-        else {
-            Write-Host " [FAIL] Not found." -ForegroundColor Red
-            $failCount++
-        }
     }
     catch {
         Write-Host " [FAIL] Could not read locks: $($_.Exception.Message)" -ForegroundColor Red
+        $failCount++
+        continue
+    }
+
+    # The cmdlet returns generic objects: the level is in Properties.level, and LockId is the full
+    # id, whose part before /providers/Microsoft.Authorization/locks/ is the scope the lock is
+    # applied to.
+    $foundLocks = @(foreach ($lock in $locks) {
+            $lockId = if ($lock.LockId) { $lock.LockId } else { $lock.ResourceId }
+            [pscustomobject]@{
+                Name  = $lock.Name
+                Level = $lock.Properties.level
+                Scope = $lockId -replace '/providers/Microsoft\.Authorization/locks/[^/]+$', ''
+            }
+        })
+    $groupScope = "/subscriptions/$subscriptionId/resourceGroups/$rgName"
+    $groupLocks = @($foundLocks | Where-Object { $_.Scope -eq $groupScope })
+    $guideLock = $groupLocks | Where-Object { $_.Name -eq $target.Lock } | Select-Object -First 1
+
+    if ($guideLock -and $guideLock.Level -eq $expectedLockLevel) {
+        Write-Host " : $($guideLock.Name) ($($guideLock.Level))" -NoNewline
+        Write-Host " [OK]" -ForegroundColor Green
+        $passCount++
+    }
+    elseif ($guideLock) {
+        Write-Host " [FAIL] $($guideLock.Name) has level $($guideLock.Level). $expected" -ForegroundColor Red
+        $failCount++
+    }
+    elseif ($groupLocks.Count -gt 0) {
+        $lockList = ($groupLocks | ForEach-Object { "$($_.Name) ($($_.Level))" }) -join ', '
+        Write-Host " [FAIL] No lock named $($target.Lock); the group carries: $lockList. $expected" -ForegroundColor Red
+        $failCount++
+    }
+    elseif ($foundLocks.Count -gt 0) {
+        $lockList = ($foundLocks | ForEach-Object { "$($_.Name) ($($_.Level)) at $($_.Scope)" }) -join ', '
+        Write-Host " [FAIL] Not found on the group itself; locks elsewhere do not count: $lockList. $expected" -ForegroundColor Red
+        $failCount++
+    }
+    else {
+        Write-Host " [FAIL] Not found. $expected" -ForegroundColor Red
         $failCount++
     }
 }
