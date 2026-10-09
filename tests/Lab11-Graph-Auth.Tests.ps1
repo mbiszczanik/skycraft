@@ -269,6 +269,27 @@ Describe 'Connect-LabGraph - a sign-in that leaves no Graph context is a failed 
         $context.Account     | Should -Be 'admin@contoso.example'
         $script:Connected    | Should -BeFalse
     }
+
+    It 'does not reuse a cached context with <case>, and signs in instead' -ForEach @(
+        @{ case = 'no account or app name'; context = @{ TenantId = '11111111-1111-1111-1111-111111111111'; Account = $null; AppName = $null } }
+        @{ case = 'no tenant';              context = @{ TenantId = $null; Account = 'admin@contoso.example'; AppName = $null } }
+    ) {
+        # A partial cached context returned as-is printed "Connected to Tenant:  as" just as an
+        # empty one after Connect-MgGraph did.
+        $script:ContextBefore = [pscustomobject]$context
+        $script:ContextAfter  = [pscustomobject]@{ TenantId = $script:TenantId; Account = 'admin@contoso.example'; AppName = $null }
+
+        $result = Connect-LabGraph -Scope $script:Scope
+
+        $script:Connected | Should -BeTrue -Because 'a partial context must go on to Connect-MgGraph'
+        $result.TenantId  | Should -Be $script:TenantId
+    }
+
+    It 'still throws when a partial cached context is followed by a sign-in that leaves none' {
+        $script:ContextBefore = [pscustomobject]@{ TenantId = $script:TenantId; Account = $null; AppName = $null }
+        { Connect-LabGraph -Scope $script:Scope } | Should -Throw '*sign-in did not complete*'
+        $script:Connected | Should -BeTrue
+    }
 }
 
 Describe 'Get-LabGraphAuthPlan - nothing configured' {

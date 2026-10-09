@@ -36,8 +36,14 @@ This guide addresses common issues encountered while setting up or running the S
 
 **Solution**:
 
-1.  Interactive sign-in: all three scripts request `User.ReadWrite.All`, `Group.ReadWrite.All` and `Directory.ReadWrite.All` (`New-LabUser.ps1` adds `Domain.Read.All` and `User.Invite.All`), so one consent covers the whole lab. Grant it by running `New-LabUser.ps1` first and accepting the consent prompt. Where the tenant requires admin consent, a Global Administrator signs in once with `Connect-MgGraph -Scopes` and the same scopes, and ticks **Consent on behalf of your organization** in the prompt.
-2.  App-only sign-in (`SKYCRAFT_GRAPH_*` set): check that the app registration holds the application permissions listed in [Creating the Lab 1.1 service principal](#creating-the-lab-11-service-principal) and that admin consent was granted for them.
+1.  Interactive sign-in: all three scripts request `User.ReadWrite.All`, `Group.ReadWrite.All` and `Directory.ReadWrite.All` (`New-LabUser.ps1` adds `Domain.Read.All` and `User.Invite.All`), so one consent covers the whole lab. Since the scripts showed no prompt, sign in with a device code instead - its sign-in and consent happen in a browser you open yourself - using the full set `New-LabUser.ps1` requests:
+
+    ```powershell
+    Connect-MgGraph -UseDeviceCode -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All'
+    ```
+
+    Open the address it prints, enter the code, accept the consent, then re-run the script: it reuses that context. Where the tenant requires admin consent, a Global Administrator runs the same command once and ticks **Consent on behalf of your organization**. `New-LabUser.ps1 -DemoMode` requests the same scopes and creates nothing, so it is another way to see whether the consent is in place.
+2.  App-only sign-in (`SKYCRAFT_GRAPH_*` set): less likely, since a principal missing an application permission usually still gets a token and fails later with "Insufficient privileges". Still, check that the app registration holds the application permissions listed in [Creating the Lab 1.1 service principal](#creating-the-lab-11-service-principal) and that admin consent was granted for them.
 
 ### Lab 1.1 hangs at "Checking Microsoft Graph connection..."
 
