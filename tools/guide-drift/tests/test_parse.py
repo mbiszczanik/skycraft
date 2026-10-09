@@ -270,7 +270,7 @@ class CheckListTests(unittest.TestCase):
         self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 7}])
         self.assertEqual(expected, "Rows appear in the workspace:")
 
-    def test_the_checks_follow_the_steps_expected_result_after_a_semicolon(self) -> None:
+    def test_the_checks_follow_an_expected_result_ending_in_a_full_stop_after_a_space(self) -> None:
         items, expected = self.step(
             "### Step 9.9.1: Verify\n"
             "\n"
@@ -282,7 +282,7 @@ class CheckListTests(unittest.TestCase):
         self.assertEqual(items, [{"kind": "action", "labels": ["Overview"], "line": 3}])
         self.assertEqual(expected, "Bastion is operational. Status: Succeeded")
 
-    def test_checks_follow_a_text_without_closing_punctuation_after_a_semicolon(self) -> None:
+    def test_checks_join_a_text_after_a_space_or_without_closing_punctuation_after_a_semicolon(self) -> None:
         for text, joined in (("Bastion is operational.", "Bastion is operational. A; B"),
                              ("Shows!", "Shows! A; B"), ("Is it running?", "Is it running? A; B"),
                              ("Two files created:", "Two files created: A; B"),
@@ -323,7 +323,8 @@ class CheckListTests(unittest.TestCase):
         self.assertEqual(expected, "Status: Succeeded")
 
     def test_verify_with_more_after_the_colon_or_inside_a_word_is_no_check_list(self) -> None:
-        for intro in ("Verify: **Public IP** → **SKU** shows Standard", "Reverify:"):
+        for intro in ("Verify: **Public IP** → **SKU** shows Standard", "Reverify:", "Step2verify:",
+                      "pre_verify:"):
             with self.subTest(intro=intro):
                 items, expected = self.step(
                     "### Step 9.9.1: Verify\n\n"
@@ -331,6 +332,85 @@ class CheckListTests(unittest.TestCase):
                     "   - Status: **Succeeded**\n")
                 self.assertIn({"kind": "field", "label": "Status", "value": "Succeeded", "line": 4}, items)
                 self.assertIsNone(expected)
+
+    def test_a_list_after_a_nested_verify_line_ends_at_the_next_numbered_step(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: X\n"
+            "\n"
+            "1. Open **A**\n"
+            "\n"
+            "   Then verify:\n"
+            "   - a: **x**\n"
+            "   - b\n"
+            "2. Click **Next**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["A"], "line": 3},
+                                 {"kind": "action", "labels": ["Next"], "line": 8}])
+        self.assertEqual(expected, "a: x; b")
+
+    def test_a_list_after_a_nested_expected_result_ends_at_the_next_numbered_step(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: X\n"
+            "\n"
+            "1. Click **Go**\n"
+            "   - **Expected Result**: You see:\n"
+            "     - a\n"
+            "2. Click **Next**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Go"], "line": 3},
+                                 {"kind": "action", "labels": ["Next"], "line": 6}])
+        self.assertEqual(expected, "You see: a")
+
+    def test_a_list_ends_where_the_other_marker_kind_starts_at_its_indent(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: X\n"
+            "\n"
+            "**Expected Result**:\n"
+            "\n"
+            "- a\n"
+            "  1. nested, still part of the result\n"
+            "1. Click **Next**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 7}])
+        self.assertEqual(expected, "a; nested, still part of the result")
+
+    def test_an_expected_result_ends_a_check_list_and_is_read_as_usual(self) -> None:
+        for intro in ("1. Verify:", "Verify:"):
+            with self.subTest(intro=intro):
+                items, expected = self.step(
+                    "### Step 9.9.1: X\n"
+                    "\n"
+                    f"{intro}\n"
+                    "   - Status: **Succeeded**\n"
+                    "   - **Expected Result**: Bastion is up.\n"
+                    "2. Click **Next**\n")
+                self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 6}])
+                self.assertEqual(expected, "Bastion is up. Status: Succeeded")
+
+    def test_tab_indented_check_items_are_deeper_than_their_verify_item(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: X\n"
+            "\n"
+            "1. Verify:\n"
+            "\t- Status: **Succeeded**\n"
+            "\t- Subnet: `AzureBastionSubnet`\n"
+            "2. Click **Next**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 6}])
+        self.assertEqual(expected, "Status: Succeeded; Subnet: AzureBastionSubnet")
+
+    def test_a_commented_out_line_inside_a_check_list_neither_ends_nor_joins_it(self) -> None:
+        for intro, prefix in (("1. Verify:", ""), ("**Expected Result**: You see:", "You see: ")):
+            with self.subTest(intro=intro):
+                items, expected = self.step(
+                    "### Step 9.9.1: X\n"
+                    "\n"
+                    f"{intro}\n"
+                    "   - Status: **Succeeded**\n"
+                    "   <!-- - Old field: **value** -->\n"
+                    "   <!--\n"
+                    "   - Another: **value**\n"
+                    "   -->\n"
+                    "   - Subnet: `AzureBastionSubnet`\n"
+                    "2. Click **Next**\n")
+                self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 10}])
+                self.assertEqual(expected, prefix + "Status: Succeeded; Subnet: AzureBastionSubnet")
 
     def test_a_verify_list_in_another_option_is_dropped_with_it(self) -> None:
         items, expected = self.step(

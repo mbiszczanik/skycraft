@@ -20,12 +20,17 @@ without a browser. Rules (issue #189):
     the text after the colon ends with a colon itself, the list is read the same way and
     joined to the text ('Navigate to the resource to verify: Name: platformskycraftswcsa;
     Location: ...', 4.1.2), so '**Contributor** (inherited ...)' after 'Shows the user has:'
-    is not a click (1.2.10). The first one in a step is kept.
+    is not a click (1.2.10). The list ends at a blank line or any other line that is not a
+    list item, at another Expected Result, and where CommonMark starts a new list: at an item
+    indented less than its first item, or at the first item's indent with the other marker
+    kind (numbered or bullet), as the next numbered step after a nested list. The first
+    Expected Result in a step is kept.
   * A line whose text, markup stripped, ends with the word 'verify:' introduces a check list
     (#224): '3. Verify:' (2.2.11), '1. In **Configuration**, verify:' (4.1.11). After a list
     item, the check list is the list items indented deeper than it; blank lines among them are
     skipped, so it ends at the first non-blank line that is not a deeper item (the next numbered
-    step). After any other line it is the list right after it, read as after an Expected Result.
+    step) or is an Expected Result, which is read as usual. After any other line it is the list
+    right after it, read as after an Expected Result.
     The checks are not items, so 'Status: **Succeeded**' is never a field to fill; they are
     joined with '; ', markup stripped, and joined to the step's Expected Result, or are its
     Expected Result alone when it has none. The introducing line is read as any other item
@@ -33,7 +38,9 @@ without a browser. Rules (issue #189):
     option's body is dropped with it.
   * Checks are joined to an Expected Result text (join_checks) after a space when the text
     ends with '.', '!', '?' or ':' ('Bastion is operational. Status: Succeeded', 2.2.11), and
-    after '; ' otherwise, so a join never reads '.;' or ':;'.
+    after '; ' otherwise, so the text and the first check never meet as '.;' or ':;'. The
+    checks themselves are joined with '; ' whatever they end with ('... dev-skycraft-swc-vnet.;
+    Production source ...', 5.3.6).
   * Bold spans in list items are UI labels. A list item containing a chain (A → B, A -> B or
     A > B) is one 'navigation' item with several labels; otherwise it is an 'action' item.
     '\\*' inside bold is a literal asterisk; a leading '*' (the Portal's required-field marker)
@@ -112,6 +119,10 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     wording is read as before: the Field | Value table after '11. Verify **Encryption**
     settings:' (4.1.2) is three fields to fill, and the list after 'Confirm **Service
     endpoints** shows:' (2.2.21) does not reach the Expected Result (#246).
+  * Checks join the step's single Expected Result, which the runner checks at the end of the
+    step, though a check list can describe a blade the step then moves on from: 2.3.19 checks
+    the Overview and then opens Record sets; 2.3.20 checks the dev load balancer and ends on
+    prod.
 
 Usage: python parse.py <path/to/lab-guide-X.Y.md> [--out steps.json] [--repo-root <dir>]
 """
@@ -160,7 +171,8 @@ YOUR = re.compile(r"^Your\s", re.IGNORECASE)     # 'Your subscription': a placeh
 BRACKET_TOKEN = re.compile(r"\[[^\]]+\]")        # '[yourtenant]', '[IP of dev-skycraft-swc-lb-pip]'
 EXPECTED = re.compile(r"^\s*(?:(?:[-*]|\d+\.)\s+)?\*\*Expected Result\*\*[^:]*:(?P<text>.*)$")
 # A line whose text, markup stripped, ends with the word 'verify:' introduces a check list (#224).
-VERIFY_INTRO = re.compile(r"(?<![^\W\d_])verify:\s*$", re.IGNORECASE)
+VERIFY_INTRO = re.compile(r"(?<!\w)verify:\s*$", re.IGNORECASE)
+ORDERED_ITEM = re.compile(r"^\s*\d+\.\s")    # a numbered list item, as against a bullet
 SENTENCE_END = (".", "!", "?", ":")   # check items follow such a text after a space, not '; '
 TABLE_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$")
 SEPARATOR_CELL = re.compile(r"^:?-+:?$")   # every non-empty cell of a separator row; not "--name"
@@ -356,17 +368,26 @@ def option_regions(body: list[tuple[int, str]]) -> list[str]:
 def following_list(body: list[tuple[int, str]], start: int) -> tuple[list[str], int]:
     """The item texts of the list at body[start] (blank lines before it are skipped), markup
     stripped as for values, and the index of the first line after it; start when no list
-    follows. The list ends at the first line that is not a list item, a blank line included."""
+    follows. The list ends at the first line that is not a list item, a blank line included,
+    and, as a new list starts there in CommonMark, at an item indented less than the first one
+    or at the first one's indent with the other marker kind (numbered or bullet): the next
+    numbered step after a nested list. An Expected Result line ends it too."""
     position = start
     while position < len(body) and (body[position][1] == HIDDEN or not body[position][1].strip()):
         position += 1
     parts: list[str] = []
     after = start
+    first: tuple[int, bool] | None = None       # indent and marker kind of the first item
     while position < len(body):
-        line = body[position][1]
+        line = body[position][1].expandtabs(4)
         if line != HIDDEN:
             li = LIST_ITEM.match(line)
-            if not li:
+            if not li or EXPECTED.match(line):
+                break
+            shape = (indent_of(line), bool(ORDERED_ITEM.match(line)))
+            if first is None:
+                first = shape
+            elif shape[0] < first[0] or (shape[0] == first[0] and shape[1] != first[1]):
                 break
             parts.append(strip_value_markup(li.group("text")))
             after = position + 1
@@ -415,7 +436,8 @@ def check_list(body: list[tuple[int, str]], index: int) -> tuple[list[str], int]
 
     After a list item, the check list is the list items indented deeper than it; blank lines
     among them are skipped, so the list ends at the first non-blank line that is not a deeper
-    list item. After any other line, it is the list right after the line (following_list).
+    list item, or that is an Expected Result. After any other line, it is the list right after
+    the line (following_list).
     """
     line = body[index][1].expandtabs(4)
     li = LIST_ITEM.match(line)
@@ -432,8 +454,8 @@ def check_list(body: list[tuple[int, str]], index: int) -> tuple[list[str], int]
             position += 1
             continue
         item = LIST_ITEM.match(current)
-        if not item or indent_of(current) <= depth:
-            break
+        if not item or indent_of(current) <= depth or EXPECTED.match(current):
+            break                              # read_step reads an Expected Result as usual
         parts.append(strip_value_markup(item.group("text")))
         position += 1
         after = position
