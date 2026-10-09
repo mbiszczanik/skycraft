@@ -20,8 +20,9 @@
          validation nor counts as a pass - and a failed lookup is not reported as "found".
       6. A lock check passes only for the guide's lock: its name, level CanNotDelete, applied to
          the group itself (issue #258). A ReadOnly lock, a lock under another name, a lock on a
-         resource inside the group, or a lock lookup that fails each fail that one check, and
-         the [FAIL] line says what was found.
+         resource inside the group or on the subscription above it, or a lock lookup that fails
+         each fail that one check, and the [FAIL] line says what was found. The scope comparison
+         ignores case, as ARM ids do.
 
     Scope limit, as in the Lab 1.1 suite: the child is launched with -Command, so these tests
     prove the failure counter reaches `exit`, not that `pwsh -File` carries the code out of the
@@ -74,8 +75,9 @@ BeforeAll {
     #   SKYCRAFT_STUB_NOLOCK          resource groups that carry no lock
     #   SKYCRAFT_STUB_LOCKKIND        'group=kind' pairs that change the one lock a group returns:
     #                                 'readonly' gives it level ReadOnly, 'wrongname' another
-    #                                 name, 'child' puts it on a resource inside the group, and
-    #                                 'fail' makes that group's lock lookup fail
+    #                                 name, 'child' puts it on a resource inside the group,
+    #                                 'subscription' on the subscription above it, and 'fail'
+    #                                 makes that group's lock lookup fail
     #   SKYCRAFT_STUB_LOOKUPFAIL      '1' makes every resource, policy and lock lookup fail
     #   SKYCRAFT_STUB_BUDGET          'none' returns no budget, 'fail' makes the lookup fail
     $script:StubBody = @'
@@ -157,11 +159,16 @@ function Get-AzResourceLock {
 
     $lockName = "lock-no-delete-$(($ResourceGroupName -split '-')[0])"
     $level    = 'CanNotDelete'
-    $scope    = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/$ResourceGroupName"
+    $subscriptionScope = '/subscriptions/00000000-0000-0000-0000-000000000000'
+    # ARM ids do not keep one casing: the platform group's lock comes back with 'resourcegroups'
+    # in lower case, so the default run proves the scope comparison ignores case.
+    $groupSegment = if ($ResourceGroupName -like 'platform-*') { 'resourcegroups' } else { 'resourceGroups' }
+    $scope    = "$subscriptionScope/$groupSegment/$ResourceGroupName"
     switch ($kind) {
-        'readonly'  { $level = 'ReadOnly' }
-        'wrongname' { $lockName = 'my-lock' }
-        'child'     { $scope = "$scope/providers/Microsoft.Storage/storageAccounts/stubstorage" }
+        'readonly'     { $level = 'ReadOnly' }
+        'wrongname'    { $lockName = 'my-lock' }
+        'child'        { $scope = "$scope/providers/Microsoft.Storage/storageAccounts/stubstorage" }
+        'subscription' { $scope = $subscriptionScope }
     }
     # Shaped like the real cmdlet's output: a generic object whose level and notes sit under
     # Properties, with no top-level Level, and whose LockId says where the lock is applied.
@@ -251,12 +258,13 @@ function Get-AzConsumptionBudget {
     $script:LockReadOnly  = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'readonly' }
     $script:LockWrongName = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'wrongname' }
     $script:LockOnChild   = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'platform-skycraft-swc-rg' = 'child' }
+    $script:LockOnSub     = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'subscription' }
     $script:LockReadFails = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'fail' }
 
     $script:AllRuns = @(
         $script:AllPass, $script:PolicyMissing, $script:LockMissing, $script:WrongTag,
         $script:NoTags, $script:RgMissing, $script:LookupsFail, $script:NoContext, $script:NoBudget, $script:BudgetFails,
-        $script:LockReadOnly, $script:LockWrongName, $script:LockOnChild, $script:LockReadFails
+        $script:LockReadOnly, $script:LockWrongName, $script:LockOnChild, $script:LockOnSub, $script:LockReadFails
     )
 }
 
@@ -395,7 +403,8 @@ Describe 'Lab 1.3 Test-Lab.ps1 - a lock check passes only for the guide''s lock 
 
     It 'passes the guide''s CanNotDelete lock on each group and names it' {
         # The stub carries the level under Properties only, as the real cmdlet does: a check that
-        # read a top-level Level would print an empty level here.
+        # read a top-level Level would print an empty level here. The platform lock's id spells
+        # 'resourcegroups' in lower case, so its [OK] also proves the scope match ignores case.
         $run = $script:AllPass
         $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg : lock-no-delete-prod \(CanNotDelete\) \[OK\]'
         $run.Output | Should -Match 'Lock on platform-skycraft-swc-rg : lock-no-delete-platform \(CanNotDelete\) \[OK\]'
@@ -428,6 +437,17 @@ Describe 'Lab 1.3 Test-Lab.ps1 - a lock check passes only for the guide''s lock 
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match 'Lock on platform-skycraft-swc-rg \[FAIL\] Not found on the group itself; locks elsewhere do not count: lock-no-delete-platform \(CanNotDelete\) at /subscriptions/[^ ]+/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft\.Storage/storageAccounts/stubstorage\.'
         $run.Output | Should -Match 'step 1\.3\.12\.'
+        $run.FailLines | Should -Be 1
+        $run.OkLines | Should -Be 7
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'does not count a lock on the subscription above the group' {
+        # In a shared subscription this is the likeliest false pass: Get-AzResourceLock
+        # -ResourceGroupName also returns locks inherited from the subscription.
+        $run = $script:LockOnSub
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] Not found on the group itself; locks elsewhere do not count: lock-no-delete-prod \(CanNotDelete\) at /subscriptions/00000000-0000-0000-0000-000000000000\. Expected'
         $run.FailLines | Should -Be 1
         $run.OkLines | Should -Be 7
         $run.Output | Should -Match 'Failed: 1\b'

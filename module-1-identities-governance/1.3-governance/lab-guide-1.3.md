@@ -332,7 +332,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 | Lock type | Delete                                               |
 | Notes     | Cannot delete resource or child resources.           |
 
-> The Bicep path applies both locks through the AVM resource-group module, which sets this notes text itself; the notes are not configurable through the module. If you create the locks in the portal, use the same text so your locks match the checklist. `Test-Lab.ps1` does not read the notes: it checks that each group carries, on the group itself, a lock with the name given here and the **Delete** (`CanNotDelete`) type.
+> The Bicep path applies both locks through the AVM resource-group module, which sets this notes text itself; the notes are not configurable through the module. If you create the locks in the portal, use the same text so your locks match the checklist. `Test-Lab.ps1` does not read the notes: it checks that each group carries, on the group itself, a lock with the name given in step 1.3.10 or 1.3.12 and the **Delete** (`CanNotDelete`) type.
 
 5. Click **OK**
 
