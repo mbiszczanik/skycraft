@@ -3,7 +3,7 @@ SUMMARY: Lab 2.2 - Secure Access (NSG/ASG/Bastion)
 DESCRIPTION: Deploys the Dev/Prod ASGs and NSGs, attaches the NSGs (and service endpoints) to the spoke subnets, and deploys the Hub NSG and the optional Azure Bastion via AVM (requires the Lab 2.1 virtual networks to exist)
 EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.3.0
+VERSION: 0.4.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -291,7 +291,14 @@ module modNsgDb 'br/public:avm/res/network/network-security-group:0.5.3' = [for 
 // --- Subnet associations: the AVM subnet child module re-declares each spoke subnet with
 //     its NSG (and service endpoints). Subnet updates on the same VNet must not overlap
 //     (AnotherOperationInProgress), so the three loops are chained with explicit dependsOn -
-//     no symbolic reference expresses this ordering. ---
+//     no symbolic reference expresses this ordering.
+//     A subnet PUT replaces the whole subnet: whatever it does not declare goes back to the
+//     default. So each module declares everything these subnets carry - Lab 2.1's address prefix
+//     and privateEndpointNetworkPolicies, and this lab's NSG and service endpoints - and a re-run
+//     (for example to pick up a new dev spoke) changes nothing on the other spoke (issue #263).
+//     privateEndpointNetworkPolicies is 'Disabled' as in Lab 2.1 and the portal: unset, the
+//     module sends null and the subnet falls back to 'Enabled' (docs/bicep-standards.md
+//     Section 4.5). No lab sets a delegation, route table or NAT gateway on these subnets. ---
 
 module modSubnetAuth 'br/public:avm/res/network/virtual-network/subnet:0.2.0' = [for (spoke, i) in varSpokes: {
   name: '${spoke.prefix}-subnet-auth-deployment'
@@ -301,6 +308,7 @@ module modSubnetAuth 'br/public:avm/res/network/virtual-network/subnet:0.2.0' = 
     virtualNetworkName: spoke.vnetName
     addressPrefix: spoke.authSubnetCidr
     networkSecurityGroupResourceId: modNsgAuth[i].outputs.resourceId
+    privateEndpointNetworkPolicies: 'Disabled'
   }
 }]
 
@@ -312,6 +320,7 @@ module modSubnetWorld 'br/public:avm/res/network/virtual-network/subnet:0.2.0' =
     virtualNetworkName: spoke.vnetName
     addressPrefix: spoke.worldSubnetCidr
     networkSecurityGroupResourceId: modNsgWorld[i].outputs.resourceId
+    privateEndpointNetworkPolicies: 'Disabled'
     // Storage service endpoint so Lab 4.4 can add WorldSubnet to the storage account's
     // network ACL. This lab is the final authority on the spoke subnets, so the endpoint
     // lives here, not in Lab 2.1.
@@ -332,6 +341,7 @@ module modSubnetDb 'br/public:avm/res/network/virtual-network/subnet:0.2.0' = [f
     virtualNetworkName: spoke.vnetName
     addressPrefix: spoke.dbSubnetCidr
     networkSecurityGroupResourceId: modNsgDb[i].outputs.resourceId
+    privateEndpointNetworkPolicies: 'Disabled'
     serviceEndpoints: [
       'Microsoft.Sql'
       'Microsoft.Storage'
