@@ -10,8 +10,8 @@
       issue #189: only '### Step X.Y.N:' sections are read; fenced code is skipped; where a step
       has '#### Option 1:' or '#### Option A:' headings only one option is read (plus the step's
       Expected Result), the first with an item, named in the step's "option" (#201; pinned on
-      lab 3.2, rules in test_parse.py); bold spans that are not UI elements are dropped; 'A -> B' chains
-      become navigation; 'Search for **X**' becomes a search of the Portal;
+      lab 3.2, rules in test_parse.py); bold spans that are not UI elements are dropped;
+      'A -> B' chains become navigation; 'Search for **X**' becomes a search of the Portal;
       '- **Label**: value' list items and Field | Value tables become fields, and so does
       '- Label: value' when the value is a bold or code span (#198); a field value that is an
       instruction or holds a bracket token is marked literal: false (#202);
@@ -770,6 +770,7 @@ Describe 'parse.py - only one option of a step is read, in every lab guide (#201
         # parser's labels, fields or tags. Lab 4.3 has Option headings in every step but its other
         # options hold only code; in 3.2.1 Option A is CLI-only, so Option B, the Portal, is read.
         $script:OtherOnly = [System.Collections.Generic.List[hashtable]]::new()
+        $script:WithOptions = [System.Collections.Generic.List[hashtable]]::new()   # steps with Option headings
         $script:Parsed = @{}
         $guides = Get-ChildItem -Path $script:RepoRoot -Directory -Filter 'module-*' |
             Get-ChildItem -Directory | Where-Object { $_.Name -match '^\d+\.\d+-' } |
@@ -805,6 +806,9 @@ Describe 'parse.py - only one option of a step is read, in every lab guide (#201
                 if (-not $step) { continue }
                 if ($line -match '^####\s+Option\s+(\d+|[A-Z])\b') {
                     $zone = if ($Matches[1] -ceq $readOption[$step]) { 'read' } else { 'other' }
+                    if (-not ($script:WithOptions | Where-Object { $_.lab -eq $lab -and $_.step -eq $step })) {
+                        $script:WithOptions.Add(@{ lab = $lab; step = $step })
+                    }
                     continue
                 }
                 foreach ($bold in [regex]::Matches($line, '\*\*(.+?)\*\*')) {
@@ -846,6 +850,19 @@ Describe 'parse.py - only one option of a step is read, in every lab guide (#201
                 }
             })
         $notFirst | Should -BeNullOrEmpty -Because ($notFirst -join '; ')
+    }
+
+    It 'names the option read in every step that has Option headings, and in no other step' {
+        $script:WithOptions.Count | Should -BeGreaterThan 0
+        $unnamed = @(foreach ($case in $script:WithOptions) {
+                $parsedStep = $script:Parsed[$case.lab].steps | Where-Object id -eq $case.step
+                if ($parsedStep.PSObject.Properties.Name -notcontains 'option') { "step $($case.step)" }
+            })
+        $unnamed | Should -BeNullOrEmpty -Because ($unnamed -join '; ')
+        $named = @(foreach ($lab in $script:Parsed.Keys) {
+                $script:Parsed[$lab].steps | Where-Object { $_.PSObject.Properties.Name -contains 'option' }
+            })
+        $named.Count | Should -Be $script:WithOptions.Count
     }
 
     It 'reads no label, field or tag from the body of an option that is not read' {

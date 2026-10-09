@@ -3,8 +3,8 @@ search and which are a blade's own search box (issue #189), which '- Label: valu
 a plain label are fields (issue #198), which field values are not text to type (issue #202),
 which lists are checks for the Expected Result rather than steps (issue #224), which code
 spans in a navigation chain are resources to open (issue #199), and which option of a step is
-read (issue #201). The full guides and the other
-parser rules are covered by tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
+read (issue #201). The full guides and the other parser rules are covered by
+tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
 """
@@ -586,6 +586,22 @@ class OptionChoiceTests(unittest.TestCase):
         self.assertEqual(items, [])
         self.assertEqual(expected, "Two files created.")
         self.assertEqual(option, "A")
+
+    def test_an_earlier_options_expected_result_is_never_the_read_options(self) -> None:
+        items, expected, option = self.step(
+            "### Step 9.9.1: Generate SSH Key Pair\n\n" + self.CLI.format(name="A")
+            + "#### Option B: Store the key in Azure\n\n"
+              "1. In Azure Portal, search for **SSH keys** and click **+ Create**\n")
+        self.assertEqual(self.labels(items), ["SSH keys", "+ Create"])
+        self.assertIsNone(expected)
+        self.assertEqual(option, "B")
+
+    def test_a_later_options_expected_result_is_the_fallback(self) -> None:
+        _, expected, option = self.step(
+            "### Step 9.9.1: X\n\n#### Option 1: Portal\n\n1. Click **Next**\n\n"
+            "#### Option 2: CLI\n\n**Expected Result**: The single result after the options.\n")
+        self.assertEqual(expected, "The single result after the options.")
+        self.assertEqual(option, "1")
 
     def test_a_step_without_option_headings_names_no_option(self) -> None:
         items, _, option = self.step("### Step 9.9.1: X\n\n1. Click **Next**\n")

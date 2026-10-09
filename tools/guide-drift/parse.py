@@ -13,11 +13,13 @@ without a browser. Rules (issue #189):
   * Where a step has '#### Option 1:' or '#### Option A:' headings, only one option's body is
     read: the first option whose body yields at least one item, or the first option when none
     does (#201: 3.2.1's Option A is CLI-only, its Option B is the Portal path). The step's
-    '"option"' is that option's name as its heading gives it ('1', 'A', 'B'); only a step with
+    "option" is that option's name as its heading gives it ('1', 'A', 'B'); only a step with
     Option headings carries the key, so the steps.json of a run tells its reader, and the
     reviewer of a recording, which path was read. The Expected Result is the first one outside
-    any option's body or in the option read; when there is none, the first one in another
-    option (the standard puts a single one after Option 3).
+    any option's body or in the option read; when there is none, the first one in a later
+    option (the standard puts a single one after Option 3). An earlier option's Expected Result
+    describes that option's path and is never taken: Option B read without one of its own
+    has none, not Option A's.
   * '**Expected Result**' may be a list item and may carry a qualifier before the colon
     ('**Expected Result** (if ...):'). When nothing follows the colon, the list right after it
     is the result: its items joined with '; ', markup stripped, and never read as steps. When
@@ -130,9 +132,9 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
   * 'select `config.txt`' (4.3.6) is read as a resource, so the runner clicks the file's row,
     which may open the file rather than select it.
   * The option read is fixed by the guide, not chosen per run. 3.2.1 reads Option B, which
-    creates an SSH key resource, while the rest of lab 3.2 follows Option A (the local public
-    key), and no later step uses the key resource: a run of 3.2 needs 3.2.1 skipped in its
-    recording (#200) or a per-step choice of option.
+    creates an SSH key resource, while the items of later 3.2 steps follow Option A (3.2.2
+    pastes skycraft-dev.pub); option B appears there only in prose notes, so a run of 3.2
+    needs 3.2.1 skipped in its recording (#200) or a per-step choice of option.
   * A caption label whose value holds bold spans turns them into actions (4.2:741, #203).
   * Instructions after a field value are lost (5.3:225, #203).
   * Text before the first option heading, and items under a non-option '####' heading after
@@ -518,13 +520,13 @@ def read_step(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, list
     does (#201): 3.2.1's Option A is CLI-only and its Option B is the Portal path.
     """
     regions, options = option_regions(body)
-    chosen = 0 if options else None
-    for index in range(len(options)):
-        if read_option(body, regions, index)[0]:
-            chosen = index
-            break
-    items, expected, images = read_option(body, regions, chosen)
-    return items, expected, images, (options[chosen] if options else None)
+    if not options:
+        return (*read_option(body, regions, None), None)
+    for index, name in enumerate(options):
+        read = read_option(body, regions, index)
+        if read[0]:
+            return (*read, name)
+    return (*read_option(body, regions, 0), options[0])
 
 
 def read_option(body: list[tuple[int, str]], regions: list[str | int],
@@ -534,9 +536,10 @@ def read_option(body: list[tuple[int, str]], regions: list[str | int],
 
     Items come from the whole body, or from the chosen option only. The Expected Result is the
     first one in the step that is not inside another option's body; when there is none, the
-    first one anywhere (the standard puts a single one after Option 3). The items of a check
-    list are read where items are; they are joined to the Expected Result (join_checks) or,
-    when the step has none, are its Expected Result alone.
+    first one in a later option (the standard puts a single one after Option 3), never one in
+    an earlier option, which describes that option's path. The items of a check list are read
+    where items are; they are joined to the Expected Result (join_checks) or, when the step has
+    none, are its Expected Result alone.
     """
     item_lines: list[tuple[int, str]] = []
     expected: str | None = None
@@ -547,9 +550,10 @@ def read_option(body: list[tuple[int, str]], regions: list[str | int],
         if EXPECTED.match(body[index][1]):
             text, after = expected_text(body, index)
             in_other = isinstance(regions[index], int) and regions[index] != chosen
+            earlier = in_other and chosen is not None and regions[index] < chosen
             if text and not in_other and expected is None:
                 expected = text
-            elif text and fallback is None:
+            elif text and fallback is None and not earlier:
                 fallback = text
             index = after
             continue
