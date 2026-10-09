@@ -22,7 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import recording  # noqa: E402
 from decide import Candidate  # noqa: E402
 from recording import (Redactor, env_secrets, expand_env, field_action, missing_env,  # noqa: E402
-                       rejected_candidates, resolve_value, resource_name, value_action, write_json)
+                       rejected_candidates, resolve_value, resource_name, skip_reason, value_action,
+                       write_json)
 
 DOMAIN = "contoso.onmicrosoft.com"
 TENANT = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -219,6 +220,27 @@ class FieldActionTests(unittest.TestCase):
     def test_a_literal_value_goes_to_value_action(self) -> None:
         self.assertEqual(self.action("1.1.6", "Group name", "SkyCraft-Admins", literal=True), ("type", "SkyCraft-Admins"))
         self.assertEqual(self.action("3.3.8", "Insecure connections", "Uncheck", literal=True), ("type", "Uncheck"))
+
+
+class SkipReasonTests(unittest.TestCase):
+    """'"skip": "<reason>"' on a step entry (#200): the reason, or an error, never a silent
+    'not skipped' that would perform the step the recording meant to leave out."""
+
+    def recording(self, entry: dict) -> dict:
+        return {"steps": {"9.9.1": entry}}
+
+    def test_no_entry_or_no_key_is_no_skip(self) -> None:
+        self.assertIsNone(skip_reason({"steps": {}}, "9.9.1"))
+        self.assertIsNone(skip_reason(self.recording({"labels": {}, "result": None}), "9.9.1"))
+
+    def test_the_reason_is_returned_stripped(self) -> None:
+        self.assertEqual(skip_reason(self.recording({"skip": "  Conceptual: no Portal path \n"}), "9.9.1"),
+                         "Conceptual: no Portal path")
+
+    def test_a_reason_without_text_or_not_a_string_raises(self) -> None:
+        for value in ("", "  \t", None, 0, 1, True, False, [], ["optional"], {}):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "step 9.9.1: 'skip' must be"):
+                skip_reason(self.recording({"skip": value}), "9.9.1")
 
 
 class RejectedCandidatesTests(unittest.TestCase):

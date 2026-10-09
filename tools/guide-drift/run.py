@@ -60,6 +60,20 @@ skipped, marks the state finished, and it cannot be resumed.
 A resumed run is the same run: it keeps the state's run id (ignoring --run-id), writes into the
 same --log-dir/<run id>/ folder, and its summary and exit code cover every step of both parts.
 
+A step whose recording entry carries '"skip": "<reason>"' (an optional or conceptual step that
+would create resources, or the other option of a lettered pair; issue #200) is never performed:
+the Portal is not touched for it, no screenshot is taken, and the summary lists it under
+'skipped' with that reason. It counts as completed, so a resume passes over it, and later steps
+run as usual. The step after it therefore starts on the view the step before the skip ended on,
+without the blade the skipped step would have opened or the resources it would have created, and
+fails if it needed them: skip only a step whose blade and resources no later step needs, or skip
+those later steps too. The skip wins over everything else the entry records: its decisions, value
+overrides and result are kept, for the day the skip is removed, but not read. The reason must
+be a non-empty string (recording.skip_reason); the run refuses to start otherwise. A step that
+was in flight when a run stopped and is skipped in the recording since (it failed, the person
+answered q and added the skip) is not asked about on -Resume: its stopped attempt's findings are
+dropped, as a redone step's are, and it is skipped like any other.
+
 Exit code: blocking drifts plus unknowns, capped at 250, when the run ends normally; 254 when a
 precondition, a guard or the state stopped it before the first step; 255 when it stopped mid-run
 (Ctrl+C, 'q', a closed window, a crash) with the state kept for -Resume, so nothing is cleaned up.
@@ -87,7 +101,8 @@ from playwright.sync_api import Browser, Error as PlaywrightError, Frame, Locato
 sys.path.insert(0, str(Path(__file__).parent))
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
-                       field_action, rejected_candidates, resolve_value, resource_name, write_json)
+                       field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
+                       write_json)
 
 Found = TypeVar("Found")     # what in_time() looks for
 
@@ -125,6 +140,7 @@ RESULT_ROLES = ("option", "link", "button", "menuitem")    # entries of the glob
 # A resource in a Portal list: the link in its name cell, the cell, or the whole row (#199).
 RESOURCE_ROLES = ("link", "gridcell", "row")
 MISSING_RESOURCE = "missing-resource"    # the category of a resource that is not on screen
+RECORDED_SKIP = "recorded-skip"          # the category of a step the recording skips (#200)
 # The Portal's global search box, named "Search resources, services, and docs (G+/)".
 SEARCH_BOX = re.compile(r"^Search resources")
 # A blade's own search box (search scope 'blade'): a search box, or a text box whose accessible
@@ -1763,12 +1779,14 @@ class Runner:
             record.update(outcome="match")
         return record
 
-    def skip_step(self, step: dict, because: str, reason: str | None = None) -> None:
+    def skip_step(self, step: dict, because: str, reason: str | None = None,
+                  category: str | None = None) -> None:
         """A 'skipped' record. because: the step whose failure caused the skip, or the step
-        itself when the person skipped it (on resume, or after it failed). reason: why the
-        person skipped a step that failed, kept as observed; on resume there is none."""
+        itself when the person skipped it (on resume, or after it failed) or the recording does
+        (category RECORDED_SKIP). reason: why the person or the recording skipped the step, kept
+        as observed; on resume there is none."""
         record = self.new_record(step, "action", None)
-        record.update(outcome="skipped", skippedBecause=because, observed=reason)
+        record.update(outcome="skipped", skippedBecause=because, observed=reason, category=category)
         self.write(record)
 
     # -- state and resume -------------------------------------------------------------------
@@ -1784,6 +1802,10 @@ class Runner:
                                      "finished": finished, "logDir": str(Path(self.args.log_dir).resolve())})
 
     def view_before(self, portal: list[dict], index: int) -> str:
+        """The view the last step performed before portal[index] ended on. A step the recording
+        skips never moved the Portal, so the step before it is asked instead."""
+        while index > 0 and skip_reason(self.recording, portal[index - 1]["id"]) is not None:
+            index -= 1
         if index == 0:
             return "(the lab's first step: start from the Portal home page)"
         previous = portal[index - 1]["id"]
@@ -1803,6 +1825,15 @@ class Runner:
             return NOT_STARTED
         print(f"Run folder: {self.run_dir}")
         first = portal[start]
+        if in_flight and skip_reason(self.recording, first["id"]) is not None:
+            # Skipped in the recording since the run stopped (#200): whether it finished does not
+            # matter any more. Its stopped attempt is dropped, as a redo's is (results.jsonl keeps
+            # it), and the loop below writes the recorded skip; the person is asked for the view
+            # the first step that runs needs, as on any other resume.
+            print(f"\nStep {first['id']} ({first['title']}) was in progress when the last run stopped; "
+                  f"the recording now skips it.")
+            self.records = [r for r in self.records if r["step"] != first["id"]]
+            in_flight = False
         if in_flight:
             print(f"\nStep {first['id']} ({first['title']}) was in progress when the last run stopped.\n"
                   f"The step before it ended on this view:\n  {self.view_before(portal, start)}\n"
@@ -1819,13 +1850,30 @@ class Runner:
                     self.skip_step(first, first["id"])
                 self.save_state(completed, None)
         elif start > 0 or self.args.resume:
-            print(f"\nStarting at step {first['id']} ({first['title']}). Bring the Portal to the view "
-                  f"the step before it ended on, then press Enter:\n  {self.view_before(portal, start)}")
-            if self.prompt("> ") is None:
-                print("No answer (input closed); nothing was run.")
-                return NOT_STARTED
+            # The first step that will run: steps the recording skips are passed over (#200), and
+            # when every step left is skipped there is no view to bring the Portal to.
+            runs = next((i for i in range(start, len(portal)) if portal[i]["id"] not in completed
+                         and skip_reason(self.recording, portal[i]["id"]) is None), None)
+            if runs is not None:
+                passed = ("" if runs == start else f" (the recording skips step {first['id']})"
+                          if runs == start + 1 else
+                          f" (the recording skips steps {first['id']} to {portal[runs - 1]['id']})")
+                print(f"\nStarting at step {portal[runs]['id']} ({portal[runs]['title']}){passed}. Bring "
+                      f"the Portal to the view the step before it ended on, then press Enter:\n"
+                      f"  {self.view_before(portal, runs)}")
+                if self.prompt("> ") is None:
+                    print("No answer (input closed); nothing was run.")
+                    return NOT_STARTED
         for step in portal[start:]:
             if step["id"] in completed:
+                continue
+            reason = skip_reason(self.recording, step["id"])
+            if reason is not None:
+                # Never performed (#200), so it comes before an ended lab's 'because step X
+                # failed': the recording's reason is why the step is not checked either way.
+                self.skip_step(step, step["id"], reason, category=RECORDED_SKIP)
+                completed.append(step["id"])
+                self.save_state(completed, self.first_failure)     # an ended lab keeps its step in flight
                 continue
             if self.first_failure:
                 self.skip_step(step, self.first_failure)
@@ -1961,9 +2009,11 @@ class Runner:
 
     @staticmethod
     def skipped_line(record: dict) -> str:
-        """A 'skipped' record in the summary (skip_step): skipped by the person after it failed,
-        with their reason; skipped on resume; or skipped because an earlier step failed and the
-        person ended the lab there."""
+        """A 'skipped' record in the summary (skip_step): skipped by the recording, with its
+        reason; skipped by the person after it failed, with theirs; skipped on resume; or skipped
+        because an earlier step failed and the person ended the lab there."""
+        if record.get("category") == RECORDED_SKIP:
+            return f"- step {record['step']} skipped by the recording: {record['observed']}"
         if record["skippedBecause"] != record["step"]:
             return f"- step {record['step']} because step {record['skippedBecause']} failed"
         if record.get("observed"):
@@ -1985,6 +2035,12 @@ def main(argv: list[str] | None = None) -> int:
     missing = missing_env(recording)
     if missing:
         print("Set these environment variables first: " + ", ".join(missing))
+        return NOT_STARTED
+    try:
+        for step_id in recording.get("steps", {}):
+            skip_reason(recording, step_id)
+    except ValueError as error:     # a malformed skip must not read as 'perform the step'
+        print(f"The recording cannot be used: {error}.")
         return NOT_STARTED
     # Everything that can refuse the run is checked before the browser opens and the person signs in.
     state = {"completed": [], "inFlight": None}

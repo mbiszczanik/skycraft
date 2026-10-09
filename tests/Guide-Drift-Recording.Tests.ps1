@@ -19,6 +19,13 @@
     address, a placeholder for the token. A guide edit that adds such a value fails here
     instead of in a live run.
 
+    A step entry may carry '"skip": "<reason>"' (issue #200): the runner never performs that step
+    and lists it as skipped with the reason. The reason must be a string with text in it; anything
+    else would leave the summary without a reason, and run.py refuses such a recording. The rest of
+    a skipped step's entry is checked as for any other step, as it is replayed again once the skip
+    is removed; a skip for a step the guide does not have, or for a step with no portal part, fails
+    like any other entry for such a step.
+
     It also keeps tenant data out of this public repository: for every recording, no e-mail
     address, tenant domain or GUID, and only query-free portal.azure.com blade addresses; for lab
     1.1, the tenant prefix and the guest address of step 1.1.5 are environment references.
@@ -28,7 +35,7 @@
 
 .NOTES
     Project: SkyCraft
-    Issue:   #189, #199, #202
+    Issue:   #189, #199, #200, #202
 #>
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
@@ -106,6 +113,30 @@ $LabelRuleCases = @(
     @{ label = 'Project'; problem = "step 9.9.1 label 'Project' is not in the guide" }
 ) | ForEach-Object { $_.actual = @(Get-LabelProblem -Step $LabelFixture -Label $_.label) -join '; '; $_ }
 
+# Why a step entry's 'skip' (#200) is malformed; nothing when the entry has none or a reason.
+# recording.skip_reason, which run.py checks every entry with, applies the same rule.
+function Get-SkipProblem {
+    param([string]$StepId, [object]$Entry)
+    $skip = $Entry.PSObject.Properties['skip']
+    if ($null -eq $skip) { return }
+    if ($skip.Value -isnot [string] -or [string]::IsNullOrWhiteSpace($skip.Value)) {
+        "step ${StepId}: 'skip' must be the reason the step is skipped, a non-empty string"
+    }
+}
+
+$SkipRuleCases = @(
+    @{ json = '{ "labels": {} }'; problem = '' }
+    @{ json = '{ "skip": "Optional: creates a CNAME record no later step uses" }'; problem = '' }
+    # The skip wins, and the rest of the entry is kept for the day it is removed.
+    @{ json = '{ "skip": "Conceptual", "labels": { "Save": { "decision": "use", "role": "button", "name": "Save" } } }'; problem = '' }
+    @{ json = '{ "skip": "" }'; problem = "step 9.9.1: 'skip' must be the reason the step is skipped, a non-empty string" }
+    @{ json = '{ "skip": "   " }'; problem = "step 9.9.1: 'skip' must be the reason the step is skipped, a non-empty string" }
+    @{ json = '{ "skip": null }'; problem = "step 9.9.1: 'skip' must be the reason the step is skipped, a non-empty string" }
+    @{ json = '{ "skip": true }'; problem = "step 9.9.1: 'skip' must be the reason the step is skipped, a non-empty string" }
+    @{ json = '{ "skip": 1 }'; problem = "step 9.9.1: 'skip' must be the reason the step is skipped, a non-empty string" }
+    @{ json = '{ "skip": ["optional"] }'; problem = "step 9.9.1: 'skip' must be the reason the step is skipped, a non-empty string" }
+) | ForEach-Object { $_.actual = @(Get-SkipProblem -StepId '9.9.1' -Entry ($_.json | ConvertFrom-Json)) -join '; '; $_ }
+
 $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/recordings') -Filter 'lab-*.json' |
     ForEach-Object {
         $file      = $_
@@ -153,6 +184,7 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
 
         $malformed = @(
             foreach ($prop in $recording.steps.PSObject.Properties) {
+                Get-SkipProblem -StepId $prop.Name -Entry $prop.Value
                 $labelsObject = $prop.Value.labels
                 if ($null -ne $labelsObject) {
                     foreach ($entry in @($labelsObject.PSObject.Properties)) {
@@ -260,8 +292,16 @@ Describe 'Guide drift recordings - every value the runner types is a literal' {
     }
 }
 
+Describe 'Guide drift recordings - a skip gives its reason' {
+    It "reports the step entry <json> as '<problem>' (empty: well-formed)" -ForEach $SkipRuleCases {
+        # A skip without a reason leaves the summary silent on why the step was not checked, and
+        # run.py refuses to start on such a recording: it fails here, not at the start of a run.
+        $actual | Should -Be $problem
+    }
+}
+
 Describe 'Guide drift recordings - every decision is one replay can act on' {
-    It "'<file>' records only use (with name and role), ignore or gone decisions and a well-formed result" -ForEach $RecordingCases {
+    It "'<file>' records only use (with name and role), ignore or gone decisions, a well-formed result and skip" -ForEach $RecordingCases {
         # ReplayDecider indexes entry['decision'] and entry['name'] directly, so a missing key
         # raises KeyError, and a use entry without a role matches any role. An unrecognised
         # decision value is treated as no answer. A hand edit that breaks the shape must fail here,
