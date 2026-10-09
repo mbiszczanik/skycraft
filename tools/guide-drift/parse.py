@@ -21,9 +21,10 @@ without a browser. Rules (issue #189):
     joined to the text ('Navigate to the resource to verify: Name: platformskycraftswcsa;
     Location: ...', 4.1.2), so '**Contributor** (inherited ...)' after 'Shows the user has:'
     is not a click (1.2.10). The list ends at a blank line or any other line that is not a
-    list item, at another Expected Result, and where CommonMark starts a new list: at an item
-    indented less than its first item, or at the first item's indent with the other marker
-    kind (numbered or bullet), as the next numbered step after a nested list. The first
+    list item, at another Expected Result, at an item indented less than its first item
+    (stricter than CommonMark, which keeps an item up to three columns less in the list), and
+    at the first item's indent with the other marker kind (numbered or bullet), as the next
+    numbered step after a nested list. The first
     Expected Result in a step is kept.
   * A line whose text, markup stripped, ends with the word 'verify:' introduces a check list
     (#224): '3. Verify:' (2.2.11), '1. In **Configuration**, verify:' (4.1.11). After a list
@@ -369,9 +370,10 @@ def following_list(body: list[tuple[int, str]], start: int) -> tuple[list[str], 
     """The item texts of the list at body[start] (blank lines before it are skipped), markup
     stripped as for values, and the index of the first line after it; start when no list
     follows. The list ends at the first line that is not a list item, a blank line included,
-    and, as a new list starts there in CommonMark, at an item indented less than the first one
-    or at the first one's indent with the other marker kind (numbered or bullet): the next
-    numbered step after a nested list. An Expected Result line ends it too."""
+    at an item indented less than the first one (stricter than CommonMark, which keeps an item
+    up to three columns less in the list) and at the first one's indent with the other marker
+    kind (numbered or bullet): the next numbered step after a nested list. An Expected Result
+    line ends it too."""
     position = start
     while position < len(body) and (body[position][1] == HIDDEN or not body[position][1].strip()):
         position += 1
