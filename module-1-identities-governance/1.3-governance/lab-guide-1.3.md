@@ -233,6 +233,7 @@ Before starting this lab:
    - Go to **Tags** tab
    - Add tag: `Environment` = `Test`
    - Click **Review + create**
+   - Click **Create**
 
 **Expected Result**: Creation succeeds because the required tag is present.
 
