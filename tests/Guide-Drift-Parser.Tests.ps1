@@ -888,6 +888,19 @@ Describe 'parse.py - only one option of a step is read, in every lab guide (#201
         $parsedStep.expected | Should -Match '^`platform-skycraft-swc-ssh` appears under \*\*SSH keys\*\*'
     }
 
+    It 'reads only real fields and clicks in step 3.2.1 Option B (#270)' {
+        # The Region value without its read-only remark, no policy name among the labels, and no
+        # pop-up title before the button that is clicked in it.
+        $parsedStep = $script:Parsed['3.2'].steps | Where-Object id -eq '3.2.1'
+        ($parsedStep.items | Where-Object { $_.kind -eq 'field' -and $_.label -eq 'Region' }).value |
+            Should -Be 'Sweden Central'
+        $labels = @($parsedStep.items | Where-Object { $_.PSObject.Properties.Name -contains 'labels' } |
+                ForEach-Object { $_.labels })
+        $labels | Should -Not -Contain 'Enforce Project Tag Value'
+        $labels | Should -Not -Contain 'Generate new key pair'
+        @(@($parsedStep.items)[-1].labels) | Should -Be @('Download private key and create resource')
+    }
+
     It 'reads the first option of every other step with Option headings, as each has a portal part' {
         $notFirst = @(foreach ($lab in $script:Parsed.Keys) {
                 foreach ($parsedStep in $script:Parsed[$lab].steps) {
