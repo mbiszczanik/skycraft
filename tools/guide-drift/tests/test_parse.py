@@ -3,8 +3,9 @@ search and which are a blade's own search box (issue #189), which '- Label: valu
 a plain label are fields (issue #198), which field values are not text to type (issue #202),
 which lists and tables are checks for the Expected Result rather than steps (issues #224 and
 #246), which code spans in a navigation chain are resources to open (issues #199 and #250),
-which chains pick a field's value and where a chain ends (issue #250), and which option of a
-step is read (issue #201). The full guides and the other parser rules are covered
+which chains pick a field's value and where a chain ends (issue #250), which option of a
+step is read (issue #201), and which captions describe rather than instruct, in which lab a
+caption is no label, and that items outside every option are read (issue #203). The full guides and the other parser rules are covered
 by tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
@@ -319,7 +320,7 @@ class PickerChainTests(unittest.TestCase):
 
     def test_a_value_that_is_not_one_span_leaves_a_navigation(self) -> None:
         # The first step after the label must be the value, a bold or code span alone.
-        self.assertEqual(self.item("For each role above: select the role → **Assign access to: Managed identity** → "   # 5.2.5
+        self.assertEqual(self.item("For each role above: select the role → **Assign access to: Managed identity** → "   # 5.2.5 before #203
                                    "pick the `platform-skycraft-swc-bv` Backup Vault → **Review + assign**."),
                          self.navigation(["Assign access to: Managed identity", "platform-skycraft-swc-bv",
                                           "Review + assign"], [1]))
@@ -351,7 +352,7 @@ class WordedResourceTests(unittest.TestCase):
 
     def test_a_verb_and_a_kind_around_the_span_are_dropped(self) -> None:
         for text, labels, resources in (
-                ("Open `skycraft-config` share → **Connect**", ["skycraft-config", "Connect"], [0]),             # 4.3.8
+                ("Open `skycraft-config` share → **Connect**", ["skycraft-config", "Connect"], [0]),             # 4.3.8 before #203
                 ("**Access control (IAM)** → pick the `platform-skycraft-swc-bv` Backup Vault → **Select**",
                  ["Access control (IAM)", "platform-skycraft-swc-bv", "Select"], [1]),
                 ("Navigate to the `prodskycraftswcsa` storage account → **Containers**",
@@ -361,7 +362,7 @@ class WordedResourceTests(unittest.TestCase):
                 self.assertEqual(self.item(text), self.navigation(labels, resources))
 
     def test_a_path_opens_each_segment_in_turn(self) -> None:
-        self.assertEqual(self.item("Browse to `common/config.txt` → click **⋯** → **Restore**"),                 # 4.3.6
+        self.assertEqual(self.item("Browse to `common/config.txt` → click **⋯** → **Restore**"),     # 4.3.6 before #203
                          self.navigation(["common", "config.txt", "⋯", "Restore"], [0, 1]))
         self.assertEqual(self.item("**File shares** → Browse to `skycraft-config/common` → **Upload**"),
                          self.navigation(["File shares", "skycraft-config", "common", "Upload"], [1, 2]))
@@ -995,6 +996,29 @@ class OptionChoiceTests(unittest.TestCase):
         self.assertEqual(self.labels(items), ["Next"])
         self.assertIsNone(option)
 
+    def test_items_before_the_first_option_heading_are_read_with_the_option(self) -> None:
+        items, _, option = self.step(
+            "### Step 9.9.1: X\n\n1. Navigate to **Storage accounts**\n\n"
+            + self.CLI.format(name="1") + self.PORTAL.format(name="2"))
+        self.assertEqual(self.labels(items), ["Storage accounts", "SSH keys", "+ Create"])
+        self.assertEqual(option, "2")       # chosen by its own items, not the shared one (#203)
+
+    def test_items_under_another_heading_after_the_options_are_read(self) -> None:
+        items, _, option = self.step(
+            "### Step 9.9.1: X\n\n" + self.PORTAL.format(name="1")
+            + "#### Option 2: CLI\n\n1. Run **OnlyInOption2**\n\n"
+              "#### Verify\n\n1. **Overview** → **Properties**\n")
+        self.assertEqual(self.labels(items), ["SSH keys", "+ Create", "Overview", "Properties"])
+        self.assertEqual(option, "1")
+
+    def test_an_option_without_items_gives_way_even_when_the_step_has_shared_items(self) -> None:
+        items, expected, option = self.step(
+            "### Step 9.9.1: X\n\n" + self.CLI.format(name="A") + self.PORTAL.format(name="B")
+            + "#### Check\n\n1. Click **Refresh**\n")
+        self.assertEqual(self.labels(items), ["SSH keys", "+ Create", "Refresh"])
+        self.assertEqual(expected, "The key appears under **SSH keys**.")
+        self.assertEqual(option, "B")
+
     def test_the_parsed_step_carries_option_only_when_the_step_has_option_headings(self) -> None:
         markdown = ("### Step 9.9.1: Keys\n\n" + self.CLI.format(name="A") + self.PORTAL.format(name="B")
                     + "### Step 9.9.2: Next\n\n1. Click **Next**\n")
@@ -1005,6 +1029,84 @@ class OptionChoiceTests(unittest.TestCase):
         self.assertEqual(steps[0]["option"], "B")
         self.assertTrue(steps[0]["portal"])
         self.assertNotIn("option", steps[1])
+
+
+class CaptionTests(unittest.TestCase):
+    """A list item '**Caption**: text' whose caption is no UI label describes unless its text is
+    an instruction (#203): the bold spans of a description are values, not clicks."""
+
+    def item(self, text: str, captions: frozenset[str] = parse.NO_CAPTIONS) -> dict | None:
+        return parse.list_item(text, 7, captions)
+
+    def test_a_caption_before_a_description_gives_no_item(self) -> None:
+        for text in ("**Result**: `PublicAccessNotPermitted` (HTTP 409, *Public access is not permitted on this "
+                     "storage account.*) - the account switch overrides every container. You would see "
+                     "`ResourceNotFound` (404) instead only if the account switch were **on** and the container "
+                     "still **Private**.",
+                     "**Note**: the **Save** button stays grey until a field changes",
+                     "**Example**: **Standard** tier, **Hot** access"):
+            with self.subTest(text=text):
+                self.assertIsNone(self.item(text))
+
+    def test_a_caption_before_an_instruction_keeps_its_clicks(self) -> None:
+        captions = parse.LAB_CAPTIONS["3.4"]
+        for text, labels in (("**Bind**: Once validated, click **Validate** and **Add**.", ["Validate", "Add"]),
+                             ("**Note**: Click **Save** before you leave", ["Save"]),
+                             ("**Tip**: select **Refresh** if the list is empty", ["Refresh"])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text, captions), {"kind": "action", "labels": labels, "line": 7})
+
+    def test_a_ui_label_before_a_colon_is_still_a_field(self) -> None:
+        self.assertEqual(self.item("**Create alert**: leave unchecked."),
+                         {"kind": "field", "label": "Create alert", "value": "leave unchecked", "line": 7})
+        self.assertEqual(self.item("**Bind**: `x`"), {"kind": "field", "label": "Bind", "value": "x", "line": 7})
+
+    def test_a_long_caption_text_is_read_in_linear_time(self) -> None:
+        for text in ("**Note**: " + "a" * 100_000 + " **on**", "**Note**: " + "a," * 50_000 + " **on**"):
+            started = time.perf_counter()
+            self.assertIsNone(self.item(text))
+            self.assertLess(time.perf_counter() - started, 1.0)
+
+
+class LabCaptionTests(unittest.TestCase):
+    """A caption of one lab (LAB_CAPTIONS) is no UI label in that lab only (#203)."""
+
+    MARKDOWN = ("### Step 9.9.1: X\n\n1. Click **Validation**\n2. Select the **group**\n"
+                "3. **Bind**: `x`\n4. Click **Result**\n")
+
+    def steps(self, lab: str, markdown: str) -> list[dict]:
+        with tempfile.TemporaryDirectory() as folder:
+            guide = Path(folder) / f"lab-guide-{lab}.md"
+            guide.write_text(markdown, encoding="utf-8")
+            return parse.parse_guide(guide)["steps"]
+
+    def test_a_lab_caption_is_dropped_in_its_own_lab(self) -> None:
+        items = self.steps("3.4", self.MARKDOWN)[0]["items"]
+        self.assertEqual(items, [{"kind": "action", "labels": ["group"], "line": 4}])
+
+    def test_a_lab_caption_is_a_label_in_any_other_lab(self) -> None:
+        items = self.steps("1.2", self.MARKDOWN)[0]["items"]
+        self.assertEqual(items, [{"kind": "action", "labels": ["Validation"], "line": 3},
+                                 {"kind": "field", "label": "Bind", "value": "x", "line": 5}])
+
+    def test_a_shared_caption_is_dropped_in_every_lab(self) -> None:
+        for lab in ("1.1", "4.2", "9.9"):
+            with self.subTest(lab=lab):
+                labels = [label for item in self.steps(lab, self.MARKDOWN)[0]["items"]
+                          for label in item.get("labels", [])]
+                self.assertNotIn("Result", labels)
+
+    def test_every_lab_caption_is_bold_in_its_own_guide_and_in_no_shared_list(self) -> None:
+        root = Path(__file__).resolve().parents[3]
+        for lab, captions in parse.LAB_CAPTIONS.items():
+            guides = list(root.glob(f"module-*/*/lab-guide-{lab}.md"))
+            self.assertEqual(len(guides), 1, lab)
+            text = guides[0].read_text(encoding="utf-8")
+            bold = {parse.clean_label(parse.unescape(m.group("text"))) for m in parse.BOLD.finditer(text)}
+            for caption in captions:
+                with self.subTest(lab=lab, caption=caption):
+                    self.assertIn(caption, bold)
+                    self.assertNotIn(caption, parse.NON_UI_BOLD)
 
 
 if __name__ == "__main__":

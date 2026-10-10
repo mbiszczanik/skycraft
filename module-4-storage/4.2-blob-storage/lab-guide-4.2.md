@@ -726,8 +726,10 @@ Get-AzStorageBlob -Container "game-assets" -Context $ctx | Select-Object Name, A
 
 1. **Find the account-level switch** (Dev):
    - Navigate to `devskycraftswcsa` → **Settings** → **Configuration**
-   - Locate **Allow Blob anonymous access** - it is **Disabled**, and `Deploy-Bicep.ps1` deploys it that way (`allowBlobPublicAccess: false`)
-   - Look at it, but leave it **Disabled** and do not click **Save**. If you do enable it, set it back to **Disabled** and **Save** again at once, or `Test-Lab.ps1` fails `DEV: AllowBlobPublicAccess is disabled`. (Organizations commonly pin this switch with a **Deny** assignment of the built-in policy *Storage account public access should be disallowed*; on such a subscription the save is refused with **RequestDisallowedByPolicy**. The SkyCraft course does not assign it.)
+   - Verify the switch:
+     - **Allow Blob anonymous access**: **Disabled**
+
+   > `Deploy-Bicep.ps1` deploys the switch that way (`allowBlobPublicAccess: false`). Look at it, but leave it **Disabled** and do not click **Save**. If you do enable it, set it back to **Disabled** and **Save** again at once, or `Test-Lab.ps1` fails `DEV: AllowBlobPublicAccess is disabled`. (Organizations commonly pin this switch with a **Deny** assignment of the built-in policy *Storage account public access should be disallowed*; on such a subscription the save is refused with **RequestDisallowedByPolicy**. The SkyCraft course does not assign it.)
 
 2. **Create the `public-demo` container - Private**:
    - Go to **Containers** → **+ Container**
@@ -736,7 +738,9 @@ Get-AzStorageBlob -Container "game-assets" -Context $ctx | Select-Object Name, A
    - Click **Create**
 
 3. **Prove the container is not anonymous**:
-   - Open `public-demo`, upload any small text file and copy its **URL** (e.g., `https://devskycraftswcsa.blob.core.windows.net/public-demo/file.txt`)
+   - **Containers** → `public-demo`
+   - Click **Upload**, select a small local text file named `file.txt`, and click **Upload**
+   - Select `file.txt` → **Overview** → copy its **URL** (`https://devskycraftswcsa.blob.core.windows.net/public-demo/file.txt`)
    - Open the URL in an incognito/private browser window
    - **Result**: `PublicAccessNotPermitted` (HTTP 409, *Public access is not permitted on this storage account.*) - the account switch overrides every container. You would see `ResourceNotFound` (404) instead only if the account switch were **on** and the container still **Private**.
 

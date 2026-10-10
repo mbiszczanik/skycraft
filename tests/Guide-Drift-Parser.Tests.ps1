@@ -25,7 +25,9 @@
       one with a verb and the resource's kind around its code span, one name per segment of a
       path; a chain after a plain field label picks that field's value ("field"); and a chain
       ends at the full stop that ends its sentence (#250; pinned on labs 4.2, 4.3, 5.1, 5.2 and
-      5.3, rules in test_parse.py).
+      5.3, rules in test_parse.py). A caption before a description gives no item, a caption of
+      one lab is no label in that lab only, and lines outside every option are read; the guide
+      lines of labs 3.3-5.3 that left a step without its navigation are pinned (#203).
 
       THE 17 GUIDES - every module-*/X.Y-*/lab-guide-X.Y.md parses, its step ids match its
       headings in order, and no label or value carries markup or comment residue. This does NOT
@@ -832,10 +834,9 @@ Describe 'parse.py - labs 4.2, 4.3, 5.1, 5.2 and 5.3, pickers, worded resource s
     It 'reads <count> chain(s) of step <id> as <labels>, resource names at <resources>, picking field "<field>"' -ForEach @(
         # 'Flow log type: **Virtual network** -> ... -> `prod-skycraft-swc-vnet` -> ...': the field's picker, then the chain.
         @{ lab = '5.3'; id = '5.3.5'; count = 1; field = 'Flow log type'; labels = @('Virtual network', '+ Select target resource', 'Virtual network', 'prod-skycraft-swc-vnet', 'Confirm selection'); resources = @(3) }
-        # 'Browse to `common/config.txt`': a path opens each segment; 'Open `x` share', 'pick the `x` Backup Vault'.
-        @{ lab = '4.3'; id = '4.3.6'; count = 1; field = ''; labels = @('common', 'config.txt', [string][char]0x22EF, 'Restore'); resources = @(0, 1) }
-        @{ lab = '4.3'; id = '4.3.8'; count = 1; field = ''; labels = @('skycraft-config', 'Connect'); resources = @(0) }
-        @{ lab = '5.2'; id = '5.2.5'; count = 1; field = ''; labels = @('Assign access to: Managed identity', 'platform-skycraft-swc-bv', 'Review + assign'); resources = @(1) }
+        # 'Browse to `common/config.txt`': a path opens each segment; 4.3.8 opens its share from the account.
+        @{ lab = '4.3'; id = '4.3.6'; count = 1; field = ''; labels = @('common', 'config.txt', 'Restore'); resources = @(0, 1) }
+        @{ lab = '4.3'; id = '4.3.8'; count = 1; field = ''; labels = @('prodskycraftswcsa', 'File shares', 'skycraft-config', 'Overview', 'Connect'); resources = @(0, 2) }
         # '`public-demo` -> **Change access level**. The **Anonymous access level** dropdown lists ...':
         # the sentence after the chain describes the dialog.
         @{ lab = '4.2'; id = '4.2.12'; count = 1; field = ''; labels = @('public-demo', 'Change access level'); resources = @(0) }
@@ -882,11 +883,239 @@ Describe 'parse.py - labs 4.2, 4.3, 5.1, 5.2 and 5.3, pickers, worded resource s
     }
 }
 
+Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide lines that navigate (#203)' {
+    BeforeAll {
+        $script:GapLabs = @{}
+        foreach ($guide in 'module-3-compute/3.3-containers/lab-guide-3.3.md',
+                           'module-3-compute/3.4-app-service/lab-guide-3.4.md',
+                           'module-4-storage/4.2-blob-storage/lab-guide-4.2.md',
+                           'module-4-storage/4.3-azure-files/lab-guide-4.3.md',
+                           'module-5-monitoring-maintenance/5.1-azure-monitor/lab-guide-5.1.md',
+                           'module-5-monitoring-maintenance/5.2-business-continuity/lab-guide-5.2.md',
+                           'module-5-monitoring-maintenance/5.3-network-monitoring/lab-guide-5.3.md') {
+            $lab = [regex]::Match($guide, 'lab-guide-(\d+\.\d+)\.md$').Groups[1].Value
+            $out = Join-Path $TestDrive "gaps-$lab.json"
+            & $script:Python $script:Parser (Join-Path $script:RepoRoot $guide) --out $out --repo-root $script:RepoRoot
+            $script:GapLabs[$lab] = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+        }
+        # The items of one step, and the labels of its navigation and action items in order.
+        function Get-GapStep { param([string]$Lab, [string]$Id) $script:GapLabs[$Lab].steps | Where-Object id -eq $Id }
+    }
+
+    It 'reads the caption **Result** of step 4.2.12 as a description: on and Private are not clicked' {
+        $labels = @((Get-GapStep '4.2' '4.2.12').items | ForEach-Object { $_.labels })
+        $labels | Should -Not -Contain 'on'
+        $labels | Should -Not -Contain 'Private'
+    }
+
+    It 'never clicks Save or a switch value in step 4.2.12, and checks the account switch instead' {
+        $step = Get-GapStep '4.2' '4.2.12'
+        $labels = @($step.items | ForEach-Object { $_.labels; $_.label })
+        foreach ($label in 'Save', 'Disabled', 'Allow Blob anonymous access', 'Deny', 'RequestDisallowedByPolicy') {
+            $labels | Should -Not -Contain $label
+        }
+        $step.expected | Should -BeExactly 'Allow Blob anonymous access: Disabled'
+    }
+
+    It 'opens public-demo in step 4.2.12 before the upload, and opens the blob before copying its URL' {
+        $items = @((Get-GapStep '4.2' '4.2.12').items)
+        $open = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Containers`npublic-demo" })
+        $open.Count | Should -Be 1
+        @($open[0].resources) | Should -Be @(1)
+        $copy = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "file.txt`nOverview`nURL" })
+        $copy.Count | Should -Be 1
+        @($copy[0].resources) | Should -Be @(0)
+        $index = [array]::IndexOf($items, $open[0])
+        @($items[$index + 1].labels) | Should -Be @('Upload', 'Upload')
+        $items[$index + 2] | Should -Be $copy[0]
+        @($items | Where-Object { (@($_.labels) -join "`n") -ceq 'URL' }) | Should -BeNullOrEmpty
+    }
+
+    # Opening a share lands on its Browse view (step-4.3.4.png), whose toolbar has Add directory
+    # and no Connect; Connect is on the share's page (Microsoft Learn), so 4.3.7 and 4.3.8 open
+    # Overview first.
+    It 'opens the skycraft-config share from the storage account first in step <id>, then <rest>' -ForEach @(
+        @{ id = '4.3.4'; rest = @('Browse'); resources = @(0, 2) }
+        @{ id = '4.3.5'; rest = @(); resources = @(0, 2) }
+        @{ id = '4.3.6'; rest = @('Browse', 'common', 'config.txt'); resources = @(0, 2, 4, 5) }
+        @{ id = '4.3.7'; rest = @('Overview'); resources = @(0, 2) }
+        @{ id = '4.3.8'; rest = @('Overview', 'Connect'); resources = @(0, 2) }
+    ) {
+        $first = @((Get-GapStep '4.3' $id).items)[0]
+        $first.kind | Should -Be 'navigation'
+        @($first.labels) | Should -Be (@('prodskycraftswcsa', 'File shares', 'skycraft-config') + $rest)
+        @($first.resources) | Should -Be $resources
+    }
+
+    It 'names the new directory of step 4.3.4 in the dialog''s own field before OK' {
+        $items = @((Get-GapStep '4.3' '4.3.4').items)
+        $add = @($items | Where-Object { (@($_.labels) -join "`n") -ceq '+ Add directory' })
+        $add.Count | Should -Be 1
+        $index = [array]::IndexOf($items, $add[0])
+        $items[$index + 1].kind | Should -Be 'field'
+        $items[$index + 1].label | Should -BeExactly 'Name'
+        $items[$index + 1].value | Should -BeExactly 'common'
+        @($items[$index + 2].labels) | Should -Be @('OK')
+    }
+
+    It 'restores config.txt in step 4.3.6 from its File properties pane and confirms the overwrite' {
+        $items = @((Get-GapStep '4.3' '4.3.6').items)
+        $restore = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "common`nconfig.txt`nRestore" })
+        $restore.Count | Should -Be 1
+        @($items[[array]::IndexOf($items, $restore[0]) + 1].labels) | Should -Be @('Overwrite original file', 'OK')
+    }
+
+    It 'opens the common directory in step 4.3.4 before the upload' {
+        $items = @((Get-GapStep '4.3' '4.3.4').items)
+        $open = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Browse`ncommon" })
+        $open.Count | Should -Be 1
+        @($open[0].resources) | Should -Be @(1)
+        @($items[[array]::IndexOf($items, $open[0]) + 1].labels) | Should -Be @('Upload')
+    }
+
+    It 'opens the snapshot of step 4.3.5 in step 4.3.6 before browsing to the file to restore' {
+        $items = @((Get-GapStep '4.3' '4.3.6').items)
+        $open = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Snapshots`nPre-update backup" })
+        $open.Count | Should -Be 1
+        @($open[0].resources) | Should -Be @(1)
+        @($items[[array]::IndexOf($items, $open[0]) + 1].labels)[0] | Should -Be 'common'
+    }
+
+    It 'reads the scope of step 5.1.5 as the tab, the scope level and the scope pane, not as one field' {
+        $items = @((Get-GapStep '5.1' '5.1.5').items)
+        @($items | Where-Object { $_.kind -eq 'field' -and $_.label -eq 'Scope' }) | Should -BeNullOrEmpty
+        $tab = @($items | Where-Object { $_.kind -eq 'action' -and (@($_.labels) -join "`n") -ceq 'Scope' })
+        $tab.Count | Should -Be 1
+        $index = [array]::IndexOf($items, $tab[0])
+        $items[$index + 1].label | Should -BeExactly 'Scope level'
+        $items[$index + 1].value | Should -BeExactly 'Subscription'
+        @($items[$index + 2].labels) | Should -Be @('+ Select scope', 'Apply')
+    }
+
+    It 'opens the vault platform-skycraft-swc-bv by name in step 5.2.5 before its policies and before + Backup' {
+        $items = @((Get-GapStep '5.2' '5.2.5').items)
+        foreach ($labels in @(@('platform-skycraft-swc-bv', 'Manage', 'Backup policies'), @('platform-skycraft-swc-bv', '+ Backup'))) {
+            $chain = @($items | Where-Object { $_.kind -eq 'navigation' -and (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
+            $chain.Count | Should -Be 1 -Because ($labels -join ' > ')
+            @($chain[0].resources) | Should -Be @(0)
+        }
+        @($items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Backup Vault'
+    }
+
+    It 'assigns each role of step 5.2.5 on the storage account, one role per chain, through + Select members' {
+        $items = @((Get-GapStep '5.2' '5.2.5').items)
+        $open = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "prodskycraftswcsa`nAccess control (IAM)`n+ Add`nAdd role assignment" })
+        $open.Count | Should -Be 1
+        @($open[0].resources) | Should -Be @(0)
+        $tail = @('Next', 'Managed identity', '+ Select members', 'platform-skycraft-swc-bv', 'Select', 'Review + assign', 'Review + assign')
+        foreach ($case in @(@{ role = 'Storage Account Backup Contributor'; head = @() },
+                            @{ role = 'Storage Blob Data Owner'; head = @('+ Add', 'Add role assignment') })) {
+            $labels = @($case.head) + @($case.role) + $tail
+            $chain = @($items | Where-Object { $_.kind -eq 'navigation' -and (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
+            $chain.Count | Should -Be 1 -Because $case.role
+            @($chain[0].resources) | Should -Be @($labels.IndexOf('platform-skycraft-swc-bv'))
+        }
+        @($items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Assign access to: Managed identity'
+    }
+
+    It 'keeps the final Create of step 5.3.6 out of the Create alert field' {
+        $items = @((Get-GapStep '5.3' '5.3.6').items)
+        $alert = @($items | Where-Object { $_.kind -eq 'field' -and $_.label -ceq 'Create alert' })
+        $alert.Count | Should -Be 1
+        $alert[0].value | Should -BeExactly 'leave unchecked'
+        $alert[0].PSObject.Properties.Name | Should -Not -Contain 'literal'
+        @($items[[array]::IndexOf($items, $alert[0]) + 1].labels) | Should -Be @('Review + create', 'Create')
+        # The tab of the same name is opened first, so the check box is on screen when the field is
+        # looked up, and find_field prefers the check box (a control) to a tab labelled the same.
+        $tab = $items[[array]::IndexOf($items, $alert[0]) - 1]
+        $tab.kind | Should -Be 'action'
+        @($tab.labels) | Should -Be @('Create alert')
+    }
+
+    It 'fills the workspace, test group and test configuration of step 5.3.6 as fields, check boxes by their state' {
+        $items = @((Get-GapStep '5.3' '5.3.6').items)
+        $fields = @{}
+        foreach ($field in @($items | Where-Object kind -eq 'field')) { $fields[$field.label] = $field }
+        $expected = [ordered]@{
+            'Use workspace created by connection monitor' = 'unchecked'
+            'Workspace'                = 'platform-skycraft-swc-law'
+            'Test group name'          = 'hub-spoke-ssh'
+            'Test configuration name'  = 'tcp-22-every-5m'
+            'Protocol'                 = 'TCP'
+            'Destination port'         = '22'
+            'Test Frequency'           = 'Every 5 minutes'
+            'Checks failed (%)'        = '10'
+            'Round trip time (ms)'     = '100'
+            'Disable traceroute'       = 'leave unchecked'
+        }
+        foreach ($label in $expected.Keys) {
+            $fields.ContainsKey($label) | Should -BeTrue -Because $label
+            $fields[$label].value | Should -BeExactly $expected[$label]
+            $fields[$label].PSObject.Properties.Name | Should -Not -Contain 'literal'
+        }
+        # Disable traceroute sits under Protocol, before Destination port.
+        $protocol = [array]::IndexOf($items, $fields['Protocol'])
+        [array]::IndexOf($items, $fields['Disable traceroute']) | Should -Be ($protocol + 1)
+        [array]::IndexOf($items, $fields['Destination port']) | Should -Be ($protocol + 2)
+        # The workspace is its own Workspace tab, after the test group (the maintainer's live pass, #183).
+        $testGroups = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Test groups`n+ Add test group" })
+        $testGroups.Count | Should -Be 1
+        $tab = @($items | Where-Object { $_.kind -eq 'action' -and (@($_.labels) -join "`n") -ceq 'Workspace' })
+        $tab.Count | Should -Be 1
+        [array]::IndexOf($items, $tab[0]) | Should -BeGreaterThan ([array]::IndexOf($items, $fields['Test group name']))
+        [array]::IndexOf($items, $fields['Use workspace created by connection monitor']) | Should -Be ([array]::IndexOf($items, $tab[0]) + 1)
+        [array]::IndexOf($items, $fields['Workspace']) | Should -Be ([array]::IndexOf($items, $tab[0]) + 2)
+        $labels = @($items | ForEach-Object { $_.labels })
+        foreach ($label in 'Disable traceroute', 'Use workspace created by connection monitor', 'TCP', '22', '10', '100') {
+            $labels | Should -Not -Contain $label
+        }
+    }
+
+    It 'still clicks what the caption **Bind** of step 3.4.12 tells to click, and nothing for **Validation**' {
+        $items = @((Get-GapStep '3.4' '3.4.12').items)
+        @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Validate`nAdd" }).Count | Should -Be 1
+        @($items | ForEach-Object { $_.labels; $_.label }) | Should -Not -Contain 'Validation'
+        @($items | ForEach-Object { $_.labels; $_.label }) | Should -Not -Contain 'Bind'
+    }
+
+    It 'reads the registry, image and tag of step 3.3.7 as three fields' {
+        $fields = @((Get-GapStep '3.3' '3.3.7').items | Where-Object kind -eq 'field')
+        ($fields | Where-Object label -ceq 'Registry').value | Should -BeExactly '[Select your registry]'
+        ($fields | Where-Object label -ceq 'Image').value | Should -BeExactly 'skycraft-auth'
+        ($fields | Where-Object label -ceq 'Image tag').value | Should -BeExactly 'v1'
+    }
+
+    It 'reads items before the first Option heading and under another "####" heading after the options' {
+        $guide = ConvertFrom-GuideFixture -Markdown (@(
+                '### Step 9.9.1: Shared lines',
+                '',
+                '1. Navigate to **Storage accounts**',
+                '',
+                '#### Option 1: Azure CLI',
+                '',
+                '```bash',
+                'az storage account list',
+                '```',
+                '',
+                '#### Option 2: Azure Portal',
+                '',
+                '1. Click **+ Create**',
+                '',
+                '#### Verify',
+                '',
+                '1. **Overview** → **Properties**'
+            ) -join "`n")
+        $step = $guide.steps[0]
+        $step.option | Should -Be '2'
+        @($step.items | ForEach-Object { $_.labels }) | Should -Be @('Storage accounts', '+ Create', 'Overview', 'Properties')
+    }
+}
+
 Describe 'parse.py - only one option of a step is read, in every lab guide (#201)' {
     BeforeAll {
-        # Bold spans of each step, by where they sit: 'read' (before the first Option heading, or
-        # in the option the parser names in the step's "option") and 'other' (any other option, up
-        # to the next step). Fenced code is skipped as parse.py skips it; 'Expected Result' is a
+        # Bold spans of each step, by where they sit: 'read' (before the first Option heading,
+        # under another '####' heading, or in the option the parser names in the step's "option")
+        # and 'other' (any other option, up to the next heading). Fenced code is skipped as parse.py skips it; 'Expected Result' is a
         # caption, not a label. A bold span that only another option uses must never reach the
         # parser's labels, fields or tags. Lab 4.3 has Option headings in every step but its other
         # options hold only code; in 3.2.1 Option A is CLI-only, so Option B, the Portal, is read.
@@ -932,6 +1161,8 @@ Describe 'parse.py - only one option of a step is read, in every lab guide (#201
                     }
                     continue
                 }
+                # Another '####' heading ends an option's body; what follows it is read (#203).
+                if ($line -match '^####\s') { $zone = 'read'; continue }
                 foreach ($bold in [regex]::Matches($line, '\*\*(.+?)\*\*')) {
                     if ($zone -eq 'read') { $read[$step].Add($bold.Groups[1].Value) } else { $other[$step].Add($bold.Groups[1].Value) }
                 }
