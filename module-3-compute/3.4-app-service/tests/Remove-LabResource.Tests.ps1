@@ -77,11 +77,12 @@ BeforeAll {
     #   SKYCRAFT_STUB_EMPTY   '1' leaves nothing to find: every getter reports ResourceNotFound,
     #                         as the real ones do for a name that does not exist
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled) or
-    #                         report its resource not found (notfound)
+    #                         report its resource, or its group, not found (notfound, rgnotfound)
     #   SKYCRAFT_STUB_FAIL    '<Remove-command>:<name>,...' makes one removal throw
     # A lookup is named after its command and the resource it reads: 'Get-AzWebApp:<app>',
-    # 'Get-AzWebAppSlot:<app>', 'Get-AzAutoscaleSetting:<name>', 'Get-AzAppServicePlan:<plan>',
-    # 'Get-AzVirtualNetwork:<vnet>'. A REST call is logged as 'Invoke-AzRestMethod:<method>:<path>'.
+    # 'Get-AzWebAppSlot:<app>', 'Get-AzAppServicePlan:<plan>', 'Get-AzVirtualNetwork:<vnet>'; the
+    # autoscale settings are listed, as 'Get-AzAutoscaleSetting', and the listing always holds one
+    # setting the lab did not create. A REST call is logged as 'Invoke-AzRestMethod:<method>:<path>'.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:SiteId  = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Web/sites/dev-skycraft-swc-app01'
@@ -123,6 +124,10 @@ function Invoke-StubLookup {
         }
         'notfound' {
             Write-Error -ErrorId 'ResourceNotFound' -Message "The Resource 'Microsoft.Web/stubs/$(($Name -split ':')[-1])' under resource group '$ResourceGroup' was not found. For more details please go to https://aka.ms/ARMResourceNotFoundFix"
+            return $true
+        }
+        'rgnotfound' {
+            Write-Error -ErrorId 'ResourceGroupNotFound' -Message "Resource group '$ResourceGroup' could not be found."
             return $true
         }
     }
@@ -178,8 +183,12 @@ function Invoke-AzRestMethod {
 function Get-AzAutoscaleSetting {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$Name)
-    if (Invoke-StubLookup -Name "Get-AzAutoscaleSetting:$Name" -ResourceGroup $ResourceGroupName -Named) { return }
-    [pscustomobject]@{ Name = $Name }
+    if (Invoke-StubLookup -Name 'Get-AzAutoscaleSetting' -ResourceGroup $ResourceGroupName) { return }
+    $settings = @([pscustomobject]@{ Name = 'unrelated-autoscale' })
+    if (-not (Test-StubEmpty)) { $settings += [pscustomobject]@{ Name = 'dev-skycraft-swc-asp-autoscale' } }
+    # -Name only from the cleanup before #290; filtered here as the real getter would.
+    if ($Name) { $settings = @($settings | Where-Object { $_.Name -eq $Name }) }
+    $settings
 }
 
 function Remove-AzAutoscaleSetting {
@@ -247,11 +256,11 @@ function Start-Sleep {
     $script:Clean       = Invoke-CleanupScript -Stub $script:Stub
     $script:Nothing     = Invoke-CleanupScript -Stub $script:Stub -Empty
     $script:WhatIf      = Invoke-CleanupScript -Stub $script:Stub -ArgumentList '-WhatIf'
-    $script:NotFound    = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzAutoscaleSetting:dev-skycraft-swc-asp-autoscale=notfound'
+    $script:NotFound    = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzAutoscaleSetting=rgnotfound'
     $script:AppDenied   = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzWebApp:dev-skycraft-swc-app01=denied'
     $script:SlotsDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzWebAppSlot:dev-skycraft-swc-app01=throttled'
     $script:LookupsFail = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
-        'Get-AzAutoscaleSetting:dev-skycraft-swc-asp-autoscale=denied'
+        'Get-AzAutoscaleSetting=denied'
         'Get-AzAppServicePlan:dev-skycraft-swc-asp=throttled'
     )
     $script:VnetDenied  = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzVirtualNetwork:dev-skycraft-swc-vnet=denied'
@@ -299,6 +308,7 @@ Describe 'Lab 3.4 Remove-LabResource.ps1 - removes what the lab creates' {
             'Remove-AzAppServicePlan:dev-skycraft-swc-asp') {
             $calls | Should -Contain $call
         }
+        $calls | Should -Not -Contain 'Remove-AzAutoscaleSetting:unrelated-autoscale'
         [array]::IndexOf($calls, "Invoke-AzRestMethod:DELETE:$siteId/networkConfig/virtualNetwork") |
             Should -BeLessThan ([array]::IndexOf($calls, 'Remove-AzWebApp:dev-skycraft-swc-app01'))
         [array]::IndexOf($calls, 'Remove-AzWebApp:dev-skycraft-swc-app01') |
@@ -360,7 +370,7 @@ Describe 'Lab 3.4 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
     It 'exits 1 when the autoscale setting and the plan could not be looked up, and removes neither' {
         $run = $script:LookupsFail
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match "\[ERROR\] Could not look up autoscale setting 'dev-skycraft-swc-asp-autoscale'"
+        $run.Output | Should -Match "\[ERROR\] Could not look up the autoscale settings in 'dev-skycraft-swc-rg'"
         $run.Output | Should -Match "\[ERROR\] Could not look up App Service Plan 'dev-skycraft-swc-asp'[^\r\n]*requests exceeded the limit"
         $run.Output | Should -Match 'Cleanup finished with 2 failure\(s\)'
         $run.Output | Should -Not -Match 'Not found or already deleted'

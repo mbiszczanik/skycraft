@@ -374,10 +374,13 @@ try {
     # 7. Delete the autoscale setting
     if ($PSCmdlet.ShouldProcess($autoscaleName, 'Remove Autoscale Setting')) {
         Write-Host "Removing autoscale setting '$autoscaleName'..." -ForegroundColor Yellow
-        $autoscaleLookup = Invoke-LabLookup -Target "autoscale setting '$autoscaleName'" -Lookup {
-            Get-AzAutoscaleSetting -ResourceGroupName $RgName -Name $autoscaleName -ErrorAction Stop
+        # Listed and picked by name: Get-AzAutoscaleSetting is a generated cmdlet, and asked for
+        # one name that does not exist it throws a plain "[code] : message" exception with no
+        # status, which is not a recognised not-found error. A missing setting is an empty match.
+        $autoscaleLookup = Invoke-LabLookup -Target "the autoscale settings in '$RgName'" -Lookup {
+            Get-AzAutoscaleSetting -ResourceGroupName $RgName -ErrorAction Stop
         }
-        if ($autoscaleLookup.Value) {
+        if ($autoscaleLookup.Value | Where-Object { $_.Name -eq $autoscaleName }) {
             try {
                 Remove-AzAutoscaleSetting -ResourceGroupName $RgName -Name $autoscaleName -ErrorAction Stop | Out-Null
                 Write-Host "  -> Deleted" -ForegroundColor Green
