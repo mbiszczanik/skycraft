@@ -179,6 +179,10 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     4.3.6's upload pane and 'select a small local text file named `file.txt`' in 4.2.12's are no
     item, so the pane has no file to upload, and the person finishes the step by hand (c) or the
     recording skips it.
+  * A check box in a picker's tree ('**+ Select scope** → expand `dev-skycraft-swc-rg` and check
+    `dev-skycraft-swc-auth-vm` (...) → **Apply**', 5.1.5) is no step of the chain: its words
+    are dropped, so the pane is applied with nothing chosen unless the person picks the VM by
+    hand (c).
   * The kind after a resource name is any one or two words after a verb that do not start with
     a preposition or a conjunction ('Open `x` share'), so other words there would be dropped as
     well ('Open `x` now'); the guides have no such step.

@@ -948,6 +948,17 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         @($items[[array]::IndexOf($items, $open[0]) + 1].labels)[0] | Should -Be 'common'
     }
 
+    It 'reads the scope of step 5.1.5 as the tab, the scope level and the scope pane, not as one field' {
+        $items = @((Get-GapStep '5.1' '5.1.5').items)
+        @($items | Where-Object { $_.kind -eq 'field' -and $_.label -eq 'Scope' }) | Should -BeNullOrEmpty
+        $tab = @($items | Where-Object { $_.kind -eq 'action' -and (@($_.labels) -join "`n") -ceq 'Scope' })
+        $tab.Count | Should -Be 1
+        $index = [array]::IndexOf($items, $tab[0])
+        $items[$index + 1].label | Should -BeExactly 'Scope level'
+        $items[$index + 1].value | Should -BeExactly 'Subscription'
+        @($items[$index + 2].labels) | Should -Be @('+ Select scope', 'Apply')
+    }
+
     It 'still clicks what the caption **Bind** of step 3.4.12 tells to click, and nothing for **Validation**' {
         $items = @((Get-GapStep '3.4' '3.4.12').items)
         @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Validate`nAdd" }).Count | Should -Be 1
