@@ -6,7 +6,8 @@
     Cleans up Lab 3.2 resources in the following order:
     1. Virtual Machines (which auto-deletes NICs and OS disks via deleteOption=Delete)
     2. Data Disks
-    3. Key Vault (if exists; deleted and purged)
+    3. Key Vault (if exists; deleted and purged - a vault that could not be purged is a failure,
+       because it keeps its name taken for the retention period)
 
     Note: This does NOT remove Lab 3.1 resources (VNets, NSGs, Load Balancer).
 
@@ -255,7 +256,10 @@ foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'KeyVault'
             Remove-AzKeyVault -VaultName $resource.Name -Location $vault.Location -InRemovedState -Force -ErrorAction Stop | Out-Null
             Write-Host "  ✓ Deleted and purged" -ForegroundColor Green
         } catch {
-            Write-Warning "Vault '$($vault.VaultName)' deleted but not purged: $_"
+            # A soft-deleted vault keeps its name taken for the retention period, so the next
+            # deployment of the lab fails on it: counted like a failed deletion.
+            $script:cleanupFailures++
+            Write-Host "  [ERROR] Vault '$($vault.VaultName)' deleted but not purged: $_" -ForegroundColor Red
             Write-Host "  Purge manually: Remove-AzKeyVault -VaultName $($vault.VaultName) -Location $($vault.Location) -InRemovedState -Force" -ForegroundColor Gray
         }
     }

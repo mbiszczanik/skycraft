@@ -231,10 +231,11 @@ function Remove-AzKeyVault {
         'Remove-AzVM:dev-skycraft-swc-world-vm'
         'Remove-AzKeyVault:dev-skycraft-swc-kv'
     )
+    $script:PurgeFails = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzKeyVault:purge:dev-skycraft-swc-kv'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:NotFound, $script:LookupsFail,
-        $script:AuthDenied, $script:WorldDenied, $script:DiskDenied, $script:RemovalsFail
+        $script:AuthDenied, $script:WorldDenied, $script:DiskDenied, $script:RemovalsFail, $script:PurgeFails
     )
 }
 
@@ -356,6 +357,16 @@ Describe 'Lab 3.2 Remove-LabResource.ps1 - a failed deletion is counted' {
         $run.Calls | Should -Contain 'Remove-AzVM:dev-skycraft-swc-auth-vm'
         $run.Calls | Should -Contain 'Remove-AzDisk:dev-skycraft-swc-world-datadisk'
         $run.Calls | Should -Not -Contain 'Remove-AzKeyVault:purge:dev-skycraft-swc-kv'
+    }
+
+    It 'exits 1 when the vault was deleted but could not be purged, and says how to purge it' {
+        # A soft-deleted vault keeps its name taken, so the next deployment of the lab fails on it.
+        $run = $script:PurgeFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[ERROR\] Vault 'dev-skycraft-swc-kv' deleted but not purged: stub failure"
+        $run.Output | Should -Match 'Purge manually: Remove-AzKeyVault -VaultName dev-skycraft-swc-kv'
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls  | Should -Contain 'Remove-AzKeyVault:dev-skycraft-swc-kv'
     }
 }
 
