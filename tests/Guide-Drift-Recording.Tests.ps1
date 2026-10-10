@@ -142,14 +142,24 @@ $SkipRuleCases = @(
 # Why a step's recorded viewUrl must not be in this public repository; nothing when it may. A
 # recorded address is the Portal's URL for a blade; the runner (recording.Redactor.view_url)
 # leaves out tenant data, ids and query strings, also percent-encoded ones, and this is the
-# backstop. The address is read decoded, as '%40' is an '@' and '%23EXT%23' a guest's '#EXT#'.
+# backstop. Every check reads the address fully decoded, as recording.fully_decoded does: decoded
+# until it stops changing ('%40' and the Portal's double-encoded '%2540' are '@', '%2523EXT%2523'
+# a guest's '#EXT#'), at most 5 rounds, then NFKC-normalised (a fullwidth at sign, U+FF20, is '@').
 function Get-ViewUrlProblem {
     param([string]$StepId, [object]$Url)
     if ($null -eq $Url) { return }
     if ($Url -isnot [string] -or -not $Url.StartsWith('https://portal.azure.com/#', [System.StringComparison]::Ordinal)) {
         return "step $StepId viewUrl does not start with https://portal.azure.com/#"
     }
-    $decoded = [uri]::UnescapeDataString($Url)
+    $decoded = $Url
+    $settled = $false
+    for ($round = 0; $round -lt 5; $round++) {
+        $next = [uri]::UnescapeDataString($decoded)
+        if ($next -ceq $decoded) { $settled = $true; break }
+        $decoded = $next
+    }
+    if (-not $settled) { return "step $StepId viewUrl does not stop decoding after 5 rounds" }
+    $decoded = $decoded.Normalize([System.Text.NormalizationForm]::FormKC)
     if ($decoded.Contains('@') -or $decoded.Contains('?')) { "step $StepId viewUrl contains '@' or '?' (also percent-encoded)" }
     if ($decoded -match '#EXT#') { "step $StepId viewUrl contains a guest user principal name (#EXT#)" }
     if ($decoded -match '[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}' -or $decoded -match '(?<![0-9a-fA-F])[0-9a-fA-F]{32}(?![0-9a-fA-F])') {
@@ -170,6 +180,13 @@ $ViewUrlRuleCases = @(
     @{ url = 'https://portal.azure.com/#view/Blade/id/11111111-2222-3333-4444-555555555555'; problem = 'step 9.9.1 viewUrl contains an id (with or without hyphens)' }
     @{ url = 'https://portal.azure.com/#view/Blade/id/1111111122223333444455555555aaaa'; problem = 'step 9.9.1 viewUrl contains an id (with or without hyphens)' }
     @{ url = 'https://portal.azure.com/#view/Blade/id/%2F1111111122223333444455555555aaaa'; problem = 'step 9.9.1 viewUrl contains an id (with or without hyphens)' }
+    # Double-encoded, as the Portal encodes blade inputs, and a fullwidth at sign (U+FF20).
+    @{ url = 'https://portal.azure.com/#view/User/upn/someone%2540example.com'; problem = "step 9.9.1 viewUrl contains '@' or '?' (also percent-encoded)" }
+    @{ url = 'https://portal.azure.com/#view/User/u/someone%2540example%252Ecom'; problem = "step 9.9.1 viewUrl contains '@' or '?' (also percent-encoded)" }
+    @{ url = 'https://portal.azure.com/#view/User/upn/someone_example.com%2523EXT%2523'; problem = 'step 9.9.1 viewUrl contains a guest user principal name (#EXT#)' }
+    @{ url = 'https://portal.azure.com/#view/Blade/id/%252F1111111122223333444455555555aaaa'; problem = 'step 9.9.1 viewUrl contains an id (with or without hyphens)' }
+    @{ url = 'https://portal.azure.com/#view/User/upn/someone%EF%BC%A0example.com'; problem = "step 9.9.1 viewUrl contains '@' or '?' (also percent-encoded)" }
+    @{ url = 'https://portal.azure.com/#view/User/upn/x%2525252525252540example.com'; problem = 'step 9.9.1 viewUrl does not stop decoding after 5 rounds' }
 ) | ForEach-Object { $_.actual = @(Get-ViewUrlProblem -StepId '9.9.1' -Url $_.url) -join '; '; $_ }
 
 $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/recordings') -Filter 'lab-*.json' |

@@ -130,7 +130,14 @@ class RedactorTests(unittest.TestCase):
                          "view/Blade/filter%3Fname",                       # a query, encoded
                          "view/Blade/id/1111111122223333444455555555aaa%61",   # an id, partly encoded
                          "view/Blade/id/11111111%2D2222-3333-4444-555555555555",
-                         "view/Invite/me%40example.com"):
+                         "view/Invite/me%40example.com",
+                         # Double-encoded, as the Portal encodes blade inputs ('%2540' is '%40').
+                         "view/User/upn/someone%2540example.com",
+                         "view/User/u/someone%2540example%252Ecom",
+                         "view/User/upn/someone_example.com%2523EXT%2523",
+                         "view/Blade/id/%252F1111111122223333444455555555aaaa",
+                         "view/User/upn/someone%EF%BC%A0example.com",      # a fullwidth at sign
+                         "view/User/upn/x%2525252525252540example.com"):   # never stops decoding
             with self.subTest(fragment=fragment):
                 self.assertIsNone(self.redactor.view_url(f"https://portal.azure.com/#@{DOMAIN}/{fragment}"))
 

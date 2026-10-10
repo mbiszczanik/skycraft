@@ -28,6 +28,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -85,6 +86,20 @@ GUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
 # A GUID written without hyphens: 32 hex digits that are not part of a longer run, also right
 # after a percent-encoded character ('%2F' and the id).
 HEX_ID = re.compile(r"(?:(?<=%[0-9a-fA-F]{2})|(?<![0-9a-fA-F]))[0-9a-fA-F]{32}(?![0-9a-fA-F])")
+DECODE_ROUNDS = 5
+
+
+def fully_decoded(text: str) -> str | None:
+    """`text` percent-decoded until it stops changing (the Portal double-encodes blade inputs:
+    '%2540' is '%40', then '@'), NFKC-normalised so that a fullwidth '＠' reads as '@'. None when
+    it still changes after DECODE_ROUNDS rounds: such text is not to be trusted either way.
+    tests/Guide-Drift-Recording.Tests.ps1 (Get-ViewUrlProblem) decodes the same way."""
+    for _ in range(DECODE_ROUNDS):
+        decoded = unquote(text)
+        if decoded == text:
+            return unicodedata.normalize("NFKC", text)
+        text = decoded
+    return None
 
 
 class Redactor:
@@ -164,16 +179,17 @@ class Redactor:
         """The Portal view without the tenant pin ('#@<tenant>/'), query strings (before or inside
         the fragment), object ids (GUIDs, with or without hyphens: '<id>') or tenant data, for the
         recording; a resume opens it again (run.py, Runner.view_address). None when the view
-        cannot be kept without tenant or personal data: once percent-decoded ('%40' is '@'), it
-        still holds an address or a user principal name ('@', '#EXT#'), a query, an id, or text
-        the Redactor would replace (an encoded tenant name, 'Contoso%20Ltd')."""
+        cannot be kept without tenant or personal data: once fully percent-decoded (fully_decoded:
+        '%40' and the Portal's double-encoded '%2540' are '@'), it still holds an address or a
+        user principal name ('@', '#EXT#'), a query, an id, or text the Redactor would replace (an
+        encoded tenant name, 'Contoso%20Ltd'); or it does not stop decoding."""
         parts = urlsplit(url)
         fragment = re.sub(r"^@[^/]*/?", "", parts.fragment).split("?", 1)[0]
         view = f"{parts.scheme}://{parts.netloc}{parts.path}#{fragment}"
         view = self.redact(HEX_ID.sub("<id>", GUID.sub("<id>", view)))
-        decoded = unquote(view)
-        if ("@" in decoded or "?" in decoded or "#ext#" in decoded.casefold() or GUID.search(decoded)
-                or HEX_ID.search(decoded) or self.redact(decoded) != decoded):
+        decoded = fully_decoded(view)
+        if (decoded is None or "@" in decoded or "?" in decoded or "#ext#" in decoded.casefold()
+                or GUID.search(decoded) or HEX_ID.search(decoded) or self.redact(decoded) != decoded):
             return None
         return view
 
