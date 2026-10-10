@@ -281,10 +281,12 @@ function Start-Sleep {
         'Remove-AzApplicationSecurityGroup:prod-skycraft-swc-asg-db'
     )
     $script:BastionOnly = Invoke-CleanupScript -Stub $script:Stub -ArgumentList '-RemoveBastion', '-Force'
+    $script:NsgsOnly    = Invoke-CleanupScript -Stub $script:Stub -ArgumentList '-RemoveNSGs', '-Force'
+    $script:AsgsOnly    = Invoke-CleanupScript -Stub $script:Stub -ArgumentList '-RemoveASGs', '-Force'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:NotFound, $script:LookupsFail, $script:RemovalsFail,
-        $script:BastionOnly
+        $script:BastionOnly, $script:NsgsOnly, $script:AsgsOnly
     )
 }
 
@@ -412,5 +414,19 @@ Describe 'Lab 2.2 Remove-LabResource.ps1 - the component switches still narrow t
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         $run.Calls | Should -Contain 'Remove-AzBastion:platform-skycraft-swc-bas'
         @($run.Calls | Where-Object { $_ -match 'SecurityGroup' }) | Should -BeNullOrEmpty
+    }
+    It 'dissociates and removes only the NSGs with -RemoveNSGs' {
+        $run = $script:NsgsOnly
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        foreach ($nsg in $script:Nsgs) { $run.Calls | Should -Contain "Remove-AzNetworkSecurityGroup:$nsg" }
+        $run.Calls | Should -Contain 'Set-AzVirtualNetwork:prod-skycraft-swc-vnet'
+        @($run.Calls | Where-Object { $_ -match 'Bastion|PublicIpAddress|ApplicationSecurityGroup' }) | Should -BeNullOrEmpty
+    }
+
+    It 'removes only the ASGs with -RemoveASGs' {
+        $run = $script:AsgsOnly
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        foreach ($asg in $script:Asgs) { $run.Calls | Should -Contain "Remove-AzApplicationSecurityGroup:$asg" }
+        @($run.Calls | Where-Object { $_ -match 'Bastion|PublicIpAddress|NetworkSecurityGroup|VirtualNetwork' }) | Should -BeNullOrEmpty
     }
 }

@@ -19,6 +19,7 @@
       4. A removal that fails is an [ERROR], counted, and the later steps still run: exit 1.
       5. The private zone stays while its VNet links could not be listed or removed, and its
          delete is still retried only on the nested-resource error (#97).
+      6. -WhatIf looks everything up and removes nothing.
 
     Which errors mean "not found" is pinned for every cleanup that carries the helpers by
     tests/Lab-Cleanup-Lookup.Tests.ps1.
@@ -245,6 +246,7 @@ function Start-Sleep {
     # One invocation per scenario, reused by the assertions below - each child process costs
     # several seconds.
     $script:Clean   = Invoke-CleanupScript -Stub $script:Stub
+    $script:WhatIf  = Invoke-CleanupScript -Stub $script:Stub -ArgumentList '-WhatIf'
     $script:Nothing = Invoke-CleanupScript -Stub $script:Stub -Empty
     $script:NotFound = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
         'Get-AzDnsZone:skycraft.example.com=notfound'
@@ -265,7 +267,7 @@ function Start-Sleep {
     $script:Draining  = Invoke-CleanupScript -Stub $script:Stub -Nested 2
 
     $script:AllRuns = @(
-        $script:Clean, $script:Nothing, $script:NotFound, $script:LookupsFail, $script:ZoneDenied,
+        $script:Clean, $script:WhatIf, $script:Nothing, $script:NotFound, $script:LookupsFail, $script:ZoneDenied,
         $script:RemovalsFail, $script:ZoneStuck, $script:Draining
     )
 }
@@ -400,5 +402,18 @@ Describe 'Lab 2.3 Remove-LabResource.ps1 - a failed removal is counted' {
         @($run.Calls | Where-Object { $_ -eq 'Remove-AzPrivateDnsZone:nested' }).Count | Should -Be 2
         $run.Calls  | Should -Contain 'Remove-AzPrivateDnsZone:skycraft.internal'
         $run.Output | Should -Match 'VNet links still draining, retrying'
+    }
+}
+
+Describe 'Lab 2.3 Remove-LabResource.ps1 - -WhatIf' {
+
+    It 'looks everything up and removes nothing' {
+        $run = $script:WhatIf
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        @($run.Calls | Where-Object { $_ -match '^Remove-' }) | Should -BeNullOrEmpty
+        $run.Calls  | Should -Contain 'Get-AzDnsZone:skycraft.example.com'
+        $run.Calls  | Should -Contain 'Get-AzPrivateDnsZone:skycraft.internal'
+        $run.Output | Should -Match 'What if: .*dev-skycraft-swc-lb'
+        $run.Output | Should -Match 'What if: .*skycraft\.internal'
     }
 }
