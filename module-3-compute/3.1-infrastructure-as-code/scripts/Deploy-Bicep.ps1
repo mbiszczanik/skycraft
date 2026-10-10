@@ -13,10 +13,20 @@
     and the lab's network module lists every subnet and no peerings: redeploying would remove
     hub-to-prod, hub-to-dev and dev-to-hub, and on the dev VNet would also swap the NSGs and drop
     the service endpoints Lab 2.2 attached (issue #188). Deploying main.bicep with a parameter file
-    directly, without this script, leaves the flags unset and does redeploy both VNets. The lookup result
-    reaches the parameter files through SKYCRAFT_HUB_VNET_EXISTS and SKYCRAFT_DEV_VNET_EXISTS, which
-    the script sets for the deployment and removes afterwards. A lookup that fails for any reason
-    other than "not found" stops the script, so an unreadable VNet is never redeployed by mistake.
+    directly, without this script, leaves the flags unset and does redeploy both VNets.
+
+    The dev load balancer public IP (dev-skycraft-swc-lb-pip) and the dev load balancer
+    (dev-skycraft-swc-lb) are looked up the same way and left untouched when they exist (issue
+    #263): zones cannot change after a public IP is created, so one made without zones (by Lab
+    2.1's Deploy-Networking.ps1 or in the portal) would make the deployment fail, and redeploying
+    this lab's declaration over the load balancer Lab 2.3 builds would replace what Lab 2.3 set
+    on it.
+
+    The lookup results reach the parameter files through SKYCRAFT_HUB_VNET_EXISTS,
+    SKYCRAFT_DEV_VNET_EXISTS, SKYCRAFT_DEV_LB_PIP_EXISTS and SKYCRAFT_DEV_LB_EXISTS, which the
+    script sets for the deployment and removes afterwards. A lookup that fails for any reason
+    other than "not found" stops the script, so an unreadable resource is never redeployed by
+    mistake.
 
 .PARAMETER Location
     The Azure region deployment target. Default: 'swedencentral'
@@ -34,7 +44,8 @@
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment dev -WhatIf
     Previews the Development deployment without changing anything. On a subscription where
-    Module 2 already built the hub and dev VNets, neither VNet appears as a change.
+    Module 2 already built the hub and dev VNets and the dev load balancer, none of them (nor the
+    load balancer's public IP) appears as a change.
 
 .NOTES
     Project: SkyCraft
@@ -63,7 +74,7 @@ $ErrorActionPreference = 'Stop'
 
 # Runs an Az lookup and returns its result, or $null when the resource (or its resource group)
 # does not exist. Any other failure is rethrown: treating "could not read it" as "absent" would
-# redeploy a VNet that stands, which is exactly the overwrite the lookup is there to prevent.
+# redeploy a resource that stands, which is exactly the overwrite the lookup is there to prevent.
 function Find-ExistingResource {
     [CmdletBinding()]
     param(
@@ -116,22 +127,25 @@ Write-Host "`nStarting Deployment: $deploymentName" -ForegroundColor Cyan
 Write-Host "Template: $bicepPath" -ForegroundColor Gray
 Write-Host "Params:   $paramPath" -ForegroundColor Gray
 
-# The VNets main.bicep declares, by the names its network module gives them.
+# The resources main.bicep declares only when they are missing, by the names its modules give
+# them, with the Az cmdlet that looks each one up and what happens to one that exists.
 $existenceFlags = [ordered]@{
-    SKYCRAFT_HUB_VNET_EXISTS = @{ ResourceGroup = 'platform-skycraft-swc-rg'; Name = 'platform-skycraft-swc-vnet' }
-    SKYCRAFT_DEV_VNET_EXISTS = @{ ResourceGroup = 'dev-skycraft-swc-rg'; Name = 'dev-skycraft-swc-vnet' }
+    SKYCRAFT_HUB_VNET_EXISTS   = @{ Cmdlet = 'Get-AzVirtualNetwork'; ResourceGroup = 'platform-skycraft-swc-rg'; Name = 'platform-skycraft-swc-vnet'; Kept = 'referenced, not redeployed (its peerings stay)' }
+    SKYCRAFT_DEV_VNET_EXISTS   = @{ Cmdlet = 'Get-AzVirtualNetwork'; ResourceGroup = 'dev-skycraft-swc-rg'; Name = 'dev-skycraft-swc-vnet'; Kept = 'referenced, not redeployed (its peerings stay)' }
+    SKYCRAFT_DEV_LB_PIP_EXISTS = @{ Cmdlet = 'Get-AzPublicIpAddress'; ResourceGroup = 'dev-skycraft-swc-rg'; Name = 'dev-skycraft-swc-lb-pip'; Kept = 'left untouched (zones cannot change)' }
+    SKYCRAFT_DEV_LB_EXISTS     = @{ Cmdlet = 'Get-AzLoadBalancer'; ResourceGroup = 'dev-skycraft-swc-rg'; Name = 'dev-skycraft-swc-lb'; Kept = 'left untouched (what Lab 2.3 set on it stays)' }
 }
 
 try {
-    Write-Host "`nLooking up existing VNets..." -ForegroundColor Cyan
+    Write-Host "`nLooking up existing VNets, the dev load balancer and its public IP..." -ForegroundColor Cyan
     foreach ($flag in $existenceFlags.GetEnumerator()) {
-        $vnet = Find-ExistingResource -Lookup {
-            Get-AzVirtualNetwork -ResourceGroupName $flag.Value.ResourceGroup -Name $flag.Value.Name -ErrorAction Stop
+        $found = Find-ExistingResource -Lookup {
+            & $flag.Value.Cmdlet -ResourceGroupName $flag.Value.ResourceGroup -Name $flag.Value.Name -ErrorAction Stop
         }
-        $exists = $null -ne $vnet
+        $exists = $null -ne $found
         Set-Item -Path "Env:$($flag.Key)" -Value $exists.ToString().ToLowerInvariant()
         if ($exists) {
-            Write-Host "  - $($flag.Value.Name) exists: referenced, not redeployed (its peerings stay)." -ForegroundColor Gray
+            Write-Host "  - $($flag.Value.Name) exists: $($flag.Value.Kept)." -ForegroundColor Gray
         }
         else {
             Write-Host "  - $($flag.Value.Name) not found: this deployment creates it." -ForegroundColor Gray

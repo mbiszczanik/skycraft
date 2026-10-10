@@ -74,7 +74,7 @@ You'll create Infrastructure as Code templates to automate SkyCraft deployment:
 Before starting this lab:
 
 - [ ] Completed Module 2 (Virtual Networking) - Section 2 exports the ARM templates of the VNets, NSGs and load balancers Module 2 created, so they should exist for that exercise
-- [ ] Nothing has to pre-exist for the **deployment** itself: `scripts/Deploy-Bicep.ps1` deploys `bicep/main.bicep` at subscription scope, and the template creates the three resource groups, the NSGs, the hub and dev VNets and the dev load balancer (`tools/lab-cycle-manifest.psd1` lists this lab as depending on 1.2 only). Re-running it after Module 2 does not redeploy the hub or dev VNet: the script looks both up first, and a VNet that already exists is only referenced, because redeploying it would remove the peerings Lab 2.1 created (and, on the dev VNet, the NSGs and service endpoints Lab 2.2 attached). The what-if then shows neither VNet as a change.
+- [ ] Nothing has to pre-exist for the **deployment** itself: `scripts/Deploy-Bicep.ps1` deploys `bicep/main.bicep` at subscription scope, and the template creates the three resource groups, the NSGs, the hub and dev VNets and the dev load balancer (`tools/lab-cycle-manifest.psd1` lists this lab as depending on 1.2 only). Re-running it after Module 2 does not redeploy the hub or dev VNet: the script looks both up first, and a VNet that already exists is only referenced, because redeploying it would remove the peerings Lab 2.1 created (and, on the dev VNet, the NSGs and service endpoints Lab 2.2 attached). The dev load balancer and its public IP are looked up the same way and left alone when they exist: a public IP's zones cannot change, and the load balancer is the one Lab 2.3 built. The what-if then shows none of them as a change.
 - [ ] PowerShell 7+ and the `Az` module (Az.Accounts, Az.Resources, Az.Network) - `scripts/Deploy-Bicep.ps1` deploys with Az PowerShell
 - [ ] Bicep CLI on `PATH` (standalone install, e.g. `winget install -e --id Microsoft.Bicep`; verify with `bicep --version`) - the copy `az bicep install` adds is not visible to Az PowerShell
 - [ ] Azure CLI 2.50.0 or later - optional, only for the `az bicep build` / `decompile` exercises
@@ -1352,8 +1352,8 @@ Test-AzSubscriptionDeployment `
 > [!WARNING]
 > Validate with the parameter file, but deploy only with `.\scripts\Deploy-Bicep.ps1`. Deployed
 > directly with `dev.bicepparam` (for example `New-AzSubscriptionDeployment`), the template does
-> not know which VNets already exist, so it redeploys the hub and dev VNets and removes the
-> peerings Lab 2.1 created.
+> not know what already exists, so it redeploys the hub and dev VNets and removes the peerings
+> Lab 2.1 created, and it redeploys the dev load balancer over the one Lab 2.3 built.
 
 > [!NOTE]
 > `az bicep build` is the one az CLI command kept in this section. It is a
@@ -1403,9 +1403,10 @@ Resource changes: 15 to create, 0 to modify, 0 to delete.
 ```
 
 If you completed Module 2, the output looks different: the script reports that
-`platform-skycraft-swc-vnet` and `dev-skycraft-swc-vnet` already exist, so neither VNet appears
-in the what-if at all. Only `auth-nsg` and `world-nsg` are created; the resource groups, the dev
-public IP and the load balancer already exist and show as unchanged or modified.
+`platform-skycraft-swc-vnet`, `dev-skycraft-swc-vnet`, `dev-skycraft-swc-lb-pip` and
+`dev-skycraft-swc-lb` already exist, so none of them appears in the what-if at all. Only
+`auth-nsg` and `world-nsg` are created; the resource groups already exist and show as unchanged
+or modified.
 
 **Color Legend**:
 
@@ -1485,10 +1486,10 @@ Get-AzVirtualNetwork -ResourceGroupName dev-skycraft-swc-rg |
     @{N = 'Subnets'; E = { $_.Subnets.Count } } |
   Format-Table -AutoSize
 
-# Expected output:
+# Expected output (AuthSubnet, WorldSubnet, DatabaseSubnet and AppServiceSubnet):
 # Name                   AddressSpace  Subnets
 # ---------------------  ------------  -------
-# dev-skycraft-swc-vnet  10.1.0.0/16   3
+# dev-skycraft-swc-vnet  10.1.0.0/16   4
 
 # Verify load balancer
 Get-AzLoadBalancer -ResourceGroupName dev-skycraft-swc-rg |
@@ -1505,27 +1506,43 @@ Get-AzLoadBalancer -ResourceGroupName dev-skycraft-swc-rg |
 
 ### Step 3.1.22: View Deployment Outputs
 
+The outputs are the `output` lines at the end of `bicep/main.bicep`; their names start with
+`out`.
+
 ```powershell
-# Get deployment outputs
-(Get-AzSubscriptionDeployment -Name 'SkyCraft-dev-20260112-2050').Outputs |
-  ConvertTo-Json -Depth 5
+# Get deployment outputs (use the deployment name Deploy-Bicep.ps1 printed)
+$outputs = (Get-AzSubscriptionDeployment -Name 'SkyCraft-dev-20260112-2050').Outputs
+
+# List the output names
+$outputs.Keys | Sort-Object
 
 # Expected output:
-# {
-#   "devLoadBalancerPublicIp": {
-#     "type": "String",
-#     "value": "20.240.50.10"
-#   },
-#   "devResourceGroupName": {
-#     "type": "String",
-#     "value": "dev-skycraft-swc-rg"
-#   },
-#   "devVnetId": {
-#     "type": "String",
-#     "value": "/subscriptions/.../dev-skycraft-swc-vnet"
-#   }
-# }
+# outConfigEnvironment
+# outConfigProdVnetPrefix
+# outDevLbPublicIpDeployed
+# outDevLoadBalancerDeployed
+# outDevLoadBalancerId
+# outDevLoadBalancerPublicIp
+# outDevResourceGroupName
+# outDevVnetDeployed
+# outDevVnetId
+# outHubVnetDeployed
+# outHubVnetId
+# outPlatformResourceGroupName
+# outProdResourceGroupName
+
+# Read single values
+$outputs['outDevLoadBalancerPublicIp'].Value
+$outputs['outDevVnetId'].Value
+
+# Expected output (your IP address and subscription ID differ):
+# 20.240.50.10
+# /subscriptions/.../resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Network/virtualNetworks/dev-skycraft-swc-vnet
 ```
+
+The four `...Deployed` outputs say whether this run created the hub VNet, the dev VNet, the dev
+load balancer and its public IP (`True`), or found them already in place and left them alone
+(`False`).
 
 ### Step 3.1.23: Export Updated ARM Template
 

@@ -10,6 +10,7 @@
       - No preview API versions
       - CostCenter tag present in main.bicep
       - Compiles successfully via 'bicep build' (resolved by tools/BicepCli.psm1)
+      - The guide's verification steps (3.1.21, 3.1.22) expect what main.bicep deploys (#263)
 
 .EXAMPLE
     Invoke-Pester -Path .\Standards.Tests.ps1
@@ -115,5 +116,36 @@ Describe 'Lab 3.1 Bicep - compilation' {
     It "'<file>' compiles via 'bicep build'" -ForEach $AllCases {
         $null = & $script:Bicep build $path --stdout 2>&1
         $LASTEXITCODE | Should -Be 0 -Because "'$file' must compile without errors"
+    }
+}
+
+Describe 'Lab 3.1 guide - verification steps match main.bicep' {
+    BeforeAll {
+        $script:Main  = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'bicep' 'main.bicep')
+        $guide        = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'lab-guide-3.1.md')
+        $script:Step21 = [regex]::Match($guide, '(?s)### Step 3\.1\.21:.*?### Step 3\.1\.22:').Value
+        $script:Step22 = [regex]::Match($guide, '(?s)### Step 3\.1\.22:.*?### Step 3\.1\.23:').Value
+        $script:Outputs = @([regex]::Matches($script:Main, '(?m)^output\s+(\w+)') | ForEach-Object { $_.Groups[1].Value })
+    }
+
+    It 'step 3.1.21 expects as many dev subnets as the dev VNet module declares' {
+        $block = [regex]::Match($script:Main, '(?s)module modDevVnet .*?parSubnets: \[(.*?)parTags:').Groups[1].Value
+        $declared = [regex]::Matches($block, "(?m)^\s+name: '").Count
+        $declared | Should -BeGreaterThan 0
+        $expected = [regex]::Match($script:Step21, 'dev-skycraft-swc-vnet\s+10\.1\.0\.0/16\s+(\d+)')
+        $expected.Success | Should -BeTrue -Because 'step 3.1.21 shows the dev VNet with its subnet count'
+        [int]$expected.Groups[1].Value | Should -Be $declared
+    }
+
+    It "step 3.1.22 lists exactly the template's outputs" {
+        $listed = @([regex]::Matches($script:Step22, '(?m)^# (out\w+)\s*$') | ForEach-Object { $_.Groups[1].Value })
+        $listed.Count | Should -BeGreaterThan 0
+        ($listed | Sort-Object) | Should -Be ($script:Outputs | Sort-Object)
+    }
+
+    It 'step 3.1.22 reads only outputs the template declares' {
+        $read = @([regex]::Matches($script:Step22, "\`$outputs\['(\w+)'\]") | ForEach-Object { $_.Groups[1].Value })
+        $read.Count | Should -BeGreaterThan 0
+        foreach ($name in $read) { $script:Outputs | Should -Contain $name }
     }
 }

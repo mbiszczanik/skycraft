@@ -266,11 +266,16 @@ Create four subnets for the development environment:
 1. Click **+ Add a subnet**
 2. Configure:
 
-| Field            | Value              |
-| ---------------- | ------------------ |
-| Name             | `AppServiceSubnet` |
-| Starting address | `10.1.4.0`         |
-| Subnet size      | `/24`              |
+| Field                        | Value                       |
+| ---------------------------- | --------------------------- |
+| Name                         | `AppServiceSubnet`          |
+| Starting address             | `10.1.4.0`                  |
+| Subnet size                  | `/24`                       |
+| Delegate subnet to a service | `Microsoft.Web/serverFarms` |
+
+**Delegate subnet to a service** is in the **Subnet delegation** section, further down the same pane.
+The delegation reserves the subnet for App Service: Lab 3.4 connects the web app to it (VNet
+integration), and the lab's Bicep template creates the subnet the same way.
 
 3. Click **Add**
 
@@ -279,7 +284,7 @@ Create four subnets for the development environment:
 - AuthSubnet: 10.1.1.0/24
 - WorldSubnet: 10.1.2.0/24
 - DatabaseSubnet: 10.1.3.0/24
-- AppServiceSubnet: 10.1.4.0/24
+- AppServiceSubnet: 10.1.4.0/24, delegated to `Microsoft.Web/serverFarms`
 
 ![Dev Subnets](./images/step-2.1.6.png)
 
@@ -328,6 +333,9 @@ Repeat the process for production:
 | WorldSubnet      | 10.2.2.0         | /24  |
 | DatabaseSubnet   | 10.2.3.0         | /24  |
 | AppServiceSubnet | 10.2.4.0         | /24  |
+
+For `AppServiceSubnet`, also set **Delegate subnet to a service** to `Microsoft.Web/serverFarms`,
+as in step 2.1.6.
 
 ![Prod Subnets](./images/step-2.1.8.png)
 
