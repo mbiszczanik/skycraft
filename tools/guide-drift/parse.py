@@ -33,16 +33,27 @@ without a browser. Rules (issue #189):
     numbered step after a nested list. The first
     Expected Result in a step is kept.
   * A line whose text, markup stripped, ends with the word 'verify:' introduces a check list
-    (#224): '3. Verify:' (2.2.11), '1. In **Configuration**, verify:' (4.1.11). After a list
-    item, the check list is the list items indented deeper than it; blank lines among them are
-    skipped, so it ends at the first non-blank line that is not a deeper item (the next numbered
-    step) or is an Expected Result, which is read as usual. After any other line it is the list
-    right after it, read as after an Expected Result.
+    (#224): '3. Verify:' (2.2.11), '1. In **Configuration**, verify:' (4.1.11). So does one
+    that starts with 'Verify' or 'Confirm' and ends with a colon (#246): '11. Verify
+    **Encryption** settings:' (4.1.2), '2. Confirm **Service endpoints** shows:' (2.2.21),
+    '4. Verify both backend pools have VMs:' (3.2.13). A form table right after the line (blank
+    lines between are allowed; table_form) is a check list of one 'Label: value' per row,
+    whatever the line's indent: 4.1.2's Encryption table is checked, not filled in. An
+    informational table is not read, as anywhere else ('Verify peering exists:' before a
+    Peering Name | Status table, 2.1.11). Otherwise, after a list item, the check list is the
+    list items indented deeper than it; blank lines among them are skipped, so it ends at the
+    first non-blank line that is not a deeper item (the next numbered step) or is an Expected
+    Result, which is read as usual. When no item is deeper, a numbered item takes the bullet
+    list right after it at its own indent ('2. Verify:' then '- Status: **OK**' at column 0),
+    read as after an Expected Result, so it ends at the next numbered step. After any other
+    line it is the list right after it, read as after an Expected Result.
     The checks are not items, so 'Status: **Succeeded**' is never a field to fill; they are
     joined with '; ', markup stripped, and joined to the step's Expected Result, or are its
     Expected Result alone when it has none. The introducing line is read as any other item
-    (a click on **Configuration**). A check list is read where items are: one in the body of
-    an option that is not read is dropped with it.
+    (a click on **Configuration**, on the wizard's **Encryption** tab), except a line 'Verify
+    **X** shows:' or 'Confirm **X** shows:' (SHOWN_LABEL), whose bold span names the setting
+    to read, not a control to click (2.2.21). A check list is read where items are: one in
+    the body of an option that is not read is dropped with it.
   * Checks are joined to an Expected Result text (join_checks) after a space when the text
     ends with '.', '!', '?' or ':' ('Bastion is operational. Status: Succeeded', 2.2.11), and
     after '; ' otherwise, so the text and the first check never meet as '.;' or ':;'. The
@@ -148,14 +159,14 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     placeholder ('Owner = <your name>', 5.3). A table row with an empty value that captions the
     rows below it ('**Remote virtual network**', 2.1.9) is a field with an empty value.
   * Only field values are checked for instructions; a tag value is typed as written.
-  * Only 'verify:' and an Expected Result introduce a check list. A list or table after other
-    wording is read as before: the Field | Value table after '11. Verify **Encryption**
-    settings:' (4.1.2) is three fields to fill, and the list after 'Confirm **Service
-    endpoints** shows:' (2.2.21) does not reach the Expected Result (#246).
+  * Only 'verify:', 'Verify ...:', 'Confirm ...:' and an Expected Result introduce a check
+    list (#224, #246). A list or table after other wording is read as before, and an
+    Expected Result ending in a colon takes a list, not a table.
   * Checks join the step's single Expected Result, which the runner checks at the end of the
     step, though a check list can describe a blade the step then moves on from: 2.3.19 checks
     the Overview and then opens Record sets; 2.3.20 checks the dev load balancer and ends on
-    prod.
+    prod; 2.2.21 checks DatabaseSubnet and ends on prod-skycraft-swc-vnet; 4.1.2 checks the
+    wizard's Encryption tab and ends on the new account.
 
 Usage: python parse.py <path/to/lab-guide-X.Y.md> [--out steps.json] [--repo-root <dir>]
 """
@@ -215,8 +226,15 @@ VALUE_INSTRUCTION = re.compile(
 YOUR = re.compile(r"^Your\s", re.IGNORECASE)     # 'Your subscription': a placeholder without brackets
 BRACKET_TOKEN = re.compile(r"\[[^\]]+\]")        # '[yourtenant]', '[IP of dev-skycraft-swc-lb-pip]'
 EXPECTED = re.compile(r"^\s*(?:(?:[-*]|\d+\.)\s+)?\*\*Expected Result\*\*[^:]*:(?P<text>.*)$")
-# A line whose text, markup stripped, ends with the word 'verify:' introduces a check list (#224).
+# A line whose text, markup stripped, ends with the word 'verify:' introduces a check list (#224),
+# and so does one that starts with 'Verify' or 'Confirm' and ends with a colon (#246); the colon
+# is tested in code, not by a '.*:' here.
 VERIFY_INTRO = re.compile(r"(?<!\w)verify:\s*$", re.IGNORECASE)
+CHECK_VERB = re.compile(r"^(?:Verify|Confirm)\b", re.IGNORECASE)
+# 'Confirm **Service endpoints** shows:' (2.2.21): the bold span names what to read, not a
+# control to click, so the line gives no item when it introduces checks (#246).
+SHOWN_LABEL = re.compile(r"^(?:Verify|Confirm)\s+\*\*(?:\\\*|[^*])+?\*\*\s+shows?\s*:\s*$",
+                         re.IGNORECASE)
 ORDERED_ITEM = re.compile(r"^\s*\d+\.\s")    # a numbered list item, as against a bullet
 SENTENCE_END = (".", "!", "?", ":")   # check items follow such a text after a space, not '; '
 TABLE_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$")
@@ -422,9 +440,7 @@ def following_list(body: list[tuple[int, str]], start: int) -> tuple[list[str], 
     up to three columns less in the list) and at the first one's indent with the other marker
     kind (numbered or bullet): the next numbered step after a nested list. An Expected Result
     line ends it too."""
-    position = start
-    while position < len(body) and (body[position][1] == HIDDEN or not body[position][1].strip()):
-        position += 1
+    position = next_line(body, start)
     parts: list[str] = []
     after = start
     first: tuple[int, bool] | None = None       # indent and marker kind of the first item
@@ -479,20 +495,76 @@ def indent_of(line: str) -> int:
     return len(line) - len(line.lstrip())
 
 
-def check_list(body: list[tuple[int, str]], index: int) -> tuple[list[str], int] | None:
-    """The check list that the line body[index] introduces by ending with 'verify:' (#224): its
-    item texts, markup stripped as for values, and the index of the first line after it. None
-    when the line does not end with 'verify:'.
+def introduces_checks(text: str) -> bool:
+    """Whether a line's text, markup stripped, introduces checks: it ends with the word 'verify:'
+    (#224), or starts with 'Verify' or 'Confirm' and ends with a colon (#246)."""
+    return bool(VERIFY_INTRO.search(text)) or (bool(CHECK_VERB.match(text)) and text.endswith(":"))
 
-    After a list item, the check list is the list items indented deeper than it; blank lines
-    among them are skipped, so the list ends at the first non-blank line that is not a deeper
-    list item, or that is an Expected Result. After any other line, it is the list right after
-    the line (following_list).
+
+def next_line(body: list[tuple[int, str]], start: int) -> int:
+    """The index of the first line from body[start] on that is neither blank nor HIDDEN."""
+    position = start
+    while position < len(body) and (body[position][1] == HIDDEN or not body[position][1].strip()):
+        position += 1
+    return position
+
+
+def table_checks(body: list[tuple[int, str]], start: int) -> tuple[list[str], int]:
+    """The rows of the form table at body[start] (blank lines before it are skipped) as checks,
+    'Label: value' with markup stripped as for values, and the index of the first line after
+    it (#246); no checks and start when no table follows or the table is not a form
+    (table_form). Like parse_items, a HIDDEN line neither ends nor joins the table."""
+    position = next_line(body, start)
+    if position >= len(body) or not TABLE_ROW.match(body[position][1]):
+        return [], start
+    parts: list[str] = []
+    form: str | None = None
+    header = True
+    after = start
+    while position < len(body):
+        row = TABLE_ROW.match(body[position][1])
+        if not row and body[position][1] != HIDDEN:
+            break
+        position += 1
+        if not row:
+            continue
+        cells = [c.strip() for c in row.group("cells").split("|")]
+        filled = [c for c in cells if c]
+        if filled and all(SEPARATOR_CELL.match(c) for c in filled):
+            continue
+        if header:
+            header, form = False, table_form(cells)
+            if not form:
+                return [], start                 # informational: not read, as in parse_items
+            continue
+        after = position
+        if len(cells) < 2 or not cells[0]:
+            continue
+        label, value = clean_label(strip_value_markup(cells[0])), strip_value_markup(cells[1])
+        parts.append(f"{label}: {value}" if value else label)
+    return parts, after
+
+
+def check_list(body: list[tuple[int, str]], index: int) -> tuple[list[str], int] | None:
+    """The checks that the line body[index] introduces (introduces_checks; #224, #246): their
+    texts, markup stripped as for values, and the index of the first line after them. None when
+    the line introduces none.
+
+    A form table right after the line (blank lines between are allowed) gives one check per row
+    (table_checks). Otherwise, after a list item, the checks are the list items indented deeper
+    than it; blank lines among them are skipped, so the list ends at the first non-blank line
+    that is not a deeper list item, or that is an Expected Result. When no item is deeper, a
+    numbered item takes the bullet list right after it at its own indent (following_list), which
+    Markdown starts as a new list, so the list ends where the next numbered step starts. After
+    any other line, the checks are the list right after the line (following_list).
     """
     line = body[index][1].expandtabs(4)
     li = LIST_ITEM.match(line)
-    if not VERIFY_INTRO.search(strip_value_markup(li.group("text") if li else line)):
+    if not introduces_checks(strip_value_markup(li.group("text") if li else line)):
         return None
+    table = table_checks(body, index + 1)
+    if table[0]:
+        return table
     if not li:
         return following_list(body, index + 1)
     depth = indent_of(line)
@@ -509,6 +581,11 @@ def check_list(body: list[tuple[int, str]], index: int) -> tuple[list[str], int]
         parts.append(strip_value_markup(item.group("text")))
         position += 1
         after = position
+    if not parts and ORDERED_ITEM.match(line) and position < len(body):
+        current = body[position][1].expandtabs(4)
+        if (LIST_ITEM.match(current) and not ORDERED_ITEM.match(current)
+                and indent_of(current) == depth and not EXPECTED.match(current)):
+            return following_list(body, index + 1)
     return parts, after
 
 
@@ -558,8 +635,10 @@ def read_option(body: list[tuple[int, str]], regions: list[str | int],
             index = after
             continue
         if regions[index] == "step" or regions[index] == chosen:
-            item_lines.append(body[index])     # the line that introduces a check list is read too
             found = check_list(body, index)
+            li = LIST_ITEM.match(body[index][1])
+            if not (found and found[0] and li and SHOWN_LABEL.match(li.group("text").strip())):
+                item_lines.append(body[index])  # the line that introduces checks is read too
             if found and found[0]:
                 checks.extend(found[0])
                 index = found[1]

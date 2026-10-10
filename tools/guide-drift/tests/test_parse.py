@@ -1,10 +1,10 @@
 """Unit tests for parse.py's reading of one list item: which searches are the Portal's global
 search and which are a blade's own search box (issue #189), which '- Label: value' items with
 a plain label are fields (issue #198), which field values are not text to type (issue #202),
-which lists are checks for the Expected Result rather than steps (issue #224), which code
-spans in a navigation chain are resources to open (issue #199), and which option of a step is
-read (issue #201). The full guides and the other parser rules are covered by
-tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
+which lists and tables are checks for the Expected Result rather than steps (issues #224 and
+#246), which code spans in a navigation chain are resources to open (issue #199), and which
+option of a step is read (issue #201). The full guides and the other parser rules are covered
+by tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
 """
@@ -532,6 +532,169 @@ class CheckListTests(unittest.TestCase):
             "   - Status: **Succeeded**\n")
         self.assertEqual(items, [{"kind": "action", "labels": ["Overview"], "line": 5}])
         self.assertIsNone(expected)
+
+
+class VerifyIntroductionTests(unittest.TestCase):
+    """A line that starts with 'Verify' or 'Confirm' and ends with a colon introduces checks as
+    'verify:' does (#246), and a form table after any such line is checks too. The fixtures copy
+    the shapes of 2.1.11, 2.2.21, 3.2.13 and 4.1.2."""
+
+    step = CheckListTests.step
+
+    def test_a_form_table_after_verify_x_settings_is_checks_and_the_tab_is_still_clicked(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Create\n"
+            "\n"
+            "10. Click **Next: Encryption**\n"
+            "\n"
+            "11. Verify **Encryption** settings:\n"
+            "\n"
+            "| Field                            | Value                            |\n"
+            "| -------------------------------- | -------------------------------- |\n"
+            "| Encryption type                  | **Microsoft-managed keys (MMK)** |\n"
+            "| Enable infrastructure encryption | ❌ Disabled                      |\n"
+            "\n"
+            "12. Click **Next: Tags**\n"
+            "\n"
+            "**Expected Result**: Deployment succeeds.\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Next: Encryption"], "line": 3},
+                                 {"kind": "action", "labels": ["Encryption"], "line": 5},
+                                 {"kind": "action", "labels": ["Next: Tags"], "line": 12}])
+        self.assertEqual(expected, "Deployment succeeds. Encryption type: Microsoft-managed keys (MMK); "
+                                   "Enable infrastructure encryption: ❌ Disabled")
+
+    def test_confirm_x_shows_gives_no_click_on_x_and_its_list_is_checks(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Verify\n"
+            "\n"
+            "1. Navigate to **Subnets** → **DatabaseSubnet**\n"
+            "2. Confirm **Service endpoints** shows:\n"
+            "\n"
+            "   - Microsoft.Sql\n"
+            "   - Microsoft.Storage\n"
+            "\n"
+            "3. Navigate to **Subnets** → **WorldSubnet**\n")
+        self.assertEqual(items, [{"kind": "navigation", "labels": ["Subnets", "DatabaseSubnet"], "line": 3},
+                                 {"kind": "navigation", "labels": ["Subnets", "WorldSubnet"], "line": 9}])
+        self.assertEqual(expected, "Microsoft.Sql; Microsoft.Storage")
+
+    def test_confirm_x_shows_with_nothing_to_check_is_read_as_before(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Verify\n"
+            "\n"
+            "1. Confirm **Service endpoints** shows:\n"
+            "2. Click **Next**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Service endpoints"], "line": 3},
+                                 {"kind": "action", "labels": ["Next"], "line": 4}])
+        self.assertIsNone(expected)
+
+    def test_verify_or_confirm_with_more_words_before_the_colon_introduces_checks(self) -> None:
+        for intro in ("4. Verify both backend pools have VMs:", "4. Confirm these exist:",
+                      "4. verify the pools:", "Confirm these exist:"):
+            with self.subTest(intro=intro):
+                items, expected = self.step(
+                    "### Step 9.9.1: Verify\n"
+                    "\n"
+                    f"{intro}\n"
+                    "   - `dev-skycraft-swc-lb-be-auth`: **1 VM**\n"
+                    "   - Status: **Succeeded**\n"
+                    "5. Click **Next**\n")
+                self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 6}])
+                self.assertEqual(expected, "dev-skycraft-swc-lb-be-auth: 1 VM; Status: Succeeded")
+
+    def test_verify_or_confirm_without_a_closing_colon_or_as_part_of_a_word_is_no_check_list(self) -> None:
+        for intro in ("Verify the status", "Confirm: **Status** is **Succeeded**", "Confirmed:",
+                      "Verification:", "Then verify the pools:"):
+            with self.subTest(intro=intro):
+                items, expected = self.step(
+                    "### Step 9.9.1: Verify\n\n"
+                    f"1. {intro}\n"
+                    "   - Status: **Succeeded**\n")
+                self.assertIn({"kind": "field", "label": "Status", "value": "Succeeded", "line": 4}, items)
+                self.assertIsNone(expected)
+
+    def test_an_informational_table_after_an_introduction_is_not_read(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Verify\n"
+            "\n"
+            "1. Navigate to **Peerings**\n"
+            "2. Verify peering exists:\n"
+            "\n"
+            "| Peering Name | Status    |\n"
+            "| ------------ | --------- |\n"
+            "| dev-to-hub   | Connected |\n"
+            "\n"
+            "3. Click **Overview**\n"
+            "\n"
+            "**Expected Result**: All peerings show Connected.\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Peerings"], "line": 3},
+                                 {"kind": "action", "labels": ["Overview"], "line": 10}])
+        self.assertEqual(expected, "All peerings show Connected.")
+
+    def test_a_form_or_tag_table_after_verify_is_checks(self) -> None:
+        for header, rows, joined in (
+                ("| Setting | Value |", ("| Status | **OK** |",), "Status: OK"),
+                ("| Name | Value |", ("| Project | `SkyCraft` |", "| Owner | |"), "Project: SkyCraft; Owner")):
+            with self.subTest(header=header):
+                items, expected = self.step(
+                    "### Step 9.9.1: Verify\n"
+                    "\n"
+                    "2. Verify:\n"
+                    f"{header}\n"
+                    "| --- | --- |\n"
+                    + "".join(row + "\n" for row in rows) +
+                    "\n"
+                    "3. Click **Next**\n")
+                self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 8 + len(rows) - 1}])
+                self.assertEqual(expected, joined)
+
+    def test_a_commented_out_row_neither_ends_nor_joins_a_table_of_checks(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Verify\n"
+            "\n"
+            "1. Verify **Encryption** settings:\n"
+            "\n"
+            "| Field | Value |\n"
+            "| ----- | ----- |\n"
+            "| Encryption type | MMK |\n"
+            "<!-- | Old field | x | -->\n"
+            "| Infrastructure encryption | Disabled |\n"
+            "2. Click **Next**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Encryption"], "line": 3},
+                                 {"kind": "action", "labels": ["Next"], "line": 10}])
+        self.assertEqual(expected, "Encryption type: MMK; Infrastructure encryption: Disabled")
+
+    def test_a_bullet_list_at_the_indent_of_a_numbered_verify_item_is_checks(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Verify\n"
+            "\n"
+            "2. Verify:\n"
+            "\n"
+            "- Status: **OK**\n"
+            "- Subnet: `AzureBastionSubnet`\n"
+            "3. Click **Next**\n"
+            "- Name: **x**\n")
+        self.assertEqual(items, [{"kind": "action", "labels": ["Next"], "line": 7},
+                                 {"kind": "field", "label": "Name", "value": "x", "line": 8}])
+        self.assertEqual(expected, "Status: OK; Subnet: AzureBastionSubnet")
+
+    def test_a_list_that_is_not_under_the_verify_item_and_could_be_the_next_step_stays_items(self) -> None:
+        for lines, first in ((("2. Verify:", "3. Click **Next**"), 4),
+                             (("- Verify:", "1. Click **Next**"), 4),
+                             (("1. Open **A**", "   - Verify:", "2. Click **Next**"), 5),
+                             (("   1. Verify:", "- Click **Next**"), 4)):
+            with self.subTest(lines=lines):
+                items, expected = self.step("### Step 9.9.1: Verify\n\n" + "".join(f"{line}\n" for line in lines))
+                self.assertEqual(items[-1], {"kind": "action", "labels": ["Next"], "line": first})
+                self.assertIsNone(expected)
+
+    def test_a_long_introduction_is_read_in_linear_time(self) -> None:
+        for intro in ("Confirm **x**" + " " * 100_000 + "shown:", "Confirm **" + "x" * 100_000 + ":",
+                      "Verify" + ": " * 50_000 + "x", "Confirm **x** shows" + " " * 100_000 + "x:"):
+            with self.subTest(length=len(intro)):
+                started = time.perf_counter()
+                self.step(f"### Step 9.9.1: X\n\n1. {intro}\n   - a\n")
+                self.assertLess(time.perf_counter() - started, 2)
 
 
 class OptionChoiceTests(unittest.TestCase):
