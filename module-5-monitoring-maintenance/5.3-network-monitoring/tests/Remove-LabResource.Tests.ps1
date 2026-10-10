@@ -81,12 +81,34 @@ BeforeAll {
     #                         '<lookup>#<n>=<kind>' only its n-th call
     #   SKYCRAFT_STUB_FAIL    '<command>:<name>,...' makes one removal throw
     # Lookups: 'ConnectionMonitor', 'FlowLogs', 'PlatformResources', 'Get-AzVM:<vm>',
-    # 'Get-AzVMExtension:<vm>', 'Tags:<vm>'. A removal is logged as '<command>:<name>'.
+    # 'Get-AzVMExtension:<vm>', 'Tags:<vm>'. A removal is logged as '<command>:<name>'. The kind
+    # 'status404' reports a missing object the way Az.Resources can: a status-only 404 (an
+    # exception whose inner CloudException carries the 404 response) with no not-found wording.
+    # The empty subscription's connection monitor is reported missing that way.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:SubscriptionId = '00000000-0000-0000-0000-000000000000'
 $script:Calls = @{}
 $script:FlowLogRemoved = $false
+
+# The shape of a status-only 404 from Az.Resources: ResourceManagerCloudException around the SDK's
+# CloudException, whose Response carries the status. Neither message says "not found".
+if (-not ('SkyCraftLab53Stub.CloudException' -as [type])) {
+    Add-Type -TypeDefinition @"
+namespace SkyCraftLab53Stub
+{
+    public class CloudException : System.Exception
+    {
+        public CloudException(string message) : base(message) { }
+        public object Response { get; set; }
+    }
+    public class ResourceManagerCloudException : System.Exception
+    {
+        public ResourceManagerCloudException(string message, System.Exception inner) : base(message, inner) { }
+    }
+}
+"@
+}
 
 function Get-StubVmId {
     param([string]$ResourceGroupName, [string]$Name)
@@ -112,15 +134,21 @@ function Invoke-StubRemoval {
 # reports the object as not found in the empty subscription. Returns $true when the lookup failed,
 # so the stub returns nothing after it.
 function Invoke-StubLookup {
-    param([string]$Name, [switch]$Gone)
+    param([string]$Name, [switch]$Gone, [string]$GoneKind = 'notfound')
     Write-StubCall -Name $Name
     $script:Calls[$Name] = 1 + [int]$script:Calls[$Name]
     $kind = foreach ($entry in @($env:SKYCRAFT_STUB_LOOKUP -split ',')) {
         $key, $value = $entry -split '=', 2
         if ($key -eq $Name -or $key -eq "$Name#$($script:Calls[$Name])") { $value }
     }
-    if (-not $kind -and $Gone -and (Test-StubEmpty)) { $kind = 'notfound' }
+    if (-not $kind -and $Gone -and (Test-StubEmpty)) { $kind = $GoneKind }
     switch ($kind) {
+        'status404' {
+            $inner = [SkyCraftLab53Stub.CloudException]::new('Long running operation failed.')
+            $inner.Response = [pscustomobject]@{ StatusCode = [System.Net.HttpStatusCode]::NotFound }
+            Write-Error -Exception ([SkyCraftLab53Stub.ResourceManagerCloudException]::new('The request failed.', $inner)) -ErrorId 'StubCloudError'
+            return $true
+        }
         'denied' {
             Write-Error -ErrorId 'AuthorizationFailed' -Message "The client 'stub' does not have authorization to perform action 'read' over scope '$Name' or the scope is invalid."
             return $true
@@ -150,7 +178,7 @@ function Get-AzResource {
     [CmdletBinding()]
     param([string]$ResourceId, [string]$ResourceGroupName, [switch]$ExpandProperties)
     if ($ResourceId -like '*/connectionMonitors/*') {
-        if (Invoke-StubLookup -Name 'ConnectionMonitor' -Gone) { return }
+        if (Invoke-StubLookup -Name 'ConnectionMonitor' -Gone -GoneKind 'status404') { return }
         return [pscustomobject]@{
             Name       = ($ResourceId -split '/')[-1]
             ResourceId = $ResourceId
@@ -366,6 +394,15 @@ Describe 'Lab 5.3 Remove-LabResource.ps1 - an absent object is not a failure' {
         $run.Output   | Should -Match 'No NWTA-\* data collection resources found'
         $run.Output   | Should -Not -Match '\[ERROR\]'
         @($run.Calls | Where-Object { $_ -match $script:ChangePattern }) | Should -BeNullOrEmpty
+    }
+
+    It 'reads a status-only 404 for the connection monitor as absent' {
+        # The empty subscription's monitor is reported missing with no not-found wording at all:
+        # only the 404 on the inner CloudException's response says so.
+        $run = $script:Nothing
+        $run.Calls  | Should -Contain 'ConnectionMonitor'
+        $run.Output | Should -Not -Match 'Could not look up Connection Monitor'
+        $run.Output | Should -Match 'Connection Monitor not found \(already removed\)'
     }
 }
 
