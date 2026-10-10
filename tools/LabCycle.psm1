@@ -1179,7 +1179,10 @@ function Test-LabCyclePreflight {
 
     .PARAMETER LeftoverProbe
         Given the guards, returns what is soft-deleted and in the way. Reported, never purged:
-        purging is irreversible and an unattended orchestrator should not make that call.
+        purging is irreversible and an unattended orchestrator should not make that call. Throws
+        when it cannot tell, and the leftovers check stops the run: until #290 the default looked
+        up with -ErrorAction SilentlyContinue, so a listing that failed (a 403, throttling) read as
+        "every guarded name clear".
 
     .PARAMETER PermissionProbe
         Given the subscription id, returns the caller's RBAC permission entries at that scope.
@@ -1240,8 +1243,11 @@ function Test-LabCyclePreflight {
             param($Guards)
             $found = @()
             foreach ($guard in $Guards) {
+                # Both getters list - every soft-deleted vault in the subscription, every resource
+                # whose name matches - so a name that is clear is an empty match, never an error.
+                # -ErrorAction Stop: a listing that fails throws, and the check reports it (#290).
                 if ($guard.Kind -eq 'KeyVault') {
-                    $removed = @(Get-AzKeyVault -InRemovedState -ErrorAction SilentlyContinue |
+                    $removed = @(Get-AzKeyVault -InRemovedState -ErrorAction Stop |
                         Where-Object { $_.VaultName -eq $guard.Name })
                     foreach ($item in $removed) {
                         $protection = if ($item.EnablePurgeProtection) { 'ON - blocks redeployment until it expires' } else { 'off' }
@@ -1251,7 +1257,10 @@ function Test-LabCyclePreflight {
                 else {
                     # A Log Analytics workspace and a Recovery Services Vault both keep their name
                     # reserved after deletion, so an existing one by that name blocks this run.
-                    $existing = @(Get-AzResource -Name $guard.Name -ErrorAction SilentlyContinue)
+                    # Get-AzResource -Name lists the subscription and filters by name as a
+                    # wildcard; the exact match is picked here.
+                    $existing = @(Get-AzResource -Name $guard.Name -ErrorAction Stop |
+                        Where-Object { $_.Name -eq $guard.Name })
                     foreach ($item in $existing) {
                         $found += @{ Kind = $guard.Kind; Name = $guard.Name; Detail = "already exists at $($item.ResourceId)" }
                     }
@@ -1330,7 +1339,12 @@ function Test-LabCyclePreflight {
         }
 
         {
-            $leftovers = @(& $LeftoverProbe $Guards)
+            # A check that could not be made is a stop, not a pass: "nothing found" from a listing
+            # that failed is the reassuring answer this guard exists to refuse.
+            try { $leftovers = @(& $LeftoverProbe $Guards) }
+            catch {
+                return (ConvertTo-CheckResult -Name 'leftovers' -Ok $false -Detail "could not check the $(@($Guards).Count) guarded name(s): $_. A check that failed is not 'clear'; run the preflight again once the cause is fixed.")
+            }
             $blocking = @($leftovers | Where-Object { $_.Kind -notin $script:RecoverableLeftoverKind })
             $recoverable = @($leftovers | Where-Object { $_.Kind -in $script:RecoverableLeftoverKind })
 
