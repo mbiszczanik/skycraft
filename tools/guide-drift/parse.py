@@ -168,8 +168,11 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     well ('Open `x` now'); the guides have no such step.
   * Other abbreviations ('approx.', 'no.', 'Fig.') end a sentence, so a chain followed by one and
     a description is cut there; an instruction is known only by INSTRUCTION's verbs ('Then
-    click **Save**.' after a chain is a description and dropped); and CHAIN_LEAD_IN's verbs are
-    a short list, so another verb phrase before a colon can still read as a field's label.
+    click **Save**.' after a chain is a description and dropped), and the other way round, a
+    description that starts with one of them is read as an instruction ('→ **B**. Open handles
+    are listed under **Handles**.' clicks Handles, though 'Open handles' is a term of the
+    Portal, 4.3); and CHAIN_LEAD_IN's verbs are a short list, so another verb phrase before a
+    colon can still read as a field's label.
   * A resource name that opens a chain and is not on screen is looked up in the Portal's global
     search, which finds Azure resources but not what lives inside one: a blob container
     ('public-demo', 4.2.12) or a file share ('skycraft-config', 4.3.6 and 4.3.8). Later in a
@@ -249,10 +252,11 @@ PLAIN_LABEL_START = re.compile("^" + PLAIN_LABEL)
 # A label before a chain that is a lead-in, not a field: a place ('In the portal:'), a check
 # ('Check permissions:', 'Verify your own role:'), an instruction INSTRUCTION does not list
 # ('Increase the quota:', 'Request quota increase:') or a sentence whose verb reports what
-# happens ('Azure creates:', 'Progress shows:'); troubleshooting and prose in 1.2-5.2.
+# happens ('Azure creates:', 'Progress shows:'); troubleshooting and prose in 1.2-5.2. 'Assign'
+# and 'Use' are not listed: 'Assign access to' and 'Use existing' are the Portal's own labels.
 CHAIN_LEAD_IN = re.compile(
     r"^(?:At|For|From|In|Inside|On|Under|Within|Check|Confirm|Verify"
-    r"|Assign|Change|Configure|Decrease|Ensure|Increase|Make|Request|Set|Try|Use)\b"
+    r"|Change|Configure|Decrease|Ensure|Increase|Make|Request|Set|Try)\b"
     r"|\b(?:appears|creates|displays|lists|opens|reports|returns|shows)$", re.IGNORECASE)
 VALUE_SPAN = re.compile(r"\*\*(?:\\\*|[^*])+?\*\*|`[^`]+`")    # a bold or code span, for fullmatch
 CODE = re.compile(r"`(?P<text>[^`]+)`")
@@ -286,9 +290,12 @@ PLAIN_LABEL_MAX_WORDS = 6      # the longest plain label in the guides has five 
 # A plain label that starts with one of these is an instruction ('Select your VM: `x`'), not a
 # Portal label. 'Type' alone is the Portal's Type field (5.3), while 'Type the VMSS name to
 # confirm: `x`' is an instruction (3.2). 'Check' is not listed: 'Check every' is a field (5.1).
-INSTRUCTION = re.compile(
-    r"^(?:Add|Choose|Click|Create|Delete|Download|Enter|Go|Link|Navigate|Open|Remove|Run|Search"
-    r"|Select|Wait|Type\s)\b", re.IGNORECASE)
+INSTRUCTION_WORDS = (r"(?:Add|Choose|Click|Create|Delete|Download|Enter|Go|Link|Navigate|Open|Remove"
+                     r"|Run|Search|Select|Wait|Type\s)\b")
+INSTRUCTION = re.compile("^" + INSTRUCTION_WORDS, re.IGNORECASE)
+# The same words after the spaces that follow a full stop, matched at the stop's end in a chain
+# (chain_sentence) without slicing the rest of the text.
+INSTRUCTION_NEXT = re.compile(r"\s*" + INSTRUCTION_WORDS, re.IGNORECASE)
 # A field value that starts with one of these, after an optional '(', is an instruction, not
 # text to type (value_is_literal). Check and Uncheck count only with a word after them, not a
 # remark ('Uncheck (default)'): alone they are a check box state. So is a bare 'Leave checked'
@@ -781,12 +788,12 @@ def chain_sentence(text: str) -> str:
     **Save**.') or by text that holds another separator ('Then **C** → **D**') goes on to the
     next one. The whole text when it has no separator outside a span, or no such full stop."""
     masked = mask_spans(text)
-    first = CHAIN.search(masked)
-    if not first:
+    separators = [m.start() for m in CHAIN.finditer(masked)]
+    if not separators:
         return text
-    for stop in SENTENCE_STOP.finditer(masked, first.end()):
-        rest = masked[stop.end():]
-        if not (INSTRUCTION.match(rest.lstrip()) or CHAIN.search(rest)):
+    last = separators[-1]            # a stop before it has another separator after it
+    for stop in SENTENCE_STOP.finditer(masked, CHAIN.search(masked).end()):
+        if not (stop.end() <= last or INSTRUCTION_NEXT.match(masked, stop.end())):
             return text[:stop.end()]
     return text
 

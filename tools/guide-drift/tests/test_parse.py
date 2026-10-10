@@ -308,6 +308,15 @@ class PickerChainTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.item(text), expected)
 
+    def test_a_portal_label_that_starts_with_a_verb_is_still_a_field(self) -> None:
+        # 'Assign access to' (the IAM Members tab) and 'Use existing' are the Portal's own labels.
+        for text, field, labels in (
+                ("Assign access to: **Managed identity** → **+ Select members**",
+                 "Assign access to", ["Managed identity", "+ Select members"]),
+                ("Use existing: **Yes** → **Select**", "Use existing", ["Yes", "Select"])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), self.picker(field, labels))
+
     def test_a_value_that_is_not_one_span_leaves_a_navigation(self) -> None:
         # The first step after the label must be the value, a bold or code span alone.
         self.assertEqual(self.item("For each role above: select the role → **Assign access to: Managed identity** → "   # 5.2.5
@@ -438,6 +447,23 @@ class ChainSentenceTests(unittest.TestCase):
                              ("**A** → **Version 1.2** → **D**", ["A", "Version 1.2", "D"])):
             with self.subTest(text=text):
                 self.assertEqual(self.item(text)["labels"], labels)
+
+    def test_a_span_with_a_full_stop_can_end_the_chain(self) -> None:
+        # A full stop inside the last span is masked: the span is read whole, not cut at its stop.
+        self.assertEqual(self.item("**A** → **Step 1. Basics**"),
+                         {"kind": "navigation", "labels": ["A", "Step 1. Basics"], "line": 7})
+        self.assertEqual(self.item("**A** → `v1. Final`"),
+                         {"kind": "navigation", "labels": ["A", "v1. Final"], "resources": [1], "line": 7})
+
+    def test_a_long_item_is_read_in_linear_time(self) -> None:
+        # Each full stop once looked at the whole rest of the item: 35 s and 10 s (#250 review).
+        n = 100_000
+        for text, labels in (("**A** → **B**" + ". Click" * n, ["A", "B"]),
+                             ("**A** → " + "x. → " * n, ["A"])):
+            with self.subTest(text=text[:16]):
+                started = time.perf_counter()
+                self.assertEqual(self.item(text)["labels"], labels)
+                self.assertLess(time.perf_counter() - started, 2)
 
     def test_an_item_without_a_chain_is_read_whole(self) -> None:
         self.assertEqual(self.item("Click **Save**. The **Overview** opens."),
