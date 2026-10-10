@@ -830,9 +830,7 @@ Describe 'parse.py - labs 4.2, 4.3, 5.1, 5.2 and 5.3, pickers, worded resource s
     }
 
     It 'reads <count> chain(s) of step <id> as <labels>, resource names at <resources>, picking field "<field>"' -ForEach @(
-        # 'Destination: **Send to Log Analytics workspace** -> `law`.': the field's picker, then the chain.
-        @{ lab = '5.1'; id = '5.1.7'; count = 1; field = 'Destination'; labels = @('Send to Log Analytics workspace', 'platform-skycraft-swc-law'); resources = @(1) }
-        @{ lab = '5.2'; id = '5.2.8'; count = 2; field = 'Destination'; labels = @('Send to Log Analytics workspace', 'platform-skycraft-swc-law'); resources = @(1) }
+        # 'Flow log type: **Virtual network** -> ... -> `prod-skycraft-swc-vnet` -> ...': the field's picker, then the chain.
         @{ lab = '5.3'; id = '5.3.5'; count = 1; field = 'Flow log type'; labels = @('Virtual network', '+ Select target resource', 'Virtual network', 'prod-skycraft-swc-vnet', 'Confirm selection'); resources = @(3) }
         # 'Browse to `common/config.txt`': a path opens each segment; 'Open `x` share', 'pick the `x` Backup Vault'.
         @{ lab = '4.3'; id = '4.3.6'; count = 1; field = ''; labels = @('common', 'config.txt', [string][char]0x22EF, 'Restore'); resources = @(0, 1) }
@@ -851,11 +849,20 @@ Describe 'parse.py - labs 4.2, 4.3, 5.1, 5.2 and 5.3, pickers, worded resource s
         }
     }
 
-    It 'reads step 5.2.8''s destination table as a field of its own line' {
-        $step = $script:PickerLabs['5.2'].steps | Where-Object id -eq '5.2.8'
-        $fields = @($step.items | Where-Object { $_.kind -eq 'field' -and $_.label -eq 'Destination table' })
-        $fields.Count | Should -Be 1
-        $fields[0].value | Should -BeExactly 'Resource specific'
+    # Diagnostic settings: the check box, then the workspace as a field the runner picks from its
+    # dropdown; the destination table is a click on its radio button, not a field (#294).
+    It 'reads step <id>''s destination as a check box, the workspace field and <radio> click(s)' -ForEach @(
+        @{ lab = '5.1'; id = '5.1.7'; count = 1; radio = 0 }
+        @{ lab = '5.2'; id = '5.2.8'; count = 2; radio = 1 }
+    ) {
+        $items = @(($script:PickerLabs[$lab].steps | Where-Object id -eq $id).items)
+        @($items | Where-Object { $_.kind -eq 'action' -and (@($_.labels) -join "`n") -ceq 'Send to Log Analytics workspace' }).Count | Should -Be $count
+        $workspace = @($items | Where-Object { $_.kind -eq 'field' -and $_.label -ceq 'Log Analytics workspace' })
+        $workspace.Count | Should -Be $count
+        foreach ($field in $workspace) { $field.value | Should -BeExactly 'platform-skycraft-swc-law' }
+        @($items | Where-Object { $_.kind -eq 'action' -and (@($_.labels) -join "`n") -ceq 'Resource specific' }).Count | Should -Be $radio
+        @($items | Where-Object { $_.kind -eq 'field' -and $_.label -eq 'Destination table' }) | Should -BeNullOrEmpty
+        @($items | Where-Object { $_.PSObject.Properties.Name -contains 'field' }) | Should -BeNullOrEmpty
     }
 
     It 'never clicks what the sentence after a chain describes in step <id>' -ForEach @(
