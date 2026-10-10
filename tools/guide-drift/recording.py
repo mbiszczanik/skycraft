@@ -19,6 +19,9 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   checkbox_state       the check box state a field value names, if any
   rejected_candidates  the reference set of candidates not chosen, without tenant data
   skip_reason          why the recording skips a step ('"skip": "<reason>"', #200), or None
+  view_blade           the blade part of a recorded view, what a step's start is compared by (#207)
+  start_blade          the blade the recording says a step starts on ('"startBlade"', #207), or
+                       None when it is not recorded yet
   write_json           writes the recording or the state file atomically
 """
 from __future__ import annotations
@@ -236,6 +239,46 @@ def skip_reason(recording: dict, step_id: str) -> str | None:
         raise ValueError(f"step {step_id}: 'skip' must be the reason the step is skipped, "
                          f"a non-empty string, not {json.dumps(reason)}")
     return reason.strip()
+
+
+def view_blade(view: str | None) -> str | None:
+    """The blade part of a view as Redactor.view_url records it (#207). For a '#view/' or
+    '#blade/' address: the extension and the blade, and the menu entry after '~' when there is
+    one, without the blade's inputs ('Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members' of
+    '#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members/groupId/<id>'). For any other
+    address ('#resource/subscriptions/<id>/...', '#home'): the whole fragment. None for no view
+    and for an empty fragment. It is cut from the redacted view, so it holds nothing view_url
+    would not record."""
+    if view is None:
+        return None
+    fragment = urlsplit(view).fragment.strip("/")
+    if not fragment:
+        return None
+    kind, _, path = fragment.partition("/")
+    if kind not in ("view", "blade") or not path:
+        return fragment
+    parts = path.split("/")
+    blade = parts[:2]
+    if len(parts) >= 4 and parts[2] == "~":
+        blade += parts[2:4]
+    return "/".join(blade)
+
+
+def start_blade(recording: dict, step_id: str) -> str | None:
+    """The blade the recording says step `step_id` starts on ('"startBlade":
+    "Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups"', #207): the view_blade of the view
+    the Portal showed when the step's first item went through in a supervised run. None when the
+    entry has no such key, or null: not recorded yet, and the run records it. Anything but a
+    string with text in it raises ValueError, as a 'skip' does (skip_reason): run.py checks every
+    entry before the browser opens, and tests/Guide-Drift-Recording.Tests.ps1 rejects such an
+    entry, and a blade with tenant or personal data, in CI."""
+    blade = recording["steps"].get(step_id, {}).get("startBlade")
+    if blade is None:
+        return None
+    if not isinstance(blade, str) or not blade.strip():
+        raise ValueError(f"step {step_id}: 'startBlade' must be the blade part of a Portal view, "
+                         f"a non-empty string, not {json.dumps(blade)}")
+    return blade
 
 
 def value_override(recording: dict, step: dict, label: str) -> str | None:

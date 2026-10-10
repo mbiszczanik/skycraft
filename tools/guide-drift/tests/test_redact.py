@@ -22,8 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import recording  # noqa: E402
 from decide import Candidate  # noqa: E402
 from recording import (Redactor, env_secrets, expand_env, field_action, missing_env,  # noqa: E402
-                       rejected_candidates, resolve_value, resource_name, skip_reason, value_action,
-                       write_json)
+                       rejected_candidates, resolve_value, resource_name, skip_reason, start_blade,
+                       value_action, view_blade, write_json)
 
 DOMAIN = "contoso.onmicrosoft.com"
 TENANT = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -280,6 +280,68 @@ class SkipReasonTests(unittest.TestCase):
         for value in ("", "  \t", None, 0, 1, True, False, [], ["optional"], {}):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "step 9.9.1: 'skip' must be"):
                 skip_reason(self.recording({"skip": value}), "9.9.1")
+
+
+class ViewBladeTests(unittest.TestCase):
+    """The blade part of a recorded view (#207): what a step's start is compared by."""
+
+    def test_a_view_address_keeps_the_extension_the_blade_and_its_menu_entry(self) -> None:
+        portal = "https://portal.azure.com/#"
+        for view, blade in (
+                ("view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members/groupId/<id>",
+                 "Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members"),
+                ("view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Overview",
+                 "Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Overview"),
+                ("view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/<id>/hidePreviewBanner~/true",
+                 "Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview"),
+                ("view/Microsoft_AAD_UsersAndTenants/InviteUser.ReactView/tenantType/AAD",
+                 "Microsoft_AAD_UsersAndTenants/InviteUser.ReactView"),
+                ("view/Microsoft_AAD_IAM/AddGroup.ReactView", "Microsoft_AAD_IAM/AddGroup.ReactView"),
+                ("blade/Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups",
+                 "Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups")):
+            with self.subTest(view=view):
+                self.assertEqual(view_blade(portal + view), blade)
+
+    def test_any_other_address_is_its_whole_fragment(self) -> None:
+        resource = ("resource/subscriptions/<id>/resourceGroups/dev-skycraft-swc-rg/providers/"
+                    "Microsoft.Network/loadBalancers/dev-skycraft-swc-lb/backendPools")
+        self.assertEqual(view_blade("https://portal.azure.com/#" + resource), resource)
+        self.assertEqual(view_blade("https://portal.azure.com/#home"), "home")
+
+    def test_no_view_or_an_empty_fragment_is_no_blade(self) -> None:
+        for view in (None, "https://portal.azure.com/#", "https://portal.azure.com/"):
+            with self.subTest(view=view):
+                self.assertIsNone(view_blade(view))
+
+    def test_a_redacted_view_gives_a_redacted_blade_and_one_with_personal_data_none(self) -> None:
+        redactor = Redactor(DOMAIN, TENANT)
+        view = redactor.view_url(f"https://portal.azure.com/#@{DOMAIN}/view/Domains/DomainMenuBlade/~/Overview"
+                                 f"/name/{DOMAIN}?x=1")
+        self.assertEqual(view_blade(view), "Domains/DomainMenuBlade/~/Overview")
+        self.assertIsNone(view_blade(redactor.view_url(
+            "https://portal.azure.com/#view/UserBlade/upn/someone%40example.com")))
+
+
+class StartBladeTests(unittest.TestCase):
+    """'"startBlade": "<blade>"' in a step entry (#207): optional; absent is 'not recorded yet'."""
+
+    def recording(self, **entry) -> dict:
+        return {"steps": {"1.1.6": entry}}
+
+    def test_no_entry_no_key_or_null_is_not_recorded(self) -> None:
+        self.assertIsNone(start_blade({"steps": {}}, "1.1.6"))
+        self.assertIsNone(start_blade(self.recording(labels={}), "1.1.6"))
+        self.assertIsNone(start_blade(self.recording(startBlade=None), "1.1.6"))
+
+    def test_the_blade_is_returned_as_recorded(self) -> None:
+        blade = "Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups"
+        self.assertEqual(start_blade(self.recording(startBlade=blade), "1.1.6"), blade)
+
+    def test_a_blade_without_text_or_not_a_string_raises(self) -> None:
+        for value in ("", "   ", True, 1, ["Microsoft_AAD_IAM/AddGroup.ReactView"]):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                    ValueError, r"^step 1\.1\.6: 'startBlade' must be the blade part of a Portal view, a non-empty string"):
+                start_blade(self.recording(startBlade=value), "1.1.6")
 
 
 class RejectedCandidatesTests(unittest.TestCase):

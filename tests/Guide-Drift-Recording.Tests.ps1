@@ -32,12 +32,18 @@
     hyphens (issue #206); for lab 1.1, the tenant prefix and the guest address of step 1.1.5 are
     environment references.
 
+    A step entry may carry '"startBlade": "<blade>"' (issue #207): the blade part of the view the
+    step starts on, which the runner compares the open blade with. It is optional (absent or null
+    is 'not recorded yet'); when present it must be a non-empty string, which run.py also
+    requires before it starts, and it is read as the view it was cut from, by the same rules as a
+    viewUrl.
+
 .EXAMPLE
     Invoke-Pester -Path .\tests\Guide-Drift-Recording.Tests.ps1
 
 .NOTES
     Project: SkyCraft
-    Issue:   #189, #199, #200, #202, #206
+    Issue:   #189, #199, #200, #202, #206, #207
 #>
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
@@ -146,10 +152,10 @@ $SkipRuleCases = @(
 # until it stops changing ('%40' and the Portal's double-encoded '%2540' are '@', '%2523EXT%2523'
 # a guest's '#EXT#'), at most 5 rounds, then NFKC-normalised (a fullwidth at sign, U+FF20, is '@').
 function Get-ViewUrlProblem {
-    param([string]$StepId, [object]$Url)
+    param([string]$StepId, [object]$Url, [string]$Key = 'viewUrl')
     if ($null -eq $Url) { return }
     if ($Url -isnot [string] -or -not $Url.StartsWith('https://portal.azure.com/#', [System.StringComparison]::Ordinal)) {
-        return "step $StepId viewUrl does not start with https://portal.azure.com/#"
+        return "step $StepId $Key does not start with https://portal.azure.com/#"
     }
     $decoded = $Url
     $settled = $false
@@ -158,14 +164,43 @@ function Get-ViewUrlProblem {
         if ($next -ceq $decoded) { $settled = $true; break }
         $decoded = $next
     }
-    if (-not $settled) { return "step $StepId viewUrl does not stop decoding after 5 rounds" }
+    if (-not $settled) { return "step $StepId $Key does not stop decoding after 5 rounds" }
     $decoded = $decoded.Normalize([System.Text.NormalizationForm]::FormKC)
-    if ($decoded.Contains('@') -or $decoded.Contains('?')) { "step $StepId viewUrl contains '@' or '?' (also percent-encoded)" }
-    if ($decoded -match '#EXT#') { "step $StepId viewUrl contains a guest user principal name (#EXT#)" }
+    if ($decoded.Contains('@') -or $decoded.Contains('?')) { "step $StepId $Key contains '@' or '?' (also percent-encoded)" }
+    if ($decoded -match '#EXT#') { "step $StepId $Key contains a guest user principal name (#EXT#)" }
     if ($decoded -match '[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}' -or $decoded -match '(?<![0-9a-fA-F])[0-9a-fA-F]{32}(?![0-9a-fA-F])') {
-        "step $StepId viewUrl contains an id (with or without hyphens)"
+        "step $StepId $Key contains an id (with or without hyphens)"
     }
 }
+
+# Why a step entry's startBlade (#207) is malformed or must not be in this public repository;
+# nothing when the entry has none (absent or null: not recorded yet) or a well-formed one. The
+# runner records the blade part of a redacted view (recording.view_blade) and refuses a
+# startBlade that is not a non-empty string (recording.start_blade); a blade is read as the view
+# it was cut from, by Get-ViewUrlProblem.
+function Get-StartBladeProblem {
+    param([string]$StepId, [object]$Entry)
+    $blade = $Entry.PSObject.Properties['startBlade']
+    if ($null -eq $blade -or $null -eq $blade.Value) { return }
+    if ($blade.Value -isnot [string] -or [string]::IsNullOrWhiteSpace($blade.Value)) {
+        return "step ${StepId}: 'startBlade' must be the blade part of a Portal view, a non-empty string"
+    }
+    Get-ViewUrlProblem -StepId $StepId -Url ('https://portal.azure.com/#' + $blade.Value) -Key 'startBlade'
+}
+
+# Example data only: made-up ids and example.com.
+$StartBladeRuleCases = @(
+    @{ json = '{ "labels": {} }'; problem = '' }
+    @{ json = '{ "startBlade": null }'; problem = '' }
+    @{ json = '{ "startBlade": "Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members" }'; problem = '' }
+    @{ json = '{ "startBlade": "resource/subscriptions/<id>/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Network/loadBalancers/dev-skycraft-swc-lb/backendPools" }'; problem = '' }
+    @{ json = '{ "startBlade": "" }'; problem = "step 9.9.1: 'startBlade' must be the blade part of a Portal view, a non-empty string" }
+    @{ json = '{ "startBlade": "   " }'; problem = "step 9.9.1: 'startBlade' must be the blade part of a Portal view, a non-empty string" }
+    @{ json = '{ "startBlade": true }'; problem = "step 9.9.1: 'startBlade' must be the blade part of a Portal view, a non-empty string" }
+    @{ json = '{ "startBlade": 1 }'; problem = "step 9.9.1: 'startBlade' must be the blade part of a Portal view, a non-empty string" }
+    @{ json = '{ "startBlade": "UserBlade/upn/someone%2540example.com" }'; problem = "step 9.9.1 startBlade contains '@' or '?' (also percent-encoded)" }
+    @{ json = '{ "startBlade": "Blade/id/11111111-2222-3333-4444-555555555555" }'; problem = 'step 9.9.1 startBlade contains an id (with or without hyphens)' }
+) | ForEach-Object { $_.actual = @(Get-StartBladeProblem -StepId '9.9.1' -Entry ($_.json | ConvertFrom-Json)) -join '; '; $_ }
 
 # Example data only: example.com and made-up ids.
 $ViewUrlRuleCases = @(
@@ -292,6 +327,12 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
             }
         )
 
+        $badBlades = @(
+            foreach ($prop in $recording.steps.PSObject.Properties) {
+                Get-StartBladeProblem -StepId $prop.Name -Entry $prop.Value
+            }
+        )
+
         @{
             file        = $file.Name
             lab         = $recording.lab
@@ -304,6 +345,7 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
             unresolved  = $unresolved
             malformed   = $malformed
             badUrls     = $badUrls
+            badBlades   = $badBlades
             raw         = $raw
         }
     }
@@ -384,6 +426,16 @@ Describe 'Guide drift recordings - nothing tenant-specific is literal (this repo
     }
 
     It "reports the viewUrl <url> as '<problem>' (empty: it may be recorded)" -ForEach $ViewUrlRuleCases {
+        $actual | Should -Be $problem
+    }
+
+    It "'<file>' records only start blades that are the blade part of a Portal view, without query, tenant or id" -ForEach $RecordingCases {
+        $badBlades | Should -BeNullOrEmpty -Because ($badBlades -join '; ')
+    }
+
+    It "reports the step entry <json> as '<problem>' (empty: its startBlade may be recorded)" -ForEach $StartBladeRuleCases {
+        # A startBlade run.py refuses fails here, not at the start of a run; one with tenant or
+        # personal data fails like a viewUrl that holds them.
         $actual | Should -Be $problem
     }
 }

@@ -1,6 +1,6 @@
 """Unit tests for run.py's bookkeeping: state, resume, failure handling, recording of decisions
-(issue #189), steps the recording skips (#200), the view a resumed run starts from (#206), and
-how it finds what a guide names (search, '+' labels, plain text, collapsed menu groups, a blade
+(issue #189), steps the recording skips (#200), the view a resumed run starts from (#206), the
+blade a step starts on and the form its fields are filled in on (#207), and how it finds what a guide names (search, '+' labels, plain text, collapsed menu groups, a blade
 still loading, a resource a chain names, #199). No browser: the page is a
 small fake (Screen stands in for a frame), and run_step is scripted where only the order of
 steps matters.
@@ -2372,6 +2372,298 @@ class FieldValueTests(RunnerTestCase):
                                        "value": "malfurion.stormrage@[yourtenant].onmicrosoft.com"})
         self.assertTrue(done)
         self.assertEqual(act.call_args.args[-1], "malfurion.stormrage@contoso.onmicrosoft.com")
+
+
+GROUPS = "Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups"
+USERS = "Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/AllUsers"
+CREATE_USER = "Microsoft_AAD_UsersAndTenants/CreateUser.ReactView"
+
+
+def page_on(view: str) -> "FakePage":
+    """A FakePage on a Portal view pinned to the tenant, with a query, as the Portal shows it."""
+    page = FakePage()
+    page.url = f"https://portal.azure.com/#@{TENANT_ID}/{view}?feature.x=1"
+    return page
+
+
+class StartBladeTests(RunnerTestCase):
+    """The blade a step starts on (#207): recorded once the step's first item went through on it,
+    and compared with the open blade before the first item of every later run."""
+
+    STEP = {"id": "9.9.2", "title": "Two", "portal": True, "expected": None, "images": ["images/two.png"],
+            "items": [{"kind": "action", "labels": ["+ New group"], "line": 3},
+                      {"kind": "action", "labels": ["Create"], "line": 4}]}
+    MESSAGE = (f"the step starts on {GROUPS}, the Portal is on {USERS}; "
+               "the guide does not say how to get there")
+
+    def run_step(self, page, outcomes=("match", "match"), answers=(), step=None):
+        """run_step with every label and resource 'performed' as `outcomes` says, in turn."""
+        r = run.Runner(page, STEPS, self.recording, self.args(), ask=Answers(*answers))
+        acted: list[str] = []
+        left = list(outcomes)
+
+        def act(step, item, label, *rest, **kwargs):
+            acted.append(label)
+            record = r.new_record(step, item["kind"], label)
+            record.update(outcome=left.pop(0) if left else "match")
+            return record
+
+        out = io.StringIO()
+        with mock.patch.object(r, "act_on_label", side_effect=act), \
+                mock.patch.object(r, "open_resource", side_effect=act), redirect_stdout(out):
+            done = r.run_step(step or self.STEP)
+        return r, done, acted, out.getvalue()
+
+    def entry(self) -> dict:
+        return self.recording["steps"].get("9.9.2", {})
+
+    @staticmethod
+    def wrong_blade(r) -> list[dict]:
+        return [x for x in r.records if x.get("category") == run.WRONG_BLADE]
+
+    def test_a_step_without_a_recorded_blade_records_the_redacted_blade_it_started_on(self) -> None:
+        page = page_on("view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members/groupId/"
+                       "11111111-2222-3333-4444-555555555555")
+        r, done, _, _ = self.run_step(page)
+        self.assertTrue(done)
+        self.assertEqual(self.entry()["startBlade"], "Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members")
+        saved = json.loads((self.tmp / "rec.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["steps"]["9.9.2"]["startBlade"], "Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members")
+        self.assertEqual((r.ask.prompts, self.wrong_blade(r)), ([], []))
+
+    def test_the_blade_is_recorded_when_a_later_item_fails_too(self) -> None:
+        _, done, _, _ = self.run_step(page_on(f"view/{GROUPS}"), outcomes=("match", "unknown"))
+        self.assertFalse(done)
+        self.assertEqual(self.entry()["startBlade"], GROUPS)
+
+    def test_a_step_whose_first_item_failed_records_no_blade(self) -> None:
+        # It may have started on the wrong blade: that is not the one to compare later runs with.
+        for outcome, severity in (("unknown", None), ("drift", "blocking")):
+            with self.subTest(outcome=outcome):
+                self.recording["steps"].pop("9.9.2", None)
+                r = run.Runner(page_on(f"view/{USERS}"), STEPS, self.recording, self.args(), ask=Answers())
+                failed = r.new_record(self.STEP, "action", "+ New group")
+                failed.update(outcome=outcome, severity=severity)
+                with mock.patch.object(r, "act_on_label", return_value=failed):
+                    self.assertFalse(self.quietly(lambda: r.run_step(self.STEP)))
+                self.assertNotIn("startBlade", self.entry())
+
+    def test_the_recorded_blade_the_portal_is_on_is_not_reported(self) -> None:
+        for recorded in (GROUPS, GROUPS.lower()):        # compared regardless of case
+            with self.subTest(recorded=recorded):
+                self.recording["steps"]["9.9.2"] = {"startBlade": recorded}
+                r, done, acted, _ = self.run_step(page_on(f"view/{GROUPS}/x/1"))
+                self.assertTrue(done)
+                self.assertEqual((acted, r.ask.prompts, self.wrong_blade(r)), (["+ New group", "Create"], [], []))
+                self.assertEqual(self.entry()["startBlade"], recorded)
+
+    def test_another_blade_is_misleading_drift_and_the_person_brings_the_portal_there(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"startBlade": GROUPS}
+        r, done, acted, out = self.run_step(page_on(f"view/{USERS}"), answers=[""])
+        self.assertTrue(done)                            # misleading: the step goes on
+        [drift] = self.wrong_blade(r)
+        self.assertEqual((drift["kind"], drift["label"], drift["outcome"], drift["severity"], drift["observed"],
+                          drift["proposedEdit"]), ("blade", GROUPS, "drift", "misleading", self.MESSAGE, None))
+        self.assertIs(r.records[0], drift)               # before the step's first item
+        self.assertIn(f"Step 9.9.2: {self.MESSAGE}.\nBring the Portal to {GROUPS}, then press Enter.", out)
+        self.assertEqual((r.ask.prompts, acted), (["> "], ["+ New group", "Create"]))
+        self.assertEqual(self.entry()["startBlade"], GROUPS)     # the recording keeps its blade
+        screenshot = [x for x in r.records if x["kind"] == "screenshot"][-1]
+        self.assertEqual((screenshot["outcome"], screenshot["category"]), ("match", None))   # images not stale
+
+    def test_closed_input_at_the_prompt_goes_on_with_the_step(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"startBlade": GROUPS}
+        r, done, acted, _ = self.run_step(page_on(f"view/{USERS}"))
+        self.assertTrue(done)
+        self.assertEqual((len(self.wrong_blade(r)), acted), (1, ["+ New group", "Create"]))
+
+    def test_a_view_the_run_cannot_name_is_neither_compared_nor_recorded(self) -> None:
+        for url in ("https://portal.azure.com/#view/UserBlade/upn/someone%40example.com",
+                    "https://login.microsoftonline.com/common/oauth2/authorize#x"):
+            for recorded in (None, GROUPS):
+                with self.subTest(url=url, recorded=recorded):
+                    self.recording["steps"]["9.9.2"] = {} if recorded is None else {"startBlade": recorded}
+                    page = FakePage()
+                    page.url = url
+                    r, done, _, _ = self.run_step(page)
+                    self.assertTrue(done)
+                    self.assertEqual((r.ask.prompts, self.wrong_blade(r)), ([], []))
+                    self.assertEqual(self.entry().get("startBlade"), recorded)
+                    self.assertNotIn("example.com", (self.tmp / "rec.json").read_text(encoding="utf-8"))
+
+    def test_a_step_that_starts_with_the_global_search_or_a_resource_starts_anywhere(self) -> None:
+        for first in ({"kind": "search", "labels": ["Microsoft Entra ID"], "line": 2, "scope": "global"},
+                      {"kind": "search", "labels": ["Microsoft Entra ID"], "line": 2},
+                      {"kind": "navigation", "labels": ["dev-skycraft-swc-lb", "Backend pools"], "line": 2,
+                       "resources": [0]}):
+            for recorded in (None, GROUPS):
+                with self.subTest(first=first, recorded=recorded):
+                    self.recording["steps"]["9.9.2"] = {} if recorded is None else {"startBlade": recorded}
+                    r, done, _, _ = self.run_step(page_on(f"view/{USERS}"), step=dict(self.STEP, items=[first]))
+                    self.assertTrue(done)
+                    self.assertEqual((r.ask.prompts, self.wrong_blade(r)), ([], []))
+                    self.assertEqual(self.entry().get("startBlade"), recorded)
+
+    def test_a_blade_search_does_not_start_anywhere(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"startBlade": GROUPS}
+        step = dict(self.STEP, items=[{"kind": "search", "labels": ["Owner"], "line": 2, "scope": "blade"}])
+        r, _, _, _ = self.run_step(page_on(f"view/{USERS}"), answers=[""], step=step)
+        self.assertEqual(len(self.wrong_blade(r)), 1)
+
+    def test_the_summary_lists_a_wrong_blade_under_misleading_and_counts_nothing(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"startBlade": GROUPS}
+        r, _, _, _ = self.run_step(page_on(f"view/{USERS}"), answers=[""])
+        self.assertEqual(self.quietly(r.finish), 0)
+        summary = (r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn(f"## misleading (1)\n- step 9.9.2: {self.MESSAGE}\n", summary)
+        self.assertIn("## stale screenshots (0)\n- none", summary)
+        self.assertIn("## proposed edits (0)\n- none", summary)
+
+    def test_main_refuses_a_malformed_start_blade_before_the_browser_opens(self) -> None:
+        (self.tmp / "steps.json").write_text(json.dumps(STEPS), encoding="utf-8")
+        argv = ["--steps", str(self.tmp / "steps.json"), "--recording", str(self.tmp / "rec.json"),
+                "--log-dir", str(self.tmp / "logs"), "--run-id", "x", "--tenant-id", "t", "--tenant-domain", "d",
+                "--state", str(self.tmp / "state.json"), "--auth-state", str(self.tmp / "auth.json")]
+
+        class Console(io.StringIO):
+            def reconfigure(self, **kwargs) -> None:
+                pass
+
+        for value in ("", "   ", True, 1):
+            with self.subTest(value=value):
+                self.recording["steps"]["9.9.2"] = {"startBlade": value}
+                (self.tmp / "rec.json").write_text(json.dumps(self.recording), encoding="utf-8")
+                out = Console()
+                with mock.patch.object(run, "sync_playwright") as playwright, redirect_stdout(out), \
+                        mock.patch.object(run, "open_portal", side_effect=OSError("the browser opened")):
+                    self.assertEqual(run.main(argv), run.NOT_STARTED)
+                playwright.assert_not_called()
+                self.assertIn("The recording cannot be used: step 9.9.2: 'startBlade' must be", out.getvalue())
+
+
+class FormOpenTests(RunnerTestCase):
+    """Before the first field of a form is filled in, an editable control for it must be on
+    screen (#207): a lookup never lands on a list, as step 1.1.4's 'User principal name' did."""
+
+    UPN = {"kind": "field", "label": "User principal name", "value": "x", "line": 4}
+    MESSAGE = (f"no form with a field 'User principal name' is open; the Portal is on {USERS}; "
+               "the guide does not say how to get there")
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+
+    @staticmethod
+    def users_list() -> Screen:
+        """The Users list: 'User principal name' is only its column's sort button."""
+        return Screen(("label", "User principal name", ScreenNode(tag="button", in_header=True)))
+
+    def form_runner(self, page=None, ask=None) -> run.Runner:
+        return run.Runner(page or page_on(f"view/{USERS}"), STEPS, self.recording, self.args(), ask=ask or Answers())
+
+    def act(self, screen: Screen, r: run.Runner | None = None, form_start: bool = True, value: str = "chromie"):
+        r = r or self.form_runner()
+        step = {"id": "9.9.1", "title": "One", "items": [self.UPN], "images": []}
+        out = io.StringIO()
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=[]), redirect_stdout(out):
+            record = r.act_on_label(step, self.UPN, "User principal name", value, form_start=form_start)
+        return record, r, out.getvalue()
+
+    @staticmethod
+    def opening_the_form(screen: Screen, field: ScreenNode, page=None):
+        """The person at the prompt: opens the form (its field appears, the address changes).
+        Input is closed at any other prompt."""
+        def ask(text: str) -> str:
+            ask.prompts.append(text)
+            if text != "> ":
+                raise EOFError
+            screen.add(("textbox", "User principal name", field))
+            if page is not None:
+                page.url = f"https://portal.azure.com/#@{TENANT_ID}/view/{CREATE_USER}"
+            return ""
+        ask.prompts = []
+        return ask
+
+    def test_a_form_open_at_once_is_filled_without_a_report(self) -> None:
+        field = ScreenNode(tag="input")
+        record, r, _ = self.act(Screen(("textbox", "User principal name", field)))
+        self.assertEqual((record["outcome"], field.filled, r.ask.prompts, r.records), ("match", ["chromie"], [], []))
+
+    def test_a_labelled_container_with_a_text_box_counts_as_a_form(self) -> None:
+        local = ScreenNode(tag="input")
+        domain = ScreenNode(attrs={"role": "combobox"}, text="contoso.onmicrosoft.com")
+        container = ScreenNode(children=Screen(("textbox", "", local), ("combobox", "", domain)))
+        record, r, _ = self.act(Screen(("label", "User principal name", container)),
+                                value="chromie@contoso.onmicrosoft.com")
+        self.assertEqual((record["outcome"], local.filled, r.records), ("match", ["chromie"], []))
+
+    def test_a_list_instead_of_the_form_is_reported_and_the_person_opens_the_form(self) -> None:
+        screen, field = self.users_list(), ScreenNode(tag="input")
+        record, r, out = self.act(screen, self.form_runner(ask=self.opening_the_form(screen, field)))
+        [drift] = r.records
+        self.assertEqual((drift["kind"], drift["label"], drift["outcome"], drift["severity"], drift["category"],
+                          drift["observed"]),
+                         ("field", "User principal name", "drift", "misleading", run.WRONG_BLADE, self.MESSAGE))
+        self.assertIn(f"Step 9.9.1: {self.MESSAGE}.\nOpen the form, then press Enter.", out)
+        self.assertEqual((r.ask.prompts, record["outcome"], field.filled), (["> "], "match", ["chromie"]))
+
+    def test_a_read_only_field_is_no_form(self) -> None:
+        # A user's Overview shows 'User principal name' as a read-only text box.
+        screen = Screen(("textbox", "User principal name", ScreenNode(tag="input", read_only=True)))
+        record, r, _ = self.act(screen, self.form_runner(ask=Answers("")))
+        self.assertEqual([x["category"] for x in r.records], [run.WRONG_BLADE])
+        self.assertEqual((record["outcome"], record["observed"]), ("unknown", "read-only: 'User principal name'"))
+
+    def test_a_form_that_does_not_open_goes_on_as_today(self) -> None:
+        record, r, _ = self.act(self.users_list())       # input closed at both prompts
+        self.assertEqual([x["category"] for x in r.records], [run.WRONG_BLADE])
+        self.assertEqual(r.ask.prompts, ["> ", run.HumanDecider.PROMPT])     # then asked about the label
+        self.assertEqual((record["outcome"], record["observed"]), ("unknown", "no answer (input closed)"))
+
+    def test_a_later_field_of_the_form_is_not_checked(self) -> None:
+        _, r, _ = self.act(self.users_list(), form_start=False)
+        self.assertEqual((r.records, r.ask.prompts), ([], [run.HumanDecider.PROMPT]))
+
+    def test_a_first_field_with_a_recorded_decision_is_not_checked(self) -> None:
+        self.recording["steps"]["9.9.1"]["labels"]["User principal name"] = {
+            "decision": "use", "role": "textbox", "name": "Username", "severity": "misleading"}
+        _, r, _ = self.act(self.users_list())
+        self.assertEqual([x for x in r.records if x.get("category") == run.WRONG_BLADE], [])
+
+    def test_run_step_checks_the_first_field_acted_on_of_each_form(self) -> None:
+        step = {"id": "9.9.1", "title": "One", "portal": True, "expected": None, "images": [], "items": [
+            {"kind": "action", "labels": ["+ New user"], "line": 2},
+            {"kind": "field", "label": "Usage location", "value": "[Leave blank]", "line": 4},
+            {"kind": "field", "label": "User principal name", "value": "x", "line": 5},
+            {"kind": "field", "label": "Display name", "value": "y", "line": 6},
+            {"kind": "action", "labels": ["Next"], "line": 7},
+            {"kind": "field", "label": "Department", "value": "z", "line": 8}]}
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        calls: list[tuple[str, bool]] = []
+
+        def act(step, item, label, value=None, form_start=False):
+            calls.append((label, form_start))
+            record = r.new_record(step, item["kind"], label)
+            record.update(outcome="match")
+            return record
+
+        with mock.patch.object(r, "act_on_label", side_effect=act):
+            self.assertTrue(self.quietly(lambda: r.run_step(step)))
+        self.assertEqual(calls, [("+ New user", False), ("User principal name", True), ("Display name", False),
+                                 ("Next", False), ("Department", True)])
+
+    def test_a_form_opened_at_the_prompt_is_the_blade_the_step_starts_on(self) -> None:
+        page = page_on(f"view/{USERS}")
+        screen, field = self.users_list(), ScreenNode(tag="input")
+        r = self.form_runner(page=page, ask=self.opening_the_form(screen, field, page))
+        step = {"id": "9.9.2", "title": "Two", "portal": True, "expected": None, "images": [], "items": [self.UPN]}
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=[]):
+            self.assertTrue(self.quietly(lambda: r.run_step(step)))
+        self.assertEqual(self.recording["steps"]["9.9.2"]["startBlade"], CREATE_USER)
 
 
 class StopTests(RunnerTestCase):
