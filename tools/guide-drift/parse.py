@@ -211,6 +211,8 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
   * 4.3.6 opens the snapshot by its Comment cell ('select `Pre-update backup`'): the Portal
     names a snapshot by the time it was taken, which the guide cannot know. Whether a click on
     that cell opens the snapshot is to be confirmed on the supervised run.
+  * 4.3.7 and 4.3.8 look for **Connect** on the share's Overview: the share's Browse view has no
+    Connect, and Learn only says it is on the share's page. To be confirmed on the supervised run.
   * The option read is fixed by the guide, not chosen per run. 3.2.1 reads Option B, which
     creates an SSH key resource, while the items of later 3.2 steps follow Option A (3.2.2
     pastes skycraft-dev.pub); option B appears there only in prose notes, so a run of 3.2
