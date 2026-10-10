@@ -25,12 +25,26 @@
          suite pins those.
       3. Invoke-LabLookup returns what a lookup found, reads "found nothing" and a not-found error
          as absent without counting them, and counts any other error in $script:cleanupFailures.
-      4. A ratchet: no cleanup gives a *-Az* command -ErrorAction SilentlyContinue or Ignore.
-         The check walks the syntax tree, so it reads every spelling (-ErrorAction:X, -EA X, a
-         quoted value, 0 or 4, the ActionPreference enum), a value carried in a splatted hashtable
-         the script builds, and a command split by backtick continuations - and never a comment
-         or a string. There is no pending list: #290 converted the last labs on it, so a new
-         lab's cleanup is held to the ratchet from its first commit.
+      4. A ratchet over every cleanup, and over tools/Remove-LabCycle.ps1 where a rule fits it.
+         No cleanup, and not the tool:
+           a. gives a *-Az* command -ErrorAction SilentlyContinue or Ignore;
+           b. sets $ErrorActionPreference to SilentlyContinue or Ignore, at any scope;
+           c. gives $PSDefaultParameterValues an ErrorAction default of SilentlyContinue or Ignore
+              for a key that can reach an Az command ('*:ErrorAction', '*-Az*:EA', 'Get-*:...').
+         And no cleanup (the tool counts differently - see the Describe):
+           d. catches the error of a *-Az* command in a catch clause that neither calls
+              Test-LabNotFoundError nor counts it in $script:cleanupFailures, throws or exits -
+              the catch that read any error as "not there" in Labs 3.1 and 4.4 before #297.
+              Every verb counts, not only Get: Lab 3.1 read a failed delete as "may not exist".
+              Invoke-AzRestMethod is left out (see Find-UnhandledAzCatch).
+         The checks walk the syntax tree, never a comment or a string. They read the spellings
+         their fixtures below cover - for (a), -ErrorAction:X, -EA X, a prefix, a quoted value, 0
+         or 4, the ActionPreference enum, a value carried in a splatted hashtable the script
+         builds, and a command split by backtick continuations - and nothing else: a value held
+         in another variable, or a default computed at run time, is not resolved. A form a
+         fixture does not cover is not read; add a fixture before relying on it. There is no
+         pending list: #290 converted the last labs on it, so a new lab's cleanup is held to the
+         ratchet from its first commit.
 
     Each lab's own tests/Remove-LabResource.Tests.ps1 runs the script end to end against stubbed
     Az commands and proves the exit code.
@@ -99,7 +113,40 @@ $RatchetCases = @($CleanupScripts | ForEach-Object {
     @{ file = ($_.Substring($RepoRoot.Length + 1) -replace '\\', '/'); path = $_ }
 })
 
+# The lab cycle's teardown asserts what the cleanups left behind, and read a failed check as
+# "gone" the same way (#290). It is held to the rules about silencing errors; its catch clauses
+# count by recording a failed result, which the catch rule does not read.
+$ToolRatchetCases = @(@{ file = 'tools/Remove-LabCycle.ps1'; path = (Join-Path $RepoRoot 'tools' 'Remove-LabCycle.ps1') })
+
 BeforeAll {
+    # What the ratchet's readers share: the values that silence an error, and how a parameter
+    # name and a literal value are read from the syntax tree.
+    $script:SilentValue = '^(SilentlyContinue|Ignore|0|4)$'
+
+    # ErrorAction, any unambiguous prefix of it (-ErrorA...), or its alias EA.
+    function Test-RatchetErrorActionName {
+        param([string]$Name)
+        $Name -eq 'EA' -or ($Name.Length -ge 6 -and 'ErrorAction'.StartsWith($Name, [System.StringComparison]::OrdinalIgnoreCase))
+    }
+
+    # The literal value of an argument or a hashtable entry, or $null when it is not a literal.
+    function Get-RatchetLiteral {
+        param($Node)
+        switch ($Node) {
+            { $_ -is [System.Management.Automation.Language.PipelineAst] } {
+                if ($_.PipelineElements.Count -eq 1) { return (Get-RatchetLiteral -Node $_.PipelineElements[0]) }
+                return $null
+            }
+            { $_ -is [System.Management.Automation.Language.CommandExpressionAst] } { return (Get-RatchetLiteral -Node $_.Expression) }
+            { $_ -is [System.Management.Automation.Language.ParenExpressionAst] } { return (Get-RatchetLiteral -Node $_.Pipeline) }
+            { $_ -is [System.Management.Automation.Language.ConvertExpressionAst] } { return (Get-RatchetLiteral -Node $_.Child) }
+            { $_ -is [System.Management.Automation.Language.ConstantExpressionAst] } { return [string]$_.Value }
+            { $_ -is [System.Management.Automation.Language.ExpandableStringExpressionAst] } { return $_.Value }
+            { $_ -is [System.Management.Automation.Language.MemberExpressionAst] } { return ($_.Member.Extent.Text -replace '[''"]', '') }
+        }
+        return $null
+    }
+
     # The ratchet's reader. Returns one finding per *-Az* command that is given -ErrorAction
     # SilentlyContinue or Ignore, in any form the parser accepts:
     #   - the parameter as ErrorAction, any unambiguous prefix of it (-ErrorA...), or its alias EA;
@@ -113,29 +160,9 @@ BeforeAll {
         [CmdletBinding()]
         param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
 
-        $silentValue = '^(SilentlyContinue|Ignore|0|4)$'
-        $isErrorActionName = {
-            param([string]$Name)
-            $Name -eq 'EA' -or ($Name.Length -ge 6 -and 'ErrorAction'.StartsWith($Name, [System.StringComparison]::OrdinalIgnoreCase))
-        }
-        # The literal value of an argument or a hashtable entry, or $null when it is not a literal.
-        $valueOf = $null
-        $valueOf = {
-            param($Node)
-            switch ($Node) {
-                { $_ -is [System.Management.Automation.Language.PipelineAst] } {
-                    if ($_.PipelineElements.Count -eq 1) { return (& $valueOf $_.PipelineElements[0]) }
-                    return $null
-                }
-                { $_ -is [System.Management.Automation.Language.CommandExpressionAst] } { return (& $valueOf $_.Expression) }
-                { $_ -is [System.Management.Automation.Language.ParenExpressionAst] } { return (& $valueOf $_.Pipeline) }
-                { $_ -is [System.Management.Automation.Language.ConvertExpressionAst] } { return (& $valueOf $_.Child) }
-                { $_ -is [System.Management.Automation.Language.ConstantExpressionAst] } { return [string]$_.Value }
-                { $_ -is [System.Management.Automation.Language.ExpandableStringExpressionAst] } { return $_.Value }
-                { $_ -is [System.Management.Automation.Language.MemberExpressionAst] } { return ($_.Member.Extent.Text -replace '[''"]', '') }
-            }
-            return $null
-        }
+        $silentValue = $script:SilentValue
+        $isErrorActionName = { param([string]$Name) Test-RatchetErrorActionName -Name $Name }
+        $valueOf = { param($Node) Get-RatchetLiteral -Node $Node }
 
         $ast = [System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$null, [ref]$null)
 
@@ -192,6 +219,192 @@ BeforeAll {
                     Line    = $command.Extent.StartLineNumber
                     Command = $name
                     Text    = ($command.Extent.Text -split "`r?`n")[0].Trim()
+                }
+            }
+        }
+    }
+
+    # The name of a variable without its scope: $script:x, $global:x and ${x} are all 'x'.
+    function Get-RatchetVariableName {
+        param($Node)
+        if ($Node -isnot [System.Management.Automation.Language.VariableExpressionAst]) { return $null }
+        $Node.VariablePath.UserPath -replace '^(global|script|local|private):', ''
+    }
+
+    # The reader for preferences that silence every command at once. Returns one finding per
+    #   - assignment of SilentlyContinue or Ignore (any literal spelling Get-RatchetLiteral reads)
+    #     to $ErrorActionPreference, at any scope ($global:, $script:, ${...}), or a Set-Variable
+    #     call that sets it, by name or by position;
+    #   - $PSDefaultParameterValues entry whose key names ErrorAction (or EA, or a prefix) for a
+    #     command pattern that can match an Az command, and whose value silences it: set by index
+    #     ($PSDefaultParameterValues['*:ErrorAction'] = ...), by member ($x.'*:EA' = ...), by
+    #     .Add(key, value), or in a hashtable literal assigned or added (=, +=) to the variable.
+    # A command pattern can match an Az command when it names '-Az', or matches Get-AzStub or
+    # Remove-AzStub as a wildcard ('*', '*-Az*', 'Get-*', 'Get-Az*'). A value held in another
+    # variable is not resolved.
+    function Find-SilencingPreference {
+        [CmdletBinding()]
+        param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$null, [ref]$null)
+
+        $reachesAz = {
+            param([string]$Key)
+            $command, $parameter = $Key -split ':', 2
+            if (-not $parameter -or -not (Test-RatchetErrorActionName -Name $parameter)) { return $false }
+            if ($command -match '-Az') { return $true }
+            $pattern = [System.Management.Automation.WildcardPattern]::new($command, 'IgnoreCase')
+            return ($pattern.IsMatch('Get-AzStub') -or $pattern.IsMatch('Remove-AzStub'))
+        }
+        $finding = {
+            param($Node, [string]$What)
+            [pscustomobject]@{
+                Line = $Node.Extent.StartLineNumber
+                What = $What
+                Text = ($Node.Extent.Text -split "`r?`n")[0].Trim()
+            }
+        }
+        # The pairs of a hashtable literal an expression holds, or nothing.
+        $pairsOf = {
+            param($Node)
+            while ($Node -and $Node -isnot [System.Management.Automation.Language.HashtableAst]) {
+                $Node = switch ($Node) {
+                    { $_ -is [System.Management.Automation.Language.PipelineAst] } { if ($_.PipelineElements.Count -eq 1) { $_.PipelineElements[0] } }
+                    { $_ -is [System.Management.Automation.Language.CommandExpressionAst] } { $_.Expression }
+                    { $_ -is [System.Management.Automation.Language.ConvertExpressionAst] } { $_.Child }
+                    { $_ -is [System.Management.Automation.Language.ParenExpressionAst] } { $_.Pipeline }
+                    default { $null }
+                }
+            }
+            if ($Node) { $Node.KeyValuePairs }
+        }
+
+        foreach ($assignment in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
+            $left = $assignment.Left
+            if ($left -is [System.Management.Automation.Language.ConvertExpressionAst]) { $left = $left.Child }
+            $leftName = Get-RatchetVariableName -Node $left
+
+            if ($leftName -eq 'ErrorActionPreference' -and (Get-RatchetLiteral -Node $assignment.Right) -match $script:SilentValue) {
+                & $finding $assignment '$ErrorActionPreference'
+            }
+            elseif ($leftName -eq 'PSDefaultParameterValues') {
+                foreach ($pair in @(& $pairsOf $assignment.Right)) {
+                    if ((& $reachesAz (Get-RatchetLiteral -Node $pair.Item1)) -and (Get-RatchetLiteral -Node $pair.Item2) -match $script:SilentValue) {
+                        & $finding $assignment '$PSDefaultParameterValues'
+                    }
+                }
+            }
+            elseif ($left -is [System.Management.Automation.Language.IndexExpressionAst] -or
+                    $left -is [System.Management.Automation.Language.MemberExpressionAst]) {
+                $target = if ($left -is [System.Management.Automation.Language.IndexExpressionAst]) { $left.Target } else { $left.Expression }
+                $key    = if ($left -is [System.Management.Automation.Language.IndexExpressionAst]) { $left.Index } else { $left.Member }
+                if ((Get-RatchetVariableName -Node $target) -eq 'PSDefaultParameterValues' -and
+                    (& $reachesAz (Get-RatchetLiteral -Node $key)) -and (Get-RatchetLiteral -Node $assignment.Right) -match $script:SilentValue) {
+                    & $finding $assignment '$PSDefaultParameterValues'
+                }
+            }
+        }
+
+        foreach ($call in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true)) {
+            if ((Get-RatchetVariableName -Node $call.Expression) -ne 'PSDefaultParameterValues') { continue }
+            if ((Get-RatchetLiteral -Node $call.Member) -ne 'Add' -or @($call.Arguments).Count -ne 2) { continue }
+            if ((& $reachesAz (Get-RatchetLiteral -Node $call.Arguments[0])) -and (Get-RatchetLiteral -Node $call.Arguments[1]) -match $script:SilentValue) {
+                & $finding $call '$PSDefaultParameterValues'
+            }
+        }
+
+        foreach ($command in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+            if ($command.GetCommandName() -notin 'Set-Variable', 'sv') { continue }
+            $named = @{}
+            $positional = [System.Collections.Generic.List[object]]::new()
+            $elements = $command.CommandElements
+            for ($index = 1; $index -lt $elements.Count; $index++) {
+                $element = $elements[$index]
+                if ($element -is [System.Management.Automation.Language.CommandParameterAst]) {
+                    $value = $element.Argument
+                    if (-not $value -and $index + 1 -lt $elements.Count -and
+                        $elements[$index + 1] -isnot [System.Management.Automation.Language.CommandParameterAst]) {
+                        $index++
+                        $value = $elements[$index]
+                    }
+                    foreach ($parameter in 'Name', 'Value') {
+                        if ($element.ParameterName.Length -ge 2 -and $parameter.StartsWith($element.ParameterName, [System.StringComparison]::OrdinalIgnoreCase)) { $named[$parameter] = $value }
+                    }
+                }
+                else { $positional.Add($element) }
+            }
+            $nameNode  = if ($named.ContainsKey('Name')) { $named.Name } elseif ($positional.Count -ge 1) { $positional[0] }
+            $valueNode = if ($named.ContainsKey('Value')) { $named.Value } elseif ($named.ContainsKey('Name') -and $positional.Count -ge 1) { $positional[0] } elseif ($positional.Count -ge 2) { $positional[1] }
+            if ((Get-RatchetLiteral -Node $nameNode) -eq 'ErrorActionPreference' -and (Get-RatchetLiteral -Node $valueNode) -match $script:SilentValue) {
+                & $finding $command '$ErrorActionPreference'
+            }
+        }
+    }
+
+    # What a catch clause must do with the error of an Az command it caught: tell a not-found from
+    # a failure (Test-LabNotFoundError), count it - an increment of, or an assignment to,
+    # $script:cleanupFailures, the counter every converted cleanup keeps and exits 1 on - or end
+    # the run (throw, exit). Read anywhere in the clause's body, nested blocks included. No
+    # cleanup has a reporting helper that counts (a Write-LabError), so none is accepted.
+    function Test-CatchHandlesError {
+        param([Parameter(Mandatory)][System.Management.Automation.Language.StatementBlockAst]$Body)
+        $isCounter = { param($Node) (Get-RatchetVariableName -Node $Node) -eq 'cleanupFailures' }
+        [bool]$Body.Find({
+            param($node)
+            ($node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Test-LabNotFoundError') -or
+            $node -is [System.Management.Automation.Language.ThrowStatementAst] -or
+            $node -is [System.Management.Automation.Language.ExitStatementAst] -or
+            ($node -is [System.Management.Automation.Language.UnaryExpressionAst] -and
+                $node.TokenKind -in 'PlusPlus', 'PostfixPlusPlus' -and (& $isCounter $node.Child)) -or
+            ($node -is [System.Management.Automation.Language.AssignmentStatementAst] -and (& $isCounter $node.Left))
+        }, $true)
+    }
+
+    # The reader for catch clauses. Returns one finding per catch clause that catches the error of
+    # a *-Az* command and does not handle it (Test-CatchHandlesError). The command's nearest
+    # enclosing try is the one whose catch clauses see its error; an inner try that handles it
+    # hides it from an outer one. Not followed: a command in a function body (its caller's try is
+    # unknown to the parser), and a lookup inside Invoke-LabLookup's -Lookup block, whose error
+    # Invoke-LabLookup itself handles and counts. Nor Invoke-AzRestMethod: it reports an HTTP
+    # failure through StatusCode and throws only when no response came back, so a script routes
+    # both through one status check after the call - Lab 3.4 records the error in its catch and
+    # counts it there - and that flow is beyond what this reader follows.
+    function Find-UnhandledAzCatch {
+        [CmdletBinding()]
+        param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$null, [ref]$null)
+        $reported = @{}
+
+        foreach ($command in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+            $name = $command.GetCommandName()
+            if (-not $name -or $name -notmatch '^\w+-Az\w' -or $name -eq 'Invoke-AzRestMethod') { continue }
+
+            $try = $null
+            $child = $command
+            for ($parent = $command.Parent; $parent; $parent = $parent.Parent) {
+                if ($parent -is [System.Management.Automation.Language.FunctionDefinitionAst]) { break }
+                if ($parent -is [System.Management.Automation.Language.ScriptBlockExpressionAst]) {
+                    $owner = $parent.Parent
+                    if ($owner -is [System.Management.Automation.Language.CommandParameterAst]) { $owner = $owner.Parent }
+                    if ($owner -is [System.Management.Automation.Language.CommandAst] -and $owner.GetCommandName() -eq 'Invoke-LabLookup') { break }
+                }
+                if ($parent -is [System.Management.Automation.Language.TryStatementAst] -and $child -eq $parent.Body) {
+                    $try = $parent
+                    break
+                }
+                $child = $parent
+            }
+            if (-not $try) { continue }
+
+            foreach ($clause in $try.CatchClauses) {
+                $key = $clause.Extent.StartOffset
+                if ($reported.ContainsKey($key) -or (Test-CatchHandlesError -Body $clause.Body)) { continue }
+                $reported[$key] = $true
+                [pscustomobject]@{
+                    Line    = $clause.Extent.StartLineNumber
+                    Command = $name
+                    Text    = ($clause.Extent.Text -split "`r?`n")[0].Trim()
                 }
             }
         }
@@ -394,6 +607,105 @@ Describe 'Lab cleanup lookups - the ratchet reads every way to silence a lookup'
     }
 }
 
+Describe 'Lab cleanup lookups - the ratchet reads a preference that silences every command' {
+
+    It 'flags <case>' -ForEach @(
+        @{ case = '$ErrorActionPreference, quoted';          text = '$ErrorActionPreference = ''SilentlyContinue''' }
+        @{ case = '$ErrorActionPreference at global scope';  text = '$global:ErrorActionPreference = ''Ignore''' }
+        @{ case = '$ErrorActionPreference by number';        text = '$script:ErrorActionPreference = 0' }
+        @{ case = '${ErrorActionPreference} and the enum';   text = '${ErrorActionPreference} = [System.Management.Automation.ActionPreference]::SilentlyContinue' }
+        @{ case = '$ErrorActionPreference in a function';    text = 'function Find-It { $ErrorActionPreference = ''SilentlyContinue''; Get-AzVM -Name x }' }
+        @{ case = '$ErrorActionPreference in a scriptblock'; text = '$lookup = { $ErrorActionPreference = ''Ignore''; Get-AzVM -Name x }' }
+        @{ case = 'Set-Variable by name';                    text = 'Set-Variable -Name ErrorActionPreference -Value SilentlyContinue' }
+        @{ case = 'Set-Variable by position';                text = 'Set-Variable ErrorActionPreference Ignore -Scope Global' }
+        @{ case = 'a default for every command';             text = '$PSDefaultParameterValues[''*:ErrorAction''] = ''SilentlyContinue''' }
+        @{ case = 'a default for every Az command';          text = '$PSDefaultParameterValues[''*-Az*:ErrorAction''] = ''Ignore''' }
+        @{ case = 'a default by the EA alias, global';       text = '$global:PSDefaultParameterValues[''Get-Az*:EA''] = ''SilentlyContinue''' }
+        @{ case = 'a default for every getter, as a member'; text = '$PSDefaultParameterValues.''Get-*:ErrorAction'' = ''SilentlyContinue''' }
+        @{ case = 'a default for one Az command';            text = '$PSDefaultParameterValues[''Get-AzVM:ErrorAction''] = 4' }
+        @{ case = 'a hashtable literal assigned';            text = '$PSDefaultParameterValues = @{ ''*:ErrorAction'' = ''SilentlyContinue'' }' }
+        @{ case = 'a hashtable literal added';               text = '$PSDefaultParameterValues += @{ ''Remove-Az*:ErrorAction'' = ''Ignore'' }' }
+        @{ case = 'the Add method';                          text = '$PSDefaultParameterValues.Add(''*:ErrorAction'', ''SilentlyContinue'')' }
+    ) {
+        @(Find-SilencingPreference -Text $text).Count | Should -Be 1
+    }
+
+    It 'does not flag <case>' -ForEach @(
+        @{ case = '$ErrorActionPreference = Stop';          text = '$ErrorActionPreference = ''Stop''' }
+        @{ case = '$ErrorActionPreference = Continue';      text = '$ErrorActionPreference = ''Continue''' }
+        @{ case = 'another preference';                     text = '$WarningPreference = ''SilentlyContinue''' }
+        @{ case = 'another variable';                       text = '$preference = ''SilentlyContinue''' }
+        @{ case = 'a comment';                              text = '# $ErrorActionPreference = ''SilentlyContinue''' }
+        @{ case = 'a string';                               text = 'Write-Host ''$PSDefaultParameterValues["*:ErrorAction"] = "Ignore"''' }
+        @{ case = 'Set-Variable on another variable';       text = 'Set-Variable -Name other -Value SilentlyContinue' }
+        @{ case = 'a default that stops';                   text = '$PSDefaultParameterValues[''*:ErrorAction''] = ''Stop''' }
+        @{ case = 'a default for a command that is not Az'; text = '$PSDefaultParameterValues[''Remove-Item:ErrorAction''] = ''SilentlyContinue''' }
+        @{ case = 'a default for another parameter';        text = '$PSDefaultParameterValues[''*:ErrorVariable''] = ''SilentlyContinue''' }
+        @{ case = 'a hashtable without the key';            text = '$PSDefaultParameterValues = @{ ''*:Verbose'' = ''SilentlyContinue'' }' }
+    ) {
+        @(Find-SilencingPreference -Text $text).Count | Should -Be 0
+    }
+}
+
+Describe 'Lab cleanup lookups - the ratchet reads a catch that swallows an Az error' {
+
+    It 'flags <case>' -ForEach @(
+        @{ case = 'a failed delete read as "may not exist" (Lab 3.1 before #297)'
+           text = 'try { Remove-AzResourceGroup -Name x -Force -ErrorAction Stop } catch { Write-Host "[FAIL] Could not delete x. It may not exist." }' }
+        @{ case = 'any error read as "not found" (Lab 4.4 before #297)'
+           text = 'try { $sa = Get-AzStorageAccount -Name x -ErrorAction Stop } catch { Write-Host "[INFO] Container not found or already removed." }' }
+        @{ case = 'an error turned into a local flag'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { $found = $false }' }
+        @{ case = 'a typed catch clause'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch [System.Exception] { Write-Warning "$_" }' }
+        @{ case = 'the one clause of two that does not count'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch [System.Net.WebException] { $script:cleanupFailures++ } catch { Write-Host "$_" }' }
+        @{ case = 'a lookup nested in a block inside the try'
+           text = 'try { if ($x) { foreach ($n in $names) { Get-AzVM -Name $n -ErrorAction Stop } } } catch { }' }
+        @{ case = 'a lookup in a pipeline block inside the try'
+           text = 'try { $names | ForEach-Object { Get-AzVM -Name $_ -ErrorAction Stop } } catch { Write-Host "$_" }' }
+        @{ case = 'a counter that is not the cleanup''s'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { $failures++ }' }
+        @{ case = 'several Az commands in one try, reported once'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop; Remove-AzVM -Name x -Force -ErrorAction Stop } catch { Write-Host "$_" }' }
+        @{ case = 'a failed change printed and not counted (Lab 4.4''s firewall revert before #297)'
+           text = 'try { Update-AzStorageAccountNetworkRuleSet -Name x -DefaultAction Allow -ErrorAction Stop } catch { Write-Host "[ERROR] Failed to revert firewall." }' }
+    ) {
+        @(Find-UnhandledAzCatch -Text $text).Count | Should -Be 1
+    }
+
+    It 'does not flag <case>' -ForEach @(
+        @{ case = 'a catch that checks Test-LabNotFoundError'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { if (-not (Test-LabNotFoundError -ErrorRecord $_)) { Write-Host "[WARN] $_" } }' }
+        @{ case = 'a catch that counts with ++'
+           text = 'try { Remove-AzVM -Name x -Force -ErrorAction Stop } catch { $script:cleanupFailures++; Write-Host "[ERROR] $_" }' }
+        @{ case = 'a catch that counts with a prefix ++'
+           text = 'try { Remove-AzVM -Name x -Force -ErrorAction Stop } catch { ++$script:cleanupFailures }' }
+        @{ case = 'a catch that counts with +='
+           text = 'try { Remove-AzVM -Name x -Force -ErrorAction Stop } catch { $script:cleanupFailures += 1 }' }
+        @{ case = 'a catch that counts in a nested block'
+           text = 'try { Remove-AzVM -Name x -Force -ErrorAction Stop } catch { if ($_) { $script:cleanupFailures++ } }' }
+        @{ case = 'a catch that throws'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { throw }' }
+        @{ case = 'a catch that exits'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { $Host.SetShouldExit(1); exit 1 }' }
+        @{ case = 'a try around a command that is not Az'
+           text = 'try { Remove-Item x -ErrorAction Stop } catch { }' }
+        @{ case = 'a lookup inside Invoke-LabLookup, which counts it'
+           text = 'try { $r = Invoke-LabLookup -Target x -Lookup { Get-AzVM -Name x -ErrorAction Stop } } catch { Write-Host "$_" }' }
+        @{ case = 'an inner try that handles the error'
+           text = 'try { try { Get-AzVM -Name x -ErrorAction Stop } catch { $script:cleanupFailures++ } } catch { Write-Host "$_" }' }
+        @{ case = 'Invoke-AzRestMethod, whose failure is checked after the call'
+           text = 'try { $response = Invoke-AzRestMethod -Method DELETE -Path $p -ErrorAction Stop } catch { $problem = "no response: $_" }' }
+        @{ case = 'a try with only a finally'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } finally { Write-Host done }' }
+        @{ case = 'a comment'
+           text = '# try { Get-AzVM -Name x } catch { }' }
+    ) {
+        @(Find-UnhandledAzCatch -Text $text).Count | Should -Be 0
+    }
+}
+
 Describe 'Lab cleanup lookups - no cleanup reads a failed lookup as "absent"' {
 
     It 'checks every cleanup discovery found' -ForEach @(@{ count = $RatchetCases.Count; expected = $ExpectedHelperFile.Count }) {
@@ -401,9 +713,21 @@ Describe 'Lab cleanup lookups - no cleanup reads a failed lookup as "absent"' {
         $count | Should -BeGreaterOrEqual $expected
     }
 
-    It "'<file>' gives no *-Az* command -ErrorAction SilentlyContinue or Ignore" -ForEach $RatchetCases {
+    It "'<file>' gives no *-Az* command -ErrorAction SilentlyContinue or Ignore" -ForEach ($RatchetCases + $ToolRatchetCases) {
         $hits = @(Find-SilencedAzCommand -Text (Get-Content -Raw -LiteralPath $path) |
             ForEach-Object { "line $($_.Line): $($_.Text)" })
         $hits | Should -BeNullOrEmpty -Because "a lookup that fails would read as 'absent'; route it through Invoke-LabLookup (#255, #290)"
+    }
+
+    It "'<file>' does not silence every command through `$ErrorActionPreference or `$PSDefaultParameterValues" -ForEach ($RatchetCases + $ToolRatchetCases) {
+        $hits = @(Find-SilencingPreference -Text (Get-Content -Raw -LiteralPath $path) |
+            ForEach-Object { "line $($_.Line): $($_.Text)" })
+        $hits | Should -BeNullOrEmpty -Because "a preference silences every lookup at once, and each one that fails reads as 'absent' (#290)"
+    }
+
+    It "'<file>' has no catch clause that swallows the error of an Az command" -ForEach $RatchetCases {
+        $hits = @(Find-UnhandledAzCatch -Text (Get-Content -Raw -LiteralPath $path) |
+            ForEach-Object { "line $($_.Line): $($_.Text) (catches $($_.Command))" })
+        $hits | Should -BeNullOrEmpty -Because "a catch that neither checks Test-LabNotFoundError nor counts the error, throws or exits reads a failure as 'not there' (#290)"
     }
 }
