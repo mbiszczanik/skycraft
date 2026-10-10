@@ -2323,7 +2323,7 @@ class ResourceTests(RunnerTestCase):
         self.assertEqual((screenshot["outcome"], screenshot["category"]), ("match", None))   # the images are not stale
 
     def test_run_step_opens_the_picker_of_a_field_before_its_chain(self) -> None:
-        # 'Destination: **Send to Log Analytics workspace** -> `law`' (5.1.7, #250): the field's
+        # 'Destination: **Send to Log Analytics workspace** -> `law`' (#250): the field's
         # picker first, then the chain; a resource at the chain's start is inside the picker, so
         # it is looked for on screen only, never in the Portal's search.
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())

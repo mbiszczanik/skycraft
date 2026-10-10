@@ -48,11 +48,12 @@ asked about it: when it is not found, the step fails with blocking drift in cate
 'missing-resource' and no proposed edit, as an earlier step, another lab or the view the run is
 on is at fault, not the guide's name (issue #199). Its screenshot is not marked stale for it.
 
-A navigation item with a "field" (parse.py, issue #250: 'Destination: **Send to Log Analytics
-workspace** -> `platform-skycraft-swc-law`') picks that field's value through its chain: the
-field is looked up as a field is and clicked, never filled, which opens its picker; it is asked
-about like any label when it is not found. The chain's labels and resource names follow; a
-resource at the chain's start is listed in the picker, so it is looked for on screen only.
+A navigation item with a "field" (parse.py, issue #250: 'Flow log type: **Virtual network** ->
+**+ Select target resource** -> ... -> `prod-skycraft-swc-vnet`') picks that field's value
+through its chain: the field is looked up as a field is and clicked, never filled, which opens
+its picker; it is asked about like any label when it is not found. The chain's labels and
+resource names follow; a resource at the chain's start is listed in the picker, so it is looked
+for on screen only.
 
 When a step does not go through, the person chooses: c, finish it by hand and continue; s, skip
 this step and continue with the next one, giving the reason, which the summary lists under
