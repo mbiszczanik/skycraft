@@ -79,14 +79,45 @@ BeforeAll {
     #                         and the getters report them not found, as the real ones do
     #   SKYCRAFT_STUB_BARE    '1' keeps the groups, the VM and the storage account, but none of the
     #                         lab's own objects
+    #   SKYCRAFT_STUB_TWO     '1' puts a second storage account in the platform group, listed
+    #                         after the first; the lab's diagnostic setting is on the second one
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled)
     #   SKYCRAFT_STUB_FAIL    '<command>:<name>,...' makes one deletion throw
-    # A lookup is named after its command; a deletion is logged as '<command>:<name>'.
+    # A lookup is named after its command ('Get-AzDiagnosticSetting:<account>' for the diagnostic
+    # settings); a deletion is logged as '<command>:<name>' ('<account>/<name>' for a setting).
+    # The bare subscription's data collection rule is reported missing the way Az.Resources can
+    # report it: a status-only 404 (an exception whose inner CloudException carries the 404
+    # response) with no not-found wording.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:SubscriptionId = '00000000-0000-0000-0000-000000000000'
 $script:VmId = "/subscriptions/$($script:SubscriptionId)/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Compute/virtualMachines/dev-skycraft-swc-auth-vm"
-$script:StorageId = "/subscriptions/$($script:SubscriptionId)/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/platformskycraftswcsa"
+$script:StorageRoot = "/subscriptions/$($script:SubscriptionId)/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts"
+
+# The shape of a status-only 404 from Az.Resources: ResourceManagerCloudException around the SDK's
+# CloudException, whose Response carries the status. Neither message says "not found".
+if (-not ('SkyCraftLab51Stub.CloudException' -as [type])) {
+    Add-Type -TypeDefinition @"
+namespace SkyCraftLab51Stub
+{
+    public class CloudException : System.Exception
+    {
+        public CloudException(string message) : base(message) { }
+        public object Response { get; set; }
+    }
+    public class ResourceManagerCloudException : System.Exception
+    {
+        public ResourceManagerCloudException(string message, System.Exception inner) : base(message, inner) { }
+    }
+}
+"@
+}
+
+function Write-StubStatus404 {
+    $inner = [SkyCraftLab51Stub.CloudException]::new('Long running operation failed.')
+    $inner.Response = [pscustomobject]@{ StatusCode = [System.Net.HttpStatusCode]::NotFound }
+    Write-Error -Exception ([SkyCraftLab51Stub.ResourceManagerCloudException]::new('The request failed.', $inner)) -ErrorId 'StubCloudError'
+}
 
 function Write-StubCall {
     param([string]$Name)
@@ -193,7 +224,7 @@ function Get-AzResource {
     param([string]$ResourceId)
     if (Invoke-StubLookup -Name 'Get-AzResource' -Gone 'group') { return }
     if (Test-StubBare) {
-        Write-Error -ErrorId 'ResourceNotFound' -Message "The Resource 'Microsoft.Insights/dataCollectionRules/skycraft-vm-dcr' under resource group 'platform-skycraft-swc-rg' was not found."
+        Write-StubStatus404
         return
     }
     [pscustomobject]@{ Name = ($ResourceId -split '/')[-1]; ResourceId = $ResourceId }
@@ -222,20 +253,31 @@ function Get-AzStorageAccount {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$Name)
     if (Invoke-StubLookup -Name 'Get-AzStorageAccount' -Gone 'group') { return }
-    [pscustomobject]@{ StorageAccountName = 'platformskycraftswcsa'; Id = $script:StorageId }
+    [pscustomobject]@{ StorageAccountName = 'platformskycraftswcsa'; Id = "$($script:StorageRoot)/platformskycraftswcsa" }
+    if ($env:SKYCRAFT_STUB_TWO -eq '1') {
+        [pscustomobject]@{ StorageAccountName = 'platformskycraftswcsb'; Id = "$($script:StorageRoot)/platformskycraftswcsb" }
+    }
 }
 
 function Get-AzDiagnosticSetting {
     [CmdletBinding()]
     param([string]$ResourceId, [string]$Name)
-    if (Invoke-StubLookup -Name 'Get-AzDiagnosticSetting' -Gone 'resource') { return }
+    $account = ($ResourceId -split '/')[-3]
+    if (Invoke-StubLookup -Name "Get-AzDiagnosticSetting:$account" -Gone 'resource') { return }
+    # With two accounts the lab's setting is on the second; the first carries only another one.
+    $onThisAccount = if ($env:SKYCRAFT_STUB_TWO -eq '1') { $account -eq 'platformskycraftswcsb' } else { $true }
+    if (-not $onThisAccount) {
+        $items = @([pscustomobject]@{ Name = 'unrelated-diag' })
+        if ($Name) { $items = @($items | Where-Object { $_.Name -eq $Name }) }
+        return $items
+    }
     Select-StubItem -Own 'skycraft-storage-diag' -Other 'unrelated-diag' -Name $Name
 }
 
 function Remove-AzDiagnosticSetting {
     [CmdletBinding()]
     param([string]$ResourceId, [string]$Name)
-    Invoke-StubRemoval -Command 'Remove-AzDiagnosticSetting' -Name $Name
+    Invoke-StubRemoval -Command 'Remove-AzDiagnosticSetting' -Name "$(($ResourceId -split '/')[-3])/$Name"
 }
 
 function Get-AzOperationalInsightsWorkspace {
@@ -261,7 +303,8 @@ function Remove-AzOperationalInsightsWorkspace {
             [string[]]$Lookup = @(),
             [string[]]$ArgumentList = @('-Force'),
             [switch]$Empty,
-            [switch]$Bare
+            [switch]$Bare,
+            [switch]$Two
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
@@ -272,6 +315,7 @@ function Remove-AzOperationalInsightsWorkspace {
             SKYCRAFT_STUB_LOOKUP = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
             SKYCRAFT_STUB_BARE   = if ($Bare) { '1' } else { '0' }
+            SKYCRAFT_STUB_TWO    = if ($Two) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG    = $logPath
         }
 
@@ -305,12 +349,14 @@ function Remove-AzOperationalInsightsWorkspace {
     $script:VmDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzVM=denied'
     $script:StepsFail = Invoke-CleanupScript -Stub $script:Stub -Fail @(
         'Remove-AzMetricAlertRuleV2:skycraft-cpu-alert'
-        'Remove-AzDiagnosticSetting:skycraft-storage-diag'
+        'Remove-AzDiagnosticSetting:platformskycraftswcsa/skycraft-storage-diag'
     )
+    $script:TwoAccounts       = Invoke-CleanupScript -Stub $script:Stub -Two
+    $script:TwoAccountsDenied = Invoke-CleanupScript -Stub $script:Stub -Two -Lookup 'Get-AzDiagnosticSetting:platformskycraftswcsa=denied'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:Bare, $script:WhatIf, $script:LookupsFail, $script:VmDenied,
-        $script:StepsFail
+        $script:StepsFail, $script:TwoAccounts, $script:TwoAccountsDenied
     )
 }
 
@@ -343,7 +389,7 @@ Describe 'Lab 5.1 Remove-LabResource.ps1 - removes what the lab created' {
         $calls | Should -Contain 'Remove-AzDataCollectionRuleAssociation:skycraft-vminsights-dcr-assoc'
         $calls | Should -Contain 'Remove-AzResource:skycraft-vm-dcr'
         $calls | Should -Contain 'Remove-AzActionGroup:skycraft-ops-ag'
-        $calls | Should -Contain 'Remove-AzDiagnosticSetting:skycraft-storage-diag'
+        $calls | Should -Contain 'Remove-AzDiagnosticSetting:platformskycraftswcsa/skycraft-storage-diag'
         $calls | Should -Contain 'Remove-AzOperationalInsightsWorkspace:platform-skycraft-swc-law'
     }
 
@@ -367,6 +413,35 @@ Describe 'Lab 5.1 Remove-LabResource.ps1 - an absent object is not a failure' {
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output   | Should -Match 'No Lab 5\.1 resources found to delete'
         @($run.Calls | Where-Object { $_ -match $script:ChangePattern }) | Should -BeNullOrEmpty
+    }
+
+    It 'reads a status-only 404 for the data collection rule as absent, not as a failed lookup' {
+        # The bare subscription's rule is reported missing with no not-found wording at all: only
+        # the 404 on the inner CloudException's response says so.
+        $script:Bare.Calls  | Should -Contain 'Get-AzResource'
+        $script:Bare.Output | Should -Not -Match 'Could not look up data collection rule'
+    }
+}
+
+Describe 'Lab 5.1 Remove-LabResource.ps1 - every storage account in the platform group is checked' {
+
+    It 'removes the diagnostic setting from the account it is on, not only the first one listed' {
+        $run = $script:TwoAccounts
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls    | Should -Contain 'Get-AzDiagnosticSetting:platformskycraftswcsa'
+        $run.Calls    | Should -Contain 'Get-AzDiagnosticSetting:platformskycraftswcsb'
+        $run.Calls    | Should -Contain 'Remove-AzDiagnosticSetting:platformskycraftswcsb/skycraft-storage-diag'
+        @($run.Calls | Where-Object { $_ -like 'Remove-AzDiagnosticSetting:platformskycraftswcsa/*' }) | Should -BeNullOrEmpty
+    }
+
+    It 'counts an account whose settings could not be looked up, still checks the next, and keeps the workspace' {
+        $run = $script:TwoAccountsDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Match "\[ERROR\] Could not look up the diagnostic settings of 'platformskycraftswcsa'"
+        $run.Output   | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls    | Should -Contain 'Remove-AzDiagnosticSetting:platformskycraftswcsb/skycraft-storage-diag'
+        $run.Calls    | Should -Not -Contain 'Remove-AzOperationalInsightsWorkspace:platform-skycraft-swc-law'
+        $run.Output   | Should -Match "Kept Log Analytics Workspace 'platform-skycraft-swc-law'"
     }
 }
 
@@ -396,7 +471,7 @@ Describe 'Lab 5.1 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
     }
 
     It 'still removes what it could see and nothing depends on' {
-        $script:LookupsFail.Calls | Should -Contain 'Remove-AzDiagnosticSetting:skycraft-storage-diag'
+        $script:LookupsFail.Calls | Should -Contain 'Remove-AzDiagnosticSetting:platformskycraftswcsa/skycraft-storage-diag'
     }
 
     It 'keeps the rule and the workspace when the VM could not be looked up' {

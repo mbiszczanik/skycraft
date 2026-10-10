@@ -233,29 +233,30 @@ if ($agLookup.Value | Where-Object { $_.Name -eq $actionGroupName }) {
     Write-Host "  - Action Group: $actionGroupName" -ForegroundColor Gray
 }
 
-# Storage Diagnostic Settings (scoped to blobServices/default) - listed and picked by name
+# Storage Diagnostic Settings (scoped to blobServices/default) - listed and picked by name, on
+# every account in the platform group: the group can hold more than the lab's account, and the
+# first one listed need not be the one the setting is on.
 $storageLookup = Invoke-LabLookup -Target "the storage accounts in '$platformRg'" -Lookup {
     Get-AzStorageAccount -ResourceGroupName $platformRg -ErrorAction Stop
 }
-$storageAcct = $storageLookup.Value | Select-Object -First 1
 if ($storageLookup.Failed) {
     if (-not $keepWorkspaceReason) {
         $keepWorkspaceReason = "the storage accounts in '$platformRg' could not be looked up, and diagnostic setting '$diagSettingName' may still send to the workspace"
     }
 }
-elseif ($storageAcct) {
+foreach ($storageAcct in $storageLookup.Value) {
     $blobServiceId = "$($storageAcct.Id)/blobServices/default"
     $diagLookup = Invoke-LabLookup -Target "the diagnostic settings of '$($storageAcct.StorageAccountName)'" -Lookup {
         Get-AzDiagnosticSetting -ResourceId $blobServiceId -ErrorAction Stop
     }
     if ($diagLookup.Failed) {
         if (-not $keepWorkspaceReason) {
-            $keepWorkspaceReason = "diagnostic setting '$diagSettingName' could not be looked up, and it may still send to the workspace"
+            $keepWorkspaceReason = "diagnostic setting '$diagSettingName' on '$($storageAcct.StorageAccountName)' could not be looked up, and it may still send to the workspace"
         }
     }
     elseif ($diagLookup.Value | Where-Object { $_.Name -eq $diagSettingName }) {
-        $resourcesToDelete.Add(@{ Type = 'StorageDiag'; Name = $diagSettingName; BlobServiceId = $blobServiceId })
-        Write-Host "  - Storage Diagnostic Settings: $diagSettingName" -ForegroundColor Gray
+        $resourcesToDelete.Add(@{ Type = 'StorageDiag'; Name = $diagSettingName; BlobServiceId = $blobServiceId; Account = $storageAcct.StorageAccountName })
+        Write-Host "  - Storage Diagnostic Settings: $diagSettingName (on $($storageAcct.StorageAccountName))" -ForegroundColor Gray
     }
 }
 
@@ -350,17 +351,17 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'ActionGroup' }) 
 
 # 5. Storage Diagnostic Settings
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'StorageDiag' }) {
-    if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Storage Diagnostic Settings')) {
-        Write-Host "  Deleting Storage Diagnostic Settings: $($r.Name)..." -ForegroundColor Gray
+    if ($PSCmdlet.ShouldProcess("$($r.Account)/$($r.Name)", 'Remove Storage Diagnostic Settings')) {
+        Write-Host "  Deleting Storage Diagnostic Settings: $($r.Name) (on $($r.Account))..." -ForegroundColor Gray
         try {
             Remove-AzDiagnosticSetting -ResourceId $r.BlobServiceId -Name $r.Name -ErrorAction Stop | Out-Null
             Write-Host "  ✓ Deleted" -ForegroundColor Green
         } catch {
             $script:cleanupFailures++
             if (-not $keepWorkspaceReason) {
-                $keepWorkspaceReason = "diagnostic setting '$($r.Name)' could not be deleted, and it still sends to the workspace"
+                $keepWorkspaceReason = "diagnostic setting '$($r.Name)' on '$($r.Account)' could not be deleted, and it still sends to the workspace"
             }
-            Write-Host "  [ERROR] Could not delete Storage Diagnostic Settings '$($r.Name)': $_" -ForegroundColor Red
+            Write-Host "  [ERROR] Could not delete Storage Diagnostic Settings '$($r.Name)' on '$($r.Account)': $_" -ForegroundColor Red
         }
     }
 }
