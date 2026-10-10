@@ -17,7 +17,9 @@
       instruction or holds a bracket token is marked literal: false (#202);
       Name | Value and Tag | Value tables become tags; the images a step references are collected.
       A list after 'verify:' or after an Expected Result ending in a colon holds checks for the
-      Expected Result, not steps (#224; pinned on labs 2.2 and 4.1, rules in test_parse.py).
+      Expected Result, not steps (#224; pinned on labs 2.2 and 4.1, rules in test_parse.py), and
+      so does a list or a form table after a line that starts with 'Verify' or 'Confirm' and
+      ends in a colon (#246; pinned on labs 2.2, 3.2, 4.1 and 5.2).
       A chain step that is one code span is a resource name among the chain's labels, its index
       in "resources" (#199; pinned on labs 3.2, 4.2 and 5.2, rules in test_parse.py).
 
@@ -715,10 +717,56 @@ Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#
 
     It 'reads the list after the Expected Result of step 4.1.2 into its text, not as a Name field' {
         $step = $script:CheckLabs['4.1'].steps | Where-Object id -eq '4.1.2'
-        $step.expected | Should -Be ('Deployment succeeds in 30-60 seconds. Navigate to the resource to verify: ' +
-            'Name: platformskycraftswcsa; Location: Sweden Central; Replication: Geo-redundant storage (GRS); Access tier: Hot')
+        # The checks of the Encryption table follow (#246, pinned below).
+        $step.expected.StartsWith('Deployment succeeds in 30-60 seconds. Navigate to the resource to verify: ' +
+            'Name: platformskycraftswcsa; Location: Sweden Central; Replication: Geo-redundant storage (GRS); Access tier: Hot;',
+            [System.StringComparison]::Ordinal) | Should -BeTrue
         @($step.items | Where-Object { $_.kind -eq 'field' -and $_.label -ceq 'Name' }) | Should -BeNullOrEmpty
         @($step.items)[-1].labels | Should -Be @('Create')
+    }
+}
+
+Describe 'parse.py - labs 2.2, 3.2, 4.1 and 5.2, Verify and Confirm introduce checks (#246)' {
+    BeforeAll {
+        $script:IntroLabs = @{}
+        foreach ($guide in 'module-2-networking/2.2-secure-access/lab-guide-2.2.md',
+                           'module-3-compute/3.2-virtual-machines/lab-guide-3.2.md',
+                           'module-4-storage/4.1-storage-accounts/lab-guide-4.1.md',
+                           'module-5-monitoring-maintenance/5.2-business-continuity/lab-guide-5.2.md') {
+            $lab = [regex]::Match($guide, 'lab-guide-(\d+\.\d+)\.md$').Groups[1].Value
+            $out = Join-Path $TestDrive "intro-$lab.json"
+            & $script:Python $script:Parser (Join-Path $script:RepoRoot $guide) --out $out --repo-root $script:RepoRoot
+            $script:IntroLabs[$lab] = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+        }
+    }
+
+    It 'checks the Encryption table of step 4.1.2 instead of filling it, and still clicks the Encryption tab' {
+        $step = $script:IntroLabs['4.1'].steps | Where-Object id -eq '4.1.2'
+        @($step.items | Where-Object { $_.kind -eq 'field' -and $_.line -ge 258 -and $_.line -le 264 }) | Should -BeNullOrEmpty
+        @($step.items | Where-Object line -eq 258).labels | Should -Be @('Encryption')
+        $step.expected | Should -Be ('Deployment succeeds in 30-60 seconds. Navigate to the resource to verify: ' +
+            'Name: platformskycraftswcsa; Location: Sweden Central; Replication: Geo-redundant storage (GRS); Access tier: Hot; ' +
+            'Encryption type: Microsoft-managed keys (MMK); Enable support for customer-managed keys: Blobs and files only; ' +
+            'Enable infrastructure encryption: ❌ Disabled')
+    }
+
+    It 'reads step <id> as <labels> and what it introduces with Verify or Confirm into its Expected Result' -ForEach @(
+        # 'Confirm **Service endpoints** shows:' names the setting to read, not a control to click.
+        # 'Microsoft.Storage' is a known misread (#283): line 697's inline 'and confirm **X**' is a click.
+        @{ lab = '2.2'; id = '2.2.21'
+           labels = @('dev-skycraft-swc-vnet', 'Subnets', 'DatabaseSubnet', 'Subnets', 'WorldSubnet', 'Microsoft.Storage', 'prod-skycraft-swc-vnet')
+           expected = 'Database subnets can access Azure SQL and Storage over Microsoft backbone (private routing), and both `WorldSubnet`s carry `Microsoft.Storage` for Lab 4.4. Microsoft.Sql; Microsoft.Storage' }
+        @{ lab = '3.2'; id = '3.2.13'
+           labels = @('Virtual machines', 'Load balancers', 'dev-skycraft-swc-lb', 'Backend pools')
+           expected = 'Both VMs running in different availability zones, connected to respective load balancer backend pools. dev-skycraft-swc-lb-be-auth: 1 VM; dev-skycraft-swc-lb-be-world: 1 VM' }
+        # The alert to look for is not a click.
+        @{ lab = '5.2'; id = '5.2.9'; labels = @('Backup center', 'Alerts')
+           expected = 'Modify policy with shorter retention (0 - Critical) - raised because Deploy-Bicep.ps1 shortens instant-restore retention to 2 days after creating the Enhanced policy. Expected; it is a security alert about the change, not a failure.' }
+    ) {
+        $step = $script:IntroLabs[$lab].steps | Where-Object id -eq $id
+        @($step.items | Where-Object kind -eq 'field') | Should -BeNullOrEmpty
+        @($step.items | ForEach-Object { $_.labels }) | Should -Be $labels
+        $step.expected | Should -Be $expected
     }
 }
 
