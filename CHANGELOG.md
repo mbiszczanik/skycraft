@@ -9,6 +9,27 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0](https://github.com/mbiszczanik/skycraft/compare/v0.14.0...v0.15.0) (2026-10-10)
+
+
+### Features
+
+* **guide-drift:** let the recording skip optional and conceptual steps ([#271](https://github.com/mbiszczanik/skycraft/issues/271)) ([1d24c37](https://github.com/mbiszczanik/skycraft/commit/1d24c37579fa95c8c3abdf8442dd57bb83b735a9)), closes [#200](https://github.com/mbiszczanik/skycraft/issues/200)
+* **guide-drift:** read the first option of a step that has a portal part ([#272](https://github.com/mbiszczanik/skycraft/issues/272)) ([1030a77](https://github.com/mbiszczanik/skycraft/commit/1030a7731f416834d9612cba9d56f7e464edea53)), closes [#201](https://github.com/mbiszczanik/skycraft/issues/201)
+
+
+### Bug Fixes
+
+* **lab-1.1:** fail a Graph sign-in that leaves no context and validate with the lab's consented scopes ([#276](https://github.com/mbiszczanik/skycraft/issues/276)) ([968f2bb](https://github.com/mbiszczanik/skycraft/commit/968f2bb61993c272c09511ca39b7e8ba12c3cb56)), closes [#242](https://github.com/mbiszczanik/skycraft/issues/242)
+* **lab-1.3:** pass the lock check only for the guide's CanNotDelete lock ([#278](https://github.com/mbiszczanik/skycraft/issues/278)) ([3437286](https://github.com/mbiszczanik/skycraft/commit/3437286cbf3d3c617255ab19305671186a4f8a5a)), closes [#258](https://github.com/mbiszczanik/skycraft/issues/258)
+* **network:** stop Lab 2.2 and 3.1 re-runs drifting the estate; delegate AppServiceSubnet everywhere ([#280](https://github.com/mbiszczanik/skycraft/issues/280)) ([6f72f86](https://github.com/mbiszczanik/skycraft/commit/6f72f86025dde7ddc5d4be5e3c782c17a1db3407))
+
+
+### Documentation
+
+* **lab-1.3:** expect the tag policy to deny the untagged resource group ([#269](https://github.com/mbiszczanik/skycraft/issues/269)) ([f316169](https://github.com/mbiszczanik/skycraft/commit/f3161690736b1ec2a505e812673f5fbd891b00b7)), closes [#253](https://github.com/mbiszczanik/skycraft/issues/253)
+* **lab-cycle:** reword the phase 1.2 comment after failed validations stopped blocking dependents ([#267](https://github.com/mbiszczanik/skycraft/issues/267)) ([531d4e2](https://github.com/mbiszczanik/skycraft/commit/531d4e2ef25cfc798ddfc3e0642dd144c05aff88)), closes [#259](https://github.com/mbiszczanik/skycraft/issues/259)
+
 ## [0.14.0](https://github.com/mbiszczanik/skycraft/compare/v0.13.0...v0.14.0) (2026-10-09)
 
 
