@@ -50,9 +50,9 @@ without a browser. Rules (issue #189):
     The checks are not items, so 'Status: **Succeeded**' is never a field to fill; they are
     joined with '; ', markup stripped, and joined to the step's Expected Result, or are its
     Expected Result alone when it has none. The introducing line is read as any other item
-    (a click on **Configuration**, on the wizard's **Encryption** tab), except a line 'Verify
-    **X** shows:' or 'Confirm **X** shows:' (SHOWN_LABEL), whose bold span names the setting
-    to read, not a control to click (2.2.21). A check list is read where items are: one in
+    (a click on **Configuration**, on the wizard's **Encryption** tab), except a list item
+    'Verify **X** shows:' or 'Confirm **X** shows:' (SHOWN_LABEL), whose bold span names the
+    setting to read, not a control to click (2.2.21). A check list is read where items are: one in
     the body of an option that is not read is dropped with it.
   * Checks are joined to an Expected Result text (join_checks) after a space when the text
     ends with '.', '!', '?' or ':' ('Bastion is operational. Status: Succeeded', 2.2.11), and
@@ -162,6 +162,15 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
   * Only 'verify:', 'Verify ...:', 'Confirm ...:' and an Expected Result introduce a check
     list (#224, #246). A list or table after other wording is read as before, and an
     Expected Result ending in a colon takes a list, not a table.
+  * 'Confirm' can also mean pressing OK in a dialog ('Confirm the rotation', 4.1; 'Confirm to
+    overwrite', 4.3), so 'Confirm the deletion:' followed by '- Click **Delete**' would turn
+    the click into a check, and so would 'Verify and set the following:' before a Setting |
+    Value table turn its fields into checks. No guide has either shape today.
+  * A fenced code block between an introduction and a form table is blanked out like any
+    other, so the table after it is still read as checks. No guide has this shape today.
+  * An inline 'and confirm **X**' is read as a click on X: 2.2.21's 'Navigate to **Subnets**
+    → **WorldSubnet** and confirm **Microsoft.Storage**' ends its chain on a value to check
+    (#283).
   * Checks join the step's single Expected Result, which the runner checks at the end of the
     step, though a check list can describe a blade the step then moves on from: 2.3.19 checks
     the Overview and then opens Record sets; 2.3.20 checks the dev load balancer and ends on
@@ -584,7 +593,7 @@ def check_list(body: list[tuple[int, str]], index: int) -> tuple[list[str], int]
     if not parts and ORDERED_ITEM.match(line) and position < len(body):
         current = body[position][1].expandtabs(4)
         if (LIST_ITEM.match(current) and not ORDERED_ITEM.match(current)
-                and indent_of(current) == depth and not EXPECTED.match(current)):
+                and indent_of(current) == depth):     # following_list stops at an Expected Result
             return following_list(body, index + 1)
     return parts, after
 

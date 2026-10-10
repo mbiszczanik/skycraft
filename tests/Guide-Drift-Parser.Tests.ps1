@@ -752,6 +752,7 @@ Describe 'parse.py - labs 2.2, 3.2, 4.1 and 5.2, Verify and Confirm introduce ch
 
     It 'reads step <id> as <labels> and what it introduces with Verify or Confirm into its Expected Result' -ForEach @(
         # 'Confirm **Service endpoints** shows:' names the setting to read, not a control to click.
+        # 'Microsoft.Storage' is a known misread (#283): line 697's inline 'and confirm **X**' is a click.
         @{ lab = '2.2'; id = '2.2.21'
            labels = @('dev-skycraft-swc-vnet', 'Subnets', 'DatabaseSubnet', 'Subnets', 'WorldSubnet', 'Microsoft.Storage', 'prod-skycraft-swc-vnet')
            expected = 'Database subnets can access Azure SQL and Storage over Microsoft backbone (private routing), and both `WorldSubnet`s carry `Microsoft.Storage` for Lab 4.4. Microsoft.Sql; Microsoft.Storage' }
