@@ -25,6 +25,15 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   start_blade          the blade the recording says a step starts on ('"startBlade"', #207), or
                        None when it is not recorded yet
   write_json           writes the recording or the state file atomically
+  one_line             the first line of a text, cut before a Playwright call log (#212)
+  error_text           an exception before scrub: '<type>: <first line>' (#212)
+  only_checkbox_state  whether a value is a check box state and nothing else (#212)
+  typed_secrets        every value the runner types into a password or credential field (#212)
+  mask_secret_values   an accessibility snapshot with the value of a credential field masked (#212)
+  scrub                a free text as a run log keeps it: one line (or every line of an
+                       accessibility tree), secrets, credentials, object ids, tenant data,
+                       other addresses, typed and element values as tokens; scrubbing twice
+                       changes nothing (#212)
 """
 from __future__ import annotations
 
@@ -35,6 +44,7 @@ import re
 import time
 import unicodedata
 from pathlib import Path
+from typing import Callable
 from urllib.parse import unquote, urlsplit
 
 from decide import Candidate
@@ -107,6 +117,34 @@ def fully_decoded(text: str) -> str | None:
     return None
 
 
+# What a run log writes in place of a secret (typed_secrets, a credential), an object id, an
+# e-mail address outside the tenant, a value a Playwright call typed and an element's value (scrub).
+SECRET = "[secret]"
+OBJECT_ID = "<id>"
+EMAIL = "<email>"
+TYPED = "[typed]"
+VALUE = "[value]"
+RUN_LOG_TOKENS = {SECRET, OBJECT_ID, EMAIL, TYPED, VALUE}
+
+
+def sub_outside(pattern: re.Pattern, replacement: str | Callable[[re.Match], str], text: str,
+                protected: re.Pattern) -> str:
+    """`text` with every match of `pattern` replaced by `replacement` (a string, or a function of
+    the match), except inside a match of `protected` (the tokens a redaction writes), so that
+    redacting twice changes nothing more than redacting once. Every token starts and ends with a
+    character that is no letter, digit, '_' or '-', so a pattern's lookarounds read the text
+    beside a token as they would without the split."""
+    def replace(part: str) -> str:
+        return pattern.sub(replacement if callable(replacement) else lambda _: replacement, part)
+
+    pieces, at = [], 0
+    for token in protected.finditer(text):
+        pieces += [replace(text[at:token.start()]), token.group()]
+        at = token.end()
+    pieces.append(replace(text[at:]))
+    return "".join(pieces)
+
+
 class Redactor:
     """Keeps tenant data out of the committed recording, which lives in a public repository.
     The tenant's domain and id become tokens on the way into the recording and are restored on
@@ -155,12 +193,30 @@ class Redactor:
         if len(prefix) >= self.PREFIX_MIN:
             self._pairs.append((re.compile(rf"(?<![\w-]){re.escape(prefix)}(?![\w-])", re.IGNORECASE),
                                 self.PREFIX, prefix))
+        # Its own tokens and those of a run log (scrub), longest first: redact() leaves them alone.
+        tokens = {token for _, token, _ in self._pairs} | RUN_LOG_TOKENS
+        self.tokens = re.compile("|".join(re.escape(t) for t in sorted(tokens, key=len, reverse=True)))
 
     def redact(self, text: str | None) -> str | None:
+        """`text` with tenant data replaced by tokens. A token already in it is left as it is
+        (sub_outside), so redacting a redacted text again changes nothing, even for a tenant
+        named like a token ('tenantname', #212)."""
         if text is None:
             return None
         for pattern, token, _ in self._pairs:
-            text = pattern.sub(token, text)
+            text = sub_outside(pattern, token, text, self.tokens)
+        return text
+
+    def redact_escaped(self, text: str) -> str:
+        """`text` with tenant data written as a regular expression escapes it (re.escape:
+        'contoso\\.onmicrosoft\\.com', 'me@example\\.com', 'Contoso\\ Ltd') replaced by the same
+        tokens: Playwright prints a locator that looks a name up by pattern (matcher,
+        pick_option) with the pattern in the first line of an error (#212). Not restored: a
+        run log only."""
+        for _, token, value in self._pairs:
+            escaped = re.escape(value)
+            if escaped != value:
+                text = sub_outside(re.compile(re.escape(escaped), re.IGNORECASE), token, text, self.tokens)
         return text
 
     def restore(self, text: str | None) -> str | None:
@@ -380,3 +436,161 @@ def field_action(recording: dict, step: dict, item: dict) -> tuple[str, str]:
             and not value_is_literal(value)):
         return ("unresolved" if BRACKET_TOKEN.search(value) else "instruction"), value
     return value_action(value), value
+
+
+# --- what a run log keeps (#212) -------------------------------------------------------------
+
+# Playwright's errors read '<api>: <message>', then '\nCall log:\n' and one line per thing it did
+# (playwright/_impl/_helper.py parse_error, _connection.py format_call_log). The call log holds
+# the element's HTML, a password field's value attribute among it, and the value typed into it.
+CALL_LOG = re.compile(r"\s*Call log:")
+# A value the runner typed, as Playwright names the call: 'fill("...")', also in a first line.
+TYPED_CALL = re.compile(r"""(?P<call>fill|type|press_sequentially|pressSequentially)\("""
+                        r"""(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')""")
+# An element's value attribute, as Playwright prints the element: '<input value="..." .../>',
+# whatever other attributes hold ('aria-label="a > b"').
+VALUE_ATTRIBUTE = re.compile(r"""(?P<head>\svalue=)(?:"[^"]*"|'[^']*'|[^\s>]+)""")
+# A GUID with its hyphens, also percent-encoded ('%2D'), as a Portal address may carry it.
+GUID_ANY = re.compile(r"[0-9a-fA-F]{8}(?:(?:-|%2[dD])[0-9a-fA-F]{4}){3}(?:-|%2[dD])[0-9a-fA-F]{12}")
+# An e-mail address: the signed-in account in the Portal's top bar, a user of another directory.
+# One in the tenant's domain is redacted first ('[tenantdomain]' is no domain here), so it stays
+# findable as 'malfurion.stormrage@[tenantdomain]'.
+# The first character is no quote, so that 'x@example.com' in quotes keeps its opening one.
+EMAIL_ADDRESS = re.compile(r"[A-Za-z0-9._%+-][A-Za-z0-9._%+'-]*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
+# A credential in a connection string or a SAS address: 'AccountKey=...', 'SharedAccessKey=...',
+# 'Password=...', '&sig=...'. No word boundary before the key: what stands before it may be an id
+# or tenant data that scrub replaces later ('<id>sig=' must not read differently on a second pass).
+CREDENTIAL = re.compile(r"""(?P<head>(?:AccountKey|SharedAccessKey|SharedAccessSignature|Password|Pwd|sig)=)"""
+                        r"""[^;&\s"'<>]+""", re.IGNORECASE)
+
+
+def one_line(text: str) -> str:
+    """The first line of `text` with text in it, stripped, cut before a Playwright call log
+    ('Call log:' and all after it). What is left is masked by scrub."""
+    lines = [line.strip() for line in CALL_LOG.split(text, 1)[0].splitlines() if line.strip()]
+    return lines[0] if lines else ""
+
+
+def error_text(error: BaseException) -> str:
+    """An exception as a record's 'observed' keeps it, before scrub: '<type>: <first line>'
+    (one_line), without Playwright's call log; the type alone when the message is empty."""
+    line = one_line(str(error))
+    return f"{type(error).__name__}: {line}" if line else type(error).__name__
+
+
+# A field whose value is a secret, as the Portal labels it: what the runner types into it is never
+# written to a run log, and its value in an accessibility snapshot is masked (mask_secret_values).
+SECRET_FIELD = re.compile(r"password|passphrase|secret|connection string|\bSAS\b|shared access signature"
+                          r"|access key|account key|(?:primary|secondary) key|\bkey ?[12]\b", re.IGNORECASE)
+# What a check box value may hold besides a state word: its marks, and 'leave' ('leave unchecked').
+CHECKBOX_MARKS = "✅✔☐❌✗☑✓"
+CHECKBOX_FILLER = {"leave"}
+
+
+def only_checkbox_state(value: str) -> bool:
+    """Whether `value` is a check box state and nothing else ('☐ Unchecked', 'leave unchecked',
+    '✅ Checked (or uncheck if already have Defender)'): every word of it, once a remark in
+    parentheses is left out, is a state word or a mark. A password that holds such a word
+    ('No!Access2024', 'Off-Grid!99') is not."""
+    words = re.findall(rf"[{CHECKBOX_MARKS}]|[^\s{CHECKBOX_MARKS}]+", REMARK.sub(" ", value).casefold())
+    allowed = CHECKED_WORDS | UNCHECKED_WORDS | set(CHECKBOX_MARKS) | CHECKBOX_FILLER
+    return bool(words) and all(word.strip(".,;:") in allowed for word in words)
+
+
+def typed_secrets(recording: dict, steps: dict) -> set[str]:
+    """Every value the runner may type into a field whose label names a secret (SECRET_FIELD:
+    'Password', 'Client secret', 'Connection string'), as the guide writes it and as the
+    recording resolves it (a valueOverride, an environment variable, placeholders;
+    field_action). A check box state and nothing else ('Auto-generate password': '☐ Unchecked',
+    only_checkbox_state) and a bracketed instruction ('[Leave blank]') are not typed, so they are
+    no secret; nor is a value whose environment variable is not set (the run refuses to start
+    then). A value the Portal generates is never typed: the runner never reads it, the call log
+    that showed it is cut (one_line), and its field's value in an accessibility snapshot is
+    masked (mask_secret_values)."""
+    secrets = set()
+    for step in steps.get("steps", []):
+        for item in step.get("items", []):
+            if item.get("kind") != "field" or not SECRET_FIELD.search(item.get("label", "")):
+                continue
+            values = [item.get("value", "")]
+            try:
+                values.append(field_action(recording, step, item)[1])
+            except SystemExit:          # expand_env: a variable that is not set
+                pass
+            secrets |= {value for value in values
+                        if value.strip() and value_action(value) == "type" and not only_checkbox_state(value)}
+    return secrets
+
+
+# A text field in an accessibility snapshot, as aria_snapshot() writes it with its value after
+# the colon: '- textbox "Password": <value>', '- textbox "Client secret" [disabled]: <value>'.
+SNAPSHOT_TEXTBOX = re.compile(r'^(?P<head>\s*- textbox "(?P<name>(?:[^"\\]|\\.)*)"[^:\n]*): (?P<value>.+)$',
+                              re.MULTILINE)
+
+
+def mask_secret_values(text: str) -> str:
+    """`text` with the value of every text field whose name names a secret (SECRET_FIELD) in
+    an accessibility snapshot as SECRET: the Portal's auto-generated password is there, and the
+    runner never knows it."""
+    return SNAPSHOT_TEXTBOX.sub(lambda m: f"{m.group('head')}: {SECRET}" if SECRET_FIELD.search(m.group("name"))
+                                else m.group(0), text)
+
+
+SCRUB_ROUNDS = 5
+
+
+def scrub(text: str | None, redactor: Redactor, secrets: set[str] | frozenset[str] = frozenset(),
+          whole: bool = False) -> str | None:
+    """What a run log (results.jsonl, summary.md, the *.aria.txt files, an error on the console)
+    keeps of a free text such as a record's 'observed'. In this order:
+
+      1. its first line, cut before a Playwright call log (one_line); with `whole`, every line
+         (an accessibility tree)
+      2. the value of a secret text field in an accessibility snapshot (mask_secret_values),
+         every typed secret (longest first) and every credential ('AccountKey=...', 'sig=...')
+         as SECRET
+      3. object ids (GUIDs, with hyphens, '%2D' or none) as OBJECT_ID, the tenant id as the
+         Redactor's '[tenantid]': first, so that 'contoso<32 hex digits>' loses the prefix too
+      4. tenant data, also as a regular expression escapes it, as the Redactor's tokens
+      5. every e-mail address left (outside the tenant's domain) as EMAIL
+      6. a value a Playwright call typed ('fill("[typed]")') and an element's value attribute
+         ('value="[value]"')
+
+    Steps 2 to 6 are repeated until they change nothing (at most SCRUB_ROUNDS times): a token
+    one step writes can make text beside it match another step it did not match before (32 hex
+    digits glued to the tenant domain are an id only once the domain is '[tenantdomain]'). Tokens
+    already in the text are left alone (sub_outside). So scrubbing a scrubbed text changes
+    nothing: records reloaded on -Resume stay as they were written.
+
+    Known limits. Tenant data, an address or an id in another form (percent-encoded '%40', in
+    base64, in a JSON escape) is not recognised. Text that only looks like one is masked too:
+    'Group@2x.png' becomes '<email>', 'ResetPassword=true' becomes 'ResetPassword=[secret]', a
+    quoted argument of 'type(' or 'fill(' in prose becomes '"[typed]"', ' value=x' becomes
+    ' value="[value]"', and 32 hex digits that are no id become '<id>'."""
+    if text is None:
+        return None
+    protected = redactor.tokens
+    tenant = re.sub(r"-|%2[dD]", "", redactor.tenant_id).casefold()
+
+    def object_id(m: re.Match) -> str:
+        return Redactor.TENANT if re.sub(r"-|%2[dD]", "", m.group()).casefold() == tenant else OBJECT_ID
+
+    def masked(text: str) -> str:
+        text = mask_secret_values(text)
+        for value in sorted(secrets, key=len, reverse=True):
+            text = sub_outside(re.compile(re.escape(value)), SECRET, text, protected)
+        text = sub_outside(CREDENTIAL, lambda m: m.group("head") + SECRET, text, protected)
+        for pattern in (GUID_ANY, HEX_ID):
+            text = sub_outside(pattern, object_id, text, protected)
+        text = redactor.redact(redactor.redact_escaped(text))
+        text = sub_outside(EMAIL_ADDRESS, EMAIL, text, protected)
+        text = TYPED_CALL.sub(lambda m: f'{m.group("call")}("{TYPED}"', text)
+        return VALUE_ATTRIBUTE.sub(lambda m: f'{m.group("head")}"{VALUE}"', text)
+
+    text = str(text) if whole else one_line(str(text))
+    for _ in range(SCRUB_ROUNDS):
+        again = masked(text)
+        if again == text:
+            break
+        text = again
+    return text

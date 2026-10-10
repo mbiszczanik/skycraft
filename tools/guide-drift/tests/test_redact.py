@@ -1,7 +1,8 @@
 """Unit tests for recording.py, which keeps tenant data out of the recording (issue #189).
 
-Redactor, env_secrets and rejected_candidates are pure and live outside run.py, so they are
-tested without a browser and without Playwright, which the CI runner does not install.
+Redactor, env_secrets, rejected_candidates and the run log's scrub (#212) are pure and live
+outside run.py, so they are tested without a browser and without Playwright, which the CI runner
+does not install.
 
 Standard library unittest only; tests/Guide-Drift-Python.Tests.ps1 runs this suite in CI.
 Run by hand from the repository root:
@@ -10,6 +11,7 @@ Run by hand from the repository root:
 """
 import json
 import os
+import random
 import shutil
 import sys
 import tempfile
@@ -423,6 +425,220 @@ class WriteJsonTests(unittest.TestCase):
         self.assertEqual((replace.call_count, sleep.call_count),
                          (recording.REPLACE_ATTEMPTS, recording.REPLACE_ATTEMPTS - 1))
 
+
+
+class RunLogTextTests(unittest.TestCase):
+    """What a run log keeps of an error or a free text (#212): its first line, without the
+    Playwright call log, typed values or element values, and redacted (recording.scrub)."""
+
+    # The formats Playwright 1.63 raises (playwright/_impl/_helper.py parse_error and
+    # _connection.py format_call_log: '<api>: <message>' + '\nCall log:\n' + its lines).
+    TIMEOUT = ('Locator.fill: Timeout 8000ms exceeded.\nCall log:\n'
+               '  - waiting for get_by_role("textbox", name="Password")\n'
+               '    - locator resolved to <input id="p" readonly type="password" value="Qx7!fake-generated"/>\n'
+               '    - fill("LoveAzeroth!2004")\n  - attempting fill action\n'
+               '    2 × waiting for element to be visible, enabled and editable\n'
+               '      - element is not editable\n')
+    STRICT = ('Locator.fill: Error: strict mode violation: get_by_label("Password") resolved to 2 elements:\n'
+              '    1) <input value="Qx7!fake-generated" aria-label="Password"/> aka get_by_role("textbox").first\n'
+              '    2) <input value="b" aria-label="Password"/> aka get_by_role("textbox").nth(1)\n\n'
+              'Call log:\n  - waiting for get_by_label("Password")\n')
+
+    def setUp(self) -> None:
+        self.redactor = Redactor(DOMAIN, TENANT, {TOKEN: "me@example.com"})
+
+    def test_one_line_keeps_the_first_line_and_drops_the_call_log(self) -> None:
+        self.assertEqual(recording.one_line(self.TIMEOUT), "Locator.fill: Timeout 8000ms exceeded.")
+        self.assertEqual(recording.one_line(self.STRICT),
+                         'Locator.fill: Error: strict mode violation: get_by_label("Password") resolved to 2 elements:')
+        self.assertEqual(recording.one_line("\n  not found  \nmore"), "not found")
+        self.assertEqual(recording.one_line("Call log:\n  - fill(\"x\")"), "")
+
+    def scrub(self, text: str, secrets=frozenset(), redactor=None, whole=False) -> str:
+        return recording.scrub(text, redactor or self.redactor, set(secrets), whole=whole)
+
+    def test_scrub_masks_a_typed_value_and_an_element_value_in_the_first_line(self) -> None:
+        text = 'Locator.fill: fill("LoveAzeroth!2004") failed on <input type="password" value="Qx7!fake-generated"/>'
+        self.assertEqual(self.scrub(text),
+                         'Locator.fill: fill("[typed]") failed on <input type="password" value="[value]"/>')
+        self.assertEqual(self.scrub("type('a\\'b') then prefill(\"c\\\"d\")"),
+                         "type(\"[typed]\") then prefill(\"[typed]\")")
+        # Another attribute holding '>' does not hide the value.
+        self.assertEqual(self.scrub('<input aria-label="a > b" value="Qx7!fake-generated"> and value=bare'),
+                         '<input aria-label="a > b" value="[value]"> and value="[value]"')
+        self.assertEqual(self.scrub('<input aria-label="a > b" value=Qx7!fake>'), '<input aria-label="a > b" value="[value]">')
+        self.assertEqual(self.scrub("value '[Leave blank]' is an instruction"),
+                         "value '[Leave blank]' is an instruction")        # the runner's own words stay
+
+    def test_error_text_is_the_type_and_the_first_line(self) -> None:
+        timeout = type("TimeoutError", (Exception,), {})
+        self.assertEqual(recording.error_text(timeout(self.TIMEOUT)),
+                         "TimeoutError: Locator.fill: Timeout 8000ms exceeded.")
+        self.assertEqual(recording.error_text(LookupError("")), "LookupError")
+
+    def test_scrub_redacts_tenant_data_object_ids_and_secrets_on_one_line(self) -> None:
+        text = (f"LookupError: option 'malfurion.stormrage@{DOMAIN}' not found in {TENANT}, group "
+                "9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f (9F8E7D6C5B4A4C3D8E2F1A0B9C8D7E6F) for me@example.com, "
+                "typed LoveAzeroth!2004\nCall log:\n  - <input value=\"Qx7!fake-generated\">")
+        self.assertEqual(recording.scrub(text, self.redactor, {"LoveAzeroth!2004"}),
+                         "LookupError: option 'malfurion.stormrage@[tenantdomain]' not found in [tenantid], group "
+                         f"<id> (<id>) for {TOKEN}, typed [secret]")
+        self.assertIsNone(recording.scrub(None, self.redactor, set()))
+
+    def test_scrub_is_idempotent(self) -> None:
+        secrets = {"LoveAzeroth!2004", "secret"}
+        redactor = Redactor("tenantname.onmicrosoft.com", TENANT, {TOKEN: "me@example.com"},
+                            tenant_name="tenantname")
+        for text in (self.TIMEOUT, self.STRICT, f"Contoso admin@{DOMAIN} {TENANT} LoveAzeroth!2004",
+                     "tenantname [tenantname] [yourtenant] <id> [secret] secret ${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}",
+                     "plain text"):
+            for r in (self.redactor, redactor):
+                with self.subTest(text=text, domain=r.domain):
+                    once = recording.scrub(text, r, secrets)
+                    self.assertEqual(recording.scrub(once, r, secrets), once)
+
+    def test_redaction_leaves_its_own_tokens_alone(self) -> None:
+        # A tenant named like a token used to turn '[tenantname]' into '[[tenantname]]' on a second pass.
+        redactor = Redactor("tenantname.onmicrosoft.com", TENANT, tenant_name="tenantname")
+        once = redactor.redact("tenantname and tenantname.onmicrosoft.com")
+        self.assertEqual(once, "[tenantname] and [tenantdomain]")
+        self.assertEqual(redactor.redact(once), once)
+
+    def test_typed_secrets_are_the_values_of_secret_fields(self) -> None:
+        steps = {"steps": [{"id": "1.1.2", "items": [
+            {"kind": "field", "label": "User principal name", "value": "malfurion.stormrage@[yourtenant].onmicrosoft.com"},
+            {"kind": "field", "label": "Auto-generate password", "value": "☐ Unchecked"},
+            {"kind": "field", "label": "Password", "value": "LoveAzeroth!2004"},
+            {"kind": "action", "labels": ["Password reset"]}]},
+            {"id": "1.1.3", "items": [{"kind": "field", "label": "Password", "value": "LoveAzeroth!2004"},
+                                      {"kind": "field", "label": "Client secret", "value": "[Leave blank]"}]},
+            {"id": "1.1.4", "items": [{"kind": "field", "label": "Confirm password", "value": "Ignored!1"}]}]}
+        rec = {"placeholders": {}, "steps": {"1.1.4": {"valueOverrides": {"Confirm password": "${SKYCRAFT_TEST_PASSWORD}"}}}}
+        with mock.patch.dict(os.environ, {"SKYCRAFT_TEST_PASSWORD": "Fake!Override9"}):
+            self.assertEqual(recording.typed_secrets(rec, steps), {"LoveAzeroth!2004", "Ignored!1", "Fake!Override9"})
+        with mock.patch.dict(os.environ, {}, clear=True):          # an unset variable is left out, not raised
+            self.assertEqual(recording.typed_secrets(rec, steps), {"LoveAzeroth!2004", "Ignored!1"})
+
+    def test_a_password_that_holds_a_check_box_word_is_still_a_secret(self) -> None:
+        passwords = {"Password": "No!Access2024", "Admin password": "Yes-Man#2024", "Key1": "on_call 42 Off"}
+        steps = {"steps": [{"id": "1.1.2", "items": (
+            [{"kind": "field", "label": label, "value": value} for label, value in passwords.items()]
+            + [{"kind": "field", "label": "Confirm password", "value": "[from the environment]", "literal": False},
+               {"kind": "field", "label": "Auto-generate password", "value": "☐ Unchecked"},
+               {"kind": "field", "label": "Require password change", "value": "✅ Checked (or uncheck if already have Defender)"},
+               {"kind": "field", "label": "Show password", "value": "leave unchecked"},
+               {"kind": "field", "label": "Password writeback", "value": "☑ Checked"}])}]}
+        rec = {"placeholders": {}, "steps": {"1.1.2": {"valueOverrides": {"Confirm password": "${SKYCRAFT_TEST_PASSWORD}"}}}}
+        with mock.patch.dict(os.environ, {"SKYCRAFT_TEST_PASSWORD": "Off-Grid!99"}):
+            self.assertEqual(recording.typed_secrets(rec, steps), set(passwords.values()) | {"Off-Grid!99"})
+        for value in ("☐ Unchecked", "✅", "leave unchecked", "Disabled.", "☑ Checked (VMs will auto-register)"):
+            with self.subTest(value=value):
+                self.assertTrue(recording.only_checkbox_state(value))
+        for value in ("No!Access2024", "Off-Grid!99", "On call", "Checked-In#7", ""):
+            with self.subTest(value=value):
+                self.assertFalse(recording.only_checkbox_state(value))
+
+    def test_secret_fields_are_named_as_the_portal_labels_credentials(self) -> None:
+        for label in ("Password", "Client secret", "Connection string", "Primary connection string", "SAS token",
+                      "Blob SAS URL", "Shared access signature", "Access key", "Storage account key", "Primary key",
+                      "key1", "Key 2", "Passphrase"):
+            with self.subTest(label=label):
+                self.assertIsNotNone(recording.SECRET_FIELD.search(label))
+        for label in ("Key vault name", "Key type", "Display name", "Keyboard layout", "Saskatoon"):
+            with self.subTest(label=label):
+                self.assertIsNone(recording.SECRET_FIELD.search(label))
+
+    def test_scrub_masks_credentials_in_connection_strings_and_sas_addresses(self) -> None:
+        cases = {
+            "DefaultEndpointsProtocol=https;AccountName=sa;AccountKey=abc+/def==;EndpointSuffix=core.windows.net":
+                "DefaultEndpointsProtocol=https;AccountName=sa;AccountKey=[secret];EndpointSuffix=core.windows.net",
+            "Endpoint=sb://ns.servicebus.windows.net/;SharedAccessKeyName=Root;SharedAccessKey=xyz=":
+                "Endpoint=sb://ns.servicebus.windows.net/;SharedAccessKeyName=Root;SharedAccessKey=[secret]",
+            "https://sa.blob.core.windows.net/c?sv=2022-11-02&sig=abc%2Bdef%3D&se=2026":
+                "https://sa.blob.core.windows.net/c?sv=2022-11-02&sig=[secret]&se=2026",
+            "Server=tcp:db;User ID=admin;Password=p@ss.w0rd;Encrypt=True":
+                "Server=tcp:db;User ID=admin;Password=[secret];Encrypt=True",
+        }
+        for text, kept in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(self.scrub(text), kept)
+        tree = ('- textbox "Connection string": AccountKey=abc\n- textbox "key1": abc\n'
+                '- textbox "SAS token" [disabled]: sv=1\n- textbox "Key vault name": kv-skycraft')
+        self.assertEqual(self.scrub(tree, whole=True),
+                         '- textbox "Connection string": [secret]\n- textbox "key1": [secret]\n'
+                         '- textbox "SAS token" [disabled]: [secret]\n- textbox "Key vault name": kv-skycraft')
+
+    def test_scrub_masks_every_address_outside_the_tenant(self) -> None:
+        self.assertEqual(self.scrub(f"Signed in as marcin.b@fabrikam.example, user malfurion@{DOMAIN}, guest "
+                                    f"me@example.com, me_example.com#EXT#@{DOMAIN}, o'neil@sub.example.org"),
+                         f"Signed in as <email>, user malfurion@[tenantdomain], guest {TOKEN}, "
+                         f"{UPN_TOKEN}#EXT#@[tenantdomain], <email>")
+        self.assertEqual(self.scrub("- button \"Account manager for Marcin (marcin@fabrikam.example)\"", whole=True),
+                         "- button \"Account manager for Marcin (<email>)\"")
+        # A quote before an address is not part of it.
+        self.assertEqual(self.scrub("LookupError: option 'x@gmail.com' not found"),
+                         "LookupError: option '<email>' not found")
+        self.assertEqual(self.scrub("'o'neil@example.org'"), "'<email>'")
+
+    def test_scrub_over_masks_what_only_looks_like_a_secret_an_address_or_a_call(self) -> None:
+        # The known limits recording.scrub documents: masked, never leaked.
+        self.assertEqual(self.scrub("Group@2x.png ResetPassword=true type('a') set value=x"),
+                         '<email> ResetPassword=[secret] type("[typed]") set value="[value]"')
+
+    def test_scrub_masks_ids_first_so_the_tenant_prefix_beside_one_goes_too(self) -> None:
+        hex_id = "9f8e7d6c5b4a4c3d8e2f1a0b9c8d7e6f"
+        encoded = "9f8e7d6c%2D5b4a%2d4c3d%2D8e2f%2D1a0b9c8d7e6f"
+        cases = {
+            f"contoso{hex_id}": "[yourtenant]<id>",
+            f"{hex_id}-contoso": "<id>-contoso",
+            f"{hex_id}contoso": f"{hex_id}contoso",    # 33 hex digits in a row: no id, no prefix
+            f"group {encoded}": "group <id>",
+            TENANT.replace("-", ""): "[tenantid]",
+            TENANT.replace("-", "%2D"): "[tenantid]",
+            TENANT.upper(): "[tenantid]",
+        }
+        for text, kept in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(self.scrub(text), kept)
+
+    def test_scrub_masks_tenant_data_as_a_regular_expression_escapes_it(self) -> None:
+        redactor = Redactor(DOMAIN, TENANT, {TOKEN: "me@example.com"}, tenant_name="Contoso Ltd")
+        text = ('Locator.click: Error: strict mode violation: get_by_role("option", name=re.compile('
+                r'r"^malfurion\.stormrage@contoso\.onmicrosoft\.com$", re.IGNORECASE)) resolved to 2 elements:')
+        self.assertEqual(self.scrub(text, redactor=redactor),
+                         'Locator.click: Error: strict mode violation: get_by_role("option", name=re.compile('
+                         r'r"^malfurion\.stormrage@[tenantdomain]$", re.IGNORECASE)) resolved to 2 elements:')
+        self.assertEqual(self.scrub(r"^me@example\.com$ ^me_example\.com\#EXT\#$ ^Contoso\ Ltd$", redactor=redactor),
+                         rf"^{TOKEN}$ ^{UPN_TOKEN}\#EXT\#$ ^[tenantname]$")
+
+    ADJACENT = ("contoso9f8e7d6c5b4a4c3d8e2f1a0b9c8d7e6f", "9f8e7d6c5b4a4c3d8e2f1a0b9c8d7e6fcontoso",
+                "contoso<id>", "<id>contoso", "[tenantdomain]contoso", "contoso[secret]", "contoso<email>",
+                'value="contoso"contoso', 'fill("contoso")contoso', "a@b.cocontoso", "contoso@b.co",
+                "contoso.onmicrosoft.comcontoso", "AccountKey=contoso;contoso", "sig=[secret]x",
+                f"{TENANT}contoso", "secretcontoso", "LoveAzeroth!2004contoso", "Contoso Ltdcontoso")
+
+    def test_scrub_is_idempotent_for_text_beside_a_token(self) -> None:
+        redactor = Redactor(DOMAIN, TENANT, {TOKEN: "me@example.com"}, tenant_name="Contoso Ltd")
+        for text in self.ADJACENT:
+            for whole in (False, True):
+                with self.subTest(text=text, whole=whole):
+                    once = self.scrub(text, {"LoveAzeroth!2004", "secret"}, redactor, whole)
+                    self.assertEqual(self.scrub(once, {"LoveAzeroth!2004", "secret"}, redactor, whole), once)
+
+    def test_scrub_is_idempotent_for_random_text(self) -> None:
+        pieces = ["contoso", "Contoso Ltd", ".onmicrosoft.com", DOMAIN, TENANT, TENANT.replace("-", ""),
+                  "9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f", "9f8e7d6c", "%2D", "me@example.com", "me_example.com",
+                  "#EXT#@", "@", ".", "-", "_", " ", "\n", '"', "'", "<", ">", "=", ";", "&", "\\", "(", ")",
+                  "[tenantid]", "[yourtenant]", "<id>", "<email>", "[secret]", "[typed]", "[value]", TOKEN,
+                  "fill(", "value=", "<input ", "AccountKey=", "sig=", "Password=", "Call log:",
+                  "LoveAzeroth!2004", "secret", "x", "ab", "b.co", "%40", "re.escape", "\\."]
+        generator = random.Random(212)
+        redactor = Redactor(DOMAIN, TENANT, {TOKEN: "me@example.com"}, tenant_name="Contoso Ltd")
+        for _ in range(3000):
+            text = "".join(generator.choice(pieces) for _ in range(generator.randint(1, 12)))
+            whole = generator.random() < 0.5
+            once = self.scrub(text, {"LoveAzeroth!2004"}, redactor, whole)
+            self.assertEqual(self.scrub(once, {"LoveAzeroth!2004"}, redactor, whole), once, repr(text))
 
 
 class CheckboxStateTests(unittest.TestCase):

@@ -2,8 +2,9 @@
 (issue #189), steps the recording skips (#200), the view a resumed run starts from (#206), the
 blade a step starts on and the form its fields are filled in on (#207), and how it finds what a
 guide names (search, '+' labels, plain text, collapsed menu groups, a blade still loading, a
-resource a chain names, #199). No browser: the page is a small fake (Screen stands in for a
-frame), and run_step is scripted where only the order of steps matters.
+resource a chain names, #199), and what results.jsonl and summary.md keep (#212). No browser:
+the page is a small fake (Screen stands in for a frame), and run_step is scripted where only the
+order of steps matters.
 
 run.py imports Playwright at module level and the CI runner does not install it, so a minimal
 stub of playwright.sync_api is put in sys.modules when the real one is missing. Nothing here
@@ -20,7 +21,8 @@ import sys
 import tempfile
 import types
 import unittest
-from contextlib import redirect_stdout
+import contextlib
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -635,6 +637,227 @@ class OneRunAcrossResumeTests(RunnerTestCase):
         self.assertEqual([x["step"] for x in r.records], ["9.9.1"])
 
 
+class RunLogRedactionTests(RunnerTestCase):
+    """results.jsonl and summary.md keep what the failure prompt shows (#212): the first line of
+    an error, without Playwright's call log, redacted, with no object id and no typed secret."""
+
+    DOMAIN = "contoso.onmicrosoft.com"
+    OBJECT_ID = "9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f"
+    PASSWORD = "LoveAzeroth!2004"           # the guide's own value for the 'Password' field
+    GENERATED = "Qx7!fake-generated"        # what an auto-generated password field holds
+    CALL_LOG = ('\nCall log:\n  - waiting for get_by_role("option", name="malfurion.stormrage@contoso.onmicrosoft.com")\n'
+                f'    - locator resolved to <input type="password" value="{GENERATED}"/>\n')
+    RAW = f"LookupError: option 'malfurion.stormrage@{DOMAIN}' not found in group {OBJECT_ID}{CALL_LOG}"
+    SHOWN = "LookupError: option 'malfurion.stormrage@[tenantdomain]' not found in group <id>"
+
+    def results_text(self, run_id: str = "test") -> str:
+        return (self.tmp / "logs" / run_id / "results.jsonl").read_text(encoding="utf-8")
+
+    def summary(self, run_id: str = "test") -> str:
+        return (self.tmp / "logs" / run_id / "summary.md").read_text(encoding="utf-8")
+
+    def unknown(self, r: run.Runner, observed: str) -> dict:
+        record = r.new_record({"id": "9.9.2"}, "field", "User principal name")
+        record.update(outcome="unknown", observed=observed)
+        return record
+
+    def assert_no_leak(self, *texts: str) -> None:
+        for text in texts:
+            # The element's HTML is in the call log; in a first line its value is masked.
+            for leak in (self.DOMAIN, self.OBJECT_ID, self.PASSWORD, self.GENERATED, "Call log", "locator resolved"):
+                self.assertNotIn(leak, text)
+
+    def test_an_observed_error_is_written_redacted_and_on_one_line(self) -> None:
+        r = self.runner()
+        r.write(self.unknown(r, self.RAW))
+        self.assertEqual(json.loads(self.results_text().splitlines()[-1])["observed"], self.SHOWN)
+        self.quietly(r.finish)
+        self.assertIn(f"## unknown (1)\n- step 9.9.2 field **User principal name**: {self.SHOWN}\n", self.summary())
+        out = io.StringIO()
+        with redirect_stdout(out):
+            r.ask_after_failure({"id": "9.9.2"})        # input closed: 'e'
+        self.assertIn(f"  field 'User principal name': unknown: {self.SHOWN}\n", out.getvalue())
+        self.assert_no_leak(self.results_text(), self.summary())
+
+    def test_a_timeout_filling_a_password_leaks_neither_the_password_nor_the_html(self) -> None:
+        item = {"kind": "field", "label": "Password", "value": self.PASSWORD, "line": 5}
+        steps = dict(STEPS, steps=[dict(STEPS["steps"][0], items=[item])] + STEPS["steps"][1:])
+        timeout = type("TimeoutError", (run.PlaywrightError,), {})
+        # As Playwright 1.63 raises it for a fill() that never finds an editable element.
+        raised = ('Locator.fill: Timeout 8000ms exceeded.\nCall log:\n'
+                  '  - waiting for get_by_role("textbox", name="Password")\n'
+                  f'    - locator resolved to <input id="p" type="password" value="{self.GENERATED}"/>\n'
+                  f'    - fill("{self.PASSWORD}")\n  - attempting fill action\n'
+                  '    2 × waiting for element to be visible, enabled and editable\n')
+        # A first line that carries the typed value and the element itself.
+        in_first_line = (f'Locator.fill: cannot type "{self.PASSWORD}" into '
+                         f'<input type="password" value="{self.GENERATED}">\nCall log:\n  - fill("{self.PASSWORD}")\n')
+        for run_id, message, shown in (
+                ("timeout", raised, "TimeoutError: Locator.fill: Timeout 8000ms exceeded."),
+                ("first", in_first_line,
+                 'TimeoutError: Locator.fill: cannot type "[secret]" into <input type="password" value="[value]">')):
+            with self.subTest(run_id=run_id):
+                r = run.Runner(FakePage(), steps, self.recording, self.args(run_id=run_id), ask=Answers())
+                field = ScreenNode(tag="input", fill_fail=timeout(message))
+                with mock.patch.object(run, "all_frames", lambda page: [Screen(("textbox", "Password", field))]), \
+                        mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                        mock.patch.object(run, "candidates_on_screen", return_value=[]):
+                    record = self.quietly(lambda: r.act_on_label(steps["steps"][0], item, "Password", self.PASSWORD))
+                r.write(record)
+                self.quietly(r.finish)
+                self.assertEqual(record["observed"], shown)
+                self.assertIn(f"- step 9.9.1 field **Password**: {shown}\n", self.summary(run_id))
+                self.assert_no_leak(self.results_text(run_id), self.summary(run_id))
+
+    def test_a_proposed_edit_scrubs_the_new_label_and_never_the_guides_own_text(self) -> None:
+        (self.tmp / "guide.md").write_text("# Lab\n\n2. In the Contoso directory, click **+ New group**\n",
+                                           encoding="utf-8")
+        r = self.runner()
+        edit = r.proposed_edit(3, "+ New group", f"New group {self.OBJECT_ID}")
+        # 'Contoso' is the tenant prefix, but here it is the guide's word: no '[yourtenant]' for it.
+        self.assertEqual(edit, {"line": 3, "old": "2. In the Contoso directory, click **+ New group**",
+                                "new": "2. In the Contoso directory, click **New group <id>**"})
+
+    def test_the_aria_files_mask_ids_and_secret_values_and_keep_every_line(self) -> None:
+        r = self.runner()
+        # As aria_snapshot() writes a text field: its value after the colon, an auto-generated
+        # password's among them.
+        tree = ('- listbox:\n  - option "malfurion.stormrage@contoso.onmicrosoft.com"\n'
+                f'  - link "Group {self.OBJECT_ID}"\n  - textbox "Password": {self.GENERATED}\n'
+                f'  - textbox "Client secret value" [disabled]: {self.PASSWORD}\n  - textbox "Name": bob')
+        self.quietly(lambda: r.save_search_tree({"id": "9.9.1"}, tree))
+        self.assertEqual((r.run_dir / "search-9.9.1.aria.txt").read_text(encoding="utf-8"),
+                         '- listbox:\n  - option "malfurion.stormrage@[tenantdomain]"\n  - link "Group <id>"\n'
+                         '  - textbox "Password": [secret]\n  - textbox "Client secret value" [disabled]: [secret]\n'
+                         '  - textbox "Name": bob\n')
+        outline = [("heading", f"Group {self.OBJECT_ID}"), ("textbox", "Password"), ("link", f"Users of {self.DOMAIN}")]
+        self.quietly(lambda: r.save_blade_outline({"id": "9.9.1"}, {"line": 7}, "Missing", outline))
+        self.assertEqual((r.run_dir / "blade-9.9.1-7.aria.txt").read_text(encoding="utf-8"),
+                         'heading "Group <id>"\ntextbox "Password"\nlink "Users of [tenantdomain]"\n')
+
+    def test_the_aria_files_mask_the_signed_in_account_and_credentials(self) -> None:
+        r = self.runner()
+        tree = ('- banner:\n  - button "Account manager for marcin.b@fabrikam.example"\n'
+                '  - textbox "Primary connection string": DefaultEndpointsProtocol=https;AccountKey=abc==\n'
+                '  - text: "SharedAccessKey=xyz="')
+        self.quietly(lambda: r.save_search_tree({"id": "9.9.1"}, tree))
+        self.assertEqual((r.run_dir / "search-9.9.1.aria.txt").read_text(encoding="utf-8"),
+                         '- banner:\n  - button "Account manager for <email>"\n'
+                         '  - textbox "Primary connection string": [secret]\n  - text: "SharedAccessKey=[secret]"\n')
+
+    def test_a_search_tree_that_could_not_be_read_keeps_the_error_s_first_line(self) -> None:
+        class Dropdown:
+            def aria_snapshot(self, timeout=None) -> str:
+                raise run.PlaywrightError('Locator.aria_snapshot: Timeout 2000ms exceeded.\nCall log:\n'
+                                          '  - waiting for locator("#results")\n'
+                                          '    - locator resolved to <div title="marcin.b@fabrikam.example">\n')
+
+        tree = run.tree_of(Dropdown(), None)
+        self.assertEqual(tree, f"# the search results: no snapshot ({run.PlaywrightError.__name__}: "
+                               "Locator.aria_snapshot: Timeout 2000ms exceeded.)")
+
+    def test_the_summary_scrubs_a_record_that_did_not_come_through_write(self) -> None:
+        r = self.runner()
+        r.records.append(self.unknown(r, self.RAW))        # as a future path that forgets write() would
+        self.quietly(r.finish)
+        self.assertIn(f"- step 9.9.2 field **User principal name**: {self.SHOWN}\n", self.summary())
+        self.assert_no_leak(self.summary())
+
+    def test_the_summary_names_the_run_folder_without_the_user_s_path(self) -> None:
+        r = self.runner()                                   # its log folder is under repo_root
+        self.quietly(r.finish)
+        self.assertTrue(self.summary().endswith("\nScreenshots and results: logs/test\n"))
+        elsewhere = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(elsewhere, ignore_errors=True))
+        r = self.runner(log_dir=elsewhere / "logs")
+        self.quietly(r.finish)
+        summary = (elsewhere / "logs" / "test" / "summary.md").read_text(encoding="utf-8")
+        self.assertTrue(summary.endswith("\nScreenshots and results: test\n"))
+        self.assertNotIn(str(elsewhere), summary)
+
+    def test_the_candidate_list_is_shown_scrubbed_and_picked_by_number(self) -> None:
+        item = {"kind": "action", "labels": ["Owner"], "line": 3}
+        step = {"id": "9.9.1", "title": "One", "items": [item], "images": []}
+        (self.tmp / "guide.md").write_text("# Lab\n\n2. Click **Owner**\n", encoding="utf-8")
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers("2"))
+        candidates = [run.Candidate("link", f"Group {self.OBJECT_ID}"),
+                      run.Candidate("button", "Account manager for marcin.b@fabrikam.example"),
+                      run.Candidate("link", f"malfurion@{self.DOMAIN}")]
+        out = io.StringIO()
+        with mock.patch.object(run, "find_exact", return_value=None), \
+                mock.patch.object(run, "candidates_on_screen", return_value=candidates), \
+                mock.patch.object(run, "find_by_name", return_value=FakeElement()) as find, redirect_stdout(out):
+            record = r.act_on_label(step, item, "Owner")
+        shown = out.getvalue()
+        for line in ("Group <id>", "Account manager for <email>", "malfurion@[tenantdomain]"):
+            self.assertIn(line, shown)
+        self.assert_no_leak(shown)
+        self.assertNotIn("fabrikam", shown)
+        # The number picks the candidate the Portal shows, looked up by its name.
+        self.assertEqual(record["outcome"], "drift")
+        self.assertEqual(find.call_args.args[2], "Account manager for marcin.b@fabrikam.example")
+
+    REASK = ("That text holds an id, an address or a secret, which the recording cannot keep; "
+             "type a shorter text, or press Enter if it is not observable.")
+
+    def check_result(self, *answers: str) -> tuple[run.Runner, dict, str, list[str]]:
+        """check_result with `answers` at its prompt: the runner, the step's entry, what it
+        printed, and every text it looked for on screen."""
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
+        entry = r.step_entry({"id": "9.9.1"})
+        looked_for: list[str] = []
+        out = io.StringIO()
+        with mock.patch.object(run, "text_on_screen", lambda page, text: looked_for.append(text) or True), \
+                redirect_stdout(out):
+            r.check_result({"id": "9.9.1", "expected": "The group shows"}, entry)
+        return r, entry, out.getvalue(), looked_for
+
+    def test_a_result_text_with_an_id_or_an_address_is_asked_again_and_never_stored(self) -> None:
+        r, entry, out, looked_for = self.check_result(
+            f"Group {self.OBJECT_ID} created", "Owner marcin.b@fabrikam.example",
+            f"Owner malfurion.stormrage@{self.DOMAIN}")
+        self.assertEqual(len(r.ask.prompts), 3)
+        self.assertEqual(out.count(self.REASK), 2)
+        # Tenant data is a token restore() gives back: the run looks for what is on screen.
+        self.assertEqual(entry["result"], {"text": "Owner malfurion.stormrage@[tenantdomain]"})
+        self.assertEqual(looked_for, [f"Owner malfurion.stormrage@{self.DOMAIN}"])
+        saved = (self.tmp / "rec.json").read_text(encoding="utf-8")
+        for kept_out in (self.OBJECT_ID, "fabrikam", "<id>", "<email>", "[secret]", self.DOMAIN):
+            self.assertNotIn(kept_out, saved)
+
+    def test_a_result_text_that_cannot_be_kept_then_enter_or_closed_input_stores_nothing(self) -> None:
+        _, entry, out, looked_for = self.check_result(f"Group {self.OBJECT_ID} created", "")
+        self.assertEqual((entry["result"], entry.get("asked"), looked_for), (None, ["result"], []))
+        self.assertIn(self.REASK, out)
+        self.recording["steps"]["9.9.1"].pop("asked")           # the same recording, not asked yet
+        r, entry, _, looked_for = self.check_result(f"Group {self.OBJECT_ID} created")     # then EOF
+        self.assertEqual((entry["result"], entry.get("asked"), looked_for), (None, None, []))   # asked next time
+        self.assertEqual(len(r.ask.prompts), 2)
+
+    def test_a_resumed_run_reloads_the_records_as_written_and_cleans_older_ones(self) -> None:
+        r = self.runner(run_id="first")
+        r.write(self.unknown(r, self.RAW))
+        drift = r.new_record({"id": "9.9.2"}, "action", "+ New group")
+        drift.update(outcome="drift", severity="cosmetic", observed="[tenantname] | Overview")
+        r.write(drift)
+        written = [json.loads(line) for line in self.results_text("first").splitlines()]
+        # A line a run wrote before #212, as the first lab 1.1 run left it.
+        with (self.tmp / "logs" / "first" / "results.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(self.unknown(r, self.RAW)) + "\n")
+        state = {"runId": "first", "lab": LAB, "completed": [], "inFlight": None}
+        resumed = self.runner(resume=True, state=state, run_id="second")
+        self.assertEqual(resumed.records[:2], written)                     # not redacted twice
+        self.assertEqual(resumed.records[2]["observed"], self.SHOWN)
+        self.quietly(resumed.finish)
+        summary = self.summary("first")
+        again = self.runner(resume=True, state=state, run_id="third")
+        self.assertEqual(again.records, resumed.records)
+        self.quietly(again.finish)
+        self.assertEqual(self.summary("first"), summary)
+        self.assertIn("observed '[tenantname] | Overview'", summary)
+        self.assert_no_leak(summary)
+
+
 class ResumeViewTests(RunnerTestCase):
     """A resumed run's browser is new (#206): before the first step that runs, the Portal is brought
     to the view that step starts from, opened by the run when the recording keeps a view it can
@@ -699,6 +922,19 @@ class ResumeViewTests(RunnerTestCase):
                       "  https://portal.azure.com/#view/Two\n", out)
         self.assertNotIn(TENANT_ID, out)
         self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+
+    def test_a_view_that_fails_to_open_is_named_with_the_error_scrubbed(self) -> None:
+        # #212: the reason is scrubbed as a record is, ids and other addresses included.
+        self.recording["steps"]["9.9.2"] = {"viewUrl": "https://portal.azure.com/#view/Two"}
+        failing = FakePage(goto_fails=run.PlaywrightError(
+            "Page.goto: net::ERR_ABORTED at https://portal.azure.com/#view/G/groupId/9f8e7d6c-5b4a-4c3d-8e2f-"
+            "1a0b9c8d7e6f/owner/marcin.b@fabrikam.example\nCall log:\n  - navigating to \"https://x\"\n"))
+        r, out, code = self.resume(["y", ""], page=failing)
+        self.assertEqual(code, 0)
+        self.assertIn("(the run cannot open it: opening it failed: Page.goto: net::ERR_ABORTED at "
+                      "https://portal.azure.com/#view/G/groupId/<id>/owner/<email>):\n", out)
+        for leak in ("9f8e7d6c", "fabrikam", "Call log"):
+            self.assertNotIn(leak, out)
 
     def test_the_first_step_of_the_lab_needs_no_view_but_the_person_still_confirms(self) -> None:
         r, out, code = self.resume(["n", ""], state={"lab": LAB, "completed": [], "inFlight": "9.9.1"})
@@ -3170,12 +3406,14 @@ class StopTests(RunnerTestCase):
             r.act_on_label(step, {"kind": "action", "line": 1}, "+ New group")
         self.assertEqual(r.ask.prompts, [])
 
-    def test_main_reports_a_failure_to_open_the_portal_as_not_started(self) -> None:
-        steps = dict(STEPS)
-        (self.tmp / "steps.json").write_text(json.dumps(steps), encoding="utf-8")
+    def main(self, *patches) -> tuple[int, str, str]:
+        """run.main() on the test steps with Playwright faked and `patches` applied: the exit
+        code, what it printed and what it wrote to stderr."""
+        (self.tmp / "steps.json").write_text(json.dumps(STEPS), encoding="utf-8")
         argv = ["--steps", str(self.tmp / "steps.json"), "--recording", str(self.tmp / "rec.json"),
-                "--log-dir", str(self.tmp / "logs"), "--run-id", "x", "--tenant-id", "t", "--tenant-domain", "d",
-                "--state", str(self.tmp / "state.json"), "--auth-state", str(self.tmp / "auth.json")]
+                "--log-dir", str(self.tmp / "logs"), "--run-id", "x", "--tenant-id", TENANT_ID,
+                "--tenant-domain", "contoso.onmicrosoft.com", "--state", str(self.tmp / "state.json"),
+                "--auth-state", str(self.tmp / "auth.json")]
 
         class Playwright:
             def __enter__(self):
@@ -3188,11 +3426,86 @@ class StopTests(RunnerTestCase):
             def reconfigure(self, **kwargs) -> None:
                 pass
 
-        out = Console()
-        with mock.patch.object(run, "sync_playwright", Playwright), \
-                mock.patch.object(run, "open_portal", side_effect=OSError("disk full")), redirect_stdout(out):
-            self.assertEqual(run.main(argv), run.NOT_STARTED)
-        self.assertIn("Could not open the Portal: OSError: disk full", out.getvalue())
+        out, err = Console(), io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(run, "sync_playwright", Playwright))
+            for patch in patches:
+                stack.enter_context(patch)
+            stack.enter_context(redirect_stdout(out))
+            stack.enter_context(redirect_stderr(err))
+            code = run.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_main_reports_a_failure_to_open_the_portal_as_not_started(self) -> None:
+        code, out, _ = self.main(mock.patch.object(run, "open_portal", side_effect=OSError("disk full")))
+        self.assertEqual(code, run.NOT_STARTED)
+        self.assertIn("Could not open the Portal: OSError: disk full", out)
+
+    # What a Playwright error carries (#212): tenant data in its first line, and a call log with
+    # the element's HTML (an auto-generated password's value) and the value typed.
+    CRASH = ("Locator.fill: Target page, context or browser has been closed: option "
+             "'malfurion.stormrage@contoso.onmicrosoft.com' in 9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f\nCall log:\n"
+             '  - locator resolved to <input type="password" value="Qx7!fake-generated"/>\n'
+             '  - fill("LoveAzeroth!2004")\n')
+    SHOWN = (f"{run.PlaywrightError.__name__}: Locator.fill: Target page, context or browser has been closed: option "
+             "'malfurion.stormrage@[tenantdomain]' in <id>")
+
+    def assert_no_leak(self, text: str) -> None:
+        for leak in ("contoso.onmicrosoft.com", "9f8e7d6c", TENANT_ID, "Qx7!fake-generated",
+                     "LoveAzeroth!2004", "Call log", "<input"):
+            self.assertNotIn(leak, text)
+
+    def test_main_prints_a_browser_error_before_the_first_step_scrubbed(self) -> None:
+        for error in (run.PlaywrightError(self.CRASH), SystemExit(f"GUARD FAILED: no tenant ID {TENANT_ID}")):
+            with self.subTest(error=type(error).__name__):
+                code, out, err = self.main(mock.patch.object(run, "open_portal", side_effect=error))
+                self.assertEqual(code, run.NOT_STARTED)
+                self.assert_no_leak(out + err)
+        self.assertIn(f"The browser stopped before the first step: {self.SHOWN}\n",
+                      self.main(mock.patch.object(run, "open_portal", side_effect=run.PlaywrightError(self.CRASH)))[1])
+
+    def test_main_prints_a_crash_mid_run_as_frames_and_a_scrubbed_first_line(self) -> None:
+        def crash(runner, state=None):
+            raise run.PlaywrightError(self.CRASH)
+
+        def summary_fails(runner):
+            raise LookupError("summary of contoso.onmicrosoft.com")
+
+        code, out, err = self.main(mock.patch.object(run, "open_portal", return_value=(mock.Mock(), FakePage())),
+                                   mock.patch.object(run.Runner, "run", crash),
+                                   mock.patch.object(run.Runner, "finish", summary_fails))
+        self.assertEqual(code, run.ABORTED)
+        self.assertIn(f"Stopped ({self.SHOWN}). Progress is in", out)
+        # Enough to debug: the frames, the type and the first line of each error.
+        self.assertIn("Traceback (most recent call last):\n", err)
+        self.assertRegex(err, r'File ".*test_runner\.py", line \d+, in crash\n')
+        self.assertIn(f"{self.SHOWN}\n", err)
+        self.assertIn("LookupError: summary of [tenantdomain]\n", err)
+        self.assert_no_leak(out + err)
+
+    def test_once_the_runner_exists_main_scrubs_with_its_redactor_and_secrets(self) -> None:
+        def crash(runner, state=None):
+            runner.secrets.add("Fresh!Secret7")         # what only the runner knows
+            raise LookupError("could not type Fresh!Secret7")
+
+        code, out, err = self.main(mock.patch.object(run, "open_portal", return_value=(mock.Mock(), FakePage())),
+                                   mock.patch.object(run.Runner, "run", crash))
+        self.assertEqual(code, run.ABORTED)
+        self.assertIn("Stopped (LookupError: could not type [secret]).", out)
+        self.assertNotIn("Fresh!Secret7", out + err)
+
+    def test_the_traceback_follows_the_chain_of_errors(self) -> None:
+        redactor = run.Redactor("contoso.onmicrosoft.com", TENANT_ID)
+        try:
+            try:
+                raise run.PlaywrightError(self.CRASH)
+            except run.PlaywrightError as error:
+                raise LookupError("the domain combo box: contoso.onmicrosoft.com") from error
+        except LookupError as error:
+            text = run.redacted_traceback(error, redactor, {"LoveAzeroth!2004"})
+        self.assertLess(text.index(self.SHOWN), text.index("LookupError: the domain combo box: [tenantdomain]"))
+        self.assertEqual(text.count("Traceback (most recent call last):"), 2)
+        self.assert_no_leak(text)
 
 
 if __name__ == "__main__":
