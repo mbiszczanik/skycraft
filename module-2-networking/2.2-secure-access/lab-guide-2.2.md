@@ -694,8 +694,21 @@ Evaluation:
    - Microsoft.Sql
    - Microsoft.Storage
 
-3. Navigate to **Subnets** → **WorldSubnet** and confirm **Microsoft.Storage**
-4. Navigate to **prod-skycraft-swc-vnet** and repeat both checks
+3. Navigate to **Subnets** → **WorldSubnet**
+4. Confirm **Service endpoints** shows:
+
+   - Microsoft.Storage
+
+5. Navigate to **prod-skycraft-swc-vnet** → **Subnets** → **DatabaseSubnet**
+6. Confirm **Service endpoints** shows:
+
+   - Microsoft.Sql
+   - Microsoft.Storage
+
+7. Navigate to **Subnets** → **WorldSubnet**
+8. Confirm **Service endpoints** shows:
+
+   - Microsoft.Storage
 
 **Expected Result**: Database subnets can access Azure SQL and Storage over Microsoft backbone (private routing), and both `WorldSubnet`s carry `Microsoft.Storage` for Lab 4.4.
 
@@ -735,7 +748,9 @@ Quick verification before proceeding:
 ### Service Endpoints
 
 - [ ] Service endpoints enabled on dev DatabaseSubnet (Microsoft.Sql, Microsoft.Storage)
+- [ ] Service endpoint enabled on dev WorldSubnet (Microsoft.Storage) - required by Lab 4.4
 - [ ] Service endpoints enabled on prod DatabaseSubnet (Microsoft.Sql, Microsoft.Storage)
+- [ ] Service endpoint enabled on prod WorldSubnet (Microsoft.Storage) - required by Lab 4.4
 
 **For detailed verification**, see [lab-checklist-2.2.md](lab-checklist-2.2.md)
 
