@@ -27,15 +27,17 @@
     like any other entry for such a step.
 
     It also keeps tenant data out of this public repository: for every recording, no e-mail
-    address, tenant domain or GUID, and only query-free portal.azure.com blade addresses; for lab
-    1.1, the tenant prefix and the guest address of step 1.1.5 are environment references.
+    address, tenant domain or GUID, and only query-free portal.azure.com blade addresses, read
+    percent-decoded, without an address, a guest user principal name or an id with or without
+    hyphens (issue #206); for lab 1.1, the tenant prefix and the guest address of step 1.1.5 are
+    environment references.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Guide-Drift-Recording.Tests.ps1
 
 .NOTES
     Project: SkyCraft
-    Issue:   #189, #199, #200, #202
+    Issue:   #189, #199, #200, #202, #206
 #>
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
@@ -137,6 +139,39 @@ $SkipRuleCases = @(
     @{ json = '{ "skip": ["optional"] }'; problem = "step 9.9.1: 'skip' must be the reason the step is skipped, a non-empty string" }
 ) | ForEach-Object { $_.actual = @(Get-SkipProblem -StepId '9.9.1' -Entry ($_.json | ConvertFrom-Json)) -join '; '; $_ }
 
+# Why a step's recorded viewUrl must not be in this public repository; nothing when it may. A
+# recorded address is the Portal's URL for a blade; the runner (recording.Redactor.view_url)
+# leaves out tenant data, ids and query strings, also percent-encoded ones, and this is the
+# backstop. The address is read decoded, as '%40' is an '@' and '%23EXT%23' a guest's '#EXT#'.
+function Get-ViewUrlProblem {
+    param([string]$StepId, [object]$Url)
+    if ($null -eq $Url) { return }
+    if ($Url -isnot [string] -or -not $Url.StartsWith('https://portal.azure.com/#', [System.StringComparison]::Ordinal)) {
+        return "step $StepId viewUrl does not start with https://portal.azure.com/#"
+    }
+    $decoded = [uri]::UnescapeDataString($Url)
+    if ($decoded.Contains('@') -or $decoded.Contains('?')) { "step $StepId viewUrl contains '@' or '?' (also percent-encoded)" }
+    if ($decoded -match '#EXT#') { "step $StepId viewUrl contains a guest user principal name (#EXT#)" }
+    if ($decoded -match '[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}' -or $decoded -match '(?<![0-9a-fA-F])[0-9a-fA-F]{32}(?![0-9a-fA-F])') {
+        "step $StepId viewUrl contains an id (with or without hyphens)"
+    }
+}
+
+# Example data only: example.com and made-up ids.
+$ViewUrlRuleCases = @(
+    @{ url = 'https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups'; problem = '' }
+    @{ url = 'https://portal.azure.com/#view/Group/groupId/<id>'; problem = '' }
+    @{ url = 'https://portal.azure.com/#view/Group/name/SkyCraft%20Admins'; problem = '' }
+    @{ url = 'https://example.com/#view/One'; problem = 'step 9.9.1 viewUrl does not start with https://portal.azure.com/#' }
+    @{ url = 'https://portal.azure.com/#view/User/upn/someone@example.com'; problem = "step 9.9.1 viewUrl contains '@' or '?' (also percent-encoded)" }
+    @{ url = 'https://portal.azure.com/#view/User/upn/someone%40example.com'; problem = "step 9.9.1 viewUrl contains '@' or '?' (also percent-encoded)" }
+    @{ url = 'https://portal.azure.com/#view/Blade/filter%3Fname'; problem = "step 9.9.1 viewUrl contains '@' or '?' (also percent-encoded)" }
+    @{ url = 'https://portal.azure.com/#view/User/upn/someone_example.com%23EXT%23'; problem = 'step 9.9.1 viewUrl contains a guest user principal name (#EXT#)' }
+    @{ url = 'https://portal.azure.com/#view/Blade/id/11111111-2222-3333-4444-555555555555'; problem = 'step 9.9.1 viewUrl contains an id (with or without hyphens)' }
+    @{ url = 'https://portal.azure.com/#view/Blade/id/1111111122223333444455555555aaaa'; problem = 'step 9.9.1 viewUrl contains an id (with or without hyphens)' }
+    @{ url = 'https://portal.azure.com/#view/Blade/id/%2F1111111122223333444455555555aaaa'; problem = 'step 9.9.1 viewUrl contains an id (with or without hyphens)' }
+) | ForEach-Object { $_.actual = @(Get-ViewUrlProblem -StepId '9.9.1' -Url $_.url) -join '; '; $_ }
+
 $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/recordings') -Filter 'lab-*.json' |
     ForEach-Object {
         $file      = $_
@@ -234,14 +269,9 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
             }
         )
 
-        # A recorded address is the Portal's URL for a blade. The runner redacts tenant domain,
-        # tenant id, GUIDs and query strings before it saves one; this is the backstop.
         $badUrls = @(
             foreach ($prop in $recording.steps.PSObject.Properties) {
-                $url = $prop.Value.viewUrl
-                if ($null -eq $url) { continue }
-                if ($url -isnot [string] -or -not $url.StartsWith('https://portal.azure.com/#', [System.StringComparison]::Ordinal)) { "step $($prop.Name) viewUrl does not start with https://portal.azure.com/#" }
-                elseif ($url.Contains('@') -or $url.Contains('?')) { "step $($prop.Name) viewUrl contains '@' or '?'" }
+                Get-ViewUrlProblem -StepId $prop.Name -Url $prop.Value.viewUrl
             }
         )
 
@@ -334,6 +364,10 @@ Describe 'Guide drift recordings - nothing tenant-specific is literal (this repo
 
     It "'<file>' records only portal.azure.com blade addresses without query or tenant" -ForEach $RecordingCases {
         $badUrls | Should -BeNullOrEmpty -Because ($badUrls -join '; ')
+    }
+
+    It "reports the viewUrl <url> as '<problem>' (empty: it may be recorded)" -ForEach $ViewUrlRuleCases {
+        $actual | Should -Be $problem
     }
 }
 

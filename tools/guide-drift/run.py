@@ -64,13 +64,22 @@ same --log-dir/<run id>/ folder, and its summary and exit code cover every step 
 A resumed run, and one started with --from-step, has a new browser on the Microsoft Entra ID
 overview, not where the stopped run left the Portal (issue #206). So before the first step that
 runs, the Portal is brought to the view that step starts from (Runner.start_view): the view the
-recording keeps for the last step performed before it (after y, the step that was in flight;
-after n, the step before it). The run opens that view itself, pinned to the tenant, when it can:
-not when the view names an object by id ('<id>': the recording leaves ids out) or is no Portal
-view. Otherwise it prints the view and why it cannot open it, or says that no view is recorded
-for that step. Either way it waits for Enter, as the recording keeps no query string and a view
-opened on its own has no blades before it: the person checks the Portal and corrects it. The
-answer to the resume question is saved only then, so closed input there leaves the state as is.
+recording keeps for the last step performed before it, passing over steps the recording skips.
+After y that is the view the step in flight ended on; after n, the view the step before it ended
+on, so that it is redone from there; after s, the skipped step's own view when it has one (from
+an earlier run), or else the view it started from, as a failed step records none. The run opens
+that view itself, pinned to the tenant, when it can: not when the view names an object by id
+('<id>': the recording leaves ids out), keeps a '[token]' or '${NAME}' this run cannot fill in
+(an environment variable that is not set), or is no Portal view. Otherwise it prints the view
+and why it cannot open it, or says that no view is recorded for that step. Either way it waits
+for Enter, as the recording keeps no query string and a view opened on its own has none of the
+blades the guide opened before it: the person checks the Portal and corrects it. The answer to
+the resume question is saved only then, so closed input there leaves the state as it was.
+
+A view is recorded only from a Portal page, and only without tenant or personal data
+(Redactor.view_url): the tenant pin, query strings and object ids (with or without hyphens) are
+left out, and a view that still holds an address, a guest user principal name, an id or tenant
+data once percent-decoded is recorded as none.
 
 A step whose recording entry carries '"skip": "<reason>"' (an optional or conceptual step that
 would create resources, or the other option of a lettered pair; issue #200) is never performed:
@@ -121,9 +130,9 @@ Found = TypeVar("Found")     # what in_time() looks for
 
 PORTAL = "https://portal.azure.com"
 ENTRA_OVERVIEW = "/view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Overview"
-# What keeps a recorded view (Redactor.view_url) from being opened as an address on resume (#206):
-# an object id the recording left out, or a token the Redactor cannot restore.
-UNOPENABLE_VIEW = re.compile(r"<id>|\[[^\]]*\]|\$\{")
+# A token left in a recorded view once the Redactor restored it: '[token]' or '${NAME}', which this
+# run cannot fill in, so the view is not opened on resume (#206).
+UNFILLED_TOKEN = re.compile(r"\[[^\]]*\]|\$\{[^}]*\}?")
 SETTLE_MS = 1500
 FIND_TIMEOUT_MS = 8000
 CHECK_TIMEOUT_MS = 2000     # set_checked() before the label is tried, and the wait for its effect
@@ -1744,8 +1753,14 @@ class Runner:
         """Keep the view `step` ended on in the recording (redacted: Redactor.view_url), where a
         resume finds it for the step after it. Called when the step went through, and when the
         person finished it by hand ('c'), so that a step done by hand leaves a view too (#206).
-        Nothing is kept from a closed window: its address is the last one it showed."""
+        The recording is left as it is for a closed window (its address is the last one it
+        showed) and for a page off the Portal (a sign-in page). A Portal view that cannot be kept
+        without tenant or personal data (view_url gives None) is recorded as None, so that a
+        resume does not open the view an older run ended on."""
         if self.page.is_closed():
+            return
+        address = urlsplit(self.page.url)
+        if f"{address.scheme}://{address.netloc}" != PORTAL:
             return
         self.step_entry(step)["viewUrl"] = self.redactor.view_url(self.page.url)
         self.save_recording()
@@ -1828,40 +1843,59 @@ class Runner:
                                      "completed": completed, "inFlight": in_flight,
                                      "finished": finished, "logDir": str(Path(self.args.log_dir).resolve())})
 
-    def start_view(self, portal: list[dict], index: int) -> tuple[str | None, str | None]:
+    def start_view(self, portal: list[dict], index: int, skipped: tuple[str, ...] = ()) -> tuple[str | None, str | None]:
         """The view portal[index] starts from: (the id of the last step performed before it, the
         view the recording keeps for that step or None). (None, None) when no step comes before
         it. A step the recording skips never moved the Portal, so the step before it is taken
-        instead (#200)."""
-        while index > 0 and skip_reason(self.recording, portal[index - 1]["id"]) is not None:
+        instead (#200). So is a step in `skipped` (skipped with 's' at the resume prompt) that has
+        no view of its own: it failed, so it never recorded one, and the guide's next step most
+        likely starts where it started."""
+        while index > 0:
+            before = portal[index - 1]["id"]
+            if skip_reason(self.recording, before) is None and (
+                    before not in skipped or self.recording["steps"].get(before, {}).get("viewUrl")):
+                break
             index -= 1
         if index == 0:
             return None, None
         previous = portal[index - 1]["id"]
         return previous, self.recording["steps"].get(previous, {}).get("viewUrl")
 
+    def view_problem(self, view: str) -> str | None:
+        """Why a recorded view cannot be opened as an address in this run, for the person; None
+        when it can. A recording is data, and the run only ever goes to the Portal."""
+        restored = self.redactor.restore(view)
+        parts = urlsplit(restored)
+        if "<id>" in view:
+            return "it names an object by id, which the recording leaves out"
+        token = UNFILLED_TOKEN.search(parts.fragment)
+        if token:
+            return (f"it keeps {token.group(0)}, which this run cannot fill in "
+                    f"(is the environment variable set?)")
+        if (f"{parts.scheme}://{parts.netloc}" != PORTAL or parts.path not in ("", "/") or parts.query
+                or not parts.fragment or parts.fragment.startswith("@")):
+            return "it is no Portal view the run can open"
+        return None
+
     def view_address(self, view: str) -> str | None:
         """The address that opens a recorded view in this run's tenant: the view with the tenant
-        data restored and the tenant pinned, as open_portal() pins it. None when it cannot be
-        opened: it names an object by id, which the recording leaves out ('<id>'), it keeps a
-        token the Redactor cannot restore, or it is no Portal view at all (a recording is data,
-        and the run only ever goes to the Portal)."""
-        parts = urlsplit(self.redactor.restore(view))
-        if (f"{parts.scheme}://{parts.netloc}" != PORTAL or parts.path not in ("", "/") or parts.query
-                or not parts.fragment or parts.fragment.startswith("@")
-                or UNOPENABLE_VIEW.search(parts.fragment)):
+        data restored and the tenant pinned, as open_portal() pins it. None when view_problem()
+        names a reason it cannot be opened."""
+        if self.view_problem(view) is not None:
             return None
-        return f"{PORTAL}/#@{self.args.tenant_id}/{parts.fragment}"
+        return f"{PORTAL}/#@{self.args.tenant_id}/{urlsplit(self.redactor.restore(view)).fragment}"
 
-    def bring_to_view(self, portal: list[dict], index: int, passed: str = "") -> bool:
+    def bring_to_view(self, portal: list[dict], index: int, passed: str = "",
+                      skipped: tuple[str, ...] = ()) -> bool:
         """Before portal[index], the first step a resumed run (or one started with --from-step)
         performs: its browser is new and shows the Microsoft Entra ID overview, not the view the
-        step starts from (#206). Opens that view when the recording keeps one that can be opened
-        (view_address); otherwise says what to bring the Portal to and why the run cannot. Then
-        waits for Enter either way: the recording keeps no query string, and a view opened on its
-        own has no blades before it. False when input is closed."""
+        step starts from (#206; start_view, with the steps skipped at the resume prompt). Opens
+        that view when the recording keeps one that can be opened (view_address); otherwise says
+        what to bring the Portal to and why the run cannot. Then waits for Enter either way: the
+        recording keeps no query string, and a view opened on its own has none of the blades the
+        guide opened before it. False when input is closed."""
         step = portal[index]
-        previous, view = self.start_view(portal, index)
+        previous, view = self.start_view(portal, index, skipped)
         head = f"\nStarting at step {step['id']} ({step['title']}){passed}."
         if previous is None:
             print(f"{head} No step of the lab comes before it, so it starts where a new run does, on "
@@ -1870,18 +1904,17 @@ class Runner:
             print(f"{head} No view is recorded for step {previous}, the step before it, so the run cannot "
                   f"open it: bring the Portal to where step {previous} ends in the guide, then press Enter.")
         else:
-            address = self.view_address(view)
-            why = ("it names an object by id, which the recording leaves out" if "<id>" in view
-                   else "it is no Portal view the run can open")
-            if address is not None:
+            why = self.view_problem(view)
+            if why is None:
                 try:
-                    self.page.goto(address, wait_until="domcontentloaded")
+                    self.page.goto(self.view_address(view), wait_until="domcontentloaded")
                 except PlaywrightError as error:
                     why = f"opening it failed: {(str(error).strip().splitlines() or [type(error).__name__])[0]}"
                 else:
                     print(f"{head} Opened the view step {previous} ended on:\n  {view}\n"
-                          f"Check the Portal shows it (the recording keeps no query string, so bring it "
-                          f"there if not), then press Enter.")
+                          f"Check the Portal shows it, then press Enter. The recording keeps no query "
+                          f"string, and the blades the guide opened before it are not open: if the step "
+                          f"needs them, bring the Portal there by hand first.")
                     return self.prompt("> ") is not None
             print(f"{head} Bring the Portal to the view step {previous} ended on, then press Enter "
                   f"(the run cannot open it: {self.redactor.redact(why)}):\n  {view}")
@@ -1930,7 +1963,7 @@ class Runner:
                 skipped = [s["id"] for s in portal[start:runs] if skip_reason(self.recording, s["id"]) is not None]
                 passed = ("" if not skipped else f" (the recording skips step {skipped[0]})" if len(skipped) == 1
                           else f" (the recording skips steps {', '.join(skipped)})")
-                if not self.bring_to_view(portal, runs, passed):
+                if not self.bring_to_view(portal, runs, passed, (first["id"],) if answer == "s" else ()):
                     print("No answer (input closed); nothing was run.")
                     return NOT_STARTED
         if answer in ("y", "s"):

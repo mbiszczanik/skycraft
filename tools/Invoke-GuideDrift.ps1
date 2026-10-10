@@ -87,10 +87,15 @@
 
     A RESUMED RUN HAS A NEW BROWSER on the Microsoft Entra ID overview (issue #206), and so has a
     run started with -FromStep. Before the first step that runs, the run opens the view that step
-    starts from, from the recording: the view the step before it ended on (after y, the step that
-    was in flight). It cannot open a view that names an object by id (the recording leaves ids
-    out); then it prints the view and the reason, or says no view is recorded for that step, and
-    you bring the Portal there by hand. Either way it waits for Enter, so check the Portal first.
+    starts from, from the recording: after y, the view the step in flight ended on; after n, the
+    view the step before it ended on, to redo it from there; after s, the skipped step's own view,
+    or the view it started from when it has none. It cannot open a view that names an object by
+    id (the recording leaves ids out) or keeps a [token] or ${NAME} this run cannot fill in (is
+    the environment variable set?); then it prints the view and the reason, or says no view is
+    recorded for that step, and you bring the Portal there by hand. Either way it waits for Enter:
+    check the Portal first, as an opened view has none of the blades the guide opened before it.
+    A view is recorded only without tenant or personal data, also once percent-decoded; one that
+    cannot be is recorded as none.
 
     CLEANUP IS THE LAB'S OWN, AND ONLY AFTER A FINISHED RUN. This script has no deletion logic.
     Unless -SkipCleanup, and only when run.py ended normally and the state file confirms it

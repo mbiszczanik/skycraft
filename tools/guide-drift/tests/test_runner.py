@@ -737,6 +737,50 @@ class ResumeViewTests(RunnerTestCase):
         self.assertEqual(r.page.visited, [f"https://portal.azure.com/#@{TENANT_ID}/view/Done/name/contoso.onmicrosoft.com"])
         self.assertNotIn("No view is recorded", out)
 
+    def test_an_opened_view_says_the_blades_before_it_are_not_open(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"viewUrl": "https://portal.azure.com/#view/Two"}
+        _, out, _ = self.resume(["y", ""])
+        self.assertIn("The recording keeps no query string, and the blades the guide opened before it "
+                      "are not open: if the step needs them, bring the Portal there by hand first.", out)
+
+    def test_a_view_with_a_token_this_run_cannot_fill_in_names_the_token(self) -> None:
+        for token in ("${SKYCRAFT_GUIDE_DRIFT_UNSET}", "[unknowntoken]"):
+            with self.subTest(token=token):
+                self.recording["steps"]["9.9.2"] = {"viewUrl": f"https://portal.azure.com/#view/Invite/{token}"}
+                r, out, _ = self.resume(["y", ""])
+                self.assertEqual(r.page.visited, [])
+                self.assertIn(f"(the run cannot open it: it keeps {token}, which this run cannot fill in "
+                              f"(is the environment variable set?))", out)
+
+    def test_after_s_a_skipped_step_without_a_view_falls_back_to_the_view_it_started_from(self) -> None:
+        r, out, code = self.resume(["s", ""])          # 9.9.2 failed before: no view of its own
+        self.assertEqual(code, 0)
+        self.assertEqual(r.page.visited, [f"https://portal.azure.com/#@{TENANT_ID}/view/One"])
+        self.assertIn("Opened the view step 9.9.1 ended on:", out)
+        self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+        # A step finished with y that has no view is not passed over: it is named instead.
+        r, out, _ = self.resume(["y", ""])
+        self.assertEqual(r.page.visited, [])
+        self.assertIn("No view is recorded for step 9.9.2", out)
+
+    def test_a_step_done_by_hand_off_the_portal_leaves_the_recording_as_it_is(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"viewUrl": "https://portal.azure.com/#view/Two"}
+        page = FakePage()
+        page.url = "https://login.microsoftonline.com/common/oauth2/authorize#x"
+        r = self.runner(answers=["c"], failing={"9.9.2"}, page=page)
+        self.quietly(r.run)
+        self.assertEqual(self.recording["steps"]["9.9.2"]["viewUrl"], "https://portal.azure.com/#view/Two")
+
+    def test_a_step_done_by_hand_on_a_view_with_personal_data_records_none(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"viewUrl": "https://portal.azure.com/#view/Two"}
+        page = FakePage()
+        page.url = f"https://portal.azure.com/#@{TENANT_ID}/view/User/upn/someone%40example.com"
+        r = self.runner(answers=["c"], failing={"9.9.2"}, page=page)
+        self.quietly(r.run)
+        self.assertIsNone(self.recording["steps"]["9.9.2"]["viewUrl"])
+        saved = (self.tmp / "rec.json").read_text(encoding="utf-8")
+        self.assertNotIn("example.com", saved)
+
     def test_a_step_done_by_hand_in_a_closed_window_records_no_view(self) -> None:
         r = self.runner(answers=["c"], failing={"9.9.2"}, page=FakePage(closed=True))
         self.quietly(r.run)

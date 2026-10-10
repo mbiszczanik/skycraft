@@ -29,7 +29,7 @@ import os
 import re
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from decide import Candidate
 from parse import BRACKET_TOKEN, value_is_literal
@@ -82,6 +82,9 @@ def write_json(path: Path, data: dict) -> None:
 
 
 GUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
+# A GUID written without hyphens: 32 hex digits that are not part of a longer run, also right
+# after a percent-encoded character ('%2F' and the id).
+HEX_ID = re.compile(r"(?:(?<=%[0-9a-fA-F]{2})|(?<![0-9a-fA-F]))[0-9a-fA-F]{32}(?![0-9a-fA-F])")
 
 
 class Redactor:
@@ -157,12 +160,22 @@ class Redactor:
             return name
         return re.compile("^" + re.escape(restored) + "$", re.IGNORECASE)
 
-    def view_url(self, url: str) -> str:
+    def view_url(self, url: str) -> str | None:
         """The Portal view without the tenant pin ('#@<tenant>/'), query strings (before or inside
-        the fragment) or object ids: shown to the person on -Resume, never navigated to."""
+        the fragment), object ids (GUIDs, with or without hyphens: '<id>') or tenant data, for the
+        recording; a resume opens it again (run.py, Runner.view_address). None when the view
+        cannot be kept without tenant or personal data: once percent-decoded ('%40' is '@'), it
+        still holds an address or a user principal name ('@', '#EXT#'), a query, an id, or text
+        the Redactor would replace (an encoded tenant name, 'Contoso%20Ltd')."""
         parts = urlsplit(url)
         fragment = re.sub(r"^@[^/]*/?", "", parts.fragment).split("?", 1)[0]
-        return self.redact(GUID.sub("<id>", f"{parts.scheme}://{parts.netloc}{parts.path}#{fragment}"))
+        view = f"{parts.scheme}://{parts.netloc}{parts.path}#{fragment}"
+        view = self.redact(HEX_ID.sub("<id>", GUID.sub("<id>", view)))
+        decoded = unquote(view)
+        if ("@" in decoded or "?" in decoded or "#ext#" in decoded.casefold() or GUID.search(decoded)
+                or HEX_ID.search(decoded) or self.redact(decoded) != decoded):
+            return None
+        return view
 
 
 def env_secrets(recording: dict) -> dict[str, str]:

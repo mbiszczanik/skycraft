@@ -112,6 +112,38 @@ class RedactorTests(unittest.TestCase):
                "11111111-2222-3333-4444-555555555555?q=1")
         self.assertEqual(self.redactor.view_url(url), "https://portal.azure.com/#view/Blade/id/<id>")
 
+    def test_view_url_maps_an_id_without_hyphens_to_the_id_token(self) -> None:
+        for raw in ("view/Blade/id/1111111122223333444455555555aaaa",
+                    "view/Blade/id/%2F1111111122223333444455555555aaaa"):     # right after '%2F'
+            with self.subTest(raw=raw):
+                self.assertEqual(self.redactor.view_url(f"https://portal.azure.com/#{raw}"),
+                                 f"https://portal.azure.com/#{raw[:raw.index('id/') + 3]}"
+                                 f"{'%2F' if '%2F' in raw else ''}<id>")
+        # A longer run of hex digits is no id.
+        longer = "https://portal.azure.com/#view/Blade/hash/" + "a" * 40
+        self.assertEqual(self.redactor.view_url(longer), longer)
+
+    def test_view_url_keeps_nothing_that_holds_personal_or_tenant_data_once_decoded(self) -> None:
+        for fragment in ("view/User/upn/someone%40example.com",            # an address, encoded
+                         "view/User/upn/someone_example.com%23EXT%23",     # a guest UPN, encoded
+                         "view/User/upn/someone_example.com%23ext%23",
+                         "view/Blade/filter%3Fname",                       # a query, encoded
+                         "view/Blade/id/1111111122223333444455555555aaa%61",   # an id, partly encoded
+                         "view/Blade/id/11111111%2D2222-3333-4444-555555555555",
+                         "view/Invite/me%40example.com"):
+            with self.subTest(fragment=fragment):
+                self.assertIsNone(self.redactor.view_url(f"https://portal.azure.com/#@{DOMAIN}/{fragment}"))
+
+    def test_view_url_keeps_no_tenant_name_that_only_decoding_shows(self) -> None:
+        redactor = Redactor(DOMAIN, TENANT, tenant_name="Fabrikam Labs")
+        self.assertIsNone(redactor.view_url("https://portal.azure.com/#view/Tenant/name/Fabrikam%20Labs"))
+        self.assertEqual(redactor.view_url("https://portal.azure.com/#view/Tenant/name/Fabrikam Labs"),
+                         "https://portal.azure.com/#view/Tenant/name/[tenantname]")
+
+    def test_view_url_keeps_encoded_text_without_personal_data(self) -> None:
+        url = "https://portal.azure.com/#view/Blade/name/SkyCraft%20Admins"
+        self.assertEqual(self.redactor.view_url(url), url)
+
 
 class EnvSecretsTests(unittest.TestCase):
     def test_only_addresses_become_secrets(self) -> None:
