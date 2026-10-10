@@ -100,14 +100,18 @@
     A STEP ON THE WRONG BLADE (issue #207). The recording keeps the blade each step starts on
     ("startBlade": the blade part of the redacted view, such as
     Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members), recorded the first time the step's first
-    item goes through, with or without your help. Before a step with a recorded blade, the run
-    compares the open blade with it; on another blade it reports misleading drift ('the step
-    starts on X, the Portal is on Y; the guide does not say how to get there') and waits for you
-    to bring the Portal to X and press Enter. A step that opens with a global search, or with a
-    resource name, may start anywhere and is not checked. Before the first field of a form, the
-    run checks a field of that name can be filled in, so it never types into a list; when none
-    can, it reports the same drift and waits for you to open the form. A wrong recorded blade is
-    deleted from the recording by hand; the next run records it again.
+    item goes through, with or without your help, once the address has settled; the console
+    says 'Recorded: step X starts on <blade>', so check it. Before a step with a recorded blade,
+    the run compares the open blade with it (ignoring case and a trailing overview) for a few
+    seconds; when it never matches, it reports misleading drift ('the step starts on X, the
+    Portal is on Y; the guide does not say how to get there') and waits for you to bring the
+    Portal to X and press Enter. The first step after -Resume or -FromStep, and the first after a
+    step the recording skips, are asked about the same way without blaming the guide, and the
+    latter records no blade. A step that opens with a global search, or with a resource name,
+    may start anywhere and is not checked. Before the first field of a form, the run checks a
+    field of that name can be filled in, so it never types into a list; when none can, it
+    reports the same drift (once per cause) and waits for you to open the form. A wrong recorded
+    blade is deleted from the recording by hand; the next run records it again.
 
     CLEANUP IS THE LAB'S OWN, AND ONLY AFTER A FINISHED RUN. This script has no deletion logic.
     Unless -SkipCleanup, and only when run.py ended normally and the state file confirms it

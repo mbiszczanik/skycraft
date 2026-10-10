@@ -20,6 +20,8 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   rejected_candidates  the reference set of candidates not chosen, without tenant data
   skip_reason          why the recording skips a step ('"skip": "<reason>"', #200), or None
   view_blade           the blade part of a recorded view, what a step's start is compared by (#207)
+  same_blade           whether two blades are the same, regardless of case and of a trailing
+                       'overview' (#207)
   start_blade          the blade the recording says a step starts on ('"startBlade"', #207), or
                        None when it is not recorded yet
   write_json           writes the recording or the state file atomically
@@ -245,10 +247,13 @@ def view_blade(view: str | None) -> str | None:
     """The blade part of a view as Redactor.view_url records it (#207). For a '#view/' or
     '#blade/' address: the extension and the blade, and the menu entry after '~' when there is
     one, without the blade's inputs ('Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members' of
-    '#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members/groupId/<id>'). For any other
-    address ('#resource/subscriptions/<id>/...', '#home'): the whole fragment. None for no view
-    and for an empty fragment. It is cut from the redacted view, so it holds nothing view_url
-    would not record."""
+    '#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members/groupId/<id>'). The one input kept
+    is a HubsExtension Browse blade's resourceType, which is what the list shows
+    ('HubsExtension/BrowseResource.ReactView/resourceType/Microsoft.Network%2FloadBalancers'):
+    without it every resource list would be the same blade. A type written with a plain '/'
+    keeps the segment after it too. For any other address ('#resource/subscriptions/<id>/...',
+    '#home'): the whole fragment. None for no view and for an empty fragment. It is cut from the
+    redacted view, so it holds nothing view_url would not record."""
     if view is None:
         return None
     fragment = urlsplit(view).fragment.strip("/")
@@ -261,7 +266,26 @@ def view_blade(view: str | None) -> str | None:
     blade = parts[:2]
     if len(parts) >= 4 and parts[2] == "~":
         blade += parts[2:4]
+    elif (len(parts) >= 4 and parts[0] == "HubsExtension" and parts[1].startswith("Browse")
+          and "resourceType" in parts[2:-1]):
+        at = parts.index("resourceType", 2)
+        blade += parts[at:at + 2]
+        if "%2f" not in parts[at + 1].casefold() and at + 2 < len(parts):
+            blade.append(parts[at + 2])     # 'Microsoft.Network/loadBalancers' unencoded
     return "/".join(blade)
+
+
+# A blade's own overview, which the Portal opens when no menu entry is named: '<resource>' and
+# '<resource>/overview', 'X/~/Overview' and 'X', are the same blade.
+TRAILING_OVERVIEW = re.compile(r"(?:/~)?/overview$|/~$", re.IGNORECASE)
+
+
+def same_blade(one: str, other: str) -> bool:
+    """Whether two blades (view_blade) are the same one: compared regardless of case and of a
+    trailing overview (TRAILING_OVERVIEW)."""
+    def key(blade: str) -> str:
+        return TRAILING_OVERVIEW.sub("", blade.strip("/")).casefold()
+    return key(one) == key(other)
 
 
 def start_blade(recording: dict, step_id: str) -> str | None:

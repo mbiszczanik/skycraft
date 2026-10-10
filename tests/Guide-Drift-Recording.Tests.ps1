@@ -33,10 +33,10 @@
     environment references.
 
     A step entry may carry '"startBlade": "<blade>"' (issue #207): the blade part of the view the
-    step starts on, which the runner compares the open blade with. It is optional (absent or null
-    is 'not recorded yet'); when present it must be a non-empty string, which run.py also
-    requires before it starts, and it is read as the view it was cut from, by the same rules as a
-    viewUrl.
+    step starts on (for a HubsExtension Browse blade, with the resource type it lists), which the
+    runner compares the open blade with. It is optional (absent or null is 'not recorded yet');
+    when present it must be a non-empty string, which run.py also requires before it starts, and
+    it is read as the view it was cut from, by the same rules as a viewUrl.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Guide-Drift-Recording.Tests.ps1
@@ -194,6 +194,10 @@ $StartBladeRuleCases = @(
     @{ json = '{ "startBlade": null }'; problem = '' }
     @{ json = '{ "startBlade": "Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members" }'; problem = '' }
     @{ json = '{ "startBlade": "resource/subscriptions/<id>/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Network/loadBalancers/dev-skycraft-swc-lb/backendPools" }'; problem = '' }
+    # A Browse blade keeps the resource type it lists (percent-encoded '/'), which is no tenant data.
+    @{ json = '{ "startBlade": "HubsExtension/BrowseResource.ReactView/resourceType/Microsoft.Network%2FloadBalancers" }'; problem = '' }
+    @{ json = '{ "startBlade": "HubsExtension/BrowseResource/resourceType/someone%2540example.com" }'; problem = "step 9.9.1 startBlade contains '@' or '?' (also percent-encoded)" }
+    @{ json = '{ "startBlade": "HubsExtension/BrowseResource/resourceType/1111111122223333444455555555aaaa" }'; problem = 'step 9.9.1 startBlade contains an id (with or without hyphens)' }
     @{ json = '{ "startBlade": "" }'; problem = "step 9.9.1: 'startBlade' must be the blade part of a Portal view, a non-empty string" }
     @{ json = '{ "startBlade": "   " }'; problem = "step 9.9.1: 'startBlade' must be the blade part of a Portal view, a non-empty string" }
     @{ json = '{ "startBlade": true }'; problem = "step 9.9.1: 'startBlade' must be the blade part of a Portal view, a non-empty string" }

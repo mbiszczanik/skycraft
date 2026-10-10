@@ -1,9 +1,9 @@
 """Unit tests for run.py's bookkeeping: state, resume, failure handling, recording of decisions
 (issue #189), steps the recording skips (#200), the view a resumed run starts from (#206), the
-blade a step starts on and the form its fields are filled in on (#207), and how it finds what a guide names (search, '+' labels, plain text, collapsed menu groups, a blade
-still loading, a resource a chain names, #199). No browser: the page is a
-small fake (Screen stands in for a frame), and run_step is scripted where only the order of
-steps matters.
+blade a step starts on and the form its fields are filled in on (#207), and how it finds what a
+guide names (search, '+' labels, plain text, collapsed menu groups, a blade still loading, a
+resource a chain names, #199). No browser: the page is a small fake (Screen stands in for a
+frame), and run_step is scripted where only the order of steps matters.
 
 run.py imports Playwright at module level and the CI runner does not install it, so a minimal
 stub of playwright.sync_api is put in sys.modules when the real one is missing. Nothing here
@@ -2379,11 +2379,35 @@ USERS = "Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/AllUsers"
 CREATE_USER = "Microsoft_AAD_UsersAndTenants/CreateUser.ReactView"
 
 
+def address(view: str) -> str:
+    """A Portal view pinned to the tenant, with a query, as the Portal shows it."""
+    return f"https://portal.azure.com/#@{TENANT_ID}/{view}?feature.x=1"
+
+
 def page_on(view: str) -> "FakePage":
-    """A FakePage on a Portal view pinned to the tenant, with a query, as the Portal shows it."""
+    """A FakePage on `view` (address)."""
     page = FakePage()
-    page.url = f"https://portal.azure.com/#@{TENANT_ID}/{view}?feature.x=1"
+    page.url = address(view)
     return page
+
+
+class MovingPage(FakePage):
+    """A FakePage whose address changes as time passes, as the Portal's does a moment after a
+    Create or Save: after each wait it shows the next of `views`, staying on the last; with
+    `cycle`, it starts over instead and never settles."""
+
+    def __init__(self, *views: str, cycle: bool = False) -> None:
+        super().__init__()
+        self.views = [address(view) for view in views]
+        self.cycle = cycle
+        self.url = self.views[0]
+        self.waits = 0
+
+    def wait_for_timeout(self, ms) -> None:
+        super().wait_for_timeout(ms)
+        self.waits += 1
+        at = self.waits % len(self.views) if self.cycle else min(self.waits, len(self.views) - 1)
+        self.url = self.views[at]
 
 
 class StartBladeTests(RunnerTestCase):
@@ -2396,21 +2420,26 @@ class StartBladeTests(RunnerTestCase):
     MESSAGE = (f"the step starts on {GROUPS}, the Portal is on {USERS}; "
                "the guide does not say how to get there")
 
-    def run_step(self, page, outcomes=("match", "match"), answers=(), step=None):
-        """run_step with every label and resource 'performed' as `outcomes` says, in turn."""
+    def run_step(self, page, outcomes=("match", "match"), answers=(), step=None, moves_to=None):
+        """run_step with every label and resource 'performed' as `outcomes` says, in turn; the
+        first one moves the Portal to `moves_to` when it is given, as a click does. The clock is
+        the page's, so waiting costs no time."""
         r = run.Runner(page, STEPS, self.recording, self.args(), ask=Answers(*answers))
         acted: list[str] = []
         left = list(outcomes)
 
         def act(step, item, label, *rest, **kwargs):
             acted.append(label)
+            if moves_to is not None and len(acted) == 1:
+                page.url = address(moves_to)
             record = r.new_record(step, item["kind"], label)
             record.update(outcome=left.pop(0) if left else "match")
             return record
 
         out = io.StringIO()
         with mock.patch.object(r, "act_on_label", side_effect=act), \
-                mock.patch.object(r, "open_resource", side_effect=act), redirect_stdout(out):
+                mock.patch.object(r, "open_resource", side_effect=act), \
+                mock.patch.object(run.time, "monotonic", lambda: page.now), redirect_stdout(out):
             done = r.run_step(step or self.STEP)
         return r, done, acted, out.getvalue()
 
@@ -2540,6 +2569,102 @@ class StartBladeTests(RunnerTestCase):
                 playwright.assert_not_called()
                 self.assertIn("The recording cannot be used: step 9.9.2: 'startBlade' must be", out.getvalue())
 
+    def test_the_blade_recorded_is_the_one_before_the_first_item(self) -> None:
+        r, _, _, out = self.run_step(page_on(f"view/{GROUPS}"), moves_to=f"view/{CREATE_USER}")
+        self.assertEqual(self.entry()["startBlade"], GROUPS)        # not where the first item led
+        self.assertIn(f"Recorded: step 9.9.2 starts on {GROUPS}\n", out)
+        self.assertIsNone(r.start_seen)
+
+    def test_the_address_is_read_once_two_readings_agree(self) -> None:
+        # Step 1.1.8 ends on AddGroup.ReactView; the Portal shows All groups a moment later.
+        page = MovingPage("view/Microsoft_AAD_IAM/AddGroup.ReactView", f"view/{GROUPS}")
+        self.run_step(page)
+        self.assertEqual(self.entry()["startBlade"], GROUPS)
+        self.assertGreaterEqual(page.waits, 2)
+
+    def test_an_address_that_never_settles_records_no_blade(self) -> None:
+        page = MovingPage(f"view/{USERS}", f"view/{GROUPS}", cycle=True)
+        r, done, _, out = self.run_step(page)
+        self.assertTrue(done)
+        self.assertNotIn("startBlade", self.entry())
+        self.assertNotIn("Recorded:", out)
+
+    def test_another_blade_that_turns_into_the_recorded_one_is_not_reported(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"startBlade": GROUPS}
+        page = MovingPage("view/Microsoft_AAD_IAM/AddGroup.ReactView", "view/Microsoft_AAD_IAM/AddGroup.ReactView",
+                          "view/Microsoft_AAD_IAM/AddGroup.ReactView", f"view/{GROUPS}")
+        r, done, _, _ = self.run_step(page)
+        self.assertTrue(done)
+        self.assertEqual((r.ask.prompts, self.wrong_blade(r)), ([], []))
+
+    def test_a_blade_and_its_overview_are_the_same_blade(self) -> None:
+        lb = "resource/subscriptions/<id>/resourceGroups/dev-rg/providers/Microsoft.Network/loadBalancers/dev-lb"
+        for recorded, view in ((f"{lb}/overview", lb), (lb, f"{lb}/overview"),
+                               ("Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Overview",
+                                "view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade")):
+            with self.subTest(recorded=recorded, view=view):
+                self.recording["steps"]["9.9.2"] = {"startBlade": recorded}
+                r, _, _, _ = self.run_step(page_on(view))
+                self.assertEqual((r.ask.prompts, self.wrong_blade(r)), ([], []))
+
+    def test_resource_lists_of_two_types_are_two_blades(self) -> None:
+        browse = "HubsExtension/BrowseResource.ReactView/resourceType/"
+        self.recording["steps"]["9.9.2"] = {"startBlade": browse + "Microsoft.Network%2FloadBalancers"}
+        r, _, _, _ = self.run_step(page_on(f"view/{browse}Microsoft.Network%2FvirtualNetworks"), answers=[""])
+        self.assertEqual(len(self.wrong_blade(r)), 1)
+
+
+class StartBladeExcuseTests(RunnerTestCase):
+    """A step whose start is not the guide's doing (#207): the first one after a resume or
+    --from-step, whose browser is new, and the first after a step the recording skips."""
+
+    STEPS = {"lab": LAB, "guide": "guide.md", "steps": [
+        {"id": f"9.9.{n}", "title": f"Step {n}", "portal": True, "expected": None, "images": [],
+         "items": [{"kind": "action", "labels": ["Go"], "line": n}]} for n in (1, 2, 3)]}
+
+    def run_lab(self, page, answers=(), state=None, **overrides):
+        r = run.Runner(page, self.STEPS, self.recording, self.args(**overrides), ask=Answers(*answers), state=state)
+
+        def act(step, item, label, *rest, **kwargs):
+            record = r.new_record(step, item["kind"], label)
+            record.update(outcome="match")
+            return record
+
+        out = io.StringIO()
+        with mock.patch.object(r, "act_on_label", side_effect=act), \
+                mock.patch.object(run.time, "monotonic", lambda: page.now), redirect_stdout(out):
+            code = r.run(state)
+        return r, code, out.getvalue()
+
+    @staticmethod
+    def wrong_blade(r) -> list[dict]:
+        return [x for x in r.records if x.get("category") == run.WRONG_BLADE]
+
+    def test_a_resumed_run_names_the_blade_and_does_not_blame_the_guide(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"startBlade": GROUPS}      # 9.9.1 ended on view/One
+        state = {"lab": LAB, "completed": ["9.9.1"], "inFlight": None, "finished": False}
+        r, code, out = self.run_lab(FakePage(), answers=["", ""], state=state, resume=True, run_id="resume")
+        self.assertEqual(code, 0)
+        self.assertIn(f"Starting at step 9.9.2 (Step 2). It starts on {GROUPS}. Opened the view step 9.9.1 ended on", out)
+        self.assertIn(f"Step 9.9.2 starts on {GROUPS}, the Portal is on One (the browser of this run is new: "
+                      f"the blades the guide opened before the step are not open).\nBring the Portal to {GROUPS}", out)
+        self.assertEqual((self.wrong_blade(r), r.ask.prompts), ([], ["> ", "> "]))
+        self.assertEqual(self.recording["steps"]["9.9.3"]["startBlade"], "One")    # later steps as usual
+
+    def test_the_step_after_a_recorded_skip_is_neither_blamed_nor_recorded(self) -> None:
+        self.recording["steps"]["9.9.1"] = {"skip": "Optional"}
+        self.recording["steps"]["9.9.2"] = {"startBlade": GROUPS}
+        r, code, out = self.run_lab(page_on(f"view/{USERS}"), answers=[""])
+        self.assertEqual(code, 0)
+        self.assertIn(f"Step 9.9.2 starts on {GROUPS}, the Portal is on {USERS} (the recording skips step 9.9.1, "
+                      "the step before it).", out)
+        self.assertEqual(self.wrong_blade(r), [])
+        del self.recording["steps"]["9.9.2"]["startBlade"]
+        self.recording["steps"].pop("9.9.3", None)
+        r, _, _ = self.run_lab(page_on(f"view/{USERS}"))
+        self.assertNotIn("startBlade", self.recording["steps"]["9.9.2"])     # depends on the skip
+        self.assertEqual(self.recording["steps"]["9.9.3"]["startBlade"], USERS)
+
 
 class FormOpenTests(RunnerTestCase):
     """Before the first field of a form is filled in, an editable control for it must be on
@@ -2664,6 +2789,62 @@ class FormOpenTests(RunnerTestCase):
                 mock.patch.object(run, "candidates_on_screen", return_value=[]):
             self.assertTrue(self.quietly(lambda: r.run_step(step)))
         self.assertEqual(self.recording["steps"]["9.9.2"]["startBlade"], CREATE_USER)
+
+    def test_only_a_text_field_is_held_back_by_read_only(self) -> None:
+        # fill_field picks, ticks or opens these: aria-readonly does not stop it.
+        for node in (ScreenNode(attrs={"role": "combobox"}, read_only=True),
+                     ScreenNode(tag="button", attrs={"aria-haspopup": "listbox"}, read_only=True),
+                     ScreenNode(tag="input", attrs={"type": "checkbox"}, read_only=True),
+                     ScreenNode(attrs={"role": "switch"}, read_only=True),
+                     ScreenNode(tag="select", read_only=True)):
+            with self.subTest(tag=node.tag, attrs=node.attrs):
+                self.assertTrue(run.editable(node, "x"))
+        self.assertFalse(run.editable(ScreenNode(tag="input", read_only=True, text="y"), "x"))
+        self.assertFalse(run.editable(ScreenNode(tag="textarea", read_only=True), "x"))
+
+    def test_a_read_only_text_field_that_already_shows_the_value_is_a_form(self) -> None:
+        field = ScreenNode(tag="input", read_only=True, text="chromie")
+        record, r, _ = self.act(Screen(("textbox", "User principal name", field)))
+        self.assertEqual((record["outcome"], record["observed"], r.records), ("match", "already set", []))
+
+    def test_a_labelled_container_holding_any_control_that_takes_a_value_is_a_form(self) -> None:
+        radios = ScreenNode(children=Screen(("radio", "Assigned", ScreenNode(tag="input", attrs={"type": "radio"})),
+                                            ("radio", "Dynamic", ScreenNode(tag="input", attrs={"type": "radio"}))))
+        self.assertTrue(run.editable(radios, "Assigned"))
+        _, r, _ = self.act(Screen(("label", "User principal name", radios)))
+        self.assertEqual(r.records, [])                  # no form drift; filling it is fill_parts' business
+        self.assertFalse(run.editable(ScreenNode(children=Screen(("text", "x", ScreenNode()))), "x"))
+
+    def test_a_wrong_blade_and_a_missing_form_of_one_cause_make_one_record(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"startBlade": CREATE_USER}
+        page = page_on(f"view/{USERS}")
+        r = self.form_runner(page=page, ask=Answers("", ""))
+        step = {"id": "9.9.2", "title": "Two", "portal": True, "expected": None, "images": [], "items": [self.UPN]}
+        out = io.StringIO()
+        with mock.patch.object(run, "all_frames", lambda page: [self.users_list()]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=[]), redirect_stdout(out):
+            r.run_step(step)
+        self.assertEqual([x["kind"] for x in r.records if x.get("category") == run.WRONG_BLADE], ["blade"])
+        self.assertIn(f"Step 9.9.2: no form with a field 'User principal name' is open; the Portal is on {USERS}.\n"
+                      "Open the form, then press Enter.", out.getvalue())
+
+    def test_a_form_missing_later_in_the_step_changes_neither_the_recorded_blade_nor_the_record_s_cause(self) -> None:
+        page = page_on(f"view/{USERS}")
+        field = ScreenNode(tag="input")
+        screen = self.users_list()
+        screen.add(("button", "+ New user",
+                    ScreenNode(on_click=lambda: setattr(page, "url", address(f"view/{USERS}/new")))))
+        r = self.form_runner(page=page, ask=self.opening_the_form(screen, field, page))
+        step = {"id": "9.9.2", "title": "Two", "portal": True, "expected": None, "images": [], "items": [
+            {"kind": "action", "labels": ["+ New user"], "line": 3}, self.UPN]}
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=[]):
+            self.assertTrue(self.quietly(lambda: r.run_step(step)))
+        self.assertEqual(self.recording["steps"]["9.9.2"]["startBlade"], USERS)    # not the form's blade
+        self.assertIsNone(r.start_seen)
+        self.assertEqual([x["kind"] for x in r.records if x.get("category") == run.WRONG_BLADE], ["field"])
 
 
 class StopTests(RunnerTestCase):

@@ -22,8 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import recording  # noqa: E402
 from decide import Candidate  # noqa: E402
 from recording import (Redactor, env_secrets, expand_env, field_action, missing_env,  # noqa: E402
-                       rejected_candidates, resolve_value, resource_name, skip_reason, start_blade,
-                       value_action, view_blade, write_json)
+                       rejected_candidates, resolve_value, resource_name, same_blade, skip_reason,
+                       start_blade, value_action, view_blade, write_json)
 
 DOMAIN = "contoso.onmicrosoft.com"
 TENANT = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -307,6 +307,33 @@ class ViewBladeTests(unittest.TestCase):
                     "Microsoft.Network/loadBalancers/dev-skycraft-swc-lb/backendPools")
         self.assertEqual(view_blade("https://portal.azure.com/#" + resource), resource)
         self.assertEqual(view_blade("https://portal.azure.com/#home"), "home")
+
+    def test_a_browse_blade_keeps_the_resource_type_it_lists(self) -> None:
+        portal = "https://portal.azure.com/#view/HubsExtension/"
+        for view, blade in (
+                ("BrowseResource.ReactView/resourceType/Microsoft.Network%2FloadBalancers",
+                 "HubsExtension/BrowseResource.ReactView/resourceType/Microsoft.Network%2FloadBalancers"),
+                ("BrowseResource/resourceType/Microsoft.Network%2FvirtualNetworks/filter/x",
+                 "HubsExtension/BrowseResource/resourceType/Microsoft.Network%2FvirtualNetworks"),
+                ("BrowseResource/resourceType/Microsoft.Network/loadBalancers",      # a plain '/'
+                 "HubsExtension/BrowseResource/resourceType/Microsoft.Network/loadBalancers"),
+                ("BrowseResourceGroups.ReactView", "HubsExtension/BrowseResourceGroups.ReactView")):
+            with self.subTest(view=view):
+                self.assertEqual(view_blade(portal + view), blade)
+        # Any other blade's inputs are still left out.
+        self.assertEqual(view_blade("https://portal.azure.com/#view/Other/Blade/resourceType/x"), "Other/Blade")
+
+    def test_same_blade_ignores_case_and_a_trailing_overview(self) -> None:
+        lb = "resource/subscriptions/<id>/resourceGroups/dev-rg/providers/Microsoft.Network/loadBalancers/dev-lb"
+        self.assertTrue(same_blade(lb, lb + "/overview"))
+        self.assertTrue(same_blade(lb + "/Overview", lb.upper()))
+        self.assertTrue(same_blade("Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Overview",
+                                   "Microsoft_AAD_IAM/ActiveDirectoryMenuBlade"))
+        self.assertFalse(same_blade("Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members",
+                                    "Microsoft_AAD_IAM/GroupDetailsMenuBlade"))
+        self.assertFalse(same_blade(lb, lb + "/backendPools"))
+        self.assertFalse(same_blade("HubsExtension/BrowseResource/resourceType/Microsoft.Network%2FloadBalancers",
+                                    "HubsExtension/BrowseResource/resourceType/Microsoft.Network%2FvirtualNetworks"))
 
     def test_no_view_or_an_empty_fragment_is_no_blade(self) -> None:
         for view in (None, "https://portal.azure.com/#", "https://portal.azure.com/"):
