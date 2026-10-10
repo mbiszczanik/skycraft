@@ -282,8 +282,9 @@ Backup reports are built from **diagnostic settings** on the vaults: each vault 
    - **Azure Backup Operations** (`AzureBackupOperations`)
 
    Backup reports needs all six. Leave **Azure Backup Reporting Data** (`AzureBackupReport`) unchecked: it is the legacy event, it flows only in **Azure diagnostics** mode, and with **Resource specific** selected it sends no data.
-4. Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`, destination table **Resource specific**.
-5. Click **Save**.
+4. Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`.
+5. Destination table: **Resource specific**.
+6. Click **Save**.
 
 **b. Backup Vault → `bv-backup-reports-diag`**
 
