@@ -735,6 +735,81 @@ class RunLogRedactionTests(RunnerTestCase):
         self.assertEqual((r.run_dir / "blade-9.9.1-7.aria.txt").read_text(encoding="utf-8"),
                          'heading "Group <id>"\ntextbox "Password"\nlink "Users of [tenantdomain]"\n')
 
+    def test_the_aria_files_mask_the_signed_in_account_and_credentials(self) -> None:
+        r = self.runner()
+        tree = ('- banner:\n  - button "Account manager for marcin.b@fabrikam.example"\n'
+                '  - textbox "Primary connection string": DefaultEndpointsProtocol=https;AccountKey=abc==\n'
+                '  - text: "SharedAccessKey=xyz="')
+        self.quietly(lambda: r.save_search_tree({"id": "9.9.1"}, tree))
+        self.assertEqual((r.run_dir / "search-9.9.1.aria.txt").read_text(encoding="utf-8"),
+                         '- banner:\n  - button "Account manager for <email>"\n'
+                         '  - textbox "Primary connection string": [secret]\n  - text: "SharedAccessKey=[secret]"\n')
+
+    def test_a_search_tree_that_could_not_be_read_keeps_the_error_s_first_line(self) -> None:
+        class Dropdown:
+            def aria_snapshot(self, timeout=None) -> str:
+                raise run.PlaywrightError('Locator.aria_snapshot: Timeout 2000ms exceeded.\nCall log:\n'
+                                          '  - waiting for locator("#results")\n'
+                                          '    - locator resolved to <div title="marcin.b@fabrikam.example">\n')
+
+        tree = run.tree_of(Dropdown(), None)
+        self.assertEqual(tree, f"# the search results: no snapshot ({run.PlaywrightError.__name__}: "
+                               "Locator.aria_snapshot: Timeout 2000ms exceeded.)")
+
+    def test_the_summary_scrubs_a_record_that_did_not_come_through_write(self) -> None:
+        r = self.runner()
+        r.records.append(self.unknown(r, self.RAW))        # as a future path that forgets write() would
+        self.quietly(r.finish)
+        self.assertIn(f"- step 9.9.2 field **User principal name**: {self.SHOWN}\n", self.summary())
+        self.assert_no_leak(self.summary())
+
+    def test_the_summary_names_the_run_folder_without_the_user_s_path(self) -> None:
+        r = self.runner()                                   # its log folder is under repo_root
+        self.quietly(r.finish)
+        self.assertTrue(self.summary().endswith("\nScreenshots and results: logs/test\n"))
+        elsewhere = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(elsewhere, ignore_errors=True))
+        r = self.runner(log_dir=elsewhere / "logs")
+        self.quietly(r.finish)
+        summary = (elsewhere / "logs" / "test" / "summary.md").read_text(encoding="utf-8")
+        self.assertTrue(summary.endswith("\nScreenshots and results: test\n"))
+        self.assertNotIn(str(elsewhere), summary)
+
+    def test_the_candidate_list_is_shown_scrubbed_and_picked_by_number(self) -> None:
+        item = {"kind": "action", "labels": ["Owner"], "line": 3}
+        step = {"id": "9.9.1", "title": "One", "items": [item], "images": []}
+        (self.tmp / "guide.md").write_text("# Lab\n\n2. Click **Owner**\n", encoding="utf-8")
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers("2"))
+        candidates = [run.Candidate("link", f"Group {self.OBJECT_ID}"),
+                      run.Candidate("button", "Account manager for marcin.b@fabrikam.example"),
+                      run.Candidate("link", f"malfurion@{self.DOMAIN}")]
+        out = io.StringIO()
+        with mock.patch.object(run, "find_exact", return_value=None), \
+                mock.patch.object(run, "candidates_on_screen", return_value=candidates), \
+                mock.patch.object(run, "find_by_name", return_value=FakeElement()) as find, redirect_stdout(out):
+            record = r.act_on_label(step, item, "Owner")
+        shown = out.getvalue()
+        for line in ("Group <id>", "Account manager for <email>", "malfurion@[tenantdomain]"):
+            self.assertIn(line, shown)
+        self.assert_no_leak(shown)
+        self.assertNotIn("fabrikam", shown)
+        # The number picks the candidate the Portal shows, looked up by its name.
+        self.assertEqual(record["outcome"], "drift")
+        self.assertEqual(find.call_args.args[2], "Account manager for marcin.b@fabrikam.example")
+
+    def test_the_text_a_result_is_checked_by_is_kept_scrubbed_in_the_recording(self) -> None:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(),
+                       ask=Answers(f"Group {self.OBJECT_ID} owned by marcin.b@fabrikam.example in {self.DOMAIN}"))
+        entry = r.step_entry({"id": "9.9.1"})
+        out = io.StringIO()
+        with mock.patch.object(run, "text_on_screen", return_value=True), redirect_stdout(out):
+            r.check_result({"id": "9.9.1", "expected": "The group shows"}, entry)
+        kept = "Group <id> owned by <email> in [tenantdomain]"
+        self.assertEqual(entry["result"], {"text": kept})
+        saved = json.loads((self.tmp / "rec.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["steps"]["9.9.1"]["result"], {"text": kept})
+        self.assertIn(f"Kept as '{kept}'", out.getvalue())
+
     def test_a_resumed_run_reloads_the_records_as_written_and_cleans_older_ones(self) -> None:
         r = self.runner(run_id="first")
         r.write(self.unknown(r, self.RAW))
@@ -3370,6 +3445,17 @@ class StopTests(RunnerTestCase):
         self.assertIn(f"{self.SHOWN}\n", err)
         self.assertIn("LookupError: summary of [tenantdomain]\n", err)
         self.assert_no_leak(out + err)
+
+    def test_once_the_runner_exists_main_scrubs_with_its_redactor_and_secrets(self) -> None:
+        def crash(runner, state=None):
+            runner.secrets.add("Fresh!Secret7")         # what only the runner knows
+            raise LookupError("could not type Fresh!Secret7")
+
+        code, out, err = self.main(mock.patch.object(run, "open_portal", return_value=(mock.Mock(), FakePage())),
+                                   mock.patch.object(run.Runner, "run", crash))
+        self.assertEqual(code, run.ABORTED)
+        self.assertIn("Stopped (LookupError: could not type [secret]).", out)
+        self.assertNotIn("Fresh!Secret7", out + err)
 
     def test_the_traceback_follows_the_chain_of_errors(self) -> None:
         redactor = run.Redactor("contoso.onmicrosoft.com", TENANT_ID)

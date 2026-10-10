@@ -19,18 +19,28 @@ summary.md, and results.jsonl behind it, are what gets copied into an issue or a
 they hold the text the failure prompt shows (issue #212). A record's "observed" is scrubbed before
 it is written (Runner.scrubbed, recording.scrub): one line, the first of an error, without the
 Playwright call log after it (which holds the element's HTML, an auto-generated password in a
-value attribute among it, and the value the runner typed), with a value typed in that line and an
-element's value attribute masked, every value the runner types into a field whose label names a
-password or secret (recording.typed_secrets) as '[secret]', tenant data as the Redactor's tokens
-and object ids as '<id>'. Scrubbing twice changes nothing, so the records a -Resume reloads stay
-as written (and a line a run wrote before #212 is cleaned for the summary). A proposed edit's new
-label is scrubbed the same way; the rest of its line is the guide's own text and is never
-redacted. The *.aria.txt files are scrubbed with every line kept, and the value of a text field
-named like a password or secret is masked there too (the Portal's auto-generated password is in
-an accessibility snapshot). The console, which is pasted too, shows an error as a record keeps it;
-a crash prints its traceback as frames (file, line, function) and each error's scrubbed first
-line, never Python's own traceback with the error text (redacted_traceback). The screenshots are
-not scrubbed: crop and anonymise them by hand.
+value attribute among it, and the value the runner typed); every value the runner types into a
+field whose label names a password, secret or other credential (recording.typed_secrets) and
+every credential in a connection string or SAS address ('AccountKey=', 'sig=') as '[secret]';
+object ids as '<id>'; tenant data, also as a regular expression escapes it, as the Redactor's
+tokens; any other e-mail address as '<email>'; a value a call typed and an element's value
+attribute as '[typed]' and '[value]'. Scrubbing twice changes nothing, so the records a -Resume
+reloads stay as written. A results.jsonl written before #212 keeps its old lines as they are: a
+resume cleans them for the summary only, so such a file is not safe to share. A proposed edit's
+new label is scrubbed the same way; the rest of its line is the guide's own text and is never
+redacted. The summary names the run folder relative to the repository (or by its name alone),
+never by an absolute path. The *.aria.txt files are scrubbed with every line kept, and the value
+of a text field named like a password or other credential is masked there too (the Portal's
+auto-generated password is in an accessibility snapshot). The text a step's result is checked by,
+as the person types it, is kept in the recording scrubbed the same way. The screenshots are not
+scrubbed: crop and anonymise them by hand.
+
+The console is scrubbed only in part: an error before or during the run is shown as a record
+keeps it, a crash as its frames (file, line, function) and each error's scrubbed first line
+(redacted_traceback), never Python's own traceback, and the decider's list of candidates is
+scrubbed. The rest is not: Invoke-GuideDrift.ps1 prints the tenant (id and domain) and the
+subscription before the run, and run.py prints the run folder's absolute path. Copy the summary,
+not the console.
 
 The runner acts only on a visible element within the window's width (the Portal parks earlier
 blades off to the left; below the fold is fine, it scrolls there first), and only on one:
@@ -1547,7 +1557,11 @@ class Runner:
         self.run_dir = args.log_dir / args.run_id
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.results_path = self.run_dir / "results.jsonl"
-        self.deciders = [ReplayDecider(recording), HumanDecider(ask=lambda text: self.ask(text))]
+        # The person picks a candidate by its number, so the list is shown scrubbed (#212): the
+        # console is pasted too, and a candidate may carry an id or another directory's address.
+        self.deciders = [ReplayDecider(recording),
+                         HumanDecider(ask=lambda text: self.ask(text),
+                                      say=lambda text: print(scrub(text, self.redactor, self.secrets, whole=True)))]
         self.redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording),
                                  getattr(args, "tenant_name", ""))
         # What the runner types into a password or secret field, never written to a run log (#212).
@@ -2175,7 +2189,12 @@ class Runner:
             answer = self.prompt("Text to look for on screen (Enter = not observable): ")
             if answer is None:          # input closed: ask again next time
                 return
-            entry["result"] = {"text": self.redactor.redact(answer)} if answer else None
+            # The recording is public: the answer is kept scrubbed (ids, addresses outside the
+            # tenant, secrets as tokens; #212), and the run looks for the text as kept.
+            kept = scrub(answer, self.redactor, self.secrets) if answer else None
+            if kept and kept != self.redactor.redact(answer):
+                print(f"Kept as '{kept}': the recording keeps no ids, addresses or secrets.")
+            entry["result"] = {"text": kept} if kept else None
             entry.setdefault("asked", []).append("result")
             self.save_recording()
         if not entry["result"]:
@@ -2318,7 +2337,7 @@ class Runner:
                           f"needs them, bring the Portal there by hand first.")
                     return self.prompt("> ") is not None
             print(f"{head} Bring the Portal to the view step {previous} ended on, then press Enter "
-                  f"(the run cannot open it: {self.redactor.redact(why)}):\n  {view}")
+                  f"(the run cannot open it: {scrub(why, self.redactor, self.secrets)}):\n  {view}")
         return self.prompt("> ") is not None
 
     # -- the run ---------------------------------------------------------------------------
@@ -2513,7 +2532,12 @@ class Runner:
         if not edits:
             lines.append("- none")
         lines.append("")
-        lines.append(f"Screenshots and results: {self.run_dir}")
+        # Relative to the repository, or the folder's name: an absolute path names the Windows user.
+        try:
+            folder = self.run_dir.resolve().relative_to(Path(self.args.repo_root).resolve()).as_posix()
+        except (AttributeError, TypeError, ValueError):
+            folder = self.run_dir.name
+        lines.append(f"Screenshots and results: {folder}")
         summary = "\n".join(lines)
         (self.run_dir / "summary.md").write_text(summary + "\n", encoding="utf-8")
         print("\n" + summary)
@@ -2609,7 +2633,7 @@ def main(argv: list[str] | None = None) -> int:
     redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording), args.tenant_name)
     secrets = typed_secrets(recording, steps)
 
-    def shown(error: BaseException) -> str:
+    def shown(error: BaseException) -> str:     # reads redactor and secrets as main() last set them
         return scrub(error_text(error), redactor, secrets)
 
     with sync_playwright() as pw:
@@ -2625,6 +2649,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Could not open the Portal: {shown(error)}")
             return NOT_STARTED
         runner = Runner(page, steps, recording, args, state=state)
+        redactor, secrets = runner.redactor, runner.secrets     # one redactor for the run from here
         try:
             return runner.run(state)
         except BaseException as stop:       # noqa: BLE001 - every way out must keep -Resume possible
