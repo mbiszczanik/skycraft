@@ -9,6 +9,13 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1](https://github.com/mbiszczanik/skycraft/compare/v0.15.0...v0.15.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **lab-1.3:** remove the budgets and the Advisor alert in cleanup ([#281](https://github.com/mbiszczanik/skycraft/issues/281)) ([11cc028](https://github.com/mbiszczanik/skycraft/commit/11cc0285623f9735cc3ab22d591f4af63367b8a5))
+
 ## [0.15.0](https://github.com/mbiszczanik/skycraft/compare/v0.14.0...v0.15.0) (2026-10-10)
 
 
