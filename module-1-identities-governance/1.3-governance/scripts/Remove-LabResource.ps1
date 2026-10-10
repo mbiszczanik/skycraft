@@ -29,6 +29,11 @@
     as not found, means "absent" - Test-LabNotFoundError tells the two apart (issue #252, as #238
     did for Lab 5.2).
 
+    A budget read that fails is counted too, although Test-Lab.ps1 leaves budgets to a manual
+    check: a 403 means the budget may still exist. On an offer without Cost Management (Azure for
+    Students, Sponsorship) no budget can exist, but the read still fails; confirm in the Portal
+    that Cost Management is unavailable for the subscription, and then ignore that error.
+
     Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
     "pwsh -File" for any script that declares #Requires -Modules for a module it has to
     auto-import, and the process would exit 0 with the failure still on screen (issue #104).
@@ -155,10 +160,17 @@ $locks = @(
 $lockRemoved = $false
 
 foreach ($lock in $locks) {
-    # The group's locks are listed and this one picked by name, so a missing lock is an empty
-    # listing rather than an error to interpret.
+    # The group's locks are listed and this one picked by its id, so a missing lock is an empty
+    # listing rather than an error to interpret. The listing also holds locks on the group's
+    # resources and on the subscription; only the id ending at the group's own scope is the
+    # guide's lock (-like compares case-insensitively, as ARM ids are). A same-named lock
+    # elsewhere would otherwise be "found" and its removal at the group's scope would 404.
+    $lockIdSuffix = "*/resourceGroups/$($lock.RG)/providers/Microsoft.Authorization/locks/$($lock.Name)"
     $lockLookup = Invoke-LabLookup -Target "lock $($lock.Name) on $($lock.RG)" -Lookup {
-        Get-AzResourceLock -ResourceGroupName $lock.RG -ErrorAction Stop | Where-Object { $_.Name -eq $lock.Name }
+        Get-AzResourceLock -ResourceGroupName $lock.RG -ErrorAction Stop | Where-Object {
+            $lockId = if ($_.LockId) { $_.LockId } else { $_.ResourceId }
+            $lockId -like $lockIdSuffix
+        }
     }
     if ($lockLookup.Failed) { continue }
     if ($lockLookup.Value.Count -eq 0) {
@@ -225,7 +237,12 @@ foreach ($budget in $budgets) {
     $budgetLookup = Invoke-LabLookup -Target "budget $($budget.Name) on $($budget.Scope)" -Lookup {
         Get-AzConsumptionBudget @budgetScope -ErrorAction Stop | Where-Object { $_.Name -eq $budget.Name }
     }
-    if ($budgetLookup.Failed) { continue }
+    if ($budgetLookup.Failed) {
+        # Counted, unlike Test-Lab.ps1's manual budget check: a 403 means the budget may exist.
+        Write-Host "     On an offer without Cost Management (Azure for Students, Sponsorship) no budget can exist, but this read still fails:" -ForegroundColor Gray
+        Write-Host "     confirm in the Portal that Cost Management is unavailable for the subscription, and then ignore this error." -ForegroundColor Gray
+        continue
+    }
     if ($budgetLookup.Value.Count -eq 0) {
         Write-Host "  -> [INFO] Budget $($budget.Name) not found." -ForegroundColor Gray
         continue

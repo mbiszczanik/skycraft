@@ -76,6 +76,10 @@ BeforeAll {
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled) or
     #                         report its resource group gone (rgnotfound)
     #   SKYCRAFT_STUB_FAIL    '<Remove-command>:<name>,...' makes one removal throw
+    #   SKYCRAFT_STUB_LOCKELSEWHERE  resource groups whose own lock is missing, while a lock with
+    #                         the same name sits on one of their resources and on the
+    #                         subscription - both returned by the group's lock listing, as the
+    #                         real cmdlet returns them
     # A lookup is named after its command and what it reads: 'Get-AzResourceLock:<rg>',
     # 'Get-AzPolicyAssignment:<name>', 'Get-AzConsumptionBudget:<rg or subscription>',
     # 'Get-AzActivityLogAlert:<rg>', 'Get-AzActionGroup:<rg>'. A removal is logged both bare and
@@ -137,8 +141,24 @@ function Get-AzResourceLock {
     param([string]$ResourceGroupName, [Parameter(ValueFromRemainingArguments)]$Rest)
     if (Invoke-StubLookup -Name "Get-AzResourceLock:$ResourceGroupName") { return }
     if (Test-StubEmpty) { return }
-    $suffix = ($ResourceGroupName -split '-')[0]
-    [pscustomobject]@{ Name = "lock-no-delete-$suffix"; ResourceGroupName = $ResourceGroupName }
+    $name = "lock-no-delete-$(($ResourceGroupName -split '-')[0])"
+    $subscription = '/subscriptions/00000000-0000-0000-0000-000000000000'
+    if (@($env:SKYCRAFT_STUB_LOCKELSEWHERE -split ',') -contains $ResourceGroupName) {
+        $resourceLock = "$subscription/resourceGroups/$ResourceGroupName/providers/Microsoft.Storage/storageAccounts/stubsa/providers/Microsoft.Authorization/locks/$name"
+        $subscriptionLock = "$subscription/providers/Microsoft.Authorization/locks/$name"
+        foreach ($lockId in $resourceLock, $subscriptionLock) {
+            [pscustomobject]@{ Name = $name; LockId = $lockId; ResourceId = $lockId }
+        }
+        return
+    }
+    # ARM does not keep the casing of ids stable ('resourcegroups' turns up as often as
+    # 'resourceGroups'), so the prod lock comes back lower-cased: the match must not care.
+    $lockId = if ($ResourceGroupName -like 'prod-*') {
+        "$subscription/resourcegroups/$ResourceGroupName/providers/microsoft.authorization/locks/$name"
+    } else {
+        "$subscription/resourceGroups/$ResourceGroupName/providers/Microsoft.Authorization/locks/$name"
+    }
+    [pscustomobject]@{ Name = $name; LockId = $lockId; ResourceId = $lockId; ResourceGroupName = $ResourceGroupName }
 }
 
 function Remove-AzResourceLock {
@@ -233,6 +253,7 @@ function Start-Sleep {
             [string[]]$Fail = @(),
             [string[]]$Lookup = @(),
             [string[]]$ArgumentList = @('-Force'),
+            [string[]]$LockElsewhere = @(),
             [switch]$Empty
         )
 
@@ -243,6 +264,7 @@ function Start-Sleep {
             SKYCRAFT_STUB_FAIL   = $Fail -join ','
             SKYCRAFT_STUB_LOOKUP = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
+            SKYCRAFT_STUB_LOCKELSEWHERE = $LockElsewhere -join ','
             SKYCRAFT_STUB_LOG    = $logPath
         }
 
@@ -290,10 +312,13 @@ function Start-Sleep {
         'Remove-AzResourceLock:lock-no-delete-prod'
         'Remove-AzPolicyAssignment:Restrict-Azure-Regions'
     )
+    # The group's own lock is gone, but its listing still returns same-named locks on a resource
+    # in it and on the subscription.
+    $script:LockElsewhere = Invoke-CleanupScript -Stub $script:Stub -LockElsewhere 'platform-skycraft-swc-rg'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:ProdGone, $script:NewLookupsFail,
-        $script:OldLookupsFail, $script:NewRemovalsFail, $script:OldRemovalsFail
+        $script:OldLookupsFail, $script:NewRemovalsFail, $script:OldRemovalsFail, $script:LockElsewhere
     )
 }
 
@@ -371,6 +396,23 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes everything the guide creates 
     }
 }
 
+Describe 'Lab 1.3 Remove-LabResource.ps1 - only the lock on the group itself is the guide lock' {
+
+    It 'matches the lock id at the group scope regardless of its casing' {
+        # The stub returns the prod lock with a lower-cased id ('resourcegroups').
+        $script:Clean.Calls | Should -Contain 'Remove-AzResourceLock:lock-no-delete-prod'
+    }
+
+    It 'does not take a same-named lock on a resource or on the subscription for the group lock' {
+        $run = $script:LockElsewhere
+        $run.ExitCode | Should -Be 0 -Because "a lock elsewhere is not the guide's lock; output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Lock lock-no-delete-platform not found'
+        $run.Output | Should -Not -Match '\[ERROR\]'
+        $run.Calls  | Should -Not -Contain 'Remove-AzResourceLock:lock-no-delete-platform'
+        $run.Calls  | Should -Contain 'Remove-AzResourceLock:lock-no-delete-prod'
+    }
+}
+
 Describe 'Lab 1.3 Remove-LabResource.ps1 - an absent object is not a failure (#252)' {
 
     It 'exits 0 and removes nothing when nothing is there' {
@@ -421,6 +463,12 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - a failed lookup is not "absent" (#252
         $run.Output | Should -Match 'Cleanup finished with 4 failure\(s\)'
         $run.Output | Should -Not -Match 'Cleanup complete'
         $run.Output | Should -Not -Match 'Budget SkyCraft-Monthly-Budget not found'
+    }
+
+    It 'tells the learner what a failed budget read means on an offer without Cost Management' {
+        $hints = [regex]::Matches($script:NewLookupsFail.Output, 'confirm in the Portal that Cost Management is unavailable')
+        $hints.Count | Should -Be 2 -Because 'each failed budget read carries the hint, and nothing else does'
+        $script:OldLookupsFail.Output | Should -Not -Match 'Cost Management'
     }
 
     It 'removes nothing it could not look up, and still runs every other step' {

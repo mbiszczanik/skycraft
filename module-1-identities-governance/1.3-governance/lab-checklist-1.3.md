@@ -228,10 +228,19 @@ Get-AzResourceLock -ResourceGroupName platform-skycraft-swc-rg |
 ### Validate Budgets
 ========================================
 
-### List all budgets (the cmdlet ships in the Az.Billing module)
+### List the budgets (the cmdlet ships in the Az.Billing module)
+
+The listing is per scope: without `-ResourceGroupName` it shows the subscription's budgets, with it
+the budgets on that resource group.
 
 ```powershell
+# Subscription budget (step 1.3.14)
 Get-AzConsumptionBudget |
+    Select-Object Name, Amount, Category |
+    Format-Table -AutoSize
+
+# Resource group budget (step 1.3.16)
+Get-AzConsumptionBudget -ResourceGroupName prod-skycraft-swc-rg |
     Select-Object Name, Amount, Category |
     Format-Table -AutoSize
 ```
@@ -240,7 +249,8 @@ Get-AzConsumptionBudget |
 - Tags appear on all three resource groups
 - 3 policy assignments visible
 - 2 resource locks confirmed
-- 2 budgets listed
+- SkyCraft-Monthly-Budget listed by the first budget command
+- SkyCraft-Prod-Monthly listed by the second budget command
 
 ---
 
