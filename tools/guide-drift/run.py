@@ -121,6 +121,25 @@ Enter, then looks the field up as usual; when this happens at the step's first i
 blade is the one recorded. A first field the recording holds a decision for is not checked: replay
 finds it. Neither drift makes the guide's screenshots stale or counts in the exit code.
 
+A field is filled as its control takes a value: a text box is typed into, a combo box or a
+drop-down has the option of the value picked, a check box or switch is ticked or cleared. A field
+label that names a container rather than a control (fill_parts) is filled through what it holds:
+its one text box; the Portal's user principal name, a text box and a domain combo box; or a radio
+group (issue #294: a storage account's 'Performance', Standard or Premium), radios and no combo
+box, a text box among them or not (an 'Other' option's), where the radio the value names is
+selected and nothing is typed. The value names a radio, compared regardless of case and of
+surrounding whitespace, by its whole accessible name; when no radio has that name, by the part of
+the name before its first ':' (the Portal names the radios 'Standard: Recommended for most
+scenarios (general-purpose v2 account)' and 'Premium: ...'); when none has that either, by the
+same two with the value's remarks in parentheses removed ('None (NSG already on subnet)' names
+'None'). A value that names no radio is unknown, and the observation lists the radios' names;
+one that names several by the rule that matched is unknown as ambiguous. A radio already selected
+is 'already set', so a re-run changes nothing. A radio found as the field itself (by its own name,
+or picked by the person) is selected when the value names it or states 'checked'; 'unchecked'
+leaves one not selected as it is, and is unknown for a selected one, which only selecting another
+radio clears. Accessible names come from the accessibility snapshot, read as the YAML Playwright
+writes (snapshot_key): a key holding ': ' is single-quoted and its name JSON-escaped.
+
 A step whose recording entry carries '"skip": "<reason>"' (an optional or conceptual step that
 would create resources, or the other option of a lettered pair; issue #200) is never performed:
 the Portal is not touched for it, no screenshot is taken, and the summary lists it under
@@ -162,7 +181,7 @@ from playwright.sync_api import Browser, Error as PlaywrightError, Frame, Locato
 
 sys.path.insert(0, str(Path(__file__).parent))
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
-from recording import (Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
+from recording import (REMARK, Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
                        field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
                        same_blade, start_blade, view_blade, write_json)
 
@@ -215,8 +234,13 @@ SEARCH_BOX = re.compile(r"^Search resources")
 # name or placeholder says search or filter.
 BLADE_SEARCH_NAME = re.compile(r"search|filter", re.IGNORECASE)
 IN_TOP_BAR_JS = "e => e.closest('[role=banner]') !== null"     # the Portal's top bar, not a blade
-# The role and accessible name on the first line of an element's aria_snapshot().
-ARIA_FIRST_LINE = re.compile(r'^\s*-\s+(?P<role>[a-z]+)(?:\s+"(?P<name>(?:[^"\\]|\\.)*)")?')
+# A line of an aria_snapshot() as Playwright writes it (snapshot_key): '- ' and a YAML key,
+# 'role "name" [flags]', with the name JSON-escaped; the whole key is single-quoted, a quote in it
+# doubled, when YAML needs it, as for a ': ' in the name ("- 'radio \"Standard: Recommended
+# ...\" [checked]'"). A line holding a child's text or a property ('- text: x', '- /url: y')
+# has no name.
+SNAPSHOT_LINE = re.compile(r"^\s*-\s+(?:'(?P<quoted>(?:[^']|'')*)'|(?P<plain>[^'].*))")
+SNAPSHOT_KEY = re.compile(r'^(?P<role>[a-z]+)(?:\s+"(?P<name>(?:[^"\\]|\\.)*)")?')
 LEADING_PLUS = re.compile(r"^\s*\+\s*")   # '+ New user': the Portal names the item 'New user'
 # What plain text must be, or sit inside, to count as the element a guide label names.
 INTERACTIVE = ("a, button, [role=link], [role=button], [role=menuitem], [role=treeitem], [role=tab], "
@@ -325,6 +349,26 @@ def all_frames(page: Page) -> list[Frame]:
     return [page.main_frame] + [f for f in page.frames if f is not page.main_frame]
 
 
+def snapshot_key(line: str) -> tuple[str, str] | None:
+    """(role, name) of one line of an aria_snapshot() (SNAPSHOT_LINE), the name '' when it has
+    none; None for a line that is no element's (a property such as '- /url: x', or no list item).
+    A single-quoted key is unquoted ('' is one quote) and the name decoded as the JSON string
+    Playwright wrote; a name that does not decode is kept as written."""
+    m = SNAPSHOT_LINE.match(line)
+    if not m:
+        return None
+    key = m.group("plain") if m.group("quoted") is None else m.group("quoted").replace("''", "'")
+    k = SNAPSHOT_KEY.match(key)
+    if not k:
+        return None
+    name = k.group("name") or ""
+    try:
+        name = json.loads(f'"{name}"')
+    except ValueError:
+        pass
+    return k.group("role"), name
+
+
 def aria_outline(page: Page) -> list[tuple[str, str]]:
     """(role, name) of every element line of the accessibility tree, across frames (main frame
     first), in tree order; the name is '' when the element has none. What blade_still_loading()
@@ -341,10 +385,7 @@ def aria_outline(page: Page) -> list[tuple[str, str]]:
             snapshot = frame.locator("body").aria_snapshot(timeout=2000)
         except PlaywrightError:     # timed out, or the frame went away while the Portal navigated
             continue
-        for line in snapshot.splitlines():
-            m = ARIA_FIRST_LINE.match(line)
-            if m:
-                outline.append((m.group("role"), m.group("name") or ""))
+        outline += [key for key in map(snapshot_key, snapshot.splitlines()) if key is not None]
     return outline
 
 
@@ -381,10 +422,8 @@ def aria_lines(page: Page) -> list[tuple[str, str, int]]:
             snapshot = frame.locator("body").aria_snapshot(timeout=2000)
         except PlaywrightError:     # timed out, or the frame went away while the Portal navigated
             continue
-        for line in snapshot.splitlines():
-            m = re.match(r'\s*-\s+(?P<role>[a-z]+)\s+"(?P<name>[^"]+)"', line)
-            if m and m.group("role") in CANDIDATE_ROLES:
-                key = (m.group("role"), m.group("name"))
+        for key in map(snapshot_key, snapshot.splitlines()):
+            if key is not None and key[1] and key[0] in CANDIDATE_ROLES:
                 counts[key] = counts.get(key, 0) + 1
     return [(role, name, count) for (role, name), count in counts.items()][:300]
 
@@ -932,9 +971,10 @@ def choose_search_box(boxes: list[dict]) -> tuple[int | None, str | None]:
 
 
 def accessible_name(element: Locator) -> str:
-    """The element's accessible name, as the first line of its aria_snapshot() gives it."""
-    m = ARIA_FIRST_LINE.match(element.aria_snapshot(timeout=1000))
-    return (m.group("name") or "") if m else ""
+    """The element's accessible name, as the first line of its aria_snapshot() gives it
+    (snapshot_key)."""
+    key = snapshot_key(element.aria_snapshot(timeout=1000).split("\n", 1)[0])
+    return key[1] if key else ""
 
 
 def blade_search_boxes(page: Page) -> list[tuple[Locator, dict]]:
@@ -1093,13 +1133,21 @@ def fill_parts(page: Page, container: Locator, value: str) -> str | None:
     text box and nothing else, the text box gets the value. With one text box and one combo box
     and an '@' in the value (the Portal's user principal name: name, '@', domain), the combo box
     must show the part after the last '@', compared regardless of case (when it does not, the
-    domain is picked from its options), and then the text box gets the part before it.
-    'already set' when every part held its value before. Raises LookupError for any other
-    container, or when the domain cannot be picked; Ambiguous when several options carry it."""
+    domain is picked from its options), and then the text box gets the part before it. With
+    radios and no combo box (a radio group: a storage account's 'Performance', Standard or
+    Premium), the radio the value names is selected (pick_radio: its whole name, else the part
+    before its ':', else either without the value's remark), also when a text box is there (an
+    'Other' option's): the value names a radio, and nothing is typed. 'already set' when every
+    part held its value before. Raises LookupError for any other container, when the domain
+    cannot be picked or when no radio is named so; Ambiguous when several options or radios
+    are."""
     textboxes, comboboxes = parts_of(container, "textbox"), parts_of(container, "combobox")
+    radios = parts_of(container, "radio")
+    if radios and not comboboxes:
+        return pick_radio(page, radios, value)
     if len(textboxes) == 1 and not comboboxes:
         return fill_field(page, textboxes[0], value)
-    if len(textboxes) == 1 and len(comboboxes) == 1 and "@" in value:
+    if len(textboxes) == 1 and len(comboboxes) == 1 and not radios and "@" in value:
         local, domain = value.rsplit("@", 1)
         try:
             tag = comboboxes[0].evaluate(CONTROL_JS, timeout=FIND_TIMEOUT_MS)[0]
@@ -1110,8 +1158,62 @@ def fill_parts(page: Page, container: Locator, value: str) -> str | None:
             raise LookupError(f"the domain combo box: {error}") from error
         typed = fill_field(page, textboxes[0], local)
         return "already set" if typed and picked else None
-    raise LookupError(f"the labelled element is not a field: it holds {len(textboxes)} text box(es) "
-                      f"and {len(comboboxes)} combo box(es)")
+    raise LookupError(f"the labelled element is not a field: it holds {len(textboxes)} text box(es), "
+                      f"{len(comboboxes)} combo box(es) and {len(radios)} radio(s)")
+
+
+def radio_matches(names: list[str], value: str) -> list[int]:
+    """The indexes of the radio names `value` names, each compared regardless of case and of
+    surrounding whitespace: the names equal to the value; when none is, the names whose part
+    before the first ':' is (the Portal's 'Standard: Recommended for most scenarios
+    (general-purpose v2 account)' is 'Standard'); when none is either, the same two again with
+    the value's remarks in parentheses removed (REMARK, as checkbox_state reads a value: 'None
+    (NSG already on subnet)' names 'None'). The first rule that matches decides; [] when none
+    does."""
+    def same(a: str, b: str) -> bool:
+        return a.strip().casefold() == b.strip().casefold()
+
+    values = [value]
+    bare = " ".join(REMARK.sub(" ", value).split())
+    if bare and not same(bare, value):
+        values.append(bare)
+    for wanted in values:
+        for part in (lambda name: name, lambda name: name.split(":", 1)[0]):
+            found = [index for index, name in enumerate(names) if same(part(name), wanted)]
+            if found:
+                return found
+    return []
+
+
+def select_radio(page: Page, radio: Locator) -> str | None:
+    """Select `radio` as a check box is ticked (set_check_state), so an intercepted click goes
+    through its label once; 'already set' when it was selected before, read with is_checked(),
+    which also reads aria-checked."""
+    if radio.is_checked(timeout=FIND_TIMEOUT_MS):
+        return "already set"
+    set_check_state(page, radio, True)
+    page.wait_for_timeout(SETTLE_MS // 2)
+    return None
+
+
+def pick_radio(page: Page, radios: list[Locator], value: str) -> str | None:
+    """Select, of a radio group's `radios`, the one `value` names (radio_matches) by its
+    accessible name (accessible_name: its <label for>, aria-label or text, as the browser
+    computes it), with select_radio. fill_parts finds the radios by role (get_by_role('radio')),
+    which covers both shapes a Portal radio group takes: Fluent UI's ChoiceGroup (a
+    [role=radiogroup] holding <input type=radio> elements, each named by its <label for>) and
+    [role=radio] elements carrying aria-checked. 'already set' when it was selected before.
+    Raises LookupError listing every radio's name when the value names none, so the summary
+    shows the name the guide should use; Ambiguous when it names several by the rule that
+    matched."""
+    names = [accessible_name(radio) for radio in radios]
+    found = radio_matches(names, value)
+    if not found:
+        options = ", ".join(f"'{name}'" for name in names)
+        raise LookupError(f"no radio is named '{value.strip()}'; the options are {options}")
+    if len(found) > 1:
+        raise Ambiguous(f"{len(found)} radios match '{value.strip()}'")
+    return select_radio(page, radios[found[0]])
 
 
 def label_of(element: Locator) -> Locator:
@@ -1180,14 +1282,27 @@ def state_within(page: Page, element: Locator, checked: bool, ms: int) -> bool:
 
 
 def fill_field(page: Page, element: Locator, value: str) -> str | None:
-    """Give the field `value`: tick or clear a checkbox or radio, pick an option, or type; a
-    labelled container that is not a control itself is filled through its parts (fill_parts).
+    """Give the field `value`: tick or clear a checkbox, select a radio, pick an option, or type;
+    a labelled container that is not a control itself is filled through its parts (fill_parts).
+    A radio (found by its own name, or picked by the person) is selected when the value names it
+    (radio_matches) or states 'checked'; a value stating 'unchecked' leaves one not selected as
+    it is and is refused for a selected one, as a radio is only cleared by selecting another.
     Returns 'already set' when the field held the value before, and does nothing then. Raises
     LookupError when the value cannot be applied (not a checkbox state, no such option)."""
     if not is_control(element):
         return fill_parts(page, element, value)
     role = element.get_attribute("role", timeout=FIND_TIMEOUT_MS) or ""
     tag, input_type = element.evaluate("e => [e.tagName.toLowerCase(), (e.getAttribute('type') || '').toLowerCase()]")
+    if role == "radio" or (not role and tag == "input" and input_type == "radio"):
+        name = accessible_name(element)
+        checked = True if radio_matches([name], value) else checkbox_state(value)
+        if checked is None:
+            raise LookupError(f"'{value}' is neither a checkbox state nor this radio's name, '{name}'")
+        if checked:
+            return select_radio(page, element)
+        if element.is_checked(timeout=FIND_TIMEOUT_MS):
+            raise LookupError("a radio cannot be cleared; pick another option")
+        return "already set"
     if role in ("checkbox", "radio", "switch") or (tag == "input" and input_type in ("checkbox", "radio")):
         checked = checkbox_state(value)
         if checked is None:
