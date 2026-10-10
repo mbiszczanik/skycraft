@@ -156,24 +156,33 @@ $resourcesToDelete = @()
 
 # Check VMs
 $vms = @("$namePrefix-auth-vm", "$namePrefix-world-vm")
+# The VMs whose lookup failed, by name.
+$vmLookupFailed = @{}
 foreach ($vm in $vms) {
     $vmLookup = Invoke-LabLookup -Target "VM $vm" -Lookup {
         Get-AzVM -Name $vm -ResourceGroupName $rgName -ErrorAction Stop
     }
+    if ($vmLookup.Failed) { $vmLookupFailed[$vm] = $true }
     if ($vmLookup.Value) {
         $resourcesToDelete += @{ Type = 'VM'; Name = $vm }
         Write-Host "  - VM: $vm" -ForegroundColor Gray
     }
 }
 
-# Check Data Disks
+# Check Data Disks. The data disk belongs to the world VM: when that VM could not be looked up, it
+# may still hold the disk, so the disk is left alone too (not counted again - the lookup is).
 $dataDisk = "$namePrefix-world-datadisk"
-$diskLookup = Invoke-LabLookup -Target "disk $dataDisk" -Lookup {
-    Get-AzDisk -DiskName $dataDisk -ResourceGroupName $rgName -ErrorAction Stop
+if ($vmLookupFailed["$namePrefix-world-vm"]) {
+    Write-Host "  [SKIP] Disk $dataDisk kept: VM $namePrefix-world-vm could not be looked up and may still use it." -ForegroundColor Yellow
 }
-if ($diskLookup.Value) {
-    $resourcesToDelete += @{ Type = 'Disk'; Name = $dataDisk }
-    Write-Host "  - Disk: $dataDisk" -ForegroundColor Gray
+else {
+    $diskLookup = Invoke-LabLookup -Target "disk $dataDisk" -Lookup {
+        Get-AzDisk -DiskName $dataDisk -ResourceGroupName $rgName -ErrorAction Stop
+    }
+    if ($diskLookup.Value) {
+        $resourcesToDelete += @{ Type = 'Disk'; Name = $dataDisk }
+        Write-Host "  - Disk: $dataDisk" -ForegroundColor Gray
+    }
 }
 
 # Check Key Vault

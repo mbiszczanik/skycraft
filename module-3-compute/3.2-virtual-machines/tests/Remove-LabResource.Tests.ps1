@@ -217,14 +217,16 @@ function Remove-AzKeyVault {
         'Get-AzVM:dev-skycraft-swc-auth-vm=notfound'
         'Get-AzDisk:dev-skycraft-swc-world-datadisk=rgnotfound'
     )
-    # Every lookup fails: nothing is found, which must not read as "nothing to delete".
+    # Every lookup fails: nothing is found, which must not read as "nothing to delete". The data
+    # disk is not even looked up: its VM could not be.
     $script:LookupsFail = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
         'Get-AzVM:dev-skycraft-swc-auth-vm=denied'
         'Get-AzVM:dev-skycraft-swc-world-vm=throttled'
-        'Get-AzDisk:dev-skycraft-swc-world-datadisk=denied'
         'Get-AzKeyVault:dev-skycraft-swc-kv=denied'
     )
     $script:AuthDenied   = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzVM:dev-skycraft-swc-auth-vm=denied'
+    $script:WorldDenied  = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzVM:dev-skycraft-swc-world-vm=denied'
+    $script:DiskDenied   = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzDisk:dev-skycraft-swc-world-datadisk=denied'
     $script:RemovalsFail = Invoke-CleanupScript -Stub $script:Stub -Fail @(
         'Remove-AzVM:dev-skycraft-swc-world-vm'
         'Remove-AzKeyVault:dev-skycraft-swc-kv'
@@ -232,7 +234,7 @@ function Remove-AzKeyVault {
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:NotFound, $script:LookupsFail,
-        $script:AuthDenied, $script:RemovalsFail
+        $script:AuthDenied, $script:WorldDenied, $script:DiskDenied, $script:RemovalsFail
     )
 }
 
@@ -296,9 +298,8 @@ Describe 'Lab 3.2 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
         $run.ExitCode | Should -Be 1 -Because "a resource that may still exist must not look like a clean cleanup; output was:`n$($run.Output)"
         $run.Output | Should -Match '\[ERROR\] Could not look up VM dev-skycraft-swc-auth-vm[^\r\n]*does not have authorization'
         $run.Output | Should -Match '\[ERROR\] Could not look up VM dev-skycraft-swc-world-vm[^\r\n]*requests exceeded the limit'
-        $run.Output | Should -Match '\[ERROR\] Could not look up disk dev-skycraft-swc-world-datadisk'
         $run.Output | Should -Match '\[ERROR\] Could not look up Key Vault dev-skycraft-swc-kv'
-        $run.Output | Should -Match 'Cleanup finished with 4 failure\(s\)'
+        $run.Output | Should -Match 'Cleanup finished with 3 failure\(s\)'
         $run.Output | Should -Not -Match 'Cleanup Complete'
     }
 
@@ -316,6 +317,26 @@ Describe 'Lab 3.2 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
         $run.Calls  | Should -Contain 'Remove-AzVM:dev-skycraft-swc-world-vm'
         $run.Calls  | Should -Contain 'Remove-AzDisk:dev-skycraft-swc-world-datadisk'
         $run.Calls  | Should -Contain 'Remove-AzKeyVault:dev-skycraft-swc-kv'
+    }
+
+    It 'leaves the data disk alone when the VM that holds it could not be looked up' {
+        $run = $script:WorldDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[SKIP\] Disk dev-skycraft-swc-world-datadisk kept: VM dev-skycraft-swc-world-vm could not be looked up'
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls  | Should -Not -Contain 'Get-AzDisk:dev-skycraft-swc-world-datadisk'
+        $run.Calls  | Should -Not -Contain 'Remove-AzDisk:dev-skycraft-swc-world-datadisk'
+        $run.Calls  | Should -Contain 'Remove-AzVM:dev-skycraft-swc-auth-vm'
+        $run.Calls  | Should -Contain 'Remove-AzKeyVault:dev-skycraft-swc-kv'
+    }
+
+    It 'exits 1 when the data disk could not be looked up, and still removes the VMs' {
+        $run = $script:DiskDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Could not look up disk dev-skycraft-swc-world-datadisk[^\r\n]*does not have authorization'
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls  | Should -Not -Contain 'Remove-AzDisk:dev-skycraft-swc-world-datadisk'
+        $run.Calls  | Should -Contain 'Remove-AzVM:dev-skycraft-swc-world-vm'
     }
 }
 
