@@ -81,6 +81,7 @@ $ExpectedHelperFile = @(
     'module-2-networking/2.1-virtual-networks/scripts/Remove-LabResource.ps1'
     'module-2-networking/2.2-secure-access/scripts/Remove-LabResource.ps1'
     'module-2-networking/2.3-name-resolution/scripts/Remove-LabResource.ps1'
+    'module-3-compute/3.1-infrastructure-as-code/scripts/Remove-LabResource.ps1'
     'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Remove-LabResource.ps1'
 )
 
