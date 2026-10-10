@@ -47,7 +47,8 @@
 - No auto-shutdown or time-based scaling is configured; lab resources are expected to be cleaned up after the lab ends.
 
 **Cleanup reminder** (post-lab):
-- **Subscription-level artifacts**: Policy assignments (three assignments created by `main.bicep`) persist at subscription scope and should be deleted via Azure Portal → Policy → Assignments → select each SkyCraft policy → Delete.
-- **RG-level artifacts**: Locks and tags are scoped to RGs (dev-skycraft-swc-rg, prod-skycraft-swc-rg, platform-skycraft-swc-rg) and are deleted automatically when RGs are deleted.
-- **To fully clean up**: Delete the three resource groups (RGs are NOT automatically deleted); this will cascade-delete all locks, tags, and policy data within those RGs. Then delete the three subscription-scoped policy assignments.
+- **`scripts/Remove-LabResource.ps1`** removes what this lab creates, whichever path created it: the two locks, the three policy assignments, the two budgets (`SkyCraft-Monthly-Budget` on the subscription, `SkyCraft-Prod-Monthly` on prod-skycraft-swc-rg), and the Advisor alert `Advisor-Cost-Recommendations` with its action group `skycraft-advisor-ag` in prod-skycraft-swc-rg (or `prod-skycraft-swc-rg`, the name the guide gave the action group before #225). The budgets and the Advisor alert are created in the portal only (`main.bicep` and `Invoke-LabGovernance.ps1` do not create them). It leaves the resource groups and their tags in place: Lab 1.2 owns the groups and later labs keep using them.
+- **Subscription-level artifacts**: The policy assignments and the subscription budget persist at subscription scope; deleting the resource groups does not remove them.
+- **RG-level artifacts**: Locks, tags, the resource group budget, the Advisor alert and its action group are scoped to RGs (dev-skycraft-swc-rg, prod-skycraft-swc-rg, platform-skycraft-swc-rg). They go when their RG is deleted, but the RGs outlive this lab, so the script removes them itself.
+- **To fully clean up**: Run `Remove-LabResource.ps1` first (a CanNotDelete lock blocks deleting the group it protects), then delete the three resource groups (Lab 1.2's cleanup).
 - **Cost risk if not cleaned up**: Zero (governance constructs are free), but policy assignments may interfere with other projects if left assigned.
