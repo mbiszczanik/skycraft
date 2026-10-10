@@ -217,14 +217,25 @@ Both endpoint VMs need the **NetworkWatcherAgent** extension, and no earlier lab
    - Connection Monitor Name: `skycraft-hub-spoke-cm`
    - Subscription: yours
    - Region: **Sweden Central** (the wizard defaults to East US; the region picks the Network Watcher, and `Test-Lab.ps1` looks under `NetworkWatcher_swedencentral`)
-3. **Test groups** → **+ Add test group** → Test group name: `hub-spoke-ssh`
+3. **Test groups** → **+ Add test group**
+   - Test group name: `hub-spoke-ssh`
    - **+ Add sources** → **Azure endpoints** → select `prod-skycraft-swc-auth-vm` → **Add endpoints**
      - **Fallback** — if only the dev environment exists: pick `dev-skycraft-swc-world-vm` instead (the deployment script makes the same substitution)
    - The source endpoint is named after its VM: select it in the test group view and rename it `prod-auth-source`
    - **+ Add destinations** → **Azure endpoints** → select `dev-skycraft-swc-auth-vm` → **Add endpoints**
    - Select the destination endpoint in the test group view and rename it `dev-auth-destination` (`Test-Lab.ps1` looks the destination up by this name)
-   - **Add Test configuration** → **New configuration**: name `tcp-22-every-5m`, Protocol **TCP**, Destination port **22**, Test Frequency **Every 5 minutes**, Checks failed **10** %, Round trip time **100** ms, **Disable traceroute** unchecked → **Add Test configuration** → **Add Test Group**.
-4. **Workspace**: uncheck **Use workspace created by connection monitor** and select `platform-skycraft-swc-law`.
+   - **Add Test configuration** → **New configuration**
+     - Test configuration name: `tcp-22-every-5m`
+     - Protocol: **TCP**
+     - **Disable traceroute**: leave unchecked
+     - Destination port: `22`
+     - Test Frequency: **Every 5 minutes**
+     - **Checks failed (%)**: `10`
+     - **Round trip time (ms)**: `100`
+   - **Add Test configuration** → **Add Test Group**
+4. **Workspace**:
+   - **Use workspace created by connection monitor**: unchecked
+   - Workspace: `platform-skycraft-swc-law`
 5. **Create alert**: leave unchecked.
 6. Click **Review + create** → **Create**.
 7. The wizard has no Tags tab, and `Test-Lab.ps1` checks the monitor's `Project` and `CostCenter` tags, so tag it from Cloud Shell (PowerShell):

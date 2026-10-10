@@ -1020,6 +1020,45 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         @($items[[array]::IndexOf($items, $alert[0]) + 1].labels) | Should -Be @('Review + create', 'Create')
     }
 
+    It 'fills the workspace, test group and test configuration of step 5.3.6 as fields, check boxes by their state' {
+        $items = @((Get-GapStep '5.3' '5.3.6').items)
+        $fields = @{}
+        foreach ($field in @($items | Where-Object kind -eq 'field')) { $fields[$field.label] = $field }
+        $expected = [ordered]@{
+            'Use workspace created by connection monitor' = 'unchecked'
+            'Workspace'                = 'platform-skycraft-swc-law'
+            'Test group name'          = 'hub-spoke-ssh'
+            'Test configuration name'  = 'tcp-22-every-5m'
+            'Protocol'                 = 'TCP'
+            'Destination port'         = '22'
+            'Test Frequency'           = 'Every 5 minutes'
+            'Checks failed (%)'        = '10'
+            'Round trip time (ms)'     = '100'
+            'Disable traceroute'       = 'leave unchecked'
+        }
+        foreach ($label in $expected.Keys) {
+            $fields.ContainsKey($label) | Should -BeTrue -Because $label
+            $fields[$label].value | Should -BeExactly $expected[$label]
+            $fields[$label].PSObject.Properties.Name | Should -Not -Contain 'literal'
+        }
+        # Disable traceroute sits under Protocol, before Destination port.
+        $protocol = [array]::IndexOf($items, $fields['Protocol'])
+        [array]::IndexOf($items, $fields['Disable traceroute']) | Should -Be ($protocol + 1)
+        [array]::IndexOf($items, $fields['Destination port']) | Should -Be ($protocol + 2)
+        # The workspace is its own Workspace tab, after the test group (the maintainer's live pass, #183).
+        $testGroups = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Test groups`n+ Add test group" })
+        $testGroups.Count | Should -Be 1
+        $tab = @($items | Where-Object { $_.kind -eq 'action' -and (@($_.labels) -join "`n") -ceq 'Workspace' })
+        $tab.Count | Should -Be 1
+        [array]::IndexOf($items, $tab[0]) | Should -BeGreaterThan ([array]::IndexOf($items, $fields['Test group name']))
+        [array]::IndexOf($items, $fields['Use workspace created by connection monitor']) | Should -Be ([array]::IndexOf($items, $tab[0]) + 1)
+        [array]::IndexOf($items, $fields['Workspace']) | Should -Be ([array]::IndexOf($items, $tab[0]) + 2)
+        $labels = @($items | ForEach-Object { $_.labels })
+        foreach ($label in 'Disable traceroute', 'Use workspace created by connection monitor', 'TCP', '22', '10', '100') {
+            $labels | Should -Not -Contain $label
+        }
+    }
+
     It 'still clicks what the caption **Bind** of step 3.4.12 tells to click, and nothing for **Validation**' {
         $items = @((Get-GapStep '3.4' '3.4.12').items)
         @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Validate`nAdd" }).Count | Should -Be 1
