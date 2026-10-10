@@ -86,35 +86,33 @@ keeps, as the step's "startBlade", the blade part of the view the step began on 
 'Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members', without the blade's inputs except a Browse
 blade's resourceType, cut from the redacted view, so a view recorded as none gives none). It is
 recorded only when none is, once the step's first item has gone through, with or without the
-person's help (a step whose first item fails may have started on the wrong blade), from the
-address read before that item once two readings SETTLE_MS apart agree (the Portal changes it a
-moment after a Create or Save), and the console says "Recorded: step X starts on <blade>" so that
-the person notices a wrong one. Before the first item of a step with a recorded blade, the open
-blade is compared with it (same_blade: regardless of case and of a trailing overview) for up to
-FIND_TIMEOUT_MS; when it never matches, the run reports misleading drift in category
-'wrong-blade', "the step starts on X, the Portal is on Y; the guide does not say how to get
-there", asks the person to bring the Portal to X and press Enter (closed input goes on as well),
-and performs the step. The first step after a resume or --from-step (its browser is new; the
-resume message names the blade), the first step after a step the recording skips, and the first
-after a step the person skipped with 's' (the Portal is wherever the failed step left it) are
-asked about the same way, with the reason and without a record: the guide is not at fault
-there. No blade is recorded for the latter two, as it would depend on the skip: so while a
-recorded skip stays, the start of the step after it is not checked (a blade recorded before the
-skip was added is only asked about). A step whose first item
-is a global search, or a chain that opens with a resource name (looked up there), may start
-anywhere and is neither checked nor recorded, and neither is a step begun on a view the run
-cannot name. A recorded blade that is wrong is deleted from the recording by hand; the next
-supervised run records it again. The first field acted on after anything but a field starts a
-form (the rows of a form table, or '**Label**: value' items in a row), and is looked for only as
-a field that can be filled in (editable, as fill_field would act on it: a text field that is
-not read-only or already shows the value, any other control, or a labelled container holding a
-control that takes a value), so the lookup never lands on a list's column or a read-only
-summary. When there is none, the run reports the same drift ("no form with a field 'X' is open;
-..."), unless the step's start was already reported or excused (one cause, one record), asks
-the person to open the form and press Enter, then looks the field up as usual; when this happens
-at the step's first item, the form's blade is the one recorded. A first field the recording
-holds a decision for is not checked: replay finds it. Neither drift makes the guide's
-screenshots stale or counts in the exit code.
+person's help (a step whose first item fails may have started on the wrong blade), from the address
+read before that item once two readings SETTLE_MS apart agree (the Portal changes it a moment after
+a Create or Save), and the console says "Recorded: step X starts on <blade>" so that the person
+notices a wrong one. Before the first item of a step with a recorded blade, the open blade is
+compared with it (same_blade: regardless of case and of a trailing overview) for up to
+FIND_TIMEOUT_MS; when it never matches, the run reports misleading drift in category 'wrong-blade',
+"the step starts on X, the Portal is on Y; the guide does not say how to get there", asks the
+person to bring the Portal to X and press Enter (closed input goes on as well), and performs the
+step. The first step after a resume or --from-step (its browser is new; the resume message names
+the blade), the first step after a step the recording skips, and the first after a step the person
+skipped with 's' (the Portal is wherever the failed step left it) are asked about the same way,
+with the reason and without a record: the guide is not at fault there. No blade is recorded for the
+latter two, as it would depend on the skip: so while a recorded skip stays, the start of the step
+after it is not checked (a blade recorded before the skip was added is only asked about). A step
+whose first item is a global search, or a chain that opens with a resource name (looked up there),
+may start anywhere and is neither checked nor recorded, and neither is a step begun on a view the
+run cannot name. A recorded blade that is wrong is deleted from the recording by hand; the next
+supervised run records it again. The first field acted on after anything but a field starts a form
+(the rows of a form table, or '**Label**: value' items in a row), and is looked for only as a field
+that can be filled in (editable, as fill_field would act on it: a text field that is not read-only
+or already shows the value, any other control, or a labelled container holding a control that takes
+a value), so the lookup never lands on a list's column or a read-only summary. When there is none,
+the run reports the same drift ("no form with a field 'X' is open; ..."), unless the step's start
+was already reported or excused (one cause, one record), asks the person to open the form and press
+Enter, then looks the field up as usual; when this happens at the step's first item, the form's
+blade is the one recorded. A first field the recording holds a decision for is not checked: replay
+finds it. Neither drift makes the guide's screenshots stale or counts in the exit code.
 
 A step whose recording entry carries '"skip": "<reason>"' (an optional or conceptual step that
 would create resources, or the other option of a lettered pair; issue #200) is never performed:
