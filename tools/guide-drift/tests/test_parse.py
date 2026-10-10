@@ -2,8 +2,9 @@
 search and which are a blade's own search box (issue #189), which '- Label: value' items with
 a plain label are fields (issue #198), which field values are not text to type (issue #202),
 which lists and tables are checks for the Expected Result rather than steps (issues #224 and
-#246), which code spans in a navigation chain are resources to open (issue #199), and which
-option of a step is read (issue #201). The full guides and the other parser rules are covered
+#246), which code spans in a navigation chain are resources to open (issues #199 and #250),
+which chains pick a field's value and where a chain ends (issue #250), and which option of a
+step is read (issue #201). The full guides and the other parser rules are covered
 by tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
@@ -128,15 +129,12 @@ class PlainLabelFieldTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(self.item(text))
 
-    def test_several_bold_spans_or_a_chain_after_the_label_stay_clicks(self) -> None:
-        for text, kind, labels in (("Logs: **StorageRead** and **StorageWrite**.", "action", ["StorageRead", "StorageWrite"]),
-                                   ("Frequency: **Daily** at **02:00 AM**.", "action", ["Daily", "02:00 AM"]),
-                                   ("Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`.",
-                                    "action", ["Send to Log Analytics workspace"]),
-                                   ("Flow log type: **Virtual network** → **+ Select target resource** → **Confirm selection**",
-                                    "navigation", ["Virtual network", "+ Select target resource", "Confirm selection"])):
+    def test_several_bold_spans_after_the_label_stay_clicks(self) -> None:
+        # A chain after the label is the way to pick its value (#250): PickerChainTests.
+        for text, labels in (("Logs: **StorageRead** and **StorageWrite**.", ["StorageRead", "StorageWrite"]),
+                             ("Frequency: **Daily** at **02:00 AM**.", ["Daily", "02:00 AM"])):
             with self.subTest(text=text):
-                self.assertEqual(self.item(text), {"kind": kind, "labels": labels, "line": 7})
+                self.assertEqual(self.item(text), {"kind": "action", "labels": labels, "line": 7})
 
     def test_a_bold_label_still_takes_the_whole_value(self) -> None:
         self.assertEqual(self.item("**Policy enforcement**: Enabled"), self.field("Policy enforcement", "Enabled"))
@@ -186,24 +184,14 @@ class ChainResourceTests(unittest.TestCase):
                 self.assertIsNone(self.item(text))
 
     def test_a_code_span_with_more_in_its_step_is_a_value_or_prose(self) -> None:
+        # 'select the modified `config.txt`' is a file on the learner's disk in an upload pane, not
+        # a Portal element (#250): the words between the verb and the span keep it unread.
         for text, kind, labels in (
                 ("Click **+ Add directory** → Name: `common` → **OK**", "navigation", ["+ Add directory", "OK"]),   # 4.3.4
                 ("Back in the Portal, click **Upload** → select the modified `config.txt` → check **Overwrite if "
                  "files already exist** → **Upload**", "navigation", ["Upload", "Overwrite if files already exist", "Upload"]),
-                ("Browse to `common/config.txt` → click **⋯** → **Restore**", "navigation", ["⋯", "Restore"]),
-                ("Open `skycraft-config` share → **Connect**", "action", ["Connect"]),                            # 4.3.8
                 ("**Test groups** → **+ Add test group** → Test group name: `hub-spoke-ssh`",                     # 5.3.6
                  "navigation", ["Test groups", "+ Add test group"])):
-            with self.subTest(text=text):
-                self.assertEqual(self.item(text), {"kind": kind, "labels": labels, "line": 7})
-
-    def test_the_chain_after_a_plain_label_names_no_resource(self) -> None:
-        for text, kind, labels in (
-                ("Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`.",              # 5.1.7
-                 "action", ["Send to Log Analytics workspace"]),
-                ("Flow log type: **Virtual network** → **+ Select target resource** → **Virtual network** → "
-                 "`prod-skycraft-swc-vnet` → **Confirm selection**",                                             # 5.3.5
-                 "navigation", ["Virtual network", "+ Select target resource", "Virtual network", "Confirm selection"])):
             with self.subTest(text=text):
                 self.assertEqual(self.item(text), {"kind": kind, "labels": labels, "line": 7})
 
@@ -222,15 +210,17 @@ class ChainResourceTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.item(text), {"kind": "action", "labels": ["A"], "line": 7})
 
-    def test_a_label_that_ends_in_a_time_is_not_a_plain_label(self) -> None:
-        # 5.2.3: '02:00:' has no space after its first colon, so PLAIN_LABEL_START does not take
-        # the text before it for a plain label, and the VM stays a resource of the chain. A time
-        # written '2 AM:' would read as one, and the chain would name no resource.
-        self.assertEqual(self.item("Run the first backup now instead of waiting for 02:00: **Protected items** → "
-                                   "**Backup items** → **Azure Virtual Machine** → `dev-skycraft-swc-auth-vm` → "
-                                   "**Backup now** → **OK**."),
-                         self.navigation(["Protected items", "Backup items", "Azure Virtual Machine",
-                                          "dev-skycraft-swc-auth-vm", "Backup now", "OK"], [3]))
+    def test_a_sentence_before_a_colon_is_no_field_label(self) -> None:
+        # 5.2.3: '02:00:' has no space after its first colon, so the text before it is no plain
+        # label. Written '2 AM:', it is one of more than six words, which is no field label either
+        # (#250): the chain is a navigation and the VM stays its resource.
+        for time_of_day in ("02:00", "2 AM"):
+            with self.subTest(time_of_day=time_of_day):
+                self.assertEqual(self.item(f"Run the first backup now instead of waiting for {time_of_day}: "
+                                           "**Protected items** → **Backup items** → **Azure Virtual Machine** → "
+                                           "`dev-skycraft-swc-auth-vm` → **Backup now** → **OK**."),
+                                 self.navigation(["Protected items", "Backup items", "Azure Virtual Machine",
+                                                  "dev-skycraft-swc-auth-vm", "Backup now", "OK"], [3]))
 
     def test_a_long_step_is_read_in_linear_time(self) -> None:
         # Two '\s*' around an optional group took about 300 s on the first of these (#199).
@@ -244,6 +234,240 @@ class ChainResourceTests(unittest.TestCase):
                     started = time.perf_counter()
                     self.assertEqual(self.item(text), {"kind": "action", "labels": ["A"], "line": 7})
                     self.assertLess(time.perf_counter() - started, 2)
+
+
+class PickerChainTests(unittest.TestCase):
+    """'Label: **A** → `x`' with a plain label is the field Label whose value is picked through
+    the chain (#250): a navigation item with '"field": "Label"', its labels and resource names
+    the chain's elements. The texts are list items from the guides, from the lab named."""
+
+    def item(self, text: str) -> dict | None:
+        return parse.list_item(text, 7)
+
+    @staticmethod
+    def picker(field: str, labels: list[str], resources: list[int] | None = None) -> dict:
+        item = {"kind": "navigation", "field": field, "labels": labels}
+        if resources:
+            item["resources"] = resources
+        item["line"] = 7
+        return item
+
+    @staticmethod
+    def navigation(labels: list[str], resources: list[int] | None = None) -> dict:
+        item = {"kind": "navigation", "labels": labels}
+        if resources:
+            item["resources"] = resources
+        item["line"] = 7
+        return item
+
+    def test_a_chain_after_a_plain_label_picks_the_fields_value(self) -> None:
+        for text, field, labels, resources in (
+                ("Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`.",
+                 "Destination", ["Send to Log Analytics workspace", "platform-skycraft-swc-law"], [1]),
+                ("Flow log type: **Virtual network** → **+ Select target resource** → **Virtual network** → "
+                 "`prod-skycraft-swc-vnet` → **Confirm selection**",                                             # 5.3.5
+                 "Flow log type", ["Virtual network", "+ Select target resource", "Virtual network",
+                                   "prod-skycraft-swc-vnet", "Confirm selection"], [3]),
+                ("Backup policy: `SkyCraft-Blob-Policy` → **Select**",
+                 "Backup policy", ["SkyCraft-Blob-Policy", "Select"], [0]),
+                ("Flow log type: **Virtual network** → **+ Select target resource** → **Confirm selection**",
+                 "Flow log type", ["Virtual network", "+ Select target resource", "Confirm selection"], None)):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), self.picker(field, labels, resources))
+
+    def test_a_label_that_is_no_field_leaves_a_navigation(self) -> None:
+        # An instruction, a lead-in ('In the portal:', 'Check permissions:', 'Verify ...:'), a
+        # caption or a sentence before the colon names no field: the chain is a navigation, and
+        # its resource names are read as in any other (#199).
+        for text, labels, resources in (
+                ("Select your VM: **Virtual machines** → `dev-skycraft-swc-auth-vm`",
+                 ["Virtual machines", "dev-skycraft-swc-auth-vm"], [1]),
+                ("In the portal: **Backup policies** → `SkyCraft-Daily-Prod` → **Modify**",                    # 5.2
+                 ["Backup policies", "SkyCraft-Daily-Prod", "Modify"], [1]),
+                ("Check permissions: **Subscription** → **Access control (IAM)** → **Check access**",          # 1.3
+                 ["Subscription", "Access control (IAM)", "Check access"], None),
+                ("Verify your own role: **Subscriptions** → **Access control (IAM)** → **Check access**",      # 1.2
+                 ["Subscriptions", "Access control (IAM)", "Check access"], None),
+                ("Note: **Subnets** → `WorldSubnet`", ["Subnets", "WorldSubnet"], [1]),
+                ("Once the vault and the account both exist and the roles have propagated: **Backup** → `x`",
+                 ["Backup", "x"], [1])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), self.navigation(labels, resources))
+
+    def test_a_verb_phrase_before_the_colon_is_no_field_label(self) -> None:
+        # An instruction that INSTRUCTION does not list ('Increase the quota:', 4.3) or a sentence
+        # whose verb reports what happens ('Azure creates:', 2.3; 'Progress shows:', 2.2).
+        for text, expected in (
+                ("Increase the quota: **File shares** → select share → **Edit quota**",
+                 self.navigation(["File shares", "Edit quota"])),
+                ("Request quota increase: **Subscriptions** → **Usage + quotas**",
+                 self.navigation(["Subscriptions", "Usage + quotas"])),
+                ("Progress shows: **Validating** → **Deploying** → **Complete**",
+                 self.navigation(["Validating", "Deploying", "Complete"])),
+                ("Azure creates: `dev-world-01.skycraft.internal` → 10.1.2.10", None)):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), expected)
+
+    def test_a_portal_label_that_starts_with_a_verb_is_still_a_field(self) -> None:
+        # 'Assign access to' (the IAM Members tab) and 'Use existing' are the Portal's own labels.
+        for text, field, labels in (
+                ("Assign access to: **Managed identity** → **+ Select members**",
+                 "Assign access to", ["Managed identity", "+ Select members"]),
+                ("Use existing: **Yes** → **Select**", "Use existing", ["Yes", "Select"])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), self.picker(field, labels))
+
+    def test_a_value_that_is_not_one_span_leaves_a_navigation(self) -> None:
+        # The first step after the label must be the value, a bold or code span alone.
+        self.assertEqual(self.item("For each role above: select the role → **Assign access to: Managed identity** → "   # 5.2.5
+                                   "pick the `platform-skycraft-swc-bv` Backup Vault → **Review + assign**."),
+                         self.navigation(["Assign access to: Managed identity", "platform-skycraft-swc-bv",
+                                          "Review + assign"], [1]))
+        self.assertEqual(self.item("Destination: send to **Log Analytics** → `platform-skycraft-swc-law`"),
+                         self.navigation(["Log Analytics", "platform-skycraft-swc-law"], [1]))
+
+    def test_a_single_value_after_a_plain_label_is_still_a_field(self) -> None:
+        self.assertEqual(self.item("Destination table: **Resource specific**."),
+                         {"kind": "field", "label": "Destination table", "value": "Resource specific", "line": 7})
+
+    def test_a_value_after_a_verb_is_a_click(self) -> None:
+        # 5.2.8: the destination table is a radio group the runner cannot set as a field (#294),
+        # so the guide words it as a click on the radio button.
+        self.assertEqual(self.item("Destination table: select **Resource specific**."),
+                         {"kind": "action", "labels": ["Resource specific"], "line": 7})
+
+
+class WordedResourceTests(unittest.TestCase):
+    """A chain step with words around its code span still names a resource (#250): 'Browse to
+    `x`', 'Open `x` share', 'pick the `x` Backup Vault'. A path after 'Browse to' opens each
+    segment in turn."""
+
+    def item(self, text: str) -> dict | None:
+        return parse.list_item(text, 7)
+
+    @staticmethod
+    def navigation(labels: list[str], resources: list[int]) -> dict:
+        return {"kind": "navigation", "labels": labels, "resources": resources, "line": 7}
+
+    def test_a_verb_and_a_kind_around_the_span_are_dropped(self) -> None:
+        for text, labels, resources in (
+                ("Open `skycraft-config` share → **Connect**", ["skycraft-config", "Connect"], [0]),             # 4.3.8
+                ("**Access control (IAM)** → pick the `platform-skycraft-swc-bv` Backup Vault → **Select**",
+                 ["Access control (IAM)", "platform-skycraft-swc-bv", "Select"], [1]),
+                ("Navigate to the `prodskycraftswcsa` storage account → **Containers**",
+                 ["prodskycraftswcsa", "Containers"], [0]),
+                ("**Containers** → Browse to `game-assets` → **Upload**", ["Containers", "game-assets", "Upload"], [1])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), self.navigation(labels, resources))
+
+    def test_a_path_opens_each_segment_in_turn(self) -> None:
+        self.assertEqual(self.item("Browse to `common/config.txt` → click **⋯** → **Restore**"),                 # 4.3.6
+                         self.navigation(["common", "config.txt", "⋯", "Restore"], [0, 1]))
+        self.assertEqual(self.item("**File shares** → Browse to `skycraft-config/common` → **Upload**"),
+                         self.navigation(["File shares", "skycraft-config", "common", "Upload"], [1, 2]))
+
+    def test_a_name_with_a_slash_is_one_name_without_browse_to(self) -> None:
+        # An address range, a resource type, a file named in a chain: no path to open in turn.
+        for name in ("10.0.0.0/16", "Microsoft.Storage/storageAccounts", "common/config.txt"):
+            with self.subTest(name=name):
+                self.assertEqual(self.item(f"**A** → `{name}`"), self.navigation(["A", name], [1]))
+                self.assertEqual(self.item(f"Open `{name}` → **A**"), self.navigation([name, "A"], [0]))
+
+    def test_an_address_or_a_drive_is_no_path(self) -> None:
+        self.assertEqual(self.item("**Browse** → Browse to `https://devskycraftswcsa.blob.core.windows.net/public-demo`"),
+                         self.navigation(["Browse", "https://devskycraftswcsa.blob.core.windows.net/public-demo"], [1]))
+        self.assertEqual(self.item("Browse to `C:/temp/x` → **A**"), self.navigation(["C:/temp/x", "A"], [0]))
+
+    def test_a_span_with_other_words_is_still_no_resource(self) -> None:
+        for text in ("`skycraft-config` share → **Connect**",              # a kind needs a verb before the span
+                     "Open `template.json` in Portal → **Connect**",         # a place, not a kind
+                     "Open `template.json` in VS Code → **Connect**",
+                     "select the modified `config.txt` → **Connect**",       # 4.3.6: a file on the learner's disk
+                     "Open `a` and `b` → **Connect**",
+                     "Open `x` as admin → **Connect**",
+                     "Open `x` by name → **Connect**",
+                     "Open `x` under Settings → **Connect**",
+                     "Open `x` over there → **Connect**",
+                     "Open `x` below → **Connect**",
+                     "Open `x` next → **Connect**"):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), {"kind": "action", "labels": ["Connect"], "line": 7})
+
+    def test_a_long_step_is_read_in_linear_time(self) -> None:
+        n = 100_000
+        for space in (" ", "\t"):
+            for text in ("**A** → Open `x`" + space * n + "!",
+                         "**A** → Open `x` " + "y" * n + "!",
+                         "**A** → Open `x` y" + space * n + "z" + space * n + "!",
+                         "**A** → Pick the" + space * n + "!",
+                         "**A** → Open the" + space * n + "the `x` !",
+                         "**A** → `" + "x/" * n + "` junk",
+                         "**A** → `x`" + (space + "y") * n + "!"):
+                with self.subTest(space=repr(space), text=text[:14]):
+                    started = time.perf_counter()
+                    self.assertEqual(self.item(text), {"kind": "action", "labels": ["A"], "line": 7})
+                    self.assertLess(time.perf_counter() - started, 2)
+
+
+class ChainSentenceTests(unittest.TestCase):
+    """A chain ends at the first full stop that ends a sentence after its first separator (#250):
+    what follows describes the blade, it is not part of the way there."""
+
+    def item(self, text: str) -> dict | None:
+        return parse.list_item(text, 7)
+
+    def test_the_sentence_after_the_chain_is_not_read(self) -> None:
+        self.assertEqual(self.item("`public-demo` → **Change access level**. The **Anonymous access level** dropdown "    # 4.2.12
+                                   "lists **Private (no anonymous access)**, **Blob (anonymous read access for blobs "
+                                   "only)** and **Container (anonymous read access for containers and blobs)** - the "
+                                   "portal offers all three even with the account switch off."),
+                         {"kind": "navigation", "labels": ["public-demo", "Change access level"], "resources": [0],
+                          "line": 7})
+
+    def test_an_instruction_or_another_chain_after_the_full_stop_is_read(self) -> None:
+        for text, labels in (("**A** → **B**. Click **Save**.", ["A", "B", "Save"]),
+                             ("**A** → **B**. Then **C** → **D**.", ["A", "B", "C", "D"]),
+                             ("**A** → **B**. Select **C**. The **D** blade opens.", ["A", "B", "C"]),
+                             ("**A** → **B**. The **C** list shows. Click **Save**.", ["A", "B"])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), {"kind": "navigation", "labels": labels, "line": 7})
+
+    def test_a_sentence_before_the_chain_is_read_as_before(self) -> None:
+        self.assertEqual(self.item("Wait for the deployment. Then go to **A** → **B**. The **C** blade opens."),
+                         {"kind": "navigation", "labels": ["A", "B"], "line": 7})
+
+    def test_a_full_stop_inside_a_span_an_abbreviation_or_a_number_ends_nothing(self) -> None:
+        for text, labels in (("**Step 1. Basics** → **Next**. Done.", ["Step 1. Basics", "Next"]),
+                             ("**A** → `v1. Final` → **B**", ["A", "v1. Final", "B"]),
+                             ("**A** → the first one, e.g. **B**", ["A", "B"]),
+                             ("**A** → **B** (i.e. **C**)", ["A", "B", "C"]),
+                             ("**A** → **B** etc. **C**", ["A", "B", "C"]),
+                             ("**A** → **B** vs. **C**", ["A", "B", "C"]),
+                             ("**A** → **B**... **C**", ["A", "B", "C"]),
+                             ("**A** → **Version 1.2** → **D**", ["A", "Version 1.2", "D"])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text)["labels"], labels)
+
+    def test_a_span_with_a_full_stop_can_end_the_chain(self) -> None:
+        # A full stop inside the last span is masked: the span is read whole, not cut at its stop.
+        self.assertEqual(self.item("**A** → **Step 1. Basics**"),
+                         {"kind": "navigation", "labels": ["A", "Step 1. Basics"], "line": 7})
+        self.assertEqual(self.item("**A** → `v1. Final`"),
+                         {"kind": "navigation", "labels": ["A", "v1. Final"], "resources": [1], "line": 7})
+
+    def test_a_long_item_is_read_in_linear_time(self) -> None:
+        # Each full stop once looked at the whole rest of the item: 35 s and 10 s (#250 review).
+        n = 100_000
+        for text, labels in (("**A** → **B**" + ". Click" * n, ["A", "B"]),
+                             ("**A** → " + "x. → " * n, ["A"])):
+            with self.subTest(text=text[:16]):
+                started = time.perf_counter()
+                self.assertEqual(self.item(text)["labels"], labels)
+                self.assertLess(time.perf_counter() - started, 2)
+
+    def test_an_item_without_a_chain_is_read_whole(self) -> None:
+        self.assertEqual(self.item("Click **Save**. The **Overview** opens."),
+                         {"kind": "action", "labels": ["Save", "Overview"], "line": 7})
 
 
 class LiteralValueTests(unittest.TestCase):

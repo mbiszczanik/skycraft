@@ -21,7 +21,11 @@
       so does a list or a form table after a line that starts with 'Verify' or 'Confirm' and
       ends in a colon (#246; pinned on labs 2.2, 3.2, 4.1 and 5.2).
       A chain step that is one code span is a resource name among the chain's labels, its index
-      in "resources" (#199; pinned on labs 3.2, 4.2 and 5.2, rules in test_parse.py).
+      in "resources" (#199; pinned on labs 3.2, 4.2 and 5.2, rules in test_parse.py), and so is
+      one with a verb and the resource's kind around its code span, one name per segment of a
+      path; a chain after a plain field label picks that field's value ("field"); and a chain
+      ends at the full stop that ends its sentence (#250; pinned on labs 4.2, 4.3, 5.1, 5.2 and
+      5.3, rules in test_parse.py).
 
       THE 17 GUIDES - every module-*/X.Y-*/lab-guide-X.Y.md parses, its step ids match its
       headings in order, and no label or value carries markup or comment residue. This does NOT
@@ -789,7 +793,7 @@ Describe 'parse.py - labs 3.2, 4.2 and 5.2, resource names in navigation chains 
         @{ lab = '3.2'; id = '3.2.14'; labels = @('Virtual machines', 'dev-skycraft-swc-world-vm'); resources = @(1) }
         @{ lab = '4.2'; id = '4.2.11'; labels = @('prodskycraftswcsa', 'Containers', 'game-assets'); resources = @(0, 2) }
         # 'waiting for 02:00: **Protected items** -> ...': no space after the first colon, so the
-        # text before it is no plain label and the chain keeps its resource (PLAIN_LABEL_START).
+        # text before it is no field label and the chain keeps its resource (picker_field, #250).
         @{ lab = '5.2'; id = '5.2.3'; labels = @('Protected items', 'Backup items', 'Azure Virtual Machine', 'dev-skycraft-swc-auth-vm', 'Backup now', 'OK'); resources = @(3) }
     ) {
         $chains = @(($script:ChainLabs[$lab].steps | Where-Object id -eq $id).items |
@@ -807,6 +811,74 @@ Describe 'parse.py - labs 3.2, 4.2 and 5.2, resource names in navigation chains 
         & $script:Python $script:Parser $guide --out $out --repo-root $script:RepoRoot
         $items = @((Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json).steps | ForEach-Object { $_.items })
         @($items | Where-Object { $_.PSObject.Properties.Name -contains 'resources' }) | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'parse.py - labs 4.2, 4.3, 5.1, 5.2 and 5.3, pickers, worded resource steps and chains that end at a full stop (#250)' {
+    BeforeAll {
+        $script:PickerLabs = @{}
+        foreach ($guide in 'module-4-storage/4.2-blob-storage/lab-guide-4.2.md',
+                           'module-4-storage/4.3-azure-files/lab-guide-4.3.md',
+                           'module-5-monitoring-maintenance/5.1-azure-monitor/lab-guide-5.1.md',
+                           'module-5-monitoring-maintenance/5.2-business-continuity/lab-guide-5.2.md',
+                           'module-5-monitoring-maintenance/5.3-network-monitoring/lab-guide-5.3.md') {
+            $lab = [regex]::Match($guide, 'lab-guide-(\d+\.\d+)\.md$').Groups[1].Value
+            $out = Join-Path $TestDrive "pickers-$lab.json"
+            & $script:Python $script:Parser (Join-Path $script:RepoRoot $guide) --out $out --repo-root $script:RepoRoot
+            $script:PickerLabs[$lab] = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+        }
+    }
+
+    It 'reads <count> chain(s) of step <id> as <labels>, resource names at <resources>, picking field "<field>"' -ForEach @(
+        # 'Flow log type: **Virtual network** -> ... -> `prod-skycraft-swc-vnet` -> ...': the field's picker, then the chain.
+        @{ lab = '5.3'; id = '5.3.5'; count = 1; field = 'Flow log type'; labels = @('Virtual network', '+ Select target resource', 'Virtual network', 'prod-skycraft-swc-vnet', 'Confirm selection'); resources = @(3) }
+        # 'Browse to `common/config.txt`': a path opens each segment; 'Open `x` share', 'pick the `x` Backup Vault'.
+        @{ lab = '4.3'; id = '4.3.6'; count = 1; field = ''; labels = @('common', 'config.txt', [string][char]0x22EF, 'Restore'); resources = @(0, 1) }
+        @{ lab = '4.3'; id = '4.3.8'; count = 1; field = ''; labels = @('skycraft-config', 'Connect'); resources = @(0) }
+        @{ lab = '5.2'; id = '5.2.5'; count = 1; field = ''; labels = @('Assign access to: Managed identity', 'platform-skycraft-swc-bv', 'Review + assign'); resources = @(1) }
+        # '`public-demo` -> **Change access level**. The **Anonymous access level** dropdown lists ...':
+        # the sentence after the chain describes the dialog.
+        @{ lab = '4.2'; id = '4.2.12'; count = 1; field = ''; labels = @('public-demo', 'Change access level'); resources = @(0) }
+    ) {
+        $chains = @(($script:PickerLabs[$lab].steps | Where-Object id -eq $id).items |
+            Where-Object { $_.kind -eq 'navigation' -and (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
+        $chains.Count | Should -Be $count
+        foreach ($chain in $chains) {
+            [string]$chain.field | Should -BeExactly $field
+            @($chain.resources) | Should -Be $resources
+        }
+    }
+
+    # Diagnostic settings: the check box, then the workspace as a field the runner picks from its
+    # dropdown; the destination table is a click on its radio button, not a field (#294).
+    It 'reads step <id>''s destination as a check box, the workspace field and <radio> click(s)' -ForEach @(
+        @{ lab = '5.1'; id = '5.1.7'; count = 1; radio = 0 }
+        @{ lab = '5.2'; id = '5.2.8'; count = 2; radio = 1 }
+    ) {
+        $items = @(($script:PickerLabs[$lab].steps | Where-Object id -eq $id).items)
+        @($items | Where-Object { $_.kind -eq 'action' -and (@($_.labels) -join "`n") -ceq 'Send to Log Analytics workspace' }).Count | Should -Be $count
+        $workspace = @($items | Where-Object { $_.kind -eq 'field' -and $_.label -ceq 'Log Analytics workspace' })
+        $workspace.Count | Should -Be $count
+        foreach ($field in $workspace) { $field.value | Should -BeExactly 'platform-skycraft-swc-law' }
+        @($items | Where-Object { $_.kind -eq 'action' -and (@($_.labels) -join "`n") -ceq 'Resource specific' }).Count | Should -Be $radio
+        @($items | Where-Object { $_.kind -eq 'field' -and $_.label -eq 'Destination table' }) | Should -BeNullOrEmpty
+        @($items | Where-Object { $_.PSObject.Properties.Name -contains 'field' }) | Should -BeNullOrEmpty
+    }
+
+    It 'never clicks what the sentence after a chain describes in step <id>' -ForEach @(
+        @{ lab = '4.2'; id = '4.2.12'; described = @('Anonymous access level', 'Private (no anonymous access)', 'Blob (anonymous read access for blobs only)', 'Container (anonymous read access for containers and blobs)') }
+        @{ lab = '5.2'; id = '5.2.3'; described = @('Take Snapshot', 'In progress', 'Failed') }
+    ) {
+        $labels = @(($script:PickerLabs[$lab].steps | Where-Object id -eq $id).items | ForEach-Object { $_.labels })
+        foreach ($label in $described) { $labels | Should -Not -Contain $label }
+    }
+
+    It 'leaves the upload pane''s local file in step 4.3.6 unread' {
+        $step = $script:PickerLabs['4.3'].steps | Where-Object id -eq '4.3.6'
+        $upload = @($step.items | Where-Object { @($_.labels) -contains 'Overwrite if files already exist' })
+        $upload.Count | Should -Be 1
+        @($upload[0].labels) | Should -Be @('Upload', 'Overwrite if files already exist', 'Upload')
+        $upload[0].PSObject.Properties.Name | Should -Not -Contain 'resources'
     }
 }
 

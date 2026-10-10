@@ -74,9 +74,10 @@ print(json.dumps(reported))
 '@
 
 # The labels of one parsed step: those run.py asks the decider about ('decided': navigation and
-# action labels and field labels; never tag names, which the runner does not look up by label),
-# or the resource names a chain gives in code spans ('resource', #199), which the runner opens by
-# name and never asks about, so a recorded decision for one would never be used.
+# action labels, field labels and the field whose picker a chain opens, #250; never tag names,
+# which the runner does not look up by label), or the resource names a chain gives in code spans
+# ('resource', #199), which the runner opens by name and never asks about, so a recorded decision
+# for one would never be used.
 function Get-StepLabel {
     param([object]$Step, [ValidateSet('decided', 'resource')][string]$Kind)
     foreach ($item in @($Step.items)) {
@@ -85,6 +86,7 @@ function Get-StepLabel {
             if ($Kind -eq 'decided') { $item.label }
             continue
         }
+        if ($Kind -eq 'decided' -and $item.field) { $item.field }
         $labels    = @($item.labels)
         $resources = @($item.resources | Where-Object { $null -ne $_ })
         for ($i = 0; $i -lt $labels.Count; $i++) {
@@ -104,10 +106,11 @@ function Get-LabelProblem {
     }
 }
 
-# Get-LabelProblem on a parsed step with a chain that names a resource, an action, a field and a
-# tag. Computed here, at discovery: It blocks cannot call file-scope functions.
+# Get-LabelProblem on a parsed step with a chain that names a resource, a chain that picks a
+# field's value, an action, a field and a tag. Computed here, at discovery: It blocks cannot call file-scope functions.
 $LabelFixture = [pscustomobject]@{ id = '9.9.1'; items = @(
         [pscustomobject]@{ kind = 'navigation'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Backend pools'); resources = @(1) }
+        [pscustomobject]@{ kind = 'navigation'; field = 'Destination'; labels = @('Send to Log Analytics workspace', 'platform-skycraft-swc-law'); resources = @(1) }
         [pscustomobject]@{ kind = 'action'; labels = @('Save') }
         [pscustomobject]@{ kind = 'field'; label = 'Name'; value = 'x' }
         [pscustomobject]@{ kind = 'tag'; name = 'Project'; value = 'SkyCraft' }
@@ -117,6 +120,9 @@ $LabelRuleCases = @(
     @{ label = 'Backend pools'; problem = '' }
     @{ label = 'Save'; problem = '' }
     @{ label = 'Name'; problem = '' }
+    @{ label = 'Destination'; problem = '' }
+    @{ label = 'Send to Log Analytics workspace'; problem = '' }
+    @{ label = 'platform-skycraft-swc-law'; problem = "step 9.9.1 label 'platform-skycraft-swc-law' is a resource name, which the runner opens by name and never asks about" }
     @{ label = 'dev-skycraft-swc-lb'; problem = "step 9.9.1 label 'dev-skycraft-swc-lb' is a resource name, which the runner opens by name and never asks about" }
     @{ label = 'Project'; problem = "step 9.9.1 label 'Project' is not in the guide" }
 ) | ForEach-Object { $_.actual = @(Get-LabelProblem -Step $LabelFixture -Label $_.label) -join '; '; $_ }

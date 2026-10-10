@@ -282,16 +282,21 @@ Backup reports are built from **diagnostic settings** on the vaults: each vault 
    - **Azure Backup Operations** (`AzureBackupOperations`)
 
    Backup reports needs all six. Leave **Azure Backup Reporting Data** (`AzureBackupReport`) unchecked: it is the legacy event, it flows only in **Azure diagnostics** mode, and with **Resource specific** selected it sends no data.
-4. Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`, destination table **Resource specific**.
-5. Click **Save**.
+4. Check **Send to Log Analytics workspace**.
+5. Log Analytics workspace: `platform-skycraft-swc-law`.
+6. Destination table: select **Resource specific**.
+7. Click **Save**.
 
 **b. Backup Vault → `bv-backup-reports-diag`**
 
 1. Open `platform-skycraft-swc-bv` → **Monitoring** → **Diagnostic settings** → **+ Add diagnostic setting**.
 2. Diagnostic setting name: `bv-backup-reports-diag`
 3. Logs: **Core Azure Backup Data**, **Addon Azure Backup Job Data**, **Addon Azure Backup Policy Data**, **Addon Azure Backup Protected Instance Data** (a Backup Vault has neither the legacy `AzureBackupReport` event nor `AddonAzureBackupStorage` - its storage data is already in Core and Protected Instance). Leave the **Health** metric (under **Metrics**) unchecked - Backup reports does not use it, and the Bicep path does not enable it.
-4. Destination: **Send to Log Analytics workspace** → `platform-skycraft-swc-law`. There is no destination-table toggle here: Backup Vault logs always land in resource-specific tables.
-5. Click **Save**.
+4. Check **Send to Log Analytics workspace**.
+5. Log Analytics workspace: `platform-skycraft-swc-law`.
+
+   There is no **Destination table** option here: Backup Vault logs always land in resource-specific tables.
+6. Click **Save**.
 
 #### Azure CLI
 
