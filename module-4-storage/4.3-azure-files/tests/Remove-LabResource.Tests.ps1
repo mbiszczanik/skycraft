@@ -51,10 +51,13 @@ BeforeAll {
     # it, so it resolves to the stub all the same.
     $script:RequiredModules = @('Az.Accounts', 'Az.Storage')
 
+    # Get-AzResource is not called by the script; it is stubbed because the cleanup before #290
+    # looked each share up with it, so a revert runs against the stub instead of a subscription.
     $script:StubCommands = @(
         'Get-AzContext'
         'Get-AzStorageAccount'
         'Get-AzRmStorageShare'
+        'Get-AzResource'
         'Remove-AzResource'
     )
 
@@ -138,6 +141,16 @@ function Get-AzRmStorageShare {
     if (Test-StubEmpty) { return }
     [pscustomobject]@{ Name = 'skycraft-config' }
     [pscustomobject]@{ Name = 'skycraft-shared' }
+}
+
+function Get-AzResource {
+    [CmdletBinding()]
+    param([string]$ResourceId)
+    $share = ($ResourceId -split '/')[-1]
+    $account = ($ResourceId -split '/')[8]
+    if (Invoke-StubLookup -Name "Get-AzRmStorageShare:$account") { return }
+    if ((Test-StubEmpty) -and $share -ne 'unrelated') { return }
+    [pscustomobject]@{ Name = $share; ResourceId = $ResourceId }
 }
 
 function Remove-AzResource {
