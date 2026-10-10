@@ -739,7 +739,9 @@ Quick verification before proceeding:
 ### Service Endpoints
 
 - [ ] Service endpoints enabled on dev DatabaseSubnet (Microsoft.Sql, Microsoft.Storage)
+- [ ] Service endpoint enabled on dev WorldSubnet (Microsoft.Storage) - required by Lab 4.4
 - [ ] Service endpoints enabled on prod DatabaseSubnet (Microsoft.Sql, Microsoft.Storage)
+- [ ] Service endpoint enabled on prod WorldSubnet (Microsoft.Storage) - required by Lab 4.4
 
 **For detailed verification**, see [lab-checklist-2.2.md](lab-checklist-2.2.md)
 
