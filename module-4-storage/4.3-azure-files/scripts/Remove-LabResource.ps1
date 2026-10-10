@@ -12,7 +12,8 @@
     reports it as not found, means "absent" - Test-LabNotFoundError tells the two apart (issue
     #290, as #255 did for Labs 1.2-2.3). The shares are listed once and picked by name, so a
     missing share is an empty match rather than an error to interpret; a listing that fails
-    touches no share.
+    touches no share. A share is removed with its snapshots (Remove-AzRmStorageShare -Include
+    Snapshots): the lab takes snapshots, and a share that has them cannot be deleted otherwise.
 
     Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
     "pwsh -File" for any script that declares #Requires -Modules for a module it has to
@@ -123,7 +124,6 @@ function Invoke-LabLookup {
 
 $resourceGroupName  = "$Environment-skycraft-swc-rg"
 $storageAccountName = "${Environment}skycraftswcsa"
-$subscriptionId     = (Get-AzContext).Subscription.Id
 
 Write-Host "=== Lab 4.3: Cleaning Up File Shares ($Environment) ===" -ForegroundColor Cyan
 
@@ -153,12 +153,12 @@ if (-not $saLookup.Failed) {
 
 if ($shareLookup -and -not $shareLookup.Failed) {
     foreach ($shareName in $sharesToRemove) {
-        $shareId = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.Storage/storageAccounts/$storageAccountName/fileServices/default/shares/$shareName"
         if ($shareLookup.Value | Where-Object { $_.Name -eq $shareName }) {
             Write-Host "Removing file share '$shareName'..." -ForegroundColor Yellow
             try {
                 if ($PSCmdlet.ShouldProcess($shareName, 'Remove file share')) {
-                    Remove-AzResource -ResourceId $shareId -Force -ErrorAction Stop | Out-Null
+                    Remove-AzRmStorageShare -ResourceGroupName $resourceGroupName -StorageAccountName $storageAccountName `
+                        -Name $shareName -Include Snapshots -Force -ErrorAction Stop | Out-Null
                     Write-Host "  -> Successfully removed '$shareName'." -ForegroundColor Green
                 }
             } catch {

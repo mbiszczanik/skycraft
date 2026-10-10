@@ -47,16 +47,16 @@ BeforeAll {
     $script:ScriptPath     = (Resolve-Path (Join-Path $PSScriptRoot '..' 'scripts' 'Remove-LabResource.ps1')).Path
     $script:StubModuleName = 'SkyCraftLab43CleanupStub'
     # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
-    # Remove-AzResource comes from Az.Resources, which the line does not name; the stub exports
-    # it, so it resolves to the stub all the same.
     $script:RequiredModules = @('Az.Accounts', 'Az.Storage')
 
-    # Get-AzResource is not called by the script; it is stubbed because the cleanup before #290
-    # looked each share up with it, so a revert runs against the stub instead of a subscription.
+    # Get-AzResource and Remove-AzResource are not called by the script; they are stubbed because
+    # the cleanup before #290 used them, so a revert runs against the stub instead of a
+    # subscription. Both removals log the same line.
     $script:StubCommands = @(
         'Get-AzContext'
         'Get-AzStorageAccount'
         'Get-AzRmStorageShare'
+        'Remove-AzRmStorageShare'
         'Get-AzResource'
         'Remove-AzResource'
     )
@@ -67,7 +67,9 @@ BeforeAll {
     #   SKYCRAFT_STUB_EMPTY   '1' leaves only the unrelated share in the listing
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled) or
     #                         report its object not found (notfound, rgnotfound)
-    #   SKYCRAFT_STUB_FAIL    'Remove-AzResource:<share>,...' makes one removal throw
+    #   SKYCRAFT_STUB_FAIL    'Remove-AzRmStorageShare:<share>,...' makes one removal throw
+    # A removal is logged as 'Remove-AzRmStorageShare:<share>' and, with where it points and what
+    # it includes, as 'Remove-AzRmStorageShare@<rg>/<account>/<share>?include=<include>'.
     # A lookup is named after its command and the object it reads: 'Get-AzStorageAccount:<sa>',
     # 'Get-AzRmStorageShare:<sa>'.
     $script:StubBody = @'
@@ -153,11 +155,19 @@ function Get-AzResource {
     [pscustomobject]@{ Name = $share; ResourceId = $ResourceId }
 }
 
+function Remove-AzRmStorageShare {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$StorageAccountName, [string]$Name, [string]$Include, [switch]$Force)
+    Write-StubCall -Name "Remove-AzRmStorageShare@$ResourceGroupName/$StorageAccountName/${Name}?include=$Include"
+    Invoke-StubRemoval -Command 'Remove-AzRmStorageShare' -Name $Name
+}
+
 function Remove-AzResource {
     [CmdletBinding()]
     param([string]$ResourceId, [switch]$Force)
-    Write-StubCall -Name "Remove-AzResource@$ResourceId"
-    Invoke-StubRemoval -Command 'Remove-AzResource' -Name (($ResourceId -split '/')[-1])
+    $parts = $ResourceId -split '/'
+    Write-StubCall -Name "Remove-AzRmStorageShare@$($parts[4])/$($parts[8])/$($parts[-1])?include="
+    Invoke-StubRemoval -Command 'Remove-AzRmStorageShare' -Name $parts[-1]
 }
 '@
 
@@ -204,7 +214,7 @@ function Remove-AzResource {
     $script:WhatIf         = Invoke-CleanupScript -Stub $script:Stub -ArgumentList '-WhatIf'
     $script:AccountDenied  = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzStorageAccount:prodskycraftswcsa=denied'
     $script:SharesThrottled = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzRmStorageShare:prodskycraftswcsa=throttled'
-    $script:RemovalFails   = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzResource:skycraft-config'
+    $script:RemovalFails   = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzRmStorageShare:skycraft-config'
 
     $script:AllRuns = @(
         $script:Clean, $script:Dev, $script:NoShares, $script:NoAccount, $script:WhatIf, $script:AccountDenied,
@@ -229,21 +239,21 @@ Describe 'Lab 4.3 Remove-LabResource.ps1 - test harness' {
 
 Describe 'Lab 4.3 Remove-LabResource.ps1 - removes what the lab creates' {
 
-    It 'exits 0 and removes both lab shares and no other' {
+    It 'exits 0 and removes both lab shares, with their snapshots, and no other' {
         $run = $script:Clean
         $run.ExitCode | Should -Be 0 -Because "a clean teardown must report success; output was:`n$($run.Output)"
         $run.Output   | Should -Match 'Lab 4.3 Cleanup Complete'
         $run.Output   | Should -Not -Match '\[ERROR\]'
-        $run.Calls    | Should -Contain 'Remove-AzResource:skycraft-config'
-        $run.Calls    | Should -Contain 'Remove-AzResource:skycraft-shared'
-        $run.Calls    | Should -Not -Contain 'Remove-AzResource:unrelated'
-        $run.Calls    | Should -Contain 'Remove-AzResource@/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/prodskycraftswcsa/fileServices/default/shares/skycraft-config'
+        $run.Calls    | Should -Contain 'Remove-AzRmStorageShare:skycraft-config'
+        $run.Calls    | Should -Contain 'Remove-AzRmStorageShare:skycraft-shared'
+        $run.Calls    | Should -Not -Contain 'Remove-AzRmStorageShare:unrelated'
+        $run.Calls    | Should -Contain 'Remove-AzRmStorageShare@prod-skycraft-swc-rg/prodskycraftswcsa/skycraft-config?include=Snapshots'
     }
 
     It 'targets the dev account with -Environment dev' {
         $script:Dev.ExitCode | Should -Be 0 -Because "output was:`n$($script:Dev.Output)"
         $script:Dev.Calls    | Should -Contain 'Get-AzRmStorageShare:devskycraftswcsa'
-        $script:Dev.Calls    | Should -Contain 'Remove-AzResource@/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/devskycraftswcsa/fileServices/default/shares/skycraft-shared'
+        $script:Dev.Calls    | Should -Contain 'Remove-AzRmStorageShare@dev-skycraft-swc-rg/devskycraftswcsa/skycraft-shared?include=Snapshots'
     }
 }
 
@@ -295,7 +305,7 @@ Describe 'Lab 4.3 Remove-LabResource.ps1 - a failed removal is counted' {
         $run.Output   | Should -Match "\[ERROR\] Could not remove 'skycraft-config': stub failure"
         $run.Output   | Should -Match 'cleanup finished with 1 failure\(s\)'
         $run.Output   | Should -Not -Match 'Cleanup Complete'
-        $run.Calls    | Should -Contain 'Remove-AzResource:skycraft-shared'
+        $run.Calls    | Should -Contain 'Remove-AzRmStorageShare:skycraft-shared'
     }
 }
 
