@@ -12,7 +12,11 @@ without a browser. Rules (issue #189):
     nothing but whitespace, so a 4-backtick fence can quote a 3-backtick one.
   * Where a step has '#### Option 1:' or '#### Option A:' headings, only one option's body is
     read: the first option whose body yields at least one item, or the first option when none
-    does (#201: 3.2.1's Option A is CLI-only, its Option B is the Portal path). The step's
+    does (#201: 3.2.1's Option A is CLI-only, its Option B is the Portal path). Lines outside
+    every option's body, before the first Option heading or under another '####' heading
+    ('#### Verify' after the options), belong to every path and are read too, in document
+    order with the option's; only the option's own items count when it is chosen (#203). No
+    guide has such lines today. The step's
     "option" is that option's name as its heading gives it ('1', 'A', 'B'); only a step with
     Option headings carries the key, so the steps.json of a run tells its reader, and the
     reviewer of a recording, which path was read. The Expected Result is the first one outside
@@ -111,7 +115,13 @@ without a browser. Rules (issue #189):
     'global search'. Otherwise the scope is 'blade': X is typed into the open blade's or pane's
     own search box ('Search for **"Owner"**' in a role assignment). Anything else after the bold
     ('and click **+ Create**', 'Search for and select **X**') leaves the item an action.
-  * A list item '**Label**: value' is a 'field' item when Label is a UI label.
+  * A list item '**Label**: value' is a 'field' item when Label is a UI label. When Label is a
+    caption (NON_UI_BOLD, the guide's LAB_CAPTIONS, or ending with ':'), the text after it
+    describes and the item gives none, so the bold values in it are not clicks (#203):
+    '**Result**: `PublicAccessNotPermitted` ... were **on** and the container still **Private**'
+    (4.2.12). The text is an instruction instead, read as any other item, when it starts with an
+    INSTRUCTION word, at its start or after a leading clause that ends in a comma (CAPTION_INSTRUCTION):
+    '**Bind**: Once validated, click **Validate** and **Add**.' (3.4.12) clicks both.
   * A field whose value is not text to type or pick as written carries '"literal": false'
     (value_is_literal, #202): the value starts with an instruction verb (VALUE_INSTRUCTION:
     'Click the "..." button', 'Search for "Allowed locations"', 'Leave default'; also inside an
@@ -137,13 +147,18 @@ without a browser. Rules (issue #189):
     span follows the span ('Logs: **A** and **B**' stays a click on each); when a chain does
     (the chain picks the field's value, above); when the label starts with an instruction
     (INSTRUCTION: 'Select your VM:', 'Add tag:', 'Enter:', 'Search for:'); and when the label
-    is a caption (NON_UI_BOLD: 'Note:', 'Example:'), is longer than six words, does not start
+    is a caption (NON_UI_BOLD or LAB_CAPTIONS: 'Note:', 'Example:'), is longer than six words,
+    does not start
     with a letter, or holds anything but letters (of any script), digits, spaces and '()/&-'.
     An underscore is excluded: it marks italics ('_Note_:') or an identifier, not a Portal
     label. A value after a verb ('Destination table: select **Resource specific**', 5.2.8) is
     no field: the bold span is a click.
-  * Bold spans that are not UI elements are dropped by NON_UI_BOLD and by the colon rule
-    (bold text ending with ':' is a caption, not a label).
+  * Bold spans that are not UI elements are dropped by NON_UI_BOLD, by the guide's own entry
+    in LAB_CAPTIONS and by the colon rule (bold text ending with ':' is a caption, not a label).
+    NON_UI_BOLD holds the captions of every guide ('Note', 'Expected Result', 'Result');
+    LAB_CAPTIONS holds those of one lab, keyed by the lab of the guide's file name, so a caption
+    added for one lab ('Validation', 3.4) never hides a Portal label of the same name in another
+    (#203). Once a lab is recorded, its captions can move to its recording as 'ignore' decisions.
   * Tables whose second header cell is 'Value' are forms. When the first header is Field,
     Property or Setting, each row becomes a 'field' item (label, value). When it is Name or Tag,
     each row becomes a 'tag' item (name, value), typed into the Portal's Tags grid by row rather
@@ -180,10 +195,6 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     a container ('game-assets', 4.2.11; 'scripts', 4.4.3) or a file share's folder or file
     ('common', 'config.txt', 4.3.6). Either is reported as a missing resource whenever it is not
     on screen (#199).
-  * 4.3.6's item 6, 'Select the snapshot from Step 4.3.5', has no bold or code span and yields
-    no item, so line 441's 'Browse to `common/config.txt` → click **⋯** → **Restore**' runs from
-    the Snapshots list, not inside the snapshot: 'common' is not on screen there and is looked
-    up in the global search, which does not find a folder (#203).
   * 'select `config.txt`' (4.3.6, line 435) is read as a resource, and so is 'config.txt', the
     last segment of line 441's path, before its **⋯**: the runner clicks the file's row, which
     may open the file rather than select it.
@@ -191,12 +202,10 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     creates an SSH key resource, while the items of later 3.2 steps follow Option A (3.2.2
     pastes skycraft-dev.pub); option B appears there only in prose notes, so a run of 3.2
     needs 3.2.1 skipped in its recording (#200) or a per-step choice of option.
-  * A caption label whose value holds bold spans turns them into actions (4.2:741, #203).
-  * Instructions after a field value are lost (5.3:225, #203).
-  * Text before the first option heading, and items under a non-option '####' heading after
-    the options, are dropped (#203).
-  * NON_UI_BOLD is one global list, so a caption from one lab can hide a real label in another
-    (#203).
+  * A caption's text is an instruction only when an INSTRUCTION word starts it or follows its
+    first comma, so '**Note**: When it is ready, the Portal asks you to click **OK**' is read as a
+    description and clicks nothing, and '**Note**: Open handles are listed under **Handles**'
+    is read as an instruction and clicks Handles. No guide has either shape today.
   * Some values that are not text to type still read as literal; #202 does not cover them, and
     each is found when its lab is recorded (#204): 'empty' (3.3.7),
     'Default (30 GiB)' (3.2.3), relative times ('1 month from now', 'Current time'), a list of
@@ -296,6 +305,12 @@ INSTRUCTION = re.compile("^" + INSTRUCTION_WORDS, re.IGNORECASE)
 # The same words after the spaces that follow a full stop, matched at the stop's end in a chain
 # (chain_sentence) without slicing the rest of the text.
 INSTRUCTION_NEXT = re.compile(r"\s*" + INSTRUCTION_WORDS, re.IGNORECASE)
+# The text after a caption ('**Bind**: Once validated, click **Validate** and **Add**.', 3.4) is
+# an instruction when it starts with one of the same words, at its start or after a leading clause
+# that ends in a comma; otherwise it describes ('**Result**: `PublicAccessNotPermitted` ... the
+# account switch were **on**', 4.2) and gives no item (#203). '[^,]*' stops at the first comma, so
+# a text that fails does so in linear time.
+CAPTION_INSTRUCTION = re.compile(r"^(?:[^,]*,\s*)?" + INSTRUCTION_WORDS, re.IGNORECASE)
 # A field value that starts with one of these, after an optional '(', is an instruction, not
 # text to type (value_is_literal). Check and Uncheck count only with a word after them, not a
 # remark ('Uncheck (default)'): alone they are a check box state. So is a bare 'Leave checked'
@@ -340,38 +355,46 @@ TAG_FIRST_HEADERS = {"name", "tag"}                        # rows become 'tag' i
 
 NON_UI_BOLD = {
     "Expected Result", "Note", "Tip", "Important", "Warning", "Why", "SkyCraft Choice",
-    # Captions and prose emphasis found in the guides, each with the lab it came from. Only text
-    # that is clearly not a Portal element is listed; a supervised run answers the rest once.
+    # Captions found in more than one guide, or generic enough for any; no Portal element the
+    # guides name is called so. A supervised run answers the rest once.
     "Azure Portal",                            # 1.1-5.2: "Open **Azure Portal**", the site itself
-    "group",                                   # 1.2: "Select the **group** (not individual users)"
-    "WITHOUT",                                 # 1.3: emphasis
-    "resource",                                # 1.3: "Locks at **resource** level"
-    "fully private",                           # 2.2: emphasis
-    "private IP",                              # 2.2: emphasis
-    "Install Bicep CLI",                       # 3.1: caption of a local-tools step
-    "Install VS Code Extension",               # 3.1: caption of a local-tools step
-    "Review generated Bicep file",             # 3.1: caption
     "(Optional)",                              # 3.2: caption
-    "zone-redundant by default",               # 3.2: emphasis
-    "Simulating zone failure",                 # 3.2: caption in a conceptual step
-    "Verifying traffic routing",               # 3.2: caption in a conceptual step
-    "Restoring service",                       # 3.2: caption in a conceptual step
-    "Version: 2.0 (Staging)",                  # 3.4: text of the local index.html
-    "Blue",                                    # 3.4: colour of the local index.html
-    "Validation",                              # 3.4: caption ("**Validation**: Add the TXT ...")
-    "Bind",                                    # 3.4: caption ("**Bind**: Once validated, ...")
-    "always enabled",                          # 4.1: emphasis
-    "Find the account-level switch",           # 4.2: caption
-    "Create the `public-demo` container - Private",  # 4.2: caption
-    "Prove the container is not anonymous",    # 4.2: caption
-    "Result",                                  # 4.2: caption ("**Result**: PublicAccess...")
-    "See the container-level switch",          # 4.2: caption
-    "backup instance",                         # 5.2: emphasis
-    "Fallback",                                # 5.3: caption
-    "Dev fallback source",                     # 5.3: caption of an expected outcome
-    "Production source",                       # 5.3: caption of an expected outcome
     "Example",                                 # 3.3: caption ("Example: `skycraft-auth-...`")
+    "Result",                                  # 2.2, 4.2: caption ("**Result**: PublicAccess...")
 }
+
+# Captions and prose emphasis that one lab's guide uses, by lab (#203). They are no UI label in
+# that lab only, so a caption added for one lab never hides a Portal label of the same name in
+# another ('Validation', 'Bind', 'group'). Only text that is clearly not a Portal element is
+# listed. Once a lab is recorded, its entries can move to its recording as 'ignore' decisions;
+# lab 1.1, the only lab recorded so far, has none.
+LAB_CAPTIONS: dict[str, frozenset[str]] = {
+    "1.2": frozenset({"group"}),                           # "Select the **group** (not individual users)"
+    "1.3": frozenset({"WITHOUT",                           # emphasis
+                      "resource"}),                        # "Locks at **resource** level"
+    "2.2": frozenset({"fully private", "private IP"}),     # emphasis
+    "3.1": frozenset({"Install Bicep CLI",                 # captions of local-tools steps
+                      "Install VS Code Extension",
+                      "Review generated Bicep file"}),
+    "3.2": frozenset({"zone-redundant by default",         # emphasis
+                      "Simulating zone failure",           # captions in a conceptual step
+                      "Verifying traffic routing",
+                      "Restoring service"}),
+    "3.4": frozenset({"Version: 2.0 (Staging)",            # text of the local index.html
+                      "Blue",                              # colour of the local index.html
+                      "Validation",                        # "**Validation**: Add the TXT ..."
+                      "Bind"}),                            # "**Bind**: Once validated, ..."
+    "4.1": frozenset({"always enabled"}),                  # emphasis
+    "4.2": frozenset({"Find the account-level switch",     # captions of 4.2.12's list
+                      "Create the `public-demo` container - Private",
+                      "Prove the container is not anonymous",
+                      "See the container-level switch"}),
+    "5.2": frozenset({"backup instance"}),                 # emphasis
+    "5.3": frozenset({"Fallback",                          # caption
+                      "Dev fallback source",               # captions of an expected outcome
+                      "Production source"}),
+}
+NO_CAPTIONS: frozenset[str] = frozenset()
 
 
 # Stands in for a line that held nothing but an HTML comment. Unlike "" it does not end a table,
@@ -442,8 +465,10 @@ def clean_label(text: str) -> str:
     return text.strip("“”\"'").strip()
 
 
-def is_ui_label(text: str) -> bool:
-    return bool(text) and text not in NON_UI_BOLD and not text.endswith(":")
+def is_ui_label(text: str, captions: frozenset[str] = NO_CAPTIONS) -> bool:
+    """Whether bold text names a UI element: not empty, no caption of every guide (NON_UI_BOLD)
+    or of the guide read (captions, from LAB_CAPTIONS), and not ending with a colon."""
+    return bool(text) and text not in NON_UI_BOLD and text not in captions and not text.endswith(":")
 
 
 def strip_value_markup(text: str) -> str:
@@ -670,7 +695,8 @@ def check_list(body: list[tuple[int, str]], index: int) -> tuple[list[str], int]
     return parts, after
 
 
-def read_step(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, list[str], str | None]:
+def read_step(body: list[tuple[int, str]], captions: frozenset[str] = NO_CAPTIONS
+              ) -> tuple[list[dict], str | None, list[str], str | None]:
     """Items, Expected Result and images of one step section, and the name of the option they
     were read from ('1', 'A', 'B'; None when the step has no Option headings).
 
@@ -679,16 +705,17 @@ def read_step(body: list[tuple[int, str]]) -> tuple[list[dict], str | None, list
     """
     regions, options = option_regions(body)
     if not options:
-        return (*read_option(body, regions, None), None)
+        return (*read_option(body, regions, None, captions), None)
     for index, name in enumerate(options):
-        read = read_option(body, regions, index)
-        if read[0]:
+        read = read_option(body, regions, index, captions)
+        own = {number for (number, _), region in zip(body, regions) if region == index}
+        if any(item["line"] in own for item in read[0]):   # an item of the option itself
             return (*read, name)
-    return (*read_option(body, regions, 0), options[0])
+    return (*read_option(body, regions, 0, captions), options[0])
 
 
-def read_option(body: list[tuple[int, str]], regions: list[str | int],
-                chosen: int | None) -> tuple[list[dict], str | None, list[str]]:
+def read_option(body: list[tuple[int, str]], regions: list[str | int], chosen: int | None,
+                captions: frozenset[str] = NO_CAPTIONS) -> tuple[list[dict], str | None, list[str]]:
     """Items, Expected Result and images of one step section, read through the option at index
     `chosen` of option_regions (None for a step without Option headings).
 
@@ -715,7 +742,7 @@ def read_option(body: list[tuple[int, str]], regions: list[str | int],
                 fallback = text
             index = after
             continue
-        if regions[index] == "step" or regions[index] == chosen:
+        if regions[index] in ("step", "outside") or regions[index] == chosen:
             found = check_list(body, index)
             li = LIST_ITEM.match(body[index][1])
             if not (found and found[0] and li and SHOWN_LABEL.match(li.group("text").strip())):
@@ -725,7 +752,7 @@ def read_option(body: list[tuple[int, str]], regions: list[str | int],
                 index = found[1]
                 continue
         index += 1
-    items, images = parse_items(item_lines)
+    items, images = parse_items(item_lines, captions)
     result = expected if expected is not None else fallback
     return items, join_checks(result, checks), images
 
@@ -752,24 +779,24 @@ def table_row_item(cells: list[str], form: str | None, number: int) -> dict | No
     return {"kind": "tag", "name": key, "value": value, "line": number}
 
 
-def plain_field(text: str, number: int) -> dict | None:
+def plain_field(text: str, number: int, captions: frozenset[str] = NO_CAPTIONS) -> dict | None:
     """The field item for 'Label: **value**' or 'Label: `value`' whose label is plain text
     (#198); None for any other item. The rules are in the module docstring."""
     m = PLAIN_FIELD.match(text)
     if not m:
         return None
     label = m.group("label").strip()
-    if not is_plain_field_label(label):
+    if not is_plain_field_label(label, captions):
         return None
     if BOLD.search(m.group("rest")) or CHAIN.search(m.group("rest")):
         return None                                # two values (actions) or a chain (picker_field)
     return field_item(label, strip_value_markup(m.group("span")), number)
 
 
-def is_plain_field_label(label: str) -> bool:
+def is_plain_field_label(label: str, captions: frozenset[str] = NO_CAPTIONS) -> bool:
     """Whether the plain text before a colon can be a Portal field's label (#198): a UI label,
     not an instruction and at most PLAIN_LABEL_MAX_WORDS words."""
-    return (is_ui_label(label) and not INSTRUCTION.match(label)
+    return (is_ui_label(label, captions) and not INSTRUCTION.match(label)
             and len(label.split()) <= PLAIN_LABEL_MAX_WORDS)
 
 
@@ -798,7 +825,7 @@ def chain_sentence(text: str) -> str:
     return text
 
 
-def picker_field(text: str) -> tuple[str, int] | None:
+def picker_field(text: str, captions: frozenset[str] = NO_CAPTIONS) -> tuple[str, int] | None:
     """(label, offset of the chain) when the chain in `text` picks the value of a field with a
     plain label (#250): 'Flow log type: **Virtual network** → ... → `prod-skycraft-swc-vnet`'
     (5.3.5). The label must be a field label (is_plain_field_label) and no lead-in
@@ -809,7 +836,7 @@ def picker_field(text: str) -> tuple[str, int] | None:
     if not m:
         return None
     label = m.group("label").strip()
-    if not is_plain_field_label(label) or CHAIN_LEAD_IN.search(label):
+    if not is_plain_field_label(label, captions) or CHAIN_LEAD_IN.search(label):
         return None
     rest = text[m.end():]
     first = CHAIN.search(mask_spans(rest))
@@ -837,34 +864,36 @@ def chain_resources(text: str) -> list[tuple[int, str]]:
     return found
 
 
-def list_item(text: str, number: int) -> dict | None:
+def list_item(text: str, number: int, captions: frozenset[str] = NO_CAPTIONS) -> dict | None:
     """The field, search, navigation or action item for the text of one list item; None for
-    none."""
+    none. `captions` are the guide's own captions (LAB_CAPTIONS), no UI label in it."""
     s = SEARCH_FOR.match(text.strip())
     if s:
         label = clean_label(unescape(s.group("label")))
-        if is_ui_label(label):
+        if is_ui_label(label, captions):
             names_portal = bool(s.group("portal")) or "portal" in (s.group("where") or "").lower()
             scope = "global" if names_portal or GLOBAL_SEARCH.search(text) else "blade"
             return {"kind": "search", "labels": [label], "scope": scope, "line": number}
     f = LIST_FIELD.match(text)
     if f:
         label = clean_label(unescape(f.group("label")))
-        if is_ui_label(label):
+        if is_ui_label(label, captions):
             value = f.group("value").strip()
             if value.endswith("."):
                 value = value[:-1]                 # before the markup, so "`staging`." works
             return field_item(label, strip_value_markup(value), number)
-    field = plain_field(text.strip(), number)
+        if label and not CAPTION_INSTRUCTION.match(f.group("value").strip()):
+            return None                            # a caption before a description (#203)
+    field = plain_field(text.strip(), number, captions)
     if field:
         return field
     chain = bool(CHAIN.search(text))
     if chain:
         text = chain_sentence(text)            # the sentence after a chain describes, it is no step
-    picker = picker_field(text) if chain else None
+    picker = picker_field(text, captions) if chain else None
     start = picker[1] if picker else 0          # a picker's chain starts after its label
     bold = [(b.start(), clean_label(unescape(b.group("text")))) for b in BOLD.finditer(text, start)]
-    bold = [(at, label) for at, label in bold if is_ui_label(label)]
+    bold = [(at, label) for at, label in bold if is_ui_label(label, captions)]
     # A chain's bold labels and resource names, in the order they appear (#199).
     steps = sorted([(at, label, False) for at, label in bold]
                    + [(start + at, name, True)
@@ -884,8 +913,10 @@ def list_item(text: str, number: int) -> dict | None:
     return {"kind": "action", "labels": [label for _, label in bold], "line": number}
 
 
-def parse_items(lines: list[tuple[int, str]]) -> tuple[list[dict], list[str]]:
-    """Items and image paths of the lines a step is read from, in document order."""
+def parse_items(lines: list[tuple[int, str]], captions: frozenset[str] = NO_CAPTIONS
+                ) -> tuple[list[dict], list[str]]:
+    """Items and image paths of the lines a step is read from, in document order. `captions`
+    are the guide's own captions (LAB_CAPTIONS)."""
     items: list[dict] = []
     images: list[str] = []
     in_table = False
@@ -907,7 +938,7 @@ def parse_items(lines: list[tuple[int, str]]) -> tuple[list[dict], list[str]]:
         else:
             in_table = False
             li = LIST_ITEM.match(line)
-            item = list_item(li.group("text"), number) if li else None
+            item = list_item(li.group("text"), number, captions) if li else None
         if item:
             items.append(item)
     return items, images
@@ -918,9 +949,10 @@ def parse_guide(guide: Path, repo_root: Path | None = None) -> dict:
     lines = strip_hidden(text.splitlines())
     lab_match = re.search(r"lab-guide-(\d+\.\d+)\.md$", guide.name)
     lab = lab_match.group(1) if lab_match else ""
+    captions = LAB_CAPTIONS.get(lab, NO_CAPTIONS)
     steps = []
     for raw in split_steps(lines):
-        items, expected, images, option = read_step(raw["body"])
+        items, expected, images, option = read_step(raw["body"], captions)
         step = {"id": raw["id"], "title": raw["title"], "line": raw["line"]}
         if option is not None:
             step["option"] = option          # only a step with Option headings carries it

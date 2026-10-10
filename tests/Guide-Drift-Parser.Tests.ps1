@@ -25,7 +25,9 @@
       one with a verb and the resource's kind around its code span, one name per segment of a
       path; a chain after a plain field label picks that field's value ("field"); and a chain
       ends at the full stop that ends its sentence (#250; pinned on labs 4.2, 4.3, 5.1, 5.2 and
-      5.3, rules in test_parse.py).
+      5.3, rules in test_parse.py). A caption before a description gives no item, a caption of
+      one lab is no label in that lab only, and lines outside every option are read; the guide
+      lines of labs 3.3-5.3 that left a step without its navigation are pinned (#203).
 
       THE 17 GUIDES - every module-*/X.Y-*/lab-guide-X.Y.md parses, its step ids match its
       headings in order, and no label or value carries markup or comment residue. This does NOT
@@ -882,11 +884,69 @@ Describe 'parse.py - labs 4.2, 4.3, 5.1, 5.2 and 5.3, pickers, worded resource s
     }
 }
 
+Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide lines that navigate (#203)' {
+    BeforeAll {
+        $script:GapLabs = @{}
+        foreach ($guide in 'module-3-compute/3.3-containers/lab-guide-3.3.md',
+                           'module-3-compute/3.4-app-service/lab-guide-3.4.md',
+                           'module-4-storage/4.2-blob-storage/lab-guide-4.2.md',
+                           'module-4-storage/4.3-azure-files/lab-guide-4.3.md',
+                           'module-5-monitoring-maintenance/5.1-azure-monitor/lab-guide-5.1.md',
+                           'module-5-monitoring-maintenance/5.2-business-continuity/lab-guide-5.2.md',
+                           'module-5-monitoring-maintenance/5.3-network-monitoring/lab-guide-5.3.md') {
+            $lab = [regex]::Match($guide, 'lab-guide-(\d+\.\d+)\.md$').Groups[1].Value
+            $out = Join-Path $TestDrive "gaps-$lab.json"
+            & $script:Python $script:Parser (Join-Path $script:RepoRoot $guide) --out $out --repo-root $script:RepoRoot
+            $script:GapLabs[$lab] = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+        }
+        # The items of one step, and the labels of its navigation and action items in order.
+        function Get-GapStep { param([string]$Lab, [string]$Id) $script:GapLabs[$Lab].steps | Where-Object id -eq $Id }
+    }
+
+    It 'reads the caption **Result** of step 4.2.12 as a description: on and Private are not clicked' {
+        $labels = @((Get-GapStep '4.2' '4.2.12').items | ForEach-Object { $_.labels })
+        $labels | Should -Not -Contain 'on'
+        $labels | Should -Not -Contain 'Private'
+    }
+
+    It 'still clicks what the caption **Bind** of step 3.4.12 tells to click, and nothing for **Validation**' {
+        $items = @((Get-GapStep '3.4' '3.4.12').items)
+        @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Validate`nAdd" }).Count | Should -Be 1
+        @($items | ForEach-Object { $_.labels; $_.label }) | Should -Not -Contain 'Validation'
+        @($items | ForEach-Object { $_.labels; $_.label }) | Should -Not -Contain 'Bind'
+    }
+
+    It 'reads items before the first Option heading and under another "####" heading after the options' {
+        $guide = ConvertFrom-GuideFixture -Markdown (@(
+                '### Step 9.9.1: Shared lines',
+                '',
+                '1. Navigate to **Storage accounts**',
+                '',
+                '#### Option 1: Azure CLI',
+                '',
+                '```bash',
+                'az storage account list',
+                '```',
+                '',
+                '#### Option 2: Azure Portal',
+                '',
+                '1. Click **+ Create**',
+                '',
+                '#### Verify',
+                '',
+                '1. **Overview** → **Properties**'
+            ) -join "`n")
+        $step = $guide.steps[0]
+        $step.option | Should -Be '2'
+        @($step.items | ForEach-Object { $_.labels }) | Should -Be @('Storage accounts', '+ Create', 'Overview', 'Properties')
+    }
+}
+
 Describe 'parse.py - only one option of a step is read, in every lab guide (#201)' {
     BeforeAll {
-        # Bold spans of each step, by where they sit: 'read' (before the first Option heading, or
-        # in the option the parser names in the step's "option") and 'other' (any other option, up
-        # to the next step). Fenced code is skipped as parse.py skips it; 'Expected Result' is a
+        # Bold spans of each step, by where they sit: 'read' (before the first Option heading,
+        # under another '####' heading, or in the option the parser names in the step's "option")
+        # and 'other' (any other option, up to the next heading). Fenced code is skipped as parse.py skips it; 'Expected Result' is a
         # caption, not a label. A bold span that only another option uses must never reach the
         # parser's labels, fields or tags. Lab 4.3 has Option headings in every step but its other
         # options hold only code; in 3.2.1 Option A is CLI-only, so Option B, the Portal, is read.
@@ -932,6 +992,8 @@ Describe 'parse.py - only one option of a step is read, in every lab guide (#201
                     }
                     continue
                 }
+                # Another '####' heading ends an option's body; what follows it is read (#203).
+                if ($line -match '^####\s') { $zone = 'read'; continue }
                 foreach ($bold in [regex]::Matches($line, '\*\*(.+?)\*\*')) {
                     if ($zone -eq 'read') { $read[$step].Add($bold.Groups[1].Value) } else { $other[$step].Add($bold.Groups[1].Value) }
                 }
