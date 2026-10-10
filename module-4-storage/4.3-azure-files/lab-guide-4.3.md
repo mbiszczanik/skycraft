@@ -327,9 +327,9 @@ Before creating a snapshot, upload a test file so you can verify the snapshot-re
 
 #### Option 1: Azure Portal (GUI)
 
-1. Open `skycraft-config` share
+1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config`
 2. Click **+ Add directory** → Name: `common` → **OK**
-3. Open `common` directory
+3. **Browse** → `common`
 4. Click **Upload** → create a local text file named `config.txt` with content: `server-name=skycraft-prod-01`
 5. Upload the file
 
@@ -394,7 +394,7 @@ Snapshots are read-only point-in-time copies. Create one before any config chang
 
 #### Option 1: Azure Portal (GUI)
 
-1. Open `skycraft-config` share
+1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config`
 2. Click **Snapshots** (under Operations)
 3. Click **+ Add snapshot**
 4. Comment: `Pre-update backup`
@@ -436,11 +436,10 @@ Simulate a bad config push by modifying the test file, then restore the original
 2. Click **Download** to save the file locally
 3. Open the downloaded file in a text editor, change content to `server-name=BROKEN`, and save
 4. Back in the Portal, click **Upload** → select the modified `config.txt` → check **Overwrite if files already exist** → **Upload**
-5. Navigate back to **Snapshots** (under Operations)
-6. Select the snapshot from Step 4.3.5
-7. Browse to `common/config.txt` → click **⋯** → **Restore**
-8. Confirm to overwrite the current version
-9. Download `config.txt` again and verify the content is back to `server-name=skycraft-prod-01`
+5. Navigate back to **Snapshots** (under Operations) → `Pre-update backup` (the snapshot from Step 4.3.5: the list names it by the time it was taken and shows this comment next to it)
+6. Browse to `common/config.txt` → click **⋯** → **Restore**
+7. Confirm to overwrite the current version
+8. Download `config.txt` again and verify the content is back to `server-name=skycraft-prod-01`
 
 > [!TIP]
 > In production, you can restore individual files without restoring the entire share. This is much faster than full-share restore for targeted rollbacks.
@@ -459,7 +458,7 @@ Mount the `skycraft-config` share as drive letter **Z:** on a Windows machine. T
 
 #### Option 1: Azure Portal (Generate Script)
 
-1. Open `skycraft-config` share
+1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config`
 2. Click **Connect**
 3. Select **Windows** tab
 4. Drive letter: **Z**

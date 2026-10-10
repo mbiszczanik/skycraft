@@ -923,6 +923,31 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         @($items | Where-Object { (@($_.labels) -join "`n") -ceq 'URL' }) | Should -BeNullOrEmpty
     }
 
+    It 'opens the skycraft-config share from the storage account first in step <id>' -ForEach @(
+        @{ id = '4.3.4' }, @{ id = '4.3.5' }, @{ id = '4.3.7' }
+    ) {
+        $first = @((Get-GapStep '4.3' $id).items)[0]
+        $first.kind | Should -Be 'navigation'
+        @($first.labels) | Should -Be @('prodskycraftswcsa', 'File shares', 'skycraft-config')
+        @($first.resources) | Should -Be @(0, 2)
+    }
+
+    It 'opens the common directory in step 4.3.4 before the upload' {
+        $items = @((Get-GapStep '4.3' '4.3.4').items)
+        $open = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Browse`ncommon" })
+        $open.Count | Should -Be 1
+        @($open[0].resources) | Should -Be @(1)
+        @($items[[array]::IndexOf($items, $open[0]) + 1].labels) | Should -Be @('Upload')
+    }
+
+    It 'opens the snapshot of step 4.3.5 in step 4.3.6 before browsing to the file to restore' {
+        $items = @((Get-GapStep '4.3' '4.3.6').items)
+        $open = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Snapshots`nPre-update backup" })
+        $open.Count | Should -Be 1
+        @($open[0].resources) | Should -Be @(1)
+        @($items[[array]::IndexOf($items, $open[0]) + 1].labels)[0] | Should -Be 'common'
+    }
+
     It 'still clicks what the caption **Bind** of step 3.4.12 tells to click, and nothing for **Validation**' {
         $items = @((Get-GapStep '3.4' '3.4.12').items)
         @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Validate`nAdd" }).Count | Should -Be 1
