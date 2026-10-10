@@ -275,16 +275,22 @@ if ($orphanedLinkCount -gt 0) {
 
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
 
+# Each VNet is looked up once, here, and the result serves both steps below. A VNet that could not
+# be looked up is one [ERROR], counted by Invoke-LabLookup, and neither its peerings nor the VNet
+# itself are touched (#255).
+$vnetLookups = @{}
+foreach ($lab in $labVnets) {
+    $vnetLookups[$lab.Name] = Invoke-LabLookup -Target "VNet $($lab.Name)" -Lookup {
+        Get-AzVirtualNetwork -Name $lab.Name -ResourceGroupName $lab.Rg -ErrorAction Stop
+    }
+}
+
 # Function to remove peerings
 function Remove-VNetPeering {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
-    param($VnetName, $RgName)
+    param($VnetName, $RgName, $Lookup)
     Write-Host "Removing peerings on $VnetName..." -ForegroundColor Yellow
-    # A VNet that could not be looked up is counted by Invoke-LabLookup; its peerings stay.
-    $vnetLookup = Invoke-LabLookup -Target "VNet $VnetName" -Lookup {
-        Get-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -ErrorAction Stop
-    }
-    $vnet = $vnetLookup.Value | Select-Object -First 1
+    $vnet = $Lookup.Value | Select-Object -First 1
     try {
         if ($vnet) {
             # No name filter: SkyCraft peerings are named hub-to-dev / dev-to-hub etc., and every peering
@@ -304,23 +310,21 @@ function Remove-VNetPeering {
     }
 }
 
-Remove-VNetPeering -VnetName $hubVnetName -RgName $hubRgName
-Remove-VNetPeering -VnetName $devVnetName -RgName $devRgName
-Remove-VNetPeering -VnetName $prodVnetName -RgName $prodRgName
+Remove-VNetPeering -VnetName $hubVnetName -RgName $hubRgName -Lookup $vnetLookups[$hubVnetName]
+Remove-VNetPeering -VnetName $devVnetName -RgName $devRgName -Lookup $vnetLookups[$devVnetName]
+Remove-VNetPeering -VnetName $prodVnetName -RgName $prodRgName -Lookup $vnetLookups[$prodVnetName]
 
 # Function to remove VNet
 function Remove-VNet {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
-    param($VnetName, $RgName)
+    param($VnetName, $RgName, $Lookup)
 
     # Probe first. A bare catch reported every failure as "not found or already deleted", which
-    # hid a real InUseSubnetCannotBeDeleted on the prod VNet during the #93 live cycle (#96). A
-    # probe that fails is no proof of absence either (#255): it is counted, and the VNet left alone.
-    $vnetLookup = Invoke-LabLookup -Target "VNet $VnetName" -Lookup {
-        Get-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -ErrorAction Stop
-    }
-    if ($vnetLookup.Failed) { return }
-    $vnet = $vnetLookup.Value | Select-Object -First 1
+    # hid a real InUseSubnetCannotBeDeleted on the prod VNet during the #93 live cycle (#96). The
+    # probe is the lookup made before the peerings were removed. One that failed is no proof of
+    # absence either (#255): it was counted there, and the VNet is left alone.
+    if ($Lookup.Failed) { return }
+    $vnet = $Lookup.Value | Select-Object -First 1
     if (-not $vnet) {
         Write-Host "  - [INFO] VNet $VnetName not found or already deleted." -ForegroundColor Gray
         return
@@ -338,9 +342,9 @@ function Remove-VNet {
     }
 }
 
-Remove-VNet -VnetName $hubVnetName -RgName $hubRgName
-Remove-VNet -VnetName $devVnetName -RgName $devRgName
-Remove-VNet -VnetName $prodVnetName -RgName $prodRgName
+Remove-VNet -VnetName $hubVnetName -RgName $hubRgName -Lookup $vnetLookups[$hubVnetName]
+Remove-VNet -VnetName $devVnetName -RgName $devRgName -Lookup $vnetLookups[$devVnetName]
+Remove-VNet -VnetName $prodVnetName -RgName $prodRgName -Lookup $vnetLookups[$prodVnetName]
 
 # Check for and remove PIPs
 $pips = @(

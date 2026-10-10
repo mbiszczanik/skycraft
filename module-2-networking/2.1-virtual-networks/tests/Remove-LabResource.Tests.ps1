@@ -21,6 +21,7 @@
       4. A removal that fails is an [ERROR], counted, and the later steps still run: exit 1.
       5. The preflight stays diagnostic (issue #110): a VNet it cannot read is a [WARN], not a
          failure, and a link target it cannot read is "unverified", never "ORPHANED".
+      6. -WhatIf looks everything up and removes nothing.
 
     The preflight's pure helpers are pinned by tests/Lab21-Subnet-Link-Preflight.Tests.ps1, and
     which errors mean "not found" by tests/Lab-Cleanup-Lookup.Tests.ps1.
@@ -73,8 +74,8 @@ BeforeAll {
     #                         report its resource not found (notfound, rgnotfound)
     #   SKYCRAFT_STUB_FAIL    '<Remove-command>:<name>,...' makes one removal throw
     # A lookup is named after its command and the resource it reads: 'Get-AzVirtualNetwork:<vnet>',
-    # 'Get-AzPublicIpAddress:<pip>', 'Get-AzResource:<last id segment>'. A VNet is read up to three
-    # times - preflight, peerings, delete - and every read follows the same entry.
+    # 'Get-AzPublicIpAddress:<pip>', 'Get-AzResource:<last id segment>'. A VNet is read twice - by
+    # the preflight and once for the delete steps - and both reads follow the same entry.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 
@@ -228,6 +229,7 @@ function Get-AzResource {
     # One invocation per scenario, reused by the assertions below - each child process costs
     # several seconds.
     $script:Clean   = Invoke-CleanupScript -Stub $script:Stub
+    $script:WhatIf  = Invoke-CleanupScript -Stub $script:Stub -ArgumentList '-WhatIf'
     $script:Nothing = Invoke-CleanupScript -Stub $script:Stub -Empty
     $script:NotFound = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
         'Get-AzVirtualNetwork:dev-skycraft-swc-vnet=notfound'
@@ -245,7 +247,7 @@ function Get-AzResource {
     $script:LinkUnverified = Invoke-CleanupScript -Stub $script:Stub -Link -Lookup 'Get-AzResource:prod-skycraft-swc-asp=denied'
 
     $script:AllRuns = @(
-        $script:Clean, $script:Nothing, $script:NotFound, $script:LookupsFail, $script:RemovalsFail,
+        $script:Clean, $script:WhatIf, $script:Nothing, $script:NotFound, $script:LookupsFail, $script:RemovalsFail,
         $script:LinkOrphaned, $script:LinkUnverified
     )
 }
@@ -318,8 +320,9 @@ Describe 'Lab 2.1 Remove-LabResource.ps1 - a failed lookup is not "absent" (#255
         $run.ExitCode | Should -Be 1 -Because "a resource that may still exist must not look like a clean cleanup; output was:`n$($run.Output)"
         $run.Output | Should -Match '\[ERROR\] Could not look up VNet prod-skycraft-swc-vnet[^\r\n]*does not have authorization'
         $run.Output | Should -Match '\[ERROR\] Could not look up PIP dev-skycraft-swc-lb-pip[^\r\n]*requests exceeded the limit'
-        # The prod VNet counts twice: once for its peerings, once for the VNet itself.
-        $run.Output | Should -Match 'Cleanup finished with 3 failure\(s\)'
+        # The prod VNet is looked up once for both delete steps, so it counts once.
+        ([regex]::Matches($run.Output, '\[ERROR\] Could not look up VNet prod-skycraft-swc-vnet')).Count | Should -Be 1
+        $run.Output | Should -Match 'Cleanup finished with 2 failure\(s\)'
         $run.Output | Should -Not -Match 'Cleanup Complete'
     }
 
@@ -374,5 +377,18 @@ Describe 'Lab 2.1 Remove-LabResource.ps1 - the preflight tells an orphan from an
     It 'never changes the exit code on its own' {
         $script:LinkOrphaned.ExitCode   | Should -Be 0 -Because "output was:`n$($script:LinkOrphaned.Output)"
         $script:LinkUnverified.ExitCode | Should -Be 0 -Because "output was:`n$($script:LinkUnverified.Output)"
+    }
+}
+
+Describe 'Lab 2.1 Remove-LabResource.ps1 - -WhatIf' {
+
+    It 'looks everything up and removes nothing' {
+        $run = $script:WhatIf
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        @($run.Calls | Where-Object { $_ -match '^Remove-' }) | Should -BeNullOrEmpty
+        $run.Calls  | Should -Contain 'Get-AzVirtualNetwork:prod-skycraft-swc-vnet'
+        $run.Calls  | Should -Contain 'Get-AzPublicIpAddress:dev-skycraft-swc-lb-pip'
+        $run.Output | Should -Match 'What if: .*platform-skycraft-swc-vnet/hub-to-dev'
+        $run.Output | Should -Match 'What if: .*prod-skycraft-swc-lb-pip'
     }
 }
