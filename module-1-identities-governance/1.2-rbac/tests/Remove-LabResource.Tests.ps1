@@ -114,15 +114,20 @@ function Get-AzRoleAssignment {
     [CmdletBinding()]
     param([string]$Scope, [switch]$IncludeClassicAdministrators)
     if (Invoke-StubLookup -Name 'Get-AzRoleAssignment') { return }
-    # Someone else's Owner assignment is in every listing; only Malfurion's is the lab's.
-    [pscustomobject]@{ SignInName = 'someone.else@contoso.example'; RoleDefinitionName = 'Owner'; ObjectId = '22222222-2222-2222-2222-222222222222' }
+    # Every listing holds someone else's Owner assignment, and an Owner assignment for Malfurion
+    # inherited from a management group - neither is the lab's. Only the one made at the
+    # subscription itself is.
+    $subscription = '/subscriptions/00000000-0000-0000-0000-000000000000'
+    [pscustomobject]@{ SignInName = 'someone.else@contoso.example'; RoleDefinitionName = 'Owner'; ObjectId = '22222222-2222-2222-2222-222222222222'; Scope = $subscription }
+    [pscustomobject]@{ SignInName = 'malfurion.stormrage@contoso.example'; RoleDefinitionName = 'Owner'; ObjectId = '11111111-1111-1111-1111-111111111111'; Scope = '/providers/Microsoft.Management/managementGroups/stub-mg' }
     if (Test-StubEmpty) { return }
-    [pscustomobject]@{ SignInName = 'malfurion.stormrage@contoso.example'; RoleDefinitionName = 'Owner'; ObjectId = '11111111-1111-1111-1111-111111111111' }
+    [pscustomobject]@{ SignInName = 'malfurion.stormrage@contoso.example'; RoleDefinitionName = 'Owner'; ObjectId = '11111111-1111-1111-1111-111111111111'; Scope = $subscription }
 }
 
 function Remove-AzRoleAssignment {
     [CmdletBinding()]
     param([string]$ObjectId, [string]$RoleDefinitionName, [string]$Scope)
+    Write-StubCall -Name "Remove-AzRoleAssignment@$Scope"
     Invoke-StubRemoval -Command 'Remove-AzRoleAssignment' -Name $ObjectId
 }
 
@@ -226,6 +231,13 @@ Describe 'Lab 1.2 Remove-LabResource.ps1 - removes what the lab creates' {
     It 'removes Malfurion''s Owner assignment and nobody else''s' {
         $script:Clean.Calls | Should -Contain 'Remove-AzRoleAssignment:11111111-1111-1111-1111-111111111111'
         $script:Clean.Calls | Should -Not -Contain 'Remove-AzRoleAssignment:22222222-2222-2222-2222-222222222222'
+    }
+
+    It 'removes only the assignment made at the subscription, once, not the inherited one' {
+        @($script:Clean.Calls | Where-Object { $_ -eq 'Remove-AzRoleAssignment' }).Count | Should -Be 1
+        $script:Clean.Calls | Should -Contain 'Remove-AzRoleAssignment@/subscriptions/00000000-0000-0000-0000-000000000000'
+        # With only the inherited assignment left, there is nothing for the lab to remove.
+        $script:Nothing.Output | Should -Match 'Assignment not found'
     }
 
     It 'deletes the three lab resource groups and no other' {

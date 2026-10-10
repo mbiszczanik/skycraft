@@ -134,7 +134,12 @@ $assignmentLookup = Invoke-LabLookup -Target "the role assignments on /subscript
     Get-AzRoleAssignment -Scope "/subscriptions/$subId" -IncludeClassicAdministrators:$false -ErrorAction Stop
 }
 if (-not $assignmentLookup.Failed) {
-    $malfurion = $assignmentLookup.Value | Where-Object { ($_.SignInName -like "malfurion.stormrage@*") -and ($_.RoleDefinitionName -eq "Owner") }
+    # Only the assignment made at the subscription itself: the listing also returns assignments
+    # inherited from a management group, which this lab did not create and cannot remove here.
+    # ARM holds one assignment per principal, role and scope, so the first match is the one.
+    $malfurion = $assignmentLookup.Value |
+        Where-Object { ($_.SignInName -like "malfurion.stormrage@*") -and ($_.RoleDefinitionName -eq "Owner") -and ($_.Scope -eq "/subscriptions/$subId") } |
+        Select-Object -First 1
 
     if (-not $malfurion) {
         Write-Host "  -> [INFO] Assignment not found." -ForegroundColor Gray
