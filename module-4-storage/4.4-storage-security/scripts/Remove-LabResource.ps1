@@ -6,6 +6,21 @@
     and cleans up RBAC role assignments created during the lab.
     Does NOT delete the storage account (owned by Lab 4.1) and does NOT remove the
     'Microsoft.Storage' service endpoint from WorldSubnet (owned by Lab 2.2).
+
+    Every step continues on error, so one stuck object does not strand the rest. A lookup that
+    fails (a 403, throttling, a transient error) or a step that fails is reported as [ERROR] and
+    counted; if anything failed the script exits 1. An object that does not exist is not a
+    failure: only a lookup that succeeds and does not find it, or a getter that reports it as not
+    found, means "absent" - Test-LabNotFoundError tells the two apart (issue #290; the script used
+    to report any error as "not found or already removed"). The storage account is looked up once;
+    when it is absent or could not be looked up, the steps that work inside it are skipped. The
+    container is picked from a listing, because Get-AzStorageContainer -Name reports a missing
+    container in words that are not a recognised not-found error. Only role assignments made on the
+    account itself are removed, not ones inherited from a resource group or the subscription.
+
+    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
+    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
+    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
 .PARAMETER Environment
     The environment to clean up (prod or dev). Default: prod.
 .PARAMETER Force
@@ -35,6 +50,78 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($Force) { $ConfirmPreference = 'None' }
 
+# Counts lookups that failed and steps that could not be carried out. Absent objects are not
+# failures.
+$script:cleanupFailures = 0
+
+# Whether a lookup's error says the object does not exist, rather than that the lookup failed.
+# Get-AzStorageAccount reports a missing account as an ARM 404: "The Resource
+# 'Microsoft.Storage/storageAccounts/<name>' under resource group '<rg>' was not found.", code
+# ResourceNotFound; when the group is gone as well, "Resource group '<rg>' could not be found.",
+# code ResourceGroupNotFound; with no error body, "Operation returned an invalid status code
+# 'NotFound'". The containers and the role assignments are listed, so a missing one is an empty
+# match. The Azure.Core clients say "Status: 404 (Not Found)". A missing subscription is a 404
+# too, but it means the context is wrong, not that the object is gone, so it never reads as
+# "absent".
+function Test-LabNotFoundError {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    $evidence = [System.Collections.Generic.List[string]]::new()
+    $evidence.Add([string]$ErrorRecord)
+    $evidence.Add([string]$ErrorRecord.FullyQualifiedErrorId)
+    $status404 = $false
+    for ($exception = $ErrorRecord.Exception; $exception; $exception = $exception.InnerException) {
+        $evidence.Add([string]$exception.Message)
+        foreach ($code in @($exception.Body.Code, $exception.Body.Error.Code, $exception.ErrorCode)) {
+            if ($code) { $evidence.Add([string]$code) }
+        }
+        # ResponseStatusCode: the generated cmdlets' RestException, which may carry no error body.
+        foreach ($status in @($exception.Response.StatusCode, $exception.ResponseStatusCode, $exception.Status)) {
+            if ("$status" -in @('404', 'NotFound')) { $status404 = $true }
+        }
+    }
+    $text = $evidence -join "`n"
+
+    if ($text -match 'SubscriptionNotFound|subscription .{0,80}(could not be|was not) found') { return $false }
+    if ($status404) { return $true }
+    return $text -match '\bResource(Group)?NotFound\b|was not found|Resource group .{0,100}could not be found|invalid status code ''NotFound''|\b404 \(Not Found\)'
+}
+
+# Runs one lookup with -ErrorAction Stop inside $Lookup, and returns what it found:
+#   Value     the lookup's output, as an array - empty when the object is absent
+#   NotFound  the getter reported the object as not found (Test-LabNotFoundError)
+#   Failed    the lookup failed any other way: it is reported as [ERROR] and counted, because it
+#             cannot tell whether the object is gone, and the caller leaves the object alone
+function Invoke-LabLookup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Target,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Lookup
+    )
+
+    try {
+        $value = @(& $Lookup)
+        return [pscustomobject]@{ Value = $value; NotFound = $false; Failed = $false }
+    }
+    catch {
+        if (Test-LabNotFoundError -ErrorRecord $_) {
+            return [pscustomobject]@{ Value = @(); NotFound = $true; Failed = $false }
+        }
+        $script:cleanupFailures++
+        Write-Host "  -> [ERROR] Could not look up $($Target): $_" -ForegroundColor Red
+        Write-Host "     A failed lookup is not 'absent': it may still exist, so this counts as a failure." -ForegroundColor Gray
+        return [pscustomobject]@{ Value = @(); NotFound = $false; Failed = $true }
+    }
+}
+
 $resourceGroupName = "$Environment-skycraft-swc-rg"
 $storageAccountName = "${Environment}skycraftswcsa"
 $vnetName = "$Environment-skycraft-swc-vnet"
@@ -46,57 +133,85 @@ if (-not (Get-AzContext)) {
     Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
 }
 
-# 3. Revert Storage Firewall to Allow
-if ($PSCmdlet.ShouldProcess($storageAccountName, 'Revert storage firewall default action to Allow')) {
-    try {
-        Write-Host "Reverting storage firewall to 'Allow' default..." -ForegroundColor Yellow
-        Update-AzStorageAccountNetworkRuleSet -ResourceGroupName $resourceGroupName `
-            -Name $storageAccountName `
-            -DefaultAction Allow -ErrorAction Stop
-        Write-Host "  -> Firewall reverted to 'Allow'." -ForegroundColor Green
-    }
-    catch {
-        Write-Host "  -> [ERROR] Failed to revert firewall." -ForegroundColor Red
-        Write-Host $_.Exception.Message -ForegroundColor Red
-    }
+# 2. Look the storage account up once. Every step below works inside it.
+$saLookup = Invoke-LabLookup -Target "storage account '$storageAccountName'" -Lookup {
+    Get-AzStorageAccount -ResourceGroupName $resourceGroupName -Name $storageAccountName -ErrorAction Stop
+}
+$sa = $saLookup.Value | Select-Object -First 1
+if (-not $saLookup.Failed -and -not $sa) {
+    Write-Host "[INFO] Storage account '$storageAccountName' not found - nothing to revert." -ForegroundColor Gray
 }
 
-# 4. Remove dev-assets container
-if ($PSCmdlet.ShouldProcess('dev-assets', 'Remove storage container')) {
-    try {
+if ($sa) {
+    # 3. Revert Storage Firewall to Allow
+    if ($PSCmdlet.ShouldProcess($storageAccountName, 'Revert storage firewall default action to Allow')) {
+        try {
+            Write-Host "Reverting storage firewall to 'Allow' default..." -ForegroundColor Yellow
+            Update-AzStorageAccountNetworkRuleSet -ResourceGroupName $resourceGroupName `
+                -Name $storageAccountName `
+                -DefaultAction Allow -ErrorAction Stop
+            Write-Host "  -> Firewall reverted to 'Allow'." -ForegroundColor Green
+        }
+        catch {
+            $script:cleanupFailures++
+            Write-Host "  -> [ERROR] Failed to revert firewall." -ForegroundColor Red
+            Write-Host $_.Exception.Message -ForegroundColor Red
+        }
+    }
+
+    # 4. Remove dev-assets container - picked from a listing; a listing that fails touches nothing.
+    if ($PSCmdlet.ShouldProcess('dev-assets', 'Remove storage container')) {
         Write-Host "Removing 'dev-assets' container..." -ForegroundColor Yellow
-        $sa = Get-AzStorageAccount -ResourceGroupName $resourceGroupName -Name $storageAccountName -ErrorAction Stop
-        Remove-AzStorageContainer -Name 'dev-assets' -Context $sa.Context -Force -ErrorAction Stop
-        Write-Host "  -> Container 'dev-assets' removed." -ForegroundColor Green
-    }
-    catch {
-        Write-Host "  -> [INFO] Container 'dev-assets' not found or already removed." -ForegroundColor Gray
-    }
-}
-
-# 5. Remove RBAC assignments (Storage Blob Data Contributor)
-if ($PSCmdlet.ShouldProcess($storageAccountName, "Remove 'Storage Blob Data Contributor' role assignments")) {
-    try {
-        Write-Host "Removing 'Storage Blob Data Contributor' role assignments..." -ForegroundColor Yellow
-        $storageId = (Get-AzStorageAccount -ResourceGroupName $resourceGroupName -Name $storageAccountName).Id
-        $assignments = Get-AzRoleAssignment -Scope $storageId |
-            Where-Object RoleDefinitionName -eq 'Storage Blob Data Contributor'
-
-        if ($assignments) {
-            foreach ($assignment in $assignments) {
-                Remove-AzRoleAssignment -ObjectId $assignment.ObjectId `
-                    -RoleDefinitionName 'Storage Blob Data Contributor' `
-                    -Scope $storageId -ErrorAction Stop
-                Write-Host "  -> Removed assignment for '$($assignment.DisplayName)'." -ForegroundColor Green
+        $containerLookup = Invoke-LabLookup -Target "the containers in '$storageAccountName'" -Lookup {
+            Get-AzStorageContainer -Context $sa.Context -ErrorAction Stop
+        }
+        if ($containerLookup.Value | Where-Object { $_.Name -eq 'dev-assets' }) {
+            try {
+                Remove-AzStorageContainer -Name 'dev-assets' -Context $sa.Context -Force -ErrorAction Stop
+                Write-Host "  -> Container 'dev-assets' removed." -ForegroundColor Green
+            }
+            catch {
+                $script:cleanupFailures++
+                Write-Host "  -> [ERROR] Failed to remove container 'dev-assets'." -ForegroundColor Red
+                Write-Host $_.Exception.Message -ForegroundColor Red
             }
         }
-        else {
-            Write-Host "  -> [INFO] No 'Storage Blob Data Contributor' assignments found." -ForegroundColor Gray
+        elseif (-not $containerLookup.Failed) {
+            Write-Host "  -> [INFO] Container 'dev-assets' not found or already removed." -ForegroundColor Gray
         }
     }
-    catch {
-        Write-Host "  -> [ERROR] Failed to remove RBAC assignments." -ForegroundColor Red
-        Write-Host $_.Exception.Message -ForegroundColor Red
+
+    # 5. Remove RBAC assignments (Storage Blob Data Contributor)
+    if ($PSCmdlet.ShouldProcess($storageAccountName, "Remove 'Storage Blob Data Contributor' role assignments")) {
+        Write-Host "Removing 'Storage Blob Data Contributor' role assignments..." -ForegroundColor Yellow
+        $storageId = $sa.Id
+        $assignmentLookup = Invoke-LabLookup -Target "the role assignments on '$storageAccountName'" -Lookup {
+            Get-AzRoleAssignment -Scope $storageId -ErrorAction Stop
+        }
+        if (-not $assignmentLookup.Failed) {
+            # Only the assignments made on the account itself: the listing also returns ones
+            # inherited from the resource group or the subscription, which this lab did not create
+            # and which cannot be removed at this scope.
+            $assignments = @($assignmentLookup.Value |
+                Where-Object { $_.RoleDefinitionName -eq 'Storage Blob Data Contributor' -and $_.Scope -eq $storageId })
+
+            if ($assignments.Count -eq 0) {
+                Write-Host "  -> [INFO] No 'Storage Blob Data Contributor' assignments found." -ForegroundColor Gray
+            }
+            foreach ($assignment in $assignments) {
+                try {
+                    Remove-AzRoleAssignment -ObjectId $assignment.ObjectId `
+                        -RoleDefinitionName 'Storage Blob Data Contributor' `
+                        -Scope $storageId -ErrorAction Stop
+                    Write-Host "  -> Removed assignment for '$($assignment.DisplayName)'." -ForegroundColor Green
+                }
+                catch {
+                    $script:cleanupFailures++
+                    Write-Host "  -> [ERROR] Failed to remove the assignment for '$($assignment.DisplayName)'." -ForegroundColor Red
+                    Write-Host $_.Exception.Message -ForegroundColor Red
+                }
+            }
+        }
     }
 }
 
@@ -105,5 +220,11 @@ if ($PSCmdlet.ShouldProcess($storageAccountName, "Remove 'Storage Blob Data Cont
 # here silently regressed Module 2 on every Module 4 cleanup, so it is deliberately left in place.
 Write-Host "`n[INFO] Leaving the 'Microsoft.Storage' service endpoint on '$vnetName/WorldSubnet' in place." -ForegroundColor Gray
 Write-Host "       It belongs to Lab 2.2; remove it with that lab's cleanup if you want it gone." -ForegroundColor Gray
+
+if ($script:cleanupFailures -gt 0) {
+    Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s). See the [ERROR] lines above." -ForegroundColor Red
+    $Host.SetShouldExit(1)
+    exit 1
+}
 
 Write-Host "`nCleanup Complete." -ForegroundColor Cyan

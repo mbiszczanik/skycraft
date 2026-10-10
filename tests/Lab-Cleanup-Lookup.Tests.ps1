@@ -25,7 +25,7 @@
          suite pins those.
       3. Invoke-LabLookup returns what a lookup found, reads "found nothing" and a not-found error
          as absent without counting them, and counts any other error in $script:cleanupFailures.
-      4. A ratchet: no cleanup outside the labs #255 still has to convert gives a *-Az* command
+      4. A ratchet: no cleanup outside the labs #290 still has to convert gives a *-Az* command
          -ErrorAction SilentlyContinue or Ignore. The check walks the syntax tree, so it reads
          every spelling (-ErrorAction:X, -EA X, a quoted value, 0 or 4, the ActionPreference
          enum), a value carried in a splatted hashtable the script builds, and a command split by
@@ -88,11 +88,12 @@ $ExpectedHelperFile = @(
     'module-4-storage/4.1-storage-accounts/scripts/Remove-LabResource.ps1'
     'module-4-storage/4.2-blob-storage/scripts/Remove-LabResource.ps1'
     'module-4-storage/4.3-azure-files/scripts/Remove-LabResource.ps1'
+    'module-4-storage/4.4-storage-security/scripts/Remove-LabResource.ps1'
     'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Remove-LabResource.ps1'
 )
 
-# The cleanups #255 still has to convert. The list only shrinks: the pending-list test below fails
-# for an entry whose cleanup no longer silences a lookup.
+# The cleanups #290 (the second half of #255) still has to convert. The list only shrinks: the
+# pending-list test below fails for an entry whose cleanup no longer silences a lookup.
 $PendingLab = @(
     'module-5-monitoring-maintenance/5.1-azure-monitor'
     'module-5-monitoring-maintenance/5.3-network-monitoring'
