@@ -76,7 +76,8 @@
     groups, and any SkyCraft restore point collection still parked in an AzureBackupRG_* group. An
     assertion that fails is counted like a teardown failure and leaves through the exit code,
     because a teardown that says it worked while the subscription disagrees is the exact failure
-    this whole tool exists to make impossible.
+    this whole tool exists to make impossible. So is a check that could not be made: a lookup that
+    failed proves nothing about what is left, and it never passes as "gone" (#290).
 
     -WhatIf lists the entire plan - every lab invocation, every sweep, every resource group - and
     deletes nothing. Every destructive step goes through ShouldProcess, so there is no path that
@@ -128,8 +129,9 @@
     to be installed on the machine running them.
 
 .PARAMETER BackupResourceGroupProbe
-    Given the prefix, returns @{ Name; SkyCraftCollections } for each matching resource group -
-    the group's name, and the names of the restore point collections in it that belong to SkyCraft.
+    Given the prefix, returns @{ Name; SkyCraftCollections } for each matching resource group that
+    holds one - the group's name, and the names of the restore point collections in it that belong
+    to SkyCraft. Throws when it cannot tell.
 
     Only SkyCraft's own, because the group is shared: an unrelated protected VM's collection lives
     in the same group and is none of this teardown's business. The filter matches lab 5.2's own,
@@ -139,10 +141,22 @@
     Given a resource group name, deletes it. Returns nothing; throws on failure.
 
 .PARAMETER ResourceGroupProbe
-    Given a name, returns something truthy when that resource group still exists.
+    Given a name, returns something truthy when that resource group still exists, nothing when it
+    does not, and throws when it cannot tell.
 
 .PARAMETER VaultProbe
-    Given an AssertAbsent entry, returns something truthy when that vault still exists.
+    Given an AssertAbsent entry, returns something truthy when that vault still exists, nothing
+    when it does not, and throws when it cannot tell.
+
+    THE PROBES THROW RATHER THAN GUESS (#290). Until then they looked up with -ErrorAction
+    SilentlyContinue, so a check that failed - a 403, throttling, a transient ARM error - returned
+    nothing, and nothing reads as "gone": a surviving vault or group passed its assertion. A probe
+    that throws is reported as a failed check, [FAIL] and counted in the exit code like any other
+    failure, and a group whose existence could not be checked is not deleted. The defaults list
+    and pick by name, so a missing object is an empty match and only a real failure throws:
+    Get-AzResourceGroup -Name reports a missing group in words that are no recognised not-found
+    error (docs/powershell-standards.md rule 3), and by the time the vaults are checked their
+    resource group has usually been deleted by the sweep, so a lookup scoped to it would fail.
 
 .PARAMETER SkipSweep
     Run the per-lab teardowns and stop. No residue sweep, no resource group deletes, no assertions.
@@ -215,16 +229,17 @@ param(
         # is there: the group is shared, and an unrelated protected VM's collection must not be
         # counted against this teardown. Reporting one would send someone to debug a leftover that
         # is not theirs.
-        Get-AzResourceGroup -ErrorAction SilentlyContinue |
-            Where-Object { $_.ResourceGroupName -like "$Prefix*" } |
-            ForEach-Object {
-                $ours = @(Get-AzResource -ResourceGroupName $_.ResourceGroupName -ErrorAction SilentlyContinue |
-                    Where-Object {
-                        $_.ResourceType -eq 'Microsoft.Compute/restorePointCollections' -and
-                        $_.Name -like 'AzureBackup_*skycraft*'
-                    } | ForEach-Object { $_.Name })
-                @{ Name = $_.ResourceGroupName; SkyCraftCollections = $ours }
-            }
+        #
+        # One listing of the subscription's restore point collections, not one listing per group:
+        # a group lab 5.2 deleted between the two calls would fail the second, and a listing that
+        # fails throws (see the probe parameters above).
+        $ours = [ordered]@{}
+        foreach ($collection in @(Get-AzResource -ResourceType 'Microsoft.Compute/restorePointCollections' -ErrorAction Stop)) {
+            if ($collection.ResourceGroupName -notlike "$Prefix*" -or $collection.Name -notlike 'AzureBackup_*skycraft*') { continue }
+            if (-not $ours.Contains($collection.ResourceGroupName)) { $ours[$collection.ResourceGroupName] = [System.Collections.Generic.List[string]]::new() }
+            $ours[$collection.ResourceGroupName].Add($collection.Name)
+        }
+        foreach ($group in $ours.Keys) { @{ Name = $group; SkyCraftCollections = @($ours[$group]) } }
     },
 
     [Parameter()]
@@ -240,18 +255,22 @@ param(
     [Parameter()]
     [scriptblock]$ResourceGroupProbe = {
         param($Name)
-        Get-AzResourceGroup -Name $Name -ErrorAction SilentlyContinue
+        Get-AzResourceGroup -ErrorAction Stop | Where-Object { $_.ResourceGroupName -eq $Name }
     },
 
     [Parameter()]
     [scriptblock]$VaultProbe = {
         param($Entry)
+        # The subscription's vaults, picked by group and name: the group itself is usually gone by
+        # now, and a lookup scoped to it would fail.
         switch ($Entry.Kind) {
             'RecoveryServicesVault' {
-                Get-AzRecoveryServicesVault -ResourceGroupName $Entry.ResourceGroup -Name $Entry.Name -ErrorAction SilentlyContinue
+                Get-AzRecoveryServicesVault -ErrorAction Stop |
+                    Where-Object { $_.ResourceGroupName -eq $Entry.ResourceGroup -and $_.Name -eq $Entry.Name }
             }
             'DataProtectionBackupVault' {
-                Get-AzDataProtectionBackupVault -ResourceGroupName $Entry.ResourceGroup -VaultName $Entry.Name -ErrorAction SilentlyContinue
+                Get-AzDataProtectionBackupVault -ErrorAction Stop |
+                    Where-Object { $_.Name -eq $Entry.Name -and $_.Id -like "*/resourceGroups/$($Entry.ResourceGroup)/providers/*" }
             }
             default { throw "No probe for vault kind '$($Entry.Kind)'." }
         }
@@ -445,7 +464,17 @@ else {
     # deletes directly.
     $jobs = @()
     foreach ($name in @($sweep.ResourceGroups)) {
-        if (-not (& $ResourceGroupProbe $name)) {
+        # A check that failed is not "already gone", and it is no licence to delete either: the
+        # group is left alone and the failure counted (#290).
+        try { $present = & $ResourceGroupProbe $name }
+        catch {
+            $record = @{ Lab = '(sweep)'; Status = 'Failed'; ExitCode = 1; Target = $name; Detail = "could not check whether it exists: $_" }
+            $results.Add($record)
+            & $recordResult $record
+            Write-Host "    [FAIL] $name - could not check whether it exists, so it was not deleted: $_" -ForegroundColor Red
+            continue
+        }
+        if (-not $present) {
             Write-Host "    [ -- ] $name already gone" -ForegroundColor DarkGray
             continue
         }
@@ -489,8 +518,16 @@ else {
         Write-Host ''
         Write-Host '  Assertions' -ForegroundColor Cyan
 
+        # A check that fails is a failed assertion, not a pass: before #290 the probes swallowed
+        # their errors, and a vault nobody could read passed as gone.
         foreach ($entry in @($sweep.AssertAbsent)) {
-            $survivor = & $VaultProbe $entry
+            try { $survivor = & $VaultProbe $entry }
+            catch {
+                $detail = "Could not check whether $($entry.Kind) '$($entry.Name)' in '$($entry.ResourceGroup)' is gone. A check that failed is not 'gone'; run it again once the cause is fixed. Error: $_"
+                $assertions.Add(@{ Name = "$($entry.Kind) absent"; Ok = $false; Detail = $detail })
+                Write-Host "    [FAIL] $detail" -ForegroundColor Red
+                continue
+            }
             if ($survivor) {
                 $detail = "$($entry.Kind) '$($entry.Name)' still exists in '$($entry.ResourceGroup)'. Its lab's own Remove-LabResource.ps1 reported no failure, so this is a teardown that lied. Check the transcript for that lab, and check the az CLI / Az PowerShell versions above: older tooling refuses to delete a vault holding soft-deleted items and leaves it exactly like this."
                 $assertions.Add(@{ Name = "$($entry.Kind) absent"; Ok = $false; Detail = $detail })
@@ -506,8 +543,12 @@ else {
         # point collection is. The group is shared, so an unrelated protected VM legitimately keeps
         # it alive, and asserting the group away would fail on a subscription that is doing nothing
         # wrong. What must be gone is our contribution to it.
+        $backupGroups = $null
+        $backupCheckError = $null
+        try { $backupGroups = @(& $BackupResourceGroupProbe $sweep.BackupResourceGroupPrefix) }
+        catch { $backupCheckError = $_ }
         $ourLeftovers = @(
-            foreach ($group in @(& $BackupResourceGroupProbe $sweep.BackupResourceGroupPrefix)) {
+            foreach ($group in @($backupGroups)) {
                 if (-not $group) { continue }
                 foreach ($collection in @($group.SkyCraftCollections)) {
                     if ($collection) { "$($group.Name)/$collection" }
@@ -515,7 +556,12 @@ else {
             }
         )
 
-        if ($ourLeftovers.Count -gt 0) {
+        if ($backupCheckError) {
+            $detail = "Could not check the $($sweep.BackupResourceGroupPrefix)* groups for SkyCraft restore point collections. A check that failed is not 'none left'; run it again once the cause is fixed. Error: $backupCheckError"
+            $assertions.Add(@{ Name = 'no SkyCraft restore point collection left'; Ok = $false; Detail = $detail })
+            Write-Host "    [FAIL] $detail" -ForegroundColor Red
+        }
+        elseif ($ourLeftovers.Count -gt 0) {
             $detail = "SkyCraft restore point collections still parked in Azure Backup groups: $($ourLeftovers -join ', '). Lab 5.2's Remove-LabResource.ps1 is what removes these, so its teardown did not finish - check that lab's transcript."
             $assertions.Add(@{ Name = 'no SkyCraft restore point collection left'; Ok = $false; Detail = $detail })
             Write-Host "    [FAIL] $detail" -ForegroundColor Red
@@ -526,7 +572,13 @@ else {
         }
 
         foreach ($name in @($sweep.ResourceGroups)) {
-            if (& $ResourceGroupProbe $name) {
+            try { $present = & $ResourceGroupProbe $name }
+            catch {
+                $assertions.Add(@{ Name = 'lab resource group absent'; Ok = $false; Detail = "could not check whether '$name' is gone: $_" })
+                Write-Host "    [FAIL] could not check whether resource group '$name' is gone: $_" -ForegroundColor Red
+                continue
+            }
+            if ($present) {
                 $assertions.Add(@{ Name = 'lab resource group absent'; Ok = $false; Detail = "'$name' still exists" })
                 Write-Host "    [FAIL] resource group '$name' still exists" -ForegroundColor Red
             }
