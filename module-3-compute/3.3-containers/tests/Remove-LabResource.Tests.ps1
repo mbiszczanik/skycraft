@@ -22,7 +22,7 @@
          counted, and the script exits 1 without claiming completion.
       3. A lookup that fails is an [ERROR], counted, and the script exits 1 without touching or
          reporting absent the resource it could not see. The Container Apps environment stays
-         when its app could not be looked up. The stub reports the failure with Write-Error, as
+         when its app could not be looked up or deleted. The stub reports the failure with Write-Error, as
          the Az getters do, so a script that passes -ErrorAction SilentlyContinue swallows it.
       4. A failure does not stop the later steps.
       5. -Environment and the name overrides reach the delete calls; -WhatIf deletes nothing.
@@ -234,9 +234,17 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - exit code contract' {
     }
 
     It 'counts every failed step rather than stopping at the first' {
-        # Remove-AzResource fails for both the app and the environment; the registry fails too.
+        # Remove-AzResource fails for the app, which keeps its environment; the registry fails too.
         $script:TwoStuck.ExitCode | Should -Be 1
-        $script:TwoStuck.Output   | Should -Match 'Cleanup finished with 3 failure\(s\)'
+        $script:TwoStuck.Output   | Should -Match 'Cleanup finished with 2 failure\(s\)'
+    }
+
+    It 'keeps the Container Apps environment when its app could not be deleted, counted once' {
+        $run = $script:TwoStuck
+        $run.Output | Should -Match "\[ERROR\] Could not delete Container App 'dev-skycraft-swc-aca-world': stub failure"
+        $run.Output | Should -Match 'Kept: the Container App could not be deleted and may still be in it'
+        $run.Calls  | Should -Not -Contain 'Remove-AzResource dev-skycraft-swc-cae-02'
+        $run.Calls  | Should -Contain 'Remove-AzContainerGroup dev-skycraft-swc-aci-auth'
     }
 
     It 'keeps running the later steps after a failure' {

@@ -16,7 +16,8 @@
     the resource it could not see is left alone. Only a lookup that succeeds and does not find the
     resource, or a getter that reports it as not found, means "absent" - Test-LabNotFoundError
     tells the two apart (issue #290, as #255 did for Labs 1.2-2.3). The Container Apps environment
-    stays when its container app could not be looked up: the app may still be running in it.
+    stays when its container app could not be looked up or deleted: the app may still be running
+    in it. The kept environment is not counted again - the app's failure already is.
 
     Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
     "pwsh -File" for any script that declares #Requires -Modules for a module it has to
@@ -198,7 +199,7 @@ foreach ($res in $resourcesToDelete) {
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
 
 # Delete order matters: the app must go before its environment, and the environment stays when
-# the app could not be looked up (KeepWhenFailed names the step whose failed lookup keeps it).
+# the app could not be looked up or deleted (KeepWhenFailed names the step whose failure keeps it).
 $steps = @(
     @{ Type = 'Container App';              Name = $AcaName; ResourceType = 'Microsoft.App/containerApps'
        Remove = { param($r) Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null } }
@@ -211,14 +212,14 @@ $steps = @(
        Remove = { param($r) Remove-AzContainerRegistry -Name $r.Name -ResourceGroupName $ResourceGroupName -ErrorAction Stop | Out-Null } }
 )
 
-# The steps whose lookup failed, by type.
-$lookupFailed = @{}
+# The steps that failed, by type: 'looked up' or 'deleted', for the message of the step they keep.
+$stepFailed = @{}
 
 foreach ($step in $steps) {
     Write-Host "Removing $($step.Type): $($step.Name)..." -ForegroundColor Yellow
-    if ($step.KeepWhenFailed -and $lookupFailed[$step.KeepWhenFailed]) {
-        # Not counted again: the failed lookup already is.
-        Write-Host "  -> [SKIP] Kept: the $($step.KeepWhenFailed) could not be looked up and may still be in it." -ForegroundColor Yellow
+    if ($step.KeepWhenFailed -and $stepFailed[$step.KeepWhenFailed]) {
+        # Not counted again: the failure that keeps it already is.
+        Write-Host "  -> [SKIP] Kept: the $($step.KeepWhenFailed) could not be $($stepFailed[$step.KeepWhenFailed]) and may still be in it." -ForegroundColor Yellow
         continue
     }
     if (-not $PSCmdlet.ShouldProcess($step.Name, "Remove $($step.Type)")) { continue }
@@ -230,7 +231,7 @@ foreach ($step in $steps) {
         Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType $step.ResourceType -Name $step.Name -ErrorAction Stop
     }
     if ($lookup.Failed) {
-        $lookupFailed[$step.Type] = $true
+        $stepFailed[$step.Type] = 'looked up'
         continue
     }
     $resource = $lookup.Value | Select-Object -First 1
@@ -244,6 +245,7 @@ foreach ($step in $steps) {
         Write-Host "  -> Deleted" -ForegroundColor Green
     } catch {
         $script:cleanupFailures++
+        $stepFailed[$step.Type] = 'deleted'
         Write-Host "  -> [ERROR] Could not delete $($step.Type) '$($step.Name)': $_" -ForegroundColor Red
     }
 }
