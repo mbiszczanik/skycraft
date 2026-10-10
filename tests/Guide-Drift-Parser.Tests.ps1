@@ -985,6 +985,16 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         @($items[$index + 2].labels) | Should -Be @('+ Select scope', 'Apply')
     }
 
+    It 'opens the vault platform-skycraft-swc-bv by name in step 5.2.5 before its policies and before + Backup' {
+        $items = @((Get-GapStep '5.2' '5.2.5').items)
+        foreach ($labels in @(@('platform-skycraft-swc-bv', 'Manage', 'Backup policies'), @('platform-skycraft-swc-bv', '+ Backup'))) {
+            $chain = @($items | Where-Object { $_.kind -eq 'navigation' -and (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
+            $chain.Count | Should -Be 1 -Because ($labels -join ' > ')
+            @($chain[0].resources) | Should -Be @(0)
+        }
+        @($items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Backup Vault'
+    }
+
     It 'assigns each role of step 5.2.5 on the storage account, one role per chain, through + Select members' {
         $items = @((Get-GapStep '5.2' '5.2.5').items)
         $open = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "prodskycraftswcsa`nAccess control (IAM)`n+ Add`nAdd role assignment" })

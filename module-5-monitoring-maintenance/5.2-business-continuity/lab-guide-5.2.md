@@ -198,14 +198,13 @@ Create the blob backup **policy**, then grant the vault identity access and prot
 
 **a. Create the blob backup policy**
 
-1. Navigate to your new **Backup Vault**.
-2. Go to **Manage** → **Backup policies**.
-3. Create a new policy:
+1. Open `platform-skycraft-swc-bv` (your new Backup vault) → **Manage** → **Backup policies**.
+2. Create a new policy:
    - Datasource type: **Azure Blobs**
    - Policy name: `SkyCraft-Blob-Policy`
    - Vault: `platform-skycraft-swc-bv`
    - Retention: **30 days** (operational)
-4. Review and create the policy.
+3. Review and create the policy.
 
 **b. Grant the Backup Vault identity access to the storage account**
 
@@ -227,7 +226,7 @@ Assign one role at a time. The wizard's **Review + assign** button first opens i
 
 **c. Configure backup (create the backup instance)**
 
-1. In the **Backup Vault**, click **+ Backup**.
+1. Open `platform-skycraft-swc-bv` → **+ Backup**.
 2. Datasource type: **Azure Blobs (Azure Storage)**.
 3. Backup policy: `SkyCraft-Blob-Policy`.
 4. Select the storage account: `prodskycraftswcsa`.
