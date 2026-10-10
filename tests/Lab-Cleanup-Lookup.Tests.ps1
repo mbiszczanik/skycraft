@@ -25,14 +25,12 @@
          suite pins those.
       3. Invoke-LabLookup returns what a lookup found, reads "found nothing" and a not-found error
          as absent without counting them, and counts any other error in $script:cleanupFailures.
-      4. A ratchet: no cleanup outside the labs #290 still has to convert gives a *-Az* command
-         -ErrorAction SilentlyContinue or Ignore. The check walks the syntax tree, so it reads
-         every spelling (-ErrorAction:X, -EA X, a quoted value, 0 or 4, the ActionPreference
-         enum), a value carried in a splatted hashtable the script builds, and a command split by
-         backtick continuations - and never a comment or a string.
-      5. The pending list cannot outlive its purpose: every entry must name a lab whose cleanup
-         still silences a lookup, so converting a lab fails this suite until the lab leaves the
-         list, and a misspelled entry fails at once.
+      4. A ratchet: no cleanup gives a *-Az* command -ErrorAction SilentlyContinue or Ignore.
+         The check walks the syntax tree, so it reads every spelling (-ErrorAction:X, -EA X, a
+         quoted value, 0 or 4, the ActionPreference enum), a value carried in a splatted hashtable
+         the script builds, and a command split by backtick continuations - and never a comment
+         or a string. There is no pending list: #290 converted the last labs on it, so a new
+         lab's cleanup is held to the ratchet from its first commit.
 
     Each lab's own tests/Remove-LabResource.Tests.ps1 runs the script end to end against stubbed
     Az commands and proves the exit code.
@@ -89,24 +87,16 @@ $ExpectedHelperFile = @(
     'module-4-storage/4.2-blob-storage/scripts/Remove-LabResource.ps1'
     'module-4-storage/4.3-azure-files/scripts/Remove-LabResource.ps1'
     'module-4-storage/4.4-storage-security/scripts/Remove-LabResource.ps1'
+    'module-5-monitoring-maintenance/5.1-azure-monitor/scripts/Remove-LabResource.ps1'
     'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Remove-LabResource.ps1'
+    'module-5-monitoring-maintenance/5.3-network-monitoring/scripts/Remove-LabResource.ps1'
 )
 
-# The cleanups #290 (the second half of #255) still has to convert. The list only shrinks: the
-# pending-list test below fails for an entry whose cleanup no longer silences a lookup.
-$PendingLab = @(
-    'module-5-monitoring-maintenance/5.1-azure-monitor'
-    'module-5-monitoring-maintenance/5.3-network-monitoring'
-)
-
-$PendingCases = @($PendingLab | ForEach-Object {
-    @{ lab = $_; path = (Join-Path $RepoRoot $_ 'scripts' 'Remove-LabResource.ps1') }
-})
-
+# Every cleanup is held to the ratchet. There is no pending list any more: #290 converted the
+# last labs on it, and a list that may hold an entry is a way to exempt a new lab's cleanup from
+# its first commit - so a new lab meets the rules or fails here.
 $RatchetCases = @($CleanupScripts | ForEach-Object {
-    $file = $_.Substring($RepoRoot.Length + 1) -replace '\\', '/'
-    $lab  = ($file -split '/')[0..1] -join '/'
-    if ($lab -notin $PendingLab) { @{ file = $file; path = $_ } }
+    @{ file = ($_.Substring($RepoRoot.Length + 1) -replace '\\', '/'); path = $_ }
 })
 
 BeforeAll {
@@ -404,18 +394,11 @@ Describe 'Lab cleanup lookups - the ratchet reads every way to silence a lookup'
     }
 }
 
-Describe 'Lab cleanup lookups - the pending list only names labs still to convert' {
+Describe 'Lab cleanup lookups - no cleanup reads a failed lookup as "absent"' {
 
-    It "'<lab>' has a cleanup that still silences a lookup" -ForEach $PendingCases {
-        Test-Path -LiteralPath $path | Should -BeTrue -Because "a pending entry that names no cleanup exempts nothing - check its spelling"
-        @(Find-SilencedAzCommand -Text (Get-Content -Raw -LiteralPath $path)).Count | Should -BeGreaterThan 0 -Because 'a converted cleanup must leave $PendingLab, or the ratchet stops guarding it'
-    }
-}
-
-Describe 'Lab cleanup lookups - no converted cleanup reads a failed lookup as "absent"' {
-
-    It 'has converted cleanups to check' -ForEach @(@{ count = $RatchetCases.Count }) {
-        $count | Should -BeGreaterThan 0
+    It 'checks every cleanup discovery found' -ForEach @(@{ count = $RatchetCases.Count; expected = $ExpectedHelperFile.Count }) {
+        # A discovery that matches less checks less and still passes.
+        $count | Should -BeGreaterOrEqual $expected
     }
 
     It "'<file>' gives no *-Az* command -ErrorAction SilentlyContinue or Ignore" -ForEach $RatchetCases {
