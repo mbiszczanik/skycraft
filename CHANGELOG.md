@@ -9,6 +9,25 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0](https://github.com/mbiszczanik/skycraft/compare/v0.15.1...v0.16.0) (2026-10-10)
+
+
+### Features
+
+* **guide-drift:** bring the Portal to the next step's view on resume ([#286](https://github.com/mbiszczanik/skycraft/issues/286)) ([0973149](https://github.com/mbiszczanik/skycraft/commit/0973149633829d7f669796730832c922421b70e7)), closes [#206](https://github.com/mbiszczanik/skycraft/issues/206)
+* **guide-drift:** read other Verify and Confirm introductions as checks ([#284](https://github.com/mbiszczanik/skycraft/issues/284)) ([b4458f4](https://github.com/mbiszczanik/skycraft/commit/b4458f4b53df5fec4c244930aacb512df05e559a)), closes [#246](https://github.com/mbiszczanik/skycraft/issues/246)
+
+
+### Bug Fixes
+
+* **labs:** count a failed cleanup lookup instead of reading it as absent (labs 1.2-2.3) ([#288](https://github.com/mbiszczanik/skycraft/issues/288)) ([ac9167d](https://github.com/mbiszczanik/skycraft/commit/ac9167db2f332865856bbcc6e4079307a0bee8ea)), closes [#255](https://github.com/mbiszczanik/skycraft/issues/255)
+
+
+### Documentation
+
+* **lab-3.2:** keep only real fields and clicks in step 3.2.1 Option B ([#285](https://github.com/mbiszczanik/skycraft/issues/285)) ([1b48882](https://github.com/mbiszczanik/skycraft/commit/1b488822f3b8379cac17ecf2659616c60173d86e)), closes [#270](https://github.com/mbiszczanik/skycraft/issues/270)
+* remove the stale root-cause analyses under docs/issues ([#287](https://github.com/mbiszczanik/skycraft/issues/287)) ([a0f43f7](https://github.com/mbiszczanik/skycraft/commit/a0f43f7a5875ae72b1abbb127bf59dfd6b2fb065))
+
 ## [0.15.1](https://github.com/mbiszczanik/skycraft/compare/v0.15.0...v0.15.1) (2026-10-10)
 
 
