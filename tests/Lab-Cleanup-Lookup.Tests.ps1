@@ -32,19 +32,25 @@
            c. gives $PSDefaultParameterValues an ErrorAction default of SilentlyContinue or Ignore
               for a key that can reach an Az command ('*:ErrorAction', '*-Az*:EA', 'Get-*:...').
          And no cleanup (the tools count differently - see $ToolRatchetCases):
-           d. catches the error of a *-Az* command in a catch clause that neither calls
-              Test-LabNotFoundError nor counts it in $script:cleanupFailures, throws or exits -
+           d. catches the error of a *-Az* command in a catch clause that, on the path a failure
+              takes, neither counts it (++ or += on $script:cleanupFailures) nor throws or exits -
               the catch that read any error as "not there" in Labs 3.1 and 4.4 before #297.
+              Test-LabNotFoundError counts only as the test that decides which path is which.
               Every verb counts, not only Get: Lab 3.1 read a failed delete as "may not exist".
-              Invoke-AzRestMethod is left out (see Find-UnhandledAzCatch).
+              Invoke-AzRestMethod is left out, and only commands written inside the try block
+              are read - not a scriptblock invoked with &, not a trap (see Find-UnhandledAzCatch).
+              The few catches that report a failure as [WARN] on purpose, in a diagnostic that
+              must not change the exit code, are listed in $DiagnosticCatch.
          The checks walk the syntax tree, never a comment or a string. They read the spellings
          their fixtures below cover - for (a), -ErrorAction:X, -EA X, a prefix, a quoted value, 0
          or 4, the ActionPreference enum, a value carried in a splatted hashtable the script
          builds, and a command split by backtick continuations - and nothing else: a value held
          in another variable, or a default computed at run time, is not resolved. A form a
-         fixture does not cover is not read; add a fixture before relying on it. There is no
-         pending list: #290 converted the last labs on it, so a new lab's cleanup is held to the
-         ratchet from its first commit.
+         fixture does not cover is not read; add a fixture before relying on it. Nor is an error
+         hidden without silencing the command: -ErrorAction Continue with 2>$null or *>$null,
+         or $ErrorActionPreference = 'Continue', is not read. There is no pending list: #290
+         converted the last labs on it, so a new lab's cleanup is held to the ratchet from its
+         first commit.
 
     Each lab's own tests/Remove-LabResource.Tests.ps1 runs the script end to end against stubbed
     Az commands and proves the exit code.
@@ -122,6 +128,24 @@ $ToolRatchetCases = @(
     @{ file = 'tools/Remove-LabCycle.ps1'; path = (Join-Path $RepoRoot 'tools' 'Remove-LabCycle.ps1') }
     @{ file = 'tools/LabCycle.psm1';       path = (Join-Path $RepoRoot 'tools' 'LabCycle.psm1') }
 )
+
+# The catch clauses that report a failed lookup as a [WARN] and do not count it, on purpose: each
+# sits in a diagnostic whose answer must not change the exit code, and tells "not found" from
+# "could not tell" with Test-LabNotFoundError instead. Keyed by file and caught command, with how
+# many such clauses may catch it there: one more fails the catch rule, and an entry that no longer
+# matches fails the Describe that checks this list, so it cannot outlive the code it excuses.
+$DiagnosticCatch = @(
+    @{ file = 'module-2-networking/2.1-virtual-networks/scripts/Remove-LabResource.ps1'; command = 'Get-AzVirtualNetwork'; count = 1
+       why  = 'the service association link preflight is diagnostic and never touches the failure count (#110); the delete steps look the VNet up again, and count' }
+    @{ file = 'module-2-networking/2.1-virtual-networks/scripts/Remove-LabResource.ps1'; command = 'Get-AzResource'; count = 1
+       why  = 'in the same preflight, a link target that cannot be read is reported "target unverified", never "orphaned" (#110)' }
+    @{ file = 'module-3-compute/3.4-app-service/scripts/Remove-LabResource.ps1'; command = 'Get-AzVirtualNetwork'; count = 1
+       why  = 'Get-SubnetLinkSnapshot feeds the informational subnet report; it returns $null for "unknown", and the plan is kept or deleted on other, counted grounds' }
+)
+foreach ($case in $RatchetCases) {
+    $case.allowed = @($DiagnosticCatch | Where-Object { $_.file -eq $case.file })
+}
+$DiagnosticCases = @($DiagnosticCatch | ForEach-Object { $_ + @{ path = (Join-Path $RepoRoot $_.file) } })
 
 BeforeAll {
     # What the ratchet's readers share: the values that silence an error, and how a parameter
@@ -346,30 +370,71 @@ BeforeAll {
         }
     }
 
-    # What a catch clause must do with the error of an Az command it caught: tell a not-found from
-    # a failure (Test-LabNotFoundError), count it - an increment of, or an assignment to,
-    # $script:cleanupFailures, the counter every converted cleanup keeps and exits 1 on - or end
-    # the run (throw, exit). Read anywhere in the clause's body, nested blocks included. No
-    # cleanup has a reporting helper that counts (a Write-LabError), so none is accepted.
+    # What a catch clause must do with the error of an Az command it caught: count it, or end the
+    # run (throw, exit), on the path a failure takes.
+    #   - Counting is ++ (prefix or postfix) or += on $script:cleanupFailures, the counter every
+    #     converted cleanup keeps and exits 1 on, with its scope written out. A plain assignment
+    #     (= 0) resets rather than counts, and an unscoped $cleanupFailures++ inside a function
+    #     counts a local that the exit never reads. No cleanup has a reporting helper that counts
+    #     (a Write-LabError), so none is accepted.
+    #   - Test-LabNotFoundError tells a not-found from a failure, and helps only when its answer
+    #     decides a branch: a count, throw or exit inside the branch taken for "not found" does not
+    #     handle a failure. That branch is the if's body for `if (Test-LabNotFoundError ...)`, and
+    #     its else for `if (-not (Test-LabNotFoundError ...))`. So `if (Test-LabNotFoundError $_) {}`
+    #     with nothing else, or a catch that counts only the not-found case, is flagged.
+    # Read anywhere else in the clause's body, nested blocks included.
     function Test-CatchHandlesError {
         param([Parameter(Mandatory)][System.Management.Automation.Language.StatementBlockAst]$Body)
-        $isCounter = { param($Node) (Get-RatchetVariableName -Node $Node) -eq 'cleanupFailures' }
+
+        $isCounter = {
+            param($Node)
+            $Node -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                $Node.VariablePath.UserPath -eq 'script:cleanupFailures'
+        }
+        # The blocks that run only for a not-found error.
+        $notFoundBranch = [System.Collections.Generic.List[object]]::new()
+        foreach ($if in $Body.FindAll({ $args[0] -is [System.Management.Automation.Language.IfStatementAst] }, $true)) {
+            foreach ($clause in $if.Clauses) {
+                $condition = $clause.Item1
+                $decides = $condition.Find({
+                    $args[0] -is [System.Management.Automation.Language.CommandAst] -and $args[0].GetCommandName() -eq 'Test-LabNotFoundError'
+                }, $true)
+                if (-not $decides) { continue }
+                $expression = if ($condition -is [System.Management.Automation.Language.PipelineAst] -and $condition.PipelineElements.Count -eq 1 -and
+                                  $condition.PipelineElements[0] -is [System.Management.Automation.Language.CommandExpressionAst]) { $condition.PipelineElements[0].Expression }
+                $negated = $expression -is [System.Management.Automation.Language.UnaryExpressionAst] -and $expression.TokenKind -in 'Not', 'Exclaim'
+                if (-not $negated) { $notFoundBranch.Add($clause.Item2) }
+                elseif ($if.ElseClause) { $notFoundBranch.Add($if.ElseClause) }
+            }
+        }
+        $onNotFoundPath = {
+            param($Node)
+            for ($parent = $Node; $parent; $parent = $parent.Parent) {
+                if ($notFoundBranch.Contains($parent)) { return $true }
+            }
+            return $false
+        }
+
         [bool]$Body.Find({
             param($node)
-            ($node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Test-LabNotFoundError') -or
-            $node -is [System.Management.Automation.Language.ThrowStatementAst] -or
-            $node -is [System.Management.Automation.Language.ExitStatementAst] -or
-            ($node -is [System.Management.Automation.Language.UnaryExpressionAst] -and
-                $node.TokenKind -in 'PlusPlus', 'PostfixPlusPlus' -and (& $isCounter $node.Child)) -or
-            ($node -is [System.Management.Automation.Language.AssignmentStatementAst] -and (& $isCounter $node.Left))
+            $handles = $node -is [System.Management.Automation.Language.ThrowStatementAst] -or
+                $node -is [System.Management.Automation.Language.ExitStatementAst] -or
+                ($node -is [System.Management.Automation.Language.UnaryExpressionAst] -and
+                    $node.TokenKind -in 'PlusPlus', 'PostfixPlusPlus' -and (& $isCounter $node.Child)) -or
+                ($node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                    $node.Operator -eq 'PlusEquals' -and (& $isCounter $node.Left))
+            $handles -and -not (& $onNotFoundPath $node)
         }, $true)
     }
 
     # The reader for catch clauses. Returns one finding per catch clause that catches the error of
     # a *-Az* command and does not handle it (Test-CatchHandlesError). The command's nearest
     # enclosing try is the one whose catch clauses see its error; an inner try that handles it
-    # hides it from an outer one. Not followed: a command in a function body (its caller's try is
-    # unknown to the parser), and a lookup inside Invoke-LabLookup's -Lookup block, whose error
+    # hides it from an outer one. It sees only commands written lexically inside the try block.
+    # Not followed: a command in a function body (its caller's try is unknown to the parser); a
+    # command in a scriptblock kept in a variable and invoked with & inside the try (Lab 3.3's
+    # $steps), which is judged only by the try it is written in, if any; a trap statement, which is
+    # not read at all; and a lookup inside Invoke-LabLookup's -Lookup block, whose error
     # Invoke-LabLookup itself handles and counts. Nor Invoke-AzRestMethod: it reports an HTTP
     # failure through StatusCode and throws only when no response came back, so a script routes
     # both through one status check after the call - Lab 3.4 records the error in its catch and
@@ -675,13 +740,33 @@ Describe 'Lab cleanup lookups - the ratchet reads a catch that swallows an Az er
            text = 'try { Get-AzVM -Name x -ErrorAction Stop; Remove-AzVM -Name x -Force -ErrorAction Stop } catch { Write-Host "$_" }' }
         @{ case = 'a failed change printed and not counted (Lab 4.4''s firewall revert before #297)'
            text = 'try { Update-AzStorageAccountNetworkRuleSet -Name x -DefaultAction Allow -ErrorAction Stop } catch { Write-Host "[ERROR] Failed to revert firewall." }' }
+        @{ case = 'Test-LabNotFoundError deciding nothing'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { if (Test-LabNotFoundError -ErrorRecord $_) { } }' }
+        @{ case = 'a count only on the not-found branch'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { if (Test-LabNotFoundError -ErrorRecord $_) { $script:cleanupFailures++ } }' }
+        @{ case = 'a count only on the not-found branch of a negated test'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { if (-not (Test-LabNotFoundError -ErrorRecord $_)) { Write-Host "$_" } else { $script:cleanupFailures++ } }' }
+        @{ case = 'a failure branch that only warns'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { if (-not (Test-LabNotFoundError -ErrorRecord $_)) { Write-Host "[WARN] $_" } }' }
+        @{ case = 'an if expression whose failure branch only yields $null'
+           text = 'try { $x = Get-AzResource -ResourceId $id -ErrorAction Stop } catch { $x = if (Test-LabNotFoundError -ErrorRecord $_) { $false } else { $null } }' }
+        @{ case = 'a plain assignment to the counter, which resets it'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { $script:cleanupFailures = 0 }' }
+        @{ case = 'an unscoped counter in a function, which is a local'
+           text = 'function Remove-It { try { Remove-AzVM -Name x -Force -ErrorAction Stop } catch { $cleanupFailures++ } }' }
     ) {
         @(Find-UnhandledAzCatch -Text $text).Count | Should -Be 1
     }
 
     It 'does not flag <case>' -ForEach @(
-        @{ case = 'a catch that checks Test-LabNotFoundError'
-           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { if (-not (Test-LabNotFoundError -ErrorRecord $_)) { Write-Host "[WARN] $_" } }' }
+        @{ case = 'a negated Test-LabNotFoundError whose branch counts'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { if (-not (Test-LabNotFoundError -ErrorRecord $_)) { $script:cleanupFailures++; Write-Host "[ERROR] $_" } }' }
+        @{ case = 'Test-LabNotFoundError whose else branch counts'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { if (Test-LabNotFoundError -ErrorRecord $_) { $gone = $true } else { $script:cleanupFailures++ } }' }
+        @{ case = 'Test-LabNotFoundError that returns, then a count for the rest'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { if (Test-LabNotFoundError -ErrorRecord $_) { return }; $script:cleanupFailures++ }' }
+        @{ case = 'a negated Test-LabNotFoundError whose branch throws'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { if (-not (Test-LabNotFoundError -ErrorRecord $_)) { throw } }' }
         @{ case = 'a catch that counts with ++'
            text = 'try { Remove-AzVM -Name x -Force -ErrorAction Stop } catch { $script:cleanupFailures++; Write-Host "[ERROR] $_" }' }
         @{ case = 'a catch that counts with a prefix ++'
@@ -731,8 +816,21 @@ Describe 'Lab cleanup lookups - no cleanup reads a failed lookup as "absent"' {
     }
 
     It "'<file>' has no catch clause that swallows the error of an Az command" -ForEach $RatchetCases {
-        $hits = @(Find-UnhandledAzCatch -Text (Get-Content -Raw -LiteralPath $path) |
-            ForEach-Object { "line $($_.Line): $($_.Text) (catches $($_.Command))" })
-        $hits | Should -BeNullOrEmpty -Because "a catch that neither checks Test-LabNotFoundError nor counts the error, throws or exits reads a failure as 'not there' (#290)"
+        $findings = @(Find-UnhandledAzCatch -Text (Get-Content -Raw -LiteralPath $path))
+        $hits = foreach ($group in ($findings | Group-Object Command)) {
+            $budget = [int](@($allowed | Where-Object { $_.command -eq $group.Name } | ForEach-Object { $_.count }) | Measure-Object -Sum).Sum
+            $group.Group | Select-Object -Skip $budget | ForEach-Object { "line $($_.Line): $($_.Text) (catches $($_.Command))" }
+        }
+        @($hits) | Should -BeNullOrEmpty -Because "a catch that neither counts the error nor throws or exits on the path a failure takes reads a failure as 'not there' (#290)"
+    }
+}
+
+Describe 'Lab cleanup lookups - the diagnostic catches the catch rule allows are still there' {
+
+    It "'<file>' still catches <command> in <count> diagnostic catch clause(s)" -ForEach $DiagnosticCases {
+        # An entry whose catch is gone, or was made to count, would excuse the next one written.
+        Test-Path -LiteralPath $path | Should -BeTrue
+        $found = @(Find-UnhandledAzCatch -Text (Get-Content -Raw -LiteralPath $path) | Where-Object { $_.Command -eq $command })
+        $found.Count | Should -Be $count -Because "remove or correct the `$DiagnosticCatch entry: $why"
     }
 }
