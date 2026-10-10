@@ -29,8 +29,10 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
                        values and element values masked (#212)
   error_text           an exception as a record keeps it: '<type>: <first line>' (#212)
   typed_secrets        every value the runner types into a password or secret field (#212)
-  scrub                a free text as a run log keeps it: one line, secrets, tenant data and
-                       object ids as tokens; scrubbing twice changes nothing (#212)
+  mask_secret_values   an accessibility snapshot with the value of a password field masked (#212)
+  scrub                a free text as a run log keeps it: one line (or every line of an
+                       accessibility tree), secrets, tenant data and object ids as tokens;
+                       scrubbing twice changes nothing (#212)
 """
 from __future__ import annotations
 
@@ -473,15 +475,32 @@ def typed_secrets(recording: dict, steps: dict) -> set[str]:
     return secrets
 
 
-def scrub(text: str | None, redactor: Redactor, secrets: set[str] | frozenset[str] = frozenset()) -> str | None:
+# A text field in an accessibility snapshot, as aria_snapshot() writes it with its value after
+# the colon: '- textbox "Password": <value>', '- textbox "Client secret" [disabled]: <value>'.
+SNAPSHOT_TEXTBOX = re.compile(r'^(?P<head>\s*- textbox "(?P<name>(?:[^"\\]|\\.)*)"[^:\n]*): (?P<value>.+)$',
+                              re.MULTILINE)
+
+
+def mask_secret_values(text: str) -> str:
+    """`text` with the value of every text field whose name names a secret (SECRET_FIELD) in
+    an accessibility snapshot as SECRET: the Portal's auto-generated password is there, and the
+    runner never knows it."""
+    return SNAPSHOT_TEXTBOX.sub(lambda m: f"{m.group('head')}: {SECRET}" if SECRET_FIELD.search(m.group("name"))
+                                else m.group(0), text)
+
+
+def scrub(text: str | None, redactor: Redactor, secrets: set[str] | frozenset[str] = frozenset(),
+          whole: bool = False) -> str | None:
     """What a run log (results.jsonl, summary.md) keeps of a free text such as a record's
     'observed': its first line without a Playwright call log (one_line), every typed secret as
     SECRET (longest first), tenant data as the Redactor's tokens, and object ids (GUIDs, with
     or without hyphens) as OBJECT_ID. Tokens already in it are left alone, so scrubbing a
-    scrubbed text changes nothing: records reloaded on -Resume stay as they were written."""
+    scrubbed text changes nothing: records reloaded on -Resume stay as they were written.
+    `whole`: keep every line (an accessibility tree for an *.aria.txt file), with the value of
+    a secret text field masked (mask_secret_values), instead of the first line."""
     if text is None:
         return None
-    text = one_line(str(text))
+    text = mask_secret_values(str(text) if whole else one_line(str(text)))
     for value in sorted(secrets, key=len, reverse=True):
         text = sub_outside(re.compile(re.escape(value)), SECRET, text, redactor.tokens)
     text = redactor.redact(text)

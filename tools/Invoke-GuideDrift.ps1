@@ -67,7 +67,10 @@
     summary.md and results.jsonl are safe to copy into an issue or a pull request: each record
     keeps what it observed on one line, as the failure prompt shows it, without Playwright's call
     log, with the tenant domain, id and name, the guest address and object ids as tokens, and
-    every value typed into a password or secret field as [secret] (#212).
+    every value typed into a password or secret field as [secret] (#212). The *.aria.txt files
+    are scrubbed the same way with every line kept, a password field's value masked too. The
+    console shows errors the same way; a crash prints only its frames (file, line, function)
+    and each error's scrubbed first line, so a pasted transcript is as safe as the summary.
     Screenshots show the tenant name, user principal names and the subscription id, so nothing
     is copied into a guide's images/ folder: crop and anonymise by hand. The saved browser
     session (tools/.guide-drift-auth.json) is a sign-in. All of it is gitignored and asserted

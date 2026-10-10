@@ -25,7 +25,12 @@ password or secret (recording.typed_secrets) as '[secret]', tenant data as the R
 and object ids as '<id>'. Scrubbing twice changes nothing, so the records a -Resume reloads stay
 as written (and a line a run wrote before #212 is cleaned for the summary). A proposed edit's new
 label is scrubbed the same way; the rest of its line is the guide's own text and is never
-redacted. The screenshots are not scrubbed: crop and anonymise them by hand.
+redacted. The *.aria.txt files are scrubbed with every line kept, and the value of a text field
+named like a password or secret is masked there too (the Portal's auto-generated password is in
+an accessibility snapshot). The console, which is pasted too, shows an error as a record keeps it;
+a crash prints its traceback as frames (file, line, function) and each error's scrubbed first
+line, never Python's own traceback with the error text (redacted_traceback). The screenshots are
+not scrubbed: crop and anonymise them by hand.
 
 The runner acts only on a visible element within the window's width (the Portal parks earlier
 blades off to the left; below the fold is fine, it scrolls there first), and only on one:
@@ -1681,7 +1686,8 @@ class Runner:
             outline = aria_outline(self.page)
         lines = [f'{role} "{name}"' if name else role for role, name in outline]
         path = self.run_dir / f"blade-{step['id']}-{item.get('line')}.aria.txt"
-        path.write_text(self.redactor.redact("\n".join(lines)) + "\n", encoding="utf-8")
+        # Every line kept, scrubbed as a record is (ids, secrets, tenant data; #212).
+        path.write_text(scrub("\n".join(lines), self.redactor, self.secrets, whole=True) + "\n", encoding="utf-8")
         print(f"The blade's outline is in {path}")
 
     def expand_menu_groups(self, label: str) -> None:
@@ -1705,11 +1711,12 @@ class Runner:
         print(f"Opened the menu groups ('{EXPAND_ALL}') to look for '{label}' again.")
 
     def save_search_tree(self, step: dict, tree: str) -> None:
-        """Keep the search dropdown's accessibility tree, redacted, as search-<step>.aria.txt in
-        the run folder: a search that found no single result shows there what the Portal
-        offered, so the lookup can be fixed without another live run."""
+        """Keep the search dropdown's accessibility tree, scrubbed (recording.scrub, every line
+        kept: object ids, typed secrets, a password field's value and tenant data as tokens,
+        #212), as search-<step>.aria.txt in the run folder: a search that found no single result
+        shows there what the Portal offered, so the lookup can be fixed without another live run."""
         path = self.run_dir / f"search-{step['id']}.aria.txt"
-        path.write_text(self.redactor.redact(tree) + "\n", encoding="utf-8")
+        path.write_text(scrub(tree, self.redactor, self.secrets, whole=True) + "\n", encoding="utf-8")
         print(f"The search results' structure is in {path}")
 
     def search_in_blade(self, label: str, record: dict) -> dict:
@@ -2540,6 +2547,27 @@ class Runner:
         return f"- step {record['step']} skipped on resume"
 
 
+def redacted_traceback(error: BaseException, redactor: Redactor, secrets: set[str]) -> str:
+    """A crash as the console shows it (#212), in place of traceback.print_exc(), whose error
+    text carries Playwright's call log (an element's HTML, a password field's value, the value
+    typed) and tenant data. Python's layout, oldest exception of the chain first: for each, the
+    frames as file, line and function, without the source text, and its type and first line,
+    scrubbed (error_text, recording.scrub). Enough to find the fault, nothing to leak."""
+    chain, seen = [], set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(current)
+        current = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
+    parts = []
+    for exception in reversed(chain):
+        frames = [f'  File "{frame.filename}", line {frame.lineno}, in {frame.name}'
+                  for frame in traceback.extract_tb(exception.__traceback__)]
+        parts.append("\n".join(["Traceback (most recent call last):", *frames,
+                                scrub(error_text(exception), redactor, secrets)]))
+    return "\n\nThe exception above led to the one below:\n\n".join(parts)
+
+
 def main(argv: list[str] | None = None) -> int:
     # Accessible names and guide text reach the console; a redirected stdout on Windows would
     # otherwise use the ANSI code page and fail on the first arrow.
@@ -2577,17 +2605,24 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as error:
         print(error)
         return NOT_STARTED
+    # The console is pasted into issues too: an error is shown as a record keeps it (#212).
+    redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording), args.tenant_name)
+    secrets = typed_secrets(recording, steps)
+
+    def shown(error: BaseException) -> str:
+        return scrub(error_text(error), redactor, secrets)
+
     with sync_playwright() as pw:
         try:
             browser, page = open_portal(pw, args, recording)
         except (SystemExit, KeyboardInterrupt) as stop:   # a guard, or Ctrl+C while signing in
-            print(str(stop) or "Interrupted before the first step.")
+            print(scrub(str(stop), redactor, secrets) or "Interrupted before the first step.")
             return NOT_STARTED
         except PlaywrightError as error:    # Chromium missing, or the window closed while signing in
-            print(f"The browser stopped before the first step: {error}")
+            print(f"The browser stopped before the first step: {shown(error)}")
             return NOT_STARTED
         except Exception as error:          # noqa: BLE001 - e.g. OSError saving --auth-state
-            print(f"Could not open the Portal: {type(error).__name__}: {error}")
+            print(f"Could not open the Portal: {shown(error)}")
             return NOT_STARTED
         runner = Runner(page, steps, recording, args, state=state)
         try:
@@ -2597,13 +2632,12 @@ def main(argv: list[str] | None = None) -> int:
             # would read as 'one finding' and the entry point would clean up what -Resume needs.
             # Print what happened, keep the state, and say so.
             if not isinstance(stop, (KeyboardInterrupt, SystemExit, PageClosed)):
-                traceback.print_exc()
+                print(redacted_traceback(stop, redactor, secrets), file=sys.stderr)
             try:
                 runner.finish()
-            except Exception:               # noqa: BLE001 - the summary is best effort here
-                traceback.print_exc()
-            print(f"\nStopped ({type(stop).__name__}: {stop}). Progress is in {args.state}; "
-                  "re-run with -Resume.")
+            except Exception as error:      # noqa: BLE001 - the summary is best effort here
+                print(redacted_traceback(error, redactor, secrets), file=sys.stderr)
+            print(f"\nStopped ({shown(stop)}). Progress is in {args.state}; re-run with -Resume.")
             return ABORTED
         finally:
             try:
