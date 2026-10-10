@@ -17,6 +17,14 @@
     lists identical. The first three tests keep the JSON files parseable and version.txt
     in step with the manifest, so a stray comma cannot break the release workflow on main.
 
+    The last block pins the squash body (issue #302). release-please lists every issue a
+    commit on main mentions as "closes #N" in the Release PR, and merging that PR closes
+    them. With squash_merge_commit_message = PR_BODY a deferred PR's 'Refs #N' reached main,
+    so the next release closed the issue that was still tracking its live pass. The setting
+    is BLANK: only the PR title reaches main. The check needs an authenticated gh and is
+    skipped without one (CI runs it unauthenticated), so it is a local guard; the docs
+    check runs everywhere.
+
 .EXAMPLE
     Invoke-Pester -Path .\tests\Release-Config.Tests.ps1
 
@@ -91,5 +99,28 @@ Describe 'release-please configuration - the PR-title check and the changelog se
         $docs = $config.'changelog-sections' | Where-Object type -ceq 'docs'
         $docs | Should -Not -BeNullOrEmpty
         [bool]$docs.hidden | Should -BeFalse
+    }
+}
+
+BeforeDiscovery {
+    # Decided at discovery so -Skip can use it: an authenticated gh that can read the repo.
+    $script:GhCanReadRepo = $false
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        $null = gh api repos/mbiszczanik/skycraft --jq .name 2>$null
+        $script:GhCanReadRepo = ($LASTEXITCODE -eq 0)
+    }
+}
+
+Describe 'release-please configuration - only the PR title reaches main (#302)' {
+    It 'the repository squash body is BLANK, so no issue reference in a PR body reaches a Release PR' -Skip:(-not $script:GhCanReadRepo) {
+        $setting = gh api repos/mbiszczanik/skycraft --jq .squash_merge_commit_message
+        $LASTEXITCODE | Should -Be 0
+        $setting | Should -BeExactly 'BLANK' -Because 'with PR_BODY a deferred PR''s "Refs #N" lands on main and the next Release PR closes #N (#302)'
+    }
+
+    It 'CONTRIBUTING.md does not ask for a footer in the PR description, which no longer reaches main' {
+        $contributing = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'CONTRIBUTING.md')
+        $contributing | Should -Not -Match 'footer in the PR description' -Because 'BREAKING CHANGE is declared with feat! in the title'
+        $contributing | Should -Not -Match 'description\s+\*\*ends\*\* with the line `Release-As' -Because 'Release-As now goes in release-please-config.json'
     }
 }
