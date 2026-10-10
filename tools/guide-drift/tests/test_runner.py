@@ -1042,6 +1042,56 @@ class GuardAndLookupTests(RunnerTestCase):
         self.assertEqual(sum("Still waiting" in line for line in said), 2)
 
 
+def snapshot_line(role: str, name: str, flags: str = "") -> str:
+    """One line of Playwright's aria_snapshot() for an element: the name JSON-escaped in double
+    quotes, and the whole key single-quoted, a quote inside it doubled, when YAML needs it, as for
+    a ': ' in the name (Playwright's yamlEscapeKeyIfNeeded, for the cases these tests use)."""
+    key = f"{role} {json.dumps(name, ensure_ascii=False)}" + (f" {flags}" if flags else "")
+    if re.search(r":(\s|$)|\s#|[{}`]", key):
+        key = "'" + key.replace("'", "''") + "'"
+    return f"- {key}"
+
+
+class SnapshotKeyTests(unittest.TestCase):
+    """snapshot_key: the role and name of one line of an accessibility snapshot, in the form
+    Playwright writes it: a YAML key, single-quoted when it holds ': ' or the like (#294)."""
+
+    STANDARD = "Standard: Recommended for most scenarios (general-purpose v2 account)"
+
+    def test_a_quoted_key_gives_its_role_and_name(self) -> None:
+        line = "- 'radio \"Standard: Recommended for most scenarios (general-purpose v2 account)\" [checked]'"
+        self.assertEqual(snapshot_line("radio", self.STANDARD, "[checked]"), line)     # the fake writes it so
+        self.assertEqual(run.snapshot_key(line), ("radio", self.STANDARD))
+        self.assertEqual(run.snapshot_key("  - 'radio \"A: b\"':"), ("radio", "A: b"))   # with children
+
+    def test_a_doubled_quote_and_an_escaped_quote_are_undone(self) -> None:
+        for name in ("Don't: stop", 'Say "hi": now', "Back\\slash: x", "It's \"quoted\""):
+            with self.subTest(name=name):
+                self.assertEqual(run.snapshot_key(snapshot_line("button", name)), ("button", name))
+        self.assertEqual(run.snapshot_key("- 'button \"Don''t: stop\"'"), ("button", "Don't: stop"))
+        self.assertEqual(run.snapshot_key('- button "Say \\"hi\\""'), ("button", 'Say "hi"'))
+
+    def test_a_plain_key_a_text_line_and_other_lines(self) -> None:
+        self.assertEqual(run.snapshot_key('- heading "Basics" [level=2]'), ("heading", "Basics"))
+        self.assertEqual(run.snapshot_key("- banner:"), ("banner", ""))
+        self.assertEqual(run.snapshot_key("- text: Owners"), ("text", ""))
+        self.assertEqual(run.snapshot_key("- 'text: Owners: all'"), ("text", ""))
+        for line in ('  - /url: "#x"', "", "  plain", "- 'unterminated"):
+            with self.subTest(line=line):
+                self.assertIsNone(run.snapshot_key(line))
+
+    def test_accessible_name_and_aria_lines_read_quoted_keys(self) -> None:
+        self.assertEqual(run.accessible_name(ScreenNode(tree=snapshot_line("radio", self.STANDARD, "[checked]"))),
+                         self.STANDARD)
+        tree = "\n".join([snapshot_line("radio", self.STANDARD), snapshot_line("radio", "Premium"),
+                          snapshot_line("button", "Don't: stop"), snapshot_line("button", 'Say "hi"'),
+                          snapshot_line("radio", "Premium"), "- text: x", "- button"])
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(tree=tree)]):
+            lines = run.aria_lines(FakePage())
+        self.assertEqual(lines, [("radio", self.STANDARD, 1), ("radio", "Premium", 2),
+                                 ("button", "Don't: stop", 1), ("button", 'Say "hi"', 1)])   # no unnamed button
+
+
 class BladeStillLoadingTests(unittest.TestCase):
     """blade_still_loading: whether a blade's frame is open while its content is not rendered
     yet (issue #233), from the accessibility outline (role, name) in tree order; aria_outline:
@@ -1123,9 +1173,11 @@ class BladeStillLoadingTests(unittest.TestCase):
         outline = self.outline(
             self.Frame('- banner:\n  - button "Settings"\n- heading "New Group" [level=2]\n'),
             self.Frame(None),
-            self.Frame('- textbox "Group name"\n- text: Owners\n  - /url: "#x"\n- button "Say \\"hi\\""\n'))
+            self.Frame('- textbox "Group name"\n- text: Owners\n  - /url: "#x"\n- button "Say \\"hi\\""\n'
+                       "- 'heading \"Step 1: Basics\" [level=2]'\n"))
         self.assertEqual(outline, [("banner", ""), ("button", "Settings"), ("heading", "New Group"),
-                                   ("textbox", "Group name"), ("text", ""), ("button", 'Say \\"hi\\"')])
+                                   ("textbox", "Group name"), ("text", ""), ("button", 'Say "hi"'),
+                                   ("heading", "Step 1: Basics")])
 
     WINDOW = {"width": 1440, "height": 900}
     HEADER = ('- heading "Create new user" [level=2]\n'
@@ -1883,7 +1935,164 @@ class FindOnScreenTests(RunnerTestCase):
                                                                              ("textbox", "", ScreenNode(tag="input"))))))
         record, _ = self.act(screen, dict(self.UPN, label="Display name"), "Display name", value="Malfurion")
         self.assertEqual(record["outcome"], "unknown")
-        self.assertIn("holds 2 text box(es) and 0 combo box(es)", record["observed"])
+        self.assertIn("holds 2 text box(es), 0 combo box(es) and 0 radio(s)", record["observed"])
+
+    PERFORMANCE = {"kind": "field", "label": "Performance", "value": "x", "line": 8}
+
+    @staticmethod
+    def radio(name: str, native: bool = True, checked: bool = False) -> tuple[str, str, ScreenNode]:
+        """One option of a radio group, as Fluent UI's ChoiceGroup draws it (native: an
+        <input type=radio> named by its <label for>) or as a [role=radio] element that carries
+        aria-checked; either way get_by_role('radio') finds it and aria_snapshot() names it."""
+        attrs = {"type": "radio", "id": f"choice-{name}"} if native else {"role": "radio"}
+        node = ScreenNode(tag="input" if native else "div", attrs=attrs, checked=checked,
+                          tree=snapshot_line("radio", name, "[checked]" if checked else ""))
+        return "radio", name, node
+
+    def radio_group(self, *options, extra=()) -> tuple[Screen, list[ScreenNode]]:
+        """A storage account's 'Performance': a [role=radiogroup] labelled by the field's label,
+        holding `options` (radio()) and anything in `extra`."""
+        group = ScreenNode(attrs={"role": "radiogroup"}, children=Screen(*options, *extra))
+        return Screen(("label", "Performance", group)), [node for _, _, node in options]
+
+    def test_a_radio_group_picks_the_radio_named_as_the_value(self) -> None:
+        for native in (True, False):
+            for value in ("Premium", "  premium "):              # regardless of case and surrounding spaces
+                with self.subTest(native=native, value=value):
+                    screen, (standard, premium) = self.radio_group(self.radio("Standard", native, checked=True),
+                                                                   self.radio("Premium", native))
+                    record, r = self.act(screen, self.PERFORMANCE, "Performance", value=value)
+                    self.assertEqual((record["outcome"], record["observed"], r.ask.prompts),
+                                     ("match", "Performance", []))
+                    self.assertEqual((premium.checked, standard.clicked, premium.clicked), (True, 0, 0))
+
+    def test_a_radio_already_selected_is_already_set(self) -> None:
+        screen, (standard, premium) = self.radio_group(self.radio("Standard", checked=True), self.radio("Premium"))
+        standard.check_error = AssertionError("set_checked() called on the radio already selected")
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="standard")
+        self.assertEqual((record["outcome"], record["observed"], premium.checked), ("match", "already set", False))
+
+    def test_an_intercepted_radio_is_selected_through_its_label(self) -> None:
+        screen, (standard, premium) = self.radio_group(self.radio("Standard", checked=True), self.radio("Premium"))
+        premium.check_error = self.INTERCEPTED
+        premium.label = ScreenNode(on_click=lambda: setattr(premium, "checked", True), label_for=premium)
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Premium")
+        self.assertEqual((record["outcome"], premium.checked, premium.label.clicked), ("match", True, 1))
+
+    def test_a_radio_group_without_the_value_names_its_options(self) -> None:
+        screen, radios = self.radio_group(self.radio("Standard", checked=True), self.radio("Premium"))
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Hot (for daily use)")
+        self.assertEqual((record["outcome"], [radio.checked for radio in radios]), ("unknown", [True, False]))
+        self.assertEqual(record["observed"], "LookupError: no radio is named 'Hot (for daily use)'; "
+                                             "the options are 'Standard', 'Premium'")
+
+    def test_two_radios_of_the_value_are_ambiguous(self) -> None:
+        screen, radios = self.radio_group(self.radio("Standard"), self.radio("standard"), self.radio("Premium"))
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Standard")
+        self.assertEqual((record["outcome"], [radio.checked for radio in radios]), ("unknown", [False, False, False]))
+        self.assertEqual(record["observed"], "Ambiguous: 2 radios match 'Standard'")
+
+    def test_a_radio_group_with_a_text_box_picks_a_radio_and_never_types(self) -> None:
+        # An 'Other' option with its own text box: the value still names a radio.
+        box = ScreenNode(tag="input")
+        screen, radios = self.radio_group(self.radio("Standard"), self.radio("Other"), extra=[("textbox", "", box)])
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Other")
+        self.assertEqual((record["outcome"], [radio.checked for radio in radios], box.filled),
+                         ("match", [False, True], []))
+        box = ScreenNode(tag="input")
+        screen, radios = self.radio_group(self.radio("Standard"), self.radio("Other"), extra=[("textbox", "", box)])
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Premium")
+        self.assertEqual((record["outcome"], [radio.checked for radio in radios], box.filled),
+                         ("unknown", [False, False], []))
+        self.assertEqual(record["observed"], "LookupError: no radio is named 'Premium'; "
+                                             "the options are 'Standard', 'Other'")
+
+    def test_a_user_principal_name_beside_a_radio_is_no_field(self) -> None:
+        local, domain = ScreenNode(tag="input"), ScreenNode(attrs={"role": "combobox"}, text="contoso.onmicrosoft.com")
+        _, _, radio = self.radio("Invite")
+        container = ScreenNode(children=Screen(("textbox", "", local), ("combobox", "", domain),
+                                               ("radio", "Invite", radio)))
+        screen = Screen(("label", "User principal name", container))
+        record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
+        self.assertEqual((record["outcome"], local.filled, domain.clicked, radio.checked), ("unknown", [], 0, False))
+        self.assertIn("holds 1 text box(es), 1 combo box(es) and 1 radio(s)", record["observed"])
+
+    STANDARD = "Standard: Recommended for most scenarios (general-purpose v2 account)"
+    PREMIUM = "Premium: Recommended for scenarios that require low latency."
+
+    def test_a_value_names_a_radio_by_the_part_before_its_colon(self) -> None:
+        # Step 4.1.2: the Portal names the radios after their description.
+        screen, (standard, premium) = self.radio_group(self.radio(self.STANDARD), self.radio(self.PREMIUM))
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value=" standard ")
+        self.assertEqual((record["outcome"], standard.checked, premium.checked), ("match", True, False))
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Standard")
+        self.assertEqual((record["outcome"], record["observed"]), ("match", "already set"))
+
+    def test_an_exact_name_wins_over_a_part_before_a_colon(self) -> None:
+        screen, (exact, prefixed) = self.radio_group(self.radio("Standard"), self.radio("Standard: legacy"))
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Standard")
+        self.assertEqual((record["outcome"], exact.checked, prefixed.checked), ("match", True, False))
+
+    def test_two_radios_of_the_part_before_a_colon_are_ambiguous(self) -> None:
+        screen, radios = self.radio_group(self.radio("Standard: HDD"), self.radio("Standard: legacy"),
+                                          self.radio(self.PREMIUM))
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Standard")
+        self.assertEqual((record["outcome"], [radio.checked for radio in radios]), ("unknown", [False, False, False]))
+        self.assertEqual(record["observed"], "Ambiguous: 2 radios match 'Standard'")
+
+    def test_a_remark_after_the_value_is_dropped_when_nothing_else_matches(self) -> None:
+        # Step 3.2.4: '| Public inbound ports | None (NSG already on subnet) |'.
+        screen, (none, allow) = self.radio_group(self.radio("None"), self.radio("Allow selected ports"))
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="None (NSG already on subnet)")
+        self.assertEqual((record["outcome"], none.checked, allow.checked), ("match", True, False))
+        screen, (with_remark, bare) = self.radio_group(self.radio("None (NSG already on subnet)"), self.radio("None"))
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="None (NSG already on subnet)")
+        self.assertEqual((record["outcome"], with_remark.checked, bare.checked), ("match", True, False))   # whole first
+        screen, (standard, premium) = self.radio_group(self.radio(self.STANDARD), self.radio(self.PREMIUM))
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Premium (for the lab)")
+        self.assertEqual((record["outcome"], standard.checked, premium.checked), ("match", False, True))   # then a part
+
+    def radio_field(self, name: str, checked: bool = False) -> tuple[Screen, ScreenNode, dict]:
+        """A radio that find_field finds by its own name: the field's label is the radio's name."""
+        _, _, radio = self.radio(name, checked=checked)
+        return Screen(("radio", name, radio)), radio, dict(self.PERFORMANCE, label=name)
+
+    def test_a_radio_found_as_the_field_is_selected_by_a_checked_value_or_its_name(self) -> None:
+        for value in ("✅ Checked", "Allow selected ports", "allow selected ports (SSH only)"):
+            with self.subTest(value=value):
+                screen, radio, item = self.radio_field("Allow selected ports")
+                record, _ = self.act(screen, item, item["label"], value=value)
+                self.assertEqual((record["outcome"], radio.checked), ("match", True))
+        screen, radio, item = self.radio_field(self.STANDARD)
+        record, _ = self.act(screen, item, item["label"], value="Standard")
+        self.assertEqual((record["outcome"], radio.checked), ("match", True))
+        for name in ("Disabled", "No"):              # its name is read before the checkbox state
+            with self.subTest(name=name):
+                screen, radio, item = self.radio_field(name)
+                record, _ = self.act(screen, item, item["label"], value=name)
+                self.assertEqual((record["outcome"], radio.checked), ("match", True))
+        screen, radio, item = self.radio_field("Allow selected ports", checked=True)
+        radio.check_error = AssertionError("set_checked() called on a radio already selected")
+        record, _ = self.act(screen, item, item["label"], value="Allow selected ports")
+        self.assertEqual((record["outcome"], record["observed"]), ("match", "already set"))
+
+    def test_a_radio_found_as_the_field_is_never_cleared(self) -> None:
+        screen, radio, item = self.radio_field("Allow selected ports", checked=True)
+        radio.check_error = AssertionError("set_checked() called to clear a radio")
+        record, _ = self.act(screen, item, item["label"], value="☐ Unchecked")
+        self.assertEqual((record["outcome"], radio.checked), ("unknown", True))
+        self.assertEqual(record["observed"], "LookupError: a radio cannot be cleared; pick another option")
+        screen, radio, item = self.radio_field("Allow selected ports")                  # not selected: nothing to do
+        radio.check_error = AssertionError("set_checked() called on a radio not selected")
+        record, _ = self.act(screen, item, item["label"], value="☐ Unchecked")
+        self.assertEqual((record["outcome"], record["observed"], radio.checked), ("match", "already set", False))
+
+    def test_a_radio_found_as_the_field_with_another_value_is_unknown(self) -> None:
+        screen, radio, item = self.radio_field("Allow selected ports")
+        record, _ = self.act(screen, item, item["label"], value="HTTPS (443)")
+        self.assertEqual((record["outcome"], radio.checked), ("unknown", False))
+        self.assertEqual(record["observed"], "LookupError: 'HTTPS (443)' is neither a checkbox state nor "
+                                             "this radio's name, 'Allow selected ports'")
 
     def test_a_text_box_of_the_label_is_preferred_to_a_container(self) -> None:
         for second in ("textbox", "label"):          # named by role, or labelled as well
