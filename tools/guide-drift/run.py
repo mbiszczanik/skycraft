@@ -121,6 +121,15 @@ Enter, then looks the field up as usual; when this happens at the step's first i
 blade is the one recorded. A first field the recording holds a decision for is not checked: replay
 finds it. Neither drift makes the guide's screenshots stale or counts in the exit code.
 
+A field is filled as its control takes a value: a text box is typed into, a combo box or a
+drop-down has the option of the value picked, a check box or switch is ticked or cleared. A field
+label that names a container rather than a control (fill_parts) is filled through what it holds:
+its one text box; the Portal's user principal name, a text box and a domain combo box; or a radio
+group (issue #294: a storage account's 'Performance', Standard or Premium), whose radio named
+as the value, regardless of case and of surrounding whitespace, is selected. A value no radio is
+named after is unknown, and the observation lists the radios' names; several radios of that name
+are unknown as ambiguous. A radio already selected is 'already set', so a re-run changes nothing.
+
 A step whose recording entry carries '"skip": "<reason>"' (an optional or conceptual step that
 would create resources, or the other option of a lettered pair; issue #200) is never performed:
 the Portal is not touched for it, no screenshot is taken, and the summary lists it under
@@ -1093,13 +1102,19 @@ def fill_parts(page: Page, container: Locator, value: str) -> str | None:
     text box and nothing else, the text box gets the value. With one text box and one combo box
     and an '@' in the value (the Portal's user principal name: name, '@', domain), the combo box
     must show the part after the last '@', compared regardless of case (when it does not, the
-    domain is picked from its options), and then the text box gets the part before it.
-    'already set' when every part held its value before. Raises LookupError for any other
-    container, or when the domain cannot be picked; Ambiguous when several options carry it."""
+    domain is picked from its options), and then the text box gets the part before it. With
+    radios and no text box or combo box (a radio group: a storage account's 'Performance',
+    Standard or Premium), the radio named `value` is selected (pick_radio). 'already set' when
+    every part held its value before. Raises LookupError for any other container, when the
+    domain cannot be picked or when no radio has the name; Ambiguous when several options or
+    radios carry it."""
     textboxes, comboboxes = parts_of(container, "textbox"), parts_of(container, "combobox")
-    if len(textboxes) == 1 and not comboboxes:
+    radios = parts_of(container, "radio")
+    if radios and not textboxes and not comboboxes:
+        return pick_radio(page, radios, value)
+    if len(textboxes) == 1 and not comboboxes and not radios:
         return fill_field(page, textboxes[0], value)
-    if len(textboxes) == 1 and len(comboboxes) == 1 and "@" in value:
+    if len(textboxes) == 1 and len(comboboxes) == 1 and not radios and "@" in value:
         local, domain = value.rsplit("@", 1)
         try:
             tag = comboboxes[0].evaluate(CONTROL_JS, timeout=FIND_TIMEOUT_MS)[0]
@@ -1110,8 +1125,37 @@ def fill_parts(page: Page, container: Locator, value: str) -> str | None:
             raise LookupError(f"the domain combo box: {error}") from error
         typed = fill_field(page, textboxes[0], local)
         return "already set" if typed and picked else None
-    raise LookupError(f"the labelled element is not a field: it holds {len(textboxes)} text box(es) "
-                      f"and {len(comboboxes)} combo box(es)")
+    raise LookupError(f"the labelled element is not a field: it holds {len(textboxes)} text box(es), "
+                      f"{len(comboboxes)} combo box(es) and {len(radios)} radio(s)")
+
+
+def pick_radio(page: Page, radios: list[Locator], value: str) -> str | None:
+    """Select, of a radio group's `radios`, the one whose accessible name (accessible_name: its <label
+    for>, aria-label or text, as the browser computes it) is `value`, compared regardless of
+    case and of surrounding whitespace. Nothing else is dropped from a name (the runner has no
+    convention for a description or a '(recommended)' after it): a radio named 'Standard:
+    Recommended for most scenarios' is not 'Standard', and the LookupError, which lists every
+    radio's name, shows the name the guide should use. fill_parts finds the radios by role
+    (get_by_role('radio')), which covers both shapes a Portal radio group takes: Fluent UI's
+    ChoiceGroup (a [role=radiogroup] holding <input type=radio> elements, each named by its
+    <label for>) and [role=radio] elements carrying aria-checked. The radio is selected as a
+    check box is ticked (set_check_state), so an intercepted click goes through its label once.
+    'already set' when it was selected before, read with is_checked(), which also reads
+    aria-checked. Raises LookupError naming the options when no radio has the name, Ambiguous
+    when several do."""
+    names = [accessible_name(radio) for radio in radios]
+    wanted = value.strip().casefold()
+    matches = [radio for radio, name in zip(radios, names) if name.strip().casefold() == wanted]
+    if not matches:
+        options = ", ".join(f"'{name}'" for name in names)
+        raise LookupError(f"no radio is named '{value.strip()}'; the options are {options}")
+    if len(matches) > 1:
+        raise Ambiguous(f"{len(matches)} radios are named '{value.strip()}'")
+    if matches[0].is_checked(timeout=FIND_TIMEOUT_MS):
+        return "already set"
+    set_check_state(page, matches[0], True)
+    page.wait_for_timeout(SETTLE_MS // 2)
+    return None
 
 
 def label_of(element: Locator) -> Locator:

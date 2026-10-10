@@ -1883,7 +1883,70 @@ class FindOnScreenTests(RunnerTestCase):
                                                                              ("textbox", "", ScreenNode(tag="input"))))))
         record, _ = self.act(screen, dict(self.UPN, label="Display name"), "Display name", value="Malfurion")
         self.assertEqual(record["outcome"], "unknown")
-        self.assertIn("holds 2 text box(es) and 0 combo box(es)", record["observed"])
+        self.assertIn("holds 2 text box(es), 0 combo box(es) and 0 radio(s)", record["observed"])
+
+    PERFORMANCE = {"kind": "field", "label": "Performance", "value": "x", "line": 8}
+
+    @staticmethod
+    def radio(name: str, native: bool = True, checked: bool = False) -> tuple[str, str, ScreenNode]:
+        """One option of a radio group, as Fluent UI's ChoiceGroup draws it (native: an
+        <input type=radio> named by its <label for>) or as a [role=radio] element that carries
+        aria-checked; either way get_by_role('radio') finds it and aria_snapshot() names it."""
+        attrs = {"type": "radio", "id": f"choice-{name}"} if native else {"role": "radio"}
+        node = ScreenNode(tag="input" if native else "div", attrs=attrs, checked=checked,
+                          tree=f'- radio "{name}"' + (" [checked]" if checked else ""))
+        return "radio", name, node
+
+    def radio_group(self, *options, extra=()) -> tuple[Screen, list[ScreenNode]]:
+        """A storage account's 'Performance': a [role=radiogroup] labelled by the field's label,
+        holding `options` (radio()) and anything in `extra`."""
+        group = ScreenNode(attrs={"role": "radiogroup"}, children=Screen(*options, *extra))
+        return Screen(("label", "Performance", group)), [node for _, _, node in options]
+
+    def test_a_radio_group_picks_the_radio_named_as_the_value(self) -> None:
+        for native in (True, False):
+            for value in ("Premium", "  premium "):              # regardless of case and surrounding spaces
+                with self.subTest(native=native, value=value):
+                    screen, (standard, premium) = self.radio_group(self.radio("Standard", native, checked=True),
+                                                                   self.radio("Premium", native))
+                    record, r = self.act(screen, self.PERFORMANCE, "Performance", value=value)
+                    self.assertEqual((record["outcome"], record["observed"], r.ask.prompts),
+                                     ("match", "Performance", []))
+                    self.assertEqual((premium.checked, standard.clicked, premium.clicked), (True, 0, 0))
+
+    def test_a_radio_already_selected_is_already_set(self) -> None:
+        screen, (standard, premium) = self.radio_group(self.radio("Standard", checked=True), self.radio("Premium"))
+        standard.check_error = AssertionError("set_checked() called on the radio already selected")
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="standard")
+        self.assertEqual((record["outcome"], record["observed"], premium.checked), ("match", "already set", False))
+
+    def test_an_intercepted_radio_is_selected_through_its_label(self) -> None:
+        screen, (standard, premium) = self.radio_group(self.radio("Standard", checked=True), self.radio("Premium"))
+        premium.check_error = self.INTERCEPTED
+        premium.label = ScreenNode(on_click=lambda: setattr(premium, "checked", True), label_for=premium)
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Premium")
+        self.assertEqual((record["outcome"], premium.checked, premium.label.clicked), ("match", True, 1))
+
+    def test_a_radio_group_without_the_value_names_its_options(self) -> None:
+        screen, radios = self.radio_group(self.radio("Standard", checked=True), self.radio("Premium"))
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Standard (general-purpose v2)")
+        self.assertEqual((record["outcome"], [radio.checked for radio in radios]), ("unknown", [True, False]))
+        self.assertEqual(record["observed"], "LookupError: no radio is named 'Standard (general-purpose v2)'; "
+                                             "the options are 'Standard', 'Premium'")
+
+    def test_two_radios_of_the_value_are_ambiguous(self) -> None:
+        screen, radios = self.radio_group(self.radio("Standard"), self.radio("standard"), self.radio("Premium"))
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Standard")
+        self.assertEqual((record["outcome"], [radio.checked for radio in radios]), ("unknown", [False, False, False]))
+        self.assertEqual(record["observed"], "Ambiguous: 2 radios are named 'Standard'")
+
+    def test_a_radio_group_with_a_text_box_is_no_field(self) -> None:
+        box = ScreenNode(tag="input")
+        screen, radios = self.radio_group(self.radio("Standard"), self.radio("Premium"), extra=[("textbox", "", box)])
+        record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Premium")
+        self.assertEqual((record["outcome"], [radio.checked for radio in radios], box.filled),
+                         ("unknown", [False, False], []))
+        self.assertIn("holds 1 text box(es), 0 combo box(es) and 2 radio(s)", record["observed"])
 
     def test_a_text_box_of_the_label_is_preferred_to_a_container(self) -> None:
         for second in ("textbox", "label"):          # named by role, or labelled as well
