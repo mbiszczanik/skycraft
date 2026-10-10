@@ -18,6 +18,7 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
                        does not resolve (#202)
   checkbox_state       the check box state a field value names, if any
   rejected_candidates  the reference set of candidates not chosen, without tenant data
+  skip_reason          why the recording skips a step ('"skip": "<reason>"', #200), or None
   write_json           writes the recording or the state file atomically
 """
 from __future__ import annotations
@@ -188,6 +189,24 @@ def rejected_candidates(candidates: list[Candidate], label: str, chosen: str | N
     others.sort(key=lambda c: difflib.SequenceMatcher(None, c.name.lower(), label.lower()).ratio(),
                 reverse=True)
     return [str(c) for c in others[:20]]
+
+
+def skip_reason(recording: dict, step_id: str) -> str | None:
+    """The reason the recording gives for skipping step `step_id` ('"skip": "Optional: creates a
+    CNAME record"', #200), stripped; None when the step entry has no 'skip' key. The step is then
+    not performed at all, whatever else its entry records: its decisions, overrides and result
+    are kept for the day the skip is removed, and not read while it stays. A 'skip' that is not
+    a string with text in it raises ValueError rather than reading as 'not skipped', which would
+    perform the very step the recording meant to leave out; run.py checks every entry before the
+    browser opens, and tests/Guide-Drift-Recording.Tests.ps1 rejects such an entry in CI."""
+    entry = recording["steps"].get(step_id, {})
+    if "skip" not in entry:
+        return None
+    reason = entry["skip"]
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError(f"step {step_id}: 'skip' must be the reason the step is skipped, "
+                         f"a non-empty string, not {json.dumps(reason)}")
+    return reason.strip()
 
 
 def value_override(recording: dict, step: dict, label: str) -> str | None:

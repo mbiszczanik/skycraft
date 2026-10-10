@@ -1,5 +1,5 @@
 """Unit tests for run.py's bookkeeping: state, resume, failure handling, recording of decisions
-(issue #189), and how it finds what a guide names (search, '+' labels, plain text, collapsed
+(issue #189), steps the recording skips (#200), and how it finds what a guide names (search, '+' labels, plain text, collapsed
 menu groups, a blade still loading, a resource a chain names, #199). No browser: the page is a
 small fake (Screen stands in for a frame), and run_step is scripted where only the order of
 steps matters.
@@ -613,6 +613,154 @@ class OneRunAcrossResumeTests(RunnerTestCase):
                                                encoding="utf-8")
         r = self.runner(resume=True, state={"runId": "first", "lab": LAB, "completed": [], "inFlight": None})
         self.assertEqual([x["step"] for x in r.records], ["9.9.1"])
+
+
+class RecordedSkipTests(RunnerTestCase):
+    """A step entry with '"skip": "<reason>"' (#200): never performed, listed with its reason,
+    passed over on resume, and no cause of anything for the steps after it."""
+
+    REASON = "Optional: creates a CNAME record no later step uses"
+
+    def skip(self, *step_ids: str, **extra) -> None:
+        for step_id in step_ids:
+            self.recording["steps"].setdefault(step_id, {}).update(skip=self.REASON, **extra)
+
+    def test_a_skipped_step_is_not_performed_and_the_summary_gives_the_reason(self) -> None:
+        self.skip("9.9.2")
+        r = self.runner()
+        self.assertEqual(self.quietly(r.run), 0)        # a skip is no finding
+        self.assertEqual(r.ran, ["9.9.1", "9.9.4", "9.9.5"])
+        self.assertEqual(r.ask.prompts, [])
+        self.assertEqual(self.state()["completed"], ["9.9.1", "9.9.2", "9.9.4", "9.9.5"])
+        self.assertTrue(self.state()["finished"])
+        skipped = [(x["step"], x["skippedBecause"], x["observed"], x["category"])
+                   for x in r.records if x["outcome"] == "skipped"]
+        self.assertEqual(skipped, [("9.9.2", "9.9.2", self.REASON, run.RECORDED_SKIP)])
+        self.assertEqual([x["step"] for x in r.records], ["9.9.2"])     # no screenshot, no other record
+        summary = (r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn(f"## skipped (1)\n- step 9.9.2 skipped by the recording: {self.REASON}\n", summary)
+
+    def test_a_skipped_step_never_touches_the_page(self) -> None:
+        # The plain Runner on no page at all: performing any step would raise AttributeError.
+        self.skip("9.9.1", "9.9.2", "9.9.4", "9.9.5")
+        r = run.Runner(None, STEPS, self.recording, self.args(), ask=Answers())
+        self.assertEqual(self.quietly(r.run), 0)
+        self.assertEqual([x["step"] for x in r.records if x["outcome"] == "skipped"],
+                         ["9.9.1", "9.9.2", "9.9.4", "9.9.5"])
+
+    def test_the_skip_wins_over_the_rest_of_the_entry_which_is_kept_as_it_is(self) -> None:
+        self.skip("9.9.2", valueOverrides={"Name": "x"}, viewUrl="https://portal.azure.com/#view/Two",
+                  result={"text": "Created"}, labels={"Save": {"decision": "use", "role": "button", "name": "Save"}})
+        kept = json.loads(json.dumps(self.recording["steps"]["9.9.2"]))
+        r = self.runner()
+        self.assertEqual(self.quietly(r.run), 0)
+        self.assertEqual(r.ran, ["9.9.1", "9.9.4", "9.9.5"])
+        self.assertEqual(self.recording["steps"]["9.9.2"], kept)
+
+    def test_the_steps_after_a_skip_run_and_fail_as_usual(self) -> None:
+        self.skip("9.9.2")
+        r = self.runner(answers=["e"], failing={"9.9.4"})
+        self.assertEqual(self.quietly(r.run), 0)
+        self.assertEqual(r.ran, ["9.9.1", "9.9.4"])
+        self.assertEqual([(x["step"], x["skippedBecause"]) for x in r.records if x["outcome"] == "skipped"],
+                         [("9.9.2", "9.9.2"), ("9.9.5", "9.9.4")])
+
+    def test_after_an_ended_lab_a_skipped_step_keeps_the_recording_s_reason(self) -> None:
+        self.skip("9.9.5")
+        r = self.runner(answers=["e"], failing={"9.9.2"})
+        self.assertEqual(self.quietly(r.run), 0)
+        summary = (r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## skipped (2)\n- step 9.9.4 because step 9.9.2 failed\n"
+                      f"- step 9.9.5 skipped by the recording: {self.REASON}\n", summary)
+        self.assertEqual(self.state()["inFlight"], "9.9.2")
+
+    def test_resume_passes_over_a_skipped_step_and_shows_the_view_before_it(self) -> None:
+        self.skip("9.9.2")
+        portal = [s for s in STEPS["steps"] if s["portal"]]
+        r = self.runner()
+        self.assertEqual(r.view_before(portal, 2), "https://portal.azure.com/#view/One")    # 9.9.4: past 9.9.2
+        self.skip("9.9.1")
+        self.assertEqual(r.view_before(portal, 2), "(the lab's first step: start from the Portal home page)")
+        del self.recording["steps"]["9.9.1"]["skip"]
+        state = {"lab": LAB, "completed": ["9.9.1", "9.9.2"], "inFlight": "9.9.4", "finished": False}
+        r = self.runner(answers=["n"], resume=True, run_id="resume")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(r.run(state), 0)
+        self.assertIn("https://portal.azure.com/#view/One", out.getvalue())
+        self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+
+    def test_a_step_the_recording_newly_skips_is_skipped_on_resume(self) -> None:
+        # Not completed in the stopped part, and skipped in the recording since: not performed.
+        self.skip("9.9.4")
+        state = {"lab": LAB, "completed": ["9.9.1"], "inFlight": None, "finished": False}
+        r = self.runner(answers=[""], resume=True, run_id="resume")
+        self.assertEqual(self.quietly(lambda: r.run(state)), 0)
+        self.assertEqual(r.ran, ["9.9.2", "9.9.5"])
+        self.assertEqual(self.state()["completed"], ["9.9.1", "9.9.2", "9.9.4", "9.9.5"])
+
+    def test_a_step_in_flight_and_skipped_since_is_not_asked_about_and_its_findings_are_dropped(self) -> None:
+        # The step failed, the person stopped (q), added a skip to the recording and resumed.
+        first = self.runner(answers=["q"], unknown={"9.9.2"}, run_id="first")
+        self.assertEqual(self.quietly(first.run), run.ABORTED)
+        state = run.load_state(self.tmp / "state.json", LAB)
+        self.assertEqual(state["inFlight"], "9.9.2")
+        self.skip("9.9.2")
+        r = self.runner(answers=[""], resume=True, run_id="second", state=state)
+        self.assertEqual(self.quietly(lambda: r.run(state)), 0)     # the stopped attempt's unknown is gone
+        self.assertEqual(r.ask.prompts, ["> "])                     # the view, not 'did it finish?'
+        self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+        self.assertEqual([(x["step"], x["outcome"], x["category"]) for x in r.records if x["step"] == "9.9.2"],
+                         [("9.9.2", "skipped", run.RECORDED_SKIP)])
+        summary = (self.tmp / "logs" / "first" / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## unknown (0)", summary)
+        self.assertIn(f"## skipped (1)\n- step 9.9.2 skipped by the recording: {self.REASON}\n", summary)
+        self.assertEqual(self.state()["completed"], ["9.9.1", "9.9.2", "9.9.4", "9.9.5"])
+
+    def test_starting_at_a_skipped_step_names_the_first_step_that_runs(self) -> None:
+        self.skip("9.9.2")
+        r = self.runner(answers=[""], from_step="9.9.2")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(r.run(), 0)
+        self.assertIn("Starting at step 9.9.4 (Four) (the recording skips step 9.9.2). Bring the "
+                      "Portal to the view the step before it ended on, then press Enter:\n"
+                      "  https://portal.azure.com/#view/One", out.getvalue())
+        self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+        self.skip("9.9.4", "9.9.5")                                  # nothing left to run: no view to ask for
+        r = self.runner(from_step="9.9.2", run_id="all-skipped")
+        self.assertEqual(self.quietly(r.run), 0)
+        self.assertEqual((r.ran, r.ask.prompts), ([], []))
+
+    def test_a_skip_after_an_ended_lab_keeps_the_failed_step_in_flight(self) -> None:
+        self.skip("9.9.5")
+        r = self.runner(answers=["e"], failing={"9.9.2"})
+        saved: list[tuple[list[str], str | None]] = []
+        save_state = r.save_state
+        r.save_state = lambda completed, in_flight, finished=False: (
+            saved.append((list(completed), in_flight)), save_state(completed, in_flight, finished))
+        self.quietly(r.run)
+        self.assertEqual(saved[-2:], [(["9.9.1", "9.9.5"], "9.9.2"), (["9.9.1", "9.9.5"], "9.9.2")])
+
+    def test_main_refuses_a_malformed_skip_before_the_browser_opens(self) -> None:
+        (self.tmp / "steps.json").write_text(json.dumps(STEPS), encoding="utf-8")
+        argv = ["--steps", str(self.tmp / "steps.json"), "--recording", str(self.tmp / "rec.json"),
+                "--log-dir", str(self.tmp / "logs"), "--run-id", "x", "--tenant-id", "t", "--tenant-domain", "d",
+                "--state", str(self.tmp / "state.json"), "--auth-state", str(self.tmp / "auth.json")]
+
+        class Console(io.StringIO):
+            def reconfigure(self, **kwargs) -> None:
+                pass
+
+        for value in ("", "   ", None, True):
+            with self.subTest(value=value):
+                self.recording["steps"]["9.9.2"] = {"skip": value}
+                (self.tmp / "rec.json").write_text(json.dumps(self.recording), encoding="utf-8")
+                out = Console()
+                with mock.patch.object(run, "sync_playwright") as playwright, redirect_stdout(out):
+                    self.assertEqual(run.main(argv), run.NOT_STARTED)
+                playwright.assert_not_called()
+                self.assertIn("The recording cannot be used: step 9.9.2: 'skip' must be", out.getvalue())
 
 
 class GuardAndLookupTests(RunnerTestCase):

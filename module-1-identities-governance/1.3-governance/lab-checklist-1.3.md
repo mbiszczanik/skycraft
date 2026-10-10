@@ -36,7 +36,7 @@
 - [ ] Parameter: Tag name = `Environment`
 - [ ] Policy enforcement: **Enabled**
 - [ ] Non-compliance message configured
-- [ ] Tested policy (attempted to create RG without tag)
+- [ ] Tested policy (creating an RG without the tag was denied)
 
 ### Policy 2: Enforce Project Tag Value
 - [ ] Policy assigned: "Require a tag and its value on resources"

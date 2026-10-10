@@ -79,6 +79,11 @@ $TagsPlatform = @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 
 $TagsDev = @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN' }
 $TagsProd = @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN' }
 
+# AppServiceSubnet is delegated to App Service (Lab 3.4's VNet integration), as main.bicep and the
+# guide's portal steps create it. The delegation is named after its service, as the AVM subnet
+# module names it, so this path and the Bicep path describe the same subnet.
+$appServiceDelegation = New-AzDelegation -Name 'Microsoft.Web/serverFarms' -ServiceName 'Microsoft.Web/serverFarms'
+
 # ===================================
 # Task 2: Create Hub Virtual Network
 # ===================================
@@ -107,7 +112,7 @@ $devSubnets = @(
     (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.1.1.0/24'),
     (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.1.2.0/24'),
     (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.1.3.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.1.4.0/24')
+    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.1.4.0/24' -Delegation $appServiceDelegation)
 )
 
 Write-Host "Creating VNet: $devVnetName..." -ForegroundColor Yellow
@@ -128,7 +133,7 @@ $prodSubnets = @(
     (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.2.1.0/24'),
     (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.2.2.0/24'),
     (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.2.3.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.2.4.0/24')
+    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.2.4.0/24' -Delegation $appServiceDelegation)
 )
 
 Write-Host "Creating VNet: $prodVnetName..." -ForegroundColor Yellow

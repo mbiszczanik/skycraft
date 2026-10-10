@@ -330,7 +330,7 @@ To allow the dashboard to connect to the Game Servers (e.g., to query status dir
 5. Select `dev-skycraft-swc-vnet`.
 6. Select **Existing subnet**:
    - Subnet: `AppServiceSubnet` (10.1.4.0/24)
-   - _Note: This subnet was created in Lab 2.1 specifically for this purpose._
+   - _Note: Lab 2.1 created this subnet for this purpose and delegated it to `Microsoft.Web/serverFarms`._
 7. Click **Connect**.
 
 **Expected Result**: The App Service is now connected to the VNet. It can access private IPs (like the database or VMs) within that VNet.
@@ -417,7 +417,7 @@ For detailed verification, see `lab-checklist-3.4.md`.
 
 **Symptom**: "Cannot add VNet Integration".
 **Cause**: Subnet might be delegated to another service or overlapping CIDR.
-**Solution**: Ensure the subnet is **delegated** to `Microsoft.Web/serverFarms`. The portal usually does this automatically when creating a new subnet in the wizard.
+**Solution**: Ensure the subnet is **delegated** to `Microsoft.Web/serverFarms` and holds nothing else. Lab 2.1 creates `AppServiceSubnet` with this delegation; on a subnet without one, App Service adds it while connecting, as long as you are allowed to change the subnet. A subnet delegated to another service cannot be used.
 
 ---
 

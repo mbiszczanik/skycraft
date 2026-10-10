@@ -222,7 +222,9 @@ Before starting this lab:
    - Name: `rg-test-no-tag`
    - Click **Review + create**
 
-**Expected Result**: Creation is **allowed** (policy is not retroactive, only evaluates new operations).
+**Expected Result**: Creation is **denied** by `Require-Environment-Tag-RG`: the **Tags** tab is marked with an error showing the non-compliance message from Step 1.3.5 and a **Policy details** link, so `rg-test-no-tag` cannot be created. A policy evaluates every new create or update request. What it does not do is change resources that already exist: a resource group created before the assignment stays without the tag and is reported as non-compliant instead (Step 1.3.9). From the CLI or a template, the same denial comes back with the error code `RequestDisallowedByPolicy`.
+
+**Note**: If the **Tags** tab shows no error and **Review + create** reaches the review page, the assignment is not in effect yet - a new assignment takes about five minutes to apply, sometimes longer. Wait a few minutes, go back to **Basics** and click **Review + create** again.
 
 ![Assign a Built-in Policy](./images/step-1.3.6a.png)
 
@@ -231,12 +233,13 @@ Before starting this lab:
    - Go to **Tags** tab
    - Add tag: `Environment` = `Test`
    - Click **Review + create**
+   - Click **Create**
 
 **Expected Result**: Creation succeeds because the required tag is present.
 
 ![Assign a Built-in Policy](./images/step-1.3.6b.png)
 
-3. Delete the test resource group: `rg-test-with-tag`
+3. Delete the test resource group: `rg-test-with-tag` (the policy denied `rg-test-no-tag`, so it does not exist)
 
 ### Step 1.3.7: Assign Policy for Resource Naming Convention
 
@@ -332,7 +335,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 | Lock type | Delete                                               |
 | Notes     | Cannot delete resource or child resources.           |
 
-> The Bicep path applies both locks through the AVM resource-group module, which sets this notes text itself; the notes are not configurable through the module. If you create the locks in the portal, use the same text so `Test-Lab.ps1` and the checklist match.
+> The Bicep path applies both locks through the AVM resource-group module, which sets this notes text itself; the notes are not configurable through the module. If you create the locks in the portal, use the same text so your locks match the checklist. `Test-Lab.ps1` does not read the notes: it checks that each group carries, on the group itself, a lock with the name given in step 1.3.10 or 1.3.12 and the **Delete** (`CanNotDelete`) type.
 
 5. Click **OK**
 
@@ -698,7 +701,7 @@ Tenant Root Group
 
 **Solutions**:
 
-- Policies take 5-10 minutes to propagate
+- A new assignment takes about five minutes to take effect, sometimes longer
 - Policy may be in "Audit" mode instead of "Deny" mode
 - Check **Policy enforcement** is set to "Enabled"
 - Review policy effect (should be "Deny" for enforcement)

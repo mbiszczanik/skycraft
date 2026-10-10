@@ -107,6 +107,7 @@
   - Name: `AppServiceSubnet`
   - Address range: `10.1.4.0/24`
   - Available IPs: 251
+  - Subnet delegation: `Microsoft.Web/serverFarms`
   - Purpose: App Service instances
 
 ### Peering Connections
@@ -158,6 +159,7 @@
   - Name: `AppServiceSubnet`
   - Address range: `10.2.4.0/24`
   - Available IPs: 251
+  - Subnet delegation: `Microsoft.Web/serverFarms`
   - Purpose: App Service instances
 
 ### Peering Connections
