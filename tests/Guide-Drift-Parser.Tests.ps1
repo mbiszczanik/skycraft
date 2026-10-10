@@ -914,7 +914,7 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         foreach ($label in 'Save', 'Disabled', 'Allow Blob anonymous access', 'Deny', 'RequestDisallowedByPolicy') {
             $labels | Should -Not -Contain $label
         }
-        $step.expected | Should -BeLike 'Allow Blob anonymous access: Disabled*'
+        $step.expected | Should -BeExactly 'Allow Blob anonymous access: Disabled'
     }
 
     It 'opens public-demo in step 4.2.12 before the upload, and opens the blob before copying its URL' {
