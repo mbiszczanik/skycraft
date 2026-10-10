@@ -1,6 +1,7 @@
 """Unit tests for run.py's bookkeeping: state, resume, failure handling, recording of decisions
-(issue #189), steps the recording skips (#200), and how it finds what a guide names (search, '+' labels, plain text, collapsed
-menu groups, a blade still loading, a resource a chain names, #199). No browser: the page is a
+(issue #189), steps the recording skips (#200), the view a resumed run starts from (#206), and
+how it finds what a guide names (search, '+' labels, plain text, collapsed menu groups, a blade
+still loading, a resource a chain names, #199). No browser: the page is a
 small fake (Screen stands in for a frame), and run_step is scripted where only the order of
 steps matters.
 
@@ -41,6 +42,7 @@ except ImportError:
 import run  # noqa: E402
 
 LAB = "9.9"
+TENANT_ID = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 STEPS = {
     "lab": LAB,
     "guide": "guide.md",
@@ -102,15 +104,17 @@ class RunnerTestCase(unittest.TestCase):
 
     def args(self, **overrides) -> argparse.Namespace:
         values = dict(steps=self.tmp / "steps.json", recording=self.tmp / "rec.json", log_dir=self.tmp / "logs",
-                      run_id="test", tenant_id="0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+                      run_id="test", tenant_id=TENANT_ID,
                       tenant_domain="contoso.onmicrosoft.com", state=self.tmp / "state.json",
                       auth_state=self.tmp / "auth.json", from_step=None, resume=False, repo_root=self.tmp)
         values.update(overrides)
         return argparse.Namespace(**values)
 
-    def runner(self, answers=(), failing=(), unknown=(), interrupt=(), state=None, **overrides) -> ScriptedRunner:
-        return ScriptedRunner(None, STEPS, self.recording, self.args(**overrides), ask=Answers(*answers),
-                              state=state, failing=failing, unknown=unknown, interrupt=interrupt)
+    def runner(self, answers=(), failing=(), unknown=(), interrupt=(), state=None, page=None,
+               **overrides) -> ScriptedRunner:
+        return ScriptedRunner(page or FakePage(), STEPS, self.recording, self.args(**overrides),
+                              ask=Answers(*answers), state=state, failing=failing, unknown=unknown,
+                              interrupt=interrupt)
 
     def quietly(self, call):
         with redirect_stdout(io.StringIO()):
@@ -241,16 +245,23 @@ class RunBookkeepingTests(RunnerTestCase):
                                         "inFlight": "9.9.2", "finished": False, "logDir": str((self.tmp / "logs").resolve())})
         self.assertTrue((r.run_dir / "summary.md").is_file())
 
-    def test_resume_asks_about_the_step_in_flight_and_shows_the_view_before_it(self) -> None:
+    def test_resume_asks_about_the_step_in_flight_and_brings_the_portal_to_the_next_view(self) -> None:
+        # y: the view the step in flight ended on; n: the view before it, to redo it; s: the step
+        # after it starts where the skipped step would have ended, as the guide has it.
+        self.recording["steps"]["9.9.2"] = {"viewUrl": "https://portal.azure.com/#view/Two"}
         state = {"lab": LAB, "completed": ["9.9.1"], "inFlight": "9.9.2", "finished": False}
-        for answer, ran, skipped in (("y", ["9.9.4", "9.9.5"], []), ("n", ["9.9.2", "9.9.4", "9.9.5"], []),
-                                     ("s", ["9.9.4", "9.9.5"], ["9.9.2"])):
+        for answer, ran, skipped, view in (("y", ["9.9.4", "9.9.5"], [], "Two"),
+                                           ("n", ["9.9.2", "9.9.4", "9.9.5"], [], "One"),
+                                           ("s", ["9.9.4", "9.9.5"], ["9.9.2"], "Two")):
             with self.subTest(answer=answer):
-                r = self.runner(answers=[answer], resume=True, run_id=f"resume-{answer}")
+                r = self.runner(answers=[answer, ""], resume=True, run_id=f"resume-{answer}")
                 out = io.StringIO()
                 with redirect_stdout(out):
                     self.assertEqual(r.run(dict(state)), 0)
-                self.assertIn("https://portal.azure.com/#view/One", out.getvalue())
+                self.assertIn(f"Opened the view step {'9.9.1' if view == 'One' else '9.9.2'} ended on:\n"
+                              f"  https://portal.azure.com/#view/{view}\n", out.getvalue())
+                self.assertEqual(r.page.visited, [f"https://portal.azure.com/#@{TENANT_ID}/view/{view}"])
+                self.assertEqual(r.ask.prompts[-1], "> ")                  # waited for Enter
                 self.assertEqual(r.ran, ran)
                 self.assertEqual([x["step"] for x in r.records if x["outcome"] == "skipped"], skipped)
                 self.assertEqual(self.state()["completed"], ["9.9.1", "9.9.2", "9.9.4", "9.9.5"])
@@ -277,6 +288,7 @@ class RunBookkeepingTests(RunnerTestCase):
         r = self.runner(answers=[""], from_step="9.9.4")
         self.assertEqual(self.quietly(r.run), 0)
         self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+        self.assertEqual(r.ask.prompts, ["> "])
 
     def test_an_unknown_from_step_runs_nothing(self) -> None:
         r = self.runner(from_step="9.9.3")         # not a portal step
@@ -348,14 +360,22 @@ class FakePage:
     url = "https://portal.azure.com/#@contoso.onmicrosoft.com/view/Two?x=1"
     viewport_size = None             # visible_in() then skips the window-column check
 
-    def __init__(self, closed: bool = False) -> None:
+    def __init__(self, closed: bool = False, goto_fails: Exception | None = None) -> None:
         self.closed = closed
+        self.goto_fails = goto_fails
+        self.visited: list[str] = []     # every address goto() was given
         self.main_frame = Screen()       # an empty screen unless a test patches run.all_frames
         self.frames = [self.main_frame]
         self.now = 0.0                   # seconds; only waits move it (FindOnScreenTests' clock)
 
     def is_closed(self) -> bool:
         return self.closed
+
+    def goto(self, url, wait_until=None) -> None:
+        self.visited.append(url)
+        if self.goto_fails:
+            raise self.goto_fails
+        self.url = url
 
     def wait_for_timeout(self, ms) -> None:
         self.now += ms / 1000
@@ -571,7 +591,7 @@ class OneRunAcrossResumeTests(RunnerTestCase):
     def test_a_resumed_run_counts_and_lists_what_the_stopped_part_found(self) -> None:
         state = self.stopped_run(answers=["q"], unknown={"9.9.4"})       # step 3 of the portal steps
         self.assertEqual((state["runId"], state["inFlight"]), ("first", "9.9.4"))
-        r = self.runner(answers=["y"], resume=True, run_id="second", state=state)
+        r = self.runner(answers=["y", ""], resume=True, run_id="second", state=state)
         self.assertEqual(r.run_dir, self.tmp / "logs" / "first")
         self.assertEqual(self.quietly(lambda: r.run(state)), 1)
         self.assertIn("- step 9.9.4 action **Missing button**: not found", self.summary())
@@ -581,7 +601,7 @@ class OneRunAcrossResumeTests(RunnerTestCase):
     def test_a_step_done_by_hand_keeps_its_findings_across_a_stop(self) -> None:
         state = self.stopped_run(answers=["c"], unknown={"9.9.4"}, interrupt={"9.9.5"})
         self.assertEqual((state["completed"], state["inFlight"]), (["9.9.1", "9.9.2", "9.9.4"], "9.9.5"))
-        r = self.runner(answers=["n"], resume=True, run_id="second", state=state)
+        r = self.runner(answers=["n", ""], resume=True, run_id="second", state=state)
         self.assertEqual(self.quietly(lambda: r.run(state)), 1)
         summary = self.summary()
         self.assertIn("- step 9.9.4 action **Missing button**: not found", summary)
@@ -590,7 +610,7 @@ class OneRunAcrossResumeTests(RunnerTestCase):
     def test_a_step_skipped_after_it_failed_is_passed_over_and_listed_after_a_stop(self) -> None:
         state = self.stopped_run(answers=["s", "no spare licences", "q"], unknown={"9.9.2", "9.9.4"})
         self.assertEqual((state["completed"], state["inFlight"]), (["9.9.1", "9.9.2"], "9.9.4"))
-        r = self.runner(answers=["y"], resume=True, run_id="second", state=state)
+        r = self.runner(answers=["y", ""], resume=True, run_id="second", state=state)
         self.assertEqual(self.quietly(lambda: r.run(state)), 2)
         self.assertEqual(r.ran, ["9.9.5"])
         self.assertTrue(self.state()["finished"])
@@ -600,7 +620,7 @@ class OneRunAcrossResumeTests(RunnerTestCase):
 
     def test_a_redone_step_replaces_its_stopped_attempt(self) -> None:
         state = self.stopped_run(answers=["q"], unknown={"9.9.4"})
-        r = self.runner(answers=["n"], resume=True, run_id="second", state=state)
+        r = self.runner(answers=["n", ""], resume=True, run_id="second", state=state)
         self.assertEqual(self.quietly(lambda: r.run(state)), 0)
         self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
         results = (self.tmp / "logs" / "first" / "results.jsonl").read_text(encoding="utf-8")
@@ -613,6 +633,158 @@ class OneRunAcrossResumeTests(RunnerTestCase):
                                                encoding="utf-8")
         r = self.runner(resume=True, state={"runId": "first", "lab": LAB, "completed": [], "inFlight": None})
         self.assertEqual([x["step"] for x in r.records], ["9.9.1"])
+
+
+class ResumeViewTests(RunnerTestCase):
+    """A resumed run's browser is new (#206): before the first step that runs, the Portal is brought
+    to the view that step starts from, opened by the run when the recording keeps a view it can
+    open, and named with the reason otherwise; and a step done by hand leaves a view too."""
+
+    IN_FLIGHT = {"lab": LAB, "completed": ["9.9.1"], "inFlight": "9.9.2", "finished": False}
+
+    def resume(self, answers, page=None, state=None) -> tuple[ScriptedRunner, str, int]:
+        r = self.runner(answers=answers, resume=True, run_id="resume", page=page)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = r.run(dict(state or self.IN_FLIGHT))
+        return r, out.getvalue(), code
+
+    def test_the_y_answer_says_the_portal_is_brought_to_the_view_the_step_ended_on(self) -> None:
+        line = next(text for text in run.Runner.RESUME_PROMPT.splitlines() if text.startswith("  y  "))
+        self.assertIn("mark it done, then bring the Portal to the view it ended on", line)
+        self.assertNotIn("leave the Portal", run.Runner.RESUME_PROMPT)
+
+    def test_a_view_with_tenant_data_is_opened_restored_and_pinned_to_the_tenant(self) -> None:
+        r = self.runner()
+        self.assertEqual(r.view_address("https://portal.azure.com/#view/Domains/name/[tenantdomain]"),
+                         f"https://portal.azure.com/#@{TENANT_ID}/view/Domains/name/contoso.onmicrosoft.com")
+
+    def test_a_view_that_names_an_object_by_id_or_is_no_portal_view_is_never_opened(self) -> None:
+        r = self.runner()
+        for view in ("https://portal.azure.com/#view/GroupDetailsMenuBlade/~/Members/groupId/<id>",
+                     "https://portal.azure.com/#view/Domains/name/[unknowntoken]",
+                     "https://portal.azure.com/#view/Invite/${GUEST}",
+                     "https://example.com/#view/One", "http://portal.azure.com/#view/One",
+                     "https://portal.azure.com/other#view/One", "https://portal.azure.com/?x=1#view/One",
+                     "https://portal.azure.com/#@evil.example/view/One", "https://portal.azure.com/"):
+            with self.subTest(view=view):
+                self.assertIsNone(r.view_address(view))
+
+    def test_a_view_with_an_object_id_is_named_with_the_reason_and_waited_for(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"viewUrl": "https://portal.azure.com/#view/Group/groupId/<id>"}
+        r, out, code = self.resume(["y", ""])
+        self.assertEqual(code, 0)
+        self.assertEqual(r.page.visited, [])
+        self.assertIn("Starting at step 9.9.4 (Four). Bring the Portal to the view step 9.9.2 ended on, then "
+                      "press Enter (the run cannot open it: it names an object by id, which the recording "
+                      "leaves out):\n  https://portal.azure.com/#view/Group/groupId/<id>\n", out)
+        self.assertEqual(r.ask.prompts[-1], "> ")
+        self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+
+    def test_a_step_without_a_view_is_named_and_waited_for(self) -> None:
+        r, out, code = self.resume(["y", ""])          # 9.9.2 has no entry in the recording
+        self.assertEqual(code, 0)
+        self.assertEqual(r.page.visited, [])
+        self.assertIn("No view is recorded for step 9.9.2, the step before it, so the run cannot open it: "
+                      "bring the Portal to where step 9.9.2 ends in the guide, then press Enter.", out)
+        self.assertEqual(r.ask.prompts[-1], "> ")
+
+    def test_a_view_that_fails_to_open_is_named_with_the_error_and_waited_for(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"viewUrl": "https://portal.azure.com/#view/Two"}
+        failing = FakePage(goto_fails=run.PlaywrightError(f"net::ERR_ABORTED at https://portal.azure.com/#@{TENANT_ID}/x\nlog"))
+        r, out, code = self.resume(["y", ""], page=failing)
+        self.assertEqual(code, 0)
+        self.assertIn("Bring the Portal to the view step 9.9.2 ended on, then press Enter (the run cannot "
+                      "open it: opening it failed: net::ERR_ABORTED at https://portal.azure.com/#@[tenantid]/x):\n"
+                      "  https://portal.azure.com/#view/Two\n", out)
+        self.assertNotIn(TENANT_ID, out)
+        self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+
+    def test_the_first_step_of_the_lab_needs_no_view_but_the_person_still_confirms(self) -> None:
+        r, out, code = self.resume(["n", ""], state={"lab": LAB, "completed": [], "inFlight": "9.9.1"})
+        self.assertEqual(code, 0)
+        self.assertEqual(r.page.visited, [])
+        self.assertIn("Starting at step 9.9.1 (One). No step of the lab comes before it, so it starts where a new run does", out)
+        self.assertEqual(r.ran, ["9.9.1", "9.9.2", "9.9.4", "9.9.5"])
+
+    def test_closed_input_at_the_view_prompt_changes_nothing(self) -> None:
+        # The answer to 'did it finish?' is kept only once the Portal is on the next step's view.
+        for answer in ("y", "s"):
+            with self.subTest(answer=answer):
+                r, _, code = self.resume([answer])
+                self.assertEqual(code, run.NOT_STARTED)
+                self.assertEqual((r.ran, r.records), ([], []))
+                self.assertFalse((self.tmp / "state.json").exists())
+
+    def test_nothing_is_brought_back_when_every_step_left_is_done(self) -> None:
+        self.recording["steps"].update({"9.9.4": {"skip": "Optional"}, "9.9.5": {"skip": "Optional"}})
+        r, _, code = self.resume(["y"])
+        self.assertEqual(code, 0)
+        self.assertEqual((r.page.visited, r.ask.prompts[1:]), ([], []))
+        self.assertTrue(self.state()["finished"])
+
+    def test_a_step_done_by_hand_records_the_view_it_ended_on(self) -> None:
+        page = FakePage()
+        page.url = f"https://portal.azure.com/#@{TENANT_ID}/view/Done/name/contoso.onmicrosoft.com?tab=1"
+        r = self.runner(answers=["c"], failing={"9.9.2"}, page=page)
+        self.assertEqual(self.quietly(r.run), 0)
+        view = "https://portal.azure.com/#view/Done/name/[tenantdomain]"
+        self.assertEqual(self.recording["steps"]["9.9.2"]["viewUrl"], view)
+        saved = json.loads((self.tmp / "rec.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["steps"]["9.9.2"]["viewUrl"], view)
+        # ... which the next resume opens for the step after it.
+        r, out, _ = self.resume([""], state={"lab": LAB, "completed": ["9.9.1", "9.9.2"], "inFlight": None})
+        self.assertEqual(r.page.visited, [f"https://portal.azure.com/#@{TENANT_ID}/view/Done/name/contoso.onmicrosoft.com"])
+        self.assertNotIn("No view is recorded", out)
+
+    def test_an_opened_view_says_the_blades_before_it_are_not_open(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"viewUrl": "https://portal.azure.com/#view/Two"}
+        _, out, _ = self.resume(["y", ""])
+        self.assertIn("The recording keeps no query string, and the blades the guide opened before it "
+                      "are not open: if the step needs them, bring the Portal there by hand first.", out)
+
+    def test_a_view_with_a_token_this_run_cannot_fill_in_names_the_token(self) -> None:
+        for token in ("${SKYCRAFT_GUIDE_DRIFT_UNSET}", "[unknowntoken]"):
+            with self.subTest(token=token):
+                self.recording["steps"]["9.9.2"] = {"viewUrl": f"https://portal.azure.com/#view/Invite/{token}"}
+                r, out, _ = self.resume(["y", ""])
+                self.assertEqual(r.page.visited, [])
+                self.assertIn(f"(the run cannot open it: it keeps {token}, which this run cannot fill in "
+                              f"(is the environment variable set?))", out)
+
+    def test_after_s_a_skipped_step_without_a_view_falls_back_to_the_view_it_started_from(self) -> None:
+        r, out, code = self.resume(["s", ""])          # 9.9.2 failed before: no view of its own
+        self.assertEqual(code, 0)
+        self.assertEqual(r.page.visited, [f"https://portal.azure.com/#@{TENANT_ID}/view/One"])
+        self.assertIn("Opened the view step 9.9.1 ended on:", out)
+        self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+        # A step finished with y that has no view is not passed over: it is named instead.
+        r, out, _ = self.resume(["y", ""])
+        self.assertEqual(r.page.visited, [])
+        self.assertIn("No view is recorded for step 9.9.2", out)
+
+    def test_a_step_done_by_hand_off_the_portal_leaves_the_recording_as_it_is(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"viewUrl": "https://portal.azure.com/#view/Two"}
+        page = FakePage()
+        page.url = "https://login.microsoftonline.com/common/oauth2/authorize#x"
+        r = self.runner(answers=["c"], failing={"9.9.2"}, page=page)
+        self.quietly(r.run)
+        self.assertEqual(self.recording["steps"]["9.9.2"]["viewUrl"], "https://portal.azure.com/#view/Two")
+
+    def test_a_step_done_by_hand_on_a_view_with_personal_data_records_none(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"viewUrl": "https://portal.azure.com/#view/Two"}
+        page = FakePage()
+        page.url = f"https://portal.azure.com/#@{TENANT_ID}/view/User/upn/someone%40example.com"
+        r = self.runner(answers=["c"], failing={"9.9.2"}, page=page)
+        self.quietly(r.run)
+        self.assertIsNone(self.recording["steps"]["9.9.2"]["viewUrl"])
+        saved = (self.tmp / "rec.json").read_text(encoding="utf-8")
+        self.assertNotIn("example.com", saved)
+
+    def test_a_step_done_by_hand_in_a_closed_window_records_no_view(self) -> None:
+        r = self.runner(answers=["c"], failing={"9.9.2"}, page=FakePage(closed=True))
+        self.quietly(r.run)
+        self.assertNotIn("viewUrl", self.recording["steps"].get("9.9.2", {}))
 
 
 class RecordedSkipTests(RunnerTestCase):
@@ -675,19 +847,20 @@ class RecordedSkipTests(RunnerTestCase):
         self.assertEqual(self.state()["inFlight"], "9.9.2")
 
     def test_resume_passes_over_a_skipped_step_and_shows_the_view_before_it(self) -> None:
-        self.skip("9.9.2")
+        self.skip("9.9.2", viewUrl="https://portal.azure.com/#view/Two")    # a skip's own view is not read
         portal = [s for s in STEPS["steps"] if s["portal"]]
         r = self.runner()
-        self.assertEqual(r.view_before(portal, 2), "https://portal.azure.com/#view/One")    # 9.9.4: past 9.9.2
+        self.assertEqual(r.start_view(portal, 2), ("9.9.1", "https://portal.azure.com/#view/One"))  # 9.9.4: past 9.9.2
         self.skip("9.9.1")
-        self.assertEqual(r.view_before(portal, 2), "(the lab's first step: start from the Portal home page)")
+        self.assertEqual(r.start_view(portal, 2), (None, None))
         del self.recording["steps"]["9.9.1"]["skip"]
         state = {"lab": LAB, "completed": ["9.9.1", "9.9.2"], "inFlight": "9.9.4", "finished": False}
-        r = self.runner(answers=["n"], resume=True, run_id="resume")
+        r = self.runner(answers=["n", ""], resume=True, run_id="resume")
         out = io.StringIO()
         with redirect_stdout(out):
             self.assertEqual(r.run(state), 0)
         self.assertIn("https://portal.azure.com/#view/One", out.getvalue())
+        self.assertEqual(r.page.visited, [f"https://portal.azure.com/#@{TENANT_ID}/view/One"])
         self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
 
     def test_a_step_the_recording_newly_skips_is_skipped_on_resume(self) -> None:
@@ -723,9 +896,9 @@ class RecordedSkipTests(RunnerTestCase):
         out = io.StringIO()
         with redirect_stdout(out):
             self.assertEqual(r.run(), 0)
-        self.assertIn("Starting at step 9.9.4 (Four) (the recording skips step 9.9.2). Bring the "
-                      "Portal to the view the step before it ended on, then press Enter:\n"
-                      "  https://portal.azure.com/#view/One", out.getvalue())
+        self.assertIn("Starting at step 9.9.4 (Four) (the recording skips step 9.9.2). Opened the view "
+                      "step 9.9.1 ended on:\n  https://portal.azure.com/#view/One\n", out.getvalue())
+        self.assertEqual(r.page.visited, [f"https://portal.azure.com/#@{TENANT_ID}/view/One"])
         self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
         self.skip("9.9.4", "9.9.5")                                  # nothing left to run: no view to ask for
         r = self.runner(from_step="9.9.2", run_id="all-skipped")

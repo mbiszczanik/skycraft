@@ -257,14 +257,16 @@ The key goes into the platform resource group because that group outlives the en
 | --------------------- | ------------------------------------------------------ |
 | Subscription          | [Your subscription]                                    |
 | Resource group        | `platform-skycraft-swc-rg`                             |
-| Region                | **Sweden Central** (read-only, taken from the resource group) |
+| Region                | **Sweden Central**                                     |
 | Key pair name         | `platform-skycraft-swc-ssh`                            |
 | SSH public key source | **Generate new key pair**                              |
 | SSH Key Type          | **RSA SSH Format**                                     |
 
+The region is read-only: the Portal takes it from the resource group.
+
 ![Create an SSH key in Azure Portal](images/step-3.2.1b.png)
 
-3. Click **Next: Tags** and add the platform tags. Lab 1.3's `Enforce-Project-Tag` policy denies any resource without `Project` = `SkyCraft`, and the key is a resource. Without the tags, **Review + create** stops at "Validation failed" with `RequestDisallowedByPolicy` (policy **Enforce Project Tag Value**):
+3. Click **Next: Tags** and add the platform tags. Lab 1.3's `Enforce-Project-Tag` policy denies any resource without `Project` = `SkyCraft`, and the key is a resource. Without the tags, **Review + create** stops at "Validation failed" with `RequestDisallowedByPolicy` (policy `Enforce Project Tag Value`):
 
 | Name        | Value       |
 | ----------- | ----------- |
@@ -274,7 +276,7 @@ The key goes into the platform resource group because that group outlives the en
 | Owner       | [Your name] |
 
 4. Click **Review + create** → **Create**
-5. In the **Generate new key pair** pop-up, click **Download private key and create resource**. The browser saves `platform-skycraft-swc-ssh.pem`
+5. In the Generate new key pair pop-up, click **Download private key and create resource**. The browser saves `platform-skycraft-swc-ssh.pem`
 
 ![Download the private key when creating the SSH key](images/step-3.2.1c.png)
 
