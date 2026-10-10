@@ -834,9 +834,9 @@ Describe 'parse.py - labs 4.2, 4.3, 5.1, 5.2 and 5.3, pickers, worded resource s
     It 'reads <count> chain(s) of step <id> as <labels>, resource names at <resources>, picking field "<field>"' -ForEach @(
         # 'Flow log type: **Virtual network** -> ... -> `prod-skycraft-swc-vnet` -> ...': the field's picker, then the chain.
         @{ lab = '5.3'; id = '5.3.5'; count = 1; field = 'Flow log type'; labels = @('Virtual network', '+ Select target resource', 'Virtual network', 'prod-skycraft-swc-vnet', 'Confirm selection'); resources = @(3) }
-        # 'Browse to `common/config.txt`': a path opens each segment; 'Open `x` share'.
+        # 'Browse to `common/config.txt`': a path opens each segment; 4.3.8 opens its share from the account.
         @{ lab = '4.3'; id = '4.3.6'; count = 1; field = ''; labels = @('common', 'config.txt', 'Restore'); resources = @(0, 1) }
-        @{ lab = '4.3'; id = '4.3.8'; count = 1; field = ''; labels = @('skycraft-config', 'Connect'); resources = @(0) }
+        @{ lab = '4.3'; id = '4.3.8'; count = 1; field = ''; labels = @('prodskycraftswcsa', 'File shares', 'skycraft-config', 'Overview', 'Connect'); resources = @(0, 2) }
         # '`public-demo` -> **Change access level**. The **Anonymous access level** dropdown lists ...':
         # the sentence after the chain describes the dialog.
         @{ lab = '4.2'; id = '4.2.12'; count = 1; field = ''; labels = @('public-demo', 'Change access level'); resources = @(0) }
@@ -931,13 +931,20 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         @($items | Where-Object { (@($_.labels) -join "`n") -ceq 'URL' }) | Should -BeNullOrEmpty
     }
 
-    It 'opens the skycraft-config share from the storage account first in step <id>' -ForEach @(
-        @{ id = '4.3.4' }, @{ id = '4.3.5' }, @{ id = '4.3.7' }
+    # Opening a share lands on its Browse view (step-4.3.4.png), whose toolbar has Add directory
+    # and no Connect; Connect is on the share's page (Microsoft Learn), so 4.3.7 and 4.3.8 open
+    # Overview first.
+    It 'opens the skycraft-config share from the storage account first in step <id>, then <rest>' -ForEach @(
+        @{ id = '4.3.4'; rest = @('Browse'); resources = @(0, 2) }
+        @{ id = '4.3.5'; rest = @(); resources = @(0, 2) }
+        @{ id = '4.3.6'; rest = @('Browse', 'common', 'config.txt'); resources = @(0, 2, 4, 5) }
+        @{ id = '4.3.7'; rest = @('Overview'); resources = @(0, 2) }
+        @{ id = '4.3.8'; rest = @('Overview', 'Connect'); resources = @(0, 2) }
     ) {
         $first = @((Get-GapStep '4.3' $id).items)[0]
         $first.kind | Should -Be 'navigation'
-        @($first.labels) | Should -Be @('prodskycraftswcsa', 'File shares', 'skycraft-config')
-        @($first.resources) | Should -Be @(0, 2)
+        @($first.labels) | Should -Be (@('prodskycraftswcsa', 'File shares', 'skycraft-config') + $rest)
+        @($first.resources) | Should -Be $resources
     }
 
     It 'names the new directory of step 4.3.4 in the dialog''s own field before OK' {

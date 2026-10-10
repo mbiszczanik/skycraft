@@ -327,7 +327,7 @@ Before creating a snapshot, upload a test file so you can verify the snapshot-re
 
 #### Option 1: Azure Portal (GUI)
 
-1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config`
+1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config` → **Browse**
 2. Click **+ Add directory**
 3. Name: `common`
 4. Click **OK**
@@ -434,11 +434,11 @@ Simulate a bad config push by modifying the test file, then restore the original
 
 #### Option 1: Azure Portal (GUI)
 
-1. Open `skycraft-config` → `common` → select `config.txt`
+1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config` → **Browse** → `common` → select `config.txt`
 2. Click **Download** to save the file locally
 3. Open the downloaded file in a text editor, change content to `server-name=BROKEN`, and save
 4. Back in the Portal, click **Upload** → select the modified `config.txt` → check **Overwrite if files already exist** → **Upload**
-5. Navigate back to **Snapshots** (under Operations) → `Pre-update backup` (the snapshot from Step 4.3.5: the list names it by the time it was taken and shows this comment next to it)
+5. Navigate back to **Snapshots** (under Operations) → select `Pre-update backup` (the snapshot's Comment)
 6. Browse to `common/config.txt` → **Restore** (selecting the file opens its File properties pane)
 7. **Overwrite original file** → **OK**
 8. Download `config.txt` again and verify the content is back to `server-name=skycraft-prod-01`
@@ -460,7 +460,7 @@ Mount the `skycraft-config` share as drive letter **Z:** on a Windows machine. T
 
 #### Option 1: Azure Portal (Generate Script)
 
-1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config`
+1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config` → **Overview**
 2. Click **Connect**
 3. Select **Windows** tab
 4. Drive letter: **Z**
@@ -506,7 +506,7 @@ Mount the `skycraft-config` share on a Linux VM. This simulates how the Auth Ser
 
 #### Option 1: Azure Portal (Generate Script)
 
-1. Open `skycraft-config` share → **Connect**
+1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config` → **Overview** → **Connect**
 2. Select **Linux** tab
 3. Copy the generated script — it installs `cifs-utils` and adds the mount to `/etc/fstab`
 4. SSH into the Linux VM and execute the script

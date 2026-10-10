@@ -72,7 +72,7 @@ without a browser. Rules (issue #189):
     `dev-skycraft-swc-lb` → **Backend pools**' (3.2.13). It may follow 'Navigate to', 'Go to',
     'Browse to', 'Open', 'Select' or 'Pick' and an optional 'the', and be followed by a remark in
     parentheses and a full stop ('`scripts` (or any container).', 4.4.3); after a verb, also by
-    the resource's kind in one or two words (#250): 'Open `skycraft-config` share' (4.3.8),
+    the resource's kind in one or two words (#250): 'Open `skycraft-config` share',
     'pick the `platform-skycraft-swc-bv` Backup Vault'. Those words are dropped, and the
     name must hold more than spaces. The name, backticks stripped, is a label in its place among
     the bold ones, and the item's '"resources"' lists the indices of such labels; only an item
@@ -202,11 +202,15 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     colon can still read as a field's label.
   * A resource name that opens a chain and is not on screen is looked up in the Portal's global
     search, which finds Azure resources but not what lives inside one: a blob container
-    ('public-demo', 4.2.12) or a file share ('skycraft-config', 4.3.6 and 4.3.8). Later in a
+    ('public-demo', 4.2.12); 4.3's chains therefore open their file share from the storage
+    account. Later in a
     chain a name is looked for on screen only, where the label before it should have listed it:
     a container ('game-assets', 4.2.11; 'scripts', 4.4.3) or a file share's folder or file
     ('common', 'config.txt', 4.3.6). Either is reported as a missing resource whenever it is not
     on screen (#199).
+  * 4.3.6 opens the snapshot by its Comment cell ('select `Pre-update backup`'): the Portal
+    names a snapshot by the time it was taken, which the guide cannot know. Whether a click on
+    that cell opens the snapshot is to be confirmed on the supervised run.
   * The option read is fixed by the guide, not chosen per run. 3.2.1 reads Option B, which
     creates an SSH key resource, while the items of later 3.2 steps follow Option A (3.2.2
     pastes skycraft-dev.pub); option B appears there only in prose notes, so a run of 3.2

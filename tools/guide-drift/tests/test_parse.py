@@ -352,7 +352,7 @@ class WordedResourceTests(unittest.TestCase):
 
     def test_a_verb_and_a_kind_around_the_span_are_dropped(self) -> None:
         for text, labels, resources in (
-                ("Open `skycraft-config` share → **Connect**", ["skycraft-config", "Connect"], [0]),             # 4.3.8
+                ("Open `skycraft-config` share → **Connect**", ["skycraft-config", "Connect"], [0]),             # 4.3.8 before #203
                 ("**Access control (IAM)** → pick the `platform-skycraft-swc-bv` Backup Vault → **Select**",
                  ["Access control (IAM)", "platform-skycraft-swc-bv", "Select"], [1]),
                 ("Navigate to the `prodskycraftswcsa` storage account → **Containers**",
