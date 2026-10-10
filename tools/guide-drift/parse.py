@@ -238,7 +238,9 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     step, though a check list can describe a blade the step then moves on from: 2.3.19 checks
     the Overview and then opens Record sets; 2.3.20 checks the dev load balancer and ends on
     prod; 2.2.21 checks DatabaseSubnet and WorldSubnet in the dev and the prod VNet and ends on
-    prod's WorldSubnet; 4.1.2 checks the wizard's Encryption tab and ends on the new account.
+    prod's WorldSubnet; 4.1.2 checks the wizard's Encryption tab and ends on the new account;
+    4.2.12 checks the account's Configuration blade and ends on a container's Change access
+    level dialog.
 
 Usage: python parse.py <path/to/lab-guide-X.Y.md> [--out steps.json] [--repo-root <dir>]
 """

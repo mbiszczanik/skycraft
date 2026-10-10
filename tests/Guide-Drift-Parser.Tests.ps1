@@ -908,6 +908,15 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         $labels | Should -Not -Contain 'Private'
     }
 
+    It 'never clicks Save or a switch value in step 4.2.12, and checks the account switch instead' {
+        $step = Get-GapStep '4.2' '4.2.12'
+        $labels = @($step.items | ForEach-Object { $_.labels; $_.label })
+        foreach ($label in 'Save', 'Disabled', 'Allow Blob anonymous access', 'Deny', 'RequestDisallowedByPolicy') {
+            $labels | Should -Not -Contain $label
+        }
+        $step.expected | Should -BeLike 'Allow Blob anonymous access: Disabled*'
+    }
+
     It 'opens public-demo in step 4.2.12 before the upload, and opens the blob before copying its URL' {
         $items = @((Get-GapStep '4.2' '4.2.12').items)
         $open = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Containers`npublic-demo" })

@@ -726,8 +726,10 @@ Get-AzStorageBlob -Container "game-assets" -Context $ctx | Select-Object Name, A
 
 1. **Find the account-level switch** (Dev):
    - Navigate to `devskycraftswcsa` → **Settings** → **Configuration**
-   - Locate **Allow Blob anonymous access** - it is **Disabled**, and `Deploy-Bicep.ps1` deploys it that way (`allowBlobPublicAccess: false`)
-   - Look at it, but leave it **Disabled** and do not click **Save**. If you do enable it, set it back to **Disabled** and **Save** again at once, or `Test-Lab.ps1` fails `DEV: AllowBlobPublicAccess is disabled`. (Organizations commonly pin this switch with a **Deny** assignment of the built-in policy *Storage account public access should be disallowed*; on such a subscription the save is refused with **RequestDisallowedByPolicy**. The SkyCraft course does not assign it.)
+   - Verify the switch:
+     - **Allow Blob anonymous access**: **Disabled** - `Deploy-Bicep.ps1` deploys it that way (`allowBlobPublicAccess: false`)
+
+   > Look at it, but leave it **Disabled** and do not click **Save**. If you do enable it, set it back to **Disabled** and **Save** again at once, or `Test-Lab.ps1` fails `DEV: AllowBlobPublicAccess is disabled`. (Organizations commonly pin this switch with a **Deny** assignment of the built-in policy *Storage account public access should be disallowed*; on such a subscription the save is refused with **RequestDisallowedByPolicy**. The SkyCraft course does not assign it.)
 
 2. **Create the `public-demo` container - Private**:
    - Go to **Containers** → **+ Container**
