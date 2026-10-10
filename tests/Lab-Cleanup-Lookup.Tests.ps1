@@ -134,6 +134,9 @@ $ToolRatchetCases = @(
 # "could not tell" with Test-LabNotFoundError instead. Keyed by file and caught command, with how
 # many such clauses may catch it there: one more fails the catch rule, and an entry that no longer
 # matches fails the Describe that checks this list, so it cannot outlive the code it excuses.
+# Entries are counted, not pinned to lines: a listed clause made to count while a new silent one
+# catches the same command in the same file keeps the count, and an Az call added inside a listed
+# diagnostic try is not seen.
 $DiagnosticCatch = @(
     @{ file = 'module-2-networking/2.1-virtual-networks/scripts/Remove-LabResource.ps1'; command = 'Get-AzVirtualNetwork'; count = 1
        why  = 'the service association link preflight is diagnostic and never touches the failure count (#110); the delete steps look the VNet up again, and count' }
