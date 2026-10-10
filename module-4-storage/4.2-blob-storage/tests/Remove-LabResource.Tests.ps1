@@ -49,8 +49,13 @@ BeforeAll {
     # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
     $script:RequiredModules = @('Az.Accounts', 'Az.Storage')
 
+    # Get-AzStorageContainer and Remove-AzStorageContainer are not called by the script; they are
+    # stubbed because the cleanup before #290 used the data plane, so a revert runs against the
+    # stub instead of a subscription.
     $script:StubCommands = @(
         'Get-AzStorageAccount'
+        'Get-AzRmStorageContainer'
+        'Remove-AzRmStorageContainer'
         'Get-AzStorageContainer'
         'Remove-AzStorageContainer'
         'Get-AzStorageAccountManagementPolicy'
@@ -69,7 +74,8 @@ BeforeAll {
     #                         report its object not found (notfound)
     #   SKYCRAFT_STUB_FAIL    '<command>:<name>,...' makes one removal or update throw
     # A lookup is named after its command and the object it reads: 'Get-AzStorageAccount:<sa>',
-    # 'Get-AzStorageContainer:<sa>', 'Get-AzStorageAccountManagementPolicy:<sa>'.
+    # 'Get-AzRmStorageContainer:<sa>', 'Get-AzStorageAccountManagementPolicy:<sa>'. A container
+# removal is logged as 'Remove-AzRmStorageContainer:<container>' by both container stubs.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 
@@ -124,19 +130,37 @@ function Get-AzStorageAccount {
     [pscustomobject]@{ StorageAccountName = $Name; Context = "ctx:$Name" }
 }
 
+function Get-StubContainer {
+    param([string]$Account)
+    if (Invoke-StubLookup -Name "Get-AzRmStorageContainer:$Account") { return }
+    $names = if ($Account -eq 'prodskycraftswcsa') { 'game-assets', 'player-backups', 'server-config', 'game-logs', 'unrelated' } else { 'public-demo', 'unrelated' }
+    foreach ($n in $names) { [pscustomobject]@{ Name = $n } }
+}
+
+function Get-AzRmStorageContainer {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$StorageAccountName)
+    Get-StubContainer -Account $StorageAccountName
+}
+
+function Remove-AzRmStorageContainer {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$StorageAccountName, [string]$Name, [switch]$Force)
+    Invoke-StubRemoval -Command 'Remove-AzRmStorageContainer' -Name $Name
+}
+
 function Get-AzStorageContainer {
     [CmdletBinding()]
     param([object]$Context, [string]$Name)
-    $account = ([string]$Context) -replace '^ctx:', ''
-    if (Invoke-StubLookup -Name "Get-AzStorageContainer:$account") { return }
-    $names = if ($account -eq 'prodskycraftswcsa') { 'game-assets', 'player-backups', 'server-config', 'game-logs', 'unrelated' } else { 'public-demo', 'unrelated' }
-    foreach ($n in $names) { [pscustomobject]@{ Name = $n } }
+    Write-StubCall -Name 'DataPlane:Get-AzStorageContainer'
+    Get-StubContainer -Account (([string]$Context) -replace '^ctx:', '')
 }
 
 function Remove-AzStorageContainer {
     [CmdletBinding()]
     param([object]$Context, [string]$Name, [switch]$Force)
-    Invoke-StubRemoval -Command 'Remove-AzStorageContainer' -Name $Name
+    Write-StubCall -Name 'DataPlane:Remove-AzStorageContainer'
+    Invoke-StubRemoval -Command 'Remove-AzRmStorageContainer' -Name $Name
 }
 
 function Get-AzStorageAccountManagementPolicy {
@@ -210,12 +234,12 @@ function Set-AzStorageAccount {
     $script:NotFound = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzStorageAccountManagementPolicy:prodskycraftswcsa=notfound'
     $script:AccountDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzStorageAccount:prodskycraftswcsa=denied'
     $script:LookupsFail   = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
-        'Get-AzStorageContainer:prodskycraftswcsa=denied'
+        'Get-AzRmStorageContainer:prodskycraftswcsa=denied'
         'Get-AzStorageAccountManagementPolicy:prodskycraftswcsa=throttled'
-        'Get-AzStorageContainer:devskycraftswcsa=throttled'
+        'Get-AzRmStorageContainer:devskycraftswcsa=throttled'
     )
     $script:StepsFail = Invoke-CleanupScript -Stub $script:Stub -Fail @(
-        'Remove-AzStorageContainer:game-assets'
+        'Remove-AzRmStorageContainer:game-assets'
         'Update-AzStorageBlobServiceProperty:prodskycraftswcsa'
     )
 
@@ -250,13 +274,20 @@ Describe 'Lab 4.2 Remove-LabResource.ps1 - removes what the lab creates' {
 
     It 'removes the lab containers and no other, the policy, and reverts versioning and public access' {
         $calls = $script:Clean.Calls
-        foreach ($call in 'Remove-AzStorageContainer:game-assets', 'Remove-AzStorageContainer:player-backups',
-            'Remove-AzStorageContainer:server-config', 'Remove-AzStorageContainer:game-logs',
-            'Remove-AzStorageContainer:public-demo', 'Remove-AzStorageAccountManagementPolicy:prodskycraftswcsa',
+        foreach ($call in 'Remove-AzRmStorageContainer:game-assets', 'Remove-AzRmStorageContainer:player-backups',
+            'Remove-AzRmStorageContainer:server-config', 'Remove-AzRmStorageContainer:game-logs',
+            'Remove-AzRmStorageContainer:public-demo', 'Remove-AzStorageAccountManagementPolicy:prodskycraftswcsa',
             'Update-AzStorageBlobServiceProperty:prodskycraftswcsa', 'Set-AzStorageAccount:devskycraftswcsa') {
             $calls | Should -Contain $call
         }
-        $calls | Should -Not -Contain 'Remove-AzStorageContainer:unrelated'
+        $calls | Should -Not -Contain 'Remove-AzRmStorageContainer:unrelated'
+    }
+
+    It 'lists and removes the containers through the control plane, which the storage firewall does not block' {
+        # Lab 4.4 denies the data plane and the cycle runs this cleanup right after 4.4 reverts it;
+        # the revert takes up to a minute to apply.
+        $script:Clean.Calls | Should -Contain 'Get-AzRmStorageContainer:prodskycraftswcsa'
+        $script:Clean.Calls | Should -Not -Match '^DataPlane:'
     }
 }
 
@@ -300,7 +331,7 @@ Describe 'Lab 4.2 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
         $run.Output | Should -Match '\[ERROR\] Could not look up the lifecycle policy of prodskycraftswcsa[^\r\n]*requests exceeded the limit'
         $run.Output | Should -Match '\[ERROR\] Could not look up the containers in devskycraftswcsa'
         $run.Output | Should -Match 'Cleanup finished with 3 failure\(s\)'
-        @($run.Calls | Where-Object { $_ -like 'Remove-AzStorageContainer*' }) | Should -BeNullOrEmpty
+        @($run.Calls | Where-Object { $_ -like 'Remove-AzRmStorageContainer*' }) | Should -BeNullOrEmpty
         $run.Calls  | Should -Not -Contain 'Remove-AzStorageAccountManagementPolicy:prodskycraftswcsa'
     }
 
@@ -323,9 +354,9 @@ Describe 'Lab 4.2 Remove-LabResource.ps1 - a failed step is counted' {
 
     It 'keeps going after a failed step' {
         $calls = $script:StepsFail.Calls
-        $calls | Should -Contain 'Remove-AzStorageContainer:player-backups'
+        $calls | Should -Contain 'Remove-AzRmStorageContainer:player-backups'
         $calls | Should -Contain 'Remove-AzStorageAccountManagementPolicy:prodskycraftswcsa'
-        $calls | Should -Contain 'Remove-AzStorageContainer:public-demo'
+        $calls | Should -Contain 'Remove-AzRmStorageContainer:public-demo'
         $calls | Should -Contain 'Set-AzStorageAccount:devskycraftswcsa'
     }
 }

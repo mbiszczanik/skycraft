@@ -12,9 +12,12 @@
     counted; if anything failed the script exits 1. An object that does not exist is not a
     failure: only a lookup that succeeds and does not find it, or a getter that reports it as not
     found, means "absent" - Test-LabNotFoundError tells the two apart (issue #290, as #255 did for
-    Labs 1.2-2.3). The containers are listed once per account and picked by name, because
-    Get-AzStorageContainer -Name reports a missing container in words that are not a recognised
-    not-found error. A storage account that could not be looked up is left alone.
+    Labs 1.2-2.3). The containers are listed once per account through the control plane
+    (Get-AzRmStorageContainer) and picked by name, so a missing container is an empty match. The
+    control plane does not go through the storage firewall: Lab 4.4 sets it to deny, and the lab
+    cycle runs this cleanup on the same account right after 4.4 reverts it, while the revert may
+    still be applying (it takes up to a minute). A storage account that could not be looked up is
+    left alone.
 
     Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
     "pwsh -File" for any script that declares #Requires -Modules for a module it has to
@@ -153,18 +156,16 @@ if (-not $prodLookup.Failed -and -not $prodSa) {
     Write-Host "  [INFO] Storage account $ProdSaName not found - nothing to clean." -ForegroundColor Gray
 }
 elseif ($prodSa -and $PSCmdlet.ShouldProcess($ProdSaName, 'Remove Lab 4.2 containers and reset storage configuration')) {
-    $ctx = $prodSa.Context
-
     # Remove Containers - listed once and picked by name; a listing that fails touches none.
     $containers = @('game-assets', 'player-backups', 'server-config', 'game-logs')
     $containerLookup = Invoke-LabLookup -Target "the containers in $ProdSaName" -Lookup {
-        Get-AzStorageContainer -Context $ctx -ErrorAction Stop
+        Get-AzRmStorageContainer -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName -ErrorAction Stop
     }
     if (-not $containerLookup.Failed) {
         foreach ($c in $containers) {
             if ($containerLookup.Value | Where-Object { $_.Name -eq $c }) {
                 Invoke-LabStep -Description "delete container $c" -Action {
-                    Remove-AzStorageContainer -Context $ctx -Name $c -Force -ErrorAction Stop
+                    Remove-AzRmStorageContainer -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName -Name $c -Force -ErrorAction Stop
                     Write-Host "  Deleted container: $c" -ForegroundColor Gray
                 }
             }
@@ -200,15 +201,13 @@ if (-not $devLookup.Failed -and -not $devSa) {
     Write-Host "  [INFO] Storage account $DevSaName not found - nothing to clean." -ForegroundColor Gray
 }
 elseif ($devSa -and $PSCmdlet.ShouldProcess($DevSaName, 'Remove public-demo container and disable public access')) {
-    $devCtx = $devSa.Context
-
     # Remove Public Demo Container
     $devContainerLookup = Invoke-LabLookup -Target "the containers in $DevSaName" -Lookup {
-        Get-AzStorageContainer -Context $devCtx -ErrorAction Stop
+        Get-AzRmStorageContainer -ResourceGroupName $DevRgName -StorageAccountName $DevSaName -ErrorAction Stop
     }
     if ($devContainerLookup.Value | Where-Object { $_.Name -eq 'public-demo' }) {
         Invoke-LabStep -Description 'delete container public-demo' -Action {
-            Remove-AzStorageContainer -Context $devCtx -Name 'public-demo' -Force -ErrorAction Stop
+            Remove-AzRmStorageContainer -ResourceGroupName $DevRgName -StorageAccountName $DevSaName -Name 'public-demo' -Force -ErrorAction Stop
             Write-Host "  Deleted container: public-demo" -ForegroundColor Gray
         }
     }

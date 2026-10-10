@@ -14,9 +14,11 @@
     found, means "absent" - Test-LabNotFoundError tells the two apart (issue #290; the script used
     to report any error as "not found or already removed"). The storage account is looked up once;
     when it is absent or could not be looked up, the steps that work inside it are skipped. The
-    container is picked from a listing, because Get-AzStorageContainer -Name reports a missing
-    container in words that are not a recognised not-found error. Only role assignments made on the
-    account itself are removed, not ones inherited from a resource group or the subscription.
+    container is listed and removed through the control plane (Get-AzRmStorageContainer,
+    Remove-AzRmStorageContainer), which the storage firewall does not apply to: the firewall revert
+    above it takes up to a minute to apply, and the data plane would answer 403 until then. Only
+    role assignments made on the account itself are removed, not ones inherited from a resource
+    group or the subscription.
 
     Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
     "pwsh -File" for any script that declares #Requires -Modules for a module it has to
@@ -163,11 +165,11 @@ if ($sa) {
     if ($PSCmdlet.ShouldProcess('dev-assets', 'Remove storage container')) {
         Write-Host "Removing 'dev-assets' container..." -ForegroundColor Yellow
         $containerLookup = Invoke-LabLookup -Target "the containers in '$storageAccountName'" -Lookup {
-            Get-AzStorageContainer -Context $sa.Context -ErrorAction Stop
+            Get-AzRmStorageContainer -ResourceGroupName $resourceGroupName -StorageAccountName $storageAccountName -ErrorAction Stop
         }
         if ($containerLookup.Value | Where-Object { $_.Name -eq 'dev-assets' }) {
             try {
-                Remove-AzStorageContainer -Name 'dev-assets' -Context $sa.Context -Force -ErrorAction Stop
+                Remove-AzRmStorageContainer -ResourceGroupName $resourceGroupName -StorageAccountName $storageAccountName -Name 'dev-assets' -Force -ErrorAction Stop
                 Write-Host "  -> Container 'dev-assets' removed." -ForegroundColor Green
             }
             catch {

@@ -49,10 +49,15 @@ BeforeAll {
     # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
     $script:RequiredModules = @('Az.Accounts', 'Az.Resources', 'Az.Storage')
 
+    # Get-AzStorageContainer and Remove-AzStorageContainer are not called by the script; they are
+    # stubbed because the cleanup before #290 used the data plane, so a revert runs against the
+    # stub instead of a subscription.
     $script:StubCommands = @(
         'Get-AzContext'
         'Get-AzStorageAccount'
         'Update-AzStorageAccountNetworkRuleSet'
+        'Get-AzRmStorageContainer'
+        'Remove-AzRmStorageContainer'
         'Get-AzStorageContainer'
         'Remove-AzStorageContainer'
         'Get-AzRoleAssignment'
@@ -69,8 +74,9 @@ BeforeAll {
     #   SKYCRAFT_STUB_BARE    '1' keeps the account but drops dev-assets and the lab's assignments
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled)
     #   SKYCRAFT_STUB_FAIL    '<command>:<name>,...' makes one change throw
-    # A lookup is named after its command: 'Get-AzStorageAccount', 'Get-AzStorageContainer',
-    # 'Get-AzRoleAssignment'.
+    # A lookup is named after its command: 'Get-AzStorageAccount', 'Get-AzRmStorageContainer',
+    # 'Get-AzRoleAssignment'. A container removal is logged as 'Remove-AzRmStorageContainer:<name>'
+    # by both container stubs.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:AccountId = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/prodskycraftswcsa'
@@ -139,10 +145,26 @@ function Update-AzStorageAccountNetworkRuleSet {
     Invoke-StubRemoval -Command 'Update-AzStorageAccountNetworkRuleSet' -Name "${Name}:$DefaultAction"
 }
 
+function Get-AzRmStorageContainer {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$StorageAccountName)
+    if (Invoke-StubLookup -Name 'Get-AzRmStorageContainer') { return }
+    [pscustomobject]@{ Name = 'unrelated' }
+    if (Test-StubBare) { return }
+    [pscustomobject]@{ Name = 'dev-assets' }
+}
+
+function Remove-AzRmStorageContainer {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$StorageAccountName, [string]$Name, [switch]$Force)
+    Invoke-StubRemoval -Command 'Remove-AzRmStorageContainer' -Name $Name
+}
+
 function Get-AzStorageContainer {
     [CmdletBinding()]
     param([object]$Context, [string]$Name)
-    if (Invoke-StubLookup -Name 'Get-AzStorageContainer') { return }
+    Write-StubCall -Name 'DataPlane:Get-AzStorageContainer'
+    if (Invoke-StubLookup -Name 'Get-AzRmStorageContainer') { return }
     [pscustomobject]@{ Name = 'unrelated' }
     if (Test-StubBare) { return }
     [pscustomobject]@{ Name = 'dev-assets' }
@@ -151,7 +173,8 @@ function Get-AzStorageContainer {
 function Remove-AzStorageContainer {
     [CmdletBinding()]
     param([string]$Name, [object]$Context, [switch]$Force)
-    Invoke-StubRemoval -Command 'Remove-AzStorageContainer' -Name $Name
+    Write-StubCall -Name 'DataPlane:Remove-AzStorageContainer'
+    Invoke-StubRemoval -Command 'Remove-AzRmStorageContainer' -Name $Name
 }
 
 function Get-AzRoleAssignment {
@@ -220,7 +243,7 @@ function Remove-AzRoleAssignment {
     $script:WhatIf        = Invoke-CleanupScript -Stub $script:Stub -ArgumentList '-WhatIf'
     $script:AccountDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzStorageAccount=denied'
     $script:LookupsFail   = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
-        'Get-AzStorageContainer=denied'
+        'Get-AzRmStorageContainer=denied'
         'Get-AzRoleAssignment=throttled'
     )
     $script:StepsFail = Invoke-CleanupScript -Stub $script:Stub -Fail @(
@@ -260,10 +283,16 @@ Describe 'Lab 4.4 Remove-LabResource.ps1 - reverts what the lab changes' {
     It 'reverts the firewall, removes dev-assets and the lab''s role assignments on the account' {
         $calls = $script:Clean.Calls
         $calls | Should -Contain 'Update-AzStorageAccountNetworkRuleSet:prodskycraftswcsa:Allow'
-        $calls | Should -Contain 'Remove-AzStorageContainer:dev-assets'
-        $calls | Should -Not -Contain 'Remove-AzStorageContainer:unrelated'
+        $calls | Should -Contain 'Remove-AzRmStorageContainer:dev-assets'
+        $calls | Should -Not -Contain 'Remove-AzRmStorageContainer:unrelated'
         $calls | Should -Contain 'Remove-AzRoleAssignment:11111111-1111-1111-1111-111111111111'
         $calls | Should -Contain 'Remove-AzRoleAssignment:22222222-2222-2222-2222-222222222222'
+    }
+
+    It 'lists and removes the container through the control plane, which the firewall revert does not wait for' {
+        # The revert takes up to a minute to apply; the data plane would answer 403 until then.
+        $script:Clean.Calls | Should -Contain 'Get-AzRmStorageContainer'
+        $script:Clean.Calls | Should -Not -Match '^DataPlane:'
     }
 
     It 'leaves an inherited assignment and another role alone' {
@@ -331,7 +360,7 @@ Describe 'Lab 4.4 Remove-LabResource.ps1 - a failed step is counted' {
     }
 
     It 'keeps going after a failed step' {
-        $script:StepsFail.Calls | Should -Contain 'Remove-AzStorageContainer:dev-assets'
+        $script:StepsFail.Calls | Should -Contain 'Remove-AzRmStorageContainer:dev-assets'
         $script:StepsFail.Calls | Should -Contain 'Remove-AzRoleAssignment:22222222-2222-2222-2222-222222222222'
     }
 }
