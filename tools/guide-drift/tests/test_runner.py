@@ -2622,12 +2622,13 @@ class StartBladeExcuseTests(RunnerTestCase):
         {"id": f"9.9.{n}", "title": f"Step {n}", "portal": True, "expected": None, "images": [],
          "items": [{"kind": "action", "labels": ["Go"], "line": n}]} for n in (1, 2, 3)]}
 
-    def run_lab(self, page, answers=(), state=None, **overrides):
+    def run_lab(self, page, answers=(), state=None, failing=(), **overrides):
+        """r.run() with every step's item performed, except in the steps of `failing` (unknown)."""
         r = run.Runner(page, self.STEPS, self.recording, self.args(**overrides), ask=Answers(*answers), state=state)
 
         def act(step, item, label, *rest, **kwargs):
             record = r.new_record(step, item["kind"], label)
-            record.update(outcome="match")
+            record.update(outcome="unknown" if step["id"] in failing else "match")
             return record
 
         out = io.StringIO()
@@ -2664,6 +2665,24 @@ class StartBladeExcuseTests(RunnerTestCase):
         r, _, _ = self.run_lab(page_on(f"view/{USERS}"))
         self.assertNotIn("startBlade", self.recording["steps"]["9.9.2"])     # depends on the skip
         self.assertEqual(self.recording["steps"]["9.9.3"]["startBlade"], USERS)
+
+    def test_the_step_after_one_skipped_with_s_is_neither_blamed_nor_recorded(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"startBlade": GROUPS}
+        r, code, out = self.run_lab(page_on(f"view/{USERS}"), answers=["s", "no licence", ""], failing={"9.9.1"})
+        self.assertEqual(code, 1)                        # 9.9.1's unknown still counts
+        self.assertIn(f"Step 9.9.2 starts on {GROUPS}, the Portal is on {USERS} (step 9.9.1 was skipped after "
+                      "it failed).", out)
+        self.assertEqual(self.wrong_blade(r), [])
+        del self.recording["steps"]["9.9.2"]["startBlade"]
+        self.recording["steps"].pop("9.9.3", None)
+        self.run_lab(page_on(f"view/{USERS}"), answers=["s", "no licence"], failing={"9.9.1"})
+        self.assertNotIn("startBlade", self.recording["steps"]["9.9.2"])     # wherever 9.9.1 left the Portal
+        self.assertEqual(self.recording["steps"]["9.9.3"]["startBlade"], USERS)
+
+    def test_the_step_after_one_done_by_hand_is_checked_as_usual(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"startBlade": GROUPS}
+        r, _, _ = self.run_lab(page_on(f"view/{USERS}"), answers=["c", ""], failing={"9.9.1"})
+        self.assertEqual([x["step"] for x in self.wrong_blade(r)], ["9.9.2"])
 
 
 class FormOpenTests(RunnerTestCase):
@@ -2845,6 +2864,37 @@ class FormOpenTests(RunnerTestCase):
         self.assertEqual(self.recording["steps"]["9.9.2"]["startBlade"], USERS)    # not the form's blade
         self.assertIsNone(r.start_seen)
         self.assertEqual([x["kind"] for x in r.records if x.get("category") == run.WRONG_BLADE], ["field"])
+
+    def run_two_items(self, page, answers=(), excuse=None) -> tuple[run.Runner, Screen]:
+        """A runner and the Users list with a '+ New user' button whose click changes nothing,
+        for run_items; step 9.9.2 is excused when `excuse` is given."""
+        screen = self.users_list()
+        screen.add(("button", "+ New user", ScreenNode()))
+        r = self.form_runner(page=page, ask=Answers(*answers))
+        if excuse:
+            r.excused["9.9.2"] = excuse
+        return r, screen
+
+    def run_items(self, r, screen, items) -> None:
+        step = {"id": "9.9.2", "title": "Two", "portal": True, "expected": None, "images": [], "items": items}
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=[]):
+            self.quietly(lambda: r.run_step(step))
+
+    def test_a_form_missing_after_a_reported_start_at_a_later_item_is_its_own_cause(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"startBlade": CREATE_USER}
+        r, screen = self.run_two_items(page_on(f"view/{USERS}"), answers=["", ""])
+        self.run_items(r, screen, [{"kind": "action", "labels": ["+ New user"], "line": 3}, self.UPN])
+        self.assertEqual([x["kind"] for x in r.records if x.get("category") == run.WRONG_BLADE], ["blade", "field"])
+
+    def test_an_excused_step_on_the_right_blade_or_none_recorded_still_reports_a_missing_form(self) -> None:
+        for recorded in (USERS, None):
+            with self.subTest(recorded=recorded):
+                self.recording["steps"]["9.9.2"] = {} if recorded is None else {"startBlade": recorded}
+                r, screen = self.run_two_items(page_on(f"view/{USERS}"), answers=[""], excuse="the run was resumed")
+                self.run_items(r, screen, [self.UPN])
+                self.assertEqual([x["kind"] for x in r.records if x.get("category") == run.WRONG_BLADE], ["field"])
 
 
 class StopTests(RunnerTestCase):

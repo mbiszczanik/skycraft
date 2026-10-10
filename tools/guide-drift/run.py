@@ -95,9 +95,12 @@ FIND_TIMEOUT_MS; when it never matches, the run reports misleading drift in cate
 'wrong-blade', "the step starts on X, the Portal is on Y; the guide does not say how to get
 there", asks the person to bring the Portal to X and press Enter (closed input goes on as well),
 and performs the step. The first step after a resume or --from-step (its browser is new; the
-resume message names the blade) and the first step after a step the recording skips (its blade
-depends on the skip, which is also why none is recorded for it) are asked about the same way,
-with the reason and without a record: the guide is not at fault there. A step whose first item
+resume message names the blade), the first step after a step the recording skips, and the first
+after a step the person skipped with 's' (the Portal is wherever the failed step left it) are
+asked about the same way, with the reason and without a record: the guide is not at fault
+there. No blade is recorded for the latter two, as it would depend on the skip: so while a
+recorded skip stays, the start of the step after it is not checked (a blade recorded before the
+skip was added is only asked about). A step whose first item
 is a global search, or a chain that opens with a resource name (looked up there), may start
 anywhere and is neither checked nor recorded, and neither is a step begun on a view the run
 cannot name. A recorded blade that is wrong is deleted from the recording by hand; the next
@@ -1418,8 +1421,8 @@ class Runner:
         self.first_item = False         # the current item is the step's first (find_form)
         self.start_accounted = False    # check_start reported or excused the step's start
         # Steps whose start is not the guide's doing, with the reason (check_start): the first
-        # step after a resume, the first after a step the recording skips. The latter are in
-        # `unrecorded` too: their blade is not recorded either.
+        # step after a resume, the first after a step the recording skips or the person skipped
+        # with 's'. The latter two are in `unrecorded` too: their blade is not recorded either.
         self.excused: dict[str, str] = {}
         self.unrecorded: set[str] = set()
 
@@ -1848,17 +1851,19 @@ class Runner:
         When it never matches, write misleading drift in category WRONG_BLADE ('the step starts
         on X, the Portal is on Y; the guide does not say how to get there') and ask the person to
         bring the Portal to X and press Enter; the recorded blade stays. A step in `excused` (the
-        first one after a resume, or after a step the recording skips) is asked about the same
-        way, with the reason and without a record: the guide is not at fault there.
+        first one after a resume, after a step the recording skips, or after one the person
+        skipped with 's') is asked about the same way, with the reason and without a record: the
+        guide is not at fault there.
 
-        Sets start_accounted when the step's start is accounted for (a record, or an excuse), so
-        that find_form does not report the same cause again at the first item. Returns the blade
-        to record once the first item has gone through: the settled one (settled_blade) when the
-        recording has none yet; None when it has one, the open blade cannot be named, the step
-        follows a step the recording skips (`unrecorded`: the blade would depend on the skip), or
-        the step starts anywhere (starts_anywhere), in which case nothing is compared either."""
+        Sets start_accounted only when it asked about a mismatch (with a record, or excused), so
+        that find_form does not report the same cause again at the first item; a matching or
+        unrecorded blade leaves a missing form there to be reported. Returns the blade to record
+        once the first item has gone through: the settled one (settled_blade) when the recording
+        has none yet; None when it has one, the open blade cannot be named, the step follows a
+        skipped step (`unrecorded`: the blade would depend on the skip), or the step starts
+        anywhere (starts_anywhere), in which case nothing is compared either."""
         excuse = self.excused.get(step["id"])
-        self.start_accounted = excuse is not None
+        self.start_accounted = False
         if not step["items"] or starts_anywhere(step["items"][0]):
             return None
         recorded = start_blade(self.recording, step["id"])
@@ -1879,11 +1884,11 @@ class Runner:
             record = self.new_record(step, "blade", recorded)
             record.update(outcome="drift", severity="misleading", category=WRONG_BLADE, observed=message)
             self.write(record)
-            self.start_accounted = True
             print(f"\nStep {step['id']}: {message}.\nBring the Portal to {recorded}, then press Enter.")
         else:
             print(f"\nStep {step['id']} starts on {recorded}, the Portal is on {current} ({excuse}).\n"
                   f"Bring the Portal to {recorded}, then press Enter.")
+        self.start_accounted = True
         self.prompt("> ")
         return None
 
@@ -2239,6 +2244,12 @@ class Runner:
                 self.skip_step(step, step["id"], self.redactor.redact(reason))
                 completed.append(step["id"])
                 self.save_state(completed, None)
+                after = portal.index(step) + 1
+                if after < len(portal):
+                    # The Portal is wherever the failed step left it: the next step's start is no
+                    # fault of the guide, and its blade is not recorded (#207).
+                    self.excused.setdefault(portal[after]["id"], f"step {step['id']} was skipped after it failed")
+                    self.unrecorded.add(portal[after]["id"])
             elif answer == "e":
                 self.first_failure = step["id"]     # the state keeps it in flight
             else:

@@ -105,9 +105,10 @@
     the run compares the open blade with it (ignoring case and a trailing overview) for a few
     seconds; when it never matches, it reports misleading drift ('the step starts on X, the
     Portal is on Y; the guide does not say how to get there') and waits for you to bring the
-    Portal to X and press Enter. The first step after -Resume or -FromStep, and the first after a
-    step the recording skips, are asked about the same way without blaming the guide, and the
-    latter records no blade. A step that opens with a global search, or with a resource name,
+    Portal to X and press Enter. The first step after -Resume or -FromStep, the first after a
+    step the recording skips, and the first after a step you skipped with s are asked about the
+    same way without blaming the guide; the latter two record no blade, so while a recorded skip
+    stays, the start of the step after it is not checked. A step that opens with a global search, or with a resource name,
     may start anywhere and is not checked. Before the first field of a form, the run checks a
     field of that name can be filled in, so it never types into a list; when none can, it
     reports the same drift (once per cause) and waits for you to open the form. A wrong recorded
