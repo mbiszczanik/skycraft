@@ -80,9 +80,22 @@
     the step's findings still count in the exit code, and a later step that needed it may fail
     and is asked about in turn); e = end the lab: skip the rest and finish; q = stop and keep the
     state (exit 255; continue with -Resume). Closed input ends the lab. A run that went on past a
-    skipped step, or ended with e, is finished, so cleanup runs. On -Resume it shows the previous
-    step's view and asks whether the step in flight finished (y), must be redone (n) or is skipped
-    (s); a step skipped with s before the stop is passed over.
+    skipped step, or ended with e, is finished, so cleanup runs. A step done by hand (c) records
+    the view the Portal shows when you answer, so a later -Resume can open it. On -Resume it asks
+    whether the step in flight finished (y), must be redone (n) or is skipped (s); a step skipped
+    with s before the stop is passed over.
+
+    A RESUMED RUN HAS A NEW BROWSER on the Microsoft Entra ID overview (issue #206), and so has a
+    run started with -FromStep. Before the first step that runs, the run opens the view that step
+    starts from, from the recording: after y, the view the step in flight ended on; after n, the
+    view the step before it ended on, to redo it from there; after s, the skipped step's own view,
+    or the view it started from when it has none. It cannot open a view that names an object by
+    id (the recording leaves ids out) or keeps a [token] or ${NAME} this run cannot fill in (is
+    the environment variable set?); then it prints the view and the reason, or says no view is
+    recorded for that step, and you bring the Portal there by hand. Either way it waits for Enter:
+    check the Portal first, as an opened view has none of the blades the guide opened before it.
+    A view is recorded only without tenant or personal data, also once percent-decoded; one that
+    cannot be is recorded as none.
 
     CLEANUP IS THE LAB'S OWN, AND ONLY AFTER A FINISHED RUN. This script has no deletion logic.
     Unless -SkipCleanup, and only when run.py ended normally and the state file confirms it
@@ -123,13 +136,15 @@
     recording in tools/guide-drift/recordings/ can run (1.1 today).
 
 .PARAMETER FromStep
-    Start at this step id ('1.1.6'), assuming earlier steps were done by hand.
+    Start at this step id ('1.1.6'), assuming earlier steps were done by hand. The run first
+    brings the Portal to the view the step starts from (see A RESUMED RUN HAS A NEW BROWSER).
 
 .PARAMETER Resume
     Continue the previous run from tools/.guide-drift-state.json, starting at the step that was
     in flight or failed. A finished run, or a state file of another lab, is refused (exit 254).
     The run continues in its own folder: the state records the absolute log directory of the
-    stopped run, and -Resume uses it whatever -LogDirectory says.
+    stopped run, and -Resume uses it whatever -LogDirectory says. The browser is new: the run
+    brings the Portal to the view the next step starts from (see A RESUMED RUN HAS A NEW BROWSER).
 
 .PARAMETER LogDirectory
     Where run folders are written. Defaults to tools/guide-drift-logs. Resolved to an absolute
