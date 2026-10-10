@@ -176,8 +176,9 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
   * A field whose value a chain picks is opened by its label, so the label must name a control;
     a chain after a heading's name ('Destination:' before a check box) would open nothing.
   * The run cannot choose a file on the learner's disk: 'select the modified `config.txt`' in
-    4.3.6's upload pane is no item, so the pane has no file to upload, and the person finishes
-    the step by hand (c) or the recording skips it.
+    4.3.6's upload pane and 'select a small local text file named `file.txt`' in 4.2.12's are no
+    item, so the pane has no file to upload, and the person finishes the step by hand (c) or the
+    recording skips it.
   * The kind after a resource name is any one or two words after a verb that do not start with
     a preposition or a conjunction ('Open `x` share'), so other words there would be dropped as
     well ('Open `x` now'); the guides have no such step.

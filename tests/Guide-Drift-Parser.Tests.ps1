@@ -909,6 +909,20 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         $labels | Should -Not -Contain 'Private'
     }
 
+    It 'opens public-demo in step 4.2.12 before the upload, and opens the blob before copying its URL' {
+        $items = @((Get-GapStep '4.2' '4.2.12').items)
+        $open = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Containers`npublic-demo" })
+        $open.Count | Should -Be 1
+        @($open[0].resources) | Should -Be @(1)
+        $copy = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "file.txt`nOverview`nURL" })
+        $copy.Count | Should -Be 1
+        @($copy[0].resources) | Should -Be @(0)
+        $index = [array]::IndexOf($items, $open[0])
+        @($items[$index + 1].labels) | Should -Be @('Upload', 'Upload')
+        $items[$index + 2] | Should -Be $copy[0]
+        @($items | Where-Object { (@($_.labels) -join "`n") -ceq 'URL' }) | Should -BeNullOrEmpty
+    }
+
     It 'still clicks what the caption **Bind** of step 3.4.12 tells to click, and nothing for **Validation**' {
         $items = @((Get-GapStep '3.4' '3.4.12').items)
         @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Validate`nAdd" }).Count | Should -Be 1

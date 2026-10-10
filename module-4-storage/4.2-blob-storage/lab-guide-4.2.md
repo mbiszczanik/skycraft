@@ -736,7 +736,9 @@ Get-AzStorageBlob -Container "game-assets" -Context $ctx | Select-Object Name, A
    - Click **Create**
 
 3. **Prove the container is not anonymous**:
-   - Open `public-demo`, upload any small text file and copy its **URL** (e.g., `https://devskycraftswcsa.blob.core.windows.net/public-demo/file.txt`)
+   - **Containers** → `public-demo`
+   - Click **Upload**, select a small local text file named `file.txt`, and click **Upload**
+   - Select `file.txt` → **Overview** → copy its **URL** (`https://devskycraftswcsa.blob.core.windows.net/public-demo/file.txt`)
    - Open the URL in an incognito/private browser window
    - **Result**: `PublicAccessNotPermitted` (HTTP 409, *Public access is not permitted on this storage account.*) - the account switch overrides every container. You would see `ResourceNotFound` (404) instead only if the account switch were **on** and the container still **Private**.
 
