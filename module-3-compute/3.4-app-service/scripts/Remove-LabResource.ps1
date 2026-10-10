@@ -30,8 +30,11 @@
     succeeds and does not find it, or a getter that reports it as not found, means "absent" -
     Test-LabNotFoundError tells the two apart (issue #290, as #255 did for Labs 1.2-2.3). The App
     Service Plan stays when the Web App or its slots could not be looked up, or the Web App could
-    not be deleted: an app may still run on the plan, with its integration attached. The Web App
-    stays when its slots could not be listed, because their integration could not be detached.
+    not be deleted: an app may still run on the plan, with its integration attached. It also stays
+    when the VNet integration of a site could not be confirmed detached - the DELETE failed, got no
+    answer or an unexpected status, or the site still reports a subnet after three minutes - which
+    is an [ERROR], counted: deleting the plan then could orphan the serviceAssociationLink. The Web
+    App stays when its slots could not be listed, because their integration could not be detached.
     The subnet checks are diagnostic: a VNet they cannot read is a [WARN], not a failure.
 
     Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
@@ -240,7 +243,7 @@ try {
 
     # 3. Detach the VNet integration from the app and every slot BEFORE anything is deleted
     if ($appLookup.Failed) {
-        $keepPlanReason = "Web App '$AppName' could not be looked up"
+        $keepPlanReason = "Web App '$AppName' could not be looked up, and it may still run on the plan"
     }
     elseif ($app) {
         $targets = @($app.Id)
@@ -250,27 +253,37 @@ try {
         if ($slotLookup.Failed) {
             # A slot runs on the plan too, and an integration it holds cannot be detached unseen.
             $keepAppReason = "its deployment slots could not be listed, so their VNet integration was not detached"
-            $keepPlanReason = "the deployment slots of '$AppName' could not be looked up"
+            $keepPlanReason = "the deployment slots of '$AppName' could not be looked up, and they may still run on the plan"
         }
         foreach ($slot in $slotLookup.Value) { $targets += $slot.Id }
 
         foreach ($id in $targets) {
             if ($PSCmdlet.ShouldProcess($id, 'Remove VNet integration')) {
                 Write-Host "Detaching VNet integration: $id" -ForegroundColor Yellow
-                $detached += $id
+                # A DELETE that did not go through is not polled: the integration is still there,
+                # and three minutes of polling would only confirm it.
                 $response = $null
+                $problem = $null
                 try {
                     $response = Invoke-AzRestMethod -Method DELETE -Path "$id/networkConfig/virtualNetwork?api-version=$webApiVersion" -ErrorAction Stop
                 }
                 catch {
-                    Write-Host "  -> [WARN] No response from the management API - the integration may still be attached: $_" -ForegroundColor Yellow
-                    continue
+                    $problem = "no response from the management API: $_"
                 }
-                if ($null -eq $response) {
-                    Write-Host "  -> [WARN] No response from the management API - the integration may still be attached." -ForegroundColor Yellow
+                if (-not $problem -and $null -eq $response) {
+                    $problem = 'no response from the management API'
                 }
-                elseif ($response.StatusCode -notin 200, 202, 204, 404) {
-                    Write-Host "  -> [WARN] HTTP $($response.StatusCode): $($response.Content)" -ForegroundColor Yellow
+                elseif (-not $problem -and $response.StatusCode -notin 200, 202, 204, 404) {
+                    $problem = "HTTP $($response.StatusCode): $($response.Content)"
+                }
+
+                if ($problem) {
+                    $script:cleanupFailures++
+                    Write-Host "  -> [ERROR] Could not detach the VNet integration - it may still be attached ($problem)" -ForegroundColor Red
+                    $keepPlanReason = 'the VNet integration could not be confirmed detached from every site, and deleting the plan could orphan its serviceAssociationLink'
+                }
+                else {
+                    $detached += $id
                 }
             }
         }
@@ -326,7 +339,9 @@ try {
         }
 
         foreach ($id in $pending) {
-            Write-Host "  -> [WARN] Integration still attached after 3 minutes: $id" -ForegroundColor Yellow
+            $script:cleanupFailures++
+            Write-Host "  -> [ERROR] Integration still attached after 3 minutes: $id" -ForegroundColor Red
+            $keepPlanReason = 'the VNet integration could not be confirmed detached from every site, and deleting the plan could orphan its serviceAssociationLink'
         }
     }
 
@@ -368,7 +383,7 @@ try {
         catch {
             $script:cleanupFailures++
             Write-Host "  -> [ERROR] Could not delete Web App '$AppName': $_" -ForegroundColor Red
-            $keepPlanReason = "Web App '$AppName' could not be deleted"
+            if (-not $keepPlanReason) { $keepPlanReason = "Web App '$AppName' could not be deleted, and it may still run on the plan" }
         }
     }
 
@@ -398,7 +413,7 @@ try {
 
     # 8. Delete the App Service Plan - only when nothing that may still run on it went unseen.
     if ($keepPlanReason) {
-        Write-Host "Keeping App Service Plan '$AspName': $keepPlanReason, and an app may still run on it." -ForegroundColor Yellow
+        Write-Host "Keeping App Service Plan '$AspName': $keepPlanReason." -ForegroundColor Yellow
     }
     elseif ($PSCmdlet.ShouldProcess($AspName, 'Remove App Service Plan')) {
         Write-Host "Removing App Service Plan '$AspName'..." -ForegroundColor Yellow

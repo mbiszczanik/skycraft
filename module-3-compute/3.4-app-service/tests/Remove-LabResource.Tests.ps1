@@ -67,6 +67,7 @@ BeforeAll {
         'Get-AzAppServicePlan'
         'Remove-AzAppServicePlan'
         'Start-Sleep'
+        'Get-Date'
     )
 
     # Every command the script calls, recording its own invocation. By default the resource group
@@ -81,12 +82,18 @@ BeforeAll {
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled) or
     #                         report its resource, or its group, not found (notfound, rgnotfound)
     #   SKYCRAFT_STUB_FAIL    '<Remove-command>:<name>,...' makes one removal throw
+    #   SKYCRAFT_STUB_REST    how the staging slot's integration answers: 'throws' (the DELETE
+    #                         throws), 'http500' (the DELETE answers 500) or 'attached' (the
+    #                         verification GET keeps reporting a subnet)
+    # Get-Date and Start-Sleep share a fake clock that a sleep advances, so the three-minute
+    # verification deadline passes without waiting for it.
     # A lookup is named after its command and the resource it reads: 'Get-AzWebApp:<app>',
     # 'Get-AzWebAppSlot:<app>', 'Get-AzAppServicePlan:<plan>', 'Get-AzVirtualNetwork:<vnet>'; the
     # autoscale settings are listed, as 'Get-AzAutoscaleSetting', and the listing always holds one
     # setting the lab did not create. A REST call is logged as 'Invoke-AzRestMethod:<method>:<path>'.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
+$script:Clock   = [datetime]'2026-01-01T00:00:00'
 $script:SiteId  = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Web/sites/dev-skycraft-swc-app01'
 
 function Write-StubCall {
@@ -183,7 +190,15 @@ function Invoke-AzRestMethod {
     [CmdletBinding()]
     param([string]$Method, [string]$Path)
     Write-StubCall -Name "Invoke-AzRestMethod:${Method}:$(($Path -split '\?')[0])"
-    if ($Method -eq 'DELETE') { return [pscustomobject]@{ StatusCode = 200; Content = '' } }
+    $kind = if ($Path -like '*/slots/staging/*') { $env:SKYCRAFT_STUB_REST }
+    if ($Method -eq 'DELETE') {
+        if ($kind -eq 'throws') { Write-Error -ErrorId 'HttpRequestException' -Message 'An error occurred while sending the request.'; return }
+        if ($kind -eq 'http500') { return [pscustomobject]@{ StatusCode = 500; Content = '{"error":{"code":"InternalServerError"}}' } }
+        return [pscustomobject]@{ StatusCode = 200; Content = '' }
+    }
+    if ($kind -eq 'attached') {
+        return [pscustomobject]@{ StatusCode = 200; Content = '{"properties":{"subnetResourceId":"/subscriptions/0/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Network/virtualNetworks/dev-skycraft-swc-vnet/subnets/AppServiceSubnet"}}' }
+    }
     [pscustomobject]@{ StatusCode = 404; Content = '' }
 }
 
@@ -223,6 +238,13 @@ function Start-Sleep {
     [CmdletBinding()]
     param([int]$Seconds)
     Write-StubCall -Name "Start-Sleep:$Seconds"
+    $script:Clock = $script:Clock.AddSeconds($Seconds)
+}
+
+function Get-Date {
+    [CmdletBinding()]
+    param()
+    $script:Clock
 }
 '@
 
@@ -234,6 +256,7 @@ function Start-Sleep {
             [string[]]$Fail = @(),
             [string[]]$Lookup = @(),
             [string[]]$ArgumentList = @('-Force'),
+            [string]$Rest = '',
             [switch]$Empty
         )
 
@@ -244,6 +267,7 @@ function Start-Sleep {
             SKYCRAFT_STUB_FAIL   = $Fail -join ','
             SKYCRAFT_STUB_LOOKUP = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
+            SKYCRAFT_STUB_REST   = $Rest
             SKYCRAFT_STUB_LOG    = $logPath
         }
 
@@ -279,9 +303,14 @@ function Start-Sleep {
         'Remove-AzAppServicePlan:dev-skycraft-swc-asp'
     )
 
+    $script:DetachThrows   = Invoke-CleanupScript -Stub $script:Stub -Rest 'throws'
+    $script:Detach500      = Invoke-CleanupScript -Stub $script:Stub -Rest 'http500'
+    $script:StillAttached  = Invoke-CleanupScript -Stub $script:Stub -Rest 'attached'
+
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:NotFound, $script:AppDenied, $script:SlotsDenied,
-        $script:LookupsFail, $script:VnetDenied, $script:AppStuck, $script:RemovalsFail
+        $script:LookupsFail, $script:VnetDenied, $script:AppStuck, $script:RemovalsFail, $script:DetachThrows,
+        $script:Detach500, $script:StillAttached
     )
 }
 
@@ -424,6 +453,36 @@ Describe 'Lab 3.4 Remove-LabResource.ps1 - a failed deletion is counted' {
         $run.Output | Should -Match 'Cleanup finished with 2 failure\(s\)'
         $run.Output | Should -Not -Match 'Cleanup completed successfully'
         $run.Calls  | Should -Contain 'Remove-AzAppServicePlan:dev-skycraft-swc-asp'
+    }
+}
+
+Describe 'Lab 3.4 Remove-LabResource.ps1 - an unconfirmed detach keeps the plan' {
+
+    It 'exits 1 and keeps the plan when <case>' -ForEach @(
+        @{ case = 'the DELETE throws';                     scenario = 'DetachThrows';  pattern = '\[ERROR\] Could not detach the VNet integration[^\r\n]*An error occurred while sending the request' }
+        @{ case = 'the DELETE answers an unexpected status'; scenario = 'Detach500';   pattern = '\[ERROR\] Could not detach the VNet integration[^\r\n]*HTTP 500' }
+        @{ case = 'the site still reports a subnet after three minutes'; scenario = 'StillAttached'; pattern = '\[ERROR\] Integration still attached after 3 minutes: [^\r\n]*/slots/staging' }
+    ) {
+        $run = Get-Variable -Scope Script -Name $scenario -ValueOnly
+        $run.ExitCode | Should -Be 1 -Because "deleting the plan could orphan its serviceAssociationLink; output was:`n$($run.Output)"
+        $run.Output | Should -Match $pattern
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Output | Should -Match "Keeping App Service Plan 'dev-skycraft-swc-asp': the VNet integration could not be confirmed detached"
+        $run.Calls  | Should -Not -Contain 'Get-AzAppServicePlan:dev-skycraft-swc-asp'
+        $run.Calls  | Should -Not -Contain 'Remove-AzAppServicePlan:dev-skycraft-swc-asp'
+        # The other steps still run.
+        $run.Calls  | Should -Contain 'Remove-AzWebApp:dev-skycraft-swc-app01'
+        $run.Calls  | Should -Contain 'Remove-AzAutoscaleSetting:dev-skycraft-swc-asp-autoscale'
+    }
+
+    It 'does not poll a site whose DELETE did not go through' {
+        $script:DetachThrows.Calls | Should -Not -Contain ('Invoke-AzRestMethod:GET:/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Web/sites/dev-skycraft-swc-app01/slots/staging/networkConfig/virtualNetwork')
+    }
+
+    It 'polls an attached site until the three-minute deadline, and no longer' {
+        $sleeps = @($script:StillAttached.Calls | Where-Object { $_ -eq 'Start-Sleep:10' }).Count
+        $sleeps | Should -BeGreaterOrEqual 17
+        $sleeps | Should -BeLessOrEqual 19
     }
 }
 
