@@ -412,7 +412,7 @@ Describe 'Lab cleanup lookups - the pending list only names labs still to conver
     }
 }
 
-Describe 'Lab cleanup lookups - no converted cleanup reads a failed lookup as "absent" (#255)' {
+Describe 'Lab cleanup lookups - no converted cleanup reads a failed lookup as "absent"' {
 
     It 'has converted cleanups to check' -ForEach @(@{ count = $RatchetCases.Count }) {
         $count | Should -BeGreaterThan 0
@@ -421,6 +421,6 @@ Describe 'Lab cleanup lookups - no converted cleanup reads a failed lookup as "a
     It "'<file>' gives no *-Az* command -ErrorAction SilentlyContinue or Ignore" -ForEach $RatchetCases {
         $hits = @(Find-SilencedAzCommand -Text (Get-Content -Raw -LiteralPath $path) |
             ForEach-Object { "line $($_.Line): $($_.Text)" })
-        $hits | Should -BeNullOrEmpty -Because "a lookup that fails would read as 'absent'; route it through Invoke-LabLookup (#255)"
+        $hits | Should -BeNullOrEmpty -Because "a lookup that fails would read as 'absent'; route it through Invoke-LabLookup (#255, #290)"
     }
 }
