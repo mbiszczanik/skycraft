@@ -2322,6 +2322,55 @@ class ResourceTests(RunnerTestCase):
         screenshot = [x for x in r.records if x["kind"] == "screenshot"][-1]
         self.assertEqual((screenshot["outcome"], screenshot["category"]), ("match", None))   # the images are not stale
 
+    def test_run_step_opens_the_picker_of_a_field_before_its_chain(self) -> None:
+        # 'Destination: **Send to Log Analytics workspace** -> `law`' (5.1.7, #250): the field's
+        # picker first, then the chain; a resource at the chain's start is inside the picker, so
+        # it is looked for on screen only, never in the Portal's search.
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        done: list[tuple] = []
+
+        def acting(how: str, outcome: str = "match"):
+            def act(step, item, label, **where):
+                done.append((how, label, *where.values()))
+                record = r.new_record(step, item["kind"], label)
+                record.update(outcome=outcome)
+                return record
+            return act
+
+        picker = {"kind": "navigation", "field": "Destination", "labels": ["Send to Log Analytics workspace", "law"],
+                  "resources": [1], "line": 236}
+        with mock.patch.object(r, "act_on_label", side_effect=acting("label")), \
+                mock.patch.object(r, "open_resource", side_effect=acting("resource")):
+            self.assertTrue(self.quietly(lambda: r.run_step(dict(self.STEP, items=[picker]))))
+        self.assertEqual(done, [("label", "Destination", True), ("label", "Send to Log Analytics workspace"),
+                                ("resource", "law", False)])
+        done.clear()
+        first = dict(picker, field="Backup policy", labels=["SkyCraft-Blob-Policy", "Select"], resources=[0])
+        with mock.patch.object(r, "act_on_label", side_effect=acting("label")), \
+                mock.patch.object(r, "open_resource", side_effect=acting("resource")):
+            self.assertTrue(self.quietly(lambda: r.run_step(dict(self.STEP, items=[first]))))
+        self.assertEqual(done, [("label", "Backup policy", True), ("resource", "SkyCraft-Blob-Policy", False),
+                                ("label", "Select")])
+        done.clear()
+        with mock.patch.object(r, "act_on_label", side_effect=acting("label", outcome="unknown")), \
+                mock.patch.object(r, "open_resource", side_effect=acting("resource")):
+            self.assertFalse(self.quietly(lambda: r.run_step(dict(self.STEP, items=[picker]))))
+        self.assertEqual(done, [("label", "Destination", True)])                   # no picker: the chain stops
+
+    def test_a_fields_picker_is_found_as_a_field_and_clicked_not_filled(self) -> None:
+        picker = {"kind": "navigation", "field": "Log Analytics workspace", "labels": ["law"], "resources": [0],
+                  "line": 236}
+        box = ScreenNode(attrs={"role": "combobox"})
+        screen = Screen(("combobox", "Log Analytics workspace", box))
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=[]):
+            record = self.quietly(lambda: r.act_on_label(self.STEP, picker, "Log Analytics workspace", open_field=True))
+        self.assertEqual((record["kind"], record["label"], record["outcome"]),
+                         ("navigation", "Log Analytics workspace", "match"))
+        self.assertEqual((box.clicked, box.filled, r.ask.prompts), (1, [], []))
+
     def test_the_summary_counts_a_missing_resource_as_blocking_and_proposes_no_edit(self) -> None:
         r = self.runner()
         record = r.new_record(self.STEP, "navigation", self.LB)
@@ -2532,6 +2581,13 @@ class StartBladeTests(RunnerTestCase):
                     self.assertTrue(done)
                     self.assertEqual((r.ask.prompts, self.wrong_blade(r)), ([], []))
                     self.assertEqual(self.entry().get("startBlade"), recorded)
+
+    def test_a_picker_chain_that_opens_with_a_resource_does_not_start_anywhere(self) -> None:
+        # The resource is looked for in the picker the field opens (#250), never in the global search.
+        item = {"kind": "navigation", "labels": ["prod-skycraft-swc-vnet", "Confirm selection"], "line": 2,
+                "resources": [0], "field": "Flow log type"}
+        self.assertFalse(run.starts_anywhere(item))
+        self.assertTrue(run.starts_anywhere({key: value for key, value in item.items() if key != "field"}))
 
     def test_a_blade_search_does_not_start_anywhere(self) -> None:
         self.recording["steps"]["9.9.2"] = {"startBlade": GROUPS}

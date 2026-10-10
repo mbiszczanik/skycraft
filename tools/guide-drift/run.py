@@ -48,6 +48,12 @@ asked about it: when it is not found, the step fails with blocking drift in cate
 'missing-resource' and no proposed edit, as an earlier step, another lab or the view the run is
 on is at fault, not the guide's name (issue #199). Its screenshot is not marked stale for it.
 
+A navigation item with a "field" (parse.py, issue #250: 'Destination: **Send to Log Analytics
+workspace** -> `platform-skycraft-swc-law`') picks that field's value through its chain: the
+field is looked up as a field is and clicked, never filled, which opens its picker; it is asked
+about like any label when it is not found. The chain's labels and resource names follow; a
+resource at the chain's start is listed in the picker, so it is looked for on screen only.
+
 When a step does not go through, the person chooses: c, finish it by hand and continue; s, skip
 this step and continue with the next one, giving the reason, which the summary lists under
 'skipped' (the step's own findings stay counted, and a later step that needed it may fail too
@@ -657,10 +663,11 @@ def editable(element: Locator, value: str = "") -> bool:
 def starts_anywhere(item: dict) -> bool:
     """Whether a step whose first item is `item` may start on any blade (#207): a search in the
     Portal's global search (a 'search' item without scope 'blade'), or a chain that opens with a
-    resource name, which is looked up there when it is not on screen (#199)."""
+    resource name, which is looked up there when it is not on screen (#199). A resource that
+    opens a picker's chain (#250) is looked for in the picker only, so that step does not."""
     if item["kind"] == "search":
         return item.get("scope") != "blade"
-    return 0 in item.get("resources", ())
+    return 0 in item.get("resources", ()) and not item.get("field")
 
 
 def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
@@ -1648,10 +1655,14 @@ class Runner:
         return element
 
     def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None,
-                     form_start: bool = False) -> dict:
+                     form_start: bool = False, open_field: bool = False) -> dict:
         """Find the element the guide calls `label`, act on it, return the result record.
         `form_start`: the label is the first field of a form, which must be open (find_form)
-        unless the recording holds a decision for the label (replay finds the field)."""
+        unless the recording holds a decision for the label (replay finds the field).
+
+        `open_field`: `label` is the field whose picker a navigation item's chain picks from
+        (parse.py's "field", #250): it is looked up as a field is (find_field) and clicked, which
+        opens its picker, never filled."""
         kind, line = item["kind"], item["line"]
         record = self.new_record(step, kind, label)
         if kind == "search" and item.get("scope") == "blade":
@@ -1660,7 +1671,7 @@ class Runner:
             if kind == "search":
                 element = search_portal(self.page, label, diagnose=lambda tree: self.save_search_tree(step, tree))
             else:
-                look = self.looking_for(label, kind)
+                look = self.looking_for(label, "field" if open_field else kind)
                 if form_start and label not in self.recording["steps"].get(step["id"], {}).get("labels", {}):
                     element = self.find_form(step, item, label, value or "", look)
                 else:
@@ -1936,10 +1947,17 @@ class Runner:
             else:
                 records = []
                 resources = set(item.get("resources", ()))     # indices of resource names (#199)
-                for index, label in enumerate(item["labels"]):
-                    records.append(self.open_resource(step, item, label, at_start=(index == 0))
-                                   if index in resources
-                                   else self.act_on_label(step, item, label))
+                picker = item.get("field")                      # the chain picks this field's value (#250)
+                labels = ([None] if picker else []) + list(item["labels"])
+                for index, label in enumerate(labels):
+                    if label is None:
+                        records.append(self.act_on_label(step, item, picker, open_field=True))
+                    else:
+                        index -= bool(picker)
+                        # A resource that opens a picker's chain is listed in the picker: no search.
+                        records.append(self.open_resource(step, item, label, at_start=(index == 0 and not picker))
+                                       if index in resources
+                                       else self.act_on_label(step, item, label))
                     if records[-1]["outcome"] == "unknown" or records[-1].get("severity") == "blocking":
                         break
             if item["kind"] != "field":
