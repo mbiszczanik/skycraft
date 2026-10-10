@@ -1018,6 +1018,11 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         $alert[0].value | Should -BeExactly 'leave unchecked'
         $alert[0].PSObject.Properties.Name | Should -Not -Contain 'literal'
         @($items[[array]::IndexOf($items, $alert[0]) + 1].labels) | Should -Be @('Review + create', 'Create')
+        # The tab of the same name is opened first, so the check box is on screen when the field is
+        # looked up, and find_field prefers the check box (a control) to a tab labelled the same.
+        $tab = $items[[array]::IndexOf($items, $alert[0]) - 1]
+        $tab.kind | Should -Be 'action'
+        @($tab.labels) | Should -Be @('Create alert')
     }
 
     It 'fills the workspace, test group and test configuration of step 5.3.6 as fields, check boxes by their state' {

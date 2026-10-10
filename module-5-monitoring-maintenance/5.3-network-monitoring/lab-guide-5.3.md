@@ -236,7 +236,8 @@ Both endpoint VMs need the **NetworkWatcherAgent** extension, and no earlier lab
 4. **Workspace**:
    - **Use workspace created by connection monitor**: unchecked
    - Workspace: `platform-skycraft-swc-law`
-5. **Create alert**: leave unchecked.
+5. **Create alert**:
+   - **Create alert**: leave unchecked
 6. Click **Review + create** → **Create**.
 7. The wizard has no Tags tab, and `Test-Lab.ps1` checks the monitor's `Project` and `CostCenter` tags, so tag it from Cloud Shell (PowerShell):
 
