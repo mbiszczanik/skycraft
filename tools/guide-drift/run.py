@@ -52,13 +52,25 @@ When a step does not go through, the person chooses: c, finish it by hand and co
 this step and continue with the next one, giving the reason, which the summary lists under
 'skipped' (the step's own findings stay counted, and a later step that needed it may fail too
 and is asked about the same way); e, end the lab: skip the rest and finish; or q, stop and keep
-the state. Closed input ends the lab. --state records the completed steps (a skipped step
-among them, so a resume passes over it) and the step a -Resume starts at (the one in progress,
-or the one that failed); a resume first asks whether that step finished (y), must be redone (n)
-or is skipped (s, as above but without a reason). A run that ends normally, whatever was
-skipped, marks the state finished, and it cannot be resumed.
+the state. Closed input ends the lab. A step finished by hand (c) records the view the Portal
+shows when the person answers, as a step that went through does (issue #206). --state records
+the completed steps (a skipped step among them, so a resume passes over it) and the step a
+-Resume starts at (the one in progress, or the one that failed); a resume first asks whether
+that step finished (y), must be redone (n) or is skipped (s, as above but without a reason). A
+run that ends normally, whatever was skipped, marks the state finished, and it cannot be resumed.
 A resumed run is the same run: it keeps the state's run id (ignoring --run-id), writes into the
 same --log-dir/<run id>/ folder, and its summary and exit code cover every step of both parts.
+
+A resumed run, and one started with --from-step, has a new browser on the Microsoft Entra ID
+overview, not where the stopped run left the Portal (issue #206). So before the first step that
+runs, the Portal is brought to the view that step starts from (Runner.start_view): the view the
+recording keeps for the last step performed before it (after y, the step that was in flight;
+after n, the step before it). The run opens that view itself, pinned to the tenant, when it can:
+not when the view names an object by id ('<id>': the recording leaves ids out) or is no Portal
+view. Otherwise it prints the view and why it cannot open it, or says that no view is recorded
+for that step. Either way it waits for Enter, as the recording keeps no query string and a view
+opened on its own has no blades before it: the person checks the Portal and corrects it. The
+answer to the resume question is saved only then, so closed input there leaves the state as is.
 
 A step whose recording entry carries '"skip": "<reason>"' (an optional or conceptual step that
 would create resources, or the other option of a lettered pair; issue #200) is never performed:
@@ -95,6 +107,7 @@ import time
 import traceback
 from pathlib import Path
 from typing import Callable, TypeVar
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, Error as PlaywrightError, Frame, Locator, Page, sync_playwright
 
@@ -108,6 +121,9 @@ Found = TypeVar("Found")     # what in_time() looks for
 
 PORTAL = "https://portal.azure.com"
 ENTRA_OVERVIEW = "/view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Overview"
+# What keeps a recorded view (Redactor.view_url) from being opened as an address on resume (#206):
+# an object id the recording left out, or a token the Redactor cannot restore.
+UNOPENABLE_VIEW = re.compile(r"<id>|\[[^\]]*\]|\$\{")
 SETTLE_MS = 1500
 FIND_TIMEOUT_MS = 8000
 CHECK_TIMEOUT_MS = 2000     # set_checked() before the label is tried, and the wait for its effect
@@ -1289,9 +1305,11 @@ class Runner:
         "  q  stop here and keep the state for -Resume (no clean-up)\n> "
     )
     REASON_PROMPT = "Why is the step skipped? (goes into the summary)\n> "
+    # The browser of a resumed run is new, on the Microsoft Entra ID overview: whatever the answer,
+    # the Portal is brought to the view the next step starts from before it runs (#206).
     RESUME_PROMPT = (
-        "  y  it finished: mark it done and continue (leave the Portal where the step ended)\n"
-        "  n  it did not: bring the Portal back to the view above, then redo it from its first item\n"
+        "  y  it finished: mark it done, then bring the Portal to the view it ended on\n"
+        "  n  it did not: bring the Portal to the view the step before it ended on, then redo it\n"
         "  s  skip it and continue with the next step\n> "
     )
 
@@ -1716,12 +1734,21 @@ class Runner:
                 break
         if not step_failed:
             self.check_result(step, entry)
-            entry["viewUrl"] = self.redactor.view_url(self.page.url)
-            self.save_recording()
+            self.record_view(step)
         self.write(self.screenshot(step))
         return not step_failed
 
     # -- results ---------------------------------------------------------------------------
+
+    def record_view(self, step: dict) -> None:
+        """Keep the view `step` ended on in the recording (redacted: Redactor.view_url), where a
+        resume finds it for the step after it. Called when the step went through, and when the
+        person finished it by hand ('c'), so that a step done by hand leaves a view too (#206).
+        Nothing is kept from a closed window: its address is the last one it showed."""
+        if self.page.is_closed():
+            return
+        self.step_entry(step)["viewUrl"] = self.redactor.view_url(self.page.url)
+        self.save_recording()
 
     def new_record(self, step: dict, kind: str, label: str | None) -> dict:
         return {"runId": self.args.run_id, "at": now(), "lab": self.steps["lab"], "step": step["id"],
@@ -1801,16 +1828,64 @@ class Runner:
                                      "completed": completed, "inFlight": in_flight,
                                      "finished": finished, "logDir": str(Path(self.args.log_dir).resolve())})
 
-    def view_before(self, portal: list[dict], index: int) -> str:
-        """The view the last step performed before portal[index] ended on. A step the recording
-        skips never moved the Portal, so the step before it is asked instead."""
+    def start_view(self, portal: list[dict], index: int) -> tuple[str | None, str | None]:
+        """The view portal[index] starts from: (the id of the last step performed before it, the
+        view the recording keeps for that step or None). (None, None) when no step comes before
+        it. A step the recording skips never moved the Portal, so the step before it is taken
+        instead (#200)."""
         while index > 0 and skip_reason(self.recording, portal[index - 1]["id"]) is not None:
             index -= 1
         if index == 0:
-            return "(the lab's first step: start from the Portal home page)"
+            return None, None
         previous = portal[index - 1]["id"]
-        url = self.recording["steps"].get(previous, {}).get("viewUrl")
-        return url or f"(no view recorded for step {previous})"
+        return previous, self.recording["steps"].get(previous, {}).get("viewUrl")
+
+    def view_address(self, view: str) -> str | None:
+        """The address that opens a recorded view in this run's tenant: the view with the tenant
+        data restored and the tenant pinned, as open_portal() pins it. None when it cannot be
+        opened: it names an object by id, which the recording leaves out ('<id>'), it keeps a
+        token the Redactor cannot restore, or it is no Portal view at all (a recording is data,
+        and the run only ever goes to the Portal)."""
+        parts = urlsplit(self.redactor.restore(view))
+        if (f"{parts.scheme}://{parts.netloc}" != PORTAL or parts.path not in ("", "/") or parts.query
+                or not parts.fragment or parts.fragment.startswith("@")
+                or UNOPENABLE_VIEW.search(parts.fragment)):
+            return None
+        return f"{PORTAL}/#@{self.args.tenant_id}/{parts.fragment}"
+
+    def bring_to_view(self, portal: list[dict], index: int, passed: str = "") -> bool:
+        """Before portal[index], the first step a resumed run (or one started with --from-step)
+        performs: its browser is new and shows the Microsoft Entra ID overview, not the view the
+        step starts from (#206). Opens that view when the recording keeps one that can be opened
+        (view_address); otherwise says what to bring the Portal to and why the run cannot. Then
+        waits for Enter either way: the recording keeps no query string, and a view opened on its
+        own has no blades before it. False when input is closed."""
+        step = portal[index]
+        previous, view = self.start_view(portal, index)
+        head = f"\nStarting at step {step['id']} ({step['title']}){passed}."
+        if previous is None:
+            print(f"{head} No step of the lab comes before it, so it starts where a new run does, on "
+                  f"the view the browser opened: check the Portal shows it, then press Enter.")
+        elif view is None:
+            print(f"{head} No view is recorded for step {previous}, the step before it, so the run cannot "
+                  f"open it: bring the Portal to where step {previous} ends in the guide, then press Enter.")
+        else:
+            address = self.view_address(view)
+            why = ("it names an object by id, which the recording leaves out" if "<id>" in view
+                   else "it is no Portal view the run can open")
+            if address is not None:
+                try:
+                    self.page.goto(address, wait_until="domcontentloaded")
+                except PlaywrightError as error:
+                    why = f"opening it failed: {(str(error).strip().splitlines() or [type(error).__name__])[0]}"
+                else:
+                    print(f"{head} Opened the view step {previous} ended on:\n  {view}\n"
+                          f"Check the Portal shows it (the recording keeps no query string, so bring it "
+                          f"there if not), then press Enter.")
+                    return self.prompt("> ") is not None
+            print(f"{head} Bring the Portal to the view step {previous} ended on, then press Enter "
+                  f"(the run cannot open it: {self.redactor.redact(why)}):\n  {view}")
+        return self.prompt("> ") is not None
 
     # -- the run ---------------------------------------------------------------------------
 
@@ -1834,36 +1909,34 @@ class Runner:
                   f"the recording now skips it.")
             self.records = [r for r in self.records if r["step"] != first["id"]]
             in_flight = False
+        answer = None
         if in_flight:
             print(f"\nStep {first['id']} ({first['title']}) was in progress when the last run stopped.\n"
-                  f"The step before it ended on this view:\n  {self.view_before(portal, start)}\n"
                   f"Did step {first['id']} finish?")
-            answer = None
             while answer not in ("y", "n", "s"):
                 answer = self.prompt(self.RESUME_PROMPT)
                 if answer is None:
                     print("No answer (input closed); nothing was run.")
                     return NOT_STARTED
             if answer in ("y", "s"):
-                completed.append(first["id"])
-                if answer == "s":
-                    self.skip_step(first, first["id"])
-                self.save_state(completed, None)
-        elif start > 0 or self.args.resume:
-            # The first step that will run: steps the recording skips are passed over (#200), and
-            # when every step left is skipped there is no view to bring the Portal to.
+                completed.append(first["id"])   # saved below, once the Portal is on the next view
+        if start > 0 or self.args.resume:
+            # The browser is new: the first step that runs needs the Portal brought to the view it
+            # starts from (#206). Steps the recording skips are passed over (#200), and when every
+            # step left is skipped or completed there is no view to bring the Portal to.
             runs = next((i for i in range(start, len(portal)) if portal[i]["id"] not in completed
                          and skip_reason(self.recording, portal[i]["id"]) is None), None)
             if runs is not None:
-                passed = ("" if runs == start else f" (the recording skips step {first['id']})"
-                          if runs == start + 1 else
-                          f" (the recording skips steps {first['id']} to {portal[runs - 1]['id']})")
-                print(f"\nStarting at step {portal[runs]['id']} ({portal[runs]['title']}){passed}. Bring "
-                      f"the Portal to the view the step before it ended on, then press Enter:\n"
-                      f"  {self.view_before(portal, runs)}")
-                if self.prompt("> ") is None:
+                skipped = [s["id"] for s in portal[start:runs] if skip_reason(self.recording, s["id"]) is not None]
+                passed = ("" if not skipped else f" (the recording skips step {skipped[0]})" if len(skipped) == 1
+                          else f" (the recording skips steps {', '.join(skipped)})")
+                if not self.bring_to_view(portal, runs, passed):
                     print("No answer (input closed); nothing was run.")
                     return NOT_STARTED
+        if answer in ("y", "s"):
+            if answer == "s":
+                self.skip_step(first, first["id"])
+            self.save_state(completed, None)
         for step in portal[start:]:
             if step["id"] in completed:
                 continue
@@ -1891,6 +1964,7 @@ class Runner:
             if answer == "s" and reason is None:    # input closed: nobody is there to go on
                 answer = "e"
             if answer == "c":
+                self.record_view(step)          # where the person finished it, for a resume (#206)
                 record = self.new_record(step, "action", None)
                 record.update(outcome="match", observed="done by hand")
                 self.write(record)
