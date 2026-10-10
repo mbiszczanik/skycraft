@@ -9,6 +9,27 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0](https://github.com/mbiszczanik/skycraft/compare/v0.16.0...v0.17.0) (2026-10-10)
+
+
+### Features
+
+* **guide-drift:** check the Portal is on the blade a step starts from ([#295](https://github.com/mbiszczanik/skycraft/issues/295)) ([a35e143](https://github.com/mbiszczanik/skycraft/commit/a35e14377f6f5b293e24a7af2a6419b0770928f4)), closes [#207](https://github.com/mbiszczanik/skycraft/issues/207)
+* **guide-drift:** fill a field whose value is a radio group ([#299](https://github.com/mbiszczanik/skycraft/issues/299)) ([c894b21](https://github.com/mbiszczanik/skycraft/commit/c894b21b0b8791f0ed5d023319ad4417607d6f42)), closes [#294](https://github.com/mbiszczanik/skycraft/issues/294)
+* **guide-drift:** read resource names in picker values, worded steps and prose chains ([#298](https://github.com/mbiszczanik/skycraft/issues/298)) ([b4c8c9e](https://github.com/mbiszczanik/skycraft/commit/b4c8c9e69bc7a69b8d198b37963c4474b534024f)), closes [#250](https://github.com/mbiszczanik/skycraft/issues/250)
+* **guide-drift:** redact what the run writes and drop Playwright call logs ([#308](https://github.com/mbiszczanik/skycraft/issues/308)) ([31a6cf4](https://github.com/mbiszczanik/skycraft/commit/31a6cf4d4e8c909637ecab222f0b045a7a96cac5)), closes [#212](https://github.com/mbiszczanik/skycraft/issues/212)
+
+
+### Bug Fixes
+
+* **guide-drift:** read the guide shapes of labs 3.3-5.3 and give their steps the navigation they need ([#307](https://github.com/mbiszczanik/skycraft/issues/307)) ([b070a24](https://github.com/mbiszczanik/skycraft/commit/b070a249b31057ff2adc0ea2f1b1d78b08f6fd56)), closes [#203](https://github.com/mbiszczanik/skycraft/issues/203)
+* **labs:** count a failed cleanup lookup instead of reading it as absent (labs 3.1-4.4) ([#297](https://github.com/mbiszczanik/skycraft/issues/297)) ([6234570](https://github.com/mbiszczanik/skycraft/commit/6234570340ee457db91a8d963556b27fa82def79)), closes [#290](https://github.com/mbiszczanik/skycraft/issues/290)
+
+
+### Documentation
+
+* **lab-2.2:** check every subnet's service endpoints in step 2.2.21 ([#291](https://github.com/mbiszczanik/skycraft/issues/291)) ([0d508ce](https://github.com/mbiszczanik/skycraft/commit/0d508ced5007486b84dfba0b44030310eb2944c6)), closes [#283](https://github.com/mbiszczanik/skycraft/issues/283)
+
 ## [0.16.0](https://github.com/mbiszczanik/skycraft/compare/v0.15.1...v0.16.0) (2026-10-10)
 
 
