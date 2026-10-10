@@ -455,7 +455,8 @@ GUID_ANY = re.compile(r"[0-9a-fA-F]{8}(?:(?:-|%2[dD])[0-9a-fA-F]{4}){3}(?:-|%2[d
 # An e-mail address: the signed-in account in the Portal's top bar, a user of another directory.
 # One in the tenant's domain is redacted first ('[tenantdomain]' is no domain here), so it stays
 # findable as 'malfurion.stormrage@[tenantdomain]'.
-EMAIL_ADDRESS = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
+# The first character is no quote, so that 'x@example.com' in quotes keeps its opening one.
+EMAIL_ADDRESS = re.compile(r"[A-Za-z0-9._%+-][A-Za-z0-9._%+'-]*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 # A credential in a connection string or a SAS address: 'AccountKey=...', 'SharedAccessKey=...',
 # 'Password=...', '&sig=...'. No word boundary before the key: what stands before it may be an id
 # or tenant data that scrub replaces later ('<id>sig=' must not read differently on a second pass).
@@ -561,8 +562,11 @@ def scrub(text: str | None, redactor: Redactor, secrets: set[str] | frozenset[st
     already in the text are left alone (sub_outside). So scrubbing a scrubbed text changes
     nothing: records reloaded on -Resume stay as they were written.
 
-    Known limit: tenant data, an address or an id in another form (percent-encoded '%40', in
-    base64, in a JSON escape) is not recognised."""
+    Known limits. Tenant data, an address or an id in another form (percent-encoded '%40', in
+    base64, in a JSON escape) is not recognised. Text that only looks like one is masked too:
+    'Group@2x.png' becomes '<email>', 'ResetPassword=true' becomes 'ResetPassword=[secret]', a
+    quoted argument of 'type(' or 'fill(' in prose becomes '"[typed]"', ' value=x' becomes
+    ' value="[value]"', and 32 hex digits that are no id become '<id>'."""
     if text is None:
         return None
     protected = redactor.tokens

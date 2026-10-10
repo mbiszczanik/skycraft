@@ -575,6 +575,15 @@ class RunLogTextTests(unittest.TestCase):
                          f"{UPN_TOKEN}#EXT#@[tenantdomain], <email>")
         self.assertEqual(self.scrub("- button \"Account manager for Marcin (marcin@fabrikam.example)\"", whole=True),
                          "- button \"Account manager for Marcin (<email>)\"")
+        # A quote before an address is not part of it.
+        self.assertEqual(self.scrub("LookupError: option 'x@gmail.com' not found"),
+                         "LookupError: option '<email>' not found")
+        self.assertEqual(self.scrub("'o'neil@example.org'"), "'<email>'")
+
+    def test_scrub_over_masks_what_only_looks_like_a_secret_an_address_or_a_call(self) -> None:
+        # The known limits recording.scrub documents: masked, never leaked.
+        self.assertEqual(self.scrub("Group@2x.png ResetPassword=true type('a') set value=x"),
+                         '<email> ResetPassword=[secret] type("[typed]") set value="[value]"')
 
     def test_scrub_masks_ids_first_so_the_tenant_prefix_beside_one_goes_too(self) -> None:
         hex_id = "9f8e7d6c5b4a4c3d8e2f1a0b9c8d7e6f"

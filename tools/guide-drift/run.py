@@ -24,8 +24,9 @@ field whose label names a password, secret or other credential (recording.typed_
 every credential in a connection string or SAS address ('AccountKey=', 'sig=') as '[secret]';
 object ids as '<id>'; tenant data, also as a regular expression escapes it, as the Redactor's
 tokens; any other e-mail address as '<email>'; a value a call typed and an element's value
-attribute as '[typed]' and '[value]'. Scrubbing twice changes nothing, so the records a -Resume
-reloads stay as written. A results.jsonl written before #212 keeps its old lines as they are: a
+attribute as '[typed]' and '[value]' (recording.scrub lists what it cannot recognise and what
+it masks that only looks like one of these: 'Group@2x.png', 'ResetPassword=true'). Scrubbing
+twice changes nothing, so the records a -Resume reloads stay as written. A results.jsonl written before #212 keeps its old lines as they are: a
 resume cleans them for the summary only, so such a file is not safe to share. A proposed edit's
 new label is scrubbed the same way; the rest of its line is the guide's own text and is never
 redacted. The summary names the run folder relative to the repository (or by its name alone),
@@ -2186,15 +2187,18 @@ class Runner:
             return
         if entry["result"] is None and "result" not in entry.get("asked", []):
             print(f'Expected Result: "{step["expected"]}"')
-            answer = self.prompt("Text to look for on screen (Enter = not observable): ")
-            if answer is None:          # input closed: ask again next time
-                return
-            # The recording is public: the answer is kept scrubbed (ids, addresses outside the
-            # tenant, secrets as tokens; #212), and the run looks for the text as kept.
-            kept = scrub(answer, self.redactor, self.secrets) if answer else None
-            if kept and kept != self.redactor.redact(answer):
-                print(f"Kept as '{kept}': the recording keeps no ids, addresses or secrets.")
-            entry["result"] = {"text": kept} if kept else None
+            # The recording is public (#212). Tenant data becomes tokens that restore() gives back,
+            # but an id, an address outside the tenant or a secret would be kept as '<id>',
+            # '<email>' or '[secret]', which is never on screen: such a text is asked again.
+            while True:
+                answer = self.prompt("Text to look for on screen (Enter = not observable): ")
+                if answer is None:          # input closed: ask again next time
+                    return
+                if not answer or scrub(answer, self.redactor, self.secrets) == self.redactor.redact(answer):
+                    break
+                print("That text holds an id, an address or a secret, which the recording cannot keep; "
+                      "type a shorter text, or press Enter if it is not observable.")
+            entry["result"] = {"text": self.redactor.redact(answer)} if answer else None
             entry.setdefault("asked", []).append("result")
             self.save_recording()
         if not entry["result"]:

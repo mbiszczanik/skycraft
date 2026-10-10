@@ -797,18 +797,42 @@ class RunLogRedactionTests(RunnerTestCase):
         self.assertEqual(record["outcome"], "drift")
         self.assertEqual(find.call_args.args[2], "Account manager for marcin.b@fabrikam.example")
 
-    def test_the_text_a_result_is_checked_by_is_kept_scrubbed_in_the_recording(self) -> None:
-        r = run.Runner(FakePage(), STEPS, self.recording, self.args(),
-                       ask=Answers(f"Group {self.OBJECT_ID} owned by marcin.b@fabrikam.example in {self.DOMAIN}"))
+    REASK = ("That text holds an id, an address or a secret, which the recording cannot keep; "
+             "type a shorter text, or press Enter if it is not observable.")
+
+    def check_result(self, *answers: str) -> tuple[run.Runner, dict, str, list[str]]:
+        """check_result with `answers` at its prompt: the runner, the step's entry, what it
+        printed, and every text it looked for on screen."""
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
         entry = r.step_entry({"id": "9.9.1"})
+        looked_for: list[str] = []
         out = io.StringIO()
-        with mock.patch.object(run, "text_on_screen", return_value=True), redirect_stdout(out):
+        with mock.patch.object(run, "text_on_screen", lambda page, text: looked_for.append(text) or True), \
+                redirect_stdout(out):
             r.check_result({"id": "9.9.1", "expected": "The group shows"}, entry)
-        kept = "Group <id> owned by <email> in [tenantdomain]"
-        self.assertEqual(entry["result"], {"text": kept})
-        saved = json.loads((self.tmp / "rec.json").read_text(encoding="utf-8"))
-        self.assertEqual(saved["steps"]["9.9.1"]["result"], {"text": kept})
-        self.assertIn(f"Kept as '{kept}'", out.getvalue())
+        return r, entry, out.getvalue(), looked_for
+
+    def test_a_result_text_with_an_id_or_an_address_is_asked_again_and_never_stored(self) -> None:
+        r, entry, out, looked_for = self.check_result(
+            f"Group {self.OBJECT_ID} created", "Owner marcin.b@fabrikam.example",
+            f"Owner malfurion.stormrage@{self.DOMAIN}")
+        self.assertEqual(len(r.ask.prompts), 3)
+        self.assertEqual(out.count(self.REASK), 2)
+        # Tenant data is a token restore() gives back: the run looks for what is on screen.
+        self.assertEqual(entry["result"], {"text": "Owner malfurion.stormrage@[tenantdomain]"})
+        self.assertEqual(looked_for, [f"Owner malfurion.stormrage@{self.DOMAIN}"])
+        saved = (self.tmp / "rec.json").read_text(encoding="utf-8")
+        for kept_out in (self.OBJECT_ID, "fabrikam", "<id>", "<email>", "[secret]", self.DOMAIN):
+            self.assertNotIn(kept_out, saved)
+
+    def test_a_result_text_that_cannot_be_kept_then_enter_or_closed_input_stores_nothing(self) -> None:
+        _, entry, out, looked_for = self.check_result(f"Group {self.OBJECT_ID} created", "")
+        self.assertEqual((entry["result"], entry.get("asked"), looked_for), (None, ["result"], []))
+        self.assertIn(self.REASK, out)
+        self.recording["steps"]["9.9.1"].pop("asked")           # the same recording, not asked yet
+        r, entry, _, looked_for = self.check_result(f"Group {self.OBJECT_ID} created")     # then EOF
+        self.assertEqual((entry["result"], entry.get("asked"), looked_for), (None, None, []))   # asked next time
+        self.assertEqual(len(r.ask.prompts), 2)
 
     def test_a_resumed_run_reloads_the_records_as_written_and_cleans_older_ones(self) -> None:
         r = self.runner(run_id="first")
@@ -898,6 +922,19 @@ class ResumeViewTests(RunnerTestCase):
                       "  https://portal.azure.com/#view/Two\n", out)
         self.assertNotIn(TENANT_ID, out)
         self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+
+    def test_a_view_that_fails_to_open_is_named_with_the_error_scrubbed(self) -> None:
+        # #212: the reason is scrubbed as a record is, ids and other addresses included.
+        self.recording["steps"]["9.9.2"] = {"viewUrl": "https://portal.azure.com/#view/Two"}
+        failing = FakePage(goto_fails=run.PlaywrightError(
+            "Page.goto: net::ERR_ABORTED at https://portal.azure.com/#view/G/groupId/9f8e7d6c-5b4a-4c3d-8e2f-"
+            "1a0b9c8d7e6f/owner/marcin.b@fabrikam.example\nCall log:\n  - navigating to \"https://x\"\n"))
+        r, out, code = self.resume(["y", ""], page=failing)
+        self.assertEqual(code, 0)
+        self.assertIn("(the run cannot open it: opening it failed: Page.goto: net::ERR_ABORTED at "
+                      "https://portal.azure.com/#view/G/groupId/<id>/owner/<email>):\n", out)
+        for leak in ("9f8e7d6c", "fabrikam", "Call log"):
+            self.assertNotIn(leak, out)
 
     def test_the_first_step_of_the_lab_needs_no_view_but_the_person_still_confirms(self) -> None:
         r, out, code = self.resume(["n", ""], state={"lab": LAB, "completed": [], "inFlight": "9.9.1"})
