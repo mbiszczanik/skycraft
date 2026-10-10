@@ -11,6 +11,24 @@
     4. Traffic Analytics data collection rule and endpoint (NWTA-*) that Azure
        creates in the platform resource group when Traffic Analytics is enabled
 
+    Every step continues on error, so one stuck object does not strand the rest. A lookup that
+    fails (a 403, throttling, a transient error) or a removal that fails is reported as [ERROR] and
+    counted; if anything failed the script exits 1. An object that does not exist is not a
+    failure: only a lookup that succeeds and does not find it, or a getter that reports it as not
+    found, means "absent" - Test-LabNotFoundError tells the two apart (issue #290; the script used
+    to look everything up with -ErrorAction SilentlyContinue, printed failures without counting
+    them, and always exited 0).
+
+    The flow logs are listed and picked by name, once to remove the lab's own and once more for
+    step 4. The NWTA-* resources are removed only after both listings succeeded: while a flow log
+    may still feed Traffic Analytics they are in use, and a listing of the platform resource group
+    that failed is not an empty group - nothing is deleted on the strength of it. An agent whose
+    ownership tag could not be read is left in place.
+
+    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
+    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
+    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+
     Note: This does NOT remove infrastructure from earlier labs (VMs, VNets,
     Storage Accounts, Log Analytics Workspace, or the Network Watcher itself,
     which Azure provisions once per region and shares across the subscription).
@@ -41,6 +59,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if ($Force) { $ConfirmPreference = 'None' }
+
+# Counts lookups that failed and objects that exist but could not be removed. Absent objects are
+# not failures.
+$script:cleanupFailures = 0
 
 # Configuration
 $networkWatcherRg      = 'NetworkWatcherRG'
@@ -161,6 +183,77 @@ function Select-TrafficAnalyticsResource {
         } | Sort-Object ResourceType -Descending)
 }
 
+# ── Lookup helpers ────────────────────────────────────────────────────────
+
+# Whether a lookup's error says the object does not exist, rather than that the lookup failed.
+# Get-AzResource -ResourceId and Get-AzVM report a missing resource as an ARM 404: "The Resource
+# '<type>/<name>' under resource group '<rg>' was not found.", code ResourceNotFound, or - for a
+# connection monitor whose Network Watcher is gone - ParentResourceNotFound with the same 404
+# status; when the group is gone as well, "Resource group '<rg>' could not be found.", code
+# ResourceGroupNotFound. Az.Network wraps the SDK's CloudException, which keeps the 404 status, as
+# the inner exception. The flow logs, the VM extensions and the platform group's resources are
+# listed, so a missing one is an empty match. The Azure.Core clients say "Status: 404 (Not
+# Found)". A missing subscription is a 404 too, but it means the context is wrong, not that the
+# object is gone, so it never reads as "absent".
+function Test-LabNotFoundError {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    $evidence = [System.Collections.Generic.List[string]]::new()
+    $evidence.Add([string]$ErrorRecord)
+    $evidence.Add([string]$ErrorRecord.FullyQualifiedErrorId)
+    $status404 = $false
+    for ($exception = $ErrorRecord.Exception; $exception; $exception = $exception.InnerException) {
+        $evidence.Add([string]$exception.Message)
+        foreach ($code in @($exception.Body.Code, $exception.Body.Error.Code, $exception.ErrorCode)) {
+            if ($code) { $evidence.Add([string]$code) }
+        }
+        # ResponseStatusCode: the generated cmdlets' RestException, which may carry no error body.
+        foreach ($status in @($exception.Response.StatusCode, $exception.ResponseStatusCode, $exception.Status)) {
+            if ("$status" -in @('404', 'NotFound')) { $status404 = $true }
+        }
+    }
+    $text = $evidence -join "`n"
+
+    if ($text -match 'SubscriptionNotFound|subscription .{0,80}(could not be|was not) found') { return $false }
+    if ($status404) { return $true }
+    return $text -match '\bResource(Group)?NotFound\b|was not found|Resource group .{0,100}could not be found|invalid status code ''NotFound''|\b404 \(Not Found\)'
+}
+
+# Runs one lookup with -ErrorAction Stop inside $Lookup, and returns what it found:
+#   Value     the lookup's output, as an array - empty when the object is absent
+#   NotFound  the getter reported the object as not found (Test-LabNotFoundError)
+#   Failed    the lookup failed any other way: it is reported as [ERROR] and counted, because it
+#             cannot tell whether the object is gone, and the caller leaves the object alone
+function Invoke-LabLookup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Target,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Lookup
+    )
+
+    try {
+        $value = @(& $Lookup)
+        return [pscustomobject]@{ Value = $value; NotFound = $false; Failed = $false }
+    }
+    catch {
+        if (Test-LabNotFoundError -ErrorRecord $_) {
+            return [pscustomobject]@{ Value = @(); NotFound = $true; Failed = $false }
+        }
+        $script:cleanupFailures++
+        Write-Host "  -> [ERROR] Could not look up $($Target): $_" -ForegroundColor Red
+        Write-Host "     A failed lookup is not 'absent': it may still exist, so this counts as a failure." -ForegroundColor Gray
+        return [pscustomobject]@{ Value = @(); NotFound = $false; Failed = $true }
+    }
+}
+
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Lab 5.3 - Resource Cleanup" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
@@ -184,38 +277,47 @@ Write-Host "    - Traffic Analytics:   NWTA-* data collection rule + endpoint in
 # ── [1/4] Remove Connection Monitor ───────────────────────────────────────
 Write-Host "`n[1/4] Removing Connection Monitor '$connectionMonitorName'..." -ForegroundColor Yellow
 $endpointVmIds = @()
-try {
-    # Read the raw ARM body before deleting: its AzureVM endpoints name the VMs
-    # that carry the NetworkWatcherAgent extension removed in step [3/4], and
-    # they cannot be read once the monitor is gone.
-    $cmResource = Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction SilentlyContinue
-    if ($cmResource) {
-        $endpointVmIds = @(Get-VirtualMachineEndpointId -Endpoint $cmResource.Properties.endpoints)
-        if ($PSCmdlet.ShouldProcess($connectionMonitorName, 'Remove Connection Monitor')) {
+# Read the raw ARM body before deleting: its AzureVM endpoints name the VMs that carry the
+# NetworkWatcherAgent extension removed in step [3/4], and they cannot be read once the monitor is
+# gone.
+$cmLookup = Invoke-LabLookup -Target "Connection Monitor '$connectionMonitorName'" -Lookup {
+    Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction Stop
+}
+$cmResource = $cmLookup.Value | Select-Object -First 1
+if ($cmResource) {
+    $endpointVmIds = @(Get-VirtualMachineEndpointId -Endpoint $cmResource.Properties.endpoints)
+    if ($PSCmdlet.ShouldProcess($connectionMonitorName, 'Remove Connection Monitor')) {
+        try {
             Remove-AzNetworkWatcherConnectionMonitor -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $connectionMonitorName -Confirm:$false -ErrorAction Stop | Out-Null
             Write-Host "  ✓ Connection Monitor removed: $connectionMonitorName" -ForegroundColor Green
+        } catch {
+            $script:cleanupFailures++
+            Write-Host "  [ERROR] Failed to remove Connection Monitor: $($_.Exception.Message)" -ForegroundColor Red
         }
-    } else {
-        Write-Host "  ✓ Connection Monitor not found (already removed): $connectionMonitorName" -ForegroundColor Gray
     }
-} catch {
-    Write-Host "  [ERROR] Failed to remove Connection Monitor: $($_.Exception.Message)" -ForegroundColor Red
+} elseif (-not $cmLookup.Failed) {
+    Write-Host "  ✓ Connection Monitor not found (already removed): $connectionMonitorName" -ForegroundColor Gray
 }
 
 # ── [2/4] Remove VNet Flow Log ────────────────────────────────────────────
+# Listed and picked by name: the listing of a Network Watcher that is gone reports a 404, and a
+# missing flow log is an empty match rather than an error to interpret.
 Write-Host "`n[2/4] Removing VNet Flow Log '$flowLogName'..." -ForegroundColor Yellow
-try {
-    $flExists = Get-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $flowLogName -ErrorAction SilentlyContinue
-    if ($flExists) {
-        if ($PSCmdlet.ShouldProcess($flowLogName, 'Remove VNet Flow Log')) {
+$flowLogLookup = Invoke-LabLookup -Target "the flow logs of '$networkWatcherName'" -Lookup {
+    Get-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -ErrorAction Stop
+}
+if ($flowLogLookup.Value | Where-Object { $_.Name -eq $flowLogName }) {
+    if ($PSCmdlet.ShouldProcess($flowLogName, 'Remove VNet Flow Log')) {
+        try {
             Remove-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $flowLogName -Confirm:$false -ErrorAction Stop | Out-Null
             Write-Host "  ✓ VNet Flow Log removed: $flowLogName" -ForegroundColor Green
+        } catch {
+            $script:cleanupFailures++
+            Write-Host "  [ERROR] Failed to remove VNet Flow Log: $($_.Exception.Message)" -ForegroundColor Red
         }
-    } else {
-        Write-Host "  ✓ VNet Flow Log not found (already removed): $flowLogName" -ForegroundColor Gray
     }
-} catch {
-    Write-Host "  [ERROR] Failed to remove VNet Flow Log: $($_.Exception.Message)" -ForegroundColor Red
+} elseif (-not $flowLogLookup.Failed) {
+    Write-Host "  ✓ VNet Flow Log not found (already removed): $flowLogName" -ForegroundColor Gray
 }
 
 # ── [3/4] Remove the NetworkWatcherAgent extensions ───────────────────────
@@ -225,10 +327,19 @@ try {
 # Lab 3.2 deletes the VMs themselves.
 Write-Host "`n[3/4] Removing NetworkWatcherAgent extensions..." -ForegroundColor Yellow
 
+# The candidates stand in for the monitor's endpoints when those cannot be read: the monitor is
+# gone, or its lookup failed. A candidate that could not be looked up is already counted.
+$vmFound = @{}
 if ($endpointVmIds.Count -eq 0) {
     foreach ($candidate in $candidateVms) {
-        $candidateVm = Get-AzVM -ResourceGroupName $candidate.ResourceGroupName -Name $candidate.Name -ErrorAction SilentlyContinue
-        if ($candidateVm) { $endpointVmIds += $candidateVm.Id }
+        $candidateLookup = Invoke-LabLookup -Target "VM '$($candidate.Name)'" -Lookup {
+            Get-AzVM -ResourceGroupName $candidate.ResourceGroupName -Name $candidate.Name -ErrorAction Stop
+        }
+        $candidateVm = $candidateLookup.Value | Select-Object -First 1
+        if ($candidateVm) {
+            $endpointVmIds += $candidateVm.Id
+            $vmFound[[string]$candidateVm.Id] = $true
+        }
     }
 }
 
@@ -240,30 +351,50 @@ if ($agentTargets.Count -eq 0) {
 foreach ($target in $agentTargets) {
     $vmRg   = $target.ResourceGroupName
     $vmName = $target.Name
-    try {
-        if (-not (Get-AzVM -ResourceGroupName $vmRg -Name $vmName -ErrorAction SilentlyContinue)) {
+    if (-not $vmFound.ContainsKey([string]$target.Id)) {
+        $vmLookup = Invoke-LabLookup -Target "VM '$vmName'" -Lookup {
+            Get-AzVM -ResourceGroupName $vmRg -Name $vmName -ErrorAction Stop
+        }
+        if ($vmLookup.Failed) { continue }
+        if (-not $vmLookup.Value) {
             Write-Host "  ✓ VM not found (already removed): $vmName" -ForegroundColor Gray
             continue
         }
-        $agents = @(Get-AzVMExtension -ResourceGroupName $vmRg -VMName $vmName -ErrorAction SilentlyContinue |
-            Where-Object { $_.Publisher -eq 'Microsoft.Azure.NetworkWatcher' })
-        if ($agents.Count -eq 0) {
-            Write-Host "  ✓ No NetworkWatcherAgent on $vmName (already removed)" -ForegroundColor Gray
+    }
+    $extensionLookup = Invoke-LabLookup -Target "the extensions of '$vmName'" -Lookup {
+        Get-AzVMExtension -ResourceGroupName $vmRg -VMName $vmName -ErrorAction Stop
+    }
+    if ($extensionLookup.Failed) { continue }
+    $agents = @($extensionLookup.Value | Where-Object { $_.Publisher -eq 'Microsoft.Azure.NetworkWatcher' })
+    if ($agents.Count -eq 0) {
+        Write-Host "  ✓ No NetworkWatcherAgent on $vmName (already removed)" -ForegroundColor Gray
+        continue
+    }
+    foreach ($agent in $agents) {
+        # The ownership tag decides whether the agent is the lab's to remove. A tag that could not
+        # be read leaves the agent in place; one that is gone with its extension leaves nothing.
+        $tagLookup = Invoke-LabLookup -Target "the tags of $($agent.Name) on $vmName" -Lookup {
+            Get-AzResource -ResourceId $agent.Id -ErrorAction Stop
+        }
+        if ($tagLookup.Failed) { continue }
+        $agentResource = $tagLookup.Value | Select-Object -First 1
+        if (-not $agentResource) {
+            Write-Host "  ✓ $($agent.Name) on $vmName not found (already removed)" -ForegroundColor Gray
             continue
         }
-        foreach ($agent in $agents) {
-            $agentTags = (Get-AzResource -ResourceId $agent.Id -ErrorAction SilentlyContinue).Tags
-            if (-not (Test-LabOwnedExtension -Tag $agentTags)) {
-                Write-Host "  [SKIP] $($agent.Name) on $vmName is not tagged Project=SkyCraft - left in place" -ForegroundColor Gray
-                continue
-            }
-            if ($PSCmdlet.ShouldProcess("$vmName/$($agent.Name)", 'Remove VM extension')) {
+        if (-not (Test-LabOwnedExtension -Tag $agentResource.Tags)) {
+            Write-Host "  [SKIP] $($agent.Name) on $vmName is not tagged Project=SkyCraft - left in place" -ForegroundColor Gray
+            continue
+        }
+        if ($PSCmdlet.ShouldProcess("$vmName/$($agent.Name)", 'Remove VM extension')) {
+            try {
                 Remove-AzVMExtension -ResourceGroupName $vmRg -VMName $vmName -Name $agent.Name -Force -ErrorAction Stop | Out-Null
                 Write-Host "  ✓ NetworkWatcherAgent removed from $vmName" -ForegroundColor Green
+            } catch {
+                $script:cleanupFailures++
+                Write-Host "  [ERROR] Failed to remove NetworkWatcherAgent from ${vmName}: $($_.Exception.Message)" -ForegroundColor Red
             }
         }
-    } catch {
-        Write-Host "  [ERROR] Failed to remove NetworkWatcherAgent from ${vmName}: $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
@@ -273,41 +404,54 @@ foreach ($target in $agentTargets) {
 # artifacts — main.bicep never declares them — and they survive the flow log, so
 # cleanup removes them once no flow log feeds them any more.
 Write-Host "`n[4/4] Removing Traffic Analytics data collection resources..." -ForegroundColor Yellow
-try {
-    $taFlowLogs = @()
-    try {
-        $taFlowLogs = @(Get-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -ErrorAction Stop |
-            Where-Object { $_.FlowAnalyticsConfiguration.NetworkWatcherFlowAnalyticsConfiguration.Enabled -eq $true })
-    } catch {
-        # Az builds that require -Name cannot list; fall back to the lab's own flow log.
-        $taFlowLogs = @(Get-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $flowLogName -ErrorAction SilentlyContinue |
-            Where-Object { $_.FlowAnalyticsConfiguration.NetworkWatcherFlowAnalyticsConfiguration.Enabled -eq $true })
-    }
 
-    if ($taFlowLogs.Count -gt 0) {
-        Write-Host "  [SKIP] $($taFlowLogs.Count) flow log(s) still use Traffic Analytics - NWTA-* resources left in place" -ForegroundColor Yellow
+# Listed again, after step [2/4]: a flow log that still feeds Traffic Analytics keeps the NWTA-*
+# resources in use. A listing that failed cannot say that none does, so nothing is removed.
+$taFlowLogLookup = Invoke-LabLookup -Target "the flow logs of '$networkWatcherName' that feed Traffic Analytics" -Lookup {
+    Get-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -ErrorAction Stop
+}
+$taFlowLogs = @($taFlowLogLookup.Value |
+    Where-Object { $_.FlowAnalyticsConfiguration.NetworkWatcherFlowAnalyticsConfiguration.Enabled -eq $true })
+
+if ($taFlowLogLookup.Failed) {
+    Write-Host "  [SKIP] NWTA-* resources left in place - the flow logs that may still feed them could not be listed" -ForegroundColor Yellow
+} elseif ($taFlowLogs.Count -gt 0) {
+    Write-Host "  [SKIP] $($taFlowLogs.Count) flow log(s) still use Traffic Analytics - NWTA-* resources left in place" -ForegroundColor Yellow
+} else {
+    # Only a listing that succeeded says what the group holds. One that failed is not an empty
+    # group: it is counted, and nothing is removed on the strength of it.
+    $platformLookup = Invoke-LabLookup -Target "the resources in '$platformRg'" -Lookup {
+        Get-AzResource -ResourceGroupName $platformRg -ErrorAction Stop
+    }
+    if ($platformLookup.Failed) {
+        Write-Host "  [SKIP] NWTA-* resources not checked - '$platformRg' could not be listed" -ForegroundColor Yellow
     } else {
-        $platformResources = @(Get-AzResource -ResourceGroupName $platformRg -ErrorAction SilentlyContinue)
-        $taResources = @(Select-TrafficAnalyticsResource -Resource $platformResources -TrafficAnalyticsFlowLogCount $taFlowLogs.Count)
+        $taResources = @(Select-TrafficAnalyticsResource -Resource $platformLookup.Value -TrafficAnalyticsFlowLogCount $taFlowLogs.Count)
         if ($taResources.Count -eq 0) {
             Write-Host "  ✓ No NWTA-* data collection resources found (already removed)" -ForegroundColor Gray
         }
         foreach ($taResource in $taResources) {
             $taKind = ($taResource.ResourceType -split '/')[-1]
-            try {
-                if ($PSCmdlet.ShouldProcess($taResource.Name, "Remove Traffic Analytics $taKind")) {
+            if ($PSCmdlet.ShouldProcess($taResource.Name, "Remove Traffic Analytics $taKind")) {
+                try {
                     Remove-AzResource -ResourceId $taResource.ResourceId -Force -ErrorAction Stop | Out-Null
                     Write-Host "  ✓ Traffic Analytics $taKind removed: $($taResource.Name)" -ForegroundColor Green
+                } catch {
+                    $script:cleanupFailures++
+                    Write-Host "  [ERROR] Failed to remove $($taResource.Name): $($_.Exception.Message)" -ForegroundColor Red
                 }
-            } catch {
-                Write-Host "  [ERROR] Failed to remove $($taResource.Name): $($_.Exception.Message)" -ForegroundColor Red
             }
         }
     }
-} catch {
-    Write-Host "  [ERROR] Failed to inspect Traffic Analytics resources: $($_.Exception.Message)" -ForegroundColor Red
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
+if ($script:cleanupFailures -gt 0) {
+    Write-Host "  Cleanup finished with $($script:cleanupFailures) failure(s)" -ForegroundColor Red
+    Write-Host "  See the [ERROR] lines above. What could not be looked up or removed may still exist." -ForegroundColor Gray
+    Write-Host "========================================`n" -ForegroundColor Cyan
+    $Host.SetShouldExit(1)
+    exit 1
+}
 Write-Host "  Cleanup Complete" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
