@@ -226,16 +226,20 @@ We will deploy the "WorldServer" component here to take advantage of scaling cap
 
 ### Step 3.3.7: Configure Container Settings
 
+The app reuses the `skycraft-auth` image for the lab demo.
+
 1. Uncheck **Use quickstart image**.
 2. **Name**: `worldserver`
 3. **Image Source**: **Azure Container Registry**
-4. Select your registry, image `skycraft-auth` (we'll reuse this image for the lab demo), and tag `v1`.
-5. **Managed identity**: **System assigned**
-6. **Command Override**: `empty`
-7. **Arguments Override**: `empty`
-8. **Develomplent Stack**: `Unspecified`
-9. **Workload profile**: `Consumption`
-10. Under **Container resource allocation**, select **0.25 CPU** and **0.5 Gi** Memory (sufficient for this demo).
+4. **Registry**: `[Select your registry]`
+5. **Image**: `skycraft-auth`
+6. **Image tag**: `v1`
+7. **Managed identity**: **System assigned**
+8. **Command Override**: `empty`
+9. **Arguments Override**: `empty`
+10. **Develomplent Stack**: `Unspecified`
+11. **Workload profile**: `Consumption`
+12. Under **Container resource allocation**, select **0.25 CPU** and **0.5 Gi** Memory (sufficient for this demo).
 
 ![Configure Container Settings](./images/step-3.3.7.png)
 

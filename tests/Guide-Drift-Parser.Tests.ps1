@@ -916,6 +916,13 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         @($items | ForEach-Object { $_.labels; $_.label }) | Should -Not -Contain 'Bind'
     }
 
+    It 'reads the registry, image and tag of step 3.3.7 as three fields' {
+        $fields = @((Get-GapStep '3.3' '3.3.7').items | Where-Object kind -eq 'field')
+        ($fields | Where-Object label -ceq 'Registry').value | Should -BeExactly '[Select your registry]'
+        ($fields | Where-Object label -ceq 'Image').value | Should -BeExactly 'skycraft-auth'
+        ($fields | Where-Object label -ceq 'Image tag').value | Should -BeExactly 'v1'
+    }
+
     It 'reads items before the first Option heading and under another "####" heading after the options' {
         $guide = ConvertFrom-GuideFixture -Markdown (@(
                 '### Step 9.9.1: Shared lines',
