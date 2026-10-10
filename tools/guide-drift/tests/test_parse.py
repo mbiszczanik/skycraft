@@ -362,7 +362,7 @@ class WordedResourceTests(unittest.TestCase):
                 self.assertEqual(self.item(text), self.navigation(labels, resources))
 
     def test_a_path_opens_each_segment_in_turn(self) -> None:
-        self.assertEqual(self.item("Browse to `common/config.txt` → click **⋯** → **Restore**"),                 # 4.3.6
+        self.assertEqual(self.item("Browse to `common/config.txt` → click **⋯** → **Restore**"),     # 4.3.6 before #203
                          self.navigation(["common", "config.txt", "⋯", "Restore"], [0, 1]))
         self.assertEqual(self.item("**File shares** → Browse to `skycraft-config/common` → **Upload**"),
                          self.navigation(["File shares", "skycraft-config", "common", "Upload"], [1, 2]))

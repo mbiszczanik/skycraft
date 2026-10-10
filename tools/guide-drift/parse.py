@@ -207,9 +207,6 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     a container ('game-assets', 4.2.11; 'scripts', 4.4.3) or a file share's folder or file
     ('common', 'config.txt', 4.3.6). Either is reported as a missing resource whenever it is not
     on screen (#199).
-  * 'select `config.txt`' (4.3.6, line 435) is read as a resource, and so is 'config.txt', the
-    last segment of line 440's path, before its **⋯**: the runner clicks the file's row, which
-    may open the file rather than select it.
   * The option read is fixed by the guide, not chosen per run. 3.2.1 reads Option B, which
     creates an SSH key resource, while the items of later 3.2 steps follow Option A (3.2.2
     pastes skycraft-dev.pub); option B appears there only in prose notes, so a run of 3.2

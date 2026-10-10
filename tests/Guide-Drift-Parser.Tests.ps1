@@ -835,7 +835,7 @@ Describe 'parse.py - labs 4.2, 4.3, 5.1, 5.2 and 5.3, pickers, worded resource s
         # 'Flow log type: **Virtual network** -> ... -> `prod-skycraft-swc-vnet` -> ...': the field's picker, then the chain.
         @{ lab = '5.3'; id = '5.3.5'; count = 1; field = 'Flow log type'; labels = @('Virtual network', '+ Select target resource', 'Virtual network', 'prod-skycraft-swc-vnet', 'Confirm selection'); resources = @(3) }
         # 'Browse to `common/config.txt`': a path opens each segment; 'Open `x` share'.
-        @{ lab = '4.3'; id = '4.3.6'; count = 1; field = ''; labels = @('common', 'config.txt', [string][char]0x22EF, 'Restore'); resources = @(0, 1) }
+        @{ lab = '4.3'; id = '4.3.6'; count = 1; field = ''; labels = @('common', 'config.txt', 'Restore'); resources = @(0, 1) }
         @{ lab = '4.3'; id = '4.3.8'; count = 1; field = ''; labels = @('skycraft-config', 'Connect'); resources = @(0) }
         # '`public-demo` -> **Change access level**. The **Anonymous access level** dropdown lists ...':
         # the sentence after the chain describes the dialog.
@@ -938,6 +938,24 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         $first.kind | Should -Be 'navigation'
         @($first.labels) | Should -Be @('prodskycraftswcsa', 'File shares', 'skycraft-config')
         @($first.resources) | Should -Be @(0, 2)
+    }
+
+    It 'names the new directory of step 4.3.4 in the dialog''s own field before OK' {
+        $items = @((Get-GapStep '4.3' '4.3.4').items)
+        $add = @($items | Where-Object { (@($_.labels) -join "`n") -ceq '+ Add directory' })
+        $add.Count | Should -Be 1
+        $index = [array]::IndexOf($items, $add[0])
+        $items[$index + 1].kind | Should -Be 'field'
+        $items[$index + 1].label | Should -BeExactly 'Name'
+        $items[$index + 1].value | Should -BeExactly 'common'
+        @($items[$index + 2].labels) | Should -Be @('OK')
+    }
+
+    It 'restores config.txt in step 4.3.6 from its File properties pane and confirms the overwrite' {
+        $items = @((Get-GapStep '4.3' '4.3.6').items)
+        $restore = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "common`nconfig.txt`nRestore" })
+        $restore.Count | Should -Be 1
+        @($items[[array]::IndexOf($items, $restore[0]) + 1].labels) | Should -Be @('Overwrite original file', 'OK')
     }
 
     It 'opens the common directory in step 4.3.4 before the upload' {
