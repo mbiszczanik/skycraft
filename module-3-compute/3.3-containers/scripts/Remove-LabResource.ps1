@@ -12,6 +12,17 @@
     steps still run, and the script exits 1 if any step failed, so an orchestrated cycle can
     tell a failed teardown from a clean one.
 
+    A lookup that fails (a 403, throttling, a transient ARM error) is an [ERROR] too, counted, and
+    the resource it could not see is left alone. Only a lookup that succeeds and does not find the
+    resource, or a getter that reports it as not found, means "absent" - Test-LabNotFoundError
+    tells the two apart (issue #290, as #255 did for Labs 1.2-2.3). The Container Apps environment
+    stays when its container app could not be looked up or deleted: the app may still be running
+    in it. The kept environment is not counted again - the app's failure already is.
+
+    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
+    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
+    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+
 .PARAMETER Force
     Skip the confirmation prompt.
 
@@ -87,6 +98,81 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($Force) { $ConfirmPreference = 'None' }
 
+# Absence and failure are different outcomes and are reported differently (#121 live pass):
+# the old catch blocks printed "Not found or already deleted" for any error, so a delete that
+# threw after the long environment teardown left the registry and the instance standing
+# behind a "Cleanup Complete." and an exit code of 0. Each step now looks the resource up
+# first, deletes only what exists, and counts a failed lookup or a failed delete; the script
+# exits 1 if any did.
+$script:cleanupFailures = 0
+
+# Whether a lookup's error says the resource does not exist, rather than that the lookup failed.
+# Get-AzResource, asked for one name and type, reports a missing resource as an ARM 404: "The
+# Resource '<type>/<name>' under resource group '<rg>' was not found.", code ResourceNotFound; when
+# the group is gone as well, "Resource group '<rg>' could not be found.", code
+# ResourceGroupNotFound; with no error body, "Operation returned an invalid status code
+# 'NotFound'". The Azure.Core clients say "Status: 404 (Not Found)". A missing subscription is a
+# 404 too, but it means the context is wrong, not that the resource is gone, so it never reads as
+# "absent".
+function Test-LabNotFoundError {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    $evidence = [System.Collections.Generic.List[string]]::new()
+    $evidence.Add([string]$ErrorRecord)
+    $evidence.Add([string]$ErrorRecord.FullyQualifiedErrorId)
+    $status404 = $false
+    for ($exception = $ErrorRecord.Exception; $exception; $exception = $exception.InnerException) {
+        $evidence.Add([string]$exception.Message)
+        foreach ($code in @($exception.Body.Code, $exception.Body.Error.Code, $exception.ErrorCode)) {
+            if ($code) { $evidence.Add([string]$code) }
+        }
+        # ResponseStatusCode: the generated cmdlets' RestException, which may carry no error body.
+        foreach ($status in @($exception.Response.StatusCode, $exception.ResponseStatusCode, $exception.Status)) {
+            if ("$status" -in @('404', 'NotFound')) { $status404 = $true }
+        }
+    }
+    $text = $evidence -join "`n"
+
+    if ($text -match 'SubscriptionNotFound|subscription .{0,80}(could not be|was not) found') { return $false }
+    if ($status404) { return $true }
+    return $text -match '\bResource(Group)?NotFound\b|was not found|Resource group .{0,100}could not be found|invalid status code ''NotFound''|\b404 \(Not Found\)'
+}
+
+# Runs one lookup with -ErrorAction Stop inside $Lookup, and returns what it found:
+#   Value     the lookup's output, as an array - empty when the resource is absent
+#   NotFound  the getter reported the resource as not found (Test-LabNotFoundError)
+#   Failed    the lookup failed any other way: it is reported as [ERROR] and counted, because it
+#             cannot tell whether the resource is gone, and the caller leaves the resource alone
+function Invoke-LabLookup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Target,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Lookup
+    )
+
+    try {
+        $value = @(& $Lookup)
+        return [pscustomobject]@{ Value = $value; NotFound = $false; Failed = $false }
+    }
+    catch {
+        if (Test-LabNotFoundError -ErrorRecord $_) {
+            return [pscustomobject]@{ Value = @(); NotFound = $true; Failed = $false }
+        }
+        $script:cleanupFailures++
+        Write-Host "  -> [ERROR] Could not look up $($Target): $_" -ForegroundColor Red
+        Write-Host "     A failed lookup is not 'absent': it may still exist, so this counts as a failure." -ForegroundColor Gray
+        return [pscustomobject]@{ Value = @(); NotFound = $false; Failed = $true }
+    }
+}
+
 Write-Host "=== Lab 3.3 - Resource Cleanup ===" -ForegroundColor Cyan -BackgroundColor Black
 
 # Verify Azure Connection
@@ -112,18 +198,13 @@ foreach ($res in $resourcesToDelete) {
 
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
 
-# Absence and failure are different outcomes and are reported differently (#121 live pass):
-# the old catch blocks printed "Not found or already deleted" for any error, so a delete that
-# threw after the long environment teardown left the registry and the instance standing
-# behind a "Cleanup Complete." and an exit code of 0. Each step now looks the resource up
-# first, deletes only what exists, and counts a failed delete; the script exits 1 if any did.
-$script:cleanupFailures = 0
-
-# Delete order matters: the app must go before its environment.
+# Delete order matters: the app must go before its environment, and the environment stays when
+# the app could not be looked up or deleted (KeepWhenFailed names the step whose failure keeps it).
 $steps = @(
     @{ Type = 'Container App';              Name = $AcaName; ResourceType = 'Microsoft.App/containerApps'
        Remove = { param($r) Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null } }
     @{ Type = 'Container Apps Environment'; Name = $CaeName; ResourceType = 'Microsoft.App/managedEnvironments'
+       KeepWhenFailed = 'Container App'
        Remove = { param($r) Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null } }
     @{ Type = 'Container Instance';         Name = $AciName; ResourceType = 'Microsoft.ContainerInstance/containerGroups'
        Remove = { param($r) Remove-AzContainerGroup -Name $r.Name -ResourceGroupName $ResourceGroupName -ErrorAction Stop | Out-Null } }
@@ -131,14 +212,29 @@ $steps = @(
        Remove = { param($r) Remove-AzContainerRegistry -Name $r.Name -ResourceGroupName $ResourceGroupName -ErrorAction Stop | Out-Null } }
 )
 
+# The steps that failed, by type: 'looked up' or 'deleted', for the message of the step they keep.
+$stepFailed = @{}
+
 foreach ($step in $steps) {
     Write-Host "Removing $($step.Type): $($step.Name)..." -ForegroundColor Yellow
+    if ($step.KeepWhenFailed -and $stepFailed[$step.KeepWhenFailed]) {
+        # Not counted again: the failure that keeps it already is.
+        Write-Host "  -> [SKIP] Kept: the $($step.KeepWhenFailed) could not be $($stepFailed[$step.KeepWhenFailed]) and may still be in it." -ForegroundColor Yellow
+        continue
+    }
     if (-not $PSCmdlet.ShouldProcess($step.Name, "Remove $($step.Type)")) { continue }
 
     # The Container Apps types have no base-module cmdlet in the Az gold-path, so every step
     # resolves its target through the generic ARM lookup and the app/environment steps delete
     # through it too.
-    $resource = Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType $step.ResourceType -Name $step.Name -ErrorAction SilentlyContinue
+    $lookup = Invoke-LabLookup -Target "$($step.Type) '$($step.Name)'" -Lookup {
+        Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType $step.ResourceType -Name $step.Name -ErrorAction Stop
+    }
+    if ($lookup.Failed) {
+        $stepFailed[$step.Type] = 'looked up'
+        continue
+    }
+    $resource = $lookup.Value | Select-Object -First 1
     if (-not $resource) {
         Write-Host "  -> [INFO] Not found - nothing to delete." -ForegroundColor Gray
         continue
@@ -149,13 +245,14 @@ foreach ($step in $steps) {
         Write-Host "  -> Deleted" -ForegroundColor Green
     } catch {
         $script:cleanupFailures++
+        $stepFailed[$step.Type] = 'deleted'
         Write-Host "  -> [ERROR] Could not delete $($step.Type) '$($step.Name)': $_" -ForegroundColor Red
     }
 }
 
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s)." -ForegroundColor Red
-    Write-Host "  See the [ERROR] lines above - the resources named there are still in $ResourceGroupName. Re-run this script once the cause is cleared." -ForegroundColor Gray
+    Write-Host "  See the [ERROR] lines above - the resources named there may still be in $ResourceGroupName. Re-run this script once the cause is cleared." -ForegroundColor Gray
     $Host.SetShouldExit(1)
     exit 1
 }

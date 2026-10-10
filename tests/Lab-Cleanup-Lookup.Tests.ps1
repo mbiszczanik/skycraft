@@ -25,7 +25,7 @@
          suite pins those.
       3. Invoke-LabLookup returns what a lookup found, reads "found nothing" and a not-found error
          as absent without counting them, and counts any other error in $script:cleanupFailures.
-      4. A ratchet: no cleanup outside the labs #255 still has to convert gives a *-Az* command
+      4. A ratchet: no cleanup outside the labs #290 still has to convert gives a *-Az* command
          -ErrorAction SilentlyContinue or Ignore. The check walks the syntax tree, so it reads
          every spelling (-ErrorAction:X, -EA X, a quoted value, 0 or 4, the ActionPreference
          enum), a value carried in a splatted hashtable the script builds, and a command split by
@@ -81,18 +81,20 @@ $ExpectedHelperFile = @(
     'module-2-networking/2.1-virtual-networks/scripts/Remove-LabResource.ps1'
     'module-2-networking/2.2-secure-access/scripts/Remove-LabResource.ps1'
     'module-2-networking/2.3-name-resolution/scripts/Remove-LabResource.ps1'
+    'module-3-compute/3.1-infrastructure-as-code/scripts/Remove-LabResource.ps1'
+    'module-3-compute/3.2-virtual-machines/scripts/Remove-LabResource.ps1'
+    'module-3-compute/3.3-containers/scripts/Remove-LabResource.ps1'
+    'module-3-compute/3.4-app-service/scripts/Remove-LabResource.ps1'
+    'module-4-storage/4.1-storage-accounts/scripts/Remove-LabResource.ps1'
+    'module-4-storage/4.2-blob-storage/scripts/Remove-LabResource.ps1'
+    'module-4-storage/4.3-azure-files/scripts/Remove-LabResource.ps1'
+    'module-4-storage/4.4-storage-security/scripts/Remove-LabResource.ps1'
     'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Remove-LabResource.ps1'
 )
 
-# The cleanups #255 still has to convert. The list only shrinks: the pending-list test below fails
-# for an entry whose cleanup no longer silences a lookup.
+# The cleanups #290 (the second half of #255) still has to convert. The list only shrinks: the
+# pending-list test below fails for an entry whose cleanup no longer silences a lookup.
 $PendingLab = @(
-    'module-3-compute/3.2-virtual-machines'
-    'module-3-compute/3.3-containers'
-    'module-3-compute/3.4-app-service'
-    'module-4-storage/4.1-storage-accounts'
-    'module-4-storage/4.2-blob-storage'
-    'module-4-storage/4.3-azure-files'
     'module-5-monitoring-maintenance/5.1-azure-monitor'
     'module-5-monitoring-maintenance/5.3-network-monitoring'
 )
@@ -410,7 +412,7 @@ Describe 'Lab cleanup lookups - the pending list only names labs still to conver
     }
 }
 
-Describe 'Lab cleanup lookups - no converted cleanup reads a failed lookup as "absent" (#255)' {
+Describe 'Lab cleanup lookups - no converted cleanup reads a failed lookup as "absent"' {
 
     It 'has converted cleanups to check' -ForEach @(@{ count = $RatchetCases.Count }) {
         $count | Should -BeGreaterThan 0
@@ -419,6 +421,6 @@ Describe 'Lab cleanup lookups - no converted cleanup reads a failed lookup as "a
     It "'<file>' gives no *-Az* command -ErrorAction SilentlyContinue or Ignore" -ForEach $RatchetCases {
         $hits = @(Find-SilencedAzCommand -Text (Get-Content -Raw -LiteralPath $path) |
             ForEach-Object { "line $($_.Line): $($_.Text)" })
-        $hits | Should -BeNullOrEmpty -Because "a lookup that fails would read as 'absent'; route it through Invoke-LabLookup (#255)"
+        $hits | Should -BeNullOrEmpty -Because "a lookup that fails would read as 'absent'; route it through Invoke-LabLookup (#255, #290)"
     }
 }

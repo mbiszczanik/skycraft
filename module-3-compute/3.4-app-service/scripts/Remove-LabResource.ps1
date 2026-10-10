@@ -24,6 +24,23 @@
     The subnet is inspected before the plan is deleted even when the Web App is already gone, so a
     partially cleaned lab still gets a warning instead of a silent plan deletion.
 
+    A lookup that fails (a 403, throttling, a transient ARM error) or a deletion that fails is
+    reported as [ERROR] and counted; the later steps still run where that is safe, and the script
+    exits 1 if anything failed. A resource that does not exist is not a failure: only a lookup that
+    succeeds and does not find it, or a getter that reports it as not found, means "absent" -
+    Test-LabNotFoundError tells the two apart (issue #290, as #255 did for Labs 1.2-2.3). The App
+    Service Plan stays when the Web App or its slots could not be looked up, or the Web App could
+    not be deleted: an app may still run on the plan, with its integration attached. It also stays
+    when the VNet integration of a site could not be confirmed detached - the DELETE failed, got no
+    answer or an unexpected status, or the site still reports a subnet after three minutes - which
+    is an [ERROR], counted: deleting the plan then could orphan the serviceAssociationLink. The Web
+    App stays when its slots could not be listed, because their integration could not be detached.
+    The subnet checks are diagnostic: a VNet they cannot read is a [WARN], not a failure.
+
+    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
+    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
+    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+
     Does NOT delete the Resource Group or the VNet (shared resources).
 
 .PARAMETER RgName
@@ -83,6 +100,78 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($Force) { $ConfirmPreference = 'None' }
 
+# Counts lookups that failed and resources that exist but could not be deleted. Absent resources
+# are not failures.
+$script:cleanupFailures = 0
+
+# Whether a lookup's error says the resource does not exist, rather than that the lookup failed.
+# Get-AzWebApp fails on a missing app with "Operation returned an invalid status code 'NotFound'".
+# Get-AzVirtualNetwork reports a missing VNet as an ARM 404: "The Resource '<type>/<name>' under
+# resource group '<rg>' was not found.", code ResourceNotFound; when the group is gone as well,
+# "Resource group '<rg>' could not be found.", code ResourceGroupNotFound. Get-AzAppServicePlan
+# returns nothing for a missing plan (its SDK accepts the 404), and the slots and the autoscale
+# settings are listed, so those are empty matches, not errors. The Azure.Core clients say "Status:
+# 404 (Not Found)". A missing subscription is a 404 too, but it means the context is wrong, not
+# that the resource is gone, so it never reads as "absent".
+function Test-LabNotFoundError {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    $evidence = [System.Collections.Generic.List[string]]::new()
+    $evidence.Add([string]$ErrorRecord)
+    $evidence.Add([string]$ErrorRecord.FullyQualifiedErrorId)
+    $status404 = $false
+    for ($exception = $ErrorRecord.Exception; $exception; $exception = $exception.InnerException) {
+        $evidence.Add([string]$exception.Message)
+        foreach ($code in @($exception.Body.Code, $exception.Body.Error.Code, $exception.ErrorCode)) {
+            if ($code) { $evidence.Add([string]$code) }
+        }
+        # ResponseStatusCode: the generated cmdlets' RestException, which may carry no error body.
+        foreach ($status in @($exception.Response.StatusCode, $exception.ResponseStatusCode, $exception.Status)) {
+            if ("$status" -in @('404', 'NotFound')) { $status404 = $true }
+        }
+    }
+    $text = $evidence -join "`n"
+
+    if ($text -match 'SubscriptionNotFound|subscription .{0,80}(could not be|was not) found') { return $false }
+    if ($status404) { return $true }
+    return $text -match '\bResource(Group)?NotFound\b|was not found|Resource group .{0,100}could not be found|invalid status code ''NotFound''|\b404 \(Not Found\)'
+}
+
+# Runs one lookup with -ErrorAction Stop inside $Lookup, and returns what it found:
+#   Value     the lookup's output, as an array - empty when the resource is absent
+#   NotFound  the getter reported the resource as not found (Test-LabNotFoundError)
+#   Failed    the lookup failed any other way: it is reported as [ERROR] and counted, because it
+#             cannot tell whether the resource is gone, and the caller leaves the resource alone
+function Invoke-LabLookup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Target,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Lookup
+    )
+
+    try {
+        $value = @(& $Lookup)
+        return [pscustomobject]@{ Value = $value; NotFound = $false; Failed = $false }
+    }
+    catch {
+        if (Test-LabNotFoundError -ErrorRecord $_) {
+            return [pscustomobject]@{ Value = @(); NotFound = $true; Failed = $false }
+        }
+        $script:cleanupFailures++
+        Write-Host "  -> [ERROR] Could not look up $($Target): $_" -ForegroundColor Red
+        Write-Host "     A failed lookup is not 'absent': it may still exist, so this counts as a failure." -ForegroundColor Gray
+        return [pscustomobject]@{ Value = @(); NotFound = $false; Failed = $true }
+    }
+}
+
 Write-Host "=== Cleanup Lab 3.4: App Service ===" -ForegroundColor Cyan
 Write-Host "Target Resource Group: $RgName" -ForegroundColor Yellow
 
@@ -100,7 +189,8 @@ function Get-SubnetLinkSnapshot {
         Returns the service association link URIs of the integration subnet.
     .DESCRIPTION
         Returns $null when the VNet or the subnet cannot be read, so that "unknown" stays
-        distinguishable from "no links".
+        distinguishable from "no links". Diagnostic only, like the subnet report it feeds: a VNet
+        that could not be read is a [WARN], never counted as a failure.
     .NOTES
         Internal helper for Remove-LabResource.ps1.
     #>
@@ -111,7 +201,16 @@ function Get-SubnetLinkSnapshot {
         [Parameter(Mandatory)][string]$Subnet
     )
 
-    $vnetObject = Get-AzVirtualNetwork -Name $Vnet -ResourceGroupName $Rg -ErrorAction SilentlyContinue
+    $vnetObject = $null
+    try {
+        $vnetObject = Get-AzVirtualNetwork -Name $Vnet -ResourceGroupName $Rg -ErrorAction Stop
+    }
+    catch {
+        if (-not (Test-LabNotFoundError -ErrorRecord $_)) {
+            Write-Host "  -> [WARN] VNet '$Vnet' could not be read - its subnet links are not checked: $_" -ForegroundColor Yellow
+        }
+        return $null
+    }
     if (-not $vnetObject) { return $null }
 
     $subnetObject = $vnetObject.Subnets | Where-Object { $_.Name -eq $Subnet }
@@ -122,6 +221,11 @@ function Get-SubnetLinkSnapshot {
     return ,@($subnetObject.ServiceAssociationLinks | ForEach-Object { $_.Link })
 }
 
+# Why the Web App and the plan must stay, when they must. Set when what runs on them could not be
+# looked up or deleted; the lookup or the deletion is already counted, so keeping is not.
+$keepAppReason = $null
+$keepPlanReason = $null
+
 try {
     # 2. Snapshot the subnet links BEFORE the detach. The known orphan names a plan with this very
     #    name, so only a before/after comparison can tell it apart from a link left by this run.
@@ -130,26 +234,56 @@ try {
         Get-SubnetLinkSnapshot -Vnet $VnetName -Rg $RgName -Subnet $SubnetName
     }
 
-    $app = Get-AzWebApp -ResourceGroupName $RgName -Name $AppName -ErrorAction SilentlyContinue
+    $appLookup = Invoke-LabLookup -Target "Web App '$AppName'" -Lookup {
+        Get-AzWebApp -ResourceGroupName $RgName -Name $AppName -ErrorAction Stop
+    }
+    $app = $appLookup.Value | Select-Object -First 1
     $targets = @()
     $detached = @()
 
     # 3. Detach the VNet integration from the app and every slot BEFORE anything is deleted
-    if ($app) {
+    if ($appLookup.Failed) {
+        $keepPlanReason = "Web App '$AppName' could not be looked up, and it may still run on the plan"
+    }
+    elseif ($app) {
         $targets = @($app.Id)
-        $slots = @(Get-AzWebAppSlot -ResourceGroupName $RgName -Name $AppName -ErrorAction SilentlyContinue)
-        foreach ($slot in $slots) { $targets += $slot.Id }
+        $slotLookup = Invoke-LabLookup -Target "the deployment slots of '$AppName'" -Lookup {
+            Get-AzWebAppSlot -ResourceGroupName $RgName -Name $AppName -ErrorAction Stop
+        }
+        if ($slotLookup.Failed) {
+            # A slot runs on the plan too, and an integration it holds cannot be detached unseen.
+            $keepAppReason = "its deployment slots could not be listed, so their VNet integration was not detached"
+            $keepPlanReason = "the deployment slots of '$AppName' could not be looked up, and they may still run on the plan"
+        }
+        foreach ($slot in $slotLookup.Value) { $targets += $slot.Id }
 
         foreach ($id in $targets) {
             if ($PSCmdlet.ShouldProcess($id, 'Remove VNet integration')) {
                 Write-Host "Detaching VNet integration: $id" -ForegroundColor Yellow
-                $detached += $id
-                $response = Invoke-AzRestMethod -Method DELETE -Path "$id/networkConfig/virtualNetwork?api-version=$webApiVersion" -ErrorAction SilentlyContinue
-                if ($null -eq $response) {
-                    Write-Host "  -> [WARN] No response from the management API - the integration may still be attached." -ForegroundColor Yellow
+                # A DELETE that did not go through is not polled: the integration is still there,
+                # and three minutes of polling would only confirm it.
+                $response = $null
+                $problem = $null
+                try {
+                    $response = Invoke-AzRestMethod -Method DELETE -Path "$id/networkConfig/virtualNetwork?api-version=$webApiVersion" -ErrorAction Stop
                 }
-                elseif ($response.StatusCode -notin 200, 202, 204, 404) {
-                    Write-Host "  -> [WARN] HTTP $($response.StatusCode): $($response.Content)" -ForegroundColor Yellow
+                catch {
+                    $problem = "no response from the management API: $_"
+                }
+                if (-not $problem -and $null -eq $response) {
+                    $problem = 'no response from the management API'
+                }
+                elseif (-not $problem -and $response.StatusCode -notin 200, 202, 204, 404) {
+                    $problem = "HTTP $($response.StatusCode): $($response.Content)"
+                }
+
+                if ($problem) {
+                    $script:cleanupFailures++
+                    Write-Host "  -> [ERROR] Could not detach the VNet integration - it may still be attached ($problem)" -ForegroundColor Red
+                    $keepPlanReason = 'the VNet integration could not be confirmed detached from every site, and deleting the plan could orphan its serviceAssociationLink'
+                }
+                else {
+                    $detached += $id
                 }
             }
         }
@@ -173,7 +307,15 @@ try {
 
         while ($pending.Count -gt 0) {
             foreach ($id in @($pending)) {
-                $check = Invoke-AzRestMethod -Method GET -Path "$id/networkConfig/virtualNetwork?api-version=$webApiVersion" -ErrorAction SilentlyContinue
+                # A poll that gets no answer is inconclusive: the site stays pending until the
+                # deadline, and is then reported as still attached.
+                $check = $null
+                try {
+                    $check = Invoke-AzRestMethod -Method GET -Path "$id/networkConfig/virtualNetwork?api-version=$webApiVersion" -ErrorAction Stop
+                }
+                catch {
+                    $check = $null
+                }
                 if ($null -eq $check) { continue }
 
                 $stillAttached = $false
@@ -197,7 +339,9 @@ try {
         }
 
         foreach ($id in $pending) {
-            Write-Host "  -> [WARN] Integration still attached after 3 minutes: $id" -ForegroundColor Yellow
+            $script:cleanupFailures++
+            Write-Host "  -> [ERROR] Integration still attached after 3 minutes: $id" -ForegroundColor Red
+            $keepPlanReason = 'the VNet integration could not be confirmed detached from every site, and deleting the plan could orphan its serviceAssociationLink'
         }
     }
 
@@ -227,43 +371,81 @@ try {
     }
 
     # 6. Delete the Web App (slots go with it)
-    if ($app -and $PSCmdlet.ShouldProcess($AppName, 'Remove Web App (including slots)')) {
+    if ($app -and $keepAppReason) {
+        Write-Host "Keeping Web App '$AppName': $keepAppReason." -ForegroundColor Yellow
+    }
+    elseif ($app -and $PSCmdlet.ShouldProcess($AppName, 'Remove Web App (including slots)')) {
         Write-Host "Removing Web App '$AppName'..." -ForegroundColor Yellow
-        Remove-AzWebApp -ResourceGroupName $RgName -Name $AppName -Force -ErrorAction Stop | Out-Null
-        Write-Host "  -> Deleted" -ForegroundColor Green
+        try {
+            Remove-AzWebApp -ResourceGroupName $RgName -Name $AppName -Force -ErrorAction Stop | Out-Null
+            Write-Host "  -> Deleted" -ForegroundColor Green
+        }
+        catch {
+            $script:cleanupFailures++
+            Write-Host "  -> [ERROR] Could not delete Web App '$AppName': $_" -ForegroundColor Red
+            if (-not $keepPlanReason) { $keepPlanReason = "Web App '$AppName' could not be deleted, and it may still run on the plan" }
+        }
     }
 
     # 7. Delete the autoscale setting
     if ($PSCmdlet.ShouldProcess($autoscaleName, 'Remove Autoscale Setting')) {
         Write-Host "Removing autoscale setting '$autoscaleName'..." -ForegroundColor Yellow
-        $autoscale = Get-AzAutoscaleSetting -ResourceGroupName $RgName -Name $autoscaleName -ErrorAction SilentlyContinue
-        if ($autoscale) {
-            Remove-AzAutoscaleSetting -ResourceGroupName $RgName -Name $autoscaleName -ErrorAction Stop | Out-Null
-            Write-Host "  -> Deleted" -ForegroundColor Green
+        # Listed and picked by name: Get-AzAutoscaleSetting is a generated cmdlet, and asked for
+        # one name that does not exist it throws a plain "[code] : message" exception with no
+        # status, which is not a recognised not-found error. A missing setting is an empty match.
+        $autoscaleLookup = Invoke-LabLookup -Target "the autoscale settings in '$RgName'" -Lookup {
+            Get-AzAutoscaleSetting -ResourceGroupName $RgName -ErrorAction Stop
         }
-        else {
+        if ($autoscaleLookup.Value | Where-Object { $_.Name -eq $autoscaleName }) {
+            try {
+                Remove-AzAutoscaleSetting -ResourceGroupName $RgName -Name $autoscaleName -ErrorAction Stop | Out-Null
+                Write-Host "  -> Deleted" -ForegroundColor Green
+            }
+            catch {
+                $script:cleanupFailures++
+                Write-Host "  -> [ERROR] Could not delete autoscale setting '$autoscaleName': $_" -ForegroundColor Red
+            }
+        }
+        elseif (-not $autoscaleLookup.Failed) {
             Write-Host "  -> Not found or already deleted." -ForegroundColor Gray
         }
     }
 
-    # 8. Delete the App Service Plan
-    if ($PSCmdlet.ShouldProcess($AspName, 'Remove App Service Plan')) {
+    # 8. Delete the App Service Plan - only when nothing that may still run on it went unseen.
+    if ($keepPlanReason) {
+        Write-Host "Keeping App Service Plan '$AspName': $keepPlanReason." -ForegroundColor Yellow
+    }
+    elseif ($PSCmdlet.ShouldProcess($AspName, 'Remove App Service Plan')) {
         Write-Host "Removing App Service Plan '$AspName'..." -ForegroundColor Yellow
-        $plan = Get-AzAppServicePlan -ResourceGroupName $RgName -Name $AspName -ErrorAction SilentlyContinue
-        if ($plan) {
-            Remove-AzAppServicePlan -ResourceGroupName $RgName -Name $AspName -Force -ErrorAction Stop | Out-Null
-            Write-Host "  -> Deleted" -ForegroundColor Green
+        $planLookup = Invoke-LabLookup -Target "App Service Plan '$AspName'" -Lookup {
+            Get-AzAppServicePlan -ResourceGroupName $RgName -Name $AspName -ErrorAction Stop
         }
-        else {
+        if ($planLookup.Value) {
+            try {
+                Remove-AzAppServicePlan -ResourceGroupName $RgName -Name $AspName -Force -ErrorAction Stop | Out-Null
+                Write-Host "  -> Deleted" -ForegroundColor Green
+            }
+            catch {
+                $script:cleanupFailures++
+                Write-Host "  -> [ERROR] Could not delete App Service Plan '$AspName': $_" -ForegroundColor Red
+            }
+        }
+        elseif (-not $planLookup.Failed) {
             Write-Host "  -> Not found or already deleted." -ForegroundColor Gray
         }
     }
-
-    Write-Host "Cleanup completed successfully." -ForegroundColor Green
 }
 catch {
+    # Anything the steps above did not expect: counted, and the run ends here.
+    $script:cleanupFailures++
     Write-Host "Cleanup failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+}
+
+if ($script:cleanupFailures -gt 0) {
+    Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s). See the [ERROR] lines above." -ForegroundColor Red
     $Host.SetShouldExit(1)
     exit 1
 }
+
+Write-Host "Cleanup completed successfully." -ForegroundColor Green
