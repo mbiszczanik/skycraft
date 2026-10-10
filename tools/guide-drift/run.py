@@ -81,6 +81,39 @@ A view is recorded only from a Portal page, and only without tenant or personal 
 left out, and a view that still holds an address, a guest user principal name, an id or tenant
 data once percent-decoded is recorded as none.
 
+Each step starts on a blade, and the run checks it is the right one (issue #207). The recording
+keeps, as the step's "startBlade", the blade part of the view the step began on (view_blade:
+'Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members', without the blade's inputs except a Browse
+blade's resourceType, cut from the redacted view, so a view recorded as none gives none). It is
+recorded only when none is, once the step's first item has gone through, with or without the
+person's help (a step whose first item fails may have started on the wrong blade), from the address
+read before that item once two readings SETTLE_MS apart agree (the Portal changes it a moment after
+a Create or Save), and the console says "Recorded: step X starts on <blade>" so that the person
+notices a wrong one. Before the first item of a step with a recorded blade, the open blade is
+compared with it (same_blade: regardless of case and of a trailing overview) for up to
+FIND_TIMEOUT_MS; when it never matches, the run reports misleading drift in category 'wrong-blade',
+"the step starts on X, the Portal is on Y; the guide does not say how to get there", asks the
+person to bring the Portal to X and press Enter (closed input goes on as well), and performs the
+step. The first step after a resume or --from-step (its browser is new; the resume message names
+the blade), the first step after a step the recording skips, and the first after a step the person
+skipped with 's' (the Portal is wherever the failed step left it) are asked about the same way,
+with the reason and without a record: the guide is not at fault there. No blade is recorded for the
+latter two, as it would depend on the skip: so while a recorded skip stays, the start of the step
+after it is not checked (a blade recorded before the skip was added is only asked about). A step
+whose first item is a global search, or a chain that opens with a resource name (looked up there),
+may start anywhere and is neither checked nor recorded, and neither is a step begun on a view the
+run cannot name. A recorded blade that is wrong is deleted from the recording by hand; the next
+supervised run records it again. The first field acted on after anything but a field starts a form
+(the rows of a form table, or '**Label**: value' items in a row), and is looked for only as a field
+that can be filled in (editable, as fill_field would act on it: a text field that is not read-only
+or already shows the value, any other control, or a labelled container holding a control that takes
+a value), so the lookup never lands on a list's column or a read-only summary. When there is none,
+the run reports the same drift ("no form with a field 'X' is open; ..."), unless the step's start
+was already reported or excused (one cause, one record), asks the person to open the form and press
+Enter, then looks the field up as usual; when this happens at the step's first item, the form's
+blade is the one recorded. A first field the recording holds a decision for is not checked: replay
+finds it. Neither drift makes the guide's screenshots stale or counts in the exit code.
+
 A step whose recording entry carries '"skip": "<reason>"' (an optional or conceptual step that
 would create resources, or the other option of a lettered pair; issue #200) is never performed:
 the Portal is not touched for it, no screenshot is taken, and the summary lists it under
@@ -124,7 +157,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
                        field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
-                       write_json)
+                       same_blade, start_blade, view_blade, write_json)
 
 Found = TypeVar("Found")     # what in_time() looks for
 
@@ -166,6 +199,9 @@ RESULT_ROLES = ("option", "link", "button", "menuitem")    # entries of the glob
 RESOURCE_ROLES = ("link", "gridcell", "row")
 MISSING_RESOURCE = "missing-resource"    # the category of a resource that is not on screen
 RECORDED_SKIP = "recorded-skip"          # the category of a step the recording skips (#200)
+# The category of a step that starts on another blade than the recorded one, or of a form whose
+# first field cannot be filled in on the open blade: the guide leaves out how to get there (#207).
+WRONG_BLADE = "wrong-blade"
 # The Portal's global search box, named "Search resources, services, and docs (G+/)".
 SEARCH_BOX = re.compile(r"^Search resources")
 # A blade's own search box (search scope 'blade'): a search box, or a text box whose accessible
@@ -590,6 +626,41 @@ def find_field(page: Page, label: str) -> Locator | None:
         if element is not None:
             return element
     return None
+
+
+def editable(element: Locator, value: str = "") -> bool:
+    """Whether a field find_field found can be filled in with `value`, so a form is open (#207),
+    judged as fill_field acts on it. A check box, radio, switch, select, combo box or button is
+    picked or ticked, not typed into, so it counts whatever its aria-readonly says. A text field
+    counts unless it is read-only (a user's Overview shows 'User principal name' as a read-only
+    text box), or when it already shows `value`, which fill_field leaves as it is. A labelled
+    container counts when it holds any control that takes a value (VALUE_ROLES: the Portal's
+    'User principal name' on the New user form, a group of radios). One that cannot be inspected
+    counts, as for is_control."""
+    if not is_control(element):
+        return any(parts_of(element, role) for role in VALUE_ROLES)
+    try:
+        tag, role, input_type, _, _ = element.evaluate(FIELD_KIND_JS, timeout=1000)
+    except PlaywrightError:
+        return True
+    if (role in ("checkbox", "radio", "switch", "combobox", "button") or tag in ("select", "button")
+            or (tag == "input" and input_type in ("checkbox", "radio"))):
+        return True
+    if not is_read_only(element):
+        return True
+    try:
+        return current_text(element, tag) == value
+    except PlaywrightError:
+        return False
+
+
+def starts_anywhere(item: dict) -> bool:
+    """Whether a step whose first item is `item` may start on any blade (#207): a search in the
+    Portal's global search (a 'search' item without scope 'blade'), or a chain that opens with a
+    resource name, which is looked up there when it is not on screen (#199)."""
+    if item["kind"] == "search":
+        return item.get("scope") != "blade"
+    return 0 in item.get("resources", ())
 
 
 def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
@@ -1341,6 +1412,17 @@ class Runner:
         self.records: list[dict] = self.earlier_results() if args.resume else []
         self.first_failure: str | None = None   # the step every later step is skipped because of
         self.expanded = False                   # whether the current item opened the menu groups
+        # The blade the current step started on, to record once its first item went through; None
+        # when there is none to record (one is recorded already, or the view has none), and after
+        # the first item (#207).
+        self.start_seen: str | None = None
+        self.first_item = False         # the current item is the step's first (find_form)
+        self.start_accounted = False    # check_start reported or excused the step's start
+        # Steps whose start is not the guide's doing, with the reason (check_start): the first
+        # step after a resume, the first after a step the recording skips or the person skipped
+        # with 's'. The latter two are in `unrecorded` too: their blade is not recorded either.
+        self.excused: dict[str, str] = {}
+        self.unrecorded: set[str] = set()
 
     def earlier_results(self) -> list[dict]:
         """The records the stopped part of this run wrote. A last line cut short by a crash is
@@ -1526,8 +1608,50 @@ class Runner:
         record.update(outcome=outcome, observed=observed)
         return record
 
-    def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None) -> dict:
-        """Find the element the guide calls `label`, act on it, return the result record."""
+    def find_form(self, step: dict, item: dict, label: str, value: str,
+                  look: Callable[[], Locator | None]) -> Locator | None:
+        """The first field of a form (#207), found by `look` only once it can be filled in with
+        `value` (editable), as long as any label is looked for (in_time, then wait_for_blade).
+        When it cannot, no form is open: a list or a read-only summary is, and a lookup there
+        would land on a column or a caption (step 1.1.4's 'User principal name' on the Users
+        list). That is misleading drift in category WRONG_BLADE (the guide does not say how to get
+        to the form), written at once, except at the step's first item when check_start has
+        already accounted for the step's start (start_accounted): one cause, one record. The
+        person is asked to open the form and press Enter, and the field is then looked up as any
+        other, the person being asked about it as usual when it is still not there. Closed input
+        at that prompt goes on the same way."""
+        def form_field() -> Locator | None:
+            element = look()
+            return element if element is not None and editable(element, value) else None
+
+        element = in_time(self.page, form_field)
+        if element is None:
+            element = self.wait_for_blade(step, item, label, form_field)
+        if element is not None:
+            return element
+        where = (f"no form with a field '{label}' is open; the Portal is on "
+                 f"{self.open_blade() or 'a view the run does not name'}")
+        if self.first_item and self.start_accounted:
+            print(f"\nStep {step['id']}: {where}.\nOpen the form, then press Enter.")
+        else:
+            message = f"{where}; the guide does not say how to get there"
+            record = self.new_record(step, "field", label)
+            record.update(outcome="drift", severity="misleading", category=WRONG_BLADE, observed=message)
+            self.write(record)
+            print(f"\nStep {step['id']}: {message}.\nOpen the form, then press Enter.")
+        self.prompt("> ")
+        if self.start_seen is not None:     # set during the step's first item only: it starts on the form
+            self.start_seen = self.open_blade()
+        element = in_time(self.page, look)
+        if element is None:
+            element = self.wait_for_blade(step, item, label, look)
+        return element
+
+    def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None,
+                     form_start: bool = False) -> dict:
+        """Find the element the guide calls `label`, act on it, return the result record.
+        `form_start`: the label is the first field of a form, which must be open (find_form)
+        unless the recording holds a decision for the label (replay finds the field)."""
         kind, line = item["kind"], item["line"]
         record = self.new_record(step, kind, label)
         if kind == "search" and item.get("scope") == "blade":
@@ -1537,9 +1661,12 @@ class Runner:
                 element = search_portal(self.page, label, diagnose=lambda tree: self.save_search_tree(step, tree))
             else:
                 look = self.looking_for(label, kind)
-                element = in_time(self.page, look)
-                if element is None:
-                    element = self.wait_for_blade(step, item, label, look)
+                if form_start and label not in self.recording["steps"].get(step["id"], {}).get("labels", {}):
+                    element = self.find_form(step, item, label, value or "", look)
+                else:
+                    element = in_time(self.page, look)
+                    if element is None:
+                        element = self.wait_for_blade(step, item, label, look)
         except Ambiguous as error:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
             return record
@@ -1691,16 +1818,95 @@ class Runner:
 
     # -- one step --------------------------------------------------------------------------
 
+    def open_blade(self) -> str | None:
+        """The blade the Portal shows (view_blade of the redacted view, Redactor.view_url); None
+        for a closed window, a page off the Portal, and a view that cannot be kept without tenant
+        or personal data."""
+        if self.page.is_closed():
+            return None
+        address = urlsplit(self.page.url)
+        if f"{address.scheme}://{address.netloc}" != PORTAL:
+            return None
+        return view_blade(self.redactor.view_url(self.page.url))
+
+    def settled_blade(self) -> str | None:
+        """The blade the Portal shows once two readings SETTLE_MS apart agree: after a Create or
+        Save the address changes a moment after the click (#207). None when it does not settle
+        within FIND_TIMEOUT_MS, or the view cannot be named."""
+        blade = self.open_blade()
+        for _ in range(FIND_TIMEOUT_MS // SETTLE_MS):
+            self.page.wait_for_timeout(SETTLE_MS)
+            again = self.open_blade()
+            if again == blade:
+                return blade
+            blade = again
+        return None
+
+    def check_start(self, step: dict) -> str | None:
+        """Before the step's first item (#207): compare the blade the Portal shows (open_blade)
+        with the one the recording says the step starts on (start_blade, same_blade), for up to
+        FIND_TIMEOUT_MS, as the address changes a moment after the previous step's last click.
+        When it never matches, write misleading drift in category WRONG_BLADE ('the step starts
+        on X, the Portal is on Y; the guide does not say how to get there') and ask the person to
+        bring the Portal to X and press Enter; the recorded blade stays. A step in `excused` (the
+        first one after a resume, after a step the recording skips, or after one the person
+        skipped with 's') is asked about the same way, with the reason and without a record: the
+        guide is not at fault there.
+
+        Sets start_accounted only when it asked about a mismatch (with a record, or excused), so
+        that find_form does not report the same cause again at the first item; a matching or
+        unrecorded blade leaves a missing form there to be reported. Returns the blade to record
+        once the first item has gone through: the settled one (settled_blade) when the recording
+        has none yet; None when it has one, the open blade cannot be named, the step follows a
+        skipped step (`unrecorded`: the blade would depend on the skip), or the step starts
+        anywhere (starts_anywhere), in which case nothing is compared either."""
+        excuse = self.excused.get(step["id"])
+        self.start_accounted = False
+        if not step["items"] or starts_anywhere(step["items"][0]):
+            return None
+        recorded = start_blade(self.recording, step["id"])
+        if recorded is None:
+            return None if step["id"] in self.unrecorded else self.settled_blade()
+        current: str | None = None
+
+        def on_recorded() -> bool | None:
+            nonlocal current
+            current = self.open_blade()
+            return True if current is not None and same_blade(current, recorded) else None
+
+        if in_time(self.page, on_recorded) or current is None:
+            return None
+        if excuse is None:
+            message = (f"the step starts on {recorded}, the Portal is on {current}; "
+                       "the guide does not say how to get there")
+            record = self.new_record(step, "blade", recorded)
+            record.update(outcome="drift", severity="misleading", category=WRONG_BLADE, observed=message)
+            self.write(record)
+            print(f"\nStep {step['id']}: {message}.\nBring the Portal to {recorded}, then press Enter.")
+        else:
+            print(f"\nStep {step['id']} starts on {recorded}, the Portal is on {current} ({excuse}).\n"
+                  f"Bring the Portal to {recorded}, then press Enter.")
+        self.start_accounted = True
+        self.prompt("> ")
+        return None
+
     def run_step(self, step: dict) -> bool:
         """Perform one step; True when every item went through. A failed step keeps the view
-        URL of its last good run and is not checked for its expected result."""
+        URL of its last good run and is not checked for its expected result. Before the first
+        item the open blade is checked (check_start); once that item has gone through, with or
+        without the person's help, the blade it started on is recorded when none is (#207). The
+        first field acted on after anything but a field starts a form (form table rows or
+        '**Label**: value' items in a row), which must be open (act_on_label's form_start)."""
         print(f"\n=== Step {step['id']}: {step['title']} ===")
         if self.page.is_closed():
             raise PageClosed("the browser window was closed")
         entry = self.step_entry(step)
+        self.start_seen = self.check_start(step)
         step_failed = False
-        for item in step["items"]:
+        in_form = False     # a field of the item before was acted on: the form is open
+        for position, item in enumerate(step["items"]):
             self.expanded = False
+            self.first_item = position == 0
             if item["kind"] == "tag":
                 record = self.new_record(step, "tag", item["name"])
                 try:
@@ -1712,7 +1918,8 @@ class Runner:
             elif item["kind"] == "field":
                 action, value = field_action(self.recording, step, item)
                 if action == "type":
-                    record = self.act_on_label(step, item, item["label"], value)
+                    record = self.act_on_label(step, item, item["label"], value, form_start=not in_form)
+                    in_form = True
                 else:
                     record = self.new_record(step, "field", item["label"])
                     if action == "skip":
@@ -1735,12 +1942,22 @@ class Runner:
                                    else self.act_on_label(step, item, label))
                     if records[-1]["outcome"] == "unknown" or records[-1].get("severity") == "blocking":
                         break
+            if item["kind"] != "field":
+                in_form = False
             for record in records:
                 self.write(record)
                 if record["outcome"] == "unknown" or record.get("severity") == "blocking":
                     step_failed = True
+            if position == 0:
+                if not step_failed and self.start_seen is not None:
+                    # It went through on the blade the step started on: later runs compare with it.
+                    self.step_entry(step)["startBlade"] = self.start_seen
+                    self.save_recording()
+                    print(f"Recorded: step {step['id']} starts on {self.start_seen}")
+                self.start_seen = None      # a later item's find_form must not change it
             if step_failed:
                 break
+        self.first_item = False
         if not step_failed:
             self.check_result(step, entry)
             self.record_view(step)
@@ -1812,9 +2029,10 @@ class Runner:
         path = self.run_dir / f"Step-{step['id']}.png"
         self.page.screenshot(path=str(path), full_page=False)
         record = self.new_record(step, "screenshot", None)
-        # A missing resource is no drift of the guide, so it does not make the guide's images stale.
-        drifted = any(r["step"] == step["id"] and r["outcome"] == "drift" and r.get("category") != MISSING_RESOURCE
-                      for r in self.records)
+        # A missing resource is no drift of the guide, and a wrong blade is a navigation the guide
+        # leaves out, not a blade it shows: neither makes the guide's images stale.
+        drifted = any(r["step"] == step["id"] and r["outcome"] == "drift"
+                      and r.get("category") not in (MISSING_RESOURCE, WRONG_BLADE) for r in self.records)
         if step["images"] and drifted:
             record.update(outcome="drift", category="stale", observed=", ".join(step["images"]))
         else:
@@ -1893,10 +2111,19 @@ class Runner:
         that view when the recording keeps one that can be opened (view_address); otherwise says
         what to bring the Portal to and why the run cannot. Then waits for Enter either way: the
         recording keeps no query string, and a view opened on its own has none of the blades the
-        guide opened before it. False when input is closed."""
+        guide opened before it. False when input is closed.
+
+        When the recording keeps the blade the step starts on (#207), the message names it too,
+        and the step is excused (check_start): a blade that differs after this prompt is asked
+        about again, but is no drift of the guide."""
         step = portal[index]
         previous, view = self.start_view(portal, index, skipped)
         head = f"\nStarting at step {step['id']} ({step['title']}){passed}."
+        blade = start_blade(self.recording, step["id"])
+        if blade is not None:
+            head += f" It starts on {blade}."
+        self.excused[step["id"]] = ("the browser of this run is new: the blades the guide opened before "
+                                    "the step are not open")
         if previous is None:
             print(f"{head} No step of the lab comes before it, so it starts where a new run does, on "
                   f"the view the browser opened: check the Portal shows it, then press Enter.")
@@ -1984,6 +2211,13 @@ class Runner:
             if self.first_failure:
                 self.skip_step(step, self.first_failure)
                 continue
+            before = portal.index(step) - 1
+            if before >= 0 and skip_reason(self.recording, portal[before]["id"]) is not None:
+                # Its blade depends on whether the step before it runs: neither compared as the
+                # guide's fault nor recorded (#207).
+                self.excused.setdefault(step["id"], f"the recording skips step {portal[before]['id']}, "
+                                                    "the step before it")
+                self.unrecorded.add(step["id"])
             self.save_state(completed, step["id"])
             # A step redone after -Resume replaces what its stopped attempt found (its screenshot
             # is overwritten too); results.jsonl keeps both attempts.
@@ -2008,6 +2242,12 @@ class Runner:
                 self.skip_step(step, step["id"], self.redactor.redact(reason))
                 completed.append(step["id"])
                 self.save_state(completed, None)
+                after = portal.index(step) + 1
+                if after < len(portal):
+                    # The Portal is wherever the failed step left it: the next step's start is no
+                    # fault of the guide, and its blade is not recorded (#207).
+                    self.excused.setdefault(portal[after]["id"], f"step {step['id']} was skipped after it failed")
+                    self.unrecorded.add(portal[after]["id"])
             elif answer == "e":
                 self.first_failure = step["id"]     # the state keeps it in flight
             else:
@@ -2106,8 +2346,10 @@ class Runner:
     def drift_line(record: dict) -> str:
         """A drift record in the summary: what was observed instead of the label, or that the
         label is gone from the Portal, or for a missing resource (#199) where it was looked for,
-        which is no fault of the guide."""
+        which is no fault of the guide, or for a wrong blade (#207) the message that names it."""
         what = f"- step {record['step']} {record['kind']}"
+        if record.get("category") == WRONG_BLADE:
+            return f"- step {record['step']}: {record['observed']}"
         if record.get("category") == MISSING_RESOURCE:
             return f"{what} `{record['label']}`: {record['observed']} (an earlier step or lab, or the view, not the guide)"
         if record["severity"] == "blocking":
@@ -2143,10 +2385,13 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         print("Set these environment variables first: " + ", ".join(missing))
         return NOT_STARTED
+    # A malformed skip must not read as 'perform the step', nor a malformed startBlade as a blade
+    # no Portal view has (#207).
     try:
         for step_id in recording.get("steps", {}):
             skip_reason(recording, step_id)
-    except ValueError as error:     # a malformed skip must not read as 'perform the step'
+            start_blade(recording, step_id)
+    except ValueError as error:
         print(f"The recording cannot be used: {error}.")
         return NOT_STARTED
     # Everything that can refuse the run is checked before the browser opens and the person signs in.
