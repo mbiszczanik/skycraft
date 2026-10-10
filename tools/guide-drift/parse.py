@@ -73,7 +73,7 @@ without a browser. Rules (issue #189):
     'Browse to', 'Open', 'Select' or 'Pick' and an optional 'the', and be followed by a remark in
     parentheses and a full stop ('`scripts` (or any container).', 4.4.3); after a verb, also by
     the resource's kind in one or two words (#250): 'Open `skycraft-config` share' (4.3.8),
-    'pick the `platform-skycraft-swc-bv` Backup Vault' (5.2.5). Those words are dropped, and the
+    'pick the `platform-skycraft-swc-bv` Backup Vault'. Those words are dropped, and the
     name must hold more than spaces. The name, backticks stripped, is a label in its place among
     the bold ones, and the item's '"resources"' lists the indices of such labels; only an item
     with a resource name carries the key. After 'Browse to', a path is one resource name per
@@ -105,7 +105,7 @@ without a browser. Rules (issue #189):
     'Check permissions:', 'Verify your own role:'; an instruction INSTRUCTION does not list,
     'Increase the quota:'; a sentence whose verb reports what happens, 'Azure creates:'), any
     other label that is no field label, and a first step with more than one span ('For each
-    role above: select the role → ...', 5.2.5) leave an ordinary navigation, its resource names
+    role above: select the role → ...') leave an ordinary navigation, its resource names
     read as in any other.
   * A list item 'Search for **X**' or 'In Azure Portal, search for **X**', optionally followed
     by where to search ('in the search bar', 'in the Azure Portal search', 'in the portal') and
@@ -183,6 +183,9 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     `dev-skycraft-swc-auth-vm` (...) → **Apply**', 5.1.5) is no step of the chain: its words
     are dropped, so the pane is applied with nothing chosen unless the person picks the VM by
     hand (c).
+  * 5.2.5 chooses the Backup vault type in the Select managed identities pane in words only:
+    Microsoft Learn does not name that list's option for a Backup vault, so the guide gives no
+    label to pick, and the vault is listed only once the person picks the type by hand (c).
   * The kind after a resource name is any one or two words after a verb that do not start with
     a preposition or a conjunction ('Open `x` share'), so other words there would be dropped as
     well ('Open `x` now'); the guides have no such step.

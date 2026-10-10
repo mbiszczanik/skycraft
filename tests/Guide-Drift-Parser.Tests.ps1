@@ -834,10 +834,9 @@ Describe 'parse.py - labs 4.2, 4.3, 5.1, 5.2 and 5.3, pickers, worded resource s
     It 'reads <count> chain(s) of step <id> as <labels>, resource names at <resources>, picking field "<field>"' -ForEach @(
         # 'Flow log type: **Virtual network** -> ... -> `prod-skycraft-swc-vnet` -> ...': the field's picker, then the chain.
         @{ lab = '5.3'; id = '5.3.5'; count = 1; field = 'Flow log type'; labels = @('Virtual network', '+ Select target resource', 'Virtual network', 'prod-skycraft-swc-vnet', 'Confirm selection'); resources = @(3) }
-        # 'Browse to `common/config.txt`': a path opens each segment; 'Open `x` share', 'pick the `x` Backup Vault'.
+        # 'Browse to `common/config.txt`': a path opens each segment; 'Open `x` share'.
         @{ lab = '4.3'; id = '4.3.6'; count = 1; field = ''; labels = @('common', 'config.txt', [string][char]0x22EF, 'Restore'); resources = @(0, 1) }
         @{ lab = '4.3'; id = '4.3.8'; count = 1; field = ''; labels = @('skycraft-config', 'Connect'); resources = @(0) }
-        @{ lab = '5.2'; id = '5.2.5'; count = 1; field = ''; labels = @('Assign access to: Managed identity', 'platform-skycraft-swc-bv', 'Review + assign'); resources = @(1) }
         # '`public-demo` -> **Change access level**. The **Anonymous access level** dropdown lists ...':
         # the sentence after the chain describes the dialog.
         @{ lab = '4.2'; id = '4.2.12'; count = 1; field = ''; labels = @('public-demo', 'Change access level'); resources = @(0) }
@@ -957,6 +956,22 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         $items[$index + 1].label | Should -BeExactly 'Scope level'
         $items[$index + 1].value | Should -BeExactly 'Subscription'
         @($items[$index + 2].labels) | Should -Be @('+ Select scope', 'Apply')
+    }
+
+    It 'assigns each role of step 5.2.5 on the storage account, one role per chain, through + Select members' {
+        $items = @((Get-GapStep '5.2' '5.2.5').items)
+        $open = @($items | Where-Object { (@($_.labels) -join "`n") -ceq "prodskycraftswcsa`nAccess control (IAM)`n+ Add`nAdd role assignment" })
+        $open.Count | Should -Be 1
+        @($open[0].resources) | Should -Be @(0)
+        $tail = @('Next', 'Managed identity', '+ Select members', 'platform-skycraft-swc-bv', 'Select', 'Review + assign', 'Review + assign')
+        foreach ($case in @(@{ role = 'Storage Account Backup Contributor'; head = @() },
+                            @{ role = 'Storage Blob Data Owner'; head = @('+ Add', 'Add role assignment') })) {
+            $labels = @($case.head) + @($case.role) + $tail
+            $chain = @($items | Where-Object { $_.kind -eq 'navigation' -and (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
+            $chain.Count | Should -Be 1 -Because $case.role
+            @($chain[0].resources) | Should -Be @($labels.IndexOf('platform-skycraft-swc-bv'))
+        }
+        @($items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Assign access to: Managed identity'
     }
 
     It 'still clicks what the caption **Bind** of step 3.4.12 tells to click, and nothing for **Validation**' {

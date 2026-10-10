@@ -320,7 +320,7 @@ class PickerChainTests(unittest.TestCase):
 
     def test_a_value_that_is_not_one_span_leaves_a_navigation(self) -> None:
         # The first step after the label must be the value, a bold or code span alone.
-        self.assertEqual(self.item("For each role above: select the role → **Assign access to: Managed identity** → "   # 5.2.5
+        self.assertEqual(self.item("For each role above: select the role → **Assign access to: Managed identity** → "   # 5.2.5 before #203
                                    "pick the `platform-skycraft-swc-bv` Backup Vault → **Review + assign**."),
                          self.navigation(["Assign access to: Managed identity", "platform-skycraft-swc-bv",
                                           "Review + assign"], [1]))

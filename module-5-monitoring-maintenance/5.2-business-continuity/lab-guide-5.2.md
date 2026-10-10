@@ -216,9 +216,11 @@ The Backup Vault uses its **system-assigned managed identity** to read and prote
 | **Storage Account Backup Contributor** | Lets the vault configure and manage operational backup on the account.    |
 | **Storage Blob Data Owner**            | Lets the vault access blob data for protection.                           |
 
-1. Open the storage account `prodskycraftswcsa` (resource group `prod-skycraft-swc-rg`).
-2. Go to **Access control (IAM)** → **+ Add** → **Add role assignment**.
-3. For each role above: select the role → **Assign access to: Managed identity** → pick the `platform-skycraft-swc-bv` Backup Vault → **Review + assign**.
+Assign one role at a time. The wizard's **Review + assign** button first opens its review tab; select it there again to assign the role.
+
+1. Navigate to `prodskycraftswcsa` (resource group `prod-skycraft-swc-rg`) → **Access control (IAM)** → **+ Add** → **Add role assignment**.
+2. **Storage Account Backup Contributor** → **Next** → Assign access to: **Managed identity** → **+ Select members** → choose the Backup vault type in the pane's managed identity list → `platform-skycraft-swc-bv` → **Select** → **Review + assign** → **Review + assign**.
+3. **+ Add** → **Add role assignment** → **Storage Blob Data Owner** → **Next** → Assign access to: **Managed identity** → **+ Select members** → choose the Backup vault type in the pane's managed identity list → `platform-skycraft-swc-bv` → **Select** → **Review + assign** → **Review + assign**.
 
 > [!NOTE]
 > Allow ~5 minutes for the role assignments to propagate before the next step, or it may fail with `UserErrorMissingRequiredPermissions`.
