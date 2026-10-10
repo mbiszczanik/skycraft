@@ -974,6 +974,15 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         @($items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Assign access to: Managed identity'
     }
 
+    It 'keeps the final Create of step 5.3.6 out of the Create alert field' {
+        $items = @((Get-GapStep '5.3' '5.3.6').items)
+        $alert = @($items | Where-Object { $_.kind -eq 'field' -and $_.label -ceq 'Create alert' })
+        $alert.Count | Should -Be 1
+        $alert[0].value | Should -BeExactly 'leave unchecked'
+        $alert[0].PSObject.Properties.Name | Should -Not -Contain 'literal'
+        @($items[[array]::IndexOf($items, $alert[0]) + 1].labels) | Should -Be @('Review + create', 'Create')
+    }
+
     It 'still clicks what the caption **Bind** of step 3.4.12 tells to click, and nothing for **Validation**' {
         $items = @((Get-GapStep '3.4' '3.4.12').items)
         @($items | Where-Object { (@($_.labels) -join "`n") -ceq "Validate`nAdd" }).Count | Should -Be 1

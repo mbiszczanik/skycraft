@@ -186,6 +186,10 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
   * 5.2.5 chooses the Backup vault type in the Select managed identities pane in words only:
     Microsoft Learn does not name that list's option for a Backup vault, so the guide gives no
     label to pick, and the vault is listed only once the person picks the type by hand (c).
+  * 5.3.6 renames its two endpoints in items of their own, in words only: Microsoft Learn says
+    an endpoint's name is edited by selecting it in the test group view but does not name the
+    field, and the lab has no screenshot of it, so the guide gives no label to fill. The
+    person renames them by hand (c) until a supervised run shows the field.
   * The kind after a resource name is any one or two words after a verb that do not start with
     a preposition or a conjunction ('Open `x` share'), so other words there would be dropped as
     well ('Open `x` now'); the guides have no such step.
