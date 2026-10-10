@@ -64,6 +64,17 @@
     summary.md, for a 'Search for' step that found no single result, search-<step>.aria.txt
     (the search dropdown's accessibility tree, redacted) and, for a label that was not found,
     blade-<step>-<guide line>.aria.txt (the outline the blade loading check read, redacted).
+    summary.md and results.jsonl are meant to be copied into an issue or a pull request: each
+    record keeps what it observed on one line, as the failure prompt shows it, without
+    Playwright's call log, with the tenant domain, id and name, the guest address, object ids and
+    any other e-mail address as tokens, and every value typed into a password or credential
+    field, and every key in a connection string or SAS address, as [secret] (#212). The summary
+    names the run folder relative to the repository. A results.jsonl written before #212 keeps
+    its old lines unscrubbed: do not share it. The *.aria.txt files are scrubbed the same way with
+    every line kept, a password field's value masked too. The console is not safe as a whole:
+    errors, crashes (frames and each error's scrubbed first line) and the list of candidates are
+    scrubbed, but this script prints the tenant (id and domain) and the subscription before the
+    run, and the run prints the run folder's absolute path. Copy the summary, not the console.
     Screenshots show the tenant name, user principal names and the subscription id, so nothing
     is copied into a guide's images/ folder: crop and anonymise by hand. The saved browser
     session (tools/.guide-drift-auth.json) is a sign-in. All of it is gitignored and asserted
