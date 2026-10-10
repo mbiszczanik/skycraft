@@ -198,7 +198,31 @@ BeforeAll {
         , $hits
     }
 
-    $orchestrators = @((Join-Path $script:ToolsDir 'Invoke-LabCycle.ps1'), (Join-Path $script:ToolsDir 'Remove-LabCycle.ps1'))
+    # An Az getter as a default probe meets it, in place of the poison for one test (#290). A
+    # failure is reported with Write-Error, as the real cmdlet does, so the probe's own
+    # -ErrorAction decides whether it is seen. Put back by Restore-AzPoison, in an AfterEach.
+    function Use-AzStub {
+        param([Parameter(Mandatory)][string]$Name, [object[]]$Value = @(), [switch]$Fail)
+        $items = $Value
+        $failing = [bool]$Fail
+        $stub = {
+            [CmdletBinding()]
+            param([Parameter(ValueFromRemainingArguments)]$Rest)
+            $null = $Rest   # the probes pass -ResourceType and the like; none of them matters here
+            if ($failing) {
+                Write-Error -ErrorId 'AuthorizationFailed' -Message "The client 'fixture' does not have authorization to perform action 'read' over scope '/subscriptions/fixture-subscription'."
+                return
+            }
+            $items
+        }.GetNewClosure()
+        Set-Item -LiteralPath "Function:\global:$Name" -Value $stub
+    }
+    function Restore-AzPoison {
+        param([Parameter(Mandatory)][string[]]$Name)
+        foreach ($one in $Name) { Set-Item -LiteralPath "Function:\global:$one" -Value (Get-Poison -Name $one) }
+    }
+
+    $orchestrators =@((Join-Path $script:ToolsDir 'Invoke-LabCycle.ps1'), (Join-Path $script:ToolsDir 'Remove-LabCycle.ps1'))
 
     # Layer 1. The developer's own global defaults are copied in first, so they still apply; the
     # copy lives in this file's scope and goes away with it.
@@ -2047,30 +2071,6 @@ Describe 'Teardown - a check that fails is not "gone" (#290)' {
             $parameter = @($script:RemoveCycleAst.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq $Name })[0]
             $parameter.DefaultValue.ScriptBlock.GetScriptBlock()
         }
-
-        # An Az getter as the default probes meet it, in place of the poison for one test. A
-        # failure is reported with Write-Error, as the real cmdlet does, so the probe's own
-        # -ErrorAction decides whether it is seen. Put back by Restore-AzPoison.
-        function Use-AzStub {
-            param([Parameter(Mandatory)][string]$Name, [object[]]$Value = @(), [switch]$Fail)
-            $items = $Value
-            $failing = [bool]$Fail
-            $stub = {
-                [CmdletBinding()]
-                param([Parameter(ValueFromRemainingArguments)]$Rest)
-                $null = $Rest   # the probes pass -ResourceType and the like; none of them matters here
-                if ($failing) {
-                    Write-Error -ErrorId 'AuthorizationFailed' -Message "The client 'fixture' does not have authorization to perform action 'read' over scope '/subscriptions/fixture-subscription'."
-                    return
-                }
-                $items
-            }.GetNewClosure()
-            Set-Item -LiteralPath "Function:\global:$Name" -Value $stub
-        }
-        function Restore-AzPoison {
-            param([Parameter(Mandatory)][string[]]$Name)
-            foreach ($one in $Name) { Set-Item -LiteralPath "Function:\global:$one" -Value (Get-Poison -Name $one) }
-        }
     }
 
     Context 'the teardown reports a probe that throws' {
@@ -2195,6 +2195,96 @@ Describe 'Teardown - a check that fails is not "gone" (#290)' {
             $result.TeardownFailedCount  | Should -Be 1
             $LASTEXITCODE | Should -Be 5
         }
+    }
+}
+
+Describe 'Preflight - a leftover check that fails is a stop, not "clear" (#290)' {
+    # Until #290 the default LeftoverProbe listed with -ErrorAction SilentlyContinue: a listing that
+    # failed returned nothing, and the leftovers check reported every guarded name clear.
+    BeforeAll {
+        $script:SshKey = Join-Path $script:Scratch 'preflight-key.pub'
+        Set-Content -LiteralPath $script:SshKey -Value 'ssh-ed25519 fixture'
+
+        # Every check before 'leftovers' passes, so the leftovers answer is the one under test.
+        $script:PreflightBase = @{
+            SubscriptionId    = 'fixture-subscription'
+            Guards            = @(
+                @{ Kind = 'KeyVault';     Name = 'dev-skycraft-swc-kv';       ResourceGroup = 'dev-skycraft-swc-rg' }
+                @{ Kind = 'LogAnalytics'; Name = 'platform-skycraft-swc-law'; ResourceGroup = 'platform-skycraft-swc-rg' }
+            )
+            SshKeyPath        = $script:SshKey
+            LockPath          = (Join-Path $script:Scratch 'preflight-lock.json')
+            ContextProbe      = $script:GoodContext
+            PermissionProbe   = { @(@{ actions = @('*'); notActions = @() }) }
+            CommandProbe      = { $true }
+            BicepVersionProbe = { 'Bicep CLI version 0.0.0 (fixture)' }
+            CanaryProbe       = { $true }
+        }
+
+        # The shipped default, lifted from Test-LabCyclePreflight's param block for the shape tests.
+        $moduleAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:ToolsDir 'LabCycle.psm1'), [ref]$null, [ref]$null)
+        $preflightAst = @($moduleAst.FindAll({
+            $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq 'Test-LabCyclePreflight'
+        }, $true))[0]
+        $script:DefaultLeftoverProbe = @($preflightAst.Body.ParamBlock.Parameters |
+            Where-Object { $_.Name.VariablePath.UserPath -eq 'LeftoverProbe' })[0].DefaultValue.ScriptBlock.GetScriptBlock()
+    }
+
+    AfterEach {
+        Restore-AzPoison -Name 'Get-AzKeyVault', 'Get-AzResource'
+    }
+
+    It 'stops at the leftovers check when the probe throws, and runs nothing after it' {
+        $probes = @{} + $script:PreflightBase
+        $probes.LeftoverProbe = { throw 'TooManyRequests: try again later' }
+
+        $results = @(Test-LabCyclePreflight @probes)
+
+        $results[-1].Name   | Should -Be 'leftovers'
+        $results[-1].Ok     | Should -BeFalse
+        $results[-1].Detail | Should -Match "could not check the 2 guarded name\(s\): TooManyRequests.*not 'clear'"
+        $results.Name       | Should -Not -Contain 'pester canary'
+    }
+
+    It 'stops when the shipped default cannot list the <What>' -ForEach @(
+        @{ What = 'soft-deleted key vaults'; Failing = 'Get-AzKeyVault'; Listing = 'Get-AzResource' }
+        @{ What = 'resources by name';       Failing = 'Get-AzResource'; Listing = 'Get-AzKeyVault' }
+    ) {
+        Use-AzStub -Name $Failing -Fail
+        Use-AzStub -Name $Listing
+
+        # No -LeftoverProbe: the module's own default runs, and meets the stubs through the global
+        # scope, as it would meet the real cmdlets.
+        $results = @(Test-LabCyclePreflight @script:PreflightBase)
+
+        $results[-1].Name   | Should -Be 'leftovers'
+        $results[-1].Ok     | Should -BeFalse -Because 'a listing that failed must not read as every name clear'
+        $results[-1].Detail | Should -Match 'could not check.*does not have authorization'
+    }
+
+    It 'passes when both listings succeed and hold none of the guarded names' {
+        Use-AzStub -Name 'Get-AzKeyVault' -Value @([pscustomobject]@{ VaultName = 'someone-elses-kv'; Location = 'swedencentral'; EnablePurgeProtection = $false })
+        Use-AzStub -Name 'Get-AzResource'
+
+        $results = @(Test-LabCyclePreflight @script:PreflightBase)
+
+        @($results | Where-Object { $_.Name -eq 'leftovers' })[0].Ok | Should -BeTrue
+        $results[-1].Name | Should -Be 'pester canary'
+    }
+
+    It 'the default probe picks the guarded names exactly from what the getters list' {
+        Use-AzStub -Name 'Get-AzKeyVault' -Value @(
+            [pscustomobject]@{ VaultName = 'dev-skycraft-swc-kv';     Location = 'swedencentral'; EnablePurgeProtection = $true }
+            [pscustomobject]@{ VaultName = 'dev-skycraft-swc-kv-old'; Location = 'swedencentral'; EnablePurgeProtection = $false })
+        Use-AzStub -Name 'Get-AzResource' -Value @(
+            [pscustomobject]@{ Name = 'platform-skycraft-swc-law';      ResourceId = '/subscriptions/fixture-subscription/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.OperationalInsights/workspaces/platform-skycraft-swc-law' }
+            [pscustomobject]@{ Name = 'platform-skycraft-swc-law-copy'; ResourceId = '/subscriptions/fixture-subscription/resourceGroups/elsewhere-rg/providers/Microsoft.OperationalInsights/workspaces/platform-skycraft-swc-law-copy' })
+
+        $found = @(& $script:DefaultLeftoverProbe $script:PreflightBase.Guards)
+
+        $found.Count | Should -Be 2
+        @($found | ForEach-Object { "$($_.Kind):$($_.Name)" }) | Should -Be @('KeyVault:dev-skycraft-swc-kv', 'LogAnalytics:platform-skycraft-swc-law')
+        $found[0].Detail | Should -Match 'purge protection ON'
     }
 }
 

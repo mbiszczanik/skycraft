@@ -25,13 +25,13 @@
          suite pins those.
       3. Invoke-LabLookup returns what a lookup found, reads "found nothing" and a not-found error
          as absent without counting them, and counts any other error in $script:cleanupFailures.
-      4. A ratchet over every cleanup, and over tools/Remove-LabCycle.ps1 where a rule fits it.
-         No cleanup, and not the tool:
+      4. A ratchet over every cleanup, and over the lab cycle's tools/Remove-LabCycle.ps1 and
+         tools/LabCycle.psm1 where a rule fits them. No cleanup, and neither tool:
            a. gives a *-Az* command -ErrorAction SilentlyContinue or Ignore;
            b. sets $ErrorActionPreference to SilentlyContinue or Ignore, at any scope;
            c. gives $PSDefaultParameterValues an ErrorAction default of SilentlyContinue or Ignore
               for a key that can reach an Az command ('*:ErrorAction', '*-Az*:EA', 'Get-*:...').
-         And no cleanup (the tool counts differently - see the Describe):
+         And no cleanup (the tools count differently - see $ToolRatchetCases):
            d. catches the error of a *-Az* command in a catch clause that neither calls
               Test-LabNotFoundError nor counts it in $script:cleanupFailures, throws or exits -
               the catch that read any error as "not there" in Labs 3.1 and 4.4 before #297.
@@ -113,10 +113,15 @@ $RatchetCases = @($CleanupScripts | ForEach-Object {
     @{ file = ($_.Substring($RepoRoot.Length + 1) -replace '\\', '/'); path = $_ }
 })
 
-# The lab cycle's teardown asserts what the cleanups left behind, and read a failed check as
-# "gone" the same way (#290). It is held to the rules about silencing errors; its catch clauses
-# count by recording a failed result, which the catch rule does not read.
-$ToolRatchetCases = @(@{ file = 'tools/Remove-LabCycle.ps1'; path = (Join-Path $RepoRoot 'tools' 'Remove-LabCycle.ps1') })
+# The lab cycle's teardown asserts what the cleanups left behind, and its preflight (in
+# LabCycle.psm1) checks for leftovers before a run; both read a failed check as "gone" or
+# "clear" the same way (#290). They are held to the rules about silencing errors. Their catch
+# clauses report a failure as a failed result or a failed check, not in $script:cleanupFailures,
+# which the catch rule does not read.
+$ToolRatchetCases = @(
+    @{ file = 'tools/Remove-LabCycle.ps1'; path = (Join-Path $RepoRoot 'tools' 'Remove-LabCycle.ps1') }
+    @{ file = 'tools/LabCycle.psm1';       path = (Join-Path $RepoRoot 'tools' 'LabCycle.psm1') }
+)
 
 BeforeAll {
     # What the ratchet's readers share: the values that silence an error, and how a parameter
