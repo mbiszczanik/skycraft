@@ -123,7 +123,7 @@ Scripts interacting with Azure **must** use `try...catch` blocks to handle API f
 
 1. Set `$ErrorActionPreference = 'Stop'` at the top of every script (right after the `param` block), so unhandled errors terminate instead of silently continuing.
 2. Use `try...catch` for all Azure cmdlets.
-3. Use `-ErrorAction SilentlyContinue` if manually checking existence.
+3. Do not read a lookup that failed as "absent". `-ErrorAction SilentlyContinue` on an existence check turns a 403, throttling or a transient ARM error into "not found", and a cleanup then skips a resource that still exists and exits `0` (issue #255). Look up with `-ErrorAction Stop` and tell the two apart: the lab cleanups run each lookup through `Invoke-LabLookup`, which reads "found nothing" and a not-found error (`Test-LabNotFoundError`) as absent, and reports any other error as `[ERROR]`, counted like a failed delete - and the resource it could not see is left alone. Each cleanup carries its own copy of the two helpers (§7.3); [`tests/Lab-Cleanup-Lookup.Tests.ps1`](../tests/Lab-Cleanup-Lookup.Tests.ps1) holds every copy to the same contract and fails a converted cleanup that passes `SilentlyContinue` to an Az command again.
 4. Use `-ErrorAction Stop` when a failure should trigger the `catch` block for retries or termination.
 5. Signal failure to the caller with `$Host.SetShouldExit(<code>)` immediately before every non-zero `exit <code>`. PowerShell 7 discards `exit <code>` from a script run as `pwsh -File` when that script declares `#Requires -Modules` for a module it has to auto-import - every `Az.*` module qualifies. The `exit` still unwinds the script, but the host never applies the code, so the process exits `0` and a failed run looks clean to the automated lab cycle. Keep the `exit` as well, so execution still stops. `exit 0` needs no guard. Enforced by [`tests/Exit-Code-Propagation.Tests.ps1`](../tests/Exit-Code-Propagation.Tests.ps1) (issue #104) on every script that declares `#Requires -Modules` - the condition the fault needs. A script that declares none carries its exit code out unaided, so the rule does not apply to it (issue #124).
 6. Gate every deployment on its result. `New-Az*Deployment` does not throw for every unhappy ending - a deployment whose resources fail to provision returns an object with `ProvisioningState` set to `Failed` or `Canceled` and the pipeline carries on. Assign the result to a variable and end the script with a non-zero `exit` when it is not `Succeeded`; a deployment piped to `Out-Null` cannot be checked at all. Enforced by [`tests/Deployment-State-Gating.Tests.ps1`](../tests/Deployment-State-Gating.Tests.ps1) (issue #75).
@@ -147,6 +147,17 @@ try {
 catch {
     Write-Host "  -> [ERROR] Failed to remove resource" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+}
+```
+
+```powershell
+$vnetLookup = Invoke-LabLookup -Target "VNet $vnetName" -Lookup {
+    Get-AzVirtualNetwork -Name $vnetName -ResourceGroupName $rgName -ErrorAction Stop
+}
+if ($vnetLookup.Failed) { return }      # [ERROR], counted: the VNet may still exist
+if ($vnetLookup.Value.Count -eq 0) {    # found nothing, or reported as not found
+    Write-Host "  -> [INFO] VNet $vnetName not found." -ForegroundColor Gray
+    return
 }
 ```
 
