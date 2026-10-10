@@ -102,13 +102,14 @@ if ($Force) { $ConfirmPreference = 'None' }
 $script:cleanupFailures = 0
 
 # Whether a lookup's error says the resource does not exist, rather than that the lookup failed.
-# Get-AzWebApp, Get-AzAppServicePlan, Get-AzAutoscaleSetting and Get-AzVirtualNetwork report a
-# missing resource as an ARM 404: "The Resource '<type>/<name>' under resource group '<rg>' was not
-# found.", code ResourceNotFound; when the group is gone as well, "Resource group '<rg>' could not
-# be found.", code ResourceGroupNotFound; with no error body, "Operation returned an invalid status
-# code 'NotFound'", or a 404 on the generated cmdlets' RestException. The Azure.Core clients say
-# "Status: 404 (Not Found)". A missing subscription is a 404 too, but it means the context is
-# wrong, not that the resource is gone, so it never reads as "absent".
+# Get-AzWebApp fails on a missing app with "Operation returned an invalid status code 'NotFound'".
+# Get-AzVirtualNetwork reports a missing VNet as an ARM 404: "The Resource '<type>/<name>' under
+# resource group '<rg>' was not found.", code ResourceNotFound; when the group is gone as well,
+# "Resource group '<rg>' could not be found.", code ResourceGroupNotFound. Get-AzAppServicePlan
+# returns nothing for a missing plan (its SDK accepts the 404), and the slots and the autoscale
+# settings are listed, so those are empty matches, not errors. The Azure.Core clients say "Status:
+# 404 (Not Found)". A missing subscription is a 404 too, but it means the context is wrong, not
+# that the resource is gone, so it never reads as "absent".
 function Test-LabNotFoundError {
     [CmdletBinding()]
     [OutputType([bool])]

@@ -74,8 +74,10 @@ BeforeAll {
     # setting, the plan, and the VNet whose integration subnet carries no links. The integration
     # DELETE answers 200 and the verification GET 404 (detached). Environment variables change
     # that, so one generated module serves every scenario:
-    #   SKYCRAFT_STUB_EMPTY   '1' leaves nothing to find: every getter reports ResourceNotFound,
-    #                         as the real ones do for a name that does not exist
+    #   SKYCRAFT_STUB_EMPTY   '1' leaves nothing to find, each getter answering as the real one
+    #                         does: Get-AzWebApp fails with "invalid status code 'NotFound'",
+    #                         Get-AzVirtualNetwork with ResourceNotFound, Get-AzAppServicePlan
+    #                         returns $null (its SDK accepts the 404) and the listings are empty
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled) or
     #                         report its resource, or its group, not found (notfound, rgnotfound)
     #   SKYCRAFT_STUB_FAIL    '<Remove-command>:<name>,...' makes one removal throw
@@ -104,9 +106,10 @@ function Invoke-StubRemoval {
 # How the lookup named here fails, if at all. The failure is reported with Write-Error, as the
 # Az getters do, so the caller's -ErrorAction decides what happens to it. Returns $true when the
 # lookup failed, so the stub returns nothing after it. -Named lookups report a missing resource
-# as ResourceNotFound when the stub is empty.
+# as not found when the stub is empty: as ResourceNotFound, or with -StatusOnly as the bare
+# "invalid status code 'NotFound'" of an SDK error with no body.
 function Invoke-StubLookup {
-    param([string]$Name, [string]$ResourceGroup, [switch]$Named)
+    param([string]$Name, [string]$ResourceGroup, [switch]$Named, [switch]$StatusOnly)
     Write-StubCall -Name $Name
     $kind = foreach ($entry in @($env:SKYCRAFT_STUB_LOOKUP -split ',')) {
         $key, $value = $entry -split '=', 2
@@ -123,6 +126,10 @@ function Invoke-StubLookup {
             return $true
         }
         'notfound' {
+            if ($StatusOnly) {
+                Write-Error -ErrorId 'DefaultErrorResponseException' -Message "Operation returned an invalid status code 'NotFound'"
+                return $true
+            }
             Write-Error -ErrorId 'ResourceNotFound' -Message "The Resource 'Microsoft.Web/stubs/$(($Name -split ':')[-1])' under resource group '$ResourceGroup' was not found. For more details please go to https://aka.ms/ARMResourceNotFoundFix"
             return $true
         }
@@ -155,7 +162,7 @@ function Get-AzVirtualNetwork {
 function Get-AzWebApp {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$Name)
-    if (Invoke-StubLookup -Name "Get-AzWebApp:$Name" -ResourceGroup $ResourceGroupName -Named) { return }
+    if (Invoke-StubLookup -Name "Get-AzWebApp:$Name" -ResourceGroup $ResourceGroupName -Named -StatusOnly) { return }
     [pscustomobject]@{ Name = $Name; Id = $script:SiteId }
 }
 
@@ -200,7 +207,9 @@ function Remove-AzAutoscaleSetting {
 function Get-AzAppServicePlan {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$Name)
-    if (Invoke-StubLookup -Name "Get-AzAppServicePlan:$Name" -ResourceGroup $ResourceGroupName -Named) { return }
+    if (Invoke-StubLookup -Name "Get-AzAppServicePlan:$Name" -ResourceGroup $ResourceGroupName) { return }
+    # The real getter answers a missing plan with no error and a $null.
+    if (Test-StubEmpty) { return $null }
     [pscustomobject]@{ Name = $Name }
 }
 
@@ -325,6 +334,13 @@ Describe 'Lab 3.4 Remove-LabResource.ps1 - an absent resource is not a failure' 
         $run.Output | Should -Match "Web App 'dev-skycraft-swc-app01' not found - nothing to detach"
         $run.Output | Should -Match 'Not found or already deleted'
         @($run.Calls | Where-Object { $_ -match '^Remove-|:DELETE:' }) | Should -BeNullOrEmpty
+    }
+
+    It 'reads the $null a missing plan comes back as as absent' {
+        $run = $script:Nothing
+        $run.Calls  | Should -Contain 'Get-AzAppServicePlan:dev-skycraft-swc-asp'
+        $run.Calls  | Should -Not -Contain 'Remove-AzAppServicePlan:dev-skycraft-swc-asp'
+        $run.Output | Should -Match "Removing App Service Plan 'dev-skycraft-swc-asp'\.\.\.\s+-> Not found or already deleted"
     }
 
     It 'exits 0 when a getter reports its resource not found, and removes the rest' {
