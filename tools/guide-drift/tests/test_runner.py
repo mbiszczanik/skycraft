@@ -1085,11 +1085,11 @@ class SnapshotKeyTests(unittest.TestCase):
                          self.STANDARD)
         tree = "\n".join([snapshot_line("radio", self.STANDARD), snapshot_line("radio", "Premium"),
                           snapshot_line("button", "Don't: stop"), snapshot_line("button", 'Say "hi"'),
-                          snapshot_line("radio", "Premium"), "- text: x"])
+                          snapshot_line("radio", "Premium"), "- text: x", "- button"])
         with mock.patch.object(run, "all_frames", lambda page: [Screen(tree=tree)]):
             lines = run.aria_lines(FakePage())
         self.assertEqual(lines, [("radio", self.STANDARD, 1), ("radio", "Premium", 2),
-                                 ("button", "Don't: stop", 1), ("button", 'Say "hi"', 1)])
+                                 ("button", "Don't: stop", 1), ("button", 'Say "hi"', 1)])   # no unnamed button
 
 
 class BladeStillLoadingTests(unittest.TestCase):
@@ -2066,6 +2066,11 @@ class FindOnScreenTests(RunnerTestCase):
         screen, radio, item = self.radio_field(self.STANDARD)
         record, _ = self.act(screen, item, item["label"], value="Standard")
         self.assertEqual((record["outcome"], radio.checked), ("match", True))
+        for name in ("Disabled", "No"):              # its name is read before the checkbox state
+            with self.subTest(name=name):
+                screen, radio, item = self.radio_field(name)
+                record, _ = self.act(screen, item, item["label"], value=name)
+                self.assertEqual((record["outcome"], radio.checked), ("match", True))
         screen, radio, item = self.radio_field("Allow selected ports", checked=True)
         radio.check_error = AssertionError("set_checked() called on a radio already selected")
         record, _ = self.act(screen, item, item["label"], value="Allow selected ports")

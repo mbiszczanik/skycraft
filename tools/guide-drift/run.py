@@ -1145,7 +1145,7 @@ def fill_parts(page: Page, container: Locator, value: str) -> str | None:
     radios = parts_of(container, "radio")
     if radios and not comboboxes:
         return pick_radio(page, radios, value)
-    if len(textboxes) == 1 and not comboboxes and not radios:
+    if len(textboxes) == 1 and not comboboxes:
         return fill_field(page, textboxes[0], value)
     if len(textboxes) == 1 and len(comboboxes) == 1 and not radios and "@" in value:
         local, domain = value.rsplit("@", 1)
