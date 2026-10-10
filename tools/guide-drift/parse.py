@@ -168,14 +168,11 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     Value table turn its fields into checks. No guide has either shape today.
   * A fenced code block between an introduction and a form table is blanked out like any
     other, so the table after it is still read as checks. No guide has this shape today.
-  * An inline 'and confirm **X**' is read as a click on X: 2.2.21's 'Navigate to **Subnets**
-    → **WorldSubnet** and confirm **Microsoft.Storage**' ends its chain on a value to check
-    (#283).
   * Checks join the step's single Expected Result, which the runner checks at the end of the
     step, though a check list can describe a blade the step then moves on from: 2.3.19 checks
     the Overview and then opens Record sets; 2.3.20 checks the dev load balancer and ends on
-    prod; 2.2.21 checks DatabaseSubnet and ends on prod-skycraft-swc-vnet; 4.1.2 checks the
-    wizard's Encryption tab and ends on the new account.
+    prod; 2.2.21 checks DatabaseSubnet and WorldSubnet and ends on prod-skycraft-swc-vnet;
+    4.1.2 checks the wizard's Encryption tab and ends on the new account.
 
 Usage: python parse.py <path/to/lab-guide-X.Y.md> [--out steps.json] [--repo-root <dir>]
 """
