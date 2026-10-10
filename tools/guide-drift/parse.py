@@ -373,8 +373,7 @@ NON_UI_BOLD = {
     # Captions found in more than one guide, or generic enough for any; no Portal element the
     # guides name is called so. A supervised run answers the rest once.
     "Azure Portal",                            # 1.1-5.2: "Open **Azure Portal**", the site itself
-    "(Optional)",                              # 3.2: caption
-    "Example",                                 # 3.3: caption ("Example: `skycraft-auth-...`")
+    "Example",          # 2.3: "**Example** (our SkyCraft config):"; 3.3: plain "Example: `skycraft-auth-...`"
     "Result",                                  # 2.2, 4.2: caption ("**Result**: PublicAccess...")
 }
 
@@ -391,7 +390,8 @@ LAB_CAPTIONS: dict[str, frozenset[str]] = {
     "3.1": frozenset({"Install Bicep CLI",                 # captions of local-tools steps
                       "Install VS Code Extension",
                       "Review generated Bicep file"}),
-    "3.2": frozenset({"zone-redundant by default",         # emphasis
+    "3.2": frozenset({"(Optional)",                        # caption
+                      "zone-redundant by default",         # emphasis
                       "Simulating zone failure",           # captions in a conceptual step
                       "Verifying traffic routing",
                       "Restoring service"}),
