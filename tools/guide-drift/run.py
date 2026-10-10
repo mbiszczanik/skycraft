@@ -9,29 +9,28 @@ the Portal is in English and the overview shows the expected tenant ID (the doma
 the account's own address in the header carries it in any directory). Only then is the browser
 session saved to --auth-state, so the next run skips the password.
 
-Everything a run leaves behind goes under --log-dir/<run id>/ and is gitignored:
-results.jsonl (one record per check, appended as the run goes), Step-X.Y.N.png (full window,
-for manual cropping and anonymisation), summary.md, and blade-<step>-<line>.aria.txt for a label that
-was not found (the outline the loading check read, redacted). Only the recording is written back
-into the repository.
+Everything a run leaves behind goes under --log-dir/<run id>/ and is gitignored: results.jsonl (one
+record per check, appended as the run goes), Step-X.Y.N.png (full window, for manual cropping and
+anonymisation), summary.md, and blade-<step>-<line>.aria.txt for a label that was not found (the
+outline the loading check read, redacted). Only the recording is written back into the repository.
 
 summary.md, and results.jsonl behind it, are what gets copied into an issue or a pull request, so
 they hold the text the failure prompt shows (issue #212). A record's "observed" is scrubbed before
 it is written (Runner.scrubbed, recording.scrub): one line, the first of an error, without the
-Playwright call log after it (which holds the element's HTML, an auto-generated password in a
-value attribute among it, and the value the runner typed); every value the runner types into a
-field whose label names a password, secret or other credential (recording.typed_secrets) and
-every credential in a connection string or SAS address ('AccountKey=', 'sig=') as '[secret]';
-object ids as '<id>'; tenant data, also as a regular expression escapes it, as the Redactor's
-tokens; any other e-mail address as '<email>'; a value a call typed and an element's value
-attribute as '[typed]' and '[value]' (recording.scrub lists what it cannot recognise and what
-it masks that only looks like one of these: 'Group@2x.png', 'ResetPassword=true'). Scrubbing
-twice changes nothing, so the records a -Resume reloads stay as written. A results.jsonl written before #212 keeps its old lines as they are: a
-resume cleans them for the summary only, so such a file is not safe to share. A proposed edit's
-new label is scrubbed the same way; the rest of its line is the guide's own text and is never
-redacted. The summary names the run folder relative to the repository (or by its name alone),
-never by an absolute path. The *.aria.txt files are scrubbed with every line kept, and the value
-of a text field named like a password or other credential is masked there too (the Portal's
+Playwright call log after it (which holds the element's HTML, an auto-generated password in a value
+attribute among it, and the value the runner typed); every value the runner types into a field
+whose label names a password, secret or other credential (recording.typed_secrets) and every
+credential in a connection string or SAS address ('AccountKey=', 'sig=') as '[secret]'; object ids
+as '<id>'; tenant data, also as a regular expression escapes it, as the Redactor's tokens; any
+other e-mail address as '<email>'; a value a call typed and an element's value attribute as
+'[typed]' and '[value]' (recording.scrub lists what it cannot recognise and what it masks that only
+looks like one of these: 'Group@2x.png', 'ResetPassword=true'). Scrubbing twice changes nothing, so
+the records a -Resume reloads stay as written. A results.jsonl written before #212 keeps its old
+lines as they are: a resume cleans them for the summary only, so such a file is not safe to share.
+A proposed edit's new label is scrubbed the same way; the rest of its line is the guide's own text
+and is never redacted. The summary names the run folder relative to the repository (or by its name
+alone), never by an absolute path. The *.aria.txt files are scrubbed with every line kept, and the
+value of a text field named like a password or other credential is masked there too (the Portal's
 auto-generated password is in an accessibility snapshot). The text a step's result is checked by,
 as the person types it, is kept in the recording scrubbed the same way. The screenshots are not
 scrubbed: crop and anonymise them by hand.
