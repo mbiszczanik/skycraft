@@ -298,6 +298,19 @@ provisioning state `Succeeded`.
 `Invoke-LabCycle.ps1`'s preflight therefore reports this as a **warning and continues**. Treating it
 as fatal would mean every successful run blocked the next one from starting.
 
+### `[STOP] leftovers: could not check the N guarded name(s)`
+
+**The preflight could not list what it guards against, so it does not know whether the names are
+free.** The leftovers check lists soft-deleted key vaults and the resources holding the names the
+run needs. When that listing fails - a 403, throttling, a transient ARM error - the check stops the
+run (exit code 3) instead of reporting the names clear: a check that failed is not "clear"
+([#290](https://github.com/mbiszczanik/skycraft/issues/290)).
+
+Read the error after the colon, fix its cause (sign in again, check the identity can read the
+subscription, or wait out the throttling), and run `Invoke-LabCycle.ps1` again. Nothing was deployed
+or deleted. `Remove-LabCycle.ps1` treats its end-of-cycle checks the same way: a `[FAIL] Could not
+check whether ...` line is a failed assertion, counted in its exit code, not a pass.
+
 ### Lab 3.3's teardown reports `exit 124`
 
 **`124` is the orchestrator's timeout sentinel**, not an error from the lab. It means the delete was
