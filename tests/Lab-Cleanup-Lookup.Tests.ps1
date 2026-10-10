@@ -84,13 +84,13 @@ $ExpectedHelperFile = @(
     'module-3-compute/3.1-infrastructure-as-code/scripts/Remove-LabResource.ps1'
     'module-3-compute/3.2-virtual-machines/scripts/Remove-LabResource.ps1'
     'module-3-compute/3.3-containers/scripts/Remove-LabResource.ps1'
+    'module-3-compute/3.4-app-service/scripts/Remove-LabResource.ps1'
     'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Remove-LabResource.ps1'
 )
 
 # The cleanups #255 still has to convert. The list only shrinks: the pending-list test below fails
 # for an entry whose cleanup no longer silences a lookup.
 $PendingLab = @(
-    'module-3-compute/3.4-app-service'
     'module-4-storage/4.1-storage-accounts'
     'module-4-storage/4.2-blob-storage'
     'module-4-storage/4.3-azure-files'
