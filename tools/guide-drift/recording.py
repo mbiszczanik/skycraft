@@ -25,6 +25,12 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   start_blade          the blade the recording says a step starts on ('"startBlade"', #207), or
                        None when it is not recorded yet
   write_json           writes the recording or the state file atomically
+  one_line             the first line of a text, cut before a Playwright call log, with typed
+                       values and element values masked (#212)
+  error_text           an exception as a record keeps it: '<type>: <first line>' (#212)
+  typed_secrets        every value the runner types into a password or secret field (#212)
+  scrub                a free text as a run log keeps it: one line, secrets, tenant data and
+                       object ids as tokens; scrubbing twice changes nothing (#212)
 """
 from __future__ import annotations
 
@@ -107,6 +113,28 @@ def fully_decoded(text: str) -> str | None:
     return None
 
 
+# What a run log writes in place of a typed secret (typed_secrets) and of an object id (scrub).
+SECRET = "[secret]"
+OBJECT_ID = "<id>"
+
+
+def sub_outside(pattern: re.Pattern, replacement: str, text: str, protected: re.Pattern) -> str:
+    """`text` with every match of `pattern` replaced by `replacement`, except inside a match of
+    `protected` (the tokens a redaction writes), so that redacting twice changes nothing more
+    than redacting once. Every token starts and ends with a character that is no letter, digit,
+    '_' or '-', so a pattern's lookarounds read the text beside a token as they would without
+    the split."""
+    def replace(part: str) -> str:
+        return pattern.sub(lambda _: replacement, part)
+
+    pieces, at = [], 0
+    for token in protected.finditer(text):
+        pieces += [replace(text[at:token.start()]), token.group()]
+        at = token.end()
+    pieces.append(replace(text[at:]))
+    return "".join(pieces)
+
+
 class Redactor:
     """Keeps tenant data out of the committed recording, which lives in a public repository.
     The tenant's domain and id become tokens on the way into the recording and are restored on
@@ -155,12 +183,18 @@ class Redactor:
         if len(prefix) >= self.PREFIX_MIN:
             self._pairs.append((re.compile(rf"(?<![\w-]){re.escape(prefix)}(?![\w-])", re.IGNORECASE),
                                 self.PREFIX, prefix))
+        # Its own tokens and those of a run log (scrub), longest first: redact() leaves them alone.
+        tokens = {token for _, token, _ in self._pairs} | {SECRET, OBJECT_ID}
+        self.tokens = re.compile("|".join(re.escape(t) for t in sorted(tokens, key=len, reverse=True)))
 
     def redact(self, text: str | None) -> str | None:
+        """`text` with tenant data replaced by tokens. A token already in it is left as it is
+        (sub_outside), so redacting a redacted text again changes nothing, even for a tenant
+        named like a token ('tenantname', #212)."""
         if text is None:
             return None
         for pattern, token, _ in self._pairs:
-            text = pattern.sub(token, text)
+            text = sub_outside(pattern, token, text, self.tokens)
         return text
 
     def restore(self, text: str | None) -> str | None:
@@ -380,3 +414,77 @@ def field_action(recording: dict, step: dict, item: dict) -> tuple[str, str]:
             and not value_is_literal(value)):
         return ("unresolved" if BRACKET_TOKEN.search(value) else "instruction"), value
     return value_action(value), value
+
+
+# --- what a run log keeps (#212) -------------------------------------------------------------
+
+# Playwright's errors read '<api>: <message>', then '\nCall log:\n' and one line per thing it did
+# (playwright/_impl/_helper.py parse_error, _connection.py format_call_log). The call log holds
+# the element's HTML, a password field's value attribute among it, and the value typed into it.
+CALL_LOG = re.compile(r"\s*\bCall log:")
+# A value the runner typed, as Playwright names the call: 'fill("...")', also in a first line.
+TYPED_CALL = re.compile(r"""\b(?P<call>fill|type|press_sequentially|pressSequentially)\("""
+                        r"""(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')""")
+# An element's value attribute, as Playwright prints the element: '<input value="..." .../>'.
+VALUE_ATTRIBUTE = re.compile(r"""(?P<head><[A-Za-z][^<>]*?\svalue=)(?:"[^"]*"|'[^']*'|[^\s"'<>]+)""")
+
+
+def one_line(text: str) -> str:
+    """The first line of `text` with text in it, stripped, cut before a Playwright call log
+    ('Call log:' and all after it), with what a call typed ('fill("[typed]")') and an element's
+    value attribute ('value="[value]"') masked: the first line of an error can carry either."""
+    lines = [line.strip() for line in CALL_LOG.split(text, 1)[0].splitlines() if line.strip()]
+    line = lines[0] if lines else ""
+    line = TYPED_CALL.sub(lambda m: f'{m.group("call")}("[typed]"', line)
+    return VALUE_ATTRIBUTE.sub(lambda m: f'{m.group("head")}"[value]"', line)
+
+
+def error_text(error: BaseException) -> str:
+    """An exception as a record's 'observed' keeps it: '<type>: <first line>' (one_line), without
+    Playwright's call log; the type alone when the message is empty."""
+    line = one_line(str(error))
+    return f"{type(error).__name__}: {line}" if line else type(error).__name__
+
+
+# A field whose value is a secret: what the runner types into it is never written to a run log.
+SECRET_FIELD = re.compile(r"password|passphrase|secret", re.IGNORECASE)
+
+
+def typed_secrets(recording: dict, steps: dict) -> set[str]:
+    """Every value the runner may type into a field whose label names a secret (SECRET_FIELD:
+    'Password', 'Client secret'), as the guide writes it and as the recording resolves it (a
+    valueOverride, an environment variable, placeholders; field_action). A check box state
+    ('Auto-generate password': '☐ Unchecked') and a bracketed instruction ('[Leave blank]') are
+    not typed, so they are no secret; nor is a value whose environment variable is not set (the
+    run refuses to start then). A value the Portal generates is never typed: the runner never
+    reads it, and the call log, the only place it showed, is cut (one_line)."""
+    secrets = set()
+    for step in steps.get("steps", []):
+        for item in step.get("items", []):
+            if item.get("kind") != "field" or not SECRET_FIELD.search(item.get("label", "")):
+                continue
+            values = [item.get("value", "")]
+            try:
+                values.append(field_action(recording, step, item)[1])
+            except SystemExit:          # expand_env: a variable that is not set
+                pass
+            secrets |= {value for value in values
+                        if value.strip() and value_action(value) == "type" and checkbox_state(value) is None}
+    return secrets
+
+
+def scrub(text: str | None, redactor: Redactor, secrets: set[str] | frozenset[str] = frozenset()) -> str | None:
+    """What a run log (results.jsonl, summary.md) keeps of a free text such as a record's
+    'observed': its first line without a Playwright call log (one_line), every typed secret as
+    SECRET (longest first), tenant data as the Redactor's tokens, and object ids (GUIDs, with
+    or without hyphens) as OBJECT_ID. Tokens already in it are left alone, so scrubbing a
+    scrubbed text changes nothing: records reloaded on -Resume stay as they were written."""
+    if text is None:
+        return None
+    text = one_line(str(text))
+    for value in sorted(secrets, key=len, reverse=True):
+        text = sub_outside(re.compile(re.escape(value)), SECRET, text, redactor.tokens)
+    text = redactor.redact(text)
+    for pattern in (GUID, HEX_ID):
+        text = sub_outside(pattern, OBJECT_ID, text, redactor.tokens)
+    return text

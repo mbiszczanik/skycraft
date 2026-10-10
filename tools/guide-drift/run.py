@@ -15,6 +15,18 @@ for manual cropping and anonymisation), summary.md, and blade-<step>-<line>.aria
 was not found (the outline the loading check read, redacted). Only the recording is written back
 into the repository.
 
+summary.md, and results.jsonl behind it, are what gets copied into an issue or a pull request, so
+they hold the text the failure prompt shows (issue #212). A record's "observed" is scrubbed before
+it is written (Runner.scrubbed, recording.scrub): one line, the first of an error, without the
+Playwright call log after it (which holds the element's HTML, an auto-generated password in a
+value attribute among it, and the value the runner typed), with a value typed in that line and an
+element's value attribute masked, every value the runner types into a field whose label names a
+password or secret (recording.typed_secrets) as '[secret]', tenant data as the Redactor's tokens
+and object ids as '<id>'. Scrubbing twice changes nothing, so the records a -Resume reloads stay
+as written (and a line a run wrote before #212 is cleaned for the summary). A proposed edit's new
+label is scrubbed the same way; the rest of its line is the guide's own text and is never
+redacted. The screenshots are not scrubbed: crop and anonymise them by hand.
+
 The runner acts only on a visible element within the window's width (the Portal parks earlier
 blades off to the left; below the fold is fine, it scrolls there first), and only on one:
 several matches are reported as unknown rather than guessed. It refuses to click or fill an
@@ -184,6 +196,7 @@ from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # n
 from recording import (REMARK, Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
                        field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
                        same_blade, start_blade, view_blade, write_json)
+from recording import error_text, one_line, scrub, typed_secrets  # noqa: E402
 
 Found = TypeVar("Found")     # what in_time() looks for
 
@@ -864,7 +877,7 @@ def tree_of(dropdown: Locator | None, frame: Frame) -> str:
     try:
         return f"# {what}\n{target.aria_snapshot(timeout=2000)}"
     except PlaywrightError as error:
-        return f"# {what}: no snapshot ({type(error).__name__}: {error})"
+        return f"# {what}: no snapshot ({error_text(error)})"
 
 
 def search_portal(page: Page, label: str, diagnose: Callable[[str], None] | None = None) -> Locator | None:
@@ -1532,6 +1545,8 @@ class Runner:
         self.deciders = [ReplayDecider(recording), HumanDecider(ask=lambda text: self.ask(text))]
         self.redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording),
                                  getattr(args, "tenant_name", ""))
+        # What the runner types into a password or secret field, never written to a run log (#212).
+        self.secrets = typed_secrets(recording, steps)
         self.records: list[dict] = self.earlier_results() if args.resume else []
         self.first_failure: str | None = None   # the step every later step is skipped because of
         self.expanded = False                   # whether the current item opened the menu groups
@@ -1548,14 +1563,15 @@ class Runner:
         self.unrecorded: set[str] = set()
 
     def earlier_results(self) -> list[dict]:
-        """The records the stopped part of this run wrote. A last line cut short by a crash is
-        skipped."""
+        """The records the stopped part of this run wrote, scrubbed as write() scrubs them: that
+        changes nothing in a record written so, and cleans one a run wrote before #212 for the
+        summary (results.jsonl keeps it as it is). A last line cut short by a crash is skipped."""
         if not self.results_path.is_file():
             return []
         records = []
         for line in self.results_path.read_text(encoding="utf-8").splitlines():
             try:
-                records.append(json.loads(line))
+                records.append(self.scrubbed(json.loads(line)))
             except ValueError:
                 continue
         return records
@@ -1725,7 +1741,7 @@ class Runner:
             record.update(outcome="unknown", observed=str(error))
             return record
         except (PlaywrightError, LookupError) as error:
-            record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
+            record.update(outcome="unknown", observed=error_text(error))
             return record
         outcome, observed = search_outcome(label, before, after)
         record.update(outcome=outcome, observed=observed)
@@ -1798,7 +1814,7 @@ class Runner:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
             return record
         except (PlaywrightError, LookupError) as error:     # the search box is missing or cannot be typed in
-            record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
+            record.update(outcome="unknown", observed=error_text(error))
             return record
         decision = Decision(kind="use", name=label, decided_by="exact") if element is not None else None
         pending = None     # a person's use/drift decision, recorded only once the action succeeded
@@ -1858,7 +1874,7 @@ class Runner:
             record.update(outcome="unknown", observed=f"read-only: '{acted_on}'")
             return record
         except (PlaywrightError, LookupError) as error:
-            record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
+            record.update(outcome="unknown", observed=error_text(error))
             return record
         # Replay must never inherit a choice the runner could not act on.
         self.remember(step, label, pending)
@@ -1928,19 +1944,22 @@ class Runner:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{name}'")
             return record
         except (PlaywrightError, LookupError) as error:
-            record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
+            record.update(outcome="unknown", observed=error_text(error))
             return record
         record.update(outcome="match", observed="opened from the Portal's search" if searched else None)
         return record
 
     def proposed_edit(self, line: int, old_label: str, new_label: str) -> dict | None:
         """The guide line with the bold label replaced; None when the line is out of range or does
-        not carry the label in bold, so there is nothing to change."""
+        not carry the label in bold, so there is nothing to change. The new label is scrubbed as
+        a record's 'observed' is (scrubbed, #212); the rest of the line is the guide's own text and
+        is never redacted, so that no token stands where the guide's words are (a tenant named
+        like a word of the guide). A token in the new label itself is #211's to refuse."""
         guide_lines = (Path(self.args.repo_root) / self.steps["guide"]).read_text(encoding="utf-8-sig").splitlines()
         if not (1 <= line <= len(guide_lines)):
             return None
         old = guide_lines[line - 1]
-        new = old.replace(f"**{old_label}**", f"**{new_label}**")
+        new = old.replace(f"**{old_label}**", f"**{scrub(new_label, self.redactor, self.secrets)}**")
         return None if new == old else {"line": line, "old": old, "new": new}
 
     # -- one step --------------------------------------------------------------------------
@@ -2040,7 +2059,7 @@ class Runner:
                     fill_tag(self.page, item["name"], resolve_value(self.recording, step, item["name"], item["value"]))
                     record.update(outcome="match", observed=item["value"])
                 except (PlaywrightError, LookupError) as error:
-                    record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
+                    record.update(outcome="unknown", observed=error_text(error))
                 records = [record]
             elif item["kind"] == "field":
                 action, value = field_action(self.recording, step, item)
@@ -2122,8 +2141,22 @@ class Runner:
                 "skippedBecause": None, "observed": None, "proposedEdit": None,
                 "screenshot": f"Step-{step['id']}.png"}
 
+    def scrubbed(self, record: dict) -> dict:
+        """`record`, changed in place, with its free text as a run log keeps it (#212): 'observed',
+        the field that carries what an error, the Portal, a decider or the person said, becomes
+        its first line without a Playwright call log, with typed secrets, tenant data and object
+        ids replaced by tokens (recording.scrub), the text the failure prompt shows. Scrubbing
+        twice changes nothing. The other fields are the run's own words, the guide's text, or
+        text redacted when it was taken (a result's text, a blade); a proposed edit's new label is
+        scrubbed when it is made (proposed_edit). A record carries no candidate list: the rejected
+        candidates go to the recording, filtered (rejected_candidates)."""
+        if record.get("observed") is not None:
+            record["observed"] = scrub(record["observed"], self.redactor, self.secrets)
+        return record
+
     def write(self, record: dict) -> None:
-        self.records.append(record)
+        """Scrub `record` (scrubbed), keep it for the summary and append it to results.jsonl."""
+        self.records.append(self.scrubbed(record))
         with self.results_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -2152,7 +2185,7 @@ class Runner:
                 self.page.wait_for_timeout(500)
                 found = text_on_screen(self.page, text)
         except PlaywrightError as error:
-            record.update(outcome="unknown", observed=f"{type(error).__name__}: {error}")
+            record.update(outcome="unknown", observed=error_text(error))
             self.write(record)
             return
         record.update(outcome="match" if found else "drift", severity=None if found else "misleading",
@@ -2270,7 +2303,7 @@ class Runner:
                 try:
                     self.page.goto(self.view_address(view), wait_until="domcontentloaded")
                 except PlaywrightError as error:
-                    why = f"opening it failed: {(str(error).strip().splitlines() or [type(error).__name__])[0]}"
+                    why = f"opening it failed: {one_line(str(error)) or type(error).__name__}"
                 else:
                     print(f"{head} Opened the view step {previous} ended on:\n  {view}\n"
                           f"Check the Portal shows it, then press Enter. The recording keeps no query "
@@ -2422,9 +2455,12 @@ class Runner:
             print("A reason is needed: the summary says why the step was not checked.")
 
     def finish(self) -> int:
+        """Write summary.md from the records and print it; returns the exit code. The records
+        are scrubbed already (write, earlier_results); scrubbing them again changes nothing and
+        keeps the summary as safe to share as results.jsonl whichever way a record came in."""
         by_severity: dict[str, list[dict]] = {"blocking": [], "misleading": [], "cosmetic": []}
         unknown, skipped, stale, edits = [], [], [], []
-        for r in self.records:
+        for r in map(self.scrubbed, self.records):
             if r["outcome"] == "drift" and r["severity"]:
                 by_severity[r["severity"]].append(r)
             elif r["outcome"] == "drift" and r["category"] == "stale":

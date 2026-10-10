@@ -2,8 +2,9 @@
 (issue #189), steps the recording skips (#200), the view a resumed run starts from (#206), the
 blade a step starts on and the form its fields are filled in on (#207), and how it finds what a
 guide names (search, '+' labels, plain text, collapsed menu groups, a blade still loading, a
-resource a chain names, #199). No browser: the page is a small fake (Screen stands in for a
-frame), and run_step is scripted where only the order of steps matters.
+resource a chain names, #199), and what results.jsonl and summary.md keep (#212). No browser:
+the page is a small fake (Screen stands in for a frame), and run_step is scripted where only the
+order of steps matters.
 
 run.py imports Playwright at module level and the CI runner does not install it, so a minimal
 stub of playwright.sync_api is put in sys.modules when the real one is missing. Nothing here
@@ -633,6 +634,111 @@ class OneRunAcrossResumeTests(RunnerTestCase):
                                                encoding="utf-8")
         r = self.runner(resume=True, state={"runId": "first", "lab": LAB, "completed": [], "inFlight": None})
         self.assertEqual([x["step"] for x in r.records], ["9.9.1"])
+
+
+class RunLogRedactionTests(RunnerTestCase):
+    """results.jsonl and summary.md keep what the failure prompt shows (#212): the first line of
+    an error, without Playwright's call log, redacted, with no object id and no typed secret."""
+
+    DOMAIN = "contoso.onmicrosoft.com"
+    OBJECT_ID = "9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f"
+    PASSWORD = "LoveAzeroth!2004"           # the guide's own value for the 'Password' field
+    GENERATED = "Qx7!fake-generated"        # what an auto-generated password field holds
+    CALL_LOG = ('\nCall log:\n  - waiting for get_by_role("option", name="malfurion.stormrage@contoso.onmicrosoft.com")\n'
+                f'    - locator resolved to <input type="password" value="{GENERATED}"/>\n')
+    RAW = f"LookupError: option 'malfurion.stormrage@{DOMAIN}' not found in group {OBJECT_ID}{CALL_LOG}"
+    SHOWN = "LookupError: option 'malfurion.stormrage@[tenantdomain]' not found in group <id>"
+
+    def results_text(self, run_id: str = "test") -> str:
+        return (self.tmp / "logs" / run_id / "results.jsonl").read_text(encoding="utf-8")
+
+    def summary(self, run_id: str = "test") -> str:
+        return (self.tmp / "logs" / run_id / "summary.md").read_text(encoding="utf-8")
+
+    def unknown(self, r: run.Runner, observed: str) -> dict:
+        record = r.new_record({"id": "9.9.2"}, "field", "User principal name")
+        record.update(outcome="unknown", observed=observed)
+        return record
+
+    def assert_no_leak(self, *texts: str) -> None:
+        for text in texts:
+            # The element's HTML is in the call log; in a first line its value is masked.
+            for leak in (self.DOMAIN, self.OBJECT_ID, self.PASSWORD, self.GENERATED, "Call log", "locator resolved"):
+                self.assertNotIn(leak, text)
+
+    def test_an_observed_error_is_written_redacted_and_on_one_line(self) -> None:
+        r = self.runner()
+        r.write(self.unknown(r, self.RAW))
+        self.assertEqual(json.loads(self.results_text().splitlines()[-1])["observed"], self.SHOWN)
+        self.quietly(r.finish)
+        self.assertIn(f"## unknown (1)\n- step 9.9.2 field **User principal name**: {self.SHOWN}\n", self.summary())
+        out = io.StringIO()
+        with redirect_stdout(out):
+            r.ask_after_failure({"id": "9.9.2"})        # input closed: 'e'
+        self.assertIn(f"  field 'User principal name': unknown: {self.SHOWN}\n", out.getvalue())
+        self.assert_no_leak(self.results_text(), self.summary())
+
+    def test_a_timeout_filling_a_password_leaks_neither_the_password_nor_the_html(self) -> None:
+        item = {"kind": "field", "label": "Password", "value": self.PASSWORD, "line": 5}
+        steps = dict(STEPS, steps=[dict(STEPS["steps"][0], items=[item])] + STEPS["steps"][1:])
+        timeout = type("TimeoutError", (run.PlaywrightError,), {})
+        # As Playwright 1.63 raises it for a fill() that never finds an editable element.
+        raised = ('Locator.fill: Timeout 8000ms exceeded.\nCall log:\n'
+                  '  - waiting for get_by_role("textbox", name="Password")\n'
+                  f'    - locator resolved to <input id="p" type="password" value="{self.GENERATED}"/>\n'
+                  f'    - fill("{self.PASSWORD}")\n  - attempting fill action\n'
+                  '    2 × waiting for element to be visible, enabled and editable\n')
+        # A first line that carries the typed value and the element itself.
+        in_first_line = (f'Locator.fill: cannot type "{self.PASSWORD}" into '
+                         f'<input type="password" value="{self.GENERATED}">\nCall log:\n  - fill("{self.PASSWORD}")\n')
+        for run_id, message, shown in (
+                ("timeout", raised, "TimeoutError: Locator.fill: Timeout 8000ms exceeded."),
+                ("first", in_first_line,
+                 'TimeoutError: Locator.fill: cannot type "[secret]" into <input type="password" value="[value]">')):
+            with self.subTest(run_id=run_id):
+                r = run.Runner(FakePage(), steps, self.recording, self.args(run_id=run_id), ask=Answers())
+                field = ScreenNode(tag="input", fill_fail=timeout(message))
+                with mock.patch.object(run, "all_frames", lambda page: [Screen(("textbox", "Password", field))]), \
+                        mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                        mock.patch.object(run, "candidates_on_screen", return_value=[]):
+                    record = self.quietly(lambda: r.act_on_label(steps["steps"][0], item, "Password", self.PASSWORD))
+                r.write(record)
+                self.quietly(r.finish)
+                self.assertEqual(record["observed"], shown)
+                self.assertIn(f"- step 9.9.1 field **Password**: {shown}\n", self.summary(run_id))
+                self.assert_no_leak(self.results_text(run_id), self.summary(run_id))
+
+    def test_a_proposed_edit_scrubs_the_new_label_and_never_the_guides_own_text(self) -> None:
+        (self.tmp / "guide.md").write_text("# Lab\n\n2. In the Contoso directory, click **+ New group**\n",
+                                           encoding="utf-8")
+        r = self.runner()
+        edit = r.proposed_edit(3, "+ New group", f"New group {self.OBJECT_ID}")
+        # 'Contoso' is the tenant prefix, but here it is the guide's word: no '[yourtenant]' for it.
+        self.assertEqual(edit, {"line": 3, "old": "2. In the Contoso directory, click **+ New group**",
+                                "new": "2. In the Contoso directory, click **New group <id>**"})
+
+    def test_a_resumed_run_reloads_the_records_as_written_and_cleans_older_ones(self) -> None:
+        r = self.runner(run_id="first")
+        r.write(self.unknown(r, self.RAW))
+        drift = r.new_record({"id": "9.9.2"}, "action", "+ New group")
+        drift.update(outcome="drift", severity="cosmetic", observed="[tenantname] | Overview")
+        r.write(drift)
+        written = [json.loads(line) for line in self.results_text("first").splitlines()]
+        # A line a run wrote before #212, as the first lab 1.1 run left it.
+        with (self.tmp / "logs" / "first" / "results.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(self.unknown(r, self.RAW)) + "\n")
+        state = {"runId": "first", "lab": LAB, "completed": [], "inFlight": None}
+        resumed = self.runner(resume=True, state=state, run_id="second")
+        self.assertEqual(resumed.records[:2], written)                     # not redacted twice
+        self.assertEqual(resumed.records[2]["observed"], self.SHOWN)
+        self.quietly(resumed.finish)
+        summary = self.summary("first")
+        again = self.runner(resume=True, state=state, run_id="third")
+        self.assertEqual(again.records, resumed.records)
+        self.quietly(again.finish)
+        self.assertEqual(self.summary("first"), summary)
+        self.assertIn("observed '[tenantname] | Overview'", summary)
+        self.assert_no_leak(summary)
 
 
 class ResumeViewTests(RunnerTestCase):

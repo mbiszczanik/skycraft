@@ -1,7 +1,8 @@
 """Unit tests for recording.py, which keeps tenant data out of the recording (issue #189).
 
-Redactor, env_secrets and rejected_candidates are pure and live outside run.py, so they are
-tested without a browser and without Playwright, which the CI runner does not install.
+Redactor, env_secrets, rejected_candidates and the run log's scrub (#212) are pure and live
+outside run.py, so they are tested without a browser and without Playwright, which the CI runner
+does not install.
 
 Standard library unittest only; tests/Guide-Drift-Python.Tests.ps1 runs this suite in CI.
 Run by hand from the repository root:
@@ -423,6 +424,92 @@ class WriteJsonTests(unittest.TestCase):
         self.assertEqual((replace.call_count, sleep.call_count),
                          (recording.REPLACE_ATTEMPTS, recording.REPLACE_ATTEMPTS - 1))
 
+
+
+class RunLogTextTests(unittest.TestCase):
+    """What a run log keeps of an error or a free text (#212): its first line, without the
+    Playwright call log, typed values or element values, and redacted (recording.scrub)."""
+
+    # The formats Playwright 1.63 raises (playwright/_impl/_helper.py parse_error and
+    # _connection.py format_call_log: '<api>: <message>' + '\nCall log:\n' + its lines).
+    TIMEOUT = ('Locator.fill: Timeout 8000ms exceeded.\nCall log:\n'
+               '  - waiting for get_by_role("textbox", name="Password")\n'
+               '    - locator resolved to <input id="p" readonly type="password" value="Qx7!fake-generated"/>\n'
+               '    - fill("LoveAzeroth!2004")\n  - attempting fill action\n'
+               '    2 × waiting for element to be visible, enabled and editable\n'
+               '      - element is not editable\n')
+    STRICT = ('Locator.fill: Error: strict mode violation: get_by_label("Password") resolved to 2 elements:\n'
+              '    1) <input value="Qx7!fake-generated" aria-label="Password"/> aka get_by_role("textbox").first\n'
+              '    2) <input value="b" aria-label="Password"/> aka get_by_role("textbox").nth(1)\n\n'
+              'Call log:\n  - waiting for get_by_label("Password")\n')
+
+    def setUp(self) -> None:
+        self.redactor = Redactor(DOMAIN, TENANT, {TOKEN: "me@example.com"})
+
+    def test_one_line_keeps_the_first_line_and_drops_the_call_log(self) -> None:
+        self.assertEqual(recording.one_line(self.TIMEOUT), "Locator.fill: Timeout 8000ms exceeded.")
+        self.assertEqual(recording.one_line(self.STRICT),
+                         'Locator.fill: Error: strict mode violation: get_by_label("Password") resolved to 2 elements:')
+        self.assertEqual(recording.one_line("\n  not found  \nmore"), "not found")
+        self.assertEqual(recording.one_line("Call log:\n  - fill(\"x\")"), "")
+
+    def test_one_line_masks_a_typed_value_and_an_element_value_in_the_first_line(self) -> None:
+        text = 'Locator.fill: fill("LoveAzeroth!2004") failed on <input type="password" value="Qx7!fake-generated"/>'
+        self.assertEqual(recording.one_line(text),
+                         'Locator.fill: fill("[typed]") failed on <input type="password" value="[value]"/>')
+        self.assertEqual(recording.one_line("type('a\\'b') then press_sequentially(\"c\\\"d\")"),
+                         "type(\"[typed]\") then press_sequentially(\"[typed]\")")
+        self.assertEqual(recording.one_line("value '[Leave blank]' is an instruction"),
+                         "value '[Leave blank]' is an instruction")        # the runner's own words stay
+
+    def test_error_text_is_the_type_and_the_first_line(self) -> None:
+        timeout = type("TimeoutError", (Exception,), {})
+        self.assertEqual(recording.error_text(timeout(self.TIMEOUT)),
+                         "TimeoutError: Locator.fill: Timeout 8000ms exceeded.")
+        self.assertEqual(recording.error_text(LookupError("")), "LookupError")
+
+    def test_scrub_redacts_tenant_data_object_ids_and_secrets_on_one_line(self) -> None:
+        text = (f"LookupError: option 'malfurion.stormrage@{DOMAIN}' not found in {TENANT}, group "
+                "9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f (9F8E7D6C5B4A4C3D8E2F1A0B9C8D7E6F) for me@example.com, "
+                "typed LoveAzeroth!2004\nCall log:\n  - <input value=\"Qx7!fake-generated\">")
+        self.assertEqual(recording.scrub(text, self.redactor, {"LoveAzeroth!2004"}),
+                         "LookupError: option 'malfurion.stormrage@[tenantdomain]' not found in [tenantid], group "
+                         f"<id> (<id>) for {TOKEN}, typed [secret]")
+        self.assertIsNone(recording.scrub(None, self.redactor, set()))
+
+    def test_scrub_is_idempotent(self) -> None:
+        secrets = {"LoveAzeroth!2004", "secret"}
+        redactor = Redactor("tenantname.onmicrosoft.com", TENANT, {TOKEN: "me@example.com"},
+                            tenant_name="tenantname")
+        for text in (self.TIMEOUT, self.STRICT, f"Contoso admin@{DOMAIN} {TENANT} LoveAzeroth!2004",
+                     "tenantname [tenantname] [yourtenant] <id> [secret] secret ${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}",
+                     "plain text"):
+            for r in (self.redactor, redactor):
+                with self.subTest(text=text, domain=r.domain):
+                    once = recording.scrub(text, r, secrets)
+                    self.assertEqual(recording.scrub(once, r, secrets), once)
+
+    def test_redaction_leaves_its_own_tokens_alone(self) -> None:
+        # A tenant named like a token used to turn '[tenantname]' into '[[tenantname]]' on a second pass.
+        redactor = Redactor("tenantname.onmicrosoft.com", TENANT, tenant_name="tenantname")
+        once = redactor.redact("tenantname and tenantname.onmicrosoft.com")
+        self.assertEqual(once, "[tenantname] and [tenantdomain]")
+        self.assertEqual(redactor.redact(once), once)
+
+    def test_typed_secrets_are_the_values_of_secret_fields(self) -> None:
+        steps = {"steps": [{"id": "1.1.2", "items": [
+            {"kind": "field", "label": "User principal name", "value": "malfurion.stormrage@[yourtenant].onmicrosoft.com"},
+            {"kind": "field", "label": "Auto-generate password", "value": "☐ Unchecked"},
+            {"kind": "field", "label": "Password", "value": "LoveAzeroth!2004"},
+            {"kind": "action", "labels": ["Password reset"]}]},
+            {"id": "1.1.3", "items": [{"kind": "field", "label": "Password", "value": "LoveAzeroth!2004"},
+                                      {"kind": "field", "label": "Client secret", "value": "[Leave blank]"}]},
+            {"id": "1.1.4", "items": [{"kind": "field", "label": "Confirm password", "value": "Ignored!1"}]}]}
+        rec = {"placeholders": {}, "steps": {"1.1.4": {"valueOverrides": {"Confirm password": "${SKYCRAFT_TEST_PASSWORD}"}}}}
+        with mock.patch.dict(os.environ, {"SKYCRAFT_TEST_PASSWORD": "Fake!Override9"}):
+            self.assertEqual(recording.typed_secrets(rec, steps), {"LoveAzeroth!2004", "Ignored!1", "Fake!Override9"})
+        with mock.patch.dict(os.environ, {}, clear=True):          # an unset variable is left out, not raised
+            self.assertEqual(recording.typed_secrets(rec, steps), {"LoveAzeroth!2004", "Ignored!1"})
 
 
 class CheckboxStateTests(unittest.TestCase):

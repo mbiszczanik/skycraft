@@ -64,6 +64,10 @@
     summary.md, for a 'Search for' step that found no single result, search-<step>.aria.txt
     (the search dropdown's accessibility tree, redacted) and, for a label that was not found,
     blade-<step>-<guide line>.aria.txt (the outline the blade loading check read, redacted).
+    summary.md and results.jsonl are safe to copy into an issue or a pull request: each record
+    keeps what it observed on one line, as the failure prompt shows it, without Playwright's call
+    log, with the tenant domain, id and name, the guest address and object ids as tokens, and
+    every value typed into a password or secret field as [secret] (#212).
     Screenshots show the tenant name, user principal names and the subscription id, so nothing
     is copied into a guide's images/ folder: crop and anonymise by hand. The saved browser
     session (tools/.guide-drift-auth.json) is a sign-in. All of it is gitignored and asserted
