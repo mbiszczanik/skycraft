@@ -991,6 +991,7 @@ class RunLogRedactionTests(RunnerTestCase):
         out = io.StringIO()
         with mock.patch.object(run, "find_exact", return_value=None), \
                 mock.patch.object(run, "candidates_on_screen", return_value=candidates), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
                 mock.patch.object(run, "find_by_name", return_value=FakeElement()) as find, redirect_stdout(out):
             record = r.act_on_label(step, item, "Owner")
         shown = out.getvalue()
