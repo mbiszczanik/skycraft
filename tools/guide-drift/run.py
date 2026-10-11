@@ -51,8 +51,8 @@ when the Portal's name, scrubbed, holds a redaction token (recording.redaction_t
 '[tenantname]', '<id>', '[secret]' or any other the Redactor or scrub writes), as it carries
 tenant or personal data. The first of these that applies is the reason given. Such a drift is
 written to results.jsonl all the same; the record's "notProposed" and the summary's 'not
-proposed' say why. The summary also holds back an edit that a record written before #211
-proposes and that brings a token into the guide line.
+proposed' say why, and a workaround's record has "workaround": true. The summary also holds back
+an edit that a record written before #211 proposes and that brings a token into the guide line.
 
 The console is scrubbed only in part: an error before or during the run is shown as a record
 keeps it, a crash as its frames (file, line, function) and each error's scrubbed first line
@@ -1960,7 +1960,8 @@ class Runner:
         if decision.kind == "drift":      # misleading or cosmetic: acted on, under a different name
             why = self.not_proposed(step, decision)     # #211: the edit, or why there is none
             record.update(outcome="drift", severity=decision.severity, observed=decision.name, notProposed=why,
-                          proposedEdit=None if why else self.proposed_edit(line, label, decision.name))
+                          proposedEdit=None if why else self.proposed_edit(line, label, decision.name),
+                          workaround=decision.workaround)
         else:
             record.update(outcome="match", observed=note or decision.name)
         return record
@@ -2214,7 +2215,7 @@ class Runner:
             if position == 0:
                 # A workaround reached the guide's place another way: the blade the step began on
                 # may not be its own (#211).
-                worked_around = any(record.get("notProposed") == WORKAROUND_REASON for record in records)
+                worked_around = any(record.get("workaround") for record in records)
                 if not step_failed and self.start_seen is not None and not worked_around:
                     # It went through on the blade the step started on: later runs compare with it.
                     self.step_entry(step)["startBlade"] = self.start_seen
@@ -2252,7 +2253,7 @@ class Runner:
         return {"runId": self.args.run_id, "at": now(), "lab": self.steps["lab"], "step": step["id"],
                 "kind": kind, "label": label, "outcome": None, "severity": None, "category": None,
                 "skippedBecause": None, "observed": None, "proposedEdit": None, "notProposed": None,
-                "screenshot": f"Step-{step['id']}.png"}
+                "workaround": False, "screenshot": f"Step-{step['id']}.png"}
 
     def scrubbed(self, record: dict) -> dict:
         """`record`, changed in place, with its free text as a run log keeps it (#212): 'observed',

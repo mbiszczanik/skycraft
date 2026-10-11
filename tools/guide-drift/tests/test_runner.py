@@ -3623,23 +3623,50 @@ class NoProposedEditTests(RunnerTestCase):
         self.assertEqual(self.act(r)["notProposed"],
                          f"the step started where the run, not the guide, left the Portal ({excuse})")
 
-    def run_whole_step(self, *answers: str) -> run.Runner:
-        """run_step on a blade the recording does not know yet, the label not on screen."""
+    def run_whole_step(self, *answers: str, step=None, no_form: bool = False) -> run.Runner:
+        """run_step on a blade the recording does not know yet, the label not on screen. With
+        `no_form`, the step's first item is a field whose form is not open: find_form writes its
+        wrong-blade record and, as the person opened the form, takes the blade to record from
+        there; the field is then filled without a browser."""
         r = self.runner_for(*answers, page=page_on(f"view/{GROUPS}"), run_id="-".join(answers))
+
+        def form_not_open(step, item, label, value, look):
+            drift = r.new_record(step, "field", label)
+            drift.update(outcome="drift", severity="misleading", category=run.WRONG_BLADE, observed="no form")
+            r.write(drift)
+            r.start_seen = r.open_blade()
+            return None
+
         clock = iter(range(0, 1_000_000, 1))
         with mock.patch.object(run, "find_exact", return_value=None), \
                 mock.patch.object(run, "candidates_on_screen", return_value=self.CANDIDATES), \
                 mock.patch.object(run.time, "monotonic", lambda: next(clock)), \
-                mock.patch.object(run, "find_by_name", return_value=FakeElement()), redirect_stdout(io.StringIO()):
-            self.assertTrue(r.run_step(self.STEP))
+                mock.patch.object(run, "find_by_name", return_value=FakeElement()), \
+                mock.patch.object(run, "fill_field", return_value=None), \
+                mock.patch.object(r, "find_form", side_effect=form_not_open) as find_form, \
+                redirect_stdout(io.StringIO()):
+            self.assertTrue(r.run_step(step or self.STEP))
+        self.assertEqual(find_form.called, no_form)
         return r
 
     def test_a_workaround_at_the_first_item_records_no_start_blade(self) -> None:
         # The person reached the guide's place another way: the blade the step began on may not be its own.
-        self.run_whole_step("w 3")
+        r = self.run_whole_step("w 3")
+        self.assertEqual([x["workaround"] for x in r.records if x["kind"] == "action"], [True])
         self.assertNotIn("startBlade", self.recording["steps"].get("9.9.2", {}))
         self.recording["steps"].pop("9.9.2", None)
-        self.run_whole_step("2")                                     # a rename: recorded as usual
+        r = self.run_whole_step("2")                                 # a rename: recorded as usual
+        self.assertEqual([x["workaround"] for x in r.records if x["kind"] == "action"], [False])
+        self.assertEqual(self.recording["steps"]["9.9.2"]["startBlade"], GROUPS)
+
+    def test_a_workaround_after_a_form_that_was_not_open_records_no_start_blade(self) -> None:
+        step = dict(self.STEP, items=[{"kind": "field", "label": "Microsoft Entra ID", "value": "x", "line": 3}])
+        r = self.run_whole_step("w 3", step=step, no_form=True)
+        drifts = [(x["category"], x["workaround"]) for x in r.records if x["outcome"] == "drift"]
+        self.assertEqual(drifts, [(run.WRONG_BLADE, False), (None, True)])
+        self.assertNotIn("startBlade", self.recording["steps"].get("9.9.2", {}))
+        self.recording["steps"].pop("9.9.2", None)
+        self.run_whole_step("2", step=step, no_form=True)            # the form's blade, as find_form leaves it
         self.assertEqual(self.recording["steps"]["9.9.2"]["startBlade"], GROUPS)
 
     def test_the_summary_holds_back_an_older_edit_that_brings_a_token_into_the_guide(self) -> None:
