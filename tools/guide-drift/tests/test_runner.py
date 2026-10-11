@@ -3049,7 +3049,7 @@ class ResourceTests(RunnerTestCase):
 
         def acting(how: str, **fields):
             def act(step, item, label, **where):
-                done.append((how, label, *where.values()))
+                done.append((how, label, *(value for value in where.values() if value is not None)))   # no state: #296
                 record = r.new_record(step, item["kind"], label)
                 record.update(outcome="match", **fields)
                 return record
@@ -3083,7 +3083,7 @@ class ResourceTests(RunnerTestCase):
 
         def acting(how: str, outcome: str = "match"):
             def act(step, item, label, **where):
-                done.append((how, label, *where.values()))
+                done.append((how, label, *(value for value in where.values() if value is not None)))   # no state: #296
                 record = r.new_record(step, item["kind"], label)
                 record.update(outcome=outcome)
                 return record
@@ -3595,7 +3595,7 @@ class FormOpenTests(RunnerTestCase):
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
         calls: list[tuple[str, bool]] = []
 
-        def act(step, item, label, value=None, form_start=False):
+        def act(step, item, label, value=None, form_start=False, state=None):
             calls.append((label, form_start))
             record = r.new_record(step, item["kind"], label)
             record.update(outcome="match")
@@ -3813,6 +3813,125 @@ class StopTests(RunnerTestCase):
         self.assertLess(text.index(self.SHOWN), text.index("LookupError: the domain combo box: [tenantdomain]"))
         self.assertEqual(text.count("Traceback (most recent call last):"), 2)
         self.assert_no_leak(text)
+
+
+class StatedStateTests(RunnerTestCase):
+    """An action or navigation label the guide gives a state ('Check **X**', 'Uncheck **X**',
+    parse.py's "checked" and "unchecked", #296): a check box, switch or radio found for it is set
+    to that state, never toggled; any other element is clicked as before."""
+
+    LABEL = "Send to Log Analytics workspace"
+    ITEM = {"kind": "action", "labels": [LABEL], "checked": [0], "line": 4}
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+
+    def act(self, screen: Screen, state: bool | None, item: dict | None = None, label: str = LABEL):
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        item = item or self.ITEM
+        step = {"id": "9.9.1", "title": "One", "items": [item], "images": []}
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=[]):
+            return self.quietly(lambda: r.act_on_label(step, item, label, state=state))
+
+    def box(self, checked: bool, role: str = "checkbox", native: bool = True) -> tuple[Screen, ScreenNode]:
+        """A check box (an <input type=checkbox> or a [role=checkbox]) or a [role=switch] named LABEL."""
+        attrs = {"type": "checkbox", "id": "checkbox-1"} if native and role == "checkbox" else {"role": role}
+        node = ScreenNode(tag="input" if native and role == "checkbox" else "button", attrs=attrs, checked=checked)
+        return Screen((role, self.LABEL, node)), node
+
+    def test_a_box_already_in_the_state_is_already_set_and_never_clicked(self) -> None:
+        for state in (True, False):
+            for role, native in (("checkbox", True), ("checkbox", False), ("switch", False)):
+                with self.subTest(state=state, role=role, native=native):
+                    screen, node = self.box(checked=state, role=role, native=native)
+                    node.check_error = AssertionError("set_checked() called on a box already in the state")
+                    record = self.act(screen, state)
+                    self.assertEqual((record["outcome"], record["observed"]), ("match", "already set"))
+                    self.assertEqual((node.checked, node.clicked), (state, 0))
+
+    def test_a_box_in_the_other_state_is_set_to_the_one_asked_for(self) -> None:
+        for state in (True, False):
+            for role, native in (("checkbox", True), ("checkbox", False), ("switch", False)):
+                with self.subTest(state=state, role=role, native=native):
+                    screen, node = self.box(checked=not state, role=role, native=native)
+                    record = self.act(screen, state)
+                    self.assertEqual((record["outcome"], record["observed"]), ("match", self.LABEL))
+                    self.assertEqual((node.checked, node.clicked), (state, 0))   # set_checked(), no plain click
+
+    def test_an_intercepted_box_is_set_through_its_label_once(self) -> None:
+        screen, node = self.box(checked=False)
+        node.check_error = run.PlaywrightError("Timeout 2000ms exceeded.\n  - <label> intercepts pointer events")
+        node.label = ScreenNode(on_click=lambda: setattr(node, "checked", not node.checked), label_for=node)
+        record = self.act(screen, True)
+        self.assertEqual((record["outcome"], node.checked, node.label.clicked), ("match", True, 1))
+
+    def test_a_box_whose_state_does_not_change_is_unknown(self) -> None:
+        screen, node = self.box(checked=True)
+        node.set_checked = lambda checked, timeout=None: None      # returns, but nothing changed
+        record = self.act(screen, False)
+        self.assertEqual((record["outcome"], node.checked), ("unknown", True))
+        self.assertIn("it is still checked", record["observed"])
+
+    def test_any_other_element_is_clicked_as_before(self) -> None:
+        for state in (True, False, None):
+            with self.subTest(state=state):
+                button = ScreenNode(tag="button")
+                record = self.act(Screen(("button", self.LABEL, button)), state)
+                self.assertEqual((record["outcome"], button.clicked), ("match", 1))
+
+    def test_a_box_without_a_state_is_clicked_as_before(self) -> None:
+        screen, node = self.box(checked=True)
+        node.check_error = AssertionError("set_checked() called for a label without a state")
+        record = self.act(screen, None)
+        self.assertEqual((record["outcome"], node.clicked), ("match", 1))
+
+    def test_a_radio_is_selected_by_checked_and_never_cleared(self) -> None:
+        def radio(checked: bool) -> tuple[Screen, ScreenNode]:
+            node = ScreenNode(tag="input", attrs={"type": "radio", "id": "choice-1"}, checked=checked,
+                              tree=snapshot_line("radio", self.LABEL, "[checked]" if checked else ""))
+            return Screen(("radio", self.LABEL, node)), node
+
+        screen, node = radio(checked=False)
+        record = self.act(screen, True)
+        self.assertEqual((record["outcome"], node.checked, node.clicked), ("match", True, 0))
+        screen, node = radio(checked=True)
+        node.check_error = AssertionError("set_checked() called on a radio already selected")
+        record = self.act(screen, True)
+        self.assertEqual((record["outcome"], record["observed"]), ("match", "already set"))
+        record = self.act(screen, False)                       # 'Uncheck' on a selected radio
+        self.assertEqual((record["outcome"], node.checked, node.clicked), ("unknown", True, 0))
+        self.assertEqual(record["observed"], "LookupError: a radio cannot be cleared; pick another option")
+        screen, node = radio(checked=False)
+        node.check_error = AssertionError("set_checked() called on a radio not selected")
+        record = self.act(screen, False)
+        self.assertEqual((record["outcome"], record["observed"], node.checked), ("match", "already set", False))
+
+    def test_run_step_gives_each_label_the_state_the_item_marks(self) -> None:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        items = [{"kind": "navigation", "labels": ["Upload", "Overwrite if files already exist", "Upload"],
+                  "checked": [1], "line": 5},
+                 {"kind": "navigation", "field": "Type", "labels": ["A", "B"], "unchecked": [0], "line": 6},
+                 {"kind": "action", "labels": ["Recovery", "Enable soft delete for blobs"], "checked": [1], "line": 7},
+                 {"kind": "action", "labels": ["Save"], "line": 8}]
+        step = {"id": "9.9.1", "title": "One", "portal": True, "items": items, "expected": None, "images": []}
+        calls = []
+
+        def act_on_label(runner, step, item, label, value=None, form_start=False, open_field=False, state=None):
+            calls.append((label, state))
+            record = runner.new_record(step, item["kind"], label)
+            record.update(outcome="match", observed=None)
+            return record
+
+        with mock.patch.object(run.Runner, "act_on_label", act_on_label), \
+                mock.patch.object(run.Runner, "check_start", return_value=None), \
+                mock.patch.object(run.Runner, "check_result"):
+            self.assertTrue(self.quietly(lambda: r.run_step(step)))
+        self.assertEqual(calls, [("Upload", None), ("Overwrite if files already exist", True), ("Upload", None),
+                                 ("Type", None), ("A", False), ("B", None),
+                                 ("Recovery", None), ("Enable soft delete for blobs", True), ("Save", None)])
 
 
 if __name__ == "__main__":
