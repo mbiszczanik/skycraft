@@ -37,6 +37,23 @@ auto-generated password is in an accessibility snapshot). The text a step's resu
 as the person types it, is kept in the recording scrubbed the same way. The screenshots are not
 scrubbed: crop and anonymise them by hand.
 
+When a label is not on screen, the person answers at the prompt (decide.py): a number uses that
+element as the guide's, renamed (misleading drift); 'c <number>' uses it, the difference cosmetic;
+'w <number>' uses it as a workaround, not as the guide's element (#211: misleading drift, never
+written to the recording, so the next run asks again); 'g' gone (blocking drift); 'i' ignore; 'u'
+unknown. A drift acted on under another name proposes a guide edit (the summary's 'proposed
+edits': the guide line with the bold label replaced), misleading or cosmetic (a change of case is
+a real rename), only when its new text belongs in the guide (Runner.not_proposed, #211). It
+proposes none when the element was used as a workaround (and a workaround at the step's first item
+records no start blade); when the step has a wrong-blade record earlier in the step or its start
+is excused (see the start of a step below), as the Portal was then not where the guide leads; or
+when the Portal's name, scrubbed, holds a redaction token (recording.redaction_tokens:
+'[tenantname]', '<id>', '[secret]' or any other the Redactor or scrub writes), as it carries
+tenant or personal data. The first of these that applies is the reason given. Such a drift is
+written to results.jsonl all the same; the record's "notProposed" and the summary's 'not
+proposed' say why, and a workaround's record has "workaround": true. The summary also holds back
+an edit that a record written before #211 proposes and that brings a token into the guide line.
+
 The console is scrubbed only in part: an error before or during the run is shown as a record
 keeps it, a crash as its frames (file, line, function) and each error's scrubbed first line
 (redacted_traceback), never Python's own traceback, and the decider's list of candidates is
@@ -243,7 +260,7 @@ from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # n
 from recording import (REMARK, Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
                        field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
                        same_blade, start_blade, view_blade, write_json)
-from recording import error_text, one_line, scrub, typed_secrets  # noqa: E402
+from recording import error_text, one_line, redaction_tokens, scrub, typed_secrets  # noqa: E402
 
 Found = TypeVar("Found")     # what in_time() looks for
 
@@ -252,6 +269,10 @@ ENTRA_OVERVIEW = "/view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Overview"
 # A token left in a recorded view once the Redactor restored it: '[token]' or '${NAME}', which this
 # run cannot fill in, so the view is not opened on resume (#206).
 UNFILLED_TOKEN = re.compile(r"\[[^\]]*\]|\$\{[^}]*\}?")
+# Two reasons a drift proposes no guide edit (Runner.not_proposed, #211): the element was used as a
+# workaround ('w <number>'), and the Portal's name holds a redaction token.
+WORKAROUND_REASON = "used as a workaround, not as the guide's element"
+TOKEN_REASON = "the Portal's name holds tenant or personal data ({token})"
 SETTLE_MS = 1500
 FIND_TIMEOUT_MS = 8000
 CHECK_TIMEOUT_MS = 2000     # set_checked() before the label is tried, and the wait for its effect
@@ -2004,8 +2025,10 @@ class Runner:
         # Replay must never inherit a choice the runner could not act on.
         self.remember(step, label, pending)
         if decision.kind == "drift":      # misleading or cosmetic: acted on, under a different name
-            record.update(outcome="drift", severity=decision.severity, observed=decision.name,
-                          proposedEdit=self.proposed_edit(line, label, decision.name))
+            why = self.not_proposed(step, decision)     # #211: the edit, or why there is none
+            record.update(outcome="drift", severity=decision.severity, observed=decision.name, notProposed=why,
+                          proposedEdit=None if why else self.proposed_edit(line, label, decision.name),
+                          workaround=decision.workaround)
         else:
             record.update(outcome="match", observed=note or decision.name)
         return record
@@ -2079,13 +2102,43 @@ class Runner:
         not carry the label in bold, so there is nothing to change. The new label is scrubbed as
         a record's 'observed' is (scrubbed, #212); the rest of the line is the guide's own text and
         is never redacted, so that no token stands where the guide's words are (a tenant named
-        like a word of the guide). A token in the new label itself is #211's to refuse."""
+        like a word of the guide). None too when the scrubbed new label holds a redaction token
+        (recording.redaction_tokens, #211): tenant or personal data never goes into a guide.
+        act_on_label asks not_proposed first, which says why."""
+        new_label = scrub(new_label, self.redactor, self.secrets)
         guide_lines = (Path(self.args.repo_root) / self.steps["guide"]).read_text(encoding="utf-8-sig").splitlines()
-        if not (1 <= line <= len(guide_lines)):
+        if redaction_tokens(new_label) or not (1 <= line <= len(guide_lines)):
             return None
         old = guide_lines[line - 1]
-        new = old.replace(f"**{old_label}**", f"**{scrub(new_label, self.redactor, self.secrets)}**")
+        new = old.replace(f"**{old_label}**", f"**{new_label}**")
         return None if new == old else {"line": line, "old": old, "new": new}
+
+    def not_proposed(self, step: dict, decision: Decision) -> str | None:
+        """Why a misleading or cosmetic drift proposes no guide edit, for the record's
+        'notProposed' and the summary's 'not proposed' (#211); None when it proposes one
+        (proposed_edit). The first that applies, in this order:
+
+          - the person used the element as a workaround ('w <number>', decide.py), not as the
+            guide's element: WORKAROUND_REASON
+          - the step has a record in category WRONG_BLADE (#207) written before this drift: it
+            started on another blade than its recorded one, or no form was open for a form's
+            first field; what the Portal showed there says nothing about the guide's labels
+          - the step is excused (check_start: the first one after a resume or --from-step, after
+            a step the recording skips, or after one skipped with 's'), whether or not a blade is
+            recorded to compare with: the blades the guide opened before it are not open
+          - the Portal's name, scrubbed, holds a redaction token: the element carries the
+            tenant's name, an id or an address, which never goes into a guide: TOKEN_REASON"""
+        if decision.workaround:
+            return WORKAROUND_REASON
+        if any(r["step"] == step["id"] and r.get("category") == WRONG_BLADE for r in self.records):
+            return f"the Portal was not where the guide leads in this step ({WRONG_BLADE})"
+        excuse = self.excused.get(step["id"])
+        if excuse is not None:
+            return f"the step started where the run, not the guide, left the Portal ({excuse})"
+        tokens = redaction_tokens(scrub(decision.name, self.redactor, self.secrets))
+        if tokens:
+            return TOKEN_REASON.format(token=tokens[0])
+        return None
 
     # -- one step --------------------------------------------------------------------------
 
@@ -2232,7 +2285,10 @@ class Runner:
                 if record["outcome"] == "unknown" or record.get("severity") == "blocking":
                     step_failed = True
             if position == 0:
-                if not step_failed and self.start_seen is not None:
+                # A workaround reached the guide's place another way: the blade the step began on
+                # may not be its own (#211).
+                worked_around = any(record.get("workaround") for record in records)
+                if not step_failed and self.start_seen is not None and not worked_around:
                     # It went through on the blade the step started on: later runs compare with it.
                     self.step_entry(step)["startBlade"] = self.start_seen
                     self.save_recording()
@@ -2268,8 +2324,8 @@ class Runner:
     def new_record(self, step: dict, kind: str, label: str | None) -> dict:
         return {"runId": self.args.run_id, "at": now(), "lab": self.steps["lab"], "step": step["id"],
                 "kind": kind, "label": label, "outcome": None, "severity": None, "category": None,
-                "skippedBecause": None, "observed": None, "proposedEdit": None,
-                "screenshot": f"Step-{step['id']}.png"}
+                "skippedBecause": None, "observed": None, "proposedEdit": None, "notProposed": None,
+                "workaround": False, "screenshot": f"Step-{step['id']}.png"}
 
     def scrubbed(self, record: dict) -> dict:
         """`record`, changed in place, with its free text as a run log keeps it (#212): 'observed',
@@ -2633,6 +2689,7 @@ class Runner:
         keeps the summary as safe to share as results.jsonl whichever way a record came in."""
         by_severity: dict[str, list[dict]] = {"blocking": [], "misleading": [], "cosmetic": []}
         unknown, skipped, stale, edits = [], [], [], []
+        held: list[tuple[dict, str]] = []     # drifts that propose no edit, and why (#211)
         for r in map(self.scrubbed, self.records):
             if r["outcome"] == "drift" and r["severity"]:
                 by_severity[r["severity"]].append(r)
@@ -2642,8 +2699,17 @@ class Runner:
                 unknown.append(r)
             elif r["outcome"] == "skipped":
                 skipped.append(r)
-            if r.get("proposedEdit"):
-                edits.append(r)
+            if r.get("notProposed"):
+                held.append((r, r["notProposed"]))
+            elif r.get("proposedEdit"):
+                # A record written before #211, reloaded on -Resume, may propose an edit that brings
+                # a token into the guide: held back here, as not_proposed would have.
+                old = set(redaction_tokens(r["proposedEdit"]["old"]))
+                added = [token for token in redaction_tokens(r["proposedEdit"]["new"]) if token not in old]
+                if added:
+                    held.append((r, TOKEN_REASON.format(token=added[0])))
+                else:
+                    edits.append(r)
         lines = [f"# Guide drift run {self.args.run_id} - lab {self.steps['lab']}", ""]
         for severity, items in by_severity.items():
             lines.append(f"## {severity} ({len(items)})")
@@ -2678,6 +2744,12 @@ class Runner:
             lines += [f"- {self.steps['guide']}:{e['line']}", f"  - old: `{e['old']}`", f"  - new: `{e['new']}`"]
         if not edits:
             lines.append("- none")
+        lines.append("")
+        # Drifts acted on under another name that propose no edit, and why (#211): the reviewer
+        # still sees what the Portal showed, and that it is not to be copied into the guide.
+        lines.append(f"## not proposed ({len(held)})")
+        lines += [f"- step {r['step']} {r['kind']} **{r['label']}**: observed {r['observed']!r}: {why}"
+                  for r, why in held] or ["- none"]
         lines.append("")
         # Relative to the repository, or the folder's name: an absolute path names the Windows user.
         try:

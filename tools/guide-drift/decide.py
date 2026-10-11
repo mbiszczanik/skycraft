@@ -10,12 +10,17 @@ value for a field); deciders may use it for context. Two deciders ship:
                  asking. Anything else falls through.
   HumanDecider   prints the step text, the missing label and the numbered candidates, and
                  reads one answer from the keyboard. Answers every time, 'unknown' on end of
-                 input.
+                 input. 'w <number>' uses an element as a workaround (#211): the guide's element
+                 is not on screen and the person reached the same place another way (a resumed
+                 browser on another blade, a link whose name holds a count). It is misleading
+                 drift, as a renamed element is, but proposes no guide edit and is never
+                 recorded: replayed, it would be taken for the guide's element under a new name,
+                 so the next run asks again.
 
 A model-based decider is a third implementation of the same signature (the Decider protocol);
-it is out of scope here and tracked in issue #190. Every decision the runner acts on is written
-back to the recording by run.py, with the rejected candidates, so supervised runs build the
-reference set.
+it is out of scope here and tracked in issue #190. Every decision the runner acts on, except a
+workaround, is written back to the recording by run.py, with the rejected candidates, so
+supervised runs build the reference set.
 """
 from __future__ import annotations
 
@@ -45,11 +50,13 @@ class Decision:
     severity: str | None = None   # drift only: "blocking" | "misleading" | "cosmetic"
     reason: str | None = None     # unknown only
     decided_by: str = "human"     # "exact" | "replay" | "human" | "none"
+    workaround: bool = False      # drift only: used, but not as the guide's element ('w', #211)
 
     def to_recording(self, rejected: list[str], at: str) -> dict | None:
         """The shape stored under recording["steps"][id]["labels"][label]; None for unknown,
-        which is never recorded because it would replay as 'still unknown' forever."""
-        if self.kind == "unknown":
+        which is never recorded because it would replay as 'still unknown' forever, and for a
+        workaround, which would replay as the guide's element renamed (#211)."""
+        if self.kind == "unknown" or self.workaround:
             return None
         if self.kind == "ignore":
             decision = "ignore"
@@ -95,9 +102,9 @@ class ReplayDecider:
 
 class HumanDecider:
     PROMPT = (
-        "  [number]   use that element (renamed = misleading drift)   g  gone (blocking drift)\n"
-        "  c [number] use it, but the difference is cosmetic          i  ignore (not a UI element)\n"
-        "  u <why>    unknown, cannot tell\n> "
+        "  [number]   use that element: the guide's, renamed (misleading drift)   g  gone (blocking drift)\n"
+        "  c [number] use it, but the difference is cosmetic                      i  ignore (not a UI element)\n"
+        "  w [number] use it as a workaround, not as the guide's (no guide edit)  u <why>  unknown, cannot tell\n> "
     )
 
     def __init__(self, ask: Callable[[str], str] = input, say: Callable[[str], None] = print) -> None:
@@ -118,22 +125,23 @@ class HumanDecider:
                 return self._pick(candidates[int(answer) - 1], label, cosmetic=False)
             if answer == "g":
                 return Decision(kind="drift", severity="blocking")
-            if (word == "c" and len(parts) == 2 and parts[1].isdecimal()
+            if (word in ("c", "w") and len(parts) == 2 and parts[1].isdecimal()
                     and 1 <= int(parts[1]) <= len(candidates)):
-                return self._pick(candidates[int(parts[1]) - 1], label, cosmetic=True)
+                return self._pick(candidates[int(parts[1]) - 1], label, cosmetic=word == "c",
+                                  workaround=word == "w")
             if answer == "i":
                 return Decision(kind="ignore")
             if word == "u":
                 return Decision(kind="unknown",
                                 reason=parts[1].strip() if len(parts) == 2 else "operator could not tell")
-            self.say("Answer with a number, g, c <number>, i or u <why>.")
+            self.say("Answer with a number, g, c <number>, w <number>, i or u <why>.")
 
     @staticmethod
-    def _pick(chosen: Candidate, label: str, cosmetic: bool) -> Decision:
+    def _pick(chosen: Candidate, label: str, cosmetic: bool, workaround: bool = False) -> Decision:
         if chosen.name == label:      # nothing differs, so there is nothing to report
             return Decision(kind="use", name=chosen.name, role=chosen.role)
         return Decision(kind="drift", name=chosen.name, role=chosen.role,
-                        severity="cosmetic" if cosmetic else "misleading")
+                        severity="cosmetic" if cosmetic else "misleading", workaround=workaround)
 
     def _show(self, step: dict, item: dict, label: str, candidates: list[Candidate]) -> None:
         self.say(f'\nStep {step["id"]}: {step["title"]}')

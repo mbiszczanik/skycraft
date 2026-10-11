@@ -561,6 +561,20 @@ class SummaryTests(RunnerTestCase):
                       f"- step 9.9.2 **Owner**: {observed}\n\n## skipped (0)", summary)
         self.assertNotIn("**Reader**", summary)
 
+    def test_finish_lists_a_drift_whose_edit_is_not_proposed_with_the_reason(self) -> None:
+        self.add("action", "Microsoft Entra ID", outcome="drift", severity="misleading",
+                 observed="[tenantname] | Overview", notProposed="the Portal's name holds tenant data ([tenantname])")
+        # A record a run wrote before #211 has no 'notProposed': not listed, as before.
+        old = self.r.new_record({"id": "9.9.2"}, "action", "Groups")
+        old.pop("notProposed", None)
+        old.update(outcome="drift", severity="cosmetic", observed="groups")
+        self.r.records.append(old)
+        self.assertEqual(self.quietly(self.r.finish), 0)
+        summary = (self.r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## proposed edits (0)\n- none\n\n## not proposed (1)\n- step 9.9.2 action "
+                      "**Microsoft Entra ID**: observed '[tenantname] | Overview': the Portal's name holds tenant "
+                      "data ([tenantname])\n\nScreenshots", summary)
+
     def test_tenant_name_is_an_optional_argument_the_redactor_uses(self) -> None:
         base = ["--steps", "s", "--recording", "r", "--log-dir", "l", "--run-id", "i", "--tenant-id", "t",
                 "--tenant-domain", "contoso.onmicrosoft.com", "--state", "st", "--auth-state", "a"]
@@ -572,7 +586,7 @@ class SummaryTests(RunnerTestCase):
     def test_finish_says_none_for_empty_sections_and_caps_the_exit_code(self) -> None:
         self.assertEqual(self.quietly(self.r.finish), 0)
         summary = (self.r.run_dir / "summary.md").read_text(encoding="utf-8")
-        self.assertIn("## proposed edits (0)\n- none", summary)
+        self.assertIn("## proposed edits (0)\n- none\n\n## not proposed (0)\n- none\n", summary)
         for _ in range(300):
             self.add("action", "x", outcome="unknown", observed="not found")
         self.assertEqual(self.quietly(self.r.finish), 250)
@@ -895,14 +909,19 @@ class RunLogRedactionTests(RunnerTestCase):
                 self.assertIn(f"- step 9.9.1 field **Password**: {shown}\n", self.summary(run_id))
                 self.assert_no_leak(self.results_text(run_id), self.summary(run_id))
 
-    def test_a_proposed_edit_scrubs_the_new_label_and_never_the_guides_own_text(self) -> None:
+    def test_a_proposed_edit_refuses_a_new_label_with_data_and_never_redacts_the_guides_text(self) -> None:
         (self.tmp / "guide.md").write_text("# Lab\n\n2. In the Contoso directory, click **+ New group**\n",
                                            encoding="utf-8")
         r = self.runner()
-        edit = r.proposed_edit(3, "+ New group", f"New group {self.OBJECT_ID}")
+        edit = r.proposed_edit(3, "+ New group", "New group")
         # 'Contoso' is the tenant prefix, but here it is the guide's word: no '[yourtenant]' for it.
         self.assertEqual(edit, {"line": 3, "old": "2. In the Contoso directory, click **+ New group**",
-                                "new": "2. In the Contoso directory, click **New group <id>**"})
+                                "new": "2. In the Contoso directory, click **New group**"})
+        # A new label that holds tenant or personal data once scrubbed is no edit at all (#211).
+        for name in (f"New group {self.OBJECT_ID}", "Contoso Ltd", f"admin@{self.DOMAIN}", "someone@fabrikam.com",
+                     "[tenantname] | Overview", "${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}"):
+            with self.subTest(name=name):
+                self.assertIsNone(r.proposed_edit(3, "+ New group", name))
 
     def test_the_aria_files_mask_ids_and_secret_values_and_keep_every_line(self) -> None:
         r = self.runner()
@@ -3491,6 +3510,233 @@ class StartBladeExcuseTests(RunnerTestCase):
         self.recording["steps"]["9.9.2"] = {"startBlade": GROUPS}
         r, _, _ = self.run_lab(page_on(f"view/{USERS}"), answers=["c", ""], failing={"9.9.1"})
         self.assertEqual([x["step"] for x in self.wrong_blade(r)], ["9.9.2"])
+
+
+class NoProposedEditTests(RunnerTestCase):
+    """A drift proposes a guide edit only when its new text belongs in the guide (#211): never a
+    Portal name that holds tenant or personal data. The drift is written to results.jsonl all
+    the same, with the reason in 'notProposed', and the summary lists it under 'not proposed'."""
+
+    STEP = {"id": "9.9.2", "title": "Two", "portal": True, "expected": None, "images": [],
+            "items": [{"kind": "action", "labels": ["Microsoft Entra ID"], "line": 3}]}
+    LINE = "1. Go back to **Microsoft Entra ID** home page"
+    # As the lab 1.1 run saw them: the tenant's overview carries its name, and the Users entry
+    # the resumed browser offered was the overview's 'View all N users' link.
+    CANDIDATES = [run.Candidate("link", "Contoso Ltd | Overview"), run.Candidate("link", "Entra ID"),
+                  run.Candidate("link", "View all 5 users"), run.Candidate("link", "someone@fabrikam.com"),
+                  run.Candidate("link", "New group 9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f")]
+    TOKEN_REASON = "the Portal's name holds tenant or personal data ([tenantname])"
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text(f"# Lab\n\n{self.LINE}\n", encoding="utf-8")
+
+    def runner_for(self, *answers: str, page=None, **overrides) -> run.Runner:
+        return run.Runner(page or FakePage(), STEPS, self.recording, self.args(tenant_name="Contoso Ltd", **overrides),
+                          ask=Answers(*answers))
+
+    def act(self, r: run.Runner, before=None) -> dict:
+        """act_on_label for the step's label, which is not on screen; `before(r)` runs first, under
+        the same clock (check_start). The record is written, as run_step writes it."""
+        clock = iter(range(0, 1_000_000, 1))               # 1 s passes between every look at the clock
+        self.element = FakeElement()
+        with mock.patch.object(run, "find_exact", return_value=None), \
+                mock.patch.object(run, "candidates_on_screen", return_value=self.CANDIDATES), \
+                mock.patch.object(run.time, "monotonic", lambda: next(clock)), \
+                mock.patch.object(run, "find_by_name", return_value=self.element), redirect_stdout(io.StringIO()):
+            if before is not None:
+                before(r)
+            record = r.act_on_label(self.STEP, self.STEP["items"][0], "Microsoft Entra ID")
+        r.write(record)
+        return record
+
+    def labels(self) -> dict:
+        saved = json.loads((self.tmp / "rec.json").read_text(encoding="utf-8"))
+        return saved["steps"].get("9.9.2", {}).get("labels", {})
+
+    def summary(self, r: run.Runner) -> str:
+        self.quietly(r.finish)
+        return (r.run_dir / "summary.md").read_text(encoding="utf-8")
+
+    def test_a_renamed_element_proposes_its_name(self) -> None:
+        r = self.runner_for("2")
+        record = self.act(r)
+        self.assertEqual((record["outcome"], record["severity"], record["observed"], record["notProposed"]),
+                         ("drift", "misleading", "Entra ID", None))
+        self.assertEqual(record["proposedEdit"], {"line": 3, "old": self.LINE,
+                                                  "new": "1. Go back to **Entra ID** home page"})
+        self.assertIn("## proposed edits (1)\n- guide.md:3\n", self.summary(r))
+
+    def test_a_cosmetic_difference_proposes_its_name_too(self) -> None:
+        # Often a real rename (a change of case): the edit is what fixes the guide.
+        record = self.act(self.runner_for("c 2"))
+        self.assertEqual((record["severity"], record["notProposed"]), ("cosmetic", None))
+        self.assertEqual(record["proposedEdit"]["new"], "1. Go back to **Entra ID** home page")
+
+    def test_a_name_with_the_tenants_name_is_drift_without_an_edit(self) -> None:
+        r = self.runner_for("1")
+        record = self.act(r)
+        self.assertEqual((record["outcome"], record["severity"], record["observed"]),
+                         ("drift", "misleading", "[tenantname] | Overview"))
+        self.assertEqual((record["proposedEdit"], record["notProposed"]), (None, self.TOKEN_REASON))
+        self.assertEqual(self.labels()["Microsoft Entra ID"]["name"], "[tenantname] | Overview")   # replay finds it
+        summary = self.summary(r)
+        self.assertIn("## misleading (1)\n- step 9.9.2 action **Microsoft Entra ID**: observed "
+                      "'[tenantname] | Overview'\n", summary)
+        self.assertIn("## proposed edits (0)\n- none\n\n## not proposed (1)\n- step 9.9.2 action "
+                      f"**Microsoft Entra ID**: observed '[tenantname] | Overview': {self.TOKEN_REASON}\n", summary)
+        results = (r.run_dir / "results.jsonl").read_text(encoding="utf-8")
+        self.assertEqual(json.loads(results.splitlines()[-1])["notProposed"], self.TOKEN_REASON)
+
+    def test_a_replayed_name_with_a_token_proposes_no_edit_either(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"labels": {"Microsoft Entra ID": {
+            "decision": "use", "role": "link", "name": "[tenantname] | Overview", "severity": "misleading"}}}
+        r = self.runner_for()                                   # no answers: replay decides
+        record = self.act(r)
+        self.assertEqual((record["severity"], record["proposedEdit"], record["notProposed"]),
+                         ("misleading", None, self.TOKEN_REASON))
+
+    def test_a_name_that_only_scrub_masks_proposes_no_edit(self) -> None:
+        # The Redactor leaves another directory's address and an object id alone; scrub does not.
+        for answer, token in (("4", "<email>"), ("5", "<id>")):
+            with self.subTest(token=token):
+                self.recording["steps"].pop("9.9.2", None)
+                record = self.act(self.runner_for(answer, run_id=f"scrub-{answer}"))
+                self.assertEqual(record["outcome"], "drift")
+                self.assertIsNone(record["proposedEdit"])
+                self.assertTrue(record["notProposed"].endswith(f"({token})"), record["notProposed"])
+
+    def test_the_first_reason_that_applies_is_the_one_given(self) -> None:
+        # A workaround, a wrong blade and an excused start come before the token in the name.
+        excuse = "the browser of this run is new: the blades the guide opened before the step are not open"
+        r = self.runner_for("w 1", run_id="workaround")
+        self.assertEqual(self.act(r)["notProposed"], run.WORKAROUND_REASON)
+        r = self.runner_for("1", run_id="wrong-blade")
+        r.excused["9.9.2"] = excuse
+        drift = r.new_record({"id": "9.9.2"}, "blade", GROUPS)
+        drift.update(outcome="drift", severity="misleading", category=run.WRONG_BLADE, observed="elsewhere")
+        r.write(drift)
+        self.assertEqual(self.act(r)["notProposed"], self.WRONG_BLADE_REASON)
+        self.recording["steps"].pop("9.9.2", None)
+        r = self.runner_for("1", run_id="excused")
+        r.excused["9.9.2"] = excuse
+        self.assertEqual(self.act(r)["notProposed"],
+                         f"the step started where the run, not the guide, left the Portal ({excuse})")
+
+    def run_whole_step(self, *answers: str, step=None, no_form: bool = False) -> run.Runner:
+        """run_step on a blade the recording does not know yet, the label not on screen. With
+        `no_form`, the step's first item is a field whose form is not open: find_form writes its
+        wrong-blade record and, as the person opened the form, takes the blade to record from
+        there; the field is then filled without a browser."""
+        r = self.runner_for(*answers, page=page_on(f"view/{GROUPS}"), run_id="-".join(answers))
+
+        def form_not_open(step, item, label, value, look):
+            drift = r.new_record(step, "field", label)
+            drift.update(outcome="drift", severity="misleading", category=run.WRONG_BLADE, observed="no form")
+            r.write(drift)
+            r.start_seen = r.open_blade()
+            return None
+
+        clock = iter(range(0, 1_000_000, 1))
+        with mock.patch.object(run, "find_exact", return_value=None), \
+                mock.patch.object(run, "candidates_on_screen", return_value=self.CANDIDATES), \
+                mock.patch.object(run.time, "monotonic", lambda: next(clock)), \
+                mock.patch.object(run, "find_by_name", return_value=FakeElement()), \
+                mock.patch.object(run, "fill_field", return_value=None), \
+                mock.patch.object(r, "find_form", side_effect=form_not_open) as find_form, \
+                redirect_stdout(io.StringIO()):
+            self.assertTrue(r.run_step(step or self.STEP))
+        self.assertEqual(find_form.called, no_form)
+        return r
+
+    def test_a_workaround_at_the_first_item_records_no_start_blade(self) -> None:
+        # The person reached the guide's place another way: the blade the step began on may not be its own.
+        r = self.run_whole_step("w 3")
+        self.assertEqual([x["workaround"] for x in r.records if x["kind"] == "action"], [True])
+        self.assertNotIn("startBlade", self.recording["steps"].get("9.9.2", {}))
+        self.recording["steps"].pop("9.9.2", None)
+        r = self.run_whole_step("2")                                 # a rename: recorded as usual
+        self.assertEqual([x["workaround"] for x in r.records if x["kind"] == "action"], [False])
+        self.assertEqual(self.recording["steps"]["9.9.2"]["startBlade"], GROUPS)
+
+    def test_a_workaround_after_a_form_that_was_not_open_records_no_start_blade(self) -> None:
+        step = dict(self.STEP, items=[{"kind": "field", "label": "Microsoft Entra ID", "value": "x", "line": 3}])
+        r = self.run_whole_step("w 3", step=step, no_form=True)
+        drifts = [(x["category"], x["workaround"]) for x in r.records if x["outcome"] == "drift"]
+        self.assertEqual(drifts, [(run.WRONG_BLADE, False), (None, True)])
+        self.assertNotIn("startBlade", self.recording["steps"].get("9.9.2", {}))
+        self.recording["steps"].pop("9.9.2", None)
+        self.run_whole_step("2", step=step, no_form=True)            # the form's blade, as find_form leaves it
+        self.assertEqual(self.recording["steps"]["9.9.2"]["startBlade"], GROUPS)
+
+    def test_the_summary_holds_back_an_older_edit_that_brings_a_token_into_the_guide(self) -> None:
+        # A record written before #211, reloaded on -Resume, may carry such an edit.
+        r = self.runner_for()
+        for label, new, observed in (("Microsoft Entra ID", "1. Go back to **[tenantname] | Overview** home page",
+                                      "[tenantname] | Overview"),
+                                     ("[yourtenant] Ltd", "1. Open **[yourtenant] Limited**", "[yourtenant] Limited")):
+            old = r.new_record({"id": "9.9.2"}, "action", label)
+            old.pop("notProposed")
+            old.update(outcome="drift", severity="misleading", observed=observed,
+                       proposedEdit={"line": 3, "old": self.LINE if label == "Microsoft Entra ID"
+                                     else "1. Open **[yourtenant] Ltd**", "new": new})
+            r.records.append(old)
+        summary = self.summary(r)
+        # The guide's own '[yourtenant]' stays: the edit brings no token the line did not have.
+        self.assertIn("## proposed edits (1)\n- guide.md:3\n  - old: `1. Open **[yourtenant] Ltd**`\n", summary)
+        self.assertNotIn("**[tenantname] | Overview**", summary)
+        self.assertIn(f"## not proposed (1)\n- step 9.9.2 action **Microsoft Entra ID**: observed "
+                      f"'[tenantname] | Overview': {self.TOKEN_REASON}\n", summary)
+
+    def test_an_element_used_as_a_workaround_is_drift_without_an_edit_and_is_not_recorded(self) -> None:
+        r = self.runner_for("w 3")
+        record = self.act(r)
+        self.assertEqual(self.element.clicked, 1)               # acted on all the same
+        self.assertEqual((record["outcome"], record["severity"], record["observed"]),
+                         ("drift", "misleading", "View all 5 users"))
+        reason = "used as a workaround, not as the guide's element"
+        self.assertEqual((record["proposedEdit"], record["notProposed"]), (None, reason))
+        self.assertEqual(self.labels(), {})     # replay would take it for the guide's element: asked again
+        self.assertIn("## proposed edits (0)\n- none\n\n## not proposed (1)\n- step 9.9.2 action "
+                      f"**Microsoft Entra ID**: observed 'View all 5 users': {reason}\n", self.summary(r))
+
+    WRONG_BLADE_REASON = "the Portal was not where the guide leads in this step (wrong-blade)"
+
+    def test_a_step_that_started_on_the_wrong_blade_proposes_no_edit(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"startBlade": GROUPS}
+        r = self.runner_for("", "2", page=page_on(f"view/{USERS}"))     # Enter at the blade prompt, then 2
+        record = self.act(r, before=lambda r: r.check_start(self.STEP))
+        self.assertEqual([x["category"] for x in r.records], [run.WRONG_BLADE, None])
+        self.assertEqual((record["severity"], record["observed"]), ("misleading", "Entra ID"))
+        self.assertEqual((record["proposedEdit"], record["notProposed"]), (None, self.WRONG_BLADE_REASON))
+        self.assertEqual(self.labels()["Microsoft Entra ID"]["name"], "Entra ID")     # the decision stays recorded
+        self.assertIn("## proposed edits (0)\n- none\n\n## not proposed (1)\n- step 9.9.2 action "
+                      f"**Microsoft Entra ID**: observed 'Entra ID': {self.WRONG_BLADE_REASON}\n", self.summary(r))
+
+    def test_a_form_not_open_in_the_step_counts_as_well_and_another_steps_does_not(self) -> None:
+        for step_id, proposed in (("9.9.1", True), ("9.9.2", False)):
+            with self.subTest(step=step_id):
+                self.recording["steps"].pop("9.9.2", None)
+                r = self.runner_for("2", run_id=step_id)
+                drift = r.new_record({"id": step_id}, "field", "User principal name")
+                drift.update(outcome="drift", severity="misleading", category=run.WRONG_BLADE, observed="no form")
+                r.write(drift)
+                record = self.act(r)
+                self.assertEqual(record["proposedEdit"] is not None, proposed)
+                self.assertEqual(record["notProposed"], None if proposed else self.WRONG_BLADE_REASON)
+
+    def test_a_step_whose_start_is_excused_proposes_no_edit(self) -> None:
+        # After a resume, a step the recording skips or one skipped with 's': whether or not a
+        # blade is recorded to compare with, the blades the guide opened before it are not open.
+        excuse = "the browser of this run is new: the blades the guide opened before the step are not open"
+        r = self.runner_for("2")
+        r.excused["9.9.2"] = excuse
+        record = self.act(r)
+        reason = f"the step started where the run, not the guide, left the Portal ({excuse})"
+        self.assertEqual((record["severity"], record["proposedEdit"], record["notProposed"]),
+                         ("misleading", None, reason))
+        r.excused = {"9.9.1": excuse}                             # another step's excuse
+        self.assertIsNotNone(self.act(r)["proposedEdit"])
 
 
 class FormOpenTests(RunnerTestCase):
