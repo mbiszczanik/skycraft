@@ -1331,6 +1331,15 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @($items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Logs'
     }
 
+    # An older rsv-backup-reports-diag still carries the legacy category: the run clears it on the
+    # Edit setting path, and never clicks it, which would tick it on a new setting.
+    It 'reads step 5.2.8''s legacy Azure Backup Reporting Data as unchecked and never clicked' {
+        $item = @((Get-StateStep '5.2' '5.2.8').items | Where-Object { (@($_.labels) -join "`n") -ceq 'Azure Backup Reporting Data' })
+        $item.Count | Should -Be 1
+        @($item[0].unchecked) | Should -Be @(0)
+        @($item[0].stateOnly) | Should -Be @(0)
+    }
+
     # 'Select', 'Click **Enable**' and 'Check that ...' give no state; a guide line added with a
     # stating verb is added here.
     It 'gives a state to these labels only' {
@@ -1351,6 +1360,8 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '5.2.8/Addon Azure Backup Storage Data/checked=0'
             '5.2.8/Addon Azure Backup Protected Instance Data/checked=0'
             '5.2.8/Azure Backup Operations/checked=0'
+            '5.2.8/Azure Backup Reporting Data/unchecked=0'
+            '5.2.8/Azure Backup Reporting Data/stateOnly=0'
             '5.2.8/Send to Log Analytics workspace/checked=0'
             '5.2.8/Send to Log Analytics workspace/checked=0'
             '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/checked=0,1,2,3'
