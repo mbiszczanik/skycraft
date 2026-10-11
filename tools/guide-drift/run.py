@@ -262,15 +262,15 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Callable, Iterator, TypeVar
 from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, Error as PlaywrightError, Frame, Locator, Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).parent))
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
-from recording import (REMARK, Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
-                       field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
+from recording import (LABEL_ROLES, REMARK, EntryNames, Redactor, checkbox_state, env_secrets,  # noqa: E402
+                       missing_env, field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
                        same_blade, start_blade, view_blade, write_json)
 from recording import (error_text, one_line, prompt_value, redaction_tokens, scrub, tag_action,  # noqa: E402
                        typed_secrets)
@@ -513,21 +513,81 @@ def blade_still_loading(outline: list[tuple[str, str]]) -> str | None:
     return None if any(role in BLADE_CONTENT_ROLES for role, _ in outline[start + 1:]) else BLADE_EMPTY
 
 
-def aria_lines(page: Page) -> list[tuple[str, str, int]]:
-    """(role, name, count) of every named element the accessibility tree exposes, across frames,
-    in first-seen order. count is how many elements share that role and name: the Portal keeps
-    earlier blades in the DOM, so 'Create' or 'Delete' often appears more than once, and a
-    candidate that stands for several elements must never be clicked by name alone."""
+# A list's entry (#317): what an element inside one is named after is the entry's data (a user's
+# display name, a resource name), not the Portal's label. A list item is none: blade menus are
+# lists of links.
+ENTRY_ROLES = ("row", "option", "treeitem")
+# The lines whose names are a list entry's data, wherever they stand (#317): a candidate whose name
+# holds one (recording.EntryNames) is named after the entry, as a picker's 'Remove <name>' is.
+ENTRY_NAME_ROLES = ("row", "cell", "gridcell", "rowheader", "option", "treeitem")
+
+
+def snapshot_elements(snapshot: str,
+                      ancestors: list | None = None) -> Iterator[tuple[tuple[str, str], bool]]:
+    """(role, name) of every element line of one frame's aria_snapshot() (snapshot_key), in tree
+    order, and whether it sits in a list's entry (aria_lines' in_entry, #317). The snapshot's
+    indentation gives the ancestors: `ancestors` is the stack of (indent, under_entry,
+    under_header) of the open elements a line may sit in, each line pushed once and popped at
+    most once, so a line costs O(1) beyond its own length. It starts empty; a test passes a list
+    that counts its pushes and pops."""
+    ancestors = [] if ancestors is None else ancestors
+    for line in snapshot.splitlines():
+        key = snapshot_key(line)
+        if key is None:
+            continue
+        indent = len(line) - len(line.lstrip())
+        while ancestors and ancestors[-1][0] >= indent:
+            ancestors.pop()
+        under_entry, under_header = (ancestors[-1][1], ancestors[-1][2]) if ancestors else (False, False)
+        yield key, under_entry and not under_header
+        if key[0] in ENTRY_ROLES:
+            under_entry, under_header = True, False
+        elif key[0] == "columnheader":
+            under_header = True
+        ancestors.append((indent, under_entry, under_header))
+
+
+def aria_lines(page: Page) -> list[tuple[str, str, int, bool, bool]]:
+    """(role, name, count, in_entry, names_entry) of every named element the accessibility tree
+    exposes, across frames, in first-seen order. count is how many elements share that role and
+    name: the Portal keeps earlier blades in the DOM, so 'Create' or 'Delete' often appears more
+    than once, and a candidate that stands for several elements must never be clicked by name
+    alone. Both flags keep an element out of the recording (recording.rejected_candidates, #317):
+
+      in_entry     at least one of them sits in a list's entry (ENTRY_ROLES: a table's or grid's
+                   row, a list box's option, a tree's item) and not in a column header of that
+                   row; the snapshot's indentation gives its ancestors, and an entry nested in a
+                   header starts afresh. Its name is then the entry's data.
+      names_entry  its name holds, as whole words, the name of a list's entry anywhere on screen
+                   (ENTRY_NAME_ROLES, recording.EntryNames): a picker's 'Remove <user>' button, a
+                   profile blade's heading or a breadcrumb that repeats a row's name. Looked for
+                   only where it decides something: in a candidate the recording could keep (a
+                   role of recording.LABEL_ROLES, not in_entry); False for any other.
+
+    Each line costs O(1) beyond its own length (snapshot_elements; EntryNames.held_by is linear
+    in a name's length). Every frame starts at the top, whatever line the previous one ended
+    inside."""
     counts: dict[tuple[str, str], int] = {}
+    in_entry: dict[tuple[str, str], bool] = {}
+    entry_names: list[str] = []
     for frame in all_frames(page):
         try:
             snapshot = frame.locator("body").aria_snapshot(timeout=2000)
         except PlaywrightError:     # timed out, or the frame went away while the Portal navigated
             continue
-        for key in map(snapshot_key, snapshot.splitlines()):
-            if key is not None and key[1] and key[0] in CANDIDATE_ROLES:
+        for key, inside in snapshot_elements(snapshot):
+            role = key[0]
+            if key[1] and role in CANDIDATE_ROLES:
                 counts[key] = counts.get(key, 0) + 1
-    return [(role, name, count) for (role, name), count in counts.items()][:300]
+                in_entry[key] = in_entry.get(key, False) or inside
+            if key[1] and role in ENTRY_NAME_ROLES:
+                entry_names.append(key[1])
+    entries = EntryNames(entry_names)
+    lines = []
+    for (role, name), count in list(counts.items())[:300]:
+        inside = in_entry[(role, name)]
+        lines.append((role, name, count, inside, role in LABEL_ROLES and not inside and entries.held_by(name)))
+    return lines
 
 
 # --- finding and acting --------------------------------------------------------------------
@@ -1166,7 +1226,8 @@ def find_by_name(page: Page, role: str | None, name: str | re.Pattern[str]) -> L
 
 
 def candidates_on_screen(page: Page) -> list[Candidate]:
-    return [Candidate(role=role, name=name, count=count) for role, name, count in aria_lines(page)]
+    return [Candidate(role=role, name=name, count=count, in_entry=in_entry, names_entry=names_entry)
+            for role, name, count, in_entry, names_entry in aria_lines(page)]
 
 
 def current_text(element: Locator, tag: str) -> str:
@@ -1974,7 +2035,8 @@ class Runner:
             # all work with '[tenantdomain]' and the element is found by the restored name.
             if self.page.is_closed():
                 raise PageClosed("the browser window was closed")
-            candidates = [Candidate(role=c.role, name=self.redactor.redact(c.name), count=c.count)
+            candidates = [Candidate(role=c.role, name=self.redactor.redact(c.name), count=c.count,
+                                    in_entry=c.in_entry, names_entry=c.names_entry)
                           for c in candidates_on_screen(self.page)]
             same = self.same_after_restore(candidates, label)
             if same is not None:

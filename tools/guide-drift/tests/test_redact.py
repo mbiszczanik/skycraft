@@ -541,6 +541,139 @@ class RejectedCandidatesTests(unittest.TestCase):
         self.assertEqual(len(rejected), 20)
         self.assertEqual(rejected[0], 'button "New groups"')
 
+    # Example data only: the lab's fictional names and contoso (#317).
+
+    def test_keeps_the_portals_labels_of_every_label_role(self) -> None:
+        labels = [Candidate("button", "Add members"), Candidate("link", "Groups | All groups"),
+                  Candidate("menuitem", "Delete"), Candidate("tab", "Enterprise applications"),
+                  Candidate("heading", "Add members"), Candidate("textbox", "Group name"),
+                  Candidate("combobox", "Group type"), Candidate("checkbox", "Select all"),
+                  Candidate("radio", "Assigned"), Candidate("switch", "Enable"),
+                  Candidate("button", "Close content 'Add members'", count=2)]
+        self.assertEqual(sorted(rejected_candidates(labels, "Malfurion Stormrage", None)),
+                         sorted(str(c) for c in labels))
+
+    def test_keeps_a_field_label_with_the_portals_decorations(self) -> None:
+        # An info icon's ' information' and a required field's ' *' (#244) decorate the Portal's
+        # own label, not a row's data.
+        labels = [Candidate("textbox", "Email information *"), Candidate("button", "Group name information")]
+        self.assertEqual(sorted(rejected_candidates(labels, "Email", None)), sorted(str(c) for c in labels))
+
+    def test_drops_a_list_rows_check_box_whose_name_is_the_rows_data(self) -> None:
+        for name in ("Select row Illidan Stormrage", "select row Contoso Reporting", "Select row ",
+                     "Select row", "  Select row Khadgar Archmage"):
+            with self.subTest(name=name):
+                self.assertEqual(rejected_candidates([Candidate("checkbox", name), Candidate("button", "Add")],
+                                                     "Malfurion Stormrage", None), ['button "Add"'])
+
+    def test_drops_the_row_prefix_in_any_role(self) -> None:
+        candidates = [Candidate("button", "Select row Chromie Timewalker"),
+                      Candidate("link", "Select row Contoso Reporting"), Candidate("tab", "Basics")]
+        self.assertEqual(rejected_candidates(candidates, "Chromie Timewalker", None), ['tab "Basics"'])
+
+    def test_keeps_a_name_that_only_starts_like_the_row_prefix(self) -> None:
+        candidates = [Candidate("button", "Select rows to compare"), Candidate("button", "Selection")]
+        self.assertEqual(sorted(rejected_candidates(candidates, "Select", None)),
+                         sorted(['button "Select rows to compare"', 'button "Selection"']))
+
+    def test_drops_every_element_inside_a_list_row(self) -> None:
+        # aria_lines (run.py) marks an element inside a row of a table or grid, not in a column
+        # header: its name is the row's data, whatever its role.
+        candidates = [Candidate("link", "Malfurion Stormrage", in_entry=True),
+                      Candidate("checkbox", "Khadgar Archmage", in_entry=True),
+                      Candidate("button", "More actions", in_entry=True),
+                      Candidate("link", "Users"), Candidate("button", "Name")]
+        self.assertEqual(sorted(rejected_candidates(candidates, "Malfurion Stormrage", None)),
+                         sorted(['link "Users"', 'button "Name"']))
+
+    def test_drops_the_entries_of_lists_and_trees(self) -> None:
+        # A drop-down's or the global search's options and a tree's items name resources and
+        # directory objects, as a table's cells do.
+        candidates = [Candidate("option", "Illidan Stormrage"), Candidate("option", "dev-skycraft-swc-rg"),
+                      Candidate("treeitem", "Contoso Root Group"), Candidate("cell", "Chromie Timewalker"),
+                      Candidate("gridcell", "Khadgar Archmage"), Candidate("row", "Khadgar Archmage"),
+                      Candidate("button", "Add")]
+        self.assertEqual(rejected_candidates(candidates, "Khadgar Archmage", None), ['button "Add"'])
+
+    def test_drops_a_name_that_repeats_a_list_entrys_name(self) -> None:
+        # aria_lines (run.py) marks a name that holds an entry's on screen (EntryNames): a picker's
+        # 'Remove <user>' button, a profile blade's heading, a breadcrumb.
+        candidates = [Candidate("button", "Remove Khadgar Archmage", names_entry=True),
+                      Candidate("heading", "Chromie Timewalker | Overview", names_entry=True),
+                      Candidate("link", "Chromie Timewalker", names_entry=True), Candidate("link", "Users")]
+        self.assertEqual(rejected_candidates(candidates, "Khadgar Archmage", None), ['link "Users"'])
+
+    def test_a_candidate_is_a_label_only_with_a_label_role_and_no_row_or_tenant_data(self) -> None:
+        self.assertTrue(recording.is_portal_label(Candidate("button", "New group")))
+        self.assertFalse(recording.is_portal_label(Candidate("option", "New group")))
+        self.assertFalse(recording.is_portal_label(Candidate("checkbox", "Select row Illidan Stormrage")))
+        self.assertFalse(recording.is_portal_label(Candidate("link", "Illidan Stormrage", in_entry=True)))
+        self.assertFalse(recording.is_portal_label(Candidate("button", "Remove Illidan Stormrage", names_entry=True)))
+        self.assertFalse(recording.is_portal_label(Candidate("link", f"admin@{DOMAIN}")))
+        self.assertFalse(recording.is_portal_label(Candidate("link", "11111111-2222-3333-4444-555555555555")))
+
+
+class EntryNamesTests(unittest.TestCase):
+    """EntryNames: whether a name holds a list entry's name on screen, as whole words, regardless
+    of case and punctuation, from ENTRY_NAME_MIN characters on (#317). Example data only: the
+    lab's fictional names and contoso."""
+
+    def test_a_name_holds_an_entry_as_whole_words_in_any_case_and_punctuation(self) -> None:
+        entries = recording.EntryNames(["Illidan Stormrage", "dev-skycraft-swc-rg", "Contoso Reporting"])
+        for name in ("Illidan Stormrage", "Remove Illidan Stormrage", "illidan stormrage | Overview",
+                     "Home > Users > Illidan  Stormrage", "Delete dev-skycraft-swc-rg", "CONTOSO REPORTING (2)"):
+            with self.subTest(name=name):
+                self.assertTrue(entries.held_by(name))
+        for name in ("Illidan", "Stormrage Illidan", "Illidan Stormrages", "dev-skycraft-swc", "Contoso",
+                     "New group", ""):
+            with self.subTest(name=name):
+                self.assertFalse(entries.held_by(name))
+
+    def test_an_entry_name_shorter_than_the_minimum_is_not_looked_for(self) -> None:
+        self.assertEqual(recording.ENTRY_NAME_MIN, 6)
+        short = recording.EntryNames(["All", "None", "Yes", "Name", "Owner", "Users", "Group", "Li Wa"])
+        for name in ("Groups | All groups", "Select all", "None", "Owner", "Users", "Add Group", "Li Wa"):
+            with self.subTest(name=name):
+                self.assertFalse(short.held_by(name))
+        self.assertTrue(recording.EntryNames(["Li Wei"]).held_by("Remove Li Wei"))     # six characters
+        self.assertTrue(recording.EntryNames(["Groups"]).held_by("Groups | All groups"))
+
+    def test_no_entries_hold_nothing(self) -> None:
+        self.assertFalse(recording.EntryNames([]).held_by("Illidan Stormrage"))
+        self.assertFalse(recording.EntryNames(["", "  ", "--"]).held_by("Illidan Stormrage"))
+
+    def test_an_entry_name_of_more_than_the_maximum_words_is_not_looked_for(self) -> None:
+        # A row's whole text: its cells are entries of their own.
+        self.assertEqual(recording.ENTRY_WORDS_MAX, 12)
+        twelve = " ".join(f"word{i}" for i in range(12))
+        thirteen = twelve + " word12"
+        entries = recording.EntryNames([twelve, thirteen, "Illidan Stormrage"])
+        self.assertTrue(entries.held_by(f"Remove {twelve}"))
+        self.assertTrue(entries.held_by(f"{thirteen} and Illidan Stormrage"))
+        self.assertFalse(recording.EntryNames([thirteen]).held_by(thirteen))
+
+    def test_held_by_looks_at_no_more_than_entry_words_max_words_per_word_of_the_name(self) -> None:
+        # #317, counted in steps rather than timed: a name of 1,001 words against rows of 1,001
+        # words (too long to be looked for) and 1,000 cells that share ENTRY_WORDS_MAX - 1 words
+        # with the name from every one of its words, so that nearly every walk goes the whole
+        # window before it fails.
+        window = recording.ENTRY_WORDS_MAX
+        vocabulary = [f"w{i}" for i in range(1_000)]
+        rows = [" ".join(vocabulary) + f" r{i}" for i in range(10)]
+        cells = [" ".join(vocabulary[k:k + window - 1] + ["zz"]) for k in range(1_000)]
+        entries = recording.EntryNames(rows + cells)
+        name = " ".join(vocabulary) + " c0"
+        self.assertFalse(entries.held_by(name))
+        words = len(recording.entry_words(name))
+        self.assertLessEqual(entries.steps, window * words)
+        self.assertGreaterEqual(entries.steps, window * (words - window))     # the window is reached
+        self.assertTrue(entries.held_by(f"{name} {cells[500]}"))               # and a cell is still found
+
+    def test_a_shorter_entry_inside_a_longer_one_is_found_on_the_way(self) -> None:
+        entries = recording.EntryNames(["Illidan Stormrage", "Illidan Stormrage Guest Contoso"])
+        self.assertTrue(entries.held_by("Illidan Stormrage Guest"))
+        self.assertFalse(entries.held_by("Illidan Guest Contoso"))
+
 
 class WriteJsonTests(unittest.TestCase):
     def setUp(self) -> None:

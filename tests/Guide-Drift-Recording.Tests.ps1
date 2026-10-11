@@ -30,7 +30,10 @@
     address, tenant domain or GUID, and only query-free portal.azure.com blade addresses, read
     percent-decoded, without an address, a guest user principal name or an id with or without
     hyphens (issue #206); for lab 1.1, the tenant prefix and the guest address of step 1.1.5 are
-    environment references.
+    environment references. A decision's rejected candidates are the Portal's labels only (issue
+    #317): each is 'role "name"', its role one of recording.LABEL_ROLES (no table cell, option or
+    tree item, which name a list's entries), and its name not a list row's check box ('Select row
+    <display name>'), which names users and service principals of the tenant.
 
     A step entry may carry '"startBlade": "<blade>"' (issue #207): the blade part of the view the
     step starts on (for a HubsExtension Browse blade, with the resource type it lists), which the
@@ -50,7 +53,7 @@
 
 .NOTES
     Project: SkyCraft
-    Issue:   #189, #199, #200, #202, #206, #207
+    Issue:   #189, #199, #200, #202, #206, #207, #317
 #>
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
@@ -114,6 +117,12 @@ for step in steps:
                 reported.append({'step': step['id'], 'label': item['label'], 'value': item['value'], 'action': action})
 print(json.dumps(reported))
 '@
+
+# The roles a rejected candidate may have (#317), read from recording.LABEL_ROLES so that the list
+# lives in one place.
+$LabelRolesJson = & $Python -B -c 'import json, sys; sys.path.insert(0, sys.argv[1]); from recording import LABEL_ROLES; print(json.dumps(sorted(LABEL_ROLES)))' (Join-Path $RepoRoot 'tools/guide-drift')
+if ($LASTEXITCODE -ne 0) { throw "reading recording.LABEL_ROLES failed (python exit code $LASTEXITCODE)" }
+$LabelRoles = @(($LabelRolesJson -join "`n") | ConvertFrom-Json)
 
 # The labels of one parsed step: those run.py asks the decider about ('decided': navigation and
 # action labels, field labels and the field whose picker a chain opens, #250; never tag names,
@@ -276,6 +285,43 @@ $ViewUrlRuleCases = @(
     @{ url = 'https://portal.azure.com/#view/User/upn/x%2525252525252540example.com'; problem = 'step 9.9.1 viewUrl does not stop decoding after 5 rounds' }
 ) | ForEach-Object { $_.actual = @(Get-ViewUrlProblem -StepId '9.9.1' -Url $_.url) -join '; '; $_ }
 
+# Why a decision's rejected candidates must not be in this public repository; nothing when they may
+# (#317). The runner keeps only the Portal's labels (recording.rejected_candidates): an entry is
+# 'role "name"' with ' (xN)' when several elements share it, the role one of $LabelRoles, and the
+# name no list row's check box ('Select row ' and the row's display name, in any role or case). A
+# problem names the entry by its position, never by its text, so that a failure does not print a
+# directory object's name into a CI log.
+function Get-RejectedProblem {
+    param([string]$StepId, [string]$Label, [object]$Entry, [string[]]$Roles)
+    $rejected = $Entry.PSObject.Properties['rejected']
+    if ($null -eq $rejected -or $null -eq $rejected.Value) { return }
+    $entries = @($rejected.Value)
+    for ($i = 0; $i -lt $entries.Count; $i++) {
+        $at = "step $StepId label '$Label': rejected entry $($i + 1)"
+        if ($entries[$i] -isnot [string] -or $entries[$i] -cnotmatch '^(?<role>[a-z]+) "(?<name>.*)"(?: \(x\d+\))?$') {
+            "$at is not 'role ""name""'"
+            continue
+        }
+        if ($Matches.role -cnotin $Roles) { "$at has the role '$($Matches.role)', which names a list's entry, not a label" }
+        if ($Matches.name -match '^\s*select row\b') { "$at is a list row's check box ('Select row ...'), named after the row's data" }
+    }
+}
+
+# Example data only: the lab's fictional names and contoso.
+$RejectedRuleCases = @(
+    @{ json = '{ "decision": "ignore" }'; problem = '' }
+    @{ json = '{ "rejected": [] }'; problem = '' }
+    @{ json = '{ "rejected": ["button \"Add members\"", "tab \"Basics\" (x2)", "textbox \"Email information *\"", "checkbox \"Select all\"", "button \"Select rows to compare\""] }'; problem = '' }
+    @{ json = '{ "rejected": ["button \"Add\"", "checkbox \"Select row Illidan Stormrage\""] }'; problem = "step 9.9.1 label 'Malfurion Stormrage': rejected entry 2 is a list row's check box ('Select row ...'), named after the row's data" }
+    @{ json = '{ "rejected": ["checkbox \"select row Contoso Reporting\" (x2)"] }'; problem = "step 9.9.1 label 'Malfurion Stormrage': rejected entry 1 is a list row's check box ('Select row ...'), named after the row's data" }
+    @{ json = '{ "rejected": ["link \"Select row Khadgar Archmage\""] }'; problem = "step 9.9.1 label 'Malfurion Stormrage': rejected entry 1 is a list row's check box ('Select row ...'), named after the row's data" }
+    @{ json = '{ "rejected": ["cell \"Chromie Timewalker\""] }'; problem = "step 9.9.1 label 'Malfurion Stormrage': rejected entry 1 has the role 'cell', which names a list's entry, not a label" }
+    @{ json = '{ "rejected": ["option \"Illidan Stormrage\""] }'; problem = "step 9.9.1 label 'Malfurion Stormrage': rejected entry 1 has the role 'option', which names a list's entry, not a label" }
+    @{ json = '{ "rejected": ["treeitem \"Contoso Root Group\""] }'; problem = "step 9.9.1 label 'Malfurion Stormrage': rejected entry 1 has the role 'treeitem', which names a list's entry, not a label" }
+    @{ json = '{ "rejected": ["gridcell \"Select row Khadgar Archmage\""] }'; problem = "step 9.9.1 label 'Malfurion Stormrage': rejected entry 1 has the role 'gridcell', which names a list's entry, not a label; step 9.9.1 label 'Malfurion Stormrage': rejected entry 1 is a list row's check box ('Select row ...'), named after the row's data" }
+    @{ json = '{ "rejected": ["Illidan Stormrage", 1] }'; problem = "step 9.9.1 label 'Malfurion Stormrage': rejected entry 1 is not 'role ""name""'; step 9.9.1 label 'Malfurion Stormrage': rejected entry 2 is not 'role ""name""'" }
+) | ForEach-Object { $_.actual = @(Get-RejectedProblem -StepId '9.9.1' -Label 'Malfurion Stormrage' -Entry ($_.json | ConvertFrom-Json) -Roles $LabelRoles) -join '; '; $_ }
+
 $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/recordings') -Filter 'lab-*.json' |
     ForEach-Object {
         $file      = $_
@@ -388,6 +434,16 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
             }
         )
 
+        $badRejected = @(
+            foreach ($prop in $recording.steps.PSObject.Properties) {
+                $labelsObject = $prop.Value.labels
+                if ($null -eq $labelsObject) { continue }
+                foreach ($entry in @($labelsObject.PSObject.Properties)) {
+                    Get-RejectedProblem -StepId $prop.Name -Label $entry.Name -Entry $entry.Value -Roles $LabelRoles
+                }
+            }
+        )
+
         @{
             file        = $file.Name
             lab         = $recording.lab
@@ -402,6 +458,7 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
             malformed   = $malformed
             badUrls     = $badUrls
             badBlades   = $badBlades
+            badRejected = $badRejected
             raw         = $raw
         }
     }
@@ -504,6 +561,15 @@ Describe 'Guide drift recordings - nothing tenant-specific is literal (this repo
     It "reports the step entry <json> as '<problem>' (empty: its startBlade may be recorded)" -ForEach $StartBladeRuleCases {
         # A startBlade run.py refuses fails here, not at the start of a run; one with tenant or
         # personal data fails like a viewUrl that holds them.
+        $actual | Should -Be $problem
+    }
+
+    It "'<file>' rejects only the Portal's labels, no list entry and no list row's check box" -ForEach $RecordingCases {
+        # A problem names the entry by position only, so this failure prints no directory object.
+        $badRejected | Should -BeNullOrEmpty -Because ($badRejected -join '; ')
+    }
+
+    It "reports the decision <json> as '<problem>' (empty: its rejected candidates may be recorded)" -ForEach $RejectedRuleCases {
         $actual | Should -Be $problem
     }
 }

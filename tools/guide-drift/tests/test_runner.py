@@ -394,11 +394,11 @@ class DecisionRecordingTests(RunnerTestCase):
         super().setUp()
         (self.tmp / "guide.md").write_text("# Lab\n\n2. Click **+ New group**\n", encoding="utf-8")
 
-    def act(self, answers, element, label="+ New group", exact=None):
+    def act(self, answers, element, label="+ New group", exact=None, extra=()):
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
         candidates = [run.Candidate("button", "New group"), run.Candidate("link", "Groups"),
                       run.Candidate("button", "Delete group"), run.Candidate("link", "Contoso Ltd"),
-                      run.Candidate("menuitem", "Bulk delete")]
+                      run.Candidate("menuitem", "Bulk delete"), *extra]
         clock = iter(range(0, 1_000_000, 1))               # 1 s passes between every look at the clock
         with mock.patch.object(run, "find_exact", return_value=exact), \
                 mock.patch.object(run, "candidates_on_screen", return_value=candidates), \
@@ -413,6 +413,17 @@ class DecisionRecordingTests(RunnerTestCase):
         self.act(["1"], element)
         self.assertEqual(element.calls, ["scroll", "is_disabled", "click"])
         self.assertEqual(self.find_by_name.call_args.args[1:], ("button", "New group"))   # plain: exact
+
+    def test_a_rejected_element_inside_or_named_after_a_list_entry_is_not_recorded(self) -> None:
+        # #317: the redacted copy of the candidates keeps aria_lines' flags, so a row's link and a
+        # button named after a row (example data: fictional users) stay out of the recording.
+        _, labels = self.act(["1"], FakeElement(), extra=[
+            run.Candidate("link", "Illidan Stormrage", in_entry=True),
+            run.Candidate("button", "Remove Khadgar Archmage", names_entry=True)])
+        rejected = labels["+ New group"]["rejected"]
+        self.assertIn('link "Groups"', rejected)
+        self.assertNotIn('link "Illidan Stormrage"', rejected)
+        self.assertNotIn('button "Remove Khadgar Archmage"', rejected)
 
     def test_a_name_that_is_the_label_once_restored_needs_no_decision(self) -> None:
         element = FakeElement()
@@ -1651,8 +1662,179 @@ class SnapshotKeyTests(unittest.TestCase):
                           snapshot_line("radio", "Premium"), "- text: x", "- button"])
         with mock.patch.object(run, "all_frames", lambda page: [Screen(tree=tree)]):
             lines = run.aria_lines(FakePage())
-        self.assertEqual(lines, [("radio", self.STANDARD, 1), ("radio", "Premium", 2),
-                                 ("button", "Don't: stop", 1), ("button", 'Say "hi"', 1)])   # no unnamed button
+        self.assertEqual(lines, [("radio", self.STANDARD, 1, False, False), ("radio", "Premium", 2, False, False),
+                                 ("button", "Don't: stop", 1, False, False),
+                                 ("button", 'Say "hi"', 1, False, False)])   # no unnamed button
+
+    def test_aria_lines_mark_an_element_inside_a_list_row_but_not_in_a_column_header(self) -> None:
+        # #317: a row's link or check box is named after the row's data (example data: the lab's
+        # fictional users); a column header's sort button and select-all box are the Portal's labels.
+        tree = "\n".join([
+            '- button "Add"',
+            '- grid "Users":',
+            '  - rowgroup:',
+            '    - row "Select all Name":',
+            '      - columnheader "Select all":',
+            '        - checkbox "Select all"',
+            '      - columnheader "Name":',
+            '        - button "Name"',
+            '  - rowgroup:',
+            '    - row "Select row Illidan Stormrage Illidan Stormrage":',
+            '      - gridcell "Select row Illidan Stormrage":',
+            '        - checkbox "Select row Illidan Stormrage"',
+            '      - gridcell "Illidan Stormrage":',
+            '        - link "Illidan Stormrage":',
+            '          - /url: "#x"',
+            '    - row "Khadgar Archmage":',
+            '      - checkbox "Khadgar Archmage"',
+            '      - button "Add"',
+            '- link "Illidan Stormrage"',      # also outside a row: the name still counts as a row's
+            '- tab "Members"',
+        ])
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(tree=tree)]):
+            lines = run.aria_lines(FakePage())
+            candidates = run.candidates_on_screen(FakePage())
+        # in_entry, then names_entry, which is looked for only outside an entry: in one, the name
+        # is the entry's data already.
+        self.assertEqual(lines, [("button", "Add", 2, True, False), ("checkbox", "Select all", 1, False, False),
+                                 ("button", "Name", 1, False, False),
+                                 ("checkbox", "Select row Illidan Stormrage", 1, True, False),
+                                 ("link", "Illidan Stormrage", 2, True, False),
+                                 ("checkbox", "Khadgar Archmage", 1, True, False),
+                                 ("tab", "Members", 1, False, False)])
+        self.assertEqual([(c.in_entry, c.names_entry) for c in candidates], [line[3:] for line in lines])
+
+    def flags(self, *trees: str) -> dict[tuple[str, str], tuple[bool, bool]]:
+        """(role, name) -> (in_entry, names_entry) of aria_lines over one frame per tree."""
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(tree=t) for t in trees]):
+            return {(role, name): (in_entry, names_entry)
+                    for role, name, _, in_entry, names_entry in run.aria_lines(FakePage())}
+
+    def in_entry(self, *trees: str) -> dict[tuple[str, str], bool]:
+        return {key: flags[0] for key, flags in self.flags(*trees).items()}
+
+    def test_an_option_and_a_tree_item_are_entries_and_a_list_item_is_not(self) -> None:
+        # #317 (example data: fictional users and contoso): a picker's selected user is an option
+        # holding a 'Remove <user>' button; a tree's item names a resource; a blade menu is a list
+        # of links, the Portal's labels.
+        tree = "\n".join([
+            '- listbox "Selected":',
+            '  - option "Illidan Stormrage":',
+            '    - button "Remove Illidan Stormrage"',
+            '- tree "Management groups":',
+            '  - treeitem "Contoso Root Group":',
+            '    - link "Contoso Root Group"',
+            '- list "Manage":',
+            '  - listitem:',
+            '    - link "Members"',
+        ])
+        self.assertEqual(self.in_entry(tree), {("option", "Illidan Stormrage"): False,
+                                               ("button", "Remove Illidan Stormrage"): True,
+                                               ("treeitem", "Contoso Root Group"): False,
+                                               ("link", "Contoso Root Group"): True, ("link", "Members"): False})
+
+    def test_a_name_that_repeats_an_entry_on_screen_names_that_entry(self) -> None:
+        # #317 (example data: fictional users): the picker's 'Remove <user>' in a plain list, a
+        # profile blade's heading and its breadcrumb repeat the name of a row elsewhere on screen;
+        # a short option ('All', under ENTRY_NAME_MIN) does not make every label with 'all' data.
+        rows = "\n".join([
+            '- grid "Members":',
+            '  - row "Khadgar Archmage":',
+            '    - gridcell "Khadgar Archmage"',
+            '  - row "Chromie Timewalker Guest":',
+            '    - rowheader "Chromie Timewalker"',
+            '- listbox "Filter":',
+            '  - option "All"',
+        ])
+        blade = "\n".join([
+            '- list "Selected":',
+            '  - listitem:',
+            '    - button "Remove Khadgar Archmage"',
+            '- link "Groups | All groups"',
+            '- link "Chromie Timewalker"',
+            '- heading "chromie timewalker | Overview"',
+            '- checkbox "Select all"',
+            '- button "Khadgar"',
+        ])
+        flags = self.flags(rows, blade)
+        self.assertEqual({key: names for key, (_, names) in flags.items() if key[0] != "option"},
+                         {("button", "Remove Khadgar Archmage"): True, ("link", "Groups | All groups"): False,
+                          ("link", "Chromie Timewalker"): True, ("heading", "chromie timewalker | Overview"): True,
+                          ("checkbox", "Select all"): False, ("button", "Khadgar"): False})
+        self.assertEqual(flags[("button", "Remove Khadgar Archmage")], (False, True))   # in a list item: no entry
+        # An option is no label the recording could keep, so its name is not looked for.
+        self.assertEqual(self.flags(rows, '- option "Khadgar Archmage"')[("option", "Khadgar Archmage")],
+                         (False, False))
+
+    def test_a_row_nested_in_a_column_header_is_a_row_again(self) -> None:
+        # #317: the header's flag ends where a new row starts (example data: a fictional user).
+        tree = "\n".join([
+            '- row "Name":',
+            '  - columnheader "Name":',
+            '    - button "Name"',
+            '    - grid "Filter":',
+            '      - row "Illidan Stormrage":',
+            '        - link "Illidan Stormrage"',
+            '    - button "Sort"',
+        ])
+        self.assertEqual(self.in_entry(tree), {("button", "Name"): False, ("link", "Illidan Stormrage"): True,
+                                             ("button", "Sort"): False})
+
+    def test_a_quoted_ancestor_key_still_opens_a_row(self) -> None:
+        # A key with ': ' is single-quoted (snapshot_key); its children are still its own.
+        tree = "\n".join([
+            "- 'row \"Khadgar Archmage: Guest\"':",
+            "  - 'link \"Khadgar Archmage: profile\"'",
+            '- link "Home"',
+        ])
+        self.assertEqual(self.in_entry(tree), {("link", "Khadgar Archmage: profile"): True, ("link", "Home"): False})
+
+    def test_each_frame_starts_outside_every_row(self) -> None:
+        first = "\n".join(['- grid "Users":', '  - row "Illidan Stormrage":', '    - link "Illidan Stormrage"'])
+        self.assertEqual(self.in_entry(first, '- link "Home"'),
+                         {("link", "Illidan Stormrage"): True, ("link", "Home"): False})
+
+    class CountingStack(list):
+        """An ancestor stack for snapshot_elements that counts its pushes and pops."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.pushes = self.pops = 0
+
+        def append(self, item) -> None:
+            self.pushes += 1
+            super().append(item)
+
+        def pop(self, *args):
+            self.pops += 1
+            return super().pop(*args)
+
+    @staticmethod
+    def chain(depth: int) -> str:
+        """A chain `depth` deep, one space per level (the smallest snapshot such a chain can be),
+        under a row so that every level is in an entry, then a line back at the top."""
+        return "\n".join([" " * i + ("- row:" if i == 0 else "- group:") for i in range(depth)]
+                         + [" " * depth + '- link "Deepest"', '- link "Top"'])
+
+    def test_the_ancestor_stack_pushes_and_pops_each_line_at_most_once(self) -> None:
+        # #317: a line costs O(1) beyond its own length, counted in steps rather than timed, so a
+        # busy runner cannot fail it. The chain is 10,000 deep and unwinds all at once at its last
+        # line; the flat list has 100,000 lines, each popping its sibling.
+        chain = self.chain(10_000)
+        flat = "\n".join(f'- button "Action {i}"' for i in range(100_000))
+        for name, tree, unwound in (("chain", chain, 10_001), ("flat", flat, 99_999)):
+            with self.subTest(snapshot=name):
+                stack = self.CountingStack()
+                elements = list(run.snapshot_elements(tree, stack))
+                lines = len(tree.splitlines())
+                self.assertEqual(len(elements), lines)
+                self.assertLessEqual(stack.pushes, lines)
+                self.assertLessEqual(stack.pops, lines)
+                self.assertEqual(stack.pops, unwound)        # the walk does unwind: the bound is reached
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(tree=chain)]):
+            lines = run.aria_lines(FakePage())
+        self.assertEqual({(role, name): inside for role, name, _, inside, _ in lines},
+                         {("link", "Deepest"): True, ("link", "Top"): False})
 
 
 class BladeStillLoadingTests(unittest.TestCase):
