@@ -47,21 +47,26 @@ All new labs and scripts must include validation steps.
 
 Releases are automated with [release-please](https://github.com/googleapis/release-please).
 The title of your pull request is the squash-commit title on `main`, and the bot reads
-those titles to decide the next version and to write the release notes.
+those titles to decide the next version and to write the release notes. The title is
+also **all** that reaches `main`: the squash body is blank (repository setting
+`squash_merge_commit_message = BLANK`, issue #302). release-please lists every issue a
+commit mentions as "closes #N" in the Release PR, so with the PR body in the commit a
+deferred PR's `Refs #N` closed the issue still tracking its live pass when the release
+merged. A `Closes #N` in the PR description still closes `#N` when the PR itself merges;
+that link is GitHub's, not the commit's.
 
 - **Title your PR as a Conventional Commit**: `type(scope): subject`, scope optional,
   subject lowercase by convention (e.g. `docs(5.2): say how Deploy-Bicep.ps1 creates
   backup policies`). The `PR Title (Conventional Commits)` check refuses a title that is
   not in that form or whose type is not in the table below; it does not check the
-  subject's case, so keep it lowercase yourself. Do not start a paragraph of the PR
-  description with a `type:` prefix either: the bot reads it as a second commit. Allowed types
-  and what they do while the project is at `0.y.z`:
+  subject's case, so keep it lowercase yourself. Allowed types and what they do while
+  the project is at `0.y.z`:
 
   | Type | Version bump | In the release notes |
   |---|---|---|
   | `fix`, `perf`, `revert`, `docs` | patch | yes |
   | `feat` | minor | yes |
-  | `feat!` / `BREAKING CHANGE:` footer in the PR description | minor | yes |
+  | `feat!` (a `!` before the colon in the title; the only way to declare a breaking change) | minor | yes |
   | `test`, `chore`, `ci`, `refactor`, `build` | none | no |
 
 - **What happens automatically**: after every merge to `main` the
@@ -71,11 +76,13 @@ those titles to decide the next version and to write the release notes.
   Merging that PR creates the `vX.Y.Z` tag and the GitHub Release with the section as
   the notes. Nothing to type anywhere.
 - **To cut a release**: merge the open `chore(main): release X.Y.Z` pull request.
-- **To force a version** (for example the jump to 1.0.0): merge a PR whose description
-  **ends** with the line `Release-As: 1.0.0`, on its own after the pre-merge checklist;
-  the bot only reads footers from the last block of the description, so one placed
-  under *Summary* is ignored. Hand edits to the Release PR are overwritten on the bot's
-  next run (every push to `main`), so do not bump the version there.
+- **To force a version** (for example the jump to 1.0.0): merge a `chore` PR that adds
+  `"release-as": "1.0.0"` to the `"."` package in `release-please-config.json`; the bot
+  then proposes that version. Once the Release PR has merged, remove the key in the next
+  PR, or every later Release PR proposes 1.0.0 again. A `Release-As:` footer in a PR
+  description no longer works, because the description does not reach `main`. Hand edits
+  to the Release PR are overwritten on the bot's next run (every push to `main`), so do
+  not bump the version there.
 - **If a run failed** (an API error after the Release PR merged, a stale Release PR):
   re-run the workflow from the Actions tab (`workflow_dispatch`); release-please is
   idempotent and finishes what was left. If it aborts with "untagged, merged release PRs

@@ -109,3 +109,36 @@ Constraints that shaped the choice:
 - **Fine-grained PAT instead of a GitHub App.** Fewer setup steps, but the
   token is bound to the maintainer's account: the bot's work is attributed
   to them, the token is rotated by hand and dies with the account; rejected.
+
+## Postscript (2026-10-10): the squash body is blank
+
+`squash_merge_commit_message` is now `BLANK`; only the PR title reaches `main`
+(issue #302). The Decision bullet "PR titles are the release notes" and the
+`PR_BODY` cost above are superseded by this paragraph.
+
+**Why.** release-please lists every issue a commit on `main` mentions as
+"closes #N" in the Release PR, and GitHub closes those issues when the Release
+PR merges. ADR-0006 tells a PR whose live verification is deferred to link its
+issue with `Refs #N` precisely so the merge does not close it; with `PR_BODY`
+that line reached `main`, and the next release closed the issue anyway. It
+happened with #182 on 2026-09-28 and with six issues on 2026-10-10 (with
+release 0.15.0: #242, #253, #258, #259; with 0.16.0: #255, #270), none of
+which had had its live pass.
+
+**What changes.**
+
+- A breaking change is declared only with `!` in the title (`feat!: ...`); a
+  `BREAKING CHANGE:` footer in the description no longer reaches the bot.
+- A forced version moves from a `Release-As:` footer to the `release-as` key
+  of the root package in `release-please-config.json`, added in one PR and
+  removed after the Release PR merges (CONTRIBUTING.md, Releases).
+- A `Closes #N` in a PR description still closes `#N` when that PR merges:
+  that is GitHub's own link, independent of the commit body.
+- `tests/Release-Config.Tests.ps1` asserts the setting through `gh api` when
+  an authenticated `gh` is present, and that CONTRIBUTING.md no longer asks
+  for footers in the description.
+
+**What it does not fix.** Commits already on `main` with a PR body keep their
+references. A Release PR open when the setting changed still lists them; its
+`closes` lines for deferred issues are removed by hand right before merging,
+or those issues are reopened after it.
