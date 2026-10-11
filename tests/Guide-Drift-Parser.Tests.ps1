@@ -1310,6 +1310,27 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @($items[0].labels) | Should -Not -Contain 'Metrics'
     }
 
+    # The other two log lists of a diagnostic setting: 'Check **X** (`Category`)' per item of the
+    # Recovery Services vault's list (5.2.8), and 'Under **Logs**, check **A** and **B**.' (5.1.7).
+    It 'reads every log category of step <id> as checked and Logs as no label' -ForEach @(
+        @{ lab = '5.2'; id = '5.2.8'; categories = @('Core Azure Backup Data', 'Addon Azure Backup Job Data', 'Addon Azure Backup Policy Data', 'Addon Azure Backup Storage Data', 'Addon Azure Backup Protected Instance Data', 'Azure Backup Operations'); perItem = $true }
+        @{ lab = '5.1'; id = '5.1.7'; categories = @('StorageRead', 'StorageWrite'); perItem = $false }
+    ) {
+        $items = @((Get-StateStep $lab $id).items)
+        if ($perItem) {
+            foreach ($category in $categories) {
+                $item = @($items | Where-Object { (@($_.labels) -join "`n") -ceq $category })
+                $item.Count | Should -Be 1 -Because $category
+                @($item[0].checked) | Should -Be @(0) -Because $category
+            }
+        } else {
+            $item = @($items | Where-Object { (@($_.labels) -join "`n") -ceq ($categories -join "`n") })
+            $item.Count | Should -Be 1
+            @($item[0].checked) | Should -Be @(0..($categories.Count - 1))
+        }
+        @($items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Logs'
+    }
+
     # 'Select', 'Click **Enable**' and 'Check that ...' give no state; a guide line added with a
     # stating verb is added here.
     It 'gives a state to these labels only' {
@@ -1321,7 +1342,14 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '4.2.7/Enable versioning for blobs/checked=0'
             '4.3.6/Upload | Overwrite if files already exist | Upload/checked=1'
             '4.4.2/Add your client IP address/checked=0'
+            '5.1.7/StorageRead | StorageWrite/checked=0,1'
             '5.1.7/Send to Log Analytics workspace/checked=0'
+            '5.2.8/Core Azure Backup Data/checked=0'
+            '5.2.8/Addon Azure Backup Job Data/checked=0'
+            '5.2.8/Addon Azure Backup Policy Data/checked=0'
+            '5.2.8/Addon Azure Backup Storage Data/checked=0'
+            '5.2.8/Addon Azure Backup Protected Instance Data/checked=0'
+            '5.2.8/Azure Backup Operations/checked=0'
             '5.2.8/Send to Log Analytics workspace/checked=0'
             '5.2.8/Send to Log Analytics workspace/checked=0'
             '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/checked=0,1,2,3'

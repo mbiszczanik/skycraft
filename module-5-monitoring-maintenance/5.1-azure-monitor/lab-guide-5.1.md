@@ -234,7 +234,7 @@ Beyond VM telemetry, this lab also routes the **platform storage account's blob 
 1. Navigate to **Storage accounts** → `platformskycraftswcsa` → **Monitoring** → **Diagnostic settings**.
 2. In the list of resources, select **blob**, then **+ Add diagnostic setting**.
 3. Diagnostic setting name: `skycraft-storage-diag`
-4. Logs: **StorageRead** and **StorageWrite**.
+4. Under **Logs**, check **StorageRead** and **StorageWrite**.
 5. Check **Send to Log Analytics workspace**.
 6. Log Analytics workspace: `platform-skycraft-swc-law`.
 7. Click **Save**.

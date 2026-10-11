@@ -274,13 +274,13 @@ Backup reports are built from **diagnostic settings** on the vaults: each vault 
 
 1. Open `platform-skycraft-swc-rsv` → **Monitoring** → **Diagnostic settings** → **+ Add diagnostic setting**.
 2. Diagnostic setting name: `rsv-backup-reports-diag`
-3. Logs - select the categories:
-   - **Core Azure Backup Data** (`CoreAzureBackup`)
-   - **Addon Azure Backup Job Data** (`AddonAzureBackupJobs`)
-   - **Addon Azure Backup Policy Data** (`AddonAzureBackupPolicy`)
-   - **Addon Azure Backup Storage Data** (`AddonAzureBackupStorage`)
-   - **Addon Azure Backup Protected Instance Data** (`AddonAzureBackupProtectedInstance`)
-   - **Azure Backup Operations** (`AzureBackupOperations`)
+3. Under **Logs**:
+   - Check **Core Azure Backup Data** (`CoreAzureBackup`)
+   - Check **Addon Azure Backup Job Data** (`AddonAzureBackupJobs`)
+   - Check **Addon Azure Backup Policy Data** (`AddonAzureBackupPolicy`)
+   - Check **Addon Azure Backup Storage Data** (`AddonAzureBackupStorage`)
+   - Check **Addon Azure Backup Protected Instance Data** (`AddonAzureBackupProtectedInstance`)
+   - Check **Azure Backup Operations** (`AzureBackupOperations`)
 
    Backup reports needs all six. Leave **Azure Backup Reporting Data** (`AzureBackupReport`) unchecked: it is the legacy event, it flows only in **Azure diagnostics** mode, and with **Resource specific** selected it sends no data.
 4. Check **Send to Log Analytics workspace**.
