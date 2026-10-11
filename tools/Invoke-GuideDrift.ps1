@@ -61,7 +61,8 @@
     WHAT A RUN LEAVES BEHIND, AND WHY IT IS GITIGNORED. -LogDirectory/<run id>/ holds
     steps.json (the parsed guide; parse.py failing stops the run with exit 1), results.jsonl (one
     record per check, appended as the run goes and never rewritten, and a "redo" marker before a
-    redone step's new attempt; a run without -Resume whose folder already holds one does not
+    redone step's new attempt, or before a step the recording now skips, when the earlier attempt
+    left records; a run without -Resume whose folder already holds a results.jsonl does not
     start, exit 254), a full-window screenshot of every step,
     summary.md, for a 'Search for' step that found no single result, search-<step>.aria.txt
     (the search dropdown's accessibility tree, redacted) and, for a label that was not found,
@@ -98,7 +99,9 @@
     whether the step in flight finished (y), must be redone (n) or is skipped (s); a step skipped
     with s before the stop is passed over. A redone step counts only its last attempt in
     summary.md and the exit code, however often the run is resumed after it (issue #222):
-    results.jsonl keeps every attempt, with a "redo" marker before the new one. A results.jsonl
+    results.jsonl keeps every attempt, with a "redo" marker before the new one. A step completed
+    before the stop and skipped in the recording since counts none of its findings: it is listed
+    as skipped by the recording. A run that does not start (254) writes nothing. A results.jsonl
     written before #222 has no markers, so a step redone there may still count its earlier
     attempt.
 
@@ -172,6 +175,8 @@
 .PARAMETER FromStep
     Start at this step id ('1.1.6'), assuming earlier steps were done by hand. The run first
     brings the Portal to the view the step starts from (see A RESUMED RUN HAS A NEW BROWSER).
+    With -Resume and a later step, the step in flight is not asked about or redone: it is
+    passed over, and its records stay counted in summary.md and the exit code.
 
 .PARAMETER Resume
     Continue the previous run from tools/.guide-drift-state.json, starting at the step that was

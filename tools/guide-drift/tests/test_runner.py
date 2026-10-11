@@ -631,10 +631,14 @@ class OneRunAcrossResumeTests(RunnerTestCase):
     def test_a_cut_short_last_line_is_skipped(self) -> None:
         folder = self.tmp / "logs" / "first"
         folder.mkdir(parents=True)
-        (folder / "results.jsonl").write_text('{"step": "9.9.1", "outcome": "match", "kind": "action"}\n{"step": "9.9',
-                                               encoding="utf-8")
-        r = self.runner(resume=True, state={"runId": "first", "lab": LAB, "completed": [], "inFlight": None})
+        record = self.runner().new_record({"id": "9.9.1"}, "action", "OK")
+        record.update(outcome="match")
+        (folder / "results.jsonl").write_text(json.dumps(record) + '\n{"step": "9.9', encoding="utf-8")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            r = self.runner(resume=True, state={"runId": "first", "lab": LAB, "completed": [], "inFlight": None})
         self.assertEqual([x["step"] for x in r.records], ["9.9.1"])
+        self.assertEqual(out.getvalue(), "")        # no warning: a crash leaves such a line
 
 
 class RedoAcrossResumesTests(RunnerTestCase):
@@ -783,6 +787,40 @@ class RedoAcrossResumesTests(RunnerTestCase):
         with redirect_stdout(io.StringIO()):
             _, code, _ = self.part("odd", state, answers=[""])
         self.assertEqual(code, 1)
+
+    def test_a_line_without_a_field_the_summary_reads_is_skipped_with_a_warning(self) -> None:
+        # A step id but no outcome (or any other field finish() reads): skipped, so the summary
+        # neither raises KeyError nor counts it.
+        for field in ("kind", "label", "outcome", "severity", "category", "skippedBecause", "observed"):
+            with self.subTest(field=field):
+                partial = self.record("9.9.2", "action", outcome="unknown", observed="not found")
+                del partial[field]
+                run_id = f"partial-{field}"
+                self.write_results(run_id, self.record("9.9.1", "action", outcome="match"), partial,
+                                   self.record("9.9.4", "action", outcome="unknown", observed="not found"))
+                state = {"runId": run_id, "lab": LAB, "completed": ["9.9.1", "9.9.2", "9.9.4"], "inFlight": None}
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    r = self.runner(run_id=run_id, resume=True, state=state)
+                self.assertEqual(out.getvalue(), "results.jsonl line 2: no record of a step; skipped.\n")
+                self.assertEqual([x["step"] for x in r.records], ["9.9.1", "9.9.4"])
+                with redirect_stdout(io.StringIO()):
+                    _, code, _ = self.part(run_id, state, answers=[""])
+                self.assertEqual(code, 1)
+                self.assertNotIn(self.FINDING, self.summary(run_id))
+
+    def test_a_run_that_does_not_start_writes_no_marker(self) -> None:
+        # 9.9.2 fails (q) and is skipped in the recording; -Resume, then closed input at the view
+        # prompt (254). The skip is taken back and the run resumed: 9.9.2's unknown still counts.
+        _, _, state = self.part("refused", answers=["q"], unknown={"9.9.2"})
+        self.recording["steps"].setdefault("9.9.2", {})["skip"] = "Optional"
+        _, code, state = self.part("refused", state, answers=[])
+        self.assertEqual(code, run.NOT_STARTED)
+        self.assertEqual([x["kind"] for x in self.lines("refused")], ["action"])
+        del self.recording["steps"]["9.9.2"]["skip"]
+        _, code, _ = self.part("refused", state, answers=["y", ""])
+        self.assertEqual(code, 1)
+        self.assertIn(self.FINDING, self.summary("refused"))
 
 
 class RunLogRedactionTests(RunnerTestCase):
@@ -1290,6 +1328,32 @@ class RecordedSkipTests(RunnerTestCase):
         summary = (self.tmp / "logs" / "first" / "summary.md").read_text(encoding="utf-8")
         self.assertIn("## unknown (1)\n- step 9.9.4 ", summary)
         self.assertIn(f"## skipped (1)\n- step 9.9.2 skipped by the recording: {self.REASON}\n", summary)
+
+    def test_a_completed_step_skipped_since_drops_its_findings_once(self) -> None:
+        # 9.9.2 fails and is done by hand (c), 9.9.4 fails (q); the recording then skips 9.9.2.
+        # The skip wins: 9.9.2's unknown is dropped behind a marker, and the step is listed as
+        # skipped by the recording, once, however often the run is resumed after that.
+        first = self.runner(answers=["c", "q"], unknown={"9.9.2", "9.9.4"}, run_id="first")
+        self.quietly(first.run)
+        state = run.load_state(self.tmp / "state.json", LAB)
+        self.assertEqual((state["completed"], state["inFlight"]), (["9.9.1", "9.9.2"], "9.9.4"))
+        self.skip("9.9.2")
+        second = self.runner(answers=["y", "", "q"], unknown={"9.9.5"}, resume=True, run_id="second", state=state)
+        self.assertEqual(self.quietly(lambda: second.run(state)), run.ABORTED)
+        self.assertEqual([(x["step"], x["outcome"]) for x in second.records if x["outcome"] != "match"],
+                         [("9.9.4", "unknown"), ("9.9.2", "skipped"), ("9.9.5", "unknown")])
+        state = run.load_state(self.tmp / "state.json", LAB)
+        third = self.runner(answers=["y", ""], resume=True, run_id="third", state=state)
+        self.assertEqual(self.quietly(lambda: third.run(state)), 2)
+        summary = (self.tmp / "logs" / "first" / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## unknown (2)\n- step 9.9.4 ", summary)
+        self.assertNotIn("- step 9.9.2 action", summary)
+        self.assertIn("## done by hand (0)", summary)
+        self.assertIn(f"## skipped (1)\n- step 9.9.2 skipped by the recording: {self.REASON}\n", summary)
+        lines = [json.loads(x) for x in (self.tmp / "logs" / "first" / "results.jsonl").read_text(
+            encoding="utf-8").splitlines()]
+        self.assertEqual([(x["kind"], x["outcome"]) for x in lines if x["step"] == "9.9.2"],
+                         [("action", "unknown"), ("action", "match"), ("redo", None), ("action", "skipped")])
 
     def test_starting_at_a_skipped_step_names_the_first_step_that_runs(self) -> None:
         self.skip("9.9.2")
