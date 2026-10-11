@@ -16,38 +16,7 @@
       },
       "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/InviteUser.ReactView/tenantType/AAD",
       "result": null,
-      "labels": {
-        "Email": {
-          "decision": "use",
-          "role": "textbox",
-          "name": "Email information *",
-          "severity": "cosmetic",
-          "rejected": [
-            "button \"information\" (x2)",
-            "tab \"Basics\"",
-            "button \"Copilot\"",
-            "textbox \"Message\"",
-            "button \"Settings\"",
-            "button \"Feedback\"",
-            "button \"Previous\"",
-            "tab \"Properties\"",
-            "tab \"Assignments\"",
-            "button \"Skip to main content\"",
-            "button \"More content actions\"",
-            "textbox \"Display name\"",
-            "textbox \"Cc recipient\"",
-            "link \"Home\"",
-            "textbox \"Invite redirect URL information *\"",
-            "button \"Show Microsoft Cloud menu\"",
-            "heading \"Microsoft Azure\"",
-            "link \"Microsoft Azure\"",
-            "button \"clear\"",
-            "link \"Users\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-06T17:18:04Z"
-        }
-      },
+      "labels": {},
       "asked": [
         "result"
       ]
@@ -98,29 +67,7 @@
       "result": {
         "text": "SkyCraft-Admins"
       },
-      "labels": {
-        "Malfurion Stormrage": {
-          "decision": "use",
-          "role": "checkbox",
-          "name": "Select row Malfurion Stormrage",
-          "severity": "cosmetic",
-          "rejected": [
-            "button \"Information\"",
-            "button \"Group type information\"",
-            "button \"Group description information\"",
-            "button \"Reset selection to default\"",
-            "button \"Membership type information\"",
-            "button \"Group name information\"",
-            "button \"Cloud Shell\"",
-            "button \"Notifications\"",
-            "button \"Skip to main content\"",
-            "button \"More content actions\"",
-            "heading \"Microsoft Azure\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-06T19:36:12Z"
-        }
-      },
+      "labels": {},
       "asked": [
         "result"
       ]
@@ -129,33 +76,7 @@
       "valueOverrides": {},
       "viewUrl": "https://portal.azure.com/#view/Microsoft_AAD_IAM/AddGroup.ReactView",
       "result": null,
-      "labels": {
-        "Khadgar Archmage": {
-          "decision": "use",
-          "role": "checkbox",
-          "name": "Select row Khadgar Archmage",
-          "severity": "cosmetic",
-          "rejected": [
-            "textbox \"Group name\"",
-            "heading \"Add members\"",
-            "button \"Group name information\"",
-            "heading \"Microsoft Azure\"",
-            "link \"Microsoft Azure\"",
-            "button \"Group type information\"",
-            "button \"Show portal menu\"",
-            "combobox \"Group type\"",
-            "link \"Home\"",
-            "button \"Name\"",
-            "link \"Groups | All groups\"",
-            "button \"Skip to main content\"",
-            "button \"Cancel\"",
-            "button \"Group description information\"",
-            "tab \"Enterprise applications\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-06T19:37:57Z"
-        }
-      }
+      "labels": {}
     },
     "1.1.9": {
       "valueOverrides": {},
@@ -163,28 +84,7 @@
       "result": {
         "text": "SkyCraft-Testers"
       },
-      "labels": {
-        "Chromie Timewalker": {
-          "decision": "use",
-          "role": "checkbox",
-          "name": "Select row Chromie Timewalker",
-          "severity": "cosmetic",
-          "rejected": [
-            "button \"Create\"",
-            "button \"Close content 'Add members'\"",
-            "button \"Close content 'New Group'\"",
-            "link \"Home\"",
-            "button \"Reset selection to default\"",
-            "combobox \"Group type\"",
-            "textbox \"Group name\"",
-            "button \"Show portal menu\"",
-            "button \"clear\"",
-            "heading \"Add members\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-06T19:38:51Z"
-        }
-      },
+      "labels": {},
       "asked": [
         "result"
       ]

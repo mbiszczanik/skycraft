@@ -4675,6 +4675,60 @@ class DecoratedNameTests(RunnerTestCase):
                       f"'Select row {self.MEMBER}': the Portal's name only decorates the guide's label "
                       "(a list row's check box)", summary)
 
+    def test_a_replay_of_lab_1_1_finds_the_decorated_elements_and_reports_no_cosmetic_drift(self) -> None:
+        # The four elements lab 1.1's replay of 2026-10-08 reported as cosmetic drift, on screens
+        # like the ones the run saw, with the recording as committed: nobody is asked, nothing is
+        # recorded, and the summary has no drift and no proposed edit.
+        lab = Path(__file__).resolve().parent.parent / "recordings" / "lab-1.1.json"
+        self.recording = json.loads(lab.read_text(encoding="utf-8"))
+        (self.tmp / "rec.json").write_text(json.dumps(self.recording), encoding="utf-8")
+        before = json.dumps(self.recording, sort_keys=True)
+        for step_id, entry in self.recording["steps"].items():
+            for label, decision in entry["labels"].items():
+                self.assertIsNone(run.decoration_of(decision.get("name") or "", label), (step_id, label))
+        guide = ["# Lab 1.1", "", "   - **Email**: `istormrage@illidari.com`",
+                 "2. Search for and select **Malfurion Stormrage**", "4. Search for and select **Khadgar Archmage**",
+                 "4. Search for and select **Chromie Timewalker**"]
+        (self.tmp / "guide.md").write_text("\n".join(guide) + "\n", encoding="utf-8")
+        steps = {"lab": "1.1", "guide": "guide.md", "steps": [
+            {"id": step_id, "title": step_id, "portal": True, "items": [], "expected": None, "images": []}
+            for step_id in ("1.1.5", "1.1.7", "1.1.8", "1.1.9")]}
+        r = run.Runner(FakePage(), steps, self.recording, self.args(), ask=Answers())
+        email = ScreenNode(tag="input")
+        invite = Screen(("textbox", "Email information *", email), ("button", "information", ScreenNode(tag="button")),
+                        ("button", "information", ScreenNode(tag="button")),
+                        ("textbox", "Display name", ScreenNode(tag="input")),
+                        ("textbox", "Invite redirect URL information *", ScreenNode(tag="input")))
+        record, _ = self.act(invite, {"kind": "field", "label": "Email", "value": "x", "line": 3}, "Email",
+                             value="istormrage@illidari.com", r=r)
+        r.write(record)
+        clicked = []
+        for step_id, line, member, other in (("1.1.7", 4, "Malfurion Stormrage", "Illidan Stormrage"),
+                                             ("1.1.8", 5, "Khadgar Archmage", "Chromie Timewalker"),
+                                             ("1.1.9", 6, "Chromie Timewalker", "Khadgar Archmage")):
+            box = ScreenNode()
+            screen = Screen(("text", member, ScreenNode(interactive=False)), ("checkbox", f"Select row {member}", box),
+                            ("text", other, ScreenNode(interactive=False)),
+                            ("checkbox", f"Select row {other}", ScreenNode()),
+                            ("button", "Group name information", ScreenNode(tag="button")),
+                            ("checkbox", "Select row Azure Resource Manager", ScreenNode()))
+            item = {"kind": "action", "labels": [member], "line": line}
+            step = {"id": step_id, "title": step_id, "items": [item], "images": []}
+            with mock.patch.object(run, "all_frames", lambda page, screen=screen: [screen]), \
+                    mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                    mock.patch.object(run, "candidates_on_screen", return_value=self.listed(screen)):
+                r.write(self.quietly(lambda: r.act_on_label(step, item, member)))
+            clicked.append(box.clicked)
+        self.assertEqual(([x["outcome"] for x in r.records], email.filled, clicked),
+                         (["match"] * 4, ["istormrage@illidari.com"], [1, 1, 1]))
+        self.assertEqual(r.ask.prompts, [])
+        self.assertEqual(json.dumps(json.loads((self.tmp / "rec.json").read_text(encoding="utf-8")), sort_keys=True),
+                         before)
+        self.assertEqual(self.quietly(r.finish), 0)
+        summary = (r.run_dir / "summary.md").read_text(encoding="utf-8")
+        for section in ("blocking", "misleading", "cosmetic", "unknown", "proposed edits", "not proposed"):
+            self.assertIn(f"## {section} (0)\n- none", summary)
+
 
 if __name__ == "__main__":
     unittest.main()
