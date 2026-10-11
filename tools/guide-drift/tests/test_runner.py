@@ -3293,6 +3293,22 @@ class PromptValueTests(RunnerTestCase):
         self.assertEqual((tag["outcome"], tag["observed"]), ("match", "[secret]"))
         self.assertNotIn("Contoso Owner", results)
 
+    def test_a_tag_value_that_is_no_text_to_type_is_never_typed(self) -> None:
+        for value, override, outcome, observed in (
+                ("IT-001", "[Leave blank]", "match", "left as is: [Leave blank]"),
+                ("skycraft-[uniqueID]", None, "unknown",
+                 "value 'skycraft-[uniqueID]' has an unresolved [token]; add a placeholder or a valueOverride "
+                 "to the recording"),
+                ('Click the "..." button', None, "unknown",
+                 "value 'Click the \"...\" button' is an instruction, not text to type; add a valueOverride for "
+                 "this tag to the recording")):
+            with self.subTest(value=value):
+                self.recording["steps"]["9.9.1"]["valueOverrides"].pop("Owner", None)
+                done, tag, fill, _ = self.run_tag(value, override=override)
+                fill.assert_not_called()
+                self.assertEqual((done, tag["outcome"], tag["observed"]), (outcome == "match", outcome, observed))
+                (self.tmp / "logs" / "test" / "results.jsonl").unlink()
+
 
 GROUPS = "Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups"
 USERS = "Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/AllUsers"

@@ -12,6 +12,7 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   resolve_value        a field value with the recording's placeholders and overrides applied
   prompt_value         the value the decider's prompt shows for a field: the one the runner
                        types, and where the recording changed it from the guide's (#210)
+  tag_action           field_action for a tag item (#210)
   resource_name        a resource name of a navigation chain with the placeholders filled, or
                        None when a placeholder is left (#199)
   value_action         type it, leave it ('[Leave blank]'), or report an unresolved [token]
@@ -472,6 +473,16 @@ def field_action(recording: dict, step: dict, item: dict) -> tuple[str, str]:
             and not value_is_literal(value)):
         return ("unresolved" if BRACKET_TOKEN.search(value) else "instruction"), value
     return value_action(value), value
+
+
+def tag_action(recording: dict, step: dict, item: dict) -> tuple[str, str]:
+    """field_action for a tag item (#210): its name is the key of its valueOverride, and its value
+    is read as parse.py reads a field's (value_is_literal; parse.py marks no tag). So a tag value
+    is typed only when it is text to type once the recording is applied: an override's '[Leave
+    blank]' leaves the tag out ('skip'), and a [token] left ('skycraft-[uniqueID]') or prose is
+    reported ('unresolved', 'instruction'), never typed as written."""
+    return field_action(recording, step, {"label": item["name"], "value": item["value"],
+                                          "literal": value_is_literal(item["value"])})
 
 
 def prompt_value(recording: dict, step: dict, item: dict) -> str:

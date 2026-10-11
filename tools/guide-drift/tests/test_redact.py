@@ -372,6 +372,28 @@ class EnvironmentValueTests(unittest.TestCase):
             "variable nor the tenant prefix, and 'Owner' names no secret: the run would show it as [secret]"])
 
 
+class TagActionTests(unittest.TestCase):
+    """A tag's value is decided as a field's is (field_action, #210): its name is the key of its
+    valueOverride, and a value that is no text to type is reported, never typed as written."""
+
+    RECORDING = {"placeholders": {"[env]": "Production"},
+                 "steps": {"2.1.3": {"valueOverrides": {"CostCenter": "[Leave blank]", "Owner": "Contoso-Admins"}}}}
+
+    def action(self, name: str, value: str) -> tuple[str, str]:
+        return recording.tag_action(self.RECORDING, {"id": "2.1.3"}, {"kind": "tag", "name": name, "value": value})
+
+    def test_a_literal_value_is_typed_with_placeholders_and_overrides(self) -> None:
+        self.assertEqual(self.action("Project", "SkyCraft"), ("type", "SkyCraft"))
+        self.assertEqual(self.action("Environment", "[env]"), ("type", "Production"))
+        self.assertEqual(self.action("Owner", "SkyCraft-Admins"), ("type", "Contoso-Admins"))
+
+    def test_a_value_that_is_no_text_to_type_is_not_typed(self) -> None:
+        self.assertEqual(self.action("CostCenter", "IT-001"), ("skip", "[Leave blank]"))
+        self.assertEqual(self.action("Name", "skycraft-[uniqueID]"), ("unresolved", "skycraft-[uniqueID]"))
+        self.assertEqual(self.action("Note", "[Leave blank]"), ("unresolved", "[Leave blank]"))
+        self.assertEqual(self.action("Owner2", 'Click the "..." button'), ("instruction", 'Click the "..." button'))
+
+
 class SkipReasonTests(unittest.TestCase):
     """'"skip": "<reason>"' on a step entry (#200): the reason, or an error, never a silent
     'not skipped' that would perform the step the recording meant to leave out."""
