@@ -185,8 +185,10 @@ without a browser. Rules (issue #189):
     blade, a tab, a row or an option far more often than it ticks a box, so a check box found
     for 'Select **X**' is clicked as before; a guide that needs a box ticked says 'Check'. The
     runner sets the state only on a check box, switch or radio; any other element it finds for
-    the label ('Enable ...' naming a button) is clicked as before. A '**Label**: checked' field
-    is read as before (checkbox_state).
+    the label ('Enable ...' naming a button) is clicked as before. A label whose state the
+    switch verbs, 'Leave', 'Make sure' or 'Ensure' give is also listed in '"stateOnly"': those
+    words are no click, so the runner reports any other element as unknown instead. A
+    '**Label**: checked' field is read as before (checkbox_state).
   * A bold span right after the word 'under' (and an optional 'the') names where the next
     label is, a blade menu's group or a section heading, and is no label (UNDER): 'Under
     **Settings**, select **Networking**.' (3.4.10), 'Under **Cost Management** click **Cost
@@ -197,7 +199,9 @@ without a browser. Rules (issue #189):
     section) or no control at all (Recovery and Tracking on Data protection, Instant restore in
     a backup policy), so nothing is lost; a collapsed menu group is opened by the runner
     ('Expand all headers'). An item that names only a place gives no item: 'Under **Blob access
-    tier (default)**, select the desired tier' (4.2.4) names no tier.
+    tier (default)**, select the desired tier' (4.2.4) names no tier. A span followed by 'tab'
+    stays a label ('Under the **Advanced** tab, check **X**' clicks Advanced): a tab is
+    clicked to show what is under it (UNDER_TAB).
   * Bold spans that are not UI elements are dropped by NON_UI_BOLD, by the guide's own entry
     in LAB_CAPTIONS and by the colon rule (bold text ending with ':' is a caption, not a label).
     NON_UI_BOLD holds the captions of every guide ('Note', 'Expected Result', 'Result');
@@ -278,9 +282,9 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     and **B** unchecked' (the state word follows the list, not each label). Check boxes named
     without a stating verb ('Logs: **A** and **B**') are clicked one by one, which toggles each;
     the guides say 'check' instead ('Under **Logs**, check **StorageRead** and
-    **StorageWrite**.', 5.1.7; one 'Check **X**' per item of 5.2.8's list of log categories), and
-    no diagnostic setting step has that shape any more. A verb before a list does not reach the items under it. The
-    other way round, 'Check **X**.' meant as 'look at X' is read as 'tick X'; the runner then
+    **StorageWrite**.', 5.1.7; one 'Check **X**' per item of 5.2.8's list of log categories),
+    and no diagnostic setting step has that shape any more. A verb before a list does not reach
+    the items under it. The other way round, 'Check **X**.' meant as 'look at X' is read as 'tick X'; the runner then
     clicks X as before when it is no check box, and ticks it when it is. No guide has that
     shape today.
   * A bold span after 'under' is always a place: 'open the failed job under **Backup jobs**'
@@ -436,9 +440,9 @@ STATE_BEFORE = re.compile(
 # What may follow such a label: the control's kind ('Enable **auto-registration** checkbox'), a
 # remark in parentheses and a full stop, then the item's end, a chain's separator or the next
 # clause (a comma, a semicolon, a colon, a dash before a space, 'and', 'then', 'or'). Anything
-# else makes the verb no instruction to set a box: 'Check **Policy enforcement** is set to "Enabled"' (1.3) is a check. Matched in
-# masked text at the label's end; each optional part starts with what only it matches, so a text
-# that fails does so in linear time.
+# else makes the verb no instruction to set a box: 'Check **Policy enforcement** is set to
+# "Enabled"' (1.3) is a check. Matched in masked text at the label's end; each optional part
+# starts with what only it matches, so a text that fails does so in linear time.
 STATE_AFTER = re.compile(
     r"(?:\s+(?:check\s?box|box|switch|toggle|option)\b)?(?:\s*\([^()]*\))?(?:\s*\.)?"
     r"\s*(?:$|→|->|>\s|[,;:]|[-–—]\s|(?:and|then|or)\b)", re.IGNORECASE)
@@ -471,6 +475,7 @@ SURE_AFTER = re.compile(WORDED_KIND + r"\s+is\s+(?P<state>" + _STATE_WORD + r")\
 # ('Under **Settings**, select **Networking**', 3.4.10; 'Click **Containers** under **Data
 # storage**', 4.2.2), not a control: clicking a Portal menu group collapses it. It is no label.
 UNDER = re.compile(r"\bunder\s+(?:the\s+)?$", re.IGNORECASE)
+UNDER_TAB = re.compile(r"\s+tabs?\b", re.IGNORECASE)   # 'Under the **Advanced** tab': a tab to click
 # What may stand between two labels of one list after a stating verb: 'Check **A** and **B**',
 # 'Uncheck **A**, **B** and **C**'. The later labels take the earlier one's state.
 STATE_LIST = re.compile(r"\s*(?:,\s*(?:and\s+|or\s+)?|(?:and|or)\s+)", re.IGNORECASE)
@@ -1027,10 +1032,14 @@ def worded_state(masked: str, start: int, end: int, since: int = 0) -> tuple[boo
     return (STATE_WORDS[after.group("state").lower()], after.end(), None) if after else None
 
 
-def stated_states(text: str, spans: list[tuple[int, int, str]]) -> tuple[dict[int, bool], set[int]]:
+def stated_states(text: str, spans: list[tuple[int, int, str]]
+                  ) -> tuple[dict[int, tuple[bool, bool]], set[int]]:
     """The state each bold label of `text` is to be in (#296), by the label's start, and the
     starts of the bold spans that are no label. `spans` are the labels' (start, end, label), in
-    order; a label without a state is left out of the first.
+    order; a label without a state is left out of the first. A state is (checked, only): `only`
+    when the words that state it are no click (a switch's value, 'Leave', 'Make sure'), so the
+    label is to be set and never clicked; a verb of STATE_VERBS may name a button too ('Enable
+    ...'), which is clicked.
 
     A label has a state when a verb of STATE_VERBS stands right before it (STATE_BEFORE), a
     switch verb with the way it is to go around it (toggled_state), or 'Leave', 'Make sure' or
@@ -1038,24 +1047,26 @@ def stated_states(text: str, spans: list[tuple[int, int, str]]) -> tuple[dict[in
     allows follows the instruction; a label that follows a label with a state and only a list's
     comma or 'and' (STATE_LIST) takes the same state: 'Uncheck **A**, **B** and **C**'. No label
     is the value of a switch ('**Enabled**' in 'Toggle **X** to **Enabled**') and a place right
-    after 'under' (UNDER: 'Under **Settings**, select ...')."""
+    after 'under' (UNDER: 'Under **Settings**, select ...'), unless 'tab' follows the place ('Under
+    the **Advanced** tab, ...'): a tab is clicked."""
     masked = mask_spans(text)
-    states: dict[int, bool] = {}
+    states: dict[int, tuple[bool, bool]] = {}
     dropped: set[int] = set()
-    previous: tuple[int, bool] | None = None      # (end, state) of the last label with a state
+    previous: tuple[int, tuple[bool, bool]] | None = None   # (end, state) of the last label with one
     for index, (start, end, _) in enumerate(spans):
         if start in dropped:
             continue                               # a switch's value, read with its label
         # What stands before the label is looked for from the end of the span before it on, so
         # an item of n spans is read in linear time, not in time n squared.
         since = spans[index - 1][1] if index else 0
-        if UNDER.search(masked, since, start):
+        if UNDER.search(masked, since, start) and not UNDER_TAB.match(masked, end):
             dropped.add(start)
             previous = None
             continue
         toggled = toggled_state(masked, spans, index, since) or worded_state(masked, start, end, since)
         if toggled:
-            state, after, value = toggled
+            checked, after, value = toggled
+            state = (checked, True)
             if not STATE_AFTER.match(masked, after):
                 previous = None
                 continue
@@ -1065,7 +1076,7 @@ def stated_states(text: str, spans: list[tuple[int, int, str]]) -> tuple[dict[in
             previous = None
             continue
         elif before := STATE_BEFORE.search(masked, since, start):
-            state, after = STATE_VERBS[before.group("verb").lower()], end
+            state, after = (STATE_VERBS[before.group("verb").lower()], False), end
         elif previous and STATE_LIST.fullmatch(masked, previous[0], start):
             state, after = previous[1], end
         else:
@@ -1076,12 +1087,15 @@ def stated_states(text: str, spans: list[tuple[int, int, str]]) -> tuple[dict[in
     return states, dropped
 
 
-def mark_states(item: dict, starts: list[int], states: dict[int, bool]) -> None:
+def mark_states(item: dict, starts: list[int | None], states: dict[int, tuple[bool, bool]]) -> None:
     """Add '"checked"' and '"unchecked"', the indices into the item's labels of those whose start
-    (`starts`, in label order; None for a resource name) has that state in `states` (#296). Only
-    an item with such a label carries either key."""
-    for key, wanted in (("checked", True), ("unchecked", False)):
-        indices = [index for index, at in enumerate(starts) if at is not None and states.get(at) is wanted]
+    (`starts`, in label order; None for a resource name) has that state in `states` (#296), and
+    '"stateOnly"', those of them that are to be set and never clicked. Only an item with such a
+    label carries the key."""
+    stated = [(index, states[at]) for index, at in enumerate(starts) if at is not None and at in states]
+    for key, indices in (("checked", [index for index, (checked, _) in stated if checked]),
+                         ("unchecked", [index for index, (checked, _) in stated if not checked]),
+                         ("stateOnly", [index for index, (_, only) in stated if only])):
         if indices:
             item[key] = indices
 

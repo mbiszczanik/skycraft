@@ -3049,7 +3049,7 @@ class ResourceTests(RunnerTestCase):
 
         def acting(how: str, **fields):
             def act(step, item, label, **where):
-                done.append((how, label, *(value for value in where.values() if value is not None)))   # no state: #296
+                done.append((how, label, *(v for k, v in where.items() if k not in ("state", "state_only"))))  # #296
                 record = r.new_record(step, item["kind"], label)
                 record.update(outcome="match", **fields)
                 return record
@@ -3083,7 +3083,7 @@ class ResourceTests(RunnerTestCase):
 
         def acting(how: str, outcome: str = "match"):
             def act(step, item, label, **where):
-                done.append((how, label, *(value for value in where.values() if value is not None)))   # no state: #296
+                done.append((how, label, *(v for k, v in where.items() if k not in ("state", "state_only"))))  # #296
                 record = r.new_record(step, item["kind"], label)
                 record.update(outcome=outcome)
                 return record
@@ -3595,7 +3595,7 @@ class FormOpenTests(RunnerTestCase):
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
         calls: list[tuple[str, bool]] = []
 
-        def act(step, item, label, value=None, form_start=False, state=None):
+        def act(step, item, label, value=None, form_start=False, state=None, state_only=False):
             calls.append((label, form_start))
             record = r.new_record(step, item["kind"], label)
             record.update(outcome="match")
@@ -3827,14 +3827,15 @@ class StatedStateTests(RunnerTestCase):
         super().setUp()
         (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
 
-    def act(self, screen: Screen, state: bool | None, item: dict | None = None, label: str = LABEL):
+    def act(self, screen: Screen, state: bool | None, item: dict | None = None, label: str = LABEL,
+            state_only: bool = False):
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
         item = item or self.ITEM
         step = {"id": "9.9.1", "title": "One", "items": [item], "images": []}
         with mock.patch.object(run, "all_frames", lambda page: [screen]), \
                 mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
                 mock.patch.object(run, "candidates_on_screen", return_value=[]):
-            return self.quietly(lambda: r.act_on_label(step, item, label, state=state))
+            return self.quietly(lambda: r.act_on_label(step, item, label, state=state, state_only=state_only))
 
     def box(self, checked: bool, role: str = "checkbox", native: bool = True) -> tuple[Screen, ScreenNode]:
         """A check box (an <input type=checkbox> or a [role=checkbox]) or a [role=switch] named LABEL."""
@@ -3882,6 +3883,39 @@ class StatedStateTests(RunnerTestCase):
                 record = self.act(Screen(("button", self.LABEL, button)), state)
                 self.assertEqual((record["outcome"], button.clicked), ("match", 1))
 
+    def test_a_disabled_box_already_in_the_state_is_already_set(self) -> None:
+        # A box the Portal greys out in the state the guide asks for is no failure.
+        for state in (True, False):
+            with self.subTest(state=state):
+                screen, node = self.box(checked=state)
+                node.disabled = True
+                record = self.act(screen, state)
+                self.assertEqual((record["outcome"], record["observed"], node.clicked), ("match", "already set", 0))
+                self.assertNotIn("is_disabled", node.calls)
+        screen, node = self.box(checked=False)                 # in the other state: it cannot be set
+        node.disabled = True
+        record = self.act(screen, True)
+        self.assertEqual((record["outcome"], record["observed"], node.checked),
+                         ("unknown", f"disabled: '{self.LABEL}'", False))
+
+    def test_a_state_only_label_that_is_no_toggle_is_unknown_and_never_clicked(self) -> None:
+        # 'Toggle **X** to **Enabled**', 'Leave **X** unchecked': the words are no click.
+        for state in (True, False):
+            with self.subTest(state=state):
+                button = ScreenNode(tag="button")
+                record = self.act(Screen(("button", self.LABEL, button)), state, state_only=True)
+                wanted = "checked" if state else "unchecked"
+                self.assertEqual((record["outcome"], record["observed"], button.clicked),
+                                 ("unknown", f"the guide sets '{self.LABEL}' to {wanted}, but it is no switch, "
+                                             "check box or radio", 0))
+        screen, node = self.box(checked=True, role="switch", native=False)     # a switch is set as usual
+        record = self.act(screen, False, state_only=True)
+        self.assertEqual((record["outcome"], node.checked, node.clicked), ("match", False, 0))
+
+    def test_switches_are_looked_up_and_listed_as_candidates(self) -> None:
+        self.assertIn("switch", run.ACTION_ROLES)
+        self.assertIn("switch", run.CANDIDATE_ROLES)
+
     def test_a_box_without_a_state_is_clicked_as_before(self) -> None:
         screen, node = self.box(checked=True)
         node.check_error = AssertionError("set_checked() called for a label without a state")
@@ -3915,12 +3949,15 @@ class StatedStateTests(RunnerTestCase):
                   "checked": [1], "line": 5},
                  {"kind": "navigation", "field": "Type", "labels": ["A", "B"], "unchecked": [0], "line": 6},
                  {"kind": "action", "labels": ["Recovery", "Enable soft delete for blobs"], "checked": [1], "line": 7},
-                 {"kind": "action", "labels": ["Save"], "line": 8}]
+                 {"kind": "action", "labels": ["Save"], "line": 8},
+                 {"kind": "action", "labels": ["Admin user", "Health"], "checked": [0], "unchecked": [1],
+                  "stateOnly": [1], "line": 9}]
         step = {"id": "9.9.1", "title": "One", "portal": True, "items": items, "expected": None, "images": []}
         calls = []
 
-        def act_on_label(runner, step, item, label, value=None, form_start=False, open_field=False, state=None):
-            calls.append((label, state))
+        def act_on_label(runner, step, item, label, value=None, form_start=False, open_field=False, state=None,
+                         state_only=False):
+            calls.append((label, state) + (("only",) if state_only else ()))
             record = runner.new_record(step, item["kind"], label)
             record.update(outcome="match", observed=None)
             return record
@@ -3931,7 +3968,8 @@ class StatedStateTests(RunnerTestCase):
             self.assertTrue(self.quietly(lambda: r.run_step(step)))
         self.assertEqual(calls, [("Upload", None), ("Overwrite if files already exist", True), ("Upload", None),
                                  ("Type", None), ("A", False), ("B", None),
-                                 ("Recovery", None), ("Enable soft delete for blobs", True), ("Save", None)])
+                                 ("Recovery", None), ("Enable soft delete for blobs", True), ("Save", None),
+                                 ("Admin user", True), ("Health", False, "only")])
 
 
 if __name__ == "__main__":

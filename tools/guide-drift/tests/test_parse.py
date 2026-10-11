@@ -1133,7 +1133,7 @@ class StateVerbTests(unittest.TestCase):
 
     def test_the_guides_shapes(self) -> None:
         for text, labels, states in (
-                ("Check **Add your client IP address**.", ["Add your client IP address"], {"checked": [0]}),     # 4.4.1
+                ("Check **Add your client IP address**.", ["Add your client IP address"], {"checked": [0]}),     # 4.4.2
                 ("Check **Send to Log Analytics workspace**.", ["Send to Log Analytics workspace"],              # 5.1.7
                  {"checked": [0]}),
                 ("Uncheck **Use quickstart image**.", ["Use quickstart image"], {"unchecked": [0]}),              # 3.3.7
@@ -1203,10 +1203,11 @@ class StateVerbTests(unittest.TestCase):
                  {"unchecked": [0]}),
                 ("Switch on **A** and **B**", ["A", "B"], {"checked": [0, 1]})):
             with self.subTest(text=text):
-                self.assertEqual(self.item(text), self.action(labels, **states))
+                only = sorted(sum(states.values(), []))          # set, never clicked
+                self.assertEqual(self.item(text), self.action(labels, **states, stateOnly=only))
         self.assertEqual(self.item("**Settings** → toggle **Use defaults** to **Off** → **Save**"),
                          {"kind": "navigation", "labels": ["Settings", "Use defaults", "Save"], "unchecked": [1],
-                          "line": 7})
+                          "stateOnly": [1], "line": 7})
 
     def test_a_switch_without_a_state_value_stays_clicks(self) -> None:
         for text, labels in (("Switch Cloud Shell to **PowerShell**", ["PowerShell"]),               # 3.4.4
@@ -1238,7 +1239,8 @@ class StateVerbTests(unittest.TestCase):
                 ("Ensure the **A** option is disabled; click **Save**", ["A", "Save"], {"unchecked": [0]}),
                 ("Click **Save**. Leave **A** unchecked.", ["Save", "A"], {"unchecked": [1]})):
             with self.subTest(text=text):
-                self.assertEqual(self.item(text), self.action(labels, **states))
+                only = sorted(sum(states.values(), []))          # set, never clicked
+                self.assertEqual(self.item(text), self.action(labels, **states, stateOnly=only))
 
     def test_leave_and_make_sure_without_a_state_word_state_nothing(self) -> None:
         for text, labels in (("Leave **A** as it is", ["A"]),
@@ -1321,6 +1323,18 @@ class UnderPlaceTests(unittest.TestCase):
     def test_a_place_in_a_chain_is_no_step(self) -> None:
         self.assertEqual(self.item("Under **Security + networking** → **Networking** → **Firewall**"),
                          {"kind": "navigation", "labels": ["Networking", "Firewall"], "line": 7})
+
+    def test_a_tab_after_under_is_a_label(self) -> None:
+        # A tab is clicked to show what is under it.
+        for text, item in (
+                ("Under the **Advanced** tab, check **Enable hierarchical namespace**",
+                 {"kind": "action", "labels": ["Advanced", "Enable hierarchical namespace"], "checked": [1]}),
+                ("Under **Networking** tab, select **Public endpoint**",
+                 {"kind": "action", "labels": ["Networking", "Public endpoint"]}),
+                ("Under the **Basics** tabs, click **Next**", {"kind": "action", "labels": ["Basics", "Next"]}),
+                ("Under **Settings** tabular data, click **Next**", {"kind": "action", "labels": ["Next"]})):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), {**item, "line": 7})
 
     def test_other_words_before_a_label_keep_it(self) -> None:
         for text, labels in (("Click **Understand**", ["Understand"]),

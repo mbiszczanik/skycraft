@@ -187,11 +187,14 @@ A label of an action or a navigation that the guide gives a state ('Check **X**'
 'Under **Recovery**, enable **X**'; parse.py's "checked" and "unchecked", issue #296) is looked up
 as any other label (a switch is among the roles looked for), and when the element found is a check
 box, switch or radio it is set as a field's state is (set_state), never toggled: 'already set'
-without a click when it holds the state, ticked or cleared otherwise. A radio is selected for
-'checked'; 'unchecked' leaves one not selected as it is and is unknown for a selected one. So a box
-the Portal's default or an earlier run ticked (5.2.8's diagnostic setting, edited after a deployment
-script created it) is not cleared. Any other element, a button named 'Enable ...', is clicked as a
-label without a state is.
+without a click when it holds the state (also when it is disabled), ticked or cleared otherwise. A
+radio is selected for 'checked'; 'unchecked' leaves one not selected as it is and is unknown for a
+selected one. So a box the Portal's default or an earlier run ticked (5.2.8's diagnostic setting,
+edited after a deployment script created it) is not cleared. Any other element, a button named
+'Enable ...', is clicked as a label without a state is, unless the words that give the state are
+no click (parse.py's "stateOnly": 'Toggle **X** to **Enabled**', 'Leave **X** unchecked', 'Make
+sure **X** is checked'): then it is unknown, "the guide sets 'X' to checked, but it is no switch,
+check box or radio".
 
 A step whose recording entry carries '"skip": "<reason>"' (an optional or conceptual step that
 would create resources, or the other option of a lettered pair; issue #200) is never performed:
@@ -1352,13 +1355,13 @@ def state_within(page: Page, element: Locator, checked: bool, ms: int) -> bool:
 def toggle_kind(element: Locator) -> tuple[str | None, str, str]:
     """(what the element is as a toggle, its role attribute, its tag): 'radio' for a radio (role
     radio, or an <input type=radio> without a role), 'check' for a check box or switch (role
-    checkbox, radio or switch, or an <input type=checkbox or radio>), None for any other element
-    (#296)."""
+    checkbox or switch, or an <input type=checkbox>, or one of type radio with another role),
+    None for any other element (#296)."""
     role = element.get_attribute("role", timeout=FIND_TIMEOUT_MS) or ""
     tag, input_type = element.evaluate(TAG_TYPE_JS)
     if role == "radio" or (not role and tag == "input" and input_type == "radio"):
         return "radio", role, tag
-    if role in ("checkbox", "radio", "switch") or (tag == "input" and input_type in ("checkbox", "radio")):
+    if role in ("checkbox", "switch") or (tag == "input" and input_type in ("checkbox", "radio")):
         return "check", role, tag
     return None, role, tag
 
@@ -1889,7 +1892,8 @@ class Runner:
         return element
 
     def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None,
-                     form_start: bool = False, open_field: bool = False, state: bool | None = None) -> dict:
+                     form_start: bool = False, open_field: bool = False, state: bool | None = None,
+                     state_only: bool = False) -> dict:
         """Find the element the guide calls `label`, act on it, return the result record.
         `form_start`: the label is the first field of a form, which must be open (find_form)
         unless the recording holds a decision for the label (replay finds the field).
@@ -1901,8 +1905,11 @@ class Runner:
         `state`: the guide gives the label a state ('Check **X**', 'Uncheck **X**'; parse.py's
         "checked" and "unchecked", #296). When the element found is a check box, switch or radio
         (toggle_kind), it is put in that state (set_state): 'already set' without a click when it
-        is in it, so a box the Portal or an earlier run ticked is not toggled off. Any other
-        element (a button named 'Enable ...') is clicked as without a state."""
+        is in it, so a box the Portal or an earlier run ticked is not toggled off, and also when
+        it is disabled in that state. Any other element (a button named 'Enable ...') is clicked
+        as without a state, unless `state_only` (parse.py's "stateOnly": a switch's value, 'Leave
+        **X** unchecked', 'Make sure **X** is checked', whose words are no click): then it is
+        unknown, as the guide sets a state the element cannot hold."""
         kind, line = item["kind"], item["line"]
         record = self.new_record(step, kind, label)
         if kind == "search" and item.get("scope") == "blade":
@@ -1970,11 +1977,18 @@ class Runner:
         try:
             # Found anywhere in the window's columns, maybe below the fold: bring it into view first.
             element.scroll_into_view_if_needed(timeout=FIND_TIMEOUT_MS)
-            if stays_disabled(self.page, element):     # never click() into a 30 s Playwright wait
+            toggle = toggle_kind(element)[0] if kind != "field" and state is not None else None
+            if toggle and element.is_checked(timeout=FIND_TIMEOUT_MS) == state:
+                note = "already set"      # nothing to do, also on a box greyed out in that state (#296)
+            elif state_only and not toggle:
+                record.update(outcome="unknown",
+                              observed=f"the guide sets '{acted_on}' to {'checked' if state else 'unchecked'}, "
+                                       "but it is no switch, check box or radio")
+                return record
+            elif stays_disabled(self.page, element):     # never click() into a 30 s Playwright wait
                 record.update(outcome="unknown", observed=f"disabled: '{acted_on}'")
                 return record
-            toggle = toggle_kind(element)[0] if kind != "field" and state is not None else None
-            if kind == "field":
+            elif kind == "field":
                 note = fill_field(self.page, element, value or "")
             elif toggle:
                 note = set_state(self.page, element, state, toggle)
@@ -2197,6 +2211,7 @@ class Runner:
                 # The labels the guide gives a state, by index: 'Check **X**' (#296).
                 states = {**{index: False for index in item.get("unchecked", ())},
                           **{index: True for index in item.get("checked", ())}}
+                state_only = set(item.get("stateOnly", ()))     # set and never clicked
                 labels = ([None] if picker else []) + list(item["labels"])
                 for index, label in enumerate(labels):
                     if label is None:
@@ -2206,7 +2221,8 @@ class Runner:
                         # A resource that opens a picker's chain is listed in the picker: no search.
                         records.append(self.open_resource(step, item, label, at_start=(index == 0 and not picker))
                                        if index in resources
-                                       else self.act_on_label(step, item, label, state=states.get(index)))
+                                       else self.act_on_label(step, item, label, state=states.get(index),
+                                                              state_only=index in state_only))
                     if records[-1]["outcome"] == "unknown" or records[-1].get("severity") == "blocking":
                         break
             if item["kind"] != "field":

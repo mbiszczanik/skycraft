@@ -1269,7 +1269,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             foreach ($lab in $script:StateLabs.Keys) {
                 foreach ($step in $script:StateLabs[$lab].steps) {
                     foreach ($item in $step.items) {
-                        foreach ($key in 'checked', 'unchecked') {
+                        foreach ($key in 'checked', 'unchecked', 'stateOnly') {
                             if ($item.PSObject.Properties.Name -contains $key) {
                                 "$($step.id)/$(@($item.labels) -join ' | ')/$key=$(@($item.$key) -join ',')"
                             }
@@ -1337,6 +1337,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         $expected = @(
             '3.3.7/Use quickstart image/unchecked=0'
             '3.3.2/Admin user/checked=0'
+            '3.3.2/Admin user/stateOnly=0'
             '4.2.5/Enable soft delete for blobs/checked=0'
             '4.2.6/Enable soft delete for containers/checked=0'
             '4.2.7/Enable versioning for blobs/checked=0'
@@ -1354,6 +1355,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '5.2.8/Send to Log Analytics workspace/checked=0'
             '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/checked=0,1,2,3'
             '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/unchecked=4'
+            '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/stateOnly=4'
         )
         @(Get-StatedItem | Sort-Object) | Should -Be @($expected | Sort-Object)
     }
