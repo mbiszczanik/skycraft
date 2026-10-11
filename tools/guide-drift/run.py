@@ -61,10 +61,12 @@ records no start blade); when the step has a wrong-blade record earlier in the s
 is excused (see the start of a step below), as the Portal was then not where the guide leads; or
 when the Portal's name, scrubbed, holds a redaction token (recording.redaction_tokens:
 '[tenantname]', '<id>', '[secret]' or any other the Redactor or scrub writes), as it carries
-tenant or personal data. The first of these that applies is the reason given. Such a drift is
-written to results.jsonl all the same; the record's "notProposed" and the summary's 'not
-proposed' say why, and a workaround's record has "workaround": true. The summary also holds back
-an edit that a record written before #211 proposes and that brings a token into the guide line.
+tenant or personal data; or when the Portal's name is the label plus one of its decorations (see
+the lookup below, #244), which the learner does not see. The first of these that applies is the
+reason given. Such a drift is written to results.jsonl all the same; the record's "notProposed"
+and the summary's 'not proposed' say why, and a workaround's record has "workaround": true. The
+summary also holds back an edit that a record written before #211 proposes and that brings a token
+into the guide line, and one that a record written before #244 proposes for a decorated name.
 
 The console is scrubbed only in part: an error before or during the run is shown as a record
 keeps it, a crash as its frames (file, line, function) and each error's scrubbed first line
@@ -84,7 +86,19 @@ is kept as search-<step>.aria.txt in the run folder. A search inside a blade ('S
 **"Owner"**' in a role assignment, scope 'blade') is typed into that blade's own search box, the
 only one on screen besides the top one, and the result is checked for, not clicked: the guide's
 next item clicks it. Plain text counts only when it
-is, or sits inside, a link, button or other interactive element. A label is looked for until
+is, or sits inside, a link, button or other interactive element. When nothing on screen has the
+label's name, an element whose name is the label plus one of the Portal's decorations, words the
+screen does not show beside the label (decide.DECORATIONS, #244: a list row's check box 'Select
+row X', a field label's info icon 'X information', the required marker 'X *', or both, 'X
+information *'), is the guide's element as well (find_decorated): a match, so nobody is asked,
+nothing is recorded and no guide edit is proposed. A decoration counts only on the roles it
+decorates (the info icon's own button, 'X information', is never the field), two decorated
+elements are ambiguous as two plain ones are, and a plain name that is on screen more than once
+as text is not found as before, never replaced by a decorated one. Such a row's check box is
+acted on as one the person picked: 'Search for and select **X**' states no state (parse.py,
+#296), so it is clicked, which clears a row already ticked; 'Check **X**' leaves it ticked. A
+person who picks a decorated name all the same (by number or with 'c') uses it, no drift either
+(decide.py). A label is looked for until
 FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; when SETTLE_MS of
 that finds nothing, the blade menu's collapsed groups are opened once ('Expand all headers') and
 the looking goes on to the same deadline. When the deadline passes while a blade is still
@@ -268,6 +282,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Browser, Error as PlaywrightError, Frame, Locator, Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).parent))
+from decide import DECORATIONS, decoration_of  # noqa: E402
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (LABEL_ROLES, REMARK, EntryNames, Redactor, checkbox_state, env_secrets,  # noqa: E402
                        missing_env, field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
@@ -286,6 +301,8 @@ UNFILLED_TOKEN = re.compile(r"\[[^\]]*\]|\$\{[^}]*\}?")
 # workaround ('w <number>'), and the Portal's name holds a redaction token.
 WORKAROUND_REASON = "used as a workaround, not as the guide's element"
 TOKEN_REASON = "the Portal's name holds tenant or personal data ({token})"
+# A name that is the guide's label plus a decoration the screen does not show (#244).
+DECORATION_REASON = "the Portal's name only decorates the guide's label ({what})"
 SETTLE_MS = 1500
 FIND_TIMEOUT_MS = 8000
 CHECK_TIMEOUT_MS = 2000     # set_checked() before the label is tried, and the wait for its effect
@@ -872,17 +889,50 @@ def starts_anywhere(item: dict) -> bool:
     return 0 in item.get("resources", ()) and not item.get("field")
 
 
+def find_decorated(page: Page, label: str, field: bool = False) -> Locator | None:
+    """The visible element whose accessible name is `label` plus one of the Portal's decorations
+    (decide.DECORATIONS, #244), on a role that decoration is found on and the lookup looks in
+    (FIELD_ROLES for a field, ACTION_ROLES otherwise): the check box 'Select row Khadgar Archmage'
+    for a member the guide selects, the text box 'Email information *' for the field 'Email'.
+    The info icon's own button, 'Email information', is never one. Every decoration counts at
+    once, so two elements decorated differently are as ambiguous as two of one name: Ambiguous,
+    or for a field the one that takes a value (one_field)."""
+    found: list[Locator] = []
+    for role in FIELD_ROLES if field else ACTION_ROLES:
+        names = [d.of(label) for d in DECORATIONS if role in d.roles]
+        if names:
+            pattern = re.compile("^(?:" + "|".join(map(re.escape, names)) + ")$")
+            found += visible_across_frames(page, lambda f, role=role, pattern=pattern:
+                                           f.get_by_role(role, name=pattern))
+    if field:
+        return one_field([element for element in found if can_be_field(element)])
+    return only_one(found)
+
+
 def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
     """The visible element whose accessible name is exactly `label`: for a field, find_field;
     otherwise the interactive roles, then plain text (find_in_roles). When nothing has the name
     and the label starts with '+' ('+ New user'), it is looked up again without the '+': the
     Portal draws the '+' as an icon, so the toolbar item is named 'New user'. That is still the
-    element the guide names, not drift."""
-    element = find_field(page, label) if field else find_in_roles(page, label, ACTION_ROLES)
+    element the guide names, not drift. Only when neither name is on screen is an element looked
+    for whose name is one of them plus a decoration of the Portal's (find_decorated, #244), which
+    is the guide's element as well, so the plain name always wins. A plain name on screen as
+    interactive text more than once is not found, as before, and is no reason to take a
+    decorated one: the person decides."""
     bare = LEADING_PLUS.sub("", label, count=1)
-    if element is None and bare and bare != label:
-        return find_exact(page, bare, field)
-    return element
+    names = [label] + ([bare] if bare and bare != label else [])
+    for name in names:
+        element = find_field(page, name) if field else find_in_roles(page, name, ACTION_ROLES)
+        if element is not None:
+            return element
+    if not field and any(visible_across_frames(page, lambda f, name=name: interactive_text(f, name))
+                         for name in names):
+        return None
+    for name in names:
+        element = find_decorated(page, name, field)
+        if element is not None:
+            return element
+    return None
 
 
 def find_resource(page: Page, name: str) -> Locator | None:
@@ -2102,7 +2152,7 @@ class Runner:
         # Replay must never inherit a choice the runner could not act on.
         self.remember(step, label, pending)
         if decision.kind == "drift":      # misleading or cosmetic: acted on, under a different name
-            why = self.not_proposed(step, decision)     # #211: the edit, or why there is none
+            why = self.not_proposed(step, decision, label)     # #211: the edit, or why there is none
             record.update(outcome="drift", severity=decision.severity, observed=decision.name, notProposed=why,
                           proposedEdit=None if why else self.proposed_edit(line, label, decision.name),
                           workaround=decision.workaround)
@@ -2181,7 +2231,11 @@ class Runner:
         is never redacted, so that no token stands where the guide's words are (a tenant named
         like a word of the guide). None too when the scrubbed new label holds a redaction token
         (recording.redaction_tokens, #211): tenant or personal data never goes into a guide.
-        act_on_label asks not_proposed first, which says why."""
+        act_on_label asks not_proposed first, which says why. None as well when the new label is the
+        old one plus a decoration of the Portal's (decide.DECORATIONS, #244): the learner sees the
+        guide's label on screen, not the accessible name."""
+        if decoration_of(new_label, old_label) is not None:
+            return None
         new_label = scrub(new_label, self.redactor, self.secrets)
         guide_lines = (Path(self.args.repo_root) / self.steps["guide"]).read_text(encoding="utf-8-sig").splitlines()
         if redaction_tokens(new_label) or not (1 <= line <= len(guide_lines)):
@@ -2190,10 +2244,10 @@ class Runner:
         new = old.replace(f"**{old_label}**", f"**{new_label}**")
         return None if new == old else {"line": line, "old": old, "new": new}
 
-    def not_proposed(self, step: dict, decision: Decision) -> str | None:
-        """Why a misleading or cosmetic drift proposes no guide edit, for the record's
-        'notProposed' and the summary's 'not proposed' (#211); None when it proposes one
-        (proposed_edit). The first that applies, in this order:
+    def not_proposed(self, step: dict, decision: Decision, label: str) -> str | None:
+        """Why a misleading or cosmetic drift of the guide's `label` proposes no guide edit, for
+        the record's 'notProposed' and the summary's 'not proposed' (#211); None when it proposes
+        one (proposed_edit). The first that applies, in this order:
 
           - the person used the element as a workaround ('w <number>', decide.py), not as the
             guide's element: WORKAROUND_REASON
@@ -2204,7 +2258,11 @@ class Runner:
             a step the recording skips, or after one skipped with 's'), whether or not a blade is
             recorded to compare with: the blades the guide opened before it are not open
           - the Portal's name, scrubbed, holds a redaction token: the element carries the
-            tenant's name, an id or an address, which never goes into a guide: TOKEN_REASON"""
+            tenant's name, an id or an address, which never goes into a guide: TOKEN_REASON
+          - the Portal's name is the guide's label plus a decoration (decide.DECORATIONS, #244),
+            which the screen does not show: DECORATION_REASON. The lookup and the deciders take
+            such a name for the guide's element, so no drift of one reaches here but a workaround;
+            this keeps a decoration out of the guide whatever decided the drift"""
         if decision.workaround:
             return WORKAROUND_REASON
         if any(r["step"] == step["id"] and r.get("category") == WRONG_BLADE for r in self.records):
@@ -2215,6 +2273,9 @@ class Runner:
         tokens = redaction_tokens(scrub(decision.name, self.redactor, self.secrets))
         if tokens:
             return TOKEN_REASON.format(token=tokens[0])
+        decoration = decoration_of(decision.name or "", label)
+        if decoration is not None:
+            return DECORATION_REASON.format(what=decoration.what)
         return None
 
     # -- one step --------------------------------------------------------------------------
@@ -2791,11 +2852,15 @@ class Runner:
                 held.append((r, r["notProposed"]))
             elif r.get("proposedEdit"):
                 # A record written before #211, reloaded on -Resume, may propose an edit that brings
-                # a token into the guide: held back here, as not_proposed would have.
+                # a token into the guide, and one written before #244 an edit that only decorates
+                # the label: held back here, as not_proposed would have.
                 old = set(redaction_tokens(r["proposedEdit"]["old"]))
                 added = [token for token in redaction_tokens(r["proposedEdit"]["new"]) if token not in old]
+                decoration = decoration_of(r["observed"] or "", r["label"] or "")
                 if added:
                     held.append((r, TOKEN_REASON.format(token=added[0])))
+                elif decoration is not None:
+                    held.append((r, DECORATION_REASON.format(what=decoration.what)))
                 else:
                     edits.append(r)
         lines = [f"# Guide drift run {self.args.run_id} - lab {self.steps['lab']}", ""]

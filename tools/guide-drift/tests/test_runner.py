@@ -41,6 +41,7 @@ except ImportError:
     sys.modules["playwright"] = types.ModuleType("playwright")
     sys.modules["playwright.sync_api"] = _stub
 
+import decide  # noqa: E402
 import run  # noqa: E402
 
 LAB = "9.9"
@@ -4514,6 +4515,165 @@ class StatedStateTests(RunnerTestCase):
                                  ("Type", None), ("A", False), ("B", None),
                                  ("Recovery", None), ("Enable soft delete for blobs", True), ("Save", None),
                                  ("Admin user", True), ("Health", False, "only")])
+
+
+class DecoratedNameTests(RunnerTestCase):
+    """An element whose accessible name is the guide's label plus one of the Portal's decorations
+    (decide.DECORATIONS: a list row's check box 'Select row X', a field label's info icon 'X
+    information', the required marker 'X *') is the guide's element (#244): the lookup finds it,
+    the record is a match, nobody is asked, nothing is recorded and no guide edit is proposed."""
+
+    MEMBER = "Khadgar Archmage"
+    PICK = {"kind": "action", "labels": [MEMBER], "line": 3}
+    EMAIL = {"kind": "field", "label": "Email", "value": "chromie@contoso.com", "line": 4}
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n\n4. Search for and select **Khadgar Archmage**\n"
+                                           "   - **Email**: `chromie@contoso.com`\n", encoding="utf-8")
+
+    @staticmethod
+    def find(screen: Screen, label: str, field: bool = False):
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            return run.find_exact(FakePage(), label, field)
+
+    @staticmethod
+    def listed(screen: Screen) -> list:
+        """What candidates_on_screen() reads off `screen`: its named elements of a candidate role."""
+        counts: dict = {}
+        for role, name, _ in screen.everything():
+            if name and role in run.CANDIDATE_ROLES:
+                counts[(role, name)] = counts.get((role, name), 0) + 1
+        return [run.Candidate(role, name, count) for (role, name), count in counts.items()]
+
+    def act(self, screen: Screen, item: dict, label: str, value=None, state=None, r=None):
+        r = r or run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "items": [item], "images": []}
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=self.listed(screen)):
+            record = self.quietly(lambda: r.act_on_label(step, item, label, value, form_start=item["kind"] == "field",
+                                                         state=state))
+        return record, r
+
+    def picker(self, *more) -> tuple[Screen, ScreenNode]:
+        """A member picker: each row shows the member's name as plain text and holds a check box
+        named 'Select row <name>'."""
+        box = ScreenNode(attrs={"role": "checkbox"})
+        return Screen(("text", self.MEMBER, ScreenNode(interactive=False)),
+                      ("checkbox", f"Select row {self.MEMBER}", box),
+                      ("text", "Chromie Timewalker", ScreenNode(interactive=False)),
+                      ("checkbox", "Select row Chromie Timewalker", ScreenNode()), *more), box
+
+    def assertMatchWithoutAsking(self, record: dict, r: run.Runner) -> None:
+        self.assertEqual((record["outcome"], record["severity"], record.get("proposedEdit")), ("match", None, None))
+        self.assertEqual(r.ask.prompts, [])
+        self.assertEqual(self.recording["steps"]["9.9.1"]["labels"], {})       # exact: nothing to record
+
+    def test_a_row_s_check_box_is_the_member_the_guide_selects(self) -> None:
+        screen, box = self.picker()
+        self.assertIs(self.find(screen, self.MEMBER), box)
+        record, r = self.act(screen, self.PICK, self.MEMBER)
+        self.assertMatchWithoutAsking(record, r)
+        self.assertEqual((record["observed"], box.clicked), (self.MEMBER, 1))
+
+    def test_each_suffix_of_a_field_label_is_the_field(self) -> None:
+        for suffix in (" information", " *", " information *"):
+            with self.subTest(suffix=suffix):
+                field = ScreenNode(tag="input")
+                screen = Screen(("button", "information", ScreenNode(tag="button")),   # the info icon itself
+                                ("textbox", f"Email{suffix}", field), ("textbox", "Display name", ScreenNode(tag="input")))
+                self.assertIs(self.find(screen, "Email", field=True), field)
+                self.recording["steps"]["9.9.1"]["labels"] = {}
+                record, r = self.act(screen, self.EMAIL, "Email", value="chromie@contoso.com")
+                self.assertMatchWithoutAsking(record, r)
+                self.assertEqual((field.filled, r.records), (["chromie@contoso.com"], []))   # a form: no wrong-blade
+
+    def test_a_decoration_counts_only_on_the_roles_it_decorates(self) -> None:
+        # The info icon is a button named 'Email information': clicking it opens a callout, not the field.
+        info = Screen(("button", "Email information", ScreenNode(tag="button")))
+        self.assertIsNone(self.find(info, "Email"))
+        self.assertIsNone(self.find(info, "Email", field=True))
+        for role in ("button", "link", "row", "cell"):          # only a check box is a row's 'Select row'
+            with self.subTest(role=role):
+                self.assertIsNone(self.find(Screen((role, f"Select row {self.MEMBER}", ScreenNode())), self.MEMBER))
+        self.assertEqual(decide.DECORATED_FIELDS, run.FIELD_ROLES)  # a field's decorations: on every field role
+        # An action is never looked up in a text box, decorated or not.
+        self.assertIsNone(self.find(Screen(("textbox", "Email *", ScreenNode(tag="input"))), "Email"))
+
+    def test_the_plain_label_wins_over_a_decorated_one(self) -> None:
+        link = ScreenNode()
+        screen, _ = self.picker(("link", self.MEMBER, link))
+        self.assertIs(self.find(screen, self.MEMBER), link)
+        text = ScreenNode(interactive=True)                     # plain text inside a link counts as well
+        screen, _ = self.picker(("text", self.MEMBER, text))
+        self.assertIs(self.find(screen, self.MEMBER), text)
+        plain, starred = ScreenNode(tag="input"), ScreenNode(tag="input")
+        screen = Screen(("textbox", "Group name *", starred), ("textbox", "Group name", plain))
+        self.assertIs(self.find(screen, "Group name", field=True), plain)
+        bare = ScreenNode()                                      # '+ New user': the bare name is plain too
+        screen = Screen(("checkbox", "Select row + New user", ScreenNode()), ("menuitem", "New user", bare))
+        self.assertIs(self.find(screen, "+ New user"), bare)
+
+    def test_a_plain_label_on_screen_twice_is_still_not_found(self) -> None:
+        # As before #244: two links of the label are not found, and the person decides.
+        screen, box = self.picker(("text", self.MEMBER, ScreenNode()), ("text", self.MEMBER, ScreenNode()))
+        self.assertIsNone(self.find(screen, self.MEMBER))
+        record, r = self.act(screen, self.PICK, self.MEMBER)
+        self.assertEqual((record["outcome"], r.ask.prompts, box.clicked), ("unknown", [run.HumanDecider.PROMPT], 0))
+
+    def test_two_decorated_matches_are_ambiguous(self) -> None:
+        screen, box = self.picker(("checkbox", f"Select row {self.MEMBER}", ScreenNode()))
+        with self.assertRaises(run.Ambiguous):
+            self.find(screen, self.MEMBER)
+        record, r = self.act(screen, self.PICK, self.MEMBER)
+        self.assertEqual((record["outcome"], record["observed"], box.clicked),
+                         ("unknown", f"ambiguous: 2 visible elements match named '{self.MEMBER}'", 0))
+        self.assertEqual(r.ask.prompts, [])
+        screen = Screen(("textbox", "Email *", ScreenNode(tag="input")),         # two decorations, one each
+                        ("textbox", "Email information *", ScreenNode(tag="input")))
+        with self.assertRaises(run.Ambiguous):
+            self.find(screen, "Email", field=True)
+
+    def test_a_row_found_through_its_decoration_is_clicked_as_before(self) -> None:
+        # 'Search for and select **X**' states no state (parse.py, #296), so the check box is
+        # clicked, as when the person picked it: a row already ticked is cleared by that click.
+        screen, box = self.picker()
+        box.checked = True
+        record, _ = self.act(screen, self.PICK, self.MEMBER)
+        self.assertEqual((record["outcome"], box.calls[-1], box.clicked), ("match", "click", 1))
+        # 'Check **X**' states one: a row already ticked is left as it is.
+        screen, box = self.picker()
+        box.checked = True
+        record, _ = self.act(screen, dict(self.PICK, checked=[0]), self.MEMBER, state=True)
+        self.assertEqual((record["outcome"], record["observed"], box.clicked), ("match", "already set", 0))
+
+    def test_a_decorated_name_never_proposes_a_guide_edit(self) -> None:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "items": [self.PICK], "images": []}
+        self.assertIsNone(r.proposed_edit(3, self.MEMBER, f"Select row {self.MEMBER}"))
+        self.assertIsNone(r.proposed_edit(4, "Email", "Email information *"))
+        self.assertIsNotNone(r.proposed_edit(3, self.MEMBER, "Khadgar"))           # a rename still proposes
+        drift = run.Decision(kind="drift", name=f"Select row {self.MEMBER}", role="checkbox", severity="cosmetic")
+        self.assertEqual(r.not_proposed(step, drift, self.MEMBER),
+                         "the Portal's name only decorates the guide's label (a list row's check box)")
+        self.assertIsNone(r.not_proposed(step, run.Decision(kind="drift", name="Khadgar", severity="cosmetic"),
+                                         self.MEMBER))
+
+    def test_the_summary_holds_back_an_older_edit_that_only_decorates_the_label(self) -> None:
+        # A results.jsonl written before #244, reloaded on -Resume, proposes 'Select row X'.
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        old = r.new_record({"id": "9.9.1"}, "action", self.MEMBER)
+        line = "4. Search for and select **Khadgar Archmage**"
+        old.update(outcome="drift", severity="cosmetic", observed=f"Select row {self.MEMBER}",
+                   proposedEdit={"line": 3, "old": line, "new": line.replace("**Khadgar", "**Select row Khadgar")})
+        r.records.append(old)
+        self.quietly(r.finish)
+        summary = (r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## proposed edits (0)\n- none", summary)
+        self.assertIn(f"## not proposed (1)\n- step 9.9.1 action **{self.MEMBER}**: observed "
+                      f"'Select row {self.MEMBER}': the Portal's name only decorates the guide's label "
+                      "(a list row's check box)", summary)
 
 
 if __name__ == "__main__":

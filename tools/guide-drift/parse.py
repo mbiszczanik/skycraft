@@ -287,6 +287,10 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     that shape any more. A verb before a list does not reach the items under it. The other way
     round, 'Check **X**.' meant as 'look at X' is read as 'tick X'; the runner then clicks X as
     before when it is no check box, and ticks it when it is. No guide has that shape today.
+  * A list row is selected by its check box, which run.py finds by the name the Portal gives it,
+    'Select row X' (#244), and 'Search for and select **X**' states no state, so the box is
+    clicked: a row already ticked (by the Portal, or by a run that stopped in the picker) is
+    cleared. Lab 1.1's member pickers open with no row ticked.
   * A bold span after 'under' is always a place: 'open the failed job under **Backup jobs**'
     (5.2.9, in prose today) would drop Backup jobs, which there is the menu entry to open.
   * Only 'verify:', 'Verify ...:', 'Confirm ...:' and an Expected Result introduce a check

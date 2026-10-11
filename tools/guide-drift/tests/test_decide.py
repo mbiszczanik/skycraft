@@ -11,7 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
+from decide import (DECORATIONS, Candidate, Decision, HumanDecider, ReplayDecider, decide,  # noqa: E402
+                    decoration_of)
 
 STEP = {"id": "1.1.6", "title": "Create First Group"}
 ITEM = {"kind": "action", "line": 155, "labels": ["+ New group"]}
@@ -281,6 +282,74 @@ class Chain(unittest.TestCase):
     def test_nobody_answering_is_unknown_decided_by_none(self):
         got = decide(STEP, ITEM, LABEL, CANDIDATES, [])
         self.assertEqual((got.kind, got.decided_by), ("unknown", "none"))
+
+
+class Decorations(unittest.TestCase):
+    """An accessible name that is the guide's label plus words the Portal adds to it, and that
+    the screen does not show beside the label, is the guide's element: no drift (#244)."""
+
+    MEMBER = "Khadgar Archmage"
+    PICKER = [Candidate("checkbox", "Select row Chromie Timewalker"),
+              Candidate("checkbox", "Select row Khadgar Archmage"),
+              Candidate("button", "Group name information")]
+
+    def test_the_list_holds_each_decoration_once(self):
+        self.assertEqual([(d.prefix, d.suffix) for d in DECORATIONS],
+                         [("Select row ", ""), ("", " information"), ("", " *"), ("", " information *")])
+
+    def test_each_decoration_of_the_label_is_recognised(self):
+        cases = {"Select row ": "Select row Khadgar Archmage",    # a list row's check box
+                 " information": "Email information",              # a field label's info icon
+                 " *": "Email *",                                  # a required field's marker
+                 " information *": "Email information *"}          # both, as lab 1.1's Email field
+        for decoration in DECORATIONS:
+            with self.subTest(decoration=decoration.what):
+                label = self.MEMBER if decoration.prefix else "Email"
+                name = cases[decoration.prefix or decoration.suffix]
+                self.assertEqual(decoration.of(label), name)
+                self.assertIs(decoration_of(name, label), decoration)
+
+    def test_anything_else_is_no_decoration(self):
+        for name, label in (("Khadgar Archmage", "Khadgar Archmage"),          # the label itself
+                            ("select row Khadgar Archmage", "Khadgar Archmage"),  # another case
+                            ("Select rowKhadgar Archmage", "Khadgar Archmage"),
+                            ("Select row Khadgar Archmage *", "Khadgar Archmage"),  # two at once
+                            ("Select row Chromie Timewalker", "Khadgar Archmage"),  # another row
+                            ("Email *information", "Email"),
+                            ("Email  *", "Email"),
+                            ("Emails *", "Email"),
+                            ("Email address information", "Email"),
+                            ("Email * information", "Email"),
+                            ("Select row ", ""),                              # no label left
+                            (" *", "")):
+            with self.subTest(name=name, label=label):
+                self.assertIsNone(decoration_of(name, label))
+
+    def test_a_decorated_name_picked_by_number_or_as_cosmetic_is_plain_use(self):
+        for answer in ("2", "c 2"):
+            with self.subTest(answer=answer):
+                given = human(answer)(STEP, ITEM, self.MEMBER, self.PICKER)
+                self.assertEqual((given.kind, given.severity, given.role, given.name),
+                                 ("use", None, "checkbox", "Select row Khadgar Archmage"))
+                replayed = ReplayDecider(recording_for(given, self.MEMBER))(STEP, ITEM, self.MEMBER, self.PICKER)
+                self.assertEqual((replayed.kind, replayed.severity, replayed.name, replayed.decided_by),
+                                 ("use", None, "Select row Khadgar Archmage", "replay"))
+
+    def test_a_decorated_name_used_as_a_workaround_stays_a_workaround(self):
+        given = human("w 2")(STEP, ITEM, self.MEMBER, self.PICKER)
+        self.assertEqual((given.kind, given.severity, given.workaround), ("drift", "misleading", True))
+
+    def test_a_cosmetic_entry_recorded_before_244_replays_as_plain_use(self):
+        # Lab 1.1's recording held four of these: every replay reported them as cosmetic drift.
+        entry = {"decision": "use", "role": "checkbox", "name": "Select row Khadgar Archmage",
+                 "severity": "cosmetic", "rejected": [], "decidedBy": "human", "at": AT}
+        recording = {"steps": {STEP["id"]: {"labels": {self.MEMBER: entry}}}}
+        replayed = ReplayDecider(recording)(STEP, ITEM, self.MEMBER, self.PICKER)
+        self.assertEqual((replayed.kind, replayed.severity, replayed.name), ("use", None, "Select row Khadgar Archmage"))
+
+    def test_another_row_is_still_drift(self):
+        given = human("c 1")(STEP, ITEM, self.MEMBER, self.PICKER)
+        self.assertEqual((given.kind, given.severity), ("drift", "cosmetic"))
 
 
 if __name__ == "__main__":
