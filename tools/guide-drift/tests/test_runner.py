@@ -763,6 +763,27 @@ class RedoAcrossResumesTests(RunnerTestCase):
         self.assertEqual(code, 3)
         self.assertEqual(self.summary("old").count(self.FINDING), 2)
 
+    def test_a_line_that_is_no_record_of_a_step_is_skipped_with_a_warning(self) -> None:
+        # Valid JSON, but not an object, or one without a step id: skipped as a cut-short line is,
+        # and said once per line, without its content (it was never scrubbed).
+        folder = self.tmp / "logs" / "odd"
+        folder.mkdir(parents=True)
+        lines = [json.dumps(self.record("9.9.1", "action", outcome="match")), "3", '["9.9.2"]', '"text"',
+                 "null", '{"kind": "action", "outcome": "unknown"}', '{"step": ["9.9.2"], "kind": "redo"}',
+                 json.dumps(self.record("9.9.2", "action", outcome="unknown", observed="not found"))]
+        (folder / "results.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        state = {"runId": "odd", "lab": LAB, "completed": ["9.9.1", "9.9.2"], "inFlight": None}
+        out = io.StringIO()
+        with redirect_stdout(out):
+            r = self.runner(run_id="odd", resume=True, state=state)
+        self.assertEqual([(x["step"], x["outcome"]) for x in r.records], [("9.9.1", "match"), ("9.9.2", "unknown")])
+        warnings = out.getvalue().splitlines()
+        self.assertEqual(warnings, [f"results.jsonl line {n}: no record of a step; skipped." for n in range(2, 8)])
+        self.assertNotIn("text", out.getvalue())
+        with redirect_stdout(io.StringIO()):
+            _, code, _ = self.part("odd", state, answers=[""])
+        self.assertEqual(code, 1)
+
 
 class RunLogRedactionTests(RunnerTestCase):
     """results.jsonl and summary.md keep what the failure prompt shows (#212): the first line of
@@ -1314,6 +1335,43 @@ class RecordedSkipTests(RunnerTestCase):
                     self.assertEqual(run.main(argv), run.NOT_STARTED)
                 playwright.assert_not_called()
                 self.assertIn("The recording cannot be used: step 9.9.2: 'skip' must be", out.getvalue())
+
+
+class RunFolderTests(RunnerTestCase):
+    """A run without --resume never appends to a results.jsonl another run left in its folder: it
+    refuses to start (254) before the browser opens, and the file stays as it was."""
+
+    class Console(io.StringIO):
+        def reconfigure(self, **kwargs) -> None:
+            pass
+
+    def main(self, *extra: str) -> tuple[int, str, mock.MagicMock]:
+        (self.tmp / "steps.json").write_text(json.dumps(STEPS), encoding="utf-8")
+        argv = ["--steps", str(self.tmp / "steps.json"), "--recording", str(self.tmp / "rec.json"),
+                "--log-dir", str(self.tmp / "logs"), "--run-id", "x", "--tenant-id", "t", "--tenant-domain", "d",
+                "--state", str(self.tmp / "state.json"), "--auth-state", str(self.tmp / "auth.json"), *extra]
+        out = self.Console()
+        with mock.patch.object(run, "sync_playwright") as playwright, redirect_stdout(out), \
+                mock.patch.object(run, "open_portal", side_effect=OSError("the browser opened")):
+            code = run.main(argv)
+        return code, out.getvalue(), playwright
+
+    def test_a_new_run_in_a_folder_with_results_refuses_to_start(self) -> None:
+        folder = self.tmp / "logs" / "x"
+        folder.mkdir(parents=True)
+        (folder / "steps.json").write_text("{}", encoding="utf-8")      # the entry point writes it first
+        code, out, playwright = self.main()
+        self.assertIn("Could not open the Portal", out)                 # no results.jsonl yet: it starts
+        (folder / "results.jsonl").write_text('{"step": "9.9.1"}\n', encoding="utf-8")
+        for extra in ((), ("--from-step", "9.9.4")):
+            with self.subTest(extra=extra):
+                code, out, playwright = self.main(*extra)
+                self.assertEqual(code, run.NOT_STARTED)
+                playwright.assert_not_called()
+                self.assertIn("already holds results.jsonl", out)
+                self.assertIn("--resume", out)
+                self.assertIn("another --run-id", out)
+                self.assertEqual((folder / "results.jsonl").read_text(encoding="utf-8"), '{"step": "9.9.1"}\n')
 
 
 class GuardAndLookupTests(RunnerTestCase):

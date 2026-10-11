@@ -100,7 +100,11 @@ step redone (n) counts only its new attempt, however often the run is resumed af
 resume drops the step's records before its last marker, so the file keeps every attempt while the
 summary, the exit code and the failure prompt see the last one only. The marker is never a finding
 and never in summary.md. A results.jsonl written before #222 has no markers: every record in it
-counts, so a step redone and completed there may still count its earlier attempt.
+counts, so a step redone and completed there may still count its earlier attempt. A line of it
+that is JSON but no record of a step is skipped with a warning, as a line cut short is without
+one. A run without --resume refuses to start (254) when its run folder already holds a
+results.jsonl, rather than append to another run's records or move them aside: continue that run
+with --resume, or give this one another --run-id.
 
 A resumed run, and one started with --from-step, has a new browser on the Microsoft Entra ID
 overview, not where the stopped run left the Portal (issue #206). So before the first step that
@@ -1594,18 +1598,24 @@ class Runner:
     def earlier_results(self) -> list[dict]:
         """The records the stopped parts of this run wrote, scrubbed as write() scrubs them: that
         changes nothing in a record written so, and cleans one a run wrote before #212 for the
-        summary (results.jsonl keeps it as it is). A last line cut short by a crash is skipped.
+        summary (results.jsonl keeps it as it is). A last line cut short by a crash is skipped,
+        and so is a line that is JSON but no record of a step (not an object, or without a step
+        id), with a warning that gives its number, never its content (it was never scrubbed).
         Of a step redone in an earlier part only what comes after its last REDO marker is kept
         (drop_attempt, #222), and the markers themselves are left out; a file written before
         #222 has none, and every record in it counts, as it did."""
         if not self.results_path.is_file():
             return []
         lines = []
-        for line in self.results_path.read_text(encoding="utf-8").splitlines():
+        for number, line in enumerate(self.results_path.read_text(encoding="utf-8").splitlines(), start=1):
             try:
-                lines.append(json.loads(line))
+                record = json.loads(line)
             except ValueError:
                 continue
+            if not isinstance(record, dict) or not isinstance(record.get("step"), str):
+                print(f"results.jsonl line {number}: no record of a step; skipped.")
+                continue
+            lines.append(record)
         redone = {r["step"]: i for i, r in enumerate(lines) if r.get("kind") == REDO}
         return [self.scrubbed(r) for i, r in enumerate(lines)
                 if r.get("kind") != REDO and i > redone.get(r["step"], -1)]
@@ -2667,6 +2677,13 @@ def main(argv: list[str] | None = None) -> int:
         start_point([s["id"] for s in steps["steps"] if s["portal"]], state, args.from_step, args.resume)
     except ValueError as error:
         print(error)
+        return NOT_STARTED
+    # A new run never appends to another run's results: the summary and exit code would count
+    # them, and a later -Resume of that run would count this one's. Nothing is moved either.
+    results = args.log_dir / args.run_id / "results.jsonl"
+    if not args.resume and results.exists():
+        print(f"The run folder {results.parent} already holds results.jsonl of run {args.run_id}: "
+              f"continue that run with --resume (-Resume), or start a new one with another --run-id.")
         return NOT_STARTED
     # The console is pasted into issues too: an error is shown as a record keeps it (#212).
     redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording), args.tenant_name)

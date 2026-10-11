@@ -61,7 +61,8 @@
     WHAT A RUN LEAVES BEHIND, AND WHY IT IS GITIGNORED. -LogDirectory/<run id>/ holds
     steps.json (the parsed guide; parse.py failing stops the run with exit 1), results.jsonl (one
     record per check, appended as the run goes and never rewritten, and a "redo" marker before a
-    redone step's new attempt), a full-window screenshot of every step,
+    redone step's new attempt; a run without -Resume whose folder already holds one does not
+    start, exit 254), a full-window screenshot of every step,
     summary.md, for a 'Search for' step that found no single result, search-<step>.aria.txt
     (the search dropdown's accessibility tree, redacted) and, for a label that was not found,
     blade-<step>-<guide line>.aria.txt (the outline the blade loading check read, redacted).
@@ -209,7 +210,8 @@
     Exit code: blocking drifts + unknowns (0 = nothing to fix, capped at 250); 1 when a prerequisite
     is missing, parse.py fails, or run.py crashes before the state confirms the run finished
     (Python's own exit 1; nothing is cleaned up and the state is kept); 254 when run.py stopped
-    before the first step, or -Resume has no unfinished state of this lab to continue; 255 when it
+    before the first step, -Resume has no unfinished state of this lab to continue, or a new run's
+    folder already holds a results.jsonl; 255 when it
     was interrupted (state kept, nothing cleaned up: re-run with -Resume).
     A cleanup that fails or is skipped does not change the exit code, as in Invoke-LabCycle.ps1:
     it is reported as a warning, and the code stays the count of findings.
@@ -456,6 +458,13 @@ try {
 
     # --- Parse, then run -----------------------------------------------------------------------
     $runDir = Join-Path $LogDirectory $runId
+    # As run.py refuses it: a new run never writes into a folder another run left results in, not
+    # even its steps.json. With a timestamp for a run id, only two starts in one second get here.
+    if (-not $Resume -and (Test-Path -LiteralPath (Join-Path $runDir 'results.jsonl'))) {
+        Write-Host "[ERROR] $runDir already holds results.jsonl of run ${runId}: continue it with -Resume, or start again in a moment for a new run id." -ForegroundColor Red
+        $Host.SetShouldExit($notStarted)
+        exit $notStarted
+    }
     New-Item -ItemType Directory -Path $runDir -Force | Out-Null
     $stepsPath = Join-Path $runDir 'steps.json'
     & $PythonPath (Join-Path $toolDir 'parse.py') $guide --out $stepsPath --repo-root $repoRoot
