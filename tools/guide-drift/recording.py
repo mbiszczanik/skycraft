@@ -16,7 +16,9 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   field_action         what to do with a field item and the value to do it with: as above, or
                        report a value parse.py marked '"literal": false' that the recording
                        does not resolve (#202)
-  checkbox_state       the check box state a field value names, if any
+  prompt_value         the value the decider's prompt shows for a field: the one the runner
+                       types, and where the recording changed it from the guide's (#210)
+  checkbox_state      the check box state a field value names, if any
   rejected_candidates  the reference set of candidates not chosen, without tenant data
   skip_reason          why the recording skips a step ('"skip": "<reason>"', #200), or None
   view_blade           the blade part of a recorded view, what a step's start is compared by (#207)
@@ -459,6 +461,43 @@ def field_action(recording: dict, step: dict, item: dict) -> tuple[str, str]:
             and not value_is_literal(value)):
         return ("unresolved" if BRACKET_TOKEN.search(value) else "instruction"), value
     return value_action(value), value
+
+
+def prompt_value(recording: dict, step: dict, item: dict) -> str:
+    """What the decider's prompt shows after 'value to type:' for a field item (#210): the value
+    the runner types (field_action), not the guide's. When the recording changed it, where from,
+    in parentheses: '(from the recording's valueOverrides)' or '(the guide's, with the recording's
+    placeholders)', then the environment variables it was read from, by name only ('; environment
+    variable NAME'). When the runner types nothing, 'none' and why: a bracketed value such as an
+    override's '[Leave blank]' leaves the field as it is, the guide's value is an instruction, or
+    a [token] is left. run.py reports a field of the last two without asking about it.
+
+    Not scrubbed here: the prompt scrubs every line it prints (run.py), so the value of a field
+    that names a secret shows as '[secret]' (typed_secrets) and an address from the environment as
+    its '${NAME}' (the Redactor)."""
+    action, value = field_action(recording, step, item)
+    override = value_override(recording, step, item["label"])
+    if override is not None:
+        source, references = "from the recording's valueOverrides", [override]
+    else:
+        # The placeholders fill_placeholders replaced, in its order, as the recording writes them.
+        references, text = [], item["value"]
+        for placeholder, replacement in recording.get("placeholders", {}).items():
+            if placeholder in text:
+                references.append(replacement)
+                text = text.replace(placeholder, replacement)
+        source = "the guide's, with the recording's placeholders" if references else ""
+    names = sorted({m.group("name") for reference in references for m in ENV_REF.finditer(reference)})
+    if names:
+        source += f"; environment variable{'s' if len(names) > 1 else ''} {', '.join(names)}"
+    note = f" ({source})" if source else ""
+    if action == "type":
+        return value + note
+    if action == "skip":
+        return f"none: '{value.strip()}' leaves the field as it is{note}"
+    if action == "instruction":
+        return "none: the guide's value is an instruction, not text to type"
+    return "none: the value has a [token] the recording does not resolve"
 
 
 # --- what a run log keeps (#212) -------------------------------------------------------------

@@ -45,7 +45,11 @@
     the step fails as blocking drift of the step (missing-resource), with no proposed guide edit
     (issue #199).
 
-    WHAT YOU ANSWER, AND WHICH EDITS ARE PROPOSED (issue #211). At the label prompt: a number uses
+    WHAT YOU ANSWER, AND WHICH EDITS ARE PROPOSED (issue #211). For a field, the label prompt
+    shows the value the run will type, not the guide's (issue #210): after the recording's
+    placeholders and valueOverrides, with where it came from and the name of any environment
+    variable it was read from, scrubbed as the candidates are (a password shows as [secret]).
+    At the label prompt: a number uses
     that element as the guide's, renamed (misleading drift); c <number> uses it, the difference
     being cosmetic; w <number> uses it as a workaround, not as the guide's element (say, a 'View
     all 5 users' link on a resumed browser): misleading drift, never written to the recording, so

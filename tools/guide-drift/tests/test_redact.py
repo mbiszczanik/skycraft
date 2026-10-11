@@ -264,6 +264,67 @@ class FieldActionTests(unittest.TestCase):
         self.assertEqual(self.action("3.3.8", "Insecure connections", "Uncheck", literal=True), ("type", "Uncheck"))
 
 
+class PromptValueTests(unittest.TestCase):
+    """What the decider's prompt shows after 'value to type:' for a field (#210): the value the
+    runner types (field_action), where the recording changed it, which environment variable it
+    comes from, and no value at all when the runner types none. Not scrubbed here: the prompt
+    scrubs every line it prints (run.py), a typed secret among them."""
+
+    RECORDING = {"placeholders": {"[yourtenant]": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}", "[region]": "swedencentral"},
+                 "steps": {"1.1.5": {"valueOverrides": {"Email": TOKEN}},
+                           "1.1.6": {"valueOverrides": {"Group name": "Contoso-Admins",
+                                                        "Owners": "[Leave blank]"}}}}
+    ENV = {"SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX": "contoso", "SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL": "me@example.com"}
+
+    def shown(self, step: str, label: str, value: str, literal: bool = True) -> str:
+        item = {"kind": "field", "label": label, "value": value, "line": 7}
+        if not literal:
+            item["literal"] = False
+        with mock.patch.dict(os.environ, self.ENV):
+            return recording.prompt_value(self.RECORDING, {"id": step}, item)
+
+    def test_the_guide_value_when_nothing_changes_it(self) -> None:
+        self.assertEqual(self.shown("1.1.4", "Display name", "Malfurion Stormrage"), "Malfurion Stormrage")
+
+    def test_an_override_says_so(self) -> None:
+        self.assertEqual(self.shown("1.1.6", "Group name", "SkyCraft-Admins"),
+                         "Contoso-Admins (from the recording's valueOverrides)")
+
+    def test_placeholders_say_so(self) -> None:
+        self.assertEqual(self.shown("1.1.6", "Location", "[region]"),
+                         "swedencentral (the guide's, with the recording's placeholders)")
+
+    def test_an_environment_variable_is_named(self) -> None:
+        self.assertEqual(self.shown("1.1.5", "Email", "guest@example.org"),
+                         "me@example.com (from the recording's valueOverrides; "
+                         "environment variable SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL)")
+        self.assertEqual(self.shown("1.1.2", "User principal name", "malfurion.stormrage@[yourtenant].onmicrosoft.com",
+                                    literal=False),
+                         "malfurion.stormrage@contoso.onmicrosoft.com (the guide's, with the recording's "
+                         "placeholders; environment variable SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX)")
+
+    def test_several_environment_variables_are_named_once_each_sorted(self) -> None:
+        rec = {"placeholders": {"[a]": "${SKYCRAFT_B}", "[b]": "${SKYCRAFT_A}"}, "steps": {}}
+        item = {"kind": "field", "label": "Name", "value": "[a]-[b]-[a]", "line": 7}
+        with mock.patch.dict(os.environ, {"SKYCRAFT_A": "x", "SKYCRAFT_B": "y"}):
+            self.assertEqual(recording.prompt_value(rec, {"id": "1.1.1"}, item),
+                             "y-x-y (the guide's, with the recording's placeholders; "
+                             "environment variables SKYCRAFT_A, SKYCRAFT_B)")
+
+    def test_a_value_the_runner_does_not_type_is_not_shown(self) -> None:
+        for args, shown in (
+                (("1.3.5", "Scope", 'Click the "..." button', False),
+                 "none: the guide's value is an instruction, not text to type"),
+                (("2.3.2", "IP address", "[IP of dev-skycraft-swc-lb-pip]", False),
+                 "none: the value has a [token] the recording does not resolve"),
+                (("2.3.2", "Name", "skycraft-auth-[uniqueID]", True),
+                 "none: the value has a [token] the recording does not resolve"),
+                (("1.1.6", "Owners", "malfurion.stormrage", True),
+                 "none: '[Leave blank]' leaves the field as it is (from the recording's valueOverrides)")):
+            with self.subTest(args=args):
+                self.assertEqual(self.shown(*args), shown)
+
+
 class SkipReasonTests(unittest.TestCase):
     """'"skip": "<reason>"' on a step entry (#200): the reason, or an error, never a silent
     'not skipped' that would perform the step the recording meant to leave out."""

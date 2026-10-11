@@ -37,7 +37,11 @@ auto-generated password is in an accessibility snapshot). The text a step's resu
 as the person types it, is kept in the recording scrubbed the same way. The screenshots are not
 scrubbed: crop and anonymise them by hand.
 
-When a label is not on screen, the person answers at the prompt (decide.py): a number uses that
+When a label is not on screen, the person answers at the prompt (decide.py). For a field it shows
+the value the run will type, not the guide's (recording.prompt_value, #210): after the recording's
+placeholders and valueOverrides, saying '(from the recording's valueOverrides)' or '(the guide's,
+with the recording's placeholders)' and naming any environment variable it was read from, scrubbed
+as the candidates are, so a typed secret shows as '[secret]'. At the prompt, a number uses that
 element as the guide's, renamed (misleading drift); 'c <number>' uses it, the difference cosmetic;
 'w <number>' uses it as a workaround, not as the guide's element (#211: misleading drift, never
 written to the recording, so the next run asks again); 'g' gone (blocking drift); 'i' ignore; 'u'
@@ -260,7 +264,7 @@ from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # n
 from recording import (REMARK, Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
                        field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
                        same_blade, start_blade, view_blade, write_json)
-from recording import error_text, one_line, redaction_tokens, scrub, typed_secrets  # noqa: E402
+from recording import error_text, one_line, prompt_value, redaction_tokens, scrub, typed_secrets  # noqa: E402
 
 Found = TypeVar("Found")     # what in_time() looks for
 
@@ -1650,9 +1654,11 @@ class Runner:
         self.results_path = self.run_dir / "results.jsonl"
         # The person picks a candidate by its number, so the list is shown scrubbed (#212): the
         # console is pasted too, and a candidate may carry an id or another directory's address.
+        # A field's value is the one the runner types, scrubbed with the rest (#210).
         self.deciders = [ReplayDecider(recording),
                          HumanDecider(ask=lambda text: self.ask(text),
-                                      say=lambda text: print(scrub(text, self.redactor, self.secrets, whole=True)))]
+                                      say=lambda text: print(scrub(text, self.redactor, self.secrets, whole=True)),
+                                      value_to_type=lambda step, item: prompt_value(self.recording, step, item))]
         self.redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording),
                                  getattr(args, "tenant_name", ""))
         # What the runner types into a password or secret field, never written to a run log (#212).

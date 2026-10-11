@@ -3194,7 +3194,69 @@ class FieldValueTests(RunnerTestCase):
         self.assertEqual(act.call_args.args[-1], "malfurion.stormrage@contoso.onmicrosoft.com")
 
 
-GROUPS = "Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups"
+class PromptValueTests(RunnerTestCase):
+    """The prompt about a field that is not found shows the value the runner types, after the
+    recording's placeholders and overrides, scrubbed as the rest of the prompt (#210)."""
+
+    GUEST = "me@example.com"
+    PASSWORD = "Fake!Pass9"
+    ENV = {"SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL": GUEST, "SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX": "contoso",
+           "SKYCRAFT_GUIDE_DRIFT_PASSWORD": PASSWORD}
+
+    def prompt_for(self, label: str, value: str, override: str | None = None, literal: bool = True) -> str:
+        """What the console shows when the field `label` with the guide's `value` is not found and
+        input is closed at the prompt."""
+        item = {"kind": "field", "label": label, "value": value, "line": 3}
+        if not literal:
+            item["literal"] = False
+        step = {"id": "9.9.1", "title": "One", "items": [item], "images": []}
+        if override is not None:
+            self.recording["steps"]["9.9.1"]["valueOverrides"][label] = override
+        self.recording["placeholders"]["[yourtenant]"] = "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}"
+        out = io.StringIO()
+        with mock.patch.dict("os.environ", self.ENV):
+            r = run.Runner(FakePage(), {**STEPS, "steps": [step]}, self.recording, self.args(), ask=Answers())
+            action, typed = run.field_action(self.recording, step, item)
+            self.assertEqual(action, "type")
+            with mock.patch.object(run, "find_exact", return_value=None), \
+                    mock.patch.object(run, "candidates_on_screen", return_value=[run.Candidate("button", "Next")]), \
+                    redirect_stdout(out):
+                record = r.act_on_label(step, item, label, typed)
+        self.assertEqual((record["outcome"], record["observed"]), ("unknown", "no answer (input closed)"))
+        return out.getvalue()
+
+    def test_the_guide_value_when_nothing_changes_it(self) -> None:
+        self.assertIn("\n  value to type: Malfurion Stormrage\n", self.prompt_for("Display name", "Malfurion Stormrage"))
+
+    def test_an_override_is_shown_instead_of_the_guide_value(self) -> None:
+        shown = self.prompt_for("Group name", "SkyCraft-Admins", override="Contoso-Admins")
+        self.assertIn("\n  value to type: Contoso-Admins (from the recording's valueOverrides)\n", shown)
+        self.assertNotIn("SkyCraft-Admins", shown)
+
+    def test_a_placeholder_is_filled_and_the_value_scrubbed(self) -> None:
+        shown = self.prompt_for("User principal name", "malfurion.stormrage@[yourtenant].onmicrosoft.com", literal=False)
+        self.assertIn("\n  value to type: malfurion.stormrage@[tenantdomain] (the guide's, with the recording's "
+                      "placeholders; environment variable SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX)\n", shown)
+        self.assertNotIn("contoso.onmicrosoft.com", shown)
+
+    def test_an_environment_variable_is_named_and_its_address_redacted(self) -> None:
+        shown = self.prompt_for("Email", "guest@example.org", override="${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}")
+        self.assertIn("\n  value to type: ${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL} (from the recording's valueOverrides; "
+                      "environment variable SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL)\n", shown)
+        self.assertNotIn(self.GUEST, shown)
+        self.assertNotIn("guest@example.org", shown)
+
+    def test_a_secret_field_shows_its_value_masked(self) -> None:
+        shown = self.prompt_for("Password", "LoveAzeroth!2004")
+        self.assertIn("\n  value to type: [secret]\n", shown)
+        self.assertNotIn("LoveAzeroth!2004", shown)
+        shown = self.prompt_for("Password", "LoveAzeroth!2004", override="${SKYCRAFT_GUIDE_DRIFT_PASSWORD}")
+        self.assertIn("\n  value to type: [secret] (from the recording's valueOverrides; "
+                      "environment variable SKYCRAFT_GUIDE_DRIFT_PASSWORD)\n", shown)
+        self.assertNotIn(self.PASSWORD, shown)
+
+
+GROUPS ="Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups"
 USERS = "Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/AllUsers"
 CREATE_USER = "Microsoft_AAD_UsersAndTenants/CreateUser.ReactView"
 

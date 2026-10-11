@@ -15,7 +15,12 @@ value for a field); deciders may use it for context. Two deciders ship:
                  browser on another blade, a link whose name holds a count). It is misleading
                  drift, as a renamed element is, but proposes no guide edit and is never
                  recorded: replayed, it would be taken for the guide's element under a new name,
-                 so the next run asks again.
+                 so the next run asks again. For a field it shows the value the runner will type,
+                 as `value_to_type` gives it (#210): run.py passes recording.prompt_value, the
+                 value after the recording's placeholders and valueOverrides, with where it came
+                 from and the environment variables it was read from, or 'none' and why when
+                 nothing is typed; run.py scrubs every line, so a secret shows as '[secret]'.
+                 Without `value_to_type`, the guide's value.
 
 A model-based decider is a third implementation of the same signature (the Decider protocol);
 it is out of scope here and tracked in issue #190. Every decision the runner acts on, except a
@@ -107,9 +112,13 @@ class HumanDecider:
         "  w [number] use it as a workaround, not as the guide's (no guide edit)  u <why>  unknown, cannot tell\n> "
     )
 
-    def __init__(self, ask: Callable[[str], str] = input, say: Callable[[str], None] = print) -> None:
+    def __init__(self, ask: Callable[[str], str] = input, say: Callable[[str], None] = print,
+                 value_to_type: Callable[[dict, dict], str] | None = None) -> None:
         self.ask = ask
         self.say = say
+        # What a field's 'value to type:' shows, given the step and the item (#210); without it,
+        # the guide's value.
+        self.value_to_type = value_to_type
 
     def __call__(self, step: dict, item: dict, label: str,
                  candidates: list[Candidate]) -> Decision:
@@ -147,7 +156,8 @@ class HumanDecider:
         self.say(f'\nStep {step["id"]}: {step["title"]}')
         self.say(f'Guide line {item.get("line")} ({item.get("kind")}): **{label}**')
         if item.get("kind") == "field":
-            self.say(f'  value to type: {item.get("value")}')
+            shown = self.value_to_type(step, item) if self.value_to_type else item.get("value")
+            self.say(f"  value to type: {shown}")
         self.say("Not found. Visible elements:")
         if not candidates:
             self.say("  (none)")
