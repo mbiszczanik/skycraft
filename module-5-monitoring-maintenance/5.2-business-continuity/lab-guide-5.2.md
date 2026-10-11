@@ -292,7 +292,7 @@ Backup reports are built from **diagnostic settings** on the vaults: each vault 
 
 1. Open `platform-skycraft-swc-bv` → **Monitoring** → **Diagnostic settings** → **+ Add diagnostic setting**.
 2. Diagnostic setting name: `bv-backup-reports-diag`
-3. Logs: **Core Azure Backup Data**, **Addon Azure Backup Job Data**, **Addon Azure Backup Policy Data**, **Addon Azure Backup Protected Instance Data** (a Backup Vault has neither the legacy `AzureBackupReport` event nor `AddonAzureBackupStorage` - its storage data is already in Core and Protected Instance). Leave the **Health** metric (under **Metrics**) unchecked - Backup reports does not use it, and the Bicep path does not enable it.
+3. Under **Logs**, check **Core Azure Backup Data**, **Addon Azure Backup Job Data**, **Addon Azure Backup Policy Data** and **Addon Azure Backup Protected Instance Data** - a Backup Vault has neither the legacy `AzureBackupReport` event nor `AddonAzureBackupStorage`, because its storage data is already in Core and Protected Instance. Leave the **Health** metric (under **Metrics**) unchecked - Backup reports does not use it, and the Bicep path does not enable it.
 4. Check **Send to Log Analytics workspace**.
 5. Log Analytics workspace: `platform-skycraft-swc-law`.
 

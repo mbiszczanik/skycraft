@@ -275,12 +275,14 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
   * Only field values are checked for instructions; a tag value is typed as written.
   * A state is read only from the verbs and shapes above (#296): 'Set to **On**.' (3.4.11, no
     label before the value) clicks On, 'Keep **X** checked' clicks X, and so does 'Leave **A**
-    and **B** unchecked' (the state word follows the list, not each label). A list of labels
-    after a field's name is clicked one by one, which toggles each check box: 'Logs: **Core
-    Azure Backup Data**, **Addon Azure Backup Job Data**, ...' (5.2.8) unticks a log that the
-    Edit setting path finds ticked. The other way round, 'Check **X**.' meant as 'look at X' is
-    read as 'tick X'; the runner then clicks X as before when it is no check box, and ticks it
-    when it is. No guide has that shape today.
+    and **B** unchecked' (the state word follows the list, not each label). Check boxes named
+    without a stating verb are clicked one by one, which toggles each: 'Logs: **StorageRead**
+    and **StorageWrite**.' (5.1.7) and the Recovery Services vault's list of six log categories
+    after 'Logs - select the categories:' (5.2.8), which the Edit setting path finds ticked. A
+    guide says 'check' instead, as 5.2.8 does for the Backup Vault's logs ('Under **Logs**,
+    check **Core Azure Backup Data**, ...'). The other way round, 'Check **X**.' meant as 'look
+    at X' is read as 'tick X'; the runner then clicks X as before when it is no check box, and
+    ticks it when it is. No guide has that shape today.
   * A bold span after 'under' is always a place: 'open the failed job under **Backup jobs**'
     (5.2.9, in prose today) would drop Backup jobs, which there is the menu entry to open.
   * Only 'verify:', 'Verify ...:', 'Confirm ...:' and an Expected Result introduce a check

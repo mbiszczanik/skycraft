@@ -1286,8 +1286,6 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @{ lab = '4.2'; id = '4.2.5'; text = 'Under **Recovery**, enable **Enable soft delete for blobs**'; kind = 'action'; labels = @('Enable soft delete for blobs'); key = 'checked'; indices = @(0) }
         @{ lab = '3.3'; id = '3.3.2'; text = 'Toggle **Admin user** to **Enabled**.'; kind = 'action'; labels = @('Admin user'); key = 'checked'; indices = @(0) }
         @{ lab = '4.3'; id = '4.3.6'; text = '... -> check **Overwrite if files already exist** -> **Upload**'; kind = 'navigation'; labels = @('Upload', 'Overwrite if files already exist', 'Upload'); key = 'checked'; indices = @(1) }
-        # Health is ticked by nothing: a click would tick it.
-        @{ lab = '5.2'; id = '5.2.8'; text = '... Leave the **Health** metric (under **Metrics**) unchecked - ...'; kind = 'action'; labels = @('Core Azure Backup Data', 'Addon Azure Backup Job Data', 'Addon Azure Backup Policy Data', 'Addon Azure Backup Protected Instance Data', 'Health'); key = 'unchecked'; indices = @(4) }
     ) {
         $items = @(($script:StateLabs[$lab].steps | Where-Object id -eq $id).items |
             Where-Object { (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
@@ -1296,6 +1294,20 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @($items[0].$key) | Should -Be $indices
         $other = if ($key -eq 'checked') { 'unchecked' } else { 'checked' }
         $items[0].PSObject.Properties.Name | Should -Not -Contain $other
+    }
+
+    # 'Under **Logs**, check **A**, **B**, **C** and **D** - ... Leave the **Health** metric (under
+    # **Metrics**) unchecked - ...': on the Edit setting path the logs are ticked already and
+    # Health is not, so a click on any of them would put it in the wrong state.
+    It 'reads step 5.2.8''s Backup Vault logs as checked and its Health metric as unchecked' {
+        $labels = @('Core Azure Backup Data', 'Addon Azure Backup Job Data', 'Addon Azure Backup Policy Data',
+            'Addon Azure Backup Protected Instance Data', 'Health')
+        $items = @((Get-StateStep '5.2' '5.2.8').items | Where-Object { (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
+        $items.Count | Should -Be 1
+        @($items[0].checked) | Should -Be @(0, 1, 2, 3)
+        @($items[0].unchecked) | Should -Be @(4)
+        @($items[0].labels) | Should -Not -Contain 'Logs'
+        @($items[0].labels) | Should -Not -Contain 'Metrics'
     }
 
     # 'Select', 'Click **Enable**' and 'Check that ...' give no state; a guide line added with a
@@ -1312,6 +1324,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '5.1.7/Send to Log Analytics workspace/checked=0'
             '5.2.8/Send to Log Analytics workspace/checked=0'
             '5.2.8/Send to Log Analytics workspace/checked=0'
+            '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/checked=0,1,2,3'
             '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/unchecked=4'
         )
         @(Get-StatedItem | Sort-Object) | Should -Be @($expected | Sort-Object)
