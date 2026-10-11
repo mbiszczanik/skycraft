@@ -42,6 +42,7 @@ except ImportError:
     sys.modules["playwright"] = types.ModuleType("playwright")
     sys.modules["playwright.sync_api"] = _stub
 
+import recording  # noqa: E402
 import run  # noqa: E402
 
 LAB = "9.9"
@@ -1694,12 +1695,13 @@ class SnapshotKeyTests(unittest.TestCase):
         with mock.patch.object(run, "all_frames", lambda page: [Screen(tree=tree)]):
             lines = run.aria_lines(FakePage())
             candidates = run.candidates_on_screen(FakePage())
-        # in_entry, then names_entry: a name that holds a row's or cell's name repeats its data.
+        # in_entry, then names_entry, which is looked for only outside an entry: in one, the name
+        # is the entry's data already.
         self.assertEqual(lines, [("button", "Add", 2, True, False), ("checkbox", "Select all", 1, False, False),
                                  ("button", "Name", 1, False, False),
-                                 ("checkbox", "Select row Illidan Stormrage", 1, True, True),
-                                 ("link", "Illidan Stormrage", 2, True, True),
-                                 ("checkbox", "Khadgar Archmage", 1, True, True),
+                                 ("checkbox", "Select row Illidan Stormrage", 1, True, False),
+                                 ("link", "Illidan Stormrage", 2, True, False),
+                                 ("checkbox", "Khadgar Archmage", 1, True, False),
                                  ("tab", "Members", 1, False, False)])
         self.assertEqual([(c.in_entry, c.names_entry) for c in candidates], [line[3:] for line in lines])
 
@@ -1761,6 +1763,9 @@ class SnapshotKeyTests(unittest.TestCase):
                           ("link", "Chromie Timewalker"): True, ("heading", "chromie timewalker | Overview"): True,
                           ("checkbox", "Select all"): False, ("button", "Khadgar"): False})
         self.assertEqual(flags[("button", "Remove Khadgar Archmage")], (False, True))   # in a list item: no entry
+        # An option is no label the recording could keep, so its name is not looked for.
+        self.assertEqual(self.flags(rows, '- option "Khadgar Archmage"')[("option", "Khadgar Archmage")],
+                         (False, False))
 
     def test_a_row_nested_in_a_column_header_is_a_row_again(self) -> None:
         # #317: the header's flag ends where a new row starts (example data: a fictional user).
@@ -1790,28 +1795,64 @@ class SnapshotKeyTests(unittest.TestCase):
         self.assertEqual(self.in_entry(first, '- link "Home"'),
                          {("link", "Illidan Stormrage"): True, ("link", "Home"): False})
 
-    def test_aria_lines_take_linear_time_however_deep_or_long_the_snapshot(self) -> None:
-        # Each line is pushed and popped once, with its flags on the stack (#317). A chain 10,000
-        # deep (one space per level, the smallest snapshot such a chain can be: 50 million
-        # characters) takes about 0.2 s; looking at every open ancestor of every line took over a
-        # second. A flat list of 100,000 lines takes about 0.4 s. The bounds leave room for a slow
-        # runner.
-        depth = 10_000
-        chain = "\n".join([" " * i + ("- row:" if i == 0 else "- group:") for i in range(depth)]
-                          + [" " * depth + '- link "Deepest"', '- link "Top"'])
-        flat = "\n".join(f'- button "Action {i}"' for i in range(100_000))
-        for name, tree, bound, expected in (
-                ("chain", chain, 1.0, {("link", "Deepest"): True, ("link", "Top"): False}),
-                ("flat", flat, 2.0, None)):
-            with self.subTest(snapshot=name):
+    def timed(self, *trees: str) -> float:
+        """The shortest of three runs of aria_lines over one frame per tree, in seconds: the
+        least disturbed by whatever else the machine is doing."""
+        runs = []
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(tree=t) for t in trees]):
+            for _ in range(3):
                 started = time.perf_counter()
-                flags = self.in_entry(tree)
-                elapsed = time.perf_counter() - started
-                if expected is not None:
-                    self.assertEqual(flags, expected)
-                else:
-                    self.assertEqual(len(flags), 300)          # aria_lines keeps the first 300
-                self.assertLess(elapsed, bound)
+                run.aria_lines(FakePage())
+                runs.append(time.perf_counter() - started)
+        return min(runs)
+
+    def assert_linear(self, small: tuple[str, ...], large: tuple[str, ...], ceiling: float) -> None:
+        """aria_lines over `large`, a snapshot twice the size of `small`, takes less than three
+        times as long (twice, give or take the machine; four times or more for quadratic work),
+        and less than `ceiling` seconds, a loose backstop for a slow runner."""
+        t_small, t_large = self.timed(*small), self.timed(*large)
+        self.assertLess(t_large, 3 * t_small, f"{t_small:.3f} s, then {t_large:.3f} s for twice the size")
+        self.assertLess(t_large, ceiling)
+
+    @staticmethod
+    def chain(depth: int) -> str:
+        """A chain `depth` deep, one space per level: the smallest snapshot such a chain can be,
+        about depth * depth / 2 characters, under a row so that every level is in an entry."""
+        return "\n".join([" " * i + ("- row:" if i == 0 else "- group:") for i in range(depth)]
+                         + [" " * depth + '- link "Deepest"', '- link "Top"'])
+
+    def test_aria_lines_take_linear_time_however_deep_or_long_the_snapshot(self) -> None:
+        # Each line is pushed and popped once, with its flags on the stack (#317). A chain's size
+        # grows with the square of its depth, so the deeper chain is sqrt(2) times as deep to be
+        # twice the size: 10,000 deep is 50 million characters, about 0.2 s. A flat list of
+        # 100,000 lines takes about 0.4 s.
+        self.assertEqual(self.in_entry(self.chain(10_000)), {("link", "Deepest"): True, ("link", "Top"): False})
+        with self.subTest(snapshot="chain"):
+            self.assert_linear((self.chain(7_071),), (self.chain(10_000),), ceiling=5.0)
+        with self.subTest(snapshot="flat"):
+            flat = [f'- button "Action {i}"' for i in range(100_000)]
+            self.assertEqual(len(self.in_entry("\n".join(flat))), 300)       # aria_lines keeps the first 300
+            self.assert_linear(("\n".join(flat[:50_000]),), ("\n".join(flat),), ceiling=5.0)
+
+    def test_aria_lines_look_for_entry_names_in_linear_time(self) -> None:
+        # EntryNames walks a trie of words from each word of a name, at most ENTRY_WORDS_MAX deep
+        # (#317): 300 candidates of 1,000 words against rows of 1,000 words and their 1,000 cells,
+        # which share the candidates' words for ENTRY_WORDS_MAX - 1 of them, take about 0.5 s.
+        # Comparing every run of words with every entry took over half a second per candidate.
+        vocabulary = [f"w{i}" for i in range(1_000)]
+        cells = [" ".join(vocabulary[k:k + recording.ENTRY_WORDS_MAX - 1] + ["zz"]) for k in range(1_000)]
+
+        def screen(words: int) -> tuple[str, str]:
+            rows = "\n".join(['- grid "Members":']
+                             + [f'  - row "{" ".join(vocabulary[:words])} r{i}":' for i in range(10)]
+                             + [f'    - gridcell "{cell}"' for cell in cells])
+            candidates = "\n".join(f'- button "{" ".join(vocabulary[:words])} c{i}"' for i in range(300))
+            return rows, candidates
+
+        flags = self.flags(*screen(1_000))
+        self.assertEqual(len(flags), 300)
+        self.assertFalse(any(names for _, names in flags.values()))     # no cell is in a candidate
+        self.assert_linear(screen(500), screen(1_000), ceiling=10.0)
 
 
 class BladeStillLoadingTests(unittest.TestCase):

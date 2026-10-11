@@ -309,9 +309,17 @@ ROW_PREFIX = re.compile(r"^\s*select row\b", re.IGNORECASE)
 # one space (#317). The Portal's short words that are also filter values and column values ('All',
 # 'None', 'Yes', 'Name', 'Type', 'Owner', 'Users', 'Group') have five letters or fewer and stand in
 # many labels ('Groups | All groups', 'Select all'); a display name of a first and a last name has
-# six characters or more ('Li Wei'), and so has every service principal's name in the tenant.
+# six characters or more ('Li Wei'), and so has every service principal's name in the tenant. The
+# price: a common cell value of six characters or more ('Groups', 'Member', 'Security', 'Assigned')
+# is looked for too, and takes the labels that hold it out of the rejected list on a screen that
+# shows it; that list only grows thinner, and nothing replays it.
 ENTRY_NAME_MIN = 6
+# The longest entry name EntryNames looks for, in words (#317), which bounds held_by to that many
+# steps per word of the name. A longer one is a row's whole text, whose cells are entries of their
+# own, or text no label repeats.
+ENTRY_WORDS_MAX = 12
 ENTRY_WORD = re.compile(r"\w+")
+ENTRY_END = ""          # a trie node's mark that an entry name ends there; no word is empty
 
 
 def entry_words(name: str) -> tuple[str, ...]:
@@ -321,20 +329,35 @@ def entry_words(name: str) -> tuple[str, ...]:
 
 class EntryNames:
     """The names of the list entries on a screen (run.py, aria_lines: rows, cells, options, tree
-    items), from ENTRY_NAME_MIN characters on (#317). held_by(name) says whether a name holds one
-    as whole words, regardless of case and punctuation: 'Remove Illidan Stormrage' and
-    'Illidan Stormrage | Overview' hold the row 'Illidan Stormrage', 'Groups | All groups' does not
-    hold the option 'All' (too short) and 'Allowed members' does not hold 'Allowed member' (not a
-    whole word). Such a name repeats an entry's data, so it is no label of the Portal's."""
+    items), from ENTRY_NAME_MIN characters to ENTRY_WORDS_MAX words (#317). held_by(name) says
+    whether a name holds one as whole words, regardless of case and punctuation: 'Remove Illidan
+    Stormrage' and 'Illidan Stormrage | Overview' hold the row 'Illidan Stormrage', 'Groups | All
+    groups' does not hold the option 'All' (too short) and 'Allowed members' does not hold
+    'Allowed member' (not a whole word). Such a name repeats an entry's data, so it is no label of
+    the Portal's. The names are a trie of words, walked from each word of the name for at most
+    ENTRY_WORDS_MAX words: linear in the name's length."""
 
     def __init__(self, names: Iterable[str]) -> None:
-        self.words = {w for w in map(entry_words, names) if len(" ".join(w)) >= ENTRY_NAME_MIN}
-        self.longest = max(map(len, self.words), default=0)
+        self.trie: dict = {}
+        for words in map(entry_words, names):
+            if len(words) > ENTRY_WORDS_MAX or len(" ".join(words)) < ENTRY_NAME_MIN:
+                continue
+            node = self.trie
+            for word in words:
+                node = node.setdefault(word, {})
+            node[ENTRY_END] = {}
 
     def held_by(self, name: str) -> bool:
         words = entry_words(name)
-        return any(words[i:j] in self.words for i in range(len(words))
-                   for j in range(i + 1, min(len(words), i + self.longest) + 1))
+        for start in range(len(words)):
+            node = self.trie
+            for word in words[start:start + ENTRY_WORDS_MAX]:
+                node = node.get(word)
+                if node is None:
+                    break
+                if ENTRY_END in node:
+                    return True
+        return False
 
 
 def is_portal_label(candidate: Candidate) -> bool:

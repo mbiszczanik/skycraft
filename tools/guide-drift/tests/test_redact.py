@@ -496,6 +496,21 @@ class EntryNamesTests(unittest.TestCase):
         self.assertFalse(recording.EntryNames([]).held_by("Illidan Stormrage"))
         self.assertFalse(recording.EntryNames(["", "  ", "--"]).held_by("Illidan Stormrage"))
 
+    def test_an_entry_name_of_more_than_the_maximum_words_is_not_looked_for(self) -> None:
+        # A row's whole text: its cells are entries of their own.
+        self.assertEqual(recording.ENTRY_WORDS_MAX, 12)
+        twelve = " ".join(f"word{i}" for i in range(12))
+        thirteen = twelve + " word12"
+        entries = recording.EntryNames([twelve, thirteen, "Illidan Stormrage"])
+        self.assertTrue(entries.held_by(f"Remove {twelve}"))
+        self.assertTrue(entries.held_by(f"{thirteen} and Illidan Stormrage"))
+        self.assertFalse(recording.EntryNames([thirteen]).held_by(thirteen))
+
+    def test_a_shorter_entry_inside_a_longer_one_is_found_on_the_way(self) -> None:
+        entries = recording.EntryNames(["Illidan Stormrage", "Illidan Stormrage Guest Contoso"])
+        self.assertTrue(entries.held_by("Illidan Stormrage Guest"))
+        self.assertFalse(entries.held_by("Illidan Guest Contoso"))
+
 
 class WriteJsonTests(unittest.TestCase):
     def setUp(self) -> None:

@@ -257,8 +257,8 @@ from playwright.sync_api import Browser, Error as PlaywrightError, Frame, Locato
 
 sys.path.insert(0, str(Path(__file__).parent))
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
-from recording import (REMARK, Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
-                       EntryNames, field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
+from recording import (LABEL_ROLES, REMARK, EntryNames, Redactor, checkbox_state, env_secrets,  # noqa: E402
+                       missing_env, field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
                        same_blade, start_blade, view_blade, write_json)
 from recording import error_text, one_line, redaction_tokens, scrub, typed_secrets  # noqa: E402
 
@@ -522,7 +522,9 @@ def aria_lines(page: Page) -> list[tuple[str, str, int, bool, bool]]:
                    header starts afresh. Its name is then the entry's data.
       names_entry  its name holds, as whole words, the name of a list's entry anywhere on screen
                    (ENTRY_NAME_ROLES, recording.EntryNames): a picker's 'Remove <user>' button, a
-                   profile blade's heading or a breadcrumb that repeats a row's name.
+                   profile blade's heading or a breadcrumb that repeats a row's name. Looked for
+                   only where it decides something: in a candidate the recording could keep (a
+                   role of recording.LABEL_ROLES, not in_entry); False for any other.
 
     Each line costs O(1) beyond its own length: the open ancestors are a stack that carries
     their flags, each line pushed and popped once."""
@@ -557,8 +559,11 @@ def aria_lines(page: Page) -> list[tuple[str, str, int, bool, bool]]:
                 under_header = True
             ancestors.append((indent, under_entry, under_header))
     entries = EntryNames(entry_names)
-    return [(role, name, count, in_entry[(role, name)], entries.held_by(name))
-            for (role, name), count in list(counts.items())[:300]]
+    lines = []
+    for (role, name), count in list(counts.items())[:300]:
+        inside = in_entry[(role, name)]
+        lines.append((role, name, count, inside, role in LABEL_ROLES and not inside and entries.held_by(name)))
+    return lines
 
 
 # --- finding and acting --------------------------------------------------------------------
