@@ -103,7 +103,7 @@ class ReplayDecider:
 class HumanDecider:
     PROMPT = (
         "  [number]   use that element: the guide's, renamed (misleading drift)   g  gone (blocking drift)\n"
-        "  c [number] use it, but the difference is cosmetic                     i  ignore (not a UI element)\n"
+        "  c [number] use it, but the difference is cosmetic                      i  ignore (not a UI element)\n"
         "  w [number] use it as a workaround, not as the guide's (no guide edit)  u <why>  unknown, cannot tell\n> "
     )
 

@@ -37,6 +37,19 @@ auto-generated password is in an accessibility snapshot). The text a step's resu
 as the person types it, is kept in the recording scrubbed the same way. The screenshots are not
 scrubbed: crop and anonymise them by hand.
 
+When a label is not on screen, the person answers at the prompt (decide.py): a number uses that
+element as the guide's, renamed (misleading drift); 'c <number>' uses it, the difference cosmetic;
+'w <number>' uses it as a workaround, not as the guide's element (#211: misleading drift, never
+written to the recording, so the next run asks again); 'g' gone (blocking drift); 'i' ignore; 'u'
+unknown. A drift acted on under another name proposes a guide edit (the summary's 'proposed
+edits': the guide line with the bold label replaced), misleading or cosmetic (a change of case is
+a real rename), only when its new text belongs in the guide (Runner.not_proposed, #211). It
+proposes none when the element was used as a workaround; when the step has a wrong-blade record or
+its start is excused (see the start of a step below), as the Portal was then not where the guide
+leads; or when the Portal's name, scrubbed, holds a redaction token (recording.redaction_tokens: '[tenantname]', '<id>', '[secret]' or any other the Redactor or
+scrub writes), as it carries tenant or personal data. Such a drift is recorded all the same; the
+record's "notProposed" and the summary's 'not proposed' say why.
+
 The console is scrubbed only in part: an error before or during the run is shown as a record
 keeps it, a crash as its frames (file, line, function) and each error's scrubbed first line
 (redacted_traceback), never Python's own traceback, and the decider's list of candidates is
