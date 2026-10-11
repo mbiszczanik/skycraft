@@ -4616,6 +4616,22 @@ class DecoratedNameTests(RunnerTestCase):
         for pattern in decorated:
             self.assertIsNone(re.search(r"(?<!\\)/", pattern), pattern)
 
+    def test_an_option_compared_regardless_of_case_escapes_a_slash_for_the_browser(self) -> None:
+        # pick_option's pattern (ignore_case) goes to the browser as a literal '/.../' too.
+        box, patterns = ScreenNode(text="10.1.0.0/16"), []
+        option = ScreenNode(on_click=lambda: setattr(box, "text", "10.0.0.0/16"))
+        screen = Screen(("combobox", "Address space", box))
+        box.on_click = lambda: screen.add(("option", "10.0.0.0/16", option), ("option", "10.1.0.0/16", ScreenNode()))
+        page = FakePage()
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: page.now), \
+                mock.patch.object(Screen, "get_by_role", lambda self, role, name=None, exact=None:
+                                  patterns.append(name) or Screen._find(self, role, name)):
+            self.assertIsNone(run.pick_option(page, box, "div", "10.0.0.0/16", ignore_case=True))
+        self.assertEqual((option.clicked, box.text), (1, "10.0.0.0/16"))
+        [pattern] = {p.pattern for p in patterns if isinstance(p, re.Pattern)}
+        self.assertIsNone(re.search(r"(?<!\\)/", pattern), pattern)
+
     def test_a_row_s_check_box_is_never_a_field(self) -> None:
         screen = Screen(("checkbox", "Select row Email", ScreenNode(tag="input", attrs={"type": "checkbox"})))
         self.assertIsNone(self.find(screen, "Email", field=True))

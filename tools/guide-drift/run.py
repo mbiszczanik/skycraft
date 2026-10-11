@@ -1327,7 +1327,7 @@ def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case:
         return "already set"
     element.click(timeout=FIND_TIMEOUT_MS)
     page.wait_for_timeout(SETTLE_MS // 2)
-    name = re.compile("^" + re.escape(value) + "$", re.IGNORECASE) if ignore_case else value
+    name = re.compile("^" + literal_pattern(value) + "$", re.IGNORECASE) if ignore_case else value
     deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
     option = find_option(page, element, name)
     while option is None and time.monotonic() < deadline:
