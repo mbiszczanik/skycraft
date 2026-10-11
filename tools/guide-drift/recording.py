@@ -243,12 +243,13 @@ class Redactor:
         """`text` with tenant data written as a regular expression escapes it (re.escape:
         'contoso\\.onmicrosoft\\.com', 'me@example\\.com', 'Contoso\\ Ltd') replaced by the same
         tokens: Playwright prints a locator that looks a name up by pattern (matcher,
-        pick_option) with the pattern in the first line of an error (#212). Not restored: a
-        run log only."""
+        pick_option) with the pattern in the first line of an error (#212). Such a pattern is
+        written with literal_pattern since #244, which escapes '/' as well ('R\\/D'): both forms
+        are replaced. Not restored: a run log only."""
         for _, token, value in self._pairs:
-            escaped = re.escape(value)
-            if escaped != value:
-                text = sub_outside(re.compile(re.escape(escaped), re.IGNORECASE), token, text, self.tokens)
+            for escaped in dict.fromkeys((literal_pattern(value), re.escape(value))):
+                if escaped != value:
+                    text = sub_outside(re.compile(re.escape(escaped), re.IGNORECASE), token, text, self.tokens)
         return text
 
     def restore(self, text: str | None) -> str | None:

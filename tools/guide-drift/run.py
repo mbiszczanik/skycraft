@@ -92,7 +92,8 @@ screen does not show beside the label (decide.DECORATIONS, #244: a list row's ch
 row X' for an action, a required field's marker 'X *', or a field label's info icon and marker,
 'X information *'), is the guide's element as well (find_decorated): a match, so nobody is asked,
 nothing is recorded and no guide edit is proposed. It is looked for once SETTLE_MS of looking
-has not found the plain name, which a blade still rendering may show later. A decoration counts
+has not found the plain name, which a blade still rendering may show later, and that time starts
+again once a loading blade has rendered and once the person has opened a form. A decoration counts
 only on the roles it decorates (a button or link of those words is another element), two
 decorated elements are ambiguous as two plain ones are, and a plain name that is on screen more
 than once as text is not found as before, never replaced by a decorated one. Known gap: a field
@@ -1886,15 +1887,17 @@ class Runner:
             return element
         return look
 
-    def wait_for_blade(self, step: dict, item: dict, label: str,
-                       look: Callable[[], Locator | None]) -> Locator | None:
+    def wait_for_blade(self, step: dict, item: dict, label: str, look: Callable[[], Locator | None],
+                       renew: Callable[[], Callable[[], Locator | None]] | None = None) -> Locator | None:
         """After `look` found nothing for FIND_TIMEOUT_MS: when a blade is still loading
         (blade_still_loading), say so once and go on looking until it has rendered or its limit
         has passed (BLADE_LOAD_TIMEOUT_MS while a title reads 'undefined', BLADE_EMPTY_TIMEOUT_MS
         for a titled blade without content); once it has rendered, look for FIND_TIMEOUT_MS again,
-        as its controls come a moment after it. None at once when no blade is loading, so a label
-        missing from a rendered blade is asked about after the normal time (issue #233). Whenever
-        the label is still not found, the outline is kept (save_blade_outline)."""
+        as its controls come a moment after it, with a fresh look from `renew` when it is given
+        (looking_for: a decorated name, #244, counts again only after SETTLE_MS on the rendered
+        blade). None at once when no blade is loading, so a label missing from a rendered blade is
+        asked about after the normal time (issue #233). Whenever the label is still not found, the
+        outline is kept (save_blade_outline)."""
         outline = aria_outline(self.page)
         loading = blade_still_loading(outline)
         if loading is None:
@@ -1920,7 +1923,7 @@ class Runner:
 
         found = in_time(self.page, look_while_loading, ms=limit)
         if found is rendered:
-            found = in_time(self.page, look)
+            found = in_time(self.page, renew() if renew else look)
         if found is None:
             self.save_blade_outline(step, item, label)
         return found
@@ -2006,8 +2009,8 @@ class Runner:
         record.update(outcome=outcome, observed=observed)
         return record
 
-    def find_form(self, step: dict, item: dict, label: str, value: str,
-                  look: Callable[[], Locator | None]) -> Locator | None:
+    def find_form(self, step: dict, item: dict, label: str, value: str, look: Callable[[], Locator | None],
+                  renew: Callable[[], Callable[[], Locator | None]] | None = None) -> Locator | None:
         """The first field of a form (#207), found by `look` only once it can be filled in with
         `value` (editable), as long as any label is looked for (in_time, then wait_for_blade).
         When it cannot, no form is open: a list or a read-only summary is, and a lookup there
@@ -2017,14 +2020,20 @@ class Runner:
         already accounted for the step's start (start_accounted): one cause, one record. The
         person is asked to open the form and press Enter, and the field is then looked up as any
         other, the person being asked about it as usual when it is still not there. Closed input
-        at that prompt goes on the same way."""
-        def form_field() -> Locator | None:
-            element = look()
-            return element if element is not None and editable(element, value) else None
+        at that prompt goes on the same way. `renew` gives a fresh look (looking_for) for a form
+        that has just opened, rendered or at the person's Enter: a decorated name (#244) counts
+        again only after SETTLE_MS there."""
+        def editable_only(look: Callable[[], Locator | None]) -> Callable[[], Locator | None]:
+            def form_field() -> Locator | None:
+                element = look()
+                return element if element is not None and editable(element, value) else None
+            return form_field
 
+        form_field = editable_only(look)
         element = in_time(self.page, form_field)
         if element is None:
-            element = self.wait_for_blade(step, item, label, form_field)
+            element = self.wait_for_blade(step, item, label, form_field,
+                                          renew=(lambda: editable_only(renew())) if renew else None)
         if element is not None:
             return element
         where = (f"no form with a field '{label}' is open; the Portal is on "
@@ -2040,9 +2049,10 @@ class Runner:
         self.prompt("> ")
         if self.start_seen is not None:     # set during the step's first item only: it starts on the form
             self.start_seen = self.open_blade()
+        look = renew() if renew else look       # the form has just opened
         element = in_time(self.page, look)
         if element is None:
-            element = self.wait_for_blade(step, item, label, look)
+            element = self.wait_for_blade(step, item, label, look, renew)
         return element
 
     def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None,
@@ -2072,13 +2082,18 @@ class Runner:
             if kind == "search":
                 element = search_portal(self.page, label, diagnose=lambda tree: self.save_search_tree(step, tree))
             else:
-                look = self.looking_for(label, "field" if open_field else kind)
+                lookup = "field" if open_field else kind
+
+                def renew() -> Callable[[], Locator | None]:     # a fresh SETTLE_MS for a view just rendered
+                    return self.looking_for(label, lookup)
+
+                look = renew()
                 if form_start and label not in self.recording["steps"].get(step["id"], {}).get("labels", {}):
-                    element = self.find_form(step, item, label, value or "", look)
+                    element = self.find_form(step, item, label, value or "", look, renew)
                 else:
                     element = in_time(self.page, look)
                     if element is None:
-                        element = self.wait_for_blade(step, item, label, look)
+                        element = self.wait_for_blade(step, item, label, look, renew)
         except Ambiguous as error:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
             return record

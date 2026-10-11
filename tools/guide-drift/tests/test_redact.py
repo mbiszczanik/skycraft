@@ -900,6 +900,20 @@ class RunLogTextTests(unittest.TestCase):
         self.assertEqual(self.scrub(r"^me@example\.com$ ^me_example\.com\#EXT\#$ ^Contoso\ Ltd$", redactor=redactor),
                          rf"^{TOKEN}$ ^{UPN_TOKEN}\#EXT\#$ ^[tenantname]$")
 
+    def test_scrub_masks_tenant_data_as_literal_pattern_escapes_it(self) -> None:
+        # Since #244 a pattern for the browser escapes '/' as well (literal_pattern): a tenant name
+        # with one must still be masked in an error that prints the pattern.
+        redactor = Redactor(DOMAIN, TENANT, tenant_name="Northwind R/D Labs")
+        escaped = recording.literal_pattern("Northwind R/D Labs")
+        self.assertIn(r"\/", escaped)
+        text = ('Locator.click: Error: strict mode violation: get_by_role("link", name=re.compile('
+                f'r"^{escaped} Overview$", re.IGNORECASE)) resolved to 2 elements:')
+        self.assertEqual(self.scrub(text, redactor=redactor),
+                         'Locator.click: Error: strict mode violation: get_by_role("link", name=re.compile('
+                         'r"^[tenantname] Overview$", re.IGNORECASE)) resolved to 2 elements:')
+        self.assertEqual(redactor.redact_escaped(f"^{escaped}$"), "^[tenantname]$")
+        self.assertEqual(redactor.redact_escaped(f"^{re.escape('Northwind R/D Labs')}$"), "^[tenantname]$")
+
     ADJACENT = ("contoso9f8e7d6c5b4a4c3d8e2f1a0b9c8d7e6f", "9f8e7d6c5b4a4c3d8e2f1a0b9c8d7e6fcontoso",
                 "contoso<id>", "<id>contoso", "[tenantdomain]contoso", "contoso[secret]", "contoso<email>",
                 'value="contoso"contoso', 'fill("contoso")contoso', "a@b.cocontoso", "contoso@b.co",

@@ -3929,7 +3929,7 @@ class NoProposedEditTests(RunnerTestCase):
         there; the field is then filled without a browser."""
         r = self.runner_for(*answers, page=page_on(f"view/{GROUPS}"), run_id="-".join(answers))
 
-        def form_not_open(step, item, label, value, look):
+        def form_not_open(step, item, label, value, look, renew=None):
             drift = r.new_record(step, "field", label)
             drift.update(outcome="drift", severity="misleading", category=run.WRONG_BLADE, observed="no form")
             r.write(drift)
@@ -4713,6 +4713,51 @@ class DecoratedNameTests(RunnerTestCase):
         r = run.Runner(Rendering(), STEPS, self.recording, self.args(), ask=Answers())
         record, _ = self.act(screen, self.PICK, self.MEMBER, r=r)
         self.assertEqual((record["outcome"], link.clicked, box.clicked), ("match", 1, 0))
+
+    def test_the_settle_time_starts_again_once_a_loading_blade_has_rendered(self) -> None:
+        # The blade is still loading past the normal lookup time; once it has rendered, its rows'
+        # check boxes come first and the member's name as a link a moment later.
+        screen = Screen(tree=FindOnScreenTests.TOP_BAR + FindOnScreenTests.NEW_GROUP)
+        box, link = ScreenNode(attrs={"role": "checkbox"}), ScreenNode()
+        rendered_at = run.FIND_TIMEOUT_MS / 1000 + 5
+
+        def render(_waits: int) -> None:
+            if "row" not in screen.tree:
+                if page.now >= rendered_at:
+                    screen.tree += f'- row "{self.MEMBER}"\n'
+            elif not screen.entries:
+                screen.add(("checkbox", f"Select row {self.MEMBER}", box))
+            elif len(screen.entries) == 1 and page.now >= rendered_at + 0.5:
+                screen.add(("link", self.MEMBER, link))
+
+        page = FindOnScreenTests.LoadingPage(render)
+        r = run.Runner(page, STEPS, self.recording, self.args(), ask=Answers())
+        with mock.patch("builtins.print"):
+            record, _ = self.act(screen, self.PICK, self.MEMBER, r=r)
+        self.assertEqual((record["outcome"], link.clicked, box.clicked), ("match", 1, 0))
+
+    def test_the_settle_time_starts_again_once_the_person_has_opened_the_form(self) -> None:
+        screen = FormOpenTests.users_list()
+        decorated, plain = ScreenNode(tag="input"), ScreenNode(tag="input")
+        opened = []
+
+        def ask(text: str) -> str:
+            if text != "> ":
+                raise EOFError
+            opened.append(page.now)                  # the form opens: its required marker's name first
+            screen.add(("textbox", "User principal name *", decorated))
+            return ""
+
+        def render(_waits: int) -> None:
+            if opened and page.now >= opened[0] + 0.5 and not plain.filled and len(screen.entries) == 2:
+                screen.add(("textbox", "User principal name", plain))
+
+        page = FindOnScreenTests.LoadingPage(render)
+        r = run.Runner(page, STEPS, self.recording, self.args(), ask=ask)
+        item = {"kind": "field", "label": "User principal name", "value": "x", "line": 4}
+        with mock.patch("builtins.print"):
+            record, _ = self.act(screen, item, "User principal name", value="khadgar", r=r)
+        self.assertEqual((record["outcome"], plain.filled, decorated.filled), ("match", ["khadgar"], []))
 
     def test_a_row_found_through_its_decoration_is_clicked_as_before(self) -> None:
         # 'Search for and select **X**' states no state (parse.py, #296), so the check box is
