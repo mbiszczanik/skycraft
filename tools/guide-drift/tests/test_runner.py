@@ -3852,8 +3852,8 @@ class NoProposedEditTests(RunnerTestCase):
         super().setUp()
         (self.tmp / "guide.md").write_text(f"# Lab\n\n{self.LINE}\n", encoding="utf-8")
 
-    def runner_for(self, *answers: str, page=None) -> run.Runner:
-        return run.Runner(page or FakePage(), STEPS, self.recording, self.args(tenant_name="Contoso Ltd"),
+    def runner_for(self, *answers: str, page=None, **overrides) -> run.Runner:
+        return run.Runner(page or FakePage(), STEPS, self.recording, self.args(tenant_name="Contoso Ltd", **overrides),
                           ask=Answers(*answers))
 
     def act(self, r: run.Runner, before=None) -> dict:
@@ -3922,6 +3922,44 @@ class NoProposedEditTests(RunnerTestCase):
         self.assertEqual(self.labels(), {})     # replay would take it for the guide's element: asked again
         self.assertIn("## proposed edits (0)\n- none\n\n## not proposed (1)\n- step 9.9.2 action "
                       f"**Microsoft Entra ID**: observed 'View all 5 users': {reason}\n", self.summary(r))
+
+    WRONG_BLADE_REASON = "the Portal was not where the guide leads in this step (wrong-blade)"
+
+    def test_a_step_that_started_on_the_wrong_blade_proposes_no_edit(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"startBlade": GROUPS}
+        r = self.runner_for("", "2", page=page_on(f"view/{USERS}"))     # Enter at the blade prompt, then 2
+        record = self.act(r, before=lambda r: r.check_start(self.STEP))
+        self.assertEqual([x["category"] for x in r.records], [run.WRONG_BLADE, None])
+        self.assertEqual((record["severity"], record["observed"]), ("misleading", "Entra ID"))
+        self.assertEqual((record["proposedEdit"], record["notProposed"]), (None, self.WRONG_BLADE_REASON))
+        self.assertEqual(self.labels()["Microsoft Entra ID"]["name"], "Entra ID")     # the decision stays recorded
+        self.assertIn("## proposed edits (0)\n- none\n\n## not proposed (1)\n- step 9.9.2 action "
+                      f"**Microsoft Entra ID**: observed 'Entra ID': {self.WRONG_BLADE_REASON}\n", self.summary(r))
+
+    def test_a_form_not_open_in_the_step_counts_as_well_and_another_steps_does_not(self) -> None:
+        for step_id, proposed in (("9.9.1", True), ("9.9.2", False)):
+            with self.subTest(step=step_id):
+                self.recording["steps"].pop("9.9.2", None)
+                r = self.runner_for("2", run_id=step_id)
+                drift = r.new_record({"id": step_id}, "field", "User principal name")
+                drift.update(outcome="drift", severity="misleading", category=run.WRONG_BLADE, observed="no form")
+                r.write(drift)
+                record = self.act(r)
+                self.assertEqual(record["proposedEdit"] is not None, proposed)
+                self.assertEqual(record["notProposed"], None if proposed else self.WRONG_BLADE_REASON)
+
+    def test_a_step_whose_start_is_excused_proposes_no_edit(self) -> None:
+        # After a resume, a step the recording skips or one skipped with 's': whether or not a
+        # blade is recorded to compare with, the blades the guide opened before it are not open.
+        excuse = "the browser of this run is new: the blades the guide opened before the step are not open"
+        r = self.runner_for("2")
+        r.excused["9.9.2"] = excuse
+        record = self.act(r)
+        reason = f"the step started where the run, not the guide, left the Portal ({excuse})"
+        self.assertEqual((record["severity"], record["proposedEdit"], record["notProposed"]),
+                         ("misleading", None, reason))
+        r.excused = {"9.9.1": excuse}                             # another step's excuse
+        self.assertIsNotNone(self.act(r)["proposedEdit"])
 
 
 if __name__ == "__main__":

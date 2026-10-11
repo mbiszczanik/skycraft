@@ -2031,10 +2031,21 @@ class Runner:
 
           - the person used the element as a workaround ('w <number>', decide.py), not as the
             guide's element
+          - the step has a record in category WRONG_BLADE (#207): it started on another blade
+            than its recorded one, or no form for its first field was open; what the Portal
+            shows there says nothing about the guide's labels
+          - the step is excused (check_start: the first one after a resume or --from-step, after
+            a step the recording skips, or after one skipped with 's'), whether or not a blade is
+            recorded to compare with: the blades the guide opened before it are not open
           - the Portal's name, scrubbed, holds a redaction token: the element carries the
             tenant's name, an id or an address, which never goes into a guide"""
         if decision.workaround:
             return "used as a workaround, not as the guide's element"
+        if any(r["step"] == step["id"] and r.get("category") == WRONG_BLADE for r in self.records):
+            return f"the Portal was not where the guide leads in this step ({WRONG_BLADE})"
+        excuse = self.excused.get(step["id"])
+        if excuse is not None:
+            return f"the step started where the run, not the guide, left the Portal ({excuse})"
         tokens = redaction_tokens(scrub(decision.name, self.redactor, self.secrets))
         if tokens:
             return f"the Portal's name holds tenant or personal data ({tokens[0]})"
