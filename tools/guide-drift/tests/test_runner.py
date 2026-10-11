@@ -4759,6 +4759,47 @@ class DecoratedNameTests(RunnerTestCase):
             record, _ = self.act(screen, item, "User principal name", value="khadgar", r=r)
         self.assertEqual((record["outcome"], plain.filled, decorated.filled), ("match", ["khadgar"], []))
 
+    UPN = {"kind": "field", "label": "User principal name", "value": "x", "line": 4}
+    UNTITLED = FindOnScreenTests.TOP_BAR + "- button \"Close content 'undefined'\"\n"
+    NEW_USER = (FindOnScreenTests.TOP_BAR + '- heading "New user" [level=2]\n'
+                "- button \"Close content 'New user'\"\n" '- textbox "Display name"\n')
+
+    def form_blade_rendering(self, *fields) -> tuple[Screen, FakePage]:
+        """A form's blade still loading (its title reads 'undefined') past the normal lookup time;
+        once it has rendered, `fields` ((name, node) of text boxes) appear one per poll."""
+        screen = Screen(tree=self.UNTITLED)
+        rendered_at = run.FIND_TIMEOUT_MS / 1000 + 5
+        waiting = list(fields)
+
+        def render(_waits: int) -> None:
+            if screen.tree == self.UNTITLED:
+                if page.now >= rendered_at:
+                    screen.tree = self.NEW_USER
+            elif waiting:
+                name, node = waiting.pop(0)
+                screen.add(("textbox", name, node))
+
+        page = FindOnScreenTests.LoadingPage(render)
+        return screen, page
+
+    def test_on_a_form_that_renders_late_a_plain_field_after_a_decorated_one_wins(self) -> None:
+        decorated, plain = ScreenNode(tag="input"), ScreenNode(tag="input")
+        screen, page = self.form_blade_rendering(("User principal name *", decorated), ("User principal name", plain))
+        r = run.Runner(page, STEPS, self.recording, self.args(), ask=Answers())
+        with mock.patch("builtins.print"):
+            record, _ = self.act(screen, self.UPN, "User principal name", value="khadgar", r=r)
+        self.assertEqual((record["outcome"], plain.filled, decorated.filled, r.records), ("match", ["khadgar"], [], []))
+        self.assertGreater(page.now, run.FIND_TIMEOUT_MS / 1000 + 5)        # found on the rendered blade
+
+    def test_on_a_form_that_renders_late_a_read_only_field_is_still_no_form(self) -> None:
+        read_only = ScreenNode(tag="input", read_only=True)
+        screen, page = self.form_blade_rendering(("User principal name", read_only))
+        r = run.Runner(page, STEPS, self.recording, self.args(), ask=Answers(""))
+        with mock.patch("builtins.print"):
+            record, _ = self.act(screen, self.UPN, "User principal name", value="khadgar", r=r)
+        self.assertEqual([x["category"] for x in r.records], [run.WRONG_BLADE])
+        self.assertEqual((record["outcome"], read_only.filled), ("unknown", []))
+
     def test_a_row_found_through_its_decoration_is_clicked_as_before(self) -> None:
         # 'Search for and select **X**' states no state (parse.py, #296), so the check box is
         # clicked, as when the person picked it: a row already ticked is cleared by that click.
