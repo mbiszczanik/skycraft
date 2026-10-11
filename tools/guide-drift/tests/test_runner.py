@@ -561,6 +561,20 @@ class SummaryTests(RunnerTestCase):
                       f"- step 9.9.2 **Owner**: {observed}\n\n## skipped (0)", summary)
         self.assertNotIn("**Reader**", summary)
 
+    def test_finish_lists_a_drift_whose_edit_is_not_proposed_with_the_reason(self) -> None:
+        self.add("action", "Microsoft Entra ID", outcome="drift", severity="misleading",
+                 observed="[tenantname] | Overview", notProposed="the Portal's name holds tenant data ([tenantname])")
+        # A record a run wrote before #211 has no 'notProposed': not listed, as before.
+        old = self.r.new_record({"id": "9.9.2"}, "action", "Groups")
+        old.pop("notProposed", None)
+        old.update(outcome="drift", severity="cosmetic", observed="groups")
+        self.r.records.append(old)
+        self.assertEqual(self.quietly(self.r.finish), 0)
+        summary = (self.r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## proposed edits (0)\n- none\n\n## not proposed (1)\n- step 9.9.2 action "
+                      "**Microsoft Entra ID**: observed '[tenantname] | Overview': the Portal's name holds tenant "
+                      "data ([tenantname])\n\nScreenshots", summary)
+
     def test_tenant_name_is_an_optional_argument_the_redactor_uses(self) -> None:
         base = ["--steps", "s", "--recording", "r", "--log-dir", "l", "--run-id", "i", "--tenant-id", "t",
                 "--tenant-domain", "contoso.onmicrosoft.com", "--state", "st", "--auth-state", "a"]
@@ -572,7 +586,7 @@ class SummaryTests(RunnerTestCase):
     def test_finish_says_none_for_empty_sections_and_caps_the_exit_code(self) -> None:
         self.assertEqual(self.quietly(self.r.finish), 0)
         summary = (self.r.run_dir / "summary.md").read_text(encoding="utf-8")
-        self.assertIn("## proposed edits (0)\n- none", summary)
+        self.assertIn("## proposed edits (0)\n- none\n\n## not proposed (0)\n- none\n", summary)
         for _ in range(300):
             self.add("action", "x", outcome="unknown", observed="not found")
         self.assertEqual(self.quietly(self.r.finish), 250)
@@ -895,14 +909,19 @@ class RunLogRedactionTests(RunnerTestCase):
                 self.assertIn(f"- step 9.9.1 field **Password**: {shown}\n", self.summary(run_id))
                 self.assert_no_leak(self.results_text(run_id), self.summary(run_id))
 
-    def test_a_proposed_edit_scrubs_the_new_label_and_never_the_guides_own_text(self) -> None:
+    def test_a_proposed_edit_refuses_a_new_label_with_data_and_never_redacts_the_guides_text(self) -> None:
         (self.tmp / "guide.md").write_text("# Lab\n\n2. In the Contoso directory, click **+ New group**\n",
                                            encoding="utf-8")
         r = self.runner()
-        edit = r.proposed_edit(3, "+ New group", f"New group {self.OBJECT_ID}")
+        edit = r.proposed_edit(3, "+ New group", "New group")
         # 'Contoso' is the tenant prefix, but here it is the guide's word: no '[yourtenant]' for it.
         self.assertEqual(edit, {"line": 3, "old": "2. In the Contoso directory, click **+ New group**",
-                                "new": "2. In the Contoso directory, click **New group <id>**"})
+                                "new": "2. In the Contoso directory, click **New group**"})
+        # A new label that holds tenant or personal data once scrubbed is no edit at all (#211).
+        for name in (f"New group {self.OBJECT_ID}", "Contoso Ltd", f"admin@{self.DOMAIN}", "someone@fabrikam.com",
+                     "[tenantname] | Overview", "${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}"):
+            with self.subTest(name=name):
+                self.assertIsNone(r.proposed_edit(3, "+ New group", name))
 
     def test_the_aria_files_mask_ids_and_secret_values_and_keep_every_line(self) -> None:
         r = self.runner()
@@ -3813,6 +3832,83 @@ class StopTests(RunnerTestCase):
         self.assertLess(text.index(self.SHOWN), text.index("LookupError: the domain combo box: [tenantdomain]"))
         self.assertEqual(text.count("Traceback (most recent call last):"), 2)
         self.assert_no_leak(text)
+
+
+class NoProposedEditTests(RunnerTestCase):
+    """A drift proposes a guide edit only when its new text belongs in the guide (#211): never a
+    Portal name that holds tenant or personal data. The drift is recorded all the same, with
+    the reason in 'notProposed', and the summary lists it under 'not proposed'."""
+
+    STEP = {"id": "9.9.2", "title": "Two", "portal": True, "expected": None, "images": [],
+            "items": [{"kind": "action", "labels": ["Microsoft Entra ID"], "line": 3}]}
+    LINE = "1. Go back to **Microsoft Entra ID** home page"
+    # As the lab 1.1 run saw them: the tenant's overview carries its name, and the Users entry
+    # the resumed browser offered was the overview's 'View all N users' link.
+    CANDIDATES = [run.Candidate("link", "Contoso Ltd | Overview"), run.Candidate("link", "Entra ID"),
+                  run.Candidate("link", "View all 5 users")]
+    TOKEN_REASON = "the Portal's name holds tenant or personal data ([tenantname])"
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text(f"# Lab\n\n{self.LINE}\n", encoding="utf-8")
+
+    def runner_for(self, *answers: str, page=None) -> run.Runner:
+        return run.Runner(page or FakePage(), STEPS, self.recording, self.args(tenant_name="Contoso Ltd"),
+                          ask=Answers(*answers))
+
+    def act(self, r: run.Runner, before=None) -> dict:
+        """act_on_label for the step's label, which is not on screen; `before(r)` runs first, under
+        the same clock (check_start). The record is written, as run_step writes it."""
+        clock = iter(range(0, 1_000_000, 1))               # 1 s passes between every look at the clock
+        with mock.patch.object(run, "find_exact", return_value=None), \
+                mock.patch.object(run, "candidates_on_screen", return_value=self.CANDIDATES), \
+                mock.patch.object(run.time, "monotonic", lambda: next(clock)), \
+                mock.patch.object(run, "find_by_name", return_value=FakeElement()), redirect_stdout(io.StringIO()):
+            if before is not None:
+                before(r)
+            record = r.act_on_label(self.STEP, self.STEP["items"][0], "Microsoft Entra ID")
+        r.write(record)
+        return record
+
+    def labels(self) -> dict:
+        saved = json.loads((self.tmp / "rec.json").read_text(encoding="utf-8"))
+        return saved["steps"].get("9.9.2", {}).get("labels", {})
+
+    def summary(self, r: run.Runner) -> str:
+        self.quietly(r.finish)
+        return (r.run_dir / "summary.md").read_text(encoding="utf-8")
+
+    def test_a_renamed_element_proposes_its_name(self) -> None:
+        r = self.runner_for("2")
+        record = self.act(r)
+        self.assertEqual((record["outcome"], record["severity"], record["observed"], record["notProposed"]),
+                         ("drift", "misleading", "Entra ID", None))
+        self.assertEqual(record["proposedEdit"], {"line": 3, "old": self.LINE,
+                                                  "new": "1. Go back to **Entra ID** home page"})
+        self.assertIn("## proposed edits (1)\n- guide.md:3\n", self.summary(r))
+
+    def test_a_name_with_the_tenants_name_is_drift_without_an_edit(self) -> None:
+        r = self.runner_for("1")
+        record = self.act(r)
+        self.assertEqual((record["outcome"], record["severity"], record["observed"]),
+                         ("drift", "misleading", "[tenantname] | Overview"))
+        self.assertEqual((record["proposedEdit"], record["notProposed"]), (None, self.TOKEN_REASON))
+        self.assertEqual(self.labels()["Microsoft Entra ID"]["name"], "[tenantname] | Overview")   # replay finds it
+        summary = self.summary(r)
+        self.assertIn("## misleading (1)\n- step 9.9.2 action **Microsoft Entra ID**: observed "
+                      "'[tenantname] | Overview'\n", summary)
+        self.assertIn("## proposed edits (0)\n- none\n\n## not proposed (1)\n- step 9.9.2 action "
+                      f"**Microsoft Entra ID**: observed '[tenantname] | Overview': {self.TOKEN_REASON}\n", summary)
+        results = (r.run_dir / "results.jsonl").read_text(encoding="utf-8")
+        self.assertEqual(json.loads(results.splitlines()[-1])["notProposed"], self.TOKEN_REASON)
+
+    def test_a_replayed_name_with_a_token_proposes_no_edit_either(self) -> None:
+        self.recording["steps"]["9.9.2"] = {"labels": {"Microsoft Entra ID": {
+            "decision": "use", "role": "link", "name": "[tenantname] | Overview", "severity": "misleading"}}}
+        r = self.runner_for()                                   # no answers: replay decides
+        record = self.act(r)
+        self.assertEqual((record["severity"], record["proposedEdit"], record["notProposed"]),
+                         ("misleading", None, self.TOKEN_REASON))
 
 
 if __name__ == "__main__":

@@ -34,6 +34,9 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
                        accessibility tree), secrets, credentials, object ids, tenant data,
                        other addresses, typed and element values as tokens; scrubbing twice
                        changes nothing (#212)
+  redaction_tokens     the tokens of REDACTION_TOKENS (the Redactor's and scrub's) and the
+                       '${NAME}' references in a text: a Portal name with one is never proposed
+                       as a guide's label (#211)
 """
 from __future__ import annotations
 
@@ -164,6 +167,9 @@ class Redactor:
     TENANT = "[tenantid]"
     NAME = "[tenantname]"
     PREFIX = "[yourtenant]"
+    # Every fixed token above; an address from the environment becomes its '${NAME}' (ENV_REF).
+    # A new token goes here too, so that REDACTION_TOKENS covers it (#211).
+    TOKENS = frozenset({DOMAIN, TENANT, NAME, PREFIX})
     PREFIX_MIN = 4
 
     def __init__(self, domain: str, tenant_id: str, secrets: dict[str, str] | None = None,
@@ -253,6 +259,23 @@ class Redactor:
                 or GUID.search(decoded) or HEX_ID.search(decoded) or self.redact(decoded) != decoded):
             return None
         return view
+
+
+# Every token a redaction writes: the Redactor's own and a run log's (scrub). A text that holds one
+# held tenant or personal data the redaction took out (#211).
+REDACTION_TOKENS = Redactor.TOKENS | RUN_LOG_TOKENS
+REDACTION_TOKEN = re.compile("|".join([re.escape(t) for t in sorted(REDACTION_TOKENS, key=len, reverse=True)]
+                                      + [ENV_REF.pattern]))
+
+
+def redaction_tokens(text: str | None) -> list[str]:
+    """The redaction tokens in `text`, in order (#211): REDACTION_TOKENS, and the '${NAME}' or
+    '${NAME|upn}' the Redactor writes for an address from the environment. A Portal name that
+    holds one carries tenant or personal data (the tenant's name, an object id, an address), so
+    run.py never proposes it as a guide's label. A guide's own placeholder that is no token
+    ('<your name>', '[uniqueID]') is not one; '[yourtenant]' is, as the Redactor writes it for
+    the tenant prefix."""
+    return [m.group() for m in REDACTION_TOKEN.finditer(text or "")]
 
 
 def env_secrets(recording: dict) -> dict[str, str]:

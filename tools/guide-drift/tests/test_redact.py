@@ -12,6 +12,7 @@ Run by hand from the repository root:
 import json
 import os
 import random
+import re
 import shutil
 import sys
 import tempfile
@@ -661,6 +662,39 @@ class CheckboxStateTests(unittest.TestCase):
         for value in ("Leave default", "Standard_LRS", "", "Checked or unchecked"):
             with self.subTest(value=value):
                 self.assertIsNone(recording.checkbox_state(value))
+
+
+class RedactionTokenTests(unittest.TestCase):
+    """The tokens a redaction writes (#211): a Portal name that holds one carries tenant or
+    personal data, so run.py never proposes it as a guide's label."""
+
+    def test_every_token_is_found_where_it_stands(self):
+        for token in sorted(recording.REDACTION_TOKENS) + [TOKEN, UPN_TOKEN]:
+            with self.subTest(token=token):
+                self.assertEqual(recording.redaction_tokens(f"{token} | Overview"), [token])
+        self.assertEqual(recording.redaction_tokens("[tenantname] users at <email> and <id>"),
+                         ["[tenantname]", "<email>", "<id>"])
+
+    def test_a_name_without_a_token_has_none(self):
+        for text in ("View all 5 users", "+ New group", "[Leave blank]", "<your name>", "skycraft-[uniqueID]",
+                     "$100", "${lowercase}", "", None):
+            with self.subTest(text=text):
+                self.assertEqual(recording.redaction_tokens(text), [])
+
+    def test_every_token_the_redactor_and_scrub_write_is_found(self):
+        # The backstop for a token added later: whatever redact() and scrub() write must be found.
+        redactor = Redactor(DOMAIN, TENANT, {TOKEN: "me@example.com"}, tenant_name="Contoso Ltd")
+        text = (f"Contoso Ltd, contoso, admin@{DOMAIN}, {TENANT}, me@example.com, me_example.com#EXT#@{DOMAIN}, "
+                '9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f, someone@fabrikam.com, AccountKey=abc, fill("x"), value=y, '
+                "Secret!1")
+        scrubbed = recording.scrub(text, redactor, {"Secret!1"})
+        written = set(re.findall(r"\[[^\]]+\]|<[^<>]+>|\$\{[^}]+\}", scrubbed))
+        written |= {token for _, token, _ in redactor._pairs}
+        self.assertGreaterEqual(written, {"[tenantname]", "[yourtenant]", "[tenantdomain]", "[tenantid]", TOKEN,
+                                          UPN_TOKEN, "<id>", "<email>", "[secret]", "[typed]", "[value]"})
+        for token in written:
+            with self.subTest(token=token):
+                self.assertEqual(recording.redaction_tokens(token), [token])
 
 
 if __name__ == "__main__":

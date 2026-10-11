@@ -228,7 +228,7 @@ from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # n
 from recording import (REMARK, Redactor, checkbox_state, env_secrets, missing_env,  # noqa: E402
                        field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
                        same_blade, start_blade, view_blade, write_json)
-from recording import error_text, one_line, scrub, typed_secrets  # noqa: E402
+from recording import error_text, one_line, redaction_tokens, scrub, typed_secrets  # noqa: E402
 
 Found = TypeVar("Found")     # what in_time() looks for
 
@@ -1937,8 +1937,9 @@ class Runner:
         # Replay must never inherit a choice the runner could not act on.
         self.remember(step, label, pending)
         if decision.kind == "drift":      # misleading or cosmetic: acted on, under a different name
-            record.update(outcome="drift", severity=decision.severity, observed=decision.name,
-                          proposedEdit=self.proposed_edit(line, label, decision.name))
+            why = self.not_proposed(step, decision)     # #211: the edit, or why there is none
+            record.update(outcome="drift", severity=decision.severity, observed=decision.name, notProposed=why,
+                          proposedEdit=None if why else self.proposed_edit(line, label, decision.name))
         else:
             record.update(outcome="match", observed=note or decision.name)
         return record
@@ -2012,13 +2013,26 @@ class Runner:
         not carry the label in bold, so there is nothing to change. The new label is scrubbed as
         a record's 'observed' is (scrubbed, #212); the rest of the line is the guide's own text and
         is never redacted, so that no token stands where the guide's words are (a tenant named
-        like a word of the guide). A token in the new label itself is #211's to refuse."""
+        like a word of the guide). None too when the scrubbed new label holds a redaction token
+        (recording.redaction_tokens, #211): tenant or personal data never goes into a guide.
+        act_on_label asks not_proposed first, which says why."""
+        new_label = scrub(new_label, self.redactor, self.secrets)
         guide_lines = (Path(self.args.repo_root) / self.steps["guide"]).read_text(encoding="utf-8-sig").splitlines()
-        if not (1 <= line <= len(guide_lines)):
+        if redaction_tokens(new_label) or not (1 <= line <= len(guide_lines)):
             return None
         old = guide_lines[line - 1]
-        new = old.replace(f"**{old_label}**", f"**{scrub(new_label, self.redactor, self.secrets)}**")
+        new = old.replace(f"**{old_label}**", f"**{new_label}**")
         return None if new == old else {"line": line, "old": old, "new": new}
+
+    def not_proposed(self, step: dict, decision: Decision) -> str | None:
+        """Why a misleading or cosmetic drift proposes no guide edit, for the record's
+        'notProposed' and the summary's 'not proposed' (#211); None when it proposes one
+        (proposed_edit). The Portal's name, scrubbed, holds a redaction token: the element
+        carries the tenant's name, an id or an address, which never goes into a guide."""
+        tokens = redaction_tokens(scrub(decision.name, self.redactor, self.secrets))
+        if tokens:
+            return f"the Portal's name holds tenant or personal data ({tokens[0]})"
+        return None
 
     # -- one step --------------------------------------------------------------------------
 
@@ -2196,7 +2210,7 @@ class Runner:
     def new_record(self, step: dict, kind: str, label: str | None) -> dict:
         return {"runId": self.args.run_id, "at": now(), "lab": self.steps["lab"], "step": step["id"],
                 "kind": kind, "label": label, "outcome": None, "severity": None, "category": None,
-                "skippedBecause": None, "observed": None, "proposedEdit": None,
+                "skippedBecause": None, "observed": None, "proposedEdit": None, "notProposed": None,
                 "screenshot": f"Step-{step['id']}.png"}
 
     def scrubbed(self, record: dict) -> dict:
@@ -2606,6 +2620,13 @@ class Runner:
             lines += [f"- {self.steps['guide']}:{e['line']}", f"  - old: `{e['old']}`", f"  - new: `{e['new']}`"]
         if not edits:
             lines.append("- none")
+        lines.append("")
+        # Drifts acted on under another name that propose no edit, and why (#211): the reviewer
+        # still sees what the Portal showed, and that it is not to be copied into the guide.
+        held = [r for r in self.records if r.get("notProposed")]
+        lines.append(f"## not proposed ({len(held)})")
+        lines += [f"- step {r['step']} {r['kind']} **{r['label']}**: observed {r['observed']!r}: {r['notProposed']}"
+                  for r in held] or ["- none"]
         lines.append("")
         # Relative to the repository, or the folder's name: an absolute path names the Windows user.
         try:
