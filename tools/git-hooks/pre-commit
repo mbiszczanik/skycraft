@@ -1,0 +1,37 @@
+#!/bin/sh
+# SkyCraft pre-commit hook (issue #303, ADR-0003).
+#
+# Several agent sessions work on this repository at once. A commit made in the shared
+# checkout lands on whatever branch another session switched it to, which happened three
+# times before this hook existed. It refuses a commit when:
+#
+#   1. the current branch is main (changes reach main only through a pull request), or
+#   2. this is the main checkout and another worktree exists (work belongs in a worktree).
+#
+# Install once per clone:   git config core.hooksPath tools/git-hooks
+# A person who knows why may bypass it with --no-verify. An agent never does.
+
+branch=$(git symbolic-ref --short -q HEAD)
+
+if [ "$branch" = "main" ]; then
+    echo "pre-commit: refusing a commit on main. Changes reach main only through a pull request." >&2
+    echo "Create a branch in a worktree:" >&2
+    echo "  git worktree add <dir> -b <type>/<issue>-<slug> origin/main" >&2
+    exit 1
+fi
+
+git_dir=$(git rev-parse --path-format=absolute --git-dir)
+common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+
+if [ "$git_dir" = "$common_dir" ]; then
+    worktrees=$(git worktree list --porcelain | grep -c '^worktree ')
+    if [ "$worktrees" -gt 1 ]; then
+        echo "pre-commit: refusing a commit in the main checkout while $((worktrees - 1)) other worktree(s) exist." >&2
+        echo "Another session may switch this checkout's branch under you (ADR-0003). Commit from your own worktree:" >&2
+        echo "  git worktree add <dir> -b <type>/<issue>-<slug> origin/main" >&2
+        echo "List them with: git worktree list" >&2
+        exit 1
+    fi
+fi
+
+exit 0

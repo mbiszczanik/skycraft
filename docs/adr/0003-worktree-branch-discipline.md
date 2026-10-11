@@ -98,3 +98,15 @@ For trivial single-edit / single-commit work — typo fixes, README tweaks
   expected value.** Viable as an additional safety net but does not by
   itself prevent the shared-checkout race. Worth adding later as a
   belt-and-braces measure; orthogonal to this ADR.
+
+## Postscript (2026-10-11): the rule is now a hook
+
+Worktrees as a rule were not enough. With three to four agent sessions on the
+repository at once, a commit landed on another session's branch in the shared
+checkout on 2026-09-21 and 2026-09-22, after this ADR was accepted. The
+"pre-commit hook" alternative above is now in place, and stronger than the one
+considered there: `tools/git-hooks/pre-commit` refuses a commit on `main`, and
+any commit in the main checkout while another worktree exists, so the shared
+checkout cannot receive work while parallel work is running. It is installed
+with `git config core.hooksPath tools/git-hooks` (CONTRIBUTING.md) and pinned by
+`tests/Git-Hooks.Tests.ps1` (issue #303).
