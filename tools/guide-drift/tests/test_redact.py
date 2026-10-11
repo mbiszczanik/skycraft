@@ -506,6 +506,23 @@ class EntryNamesTests(unittest.TestCase):
         self.assertTrue(entries.held_by(f"{thirteen} and Illidan Stormrage"))
         self.assertFalse(recording.EntryNames([thirteen]).held_by(thirteen))
 
+    def test_held_by_looks_at_no_more_than_entry_words_max_words_per_word_of_the_name(self) -> None:
+        # #317, counted in steps rather than timed: a name of 1,001 words against rows of 1,001
+        # words (too long to be looked for) and 1,000 cells that share ENTRY_WORDS_MAX - 1 words
+        # with the name from every one of its words, so that nearly every walk goes the whole
+        # window before it fails.
+        window = recording.ENTRY_WORDS_MAX
+        vocabulary = [f"w{i}" for i in range(1_000)]
+        rows = [" ".join(vocabulary) + f" r{i}" for i in range(10)]
+        cells = [" ".join(vocabulary[k:k + window - 1] + ["zz"]) for k in range(1_000)]
+        entries = recording.EntryNames(rows + cells)
+        name = " ".join(vocabulary) + " c0"
+        self.assertFalse(entries.held_by(name))
+        words = len(recording.entry_words(name))
+        self.assertLessEqual(entries.steps, window * words)
+        self.assertGreaterEqual(entries.steps, window * (words - window))     # the window is reached
+        self.assertTrue(entries.held_by(f"{name} {cells[500]}"))               # and a cell is still found
+
     def test_a_shorter_entry_inside_a_longer_one_is_found_on_the_way(self) -> None:
         entries = recording.EntryNames(["Illidan Stormrage", "Illidan Stormrage Guest Contoso"])
         self.assertTrue(entries.held_by("Illidan Stormrage Guest"))

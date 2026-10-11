@@ -335,9 +335,11 @@ class EntryNames:
     groups' does not hold the option 'All' (too short) and 'Allowed members' does not hold
     'Allowed member' (not a whole word). Such a name repeats an entry's data, so it is no label of
     the Portal's. The names are a trie of words, walked from each word of the name for at most
-    ENTRY_WORDS_MAX words: linear in the name's length."""
+    ENTRY_WORDS_MAX words: linear in the name's length. `steps` counts the words the walks have
+    looked at, which the tests hold to ENTRY_WORDS_MAX per word of a name."""
 
     def __init__(self, names: Iterable[str]) -> None:
+        self.steps = 0
         self.trie: dict = {}
         for words in map(entry_words, names):
             if len(words) > ENTRY_WORDS_MAX or len(" ".join(words)) < ENTRY_NAME_MIN:
@@ -351,7 +353,12 @@ class EntryNames:
         words = entry_words(name)
         for start in range(len(words)):
             node = self.trie
+            # The window and the cap in __init__ (no entry of more than ENTRY_WORDS_MAX words is
+            # registered) guard the same bound: with the cap alone, a walk would stop by itself
+            # one lookup later, where the trie has no deeper word; the window keeps the bound at
+            # exactly ENTRY_WORDS_MAX whatever the trie holds.
             for word in words[start:start + ENTRY_WORDS_MAX]:
+                self.steps += 1
                 node = node.get(word)
                 if node is None:
                     break

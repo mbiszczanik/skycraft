@@ -250,7 +250,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Callable, Iterator, TypeVar
 from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, Error as PlaywrightError, Frame, Locator, Page, sync_playwright
@@ -509,6 +509,31 @@ ENTRY_ROLES = ("row", "option", "treeitem")
 ENTRY_NAME_ROLES = ("row", "cell", "gridcell", "rowheader", "option", "treeitem")
 
 
+def snapshot_elements(snapshot: str,
+                      ancestors: list | None = None) -> Iterator[tuple[tuple[str, str], bool]]:
+    """(role, name) of every element line of one frame's aria_snapshot() (snapshot_key), in tree
+    order, and whether it sits in a list's entry (aria_lines' in_entry, #317). The snapshot's
+    indentation gives the ancestors: `ancestors` is the stack of (indent, under_entry,
+    under_header) of the open elements a line may sit in, each line pushed once and popped at
+    most once, so a line costs O(1) beyond its own length. It starts empty; a test passes a list
+    that counts its pushes and pops."""
+    ancestors = [] if ancestors is None else ancestors
+    for line in snapshot.splitlines():
+        key = snapshot_key(line)
+        if key is None:
+            continue
+        indent = len(line) - len(line.lstrip())
+        while ancestors and ancestors[-1][0] >= indent:
+            ancestors.pop()
+        under_entry, under_header = (ancestors[-1][1], ancestors[-1][2]) if ancestors else (False, False)
+        yield key, under_entry and not under_header
+        if key[0] in ENTRY_ROLES:
+            under_entry, under_header = True, False
+        elif key[0] == "columnheader":
+            under_header = True
+        ancestors.append((indent, under_entry, under_header))
+
+
 def aria_lines(page: Page) -> list[tuple[str, str, int, bool, bool]]:
     """(role, name, count, in_entry, names_entry) of every named element the accessibility tree
     exposes, across frames, in first-seen order. count is how many elements share that role and
@@ -526,8 +551,9 @@ def aria_lines(page: Page) -> list[tuple[str, str, int, bool, bool]]:
                    only where it decides something: in a candidate the recording could keep (a
                    role of recording.LABEL_ROLES, not in_entry); False for any other.
 
-    Each line costs O(1) beyond its own length: the open ancestors are a stack that carries
-    their flags, each line pushed and popped once."""
+    Each line costs O(1) beyond its own length (snapshot_elements; EntryNames.held_by is linear
+    in a name's length). Every frame starts at the top, whatever line the previous one ended
+    inside."""
     counts: dict[tuple[str, str], int] = {}
     in_entry: dict[tuple[str, str], bool] = {}
     entry_names: list[str] = []
@@ -536,28 +562,13 @@ def aria_lines(page: Page) -> list[tuple[str, str, int, bool, bool]]:
             snapshot = frame.locator("body").aria_snapshot(timeout=2000)
         except PlaywrightError:     # timed out, or the frame went away while the Portal navigated
             continue
-        # (indent, under_entry, under_header) of each open element a line may sit in; every
-        # frame starts at the top, whatever line the previous one ended inside.
-        ancestors: list[tuple[int, bool, bool]] = []
-        for line in snapshot.splitlines():
-            key = snapshot_key(line)
-            if key is None:
-                continue
-            indent = len(line) - len(line.lstrip())
-            while ancestors and ancestors[-1][0] >= indent:
-                ancestors.pop()
-            under_entry, under_header = (ancestors[-1][1], ancestors[-1][2]) if ancestors else (False, False)
+        for key, inside in snapshot_elements(snapshot):
             role = key[0]
             if key[1] and role in CANDIDATE_ROLES:
                 counts[key] = counts.get(key, 0) + 1
-                in_entry[key] = in_entry.get(key, False) or (under_entry and not under_header)
+                in_entry[key] = in_entry.get(key, False) or inside
             if key[1] and role in ENTRY_NAME_ROLES:
                 entry_names.append(key[1])
-            if role in ENTRY_ROLES:
-                under_entry, under_header = True, False
-            elif role == "columnheader":
-                under_header = True
-            ancestors.append((indent, under_entry, under_header))
     entries = EntryNames(entry_names)
     lines = []
     for (role, name), count in list(counts.items())[:300]:
