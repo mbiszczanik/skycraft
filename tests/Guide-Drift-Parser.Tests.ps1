@@ -27,7 +27,15 @@
       ends at the full stop that ends its sentence (#250; pinned on labs 4.2, 4.3, 5.1, 5.2 and
       5.3, rules in test_parse.py). A caption before a description gives no item, a caption of
       one lab is no label in that lab only, and lines outside every option are read; the guide
-      lines of labs 3.3-5.3 that left a step without its navigation are pinned (#203).
+      lines of labs 3.3-5.3 that left a step without its navigation are pinned (#203). A label
+      right after 'check', 'uncheck', 'enable' and the other verbs that state a check box's state
+      carries that state ("checked", "unchecked"), so the runner sets the box instead of toggling
+      it; a switch set to a value ('Toggle **X** to **Enabled**') carries the value's state and the
+      value is no label, a label that 'Leave' or 'Make sure' gives a state word ('Leave **X**
+      unchecked') carries that state, and a place after 'under' ('Under **Settings**, ...') is no
+      label.
+      One guide line of each shape in use is pinned, and so is the whole list of stated labels
+      (#296; rules in test_parse.py).
 
       THE 17 GUIDES - every module-*/X.Y-*/lab-guide-X.Y.md parses, its step ids match its
       headings in order, and no label or value carries markup or comment residue. This does NOT
@@ -1238,6 +1246,166 @@ Describe 'parse.py - only one option of a step is read, in every lab guide (#201
                         switch ($item.kind) { 'field' { $item.label } 'tag' { $item.name } default { $item.labels } }
                     })
                 if ($texts -ccontains $case.bold) { "step $($case.step): '$($case.bold)'" }
+            })
+        $leaks | Should -BeNullOrEmpty -Because ($leaks -join '; ')
+    }
+}
+
+Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or leave carries that state, and a place after "under" is no label, in every lab guide (#296)' {
+    BeforeAll {
+        $script:StateLabs = @{}
+        $guides = Get-ChildItem -Path $script:RepoRoot -Directory -Filter 'module-*' |
+            Get-ChildItem -Directory | Where-Object { $_.Name -match '^\d+\.\d+-' } |
+            ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Filter 'lab-guide-*.md' }
+        foreach ($guide in $guides) {
+            $lab = [regex]::Match($guide.Name, '\d+\.\d+').Value
+            $out = Join-Path $TestDrive "states-$lab.json"
+            & $script:Python $script:Parser $guide.FullName --out $out --repo-root $script:RepoRoot
+            $script:StateLabs[$lab] = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+        }
+        function Get-StateStep { param([string]$Lab, [string]$Id) $script:StateLabs[$Lab].steps | Where-Object id -eq $Id }
+        # 'step/labels joined by " | "/key=indices' of every item that carries a state.
+        function Get-StatedItem {
+            foreach ($lab in $script:StateLabs.Keys) {
+                foreach ($step in $script:StateLabs[$lab].steps) {
+                    foreach ($item in $step.items) {
+                        foreach ($key in 'checked', 'unchecked', 'stateOnly') {
+                            if ($item.PSObject.Properties.Name -contains $key) {
+                                "$($step.id)/$(@($item.labels) -join ' | ')/$key=$(@($item.$key) -join ',')"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    It 'reads step <id>''s "<text>" as <kind> <labels>, <key> at <indices>' -ForEach @(
+        @{ lab = '4.4'; id = '4.4.2'; text = 'Check **Add your client IP address**.'; kind = 'action'; labels = @('Add your client IP address'); key = 'checked'; indices = @(0) }
+        @{ lab = '3.3'; id = '3.3.7'; text = 'Uncheck **Use quickstart image**.'; kind = 'action'; labels = @('Use quickstart image'); key = 'unchecked'; indices = @(0) }
+        @{ lab = '4.2'; id = '4.2.5'; text = 'Under **Recovery**, enable **Enable soft delete for blobs**'; kind = 'action'; labels = @('Enable soft delete for blobs'); key = 'checked'; indices = @(0) }
+        @{ lab = '3.3'; id = '3.3.2'; text = 'Toggle **Admin user** to **Enabled**.'; kind = 'action'; labels = @('Admin user'); key = 'checked'; indices = @(0) }
+        @{ lab = '4.3'; id = '4.3.6'; text = '... -> check **Overwrite if files already exist** -> **Upload**'; kind = 'navigation'; labels = @('Upload', 'Overwrite if files already exist', 'Upload'); key = 'checked'; indices = @(1) }
+    ) {
+        $items = @(($script:StateLabs[$lab].steps | Where-Object id -eq $id).items |
+            Where-Object { (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
+        $items.Count | Should -Be 1
+        $items[0].kind | Should -Be $kind
+        @($items[0].$key) | Should -Be $indices
+        $other = if ($key -eq 'checked') { 'unchecked' } else { 'checked' }
+        $items[0].PSObject.Properties.Name | Should -Not -Contain $other
+    }
+
+    # 'Under **Logs**, check **A**, **B**, **C** and **D** - ... Leave the **Health** metric (under
+    # **Metrics**) unchecked - ...': on the Edit setting path the logs are ticked already and
+    # Health is not, so a click on any of them would put it in the wrong state.
+    It 'reads step 5.2.8''s Backup Vault logs as checked and its Health metric as unchecked' {
+        $labels = @('Core Azure Backup Data', 'Addon Azure Backup Job Data', 'Addon Azure Backup Policy Data',
+            'Addon Azure Backup Protected Instance Data', 'Health')
+        $items = @((Get-StateStep '5.2' '5.2.8').items | Where-Object { (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
+        $items.Count | Should -Be 1
+        @($items[0].checked) | Should -Be @(0, 1, 2, 3)
+        @($items[0].unchecked) | Should -Be @(4)
+        @($items[0].labels) | Should -Not -Contain 'Logs'
+        @($items[0].labels) | Should -Not -Contain 'Metrics'
+    }
+
+    # The other two log lists of a diagnostic setting: 'Check **X** (`Category`)' per item of the
+    # Recovery Services vault's list (5.2.8), and 'Under **Logs**, check **A** and **B**.' (5.1.7).
+    It 'reads every log category of step <id> as checked and Logs as no label' -ForEach @(
+        @{ lab = '5.2'; id = '5.2.8'; categories = @('Core Azure Backup Data', 'Addon Azure Backup Job Data', 'Addon Azure Backup Policy Data', 'Addon Azure Backup Storage Data', 'Addon Azure Backup Protected Instance Data', 'Azure Backup Operations'); perItem = $true }
+        @{ lab = '5.1'; id = '5.1.7'; categories = @('StorageRead', 'StorageWrite'); perItem = $false }
+    ) {
+        $items = @((Get-StateStep $lab $id).items)
+        if ($perItem) {
+            foreach ($category in $categories) {
+                $item = @($items | Where-Object { (@($_.labels) -join "`n") -ceq $category })
+                $item.Count | Should -Be 1 -Because $category
+                @($item[0].checked) | Should -Be @(0) -Because $category
+            }
+        } else {
+            $item = @($items | Where-Object { (@($_.labels) -join "`n") -ceq ($categories -join "`n") })
+            $item.Count | Should -Be 1
+            @($item[0].checked) | Should -Be @(0..($categories.Count - 1))
+        }
+        @($items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Logs'
+    }
+
+    # An older rsv-backup-reports-diag still carries the legacy category: the run clears it on the
+    # Edit setting path, and never clicks it, which would tick it on a new setting.
+    It 'reads step 5.2.8''s legacy Azure Backup Reporting Data as unchecked and never clicked' {
+        $item = @((Get-StateStep '5.2' '5.2.8').items | Where-Object { (@($_.labels) -join "`n") -ceq 'Azure Backup Reporting Data' })
+        $item.Count | Should -Be 1
+        @($item[0].unchecked) | Should -Be @(0)
+        @($item[0].stateOnly) | Should -Be @(0)
+    }
+
+    # 'Select', 'Click **Enable**' and 'Check that ...' give no state; a guide line added with a
+    # stating verb is added here.
+    It 'gives a state to these labels only' {
+        $expected = @(
+            '3.3.7/Use quickstart image/unchecked=0'
+            '3.3.2/Admin user/checked=0'
+            '3.3.2/Admin user/stateOnly=0'
+            '4.2.5/Enable soft delete for blobs/checked=0'
+            '4.2.6/Enable soft delete for containers/checked=0'
+            '4.2.7/Enable versioning for blobs/checked=0'
+            '4.3.6/Upload | Overwrite if files already exist | Upload/checked=1'
+            '4.4.2/Add your client IP address/checked=0'
+            '5.1.7/StorageRead | StorageWrite/checked=0,1'
+            '5.1.7/Send to Log Analytics workspace/checked=0'
+            '5.2.8/Core Azure Backup Data/checked=0'
+            '5.2.8/Addon Azure Backup Job Data/checked=0'
+            '5.2.8/Addon Azure Backup Policy Data/checked=0'
+            '5.2.8/Addon Azure Backup Storage Data/checked=0'
+            '5.2.8/Addon Azure Backup Protected Instance Data/checked=0'
+            '5.2.8/Azure Backup Operations/checked=0'
+            '5.2.8/Azure Backup Reporting Data/unchecked=0'
+            '5.2.8/Azure Backup Reporting Data/stateOnly=0'
+            '5.2.8/Send to Log Analytics workspace/checked=0'
+            '5.2.8/Send to Log Analytics workspace/checked=0'
+            '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/checked=0,1,2,3'
+            '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/unchecked=4'
+            '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/stateOnly=4'
+        )
+        @(Get-StatedItem | Sort-Object) | Should -Be @($expected | Sort-Object)
+    }
+
+    It 'never clicks the value a switch is set to: Enabled in step 3.3.2' {
+        $labels = @((Get-StateStep '3.3' '3.3.2').items | ForEach-Object { $_.labels })
+        $labels | Should -Not -Contain 'Enabled'
+        $labels | Should -Contain 'Access keys'
+    }
+
+    # A menu group or a section heading: clicking a Portal menu group collapses it.
+    It 'reads step <id>''s "<text>" as <labels>, the place no label' -ForEach @(
+        @{ lab = '1.3'; id = '1.3.17'; text = 'Under **Cost Management** click **Cost analysis**'; labels = @('Cost analysis') }
+        @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Settings**, select **Networking**.'; labels = @('Networking') }
+        @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Outbound traffic configuration**, click **VNet integration**.'; labels = @('VNet integration') }
+        @{ lab = '3.3'; id = '3.3.2'; text = 'In the left menu, under **Settings**, select **Access keys**.'; labels = @('Access keys') }
+        @{ lab = '4.2'; id = '4.2.2'; text = 'Click **Containers** under **Data storage**'; labels = @('Containers') }
+        @{ lab = '5.2'; id = '5.2.2'; text = 'Under **Instant restore**, fill in **Azure Backup Resource Group**: ...'; labels = @('Azure Backup Resource Group') }
+    ) {
+        $items = @((Get-StateStep $lab $id).items | Where-Object { (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
+        $items.Count | Should -Be 1
+    }
+
+    It 'reads no item from "Under **Blob access tier (default)**, select the desired tier" in step 4.2.4' {
+        $labels = @((Get-StateStep '4.2' '4.2.4').items | ForEach-Object { $_.labels })
+        $labels | Should -Not -Contain 'Blob access tier (default)'
+        $labels | Should -Contain 'Save'
+    }
+
+    It 'gives no item of any guide a label its line puts right after "under"' {
+        $leaks = @(foreach ($lab in $script:StateLabs.Keys) {
+                $lines = Get-Content -LiteralPath (Join-Path $script:RepoRoot $script:StateLabs[$lab].guide) -Encoding utf8
+                foreach ($step in $script:StateLabs[$lab].steps) {
+                    foreach ($item in $step.items) {
+                        foreach ($m in [regex]::Matches($lines[$item.line - 1], '(?i)\bunder\s+(?:the\s+)?\*\*(.+?)\*\*')) {
+                            if (@($item.labels) -ccontains $m.Groups[1].Value) { "step $($step.id) line $($item.line): '$($m.Groups[1].Value)'" }
+                        }
+                    }
+                }
             })
         $leaks | Should -BeNullOrEmpty -Because ($leaks -join '; ')
     }
