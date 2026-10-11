@@ -10,15 +10,15 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   env_secrets          the '${NAME}' references whose values are addresses (for the Redactor)
   missing_env          the '${NAME}' references the environment does not set
   resolve_value        a field value with the recording's placeholders and overrides applied
+  prompt_value         the value the decider's prompt shows for a field: the one the runner
+                       types, and where the recording changed it from the guide's (#210)
   resource_name        a resource name of a navigation chain with the placeholders filled, or
                        None when a placeholder is left (#199)
   value_action         type it, leave it ('[Leave blank]'), or report an unresolved [token]
   field_action         what to do with a field item and the value to do it with: as above, or
                        report a value parse.py marked '"literal": false' that the recording
                        does not resolve (#202)
-  prompt_value         the value the decider's prompt shows for a field: the one the runner
-                       types, and where the recording changed it from the guide's (#210)
-  checkbox_state      the check box state a field value names, if any
+  checkbox_state       the check box state a field value names, if any
   rejected_candidates  the reference set of candidates not chosen, without tenant data
   skip_reason          why the recording skips a step ('"skip": "<reason>"', #200), or None
   view_blade           the blade part of a recorded view, what a step's start is compared by (#207)
