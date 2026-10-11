@@ -505,9 +505,11 @@ def aria_lines(page: Page) -> list[tuple[str, str, int, bool]]:
     frames, in first-seen order. count is how many elements share that role and name: the Portal
     keeps earlier blades in the DOM, so 'Create' or 'Delete' often appears more than once, and a
     candidate that stands for several elements must never be clicked by name alone. in_row: at
-    least one of them sits in a row of a table or grid, not in a column header (the snapshot's
-    indentation gives its ancestors): its name is then the row's data, such as a user's display
-    name, and is kept out of the recording (recording.rejected_candidates, #317)."""
+    least one of them sits in a row of a table or grid and not in a column header of that row
+    (the snapshot's indentation gives its ancestors; a row nested in a header starts afresh):
+    its name is then the row's data, such as a user's display name, and is kept out of the
+    recording (recording.rejected_candidates, #317). Each line costs O(1) beyond its own length:
+    the open ancestors are a stack that carries their flags, each line pushed and popped once."""
     counts: dict[tuple[str, str], int] = {}
     in_row: dict[tuple[str, str], bool] = {}
     for frame in all_frames(page):
@@ -515,7 +517,9 @@ def aria_lines(page: Page) -> list[tuple[str, str, int, bool]]:
             snapshot = frame.locator("body").aria_snapshot(timeout=2000)
         except PlaywrightError:     # timed out, or the frame went away while the Portal navigated
             continue
-        ancestors: list[tuple[int, str]] = []     # (indent, role) of the elements this line is in
+        # (indent, under_row, under_header) of each open element a line may sit in; every frame
+        # starts at the top, whatever line the previous one ended inside.
+        ancestors: list[tuple[int, bool, bool]] = []
         for line in snapshot.splitlines():
             key = snapshot_key(line)
             if key is None:
@@ -523,11 +527,16 @@ def aria_lines(page: Page) -> list[tuple[str, str, int, bool]]:
             indent = len(line) - len(line.lstrip())
             while ancestors and ancestors[-1][0] >= indent:
                 ancestors.pop()
-            roles = [role for _, role in ancestors]
-            if key[1] and key[0] in CANDIDATE_ROLES:
+            under_row, under_header = (ancestors[-1][1], ancestors[-1][2]) if ancestors else (False, False)
+            role = key[0]
+            if key[1] and role in CANDIDATE_ROLES:
                 counts[key] = counts.get(key, 0) + 1
-                in_row[key] = in_row.get(key, False) or ("row" in roles and "columnheader" not in roles)
-            ancestors.append((indent, key[0]))
+                in_row[key] = in_row.get(key, False) or (under_row and not under_header)
+            if role == "row":
+                under_row, under_header = True, False
+            elif role == "columnheader":
+                under_header = True
+            ancestors.append((indent, under_row, under_header))
     return [(role, name, count, in_row[(role, name)]) for (role, name), count in counts.items()][:300]
 
 

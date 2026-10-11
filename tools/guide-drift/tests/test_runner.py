@@ -19,6 +19,7 @@ import json
 import re
 import sys
 import tempfile
+import time
 import types
 import unittest
 import contextlib
@@ -1695,6 +1696,60 @@ class SnapshotKeyTests(unittest.TestCase):
                                  ("link", "Illidan Stormrage", 2, True), ("checkbox", "Khadgar Archmage", 1, True),
                                  ("tab", "Members", 1, False)])
         self.assertEqual([c.in_row for c in candidates], [line[3] for line in lines])
+
+    def in_row(self, *trees: str) -> dict[tuple[str, str], bool]:
+        """(role, name) -> in_row of aria_lines over one frame per tree."""
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(tree=t) for t in trees]):
+            return {(role, name): flag for role, name, _, flag in run.aria_lines(FakePage())}
+
+    def test_a_row_nested_in_a_column_header_is_a_row_again(self) -> None:
+        # #317: the header's flag ends where a new row starts (example data: a fictional user).
+        tree = "\n".join([
+            '- row "Name":',
+            '  - columnheader "Name":',
+            '    - button "Name"',
+            '    - grid "Filter":',
+            '      - row "Illidan Stormrage":',
+            '        - link "Illidan Stormrage"',
+            '    - button "Sort"',
+        ])
+        self.assertEqual(self.in_row(tree), {("button", "Name"): False, ("link", "Illidan Stormrage"): True,
+                                             ("button", "Sort"): False})
+
+    def test_a_quoted_ancestor_key_still_opens_a_row(self) -> None:
+        # A key with ': ' is single-quoted (snapshot_key); its children are still its own.
+        tree = "\n".join([
+            "- 'row \"Khadgar Archmage: Guest\"':",
+            "  - 'link \"Khadgar Archmage: profile\"'",
+            '- link "Home"',
+        ])
+        self.assertEqual(self.in_row(tree), {("link", "Khadgar Archmage: profile"): True, ("link", "Home"): False})
+
+    def test_each_frame_starts_outside_every_row(self) -> None:
+        first = "\n".join(['- grid "Users":', '  - row "Illidan Stormrage":', '    - link "Illidan Stormrage"'])
+        self.assertEqual(self.in_row(first, '- link "Home"'),
+                         {("link", "Illidan Stormrage"): True, ("link", "Home"): False})
+
+    def test_aria_lines_take_linear_time_however_deep_or_long_the_snapshot(self) -> None:
+        # Each line is pushed and popped once, with its flags on the stack (#317): a chain 10,000
+        # deep (one space per level, so the snapshot is as small as such a chain can be) and a
+        # flat list of 100,000 lines each take a fraction of a second. Looking at every open
+        # ancestor of every line took seconds for the chain.
+        depth = 10_000
+        chain = "\n".join([" " * i + "- row:" if i == 0 else " " * i + "- group:" for i in range(depth)]
+                          + [" " * depth + '- link "Deepest"', '- link "Top"'])
+        flat = "\n".join(f'- button "Action {i}"' for i in range(100_000))
+        for name, tree, expected in (("chain", chain, {("link", "Deepest"): True, ("link", "Top"): False}),
+                                     ("flat", flat, None)):
+            with self.subTest(snapshot=name):
+                started = time.perf_counter()
+                flags = self.in_row(tree)
+                elapsed = time.perf_counter() - started
+                if expected is not None:
+                    self.assertEqual(flags, expected)
+                else:
+                    self.assertEqual(len(flags), 300)          # aria_lines keeps the first 300
+                self.assertLess(elapsed, 1.0)
 
 
 class BladeStillLoadingTests(unittest.TestCase):
