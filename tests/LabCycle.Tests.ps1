@@ -198,7 +198,31 @@ BeforeAll {
         , $hits
     }
 
-    $orchestrators = @((Join-Path $script:ToolsDir 'Invoke-LabCycle.ps1'), (Join-Path $script:ToolsDir 'Remove-LabCycle.ps1'))
+    # An Az getter as a default probe meets it, in place of the poison for one test (#290). A
+    # failure is reported with Write-Error, as the real cmdlet does, so the probe's own
+    # -ErrorAction decides whether it is seen. Put back by Restore-AzPoison, in an AfterEach.
+    function Use-AzStub {
+        param([Parameter(Mandatory)][string]$Name, [object[]]$Value = @(), [switch]$Fail)
+        $items = $Value
+        $failing = [bool]$Fail
+        $stub = {
+            [CmdletBinding()]
+            param([Parameter(ValueFromRemainingArguments)]$Rest)
+            $null = $Rest   # the probes pass -ResourceType and the like; none of them matters here
+            if ($failing) {
+                Write-Error -ErrorId 'AuthorizationFailed' -Message "The client 'fixture' does not have authorization to perform action 'read' over scope '/subscriptions/fixture-subscription'."
+                return
+            }
+            $items
+        }.GetNewClosure()
+        Set-Item -LiteralPath "Function:\global:$Name" -Value $stub
+    }
+    function Restore-AzPoison {
+        param([Parameter(Mandatory)][string[]]$Name)
+        foreach ($one in $Name) { Set-Item -LiteralPath "Function:\global:$one" -Value (Get-Poison -Name $one) }
+    }
+
+    $orchestrators =@((Join-Path $script:ToolsDir 'Invoke-LabCycle.ps1'), (Join-Path $script:ToolsDir 'Remove-LabCycle.ps1'))
 
     # Layer 1. The developer's own global defaults are copied in first, so they still apply; the
     # copy lives in this file's scope and goes away with it.
@@ -1997,6 +2021,270 @@ Describe 'Teardown - the residue sweep' {
         $deleted.Count | Should -Be 0
         @($result.Assertions).Count | Should -Be 0
         $LASTEXITCODE | Should -Be 0
+    }
+}
+
+Describe 'Teardown - a check that fails is not "gone" (#290)' {
+    # Until #290 the default probes looked up with -ErrorAction SilentlyContinue: a check that
+    # failed - a 403, throttling, a transient ARM error - returned nothing, and nothing passed as
+    # "gone". A probe now throws when it cannot tell, and the teardown reports that as a failure.
+    BeforeAll {
+        $script:CheckManifest = New-FixtureManifest -Body @'
+@{
+    Phases = @()
+    SoftDeleteGuards = @()
+    CompileOnly = @()
+    Teardowns = @()
+    ResidualSweep = @{
+        BackupResourceGroupPrefix = 'AzureBackupRG_'
+        AssertAbsent = @(
+            @{ Kind = 'RecoveryServicesVault'; Name = 'platform-skycraft-swc-rsv'; ResourceGroup = 'platform-skycraft-swc-rg' }
+            @{ Kind = 'DataProtectionBackupVault'; Name = 'platform-skycraft-swc-bv'; ResourceGroup = 'platform-skycraft-swc-rg' }
+        )
+        ResourceGroups = @('dev-skycraft-swc-rg')
+    }
+    ToolingFloor = @{ AzCli = '2.75.0'; AzPowerShell = '7.5.0' }
+}
+'@
+        $script:CheckBase = @{
+            ContextProbe             = $script:GoodContext
+            ToolingFloorRunner       = { @() }
+            TeardownRunner           = { 0 }
+            BackupResourceGroupProbe = { @() }
+            ResourceGroupProbe       = { $null }
+            VaultProbe               = { $null }
+            ResourceGroupRemover     = { $null }
+        }
+
+        function Invoke-RemoveCycleCheck {
+            param([hashtable]$Probes)
+            & $script:RemoveCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:CheckManifest `
+                -Confirm:$false -LogDirectory $script:OfflinePaths.LogDirectory `
+                -ResultsPath $script:OfflinePaths.ResultsPath @Probes
+        }
+
+        # The shipped default of one probe, lifted from the script's own param block: the code
+        # under test is the real default, and a call that forgets to pass it still meets the poison.
+        $script:RemoveCycleAst = [System.Management.Automation.Language.Parser]::ParseFile($script:RemoveCycle, [ref]$null, [ref]$null)
+        function Get-DefaultProbe {
+            param([Parameter(Mandatory)][string]$Name)
+            $parameter = @($script:RemoveCycleAst.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq $Name })[0]
+            $parameter.DefaultValue.ScriptBlock.GetScriptBlock()
+        }
+    }
+
+    Context 'the teardown reports a probe that throws' {
+
+        It 'fails the vault assertion when the vault cannot be checked' {
+            $probes = @{} + $script:CheckBase
+            $probes.VaultProbe = { throw 'AuthorizationFailed: no read on the vault' }
+
+            $result = Invoke-RemoveCycleCheck -Probes $probes
+
+            $failed = @($result.Assertions | Where-Object { -not $_.Ok })
+            $failed.Count | Should -Be 2 -Because 'both vaults are unchecked, so neither passes as gone'
+            $failed[0].Detail | Should -Match "Could not check whether RecoveryServicesVault 'platform-skycraft-swc-rsv'.*AuthorizationFailed"
+            $LASTEXITCODE | Should -Be 2
+        }
+
+        It 'fails the restore point assertion when the backup groups cannot be checked' {
+            $probes = @{} + $script:CheckBase
+            $probes.BackupResourceGroupProbe = { throw 'TooManyRequests' }
+
+            $result = Invoke-RemoveCycleCheck -Probes $probes
+
+            $failed = @($result.Assertions | Where-Object { -not $_.Ok })
+            $failed.Count | Should -Be 1
+            $failed[0].Name   | Should -Be 'no SkyCraft restore point collection left'
+            $failed[0].Detail | Should -Match 'Could not check the AzureBackupRG_\* groups.*TooManyRequests'
+            $LASTEXITCODE | Should -Be 1
+        }
+
+        It 'neither deletes nor passes a resource group whose existence cannot be checked' {
+            $deleted = New-CallCounter
+            $probes = @{} + $script:CheckBase
+            $probes.ResourceGroupProbe   = { throw 'AuthorizationFailed: no read on the group' }
+            $probes.ResourceGroupRemover = { $deleted.Count++; $null }.GetNewClosure()
+
+            $result = Invoke-RemoveCycleCheck -Probes $probes
+
+            $deleted.Count | Should -Be 0 -Because 'a check that failed is no licence to delete'
+            $result.TeardownFailedCount | Should -Be 1 -Because 'the sweep could not check the group'
+            @($result.Teardowns | Where-Object { $_.Status -eq 'Failed' })[0].Detail | Should -Match 'could not check whether it exists'
+            @($result.Assertions | Where-Object { -not $_.Ok }).Count | Should -Be 1 -Because 'the assertion could not check it either'
+            $LASTEXITCODE | Should -Be 2
+        }
+    }
+
+    Context 'the default probes throw when the lookup fails, and list and pick by name' {
+
+        AfterEach {
+            Restore-AzPoison -Name 'Get-AzResourceGroup', 'Get-AzResource', 'Get-AzRecoveryServicesVault', 'Get-AzDataProtectionBackupVault'
+        }
+
+        It 'the resource group probe throws when the groups cannot be listed' {
+            Use-AzStub -Name 'Get-AzResourceGroup' -Fail
+            $probe = Get-DefaultProbe -Name 'ResourceGroupProbe'
+            { & $probe 'dev-skycraft-swc-rg' } | Should -Throw -ExpectedMessage '*does not have authorization*'
+        }
+
+        It 'the resource group probe finds a group by name in the listing, and nothing for a missing one' {
+            Use-AzStub -Name 'Get-AzResourceGroup' -Value @(
+                [pscustomobject]@{ ResourceGroupName = 'dev-skycraft-swc-rg' }
+                [pscustomobject]@{ ResourceGroupName = 'unrelated-rg' })
+            $probe = Get-DefaultProbe -Name 'ResourceGroupProbe'
+            @(& $probe 'dev-skycraft-swc-rg').Count  | Should -Be 1
+            @(& $probe 'prod-skycraft-swc-rg').Count | Should -Be 0
+        }
+
+        It 'the vault probe throws when the <Kind> vaults cannot be listed' -ForEach @(
+            @{ Kind = 'RecoveryServicesVault';     Command = 'Get-AzRecoveryServicesVault' }
+            @{ Kind = 'DataProtectionBackupVault'; Command = 'Get-AzDataProtectionBackupVault' }
+        ) {
+            Use-AzStub -Name $Command -Fail
+            $probe = Get-DefaultProbe -Name 'VaultProbe'
+            { & $probe @{ Kind = $Kind; Name = 'platform-skycraft-swc-v'; ResourceGroup = 'platform-skycraft-swc-rg' } } |
+                Should -Throw -ExpectedMessage '*does not have authorization*'
+        }
+
+        It 'the vault probe picks the vault by group and name from the subscription''s vaults' {
+            Use-AzStub -Name 'Get-AzRecoveryServicesVault' -Value @(
+                [pscustomobject]@{ Name = 'platform-skycraft-swc-rsv'; ResourceGroupName = 'someone-elses-rg' }
+                [pscustomobject]@{ Name = 'platform-skycraft-swc-rsv'; ResourceGroupName = 'platform-skycraft-swc-rg' })
+            Use-AzStub -Name 'Get-AzDataProtectionBackupVault' -Value @(
+                [pscustomobject]@{ Name = 'platform-skycraft-swc-bv'; Id = '/subscriptions/fixture-subscription/resourceGroups/someone-elses-rg/providers/Microsoft.DataProtection/backupVaults/platform-skycraft-swc-bv' })
+            $probe = Get-DefaultProbe -Name 'VaultProbe'
+            @(& $probe @{ Kind = 'RecoveryServicesVault'; Name = 'platform-skycraft-swc-rsv'; ResourceGroup = 'platform-skycraft-swc-rg' }).Count | Should -Be 1
+            @(& $probe @{ Kind = 'DataProtectionBackupVault'; Name = 'platform-skycraft-swc-bv'; ResourceGroup = 'platform-skycraft-swc-rg' }).Count | Should -Be 0
+        }
+
+        It 'the restore point probe throws when the collections cannot be listed' {
+            Use-AzStub -Name 'Get-AzResource' -Fail
+            $probe = Get-DefaultProbe -Name 'BackupResourceGroupProbe'
+            { & $probe 'AzureBackupRG_' } | Should -Throw -ExpectedMessage '*does not have authorization*'
+        }
+
+        It 'the restore point probe reports only SkyCraft collections in the prefixed groups' {
+            Use-AzStub -Name 'Get-AzResource' -Value @(
+                [pscustomobject]@{ Name = 'AzureBackup_dev-skycraft-swc-auth-vm_1'; ResourceGroupName = 'AzureBackupRG_swedencentral_1'; ResourceType = 'Microsoft.Compute/restorePointCollections' }
+                [pscustomobject]@{ Name = 'AzureBackup_unrelated-vm_2';             ResourceGroupName = 'AzureBackupRG_swedencentral_1'; ResourceType = 'Microsoft.Compute/restorePointCollections' }
+                [pscustomobject]@{ Name = 'AzureBackup_prod-skycraft-swc-auth-vm_3'; ResourceGroupName = 'skycraft-snapshots-rg';         ResourceType = 'Microsoft.Compute/restorePointCollections' })
+            $probe = Get-DefaultProbe -Name 'BackupResourceGroupProbe'
+            $groups = @(& $probe 'AzureBackupRG_')
+            $groups.Count | Should -Be 1
+            $groups[0].Name | Should -Be 'AzureBackupRG_swedencentral_1'
+            @($groups[0].SkyCraftCollections) | Should -Be @('AzureBackup_dev-skycraft-swc-auth-vm_1')
+        }
+
+        It 'a teardown on the default probes fails its assertions when every check fails' {
+            Use-AzStub -Name 'Get-AzResourceGroup' -Fail
+            Use-AzStub -Name 'Get-AzResource' -Fail
+            Use-AzStub -Name 'Get-AzRecoveryServicesVault' -Fail
+            Use-AzStub -Name 'Get-AzDataProtectionBackupVault' -Fail
+            $deleted = New-CallCounter
+            $probes = @{} + $script:CheckBase
+            $probes.ResourceGroupProbe       = Get-DefaultProbe -Name 'ResourceGroupProbe'
+            $probes.VaultProbe               = Get-DefaultProbe -Name 'VaultProbe'
+            $probes.BackupResourceGroupProbe = Get-DefaultProbe -Name 'BackupResourceGroupProbe'
+            $probes.ResourceGroupRemover     = { $deleted.Count++; $null }.GetNewClosure()
+
+            $result = Invoke-RemoveCycleCheck -Probes $probes
+
+            $deleted.Count | Should -Be 0
+            $result.AssertionFailedCount | Should -Be 4 -Because 'two vaults, the restore points and one group: none of them could be checked'
+            $result.TeardownFailedCount  | Should -Be 1
+            $LASTEXITCODE | Should -Be 5
+        }
+    }
+}
+
+Describe 'Preflight - a leftover check that fails is a stop, not "clear" (#290)' {
+    # Until #290 the default LeftoverProbe listed with -ErrorAction SilentlyContinue: a listing that
+    # failed returned nothing, and the leftovers check reported every guarded name clear.
+    BeforeAll {
+        $script:SshKey = Join-Path $script:Scratch 'preflight-key.pub'
+        Set-Content -LiteralPath $script:SshKey -Value 'ssh-ed25519 fixture'
+
+        # Every check before 'leftovers' passes, so the leftovers answer is the one under test.
+        $script:PreflightBase = @{
+            SubscriptionId    = 'fixture-subscription'
+            Guards            = @(
+                @{ Kind = 'KeyVault';     Name = 'dev-skycraft-swc-kv';       ResourceGroup = 'dev-skycraft-swc-rg' }
+                @{ Kind = 'LogAnalytics'; Name = 'platform-skycraft-swc-law'; ResourceGroup = 'platform-skycraft-swc-rg' }
+            )
+            SshKeyPath        = $script:SshKey
+            LockPath          = (Join-Path $script:Scratch 'preflight-lock.json')
+            ContextProbe      = $script:GoodContext
+            PermissionProbe   = { @(@{ actions = @('*'); notActions = @() }) }
+            CommandProbe      = { $true }
+            BicepVersionProbe = { 'Bicep CLI version 0.0.0 (fixture)' }
+            CanaryProbe       = { $true }
+        }
+
+        # The shipped default, lifted from Test-LabCyclePreflight's param block for the shape tests.
+        $moduleAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:ToolsDir 'LabCycle.psm1'), [ref]$null, [ref]$null)
+        $preflightAst = @($moduleAst.FindAll({
+            $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq 'Test-LabCyclePreflight'
+        }, $true))[0]
+        $script:DefaultLeftoverProbe = @($preflightAst.Body.ParamBlock.Parameters |
+            Where-Object { $_.Name.VariablePath.UserPath -eq 'LeftoverProbe' })[0].DefaultValue.ScriptBlock.GetScriptBlock()
+    }
+
+    AfterEach {
+        Restore-AzPoison -Name 'Get-AzKeyVault', 'Get-AzResource'
+    }
+
+    It 'stops at the leftovers check when the probe throws, and runs nothing after it' {
+        $probes = @{} + $script:PreflightBase
+        $probes.LeftoverProbe = { throw 'TooManyRequests: try again later' }
+
+        $results = @(Test-LabCyclePreflight @probes)
+
+        $results[-1].Name   | Should -Be 'leftovers'
+        $results[-1].Ok     | Should -BeFalse
+        $results[-1].Detail | Should -Match "could not check the 2 guarded name\(s\): TooManyRequests.*not 'clear'"
+        $results.Name       | Should -Not -Contain 'pester canary'
+    }
+
+    It 'stops when the shipped default cannot list the <What>' -ForEach @(
+        @{ What = 'soft-deleted key vaults'; Failing = 'Get-AzKeyVault'; Listing = 'Get-AzResource' }
+        @{ What = 'resources by name';       Failing = 'Get-AzResource'; Listing = 'Get-AzKeyVault' }
+    ) {
+        Use-AzStub -Name $Failing -Fail
+        Use-AzStub -Name $Listing
+
+        # No -LeftoverProbe: the module's own default runs, and meets the stubs through the global
+        # scope, as it would meet the real cmdlets.
+        $results = @(Test-LabCyclePreflight @script:PreflightBase)
+
+        $results[-1].Name   | Should -Be 'leftovers'
+        $results[-1].Ok     | Should -BeFalse -Because 'a listing that failed must not read as every name clear'
+        $results[-1].Detail | Should -Match 'could not check.*does not have authorization'
+    }
+
+    It 'passes when both listings succeed and hold none of the guarded names' {
+        Use-AzStub -Name 'Get-AzKeyVault' -Value @([pscustomobject]@{ VaultName = 'someone-elses-kv'; Location = 'swedencentral'; EnablePurgeProtection = $false })
+        Use-AzStub -Name 'Get-AzResource'
+
+        $results = @(Test-LabCyclePreflight @script:PreflightBase)
+
+        @($results | Where-Object { $_.Name -eq 'leftovers' })[0].Ok | Should -BeTrue
+        $results[-1].Name | Should -Be 'pester canary'
+    }
+
+    It 'the default probe picks the guarded names exactly from what the getters list' {
+        Use-AzStub -Name 'Get-AzKeyVault' -Value @(
+            [pscustomobject]@{ VaultName = 'dev-skycraft-swc-kv';     Location = 'swedencentral'; EnablePurgeProtection = $true }
+            [pscustomobject]@{ VaultName = 'dev-skycraft-swc-kv-old'; Location = 'swedencentral'; EnablePurgeProtection = $false })
+        Use-AzStub -Name 'Get-AzResource' -Value @(
+            [pscustomobject]@{ Name = 'platform-skycraft-swc-law';      ResourceId = '/subscriptions/fixture-subscription/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.OperationalInsights/workspaces/platform-skycraft-swc-law' }
+            [pscustomobject]@{ Name = 'platform-skycraft-swc-law-copy'; ResourceId = '/subscriptions/fixture-subscription/resourceGroups/elsewhere-rg/providers/Microsoft.OperationalInsights/workspaces/platform-skycraft-swc-law-copy' })
+
+        $found = @(& $script:DefaultLeftoverProbe $script:PreflightBase.Guards)
+
+        $found.Count | Should -Be 2
+        @($found | ForEach-Object { "$($_.Kind):$($_.Name)" }) | Should -Be @('KeyVault:dev-skycraft-swc-kv', 'LogAnalytics:platform-skycraft-swc-law')
+        $found[0].Detail | Should -Match 'purge protection ON'
     }
 }
 
