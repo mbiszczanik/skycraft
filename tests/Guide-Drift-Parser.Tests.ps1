@@ -31,7 +31,9 @@
       right after 'check', 'uncheck', 'enable' and the other verbs that state a check box's state
       carries that state ("checked", "unchecked"), so the runner sets the box instead of toggling
       it; a switch set to a value ('Toggle **X** to **Enabled**') carries the value's state and the
-      value is no label, and a place after 'under' ('Under **Settings**, ...') is no label either.
+      value is no label, a label that 'Leave' or 'Make sure' gives a state word ('Leave **X**
+      unchecked') carries that state, and a place after 'under' ('Under **Settings**, ...') is no
+      label.
       One guide line of each shape in use is pinned, and so is the whole list of stated labels
       (#296; rules in test_parse.py).
 
@@ -1249,7 +1251,7 @@ Describe 'parse.py - only one option of a step is read, in every lab guide (#201
     }
 }
 
-Describe 'parse.py - a label the guide says to check, uncheck, enable or switch carries that state, and a place after "under" is no label, in every lab guide (#296)' {
+Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or leave carries that state, and a place after "under" is no label, in every lab guide (#296)' {
     BeforeAll {
         $script:StateLabs = @{}
         $guides = Get-ChildItem -Path $script:RepoRoot -Directory -Filter 'module-*' |
@@ -1284,6 +1286,8 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable or switch 
         @{ lab = '4.2'; id = '4.2.5'; text = 'Under **Recovery**, enable **Enable soft delete for blobs**'; kind = 'action'; labels = @('Enable soft delete for blobs'); key = 'checked'; indices = @(0) }
         @{ lab = '3.3'; id = '3.3.2'; text = 'Toggle **Admin user** to **Enabled**.'; kind = 'action'; labels = @('Admin user'); key = 'checked'; indices = @(0) }
         @{ lab = '4.3'; id = '4.3.6'; text = '... -> check **Overwrite if files already exist** -> **Upload**'; kind = 'navigation'; labels = @('Upload', 'Overwrite if files already exist', 'Upload'); key = 'checked'; indices = @(1) }
+        # Health is ticked by nothing: a click would tick it.
+        @{ lab = '5.2'; id = '5.2.8'; text = '... Leave the **Health** metric (under **Metrics**) unchecked - ...'; kind = 'action'; labels = @('Core Azure Backup Data', 'Addon Azure Backup Job Data', 'Addon Azure Backup Policy Data', 'Addon Azure Backup Protected Instance Data', 'Health'); key = 'unchecked'; indices = @(4) }
     ) {
         $items = @(($script:StateLabs[$lab].steps | Where-Object id -eq $id).items |
             Where-Object { (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
@@ -1308,6 +1312,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable or switch 
             '5.1.7/Send to Log Analytics workspace/checked=0'
             '5.2.8/Send to Log Analytics workspace/checked=0'
             '5.2.8/Send to Log Analytics workspace/checked=0'
+            '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/unchecked=4'
         )
         @(Get-StatedItem | Sort-Object) | Should -Be @($expected | Sort-Object)
     }

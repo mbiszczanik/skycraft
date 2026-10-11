@@ -1218,6 +1218,40 @@ class StateVerbTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.item(text), self.action(labels))
 
+    def test_leave_and_make_sure_state_the_state_after_the_label(self) -> None:
+        for text, labels, states in (
+                ("Leave **Health** unchecked", ["Health"], {"unchecked": [0]}),
+                ("Leave the **Health** metric (under **Metrics**) unchecked - Backup reports does not use it.",
+                 ["Health"], {"unchecked": [0]}),                                                     # 5.2.8
+                ("Leave **Azure Backup Reporting Data** (`AzureBackupReport`) unchecked: it is the legacy event.",
+                 ["Azure Backup Reporting Data"], {"unchecked": [0]}),                               # 5.2.8 prose
+                ("Leave **A** checked.", ["A"], {"checked": [0]}),
+                ("Leave **A** ticked", ["A"], {"checked": [0]}),
+                ("leave **A** enabled", ["A"], {"checked": [0]}),
+                ("Leave **A** on", ["A"], {"checked": [0]}),
+                ("Leave **A** disabled (default)", ["A"], {"unchecked": [0]}),
+                ("Leave **A** off, then click **Save**", ["A", "Save"], {"unchecked": [0]}),
+                ("Make sure **A** is checked", ["A"], {"checked": [0]}),
+                ("Make sure that the **A** box is selected.", ["A"], {"checked": [0]}),
+                ("Ensure **A** is unchecked", ["A"], {"unchecked": [0]}),
+                ("Ensure **A** is enabled", ["A"], {"checked": [0]}),
+                ("Ensure the **A** option is disabled; click **Save**", ["A", "Save"], {"unchecked": [0]}),
+                ("Click **Save**. Leave **A** unchecked.", ["Save", "A"], {"unchecked": [1]})):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), self.action(labels, **states))
+
+    def test_leave_and_make_sure_without_a_state_word_state_nothing(self) -> None:
+        for text, labels in (("Leave **A** as it is", ["A"]),
+                             ("Leave **A** unchecked if you want to keep costs low", ["A"]),
+                             ("Leave it **Disabled** and do not click **Save**", ["Disabled", "Save"]),   # 4.2.12 prose
+                             ("Ensure storage account is **StorageV2** (General Purpose v2)", ["StorageV2"]),
+                             ("Ensure the VM is **Running**.", ["Running"]),
+                             ("Make sure **A** is visible", ["A"]),
+                             ("Ensure **Sweden Central** is set to **Enabled**.", ["Sweden Central", "Enabled"]),
+                             ("Please leave **A** unchecked", ["A"])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), self.action(labels))
+
     def test_a_field_with_a_state_is_still_a_field(self) -> None:
         # #307's shape: the state is the field's value, which checkbox_state reads.
         self.assertEqual(self.item("**Enable traffic analytics**: checked"),
@@ -1232,7 +1266,10 @@ class StateVerbTests(unittest.TestCase):
                          "Check **A** (" + "y" * 100_000 + ")" + space * 100_000 + "x",
                          "Toggle **A**" + space * 100_000 + "to" + space * 100_000 + "x",
                          "Turn" + space * 100_000 + "on" + space * 100_000 + "x **A**",
-                         "Under" + space * 100_000 + "x **A**"):
+                         "Under" + space * 100_000 + "x **A**",
+                         "Leave **A**" + space * 100_000 + "x" + space * 100_000 + "y",
+                         "Leave **A** (" + "y" * 100_000 + ")" + space * 100_000 + "x",
+                         "Make sure **A**" + space * 100_000 + "is" + space * 100_000 + "x"):
                 with self.subTest(space=repr(space), text=text[:12]):
                     started = time.perf_counter()
                     self.item(text)
