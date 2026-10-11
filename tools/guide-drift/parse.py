@@ -163,17 +163,33 @@ without a browser. Rules (issue #189):
     box', 'box', 'switch', 'toggle', 'option'), a remark in parentheses and a full stop may come
     before the item's end, a separator or the next clause (a comma, a semicolon, 'and', 'then',
     'or'): 'Uncheck **Use quickstart image**.' (3.3.7), 'Under **Recovery**, enable **Enable
-    soft delete for blobs**' (4.2.5; Recovery is clicked as before), '... → check **Overwrite if
-    files already exist** → **Upload**' (4.3.6). Labels listed after such a label with commas
-    and 'and' take its state ('Uncheck **A**, **B** and **C**'). Other words after the label
-    make the verb no instruction to set a box ('Check **Policy enforcement** is set to
-    "Enabled"', 1.3), and so do other words between the verb and the label ('Check the box next
-    to **X**'). 'Select' states nothing: in the guides it opens a blade, a tab, a row or an
-    option far more often than it ticks a box, so a check box found for 'Select **X**' is
-    clicked as before; a guide that needs a box ticked says 'Check'. The runner sets the state
-    only on a check box, switch or radio; any other element it finds for the label ('Enable
-    ...' naming a button) is clicked as before. A '**Label**: checked' field is read as before
-    (checkbox_state).
+    soft delete for blobs**' (4.2.5), '... → check **Overwrite if files already exist** →
+    **Upload**' (4.3.6). 'Toggle', 'Turn' and 'Switch' state a state with the way the switch is
+    to go (TOGGLE_BEFORE): 'Turn on **X**', 'Switch off **X**', 'Turn **X** on', or a bold value
+    of TOGGLE_VALUES (Enabled, Disabled, On, Off, in any case) right after the label, with an
+    optional 'to': 'Toggle **Admin user** to **Enabled**.' (3.3.2). That value is the state,
+    not a label, and is not clicked; the same rule applies to what may follow it. 'Switch Cloud
+    Shell to **PowerShell**' (3.4.4) and 'Toggle **X**' state nothing. Labels listed after such
+    a label with commas and 'and' take its state ('Uncheck **A**, **B** and **C**'). Other
+    words after the label make the verb no instruction to set a box ('Check **Policy
+    enforcement** is set to "Enabled"', 1.3), and so do other words between the verb and the
+    label ('Check the box next to **X**'). 'Select' states nothing: in the guides it opens a
+    blade, a tab, a row or an option far more often than it ticks a box, so a check box found
+    for 'Select **X**' is clicked as before; a guide that needs a box ticked says 'Check'. The
+    runner sets the state only on a check box, switch or radio; any other element it finds for
+    the label ('Enable ...' naming a button) is clicked as before. A '**Label**: checked' field
+    is read as before (checkbox_state).
+  * A bold span right after the word 'under' (and an optional 'the') names where the next
+    label is, a blade menu's group or a section heading, and is no label (UNDER): 'Under
+    **Settings**, select **Networking**.' (3.4.10), 'Under **Cost Management** click **Cost
+    analysis**' (1.3.17), 'In the left menu, under **Settings**, select **Access keys**.'
+    (3.3.2), 'Click **Containers** under **Data storage**' (4.2.2), and in a chain, where it is
+    no step. Clicking a Portal menu group collapses it, and a section heading is no control. In
+    every guide line of that shape today the place is open by default (a menu group, a form's
+    section) or no control at all (Recovery and Tracking on Data protection, Instant restore in
+    a backup policy), so nothing is lost; a collapsed menu group is opened by the runner
+    ('Expand all headers'). An item that names only a place gives no item: 'Under **Blob access
+    tier (default)**, select the desired tier' (4.2.4) names no tier.
   * Bold spans that are not UI elements are dropped by NON_UI_BOLD, by the guide's own entry
     in LAB_CAPTIONS and by the colon rule (bold text ending with ':' is a caption, not a label).
     NON_UI_BOLD holds the captions of every guide ('Note', 'Expected Result', 'Result');
@@ -218,7 +234,7 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     a description is cut there; an instruction is known only by INSTRUCTION's verbs ('Then
     click **Save**.' after a chain is a description and dropped), and the other way round, a
     description that starts with one of them is read as an instruction ('→ **B**. Open handles
-    are listed under **Handles**.' clicks Handles, though 'Open handles' is a term of the
+    are listed in **Handles**.' clicks Handles, though 'Open handles' is a term of the
     Portal, 4.3); and CHAIN_LEAD_IN's verbs are a short list, so another verb phrase before a
     colon can still read as a field's label.
   * A resource name that opens a chain and is not on screen is looked up in the Portal's global
@@ -240,7 +256,7 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     needs 3.2.1 skipped in its recording (#200) or a per-step choice of option.
   * A caption's text is an instruction only when an INSTRUCTION word starts it or follows its
     first comma, so '**Note**: When it is ready, the Portal asks you to click **OK**' is read as a
-    description and clicks nothing, and '**Note**: Open handles are listed under **Handles**'
+    description and clicks nothing, and '**Note**: Open handles are listed in **Handles**'
     is read as an instruction and clicks Handles. No guide has either shape today.
   * Some values that are not text to type still read as literal; #202 does not cover them, and
     each is found when its lab is recorded (#204): 'empty' (3.3.7),
@@ -249,12 +265,14 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     placeholder ('Owner = <your name>', 5.3). A table row with an empty value that captions the
     rows below it ('**Remote virtual network**', 2.1.9) is a field with an empty value.
   * Only field values are checked for instructions; a tag value is typed as written.
-  * A state is read only from the verbs of STATE_VERBS right before a label (#296): 'Toggle
-    **Admin user** to **Enabled**' (3.3.2, a switch whose state follows it) clicks Admin user
-    and then Enabled, and 'Turn on **X**' or 'Make sure **X** is checked' would click X, which
-    toggles a check box. The other way round, 'Check **X**.' meant as 'look at X' is read as
-    'tick X'; the runner then clicks X as before when it is no check box, and ticks it when it
-    is. No guide has either of the last two shapes today.
+  * A state is read only from the verbs of STATE_VERBS and the switch verbs around a label
+    (#296): 'Make sure **X** is checked' or 'Leave **X** unchecked' clicks X, which toggles a
+    check box ('Leave the **Health** metric (under **Metrics**) unchecked', 5.2.8, clicks
+    Health), and 'Set to **On**.' (3.4.11, no label before the value) clicks On. The other way
+    round, 'Check **X**.' meant as 'look at X' is read as 'tick X'; the runner then clicks X as
+    before when it is no check box, and ticks it when it is. No guide has that shape today.
+  * A bold span after 'under' is always a place: 'open the failed job under **Backup jobs**'
+    (5.2.9, in prose today) would drop Backup jobs, which there is the menu entry to open.
   * Only 'verify:', 'Verify ...:', 'Confirm ...:' and an Expected Result introduce a check
     list (#224, #246). A list or table after other wording is read as before, and an
     Expected Result ending in a colon takes a list, not a table.
@@ -411,6 +429,20 @@ STATE_BEFORE = re.compile(
 STATE_AFTER = re.compile(
     r"(?:\s+(?:check\s?box|box|switch|toggle|option)\b)?(?:\s*\([^()]*\))?(?:\s*\.)?"
     r"\s*(?:$|→|->|>\s|[,;]|(?:and|then|or)\b)", re.IGNORECASE)
+# 'Toggle', 'Turn' and 'Switch' state a switch's state with the way it is to go: before the label
+# ('Turn on **X**', 'Switch off **X**'), after it ('Turn **X** on'), or as a value in a bold span
+# after it, with an optional 'to' (TOGGLE_VALUES: 'Toggle **Admin user** to **Enabled**', 3.3.2).
+# That value is the state, not a label to click. Where they start is as for STATE_BEFORE.
+TOGGLE_BEFORE = re.compile(
+    r"(?:^|[,;]\s*|\b(?:and|then|or)\s+|(?:→|->|\s>)\s*)"
+    r"(?:toggle|turn|switch)\s+(?:(?P<way>on|off)\s+)?(?:the\s+)?$", re.IGNORECASE)
+TOGGLE_WAY = re.compile(r"\s+(?P<way>on|off)\b", re.IGNORECASE)        # 'Turn **X** on'
+TOGGLE_TO = re.compile(r"\s+(?:to\s+)?(?=\*\*)", re.IGNORECASE)       # 'Toggle **X** to **Enabled**'
+TOGGLE_VALUES = {"enabled": True, "on": True, "disabled": False, "off": False}
+# A bold span right after 'under' names where the next label is, a menu group or a section heading
+# ('Under **Settings**, select **Networking**', 3.4.10; 'Click **Containers** under **Data
+# storage**', 4.2.2), not a control: clicking a Portal menu group collapses it. It is no label.
+UNDER = re.compile(r"\bunder\s+(?:the\s+)?$", re.IGNORECASE)
 # What may stand between two labels of one list after a stating verb: 'Check **A** and **B**',
 # 'Uncheck **A**, **B** and **C**'. The later labels take the earlier one's state.
 STATE_LIST = re.compile(r"\s*(?:,\s*(?:and\s+|or\s+)?|(?:and|or)\s+)", re.IGNORECASE)
@@ -931,30 +963,71 @@ def chain_resources(text: str) -> list[tuple[int, str]]:
     return found
 
 
-def stated_states(text: str, spans: list[tuple[int, int]]) -> dict[int, bool]:
-    """The state each bold label of `text` is to be in (#296), by the label's start; a label
-    without one is left out. `spans` are the labels' (start, end), in order. A label has a state
-    when a verb of STATE_VERBS stands right before it (STATE_BEFORE) and only what STATE_AFTER
-    allows follows it; a label that follows a label with a state and only a list's comma or 'and'
-    (STATE_LIST) takes the same state: 'Uncheck **A**, **B** and **C**'."""
+def toggled_state(masked: str, spans: list[tuple[int, int, str]], index: int) -> tuple[bool, int, int | None] | None:
+    """(state, where the instruction ends, start of the value span or None) when a switch verb
+    (TOGGLE_BEFORE) stands right before the label spans[index] and states the way it is to go:
+    'Turn on **X**', 'Turn **X** on' (TOGGLE_WAY), or 'Toggle **X** to **Enabled**', the next
+    span holding one of TOGGLE_VALUES right after the label (TOGGLE_TO). None otherwise."""
+    start, end, _ = spans[index]
+    toggle = TOGGLE_BEFORE.search(masked, 0, start)
+    if not toggle:
+        return None
+    if toggle.group("way"):
+        return toggle.group("way").lower() == "on", end, None
+    way = TOGGLE_WAY.match(masked, end)
+    if way:
+        return way.group("way").lower() == "on", way.end(), None
+    to = TOGGLE_TO.match(masked, end)
+    if to and index + 1 < len(spans) and spans[index + 1][0] == to.end():
+        value = spans[index + 1][2].casefold()
+        if value in TOGGLE_VALUES:
+            return TOGGLE_VALUES[value], spans[index + 1][1], spans[index + 1][0]
+    return None
+
+
+def stated_states(text: str, spans: list[tuple[int, int, str]]) -> tuple[dict[int, bool], set[int]]:
+    """The state each bold label of `text` is to be in (#296), by the label's start, and the
+    starts of the bold spans that are no label. `spans` are the labels' (start, end, label), in
+    order; a label without a state is left out of the first.
+
+    A label has a state when a verb of STATE_VERBS stands right before it (STATE_BEFORE), or a
+    switch verb with the way it is to go around it (toggled_state), and only what STATE_AFTER
+    allows follows the instruction; a label that follows a label with a state and only a list's
+    comma or 'and' (STATE_LIST) takes the same state: 'Uncheck **A**, **B** and **C**'. No label
+    is the value of a switch ('**Enabled**' in 'Toggle **X** to **Enabled**') and a place right
+    after 'under' (UNDER: 'Under **Settings**, select ...')."""
     masked = mask_spans(text)
     states: dict[int, bool] = {}
+    dropped: set[int] = set()
     previous: tuple[int, bool] | None = None      # (end, state) of the last label with a state
-    for start, end in spans:
-        if not STATE_AFTER.match(masked, end):
+    for index, (start, end, _) in enumerate(spans):
+        if start in dropped:
+            continue                               # a switch's value, read with its label
+        if UNDER.search(masked, 0, start):
+            dropped.add(start)
             previous = None
             continue
-        before = STATE_BEFORE.search(masked, 0, start)
-        if before:
-            state = STATE_VERBS[before.group("verb").lower()]
+        toggled = toggled_state(masked, spans, index)
+        if toggled:
+            state, after, value = toggled
+            if not STATE_AFTER.match(masked, after):
+                previous = None
+                continue
+            if value is not None:
+                dropped.add(value)
+        elif not STATE_AFTER.match(masked, end):
+            previous = None
+            continue
+        elif before := STATE_BEFORE.search(masked, 0, start):
+            state, after = STATE_VERBS[before.group("verb").lower()], end
         elif previous and STATE_LIST.fullmatch(masked, previous[0], start):
-            state = previous[1]
+            state, after = previous[1], end
         else:
             previous = None
             continue
         states[start] = state
-        previous = (end, state)
-    return states
+        previous = (after, state)
+    return states, dropped
 
 
 def mark_states(item: dict, starts: list[int], states: dict[int, bool]) -> None:
@@ -995,9 +1068,11 @@ def list_item(text: str, number: int, captions: frozenset[str] = NO_CAPTIONS) ->
         text = chain_sentence(text)            # the sentence after a chain describes, it is no step
     picker = picker_field(text, captions) if chain else None
     start = picker[1] if picker else 0          # a picker's chain starts after its label
-    spans = [b for b in BOLD.finditer(text, start) if is_ui_label(clean_label(unescape(b.group("text"))), captions)]
-    bold = [(b.start(), clean_label(unescape(b.group("text")))) for b in spans]
-    states = stated_states(text, [b.span() for b in spans])       # the check boxes to set (#296)
+    spans = [(b.start(), b.end(), clean_label(unescape(b.group("text")))) for b in BOLD.finditer(text, start)]
+    spans = [(at, end, label) for at, end, label in spans if is_ui_label(label, captions)]
+    # The check boxes to set, and the switch values and places that are no label (#296).
+    states, dropped = stated_states(text, spans)
+    bold = [(at, label) for at, _, label in spans if at not in dropped]
     # A chain's bold labels and resource names, in the order they appear (#199).
     steps = sorted([(at, label, False) for at, label in bold]
                    + [(start + at, name, True)

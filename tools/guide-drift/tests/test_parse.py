@@ -1138,7 +1138,7 @@ class StateVerbTests(unittest.TestCase):
                  {"checked": [0]}),
                 ("Uncheck **Use quickstart image**.", ["Use quickstart image"], {"unchecked": [0]}),              # 3.3.7
                 ("Under **Recovery**, enable **Enable soft delete for blobs**",                                  # 4.2.5
-                 ["Recovery", "Enable soft delete for blobs"], {"checked": [1]}),
+                 ["Enable soft delete for blobs"], {"checked": [0]}),
                 ("Enable **Enable soft delete for containers**", ["Enable soft delete for containers"],          # 4.2.6
                  {"checked": [0]}),
                 ("Enable **auto-registration** checkbox", ["auto-registration"], {"checked": [0]}),              # 2.3
@@ -1169,7 +1169,7 @@ class StateVerbTests(unittest.TestCase):
         # 'Select' opens a blade, a tab, a row or an option far more often than it ticks a box, so it
         # states no state; a check box the run finds for it is clicked as before.
         for text in ("Select **Enable soft delete for blobs**", "select **Use quickstart image**.",
-                     "Click **Save**", "Toggle **Admin user** to **Enabled**."):
+                     "Click **Save**"):
             with self.subTest(text=text):
                 item = self.item(text)
                 self.assertNotIn("checked", item)
@@ -1188,6 +1188,36 @@ class StateVerbTests(unittest.TestCase):
                 self.assertNotIn("checked", item or {})
                 self.assertNotIn("unchecked", item or {})
 
+    def test_a_switch_set_to_a_value_is_a_state_and_the_value_no_click(self) -> None:
+        for text, labels, states in (
+                ("Toggle **Admin user** to **Enabled**.", ["Admin user"], {"checked": [0]}),             # 3.3.2
+                ("Toggle **Admin user** to **Disabled**.", ["Admin user"], {"unchecked": [0]}),
+                ("Turn **HTTPS Only** to **On**", ["HTTPS Only"], {"checked": [0]}),
+                ("Switch **HTTPS Only** to **Off**", ["HTTPS Only"], {"unchecked": [0]}),
+                ("Toggle **Admin user** **Enabled**", ["Admin user"], {"checked": [0]}),
+                ("toggle the **Admin user** to **enabled** (default)", ["Admin user"], {"checked": [0]}),
+                ("Turn **HTTPS Only** on", ["HTTPS Only"], {"checked": [0]}),
+                ("Switch **HTTPS Only** off.", ["HTTPS Only"], {"unchecked": [0]}),
+                ("Turn on **HTTPS Only**", ["HTTPS Only"], {"checked": [0]}),
+                ("Turn off **Security defaults**, then click **Save**", ["Security defaults", "Save"],
+                 {"unchecked": [0]}),
+                ("Switch on **A** and **B**", ["A", "B"], {"checked": [0, 1]})):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), self.action(labels, **states))
+        self.assertEqual(self.item("**Settings** → toggle **Use defaults** to **Off** → **Save**"),
+                         {"kind": "navigation", "labels": ["Settings", "Use defaults", "Save"], "unchecked": [1],
+                          "line": 7})
+
+    def test_a_switch_without_a_state_value_stays_clicks(self) -> None:
+        for text, labels in (("Switch Cloud Shell to **PowerShell**", ["PowerShell"]),               # 3.4.4
+                             ("Toggle **Admin user** to **Premium**", ["Admin user", "Premium"]),
+                             ("Toggle **Admin user**", ["Admin user"]),
+                             ("Turn **A** to **On** in the portal", ["A", "On"]),
+                             ("Click **Enabled**", ["Enabled"]),
+                             ("Set to **On**.", ["On"])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), self.action(labels))
+
     def test_a_field_with_a_state_is_still_a_field(self) -> None:
         # #307's shape: the state is the field's value, which checkbox_state reads.
         self.assertEqual(self.item("**Enable traffic analytics**: checked"),
@@ -1199,11 +1229,56 @@ class StateVerbTests(unittest.TestCase):
                          "," * 50_000 + "check" + space * 100_000 + "**A**",
                          "Check **A**" + space * 100_000 + "x",
                          "Check **A**" + space * 100_000 + "." + space * 100_000 + "x",
-                         "Check **A** (" + "y" * 100_000 + ")" + space * 100_000 + "x"):
+                         "Check **A** (" + "y" * 100_000 + ")" + space * 100_000 + "x",
+                         "Toggle **A**" + space * 100_000 + "to" + space * 100_000 + "x",
+                         "Turn" + space * 100_000 + "on" + space * 100_000 + "x **A**",
+                         "Under" + space * 100_000 + "x **A**"):
                 with self.subTest(space=repr(space), text=text[:12]):
                     started = time.perf_counter()
                     self.item(text)
                     self.assertLess(time.perf_counter() - started, 2)
+
+
+class UnderPlaceTests(unittest.TestCase):
+    """A bold span right after 'under' names where the next label is, a menu group or a section
+    heading, not a control to click: clicking a Portal menu group collapses it. The texts are
+    list items from the guides, from the lab named."""
+
+    def item(self, text: str) -> dict | None:
+        return parse.list_item(text, 7)
+
+    def test_the_place_is_no_label(self) -> None:
+        for text, labels in (
+                ("Under **Cost Management**, click **Budgets**", ["Budgets"]),                                # 1.3.14
+                ("Under **Cost Management** click **Cost analysis**", ["Cost analysis"]),                      # 1.3.17
+                ("Under **Service endpoints**, click **+ Add** and select **Microsoft.Storage**",             # 2.2.14
+                 ["+ Add", "Microsoft.Storage"]),
+                ("Under **Container resource allocation**, select **0.25 CPU** and **0.5 Gi** Memory (sufficient "
+                 "for this demo).", ["0.25 CPU", "0.5 Gi"]),                                                   # 3.3.7
+                ("Under **Settings**, select **Scale out (App Service plan)**.", ["Scale out (App Service plan)"]),  # 3.4.8
+                ("Under **Settings**, select **Configuration** (or **Environment variables** in newer UI, check "
+                 "**General settings** tab).", ["Configuration", "Environment variables", "General settings"]),     # 3.4.11
+                ("Under **Instant restore**, fill in **Azure Backup Resource Group**: name `platform-skycraft-swc-rpc`, "
+                 "suffix `-rg`.", ["Azure Backup Resource Group"]),                                             # 5.2.2
+                ("In the left menu, under **Settings**, select **Access keys**.", ["Access keys"]),           # 3.3.2
+                ("Click **Containers** under **Data storage**", ["Containers"]),                               # 4.2.2
+                ("Click **Containers** under the **Data storage** group.", ["Containers"])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), {"kind": "action", "labels": labels, "line": 7})
+
+    def test_an_item_that_names_only_a_place_is_no_item(self) -> None:
+        self.assertIsNone(self.item("Under **Blob access tier (default)**, select the desired tier"))   # 4.2.4
+
+    def test_a_place_in_a_chain_is_no_step(self) -> None:
+        self.assertEqual(self.item("Under **Security + networking** → **Networking** → **Firewall**"),
+                         {"kind": "navigation", "labels": ["Networking", "Firewall"], "line": 7})
+
+    def test_other_words_before_a_label_keep_it(self) -> None:
+        for text, labels in (("Click **Understand**", ["Understand"]),
+                             ("Thunder **A**", ["A"]),
+                             ("Undergo **A**", ["A"])):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), {"kind": "action", "labels": labels, "line": 7})
 
 
 if __name__ == "__main__":
