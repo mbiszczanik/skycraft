@@ -3256,16 +3256,42 @@ class PromptValueTests(RunnerTestCase):
                       "environment variable SKYCRAFT_GUIDE_DRIFT_PASSWORD)\n", shown)
         self.assertNotIn(self.PASSWORD, shown)
 
-    def test_a_tag_record_observes_the_value_typed_not_the_guides(self) -> None:
-        item = {"kind": "tag", "name": "Owner", "value": "SkyCraft-Admins", "line": 3}
+    def test_a_plain_field_read_from_the_environment_shows_its_value_masked(self) -> None:
+        # Any value read from the environment is a secret, but an address and the tenant prefix.
+        self.ENV = {**self.ENV, "SKYCRAFT_TEST_DISPLAY": "Contoso Display"}
+        shown = self.prompt_for("Display name", "Malfurion Stormrage", override="${SKYCRAFT_TEST_DISPLAY}")
+        self.assertIn("\n  value to type: [secret] (from the recording's valueOverrides; "
+                      "environment variable SKYCRAFT_TEST_DISPLAY)\n", shown)
+        self.assertNotIn("Contoso Display", shown)
+
+    def run_tag(self, value: str, override: str | None = None, env: dict | None = None):
+        """run_step on a step with one tag 'Owner' whose guide value is `value`: whether it went
+        through, the tag's record, the fill_tag mock and results.jsonl."""
+        item = {"kind": "tag", "name": "Owner", "value": value, "line": 3}
         step = {"id": "9.9.1", "title": "One", "expected": None, "images": [], "items": [item]}
-        self.recording["steps"]["9.9.1"]["valueOverrides"]["Owner"] = "Contoso-Admins"
-        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
-        with mock.patch.object(run, "fill_tag") as fill, mock.patch.object(run.Runner, "check_result"):
-            self.assertTrue(self.quietly(lambda: r.run_step(step)))
-        self.assertEqual(fill.call_args.args[1:], ("Owner", "Contoso-Admins"))
+        if override is not None:
+            self.recording["steps"]["9.9.1"]["valueOverrides"]["Owner"] = override
+        with mock.patch.dict("os.environ", env or {}):
+            r = run.Runner(FakePage(), {**STEPS, "steps": [step]}, self.recording, self.args(), ask=Answers())
+            with mock.patch.object(run, "fill_tag") as fill, mock.patch.object(run.Runner, "check_result"):
+                done = self.quietly(lambda: r.run_step(step))
         [tag] = [record for record in r.records if record["kind"] == "tag"]
+        results = (self.tmp / "logs" / "test" / "results.jsonl").read_text(encoding="utf-8")
+        return done, tag, fill, results
+
+    def test_a_tag_record_observes_the_value_typed_not_the_guides(self) -> None:
+        done, tag, fill, _ = self.run_tag("SkyCraft-Admins", override="Contoso-Admins")
+        self.assertTrue(done)
+        self.assertEqual(fill.call_args.args[1:], ("Owner", "Contoso-Admins"))
         self.assertEqual((tag["outcome"], tag["observed"]), ("match", "Contoso-Admins"))
+
+    def test_a_tag_value_read_from_the_environment_is_kept_masked(self) -> None:
+        done, tag, fill, results = self.run_tag("SkyCraft-Admins", override="${SKYCRAFT_TEST_OWNER}",
+                                                env={"SKYCRAFT_TEST_OWNER": "Contoso Owner"})
+        self.assertTrue(done)
+        self.assertEqual(fill.call_args.args[1:], ("Owner", "Contoso Owner"))
+        self.assertEqual((tag["outcome"], tag["observed"]), ("match", "[secret]"))
+        self.assertNotIn("Contoso Owner", results)
 
 
 GROUPS = "Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups"

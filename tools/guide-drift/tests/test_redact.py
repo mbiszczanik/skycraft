@@ -325,6 +325,53 @@ class PromptValueTests(unittest.TestCase):
                 self.assertEqual(self.shown(*args), shown)
 
 
+class EnvironmentValueTests(unittest.TestCase):
+    """A value read from the environment is a secret to a run log, wherever it is typed (#210),
+    except an address the Redactor writes back as its '${NAME}' and the tenant prefix; and a
+    recording reads any other variable only into a field that names a secret."""
+
+    STEPS = {"steps": [{"id": "1.1.4", "items": [{"kind": "field", "label": "Display name", "value": "Malfurion"},
+                                                 {"kind": "tag", "name": "Owner", "value": "[owner]"}]}]}
+    ENV = {"SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX": "contoso", "SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL": "me@example.com",
+           "SKYCRAFT_TEST_DISPLAY": "Contoso Display", "SKYCRAFT_TEST_OWNER": "Contoso Owner"}
+
+    def test_every_environment_value_but_an_address_and_the_tenant_prefix_is_a_typed_secret(self) -> None:
+        rec = {"placeholders": {"[yourtenant]": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}", "[owner]": "${SKYCRAFT_TEST_OWNER}"},
+               "steps": {"1.1.4": {"valueOverrides": {"Display name": "${SKYCRAFT_TEST_DISPLAY}"}},
+                         "1.1.5": {"valueOverrides": {"Email": TOKEN}}}}
+        with mock.patch.dict(os.environ, self.ENV):
+            self.assertEqual(recording.typed_secrets(rec, self.STEPS), {"Contoso Display", "Contoso Owner"})
+
+    def test_a_blank_or_unset_environment_value_is_no_secret(self) -> None:
+        rec = {"placeholders": {}, "steps": {"1.1.4": {"valueOverrides": {"Display name": "${SKYCRAFT_TEST_DISPLAY}"}}}}
+        with mock.patch.dict(os.environ, {"SKYCRAFT_TEST_DISPLAY": "  "}):
+            self.assertEqual(recording.typed_secrets(rec, self.STEPS), set())
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(recording.typed_secrets(rec, self.STEPS), set())
+
+    def test_the_names_the_run_may_show_live_in_one_place(self) -> None:
+        self.assertEqual(recording.TENANT_PREFIX_ENV, "SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX")
+        self.assertEqual(recording.ADDRESS_ENV, frozenset({"SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL"}))
+
+    def test_an_override_reads_an_address_the_tenant_prefix_or_a_secret_only(self) -> None:
+        rec = {"steps": {"1.1.2": {"valueOverrides": {"Password": "${SKYCRAFT_TEST_PASSWORD}",
+                                                      "Domain": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}.example"}},
+                         "1.1.5": {"valueOverrides": {"Email": TOKEN, "Invited user": UPN_TOKEN, "Group": "SkyCraft"}},
+                         "1.1.6": {"labels": {}}}}
+        self.assertEqual(recording.env_override_problems(rec), [])
+
+    def test_an_override_that_reads_another_variable_into_a_plain_field_is_a_problem(self) -> None:
+        rec = {"steps": {"1.1.4": {"valueOverrides": {"Display name": "${SKYCRAFT_TEST_DISPLAY} (${SKYCRAFT_TEST_B})",
+                                                      "Owner": "x-${SKYCRAFT_TEST_DISPLAY}"}}}}
+        self.assertEqual(recording.env_override_problems(rec), [
+            "step 1.1.4 valueOverride 'Display name' reads ${SKYCRAFT_TEST_DISPLAY}, which is neither an address "
+            "variable nor the tenant prefix, and 'Display name' names no secret: the run would show it as [secret]",
+            "step 1.1.4 valueOverride 'Display name' reads ${SKYCRAFT_TEST_B}, which is neither an address "
+            "variable nor the tenant prefix, and 'Display name' names no secret: the run would show it as [secret]",
+            "step 1.1.4 valueOverride 'Owner' reads ${SKYCRAFT_TEST_DISPLAY}, which is neither an address "
+            "variable nor the tenant prefix, and 'Owner' names no secret: the run would show it as [secret]"])
+
+
 class SkipReasonTests(unittest.TestCase):
     """'"skip": "<reason>"' on a step entry (#200): the reason, or an error, never a silent
     'not skipped' that would perform the step the recording meant to leave out."""

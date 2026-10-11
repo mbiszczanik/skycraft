@@ -30,7 +30,11 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   one_line             the first line of a text, cut before a Playwright call log (#212)
   error_text           an exception before scrub: '<type>: <first line>' (#212)
   only_checkbox_state  whether a value is a check box state and nothing else (#212)
-  typed_secrets        every value the runner types into a password or credential field (#212)
+  typed_secrets        every value the runner types into a password or credential field (#212),
+                       and every value read from the environment but an address and the tenant
+                       prefix (#210)
+  env_override_problems  a valueOverride that reads a variable of neither kind into a field that
+                       names no secret (#210)
   mask_secret_values   an accessibility snapshot with the value of a credential field masked (#212)
   scrub                a free text as a run log keeps it: one line (or every line of an
                        accessibility tree), secrets, credentials, object ids, tenant data,
@@ -58,6 +62,13 @@ from parse import BRACKET_TOKEN, value_is_literal
 # '${NAME}', or '${NAME|upn}' for the guest user principal name form of an address (the
 # Redactor writes that form; see Redactor.__init__).
 ENV_REF = re.compile(r"\$\{(?P<name>[A-Z0-9_]+)(?P<upn>\|upn)?\}")
+# The environment variables whose values a run log may show (#210); every other value read from
+# the environment is a secret to it (typed_secrets). The tenant prefix, which Invoke-GuideDrift.ps1
+# sets and the Redactor writes as '[yourtenant]', and the addresses the Redactor writes back as
+# their '${NAME}' (env_secrets). A recording's valueOverride reads any other variable only into a
+# field that names a secret (env_override_problems, tests/Guide-Drift-Recording.Tests.ps1).
+TENANT_PREFIX_ENV = "SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX"
+ADDRESS_ENV = frozenset({"SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL"})
 
 
 def env_names(recording: dict) -> set[str]:
@@ -475,9 +486,10 @@ def prompt_value(recording: dict, step: dict, item: dict) -> str:
     is left. run.py asks about none of these fields: it leaves the first as it is and reports the
     other two without looking the field up. These branches only keep the function total.
 
-    Not scrubbed here: the prompt scrubs every line it prints (run.py), so the value of a field
-    that names a secret shows as '[secret]' (typed_secrets) and an address from the environment as
-    its '${NAME}' (the Redactor)."""
+    Not scrubbed here: the prompt scrubs every line it prints (run.py). So the value of a field
+    that names a secret, and every value read from the environment but an address and the tenant
+    prefix, shows as '[secret]' (typed_secrets); an address from the environment shows as its
+    '${NAME}' (the Redactor), and the tenant prefix as '[yourtenant]'."""
     action, value = field_action(recording, step, item)
     override = value_override(recording, step, item["label"])
     if override is not None:
@@ -571,7 +583,14 @@ def typed_secrets(recording: dict, steps: dict) -> set[str]:
     no secret; nor is a value whose environment variable is not set (the run refuses to start
     then). A value the Portal generates is never typed: the runner never reads it, the call log
     that showed it is cut (one_line), and its field's value in an accessibility snapshot is
-    masked (mask_secret_values)."""
+    masked (mask_secret_values).
+
+    Also every value the recording reads from the environment, whatever field, tag or text it
+    goes into (#210), but an address the Redactor writes back as its '${NAME}' (env_secrets) and
+    the tenant prefix (TENANT_PREFIX_ENV), which it writes as '[yourtenant]': the prompt and the
+    records show '[secret]', never the value. A blank or unset one is left out. A short value
+    masks every text it appears in, so a variable that is no secret belongs in ADDRESS_ENV or
+    TENANT_PREFIX_ENV."""
     secrets = set()
     for step in steps.get("steps", []):
         for item in step.get("items", []):
@@ -584,7 +603,29 @@ def typed_secrets(recording: dict, steps: dict) -> set[str]:
                 pass
             secrets |= {value for value in values
                         if value.strip() and value_action(value) == "type" and not only_checkbox_state(value)}
+    shown = {token[2:-1] for token in env_secrets(recording)} | {TENANT_PREFIX_ENV}
+    secrets |= {os.environ[name] for name in env_names(recording) - shown if os.environ.get(name, "").strip()}
     return secrets
+
+
+def env_override_problems(recording: dict) -> list[str]:
+    """Why a valueOverride of `recording` reads the environment where it should not (#210): each
+    '${NAME}' it holds must be an address variable (ADDRESS_ENV) or the tenant prefix
+    (TENANT_PREFIX_ENV), or sit under a label that names a secret (SECRET_FIELD). Any other value
+    from the environment is masked as '[secret]' in every run log (typed_secrets), so a field that
+    names no secret would be reported under a mask. One problem per variable and override, by
+    name only; [] when there is none. tests/Guide-Drift-Recording.Tests.ps1 runs it on every
+    recording."""
+    problems = []
+    for step_id, entry in recording.get("steps", {}).items():
+        for label, value in (entry.get("valueOverrides") or {}).items():
+            if SECRET_FIELD.search(label):
+                continue
+            names = dict.fromkeys(m.group("name") for m in ENV_REF.finditer(json.dumps(value)))
+            problems += [f"step {step_id} valueOverride '{label}' reads ${{{name}}}, which is neither an address "
+                         f"variable nor the tenant prefix, and '{label}' names no secret: the run would show it "
+                         "as [secret]" for name in names if name not in ADDRESS_ENV | {TENANT_PREFIX_ENV}]
+    return problems
 
 
 # A text field in an accessibility snapshot, as aria_snapshot() writes it with its value after

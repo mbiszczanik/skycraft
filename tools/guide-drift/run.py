@@ -21,8 +21,9 @@ they hold the text the failure prompt shows (issue #212). A record's "observed" 
 it is written (Runner.scrubbed, recording.scrub): one line, the first of an error, without the
 Playwright call log after it (which holds the element's HTML, an auto-generated password in a value
 attribute among it, and the value the runner typed); every value the runner types into a field
-whose label names a password, secret or other credential (recording.typed_secrets) and every
-credential in a connection string or SAS address ('AccountKey=', 'sig=') as '[secret]'; object ids
+whose label names a password, secret or other credential, every value read from the environment
+but an address and the tenant prefix (recording.typed_secrets, #210), and every credential in a
+connection string or SAS address ('AccountKey=', 'sig=') as '[secret]'; object ids
 as '<id>'; tenant data, also as a regular expression escapes it, as the Redactor's tokens; any
 other e-mail address as '<email>'; a value a call typed and an element's value attribute as
 '[typed]' and '[value]' (recording.scrub lists what it cannot recognise and what it masks that only
@@ -41,8 +42,11 @@ When a label is not on screen, the person answers at the prompt (decide.py). For
 the value the run will type, not the guide's (recording.prompt_value, #210): after the recording's
 placeholders and valueOverrides, saying '(from the recording's valueOverrides)' or '(the guide's,
 with the recording's placeholders)' and naming any environment variable it was read from, scrubbed
-as the candidates are, so a typed secret shows as '[secret]'. A tag's record keeps the value
-typed too, scrubbed as any record's 'observed'. At the prompt, a number uses that
+as the candidates are. So a typed secret shows as '[secret]', and so does any value read from the
+environment but an address, shown as its '${NAME}', and the tenant prefix, shown as '[yourtenant]'
+(recording.typed_secrets): a recording reads any other variable only into a field that names a
+secret (recording.env_override_problems, checked by tests/Guide-Drift-Recording.Tests.ps1). A tag's
+record keeps the value typed too, scrubbed. At the prompt, a number uses that
 element as the guide's, renamed (misleading drift); 'c <number>' uses it, the difference cosmetic;
 'w <number>' uses it as a workaround, not as the guide's element (#211: misleading drift, never
 written to the recording, so the next run asks again); 'g' gone (blocking drift); 'i' ignore; 'u'
