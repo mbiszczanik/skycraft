@@ -23,10 +23,11 @@ value for a field); deciders may use it for context. Two deciders ship:
 
 A name that is the guide's label plus one of the Portal's decorations (DECORATIONS, #244: 'Select
 row X' for a list row's check box, 'X information *' for a field with an info icon that must be
-filled in) is the guide's element, not drift: run.py finds such an element without asking, and
-when a decider is asked all the same, a pick of one by number or with 'c' is plain use, recorded
-and replayed as such (a recording made before #244 that holds it as cosmetic drift replays as use
-too). 'w' still makes it a workaround.
+filled in) on a role it decorates is the guide's element, not drift: run.py finds such an element
+without asking, and when a decider is asked all the same, a pick of one by number or with 'c' is
+plain use, recorded and replayed as such (a recording made before #244 that holds it as cosmetic
+drift replays as use too). 'w' still makes it a workaround. The same words on another role are
+another element (a button 'X information *', a link 'Select row X') and stay drift.
 
 A model-based decider is a third implementation of the same signature (the Decider protocol);
 it is out of scope here and tracked in issue #190. Every decision the runner acts on, except a
@@ -45,13 +46,15 @@ NEAREST = 10   # how many candidates the human sees first, most similar to the l
 @dataclass(frozen=True)
 class Decoration:
     """Words the Portal adds to an element's accessible name around the label the screen shows
-    (#244). `roles` are the roles it is found on (run.find_decorated): the decoration names that
-    element, while the same words on another role name something else, as 'Email information' is
-    the info icon's button beside the 'Email' field."""
+    (#244). `roles` are the roles it is found on (run.find_decorated, decoration_of with a role):
+    the decoration names that element, while the same words on another role name something else.
+    `fields`: whether a field's lookup takes it too; a list row's check box is selected by an
+    action, never filled in as a field."""
     prefix: str
     suffix: str
     roles: tuple[str, ...]
     what: str        # for the reason a guide edit is not proposed (run.Runner.not_proposed)
+    fields: bool = True
 
     def of(self, label: str) -> str:
         return f"{self.prefix}{label}{self.suffix}"
@@ -60,23 +63,25 @@ class Decoration:
 # The fields a label with an info icon or a required marker names (run.FIELD_ROLES).
 DECORATED_FIELDS = ("textbox", "combobox", "checkbox", "radio")
 # The one list of decorations (#244): an accessible name that is the guide's label plus exactly one
-# of these is the guide's element, not drift, and never a guide edit. A field label with an info
-# icon that must be filled in carries both its suffixes, in this order, so the pair is one entry.
+# of these, on a role it decorates, is the guide's element, not drift, and never a guide edit. Only
+# decorations a run has seen are listed: a field label with an info icon that must be filled in
+# carries both suffixes, in this order ('Email information *', lab 1.1), so the pair is one entry;
+# the info icon's suffix alone is not listed (run.py's header, known gap).
 DECORATIONS = (
-    Decoration("Select row ", "", ("checkbox",), "a list row's check box"),
-    Decoration("", " information", DECORATED_FIELDS, "a field label's info icon"),
+    Decoration("Select row ", "", ("checkbox",), "a list row's check box", fields=False),
     Decoration("", " *", DECORATED_FIELDS, "a required field's marker"),
     Decoration("", " information *", DECORATED_FIELDS, "a field label's info icon and required marker"),
 )
 
 
-def decoration_of(name: str, label: str) -> Decoration | None:
+def decoration_of(name: str, label: str, role: str | None = None) -> Decoration | None:
     """The decoration `name` adds to `label` (DECORATIONS), or None when `name` is not exactly
     the non-empty `label` plus one of them: the label itself, another case, another label or
-    other words around it are no decoration."""
+    other words around it are no decoration. With a `role`, only a decoration found on that role
+    counts (the deciders know the element's role; a proposed edit's text does not)."""
     if not label:
         return None
-    return next((d for d in DECORATIONS if name == d.of(label)), None)
+    return next((d for d in DECORATIONS if name == d.of(label) and (role is None or role in d.roles)), None)
 
 
 @dataclass
@@ -145,7 +150,7 @@ class ReplayDecider:
                 return None
             candidate = matches[0]
             # A decorated name is the guide's element (#244), whatever a recording before it says.
-            renamed = candidate.name != label and decoration_of(candidate.name, label) is None
+            renamed = candidate.name != label and decoration_of(candidate.name, label, candidate.role) is None
             severity = (entry.get("severity") or "misleading") if renamed else None
             return Decision(kind="drift" if severity else "use", name=candidate.name,
                             role=candidate.role, severity=severity, decided_by="replay")
@@ -195,7 +200,7 @@ class HumanDecider:
     @staticmethod
     def _pick(chosen: Candidate, label: str, cosmetic: bool, workaround: bool = False) -> Decision:
         # Nothing differs, or only a decoration the Portal adds to the label (#244): nothing to report.
-        if chosen.name == label or (decoration_of(chosen.name, label) is not None and not workaround):
+        if chosen.name == label or (decoration_of(chosen.name, label, chosen.role) is not None and not workaround):
             return Decision(kind="use", name=chosen.name, role=chosen.role)
         return Decision(kind="drift", name=chosen.name, role=chosen.role,
                         severity="cosmetic" if cosmetic else "misleading", workaround=workaround)

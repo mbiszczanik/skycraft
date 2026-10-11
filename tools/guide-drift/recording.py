@@ -167,6 +167,13 @@ def sub_outside(pattern: re.Pattern, replacement: str | Callable[[re.Match], str
     return "".join(pieces)
 
 
+def literal_pattern(text: str) -> str:
+    """`text` as a regular expression that matches it literally (re.escape), with '/' escaped
+    as well: Playwright hands a Python pattern to the browser as a JavaScript regular expression
+    literal, '/.../', which an unescaped '/' in a name ('Read/Write') would end early."""
+    return re.escape(text).replace("/", r"\/")
+
+
 class Redactor:
     """Keeps tenant data out of the committed recording, which lives in a public repository.
     The tenant's domain and id become tokens on the way into the recording and are restored on
@@ -259,7 +266,7 @@ class Redactor:
         restored = self.restore(name)
         if restored == name:
             return name
-        return re.compile("^" + re.escape(restored) + "$", re.IGNORECASE)
+        return re.compile("^" + literal_pattern(restored) + "$", re.IGNORECASE)
 
     def view_url(self, url: str) -> str | None:
         """The Portal view without the tenant pin ('#@<tenant>/'), query strings (before or inside

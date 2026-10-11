@@ -294,20 +294,25 @@ class Decorations(unittest.TestCase):
               Candidate("button", "Group name information")]
 
     def test_the_list_holds_each_decoration_once(self):
-        self.assertEqual([(d.prefix, d.suffix) for d in DECORATIONS],
-                         [("Select row ", ""), ("", " information"), ("", " *"), ("", " information *")])
+        # Only decorations a run has seen: the info icon's suffix alone, 'Email information', is not one.
+        self.assertEqual([(d.prefix, d.suffix, d.fields) for d in DECORATIONS],
+                         [("Select row ", "", False), ("", " *", True), ("", " information *", True)])
 
-    def test_each_decoration_of_the_label_is_recognised(self):
-        cases = {"Select row ": "Select row Khadgar Archmage",    # a list row's check box
-                 " information": "Email information",              # a field label's info icon
-                 " *": "Email *",                                  # a required field's marker
-                 " information *": "Email information *"}          # both, as lab 1.1's Email field
+    def test_each_decoration_of_the_label_is_recognised_on_its_roles_only(self):
+        cases = {"Select row ": ("Select row Khadgar Archmage", ("checkbox",)),    # a list row's check box
+                 " *": ("Email *", ("textbox", "combobox", "checkbox", "radio")),   # a required field's marker
+                 " information *": ("Email information *",                          # lab 1.1's Email field
+                                    ("textbox", "combobox", "checkbox", "radio"))}
         for decoration in DECORATIONS:
             with self.subTest(decoration=decoration.what):
                 label = self.MEMBER if decoration.prefix else "Email"
-                name = cases[decoration.prefix or decoration.suffix]
-                self.assertEqual(decoration.of(label), name)
-                self.assertIs(decoration_of(name, label), decoration)
+                name, roles = cases[decoration.prefix or decoration.suffix]
+                self.assertEqual((decoration.of(label), decoration.roles), (name, roles))
+                self.assertIs(decoration_of(name, label), decoration)                 # no role: the text alone
+                for role in roles:
+                    self.assertIs(decoration_of(name, label, role), decoration)
+                for role in ("button", "link", "menuitem", "heading", "cell"):
+                    self.assertIsNone(decoration_of(name, label, role))
 
     def test_anything_else_is_no_decoration(self):
         for name, label in (("Khadgar Archmage", "Khadgar Archmage"),          # the label itself
@@ -319,6 +324,7 @@ class Decorations(unittest.TestCase):
                             ("Email  *", "Email"),
                             ("Emails *", "Email"),
                             ("Email address information", "Email"),
+                            ("Email information", "Email"),                   # the info icon alone: not seen
                             ("Email * information", "Email"),
                             ("Select row ", ""),                              # no label left
                             (" *", "")):
@@ -350,6 +356,26 @@ class Decorations(unittest.TestCase):
     def test_another_row_is_still_drift(self):
         given = human("c 1")(STEP, ITEM, self.MEMBER, self.PICKER)
         self.assertEqual((given.kind, given.severity), ("drift", "cosmetic"))
+
+    def test_the_same_words_on_a_role_they_do_not_decorate_stay_drift(self):
+        candidates = [Candidate("button", "Group name information"), Candidate("button", "Group name information *"),
+                      Candidate("link", "Select row Group name"), Candidate("textbox", "Group name *")]
+        for number, name in ((1, "Group name information"),       # the info icon's button
+                             (2, "Group name information *"),     # decorated words, but a button
+                             (3, "Select row Group name")):       # a link, not a row's check box
+            with self.subTest(name=name):
+                given = human(str(number))(STEP, FIELD, "Group name", candidates)
+                self.assertEqual((given.kind, given.severity, given.name), ("drift", "misleading", name))
+        self.assertEqual(human("4")(STEP, FIELD, "Group name", candidates).kind, "use")   # the field itself
+
+    def test_a_recorded_drift_to_a_button_of_decorated_words_replays_as_drift(self):
+        entry = {"decision": "use", "role": "button", "name": "Group name information *",
+                 "severity": "misleading", "rejected": [], "decidedBy": "human", "at": AT}
+        recording = {"steps": {STEP["id"]: {"labels": {"Group name": entry}}}}
+        candidates = [Candidate("button", "Group name information *")]
+        replayed = ReplayDecider(recording)(STEP, FIELD, "Group name", candidates)
+        self.assertEqual((replayed.kind, replayed.severity, replayed.name),
+                         ("drift", "misleading", "Group name information *"))
 
 
 if __name__ == "__main__":

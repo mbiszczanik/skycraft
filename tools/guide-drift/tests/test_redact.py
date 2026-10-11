@@ -73,6 +73,15 @@ class RedactorTests(unittest.TestCase):
                 self.assertIsNone(pattern.search(name))
         self.assertIsNotNone(self.redactor.matcher(f"{TOKEN} (Guest)").search("Me@Example.com (Guest)"))
 
+    def test_matcher_escapes_a_slash_for_the_browser(self) -> None:
+        # Playwright hands the pattern to the browser as a literal '/.../' (#244): an unescaped '/'
+        # in the name would end it early.
+        pattern = self.redactor.matcher("[yourtenant] Read/Write")
+        self.assertNotRegex(pattern.pattern, r"(?<!\\)/")
+        self.assertIsNotNone(pattern.search("Contoso Read/Write"))
+        self.assertIsNone(pattern.search("Contoso Read\\/Write"))
+        self.assertEqual(recording.literal_pattern("a/b.c"), r"a\/b\.c")
+
     def test_short_tenant_prefix_is_not_redacted(self) -> None:
         redactor = Redactor("abc.onmicrosoft.com", TENANT)
         self.assertEqual(redactor.redact("abc and abc.onmicrosoft.com"), "abc and [tenantdomain]")

@@ -4519,9 +4519,10 @@ class StatedStateTests(RunnerTestCase):
 
 class DecoratedNameTests(RunnerTestCase):
     """An element whose accessible name is the guide's label plus one of the Portal's decorations
-    (decide.DECORATIONS: a list row's check box 'Select row X', a field label's info icon 'X
-    information', the required marker 'X *') is the guide's element (#244): the lookup finds it,
-    the record is a match, nobody is asked, nothing is recorded and no guide edit is proposed."""
+    (decide.DECORATIONS: a list row's check box 'Select row X' for an action, a required field's
+    marker 'X *', a field label's info icon and marker 'X information *') is the guide's element
+    (#244): the lookup finds it once SETTLE_MS of looking has not found the plain name, the record
+    is a match, nobody is asked, nothing is recorded and no guide edit is proposed."""
 
     MEMBER = "Khadgar Archmage"
     PICK = {"kind": "action", "labels": [MEMBER], "line": 3}
@@ -4578,7 +4579,7 @@ class DecoratedNameTests(RunnerTestCase):
         self.assertEqual((record["observed"], box.clicked), (self.MEMBER, 1))
 
     def test_each_suffix_of_a_field_label_is_the_field(self) -> None:
-        for suffix in (" information", " *", " information *"):
+        for suffix in (" *", " information *"):
             with self.subTest(suffix=suffix):
                 field = ScreenNode(tag="input")
                 screen = Screen(("button", "information", ScreenNode(tag="button")),   # the info icon itself
@@ -4589,11 +4590,44 @@ class DecoratedNameTests(RunnerTestCase):
                 self.assertMatchWithoutAsking(record, r)
                 self.assertEqual((field.filled, r.records), (["chromie@contoso.com"], []))   # a form: no wrong-blade
 
+    def test_the_info_icon_s_suffix_alone_is_no_decoration(self) -> None:
+        # Known gap: no run has seen a field named 'Email information', so the person is asked.
+        screen = Screen(("textbox", "Email information", ScreenNode(tag="input")))
+        self.assertIsNone(self.find(screen, "Email", field=True))
+
+    def test_a_decorated_name_is_matched_whole(self) -> None:
+        for role, name, label, field in (("textbox", "Work Email information *", "Email", True),
+                                         ("textbox", "Work Email *", "Email", True),
+                                         ("textbox", "Email information * (optional)", "Email", True),
+                                         ("checkbox", f"Select row {self.MEMBER} Jr", self.MEMBER, False),
+                                         ("checkbox", f"Select rows {self.MEMBER}", self.MEMBER, False)):
+            with self.subTest(name=name):
+                self.assertIsNone(self.find(Screen((role, name, ScreenNode(tag="input"))), label, field=field))
+
+    def test_a_slash_in_the_label_is_escaped_for_the_browser(self) -> None:
+        # Playwright hands the pattern to the browser as a literal '/.../': an unescaped '/' ends it.
+        box, patterns = ScreenNode(), []
+        screen = Screen(("checkbox", "Select row Read/Write", box))
+        with mock.patch.object(Screen, "get_by_role", lambda self, role, name=None, exact=None:
+                               patterns.append(name) or Screen._find(self, role, name)):
+            self.assertIs(self.find(screen, "Read/Write"), box)
+        decorated = [p.pattern for p in patterns if isinstance(p, re.Pattern)]
+        self.assertTrue(decorated)
+        for pattern in decorated:
+            self.assertIsNone(re.search(r"(?<!\\)/", pattern), pattern)
+
+    def test_a_row_s_check_box_is_never_a_field(self) -> None:
+        screen = Screen(("checkbox", "Select row Email", ScreenNode(tag="input", attrs={"type": "checkbox"})))
+        self.assertIsNone(self.find(screen, "Email", field=True))
+        self.assertIsNotNone(self.find(screen, "Email"))                    # an action selects the row
+
     def test_a_decoration_counts_only_on_the_roles_it_decorates(self) -> None:
         # The info icon is a button named 'Email information': clicking it opens a callout, not the field.
-        info = Screen(("button", "Email information", ScreenNode(tag="button")))
-        self.assertIsNone(self.find(info, "Email"))
-        self.assertIsNone(self.find(info, "Email", field=True))
+        for name in ("Email information", "Email information *", "Email *"):
+            with self.subTest(name=name):
+                info = Screen(("button", name, ScreenNode(tag="button")))
+                self.assertIsNone(self.find(info, "Email"))
+                self.assertIsNone(self.find(info, "Email", field=True))
         for role in ("button", "link", "row", "cell"):          # only a check box is a row's 'Select row'
             with self.subTest(role=role):
                 self.assertIsNone(self.find(Screen((role, f"Select row {self.MEMBER}", ScreenNode())), self.MEMBER))
@@ -4634,6 +4668,35 @@ class DecoratedNameTests(RunnerTestCase):
                         ("textbox", "Email information *", ScreenNode(tag="input")))
         with self.assertRaises(run.Ambiguous):
             self.find(screen, "Email", field=True)
+
+    def test_decorated_matches_of_every_role_are_collected_together(self) -> None:
+        screen = Screen(("textbox", "Email *", ScreenNode(tag="input")),
+                        ("checkbox", "Email information *", ScreenNode(tag="input", attrs={"type": "checkbox"})))
+        with self.assertRaises(run.Ambiguous):
+            self.find(screen, "Email", field=True)
+        screen, _ = self.picker(("radio", f"{self.MEMBER} *", ScreenNode()))
+        with self.assertRaises(run.Ambiguous):
+            self.find(screen, self.MEMBER)
+
+    def test_of_a_decorated_container_and_its_input_the_input_is_the_field(self) -> None:
+        # A combo box's container and the input inside it, both named 'Region *': one_field decides.
+        container, input_ = ScreenNode(tag="div"), ScreenNode(tag="input")
+        screen = Screen(("combobox", "Region *", container), ("textbox", "Region *", input_))
+        self.assertIs(self.find(screen, "Region", field=True), input_)
+
+    def test_a_plain_name_a_blade_shows_a_moment_later_wins_over_a_decorated_one(self) -> None:
+        screen, box = self.picker()
+        link = ScreenNode()
+
+        class Rendering(FakePage):
+            def wait_for_timeout(self, ms) -> None:      # the blade renders the plain link after the first look
+                super().wait_for_timeout(ms)
+                if not any(node is link for _, _, node in screen.everything()):
+                    screen.add(("link", DecoratedNameTests.MEMBER, link))
+
+        r = run.Runner(Rendering(), STEPS, self.recording, self.args(), ask=Answers())
+        record, _ = self.act(screen, self.PICK, self.MEMBER, r=r)
+        self.assertEqual((record["outcome"], link.clicked, box.clicked), ("match", 1, 0))
 
     def test_a_row_found_through_its_decoration_is_clicked_as_before(self) -> None:
         # 'Search for and select **X**' states no state (parse.py, #296), so the check box is

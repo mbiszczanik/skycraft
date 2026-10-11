@@ -89,16 +89,19 @@ next item clicks it. Plain text counts only when it
 is, or sits inside, a link, button or other interactive element. When nothing on screen has the
 label's name, an element whose name is the label plus one of the Portal's decorations, words the
 screen does not show beside the label (decide.DECORATIONS, #244: a list row's check box 'Select
-row X', a field label's info icon 'X information', the required marker 'X *', or both, 'X
-information *'), is the guide's element as well (find_decorated): a match, so nobody is asked,
-nothing is recorded and no guide edit is proposed. A decoration counts only on the roles it
-decorates (the info icon's own button, 'X information', is never the field), two decorated
-elements are ambiguous as two plain ones are, and a plain name that is on screen more than once
-as text is not found as before, never replaced by a decorated one. Such a row's check box is
-acted on as one the person picked: 'Search for and select **X**' states no state (parse.py,
-#296), so it is clicked, which clears a row already ticked; 'Check **X**' leaves it ticked. A
-person who picks a decorated name all the same (by number or with 'c') uses it, no drift either
-(decide.py). A label is looked for until
+row X' for an action, a required field's marker 'X *', or a field label's info icon and marker,
+'X information *'), is the guide's element as well (find_decorated): a match, so nobody is asked,
+nothing is recorded and no guide edit is proposed. It is looked for once SETTLE_MS of looking
+has not found the plain name, which a blade still rendering may show later. A decoration counts
+only on the roles it decorates (a button or link of those words is another element), two
+decorated elements are ambiguous as two plain ones are, and a plain name that is on screen more
+than once as text is not found as before, never replaced by a decorated one. Known gap: a field
+label with an info icon and no required marker is presumably named 'X information', but no run
+has seen one, so that suffix alone is no decoration and the person is asked. Such a row's check
+box is acted on as one the person picked: 'Search for and select **X**' states no state
+(parse.py, #296), so it is clicked, which clears a row already ticked; 'Check **X**' leaves it
+ticked. A person who picks a decorated name on a role it decorates all the same (by number or
+with 'c') uses it, no drift either (decide.py). A label is looked for until
 FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; when SETTLE_MS of
 that finds nothing, the blade menu's collapsed groups are opened once ('Expand all headers') and
 the looking goes on to the same deadline. When the deadline passes while a blade is still
@@ -283,6 +286,7 @@ from playwright.sync_api import Browser, Error as PlaywrightError, Frame, Locato
 
 sys.path.insert(0, str(Path(__file__).parent))
 from decide import DECORATIONS, decoration_of  # noqa: E402
+from recording import literal_pattern  # noqa: E402
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (LABEL_ROLES, REMARK, EntryNames, Redactor, checkbox_state, env_secrets,  # noqa: E402
                        missing_env, field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
@@ -894,14 +898,14 @@ def find_decorated(page: Page, label: str, field: bool = False) -> Locator | Non
     (decide.DECORATIONS, #244), on a role that decoration is found on and the lookup looks in
     (FIELD_ROLES for a field, ACTION_ROLES otherwise): the check box 'Select row Khadgar Archmage'
     for a member the guide selects, the text box 'Email information *' for the field 'Email'.
-    The info icon's own button, 'Email information', is never one. Every decoration counts at
+    A row's check box is never a field (Decoration.fields). Every decoration counts at
     once, so two elements decorated differently are as ambiguous as two of one name: Ambiguous,
     or for a field the one that takes a value (one_field)."""
     found: list[Locator] = []
     for role in FIELD_ROLES if field else ACTION_ROLES:
-        names = [d.of(label) for d in DECORATIONS if role in d.roles]
+        names = [d.of(label) for d in DECORATIONS if role in d.roles and (d.fields or not field)]
         if names:
-            pattern = re.compile("^(?:" + "|".join(map(re.escape, names)) + ")$")
+            pattern = re.compile("^(?:" + "|".join(map(literal_pattern, names)) + ")$")
             found += visible_across_frames(page, lambda f, role=role, pattern=pattern:
                                            f.get_by_role(role, name=pattern))
     if field:
@@ -909,15 +913,16 @@ def find_decorated(page: Page, label: str, field: bool = False) -> Locator | Non
     return only_one(found)
 
 
-def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
+def find_exact(page: Page, label: str, field: bool = False, decorated: bool = True) -> Locator | None:
     """The visible element whose accessible name is exactly `label`: for a field, find_field;
     otherwise the interactive roles, then plain text (find_in_roles). When nothing has the name
     and the label starts with '+' ('+ New user'), it is looked up again without the '+': the
     Portal draws the '+' as an icon, so the toolbar item is named 'New user'. That is still the
     element the guide names, not drift. Only when neither name is on screen is an element looked
     for whose name is one of them plus a decoration of the Portal's (find_decorated, #244), which
-    is the guide's element as well, so the plain name always wins. A plain name on screen as
-    interactive text more than once is not found, as before, and is no reason to take a
+    is the guide's element as well, so the plain name always wins; not at all when `decorated`
+    is False (looking_for, while a blade may still render the plain one). A plain name on screen
+    as interactive text more than once is not found, as before, and is no reason to take a
     decorated one: the person decides."""
     bare = LEADING_PLUS.sub("", label, count=1)
     names = [label] + ([bare] if bare and bare != label else [])
@@ -925,8 +930,8 @@ def find_exact(page: Page, label: str, field: bool = False) -> Locator | None:
         element = find_field(page, name) if field else find_in_roles(page, name, ACTION_ROLES)
         if element is not None:
             return element
-    if not field and any(visible_across_frames(page, lambda f, name=name: interactive_text(f, name))
-                         for name in names):
+    if not decorated or (not field and any(visible_across_frames(page, lambda f, name=name: interactive_text(f, name))
+                                           for name in names)):
         return None
     for name in names:
         element = find_decorated(page, name, field)
@@ -1868,13 +1873,15 @@ class Runner:
         """One look for `label` (find_exact), for in_time to repeat. For a navigation or action
         item, once looks have found nothing for SETTLE_MS, the blade menu's collapsed groups are
         opened (expand_menu_groups) and the looks go on to the same deadline, so a label that
-        only an open group shows costs a moment, not the whole FIND_TIMEOUT_MS."""
+        only an open group shows costs a moment, not the whole FIND_TIMEOUT_MS. A decorated name
+        (find_decorated, #244) counts only from SETTLE_MS on as well: a blade still rendering may
+        show the plain one a moment later, and the plain one wins."""
         started = time.monotonic()
 
         def look() -> Locator | None:
-            element = find_exact(self.page, label, field=(kind == "field"))
-            if (element is None and kind in ("navigation", "action")
-                    and time.monotonic() - started >= SETTLE_MS / 1000):
+            settled = time.monotonic() - started >= SETTLE_MS / 1000
+            element = find_exact(self.page, label, field=(kind == "field"), decorated=settled)
+            if element is None and kind in ("navigation", "action") and settled:
                 self.expand_menu_groups(label)
             return element
         return look
