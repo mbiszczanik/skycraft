@@ -41,7 +41,8 @@ When a label is not on screen, the person answers at the prompt (decide.py). For
 the value the run will type, not the guide's (recording.prompt_value, #210): after the recording's
 placeholders and valueOverrides, saying '(from the recording's valueOverrides)' or '(the guide's,
 with the recording's placeholders)' and naming any environment variable it was read from, scrubbed
-as the candidates are, so a typed secret shows as '[secret]'. At the prompt, a number uses that
+as the candidates are, so a typed secret shows as '[secret]'. A tag's record keeps the value
+typed too, scrubbed as any record's 'observed'. At the prompt, a number uses that
 element as the guide's, renamed (misleading drift); 'c <number>' uses it, the difference cosmetic;
 'w <number>' uses it as a workaround, not as the guide's element (#211: misleading drift, never
 written to the recording, so the next run asks again); 'g' gone (blocking drift); 'i' ignore; 'u'
@@ -2240,8 +2241,9 @@ class Runner:
             if item["kind"] == "tag":
                 record = self.new_record(step, "tag", item["name"])
                 try:
-                    fill_tag(self.page, item["name"], resolve_value(self.recording, step, item["name"], item["value"]))
-                    record.update(outcome="match", observed=item["value"])
+                    value = resolve_value(self.recording, step, item["name"], item["value"])
+                    fill_tag(self.page, item["name"], value)
+                    record.update(outcome="match", observed=value)      # what was typed, not the guide's (#210)
                 except (PlaywrightError, LookupError) as error:
                     record.update(outcome="unknown", observed=error_text(error))
                 records = [record]

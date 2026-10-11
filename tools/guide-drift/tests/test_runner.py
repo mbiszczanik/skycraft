@@ -3255,6 +3255,17 @@ class PromptValueTests(RunnerTestCase):
                       "environment variable SKYCRAFT_GUIDE_DRIFT_PASSWORD)\n", shown)
         self.assertNotIn(self.PASSWORD, shown)
 
+    def test_a_tag_record_observes_the_value_typed_not_the_guides(self) -> None:
+        item = {"kind": "tag", "name": "Owner", "value": "SkyCraft-Admins", "line": 3}
+        step = {"id": "9.9.1", "title": "One", "expected": None, "images": [], "items": [item]}
+        self.recording["steps"]["9.9.1"]["valueOverrides"]["Owner"] = "Contoso-Admins"
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        with mock.patch.object(run, "fill_tag") as fill, mock.patch.object(run.Runner, "check_result"):
+            self.assertTrue(self.quietly(lambda: r.run_step(step)))
+        self.assertEqual(fill.call_args.args[1:], ("Owner", "Contoso-Admins"))
+        [tag] = [record for record in r.records if record["kind"] == "tag"]
+        self.assertEqual((tag["outcome"], tag["observed"]), ("match", "Contoso-Admins"))
+
 
 GROUPS ="Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups"
 USERS = "Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/AllUsers"
