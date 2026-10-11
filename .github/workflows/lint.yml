@@ -113,6 +113,13 @@ jobs:
               exit 1
           }
 
+          # Success is stated just as explicitly. GitHub appends `exit $LASTEXITCODE` to a pwsh
+          # step, and suites that run a script in a child pwsh leave that child's exit code in
+          # $LASTEXITCODE (Remove-LabCycle.ps1's 5 for "every check failed"), which would fail a
+          # green run.
+          $Host.SetShouldExit(0)
+          exit 0
+
   bicep:
     name: Bicep Build (Linter)
     runs-on: ubuntu-latest
