@@ -23,3 +23,6 @@
 
 # Shell scripts - always LF.
 *.sh   text eol=lf
+
+# Git hooks run under sh, also on Windows - always LF (issue #303).
+tools/git-hooks/* text eol=lf

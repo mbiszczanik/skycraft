@@ -24,7 +24,15 @@ SkyCraft follows **GitHub Flow** (see [ADR-0001](docs/adr/0001-use-github-flow.m
 For multi-commit work — and for any work driven by an automated agent — use a
 `git worktree` to isolate the feature from the main checkout (see
 [ADR-0003](docs/adr/0003-worktree-branch-discipline.md) for the rationale and
-the exact commands).
+the exact commands). Install the repository's pre-commit hook once per clone:
+
+```powershell
+git config core.hooksPath tools/git-hooks
+```
+
+It refuses a commit on `main`, and a commit in the main checkout while another
+worktree exists (issue #303). A person who knows why may pass `--no-verify`; an
+agent never does.
 
 ## 🛠️ How to Contribute
 
