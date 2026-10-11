@@ -2027,8 +2027,14 @@ class Runner:
     def not_proposed(self, step: dict, decision: Decision) -> str | None:
         """Why a misleading or cosmetic drift proposes no guide edit, for the record's
         'notProposed' and the summary's 'not proposed' (#211); None when it proposes one
-        (proposed_edit). The Portal's name, scrubbed, holds a redaction token: the element
-        carries the tenant's name, an id or an address, which never goes into a guide."""
+        (proposed_edit). In this order:
+
+          - the person used the element as a workaround ('w <number>', decide.py), not as the
+            guide's element
+          - the Portal's name, scrubbed, holds a redaction token: the element carries the
+            tenant's name, an id or an address, which never goes into a guide"""
+        if decision.workaround:
+            return "used as a workaround, not as the guide's element"
         tokens = redaction_tokens(scrub(decision.name, self.redactor, self.secrets))
         if tokens:
             return f"the Portal's name holds tenant or personal data ({tokens[0]})"

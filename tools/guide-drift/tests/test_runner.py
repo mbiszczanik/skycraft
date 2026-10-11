@@ -3860,10 +3860,11 @@ class NoProposedEditTests(RunnerTestCase):
         """act_on_label for the step's label, which is not on screen; `before(r)` runs first, under
         the same clock (check_start). The record is written, as run_step writes it."""
         clock = iter(range(0, 1_000_000, 1))               # 1 s passes between every look at the clock
+        self.element = FakeElement()
         with mock.patch.object(run, "find_exact", return_value=None), \
                 mock.patch.object(run, "candidates_on_screen", return_value=self.CANDIDATES), \
                 mock.patch.object(run.time, "monotonic", lambda: next(clock)), \
-                mock.patch.object(run, "find_by_name", return_value=FakeElement()), redirect_stdout(io.StringIO()):
+                mock.patch.object(run, "find_by_name", return_value=self.element), redirect_stdout(io.StringIO()):
             if before is not None:
                 before(r)
             record = r.act_on_label(self.STEP, self.STEP["items"][0], "Microsoft Entra ID")
@@ -3909,6 +3910,18 @@ class NoProposedEditTests(RunnerTestCase):
         record = self.act(r)
         self.assertEqual((record["severity"], record["proposedEdit"], record["notProposed"]),
                          ("misleading", None, self.TOKEN_REASON))
+
+    def test_an_element_used_as_a_workaround_is_drift_without_an_edit_and_is_not_recorded(self) -> None:
+        r = self.runner_for("w 3")
+        record = self.act(r)
+        self.assertEqual(self.element.clicked, 1)               # acted on all the same
+        self.assertEqual((record["outcome"], record["severity"], record["observed"]),
+                         ("drift", "misleading", "View all 5 users"))
+        reason = "used as a workaround, not as the guide's element"
+        self.assertEqual((record["proposedEdit"], record["notProposed"]), (None, reason))
+        self.assertEqual(self.labels(), {})     # replay would take it for the guide's element: asked again
+        self.assertIn("## proposed edits (0)\n- none\n\n## not proposed (1)\n- step 9.9.2 action "
+                      f"**Microsoft Entra ID**: observed 'View all 5 users': {reason}\n", self.summary(r))
 
 
 if __name__ == "__main__":

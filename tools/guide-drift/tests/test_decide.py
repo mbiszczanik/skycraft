@@ -82,6 +82,24 @@ class RoundTrip(unittest.TestCase):
         self.assertEqual((given.kind, given.severity), ("use", None))
         self.assertSame(given, replayed)
 
+    def test_w_number_is_misleading_drift_used_as_a_workaround_and_never_recorded(self):
+        # Recorded, it would replay as the guide's element renamed (#211): the person is asked again.
+        given = human("w 2")(STEP, ITEM, LABEL, CANDIDATES)
+        self.assertEqual((given.kind, given.severity, given.role, given.name, given.workaround),
+                         ("drift", "misleading", "button", "New group", True))
+        self.assertIsNone(given.to_recording([], AT))
+        self.assertFalse(human("2")(STEP, ITEM, LABEL, CANDIDATES).workaround)
+
+    def test_w_number_same_name_is_plain_use(self):
+        given, replayed = self.roundtrip("w 3")
+        self.assertEqual((given.kind, given.severity, given.workaround), ("use", None, False))
+        self.assertSame(given, replayed)
+
+    def test_the_prompt_names_every_answer(self):
+        for answer in ("[number]", "c [number]", "w [number]", "g ", "i ", "u <why>"):
+            with self.subTest(answer=answer):
+                self.assertIn(f"  {answer}", HumanDecider.PROMPT)
+
     def test_gone_is_blocking_and_replays_without_candidates(self):
         given, replayed = self.roundtrip("g")
         self.assertEqual((given.kind, given.severity), ("drift", "blocking"))
@@ -143,7 +161,8 @@ class Replay(unittest.TestCase):
 
 class Asking(unittest.TestCase):
     def test_invalid_answers_reprompt_then_accept_a_valid_one(self):
-        for bad in ("0", "999", "c", "c 0", "x", "use 3", "²", "c 999", "cc 1", "ignore", "go", ""):
+        for bad in ("0", "999", "c", "c 0", "x", "use 3", "²", "c 999", "cc 1", "ignore", "go", "",
+                    "w", "w 0", "w 999", "ww 1", "w x"):
             with self.subTest(bad=bad):
                 decider = human(bad, "2")
                 decision = decider(STEP, ITEM, LABEL, CANDIDATES)
