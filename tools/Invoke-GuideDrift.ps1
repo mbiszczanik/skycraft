@@ -60,7 +60,8 @@
 
     WHAT A RUN LEAVES BEHIND, AND WHY IT IS GITIGNORED. -LogDirectory/<run id>/ holds
     steps.json (the parsed guide; parse.py failing stops the run with exit 1), results.jsonl (one
-    record per check, appended as the run goes), a full-window screenshot of every step,
+    record per check, appended as the run goes and never rewritten, and a "redo" marker before a
+    redone step's new attempt), a full-window screenshot of every step,
     summary.md, for a 'Search for' step that found no single result, search-<step>.aria.txt
     (the search dropdown's accessibility tree, redacted) and, for a label that was not found,
     blade-<step>-<guide line>.aria.txt (the outline the blade loading check read, redacted).
@@ -94,7 +95,11 @@
     skipped step, or ended with e, is finished, so cleanup runs. A step done by hand (c) records
     the view the Portal shows when you answer, so a later -Resume can open it. On -Resume it asks
     whether the step in flight finished (y), must be redone (n) or is skipped (s); a step skipped
-    with s before the stop is passed over.
+    with s before the stop is passed over. A redone step counts only its last attempt in
+    summary.md and the exit code, however often the run is resumed after it (issue #222):
+    results.jsonl keeps every attempt, with a "redo" marker before the new one. A results.jsonl
+    written before #222 has no markers, so a step redone there may still count its earlier
+    attempt.
 
     A RESUMED RUN HAS A NEW BROWSER on the Microsoft Entra ID overview (issue #206), and so has a
     run started with -FromStep. Before the first step that runs, the run opens the view that step

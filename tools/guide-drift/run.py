@@ -10,7 +10,8 @@ the account's own address in the header carries it in any directory). Only then 
 session saved to --auth-state, so the next run skips the password.
 
 Everything a run leaves behind goes under --log-dir/<run id>/ and is gitignored: results.jsonl (one
-record per check, appended as the run goes), Step-X.Y.N.png (full window, for manual cropping and
+record per check, appended as the run goes and never rewritten, and a "redo" marker before a
+redone step's new attempt), Step-X.Y.N.png (full window, for manual cropping and
 anonymisation), summary.md, and blade-<step>-<line>.aria.txt for a label that was not found (the
 outline the loading check read, redacted). Only the recording is written back into the repository.
 
@@ -93,7 +94,13 @@ the completed steps (a skipped step among them, so a resume passes over it) and 
 that step finished (y), must be redone (n) or is skipped (s, as above but without a reason). A
 run that ends normally, whatever was skipped, marks the state finished, and it cannot be resumed.
 A resumed run is the same run: it keeps the state's run id (ignoring --run-id), writes into the
-same --log-dir/<run id>/ folder, and its summary and exit code cover every step of both parts.
+same --log-dir/<run id>/ folder, and its summary and exit code cover every step of every part. A
+step redone (n) counts only its new attempt, however often the run is resumed after it (issue
+#222): before that attempt, results.jsonl gets a marker ("kind": "redo", the step's id), and a
+resume drops the step's records before its last marker, so the file keeps every attempt while the
+summary, the exit code and the failure prompt see the last one only. The marker is never a finding
+and never in summary.md. A results.jsonl written before #222 has no markers: every record in it
+counts, so a step redone and completed there may still count its earlier attempt.
 
 A resumed run, and one started with --from-step, has a new browser on the Microsoft Entra ID
 overview, not where the stopped run left the Portal (issue #206). So before the first step that
@@ -256,6 +263,9 @@ RECORDED_SKIP = "recorded-skip"          # the category of a step the recording 
 # The category of a step that starts on another blade than the recorded one, or of a form whose
 # first field cannot be filled in on the open blade: the guide leaves out how to get there (#207).
 WRONG_BLADE = "wrong-blade"
+# The kind of the marker a redo appends to results.jsonl before its new attempt (#222): a resume
+# drops the step's records before its last marker. Never one of the runner's records.
+REDO = "redo"
 # The Portal's global search box, named "Search resources, services, and docs (G+/)".
 SEARCH_BOX = re.compile(r"^Search resources")
 # A blade's own search box (search scope 'blade'): a search box, or a text box whose accessible
@@ -1582,18 +1592,23 @@ class Runner:
         self.unrecorded: set[str] = set()
 
     def earlier_results(self) -> list[dict]:
-        """The records the stopped part of this run wrote, scrubbed as write() scrubs them: that
+        """The records the stopped parts of this run wrote, scrubbed as write() scrubs them: that
         changes nothing in a record written so, and cleans one a run wrote before #212 for the
-        summary (results.jsonl keeps it as it is). A last line cut short by a crash is skipped."""
+        summary (results.jsonl keeps it as it is). A last line cut short by a crash is skipped.
+        Of a step redone in an earlier part only what comes after its last REDO marker is kept
+        (drop_attempt, #222), and the markers themselves are left out; a file written before
+        #222 has none, and every record in it counts, as it did."""
         if not self.results_path.is_file():
             return []
-        records = []
+        lines = []
         for line in self.results_path.read_text(encoding="utf-8").splitlines():
             try:
-                records.append(self.scrubbed(json.loads(line)))
+                lines.append(json.loads(line))
             except ValueError:
                 continue
-        return records
+        redone = {r["step"]: i for i, r in enumerate(lines) if r.get("kind") == REDO}
+        return [self.scrubbed(r) for i, r in enumerate(lines)
+                if r.get("kind") != REDO and i > redone.get(r["step"], -1)]
 
     def prompt(self, text: str) -> str | None:
         """One line from the person, stripped; None when input is closed."""
@@ -2178,8 +2193,27 @@ class Runner:
     def write(self, record: dict) -> None:
         """Scrub `record` (scrubbed), keep it for the summary and append it to results.jsonl."""
         self.records.append(self.scrubbed(record))
+        self.append(record)
+
+    def append(self, record: dict) -> None:
+        """Append one line to results.jsonl, which is never rewritten."""
         with self.results_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def drop_attempt(self, step: dict) -> None:
+        """Forget what an earlier attempt of `step` found, before the step is redone or skipped
+        in its place: a step redone after -Resume ('n'), or one in flight that the recording
+        skips since. results.jsonl keeps every attempt, so when the earlier attempt left
+        records, a marker (kind REDO) is appended first (#222): a later resume drops the step's
+        records before its last marker (earlier_results) and does not count the old attempt
+        again once the step is completed. The marker has no free text, so scrubbing leaves it
+        as it is, and it never enters self.records: no prompt, check or summary sees it."""
+        if not any(r["step"] == step["id"] for r in self.records):
+            return
+        marker = self.new_record(step, REDO, None)
+        marker["screenshot"] = None
+        self.append(marker)
+        self.records = [r for r in self.records if r["step"] != step["id"]]
 
     def check_result(self, step: dict, entry: dict) -> None:
         if not step.get("expected"):
@@ -2358,12 +2392,13 @@ class Runner:
         first = portal[start]
         if in_flight and skip_reason(self.recording, first["id"]) is not None:
             # Skipped in the recording since the run stopped (#200): whether it finished does not
-            # matter any more. Its stopped attempt is dropped, as a redo's is (results.jsonl keeps
-            # it), and the loop below writes the recorded skip; the person is asked for the view
-            # the first step that runs needs, as on any other resume.
+            # matter any more. Its stopped attempt is dropped, as a redo's is (drop_attempt:
+            # results.jsonl keeps it, before a marker), and the loop below writes the recorded
+            # skip; the person is asked for the view the first step that runs needs, as on any
+            # other resume.
             print(f"\nStep {first['id']} ({first['title']}) was in progress when the last run stopped; "
                   f"the recording now skips it.")
-            self.records = [r for r in self.records if r["step"] != first["id"]]
+            self.drop_attempt(first)
             in_flight = False
         answer = None
         if in_flight:
@@ -2416,8 +2451,9 @@ class Runner:
                 self.unrecorded.add(step["id"])
             self.save_state(completed, step["id"])
             # A step redone after -Resume replaces what its stopped attempt found (its screenshot
-            # is overwritten too); results.jsonl keeps both attempts.
-            self.records = [r for r in self.records if r["step"] != step["id"]]
+            # is overwritten too); results.jsonl keeps both attempts, with a marker between them
+            # so that a later resume does not count the old one again (drop_attempt, #222).
+            self.drop_attempt(step)
             if self.run_step(step):
                 completed.append(step["id"])
                 self.save_state(completed, None)

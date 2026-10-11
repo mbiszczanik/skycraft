@@ -2,9 +2,9 @@
 (issue #189), steps the recording skips (#200), the view a resumed run starts from (#206), the
 blade a step starts on and the form its fields are filled in on (#207), and how it finds what a
 guide names (search, '+' labels, plain text, collapsed menu groups, a blade still loading, a
-resource a chain names, #199), and what results.jsonl and summary.md keep (#212). No browser:
-the page is a small fake (Screen stands in for a frame), and run_step is scripted where only the
-order of steps matters.
+resource a chain names, #199), what results.jsonl and summary.md keep (#212), and what a step
+redone across resumes counts (#222). No browser: the page is a small fake (Screen stands in for a
+frame), and run_step is scripted where only the order of steps matters.
 
 run.py imports Playwright at module level and the CI runner does not install it, so a minimal
 stub of playwright.sync_api is put in sys.modules when the real one is missing. Nothing here
@@ -637,6 +637,133 @@ class OneRunAcrossResumeTests(RunnerTestCase):
         self.assertEqual([x["step"] for x in r.records], ["9.9.1"])
 
 
+class RedoAcrossResumesTests(RunnerTestCase):
+    """A step redone after -Resume counts only its last attempt, however often the run is resumed
+    (#222): the redo appends a marker to results.jsonl before its new attempt, and a later resume
+    drops the step's records that come before its last marker. The marker itself is never a
+    finding."""
+
+    FINDING = "- step 9.9.2 action **Missing button**: not found"
+
+    def part(self, run_id: str, state: dict | None = None, **script) -> tuple[ScriptedRunner, int, dict]:
+        """One part of the run: a new run when `state` is None, else a resume of it. Returns the
+        runner, its exit code (ABORTED for Ctrl+C, as main() returns it) and the state it left."""
+        r = self.runner(run_id=run_id, resume=state is not None, state=state, **script)
+        try:
+            code = self.quietly(lambda: r.run(state))
+        except KeyboardInterrupt:
+            code = run.ABORTED
+        return r, code, self.state()
+
+    def lines(self, run_id: str) -> list[dict]:
+        text = (self.tmp / "logs" / run_id / "results.jsonl").read_text(encoding="utf-8")
+        return [json.loads(line) for line in text.splitlines()]
+
+    def summary(self, run_id: str) -> str:
+        return (self.tmp / "logs" / run_id / "summary.md").read_text(encoding="utf-8")
+
+    def test_a_redone_step_completed_then_a_second_resume_counts_each_finding_once(self) -> None:
+        # 9.9.2 fails, q; -Resume, n: the redo goes through, or fails again and is done by hand (c)
+        # or skipped (s); 9.9.4 fails, q; -Resume, y. Before #222 the last part counted 9.9.2's
+        # first attempt again: 2 for 1 and 3 for 2.
+        for how, answers, unknown, code, by_hand, skipped in (
+                ("succeeds", ["n", "", "q"], {"9.9.4"}, 1, 0, []),
+                ("c", ["n", "", "c", "q"], {"9.9.2", "9.9.4"}, 2, 1, []),
+                ("s", ["n", "", "s", "no spare licences", "q"], {"9.9.2", "9.9.4"}, 2, 0,
+                 ["- step 9.9.2 skipped after it failed: no spare licences"])):
+            with self.subTest(redo=how):
+                run_id = f"resumed-{how}"
+                _, stopped, state = self.part(run_id, answers=["q"], unknown={"9.9.2"})
+                self.assertEqual((stopped, state["inFlight"]), (run.ABORTED, "9.9.2"))
+                second, stopped, state = self.part(run_id, state, answers=answers, unknown=unknown)
+                self.assertEqual((stopped, state["inFlight"]), (run.ABORTED, "9.9.4"))
+                self.assertEqual(second.ran, ["9.9.2", "9.9.4"])
+                third, exit_code, state = self.part(run_id, state, answers=["y", ""])
+                self.assertEqual(third.ran, ["9.9.5"])
+                self.assertTrue(state["finished"])
+                self.assertEqual(exit_code, code)
+                summary = self.summary(run_id)
+                self.assertIn(f"## unknown ({code})\n", summary)
+                self.assertEqual(summary.count(self.FINDING), code - 1)
+                self.assertIn("- step 9.9.4 action **Missing button**: not found", summary)
+                self.assertIn(f"## done by hand ({by_hand})\n", summary)
+                self.assertIn("\n".join([f"## skipped ({len(skipped)})", *(skipped or ["- none"])]) + "\n", summary)
+                self.assertNotIn("redo", summary)
+                # The file keeps both attempts, with the marker between them.
+                kinds = [(x["kind"], x["outcome"]) for x in self.lines(run_id) if x["step"] == "9.9.2"]
+                self.assertEqual(kinds[:2], [("action", "unknown"), ("redo", None)])
+
+    def test_the_last_marker_wins_when_a_step_is_redone_twice(self) -> None:
+        _, _, state = self.part("twice", answers=["q"], unknown={"9.9.2"})
+        _, _, state = self.part("twice", state, answers=["n", "", "q"], unknown={"9.9.2"})
+        self.assertEqual(state["inFlight"], "9.9.2")
+        _, _, state = self.part("twice", state, answers=["n", "", "q"], unknown={"9.9.4"})
+        self.assertEqual(state["inFlight"], "9.9.4")
+        _, code, _ = self.part("twice", state, answers=["y", ""])
+        self.assertEqual(code, 1)
+        self.assertNotIn(self.FINDING, self.summary("twice"))
+        self.assertEqual([x["step"] for x in self.lines("twice") if x["kind"] == "redo"], ["9.9.2", "9.9.2"])
+
+    def test_the_marker_survives_scrubbing_and_is_never_a_record(self) -> None:
+        _, _, state = self.part("scrub", answers=["q"], unknown={"9.9.2"})
+        r, _, state = self.part("scrub", state, answers=["n", "", "q"], unknown={"9.9.4"})
+        marker = next(x for x in self.lines("scrub") if x["kind"] == "redo")
+        self.assertEqual(r.scrubbed(dict(marker)), marker)
+        self.assertEqual((marker["step"], marker["runId"], marker["observed"], marker["screenshot"]),
+                         ("9.9.2", "scrub", None, None))
+        self.assertNotIn("redo", [x["kind"] for x in r.records])
+        resumed = self.runner(run_id="scrub", resume=True, state=state)
+        self.assertNotIn("redo", [x["kind"] for x in resumed.records])
+        self.assertEqual([(x["step"], x["outcome"]) for x in resumed.records], [("9.9.4", "unknown")])
+
+    def test_a_step_run_for_the_first_time_writes_no_marker(self) -> None:
+        self.part("plain", answers=["s", "no spare licences"], unknown={"9.9.2"})
+        self.assertEqual([x for x in self.lines("plain") if x["kind"] == "redo"], [])
+        # A redo of a step whose stopped attempt left no record has nothing to replace.
+        state = {"runId": "plain", "lab": LAB, "completed": ["9.9.1", "9.9.2", "9.9.4"], "inFlight": "9.9.5"}
+        r, code, _ = self.part("plain", state, answers=["n", ""])
+        self.assertEqual((r.ran, code), (["9.9.5"], 1))
+        self.assertEqual([x for x in self.lines("plain") if x["kind"] == "redo"], [])
+
+    def write_results(self, run_id: str, *records: dict) -> None:
+        folder = self.tmp / "logs" / run_id
+        folder.mkdir(parents=True)
+        (folder / "results.jsonl").write_text("".join(json.dumps(x) + "\n" for x in records), encoding="utf-8")
+
+    def record(self, step: str, kind: str, **fields) -> dict:
+        record = {"runId": "x", "at": "2026-10-11T10:00:00", "lab": LAB, "step": step, "kind": kind,
+                  "label": "Missing button" if kind == "action" else None, "outcome": None, "severity": None,
+                  "category": None, "skippedBecause": None, "observed": None, "proposedEdit": None,
+                  "screenshot": f"Step-{step}.png" if kind == "action" else None}
+        record.update(fields)
+        return record
+
+    def test_a_marker_without_later_records_drops_the_step_s_earlier_attempt(self) -> None:
+        # A run stopped right after the marker (Ctrl+C before the redo wrote anything): the
+        # attempt in flight is the redo, and it found nothing yet.
+        self.write_results("cut", self.record("9.9.1", "action", outcome="match"),
+                           self.record("9.9.2", "action", outcome="unknown", observed="not found"),
+                           self.record("9.9.2", "redo"))
+        state = {"runId": "cut", "lab": LAB, "completed": ["9.9.1"], "inFlight": "9.9.2"}
+        r, code, _ = self.part("cut", state, answers=["y", ""])
+        self.assertEqual([x["step"] for x in r.records if x["step"] in ("9.9.1", "9.9.2")], ["9.9.1"])
+        self.assertEqual(code, 0)
+        self.assertIn("## unknown (0)\n", self.summary("cut"))
+        self.assertNotIn("redo", self.summary("cut"))
+
+    def test_a_results_file_without_markers_is_read_as_before(self) -> None:
+        # Written before #222: both attempts of a redone step, no marker. Every record counts.
+        self.write_results("old", self.record("9.9.1", "action", outcome="match"),
+                           self.record("9.9.2", "action", outcome="unknown", observed="not found"),
+                           self.record("9.9.2", "action", outcome="unknown", observed="not found"),
+                           self.record("9.9.4", "action", outcome="unknown", observed="not found"))
+        state = {"runId": "old", "lab": LAB, "completed": ["9.9.1", "9.9.2"], "inFlight": "9.9.4"}
+        r, code, _ = self.part("old", state, answers=["y", ""])
+        self.assertEqual(len([x for x in r.records if x["outcome"] == "unknown"]), 3)
+        self.assertEqual(code, 3)
+        self.assertEqual(self.summary("old").count(self.FINDING), 2)
+
+
 class RunLogRedactionTests(RunnerTestCase):
     """results.jsonl and summary.md keep what the failure prompt shows (#212): the first line of
     an error, without Playwright's call log, redacted, with no object id and no typed secret."""
@@ -1125,6 +1252,23 @@ class RecordedSkipTests(RunnerTestCase):
         self.assertIn("## unknown (0)", summary)
         self.assertIn(f"## skipped (1)\n- step 9.9.2 skipped by the recording: {self.REASON}\n", summary)
         self.assertEqual(self.state()["completed"], ["9.9.1", "9.9.2", "9.9.4", "9.9.5"])
+
+    def test_a_step_in_flight_and_skipped_since_stays_dropped_after_a_second_resume(self) -> None:
+        # As above, but a later step fails and the run is stopped and resumed again (#222): the
+        # dropped attempt is behind a marker in results.jsonl, so it is not counted again.
+        first = self.runner(answers=["q"], unknown={"9.9.2"}, run_id="first")
+        self.quietly(first.run)
+        state = run.load_state(self.tmp / "state.json", LAB)
+        self.skip("9.9.2")
+        second = self.runner(answers=["", "q"], unknown={"9.9.4"}, resume=True, run_id="second", state=state)
+        self.assertEqual(self.quietly(lambda: second.run(state)), run.ABORTED)
+        state = run.load_state(self.tmp / "state.json", LAB)
+        self.assertEqual(state["inFlight"], "9.9.4")
+        third = self.runner(answers=["y", ""], resume=True, run_id="third", state=state)
+        self.assertEqual(self.quietly(lambda: third.run(state)), 1)
+        summary = (self.tmp / "logs" / "first" / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## unknown (1)\n- step 9.9.4 ", summary)
+        self.assertIn(f"## skipped (1)\n- step 9.9.2 skipped by the recording: {self.REASON}\n", summary)
 
     def test_starting_at_a_skipped_step_names_the_first_step_that_runs(self) -> None:
         self.skip("9.9.2")
