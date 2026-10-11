@@ -394,11 +394,11 @@ class DecisionRecordingTests(RunnerTestCase):
         super().setUp()
         (self.tmp / "guide.md").write_text("# Lab\n\n2. Click **+ New group**\n", encoding="utf-8")
 
-    def act(self, answers, element, label="+ New group", exact=None):
+    def act(self, answers, element, label="+ New group", exact=None, extra=()):
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
         candidates = [run.Candidate("button", "New group"), run.Candidate("link", "Groups"),
                       run.Candidate("button", "Delete group"), run.Candidate("link", "Contoso Ltd"),
-                      run.Candidate("menuitem", "Bulk delete")]
+                      run.Candidate("menuitem", "Bulk delete"), *extra]
         clock = iter(range(0, 1_000_000, 1))               # 1 s passes between every look at the clock
         with mock.patch.object(run, "find_exact", return_value=exact), \
                 mock.patch.object(run, "candidates_on_screen", return_value=candidates), \
@@ -413,6 +413,14 @@ class DecisionRecordingTests(RunnerTestCase):
         self.act(["1"], element)
         self.assertEqual(element.calls, ["scroll", "is_disabled", "click"])
         self.assertEqual(self.find_by_name.call_args.args[1:], ("button", "New group"))   # plain: exact
+
+    def test_a_rejected_element_inside_a_list_row_is_not_recorded(self) -> None:
+        # #317: the redacted copy of the candidates keeps aria_lines' in_row, so a row's link, whose
+        # name is the row's data (example data: a fictional user), stays out of the recording.
+        _, labels = self.act(["1"], FakeElement(), extra=[run.Candidate("link", "Illidan Stormrage", in_row=True)])
+        rejected = labels["+ New group"]["rejected"]
+        self.assertIn('link "Groups"', rejected)
+        self.assertNotIn('link "Illidan Stormrage"', rejected)
 
     def test_a_name_that_is_the_label_once_restored_needs_no_decision(self) -> None:
         element = FakeElement()
@@ -1650,8 +1658,43 @@ class SnapshotKeyTests(unittest.TestCase):
                           snapshot_line("radio", "Premium"), "- text: x", "- button"])
         with mock.patch.object(run, "all_frames", lambda page: [Screen(tree=tree)]):
             lines = run.aria_lines(FakePage())
-        self.assertEqual(lines, [("radio", self.STANDARD, 1), ("radio", "Premium", 2),
-                                 ("button", "Don't: stop", 1), ("button", 'Say "hi"', 1)])   # no unnamed button
+        self.assertEqual(lines, [("radio", self.STANDARD, 1, False), ("radio", "Premium", 2, False),
+                                 ("button", "Don't: stop", 1, False), ("button", 'Say "hi"', 1, False)])   # no unnamed button
+
+    def test_aria_lines_mark_an_element_inside_a_list_row_but_not_in_a_column_header(self) -> None:
+        # #317: a row's link or check box is named after the row's data (example data: the lab's
+        # fictional users); a column header's sort button and select-all box are the Portal's labels.
+        tree = "\n".join([
+            '- button "Add"',
+            '- grid "Users":',
+            '  - rowgroup:',
+            '    - row "Select all Name":',
+            '      - columnheader "Select all":',
+            '        - checkbox "Select all"',
+            '      - columnheader "Name":',
+            '        - button "Name"',
+            '  - rowgroup:',
+            '    - row "Select row Illidan Stormrage Illidan Stormrage":',
+            '      - gridcell "Select row Illidan Stormrage":',
+            '        - checkbox "Select row Illidan Stormrage"',
+            '      - gridcell "Illidan Stormrage":',
+            '        - link "Illidan Stormrage":',
+            '          - /url: "#x"',
+            '    - row "Khadgar Archmage":',
+            '      - checkbox "Khadgar Archmage"',
+            '      - button "Add"',
+            '- link "Illidan Stormrage"',      # also outside a row: the name still counts as a row's
+            '- tab "Members"',
+        ])
+        with mock.patch.object(run, "all_frames", lambda page: [Screen(tree=tree)]):
+            lines = run.aria_lines(FakePage())
+            candidates = run.candidates_on_screen(FakePage())
+        self.assertEqual(lines, [("button", "Add", 2, True), ("checkbox", "Select all", 1, False),
+                                 ("button", "Name", 1, False),
+                                 ("checkbox", "Select row Illidan Stormrage", 1, True),
+                                 ("link", "Illidan Stormrage", 2, True), ("checkbox", "Khadgar Archmage", 1, True),
+                                 ("tab", "Members", 1, False)])
+        self.assertEqual([c.in_row for c in candidates], [line[3] for line in lines])
 
 
 class BladeStillLoadingTests(unittest.TestCase):

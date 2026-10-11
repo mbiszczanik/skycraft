@@ -500,21 +500,35 @@ def blade_still_loading(outline: list[tuple[str, str]]) -> str | None:
     return None if any(role in BLADE_CONTENT_ROLES for role, _ in outline[start + 1:]) else BLADE_EMPTY
 
 
-def aria_lines(page: Page) -> list[tuple[str, str, int]]:
-    """(role, name, count) of every named element the accessibility tree exposes, across frames,
-    in first-seen order. count is how many elements share that role and name: the Portal keeps
-    earlier blades in the DOM, so 'Create' or 'Delete' often appears more than once, and a
-    candidate that stands for several elements must never be clicked by name alone."""
+def aria_lines(page: Page) -> list[tuple[str, str, int, bool]]:
+    """(role, name, count, in_row) of every named element the accessibility tree exposes, across
+    frames, in first-seen order. count is how many elements share that role and name: the Portal
+    keeps earlier blades in the DOM, so 'Create' or 'Delete' often appears more than once, and a
+    candidate that stands for several elements must never be clicked by name alone. in_row: at
+    least one of them sits in a row of a table or grid, not in a column header (the snapshot's
+    indentation gives its ancestors): its name is then the row's data, such as a user's display
+    name, and is kept out of the recording (recording.rejected_candidates, #317)."""
     counts: dict[tuple[str, str], int] = {}
+    in_row: dict[tuple[str, str], bool] = {}
     for frame in all_frames(page):
         try:
             snapshot = frame.locator("body").aria_snapshot(timeout=2000)
         except PlaywrightError:     # timed out, or the frame went away while the Portal navigated
             continue
-        for key in map(snapshot_key, snapshot.splitlines()):
-            if key is not None and key[1] and key[0] in CANDIDATE_ROLES:
+        ancestors: list[tuple[int, str]] = []     # (indent, role) of the elements this line is in
+        for line in snapshot.splitlines():
+            key = snapshot_key(line)
+            if key is None:
+                continue
+            indent = len(line) - len(line.lstrip())
+            while ancestors and ancestors[-1][0] >= indent:
+                ancestors.pop()
+            roles = [role for _, role in ancestors]
+            if key[1] and key[0] in CANDIDATE_ROLES:
                 counts[key] = counts.get(key, 0) + 1
-    return [(role, name, count) for (role, name), count in counts.items()][:300]
+                in_row[key] = in_row.get(key, False) or ("row" in roles and "columnheader" not in roles)
+            ancestors.append((indent, key[0]))
+    return [(role, name, count, in_row[(role, name)]) for (role, name), count in counts.items()][:300]
 
 
 # --- finding and acting --------------------------------------------------------------------
@@ -1153,7 +1167,8 @@ def find_by_name(page: Page, role: str | None, name: str | re.Pattern[str]) -> L
 
 
 def candidates_on_screen(page: Page) -> list[Candidate]:
-    return [Candidate(role=role, name=name, count=count) for role, name, count in aria_lines(page)]
+    return [Candidate(role=role, name=name, count=count, in_row=in_row)
+            for role, name, count, in_row in aria_lines(page)]
 
 
 def current_text(element: Locator, tag: str) -> str:
@@ -1959,8 +1974,8 @@ class Runner:
             # all work with '[tenantdomain]' and the element is found by the restored name.
             if self.page.is_closed():
                 raise PageClosed("the browser window was closed")
-            candidates = [Candidate(role=c.role, name=self.redactor.redact(c.name), count=c.count)
-                          for c in candidates_on_screen(self.page)]
+            candidates = [Candidate(role=c.role, name=self.redactor.redact(c.name), count=c.count,
+                                    in_row=c.in_row) for c in candidates_on_screen(self.page)]
             same = self.same_after_restore(candidates, label)
             if same is not None:
                 decision = Decision(kind="use", name=same.name, role=same.role, decided_by="exact")

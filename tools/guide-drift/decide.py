@@ -36,6 +36,7 @@ class Candidate:
     role: str
     name: str
     count: int = 1                # how many elements on screen share this role and name
+    in_row: bool = False          # one of them sits in a list row (run.py, aria_lines; #317)
 
     def __str__(self) -> str:
         suffix = f" (x{self.count})" if self.count > 1 else ""

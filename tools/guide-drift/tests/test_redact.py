@@ -395,6 +395,68 @@ class RejectedCandidatesTests(unittest.TestCase):
         self.assertEqual(len(rejected), 20)
         self.assertEqual(rejected[0], 'button "New groups"')
 
+    # Example data only: the lab's fictional names and contoso (#317).
+
+    def test_keeps_the_portals_labels_of_every_label_role(self) -> None:
+        labels = [Candidate("button", "Add members"), Candidate("link", "Groups | All groups"),
+                  Candidate("menuitem", "Delete"), Candidate("tab", "Enterprise applications"),
+                  Candidate("heading", "Add members"), Candidate("textbox", "Group name"),
+                  Candidate("combobox", "Group type"), Candidate("checkbox", "Select all"),
+                  Candidate("radio", "Assigned"), Candidate("switch", "Enable"),
+                  Candidate("button", "Close content 'Add members'", count=2)]
+        self.assertEqual(sorted(rejected_candidates(labels, "Malfurion Stormrage", None)),
+                         sorted(str(c) for c in labels))
+
+    def test_keeps_a_field_label_with_the_portals_decorations(self) -> None:
+        # An info icon's ' information' and a required field's ' *' (#244) decorate the Portal's
+        # own label, not a row's data.
+        labels = [Candidate("textbox", "Email information *"), Candidate("button", "Group name information")]
+        self.assertEqual(sorted(rejected_candidates(labels, "Email", None)), sorted(str(c) for c in labels))
+
+    def test_drops_a_list_rows_check_box_whose_name_is_the_rows_data(self) -> None:
+        for name in ("Select row Illidan Stormrage", "select row Contoso Reporting", "Select row ",
+                     "Select row", "  Select row Khadgar Archmage"):
+            with self.subTest(name=name):
+                self.assertEqual(rejected_candidates([Candidate("checkbox", name), Candidate("button", "Add")],
+                                                     "Malfurion Stormrage", None), ['button "Add"'])
+
+    def test_drops_the_row_prefix_in_any_role(self) -> None:
+        candidates = [Candidate("button", "Select row Chromie Timewalker"),
+                      Candidate("link", "Select row Contoso Reporting"), Candidate("tab", "Basics")]
+        self.assertEqual(rejected_candidates(candidates, "Chromie Timewalker", None), ['tab "Basics"'])
+
+    def test_keeps_a_name_that_only_starts_like_the_row_prefix(self) -> None:
+        candidates = [Candidate("button", "Select rows to compare"), Candidate("button", "Selection")]
+        self.assertEqual(sorted(rejected_candidates(candidates, "Select", None)),
+                         sorted(['button "Select rows to compare"', 'button "Selection"']))
+
+    def test_drops_every_element_inside_a_list_row(self) -> None:
+        # aria_lines (run.py) marks an element inside a row of a table or grid, not in a column
+        # header: its name is the row's data, whatever its role.
+        candidates = [Candidate("link", "Malfurion Stormrage", in_row=True),
+                      Candidate("checkbox", "Khadgar Archmage", in_row=True),
+                      Candidate("button", "More actions", in_row=True),
+                      Candidate("link", "Users"), Candidate("button", "Name")]
+        self.assertEqual(sorted(rejected_candidates(candidates, "Malfurion Stormrage", None)),
+                         sorted(['link "Users"', 'button "Name"']))
+
+    def test_drops_the_entries_of_lists_and_trees(self) -> None:
+        # A drop-down's or the global search's options and a tree's items name resources and
+        # directory objects, as a table's cells do.
+        candidates = [Candidate("option", "Illidan Stormrage"), Candidate("option", "dev-skycraft-swc-rg"),
+                      Candidate("treeitem", "Contoso Root Group"), Candidate("cell", "Chromie Timewalker"),
+                      Candidate("gridcell", "Khadgar Archmage"), Candidate("row", "Khadgar Archmage"),
+                      Candidate("button", "Add")]
+        self.assertEqual(rejected_candidates(candidates, "Khadgar Archmage", None), ['button "Add"'])
+
+    def test_a_candidate_is_a_label_only_with_a_label_role_and_no_row_or_tenant_data(self) -> None:
+        self.assertTrue(recording.is_ui_label(Candidate("button", "New group")))
+        self.assertFalse(recording.is_ui_label(Candidate("option", "New group")))
+        self.assertFalse(recording.is_ui_label(Candidate("checkbox", "Select row Illidan Stormrage")))
+        self.assertFalse(recording.is_ui_label(Candidate("link", "Illidan Stormrage", in_row=True)))
+        self.assertFalse(recording.is_ui_label(Candidate("link", f"admin@{DOMAIN}")))
+        self.assertFalse(recording.is_ui_label(Candidate("link", "11111111-2222-3333-4444-555555555555")))
+
 
 class WriteJsonTests(unittest.TestCase):
     def setUp(self) -> None:
