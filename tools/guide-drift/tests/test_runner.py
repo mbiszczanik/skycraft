@@ -3566,6 +3566,12 @@ class NoProposedEditTests(RunnerTestCase):
                                                   "new": "1. Go back to **Entra ID** home page"})
         self.assertIn("## proposed edits (1)\n- guide.md:3\n", self.summary(r))
 
+    def test_a_cosmetic_difference_proposes_its_name_too(self) -> None:
+        # Often a real rename (a change of case): the edit is what fixes the guide.
+        record = self.act(self.runner_for("c 2"))
+        self.assertEqual((record["severity"], record["notProposed"]), ("cosmetic", None))
+        self.assertEqual(record["proposedEdit"]["new"], "1. Go back to **Entra ID** home page")
+
     def test_a_name_with_the_tenants_name_is_drift_without_an_edit(self) -> None:
         r = self.runner_for("1")
         record = self.act(r)
