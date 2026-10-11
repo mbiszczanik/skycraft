@@ -468,9 +468,12 @@ def prompt_value(recording: dict, step: dict, item: dict) -> str:
     the runner types (field_action), not the guide's. When the recording changed it, where from,
     in parentheses: '(from the recording's valueOverrides)' or '(the guide's, with the recording's
     placeholders)', then the environment variables it was read from, by name only ('; environment
-    variable NAME'). When the runner types nothing, 'none' and why: a bracketed value such as an
-    override's '[Leave blank]' leaves the field as it is, the guide's value is an instruction, or
-    a [token] is left. run.py reports a field of the last two without asking about it.
+    variable NAME').
+
+    When the runner types nothing it says 'none' and why: a bracketed value such as an override's
+    '[Leave blank]' leaves the field as it is, the guide's value is an instruction, or a [token]
+    is left. run.py asks about none of these fields: it leaves the first as it is and reports the
+    other two without looking the field up. These branches only keep the function total.
 
     Not scrubbed here: the prompt scrubs every line it prints (run.py), so the value of a field
     that names a secret shows as '[secret]' (typed_secrets) and an address from the environment as

@@ -3268,7 +3268,7 @@ class PromptValueTests(RunnerTestCase):
         self.assertEqual((tag["outcome"], tag["observed"]), ("match", "Contoso-Admins"))
 
 
-GROUPS ="Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups"
+GROUPS = "Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups"
 USERS = "Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/AllUsers"
 CREATE_USER = "Microsoft_AAD_UsersAndTenants/CreateUser.ReactView"
 

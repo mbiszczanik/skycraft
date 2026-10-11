@@ -18,9 +18,8 @@ value for a field); deciders may use it for context. Two deciders ship:
                  so the next run asks again. For a field it shows the value the runner will type,
                  as `value_to_type` gives it (#210): run.py passes recording.prompt_value, the
                  value after the recording's placeholders and valueOverrides, with where it came
-                 from and the environment variables it was read from, or 'none' and why when
-                 nothing is typed; run.py scrubs every line, so a secret shows as '[secret]'.
-                 Without `value_to_type`, the guide's value.
+                 from and the environment variables it was read from; run.py scrubs every line,
+                 so a secret shows as '[secret]'. Without `value_to_type`, the guide's value.
 
 A model-based decider is a third implementation of the same signature (the Decider protocol);
 it is out of scope here and tracked in issue #190. Every decision the runner acts on, except a
