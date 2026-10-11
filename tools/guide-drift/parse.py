@@ -153,6 +153,27 @@ without a browser. Rules (issue #189):
     An underscore is excluded: it marks italics ('_Note_:') or an identifier, not a Portal
     label. A value after a verb ('Destination table: select **Resource specific**', 5.2.8) is
     no field: the bold span is a click.
+  * A bold label of an action or a navigation item right after a verb that states a check box's
+    state carries that state (#296): '"checked"' or '"unchecked"' lists the indices into
+    '"labels"' of such labels, and only an item with one carries the key. 'check', 'tick' and
+    'enable' state checked; 'uncheck', 'untick', 'clear', 'deselect' and 'disable' state
+    unchecked, in any case (STATE_VERBS). The verb stands at the item's start, after a comma or
+    a semicolon, after 'and', 'then' or 'or', or at the start of a chain's step, with an optional
+    'the' between it and the label; after the label only the control's kind ('checkbox', 'check
+    box', 'box', 'switch', 'toggle', 'option'), a remark in parentheses and a full stop may come
+    before the item's end, a separator or the next clause (a comma, a semicolon, 'and', 'then',
+    'or'): 'Uncheck **Use quickstart image**.' (3.3.7), 'Under **Recovery**, enable **Enable
+    soft delete for blobs**' (4.2.5; Recovery is clicked as before), '... → check **Overwrite if
+    files already exist** → **Upload**' (4.3.6). Labels listed after such a label with commas
+    and 'and' take its state ('Uncheck **A**, **B** and **C**'). Other words after the label
+    make the verb no instruction to set a box ('Check **Policy enforcement** is set to
+    "Enabled"', 1.3), and so do other words between the verb and the label ('Check the box next
+    to **X**'). 'Select' states nothing: in the guides it opens a blade, a tab, a row or an
+    option far more often than it ticks a box, so a check box found for 'Select **X**' is
+    clicked as before; a guide that needs a box ticked says 'Check'. The runner sets the state
+    only on a check box, switch or radio; any other element it finds for the label ('Enable
+    ...' naming a button) is clicked as before. A '**Label**: checked' field is read as before
+    (checkbox_state).
   * Bold spans that are not UI elements are dropped by NON_UI_BOLD, by the guide's own entry
     in LAB_CAPTIONS and by the colon rule (bold text ending with ':' is a caption, not a label).
     NON_UI_BOLD holds the captions of every guide ('Note', 'Expected Result', 'Result');
@@ -228,6 +249,12 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     placeholder ('Owner = <your name>', 5.3). A table row with an empty value that captions the
     rows below it ('**Remote virtual network**', 2.1.9) is a field with an empty value.
   * Only field values are checked for instructions; a tag value is typed as written.
+  * A state is read only from the verbs of STATE_VERBS right before a label (#296): 'Toggle
+    **Admin user** to **Enabled**' (3.3.2, a switch whose state follows it) clicks Admin user
+    and then Enabled, and 'Turn on **X**' or 'Make sure **X** is checked' would click X, which
+    toggles a check box. The other way round, 'Check **X**.' meant as 'look at X' is read as
+    'tick X'; the runner then clicks X as before when it is no check box, and ticks it when it
+    is. No guide has either of the last two shapes today.
   * Only 'verify:', 'Verify ...:', 'Confirm ...:' and an Expected Result introduce a check
     list (#224, #246). A list or table after other wording is read as before, and an
     Expected Result ending in a colon takes a list, not a table.
@@ -364,6 +391,29 @@ SEARCH_FOR = re.compile(
     r"\s*\.?\s*$", re.IGNORECASE)
 # What makes a search the Portal's global one rather than the open blade's own search box.
 GLOBAL_SEARCH = re.compile(r"search\s+bar|top\s+search|global\s+search", re.IGNORECASE)
+# A verb that states the state a check box is to be in (#296), right before a bold label: at the
+# item's start, after a comma or a semicolon, after 'and', 'then' or 'or', or at the start of a
+# chain's step, with an optional 'the' after it ('Uncheck **X**', 'Under **Recovery**, enable **X**',
+# '→ check **X** →'). 'Select' is not one: it opens a blade, a tab, a row or an option far more
+# often than it ticks a box. Searched in masked text (mask_spans) up to the label, so '$' is the
+# label's start.
+STATE_VERBS = {"check": True, "tick": True, "enable": True,
+               "uncheck": False, "untick": False, "clear": False, "deselect": False, "disable": False}
+STATE_BEFORE = re.compile(
+    r"(?:^|[,;]\s*|\b(?:and|then|or)\s+|(?:→|->|\s>)\s*)"
+    r"(?P<verb>" + "|".join(STATE_VERBS) + r")\s+(?:the\s+)?$", re.IGNORECASE)
+# What may follow such a label: the control's kind ('Enable **auto-registration** checkbox'), a
+# remark in parentheses and a full stop, then the item's end, a chain's separator or the next
+# clause (a comma, a semicolon, 'and', 'then', 'or'). Anything else makes the verb no instruction
+# to set a box: 'Check **Policy enforcement** is set to "Enabled"' (1.3) is a check. Matched in
+# masked text at the label's end; each optional part starts with what only it matches, so a text
+# that fails does so in linear time.
+STATE_AFTER = re.compile(
+    r"(?:\s+(?:check\s?box|box|switch|toggle|option)\b)?(?:\s*\([^()]*\))?(?:\s*\.)?"
+    r"\s*(?:$|→|->|>\s|[,;]|(?:and|then|or)\b)", re.IGNORECASE)
+# What may stand between two labels of one list after a stating verb: 'Check **A** and **B**',
+# 'Uncheck **A**, **B** and **C**'. The later labels take the earlier one's state.
+STATE_LIST = re.compile(r"\s*(?:,\s*(?:and\s+|or\s+)?|(?:and|or)\s+)", re.IGNORECASE)
 
 # A table is a form when its header is '<one of these> | Value'.
 # 'Parameter | Value' lists CLI flags and is not a form.
@@ -881,6 +931,42 @@ def chain_resources(text: str) -> list[tuple[int, str]]:
     return found
 
 
+def stated_states(text: str, spans: list[tuple[int, int]]) -> dict[int, bool]:
+    """The state each bold label of `text` is to be in (#296), by the label's start; a label
+    without one is left out. `spans` are the labels' (start, end), in order. A label has a state
+    when a verb of STATE_VERBS stands right before it (STATE_BEFORE) and only what STATE_AFTER
+    allows follows it; a label that follows a label with a state and only a list's comma or 'and'
+    (STATE_LIST) takes the same state: 'Uncheck **A**, **B** and **C**'."""
+    masked = mask_spans(text)
+    states: dict[int, bool] = {}
+    previous: tuple[int, bool] | None = None      # (end, state) of the last label with a state
+    for start, end in spans:
+        if not STATE_AFTER.match(masked, end):
+            previous = None
+            continue
+        before = STATE_BEFORE.search(masked, 0, start)
+        if before:
+            state = STATE_VERBS[before.group("verb").lower()]
+        elif previous and STATE_LIST.fullmatch(masked, previous[0], start):
+            state = previous[1]
+        else:
+            previous = None
+            continue
+        states[start] = state
+        previous = (end, state)
+    return states
+
+
+def mark_states(item: dict, starts: list[int], states: dict[int, bool]) -> None:
+    """Add '"checked"' and '"unchecked"', the indices into the item's labels of those whose start
+    (`starts`, in label order; None for a resource name) has that state in `states` (#296). Only
+    an item with such a label carries either key."""
+    for key, wanted in (("checked", True), ("unchecked", False)):
+        indices = [index for index, at in enumerate(starts) if at is not None and states.get(at) is wanted]
+        if indices:
+            item[key] = indices
+
+
 def list_item(text: str, number: int, captions: frozenset[str] = NO_CAPTIONS) -> dict | None:
     """The field, search, navigation or action item for the text of one list item; None for
     none. `captions` are the guide's own captions (LAB_CAPTIONS), no UI label in it."""
@@ -909,8 +995,9 @@ def list_item(text: str, number: int, captions: frozenset[str] = NO_CAPTIONS) ->
         text = chain_sentence(text)            # the sentence after a chain describes, it is no step
     picker = picker_field(text, captions) if chain else None
     start = picker[1] if picker else 0          # a picker's chain starts after its label
-    bold = [(b.start(), clean_label(unescape(b.group("text")))) for b in BOLD.finditer(text, start)]
-    bold = [(at, label) for at, label in bold if is_ui_label(label, captions)]
+    spans = [b for b in BOLD.finditer(text, start) if is_ui_label(clean_label(unescape(b.group("text"))), captions)]
+    bold = [(b.start(), clean_label(unescape(b.group("text")))) for b in spans]
+    states = stated_states(text, [b.span() for b in spans])       # the check boxes to set (#296)
     # A chain's bold labels and resource names, in the order they appear (#199).
     steps = sorted([(at, label, False) for at, label in bold]
                    + [(start + at, name, True)
@@ -923,11 +1010,15 @@ def list_item(text: str, number: int, captions: frozenset[str] = NO_CAPTIONS) ->
         resources = [index for index, (_, _, resource) in enumerate(steps) if resource]
         if resources:
             item["resources"] = resources
+        mark_states(item, [None if resource else at for at, _, resource in steps], states)
         item["line"] = number
         return item
     if not bold:
         return None
-    return {"kind": "action", "labels": [label for _, label in bold], "line": number}
+    item = {"kind": "action", "labels": [label for _, label in bold]}
+    mark_states(item, [at for at, _ in bold], states)
+    item["line"] = number
+    return item
 
 
 def parse_items(lines: list[tuple[int, str]], captions: frozenset[str] = NO_CAPTIONS

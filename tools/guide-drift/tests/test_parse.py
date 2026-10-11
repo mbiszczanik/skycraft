@@ -5,7 +5,8 @@ which lists and tables are checks for the Expected Result rather than steps (iss
 #246), which code spans in a navigation chain are resources to open (issues #199 and #250),
 which chains pick a field's value and where a chain ends (issue #250), which option of a
 step is read (issue #201), and which captions describe rather than instruct, in which lab a
-caption is no label, and that items outside every option are read (issue #203). The full guides and the other parser rules are covered
+caption is no label, and that items outside every option are read (issue #203), and which
+labels a verb gives a check box state (issue #296). The full guides and the other parser rules are covered
 by tests/Guide-Drift-Parser.Tests.ps1. Run from the repository root:
 
     python -B -m unittest discover -s tools/guide-drift/tests -v
@@ -187,14 +188,15 @@ class ChainResourceTests(unittest.TestCase):
     def test_a_code_span_with_more_in_its_step_is_a_value_or_prose(self) -> None:
         # 'select the modified `config.txt`' is a file on the learner's disk in an upload pane, not
         # a Portal element (#250): the words between the verb and the span keep it unread.
-        for text, kind, labels in (
-                ("Click **+ Add directory** → Name: `common` → **OK**", "navigation", ["+ Add directory", "OK"]),   # 4.3.4
+        for text, kind, labels, extra in (
+                ("Click **+ Add directory** → Name: `common` → **OK**", "navigation", ["+ Add directory", "OK"], {}),   # 4.3.4
                 ("Back in the Portal, click **Upload** → select the modified `config.txt` → check **Overwrite if "
-                 "files already exist** → **Upload**", "navigation", ["Upload", "Overwrite if files already exist", "Upload"]),
+                 "files already exist** → **Upload**", "navigation", ["Upload", "Overwrite if files already exist", "Upload"],
+                 {"checked": [1]}),                                                         # the check box: StateVerbTests
                 ("**Test groups** → **+ Add test group** → Test group name: `hub-spoke-ssh`",                     # 5.3.6
-                 "navigation", ["Test groups", "+ Add test group"])):
+                 "navigation", ["Test groups", "+ Add test group"], {})):
             with self.subTest(text=text):
-                self.assertEqual(self.item(text), {"kind": kind, "labels": labels, "line": 7})
+                self.assertEqual(self.item(text), {"kind": kind, "labels": labels, **extra, "line": 7})
 
     def test_a_separator_inside_a_code_or_bold_span_does_not_split_a_step(self) -> None:
         # A split at the arrow inside the second code span would cut the step in the middle of that
@@ -1107,6 +1109,101 @@ class LabCaptionTests(unittest.TestCase):
                 with self.subTest(lab=lab, caption=caption):
                     self.assertIn(caption, bold)
                     self.assertNotIn(caption, parse.NON_UI_BOLD)
+
+
+class StateVerbTests(unittest.TestCase):
+    """A label right after a verb that states a check box's state is marked with that state
+    (#296): its index in '"checked"' or '"unchecked"', so the runner sets the box instead of
+    toggling it. The texts are list items from the guides where a lab is named."""
+
+    def item(self, text: str) -> dict | None:
+        return parse.list_item(text, 7)
+
+    def action(self, labels: list[str], **states: list[int]) -> dict:
+        return {"kind": "action", "labels": labels, **states, "line": 7}
+
+    def test_each_verb_marks_the_label_after_it_with_its_state(self) -> None:
+        for verb, key in (("Check", "checked"), ("check", "checked"), ("Tick", "checked"), ("Enable", "checked"),
+                          ("enable", "checked"), ("Uncheck", "unchecked"), ("Untick", "unchecked"),
+                          ("Clear", "unchecked"), ("Deselect", "unchecked"), ("Disable", "unchecked"),
+                          ("disable", "unchecked")):
+            with self.subTest(verb=verb):
+                self.assertEqual(self.item(f"{verb} **Use quickstart image**."),
+                                 self.action(["Use quickstart image"], **{key: [0]}))
+
+    def test_the_guides_shapes(self) -> None:
+        for text, labels, states in (
+                ("Check **Add your client IP address**.", ["Add your client IP address"], {"checked": [0]}),     # 4.4.1
+                ("Check **Send to Log Analytics workspace**.", ["Send to Log Analytics workspace"],              # 5.1.7
+                 {"checked": [0]}),
+                ("Uncheck **Use quickstart image**.", ["Use quickstart image"], {"unchecked": [0]}),              # 3.3.7
+                ("Under **Recovery**, enable **Enable soft delete for blobs**",                                  # 4.2.5
+                 ["Recovery", "Enable soft delete for blobs"], {"checked": [1]}),
+                ("Enable **Enable soft delete for containers**", ["Enable soft delete for containers"],          # 4.2.6
+                 {"checked": [0]}),
+                ("Enable **auto-registration** checkbox", ["auto-registration"], {"checked": [0]}),              # 2.3
+                ("Check the **Send to Log Analytics workspace** check box", ["Send to Log Analytics workspace"],
+                 {"checked": [0]}),
+                ("Clear **Use quickstart image** (default)", ["Use quickstart image"], {"unchecked": [0]}),
+                ("Click **Add** and check **Primary**", ["Add", "Primary"], {"checked": [1]}),
+                ("Untick **A**; tick **B**", ["A", "B"], {"unchecked": [0], "checked": [1]}),
+                ("Check **A** and **B**", ["A", "B"], {"checked": [0, 1]}),          # a list after the verb
+                ("Uncheck **A**, **B** and **C**", ["A", "B", "C"], {"unchecked": [0, 1, 2]}),
+                ("Check **A**, then click **Save**", ["A", "Save"], {"checked": [0]})):
+            with self.subTest(text=text):
+                self.assertEqual(self.item(text), self.action(labels, **states))
+
+    def test_a_stated_label_in_a_chain_is_marked_in_its_place(self) -> None:
+        # 4.3.6: the chain's second label is the check box.
+        self.assertEqual(self.item("Back in the Portal, click **Upload** → select the modified `config.txt` → check "
+                                   "**Overwrite if files already exist** → **Upload**"),
+                         {"kind": "navigation", "labels": ["Upload", "Overwrite if files already exist", "Upload"],
+                          "checked": [1], "line": 7})
+        self.assertEqual(self.item("**Settings** → uncheck **Use defaults** → `dev-vm` → **Save**"),
+                         {"kind": "navigation", "labels": ["Settings", "Use defaults", "dev-vm", "Save"],
+                          "resources": [2], "unchecked": [1], "line": 7})
+        self.assertEqual(self.item("Disable **A** > **B**"),
+                         {"kind": "navigation", "labels": ["A", "B"], "unchecked": [0], "line": 7})
+
+    def test_select_is_a_click(self) -> None:
+        # 'Select' opens a blade, a tab, a row or an option far more often than it ticks a box, so it
+        # states no state; a check box the run finds for it is clicked as before.
+        for text in ("Select **Enable soft delete for blobs**", "select **Use quickstart image**.",
+                     "Click **Save**", "Toggle **Admin user** to **Enabled**."):
+            with self.subTest(text=text):
+                item = self.item(text)
+                self.assertNotIn("checked", item)
+                self.assertNotIn("unchecked", item)
+
+    def test_a_verb_that_is_no_instruction_to_set_a_box_states_nothing(self) -> None:
+        for text in ('Check **Policy enforcement** is set to "Enabled"',                  # 1.3: a check, not a box
+                     "Check the **Encryption** column shows encryption type",              # 3.2
+                     "Check if the **Data Collection Rule** is correctly associated with the VM.",   # 5.1
+                     "Check session persistence setting (should be **None** for even distribution)",  # 2.3
+                     "Check permissions: **Subscription** → **Access control (IAM)** → **Check access**",
+                     "Click **Check access**", "Click **Enable**.", "Enable **VM Insights** for SkyCraft virtual machines",
+                     "Recheck **A**", "Precheck **A**", "Enabled **A**", "Check the box next to **A**"):
+            with self.subTest(text=text):
+                item = self.item(text)
+                self.assertNotIn("checked", item or {})
+                self.assertNotIn("unchecked", item or {})
+
+    def test_a_field_with_a_state_is_still_a_field(self) -> None:
+        # #307's shape: the state is the field's value, which checkbox_state reads.
+        self.assertEqual(self.item("**Enable traffic analytics**: checked"),
+                         {"kind": "field", "label": "Enable traffic analytics", "value": "checked", "line": 7})
+
+    def test_a_long_item_is_read_in_linear_time(self) -> None:
+        for space in (" ", "\t"):
+            for text in ("Check" + space * 100_000 + "x **A**",
+                         "," * 50_000 + "check" + space * 100_000 + "**A**",
+                         "Check **A**" + space * 100_000 + "x",
+                         "Check **A**" + space * 100_000 + "." + space * 100_000 + "x",
+                         "Check **A** (" + "y" * 100_000 + ")" + space * 100_000 + "x"):
+                with self.subTest(space=repr(space), text=text[:12]):
+                    started = time.perf_counter()
+                    self.item(text)
+                    self.assertLess(time.perf_counter() - started, 2)
 
 
 if __name__ == "__main__":
