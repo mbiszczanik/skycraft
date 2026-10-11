@@ -450,12 +450,12 @@ class RejectedCandidatesTests(unittest.TestCase):
         self.assertEqual(rejected_candidates(candidates, "Khadgar Archmage", None), ['button "Add"'])
 
     def test_a_candidate_is_a_label_only_with_a_label_role_and_no_row_or_tenant_data(self) -> None:
-        self.assertTrue(recording.is_ui_label(Candidate("button", "New group")))
-        self.assertFalse(recording.is_ui_label(Candidate("option", "New group")))
-        self.assertFalse(recording.is_ui_label(Candidate("checkbox", "Select row Illidan Stormrage")))
-        self.assertFalse(recording.is_ui_label(Candidate("link", "Illidan Stormrage", in_row=True)))
-        self.assertFalse(recording.is_ui_label(Candidate("link", f"admin@{DOMAIN}")))
-        self.assertFalse(recording.is_ui_label(Candidate("link", "11111111-2222-3333-4444-555555555555")))
+        self.assertTrue(recording.is_portal_label(Candidate("button", "New group")))
+        self.assertFalse(recording.is_portal_label(Candidate("option", "New group")))
+        self.assertFalse(recording.is_portal_label(Candidate("checkbox", "Select row Illidan Stormrage")))
+        self.assertFalse(recording.is_portal_label(Candidate("link", "Illidan Stormrage", in_row=True)))
+        self.assertFalse(recording.is_portal_label(Candidate("link", f"admin@{DOMAIN}")))
+        self.assertFalse(recording.is_portal_label(Candidate("link", "11111111-2222-3333-4444-555555555555")))
 
 
 class WriteJsonTests(unittest.TestCase):

@@ -17,7 +17,7 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
                        report a value parse.py marked '"literal": false' that the recording
                        does not resolve (#202)
   checkbox_state       the check box state a field value names, if any
-  is_ui_label          whether a candidate's name is a label of the Portal's, not a list's or a
+  is_portal_label      whether a candidate's name is a label of the Portal's, not a list's or a
                        row's data (#317)
   rejected_candidates  the reference set of candidates not chosen: only the Portal's labels,
                        without tenant data (#317)
@@ -304,7 +304,7 @@ LABEL_ROLES = frozenset({"button", "link", "menuitem", "tab", "heading", "textbo
 ROW_PREFIX = re.compile(r"^\s*select row\b", re.IGNORECASE)
 
 
-def is_ui_label(candidate: Candidate) -> bool:
+def is_portal_label(candidate: Candidate) -> bool:
     """Whether a candidate's name is a label of the Portal's, which a public recording may keep,
     rather than data (#317): its role is one of LABEL_ROLES; it is in no list row (in_row, which
     run.py's aria_lines sets for a row's link, check box or button, whatever its name); its name
@@ -318,11 +318,11 @@ def is_ui_label(candidate: Candidate) -> bool:
 def rejected_candidates(candidates: list[Candidate], label: str, chosen: str | None) -> list[str]:
     """The 20 visible candidates most like the label, other than the chosen one, as 'role "name"':
     the reference set issue #190 needs, without committing the whole screen to the recording.
-    Only the Portal's labels are kept (is_ui_label, an allowlist, #317): left out entirely are a
-    list's entries (table cells, options, tree items), every element in a list row and every row
-    check box ('Select row <display name>'), which name users, service principals and resources,
-    and names with an '@' or a GUID."""
-    others = [c for c in candidates if c.name != chosen and is_ui_label(c)]
+    Only the Portal's labels are kept (is_portal_label, an allowlist, #317): left out entirely are
+    a list's entries (table cells, options, tree items), every element in a list row and every
+    row check box ('Select row <display name>'), which name users, service principals and
+    resources, and names with an '@' or a GUID."""
+    others = [c for c in candidates if c.name != chosen and is_portal_label(c)]
     others.sort(key=lambda c: difflib.SequenceMatcher(None, c.name.lower(), label.lower()).ratio(),
                 reverse=True)
     return [str(c) for c in others[:20]]
