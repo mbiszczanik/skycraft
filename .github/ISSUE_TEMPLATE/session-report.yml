@@ -1,0 +1,59 @@
+# Issue form for learners of the SkyCraft Akademia course (issue #304).
+#
+# The field labels and help texts are Polish, because the learners are Polish and the course
+# is taught in Polish. This is a deliberate exception to the repository's English-only rule;
+# everything else here (this header, the ids, the label) stays English.
+#
+# Triage: a session-report is turned into a `bug` issue by the maintainer only after the step
+# is reproduced. Several reports of one step are one bug.
+name: "Zgłoszenie z zajęć"
+description: "Coś w labie nie zgadza się z tym, co widzisz w Azure? Opisz krok, a poprawimy przewodnik."
+title: "[Zajęcia]: lab X.Y, krok X.Y.Z"
+labels: ["session-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Dzięki, że zgłaszasz. Każde zgłoszenie sprawdzamy i poprawiamy przewodnik dla kolejnych osób.
+        Nie wklejaj haseł, kluczy ani identyfikatorów subskrypcji. Na zrzucie ekranu zamaż je przed wysłaniem.
+  - type: input
+    id: step
+    attributes:
+      label: "Lab i krok"
+      description: "Numer kroku z nagłówka przewodnika."
+      placeholder: "1.3.6"
+    validations:
+      required: true
+  - type: textarea
+    id: guide-says
+    attributes:
+      label: "Co mówi przewodnik"
+      description: "Skopiuj zdanie albo punkt z przewodnika, którego nie dało się wykonać."
+    validations:
+      required: true
+  - type: textarea
+    id: what-you-saw
+    attributes:
+      label: "Co zobaczyłeś lub zobaczyłaś"
+      description: "Co pokazał Portal, CLI albo PowerShell. Jeśli pojawił się komunikat błędu, wklej go w całości."
+    validations:
+      required: true
+  - type: checkboxes
+    id: path
+    attributes:
+      label: "Którą ścieżką szedłeś lub szłaś"
+      options:
+        - label: "Portal"
+        - label: "Azure CLI (az)"
+        - label: "PowerShell (Az)"
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: "Zrzut ekranu"
+      description: "Przeciągnij plik tutaj. Pole nieobowiązkowe."
+  - type: input
+    id: session
+    attributes:
+      label: "Numer spotkania"
+      description: "Pole nieobowiązkowe."
+      placeholder: "3"
