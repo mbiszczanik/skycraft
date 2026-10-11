@@ -49,7 +49,7 @@
     that element as the guide's, renamed (misleading drift); c <number> uses it, the difference
     being cosmetic; w <number> uses it as a workaround, not as the guide's element (say, a 'View
     all 5 users' link on a resumed browser): misleading drift, never written to the recording, so
-    the next run asks again; g = gone (blocking drift); i = ignore (not a UI element); u <why> =
+    the next run asks again (at a step's first item, no start blade is recorded either); g = gone (blocking drift); i = ignore (not a UI element); u <why> =
     unknown. summary.md lists a proposed guide edit for a misleading or cosmetic drift only when
     its new text belongs in the guide. It proposes none, and lists the drift under 'not proposed'
     with the reason, when the element was used as a workaround; when the step started on the

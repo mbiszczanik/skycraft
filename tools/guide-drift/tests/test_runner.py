@@ -3514,8 +3514,8 @@ class StartBladeExcuseTests(RunnerTestCase):
 
 class NoProposedEditTests(RunnerTestCase):
     """A drift proposes a guide edit only when its new text belongs in the guide (#211): never a
-    Portal name that holds tenant or personal data. The drift is recorded all the same, with
-    the reason in 'notProposed', and the summary lists it under 'not proposed'."""
+    Portal name that holds tenant or personal data. The drift is written to results.jsonl all
+    the same, with the reason in 'notProposed', and the summary lists it under 'not proposed'."""
 
     STEP = {"id": "9.9.2", "title": "Two", "portal": True, "expected": None, "images": [],
             "items": [{"kind": "action", "labels": ["Microsoft Entra ID"], "line": 3}]}
@@ -3523,7 +3523,8 @@ class NoProposedEditTests(RunnerTestCase):
     # As the lab 1.1 run saw them: the tenant's overview carries its name, and the Users entry
     # the resumed browser offered was the overview's 'View all N users' link.
     CANDIDATES = [run.Candidate("link", "Contoso Ltd | Overview"), run.Candidate("link", "Entra ID"),
-                  run.Candidate("link", "View all 5 users")]
+                  run.Candidate("link", "View all 5 users"), run.Candidate("link", "someone@fabrikam.com"),
+                  run.Candidate("link", "New group 9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f")]
     TOKEN_REASON = "the Portal's name holds tenant or personal data ([tenantname])"
 
     def setUp(self) -> None:
@@ -3594,6 +3595,71 @@ class NoProposedEditTests(RunnerTestCase):
         record = self.act(r)
         self.assertEqual((record["severity"], record["proposedEdit"], record["notProposed"]),
                          ("misleading", None, self.TOKEN_REASON))
+
+    def test_a_name_that_only_scrub_masks_proposes_no_edit(self) -> None:
+        # The Redactor leaves another directory's address and an object id alone; scrub does not.
+        for answer, token in (("4", "<email>"), ("5", "<id>")):
+            with self.subTest(token=token):
+                self.recording["steps"].pop("9.9.2", None)
+                record = self.act(self.runner_for(answer, run_id=f"scrub-{answer}"))
+                self.assertEqual(record["outcome"], "drift")
+                self.assertIsNone(record["proposedEdit"])
+                self.assertTrue(record["notProposed"].endswith(f"({token})"), record["notProposed"])
+
+    def test_the_first_reason_that_applies_is_the_one_given(self) -> None:
+        # A workaround, a wrong blade and an excused start come before the token in the name.
+        excuse = "the browser of this run is new: the blades the guide opened before the step are not open"
+        r = self.runner_for("w 1", run_id="workaround")
+        self.assertEqual(self.act(r)["notProposed"], run.WORKAROUND_REASON)
+        r = self.runner_for("1", run_id="wrong-blade")
+        r.excused["9.9.2"] = excuse
+        drift = r.new_record({"id": "9.9.2"}, "blade", GROUPS)
+        drift.update(outcome="drift", severity="misleading", category=run.WRONG_BLADE, observed="elsewhere")
+        r.write(drift)
+        self.assertEqual(self.act(r)["notProposed"], self.WRONG_BLADE_REASON)
+        self.recording["steps"].pop("9.9.2", None)
+        r = self.runner_for("1", run_id="excused")
+        r.excused["9.9.2"] = excuse
+        self.assertEqual(self.act(r)["notProposed"],
+                         f"the step started where the run, not the guide, left the Portal ({excuse})")
+
+    def run_whole_step(self, *answers: str) -> run.Runner:
+        """run_step on a blade the recording does not know yet, the label not on screen."""
+        r = self.runner_for(*answers, page=page_on(f"view/{GROUPS}"), run_id="-".join(answers))
+        clock = iter(range(0, 1_000_000, 1))
+        with mock.patch.object(run, "find_exact", return_value=None), \
+                mock.patch.object(run, "candidates_on_screen", return_value=self.CANDIDATES), \
+                mock.patch.object(run.time, "monotonic", lambda: next(clock)), \
+                mock.patch.object(run, "find_by_name", return_value=FakeElement()), redirect_stdout(io.StringIO()):
+            self.assertTrue(r.run_step(self.STEP))
+        return r
+
+    def test_a_workaround_at_the_first_item_records_no_start_blade(self) -> None:
+        # The person reached the guide's place another way: the blade the step began on may not be its own.
+        self.run_whole_step("w 3")
+        self.assertNotIn("startBlade", self.recording["steps"].get("9.9.2", {}))
+        self.recording["steps"].pop("9.9.2", None)
+        self.run_whole_step("2")                                     # a rename: recorded as usual
+        self.assertEqual(self.recording["steps"]["9.9.2"]["startBlade"], GROUPS)
+
+    def test_the_summary_holds_back_an_older_edit_that_brings_a_token_into_the_guide(self) -> None:
+        # A record written before #211, reloaded on -Resume, may carry such an edit.
+        r = self.runner_for()
+        for label, new, observed in (("Microsoft Entra ID", "1. Go back to **[tenantname] | Overview** home page",
+                                      "[tenantname] | Overview"),
+                                     ("[yourtenant] Ltd", "1. Open **[yourtenant] Limited**", "[yourtenant] Limited")):
+            old = r.new_record({"id": "9.9.2"}, "action", label)
+            old.pop("notProposed")
+            old.update(outcome="drift", severity="misleading", observed=observed,
+                       proposedEdit={"line": 3, "old": self.LINE if label == "Microsoft Entra ID"
+                                     else "1. Open **[yourtenant] Ltd**", "new": new})
+            r.records.append(old)
+        summary = self.summary(r)
+        # The guide's own '[yourtenant]' stays: the edit brings no token the line did not have.
+        self.assertIn("## proposed edits (1)\n- guide.md:3\n  - old: `1. Open **[yourtenant] Ltd**`\n", summary)
+        self.assertNotIn("**[tenantname] | Overview**", summary)
+        self.assertIn(f"## not proposed (1)\n- step 9.9.2 action **Microsoft Entra ID**: observed "
+                      f"'[tenantname] | Overview': {self.TOKEN_REASON}\n", summary)
 
     def test_an_element_used_as_a_workaround_is_drift_without_an_edit_and_is_not_recorded(self) -> None:
         r = self.runner_for("w 3")

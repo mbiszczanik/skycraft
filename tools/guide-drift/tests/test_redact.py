@@ -681,6 +681,18 @@ class RedactionTokenTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(recording.redaction_tokens(text), [])
 
+    def test_every_token_constant_is_a_redaction_token(self):
+        # A token constant added to recording.py, or to the Redactor, without adding it to
+        # REDACTION_TOKENS would let a guide edit carry it.
+        shape = re.compile(r"^\[[a-z]+\]$|^<[a-z]+>$")
+        constants = {name: value for scope in (vars(recording), vars(Redactor)) for name, value in scope.items()
+                     if isinstance(value, str) and shape.match(value)}
+        self.assertGreaterEqual(set(constants), {"SECRET", "OBJECT_ID", "EMAIL", "TYPED", "VALUE",
+                                                 "DOMAIN", "TENANT", "NAME", "PREFIX"})
+        for name, value in constants.items():
+            with self.subTest(name=name):
+                self.assertIn(value, recording.REDACTION_TOKENS)
+
     def test_every_token_the_redactor_and_scrub_write_is_found(self):
         # The backstop for a token added later: whatever redact() and scrub() write must be found.
         redactor = Redactor(DOMAIN, TENANT, {TOKEN: "me@example.com"}, tenant_name="Contoso Ltd")
