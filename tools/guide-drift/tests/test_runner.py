@@ -1731,16 +1731,18 @@ class SnapshotKeyTests(unittest.TestCase):
                          {("link", "Illidan Stormrage"): True, ("link", "Home"): False})
 
     def test_aria_lines_take_linear_time_however_deep_or_long_the_snapshot(self) -> None:
-        # Each line is pushed and popped once, with its flags on the stack (#317): a chain 10,000
-        # deep (one space per level, so the snapshot is as small as such a chain can be) and a
-        # flat list of 100,000 lines each take a fraction of a second. Looking at every open
-        # ancestor of every line took seconds for the chain.
+        # Each line is pushed and popped once, with its flags on the stack (#317). A chain 10,000
+        # deep (one space per level, the smallest snapshot such a chain can be: 50 million
+        # characters) takes about 0.2 s; looking at every open ancestor of every line took over a
+        # second. A flat list of 100,000 lines takes about 0.4 s. The bounds leave room for a slow
+        # runner.
         depth = 10_000
-        chain = "\n".join([" " * i + "- row:" if i == 0 else " " * i + "- group:" for i in range(depth)]
+        chain = "\n".join([" " * i + ("- row:" if i == 0 else "- group:") for i in range(depth)]
                           + [" " * depth + '- link "Deepest"', '- link "Top"'])
         flat = "\n".join(f'- button "Action {i}"' for i in range(100_000))
-        for name, tree, expected in (("chain", chain, {("link", "Deepest"): True, ("link", "Top"): False}),
-                                     ("flat", flat, None)):
+        for name, tree, bound, expected in (
+                ("chain", chain, 1.0, {("link", "Deepest"): True, ("link", "Top"): False}),
+                ("flat", flat, 2.0, None)):
             with self.subTest(snapshot=name):
                 started = time.perf_counter()
                 flags = self.in_row(tree)
@@ -1749,7 +1751,7 @@ class SnapshotKeyTests(unittest.TestCase):
                     self.assertEqual(flags, expected)
                 else:
                     self.assertEqual(len(flags), 300)          # aria_lines keeps the first 300
-                self.assertLess(elapsed, 1.0)
+                self.assertLess(elapsed, bound)
 
 
 class BladeStillLoadingTests(unittest.TestCase):
