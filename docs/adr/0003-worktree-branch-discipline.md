@@ -110,4 +110,3 @@ any commit in the main checkout while another worktree exists, so the shared
 checkout cannot receive work while parallel work is running. It is installed
 with `git config core.hooksPath tools/git-hooks` (CONTRIBUTING.md) and pinned by
 `tests/Git-Hooks.Tests.ps1` (issue #303).
-
