@@ -41,6 +41,13 @@
     when present it must be a non-empty string, which run.py also requires before it starts, and
     it is read as the view it was cut from, by the same rules as a viewUrl.
 
+    A valueOverride reads from the environment ('${NAME}') only an address variable or the tenant
+    prefix, or else into a field that names a secret; a placeholder reads only an address
+    variable or the tenant prefix, as it fills any label (issue #210). The run masks or redacts
+    every value it reads from the environment, in the prompt and in its records. The names and
+    the secret field pattern live in tools/guide-drift/recording.py (ADDRESS_ENV,
+    TENANT_PREFIX_ENV, SECRET_FIELD), and recording.env_override_problems applies the rule.
+
 .EXAMPLE
     Invoke-Pester -Path .\tests\Guide-Drift-Recording.Tests.ps1
 
@@ -54,6 +61,41 @@
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Parser   = Join-Path $RepoRoot 'tools/guide-drift/parse.py'
 $Python   = if ($IsWindows) { 'python' } else { 'python3' }
+# Prints, as a JSON array, why each valueOverride of the recording (argv[2]) that reads the
+# environment may not (#210): recording.env_override_problems, beside the names it allows.
+$EnvOverrideCheck = @'
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from recording import env_override_problems
+print(json.dumps(env_override_problems(json.loads(Path(sys.argv[2]).read_bytes()))))
+'@
+
+# The problems $EnvOverrideCheck finds in the recording at $Path; nothing when there is none.
+function Get-EnvOverrideProblem {
+    param([string]$Path)
+    $json = & $Python -B -c $EnvOverrideCheck (Join-Path $RepoRoot 'tools/guide-drift') $Path
+    if ($LASTEXITCODE -ne 0) { throw "the environment check of '$Path' failed (python exit code $LASTEXITCODE)" }
+    @(($json -join "`n") | ConvertFrom-Json)
+}
+
+# Example data only: made-up variable names besides the ones recording.py allows.
+$EnvOverrideRuleCases = @(
+    @{ json = '{ "steps": { "1.1.5": { "valueOverrides": { "Email": "${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}" } } } }'; problem = '' }
+    @{ json = '{ "steps": { "1.1.2": { "valueOverrides": { "Domain": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}.example" } } } }'; problem = '' }
+    @{ json = '{ "steps": { "1.1.2": { "valueOverrides": { "Password": "${SKYCRAFT_TEST_PASSWORD}" } } } }'; problem = '' }
+    @{ json = '{ "steps": { "1.1.4": { "valueOverrides": { "Display name": "${SKYCRAFT_TEST_DISPLAY}" } } } }'; problem = "step 1.1.4 valueOverride 'Display name' reads `${SKYCRAFT_TEST_DISPLAY}, which is neither an address variable nor the tenant prefix, and 'Display name' names no secret: its value is masked or redacted in every run log" }
+    @{ json = '{ "placeholders": { "[yourtenant]": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}", "[guest]": "${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}" }, "steps": {} }'; problem = '' }
+    @{ json = '{ "placeholders": { "[password]": "${SKYCRAFT_TEST_PASSWORD}" }, "steps": {} }'; problem = "placeholder '[password]' reads `${SKYCRAFT_TEST_PASSWORD}, which is neither an address variable nor the tenant prefix: a placeholder fills any label, and its value is masked or redacted in every run log" }
+) | ForEach-Object {
+    $file = [System.IO.Path]::GetTempFileName()
+    try {
+        Set-Content -LiteralPath $file -Value $_.json -Encoding utf8NoBOM
+        $_.actual = @(Get-EnvOverrideProblem -Path $file) -join '; '
+    } finally { Remove-Item -LiteralPath $file -ErrorAction SilentlyContinue }
+    $_
+}
+
 # Prints, as a JSON array, every field of the parsed guide (argv[3]) that is marked
 # '"literal": false' and that recording.field_action - the runner's own decision - would report
 # rather than type with the recording (argv[2]). Each '${NAME}' the recording refers to is set to
@@ -377,6 +419,9 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
             }
         )
 
+        # A value from the environment the run would mask in a field that names no secret (#210).
+        $badEnvRefs = @(Get-EnvOverrideProblem -Path $file.FullName)
+
         $badUrls = @(
             foreach ($prop in $recording.steps.PSObject.Properties) {
                 Get-ViewUrlProblem -StepId $prop.Name -Url $prop.Value.viewUrl
@@ -409,6 +454,7 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
             nameMatches = ($file.BaseName -ceq "lab-$($recording.lab)")
             missing     = $missing
             unresolved  = $unresolved
+            badEnvRefs  = $badEnvRefs
             malformed   = $malformed
             badUrls     = $badUrls
             badBlades   = $badBlades
@@ -445,6 +491,18 @@ Describe 'Guide drift recordings - a decision is recorded only for a label the r
 Describe 'Guide drift recordings - every value the runner types is a literal' {
     It "'<file>' resolves every field its guide marks literal: false, by a valueOverride or placeholders" -ForEach $RecordingCases {
         $unresolved | Should -BeNullOrEmpty -Because ($unresolved -join '; ')
+    }
+}
+
+Describe 'Guide drift recordings - a value from the environment is an address, the tenant prefix or a secret' {
+    It "'<file>' reads any other environment variable only into a field that names a secret" -ForEach $RecordingCases {
+        # The run shows such a value as [secret] (recording.typed_secrets), so a plain field reading
+        # one would be reported under a mask. A problem names the variable, never its value.
+        $badEnvRefs | Should -BeNullOrEmpty -Because ($badEnvRefs -join '; ')
+    }
+
+    It "reports the recording <json> as '<problem>' (empty: it may read the environment so)" -ForEach $EnvOverrideRuleCases {
+        $actual | Should -Be $problem
     }
 }
 

@@ -10,6 +10,9 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   env_secrets          the '${NAME}' references whose values are addresses (for the Redactor)
   missing_env          the '${NAME}' references the environment does not set
   resolve_value        a field value with the recording's placeholders and overrides applied
+  prompt_value         the value the decider's prompt shows for a field: the one the runner
+                       types, and where the recording changed it from the guide's (#210)
+  tag_action           field_action for a tag item (#210)
   resource_name        a resource name of a navigation chain with the placeholders filled, or
                        None when a placeholder is left (#199)
   value_action         type it, leave it ('[Leave blank]'), or report an unresolved [token]
@@ -32,7 +35,11 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   one_line             the first line of a text, cut before a Playwright call log (#212)
   error_text           an exception before scrub: '<type>: <first line>' (#212)
   only_checkbox_state  whether a value is a check box state and nothing else (#212)
-  typed_secrets        every value the runner types into a password or credential field (#212)
+  typed_secrets        every value the runner types into a password or credential field (#212),
+                       and every value read from the environment but an address and the tenant
+                       prefix (#210)
+  env_override_problems  a placeholder that reads a variable of neither kind, or a valueOverride
+                       that reads one into a field that names no secret (#210)
   mask_secret_values   an accessibility snapshot with the value of a credential field masked (#212)
   scrub                a free text as a run log keeps it: one line (or every line of an
                        accessibility tree), secrets, credentials, object ids, tenant data,
@@ -60,6 +67,14 @@ from parse import BRACKET_TOKEN, value_is_literal
 # '${NAME}', or '${NAME|upn}' for the guest user principal name form of an address (the
 # Redactor writes that form; see Redactor.__init__).
 ENV_REF = re.compile(r"\$\{(?P<name>[A-Z0-9_]+)(?P<upn>\|upn)?\}")
+# The environment variables whose values a run log may show (#210); every other value read from
+# the environment is a secret to it (typed_secrets). The tenant prefix, which Invoke-GuideDrift.ps1
+# sets and the Redactor writes as '[yourtenant]', and the addresses the Redactor writes back as
+# their '${NAME}' (env_secrets). A recording's placeholder reads no other variable, as it fills any
+# label; its valueOverride reads one only into a field that names a secret (env_override_problems,
+# tests/Guide-Drift-Recording.Tests.ps1).
+TENANT_PREFIX_ENV = "SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX"
+ADDRESS_ENV = frozenset({"SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL"})
 
 
 def env_names(recording: dict) -> set[str]:
@@ -550,6 +565,57 @@ def field_action(recording: dict, step: dict, item: dict) -> tuple[str, str]:
     return value_action(value), value
 
 
+def tag_action(recording: dict, step: dict, item: dict) -> tuple[str, str]:
+    """field_action for a tag item (#210): its name is the key of its valueOverride, and its value
+    is read as parse.py reads a field's (value_is_literal; parse.py marks no tag). So a tag value
+    is typed only when it is text to type once the recording is applied: an override's '[Leave
+    blank]' leaves the tag out ('skip'), and a [token] left ('skycraft-[uniqueID]') or prose is
+    reported ('unresolved', 'instruction'), never typed as written."""
+    return field_action(recording, step, {"label": item["name"], "value": item["value"],
+                                          "literal": value_is_literal(item["value"])})
+
+
+def prompt_value(recording: dict, step: dict, item: dict) -> str:
+    """What the decider's prompt shows after 'value to type:' for a field item (#210): the value
+    the runner types (field_action), not the guide's. When the recording changed it, where from,
+    in parentheses: '(from the recording's valueOverrides)' or '(the guide's, with the recording's
+    placeholders)', then the environment variables it was read from, by name only ('; environment
+    variable NAME').
+
+    When the runner types nothing it says 'none' and why: a bracketed value such as an override's
+    '[Leave blank]' leaves the field as it is, the guide's value is an instruction, or a [token]
+    is left. run.py asks about none of these fields: it leaves the first as it is and reports the
+    other two without looking the field up. These branches only keep the function total.
+
+    Not scrubbed here: the prompt scrubs every line it prints (run.py). So the value of a field
+    that names a secret, and every value read from the environment but an address and the tenant
+    prefix, shows as '[secret]' (typed_secrets); an address from the environment shows as its
+    '${NAME}' (the Redactor), and the tenant prefix as '[yourtenant]'."""
+    action, value = field_action(recording, step, item)
+    override = value_override(recording, step, item["label"])
+    if override is not None:
+        source, references = "from the recording's valueOverrides", [override]
+    else:
+        # The placeholders fill_placeholders replaced, in its order, as the recording writes them.
+        references, text = [], item["value"]
+        for placeholder, replacement in recording.get("placeholders", {}).items():
+            if placeholder in text:
+                references.append(replacement)
+                text = text.replace(placeholder, replacement)
+        source = "the guide's, with the recording's placeholders" if references else ""
+    names = sorted({m.group("name") for reference in references for m in ENV_REF.finditer(reference)})
+    if names:
+        source += f"; environment variable{'s' if len(names) > 1 else ''} {', '.join(names)}"
+    note = f" ({source})" if source else ""
+    if action == "type":
+        return value + note
+    if action == "skip":
+        return f"none: '{value.strip()}' leaves the field as it is{note}"
+    if action == "instruction":
+        return "none: the guide's value is an instruction, not text to type"
+    return "none: the value has a [token] the recording does not resolve"
+
+
 # --- what a run log keeps (#212) -------------------------------------------------------------
 
 # Playwright's errors read '<api>: <message>', then '\nCall log:\n' and one line per thing it did
@@ -618,7 +684,14 @@ def typed_secrets(recording: dict, steps: dict) -> set[str]:
     no secret; nor is a value whose environment variable is not set (the run refuses to start
     then). A value the Portal generates is never typed: the runner never reads it, the call log
     that showed it is cut (one_line), and its field's value in an accessibility snapshot is
-    masked (mask_secret_values)."""
+    masked (mask_secret_values).
+
+    Also every value the recording reads from the environment, whatever field, tag or text it
+    goes into (#210), but an address the Redactor writes back as its '${NAME}' (env_secrets) and
+    the tenant prefix (TENANT_PREFIX_ENV), which it writes as '[yourtenant]': the prompt and the
+    records show '[secret]', never the value. A blank or unset one is left out. A short value
+    masks every text it appears in, so a variable that is no secret belongs in ADDRESS_ENV or
+    TENANT_PREFIX_ENV."""
     secrets = set()
     for step in steps.get("steps", []):
         for item in step.get("items", []):
@@ -631,7 +704,37 @@ def typed_secrets(recording: dict, steps: dict) -> set[str]:
                 pass
             secrets |= {value for value in values
                         if value.strip() and value_action(value) == "type" and not only_checkbox_state(value)}
+    shown = {token[2:-1] for token in env_secrets(recording)} | {TENANT_PREFIX_ENV}
+    secrets |= {os.environ[name] for name in env_names(recording) - shown if os.environ.get(name, "").strip()}
     return secrets
+
+
+def env_override_problems(recording: dict) -> list[str]:
+    """Why `recording` reads the environment where it should not (#210). Each '${NAME}' of a
+    placeholder must be an address variable (ADDRESS_ENV) or the tenant prefix (TENANT_PREFIX_ENV):
+    a placeholder fills any label. Each '${NAME}' of a valueOverride must be one of those too, or
+    sit under a label that names a secret (SECRET_FIELD). A value read from the environment is
+    masked as '[secret]' in every run log (typed_secrets) or, an address, redacted as its
+    '${NAME}' (the Redactor), so a field that names no secret would be reported under a mask. One
+    problem per variable and placeholder or override, by name only, placeholders first; [] when
+    there is none. tests/Guide-Drift-Recording.Tests.ps1 runs it on every recording."""
+    shown = ADDRESS_ENV | {TENANT_PREFIX_ENV}
+
+    def names(value: object) -> list[str]:
+        found = dict.fromkeys(m.group("name") for m in ENV_REF.finditer(json.dumps(value)))
+        return [name for name in found if name not in shown]
+
+    problems = [f"placeholder '{placeholder}' reads ${{{name}}}, which is neither an address variable nor the "
+                "tenant prefix: a placeholder fills any label, and its value is masked or redacted in every run log"
+                for placeholder, value in (recording.get("placeholders") or {}).items() for name in names(value)]
+    for step_id, entry in recording.get("steps", {}).items():
+        for label, value in (entry.get("valueOverrides") or {}).items():
+            if SECRET_FIELD.search(label):
+                continue
+            problems += [f"step {step_id} valueOverride '{label}' reads ${{{name}}}, which is neither an address "
+                         f"variable nor the tenant prefix, and '{label}' names no secret: its value is masked or "
+                         "redacted in every run log" for name in names(value)]
+    return problems
 
 
 # A text field in an accessibility snapshot, as aria_snapshot() writes it with its value after

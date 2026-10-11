@@ -1002,6 +1002,7 @@ class RunLogRedactionTests(RunnerTestCase):
         out = io.StringIO()
         with mock.patch.object(run, "find_exact", return_value=None), \
                 mock.patch.object(run, "candidates_on_screen", return_value=candidates), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
                 mock.patch.object(run, "find_by_name", return_value=FakeElement()) as find, redirect_stdout(out):
             record = r.act_on_label(step, item, "Owner")
         shown = out.getvalue()
@@ -3374,6 +3375,121 @@ class FieldValueTests(RunnerTestCase):
                                        "value": "malfurion.stormrage@[yourtenant].onmicrosoft.com"})
         self.assertTrue(done)
         self.assertEqual(act.call_args.args[-1], "malfurion.stormrage@contoso.onmicrosoft.com")
+
+
+class PromptValueTests(RunnerTestCase):
+    """The prompt about a field that is not found shows the value the runner types, after the
+    recording's placeholders and overrides, scrubbed as the rest of the prompt (#210)."""
+
+    GUEST = "me@example.com"
+    PASSWORD = "Fake!Pass9"
+    ENV = {"SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL": GUEST, "SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX": "contoso",
+           "SKYCRAFT_GUIDE_DRIFT_PASSWORD": PASSWORD}
+
+    def prompt_for(self, label: str, value: str, override: str | None = None, literal: bool = True) -> str:
+        """What the console shows when the field `label` with the guide's `value` is not found and
+        input is closed at the prompt."""
+        item = {"kind": "field", "label": label, "value": value, "line": 3}
+        if not literal:
+            item["literal"] = False
+        step = {"id": "9.9.1", "title": "One", "items": [item], "images": []}
+        if override is not None:
+            self.recording["steps"]["9.9.1"]["valueOverrides"][label] = override
+        self.recording["placeholders"]["[yourtenant]"] = "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}"
+        out = io.StringIO()
+        with mock.patch.dict("os.environ", self.ENV):
+            r = run.Runner(FakePage(), {**STEPS, "steps": [step]}, self.recording, self.args(), ask=Answers())
+            action, typed = run.field_action(self.recording, step, item)
+            self.assertEqual(action, "type")
+            with mock.patch.object(run, "find_exact", return_value=None), \
+                    mock.patch.object(run, "candidates_on_screen", return_value=[run.Candidate("button", "Next")]), \
+                    mock.patch.object(run.time, "monotonic", lambda: r.page.now), redirect_stdout(out):
+                record = r.act_on_label(step, item, label, typed)
+        self.assertEqual((record["outcome"], record["observed"]), ("unknown", "no answer (input closed)"))
+        return out.getvalue()
+
+    def test_the_guide_value_when_nothing_changes_it(self) -> None:
+        self.assertIn("\n  value to type: Malfurion Stormrage\n", self.prompt_for("Display name", "Malfurion Stormrage"))
+
+    def test_an_override_is_shown_instead_of_the_guide_value(self) -> None:
+        shown = self.prompt_for("Group name", "SkyCraft-Admins", override="Contoso-Admins")
+        self.assertIn("\n  value to type: Contoso-Admins (from the recording's valueOverrides)\n", shown)
+        self.assertNotIn("SkyCraft-Admins", shown)
+
+    def test_a_placeholder_is_filled_and_the_value_scrubbed(self) -> None:
+        shown = self.prompt_for("User principal name", "malfurion.stormrage@[yourtenant].onmicrosoft.com", literal=False)
+        self.assertIn("\n  value to type: malfurion.stormrage@[tenantdomain] (the guide's, with the recording's "
+                      "placeholders; environment variable SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX)\n", shown)
+        self.assertNotIn("contoso.onmicrosoft.com", shown)
+
+    def test_an_environment_variable_is_named_and_its_address_redacted(self) -> None:
+        shown = self.prompt_for("Email", "guest@example.org", override="${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}")
+        self.assertIn("\n  value to type: ${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL} (from the recording's valueOverrides; "
+                      "environment variable SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL)\n", shown)
+        self.assertNotIn(self.GUEST, shown)
+        self.assertNotIn("guest@example.org", shown)
+
+    def test_a_secret_field_shows_its_value_masked(self) -> None:
+        shown = self.prompt_for("Password", "LoveAzeroth!2004")
+        self.assertIn("\n  value to type: [secret]\n", shown)
+        self.assertNotIn("LoveAzeroth!2004", shown)
+        shown = self.prompt_for("Password", "LoveAzeroth!2004", override="${SKYCRAFT_GUIDE_DRIFT_PASSWORD}")
+        self.assertIn("\n  value to type: [secret] (from the recording's valueOverrides; "
+                      "environment variable SKYCRAFT_GUIDE_DRIFT_PASSWORD)\n", shown)
+        self.assertNotIn(self.PASSWORD, shown)
+
+    def test_a_plain_field_read_from_the_environment_shows_its_value_masked(self) -> None:
+        # Any value read from the environment is a secret, but an address and the tenant prefix.
+        self.ENV = {**self.ENV, "SKYCRAFT_TEST_DISPLAY": "Contoso Display"}
+        shown = self.prompt_for("Display name", "Malfurion Stormrage", override="${SKYCRAFT_TEST_DISPLAY}")
+        self.assertIn("\n  value to type: [secret] (from the recording's valueOverrides; "
+                      "environment variable SKYCRAFT_TEST_DISPLAY)\n", shown)
+        self.assertNotIn("Contoso Display", shown)
+
+    def run_tag(self, value: str, override: str | None = None, env: dict | None = None):
+        """run_step on a step with one tag 'Owner' whose guide value is `value`: whether it went
+        through, the tag's record, the fill_tag mock and results.jsonl."""
+        item = {"kind": "tag", "name": "Owner", "value": value, "line": 3}
+        step = {"id": "9.9.1", "title": "One", "expected": None, "images": [], "items": [item]}
+        if override is not None:
+            self.recording["steps"]["9.9.1"]["valueOverrides"]["Owner"] = override
+        with mock.patch.dict("os.environ", env or {}):
+            r = run.Runner(FakePage(), {**STEPS, "steps": [step]}, self.recording, self.args(), ask=Answers())
+            with mock.patch.object(run, "fill_tag") as fill, mock.patch.object(run.Runner, "check_result"):
+                done = self.quietly(lambda: r.run_step(step))
+        [tag] = [record for record in r.records if record["kind"] == "tag"]
+        results = (self.tmp / "logs" / "test" / "results.jsonl").read_text(encoding="utf-8")
+        return done, tag, fill, results
+
+    def test_a_tag_record_observes_the_value_typed_not_the_guides(self) -> None:
+        done, tag, fill, _ = self.run_tag("SkyCraft-Admins", override="Contoso-Admins")
+        self.assertTrue(done)
+        self.assertEqual(fill.call_args.args[1:], ("Owner", "Contoso-Admins"))
+        self.assertEqual((tag["outcome"], tag["observed"]), ("match", "Contoso-Admins"))
+
+    def test_a_tag_value_read_from_the_environment_is_kept_masked(self) -> None:
+        done, tag, fill, results = self.run_tag("SkyCraft-Admins", override="${SKYCRAFT_TEST_OWNER}",
+                                                env={"SKYCRAFT_TEST_OWNER": "Contoso Owner"})
+        self.assertTrue(done)
+        self.assertEqual(fill.call_args.args[1:], ("Owner", "Contoso Owner"))
+        self.assertEqual((tag["outcome"], tag["observed"]), ("match", "[secret]"))
+        self.assertNotIn("Contoso Owner", results)
+
+    def test_a_tag_value_that_is_no_text_to_type_is_never_typed(self) -> None:
+        for value, override, outcome, observed in (
+                ("IT-001", "[Leave blank]", "match", "left out: [Leave blank]"),
+                ("skycraft-[uniqueID]", None, "unknown",
+                 "value 'skycraft-[uniqueID]' has an unresolved [token]; add a placeholder or a valueOverride "
+                 "to the recording"),
+                ('Click the "..." button', None, "unknown",
+                 "value 'Click the \"...\" button' is an instruction, not text to type; add a valueOverride for "
+                 "this tag to the recording")):
+            with self.subTest(value=value):
+                self.recording["steps"]["9.9.1"]["valueOverrides"].pop("Owner", None)
+                done, tag, fill, _ = self.run_tag(value, override=override)
+                fill.assert_not_called()
+                self.assertEqual((done, tag["outcome"], tag["observed"]), (outcome == "match", outcome, observed))
+                (self.tmp / "logs" / "test" / "results.jsonl").unlink()
 
 
 GROUPS = "Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups"

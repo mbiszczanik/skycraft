@@ -21,8 +21,9 @@ they hold the text the failure prompt shows (issue #212). A record's "observed" 
 it is written (Runner.scrubbed, recording.scrub): one line, the first of an error, without the
 Playwright call log after it (which holds the element's HTML, an auto-generated password in a value
 attribute among it, and the value the runner typed); every value the runner types into a field
-whose label names a password, secret or other credential (recording.typed_secrets) and every
-credential in a connection string or SAS address ('AccountKey=', 'sig=') as '[secret]'; object ids
+whose label names a password, secret or other credential, every value read from the environment
+but an address and the tenant prefix (recording.typed_secrets, #210), and every credential in a
+connection string or SAS address ('AccountKey=', 'sig=') as '[secret]'; object ids
 as '<id>'; tenant data, also as a regular expression escapes it, as the Redactor's tokens; any
 other e-mail address as '<email>'; a value a call typed and an element's value attribute as
 '[typed]' and '[value]' (recording.scrub lists what it cannot recognise and what it masks that only
@@ -37,7 +38,18 @@ auto-generated password is in an accessibility snapshot). The text a step's resu
 as the person types it, is kept in the recording scrubbed the same way. The screenshots are not
 scrubbed: crop and anonymise them by hand.
 
-When a label is not on screen, the person answers at the prompt (decide.py): a number uses that
+When a label is not on screen, the person answers at the prompt (decide.py). For a field it shows
+the value the run will type, not the guide's (recording.prompt_value, #210): after the recording's
+placeholders and valueOverrides, saying '(from the recording's valueOverrides)' or '(the guide's,
+with the recording's placeholders)' and naming any environment variable it was read from, scrubbed
+as the candidates are. So a typed secret shows as '[secret]', and so does any value read from the
+environment but an address, shown as its '${NAME}', and the tenant prefix, shown as '[yourtenant]'
+(recording.typed_secrets): a recording's placeholder reads no other variable, as it fills any label,
+and its valueOverride reads one only into a field that names a secret
+(recording.env_override_problems, checked by tests/Guide-Drift-Recording.Tests.ps1). A tag is
+decided as a field is (recording.tag_action): its value is typed, and its record keeps the value
+typed, scrubbed; an override's '[Leave blank]' leaves it out ('left out'), and a [token] left or
+an instruction is reported as unknown, never typed as written. At the prompt, a number uses that
 element as the guide's, renamed (misleading drift); 'c <number>' uses it, the difference cosmetic;
 'w <number>' uses it as a workaround, not as the guide's element (#211: misleading drift, never
 written to the recording, so the next run asks again); 'g' gone (blocking drift); 'i' ignore; 'u'
@@ -260,7 +272,8 @@ from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # n
 from recording import (LABEL_ROLES, REMARK, EntryNames, Redactor, checkbox_state, env_secrets,  # noqa: E402
                        missing_env, field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
                        same_blade, start_blade, view_blade, write_json)
-from recording import error_text, one_line, redaction_tokens, scrub, typed_secrets  # noqa: E402
+from recording import (error_text, one_line, prompt_value, redaction_tokens, scrub, tag_action,  # noqa: E402
+                       typed_secrets)
 
 Found = TypeVar("Found")     # what in_time() looks for
 
@@ -1711,9 +1724,11 @@ class Runner:
         self.results_path = self.run_dir / "results.jsonl"
         # The person picks a candidate by its number, so the list is shown scrubbed (#212): the
         # console is pasted too, and a candidate may carry an id or another directory's address.
+        # A field's value is the one the runner types, scrubbed with the rest (#210).
         self.deciders = [ReplayDecider(recording),
                          HumanDecider(ask=lambda text: self.ask(text),
-                                      say=lambda text: print(scrub(text, self.redactor, self.secrets, whole=True)))]
+                                      say=lambda text: print(scrub(text, self.redactor, self.secrets, whole=True)),
+                                      value_to_type=lambda step, item: prompt_value(self.recording, step, item))]
         self.redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording),
                                  getattr(args, "tenant_name", ""))
         # What the runner types into a password or secret field, never written to a run log (#212).
@@ -2294,12 +2309,17 @@ class Runner:
             self.expanded = False
             self.first_item = position == 0
             if item["kind"] == "tag":
-                record = self.new_record(step, "tag", item["name"])
-                try:
-                    fill_tag(self.page, item["name"], resolve_value(self.recording, step, item["name"], item["value"]))
-                    record.update(outcome="match", observed=item["value"])
-                except (PlaywrightError, LookupError) as error:
-                    record.update(outcome="unknown", observed=error_text(error))
+                # Decided as a field's value is (#210): a value that is no text to type is reported.
+                action, value = tag_action(self.recording, step, item)
+                if action == "type":
+                    record = self.new_record(step, "tag", item["name"])
+                    try:
+                        fill_tag(self.page, item["name"], value)
+                        record.update(outcome="match", observed=value)      # what was typed, not the guide's
+                    except (PlaywrightError, LookupError) as error:
+                        record.update(outcome="unknown", observed=error_text(error))
+                else:
+                    record = self.not_typed(step, item, "tag", item["name"], action, value)
                 records = [record]
             elif item["kind"] == "field":
                 action, value = field_action(self.recording, step, item)
@@ -2307,17 +2327,7 @@ class Runner:
                     record = self.act_on_label(step, item, item["label"], value, form_start=not in_form)
                     in_form = True
                 else:
-                    record = self.new_record(step, "field", item["label"])
-                    if action == "skip":
-                        record.update(outcome="match", observed=f"left as is: {value}")
-                    elif action == "instruction":     # the guide's own text: no tenant data
-                        record.update(outcome="unknown",
-                                      observed=f"value '{item['value']}' is an instruction, not text to "
-                                               "type; add a valueOverride for this field to the recording")
-                    else:
-                        record.update(outcome="unknown",
-                                      observed=f"value '{value}' has an unresolved [token]; add a "
-                                               "placeholder or a valueOverride to the recording")
+                    record = self.not_typed(step, item, "field", item["label"], action, value)
                 records = [record]
             else:
                 records = []
@@ -2364,6 +2374,22 @@ class Runner:
             self.record_view(step)
         self.write(self.screenshot(step))
         return not step_failed
+
+    def not_typed(self, step: dict, item: dict, kind: str, label: str, action: str, value: str) -> dict:
+        """The record of a field or tag item whose value the runner does not type (field_action,
+        tag_action: `action` is not 'type'): for 'skip' a match, a field 'left as is' and a tag
+        'left out' (no tag is added); else unknown, with what the recording needs so that the value
+        is typed."""
+        record = self.new_record(step, kind, label)
+        if action == "skip":
+            record.update(outcome="match", observed=f"left {'out' if kind == 'tag' else 'as is'}: {value}")
+        elif action == "instruction":     # the guide's own text: no tenant data
+            record.update(outcome="unknown", observed=f"value '{item['value']}' is an instruction, not text to "
+                                                     f"type; add a valueOverride for this {kind} to the recording")
+        else:
+            record.update(outcome="unknown", observed=f"value '{value}' has an unresolved [token]; add a "
+                                                     "placeholder or a valueOverride to the recording")
+        return record
 
     # -- results ---------------------------------------------------------------------------
 

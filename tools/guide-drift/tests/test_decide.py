@@ -212,6 +212,23 @@ class Listing(unittest.TestCase):
         decider(STEP, ITEM, LABEL, CANDIDATES)
         self.assertNotIn("value to type", "\n".join(decider.said))
 
+    def test_a_field_shows_the_value_to_type_it_is_given_not_the_guides(self):
+        # #210: run.py gives the value the runner types (recording.prompt_value).
+        asked, said = [], []
+        decider = HumanDecider(ask=lambda _: "g", say=said.append,
+                               value_to_type=lambda step, item: asked.append((step, item)) or "Contoso-Admins (x)")
+        decider(STEP, FIELD, "Group name", CANDIDATES)
+        self.assertIn("  value to type: Contoso-Admins (x)", said)
+        self.assertNotIn("SkyCraft-Admins", "\n".join(said))
+        self.assertEqual(asked, [(STEP, FIELD)])
+
+    def test_value_to_type_is_not_asked_for_an_action(self):
+        said = []
+        decider = HumanDecider(ask=lambda _: "g", say=said.append,
+                               value_to_type=lambda step, item: self.fail("asked for an action"))
+        decider(STEP, ITEM, LABEL, CANDIDATES)
+        self.assertNotIn("value to type", "\n".join(said))
+
     def test_ambiguous_candidate_shows_its_count(self):
         self.assertEqual(str(Candidate("button", "New group", count=2)), 'button "New group" (x2)')
         self.assertEqual(str(Candidate("button", "New group")), 'button "New group"')
