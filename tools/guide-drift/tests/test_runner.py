@@ -1329,6 +1329,47 @@ class RecordedSkipTests(RunnerTestCase):
         self.assertIn("## unknown (1)\n- step 9.9.4 ", summary)
         self.assertIn(f"## skipped (1)\n- step 9.9.2 skipped by the recording: {self.REASON}\n", summary)
 
+    def resume_on_file(self, *records: tuple[str, str, dict]) -> tuple[int, str]:
+        """A resume of run 'hand' whose results.jsonl holds `records` (step, kind, fields), with
+        9.9.1 and 9.9.2 completed, 9.9.4 in flight (answered y) and 9.9.2 skipped in the recording.
+        Returns the exit code and the summary."""
+        maker = self.runner()
+        lines = []
+        for step, kind, fields in records:
+            record = maker.new_record({"id": step}, kind, "Missing button" if kind == "action" else None)
+            record.update(fields)
+            lines.append(json.dumps(record) + "\n")
+        folder = self.tmp / "logs" / "hand"
+        folder.mkdir(parents=True)
+        (folder / "results.jsonl").write_text("".join(lines), encoding="utf-8")
+        self.skip("9.9.2")
+        state = {"runId": "hand", "lab": LAB, "completed": ["9.9.1", "9.9.2"], "inFlight": "9.9.4"}
+        r = self.runner(answers=["y", ""], resume=True, run_id="hand", state=state)
+        code = self.quietly(lambda: r.run(state))
+        return code, (folder / "summary.md").read_text(encoding="utf-8")
+
+    def test_a_completed_step_with_a_finding_beside_its_recorded_skip_counts_none(self) -> None:
+        # Only a step whose records are all recorded skips is left as it is: an unknown beside one
+        # is dropped, and the step listed once.
+        code, summary = self.resume_on_file(
+            ("9.9.1", "action", {"outcome": "match"}),
+            ("9.9.2", "action", {"outcome": "unknown", "observed": "not found"}),
+            ("9.9.2", "action", {"outcome": "skipped", "skippedBecause": "9.9.2", "observed": self.REASON,
+                                 "category": run.RECORDED_SKIP}))
+        self.assertEqual(code, 0)
+        self.assertIn("## unknown (0)\n", summary)
+        self.assertIn(f"## skipped (1)\n- step 9.9.2 skipped by the recording: {self.REASON}\n", summary)
+
+    def test_a_completed_step_without_records_is_still_listed_as_skipped_by_the_recording(self) -> None:
+        # Its last line is a marker, so a resume loads no record of it; the skip still lists it.
+        code, summary = self.resume_on_file(
+            ("9.9.1", "action", {"outcome": "match"}),
+            ("9.9.2", "action", {"outcome": "unknown", "observed": "not found"}),
+            ("9.9.2", "redo", {"screenshot": None}))
+        self.assertEqual(code, 0)
+        self.assertIn("## unknown (0)\n", summary)
+        self.assertIn(f"## skipped (1)\n- step 9.9.2 skipped by the recording: {self.REASON}\n", summary)
+
     def test_a_completed_step_skipped_since_drops_its_findings_once(self) -> None:
         # 9.9.2 fails and is done by hand (c), 9.9.4 fails (q); the recording then skips 9.9.2.
         # The skip wins: 9.9.2's unknown is dropped behind a marker, and the step is listed as

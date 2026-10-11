@@ -101,9 +101,9 @@
     summary.md and the exit code, however often the run is resumed after it (issue #222):
     results.jsonl keeps every attempt, with a "redo" marker before the new one. A step completed
     before the stop and skipped in the recording since counts none of its findings: it is listed
-    as skipped by the recording. A run that does not start (254) writes nothing. A results.jsonl
-    written before #222 has no markers, so a step redone there may still count its earlier
-    attempt.
+    as skipped by the recording. A run that does not start (254) adds nothing to results.jsonl.
+    A results.jsonl written before #222 has no markers, so a step redone there may still count
+    its earlier attempt.
 
     A RESUMED RUN HAS A NEW BROWSER on the Microsoft Entra ID overview (issue #206), and so has a
     run started with -FromStep. Before the first step that runs, the run opens the view that step
