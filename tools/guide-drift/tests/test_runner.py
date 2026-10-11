@@ -3295,7 +3295,7 @@ class PromptValueTests(RunnerTestCase):
 
     def test_a_tag_value_that_is_no_text_to_type_is_never_typed(self) -> None:
         for value, override, outcome, observed in (
-                ("IT-001", "[Leave blank]", "match", "left as is: [Leave blank]"),
+                ("IT-001", "[Leave blank]", "match", "left out: [Leave blank]"),
                 ("skycraft-[uniqueID]", None, "unknown",
                  "value 'skycraft-[uniqueID]' has an unresolved [token]; add a placeholder or a valueOverride "
                  "to the recording"),

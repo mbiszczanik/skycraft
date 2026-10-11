@@ -357,7 +357,9 @@ class EnvironmentValueTests(unittest.TestCase):
         rec = {"steps": {"1.1.2": {"valueOverrides": {"Password": "${SKYCRAFT_TEST_PASSWORD}",
                                                       "Domain": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}.example"}},
                          "1.1.5": {"valueOverrides": {"Email": TOKEN, "Invited user": UPN_TOKEN, "Group": "SkyCraft"}},
-                         "1.1.6": {"labels": {}}}}
+                         "1.1.6": {"labels": {}}},
+               "placeholders": {"[yourtenant]": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}", "[guest]": TOKEN,
+                                "[region]": "swedencentral"}}
         self.assertEqual(recording.env_override_problems(rec), [])
 
     def test_an_override_that_reads_another_variable_into_a_plain_field_is_a_problem(self) -> None:
@@ -365,11 +367,25 @@ class EnvironmentValueTests(unittest.TestCase):
                                                       "Owner": "x-${SKYCRAFT_TEST_DISPLAY}"}}}}
         self.assertEqual(recording.env_override_problems(rec), [
             "step 1.1.4 valueOverride 'Display name' reads ${SKYCRAFT_TEST_DISPLAY}, which is neither an address "
-            "variable nor the tenant prefix, and 'Display name' names no secret: the run would show it as [secret]",
+            "variable nor the tenant prefix, and 'Display name' names no secret: its value is masked or redacted "
+            "in every run log",
             "step 1.1.4 valueOverride 'Display name' reads ${SKYCRAFT_TEST_B}, which is neither an address "
-            "variable nor the tenant prefix, and 'Display name' names no secret: the run would show it as [secret]",
+            "variable nor the tenant prefix, and 'Display name' names no secret: its value is masked or redacted "
+            "in every run log",
             "step 1.1.4 valueOverride 'Owner' reads ${SKYCRAFT_TEST_DISPLAY}, which is neither an address "
-            "variable nor the tenant prefix, and 'Owner' names no secret: the run would show it as [secret]"])
+            "variable nor the tenant prefix, and 'Owner' names no secret: its value is masked or redacted "
+            "in every run log"])
+
+    def test_a_placeholder_reads_only_an_address_or_the_tenant_prefix(self) -> None:
+        # A placeholder fills any label, so a secret's variable is a problem there too.
+        rec = {"placeholders": {"[yourtenant]": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}",
+                                "[password]": "${SKYCRAFT_TEST_PASSWORD}", "[owner]": "${SKYCRAFT_TEST_OWNER}-x"},
+               "steps": {"1.1.2": {"valueOverrides": {"Password": "${SKYCRAFT_TEST_PASSWORD}"}}}}
+        self.assertEqual(recording.env_override_problems(rec), [
+            "placeholder '[password]' reads ${SKYCRAFT_TEST_PASSWORD}, which is neither an address variable nor "
+            "the tenant prefix: a placeholder fills any label, and its value is masked or redacted in every run log",
+            "placeholder '[owner]' reads ${SKYCRAFT_TEST_OWNER}, which is neither an address variable nor "
+            "the tenant prefix: a placeholder fills any label, and its value is masked or redacted in every run log"])
 
 
 class TagActionTests(unittest.TestCase):

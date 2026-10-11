@@ -39,10 +39,11 @@
     it is read as the view it was cut from, by the same rules as a viewUrl.
 
     A valueOverride reads from the environment ('${NAME}') only an address variable or the tenant
-    prefix, or else into a field that names a secret (issue #210): the run shows every other
-    value from the environment as [secret], in the prompt and in its records. The names and the
-    secret field pattern live in tools/guide-drift/recording.py (ADDRESS_ENV, TENANT_PREFIX_ENV,
-    SECRET_FIELD), and recording.env_override_problems applies the rule.
+    prefix, or else into a field that names a secret; a placeholder reads only an address
+    variable or the tenant prefix, as it fills any label (issue #210). The run masks or redacts
+    every value it reads from the environment, in the prompt and in its records. The names and
+    the secret field pattern live in tools/guide-drift/recording.py (ADDRESS_ENV,
+    TENANT_PREFIX_ENV, SECRET_FIELD), and recording.env_override_problems applies the rule.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Guide-Drift-Recording.Tests.ps1
@@ -80,7 +81,9 @@ $EnvOverrideRuleCases = @(
     @{ json = '{ "steps": { "1.1.5": { "valueOverrides": { "Email": "${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}" } } } }'; problem = '' }
     @{ json = '{ "steps": { "1.1.2": { "valueOverrides": { "Domain": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}.example" } } } }'; problem = '' }
     @{ json = '{ "steps": { "1.1.2": { "valueOverrides": { "Password": "${SKYCRAFT_TEST_PASSWORD}" } } } }'; problem = '' }
-    @{ json = '{ "steps": { "1.1.4": { "valueOverrides": { "Display name": "${SKYCRAFT_TEST_DISPLAY}" } } } }'; problem = "step 1.1.4 valueOverride 'Display name' reads `${SKYCRAFT_TEST_DISPLAY}, which is neither an address variable nor the tenant prefix, and 'Display name' names no secret: the run would show it as [secret]" }
+    @{ json = '{ "steps": { "1.1.4": { "valueOverrides": { "Display name": "${SKYCRAFT_TEST_DISPLAY}" } } } }'; problem = "step 1.1.4 valueOverride 'Display name' reads `${SKYCRAFT_TEST_DISPLAY}, which is neither an address variable nor the tenant prefix, and 'Display name' names no secret: its value is masked or redacted in every run log" }
+    @{ json = '{ "placeholders": { "[yourtenant]": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}", "[guest]": "${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}" }, "steps": {} }'; problem = '' }
+    @{ json = '{ "placeholders": { "[password]": "${SKYCRAFT_TEST_PASSWORD}" }, "steps": {} }'; problem = "placeholder '[password]' reads `${SKYCRAFT_TEST_PASSWORD}, which is neither an address variable nor the tenant prefix: a placeholder fills any label, and its value is masked or redacted in every run log" }
 ) | ForEach-Object {
     $file = [System.IO.Path]::GetTempFileName()
     try {

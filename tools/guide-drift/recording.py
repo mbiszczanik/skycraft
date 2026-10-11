@@ -34,8 +34,8 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   typed_secrets        every value the runner types into a password or credential field (#212),
                        and every value read from the environment but an address and the tenant
                        prefix (#210)
-  env_override_problems  a valueOverride that reads a variable of neither kind into a field that
-                       names no secret (#210)
+  env_override_problems  a placeholder that reads a variable of neither kind, or a valueOverride
+                       that reads one into a field that names no secret (#210)
   mask_secret_values   an accessibility snapshot with the value of a credential field masked (#212)
   scrub                a free text as a run log keeps it: one line (or every line of an
                        accessibility tree), secrets, credentials, object ids, tenant data,
@@ -66,8 +66,9 @@ ENV_REF = re.compile(r"\$\{(?P<name>[A-Z0-9_]+)(?P<upn>\|upn)?\}")
 # The environment variables whose values a run log may show (#210); every other value read from
 # the environment is a secret to it (typed_secrets). The tenant prefix, which Invoke-GuideDrift.ps1
 # sets and the Redactor writes as '[yourtenant]', and the addresses the Redactor writes back as
-# their '${NAME}' (env_secrets). A recording's valueOverride reads any other variable only into a
-# field that names a secret (env_override_problems, tests/Guide-Drift-Recording.Tests.ps1).
+# their '${NAME}' (env_secrets). A recording's placeholder reads no other variable, as it fills any
+# label; its valueOverride reads one only into a field that names a secret (env_override_problems,
+# tests/Guide-Drift-Recording.Tests.ps1).
 TENANT_PREFIX_ENV = "SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX"
 ADDRESS_ENV = frozenset({"SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL"})
 
@@ -620,22 +621,30 @@ def typed_secrets(recording: dict, steps: dict) -> set[str]:
 
 
 def env_override_problems(recording: dict) -> list[str]:
-    """Why a valueOverride of `recording` reads the environment where it should not (#210): each
-    '${NAME}' it holds must be an address variable (ADDRESS_ENV) or the tenant prefix
-    (TENANT_PREFIX_ENV), or sit under a label that names a secret (SECRET_FIELD). Any other value
-    from the environment is masked as '[secret]' in every run log (typed_secrets), so a field that
-    names no secret would be reported under a mask. One problem per variable and override, by
-    name only; [] when there is none. tests/Guide-Drift-Recording.Tests.ps1 runs it on every
-    recording."""
-    problems = []
+    """Why `recording` reads the environment where it should not (#210). Each '${NAME}' of a
+    placeholder must be an address variable (ADDRESS_ENV) or the tenant prefix (TENANT_PREFIX_ENV):
+    a placeholder fills any label. Each '${NAME}' of a valueOverride must be one of those too, or
+    sit under a label that names a secret (SECRET_FIELD). A value read from the environment is
+    masked as '[secret]' in every run log (typed_secrets) or, an address, redacted as its
+    '${NAME}' (the Redactor), so a field that names no secret would be reported under a mask. One
+    problem per variable and placeholder or override, by name only, placeholders first; [] when
+    there is none. tests/Guide-Drift-Recording.Tests.ps1 runs it on every recording."""
+    shown = ADDRESS_ENV | {TENANT_PREFIX_ENV}
+
+    def names(value: object) -> list[str]:
+        found = dict.fromkeys(m.group("name") for m in ENV_REF.finditer(json.dumps(value)))
+        return [name for name in found if name not in shown]
+
+    problems = [f"placeholder '{placeholder}' reads ${{{name}}}, which is neither an address variable nor the "
+                "tenant prefix: a placeholder fills any label, and its value is masked or redacted in every run log"
+                for placeholder, value in (recording.get("placeholders") or {}).items() for name in names(value)]
     for step_id, entry in recording.get("steps", {}).items():
         for label, value in (entry.get("valueOverrides") or {}).items():
             if SECRET_FIELD.search(label):
                 continue
-            names = dict.fromkeys(m.group("name") for m in ENV_REF.finditer(json.dumps(value)))
             problems += [f"step {step_id} valueOverride '{label}' reads ${{{name}}}, which is neither an address "
-                         f"variable nor the tenant prefix, and '{label}' names no secret: the run would show it "
-                         "as [secret]" for name in names if name not in ADDRESS_ENV | {TENANT_PREFIX_ENV}]
+                         f"variable nor the tenant prefix, and '{label}' names no secret: its value is masked or "
+                         "redacted in every run log" for name in names(value)]
     return problems
 
 

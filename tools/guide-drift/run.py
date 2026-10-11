@@ -44,10 +44,11 @@ placeholders and valueOverrides, saying '(from the recording's valueOverrides)' 
 with the recording's placeholders)' and naming any environment variable it was read from, scrubbed
 as the candidates are. So a typed secret shows as '[secret]', and so does any value read from the
 environment but an address, shown as its '${NAME}', and the tenant prefix, shown as '[yourtenant]'
-(recording.typed_secrets): a recording reads any other variable only into a field that names a
-secret (recording.env_override_problems, checked by tests/Guide-Drift-Recording.Tests.ps1). A tag is
+(recording.typed_secrets): a recording's placeholder reads no other variable, as it fills any label,
+and its valueOverride reads one only into a field that names a secret
+(recording.env_override_problems, checked by tests/Guide-Drift-Recording.Tests.ps1). A tag is
 decided as a field is (recording.tag_action): its value is typed, and its record keeps the value
-typed, scrubbed; an override's '[Leave blank]' leaves it out ('left as is'), and a [token] left or
+typed, scrubbed; an override's '[Leave blank]' leaves it out ('left out'), and a [token] left or
 an instruction is reported as unknown, never typed as written. At the prompt, a number uses that
 element as the guide's, renamed (misleading drift); 'c <number>' uses it, the difference cosmetic;
 'w <number>' uses it as a workaround, not as the guide's element (#211: misleading drift, never
@@ -2314,11 +2315,12 @@ class Runner:
 
     def not_typed(self, step: dict, item: dict, kind: str, label: str, action: str, value: str) -> dict:
         """The record of a field or tag item whose value the runner does not type (field_action,
-        tag_action: `action` is not 'type'): a match 'left as is' for 'skip', else unknown, with what
-        the recording needs so that the value is typed."""
+        tag_action: `action` is not 'type'): for 'skip' a match, a field 'left as is' and a tag
+        'left out' (no tag is added); else unknown, with what the recording needs so that the value
+        is typed."""
         record = self.new_record(step, kind, label)
         if action == "skip":
-            record.update(outcome="match", observed=f"left as is: {value}")
+            record.update(outcome="match", observed=f"left {'out' if kind == 'tag' else 'as is'}: {value}")
         elif action == "instruction":     # the guide's own text: no tenant data
             record.update(outcome="unknown", observed=f"value '{item['value']}' is an instruction, not text to "
                                                      f"type; add a valueOverride for this {kind} to the recording")
