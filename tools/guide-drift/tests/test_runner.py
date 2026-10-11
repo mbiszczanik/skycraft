@@ -3220,7 +3220,7 @@ class PromptValueTests(RunnerTestCase):
             self.assertEqual(action, "type")
             with mock.patch.object(run, "find_exact", return_value=None), \
                     mock.patch.object(run, "candidates_on_screen", return_value=[run.Candidate("button", "Next")]), \
-                    redirect_stdout(out):
+                    mock.patch.object(run.time, "monotonic", lambda: r.page.now), redirect_stdout(out):
                 record = r.act_on_label(step, item, label, typed)
         self.assertEqual((record["outcome"], record["observed"]), ("unknown", "no answer (input closed)"))
         return out.getvalue()
