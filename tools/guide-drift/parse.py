@@ -123,22 +123,23 @@ without a browser. Rules (issue #189):
     INSTRUCTION word, at its start or after a leading clause that ends in a comma (CAPTION_INSTRUCTION):
     '**Bind**: Once validated, click **Validate** and **Add**.' (3.4.12) clicks both.
   * A field whose value is not text to type or pick as written carries '"literal": false'
-    (value_is_literal, #202): the value starts with an instruction verb (VALUE_INSTRUCTION:
-    'Click the "..." button', 'Search for "Allowed locations"', 'Leave default'; also inside an
-    opening parenthesis, '(leave blank for now)'), ends with a colon ('Select:' before a list),
-    starts with 'Your' (a placeholder without brackets: 'Your subscription') or holds a bracket
-    token ('[IP of dev-skycraft-swc-lb-pip]', 'malfurion.stormrage@[yourtenant].onmicrosoft.com').
-    The runner types such a value only once the recording's valueOverrides gives the field a
-    value, or its placeholders turn the value into a literal ('[yourtenant]'); otherwise it
-    reports the field as unknown. tests/Guide-Drift-Recording.Tests.ps1 requires the same of
-    every recorded lab. A check box state is a literal: 'checked', '✅ Checked', 'Uncheck'; the
-    runner reads it (recording.checkbox_state) and ticks or clears the check box the label
-    names rather than typing it. So is a bare 'Leave checked' or 'Leave unchecked'. Check and
-    Uncheck are instructions only when a word follows them ('uncheck Use workspace created by
-    connection monitor and select ...'), not a remark ('Uncheck (default)'). Words the Portal's own options start with in the guides are not instruction verbs:
-    'Allow', 'Apply rule to all blobs ...', 'Disable', 'Do not clone settings', 'Enable public
-    access ...', 'Increase count by', 'Limit blobs with filters', 'Scale based on a metric',
-    'Use existing public key' and 'Create new' ('Create a container named ...' is an instruction).
+    (value_is_literal, #202): the value starts with an instruction verb (VALUE_INSTRUCTION: 'Click
+    the "..." button', 'Search for "Allowed locations"', 'Leave default'; also inside an opening
+    parenthesis, '(leave blank for now)'), ends with a colon ('Select:' before a list), starts with
+    'Your' (a placeholder without brackets: 'Your subscription') or holds a bracket token ('[IP of
+    dev-skycraft-swc-lb-pip]', 'malfurion.stormrage@[yourtenant].onmicrosoft.com'). The runner
+    types such a value only once the recording's valueOverrides gives the field a value, or its
+    placeholders turn the value into a literal ('[yourtenant]'); otherwise it reports the field as
+    unknown. tests/Guide-Drift-Recording.Tests.ps1 requires the same of every recorded lab. A check
+    box state is a literal: 'checked', '✅ Checked', 'Uncheck'; the runner reads it
+    (recording.checkbox_state) and ticks or clears the check box the label names rather than typing
+    it. So is a bare 'Leave checked' or 'Leave unchecked'. Check and Uncheck are instructions only
+    when a word follows them ('uncheck Use workspace created by connection monitor and select
+    ...'), not a remark ('Uncheck (default)'). Words the Portal's own options start with in the
+    guides are not instruction verbs: 'Allow', 'Apply rule to all blobs ...', 'Disable', 'Do not
+    clone settings', 'Enable public access ...', 'Increase count by', 'Limit blobs with filters',
+    'Scale based on a metric', 'Use existing public key' and 'Create new' ('Create a container
+    named ...' is an instruction).
   * A list item 'Label: value' whose label is plain text is a 'field' item too (#198) when the
     value starts with one bold or code span: 'Lock type: **Delete**', 'Name: `x` (use
     existing)'. The value is that span, its markup stripped as for any value; a remark after it
@@ -277,16 +278,15 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     placeholder ('Owner = <your name>', 5.3). A table row with an empty value that captions the
     rows below it ('**Remote virtual network**', 2.1.9) is a field with an empty value.
   * Only field values are checked for instructions; a tag value is typed as written.
-  * A state is read only from the verbs and shapes above (#296): 'Set to **On**.' (3.4.11, no
-    label before the value) clicks On, 'Keep **X** checked' clicks X, and so does 'Leave **A**
-    and **B** unchecked' (the state word follows the list, not each label). Check boxes named
-    without a stating verb ('Logs: **A** and **B**') are clicked one by one, which toggles each;
-    the guides say 'check' instead ('Under **Logs**, check **StorageRead** and
-    **StorageWrite**.', 5.1.7; one 'Check **X**' per item of 5.2.8's list of log categories),
-    and no diagnostic setting step has that shape any more. A verb before a list does not reach
-    the items under it. The other way round, 'Check **X**.' meant as 'look at X' is read as 'tick X'; the runner then
-    clicks X as before when it is no check box, and ticks it when it is. No guide has that
-    shape today.
+  * A state is read only from the verbs and shapes above (#296): 'Set to **On**.' (3.4.11, no label
+    before the value) clicks On, 'Keep **X** checked' clicks X, and so does 'Leave **A** and **B**
+    unchecked' (the state word follows the list, not each label). Check boxes named without a
+    stating verb ('Logs: **A** and **B**') are clicked one by one, which toggles each; the guides
+    say 'check' instead ('Under **Logs**, check **StorageRead** and **StorageWrite**.', 5.1.7; one
+    'Check **X**' per item of 5.2.8's list of log categories), and no diagnostic setting step has
+    that shape any more. A verb before a list does not reach the items under it. The other way
+    round, 'Check **X**.' meant as 'look at X' is read as 'tick X'; the runner then clicks X as
+    before when it is no check box, and ticks it when it is. No guide has that shape today.
   * A bold span after 'under' is always a place: 'open the failed job under **Backup jobs**'
     (5.2.9, in prose today) would drop Backup jobs, which there is the menu entry to open.
   * Only 'verify:', 'Verify ...:', 'Confirm ...:' and an Expected Result introduce a check
