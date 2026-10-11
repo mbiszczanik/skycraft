@@ -17,6 +17,7 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
                        report a value parse.py marked '"literal": false' that the recording
                        does not resolve (#202)
   checkbox_state       the check box state a field value names, if any
+  EntryNames           the names of a screen's list entries, and whether a name holds one (#317)
   is_portal_label      whether a candidate's name is a label of the Portal's, not a list's or a
                        row's data (#317)
   rejected_candidates  the reference set of candidates not chosen: only the Portal's labels,
@@ -50,7 +51,7 @@ import re
 import time
 import unicodedata
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 from urllib.parse import unquote, urlsplit
 
 from decide import Candidate
@@ -304,24 +305,58 @@ LABEL_ROLES = frozenset({"button", "link", "menuitem", "tab", "heading", "textbo
 ROW_PREFIX = re.compile(r"^\s*select row\b", re.IGNORECASE)
 
 
+# The shortest entry name EntryNames looks for, in characters of its case-folded words joined by
+# one space (#317). The Portal's short words that are also filter values and column values ('All',
+# 'None', 'Yes', 'Name', 'Type', 'Owner', 'Users', 'Group') have five letters or fewer and stand in
+# many labels ('Groups | All groups', 'Select all'); a display name of a first and a last name has
+# six characters or more ('Li Wei'), and so has every service principal's name in the tenant.
+ENTRY_NAME_MIN = 6
+ENTRY_WORD = re.compile(r"\w+")
+
+
+def entry_words(name: str) -> tuple[str, ...]:
+    """A name's words, case-folded: what EntryNames compares (punctuation and spacing aside)."""
+    return tuple(ENTRY_WORD.findall(name.casefold()))
+
+
+class EntryNames:
+    """The names of the list entries on a screen (run.py, aria_lines: rows, cells, options, tree
+    items), from ENTRY_NAME_MIN characters on (#317). held_by(name) says whether a name holds one
+    as whole words, regardless of case and punctuation: 'Remove Illidan Stormrage' and
+    'Illidan Stormrage | Overview' hold the row 'Illidan Stormrage', 'Groups | All groups' does not
+    hold the option 'All' (too short) and 'Allowed members' does not hold 'Allowed member' (not a
+    whole word). Such a name repeats an entry's data, so it is no label of the Portal's."""
+
+    def __init__(self, names: Iterable[str]) -> None:
+        self.words = {w for w in map(entry_words, names) if len(" ".join(w)) >= ENTRY_NAME_MIN}
+        self.longest = max(map(len, self.words), default=0)
+
+    def held_by(self, name: str) -> bool:
+        words = entry_words(name)
+        return any(words[i:j] in self.words for i in range(len(words))
+                   for j in range(i + 1, min(len(words), i + self.longest) + 1))
+
+
 def is_portal_label(candidate: Candidate) -> bool:
     """Whether a candidate's name is a label of the Portal's, which a public recording may keep,
-    rather than data (#317): its role is one of LABEL_ROLES; it is in no list row (in_row, which
-    run.py's aria_lines sets for a row's link, check box or button, whatever its name); its name
-    is not a row check box's ('Select row ...', ROW_PREFIX, in any role) and holds no '@' (a user
+    rather than data (#317): its role is one of LABEL_ROLES; it is in no list's entry (in_entry,
+    which run.py's aria_lines sets for an element in a row, an option or a tree item, whatever
+    its name) and does not repeat an entry's name (names_entry, EntryNames); its name is not a
+    row check box's ('Select row ...', ROW_PREFIX, in any role) and holds no '@' (a user
     principal name, the signed-in account) and no GUID (an object or subscription id). A field
     label the Portal decorates ('Email information *', #244) is a label."""
-    return (candidate.role in LABEL_ROLES and not candidate.in_row and not ROW_PREFIX.match(candidate.name)
-            and "@" not in candidate.name and not GUID.search(candidate.name))
+    return (candidate.role in LABEL_ROLES and not candidate.in_entry and not candidate.names_entry
+            and not ROW_PREFIX.match(candidate.name) and "@" not in candidate.name
+            and not GUID.search(candidate.name))
 
 
 def rejected_candidates(candidates: list[Candidate], label: str, chosen: str | None) -> list[str]:
     """The 20 visible candidates most like the label, other than the chosen one, as 'role "name"':
     the reference set issue #190 needs, without committing the whole screen to the recording.
     Only the Portal's labels are kept (is_portal_label, an allowlist, #317): left out entirely are
-    a list's entries (table cells, options, tree items), every element in a list row and every
-    row check box ('Select row <display name>'), which name users, service principals and
-    resources, and names with an '@' or a GUID."""
+    a list's entries (table cells, options, tree items), every element in one, every name that
+    repeats one's name and every row check box ('Select row <display name>'), which name users,
+    service principals and resources, and names with an '@' or a GUID."""
     others = [c for c in candidates if c.name != chosen and is_portal_label(c)]
     others.sort(key=lambda c: difflib.SequenceMatcher(None, c.name.lower(), label.lower()).ratio(),
                 reverse=True)

@@ -433,9 +433,9 @@ class RejectedCandidatesTests(unittest.TestCase):
     def test_drops_every_element_inside_a_list_row(self) -> None:
         # aria_lines (run.py) marks an element inside a row of a table or grid, not in a column
         # header: its name is the row's data, whatever its role.
-        candidates = [Candidate("link", "Malfurion Stormrage", in_row=True),
-                      Candidate("checkbox", "Khadgar Archmage", in_row=True),
-                      Candidate("button", "More actions", in_row=True),
+        candidates = [Candidate("link", "Malfurion Stormrage", in_entry=True),
+                      Candidate("checkbox", "Khadgar Archmage", in_entry=True),
+                      Candidate("button", "More actions", in_entry=True),
                       Candidate("link", "Users"), Candidate("button", "Name")]
         self.assertEqual(sorted(rejected_candidates(candidates, "Malfurion Stormrage", None)),
                          sorted(['link "Users"', 'button "Name"']))
@@ -449,13 +449,52 @@ class RejectedCandidatesTests(unittest.TestCase):
                       Candidate("button", "Add")]
         self.assertEqual(rejected_candidates(candidates, "Khadgar Archmage", None), ['button "Add"'])
 
+    def test_drops_a_name_that_repeats_a_list_entrys_name(self) -> None:
+        # aria_lines (run.py) marks a name that holds an entry's on screen (EntryNames): a picker's
+        # 'Remove <user>' button, a profile blade's heading, a breadcrumb.
+        candidates = [Candidate("button", "Remove Khadgar Archmage", names_entry=True),
+                      Candidate("heading", "Chromie Timewalker | Overview", names_entry=True),
+                      Candidate("link", "Chromie Timewalker", names_entry=True), Candidate("link", "Users")]
+        self.assertEqual(rejected_candidates(candidates, "Khadgar Archmage", None), ['link "Users"'])
+
     def test_a_candidate_is_a_label_only_with_a_label_role_and_no_row_or_tenant_data(self) -> None:
         self.assertTrue(recording.is_portal_label(Candidate("button", "New group")))
         self.assertFalse(recording.is_portal_label(Candidate("option", "New group")))
         self.assertFalse(recording.is_portal_label(Candidate("checkbox", "Select row Illidan Stormrage")))
-        self.assertFalse(recording.is_portal_label(Candidate("link", "Illidan Stormrage", in_row=True)))
+        self.assertFalse(recording.is_portal_label(Candidate("link", "Illidan Stormrage", in_entry=True)))
+        self.assertFalse(recording.is_portal_label(Candidate("button", "Remove Illidan Stormrage", names_entry=True)))
         self.assertFalse(recording.is_portal_label(Candidate("link", f"admin@{DOMAIN}")))
         self.assertFalse(recording.is_portal_label(Candidate("link", "11111111-2222-3333-4444-555555555555")))
+
+
+class EntryNamesTests(unittest.TestCase):
+    """EntryNames: whether a name holds a list entry's name on screen, as whole words, regardless
+    of case and punctuation, from ENTRY_NAME_MIN characters on (#317). Example data only: the
+    lab's fictional names and contoso."""
+
+    def test_a_name_holds_an_entry_as_whole_words_in_any_case_and_punctuation(self) -> None:
+        entries = recording.EntryNames(["Illidan Stormrage", "dev-skycraft-swc-rg", "Contoso Reporting"])
+        for name in ("Illidan Stormrage", "Remove Illidan Stormrage", "illidan stormrage | Overview",
+                     "Home > Users > Illidan  Stormrage", "Delete dev-skycraft-swc-rg", "CONTOSO REPORTING (2)"):
+            with self.subTest(name=name):
+                self.assertTrue(entries.held_by(name))
+        for name in ("Illidan", "Stormrage Illidan", "Illidan Stormrages", "dev-skycraft-swc", "Contoso",
+                     "New group", ""):
+            with self.subTest(name=name):
+                self.assertFalse(entries.held_by(name))
+
+    def test_an_entry_name_shorter_than_the_minimum_is_not_looked_for(self) -> None:
+        self.assertEqual(recording.ENTRY_NAME_MIN, 6)
+        short = recording.EntryNames(["All", "None", "Yes", "Name", "Owner", "Users", "Group", "Li Wa"])
+        for name in ("Groups | All groups", "Select all", "None", "Owner", "Users", "Add Group", "Li Wa"):
+            with self.subTest(name=name):
+                self.assertFalse(short.held_by(name))
+        self.assertTrue(recording.EntryNames(["Li Wei"]).held_by("Remove Li Wei"))     # six characters
+        self.assertTrue(recording.EntryNames(["Groups"]).held_by("Groups | All groups"))
+
+    def test_no_entries_hold_nothing(self) -> None:
+        self.assertFalse(recording.EntryNames([]).held_by("Illidan Stormrage"))
+        self.assertFalse(recording.EntryNames(["", "  ", "--"]).held_by("Illidan Stormrage"))
 
 
 class WriteJsonTests(unittest.TestCase):
