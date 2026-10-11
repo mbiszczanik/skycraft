@@ -204,6 +204,17 @@ az [command] --name [value] --resource-group [rg] --output table
 - Always include **Expected Result** after step groups
 - **Screenshots**: Place **after** Expected Result (Instructions → Result → Screenshot)
 
+### Check Boxes, Switches and Places
+
+Say the state a control must end in, not the click that gets it there: a box may already be ticked (a Portal default, or a setting a deployment script created). The guide drift tool (`tools/guide-drift/parse.py`, which holds the full rules) reads these shapes and sets the control instead of toggling it:
+
+- **Check boxes**: `Check **X**`, `Uncheck **X**`, `Leave **X** unchecked`; a list takes the verb once (`Under **Logs**, check **A** and **B**`), a bulleted list needs it on every item
+- **Switches**: `Toggle **X** to **On**` (or **Off**, **Enabled**, **Disabled**)
+- **Fields in a list or form table**: `**X**: checked` / `**X**: unchecked`
+- **Places**: `Under **X**, ...` names a section or menu group that is not clicked; write `Under the **X** tab, ...` when the tab must be opened
+
+`Select **X**` is a click: never use it for a check box.
+
 ---
 
 ## 6. Knowledge Check Format
