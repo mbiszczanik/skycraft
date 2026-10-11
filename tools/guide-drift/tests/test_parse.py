@@ -1275,6 +1275,18 @@ class StateVerbTests(unittest.TestCase):
                     self.item(text)
                     self.assertLess(time.perf_counter() - started, 2)
 
+    def test_an_item_of_many_labels_is_read_in_linear_time(self) -> None:
+        # Each label's verb is looked for after the label before it only: from the item's start,
+        # 2000 labels took 6-9 s.
+        for text in ("Check " + ", ".join(f"**A{n}**" for n in range(5000)),
+                     " ".join(f"Leave **A{n}** x" for n in range(5000)),
+                     " ".join(f"under **A{n}**" for n in range(5000)),
+                     " ".join(f"Toggle **A{n}** to **On**." for n in range(5000))):
+            with self.subTest(text=text[:20]):
+                started = time.perf_counter()
+                self.item(text)
+                self.assertLess(time.perf_counter() - started, 2)
+
 
 class UnderPlaceTests(unittest.TestCase):
     """A bold span right after 'under' names where the next label is, a menu group or a section

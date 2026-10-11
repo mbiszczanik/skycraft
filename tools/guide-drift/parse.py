@@ -991,13 +991,15 @@ def chain_resources(text: str) -> list[tuple[int, str]]:
     return found
 
 
-def toggled_state(masked: str, spans: list[tuple[int, int, str]], index: int) -> tuple[bool, int, int | None] | None:
+def toggled_state(masked: str, spans: list[tuple[int, int, str]], index: int,
+                  since: int = 0) -> tuple[bool, int, int | None] | None:
     """(state, where the instruction ends, start of the value span or None) when a switch verb
     (TOGGLE_BEFORE) stands right before the label spans[index] and states the way it is to go:
     'Turn on **X**', 'Turn **X** on' (TOGGLE_WAY), or 'Toggle **X** to **Enabled**', the next
-    span holding one of TOGGLE_VALUES right after the label (TOGGLE_TO). None otherwise."""
+    span holding one of TOGGLE_VALUES right after the label (TOGGLE_TO). None otherwise. The
+    verb is looked for from `since` on, the end of the span before the label."""
     start, end, _ = spans[index]
-    toggle = TOGGLE_BEFORE.search(masked, 0, start)
+    toggle = TOGGLE_BEFORE.search(masked, since, start)
     if not toggle:
         return None
     if toggle.group("way"):
@@ -1013,12 +1015,12 @@ def toggled_state(masked: str, spans: list[tuple[int, int, str]], index: int) ->
     return None
 
 
-def worded_state(masked: str, start: int, end: int) -> tuple[bool, int, None] | None:
+def worded_state(masked: str, start: int, end: int, since: int = 0) -> tuple[bool, int, None] | None:
     """(state, where the instruction ends, None) when 'Leave', 'Make sure' or 'Ensure' stands
-    right before the label at masked[start:end] (WORDED_BEFORE) and a word of STATE_WORDS
-    follows it (LEAVE_AFTER, SURE_AFTER): 'Leave **X** unchecked', 'Ensure **X** is enabled'.
-    None otherwise."""
-    before = WORDED_BEFORE.search(masked, 0, start)
+    right before the label at masked[start:end] (WORDED_BEFORE, looked for from `since` on) and
+    a word of STATE_WORDS follows it (LEAVE_AFTER, SURE_AFTER): 'Leave **X** unchecked', 'Ensure
+    **X** is enabled'. None otherwise."""
+    before = WORDED_BEFORE.search(masked, since, start)
     if not before:
         return None
     after = (LEAVE_AFTER if before.group("leave") else SURE_AFTER).match(masked, end)
@@ -1044,11 +1046,14 @@ def stated_states(text: str, spans: list[tuple[int, int, str]]) -> tuple[dict[in
     for index, (start, end, _) in enumerate(spans):
         if start in dropped:
             continue                               # a switch's value, read with its label
-        if UNDER.search(masked, 0, start):
+        # What stands before the label is looked for from the end of the span before it on, so
+        # an item of n spans is read in linear time, not in time n squared.
+        since = spans[index - 1][1] if index else 0
+        if UNDER.search(masked, since, start):
             dropped.add(start)
             previous = None
             continue
-        toggled = toggled_state(masked, spans, index) or worded_state(masked, start, end)
+        toggled = toggled_state(masked, spans, index, since) or worded_state(masked, start, end, since)
         if toggled:
             state, after, value = toggled
             if not STATE_AFTER.match(masked, after):
@@ -1059,7 +1064,7 @@ def stated_states(text: str, spans: list[tuple[int, int, str]]) -> tuple[dict[in
         elif not STATE_AFTER.match(masked, end):
             previous = None
             continue
-        elif before := STATE_BEFORE.search(masked, 0, start):
+        elif before := STATE_BEFORE.search(masked, since, start):
             state, after = STATE_VERBS[before.group("verb").lower()], end
         elif previous and STATE_LIST.fullmatch(masked, previous[0], start):
             state, after = previous[1], end
