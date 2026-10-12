@@ -3836,13 +3836,16 @@ class NoProposedEditTests(RunnerTestCase):
 
     def act(self, r: run.Runner, before=None) -> dict:
         """act_on_label for the step's label, which is not on screen; `before(r)` runs first, under
-        the same clock (check_start). The record is written, as run_step writes it."""
+        the same clock (check_start). The record is written, as run_step writes it; what the run
+        printed is in self.console."""
         clock = iter(range(0, 1_000_000, 1))               # 1 s passes between every look at the clock
         self.element = FakeElement()
+        self.console = io.StringIO()
         with mock.patch.object(run, "find_exact", return_value=None), \
                 mock.patch.object(run, "candidates_on_screen", return_value=self.CANDIDATES), \
                 mock.patch.object(run.time, "monotonic", lambda: next(clock)), \
-                mock.patch.object(run, "find_by_name", return_value=self.element), redirect_stdout(io.StringIO()):
+                mock.patch.object(run, "find_by_name", return_value=self.element) as self.find_by_name, \
+                redirect_stdout(self.console):
             if before is not None:
                 before(r)
             record = r.act_on_label(self.STEP, self.STEP["items"][0], "Microsoft Entra ID")
@@ -3895,15 +3898,60 @@ class NoProposedEditTests(RunnerTestCase):
         self.assertEqual((record["severity"], record["proposedEdit"], record["notProposed"]),
                          ("misleading", None, self.TOKEN_REASON))
 
-    def test_a_name_that_only_scrub_masks_proposes_no_edit(self) -> None:
+    def test_a_replayed_name_that_only_scrub_masks_proposes_no_edit(self) -> None:
         # The Redactor leaves another directory's address and an object id alone; scrub does not.
-        for answer, token in (("4", "<email>"), ("5", "<id>")):
+        # A person's pick of such a name is never recorded since #315, but a recording made before
+        # it may hold one (tests/Guide-Drift-Recording.Tests.ps1 fails it in CI).
+        for candidate, token in ((self.CANDIDATES[3], "<email>"), (self.CANDIDATES[4], "<id>")):
             with self.subTest(token=token):
-                self.recording["steps"].pop("9.9.2", None)
-                record = self.act(self.runner_for(answer, run_id=f"scrub-{answer}"))
-                self.assertEqual(record["outcome"], "drift")
+                self.recording["steps"]["9.9.2"] = {"labels": {"Microsoft Entra ID": {
+                    "decision": "use", "role": candidate.role, "name": candidate.name, "severity": "misleading"}}}
+                record = self.act(self.runner_for(run_id=f"scrub-{token[1:-1]}"))     # no answers: replay
+                self.assertEqual((record["outcome"], record["workaround"]), ("drift", False))
                 self.assertIsNone(record["proposedEdit"])
                 self.assertTrue(record["notProposed"].endswith(f"({token})"), record["notProposed"])
+
+    UNRECORDABLE = ("That element's name holds an id, an address or a secret, which the recording cannot keep: "
+                    "it is used as a workaround in this run, with no guide edit, and the next run asks again.")
+
+    def test_a_pick_whose_name_holds_an_id_or_an_outside_address_is_a_workaround_never_recorded(self) -> None:
+        # #315: replay looks the element up by the name the recording keeps, so a masked name would
+        # never be found, and the recording is public. The run acts on it and goes on.
+        for answer, severity, name in (("4", "misleading", "someone@fabrikam.com"),
+                                       ("c 5", "cosmetic", "New group 9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f")):
+            with self.subTest(answer=answer):
+                self.recording["steps"].pop("9.9.2", None)
+                r = self.runner_for(answer, run_id=f"unrecordable-{answer[-1]}")
+                record = self.act(r)
+                self.assertEqual(self.element.clicked, 1)
+                self.assertEqual(self.find_by_name.call_args.args[1:], ("link", name))   # this run's element
+                self.assertEqual((record["outcome"], record["severity"], record["workaround"]),
+                                 ("drift", severity, True))
+                self.assertEqual((record["proposedEdit"], record["notProposed"]), (None, run.WORKAROUND_REASON))
+                self.assertIn(self.UNRECORDABLE, self.console.getvalue())
+                self.assertEqual(self.labels(), {})                # asked again on the next run
+                saved = (self.tmp / "rec.json").read_text(encoding="utf-8")
+                for kept_out in ("fabrikam", "9f8e7d6c", "<id>", "<email>", "[secret]"):
+                    self.assertNotIn(kept_out, saved)
+                results = (r.run_dir / "results.jsonl").read_text(encoding="utf-8")
+                self.assertNotIn("fabrikam", results)
+                self.assertNotIn("9f8e7d6c", results)
+
+    def test_a_pick_whose_name_the_recording_keeps_is_recorded_without_the_note(self) -> None:
+        record = self.act(self.runner_for("w 4", run_id="w"))      # a workaround already: no note
+        self.assertEqual((record["workaround"], self.labels()), (True, {}))
+        self.assertNotIn(self.UNRECORDABLE, self.console.getvalue())
+        # Tenant data is a token restore() gives back: replay finds such a name, so it is recorded.
+        record = self.act(self.runner_for("1"))
+        self.assertEqual((record["workaround"], self.labels()["Microsoft Entra ID"]["name"]),
+                         (False, "[tenantname] | Overview"))
+        self.assertNotIn(self.UNRECORDABLE, self.console.getvalue())
+
+    def test_a_step_whose_first_pick_cannot_be_recorded_goes_through_and_records_no_start_blade(self) -> None:
+        r = self.run_whole_step("5")
+        self.assertEqual([x["workaround"] for x in r.records if x["kind"] == "action"], [True])
+        self.assertNotIn("startBlade", self.recording["steps"].get("9.9.2", {}))
+        self.assertEqual(self.recording["steps"].get("9.9.2", {}).get("labels", {}), {})
 
     def test_the_first_reason_that_applies_is_the_one_given(self) -> None:
         # A workaround, a wrong blade and an excused start come before the token in the name.
