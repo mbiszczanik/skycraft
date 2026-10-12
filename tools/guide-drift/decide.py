@@ -32,11 +32,14 @@ another element (a button 'X information *', a link 'Select row X') and stay dri
 A model-based decider is a third implementation of the same signature (the Decider protocol);
 it is out of scope here and tracked in issue #190. Every decision the runner acts on, except a
 workaround, is written back to the recording by run.py, with the rejected candidates, so
-supervised runs build the reference set.
+supervised runs build the reference set. A person's pick whose name the recording cannot keep (an
+id, an address outside the tenant or a secret: scrub would mask it, and replay would never find the
+masked name) is made a workaround by run.py (Decision.as_workaround, #315): acted on in this run,
+never recorded, and asked about again on the next.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from typing import Callable, Protocol
 
@@ -106,6 +109,12 @@ class Decision:
     reason: str | None = None     # unknown only
     decided_by: str = "human"     # "exact" | "replay" | "human" | "none"
     workaround: bool = False      # drift only: used, but not as the guide's element ('w', #211)
+
+    def as_workaround(self) -> Decision:
+        """This pick of an element as a workaround, as 'w <number>' makes it (#211): drift of the
+        severity the person gave, misleading for a plain use, acted on in this run and never
+        recorded. run.py makes a pick one when the recording cannot keep its name (#315)."""
+        return replace(self, kind="drift", severity=self.severity or "misleading", workaround=True)
 
     def to_recording(self, rejected: list[str], at: str) -> dict | None:
         """The shape stored under recording["steps"][id]["labels"][label]; None for unknown,

@@ -53,20 +53,24 @@ an instruction is reported as unknown, never typed as written. At the prompt, a 
 element as the guide's, renamed (misleading drift); 'c <number>' uses it, the difference cosmetic;
 'w <number>' uses it as a workaround, not as the guide's element (#211: misleading drift, never
 written to the recording, so the next run asks again); 'g' gone (blocking drift); 'i' ignore; 'u'
-unknown. A drift acted on under another name proposes a guide edit (the summary's 'proposed
-edits': the guide line with the bold label replaced), misleading or cosmetic (a change of case is
-a real rename), only when its new text belongs in the guide (Runner.not_proposed, #211). It
-proposes none when the element was used as a workaround (and a workaround at the step's first item
-records no start blade); when the step has a wrong-blade record earlier in the step or its start
-is excused (see the start of a step below), as the Portal was then not where the guide leads; or
-when the Portal's name, scrubbed, holds a redaction token (recording.redaction_tokens:
-'[tenantname]', '<id>', '[secret]' or any other the Redactor or scrub writes), as it carries
-tenant or personal data; or when the Portal's name is the label plus one of its decorations (see
-the lookup below, #244), which the learner does not see. The first of these that applies is the
-reason given. Such a drift is written to results.jsonl all the same; the record's "notProposed"
-and the summary's 'not proposed' say why, and a workaround's record has "workaround": true. The
-summary also holds back an edit that a record written before #211 proposes and that brings a token
-into the guide line, and one that a record written before #244 proposes for a decorated name.
+unknown. A pick by number or with 'c' whose name the recording cannot keep, as it holds an id, an
+address outside the tenant or a secret (Runner.recordable, the rule a typed result text follows),
+is used as a workaround all the same, and the console says so (#315): replay looks the element up
+by the name the recording keeps, and a masked one would never be found. A drift acted on under
+another name proposes a guide edit (the summary's 'proposed edits': the guide line with the bold
+label replaced), misleading or cosmetic (a change of case is a real rename), only when its new text
+belongs in the guide (Runner.not_proposed, #211). It proposes none when the element was used as a
+workaround (and a workaround at the step's first item records no start blade); when the step has a
+wrong-blade record earlier in the step or its start is excused (see the start of a step below), as
+the Portal was then not where the guide leads; or when the Portal's name, scrubbed, holds a
+redaction token (recording.redaction_tokens: '[tenantname]', '<id>', '[secret]' or any other the
+Redactor or scrub writes), as it carries tenant or personal data; or when the Portal's name is the
+label plus one of its decorations (see the lookup below, #244), which the learner does not see. The
+first of these that applies is the reason given. Such a drift is written to results.jsonl all the
+same; the record's "notProposed" and the summary's 'not proposed' say why, and a workaround's
+record has "workaround": true. The summary also holds back an edit that a record written before
+#211 proposes and that brings a token into the guide line, and one that a record written before
+#244 proposes for a decorated name.
 
 The console is scrubbed only in part: an error before or during the run is shown as a record
 keeps it, a crash as its frames (file, line, function) and each error's scrubbed first line
@@ -290,7 +294,7 @@ from decide import DECORATIONS, decoration_of  # noqa: E402
 from recording import literal_pattern  # noqa: E402
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (LABEL_ROLES, REMARK, EntryNames, Redactor, checkbox_state, env_secrets,  # noqa: E402
-                       missing_env, field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
+                       missing_env, field_action, rejected_candidates, resource_name, skip_reason,
                        same_blade, start_blade, view_blade, write_json)
 from recording import (error_text, one_line, prompt_value, redaction_tokens, scrub, tag_action,  # noqa: E402
                        typed_secrets)
@@ -308,6 +312,10 @@ WORKAROUND_REASON = "used as a workaround, not as the guide's element"
 TOKEN_REASON = "the Portal's name holds tenant or personal data ({token})"
 # A name that is the guide's label plus a decoration the screen does not show (#244).
 DECORATION_REASON = "the Portal's name only decorates the guide's label ({what})"
+# Why a pick at the prompt is used as a workaround and not recorded (#315): replay looks the element
+# up by the name the recording keeps, and the recording cannot keep this one (Runner.recordable).
+UNRECORDABLE_NAME = ("That element's name holds an id, an address or a secret, which the recording cannot keep: "
+                     "it is used as a workaround in this run, with no guide edit, and the next run asks again.")
 SETTLE_MS = 1500
 FIND_TIMEOUT_MS = 8000
 CHECK_TIMEOUT_MS = 2000     # set_checked() before the label is tried, and the wait for its effect
@@ -1852,6 +1860,13 @@ class Runner:
     def save_recording(self) -> None:
         write_json(self.args.recording, self.recording)
 
+    def recordable(self, text: str) -> bool:
+        """Whether the recording, which is public, can keep `text` (#212, #315): scrubbing it changes
+        nothing the Redactor does not. Tenant data becomes tokens that restore() gives back, but an
+        id, an address outside the tenant or a secret would be kept as '<id>', '<email>' or
+        '[secret]', which is never on screen, and kept as it is it would be published."""
+        return scrub(text, self.redactor, self.secrets) == self.redactor.redact(text)
+
     def remember(self, step: dict, label: str, entry: dict | None) -> None:
         if entry is not None:
             self.step_entry(step)["labels"][label] = entry
@@ -2116,6 +2131,11 @@ class Runner:
             else:
                 decision = decide(step, item, label, candidates, self.deciders)
             if decision.decided_by == "human":
+                if decision.name and not decision.workaround and not self.recordable(decision.name):
+                    # The rule a typed result text follows (#212, #315): a name the recording
+                    # cannot keep is acted on as a workaround, never recorded: the next run asks again.
+                    print(UNRECORDABLE_NAME)
+                    decision = decision.as_workaround()
                 entry = decision.to_recording(rejected_candidates(candidates, label, decision.name), now())
                 if decision.kind == "ignore" or decision.severity == "blocking":
                     self.remember(step, label, entry)     # nothing to act on: record at once
@@ -2543,14 +2563,12 @@ class Runner:
             return
         if entry["result"] is None and "result" not in entry.get("asked", []):
             print(f'Expected Result: "{step["expected"]}"')
-            # The recording is public (#212). Tenant data becomes tokens that restore() gives back,
-            # but an id, an address outside the tenant or a secret would be kept as '<id>',
-            # '<email>' or '[secret]', which is never on screen: such a text is asked again.
+            # The recording is public (#212): a text it cannot keep (recordable) is asked again.
             while True:
                 answer = self.prompt("Text to look for on screen (Enter = not observable): ")
                 if answer is None:          # input closed: ask again next time
                     return
-                if not answer or scrub(answer, self.redactor, self.secrets) == self.redactor.redact(answer):
+                if not answer or self.recordable(answer):
                     break
                 print("That text holds an id, an address or a secret, which the recording cannot keep; "
                       "type a shorter text, or press Enter if it is not observable.")

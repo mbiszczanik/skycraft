@@ -91,6 +91,19 @@ class RoundTrip(unittest.TestCase):
         self.assertIsNone(given.to_recording([], AT))
         self.assertFalse(human("2")(STEP, ITEM, LABEL, CANDIDATES).workaround)
 
+    def test_a_pick_made_a_workaround_keeps_its_element_and_its_severity_and_is_never_recorded(self):
+        # run.py makes a pick one when the recording cannot keep its name (#315): asked again next run.
+        for answer, kind, severity in (("2", "drift", "misleading"), ("c 2", "drift", "cosmetic"),
+                                       ("3", "use", "misleading")):
+            with self.subTest(answer=answer):
+                picked = human(answer)(STEP, ITEM, LABEL, CANDIDATES)
+                self.assertEqual(picked.kind, kind)
+                given = picked.as_workaround()
+                self.assertEqual((given.kind, given.severity, given.role, given.name, given.workaround),
+                                 ("drift", severity, picked.role, picked.name, True))
+                self.assertIsNone(given.to_recording([], AT))
+                self.assertFalse(picked.workaround)            # a copy: the pick itself is unchanged
+
     def test_w_number_same_name_is_plain_use(self):
         given, replayed = self.roundtrip("w 3")
         self.assertEqual((given.kind, given.severity, given.workaround), ("use", None, False))
