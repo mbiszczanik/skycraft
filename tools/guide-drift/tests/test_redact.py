@@ -73,6 +73,15 @@ class RedactorTests(unittest.TestCase):
                 self.assertIsNone(pattern.search(name))
         self.assertIsNotNone(self.redactor.matcher(f"{TOKEN} (Guest)").search("Me@Example.com (Guest)"))
 
+    def test_matcher_escapes_a_slash_for_the_browser(self) -> None:
+        # Playwright hands the pattern to the browser as a literal '/.../' (#244): an unescaped '/'
+        # in the name would end it early.
+        pattern = self.redactor.matcher("[yourtenant] Read/Write")
+        self.assertNotRegex(pattern.pattern, r"(?<!\\)/")
+        self.assertIsNotNone(pattern.search("Contoso Read/Write"))
+        self.assertIsNone(pattern.search("Contoso Read\\/Write"))
+        self.assertEqual(recording.literal_pattern("a/b.c"), r"a\/b\.c")
+
     def test_short_tenant_prefix_is_not_redacted(self) -> None:
         redactor = Redactor("abc.onmicrosoft.com", TENANT)
         self.assertEqual(redactor.redact("abc and abc.onmicrosoft.com"), "abc and [tenantdomain]")
@@ -890,6 +899,20 @@ class RunLogTextTests(unittest.TestCase):
                          r'r"^malfurion\.stormrage@[tenantdomain]$", re.IGNORECASE)) resolved to 2 elements:')
         self.assertEqual(self.scrub(r"^me@example\.com$ ^me_example\.com\#EXT\#$ ^Contoso\ Ltd$", redactor=redactor),
                          rf"^{TOKEN}$ ^{UPN_TOKEN}\#EXT\#$ ^[tenantname]$")
+
+    def test_scrub_masks_tenant_data_as_literal_pattern_escapes_it(self) -> None:
+        # Since #244 a pattern for the browser escapes '/' as well (literal_pattern): a tenant name
+        # with one must still be masked in an error that prints the pattern.
+        redactor = Redactor(DOMAIN, TENANT, tenant_name="Northwind R/D Labs")
+        escaped = recording.literal_pattern("Northwind R/D Labs")
+        self.assertIn(r"\/", escaped)
+        text = ('Locator.click: Error: strict mode violation: get_by_role("link", name=re.compile('
+                f'r"^{escaped} Overview$", re.IGNORECASE)) resolved to 2 elements:')
+        self.assertEqual(self.scrub(text, redactor=redactor),
+                         'Locator.click: Error: strict mode violation: get_by_role("link", name=re.compile('
+                         'r"^[tenantname] Overview$", re.IGNORECASE)) resolved to 2 elements:')
+        self.assertEqual(redactor.redact_escaped(f"^{escaped}$"), "^[tenantname]$")
+        self.assertEqual(redactor.redact_escaped(f"^{re.escape('Northwind R/D Labs')}$"), "^[tenantname]$")
 
     ADJACENT = ("contoso9f8e7d6c5b4a4c3d8e2f1a0b9c8d7e6f", "9f8e7d6c5b4a4c3d8e2f1a0b9c8d7e6fcontoso",
                 "contoso<id>", "<id>contoso", "[tenantdomain]contoso", "contoso[secret]", "contoso<email>",

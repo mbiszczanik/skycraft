@@ -167,6 +167,13 @@ def sub_outside(pattern: re.Pattern, replacement: str | Callable[[re.Match], str
     return "".join(pieces)
 
 
+def literal_pattern(text: str) -> str:
+    """`text` as a regular expression that matches it literally (re.escape), with '/' escaped
+    as well: Playwright hands a Python pattern to the browser as a JavaScript regular expression
+    literal, '/.../', which an unescaped '/' in a name ('Read/Write') would end early."""
+    return re.escape(text).replace("/", r"\/")
+
+
 class Redactor:
     """Keeps tenant data out of the committed recording, which lives in a public repository.
     The tenant's domain and id become tokens on the way into the recording and are restored on
@@ -236,12 +243,13 @@ class Redactor:
         """`text` with tenant data written as a regular expression escapes it (re.escape:
         'contoso\\.onmicrosoft\\.com', 'me@example\\.com', 'Contoso\\ Ltd') replaced by the same
         tokens: Playwright prints a locator that looks a name up by pattern (matcher,
-        pick_option) with the pattern in the first line of an error (#212). Not restored: a
-        run log only."""
+        pick_option) with the pattern in the first line of an error (#212). Such a pattern is
+        written with literal_pattern since #244, which escapes '/' as well ('R\\/D'): both forms
+        are replaced. Not restored: a run log only."""
         for _, token, value in self._pairs:
-            escaped = re.escape(value)
-            if escaped != value:
-                text = sub_outside(re.compile(re.escape(escaped), re.IGNORECASE), token, text, self.tokens)
+            for escaped in dict.fromkeys((literal_pattern(value), re.escape(value))):
+                if escaped != value:
+                    text = sub_outside(re.compile(re.escape(escaped), re.IGNORECASE), token, text, self.tokens)
         return text
 
     def restore(self, text: str | None) -> str | None:
@@ -259,7 +267,7 @@ class Redactor:
         restored = self.restore(name)
         if restored == name:
             return name
-        return re.compile("^" + re.escape(restored) + "$", re.IGNORECASE)
+        return re.compile("^" + literal_pattern(restored) + "$", re.IGNORECASE)
 
     def view_url(self, url: str) -> str | None:
         """The Portal view without the tenant pin ('#@<tenant>/'), query strings (before or inside

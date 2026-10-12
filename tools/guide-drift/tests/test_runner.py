@@ -41,6 +41,7 @@ except ImportError:
     sys.modules["playwright"] = types.ModuleType("playwright")
     sys.modules["playwright.sync_api"] = _stub
 
+import decide  # noqa: E402
 import run  # noqa: E402
 
 LAB = "9.9"
@@ -3928,7 +3929,7 @@ class NoProposedEditTests(RunnerTestCase):
         there; the field is then filled without a browser."""
         r = self.runner_for(*answers, page=page_on(f"view/{GROUPS}"), run_id="-".join(answers))
 
-        def form_not_open(step, item, label, value, look):
+        def form_not_open(step, item, label, value, look, renew=None):
             drift = r.new_record(step, "field", label)
             drift.update(outcome="drift", severity="misleading", category=run.WRONG_BLADE, observed="no form")
             r.write(drift)
@@ -4514,6 +4515,384 @@ class StatedStateTests(RunnerTestCase):
                                  ("Type", None), ("A", False), ("B", None),
                                  ("Recovery", None), ("Enable soft delete for blobs", True), ("Save", None),
                                  ("Admin user", True), ("Health", False, "only")])
+
+
+class DecoratedNameTests(RunnerTestCase):
+    """An element whose accessible name is the guide's label plus one of the Portal's decorations
+    (decide.DECORATIONS: a list row's check box 'Select row X' for an action, a required field's
+    marker 'X *', a field label's info icon and marker 'X information *') is the guide's element
+    (#244): the lookup finds it once SETTLE_MS of looking has not found the plain name, the record
+    is a match, nobody is asked, nothing is recorded and no guide edit is proposed."""
+
+    MEMBER = "Khadgar Archmage"
+    PICK = {"kind": "action", "labels": [MEMBER], "line": 3}
+    EMAIL = {"kind": "field", "label": "Email", "value": "chromie@contoso.com", "line": 4}
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n\n4. Search for and select **Khadgar Archmage**\n"
+                                           "   - **Email**: `chromie@contoso.com`\n", encoding="utf-8")
+
+    @staticmethod
+    def find(screen: Screen, label: str, field: bool = False):
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            return run.find_exact(FakePage(), label, field)
+
+    @staticmethod
+    def listed(screen: Screen) -> list:
+        """What candidates_on_screen() reads off `screen`: its named elements of a candidate role."""
+        counts: dict = {}
+        for role, name, _ in screen.everything():
+            if name and role in run.CANDIDATE_ROLES:
+                counts[(role, name)] = counts.get((role, name), 0) + 1
+        return [run.Candidate(role, name, count) for (role, name), count in counts.items()]
+
+    def act(self, screen: Screen, item: dict, label: str, value=None, state=None, r=None):
+        r = r or run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "items": [item], "images": []}
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=self.listed(screen)):
+            record = self.quietly(lambda: r.act_on_label(step, item, label, value, form_start=item["kind"] == "field",
+                                                         state=state))
+        return record, r
+
+    def picker(self, *more) -> tuple[Screen, ScreenNode]:
+        """A member picker: each row shows the member's name as plain text and holds a check box
+        named 'Select row <name>'."""
+        box = ScreenNode(attrs={"role": "checkbox"})
+        return Screen(("text", self.MEMBER, ScreenNode(interactive=False)),
+                      ("checkbox", f"Select row {self.MEMBER}", box),
+                      ("text", "Chromie Timewalker", ScreenNode(interactive=False)),
+                      ("checkbox", "Select row Chromie Timewalker", ScreenNode()), *more), box
+
+    def assertMatchWithoutAsking(self, record: dict, r: run.Runner) -> None:
+        self.assertEqual((record["outcome"], record["severity"], record.get("proposedEdit")), ("match", None, None))
+        self.assertEqual(r.ask.prompts, [])
+        self.assertEqual(self.recording["steps"]["9.9.1"]["labels"], {})       # exact: nothing to record
+
+    def test_a_row_s_check_box_is_the_member_the_guide_selects(self) -> None:
+        screen, box = self.picker()
+        self.assertIs(self.find(screen, self.MEMBER), box)
+        record, r = self.act(screen, self.PICK, self.MEMBER)
+        self.assertMatchWithoutAsking(record, r)
+        self.assertEqual((record["observed"], box.clicked), (self.MEMBER, 1))
+
+    def test_each_suffix_of_a_field_label_is_the_field(self) -> None:
+        for suffix in (" *", " information *"):
+            with self.subTest(suffix=suffix):
+                field = ScreenNode(tag="input")
+                screen = Screen(("button", "information", ScreenNode(tag="button")),   # the info icon itself
+                                ("textbox", f"Email{suffix}", field), ("textbox", "Display name", ScreenNode(tag="input")))
+                self.assertIs(self.find(screen, "Email", field=True), field)
+                self.recording["steps"]["9.9.1"]["labels"] = {}
+                record, r = self.act(screen, self.EMAIL, "Email", value="chromie@contoso.com")
+                self.assertMatchWithoutAsking(record, r)
+                self.assertEqual((field.filled, r.records), (["chromie@contoso.com"], []))   # a form: no wrong-blade
+
+    def test_the_info_icon_s_suffix_alone_is_no_decoration(self) -> None:
+        # Known gap: no run has seen a field named 'Email information', so the person is asked.
+        screen = Screen(("textbox", "Email information", ScreenNode(tag="input")))
+        self.assertIsNone(self.find(screen, "Email", field=True))
+
+    def test_a_decorated_name_is_matched_whole(self) -> None:
+        for role, name, label, field in (("textbox", "Work Email information *", "Email", True),
+                                         ("textbox", "Work Email *", "Email", True),
+                                         ("textbox", "Email information * (optional)", "Email", True),
+                                         ("checkbox", f"Select row {self.MEMBER} Jr", self.MEMBER, False),
+                                         ("checkbox", f"Select rows {self.MEMBER}", self.MEMBER, False)):
+            with self.subTest(name=name):
+                self.assertIsNone(self.find(Screen((role, name, ScreenNode(tag="input"))), label, field=field))
+
+    def test_a_slash_in_the_label_is_escaped_for_the_browser(self) -> None:
+        # Playwright hands the pattern to the browser as a literal '/.../': an unescaped '/' ends it.
+        box, patterns = ScreenNode(), []
+        screen = Screen(("checkbox", "Select row Read/Write", box))
+        with mock.patch.object(Screen, "get_by_role", lambda self, role, name=None, exact=None:
+                               patterns.append(name) or Screen._find(self, role, name)):
+            self.assertIs(self.find(screen, "Read/Write"), box)
+        decorated = [p.pattern for p in patterns if isinstance(p, re.Pattern)]
+        self.assertTrue(decorated)
+        for pattern in decorated:
+            self.assertIsNone(re.search(r"(?<!\\)/", pattern), pattern)
+
+    def test_an_option_compared_regardless_of_case_escapes_a_slash_for_the_browser(self) -> None:
+        # pick_option's pattern (ignore_case) goes to the browser as a literal '/.../' too.
+        box, patterns = ScreenNode(text="10.1.0.0/16"), []
+        option = ScreenNode(on_click=lambda: setattr(box, "text", "10.0.0.0/16"))
+        screen = Screen(("combobox", "Address space", box))
+        box.on_click = lambda: screen.add(("option", "10.0.0.0/16", option), ("option", "10.1.0.0/16", ScreenNode()))
+        page = FakePage()
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: page.now), \
+                mock.patch.object(Screen, "get_by_role", lambda self, role, name=None, exact=None:
+                                  patterns.append(name) or Screen._find(self, role, name)):
+            self.assertIsNone(run.pick_option(page, box, "div", "10.0.0.0/16", ignore_case=True))
+        self.assertEqual((option.clicked, box.text), (1, "10.0.0.0/16"))
+        [pattern] = {p.pattern for p in patterns if isinstance(p, re.Pattern)}
+        self.assertIsNone(re.search(r"(?<!\\)/", pattern), pattern)
+
+    def test_a_row_s_check_box_is_never_a_field(self) -> None:
+        screen = Screen(("checkbox", "Select row Email", ScreenNode(tag="input", attrs={"type": "checkbox"})))
+        self.assertIsNone(self.find(screen, "Email", field=True))
+        self.assertIsNotNone(self.find(screen, "Email"))                    # an action selects the row
+
+    def test_a_decoration_counts_only_on_the_roles_it_decorates(self) -> None:
+        # The info icon is a button named 'Email information': clicking it opens a callout, not the field.
+        for name in ("Email information", "Email information *", "Email *"):
+            with self.subTest(name=name):
+                info = Screen(("button", name, ScreenNode(tag="button")))
+                self.assertIsNone(self.find(info, "Email"))
+                self.assertIsNone(self.find(info, "Email", field=True))
+        for role in ("button", "link", "row", "cell"):          # only a check box is a row's 'Select row'
+            with self.subTest(role=role):
+                self.assertIsNone(self.find(Screen((role, f"Select row {self.MEMBER}", ScreenNode())), self.MEMBER))
+        self.assertEqual(decide.DECORATED_FIELDS, run.FIELD_ROLES)  # a field's decorations: on every field role
+        # An action is never looked up in a text box, decorated or not.
+        self.assertIsNone(self.find(Screen(("textbox", "Email *", ScreenNode(tag="input"))), "Email"))
+
+    def test_the_plain_label_wins_over_a_decorated_one(self) -> None:
+        link = ScreenNode()
+        screen, _ = self.picker(("link", self.MEMBER, link))
+        self.assertIs(self.find(screen, self.MEMBER), link)
+        text = ScreenNode(interactive=True)                     # plain text inside a link counts as well
+        screen, _ = self.picker(("text", self.MEMBER, text))
+        self.assertIs(self.find(screen, self.MEMBER), text)
+        plain, starred = ScreenNode(tag="input"), ScreenNode(tag="input")
+        screen = Screen(("textbox", "Group name *", starred), ("textbox", "Group name", plain))
+        self.assertIs(self.find(screen, "Group name", field=True), plain)
+        bare = ScreenNode()                                      # '+ New user': the bare name is plain too
+        screen = Screen(("checkbox", "Select row + New user", ScreenNode()), ("menuitem", "New user", bare))
+        self.assertIs(self.find(screen, "+ New user"), bare)
+
+    def test_a_plain_label_on_screen_twice_is_still_not_found(self) -> None:
+        # As before #244: two links of the label are not found, and the person decides.
+        screen, box = self.picker(("text", self.MEMBER, ScreenNode()), ("text", self.MEMBER, ScreenNode()))
+        self.assertIsNone(self.find(screen, self.MEMBER))
+        record, r = self.act(screen, self.PICK, self.MEMBER)
+        self.assertEqual((record["outcome"], r.ask.prompts, box.clicked), ("unknown", [run.HumanDecider.PROMPT], 0))
+
+    def test_two_decorated_matches_are_ambiguous(self) -> None:
+        screen, box = self.picker(("checkbox", f"Select row {self.MEMBER}", ScreenNode()))
+        with self.assertRaises(run.Ambiguous):
+            self.find(screen, self.MEMBER)
+        record, r = self.act(screen, self.PICK, self.MEMBER)
+        self.assertEqual((record["outcome"], record["observed"], box.clicked),
+                         ("unknown", f"ambiguous: 2 visible elements match named '{self.MEMBER}'", 0))
+        self.assertEqual(r.ask.prompts, [])
+        screen = Screen(("textbox", "Email *", ScreenNode(tag="input")),         # two decorations, one each
+                        ("textbox", "Email information *", ScreenNode(tag="input")))
+        with self.assertRaises(run.Ambiguous):
+            self.find(screen, "Email", field=True)
+
+    def test_decorated_matches_of_every_role_are_collected_together(self) -> None:
+        screen = Screen(("textbox", "Email *", ScreenNode(tag="input")),
+                        ("checkbox", "Email information *", ScreenNode(tag="input", attrs={"type": "checkbox"})))
+        with self.assertRaises(run.Ambiguous):
+            self.find(screen, "Email", field=True)
+        screen, _ = self.picker(("radio", f"{self.MEMBER} *", ScreenNode()))
+        with self.assertRaises(run.Ambiguous):
+            self.find(screen, self.MEMBER)
+
+    def test_of_a_decorated_container_and_its_input_the_input_is_the_field(self) -> None:
+        # A combo box's container and the input inside it, both named 'Region *': one_field decides.
+        container, input_ = ScreenNode(tag="div"), ScreenNode(tag="input")
+        screen = Screen(("combobox", "Region *", container), ("textbox", "Region *", input_))
+        self.assertIs(self.find(screen, "Region", field=True), input_)
+
+    def test_a_plain_name_a_blade_shows_a_moment_later_wins_over_a_decorated_one(self) -> None:
+        screen, box = self.picker()
+        link = ScreenNode()
+
+        class Rendering(FakePage):
+            def wait_for_timeout(self, ms) -> None:      # the blade renders the plain link after the first look
+                super().wait_for_timeout(ms)
+                if not any(node is link for _, _, node in screen.everything()):
+                    screen.add(("link", DecoratedNameTests.MEMBER, link))
+
+        r = run.Runner(Rendering(), STEPS, self.recording, self.args(), ask=Answers())
+        record, _ = self.act(screen, self.PICK, self.MEMBER, r=r)
+        self.assertEqual((record["outcome"], link.clicked, box.clicked), ("match", 1, 0))
+
+    def test_the_settle_time_starts_again_once_a_loading_blade_has_rendered(self) -> None:
+        # The blade is still loading past the normal lookup time; once it has rendered, its rows'
+        # check boxes come first and the member's name as a link a moment later.
+        screen = Screen(tree=FindOnScreenTests.TOP_BAR + FindOnScreenTests.NEW_GROUP)
+        box, link = ScreenNode(attrs={"role": "checkbox"}), ScreenNode()
+        rendered_at = run.FIND_TIMEOUT_MS / 1000 + 5
+
+        def render(_waits: int) -> None:
+            if "row" not in screen.tree:
+                if page.now >= rendered_at:
+                    screen.tree += f'- row "{self.MEMBER}"\n'
+            elif not screen.entries:
+                screen.add(("checkbox", f"Select row {self.MEMBER}", box))
+            elif len(screen.entries) == 1 and page.now >= rendered_at + 0.5:
+                screen.add(("link", self.MEMBER, link))
+
+        page = FindOnScreenTests.LoadingPage(render)
+        r = run.Runner(page, STEPS, self.recording, self.args(), ask=Answers())
+        with mock.patch("builtins.print"):
+            record, _ = self.act(screen, self.PICK, self.MEMBER, r=r)
+        self.assertEqual((record["outcome"], link.clicked, box.clicked), ("match", 1, 0))
+
+    def test_the_settle_time_starts_again_once_the_person_has_opened_the_form(self) -> None:
+        screen = FormOpenTests.users_list()
+        decorated, plain = ScreenNode(tag="input"), ScreenNode(tag="input")
+        opened = []
+
+        def ask(text: str) -> str:
+            if text != "> ":
+                raise EOFError
+            opened.append(page.now)                  # the form opens: its required marker's name first
+            screen.add(("textbox", "User principal name *", decorated))
+            return ""
+
+        def render(_waits: int) -> None:
+            if opened and page.now >= opened[0] + 0.5 and not plain.filled and len(screen.entries) == 2:
+                screen.add(("textbox", "User principal name", plain))
+
+        page = FindOnScreenTests.LoadingPage(render)
+        r = run.Runner(page, STEPS, self.recording, self.args(), ask=ask)
+        item = {"kind": "field", "label": "User principal name", "value": "x", "line": 4}
+        with mock.patch("builtins.print"):
+            record, _ = self.act(screen, item, "User principal name", value="khadgar", r=r)
+        self.assertEqual((record["outcome"], plain.filled, decorated.filled), ("match", ["khadgar"], []))
+
+    UPN = {"kind": "field", "label": "User principal name", "value": "x", "line": 4}
+    UNTITLED = FindOnScreenTests.TOP_BAR + "- button \"Close content 'undefined'\"\n"
+    NEW_USER = (FindOnScreenTests.TOP_BAR + '- heading "New user" [level=2]\n'
+                "- button \"Close content 'New user'\"\n" '- textbox "Display name"\n')
+
+    def form_blade_rendering(self, *fields) -> tuple[Screen, FakePage]:
+        """A form's blade still loading (its title reads 'undefined') past the normal lookup time;
+        once it has rendered, `fields` ((name, node) of text boxes) appear one per poll."""
+        screen = Screen(tree=self.UNTITLED)
+        rendered_at = run.FIND_TIMEOUT_MS / 1000 + 5
+        waiting = list(fields)
+
+        def render(_waits: int) -> None:
+            if screen.tree == self.UNTITLED:
+                if page.now >= rendered_at:
+                    screen.tree = self.NEW_USER
+            elif waiting:
+                name, node = waiting.pop(0)
+                screen.add(("textbox", name, node))
+
+        page = FindOnScreenTests.LoadingPage(render)
+        return screen, page
+
+    def test_on_a_form_that_renders_late_a_plain_field_after_a_decorated_one_wins(self) -> None:
+        decorated, plain = ScreenNode(tag="input"), ScreenNode(tag="input")
+        screen, page = self.form_blade_rendering(("User principal name *", decorated), ("User principal name", plain))
+        r = run.Runner(page, STEPS, self.recording, self.args(), ask=Answers())
+        with mock.patch("builtins.print"):
+            record, _ = self.act(screen, self.UPN, "User principal name", value="khadgar", r=r)
+        self.assertEqual((record["outcome"], plain.filled, decorated.filled, r.records), ("match", ["khadgar"], [], []))
+        self.assertGreater(page.now, run.FIND_TIMEOUT_MS / 1000 + 5)        # found on the rendered blade
+
+    def test_on_a_form_that_renders_late_a_read_only_field_is_still_no_form(self) -> None:
+        read_only = ScreenNode(tag="input", read_only=True)
+        screen, page = self.form_blade_rendering(("User principal name", read_only))
+        r = run.Runner(page, STEPS, self.recording, self.args(), ask=Answers(""))
+        with mock.patch("builtins.print"):
+            record, _ = self.act(screen, self.UPN, "User principal name", value="khadgar", r=r)
+        self.assertEqual([x["category"] for x in r.records], [run.WRONG_BLADE])
+        self.assertEqual((record["outcome"], read_only.filled), ("unknown", []))
+
+    def test_a_row_found_through_its_decoration_is_clicked_as_before(self) -> None:
+        # 'Search for and select **X**' states no state (parse.py, #296), so the check box is
+        # clicked, as when the person picked it: a row already ticked is cleared by that click.
+        screen, box = self.picker()
+        box.checked = True
+        record, _ = self.act(screen, self.PICK, self.MEMBER)
+        self.assertEqual((record["outcome"], box.calls[-1], box.clicked), ("match", "click", 1))
+        # 'Check **X**' states one: a row already ticked is left as it is.
+        screen, box = self.picker()
+        box.checked = True
+        record, _ = self.act(screen, dict(self.PICK, checked=[0]), self.MEMBER, state=True)
+        self.assertEqual((record["outcome"], record["observed"], box.clicked), ("match", "already set", 0))
+
+    def test_a_decorated_name_never_proposes_a_guide_edit(self) -> None:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "items": [self.PICK], "images": []}
+        self.assertIsNone(r.proposed_edit(3, self.MEMBER, f"Select row {self.MEMBER}"))
+        self.assertIsNone(r.proposed_edit(4, "Email", "Email information *"))
+        self.assertIsNotNone(r.proposed_edit(3, self.MEMBER, "Khadgar"))           # a rename still proposes
+        drift = run.Decision(kind="drift", name=f"Select row {self.MEMBER}", role="checkbox", severity="cosmetic")
+        self.assertEqual(r.not_proposed(step, drift, self.MEMBER),
+                         "the Portal's name only decorates the guide's label (a list row's check box)")
+        self.assertIsNone(r.not_proposed(step, run.Decision(kind="drift", name="Khadgar", severity="cosmetic"),
+                                         self.MEMBER))
+
+    def test_the_summary_holds_back_an_older_edit_that_only_decorates_the_label(self) -> None:
+        # A results.jsonl written before #244, reloaded on -Resume, proposes 'Select row X'.
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        old = r.new_record({"id": "9.9.1"}, "action", self.MEMBER)
+        line = "4. Search for and select **Khadgar Archmage**"
+        old.update(outcome="drift", severity="cosmetic", observed=f"Select row {self.MEMBER}",
+                   proposedEdit={"line": 3, "old": line, "new": line.replace("**Khadgar", "**Select row Khadgar")})
+        r.records.append(old)
+        self.quietly(r.finish)
+        summary = (r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## proposed edits (0)\n- none", summary)
+        self.assertIn(f"## not proposed (1)\n- step 9.9.1 action **{self.MEMBER}**: observed "
+                      f"'Select row {self.MEMBER}': the Portal's name only decorates the guide's label "
+                      "(a list row's check box)", summary)
+
+    def test_a_replay_of_lab_1_1_finds_the_decorated_elements_and_reports_no_cosmetic_drift(self) -> None:
+        # The four elements lab 1.1's replay of 2026-10-08 reported as cosmetic drift, on screens
+        # like the ones the run saw, with the recording as committed: nobody is asked, nothing is
+        # recorded, and the summary has no drift and no proposed edit.
+        lab = Path(__file__).resolve().parent.parent / "recordings" / "lab-1.1.json"
+        self.recording = json.loads(lab.read_text(encoding="utf-8"))
+        (self.tmp / "rec.json").write_text(json.dumps(self.recording), encoding="utf-8")
+        before = json.dumps(self.recording, sort_keys=True)
+        for step_id, entry in self.recording["steps"].items():
+            for label, decision in entry["labels"].items():
+                self.assertIsNone(run.decoration_of(decision.get("name") or "", label), (step_id, label))
+        guide = ["# Lab 1.1", "", "   - **Email**: `istormrage@illidari.com`",
+                 "2. Search for and select **Malfurion Stormrage**", "4. Search for and select **Khadgar Archmage**",
+                 "4. Search for and select **Chromie Timewalker**"]
+        (self.tmp / "guide.md").write_text("\n".join(guide) + "\n", encoding="utf-8")
+        steps = {"lab": "1.1", "guide": "guide.md", "steps": [
+            {"id": step_id, "title": step_id, "portal": True, "items": [], "expected": None, "images": []}
+            for step_id in ("1.1.5", "1.1.7", "1.1.8", "1.1.9")]}
+        r = run.Runner(FakePage(), steps, self.recording, self.args(), ask=Answers())
+        email = ScreenNode(tag="input")
+        invite = Screen(("textbox", "Email information *", email), ("button", "information", ScreenNode(tag="button")),
+                        ("button", "information", ScreenNode(tag="button")),
+                        ("textbox", "Display name", ScreenNode(tag="input")),
+                        ("textbox", "Invite redirect URL information *", ScreenNode(tag="input")))
+        record, _ = self.act(invite, {"kind": "field", "label": "Email", "value": "x", "line": 3}, "Email",
+                             value="istormrage@illidari.com", r=r)
+        r.write(record)
+        clicked = []
+        for step_id, line, member, other in (("1.1.7", 4, "Malfurion Stormrage", "Illidan Stormrage"),
+                                             ("1.1.8", 5, "Khadgar Archmage", "Chromie Timewalker"),
+                                             ("1.1.9", 6, "Chromie Timewalker", "Khadgar Archmage")):
+            box = ScreenNode()
+            screen = Screen(("text", member, ScreenNode(interactive=False)), ("checkbox", f"Select row {member}", box),
+                            ("text", other, ScreenNode(interactive=False)),
+                            ("checkbox", f"Select row {other}", ScreenNode()),
+                            ("button", "Group name information", ScreenNode(tag="button")),
+                            ("checkbox", "Select row Azure Resource Manager", ScreenNode()))
+            item = {"kind": "action", "labels": [member], "line": line}
+            step = {"id": step_id, "title": step_id, "items": [item], "images": []}
+            with mock.patch.object(run, "all_frames", lambda page, screen=screen: [screen]), \
+                    mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                    mock.patch.object(run, "candidates_on_screen", return_value=self.listed(screen)):
+                r.write(self.quietly(lambda: r.act_on_label(step, item, member)))
+            clicked.append(box.clicked)
+        self.assertEqual(([x["outcome"] for x in r.records], email.filled, clicked),
+                         (["match"] * 4, ["istormrage@illidari.com"], [1, 1, 1]))
+        self.assertEqual(r.ask.prompts, [])
+        self.assertEqual(json.dumps(json.loads((self.tmp / "rec.json").read_text(encoding="utf-8")), sort_keys=True),
+                         before)
+        self.assertEqual(self.quietly(r.finish), 0)
+        summary = (r.run_dir / "summary.md").read_text(encoding="utf-8")
+        for section in ("blocking", "misleading", "cosmetic", "unknown", "proposed edits", "not proposed"):
+            self.assertIn(f"## {section} (0)\n- none", summary)
 
 
 if __name__ == "__main__":
