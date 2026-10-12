@@ -9,6 +9,24 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0](https://github.com/mbiszczanik/skycraft/compare/v0.17.0...v0.18.0) (2026-10-12)
+
+
+### Features
+
+* **guide-drift:** never propose a guide edit with a redaction token or a workaround ([#319](https://github.com/mbiszczanik/skycraft/issues/319)) ([65837df](https://github.com/mbiszczanik/skycraft/commit/65837dfce781b42183401cf25b0a523abc6b70d9))
+* **guide-drift:** read an accessible name that only decorates the guide's label as a match ([#323](https://github.com/mbiszczanik/skycraft/issues/323)) ([18377ec](https://github.com/mbiszczanik/skycraft/commit/18377ec7f42299503b657cfc075ff234431e566e))
+* **guide-drift:** set a check box to the state the guide asks for instead of toggling it ([#316](https://github.com/mbiszczanik/skycraft/issues/316)) ([e9b5411](https://github.com/mbiszczanik/skycraft/commit/e9b5411f5b74774d699c1b29573d0e31f1d2c5b6))
+* **guide-drift:** show the value the runner will type, and keep environment values out of the logs ([#322](https://github.com/mbiszczanik/skycraft/issues/322)) ([3e51863](https://github.com/mbiszczanik/skycraft/commit/3e518631215c902d8e8ccd6948d6e4d33f17bb1e))
+
+
+### Bug Fixes
+
+* **guide-drift:** count a redone step's last attempt only, however often the run is resumed ([#313](https://github.com/mbiszczanik/skycraft/issues/313)) ([631a693](https://github.com/mbiszczanik/skycraft/commit/631a693d3d1b912c0fa5395525bcedbd9aa9189e))
+* **guide-drift:** keep only the Portal's labels among a recording's rejected candidates ([#321](https://github.com/mbiszczanik/skycraft/issues/321)) ([cc50a57](https://github.com/mbiszczanik/skycraft/commit/cc50a5722f81fdbcfbde562a3c7376729ca65984))
+* **guide-drift:** never record a picked element whose name holds an id or an address ([#324](https://github.com/mbiszczanik/skycraft/issues/324)) ([9b8ee26](https://github.com/mbiszczanik/skycraft/commit/9b8ee260491218c057d3e9e005600722f383358e))
+* **labs:** count a failed lookup in the last cleanups and the lab cycle's leftover checks ([#309](https://github.com/mbiszczanik/skycraft/issues/309)) ([e9829eb](https://github.com/mbiszczanik/skycraft/commit/e9829eb9ec8af0e1fbb47e62131efb4cbf87b0ad))
+
 ## [0.17.0](https://github.com/mbiszczanik/skycraft/compare/v0.16.0...v0.17.0) (2026-10-11)
 
 
