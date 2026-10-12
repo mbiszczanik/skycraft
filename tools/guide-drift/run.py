@@ -290,7 +290,7 @@ from decide import DECORATIONS, decoration_of  # noqa: E402
 from recording import literal_pattern  # noqa: E402
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (LABEL_ROLES, REMARK, EntryNames, Redactor, checkbox_state, env_secrets,  # noqa: E402
-                       missing_env, field_action, rejected_candidates, resolve_value, resource_name, skip_reason,
+                       missing_env, field_action, rejected_candidates, resource_name, skip_reason,
                        same_blade, start_blade, view_blade, write_json)
 from recording import (error_text, one_line, prompt_value, redaction_tokens, scrub, tag_action,  # noqa: E402
                        typed_secrets)
