@@ -8,7 +8,10 @@
     
     Actions performed:
     1. Applies Tags to Resource Groups (Update-AzTag)
-    2. Assigns Azure Policies at Subscription Scope (New-AzPolicyAssignment)
+    2. Assigns Azure Policies at Subscription Scope (New-AzPolicyAssignment). An assignment that
+       already exists - under the fixed name, or made in the Portal under a generated name with
+       the guide's name as display name - is left as it is; one made twice is an [ERROR] and
+       nothing is created for it (issue #330).
     3. Creating Resource Locks (New-AzResourceLock). A lock that already exists under the guide's
        name but with another level is set to CanNotDelete, and the script says so (issue #258).
 
@@ -102,56 +105,63 @@ foreach ($config in $tagConfigurations) {
 # 3. Assign Policies
 Write-Header "`n=== 2. Assigning Policies (New-AzPolicyAssignment) ==="
 
-$policies = @(
-    @{
-        Name = "Require-Environment-Tag-RG"
-        DisplayName = "Require Environment Tag on Resource Groups"
-        Definition = "Require a tag on resource groups"
-        Params = @{ tagName = "Environment" }
-    },
-    @{
-        Name = "Enforce-Project-Tag"
-        DisplayName = "Enforce Project Tag Value"
-        Definition = "Require a tag and its value on resources"
-        Params = @{ tagName = "Project"; tagValue = "SkyCraft" }
-    },
-    @{
-        Name = "Restrict-Azure-Regions"
-        DisplayName = "Restrict to Allowed Regions"
-        Definition = "Allowed locations"
-        Params = @{ listOfAllowedLocations = @("swedencentral", "northeurope") }
-    }
-)
+# The three assignments - names, display names, definition ids - come from
+# LabPolicyAssignment.ps1, shared with Test-Lab.ps1 and Remove-LabResource.ps1; the parameters
+# are this script's own.
+. (Join-Path $PSScriptRoot 'LabPolicyAssignment.ps1')
+$policyParams = @{
+    'Require-Environment-Tag-RG' = @{ tagName = "Environment" }
+    'Enforce-Project-Tag'        = @{ tagName = "Project"; tagValue = "SkyCraft" }
+    'Restrict-Azure-Regions'     = @{ listOfAllowedLocations = @("swedencentral", "northeurope") }
+}
+$subscriptionScope = "/subscriptions/$SubscriptionId"
 
-foreach ($policy in $policies) {
+# An assignment the learner made in the Portal has a generated resource name and the guide's
+# name as its display name (issue #330). Checking by resource name missed it and created a second
+# set next to it, so the subscription's assignments are listed and matched the way the cleanup
+# matches them. A listing that fails creates nothing: an assignment it could not see may exist.
+$assignments = $null
+if (-not $WhatIf) {
+    try {
+        $assignments = @(Get-AzPolicyAssignment -Scope $subscriptionScope -ErrorAction Stop | Where-Object { $_ })
+    }
+    catch {
+        Write-Error-Custom "Could not list the policy assignments on the subscription, so none is created: $_"
+    }
+}
+
+foreach ($policy in Get-LabPolicyAssignmentSpec) {
     if ($WhatIf) {
          Write-Host "WHATIF: Would assign policy $($policy.Name)" -ForegroundColor Yellow
+         continue
     }
-    else {
-        try {
-            $def = Get-AzPolicyDefinition | Where-Object { $_.Properties.DisplayName -eq $policy.Definition } | Select-Object -First 1
-            if ($def) {
-                # Check existance first to avoid error spam
-                if (Get-AzPolicyAssignment -Name $policy.Name -Scope "/subscriptions/$SubscriptionId" -ErrorAction SilentlyContinue) {
-                     Write-Success "Policy $($policy.Name) already assigned."
-                }
-                else {
-                    New-AzPolicyAssignment `
-                        -Name $policy.Name `
-                        -DisplayName $policy.DisplayName `
-                        -Scope "/subscriptions/$SubscriptionId" `
-                        -PolicyDefinition $def `
-                        -PolicyParameterObject $policy.Params `
-                        -ErrorAction Stop | Out-Null
-                    Write-Success "Assigned policy $($policy.Name)"
-                }
-            } else {
-                Write-Error-Custom "Definition '$($policy.Definition)' not found."
-            }
-        }
-        catch {
-            Write-Error-Custom "Failed to assign $($policy.Name): $_"
-        }
+    if ($null -eq $assignments) { continue }
+
+    $found = @(Select-LabPolicyAssignment -Assignment $assignments -SubscriptionId $SubscriptionId -Spec $policy)
+    if ($found.Count -eq 1) {
+        Write-Success "Policy $($policy.Name) already assigned: $(Format-LabPolicyAssignment -Assignment $found[0])"
+        continue
+    }
+    if ($found.Count -gt 1) {
+        $foundList = ($found | ForEach-Object { Format-LabPolicyAssignment -Assignment $_ }) -join ', '
+        Write-Error-Custom "$($found.Count) assignments match $($policy.Name): $foundList. Not creating another; delete all but one in the Portal (Policy > Assignments)."
+        continue
+    }
+
+    try {
+        # Read by id: a search by display name can pick a custom definition of the same name.
+        $def = Get-AzPolicyDefinition -Id $policy.PolicyDefinitionId -ErrorAction Stop
+        New-AzPolicyAssignment `
+            -Name $policy.Name `
+            -DisplayName $policy.DisplayName `
+            -Scope $subscriptionScope `
+            -PolicyDefinition $def `
+            -PolicyParameterObject $policyParams[$policy.Name] `
+            -ErrorAction Stop | Out-Null
+        Write-Success "Assigned policy $($policy.Name)"
+    }
+    catch {
+        Write-Error-Custom "Failed to assign $($policy.Name): $_"
     }
 }
 

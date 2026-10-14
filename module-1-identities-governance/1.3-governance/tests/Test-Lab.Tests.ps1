@@ -23,6 +23,11 @@
          resource inside the group or on the subscription above it, or a lock lookup that fails
          each fail that one check, and the [FAIL] line says what was found. The scope comparison
          ignores case, as ARM ids do.
+      7. A policy check finds its assignment whichever path made it (issue #330): the fixed name
+         the Bicep path sets, or the display name a learner types into the Portal's Assignment
+         name, next to a generated resource name. An assignment inherited from a management
+         group or of another definition does not count, and two assignments that both match
+         fail the check: the cleanup removes neither.
 
     Scope limit, as in the Lab 1.1 suite: the child is launched with -Command, so these tests
     prove the failure counter reaches `exit`, not that `pwsh -File` carries the code out of the
@@ -70,8 +75,11 @@ BeforeAll {
     #                                 lookups fail for them, as the real cmdlets do
     #   SKYCRAFT_STUB_NOTAGS          resource groups that carry no tag at all
     #   SKYCRAFT_STUB_WRONGTAG        resource groups whose Project tag is not 'SkyCraft'
-    #   SKYCRAFT_STUB_MISSINGPOLICY   policy assignments (by name) that do not exist - an error
-    #                                 from the real cmdlet, as here
+    #   SKYCRAFT_STUB_POLICYSET       who made the three policy assignments: 'bicep' (the default:
+    #                                 fixed names), 'portal' (generated names, the guide's names
+    #                                 as display names) or 'both' (two of each)
+    #   SKYCRAFT_STUB_MISSINGPOLICY   policy assignments (by the guide's name) left out of the
+    #                                 listing
     #   SKYCRAFT_STUB_NOLOCK          resource groups that carry no lock
     #   SKYCRAFT_STUB_LOCKKIND        'group=kind' pairs that change the one lock a group returns:
     #                                 'readonly' gives it level ReadOnly, 'wrongname' another
@@ -132,16 +140,45 @@ function Get-AzResourceGroup {
     }
 }
 
+function New-StubAssignment {
+    param([string]$Name, [string]$DisplayName, [string]$Definition, [string]$Scope)
+    [pscustomobject]@{
+        Name               = $Name
+        DisplayName        = $DisplayName
+        PolicyDefinitionId = "/providers/Microsoft.Authorization/policyDefinitions/$Definition"
+        Scope              = $Scope
+        Id                 = "$Scope/providers/Microsoft.Authorization/policyAssignments/$Name"
+    }
+}
+
+# Lists the assignments that apply to the subscription, as the real cmdlet does for -Scope with
+# no -Name: the lab's three, made by the Bicep path, the Portal or both, plus one inherited from a
+# management group under the guide's name and an unrelated one under a guide display name.
 function Get-AzPolicyAssignment {
     [CmdletBinding()]
     param([string]$Name, [string]$Scope, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name 'Get-AzPolicyAssignment'
     if (Test-StubLookupFail) { Write-Error 'stub lookup failure: Get-AzPolicyAssignment'; return }
-    if (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGPOLICY' -Name $Name) {
-        Write-Error "PolicyAssignmentNotFound: The policy assignment '$Name' is not found."
-        return
+    if ($Name) { throw "stub: the lab looks assignments up by listing the scope, not by name ($Name)" }
+
+    $lab = @(
+        @{ Name = 'Require-Environment-Tag-RG'; Bicep = 'Require Environment Tag on Resource Groups'; Definition = '96670d01-0a4d-4649-9c89-2d3abc0a5025'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa1' }
+        @{ Name = 'Enforce-Project-Tag'; Bicep = 'Enforce Project Tag Value'; Definition = '1e30110a-5ceb-460c-a204-c1c3969c6d62'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa2' }
+        @{ Name = 'Restrict-Azure-Regions'; Bicep = 'Restrict to Allowed Regions'; Definition = 'e56962a6-4747-49cd-b67b-bf8b01975c4c'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa3' }
+    )
+    $set = if ($env:SKYCRAFT_STUB_POLICYSET) { $env:SKYCRAFT_STUB_POLICYSET } else { 'bicep' }
+    foreach ($assignment in $lab) {
+        if (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGPOLICY' -Name $assignment.Name) { continue }
+        if ($set -in 'bicep', 'both') {
+            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope
+        }
+        if ($set -in 'portal', 'both') {
+            New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope
+        }
     }
-    [pscustomobject]@{ Name = $Name; Scope = $Scope }
+    New-StubAssignment -Name 'Enforce-Project-Tag' -DisplayName 'Enforce Project Tag Value' -Definition '1e30110a-5ceb-460c-a204-c1c3969c6d62' `
+        -Scope '/providers/Microsoft.Management/managementGroups/stub-mg'
+    New-StubAssignment -Name 'bbbbbbbbbbbbbbbbbbbbbbb1' -DisplayName 'Restrict-Azure-Regions' -Definition '00000000-0000-0000-0000-00000000beef' -Scope $Scope
 }
 
 function Get-AzResourceLock {
@@ -203,6 +240,8 @@ function Get-AzConsumptionBudget {
             [string[]]$NoTags = @(),
             [string[]]$WrongTag = @(),
             [string[]]$MissingPolicy = @(),
+            [ValidateSet('bicep', 'portal', 'both')]
+            [string]$PolicySet = 'bicep',
             [string[]]$NoLock = @(),
             [hashtable]$LockKind = @{},
             [ValidateSet('present', 'none', 'fail')]
@@ -219,6 +258,7 @@ function Get-AzConsumptionBudget {
             SKYCRAFT_STUB_NOTAGS        = $NoTags -join ','
             SKYCRAFT_STUB_WRONGTAG      = $WrongTag -join ','
             SKYCRAFT_STUB_MISSINGPOLICY = $MissingPolicy -join ','
+            SKYCRAFT_STUB_POLICYSET     = $PolicySet
             SKYCRAFT_STUB_NOLOCK        = $NoLock -join ','
             SKYCRAFT_STUB_LOCKKIND      = ($LockKind.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ','
             SKYCRAFT_STUB_BUDGET        = $Budget
@@ -260,11 +300,14 @@ function Get-AzConsumptionBudget {
     $script:LockOnChild   = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'platform-skycraft-swc-rg' = 'child' }
     $script:LockOnSub     = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'subscription' }
     $script:LockReadFails = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'fail' }
+    $script:PortalMade    = Invoke-ValidatorScript -Stub $script:Stub -PolicySet 'portal'
+    $script:TwoSets       = Invoke-ValidatorScript -Stub $script:Stub -PolicySet 'both'
 
     $script:AllRuns = @(
         $script:AllPass, $script:PolicyMissing, $script:LockMissing, $script:WrongTag,
         $script:NoTags, $script:RgMissing, $script:LookupsFail, $script:NoContext, $script:NoBudget, $script:BudgetFails,
-        $script:LockReadOnly, $script:LockWrongName, $script:LockOnChild, $script:LockOnSub, $script:LockReadFails
+        $script:LockReadOnly, $script:LockWrongName, $script:LockOnChild, $script:LockOnSub, $script:LockReadFails,
+        $script:PortalMade, $script:TwoSets
     )
 }
 
@@ -300,7 +343,9 @@ Describe 'Lab 1.3 Test-Lab.ps1 - failures are counted and set the exit code (#25
     It 'exits 1 and reports 1 failed when one policy assignment is missing' {
         $run = $script:PolicyMissing
         $run.ExitCode | Should -Be 1 -Because "a missing policy assignment must not look like a passed validation; output was:`n$($run.Output)"
-        $run.Output | Should -Match 'Policy: Enforce-Project-Tag \[FAIL\]'
+        # The assignment inherited from a management group under the same name, and the unrelated
+        # one under a guide display name, are both in the listing and must not stand in for it.
+        $run.Output | Should -Match "Policy: Enforce-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Require a tag and its value on resources' on the subscription itself, named 'Enforce-Project-Tag' or 'Enforce Project Tag Value', step 1\.3\.7\."
         $run.FailLines | Should -Be 1
         $run.Output | Should -Match 'Passed: 7\b'
         $run.Output | Should -Match 'Failed: 1\b'
@@ -461,5 +506,37 @@ Describe 'Lab 1.3 Test-Lab.ps1 - a lock check passes only for the guide''s lock 
         $run.FailLines | Should -Be 1
         $run.OkLines | Should -Be 7
         $run.Output | Should -Match 'Failed: 1\b'
+    }
+}
+
+Describe 'Lab 1.3 Test-Lab.ps1 - finds the policy assignments whichever path made them (#330)' {
+
+    It 'passes the Bicep-made assignments, found by their fixed names' {
+        $run = $script:AllPass
+        $run.Output | Should -Match "Policy: Require-Environment-Tag-RG : 'Require Environment Tag on Resource Groups' \(name Require-Environment-Tag-RG\) \[OK\]"
+        $run.Output | Should -Match "Policy: Restrict-Azure-Regions : 'Restrict to Allowed Regions' \(name Restrict-Azure-Regions\) \[OK\]"
+    }
+
+    It 'passes the Portal-made assignments, found by the display names the learner typed' {
+        # The Portal's Assignment name sets only the display name; the resource name is generated.
+        $run = $script:PortalMade
+        $run.ExitCode | Should -Be 0 -Because "a learner who took the Portal path built what the guide asks for; output was:`n$($run.Output)"
+        $run.Output | Should -Match "Policy: Require-Environment-Tag-RG : 'Require-Environment-Tag-RG' \(name aaaaaaaaaaaaaaaaaaaaaaa1\) \[OK\]"
+        $run.Output | Should -Match "Policy: Enforce-Project-Tag : 'Enforce-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa2\) \[OK\]"
+        $run.Output | Should -Match "Policy: Restrict-Azure-Regions : 'Restrict-Azure-Regions' \(name aaaaaaaaaaaaaaaaaaaaaaa3\) \[OK\]"
+        $run.Output | Should -Match 'Passed: 8\b'
+    }
+
+    It 'lists the subscription''s assignments once, rather than reading each by name' {
+        @($script:AllPass.Calls | Where-Object { $_ -eq 'Get-AzPolicyAssignment' }).Count | Should -Be 1
+    }
+
+    It 'fails each assignment made twice, and names both, because the cleanup removes neither' {
+        $run = $script:TwoSets
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Policy: Enforce-Project-Tag \[FAIL\] 2 assignments match: 'Enforce Project Tag Value' \(name Enforce-Project-Tag\), 'Enforce-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa2\)\. Keep one and delete the others"
+        $run.FailLines | Should -Be 3
+        $run.OkLines | Should -Be 5
+        $run.Output | Should -Match 'Failed: 3\b'
     }
 }
