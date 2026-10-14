@@ -154,6 +154,21 @@
     drift (once per cause) and waits for you to open the form. A wrong recorded blade is deleted
     from the recording by hand; the next run records it again.
 
+    A PORTAL DEPLOYMENT IS WAITED FOR (issue #328). A Create starts a deployment that takes from
+    seconds to ten minutes or more. When a label, a form's first field, a resource name or the
+    Expected Result is not found in its usual time while the Portal shows a deployment still
+    running ('Deployment is in progress' on the deployment overview, or 'Deployment in progress'
+    in its notification), the run says so and waits for it to end, up to -DeploymentTimeoutMinutes,
+    saying every minute how long it has waited; then it looks again. A deployment that failed, or
+    one still running after that time, ends the step as unknown with the Portal's text (scrubbed),
+    and you are not asked about the label. A failure is reported once: one left on screen from an
+    earlier deployment, or one already reported, does not stop a later step, which is looked up as
+    usual; what you answer about its labels then is used in that run only, as a workaround, and
+    is not written to the recording. Without a deployment on screen nothing waits longer (a lookup
+    that misses reads the screen once more for the Expected Result), and a recording needs nothing
+    for it. The texts come from Microsoft Learn: the first supervised run of a lab that deploys
+    confirms them.
+
     CLEANUP IS THE LAB'S OWN, AND ONLY AFTER A FINISHED RUN. This script has no deletion logic.
     Unless -SkipCleanup, and only when run.py ended normally and the state file confirms it
     (finished, with this run's id), it hands off to the lab's own teardown:
@@ -209,6 +224,11 @@
     Where run folders are written. Defaults to tools/guide-drift-logs. Resolved to an absolute
     path against the current directory. Ignored with -Resume when the state names the stopped
     run's directory (see -Resume).
+
+.PARAMETER DeploymentTimeoutMinutes
+    How long a lookup waits at most for a Portal deployment that is still running (see A PORTAL
+    DEPLOYMENT IS WAITED FOR), in minutes, from 1 to 600. Defaults to 30; raise it for a slow
+    region or a resource that takes longer.
 
 .PARAMETER SkipCleanup
     Leave what the run created in place, and skip the check of the cleanup's prerequisites.
@@ -271,6 +291,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$LogDirectory = (Join-Path $PSScriptRoot 'guide-drift-logs'),
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 600)]
+    [int]$DeploymentTimeoutMinutes = 30,
 
     [Parameter(Mandatory = $false)]
     [switch]$SkipCleanup,
@@ -509,6 +533,7 @@ try {
         '--tenant-domain', $domain
         '--state', $statePath
         '--auth-state', $authPath
+        '--deployment-timeout-minutes', $DeploymentTimeoutMinutes
     )
     # Not passed when empty: an empty native argument is easy to lose on the way to Python.
     if ($tenantName) { $runArgs += @('--tenant-name', $tenantName) }

@@ -2,9 +2,10 @@
 (issue #189), steps the recording skips (#200), the view a resumed run starts from (#206), the
 blade a step starts on and the form its fields are filled in on (#207), and how it finds what a
 guide names (search, '+' labels, plain text, collapsed menu groups, a blade still loading, a
-resource a chain names, #199), what results.jsonl and summary.md keep (#212), and what a step
-redone across resumes counts (#222). No browser: the page is a small fake (Screen stands in for a
-frame), and run_step is scripted where only the order of steps matters.
+resource a chain names, #199, a Portal deployment still running, #328), what results.jsonl and
+summary.md keep (#212), and what a step redone across resumes counts (#222). No browser: the page
+is a small fake (Screen stands in for a frame), and run_step is scripted where only the order of
+steps matters.
 
 run.py imports Playwright at module level and the CI runner does not install it, so a minimal
 stub of playwright.sync_api is put in sys.modules when the real one is missing. Nothing here
@@ -3024,13 +3025,13 @@ class FindOnScreenTests(RunnerTestCase):
         screen = Screen(("textbox", "Group name", ScreenNode(tag="input")),
                         tree=self.TOP_BAR + self.NEW_GROUP + '- textbox "Group name"\n')
         item = {"kind": "field", "label": "Group type", "value": "Security", "line": 2}
-        outline = mock.Mock(side_effect=run.aria_outline)
-        with mock.patch("builtins.print") as said, mock.patch.object(run, "aria_outline", outline):
+        reads = mock.Mock(side_effect=run.frame_snapshots)
+        with mock.patch("builtins.print") as said, mock.patch.object(run, "frame_snapshots", reads):
             record, r = self.act(screen, item, "Group type", value="Security")
         self.assertEqual((record["outcome"], len(r.ask.prompts)), ("unknown", 1))
         self.assertLess(r.page.now, run.FIND_TIMEOUT_MS / 1000 + 1)
         self.assertFalse(self.waiting_lines(said))
-        self.assertEqual(outline.call_count, 1)                            # the outline read is the one kept
+        self.assertEqual(reads.call_count, 1)        # one read for the deployment and the blade, the one kept
         self.assertTrue(self.blade_outline(2).endswith(                    # what the check read
             'heading "New Group"\nbutton "Close content \'New Group\'"\ntextbox "Group name"\n'))
 
@@ -3110,6 +3111,382 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual(record["outcome"], "unknown")
         self.assertIn("search box is not on screen", record["observed"])
         self.assertEqual(r.ask.prompts, [])
+
+
+class DeploymentStateTests(unittest.TestCase):
+    """snapshot_text and deployment_state (#328): what one snapshot line shows, and whether the
+    screen shows a Portal deployment that is still running or has failed."""
+
+    def test_a_line_shows_its_name_or_else_its_inline_text(self) -> None:
+        for line, text in (('- heading "Deployment is in progress" [level=2]', "Deployment is in progress"),
+                           ("- 'heading \"Deployment failed: x\" [level=2]'", "Deployment failed: x"),
+                           ("- text: Deployment in progress...", "Deployment in progress..."),
+                           ("  - paragraph: Your deployment failed", "Your deployment failed"),
+                           ('- text: "Resource \'vm\' failed: Conflict"', "Resource 'vm' failed: Conflict"),
+                           ("- text: 'It''s done'", "It's done"),
+                           ('- button "Go to resource"', "Go to resource"),
+                           ("- list:", ""), ("- /url: https://x", ""), ("no line", "")):
+            with self.subTest(line=line):
+                self.assertEqual(run.snapshot_text(line), text)
+
+    def test_a_running_deployment_is_read_from_the_overview_or_a_notification(self) -> None:
+        for text in ("Deployment is in progress", "Deployment in progress...", "deployment is in progress"):
+            with self.subTest(text=text):
+                self.assertEqual(run.deployment_state(["Home", text, "Deployment name: x"]), (text, []))
+
+    def test_every_failure_comes_once_with_the_text_that_follows_it(self) -> None:
+        self.assertEqual(run.deployment_state(["Home", "Your deployment failed", "", "Conflict: subnet in use", "x"]),
+                         (None, ["Your deployment failed; Conflict: subnet in use"]))
+        self.assertEqual(run.deployment_state(["Deployment failed"]), (None, ["Deployment failed"]))
+        self.assertEqual(run.deployment_state(["Deployment failed", "a", "Your deployment failed", "b",
+                                               "Deployment failed", "a"]),
+                         (None, ["Deployment failed; a", "Your deployment failed; b"]))
+
+    def test_a_running_deployment_comes_with_the_failures_on_screen(self) -> None:
+        self.assertEqual(run.deployment_state(["Deployment failed", "Deployment is in progress"]),
+                         ("Deployment is in progress", ["Deployment failed"]))
+
+    def test_a_deployment_status_after_a_failure_is_not_its_detail(self) -> None:
+        # The detail is the failure's identity: another deployment's status changes as it ends.
+        for status in ("Deployment is in progress", "Your deployment is complete", "Deployment succeeded",
+                       "Your deployment failed"):
+            with self.subTest(status=status):
+                self.assertIn("Deployment failed", run.deployment_state(["Deployment failed", "", status])[1])
+
+    def test_a_finished_deployment_and_other_text_are_no_deployment(self) -> None:
+        for texts in ([], ["Your deployment is complete", "Go to resource"], ["Deployment succeeded"],
+                      ["Deployments", "Deployment name", "Deployment details"],
+                      ["How to check the deployment is in progress"]):
+            with self.subTest(texts=texts):
+                self.assertEqual(run.deployment_state(texts), (None, []))
+
+    def test_a_screen_whose_main_frame_says_nothing_is_no_reading(self) -> None:
+        self.assertIsNone(run.texts_of([]))
+        self.assertIsNone(run.texts_of([None, '- heading "Deployment is in progress"']))
+        self.assertIsNone(run.texts_of(["  \n", '- heading "Deployment is in progress"']))
+        self.assertEqual(run.texts_of(['- heading "Home"', None, "- text: x"]), ["Home", "x"])
+
+    def test_the_maximum_wait_is_an_argument_of_30_minutes_by_default(self) -> None:
+        required = ["--steps", "s", "--recording", "r", "--log-dir", "l", "--run-id", "i", "--tenant-id", "t",
+                    "--tenant-domain", "d", "--state", "s", "--auth-state", "a"]
+        self.assertEqual(run.parse_args(required).deployment_timeout_minutes, 30)
+        self.assertEqual(run.parse_args(required + ["--deployment-timeout-minutes", "90"]).deployment_timeout_minutes, 90)
+        for wrong in ("0", "-5", "ten"):
+            with self.subTest(wrong=wrong), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                run.parse_args(required + ["--deployment-timeout-minutes", wrong])
+
+
+class DeploymentWaitTests(RunnerTestCase):
+    """A lookup that finds nothing while the Portal shows a deployment still running waits for it
+    to end, up to the maximum (#328): a label, a form's first field, a resource a chain names and
+    the Expected Result. A failed deployment is reported as such, and a step with no deployment
+    keeps its timing."""
+
+    TOP_BAR = FindOnScreenTests.TOP_BAR
+    RUNNING = TOP_BAR + '- heading "Deployment is in progress" [level=2]\n- text: "Deployment name: Microsoft.VM-1"\n'
+    COMPLETE = TOP_BAR + '- heading "Your deployment is complete" [level=2]\n- button "Go to resource"\n'
+    OBJECT_ID = "11111111-2222-4333-8444-555555555555"
+    FAILED = (TOP_BAR + '- heading "Your deployment failed" [level=2]\n'
+              f'- text: "Resource {OBJECT_ID} in contoso.onmicrosoft.com failed: Conflict"\n')
+    GO = {"kind": "action", "labels": ["Go to resource"], "line": 4}
+    STEP = {"id": "9.9.1", "title": "One", "items": [GO], "images": [], "expected": "Deployment succeeds"}
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+        POPUP_RECORD.update(popups=None, made=0)
+
+    act = FindOnScreenTests.act
+    LoadingPage = FindOnScreenTests.LoadingPage
+
+    def ending(self, screen: Screen, at: float, tree: str, *entries) -> FakePage:
+        """A page whose deployment ends `at` seconds after the start: from the first wait at or
+        after that moment, the screen shows `tree` and `entries`."""
+        def end(_waits: int) -> None:
+            if page.now >= at and screen.tree != tree:
+                screen.tree = tree
+                screen.add(*entries)
+
+        page = self.LoadingPage(end)
+        return page
+
+    @staticmethod
+    def said(printed) -> list[str]:
+        return [str(c.args[0]) for c in printed.call_args_list if c.args]
+
+    def test_a_label_that_shows_once_the_deployment_completes_is_used_without_asking(self) -> None:
+        go = ScreenNode()
+        screen = Screen(tree=self.RUNNING)
+        page = self.ending(screen, 150, self.COMPLETE, ("button", "Go to resource", go))
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], go.clicked, r.ask.prompts), ("match", 1, []))
+        self.assertGreaterEqual(page.now, 150)
+        self.assertLess(page.now, 150 + run.DEPLOYMENT_POLL_MS / 1000 + run.SETTLE_MS / 1000 + 1)
+        lines = self.said(printed)
+        waiting = [line for line in lines if "deployment is still running" in line]
+        self.assertEqual(len(waiting), 1)                                 # said once, not every poll
+        self.assertIn("30 min", waiting[0])
+        self.assertIn("'Go to resource'", waiting[0])
+        self.assertEqual(len([line for line in lines if line.startswith("  still waiting")]), 2)   # each minute
+        self.assertIn("Found 'Go to resource' after waiting 2 min 25 s for the deployment.", lines)
+        self.assertEqual(self.recording["steps"]["9.9.1"]["labels"], {})
+
+    def test_a_failed_deployment_is_reported_as_such_and_nobody_is_asked(self) -> None:
+        screen = Screen(tree=self.RUNNING)
+        page = self.ending(screen, 90, self.FAILED)
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], record["severity"], r.ask.prompts), ("unknown", None, []))
+        self.assertLess(page.now, 90 + run.DEPLOYMENT_POLL_MS / 1000 + 1)
+        self.assertTrue(record["observed"].startswith("the Portal's deployment failed: Your deployment failed; "))
+        r.write(record)                                                   # scrubbed as any observed text
+        written = json.loads((self.tmp / "logs" / "test" / "results.jsonl").read_text(encoding="utf-8"))
+        self.assertEqual(written["observed"], "the Portal's deployment failed: Your deployment failed; "
+                                              "Resource <id> in [tenantdomain] failed: Conflict")
+        self.assertEqual(self.recording["steps"]["9.9.1"]["labels"], {})
+        self.assertTrue(any("deployment failed" in line for line in self.said(printed)))
+
+    def test_a_deployment_that_failed_before_the_lookup_ended_is_reported_without_waiting(self) -> None:
+        record, r = self.act(Screen(tree=self.FAILED), self.GO, "Go to resource")
+        self.assertEqual((record["outcome"], r.ask.prompts), ("unknown", []))
+        self.assertIn("the Portal's deployment failed", record["observed"])
+        self.assertLess(r.page.now, run.FIND_TIMEOUT_MS / 1000 + 1)
+
+    def test_a_deployment_still_running_at_the_maximum_is_reported_and_nobody_is_asked(self) -> None:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(deployment_timeout_minutes=2), ask=Answers())
+        with mock.patch("builtins.print") as printed:
+            record, _ = self.act(Screen(tree=self.RUNNING), self.GO, "Go to resource", runner=r)
+        self.assertEqual((record["outcome"], r.ask.prompts), ("unknown", []))
+        self.assertEqual(record["observed"], "the Portal's deployment was still running after 2 min, "
+                                             "the longest the run waits (-DeploymentTimeoutMinutes)")
+        start = run.FIND_TIMEOUT_MS / 1000
+        self.assertGreaterEqual(r.page.now, start + 120)
+        self.assertLess(r.page.now, start + 120 + run.DEPLOYMENT_POLL_MS / 1000 + 1)
+        self.assertTrue(any("2 min" in line for line in self.said(printed) if "still running" in line))
+
+    def test_a_label_missing_without_a_deployment_is_asked_about_after_the_normal_time(self) -> None:
+        screen = Screen(tree=self.COMPLETE)                               # a finished deployment is none
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.GO, "Go to resource")
+        self.assertEqual((record["outcome"], len(r.ask.prompts)), ("unknown", 1))
+        self.assertLess(r.page.now, run.FIND_TIMEOUT_MS / 1000 + 1)
+        self.assertFalse([line for line in self.said(printed) if "deployment" in line])
+
+    def test_a_label_still_missing_after_the_deployment_is_asked_about_after_one_more_lookup(self) -> None:
+        screen = Screen(tree=self.RUNNING)
+        page = self.ending(screen, 60, self.COMPLETE)                     # no 'Go to resource' after all
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], len(r.ask.prompts)), ("unknown", 1))
+        self.assertIn("The deployment has ended after 55 s: looking for 'Go to resource' again.", self.said(printed))
+        self.assertGreaterEqual(page.now, 60 + run.FIND_TIMEOUT_MS / 1000)
+        self.assertLess(page.now, 60 + run.DEPLOYMENT_POLL_MS / 1000 + run.FIND_TIMEOUT_MS / 1000 + 1)
+
+    def on(self, screen: Screen, r: run.Runner, call):
+        """`call()` with `screen` as the page's only frame and the page's clock for time."""
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=[]), mock.patch("builtins.print"):
+            return call()
+
+    def test_a_form_field_and_a_resource_wait_for_the_deployment_too(self) -> None:
+        field = ScreenNode(tag="input")
+        screen = Screen(tree=self.RUNNING)
+        page = self.ending(screen, 100, self.COMPLETE + '- textbox "Name"\n', ("textbox", "Name", field))
+        r = run.Runner(page, STEPS, self.recording, self.args(), ask=Answers())
+        item = {"kind": "field", "label": "Name", "value": "x", "line": 5}
+        record = self.on(screen, r, lambda: r.act_on_label(self.STEP, item, "Name", "web-01", form_start=True))
+        self.assertEqual((record["outcome"], field.filled, r.ask.prompts, r.records), ("match", ["web-01"], [], []))
+        self.assertGreaterEqual(page.now, 100)
+        link = ScreenNode()
+        screen = Screen(tree=self.RUNNING)
+        page = self.ending(screen, 100, self.COMPLETE, ("link", "dev-skycraft-swc-lb", link))
+        r = run.Runner(page, STEPS, self.recording, self.args(), ask=Answers())
+        chain = {"kind": "navigation", "labels": ["dev-skycraft-swc-lb"], "resources": [0], "line": 6}
+        record = self.on(screen, r, lambda: r.open_resource(self.STEP, chain, "dev-skycraft-swc-lb"))
+        self.assertEqual((record["outcome"], link.clicked), ("match", 1))
+        self.assertGreaterEqual(page.now, 100)
+
+    SEARCH_BOX = FindOnScreenTests.SEARCH_BOX
+    OLD_FAILURE = '- text: Deployment failed\n- text: "Deployment to resource group \'rg-old\' failed."\n'
+
+    def test_an_earlier_failure_left_on_screen_does_not_fail_a_deployment_that_completes(self) -> None:
+        # The race: the running line goes, the old failure stays, and 'Go to resource' renders a moment later.
+        go = ScreenNode()
+        screen = Screen(tree=self.RUNNING + self.OLD_FAILURE)
+
+        def finish(_waits: int) -> None:
+            if page.now >= 60 and "complete" not in screen.tree:
+                screen.tree = self.COMPLETE + self.OLD_FAILURE
+            if page.now >= 66 and not screen.entries:
+                screen.add(("button", "Go to resource", go))
+
+        page = self.LoadingPage(finish)
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], go.clicked, r.ask.prompts), ("match", 1, []))
+        self.assertIn("The deployment has ended after 55 s: looking for 'Go to resource' again.", self.said(printed))
+        self.assertEqual(r.reported_failures, {"Deployment failed; Deployment to resource group 'rg-old' failed."})
+
+    def test_a_stale_failure_right_before_a_running_overview_keeps_its_identity(self) -> None:
+        # The failure line has no detail of its own: the overview's status follows it and changes.
+        go = ScreenNode()
+        screen = Screen(tree=self.TOP_BAR + "- text: Deployment failed\n" + self.RUNNING[len(self.TOP_BAR):])
+
+        def finish(_waits: int) -> None:
+            if page.now >= 60 and "complete" not in screen.tree:
+                screen.tree = self.TOP_BAR + "- text: Deployment failed\n" + self.COMPLETE[len(self.TOP_BAR):]
+            if page.now >= 66 and not screen.entries:
+                screen.add(("button", "Go to resource", go))
+
+        page = self.LoadingPage(finish)
+        with mock.patch("builtins.print"):
+            record, r = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], go.clicked, r.ask.prompts), ("match", 1, []))
+
+    def test_a_failure_a_wait_passed_over_is_not_reported_at_the_next_miss(self) -> None:
+        go = ScreenNode()
+        screen = Screen(tree=self.RUNNING + self.OLD_FAILURE)
+        page = self.ending(screen, 60, self.COMPLETE + self.OLD_FAILURE, ("button", "Go to resource", go))
+        r = run.Runner(page, STEPS, self.recording, self.args(), ask=Answers())
+        with mock.patch("builtins.print"):
+            first, _ = self.act(screen, self.GO, "Go to resource", runner=r)
+            second, _ = self.act(screen, {"kind": "action", "labels": ["Overview"], "line": 7}, "Overview", runner=r)
+        self.assertEqual((first["outcome"], go.clicked), ("match", 1))
+        self.assertEqual((second["outcome"], len(r.ask.prompts)), ("unknown", 1))       # asked, not blamed
+        self.assertNotIn("deployment failed", second["observed"] or "")
+
+    def test_a_failure_already_reported_lets_the_lookup_go_on_as_usual(self) -> None:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        first, _ = self.act(Screen(tree=self.FAILED), self.GO, "Go to resource", runner=r)
+        self.assertEqual((first["outcome"], r.ask.prompts), ("unknown", []))
+        with mock.patch("builtins.print") as printed:           # the person skipped the step; the next one misses
+            second, _ = self.act(Screen(tree=self.FAILED), {"kind": "action", "labels": ["Overview"], "line": 7},
+                                 "Overview", runner=r)
+        self.assertEqual((second["outcome"], len(r.ask.prompts)), ("unknown", 1))       # the person is asked
+        self.assertIn("A deployment failure is still on screen, reported already: looking for 'Overview' as usual.",
+                      self.said(printed))
+        self.assertLess(r.page.now, 2 * (run.FIND_TIMEOUT_MS / 1000 + 1))
+
+    def test_an_answer_about_a_label_looked_up_past_a_failure_is_used_but_never_recorded(self) -> None:
+        overview = ScreenNode()
+        item = {"kind": "action", "labels": ["Overview"], "line": 7}
+        for answer, outcome, clicked in (("1", "drift", 1), ("g", "drift", 0), ("i", "match", 0)):
+            with self.subTest(answer=answer):
+                self.recording["steps"]["9.9.1"]["labels"] = {}
+                r = run.Runner(FakePage(), STEPS, self.recording, self.args(run_id=f"past-{answer}"),
+                               ask=Answers(answer))
+                self.act(Screen(tree=self.FAILED), self.GO, "Go to resource", runner=r)   # reported: unknown
+                overview.clicked = 0
+                screen = Screen(("link", "Overview (preview)", overview), tree=self.FAILED)
+                with mock.patch("builtins.print") as printed:
+                    record, _ = self.act(screen, item, "Overview", runner=r,
+                                         candidates=[run.Candidate("link", "Overview (preview)")])
+                self.assertEqual((record["outcome"], overview.clicked, len(r.ask.prompts)), (outcome, clicked, 1))
+                self.assertIn(run.PAST_FAILURE, self.said(printed))
+                self.assertEqual(self.recording["steps"]["9.9.1"]["labels"], {})
+                saved = json.loads((self.tmp / "rec.json").read_text(encoding="utf-8"))
+                self.assertNotIn("Overview", saved["steps"].get("9.9.1", {}).get("labels", {}))
+                if answer == "1":
+                    self.assertEqual((record["severity"], record["workaround"], record["proposedEdit"]),
+                                     ("misleading", True, None))
+
+    def test_a_failure_already_reported_lets_a_resource_be_searched_for(self) -> None:
+        lb = "dev-skycraft-swc-lb"
+        screen = Screen(tree=self.FAILED)
+        found = ScreenNode(section=("", "Resources", lb))
+        ResourceTests.with_search(self, screen, ("option", lb, found))
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        chain = {"kind": "navigation", "labels": [lb], "resources": [0], "line": 6}
+        r.reported_failures.add("Your deployment failed; Resource " + self.OBJECT_ID
+                                + " in contoso.onmicrosoft.com failed: Conflict")
+        record = self.on(screen, r, lambda: r.open_resource(self.STEP, chain, lb, at_start=True))
+        self.assertEqual((record["outcome"], record["observed"], found.clicked),
+                         ("match", "opened from the Portal's search", 1))
+
+    def test_a_screen_that_cannot_be_read_for_a_while_does_not_end_the_wait(self) -> None:
+        go = ScreenNode()
+
+        class Unreadable(Screen):
+            """A frame whose snapshot times out while `blind` is set, as on a Portal re-rendering."""
+            blind = False
+
+            def locator(self, selector: str):
+                if selector == "body" and self.blind:
+                    class Body:
+                        def aria_snapshot(self, timeout=None):
+                            raise run.PlaywrightError("Timeout 2000ms exceeded")
+                    return Body()
+                return super().locator(selector)
+
+        screen = Unreadable(tree=self.RUNNING)
+
+        def render(_waits: int) -> None:
+            screen.blind = 30 <= page.now < 45 or 70 <= page.now < 75
+            if page.now >= 50 and screen.tree == self.RUNNING:
+                screen.tree = ""                                 # empty for a moment: navigating
+            if page.now >= 60 and screen.tree == "":
+                screen.tree = self.RUNNING
+            if page.now >= 100 and not screen.entries:
+                screen.tree = self.COMPLETE
+                screen.add(("button", "Go to resource", go))
+
+        page = self.LoadingPage(render)
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], go.clicked, r.ask.prompts), ("match", 1, []))
+        self.assertFalse([line for line in self.said(printed) if "has ended" in line])
+
+    def check(self, screen: Screen, page: FakePage, **args) -> tuple[dict, run.Runner, list[str]]:
+        """check_result for STEP, whose recorded result is 'Your deployment is complete', against
+        `screen`: the record written, the runner and what the console said."""
+        self.recording["steps"]["9.9.1"]["result"] = {"text": "Your deployment is complete"}
+        r = run.Runner(page, STEPS, self.recording, self.args(**args), ask=Answers())
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "text_on_screen", lambda page, text: text in screen.tree), \
+                mock.patch("builtins.print") as printed:
+            r.check_result(self.STEP, r.step_entry(self.STEP))
+        return r.records[-1], r, self.said(printed)
+
+    def test_the_expected_result_waits_for_the_deployment(self) -> None:
+        screen = Screen(tree=self.RUNNING)
+        page = self.ending(screen, 400, self.COMPLETE)
+        record, _, said = self.check(screen, page)
+        self.assertEqual((record["kind"], record["outcome"]), ("result", "match"))
+        self.assertGreaterEqual(page.now, 400)
+        self.assertLess(page.now, 400 + run.DEPLOYMENT_POLL_MS / 1000 + 1)
+        self.assertTrue(any("the Expected Result" in line for line in said if "still running" in line))
+
+    def test_the_expected_result_of_a_failed_deployment_is_reported_as_such(self) -> None:
+        screen = Screen(tree=self.RUNNING)
+        record, _, _ = self.check(screen, self.ending(screen, 30, self.FAILED))
+        self.assertEqual((record["outcome"], record["severity"]), ("unknown", None))
+        self.assertTrue(record["observed"].startswith(
+            "the Portal's deployment failed: Your deployment failed; Resource <id>"))
+
+    def test_an_expected_result_missing_after_the_deployment_says_how_long_it_was_looked_for(self) -> None:
+        screen = Screen(tree=self.RUNNING)
+        record, _, _ = self.check(screen, self.ending(screen, 100, self.TOP_BAR))
+        self.assertEqual((record["outcome"], record["observed"]),
+                         ("drift", f"text not on screen within {run.RESULT_TIMEOUT_S} s, 1 min 25 s of waiting "
+                                   f"for a deployment, and {run.RESULT_TIMEOUT_S} s after it ended"))
+
+    def test_the_expected_result_of_a_deployment_past_the_maximum_is_unknown(self) -> None:
+        record, r, _ = self.check(Screen(tree=self.RUNNING), FakePage(), deployment_timeout_minutes=1)
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertIn("still running after 1 min", record["observed"])
+        self.assertGreaterEqual(r.page.now, run.RESULT_TIMEOUT_S + 60)
+        self.assertLess(r.page.now, run.RESULT_TIMEOUT_S + 60 + run.DEPLOYMENT_POLL_MS / 1000 + 1)
+
+    def test_an_expected_result_without_a_deployment_keeps_its_timing(self) -> None:
+        record, r, said = self.check(Screen(tree=self.TOP_BAR), FakePage())
+        self.assertEqual((record["outcome"], record["severity"], record["observed"]),
+                         ("drift", "misleading", f"text not on screen within {run.RESULT_TIMEOUT_S} s"))
+        self.assertGreaterEqual(r.page.now, run.RESULT_TIMEOUT_S)
+        self.assertLess(r.page.now, run.RESULT_TIMEOUT_S + 1)
+        self.assertFalse([line for line in said if "deployment" in line])
 
 
 class ResourceTests(RunnerTestCase):

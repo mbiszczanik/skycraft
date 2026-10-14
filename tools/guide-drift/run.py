@@ -115,6 +115,35 @@ blade's title heading has no content after it), the console says so once and the
 for up to BLADE_LOAD_TIMEOUT_MS more (BLADE_EMPTY_TIMEOUT_MS for a titled blade); once the blade
 has rendered, it is looked for FIND_TIMEOUT_MS again. Only then is the person asked.
 
+A Portal deployment takes from seconds to ten minutes, so before the blade check, a lookup that
+found nothing waits for one that the screen shows still running (issue #328, wait_for_deployment):
+a line of the accessibility tree, in the main frame or a child frame within the window's columns,
+whose whole text starts with 'Deployment is in progress' (the deployment overview) or 'Deployment
+in progress' (its notification; DEPLOYMENT_RUNNING_TEXT, which says where the texts come from and
+that no run has confirmed them yet). The console says so once, and how long the run waits at most
+(--deployment-timeout-minutes, 30 by default), then every DEPLOYMENT_SAY_S how long it has waited.
+The label is looked for every DEPLOYMENT_POLL_MS meanwhile; a read of the screen whose main frame
+cannot be read or shows nothing says nothing, and the wait goes on. Once the deployment has ended,
+the label is looked for FIND_TIMEOUT_MS again, then as above. A failure ('Your deployment failed',
+'Deployment failed') ends the item as unknown with the Portal's text and the line after it,
+scrubbed as any observed text, and so does a deployment still running after the longest wait; the
+person is not asked about the label then, and nothing is recorded: nothing about it is known to be
+missing. Only a new failure counts: one on screen when a wait starts is an earlier deployment's,
+means only that the running one has ended once it is gone, and counts as reported; one this run
+has reported (the overview or notification of a step that failed and was skipped or done by hand,
+or the same text from a new deployment) is said to be still on screen, and the lookup goes on as
+without a deployment (the blade check, the recording's decision, the global search, the person);
+what the person answers there is used in this run only, a pick as a workaround, and never recorded,
+as the Portal may not be where the guide leads. A
+failure's identity is its text and the line after it, unless that line is a deployment's status
+too (DEPLOYMENT_STATUS_TEXTS). A label, a form's first field (find_form) and a resource
+a chain names are waited for so, and the Expected Result is too after its RESULT_TIMEOUT_S
+(check_result). Without a deployment on screen nothing waits longer than before, and a recording
+needs nothing for it; a label's miss reads the screen once for both checks, as the blade check
+alone did, and the Expected Result's miss reads it once more than before. The start of a step
+(check_start) is not waited for: the deployment overview's address is set when it opens, not when
+it ends.
+
 A resource a navigation chain names in a code span ('**Load balancers** -> `dev-skycraft-swc-lb`
 -> **Backend pools**', parse.py's "resources") is opened as the one visible link, grid cell or row
 of that exact name, once the recording's placeholders are filled; a name with a placeholder left
@@ -272,7 +301,7 @@ Usage (normally via Invoke-GuideDrift.ps1):
   python run.py --steps steps.json --recording recordings/lab-1.1.json --log-dir <dir>
                 --run-id 20261007-100000 --tenant-id <guid> --tenant-domain contoso.onmicrosoft.com
                 --state <path> --auth-state <path> [--tenant-name "Contoso Ltd"]
-                [--from-step 1.1.6] [--resume]
+                [--from-step 1.1.6] [--resume] [--deployment-timeout-minutes 30]
 """
 from __future__ import annotations
 
@@ -316,6 +345,9 @@ DECORATION_REASON = "the Portal's name only decorates the guide's label ({what})
 # up by the name the recording keeps, and the recording cannot keep this one (Runner.recordable).
 UNRECORDABLE_NAME = ("That element's name holds an id, an address or a secret, which the recording cannot keep: "
                      "it is used as a workaround in this run, with no guide edit, and the next run asks again.")
+# Why the person's answer about a label looked up past a deployment failure is not recorded (#328).
+PAST_FAILURE = ("A deployment failure is on screen, so that answer is used in this run only, as a workaround with "
+                "no guide edit, and is not written to the recording: the next run asks again.")
 SETTLE_MS = 1500
 FIND_TIMEOUT_MS = 8000
 CHECK_TIMEOUT_MS = 2000     # set_checked() before the label is tried, and the wait for its effect
@@ -327,6 +359,25 @@ BLADE_LOAD_TIMEOUT_MS = 60000
 # The same for a blade whose title is there but whose content is not: a blade that has nothing
 # but its title and buttons for good (a read-only summary) costs this much, not a minute.
 BLADE_EMPTY_TIMEOUT_MS = 20000
+# What the Portal shows while a deployment runs and once it has failed (#328), as the whole text of
+# one line of the accessibility tree (snapshot_text), regardless of case. The deployment overview
+# a Create opens is titled 'Deployment is in progress', then 'Your deployment is complete' or 'Your
+# deployment failed' (Microsoft Learn: container-apps/quickstart-portal, and
+# troubleshoot/azure/azure-kubernetes/extensions/troubleshoot-failed-kubernetes-deployment-offer);
+# the notification of a deployment reads 'Deployment in progress...', then 'Deployment succeeded' or
+# 'Deployment failed'. No guide screenshot shows either and no run has read them yet: the first
+# supervised run of a lab that deploys confirms them (blade-*.aria.txt keeps what a lookup that
+# found nothing read). A complete or succeeded deployment is none: nothing is waited for.
+DEPLOYMENT_RUNNING_TEXT = re.compile(r"^(?:deployment is in progress|deployment in progress)\b", re.IGNORECASE)
+DEPLOYMENT_FAILED_TEXT = re.compile(r"^(?:your deployment failed|deployment failed)\b", re.IGNORECASE)
+DEPLOYMENT_ENDED_TEXT = re.compile(r"^(?:your deployment is complete|deployment succeeded)\b", re.IGNORECASE)
+DEPLOYMENT_STATUS_TEXTS = (DEPLOYMENT_RUNNING_TEXT, DEPLOYMENT_FAILED_TEXT, DEPLOYMENT_ENDED_TEXT)
+# How long a lookup waits at most for a deployment still running (--deployment-timeout-minutes,
+# -DeploymentTimeoutMinutes), how often it looks again meanwhile, and how often the console says
+# that it is still waiting.
+DEPLOYMENT_TIMEOUT_MIN = 30
+DEPLOYMENT_POLL_MS = 5000
+DEPLOYMENT_SAY_S = 60
 # A blade's or pane's close button, named after its title: "Close content 'New Group'". The title
 # reads 'undefined' while the blade's content is still loading.
 BLADE_CLOSE = re.compile(r"^Close content '(?P<title>.*)'$")
@@ -473,7 +524,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--auth-state", type=Path, required=True)
     p.add_argument("--from-step")
     p.add_argument("--resume", action="store_true")
+    p.add_argument("--deployment-timeout-minutes", type=whole_minutes, default=DEPLOYMENT_TIMEOUT_MIN,
+                   help="how long a lookup waits at most for a Portal deployment still running (#328)")
     return p.parse_args(argv)
+
+
+def whole_minutes(text: str) -> int:
+    """A number of minutes, at least 1, for argparse."""
+    try:
+        minutes = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a whole number of minutes: {text!r}") from None
+    if minutes < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1 minute: {minutes}")
+    return minutes
+
+
+def duration(seconds: float) -> str:
+    """'45 s', '2 min', '2 min 5 s': how long the console says a wait took."""
+    minutes, rest = divmod(int(seconds), 60)
+    if not minutes:
+        return f"{rest} s"
+    return f"{minutes} min" + (f" {rest} s" if rest else "")
 
 
 def all_frames(page: Page) -> list[Frame]:
@@ -508,17 +580,96 @@ def aria_outline(page: Page) -> list[tuple[str, str]]:
     blades render in iframes and the Portal parks earlier ones off to the left, where their rows
     would follow the new blade's heading and pass for its content. So is a frame that cannot be
     read."""
-    outline: list[tuple[str, str]] = []
+    return outline_of(frame_snapshots(page))
+
+
+def frame_snapshots(page: Page) -> list[str | None]:
+    """The aria_snapshot() of the main frame and of every child frame whose iframe lies within the
+    window's columns (aria_outline says why), main frame first; None for a frame that cannot be
+    read. One read of the screen gives both the outline (outline_of) and the texts a deployment is
+    read from (texts_of), so a lookup that found nothing reads it once (#328)."""
+    snapshots: list[str | None] = []
     frames = all_frames(page)
     for frame in frames:
         if frame is not frames[0] and not frame_in_window(frame, page.viewport_size):
             continue
         try:
-            snapshot = frame.locator("body").aria_snapshot(timeout=2000)
+            snapshots.append(frame.locator("body").aria_snapshot(timeout=2000))
         except PlaywrightError:     # timed out, or the frame went away while the Portal navigated
-            continue
-        outline += [key for key in map(snapshot_key, snapshot.splitlines()) if key is not None]
-    return outline
+            snapshots.append(None)
+    return snapshots
+
+
+def outline_of(snapshots: list[str | None]) -> list[tuple[str, str]]:
+    """aria_outline() of the frames frame_snapshots() read; a frame that could not be read is left out."""
+    return [key for snapshot in snapshots if snapshot is not None
+            for key in map(snapshot_key, snapshot.splitlines()) if key is not None]
+
+
+# The inline text of a snapshot line once its key is read (snapshot_text): 'paragraph: x', 'text: x',
+# 'heading [level=2]: x'. YAML quotes the text when it needs to.
+SNAPSHOT_INLINE = re.compile(r'^[a-z]+(?:\s+"(?:[^"\\]|\\.)*")?(?:\s+\[[^\]]*\])*:\s+(?P<text>.+)$')
+
+
+def snapshot_text(line: str) -> str:
+    """What one line of an aria_snapshot() shows (#328): the element's name (snapshot_key), or else
+    the text written after it ('- paragraph: x', '- text: x'), unquoted; '' for a line with
+    neither (a list, a property such as '- /url: x', no list item)."""
+    key = snapshot_key(line)
+    if key is None:
+        return ""
+    if key[1]:
+        return key[1]
+    m = SNAPSHOT_LINE.match(line)
+    inline = SNAPSHOT_INLINE.match(m.group("plain") if m.group("quoted") is None
+                                   else m.group("quoted").replace("''", "'"))
+    if not inline:
+        return ""
+    text = inline.group("text").strip()
+    if len(text) > 1 and text[0] == text[-1] == '"':
+        try:
+            return json.loads(text)
+        except ValueError:
+            return text[1:-1]
+    if len(text) > 1 and text[0] == text[-1] == "'":
+        return text[1:-1].replace("''", "'")
+    return text
+
+
+def texts_of(snapshots: list[str | None]) -> list[str] | None:
+    """snapshot_text of every line of the frames frame_snapshots() read, in tree order: what
+    deployment_state() reads. None when the main frame could not be read or shows nothing (the
+    Portal navigating): such a read says nothing about a deployment, so a wait goes on (#328)."""
+    if not snapshots or snapshots[0] is None or not snapshots[0].strip():
+        return None
+    return [snapshot_text(line) for snapshot in snapshots if snapshot is not None
+            for line in snapshot.splitlines()]
+
+
+def screen_texts(page: Page) -> list[str] | None:
+    """texts_of() a fresh read of the screen."""
+    return texts_of(frame_snapshots(page))
+
+
+def deployment_state(texts: list[str]) -> tuple[str | None, list[str]]:
+    """What the screen (texts_of) shows of Portal deployments (#328): the text of the first line
+    whose whole text starts as DEPLOYMENT_RUNNING_TEXT does, None when there is none; and every
+    failure on screen, in tree order, once each: a line that starts as DEPLOYMENT_FAILED_TEXT
+    does, '; ' and the next line with text (the error the Portal gives under it), unless that line
+    is a deployment's status itself (DEPLOYMENT_STATUS_TEXTS: another deployment's, which changes as
+    that one runs and ends, so the failure would not stay the same failure). A failure may be an
+    earlier deployment's, left on screen: Runner.wait_for_deployment tells them apart."""
+    running = next((text.strip() for text in texts if DEPLOYMENT_RUNNING_TEXT.match(text.strip())), None)
+    failures: list[str] = []
+    for index, text in enumerate(texts):
+        if DEPLOYMENT_FAILED_TEXT.match(text.strip()):
+            after = next((t.strip() for t in texts[index + 1:] if t.strip()), "")
+            if any(status.match(after) for status in DEPLOYMENT_STATUS_TEXTS):
+                after = ""
+            failure = text.strip() + (f"; {after}" if after else "")
+            if failure not in failures:
+                failures.append(failure)
+    return running, failures
 
 
 def blade_still_loading(outline: list[tuple[str, str]]) -> str | None:
@@ -630,6 +781,12 @@ class Ambiguous(LookupError):
 class PageClosed(Exception):
     """The browser window is gone. The run stops at once (ABORTED, state kept) rather than ask
     the person to choose among the candidates of an empty screen."""
+
+
+class DeploymentStopped(Exception):
+    """A lookup gave up on a Portal deployment (#328): it failed, or it was still running after the
+    longest wait. Its message is the record's 'observed'; the step is unknown, and the person is
+    not asked about the label, as nothing about it is missing yet."""
 
 
 class ReadOnly(LookupError):
@@ -1811,6 +1968,13 @@ class Runner:
         # with 's'. The latter two are in `unrecorded` too: their blade is not recorded either.
         self.excused: dict[str, str] = {}
         self.unrecorded: set[str] = set()
+        # The longest a lookup waits for a deployment still running, and the deployments' failures
+        # this run has reported, which are not reported again (#328).
+        self.deployment_minutes: int = getattr(args, "deployment_timeout_minutes", DEPLOYMENT_TIMEOUT_MIN)
+        self.reported_failures: set[str] = set()
+        # The current label was looked up past a failure already reported (wait_for_deployment): the
+        # person's answer is used in this run only, never written to the recording (#328).
+        self.failure_on_screen = False
 
     def earlier_results(self) -> list[dict]:
         """The records the stopped parts of this run wrote, scrubbed as write() scrubs them: that
@@ -1902,6 +2066,79 @@ class Runner:
             return element
         return look
 
+    def wait_for_deployment(self, what: str, look: Callable[[], Found | None],
+                            snapshots: list[str | None] | None = None) -> tuple[float | None, Found | None]:
+        """After `look` found nothing in its usual time, from `snapshots` (frame_snapshots, read
+        afresh when not given): when the screen shows a Portal deployment still running
+        (deployment_state, #328), say so once, naming `what` it looks for, and look again every
+        DEPLOYMENT_POLL_MS until it finds something or the deployment has ended, for up to the
+        run's longest wait (--deployment-timeout-minutes), saying every DEPLOYMENT_SAY_S how long it
+        has waited. Returns (the seconds it waited, what it found); (None, None) at once when no
+        deployment is running, so a step without one waits no longer. An Ambiguous look counts as
+        none while the deployment runs, and so does a read of the screen that says nothing
+        (texts_of: the main frame unreadable or empty): the wait goes on.
+
+        A failure (DEPLOYMENT_FAILED_TEXT) raises DeploymentStopped with the Portal's text, which
+        write() scrubs as any observed text, but only a failure that is new. The failures on screen
+        when a wait starts are an earlier deployment's: once the running one is gone, they mean it
+        has ended, and the label is looked for again. With nothing running, a failure is reported
+        once per run (reported_failures, which also takes the failures a wait passed over); one
+        already reported says only that it is still on screen, and the lookup goes on as without a
+        deployment (the blade check, the recording's decision, the global search, the person), as a
+        step after a failed one does. It sets failure_on_screen then: act_on_label uses what the
+        person answers in this run only, as the Portal may not be where the guide leads. One still
+        running after the longest wait raises DeploymentStopped too, and a closed window
+        PageClosed."""
+        texts = texts_of(frame_snapshots(self.page) if snapshots is None else snapshots)
+        if texts is None:
+            return None, None
+        running, failures = deployment_state(texts)
+        if running is None:
+            new = [failure for failure in failures if failure not in self.reported_failures]
+            if new:
+                self.reported_failures.update(new)
+                print("The Portal's deployment failed.")
+                raise DeploymentStopped(f"the Portal's deployment failed: {new[0]}")
+            if failures:
+                self.failure_on_screen = True
+                print(f"A deployment failure is still on screen, reported already: looking for {what} as usual.")
+            return None, None
+        earlier = set(failures)
+        self.reported_failures.update(earlier)      # an earlier deployment's: never reported later
+        limit = self.deployment_minutes
+        print(f"A Portal deployment is still running: waiting up to {limit} min for it to end "
+              f"before giving up on {what}.")
+        started = said = time.monotonic()
+        while True:
+            try:
+                found = look()
+            except Ambiguous:
+                found = None
+            waited = time.monotonic() - started
+            if found is not None:
+                print(f"Found {what} after waiting {duration(waited)} for the deployment.")
+                return waited, found
+            texts = screen_texts(self.page)
+            if texts is not None:
+                running, failures = deployment_state(texts)
+                if running is None:
+                    new = [failure for failure in failures if failure not in earlier]
+                    if new:
+                        self.reported_failures.update(new)
+                        print(f"The Portal's deployment failed after {duration(waited)}.")
+                        raise DeploymentStopped(f"the Portal's deployment failed: {new[0]}")
+                    print(f"The deployment has ended after {duration(waited)}: looking for {what} again.")
+                    return waited, None
+            if waited >= limit * 60:
+                raise DeploymentStopped(f"the Portal's deployment was still running after {limit} min, "
+                                        "the longest the run waits (-DeploymentTimeoutMinutes)")
+            if time.monotonic() - said >= DEPLOYMENT_SAY_S:
+                said = time.monotonic()
+                print(f"  still waiting for the deployment: {duration(waited)} of up to {limit} min")
+            if self.page.is_closed():
+                raise PageClosed("the browser window was closed")
+            self.page.wait_for_timeout(DEPLOYMENT_POLL_MS)
+
     def wait_for_blade(self, step: dict, item: dict, label: str, look: Callable[[], Locator | None],
                        renew: Callable[[], Callable[[], Locator | None]] | None = None) -> Locator | None:
         """After `look` found nothing for FIND_TIMEOUT_MS: when a blade is still loading
@@ -1912,8 +2149,27 @@ class Runner:
         (looking_for: a decorated name, #244, counts again only after SETTLE_MS on the rendered
         blade). None at once when no blade is loading, so a label missing from a rendered blade is
         asked about after the normal time (issue #233). Whenever the label is still not found, the
-        outline is kept (save_blade_outline)."""
-        outline = aria_outline(self.page)
+        outline is kept (save_blade_outline).
+
+        Before all that, a deployment still running is waited for (wait_for_deployment, #328); once
+        it has ended, `look` (or a fresh one from `renew`) gets FIND_TIMEOUT_MS again before the
+        blade is checked. A new failure, or a deployment past the longest wait, raises
+        DeploymentStopped once the outline is kept. Without a deployment the screen is read once
+        for both checks (frame_snapshots)."""
+        snapshots = frame_snapshots(self.page)
+        try:
+            waited, found = self.wait_for_deployment(f"'{label}'", look, snapshots)
+        except DeploymentStopped:
+            self.save_blade_outline(step, item, label)
+            raise
+        if found is not None:
+            return found
+        if waited is not None:
+            found = in_time(self.page, renew() if renew else look)
+            if found is not None:
+                return found
+            snapshots = frame_snapshots(self.page)
+        outline = outline_of(snapshots)
         loading = blade_still_loading(outline)
         if loading is None:
             self.save_blade_outline(step, item, label, outline)
@@ -2090,6 +2346,7 @@ class Runner:
         **X** unchecked', 'Make sure **X** is checked', whose words are no click): then it is
         unknown, as the guide sets a state the element cannot hold."""
         kind, line = item["kind"], item["line"]
+        self.failure_on_screen = False
         record = self.new_record(step, kind, label)
         if kind == "search" and item.get("scope") == "blade":
             return self.search_in_blade(label, record)
@@ -2111,6 +2368,9 @@ class Runner:
                         element = self.wait_for_blade(step, item, label, look, renew)
         except Ambiguous as error:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
+            return record
+        except DeploymentStopped as error:       # failed or past the longest wait: nobody is asked (#328)
+            record.update(outcome="unknown", observed=str(error))
             return record
         except (PlaywrightError, LookupError) as error:     # the search box is missing or cannot be typed in
             record.update(outcome="unknown", observed=error_text(error))
@@ -2136,7 +2396,14 @@ class Runner:
                     # cannot keep is acted on as a workaround, never recorded: the next run asks again.
                     print(UNRECORDABLE_NAME)
                     decision = decision.as_workaround()
-                entry = decision.to_recording(rejected_candidates(candidates, label, decision.name), now())
+                if self.failure_on_screen:
+                    # A deployment failed before this lookup (#328): the Portal may not be where the
+                    # guide leads, so the answer is used in this run only; the next run asks again.
+                    print(PAST_FAILURE)
+                    if decision.name and not decision.workaround:
+                        decision = decision.as_workaround()
+                entry = (None if self.failure_on_screen
+                         else decision.to_recording(rejected_candidates(candidates, label, decision.name), now()))
                 if decision.kind == "ignore" or decision.severity == "blocking":
                     self.remember(step, label, entry)     # nothing to act on: record at once
                 else:
@@ -2259,6 +2526,9 @@ class Runner:
             self.page.wait_for_timeout(SETTLE_MS)
         except Ambiguous as error:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{name}'")
+            return record
+        except DeploymentStopped as error:       # failed or past the longest wait (#328)
+            record.update(outcome="unknown", observed=str(error))
             return record
         except (PlaywrightError, LookupError) as error:
             record.update(outcome="unknown", observed=error_text(error))
@@ -2582,18 +2852,37 @@ class Runner:
         # breadcrumb at once, and either proves the result. The Portal often shows the result a
         # few seconds after the last click (a notification, a refreshed list), so keep looking.
         text = self.redactor.restore(entry["result"]["text"])
-        deadline = time.monotonic() + RESULT_TIMEOUT_S
-        try:
+
+        def shown_within(seconds: float) -> bool:
+            deadline = time.monotonic() + seconds
             found = text_on_screen(self.page, text)
             while not found and time.monotonic() < deadline:
                 self.page.wait_for_timeout(500)
                 found = text_on_screen(self.page, text)
+            return found
+
+        waited: float | None = None
+        try:
+            found = shown_within(RESULT_TIMEOUT_S)
+            if not found:
+                # A deployment still running is waited for, then the text looked for again (#328).
+                waited, shown = self.wait_for_deployment(
+                    "the Expected Result", lambda: True if text_on_screen(self.page, text) else None)
+                found = bool(shown) or (waited is not None and shown_within(RESULT_TIMEOUT_S))
         except PlaywrightError as error:
             record.update(outcome="unknown", observed=error_text(error))
             self.write(record)
             return
+        except DeploymentStopped as error:
+            record.update(outcome="unknown", observed=str(error))
+            self.write(record)
+            return
+        missing = f"text not on screen within {RESULT_TIMEOUT_S} s"
+        if waited is not None:
+            missing += (f", {duration(waited)} of waiting for a deployment, "
+                        f"and {RESULT_TIMEOUT_S} s after it ended")
         record.update(outcome="match" if found else "drift", severity=None if found else "misleading",
-                      observed=None if found else f"text not on screen within {RESULT_TIMEOUT_S} s")
+                      observed=None if found else missing)
         self.write(record)
 
     def screenshot(self, step: dict) -> dict:
