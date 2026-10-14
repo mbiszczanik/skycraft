@@ -16,7 +16,9 @@
       verified    The body carries exactly one 'Live-verified: <what was run>' line. Pass.
       deferred    The body carries exactly one 'Live-verification: deferred -> #<issue>' line
                   and no GitHub closing keyword (close/fix/resolve + #N), so the merge cannot
-                  close the issue whose live criterion is still open. Pass.
+                  close the issue whose live criterion is still open, and the PR carries the
+                  label 'live-deferral-approved': the maintainer's decision that this PR may
+                  merge before its live pass (issue #338). Pass; without the label, fail.
       otherwise   Fail, with the two accepted forms in the message.
 
     Declarations inside HTML comments are ignored, so the PR template can show the syntax.
@@ -33,12 +35,18 @@
 .PARAMETER ChangedFile
     The changed paths as an array; alternative to -ChangedFilePath for local runs.
 
+.PARAMETER LabelPath
+    File holding the PR's labels, one per line (the workflow reads them from the issues API).
+
+.PARAMETER Label
+    The PR's labels as an array; alternative to -LabelPath for local runs.
+
 .EXAMPLE
     .\tools\Test-PrLiveVerification.ps1 -BodyPath body.md -ChangedFilePath files.txt
     The workflow form. Exits 1 when the gate fails.
 
 .EXAMPLE
-    .\tools\Test-PrLiveVerification.ps1 -Body (gh pr view 140 --json body -q .body) -ChangedFile (gh pr diff 140 --name-only)
+    .\tools\Test-PrLiveVerification.ps1 -Body (gh pr view 140 --json body -q .body) -ChangedFile (gh pr diff 140 --name-only) -Label (gh pr view 140 --json labels -q '.labels[].name')
     Check an open PR from a developer machine.
 
 .NOTES
@@ -61,7 +69,13 @@ param(
     [string]$Body,
 
     [Parameter(Mandatory = $false)]
-    [string[]]$ChangedFile
+    [string[]]$ChangedFile,
+
+    [Parameter(Mandatory = $false)]
+    [string]$LabelPath,
+
+    [Parameter(Mandatory = $false)]
+    [string[]]$Label
 )
 
 $ErrorActionPreference = 'Stop'
@@ -80,8 +94,12 @@ function Test-GatedPath {
 function Get-PrGateVerdict {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ChangedFile,
-        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body,
+        [AllowEmptyCollection()][string[]]$Label = @()
     )
+
+    # The maintainer's decision to merge a PR before its live pass ran (issue #338).
+    $approvalLabel = 'live-deferral-approved'
 
     $verdict = [PSCustomObject]@{
         Gated      = $false
@@ -128,7 +146,12 @@ function Get-PrGateVerdict {
         $verdict.Reason = "live verification is deferred to #$($verdict.DeferredTo), but the body carries a closing keyword (close/fix/resolve #N). A merge would close an issue whose live criterion is still open - use 'Refs #N' and close it after the live pass."
         return $verdict
     }
-    $verdict.Reason = "live verification deferred to #$($verdict.DeferredTo)"
+    if (@($Label | ForEach-Object { $_.Trim() }) -notcontains $approvalLabel) {
+        $verdict.Pass   = $false
+        $verdict.Reason = "live verification is deferred to #$($verdict.DeferredTo) and the PR has no '$approvalLabel' label. Run the live pass and declare 'Live-verified: <what was run>', or, if merging before it is acceptable, the maintainer adds the label."
+        return $verdict
+    }
+    $verdict.Reason = "live verification deferred to #$($verdict.DeferredTo), merge approved by the '$approvalLabel' label"
     return $verdict
 }
 
@@ -138,8 +161,10 @@ if ($MyInvocation.InvocationName -ne '.') {
     if ($ChangedFilePath) { $ChangedFile = @(Get-Content -LiteralPath $ChangedFilePath | Where-Object { $_.Trim() }) }
     if ($null -eq $Body)  { $Body = '' }
     if ($null -eq $ChangedFile) { $ChangedFile = @() }
+    if ($LabelPath)       { $Label = @(Get-Content -LiteralPath $LabelPath | Where-Object { $_.Trim() }) }
+    if ($null -eq $Label) { $Label = @() }
 
-    $result = Get-PrGateVerdict -ChangedFile $ChangedFile -Body $Body
+    $result = Get-PrGateVerdict -ChangedFile $ChangedFile -Body $Body -Label $Label
 
     if ($result.Pass) {
         Write-Host "[PASS] PR gate: $($result.Reason)" -ForegroundColor Green
