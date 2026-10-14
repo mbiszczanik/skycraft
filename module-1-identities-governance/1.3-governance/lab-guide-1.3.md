@@ -294,6 +294,8 @@ After a refresh, `rg-test-with-tag` is no longer listed in **Resource groups**.
 
 **Note**: **Region** starts at **(US) East US**. Change it to Sweden Central: Step 1.3.9 will allow only Sweden Central and North Europe, and once that policy is in place an action group in East US is refused (the Portal then shows the refusal only under the notification bell and leaves the form as it was). **Display name** takes at most 12 characters.
 
+![Configure Advisor Alerts](./images/step-1.3.7a.png)
+
 7. Click the **Tags** tab and add:
 
 | Name        | Value       |
