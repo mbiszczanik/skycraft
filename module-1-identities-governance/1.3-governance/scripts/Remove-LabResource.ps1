@@ -6,7 +6,10 @@
     Removes, in this order:
     1. The resource locks on the production and platform resource groups
        (lock-no-delete-prod, lock-no-delete-platform).
-    2. The three subscription-level policy assignments.
+    2. The three subscription-level policy assignments, whether the Bicep path made them under
+       fixed names or the learner made them in the Portal under generated names (issue #330;
+       LabPolicyAssignment.ps1 says which assignment counts). An assignment made twice is not
+       removed: that is an [ERROR], because which of the two is the lab's cannot be told.
     3. The two budgets: SkyCraft-Monthly-Budget on the subscription (step 1.3.14) and
        SkyCraft-Prod-Monthly on prod-skycraft-swc-rg (step 1.3.16).
     4. The Advisor alert Advisor-Cost-Recommendations (step 1.3.21), an activity log alert in
@@ -72,10 +75,11 @@ $prodRg = "prod-skycraft-swc-rg"
 $script:cleanupFailures = 0
 
 # Whether a lookup's error says the object (or the resource group holding it) does not exist,
-# rather than that the lookup failed. The locks, budgets, alerts and action groups are found by
-# listing their scope, so for them a not-found error means the resource group is gone:
-# "Resource group '<rg>' could not be found.", code ResourceGroupNotFound. Get-AzPolicyAssignment
-# reads one assignment by name and reports a missing one as PolicyAssignmentNotFound. The status
+# rather than that the lookup failed. Every object is found by listing its scope, so for the
+# locks, budgets, alerts and action groups a not-found error means the resource group is gone:
+# "Resource group '<rg>' could not be found.", code ResourceGroupNotFound. PolicyAssignmentNotFound
+# is what Get-AzPolicyAssignment reports for a read by name, which this script no longer makes
+# (issue #330); it is still read as not found. The status
 # travels in Response.StatusCode (Get-AzConsumptionBudget), ResponseStatusCode (the generated
 # Az.Monitor and policy cmdlets) or HttpStatus (Get-AzResourceLock). A missing subscription is a
 # 404 too, but it means the context is wrong, not that the object is gone, so it never reads as
@@ -199,26 +203,45 @@ if ($lockRemoved) {
 }
 
 # 2. Remove Policies
+# The Portal's Assignment name sets only an assignment's display name; its resource name is a
+# generated id, so a lookup by name missed every Portal-made assignment and left two deny
+# policies on the subscription (issue #330). The subscription's assignments are listed once, and
+# each of the guide's three is picked by its definition and by the name the guide gives it, as
+# resource name or display name - LabPolicyAssignment.ps1, shared with Test-Lab.ps1, says which
+# match. A match is removed by its id. Two matches for one assignment are an [ERROR] and neither
+# is removed: which one the learner meant cannot be told.
 Write-Host "`n2. Removing Policy Assignments..." -ForegroundColor Cyan
-$policies = @("Require-Environment-Tag-RG", "Enforce-Project-Tag", "Restrict-Azure-Regions")
+. (Join-Path $PSScriptRoot 'LabPolicyAssignment.ps1')
 
-foreach ($policy in $policies) {
-    $policyLookup = Invoke-LabLookup -Target "policy assignment $policy" -Lookup {
-        Get-AzPolicyAssignment -Name $policy -Scope "/subscriptions/$subId" -ErrorAction Stop
-    }
-    if ($policyLookup.Failed) { continue }
-    if ($policyLookup.Value.Count -eq 0) {
-        Write-Host "  -> [INFO] Policy $policy not found." -ForegroundColor Gray
-        continue
-    }
-    if ($PSCmdlet.ShouldProcess("$policy on /subscriptions/$subId", 'Remove policy assignment')) {
-        try {
-            Remove-AzPolicyAssignment -Name $policy -Scope "/subscriptions/$subId" -ErrorAction Stop
-            Write-Host "  -> [SUCCESS] Removed policy: $policy" -ForegroundColor Green
+$subscriptionScope = "/subscriptions/$subId"
+$policyLookup = Invoke-LabLookup -Target "the policy assignments on the subscription" -Lookup {
+    Get-AzPolicyAssignment -Scope $subscriptionScope -ErrorAction Stop
+}
+if (-not $policyLookup.Failed) {
+    foreach ($spec in Get-LabPolicyAssignmentSpec) {
+        $found = @(Select-LabPolicyAssignment -Assignment $policyLookup.Value -SubscriptionId $subId -Spec $spec)
+        if ($found.Count -eq 0) {
+            Write-Host "  -> [INFO] Policy $($spec.Name) not found." -ForegroundColor Gray
+            continue
         }
-        catch {
+        if ($found.Count -gt 1) {
             $script:cleanupFailures++
-            Write-Host "  -> [ERROR] Failed to remove policy ${policy}: $_" -ForegroundColor Red
+            $foundList = ($found | ForEach-Object { Format-LabPolicyAssignment -Assignment $_ }) -join ', '
+            Write-Host "  -> [ERROR] $($found.Count) assignments match $($spec.Name): $foundList. Removing none of them; delete the extra ones in the Portal (Policy > Assignments) and run this script again." -ForegroundColor Red
+            continue
+        }
+
+        $assignment = $found[0]
+        $label = "$($spec.Name) $(Format-LabPolicyAssignment -Assignment $assignment)"
+        if ($PSCmdlet.ShouldProcess("$label on $subscriptionScope", 'Remove policy assignment')) {
+            try {
+                Remove-AzPolicyAssignment -Id (Get-LabPolicyAssignmentId -Assignment $assignment) -ErrorAction Stop | Out-Null
+                Write-Host "  -> [SUCCESS] Removed policy: $label" -ForegroundColor Green
+            }
+            catch {
+                $script:cleanupFailures++
+                Write-Host "  -> [ERROR] Failed to remove policy ${label}: $_" -ForegroundColor Red
+            }
         }
     }
 }

@@ -266,7 +266,7 @@ The region is read-only: the Portal takes it from the resource group.
 
 ![Create an SSH key in Azure Portal](images/step-3.2.1b.png)
 
-3. Click **Next: Tags** and add the platform tags. Lab 1.3's `Enforce-Project-Tag` policy denies any resource without `Project` = `SkyCraft`, and the key is a resource. Without the tags, **Review + create** stops at "Validation failed" with `RequestDisallowedByPolicy` (policy `Enforce Project Tag Value`):
+3. Click **Next: Tags** and add the platform tags. Lab 1.3's `Enforce-Project-Tag` policy denies any resource without `Project` = `SkyCraft`, and the key is a resource. Without the tags, **Review + create** stops at "Validation failed" with `RequestDisallowedByPolicy`, naming the assignment by its display name: `Enforce-Project-Tag` if you made it in the Portal in Lab 1.3, `Enforce Project Tag Value` if Lab 1.3 was deployed with Bicep or its scripts:
 
 | Name        | Value       |
 | ----------- | ----------- |

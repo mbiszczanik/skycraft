@@ -22,6 +22,10 @@
       5. -WhatIf removes nothing and does not wait for lock propagation.
       6. Which errors mean "not found" is pinned by lifting Test-LabNotFoundError out of the
          script with the parser and running it on one error per shape.
+      7. The policy assignments are found whichever path made them (issue #330): by the fixed
+         name the Bicep path sets, or by the display name a learner types into the Portal next
+         to a generated resource name. They are removed by id, from the subscription only. An
+         assignment made twice is removed neither time: an [ERROR], counted, exit 1.
 
     Scope limit, as in the Lab 5.2 suite: the child is launched with -Command, so these tests
     prove the failure counter reaches `exit`, not that `pwsh -File` carries the code out of the
@@ -70,9 +74,10 @@ BeforeAll {
     # Every command the script calls, recording its own invocation. By default the subscription
     # holds everything the guide creates, plus an unrelated action group in prod-skycraft-swc-rg.
     # Environment variables change that, so one generated module serves every scenario:
-    #   SKYCRAFT_STUB_EMPTY   '1' leaves nothing to find: the listings come back empty and
-    #                         Get-AzPolicyAssignment reports PolicyAssignmentNotFound, as the
-    #                         real cmdlet does for a name that is not assigned
+    #   SKYCRAFT_STUB_EMPTY   '1' leaves nothing to find: every listing comes back empty
+    #   SKYCRAFT_STUB_POLICYSET  who made the three policy assignments: 'bicep' (the default:
+    #                         fixed names), 'portal' (generated names, the guide's names as
+    #                         display names) or 'both' (two of each)
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled) or
     #                         report its resource group gone (rgnotfound)
     #   SKYCRAFT_STUB_FAIL    '<Remove-command>:<name>,...' makes one removal throw
@@ -81,7 +86,7 @@ BeforeAll {
     #                         subscription - both returned by the group's lock listing, as the
     #                         real cmdlet returns them
     # A lookup is named after its command and what it reads: 'Get-AzResourceLock:<rg>',
-    # 'Get-AzPolicyAssignment:<name>', 'Get-AzConsumptionBudget:<rg or subscription>',
+    # 'Get-AzPolicyAssignment:subscription', 'Get-AzConsumptionBudget:<rg or subscription>',
     # 'Get-AzActivityLogAlert:<rg>', 'Get-AzActionGroup:<rg>'. A removal is logged both bare and
     # with the object's name, so the assertions can be generic or precise.
     $script:StubBody = @'
@@ -167,21 +172,56 @@ function Remove-AzResourceLock {
     Invoke-StubRemoval -Command 'Remove-AzResourceLock' -Name $LockName
 }
 
+function New-StubAssignment {
+    param([string]$Name, [string]$DisplayName, [string]$Definition, [string]$Scope)
+    [pscustomobject]@{
+        Name               = $Name
+        DisplayName        = $DisplayName
+        PolicyDefinitionId = "/providers/Microsoft.Authorization/policyDefinitions/$Definition"
+        Scope              = $Scope
+        Id                 = "$Scope/providers/Microsoft.Authorization/policyAssignments/$Name"
+    }
+}
+
+# Lists the assignments that apply to the subscription, as the real cmdlet does for -Scope with
+# no -Name: the lab's three, made by the Bicep path, the Portal or both, plus one inherited from a
+# management group under the guide's name and an unrelated one under a guide display name, which
+# must both be left alone.
 function Get-AzPolicyAssignment {
     [CmdletBinding()]
     param([string]$Name, [string]$Scope, [Parameter(ValueFromRemainingArguments)]$Rest)
-    if (Invoke-StubLookup -Name "Get-AzPolicyAssignment:$Name") { return }
-    if (Test-StubEmpty) {
-        Write-Error -ErrorId 'PolicyAssignmentNotFound' -Message "PolicyAssignmentNotFound : The policy assignment '$Name' is not found."
-        return
+    if (Invoke-StubLookup -Name 'Get-AzPolicyAssignment:subscription') { return }
+    if ($Name) { throw "stub: the lab looks assignments up by listing the scope, not by name ($Name)" }
+    if (Test-StubEmpty) { return }
+
+    $lab = @(
+        @{ Name = 'Require-Environment-Tag-RG'; Bicep = 'Require Environment Tag on Resource Groups'; Definition = '96670d01-0a4d-4649-9c89-2d3abc0a5025'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa1' }
+        @{ Name = 'Enforce-Project-Tag'; Bicep = 'Enforce Project Tag Value'; Definition = '1e30110a-5ceb-460c-a204-c1c3969c6d62'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa2' }
+        @{ Name = 'Restrict-Azure-Regions'; Bicep = 'Restrict to Allowed Regions'; Definition = 'e56962a6-4747-49cd-b67b-bf8b01975c4c'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa3' }
+    )
+    $set = if ($env:SKYCRAFT_STUB_POLICYSET) { $env:SKYCRAFT_STUB_POLICYSET } else { 'bicep' }
+    foreach ($assignment in $lab) {
+        if ($set -in 'bicep', 'both') {
+            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope
+        }
+        if ($set -in 'portal', 'both') {
+            New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope
+        }
     }
-    [pscustomobject]@{ Name = $Name; Scope = $Scope }
+    New-StubAssignment -Name 'Enforce-Project-Tag' -DisplayName 'Enforce Project Tag Value' -Definition '1e30110a-5ceb-460c-a204-c1c3969c6d62' `
+        -Scope '/providers/Microsoft.Management/managementGroups/stub-mg'
+    New-StubAssignment -Name 'bbbbbbbbbbbbbbbbbbbbbbb1' -DisplayName 'Restrict-Azure-Regions' -Definition '00000000-0000-0000-0000-00000000beef' -Scope $Scope
 }
 
+# Removes by full id, the one handle that names a Portal-made assignment and nothing else. The
+# call is logged with the id's last segment (the resource name) and with its scope.
 function Remove-AzPolicyAssignment {
     [CmdletBinding()]
-    param([string]$Name, [string]$Scope)
-    Invoke-StubRemoval -Command 'Remove-AzPolicyAssignment' -Name $Name
+    param([string]$Id, [string]$Name, [string]$Scope)
+    if (-not $Id) { throw "stub: the lab removes an assignment by its id, not by name ($Name)" }
+    $assignmentScope = $Id -replace '/providers/Microsoft\.Authorization/policyAssignments/[^/]+$', ''
+    Write-StubCall -Name "Remove-AzPolicyAssignment@$assignmentScope"
+    Invoke-StubRemoval -Command 'Remove-AzPolicyAssignment' -Name ($Id -split '/')[-1]
 }
 
 function Get-AzConsumptionBudget {
@@ -254,6 +294,8 @@ function Start-Sleep {
             [string[]]$Lookup = @(),
             [string[]]$ArgumentList = @('-Force'),
             [string[]]$LockElsewhere = @(),
+            [ValidateSet('bicep', 'portal', 'both')]
+            [string]$PolicySet = 'bicep',
             [switch]$Empty
         )
 
@@ -265,6 +307,7 @@ function Start-Sleep {
             SKYCRAFT_STUB_LOOKUP = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
             SKYCRAFT_STUB_LOCKELSEWHERE = $LockElsewhere -join ','
+            SKYCRAFT_STUB_POLICYSET = $PolicySet
             SKYCRAFT_STUB_LOG    = $logPath
         }
 
@@ -301,7 +344,7 @@ function Start-Sleep {
     )
     $script:OldLookupsFail = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
         'Get-AzResourceLock:prod-skycraft-swc-rg=denied'
-        'Get-AzPolicyAssignment:Enforce-Project-Tag=throttled'
+        'Get-AzPolicyAssignment:subscription=throttled'
     )
     $script:NewRemovalsFail = Invoke-CleanupScript -Stub $script:Stub -Fail @(
         'Remove-AzConsumptionBudget:SkyCraft-Monthly-Budget'
@@ -315,10 +358,15 @@ function Start-Sleep {
     # The group's own lock is gone, but its listing still returns same-named locks on a resource
     # in it and on the subscription.
     $script:LockElsewhere = Invoke-CleanupScript -Stub $script:Stub -LockElsewhere 'platform-skycraft-swc-rg'
+    # The learner made the three assignments in the Portal (#330), or in the Portal and again with
+    # the Bicep path or Invoke-LabGovernance.ps1.
+    $script:PortalMade = Invoke-CleanupScript -Stub $script:Stub -PolicySet 'portal'
+    $script:TwoSets    = Invoke-CleanupScript -Stub $script:Stub -PolicySet 'both'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:ProdGone, $script:NewLookupsFail,
-        $script:OldLookupsFail, $script:NewRemovalsFail, $script:OldRemovalsFail, $script:LockElsewhere
+        $script:OldLookupsFail, $script:NewRemovalsFail, $script:OldRemovalsFail, $script:LockElsewhere,
+        $script:PortalMade, $script:TwoSets
     )
 }
 
@@ -393,6 +441,44 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes everything the guide creates 
         $rgBudget | Should -BeGreaterThan $sleep
         $alert    | Should -BeGreaterThan $sleep
         $group    | Should -BeGreaterThan $alert
+    }
+}
+
+Describe 'Lab 1.3 Remove-LabResource.ps1 - removes the policy assignments whichever path made them (#330)' {
+
+    It 'removes the Portal-made assignments, found by the display names the learner typed' {
+        # The Portal's Assignment name sets only the display name; the resource name is generated,
+        # so a lookup by name reported them absent and left two deny policies on the subscription.
+        $run = $script:PortalMade
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        foreach ($name in 'aaaaaaaaaaaaaaaaaaaaaaa1', 'aaaaaaaaaaaaaaaaaaaaaaa2', 'aaaaaaaaaaaaaaaaaaaaaaa3') {
+            $run.Calls | Should -Contain "Remove-AzPolicyAssignment:$name"
+        }
+        $run.Output | Should -Match "\[SUCCESS\] Removed policy: Enforce-Project-Tag 'Enforce-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa2\)"
+        $run.Output | Should -Not -Match 'Policy [^ ]+ not found'
+    }
+
+    It 'removes from the subscription only, and leaves an inherited or unrelated assignment alone' {
+        foreach ($run in $script:Clean, $script:PortalMade) {
+            @($run.Calls | Where-Object { $_ -like 'Remove-AzPolicyAssignment@*' }) |
+                Should -Be (@('Remove-AzPolicyAssignment@/subscriptions/00000000-0000-0000-0000-000000000000') * 3)
+            $run.Calls | Should -Not -Contain 'Remove-AzPolicyAssignment:bbbbbbbbbbbbbbbbbbbbbbb1'
+        }
+    }
+
+    It 'lists the subscription''s assignments once, rather than reading each by name' {
+        @($script:Clean.Calls | Where-Object { $_ -eq 'Get-AzPolicyAssignment:subscription' }).Count | Should -Be 1
+    }
+
+    It 'refuses to remove an assignment made twice, names both, and exits 1' {
+        # Which of the two the learner meant cannot be told; removing one and reporting success
+        # would leave the other in force.
+        $run = $script:TwoSets
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Calls | Should -Not -Contain 'Remove-AzPolicyAssignment'
+        $run.Output | Should -Match "\[ERROR\] 2 assignments match Enforce-Project-Tag: 'Enforce Project Tag Value' \(name Enforce-Project-Tag\), 'Enforce-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa2\)\. Removing none of them"
+        $run.Output | Should -Match 'Cleanup finished with 3 failure\(s\)'
+        $run.Calls | Should -Contain 'Remove-AzConsumptionBudget:SkyCraft-Monthly-Budget'
     }
 }
 
@@ -484,11 +570,12 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - a failed lookup is not "absent" (#252
         $run = $script:OldLookupsFail
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match '\[ERROR\] Could not look up lock lock-no-delete-prod on prod-skycraft-swc-rg'
-        $run.Output | Should -Match '\[ERROR\] Could not look up policy assignment Enforce-Project-Tag'
+        $run.Output | Should -Match '\[ERROR\] Could not look up the policy assignments on the subscription'
         $run.Output | Should -Not -Match 'Lock lock-no-delete-prod not found'
+        $run.Output | Should -Not -Match 'Policy [^ ]+ not found'
         $run.Output | Should -Match 'Cleanup finished with 2 failure\(s\)'
         $run.Calls  | Should -Not -Contain 'Remove-AzResourceLock:lock-no-delete-prod'
-        $run.Calls  | Should -Not -Contain 'Remove-AzPolicyAssignment:Enforce-Project-Tag'
+        $run.Calls  | Should -Not -Contain 'Remove-AzPolicyAssignment'
         $run.Calls  | Should -Contain 'Remove-AzActionGroup:skycraft-advisor-ag'
     }
 }
