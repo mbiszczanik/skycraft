@@ -163,7 +163,8 @@
     one still running after that time, ends the step as unknown with the Portal's text (scrubbed),
     and you are not asked about the label. A failure is reported once: one left on screen from an
     earlier deployment, or one already reported, does not stop a later step, which is looked up as
-    usual. Without a deployment on screen nothing waits longer (a lookup that misses reads the
+    usual; what you answer about its labels then is used in that run only, as a workaround, and
+    is not written to the recording. Without a deployment on screen nothing waits longer (a lookup that misses reads the
     screen once more for the Expected Result), and a recording needs nothing for it. The texts come
     from Microsoft Learn: the first supervised run of a lab that deploys confirms them.
 

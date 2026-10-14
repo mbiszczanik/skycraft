@@ -3144,7 +3144,14 @@ class DeploymentStateTests(unittest.TestCase):
 
     def test_a_running_deployment_comes_with_the_failures_on_screen(self) -> None:
         self.assertEqual(run.deployment_state(["Deployment failed", "Deployment is in progress"]),
-                         ("Deployment is in progress", ["Deployment failed; Deployment is in progress"]))
+                         ("Deployment is in progress", ["Deployment failed"]))
+
+    def test_a_deployment_status_after_a_failure_is_not_its_detail(self) -> None:
+        # The detail is the failure's identity: another deployment's status changes as it ends.
+        for status in ("Deployment is in progress", "Your deployment is complete", "Deployment succeeded",
+                       "Your deployment failed"):
+            with self.subTest(status=status):
+                self.assertIn("Deployment failed", run.deployment_state(["Deployment failed", "", status])[1])
 
     def test_a_finished_deployment_and_other_text_are_no_deployment(self) -> None:
         for texts in ([], ["Your deployment is complete", "Go to resource"], ["Deployment succeeded"],
@@ -3320,7 +3327,35 @@ class DeploymentWaitTests(RunnerTestCase):
             record, r = self.act(screen, self.GO, "Go to resource", page=page)
         self.assertEqual((record["outcome"], go.clicked, r.ask.prompts), ("match", 1, []))
         self.assertIn("The deployment has ended after 55 s: looking for 'Go to resource' again.", self.said(printed))
-        self.assertEqual(r.reported_failures, set())
+        self.assertEqual(r.reported_failures, {"Deployment failed; Deployment to resource group 'rg-old' failed."})
+
+    def test_a_stale_failure_right_before_a_running_overview_keeps_its_identity(self) -> None:
+        # The failure line has no detail of its own: the overview's status follows it and changes.
+        go = ScreenNode()
+        screen = Screen(tree=self.TOP_BAR + "- text: Deployment failed\n" + self.RUNNING[len(self.TOP_BAR):])
+
+        def finish(_waits: int) -> None:
+            if page.now >= 60 and "complete" not in screen.tree:
+                screen.tree = self.TOP_BAR + "- text: Deployment failed\n" + self.COMPLETE[len(self.TOP_BAR):]
+            if page.now >= 66 and not screen.entries:
+                screen.add(("button", "Go to resource", go))
+
+        page = self.LoadingPage(finish)
+        with mock.patch("builtins.print"):
+            record, r = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], go.clicked, r.ask.prompts), ("match", 1, []))
+
+    def test_a_failure_a_wait_passed_over_is_not_reported_at_the_next_miss(self) -> None:
+        go = ScreenNode()
+        screen = Screen(tree=self.RUNNING + self.OLD_FAILURE)
+        page = self.ending(screen, 60, self.COMPLETE + self.OLD_FAILURE, ("button", "Go to resource", go))
+        r = run.Runner(page, STEPS, self.recording, self.args(), ask=Answers())
+        with mock.patch("builtins.print"):
+            first, _ = self.act(screen, self.GO, "Go to resource", runner=r)
+            second, _ = self.act(screen, {"kind": "action", "labels": ["Overview"], "line": 7}, "Overview", runner=r)
+        self.assertEqual((first["outcome"], go.clicked), ("match", 1))
+        self.assertEqual((second["outcome"], len(r.ask.prompts)), ("unknown", 1))       # asked, not blamed
+        self.assertNotIn("deployment failed", second["observed"] or "")
 
     def test_a_failure_already_reported_lets_the_lookup_go_on_as_usual(self) -> None:
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
@@ -3330,9 +3365,32 @@ class DeploymentWaitTests(RunnerTestCase):
             second, _ = self.act(Screen(tree=self.FAILED), {"kind": "action", "labels": ["Overview"], "line": 7},
                                  "Overview", runner=r)
         self.assertEqual((second["outcome"], len(r.ask.prompts)), ("unknown", 1))       # the person is asked
-        self.assertIn("An earlier deployment's failure is still on screen: looking for 'Overview' as usual.",
+        self.assertIn("A deployment failure is still on screen, reported already: looking for 'Overview' as usual.",
                       self.said(printed))
         self.assertLess(r.page.now, 2 * (run.FIND_TIMEOUT_MS / 1000 + 1))
+
+    def test_an_answer_about_a_label_looked_up_past_a_failure_is_used_but_never_recorded(self) -> None:
+        overview = ScreenNode()
+        item = {"kind": "action", "labels": ["Overview"], "line": 7}
+        for answer, outcome, clicked in (("1", "drift", 1), ("g", "drift", 0), ("i", "match", 0)):
+            with self.subTest(answer=answer):
+                self.recording["steps"]["9.9.1"]["labels"] = {}
+                r = run.Runner(FakePage(), STEPS, self.recording, self.args(run_id=f"past-{answer}"),
+                               ask=Answers(answer))
+                self.act(Screen(tree=self.FAILED), self.GO, "Go to resource", runner=r)   # reported: unknown
+                overview.clicked = 0
+                screen = Screen(("link", "Overview (preview)", overview), tree=self.FAILED)
+                with mock.patch("builtins.print") as printed:
+                    record, _ = self.act(screen, item, "Overview", runner=r,
+                                         candidates=[run.Candidate("link", "Overview (preview)")])
+                self.assertEqual((record["outcome"], overview.clicked, len(r.ask.prompts)), (outcome, clicked, 1))
+                self.assertIn(run.PAST_FAILURE, self.said(printed))
+                self.assertEqual(self.recording["steps"]["9.9.1"]["labels"], {})
+                saved = json.loads((self.tmp / "rec.json").read_text(encoding="utf-8"))
+                self.assertNotIn("Overview", saved["steps"].get("9.9.1", {}).get("labels", {}))
+                if answer == "1":
+                    self.assertEqual((record["severity"], record["workaround"], record["proposedEdit"]),
+                                     ("misleading", True, None))
 
     def test_a_failure_already_reported_lets_a_resource_be_searched_for(self) -> None:
         lb = "dev-skycraft-swc-lb"

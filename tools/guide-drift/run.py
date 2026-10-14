@@ -128,11 +128,14 @@ the label is looked for FIND_TIMEOUT_MS again, then as above. A failure ('Your d
 'Deployment failed') ends the item as unknown with the Portal's text and the line after it,
 scrubbed as any observed text, and so does a deployment still running after the longest wait; the
 person is not asked about the label then, and nothing is recorded: nothing about it is known to be
-missing. Only a new failure counts: one on screen when a wait starts is an earlier deployment's and
-means only that the running one has ended once it is gone, and one this run has reported already
-(the overview or notification of a step that failed and was skipped or done by hand) is said to be
-still on screen, and the lookup goes on as without a deployment (the blade check, the recording's
-decision, the global search, the person). A label, a form's first field (find_form) and a resource
+missing. Only a new failure counts: one on screen when a wait starts is an earlier deployment's,
+means only that the running one has ended once it is gone, and counts as reported; one this run
+has reported (the overview or notification of a step that failed and was skipped or done by hand,
+or the same text from a new deployment) is said to be still on screen, and the lookup goes on as without a deployment (the blade check, the recording's
+decision, the global search, the person); what the person answers there is used in this run only,
+a pick as a workaround, and never recorded, as the Portal may not be where the guide leads. A
+failure's identity is its text and the line after it, unless that line is a deployment's status
+too (DEPLOYMENT_STATUS_TEXTS). A label, a form's first field (find_form) and a resource
 a chain names are waited for so, and the Expected Result is too after its RESULT_TIMEOUT_S
 (check_result). Without a deployment on screen nothing waits longer than before, and a recording
 needs nothing for it; a label's miss reads the screen once for both checks, as the blade check
@@ -341,6 +344,9 @@ DECORATION_REASON = "the Portal's name only decorates the guide's label ({what})
 # up by the name the recording keeps, and the recording cannot keep this one (Runner.recordable).
 UNRECORDABLE_NAME = ("That element's name holds an id, an address or a secret, which the recording cannot keep: "
                      "it is used as a workaround in this run, with no guide edit, and the next run asks again.")
+# Why the person's answer about a label looked up past a deployment failure is not recorded (#328).
+PAST_FAILURE = ("A deployment failure is on screen, so that answer is used in this run only, as a workaround with "
+                "no guide edit, and is not written to the recording: the next run asks again.")
 SETTLE_MS = 1500
 FIND_TIMEOUT_MS = 8000
 CHECK_TIMEOUT_MS = 2000     # set_checked() before the label is tried, and the wait for its effect
@@ -363,6 +369,8 @@ BLADE_EMPTY_TIMEOUT_MS = 20000
 # found nothing read). A complete or succeeded deployment is none: nothing is waited for.
 DEPLOYMENT_RUNNING_TEXT = re.compile(r"^(?:deployment is in progress|deployment in progress)\b", re.IGNORECASE)
 DEPLOYMENT_FAILED_TEXT = re.compile(r"^(?:your deployment failed|deployment failed)\b", re.IGNORECASE)
+DEPLOYMENT_ENDED_TEXT = re.compile(r"^(?:your deployment is complete|deployment succeeded)\b", re.IGNORECASE)
+DEPLOYMENT_STATUS_TEXTS = (DEPLOYMENT_RUNNING_TEXT, DEPLOYMENT_FAILED_TEXT, DEPLOYMENT_ENDED_TEXT)
 # How long a lookup waits at most for a deployment still running (--deployment-timeout-minutes,
 # -DeploymentTimeoutMinutes), how often it looks again meanwhile, and how often the console says
 # that it is still waiting.
@@ -646,13 +654,17 @@ def deployment_state(texts: list[str]) -> tuple[str | None, list[str]]:
     """What the screen (texts_of) shows of Portal deployments (#328): the text of the first line
     whose whole text starts as DEPLOYMENT_RUNNING_TEXT does, None when there is none; and every
     failure on screen, in tree order, once each: a line that starts as DEPLOYMENT_FAILED_TEXT
-    does, '; ' and the next line with text (the error the Portal gives under it). A failure may
-    be an earlier deployment's, left on screen: Runner.wait_for_deployment tells them apart."""
+    does, '; ' and the next line with text (the error the Portal gives under it), unless that line
+    is a deployment's status itself (DEPLOYMENT_STATUS_TEXTS: another deployment's, which changes as
+    that one runs and ends, so the failure would not stay the same failure). A failure may be an
+    earlier deployment's, left on screen: Runner.wait_for_deployment tells them apart."""
     running = next((text.strip() for text in texts if DEPLOYMENT_RUNNING_TEXT.match(text.strip())), None)
     failures: list[str] = []
     for index, text in enumerate(texts):
         if DEPLOYMENT_FAILED_TEXT.match(text.strip()):
             after = next((t.strip() for t in texts[index + 1:] if t.strip()), "")
+            if any(status.match(after) for status in DEPLOYMENT_STATUS_TEXTS):
+                after = ""
             failure = text.strip() + (f"; {after}" if after else "")
             if failure not in failures:
                 failures.append(failure)
@@ -1959,6 +1971,9 @@ class Runner:
         # this run has reported, which are not reported again (#328).
         self.deployment_minutes: int = getattr(args, "deployment_timeout_minutes", DEPLOYMENT_TIMEOUT_MIN)
         self.reported_failures: set[str] = set()
+        # The current label was looked up past a failure already reported (wait_for_deployment): the
+        # person's answer is used in this run only, never written to the recording (#328).
+        self.failure_on_screen = False
 
     def earlier_results(self) -> list[dict]:
         """The records the stopped parts of this run wrote, scrubbed as write() scrubs them: that
@@ -2066,9 +2081,11 @@ class Runner:
         write() scrubs as any observed text, but only a failure that is new. The failures on screen
         when a wait starts are an earlier deployment's: once the running one is gone, they mean it
         has ended, and the label is looked for again. With nothing running, a failure is reported
-        once per run (reported_failures); one already reported says only that it is still on
-        screen, and the lookup goes on as without a deployment (the blade check, the recording's
-        decision, the global search, the person), as a step after a failed one does. One still
+        once per run (reported_failures, which also takes the failures a wait passed over); one
+        already reported says only that it is still on screen, and the lookup goes on as without a
+        deployment (the blade check, the recording's decision, the global search, the person), as a
+        step after a failed one does. It sets failure_on_screen then: act_on_label uses what the
+        person answers in this run only, as the Portal may not be where the guide leads. One still
         running after the longest wait raises DeploymentStopped too, and a closed window
         PageClosed."""
         texts = texts_of(frame_snapshots(self.page) if snapshots is None else snapshots)
@@ -2082,9 +2099,11 @@ class Runner:
                 print("The Portal's deployment failed.")
                 raise DeploymentStopped(f"the Portal's deployment failed: {new[0]}")
             if failures:
-                print(f"An earlier deployment's failure is still on screen: looking for {what} as usual.")
+                self.failure_on_screen = True
+                print(f"A deployment failure is still on screen, reported already: looking for {what} as usual.")
             return None, None
         earlier = set(failures)
+        self.reported_failures.update(earlier)      # an earlier deployment's: never reported later
         limit = self.deployment_minutes
         print(f"A Portal deployment is still running: waiting up to {limit} min for it to end "
               f"before giving up on {what}.")
@@ -2326,6 +2345,7 @@ class Runner:
         **X** unchecked', 'Make sure **X** is checked', whose words are no click): then it is
         unknown, as the guide sets a state the element cannot hold."""
         kind, line = item["kind"], item["line"]
+        self.failure_on_screen = False
         record = self.new_record(step, kind, label)
         if kind == "search" and item.get("scope") == "blade":
             return self.search_in_blade(label, record)
@@ -2375,7 +2395,14 @@ class Runner:
                     # cannot keep is acted on as a workaround, never recorded: the next run asks again.
                     print(UNRECORDABLE_NAME)
                     decision = decision.as_workaround()
-                entry = decision.to_recording(rejected_candidates(candidates, label, decision.name), now())
+                if self.failure_on_screen:
+                    # A deployment failed before this lookup (#328): the Portal may not be where the
+                    # guide leads, so the answer is used in this run only; the next run asks again.
+                    print(PAST_FAILURE)
+                    if decision.name and not decision.workaround:
+                        decision = decision.as_workaround()
+                entry = (None if self.failure_on_screen
+                         else decision.to_recording(rejected_candidates(candidates, label, decision.name), now()))
                 if decision.kind == "ignore" or decision.severity == "blocking":
                     self.remember(step, label, entry)     # nothing to act on: record at once
                 else:
