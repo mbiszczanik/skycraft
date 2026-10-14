@@ -12,19 +12,23 @@ no tenant name. Step numbers are the guide's after #337.
       non-compliance message and **Policy details**. Taken on 2026-10-14 in the second agent Portal pass
       of #337, cropped. The mouse pointer covers part of "Azure" in the tab's intro text; retake if a
       clean one comes up.
-- [ ] Reference `step-1.3.6a.png` in the guide, after the Expected Result of item 5 in 1.3.6
-- [ ] 1.3.5 (replaces the removed `step-1.3.5b.png`): Basics tab with **Policy enforcement** on
+- [x] Reference `step-1.3.6a.png` in the guide, after the Expected Result of item 5 in 1.3.6
+- [x] 1.3.5 (replaces the removed `step-1.3.5b.png`): Basics tab with **Policy enforcement** on
       Default (enforcement)
 - [ ] 1.3.7 (replaces the removed `step-1.3.21a.png` and `step-1.3.21b.png`): the action group's
       Basics (Region Sweden Central, `skycraft-advisor-ag`, `SkyAdvisor`), then **Alerts (Preview)**
       listing `Advisor-Cost-Recommendations`
-- [ ] 1.3.12 (replaces the removed lock-notification image, old `step-1.3.11.png`): the
+      Done: `step-1.3.7b.png` (the alert listed, subscription name replaced by `<your subscription>`).
+      Open: `step-1.3.7a.png` (the action group's Basics); while `skycraft-advisor-ag` exists the form
+      shows "The specified name already exists", and the production lock stops its deletion. Take it
+      after the cleanup, without creating the group.
+- [x] 1.3.12 (replaces the removed lock-notification image, old `step-1.3.11.png`): the
       **Failed to delete resource group** notification; optional
-- [ ] 1.3.17 (replaces the removed `step-1.3.16.png`, the Add filter route): the resource group's
+- [x] 1.3.17 (replaces the removed `step-1.3.16.png`, the Add filter route): the resource group's
       **Budgets** with **+ Add**
-- [ ] Retake `step-1.3.11.png` (1.3.11): its Notes field shows other text than the guide's table
-- [ ] Retake `step-1.3.18a.png` (1.3.18): the VIEW menu with the **Built-in views** heading
-- [ ] Reference every new image in the guide; run `tests/Guide-Step-Numbering.Tests.ps1` and
+- [x] Retake `step-1.3.11.png` (1.3.11): its Notes field shows other text than the guide's table
+- [x] Retake `step-1.3.18a.png` (1.3.18): the VIEW menu with the **Built-in views** heading
+- [x] Reference every new image in the guide (all but `step-1.3.7a.png`); run `tests/Guide-Step-Numbering.Tests.ps1` and
       `tests/Guide-Drift-Parser.Tests.ps1`
 - [x] Recording `tools/guide-drift/recordings/lab-1.3.json` from the supervised run of 2026-10-14
       (run 20261014-171319, exit 15). Steps the runner could not do were done with az / Az PowerShell

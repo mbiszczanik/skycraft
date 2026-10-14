@@ -192,6 +192,8 @@ The **Tags** service lists every tag in your subscription as one name : value pa
 
 **Note**: Once you add the definition, the wizard fills **Assignment name** with the definition's own name (`Require a tag on resource groups`). Replace it with `Require-Environment-Tag-RG`: the lab's scripts (`Test-Lab.ps1`, `Remove-LabResource.ps1`) look for an assignment of this definition with that name. In the Portal, **Assignment name** sets the assignment's display name; Azure names the assignment resource itself with a generated id. The wizard also shows a **Version** field (`1.*.*`): leave it as it is.
 
+![Assign a Built-in Policy](./images/step-1.3.5b.png)
+
 5. Click the **Parameters** tab and set:
 
 - **Tag Name**: `Environment`
@@ -225,6 +227,8 @@ First, try to create a resource group **WITHOUT** the "Environment" tag:
 5. If the review page opens without an error, click **Create**, then click the notification **Failed to create the resource group** to open the error details
 
 **Expected Result**: Creation is **denied** by `Require-Environment-Tag-RG`, so `rg-test-no-tag` is not created. The Portal shows the denial in one of two places (both were seen on the same day): either **Review + create** fails with "Validation failed. Required information is missing or not valid.", the **Tags** tab is marked with an error showing the non-compliance message from Step 1.3.5 and a **Policy details** link, and **Create** stays greyed out; or the review page opens without an error and the denial comes after **Create**, where the error details show the error code `RequestDisallowedByPolicy`, the policy `Require-Environment-Tag-RG` with a **Policy link**, and the same message. A policy evaluates every new create or update request. What it does not do is change resources that already exist: a resource group created before the assignment stays without the tag and is reported as non-compliant instead (Step 1.3.10). From the CLI or a template, the same denial comes back with the same error code.
+
+![Assign a Built-in Policy](./images/step-1.3.6a.png)
 
 Now create one with the tag:
 
@@ -312,6 +316,8 @@ Back in **Create Advisor Alerts**, the new action group `skycraft-advisor-ag` is
 10. Click **Create alert**
 
 **Expected Result**: The Portal confirms with the notification **Successfully created alert** ("Successfully created alert for Azure Advisor"), and **Alerts (Preview)** lists `Advisor-Cost-Recommendations`. From now on, you'll receive alerts when Advisor identifies new cost-saving opportunities.
+
+![Configure Advisor Alerts](./images/step-1.3.7b.png)
 
 **Note**: **Alerts (Preview)** lists the rule even when its creation failed. If the Portal says **Failed to create alert** ("An error occurred while trying to create alert"), the alert does not exist: see Troubleshooting, Issue 6.
 
@@ -448,6 +454,8 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 **Expected Result**: The Portal refuses before it deletes anything. A notification **Failed to delete resource group prod-skycraft-swc-rg** (open the notification bell if it is not on screen) says: "Resource group prod-skycraft-swc-rg has locks applied. Remove the locks before deleting." The resource group and everything in it stay.
 
+![Test the Lock](./images/step-1.3.12.png)
+
 **Note**: The pane opened by **Delete resource group** shows no lock warning, and the **Delete** button stays greyed out until the name is typed and the field loses focus. The refusal comes only after you confirm. From the CLI or a template, Azure Resource Manager refuses the same delete with the error code `ScopeLocked`.
 
 **Key Learning**: Even with Owner role, you cannot delete a locked resource until the lock is removed.
@@ -577,6 +585,8 @@ Create a more specific budget for the production environment. A budget belongs t
 9. Click **Create**
 
 **Expected Result**: The resource group's **Budgets** lists `SkyCraft-Prod-Monthly`.
+
+![Manage Costs with Budgets and Alerts](./images/step-1.3.17.png)
 
 ### Step 1.3.18: View Cost Analysis
 
