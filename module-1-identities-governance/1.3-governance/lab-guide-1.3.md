@@ -183,7 +183,7 @@ The **Tags** service lists every tag in your subscription as one name : value pa
 4. On the **Basics** tab, fill in:
 
 - **Scope**: Click the "..." button
-  - The pane opens with your subscription selected (the wizard fills in the scope already)
+  - The pane opens with Subscription showing All selected, which is your subscription (the wizard fills in the scope already)
   - Click **Select**
 - **Policy definition**: Click the "..." button
   - Search for **Require a tag on resource groups**
@@ -223,29 +223,28 @@ First, try to create a resource group **WITHOUT** the "Environment" tag:
 | Resource group name | rg-test-no-tag |
 | Region              | Sweden Central |
 
-4. Click **Review + create**. The review page opens without an error: the Portal does not check the policy before you create.
-5. Click **Create**
-6. When the Portal shows **Failed to create the resource group**, click the notification to open the error details
+4. Click **Review + create**
+5. If the review page opens without an error, click **Create**, then click the notification **Failed to create the resource group** to open the error details
 
-**Expected Result**: Creation is **denied** by `Require-Environment-Tag-RG`, so `rg-test-no-tag` is not created. The error details show the error code `RequestDisallowedByPolicy`, the policy `Require-Environment-Tag-RG` with a **Policy link**, and the non-compliance message from Step 1.3.5. A policy evaluates every new create or update request. What it does not do is change resources that already exist: a resource group created before the assignment stays without the tag and is reported as non-compliant instead (Step 1.3.10). From the CLI or a template, the same denial comes back with the same error code.
+**Expected Result**: Creation is **denied** by `Require-Environment-Tag-RG`, so `rg-test-no-tag` is not created. The Portal shows the denial in one of two places (both were seen on the same day): either **Review + create** fails with "Validation failed. Required information is missing or not valid.", the **Tags** tab is marked with an error showing the non-compliance message from Step 1.3.5 and a **Policy details** link, and **Create** stays greyed out; or the review page opens without an error and the denial comes after **Create**, where the error details show the error code `RequestDisallowedByPolicy`, the policy `Require-Environment-Tag-RG` with a **Policy link**, and the same message. A policy evaluates every new create or update request. What it does not do is change resources that already exist: a resource group created before the assignment stays without the tag and is reported as non-compliant instead (Step 1.3.10). From the CLI or a template, the same denial comes back with the same error code.
 
 Now create one with the tag:
 
-7. Close the error details and click **+ Create** again
-8. On the **Basics** tab, fill in:
+6. Close the error details, or the form if the Tags tab showed the error, and click **+ Create** again
+7. On the **Basics** tab, fill in:
 
 | Field               | Value            |
 | ------------------- | ---------------- |
 | Resource group name | rg-test-with-tag |
 | Region              | Sweden Central   |
 
-9. Click the **Tags** tab and add:
+8. Click the **Tags** tab and add:
 
 | Name        | Value |
 | ----------- | ----- |
 | Environment | Test  |
 
-10. Click **Review + create**, then **Create**
+9. Click **Review + create**, then **Create**
 
 **Expected Result**: Creation succeeds because the required tag is present.
 
@@ -255,14 +254,14 @@ Now create one with the tag:
 
 Finally, delete the test resource group `rg-test-with-tag` (the policy denied `rg-test-no-tag`, so it does not exist):
 
-11. Click **Refresh**, then click **rg-test-with-tag**
-12. Click **Delete resource group**
-13. Fill in the confirmation field:
+10. Click **Refresh**, then click **rg-test-with-tag**
+11. Click **Delete resource group**
+12. Fill in the confirmation field:
 
 - **Enter resource group name to confirm deletion**: `rg-test-with-tag`
 
-14. Click outside the field, then click **Delete**
-15. In the **Delete confirmation** dialog, click **Delete**
+13. Click outside the field, then click **Delete**
+14. In the **Delete confirmation** dialog, click **Delete**
 
 **Note**: The **Delete** button stays greyed out until the name is typed and the field loses focus. That is why you click outside the field first.
 
@@ -278,7 +277,7 @@ After a refresh, `rg-test-with-tag` is no longer listed in **Resource groups**.
 3. Click **New Advisor Alert**
 4. Fill in the top of the form:
 
-- **Scope**: Your subscription
+- **Subscription**: Your subscription
 - **Category**: Cost
 
 5. Under **Action groups**, click **Create new**
@@ -314,7 +313,7 @@ Back in **Create Advisor Alerts**, the new action group `skycraft-advisor-ag` is
 
 10. Click **Create alert**
 
-**Expected Result**: No **Failed to create alert** notification appears, and **Alerts (Preview)** lists `Advisor-Cost-Recommendations`. From now on, you'll receive alerts when Advisor identifies new cost-saving opportunities.
+**Expected Result**: The Portal confirms with the notification **Successfully created alert** ("Successfully created alert for Azure Advisor"), and **Alerts (Preview)** lists `Advisor-Cost-Recommendations`. From now on, you'll receive alerts when Advisor identifies new cost-saving opportunities.
 
 **Note**: **Alerts (Preview)** lists the rule even when its creation failed. If the Portal says **Failed to create alert** ("An error occurred while trying to create alert"), the alert does not exist: see Troubleshooting, Issue 6.
 
@@ -451,7 +450,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 5. Click outside the field, then click **Delete**
 6. In the **Delete confirmation** dialog, click **Delete**
 
-**Expected Result**: The Portal refuses before it deletes anything. A notification **Failed to delete resource group prod-skycraft-swc-rg** says: "Resource group prod-skycraft-swc-rg has locks applied. Remove the locks before deleting." The resource group and everything in it stay.
+**Expected Result**: The Portal refuses before it deletes anything. A notification **Failed to delete resource group prod-skycraft-swc-rg** (open the notification bell if it is not on screen) says: "Resource group prod-skycraft-swc-rg has locks applied. Remove the locks before deleting." The resource group and everything in it stay.
 
 **Note**: The pane opened by **Delete resource group** shows no lock warning, and the **Delete** button stays greyed out until the name is typed and the field loses focus. The refusal comes only after you confirm. From the CLI or a template, Azure Resource Manager refuses the same delete with the error code `ScopeLocked`.
 
@@ -505,7 +504,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 3. In the left menu, under **Monitoring**, click **Budgets**
 4. Click **+ Add**
 
-**Note**: Cost Management + Billing opens on **Billing scopes**. **Cost Management** then opens at a scope the Portal picks for you (a **Scope automatically selected** popover says so) and names it at the top of the page. It should be your subscription; if it is another scope, click **Change scope** in the left menu and pick your subscription before you continue.
+**Note**: Cost Management + Billing opens on **Billing scopes**. **Cost Management** then opens at a scope the Portal picks for you (sometimes a **Scope automatically selected** popover says so) and names it at the top of the page, after **Scope**. It should be your subscription; if it is another scope, click **Change scope** in the left menu and pick your subscription before you continue.
 
 5. On the **Create a budget** step, fill in:
 
@@ -598,8 +597,8 @@ Create a more specific budget for the production environment. A budget belongs t
 ![Manage Costs with Budgets and Alerts](./images/step-1.3.18a.png)
 
 5. Click the date range button (it shows the current period) and, under **Relative dates**, click **Last 30 days**
-6. Click **Add filter**, choose **Tag**, then pick the tag `project` with the value `skycraft` (Cost analysis shows tag names and values in lower case)
-7. Click **Add filter** again, choose **Resource group name**, then pick `prod-skycraft-swc-rg`
+6. Click **Add filter**, choose **Tag**, then pick the tag `project` with the value `skycraft` (Cost analysis shows tag names and values in lower case), and click the green check mark next to the filter to apply it
+7. Click **Add filter** again, choose **Resource group name**, pick `prod-skycraft-swc-rg` and click the green check mark
 
 **Expected Result**: Visual charts showing cost breakdown (likely very low since we haven't deployed resources yet).
 
