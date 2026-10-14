@@ -193,7 +193,7 @@ without a browser. Rules (issue #189):
   * A bold span right after the word 'under' (and an optional 'the') names where the next
     label is, a blade menu's group or a section heading, and is no label (UNDER): 'Under
     **Settings**, select **Networking**.' (3.4.10), 'Under **Cost Management** click **Cost
-    analysis**' (1.3.17), 'In the left menu, under **Settings**, select **Access keys**.'
+    analysis**' (1.3.18), 'In the left menu, under **Settings**, select **Access keys**.'
     (3.3.2), 'Click **Containers** under **Data storage**' (4.2.2), and in a chain, where it is
     no step. Clicking a Portal menu group collapses it, and a section heading is no control. In
     every guide line of that shape today the place is open by default (a menu group, a form's

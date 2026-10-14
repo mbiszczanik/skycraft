@@ -345,7 +345,7 @@ Describe 'Lab 1.3 Test-Lab.ps1 - failures are counted and set the exit code (#25
         $run.ExitCode | Should -Be 1 -Because "a missing policy assignment must not look like a passed validation; output was:`n$($run.Output)"
         # The assignment inherited from a management group under the same name, and the unrelated
         # one under a guide display name, are both in the listing and must not stand in for it.
-        $run.Output | Should -Match "Policy: Enforce-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Require a tag and its value on resources' on the subscription itself, named 'Enforce-Project-Tag' or 'Enforce Project Tag Value', step 1\.3\.7\."
+        $run.Output | Should -Match "Policy: Enforce-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Require a tag and its value on resources' on the subscription itself, named 'Enforce-Project-Tag' or 'Enforce Project Tag Value', step 1\.3\.8\."
         $run.FailLines | Should -Be 1
         $run.Output | Should -Match 'Passed: 7\b'
         $run.Output | Should -Match 'Failed: 1\b'
@@ -457,8 +457,8 @@ Describe 'Lab 1.3 Test-Lab.ps1 - a lock check passes only for the guide''s lock 
 
     It 'fails a ReadOnly lock under the guide''s name, and says which level it found' {
         $run = $script:LockReadOnly
-        $run.ExitCode | Should -Be 1 -Because "a ReadOnly lock is not the lock step 1.3.10 creates; output was:`n$($run.Output)"
-        $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] lock-no-delete-prod has level ReadOnly\. Expected lock-no-delete-prod \(CanNotDelete\) on the group, step 1\.3\.10\.'
+        $run.ExitCode | Should -Be 1 -Because "a ReadOnly lock is not the lock step 1.3.11 creates; output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] lock-no-delete-prod has level ReadOnly\. Expected lock-no-delete-prod \(CanNotDelete\) on the group, step 1\.3\.11\.'
         $run.FailLines | Should -Be 1
         $run.OkLines | Should -Be 7
         $run.Output | Should -Match 'Failed: 1\b'
@@ -481,7 +481,7 @@ Describe 'Lab 1.3 Test-Lab.ps1 - a lock check passes only for the guide''s lock 
         $run = $script:LockOnChild
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match 'Lock on platform-skycraft-swc-rg \[FAIL\] Not found on the group itself; locks elsewhere do not count: lock-no-delete-platform \(CanNotDelete\) at /subscriptions/[^ ]+/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft\.Storage/storageAccounts/stubstorage\.'
-        $run.Output | Should -Match 'step 1\.3\.12\.'
+        $run.Output | Should -Match 'step 1\.3\.13\.'
         $run.FailLines | Should -Be 1
         $run.OkLines | Should -Be 7
         $run.Output | Should -Match 'Failed: 1\b'
