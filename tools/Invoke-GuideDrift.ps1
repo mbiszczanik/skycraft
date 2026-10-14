@@ -161,9 +161,11 @@
     in its notification), the run says so and waits for it to end, up to -DeploymentTimeoutMinutes,
     saying every minute how long it has waited; then it looks again. A deployment that failed, or
     one still running after that time, ends the step as unknown with the Portal's text (scrubbed),
-    and you are not asked about the label. Without a deployment on screen nothing waits longer, and
-    a recording needs nothing for it. The texts come from Microsoft Learn: the first supervised run
-    of a lab that deploys confirms them.
+    and you are not asked about the label. A failure is reported once: one left on screen from an
+    earlier deployment, or one already reported, does not stop a later step, which is looked up as
+    usual. Without a deployment on screen nothing waits longer (a lookup that misses reads the
+    screen once more for the Expected Result), and a recording needs nothing for it. The texts come
+    from Microsoft Learn: the first supervised run of a lab that deploys confirms them.
 
     CLEANUP IS THE LAB'S OWN, AND ONLY AFTER A FINISHED RUN. This script has no deletion logic.
     Unless -SkipCleanup, and only when run.py ended normally and the state file confirms it
