@@ -67,6 +67,17 @@ would be tracked rather than forgotten.
    human-side half of the same rule; the gate is what catches the case
    where the draft is promoted without the declaration being updated.
 
+5. **A deferral needs the maintainer's approval** (amended 2026-10-14,
+   #338). A deferred PR passes the gate only while it carries the label
+   `live-deferral-approved`, which the maintainer adds when merging
+   before the live pass is acceptable for that PR. Without it the check
+   fails and says how to get out: run the live pass and declare
+   `Live-verified:`, or get the label. The workflow also runs on
+   `labeled` and `unlabeled` and reads the labels from the API. Before
+   this, a `deferred -> #N` line alone turned the check green, so
+   deferring was the default rather than a decision (PR #337 went green
+   while a step's success path had never been seen live).
+
 ## Consequences
 
 **What we gain:**
@@ -88,6 +99,9 @@ would be tracked rather than forgotten.
 - Every lab-content PR carries one more line of ceremony, and a body
   edit is needed to unblock a PR that forgot it (the workflow re-runs on
   `edited`).
+- The approval label is not removed when new commits arrive: once
+  given, it covers later pushes to the same PR. Anyone who can label
+  PRs can give it; in this repository that is the maintainer.
 
 **What we must do as a follow-up:**
 
@@ -107,5 +121,7 @@ would be tracked rather than forgotten.
   and simpler to read on the PR list, but the label carries no
   information about *what* was or was not run and *where* it is tracked.
   The body line does, and it lives in the merge commit's history.
+  (Decision 5 uses a label differently: not instead of the body line,
+  but as the maintainer's approval on top of it.)
 - **Rely on the PR template checkbox.** That is what #132 had. A template
   is advice; it is skipped by `--body-file`, by the API, and by habit.

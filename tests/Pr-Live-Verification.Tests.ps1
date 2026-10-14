@@ -128,10 +128,38 @@ Describe 'Get-PrGateVerdict' {
         $v.Verified | Should -Match '67b14134'
     }
 
-    It 'passes a gated PR that defers to a tracked issue and only references its own' {
-        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Refs #79`n`nLive-verification: deferred -> #141"
+    It 'passes a deferred PR that references its issue and carries the approval label (#338)' {
+        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Refs #79`n`nLive-verification: deferred -> #141" `
+            -Label @('documentation', 'live-deferral-approved')
         $v.Pass       | Should -BeTrue
         $v.DeferredTo | Should -Be 141
+        $v.Reason     | Should -Match 'live-deferral-approved'
+    }
+
+    It 'fails a deferred PR without the approval label, naming the label and the way out (#338)' {
+        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Refs #79`n`nLive-verification: deferred -> #141"
+        $v.Pass       | Should -BeFalse
+        $v.DeferredTo | Should -Be 141
+        $v.Reason     | Should -Match 'live-deferral-approved'
+        $v.Reason     | Should -Match 'Live-verified'
+    }
+
+    It 'does not take a label that only resembles the approval label' {
+        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Refs #79`nLive-verification: deferred -> #141" `
+            -Label @('live-deferral-approved-later', 'live deferral approved')
+        $v.Pass | Should -BeFalse
+    }
+
+    It 'still fails a deferred PR with a closing keyword, label or not' {
+        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Closes #79`nLive-verification: deferred -> #141" `
+            -Label @('live-deferral-approved')
+        $v.Pass   | Should -BeFalse
+        $v.Reason | Should -Match 'Refs'
+    }
+
+    It 'needs no label for a verified or an ungated PR' {
+        (Get-PrGateVerdict -ChangedFile $script:Gated -Body 'Live-verified: labs 1.3 by hand, 2026-10-14').Pass | Should -BeTrue
+        (Get-PrGateVerdict -ChangedFile $script:NotGated -Body 'Live-verification: deferred -> #141').Pass     | Should -BeTrue
     }
 
     It 'fails a deferred PR that still carries a closing keyword' {

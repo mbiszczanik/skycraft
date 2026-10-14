@@ -18,7 +18,8 @@ Closes #
        Live-verified: <what was run - Invoke-LabCycle run id, or labs + date>
        Live-verification: deferred -> #<issue tracking the live pass>
 
-     A deferred PR is opened as a draft (gh pr create --draft) and links its issue with Refs. -->
+     A deferred PR is opened as a draft (gh pr create --draft) and links its issue with Refs.
+     It can merge only after the maintainer adds the label live-deferral-approved. -->
 
 Live-verified:
 

@@ -7,11 +7,13 @@ name: PR Gate
 # changed paths. Rationale and the merge rule: docs/adr/0006-pr-live-verification-gate.md.
 #
 # 'edited' re-runs the check when the body changes, so a PR can be fixed by editing its
-# description; 'ready_for_review' re-runs it when a draft is promoted.
+# description; 'ready_for_review' re-runs it when a draft is promoted; 'labeled' and
+# 'unlabeled' re-run it when the maintainer adds or removes 'live-deferral-approved', the
+# label a deferred PR needs before it can merge (issue #338).
 
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened, ready_for_review]
+    types: [opened, edited, synchronize, reopened, ready_for_review, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -24,7 +26,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Collect the PR body and its changed paths
+      # The labels come from the API, not the event payload, so a re-run of an older event
+      # sees the labels the PR carries now.
+      - name: Collect the PR body, its changed paths and its labels
         env:
           GH_TOKEN: ${{ github.token }}
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -33,7 +37,10 @@ jobs:
           printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename' \
             > "$RUNNER_TEMP/pr-files.txt"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels" --paginate --jq '.[].name' \
+            > "$RUNNER_TEMP/pr-labels.txt"
           echo "Changed paths: $(wc -l < "$RUNNER_TEMP/pr-files.txt")"
+          echo "Labels: $(tr '\n' ' ' < "$RUNNER_TEMP/pr-labels.txt")"
 
       # The script sets $Host.SetShouldExit(1) before its own `exit 1` (the #128 guard for a
       # `pwsh -command` step); the explicit check below is belt and braces.
@@ -42,7 +49,8 @@ jobs:
         run: |
           ./tools/Test-PrLiveVerification.ps1 `
             -BodyPath "$env:RUNNER_TEMP/pr-body.md" `
-            -ChangedFilePath "$env:RUNNER_TEMP/pr-files.txt"
+            -ChangedFilePath "$env:RUNNER_TEMP/pr-files.txt" `
+            -LabelPath "$env:RUNNER_TEMP/pr-labels.txt"
           if ($LASTEXITCODE -ne 0) {
               $Host.SetShouldExit($LASTEXITCODE)
               exit $LASTEXITCODE
