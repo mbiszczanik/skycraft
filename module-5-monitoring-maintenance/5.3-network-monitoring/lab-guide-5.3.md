@@ -368,7 +368,7 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 
 ### Issue 4: Enabling Traffic Analytics fails with `TARequestDisallowedByPolicy`
 
-**Symptom**: Creating the flow log (Step 5.3.5, any path) fails with *The enablement of Traffic Analytics is blocked due to the user's policy restrictions: "RequestDisallowedByPolicy ... policyAssignments/Enforce-Project-Tag"*, and the flow log is left in the **Failed** state.
+**Symptom**: Creating the flow log (Step 5.3.5, any path) fails with *The enablement of Traffic Analytics is blocked due to the user's policy restrictions: "RequestDisallowedByPolicy ..."*, and the flow log is left in the **Failed** state. The message names Lab 1.3's `Enforce-Project-Tag` assignment: its id ends in `policyAssignments/Enforce-Project-Tag` when Lab 1.3 was deployed with Bicep or its scripts, and in a generated id when the assignment was made in the Portal.
 
 **Root Cause**: When Traffic Analytics is enabled it creates its own data collection endpoint and rule, `NWTA-<workspace-guid>...`, in the workspace's resource group (`platform-skycraft-swc-rg`) - without tags. Lab 1.3's `Enforce-Project-Tag` assignment denies every untagged resource, so the pair is refused.
 
