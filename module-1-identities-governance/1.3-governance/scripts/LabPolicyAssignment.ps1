@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     Test-Lab.ps1, Remove-LabResource.ps1 and Invoke-LabGovernance.ps1 all need to find the three
-    assignments of steps 1.3.5, 1.3.7 and 1.3.8. They dot-source this file so that the three
+    assignments of steps 1.3.5, 1.3.8 and 1.3.9. They dot-source this file so that the three
     share one answer to "which assignment is the guide's" (issue #330). It lives in the lab's own
     scripts/ folder, so the lab still runs and reads on its own (docs/powershell-standards.md,
     sections 7.3 and 7.5).
@@ -72,14 +72,14 @@ function Get-LabPolicyAssignmentSpec {
         DisplayName           = 'Enforce Project Tag Value'
         PolicyDefinitionId    = '/providers/Microsoft.Authorization/policyDefinitions/1e30110a-5ceb-460c-a204-c1c3969c6d62'
         DefinitionDisplayName = 'Require a tag and its value on resources'
-        Step                  = '1.3.7'
+        Step                  = '1.3.8'
     }
     [pscustomobject]@{
         Name                  = 'Restrict-Azure-Regions'
         DisplayName           = 'Restrict to Allowed Regions'
         PolicyDefinitionId    = '/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c'
         DefinitionDisplayName = 'Allowed locations'
-        Step                  = '1.3.8'
+        Step                  = '1.3.9'
     }
 }
 

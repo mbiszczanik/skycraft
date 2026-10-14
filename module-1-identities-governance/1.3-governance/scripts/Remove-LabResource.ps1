@@ -10,9 +10,9 @@
        fixed names or the learner made them in the Portal under generated names (issue #330;
        LabPolicyAssignment.ps1 says which assignment counts). An assignment made twice is not
        removed: that is an [ERROR], because which of the two is the lab's cannot be told.
-    3. The two budgets: SkyCraft-Monthly-Budget on the subscription (step 1.3.14) and
-       SkyCraft-Prod-Monthly on prod-skycraft-swc-rg (step 1.3.16).
-    4. The Advisor alert Advisor-Cost-Recommendations (step 1.3.21), an activity log alert in
+    3. The two budgets: SkyCraft-Monthly-Budget on the subscription (step 1.3.15) and
+       SkyCraft-Prod-Monthly on prod-skycraft-swc-rg (step 1.3.17).
+    4. The Advisor alert Advisor-Cost-Recommendations (step 1.3.7), an activity log alert in
        prod-skycraft-swc-rg, and then its action group skycraft-advisor-ag in the same group.
        An action group created before issue #225 renamed it is called prod-skycraft-swc-rg,
        like the group it lives in; it is removed too.
@@ -286,7 +286,7 @@ foreach ($budget in $budgets) {
 #    log alert (Microsoft.Insights/activityLogAlerts); both live in prod-skycraft-swc-rg.
 Write-Host "`n4. Removing the Advisor Alert and its Action Group..." -ForegroundColor Cyan
 $advisorAlertName = "Advisor-Cost-Recommendations"
-# skycraft-advisor-ag is the name step 1.3.21 gives; before issue #225 the step named the action
+# skycraft-advisor-ag is the name step 1.3.7 gives; before issue #225 the step named the action
 # group like its resource group, so a subscription that ran the older guide holds that one.
 $actionGroupNames = @("skycraft-advisor-ag", "prod-skycraft-swc-rg")
 

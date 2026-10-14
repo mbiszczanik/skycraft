@@ -642,7 +642,7 @@ Describe 'parse.py - values that are instructions, placeholders or check box sta
 
     It "marks '<label>' of step <step> literal: false" -ForEach @(
         @{ guide = 'module-1-identities-governance/1.3-governance/lab-guide-1.3.md'; step = '1.3.5'; label = 'Scope'; value = 'Click the "..." button' }
-        @{ guide = 'module-1-identities-governance/1.3-governance/lab-guide-1.3.md'; step = '1.3.8'; label = 'Allowed locations'; value = 'Select:' }
+        @{ guide = 'module-1-identities-governance/1.3-governance/lab-guide-1.3.md'; step = '1.3.9'; label = 'Allowed locations'; value = 'Select:' }
         @{ guide = 'module-2-networking/2.3-name-resolution/lab-guide-2.3.md'; step = '2.3.2'; label = 'IP address'; value = '[IP of dev-skycraft-swc-lb-pip]' }
     ) {
         $field = Get-GuideField -Guide $guide -StepId $step -Label $label
@@ -692,8 +692,8 @@ Describe 'parse.py - lab 1.3, a lock type is a field, not a click on Delete' {
         $script:Lab13 = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
     }
 
-    It 'reads step 1.3.12 as the lock form: name, type and notes as fields' {
-        $step = $script:Lab13.steps | Where-Object id -eq '1.3.12'
+    It 'reads step 1.3.13 as the lock form: name, type and notes as fields' {
+        $step = $script:Lab13.steps | Where-Object id -eq '1.3.13'
         @($step.items.kind) | Should -Be @('action', 'navigation', 'field', 'field', 'field', 'action')
         @(($step.items | Where-Object kind -eq 'field').label) | Should -Be @('Lock name', 'Lock type', 'Notes')
         ($step.items | Where-Object label -eq 'Lock type').value | Should -Be 'Delete'
@@ -1379,7 +1379,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
 
     # A menu group or a section heading: clicking a Portal menu group collapses it.
     It 'reads step <id>''s "<text>" as <labels>, the place no label' -ForEach @(
-        @{ lab = '1.3'; id = '1.3.17'; text = 'Under **Cost Management** click **Cost analysis**'; labels = @('Cost analysis') }
+        @{ lab = '1.3'; id = '1.3.18'; text = 'Under **Cost Management** click **Cost analysis**'; labels = @('Cost analysis') }
         @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Settings**, select **Networking**.'; labels = @('Networking') }
         @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Outbound traffic configuration**, click **VNet integration**.'; labels = @('VNet integration') }
         @{ lab = '3.3'; id = '3.3.2'; text = 'In the left menu, under **Settings**, select **Access keys**.'; labels = @('Access keys') }

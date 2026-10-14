@@ -267,7 +267,7 @@ function Get-AzActionGroup {
     if (Invoke-StubLookup -Name "Get-AzActionGroup:$ResourceGroupName") { return }
     if (Test-StubEmpty) { return }
     [pscustomobject]@{ Name = 'skycraft-advisor-ag' }
-    # The name step 1.3.21 gave the action group before #225.
+    # The name step 1.3.7 gave the action group before #225.
     [pscustomobject]@{ Name = 'prod-skycraft-swc-rg' }
     [pscustomobject]@{ Name = 'unrelated-ag' }
 }
@@ -401,12 +401,12 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes everything the guide creates 
         }
     }
 
-    It 'removes the subscription budget from the subscription (step 1.3.14)' {
+    It 'removes the subscription budget from the subscription (step 1.3.15)' {
         $script:Clean.Calls  | Should -Contain 'Remove-AzConsumptionBudget@subscription:SkyCraft-Monthly-Budget'
         $script:Clean.Output | Should -Match '\[SUCCESS\] Removed budget: SkyCraft-Monthly-Budget'
     }
 
-    It 'removes the resource group budget from prod-skycraft-swc-rg (step 1.3.16)' {
+    It 'removes the resource group budget from prod-skycraft-swc-rg (step 1.3.17)' {
         $script:Clean.Calls  | Should -Contain 'Remove-AzConsumptionBudget@prod-skycraft-swc-rg:SkyCraft-Prod-Monthly'
         $script:Clean.Output | Should -Match '\[SUCCESS\] Removed budget: SkyCraft-Prod-Monthly'
     }
@@ -415,7 +415,7 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes everything the guide creates 
         $script:Clean.Calls | Should -Not -Contain 'Remove-AzConsumptionBudget:Someone-Elses-Budget'
     }
 
-    It 'removes the Advisor alert (step 1.3.21)' {
+    It 'removes the Advisor alert (step 1.3.7)' {
         $script:Clean.Calls  | Should -Contain 'Remove-AzActivityLogAlert:Advisor-Cost-Recommendations'
         $script:Clean.Output | Should -Match '\[SUCCESS\] Removed Advisor alert: Advisor-Cost-Recommendations'
     }

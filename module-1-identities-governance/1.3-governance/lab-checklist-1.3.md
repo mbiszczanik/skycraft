@@ -31,26 +31,36 @@
 
 ### Policy 1: Require Environment Tag
 - [ ] Policy assigned: "Require a tag on resource groups"
-- [ ] Assignment name: `Require-Environment-Tag-RG`
+- [ ] Assignment name: `Require-Environment-Tag-RG` (in the Portal, the assignment's display name; see the note below)
 - [ ] Scope: Subscription level
 - [ ] Parameter: Tag name = `Environment`
-- [ ] Policy enforcement: **Enabled**
+- [ ] Policy enforcement: **Default (enforcement)**
 - [ ] Non-compliance message configured
-- [ ] Tested policy (creating an RG without the tag was denied)
+- [ ] Tested policy (creating an RG without the tag was denied after **Create**, with `RequestDisallowedByPolicy`)
 
 ### Policy 2: Enforce Project Tag Value
 - [ ] Policy assigned: "Require a tag and its value on resources"
 - [ ] Assignment name: `Enforce-Project-Tag`
 - [ ] Parameter: Tag name = `Project`, Tag value = `SkyCraft`
-- [ ] Policy enforcement: **Enabled**
+- [ ] Policy enforcement: **Default (enforcement)**
 - [ ] Non-compliance message configured
 
 ### Policy 3: Allowed Locations
 - [ ] Policy assigned: "Allowed locations"
 - [ ] Assignment name: `Restrict-Azure-Regions`
 - [ ] Allowed locations: Sweden Central, North Europe
-- [ ] Policy enforcement: **Enabled**
+- [ ] Policy enforcement: **Default (enforcement)**
 - [ ] Non-compliance message configured
+
+> **Assignment names**: the Portal's **Assignment name** field sets the assignment's display name;
+> Azure names the assignment resource itself with a generated id. The Bicep path sets the name
+> (`Require-Environment-Tag-RG`, ...) and its own display names (`Require Environment Tag on Resource
+> Groups`, `Enforce Project Tag Value`, `Restrict to Allowed Regions`). `Test-Lab.ps1` and
+> `Remove-LabResource.ps1` accept an assignment made at the subscription itself, of the built-in
+> definition named above, whose name or display name is the dashed name, or whose display name is
+> the Bicep one. An assignment left with the definition's own name (the wizard fills it in) is not
+> found, and two matching assignments for one policy (for example from the Portal and the Bicep path)
+> fail the check.
 
 ### Policy Compliance
 - [ ] Accessed Policy Compliance dashboard
@@ -68,7 +78,7 @@
 - [ ] Lock type: **Delete** (CanNotDelete)
 - [ ] Notes: `Cannot delete resource or child resources.`
 - [ ] Tested lock (attempted to delete resource group)
-- [ ] Verified error message received
+- [ ] Verified the Portal refused: notification **Failed to delete resource group prod-skycraft-swc-rg** ("has locks applied")
 
 ### Lock 2: Platform Resource Group
 - [ ] Lock applied to: `platform-skycraft-swc-rg`
@@ -89,19 +99,19 @@
 ### Budget 1: Subscription Budget
 - [ ] Budget created: `SkyCraft-Monthly-Budget`
 - [ ] Scope: Subscription level
-- [ ] Amount: $200 (or your chosen amount)
+- [ ] Amount: 100 in your billing currency (or your chosen amount)
 - [ ] Reset period: Monthly
-- [ ] Expiration date set (1 year from now)
+- [ ] Expiration date set (the Portal's default, two years from now)
 - [ ] Alert at 50% of budget configured
 - [ ] Alert at 80% of budget configured
 - [ ] Alert at 100% of budget configured
-- [ ] Email recipients configured for all alerts
+- [ ] Email recipients configured (one list, shared by all alerts)
 - [ ] Confirmation email received
 
 ### Budget 2: Resource Group Budget
 - [ ] Budget created: `SkyCraft-Prod-Monthly`
-- [ ] Scope: prod-skycraft-swc-rg
-- [ ] Amount: $100 (or your chosen amount)
+- [ ] Scope: prod-skycraft-swc-rg (created from the resource group's own **Budgets**, not with a filter)
+- [ ] Amount: 50 in your billing currency (or your chosen amount)
 - [ ] Alerts configured (60%, 85%, 100%)
 - [ ] Email recipients configured
 
@@ -120,7 +130,7 @@
 
 ### Advisor Dashboard
 - [ ] Accessed Azure Advisor
-- [ ] Reviewed Overall Score
+- [ ] Reviewed the **Advisor score** page
 - [ ] Viewed recommendations by category:
   - [ ] Cost
   - [ ] Security
@@ -132,9 +142,10 @@
 ### Advisor Configuration
 - [ ] Reviewed Advisor Configuration settings
 - [ ] Explored filtering options (include/exclude resources)
-- [ ] Created Advisor alert rule
+- [ ] Created Advisor alert rule (Step 1.3.7, before the tag policy of Step 1.3.8)
 - [ ] Alert name: `Advisor-Cost-Recommendations`
 - [ ] Alert category: Cost
+- [ ] Action group: `skycraft-advisor-ag` in prod-skycraft-swc-rg, Region Sweden Central, tagged `Project` = `SkyCraft`
 - [ ] Understand how to act on recommendations
 
 ---
@@ -191,7 +202,7 @@ Get-AzResource -TagName Project -TagValue SkyCraft |
 
 ```powershell
 Get-AzPolicyAssignment |
-    Select-Object Name, DisplayName, Scope |
+    Select-Object Name, DisplayName, PolicyDefinitionId, Scope |
     Format-Table -AutoSize
 ```
 
@@ -234,12 +245,12 @@ The listing is per scope: without `-ResourceGroupName` it shows the subscription
 the budgets on that resource group.
 
 ```powershell
-# Subscription budget (step 1.3.14)
+# Subscription budget (step 1.3.15)
 Get-AzConsumptionBudget |
     Select-Object Name, Amount, Category |
     Format-Table -AutoSize
 
-# Resource group budget (step 1.3.16)
+# Resource group budget (step 1.3.17)
 Get-AzConsumptionBudget -ResourceGroupName prod-skycraft-swc-rg |
     Select-Object Name, Amount, Category |
     Format-Table -AutoSize
@@ -247,7 +258,7 @@ Get-AzConsumptionBudget -ResourceGroupName prod-skycraft-swc-rg |
 
 **Expected Results**:
 - Tags appear on all three resource groups
-- 3 policy assignments visible
+- 3 policy assignments visible, each with the dashed name in **Name** (Bicep path) or **DisplayName** (Portal path)
 - 2 resource locks confirmed
 - SkyCraft-Monthly-Budget listed by the first budget command
 - SkyCraft-Prod-Monthly listed by the second budget command

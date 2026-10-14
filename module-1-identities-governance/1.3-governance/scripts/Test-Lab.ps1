@@ -145,12 +145,12 @@ foreach ($spec in Get-LabPolicyAssignmentSpec) {
 # and then outlive the cleanup (issue #258). Get-AzResourceLock -ResourceGroupName also returns
 # locks on resources inside the group and on the subscription above it; neither is the lock the
 # guide asks for, so only a lock applied at the group's own scope counts. The lock notes are not
-# checked: the Bicep path sets them itself (lab-guide-1.3.md, step 1.3.10).
+# checked: the Bicep path sets them itself (lab-guide-1.3.md, step 1.3.11).
 Write-Host "`n=== 3. Validating Locks ===" -ForegroundColor Cyan
 $expectedLockLevel = "CanNotDelete"
 $lockTargets = @(
-    @{ RG = "prod-skycraft-swc-rg"; Lock = "lock-no-delete-prod"; Step = "1.3.10" },
-    @{ RG = "platform-skycraft-swc-rg"; Lock = "lock-no-delete-platform"; Step = "1.3.12" }
+    @{ RG = "prod-skycraft-swc-rg"; Lock = "lock-no-delete-prod"; Step = "1.3.11" },
+    @{ RG = "platform-skycraft-swc-rg"; Lock = "lock-no-delete-platform"; Step = "1.3.13" }
 )
 
 foreach ($target in $lockTargets) {

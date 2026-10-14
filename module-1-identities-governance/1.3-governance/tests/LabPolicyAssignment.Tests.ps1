@@ -69,7 +69,7 @@ Describe 'Lab 1.3 policy assignment lookup - the guide''s three assignments' {
     It 'names the three assignments the guide, the Bicep path and Invoke-LabGovernance.ps1 create' {
         $script:Specs.Name | Should -Be @('Require-Environment-Tag-RG', 'Enforce-Project-Tag', 'Restrict-Azure-Regions')
         $script:Specs.DisplayName | Should -Be @('Require Environment Tag on Resource Groups', 'Enforce Project Tag Value', 'Restrict to Allowed Regions')
-        $script:Specs.Step | Should -Be @('1.3.5', '1.3.7', '1.3.8')
+        $script:Specs.Step | Should -Be @('1.3.5', '1.3.8', '1.3.9')
     }
 
     It 'holds the same definition ids and display names as bicep/main.bicep' {
