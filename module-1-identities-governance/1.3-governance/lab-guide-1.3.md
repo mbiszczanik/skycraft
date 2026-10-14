@@ -86,7 +86,7 @@ Before starting this lab:
 
 > [!IMPORTANT] > **Prerequisite**: The resource groups (`platform-skycraft-swc-rg`, `dev-skycraft-swc-rg`, `prod-skycraft-swc-rg`) must already exist. If you haven't created them, complete [Lab 1.2: Manage Access to Azure Resources (RBAC)](../../module-1-identities-governance/1.2-rbac/lab-guide-1.2.md#-section-2-create-resource-groups-15-minutes) first.
 
-1. In **Azure Portal**, navigate to **Resource groups**
+1. In Azure Portal, search for **Resource groups**
 2. Click on **dev-skycraft-swc-rg**
 3. In the left menu, click **Tags**
 4. Add the following tags:
@@ -99,6 +99,8 @@ Before starting this lab:
 | Owner       | mbiszczanik |
 
 5. Click **Apply**
+
+**Note**: If the group already carries these four tags with these values (Lab 1.2's Bicep path creates the groups with them), **Apply** stays greyed out: there is nothing to change. Check the values against the table and go on.
 
 **Expected Result**: Tags are saved and visible in the Tags blade.
 
@@ -119,6 +121,8 @@ Before starting this lab:
 
 4. Click **Apply**
 
+**Note**: If the tags are already there with these values, **Apply** stays greyed out and there is nothing to do (as in Step 1.3.1).
+
 ### Step 1.3.3: Tag Platform Services Resource Group
 
 1. Navigate to **platform-skycraft-swc-rg**
@@ -134,14 +138,16 @@ Before starting this lab:
 
 4. Click **Apply**
 
+**Note**: If the tags are already there with these values, **Apply** stays greyed out and there is nothing to do (as in Step 1.3.1).
+
 ### Step 1.3.4: View Resources by Tag
 
-1. In the Azure Portal search bar, type **Tags**
-2. Click **Tags** service
-3. You'll see all tags across your subscription
-4. Click on **Project** tag
-5. Click on **SkyCraft** value
-6. **Expected Result**: Shows all three resource groups with the "SkyCraft" project tag
+1. In Azure Portal, search for **Tags**
+2. In the list of tags, click **Project : SkyCraft**
+
+The **Tags** service lists every tag in your subscription as one name : value pair per line (`CostCenter : MSDN`, `Environment : Development`, `Project : SkyCraft`, ...).
+
+**Expected Result**: **Resources with tag Project : SkyCraft** lists the three resource groups, and any resource that already carries the tag (for example from Lab 1.2's deployment).
 
 **Best Practice**: Standardize tag names and values across your organization to ensure consistency.
 
@@ -169,125 +175,208 @@ Before starting this lab:
 ### Step 1.3.5: Assign a Built-in Policy (Require Tag on Resource Groups)
 
 1. In Azure Portal, search for **Policy**
-2. Click **Policy** service
-3. In the left menu, click **Assignments**
-4. Click **+ Assign policy**
+2. In the left menu, under **Authoring**, click **Assignments**
+3. Click **Assign policy**
 
 ![Assign a Built-in Policy](./images/step-1.3.5a.png)
 
-**Basics tab**:
+4. On the **Basics** tab, fill in:
 
 - **Scope**: Click the "..." button
-  - Select your subscription
+  - The pane opens with your subscription selected (the wizard fills in the scope already)
   - Click **Select**
 - **Policy definition**: Click the "..." button
-  - Search for: **"Require a tag on resource groups"**
-  - Select this policy
-  - Click **Add**
+  - Search for **Require a tag on resource groups**
+  - Select **Require a tag on resource groups**, then click **Add**
+- **Assignment name**: `Require-Environment-Tag-RG`
+- **Description**: `All resource groups must have an Environment tag`
+- **Policy enforcement**: Default (enforcement)
 
-![Assign a Built-in Policy](./images/step-1.3.5b.png)
+**Note**: Once you add the definition, the wizard fills **Assignment name** with the definition's own name (`Require a tag on resource groups`). Replace it with `Require-Environment-Tag-RG`: the lab's scripts (`Test-Lab.ps1`, `Remove-LabResource.ps1`) look for an assignment of this definition with that name. In the Portal, **Assignment name** sets the assignment's display name; Azure names the assignment resource itself with a generated id. The wizard also shows a **Version** field (`1.*.*`): leave it as it is.
 
-5. Fill in additional details:
-   - **Assignment name**: `Require-Environment-Tag-RG`
-   - **Description**: `All resource groups must have an Environment tag`
-   - **Policy enforcement**: Enabled
-
-6. Click **Next**
-
-**Parameters tab**:
+5. Click the **Parameters** tab and set:
 
 - **Tag Name**: `Environment`
 
-7. Click **Next**
-
-**Remediation tab** (skip for now):
-
-8. Click **Next**
-
-**Non-compliance messages tab**:
+6. Click the **Non-compliance messages** tab and set:
 
 - **Non-compliance message**: `Resource group must have an Environment tag (Development, Production, or Platform)`
 
-9. Click **Review + create**
-10. Click **Create**
+The **Remediation** and **Managed identity** tabs stay as they are: this policy denies, it does not change resources.
 
-**Expected Result**: Policy is assigned and will evaluate new resource groups.
+7. Click **Review + create**, then **Create**
+
+**Expected Result**: Policy is assigned and will evaluate new resource groups. **Assignments** lists `Require-Environment-Tag-RG`.
 
 ![Assign a Built-in Policy](./images/step-1.3.5c.png)
 
 ### Step 1.3.6: Test the Policy
 
-1. Try to create a new resource group **WITHOUT** the "Environment" tag:
-   - Click **+ Create a resource group**
-   - Name: `rg-test-no-tag`
-   - Click **Review + create**
+First, try to create a resource group **WITHOUT** the "Environment" tag:
 
-**Expected Result**: Creation is **denied** by `Require-Environment-Tag-RG`: the **Tags** tab is marked with an error showing the non-compliance message from Step 1.3.5 and a **Policy details** link, so `rg-test-no-tag` cannot be created. A policy evaluates every new create or update request. What it does not do is change resources that already exist: a resource group created before the assignment stays without the tag and is reported as non-compliant instead (Step 1.3.9). From the CLI or a template, the same denial comes back with the error code `RequestDisallowedByPolicy`.
+1. In Azure Portal, search for **Resource groups**
+2. Click **+ Create**
+3. On the **Basics** tab, fill in (leave the Tags tab empty):
 
-**Note**: If the **Tags** tab shows no error and **Review + create** reaches the review page, the assignment is not in effect yet - a new assignment takes about five minutes to apply, sometimes longer. Wait a few minutes, go back to **Basics** and click **Review + create** again.
+| Field               | Value          |
+| ------------------- | -------------- |
+| Resource group name | rg-test-no-tag |
+| Region              | Sweden Central |
 
-![Assign a Built-in Policy](./images/step-1.3.6a.png)
+4. Click **Review + create**. The review page opens without an error: the Portal does not check the policy before you create.
+5. Click **Create**
+6. When the Portal shows **Failed to create the resource group**, click the notification to open the error details
 
-2. Now try again:
-   - Name: `rg-test-with-tag`
-   - Go to **Tags** tab
-   - Add tag: `Environment` = `Test`
-   - Click **Review + create**
-   - Click **Create**
+**Expected Result**: Creation is **denied** by `Require-Environment-Tag-RG`, so `rg-test-no-tag` is not created. The error details show the error code `RequestDisallowedByPolicy`, the policy `Require-Environment-Tag-RG` with a **Policy link**, and the non-compliance message from Step 1.3.5. A policy evaluates every new create or update request. What it does not do is change resources that already exist: a resource group created before the assignment stays without the tag and is reported as non-compliant instead (Step 1.3.9). From the CLI or a template, the same denial comes back with the same error code.
+
+Now create one with the tag:
+
+7. Close the error details and click **+ Create** again
+8. On the **Basics** tab, fill in:
+
+| Field               | Value            |
+| ------------------- | ---------------- |
+| Resource group name | rg-test-with-tag |
+| Region              | Sweden Central   |
+
+9. Click the **Tags** tab and add:
+
+| Name        | Value |
+| ----------- | ----- |
+| Environment | Test  |
+
+10. Click **Review + create**, then **Create**
 
 **Expected Result**: Creation succeeds because the required tag is present.
 
+**Note**: If `rg-test-no-tag` was created as well, the assignment was not in effect yet: see Troubleshooting, Issue 2.
+
 ![Assign a Built-in Policy](./images/step-1.3.6b.png)
 
-3. Delete the test resource group: `rg-test-with-tag` (the policy denied `rg-test-no-tag`, so it does not exist)
+Finally, delete the test resource group `rg-test-with-tag` (the policy denied `rg-test-no-tag`, so it does not exist):
+
+11. Click **Refresh**, then click **rg-test-with-tag**
+12. Click **Delete resource group**
+13. Fill in the confirmation field:
+
+- **Enter resource group name to confirm deletion**: `rg-test-with-tag`
+
+14. Click outside the field, then click **Delete**
+15. In the **Delete confirmation** dialog, click **Delete**
+
+**Note**: The **Delete** button stays greyed out until the name is typed and the field loses focus. That is why you click outside the field first.
+
+After a refresh, `rg-test-with-tag` is no longer listed in **Resource groups**.
+
+### Step 1.3.21: Configure Advisor Alerts
+
+> [!IMPORTANT]
+> This step belongs to Section 5 (Azure Advisor), but you do it here, before Step 1.3.7. Step 1.3.7 assigns `Enforce-Project-Tag`, which refuses every new resource without the tag `Project` = `SkyCraft`. The **Create Advisor Alerts** form has no tags, so once that assignment is in place the Portal cannot create the alert. The step keeps its number so that links to it stay valid.
+
+1. In Azure Portal, search for **Advisor**
+2. In the left menu, under **Monitoring** (expand it if it is collapsed), click **Alerts (Preview)**
+3. Click **New Advisor Alert**
+4. Fill in the top of the form:
+
+- **Scope**: Your subscription
+- **Category**: Cost
+
+5. Under **Action groups**, click **Create new**
+6. On the **Basics** tab of the new action group, fill in:
+
+| Field             | Value                |
+| ----------------- | -------------------- |
+| Resource group    | prod-skycraft-swc-rg |
+| Region            | Sweden Central       |
+| Action group name | skycraft-advisor-ag  |
+| Display name      | SkyAdvisor           |
+
+**Note**: **Region** starts at **(US) East US**. Change it to Sweden Central: Step 1.3.8 will allow only Sweden Central and North Europe, and once that policy is in place an action group in East US is refused (the Portal then shows the refusal only under the notification bell and leaves the form as it was). **Display name** takes at most 12 characters.
+
+7. Click the **Tags** tab and add:
+
+| Name        | Value       |
+| ----------- | ----------- |
+| Environment | Production  |
+| Project     | SkyCraft    |
+| CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
+
+8. Click **Review + create**, then **Create**
+
+Back in **Create Advisor Alerts**, the new action group `skycraft-advisor-ag` is listed under **Action groups**.
+
+9. Under **Alert details**, fill in:
+
+- **Alert rule name**: `Advisor-Cost-Recommendations`
+- **Description**: `Alert when new cost recommendations are available`
+- **Select existing resource group**: `prod-skycraft-swc-rg`
+
+10. Click **Create alert**
+
+**Expected Result**: No **Failed to create alert** notification appears, and **Alerts (Preview)** lists `Advisor-Cost-Recommendations`. From now on, you'll receive alerts when Advisor identifies new cost-saving opportunities.
+
+**Note**: **Alerts (Preview)** lists the rule even when its creation failed. If the Portal says **Failed to create alert** ("An error occurred while trying to create alert"), the alert does not exist: see Troubleshooting, Issue 6.
 
 ### Step 1.3.7: Assign Policy for Resource Naming Convention
 
-1. In **Policy** service, click **Assignments**
-2. Click **+ Assign policy**
-
-**Basics tab**:
+1. In Azure Portal, search for **Policy**
+2. In the left menu, under **Authoring**, click **Assignments**
+3. Click **Assign policy**
+4. On the **Basics** tab, fill in:
 
 - **Scope**: Your subscription
-- **Policy definition**: Search for **"Require a tag and its value on resources"**
+- **Policy definition**: Click the "..." button
+  - Search for **Require a tag and its value on resources**
+  - Select **Require a tag and its value on resources**, then click **Add**
 - **Assignment name**: `Enforce-Project-Tag`
 - **Description**: `All resources must have Project tag set to SkyCraft`
 
-**Parameters tab**:
+**Note**: As in Step 1.3.5, replace the definition's name that the wizard fills into **Assignment name**.
+
+5. Click the **Parameters** tab and set:
 
 - **Tag Name**: `Project`
 - **Tag Value**: `SkyCraft`
 
-**Non-compliance message**:
+6. Click the **Non-compliance messages** tab and set:
 
-- Message: `All resources must be tagged with Project=SkyCraft`
+- **Non-compliance message**: `All resources must be tagged with Project=SkyCraft`
 
-3. Click **Review + create** → **Create**
+7. Click **Review + create**, then **Create**
+
+**Note**: From now on, the Portal refuses every new resource in this subscription that does not carry the tag `Project` = `SkyCraft`. Resource groups are not resources in this sense: the definition checks resources only.
 
 ### Step 1.3.8: Assign Policy to Enforce Allowed Locations
 
 Prevent resource creation in unintended regions:
 
-1. **Policy** → **Assignments** → **+ Assign policy**
-
-**Basics tab**:
+1. In the left menu, under **Authoring**, click **Assignments**
+2. Click **Assign policy**
+3. On the **Basics** tab, fill in:
 
 - **Scope**: Your subscription
-- **Policy definition**: Search for **"Allowed locations"**
+- **Policy definition**: Click the "..." button
+  - Search for **Allowed locations**
+  - Select **Allowed locations**, then click **Add**
 - **Assignment name**: `Restrict-Azure-Regions`
 - **Description**: `Resources can only be created in Sweden Central and North Europe`
 
-**Parameters tab**:
+**Note**: The search returns three definitions: Azure Cosmos DB allowed locations, Allowed locations, and Allowed locations for resource groups. Take the one named exactly Allowed locations. As in Step 1.3.5, replace the definition's name that the wizard fills into **Assignment name**.
+
+4. Click the **Parameters** tab and set:
 
 - **Allowed locations**: Select:
   - Sweden Central
   - North Europe
 
-**Non-compliance message**:
+The list is a multi-select with a filter box: tick both regions; the field then shows "2 selected".
 
-- Message: `Resources must be deployed to Sweden Central or North Europe regions only`
+5. Click the **Non-compliance messages** tab and set:
 
-2. Click **Review + create** → **Create**
+- **Non-compliance message**: `Resources must be deployed to Sweden Central or North Europe regions only`
+
+6. Click **Review + create**, then **Create**
 
 ### Step 1.3.9: View Policy Compliance
 
@@ -324,10 +413,11 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 ### Step 1.3.10: Apply CanNotDelete Lock to Production Resource Group
 
-1. Navigate to **prod-skycraft-swc-rg**
-2. In the left menu, click **Locks**
-3. Click **+ Add**
-4. Fill in:
+1. In Azure Portal, search for **Resource groups**
+2. Click **prod-skycraft-swc-rg**
+3. In the left menu, under **Settings**, click **Locks**
+4. Click **+ Add**
+5. Fill in:
 
 | Field     | Value                                                |
 | --------- | ---------------------------------------------------- |
@@ -337,7 +427,9 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 > The Bicep path applies both locks through the AVM resource-group module, which sets this notes text itself; the notes are not configurable through the module. If you create the locks in the portal, use the same text so your locks match the checklist. `Test-Lab.ps1` does not read the notes: it checks that each group carries, on the group itself, a lock with the name given in step 1.3.10 or 1.3.12 and the **Delete** (`CanNotDelete`) type.
 
-5. Click **OK**
+**Note**: **Lock type** starts at **Read-only**. Change it to **Delete**: a read-only lock on the group would block every change to it and its resources, not only deletion.
+
+6. Click **OK**
 
 **Expected Result**: Lock is created and shows in the Locks list.
 
@@ -345,26 +437,36 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 ### Step 1.3.11: Test the Lock
 
-1. Still in **prod-skycraft-swc-rg**, click **Overview**
-2. Click **Delete resource group** button
-3. **Expected Result**: You'll see an error:
+> [!WARNING]
+> This step really asks the Portal to delete the production resource group. The lock from Step 1.3.10 is what stops it. Do not start the step unless **Locks** lists `lock-no-delete-prod` with the lock type Delete: without the lock, the group and everything in it are deleted.
 
-   > "Failed to delete resource group 'prod-skycraft-swc-rg'. Error: The scope 'prod-skycraft-swc-rg' cannot perform delete operation because following scope(s) are locked: '/subscriptions/.../resourceGroups/prod-skycraft-swc-rg'. Please remove the lock and try again."
+1. Still in `prod-skycraft-swc-rg`, in the left menu, under **Settings**, click **Locks** and verify:
+   - `lock-no-delete-prod` is listed, with the lock type Delete
+2. In the left menu, click **Overview**
+3. Click **Delete resource group**
+4. Fill in the confirmation field:
 
-4. Click **Cancel** (do not delete)
+- **Enter resource group name to confirm deletion**: `prod-skycraft-swc-rg`
+
+5. Click outside the field, then click **Delete**
+6. In the **Delete confirmation** dialog, click **Delete**
+
+**Expected Result**: The Portal refuses before it deletes anything. A notification **Failed to delete resource group prod-skycraft-swc-rg** says: "Resource group prod-skycraft-swc-rg has locks applied. Remove the locks before deleting." The resource group and everything in it stay.
+
+**Note**: The pane opened by **Delete resource group** shows no lock warning, and the **Delete** button stays greyed out until the name is typed and the field loses focus. The refusal comes only after you confirm. From the CLI or a template, Azure Resource Manager refuses the same delete with the error code `ScopeLocked`.
 
 **Key Learning**: Even with Owner role, you cannot delete a locked resource until the lock is removed.
-
-![Assign a Built-in Policy](./images/step-1.3.11.png)
 
 ### Step 1.3.12: Apply CanNotDelete Lock to Platform Resource Group
 
 1. Navigate to **platform-skycraft-swc-rg**
-2. Click **Locks** → **+ Add**
+2. In the left menu, under **Settings**, click **Locks** → **+ Add**
 3. Create lock:
    - Lock name: `lock-no-delete-platform`
    - Lock type: **Delete**
    - Notes: `Cannot delete resource or child resources.`
+
+**Note**: As in Step 1.3.10, **Lock type** starts at **Read-only**: change it to **Delete**.
 
 4. Click **OK**
 
@@ -399,104 +501,105 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 ### Step 1.3.14: Create a Subscription Budget
 
 1. In Azure Portal, search for **Cost Management + Billing**
-2. Click **Cost Management + Billing**
-3. Under **Cost Management**, click **Budgets**
+2. In the left menu, click **Cost Management**
+3. In the left menu, under **Monitoring**, click **Budgets**
 4. Click **+ Add**
 
-**Scope**: Verify your subscription is selected
+**Note**: Cost Management + Billing opens on **Billing scopes**. **Cost Management** then opens at a scope the Portal picks for you (a **Scope automatically selected** popover says so) and names it at the top of the page. It should be your subscription; if it is another scope, click **Change scope** in the left menu and pick your subscription before you continue.
 
-5. Fill in budget details:
+5. On the **Create a budget** step, fill in:
 
-| Field           | Value                             |
-| --------------- | --------------------------------- |
-| Name            | SkyCraft-Monthly-Budget           |
-| Reset period    | Monthly                           |
-| Creation date   | [First day of current month]      |
-| Expiration date | [One year from now]               |
-| Amount          | $100 (adjust based on your needs) |
+| Field           | Value                                               |
+| --------------- | --------------------------------------------------- |
+| Name            | SkyCraft-Monthly-Budget                             |
+| Reset period    | Monthly                                             |
+| Creation date   | [The current month; the day is fixed to the 1st]    |
+| Expiration date | [Leave the default, two years from now]             |
+| Amount          | 100 (in your billing currency; adjust to your needs) |
 
-6. Click **Next**
+**Note**: **Reset period** starts at **Billing month**. Pick **Monthly**, which the list shows under **Calendar months**. The **Amount** field is labelled with your billing currency (for example **Amount (€)**).
+
+6. Click **Next >**
 
 ![Manage Costs with Budgets and Alerts](./images/step-1.3.14b.png)
 
 ### Step 1.3.15: Configure Budget Alerts
 
-**Alert conditions** tab:
+On the **Set alerts** step, every alert is one row under **Alert conditions**. A new empty row appears below each row you fill in.
 
-1. Click **+ Add condition**
+1. Fill in three rows under **Alert conditions** (leave the Action group column at None):
 
-**Alert 1** (Warning at 50%):
+| Type        | % of budget |
+| ----------- | ----------- |
+| Actual cost | 50          |
+| Actual cost | 80          |
+| Actual cost | 100         |
 
-- **Alert type**: Actual
-- **% of budget**: 50
-- **Action group**: (leave blank for now)
-- **Alert recipients (email)**: Enter your email address
-- **Language**: English
+2. Fill in the recipients:
 
-2. Click **+ Add condition** again
+- **Alert recipients (email)**: [your email address]
 
-**Alert 2** (Critical at 80%):
+**Note**: **Alert recipients (email)** is one list for all the rows: every recipient gets every alert of this budget. To add a second address, type it in the empty row that appears below the first. **Languages** can stay at Default.
 
-- **Alert type**: Actual
-- **% of budget**: 80
-- **Alert recipients (email)**: Enter your email address
+3. Click **Create**
 
-3. Click **+ Add condition**
-
-**Alert 3** (Exceeded at 100%):
-
-- **Alert type**: Actual
-- **% of budget**: 100
-- **Alert recipients (email)**: Enter your email and Malfurion Stormrage's email
-
-4. Click **Next**
-
-**Advanced options** (optional):
-
-- Skip for now
-
-5. Click **Create**
-
-**Expected Result**: Budget is created and you'll receive email confirmation
+**Expected Result**: Budget is created and **Budgets** lists `SkyCraft-Monthly-Budget`. The recipients may also receive a confirmation email.
 
 ![Manage Costs with Budgets and Alerts](./images/step-1.3.15.png)
 
 ### Step 1.3.16: Create Resource Group Budget
 
-Create a more specific budget for the production environment:
+Create a more specific budget for the production environment. A budget belongs to the scope it is created at, so you create this one from the resource group itself:
 
-1. In **Budgets**, click **+ Add**
-2. Click **Scope** and select **prod-skycraft-swc-rg**
-3. Fill in:
+1. In Azure Portal, search for **Resource groups**
+2. Click **prod-skycraft-swc-rg**
+3. In the left menu, under **Cost Management**, click **Budgets**
+4. Click **+ Add**
 
-| Field        | Value                 |
-| ------------ | --------------------- |
-| Name         | SkyCraft-Prod-Monthly |
-| Reset period | Monthly               |
-| Amount       | $50                   |
+**Note**: In **Create budget**, **Scope** is plain text and shows `prod-skycraft-swc-rg`: it cannot be changed there. Do not use **Add filter** to pick the group: that creates a subscription budget with a filter, not a budget of the resource group.
 
-![Manage Costs with Budgets and Alerts](./images/step-1.3.16.png)
+5. On the **Create a budget** step, fill in:
 
-4. Configure alerts at 60%, 85%, and 100%
-5. Add email recipients
-6. Click **Create**
+| Field        | Value                         |
+| ------------ | ----------------------------- |
+| Name         | SkyCraft-Prod-Monthly         |
+| Reset period | Monthly                       |
+| Amount       | 50 (in your billing currency) |
+
+6. Click **Next >**
+7. On the **Set alerts** step, fill in three rows under **Alert conditions**:
+
+| Type        | % of budget |
+| ----------- | ----------- |
+| Actual cost | 60          |
+| Actual cost | 85          |
+| Actual cost | 100         |
+
+8. Fill in the recipients:
+
+- **Alert recipients (email)**: [your email address]
+
+9. Click **Create**
+
+**Expected Result**: The resource group's **Budgets** lists `SkyCraft-Prod-Monthly`.
 
 ### Step 1.3.17: View Cost Analysis
 
-1. In **Cost Management + Billing**, click **Cost analysis**
-2. Click **Go to subscription**
+1. In Azure Portal, search for **Subscriptions**
+2. Click your subscription
 3. Under **Cost Management** click **Cost analysis**
-4. Explore different views:
+4. Open the **VIEW** menu and, under **Built-in views**, explore:
    - **Cost by resource** - See spending per resource
    - **Cost by service** - See spending per Azure service
    - **Daily costs** - Trend over time
 
+**Note**: Open Cost analysis from the subscription, as here. **Cost Management + Billing** has no **Cost analysis** of its own, and its **Go to subscription** link opens the scope you used last (after Step 1.3.16, the production resource group).
+
 ![Manage Costs with Budgets and Alerts](./images/step-1.3.17a.png)
 
-5. Apply filters:
-   - **Tag**: Project = SkyCraft
-   - **Resource group**: prod-skycraft-swc-rg
-   - **Time range**: Last 30 days
+5. Click the date range button (it shows the current period) and, under **Relative dates**, click **Last 30 days**
+6. Click **Add filter**, choose **Tag**, then pick the tag `project` with the value `skycraft` (Cost analysis shows tag names and values in lower case)
+7. Click **Add filter** again, choose **Resource group name**, then pick `prod-skycraft-swc-rg`
 
 **Expected Result**: Visual charts showing cost breakdown (likely very low since we haven't deployed resources yet).
 
@@ -521,18 +624,21 @@ Create a more specific budget for the production environment:
 1. In Azure Portal, search for **Advisor**
 2. Click **Advisor** service
 3. Review the **Overview** page
+4. In the left menu, click **Advisor score**
 
-**Dashboard shows**:
+**Overview shows** one card per category (Cost, Security, Reliability, Operational excellence, Performance), each with:
 
-- Overall score (0-100%)
-- Recommendations by category
-- Number of affected resources
+- Its own score ("Score --%" until Advisor has assessed the category)
+- The number of active recommendations
+- The number of impacted resources
+
+The overall score (0-100%) is on the separate **Advisor score** page.
 
 ![Manage Costs with Budgets and Alerts](./images/step-1.3.18.png)
 
 ### Step 1.3.19: Review Cost Recommendations
 
-1. Click **Cost** tab in left menu
+1. In the left menu, under **Recommendations**, click **Cost**
 2. Review recommendations (may be none if newly created)
 
 **Common recommendations**:
@@ -546,7 +652,7 @@ Create a more specific budget for the production environment:
 
 ### Step 1.3.20: Review Security Recommendations
 
-1. Click **Security** tab
+1. In the left menu, under **Recommendations**, click **Security**
 2. Review recommendations
 
 **Common recommendations**:
@@ -558,37 +664,7 @@ Create a more specific budget for the production environment:
 
 ![Review Security Recommendations](./images/step-1.3.20.png)
 
-### Step 1.3.21: Configure Advisor Alerts
-
-1. Click **Monitoring** in left menu
-2. Click **Alerts** in left menu
-3. Click **+ New Advisor alert**
-
-**Create alert rule**:
-
-- **Scope**: Your subscription
-- **Condition**: Category = Cost
-- **Action group**:
-  - Click **Create new**
-  - Choose resource group: `prod-skycraft-swc-rg`
-- **Action groups**:
-  - Action group name: `skycraft-advisor-ag`
-  - Display name: `SkyAdvisor` (the Portal allows at most 12 characters)
-  - Fill tags accordingly to policies
-  - Click **Review + Create**
-
-![Manage Costs with Budgets and Alerts](./images/step-1.3.21a.png)
-
-- **Alert details**:
-  - Alert rule name: `Advisor-Cost-Recommendations`
-  - Description: `Alert when new cost recommendations are available`
-  - Select existing resource group: `prod-skycraft-swc-rg`
-
-![Manage Costs with Budgets and Alerts](./images/step-1.3.21b.png)
-
-4. Click **Create alert**
-
-**Expected Result**: You'll receive alerts when Advisor identifies new cost-saving opportunities.
+**Advisor alerts**: you created the Advisor alert for cost recommendations in [Step 1.3.21](#step-1321-configure-advisor-alerts), in Section 2, before the tag policy of Step 1.3.7 could refuse it. To see it, open **Alerts (Preview)** under **Monitoring** in Advisor's left menu.
 
 ---
 
@@ -661,9 +737,9 @@ Tenant Root Group
 
 ### Cost Management
 
-- [ ] Created subscription-level budget ($200/month)
+- [ ] Created subscription-level budget (100 per month, in your billing currency)
 - [ ] Configured 3 alert thresholds (50%, 80%, 100%)
-- [ ] Created resource group-specific budget (prod-skycraft-swc-rg)
+- [ ] Created resource group-specific budget (prod-skycraft-swc-rg, 50 per month)
 - [ ] Explored Cost Analysis with filters
 - [ ] Understand daily cost trends
 
@@ -671,7 +747,7 @@ Tenant Root Group
 
 - [ ] Accessed Advisor dashboard
 - [ ] Reviewed recommendations by category
-- [ ] Configured Advisor alert for cost recommendations
+- [ ] Configured Advisor alert for cost recommendations (Step 1.3.21, before Step 1.3.7)
 - [ ] Understand how to act on recommendations
 
 ### Management Groups
@@ -701,9 +777,9 @@ Tenant Root Group
 
 **Solutions**:
 
-- A new assignment takes about five minutes to take effect, sometimes longer
+- A new assignment takes about five minutes to take effect, sometimes longer. If Step 1.3.6 created `rg-test-no-tag`, delete it the way the step deletes `rg-test-with-tag`, wait a few minutes and try again
 - Policy may be in "Audit" mode instead of "Deny" mode
-- Check **Policy enforcement** is set to "Enabled"
+- Check **Policy enforcement** is set to "Default (enforcement)", not "Do not enforce"
 - Review policy effect (should be "Deny" for enforcement)
 
 ### Issue 3: Cannot delete resource despite Owner role
@@ -738,6 +814,15 @@ Tenant Root Group
 - Tags must be applied before resources are created
 - Use "Cost by tag" view in Cost Analysis
 - Ensure tag is applied to actual resources, not just resource group
+
+### Issue 6: Advisor alert or its action group is refused
+
+**Symptom**: In Step 1.3.21, the Portal says "Failed to create alert - An error occurred while trying to create alert", or the action group's **Create** does nothing and the notification bell shows "Failed to create action group"
+
+**Solutions**:
+
+- Action group: set **Region** to Sweden Central. `Restrict-Azure-Regions` (Step 1.3.8) refuses the default East US
+- Alert: `Enforce-Project-Tag` (Step 1.3.7) is already assigned in your subscription, for example from an earlier run of this lab or its Bicep path. The **Create Advisor Alerts** form has no tags, so the policy refuses the alert. **Alerts (Preview)** may still list it, but it does not exist. Create the alert before Step 1.3.7, as the guide orders it; `Test-Lab.ps1` does not check the alert
 
 ---
 
