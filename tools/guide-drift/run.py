@@ -2030,7 +2030,7 @@ class Runner:
 
     def wait_for_deployment(self, what: str, look: Callable[[], Found | None]) -> tuple[bool, Found | None]:
         """After `look` found nothing in its usual time: when the screen shows a Portal deployment
-        still running (deployment_state, #328), say so once, with `what` is looked for, and look
+        still running (deployment_state, #328), say so once, naming `what` it looks for, and look
         again every DEPLOYMENT_POLL_MS until it finds something or the deployment has ended, for up
         to the run's longest wait (--deployment-timeout-minutes), saying every DEPLOYMENT_SAY_S how
         long it has waited. Returns (whether it waited, what it found); (False, None) at once when
