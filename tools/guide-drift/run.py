@@ -131,9 +131,10 @@ person is not asked about the label then, and nothing is recorded: nothing about
 missing. Only a new failure counts: one on screen when a wait starts is an earlier deployment's,
 means only that the running one has ended once it is gone, and counts as reported; one this run
 has reported (the overview or notification of a step that failed and was skipped or done by hand,
-or the same text from a new deployment) is said to be still on screen, and the lookup goes on as without a deployment (the blade check, the recording's
-decision, the global search, the person); what the person answers there is used in this run only,
-a pick as a workaround, and never recorded, as the Portal may not be where the guide leads. A
+or the same text from a new deployment) is said to be still on screen, and the lookup goes on as
+without a deployment (the blade check, the recording's decision, the global search, the person);
+what the person answers there is used in this run only, a pick as a workaround, and never recorded,
+as the Portal may not be where the guide leads. A
 failure's identity is its text and the line after it, unless that line is a deployment's status
 too (DEPLOYMENT_STATUS_TEXTS). A label, a form's first field (find_form) and a resource
 a chain names are waited for so, and the Expected Result is too after its RESULT_TIMEOUT_S
