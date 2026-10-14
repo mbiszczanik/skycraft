@@ -5,7 +5,8 @@
 .DESCRIPTION
     Checks for the existence and correct configuration of:
     1. Resource Group Tags
-    2. Policy Assignments
+    2. Policy Assignments (the guide's three on the subscription, made in the Portal or by the
+       Bicep path; see LabPolicyAssignment.ps1 for which assignment counts)
     3. Resource Locks (the guide's lock, by name and CanNotDelete level, on the group itself)
     4. Budgets (manual check)
 
@@ -95,30 +96,44 @@ foreach ($rgName in $resourceGroups) {
 }
 
 # 2. Validate Policies
+# The Portal's Assignment name sets only an assignment's display name; its resource name is a
+# generated id (issue #330). So the subscription's assignments are listed once, and each of the
+# guide's three is picked by its definition and by the name the guide gives it, as resource name
+# or display name - LabPolicyAssignment.ps1, shared with the cleanup, says which match. A listing
+# that fails fails all three checks and says why.
 Write-Host "`n=== 2. Validating Policy Assignments ===" -ForegroundColor Cyan
-$expectedPolicies = @(
-    "Require-Environment-Tag-RG",
-    "Enforce-Project-Tag",
-    "Restrict-Azure-Regions"
-)
+. (Join-Path $PSScriptRoot 'LabPolicyAssignment.ps1')
 
-foreach ($policyName in $expectedPolicies) {
-    Write-Host "  Policy: $policyName" -NoNewline
-    try {
-        # A policy assignment that does not exist is an error from this cmdlet, so it lands in the
-        # catch together with a lookup that failed for any other reason.
-        $assignment = Get-AzPolicyAssignment -Name $policyName -Scope "/subscriptions/$subscriptionId" -ErrorAction Stop
-        if ($assignment) {
-            Write-Host " [OK]" -ForegroundColor Green
-            $passCount++
-        }
-        else {
-            Write-Host " [FAIL] Not found." -ForegroundColor Red
-            $failCount++
-        }
+$policyListError = $null
+try {
+    $assignments = @(Get-AzPolicyAssignment -Scope "/subscriptions/$subscriptionId" -ErrorAction Stop | Where-Object { $_ })
+}
+catch {
+    $policyListError = $_.Exception.Message
+}
+
+foreach ($spec in Get-LabPolicyAssignmentSpec) {
+    Write-Host "  Policy: $($spec.Name)" -NoNewline
+    if ($policyListError) {
+        Write-Host " [FAIL] Could not read the policy assignments: $policyListError" -ForegroundColor Red
+        $failCount++
+        continue
     }
-    catch {
-        Write-Host " [FAIL] Not found or unreadable: $($_.Exception.Message)" -ForegroundColor Red
+
+    $found = @(Select-LabPolicyAssignment -Assignment $assignments -SubscriptionId $subscriptionId -Spec $spec)
+    if ($found.Count -eq 1) {
+        Write-Host " : $(Format-LabPolicyAssignment -Assignment $found[0])" -NoNewline
+        Write-Host " [OK]" -ForegroundColor Green
+        $passCount++
+    }
+    elseif ($found.Count -eq 0) {
+        Write-Host " [FAIL] Not found. Expected an assignment of '$($spec.DefinitionDisplayName)' on the subscription itself, named '$($spec.Name)' or '$($spec.DisplayName)', step $($spec.Step)." -ForegroundColor Red
+        $failCount++
+    }
+    else {
+        # Remove-LabResource.ps1 cannot tell which one the learner meant, so it removes neither.
+        $foundList = ($found | ForEach-Object { Format-LabPolicyAssignment -Assignment $_ }) -join ', '
+        Write-Host " [FAIL] $($found.Count) assignments match: $foundList. Keep one and delete the others: with more than one, Remove-LabResource.ps1 removes none." -ForegroundColor Red
         $failCount++
     }
 }
