@@ -182,10 +182,8 @@ The **Tags** service lists every tag in your subscription as one name : value pa
 
 4. On the **Basics** tab, fill in:
 
-- **Scope**: Click the "..." button
-  - The pane opens with Subscription showing All selected, which is your subscription (the wizard fills in the scope already)
-  - Click **Select**
-- **Policy definition**: Click the "..." button
+- Scope: leave it as it is. The wizard fills in your subscription already (its "..." button opens a pane with Subscription showing All selected, which is your subscription)
+- Click the "..." button at the end of **Policy definition**
   - Search for **Require a tag on resource groups**
   - Select **Require a tag on resource groups**, then click **Add**
 - **Assignment name**: `Require-Environment-Tag-RG`
@@ -325,7 +323,7 @@ Back in **Create Advisor Alerts**, the new action group `skycraft-advisor-ag` is
 4. On the **Basics** tab, fill in:
 
 - **Scope**: Your subscription
-- **Policy definition**: Click the "..." button
+- Click the "..." button at the end of **Policy definition**
   - Search for **Require a tag and its value on resources**
   - Select **Require a tag and its value on resources**, then click **Add**
 - **Assignment name**: `Enforce-Project-Tag`
@@ -355,7 +353,7 @@ Prevent resource creation in unintended regions:
 3. On the **Basics** tab, fill in:
 
 - **Scope**: Your subscription
-- **Policy definition**: Click the "..." button
+- Click the "..." button at the end of **Policy definition**
   - Search for **Allowed locations**
   - Select **Allowed locations**, then click **Add**
 - **Assignment name**: `Restrict-Azure-Regions`
@@ -365,11 +363,9 @@ Prevent resource creation in unintended regions:
 
 4. Click the **Parameters** tab and set:
 
-- **Allowed locations**: Select:
-  - Sweden Central
-  - North Europe
+- Open the **Allowed locations** list and tick **Sweden Central** and **North Europe**
 
-The list is a multi-select with a filter box: tick both regions; the field then shows "2 selected".
+The list is a multi-select with a filter box; with both regions ticked, the field shows "2 selected".
 
 5. Click the **Non-compliance messages** tab and set:
 
@@ -414,7 +410,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 1. In Azure Portal, search for **Resource groups**
 2. Click **prod-skycraft-swc-rg**
-3. In the left menu, under **Settings**, click **Locks**
+3. In the left menu, under **Settings** (expand it if it is collapsed), click **Locks**
 4. Click **+ Add**
 5. Fill in:
 
@@ -439,7 +435,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 > [!WARNING]
 > This step really asks the Portal to delete the production resource group. The lock from Step 1.3.11 is what stops it. Do not start the step unless **Locks** lists `lock-no-delete-prod` with the lock type Delete: without the lock, the group and everything in it are deleted.
 
-1. Still in `prod-skycraft-swc-rg`, in the left menu, under **Settings**, click **Locks** and verify:
+1. Still in `prod-skycraft-swc-rg`, in the left menu, under **Settings** (expand it if it is collapsed), click **Locks** and verify:
    - `lock-no-delete-prod` is listed, with the lock type Delete
 2. In the left menu, click **Overview**
 3. Click **Delete resource group**
@@ -459,7 +455,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 ### Step 1.3.13: Apply CanNotDelete Lock to Platform Resource Group
 
 1. Navigate to **platform-skycraft-swc-rg**
-2. In the left menu, under **Settings**, click **Locks** → **+ Add**
+2. In the left menu, under **Settings** (expand it if it is collapsed), click **Locks** → **+ Add**
 3. Create lock:
    - Lock name: `lock-no-delete-platform`
    - Lock type: **Delete**
@@ -552,7 +548,7 @@ Create a more specific budget for the production environment. A budget belongs t
 
 1. In Azure Portal, search for **Resource groups**
 2. Click **prod-skycraft-swc-rg**
-3. In the left menu, under **Cost Management**, click **Budgets**
+3. In the left menu, under **Cost Management** (expand it if it is collapsed), click **Budgets**
 4. Click **+ Add**
 
 **Note**: In **Create budget**, **Scope** is plain text and shows `prod-skycraft-swc-rg`: it cannot be changed there. Do not use **Add filter** to pick the group: that creates a subscription budget with a filter, not a budget of the resource group.
@@ -621,9 +617,8 @@ Create a more specific budget for the production environment. A budget belongs t
 ### Step 1.3.19: Access Azure Advisor
 
 1. In Azure Portal, search for **Advisor**
-2. Click **Advisor** service
-3. Review the **Overview** page
-4. In the left menu, click **Advisor score**
+2. Review the **Overview** page
+3. In the left menu, click **Advisor score**
 
 **Overview shows** one card per category (Cost, Security, Reliability, Operational excellence, Performance), each with:
 

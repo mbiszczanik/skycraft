@@ -26,4 +26,18 @@ no tenant name. Step numbers are the guide's after #337.
 - [ ] Retake `step-1.3.18a.png` (1.3.18): the VIEW menu with the **Built-in views** heading
 - [ ] Reference every new image in the guide; run `tests/Guide-Step-Numbering.Tests.ps1` and
       `tests/Guide-Drift-Parser.Tests.ps1`
+- [x] Recording `tools/guide-drift/recordings/lab-1.3.json` from the supervised run of 2026-10-14
+      (run 20261014-171319, exit 15). Steps the runner could not do were done with az / Az PowerShell
+      and answered `c`; 1.3.5 by hand in the run's browser; 1.3.18 skipped (no label for "Click your
+      subscription" and the tag filter). Start blades recorded after such steps were removed.
+- [x] Guide wording the run showed: the "..." button of **Policy definition** (1.3.5, 1.3.8, 1.3.9)
+      and the **Allowed locations** list (1.3.9) as clickable items; 1.3.5's Scope left as the wizard
+      fills it; collapsed **Settings** / **Cost Management** groups in the resource group pane (1.3.11,
+      1.3.12, 1.3.13, 1.3.17); 1.3.19 without the extra "Click Advisor service"
+- [x] `SKYCRAFT_GUIDE_DRIFT_ALERT_EMAIL` for the budget alert recipients (1.3.16, 1.3.17)
+- [ ] File the runner gaps the run showed as one issue: two menus on screen (ambiguous **Tags**),
+      the unnamed Category combobox of Create Advisor Alerts, the Monthly option of Reset period,
+      bold words in conceptual steps and Expected View lists read as actions
+- [ ] Replay `-Lab 1.3` after the screenshots, to check the rewritten picker steps
+- [ ] Clean up the subscription after the screenshots: `Remove-LabResource.ps1 -Force`
 - [ ] Delete this PLAN.md in the PR's last commit

@@ -360,7 +360,8 @@ class EnvironmentValueTests(unittest.TestCase):
 
     def test_the_names_the_run_may_show_live_in_one_place(self) -> None:
         self.assertEqual(recording.TENANT_PREFIX_ENV, "SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX")
-        self.assertEqual(recording.ADDRESS_ENV, frozenset({"SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL"}))
+        self.assertEqual(recording.ADDRESS_ENV, frozenset({"SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL",
+                                                     "SKYCRAFT_GUIDE_DRIFT_ALERT_EMAIL"}))
 
     def test_an_override_reads_an_address_the_tenant_prefix_or_a_secret_only(self) -> None:
         rec = {"steps": {"1.1.2": {"valueOverrides": {"Password": "${SKYCRAFT_TEST_PASSWORD}",
