@@ -142,7 +142,7 @@
 ### Advisor Configuration
 - [ ] Reviewed Advisor Configuration settings
 - [ ] Explored filtering options (include/exclude resources)
-- [ ] Created Advisor alert rule (Step 1.3.21, before the tag policy of Step 1.3.7)
+- [ ] Created Advisor alert rule (Step 1.3.7, before the tag policy of Step 1.3.8)
 - [ ] Alert name: `Advisor-Cost-Recommendations`
 - [ ] Alert category: Cost
 - [ ] Action group: `skycraft-advisor-ag` in prod-skycraft-swc-rg, Region Sweden Central, tagged `Project` = `SkyCraft`
@@ -245,12 +245,12 @@ The listing is per scope: without `-ResourceGroupName` it shows the subscription
 the budgets on that resource group.
 
 ```powershell
-# Subscription budget (step 1.3.14)
+# Subscription budget (step 1.3.15)
 Get-AzConsumptionBudget |
     Select-Object Name, Amount, Category |
     Format-Table -AutoSize
 
-# Resource group budget (step 1.3.16)
+# Resource group budget (step 1.3.17)
 Get-AzConsumptionBudget -ResourceGroupName prod-skycraft-swc-rg |
     Select-Object Name, Amount, Category |
     Format-Table -AutoSize

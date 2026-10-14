@@ -227,7 +227,7 @@ First, try to create a resource group **WITHOUT** the "Environment" tag:
 5. Click **Create**
 6. When the Portal shows **Failed to create the resource group**, click the notification to open the error details
 
-**Expected Result**: Creation is **denied** by `Require-Environment-Tag-RG`, so `rg-test-no-tag` is not created. The error details show the error code `RequestDisallowedByPolicy`, the policy `Require-Environment-Tag-RG` with a **Policy link**, and the non-compliance message from Step 1.3.5. A policy evaluates every new create or update request. What it does not do is change resources that already exist: a resource group created before the assignment stays without the tag and is reported as non-compliant instead (Step 1.3.9). From the CLI or a template, the same denial comes back with the same error code.
+**Expected Result**: Creation is **denied** by `Require-Environment-Tag-RG`, so `rg-test-no-tag` is not created. The error details show the error code `RequestDisallowedByPolicy`, the policy `Require-Environment-Tag-RG` with a **Policy link**, and the non-compliance message from Step 1.3.5. A policy evaluates every new create or update request. What it does not do is change resources that already exist: a resource group created before the assignment stays without the tag and is reported as non-compliant instead (Step 1.3.10). From the CLI or a template, the same denial comes back with the same error code.
 
 Now create one with the tag:
 
@@ -268,10 +268,10 @@ Finally, delete the test resource group `rg-test-with-tag` (the policy denied `r
 
 After a refresh, `rg-test-with-tag` is no longer listed in **Resource groups**.
 
-### Step 1.3.21: Configure Advisor Alerts
+### Step 1.3.7: Configure Advisor Alerts
 
 > [!IMPORTANT]
-> This step belongs to Section 5 (Azure Advisor), but you do it here, before Step 1.3.7. Step 1.3.7 assigns `Enforce-Project-Tag`, which refuses every new resource without the tag `Project` = `SkyCraft`. The **Create Advisor Alerts** form has no tags, so once that assignment is in place the Portal cannot create the alert. The step keeps its number so that links to it stay valid.
+> This step belongs to Section 5 (Azure Advisor), but you do it here, before the next policy step. Step 1.3.8 assigns `Enforce-Project-Tag`, which refuses every new resource without the tag `Project` = `SkyCraft`. The **Create Advisor Alerts** form has no tags, so once that assignment is in place the Portal cannot create the alert.
 
 1. In Azure Portal, search for **Advisor**
 2. In the left menu, under **Monitoring** (expand it if it is collapsed), click **Alerts (Preview)**
@@ -291,7 +291,7 @@ After a refresh, `rg-test-with-tag` is no longer listed in **Resource groups**.
 | Action group name | skycraft-advisor-ag  |
 | Display name      | SkyAdvisor           |
 
-**Note**: **Region** starts at **(US) East US**. Change it to Sweden Central: Step 1.3.8 will allow only Sweden Central and North Europe, and once that policy is in place an action group in East US is refused (the Portal then shows the refusal only under the notification bell and leaves the form as it was). **Display name** takes at most 12 characters.
+**Note**: **Region** starts at **(US) East US**. Change it to Sweden Central: Step 1.3.9 will allow only Sweden Central and North Europe, and once that policy is in place an action group in East US is refused (the Portal then shows the refusal only under the notification bell and leaves the form as it was). **Display name** takes at most 12 characters.
 
 7. Click the **Tags** tab and add:
 
@@ -318,7 +318,7 @@ Back in **Create Advisor Alerts**, the new action group `skycraft-advisor-ag` is
 
 **Note**: **Alerts (Preview)** lists the rule even when its creation failed. If the Portal says **Failed to create alert** ("An error occurred while trying to create alert"), the alert does not exist: see Troubleshooting, Issue 6.
 
-### Step 1.3.7: Assign Policy for Resource Naming Convention
+### Step 1.3.8: Assign Policy for Resource Naming Convention
 
 1. In Azure Portal, search for **Policy**
 2. In the left menu, under **Authoring**, click **Assignments**
@@ -347,7 +347,7 @@ Back in **Create Advisor Alerts**, the new action group `skycraft-advisor-ag` is
 
 **Note**: From now on, the Portal refuses every new resource in this subscription that does not carry the tag `Project` = `SkyCraft`. Resource groups are not resources in this sense: the definition checks resources only.
 
-### Step 1.3.8: Assign Policy to Enforce Allowed Locations
+### Step 1.3.9: Assign Policy to Enforce Allowed Locations
 
 Prevent resource creation in unintended regions:
 
@@ -378,7 +378,7 @@ The list is a multi-select with a filter box: tick both regions; the field then 
 
 6. Click **Review + create**, then **Create**
 
-### Step 1.3.9: View Policy Compliance
+### Step 1.3.10: View Policy Compliance
 
 1. In **Policy** service, click **Compliance** in left menu
 2. Review the compliance dashboard
@@ -394,7 +394,7 @@ The list is a multi-select with a filter box: tick both regions; the field then 
 
 **Note**: Existing resources created before policy assignment may show as non-compliant. This is expected.
 
-![Assign a Built-in Policy](./images/step-1.3.9.png)
+![Assign a Built-in Policy](./images/step-1.3.10.png)
 
 ---
 
@@ -411,7 +411,7 @@ The list is a multi-select with a filter box: tick both regions; the field then 
 
 Locks applied at parent scope (subscription/resource group) are inherited by child resources.
 
-### Step 1.3.10: Apply CanNotDelete Lock to Production Resource Group
+### Step 1.3.11: Apply CanNotDelete Lock to Production Resource Group
 
 1. In Azure Portal, search for **Resource groups**
 2. Click **prod-skycraft-swc-rg**
@@ -425,7 +425,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 | Lock type | Delete                                               |
 | Notes     | Cannot delete resource or child resources.           |
 
-> The Bicep path applies both locks through the AVM resource-group module, which sets this notes text itself; the notes are not configurable through the module. If you create the locks in the portal, use the same text so your locks match the checklist. `Test-Lab.ps1` does not read the notes: it checks that each group carries, on the group itself, a lock with the name given in step 1.3.10 or 1.3.12 and the **Delete** (`CanNotDelete`) type.
+> The Bicep path applies both locks through the AVM resource-group module, which sets this notes text itself; the notes are not configurable through the module. If you create the locks in the portal, use the same text so your locks match the checklist. `Test-Lab.ps1` does not read the notes: it checks that each group carries, on the group itself, a lock with the name given in step 1.3.11 or 1.3.13 and the **Delete** (`CanNotDelete`) type.
 
 **Note**: **Lock type** starts at **Read-only**. Change it to **Delete**: a read-only lock on the group would block every change to it and its resources, not only deletion.
 
@@ -433,12 +433,12 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 **Expected Result**: Lock is created and shows in the Locks list.
 
-![Assign a Built-in Policy](./images/step-1.3.10.png)
+![Assign a Built-in Policy](./images/step-1.3.11.png)
 
-### Step 1.3.11: Test the Lock
+### Step 1.3.12: Test the Lock
 
 > [!WARNING]
-> This step really asks the Portal to delete the production resource group. The lock from Step 1.3.10 is what stops it. Do not start the step unless **Locks** lists `lock-no-delete-prod` with the lock type Delete: without the lock, the group and everything in it are deleted.
+> This step really asks the Portal to delete the production resource group. The lock from Step 1.3.11 is what stops it. Do not start the step unless **Locks** lists `lock-no-delete-prod` with the lock type Delete: without the lock, the group and everything in it are deleted.
 
 1. Still in `prod-skycraft-swc-rg`, in the left menu, under **Settings**, click **Locks** and verify:
    - `lock-no-delete-prod` is listed, with the lock type Delete
@@ -457,7 +457,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 **Key Learning**: Even with Owner role, you cannot delete a locked resource until the lock is removed.
 
-### Step 1.3.12: Apply CanNotDelete Lock to Platform Resource Group
+### Step 1.3.13: Apply CanNotDelete Lock to Platform Resource Group
 
 1. Navigate to **platform-skycraft-swc-rg**
 2. In the left menu, under **Settings**, click **Locks** → **+ Add**
@@ -466,11 +466,11 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
    - Lock type: **Delete**
    - Notes: `Cannot delete resource or child resources.`
 
-**Note**: As in Step 1.3.10, **Lock type** starts at **Read-only**: change it to **Delete**.
+**Note**: As in Step 1.3.11, **Lock type** starts at **Read-only**: change it to **Delete**.
 
 4. Click **OK**
 
-### Step 1.3.13: Understand Lock Hierarchy
+### Step 1.3.14: Understand Lock Hierarchy
 
 **Important Concepts**:
 
@@ -496,9 +496,9 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 - Triggering alerts when thresholds are reached
 - Tracking cost trends over time
 
-![Manage Costs with Budgets and Alerts](./images/step-1.3.14a.png)
+![Manage Costs with Budgets and Alerts](./images/step-1.3.15a.png)
 
-### Step 1.3.14: Create a Subscription Budget
+### Step 1.3.15: Create a Subscription Budget
 
 1. In Azure Portal, search for **Cost Management + Billing**
 2. In the left menu, click **Cost Management**
@@ -521,9 +521,9 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 6. Click **Next >**
 
-![Manage Costs with Budgets and Alerts](./images/step-1.3.14b.png)
+![Manage Costs with Budgets and Alerts](./images/step-1.3.15b.png)
 
-### Step 1.3.15: Configure Budget Alerts
+### Step 1.3.16: Configure Budget Alerts
 
 On the **Set alerts** step, every alert is one row under **Alert conditions**. A new empty row appears below each row you fill in.
 
@@ -545,9 +545,9 @@ On the **Set alerts** step, every alert is one row under **Alert conditions**. A
 
 **Expected Result**: Budget is created and **Budgets** lists `SkyCraft-Monthly-Budget`. The recipients may also receive a confirmation email.
 
-![Manage Costs with Budgets and Alerts](./images/step-1.3.15.png)
+![Manage Costs with Budgets and Alerts](./images/step-1.3.16.png)
 
-### Step 1.3.16: Create Resource Group Budget
+### Step 1.3.17: Create Resource Group Budget
 
 Create a more specific budget for the production environment. A budget belongs to the scope it is created at, so you create this one from the resource group itself:
 
@@ -583,7 +583,7 @@ Create a more specific budget for the production environment. A budget belongs t
 
 **Expected Result**: The resource group's **Budgets** lists `SkyCraft-Prod-Monthly`.
 
-### Step 1.3.17: View Cost Analysis
+### Step 1.3.18: View Cost Analysis
 
 1. In Azure Portal, search for **Subscriptions**
 2. Click your subscription
@@ -593,9 +593,9 @@ Create a more specific budget for the production environment. A budget belongs t
    - **Cost by service** - See spending per Azure service
    - **Daily costs** - Trend over time
 
-**Note**: Open Cost analysis from the subscription, as here. **Cost Management + Billing** has no **Cost analysis** of its own, and its **Go to subscription** link opens the scope you used last (after Step 1.3.16, the production resource group).
+**Note**: Open Cost analysis from the subscription, as here. **Cost Management + Billing** has no **Cost analysis** of its own, and its **Go to subscription** link opens the scope you used last (after Step 1.3.17, the production resource group).
 
-![Manage Costs with Budgets and Alerts](./images/step-1.3.17a.png)
+![Manage Costs with Budgets and Alerts](./images/step-1.3.18a.png)
 
 5. Click the date range button (it shows the current period) and, under **Relative dates**, click **Last 30 days**
 6. Click **Add filter**, choose **Tag**, then pick the tag `project` with the value `skycraft` (Cost analysis shows tag names and values in lower case)
@@ -603,7 +603,7 @@ Create a more specific budget for the production environment. A budget belongs t
 
 **Expected Result**: Visual charts showing cost breakdown (likely very low since we haven't deployed resources yet).
 
-![Manage Costs with Budgets and Alerts](./images/step-1.3.17b.png)
+![Manage Costs with Budgets and Alerts](./images/step-1.3.18b.png)
 
 ---
 
@@ -619,7 +619,7 @@ Create a more specific budget for the production environment. A budget belongs t
 - Reduce costs
 - Achieve operational excellence
 
-### Step 1.3.18: Access Azure Advisor
+### Step 1.3.19: Access Azure Advisor
 
 1. In Azure Portal, search for **Advisor**
 2. Click **Advisor** service
@@ -634,9 +634,9 @@ Create a more specific budget for the production environment. A budget belongs t
 
 The overall score (0-100%) is on the separate **Advisor score** page.
 
-![Manage Costs with Budgets and Alerts](./images/step-1.3.18.png)
+![Manage Costs with Budgets and Alerts](./images/step-1.3.19.png)
 
-### Step 1.3.19: Review Cost Recommendations
+### Step 1.3.20: Review Cost Recommendations
 
 1. In the left menu, under **Recommendations**, click **Cost**
 2. Review recommendations (may be none if newly created)
@@ -650,7 +650,7 @@ The overall score (0-100%) is on the separate **Advisor score** page.
 
 3. If recommendations exist, click one to view details
 
-### Step 1.3.20: Review Security Recommendations
+### Step 1.3.21: Review Security Recommendations
 
 1. In the left menu, under **Recommendations**, click **Security**
 2. Review recommendations
@@ -662,9 +662,9 @@ The overall score (0-100%) is on the separate **Advisor score** page.
 - Enable encryption
 - Configure backup
 
-![Review Security Recommendations](./images/step-1.3.20.png)
+![Review Security Recommendations](./images/step-1.3.21.png)
 
-**Advisor alerts**: you created the Advisor alert for cost recommendations in [Step 1.3.21](#step-1321-configure-advisor-alerts), in Section 2, before the tag policy of Step 1.3.7 could refuse it. To see it, open **Alerts (Preview)** under **Monitoring** in Advisor's left menu.
+**Advisor alerts**: you created the Advisor alert for cost recommendations in [Step 1.3.7](#step-137-configure-advisor-alerts), in Section 2, before the tag policy of Step 1.3.8 could refuse it. To see it, open **Alerts (Preview)** under **Monitoring** in Advisor's left menu.
 
 ---
 
@@ -747,7 +747,7 @@ Tenant Root Group
 
 - [ ] Accessed Advisor dashboard
 - [ ] Reviewed recommendations by category
-- [ ] Configured Advisor alert for cost recommendations (Step 1.3.21, before Step 1.3.7)
+- [ ] Configured Advisor alert for cost recommendations (Step 1.3.7, before Step 1.3.8)
 - [ ] Understand how to act on recommendations
 
 ### Management Groups
@@ -817,12 +817,12 @@ Tenant Root Group
 
 ### Issue 6: Advisor alert or its action group is refused
 
-**Symptom**: In Step 1.3.21, the Portal says "Failed to create alert - An error occurred while trying to create alert", or the action group's **Create** does nothing and the notification bell shows "Failed to create action group"
+**Symptom**: In Step 1.3.7, the Portal says "Failed to create alert - An error occurred while trying to create alert", or the action group's **Create** does nothing and the notification bell shows "Failed to create action group"
 
 **Solutions**:
 
-- Action group: set **Region** to Sweden Central. `Restrict-Azure-Regions` (Step 1.3.8) refuses the default East US
-- Alert: `Enforce-Project-Tag` (Step 1.3.7) is already assigned in your subscription, for example from an earlier run of this lab or its Bicep path. The **Create Advisor Alerts** form has no tags, so the policy refuses the alert. **Alerts (Preview)** may still list it, but it does not exist. Create the alert before Step 1.3.7, as the guide orders it; `Test-Lab.ps1` does not check the alert
+- Action group: set **Region** to Sweden Central. `Restrict-Azure-Regions` (Step 1.3.9) refuses the default East US
+- Alert: `Enforce-Project-Tag` (Step 1.3.8) is already assigned in your subscription, for example from an earlier run of this lab or its Bicep path. The **Create Advisor Alerts** form has no tags, so the policy refuses the alert. **Alerts (Preview)** may still list it, but it does not exist. Create the alert before Step 1.3.8, as the guide orders it; `Test-Lab.ps1` does not check the alert
 
 ---
 
