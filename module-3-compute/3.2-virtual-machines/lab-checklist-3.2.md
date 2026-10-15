@@ -27,6 +27,7 @@
 - [ ] NIC network security group: None (NSG on subnet)
 - [ ] Load balancer: `dev-skycraft-swc-lb`
 - [ ] Backend pool: `dev-skycraft-swc-lb-be-auth`
+- [ ] Outbound pool: `dev-skycraft-swc-lb-be-outbound` (internet access through the Lab 2.3 outbound rule)
 
 ### Disks
 
@@ -64,6 +65,7 @@
 - [ ] Public IP address: **None**
 - [ ] Load balancer: `dev-skycraft-swc-lb`
 - [ ] Backend pool: `dev-skycraft-swc-lb-be-world`
+- [ ] Outbound pool: `dev-skycraft-swc-lb-be-outbound` (internet access through the Lab 2.3 outbound rule)
 
 ### Disks
 
@@ -121,6 +123,12 @@
 - [ ] Pool name: `dev-skycraft-swc-lb-be-world`
 - [ ] VM member: `dev-skycraft-swc-world-vm`
 - [ ] Health probe: Port 8085
+
+### Outbound Pool
+
+- [ ] Pool name: `dev-skycraft-swc-lb-be-outbound`
+- [ ] VM members: `dev-skycraft-swc-auth-vm` and `dev-skycraft-swc-world-vm`
+- [ ] Used by the outbound rule `dev-skycraft-swc-lb-outbound` (the VMs' only internet access; the subnets are private)
 
 ---
 
@@ -264,6 +272,7 @@ Get-AzVMDiskEncryptionStatus -ResourceGroupName dev-skycraft-swc-rg -VMName dev-
 # ----                             ----------------
 # dev-skycraft-swc-lb-be-auth      1
 # dev-skycraft-swc-lb-be-world     1
+# dev-skycraft-swc-lb-be-outbound  2
 ```
 
 ### Verify Key Vault
@@ -286,8 +295,8 @@ Get-AzKeyVault -ResourceGroupName dev-skycraft-swc-rg -VaultName dev-skycraft-sw
 
 | Component       | Name                      | Zone | Size             | Disk Encryption | Backend Pool |
 | --------------- | ------------------------- | ---- | ---------------- | --------------- | ------------ |
-| **Authserver**  | dev-skycraft-swc-auth-vm  | 1    | Standard_B2ls_v2 | ✅              | be-auth      |
-| **Worldserver** | dev-skycraft-swc-world-vm | 2    | Standard_B2ls_v2 | ✅              | be-world     |
+| **Authserver**  | dev-skycraft-swc-auth-vm  | 1    | Standard_B2ls_v2 | ✅              | be-auth, be-outbound  |
+| **Worldserver** | dev-skycraft-swc-world-vm | 2    | Standard_B2ls_v2 | ✅              | be-world, be-outbound |
 | **Key Vault**   | dev-skycraft-swc-kv       | N/A  | Standard         | N/A             | N/A          |
 
 ### Disk Summary
@@ -387,6 +396,7 @@ Get-AzKeyVault -ResourceGroupName dev-skycraft-swc-rg -VaultName dev-skycraft-sw
 - [ ] All disks encrypted with Azure Disk Encryption
 - [ ] Data disk attached and mounted on Worldserver
 - [ ] VMs added to load balancer backend pools
+- [ ] Both VMs in the outbound pool `dev-skycraft-swc-lb-be-outbound`
 - [ ] Key vault created for encryption keys
 - [ ] All tags applied correctly
 - [ ] All validation commands executed successfully

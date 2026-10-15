@@ -8,6 +8,8 @@
     - NICs are configured with correct subnets
     - Data disk is attached to Worldserver
     - Load balancer backend pools contain VMs
+    - Both VM NICs are in the egress pool <lb>-be-outbound, the only pool the load balancer's
+      outbound rule gives internet access (the subnets are private)
 
 .PARAMETER Environment
     Target environment (dev or prod). Default: dev
@@ -192,6 +194,25 @@ if ($worldBePool -like "*world-nic*") {
 } else {
     Write-Host " FAIL" -ForegroundColor Red
     $failCount++
+}
+
+# Test both VM NICs in the egress pool. The subnets are private and the load balancer's single
+# outbound rule (Lab 2.3) covers only '-be-outbound', so a VM outside it has no internet access.
+# The pool members are matched against each VM's own NIC IDs, so a NIC the portal named counts too.
+$outboundIpConfigIds = @(($lb.BackendAddressPools | Where-Object { $_.Name -eq "$namePrefix-lb-be-outbound" }).BackendIpConfigurations |
+    ForEach-Object { $_.Id })
+foreach ($vm in @(@{ Label = 'Auth'; Name = "$namePrefix-auth-vm" }, @{ Label = 'World'; Name = "$namePrefix-world-vm" })) {
+    Write-Host "  Testing: $($vm.Label) VM NIC in egress pool $namePrefix-lb-be-outbound..." -NoNewline
+    $nicIds = @((Get-AzVM -ResourceGroupName $rgName -Name $vm.Name -ErrorAction SilentlyContinue).NetworkProfile.NetworkInterfaces |
+        ForEach-Object { $_.Id })
+    $inPool = @($nicIds | Where-Object { $nicId = $_; @($outboundIpConfigIds | Where-Object { $_ -like "$nicId/ipConfigurations/*" }).Count -gt 0 })
+    if ($inPool.Count -gt 0) {
+        Write-Host " PASS" -ForegroundColor Green
+        $passCount++
+    } else {
+        Write-Host " FAIL" -ForegroundColor Red
+        $failCount++
+    }
 }
 
 # ============================================================================
