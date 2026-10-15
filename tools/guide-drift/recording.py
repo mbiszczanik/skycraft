@@ -26,6 +26,10 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   rejected_candidates  the reference set of candidates not chosen: only the Portal's labels,
                        without tenant data (#317)
   skip_reason          why the recording skips a step ('"skip": "<reason>"', #200), or None
+  late_minutes         how long the recording lets a view that lists a label only later be refreshed
+                       for ('"lateLabels": {"<label>": <minutes>}', #342), or None
+  late_label_problems  every 'lateLabels' entry that is not whole minutes from 1 to 60 (run.py
+                       refuses to start on one, as for a skip without a reason)
   view_blade           the blade part of a recorded view, what a step's start is compared by (#207)
   same_blade           whether two blades are the same, regardless of case and of a trailing
                        'overview' (#207)
@@ -432,6 +436,47 @@ def skip_reason(recording: dict, step_id: str) -> str | None:
         raise ValueError(f"step {step_id}: 'skip' must be the reason the step is skipped, "
                          f"a non-empty string, not {json.dumps(reason)}")
     return reason.strip()
+
+
+LATE_MINUTES_MAX = 60
+
+
+def late_minutes(recording: dict, step_id: str, label: str) -> int | None:
+    """How many minutes the recording lets step `step_id` refresh a view that does not list
+    `label` yet ('"lateLabels": {"Require-Environment-Tag-RG": 30}', #342: a Policy compliance
+    grid fills in minutes after an assignment is made); None when the entry does not say, which
+    is no wait at all. A value that late_label_problems rejects is none too: run.py refuses to
+    start on it before any step runs."""
+    late = recording["steps"].get(step_id, {}).get("lateLabels")
+    minutes = late.get(label) if isinstance(late, dict) else None
+    return minutes if is_late_minutes(minutes) else None
+
+
+def is_late_minutes(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= LATE_MINUTES_MAX
+
+
+def late_label_problems(recording: dict) -> list[str]:
+    """Why a step entry's 'lateLabels' cannot be used, one text per fault: it is not an object of
+    label to minutes, or a label's minutes are not a whole number from 1 to 60 (0, text such as
+    "30", a fraction and a boolean are not). run.py refuses to start on any, as on a 'skip'
+    without a reason (skip_reason), so a typo cannot read as 'wait for nothing' or 'wait for
+    ever'; tests/Guide-Drift-Recording.Tests.ps1 also requires each label to be one of its
+    step's labels. Empty when every entry is well-formed."""
+    problems: list[str] = []
+    for step_id, entry in recording.get("steps", {}).items():
+        if "lateLabels" not in entry:
+            continue
+        late = entry["lateLabels"]
+        if not isinstance(late, dict):
+            problems.append(f"step {step_id}: 'lateLabels' must be an object of label to minutes, "
+                            f"not {json.dumps(late)}")
+            continue
+        for label, minutes in late.items():
+            if not is_late_minutes(minutes):
+                problems.append(f"step {step_id}: 'lateLabels' '{label}' must be whole minutes from 1 to "
+                                f"{LATE_MINUTES_MAX}, not {json.dumps(minutes)}")
+    return problems
 
 
 def view_blade(view: str | None) -> str | None:

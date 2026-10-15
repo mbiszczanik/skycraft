@@ -25,8 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import recording  # noqa: E402
 from decide import Candidate  # noqa: E402
 from recording import (Redactor, env_secrets, expand_env, field_action, missing_env,  # noqa: E402
-                       rejected_candidates, resolve_value, resource_name, same_blade, skip_reason,
-                       start_blade, value_action, view_blade, write_json)
+                       late_label_problems, late_minutes, rejected_candidates, resolve_value,
+                       resource_name, same_blade, skip_reason, start_blade, value_action, view_blade, write_json)
 
 DOMAIN = "contoso.onmicrosoft.com"
 TENANT = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -439,6 +439,35 @@ class SkipReasonTests(unittest.TestCase):
         for value in ("", "  \t", None, 0, 1, True, False, [], ["optional"], {}):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "step 9.9.1: 'skip' must be"):
                 skip_reason(self.recording({"skip": value}), "9.9.1")
+
+
+class LateLabelTests(unittest.TestCase):
+    """'"lateLabels": {"<label>": <minutes>}' on a step entry (#342): how long a view that lists the
+    label only later is refreshed for. Whole minutes from 1 to 60, never a silent 'no wait'."""
+
+    def recording(self, late: object) -> dict:
+        return {"steps": {"9.9.1": {"lateLabels": late}, "9.9.2": {"labels": {}}}}
+
+    def test_the_minutes_of_a_label_are_returned(self) -> None:
+        recording = self.recording({"Require-Environment-Tag-RG": 30})
+        self.assertEqual(late_minutes(recording, "9.9.1", "Require-Environment-Tag-RG"), 30)
+        self.assertIsNone(late_minutes(recording, "9.9.1", "Enforce-Project-Tag"))
+        self.assertIsNone(late_minutes(recording, "9.9.2", "Require-Environment-Tag-RG"))
+        self.assertIsNone(late_minutes(recording, "9.9.3", "Require-Environment-Tag-RG"))
+        self.assertEqual(late_label_problems(recording), [])
+
+    def test_a_late_label_of_zero_or_of_text_is_refused(self) -> None:
+        for value in (0, -5, 61, 1.5, "30", "", None, True, False, [30]):
+            with self.subTest(minutes=value):
+                problems = late_label_problems(self.recording({"Require-Environment-Tag-RG": value}))
+                self.assertEqual(len(problems), 1)
+                self.assertIn("step 9.9.1: 'lateLabels' 'Require-Environment-Tag-RG' must be", problems[0])
+        for edge in (1, 60):
+            self.assertEqual(late_label_problems(self.recording({"A": edge})), [])
+        for late in ([], ["A"], "A", 30, None):
+            with self.subTest(late=late):
+                self.assertEqual(len(late_label_problems(self.recording(late))), 1)
+        self.assertEqual(late_label_problems(self.recording({})), [])
 
 
 class ViewBladeTests(unittest.TestCase):

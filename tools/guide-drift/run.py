@@ -178,6 +178,18 @@ alone did, and the Expected Result's miss reads it once more than before. The st
 (check_start) is not waited for: the deployment overview's address is set when it opens, not when
 it ends.
 
+A view can list a label minutes after the step before it made it: Policy's Compliance grid shows
+an assignment only after the next evaluation (step 1.3.10). A step entry says so with '"lateLabels":
+{"<label>": <minutes>}', whole minutes from 1 to 60 (recording.late_minutes; run.py refuses to start
+on any other value, recording.late_label_problems, as on a skip without a reason). Only for that
+label, once the lookup above found nothing and before the recording's decision or the person is
+asked (Runner.wait_for_late_view): the console says once how long the run waits, then every
+LATE_POLL_S the newest blade's one visible 'Refresh' (button or menu item, newest_blade) is
+clicked, or, when the screen shows none, the page is reloaded, and the label is looked for
+FIND_TIMEOUT_MS; every DEPLOYMENT_SAY_S the console says how long the run has waited. At the limit
+it goes on as without the wait, so a label that never shows is still reported or asked about; a
+label without an entry is never waited for, as a real drift would cost minutes on every run.
+
 A resource a navigation chain names in a code span ('**Load balancers** -> `dev-skycraft-swc-lb`
 -> **Backend pools**', parse.py's "resources") is opened as the one visible link, grid cell or row
 of that exact name, once the recording's placeholders are filled; a name with a placeholder left
@@ -382,7 +394,8 @@ from decide import DECORATIONS, decoration_of  # noqa: E402
 from recording import literal_pattern  # noqa: E402
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (LABEL_ROLES, REMARK, EntryNames, Redactor, checkbox_state, env_secrets,  # noqa: E402
-                       missing_env, field_action, rejected_candidates, resource_name, skip_reason,
+                       missing_env, field_action, late_label_problems, late_minutes, rejected_candidates,
+                       resource_name, skip_reason,
                        same_blade, start_blade, view_blade, write_json)
 from recording import (error_text, one_line, prompt_value, redaction_tokens, scrub, tag_action,  # noqa: E402
                        typed_secrets)
@@ -437,6 +450,10 @@ DEPLOYMENT_STATUS_TEXTS = (DEPLOYMENT_RUNNING_TEXT, DEPLOYMENT_FAILED_TEXT, DEPL
 DEPLOYMENT_TIMEOUT_MIN = 30
 DEPLOYMENT_POLL_MS = 5000
 DEPLOYMENT_SAY_S = 60
+# A view that lists a label only later ("lateLabels", Runner.wait_for_late_view): how often it is
+# refreshed, and the button that does it.
+LATE_POLL_S = 60
+REFRESH = "Refresh"
 # A blade's or pane's close button, named after its title: "Close content 'New Group'". The title
 # reads 'undefined' while the blade's content is still loading.
 BLADE_CLOSE = re.compile(r"^Close content '(?P<title>.*)'$")
@@ -2578,6 +2595,62 @@ class Runner:
                 raise PageClosed("the browser window was closed")
             self.page.wait_for_timeout(DEPLOYMENT_POLL_MS)
 
+    def wait_for_late_view(self, step: dict, item: dict, label: str,
+                           look: Callable[[], Locator | None]) -> Locator | None:
+        """After the lookup (wait_for_blade) found nothing: when the recording lets step `step` wait
+        for a view that lists `label` only later (recording.late_minutes, "lateLabels", #342),
+        say once how long, then every LATE_POLL_S click the newest blade's one visible 'Refresh'
+        (refresh_view; the page is reloaded when there is none) and look for FIND_TIMEOUT_MS,
+        saying every DEPLOYMENT_SAY_S how long it has waited. Returns what `look` found; None at
+        the limit, and at once without an entry for the label, so the deciders and the person
+        come as before. A window that closes raises PageClosed."""
+        minutes = late_minutes(self.recording, step["id"], label)
+        if minutes is None:
+            return None
+        print(f"'{label}' may be listed only later: refreshing the view every {duration(LATE_POLL_S)} "
+              f"for up to {minutes} min before asking about it.")
+        started = said = time.monotonic()
+        refreshes = 0
+        while True:
+            due = started + (refreshes + 1) * LATE_POLL_S
+            while time.monotonic() < due:
+                if self.page.is_closed():
+                    raise PageClosed("the browser window was closed")
+                if time.monotonic() - said >= DEPLOYMENT_SAY_S:
+                    said = time.monotonic()
+                    print(f"  still waiting for '{label}': {duration(said - started)} of up to {minutes} min")
+                self.page.wait_for_timeout(min(DEPLOYMENT_POLL_MS, max(1, int((due - time.monotonic()) * 1000))))
+            waited = time.monotonic() - started
+            if waited >= minutes * 60:
+                print(f"'{label}' is still not listed after {duration(waited)} (the recording's {minutes} min): "
+                      "asking about it.")
+                return None
+            self.refresh_view()
+            refreshes += 1
+            found = in_time(self.page, look)
+            if found is not None:
+                print(f"Found '{label}' after refreshing for {duration(time.monotonic() - started)}.")
+                return found
+
+    def refresh_view(self) -> None:
+        """Click the newest blade's one visible 'Refresh' (a button, else a menu item: the
+        Compliance blade's is a menu item), or reload the page when the screen shows none or
+        several that newest_blade cannot tell apart, or the click fails."""
+        for role in ("button", "menuitem"):
+            try:
+                button = newest_blade(visible_across_frames(
+                    self.page, lambda f, role=role: f.get_by_role(role, name=REFRESH, exact=True)))
+            except Ambiguous:
+                break
+            if button is None:
+                continue
+            try:
+                button.click(timeout=FIND_TIMEOUT_MS)
+                return
+            except PlaywrightError:
+                break
+        self.page.reload()
+
     def wait_for_blade(self, step: dict, item: dict, label: str, look: Callable[[], Locator | None],
                        renew: Callable[[], Callable[[], Locator | None]] | None = None) -> Locator | None:
         """After `look` found nothing for FIND_TIMEOUT_MS: when a blade is still loading
@@ -2843,6 +2916,8 @@ class Runner:
                         element = in_time(self.page, look)
                         if element is None:
                             element = self.wait_for_blade(step, item, label, look, renew)
+                    if element is None:
+                        element = self.wait_for_late_view(step, item, label, renew())
         except Ambiguous as error:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
             return record
@@ -3820,6 +3895,10 @@ def main(argv: list[str] | None = None) -> int:
             start_blade(recording, step_id)
     except ValueError as error:
         print(f"The recording cannot be used: {error}.")
+        return NOT_STARTED
+    problems = late_label_problems(recording)
+    if problems:
+        print(f"The recording cannot be used: {problems[0]}.")
         return NOT_STARTED
     # Everything that can refuse the run is checked before the browser opens and the person signs in.
     state = {"completed": [], "inFlight": None}

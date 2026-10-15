@@ -35,6 +35,12 @@
     tree item, which name a list's entries), and its name not a list row's check box ('Select row
     <display name>'), which names users and service principals of the tenant.
 
+    A step entry may carry '"lateLabels": {"<label>": <minutes>}' (issue #342): a view that lists the
+    label only later (step 1.3.10's Policy Compliance grid) is refreshed for up to that many whole
+    minutes, from 1 to 60, before the label is reported or asked about. run.py refuses to start on
+    any other value, and the label must be one of the step's labels, or the runner would never wait
+    for it.
+
     A step entry may carry '"startBlade": "<blade>"' (issue #207): the blade part of the view the
     step starts on (for a HubsExtension Browse blade, with the resource type it lists), which the
     runner compares the open blade with. It is optional (absent or null is 'not recorded yet');
@@ -53,7 +59,7 @@
 
 .NOTES
     Project: SkyCraft
-    Issue:   #189, #199, #200, #202, #206, #207, #317
+    Issue:   #189, #199, #200, #202, #206, #207, #317, #342
 #>
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
@@ -177,6 +183,41 @@ $LabelRuleCases = @(
     @{ label = 'dev-skycraft-swc-lb'; problem = "step 9.9.1 label 'dev-skycraft-swc-lb' is a resource name, which the runner opens by name and never asks about" }
     @{ label = 'Project'; problem = "step 9.9.1 label 'Project' is not in the guide" }
 ) | ForEach-Object { $_.actual = @(Get-LabelProblem -Step $LabelFixture -Label $_.label) -join '; '; $_ }
+
+# Why a step entry's 'lateLabels' (#342) cannot be used: not an object of label to minutes, minutes
+# that are not a whole number from 1 to 60, and, when the parsed $Step is given, a label that is not
+# one of its labels (the runner would never wait for it). recording.late_label_problems, which
+# run.py refuses to start with, applies the minutes rule.
+function Get-LateLabelProblem {
+    param([string]$StepId, [object]$Entry, [object]$Step)
+    $late = $Entry.PSObject.Properties['lateLabels']
+    if ($null -eq $late) { return }
+    if ($late.Value -isnot [pscustomobject]) {
+        return "step ${StepId}: 'lateLabels' must be an object of label to minutes"
+    }
+    foreach ($label in @($late.Value.PSObject.Properties)) {
+        $minutes = $label.Value
+        if (($minutes -isnot [int] -and $minutes -isnot [long]) -or $minutes -lt 1 -or $minutes -gt 60) {
+            "step ${StepId}: 'lateLabels' '$($label.Name)' must be whole minutes from 1 to 60"
+        }
+        if ($Step -and @(Get-StepLabel -Step $Step -Kind decided) -cnotcontains $label.Name) {
+            "step ${StepId}: 'lateLabels' '$($label.Name)' is not a label of the step"
+        }
+    }
+}
+
+$LateRuleCases = @(
+    @{ json = '{ "lateLabels": { "Save": 30 } }'; problem = '' }
+    @{ json = '{ "lateLabels": { "Save": 1, "Name": 60 } }'; problem = '' }
+    @{ json = '{ "labels": {} }'; problem = '' }
+    @{ json = '{ "lateLabels": { "Save": 0 } }'; problem = "step 9.9.1: 'lateLabels' 'Save' must be whole minutes from 1 to 60" }
+    @{ json = '{ "lateLabels": { "Save": 61 } }'; problem = "step 9.9.1: 'lateLabels' 'Save' must be whole minutes from 1 to 60" }
+    @{ json = '{ "lateLabels": { "Save": "30" } }'; problem = "step 9.9.1: 'lateLabels' 'Save' must be whole minutes from 1 to 60" }
+    @{ json = '{ "lateLabels": { "Save": 1.5 } }'; problem = "step 9.9.1: 'lateLabels' 'Save' must be whole minutes from 1 to 60" }
+    @{ json = '{ "lateLabels": { "Save": true } }'; problem = "step 9.9.1: 'lateLabels' 'Save' must be whole minutes from 1 to 60" }
+    @{ json = '{ "lateLabels": { "Cancel": 30 } }'; problem = "step 9.9.1: 'lateLabels' 'Cancel' is not a label of the step" }
+    @{ json = '{ "lateLabels": [30] }'; problem = "step 9.9.1: 'lateLabels' must be an object of label to minutes" }
+) | ForEach-Object { $_.actual = @(Get-LateLabelProblem -StepId '9.9.1' -Entry ($_.json | ConvertFrom-Json) -Step $LabelFixture) -join '; '; $_ }
 
 # Why a step entry's 'skip' (#200) is malformed; nothing when the entry has none or a reason.
 # recording.skip_reason, which run.py checks every entry with, applies the same rule.
@@ -370,6 +411,7 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
         $malformed = @(
             foreach ($prop in $recording.steps.PSObject.Properties) {
                 Get-SkipProblem -StepId $prop.Name -Entry $prop.Value
+                Get-LateLabelProblem -StepId $prop.Name -Entry $prop.Value -Step $stepById[$prop.Name]
                 $labelsObject = $prop.Value.labels
                 if ($null -ne $labelsObject) {
                     foreach ($entry in @($labelsObject.PSObject.Properties)) {
@@ -514,8 +556,16 @@ Describe 'Guide drift recordings - a skip gives its reason' {
     }
 }
 
+Describe 'Guide drift recordings - a late label waits whole minutes for a label of its step' {
+    It "reports the step entry <json> as '<problem>' (empty: well-formed)" -ForEach $LateRuleCases {
+        # run.py refuses to start on minutes outside 1..60 (recording.late_label_problems); a label
+        # the step does not have would never be waited for. Both fail here, not in a live run.
+        $actual | Should -Be $problem
+    }
+}
+
 Describe 'Guide drift recordings - every decision is one replay can act on' {
-    It "'<file>' records only use (with name and role), ignore or gone decisions, a well-formed result and skip" -ForEach $RecordingCases {
+    It "'<file>' records only use (with name and role), ignore or gone decisions, a well-formed result, skip and late labels" -ForEach $RecordingCases {
         # ReplayDecider indexes entry['decision'] and entry['name'] directly, so a missing key
         # raises KeyError, and a use entry without a role matches any role. An unrecognised
         # decision value is treated as no answer. A hand edit that breaks the shape must fail here,

@@ -6099,5 +6099,108 @@ class OpenedListTests(RunnerTestCase):
         self.assertEqual((options["North Europe"].clicked, other.clicked), (0, 1))
 
 
+class LateViewTests(RunnerTestCase):
+    """A label the recording says a view lists only later ("lateLabels", 1.3.10's Compliance
+    grid, #342) is waited for by refreshing the view, for as long as the recording allows."""
+
+    LABEL = "Require-Environment-Tag-RG"
+    ITEM = {"kind": "action", "labels": [LABEL], "line": 4}
+    # Run A's Compliance grid, trimmed to the rows a test needs (no Scope cell: it names the
+    # subscription).
+    GRID = ('- heading "Policy | Compliance" [level=1]\n'
+            '- menuitem "Refresh"\n'
+            '- grid:\n'
+            '  - row "Name Scope Compliance state":\n'
+            '    - columnheader "Name"\n'
+            '  - row "Enforce-Project-Tag":\n'
+            '    - link "Enforce-Project-Tag"\n'
+            '  - row "Restrict-Azure-Regions":\n'
+            '    - link "Restrict-Azure-Regions"\n')
+    LEFT, RIGHT = ("Policy | Overview", 0), ("Policy | Compliance", 500)
+
+    class ReloadPage(FakePage):
+        def __init__(self, on_reload=None) -> None:
+            super().__init__()
+            self.reloads = 0
+            self.on_reload = on_reload
+
+        def reload(self, wait_until=None) -> None:
+            self.reloads += 1
+            if self.on_reload:
+                self.on_reload(self.reloads)
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+        POPUP_RECORD.update(popups=None, made=0)
+
+    act = FindOnScreenTests.act
+
+    def allow(self, minutes) -> None:
+        self.recording["steps"].setdefault("9.9.1", {})["lateLabels"] = {self.LABEL: minutes}
+
+    def refreshing(self, shows_after: int):
+        """A screen with a Refresh menu item in each of two blades; the grid row appears at the
+        `shows_after`-th click of the right-most blade's."""
+        link, clicks = ScreenNode(), []
+        screen = Screen(tree=self.GRID)
+
+        def refreshed() -> None:
+            clicks.append(1)
+            if len(clicks) == shows_after:
+                screen.add(("link", self.LABEL, link))
+        left = ScreenNode(blade=self.LEFT)
+        right = ScreenNode(blade=self.RIGHT, on_click=refreshed)
+        screen.add(("menuitem", "Refresh", left), ("menuitem", "Refresh", right))
+        return screen, link, left, right
+
+    @staticmethod
+    def said(printed) -> list[str]:
+        return [str(c.args[0]) for c in printed.call_args_list if c.args]
+
+    def test_compliance_lists_the_assignment_after_two_refreshes(self) -> None:
+        self.allow(30)
+        screen, link, left, right = self.refreshing(shows_after=2)
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.ITEM, self.LABEL)
+        self.assertEqual((record["outcome"], link.clicked, r.ask.prompts), ("match", 1, []))
+        self.assertEqual((right.clicked, left.clicked), (2, 0))             # the newest blade's Refresh
+        self.assertGreaterEqual(r.page.now, 2 * run.LATE_POLL_S)
+        self.assertLess(r.page.now, 3 * run.LATE_POLL_S + run.FIND_TIMEOUT_MS / 1000)
+        waiting = [line for line in self.said(printed) if "may be listed only later" in line]
+        self.assertIn("up to 30 min", waiting[0])
+        self.assertEqual(len(waiting), 1)                                  # said once, not every look
+        self.assertIn(f"'{self.LABEL}'", waiting[0])
+        self.assertEqual(self.recording["steps"]["9.9.1"]["labels"], {})
+
+    def test_the_page_is_reloaded_when_no_refresh_is_on_screen(self) -> None:
+        self.allow(30)
+        link, screen = ScreenNode(), Screen(tree=self.GRID)
+        page = self.ReloadPage(lambda n: n == 1 and screen.add(("link", self.LABEL, link)))
+        record, r = self.act(screen, self.ITEM, self.LABEL, page=page)
+        self.assertEqual((record["outcome"], link.clicked, r.ask.prompts), ("match", 1, []))
+        self.assertEqual(page.reloads, 1)
+
+    def test_the_label_is_asked_about_after_the_limit(self) -> None:
+        self.allow(2)
+        screen, link, left, right = self.refreshing(shows_after=99)
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.ITEM, self.LABEL)
+        self.assertEqual((record["outcome"], len(r.ask.prompts), link.clicked), ("unknown", 1, 0))
+        start = run.FIND_TIMEOUT_MS / 1000
+        self.assertGreaterEqual(r.page.now, start + 2 * 60)
+        self.assertLess(r.page.now, start + 2 * 60 + run.LATE_POLL_S + run.FIND_TIMEOUT_MS / 1000)
+        self.assertGreaterEqual(right.clicked, 1)
+        self.assertLessEqual(right.clicked, 2)
+        self.assertTrue(any("2 min" in line and "asking" in line for line in self.said(printed)))
+
+    def test_no_wait_without_a_late_label(self) -> None:
+        screen, link, left, right = self.refreshing(shows_after=1)
+        self.recording["steps"].setdefault("9.9.1", {})["lateLabels"] = {"Another-Assignment": 30}
+        record, r = self.act(screen, self.ITEM, self.LABEL)
+        self.assertEqual((record["outcome"], len(r.ask.prompts), right.clicked), ("unknown", 1, 0))
+        self.assertLess(r.page.now, run.FIND_TIMEOUT_MS / 1000 + 1)
+
+
 if __name__ == "__main__":
     unittest.main()
