@@ -2392,6 +2392,88 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual(self.recording["steps"]["9.9.1"]["labels"][self.ENTRA]["name"], "Entra ID")
         self.assertTrue(self.tree_file().is_file())
 
+    RG = "Resource groups"
+    RM = " Resource Manager"
+
+    def test_resource_groups_resource_manager_is_the_resource_groups_result(self) -> None:
+        wanted = self.result("Services (67)", whole="Resource groups Resource Manager")
+        keywords = self.result("Services (67)", whole="Subscriptions Keywords: resource groups")
+        includes = self.result("Services (67)", whole="Resource Manager Includes: Resource groups")
+        offer = self.result("Marketplace (22)", whole="Resource group")
+        screen, box = self.search_screen(("option", "Subscriptions Keywords: resource groups", keywords),
+                                         ("option", "Resource Manager Includes: Resource groups", includes),
+                                         ("option", "Resource groups Resource Manager", wanted),
+                                         ("option", "Resource group", offer))
+        record, r = self.act(screen, self.SEARCH, self.RG)
+        self.assertEqual((record["outcome"], record["kind"]), ("match", "search"))
+        self.assertEqual((wanted.clicked, keywords.clicked, includes.clicked, offer.clicked), (1, 0, 0, 0))
+        self.assertEqual((r.ask.prompts, box.filled), ([], [self.RG]))
+        self.assertFalse(self.tree_file().exists())
+
+    def test_tags_and_management_groups_resource_manager_too(self) -> None:
+        for label in ("Tags", "Management groups"):
+            with self.subTest(label=label):
+                wanted = self.result("Services (67)", whole=f"{label} Resource Manager")
+                other = self.result("Services (67)", whole=f"Policy Includes: {label}")
+                screen, _ = self.search_screen(("option", f"Policy Includes: {label}", other),
+                                               ("option", f"{label} Resource Manager", wanted))
+                record, _ = self.act(screen, self.SEARCH, label)
+                self.assertEqual((record["outcome"], wanted.clicked, other.clicked), ("match", 1, 0))
+
+    def test_an_exact_result_wins_over_a_category_one(self) -> None:
+        exact = self.result("Services (67)", whole=self.RG)
+        category = self.result("Services (67)", whole=self.RG + self.RM)
+        screen, _ = self.search_screen(("option", self.RG + self.RM, category), ("option", self.RG, exact))
+        record, _ = self.act(screen, self.SEARCH, self.RG)
+        self.assertEqual((record["outcome"], exact.clicked, category.clicked), ("match", 1, 0))
+
+    def test_a_category_result_outside_services_never_counts(self) -> None:
+        market = self.result("Marketplace (22)", whole=self.RG + self.RM)
+        docs = self.result("Documentation (99+)", whole=self.RG + self.RM)
+        screen, _ = self.search_screen(("option", self.RG + self.RM, market), ("option", self.RG + self.RM, docs))
+        record, _ = self.act(screen, self.SEARCH, self.RG)
+        self.assertEqual((record["outcome"], market.clicked, docs.clicked), ("unknown", 0, 0))
+        self.assertTrue(self.tree_file().is_file())
+
+    def test_two_category_results_in_services_are_ambiguous(self) -> None:
+        one, two = (self.result("Services (67)", whole=self.RG + self.RM) for _ in range(2))
+        screen, _ = self.search_screen(("option", self.RG + self.RM, one), ("option", self.RG + self.RM, two))
+        record, _ = self.act(screen, self.SEARCH, self.RG)
+        self.assertEqual((record["outcome"], one.clicked, two.clicked), ("unknown", 0, 0))
+        self.assertIn("ambiguous", record["observed"])
+
+    def typed_again_screen(self, appears_on: int):
+        """A search whose results list appears only after the `appears_on`th time the label is typed."""
+        screen, box = self.search_screen(self.EXACT_ENTRY)
+        box.on_fill()                                        # the dropdown the first typing would add:
+        listbox = screen.entries.pop()                       # held back until the label is typed again
+        typed = []
+
+        def on_fill() -> None:
+            if box.text:
+                typed.append(box.text)
+                if len(typed) == appears_on:
+                    screen.add(listbox)
+        box.on_fill = on_fill
+        return screen, box
+
+    def test_a_search_without_a_results_list_is_typed_again_once(self) -> None:
+        self.EXACT_ENTRY = ("option", self.ENTRA, services := self.result("Services (67)"))
+        screen, box = self.typed_again_screen(appears_on=2)
+        record, r = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual((record["outcome"], services.clicked), ("match", 1))
+        self.assertEqual((box.filled, box.pressed), ([self.ENTRA, "", self.ENTRA], ["Escape"]))
+        self.assertEqual(r.ask.prompts, [])
+        self.assertFalse(self.tree_file().exists())
+
+    def test_a_second_miss_saves_the_tree_and_asks(self) -> None:
+        self.EXACT_ENTRY = ("option", self.ENTRA, services := self.result("Services (67)"))
+        screen, box = self.typed_again_screen(appears_on=3)
+        record, r = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual((record["outcome"], services.clicked, len(r.ask.prompts)), ("unknown", 0, 1))
+        self.assertEqual(box.filled.count(self.ENTRA), 2)       # typed twice, not a third time
+        self.assertIn("no results list identified", self.tree_file().read_text(encoding="utf-8"))
+
     def test_a_closed_window_is_not_a_missing_search_box(self) -> None:
         with self.assertRaises(run.PageClosed):
             self.act(Screen(), self.SEARCH, self.ENTRA, page=FakePage(closed=True))

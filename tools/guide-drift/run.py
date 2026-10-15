@@ -89,16 +89,22 @@ from, and both menus show 'Tags'). It refuses to click or fill an
 element whose name contains the word delete, remove, reset, revoke, disable, block, purge or
 sign out, unless the guide's own label does too. A guide's 'Search for **X**' is typed into the
 Portal's global search, and the result named exactly X in its dropdown is opened (the Services
-entry, never Marketplace or Documentation); when that fails, the dropdown's accessibility tree
-is kept as search-<step>.aria.txt in the run folder. A search inside a blade ('Search for
+entry, never Marketplace or Documentation); when the Portal lists a service category under
+another name, its Services entry with the group's words after the label ('Resource groups
+Resource Manager' for 'Resource groups', #342: decide.Decoration.search) is the result, but only
+when there is no exact one, and never under Marketplace or Documentation or beside several. A
+search whose results never load (no results list before the deadline) is closed and typed once
+more; when that fails, or no result is found, the dropdown's accessibility tree (the whole frame
+when there was no list) is kept as search-<step>.aria.txt in the run folder. A search inside a blade ('Search for
 **"Owner"**' in a role assignment, scope 'blade') is typed into that blade's own search box, the
 only one on screen besides the top one, and the result is checked for, not clicked: the guide's
 next item clicks it. Plain text counts only when it
 is, or sits inside, a link, button or other interactive element. When nothing on screen has the
 label's name, an element whose name is the label plus one of the Portal's decorations, words the
 screen does not show beside the label (decide.DECORATIONS, #244: a list row's check box 'Select
-row X' for an action, a required field's marker 'X *', or a field label's info icon and marker,
-'X information *'), is the guide's element as well (find_decorated): a match, so nobody is asked,
+row X' for an action, a required field's marker 'X *', a field label's info icon and marker,
+'X information *', or a search result's group, 'X Resource Manager', found in the global search
+only), is the guide's element as well (find_decorated): a match, so nobody is asked,
 nothing is recorded and no guide edit is proposed. It is looked for once SETTLE_MS of looking
 has not found the plain name, which a blade still rendering may show later, and that time starts
 again once a loading blade has rendered and once the person has opened a form. A decoration counts
@@ -1198,7 +1204,8 @@ def find_decorated(page: Page, label: str, field: bool = False) -> Locator | Non
     or for a field the one that takes a value (one_field)."""
     found: list[Locator] = []
     for role in FIELD_ROLES if field else ACTION_ROLES:
-        names = [d.of(label) for d in DECORATIONS if role in d.roles and (d.fields or not field)]
+        names = [d.of(label) for d in DECORATIONS
+                 if role in d.roles and (d.fields or not field) and not d.search]
         if names:
             pattern = re.compile("^(?:" + "|".join(map(literal_pattern, names)) + ")$")
             found += visible_across_frames(page, lambda f, role=role, pattern=pattern:
@@ -1238,7 +1245,7 @@ def find_row_control(page: Page, label: str) -> Locator | None:
     viewport = page.viewport_size
     radios = visible_in(rows[0].get_by_role("radio"), viewport)
     boxes = [] if radios else [box for box in visible_in(rows[0].get_by_role("checkbox"), viewport)
-                               if decoration_of(accessible_name(box), label) is None]
+                               if decoration_of(accessible_name(box), label, "checkbox") is None]
     control = (radios if radios else boxes)
     if len(control) != 1:
         return None
@@ -1414,7 +1421,7 @@ def search_dropdown(page: Page, frame: Frame, box: Locator) -> Locator | None:
         return None
 
 
-def search_result(label: str, root: object) -> Choose:
+def search_result(label: str, root: object, category: bool = False) -> Choose:
     """find_in_roles' choice among exact results in the search dropdown `root` (an element
     handle). The Portal lists a service under 'Services' and again under 'Marketplace' (an offer
     to buy) and in 'Documentation' links; the section is the result's group name, or the nearest
@@ -1424,8 +1431,13 @@ def search_result(label: str, root: object) -> Choose:
     told apart from a Marketplace entry), and otherwise only when it is the only one left;
     several are Ambiguous. Plain text counts only when the whole result it sits in reads `label`,
     not when it is the highlighted part of a longer result ('Microsoft Entra ID Protection'). A
-    result that changes while it is read raises Ambiguous, so the caller looks again."""
+    result that changes while it is read raises Ambiguous, so the caller looks again.
+    `category` (#342): `label` is a service category's result name (decide.Decoration.search):
+    only a result under Services counts, whatever else has no section or another, and never plain
+    text."""
     def choose(found: list[Locator], by_text: bool) -> Locator | None:
+        if category and by_text:
+            return None
         read: list[tuple[Locator, str, str]] = []
         for element in found:
             try:
@@ -1439,7 +1451,7 @@ def search_result(label: str, root: object) -> Choose:
         others: list[Locator] = []
         for element, section, whole in read:
             if (SEARCH_EXCLUDED.match(section) or (by_text and whole != label)
-                    or (sectioned and not section)):
+                    or (sectioned and not section) or (category and not SEARCH_PREFERRED.match(section))):
                 continue
             (services if SEARCH_PREFERRED.match(section) else others).append(element)
         if len(services) > 1:
@@ -1494,36 +1506,54 @@ def search_portal(page: Page, label: str, diagnose: Callable[[str], None] | None
 
 def search_results(page: Page, frame: Frame, box: Locator, label: str,
                    diagnose: Callable[[str], None] | None) -> Locator | None:
-    """search_portal once the popups on the page are recorded: type, then look for the result."""
-    try:
-        box.fill(label, timeout=FIND_TIMEOUT_MS)
-    except PlaywrightError:
-        if page.is_closed():
-            raise PageClosed("the browser window was closed") from None
-        raise
-    page.wait_for_timeout(SETTLE_MS)
-    deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
-    while True:
-        dropdown = search_dropdown(page, frame, box)
-        ambiguous: Ambiguous | None = None
-        if dropdown is not None:
-            result = None
-            try:
-                root = dropdown.element_handle(timeout=1000)
+    """search_portal once the popups on the page are recorded: type, then look for the result.
+    The result is the one named exactly `label` (search_result); when there is none, the one a
+    search decoration makes of it (decide.Decoration.search, #342: 'Resource groups Resource
+    Manager' for 'Resource groups'), under Services only. When the results are not loading at
+    all (no results list is identified before the deadline), the box is emptied and closed
+    (close_search) and the label is typed once more with a new deadline; the tree is kept only
+    after that second try."""
+    dropdown = None
+    ambiguous: Ambiguous | None = None
+    for attempt in range(2):
+        if attempt:
+            close_search(page)
+        try:
+            box.fill(label, timeout=FIND_TIMEOUT_MS)
+        except PlaywrightError:
+            if page.is_closed():
+                raise PageClosed("the browser window was closed") from None
+            raise
+        page.wait_for_timeout(SETTLE_MS)
+        deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
+        while True:
+            dropdown = search_dropdown(page, frame, box)
+            ambiguous = None
+            if dropdown is not None:
+                result = None
                 try:
-                    result = find_in_roles(page, label, RESULT_ROLES, root=dropdown,
-                                           choose=search_result(label, root))
-                finally:
-                    root.dispose()
-            except Ambiguous as error:
-                ambiguous = error
-            except PlaywrightError:     # the dropdown went away while the Portal reloaded it
-                pass
-            if result is not None:
-                return result
-        if time.monotonic() >= deadline:
+                    root = dropdown.element_handle(timeout=1000)
+                    try:
+                        result = find_in_roles(page, label, RESULT_ROLES, root=dropdown,
+                                               choose=search_result(label, root))
+                        for decoration in (d for d in DECORATIONS if d.search):
+                            if result is None:
+                                named = decoration.of(label)
+                                result = find_in_roles(page, named, decoration.roles, root=dropdown,
+                                                       choose=search_result(named, root, category=True))
+                    finally:
+                        root.dispose()
+                except Ambiguous as error:
+                    ambiguous = error
+                except PlaywrightError:     # the dropdown went away while the Portal reloaded it
+                    pass
+                if result is not None:
+                    return result
+            if time.monotonic() >= deadline:
+                break
+            page.wait_for_timeout(500)
+        if dropdown is not None:
             break
-        page.wait_for_timeout(500)
     if diagnose is not None:
         diagnose(tree_of(dropdown, frame))
     if ambiguous is not None:

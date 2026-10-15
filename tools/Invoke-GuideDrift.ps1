@@ -45,7 +45,9 @@
     `dev-skycraft-swc-lb`') is never asked about: it is opened from the screen, or else, when it
     opens the chain, from the Portal's global search; when it is not found under that exact name,
     the step fails as blocking drift of the step (missing-resource), with no proposed guide edit
-    (issue #199).
+    (issue #199). The same search finds a 'Search for **Resource groups**' step's result when the
+    Portal lists it as 'Resource groups Resource Manager' under Services, and types the label
+    once more when the results do not load the first time (issue #342).
 
     WHAT YOU ANSWER, AND WHICH EDITS ARE PROPOSED (issue #211). For a field, the label prompt
     shows the value the run will type, not the guide's (issue #210): after the recording's

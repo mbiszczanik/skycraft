@@ -26,7 +26,10 @@ row X' for a list row's check box, 'X information *' for a field with an info ic
 filled in) on a role it decorates is the guide's element, not drift: run.py finds such an element
 without asking, and when a decider is asked all the same, a pick of one by number or with 'c' is
 plain use, recorded and replayed as such (a recording made before #244 that holds it as cosmetic
-drift replays as use too). 'w' still makes it a workaround. The same words on another role are
+drift replays as use too). 'w' still makes it a workaround. The global search's result for a
+service category, 'Resource groups Resource Manager' for the guide's 'Resource groups' (#342), is
+one of them (Decoration.search): run.py opens it from the Services group, and a pick of it by
+number or with 'c', or its replay, is use as well. The same words on another role are
 another element (a button 'X information *', a link 'Select row X') and stay drift.
 
 A model-based decider is a third implementation of the same signature (the Decider protocol);
@@ -52,12 +55,15 @@ class Decoration:
     (#244). `roles` are the roles it is found on (run.find_decorated, decoration_of with a role):
     the decoration names that element, while the same words on another role name something else.
     `fields`: whether a field's lookup takes it too; a list row's check box is selected by an
-    action, never filled in as a field."""
+    action, never filled in as a field. `search`: the words of a result in the global search's
+    dropdown (run.search_results looks for it there, in Services only), not of an element on
+    the page: run.find_decorated never takes it."""
     prefix: str
     suffix: str
     roles: tuple[str, ...]
     what: str        # for the reason a guide edit is not proposed (run.Runner.not_proposed)
     fields: bool = True
+    search: bool = False
 
     def of(self, label: str) -> str:
         return f"{self.prefix}{label}{self.suffix}"
@@ -74,6 +80,7 @@ DECORATIONS = (
     Decoration("Select row ", "", ("checkbox",), "a list row's check box", fields=False),
     Decoration("", " *", DECORATED_FIELDS, "a required field's marker"),
     Decoration("", " information *", DECORATED_FIELDS, "a field label's info icon and required marker"),
+    Decoration("", " Resource Manager", ("option",), "the search result's service group", fields=False, search=True),
 )
 
 
