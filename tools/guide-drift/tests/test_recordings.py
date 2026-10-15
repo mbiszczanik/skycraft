@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from decide import DECORATIONS, decoration_of  # noqa: E402
+from decide import decoration_of  # noqa: E402
 
 RECORDINGS = Path(__file__).resolve().parent.parent / "recordings"
 

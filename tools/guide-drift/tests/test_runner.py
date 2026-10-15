@@ -6060,7 +6060,6 @@ class ListOptionTests(RunnerTestCase):
         self.assertIn("<id>", saved)
 
 
-
 class OpenedListTests(RunnerTestCase):
     """A multi-select list opened by the label before it (1.3.9's 'Allowed locations' above the
     combo box 'Location'; #342): the item's later labels are options of that list, set to the
