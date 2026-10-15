@@ -109,7 +109,17 @@ has seen one, so that suffix alone is no decoration and the person is asked. Suc
 box is acted on as one the person picked: 'Search for and select **X**' states no state
 (parse.py, #296), so it is clicked, which clears a row already ticked; 'Check **X**' leaves it
 ticked. A person who picks a decorated name on a role it decorates all the same (by number or
-with 'c') uses it, no drift either (decide.py). A label is looked for until
+with 'c') uses it, no drift either (decide.py).
+A picker row is the guide's element as well (find_row_control, #342): a policy picker names the
+policy in a cell of the row and holds a radio named 'Select' (or a check box) in it, so for an
+action nothing else has the name, the visible row (never the header row) with a grid cell or
+cell named exactly the label gives its one radio, or else its one check box that is no
+decoration of the label. 'Allowed locations' is not the row 'Azure Cosmos DB allowed locations';
+two rows of that exact cell are ambiguous, and a row without one such control is not found. It
+is looked for after the decorated names, from SETTLE_MS on, is a match with nothing recorded and
+no guide edit, and is selected as a stated 'Check' is (set_state: a radio is selected, a check
+box ticked), so a row already selected is 'already set' and selecting never clears it.
+A label is looked for until
 FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; when SETTLE_MS of
 that finds nothing, the blade menu's collapsed groups are opened ('Expand all headers', the
 newest blade's button when several blades show one) and the looking goes on to the same deadline.
@@ -1121,6 +1131,44 @@ def find_decorated(page: Page, label: str, field: bool = False) -> Locator | Non
     return only_one(found)
 
 
+# Set on the control find_row_control returns, so act_on_label selects it (set_state) rather than click it.
+ROW_CONTROL_MARK = "skycraft_row_control"
+
+
+def find_row_control(page: Page, label: str) -> Locator | None:
+    """The selection control of the picker row that names `label` (#342): a policy picker's row
+    holds a radio named 'Select' beside the cell that carries the policy's name (1.3.5, 1.3.9).
+    The rows are the visible `row` elements that are no header row (they hold no column header)
+    and hold a `gridcell` or `cell` whose accessible name is exactly `label`, so 'Allowed
+    locations' is not the row 'Azure Cosmos DB allowed locations' or 'Allowed locations for
+    resource groups'. Two such rows raise Ambiguous. The row's control is its one radio, or else
+    its one check box whose name is no decoration of the label (decide.DECORATIONS: that one is
+    find_decorated's); None when the row holds neither or several. The control is marked
+    (ROW_CONTROL_MARK) for act_on_label."""
+    rows = []
+    for row in visible_across_frames(page, lambda f: f.get_by_role("row")):
+        try:
+            if row.get_by_role("columnheader").count():
+                continue
+            if any(row.get_by_role(role, name=label, exact=True).count() for role in ("gridcell", "cell")):
+                rows.append(row)
+        except PlaywrightError:     # the row went away while the Portal re-rendered the list
+            continue
+    if len(rows) > 1:
+        raise Ambiguous(f"{len(rows)} visible rows have a cell named exactly '{label}'")
+    if not rows:
+        return None
+    viewport = page.viewport_size
+    radios = visible_in(rows[0].get_by_role("radio"), viewport)
+    boxes = [] if radios else [box for box in visible_in(rows[0].get_by_role("checkbox"), viewport)
+                               if decoration_of(accessible_name(box), label) is None]
+    control = (radios if radios else boxes)
+    if len(control) != 1:
+        return None
+    setattr(control[0], ROW_CONTROL_MARK, True)
+    return control[0]
+
+
 def find_exact(page: Page, label: str, field: bool = False, decorated: bool = True) -> Locator | None:
     """The visible element whose accessible name is exactly `label`: for a field, find_field;
     otherwise the interactive roles, then plain text (find_in_roles). When nothing has the name
@@ -1131,7 +1179,8 @@ def find_exact(page: Page, label: str, field: bool = False, decorated: bool = Tr
     is the guide's element as well, so the plain name always wins; not at all when `decorated`
     is False (looking_for, while a blade may still render the plain one). A plain name on screen
     as interactive text more than once is not found, as before, and is no reason to take a
-    decorated one: the person decides."""
+    decorated one: the person decides. After the decorated names, for an action, the control of
+    the picker row whose cell names the label (find_row_control, #342)."""
     bare = LEADING_PLUS.sub("", label, count=1)
     names = [label] + ([bare] if bare and bare != label else [])
     for name in names:
@@ -1145,7 +1194,7 @@ def find_exact(page: Page, label: str, field: bool = False, decorated: bool = Tr
         element = find_decorated(page, name, field)
         if element is not None:
             return element
-    return None
+    return None if field else find_row_control(page, label)
 
 
 def find_resource(page: Page, name: str) -> Locator | None:
@@ -2542,6 +2591,8 @@ class Runner:
         try:
             # Found anywhere in the window's columns, maybe below the fold: bring it into view first.
             element.scroll_into_view_if_needed(timeout=FIND_TIMEOUT_MS)
+            if state is None and getattr(element, ROW_CONTROL_MARK, False):
+                state = True       # a picker row is selected (#342), so a row already selected is left as it is
             toggle, role, _ = toggle_kind(element) if kind != "field" and state is not None else (None, "", "")
             if toggle == "check" and role in OPTION_ROLES:
                 element = option_box(element)      # an option holding one check box: set through the box

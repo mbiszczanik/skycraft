@@ -5476,5 +5476,117 @@ class DecoratedNameTests(RunnerTestCase):
             self.assertIn(f"## {section} (0)\n- none", summary)
 
 
+class PickerRowTests(RunnerTestCase):
+    """A policy picker's row names its policy in a cell and holds a radio named 'Select' (1.3.5,
+    1.3.9; #342): that radio is the element the guide's 'select **X**' names (find_row_control),
+    a match with nobody asked, nothing recorded and no guide edit."""
+
+    PICK = {"kind": "action", "labels": ["Allowed locations"], "line": 3}
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n\n3. Select **Allowed locations**\n", encoding="utf-8")
+
+    @staticmethod
+    def radio(checked: bool = False) -> ScreenNode:
+        return ScreenNode(attrs={"role": "radio"}, tag="input", checked=checked, tree='- radio "Select"')
+
+    @staticmethod
+    def box(name: str = "Select") -> ScreenNode:
+        return ScreenNode(attrs={"role": "checkbox"}, tag="input", tree=f'- checkbox "{name}"')
+
+    @staticmethod
+    def row(name: str, *controls: tuple[str, ScreenNode], cell: str = "gridcell") -> tuple[str, str, ScreenNode]:
+        parts = [(role, "Select", node) for role, node in controls] + [(cell, name, ScreenNode(interactive=False))]
+        return "row", f"Select {name} 1.1.0 General BuiltIn", ScreenNode(children=Screen(*parts))
+
+    HEADER = ("row", "Name Version Category Type",
+              ScreenNode(children=Screen(("columnheader", "Name", ScreenNode()), ("columnheader", "Version", ScreenNode()))))
+
+    @staticmethod
+    def find(screen: Screen, label: str = "Allowed locations"):
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            return run.find_exact(FakePage(), label)
+
+    def act(self, screen: Screen, state=None):
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "items": [self.PICK], "images": []}
+        listed = [run.Candidate(role, name) for role, name, _ in screen.everything() if name]
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=listed):
+            record = self.quietly(lambda: r.act_on_label(step, self.PICK, "Allowed locations", state=state))
+        return record, r
+
+    def test_a_picker_row_is_selected_by_its_select_radio(self) -> None:
+        radio = self.radio()
+        screen = Screen(self.HEADER, self.row("Require a tag on resource groups", ("radio", ScreenNode())),
+                        self.row("Allowed locations", ("radio", radio)))
+        self.assertIs(self.find(screen), radio)
+        record, r = self.act(screen)
+        self.assertEqual((record["outcome"], record["severity"], record.get("proposedEdit")), ("match", None, None))
+        self.assertEqual((r.ask.prompts, self.recording["steps"]["9.9.1"]["labels"]), ([], {}))
+        self.assertTrue(radio.checked)
+
+    def test_the_row_named_exactly_wins_among_three(self) -> None:
+        radio = self.radio()
+        screen = Screen(self.HEADER,
+                        self.row("Azure Cosmos DB allowed locations", ("radio", ScreenNode())),
+                        self.row("Allowed locations", ("radio", radio)),
+                        self.row("Allowed locations for resource groups", ("radio", ScreenNode())))
+        self.assertIs(self.find(screen), radio)
+
+    def test_a_cell_role_row_counts_as_well(self) -> None:
+        radio = self.radio()
+        self.assertIs(self.find(Screen(self.row("Allowed locations", ("radio", radio), cell="cell"))), radio)
+
+    def test_two_rows_of_that_exact_name_are_ambiguous(self) -> None:
+        screen = Screen(self.row("Allowed locations", ("radio", self.radio())),
+                        self.row("Allowed locations", ("radio", self.radio())))
+        with self.assertRaises(run.Ambiguous):
+            self.find(screen)
+
+    def test_a_row_already_selected_is_already_set(self) -> None:
+        radio = self.radio(checked=True)
+        record, _ = self.act(Screen(self.row("Allowed locations", ("radio", radio))))
+        self.assertEqual((record["outcome"], record["observed"], radio.clicked), ("match", "already set", 0))
+
+    def test_a_check_box_row_is_ticked_never_cleared(self) -> None:
+        box = self.box()
+        box.checked = True
+        record, _ = self.act(Screen(self.row("Allowed locations", ("checkbox", box))))
+        self.assertEqual((record["outcome"], record["observed"], box.checked, box.clicked), ("match", "already set", True, 0))
+        box = self.box()
+        record, _ = self.act(Screen(self.row("Allowed locations", ("checkbox", box))))
+        self.assertEqual((record["outcome"], box.checked), ("match", True))
+
+    def test_a_check_box_that_only_decorates_the_label_is_no_row_control(self) -> None:
+        screen = Screen(self.row("Allowed locations", ("checkbox", self.box("Allowed locations *"))))
+        self.assertIsNone(self.find(screen))
+
+    def test_a_row_without_one_selection_control_is_not_found(self) -> None:
+        for controls in ((), (("radio", self.radio()), ("radio", self.radio())),
+                         (("checkbox", self.box()), ("checkbox", self.box()))):
+            with self.subTest(controls=len(controls)):
+                self.assertIsNone(self.find(Screen(self.row("Allowed locations", *controls))))
+
+    def test_the_header_row_is_no_row(self) -> None:
+        header = ("row", "Allowed locations",
+                  ScreenNode(children=Screen(("columnheader", "Allowed locations", ScreenNode()),
+                                             ("gridcell", "Allowed locations", ScreenNode()),
+                                             ("radio", "Select", self.radio()))))
+        self.assertIsNone(self.find(Screen(header)))
+
+    def test_a_hidden_row_is_no_row(self) -> None:
+        hidden = self.row("Allowed locations", ("radio", self.radio()))
+        hidden[2].shown = False
+        self.assertIsNone(self.find(Screen(hidden)))
+
+    def test_the_plain_name_still_wins_over_a_row(self) -> None:
+        link = ScreenNode()
+        screen = Screen(("link", "Allowed locations", link), self.row("Allowed locations", ("radio", self.radio())))
+        self.assertIs(self.find(screen), link)
+
+
 if __name__ == "__main__":
     unittest.main()
