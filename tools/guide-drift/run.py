@@ -25,7 +25,8 @@ attribute among it, and the value the runner typed); every value the runner type
 whose label names a password, secret or other credential, every value read from the environment
 but an address and the tenant prefix (recording.typed_secrets, #210), and every credential in a
 connection string or SAS address ('AccountKey=', 'sig=') as '[secret]'; object ids
-as '<id>'; tenant data, also as a regular expression escapes it, as the Redactor's tokens; any
+as '<id>'; tenant data and the run's subscription name (--subscription-name, '[yoursubscription]'),
+also as a regular expression escapes it, as the Redactor's tokens; any
 other e-mail address as '<email>'; a value a call typed and an element's value attribute as
 '[typed]' and '[value]' (recording.scrub lists what it cannot recognise and what it masks that only
 looks like one of these: 'Group@2x.png', 'ResetPassword=true'). Scrubbing twice changes nothing, so
@@ -64,8 +65,8 @@ belongs in the guide (Runner.not_proposed, #211). It proposes none when the elem
 workaround (and a workaround at the step's first item records no start blade); when the step has a
 wrong-blade record earlier in the step or its start is excused (see the start of a step below), as
 the Portal was then not where the guide leads; or when the Portal's name, scrubbed, holds a
-redaction token (recording.redaction_tokens: '[tenantname]', '<id>', '[secret]' or any other the
-Redactor or scrub writes), as it carries tenant or personal data; or when the Portal's name is the
+redaction token (recording.redaction_tokens: '[tenantname]', '[yoursubscription]', '<id>',
+'[secret]' or any other the Redactor or scrub writes), as it carries tenant or personal data; or when the Portal's name is the
 label plus one of its decorations (see the lookup below, #244), which the learner does not see. The
 first of these that applies is the reason given. Such a drift is written to results.jsonl all the
 same; the record's "notProposed" and the summary's 'not proposed' say why, and a workaround's
@@ -371,6 +372,7 @@ Usage (normally via Invoke-GuideDrift.ps1):
   python run.py --steps steps.json --recording recordings/lab-1.1.json --log-dir <dir>
                 --run-id 20261007-100000 --tenant-id <guid> --tenant-domain contoso.onmicrosoft.com
                 --state <path> --auth-state <path> [--tenant-name "Contoso Ltd"]
+                [--subscription-name "Example Subscription"]
                 [--from-step 1.1.6] [--resume] [--deployment-timeout-minutes 30]
 """
 from __future__ import annotations
@@ -641,6 +643,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--tenant-domain", required=True)
     p.add_argument("--tenant-name", default="",
                    help="the tenant's display name, kept out of the recording as [tenantname]")
+    p.add_argument("--subscription-name", default="",
+                   help="the run's subscription name, kept out of the recording as [yoursubscription]")
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--auth-state", type=Path, required=True)
     p.add_argument("--from-step")
@@ -2402,7 +2406,7 @@ class Runner:
                                       say=lambda text: print(scrub(text, self.redactor, self.secrets, whole=True)),
                                       value_to_type=lambda step, item: prompt_value(self.recording, step, item))]
         self.redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording),
-                                 getattr(args, "tenant_name", ""))
+                                 getattr(args, "tenant_name", ""), getattr(args, "subscription_name", ""))
         # What the runner types into a password or secret field, never written to a run log (#212).
         self.secrets = typed_secrets(recording, steps)
         self.records: list[dict] = self.earlier_results() if args.resume else []
@@ -2511,8 +2515,12 @@ class Runner:
         opened (expand_menu_groups) and the looks go on to the same deadline, so a label that
         only an open group shows costs a moment, not the whole FIND_TIMEOUT_MS. A decorated name
         (find_decorated, #244) counts only from SETTLE_MS on as well: a blade still rendering may
-        show the plain one a moment later, and the plain one wins."""
+        show the plain one a moment later, and the plain one wins. A label that holds a Redactor
+        token ('[yoursubscription]', the guide's placeholder) is looked up by the name the token
+        stands for (redactor.restore, the name matcher() matches), so the run's own subscription
+        link is a match."""
         started = time.monotonic()
+        label = self.redactor.restore(label)
 
         def look() -> Locator | None:
             settled = time.monotonic() - started >= SETTLE_MS / 1000
@@ -3921,7 +3929,8 @@ def main(argv: list[str] | None = None) -> int:
               f"continue that run with --resume (-Resume), or start a new one with another --run-id.")
         return NOT_STARTED
     # The console is pasted into issues too: an error is shown as a record keeps it (#212).
-    redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording), args.tenant_name)
+    redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording), args.tenant_name,
+                        args.subscription_name)
     secrets = typed_secrets(recording, steps)
 
     def shown(error: BaseException) -> str:     # reads redactor and secrets as main() last set them

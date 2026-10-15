@@ -67,7 +67,7 @@
     the reason, when the element was used as a workaround; when the step started on the wrong
     blade (a wrong-blade record) or is excused (the first step after -Resume or -FromStep, after a
     recorded skip or a step skipped with s); or when the Portal's name holds a redaction token
-    ([tenantname], <id>, [secret] or any other), as it carries tenant or personal data.
+    ([tenantname], [yoursubscription], <id>, [secret] or any other), as it carries tenant or personal data.
 
     STEPS THE RECORDING SKIPS. A step that is optional or conceptual by its heading and would
     create resources, or that follows the other option of a lettered pair, is left out by
@@ -95,7 +95,8 @@
     accessibility tree, redacted).
     summary.md and results.jsonl are meant to be copied into an issue or a pull request: each
     record keeps what it observed on one line, as the failure prompt shows it, without
-    Playwright's call log, with the tenant domain, id and name, the guest address, object ids and
+    Playwright's call log, with the tenant domain, id and name, the subscription's name (as
+    [yoursubscription], also in the *.aria.txt files), the guest address, object ids and
     any other e-mail address as tokens, and every value typed into a password or credential
     field, and every key in a connection string or SAS address, as [secret] (#212). The summary
     names the run folder relative to the repository. A results.jsonl written before #212 keeps
@@ -214,7 +215,10 @@
     The subscription whose tenant the run is for. Mandatory and compared by id against the Az
     context through Test-LabCycleSubscription, for the reason Invoke-LabCycle.ps1 gives
     (2026-08-02). The tenant id, its initial *.onmicrosoft.com domain and its display name are
-    read from it; the display name is kept out of the recording as '[tenantname]'.
+    read from it; the display name is kept out of the recording as '[tenantname]'. The
+    subscription's own name, read from the Az context, is passed to run.py (--subscription-name)
+    and kept out of the recording as '[yoursubscription]', which a guide's bold label of that
+    token finds as the run's subscription link; not passed in tenant mode or when empty.
 
 .PARAMETER TenantId
     The tenant to run an Entra-only lab against, when it has no subscription (tenant mode, see
@@ -478,6 +482,9 @@ if (-not $tenantId -or -not $domain) {
 }
 # The display name ('Contoso Ltd'), shown by the Portal; run.py keeps it out of the recording.
 $tenantName = [string]$tenant.Name
+# The subscription's name, shown by the Portal on its blades; run.py keeps it out of the recording
+# and finds the guide's '[yoursubscription]' by it. Subscription mode only: tenant mode has none.
+$subscriptionName = if ($tenantMode) { '' } else { [string](Get-AzContext).Subscription.Name }
 
 # --- Which run this is ---------------------------------------------------------------------
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -557,6 +564,7 @@ try {
     )
     # Not passed when empty: an empty native argument is easy to lose on the way to Python.
     if ($tenantName) { $runArgs += @('--tenant-name', $tenantName) }
+    if ($subscriptionName) { $runArgs += @('--subscription-name', $subscriptionName) }
     if ($FromStep) { $runArgs += @('--from-step', $FromStep) }
     if ($Resume)   { $runArgs += '--resume' }
 

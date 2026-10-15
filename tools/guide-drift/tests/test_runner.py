@@ -599,6 +599,33 @@ class SummaryTests(RunnerTestCase):
         r = ScriptedRunner(None, STEPS, self.recording, args, ask=Answers())
         self.assertEqual(r.redactor.redact("Contoso Ltd"), "[tenantname]")
 
+    def test_subscription_name_is_an_optional_argument_the_redactor_uses(self) -> None:
+        base = ["--steps", "s", "--recording", "r", "--log-dir", "l", "--run-id", "i", "--tenant-id", "t",
+                "--tenant-domain", "contoso.onmicrosoft.com", "--state", "st", "--auth-state", "a"]
+        self.assertEqual(run.parse_args(base).subscription_name, "")
+        self.assertEqual(run.parse_args(base + ["--subscription-name", "Example Subscription"]).subscription_name,
+                         "Example Subscription")
+
+    def test_yoursubscription_finds_the_runs_subscription_link(self) -> None:
+        r = self.runner(subscription_name="Example Subscription")
+        link = FakeElement()
+        looked_up = []
+
+        def find_exact(page, label, field=False, decorated=True):
+            looked_up.append(label)
+            return link if label == "Example Subscription" else None
+        with mock.patch.object(run, "find_exact", find_exact):
+            self.assertIs(r.looking_for("[yoursubscription]", "navigation")(), link)
+            self.assertIsNone(r.looking_for("Subscriptions", "navigation")())
+        self.assertEqual(looked_up, ["Example Subscription", "Subscriptions"])
+
+    def test_a_blade_outline_scrubs_the_subscription_name(self) -> None:
+        r = self.runner(subscription_name="Example Subscription")
+        outline = [("heading", "Example Subscription | Cost analysis"), ("link", "Example Subscription")]
+        self.quietly(lambda: r.save_blade_outline({"id": "9.9.1"}, {"line": 7}, "Missing", outline))
+        self.assertEqual((r.run_dir / "blade-9.9.1-7.aria.txt").read_text(encoding="utf-8"),
+                         'heading "[yoursubscription] | Cost analysis"\nlink "[yoursubscription]"\n')
+
     def test_finish_says_none_for_empty_sections_and_caps_the_exit_code(self) -> None:
         self.assertEqual(self.quietly(self.r.finish), 0)
         summary = (self.r.run_dir / "summary.md").read_text(encoding="utf-8")

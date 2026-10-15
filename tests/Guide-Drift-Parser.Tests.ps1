@@ -692,6 +692,12 @@ Describe 'parse.py - lab 1.3, a lock type is a field, not a click on Delete' {
         $script:Lab13 = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
     }
 
+    It 'reads step 1.3.18 item 2 as a click on the subscription placeholder, [yoursubscription]' {
+        $step = $script:Lab13.steps | Where-Object id -eq '1.3.18'
+        @($step.items | Select-Object -First 3 | ForEach-Object { $_.labels }) | Should -Be @('Subscriptions', '[yoursubscription]', 'Cost analysis')
+        ($step.items | Where-Object { @($_.labels) -ccontains '[yoursubscription]' }).kind | Should -Be 'action'
+    }
+
     It 'reads step 1.3.13 as the lock form: name, type and notes as fields' {
         $step = $script:Lab13.steps | Where-Object id -eq '1.3.13'
         @($step.items.kind) | Should -Be @('action', 'navigation', 'field', 'field', 'field', 'action')

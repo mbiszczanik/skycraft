@@ -595,7 +595,7 @@ Create a more specific budget for the production environment. A budget belongs t
 ### Step 1.3.18: View Cost Analysis
 
 1. In Azure Portal, search for **Subscriptions**
-2. Click your subscription
+2. Click your subscription, **[yoursubscription]**
 3. Under **Cost Management** click **Cost analysis**
 4. Open the **VIEW** menu and, under **Built-in views**, explore:
    - **Cost by resource** - See spending per resource

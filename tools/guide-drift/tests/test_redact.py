@@ -104,6 +104,21 @@ class RedactorTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(Redactor(DOMAIN, TENANT, tenant_name=name).redact("Abc corp"), "Abc corp")
 
+    def test_the_subscription_name_becomes_yoursubscription_and_back(self) -> None:
+        redactor = Redactor(DOMAIN, TENANT, subscription_name="Example Subscription")
+        redacted = redactor.redact("example subscription | Overview (Example Subscription-Archive)")
+        # Case-insensitive, and only as a whole name, like the tenant's display name.
+        self.assertEqual(redacted, "[yoursubscription] | Overview (Example Subscription-Archive)")
+        self.assertEqual(redactor.restore("[yoursubscription] | Overview"), "Example Subscription | Overview")
+        self.assertIsNotNone(redactor.matcher("[yoursubscription]").search("EXAMPLE SUBSCRIPTION"))
+        self.assertEqual(redactor.redact(redacted), redacted)
+
+    def test_a_short_subscription_name_is_left_alone(self) -> None:
+        for name in ("", "  ", "Dev"):
+            with self.subTest(name=name):
+                self.assertEqual(Redactor(DOMAIN, TENANT, subscription_name=name).redact("Dev subscription"),
+                                 "Dev subscription")
+
     def test_guest_upn_becomes_the_upn_token_and_restores(self) -> None:
         upn = f"me_example.com#EXT#@{DOMAIN}"
         redacted = self.redactor.redact(upn)
@@ -1013,6 +1028,11 @@ class RedactionTokenTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(recording.redaction_tokens(text), [])
 
+    def test_yoursubscription_is_a_redaction_token(self):
+        self.assertIn("[yoursubscription]", recording.REDACTION_TOKENS)
+        self.assertIn(Redactor.SUBSCRIPTION, Redactor.TOKENS)
+        self.assertEqual(recording.redaction_tokens("[yoursubscription] | Overview"), ["[yoursubscription]"])
+
     def test_every_token_constant_is_a_redaction_token(self):
         # A token constant added to recording.py, or to the Redactor, without adding it to
         # REDACTION_TOKENS would let a guide edit carry it.
@@ -1020,7 +1040,7 @@ class RedactionTokenTests(unittest.TestCase):
         constants = {name: value for scope in (vars(recording), vars(Redactor)) for name, value in scope.items()
                      if isinstance(value, str) and shape.match(value)}
         self.assertGreaterEqual(set(constants), {"SECRET", "OBJECT_ID", "EMAIL", "TYPED", "VALUE",
-                                                 "DOMAIN", "TENANT", "NAME", "PREFIX"})
+                                                 "DOMAIN", "TENANT", "NAME", "PREFIX", "SUBSCRIPTION"})
         for name, value in constants.items():
             with self.subTest(name=name):
                 self.assertIn(value, recording.REDACTION_TOKENS)

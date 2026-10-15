@@ -186,8 +186,11 @@ class Redactor:
     becomes '[yourtenant]', the guides' own placeholder, when it is at least 4 characters long;
     a shorter one would clobber ordinary words. The tenant's display name ('Contoso Ltd', shown
     in the directory switcher and on the Entra overview) becomes '[tenantname]' under the same
-    rule. tests/Guide-Drift-Recording.Tests.ps1 is the backstop: it fails on any literal e-mail
-    address, *.onmicrosoft.com domain, guest user principal name or GUID in a recording.
+    rule, and the run's subscription name ('Example Subscription', shown on the subscription's
+    blades and in the list of subscriptions) becomes '[yoursubscription]', the guides' own
+    placeholder, under it as well. tests/Guide-Drift-Recording.Tests.ps1 is the backstop: it
+    fails on any literal e-mail address, *.onmicrosoft.com domain, guest user principal name or
+    GUID in a recording.
 
     Restored values are lower case, as the Portal shows domains and ids (the display name comes
     back as given); a display name that spells the prefix in another case ('Contoso') comes back
@@ -197,13 +200,14 @@ class Redactor:
     TENANT = "[tenantid]"
     NAME = "[tenantname]"
     PREFIX = "[yourtenant]"
+    SUBSCRIPTION = "[yoursubscription]"
     # Every fixed token above; an address from the environment becomes its '${NAME}' (ENV_REF).
     # A new token goes here too, so that REDACTION_TOKENS covers it (#211).
-    TOKENS = frozenset({DOMAIN, TENANT, NAME, PREFIX})
+    TOKENS = frozenset({DOMAIN, TENANT, NAME, PREFIX, SUBSCRIPTION})
     PREFIX_MIN = 4
 
     def __init__(self, domain: str, tenant_id: str, secrets: dict[str, str] | None = None,
-                 tenant_name: str = "") -> None:
+                 tenant_name: str = "", subscription_name: str = "") -> None:
         # The Portal shows domains in lower case; restore() must give back what is on screen.
         self.domain = domain.lower()
         self.tenant_id = tenant_id.lower()
@@ -224,6 +228,11 @@ class Redactor:
         if len(name) >= self.PREFIX_MIN:
             self._pairs.append((re.compile(rf"(?<![\w-]){re.escape(name)}(?![\w-])", re.IGNORECASE),
                                 self.NAME, name))
+        # The subscription's name under the same rule, before the prefix it may contain.
+        subscription = subscription_name.strip()
+        if len(subscription) >= self.PREFIX_MIN:
+            self._pairs.append((re.compile(rf"(?<![\w-]){re.escape(subscription)}(?![\w-])", re.IGNORECASE),
+                                self.SUBSCRIPTION, subscription))
         # Last, so the full domain is already a token.
         prefix = self.domain.split(".", 1)[0]
         if len(prefix) >= self.PREFIX_MIN:
