@@ -21,24 +21,24 @@ summary.md, and results.jsonl behind it, are what gets copied into an issue or a
 they hold the text the failure prompt shows (issue #212). A record's "observed" is scrubbed before
 it is written (Runner.scrubbed, recording.scrub): one line, the first of an error, without the
 Playwright call log after it (which holds the element's HTML, an auto-generated password in a value
-attribute among it, and the value the runner typed); every value the runner types into a field
-whose label names a password, secret or other credential, every value read from the environment
-but an address and the tenant prefix (recording.typed_secrets, #210), and every credential in a
-connection string or SAS address ('AccountKey=', 'sig=') as '[secret]'; object ids,
-and a generated resource name as a path segment (20 or more hex digits, #342), as '<id>'; tenant data and the run's subscription name (--subscription-name, '[yoursubscription]'),
-also as a regular expression escapes it, as the Redactor's tokens; any
-other e-mail address as '<email>'; a value a call typed and an element's value attribute as
-'[typed]' and '[value]' (recording.scrub lists what it cannot recognise and what it masks that only
-looks like one of these: 'Group@2x.png', 'ResetPassword=true'). Scrubbing twice changes nothing, so
-the records a -Resume reloads stay as written. A results.jsonl written before #212 keeps its old
-lines as they are: a resume cleans them for the summary only, so such a file is not safe to share.
-A proposed edit's new label is scrubbed the same way; the rest of its line is the guide's own text
-and is never redacted. The summary names the run folder relative to the repository (or by its name
-alone), never by an absolute path. The *.aria.txt files are scrubbed with every line kept, and the
-value of a text field named like a password or other credential is masked there too (the Portal's
-auto-generated password is in an accessibility snapshot). The text a step's result is checked by,
-as the person types it, is kept in the recording scrubbed the same way. The screenshots are not
-scrubbed: crop and anonymise them by hand.
+attribute among it, and the value the runner typed); every value the runner types into a field whose
+label names a password, secret or other credential, every value read from the environment but an
+address and the tenant prefix (recording.typed_secrets, #210), and every credential in a connection
+string or SAS address ('AccountKey=', 'sig=') as '[secret]'; object ids, and a generated resource
+name as a path segment (20 or more hex digits, #342), as '<id>'; tenant data and the run's
+subscription name (--subscription-name, '[yoursubscription]'), also as a regular expression escapes
+it, as the Redactor's tokens; any other e-mail address as '<email>'; a value a call typed and an
+element's value attribute as '[typed]' and '[value]' (recording.scrub lists what it cannot recognise
+and what it masks that only looks like one of these: 'Group@2x.png', 'ResetPassword=true').
+Scrubbing twice changes nothing, so the records a -Resume reloads stay as written. A results.jsonl
+written before #212 keeps its old lines as they are: a resume cleans them for the summary only, so
+such a file is not safe to share. A proposed edit's new label is scrubbed the same way; the rest of
+its line is the guide's own text and is never redacted. The summary names the run folder relative to
+the repository (or by its name alone), never by an absolute path. The *.aria.txt files are scrubbed
+with every line kept, and the value of a text field named like a password or other credential is
+masked there too (the Portal's auto-generated password is in an accessibility snapshot). The text a
+step's result is checked by, as the person types it, is kept in the recording scrubbed the same way.
+The screenshots are not scrubbed: crop and anonymise them by hand.
 
 When a label is not on screen, the person answers at the prompt (decide.py). For a field it shows
 the value the run will type, not the guide's (recording.prompt_value, #210): after the recording's
@@ -50,29 +50,29 @@ environment but an address, shown as its '${NAME}', and the tenant prefix, shown
 and its valueOverride reads one only into a field that names a secret
 (recording.env_override_problems, checked by tests/Guide-Drift-Recording.Tests.ps1). A tag is
 decided as a field is (recording.tag_action): its value is typed, and its record keeps the value
-typed, scrubbed; an override's '[Leave blank]' leaves it out ('left out'), and a [token] left or
-an instruction is reported as unknown, never typed as written. At the prompt, a number uses that
+typed, scrubbed; an override's '[Leave blank]' leaves it out ('left out'), and a [token] left or an
+instruction is reported as unknown, never typed as written. At the prompt, a number uses that
 element as the guide's, renamed (misleading drift); 'c <number>' uses it, the difference cosmetic;
 'w <number>' uses it as a workaround, not as the guide's element (#211: misleading drift, never
 written to the recording, so the next run asks again); 'g' gone (blocking drift); 'i' ignore; 'u'
 unknown. A pick by number or with 'c' whose name the recording cannot keep, as it holds an id, an
-address outside the tenant or a secret (Runner.recordable, the rule a typed result text follows),
-is used as a workaround all the same, and the console says so (#315): replay looks the element up
-by the name the recording keeps, and a masked one would never be found. A drift acted on under
-another name proposes a guide edit (the summary's 'proposed edits': the guide line with the bold
-label replaced), misleading or cosmetic (a change of case is a real rename), only when its new text
+address outside the tenant or a secret (Runner.recordable, the rule a typed result text follows), is
+used as a workaround all the same, and the console says so (#315): replay looks the element up by
+the name the recording keeps, and a masked one would never be found. A drift acted on under another
+name proposes a guide edit (the summary's 'proposed edits': the guide line with the bold label
+replaced), misleading or cosmetic (a change of case is a real rename), only when its new text
 belongs in the guide (Runner.not_proposed, #211). It proposes none when the element was used as a
 workaround (and a workaround at the step's first item records no start blade); when the step has a
 wrong-blade record earlier in the step or its start is excused (see the start of a step below), as
 the Portal was then not where the guide leads; or when the Portal's name, scrubbed, holds a
 redaction token (recording.redaction_tokens: '[tenantname]', '[yoursubscription]', '<id>',
-'[secret]' or any other the Redactor or scrub writes), as it carries tenant or personal data; or when the Portal's name is the
-label plus one of its decorations (see the lookup below, #244), which the learner does not see. The
-first of these that applies is the reason given. Such a drift is written to results.jsonl all the
-same; the record's "notProposed" and the summary's 'not proposed' say why, and a workaround's
-record has "workaround": true. The summary also holds back an edit that a record written before
-#211 proposes and that brings a token into the guide line, and one that a record written before
-#244 proposes for a decorated name.
+'[secret]' or any other the Redactor or scrub writes), as it carries tenant or personal data; or
+when the Portal's name is the label plus one of its decorations (see the lookup below, #244), which
+the learner does not see. The first of these that applies is the reason given. Such a drift is
+written to results.jsonl all the same; the record's "notProposed" and the summary's 'not proposed'
+say why, and a workaround's record has "workaround": true. The summary also holds back an edit that
+a record written before #211 proposes and that brings a token into the guide line, and one that a
+record written before #244 proposes for a decorated name.
 
 The console is scrubbed only in part: an error before or during the run is shown as a record
 keeps it, a crash as its frames (file, line, function) and each error's scrubbed first line
@@ -81,74 +81,76 @@ scrubbed. The rest is not: Invoke-GuideDrift.ps1 prints the tenant (id and domai
 subscription before the run, and run.py prints the run folder's absolute path. Copy the summary,
 not the console.
 
-The runner acts only on a visible element within the window's width (the Portal parks earlier
-blades off to the left; below the fold is fine, it scrolls there first), and only on one:
-several matches are reported as unknown rather than guessed, except that when each of them sits
-in a blade (a [role=region]), the blades differ and the right-most, newest blade holds only one,
-that one is acted on (newest_blade: a resource group's pane stays open beside the list it came
-from, and both menus show 'Tags'). It refuses to click or fill an
-element whose name contains the word delete, remove, reset, revoke, disable, block, purge or
-sign out, unless the guide's own label does too. A guide's 'Search for **X**' is typed into the
-Portal's global search, and the result named exactly X in its dropdown is opened (the Services
-entry, never Marketplace or Documentation); when the Portal lists a service category under
-another name, its Services entry with the group's words after the label ('Resource groups
-Resource Manager' for 'Resource groups', #342: decide.Decoration.search) is the result, but only
-when there is no exact one, and never under Marketplace or Documentation or beside several. A
-search whose results never load (no results list before the deadline) is closed and typed once
-more; when that fails, or no result is found, the dropdown's accessibility tree (the whole frame
-when there was no list) is kept as search-<step>.aria.txt in the run folder. A search inside a blade ('Search for
+The runner acts only on a visible element within the window's width (the Portal parks earlier blades
+off to the left; below the fold is fine, it scrolls there first), and only on one: several matches
+are reported as unknown rather than guessed, except that when each of them sits in a blade (a
+[role=region]), the blades differ and the right-most, newest blade holds only one, that one is acted
+on (newest_blade: a resource group's pane stays open beside the list it came from, and both menus
+show 'Tags'). A decorated name (find_decorated, below) keeps the stricter rule on purpose: several
+are ambiguous wherever they sit, as a decoration is a looser match than the plain name. It refuses
+to click or fill an element whose name contains the word delete, remove, reset, revoke, disable,
+block, purge or sign out, unless the guide's own label does too. A guide's 'Search for **X**' is
+typed into the Portal's global search, and the result named exactly X in its dropdown is opened (the
+Services entry, never Marketplace or Documentation); when the Portal lists a service category under
+another name, its Services entry with the group's words after the label ('Resource groups Resource
+Manager' for 'Resource groups', #342: decide.Decoration.search) is the result, but only when there
+is no exact one, and never under Marketplace or Documentation or beside several. A search whose
+results never load (no results list before the deadline) is closed and typed once more; when that
+fails, or no result is found, the dropdown's accessibility tree (the whole frame when there was no
+list) is kept as search-<step>.aria.txt in the run folder. A search inside a blade ('Search for
 **"Owner"**' in a role assignment, scope 'blade') is typed into that blade's own search box, the
-only one on screen besides the top one, and the result is checked for, not clicked: the guide's
-next item clicks it. Plain text counts only when it
-is, or sits inside, a link, button or other interactive element. When nothing on screen has the
-label's name, an element whose name is the label plus one of the Portal's decorations, words the
-screen does not show beside the label (decide.DECORATIONS, #244: a list row's check box 'Select
-row X' for an action, a required field's marker 'X *', a field label's info icon and marker,
-'X information *', or a search result's group, 'X Resource Manager', found in the global search
-only), is the guide's element as well (find_decorated): a match, so nobody is asked,
-nothing is recorded and no guide edit is proposed. It is looked for once SETTLE_MS of looking
-has not found the plain name, which a blade still rendering may show later, and that time starts
-again once a loading blade has rendered and once the person has opened a form. A decoration counts
-only on the roles it decorates (a button or link of those words is another element), two
-decorated elements are ambiguous as two plain ones are, and a plain name that is on screen more
-than once as text is not found as before, never replaced by a decorated one. Known gap: a field
-label with an info icon and no required marker is presumably named 'X information', but no run
-has seen one, so that suffix alone is no decoration and the person is asked. Such a row's check
-box is acted on as one the person picked: 'Search for and select **X**' states no state
-(parse.py, #296), so it is clicked, which clears a row already ticked; 'Check **X**' leaves it
-ticked. A person who picks a decorated name on a role it decorates all the same (by number or
-with 'c') uses it, no drift either (decide.py).
+only one on screen besides the top one, and the result is checked for, not clicked: the guide's next
+item clicks it. Plain text counts only when it is, or sits inside, a link, button or other
+interactive element. When nothing on screen has the label's name, an element whose name is the label
+plus one of the Portal's decorations, words the screen does not show beside the label
+(decide.DECORATIONS, #244: a list row's check box 'Select row X' for an action, a required field's
+marker 'X *', a field label's info icon and marker, 'X information *', or a search result's group,
+'X Resource Manager', found in the global search only), is the guide's element as well
+(find_decorated): a match, so nobody is asked, nothing is recorded and no guide edit is proposed. It
+is looked for once SETTLE_MS of looking has not found the plain name, which a blade still rendering
+may show later, and that time starts again once a loading blade has rendered and once the person has
+opened a form. A decoration counts only on the roles it decorates (a button or link of those words
+is another element), two decorated elements are ambiguous as two plain ones are, and a plain name
+that is on screen more than once as text is not found as before, never replaced by a decorated one.
+Known gap: a field label with an info icon and no required marker is presumably named 'X
+information', but no run has seen one, so that suffix alone is no decoration and the person is
+asked. Such a row's check box is acted on as one the person picked: 'Search for and select **X**'
+states no state (parse.py, #296), so it is clicked, which clears a row already ticked; 'Check **X**'
+leaves it ticked. A person who picks a decorated name on a role it decorates all the same (by number
+or with 'c') uses it, no drift either (decide.py).
+
 A picker row is the guide's element as well (find_row_control, #342): a policy picker names the
 policy in a cell of the row and holds a radio named 'Select' (or a check box) in it, so for an
-action nothing else has the name, the visible row (never the header row) with a grid cell or
-cell named exactly the label gives its one radio, or else its one check box that is no
-decoration of the label. 'Allowed locations' is not the row 'Azure Cosmos DB allowed locations';
-two rows of that exact cell are ambiguous, and a row without one such control is not found. It
-is looked for after the decorated names, from SETTLE_MS on, is a match with nothing recorded and
-no guide edit, and is selected as a stated 'Check' is (set_state: a radio is selected, a check
-box ticked), so a row already selected is 'already set' and selecting never clears it.
-A field (and an action whose control opens a list) is the guide's element as well when its
-label is plain text with the control right after it (find_by_text_label, #342): the Advisor
-alert's three combo boxes have no accessible name and the texts 'Category', 'Sub-category' and
-'Impact level' before them; a budget's 'Name' is a text box named 'Enter a unique name'. The text
-must be the label alone (whole text, no link, button or other interactive element), and the first
-control after it in document order (input, select, textarea, or role combobox, textbox, listbox,
-spinbutton, radiogroup) must come before any other text, whatever its own name. The same text
-twice is ambiguous unless the controls sit in different blades, when the newest blade's is the
-one. It is looked for after the decorated names, from SETTLE_MS on, is a match with nothing
-recorded and no guide edit, and counts as a field that can be filled in, so a form whose first
-field is found this way is open (find_form) and writes no wrong-blade record.
-A label is looked for until
-FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; when SETTLE_MS of
-that finds nothing, the blade menu's collapsed groups are opened ('Expand all headers', the
-newest blade's button when several blades show one) and the looking goes on to the same deadline.
-The groups count as open once that blade shows 'Collapse all headers' within SETTLE_MS; a click
-while the menu still reads 'Loading...' changes nothing, so it is clicked again on a later look,
-EXPAND_TRIES times at most per item. When the deadline passes while a blade is still
-loading (blade_still_loading: a close button reads "Close content 'undefined'", or the newest
-blade's title heading has no content after it), the console says so once and the label is looked
-for up to BLADE_LOAD_TIMEOUT_MS more (BLADE_EMPTY_TIMEOUT_MS for a titled blade); once the blade
-has rendered, it is looked for FIND_TIMEOUT_MS again. Only then is the person asked.
+action nothing else has the name, the visible row (never the header row) with a grid cell or cell
+named exactly the label gives its one radio, or else its one check box that is no decoration of the
+label. 'Allowed locations' is not the row 'Azure Cosmos DB allowed locations'; two rows of that
+exact cell are ambiguous, and a row without one such control is not found. It is looked for after
+the decorated names, from SETTLE_MS on, is a match with nothing recorded and no guide edit, and is
+selected as a stated 'Check' is (set_state: a radio is selected, a check box ticked), so a row
+already selected is 'already set' and selecting never clears it.
+
+A field (and an action whose control opens a list) is the guide's element as well when its label is
+plain text with the control right after it (find_by_text_label, #342): the Advisor alert's three
+combo boxes have no accessible name and the texts 'Category', 'Sub-category' and 'Impact level'
+before them; a budget's 'Name' is a text box named 'Enter a unique name'. The text must be the label
+alone (whole text, no link, button or other interactive element), and the first control after it in
+document order (input, select, textarea, or role combobox, textbox, listbox, spinbutton, radiogroup)
+must come before any other text, whatever its own name. The same text twice is ambiguous unless the
+controls sit in different blades, when the newest blade's is the one. It is looked for after the
+decorated names, from SETTLE_MS on, is a match with nothing recorded and no guide edit, and counts
+as a field that can be filled in, so a form whose first field is found this way is open (find_form)
+and writes no wrong-blade record.
+
+A label is looked for until FIND_TIMEOUT_MS has passed, as a blade renders its controls after its
+heading; when SETTLE_MS of that finds nothing, the blade menu's collapsed groups are opened ('Expand
+all headers', the newest blade's button when several blades show one) and the looking goes on to the
+same deadline. The groups count as open once that blade shows 'Collapse all headers' within
+SETTLE_MS; a click while the menu still reads 'Loading...' changes nothing, so it is clicked again
+on a later look, EXPAND_TRIES times at most per item. When the deadline passes while a blade is
+still loading (blade_still_loading: a close button reads "Close content 'undefined'", or the newest
+blade's title heading has no content after it), the console says so once and the label is looked for
+up to BLADE_LOAD_TIMEOUT_MS more (BLADE_EMPTY_TIMEOUT_MS for a titled blade); once the blade has
+rendered, it is looked for FIND_TIMEOUT_MS again. Only then is the person asked.
 
 A Portal deployment takes from seconds to ten minutes, so before the blade check, a lookup that
 found nothing waits for one that the screen shows still running (issue #328, wait_for_deployment):
@@ -215,17 +217,17 @@ its picker; it is asked about like any label when it is not found. The chain's l
 resource names follow; a resource at the chain's start is listed in the picker, so it is looked
 for on screen only.
 
-A label of an action or navigation item that opens a list (#342: 1.3.9's **Allowed locations**
-is the text before the combo box 'Location', found by that text, find_by_text_label) keeps it as
-Runner.open_list for the rest of the item; whether the control opens a list (opens_a_list) is
-read before it is clicked, as a click may close a form or open a blade. Each later label is looked for as an option of that
-list first (find_in_list: an option or tree item in the popup the combo box names, else on screen,
-under a region prefix too; when it is not there, the list's filter box is typed into, then the
-list is scrolled, as pick_option does), and is put in the state the guide gives it as any option
-is (toggle_kind: 'already set' without a click for a region that is ticked already), or clicked
-when the guide gives none. A label the list does not hold is looked for on screen as before. When
-the item ends (also when it failed), a list still open is closed with Escape on its combo box, so
-the next tab click is not intercepted, unless no later label was looked for in it: a list that
+A label of an action or navigation item that opens a list (#342: 1.3.9's **Allowed locations** is
+the text before the combo box 'Location', found by that text, find_by_text_label) keeps it as
+Runner.open_list for the rest of the item; whether the control opens a list (opens_a_list) is read
+before it is clicked, as a click may close a form or open a blade. Each later label is looked for as
+an option of that list first (find_in_list: an option or tree item in the popup the combo box names,
+else on screen, under a region prefix too; when it is not there, the list's filter box is typed
+into, then the list is scrolled, as pick_option does), and is put in the state the guide gives it as
+any option is (toggle_kind: 'already set' without a click for a region that is ticked already), or
+clicked when the guide gives none. A label the list does not hold is looked for on screen as before.
+When the item ends (also when it failed), a list still open is closed with Escape on its combo box,
+so the next tab click is not intercepted, unless no later label was looked for in it: a list that
 the item's last label opened is the next item's to pick from. The list is forgotten at each item.
 
 When a step does not go through, the person chooses: c, finish it by hand and continue; s, skip
@@ -308,51 +310,53 @@ Enter, then looks the field up as usual; when this happens at the step's first i
 blade is the one recorded. A first field the recording holds a decision for is not checked: replay
 finds it. Neither drift makes the guide's screenshots stale or counts in the exit code.
 
-A field is filled as its control takes a value: a text box is typed into, a combo box or a
-drop-down has the option of the value picked, a check box or switch is ticked or cleared. An
-option is an entry of role option or treeitem (a tree is a list too: Cost Management's 'Reset
-period'), looked for inside the list the combo box names, else on screen; its name matches whole,
-or else after the region prefix the Portal puts before a location ('Sweden Central' picks
-'(Europe) Sweden Central'; two such entries are ambiguous), and a field showing the prefixed name
-is already set. When the open list holds one search box or text box, or the combo box is an
-editable input, the value (without its prefix) is typed into it first; an option still missing
-is looked for in a list that scrolls, a page at a time, up to LIST_SCROLL_PAGES pages. One not
-found leaves the open list's tree, scrubbed, as list-<step>-<line>.aria.txt in the run folder. A field
-label that names a container rather than a control (fill_parts) is filled through what it holds:
-its one text box; the Portal's user principal name, a text box and a domain combo box; or a radio
-group (issue #294: a storage account's 'Performance', Standard or Premium), radios and no combo
-box, a text box among them or not (an 'Other' option's), where the radio the value names is
-selected and nothing is typed. The value names a radio, compared regardless of case and of
-surrounding whitespace, by its whole accessible name; when no radio has that name, by the part of
-the name before its first ':' (the Portal names the radios 'Standard: Recommended for most
-scenarios (general-purpose v2 account)' and 'Premium: ...'); when none has that either, by the
-same two with the value's remarks in parentheses removed ('None (NSG already on subnet)' names
-'None'). A value that names no radio is unknown, and the observation lists the radios' names;
-one that names several by the rule that matched is unknown as ambiguous. A radio already selected
-is 'already set', so a re-run changes nothing. A radio found as the field itself (by its own name,
-or picked by the person) is selected when the value names it or states 'checked'; 'unchecked'
-leaves one not selected as it is, and is unknown for a selected one, which only selecting another
-radio clears. Accessible names come from the accessibility snapshot, read as the YAML Playwright
-writes (snapshot_key): a key holding ': ' is single-quoted and its name JSON-escaped.
+A field is filled as its control takes a value: a text box is typed into, a combo box or a drop-down
+has the option of the value picked, a check box or switch is ticked or cleared. An option is an
+entry of role option or treeitem (a tree is a list too: Cost Management's 'Reset period'), looked
+for inside the list the combo box names, else on screen; its name matches whole, or else after the
+region prefix the Portal puts before a location ('Sweden Central' picks '(Europe) Sweden Central';
+two such entries are ambiguous), and a field showing the prefixed name is already set. When the open
+list holds one search box or text box, or the combo box is an editable input, the value (without its
+prefix) is typed into it first; an option still missing is looked for in a list that scrolls, a page
+at a time, up to LIST_SCROLL_PAGES pages. One not found leaves the open list's tree, scrubbed, as
+list-<step>-<line>.aria.txt in the run folder. A field label that names a container rather than a
+control (fill_parts) is filled through what it holds: its one text box; the Portal's user principal
+name, a text box and a domain combo box; or a radio group (issue #294: a storage account's
+'Performance', Standard or Premium), radios and no combo box, a text box among them or not (an
+'Other' option's), where the radio the value names is selected and nothing is typed. When a <label>,
+a wrapper and a radio group all carry the field's name (1.3.5's 'Policy enforcement', #342), the
+radio group that holds radios is the field (one_field: after a control that takes a value and a
+button that opens a list), and it is filled so. The value names a radio, compared regardless of case
+and of surrounding whitespace, by its whole accessible name; when no radio has that name, by the
+part of the name before its first ':' (the Portal names the radios 'Standard: Recommended for most
+scenarios (general-purpose v2 account)' and 'Premium: ...'); when none has that either, by the same
+two with the value's remarks in parentheses removed ('None (NSG already on subnet)' names 'None'). A
+value that names no radio is unknown, and the observation lists the radios' names; one that names
+several by the rule that matched is unknown as ambiguous. A radio already selected is 'already set',
+so a re-run changes nothing. A radio found as the field itself (by its own name, or picked by the
+person) is selected when the value names it or states 'checked'; 'unchecked' leaves one not selected
+as it is, and is unknown for a selected one, which only selecting another radio clears. Accessible
+names come from the accessibility snapshot, read as the YAML Playwright writes (snapshot_key): a key
+holding ': ' is single-quoted and its name JSON-escaped.
 
-A check box is ticked or cleared with set_checked(), or through its label when Fluent UI's tick
-mark intercepts that click, and its state is then read back: one that does not change is unknown.
-A label of an action or a navigation that the guide gives a state ('Check **X**', 'Uncheck **X**',
-'Under **Recovery**, enable **X**'; parse.py's "checked" and "unchecked", issue #296) is looked up
-as any other label (a switch is among the roles looked for), and when the element found is a check
-box, switch or radio it is set as a field's state is (set_state), never toggled: 'already set'
-without a click when it holds the state (also when it is disabled), ticked or cleared otherwise. A
-radio is selected for 'checked'; 'unchecked' leaves one not selected as it is and is unknown for a
-selected one. An entry of a multi-select list (role option, treeitem, menuitemcheckbox or
-menuitemradio) is set by its aria-selected or aria-checked, read back after one click (unknown when
-it does not change), so an option already selected ('North Europe' in 1.3.9's Allowed locations) is
-not clicked again and cleared; an entry without that attribute that holds exactly one check box is
-set through the box, and one with neither is clicked as before. So a box the Portal's default or an earlier run ticked (5.2.8's diagnostic setting,
-edited after a deployment script created it) is not cleared. Any other element, a button named
-'Enable ...', is clicked as a label without a state is, unless the words that give the state are
-no click (parse.py's "stateOnly": 'Toggle **X** to **Enabled**', 'Leave **X** unchecked', 'Make
-sure **X** is checked'): then it is unknown, "the guide sets 'X' to checked, but it is no switch,
-check box or radio".
+A check box is ticked or cleared with set_checked(), or through its label when Fluent UI's tick mark
+intercepts that click, and its state is then read back: one that does not change is unknown. A label
+of an action or a navigation that the guide gives a state ('Check **X**', 'Uncheck **X**', 'Under
+**Recovery**, enable **X**'; parse.py's "checked" and "unchecked", issue #296) is looked up as any
+other label (a switch is among the roles looked for), and when the element found is a check box,
+switch or radio it is set as a field's state is (set_state), never toggled: 'already set' without a
+click when it holds the state (also when it is disabled), ticked or cleared otherwise. A radio is
+selected for 'checked'; 'unchecked' leaves one not selected as it is and is unknown for a selected
+one. So a box the Portal's default or an earlier run ticked (5.2.8's diagnostic setting, edited
+after a deployment script created it) is not cleared. An entry of a multi-select list (role option,
+treeitem, menuitemcheckbox or menuitemradio) is set the same way, by its aria-selected or
+aria-checked, read back after one click (unknown when it does not change), so an option already
+selected ('North Europe' in 1.3.9's Allowed locations, #342) is not clicked again and cleared; an
+entry without that attribute that holds exactly one check box is set through the box, and one with
+neither is clicked as before. Any other element, a button named 'Enable ...', is clicked as a label
+without a state is, unless the words that give the state are no click (parse.py's "stateOnly":
+'Toggle **X** to **Enabled**', 'Leave **X** unchecked', 'Make sure **X** is checked'): then it is
+unknown, "the guide sets 'X' to checked, but it is no switch, check box or radio".
 
 A step whose recording entry carries '"skip": "<reason>"' (an optional or conceptual step that
 would create resources, or the other option of a lettered pair; issue #200) is never performed:
@@ -1060,8 +1064,8 @@ def find_in_roles(page: Page, label: str, roles: tuple[str, ...], root: Locator 
     clicking it navigates nowhere. Every frame is searched, or only inside `root` when it is
     given (the global search's results). `choose` picks among the matches of one role, or of the
     text: by default there must be at most one, or one in the newest blade (newest_blade), and
-    several others raise Ambiguous. An ambiguous text
-    match counts as not found, so the person picks a role-specific candidate."""
+    several others raise Ambiguous. An ambiguous text match counts as not found, so the person
+    picks a role-specific candidate."""
     def matches(make_locator: Callable[[Frame | Locator], Locator]) -> list[Locator]:
         if root is None:
             return visible_across_frames(page, make_locator)
@@ -1116,9 +1120,9 @@ def one_field(found: list[Locator]) -> Locator | None:
     takes a value, or else the only button that opens a list (field_kind), or else the only
     radiogroup holding radios (Policy enforcement: a <label>, a wrapper <div> and the radiogroup
     all carry the name). Fluent UI forms put more than the field under a label ('Group
-    description' and its info icon). Raises Ambiguous
-    naming what matched ('textarea, button'), so a live run shows what collided, and whenever
-    one of them could not be inspected: it may be the field, and dropping it would be a guess."""
+    description' and its info icon). Raises Ambiguous naming what matched ('textarea, button'),
+    so a live run shows what collided, and whenever one of them could not be inspected: it may
+    be the field, and dropping it would be a guess."""
     if len(found) <= 1:
         return found[0] if found else None
     kinds = [field_kind(element) for element in found]
@@ -1171,8 +1175,12 @@ def find_field(page: Page, label: str) -> Locator | None:
     a domain combo box, and fill_field splits the value over those parts. Only elements that can
     be a field count (can_be_field): a list's column header or a plain button of the label's
     name is never taken for the field, so the field is not found and the person decides. Of
-    several matches, the one that takes a value wins (one_field). An ambiguous match raises
-    Ambiguous."""
+    several matches, the one that takes a value wins, else the one button that opens a list, else
+    the one radio group holding radios (one_field, #342: 1.3.5's 'Policy enforcement' is a <label>,
+    a wrapper <div> and the radiogroup). An ambiguous match raises Ambiguous. A field whose label is
+    plain text beside an unnamed control is not looked for here: find_exact asks find_by_text_label
+    for it, after the decorated names (find_decorated), so a field of the label's own name, plain
+    or decorated, always wins."""
     def fields(make_locator: Callable[[Frame], Locator]) -> list[Locator]:
         return [element for element in visible_across_frames(page, make_locator) if can_be_field(element)]
 
@@ -1235,7 +1243,9 @@ def find_decorated(page: Page, label: str, field: bool = False) -> Locator | Non
     for a member the guide selects, the text box 'Email information *' for the field 'Email'.
     A row's check box is never a field (Decoration.fields). Every decoration counts at
     once, so two elements decorated differently are as ambiguous as two of one name: Ambiguous,
-    or for a field the one that takes a value (one_field)."""
+    or for a field the one that takes a value (one_field). Unlike the other lookups it keeps
+    only_one, not newest_blade, on purpose: a decorated name is a looser match than the plain one,
+    so one in the list's blade and one in the pane's stay ambiguous, and the person decides."""
     found: list[Locator] = []
     for role in FIELD_ROLES if field else ACTION_ROLES:
         names = [d.of(label) for d in DECORATIONS
@@ -1342,7 +1352,8 @@ def find_exact(page: Page, label: str, field: bool = False, decorated: bool = Tr
     decorated one: the person decides. After the decorated names, for an action, the control of
     the picker row whose cell names the label (find_row_control, #342); then, for a field, and
     for an action when the control opens a list, the control after the plain text of that label
-    (find_by_text_label, #342)."""
+    (find_by_text_label, #342). The text-label lookup sits here, last, and not in find_field, so
+    every name a control carries itself, plain or decorated, is tried before a text beside one."""
     bare = LEADING_PLUS.sub("", label, count=1)
     names = [label] + ([bare] if bare and bare != label else [])
     for name in names:
@@ -1511,15 +1522,20 @@ def tree_of(dropdown: Locator | None, frame: Frame) -> str:
 
 
 def search_portal(page: Page, label: str, diagnose: Callable[[str], None] | None = None) -> Locator | None:
-    """Type `label` into the Portal's global search and return the result named exactly `label`
-    in its dropdown (search_dropdown, search_result): an option, link, button or menu item, then
-    plain text. Nothing outside the dropdown counts, so a same-named link already on the page (a
-    favourite in the portal menu, a tile on Home) is never clicked. The results load as the
-    Portal answers, so they are looked for until FIND_TIMEOUT_MS has passed; an ambiguous look
-    is retried too. When there is no exact result, or the last look was ambiguous, `diagnose` is
-    given the dropdown's accessibility tree; then None is returned (the person picks from the
-    list still open on screen) or the last Ambiguous raised. Raises LookupError when the search
-    box is not on screen, PageClosed when the window is gone."""
+    """Type `label` into the Portal's global search and return its result in the dropdown
+    (search_dropdown, search_results): the result named exactly `label` (search_result: an
+    option, link, button or menu item, then plain text), or, when there is none, the Services
+    entry named `label` plus its service group (decide.Decoration.search, #342: 'Resource groups
+    Resource Manager' for 'Resource groups'), never under Marketplace or Documentation. Nothing
+    outside the dropdown counts, so a same-named link already on the page (a favourite in the
+    portal menu, a tile on Home) is never clicked. The results load as the Portal answers, so
+    they are looked for until FIND_TIMEOUT_MS has passed; an ambiguous look is retried too. When
+    no results list shows up by then, the box is emptied and closed and `label` typed once more
+    with a new deadline (#342). When there is no result after that, or the last look was
+    ambiguous, `diagnose` is given the dropdown's accessibility tree (the whole frame's when no
+    list was identified); then None is returned (the person picks from the list still open on
+    screen) or the last Ambiguous raised. Raises LookupError when the search box is not on
+    screen, PageClosed when the window is gone."""
     found = in_time(page, lambda: search_box(page))
     if found is None:
         if page.is_closed():
@@ -1945,12 +1961,12 @@ def fill_parts(page: Page, container: Locator, value: str,
     domain is picked from its options), and then the text box gets the part before it. With
     radios and no combo box (a radio group: a storage account's 'Performance', Standard or
     Premium; find_field takes the radiogroup when it, a <label> and a wrapper <div> share the
-    name, 'Policy enforcement'), the radio the value names is selected (pick_radio: its whole name, else the part
-    before its ':', else either without the value's remark), also when a text box is there (an
-    'Other' option's): the value names a radio, and nothing is typed. 'already set' when every
-    part held its value before. Raises LookupError for any other container, when the domain
-    cannot be picked or when no radio is named so; Ambiguous when several options or radios
-    are."""
+    name, 'Policy enforcement'), the radio the value names is selected (pick_radio: its whole
+    name, else the part before its ':', else either without the value's remark), also when a
+    text box is there (an 'Other' option's): the value names a radio, and nothing is typed.
+    'already set' when every part held its value before. Raises LookupError for any other
+    container, when the domain cannot be picked or when no radio is named so; Ambiguous when
+    several options or radios are."""
     textboxes, comboboxes = parts_of(container, "textbox"), parts_of(container, "combobox")
     radios = parts_of(container, "radio")
     if radios and not comboboxes:
@@ -2924,7 +2940,26 @@ class Runner:
         it is disabled in that state. Any other element (a button named 'Enable ...') is clicked
         as without a state, unless `state_only` (parse.py's "stateOnly": a switch's value, 'Leave
         **X** unchecked', 'Make sure **X** is checked', whose words are no click): then it is
-        unknown, as the guide sets a state the element cannot hold."""
+        unknown, as the guide sets a state the element cannot hold. An entry of a multi-select list
+        (OPTION_ROLES: option, treeitem, menuitemcheckbox, menuitemradio) is set by its
+        aria-selected or aria-checked (toggle_kind, set_state; #342, 1.3.9's North Europe): one
+        already in the state is 'already set' and not clicked, so it is never cleared; one that
+        holds exactly one check box is set through the box (option_box).
+
+        A picker row's control (find_row_control, #342: its 'Select' radio, marked with
+        ROW_CONTROL_MARK) is selected as a stated 'Check' is, even when the guide states no state:
+        a row already selected is 'already set'.
+
+        A label of an action or navigation item whose control opens a list (opens_a_list, read
+        before the click) keeps that control as Runner.open_list for the rest of the item; a later
+        label of the item is looked for in that list first (find_in_list), and on screen as before
+        when the list does not hold it (Runner.list_consulted then lets close_list close the list
+        when the item ends).
+
+        When the lookup and the blade check found nothing, a label the recording lists under the
+        step's "lateLabels" is waited for (wait_for_late_view: the view refreshed every
+        LATE_POLL_S, for up to its minutes) before the recording's decision or the person is
+        asked."""
         kind, line = item["kind"], item["line"]
         self.failure_on_screen = False
         record = self.new_record(step, kind, label)
