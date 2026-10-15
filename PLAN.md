@@ -51,127 +51,127 @@ Branch `feat/342-guide-drift-portal-controls`, stacked on `feat/329-lab13-record
 
 ### Task 1: (a) #296, an option of a multi-select list is set, never toggled (1.3.9 North Europe)
 
-- [ ] **Files:** `tools/guide-drift/run.py`, `tools/guide-drift/tests/test_runner.py`.
-- [ ] **Behaviour:**
+- [x] **Files:** `tools/guide-drift/run.py`, `tools/guide-drift/tests/test_runner.py`.
+- [x] **Behaviour:**
   - `toggle_kind` returns `"option"` for an element of role `option`, `treeitem`, `menuitemcheckbox` or `menuitemradio` that carries `aria-selected` or `aria-checked` (`"true"`/`"false"`).
   - An option with no state attribute but exactly one check box inside is set through that box (`"check"`).
   - A new `toggle_state(element, kind)` reads `is_checked()` for check/radio and the attribute for option. `set_state`, `state_within` and the "already set" test in `act_on_label` (currently `element.is_checked(...) == state`) use it.
   - An option is set by one click, then read back for `CHECK_TIMEOUT_MS`. It is unknown ("it was clicked to make it checked, but it is still unchecked") when the state does not change.
   - An option without a state attribute is clicked as before (`stateOnly` makes it unknown, as for any non-toggle).
-- [ ] **Fake:** `ScreenNode` reads `aria-selected` from `attrs`; a new flag `selects_on_click` flips it on `click()`. `evaluate` answers the new state-reading script, if one is used.
-- [ ] **Tests (class `StatedStateTests`):** `test_an_option_already_selected_is_already_set_and_not_clicked` (1.3.9 North Europe, state True); `test_an_unselected_option_is_clicked_once_and_read_back`; `test_an_option_whose_state_does_not_change_is_unknown`; `test_unchecked_clears_a_selected_option`; `test_an_option_holding_one_check_box_sets_the_box`; `test_an_option_without_a_state_attribute_is_clicked_as_before`.
-- [ ] **Docs:** run.py docstring paragraph "A label of an action or a navigation that the guide gives a state ..." names options of a multi-select list.
-- [ ] **Commit:** `feat(guide-drift): keep a selected option of a multi-select list as the guide states it (#296)`
+- [x] **Fake:** `ScreenNode` reads `aria-selected` from `attrs`; a new flag `selects_on_click` flips it on `click()`. `evaluate` answers the new state-reading script, if one is used.
+- [x] **Tests (class `StatedStateTests`):** `test_an_option_already_selected_is_already_set_and_not_clicked` (1.3.9 North Europe, state True); `test_an_unselected_option_is_clicked_once_and_read_back`; `test_an_option_whose_state_does_not_change_is_unknown`; `test_unchecked_clears_a_selected_option`; `test_an_option_holding_one_check_box_sets_the_box`; `test_an_option_without_a_state_attribute_is_clicked_as_before`.
+- [x] **Docs:** run.py docstring paragraph "A label of an action or a navigation that the guide gives a state ..." names options of a multi-select list.
+- [x] **Commit:** `feat(guide-drift): keep a selected option of a multi-select list as the guide states it (#296)`
 
 ### Task 2: (d) prefer the blade the step works on, and open its collapsed menu groups
 
-- [ ] **Files:** `run.py`, `tests/test_runner.py`.
-- [ ] **Newest-blade preference:** new `BLADE_OF_JS` (the closest `[role=region]` ancestor's `aria-label` and its left edge, or null); new `newest_blade(found)`: of several matches, when every one sits in a region and the regions differ, the one match in the right-most region (the newest blade; earlier ones are parked left), otherwise `Ambiguous` as today. `find_in_roles`' default `choose` and `expand_menu_groups`' button lookup use it.
-- [ ] **Expand retry:** `expand_menu_groups` sets `self.expanded` only once that blade shows `Collapse all headers` within `SETTLE_MS`; otherwise it may click again on a later look, at most `EXPAND_TRIES = 3` per item (1.3.15: the menu still read `Loading...`).
-- [ ] **Tests (class `NewestBladeTests`):** `test_tags_in_the_list_menu_and_the_open_pane_takes_the_pane` (1.3.1-1.3.3); `test_two_matches_in_the_newest_blade_stay_ambiguous`; `test_a_match_outside_any_region_keeps_it_ambiguous`; `test_locks_shows_after_the_panes_expand_all_headers` (1.3.11-1.3.13; the pane's button is clicked, the list's is not); `test_budgets_under_the_panes_cost_management_group` (1.3.17); `test_an_expand_click_while_the_menu_loads_is_tried_again` (1.3.15 run B); `test_expand_is_clicked_at_most_three_times`.
-- [ ] **Docs:** run.py docstring ("only on one: several matches are reported as unknown rather than guessed" gains the newest-blade exception; the 'Expand all headers' sentence gains the retry). Invoke help: the "It never clicks one of several matching elements" sentence.
-- [ ] **Commit:** `feat(guide-drift): act in the blade the step works on and open its collapsed menu groups (#342)`
+- [x] **Files:** `run.py`, `tests/test_runner.py`.
+- [x] **Newest-blade preference:** new `BLADE_OF_JS` (the closest `[role=region]` ancestor's `aria-label` and its left edge, or null); new `newest_blade(found)`: of several matches, when every one sits in a region and the regions differ, the one match in the right-most region (the newest blade; earlier ones are parked left), otherwise `Ambiguous` as today. `find_in_roles`' default `choose` and `expand_menu_groups`' button lookup use it.
+- [x] **Expand retry:** `expand_menu_groups` sets `self.expanded` only once that blade shows `Collapse all headers` within `SETTLE_MS`; otherwise it may click again on a later look, at most `EXPAND_TRIES = 3` per item (1.3.15: the menu still read `Loading...`).
+- [x] **Tests (class `NewestBladeTests`):** `test_tags_in_the_list_menu_and_the_open_pane_takes_the_pane` (1.3.1-1.3.3); `test_two_matches_in_the_newest_blade_stay_ambiguous`; `test_a_match_outside_any_region_keeps_it_ambiguous`; `test_locks_shows_after_the_panes_expand_all_headers` (1.3.11-1.3.13; the pane's button is clicked, the list's is not); `test_budgets_under_the_panes_cost_management_group` (1.3.17); `test_an_expand_click_while_the_menu_loads_is_tried_again` (1.3.15 run B); `test_expand_is_clicked_at_most_three_times`.
+- [x] **Docs:** run.py docstring ("only on one: several matches are reported as unknown rather than guessed" gains the newest-blade exception; the 'Expand all headers' sentence gains the retry). Invoke help: the "It never clicks one of several matching elements" sentence.
+- [x] **Commit:** `feat(guide-drift): act in the blade the step works on and open its collapsed menu groups (#342)`
 
 ### Task 3: (c) a picker row is selected by the cell that names it
 
-- [ ] **Files:** `run.py`, `tests/test_runner.py`.
-- [ ] **Behaviour:**
+- [x] **Files:** `run.py`, `tests/test_runner.py`.
+- [x] **Behaviour:**
   - New `find_row_control(page, label)`: the visible rows (role `row`, not a header row) holding a `gridcell`/`cell` whose accessible name is exactly `label` (so "Allowed locations" never matches "Azure Cosmos DB allowed locations" or "Allowed locations for resource groups").
   - One row: its one radio, or else its one check box whose name is no decoration of the label. Two rows of that exact cell: `Ambiguous`. A row without one selection control: none.
   - Looked for by `find_exact` for an action, after `find_decorated`, from `SETTLE_MS` on.
   - It is the guide's element: a match, nothing recorded, no guide edit. A radio is selected with `select_radio`; a check box with `set_state(..., True)`, so selecting a row never clears it.
-- [ ] **Tests:** `test_a_picker_row_is_selected_by_its_select_radio` (1.3.5, one row); `test_the_row_named_exactly_wins_among_three` (1.3.9); `test_two_rows_of_that_exact_name_are_ambiguous`; `test_a_row_already_selected_is_already_set`; `test_a_row_without_one_selection_control_is_not_found`; `test_the_header_row_is_no_row`.
-- [ ] **Docs:** run.py docstring, next to the decorations paragraph.
-- [ ] **Commit:** `feat(guide-drift): select a picker row by the cell that names it (#342)`
+- [x] **Tests:** `test_a_picker_row_is_selected_by_its_select_radio` (1.3.5, one row); `test_the_row_named_exactly_wins_among_three` (1.3.9); `test_two_rows_of_that_exact_name_are_ambiguous`; `test_a_row_already_selected_is_already_set`; `test_a_row_without_one_selection_control_is_not_found`; `test_the_header_row_is_no_row`.
+- [x] **Docs:** run.py docstring, next to the decorations paragraph.
+- [x] **Commit:** `feat(guide-drift): select a picker row by the cell that names it (#342)`
 
 ### Task 4: (e) a field found by the visible text label next to it
 
-- [ ] **Files:** `run.py`, `tests/test_runner.py`.
-- [ ] **Behaviour:**
+- [x] **Files:** `run.py`, `tests/test_runner.py`.
+- [x] **Behaviour:**
   - New `NEXT_CONTROL_JS` and `find_by_text_label(page, label)`: non-interactive text whose whole text is `label`, and the first control after it in document order (`input`, `select`, `textarea`, roles `combobox`, `textbox`, `listbox`, `spinbutton`, `radiogroup`), with no other non-empty text between. It counts whether the control's accessible name is empty (Category) or differs ("Enter a unique name" for Name; "Location" for Allowed locations). The same label twice: `Ambiguous`.
   - `find_field` uses it after its labelled and role lookups, from `SETTLE_MS` on (as decorated names). `find_exact` for an action uses it only when the control opens a list (combobox, or `aria-haspopup` listbox); Task 7 uses this.
   - It is the guide's element: a match, nothing recorded, no edit. `find_form` / `editable` accept it, so 1.3.7 writes no wrong-blade record.
-- [ ] **Fake:** `ScreenNode.next_control` (what `NEXT_CONTROL_JS` answers for a text node).
-- [ ] **Tests:** `test_category_is_the_unnamed_combobox_after_its_text` (1.3.7: Category, Sub-category, Impact level); `test_name_is_the_textbox_named_by_its_placeholder` (1.3.15); `test_text_with_other_text_before_the_control_is_no_label`; `test_a_text_label_on_screen_twice_is_ambiguous`; `test_a_field_named_by_its_accessible_name_still_wins`; `test_a_form_whose_first_field_is_found_by_its_text_is_open` (no WRONG_BLADE record).
-- [ ] **Docs:** run.py docstring (field lookup and the form check); Invoke help, "A STEP ON THE WRONG BLADE".
-- [ ] **Commit:** `feat(guide-drift): find a field by the text label beside it (#342)`
+- [x] **Fake:** `ScreenNode.next_control` (what `NEXT_CONTROL_JS` answers for a text node).
+- [x] **Tests:** `test_category_is_the_unnamed_combobox_after_its_text` (1.3.7: Category, Sub-category, Impact level); `test_name_is_the_textbox_named_by_its_placeholder` (1.3.15); `test_text_with_other_text_before_the_control_is_no_label`; `test_a_text_label_on_screen_twice_is_ambiguous`; `test_a_field_named_by_its_accessible_name_still_wins`; `test_a_form_whose_first_field_is_found_by_its_text_is_open` (no WRONG_BLADE record).
+- [x] **Docs:** run.py docstring (field lookup and the form check); Invoke help, "A STEP ON THE WRONG BLADE".
+- [x] **Commit:** `feat(guide-drift): find a field by the text label beside it (#342)`
 
 ### Task 5: (e) a radiogroup named like its label and its container
 
-- [ ] **Files:** `run.py`, `tests/test_runner.py`.
-- [ ] **Behaviour:** in `find_field`, when the labelled elements are containers only and exactly one has role `radiogroup` holding radios, it is the field; it wins over a `<label>` and a wrapper `div` of the same name (one way: a "group" tier in `one_field` after "value" and "dropdown"). `fill_field` then goes through `fill_parts`, and `pick_radio` selects the radio the value names.
-- [ ] **Tests:** `test_policy_enforcement_label_div_and_radiogroup_take_the_radiogroup` ("Default (enforcement)" already selected: already set); `test_do_not_enforce_is_selected`; `test_two_radiogroups_of_the_name_stay_ambiguous`.
-- [ ] **Docs:** run.py docstring, the `fill_parts` / radio paragraph.
-- [ ] **Commit:** `feat(guide-drift): fill a radio group that shares its name with its label and container (#342)`
+- [x] **Files:** `run.py`, `tests/test_runner.py`.
+- [x] **Behaviour:** in `find_field`, when the labelled elements are containers only and exactly one has role `radiogroup` holding radios, it is the field; it wins over a `<label>` and a wrapper `div` of the same name (one way: a "group" tier in `one_field` after "value" and "dropdown"). `fill_field` then goes through `fill_parts`, and `pick_radio` selects the radio the value names.
+- [x] **Tests:** `test_policy_enforcement_label_div_and_radiogroup_take_the_radiogroup` ("Default (enforcement)" already selected: already set); `test_do_not_enforce_is_selected`; `test_two_radiogroups_of_the_name_stay_ambiguous`.
+- [x] **Docs:** run.py docstring, the `fill_parts` / radio paragraph.
+- [x] **Commit:** `feat(guide-drift): fill a radio group that shares its name with its label and container (#342)`
 
 ### Task 6: (b) a list option by its name, a filter box, a long list
 
-- [ ] **Files:** `run.py`, `tests/test_runner.py`.
-- [ ] **Behaviour:**
+- [x] **Files:** `run.py`, `tests/test_runner.py`.
+- [x] **Behaviour:**
   - `find_option` looks for roles `option` and `treeitem`, inside the listbox, tree or dialog the combobox names, else on screen.
   - A name matches exactly, or else after removing a region prefix (`REGION_PREFIX = ^\([^()]+\)\s+`) from the option's name; several by that rule: `Ambiguous`. `pick_option`'s `shows()` accepts the field showing the prefixed name (already set).
   - Before looking: when the open popup holds one searchbox/textbox, or the combobox is an editable input, the value (prefix removed) is typed into it.
   - When the option is still missing and the list scrolls, it is scrolled a page at a time, at most `LIST_SCROLL_PAGES = 20` (`LIST_SCROLL_JS`), looking after each page.
   - `pick_option` / `fill_field` take an optional `diagnose`; on "option not found" the open list's snapshot is saved, scrubbed, as `list-<step>-<line>.aria.txt`.
-- [ ] **Tests (class `ListOptionTests`):** `test_reset_period_monthly_is_a_treeitem_under_calendar_months` (1.3.15 / 1.3.17); `test_region_sweden_central_finds_the_europe_prefixed_option` (1.3.6); `test_a_field_showing_the_prefixed_name_is_already_set`; `test_two_options_after_removing_the_prefix_are_ambiguous`; `test_the_filter_box_is_typed_into_first`; `test_an_option_shown_only_after_scrolling_is_found`; `test_scrolling_stops_after_twenty_pages`; `test_a_missing_option_saves_the_list_tree_scrubbed`.
-- [ ] **Docs:** run.py docstring ("A field is filled as its control takes a value" and the run-folder paragraph); Invoke help, "WHAT A RUN LEAVES BEHIND" (`list-*.aria.txt`).
-- [ ] **Commit:** `feat(guide-drift): pick a list option under its region prefix, through a filter box or a long list (#342)`
+- [x] **Tests (class `ListOptionTests`):** `test_reset_period_monthly_is_a_treeitem_under_calendar_months` (1.3.15 / 1.3.17); `test_region_sweden_central_finds_the_europe_prefixed_option` (1.3.6); `test_a_field_showing_the_prefixed_name_is_already_set`; `test_two_options_after_removing_the_prefix_are_ambiguous`; `test_the_filter_box_is_typed_into_first`; `test_an_option_shown_only_after_scrolling_is_found`; `test_scrolling_stops_after_twenty_pages`; `test_a_missing_option_saves_the_list_tree_scrubbed`.
+- [x] **Docs:** run.py docstring ("A field is filled as its control takes a value" and the run-folder paragraph); Invoke help, "WHAT A RUN LEAVES BEHIND" (`list-*.aria.txt`).
+- [x] **Commit:** `feat(guide-drift): pick a list option under its region prefix, through a filter box or a long list (#342)`
 
 ### Task 7: (b) a multi-select list opened by its visible label (1.3.9; needs Tasks 1, 4, 6)
 
-- [ ] **Files:** `run.py`, `tests/test_runner.py`.
-- [ ] **Behaviour:** in `run_step`, when a label of an action or navigation item clicks a control that opens a list (Task 4's text-label combobox, or any combobox), `Runner.open_list` keeps it. The item's later labels are looked for as options of that list first (Task 6's rules and filter typing), else on screen as today; they are set to the item's stated state with Task 1's toggles, or clicked when the guide states none. At the item's end, a list still open is closed (Escape on the combobox), so the next tab click is not intercepted. Reset per item.
-- [ ] **Tests:** `test_allowed_locations_opens_the_location_combobox_and_ticks_both_regions`; `test_north_europe_already_ticked_stays_ticked` (the 1.3.9 run B case, end to end); `test_sweden_central_appears_after_typing_in_the_filter_box`; `test_the_list_is_closed_after_the_item`; `test_a_label_not_in_the_list_is_looked_for_on_screen`.
-- [ ] **Docs:** run.py docstring (a new paragraph on lists opened by a label).
-- [ ] **Commit:** `feat(guide-drift): open a multi-select list by its label and tick the options the guide names (#342)`
+- [x] **Files:** `run.py`, `tests/test_runner.py`.
+- [x] **Behaviour:** in `run_step`, when a label of an action or navigation item clicks a control that opens a list (Task 4's text-label combobox, or any combobox), `Runner.open_list` keeps it. The item's later labels are looked for as options of that list first (Task 6's rules and filter typing), else on screen as today; they are set to the item's stated state with Task 1's toggles, or clicked when the guide states none. At the item's end, a list still open is closed (Escape on the combobox), so the next tab click is not intercepted. Reset per item.
+- [x] **Tests:** `test_allowed_locations_opens_the_location_combobox_and_ticks_both_regions`; `test_north_europe_already_ticked_stays_ticked` (the 1.3.9 run B case, end to end); `test_sweden_central_appears_after_typing_in_the_filter_box`; `test_the_list_is_closed_after_the_item`; `test_a_label_not_in_the_list_is_looked_for_on_screen`.
+- [x] **Docs:** run.py docstring (a new paragraph on lists opened by a label).
+- [x] **Commit:** `feat(guide-drift): open a multi-select list by its label and tick the options the guide names (#342)`
 
 ### Task 8: (f) a search result with its category, and one retry of a search without results
 
-- [ ] **Files:** `decide.py`, `run.py`, `tests/test_decide.py`, `tests/test_runner.py`.
-- [ ] **Category results:** `Decoration` gains `search: bool = False`; new entry `Decoration("", " Resource Manager", ("option",), "the search result's service group", fields=False, search=True)` (only categories a run has seen). `find_decorated` skips search decorations. `search_results`: when no exact result is found, a second `find_in_roles` on role `option` inside the dropdown for the label plus a search decoration, through `search_result`, so Services only and Marketplace never. Decision handling follows from `decoration_of`: ReplayDecider and HumanDecider give use, and `not_proposed` gives `DECORATION_REASON`.
-- [ ] **Retry:** in `search_results`, when the deadline passes with no dropdown identified, `close_search` is called and the label is typed again once, with a new deadline; the tree is saved only after that try.
-- [ ] **Tests:** `test_resource_groups_resource_manager_is_the_resource_groups_result` ("Subscriptions Keywords: resource groups" and "Resource Manager Includes: Resource groups" must not match); `test_tags_and_management_groups_resource_manager_too`; `test_an_exact_result_wins_over_a_category_one`; `test_a_category_result_outside_services_never_counts`; `test_a_search_without_a_results_list_is_typed_again_once` (1.3.22 run B); `test_a_second_miss_saves_the_tree_and_asks`; in test_decide.py: `test_replay_of_a_recorded_category_result_is_use`, `test_a_human_pick_of_it_is_use`.
-- [ ] **Docs:** run.py docstring (the "Search for **X**" paragraph and the decorations paragraph), decide.py docstring, Invoke help (the search sentence in "SUPERVISED FIRST").
-- [ ] **Commit:** `feat(guide-drift): read a search result with its service group as the guide's, and retry a search once (#342)`
+- [x] **Files:** `decide.py`, `run.py`, `tests/test_decide.py`, `tests/test_runner.py`.
+- [x] **Category results:** `Decoration` gains `search: bool = False`; new entry `Decoration("", " Resource Manager", ("option",), "the search result's service group", fields=False, search=True)` (only categories a run has seen). `find_decorated` skips search decorations. `search_results`: when no exact result is found, a second `find_in_roles` on role `option` inside the dropdown for the label plus a search decoration, through `search_result`, so Services only and Marketplace never. Decision handling follows from `decoration_of`: ReplayDecider and HumanDecider give use, and `not_proposed` gives `DECORATION_REASON`.
+- [x] **Retry:** in `search_results`, when the deadline passes with no dropdown identified, `close_search` is called and the label is typed again once, with a new deadline; the tree is saved only after that try.
+- [x] **Tests:** `test_resource_groups_resource_manager_is_the_resource_groups_result` ("Subscriptions Keywords: resource groups" and "Resource Manager Includes: Resource groups" must not match); `test_tags_and_management_groups_resource_manager_too`; `test_an_exact_result_wins_over_a_category_one`; `test_a_category_result_outside_services_never_counts`; `test_a_search_without_a_results_list_is_typed_again_once` (1.3.22 run B); `test_a_second_miss_saves_the_tree_and_asks`; in test_decide.py: `test_replay_of_a_recorded_category_result_is_use`, `test_a_human_pick_of_it_is_use`.
+- [x] **Docs:** run.py docstring (the "Search for **X**" paragraph and the decorations paragraph), decide.py docstring, Invoke help (the search sentence in "SUPERVISED FIRST").
+- [x] **Commit:** `feat(guide-drift): read a search result with its service group as the guide's, and retry a search once (#342)`
 
 ### Task 9: (g) a view that fills in later is refreshed for a bounded time (1.3.10)
 
-- [ ] **Files:** `recording.py`, `run.py`, `tests/test_redact.py`, `tests/test_runner.py`, `tests/Guide-Drift-Recording.Tests.ps1`, `tools/guide-drift/recordings/lab-1.3.json`, `tools/Invoke-GuideDrift.ps1`.
-- [ ] **Recording key:** `"lateLabels": {"<label>": <minutes>}` in a step entry; `recording.late_minutes(recording, step_id, label)`; `recording.late_label_problems(recording)`: whole minutes from 1 to 60; run.py refuses to start (254) on a problem, as for a skip without a reason. The Pester test also checks that the label is one of the step's parsed labels.
-- [ ] **Runner:** new `Runner.wait_for_late_view(step, item, label, look)`, modelled on `wait_for_deployment`. After `wait_for_blade` found nothing, and before the deciders: say once how long it waits; every `LATE_POLL_S = 60` click the newest blade's one visible `Refresh` (button or menuitem, Task 2's preference), or else `page.reload()`, then look for `FIND_TIMEOUT_MS`; say every `DEPLOYMENT_SAY_S` how long it has waited; at the limit, go on to the deciders as before. lab-1.3.json 1.3.10 gets `"lateLabels": {"Require-Environment-Tag-RG": 30}`.
-- [ ] **Tests:** `test_compliance_lists_the_assignment_after_two_refreshes`; `test_the_page_is_reloaded_when_no_refresh_is_on_screen`; `test_the_label_is_asked_about_after_the_limit`; `test_no_wait_without_a_late_label`; `test_a_late_label_of_zero_or_of_text_is_refused` (test_redact); Pester `Describe 'Guide drift recordings - a late label waits whole minutes for a label of its step'` with rule cases (valid, 0, 61, "30", unknown label).
-- [ ] **Docs:** run.py docstring (after the deployment paragraph), recording.py header, Invoke help (a new paragraph, "A VIEW THAT FILLS IN LATER"), the Recording test's synopsis.
-- [ ] **Commit:** `feat(guide-drift): refresh a view that lists a label only later, for as long as the recording allows (#342)`
+- [x] **Files:** `recording.py`, `run.py`, `tests/test_redact.py`, `tests/test_runner.py`, `tests/Guide-Drift-Recording.Tests.ps1`, `tools/guide-drift/recordings/lab-1.3.json`, `tools/Invoke-GuideDrift.ps1`.
+- [x] **Recording key:** `"lateLabels": {"<label>": <minutes>}` in a step entry; `recording.late_minutes(recording, step_id, label)`; `recording.late_label_problems(recording)`: whole minutes from 1 to 60; run.py refuses to start (254) on a problem, as for a skip without a reason. The Pester test also checks that the label is one of the step's parsed labels.
+- [x] **Runner:** new `Runner.wait_for_late_view(step, item, label, look)`, modelled on `wait_for_deployment`. After `wait_for_blade` found nothing, and before the deciders: say once how long it waits; every `LATE_POLL_S = 60` click the newest blade's one visible `Refresh` (button or menuitem, Task 2's preference), or else `page.reload()`, then look for `FIND_TIMEOUT_MS`; say every `DEPLOYMENT_SAY_S` how long it has waited; at the limit, go on to the deciders as before. lab-1.3.json 1.3.10 gets `"lateLabels": {"Require-Environment-Tag-RG": 30}`.
+- [x] **Tests:** `test_compliance_lists_the_assignment_after_two_refreshes`; `test_the_page_is_reloaded_when_no_refresh_is_on_screen`; `test_the_label_is_asked_about_after_the_limit`; `test_no_wait_without_a_late_label`; `test_a_late_label_of_zero_or_of_text_is_refused` (test_redact); Pester `Describe 'Guide drift recordings - a late label waits whole minutes for a label of its step'` with rule cases (valid, 0, 61, "30", unknown label).
+- [x] **Docs:** run.py docstring (after the deployment paragraph), recording.py header, Invoke help (a new paragraph, "A VIEW THAT FILLS IN LATER"), the Recording test's synopsis.
+- [x] **Commit:** `feat(guide-drift): refresh a view that lists a label only later, for as long as the recording allows (#342)`
 
 ### Task 10: (h) parser: Expected View lists and steps without numbered items; 1.3.22's wording
 
-- [ ] **Files:** `parse.py`, `tests/test_parse.py`, `tests/Guide-Drift-Parser.Tests.ps1`, `module-1-identities-governance/1.3-governance/lab-guide-1.3.md`, `tools/guide-drift/recordings/lab-1.3.json`.
-- [ ] **Parser rules:** `EXPECTED_VIEW`: a line `**Expected View**:` with nothing after the colon; the list right after it (`following_list`) is neither items nor joined to the Expected Result (with text after the colon, 2.1 line 529 and 2.2 line 517, nothing changes). A step whose read body holds no numbered list item gives no action, navigation or search item from its lists; its form-table fields and tags stay (today this drops only 1.3.14 and 2.2.16; 3.2.10 and 3.2.11 keep their fields).
-- [ ] **Guide 1.3.22:** item 3 "You'll see the **Tenant Root Group**" becomes `**Expected Result**: **Management groups** lists the **Tenant Root Group**.`
-- [ ] **Recording, in the same commit so Pester stays green:** drop 1.3.10 "Overall compliance percentage"; drop 1.3.14's entry (the step becomes `portal: false`); drop 1.3.22 "Tenant Root Group"; add to 1.3.22 `"result": {"text": "Tenant Root Group"}, "asked": ["result"]`.
-- [ ] **Tests:** test_parse.py: `test_an_expected_view_list_is_no_action`, `test_an_expected_view_with_text_is_read_as_before`, `test_a_step_without_numbered_items_gives_no_clicks`, `test_its_form_table_still_gives_fields`; Guide-Drift-Parser.Tests.ps1: `It 'reads lab 1.3: no Overall compliance percentage in 1.3.10, 1.3.14 without a portal part, 1.3.22 ending in its Expected Result'` and `It 'drops list clicks only in steps 1.3.14 and 2.2.16 of every guide'`; Guide-Step-Numbering stays green.
-- [ ] **Docs:** parse.py docstring (the two rules, and the Known gaps entry if one applies).
-- [ ] **Commit:** `feat(guide-drift): read no click from an Expected View list or a step without numbered items (#342)`
+- [x] **Files:** `parse.py`, `tests/test_parse.py`, `tests/Guide-Drift-Parser.Tests.ps1`, `module-1-identities-governance/1.3-governance/lab-guide-1.3.md`, `tools/guide-drift/recordings/lab-1.3.json`.
+- [x] **Parser rules:** `EXPECTED_VIEW`: a line `**Expected View**:` with nothing after the colon; the list right after it (`following_list`) is neither items nor joined to the Expected Result (with text after the colon, 2.1 line 529 and 2.2 line 517, nothing changes). A step whose read body holds no numbered list item gives no action, navigation or search item from its lists; its form-table fields and tags stay (today this drops only 1.3.14 and 2.2.16; 3.2.10 and 3.2.11 keep their fields).
+- [x] **Guide 1.3.22:** item 3 "You'll see the **Tenant Root Group**" becomes `**Expected Result**: **Management groups** lists the **Tenant Root Group**.`
+- [x] **Recording, in the same commit so Pester stays green:** drop 1.3.10 "Overall compliance percentage"; drop 1.3.14's entry (the step becomes `portal: false`); drop 1.3.22 "Tenant Root Group"; add to 1.3.22 `"result": {"text": "Tenant Root Group"}, "asked": ["result"]`.
+- [x] **Tests:** test_parse.py: `test_an_expected_view_list_is_no_action`, `test_an_expected_view_with_text_is_read_as_before`, `test_a_step_without_numbered_items_gives_no_clicks`, `test_its_form_table_still_gives_fields`; Guide-Drift-Parser.Tests.ps1: `It 'reads lab 1.3: no Overall compliance percentage in 1.3.10, 1.3.14 without a portal part, 1.3.22 ending in its Expected Result'` and `It 'drops list clicks only in steps 1.3.14 and 2.2.16 of every guide'`; Guide-Step-Numbering stays green.
+- [x] **Docs:** parse.py docstring (the two rules, and the Known gaps entry if one applies).
+- [x] **Commit:** `feat(guide-drift): read no click from an Expected View list or a step without numbered items (#342)`
 
 ### Task 11: (i) the run's subscription as a label and a redaction token; 1.3.18 item 2
 
-- [ ] **Files:** `recording.py`, `run.py`, `tools/Invoke-GuideDrift.ps1`, `tests/test_redact.py`, `tests/test_runner.py`, `tests/Guide-Drift-Parser.Tests.ps1`, the Lab 1.3 guide.
-- [ ] **Redactor:** takes `subscription_name`; token `SUBSCRIPTION = "[yoursubscription]"` in `TOKENS`, so `REDACTION_TOKENS` covers it; same rule as the tenant name (at least 4 characters, bounded by non-word characters, placed before the prefix pair). This also closes a leak: run B's outlines carry the subscription's display name in clear.
-- [ ] **run.py:** new `--subscription-name` argument; `looking_for` looks a label that holds a Redactor token up by `redactor.matcher(label)` (the restored name), so the guide's **[yoursubscription]** finds the run's subscription link as a match.
-- [ ] **Invoke-GuideDrift.ps1:** passes `--subscription-name (Get-AzContext).Subscription.Name` in subscription mode only, not when empty; the help lists the token.
-- [ ] **Guide 1.3.18:** item 2 becomes `2. Click your subscription, **[yoursubscription]**` (parse.py already reads it as a label).
-- [ ] Not here: #236's built-in placeholders for Subscription fields.
-- [ ] **Tests:** test_redact: `test_the_subscription_name_becomes_yoursubscription_and_back`, `test_a_short_subscription_name_is_left_alone`, `test_yoursubscription_is_a_redaction_token`; test_runner: `test_yoursubscription_finds_the_runs_subscription_link` (neutral "Example Subscription"), `test_a_blade_outline_scrubs_the_subscription_name`; parser pin for 1.3.18 item 2.
-- [ ] **Docs:** run.py docstring (scrub and Usage), recording.py Redactor docstring, Invoke help (`-SubscriptionId` and "WHAT A RUN LEAVES BEHIND").
-- [ ] **Commit:** `feat(guide-drift): find and redact the run's subscription as [yoursubscription] (#342)`
+- [x] **Files:** `recording.py`, `run.py`, `tools/Invoke-GuideDrift.ps1`, `tests/test_redact.py`, `tests/test_runner.py`, `tests/Guide-Drift-Parser.Tests.ps1`, the Lab 1.3 guide.
+- [x] **Redactor:** takes `subscription_name`; token `SUBSCRIPTION = "[yoursubscription]"` in `TOKENS`, so `REDACTION_TOKENS` covers it; same rule as the tenant name (at least 4 characters, bounded by non-word characters, placed before the prefix pair). This also closes a leak: run B's outlines carry the subscription's display name in clear.
+- [x] **run.py:** new `--subscription-name` argument; `looking_for` looks a label that holds a Redactor token up by `redactor.matcher(label)` (the restored name), so the guide's **[yoursubscription]** finds the run's subscription link as a match.
+- [x] **Invoke-GuideDrift.ps1:** passes `--subscription-name (Get-AzContext).Subscription.Name` in subscription mode only, not when empty; the help lists the token.
+- [x] **Guide 1.3.18:** item 2 becomes `2. Click your subscription, **[yoursubscription]**` (parse.py already reads it as a label).
+- [x] Not here: #236's built-in placeholders for Subscription fields.
+- [x] **Tests:** test_redact: `test_the_subscription_name_becomes_yoursubscription_and_back`, `test_a_short_subscription_name_is_left_alone`, `test_yoursubscription_is_a_redaction_token`; test_runner: `test_yoursubscription_finds_the_runs_subscription_link` (neutral "Example Subscription"), `test_a_blade_outline_scrubs_the_subscription_name`; parser pin for 1.3.18 item 2.
+- [x] **Docs:** run.py docstring (scrub and Usage), recording.py Redactor docstring, Invoke help (`-SubscriptionId` and "WHAT A RUN LEAVES BEHIND").
+- [x] **Commit:** `feat(guide-drift): find and redact the run's subscription as [yoursubscription] (#342)`
 
 ### Task 12: (j) the Lab 1.3 recording drops the workarounds the runner no longer needs
 
-- [ ] **Files:** `tools/guide-drift/recordings/lab-1.3.json`, `tests/test_runner.py` (or a new `tests/test_recordings.py`).
-- [ ] **Drop:** the "Resource groups" entries of 1.3.1, 1.3.6, 1.3.11 and 1.3.17, 1.3.4's "Tags" and 1.3.22's "Management groups" (Task 8); 1.3.5's "Require a tag on resource groups" and 1.3.8's "Require a tag and its value on resources", both `radio "Select"` (Task 3); 1.3.5's valueOverride "Policy enforcement": "[Leave blank]" (Task 5); 1.3.15's "Name" -> "Enter a unique name" (Task 4).
-- [ ] **Keep:** the "[Leave blank]" overrides of 1.3.7 Subscription and the 1.3.8 / 1.3.9 Scope (fields marked `literal: false`, which the recording test requires), 1.3.15's date and amount overrides, the alert e-mail overrides, every `viewUrl` / `startBlade`, and Task 9's `lateLabels`.
-- [ ] **Test:** `test_the_lab_1_3_recording_works_around_no_control_the_runner_operates`: no label entry of any recording is a `use` of `radio "Select"`, or of an option whose name is its label plus a search decoration. Pester `Guide-Drift-Recording.Tests.ps1` green.
-- [ ] **Commit:** `chore(guide-drift): drop the Lab 1.3 recording's workarounds for controls the runner now operates (#342)`
+- [x] **Files:** `tools/guide-drift/recordings/lab-1.3.json`, `tests/test_runner.py` (or a new `tests/test_recordings.py`).
+- [x] **Drop:** the "Resource groups" entries of 1.3.1, 1.3.6, 1.3.11 and 1.3.17, 1.3.4's "Tags" and 1.3.22's "Management groups" (Task 8); 1.3.5's "Require a tag on resource groups" and 1.3.8's "Require a tag and its value on resources", both `radio "Select"` (Task 3); 1.3.5's valueOverride "Policy enforcement": "[Leave blank]" (Task 5); 1.3.15's "Name" -> "Enter a unique name" (Task 4).
+- [x] **Keep:** the "[Leave blank]" overrides of 1.3.7 Subscription and the 1.3.8 / 1.3.9 Scope (fields marked `literal: false`, which the recording test requires), 1.3.15's date and amount overrides, the alert e-mail overrides, every `viewUrl` / `startBlade`, and Task 9's `lateLabels`.
+- [x] **Test:** `test_the_lab_1_3_recording_works_around_no_control_the_runner_operates`: no label entry of any recording is a `use` of `radio "Select"`, or of an option whose name is its label plus a search decoration. Pester `Guide-Drift-Recording.Tests.ps1` green.
+- [x] **Commit:** `chore(guide-drift): drop the Lab 1.3 recording's workarounds for controls the runner now operates (#342)`
 
 ### Task 13: 1.3.18's tag filter as fields (controller only, needs the maintainer's sign-in; not for an implementer subagent)
 
@@ -186,5 +186,6 @@ Branch `feat/342-guide-drift-portal-controls`, stacked on `feat/329-lab13-record
 - [ ] Replay `.\tools\Invoke-GuideDrift.ps1 -SubscriptionId <id> -Lab 1.3 -SkipCleanup`. It must end with exit 0: every step 1.3.1-1.3.22 performed; no blocking or misleading drift, no unknown, no proposed edit; no `c` or `s` answer, and no label prompt. 1.3.10 may wait up to its 30 recorded minutes. A prompt means a defect: answer `q`, fix it offline with a test, and replay.
 - [ ] `module-1-identities-governance/1.3-governance/scripts/Test-Lab.ps1` passes on the state that run leaves.
 - [ ] `Remove-LabResource.ps1 -Force` exits 0.
-- [ ] Put the run id and exit code on the PR's Live-verified line. Copy summary.md, not the console.
+- [ ] **Lab 1.1 replay, tenant mode (needs the maintainer's sign-in in the Entra test tenant), after the Lab 1.3 acceptance:** `.\tools\Invoke-GuideDrift.ps1 -TenantId <id> -Lab 1.1`. Runner-wide changes of this branch reach Lab 1.1's path: expanding menu groups now counts only once 'Collapse all headers' shows (up to `EXPAND_TRIES` clicks per item on an Entra menu), `pick_option` types into an editable combo box (the user principal name's domain combo box), `opens_a_list` is evaluated before every action click, and `newest_blade` is `find_in_roles`' default. It must end with exit 0 and no label prompt, as Lab 1.1 did before this branch; a prompt is a defect: answer `q`, fix it offline with a test, and replay. Its cleanup runs as usual.
+- [ ] Put both runs' ids and exit codes (Lab 1.3 and Lab 1.1) on the PR's Live-verified line. Copy summary.md, not the console.
 - [ ] Delete this PLAN.md in the PR's last commit.
