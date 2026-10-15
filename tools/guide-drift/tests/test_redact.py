@@ -488,6 +488,27 @@ class SkipReasonTests(unittest.TestCase):
                 skip_reason(self.recording({"skip": value}), "9.9.1")
 
 
+class SubscriptionStepsTests(unittest.TestCase):
+    """The steps a run performs whose labels name the run's subscription as '[yoursubscription]'
+    (#342): without the subscription's name the run cannot find, or redact, it."""
+
+    @staticmethod
+    def steps(*labels_by_step: tuple[str, bool, list[str]]) -> dict:
+        return {"steps": [{"id": step, "portal": portal, "items": [{"kind": "navigation", "labels": labels}]}
+                          for step, portal, labels in labels_by_step]}
+
+    def test_a_portal_step_with_the_token_in_a_label_needs_the_name(self) -> None:
+        steps = self.steps(("9.9.1", True, ["Subscriptions"]), ("9.9.2", True, ["Cost analysis", "[yoursubscription]"]),
+                           ("9.9.3", True, ["[yoursubscription] | Overview"]))
+        self.assertEqual(recording.subscription_steps(steps, {"steps": {}}), ["9.9.2", "9.9.3"])
+
+    def test_a_step_without_a_portal_part_or_skipped_by_the_recording_does_not(self) -> None:
+        steps = self.steps(("9.9.1", False, ["[yoursubscription]"]), ("9.9.2", True, ["[yoursubscription]"]))
+        self.assertEqual(recording.subscription_steps(steps, {"steps": {"9.9.2": {"skip": "Optional"}}}), [])
+        self.assertEqual(recording.subscription_steps(self.steps(("9.9.1", True, ["[yourtenant]"])), {"steps": {}}),
+                         [])
+
+
 class LateLabelTests(unittest.TestCase):
     """'"lateLabels": {"<label>": <minutes>}' on a step entry (#342): how long a view that lists the
     label only later is refreshed for. Whole minutes from 1 to 60, never a silent 'no wait'."""

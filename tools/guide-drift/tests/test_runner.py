@@ -1542,6 +1542,53 @@ class RunFolderTests(RunnerTestCase):
                 self.assertEqual((folder / "results.jsonl").read_text(encoding="utf-8"), '{"step": "9.9.1"}\n')
 
 
+class SubscriptionNameTests(RunnerTestCase):
+    """A guide label holding '[yoursubscription]' (1.3.18 item 2, #342) is found, and the person's
+    pick of it redacted, only by the run's subscription name: without one (run.py run directly, or
+    an empty Az context name) the run refuses to start (254) before the browser opens, rather than
+    ask and write the literal name into the public recording."""
+
+    Console = RunFolderTests.Console
+
+    def setUp(self) -> None:
+        super().setUp()
+        steps = json.loads(json.dumps(STEPS))
+        steps["steps"][3]["items"] = [{"kind": "navigation", "labels": ["Subscriptions", "[yoursubscription]"],
+                                       "line": 7}]
+        self.steps = steps
+
+    def main(self, *extra: str) -> tuple[int, str, mock.MagicMock]:
+        (self.tmp / "steps.json").write_text(json.dumps(self.steps), encoding="utf-8")
+        argv = ["--steps", str(self.tmp / "steps.json"), "--recording", str(self.tmp / "rec.json"),
+                "--log-dir", str(self.tmp / "logs"), "--run-id", "x", "--tenant-id", "t", "--tenant-domain", "d",
+                "--state", str(self.tmp / "state.json"), "--auth-state", str(self.tmp / "auth.json"), *extra]
+        out = self.Console()
+        with mock.patch.object(run, "sync_playwright") as playwright, redirect_stdout(out), \
+                mock.patch.object(run, "open_portal", side_effect=OSError("the browser opened")):
+            code = run.main(argv)
+        return code, out.getvalue(), playwright
+
+    def test_a_label_naming_the_subscription_without_its_name_refuses_to_start(self) -> None:
+        for extra in ((), ("--subscription-name", "   "), ("--subscription-name", "Dev")):
+            with self.subTest(extra=extra):
+                code, out, playwright = self.main(*extra)
+                self.assertEqual(code, run.NOT_STARTED)
+                playwright.assert_not_called()
+                self.assertIn("step 9.9.4", out)
+                self.assertIn("[yoursubscription]", out)
+                self.assertIn("--subscription-name", out)
+                self.assertFalse((self.tmp / "logs" / "x" / "results.jsonl").exists())
+
+    def test_with_the_subscription_name_it_starts(self) -> None:
+        code, out, _ = self.main("--subscription-name", "Example Subscription")
+        self.assertIn("Could not open the Portal", out)                 # past every refusal
+
+    def test_steps_without_the_token_need_no_name(self) -> None:
+        self.steps = STEPS
+        code, out, _ = self.main()
+        self.assertIn("Could not open the Portal", out)
+
+
 class GuardAndLookupTests(RunnerTestCase):
     def test_tree_text_reads_text_and_text_boxes_but_never_link_targets(self) -> None:
         snapshot = ('- link "Switch directory":\n'

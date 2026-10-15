@@ -221,7 +221,9 @@
     read from it; the display name is kept out of the recording as '[tenantname]'. The
     subscription's own name, read from the Az context, is passed to run.py (--subscription-name)
     and kept out of the recording as '[yoursubscription]', which a guide's bold label of that
-    token finds as the run's subscription link; not passed in tenant mode or when empty.
+    token finds as the run's subscription link; not passed in tenant mode or when empty. Without
+    it (or with a name shorter than 4 characters, which is not redacted), a run of a guide with
+    such a label (lab 1.3, step 1.3.18) refuses to start (exit 254) before the browser opens.
 
 .PARAMETER TenantId
     The tenant to run an Entra-only lab against, when it has no subscription (tenant mode, see

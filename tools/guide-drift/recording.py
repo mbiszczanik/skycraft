@@ -31,6 +31,8 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
                        for ('"lateLabels": {"<label>": <minutes>}', #342), or None
   late_label_problems  every 'lateLabels' entry that is not whole minutes from 1 to 60 (run.py
                        refuses to start on one, as for a skip without a reason)
+  subscription_steps   the steps a run performs whose labels hold '[yoursubscription]' (run.py
+                       refuses to start on one without the subscription's name, #342)
   view_blade           the blade part of a recorded view, what a step's start is compared by (#207)
   same_blade           whether two blades are the same, regardless of case and of a trailing
                        'overview' (#207)
@@ -500,6 +502,19 @@ def late_label_problems(recording: dict) -> list[str]:
                 problems.append(f"step {step_id}: 'lateLabels' '{label}' must be whole minutes from 1 to "
                                 f"{LATE_MINUTES_MAX}, not {json.dumps(minutes)}")
     return problems
+
+
+def subscription_steps(steps: dict, recording: dict) -> list[str]:
+    """The ids of the steps a run performs (a portal part, no 'skip' in the recording) with a label
+    that holds Redactor.SUBSCRIPTION, the guide's '[yoursubscription]' (1.3.18 item 2, #342). Only
+    the run's subscription name finds such a label (Redactor.restore) and keeps it out of what the
+    run writes; without it the label is not found, and the person's pick of the subscription's link
+    would reach the public recording as the literal name. run.py refuses to start (254) when this is
+    not empty and --subscription-name is missing or too short to redact (Redactor.PREFIX_MIN)."""
+    return [step["id"] for step in steps.get("steps", [])
+            if step.get("portal") and skip_reason(recording, step["id"]) is None
+            and any(Redactor.SUBSCRIPTION in label for item in step.get("items", ())
+                    for label in item.get("labels", ()))]
 
 
 def view_blade(view: str | None) -> str | None:

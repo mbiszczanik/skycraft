@@ -371,6 +371,12 @@ So are the findings of a step completed in an earlier part and skipped in the re
 the resume lists it as skipped by the recording, once. All of this is written only once the
 resume has its answers, so a run that does not start (254) leaves results.jsonl as it was.
 
+A step the run performs whose label holds '[yoursubscription]' (1.3.18 item 2,
+recording.subscription_steps) needs the run's subscription name: without --subscription-name, or
+with one shorter than the Redactor redacts (Redactor.PREFIX_MIN), the run refuses to start (254)
+before the browser opens, as the label would not be found and the person's pick of the
+subscription's link would reach the recording as the literal name.
+
 Exit code: blocking drifts plus unknowns, capped at 250, when the run ends normally; 254 when a
 precondition, a guard or the state stopped it before the first step; 255 when it stopped mid-run
 (Ctrl+C, 'q', a closed window, a crash) with the state kept for -Resume, so nothing is cleaned up.
@@ -404,7 +410,7 @@ from recording import literal_pattern  # noqa: E402
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (LABEL_ROLES, REMARK, EntryNames, Redactor, checkbox_state, env_secrets,  # noqa: E402
                        missing_env, field_action, late_label_problems, late_minutes, rejected_candidates,
-                       resource_name, skip_reason,
+                       resource_name, skip_reason, subscription_steps,
                        same_blade, start_blade, view_blade, write_json)
 from recording import (error_text, one_line, prompt_value, redaction_tokens, scrub, tag_action,  # noqa: E402
                        typed_secrets)
@@ -3931,6 +3937,14 @@ def main(argv: list[str] | None = None) -> int:
     problems = late_label_problems(recording)
     if problems:
         print(f"The recording cannot be used: {problems[0]}.")
+        return NOT_STARTED
+    # A label of the run's subscription is found, and redacted, only by its name (#342).
+    needing = subscription_steps(steps, recording)
+    if needing and len(args.subscription_name.strip()) < Redactor.PREFIX_MIN:
+        print(f"step {needing[0]} names the run's subscription as [yoursubscription], but the run has no "
+              f"--subscription-name of at least {Redactor.PREFIX_MIN} characters, so it could neither find "
+              "the subscription nor keep its name out of the recording. Run it through Invoke-GuideDrift.ps1 "
+              "-SubscriptionId <id>, or pass --subscription-name with the subscription's name.")
         return NOT_STARTED
     # Everything that can refuse the run is checked before the browser opens and the person signs in.
     state = {"completed": [], "inFlight": None}
