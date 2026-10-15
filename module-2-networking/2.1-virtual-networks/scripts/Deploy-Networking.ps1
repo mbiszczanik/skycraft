@@ -84,14 +84,18 @@ $TagsProd = @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'M
 # module names it, so this path and the Bicep path describe the same subnet.
 $appServiceDelegation = New-AzDelegation -Name 'Microsoft.Web/serverFarms' -ServiceName 'Microsoft.Web/serverFarms'
 
+# Every subnet is private (-DefaultOutboundAccess $false), as the portal's Add a subnet pane and
+# main.bicep create it: no default outbound access. The Module 3 VMs reach the internet through
+# Lab 2.3's load balancer outbound rules.
+
 # ===================================
 # Task 2: Create Hub Virtual Network
 # ===================================
 Write-Host "`n=== Task 2: Creating Hub Virtual Network ===" -ForegroundColor Cyan
 $hubVnetName = 'platform-skycraft-swc-vnet'
 $hubSubnets = @(
-    (New-AzVirtualNetworkSubnetConfig -Name 'AzureBastionSubnet' -AddressPrefix '10.0.0.0/26'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'GatewaySubnet' -AddressPrefix '10.0.1.0/27')
+    (New-AzVirtualNetworkSubnetConfig -Name 'AzureBastionSubnet' -AddressPrefix '10.0.0.0/26' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'GatewaySubnet' -AddressPrefix '10.0.1.0/27' -DefaultOutboundAccess $false)
 )
 
 Write-Host "Creating VNet: $hubVnetName..." -ForegroundColor Yellow
@@ -109,10 +113,10 @@ try {
 Write-Host "`n=== Task 3: Creating Dev Virtual Network ===" -ForegroundColor Cyan
 $devVnetName = 'dev-skycraft-swc-vnet'
 $devSubnets = @(
-    (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.1.1.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.1.2.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.1.3.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.1.4.0/24' -Delegation $appServiceDelegation)
+    (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.1.1.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.1.2.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.1.3.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.1.4.0/24' -Delegation $appServiceDelegation -DefaultOutboundAccess $false)
 )
 
 Write-Host "Creating VNet: $devVnetName..." -ForegroundColor Yellow
@@ -130,10 +134,10 @@ try {
 Write-Host "`n=== Task 4: Creating Prod Virtual Network ===" -ForegroundColor Cyan
 $prodVnetName = 'prod-skycraft-swc-vnet'
 $prodSubnets = @(
-    (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.2.1.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.2.2.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.2.3.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.2.4.0/24' -Delegation $appServiceDelegation)
+    (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.2.1.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.2.2.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.2.3.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.2.4.0/24' -Delegation $appServiceDelegation -DefaultOutboundAccess $false)
 )
 
 Write-Host "Creating VNet: $prodVnetName..." -ForegroundColor Yellow
