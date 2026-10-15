@@ -2747,6 +2747,41 @@ class FindOnScreenTests(RunnerTestCase):
         record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Premium")
         self.assertEqual((record["outcome"], premium.checked, premium.label.clicked), ("match", True, 1))
 
+    ENFORCEMENT = {"kind": "field", "label": "Policy enforcement", "value": "x", "line": 8}
+
+    def enforcement(self, groups: int = 1) -> tuple[Screen, list[ScreenNode], list[ScreenNode]]:
+        """Run B's blade-1.3.5: a <label>, a wrapper <div> and `groups` radiogroup(s) of one name,
+        'Default (enforcement)' selected among Default, Do not enforce and Enroll."""
+        screen = Screen(("label", "Policy enforcement", ScreenNode(tag="label")),
+                        ("label", "Policy enforcement", ScreenNode(tag="div")))
+        radios, groupnodes = [], []
+        for _ in range(groups):
+            options = [self.radio("Default (enforcement)", checked=True), self.radio("Do not enforce"),
+                       self.radio("Enroll")]
+            group = ScreenNode(attrs={"role": "radiogroup"}, children=Screen(*options))
+            screen.add(("label", "Policy enforcement", group))
+            radios.append([node for _, _, node in options])
+            groupnodes.append(group)
+        return screen, radios[0], groupnodes
+
+    def test_policy_enforcement_label_div_and_radiogroup_take_the_radiogroup(self) -> None:
+        screen, radios, _ = self.enforcement()
+        radios[0].check_error = AssertionError("set_checked() called on the radio already selected")
+        record, _ = self.act(screen, self.ENFORCEMENT, "Policy enforcement", value="Default (enforcement)")
+        self.assertEqual((record["outcome"], record["observed"]), ("match", "already set"))
+
+    def test_do_not_enforce_is_selected(self) -> None:
+        screen, radios, _ = self.enforcement()
+        record, _ = self.act(screen, self.ENFORCEMENT, "Policy enforcement", value="Do not enforce")
+        self.assertEqual((record["outcome"], radios[1].checked, radios[2].checked), ("match", True, False))
+
+    def test_two_radiogroups_of_the_name_stay_ambiguous(self) -> None:
+        screen, radios, _ = self.enforcement(groups=2)
+        record, _ = self.act(screen, self.ENFORCEMENT, "Policy enforcement", value="Do not enforce")
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertIn("4 visible elements match", record["observed"])
+        self.assertFalse(radios[1].checked)
+
     def test_a_radio_group_without_the_value_names_its_options(self) -> None:
         screen, radios = self.radio_group(self.radio("Standard", checked=True), self.radio("Premium"))
         record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Hot (for daily use)")

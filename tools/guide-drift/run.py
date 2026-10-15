@@ -1035,16 +1035,22 @@ def field_kind(element: Locator) -> tuple[str, str | None]:
 
 def one_field(found: list[Locator]) -> Locator | None:
     """The field among the elements a label matches: the only one, or else the only one that
-    takes a value, or else the only button that opens a list (field_kind). Fluent UI forms put
-    more than the field under a label ('Group description' and its info icon). Raises Ambiguous
+    takes a value, or else the only button that opens a list (field_kind), or else the only
+    radiogroup holding radios (Policy enforcement: a <label>, a wrapper <div> and the radiogroup
+    all carry the name). Fluent UI forms put more than the field under a label ('Group
+    description' and its info icon). Raises Ambiguous
     naming what matched ('textarea, button'), so a live run shows what collided, and whenever
     one of them could not be inspected: it may be the field, and dropping it would be a guess."""
     if len(found) <= 1:
         return found[0] if found else None
     kinds = [field_kind(element) for element in found]
     inspected = all(what != "?" for what, _ in kinds)
-    for tier in ("value", "dropdown") if inspected else ():
-        picked = [element for element, (_, kind) in zip(found, kinds) if kind == tier]
+    for tier in ("value", "dropdown", "group") if inspected else ():
+        if tier == "group":     # the radio group of the name, beside its <label> and a wrapper <div>
+            picked = [element for element, (what, _) in zip(found, kinds)
+                      if what == "radiogroup" and parts_of(element, "radio")]
+        else:
+            picked = [element for element, (_, kind) in zip(found, kinds) if kind == tier]
         if len(picked) == 1:
             return picked[0]
         if picked:
@@ -1688,7 +1694,8 @@ def fill_parts(page: Page, container: Locator, value: str) -> str | None:
     must show the part after the last '@', compared regardless of case (when it does not, the
     domain is picked from its options), and then the text box gets the part before it. With
     radios and no combo box (a radio group: a storage account's 'Performance', Standard or
-    Premium), the radio the value names is selected (pick_radio: its whole name, else the part
+    Premium; find_field takes the radiogroup when it, a <label> and a wrapper <div> share the
+    name, 'Policy enforcement'), the radio the value names is selected (pick_radio: its whole name, else the part
     before its ':', else either without the value's remark), also when a text box is there (an
     'Other' option's): the value names a radio, and nothing is typed. 'already set' when every
     part held its value before. Raises LookupError for any other container, when the domain
