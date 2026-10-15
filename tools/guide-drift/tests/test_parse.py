@@ -1344,5 +1344,64 @@ class UnderPlaceTests(unittest.TestCase):
                 self.assertEqual(self.item(text), {"kind": "action", "labels": labels, "line": 7})
 
 
+class NoClickListTests(unittest.TestCase):
+    """An Expected View list and a step without numbered items give no click (#342). The fixtures
+    copy the shapes of 1.3.10, 1.3.14 and 2.1.x."""
+
+    def step(self, markdown: str) -> tuple[list[dict], str | None]:
+        body = parse.split_steps(parse.strip_hidden(markdown.splitlines()))[0]["body"]
+        items, expected, _, _ = parse.read_step(body)
+        return items, expected
+
+    def test_an_expected_view_list_is_no_action(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: View\n"
+            "\n"
+            "1. Click **Compliance** in left menu\n"
+            "\n"
+            "**Expected View**:\n"
+            "\n"
+            "- **Overall percentage** (likely <100% initially)\n"
+            "- List of assigned policies\n"
+            "\n"
+            "2. Click **Policy A**\n"
+            "\n"
+            "**Expected Result**: The policy opens.\n")
+        self.assertEqual([i["labels"] for i in items], [["Compliance"], ["Policy A"]])
+        self.assertEqual(expected, "The policy opens.")
+
+    def test_an_expected_view_with_text_is_read_as_before(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: View\n"
+            "\n"
+            "1. Click **Diagram**\n"
+            "\n"
+            "**Expected View**: A diagram of the hub.\n"
+            "- **Spoke** is shown\n")
+        self.assertEqual([i["labels"] for i in items], [["Diagram"], ["Spoke"]])
+        self.assertIsNone(expected)
+
+    def test_a_step_without_numbered_items_gives_no_clicks(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Understand\n"
+            "\n"
+            "**Important Concepts**:\n"
+            "\n"
+            "- Locks at **subscription** level protect all\n"
+            "- Use **CanNotDelete** on production\n")
+        self.assertEqual(items, [])
+
+    def test_its_form_table_still_gives_fields(self) -> None:
+        items, _ = self.step(
+            "### Step 9.9.1: Understand\n"
+            "\n"
+            "- Use **CanNotDelete** on production\n"
+            "\n"
+            "| Field | Value |\n"
+            "|---|---|\n"
+            "| Name | `lock-a` |\n")
+        self.assertEqual([(i["kind"], i["label"]) for i in items], [("field", "Name")])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -699,6 +699,53 @@ Describe 'parse.py - lab 1.3, a lock type is a field, not a click on Delete' {
         ($step.items | Where-Object label -eq 'Lock type').value | Should -Be 'Delete'
         @($step.items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Delete'
     }
+
+    It 'reads lab 1.3: no Overall compliance percentage in 1.3.10, 1.3.14 without a portal part, 1.3.22 ending in its Expected Result' {
+        $s10 = $script:Lab13.steps | Where-Object id -eq '1.3.10'
+        @($s10.items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Overall compliance percentage'
+        @($s10.items | ForEach-Object { $_.labels }) | Should -Contain 'Require-Environment-Tag-RG'
+        $s14 = $script:Lab13.steps | Where-Object id -eq '1.3.14'
+        $s14.portal | Should -BeFalse
+        @($s14.items).Count | Should -Be 0
+        $s22 = $script:Lab13.steps | Where-Object id -eq '1.3.22'
+        @($s22.items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Tenant Root Group'
+        $s22.expected | Should -Match 'Tenant Root Group'
+    }
+}
+
+Describe 'parse.py - every guide, a step without numbered items gives no list clicks (#342)' {
+    BeforeAll {
+        $guides = Get-ChildItem -Path $script:RepoRoot -Directory -Filter 'module-*' |
+            Get-ChildItem -Directory | Where-Object { $_.Name -match '^\d+\.\d+-' } |
+            ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Filter 'lab-guide-*.md' }
+        $script:Dropped = [System.Collections.Generic.List[string]]::new()
+        $script:GuideCount = 0
+        foreach ($guide in $guides) {
+            $script:GuideCount++
+            $out = Join-Path $TestDrive "dropped-$($guide.Name).json"
+            & $script:Python $script:Parser $guide.FullName --out $out --repo-root $script:RepoRoot
+            $parsed = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+            # Per step: a bold list item outside fenced code, and a numbered item outside it.
+            $bold = @{}; $numbered = @{}; $step = $null; $fence = $false
+            foreach ($line in (Get-Content -LiteralPath $guide.FullName -Encoding utf8)) {
+                if ($line -match '^[ \t]*(`{3,}|~{3,})') { $fence = -not $fence; continue }
+                if ($fence) { continue }
+                if ($line -match '^###\s+Step\s+(\d+\.\d+\.\d+):') { $step = $Matches[1]; continue }
+                if ($line -match '^#{1,3}\s') { $step = $null; continue }
+                if (-not $step) { continue }
+                if ($line -match '^\s*\d+\.\s') { $numbered[$step] = $true }
+                if ($line -match '^\s*(?:[-*]|\d+\.)\s.*\*\*') { $bold[$step] = $true }
+            }
+            foreach ($s in $parsed.steps) {
+                if (-not $s.portal -and $bold[$s.id] -and -not $numbered[$s.id]) { $script:Dropped.Add($s.id) }
+            }
+        }
+    }
+
+    It 'drops list clicks only in steps 1.3.14 and 2.2.16 of every guide' {
+        $script:GuideCount | Should -Be 17
+        @($script:Dropped | Sort-Object) | Should -Be @('1.3.14', '2.2.16')
+    }
 }
 
 Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#224)' {

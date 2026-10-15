@@ -214,6 +214,14 @@ without a browser. Rules (issue #189):
     each row becomes a 'tag' item (name, value), typed into the Portal's Tags grid by row rather
     than looked up as a labelled control. Backticks and bold are stripped from both cells.
     Every other table is informational and is not read.
+  * '**Expected View**:' with nothing after the colon (1.3.10) introduces a list that describes
+    the screen ('**Overall compliance percentage** (likely <100% initially)'): the list right
+    after it is neither items nor joined to the Expected Result, so no click is read from it
+    and the replay asks for no text to look for (#342). With text after the colon (2.1.x,
+    2.2.x) nothing changes.
+  * A step whose read body holds no numbered list item (1.3.14 and 2.2.16 explain a concept in
+    bullet lists) gives no action, navigation or search item from its lists; its fields and
+    tags (form tables, 3.2.10, 3.2.11, and 'Label: **value**' list items) stay (#342).
   * A step with no item left is emitted with portal=false and is not checked by the runner.
 
 Known gaps. Spec #189 records only lab 1.1; fix these before another lab is recorded
@@ -413,6 +421,9 @@ CHECK_VERB = re.compile(r"^(?:Verify|Confirm)\b", re.IGNORECASE)
 # control to click, so the line gives no item when it introduces checks (#246).
 SHOWN_LABEL = re.compile(r"^(?:Verify|Confirm)\s+\*\*(?:\\\*|[^*])+?\*\*\s+shows?\s*:\s*$",
                          re.IGNORECASE)
+# '**Expected View**:' with nothing after the colon: the list right after it describes a screen
+# and is no step (#342).
+EXPECTED_VIEW = re.compile(r"^\s*(?:(?:[-*]|\d+\.)\s+)?\*\*Expected View\*\*\s*:\s*$")
 ORDERED_ITEM = re.compile(r"^\s*\d+\.\s")    # a numbered list item, as against a bullet
 SENTENCE_END = (".", "!", "?", ":")   # check items follow such a text after a space, not '; '
 TABLE_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$")
@@ -868,6 +879,9 @@ def read_option(body: list[tuple[int, str]], regions: list[str | int], chosen: i
     checks: list[str] = []
     index = 0
     while index < len(body):
+        if EXPECTED_VIEW.match(body[index][1]):
+            index = max(following_list(body, index + 1)[1], index + 1)   # its list is no step
+            continue
         if EXPECTED.match(body[index][1]):
             text, after = expected_text(body, index)
             in_other = isinstance(regions[index], int) and regions[index] != chosen
@@ -889,6 +903,9 @@ def read_option(body: list[tuple[int, str]], regions: list[str | int], chosen: i
                 continue
         index += 1
     items, images = parse_items(item_lines, captions)
+    if not any(ORDERED_ITEM.match(line) for _, line in item_lines):
+        # no numbered item: its lists describe and give no click; fields and tags stay (#342)
+        items = [item for item in items if item["kind"] in ("field", "tag")]
     result = expected if expected is not None else fallback
     return items, join_checks(result, checks), images
 

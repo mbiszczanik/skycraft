@@ -327,38 +327,7 @@
       "valueOverrides": {},
       "viewUrl": "https://portal.azure.com/#view/Microsoft_Azure_Policy/PolicyComplianceDetail.ReactView/assignmentId/%2Fsubscriptions%2F<id>%2Fproviders%2Fmicrosoft.authorization%2Fpolicyassignments%2Fa0d67d1ca9255f3d8664b131/scopes~/%5B%22%2Fsubscriptions%2F<id>%22%5D/policyDefinitionId/%2Fproviders%2Fmicrosoft.authorization%2Fpolicydefinitions%2F<id>",
       "result": null,
-      "labels": {
-        "Overall compliance percentage": {
-          "decision": "ignore",
-          "role": null,
-          "name": null,
-          "severity": null,
-          "rejected": [
-            "button \"Overall compliance info\"",
-            "button \"Compliance state\"",
-            "heading \"Policy | Compliance\"",
-            "link \"Compliance\"",
-            "button \"Resources by compliance state info\"",
-            "button \"Resource compliance\"",
-            "button \"Compliance state Compliance state : All compliance states\"",
-            "button \"More content actions\"",
-            "button \"Close content 'Policy | Compliance'\"",
-            "button \"Skip to main content\"",
-            "button \"Collapse all headers\"",
-            "link \"Overview\"",
-            "heading \"Microsoft Azure\"",
-            "link \"Microsoft Azure\"",
-            "button \"Add Assignments to Favorites\"",
-            "button \"Suggest useful built-in Azure Policy definitions\"",
-            "button \"Show portal menu\"",
-            "button \"Show Microsoft Cloud menu\"",
-            "button \"Edit columns\"",
-            "menuitem \"Assign policy\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-14T15:33:40Z"
-        }
-      },
+      "labels": {},
       "startBlade": "Microsoft_Azure_Policy/PolicyMenuBlade.MenuView/~/Assignments"
     },
     "1.3.11": {
@@ -410,133 +379,6 @@
       "result": null,
       "labels": {}
     },
-    "1.3.14": {
-      "valueOverrides": {},
-      "viewUrl": "https://portal.azure.com/#resource/subscriptions/<id>/resourceGroups/platform-skycraft-swc-rg/overview",
-      "result": null,
-      "labels": {
-        "subscription": {
-          "decision": "ignore",
-          "role": null,
-          "name": null,
-          "severity": null,
-          "rejected": [
-            "button \"Subscription\"",
-            "button \"move to another subscription\"",
-            "button \"Location\" (x2)",
-            "button \"Skip to main content\"",
-            "button \"Notifications\"",
-            "button \"Settings\"",
-            "button \"Toggle Organization\"",
-            "tab \"Recommendations\"",
-            "button \"Essentials\"",
-            "heading \"Essentials\"",
-            "button \"Toggle Automation\"",
-            "button \"Chat suggestions from Copilot\"",
-            "link \"Activity log\"",
-            "menuitem \"Create\" (x2)",
-            "button \"Support + Troubleshooting\"",
-            "button \"Add resource to favorites\"",
-            "menuitem \"Group by none\"",
-            "button \"More content actions\"",
-            "button \"New Browse Experience\"",
-            "button \"Toggle Settings\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-14T15:43:41Z"
-        },
-        "resource group": {
-          "decision": "ignore",
-          "role": null,
-          "name": null,
-          "severity": null,
-          "rejected": [
-            "link \"Resource groups\"",
-            "link \"Resource Manager\"",
-            "tab \"Resources\"",
-            "link \"Resource visualizer\"",
-            "link \"All resources\"",
-            "link \"Resource Manager | Resource groups\"",
-            "heading \"Resource Manager | Resource groups\"",
-            "link \"Recent resources\"",
-            "button \"Hide Resource Manager | Resource groups\"",
-            "button \"Add resource to favorites\"",
-            "link \"Favorite resources\"",
-            "button \"Hide the menu for Resource Manager\"",
-            "combobox \"Search resources, services, and docs (G+/)\"",
-            "button \"Subscription\"",
-            "menuitem \"Group by none\"",
-            "button \"Support + Troubleshooting\"",
-            "button \"Remove Location equals all\"",
-            "checkbox \"Select all rows\" (x2)",
-            "button \"Remove Type equals all\"",
-            "button \"Chat suggestions from Copilot\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-14T15:44:03Z"
-        },
-        "CanNotDelete": {
-          "decision": "ignore",
-          "role": null,
-          "name": null,
-          "severity": null,
-          "rejected": [
-            "menuitem \"Create\" (x2)",
-            "button \"Cloud Shell\"",
-            "button \"clear\"",
-            "button \"Toggle Help\" (x2)",
-            "menuitem \"Manage view\" (x2)",
-            "link \"Analyze (Preview)\"",
-            "button \"Toggle Tools\"",
-            "link \"Events\"",
-            "button \"Add resource to favorites\"",
-            "button \"How to manage changes with deployment tools?\"",
-            "button \"Notifications\"",
-            "link \"All resources\"",
-            "menuitem \"More commands\" (x2)",
-            "button \"Copilot\"",
-            "link \"Overview\"",
-            "button \"Location\" (x2)",
-            "button \"move to another subscription\"",
-            "heading \"Microsoft Azure\"",
-            "link \"Microsoft Azure\"",
-            "button \"Toggle Settings\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-14T15:44:26Z"
-        },
-        "ReadOnly": {
-          "decision": "ignore",
-          "role": null,
-          "name": null,
-          "severity": null,
-          "rejected": [
-            "tab \"Recommendations\"",
-            "menuitem \"Create\" (x2)",
-            "menuitem \"More commands\" (x2)",
-            "button \"Location\" (x2)",
-            "tab \"Resources\"",
-            "button \"Remove Location equals all\"",
-            "link \"Resource Manager\"",
-            "button \"Essentials\"",
-            "heading \"Essentials\"",
-            "link \"Analyze (Preview)\"",
-            "button \"Toggle Automation\"",
-            "button \"clear\"",
-            "button \"Subscription\"",
-            "button \"Toggle Organization\"",
-            "link \"Resource visualizer\"",
-            "button \"Notifications\"",
-            "link \"All resources\"",
-            "button \"More content actions\"",
-            "link \"Access control (IAM)\"",
-            "link \"Events\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-14T15:44:52Z"
-        }
-      }
-    },
     "1.3.18": {
       "valueOverrides": {},
       "viewUrl": null,
@@ -566,7 +408,9 @@
     "1.3.22": {
       "valueOverrides": {},
       "viewUrl": "https://portal.azure.com/#servicemenu/Microsoft_Azure_Resources/ResourceManager/managementgroupbrowse",
-      "result": null,
+      "result": {
+        "text": "Tenant Root Group"
+      },
       "labels": {
         "Management groups": {
           "decision": "use",
@@ -597,38 +441,11 @@
           ],
           "decidedBy": "human",
           "at": "2026-10-14T15:52:36Z"
-        },
-        "Tenant Root Group": {
-          "decision": "ignore",
-          "role": null,
-          "name": null,
-          "severity": null,
-          "rejected": [
-            "link \"Resource groups\"",
-            "link \"Recent resources\"",
-            "heading \"Resource Manager | Management groups\"",
-            "button \"Close content 'Resource Manager | Management groups'\"",
-            "button \"Show Microsoft Cloud menu\"",
-            "button \"More content actions\"",
-            "heading \"Microsoft Azure\"",
-            "link \"Microsoft Azure\"",
-            "button \"Add Service groups to Favorites\"",
-            "menuitem \"Expand / Collapse all\"",
-            "button \"Add Management groups to Favorites\"",
-            "button \"Pin content 'Resource Manager | Management groups' to dashboard\"",
-            "button \"Toggle Tools\"",
-            "link \"Favorite resources\"",
-            "link \"All resources\"",
-            "button \"Toggle Organization\"",
-            "menuitem \"Export to CSV\"",
-            "button \"Total subscriptions\"",
-            "button \"Settings\"",
-            "tab \"Settings\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-14T15:53:15Z"
         }
-      }
+      },
+      "asked": [
+        "result"
+      ]
     }
   }
 }

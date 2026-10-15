@@ -704,7 +704,8 @@ Tenant Root Group
 
 1. In Azure Portal, search for **Management groups**
 2. Click **Management groups** service
-3. You'll see the **Tenant Root Group**
+
+**Expected Result**: **Management groups** lists the **Tenant Root Group**.
 
 ![View Management Groups](./images/step-1.3.22.png)
 
