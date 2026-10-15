@@ -88,7 +88,9 @@
     start, exit 254), a full-window screenshot of every step,
     summary.md, for a 'Search for' step that found no single result, search-<step>.aria.txt
     (the search dropdown's accessibility tree, redacted) and, for a label that was not found,
-    blade-<step>-<guide line>.aria.txt (the outline the blade loading check read, redacted).
+    blade-<step>-<guide line>.aria.txt (the outline the blade loading check read, redacted) and,
+    for a list option that was not found, list-<step>-<guide line>.aria.txt (the open list's
+    accessibility tree, redacted).
     summary.md and results.jsonl are meant to be copied into an issue or a pull request: each
     record keeps what it observed on one line, as the failure prompt shows it, without
     Playwright's call log, with the tenant domain, id and name, the guest address, object ids and
