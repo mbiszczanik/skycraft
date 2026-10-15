@@ -119,6 +119,17 @@ two rows of that exact cell are ambiguous, and a row without one such control is
 is looked for after the decorated names, from SETTLE_MS on, is a match with nothing recorded and
 no guide edit, and is selected as a stated 'Check' is (set_state: a radio is selected, a check
 box ticked), so a row already selected is 'already set' and selecting never clears it.
+A field (and an action whose control opens a list) is the guide's element as well when its
+label is plain text with the control right after it (find_by_text_label, #342): the Advisor
+alert's three combo boxes have no accessible name and the texts 'Category', 'Sub-category' and
+'Impact level' before them; a budget's 'Name' is a text box named 'Enter a unique name'. The text
+must be the label alone (whole text, no link, button or other interactive element), and the first
+control after it in document order (input, select, textarea, or role combobox, textbox, listbox,
+spinbutton, radiogroup) must come before any other text, whatever its own name. The same text
+twice is ambiguous unless the controls sit in different blades, when the newest blade's is the
+one. It is looked for after the decorated names, from SETTLE_MS on, is a match with nothing
+recorded and no guide edit, and counts as a field that can be filled in, so a form whose first
+field is found this way is open (find_form) and writes no wrong-blade record.
 A label is looked for until
 FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; when SETTLE_MS of
 that finds nothing, the blade menu's collapsed groups are opened ('Expand all headers', the
@@ -327,6 +338,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import itertools
 import json
 import re
 import sys
@@ -453,6 +465,27 @@ EXPAND_TRIES = 3                            # clicks of 'Expand all headers' per
 # The closest region (a blade) holding the element: [its aria-label, its left edge], or null.
 BLADE_OF_JS = ("e => { const r = e.closest('[role=region]'); "
                "return r ? [r.getAttribute('aria-label') || '', r.getBoundingClientRect().left] : null; }")
+# The control that follows a non-interactive text in document order (find_by_text_label, #342): an
+# input, select or textarea, or an element of role combobox, textbox, listbox, spinbutton or
+# radiogroup, visible, with no other visible text between the two. It marks that control with
+# NEXT_CONTROL_ATTR = the token it is given (a locator can then find it in its frame) and answers
+# whether there is one. A text that is, or sits inside, an interactive element (INTERACTIVE)
+# answers false.
+NEXT_CONTROL_ATTR = "data-skycraft-next-control"
+NEXT_CONTROL_TOKENS = itertools.count(1)
+NEXT_CONTROL_JS = (
+    "(e, token) => { if (e.closest('" + INTERACTIVE + "')) return false; "
+    "const control = 'input:not([type=hidden]), select, textarea, [role=combobox], [role=textbox], "
+    "[role=listbox], [role=spinbutton], [role=radiogroup]'; "
+    "const shown = n => n.getClientRects().length > 0; "
+    "const walker = e.ownerDocument.createTreeWalker(e.ownerDocument.body, "
+    "NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT); walker.currentNode = e; "
+    "for (let n = walker.nextNode(); n; n = walker.nextNode()) { if (e.contains(n)) continue; "
+    "if (n.nodeType === 1) { if (n.matches(control) && shown(n)) { "
+    "n.setAttribute('" + NEXT_CONTROL_ATTR + "', token); return true; } } "
+    "else if (n.textContent.trim()) { const p = n.parentElement; "
+    "if (p && !/^(SCRIPT|STYLE|NOSCRIPT)$/.test(p.tagName) && shown(p)) return false; } } "
+    "return false; }")
 # The global search's dropdown when the box names none in aria-controls or aria-owns: a popup of
 # these roles that was not visible before typing (MARK_POPUPS_JS records the visible ones first,
 # NEW_POPUP_JS asks, UNMARK_POPUPS_JS forgets them after the search). Only when that record could
@@ -1169,6 +1202,47 @@ def find_row_control(page: Page, label: str) -> Locator | None:
     return control[0]
 
 
+def opens_a_list(element: Locator) -> bool:
+    """Whether the control opens a list: a combo box, or an element with aria-haspopup listbox.
+    One that cannot be inspected does not."""
+    try:
+        _, role, _, popup, _ = element.evaluate(FIELD_KIND_JS, timeout=1000)
+    except PlaywrightError:
+        return False
+    return role == "combobox" or popup == "listbox"
+
+
+def find_by_text_label(page: Page, label: str, opens_list: bool = False) -> Locator | None:
+    """The control whose label is plain text beside it (#342): the Portal's Create Advisor Alerts
+    form has three combo boxes without a name under the texts 'Category', 'Sub-category' and
+    'Impact level', and a budget's 'Name' is a text box named by its placeholder 'Enter a unique
+    name'. Text whose whole text is `label`, that is no interactive element and sits in none
+    (get_by_text, exact), gives the first control after it in document order (NEXT_CONTROL_JS:
+    input, select, textarea, or role combobox, textbox, listbox, spinbutton, radiogroup) when no
+    other text comes between; the control's own accessible name does not matter (empty, or not
+    the label). Of several, the newest blade's is taken (newest_blade); otherwise they raise
+    Ambiguous. `opens_list`: only a control that opens a list counts (opens_a_list), which is
+    all a guide's action names this way. The guide's element: a match with nothing recorded."""
+    controls: list[Locator] = []
+    viewport = page.viewport_size
+    for frame in all_frames(page):
+        try:
+            for text in visible_in(frame.get_by_text(label, exact=True), viewport):
+                token = str(next(NEXT_CONTROL_TOKENS))
+                try:
+                    if not text.evaluate(NEXT_CONTROL_JS, token, timeout=1000):
+                        continue
+                except PlaywrightError:     # the text went away while the Portal re-rendered
+                    continue
+                # A second text of the same control re-marks it: only the last token finds it.
+                controls += visible_in(frame.locator(f'[{NEXT_CONTROL_ATTR}="{token}"]'), viewport)
+        except PlaywrightError:     # the frame detached or navigated: nothing to find there
+            continue
+    if opens_list:
+        controls = [control for control in controls if opens_a_list(control)]
+    return newest_blade(controls)
+
+
 def find_exact(page: Page, label: str, field: bool = False, decorated: bool = True) -> Locator | None:
     """The visible element whose accessible name is exactly `label`: for a field, find_field;
     otherwise the interactive roles, then plain text (find_in_roles). When nothing has the name
@@ -1180,7 +1254,9 @@ def find_exact(page: Page, label: str, field: bool = False, decorated: bool = Tr
     is False (looking_for, while a blade may still render the plain one). A plain name on screen
     as interactive text more than once is not found, as before, and is no reason to take a
     decorated one: the person decides. After the decorated names, for an action, the control of
-    the picker row whose cell names the label (find_row_control, #342)."""
+    the picker row whose cell names the label (find_row_control, #342); then, for a field, and
+    for an action when the control opens a list, the control after the plain text of that label
+    (find_by_text_label, #342)."""
     bare = LEADING_PLUS.sub("", label, count=1)
     names = [label] + ([bare] if bare and bare != label else [])
     for name in names:
@@ -1194,7 +1270,9 @@ def find_exact(page: Page, label: str, field: bool = False, decorated: bool = Tr
         element = find_decorated(page, name, field)
         if element is not None:
             return element
-    return None if field else find_row_control(page, label)
+    if field:
+        return find_by_text_label(page, label)
+    return find_row_control(page, label) or find_by_text_label(page, label, opens_list=True)
 
 
 def find_resource(page: Page, name: str) -> Locator | None:

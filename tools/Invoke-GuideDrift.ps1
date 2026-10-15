@@ -154,7 +154,10 @@
     after it is not checked. A step that opens with a global search, or with a resource name, may
     start anywhere and is not checked. Before the first field of a form, the run checks a field of
     that name can be filled in, so it never types into a list; when none can, it reports the same
-    drift (once per cause) and waits for you to open the form. A wrong recorded blade is deleted
+    drift (once per cause) and waits for you to open the form. A field whose label is plain text
+    with the control right after it (the Advisor alert's unnamed 'Category' combo box, a budget's
+    'Name' text box named by its placeholder) is that field: found, nothing recorded, and its form
+    counts as open. A wrong recorded blade is deleted
     from the recording by hand; the next run records it again.
 
     A PORTAL DEPLOYMENT IS WAITED FOR (issue #328). A Create starts a deployment that takes from

@@ -1973,7 +1973,9 @@ class ScreenNode(FakeElement):
     the number of reads after which `checked` turns over, as a click that went through late. As a
     label: `label_for`, the input it belongs to; `has_link`, whether it holds a link. As an option
     of a list: `selects_on_click` turns its aria-selected over on click. `blade`: what BLADE_OF_JS
-    reads, the aria-label and left edge of the region it sits in (None: in no region)."""
+    reads, the aria-label and left edge of the region it sits in (None: in no region).
+    `next_control`: as a text, the control NEXT_CONTROL_JS finds after it (None: other text comes
+    first, or no control), which the script marks with the token it is given."""
 
     def __init__(self, interactive: bool = True, on_click=None, on_fill=None, attrs=None, children=None,
                  rect=None, section=("", "", ""), unreadable: int = 0, tree: str = "", tag: str = "div",
@@ -1982,8 +1984,10 @@ class ScreenNode(FakeElement):
                  editable: bool = False, uninspectable: bool = False, checked: bool = False,
                  check_error: Exception | None = None, label: "ScreenNode | None" = None,
                  label_for: "ScreenNode | None" = None, has_link: bool = False,
-                 selects_on_click: bool = False, blade: tuple[str, float] | None = None) -> None:
+                 selects_on_click: bool = False, blade: tuple[str, float] | None = None,
+                 next_control: "ScreenNode | None" = None) -> None:
         super().__init__()
+        self.next_control = next_control
         self.blade = blade
         self.selects_on_click = selects_on_click
         self.label_for = label_for
@@ -2042,6 +2046,11 @@ class ScreenNode(FakeElement):
             return [self.label_for is arg, self.has_link]
         if script == run.BLADE_OF_JS:
             return list(self.blade) if self.blade else None
+        if script == run.NEXT_CONTROL_JS:
+            if self.next_control is None or self.interactive:
+                return False
+            self.next_control.attrs[run.NEXT_CONTROL_ATTR] = arg
+            return True
         if script == run.IN_TOP_BAR_JS:
             return self.in_top_bar
         if script == run.FIELD_KIND_JS:
@@ -2179,6 +2188,9 @@ class Screen:
         list of '[role=x]' (POPUP_ROLES)."""
         if selector.startswith(":is("):
             return ScreenLocator([node for _, _, node in self.everything() if node.interactive])
+        m = re.match(r'^\[(data-[\w-]+)="([^"]*)"\]$', selector)
+        if m:
+            return ScreenLocator([node for _, _, node in self.everything() if node.attrs.get(m.group(1)) == m.group(2)])
         m = self.ID.match(selector)
         if m:
             return ScreenLocator([node for _, _, node in self.everything() if node.attrs.get("id") == m.group(1)])
@@ -5586,6 +5598,101 @@ class PickerRowTests(RunnerTestCase):
         link = ScreenNode()
         screen = Screen(("link", "Allowed locations", link), self.row("Allowed locations", ("radio", self.radio())))
         self.assertIs(self.find(screen), link)
+
+
+class TextLabelTests(RunnerTestCase):
+    """A field whose label is plain text beside it, not its accessible name (1.3.7's unnamed
+    combo boxes under 'Category', 'Sub-category', 'Impact level'; 1.3.15's 'Name' above a text
+    box named by its placeholder; #342): find_by_text_label, the guide's element, nothing recorded."""
+
+    @staticmethod
+    def label(text: str, control: ScreenNode | None) -> tuple[str, str, ScreenNode]:
+        return "text", text, ScreenNode(interactive=False, next_control=control)
+
+    @staticmethod
+    def combo() -> ScreenNode:
+        return ScreenNode(attrs={"role": "combobox"}, tag="div")
+
+    def advisor(self) -> tuple[Screen, list[ScreenNode]]:
+        """Run B's Create Advisor Alerts iframe: three combo boxes without a name; their labels
+        are the text before each (Step-1.3.7.png)."""
+        boxes = [self.combo() for _ in range(3)]
+        screen = Screen(("radiogroup", "Configured by", ScreenNode()),
+                        self.label("Category", boxes[0]), ("combobox", "", boxes[0]),
+                        self.label("Sub-category", boxes[1]), ("combobox", "", boxes[1]),
+                        self.label("Impact level", boxes[2]), ("combobox", "", boxes[2]))
+        return screen, boxes
+
+    @staticmethod
+    def find(screen: Screen, label: str, field: bool = True, **kwargs):
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            return run.find_exact(FakePage(), label, field=field, **kwargs)
+
+    def test_category_is_the_unnamed_combobox_after_its_text(self) -> None:
+        screen, boxes = self.advisor()
+        for text, box in zip(("Category", "Sub-category", "Impact level"), boxes):
+            with self.subTest(label=text):
+                self.assertIs(self.find(screen, text), box)
+
+    def test_name_is_the_textbox_named_by_its_placeholder(self) -> None:
+        # blade-1.3.16: textbox "Enter a unique name" under the text "Name"
+        box = ScreenNode(attrs={"role": "textbox"}, tag="input")
+        screen = Screen(self.label("Name", box), ("textbox", "Enter a unique name", box))
+        self.assertIs(self.find(screen, "Name"), box)
+
+    def test_text_with_other_text_before_the_control_is_no_label(self) -> None:
+        screen = Screen(self.label("Category", None), ("text", "Choose carefully", ScreenNode(interactive=False)),
+                        ("combobox", "", self.combo()))
+        self.assertIsNone(self.find(screen, "Category"))
+
+    def test_a_text_label_on_screen_twice_is_ambiguous(self) -> None:
+        first, second = self.combo(), self.combo()
+        screen = Screen(self.label("Category", first), ("combobox", "", first),
+                        self.label("Category", second), ("combobox", "", second))
+        with self.assertRaises(run.Ambiguous):
+            self.find(screen, "Category")
+
+    def test_a_field_named_by_its_accessible_name_still_wins(self) -> None:
+        named, other = ScreenNode(attrs={"role": "textbox"}, tag="input"), self.combo()
+        screen = Screen(self.label("Name", other), ("textbox", "Name", named))
+        self.assertIs(self.find(screen, "Name"), named)
+
+    def test_it_counts_only_once_the_decorated_names_may(self) -> None:
+        screen, _ = self.advisor()
+        self.assertIsNone(self.find(screen, "Category", decorated=False))
+
+    def test_interactive_text_is_no_label(self) -> None:
+        screen = Screen(("text", "Category", ScreenNode(interactive=True, next_control=self.combo())))
+        self.assertIsNone(self.find(screen, "Category"))
+
+    def test_the_newest_blade_wins_among_equal_labels(self) -> None:
+        old, new = self.combo(), self.combo()
+        old.blade, new.blade = ("Earlier", 0.0), ("Newest", 500.0)
+        screen = Screen(self.label("Category", old), ("combobox", "", old),
+                        self.label("Category", new), ("combobox", "", new))
+        self.assertIs(self.find(screen, "Category"), new)
+
+    def test_an_action_uses_it_only_for_a_control_that_opens_a_list(self) -> None:
+        box, button = self.combo(), ScreenNode(attrs={"role": "button"}, tag="button")
+        self.assertIs(self.find(Screen(self.label("Category", box), ("combobox", "", box)), "Category", field=False), box)
+        self.assertIsNone(self.find(Screen(self.label("Category", button), ("button", "", button)), "Category", field=False))
+        listbox = ScreenNode(attrs={"role": "button", "aria-haspopup": "listbox"}, tag="button")
+        self.assertIs(self.find(Screen(self.label("Category", listbox), ("button", "", listbox)), "Category", field=False), listbox)
+
+    FIELD = {"kind": "field", "label": "Name", "value": "budget", "line": 4}
+
+    def test_a_form_whose_first_field_is_found_by_its_text_is_open(self) -> None:
+        (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+        box = ScreenNode(attrs={"role": "textbox"}, tag="input")
+        screen = Screen(self.label("Name", box), ("textbox", "Enter a unique name", box))
+        r = run.Runner(page_on(f"view/{USERS}"), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "items": [self.FIELD], "images": []}
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=[]):
+            record = self.quietly(lambda: r.act_on_label(step, self.FIELD, "Name", "budget", form_start=True))
+        self.assertEqual((record["outcome"], box.filled, r.ask.prompts, r.records, self.recording["steps"]["9.9.1"]["labels"]),
+                         ("match", ["budget"], [], [], {}))
 
 
 if __name__ == "__main__":
