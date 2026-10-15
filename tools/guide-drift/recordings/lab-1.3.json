@@ -9,43 +9,10 @@
   "placeholders": {},
   "steps": {
     "1.3.5": {
-      "valueOverrides": {
-        "Policy enforcement": "[Leave blank]"
-      },
+      "valueOverrides": {},
       "viewUrl": "https://portal.azure.com/#view/Microsoft_Azure_Policy/CreateEditAssignment.ReactView/isCreateMode~/true/assignMode/Policy/preSelectedDefinitionId~/null/preSelectedDefinitionVersion~/null/preSelectedScope/%2Fsubscriptions%2F<id>",
       "result": null,
-      "labels": {
-        "Require a tag on resource groups": {
-          "decision": "use",
-          "role": "radio",
-          "name": "Select",
-          "severity": "cosmetic",
-          "rejected": [
-            "button \"Expand Resource selectors\"",
-            "button \"Category Category : All categories\"",
-            "button \"More content actions\"",
-            "tab \"Review + create\"",
-            "button \"Review + create\"",
-            "tab \"Remediation\"",
-            "combobox \"Search resources, services, and docs (G+/)\"",
-            "button \"Support + Troubleshooting\"",
-            "button \"Skip to main content\"",
-            "button \"Latest version\"",
-            "link \"Learn more about setting the scope\"",
-            "button \"Learn more about setting the scope\"",
-            "button \"Expand Overrides\"",
-            "textbox \"Exclusions\"",
-            "button \"Previous step of the form\"",
-            "heading \"Available Definitions\"",
-            "button \"Close content 'Available Definitions'\"",
-            "radio \"Do not enforce\"",
-            "tab \"Non-compliance messages\"",
-            "button \"Show portal menu\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-15T07:29:35Z"
-        }
-      }
+      "labels": {}
     },
     "1.3.7": {
       "valueOverrides": {
@@ -61,38 +28,7 @@
       },
       "viewUrl": "https://portal.azure.com/#view/Microsoft_Azure_Policy/CreateEditAssignment.ReactView/isCreateMode~/true/assignMode/Policy/preSelectedDefinitionId~/null/preSelectedDefinitionVersion~/null/preSelectedScope/%2Fsubscriptions%2F<id>",
       "result": null,
-      "labels": {
-        "Require a tag and its value on resources": {
-          "decision": "use",
-          "role": "radio",
-          "name": "Select",
-          "severity": "cosmetic",
-          "rejected": [
-            "button \"Expand Resource selectors\"",
-            "button \"Expand Overrides\"",
-            "tab \"Remediation\"",
-            "button \"Support + Troubleshooting\"",
-            "button \"Category Category : All categories\"",
-            "heading \"Available Definitions\"",
-            "combobox \"Search resources, services, and docs (G+/)\"",
-            "heading \"Microsoft Azure\"",
-            "link \"Microsoft Azure\"",
-            "tab \"Review + create\"",
-            "button \"Review + create\"",
-            "button \"Skip to main content\"",
-            "button \"More content actions\"",
-            "radio \"Do not enforce\"",
-            "button \"Show portal menu\"",
-            "tab \"Managed identity\"",
-            "button \"Next: Parameters\"",
-            "button \"Show Microsoft Cloud menu\"",
-            "textbox \"Policy definition\"",
-            "button \"Policy definition\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-15T07:34:59Z"
-        }
-      }
+      "labels": {}
     },
     "1.3.9": {
       "valueOverrides": {
@@ -111,38 +47,7 @@
       },
       "viewUrl": "https://portal.azure.com/#view/Microsoft_Azure_CostManagement/BudgetCreateBlade/id/%2Fsubscriptions%2F<id>/openedBy/ACM.Budgets",
       "result": null,
-      "labels": {
-        "Name": {
-          "decision": "use",
-          "role": "textbox",
-          "name": "Enter a unique name",
-          "severity": "cosmetic",
-          "rejected": [
-            "link \"Home\"",
-            "button \"Next >\"",
-            "button \"Show portal menu\"",
-            "button \"Add filter\"",
-            "textbox \"Amount (€)\"",
-            "button \"Notifications\"",
-            "button \"clear\"",
-            "heading \"Microsoft Azure\"",
-            "link \"Microsoft Azure\"",
-            "button \"Toggle\" (x6)",
-            "link \"Cost Management + Billing | Cost Management\"",
-            "button \"Skip to main content\"",
-            "button \"Settings\"",
-            "button \"Feedback\"",
-            "button \"More content actions\"",
-            "button \"Previous\"",
-            "tab \"Set alerts\"",
-            "button \"Show Microsoft Cloud menu\"",
-            "button \"Cloud Shell\"",
-            "combobox \"Reset period\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-14T15:46:34Z"
-        }
-      }
+      "labels": {}
     },
     "1.3.16": {
       "valueOverrides": {
@@ -159,75 +64,13 @@
       },
       "viewUrl": "https://portal.azure.com/#resource/subscriptions/<id>/resourceGroups/prod-skycraft-swc-rg/overview",
       "result": null,
-      "labels": {
-        "Resource groups": {
-          "decision": "use",
-          "role": "option",
-          "name": "Resource groups Resource Manager",
-          "severity": "cosmetic",
-          "rejected": [
-            "combobox \"Reset period\"",
-            "heading \"Services\"",
-            "button \"Previous\"",
-            "button \"Support + Troubleshooting\"",
-            "tab \"Set alerts\"",
-            "button \"Services (43)\"",
-            "button \"Settings\"",
-            "button \"4 more filters\"",
-            "button \"Marketplace (2)\"",
-            "button \"Try searching in Microsoft Entra ID\"",
-            "combobox \"Search resources, services, and docs (G+/)\"",
-            "heading \"Marketplace\"",
-            "button \"Cloud Shell\"",
-            "button \"Show Microsoft Cloud menu\"",
-            "button \"clear\"",
-            "button \"See more (Services)\"",
-            "button \"Notifications\"",
-            "button \"More content actions\"",
-            "combobox \"Enter end date month\"",
-            "combobox \"Enter start date year\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-14T15:50:04Z"
-        }
-      }
+      "labels": {}
     },
     "1.3.1": {
       "valueOverrides": {},
       "viewUrl": "https://portal.azure.com/#resource/subscriptions/<id>/resourceGroups/dev-skycraft-swc-rg/overview",
       "result": null,
-      "labels": {
-        "Resource groups": {
-          "decision": "use",
-          "role": "option",
-          "name": "Resource groups Resource Manager",
-          "severity": "cosmetic",
-          "rejected": [
-            "heading \"Services\"",
-            "button \"Support + Troubleshooting\"",
-            "button \"Services (43)\"",
-            "heading \"Error details\"",
-            "button \"Settings\"",
-            "button \"4 more filters\"",
-            "button \"Marketplace (2)\"",
-            "button \"Try searching in Microsoft Entra ID\"",
-            "combobox \"Search resources, services, and docs (G+/)\"",
-            "heading \"Marketplace\"",
-            "button \"Cloud Shell\"",
-            "button \"Copy error details\"",
-            "button \"Show Microsoft Cloud menu\"",
-            "button \"clear\"",
-            "button \"See more (Services)\"",
-            "button \"Notifications\"",
-            "button \"More content actions\"",
-            "heading \"You don't have access\"",
-            "button \"Copilot\"",
-            "heading \"Help improve this page\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-14T15:16:00Z"
-        }
-      }
+      "labels": {}
     },
     "1.3.2": {
       "valueOverrides": {},
@@ -247,38 +90,7 @@
       "result": {
         "text": "prod-skycraft-swc-rg"
       },
-      "labels": {
-        "Tags": {
-          "decision": "use",
-          "role": "option",
-          "name": "Tags Resource Manager",
-          "severity": "cosmetic",
-          "rejected": [
-            "link \"Tags\" (x2)",
-            "button \"edit tags\"",
-            "button \"Settings\"",
-            "button \"Change\"",
-            "link \"Events\"",
-            "button \"Toggle Tools\"",
-            "button \"Notifications\"",
-            "button \"Toggle Settings\"",
-            "button \"Toggle Deployments\"",
-            "button \"Toggle Help\" (x2)",
-            "menuitem \"Manage view\" (x2)",
-            "button \"More content actions\"",
-            "link \"Activity log\"",
-            "button \"Name\" (x2)",
-            "button \"Type\"",
-            "heading \"Documentation\"",
-            "link \"All resources\"",
-            "menuitem \"More commands\" (x2)",
-            "button \"Toggle Cost Management\"",
-            "button \"Remove Type equals all\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-14T15:18:28Z"
-        }
-      },
+      "labels": {},
       "asked": [
         "result"
       ]
@@ -287,38 +99,7 @@
       "valueOverrides": {},
       "viewUrl": "https://portal.azure.com/#view/HubsExtension/ResourceGroupCreate.ReactView/_provisioningContext~/%7B%22telemetryId%22%3A%22<id>%22%2C%22referenceType%22%3A%7B%22extensionName%22%3A%22HubsExtension%22%2C%22assetType%22%3A%22ResourceGroups%22%7D%2C%22initialValues%22%3A%7B%22subscriptionIds%22%3A%5B%22<id>%22%2C%22<id>%22%2C%22<id>%22%2C%22<id>%22%5D%2C%22resourceGroupNames%22%3A%5B%5D%2C%22locationNames%22%3A%5B%22swedencentral%22%2C%22eastus%22%2C%22westeurope%22%2C%22northeurope%22%2C%22eastus2%22%5D%7D%2C%22marketplaceItem%22%3A%7B%22categoryIds%22%3A%5B%5D%2C%22id%22%3A%22Microsoft.Portal%22%2C%22itemDisplayName%22%3A%22NoMarketplace%22%2C%22products%22%3A%5B%5D%2C%22version%22%3A%22%22%2C%22productsWithNoPricing%22%3A%5B%5D%2C%22publisherDisplayName%22%3A%22Microsoft.Portal%22%2C%22deploymentName%22%3A%22NoMarketplace%22%2C%22launchingContext%22%3A%7B%22telemetryId%22%3A%22<id>%22%2C%22source%22%3A%5B%22BrowseResourceGroups.ReactView%22%2C%22%7B%20Name%3A%20Part%2C%20Type%3A%20%5B0%5DHubsExtension-%5B1%5DBrowseResourceGroups.ReactView-%5B2%5DAzBladeVirtualLens-%5B5%5DBrowseResourceGroups.ReactView%2C%20Id%3A%20Part-BrowseResourceGroups.ReactView-18%20%7D%22%2C%22Part-BrowseResourceGroups.ReactView-18%22%5D%2C%22galleryItemId%22%3A%22%22%7D%2C%22deploymentTemplateFileUris%22%3A%7B%7D%2C%22uiMetadata%22%3Anull%7D%7D",
       "result": null,
-      "labels": {
-        "Resource groups": {
-          "decision": "use",
-          "role": "option",
-          "name": "Resource groups Resource Manager",
-          "severity": "cosmetic",
-          "rejected": [
-            "heading \"Services\"",
-            "button \"Support + Troubleshooting\"",
-            "button \"Scope\"",
-            "button \"Edit columns\"",
-            "button \"Services (43)\"",
-            "button \"Settings\"",
-            "button \"4 more filters\"",
-            "button \"Marketplace (2)\"",
-            "button \"Try searching in Microsoft Entra ID\"",
-            "combobox \"Search resources, services, and docs (G+/)\"",
-            "heading \"Marketplace\"",
-            "button \"Cloud Shell\"",
-            "link \"Remediation\"",
-            "button \"Show Microsoft Cloud menu\"",
-            "button \"clear\"",
-            "button \"See more (Services)\"",
-            "button \"Notifications\"",
-            "button \"More content actions\"",
-            "link \"Events\"",
-            "textbox \"Search\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-14T15:23:32Z"
-        }
-      }
+      "labels": {}
     },
     "1.3.10": {
       "lateLabels": {
@@ -334,38 +115,7 @@
       "valueOverrides": {},
       "viewUrl": "https://portal.azure.com/#resource/subscriptions/<id>/resourceGroups/prod-skycraft-swc-rg/overview",
       "result": null,
-      "labels": {
-        "Resource groups": {
-          "decision": "use",
-          "role": "option",
-          "name": "Resource groups Resource Manager",
-          "severity": "cosmetic",
-          "rejected": [
-            "button \"Resource type\"",
-            "tab \"Resource Compliance\"",
-            "heading \"Services\"",
-            "textbox \"Filter by resource name or ID...\"",
-            "button \"Support + Troubleshooting\"",
-            "button \"Scope\"",
-            "button \"Compliance reason\"",
-            "button \"Edit columns\"",
-            "menuitem \"Create remediation task\"",
-            "button \"Resources by compliance state info\"",
-            "button \"Services (43)\"",
-            "button \"Settings\"",
-            "button \"4 more filters\"",
-            "heading \"Require-Environment-Tag-RG\"",
-            "button \"Marketplace (2)\"",
-            "button \"Copy to clipboard the value Require a tag on resource groups for Definition\"",
-            "menuitem \"Create exemption\"",
-            "button \"Compliance state\"",
-            "button \"Try searching in Microsoft Entra ID\"",
-            "combobox \"Search resources, services, and docs (G+/)\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-14T15:39:19Z"
-        }
-      }
+      "labels": {}
     },
     "1.3.12": {
       "valueOverrides": {},
@@ -411,38 +161,7 @@
       "result": {
         "text": "Tenant Root Group"
       },
-      "labels": {
-        "Management groups": {
-          "decision": "use",
-          "role": "option",
-          "name": "Management groups Resource Manager",
-          "severity": "cosmetic",
-          "rejected": [
-            "button \"More content actions\"",
-            "button \"Resource Group equals all\"",
-            "button \"Active resources\"",
-            "button \"Toggle Recommendations\"",
-            "menuitem \"Group by\"",
-            "link \"Assessments (Preview)\"",
-            "button \"Resource Group equals all remove\"",
-            "button \"Change\"",
-            "button \"Page 1\"",
-            "button \"Page 2\"",
-            "button \"Add All recommendations to Favorites\"",
-            "heading \"Documentation\"",
-            "button \"Toggle Support + troubleshooting\"",
-            "button \"Skip to main content\"",
-            "button \"Last refreshed\"",
-            "button \"Add Operational excellence to Favorites\"",
-            "button \"Previous\"",
-            "button \"Are these recommendations helpful?\"",
-            "link \"Getting started\"",
-            "button \"Add Performance to Favorites\""
-          ],
-          "decidedBy": "human",
-          "at": "2026-10-14T15:52:36Z"
-        }
-      },
+      "labels": {},
       "asked": [
         "result"
       ]
