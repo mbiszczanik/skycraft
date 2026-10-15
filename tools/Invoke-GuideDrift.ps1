@@ -185,10 +185,12 @@
     1.3.10). A step entry of the recording says so with "lateLabels": {"<label>": <minutes>},
     whole minutes from 1 to 60 (a label of that step; the run refuses to start on any other
     value). For that label only, when it is not found in its usual time, the run says how long it
-    waits, then every minute clicks the newest blade's Refresh (or reloads the page when none is
-    on screen) and looks again, saying every minute how long it has waited. At the limit it goes
-    on as usual: the recorded decision, or you are asked. A label without an entry is never
-    waited for, so a real drift costs no minutes.
+    waits, then every minute clicks the newest blade's Refresh, a button or a menu item (or
+    reloads the page when none is on screen), and looks again, saying every minute how long it
+    has waited: N minutes are N refreshes, the last one at the limit and looked at too. A reload
+    that times out is reported and the wait goes on. After that last look it goes on as usual:
+    the recorded decision, or you are asked. A label without an entry is never waited for, so a
+    real drift costs no minutes.
 
     CLEANUP IS THE LAB'S OWN, AND ONLY AFTER A FINISHED RUN. This script has no deletion logic.
     Unless -SkipCleanup, and only when run.py ended normally and the state file confirms it

@@ -6217,9 +6217,76 @@ class LateViewTests(RunnerTestCase):
         start = run.FIND_TIMEOUT_MS / 1000
         self.assertGreaterEqual(r.page.now, start + 2 * 60)
         self.assertLess(r.page.now, start + 2 * 60 + run.LATE_POLL_S + run.FIND_TIMEOUT_MS / 1000)
-        self.assertGreaterEqual(right.clicked, 1)
-        self.assertLessEqual(right.clicked, 2)
+        self.assertEqual(right.clicked, 2)                                 # one refresh a minute, the last at the limit
         self.assertTrue(any("2 min" in line and "asking" in line for line in self.said(printed)))
+
+    def test_one_late_minute_refreshes_once_looks_once_and_then_asks(self) -> None:
+        self.allow(1)
+        screen, link, left, right = self.refreshing(shows_after=99)
+        looks = []
+        exact = run.find_exact
+        with mock.patch.object(run, "find_exact", lambda *a, **k: looks.append(right.clicked) or exact(*a, **k)):
+            record, r = self.act(screen, self.ITEM, self.LABEL)
+        self.assertEqual((record["outcome"], len(r.ask.prompts), right.clicked, left.clicked), ("unknown", 1, 1, 0))
+        start = run.FIND_TIMEOUT_MS / 1000
+        self.assertGreaterEqual(r.page.now, start + run.LATE_POLL_S + run.FIND_TIMEOUT_MS / 1000)
+        self.assertLess(r.page.now, start + run.LATE_POLL_S + run.FIND_TIMEOUT_MS / 1000 + 1)
+        self.assertTrue(looks and looks[-1] == 1)                          # looked at after the refresh
+
+    def test_one_late_minute_finds_a_label_its_one_refresh_shows(self) -> None:
+        self.allow(1)
+        screen, link, left, right = self.refreshing(shows_after=1)
+        record, r = self.act(screen, self.ITEM, self.LABEL)
+        self.assertEqual((record["outcome"], link.clicked, r.ask.prompts, right.clicked), ("match", 1, [], 1))
+
+    def test_the_newest_blades_refresh_menu_item_wins_over_an_older_blades_button(self) -> None:
+        # The Compliance blade's Refresh is a menu item; the Overview blade parked left of it has a button.
+        self.allow(30)
+        link, older, clicks = ScreenNode(), ScreenNode(blade=self.LEFT), []
+        screen = Screen(tree=self.GRID)
+        newest = ScreenNode(blade=self.RIGHT, on_click=lambda: screen.add(("link", self.LABEL, link)))
+        screen.add(("button", "Refresh", older), ("menuitem", "Refresh", newest))
+        page = self.ReloadPage()
+        record, r = self.act(screen, self.ITEM, self.LABEL, page=page)
+        self.assertEqual((record["outcome"], newest.clicked, older.clicked, page.reloads), ("match", 1, 0, 0))
+
+    def test_refresh_buttons_and_menu_items_the_newest_blade_cannot_tell_apart_reload_the_page(self) -> None:
+        self.allow(30)
+        link, screen = ScreenNode(), Screen(tree=self.GRID)
+        button, item = ScreenNode(blade=self.RIGHT), ScreenNode(blade=self.RIGHT)
+        screen.add(("button", "Refresh", button), ("menuitem", "Refresh", item))
+        page = self.ReloadPage(lambda n: n == 1 and screen.add(("link", self.LABEL, link)))
+        record, r = self.act(screen, self.ITEM, self.LABEL, page=page)
+        self.assertEqual((record["outcome"], button.clicked, item.clicked, page.reloads), ("match", 0, 0, 1))
+
+    def test_a_reload_that_times_out_is_reported_and_the_wait_goes_on(self) -> None:
+        self.allow(30)
+        link, screen = ScreenNode(), Screen(tree=self.GRID)
+
+        def reloaded(n: int) -> None:
+            if n == 1:
+                raise run.PlaywrightError("Timeout 30000ms exceeded.")
+            screen.add(("link", self.LABEL, link))
+        page = self.ReloadPage(reloaded)
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.ITEM, self.LABEL, page=page)
+        self.assertEqual((record["outcome"], link.clicked, page.reloads, r.ask.prompts), ("match", 1, 2, []))
+        said = [line for line in self.said(printed) if "reload" in line.lower()]
+        self.assertEqual(len(said), 1)
+        self.assertIn("Timeout 30000ms exceeded", said[0])
+
+    def test_a_window_closed_during_the_reload_stops_the_run(self) -> None:
+        self.allow(30)
+        screen = Screen(tree=self.GRID)
+        page = self.ReloadPage()
+
+        def closed(n: int) -> None:
+            page.closed = True
+            raise run.PlaywrightError("Target page, context or browser has been closed")
+        page.on_reload = closed
+        with self.assertRaises(run.PageClosed):
+            self.act(screen, self.ITEM, self.LABEL, page=page)
+        self.assertEqual(page.reloads, 1)
 
     def test_no_wait_without_a_late_label(self) -> None:
         screen, link, left, right = self.refreshing(shows_after=1)

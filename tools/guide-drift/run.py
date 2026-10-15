@@ -185,11 +185,15 @@ an assignment only after the next evaluation (step 1.3.10). A step entry says so
 on any other value, recording.late_label_problems, as on a skip without a reason). Only for that
 label, once the lookup above found nothing and before the recording's decision or the person is
 asked (Runner.wait_for_late_view): the console says once how long the run waits, then every
-LATE_POLL_S the newest blade's one visible 'Refresh' (button or menu item, newest_blade) is
-clicked, or, when the screen shows none, the page is reloaded, and the label is looked for
-FIND_TIMEOUT_MS; every DEPLOYMENT_SAY_S the console says how long the run has waited. At the limit
-it goes on as without the wait, so a label that never shows is still reported or asked about; a
-label without an entry is never waited for, as a real drift would cost minutes on every run.
+LATE_POLL_S the view is refreshed (Runner.refresh_view: the newest blade's one visible 'Refresh'
+is clicked, a button or a menu item alike, chosen among both roles together by newest_blade; when
+the screen shows none, or several it cannot tell apart, the page is reloaded, and a reload that
+times out is said on the console and the wait goes on) and the label is looked for
+FIND_TIMEOUT_MS; every DEPLOYMENT_SAY_S the console says how long the run has waited. The refresh
+comes before the limit is checked, so N minutes give N refreshes, the last one at the limit and
+looked at too. After that it goes on as without the wait, so a label that never shows is still
+reported or asked about; a label without an entry is never waited for, as a real drift would
+cost minutes on every run.
 
 A resource a navigation chain names in a code span ('**Load balancers** -> `dev-skycraft-swc-lb`
 -> **Backend pools**', parse.py's "resources") is opened as the one visible link, grid cell or row
@@ -2607,11 +2611,14 @@ class Runner:
                            look: Callable[[], Locator | None]) -> Locator | None:
         """After the lookup (wait_for_blade) found nothing: when the recording lets step `step` wait
         for a view that lists `label` only later (recording.late_minutes, "lateLabels", #342),
-        say once how long, then every LATE_POLL_S click the newest blade's one visible 'Refresh'
-        (refresh_view; the page is reloaded when there is none) and look for FIND_TIMEOUT_MS,
-        saying every DEPLOYMENT_SAY_S how long it has waited. Returns what `look` found; None at
-        the limit, and at once without an entry for the label, so the deciders and the person
-        come as before. A window that closes raises PageClosed."""
+        say once how long, then every LATE_POLL_S refresh the view (refresh_view: the newest
+        blade's one visible 'Refresh', else a reload of the page) and look for FIND_TIMEOUT_MS,
+        saying every DEPLOYMENT_SAY_S how long it has waited. The refresh comes before the limit
+        is checked, so N minutes give N refreshes, the last one at the limit and looked at too
+        (one minute: one refresh, one look, then the deciders). Returns what `look` found; None
+        once the last look after the limit has found nothing, and at once without an entry for the
+        label, so the deciders and the person come as before. A window that closes raises
+        PageClosed."""
         minutes = late_minutes(self.recording, step["id"], label)
         if minutes is None:
             return None
@@ -2628,36 +2635,46 @@ class Runner:
                     said = time.monotonic()
                     print(f"  still waiting for '{label}': {duration(said - started)} of up to {minutes} min")
                 self.page.wait_for_timeout(min(DEPLOYMENT_POLL_MS, max(1, int((due - time.monotonic()) * 1000))))
-            waited = time.monotonic() - started
-            if waited >= minutes * 60:
-                print(f"'{label}' is still not listed after {duration(waited)} (the recording's {minutes} min): "
-                      "asking about it.")
-                return None
             self.refresh_view()
             refreshes += 1
             found = in_time(self.page, look)
             if found is not None:
                 print(f"Found '{label}' after refreshing for {duration(time.monotonic() - started)}.")
                 return found
+            if refreshes * LATE_POLL_S >= minutes * 60:
+                print(f"'{label}' is still not listed after {duration(time.monotonic() - started)} "
+                      f"(the recording's {minutes} min): asking about it.")
+                return None
 
     def refresh_view(self) -> None:
-        """Click the newest blade's one visible 'Refresh' (a button, else a menu item: the
-        Compliance blade's is a menu item), or reload the page when the screen shows none or
-        several that newest_blade cannot tell apart, or the click fails."""
-        for role in ("button", "menuitem"):
-            try:
-                button = newest_blade(visible_across_frames(
-                    self.page, lambda f, role=role: f.get_by_role(role, name=REFRESH, exact=True)))
-            except Ambiguous:
-                break
-            if button is None:
-                continue
+        """Refresh the view: click the newest blade's one visible 'Refresh', a button or a menu
+        item alike (the Compliance blade's is a menu item, and a blade parked left of it may show a
+        button), chosen among both roles together by newest_blade, so the newest blade's wins
+        whatever its role. When the screen shows none, or several that newest_blade cannot tell
+        apart, or the click fails, the page is reloaded instead. A reload that fails (it timed out)
+        is reported on the console, scrubbed, and the wait goes on; a closed window raises
+        PageClosed, as anywhere else."""
+        found = [element for role in ("button", "menuitem")
+                 for element in visible_across_frames(
+                     self.page, lambda f, role=role: f.get_by_role(role, name=REFRESH, exact=True))]
+        try:
+            button = newest_blade(found)
+        except Ambiguous:
+            button = None
+        if button is not None:
             try:
                 button.click(timeout=FIND_TIMEOUT_MS)
                 return
             except PlaywrightError:
-                break
-        self.page.reload()
+                if self.page.is_closed():
+                    raise PageClosed("the browser window was closed") from None
+        try:
+            self.page.reload()
+        except PlaywrightError as error:
+            if self.page.is_closed():
+                raise PageClosed("the browser window was closed") from None
+            print(f"The page did not reload ({scrub(error_text(error), self.redactor, self.secrets)}): "
+                  "looking again all the same.")
 
     def wait_for_blade(self, step: dict, item: dict, label: str, look: Callable[[], Locator | None],
                        renew: Callable[[], Callable[[], Locator | None]] | None = None) -> Locator | None:
