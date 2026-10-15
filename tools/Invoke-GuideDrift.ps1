@@ -17,8 +17,10 @@
     on the Entra ID overview of the tenant of -SubscriptionId (or of -TenantId), waits for you to sign in (until
     the overview shows 'Tenant ID'), refuses to start unless the Portal is in English and the
     overview shows that tenant's id, then performs every portal step for real: later
-    steps depend on what earlier ones created. It never clicks one of several matching elements,
-    and never an element whose name contains delete, remove, reset, revoke, disable, block, purge
+    steps depend on what earlier ones created. It never clicks one of several matching elements
+    (except the only match in the newest of several open blades: the pane opened beside a list
+    shows the same menu entries as the list), and never an element whose name contains delete,
+    remove, reset, revoke, disable, block, purge
     or sign out unless the guide's own label contains that word too. Every check ends as match,
     drift (blocking, misleading or cosmetic), unknown or skipped, so 'could not check' is never
     reported as 'fine'.

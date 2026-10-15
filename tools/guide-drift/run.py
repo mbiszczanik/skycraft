@@ -81,7 +81,10 @@ not the console.
 
 The runner acts only on a visible element within the window's width (the Portal parks earlier
 blades off to the left; below the fold is fine, it scrolls there first), and only on one:
-several matches are reported as unknown rather than guessed. It refuses to click or fill an
+several matches are reported as unknown rather than guessed, except that when each of them sits
+in a blade (a [role=region]), the blades differ and the right-most, newest blade holds only one,
+that one is acted on (newest_blade: a resource group's pane stays open beside the list it came
+from, and both menus show 'Tags'). It refuses to click or fill an
 element whose name contains the word delete, remove, reset, revoke, disable, block, purge or
 sign out, unless the guide's own label does too. A guide's 'Search for **X**' is typed into the
 Portal's global search, and the result named exactly X in its dropdown is opened (the Services
@@ -108,8 +111,11 @@ box is acted on as one the person picked: 'Search for and select **X**' states n
 ticked. A person who picks a decorated name on a role it decorates all the same (by number or
 with 'c') uses it, no drift either (decide.py). A label is looked for until
 FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; when SETTLE_MS of
-that finds nothing, the blade menu's collapsed groups are opened once ('Expand all headers') and
-the looking goes on to the same deadline. When the deadline passes while a blade is still
+that finds nothing, the blade menu's collapsed groups are opened ('Expand all headers', the
+newest blade's button when several blades show one) and the looking goes on to the same deadline.
+The groups count as open once that blade shows 'Collapse all headers' within SETTLE_MS; a click
+while the menu still reads 'Loading...' changes nothing, so it is clicked again on a later look,
+EXPAND_TRIES times at most per item. When the deadline passes while a blade is still
 loading (blade_still_loading: a close button reads "Close content 'undefined'", or the newest
 blade's title heading has no content after it), the console says so once and the label is looked
 for up to BLADE_LOAD_TIMEOUT_MS more (BLADE_EMPTY_TIMEOUT_MS for a titled blade); once the blade
@@ -432,6 +438,11 @@ INTERACTIVE = ("a, button, [role=link], [role=button], [role=menuitem], [role=tr
                "[role=option], [role=checkbox], [role=radio]")
 # A blade menu's button that opens all its collapsed groups ('Manage', 'Monitoring', 'Help').
 EXPAND_ALL = "Expand all headers"
+COLLAPSE_ALL = "Collapse all headers"       # what a blade's menu shows once its groups are open
+EXPAND_TRIES = 3                            # clicks of 'Expand all headers' per item, while the menu loads
+# The closest region (a blade) holding the element: [its aria-label, its left edge], or null.
+BLADE_OF_JS = ("e => { const r = e.closest('[role=region]'); "
+               "return r ? [r.getAttribute('aria-label') || '', r.getBoundingClientRect().left] : null; }")
 # The global search's dropdown when the box names none in aria-controls or aria-owns: a popup of
 # these roles that was not visible before typing (MARK_POPUPS_JS records the visible ones first,
 # NEW_POPUP_JS asks, UNMARK_POPUPS_JS forgets them after the search). Only when that record could
@@ -871,6 +882,30 @@ def only_one(found: list[Locator], by_text: bool = False) -> Locator | None:
     return found[0] if found else None
 
 
+def newest_blade(found: list[Locator], by_text: bool = False) -> Locator | None:
+    """Like only_one, except that several matches may be told apart by the blade they sit in: the
+    Portal keeps earlier blades open to the left of the newest one (a resource group's pane beside
+    the list it was opened from), and both show a 'Tags' link. When every match sits in a region
+    (BLADE_OF_JS), the regions differ and the right-most one holds exactly one match, that is the
+    one (the step works on the newest blade). Otherwise (two in that blade, one outside any
+    region, a region that cannot be read, regions at the same place) it raises Ambiguous."""
+    if len(found) < 2:
+        return only_one(found, by_text)
+    blades = []
+    for element in found:
+        try:
+            blades.append(element.evaluate(BLADE_OF_JS, timeout=1000))
+        except PlaywrightError:
+            blades.append(None)
+    if any(blade is None for blade in blades) or len({tuple(blade) for blade in blades}) < 2:
+        return only_one(found, by_text)
+    right = max(blade[1] for blade in blades)
+    newest = [element for element, blade in zip(found, blades) if blade[1] == right]
+    if len(newest) == 1:
+        return newest[0]
+    return only_one(found, by_text)
+
+
 def unique_visible(page: Page, make_locator: Callable[[Frame], Locator]) -> Locator | None:
     """The one visible element `make_locator(frame)` matches across all frames, or None when there
     is none; raises Ambiguous when there are several."""
@@ -897,13 +932,14 @@ Choose = Callable[[list[Locator], bool], "Locator | None"]
 
 
 def find_in_roles(page: Page, label: str, roles: tuple[str, ...], root: Locator | None = None,
-                  choose: Choose = only_one) -> Locator | None:
+                  choose: Choose = newest_blade) -> Locator | None:
     """The visible element of the first of `roles` whose accessible name is exactly `label`, then
     plain text that is, or sits inside, an interactive element (interactive_text). Static text is
     never a match: the Entra overview's 'Basic information' table has a 'Users' caption, and
     clicking it navigates nowhere. Every frame is searched, or only inside `root` when it is
     given (the global search's results). `choose` picks among the matches of one role, or of the
-    text: by default there must be at most one, and several raise Ambiguous. An ambiguous text
+    text: by default there must be at most one, or one in the newest blade (newest_blade), and
+    several others raise Ambiguous. An ambiguous text
     match counts as not found, so the person picks a role-specific candidate."""
     def matches(make_locator: Callable[[Frame | Locator], Locator]) -> list[Locator]:
         if root is None:
@@ -2004,6 +2040,7 @@ class Runner:
         self.records: list[dict] = self.earlier_results() if args.resume else []
         self.first_failure: str | None = None   # the step every later step is skipped because of
         self.expanded = False                   # whether the current item opened the menu groups
+        self.expand_tries = 0                   # clicks of 'Expand all headers' for the current item
         # The blade the current step started on, to record once its first item went through; None
         # when there is none to record (one is recorded already, or the view has none), and after
         # the first item (#207).
@@ -2266,22 +2303,46 @@ class Runner:
     def expand_menu_groups(self, label: str) -> None:
         """Open every collapsed group of the blade's menu with its 'Expand all headers' button.
         Entra ID blades fold menu entries into groups ('Manage', 'Monitoring'), so a link such as
-        'Users' is not on screen until its group opens. The button is clicked at most once per
-        item (run_step resets the flag), and only when exactly one is visible."""
-        if self.expanded:
+        'Users' is not on screen until its group opens. Several blades may show the button (a list
+        and the pane opened from it): the newest blade's is clicked (newest_blade), and no button is
+        clicked when that cannot be told. The groups count as open once that blade shows 'Collapse
+        all headers' within SETTLE_MS; a click while the menu still reads 'Loading...' changes
+        nothing, so the button may be clicked again on a later look, at most EXPAND_TRIES times per
+        item (run_step resets both)."""
+        if self.expanded or self.expand_tries >= EXPAND_TRIES:
             return
         try:
-            button = unique_visible(self.page, lambda f: f.get_by_role("button", name=EXPAND_ALL, exact=True))
+            button = newest_blade(visible_across_frames(
+                self.page, lambda f: f.get_by_role("button", name=EXPAND_ALL, exact=True)))
         except Ambiguous:
             return
         if button is None:
             return
-        self.expanded = True
+        self.expand_tries += 1
+        try:
+            blade = button.evaluate(BLADE_OF_JS, timeout=1000)
+        except PlaywrightError:
+            blade = None
         try:
             button.click(timeout=FIND_TIMEOUT_MS)
         except PlaywrightError:
             return
         print(f"Opened the menu groups ('{EXPAND_ALL}') to look for '{label}' again.")
+        for _ in range(SETTLE_MS // (SETTLE_MS // 5)):
+            if self.groups_open(blade):
+                self.expanded = True
+                return
+            self.page.wait_for_timeout(SETTLE_MS // 5)
+
+    def groups_open(self, blade: list | None) -> bool:
+        """Whether 'Collapse all headers' is shown in the blade `blade` (BLADE_OF_JS) names."""
+        for found in visible_across_frames(self.page, lambda f: f.get_by_role("button", name=COLLAPSE_ALL, exact=True)):
+            try:
+                if found.evaluate(BLADE_OF_JS, timeout=1000) == blade:
+                    return True
+            except PlaywrightError:
+                continue
+        return False
 
     def save_search_tree(self, step: dict, tree: str) -> None:
         """Keep the search dropdown's accessibility tree, scrubbed (recording.scrub, every line
@@ -2729,6 +2790,7 @@ class Runner:
         in_form = False     # a field of the item before was acted on: the form is open
         for position, item in enumerate(step["items"]):
             self.expanded = False
+            self.expand_tries = 0
             self.first_item = position == 0
             if item["kind"] == "tag":
                 # Decided as a field's value is (#210): a value that is no text to type is reported.

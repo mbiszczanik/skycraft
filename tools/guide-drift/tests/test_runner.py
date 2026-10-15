@@ -1972,7 +1972,8 @@ class ScreenNode(FakeElement):
     `label`: the node label_of() finds for it, and `more_labels` any others it finds; `flips_after`:
     the number of reads after which `checked` turns over, as a click that went through late. As a
     label: `label_for`, the input it belongs to; `has_link`, whether it holds a link. As an option
-    of a list: `selects_on_click` turns its aria-selected over on click."""
+    of a list: `selects_on_click` turns its aria-selected over on click. `blade`: what BLADE_OF_JS
+    reads, the aria-label and left edge of the region it sits in (None: in no region)."""
 
     def __init__(self, interactive: bool = True, on_click=None, on_fill=None, attrs=None, children=None,
                  rect=None, section=("", "", ""), unreadable: int = 0, tree: str = "", tag: str = "div",
@@ -1981,8 +1982,9 @@ class ScreenNode(FakeElement):
                  editable: bool = False, uninspectable: bool = False, checked: bool = False,
                  check_error: Exception | None = None, label: "ScreenNode | None" = None,
                  label_for: "ScreenNode | None" = None, has_link: bool = False,
-                 selects_on_click: bool = False) -> None:
+                 selects_on_click: bool = False, blade: tuple[str, float] | None = None) -> None:
         super().__init__()
+        self.blade = blade
         self.selects_on_click = selects_on_click
         self.label_for = label_for
         self.has_link = has_link
@@ -2038,6 +2040,8 @@ class ScreenNode(FakeElement):
             return self.read_only
         if script == run.LABEL_CHECK_JS:
             return [self.label_for is arg, self.has_link]
+        if script == run.BLADE_OF_JS:
+            return list(self.blade) if self.blade else None
         if script == run.IN_TOP_BAR_JS:
             return self.in_top_bar
         if script == run.FIELD_KIND_JS:
@@ -2897,7 +2901,8 @@ class FindOnScreenTests(RunnerTestCase):
     def test_collapsed_menu_groups_are_expanded_once_before_the_person_is_asked(self) -> None:
         users, all_users = ScreenNode(), ScreenNode()
         screen = Screen(("text", "Users", ScreenNode(interactive=False)))
-        expand = ScreenNode(on_click=lambda: screen.add(("link", "Users", users)))
+        expand = ScreenNode(on_click=lambda: screen.add(("link", "Users", users),
+                                                        ("button", "Collapse all headers", ScreenNode())))
         screen.add(("button", "Expand all headers", expand), ("button", "Toggle Manage", ScreenNode()))
         record, r = self.act(screen, self.NAVIGATION, "Users")
         self.assertEqual((record["outcome"], record["observed"]), ("match", "Users"))
@@ -2935,7 +2940,8 @@ class FindOnScreenTests(RunnerTestCase):
     def test_a_label_behind_a_collapsed_group_is_found_soon_after_expanding(self) -> None:
         users = ScreenNode()
         screen = Screen()
-        expand = ScreenNode(on_click=lambda: screen.add(("link", "Users", users)))
+        expand = ScreenNode(on_click=lambda: screen.add(("link", "Users", users),
+                                                        ("button", "Collapse all headers", ScreenNode())))
         screen.add(("button", "Expand all headers", expand))
         record, r = self.act(screen, self.NAVIGATION, "Users")
         self.assertEqual((record["outcome"], users.clicked, expand.clicked, r.ask.prompts), ("match", 1, 1, []))
@@ -2943,8 +2949,9 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertLess(found_at, run.SETTLE_MS / 1000 + 0.6)            # not the whole FIND_TIMEOUT_MS
 
     def test_a_label_that_never_appears_expands_once_and_asks_at_the_deadline(self) -> None:
-        expand = ScreenNode()
-        screen = Screen(("button", "Expand all headers", expand))
+        screen = Screen()
+        expand = ScreenNode(on_click=lambda: screen.add(("button", "Collapse all headers", ScreenNode())))
+        screen.add(("button", "Expand all headers", expand))
         record, r = self.act(screen, self.NAVIGATION, "Users")
         self.assertEqual((record["outcome"], expand.clicked, len(r.ask.prompts)), ("unknown", 1, 1))
         self.assertGreaterEqual(r.page.now, run.FIND_TIMEOUT_MS / 1000)
@@ -3116,6 +3123,92 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual(record["outcome"], "unknown")
         self.assertIn("search box is not on screen", record["observed"])
         self.assertEqual(r.ask.prompts, [])
+
+
+class NewestBladeTests(RunnerTestCase):
+    """Two blades show the same menu entry (a resource group list and the pane opened from it, run B
+    of #342): the step works on the newest, right-most blade; its collapsed groups are opened."""
+
+    act = FindOnScreenTests.act
+    LIST = ("Resource Manager | Resource groups [tenantname]", 0)
+    PANE = ("prod-skycraft-swc-rg Resource group", 700)
+    ACTION = {"kind": "action", "labels": ["Tags"], "line": 1}
+
+    def blade_screen(self, **kwargs) -> tuple[Screen, dict[str, ScreenNode]]:
+        nodes = {"list_tags": ScreenNode(blade=self.LIST), "pane_tags": ScreenNode(blade=self.PANE)}
+        return Screen(("link", "Tags", nodes["list_tags"]), ("link", "Tags", nodes["pane_tags"])), nodes
+
+    def test_tags_in_the_list_menu_and_the_open_pane_takes_the_pane(self) -> None:
+        screen, nodes = self.blade_screen()
+        screen.add(("button", "Close content 'prod-skycraft-swc-rg'", ScreenNode(blade=self.PANE)))
+        record, r = self.act(screen, self.ACTION, "Tags")
+        self.assertEqual((record["outcome"], nodes["pane_tags"].clicked, nodes["list_tags"].clicked, r.ask.prompts),
+                         ("match", 1, 0, []))
+
+    def test_two_matches_in_the_newest_blade_stay_ambiguous(self) -> None:
+        screen, nodes = self.blade_screen()
+        second = ScreenNode(blade=self.PANE)
+        screen.add(("link", "Tags", second))
+        record, _ = self.act(screen, self.ACTION, "Tags")
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertEqual((nodes["pane_tags"].clicked, nodes["list_tags"].clicked, second.clicked), (0, 0, 0))
+
+    def test_a_match_outside_any_region_keeps_it_ambiguous(self) -> None:
+        outside = ScreenNode()
+        screen = Screen(("link", "Tags", outside), ("link", "Tags", ScreenNode(blade=self.PANE)))
+        record, _ = self.act(screen, self.ACTION, "Tags")
+        self.assertEqual((record["outcome"], outside.clicked), ("unknown", 0))
+
+    def two_menus(self, entry: str, pane_toggle: str | None = None):
+        """The list's and the pane's menus, each with an 'Expand all headers' button; the pane's
+        opens its groups and shows `entry` (under `pane_toggle`'s group when given)."""
+        screen, nodes = self.blade_screen()
+        shown = ScreenNode(blade=self.PANE)
+        nodes["entry"] = shown
+        nodes["list_expand"] = ScreenNode(blade=self.LIST)
+        nodes["pane_expand"] = ScreenNode(blade=self.PANE, on_click=lambda: screen.add(
+            ("link", entry, shown), ("button", "Collapse all headers", ScreenNode(blade=self.PANE))))
+        screen.add(("button", "Expand all headers", nodes["list_expand"]),
+                   ("button", "Expand all headers", nodes["pane_expand"]))
+        if pane_toggle:
+            screen.add(("button", pane_toggle, ScreenNode(blade=self.PANE)))
+        return screen, nodes
+
+    def test_locks_shows_after_the_panes_expand_all_headers(self) -> None:
+        screen, nodes = self.two_menus("Locks", "Toggle Settings")
+        record, r = self.act(screen, {"kind": "action", "labels": ["Locks"], "line": 1}, "Locks")
+        self.assertEqual((record["outcome"], nodes["entry"].clicked, r.ask.prompts), ("match", 1, []))
+        self.assertEqual((nodes["pane_expand"].clicked, nodes["list_expand"].clicked), (1, 0))
+
+    def test_budgets_under_the_panes_cost_management_group(self) -> None:
+        screen, nodes = self.two_menus("Budgets", "Toggle Cost Management")
+        record, r = self.act(screen, {"kind": "navigation", "labels": ["Budgets"], "line": 1}, "Budgets")
+        self.assertEqual((record["outcome"], nodes["entry"].clicked, r.ask.prompts), ("match", 1, []))
+        self.assertEqual((nodes["pane_expand"].clicked, nodes["list_expand"].clicked), (1, 0))
+
+    def test_an_expand_click_while_the_menu_loads_is_tried_again(self) -> None:
+        # Run B, 1.3.15: the click landed while the menu read 'Loading...' and changed nothing.
+        monitoring = ScreenNode(blade=self.PANE)
+        screen = Screen()
+        clicks = []
+
+        def opens() -> None:
+            clicks.append(1)
+            if len(clicks) == 2:
+                screen.add(("link", "Monitoring", monitoring), ("button", "Collapse all headers",
+                                                                   ScreenNode(blade=self.PANE)))
+        expand = ScreenNode(blade=self.PANE, on_click=opens)
+        screen.add(("button", "Expand all headers", expand))
+        record, r = self.act(screen, {"kind": "action", "labels": ["Monitoring"], "line": 1}, "Monitoring")
+        self.assertEqual((record["outcome"], expand.clicked, monitoring.clicked, r.ask.prompts), ("match", 2, 1, []))
+
+    def test_expand_is_clicked_at_most_three_times(self) -> None:
+        expand = ScreenNode(blade=self.PANE)
+        screen = Screen(("button", "Expand all headers", expand))
+        record, r = self.act(screen, {"kind": "action", "labels": ["Monitoring"], "line": 1}, "Monitoring")
+        self.assertEqual((record["outcome"], expand.clicked, len(r.ask.prompts)), ("unknown", run.EXPAND_TRIES, 1))
+        self.assertEqual(run.EXPAND_TRIES, 3)
+        self.assertFalse(r.expanded)
 
 
 class DeploymentStateTests(unittest.TestCase):
