@@ -3,7 +3,7 @@ SUMMARY: Lab 3.1 - Infrastructure as Code Orchestrator
 DESCRIPTION: Orchestrates SkyCraft Lab 3.1 (resource groups, hub and dev VNets, NSGs, public IP, load balancer) with hand-written local modules - writing them is this lab's learning objective (docs/bicep-standards.md section 8.2). A VNet, the dev load balancer or its public IP that already exists is referenced, not redeployed (see parHubVnetExists, parDevLbPipExists).
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev (selects parameters/dev.bicepparam; -Environment prod selects parameters/prod.bicepparam)
 AUTHOR/S: Marcin Biszczanik
-VERSION: 1.3.0
+VERSION: 1.4.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -299,6 +299,7 @@ module modDevLoadBalancer 'modules/loadbalancer.bicep' = if (!parDevLbExists) {
     parBackendPools: [
       { name: '${varDevPrefix}-lb-be-world' }
       { name: '${varDevPrefix}-lb-be-auth' }
+      { name: '${varDevPrefix}-lb-be-outbound' }
     ]
     parHealthProbes: [
       {
@@ -332,6 +333,20 @@ module modDevLoadBalancer 'modules/loadbalancer.bicep' = if (!parDevLbExists) {
         backendPort: 3724
         backendPoolName: '${varDevPrefix}-lb-be-auth'
         probeName: '${varDevPrefix}-lb-probe-auth'
+      }
+    ]
+    // One outbound rule for the egress pool, as in Lab 2.3: the VMs' only path to the internet
+    // from private subnets. A frontend IP takes one outbound rule (protocol All), so Lab 3.2 puts
+    // every VM NIC into '-be-outbound' besides its role pool. 8,000 of the frontend's 63,992 ports
+    // per instance admit 7 instances; Module 3 puts 2 VMs there.
+    parOutboundRules: [
+      {
+        name: '${varDevPrefix}-lb-outbound'
+        backendPoolName: '${varDevPrefix}-lb-be-outbound'
+        protocol: 'All'
+        allocatedOutboundPorts: 8000
+        idleTimeoutInMinutes: 4
+        enableTcpReset: true
       }
     ]
     parTags: varTagsDev

@@ -3,7 +3,7 @@ SUMMARY: Lab 3.2 - Virtual Machines Orchestrator
 DESCRIPTION: Deploys the Auth and World Linux VMs (NICs via the AVM VM module), the World data disk and the optional Key Vault for Azure Disk Encryption into the Lab 3.1 network, via Azure Verified Modules
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev -SshKeyPath $HOME\.ssh\skycraft-dev.pub
 AUTHOR/S: Marcin Biszczanik
-VERSION: 1.1.0
+VERSION: 1.2.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -127,6 +127,14 @@ resource resLbPoolWorld 'Microsoft.Network/loadBalancers/backendAddressPools@202
   scope: resRg
 }
 
+// Egress pool (Lab 2.3 / 3.1): the subnets are private, and the load balancer's one outbound rule
+// gives internet access to this pool only (a frontend IP takes a single outbound rule), so every
+// VM NIC joins it besides its role pool.
+resource resLbPoolOutbound 'Microsoft.Network/loadBalancers/backendAddressPools@2023-11-01' existing = {
+  name: '${varLbName}/${varLbName}-be-outbound'
+  scope: resRg
+}
+
 /*******************
 *     Modules      *
 *******************/
@@ -174,7 +182,7 @@ module modWorldDataDisk 'br/public:avm/res/compute/disk:0.6.1' = {
   }
 }
 
-// Auth VM (NIC created by the module, in the Auth backend pool)
+// Auth VM (NIC created by the module, in the Auth backend pool and the egress pool)
 module modAuthVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
   name: 'auth-vm-deployment'
   scope: resRg
@@ -214,6 +222,7 @@ module modAuthVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
             subnetResourceId: resSubnetAuth.id
             loadBalancerBackendAddressPools: [
               { id: resLbPoolAuth.id }
+              { id: resLbPoolOutbound.id }
             ]
           }
         ]
@@ -227,7 +236,7 @@ module modAuthVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
   }
 }
 
-// World VM (NIC in the World backend pool, data disk attached)
+// World VM (NIC in the World backend pool and the egress pool, data disk attached)
 module modWorldVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
   name: 'world-vm-deployment'
   scope: resRg
@@ -275,6 +284,7 @@ module modWorldVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
             subnetResourceId: resSubnetWorld.id
             loadBalancerBackendAddressPools: [
               { id: resLbPoolWorld.id }
+              { id: resLbPoolOutbound.id }
             ]
           }
         ]

@@ -1,8 +1,8 @@
 /*=====================================================
 SUMMARY: Lab 3.1 - Load Balancer Module
-DESCRIPTION: Deploys a Standard Azure Load Balancer with typed backend pools, health probes and load-balancing rules for SkyCraft Lab 3.1.
+DESCRIPTION: Deploys a Standard Azure Load Balancer with typed backend pools, health probes, load-balancing rules and outbound rules for SkyCraft Lab 3.1.
 AUTHOR/S: Marcin Biszczanik
-VERSION: 1.2.0
+VERSION: 1.3.0
 DEPLOYMENT: [Internal use via Orchestrator]
 ======================================================*/
 
@@ -67,6 +67,31 @@ type lbRuleConfig = {
   probeName: string
 }
 
+@description('Outbound rule definition (egress for one backend pool through the frontend IP)')
+type outboundRuleConfig = {
+  @description('Outbound rule name')
+  name: string
+
+  @description('Name of the backend pool the rule gives outbound access (must exist in parBackendPools)')
+  backendPoolName: string
+
+  @description('Transport protocol of the outbound flows')
+  protocol: 'All' | 'Tcp' | 'Udp'
+
+  @description('SNAT ports per backend instance (manual allocation; a multiple of 8 - the frontend IP offers 63,992 ports, so this caps the pool at 63,992 / ports instances)')
+  @minValue(8)
+  @maxValue(64000)
+  allocatedOutboundPorts: int
+
+  @description('Idle timeout of an outbound flow, in minutes')
+  @minValue(4)
+  @maxValue(120)
+  idleTimeoutInMinutes: int
+
+  @description('Send a TCP reset to both ends when an idle flow times out')
+  enableTcpReset: bool
+}
+
 /*******************
 *    Parameters    *
 *******************/
@@ -90,6 +115,10 @@ param parHealthProbes healthProbeConfig[]
 
 @description('Load balancing rule configurations')
 param parLbRules lbRuleConfig[]
+
+@description('Outbound rule for the egress pool - the backend VMs\' only path to the internet. At most one: Azure refuses a second outbound rule with an overlapping protocol on the same frontend IP')
+@maxLength(1)
+param parOutboundRules outboundRuleConfig[]
 
 @description('Resource tags (canonical set: Project, Environment, CostCenter, Owner)')
 param parTags object
@@ -155,9 +184,27 @@ resource resLoadBalancer 'Microsoft.Network/loadBalancers@2023-11-01' = {
         enableFloatingIP: false
         idleTimeoutInMinutes: 4
         loadDistribution: 'Default'
-        // Explicit for parity with the Lab 2.3 AVM definition of this load balancer (standards section 4.5):
-        // the Module 3 VMs rely on the implicit outbound SNAT through the frontend IP.
-        disableOutboundSnat: false
+        // As in Lab 2.3 (docs/bicep-standards.md section 4.5): egress comes from the outbound
+        // rule below, and Azure requires SNAT off on every rule whose frontend IP an outbound
+        // rule uses.
+        disableOutboundSnat: true
+      }
+    }]
+    outboundRules: [for rule in parOutboundRules: {
+      name: rule.name
+      properties: {
+        frontendIPConfigurations: [
+          {
+            id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', varLbName, varFrontendName)
+          }
+        ]
+        backendAddressPool: {
+          id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', varLbName, rule.backendPoolName)
+        }
+        protocol: rule.protocol
+        allocatedOutboundPorts: rule.allocatedOutboundPorts
+        idleTimeoutInMinutes: rule.idleTimeoutInMinutes
+        enableTcpReset: rule.enableTcpReset
       }
     }]
   }
