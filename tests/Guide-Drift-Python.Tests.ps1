@@ -11,7 +11,9 @@
     failure prompts, decisions, summary, and finding what a guide names). This file discovers and
     runs all of them as one It, so the existing CI job, which runs every Pester file under tests/,
     covers them on the ubuntu-latest runner without a new step and without Playwright
-    (test_runner.py stubs it).
+    (test_runner.py stubs it). test_browser_js.py (#342) runs the runner's in-page scripts in
+    headless Chromium and is skipped as a whole where Playwright or Chromium is missing, as in
+    CI: its evidence is a local run.
     Python is started with -B so that no __pycache__ is written into the working tree.
 
 .EXAMPLE
