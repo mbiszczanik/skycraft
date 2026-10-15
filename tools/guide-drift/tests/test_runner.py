@@ -1971,7 +1971,8 @@ class ScreenNode(FakeElement):
     state; `check_error`: what set_checked() raises (Fluent's tick mark intercepting the click);
     `label`: the node label_of() finds for it, and `more_labels` any others it finds; `flips_after`:
     the number of reads after which `checked` turns over, as a click that went through late. As a
-    label: `label_for`, the input it belongs to; `has_link`, whether it holds a link."""
+    label: `label_for`, the input it belongs to; `has_link`, whether it holds a link. As an option
+    of a list: `selects_on_click` turns its aria-selected over on click."""
 
     def __init__(self, interactive: bool = True, on_click=None, on_fill=None, attrs=None, children=None,
                  rect=None, section=("", "", ""), unreadable: int = 0, tree: str = "", tag: str = "div",
@@ -1979,8 +1980,10 @@ class ScreenNode(FakeElement):
                  read_only: bool = False, in_header: bool = False, controls_role: str = "",
                  editable: bool = False, uninspectable: bool = False, checked: bool = False,
                  check_error: Exception | None = None, label: "ScreenNode | None" = None,
-                 label_for: "ScreenNode | None" = None, has_link: bool = False) -> None:
+                 label_for: "ScreenNode | None" = None, has_link: bool = False,
+                 selects_on_click: bool = False) -> None:
         super().__init__()
+        self.selects_on_click = selects_on_click
         self.label_for = label_for
         self.has_link = has_link
         self.more_labels: list = []
@@ -2099,6 +2102,8 @@ class ScreenNode(FakeElement):
 
     def click(self, timeout=None) -> None:
         super().click(timeout)
+        if self.selects_on_click:
+            self.attrs["aria-selected"] = "false" if self.attrs.get("aria-selected") == "true" else "true"
         if self.on_click:
             self.on_click()
 
@@ -4912,6 +4917,64 @@ class StatedStateTests(RunnerTestCase):
         node.check_error = AssertionError("set_checked() called on a radio not selected")
         record = self.act(screen, False)
         self.assertEqual((record["outcome"], record["observed"], node.checked), ("match", "already set", False))
+
+    def option(self, selected: bool | None, role: str = "option", selects: bool = True) -> tuple[Screen, ScreenNode]:
+        """An entry of a multi-select list (1.3.9's 'North Europe') whose state is aria-selected."""
+        attrs = {"role": role} if selected is None else {"role": role, "aria-selected": str(selected).lower()}
+        node = ScreenNode(tag="div", attrs=attrs, selects_on_click=selects)
+        return Screen((role, self.LABEL, node)), node
+
+    def test_an_option_already_selected_is_already_set_and_not_clicked(self) -> None:
+        for role in ("option", "treeitem"):
+            with self.subTest(role=role):
+                screen, node = self.option(True, role)
+                record = self.act(screen, True)
+                self.assertEqual((record["outcome"], record["observed"], node.clicked), ("match", "already set", 0))
+
+    def test_toggle_kind_reads_the_state_of_every_option_role(self) -> None:
+        for role in run.OPTION_ROLES:
+            for attr in ("aria-selected", "aria-checked"):
+                with self.subTest(role=role, attr=attr):
+                    node = ScreenNode(tag="div", attrs={"role": role, attr: "true"})
+                    self.assertEqual(run.toggle_kind(node)[0], "option")
+                    self.assertTrue(run.toggle_state(node, "option"))
+
+    def test_an_unselected_option_is_clicked_once_and_read_back(self) -> None:
+        screen, node = self.option(False)
+        record = self.act(screen, True)
+        self.assertEqual((record["outcome"], record["observed"], node.clicked), ("match", self.LABEL, 1))
+        self.assertEqual(node.attrs["aria-selected"], "true")
+
+    def test_an_option_whose_state_does_not_change_is_unknown(self) -> None:
+        screen, node = self.option(False, selects=False)
+        record = self.act(screen, True)
+        self.assertEqual((record["outcome"], node.clicked), ("unknown", 1))
+        self.assertIn("it was clicked to make it checked, but it is still unchecked", record["observed"])
+
+    def test_unchecked_clears_a_selected_option(self) -> None:
+        screen, node = self.option(True)
+        record = self.act(screen, False)
+        self.assertEqual((record["outcome"], node.clicked, node.attrs["aria-selected"]), ("match", 1, "false"))
+        screen, node = self.option(False)                      # already clear: left as it is
+        record = self.act(screen, False)
+        self.assertEqual((record["outcome"], record["observed"], node.clicked), ("match", "already set", 0))
+
+    def test_an_option_holding_one_check_box_sets_the_box(self) -> None:
+        box = ScreenNode(tag="input", attrs={"type": "checkbox"}, checked=False)
+        node = ScreenNode(tag="div", attrs={"role": "option"}, children=Screen(("checkbox", "", box)))
+        record = self.act(Screen(("option", self.LABEL, node)), True)
+        self.assertEqual((record["outcome"], box.checked, node.clicked), ("match", True, 0))
+        box.check_error = AssertionError("set_checked() called on a box already in the state")
+        record = self.act(Screen(("option", self.LABEL, node)), True)
+        self.assertEqual((record["outcome"], record["observed"]), ("match", "already set"))
+
+    def test_an_option_without_a_state_attribute_is_clicked_as_before(self) -> None:
+        screen, node = self.option(None)
+        record = self.act(screen, True)
+        self.assertEqual((record["outcome"], node.clicked), ("match", 1))
+        screen, node = self.option(None)                       # stateOnly: the words are no click
+        record = self.act(screen, True, state_only=True)
+        self.assertEqual((record["outcome"], node.clicked), ("unknown", 0))
 
     def test_run_step_gives_each_label_the_state_the_item_marks(self) -> None:
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())

@@ -269,7 +269,11 @@ as any other label (a switch is among the roles looked for), and when the elemen
 box, switch or radio it is set as a field's state is (set_state), never toggled: 'already set'
 without a click when it holds the state (also when it is disabled), ticked or cleared otherwise. A
 radio is selected for 'checked'; 'unchecked' leaves one not selected as it is and is unknown for a
-selected one. So a box the Portal's default or an earlier run ticked (5.2.8's diagnostic setting,
+selected one. An entry of a multi-select list (role option, treeitem, menuitemcheckbox or
+menuitemradio) is set by its aria-selected or aria-checked, read back after one click (unknown when
+it does not change), so an option already selected ('North Europe' in 1.3.9's Allowed locations) is
+not clicked again and cleared; an entry without that attribute that holds exactly one check box is
+set through the box, and one with neither is clicked as before. So a box the Portal's default or an earlier run ticked (5.2.8's diagnostic setting,
 edited after a deployment script created it) is not cleared. Any other element, a button named
 'Enable ...', is clicked as a label without a state is, unless the words that give the state are
 no click (parse.py's "stateOnly": 'Toggle **X** to **Enabled**', 'Leave **X** unchecked', 'Make
@@ -497,6 +501,8 @@ FIELD_CANDIDATE_JS = r"""e => {
     return !!target && ['listbox', 'menu'].includes(target.getAttribute('role'));
   });
 }"""
+# Roles of an entry of a multi-select list, whose state is aria-selected or aria-checked (toggle_kind).
+OPTION_ROLES = ("option", "treeitem", "menuitemcheckbox", "menuitemradio")
 # What toggle_kind reads of an element: [tag, type attribute].
 TAG_TYPE_JS = "e => [e.tagName.toLowerCase(), (e.getAttribute('type') || '').toLowerCase()]"
 # For a check box's label (label_of): [whether it belongs to the input, whether it holds a link].
@@ -1658,10 +1664,10 @@ def set_check_state(page: Page, element: Locator, checked: bool) -> None:
         raise LookupError(f"its label was clicked to make it {wanted}, but it is still {other}")
 
 
-def state_within(page: Page, element: Locator, checked: bool, ms: int) -> bool:
-    """Whether the check box shows `checked` within `ms`, read every 250 ms."""
+def state_within(page: Page, element: Locator, checked: bool, ms: int, kind: str = "check") -> bool:
+    """Whether the toggle (toggle_state) shows `checked` within `ms`, read every 250 ms."""
     deadline = time.monotonic() + ms / 1000
-    while element.is_checked(timeout=FIND_TIMEOUT_MS) != checked:
+    while toggle_state(element, kind) != checked:
         if time.monotonic() >= deadline:
             return False
         page.wait_for_timeout(250)
@@ -1672,14 +1678,45 @@ def toggle_kind(element: Locator) -> tuple[str | None, str, str]:
     """(what the element is as a toggle, its role attribute, its tag): 'radio' for a radio (role
     radio, or an <input type=radio> without a role), 'check' for a check box or switch (role
     checkbox or switch, or an <input type=checkbox>, or one of type radio with another role),
-    None for any other element (#296)."""
+    'option' for an entry of a multi-select list (role option, treeitem, menuitemcheckbox or
+    menuitemradio) that carries aria-selected or aria-checked, whose state is that attribute
+    (toggle_state), and 'check' for such an entry without one that holds exactly one check box,
+    which option_box finds and set_state sets; None for any other element (#296)."""
     role = element.get_attribute("role", timeout=FIND_TIMEOUT_MS) or ""
     tag, input_type = element.evaluate(TAG_TYPE_JS)
+    if role in OPTION_ROLES:
+        if option_state(element) is not None:
+            return "option", role, tag
+        if option_box(element) is not None:
+            return "check", role, tag
     if role == "radio" or (not role and tag == "input" and input_type == "radio"):
         return "radio", role, tag
     if role in ("checkbox", "switch") or (tag == "input" and input_type in ("checkbox", "radio")):
         return "check", role, tag
     return None, role, tag
+
+
+def option_state(element: Locator) -> str | None:
+    """The 'true' or 'false' that an option carries as aria-selected or aria-checked, else None."""
+    for name in ("aria-selected", "aria-checked"):
+        value = (element.get_attribute(name, timeout=FIND_TIMEOUT_MS) or "").lower()
+        if value in ("true", "false"):
+            return value
+    return None
+
+
+def option_box(element: Locator) -> Locator | None:
+    """The one check box inside the option `element`, None when it holds none or several."""
+    boxes = element.get_by_role("checkbox")
+    return boxes.nth(0) if boxes.count() == 1 else None
+
+
+def toggle_state(element: Locator, kind: str) -> bool:
+    """Whether the toggle `element` of `kind` (toggle_kind) is checked: is_checked() for a check
+    box, switch or radio, aria-selected or aria-checked for an 'option'."""
+    if kind == "option":
+        return option_state(element) == "true"
+    return element.is_checked(timeout=FIND_TIMEOUT_MS)
 
 
 def set_state(page: Page, element: Locator, checked: bool, kind: str) -> str | None:
@@ -1688,14 +1725,24 @@ def set_state(page: Page, element: Locator, checked: bool, kind: str) -> str | N
     reads the state back) and let the form settle. A radio is selected (select_radio);
     'unchecked' leaves one not selected as it is and raises LookupError for a selected one, as a
     radio is cleared only by selecting another. Used for a field's state (fill_field) and for a
-    label the guide gives a state ('Check **X**', #296)."""
+    label the guide gives a state ('Check **X**', #296). An 'option' of a list is clicked once when
+    its state differs, then read for CHECK_TIMEOUT_MS: LookupError when it did not change."""
+    if kind == "option":
+        if toggle_state(element, kind) == checked:
+            return "already set"
+        element.click(timeout=FIND_TIMEOUT_MS)
+        if not state_within(page, element, checked, CHECK_TIMEOUT_MS, kind):
+            wanted, other = ("checked", "unchecked") if checked else ("unchecked", "checked")
+            raise LookupError(f"it was clicked to make it {wanted}, but it is still {other}")
+        page.wait_for_timeout(SETTLE_MS // 2)
+        return None
     if kind == "radio":
         if checked:
             return select_radio(page, element)
         if element.is_checked(timeout=FIND_TIMEOUT_MS):
             raise LookupError("a radio cannot be cleared; pick another option")
         return "already set"
-    if element.is_checked(timeout=FIND_TIMEOUT_MS) == checked:
+    if toggle_state(element, kind) == checked:
         return "already set"
     set_check_state(page, element, checked)
     page.wait_for_timeout(SETTLE_MS // 2)
@@ -2434,8 +2481,10 @@ class Runner:
         try:
             # Found anywhere in the window's columns, maybe below the fold: bring it into view first.
             element.scroll_into_view_if_needed(timeout=FIND_TIMEOUT_MS)
-            toggle = toggle_kind(element)[0] if kind != "field" and state is not None else None
-            if toggle and element.is_checked(timeout=FIND_TIMEOUT_MS) == state:
+            toggle, role, _ = toggle_kind(element) if kind != "field" and state is not None else (None, "", "")
+            if toggle == "check" and role in OPTION_ROLES:
+                element = option_box(element)      # an option holding one check box: set through the box
+            if toggle and toggle_state(element, toggle) == state:
                 note = "already set"      # nothing to do, also on a box greyed out in that state (#296)
             elif state_only and not toggle:
                 record.update(outcome="unknown",
