@@ -397,6 +397,8 @@ The list is a multi-select with a filter box; with both regions ticked, the fiel
 
 **Note**: Existing resources created before policy assignment may show as non-compliant. This is expected.
 
+**Note**: A new assignment appears in Compliance only after its first evaluation, which can take up to 30 minutes after you assign it. If `Require-Environment-Tag-RG` is not listed yet, come back to this step after Section 3.
+
 ![Assign a Built-in Policy](./images/step-1.3.10.png)
 
 ---

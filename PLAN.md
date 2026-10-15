@@ -41,6 +41,10 @@ no tenant name. Step numbers are the guide's after #337.
 - [ ] File the runner gaps the run showed as one issue: two menus on screen (ambiguous **Tags**),
       the unnamed Category combobox of Create Advisor Alerts, the Monthly option of Reset period,
       bold words in conceptual steps and Expected View lists read as actions
-- [ ] Replay `-Lab 1.3` after the screenshots, to check the rewritten picker steps
+- [x] Replay `-Lab 1.3` after the screenshots (run 20261015-092629, exit 15): the rewritten
+      Policy definition step opens the picker and searches in 1.3.5, 1.3.8 and 1.3.9; 1.3.8 and 1.3.9
+      went through to Create in the Portal (the definition row by its Select radio, recorded; 1.3.9's
+      row and regions ticked by hand). 1.3.10 needs the first evaluation of a new assignment (note
+      added). Cleanup `Remove-LabResource.ps1 -Force` exit 0.
 - [x] Clean up the subscription after the screenshots: `Remove-LabResource.ps1 -Force` (2026-10-14, exit 0)
 - [ ] Delete this PLAN.md in the PR's last commit
