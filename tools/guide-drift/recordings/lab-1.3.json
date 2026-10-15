@@ -106,7 +106,7 @@
         "Require-Environment-Tag-RG": 30
       },
       "valueOverrides": {},
-      "viewUrl": "https://portal.azure.com/#view/Microsoft_Azure_Policy/PolicyComplianceDetail.ReactView/assignmentId/%2Fsubscriptions%2F<id>%2Fproviders%2Fmicrosoft.authorization%2Fpolicyassignments%2Fa0d67d1ca9255f3d8664b131/scopes~/%5B%22%2Fsubscriptions%2F<id>%22%5D/policyDefinitionId/%2Fproviders%2Fmicrosoft.authorization%2Fpolicydefinitions%2F<id>",
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_Azure_Policy/PolicyComplianceDetail.ReactView/assignmentId/%2Fsubscriptions%2F<id>%2Fproviders%2Fmicrosoft.authorization%2Fpolicyassignments%2F<id>/scopes~/%5B%22%2Fsubscriptions%2F<id>%22%5D/policyDefinitionId/%2Fproviders%2Fmicrosoft.authorization%2Fpolicydefinitions%2F<id>",
       "result": null,
       "labels": {},
       "startBlade": "Microsoft_Azure_Policy/PolicyMenuBlade.MenuView/~/Assignments"

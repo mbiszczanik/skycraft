@@ -5,7 +5,8 @@ run.py drives Chromium through Playwright and imports these; keeping them here l
 tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has no Playwright.
 
   Redactor             keeps the tenant domain, tenant id and guest addresses out of the
-                       committed recording, and restores them when a recorded name is looked up
+                       committed recording, and restores them when a recorded name is looked up;
+                       its view_url leaves ids and generated resource names out of a view (#342)
   expand_env           expands '${NAME}' references from the environment at the moment of use
   env_secrets          the '${NAME}' references whose values are addresses (for the Redactor)
   missing_env          the '${NAME}' references the environment does not set
@@ -127,6 +128,14 @@ GUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
 # A GUID written without hyphens: 32 hex digits that are not part of a longer run, also right
 # after a percent-encoded character ('%2F' and the id).
 HEX_ID = re.compile(r"(?:(?<=%[0-9a-fA-F]{2})|(?<![0-9a-fA-F]))[0-9a-fA-F]{32}(?![0-9a-fA-F])")
+# A generated resource name in a path (#342): 20 or more hex digits, in either case, that make a
+# whole path segment, after '/' or a percent-encoded one ('%2F', '%2f', double-encoded '%252F'),
+# with no letter or digit after them, also none percent-encoded ('%61'). The Portal names a Policy
+# assignment with 24 hex digits, and step 1.3.10's Compliance view carries it after
+# 'policyassignments%2F'. Masked as OBJECT_ID with its '/' kept (Redactor.view_url, scrub); a run
+# of fewer digits, or one inside a longer word, is kept.
+RESOURCE_HEX_NAME = re.compile(r"(?P<sep>/|%(?:25)*2[fF])[0-9a-fA-F]{20,}(?![0-9A-Za-z])"
+                               r"(?!%(?:25)*(?:3[0-9]|[46][1-9a-fA-F]|[57][0-9aA]))")
 DECODE_ROUNDS = 5
 
 
@@ -284,19 +293,24 @@ class Redactor:
 
     def view_url(self, url: str) -> str | None:
         """The Portal view without the tenant pin ('#@<tenant>/'), query strings (before or inside
-        the fragment), object ids (GUIDs, with or without hyphens: '<id>') or tenant data, for the
-        recording; a resume opens it again (run.py, Runner.view_address). None when the view
-        cannot be kept without tenant or personal data: once fully percent-decoded (fully_decoded:
-        '%40' and the Portal's double-encoded '%2540' are '@'), it still holds an address or a
-        user principal name ('@', '#EXT#'), a query, an id, or text the Redactor would replace (an
-        encoded tenant name, 'Contoso%20Ltd'); or it does not stop decoding."""
+        the fragment), object ids (GUIDs, with or without hyphens: '<id>'), generated resource
+        names (RESOURCE_HEX_NAME, #342: a path segment of 20 or more hex digits, as a Policy
+        assignment's name follows 'policyassignments%2F', becomes '<id>' after its '/') or tenant
+        data, for the recording; a resume opens it again (run.py, Runner.view_address). None when
+        the view cannot be kept without tenant or personal data: once fully percent-decoded
+        (fully_decoded: '%40' and the Portal's double-encoded '%2540' are '@'), it still holds an
+        address or a user principal name ('@', '#EXT#'), a query, an id or such a name (one partly
+        percent-encoded is whole only once decoded), or text the Redactor would replace (an encoded
+        tenant name, 'Contoso%20Ltd'); or it does not stop decoding."""
         parts = urlsplit(url)
         fragment = re.sub(r"^@[^/]*/?", "", parts.fragment).split("?", 1)[0]
         view = f"{parts.scheme}://{parts.netloc}{parts.path}#{fragment}"
-        view = self.redact(HEX_ID.sub("<id>", GUID.sub("<id>", view)))
+        view = HEX_ID.sub("<id>", GUID.sub("<id>", view))
+        view = self.redact(RESOURCE_HEX_NAME.sub(lambda m: m.group("sep") + "<id>", view))
         decoded = fully_decoded(view)
         if (decoded is None or "@" in decoded or "?" in decoded or "#ext#" in decoded.casefold()
-                or GUID.search(decoded) or HEX_ID.search(decoded) or self.redact(decoded) != decoded):
+                or GUID.search(decoded) or HEX_ID.search(decoded) or RESOURCE_HEX_NAME.search(decoded)
+                or self.redact(decoded) != decoded):
             return None
         return view
 
@@ -827,7 +841,9 @@ def scrub(text: str | None, redactor: Redactor, secrets: set[str] | frozenset[st
          every typed secret (longest first) and every credential ('AccountKey=...', 'sig=...')
          as SECRET
       3. object ids (GUIDs, with hyphens, '%2D' or none) as OBJECT_ID, the tenant id as the
-         Redactor's '[tenantid]': first, so that 'contoso<32 hex digits>' loses the prefix too
+         Redactor's '[tenantid]': first, so that 'contoso<32 hex digits>' loses the prefix too;
+         then a generated resource name in a path (RESOURCE_HEX_NAME, #342: 20 or more hex
+         digits as a path segment, after '/' or '%2F', a Policy assignment's name) as OBJECT_ID
       4. tenant data, also as a regular expression escapes it, as the Redactor's tokens
       5. every e-mail address left (outside the tenant's domain) as EMAIL
       6. a value a Playwright call typed ('fill("[typed]")') and an element's value attribute
@@ -843,7 +859,9 @@ def scrub(text: str | None, redactor: Redactor, secrets: set[str] | frozenset[st
     base64, in a JSON escape) is not recognised. Text that only looks like one is masked too:
     'Group@2x.png' becomes '<email>', 'ResetPassword=true' becomes 'ResetPassword=[secret]', a
     quoted argument of 'type(' or 'fill(' in prose becomes '"[typed]"', ' value=x' becomes
-    ' value="[value]"', and 32 hex digits that are no id become '<id>'."""
+    ' value="[value]"', and 32 hex digits that are no id become '<id>', as does any path segment
+    of 20 or more hex digits. A generated resource name outside a path (a grid cell, prose) is
+    not recognised."""
     if text is None:
         return None
     protected = redactor.tokens
@@ -859,6 +877,7 @@ def scrub(text: str | None, redactor: Redactor, secrets: set[str] | frozenset[st
         text = sub_outside(CREDENTIAL, lambda m: m.group("head") + SECRET, text, protected)
         for pattern in (GUID_ANY, HEX_ID):
             text = sub_outside(pattern, object_id, text, protected)
+        text = sub_outside(RESOURCE_HEX_NAME, lambda m: m.group("sep") + OBJECT_ID, text, protected)
         text = redactor.redact(redactor.redact_escaped(text))
         text = sub_outside(EMAIL_ADDRESS, EMAIL, text, protected)
         text = TYPED_CALL.sub(lambda m: f'{m.group("call")}("{TYPED}"', text)

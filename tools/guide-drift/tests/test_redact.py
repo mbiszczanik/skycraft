@@ -146,9 +146,42 @@ class RedactorTests(unittest.TestCase):
                 self.assertEqual(self.redactor.view_url(f"https://portal.azure.com/#{raw}"),
                                  f"https://portal.azure.com/#{raw[:raw.index('id/') + 3]}"
                                  f"{'%2F' if '%2F' in raw else ''}<id>")
-        # A longer run of hex digits is no id.
-        longer = "https://portal.azure.com/#view/Blade/hash/" + "a" * 40
+        # A longer run of hex digits is no GUID; inside a longer segment it is kept (as a whole
+        # segment it is a generated resource name: test_view_url_masks_a_generated_resource_name).
+        longer = "https://portal.azure.com/#view/Blade/hash/x" + "a" * 40
         self.assertEqual(self.redactor.view_url(longer), longer)
+
+    # A made-up Policy assignment name: the Portal names an assignment with 24 hex digits.
+    ASSIGNMENT = "0123456789abcdef01234567"
+
+    def test_view_url_masks_a_generated_resource_name(self) -> None:
+        # Step 1.3.10's Compliance view names the assignment in its address (#342).
+        base = "https://portal.azure.com/#view/Microsoft_Azure_Policy/PolicyComplianceDetail.ReactView/assignmentId/"
+        for raw, kept in (
+                (f"%2Fproviders%2Fmicrosoft.authorization%2Fpolicyassignments%2F{self.ASSIGNMENT}/scopes~/x",
+                 "%2Fproviders%2Fmicrosoft.authorization%2Fpolicyassignments%2F<id>/scopes~/x"),
+                (f"%2Fproviders%2Fpolicyassignments%2f{self.ASSIGNMENT.upper()}",       # lower-case '%2f'
+                 "%2Fproviders%2Fpolicyassignments%2f<id>"),
+                (f"providers/policyassignments/{self.ASSIGNMENT}", "providers/policyassignments/<id>"),
+                (f"%252Fpolicyassignments%252F{self.ASSIGNMENT}%252Fx", "%252Fpolicyassignments%252F<id>%252Fx"),
+                ("hash/" + "a" * 40, "hash/<id>"),
+                # A double-encoded id is no HEX_ID ('2F' is hex too), but a whole segment all the same.
+                ("%252F1111111122223333444455555555aaaa", "%252F<id>"),
+                (f"%2F{self.ASSIGNMENT}%2Fx", "%2F<id>%2Fx"),
+                ("name/" + "1" * 20, "name/<id>")):
+            with self.subTest(raw=raw):
+                self.assertEqual(self.redactor.view_url(base + raw), base + kept)
+        # Partly encoded, it is a whole segment only once decoded: recorded as none.
+        for raw in (f"name/{self.ASSIGNMENT}%31", f"name/{self.ASSIGNMENT}%2561"):
+            with self.subTest(raw=raw):
+                self.assertIsNone(self.redactor.view_url(base + raw))
+
+    def test_view_url_keeps_a_short_hex_run_and_one_inside_a_word(self) -> None:
+        for raw in ("name/" + "1" * 19, f"name/{self.ASSIGNMENT}x", f"name/x{self.ASSIGNMENT}",
+                    "name/Microsoft.Authorization", "name/deadbeef"):
+            with self.subTest(raw=raw):
+                url = f"https://portal.azure.com/#view/Blade/{raw}"
+                self.assertEqual(self.redactor.view_url(url), url)
 
     def test_view_url_keeps_nothing_that_holds_personal_or_tenant_data_once_decoded(self) -> None:
         for fragment in ("view/User/upn/someone%40example.com",            # an address, encoded
@@ -162,7 +195,6 @@ class RedactorTests(unittest.TestCase):
                          "view/User/upn/someone%2540example.com",
                          "view/User/u/someone%2540example%252Ecom",
                          "view/User/upn/someone_example.com%2523EXT%2523",
-                         "view/Blade/id/%252F1111111122223333444455555555aaaa",
                          "view/User/upn/someone%EF%BC%A0example.com",      # a fullwidth at sign
                          "view/User/upn/x%2525252525252540example.com"):   # never stops decoding
             with self.subTest(fragment=fragment):
@@ -934,6 +966,25 @@ class RunLogTextTests(unittest.TestCase):
         for text, kept in cases.items():
             with self.subTest(text=text):
                 self.assertEqual(self.scrub(text), kept)
+
+    def test_scrub_masks_a_generated_resource_name_in_a_path(self) -> None:
+        # A Policy assignment is named with 24 hex digits (made up here); the Portal's address and an
+        # outline's '/url:' line carry it after its resource type (#342).
+        name = "0123456789abcdef01234567"
+        cases = {
+            f"Page.goto: #view/assignmentId/%2Fproviders%2Fpolicyassignments%2F{name}/scopes~": (
+                "Page.goto: #view/assignmentId/%2Fproviders%2Fpolicyassignments%2F<id>/scopes~"),
+            f"- /url: /providers/Microsoft.Authorization/policyAssignments/{name.upper()}": (
+                "- /url: /providers/Microsoft.Authorization/policyAssignments/<id>"),
+            f"policyassignments%252F{name}%252F": "policyassignments%252F<id>%252F",
+            f"name {name} outside a path": f"name {name} outside a path",       # no path segment: kept
+            f"/x{name}": f"/x{name}",
+            "/" + "1" * 19: "/" + "1" * 19,
+        }
+        for text, kept in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(self.scrub(text, whole=True), kept)
+                self.assertEqual(self.scrub(kept, whole=True), kept)                # idempotent
 
     def test_scrub_masks_tenant_data_as_a_regular_expression_escapes_it(self) -> None:
         redactor = Redactor(DOMAIN, TENANT, {TOKEN: "me@example.com"}, tenant_name="Contoso Ltd")

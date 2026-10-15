@@ -142,8 +142,9 @@
     the environment variable set?); then it prints the view and the reason, or says no view is
     recorded for that step, and you bring the Portal there by hand. Either way it waits for Enter:
     check the Portal first, as an opened view has none of the blades the guide opened before it.
-    A view is recorded only without tenant or personal data, also once percent-decoded; one that
-    cannot be is recorded as none.
+    A view is recorded only without tenant or personal data, also once percent-decoded: an id,
+    and a generated resource name (a path segment of 20 or more hex digits, such as a Policy
+    assignment's name), becomes <id>; one that cannot be is recorded as none.
 
     A STEP ON THE WRONG BLADE (issue #207). The recording keeps the blade each step starts on
     ("startBlade": the blade part of the redacted view, such as

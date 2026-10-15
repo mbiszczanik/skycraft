@@ -28,8 +28,9 @@
 
     It also keeps tenant data out of this public repository: for every recording, no e-mail
     address, tenant domain or GUID, and only query-free portal.azure.com blade addresses, read
-    percent-decoded, without an address, a guest user principal name or an id with or without
-    hyphens (issue #206); for lab 1.1, the tenant prefix and the guest address of step 1.1.5 are
+    percent-decoded, without an address, a guest user principal name, an id with or without
+    hyphens (issue #206) or a generated resource name, a path segment of 20 or more hex digits
+    such as a Policy assignment's name (issue #342); for lab 1.1, the tenant prefix and the guest address of step 1.1.5 are
     environment references. A decision's rejected candidates are the Portal's labels only (issue
     #317): each is 'role "name"', its role one of recording.LABEL_ROLES (no table cell, option or
     tree item, which name a list's entries), and its name not a list row's check box ('Select row
@@ -268,6 +269,9 @@ function Get-ViewUrlProblem {
     if ($decoded -match '#EXT#') { "step $StepId $Key contains a guest user principal name (#EXT#)" }
     if ($decoded -match '[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}' -or $decoded -match '(?<![0-9a-fA-F])[0-9a-fA-F]{32}(?![0-9a-fA-F])') {
         "step $StepId $Key contains an id (with or without hyphens)"
+    } elseif ($decoded -match '/[0-9a-fA-F]{20,}(?![0-9A-Za-z])') {
+        # A generated resource name (issue #342): a Policy assignment is named with 24 hex digits.
+        "step $StepId $Key contains a generated resource name (a path segment of 20 or more hex digits)"
     }
 }
 
@@ -324,6 +328,13 @@ $ViewUrlRuleCases = @(
     @{ url = 'https://portal.azure.com/#view/Blade/id/%252F1111111122223333444455555555aaaa'; problem = 'step 9.9.1 viewUrl contains an id (with or without hyphens)' }
     @{ url = 'https://portal.azure.com/#view/User/upn/someone%EF%BC%A0example.com'; problem = "step 9.9.1 viewUrl contains '@' or '?' (also percent-encoded)" }
     @{ url = 'https://portal.azure.com/#view/User/upn/x%2525252525252540example.com'; problem = 'step 9.9.1 viewUrl does not stop decoding after 5 rounds' }
+    # A generated resource name, 24 hex digits made up here, also percent-encoded; fewer digits, or
+    # inside a longer word, is none.
+    @{ url = 'https://portal.azure.com/#view/Blade/assignmentId/%2Fproviders%2Fpolicyassignments%2F0123456789abcdef01234567/scopes~/x'; problem = 'step 9.9.1 viewUrl contains a generated resource name (a path segment of 20 or more hex digits)' }
+    @{ url = 'https://portal.azure.com/#view/Blade/policyassignments%252F0123456789ABCDEF01234567'; problem = 'step 9.9.1 viewUrl contains a generated resource name (a path segment of 20 or more hex digits)' }
+    @{ url = 'https://portal.azure.com/#view/Blade/policyassignments%2F<id>/scopes~/x'; problem = '' }
+    @{ url = 'https://portal.azure.com/#view/Blade/name/1111111111111111111'; problem = '' }
+    @{ url = 'https://portal.azure.com/#view/Blade/name/x0123456789abcdef01234567'; problem = '' }
 ) | ForEach-Object { $_.actual = @(Get-ViewUrlProblem -StepId '9.9.1' -Url $_.url) -join '; '; $_ }
 
 # Why a decision's rejected candidates must not be in this public repository; nothing when they may

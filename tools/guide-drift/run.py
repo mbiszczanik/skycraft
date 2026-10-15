@@ -24,8 +24,8 @@ Playwright call log after it (which holds the element's HTML, an auto-generated 
 attribute among it, and the value the runner typed); every value the runner types into a field
 whose label names a password, secret or other credential, every value read from the environment
 but an address and the tenant prefix (recording.typed_secrets, #210), and every credential in a
-connection string or SAS address ('AccountKey=', 'sig=') as '[secret]'; object ids
-as '<id>'; tenant data and the run's subscription name (--subscription-name, '[yoursubscription]'),
+connection string or SAS address ('AccountKey=', 'sig=') as '[secret]'; object ids,
+and a generated resource name as a path segment (20 or more hex digits, #342), as '<id>'; tenant data and the run's subscription name (--subscription-name, '[yoursubscription]'),
 also as a regular expression escapes it, as the Redactor's tokens; any
 other e-mail address as '<email>'; a value a call typed and an element's value attribute as
 '[typed]' and '[value]' (recording.scrub lists what it cannot recognise and what it masks that only
@@ -269,9 +269,11 @@ blades the guide opened before it: the person checks the Portal and corrects it.
 the resume question is saved only then, so closed input there leaves the state as it was.
 
 A view is recorded only from a Portal page, and only without tenant or personal data
-(Redactor.view_url): the tenant pin, query strings and object ids (with or without hyphens) are
-left out, and a view that still holds an address, a guest user principal name, an id or tenant
-data once percent-decoded is recorded as none.
+(Redactor.view_url): the tenant pin, query strings, object ids (with or without hyphens) and
+generated resource names (a path segment of 20 or more hex digits: a Policy assignment's name in
+step 1.3.10's Compliance view, #342) are left out, as '<id>' for an id or a name, and a view that
+still holds an address, a guest user principal name, an id, such a name or tenant data once
+percent-decoded is recorded as none.
 
 Each step starts on a blade, and the run checks it is the right one (issue #207). The recording
 keeps, as the step's "startBlade", the blade part of the view the step began on (view_blade:
