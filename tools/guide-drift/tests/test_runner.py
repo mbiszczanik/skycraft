@@ -3373,6 +3373,19 @@ class NewestBladeTests(RunnerTestCase):
         self.assertEqual(run.EXPAND_TRIES, 3)
         self.assertFalse(r.expanded)
 
+    def test_the_groups_are_read_five_times_after_an_expand_click_whatever_settle_ms_is(self) -> None:
+        for settle in (3, run.SETTLE_MS):
+            with self.subTest(settle=settle):
+                expand = ScreenNode(blade=self.PANE)
+                screen = Screen(("button", "Expand all headers", expand))
+                r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+                reads = []
+                with mock.patch.object(run, "SETTLE_MS", settle), \
+                        mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                        mock.patch.object(run.Runner, "groups_open", lambda self, blade: reads.append(blade) and False):
+                    self.quietly(lambda: r.expand_menu_groups("Monitoring"))
+                self.assertEqual((expand.clicked, len(reads)), (1, 5))
+
 
 class DeploymentStateTests(unittest.TestCase):
     """snapshot_text and deployment_state (#328): what one snapshot line shows, and whether the
@@ -6093,6 +6106,19 @@ class OpenedListTests(RunnerTestCase):
         screen, combo, _, _ = self.parameters()
         self.perform(screen, [dict(self.ITEM, labels=["Allowed locations", "Sweden Central"], checked=[1])])
         self.assertEqual((combo.pressed, [e for e in screen.entries if e[0] == "listbox"]), (["Escape"], []))
+
+    def test_whether_the_control_opens_a_list_is_read_before_the_click(self) -> None:
+        # The Portal may re-render or remove the clicked control; it is read while it is there.
+        screen, combo, options, _ = self.parameters()
+        opens = combo.on_click
+
+        def click() -> None:
+            opens()
+            combo.uninspectable = True                  # FIELD_KIND_JS fails from now on
+        combo.on_click = click
+        r, done = self.perform(screen, [dict(self.ITEM, labels=["Allowed locations", "Sweden Central"], checked=[1])])
+        self.assertTrue(done)
+        self.assertEqual((combo.pressed, options["Sweden Central"].attrs["aria-selected"]), (["Escape"], "true"))
 
     def test_a_list_the_last_label_opened_stays_open_for_the_next_item(self) -> None:
         screen, combo, _, _ = self.parameters()

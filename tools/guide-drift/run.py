@@ -217,7 +217,8 @@ for on screen only.
 
 A label of an action or navigation item that opens a list (#342: 1.3.9's **Allowed locations**
 is the text before the combo box 'Location', found by that text, find_by_text_label) keeps it as
-Runner.open_list for the rest of the item. Each later label is looked for as an option of that
+Runner.open_list for the rest of the item; whether the control opens a list (opens_a_list) is
+read before it is clicked, as a click may close a form or open a blade. Each later label is looked for as an option of that
 list first (find_in_list: an option or tree item in the popup the combo box names, else on screen,
 under a region prefix too; when it is not there, the list's filter box is typed into, then the
 list is scrolled, as pick_option does), and is put in the state the guide gives it as any option
@@ -1280,7 +1281,8 @@ def find_row_control(page: Page, label: str) -> Locator | None:
 
 def opens_a_list(element: Locator) -> bool:
     """Whether the control opens a list: a combo box, or an element with aria-haspopup listbox.
-    One that cannot be inspected does not."""
+    One that cannot be inspected does not. act_on_label asks before it clicks the control, which
+    may be gone or re-rendered after the click."""
     try:
         _, role, _, popup, _ = element.evaluate(FIELD_KIND_JS, timeout=1000)
     except PlaywrightError:
@@ -2781,7 +2783,7 @@ class Runner:
         except PlaywrightError:
             return
         print(f"Opened the menu groups ('{EXPAND_ALL}') to look for '{label}' again.")
-        for _ in range(SETTLE_MS // (SETTLE_MS // 5)):
+        for _ in range(5):      # five reads over SETTLE_MS
             if self.groups_open(blade):
                 self.expanded = True
                 return
@@ -3032,9 +3034,12 @@ class Runner:
             elif toggle:
                 note = set_state(self.page, element, state, toggle)
             else:
+                # Read before the click: a click may close a form or open a blade, and the control
+                # may be gone or re-rendered after it.
+                opens = kind in ("navigation", "action") and opens_a_list(element)
                 element.click(timeout=FIND_TIMEOUT_MS)
                 self.page.wait_for_timeout(SETTLE_MS)
-                if kind in ("navigation", "action") and opens_a_list(element):
+                if opens:
                     self.open_list = element      # the item's later labels are looked for in it first
         except ReadOnly:
             record.update(outcome="unknown", observed=f"read-only: '{acted_on}'")
