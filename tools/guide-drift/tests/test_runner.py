@@ -346,6 +346,9 @@ class FakeElement:
     def scroll_into_view_if_needed(self, timeout=None) -> None:
         self.calls.append("scroll")
 
+    def evaluate(self, script, arg=None, timeout=None):
+        raise run.PlaywrightError("a bare element cannot be inspected")     # opens_a_list: not a list
+
     def click(self, timeout=None) -> None:
         self.calls.append("click")
         if self.fail:
@@ -5886,6 +5889,132 @@ class ListOptionTests(RunnerTestCase):
         self.assertIn("(Europe) North Europe", saved)
         self.assertNotIn("3f2a9c1e", saved)
         self.assertIn("<id>", saved)
+
+
+
+class OpenedListTests(RunnerTestCase):
+    """A multi-select list opened by the label before it (1.3.9's 'Allowed locations' above the
+    combo box 'Location'; #342): the item's later labels are options of that list, set to the
+    state the guide gives them, and the list is closed when the item ends."""
+
+    ITEM = {"kind": "action", "labels": ["Allowed locations", "Sweden Central", "North Europe"],
+            "checked": [1, 2], "line": 5}
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+
+    def parameters(self, ticked=(), late=()):
+        """Run B's Parameters tab: the text 'Allowed locations' before the combo box 'Location'; once
+        clicked, it opens a list with a Filter box and check box options under a heading (Europe).
+        Options in `late` appear only after the filter box is typed into. Returns (screen, combo box,
+        options by name, filter box)."""
+        screen, combo = Screen(), ScreenNode(attrs={"role": "combobox", "aria-controls": "locations"}, tag="div")
+        options = {name: ScreenNode(attrs={"role": "option", "aria-selected": "true" if name in ticked else "false"},
+                                    selects_on_click=True)
+                   for name in ("North Europe", "Sweden Central", "West Europe")}
+        children = Screen(("text", "Europe", ScreenNode(interactive=False)))
+        for name, option in options.items():
+            if name not in late:
+                children.add(("option", name, option))
+
+        def type_in_filter() -> None:
+            for name in late:
+                if all(entry[2] is not options[name] for entry in children.entries):
+                    children.add(("option", name, options[name]))
+
+        filter_box = ScreenNode(tag="input", on_fill=type_in_filter)
+        children.add(("searchbox", "Filter", filter_box))
+        popup = ScreenNode(attrs={"id": "locations"}, children=children)
+        shown = ("listbox", "Location", popup)
+        combo.on_click = lambda: shown in screen.entries or screen.add(shown)
+
+        def press(key, timeout=None) -> None:
+            combo.pressed.append(key)
+            if key == "Escape" and shown in screen.entries:
+                screen.entries.remove(shown)
+
+        combo.press = press
+        screen.add(("text", "Allowed locations", ScreenNode(interactive=False, next_control=combo)),
+                   ("combobox", "Location", combo))
+        return screen, combo, options, filter_box
+
+    def perform(self, screen: Screen, items: list[dict] | None = None):
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "expected": None, "images": [], "items": items or [self.ITEM]}
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=[]):
+            done = self.quietly(lambda: r.run_step(step))
+        return r, done
+
+    @staticmethod
+    def outcomes(r: run.Runner) -> list[tuple[str, str]]:
+        return [(x["label"], x["outcome"]) for x in r.records if x["kind"] == "action"]
+
+    def test_allowed_locations_opens_the_location_combobox_and_ticks_both_regions(self) -> None:
+        screen, combo, options, _ = self.parameters()
+        r, done = self.perform(screen)
+        self.assertTrue(done)
+        self.assertEqual(self.outcomes(r), [("Allowed locations", "match"), ("Sweden Central", "match"),
+                                            ("North Europe", "match")])
+        self.assertEqual((combo.clicked, options["Sweden Central"].clicked, options["North Europe"].clicked,
+                          options["West Europe"].clicked), (1, 1, 1, 0))
+        self.assertEqual([options[n].attrs["aria-selected"] for n in ("Sweden Central", "North Europe", "West Europe")],
+                         ["true", "true", "false"])
+        self.assertEqual((r.ask.prompts, self.recording["steps"]["9.9.1"]["labels"]), ([], {}))
+
+    def test_north_europe_already_ticked_stays_ticked(self) -> None:
+        # Run B clicked North Europe, which was ticked already, and unticked it.
+        screen, _, options, _ = self.parameters(ticked=("North Europe",))
+        r, done = self.perform(screen)
+        self.assertTrue(done)
+        self.assertEqual((options["North Europe"].clicked, options["North Europe"].attrs["aria-selected"]), (0, "true"))
+        self.assertEqual((options["Sweden Central"].clicked, options["Sweden Central"].attrs["aria-selected"]), (1, "true"))
+        self.assertEqual([x["observed"] for x in r.records if x["label"] == "North Europe"], ["already set"])
+
+    def test_sweden_central_appears_after_typing_in_the_filter_box(self) -> None:
+        screen, _, options, filter_box = self.parameters(late=("Sweden Central",))
+        r, done = self.perform(screen)
+        self.assertTrue(done)
+        self.assertEqual((filter_box.filled, options["Sweden Central"].clicked, options["North Europe"].clicked),
+                         (["Sweden Central"], 1, 1))
+
+    def test_the_list_is_closed_after_the_item(self) -> None:
+        screen, combo, _, _ = self.parameters()
+        self.perform(screen, [dict(self.ITEM, labels=["Allowed locations", "Sweden Central"], checked=[1])])
+        self.assertEqual((combo.pressed, [e for e in screen.entries if e[0] == "listbox"]), (["Escape"], []))
+
+    def test_a_list_the_last_label_opened_stays_open_for_the_next_item(self) -> None:
+        screen, combo, _, _ = self.parameters()
+        self.perform(screen, [{"kind": "action", "labels": ["Allowed locations"], "line": 5}])
+        self.assertEqual((combo.clicked, combo.pressed), (1, []))
+
+    def test_a_list_that_closed_itself_is_not_closed_again(self) -> None:
+        screen, combo, options, _ = self.parameters()
+        options["Sweden Central"].on_click = lambda: screen.entries.remove(
+            next(e for e in screen.entries if e[0] == "listbox"))
+        self.perform(screen, [dict(self.ITEM, labels=["Allowed locations", "Sweden Central"], checked=[1])])
+        self.assertEqual(combo.pressed, [])
+
+    def test_a_label_not_in_the_list_is_looked_for_on_screen(self) -> None:
+        screen, combo, options, _ = self.parameters()
+        save = ScreenNode()
+        screen.add(("button", "Save", save))
+        item = {"kind": "action", "labels": ["Allowed locations", "Sweden Central", "Save"], "checked": [1], "line": 5}
+        r, done = self.perform(screen, [item])
+        self.assertTrue(done)
+        self.assertEqual((save.clicked, options["Sweden Central"].clicked), (1, 1))
+
+    def test_the_list_is_forgotten_with_the_item(self) -> None:
+        screen, combo, options, _ = self.parameters()
+        other = ScreenNode()
+        screen.add(("button", "North Europe", other))
+        first = {"kind": "action", "labels": ["Allowed locations", "Sweden Central"], "checked": [1], "line": 5}
+        second = {"kind": "action", "labels": ["North Europe"], "line": 6}
+        r, done = self.perform(screen, [first, second])
+        self.assertTrue(done)
+        self.assertEqual((options["North Europe"].clicked, other.clicked), (0, 1))
 
 
 if __name__ == "__main__":

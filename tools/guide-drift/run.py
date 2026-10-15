@@ -192,6 +192,18 @@ its picker; it is asked about like any label when it is not found. The chain's l
 resource names follow; a resource at the chain's start is listed in the picker, so it is looked
 for on screen only.
 
+A label of an action or navigation item that opens a list (#342: 1.3.9's **Allowed locations**
+is the text before the combo box 'Location', found by that text, find_by_text_label) keeps it as
+Runner.open_list for the rest of the item. Each later label is looked for as an option of that
+list first (find_in_list: an option or tree item in the popup the combo box names, else on screen,
+under a region prefix too; when it is not there, the list's filter box is typed into, then the
+list is scrolled, as pick_option does), and is put in the state the guide gives it as any option
+is (toggle_kind: 'already set' without a click for a region that is ticked already), or clicked
+when the guide gives none. A label the list does not hold is looked for on screen as before. When
+the item ends (also when it failed), a list still open is closed with Escape on its combo box, so
+the next tab click is not intercepted, unless no later label was looked for in it: a list that
+the item's last label opened is the next item's to pick from. The list is forgotten at each item.
+
 When a step does not go through, the person chooses: c, finish it by hand and continue; s, skip
 this step and continue with the next one, giving the reason, which the summary lists under
 'skipped' (the step's own findings stay counted, and a later step that needed it may fail too
@@ -1768,6 +1780,33 @@ def safe_visible(frame: Frame, selector: str) -> list[Locator]:
         return []
 
 
+def find_in_list(page: Page, element: Locator, label: str) -> Locator | None:
+    """The option called `label` in the list the combo box `element` opened (find_option: its
+    popup, else on screen; the region prefix counts), for a label that follows the label which
+    opened the list. Looked at once; then, when the list has a filter box (filter_box), `label`
+    (without its region prefix) is typed into it and the list is looked at for SETTLE_MS; then
+    scrolled, a page at a time, LIST_SCROLL_PAGES at most (scroll_list). None when the list does
+    not hold it: the label is looked for on screen then. Raises Ambiguous as find_option does."""
+    found = find_option(page, element, label)
+    if found is not None:
+        return found
+    try:
+        tag = element.evaluate(TAG_TYPE_JS, timeout=1000)[0]
+        box = filter_box(page, element, tag, open_list(page, element))
+        if box is not None:
+            box.fill(REGION_PREFIX.sub("", label), timeout=FIND_TIMEOUT_MS)
+            page.wait_for_timeout(SETTLE_MS // 5)
+    except PlaywrightError:     # the list closed or reloaded: look on screen
+        return None
+    found = in_time(page, lambda: find_option(page, element, label), SETTLE_MS)
+    for _ in range(LIST_SCROLL_PAGES):
+        if found is not None or not scroll_list(page, element):
+            break
+        page.wait_for_timeout(250)
+        found = find_option(page, element, label)
+    return found
+
+
 def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case: bool = False,
                 diagnose: Callable[[str], None] | None = None) -> str | None:
     """Open the combo box or drop-down button `element` and pick the option named `value`;
@@ -2341,6 +2380,10 @@ class Runner:
         # The current label was looked up past a failure already reported (wait_for_deployment): the
         # person's answer is used in this run only, never written to the recording (#328).
         self.failure_on_screen = False
+        # The control that opened a list for the current item (a label of an action or navigation
+        # item that opens one), and whether a later label was looked up in it; reset per item (#342).
+        self.open_list: Locator | None = None
+        self.list_consulted = False
 
     def earlier_results(self) -> list[dict]:
         """The records the stopped parts of this run wrote, scrubbed as write() scrubs them: that
@@ -2758,13 +2801,18 @@ class Runner:
                 def renew() -> Callable[[], Locator | None]:     # a fresh SETTLE_MS for a view just rendered
                     return self.looking_for(label, lookup)
 
-                look = renew()
-                if form_start and label not in self.recording["steps"].get(step["id"], {}).get("labels", {}):
-                    element = self.find_form(step, item, label, value or "", look, renew)
-                else:
-                    element = in_time(self.page, look)
-                    if element is None:
-                        element = self.wait_for_blade(step, item, label, look, renew)
+                element = None
+                if self.open_list is not None and kind in ("navigation", "action") and not open_field:
+                    self.list_consulted = True
+                    element = find_in_list(self.page, self.open_list, label)
+                if element is None:
+                    look = renew()
+                    if form_start and label not in self.recording["steps"].get(step["id"], {}).get("labels", {}):
+                        element = self.find_form(step, item, label, value or "", look, renew)
+                    else:
+                        element = in_time(self.page, look)
+                        if element is None:
+                            element = self.wait_for_blade(step, item, label, look, renew)
         except Ambiguous as error:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
             return record
@@ -2856,6 +2904,8 @@ class Runner:
             else:
                 element.click(timeout=FIND_TIMEOUT_MS)
                 self.page.wait_for_timeout(SETTLE_MS)
+                if kind in ("navigation", "action") and opens_a_list(element):
+                    self.open_list = element      # the item's later labels are looked for in it first
         except ReadOnly:
             record.update(outcome="unknown", observed=f"read-only: '{acted_on}'")
             return record
@@ -3085,6 +3135,7 @@ class Runner:
         for position, item in enumerate(step["items"]):
             self.expanded = False
             self.expand_tries = 0
+            self.open_list, self.list_consulted = None, False
             self.first_item = position == 0
             if item["kind"] == "tag":
                 # Decided as a field's value is (#210): a value that is no text to type is reported.
@@ -3128,6 +3179,7 @@ class Runner:
                                                               state_only=index in state_only))
                     if records[-1]["outcome"] == "unknown" or records[-1].get("severity") == "blocking":
                         break
+            self.close_list()
             if item["kind"] != "field":
                 in_form = False
             for record in records:
@@ -3152,6 +3204,23 @@ class Runner:
             self.record_view(step)
         self.write(self.screenshot(step))
         return not step_failed
+
+    def close_list(self) -> None:
+        """At the end of an item: close the list its first label opened (Runner.open_list) when it
+        is still open (it names a popup that is on screen, or says aria-expanded), with Escape on
+        its combo box, so the next tab click is not intercepted by it (#342). A list is left as it
+        is when no later label of the item was looked for in it (list_consulted): the item's last
+        label opened it, and the next item picks from it. The reset is the item's start."""
+        element, consulted = self.open_list, self.list_consulted
+        self.open_list, self.list_consulted = None, False
+        if element is None or not consulted:
+            return
+        try:
+            if open_list(self.page, element) is None and element.get_attribute("aria-expanded", timeout=1000) != "true":
+                return
+            element.press("Escape", timeout=FIND_TIMEOUT_MS)
+        except (PlaywrightError, Ambiguous):    # it closed itself, or the page moved on
+            return
 
     def not_typed(self, step: dict, item: dict, kind: str, label: str, action: str, value: str) -> dict:
         """The record of a field or tag item whose value the runner does not type (field_action,
