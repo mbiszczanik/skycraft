@@ -13,8 +13,9 @@ Everything a run leaves behind goes under --log-dir/<run id>/ and is gitignored:
 record per check, appended as the run goes and never rewritten, and a "redo" marker before a
 redone step's new attempt, or before a step the recording now skips, when the earlier attempt
 left records), Step-X.Y.N.png (full window, for manual cropping and anonymisation), summary.md,
-and blade-<step>-<line>.aria.txt for a label that was not found (the outline the loading check
-read, redacted). Only the recording is written back into the repository.
+blade-<step>-<line>.aria.txt for a label that was not found (the outline the loading check
+read, redacted), and list-<step>-<line>.aria.txt for a list option that was not found (the open
+list's accessibility tree, redacted). Only the recording is written back into the repository.
 
 summary.md, and results.jsonl behind it, are what gets copied into an issue or a pull request, so
 they hold the text the failure prompt shows (issue #212). A record's "observed" is scrubbed before
@@ -270,7 +271,15 @@ blade is the one recorded. A first field the recording holds a decision for is n
 finds it. Neither drift makes the guide's screenshots stale or counts in the exit code.
 
 A field is filled as its control takes a value: a text box is typed into, a combo box or a
-drop-down has the option of the value picked, a check box or switch is ticked or cleared. A field
+drop-down has the option of the value picked, a check box or switch is ticked or cleared. An
+option is an entry of role option or treeitem (a tree is a list too: Cost Management's 'Reset
+period'), looked for inside the list the combo box names, else on screen; its name matches whole,
+or else after the region prefix the Portal puts before a location ('Sweden Central' picks
+'(Europe) Sweden Central'; two such entries are ambiguous), and a field showing the prefixed name
+is already set. When the open list holds one search box or text box, or the combo box is an
+editable input, the value (without its prefix) is typed into it first; an option still missing
+is looked for in a list that scrolls, a page at a time, up to LIST_SCROLL_PAGES pages. One not
+found leaves the open list's tree, scrubbed, as list-<step>-<line>.aria.txt in the run folder. A field
 label that names a container rather than a control (fill_parts) is filled through what it holds:
 its one text box; the Portal's user principal name, a text box and a domain combo box; or a radio
 group (issue #294: a storage account's 'Performance', Standard or Premium), radios and no combo
@@ -557,6 +566,23 @@ FIELD_CANDIDATE_JS = r"""e => {
 }"""
 # Roles of an entry of a multi-select list, whose state is aria-selected or aria-checked (toggle_kind).
 OPTION_ROLES = ("option", "treeitem", "menuitemcheckbox", "menuitemradio")
+# What pick_option picks from (#342): an entry of a drop-down list, or of the tree that is one
+# (Cost Management's 'Reset period').
+PICK_ROLES = ("option", "treeitem")
+# The Portal's location lists put the geography before a region's name: '(Europe) Sweden Central'.
+REGION_PREFIX = re.compile(r"^\([^()]+\)\s+")
+# A list that scrolls (virtualised: only the entries in view exist) is scrolled a page at a time,
+# this many pages at most, while the option is missing. LIST_SCROLL_JS scrolls the nearest
+# scrollable ancestor of the element (or, failing that, its first scrollable descendant) by its
+# own height and answers whether it moved.
+LIST_SCROLL_PAGES = 20
+LIST_SCROLL_JS = (
+    "e => { const scrolls = n => n.scrollHeight > n.clientHeight + 1 "
+    "&& !/^(visible|hidden)$/.test(getComputedStyle(n).overflowY); let list = null; "
+    "for (let n = e; n && !list; n = n.parentElement) if (scrolls(n)) list = n; "
+    "if (!list) list = [...e.querySelectorAll('*')].find(scrolls) || null; if (!list) return false; "
+    "const before = list.scrollTop; list.scrollTop = before + list.clientHeight; "
+    "return list.scrollTop > before; }")
 # What toggle_kind reads of an element: [tag, type attribute].
 TAG_TYPE_JS = "e => [e.tagName.toLowerCase(), (e.getAttribute('type') || '').toLowerCase()]"
 # For a check box's label (label_of): [whether it belongs to the input, whether it holds a link].
@@ -1632,49 +1658,168 @@ def current_text(element: Locator, tag: str) -> str:
     return element.inner_text(timeout=FIND_TIMEOUT_MS).strip()
 
 
-def find_option(page: Page, element: Locator, name: str | re.Pattern[str]) -> Locator | None:
-    """The option called `name` of the open combo box `element`: inside the listbox it names in
-    aria-controls or aria-owns, when that is on screen; otherwise anywhere on screen. Raises
-    Ambiguous when several options have the name."""
+def open_list(page: Page, element: Locator) -> Locator | None:
+    """The listbox, tree or dialog the combo box `element` names in aria-controls or aria-owns,
+    when it is on screen (and only one is); None otherwise."""
     try:
         owned = owned_ids(element)
     except PlaywrightError:
-        owned = []
+        return None
     for owned_id in owned:
         try:
-            listbox = unique_visible(page, lambda f, owned_id=owned_id: f.locator(by_id(owned_id)))
+            found = unique_visible(page, lambda f, owned_id=owned_id: f.locator(by_id(owned_id)))
         except Ambiguous:
             continue
-        if listbox is not None:
-            try:
-                return only_one(visible_in(listbox.get_by_role("option", name=name, exact=True),
-                                           page.viewport_size))
-            except PlaywrightError:     # the list closed or reloaded: look again
-                return None
-    return find_by_name(page, "option", name)
+        if found is not None:
+            return found
+    return None
 
 
-def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case: bool = False) -> str | None:
+def option_names(name: str | re.Pattern[str]) -> list[str | re.Pattern[str]]:
+    """What an option may be called, in the order it is looked for: `name` itself, then `name`
+    after a region prefix (REGION_PREFIX), in the same case rule."""
+    if isinstance(name, str):
+        return [name, re.compile(REGION_PREFIX.pattern + literal_pattern(name) + "$")]
+    return [name, re.compile(REGION_PREFIX.pattern + name.pattern.removeprefix("^"), name.flags)]
+
+
+def options_named(page: Page, container: Locator | None, name: str | re.Pattern[str]) -> list[Locator]:
+    """The visible entries (PICK_ROLES) called `name`: inside `container` when there is one,
+    else anywhere on screen."""
+    found: list[Locator] = []
+    for role in PICK_ROLES:
+        if container is not None:
+            found += visible_in(container.get_by_role(role, name=name, exact=True), page.viewport_size)
+        else:
+            found += visible_across_frames(page, lambda f, role=role: f.get_by_role(role, name=name, exact=True))
+    return found
+
+
+def find_option(page: Page, element: Locator, name: str | re.Pattern[str]) -> Locator | None:
+    """The option called `name` of the open combo box `element`: an entry of role option or
+    treeitem, inside the listbox, tree or dialog it names in aria-controls or aria-owns, when that
+    is on screen; otherwise anywhere on screen. The name matches whole; when no entry has it, after
+    removing a region prefix from the entry's name ('Sweden Central' finds '(Europe) Sweden
+    Central'). Raises Ambiguous when several entries match by the rule that matched."""
+    container = open_list(page, element)
+    try:
+        for candidate in option_names(name):
+            found = options_named(page, container, candidate)
+            if found:
+                return only_one(found)
+    except PlaywrightError:     # the list closed or reloaded: look again
+        return None
+    return None
+
+
+def filter_box(page: Page, element: Locator, tag: str, container: Locator | None) -> Locator | None:
+    """The text box that narrows the open list: the one search box or text box the list (the popup
+    `container`) holds, else the combo box itself when it is an editable input; None otherwise."""
+    if container is not None:
+        boxes = parts_of(container, "searchbox") + parts_of(container, "textbox")
+        if boxes:
+            return boxes[0] if len(boxes) == 1 else None
+    if tag == "input" and not is_read_only(element):
+        return element
+    return None
+
+
+def scroll_list(page: Page, element: Locator) -> bool:
+    """Scroll the open list of `element` by a page; whether it moved. The list is the one the combo
+    box names, else the page of the first entry on screen."""
+    target = open_list(page, element)
+    if target is None:
+        entries = [found for role in PICK_ROLES
+                   for found in visible_across_frames(page, lambda f, role=role: f.get_by_role(role))]
+        target = entries[0] if entries else None
+    if target is None:
+        return False
+    try:
+        return bool(target.evaluate(LIST_SCROLL_JS, timeout=1000))
+    except PlaywrightError:
+        return False
+
+
+def list_tree(page: Page, element: Locator) -> str:
+    """The accessibility tree of the open list, for a run's diagnosis (list-<step>-<line>.aria.txt):
+    the list the combo box names; else the popups on screen; else the frames' bodies."""
+    container = open_list(page, element)
+    if container is not None:
+        targets, what = [container], "the open list"
+    else:
+        targets = [popup for frame in all_frames(page) for popup in safe_visible(frame, POPUP_ROLES)]
+        what = "the popups on screen"
+        if not targets:
+            targets, what = [frame.locator("body") for frame in all_frames(page)], "no list identified; the whole page"
+    lines = [f"# {what}"]
+    for target in targets:
+        try:
+            lines.append(target.aria_snapshot(timeout=2000))
+        except PlaywrightError as error:
+            lines.append(f"# no snapshot ({error_text(error)})")
+    return "\n".join(lines)
+
+
+def safe_visible(frame: Frame, selector: str) -> list[Locator]:
+    """The visible elements `selector` matches in the frame; none when it went away."""
+    try:
+        return visible_in(frame.locator(selector), None)
+    except PlaywrightError:
+        return []
+
+
+def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case: bool = False,
+                diagnose: Callable[[str], None] | None = None) -> str | None:
     """Open the combo box or drop-down button `element` and pick the option named `value`;
-    'already set' when it shows `value` already. With `ignore_case`, names are compared regardless
+    'already set' when it shows `value` already (also the name with a region prefix: 'Sweden
+    Central' for '(Europe) Sweden Central'). With `ignore_case`, names are compared regardless
     of case (a domain). The options load as the Portal answers, so they are looked for until
     FIND_TIMEOUT_MS has passed (find_option), and so is the field's text after the click, which
-    the Portal may update late. Raises LookupError when no option has the name, or when the
-    element does not show `value` by then; Ambiguous when several options have the name."""
+    the Portal may update late. When the open list holds one search box or text box, or the combo
+    box is an editable input, `value` (without its region prefix) is typed into it before the
+    options are looked at (filter_box). An option still missing when the time has passed is looked
+    for in a list that scrolls, a page at a time, LIST_SCROLL_PAGES at most. Raises LookupError when
+    no option has the name, or when the element does not show `value` by then; Ambiguous when
+    several options have the name. When no option is found, `diagnose` is given the open list's
+    accessibility tree (list_tree)."""
     def shows(text: str) -> bool:
-        return text == value or (ignore_case and text.casefold() == value.casefold())
+        text = text.strip()
+        names = (text, REGION_PREFIX.sub("", text))
+        return any(n == value or (ignore_case and n.casefold() == value.casefold()) for n in names)
 
     if shows(current_text(element, tag)):
         return "already set"
     element.click(timeout=FIND_TIMEOUT_MS)
     page.wait_for_timeout(SETTLE_MS // 2)
     name = re.compile("^" + literal_pattern(value) + "$", re.IGNORECASE) if ignore_case else value
+    filtered = False
+
+    def look() -> Locator | None:
+        nonlocal filtered
+        if not filtered:
+            box = filter_box(page, element, tag, open_list(page, element))
+            if box is not None:
+                try:
+                    box.fill(REGION_PREFIX.sub("", value), timeout=FIND_TIMEOUT_MS)
+                    filtered = True
+                    page.wait_for_timeout(SETTLE_MS // 5)
+                except PlaywrightError:     # the list closed: try again with the next look
+                    pass
+        return find_option(page, element, name)
+
     deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
-    option = find_option(page, element, name)
+    option = look()
     while option is None and time.monotonic() < deadline:
+        page.wait_for_timeout(250)
+        option = look()
+    for _ in range(LIST_SCROLL_PAGES):
+        if option is not None or not scroll_list(page, element):
+            break
         page.wait_for_timeout(250)
         option = find_option(page, element, name)
     if option is None:
+        if diagnose is not None:
+            diagnose(list_tree(page, element))
         raise LookupError(f"option '{value}' not found")
     option.click(timeout=FIND_TIMEOUT_MS)
     deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
@@ -1687,7 +1832,8 @@ def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case:
     return None
 
 
-def fill_parts(page: Page, container: Locator, value: str) -> str | None:
+def fill_parts(page: Page, container: Locator, value: str,
+               diagnose: Callable[[str], None] | None = None) -> str | None:
     """Give `value` to a labelled container that is not a control itself (find_field). With one
     text box and nothing else, the text box gets the value. With one text box and one combo box
     and an '@' in the value (the Portal's user principal name: name, '@', domain), the combo box
@@ -1706,17 +1852,17 @@ def fill_parts(page: Page, container: Locator, value: str) -> str | None:
     if radios and not comboboxes:
         return pick_radio(page, radios, value)
     if len(textboxes) == 1 and not comboboxes:
-        return fill_field(page, textboxes[0], value)
+        return fill_field(page, textboxes[0], value, diagnose)
     if len(textboxes) == 1 and len(comboboxes) == 1 and not radios and "@" in value:
         local, domain = value.rsplit("@", 1)
         try:
             tag = comboboxes[0].evaluate(CONTROL_JS, timeout=FIND_TIMEOUT_MS)[0]
-            picked = pick_option(page, comboboxes[0], tag, domain, ignore_case=True)
+            picked = pick_option(page, comboboxes[0], tag, domain, ignore_case=True, diagnose=diagnose)
         except Ambiguous:
             raise
         except LookupError as error:
             raise LookupError(f"the domain combo box: {error}") from error
-        typed = fill_field(page, textboxes[0], local)
+        typed = fill_field(page, textboxes[0], local, diagnose)
         return "already set" if typed and picked else None
     raise LookupError(f"the labelled element is not a field: it holds {len(textboxes)} text box(es), "
                       f"{len(comboboxes)} combo box(es) and {len(radios)} radio(s)")
@@ -1919,16 +2065,18 @@ def set_state(page: Page, element: Locator, checked: bool, kind: str) -> str | N
     return None
 
 
-def fill_field(page: Page, element: Locator, value: str) -> str | None:
+def fill_field(page: Page, element: Locator, value: str,
+               diagnose: Callable[[str], None] | None = None) -> str | None:
     """Give the field `value`: tick or clear a checkbox, select a radio, pick an option, or type;
     a labelled container that is not a control itself is filled through its parts (fill_parts).
     A radio (found by its own name, or picked by the person) is selected when the value names it
     (radio_matches) or states 'checked'; a value stating 'unchecked' leaves one not selected as
     it is and is refused for a selected one, as a radio is only cleared by selecting another.
     Returns 'already set' when the field held the value before, and does nothing then. Raises
-    LookupError when the value cannot be applied (not a checkbox state, no such option)."""
+    LookupError when the value cannot be applied (not a checkbox state, no such option; `diagnose`
+    then gets the open list's tree, pick_option)."""
     if not is_control(element):
-        return fill_parts(page, element, value)
+        return fill_parts(page, element, value, diagnose)
     kind, role, tag = toggle_kind(element)
     if kind == "radio":
         name = accessible_name(element)
@@ -1947,7 +2095,7 @@ def fill_field(page: Page, element: Locator, value: str) -> str | None:
             return "already set"
         element.select_option(value, timeout=FIND_TIMEOUT_MS)   # an option whose value or label is `value`
     elif role in ("combobox", "button") or tag == "button":
-        if pick_option(page, element, tag, value):
+        if pick_option(page, element, tag, value, diagnose=diagnose):
             return "already set"
     else:
         if current_text(element, tag) == value:
@@ -2478,6 +2626,15 @@ class Runner:
                 continue
         return False
 
+    def save_list_tree(self, step: dict, item: dict, tree: str) -> None:
+        """Keep the open list's accessibility tree, scrubbed as the blade outlines are (every line
+        kept), as list-<step>-<guide line>.aria.txt in the run folder: an option that was not found
+        shows there what the list offered (a prefix, a filter box, a list that scrolls), so the
+        lookup can be fixed without another live run."""
+        path = self.run_dir / f"list-{step['id']}-{item.get('line')}.aria.txt"
+        path.write_text(scrub(tree, self.redactor, self.secrets, whole=True) + "\n", encoding="utf-8")
+        print(f"The open list's structure is in {path}")
+
     def save_search_tree(self, step: dict, tree: str) -> None:
         """Keep the search dropdown's accessibility tree, scrubbed (recording.scrub, every line
         kept: object ids, typed secrets, a password field's value and tenant data as tokens,
@@ -2692,7 +2849,8 @@ class Runner:
                 record.update(outcome="unknown", observed=f"disabled: '{acted_on}'")
                 return record
             elif kind == "field":
-                note = fill_field(self.page, element, value or "")
+                note = fill_field(self.page, element, value or "",
+                                  diagnose=lambda tree: self.save_list_tree(step, item, tree))
             elif toggle:
                 note = set_state(self.page, element, state, toggle)
             else:

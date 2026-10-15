@@ -1975,7 +1975,8 @@ class ScreenNode(FakeElement):
     of a list: `selects_on_click` turns its aria-selected over on click. `blade`: what BLADE_OF_JS
     reads, the aria-label and left edge of the region it sits in (None: in no region).
     `next_control`: as a text, the control NEXT_CONTROL_JS finds after it (None: other text comes
-    first, or no control), which the script marks with the token it is given."""
+    first, or no control), which the script marks with the token it is given. `on_scroll`: as a
+    list, what LIST_SCROLL_JS answers (true: the list moved); it shows the options of the next page."""
 
     def __init__(self, interactive: bool = True, on_click=None, on_fill=None, attrs=None, children=None,
                  rect=None, section=("", "", ""), unreadable: int = 0, tree: str = "", tag: str = "div",
@@ -1985,8 +1986,9 @@ class ScreenNode(FakeElement):
                  check_error: Exception | None = None, label: "ScreenNode | None" = None,
                  label_for: "ScreenNode | None" = None, has_link: bool = False,
                  selects_on_click: bool = False, blade: tuple[str, float] | None = None,
-                 next_control: "ScreenNode | None" = None) -> None:
+                 next_control: "ScreenNode | None" = None, on_scroll=None) -> None:
         super().__init__()
+        self.on_scroll = on_scroll
         self.next_control = next_control
         self.blade = blade
         self.selects_on_click = selects_on_click
@@ -2053,6 +2055,8 @@ class ScreenNode(FakeElement):
             return True
         if script == run.IN_TOP_BAR_JS:
             return self.in_top_bar
+        if script == run.LIST_SCROLL_JS:
+            return bool(self.on_scroll()) if self.on_scroll else False
         if script == run.FIELD_KIND_JS:
             if self.uninspectable:
                 raise run.PlaywrightError("element was detached")
@@ -5728,6 +5732,160 @@ class TextLabelTests(RunnerTestCase):
             record = self.quietly(lambda: r.act_on_label(step, self.FIELD, "Name", "budget", form_start=True))
         self.assertEqual((record["outcome"], box.filled, r.ask.prompts, r.records, self.recording["steps"]["9.9.1"]["labels"]),
                          ("match", ["budget"], [], [], {}))
+
+
+class ListOptionTests(RunnerTestCase):
+    """A list option picked by its name (#342): the roles option and treeitem, a region prefix
+    ('(Europe) Sweden Central'), a filter box, a list that scrolls, and the list's tree kept when
+    the option is missing."""
+
+    @staticmethod
+    def pick(page, box, value, tag="div", **kwargs):
+        with mock.patch.object(run.time, "monotonic", lambda: page.now):
+            return run.pick_option(page, box, tag, value, **kwargs)
+
+    def opened(self, role: str, names: list[str], owned: bool = False):
+        """A combo box that shows `names` as `role` entries once clicked; an option sets its text."""
+        screen, page = Screen(), FakePage()
+        box = ScreenNode(attrs={"role": "combobox"}, tag="div")
+        options = {}
+        for name in names:
+            options[name] = ScreenNode(on_click=lambda name=name: setattr(box, "text", name))
+        if owned:
+            box.attrs["aria-controls"] = "list"
+            popup = ScreenNode(attrs={"id": "list"}, children=Screen(*((role, n, o) for n, o in options.items())))
+            box.on_click = lambda: screen.add(("tree", "List of options", popup))
+        else:
+            box.on_click = lambda: screen.add(*((role, n, o) for n, o in options.items()))
+        screen.add(("combobox", "Field", box))
+        return screen, page, box, options
+
+    def test_reset_period_monthly_is_a_treeitem_under_calendar_months(self) -> None:
+        # blade-1.3.16: combobox "Reset period", dialog > tree "List of options" > treeitem "Monthly"
+        names = ["Billing month", "Monthly", "Quarterly", "Annually"]
+        for owned in (False, True):
+            with self.subTest(owned=owned):
+                screen, page, box, options = self.opened("treeitem", names, owned)
+                with mock.patch.object(run, "all_frames", lambda page: [screen]):
+                    self.assertIsNone(self.pick(page, box, "Monthly"))
+                self.assertEqual((options["Monthly"].clicked, options["Quarterly"].clicked, box.text), (1, 0, "Monthly"))
+
+    def test_region_sweden_central_finds_the_europe_prefixed_option(self) -> None:
+        # Step-1.3.6.png: a list of '(Europe) North Europe', '(Europe) Sweden Central', ...
+        names = ["(Europe) North Europe", "(Europe) Sweden Central", "(US) East US"]
+        screen, page, box, options = self.opened("option", names)
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIsNone(self.pick(page, box, "Sweden Central"))
+        self.assertEqual((options["(Europe) Sweden Central"].clicked, options["(Europe) North Europe"].clicked,
+                          box.text), (1, 0, "(Europe) Sweden Central"))
+
+    def test_an_exact_name_wins_over_a_prefixed_one(self) -> None:
+        screen, page, box, options = self.opened("option", ["Sweden Central", "(Europe) Sweden Central"])
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIsNone(self.pick(page, box, "Sweden Central"))
+        self.assertEqual((options["Sweden Central"].clicked, options["(Europe) Sweden Central"].clicked), (1, 0))
+
+    def test_a_field_showing_the_prefixed_name_is_already_set(self) -> None:
+        screen, page, box, options = self.opened("option", ["(Europe) Sweden Central"])
+        box.text = "(Europe) Sweden Central"
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertEqual(self.pick(page, box, "Sweden Central"), "already set")
+        self.assertEqual(box.clicked, 0)
+
+    def test_two_options_after_removing_the_prefix_are_ambiguous(self) -> None:
+        screen, page, box, options = self.opened("option", ["(Europe) Sweden Central", "(Asia Pacific) Sweden Central"])
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), self.assertRaises(run.Ambiguous):
+            self.pick(page, box, "Sweden Central")
+        self.assertEqual([o.clicked for o in options.values()], [0, 0])
+
+    def test_the_filter_box_is_typed_into_first(self) -> None:
+        for editable in (False, True):
+            with self.subTest(editable=editable):
+                screen, page = Screen(), FakePage()
+                box = ScreenNode(attrs={"role": "combobox", "aria-controls": "list"}, tag="input" if editable else "div")
+                option = ScreenNode(on_click=lambda: setattr(box, "text", "(Europe) Sweden Central"))
+                children = Screen()
+                popup = ScreenNode(attrs={"id": "list"}, children=children)
+                filter_box = ScreenNode(tag="input", on_fill=lambda: children.add(
+                    ("option", "(Europe) Sweden Central", option)))
+                if editable:        # the combo box is the filter: the popup has no text box of its own
+                    box.on_fill = filter_box.on_fill
+                else:
+                    children.add(("searchbox", "Filter", filter_box))
+                box.on_click = lambda: screen.add(("listbox", "Regions", popup))
+                screen.add(("combobox", "Region", box))
+                with mock.patch.object(run, "all_frames", lambda page: [screen]):
+                    self.assertIsNone(self.pick(page, box, "(Europe) Sweden Central", tag=box.tag))
+                typed = box.filled if editable else filter_box.filled
+                self.assertEqual((typed, option.clicked), (["Sweden Central"], 1))
+
+    def paged(self, pages: list[list[str]], end_scrolls: bool = True):
+        """A list that shows pages[0], and the next page after each scroll (`state['scrolls']`
+        counts them); with `end_scrolls` False the last page cannot be scrolled past."""
+        screen, page, state = Screen(), FakePage(), {"scrolls": 0}
+        box = ScreenNode(attrs={"role": "combobox", "aria-controls": "list"}, tag="div")
+        children, options = Screen(), {}
+
+        def show(index: int) -> None:
+            children.entries.clear()
+            for name in pages[index]:
+                options[name] = ScreenNode(on_click=lambda name=name: setattr(box, "text", name))
+                children.add(("option", name, options[name]))
+
+        def scroll() -> bool:
+            state["scrolls"] += 1
+            if state["scrolls"] >= len(pages) and not end_scrolls:
+                return False
+            show(min(state["scrolls"], len(pages) - 1))
+            return True
+
+        popup = ScreenNode(attrs={"id": "list"}, children=children, on_scroll=scroll)
+        show(0)
+        box.on_click = lambda: screen.add(("listbox", "Regions", popup))
+        screen.add(("combobox", "Region", box))
+        return screen, page, box, options, state, popup
+
+    def test_an_option_shown_only_after_scrolling_is_found(self) -> None:
+        screen, page, box, options, state, _ = self.paged([["(Europe) North Europe"], ["(Europe) Norway East"],
+                                                           ["(Europe) Sweden Central"]])
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIsNone(self.pick(page, box, "Sweden Central"))
+        self.assertEqual((state["scrolls"], options["(Europe) Sweden Central"].clicked), (2, 1))
+
+    def test_scrolling_stops_after_twenty_pages(self) -> None:
+        pages = [[f"(Europe) Region {n}"] for n in range(40)]
+        screen, page, box, _, state, _ = self.paged(pages)
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                self.assertRaisesRegex(LookupError, "option 'Sweden Central' not found"):
+            self.pick(page, box, "Sweden Central")
+        self.assertEqual((state["scrolls"], run.LIST_SCROLL_PAGES), (20, 20))
+
+    def test_scrolling_stops_when_the_list_does_not_move(self) -> None:
+        screen, page, box, _, state, _ = self.paged([["(Europe) North Europe"], ["(Europe) Norway East"]],
+                                                    end_scrolls=False)
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), self.assertRaises(LookupError):
+            self.pick(page, box, "Sweden Central")
+        self.assertEqual(state["scrolls"], 2)       # the second scroll found the end: nothing moved
+
+    def test_a_missing_option_saves_the_list_tree_scrubbed(self) -> None:
+        tree = ('- listbox "Regions":\n  - option "(Europe) North Europe"\n'
+                '  - option "Item 3f2a9c1e-8b4d-4e6f-9a1b-2c3d4e5f6a7b"')
+        screen, page, box, _, _, popup = self.paged([["(Europe) North Europe"]])
+        popup.tree = tree
+        seen = []
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), self.assertRaises(LookupError):
+            self.pick(page, box, "Sweden Central", diagnose=seen.append)
+        self.assertEqual(len(seen), 1)
+        self.assertIn("(Europe) North Europe", seen[0])
+        # the runner keeps it as list-<step>-<line>.aria.txt, scrubbed as the blade outlines are
+        (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+        r = run.Runner(page_on(f"view/{USERS}"), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "items": [], "images": []}
+        self.quietly(lambda: r.save_list_tree(step, {"line": 7}, seen[0]))
+        saved = (r.run_dir / "list-9.9.1-7.aria.txt").read_text(encoding="utf-8")
+        self.assertIn("(Europe) North Europe", saved)
+        self.assertNotIn("3f2a9c1e", saved)
+        self.assertIn("<id>", saved)
 
 
 if __name__ == "__main__":
