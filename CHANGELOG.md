@@ -9,6 +9,21 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0](https://github.com/mbiszczanik/skycraft/compare/v0.18.0...v0.19.0) (2026-10-16)
+
+
+### Features
+
+* **guide-drift:** record Lab 1.3 and bring its guide and screenshots to the run ([#341](https://github.com/mbiszczanik/skycraft/issues/341)) ([aca732a](https://github.com/mbiszczanik/skycraft/commit/aca732a1392876919ec4c30a456f666da8b36454))
+* **guide-drift:** wait for a Portal deployment to finish before the next element ([#333](https://github.com/mbiszczanik/skycraft/issues/333)) ([6ea74cf](https://github.com/mbiszczanik/skycraft/commit/6ea74cfa2ea2028f101aac3ededc3e1b534f4c39))
+* **pr-gate:** a deferred live verification needs the maintainer's label to merge ([#339](https://github.com/mbiszczanik/skycraft/issues/339)) ([6c43c53](https://github.com/mbiszczanik/skycraft/commit/6c43c53257a6f5a09cba91592224f936b3aa1ddb))
+
+
+### Bug Fixes
+
+* **lab-1.3:** follow today's Portal in the guide and the checklist ([#337](https://github.com/mbiszczanik/skycraft/issues/337)) ([27e2cd4](https://github.com/mbiszczanik/skycraft/commit/27e2cd4a1d89e23e9fd2b9f1ea9042dddfaea1a4))
+* **labs:** find the Lab 1.3 policy assignments the Portal names by display name ([#336](https://github.com/mbiszczanik/skycraft/issues/336)) ([c53239d](https://github.com/mbiszczanik/skycraft/commit/c53239d504bd1baf0cd79678646b25d078390d2a))
+
 ## [0.18.0](https://github.com/mbiszczanik/skycraft/compare/v0.17.0...v0.18.0) (2026-10-12)
 
 
