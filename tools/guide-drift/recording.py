@@ -74,7 +74,7 @@ ENV_REF = re.compile(r"\$\{(?P<name>[A-Z0-9_]+)(?P<upn>\|upn)?\}")
 # label; its valueOverride reads one only into a field that names a secret (env_override_problems,
 # tests/Guide-Drift-Recording.Tests.ps1).
 TENANT_PREFIX_ENV = "SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX"
-ADDRESS_ENV = frozenset({"SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL"})
+ADDRESS_ENV = frozenset({"SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL", "SKYCRAFT_GUIDE_DRIFT_ALERT_EMAIL"})
 
 
 def env_names(recording: dict) -> set[str]:

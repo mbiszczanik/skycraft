@@ -107,7 +107,8 @@
     address with ${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}, and '[yourtenant]' with
     ${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}, which this script sets from the tenant's initial
     *.onmicrosoft.com domain (and restores afterwards). Set SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL to an
-    address you control before running lab 1.1.
+    address you control before running lab 1.1. Steps 1.3.16 and 1.3.17 send budget alerts to
+    ${SKYCRAFT_GUIDE_DRIFT_ALERT_EMAIL}: set it to an address you read before running lab 1.3.
 
     WHEN A STEP FAILS the run asks: c = you did it by hand, continue; s = skip this step and
     continue with the next one (it asks for the reason, which summary.md lists under 'skipped';
