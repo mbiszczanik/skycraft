@@ -358,5 +358,36 @@ class ZeroSizeComboBoxTests(BrowserTestCase):
         self.assertEqual(self.id_of(run.click_target(region)), "region")
 
 
+
+class TagGridTests(BrowserTestCase):
+    """fill_tag on the Portal's Tags grid (1.3.1, run 20261017-123546): rows of combo boxes named
+    'Name' and 'Value', the last one empty; Lab 1.2's Bicep path made the group with the tags."""
+
+    def grid(self, rows) -> None:
+        cells = "".join(f'<div><input role=combobox aria-label=Name value="{name}">'
+                        f'<input role=combobox aria-label=Value value="{value}"></div>' for name, value in rows)
+        self.show(cells + '<div><input role=combobox aria-label=Name id=new-name>'
+                          '<input role=combobox aria-label=Value id=new-value></div>')
+
+    def values(self) -> list:
+        return self.page.evaluate("[...document.querySelectorAll('[aria-label=Value]')].map(e => e.value)")
+
+    def test_a_tag_with_its_value_already_is_left_as_it_is(self) -> None:
+        self.grid([("Environment", "Development"), ("Owner", "SkyCraft-Admins")])
+        self.assertEqual(run.fill_tag(self.page, "owner", "SkyCraft-Admins"), run.ALREADY_SET)
+        self.assertEqual(self.values(), ["Development", "SkyCraft-Admins", ""])
+
+    def test_a_tag_with_another_value_gets_the_value_in_its_row(self) -> None:
+        self.grid([("Environment", "Production")])
+        self.assertIsNone(run.fill_tag(self.page, "Environment", "Development"))
+        self.assertEqual(self.values(), ["Development", ""])
+
+    def test_a_new_tag_goes_into_the_empty_row(self) -> None:
+        self.grid([("Environment", "Development")])
+        self.assertIsNone(run.fill_tag(self.page, "Project", "SkyCraft"))
+        self.assertEqual(self.page.locator("#new-name").input_value(), "Project")
+        self.assertEqual(self.values(), ["Development", "SkyCraft"])
+
+
 if __name__ == "__main__":
     unittest.main()

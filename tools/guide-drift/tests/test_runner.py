@@ -399,8 +399,9 @@ class DecisionRecordingTests(RunnerTestCase):
         super().setUp()
         (self.tmp / "guide.md").write_text("# Lab\n\n2. Click **+ New group**\n", encoding="utf-8")
 
-    def act(self, answers, element, label="+ New group", exact=None, extra=()):
+    def act(self, answers, element, label="+ New group", exact=None, extra=(), records=()):
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
+        r.records.extend(records)       # what the step's earlier items recorded
         candidates = [run.Candidate("button", "New group"), run.Candidate("link", "Groups"),
                       run.Candidate("button", "Delete group"), run.Candidate("link", "Contoso Ltd"),
                       run.Candidate("menuitem", "Bulk delete"), *extra]
@@ -473,6 +474,23 @@ class DecisionRecordingTests(RunnerTestCase):
         self.assertEqual((element.clicked, labels), (0, {}))
         self.assertGreater(element.calls.count("is_disabled"), 1)               # asked again until the deadline
         self.assertNotIn("click", element.calls)
+
+    def test_a_disabled_submit_after_a_form_whose_values_were_all_set_is_a_match(self) -> None:
+        # Run 20261017-123546, 1.3.1: Lab 1.2's Bicep path made the group with the four tags, so
+        # 'Apply' stayed greyed out, as the guide's note says.
+        def tag(observed, step="9.9.1"):
+            return {"step": step, "kind": "tag", "label": "Owner", "outcome": "match", "observed": observed}
+        search = {"step": "9.9.1", "kind": "search", "label": "Resource groups", "outcome": "match", "observed": "x"}
+        for records, outcome in (([search, tag(run.ALREADY_SET), tag(run.ALREADY_SET)], "match"),
+                                 ([search, tag(run.ALREADY_SET), tag("SkyCraft")], "unknown"),   # one was typed
+                                 ([search], "unknown"),                                          # no form
+                                 ([tag(run.ALREADY_SET, step="9.9.0")], "unknown")):             # another step's
+            with self.subTest(records=[r["observed"] for r in records]):
+                element = FakeElement(disabled=True)
+                record, labels = self.act([], None, label="Apply", exact=element, records=records)
+                self.assertEqual(record["outcome"], outcome)
+                self.assertEqual(record["observed"], run.NOTHING_TO_SAVE if outcome == "match" else "disabled: 'Apply'")
+                self.assertNotIn("click", element.calls)
 
     def test_an_element_greyed_out_while_the_blade_loads_is_clicked_once_enabled(self) -> None:
         element = FakeElement(disabled_for=3)
@@ -4183,6 +4201,15 @@ class PromptValueTests(RunnerTestCase):
         [tag] = [record for record in r.records if record["kind"] == "tag"]
         results = (self.tmp / "logs" / "test" / "results.jsonl").read_text(encoding="utf-8")
         return done, tag, fill, results
+
+    def test_a_tag_the_grid_has_already_is_recorded_as_already_set(self) -> None:
+        item = {"kind": "tag", "name": "Owner", "value": "SkyCraft-Admins", "line": 3}
+        step = {"id": "9.9.1", "title": "One", "expected": None, "images": [], "items": [item]}
+        r = run.Runner(FakePage(), {**STEPS, "steps": [step]}, self.recording, self.args(), ask=Answers())
+        with mock.patch.object(run, "fill_tag", return_value=run.ALREADY_SET),                 mock.patch.object(run.Runner, "check_result"):
+            self.assertTrue(self.quietly(lambda: r.run_step(step)))
+        [tag] = [record for record in r.records if record["kind"] == "tag"]
+        self.assertEqual((tag["outcome"], tag["observed"]), ("match", run.ALREADY_SET))
 
     def test_a_tag_record_observes_the_value_typed_not_the_guides(self) -> None:
         done, tag, fill, _ = self.run_tag("SkyCraft-Admins", override="Contoso-Admins")

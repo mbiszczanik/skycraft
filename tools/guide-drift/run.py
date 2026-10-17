@@ -542,6 +542,10 @@ INTERACTIVE = ("a, button, [role=link], [role=button], [role=menuitem], [role=tr
 # A blade menu's button that opens all its collapsed groups ('Manage', 'Monitoring', 'Help').
 EXPAND_ALL = "Expand all headers"
 COLLAPSE_ALL = "Collapse all headers"       # what a blade's menu shows once its groups are open
+# What a field's or tag's record observes when the form showed the value already, and what a disabled
+# submit observes when every value of its form was (Runner.form_unchanged).
+ALREADY_SET = "already set"
+NOTHING_TO_SAVE = "disabled: nothing to save, every value was already set"
 # What a kept outline holds when no frame could be read (save_blade_outline, BLADE_UNREAD).
 UNREAD_OUTLINE = "(no frame could be read: the Portal did not answer within the snapshot's time)"
 EXPAND_TRIES = 3                            # clicks of 'Expand all headers' per item, while the menu loads
@@ -2339,10 +2343,14 @@ def fill_field(page: Page, element: Locator, value: str,
     return None
 
 
-def fill_tag(page: Page, name: str, value: str) -> None:
+def fill_tag(page: Page, name: str, value: str) -> str | None:
     """The Portal's Tags grid ends with an empty row whose inputs are named 'Name' and 'Value';
-    typing into it adds the next empty row. Fill the last of each. The exact roles are confirmed
-    in the first supervised run (Task 12); until then a miss is reported as unknown, not guessed."""
+    typing into it adds the next empty row. A row whose name is the tag's already (case aside, as
+    Azure compares tag names) keeps it: with the value, nothing is typed and ALREADY_SET is
+    returned; with another value, that row's value is replaced. Otherwise the last row's inputs
+    are filled. Lab 1.2's Bicep path creates the resource groups with Lab 1.3's tags, so a
+    replay finds them set (run 20261017-123546), and a second row of the same name would only
+    keep 'Apply' greyed out."""
     for frame in all_frames(page):
         try:
             names = frame.get_by_role("combobox", name="Name", exact=True)
@@ -2355,11 +2363,19 @@ def fill_tag(page: Page, name: str, value: str) -> None:
         except PlaywrightError:     # the frame went away: look in the others
             continue
         if grid:
+            for index in range(min(names.count(), values.count())):
+                if names.nth(index).input_value(timeout=FIND_TIMEOUT_MS).strip().casefold() != name.casefold():
+                    continue
+                if values.nth(index).input_value(timeout=FIND_TIMEOUT_MS) == value:
+                    return ALREADY_SET
+                values.nth(index).fill(value, timeout=FIND_TIMEOUT_MS)
+                page.wait_for_timeout(SETTLE_MS // 2)
+                return None
             names.last.fill(name, timeout=FIND_TIMEOUT_MS)
             page.wait_for_timeout(SETTLE_MS // 2)
             values.last.fill(value, timeout=FIND_TIMEOUT_MS)
             page.wait_for_timeout(SETTLE_MS // 2)
-            return
+            return None
     raise LookupError("Tags grid not found (no inputs named 'Name' and 'Value')")
 
 
@@ -3182,8 +3198,10 @@ class Runner:
                                        "but it is no switch, check box or radio")
                 return record
             elif stays_disabled(self.page, element):     # never click() into a 30 s Playwright wait
-                record.update(outcome="unknown", observed=f"disabled: '{acted_on}'")
-                return record
+                if not self.form_unchanged(step):
+                    record.update(outcome="unknown", observed=f"disabled: '{acted_on}'")
+                    return record
+                note = NOTHING_TO_SAVE
             elif kind == "field":
                 note = fill_field(self.page, element, value or "",
                                   diagnose=lambda tree: self.save_list_tree(step, item, tree))
@@ -3434,8 +3452,9 @@ class Runner:
                 if action == "type":
                     record = self.new_record(step, "tag", item["name"])
                     try:
-                        fill_tag(self.page, item["name"], value)
-                        record.update(outcome="match", observed=value)      # what was typed, not the guide's
+                        note = fill_tag(self.page, item["name"], value)
+                        # What was typed, not the guide's; or that the grid had it already.
+                        record.update(outcome="match", observed=ALREADY_SET if note == ALREADY_SET else value)
                     except (PlaywrightError, LookupError) as error:
                         record.update(outcome="unknown", observed=error_text(error))
                 else:
@@ -3565,6 +3584,18 @@ class Runner:
         if record.get("observed") is not None:
             record["observed"] = scrub(record["observed"], self.redactor, self.secrets)
         return record
+
+    def form_unchanged(self, step: dict) -> bool:
+        """Whether the form `step` is filling holds the guide's values already: the step's records
+        since its last one of another kind are tag or field records, at least one, every one of
+        them ALREADY_SET. Its 'Apply' or 'Save' is then greyed out with nothing to save, which the
+        guide says (1.3.1: the groups carry the tags already), so a disabled one is no failure."""
+        form = []
+        for record in reversed(self.records):
+            if record["step"] != step["id"] or record["kind"] not in ("tag", "field"):
+                break
+            form.append(record)
+        return bool(form) and all(record["observed"] == ALREADY_SET for record in form)
 
     def write(self, record: dict) -> None:
         """Scrub `record` (scrubbed), keep it for the summary and append it to results.jsonl."""
