@@ -360,33 +360,37 @@ class ZeroSizeComboBoxTests(BrowserTestCase):
 
 
 class TagGridTests(BrowserTestCase):
-    """fill_tag on the Portal's Tags grid (1.3.1, run 20261017-123546): rows of combo boxes named
-    'Name' and 'Value', the last one empty; Lab 1.2's Bicep path made the group with the tags."""
+    """fill_tag on the Portal's Tags grid (1.3.1, run 20261017-123546): the tags a group has as rows
+    of plain cells, name, ':' and value, then an empty row with combo boxes named 'Name' and
+    'Value'; Lab 1.2's Bicep path made the group with Lab 1.3's tags."""
 
     def grid(self, rows) -> None:
-        cells = "".join(f'<div><input role=combobox aria-label=Name value="{name}">'
-                        f'<input role=combobox aria-label=Value value="{value}"></div>' for name, value in rows)
-        self.show(cells + '<div><input role=combobox aria-label=Name id=new-name>'
-                          '<input role=combobox aria-label=Value id=new-value></div>')
+        listed = "".join(f'<div role=row><div role=gridcell>{name}</div><div role=gridcell>:</div>'
+                         f'<div role=gridcell>{value}</div><div role=gridcell><button>Delete</button></div></div>'
+                         for name, value in rows)
+        self.show(f'<div role=grid aria-label="Add or edit tags grid">{listed}'
+                  '<div role=row><div role=gridcell><input role=combobox aria-label=Name id=new-name></div>'
+                  '<div role=gridcell>:</div>'
+                  '<div role=gridcell><input role=combobox aria-label=Value id=new-value></div></div></div>')
 
-    def values(self) -> list:
-        return self.page.evaluate("[...document.querySelectorAll('[aria-label=Value]')].map(e => e.value)")
+    def typed(self) -> tuple:
+        return (self.page.locator("#new-name").input_value(), self.page.locator("#new-value").input_value())
 
-    def test_a_tag_with_its_value_already_is_left_as_it_is(self) -> None:
-        self.grid([("Environment", "Development"), ("Owner", "SkyCraft-Admins")])
+    def test_a_listed_tag_with_its_value_is_already_set_and_nothing_is_typed(self) -> None:
+        self.grid([("CostCenter", "MSDN"), ("Owner", "SkyCraft-Admins")])
         self.assertEqual(run.fill_tag(self.page, "owner", "SkyCraft-Admins"), run.ALREADY_SET)
-        self.assertEqual(self.values(), ["Development", "SkyCraft-Admins", ""])
+        self.assertEqual(self.typed(), ("", ""))
 
-    def test_a_tag_with_another_value_gets_the_value_in_its_row(self) -> None:
+    def test_a_listed_tag_with_another_value_is_reported_not_typed_again(self) -> None:
         self.grid([("Environment", "Production")])
-        self.assertIsNone(run.fill_tag(self.page, "Environment", "Development"))
-        self.assertEqual(self.values(), ["Development", ""])
+        with self.assertRaisesRegex(LookupError, "listed with the value 'Production', not 'Development'"):
+            run.fill_tag(self.page, "Environment", "Development")
+        self.assertEqual(self.typed(), ("", ""))
 
     def test_a_new_tag_goes_into_the_empty_row(self) -> None:
         self.grid([("Environment", "Development")])
         self.assertIsNone(run.fill_tag(self.page, "Project", "SkyCraft"))
-        self.assertEqual(self.page.locator("#new-name").input_value(), "Project")
-        self.assertEqual(self.values(), ["Development", "SkyCraft"])
+        self.assertEqual(self.typed(), ("Project", "SkyCraft"))
 
 
 if __name__ == "__main__":
