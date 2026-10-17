@@ -3076,7 +3076,7 @@ class Runner:
 
     def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None,
                      form_start: bool = False, open_field: bool = False, state: bool | None = None,
-                     state_only: bool = False, searched_again: bool = False) -> dict:
+                     state_only: bool = False, looked_again: bool = False) -> dict:
         """Find the element the guide calls `label`, act on it, return the result record.
         `form_start`: the label is the first field of a form, which must be open (find_form)
         unless the recording holds a decision for the label (replay finds the field).
@@ -3205,6 +3205,7 @@ class Runner:
             record.update(outcome="unknown", observed=f"refused: destructive element '{acted_on}'")
             return record
         note = None
+        acted = False       # whether the element was clicked, filled or set: then it is never looked for again
         try:
             # Found anywhere in the window's columns, maybe below the fold: bring it into view first.
             element.scroll_into_view_if_needed(timeout=FIND_TIMEOUT_MS)
@@ -3226,14 +3227,17 @@ class Runner:
                     return record
                 note = NOTHING_TO_SAVE
             elif kind == "field":
+                acted = True
                 note = fill_field(self.page, element, value or "",
                                   diagnose=lambda tree: self.save_list_tree(step, item, tree))
             elif toggle:
+                acted = True
                 note = set_state(self.page, element, state, toggle)
             else:
                 # Read before the click: a click may close a form or open a blade, and the control
                 # may be gone or re-rendered after it.
                 opens = kind in ("navigation", "action") and opens_a_list(element)
+                acted = True
                 click_target(element).click(timeout=FIND_TIMEOUT_MS)
                 self.page.wait_for_timeout(SETTLE_MS)
                 if opens:
@@ -3242,13 +3246,16 @@ class Runner:
             record.update(outcome="unknown", observed=f"read-only: '{acted_on}'")
             return record
         except (PlaywrightError, LookupError) as error:
-            if kind == "search" and isinstance(error, PlaywrightError) and not searched_again                     and not self.page.is_closed():
-                # The dropdown re-rendered between finding the result and acting on it, and the
-                # result went away (run 20261017-123546, 1.3.6: is_disabled timed out): once more.
-                print(f"The search result '{acted_on}' went away before the click: searching once more.")
-                close_search(self.page)
+            if (kind in ("search", "action", "navigation") and isinstance(error, PlaywrightError) and not acted
+                    and not looked_again and not self.page.is_closed()):
+                # The view re-rendered between finding the element and acting on it, and the element
+                # went away (run 20261017-123546, 1.3.6: a search result's is_disabled() and the
+                # list's Refresh's scroll_into_view_if_needed() timed out): look for it once more.
+                print(f"'{acted_on}' went away before it was acted on: looking for it once more.")
+                if kind == "search":
+                    close_search(self.page)
                 return self.act_on_label(step, item, label, value, form_start, open_field, state, state_only,
-                                         searched_again=True)
+                                         looked_again=True)
             record.update(outcome="unknown", observed=error_text(error))
             return record
         # Replay must never inherit a choice the runner could not act on.

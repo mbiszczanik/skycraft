@@ -2721,6 +2721,26 @@ class FindOnScreenTests(RunnerTestCase):
                 self.assertEqual((record["outcome"], search.call_count, close.call_count), (outcome, searches, 1))
                 self.assertEqual(results[1].clicked, 1 if outcome == "match" else 0)
 
+    def test_an_action_gone_before_the_click_is_looked_for_once_more_and_never_clicked_twice(self) -> None:
+        # Run 20261017-123546, 1.3.6: the Resource groups list re-rendered after a group was
+        # created, and scroll_into_view_if_needed() timed out on the Refresh it had found.
+        class Gone(FakeElement):
+            def scroll_into_view_if_needed(self, timeout=None) -> None:
+                raise run.PlaywrightError("Timeout 8000ms exceeded.")
+
+        class ClickFails(FakeElement):
+            def click(self, timeout=None) -> None:
+                self.clicked += 1
+                raise run.PlaywrightError("Timeout 8000ms exceeded.")
+        item = {"kind": "action", "labels": ["Refresh"], "line": 5}
+        for found, outcome, looks in (([Gone(), FakeElement()], "match", 2), ([Gone(), Gone()], "unknown", 2),
+                                      ([ClickFails(), FakeElement()], "unknown", 1)):     # a click is not redone
+            with self.subTest(found=[type(f).__name__ for f in found]):
+                with mock.patch.object(run, "find_exact", side_effect=found) as find:
+                    record, _ = self.act(Screen(), item, "Refresh")
+                self.assertEqual((record["outcome"], find.call_count), (outcome, looks))
+                self.assertEqual(found[1].clicked, 1 if outcome == "match" else 0)
+
     def test_a_search_without_a_scope_is_the_global_search(self) -> None:
         self.assertNotIn("scope", self.SEARCH)                               # steps.json from before scopes
         record, _ = self.act(Screen(), self.SEARCH, self.ENTRA)
