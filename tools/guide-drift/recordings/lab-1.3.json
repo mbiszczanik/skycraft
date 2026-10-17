@@ -10,9 +10,14 @@
   "steps": {
     "1.3.5": {
       "valueOverrides": {},
-      "viewUrl": "https://portal.azure.com/#view/Microsoft_Azure_Policy/CreateEditAssignment.ReactView/isCreateMode~/true/assignMode/Policy/preSelectedDefinitionId~/null/preSelectedDefinitionVersion~/null/preSelectedScope/%2Fsubscriptions%2F<id>",
-      "result": null,
-      "labels": {}
+      "viewUrl": "https://portal.azure.com/#view/Microsoft_Azure_Policy/PolicyMenuBlade.MenuView/~/Assignments",
+      "result": {
+        "text": "Require-Environment-Tag-RG"
+      },
+      "labels": {},
+      "asked": [
+        "result"
+      ]
     },
     "1.3.7": {
       "valueOverrides": {
@@ -68,21 +73,28 @@
     },
     "1.3.1": {
       "valueOverrides": {},
-      "viewUrl": "https://portal.azure.com/#resource/subscriptions/<id>/resourceGroups/dev-skycraft-swc-rg/overview",
-      "result": null,
-      "labels": {}
+      "viewUrl": "https://portal.azure.com/#resource/subscriptions/<id>/resourceGroups/dev-skycraft-swc-rg/tags",
+      "result": {
+        "text": "MSDN"
+      },
+      "labels": {},
+      "asked": [
+        "result"
+      ]
     },
     "1.3.2": {
       "valueOverrides": {},
-      "viewUrl": "https://portal.azure.com/#resource/subscriptions/<id>/resourceGroups/prod-skycraft-swc-rg/overview",
+      "viewUrl": "https://portal.azure.com/#resource/subscriptions/<id>/resourceGroups/prod-skycraft-swc-rg/tags",
       "result": null,
-      "labels": {}
+      "labels": {},
+      "startBlade": "resource/subscriptions/<id>/resourceGroups/dev-skycraft-swc-rg/tags"
     },
     "1.3.3": {
       "valueOverrides": {},
-      "viewUrl": "https://portal.azure.com/#resource/subscriptions/<id>/resourceGroups/platform-skycraft-swc-rg/overview",
+      "viewUrl": "https://portal.azure.com/#resource/subscriptions/<id>/resourceGroups/platform-skycraft-swc-rg/tags",
       "result": null,
-      "labels": {}
+      "labels": {},
+      "startBlade": "resource/subscriptions/<id>/resourceGroups/prod-skycraft-swc-rg/tags"
     },
     "1.3.4": {
       "valueOverrides": {},
@@ -96,6 +108,9 @@
       ]
     },
     "1.3.6": {
+      "lateLabels": {
+        "rg-test-with-tag": 5
+      },
       "valueOverrides": {},
       "viewUrl": "https://portal.azure.com/#view/HubsExtension/ResourceGroupCreate.ReactView/_provisioningContext~/%7B%22telemetryId%22%3A%22<id>%22%2C%22referenceType%22%3A%7B%22extensionName%22%3A%22HubsExtension%22%2C%22assetType%22%3A%22ResourceGroups%22%7D%2C%22initialValues%22%3A%7B%22subscriptionIds%22%3A%5B%22<id>%22%2C%22<id>%22%2C%22<id>%22%2C%22<id>%22%5D%2C%22resourceGroupNames%22%3A%5B%5D%2C%22locationNames%22%3A%5B%22swedencentral%22%2C%22eastus%22%2C%22westeurope%22%2C%22northeurope%22%2C%22eastus2%22%5D%7D%2C%22marketplaceItem%22%3A%7B%22categoryIds%22%3A%5B%5D%2C%22id%22%3A%22Microsoft.Portal%22%2C%22itemDisplayName%22%3A%22NoMarketplace%22%2C%22products%22%3A%5B%5D%2C%22version%22%3A%22%22%2C%22productsWithNoPricing%22%3A%5B%5D%2C%22publisherDisplayName%22%3A%22Microsoft.Portal%22%2C%22deploymentName%22%3A%22NoMarketplace%22%2C%22launchingContext%22%3A%7B%22telemetryId%22%3A%22<id>%22%2C%22source%22%3A%5B%22BrowseResourceGroups.ReactView%22%2C%22%7B%20Name%3A%20Part%2C%20Type%3A%20%5B0%5DHubsExtension-%5B1%5DBrowseResourceGroups.ReactView-%5B2%5DAzBladeVirtualLens-%5B5%5DBrowseResourceGroups.ReactView%2C%20Id%3A%20Part-BrowseResourceGroups.ReactView-18%20%7D%22%2C%22Part-BrowseResourceGroups.ReactView-18%22%5D%2C%22galleryItemId%22%3A%22%22%7D%2C%22deploymentTemplateFileUris%22%3A%7B%7D%2C%22uiMetadata%22%3Anull%7D%7D",
       "result": null,
