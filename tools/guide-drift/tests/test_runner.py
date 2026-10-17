@@ -3229,6 +3229,22 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual((record["outcome"], all_users.clicked), ("match", 1))
         self.assertIsNone(run.DESTRUCTIVE.search(run.EXPAND_ALL))
 
+    def test_a_command_in_the_toolbar_s_overflow_is_found_after_opening_it_once(self) -> None:
+        # Run 20261017-123546, 1.3.6: the resource group's pane beside the list was narrow, and
+        # 'Delete resource group' was under 'More commands'.
+        delete = ScreenNode()
+        screen = Screen()
+        more = ScreenNode(on_click=lambda: screen.add(("menuitem", "Delete resource group", delete)))
+        screen.add(("menuitem", "More commands", more))
+        item = {"kind": "action", "labels": ["Delete resource group"], "line": 1}
+        record, r = self.act(screen, item, "Delete resource group")
+        self.assertEqual((record["outcome"], more.clicked, delete.clicked, r.ask.prompts), ("match", 1, 1, []))
+        # A label that is in no overflow: opened once, then the person is asked.
+        record, r = self.act(Screen(("button", "More commands", ScreenNode())), item, "Delete resource group",
+                             candidates=[run.Candidate("button", "More commands")])
+        self.assertEqual((record["outcome"], len(r.ask.prompts)), ("unknown", 1))
+        self.assertTrue(r.overflow_opened)
+
     def test_without_an_expand_button_the_person_is_asked_at_once(self) -> None:
         toggle = ScreenNode()
         screen = Screen(("text", "Users", ScreenNode(interactive=False)), ("button", "Toggle Manage", toggle))

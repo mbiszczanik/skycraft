@@ -551,6 +551,11 @@ NOTHING_TO_SAVE = "disabled: nothing to save, every value was already set"
 # What a kept outline holds when no frame could be read (save_blade_outline, BLADE_UNREAD).
 UNREAD_OUTLINE = "(no frame could be read: the Portal did not answer within the snapshot's time)"
 EXPAND_TRIES = 3                            # clicks of 'Expand all headers' per item, while the menu loads
+# A blade toolbar's overflow ('...'), which holds the commands that do not fit: a resource group's
+# pane opened beside the list is narrow, and 'Delete resource group' goes there (run
+# 20261017-123546, 1.3.6). A button or a menu item (OVERFLOW_ROLES).
+MORE_COMMANDS = "More commands"
+OVERFLOW_ROLES = ("button", "menuitem")
 # The closest region (a blade) holding the element: [its name, its left edge], or null. A region is
 # an element of role region, or a <section> named by aria-labelledby or aria-label, which is one
 # without the attribute: the Portal's blades are such sections ('section.fxs-blade', labelled by the
@@ -564,6 +569,8 @@ BLADE_OF_JS = r"""e => {
   const name = texts.length ? texts.join(' ') : (r.getAttribute('aria-label') || '');
   return [name, r.getBoundingClientRect().left];
 }"""
+# What blade_of names a blade that is an iframe in no region (a React blade).
+IFRAME_BLADE = "(iframe)"
 # A combo box whose own box has no width or no height (ng-select's input: Cost analysis' VIEW list,
 # run 20261017-003656, a zero-width input inside a 150 px container): the nearest ancestor, at most
 # four up, whose box has both, when it is visible and holds no other control; it may be fully
@@ -1130,8 +1137,11 @@ def blade_of(element: Locator) -> list | None:
     an element of a child frame outside any region there, the region holding the iframe that
     shows that frame, and so on up to the main frame. Cost analysis renders in an iframe of the
     subscription's blade, so its 'Add filter' has no region of its own, while the Subscriptions
-    list beside it has an 'Add filter' too (run 20261017-095926). None when no region holds it;
-    raises PlaywrightError when the element or a frame cannot be read."""
+    list beside it has an 'Add filter' too (run 20261017-095926). A React blade is an iframe of
+    its own beside the others, in no region (the Resource groups list and a group's pane, each
+    with a 'More commands', run 20261017-123546): the outermost such iframe then stands for the
+    blade, as [IFRAME_BLADE, its left edge]. None for an element of the main frame that no
+    region holds; raises PlaywrightError when the element or a frame cannot be read."""
     blade = element.evaluate(BLADE_OF_JS, timeout=1000)
     if blade is not None:
         return blade
@@ -1140,16 +1150,20 @@ def blade_of(element: Locator) -> list | None:
         frame = handle.owner_frame()
     finally:
         handle.dispose()
+    outermost = None        # the left edge of the iframe in the main frame that shows the element
     while frame is not None and frame.parent_frame is not None:
         iframe = frame.frame_element()
         try:
             blade = iframe.evaluate(BLADE_OF_JS)
+            box = iframe.bounding_box()
         finally:
             iframe.dispose()
         if blade is not None:
             return blade
+        if box is not None:
+            outermost = box["x"]
         frame = frame.parent_frame
-    return None
+    return None if outermost is None else [IFRAME_BLADE, outermost]
 
 
 def unique_visible(page: Page, make_locator: Callable[[Frame], Locator]) -> Locator | None:
@@ -2597,6 +2611,7 @@ class Runner:
         self.records: list[dict] = self.earlier_results() if args.resume else []
         self.first_failure: str | None = None   # the step every later step is skipped because of
         self.expanded = False                   # whether the current item opened the menu groups
+        self.overflow_opened = False            # whether the current item opened a toolbar's overflow
         self.expand_tries = 0                   # clicks of 'Expand all headers' for the current item
         # The blade the current step started on, to record once its first item went through; None
         # when there is none to record (one is recorded already, or the view has none), and after
@@ -2712,6 +2727,7 @@ class Runner:
             element = find_exact(self.page, label, field=(kind == "field"), decorated=settled)
             if element is None and kind in ("navigation", "action") and settled:
                 self.expand_menu_groups(label)
+                self.open_overflow(label)
             return element
         return look
 
@@ -2968,6 +2984,32 @@ class Runner:
                 self.expanded = True
                 return
             self.page.wait_for_timeout(SETTLE_MS // 5)
+
+    def open_overflow(self, label: str) -> None:
+        """Open the newest blade's toolbar overflow ('More commands', MORE_COMMANDS) once per item,
+        when the label is not on screen after SETTLE_MS: a narrow pane moves the commands that do
+        not fit there ('Delete resource group' in a resource group's pane beside the list, run
+        20261017-123546). The newest blade's button is clicked (newest_blade, blade_of); none when
+        that cannot be told. The looks then go on to the same deadline."""
+        if self.overflow_opened:
+            return
+        found: list[Locator] = []
+        for role in OVERFLOW_ROLES:
+            found += visible_across_frames(self.page, lambda f, role=role: f.get_by_role(role, name=MORE_COMMANDS,
+                                                                                         exact=True))
+        try:
+            button = newest_blade(found)
+        except Ambiguous:
+            return
+        if button is None:
+            return
+        self.overflow_opened = True
+        try:
+            button.click(timeout=FIND_TIMEOUT_MS)
+        except PlaywrightError as error:
+            print(f"Could not click '{MORE_COMMANDS}' ({scrub(error_text(error), self.redactor, self.secrets)}).")
+            return
+        print(f"Opened the toolbar's '{MORE_COMMANDS}' to look for '{label}' again.")
 
     def groups_open(self, blade: list | None) -> bool:
         """Whether 'Collapse all headers' is shown in the blade `blade` (BLADE_OF_JS) names."""
@@ -3485,6 +3527,7 @@ class Runner:
         for position, item in enumerate(step["items"]):
             self.expanded = False
             self.expand_tries = 0
+            self.overflow_opened = False
             self.open_list, self.list_consulted = None, False
             self.first_item = position == 0
             if item["kind"] == "tag":
