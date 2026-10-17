@@ -11,7 +11,11 @@
     - VM backup protection enabled on dev-skycraft-swc-auth-vm (skipped if VM absent), and
       its latest backup job did not fail - configuration alone stayed green while every
       backup was refused by policy (issue #184)
-    - Backup Vault (platform-skycraft-swc-bv): exists, LRS, system-assigned identity
+    - Backup Vault (platform-skycraft-swc-bv): exists, LRS, system-assigned identity, soft delete
+      Off. A vault created in the Portal is AlwaysOn, which cannot be undone, so the lab creates
+      it with Az PowerShell or the Bicep (decision on issue #366); the check says so when it
+      fails, and accepts On/AlwaysOn once $backupVaultSoftDeleteAccepted is widened for the GA
+      of secure by default in the region
     - Blob Backup Policy (SkyCraft-Blob-Policy): AzureBlob datasource, 30-day retention
     - Blob backup instance configured for prodskycraftswcsa
 
@@ -51,6 +55,11 @@ $storageAccount = 'prodskycraftswcsa'
 $snapshotRgPrefix = 'platform-skycraft-swc-rpc'
 $snapshotRgSuffix = '-rg'
 $snapshotRgName   = "${snapshotRgPrefix}1${snapshotRgSuffix}"
+# Backup vault soft delete states the lab accepts (#355, decision on #366). 'Off' while the option
+# exists in Sweden Central: secure by default is in preview for Backup vaults there, and Microsoft
+# Learn says the option to turn soft delete off may go when it reaches GA. Once it does, add 'On'
+# and 'AlwaysOn' here; the Recovery Services vault check below already expects AlwaysON.
+$backupVaultSoftDeleteAccepted = @('Off')
 
 $passCount = 0
 $failCount = 0
@@ -343,9 +352,17 @@ Invoke-Test "Backup Vault tag 'CostCenter' = 'MSDN'" {
     return ($bvArm.Tags.CostCenter -eq 'MSDN')
 }
 
-Invoke-Test "Backup Vault soft delete is off (lab-friction override, docs/bicep-standards.md section 4.5)" {
+Invoke-Test "Backup Vault soft delete is $($backupVaultSoftDeleteAccepted -join ' or ') (lab-friction override, docs/bicep-standards.md section 4.5)" {
     if (-not $bvArm) { return $false }
-    return ($bvArm.Properties.securitySettings.softDeleteSettings.state -eq 'Off')
+    $softDeleteState = "$($bvArm.Properties.securitySettings.softDeleteSettings.state)"
+    if ($softDeleteState -in $backupVaultSoftDeleteAccepted) { return $true }
+    if ($softDeleteState -eq 'AlwaysOn') {
+        # The Portal creates Backup vaults AlwaysOn, and AlwaysOn cannot be turned off.
+        Write-Host " (state is AlwaysOn, which cannot be turned off: a vault created in the Portal is AlwaysOn - recreate it with soft delete Off through the Az PowerShell of Step 5.2.4 or the Bicep; see lab-guide-5.2.md, Troubleshooting)" -NoNewline -ForegroundColor Gray
+    } else {
+        Write-Host " (state is '$softDeleteState' - set it to Off: Update-AzDataProtectionBackupVault -SoftDeleteState Off)" -NoNewline -ForegroundColor Gray
+    }
+    return $false
 }
 
 # ============================================================================

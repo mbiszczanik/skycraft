@@ -5,14 +5,23 @@
 .DESCRIPTION
     Validates that all Lab 5.1 monitoring resources are deployed correctly:
     - Log Analytics Workspace exists with correct SKU and retention
-    - VM Insights DCR exists and is associated with a SkyCraft VM
+    - VM Insights DCR is associated with a SkyCraft VM and sends to the workspace
     - Action Group exists with email receiver configured
     - Metric Alert rule exists and is enabled
     - Storage Diagnostic Settings are configured
     - Tags match governance requirements
 
+    The data collection rule is found through the VM it applies to, not by name and group
+    (issue #355): VM insights names its rule 'MSVMI-<...>' in the VM's group, the data collection
+    rule wizard takes any group, and the Bicep creates 'skycraft-vm-dcr' in the platform group.
+    The rules associated with the VMs of the dev and prod groups are read, and the one that sends
+    to the lab's workspace is checked ('skycraft-vm-dcr' first if several do). Names stay literal
+    where the guide has the learner type both name and group: the action group, the alert rule
+    and the diagnostic setting.
+
 .PARAMETER Environment
-    Target environment prefix when checking VM resources. Default: dev
+    Target environment prefix when checking VM resources: its group's VMs are searched first for
+    the data collection rule, then the other environment's. Default: dev
 
 .EXAMPLE
     .\Test-Lab.ps1
@@ -31,7 +40,6 @@
 param(
     [Parameter()]
     [ValidateSet('dev', 'prod')]
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Environment', Justification = 'Documented public parameter retained for interface stability and future VM-scoped probes.')]
     [string]$Environment = 'dev'
 )
 
@@ -82,7 +90,6 @@ if (-not $context) {
     $Host.SetShouldExit(1)
     exit 1
 }
-$subscriptionId = $context.Subscription.Id
 Write-Host "  Account: $($context.Account.Id)" -ForegroundColor Gray
 Write-Host ""
 
@@ -119,18 +126,77 @@ Invoke-Test "Workspace has correct tags (Project, Environment, CostCenter)" {
 Write-Host ""
 Write-Host "[VM Insights Data Collection Rule]" -ForegroundColor Yellow
 
-# DCR detail is read from the raw ARM body (Get-AzResource -ExpandProperties)
-# so the camelCase destinations/dataFlows structure matches the ARM schema.
-$dcrId = "/subscriptions/$subscriptionId/resourceGroups/$platformRg/providers/Microsoft.Insights/dataCollectionRules/$dcrName"
-$dcrResource = Get-AzResource -ResourceId $dcrId -ExpandProperties -ErrorAction SilentlyContinue
+# Found through the VM it applies to, not by name and group (#355): a VM's data collection rule
+# associations name the rules that apply to it, wherever they live and whatever they are called.
+# DCR detail is read from the raw ARM body (Get-AzResource -ExpandProperties) so the camelCase
+# destinations/dataFlows structure matches the ARM schema.
+$vmGroups = @("$Environment-skycraft-swc-rg") + @(@('dev', 'prod') | Where-Object { $_ -ne $Environment } | ForEach-Object { "$_-skycraft-swc-rg" })
+$dcrResource    = $null
+$dcrVmNames     = @()
+$dcrLookupError = $null
+try {
+    $ruleVms     = [ordered]@{}   # rule id (lower case) -> names of the VMs it is associated with
+    $groupErrors = @()
+    foreach ($group in $vmGroups) {
+        try {
+            $vms = @(Get-AzResource -ResourceGroupName $group -ResourceType 'Microsoft.Compute/virtualMachines' -ErrorAction Stop | Where-Object { $_ })
+        }
+        catch {
+            $groupErrors += "VMs in '$group': $($_.Exception.Message)"
+            continue
+        }
+        foreach ($vm in $vms) {
+            $response = Invoke-AzRestMethod -Method GET -Path "$($vm.ResourceId)/providers/Microsoft.Insights/dataCollectionRuleAssociations?api-version=2023-03-11" -ErrorAction Stop
+            if ($response.StatusCode -ne 200) {
+                $groupErrors += "associations of '$($vm.Name)': HTTP $($response.StatusCode)"
+                continue
+            }
+            foreach ($association in @(($response.Content | ConvertFrom-Json).value)) {
+                # An association with a data collection endpoint names no rule.
+                $ruleId = "$($association.properties.dataCollectionRuleId)"
+                if (-not $ruleId) { continue }
+                $key = $ruleId.ToLowerInvariant()
+                if (-not $ruleVms.Contains($key)) { $ruleVms[$key] = [pscustomobject]@{ Id = $ruleId; Vms = @() } }
+                $ruleVms[$key].Vms += $vm.Name
+            }
+        }
+    }
 
-Invoke-Test "DCR '$dcrName' exists" {
-    return ($null -ne $dcrResource -and $dcrResource.Name -eq $dcrName)
+    $rules = foreach ($entry in $ruleVms.Values) {
+        $rule = Get-AzResource -ResourceId $entry.Id -ExpandProperties -ErrorAction Stop
+        $sendsHere = $null -ne $wsCache -and (@($rule.Properties.destinations.logAnalytics | ForEach-Object { "$($_.workspaceResourceId)" }) -contains $wsCache.ResourceId)
+        [pscustomobject]@{ Resource = $rule; Vms = $entry.Vms; SendsHere = $sendsHere; Preferred = ($rule.Name -eq $dcrName) }
+    }
+    # The rule that sends to the lab's workspace is the lab's; the Bicep's name breaks a tie.
+    $chosen = @($rules) | Where-Object { $_ } |
+        Sort-Object -Property @{ Expression = 'SendsHere'; Descending = $true }, @{ Expression = 'Preferred'; Descending = $true } |
+        Select-Object -First 1
+    if ($chosen) {
+        $dcrResource = $chosen.Resource
+        $dcrVmNames  = $chosen.Vms
+    }
+    elseif ($groupErrors.Count -gt 0) {
+        throw "could not read $($groupErrors -join '; ')"
+    }
+}
+catch {
+    $dcrLookupError = $_.Exception.Message
+}
+
+Invoke-Test "Data collection rule associated with a VM in $($vmGroups -join ' or ')" {
+    if ($dcrLookupError) { throw $dcrLookupError }
+    if (-not $dcrResource) {
+        Write-Host " (no rule is associated with these VMs - Step 5.1.2)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
+    Write-Host " ('$($dcrResource.Name)' in $($dcrResource.ResourceGroupName), on $($dcrVmNames -join ', '))" -NoNewline -ForegroundColor Gray
+    return $true
 }
 
 Invoke-Test "DCR destination points to workspace" {
-    $destWsId = $dcrResource.Properties.destinations.logAnalytics[0].workspaceResourceId
-    return ($destWsId -eq $wsCache.ResourceId)
+    if (-not $dcrResource -or -not $wsCache) { return $false }
+    $destWsIds = @($dcrResource.Properties.destinations.logAnalytics | ForEach-Object { "$($_.workspaceResourceId)" })
+    return ($destWsIds -contains $wsCache.ResourceId)
 }
 
 Invoke-Test "DCR has InsightsMetrics data flow" {
@@ -141,12 +207,6 @@ Invoke-Test "DCR has InsightsMetrics data flow" {
 Invoke-Test "DCR includes Syslog stream" {
     $streams = $dcrResource.Properties.dataFlows | ForEach-Object { $_.streams } | Select-Object -Unique
     return ($streams -contains 'Microsoft-Syslog')
-}
-
-Invoke-Test "DCR has at least one VM association" {
-    $assocResponse = Invoke-AzRestMethod -Method GET -Path "/subscriptions/$subscriptionId/resourceGroups/$platformRg/providers/Microsoft.Insights/dataCollectionRules/$dcrName/associations?api-version=2023-03-11"
-    $assocList = $assocResponse.Content | ConvertFrom-Json
-    return ($assocList.value.Count -gt 0)
 }
 
 # ============================================================================
