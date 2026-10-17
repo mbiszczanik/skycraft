@@ -230,23 +230,24 @@ First, try to create a resource group **WITHOUT** the "Environment" tag:
 
 ![Assign a Built-in Policy](./images/step-1.3.6a.png)
 
-Now create one with the tag:
+Now create one with the tag. A new search leaves the form, or the error details, behind:
 
-6. Close the error details, or the form if the Tags tab showed the error, and click **+ Create** again
-7. On the **Basics** tab, fill in:
+6. In Azure Portal, search for **Resource groups**
+7. Click **+ Create**
+8. On the **Basics** tab, fill in:
 
 | Field               | Value            |
 | ------------------- | ---------------- |
 | Resource group name | rg-test-with-tag |
 | Region              | Sweden Central   |
 
-8. Click the **Tags** tab and add:
+9. Click the **Tags** tab and add:
 
 | Name        | Value |
 | ----------- | ----- |
 | Environment | Test  |
 
-9. Click **Review + create**, then **Create**
+10. Click **Review + create**, then **Create**
 
 **Expected Result**: Creation succeeds because the required tag is present.
 
@@ -256,14 +257,14 @@ Now create one with the tag:
 
 Finally, delete the test resource group `rg-test-with-tag` (the policy denied `rg-test-no-tag`, so it does not exist):
 
-10. Click **Refresh**, then click **rg-test-with-tag**
-11. Click **Delete resource group**
-12. Fill in the confirmation field:
+11. Click **Refresh**, then click **rg-test-with-tag**
+12. Click **Delete resource group**
+13. Fill in the confirmation field:
 
 - **Enter resource group name to confirm deletion**: `rg-test-with-tag`
 
-13. Click outside the field, then click **Delete**
-14. In the **Delete confirmation** dialog, click **Delete**
+14. Click outside the field, then click **Delete**
+15. In the **Delete confirmation** dialog, click **Delete**
 
 **Note**: The **Delete** button stays greyed out until the name is typed and the field loses focus. That is why you click outside the field first.
 
