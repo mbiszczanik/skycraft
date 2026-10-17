@@ -2380,9 +2380,13 @@ def fill_tag(page: Page, name: str, value: str) -> str | None:
                 if shown == value:
                     return ALREADY_SET
                 raise LookupError(f"tag '{name}' is listed with the value '{shown}', not '{value}'")
-            names.last.fill(name, timeout=FIND_TIMEOUT_MS)
+            # The row is taken by its place before typing: the Portal adds the next empty row as
+            # soon as a name is typed, and '.last' would then be that new row (run 20261017-123546,
+            # 1.3.6: 'Test' went into the row after 'Environment').
+            row = min(names.count(), values.count()) - 1
+            names.nth(row).fill(name, timeout=FIND_TIMEOUT_MS)
             page.wait_for_timeout(SETTLE_MS // 2)
-            values.last.fill(value, timeout=FIND_TIMEOUT_MS)
+            values.nth(row).fill(value, timeout=FIND_TIMEOUT_MS)
             page.wait_for_timeout(SETTLE_MS // 2)
             return None
     raise LookupError("Tags grid not found (no inputs named 'Name' and 'Value')")
