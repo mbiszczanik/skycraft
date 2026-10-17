@@ -6031,6 +6031,18 @@ class ListOptionTests(RunnerTestCase):
         self.assertEqual((options["(Europe) Sweden Central"].clicked,
                           options["Recommended: (Europe) Sweden Central"].clicked), (1, 0))
 
+    def test_a_field_showing_the_region_on_its_first_line_shows_the_value(self) -> None:
+        # Run 20261017-123546, 1.3.6: after the click the Region field read '(Europe) Sweden
+        # Central' and more text on the next line.
+        screen, page, box, options = self.opened("option", ["Recommended: (Europe) Sweden Central"])
+        options["Recommended: (Europe) Sweden Central"].on_click = lambda: setattr(
+            box, "text", "(Europe) Sweden Central\nRecommended")
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIsNone(self.pick(page, box, "Sweden Central"))
+        box.text = "(Europe) Sweden Central\nRecommended"
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertEqual(self.pick(page, box, "Sweden Central"), "already set")
+
     def test_an_exact_name_wins_over_a_prefixed_one(self) -> None:
         screen, page, box, options = self.opened("option", ["Sweden Central", "(Europe) Sweden Central"])
         with mock.patch.object(run, "all_frames", lambda page: [screen]):

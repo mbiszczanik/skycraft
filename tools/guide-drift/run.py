@@ -2025,8 +2025,10 @@ def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case:
     several options have the name. When no option is found, `diagnose` is given the open list's
     accessibility tree (list_tree)."""
     def shows(text: str) -> bool:
-        text = text.strip()
-        names = (text, REGION_PREFIX.sub("", text), REGION_PREFIX.sub("", GROUP_PREFIX.sub("", text)))
+        # The whole text, or one of its lines: a Region field shows the region on its first line
+        # and more text under it (run 20261017-123546, 1.3.6).
+        texts = [text.strip()] + [line.strip() for line in text.splitlines() if line.strip()]
+        names = [n for t in texts for n in (t, REGION_PREFIX.sub("", t), REGION_PREFIX.sub("", GROUP_PREFIX.sub("", t)))]
         return any(n == value or (ignore_case and n.casefold() == value.casefold()) for n in names)
 
     if shows(current_text(element, tag)):
