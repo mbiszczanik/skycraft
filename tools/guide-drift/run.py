@@ -2344,13 +2344,14 @@ def fill_field(page: Page, element: Locator, value: str,
 
 
 def fill_tag(page: Page, name: str, value: str) -> str | None:
-    """The Portal's Tags grid ends with an empty row whose inputs are named 'Name' and 'Value';
-    typing into it adds the next empty row. A row whose name is the tag's already (case aside, as
-    Azure compares tag names) keeps it: with the value, nothing is typed and ALREADY_SET is
-    returned; with another value, that row's value is replaced. Otherwise the last row's inputs
-    are filled. Lab 1.2's Bicep path creates the resource groups with Lab 1.3's tags, so a
-    replay finds them set (run 20261017-123546), and a second row of the same name would only
-    keep 'Apply' greyed out."""
+    """The Portal's Tags grid lists the tags a resource has as rows of plain cells, name, ':' and
+    value ('row "CostCenter : MSDN"'), and ends with an empty row whose combo boxes are named
+    'Name' and 'Value'; typing into it adds the next empty row (run 20261017-123546). A tag the
+    grid lists already (its name case aside, as Azure compares tag names) is not typed again: with
+    the value, ALREADY_SET is returned; with another value, LookupError, as no run has seen how
+    the Portal edits a listed value. Lab 1.2's Bicep path creates the resource groups with Lab
+    1.3's tags, so a replay finds them, and a second row of the same name would only keep 'Apply'
+    greyed out. Otherwise the last row's combo boxes (or inputs labelled so) are filled."""
     for frame in all_frames(page):
         try:
             names = frame.get_by_role("combobox", name="Name", exact=True)
@@ -2360,23 +2361,35 @@ def fill_tag(page: Page, name: str, value: str) -> str | None:
             if values.count() == 0:
                 values = frame.get_by_label("Value", exact=True)
             grid = names.count() > 0 and values.count() > 0
+            listed = listed_tags(frame) if grid else {}
         except PlaywrightError:     # the frame went away: look in the others
             continue
         if grid:
-            for index in range(min(names.count(), values.count())):
-                if names.nth(index).input_value(timeout=FIND_TIMEOUT_MS).strip().casefold() != name.casefold():
-                    continue
-                if values.nth(index).input_value(timeout=FIND_TIMEOUT_MS) == value:
+            if name.casefold() in listed:
+                shown = listed[name.casefold()]
+                if shown == value:
                     return ALREADY_SET
-                values.nth(index).fill(value, timeout=FIND_TIMEOUT_MS)
-                page.wait_for_timeout(SETTLE_MS // 2)
-                return None
+                raise LookupError(f"tag '{name}' is listed with the value '{shown}', not '{value}'")
             names.last.fill(name, timeout=FIND_TIMEOUT_MS)
             page.wait_for_timeout(SETTLE_MS // 2)
             values.last.fill(value, timeout=FIND_TIMEOUT_MS)
             page.wait_for_timeout(SETTLE_MS // 2)
             return None
     raise LookupError("Tags grid not found (no inputs named 'Name' and 'Value')")
+
+
+def listed_tags(frame: Frame) -> dict[str, str]:
+    """The tags the Tags grid lists in `frame` (fill_tag): {name, case-folded: value} from every
+    row of three or more cells whose second cell reads ':' and whose first holds no control."""
+    tags: dict[str, str] = {}
+    for row in frame.get_by_role("row").all():
+        cells = row.get_by_role("gridcell")
+        if cells.count() < 3 or cells.nth(1).inner_text(timeout=1000).strip() != ":":
+            continue
+        if cells.nth(0).locator("input, [role=combobox], [role=textbox]").count():
+            continue        # the empty row to type into
+        tags[cells.nth(0).inner_text(timeout=1000).strip().casefold()] = cells.nth(2).inner_text(timeout=1000).strip()
+    return tags
 
 
 # --- signing in and the guards -------------------------------------------------------------
