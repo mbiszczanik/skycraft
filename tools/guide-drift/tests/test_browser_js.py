@@ -387,6 +387,23 @@ class TagGridTests(BrowserTestCase):
             run.fill_tag(self.page, "Environment", "Development")
         self.assertEqual(self.typed(), ("", ""))
 
+    def test_the_value_goes_into_the_row_of_the_name_when_typing_adds_a_row(self) -> None:
+        # Create a resource group's Tags tab adds the next empty row as soon as a name is typed
+        # (run 20261017-123546, 1.3.6).
+        self.show('<div role=grid id=grid><div role=row><div role=gridcell>'
+                  '<input role=combobox aria-label=Name class=name></div><div role=gridcell>:</div>'
+                  '<div role=gridcell><input role=combobox aria-label=Value class=value></div></div></div>'
+                  "<script>document.getElementById('grid').addEventListener('input', e => {"
+                  " if (!e.target.classList.contains('name')) return;"
+                  " const row = e.target.closest('[role=row]');"
+                  " if (row.nextElementSibling) return;"
+                  " row.after(row.cloneNode(true)); row.nextElementSibling.querySelectorAll('input')"
+                  ".forEach(i => i.value = ''); });</script>")
+        self.assertIsNone(run.fill_tag(self.page, "Environment", "Test"))
+        rows = self.page.evaluate("[...document.querySelectorAll('[role=row]')].map(r => "
+                                  "[...r.querySelectorAll('input')].map(i => i.value))")
+        self.assertEqual(rows, [["Environment", "Test"], ["", ""]])
+
     def test_a_new_tag_goes_into_the_empty_row(self) -> None:
         self.grid([("Environment", "Development")])
         self.assertIsNone(run.fill_tag(self.page, "Project", "SkyCraft"))
