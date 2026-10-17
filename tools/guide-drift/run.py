@@ -84,7 +84,8 @@ not the console.
 The runner acts only on a visible element within the window's width (the Portal parks earlier blades
 off to the left; below the fold is fine, it scrolls there first), and only on one: several matches
 are reported as unknown rather than guessed, except that when each of them sits in a blade (a
-[role=region]), the blades differ and the right-most, newest blade holds only one, that one is acted
+[role=region], or a <section> named by aria-labelledby or aria-label, which the Portal's blades are),
+the blades differ and the right-most, newest blade holds only one, that one is acted
 on (newest_blade: a resource group's pane stays open beside the list it came from, and both menus
 show 'Tags'). A decorated name (find_decorated, below) keeps the stricter rule on purpose: several
 are ambiguous wherever they sit, as a decoration is a looser match than the plain name. It refuses
@@ -148,9 +149,19 @@ same deadline. The groups count as open once that blade shows 'Collapse all head
 SETTLE_MS; a click while the menu still reads 'Loading...' changes nothing, so it is clicked again
 on a later look, EXPAND_TRIES times at most per item. When the deadline passes while a blade is
 still loading (blade_still_loading: a close button reads "Close content 'undefined'", or the newest
-blade's title heading has no content after it), the console says so once and the label is looked for
-up to BLADE_LOAD_TIMEOUT_MS more (BLADE_EMPTY_TIMEOUT_MS for a titled blade); once the blade has
-rendered, it is looked for FIND_TIMEOUT_MS again. Only then is the person asked.
+blade's title heading has no content after it, or a part of it is named 'Loading...' as Cost
+analysis' date range button is while its VIEW list has not come yet, or no frame could be read at
+all, as when the Portal
+was too busy to answer within the snapshot's time while a subscription's overview rendered, run
+20261017-003656), the console says so once and the label is looked for up to BLADE_LOAD_TIMEOUT_MS
+more (BLADE_EMPTY_TIMEOUT_MS for a titled, busy or unread blade); once the blade has rendered, it is looked
+for FIND_TIMEOUT_MS again. Only then is the person asked.
+
+A combo box whose own box has no width or no height (ng-select, Cost analysis' VIEW list: a
+zero-width input inside the visible container) counts as visible when its nearest ancestor with a
+box is (ZERO_SIZE_COMBOBOX_JS), and is clicked there (click_target): Playwright neither sees nor
+clicks a zero-width element. An action is looked up among combo boxes too, after every other action
+role, so 'Open the **VIEW** list' opens it and the item's next label is picked from that list.
 
 A Portal deployment takes from seconds to ten minutes, so before the blade check, a lookup that
 found nothing waits for one that the screen shows still running (issue #328, wait_for_deployment):
@@ -477,9 +488,13 @@ REFRESH = "Refresh"
 # reads 'undefined' while the blade's content is still loading.
 BLADE_CLOSE = re.compile(r"^Close content '(?P<title>.*)'$")
 UNTITLED_BLADE = "undefined"
-# What blade_still_loading() answers: a close button titled 'undefined', or a titled blade with no
-# content after its heading.
-BLADE_UNTITLED, BLADE_EMPTY = "untitled", "empty"
+# What blade_still_loading() answers: a close button titled 'undefined', a titled blade with no
+# content after its heading, or no frame read at all.
+BLADE_UNTITLED, BLADE_EMPTY, BLADE_UNREAD, BLADE_BUSY = "untitled", "empty", "unread", "busy"
+# The whole name of an element the Portal shows while a part of a blade still loads: Cost analysis'
+# date range button reads 'Loading... ' for seconds after the blade's title, and its VIEW list
+# comes only then (run 20261017-095926, about 13 s after the blade opened).
+LOADING_NAME = re.compile(r"^Loading(?:\.\.\.|\u2026)?\s*$")
 # What a rendered blade shows after its title: form controls, list rows, tabs, tables, prose.
 # Buttons, links and bare text do not count, as the blade's header has them (Maximize, Close)
 # before anything else renders.
@@ -490,6 +505,9 @@ CANDIDATE_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "t
                    "combobox", "checkbox", "radio", "switch", "heading", "cell")
 FIELD_ROLES = ("textbox", "combobox", "checkbox", "radio")
 ACTION_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "checkbox", "radio", "switch")
+# What an action's plain name is looked up among (find_exact): a list the guide opens by its name
+# ('Open the **VIEW** list', 1.3.18) too, last, so a button or link of that name wins.
+ACTION_LOOKUP_ROLES = ACTION_ROLES + ("combobox",)
 RESULT_ROLES = ("option", "link", "button", "menuitem")    # entries of the global search's results
 # A resource in a Portal list: the link in its name cell, the cell, or the whole row (#199).
 RESOURCE_ROLES = ("link", "gridcell", "row")
@@ -524,10 +542,48 @@ INTERACTIVE = ("a, button, [role=link], [role=button], [role=menuitem], [role=tr
 # A blade menu's button that opens all its collapsed groups ('Manage', 'Monitoring', 'Help').
 EXPAND_ALL = "Expand all headers"
 COLLAPSE_ALL = "Collapse all headers"       # what a blade's menu shows once its groups are open
+# What a kept outline holds when no frame could be read (save_blade_outline, BLADE_UNREAD).
+UNREAD_OUTLINE = "(no frame could be read: the Portal did not answer within the snapshot's time)"
 EXPAND_TRIES = 3                            # clicks of 'Expand all headers' per item, while the menu loads
-# The closest region (a blade) holding the element: [its aria-label, its left edge], or null.
-BLADE_OF_JS = ("e => { const r = e.closest('[role=region]'); "
-               "return r ? [r.getAttribute('aria-label') || '', r.getBoundingClientRect().left] : null; }")
+# The closest region (a blade) holding the element: [its name, its left edge], or null. A region is
+# an element of role region, or a <section> named by aria-labelledby or aria-label, which is one
+# without the attribute: the Portal's blades are such sections ('section.fxs-blade', labelled by the
+# title and subtitle; run 20261017-003656). The name is the text of the elements aria-labelledby
+# names, joined by a space, or else the aria-label, as the accessible name is computed.
+BLADE_OF_JS = r"""e => {
+  const r = e.closest('[role=region], section[aria-labelledby], section[aria-label]');
+  if (!r) return null;
+  const ids = (r.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+  const texts = ids.map(id => document.getElementById(id)).filter(Boolean).map(x => x.textContent.trim());
+  const name = texts.length ? texts.join(' ') : (r.getAttribute('aria-label') || '');
+  return [name, r.getBoundingClientRect().left];
+}"""
+# A combo box whose own box has no width or no height (ng-select's input: Cost analysis' VIEW list,
+# run 20261017-003656, a zero-width input inside a 150 px container): the nearest ancestor, at most
+# four up, whose box has both, when it is visible and holds no other control; it may be fully
+# transparent, as ng-select's '.ng-input' is (opacity 0), since a click still reaches it. Answers that
+# ancestor's {x, width} (visible_in checks it against the window's columns), and marks it with
+# CLICK_PROXY_ATTR = the token when one is given (click_target clicks it); null for any other
+# element, or when no such ancestor is found.
+CLICK_PROXY_ATTR = "data-skycraft-click-proxy"
+ZERO_SIZE_COMBOBOX_JS = r"""(e, token) => {
+  if (e.getAttribute('role') !== 'combobox') return null;
+  const own = e.getBoundingClientRect();
+  if (own.width > 0 && own.height > 0) return null;
+  const controls = 'input, select, textarea, button, a[href], [role=combobox], [role=textbox], '
+                 + '[role=button], [role=link], [role=checkbox], [role=radio]';
+  let n = e.parentElement;
+  for (let i = 0; n && i < 4; i++, n = n.parentElement) {
+    const r = n.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      if (!n.checkVisibility({visibilityProperty: true})) return null;
+      if (n.querySelectorAll(controls).length !== 1) return null;
+      if (token !== null) n.setAttribute('""" + CLICK_PROXY_ATTR + r"""', token);
+      return {x: r.x, width: r.width};
+    }
+  }
+  return null;
+}"""
 # The control that follows a non-interactive text in document order (find_by_text_label, #342): an
 # input, select or textarea, or an element of role combobox, textbox, listbox, spinbutton or
 # radiogroup, visible, with no other visible text between the two. It marks that control with
@@ -816,12 +872,18 @@ def deployment_state(texts: list[str]) -> tuple[str | None, list[str]]:
 
 def blade_still_loading(outline: list[tuple[str, str]]) -> str | None:
     """Whether a blade's frame is open while its content has not rendered yet (issue #233), from
-    aria_outline(): BLADE_UNTITLED when any close button reads "Close content 'undefined'";
+    aria_outline(): BLADE_UNREAD when the outline is empty, as no frame could be read (the main
+    frame's snapshot timed out while a subscription's overview rendered, run 20261017-003656: the
+    lookup then gave up before the blade's menu was there to expand); BLADE_UNTITLED when any
+    close button reads "Close content 'undefined'"; BLADE_BUSY when an element after the newest
+    blade's close button is named 'Loading...' as a whole (LOADING_NAME);
     BLADE_EMPTY when the newest blade (the one whose "Close content '<title>'" button comes last)
     has a heading named after its title but no content (BLADE_CONTENT_ROLES) after the later of
     the two; None otherwise. The top bar's search box and an older blade's fields come before
     them, so they do not count. Without a close button, or without the title heading, nothing is
     said to be loading and the lookup keeps its normal time."""
+    if not outline:
+        return BLADE_UNREAD
     closes = [(index, m.group("title")) for index, (role, name) in enumerate(outline)
               if role == "button" and (m := BLADE_CLOSE.match(name))]
     if not closes:
@@ -829,6 +891,8 @@ def blade_still_loading(outline: list[tuple[str, str]]) -> str | None:
     if any(title == UNTITLED_BLADE for _, title in closes):
         return BLADE_UNTITLED
     close_at, title = closes[-1]
+    if any(LOADING_NAME.match(name) for _, name in outline[close_at + 1:]):
+        return BLADE_BUSY
     headings = [index for index, (role, name) in enumerate(outline) if role == "heading" and name == title]
     if not headings:
         return None
@@ -971,20 +1035,40 @@ def frame_in_window(frame: Frame, viewport: dict | None) -> bool:
 
 def visible_in(locator: Locator, viewport: dict | None) -> list[Locator]:
     """The elements of `locator` that are visible and, when `viewport` is given, overlap the
-    window horizontally. is_visible() does not wait. An element that cannot be inspected (it
-    went away mid-check) still counts: dropping it could turn two matches into one, and the
-    runner would act on a guess. A frame that goes away raises PlaywrightError from count(),
-    which callers handle per frame."""
+    window horizontally. is_visible() does not wait. A combo box without a width or height of its
+    own counts by the ancestor it is clicked at (ZERO_SIZE_COMBOBOX_JS). An element that cannot be
+    inspected (it went away mid-check) still counts: dropping it could turn two matches into one,
+    and the runner would act on a guess. A frame that goes away raises PlaywrightError from
+    count(), which callers handle per frame."""
     found = []
     for index in range(locator.count()):
         element = locator.nth(index)
         try:
-            counts = element.is_visible() and in_window_columns(element, viewport)
+            if element.is_visible():
+                counts = in_window_columns(element, viewport)
+            else:
+                box = element.evaluate(ZERO_SIZE_COMBOBOX_JS, None, timeout=1000)
+                counts = box is not None and (viewport is None or overlaps_columns(box, viewport))
         except PlaywrightError:
             counts = True
         if counts:
             found.append(element)
     return found
+
+
+def click_target(element: Locator) -> Locator:
+    """Where to click `element`: itself, or for a combo box without a width or height of its own
+    the ancestor ZERO_SIZE_COMBOBOX_JS marks (Playwright refuses to click a zero-width element,
+    and the ancestor opens the list). An element that cannot be inspected is clicked itself, and
+    the error that follows is reported."""
+    token = str(next(NEXT_CONTROL_TOKENS))
+    try:
+        box = element.evaluate(ZERO_SIZE_COMBOBOX_JS, token, timeout=1000)
+    except PlaywrightError:
+        return element
+    if box is None:
+        return element
+    return element.locator(f'xpath=ancestor::*[@{CLICK_PROXY_ATTR}="{token}"][1]')
 
 
 def visible_across_frames(page: Page, make_locator: Callable[[Frame], Locator],
@@ -1012,14 +1096,15 @@ def newest_blade(found: list[Locator], by_text: bool = False) -> Locator | None:
     Portal keeps earlier blades open to the left of the newest one (a resource group's pane beside
     the list it was opened from), and both show a 'Tags' link. When every match sits in a region
     (BLADE_OF_JS), the regions differ and the right-most one holds exactly one match, that is the
-    one (the step works on the newest blade). Otherwise (two in that blade, one outside any
+    one (the step works on the newest blade); an element in a child frame counts in the blade of
+    the iframe that shows it (blade_of). Otherwise (two in that blade, one outside any
     region, a region that cannot be read, regions at the same place) it raises Ambiguous."""
     if len(found) < 2:
         return only_one(found, by_text)
     blades = []
     for element in found:
         try:
-            blades.append(element.evaluate(BLADE_OF_JS, timeout=1000))
+            blades.append(blade_of(element))
         except PlaywrightError:
             blades.append(None)
     if any(blade is None for blade in blades) or len({tuple(blade) for blade in blades}) < 2:
@@ -1029,6 +1114,33 @@ def newest_blade(found: list[Locator], by_text: bool = False) -> Locator | None:
     if len(newest) == 1:
         return newest[0]
     return only_one(found, by_text)
+
+
+def blade_of(element: Locator) -> list | None:
+    """The blade the element sits in (BLADE_OF_JS): the closest region in its own frame, or, for
+    an element of a child frame outside any region there, the region holding the iframe that
+    shows that frame, and so on up to the main frame. Cost analysis renders in an iframe of the
+    subscription's blade, so its 'Add filter' has no region of its own, while the Subscriptions
+    list beside it has an 'Add filter' too (run 20261017-095926). None when no region holds it;
+    raises PlaywrightError when the element or a frame cannot be read."""
+    blade = element.evaluate(BLADE_OF_JS, timeout=1000)
+    if blade is not None:
+        return blade
+    handle = element.element_handle(timeout=1000)
+    try:
+        frame = handle.owner_frame()
+    finally:
+        handle.dispose()
+    while frame is not None and frame.parent_frame is not None:
+        iframe = frame.frame_element()
+        try:
+            blade = iframe.evaluate(BLADE_OF_JS)
+        finally:
+            iframe.dispose()
+        if blade is not None:
+            return blade
+        frame = frame.parent_frame
+    return None
 
 
 def unique_visible(page: Page, make_locator: Callable[[Frame], Locator]) -> Locator | None:
@@ -1357,7 +1469,7 @@ def find_exact(page: Page, label: str, field: bool = False, decorated: bool = Tr
     bare = LEADING_PLUS.sub("", label, count=1)
     names = [label] + ([bare] if bare and bare != label else [])
     for name in names:
-        element = find_field(page, name) if field else find_in_roles(page, name, ACTION_ROLES)
+        element = find_field(page, name) if field else find_in_roles(page, name, ACTION_LOOKUP_ROLES)
         if element is not None:
             return element
     if not decorated or (not field and any(visible_across_frames(page, lambda f, name=name: interactive_text(f, name))
@@ -1909,7 +2021,7 @@ def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case:
 
     if shows(current_text(element, tag)):
         return "already set"
-    element.click(timeout=FIND_TIMEOUT_MS)
+    click_target(element).click(timeout=FIND_TIMEOUT_MS)
     page.wait_for_timeout(SETTLE_MS // 2)
     name = re.compile("^" + literal_pattern(value) + "$", re.IGNORECASE) if ignore_case else value
     filtered = False
@@ -2707,7 +2819,7 @@ class Runner:
         """After `look` found nothing for FIND_TIMEOUT_MS: when a blade is still loading
         (blade_still_loading), say so once and go on looking until it has rendered or its limit
         has passed (BLADE_LOAD_TIMEOUT_MS while a title reads 'undefined', BLADE_EMPTY_TIMEOUT_MS
-        for a titled blade without content); once it has rendered, look for FIND_TIMEOUT_MS again,
+        for a titled blade without content, or when no frame could be read); once it has rendered, look for FIND_TIMEOUT_MS again,
         as its controls come a moment after it, with a fresh look from `renew` when it is given
         (looking_for: a decorated name, #244, counts again only after SETTLE_MS on the rendered
         blade). None at once when no blade is loading, so a label missing from a rendered blade is
@@ -2773,7 +2885,7 @@ class Runner:
             return
         if outline is None:
             outline = aria_outline(self.page)
-        lines = [f'{role} "{name}"' if name else role for role, name in outline]
+        lines = [f'{role} "{name}"' if name else role for role, name in outline] or [UNREAD_OUTLINE]
         path = self.run_dir / f"blade-{step['id']}-{item.get('line')}.aria.txt"
         # Every line kept, scrubbed as a record is (ids, secrets, tenant data; #212).
         path.write_text(scrub("\n".join(lines), self.redactor, self.secrets, whole=True) + "\n", encoding="utf-8")
@@ -2804,7 +2916,8 @@ class Runner:
             blade = None
         try:
             button.click(timeout=FIND_TIMEOUT_MS)
-        except PlaywrightError:
+        except PlaywrightError as error:
+            print(f"Could not click '{EXPAND_ALL}' ({scrub(error_text(error), self.redactor, self.secrets)}).")
             return
         print(f"Opened the menu groups ('{EXPAND_ALL}') to look for '{label}' again.")
         for _ in range(5):      # five reads over SETTLE_MS
@@ -3080,7 +3193,7 @@ class Runner:
                 # Read before the click: a click may close a form or open a blade, and the control
                 # may be gone or re-rendered after it.
                 opens = kind in ("navigation", "action") and opens_a_list(element)
-                element.click(timeout=FIND_TIMEOUT_MS)
+                click_target(element).click(timeout=FIND_TIMEOUT_MS)
                 self.page.wait_for_timeout(SETTLE_MS)
                 if opens:
                     self.open_list = element      # the item's later labels are looked for in it first

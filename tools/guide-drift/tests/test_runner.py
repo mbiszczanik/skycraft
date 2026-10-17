@@ -1956,10 +1956,29 @@ class BladeStillLoadingTests(unittest.TestCase):
         self.assertEqual(run.blade_still_loading(outline), run.BLADE_EMPTY)
 
     def test_without_a_titled_blade_frame_nothing_is_loading(self) -> None:
-        self.assertIsNone(run.blade_still_loading([]))
         self.assertIsNone(run.blade_still_loading(self.TOP_BAR))
         self.assertIsNone(run.blade_still_loading(self.TOP_BAR + [("heading", "Overview")]))      # no frame
         self.assertIsNone(run.blade_still_loading(self.TOP_BAR + [("button", "Close content 'Users'")]))  # no heading
+
+    def test_a_part_named_loading_after_the_newest_blade_s_close_button_is_still_loading(self) -> None:
+        # Run 20261017-095926, 1.3.18: Cost analysis showed its title and menu while its iframe's
+        # date range button read 'Loading... '; the VIEW list came about 13 s after the blade.
+        cost = [("heading", "Subscription | Cost analysis"), ("button", "Close content 'Subscription | Cost analysis'"),
+                ("link", "Overview"), ("button", "Scope: Subscription"), ("combobox", "Select")]
+        self.assertEqual(run.blade_still_loading(self.TOP_BAR + cost + [("button", "Loading... ")]), run.BLADE_BUSY)
+        self.assertEqual(run.blade_still_loading(self.TOP_BAR + cost + [("button", "Loading…")]), run.BLADE_BUSY)
+        self.assertIsNone(run.blade_still_loading(self.TOP_BAR + cost + [("button", "Invoice (Azure) : Sep 26-Oct 25 ")]))
+        # Only a whole name counts, and only after the newest blade's close button.
+        self.assertIsNone(run.blade_still_loading(
+            self.TOP_BAR + cost + [("button", "Copy to clipboard the value for Current billing period Loading...")]))
+        self.assertIsNone(run.blade_still_loading(self.TOP_BAR + [("button", "Loading...")] + cost))
+
+    def test_a_screen_no_frame_could_be_read_is_still_loading(self) -> None:
+        # Run 20261017-003656, 1.3.18: the main frame's snapshot timed out while the subscription's
+        # overview rendered, the empty outline passed for a rendered blade, and 'Cost analysis' was
+        # asked about before the menu with its collapsed group was there to expand.
+        self.assertEqual(run.blade_still_loading([]), run.BLADE_UNREAD)
+        self.assertEqual(run.outline_of([None]), [])
 
     class Frame:
         """A frame with an accessibility snapshot (None: unreadable) and its iframe's bounding box
@@ -2132,6 +2151,8 @@ class ScreenNode(FakeElement):
             return True
         if script == run.IN_TOP_BAR_JS:
             return self.in_top_bar
+        if script == run.ZERO_SIZE_COMBOBOX_JS:       # a box of its own (test_browser_js has the rest)
+            return None
         if script == run.LIST_SCROLL_JS:
             return bool(self.on_scroll()) if self.on_scroll else False
         if script == run.FIELD_KIND_JS:
@@ -2156,6 +2177,9 @@ class ScreenNode(FakeElement):
 
     def element_handle(self, timeout=None):
         return self
+
+    def owner_frame(self):          # blade_of: the screen's nodes are the main frame's
+        return None
 
     def dispose(self) -> None:
         pass
