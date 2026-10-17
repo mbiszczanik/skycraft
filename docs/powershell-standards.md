@@ -125,16 +125,23 @@ Scripts interacting with Azure **must** use `try...catch` blocks to handle API f
 2. Use `try...catch` for all Azure cmdlets.
 3. Do not read a lookup that failed as "absent". `-ErrorAction SilentlyContinue` on an existence check turns a 403, throttling or a transient ARM error into "not found", and a cleanup then skips a resource that still exists and exits `0` (issue #255). Look up with `-ErrorAction Stop` and tell the two apart: the lab cleanups run each lookup through `Invoke-LabLookup`, which reads "found nothing" and a not-found error (`Test-LabNotFoundError`) as absent, and reports any other error as `[ERROR]`, counted like a failed delete - and the resource it could not see is left alone. `Test-LabNotFoundError` recognises the ARM not-found shapes (`ResourceNotFound`, `ResourceGroupNotFound`, a 404 status), not every cmdlet's own wording: `Get-AzResourceGroup -Name` reports a missing group as "Provided resource group does not exist.", and `Get-AzStorageContainer -Name` a missing container as "Can not find the container", which both read as a failed lookup. Generated cmdlets can do the same: `Get-AzAutoscaleSetting -Name` reports a missing setting as a plain exception with no status. List instead and pick by name (`Get-AzResourceGroup`; for containers `Get-AzRmStorageContainer`, a control-plane call the storage firewall does not block; the Az.Monitor objects in Lab 5.1), so a missing object is an empty match rather than an error to interpret. Each cleanup carries its own copy of the two helpers (§7.5). [`tests/Lab-Cleanup-Lookup.Tests.ps1`](../tests/Lab-Cleanup-Lookup.Tests.ps1) holds every copy to the same contract, and fails any cleanup that silences a lookup another way: a `*-Az*` command given `-ErrorAction SilentlyContinue` or `Ignore`, directly or through a splatted hashtable the script builds; `$ErrorActionPreference` set to either, at any scope; a `$PSDefaultParameterValues` entry that gives Az commands either as their `ErrorAction`; or a catch clause around a `*-Az*` command (`Invoke-AzRestMethod` aside) that, on the path a failure takes, neither counts the error (`++` or `+=` on `$script:cleanupFailures`, scope written out) nor throws or exits - the way Labs 3.1 and 4.4 read any error as "not there" before #297. `Test-LabNotFoundError` satisfies that rule only as the test that decides which branch is the failure path; `if (Test-LabNotFoundError $_) { }` on its own is flagged. A few diagnostics report a failure as `[WARN]` on purpose, because their answer must not change the exit code; the suite lists those catch clauses by file and command, and fails an entry that no longer matches. It reads all of this from the syntax tree, never from comments or strings, and only in the spellings its fixtures cover; a value held in another variable is not resolved. The catch rule sees only commands written inside the `try` block: a scriptblock invoked with `&` inside it, and a `trap`, are not read. Nor is an error hidden without silencing the command: `-ErrorAction Continue` with `2>$null` or `*>$null`, or `$ErrorActionPreference = 'Continue'`. The lab cycle's `tools/Remove-LabCycle.ps1`, which asserts what the cleanups left behind, and `tools/LabCycle.psm1`, whose preflight checks for leftovers before a run, are held to the same rules except the one about catch clauses: they report a check that failed as a failed result or a failed preflight check, not in `$script:cleanupFailures`. No lab is exempt from these rules, only the listed diagnostic catch clauses are: a new lab's cleanup meets them from its first commit.
 4. Use `-ErrorAction Stop` when a failure should trigger the `catch` block for retries or termination.
-5. Signal failure to the caller with `$Host.SetShouldExit(<code>)` immediately before every non-zero `exit <code>`. PowerShell 7 discards `exit <code>` from a script run as `pwsh -File` when that script declares `#Requires -Modules` for a module it has to auto-import - every `Az.*` module qualifies. The `exit` still unwinds the script, but the host never applies the code, so the process exits `0` and a failed run looks clean to the automated lab cycle. Keep the `exit` as well, so execution still stops. `exit 0` needs no guard. Enforced by [`tests/Exit-Code-Propagation.Tests.ps1`](../tests/Exit-Code-Propagation.Tests.ps1) (issue #104) on every script that declares `#Requires -Modules` - the condition the fault needs. A script that declares none carries its exit code out unaided, so the rule does not apply to it (issue #124).
-6. Gate every deployment on its result. `New-Az*Deployment` does not throw for every unhappy ending - a deployment whose resources fail to provision returns an object with `ProvisioningState` set to `Failed` or `Canceled` and the pipeline carries on. Assign the result to a variable and end the script with a non-zero `exit` when it is not `Succeeded`; a deployment piped to `Out-Null` cannot be checked at all. Enforced by [`tests/Deployment-State-Gating.Tests.ps1`](../tests/Deployment-State-Gating.Tests.ps1) (issue #75).
+5. End a lab script with `Exit-Lab -FailureCount <n>` from [`tools/LabCommon.psm1`](../tools/LabCommon.psm1), never with a non-zero `exit` or `$Host.SetShouldExit`. A lab script has two callers: the learner, who runs it at the prompt (`.\scripts\Test-Lab.ps1`) and keeps working in that session, and the lab cycle or CI, which start it as a process. PowerShell 7 discards `exit <code>` from a script run as `pwsh -File` when the script declares `#Requires -Modules` for a module it has to auto-import - `Az.Accounts` qualifies - so the process exits `0` and a failed run looks clean (issue #104). `$Host.SetShouldExit(<code>)` carries the code out, but it ends the whole process: at the prompt it closes the learner's PowerShell window, even with code `0` (issue #257). `Exit-Lab` exits `1` when the count is above zero and `0` otherwise, and calls `$Host.SetShouldExit` only when the script is the entry point of a `pwsh -File` process (`-File` on the command line, no `-NoExit`, and the script at the bottom of the call stack). At a prompt, under `-Command` and inside the lab cycle's launcher shim it is a plain `exit`: the session stays open and `$LASTEXITCODE` holds the code. Pass the failure count, not an exit code: `exit $failCount` wraps to `0` at 256 failures. `exit 0` stays as it is. Import the module right after `$ErrorActionPreference`, by a path relative to the script so it holds in any clone and in Cloud Shell, and call `Exit-Lab` from the script itself, not from a file it dot-sources:
+
+   ```powershell
+   $ErrorActionPreference = 'Stop'
+   # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+   Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
+   ```
+
+   [`tests/Exit-Code-Propagation.Tests.ps1`](../tests/Exit-Code-Propagation.Tests.ps1) enforces this on every `module-*/**/scripts/*.ps1` and `scripts/*.ps1`, and proves both callers with real `pwsh` processes: `pwsh -File` returns `1` for a failed run, and an interactive session keeps running after it with `$LASTEXITCODE` `1`. The maintainer tools under `tools/` are process entry points with exit codes above `1` and keep the #104 rule: a tools script that declares `#Requires -Modules` precedes every non-zero `exit <code>` with `$Host.SetShouldExit(<code>)`; one that declares none carries its exit code out unaided (issue #124). Run them with `pwsh -File`, not at the prompt.
+6. Gate every deployment on its result. `New-Az*Deployment` does not throw for every unhappy ending - a deployment whose resources fail to provision returns an object with `ProvisioningState` set to `Failed` or `Canceled` and the pipeline carries on. Assign the result to a variable and end the script with `Exit-Lab -FailureCount 1` (or a non-zero `exit` in a tool) when it is not `Succeeded`; a deployment piped to `Out-Null` cannot be checked at all. Enforced by [`tests/Deployment-State-Gating.Tests.ps1`](../tests/Deployment-State-Gating.Tests.ps1) (issue #75).
 
 ```powershell
 $deployment = New-AzSubscriptionDeployment @deployParams
 
 if ($deployment.ProvisioningState -ne 'Succeeded') {
     Write-Host "[FAILED] Deployment finished with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 ```
 
@@ -164,9 +171,8 @@ if ($vnetLookup.Value.Count -eq 0) {    # found nothing, or reported as not foun
 ```powershell
 if ($script:cleanupFailures -gt 0) {
     Write-Host "Cleanup finished with $($script:cleanupFailures) failure(s)." -ForegroundColor Red
-    $Host.SetShouldExit(1)   # without this, `pwsh -File` reports success anyway
-    exit 1
 }
+Exit-Lab -FailureCount $script:cleanupFailures   # 1 when anything failed, 0 otherwise
 ```
 
 ## 5. Best Practices
@@ -348,8 +354,9 @@ These are deliberate decisions where SkyCraft departs from the official Microsof
 
 - **Microsoft says**: Don't repeat yourself; a helper used by many scripts belongs in one module that they import.
 - **We do**: Every `Remove-LabResource.ps1` that looks resources up carries its own copy of `Test-LabNotFoundError` and `Invoke-LabLookup` (rule 3 in §4). A copy may recognise extra not-found shapes its own getters produce (Lab 1.3 adds `PolicyAssignmentNotFound`); the common behaviour is the same in all of them.
-- **Why**: The reason in §7.3 holds here too: a lab folder must run, and read, on its own. A shared runtime module would be the first thing a lab script imports from outside its folder. The cost of copies is drift, so [`tests/Lab-Cleanup-Lookup.Tests.ps1`](../tests/Lab-Cleanup-Lookup.Tests.ps1) lifts every copy with the parser and runs it on the same error shapes, and requires both helpers in every cleanup that calls `Invoke-LabLookup`.
+- **Why**: The reason in §7.3 holds here too: a lab folder must read on its own, and the lookup is part of what it teaches. The cost of copies is drift, so [`tests/Lab-Cleanup-Lookup.Tests.ps1`](../tests/Lab-Cleanup-Lookup.Tests.ps1) lifts every copy with the parser and runs it on the same error shapes, and requires both helpers in every cleanup that calls `Invoke-LabLookup`.
 - **Within one lab**: the rule is about the lab folder, not the file. Scripts of the same lab may dot-source a helper file kept in that lab's own `scripts/` folder when they must give the same answer: Lab 1.3's `Test-Lab.ps1`, `Remove-LabResource.ps1` and `Invoke-LabGovernance.ps1` share `scripts/LabPolicyAssignment.ps1`, which decides which policy assignment is the guide's (issue #330). The lab still runs and reads on its own, and the file meets every rule a lab script does (help header, `#Requires -Version 7.0`, `[CmdletBinding()]`, `$ErrorActionPreference = 'Stop'`). A cleanup's `Test-LabNotFoundError` and `Invoke-LabLookup` stay in the cleanup itself, where `tests/Lab-Cleanup-Lookup.Tests.ps1` reads them.
+- **The one shared module**: every lab script imports [`tools/LabCommon.psm1`](../tools/LabCommon.psm1) for `Exit-Lab` (rule 5 in §4, issues #257 and #301). How a script hands its exit code to two different callers teaches nothing about Azure, and getting it wrong in one of 60 copies either closes the learner's session or hides a failure from the lab cycle, so it lives in one place. A lab folder therefore runs inside a clone of the repository (Cloud Shell included), not copied out on its own. Connection checks and lookups stay in each lab.
 
 ## 8. Script Boilerplate
 
@@ -379,13 +386,15 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Script Title ===" -ForegroundColor Cyan
 
 # 1. Verify Connection
 $context = Get-AzContext
 if (-not $context) {
-    Write-Host "Not logged in." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
+    Write-Host "Not logged in." -ForegroundColor Red; Exit-Lab -FailureCount 1
 }
 
 # 2. Logic with Error Handling
@@ -397,8 +406,7 @@ try {
 catch {
     Write-Host "Failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 ```
 
@@ -431,6 +439,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Cleanup: $ResourceGroupName ===" -ForegroundColor Cyan
 
@@ -443,7 +453,6 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] $($_.Exception.Message)" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 ```

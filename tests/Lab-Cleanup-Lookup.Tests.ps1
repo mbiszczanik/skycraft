@@ -374,7 +374,7 @@ BeforeAll {
     }
 
     # What a catch clause must do with the error of an Az command it caught: count it, or end the
-    # run (throw, exit), on the path a failure takes.
+    # run (throw, exit, Exit-Lab), on the path a failure takes.
     #   - Counting is ++ (prefix or postfix) or += on $script:cleanupFailures, the counter every
     #     converted cleanup keeps and exits 1 on, with its scope written out. A plain assignment
     #     (= 0) resets rather than counts, and an unscoped $cleanupFailures++ inside a function
@@ -422,6 +422,8 @@ BeforeAll {
             param($node)
             $handles = $node -is [System.Management.Automation.Language.ThrowStatementAst] -or
                 $node -is [System.Management.Automation.Language.ExitStatementAst] -or
+                ($node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Exit-Lab' -and
+                    $node.CommandElements[-1].Extent.Text.Trim() -ne '0') -or
                 ($node -is [System.Management.Automation.Language.UnaryExpressionAst] -and
                     $node.TokenKind -in 'PlusPlus', 'PostfixPlusPlus' -and (& $isCounter $node.Child)) -or
                 ($node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
@@ -757,6 +759,8 @@ Describe 'Lab cleanup lookups - the ratchet reads a catch that swallows an Az er
            text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { $script:cleanupFailures = 0 }' }
         @{ case = 'an unscoped counter in a function, which is a local'
            text = 'function Remove-It { try { Remove-AzVM -Name x -Force -ErrorAction Stop } catch { $cleanupFailures++ } }' }
+        @{ case = 'a catch that ends the run with Exit-Lab and a count of 0, which exits 0'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { Exit-Lab -FailureCount 0 }' }
     ) {
         @(Find-UnhandledAzCatch -Text $text).Count | Should -Be 1
     }
@@ -781,7 +785,9 @@ Describe 'Lab cleanup lookups - the ratchet reads a catch that swallows an Az er
         @{ case = 'a catch that throws'
            text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { throw }' }
         @{ case = 'a catch that exits'
-           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { $Host.SetShouldExit(1); exit 1 }' }
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { exit 1 }' }
+        @{ case = 'a catch that ends the run through Exit-Lab'
+           text = 'try { Get-AzVM -Name x -ErrorAction Stop } catch { Exit-Lab -FailureCount 1 }' }
         @{ case = 'a try around a command that is not Az'
            text = 'try { Remove-Item x -ErrorAction Stop } catch { }' }
         @{ case = 'a lookup inside Invoke-LabLookup, which counts it'

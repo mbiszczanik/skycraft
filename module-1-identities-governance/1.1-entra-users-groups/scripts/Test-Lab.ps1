@@ -249,6 +249,8 @@ function Connect-LabGraph {
 }
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 1.1 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -270,8 +272,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Microsoft Graph: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 # Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain, the one the guide's
@@ -284,8 +285,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Could not determine the tenant's initial *.onmicrosoft.com domain: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 # The guest the guide invites in step 1.1.5 (and New-LabUser.ps1 invites).
@@ -425,8 +425,7 @@ Write-Host "  Failed: $failCount" -ForegroundColor $(if ($failCount -gt 0) { 'Re
 
 if ($failCount -gt 0) {
     Write-Host "`nLab 1.1 validation failed: $failCount check(s) failed. See the [FAIL] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nLab 1.1 validation passed: all $passCount checks passed." -ForegroundColor Green
