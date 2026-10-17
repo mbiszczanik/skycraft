@@ -375,6 +375,34 @@ class ZeroSizeComboBoxTests(BrowserTestCase):
 
 
 
+class ClippedToolbarTests(BrowserTestCase):
+    """receives_click and find_exact on a toolbar too narrow for its commands (1.3.6, run
+    20261017-123546): the last command is clipped, still visible to Playwright, and the '...'
+    holds it."""
+
+    def toolbar(self, menu: bool = False) -> None:
+        items = "".join(f'<div role=menuitem tabindex=0 style="display: inline-block; width: 150px" id={i}>{name}</div>'
+                        for i, name in (("create", "Create"), ("view", "Manage view"),
+                                        ("delete", "Delete resource group")))
+        dropdown = ('<div role=menu style="position: absolute; top: 60px; left: 300px">'
+                    '<div role=menuitem tabindex=0 id=menu-delete>Delete resource group</div></div>') if menu else ""
+        self.show(f'<div role=menubar style="width: 320px; overflow: hidden; white-space: nowrap">{items}</div>'
+                  f'<div role=menuitem tabindex=0 id=more style="position: absolute; top: 8px; left: 330px">'
+                  f'More commands</div>{dropdown}')
+
+    def test_a_command_the_toolbar_clips_is_visible_but_not_reached(self) -> None:
+        self.toolbar()
+        clipped = self.page.locator("#delete")
+        self.assertTrue(clipped.is_visible())                    # what Playwright says
+        self.assertFalse(run.receives_click(clipped))
+        self.assertTrue(run.receives_click(self.page.locator("#create")))
+        self.assertIsNone(run.find_exact(self.page, "Delete resource group"))
+
+    def test_the_command_in_the_open_overflow_is_found(self) -> None:
+        self.toolbar(menu=True)
+        self.assertEqual(self.id_of(run.find_exact(self.page, "Delete resource group")), "menu-delete")
+
+
 class TagGridTests(BrowserTestCase):
     """fill_tag on the Portal's Tags grid (1.3.1, run 20261017-123546): the tags a group has as rows
     of plain cells, name, ':' and value, then an empty row with combo boxes named 'Name' and
