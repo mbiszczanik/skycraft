@@ -52,10 +52,20 @@
 - [ ] Policy enforcement: **Default (enforcement)**
 - [ ] Non-compliance message configured
 
+### Policy 4: Inherit Project Tag from the Resource Group (Step 1.3.8)
+- [ ] Policy assigned: "Inherit a tag from the resource group if missing" (Modify effect)
+- [ ] Assignment name: `Inherit-Project-Tag`
+- [ ] Scope: Subscription level
+- [ ] Parameter: Tag name = `Project`
+- [ ] Managed identity: system-assigned, location Sweden Central
+- [ ] The identity holds **Contributor** on the subscription (the Portal grants it on **Create**; only a remediation task uses it)
+- [ ] Understand why Modify and Deny work together: Modify adds the group's `Project` tag before `Enforce-Project-Tag` checks the request
+
 > **Assignment names**: the Portal's **Assignment name** field sets the assignment's display name;
 > Azure names the assignment resource itself with a generated id. The Bicep path sets the name
 > (`Require-Environment-Tag-RG`, ...) and its own display names (`Require Environment Tag on Resource
-> Groups`, `Enforce Project Tag Value`, `Restrict to Allowed Regions`). `Test-Lab.ps1` and
+> Groups`, `Enforce Project Tag Value`, `Inherit Project Tag from Resource Group`, `Restrict to
+> Allowed Regions`). `Test-Lab.ps1` and
 > `Remove-LabResource.ps1` accept an assignment made at the subscription itself, of the built-in
 > definition named above, whose name or display name is the dashed name, or whose display name is
 > the Bicep one. An assignment left with the definition's own name (the wizard fills it in) is not
@@ -206,6 +216,15 @@ Get-AzPolicyAssignment |
     Format-Table -AutoSize
 ```
 
+### Check Inherit-Project-Tag: tag name and managed identity
+
+```powershell
+Get-AzPolicyAssignment -Scope "/subscriptions/$((Get-AzContext).Subscription.Id)" |
+    Where-Object { $_.PolicyDefinitionId -like '*/ea3f2387-9b95-492a-a190-fcdc54f7b070' } |
+    Select-Object Name, DisplayName, IdentityType, @{N='TagName';E={$_.Parameter.tagName.value}} |
+    Format-Table -AutoSize
+```
+
 ### Check policy compliance
 
 ```powershell
@@ -258,7 +277,8 @@ Get-AzConsumptionBudget -ResourceGroupName prod-skycraft-swc-rg |
 
 **Expected Results**:
 - Tags appear on all three resource groups
-- 3 policy assignments visible, each with the dashed name in **Name** (Bicep path) or **DisplayName** (Portal path)
+- 4 policy assignments visible, each with the dashed name in **Name** (Bicep path) or **DisplayName** (Portal path)
+- `Inherit-Project-Tag` listed with IdentityType `SystemAssigned` and TagName `Project`
 - 2 resource locks confirmed
 - SkyCraft-Monthly-Budget listed by the first budget command
 - SkyCraft-Prod-Monthly listed by the second budget command
@@ -270,7 +290,7 @@ Get-AzConsumptionBudget -ResourceGroupName prod-skycraft-swc-rg |
 | Component | Implemented | Count | Purpose |
 |-----------|-------------|-------|---------|
 | Tags | ✅ | 12 tags (4 per RG) | Resource organization and cost tracking |
-| Azure Policies | ✅ | 3 assignments | Enforce standards and compliance |
+| Azure Policies | ✅ | 4 assignments (3 Deny, 1 Modify) | Enforce standards and compliance |
 | Resource Locks | ✅ | 2 locks | Prevent accidental deletion |
 | Budgets | ✅ | 2 budgets | Cost control and alerts |
 | Advisor Alerts | ✅ | 1 alert rule | Proactive optimization |

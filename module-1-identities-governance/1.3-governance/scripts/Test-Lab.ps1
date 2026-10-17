@@ -5,8 +5,11 @@
 .DESCRIPTION
     Checks for the existence and correct configuration of:
     1. Resource Group Tags
-    2. Policy Assignments (the guide's three on the subscription, made in the Portal or by the
-       Bicep path; see LabPolicyAssignment.ps1 for which assignment counts)
+    2. Policy Assignments (the guide's four on the subscription, made in the Portal or by the
+       Bicep path; see LabPolicyAssignment.ps1 for which assignment counts). Inherit-Project-Tag,
+       the Modify assignment of step 1.3.8 (issue #350), passes only with tagName Project and a
+       system-assigned managed identity. Its identity's role is not checked: a request-time
+       Modify needs none, and only a remediation task uses it.
     3. Resource Locks (the guide's lock, by name and CanNotDelete level, on the group itself)
     4. Budgets (manual check)
 
@@ -98,9 +101,10 @@ foreach ($rgName in $resourceGroups) {
 # 2. Validate Policies
 # The Portal's Assignment name sets only an assignment's display name; its resource name is a
 # generated id (issue #330). So the subscription's assignments are listed once, and each of the
-# guide's three is picked by its definition and by the name the guide gives it, as resource name
-# or display name - LabPolicyAssignment.ps1, shared with the cleanup, says which match. A listing
-# that fails fails all three checks and says why.
+# guide's four is picked by its definition and by the name the guide gives it, as resource name
+# or display name - LabPolicyAssignment.ps1, shared with the cleanup, says which match. Matching
+# by definition first keeps the Modify assignment Inherit-Project-Tag from counting as a second
+# Enforce-Project-Tag (issue #350). A listing that fails fails all four checks and says why.
 Write-Host "`n=== 2. Validating Policy Assignments ===" -ForegroundColor Cyan
 . (Join-Path $PSScriptRoot 'LabPolicyAssignment.ps1')
 
@@ -123,6 +127,12 @@ foreach ($spec in Get-LabPolicyAssignmentSpec) {
     $found = @(Select-LabPolicyAssignment -Assignment $assignments -SubscriptionId $subscriptionId -Spec $spec)
     if ($found.Count -eq 1) {
         Write-Host " : $(Format-LabPolicyAssignment -Assignment $found[0])" -NoNewline
+        $problems = @(Get-LabPolicyAssignmentProblem -Assignment $found[0] -Spec $spec)
+        if ($problems.Count -gt 0) {
+            Write-Host " [FAIL] $($problems -join '; '). See step $($spec.Step)." -ForegroundColor Red
+            $failCount++
+            continue
+        }
         Write-Host " [OK]" -ForegroundColor Green
         $passCount++
     }

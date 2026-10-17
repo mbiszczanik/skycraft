@@ -1344,6 +1344,9 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
     # stating verb is added here.
     It 'gives a state to these labels only' {
         $expected = @(
+            # Inherit-Project-Tag (#350): open the Remediation tab, leave the task box unticked.
+            '1.3.8/Remediation | Create a remediation task/unchecked=1'
+            '1.3.8/Remediation | Create a remediation task/stateOnly=1'
             '1.3.9/Allowed locations | Sweden Central | North Europe/checked=1,2'
             '3.3.7/Use quickstart image/unchecked=0'
             '3.3.2/Admin user/checked=0'

@@ -64,6 +64,18 @@ Before starting this lab:
 - [ ] Owner or Contributor role at subscription level
 - [ ] Understanding of compliance and governance concepts
 
+## 🛠️ Portal, PowerShell and Bicep Paths
+
+You can build this lab in the Portal by following this guide, with Az PowerShell, or with Bicep. The three paths end in the same state, and `scripts/Test-Lab.ps1` accepts it whichever path built it:
+
+| Path | What it creates |
+| ---- | --------------- |
+| Portal (this guide) | Everything in the steps below |
+| `scripts/Invoke-LabGovernance.ps1` (Az PowerShell) | The tags of Steps 1.3.1-1.3.3; the four policy assignments of Steps 1.3.5, 1.3.8 and 1.3.9, including the managed identity of `Inherit-Project-Tag` and its role; the locks of Steps 1.3.11 and 1.3.13 |
+| `scripts/Deploy-Bicep.ps1` (Bicep, `bicep/main.bicep`) | The same as the PowerShell script |
+
+Step 1.3.8 also shows the Az PowerShell and Azure CLI commands for `Inherit-Project-Tag`. These steps have no scripted or Bicep counterpart, because they test, view or explore rather than create, or because the lab keeps them in the Portal: 1.3.4, 1.3.6 (policy test), 1.3.7 (Advisor alert and its action group), 1.3.10, 1.3.12 (lock test), 1.3.14, 1.3.15-1.3.17 (budgets), 1.3.18-1.3.22. `Test-Lab.ps1` does not check the budgets or the Advisor alert.
+
 ## 📖 Section 1: Apply and Manage Tags (30 minutes)
 
 ### What are Azure Tags?
@@ -80,7 +92,7 @@ Before starting this lab:
 - Maximum 50 tags per resource
 - Tag name: 512 characters (storage accounts: 128 characters)
 - Tag value: 256 characters
-- Tags are not inherited from parent scopes (need Azure Policy for inheritance)
+- Tags are not inherited from parent scopes (need Azure Policy for inheritance; Step 1.3.8 assigns such a policy)
 
 ### Step 1.3.1: Apply Tags to Resource Groups
 
@@ -163,7 +175,7 @@ The **Tags** service lists every tag in your subscription as one name : value pa
 
 - **Audit** resources that don't meet requirements
 - **Deny** creation of non-compliant resources
-- **Modify** resources to meet requirements (e.g., add tags)
+- **Modify** resources to meet requirements (e.g., add tags, as `Inherit-Project-Tag` does in Step 1.3.8)
 - **Deploy** resources automatically (DeployIfNotExists)
 
 ### Built-in vs. Custom Policies
@@ -350,7 +362,78 @@ Back in **Create Advisor Alerts**, the new action group `skycraft-advisor-ag` is
 
 7. Click **Review + create**, then **Create**
 
-**Note**: From now on, the Portal refuses every new resource in this subscription that does not carry the tag `Project` = `SkyCraft`. Resource groups are not resources in this sense: the definition checks resources only.
+**Note**: From now on, the Portal refuses every new resource in this subscription that does not carry the tag `Project` = `SkyCraft`, unless the assignment below adds the tag for it. Resource groups are not resources in this sense: the definition checks resources only.
+
+Now assign the second tag policy of this step, `Inherit-Project-Tag`. It copies the `Project` tag of a resource group to every new resource created in it without the tag:
+
+8. In the left menu, under **Authoring**, click **Assignments**
+9. Click **Assign policy**
+10. On the **Basics** tab, fill in:
+
+- **Scope**: Your subscription
+- Click the "..." button at the end of **Policy definition**
+  - Search for **Inherit a tag from the resource group if missing**
+  - Select **Inherit a tag from the resource group if missing**, then click **Add**
+- **Assignment name**: `Inherit-Project-Tag`
+- **Description**: `Resources get the Project tag of their resource group when they are created without it`
+
+**Note**: The search also lists **Inherit a tag from the resource group**, without "if missing": that one overwrites a tag the resource already has. Take the one that ends in "if missing". As in Step 1.3.5, replace the definition's name that the wizard fills into **Assignment name**.
+
+11. Click the **Parameters** tab and set:
+
+- **Tag Name**: `Project`
+
+12. Click the **Remediation** tab and leave **Create a remediation task** unchecked
+13. Click the **Managed identity** tab and set:
+
+- **Create a Managed Identity**: checked
+- **Type of Managed Identity**: System assigned managed identity
+- **System assigned identity location**: Sweden Central
+
+**Note**: A Modify policy changes resources, so its assignment needs a managed identity. When you click **Create**, the Portal also gives this identity the role that the policy definition lists, **Contributor**, on your subscription. That role is used only by a remediation task (Step 1.3.10, optional); adding the tag to a new resource needs no role. If your account cannot assign roles, the Portal says so after **Create**; the assignment is still created and still tags new resources.
+
+14. Click **Review + create**, then **Create**
+
+**Expected Result**: **Assignments** lists `Enforce-Project-Tag` and `Inherit-Project-Tag`.
+
+**Why two tag policies**: Azure Policy evaluates a create or update request in a fixed order: Modify policies change the request first, and Deny policies check the changed request afterwards. When you create a resource without the `Project` tag in a resource group that carries `Project` = `SkyCraft`, `Inherit-Project-Tag` adds the tag, and `Enforce-Project-Tag` then lets the resource pass. In later labs this covers resources you cannot tag yourself: VM extensions, autoscale settings, deployment slots, and resources a service creates for you (a backup's restore point collection, for example). Two cases stay refused, because there is nothing to inherit: a resource in a group without the `Project` tag (such as `NetworkWatcherRG`, which Azure creates on its own), and a resource group that a service creates itself (refused by `Require-Environment-Tag-RG`). The labs that make Azure create such a group have you create and tag it first.
+
+**With Az PowerShell** (instead of items 8-14; the other assignments, the tags and the locks of this lab are created by `scripts/Invoke-LabGovernance.ps1`):
+
+```powershell
+$subscriptionScope = "/subscriptions/$((Get-AzContext).Subscription.Id)"
+$definition = Get-AzPolicyDefinition -Id '/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070'
+$assignment = New-AzPolicyAssignment -Name 'Inherit-Project-Tag' `
+    -DisplayName 'Inherit Project Tag from Resource Group' `
+    -Scope $subscriptionScope `
+    -PolicyDefinition $definition `
+    -PolicyParameterObject @{ tagName = 'Project' } `
+    -IdentityType 'SystemAssigned' `
+    -Location 'swedencentral'
+
+# The Portal grants this role itself; from PowerShell you grant it. If Azure answers that the
+# principal does not exist, the new identity is not replicated yet: wait a minute and run it again.
+New-AzRoleAssignment -ObjectId $assignment.IdentityPrincipalId -ObjectType 'ServicePrincipal' `
+    -RoleDefinitionId 'b24988ac-6180-42a0-ab88-20f7382dd24c' -Scope $subscriptionScope
+```
+
+**With the Azure CLI**:
+
+```bash
+subscriptionScope="/subscriptions/$(az account show --query id --output tsv)"
+az policy assignment create \
+  --name Inherit-Project-Tag \
+  --display-name "Inherit Project Tag from Resource Group" \
+  --scope "$subscriptionScope" \
+  --policy "/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070" \
+  --params '{"tagName": {"value": "Project"}}' \
+  --mi-system-assigned \
+  --location swedencentral \
+  --identity-scope "$subscriptionScope" \
+  --role Contributor
+```
+
+**Note**: Pass `--policy` the full definition path, as above. With the bare id (`ea3f2387-...`), the current Azure CLI fails with `PolicyDefinitionNotFound`, although `az policy definition show` finds the same definition.
 
 ### Step 1.3.9: Assign Policy to Enforce Allowed Locations
 
@@ -400,6 +483,17 @@ The list is a multi-select with a filter box; with both regions ticked, the fiel
 **Note**: A new assignment appears in Compliance only after its first evaluation, which can take up to 30 minutes after you assign it. If `Require-Environment-Tag-RG` is not listed yet, come back to this step after Section 3.
 
 ![Assign a Built-in Policy](./images/step-1.3.10.png)
+
+> [!TIP]
+> **Optional: tag the resources that existed before Step 1.3.8.** `Inherit-Project-Tag` adds the tag when a resource is created or updated; a resource that already existed without the `Project` tag stays as it is and is listed as non-compliant under `Inherit-Project-Tag` here in **Compliance**. A **remediation task** tags such resources: click `Inherit-Project-Tag` in **Compliance**, then **Create Remediation Task**, and on the **New remediation task** page click **Remediate**. The task runs as the assignment's managed identity, with the Contributor role it got in Step 1.3.8. Right after Labs 1.1 and 1.2 there is usually nothing to remediate, because the resource groups are not resources this policy checks. The same with Az PowerShell (the `Start-AzPolicyRemediation` cmdlet ships in the Az.PolicyInsights module):
+
+```powershell
+$subscriptionScope = "/subscriptions/$((Get-AzContext).Subscription.Id)"
+# The Portal names the assignment with a generated id, so find it by its definition.
+$assignment = Get-AzPolicyAssignment -Scope $subscriptionScope |
+    Where-Object { $_.PolicyDefinitionId -like '*/ea3f2387-9b95-492a-a190-fcdc54f7b070' -and $_.Scope -eq $subscriptionScope }
+Start-AzPolicyRemediation -Name 'remediate-project-tag' -PolicyAssignmentId $assignment.Id
+```
 
 ---
 
@@ -732,8 +826,9 @@ Tenant Root Group
 
 - [ ] Policy: Require Environment tag on resource groups
 - [ ] Policy: Require Project=SkyCraft on all resources
+- [ ] Policy: Inherit the Project tag from the resource group (Modify, with a system-assigned managed identity)
 - [ ] Policy: Restrict resources to Sweden Central and North Europe
-- [ ] Policy compliance dashboard shows all three policies
+- [ ] Policy compliance dashboard shows all four policies
 - [ ] Tested policy enforcement (tried creating resource without tag)
 
 ### Resource Locks Configured
@@ -832,6 +927,19 @@ Tenant Root Group
 - Action group: set **Region** to Sweden Central. `Restrict-Azure-Regions` (Step 1.3.9) refuses the default East US
 - Alert: `Enforce-Project-Tag` (Step 1.3.8) is already assigned in your subscription, for example from an earlier run of this lab or its Bicep path. The **Create Advisor Alerts** form has no tags, so the policy refuses the alert. **Alerts (Preview)** may still list it, but it does not exist. Create the alert before Step 1.3.8, as the guide orders it; `Test-Lab.ps1` does not check the alert
 
+### Issue 7: A resource without tags is refused although `Inherit-Project-Tag` is assigned
+
+**Symptom**: In this lab or a later one, creating a resource fails with `RequestDisallowedByPolicy` and "All resources must be tagged with Project=SkyCraft", or a resource group fails with the Environment tag message, although Step 1.3.8 assigned `Inherit-Project-Tag`
+
+**Root Cause**: `Inherit-Project-Tag` copies the tag from the resource's own resource group. It has nothing to copy when that group has no `Project` tag, and it does not apply to resource groups at all. It also takes effect only some minutes after you assign it, like every assignment.
+
+**Solutions**:
+
+- Check that the resource group carries `Project` = `SkyCraft` (**Resource groups** → the group → **Tags**). A group Azure creates on its own, such as `NetworkWatcherRG`, has no tags until you add them
+- A resource group that a service would create itself (Site Recovery's target group, `DefaultResourceGroup-*`) is refused by `Require-Environment-Tag-RG`: create and tag the group first, then pick it in the wizard, as the later labs describe
+- Check that `Inherit-Project-Tag` is the definition that ends in "if missing", with **Tag Name** `Project`, and that **Assignments** lists it; `Test-Lab.ps1` checks both
+- Right after Step 1.3.8, wait about ten minutes and try again
+
 ---
 
 ## 🎓 Knowledge Check
@@ -859,7 +967,7 @@ Test your understanding with these questions:
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: No, tags are NOT automatically inherited. You must use Azure Policy with "Modify" effect to inherit tags, or apply tags directly to resources.
+   **Answer**: No, tags are NOT automatically inherited. You must use Azure Policy with "Modify" effect to inherit tags (as `Inherit-Project-Tag` does from Step 1.3.8 on), or apply tags directly to resources.
    </details>
 
 4. **What happens when a budget threshold is reached?**
@@ -927,7 +1035,7 @@ Congratulations! You've completed **Module 1: Manage Azure Identities and Govern
 
 **Governance Components Implemented**:
 
-- 3 Azure Policy assignments
+- 4 Azure Policy assignments (three Deny, one Modify with a managed identity)
 - 2 resource locks
 - 12 tags across resource groups (4 canonical tags per resource group)
 - 2 budgets with multiple alert thresholds

@@ -3,7 +3,7 @@ SUMMARY: Lab 1.3 - Governance Orchestrator
 DESCRIPTION: Orchestrates deployment of tags, policies, and locks for Lab 1.3 via AVM (requires the Lab 1.2 resource groups to exist)
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Owner mbiszczanik
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.2.1
+VERSION: 0.3.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -13,7 +13,7 @@ targetScope = 'subscription'
 *    Parameters    *
 *******************/
 
-@description('Deployment region; stored as location metadata on the policy assignments (only relevant if a managed identity is added later)')
+@description('Deployment region; the location of the policy assignments and of the managed identity of Inherit-Project-Tag')
 @allowed([
   'swedencentral'
   'northeurope'
@@ -168,6 +168,37 @@ module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assign
       {
         message: 'All resources must be tagged with Project=SkyCraft'
       }
+    ]
+  }
+}
+
+// Modify assignment next to Enforce-Project-Tag (issue #350): a resource created without the
+// Project tag gets its resource group's value. Azure Policy runs Modify before Deny, so resources
+// a learner cannot tag (VM extensions, autoscale settings, deployment slots, resources a service
+// creates) pass Enforce-Project-Tag when their group carries the tag. A Modify assignment needs a
+// managed identity; the identity gets Contributor on the subscription, the role the built-in
+// definition lists in roleDefinitionIds and the one the Portal grants itself, so the Portal and
+// Bicep paths end in the same state. Only a remediation task uses the role: a request-time
+// Modify needs none.
+module modInheritProjectTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
+  name: 'Inherit-Project-Tag'
+  params: {
+    name: 'Inherit-Project-Tag'
+    location: parLocation
+    policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070'
+    definitionVersion: '1.*.*'
+    displayName: 'Inherit Project Tag from Resource Group'
+    description: 'Resources get the Project tag of their resource group when they are created without it'
+    parameters: {
+      tagName: {
+        value: 'Project'
+      }
+    }
+    managedIdentities: {
+      systemAssigned: true
+    }
+    roleDefinitionIds: [
+      '/providers/Microsoft.Authorization/roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c'
     ]
   }
 }
