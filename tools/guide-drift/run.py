@@ -569,6 +569,17 @@ BLADE_OF_JS = r"""e => {
   const name = texts.length ? texts.join(' ') : (r.getAttribute('aria-label') || '');
   return [name, r.getBoundingClientRect().left];
 }"""
+# Whether a click at the element's centre reaches it (receives_click): the element at that point is
+# the element or inside it; true when the centre is outside the window, which a scroll fixes, and for
+# an element without a width or height, which click_target clicks at its ancestor.
+HIT_TEST_JS = r"""e => {
+  const r = e.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return true;
+  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return true;
+  const hit = document.elementFromPoint(x, y);
+  return !hit || hit === e || e.contains(hit);
+}"""
 # What blade_of names a blade that is an iframe in no region (a React blade).
 IFRAME_BLADE = "(iframe)"
 # A combo box whose own box has no width or no height (ng-select's input: Cost analysis' VIEW list,
@@ -1191,8 +1202,20 @@ def interactive_text(scope: Frame | Locator, label: str) -> Locator:
 Choose = Callable[[list[Locator], bool], "Locator | None"]
 
 
+def receives_click(element: Locator) -> bool:
+    """Whether a click at the element's centre reaches it (HIT_TEST_JS): a toolbar too narrow for
+    its commands clips the last ones, which Playwright still calls visible, and the click times out
+    (run 20261017-123546, 1.3.6's 'Delete resource group' beside the '...' that holds it). An
+    element whose centre is outside the window counts, as it is scrolled into view first; so does
+    one that cannot be inspected: the click then reports what went wrong."""
+    try:
+        return bool(element.evaluate(HIT_TEST_JS, timeout=1000))
+    except PlaywrightError:
+        return True
+
+
 def find_in_roles(page: Page, label: str, roles: tuple[str, ...], root: Locator | None = None,
-                  choose: Choose = newest_blade) -> Locator | None:
+                  choose: Choose = newest_blade, reachable: bool = False) -> Locator | None:
     """The visible element of the first of `roles` whose accessible name is exactly `label`, then
     plain text that is, or sits inside, an interactive element (interactive_text). Static text is
     never a match: the Entra overview's 'Basic information' table has a 'Users' caption, and
@@ -1200,14 +1223,18 @@ def find_in_roles(page: Page, label: str, roles: tuple[str, ...], root: Locator 
     given (the global search's results). `choose` picks among the matches of one role, or of the
     text: by default there must be at most one, or one in the newest blade (newest_blade), and
     several others raise Ambiguous. An ambiguous text match counts as not found, so the person
-    picks a role-specific candidate."""
+    picks a role-specific candidate. `reachable`: only an element a click at its centre reaches
+    counts (receives_click), so a command a narrow toolbar clips is not found, and the one in its
+    overflow is (Runner.open_overflow)."""
     def matches(make_locator: Callable[[Frame | Locator], Locator]) -> list[Locator]:
         if root is None:
-            return visible_across_frames(page, make_locator)
-        try:
-            return visible_in(make_locator(root), page.viewport_size)
-        except PlaywrightError:     # the results went away while the Portal reloaded them
-            return []
+            found = visible_across_frames(page, make_locator)
+        else:
+            try:
+                found = visible_in(make_locator(root), page.viewport_size)
+            except PlaywrightError:     # the results went away while the Portal reloaded them
+                return []
+        return [element for element in found if receives_click(element)] if reachable else found
 
     for role in roles:
         element = choose(matches(lambda s, role=role: s.get_by_role(role, name=label, exact=True)), False)
@@ -1492,7 +1519,7 @@ def find_exact(page: Page, label: str, field: bool = False, decorated: bool = Tr
     bare = LEADING_PLUS.sub("", label, count=1)
     names = [label] + ([bare] if bare and bare != label else [])
     for name in names:
-        element = find_field(page, name) if field else find_in_roles(page, name, ACTION_LOOKUP_ROLES)
+        element = find_field(page, name) if field else find_in_roles(page, name, ACTION_LOOKUP_ROLES, reachable=True)
         if element is not None:
             return element
     if not decorated or (not field and any(visible_across_frames(page, lambda f, name=name: interactive_text(f, name))

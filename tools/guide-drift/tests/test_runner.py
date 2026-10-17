@@ -2199,6 +2199,8 @@ class ScreenNode(FakeElement):
             return self.in_top_bar
         if script == run.ZERO_SIZE_COMBOBOX_JS:       # a box of its own (test_browser_js has the rest)
             return None
+        if script == run.HIT_TEST_JS:                  # a click reaches it (test_browser_js has the rest)
+            return True
         if script == run.LIST_SCROLL_JS:
             return bool(self.on_scroll()) if self.on_scroll else False
         if script == run.FIELD_KIND_JS:
