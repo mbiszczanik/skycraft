@@ -207,7 +207,10 @@ without a browser. Rules (issue #189):
     ('Expand all headers'). An item that names only a place gives no item: 'Under **Blob access
     tier (default)**, select the desired tier' (4.2.4) names no tier. A span followed by 'tab'
     stays a label ('Under the **Advanced** tab, check **X**' clicks Advanced): a tab is
-    clicked to show what is under it (UNDER_TAB).
+    clicked to show what is under it (UNDER_TAB). So is a bold span between 'in the' and a
+    container's kind, dialog, blade, pane, panel or window (IN_PLACE, PLACE_KIND, #342): 'In the
+    **Delete confirmation** dialog, click **Delete**' (1.3.6, 1.3.13) clicks Delete only; a
+    dialog is no control.
   * Bold spans that are not UI elements are dropped by NON_UI_BOLD, by the guide's own entry
     in LAB_CAPTIONS and by the colon rule (bold text ending with ':' is a caption, not a label).
     NON_UI_BOLD holds the captions of every guide ('Note', 'Expected Result', 'Result');
@@ -497,6 +500,11 @@ SURE_AFTER = re.compile(WORDED_KIND + r"\s+is\s+(?P<state>" + _STATE_WORD + r")\
 # ('Under **Settings**, select **Networking**', 3.4.10; 'Click **Containers** under **Data
 # storage**', 4.2.2), not a control: clicking a Portal menu group collapses it. It is no label.
 UNDER = re.compile(r"\bunder\s+(?:the\s+)?$", re.IGNORECASE)
+# A bold span between 'in the' and the kind of a container names where the next label is, no label
+# itself (#342): 'In the **Delete confirmation** dialog, click **Delete**' (1.3.6, 1.3.13), 'In the
+# **Overview** blade, locate ...' (3.3).
+IN_PLACE = re.compile(r"\bin\s+the\s+$", re.IGNORECASE)
+PLACE_KIND = re.compile(r"\s+(?:dialog|blade|pane|panel|window)\b", re.IGNORECASE)
 UNDER_TAB = re.compile(r"\s+tabs?\b", re.IGNORECASE)   # 'Under the **Advanced** tab': a tab to click
 # What may stand between two labels of one list after a stating verb: 'Check **A** and **B**',
 # 'Uncheck **A**, **B** and **C**'. The later labels take the earlier one's state.
@@ -1087,7 +1095,8 @@ def stated_states(text: str, spans: list[tuple[int, int, str]]
         # What stands before the label is looked for from the end of the span before it on, so
         # an item of n spans is read in linear time, not in time n squared.
         since = spans[index - 1][1] if index else 0
-        if UNDER.search(masked, since, start) and not UNDER_TAB.match(masked, end):
+        if ((UNDER.search(masked, since, start) and not UNDER_TAB.match(masked, end))
+                or (IN_PLACE.search(masked, since, start) and PLACE_KIND.match(masked, end))):
             dropped.add(start)
             previous = None
             continue

@@ -1312,6 +1312,25 @@ class ConditionalItemTests(unittest.TestCase):
                 self.assertNotIn("conditional", parse.list_item(text, 5))
 
 
+class InPlaceTests(unittest.TestCase):
+    """A bold span between 'in the' and a container's kind (dialog, blade, pane, panel, window) is
+    where the next label is, no label (#342): run 20261017-123546 looked for 'Delete confirmation'
+    to click, a dialog. Texts from the guides."""
+
+    def test_the_dialog_or_blade_is_no_label(self) -> None:
+        for text, labels in (
+                ("In the **Delete confirmation** dialog, click **Delete**", ["Delete"]),          # 1.3.6, 1.3.13
+                ("In the **Overview** blade, locate the **FQDN** (Fully Qualified Domain Name).", ["FQDN"])):  # 3.3
+            with self.subTest(text=text):
+                self.assertEqual(parse.list_item(text, 7)["labels"], labels)
+
+    def test_a_tab_or_a_span_without_in_the_stays_a_label(self) -> None:
+        for text, labels in (("Click **Tags** in the **Overview** tab", ["Tags", "Overview"]),
+                             ("Click **Delete confirmation** dialog's **Delete**", ["Delete confirmation", "Delete"])):
+            with self.subTest(text=text):
+                self.assertEqual(parse.list_item(text, 7)["labels"], labels)
+
+
 class UnderPlaceTests(unittest.TestCase):
     """A bold span right after 'under' names where the next label is, a menu group or a section
     heading, not a control to click: clicking a Portal menu group collapses it. The texts are
