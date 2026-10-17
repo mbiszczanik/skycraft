@@ -173,12 +173,12 @@ Branch `feat/342-guide-drift-portal-controls`, stacked on `feat/329-lab13-record
 - [x] **Test:** `test_the_lab_1_3_recording_works_around_no_control_the_runner_operates`: no label entry of any recording is a `use` of `radio "Select"`, or of an option whose name is its label plus a search decoration. Pester `Guide-Drift-Recording.Tests.ps1` green.
 - [x] **Commit:** `chore(guide-drift): drop the Lab 1.3 recording's workarounds for controls the runner now operates (#342)`
 
-### Task 13: 1.3.18's tag filter as fields (controller only, needs the maintainer's sign-in; not for an implementer subagent)
+### Task 13: 1.3.18's view list and tag filter (controller only, needs the maintainer's sign-in; not for an implementer subagent)
 
-- [ ] A supervised run `.\tools\Invoke-GuideDrift.ps1 -SubscriptionId <id> -Lab 1.3 -FromStep 1.3.18 -SkipCleanup`. At the filter pill, answer `u` so its outline is kept as `blade-1.3.18-<line>.aria.txt`.
-- [ ] From that outline, rewrite items 6 and 7 as field items the parser reads (`- <Portal label>: \`project\``, `- <Portal label>: \`skycraft\``; the same for the resource group filter), with the Portal's own labels.
-- [ ] Add a parser pin, and a unit test on a trimmed excerpt of the pill (no subscription name). Record decisions only if a label still differs.
-- [ ] **Commit:** `docs(lab-1.3): give Cost analysis' tag filter fields the run can fill (#342)`
+- [x] Supervised runs from 1.3.18 (20261017-003656 exit 1, 20261017-095926 resumed four times, exit 0) and a read-only probe of Cost analysis showed the Portal's names: combobox `VIEW` with option `Cost by service`; `Add filter` opens three lists one after another, options `Tag`, `project`, `skycraft`; the filter applies only on a click outside it, and the date options carry the current dates.
+- [x] Rewrote 1.3.18 as two click chains the parser reads (`VIEW` -> `Cost by service`; `Add filter` -> `Tag` -> `project` -> `skycraft`); the other views, the date range and a second filter moved to notes. Parser pin in `tests/Guide-Drift-Parser.Tests.ps1`; Expected Result recorded as `project`.
+- [x] Runner fixes the runs needed, with tests: Portal blades are labelled sections (BLADE_OF_JS, blade_of across frames), zero-width ng-select combo boxes (ZERO_SIZE_COMBOBOX_JS, click_target), an unread or 'Loading...' blade is still loading.
+- [x] **Commits:** 4c80d22, fe83e1e
 
 ### Task 14: Live acceptance (controller only, needs the maintainer's sign-in; not for an implementer subagent)
 
