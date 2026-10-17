@@ -1290,6 +1290,28 @@ class StateVerbTests(unittest.TestCase):
                 self.assertLess(time.perf_counter() - started, 2)
 
 
+class ConditionalItemTests(unittest.TestCase):
+    """An item that starts with 'If' holds only under its condition (#342): the runner performs it
+    when its first label is on screen and not greyed out. Texts from the guides."""
+
+    def test_an_item_starting_with_if_is_conditional(self) -> None:
+        for text, labels in (
+                ("If the review page opens without an error, click **Create**, then click the notification "
+                 "**Failed to create the resource group** to open the error details",
+                 ["Create", "Failed to create the resource group"]),                                   # 1.3.6
+                ("If prompted, click **Use Bastion**", ["Use Bastion"])):                              # 3.2.15
+            with self.subTest(text=text):
+                item = parse.list_item(text, 5)
+                self.assertEqual((item["labels"], item.get("conditional")), (labels, True))
+
+    def test_a_when_item_or_an_if_inside_the_sentence_is_no_condition(self) -> None:
+        for text in ("When the Portal returns to All users, click **Refresh** (the list may not show the new "
+                     "user yet)",                                                                       # 1.1
+                     "Click **Create**, if it is enabled", "Iffy wording, click **Save**"):
+            with self.subTest(text=text):
+                self.assertNotIn("conditional", parse.list_item(text, 5))
+
+
 class UnderPlaceTests(unittest.TestCase):
     """A bold span right after 'under' names where the next label is, a menu group or a section
     heading, not a control to click: clicking a Portal menu group collapses it. The texts are

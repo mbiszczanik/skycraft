@@ -190,6 +190,11 @@ without a browser. Rules (issue #189):
     switch verbs, 'Leave', 'Make sure' or 'Ensure' give is also listed in '"stateOnly"': those
     words are no click, so the runner reports any other element as unknown instead. A
     '**Label**: checked' field is read as before (checkbox_state).
+  * An action or navigation item whose text starts with 'If' (CONDITIONAL) carries
+    '"conditional": true': 'If the review page opens without an error, click **Create**, then
+    ...' (1.3.6), 'If prompted, click **Use Bastion**' (3.2). The runner performs it only when its
+    first label is on screen and not greyed out; otherwise the condition does not hold, and the
+    item is passed as such, nobody asked (#342).
   * A bold span right after the word 'under' (and an optional 'the') names where the next
     label is, a blade menu's group or a section heading, and is no label (UNDER): 'Under
     **Settings**, select **Networking**.' (3.4.10), 'Under **Cost Management** click **Cost
@@ -337,6 +342,8 @@ SUBHEADING = re.compile(r"^####\s")
 FENCE = re.compile(r"^[ \t]*(?P<run>`{3,}|~{3,})(?P<info>.*)$")
 LIST_ITEM = re.compile(r"^\s*(?:\d+\.|[-*])\s+(?P<text>.+)$")
 BOLD = re.compile(r"\*\*(?P<text>(?:\\\*|[^*])+?)\*\*")   # '\*' inside bold is a literal '*'
+# An item that holds only under a condition the guide states first (#342): 'If prompted, ...'.
+CONDITIONAL = re.compile(r"^\s*If\b")
 LIST_FIELD = re.compile(r"^\*\*(?P<label>(?:\\\*|[^*])+?)\*\*\s*:\s*(?P<value>.+)$")
 # 'Label: **value**' or 'Label: `value`' with a plain label (#198). The label starts with a
 # letter and holds letters of any script, digits, spaces and '()/&-', never '_' ([^\W_] is a
@@ -1160,6 +1167,8 @@ def list_item(text: str, number: int, captions: frozenset[str] = NO_CAPTIONS) ->
                       for at, name in (chain_resources(text[start:]) if chain else [])])
     if (picker and steps) or (chain and len(steps) > 1):
         item = {"kind": "navigation"}
+        if CONDITIONAL.match(text):
+            item["conditional"] = True
         if picker:
             item["field"] = picker[0]          # open the field's picker, then the chain (#250)
         item["labels"] = [label for _, label, _ in steps]
@@ -1172,6 +1181,8 @@ def list_item(text: str, number: int, captions: frozenset[str] = NO_CAPTIONS) ->
     if not bold:
         return None
     item = {"kind": "action", "labels": [label for _, label in bold]}
+    if CONDITIONAL.match(text):
+        item["conditional"] = True
     mark_states(item, [at for at, _ in bold], states)
     item["line"] = number
     return item

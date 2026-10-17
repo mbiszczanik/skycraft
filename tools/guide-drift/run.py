@@ -542,6 +542,8 @@ INTERACTIVE = ("a, button, [role=link], [role=button], [role=menuitem], [role=tr
 # A blade menu's button that opens all its collapsed groups ('Manage', 'Monitoring', 'Help').
 EXPAND_ALL = "Expand all headers"
 COLLAPSE_ALL = "Collapse all headers"       # what a blade's menu shows once its groups are open
+# What a conditional item's record observes when its condition does not hold (condition_unmet).
+CONDITION_UNMET = "condition not met"
 # What a field's or tag's record observes when the form showed the value already, and what a disabled
 # submit observes when every value of its form was (Runner.form_unchanged).
 ALREADY_SET = "already set"
@@ -3505,6 +3507,11 @@ class Runner:
                           **{index: True for index in item.get("checked", ())}}
                 state_only = set(item.get("stateOnly", ()))     # set and never clicked
                 labels = ([None] if picker else []) + list(item["labels"])
+                unmet = (self.condition_unmet(step, item, item["labels"][0])
+                         if item.get("conditional") and not picker and 0 not in resources else None)
+                if unmet is not None:
+                    records.append(unmet)
+                    labels = []
                 for index, label in enumerate(labels):
                     if label is None:
                         records.append(self.act_on_label(step, item, picker, open_field=True))
@@ -3611,6 +3618,27 @@ class Runner:
         candidates go to the recording, filtered (rejected_candidates)."""
         if record.get("observed") is not None:
             record["observed"] = scrub(record["observed"], self.redactor, self.secrets)
+        return record
+
+    def condition_unmet(self, step: dict, item: dict, label: str) -> dict | None:
+        """For a conditional item ('If the review page opens without an error, click **Create**',
+        1.3.6; parse.CONDITIONAL): None when its first label is on screen within FIND_TIMEOUT_MS
+        and not greyed out (stays_disabled), so the item is performed as any other; otherwise
+        the record of an item whose condition does not hold, a match, and nobody is asked. In run
+        20261017-123546 Review + create failed validation at once, as the guide says it may, and
+        Create stayed greyed out."""
+        try:
+            element = in_time(self.page, self.looking_for(label, item["kind"]))
+            why = (f"'{label}' is not on screen" if element is None
+                   else f"'{label}' is greyed out" if stays_disabled(self.page, element) else None)
+        except (PlaywrightError, LookupError) as error:     # Ambiguous too: let the item report it
+            return None if isinstance(error, Ambiguous) else self.unmet_record(step, item, label, error_text(error))
+        return None if why is None else self.unmet_record(step, item, label, why)
+
+    def unmet_record(self, step: dict, item: dict, label: str, why: str) -> dict:
+        record = self.new_record(step, item["kind"], label)
+        record.update(outcome="match", observed=f"{CONDITION_UNMET}: {why}")
+        print(f"The guide's condition for '{label}' does not hold ({why}): going on.")
         return record
 
     def form_unchanged(self, step: dict) -> bool:

@@ -475,6 +475,34 @@ class DecisionRecordingTests(RunnerTestCase):
         self.assertGreater(element.calls.count("is_disabled"), 1)               # asked again until the deadline
         self.assertNotIn("click", element.calls)
 
+    def test_a_conditional_item_whose_first_label_is_missing_or_greyed_out_is_passed(self) -> None:
+        # Run 20261017-123546, 1.3.6: Review + create failed validation at once, and Create stayed
+        # greyed out; the guide clicks it only 'If the review page opens without an error'.
+        item = {"kind": "action", "labels": ["Create", "Failed to create the resource group"],
+                "conditional": True, "line": 5}
+        for found, disabled, observed in ((None, False, "condition not met: 'Create' is not on screen"),
+                                          (FakeElement(), True, "condition not met: 'Create' is greyed out"),
+                                          (FakeElement(), False, None)):
+            with self.subTest(observed=observed):
+                r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+                with mock.patch.object(run, "in_time", return_value=found),                         mock.patch.object(run, "stays_disabled", return_value=disabled):
+                    record = self.quietly(lambda: r.condition_unmet(self.STEP, item, "Create"))
+                if observed is None:
+                    self.assertIsNone(record)
+                else:
+                    self.assertEqual((record["outcome"], record["observed"], r.ask.prompts), ("match", observed, []))
+
+    def test_a_conditional_item_that_does_not_hold_acts_on_none_of_its_labels(self) -> None:
+        item = {"kind": "action", "labels": ["Create", "Failed to create the resource group"],
+                "conditional": True, "line": 5}
+        step = {"id": "9.9.1", "title": "One", "expected": None, "images": [], "items": [item]}
+        r = run.Runner(FakePage(), {**STEPS, "steps": [step]}, self.recording, self.args(), ask=Answers())
+        unmet = {**r.new_record(step, "action", "Create"), "outcome": "match", "observed": "condition not met: x"}
+        with mock.patch.object(run.Runner, "condition_unmet", return_value=unmet),                 mock.patch.object(run.Runner, "act_on_label") as act, mock.patch.object(run.Runner, "check_result"):
+            self.assertTrue(self.quietly(lambda: r.run_step(step)))
+        act.assert_not_called()
+        self.assertIn(unmet["observed"], [record["observed"] for record in r.records])
+
     def test_a_disabled_submit_after_a_form_whose_values_were_all_set_is_a_match(self) -> None:
         # Run 20261017-123546, 1.3.1: Lab 1.2's Bicep path made the group with the four tags, so
         # 'Apply' stayed greyed out, as the guide's note says.
