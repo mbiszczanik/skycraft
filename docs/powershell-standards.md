@@ -342,7 +342,7 @@ These are deliberate decisions where SkyCraft departs from the official Microsof
 
 - **Microsoft says**: Don't repeat yourself; factor shared setup (the `Get-AzContext` / `Connect-AzAccount` / `az account show` connection check) into a single shared module dot-sourced by every script.
 - **We do**: Each lab's scripts carry their own self-contained connection-check block.
-- **Why**: Every lab folder must be runnable in isolation and readable end-to-end without chasing a shared helper up the tree. The connection step is itself part of the lesson — students should see *how* a script verifies it is authenticated before acting. A shared `Common.ps1` would couple labs together and hide a teaching moment behind an abstraction.
+- **Why**: Every lab folder must be readable end-to-end without chasing a shared helper up the tree. (It runs inside a clone of the repository: the one shared module, `tools/LabCommon.psm1`, only ends the script with the right exit code - §7.5.) The connection step is itself part of the lesson — students should see *how* a script verifies it is authenticated before acting. A shared `Common.ps1` would couple labs together and hide a teaching moment behind an abstraction.
 
 ### 7.4 `-Force` Switch on Destructive Scripts
 

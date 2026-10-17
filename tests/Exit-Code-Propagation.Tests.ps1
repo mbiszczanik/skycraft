@@ -12,7 +12,7 @@
     `$Host.SetShouldExit(<code>)` before the `exit` carries the code out.
 
     #257: `$Host.SetShouldExit` asks the host to end the whole process. Called from a script the
-    learner ran at the prompt (`.\scripts\Test-Lab.ps1`, as the guides say), it closes their
+    learner ran at the prompt (a lab's validator, as the guides say), it closes their
     PowerShell window - even with code 0, after a passing run.
 
     Every lab script therefore ends through Exit-Lab (tools/LabCommon.psm1): exit 1 when the
@@ -278,7 +278,7 @@ Describe 'SkyCraft PowerShell - Exit-Lab tells the entry point of a pwsh -File p
 
     BeforeAll {
         $script:LabCommon = Import-Module $LabCommonPath -Force -PassThru
-        $script:Lab  = if ($IsWindows) { 'C:\repo\module-1\1.1\scripts\Test-Lab.ps1' } else { '/repo/module-1/1.1/scripts/Test-Lab.ps1' }
+        $script:Lab  = if ($IsWindows) { 'C:\repo\module-1\1.1\scripts\Lab-Fixture.ps1' } else { '/repo/module-1/1.1/scripts/Lab-Fixture.ps1' }
         $script:Shim = if ($IsWindows) { 'C:\repo\tools\Invoke-LabScript.ps1' } else { '/repo/tools/Invoke-LabScript.ps1' }
     }
 
@@ -325,7 +325,7 @@ Describe 'SkyCraft PowerShell - Exit-Lab reaches both callers (real pwsh process
         # A lab-shaped script: it declares Az.Accounts where it is installed - the condition the
         # #104 fault needs - and ends the way every lab script does.
         $requires = if ($script:HasAz) { '#Requires -Modules Az.Accounts' } else { '' }
-        $script:LabScript = Join-Path $TestDrive 'Test-Lab.ps1'
+        $script:LabScript = Join-Path $TestDrive 'Lab-Fixture.ps1'
         @(
             '#Requires -Version 7.0'
             $requires
