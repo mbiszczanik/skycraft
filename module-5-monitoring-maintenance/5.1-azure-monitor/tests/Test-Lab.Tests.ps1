@@ -18,6 +18,9 @@
       3. No rule on any SkyCraft VM is a counted failure that says which step makes one.
       4. An association lookup that fails is a counted FAIL with the error, and the script still
          reaches its summary.
+      5. The alert rule, whose name and group the guide has the learner type, is still checked
+         by name in the platform group; one left in the VM's group (the Portal's default) fails
+         and the line names where it is, found through its scope.
 
     No subscription is needed, and none is used: tests/Support/LabScriptStub.psm1 (issue #112)
     imports the real modules first, the stub last, and aborts the child with exit 99 unless every
@@ -66,6 +69,11 @@ BeforeAll {
     #                       'fail'   reading the associations fails
     # The streams of the Portal-named rule are set to what the stream checks expect: this suite
     # is about finding the rule, not about which wizard collects what (#365).
+    # The alert rule varies with SKYCRAFT_STUB_ALERT:
+    #   (unset)      'skycraft-cpu-alert' in the platform group, as the guide leaves it
+    #   'vmgroup'    the rule sits in the VM's group, the Portal's default, next to an
+    #                unrelated rule on a SQL server
+    #   'listfails'  as 'vmgroup', and listing the subscription's rules fails
     $script:StubBody = @'
 $script:Sub = '/subscriptions/00000000-0000-0000-0000-000000000000'
 $script:PlatformRg = "$script:Sub/resourceGroups/platform-skycraft-swc-rg"
@@ -187,6 +195,18 @@ function Get-AzActionGroup {
 function Get-AzMetricAlertRuleV2 {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if (-not $Name) {
+        # Listing the subscription's rules: only the 'vmgroup' case reaches it.
+        if ($env:SKYCRAFT_STUB_ALERT -eq 'listfails') { throw 'stub lookup failure: Get-AzMetricAlertRuleV2 list' }
+        return @(
+            [pscustomobject]@{ Name = 'skycraft-cpu-alert'; ResourceGroup = 'dev-skycraft-swc-rg'; Scopes = @("$script:DevRg/providers/Microsoft.Compute/virtualMachines/dev-skycraft-swc-auth-vm") }
+            [pscustomobject]@{ Name = 'unrelated-sql-alert'; ResourceGroup = 'other-rg'; Scopes = @("$script:Sub/resourceGroups/other-rg/providers/Microsoft.Sql/servers/other-sql") }
+        )
+    }
+    if ($env:SKYCRAFT_STUB_ALERT -in 'vmgroup', 'listfails') {
+        Write-Error "stub: alert rule '$Name' not found in '$ResourceGroupName'."
+        return
+    }
     [pscustomobject]@{
         Name                = $Name
         Id                  = $script:AlertId
@@ -217,10 +237,13 @@ function Get-AzDiagnosticSetting {
         param(
             [pscustomobject]$Stub,
             [ValidateSet('bicep', 'portal', 'none', 'fail')]
-            [string]$Dcr
+            [string]$Dcr,
+            [ValidateSet('platform', 'vmgroup', 'listfails')]
+            [string]$Alert = 'platform'
         )
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
-            SKYCRAFT_STUB_DCR = $Dcr
+            SKYCRAFT_STUB_DCR   = $Dcr
+            SKYCRAFT_STUB_ALERT = $Alert
         }
         return [pscustomobject]@{
             ExitCode = $run.ExitCode
@@ -237,7 +260,9 @@ function Get-AzDiagnosticSetting {
     $script:PortalMade = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'portal'
     $script:NoRule     = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'none'
     $script:ReadFails  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'fail'
-    $script:AllRuns    = @($script:BicepMade, $script:PortalMade, $script:NoRule, $script:ReadFails)
+    $script:AlertInVmGroup = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Alert 'vmgroup'
+    $script:AlertListFails = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Alert 'listfails'
+    $script:AllRuns    = @($script:BicepMade, $script:PortalMade, $script:NoRule, $script:ReadFails, $script:AlertInVmGroup, $script:AlertListFails)
 }
 
 AfterAll {
@@ -299,5 +324,29 @@ Describe 'Lab 5.1 Test-Lab.ps1 - finds the data collection rule through the VM i
         $run.Output | Should -Match 'Data collection rule associated with a VM in dev-skycraft-swc-rg or prod-skycraft-swc-rg\.\.\. FAIL \(stub lookup failure: Invoke-AzRestMethod dataCollectionRuleAssociations\)'
         $run.Output | Should -Match 'Test Results Summary'
         $run.Output | Should -Match 'Failed: 4\b'
+    }
+}
+
+Describe 'Lab 5.1 Test-Lab.ps1 - an alert rule outside the guide''s group is named through its scope (#355)' {
+
+    It 'keeps the literal check, because the guide has the learner type name and group' {
+        $script:BicepMade.Output | Should -Match "Alert rule 'skycraft-cpu-alert' exists\.\.\. PASS"
+    }
+
+    It 'fails a rule left in the VM''s group, counted, and says where it is and which step sets the group' {
+        $run = $script:AlertInVmGroup
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Alert rule 'skycraft-cpu-alert' exists\.\.\. \(not in platform-skycraft-swc-rg; found 'skycraft-cpu-alert' in dev-skycraft-swc-rg on a SkyCraft VM - Step 5\.1\.5 names the rule 'skycraft-cpu-alert' and sets Details > Resource group to platform-skycraft-swc-rg\) FAIL"
+        $run.Output | Should -Not -Match 'unrelated-sql-alert'
+        # Exists, enabled, severity, window, frequency and threshold all read the rule.
+        $run.Output | Should -Match 'Failed: 6\b'
+    }
+
+    It 'still fails, counted, when listing the subscription''s rules fails, and prints the error' {
+        $run = $script:AlertListFails
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Alert rule 'skycraft-cpu-alert' exists\.\.\. \(no rule named 'skycraft-cpu-alert' in platform-skycraft-swc-rg; the subscription's alert rules could not be listed: stub lookup failure: Get-AzMetricAlertRuleV2 list\) FAIL"
+        $run.Output | Should -Match 'Test Results Summary'
+        $run.Output | Should -Match 'Failed: 6\b'
     }
 }

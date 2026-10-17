@@ -17,7 +17,9 @@
     The rules associated with the VMs of the dev and prod groups are read, and the one that sends
     to the lab's workspace is checked ('skycraft-vm-dcr' first if several do). Names stay literal
     where the guide has the learner type both name and group: the action group, the alert rule
-    and the diagnostic setting.
+    and the diagnostic setting. When the alert rule is not where the guide puts it, the failure
+    names the rules found on a SkyCraft VM through their scope, since the Portal defaults the
+    rule's group to the VM's.
 
 .PARAMETER Environment
     Target environment prefix when checking VM resources: its group's VMs are searched first for
@@ -244,7 +246,25 @@ Write-Host "[Metric Alert]" -ForegroundColor Yellow
 
 Invoke-Test "Alert rule '$alertRuleName' exists" {
     $alert = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
-    return ($null -ne $alert -and $alert.Name -eq $alertRuleName)
+    if ($null -ne $alert -and $alert.Name -eq $alertRuleName) { return $true }
+    # The guide has the learner type both name and group, so the check stays literal. But the
+    # Portal defaults the rule's group to the watched VM's group, so say where a rule on a
+    # SkyCraft VM ended up, found through its scope (#355). The hint never replaces the FAIL.
+    $vmScope = '/providers/Microsoft\.Compute/virtualMachines/(dev|prod)-skycraft-swc-'
+    $elsewhere = @()
+    try {
+        $elsewhere = @(Get-AzMetricAlertRuleV2 -ErrorAction Stop | Where-Object {
+                $_ -and ($_.Name -eq $alertRuleName -or @($_.Scopes | Where-Object { "$_" -match $vmScope }).Count -gt 0)
+            })
+    }
+    catch {
+        Write-Host " (no rule named '$alertRuleName' in $platformRg; the subscription's alert rules could not be listed: $($_.Exception.Message))" -NoNewline -ForegroundColor Gray
+    }
+    if ($elsewhere.Count -gt 0) {
+        $found = ($elsewhere | ForEach-Object { "'$($_.Name)' in $($_.ResourceGroup)" }) -join ', '
+        Write-Host " (not in ${platformRg}; found $found on a SkyCraft VM - Step 5.1.5 names the rule '$alertRuleName' and sets Details > Resource group to $platformRg)" -NoNewline -ForegroundColor Gray
+    }
+    return $false
 }
 
 Invoke-Test "Alert rule is enabled" {
