@@ -2680,6 +2680,19 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual((record["outcome"], record["observed"], r.ask.prompts),
                          ("unknown", "ambiguous: 2 search boxes ('Search', 'Filter by name')", []))
 
+    def test_a_search_result_gone_before_the_click_is_searched_for_once_more(self) -> None:
+        # Run 20261017-123546, 1.3.6: the dropdown re-rendered and is_disabled() timed out on the
+        # result it had found.
+        class Gone(FakeElement):
+            def is_disabled(self, timeout=None) -> bool:
+                raise run.PlaywrightError("Timeout 8000ms exceeded.")
+        for results, outcome, searches in (([Gone(), FakeElement()], "match", 2), ([Gone(), Gone()], "unknown", 2)):
+            with self.subTest(outcome=outcome):
+                with mock.patch.object(run, "search_portal", side_effect=results) as search,                         mock.patch.object(run, "close_search") as close:
+                    record, _ = self.act(Screen(), self.SEARCH, self.ENTRA)
+                self.assertEqual((record["outcome"], search.call_count, close.call_count), (outcome, searches, 1))
+                self.assertEqual(results[1].clicked, 1 if outcome == "match" else 0)
+
     def test_a_search_without_a_scope_is_the_global_search(self) -> None:
         self.assertNotIn("scope", self.SEARCH)                               # steps.json from before scopes
         record, _ = self.act(Screen(), self.SEARCH, self.ENTRA)

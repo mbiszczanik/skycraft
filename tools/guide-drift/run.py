@@ -3072,7 +3072,7 @@ class Runner:
 
     def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None,
                      form_start: bool = False, open_field: bool = False, state: bool | None = None,
-                     state_only: bool = False) -> dict:
+                     state_only: bool = False, searched_again: bool = False) -> dict:
         """Find the element the guide calls `label`, act on it, return the result record.
         `form_start`: the label is the first field of a form, which must be open (find_form)
         unless the recording holds a decision for the label (replay finds the field).
@@ -3238,6 +3238,13 @@ class Runner:
             record.update(outcome="unknown", observed=f"read-only: '{acted_on}'")
             return record
         except (PlaywrightError, LookupError) as error:
+            if kind == "search" and isinstance(error, PlaywrightError) and not searched_again                     and not self.page.is_closed():
+                # The dropdown re-rendered between finding the result and acting on it, and the
+                # result went away (run 20261017-123546, 1.3.6: is_disabled timed out): once more.
+                print(f"The search result '{acted_on}' went away before the click: searching once more.")
+                close_search(self.page)
+                return self.act_on_label(step, item, label, value, form_start, open_field, state, state_only,
+                                         searched_again=True)
             record.update(outcome="unknown", observed=error_text(error))
             return record
         # Replay must never inherit a choice the runner could not act on.
