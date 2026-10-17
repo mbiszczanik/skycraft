@@ -597,20 +597,17 @@ Create a more specific budget for the production environment. A budget belongs t
 1. In Azure Portal, search for **Subscriptions**
 2. Click your subscription, **[yoursubscription]**
 3. Under **Cost Management** click **Cost analysis**
-4. Open the **VIEW** menu and, under **Built-in views**, explore:
-   - **Cost by resource** - See spending per resource
-   - **Cost by service** - See spending per Azure service
-   - **Daily costs** - Trend over time
+4. Open the **VIEW** list and, under **Built-in views**, click **Cost by service** to see spending per Azure service
 
-**Note**: Open Cost analysis from the subscription, as here. **Cost Management + Billing** has no **Cost analysis** of its own, and its **Go to subscription** link opens the scope you used last (after Step 1.3.17, the production resource group).
+**Note**: Open Cost analysis from the subscription, as here. **Cost Management + Billing** has no **Cost analysis** of its own, and its **Go to subscription** link opens the scope you used last (after Step 1.3.17, the production resource group). The **VIEW** list also holds **Cost by resource** (spending per resource) and **Daily costs** (the trend over time), and the date range button next to it (it shows the current period) offers **Last 30 days** under **Relative dates**: explore them as well.
 
 ![Manage Costs with Budgets and Alerts](./images/step-1.3.18a.png)
 
-5. Click the date range button (it shows the current period) and, under **Relative dates**, click **Last 30 days**
-6. Click **Add filter**, choose **Tag**, then pick the tag `project` with the value `skycraft` (Cost analysis shows tag names and values in lower case), and click the green check mark next to the filter to apply it
-7. Click **Add filter** again, choose **Resource group name**, pick `prod-skycraft-swc-rg` and click the green check mark
+5. Click **Add filter**, then pick **Tag**, **project** and **skycraft** in the lists that open one after another (Cost analysis shows tag names and values in lower case)
 
-**Expected Result**: Visual charts showing cost breakdown (likely very low since we haven't deployed resources yet).
+**Note**: The filter applies once you click outside it, or on the green check mark next to it, and then shows as **Tag: project: skycraft**. Add a second filter the same way to narrow the view further, for example **Resource group name** `prod-skycraft-swc-rg`.
+
+**Expected Result**: Cost analysis shows, by service, the costs of the resources tagged `project: skycraft` (likely low, as only Module 1 objects exist so far).
 
 ![Manage Costs with Budgets and Alerts](./images/step-1.3.18b.png)
 

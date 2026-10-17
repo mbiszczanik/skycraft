@@ -698,6 +698,17 @@ Describe 'parse.py - lab 1.3, a lock type is a field, not a click on Delete' {
         ($step.items | Where-Object { @($_.labels) -ccontains '[yoursubscription]' }).kind | Should -Be 'action'
     }
 
+    It 'reads step 1.3.18 as two click chains the Portal names as written: the VIEW list, and the tag filter' {
+        # Names seen in Cost analysis on 2026-10-17: combobox 'VIEW' with option 'Cost by service';
+        # 'Add filter' opens three lists one after another, options 'Tag', 'project' and 'skycraft'.
+        $step = $script:Lab13.steps | Where-Object id -eq '1.3.18'
+        @($step.items.kind) | Should -Be @('search', 'action', 'action', 'action', 'action')
+        @($step.items[3].labels) | Should -Be @('VIEW', 'Cost by service')
+        @($step.items[4].labels) | Should -Be @('Add filter', 'Tag', 'project', 'skycraft')
+        @($step.items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Last 30 days'
+        @($step.items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Resource group name'
+    }
+
     It 'reads step 1.3.13 as the lock form: name, type and notes as fields' {
         $step = $script:Lab13.steps | Where-Object id -eq '1.3.13'
         @($step.items.kind) | Should -Be @('action', 'navigation', 'field', 'field', 'field', 'action')
