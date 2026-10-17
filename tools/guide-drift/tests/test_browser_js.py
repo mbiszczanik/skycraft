@@ -129,6 +129,42 @@ class BladeTests(BrowserTestCase):
         run.Runner.refresh_view(SimpleNamespace(page=self.page))
         self.assertEqual(self.page.evaluate("document.body.dataset.refreshed"), "pane")
 
+    def portal_blades(self) -> None:
+        # The Portal's own shape (run 20261017-003656): a blade is a <section class=fxs-blade>
+        # labelled by its title and subtitle, with no role attribute.
+        self.show('<section class=fxs-blade aria-labelledby="l1 l2" style="position: absolute; left: 0; width: 600px">'
+                  '<h2 id=l1>Resource groups</h2><div id=l2>Resource Manager</div>'
+                  '<a href="#" id=list-tags>Tags</a></section>'
+                  '<section class=fxs-blade aria-labelledby="p1 p2" style="position: absolute; left: 700px; width: 600px">'
+                  '<h2 id=p1>prod-skycraft-swc-rg</h2><div id=p2>Resource group</div>'
+                  '<a href="#" id=pane-tags>Tags</a></section>')
+
+    def test_a_portal_blade_is_a_section_named_by_its_labelling_elements(self) -> None:
+        self.portal_blades()
+        self.assertEqual(self.page.locator("#pane-tags").evaluate(run.BLADE_OF_JS),
+                         ["prod-skycraft-swc-rg Resource group", 700])
+        self.assertEqual(self.id_of(run.find_in_roles(self.page, "Tags", run.ACTION_ROLES)), "pane-tags")
+
+    def test_an_element_in_a_frame_outside_any_region_is_in_the_blade_of_its_iframe(self) -> None:
+        # Cost analysis renders in an iframe of the subscription's blade, beside the Subscriptions
+        # list, and both show 'Add filter' (run 20261017-095926).
+        self.show('<section aria-label="Subscriptions" style="position: absolute; left: 0; width: 600px">'
+                  '<button id=list-filter>Add filter</button></section>'
+                  '<section aria-label="Cost analysis" style="position: absolute; left: 700px; width: 700px">'
+                  '<iframe style="width: 650px; height: 300px" '
+                  'srcdoc="<main><button id=cost-filter>Add filter</button></main>"></iframe></section>')
+        frame = self.page.frames[1]
+        frame.wait_for_selector("#cost-filter")
+        self.assertEqual(run.blade_of(frame.locator("#cost-filter")), ["Cost analysis", 700])
+        found = run.visible_across_frames(self.page, lambda f: f.get_by_role("button", name="Add filter", exact=True))
+        self.assertEqual(len(found), 2)
+        self.assertEqual(self.id_of(run.newest_blade(found)), "cost-filter")
+
+    def test_a_section_named_by_aria_label_is_a_blade_and_an_unnamed_one_is_none(self) -> None:
+        self.show('<section aria-label="Menu" style="margin-left: 50px"><a href="#" id=named>Tags</a></section>'
+                  '<section><a href="#" id=unnamed>Tags</a></section>')
+        self.assertEqual(self.page.locator("#named").evaluate(run.BLADE_OF_JS), ["Menu", 58])
+        self.assertIsNone(self.page.locator("#unnamed").evaluate(run.BLADE_OF_JS))
 
 class TextLabelTests(BrowserTestCase):
     """NEXT_CONTROL_JS through find_by_text_label: the Advisor alert's unnamed combo boxes under the
@@ -275,6 +311,51 @@ class PlaywrightBehaviourTests(BrowserTestCase):
         for element, opens in (("combo", True), ("dropdown", True), ("plain", False), ("text", False)):
             with self.subTest(element=element):
                 self.assertEqual(run.opens_a_list(self.page.locator(f"#{element}")), opens)
+
+class ZeroSizeComboBoxTests(BrowserTestCase):
+    """ZERO_SIZE_COMBOBOX_JS, visible_in and click_target on Cost analysis' VIEW list (1.3.18, run
+    20261017-003656): an ng-select whose input, the combo box, has no width inside a visible
+    container that opens the list on mousedown."""
+
+    def view_list(self, extra: str = "", container_style: str = "", proxy_style: str = "") -> None:
+        self.show(f'<div class="ng-select-container" id=container style="width: 150px; height: 44px; {container_style}" '
+                  "onmousedown=\"document.getElementById('view').setAttribute('aria-expanded', 'true')\">"
+                  '<div class="ng-value-container"><span>VIEW</span><div>AccumulatedCosts</div></div>'
+                  f'<div class="ng-input" id=proxy style="width: 150px; height: 16px; {proxy_style}">'
+                  '<input role=combobox aria-label=VIEW aria-expanded=false readonly id=view '
+                  f'style="width: 0; height: 16px; padding: 0; border: 0">{extra}</div></div>')
+
+    def test_the_combo_box_counts_as_visible_and_is_clicked_at_its_container(self) -> None:
+        self.view_list()
+        view = self.page.get_by_role("combobox", name="VIEW", exact=True)
+        self.assertFalse(view.is_visible())         # what Playwright says of a zero-width element
+        self.assertEqual(len(run.visible_in(view, VIEWPORT)), 1)
+        self.assertEqual(self.id_of(run.find_exact(self.page, "VIEW")), "view")
+        target = run.click_target(view)
+        self.assertEqual(self.id_of(target), "proxy")
+        target.click(timeout=2000)
+        self.assertEqual(view.get_attribute("aria-expanded"), "true")
+
+    def test_a_transparent_stand_in_counts_as_the_portal_s_does(self) -> None:
+        # ng-select's '.ng-input' has opacity 0 in the Portal (run 20261017-095926); a click
+        # still reaches it and opens the list.
+        self.view_list(proxy_style="opacity: 0")
+        view = self.page.get_by_role("combobox", name="VIEW", exact=True)
+        self.assertEqual(len(run.visible_in(view, VIEWPORT)), 1)
+        run.click_target(view).click(timeout=2000)
+        self.assertEqual(view.get_attribute("aria-expanded"), "true")
+
+    def test_an_ancestor_holding_another_control_gives_no_stand_in(self) -> None:
+        self.view_list("<button>Clear</button>")
+        view = self.page.get_by_role("combobox", name="VIEW", exact=True)
+        self.assertEqual(run.visible_in(view, VIEWPORT), [])
+        self.assertIsNone(view.evaluate(run.ZERO_SIZE_COMBOBOX_JS, None))
+
+    def test_a_combo_box_with_a_box_of_its_own_is_clicked_itself(self) -> None:
+        self.show("<div role=combobox tabindex=0 aria-label=Region id=region>East US</div>")
+        region = self.page.get_by_role("combobox", name="Region")
+        self.assertIsNone(region.evaluate(run.ZERO_SIZE_COMBOBOX_JS, "1"))
+        self.assertEqual(self.id_of(run.click_target(region)), "region")
 
 
 if __name__ == "__main__":
