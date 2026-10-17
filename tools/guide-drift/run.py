@@ -685,6 +685,9 @@ OPTION_ROLES = ("option", "treeitem", "menuitemcheckbox", "menuitemradio")
 PICK_ROLES = ("option", "treeitem")
 # The Portal's location lists put the geography before a region's name: '(Europe) Sweden Central'.
 REGION_PREFIX = re.compile(r"^\([^()]+\)\s+")
+# A list that groups its options names each after its group's heading: Create a resource group's
+# Region list puts 'Recommended: (Europe) Sweden Central' under 'Recommended' (run 20261017-123546).
+GROUP_PREFIX = re.compile(r"^[^:()]+:\s+")
 # A list that scrolls (virtualised: only the entries in view exist) is scrolled a page at a time,
 # this many pages at most, while the option is missing. LIST_SCROLL_JS scrolls the nearest
 # scrollable ancestor of the element (or, failing that, its first scrollable descendant) by its
@@ -1886,10 +1889,13 @@ def open_list(page: Page, element: Locator) -> Locator | None:
 
 def option_names(name: str | re.Pattern[str]) -> list[str | re.Pattern[str]]:
     """What an option may be called, in the order it is looked for: `name` itself, then `name`
-    after a region prefix (REGION_PREFIX), in the same case rule."""
-    if isinstance(name, str):
-        return [name, re.compile(REGION_PREFIX.pattern + literal_pattern(name) + "$")]
-    return [name, re.compile(REGION_PREFIX.pattern + name.pattern.removeprefix("^"), name.flags)]
+    after a region prefix (REGION_PREFIX), then after a group's heading (GROUP_PREFIX) and an
+    optional region prefix, in the same case rule."""
+    body, flags = ((literal_pattern(name) + "$", 0) if isinstance(name, str)
+                   else (name.pattern.removeprefix("^"), name.flags))
+    region = REGION_PREFIX.pattern.removeprefix("^")
+    return [name, re.compile("^" + region + body, flags),
+            re.compile("^" + GROUP_PREFIX.pattern.removeprefix("^") + "(?:" + region + ")?" + body, flags)]
 
 
 def options_named(page: Page, container: Locator | None, name: str | re.Pattern[str]) -> list[Locator]:
@@ -2020,7 +2026,7 @@ def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case:
     accessibility tree (list_tree)."""
     def shows(text: str) -> bool:
         text = text.strip()
-        names = (text, REGION_PREFIX.sub("", text))
+        names = (text, REGION_PREFIX.sub("", text), REGION_PREFIX.sub("", GROUP_PREFIX.sub("", text)))
         return any(n == value or (ignore_case and n.casefold() == value.casefold()) for n in names)
 
     if shows(current_text(element, tag)):

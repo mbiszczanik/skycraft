@@ -6002,6 +6002,22 @@ class ListOptionTests(RunnerTestCase):
         self.assertEqual((options["(Europe) Sweden Central"].clicked, options["(Europe) North Europe"].clicked,
                           box.text), (1, 0, "(Europe) Sweden Central"))
 
+    def test_region_sweden_central_finds_the_option_named_after_its_group_too(self) -> None:
+        # list-1.3.6-224 (run 20261017-123546): group 'Recommended' > option 'Recommended: (Europe)
+        # Sweden Central', with the filter box holding 'Sweden Central'.
+        names = ["Recommended: (Europe) Sweden Central", "Recommended: (Europe) North Europe"]
+        screen, page, box, options = self.opened("option", names)
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIsNone(self.pick(page, box, "Sweden Central"))
+        self.assertEqual((options[names[0]].clicked, options[names[1]].clicked), (1, 0))
+        # The region's own entry, without the group's heading, comes first.
+        screen, page, box, options = self.opened("option", ["Recommended: (Europe) Sweden Central",
+                                                            "(Europe) Sweden Central"])
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIsNone(self.pick(page, box, "Sweden Central"))
+        self.assertEqual((options["(Europe) Sweden Central"].clicked,
+                          options["Recommended: (Europe) Sweden Central"].clicked), (1, 0))
+
     def test_an_exact_name_wins_over_a_prefixed_one(self) -> None:
         screen, page, box, options = self.opened("option", ["Sweden Central", "(Europe) Sweden Central"])
         with mock.patch.object(run, "all_frames", lambda page: [screen]):
