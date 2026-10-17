@@ -160,6 +160,22 @@ class BladeTests(BrowserTestCase):
         self.assertEqual(len(found), 2)
         self.assertEqual(self.id_of(run.newest_blade(found)), "cost-filter")
 
+    def test_a_react_blade_is_an_iframe_in_no_region_and_stands_by_its_left_edge(self) -> None:
+        # The Resource groups list and a group's pane, each a React iframe beside the other, each
+        # with a 'More commands' (run 20261017-123546, 1.3.6).
+        self.show('<main><iframe style="position: absolute; left: 0; width: 580px; height: 300px" '
+                  'srcdoc="<button id=list-more>More commands</button>"></iframe>'
+                  '<iframe style="position: absolute; left: 600px; width: 800px; height: 300px" '
+                  'srcdoc="<button id=pane-more>More commands</button>"></iframe></main>')
+        list_frame, pane_frame = self.page.frames[1], self.page.frames[2]
+        list_frame.wait_for_selector("#list-more")
+        pane_frame.wait_for_selector("#pane-more")
+        self.assertEqual(run.blade_of(pane_frame.locator("#pane-more")), [run.IFRAME_BLADE, 600])
+        found = run.visible_across_frames(self.page, lambda f: f.get_by_role("button", name="More commands",
+                                                                              exact=True))
+        self.assertEqual(len(found), 2)
+        self.assertEqual(self.id_of(run.newest_blade(found)), "pane-more")
+
     def test_a_section_named_by_aria_label_is_a_blade_and_an_unnamed_one_is_none(self) -> None:
         self.show('<section aria-label="Menu" style="margin-left: 50px"><a href="#" id=named>Tags</a></section>'
                   '<section><a href="#" id=unnamed>Tags</a></section>')
