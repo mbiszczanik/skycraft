@@ -20,9 +20,10 @@
     role assignments made on the account itself are removed, not ones inherited from a resource
     group or the subscription.
 
-    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
-    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
-    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+    Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
+    otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
+    (issue #104), it also sets the process exit code; run at a prompt or by another script,
+    it leaves the session open and the code in $LASTEXITCODE (issue #257).
 .PARAMETER Environment
     The environment to clean up (prod or dev). Default: prod.
 .PARAMETER Force
@@ -50,6 +51,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
 # Counts lookups that failed and steps that could not be carried out. Absent objects are not
@@ -132,7 +135,7 @@ Write-Host "=== Lab 4.4: Cleaning Up Security Configuration ===" -ForegroundColo
 
 # 1. Verify Connection
 if (-not (Get-AzContext)) {
-    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
+    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; Exit-Lab -FailureCount 1
 }
 
 # 2. Look the storage account up once. Every step below works inside it.
@@ -200,16 +203,20 @@ if ($sa) {
             if ($assignments.Count -eq 0) {
                 Write-Host "  -> [INFO] No 'Storage Blob Data Contributor' assignments found." -ForegroundColor Gray
             }
+            # Each assignment is named by its place in the list, not by its holder: a display name is a
+            # real person's name, and the output may be pasted as evidence.
+            $position = 0
             foreach ($assignment in $assignments) {
+                $position++
                 try {
                     Remove-AzRoleAssignment -ObjectId $assignment.ObjectId `
                         -RoleDefinitionName 'Storage Blob Data Contributor' `
                         -Scope $storageId -ErrorAction Stop
-                    Write-Host "  -> Removed assignment for '$($assignment.DisplayName)'." -ForegroundColor Green
+                    Write-Host "  -> Removed assignment $position of $($assignments.Count)." -ForegroundColor Green
                 }
                 catch {
                     $script:cleanupFailures++
-                    Write-Host "  -> [ERROR] Failed to remove the assignment for '$($assignment.DisplayName)'." -ForegroundColor Red
+                    Write-Host "  -> [ERROR] Failed to remove assignment $position of $($assignments.Count)." -ForegroundColor Red
                     Write-Host $_.Exception.Message -ForegroundColor Red
                 }
             }
@@ -225,8 +232,7 @@ Write-Host "       It belongs to Lab 2.2; remove it with that lab's cleanup if y
 
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s). See the [ERROR] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nCleanup Complete." -ForegroundColor Cyan

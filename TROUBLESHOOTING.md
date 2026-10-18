@@ -335,15 +335,19 @@ its measured duration.
 
 **Cause, historically**: a lab script that printed a failure and exited 0. Both known instances are
 fixed — [#104](https://github.com/mbiszczanik/skycraft/issues/104) for Lab 2.1's cleanup and
-[#105](https://github.com/mbiszczanik/skycraft/issues/105) for Lab 5.2's — and
-`tests/Exit-Code-Propagation.Tests.ps1` now holds the whole repository to the pattern.
+[#105](https://github.com/mbiszczanik/skycraft/issues/105) for Lab 5.2's. Every lab script now
+ends through `Exit-Lab` from `tools/LabCommon.psm1`
+([#257](https://github.com/mbiszczanik/skycraft/issues/257)), and
+`tests/Exit-Code-Propagation.Tests.ps1` fails a lab script that does not.
 
 Two things make this visible if it recurs:
 
-- `tools/Invoke-LabScript.ps1` is the only process that carries a lab script's real exit code out.
-  A script declaring `#Requires -Modules` and launched with `pwsh -File` has its `exit` **discarded**
-  and the process reports 0 regardless; the shim declares no module requirement, which is the entire
-  reason it works.
+- A lab script returns its exit code (`0`, or `1` when anything failed) whichever way it is
+  started. PowerShell discards the `exit` of a script that declares `#Requires -Modules` and runs
+  as `pwsh -File`, so `Exit-Lab` also calls `$Host.SetShouldExit` when the script is the entry
+  point of such a process; at a prompt, under `-Command` and inside `tools/Invoke-LabScript.ps1`
+  (the lab cycle's launcher) it is a plain `exit`. A run that reports 0 after printing `[FAIL]`
+  means a script that does not end through `Exit-Lab` - the suite above should have failed first.
 - The per-step transcripts under `tools/lab-cycle-logs/` hold exactly what each script printed. Read
   the transcript before believing the status.
 

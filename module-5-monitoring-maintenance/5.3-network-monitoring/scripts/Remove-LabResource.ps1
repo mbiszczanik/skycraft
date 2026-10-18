@@ -25,9 +25,10 @@
     that failed is not an empty group - nothing is deleted on the strength of it. An agent whose
     ownership tag could not be read is left in place.
 
-    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
-    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
-    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+    Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
+    otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
+    (issue #104), it also sets the process exit code; run at a prompt or by another script,
+    it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
     Note: This does NOT remove infrastructure from earlier labs (VMs, VNets,
     Storage Accounts, Log Analytics Workspace, or the Network Watcher itself,
@@ -58,6 +59,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
 # Counts lookups that failed and objects that exist but could not be removed. Absent objects are
@@ -261,8 +264,7 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "  Account: $($context.Account.Id)" -ForegroundColor Gray
 
@@ -450,8 +452,7 @@ if ($script:cleanupFailures -gt 0) {
     Write-Host "  Cleanup finished with $($script:cleanupFailures) failure(s)" -ForegroundColor Red
     Write-Host "  See the [ERROR] lines above. What could not be looked up or removed may still exist." -ForegroundColor Gray
     Write-Host "========================================`n" -ForegroundColor Cyan
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "  Cleanup Complete" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan

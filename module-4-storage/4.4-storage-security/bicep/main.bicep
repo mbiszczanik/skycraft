@@ -1,9 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 4.4 - Storage Security - Orchestrator
-DESCRIPTION: Locks a SkyCraft storage account down via the Azure Verified Module for storage accounts - firewall default action Deny, a virtual network rule for the lab subnet, an optional client IP rule, and the dev-assets container used for SAS and RBAC testing
+DESCRIPTION: Locks a SkyCraft storage account down via the Azure Verified Module for storage accounts - firewall default action Deny, a virtual network rule for the lab subnet, an optional client IP rule, the dev-assets container used for SAS and RBAC testing, and an optional Storage Blob Data Contributor assignment on the account
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment prod
 AUTHOR/S: Marcin Biszczanik
-VERSION: 2.0.0
+VERSION: 2.1.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -34,6 +34,12 @@ param parSubnetName string = 'WorldSubnet'
 
 @description('Client IP address allowed through the storage firewall. Leave empty to add no IP rule.')
 param parClientIp string = ''
+
+// Step 4.4.7 of the guide. Deploy-Bicep.ps1 passes the object id of whoever runs it, or nothing
+// when that identity holds the role on the account already: ARM refuses a second assignment of
+// the same role to the same principal at the same scope under another name (RoleAssignmentExists).
+@description('Object id of the user or service principal that gets Storage Blob Data Contributor on the account (guide Step 4.4.7). Leave empty to assign nothing.')
+param parDataContributorPrincipalId string = ''
 
 @description('Blob soft delete retention days (baseline from Lab 4.1)')
 @minValue(1)
@@ -152,6 +158,15 @@ module modStorage 'br/public:avm/res/storage/storage-account:0.33.0' = {
       changeFeedEnabled: false
       containers: varContainers
     }
+    // Data-plane access with Entra ID instead of the account key (guide Section 4). The module
+    // names the assignment guid(account, principal, role), so a re-run changes nothing.
+    roleAssignments: empty(parDataContributorPrincipalId) ? [] : [
+      {
+        principalId: parDataContributorPrincipalId
+        roleDefinitionIdOrName: 'Storage Blob Data Contributor'
+        description: 'SkyCraft Lab 4.4 Step 4.4.7: blob data access with Microsoft Entra ID'
+      }
+    ]
   }
 }
 
