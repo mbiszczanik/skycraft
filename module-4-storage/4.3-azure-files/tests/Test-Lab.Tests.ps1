@@ -341,6 +341,9 @@ Describe 'Lab 4.3 Test-Lab.ps1 - a failed lookup is a counted failure, never a p
         $run.Output | Should -Match "\[FAIL\] File shares listable - .*'TooManyRequests'"
         $run.Output | Should -Match "\[FAIL\] Azure Files backup items of vault 'platform-skycraft-swc-rsv' readable - .*'InternalServerError'"
         $run.Output | Should -Not -Match 'Cannot index into a null array'
+        # The unread vault may protect a share: no [PASS] for what could not be read.
+        $run.Output | Should -Not -Match '\[PASS\] No Azure Backup protects'
+        $run.Output | Should -Match '\[SKIP\] No Azure Backup protects .* 1 vault\(s\) could not be read'
         $run.FailLines | Should -Be 3
         $run.Output | Should -Match 'Validation Complete\. Failures: 3'
     }

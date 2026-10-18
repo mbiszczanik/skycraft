@@ -95,9 +95,10 @@ Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycra
 > **Run the Module 4 labs in order (4.1 → 4.2 → 4.3 → 4.4).** All four configure the **same**
 > three storage accounts, and they are cumulative forward: each lab replaces the account-level
 > properties and the sub-services it owns, while leaving the sub-services it does not own alone.
-> Re-running Lab 4.2 after Lab 4.3 resets file-share retention from 14 days back to 7; re-running
-> Lab 4.1 after Lab 4.2 turns production blob versioning back off, and after Lab 4.3 it too resets
-> file-share retention to 7 days. See `docs/bicep-standards.md` §4.5 for the mechanism.
+> Re-running Lab 4.1 after Lab 4.2 turns production blob versioning back off, and after Lab 4.3
+> it resets file-share retention from 14 days back to 7. Lab 4.2's and Lab 4.4's Bicep leave the
+> file service alone, so re-running them keeps the 14 days. See `docs/bicep-standards.md` §4.5 for
+> the mechanism.
 
 ---
 
@@ -123,7 +124,7 @@ Steps without a Bicep counterpart: 4.3.4-4.3.6 work on data (a directory, a file
 Two differences between the paths are known:
 
 - **Azure Backup**: the Portal's new share wizard ticks **Enable backup** on its **Backup** tab by default. Steps 4.3.1 and 4.3.2 have you untick it, so the Portal ends where the Az PowerShell blocks and the Bicep end: with no backup. `Test-Lab.ps1` fails a share that a Recovery Services vault protects.
-- **The Bicep redeploys the whole account**, not only its file service: it restates Lab 4.1's account settings, including the AVM module defaults Lab 4.1's Paths section lists, and with them `networkAcls` **Allow**. Run after Lab 4.4, it opens the production account's firewall again. With `-Environment dev` it targets `devskycraftswcsa` and sends **Disabled** for large file shares; if that account was built in the Portal or with PowerShell, Azure may refuse the deployment (Lab 4.1's Paths section; issue #390). The default `prod` target, a geo-redundant account, is not affected.
+- **The Bicep redeploys the whole account**, not only its file service: it restates the account settings Lab 4.1 sets (redundancy, TLS 1.2, no anonymous blob access, `networkAcls` **Allow**), and the AVM module sends its own default for every account setting the template does not name. Run after Lab 4.4, it opens the production account's firewall again. With `-Environment dev` it targets `devskycraftswcsa` and sends **Disabled** for large file shares; if that account was built in the Portal or with PowerShell, Azure may refuse the deployment (issue #390). The default `prod` target, a geo-redundant account, is not affected.
 
 **Preview - the AVM module call the Bicep path makes**:
 
@@ -207,7 +208,7 @@ We need a share named `skycraft-config` with a 100 GiB quota. This share stores 
 2. Click the **Resources** tab
 3. Click **prodskycraftswcsa**
 
-**Note**: Searching for **Storage accounts** opens **Storage center | Blob Storage**; its **Resources** tab lists the storage accounts (as in Lab 4.1, Step 4.1.2).
+**Note**: Searching for **Storage accounts** opens **Storage center | Blob Storage**; its **Resources** tab lists the storage accounts.
 
 4. Under **Data storage**, select **Classic file shares**
 
@@ -417,7 +418,7 @@ Before creating a snapshot, upload a test file so you can verify the snapshot-re
 
 #### Option 1: Azure Portal (GUI)
 
-1. Navigate to `prodskycraftswcsa` → **Classic file shares** → `skycraft-config` → **Browse**
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**) → `skycraft-config` → **Browse**
 
 **Note**: **Browse** shows **Authentication method: Access key (Switch to Microsoft Entra user account)**. Leave the access key: browsing with your Microsoft Entra account needs a file data role that this lab does not grant.
 
@@ -427,7 +428,8 @@ Before creating a snapshot, upload a test file so you can verify the snapshot-re
 5. On your computer, create a text file named `config.txt` that holds one line: `server-name=skycraft-prod-01`
 6. **Browse** → `common`
 7. Click **Upload**
-8. In the upload pane, choose `config.txt` on your computer and confirm the upload
+8. In the pane that opens, choose `config.txt` on your computer (drag it into the pane, or browse for it)
+9. Click **Upload**
 
 #### Option 2: Az PowerShell
 
@@ -490,7 +492,7 @@ Snapshots are read-only point-in-time copies. Create one before any config chang
 
 #### Option 1: Azure Portal (GUI)
 
-1. Navigate to `prodskycraftswcsa` → **Classic file shares** → `skycraft-config`
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**) → `skycraft-config`
 2. Under **Operations**, select **Snapshots**
 3. Click **+ Add snapshot**
 4. Comment: `Pre-update backup`
@@ -532,7 +534,7 @@ Simulate a bad config push by modifying the test file, then restore the original
 
 #### Option 1: Azure Portal (GUI)
 
-1. Navigate to `prodskycraftswcsa` → **Classic file shares** → `skycraft-config` → **Browse** → `common` → select `config.txt`
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**) → `skycraft-config` → **Browse** → `common` → select `config.txt`
 2. Click **Download** to save the file locally
 3. Open the downloaded file in a text editor, change content to `server-name=BROKEN`, and save
 4. Back in the Portal, click **Upload** → select the modified `config.txt` → check **Overwrite if files already exist** → **Upload**
@@ -557,7 +559,10 @@ Set-AzStorageFileContent -ShareName "skycraft-config" -Source ".\config.txt" -Pa
 $snapshotTime = (Get-AzRmStorageShare -ResourceGroupName "prod-skycraft-swc-rg" -StorageAccountName "prodskycraftswcsa" `
     -IncludeSnapshot | Where-Object { $_.Name -eq "skycraft-config" -and $_.SnapshotTime } |
     Sort-Object SnapshotTime -Descending | Select-Object -First 1).SnapshotTime
-$snapshot = Get-AzStorageShare -Name "skycraft-config" -SnapshotTime $snapshotTime -Context $saContext
+# Azure reports the snapshot time in UTC, and -SnapshotTime takes a DateTimeOffset: mark the time
+# as UTC so the conversion cannot shift it by your time zone and miss the snapshot
+$snapshotUtc = if ($snapshotTime.Kind -eq 'Local') { $snapshotTime.ToUniversalTime() } else { [DateTime]::SpecifyKind($snapshotTime, 'Utc') }
+$snapshot = Get-AzStorageShare -Name "skycraft-config" -SnapshotTime ([DateTimeOffset]$snapshotUtc) -Context $saContext
 
 # Copy the file from the snapshot over the live one, then read the live one back
 Get-AzStorageFileContent -ShareClient $snapshot.ShareClient -Path "common/config.txt" `
@@ -594,7 +599,7 @@ If `TcpTestSucceeded` is `False`, your network blocks SMB: skip to Step 4.3.8 an
 
 #### Option 1: Azure Portal (Generate Script)
 
-1. Navigate to `prodskycraftswcsa` → **Classic file shares** → `skycraft-config` → **Overview**
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**) → `skycraft-config` → **Overview**
 2. Click **Connect**
 3. Click the **Windows** tab
 4. Drive letter: **Z**
@@ -645,7 +650,7 @@ Mount the `skycraft-config` share on a Linux machine. This simulates how the Aut
 
 #### Option 1: Azure Portal (Generate Script)
 
-1. Navigate to `prodskycraftswcsa` → **Classic file shares** → `skycraft-config` → **Overview** → **Connect**
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**) → `skycraft-config` → **Overview** → **Connect**
 2. Click the **Linux** tab
 3. Click **Show Script**
 4. Copy the generated script — it installs `cifs-utils`, stores the account key in a credentials file under `/etc/smbcredentials` and adds the mount to `/etc/fstab`
@@ -739,7 +744,7 @@ Run the lab's validator from the lab folder:
 | --- | --- | --- | --- |
 | `skycraft-config` (100 GiB quota, Hot) with `common/config.txt` and the snapshot of Step 4.3.5 | `prodskycraftswcsa` | about 0 (a few bytes; quota is free) | Nothing. Lab 4.4 limits the account's firewall to `WorldSubnet` and your client IP, so a mount from another network stops working after Lab 4.4 |
 | `skycraft-shared` (500 GiB quota, Hot), empty | `prodskycraftswcsa` | 0 | Nothing |
-| File share soft delete, 14 days | `prodskycraftswcsa` | data in deleted shares is billed for 14 days | Re-running Lab 4.1's or Lab 4.2's Bicep sets it back to 7 days |
+| File share soft delete, 14 days | `prodskycraftswcsa` | data in deleted shares is billed for 14 days | Re-running Lab 4.1's Bicep sets it back to 7 days; Lab 4.2's and Lab 4.4's Bicep leave it alone |
 | Drive `Z:` and the saved key (`cmdkey`) | Your Windows computer | 0 | Nothing. Remove them with `Remove-PSDrive -Name Z` (or `net use Z: /delete`) and `cmdkey /delete:prodskycraftswcsa.file.core.windows.net` |
 | The mount, `/etc/smbcredentials/prodskycraftswcsa.cred` and, from the Portal script, a line in `/etc/fstab` | The Linux machine of Step 4.3.8 | 0 | Nothing. Remove them with `sudo umount /mnt/skycraft-config`, `sudo rm /etc/smbcredentials/prodskycraftswcsa.cred` and by deleting the share's line from `/etc/fstab` |
 | **Only if Enable backup was left ticked**: a Recovery Services vault (new, or Lab 5.2's), a daily backup policy, the protected shares and the vault's delete lock on the account | `prod-skycraft-swc-rg`, or `platform-skycraft-swc-rg` for Lab 5.2's vault | a protected-instance fee plus the backup snapshots' storage | Blocks this lab's cleanup; remove it as in Troubleshooting, Issue 6 |
@@ -850,7 +855,7 @@ sudo mount -t cifs \
 
 - Increase the quota: on the share's page, click **Edit quota**, enter the new quota and click **OK** (in a pay-as-you-go account a larger quota costs nothing)
 - Clean up unused files or old directories
-- Check actual usage: **Classic file shares** → select share → **Overview** → Used capacity
+- Check actual usage: **Classic file shares** (under **Data storage**) → select share → **Overview** → Used capacity
 
 ```powershell
 # Increase quota to 200 GiB
@@ -866,7 +871,7 @@ Update-AzRmStorageShare -ResourceGroupName "prod-skycraft-swc-rg" -StorageAccoun
 
 **Cause**: The **Backup** tab of the new share wizard was left at its default, **Enable backup** ticked (Steps 4.3.1 and 4.3.2). Azure Backup registered `prodskycraftswcsa` with a Recovery Services vault, protects the share with a daily policy and put a delete lock on the account.
 
-**Solution**: Stop the backup and delete its data, then unregister the account from the vault. In the Portal: open the vault → **Backup items** → **Azure Storage (Azure Files)** → the share → **Stop backup** → **Delete Backup Data**; then the vault's **Backup Infrastructure** → **Storage Accounts** → `prodskycraftswcsa` → **Unregister**. With Az PowerShell:
+**Solution**: Stop the backup and delete its data, then unregister the account from the vault. In the Portal: open the vault → **Backup items** (under **Protected items**) → **Azure Storage (Azure Files)** → the share → **Stop backup** → **Delete Backup Data**; then the vault's **Backup Infrastructure** (under **Manage**) → **Storage Accounts** → `prodskycraftswcsa` → **Unregister**. With Az PowerShell:
 
 ```powershell
 foreach ($vault in Get-AzResource -ResourceType "Microsoft.RecoveryServices/vaults") {

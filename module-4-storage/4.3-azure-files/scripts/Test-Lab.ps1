@@ -21,7 +21,8 @@
         name the Portal generates).
 
     A lookup that fails is a counted [FAIL] that prints its error, never a crash or a pass
-    (docs/powershell-standards.md section 4, rule 7). Every exit goes through Exit-Lab
+    (docs/powershell-standards.md section 4, rule 7); a check that needs what it could not read
+    is skipped, not passed. Every exit goes through Exit-Lab
     (tools/LabCommon.psm1): 1 when anything failed, 0 otherwise.
 
     The script does not check the directory, the file, the snapshot or a mount: those are data
@@ -175,6 +176,7 @@ try {
     $vaults = @(Get-AzResource -ResourceType 'Microsoft.RecoveryServices/vaults' -ErrorAction Stop)
     $containerSuffix = ";$resourceGroupName;$storageAccountName"
     $protected = [System.Collections.Generic.List[string]]::new()
+    $unreadableVaults = 0
 
     foreach ($vault in $vaults) {
         try {
@@ -183,6 +185,7 @@ try {
         }
         catch {
             Write-LabCheck -Check "Azure Files backup items of vault '$($vault.Name)' readable" -Passed $false -Detail "$_"
+            $unreadableVaults++
             continue
         }
 
@@ -196,11 +199,20 @@ try {
         }
     }
 
-    $backupHint = if ($protected.Count -gt 0) {
-        "Protected: $($protected -join ', '). Enable backup was left ticked on the wizard's Backup tab; stop the backup as in Troubleshooting, Issue 6"
-    } else { '' }
-    Write-LabCheck -Check 'No Azure Backup protects a file share of the account (backups are Lab 5.2)' `
-        -Passed ($protected.Count -eq 0) -Detail $backupHint
+    # A vault that could not be read may protect a share: it is already a counted [FAIL] above, and
+    # the summary must not then claim a [PASS] for what it could not see. A protection found in
+    # another vault still fails the summary.
+    $backupCheck = 'No Azure Backup protects a file share of the account (backups are Lab 5.2)'
+    if ($protected.Count -gt 0) {
+        Write-LabCheck -Check $backupCheck -Passed $false `
+            -Detail "Protected: $($protected -join ', '). Enable backup was left ticked on the wizard's Backup tab; stop the backup as in Troubleshooting, Issue 6"
+    }
+    elseif ($unreadableVaults -eq 0) {
+        Write-LabCheck -Check $backupCheck -Passed $true
+    }
+    else {
+        Write-Host "  [SKIP] $backupCheck - $unreadableVaults vault(s) could not be read (counted above)" -ForegroundColor Yellow
+    }
 }
 catch {
     Write-LabCheck -Check 'Recovery Services vaults listable' -Passed $false -Detail "$_"
