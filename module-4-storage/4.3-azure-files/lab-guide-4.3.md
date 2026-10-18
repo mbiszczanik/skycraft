@@ -4,11 +4,11 @@
 
 By completing this lab, you will:
 
-- Master **Azure Files provisioning** by creating and configuring SMB file shares using Portal, CLI, and PowerShell (AZ-104: Configure Azure Files)
+- Master **Azure Files provisioning** by creating and configuring SMB file shares using Portal, Az PowerShell and the Azure CLI (AZ-104: Configure Azure Files)
 - Implement **quota management and access tier selection** for cost-optimized shared storage
 - Configure **snapshots and soft delete** to protect critical game configuration data
 - Restore individual files from snapshots to validate a disaster recovery workflow
-- Mount Azure File Shares on **Windows and Linux** using SMB 3.0
+- Mount Azure File Shares on **Windows and Linux** using SMB 3.x
 - Troubleshoot common Azure Files connectivity failures (port 445, authentication)
 
 ---
@@ -35,7 +35,7 @@ This diagram shows the Azure Files infrastructure you will deploy inside the pro
 
 ## 📋 Real-World Scenario
 
-**Situation**: SkyCraft game servers need a shared file system to store configuration files (`server.properties`), allowlist/blocklist data, and shared game assets. Unlike Blob Storage (which is object-based), these legacy game server applications require a standard file system interface (SMB) to read and write files. Multiple VMs across both Windows (World Servers) and Linux (Auth Servers) must access the same data concurrently.
+**Situation**: SkyCraft game servers need a shared file system to store configuration files (`server.properties`), allowlist/blocklist data, and shared game assets. Unlike Blob Storage (which is object-based), these legacy game server applications require a standard file system interface (SMB) to read and write files. The Linux game server VMs (Module 3) and the administrators' Windows workstations must access the same data concurrently.
 
 | Data Category         | Access Pattern        | Requirement                     | Priority |
 | :-------------------- | :-------------------- | :------------------------------ | :------- |
@@ -47,13 +47,13 @@ This diagram shows the Azure Files infrastructure you will deploy inside the pro
 
 1. **Config data** is protected with snapshots for quick rollback.
 2. **Shared assets** have enough capacity (quota) for growth.
-3. **Access** is possible from both Windows and Linux VMs via SMB 3.0.
+3. **Access** is possible from both Windows and Linux machines via SMB 3.x.
 
 **Business Impact**:
 
 - **Compatibility**: Supports legacy apps without code changes via SMB mount.
 - **Resilience**: Snapshots allow sub-minute recovery from "bad config" pushes.
-- **Cost Control**: Quotas and Hot tier prevent runaway costs — ~60% cheaper than Premium for our workload.
+- **Cost Control**: Quotas cap how far each share can grow, and the Hot tier fits small, often-read files better than the Transaction optimized tier the Portal proposes.
 - **Governance**: Centralized file shares eliminate config drift across servers.
 
 ---
@@ -64,6 +64,7 @@ This diagram shows the Azure Files infrastructure you will deploy inside the pro
 - **Section 2**: Create File Shares (30 min)
 - **Section 3**: Data Protection & Snapshots (25 min)
 - **Section 4**: Mount & Test (20 min)
+- **What This Lab Leaves Behind** and **Clean Up** (5 min)
 
 ---
 
@@ -71,22 +72,58 @@ This diagram shows the Azure Files infrastructure you will deploy inside the pro
 
 Before starting this lab:
 
-- [ ] Completed Lab 4.1 (Storage Accounts) & Lab 4.2 (Blob Storage)
-- [ ] Existing resources:
-  - Storage account: `prodskycraftswcsa` in `prod-skycraft-swc-rg`
-  - Resource group: `prod-skycraft-swc-rg` (Sweden Central)
-- [ ] Azure CLI installed (`az --version` ≥ 2.50)
-- [ ] PowerShell Az module installed (`Get-Module Az -ListAvailable`)
-- [ ] Contributor or Owner role on the subscription
+- [ ] Lab 4.1 completed: storage account `prodskycraftswcsa` (StorageV2, Standard_GRS) in `prod-skycraft-swc-rg`, in Sweden Central, with its four SkyCraft tags and 7-day file share soft delete. `tools/lab-cycle-manifest.psd1` lists Lab 4.1 as this lab's only dependency; Lab 4.2 normally comes first (see the note below), but nothing in this lab uses its containers.
+- [ ] **Owner** or **Contributor** on `prod-skycraft-swc-rg`. The Portal and the Az PowerShell blocks reach the files with the account key, which these roles may read, so no data role is needed.
+- [ ] PowerShell 7+ with the `Az` module (Az.Accounts, Az.Resources, Az.Storage; `scripts/Test-Lab.ps1` also uses Az.RecoveryServices), signed in with `Connect-AzAccount`. The Azure CLI is optional (Option 3 blocks).
+- [ ] For Step 4.3.7: a Windows computer that can reach port 445 on the internet (many home and corporate networks block it; the step says how to test).
+- [ ] For Step 4.3.8: a Linux machine with `cifs-utils`, such as Lab 3.2's `dev-skycraft-swc-auth-vm` (reached through Azure Bastion from Lab 2.2) or WSL2 on your computer.
 - [ ] Understanding of SMB protocol basics and file system concepts
+
+If you completed Lab 1.3, its policies are still assigned to your subscription. This lab creates no new Azure resource with a region or tags of its own: a file share, its directories, files and snapshots, and the file service's soft delete setting are parts of `prodskycraftswcsa`, which already carries the region (Sweden Central) and the four SkyCraft tags from Lab 4.1. `Enforce-Project-Tag` and `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8) and `Restrict-Azure-Regions` (Step 1.3.9) evaluate only resources that have tags and a location, so no step below asks for a region or tags, and none is refused by them. The Bicep path redeploys the account with the same region and four tags as Lab 4.1. No step makes Azure create a resource group or a resource of its own, unless you leave **Enable backup** ticked in Steps 4.3.1-4.3.2, which can create a Recovery Services vault and a backup policy (see the warning in Step 4.3.1). Lab 1.3's delete lock on `prod-skycraft-swc-rg` (`lock-no-delete-prod`, Step 1.3.11) does not stop the steps below, which create and change things in that group; it does stop this lab's cleanup (see Clean Up).
+
+Check the prerequisites with Az PowerShell:
+
+```powershell
+Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa' |
+    Select-Object StorageAccountName, Location, @{ n = 'Sku'; e = { $_.Sku.Name } }, Kind, ProvisioningState
+(Get-AzStorageFileServiceProperty -ResourceGroupName 'prod-skycraft-swc-rg' -StorageAccountName 'prodskycraftswcsa').ShareDeleteRetentionPolicy
+```
+
+**Expected Result**: `prodskycraftswcsa` in `swedencentral`, `Standard_GRS`, `StorageV2`, `Succeeded`; file share soft delete `Enabled` `True` with `Days` `7` (Lab 4.1). `Days` reads 14 if you ran this lab before.
 
 > [!IMPORTANT]
 > **Run the Module 4 labs in order (4.1 → 4.2 → 4.3 → 4.4).** All four configure the **same**
 > three storage accounts, and they are cumulative forward: each lab replaces the account-level
 > properties and the sub-services it owns, while leaving the sub-services it does not own alone.
 > Re-running Lab 4.2 after Lab 4.3 resets file-share retention from 14 days back to 7; re-running
-> Lab 4.1 after Lab 4.2 turns production blob versioning back off. See `docs/bicep-standards.md`
-> §4.5 for the mechanism.
+> Lab 4.1 after Lab 4.2 turns production blob versioning back off, and after Lab 4.3 it too resets
+> file-share retention to 7 days. See `docs/bicep-standards.md` §4.5 for the mechanism.
+
+---
+
+## 🛠️ Portal, PowerShell and Bicep Paths
+
+You can build this lab in the Portal (Option 1 of each step), with the Az PowerShell blocks (Option 2), or with Bicep (`scripts/Deploy-Bicep.ps1`, which deploys `bicep/main.bicep` to `prodskycraftswcsa` by default). The Azure CLI blocks (Option 3) are an optional third way to run Steps 4.3.1-4.3.5. **Pick one path** for Steps 4.3.1-4.3.3: they all create the same two shares and the same setting, and `scripts/Test-Lab.ps1` accepts the result whichever path built it.
+
+The end state on every path:
+
+- File share `skycraft-config` on `prodskycraftswcsa`: SMB, access tier **Hot**, quota 100 GiB.
+- File share `skycraft-shared` on `prodskycraftswcsa`: SMB, access tier **Hot**, quota 500 GiB.
+- File share soft delete on the account: enabled, 14 days.
+- No Azure Backup on either share, and no other share on the account.
+
+| Path | What it creates |
+| ---- | --------------- |
+| Portal (Option 1 of Steps 4.3.1-4.3.8) | Everything in the steps below |
+| Az PowerShell (Option 2 of Steps 4.3.1-4.3.7; Step 4.3.8's Option 2 is bash on the Linux machine) | The same, including the directory, the file, the snapshot and the restore |
+| `scripts/Deploy-Bicep.ps1` (Bicep, `bicep/main.bicep`) | The two shares and the 14-day soft delete only |
+
+Steps without a Bicep counterpart: 4.3.4-4.3.6 work on data (a directory, a file, a snapshot and a restore), which a template does not create; they have Az PowerShell blocks, and `Test-Lab.ps1` does not check them. 4.3.7 and 4.3.8 mount the share on a client: the Portal generates a script, Option 2 is the same script written out, and there is nothing to deploy. Nothing in this lab is Portal-only.
+
+Two differences between the paths are known:
+
+- **Azure Backup**: the Portal's new share wizard ticks **Enable backup** on its **Backup** tab by default. Steps 4.3.1 and 4.3.2 have you untick it, so the Portal ends where the Az PowerShell blocks and the Bicep end: with no backup. `Test-Lab.ps1` fails a share that a Recovery Services vault protects.
+- **The Bicep redeploys the whole account**, not only its file service: it restates Lab 4.1's account settings, including the AVM module defaults Lab 4.1's Paths section lists, and with them `networkAcls` **Allow**. Run after Lab 4.4, it opens the production account's firewall again. With `-Environment dev` it targets `devskycraftswcsa` and sends **Disabled** for large file shares; if that account was built in the Portal or with PowerShell, Azure may refuse the deployment (Lab 4.1's Paths section; issue #390). The default `prod` target, a geo-redundant account, is not affected.
 
 **Preview - the AVM module call the Bicep path makes**:
 
@@ -99,7 +136,7 @@ module modStorage 'br/public:avm/res/storage/storage-account:0.33.0' = {
     blobServices: {}                    // skip the blob service - Lab 4.2 owns it
     fileServices: {
       shareDeleteRetentionPolicy: { enabled: true, days: 14 }
-      shares: [ /* skycraft-config 100 GiB, skycraft-shared 500 GiB */ ]
+      shares: [ /* skycraft-config 100 GiB, skycraft-shared 500 GiB, both Hot */ ]
     }
   }
 }
@@ -108,21 +145,7 @@ module modStorage 'br/public:avm/res/storage/storage-account:0.33.0' = {
 The empty `blobServices: {}` is load-bearing: the module skips a sub-service whose parameter is
 empty, so Lab 4.2's containers, versioning and lifecycle rules are left exactly as they were.
 `blobServices` is the only sub-service that needs the explicit `{}` — it is the only one with a
-non-empty default (`docs/bicep-standards.md` §4.5).
-
-**Verify prerequisites**:
-
-```azurecli
-# Confirm storage account exists
-az storage account show \
-  --name prodskycraftswcsa \
-  --resource-group prod-skycraft-swc-rg \
-  --query "{Name:name, Location:location, Kind:kind}" \
-  --output table
-
-# Confirm Azure CLI version
-az version --query '"azure-cli"' --output tsv
-```
+non-empty default (`docs/bicep-standards.md` §4.5). The template configures no backup.
 
 ---
 
@@ -133,6 +156,17 @@ az version --query '"azure-cli"' --output tsv
 Azure Files provides fully managed file shares in the cloud, accessible via the industry-standard **Server Message Block (SMB)** or **Network File System (NFS)** protocols. Unlike Blob Storage (which uses a flat namespace with REST API access), Azure Files exposes a traditional directory and file hierarchy that applications can mount as a network drive — no code changes required.
 
 Azure Files is the natural fit when your workload needs a shared file system that multiple VMs or containers can access simultaneously. For SkyCraft, this means all game servers can read the same `server.properties` and allowlist data without maintaining separate copies on each VM.
+
+### Classic File Shares and File Shares
+
+Azure Files has two kinds of share, and the Portal names them differently ([Azure Files management concepts](https://learn.microsoft.com/azure/storage/files/files-management-concepts)):
+
+| Kind                 | Lives in                                         | Protocols  | Billing                            | This lab      |
+| :------------------- | :----------------------------------------------- | :--------- | :--------------------------------- | :------------ |
+| **Classic file share** | A storage account (`Microsoft.Storage`)        | SMB, NFS   | Pay-as-you-go (StorageV2 account) or provisioned (FileStorage account) | ✅ Used |
+| **File share**       | Its own resource in a resource group (`Microsoft.FileShares`) | NFS only | Provisioned v2 only, SSD   | Not used      |
+
+The shares of this lab are **classic file shares** in `prodskycraftswcsa`, a StorageV2 account: you pay for the data stored and for the operations on it, not for the quota. Do not create them from the Portal's **File shares** service (the result of searching for "File shares"): that creates a `Microsoft.FileShares` share, which supports only NFS and bills its provisioned storage, IOPS and throughput every hour whether you use them or not.
 
 ### Deep Dive: Protocols (SMB vs. NFS)
 
@@ -149,12 +183,15 @@ Azure Files supports two main protocols. We will use SMB for maximum compatibili
 
 | Tier                      | Workload              | Backend | SkyCraft Use Case              |
 | :------------------------ | :-------------------- | :------ | :----------------------------- |
-| **Premium**               | High IOPS (Databases) | SSD     | Not needed — configs are small |
-| **Transaction Optimized** | High churn            | HDD     | Possible, but overkill         |
+| **Premium**               | High IOPS (Databases) | SSD     | Not available: needs a provisioned FileStorage account, so the wizard greys it out here |
+| **Transaction Optimized** | High churn            | HDD     | The Portal's default; possible, but overkill |
 | **Hot**                   | General purpose       | HDD     | ✅ Best fit for config files   |
 | **Cool**                  | Archive/Backups       | HDD     | Old snapshots/logs only        |
 
-> **SkyCraft Choice**: We use the **Hot** tier for SkyCraft because game config files are small but accessed frequently when servers start up or reload. The transaction costs of the Cool tier would outweigh the storage savings. Premium SSD is unnecessary since config reads are not IOPS-intensive.
+> **SkyCraft Choice**: We use the **Hot** tier for SkyCraft because game config files are small but accessed frequently when servers start up or reload. Transaction optimized, which the Portal proposes, has the highest price per stored GiB and the lowest per operation, a fit for migrations and very busy shares. The transaction costs of the Cool tier would outweigh the storage savings. Premium SSD is unnecessary since config reads are not IOPS-intensive. All three HDD tiers use the same hardware; only the prices differ ([Understand Azure Files billing](https://learn.microsoft.com/azure/storage/files/understanding-billing#pay-as-you-go-model)).
+
+> [!WARNING]
+> Choose the tier when you create the share. A share's tier can be changed at most five times in 30 days, and after a change it cannot be changed again for 24 hours; each change is billed as one transaction per file in the share ([Understand Azure Files billing](https://learn.microsoft.com/azure/storage/files/understanding-billing#switching-between-access-tiers)).
 
 ---
 
@@ -162,25 +199,66 @@ Azure Files supports two main protocols. We will use SMB for maximum compatibili
 
 ### Step 4.3.1: Create Configuration File Share
 
-We need a share named `skycraft-config` with a 100 GB quota. This share stores `server.properties`, allowlists, and similar configuration data that all game servers must read.
+We need a share named `skycraft-config` with a 100 GiB quota. This share stores `server.properties`, allowlists, and similar configuration data that all game servers must read.
 
 #### Option 1: Azure Portal (GUI)
 
-1. Navigate to **Storage accounts** → `prodskycraftswcsa`
-2. Select **File shares** (under Data storage)
-3. Click **+ File share**
-4. Fill in the details:
+1. In Azure Portal, search for **Storage accounts**
+2. Click the **Resources** tab
+3. Click **prodskycraftswcsa**
 
-| Field | Value             |
-| :---- | :---------------- |
-| Name  | `skycraft-config` |
-| Tier  | **Hot**           |
+**Note**: Searching for **Storage accounts** opens **Storage center | Blob Storage**; its **Resources** tab lists the storage accounts (as in Lab 4.1, Step 4.1.2).
 
-5. Click **Create**
-6. Select the new share → click **Edit quota**
-7. Set quota to **100** GB → click **Save**
+4. Under **Data storage**, select **Classic file shares**
 
-#### Option 2: Azure CLI
+**Note**: The page may open with a banner, "Action required: Windows Kerberos RC4 hardening may affect your Azure Files access". It concerns accounts that use Active Directory (Kerberos) authentication; this lab mounts with the account key, so there is nothing to do. Under **Classic file share settings**, the page lists **Identity-based access** (**Not configured**), **Default share-level permissions** (**Disabled**), **Soft delete** (**7 days**, from Lab 4.1) and **Security** (**Maximum compatibility (Recommended)**). Leave **Security** as it is: its **Maximum security** profile allows only Kerberos and AES-256-GCM, so the account key mounts of Steps 4.3.7 and 4.3.8 (NTLMv2) would be refused, and Windows clients older than Windows 11 could not connect at all ([SMB security settings](https://learn.microsoft.com/azure/storage/files/files-smb-protocol#smb-security-settings)).
+
+5. Click **+ Classic file share**
+6. On the **Basics** tab, fill in:
+
+| Field       | Value             |
+| :---------- | :---------------- |
+| Name        | `skycraft-config` |
+| Access tier | **Hot**           |
+
+**Note**: **Access tier** defaults to **Transaction optimized**; pick **Hot** (see the warning in Section 1 on changing it later). **Premium** is listed but greyed out. The tab has no quota field: you set the quota after the share is created.
+
+7. Click the **Backup** tab
+8. Uncheck **Enable backup**
+
+> [!WARNING]
+> **Enable backup** is ticked by default. Left ticked, **Create** also turns on Azure Backup for the share: it uses an existing Recovery Services vault (for example `platform-skycraft-swc-rsv`, if Lab 5.2 ran in this subscription before) or creates a new one, with a new daily policy (7:30 PM UTC, each backup kept 30 days). From then on you pay a protected-instance fee and the storage of the backup snapshots ([About Azure Files backup](https://learn.microsoft.com/azure/backup/azure-file-share-backup-overview#backup-costs)), and Azure Backup puts a delete lock on `prodskycraftswcsa` that blocks deleting any of its file shares, so this lab's cleanup fails. Backups are Lab 5.2's topic; the Az PowerShell and Bicep paths of this lab create none, and `Test-Lab.ps1` fails a protected share. If you already created a share with backup on, see Troubleshooting, Issue 6.
+
+9. Click the **Review + create** tab
+10. Click **Create**
+
+**Note**: After **Create**, the Portal opens the new share's page.
+
+11. Click **Edit quota**
+12. In the pane that opens, Edit quota, fill in:
+
+| Field       | Value |
+| :---------- | :---- |
+| Quota (GiB) | `100` |
+
+13. Click **OK**
+14. Click **Refresh**
+
+**Note**: A new share's quota is 102400 GiB (100 TiB, the most a pay-as-you-go share can hold); the pane's **Set to maximum** sets that value again. In a pay-as-you-go account the quota is only a limit: it costs nothing, and writes fail once the share is full ([Modify an Azure file share](https://learn.microsoft.com/azure/storage/files/modify-file-share)). The share's page keeps showing 102400 until you click **Refresh**.
+
+#### Option 2: Az PowerShell
+
+```powershell
+# Create the file share: Hot tier, 100 GiB quota. This creates no backup.
+New-AzRmStorageShare `
+  -ResourceGroupName "prod-skycraft-swc-rg" `
+  -StorageAccountName "prodskycraftswcsa" `
+  -Name "skycraft-config" `
+  -QuotaGiB 100 `
+  -AccessTier Hot
+```
+
+#### Option 3: Azure CLI (optional)
 
 ```bash
 # Create file share with 100GB quota
@@ -193,25 +271,14 @@ az storage share-rm create \
   --output table
 ```
 
-#### Option 3: PowerShell
-
-```powershell
-# Create file share
-New-AzRmStorageShare `
-  -ResourceGroupName "prod-skycraft-swc-rg" `
-  -StorageAccountName "prodskycraftswcsa" `
-  -Name "skycraft-config" `
-  -QuotaGiB 100 `
-  -AccessTier Hot
-```
-
-**Expected Result**: `skycraft-config` file share exists with 100 GB quota and Hot access tier.
+**Expected Result**: `skycraft-config` file share exists with 100 GiB quota and Hot access tier, and no backup.
 
 | Property    | Expected Value    |
 | :---------- | :---------------- |
 | Name        | `skycraft-config` |
-| Quota       | 100 GB            |
+| Quota       | 100 GiB           |
 | Access Tier | Hot               |
+| Backup      | Not configured    |
 
 ---
 
@@ -221,18 +288,41 @@ Create a second share `skycraft-shared` for larger game assets such as maps, tex
 
 #### Option 1: Azure Portal (GUI)
 
-1. Click **+ File share**
-2. Fill in the details:
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** (in the left menu, under **Data storage**; expand the group if it is collapsed)
+2. Click **+ Classic file share**
+3. On the **Basics** tab, fill in:
 
-| Field | Value             |
-| :---- | :---------------- |
-| Name  | `skycraft-shared` |
-| Tier  | **Hot**           |
+| Field       | Value             |
+| :---------- | :---------------- |
+| Name        | `skycraft-shared` |
+| Access tier | **Hot**           |
 
-3. Click **Create**
-4. Edit quota to **500** GB
+4. Click the **Backup** tab
+5. Uncheck **Enable backup** (ticked by default; see the warning in Step 4.3.1)
+6. Click the **Review + create** tab
+7. Click **Create**
+8. Click **Edit quota**
+9. In the pane that opens, Edit quota, fill in:
 
-#### Option 2: Azure CLI
+| Field       | Value |
+| :---------- | :---- |
+| Quota (GiB) | `500` |
+
+10. Click **OK**
+11. Click **Refresh**
+
+#### Option 2: Az PowerShell
+
+```powershell
+New-AzRmStorageShare `
+  -ResourceGroupName "prod-skycraft-swc-rg" `
+  -StorageAccountName "prodskycraftswcsa" `
+  -Name "skycraft-shared" `
+  -QuotaGiB 500 `
+  -AccessTier Hot
+```
+
+#### Option 3: Azure CLI (optional)
 
 ```bash
 # Create shared data file share with 500GB quota
@@ -245,24 +335,14 @@ az storage share-rm create \
   --output table
 ```
 
-#### Option 3: PowerShell
-
-```powershell
-New-AzRmStorageShare `
-  -ResourceGroupName "prod-skycraft-swc-rg" `
-  -StorageAccountName "prodskycraftswcsa" `
-  -Name "skycraft-shared" `
-  -QuotaGiB 500 `
-  -AccessTier Hot
-```
-
-**Expected Result**: `skycraft-shared` file share exists with 500 GB quota and Hot access tier.
+**Expected Result**: `skycraft-shared` file share exists with 500 GiB quota and Hot access tier, and no backup. The Classic file shares list shows both shares, each with access tier Hot and its quota.
 
 | Property    | Expected Value    |
 | :---------- | :---------------- |
 | Name        | `skycraft-shared` |
-| Quota       | 500 GB            |
+| Quota       | 500 GiB           |
 | Access Tier | Hot               |
+| Backup      | Not configured    |
 
 ![Create File Shares](images/step-4.3.2.png)
 
@@ -276,22 +356,39 @@ Snapshots are **read-only, point-in-time copies** of an entire file share. They 
 
 **Soft delete** adds a second safety net: if an entire file share is accidentally deleted, it can be recovered within the retention period.
 
-> **SkyCraft Choice**: We enable **14-day soft delete** because it covers two full sprint cycles — enough time for the team to notice even "silent" deletions. For snapshots, we start with manual snapshots and will automate daily snapshots via Azure Backup in Lab 5.2.
+> **SkyCraft Choice**: We raise share soft delete from Lab 4.1's 7 days to **14 days** because it covers two full sprint cycles — enough time for the team to notice even "silent" deletions. For snapshots, we take a manual snapshot here; scheduled backups come with Azure Backup in Lab 5.2, which is why Steps 4.3.1 and 4.3.2 leave **Enable backup** unticked.
 
 ### Step 4.3.3: Configure Soft Delete
 
-Protect against accidental deletions of the file share or its contents.
+Protect against accidental deletion of the file shares. Lab 4.1 already turned share soft delete on with 7 days (the **Data protection** tab of its wizard, its PowerShell and CLI blocks, or its Bicep); this step raises the retention to 14 days.
 
 #### Option 1: Azure Portal (GUI)
 
-1. Navigate to **Storage accounts** → `prodskycraftswcsa`
-2. Go to **Data storage** → **File shares**
-3. Click **Disabled** next to **Soft delete**
-4. Select **Enabled** for **Soft delete for all file shares**
-5. Set **File share retention period in days** to `14`
-6. Click **Save**
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** (in the left menu, under **Data storage**; expand the group if it is collapsed)
+2. Click **7 days** next to _Soft delete_
 
-#### Option 2: Azure CLI
+**Note**: The link next to **Soft delete** shows the current retention: **7 days** after Lab 4.1, or **Disabled** if soft delete was turned off. Click it either way. It opens the **Soft delete** pane.
+
+3. Make sure **Soft delete for all classic file shares** is enabled
+4. Fill in:
+
+| Field                                         | Value |
+| :-------------------------------------------- | :---- |
+| Classic file share retainment period in days | `14`  |
+
+5. Click **Save**
+
+#### Option 2: Az PowerShell
+
+```powershell
+Update-AzStorageFileServiceProperty `
+  -ResourceGroupName "prod-skycraft-swc-rg" `
+  -StorageAccountName "prodskycraftswcsa" `
+  -EnableShareDeleteRetentionPolicy $true `
+  -ShareRetentionDays 14
+```
+
+#### Option 3: Azure CLI (optional)
 
 ```bash
 # Enable soft delete with 14-day retention
@@ -302,20 +399,13 @@ az storage account file-service-properties update \
   --delete-retention-days 14
 ```
 
-#### Option 3: PowerShell
-
-```powershell
-Update-AzStorageFileServiceProperty `
-  -ResourceGroupName "prod-skycraft-swc-rg" `
-  -StorageAccountName "prodskycraftswcsa" `
-  -EnableShareDeleteRetentionPolicy $true `
-  -ShareRetentionDays 14
-```
-
-**Expected Result**: Soft delete is enabled with a 14-day retention window for all file shares in this storage account.
+**Expected Result**: Soft delete is enabled with a 14-day retention window for all file shares in this storage account; the **Classic file shares** page shows **Soft delete** **14 days**.
 
 > [!IMPORTANT]
-> Soft delete is a storage-account-level setting — it applies to **all** file shares, not just one. Ensure this aligns with your data governance requirements.
+> Soft delete is a storage-account-level setting — it applies to **all** file shares, not just one. A deleted share stays recoverable (**Show deleted shares** on the **Classic file shares** page lists it) and is billed for the data it holds until the retention ends. A new retention applies to shares deleted after the change; a share deleted earlier keeps the expiry it had ([Azure file share soft delete](https://learn.microsoft.com/azure/storage/files/storage-files-prevent-file-share-deletion)).
+
+> [!WARNING]
+> Do not turn soft delete off. While it is off, deleting a share deletes it, its files and its snapshots at once, with nothing to restore.
 
 ![Configure Soft Delete](images/step-4.3.3.png)
 
@@ -327,15 +417,42 @@ Before creating a snapshot, upload a test file so you can verify the snapshot-re
 
 #### Option 1: Azure Portal (GUI)
 
-1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config` → **Browse**
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** → `skycraft-config` → **Browse**
+
+**Note**: **Browse** shows **Authentication method: Access key (Switch to Microsoft Entra user account)**. Leave the access key: browsing with your Microsoft Entra account needs a file data role that this lab does not grant.
+
 2. Click **+ Add directory**
 3. Name: `common`
 4. Click **OK**
-5. **Browse** → `common`
-6. Click **Upload** → create a local text file named `config.txt` with content: `server-name=skycraft-prod-01`
-7. Upload the file
+5. On your computer, create a text file named `config.txt` that holds one line: `server-name=skycraft-prod-01`
+6. **Browse** → `common`
+7. Click **Upload**
+8. In the upload pane, choose `config.txt` on your computer and confirm the upload
 
-#### Option 2: Azure CLI
+#### Option 2: Az PowerShell
+
+```powershell
+# Get storage context (it signs requests with the account key)
+$saContext = (Get-AzStorageAccount `
+  -ResourceGroupName "prod-skycraft-swc-rg" `
+  -Name "prodskycraftswcsa").Context
+
+# Create directory
+New-AzStorageDirectory `
+  -ShareName "skycraft-config" `
+  -Path "common" `
+  -Context $saContext
+
+# Create and upload test file
+"server-name=skycraft-prod-01" | Out-File -FilePath ".\config.txt" -Encoding utf8
+Set-AzStorageFileContent `
+  -ShareName "skycraft-config" `
+  -Source ".\config.txt" `
+  -Path "common/config.txt" `
+  -Context $saContext
+```
+
+#### Option 3: Azure CLI (optional)
 
 ```bash
 # Get storage account key
@@ -361,29 +478,6 @@ az storage file upload \
   --account-key $STORAGE_KEY
 ```
 
-#### Option 3: PowerShell
-
-```powershell
-# Get storage context
-$saContext = (Get-AzStorageAccount `
-  -ResourceGroupName "prod-skycraft-swc-rg" `
-  -Name "prodskycraftswcsa").Context
-
-# Create directory
-New-AzStorageDirectory `
-  -ShareName "skycraft-config" `
-  -Path "common" `
-  -Context $saContext
-
-# Create and upload test file
-"server-name=skycraft-prod-01" | Out-File -FilePath ".\config.txt" -Encoding utf8
-Set-AzStorageFileContent `
-  -ShareName "skycraft-config" `
-  -Source ".\config.txt" `
-  -Path "common/config.txt" `
-  -Context $saContext
-```
-
 **Expected Result**: File `common/config.txt` is visible in the `skycraft-config` share.
 
 ![Upload Test File](images/step-4.3.4.png)
@@ -396,13 +490,24 @@ Snapshots are read-only point-in-time copies. Create one before any config chang
 
 #### Option 1: Azure Portal (GUI)
 
-1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config`
-2. Click **Snapshots** (under Operations)
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** → `skycraft-config`
+2. Under **Operations**, select **Snapshots**
 3. Click **+ Add snapshot**
 4. Comment: `Pre-update backup`
 5. Click **OK**
 
-#### Option 2: Azure CLI
+#### Option 2: Az PowerShell
+
+```powershell
+# -Snapshot takes a snapshot of the existing share instead of creating a share
+New-AzRmStorageShare `
+  -ResourceGroupName "prod-skycraft-swc-rg" `
+  -StorageAccountName "prodskycraftswcsa" `
+  -Name "skycraft-config" `
+  -Snapshot
+```
+
+#### Option 3: Azure CLI (optional)
 
 ```bash
 # Create a snapshot of skycraft-config
@@ -413,16 +518,9 @@ az storage share-rm snapshot \
   --output table
 ```
 
-#### Option 3: PowerShell
+**Expected Result**: A new snapshot appears in the Snapshots list with the current timestamp and, on the Portal path, the comment "Pre-update backup". A snapshot taken with Option 2 or 3 has no comment: find it by its time.
 
-```powershell
-New-AzRmStorageShareSnapshot `
-  -ResourceGroupName "prod-skycraft-swc-rg" `
-  -StorageAccountName "prodskycraftswcsa" `
-  -ShareName "skycraft-config"
-```
-
-**Expected Result**: A new snapshot appears in the Snapshots list with the current timestamp and the comment "Pre-update backup".
+**Note**: A snapshot is billed only for the data that differs from the live share and from the other snapshots, on the share's own storage meter. A share holds at most 200 snapshots, and a share that has snapshots can only be deleted together with them: this lab's cleanup deletes both.
 
 ![Create Manual Snapshot](images/step-4.3.5.png)
 
@@ -434,14 +532,42 @@ Simulate a bad config push by modifying the test file, then restore the original
 
 #### Option 1: Azure Portal (GUI)
 
-1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config` → **Browse** → `common` → select `config.txt`
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** → `skycraft-config` → **Browse** → `common` → select `config.txt`
 2. Click **Download** to save the file locally
 3. Open the downloaded file in a text editor, change content to `server-name=BROKEN`, and save
 4. Back in the Portal, click **Upload** → select the modified `config.txt` → check **Overwrite if files already exist** → **Upload**
-5. Navigate back to **Snapshots** (under Operations) → select `Pre-update backup` (the snapshot's Comment)
+5. Under **Operations**, select **Snapshots** → select `Pre-update backup` (the snapshot's Comment)
 6. Browse to `common/config.txt` → **Restore** (selecting the file opens its File properties pane)
 7. **Overwrite original file** → **OK**
 8. Download `config.txt` again and verify the content is back to `server-name=skycraft-prod-01`
+
+**Note**: The restore pane opens on **Restore as a copy and rename**, which keeps the broken file and writes the snapshot's version next to it under a new name. Choose **Overwrite original file** to roll the change back.
+
+#### Option 2: Az PowerShell
+
+```powershell
+$saContext = (Get-AzStorageAccount -ResourceGroupName "prod-skycraft-swc-rg" -Name "prodskycraftswcsa").Context
+
+# Simulate the bad config push
+"server-name=BROKEN" | Out-File -FilePath ".\config.txt" -Encoding utf8
+Set-AzStorageFileContent -ShareName "skycraft-config" -Source ".\config.txt" -Path "common/config.txt" `
+  -Context $saContext -Force
+
+# Open the newest snapshot of the share (Step 4.3.5)
+$snapshotTime = (Get-AzRmStorageShare -ResourceGroupName "prod-skycraft-swc-rg" -StorageAccountName "prodskycraftswcsa" `
+    -IncludeSnapshot | Where-Object { $_.Name -eq "skycraft-config" -and $_.SnapshotTime } |
+    Sort-Object SnapshotTime -Descending | Select-Object -First 1).SnapshotTime
+$snapshot = Get-AzStorageShare -Name "skycraft-config" -SnapshotTime $snapshotTime -Context $saContext
+
+# Copy the file from the snapshot over the live one, then read the live one back
+Get-AzStorageFileContent -ShareClient $snapshot.ShareClient -Path "common/config.txt" `
+  -Destination ".\config-snapshot.txt" -Force
+Set-AzStorageFileContent -ShareName "skycraft-config" -Source ".\config-snapshot.txt" -Path "common/config.txt" `
+  -Context $saContext -Force
+Get-AzStorageFileContent -ShareName "skycraft-config" -Path "common/config.txt" -Destination ".\config-check.txt" `
+  -Context $saContext -Force
+Get-Content ".\config-check.txt"
+```
 
 > [!TIP]
 > In production, you can restore individual files without restoring the entire share. This is much faster than full-share restore for targeted rollbacks.
@@ -456,23 +582,36 @@ Simulate a bad config push by modifying the test file, then restore the original
 
 ### Step 4.3.7: Mount on Windows
 
-Mount the `skycraft-config` share as drive letter **Z:** on a Windows machine. This simulates how the World Server VM accesses shared configuration.
+Mount the `skycraft-config` share as drive letter **Z:** on your Windows computer. This simulates how an administrator's Windows workstation reaches the shared configuration.
+
+Port 445 must be open from your computer to Azure. Test it first in PowerShell:
+
+```powershell
+Test-NetConnection -ComputerName prodskycraftswcsa.file.core.windows.net -Port 445
+```
+
+If `TcpTestSucceeded` is `False`, your network blocks SMB: skip to Step 4.3.8 and mount from a Linux VM in Azure instead (see Troubleshooting, Issue 1).
 
 #### Option 1: Azure Portal (Generate Script)
 
-1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config` → **Overview**
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** → `skycraft-config` → **Overview**
 2. Click **Connect**
-3. Select **Windows** tab
+3. Click the **Windows** tab
 4. Drive letter: **Z**
 5. Authentication method: **Storage account key**
-6. Click **Show script** → Copy and run in an elevated PowerShell terminal
+6. Click **Show Script**
+7. Copy the script and run it in a normal (not elevated) PowerShell window on your computer
+
+**Note**: The Portal asks for a normal PowerShell window, not one opened with **Run as administrator**: Windows keeps the drive letters mapped in an elevated window apart from those of your normal session, so a drive mapped as administrator does not appear in File Explorer.
+
+> [!WARNING]
+> The generated script contains the storage account key in clear text, and it saves the key in Windows Credential Manager (`cmdkey`) so the drive comes back after a restart. Anyone with the key has full access to every share, container, queue and table in the account. Do not paste the script into a chat, an issue or a screenshot; What This Lab Leaves Behind says how to remove the drive and the saved key.
 
 #### Option 2: PowerShell (Manual)
 
-```powershell
-# Test connectivity first
-Test-NetConnection -ComputerName prodskycraftswcsa.file.core.windows.net -Port 445
+Run it in a normal (not elevated) PowerShell window, as Option 1 does:
 
+```powershell
 # Mount the share as drive Z:
 $connectTestResult = Test-NetConnection `
   -ComputerName prodskycraftswcsa.file.core.windows.net -Port 445
@@ -502,36 +641,36 @@ if ($connectTestResult.TcpTestSucceeded) {
 
 ### Step 4.3.8: Mount on Linux
 
-Mount the `skycraft-config` share on a Linux VM. This simulates how the Auth Server VM accesses shared configuration.
+Mount the `skycraft-config` share on a Linux machine. This simulates how the Auth Server VM accesses shared configuration. Use Lab 3.2's `dev-skycraft-swc-auth-vm`, which you reach over SSH through Azure Bastion (Lab 2.2; Bastion is billed by the hour while it exists), or WSL2 on your computer if port 445 is open there.
 
 #### Option 1: Azure Portal (Generate Script)
 
-1. Navigate to `prodskycraftswcsa` → **File shares** → `skycraft-config` → **Overview** → **Connect**
-2. Select **Linux** tab
-3. Copy the generated script — it installs `cifs-utils` and adds the mount to `/etc/fstab`
-4. SSH into the Linux VM and execute the script
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** → `skycraft-config` → **Overview** → **Connect**
+2. Click the **Linux** tab
+3. Click **Show Script**
+4. Copy the generated script — it installs `cifs-utils`, stores the account key in a credentials file under `/etc/smbcredentials` and adds the mount to `/etc/fstab`
+5. SSH into the Linux VM and execute the script
 
-#### Option 2: Azure CLI + Bash
+#### Option 2: Bash (Manual)
+
+First read the account key on your computer with Az PowerShell; the VM has neither Az PowerShell nor the Azure CLI signed in:
+
+```powershell
+(Get-AzStorageAccountKey -ResourceGroupName "prod-skycraft-swc-rg" -Name "prodskycraftswcsa")[0].Value
+```
+
+Then, on the Linux machine, replace `<storage-account-key>` with that value:
 
 ```bash
 # Install cifs-utils (Ubuntu/Debian)
 sudo apt-get update && sudo apt-get install -y cifs-utils
 
-# Get storage key
-STORAGE_KEY=$(az storage account keys list \
-  --account-name prodskycraftswcsa \
-  --resource-group prod-skycraft-swc-rg \
-  --query "[0].value" --output tsv)
-
 # Create mount point and credentials directory
 sudo mkdir -p /mnt/skycraft-config
 sudo mkdir -p /etc/smbcredentials
 
-# Create credentials file (secure)
-sudo bash -c "cat > /etc/smbcredentials/prodskycraftswcsa.cred << EOF
-username=prodskycraftswcsa
-password=$STORAGE_KEY
-EOF"
+# Create credentials file (secure); '>' overwrites, so the file holds one username and one password
+sudo bash -c 'printf "username=prodskycraftswcsa\npassword=%s\n" "<storage-account-key>" > /etc/smbcredentials/prodskycraftswcsa.cred'
 sudo chmod 600 /etc/smbcredentials/prodskycraftswcsa.cred
 
 # Mount the share
@@ -543,6 +682,8 @@ sudo mount -t cifs \
 # Verify
 ls /mnt/skycraft-config/common/
 ```
+
+**Note**: `dir_mode=0777,file_mode=0777` lets every user on the machine read and change the mounted files, which is enough for a lab VM with one user. On a shared server, mount with `uid=`, `gid=` and narrower modes instead.
 
 **Expected Result**: The `common/config.txt` file is visible at `/mnt/skycraft-config/common/config.txt`.
 
@@ -557,8 +698,8 @@ ls /mnt/skycraft-config/common/
 
 ### Resources Created
 
-- [ ] `skycraft-config` (100 GB quota, Hot tier)
-- [ ] `skycraft-shared` (500 GB quota, Hot tier)
+- [ ] `skycraft-config` (100 GiB quota, Hot tier, no backup)
+- [ ] `skycraft-shared` (500 GiB quota, Hot tier, no backup)
 - [ ] Directory `common` with `config.txt` in `skycraft-config`
 
 ### Data Protection
@@ -578,7 +719,44 @@ ls /mnt/skycraft-config/common/
 - [ ] CostCenter = `MSDN`
 - [ ] Owner = `mbiszczanik`
 
+Run the lab's validator from the lab folder:
+
+```powershell
+./scripts/Test-Lab.ps1
+```
+
+**Expected Result**: `Validation Complete. Failures: 0`, exit code 0. It checks the account (provisioned, redundancy), share soft delete (at least 14 days), that exactly the two shares exist with their quota and the Hot tier, and that no Recovery Services vault backs up a share of the account. It does not check the directory, the file, the snapshot or a mount.
+
 **For detailed verification**, see [lab-checklist-4.3.md](lab-checklist-4.3.md)
+
+---
+
+## 📦 What This Lab Leaves Behind
+
+`tools/lab-cycle-manifest.psd1` lists no lab that depends on Lab 4.3: no later lab uses the shares. They live in `prodskycraftswcsa`, which Lab 4.1 created and whose cost Lab 4.1 lists. A pay-as-you-go share is billed for the data it holds and the operations on it, not for its quota ([Understand Azure Files billing](https://learn.microsoft.com/azure/storage/files/understanding-billing#pay-as-you-go-model)); with a few bytes in them, both shares together cost well under 0.01 USD per day. Check the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) for your own prices.
+
+| Left behind | Where | Daily cost | What it does in later labs |
+| --- | --- | --- | --- |
+| `skycraft-config` (100 GiB quota, Hot) with `common/config.txt` and the snapshot of Step 4.3.5 | `prodskycraftswcsa` | about 0 (a few bytes; quota is free) | Nothing. Lab 4.4 limits the account's firewall to `WorldSubnet` and your client IP, so a mount from another network stops working after Lab 4.4 |
+| `skycraft-shared` (500 GiB quota, Hot), empty | `prodskycraftswcsa` | 0 | Nothing |
+| File share soft delete, 14 days | `prodskycraftswcsa` | data in deleted shares is billed for 14 days | Re-running Lab 4.1's or Lab 4.2's Bicep sets it back to 7 days |
+| Drive `Z:` and the saved key (`cmdkey`) | Your Windows computer | 0 | Nothing. Remove them with `Remove-PSDrive -Name Z` (or `net use Z: /delete`) and `cmdkey /delete:prodskycraftswcsa.file.core.windows.net` |
+| The mount, `/etc/smbcredentials/prodskycraftswcsa.cred` and, from the Portal script, a line in `/etc/fstab` | The Linux machine of Step 4.3.8 | 0 | Nothing. Remove them with `sudo umount /mnt/skycraft-config`, `sudo rm /etc/smbcredentials/prodskycraftswcsa.cred` and by deleting the share's line from `/etc/fstab` |
+| **Only if Enable backup was left ticked**: a Recovery Services vault (new, or Lab 5.2's), a daily backup policy, the protected shares and the vault's delete lock on the account | `prod-skycraft-swc-rg`, or `platform-skycraft-swc-rg` for Lab 5.2's vault | a protected-instance fee plus the backup snapshots' storage | Blocks this lab's cleanup; remove it as in Troubleshooting, Issue 6 |
+
+---
+
+## 🧹 Clean Up
+
+Keep the shares if you go on to Lab 4.4: they cost next to nothing (see above). To remove what this lab added, run the lab's cleanup from the lab folder:
+
+```powershell
+./scripts/Remove-LabResource.ps1
+```
+
+It asks before it changes anything (`-WhatIf` lists the changes; `-Force` skips the question). It deletes `skycraft-config` and `skycraft-shared` **with their snapshots and every file in them**; the storage account and its soft delete setting stay. A deleted share stays recoverable, and billed, for the 14 days of soft delete. If you delete a share and want to create one with the same name again, wait a minute first: until Azure has finished the delete it answers with a conflict.
+
+While Lab 1.3's delete lock (`lock-no-delete-prod`) is on `prod-skycraft-swc-rg`, Azure refuses to delete the shares (`ScopeLocked`). The script reports each refusal as `[ERROR]` and exits 1; it does not remove the lock itself (tracked in [issue #372](https://github.com/mbiszczanik/skycraft/issues/372)). To clean up completely, remove `lock-no-delete-prod` by hand (`prod-skycraft-swc-rg` → **Locks**, under **Settings**), run the script again, wait a minute, and then create the lock again as in Lab 1.3, Step 1.3.11. Azure Backup's own delete lock on the account blocks the delete in the same way: stop the backup first (Troubleshooting, Issue 6).
 
 ---
 
@@ -606,29 +784,27 @@ ls /mnt/skycraft-config/common/
 
 **Solution**:
 
-- Regenerate keys in **Storage accounts** → **Access keys** → **Rotate key**
-- Update the stored credential: `cmdkey /delete:prodskycraftswcsa.file.core.windows.net`
+- Read the current key: in `prodskycraftswcsa`, under **Security + networking**, select **Access keys** (a key rotated in Lab 4.1, Step 4.1.13, has a new value)
+- Update the stored credential: `cmdkey /delete:prodskycraftswcsa.file.core.windows.net`, then run the mount script again
 - Sync your system clock: `w32tm /resync` (Windows) or `sudo ntpdate pool.ntp.org` (Linux)
 
 ---
 
 ### Issue 3: File share cannot be deleted
 
-**Symptom**: Deletion fails even for an empty share — Azure returns a conflict error.
+**Symptom**: Deletion fails even for an empty share — Azure returns a conflict or a lock error.
 
-**Root Cause**: Active snapshots or an active lease/handle on the share prevent deletion.
+**Root Cause**: Snapshots or open handles on the share, Lab 1.3's `lock-no-delete-prod` on the resource group (`ScopeLocked`, see Clean Up), or the delete lock Azure Backup puts on the account when it protects a share (Issue 6).
 
 **Solution**:
 
-- Delete all snapshots first (Snapshots → select all → Delete)
-- Check for active handles: **File shares** → select share → **Diagnostics** → **Open handles**
+- Delete the share together with its snapshots: `Remove-AzRmStorageShare -ResourceGroupName prod-skycraft-swc-rg -StorageAccountName prodskycraftswcsa -Name skycraft-config -Include Snapshots -Force` (the lab's cleanup does this)
+- List and close open handles (a drive still mapped on a computer keeps them open):
 
-```bash
-# Force-close open handles
-az storage share close-handle \
-  --name skycraft-config \
-  --account-name prodskycraftswcsa \
-  --close-all
+```powershell
+$saContext = (Get-AzStorageAccount -ResourceGroupName "prod-skycraft-swc-rg" -Name "prodskycraftswcsa").Context
+Get-AzStorageFileHandle -ShareName "skycraft-config" -Recursive -Context $saContext
+Close-AzStorageFileHandle -ShareName "skycraft-config" -Recursive -CloseAll -Context $saContext
 ```
 
 ---
@@ -644,7 +820,8 @@ az storage share close-handle \
 | **Missing `cifs-utils`**          | `which mount.cifs` returns nothing                                                                 | `sudo apt-get install -y cifs-utils`                                 |
 | **Duplicate credentials**         | `sudo cat /etc/smbcredentials/prodskycraftswcsa.cred` shows multiple `username=`/`password=` lines | Recreate with `>` (overwrite) instead of `>>` (append)               |
 | **SMB encryption not negotiated** | Storage has Secure Transfer Required (`EnableHttpsTrafficOnly: True`)                              | Add `vers=3.1.1,sec=ntlmssp,seal` to mount options                   |
-| **Storage firewall blocking IP**  | `curl -s https://api.ipify.org` vs `az storage account show --query networkRuleSet.ipRules`        | Add your IP: `az storage account network-rule add --ip-address <IP>` |
+| **Storage firewall blocking IP**  | `curl -s https://api.ipify.org` vs `(Get-AzStorageAccountNetworkRuleSet -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa).IpRules` | Add your IP: `Add-AzStorageAccountNetworkRule -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa -IPAddressOrRange <IP>` |
+| **Security profile without NTLMv2** | **Classic file shares** page: **Security** is not **Maximum compatibility**                      | Set **Security** back to **Maximum compatibility (Recommended)**     |
 
 **Solution** (verified on WSL2):
 
@@ -671,18 +848,51 @@ sudo mount -t cifs \
 
 **Solution**:
 
-- Increase the quota: **File shares** → select share → **Edit quota**
+- Increase the quota: on the share's page, click **Edit quota**, enter the new quota and click **OK** (in a pay-as-you-go account a larger quota costs nothing)
 - Clean up unused files or old directories
-- Check actual usage: **File shares** → select share → **Overview** → Used capacity
+- Check actual usage: **Classic file shares** → select share → **Overview** → Used capacity
 
-```bash
-# Increase quota to 200 GB
-az storage share-rm update \
-  --name skycraft-config \
-  --storage-account prodskycraftswcsa \
-  --resource-group prod-skycraft-swc-rg \
-  --quota 200
+```powershell
+# Increase quota to 200 GiB
+Update-AzRmStorageShare -ResourceGroupName "prod-skycraft-swc-rg" -StorageAccountName "prodskycraftswcsa" `
+  -Name "skycraft-config" -QuotaGiB 200
 ```
+
+---
+
+### Issue 6: Azure Backup protects a share (Enable backup was left ticked)
+
+**Symptom**: `Test-Lab.ps1` reports `[FAIL] No Azure Backup protects a file share of the account`, the share's page lists a backup under **Operations** → **Backup**, or the cleanup fails on a lock it did not expect.
+
+**Cause**: The **Backup** tab of the new share wizard was left at its default, **Enable backup** ticked (Steps 4.3.1 and 4.3.2). Azure Backup registered `prodskycraftswcsa` with a Recovery Services vault, protects the share with a daily policy and put a delete lock on the account.
+
+**Solution**: Stop the backup and delete its data, then unregister the account from the vault. In the Portal: open the vault → **Backup items** → **Azure Storage (Azure Files)** → the share → **Stop backup** → **Delete Backup Data**; then the vault's **Backup Infrastructure** → **Storage Accounts** → `prodskycraftswcsa` → **Unregister**. With Az PowerShell:
+
+```powershell
+foreach ($vault in Get-AzResource -ResourceType "Microsoft.RecoveryServices/vaults") {
+    $items = Get-AzRecoveryServicesBackupItem -BackupManagementType AzureStorage -WorkloadType AzureFiles -VaultId $vault.ResourceId |
+        Where-Object { $_.ContainerName -like "*;prod-skycraft-swc-rg;prodskycraftswcsa" }
+    foreach ($item in $items) {
+        Disable-AzRecoveryServicesBackupProtection -Item $item -VaultId $vault.ResourceId -RemoveRecoveryPoints -Force
+    }
+    if ($items) {
+        $container = Get-AzRecoveryServicesBackupContainer -ContainerType AzureStorage -FriendlyName "prodskycraftswcsa" -VaultId $vault.ResourceId
+        Unregister-AzRecoveryServicesBackupContainer -Container $container -VaultId $vault.ResourceId -Force
+    }
+}
+```
+
+Afterwards, check three things. Under **Settings**, **Locks** of `prodskycraftswcsa`: delete a lock that Azure Backup created if one is still there (not Lab 1.3's `lock-no-delete-prod`, which sits on the resource group). The soft delete of Step 4.3.3: when it unregisters an account whose share retention is exactly 14 days, Azure Backup turns share soft delete off ([Azure Backup soft delete for Azure Files](https://learn.microsoft.com/azure/backup/soft-delete-azure-file-share#frequently-asked-questions-azure-backup-soft-delete-for-azure-files)), so repeat Step 4.3.3 if it shows **Disabled**. And if the wizard created a new vault, delete it when it holds no backup item any more (it is not Lab 5.2's `platform-skycraft-swc-rsv`).
+
+---
+
+### Issue 7: A share's access tier is Transaction optimized
+
+**Symptom**: `Test-Lab.ps1` reports `[FAIL] File share 'skycraft-config' access tier is Hot` with `Actual: TransactionOptimized`.
+
+**Cause**: **Access tier** on the wizard's **Basics** tab was left at its default.
+
+**Solution**: On the share's page, click **Change tier**, select **Hot** and click **Apply**. With Az PowerShell: `Update-AzRmStorageShare -ResourceGroupName prod-skycraft-swc-rg -StorageAccountName prodskycraftswcsa -Name skycraft-config -AccessTier Hot`. After a change, the tier cannot be changed again for 24 hours (see Section 1).
 
 ---
 
@@ -728,7 +938,7 @@ az storage share-rm update \
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: A **quota** is a configurable, per-share limit that restricts how much data a single file share can consume (e.g., 100 GB). It is a hard cap — writes fail when reached. A **storage account capacity limit** is the total storage available across all shares, blobs, queues, and tables in the account (up to 5 PiB for standard accounts). Quotas are a governance tool to prevent any one share from monopolizing account capacity.
+   **Answer**: A **quota** is a configurable, per-share limit that restricts how much data a single file share can consume (e.g., 100 GB). It is a hard cap — writes fail when reached. In a pay-as-you-go account it costs nothing by itself; in a provisioned account the quota is the provisioned size you pay for. A **storage account capacity limit** is the total storage available across all shares, blobs, queues, and tables in the account (up to 5 PiB for standard accounts). Quotas are a governance tool to prevent any one share from monopolizing account capacity.
    </details>
 
 6. **When should you choose Azure Files over Azure Blob Storage?**
@@ -745,12 +955,12 @@ az storage share-rm update \
    Choose Blob Storage when you need object storage with REST API access, lifecycle management, or CDN integration (e.g., distributing game client patches to players).
    </details>
 
-7. **What happens to existing snapshots if you change the access tier of a file share from Hot to Cool?**
+7. **What does it cost to change the access tier of a file share from Hot to Cool, and how are its snapshots billed?**
 
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: Existing snapshots **retain the tier they were taken at**. Only **new data** written after the tier change is stored at the Cool tier rate. Each snapshot is billed at the tier of the share at the time the snapshot was taken. This means you could temporarily have snapshots at Hot pricing and current data at Cool pricing. To fully transition, you would need to delete old Hot-tier snapshots after taking a new snapshot at the Cool tier.
+   **Answer**: Moving a share to a cooler tier is billed as one write transaction of the cooler tier per file in the share (moving to a hotter tier from Cool also adds a data retrieval charge per GiB), and after a change the tier cannot be changed again for 24 hours, at most five times in 30 days. Snapshots have no line of their own on a pay-as-you-go bill: their differential size counts against the same **Data Stored** meter as the live share ([Understand Azure Files billing](https://learn.microsoft.com/azure/storage/files/understanding-billing#pay-as-you-go-snapshots)).
    </details>
 
 ---
@@ -758,6 +968,9 @@ az storage share-rm update \
 ## 📚 Additional Resources
 
 - [Azure Files overview](https://learn.microsoft.com/azure/storage/files/storage-files-introduction)
+- [Create an Azure classic file share](https://learn.microsoft.com/azure/storage/files/create-classic-file-share)
+- [Understand Azure Files billing](https://learn.microsoft.com/azure/storage/files/understanding-billing)
+- [About Azure Files backup](https://learn.microsoft.com/azure/backup/azure-file-share-backup-overview)
 - [Troubleshoot Azure Files mounting on Windows](https://learn.microsoft.com/azure/storage/files/storage-troubleshoot-windows-file-connection-problems)
 - [Troubleshoot Azure Files mounting on Linux](https://learn.microsoft.com/azure/storage/files/storage-troubleshoot-linux-file-connection-problems)
 - [Overview of Azure Files identity-based authentication](https://learn.microsoft.com/azure/storage/files/storage-files-active-directory-overview)
@@ -781,23 +994,23 @@ az storage share-rm update \
 
 **What You Accomplished:**
 
-✅ Provisioned two SMB file shares with quota and tier configuration
-✅ Configured soft delete (14 days) for accidental deletion protection
+✅ Provisioned two SMB file shares with quota and tier configuration, without Azure Backup
+✅ Raised soft delete to 14 days for accidental deletion protection
 ✅ Created a manual snapshot and validated file-level restore
 ✅ Mounted file shares on Windows (drive letter) and Linux (CIFS mount)
-✅ Tested cross-platform access via SMB 3.0
+✅ Tested cross-platform access via SMB 3.x
 
 **Infrastructure Deployed**:
 
-| Resource        | Name              | Configuration         |
-| :-------------- | :---------------- | :-------------------- |
-| File Share      | `skycraft-config` | 100 GB, Hot, Snapshot |
-| File Share      | `skycraft-shared` | 500 GB, Hot           |
-| Data Protection | Soft Delete       | 14-day retention      |
+| Resource        | Name              | Configuration                     |
+| :-------------- | :---------------- | :-------------------------------- |
+| File Share      | `skycraft-config` | 100 GiB, Hot, snapshot, no backup |
+| File Share      | `skycraft-shared` | 500 GiB, Hot, no backup           |
+| Data Protection | Soft Delete       | 14-day retention                  |
 
 **Skills Gained**:
 
-- Azure Files provisioning via Portal, CLI, and PowerShell
+- Azure Files provisioning via Portal, Az PowerShell and the Azure CLI
 - Snapshot creation and file-level restore
 - SMB mount on Windows and Linux
 - Port 445 connectivity troubleshooting
@@ -808,4 +1021,4 @@ az storage share-rm update \
 
 ---
 
-_Note: The file shares are now ready for use by SkyCraft VMs. In Lab 4.4, you will restrict access to these shares using network rules and private endpoints to ensure only authorized VMs can connect._
+_Note: The file shares are now ready for use by SkyCraft VMs. In Lab 4.4, you will restrict access to the production account with network rules, so only the allowed subnet and your own IP address can reach these shares._

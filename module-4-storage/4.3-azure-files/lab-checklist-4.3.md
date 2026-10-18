@@ -7,16 +7,19 @@
 - [ ] Share name: `skycraft-config`
 - [ ] Storage account: `prodskycraftswcsa`
 - [ ] Resource group: `prod-skycraft-swc-rg`
-- [ ] Quota: **100 GB**
-- [ ] Access Tier: **Hot**
+- [ ] Quota: **100 GiB** (Step 4.3.1, **Edit quota**)
+- [ ] Access Tier: **Hot** (not the wizard's default, Transaction optimized)
+- [ ] Azure Backup: **not configured** (**Enable backup** unticked on the wizard's **Backup** tab)
 
 ### skycraft-shared
 
 - [ ] Share name: `skycraft-shared`
 - [ ] Storage account: `prodskycraftswcsa`
 - [ ] Resource group: `prod-skycraft-swc-rg`
-- [ ] Quota: **500 GB**
+- [ ] Quota: **500 GiB** (Step 4.3.2, **Edit quota**)
 - [ ] Access Tier: **Hot**
+- [ ] Azure Backup: **not configured**
+- [ ] No other file share in `prodskycraftswcsa`
 
 ---
 
@@ -31,8 +34,8 @@
 
 ### Soft Delete
 
-- [ ] Soft delete **enabled** for file shares
-- [ ] Retention period: **14 days**
+- [ ] Soft delete **enabled** for file shares (on since Lab 4.1)
+- [ ] Retention period: **14 days** (Step 4.3.3; Lab 4.1 set 7)
 
 ### Snapshots
 
@@ -43,8 +46,9 @@
 
 ## ✅ Connectivity Verification
 
-- [ ] Mount script generated via Azure Portal (Windows and/or Linux)
+- [ ] Mount script generated via Azure Portal (Windows and/or Linux) and run on Windows in a normal, not elevated, PowerShell window
 - [ ] Port 445 connectivity tested to `prodskycraftswcsa.file.core.windows.net`
+- [ ] Storage account key kept out of screenshots, chats and issues
 
 ---
 
@@ -59,7 +63,15 @@
 
 ## 🔍 Validation Commands
 
-Run these Az PowerShell commands to validate your lab setup:
+Run the lab's validator from the lab folder; it checks the account, soft delete, both shares (quota and tier) and that no Recovery Services vault backs up a share of the account:
+
+```powershell
+./scripts/Test-Lab.ps1
+# Expected Output (last line):
+# Validation Complete. Failures: 0
+```
+
+Or run these Az PowerShell commands to validate your lab setup:
 
 ### Login and Set Context
 
@@ -101,7 +113,21 @@ Get-AzStorageFileServiceProperty `
 # 14      True
 ```
 
-### 3. Verify Existing Snapshots
+### 3. Verify That No Azure Backup Protects the Shares
+
+```powershell
+$account = Get-AzStorageAccount -ResourceGroupName "prod-skycraft-swc-rg" -Name "prodskycraftswcsa"
+foreach ($vault in Get-AzResource -ResourceType "Microsoft.RecoveryServices/vaults") {
+    Get-AzRecoveryServicesBackupItem -BackupManagementType AzureStorage -WorkloadType AzureFiles -VaultId $vault.ResourceId |
+        Where-Object { $_.SourceResourceId -eq $account.Id -or $_.ContainerName -like "*;prod-skycraft-swc-rg;prodskycraftswcsa" } |
+        Select-Object @{ n = 'Vault'; e = { $vault.Name } }, Name, ProtectionState
+}
+
+# Expected Output:
+# (nothing - no vault protects a share of prodskycraftswcsa)
+```
+
+### 4. Verify Existing Snapshots
 
 ```powershell
 Get-AzRmStorageShare `
@@ -118,7 +144,7 @@ Get-AzRmStorageShare `
 # skycraft-config  2026-02-10 07:15:00 +00:00
 ```
 
-### 4. Verify Tags
+### 5. Verify Tags
 
 ```powershell
 (Get-AzStorageAccount -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa).Tags
@@ -132,7 +158,7 @@ Get-AzRmStorageShare `
 # Project     SkyCraft
 ```
 
-### 5. Verify Port 445 Connectivity
+### 6. Verify Port 445 Connectivity
 
 ```powershell
 Test-NetConnection `
@@ -150,8 +176,8 @@ Test-NetConnection `
 
 | Component        | Resource Name     | Quota  | Access Tier | Protection              | Status |
 | :--------------- | :---------------- | :----- | :---------- | :---------------------- | :----- |
-| **Config Share** | `skycraft-config` | 100 GB | Hot         | Snapshots + Soft Delete | ✅     |
-| **Asset Share**  | `skycraft-shared` | 500 GB | Hot         | Soft Delete             | ✅     |
+| **Config Share** | `skycraft-config` | 100 GiB | Hot        | Snapshots + Soft Delete, no backup | ✅     |
+| **Asset Share**  | `skycraft-shared` | 500 GiB | Hot        | Soft Delete, no backup             | ✅     |
 | **Soft Delete**  | Account-level     | N/A    | N/A         | 14-day retention        | ✅     |
 
 ---
@@ -212,6 +238,8 @@ Test-NetConnection `
 **All Verification Items Complete**:
 
 - [ ] All file shares created with proper naming conventions
+- [ ] Neither share protected by Azure Backup (that is Lab 5.2)
+- [ ] `./scripts/Test-Lab.ps1` reports `Failures: 0`
 - [ ] All tags applied correctly (Project, Environment, CostCenter, Owner)
 - [ ] All validation commands executed successfully
 - [ ] All reflection questions answered
@@ -231,7 +259,7 @@ You've successfully completed **Lab 4.3: Configure Azure Files**!
 **What You Built**:
 
 - ✅ Centralized SMB storage for game server configuration
-- ✅ High-capacity shared asset storage (500 GB)
+- ✅ High-capacity shared asset storage (500 GiB)
 - ✅ Robust data protection with soft delete (14 days) and snapshots
 - ✅ Cross-platform mount capability (Windows + Linux)
 

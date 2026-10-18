@@ -14,7 +14,7 @@ By completing this module, you will be able to:
 
 - **Create and configure** storage accounts with appropriate redundancy and access tiers
 - **Implement blob storage** with containers, versioning, soft delete, and lifecycle management
-- **Configure Azure Files** with file shares, snapshots, and identity-based access
+- **Configure Azure Files** with file shares, quotas and access tiers, snapshots and soft delete, and SMB mounts on Windows and Linux
 - **Secure storage** using SAS tokens, stored access policies, firewalls, and encryption
 - **Manage data** using Azure Storage Explorer and AzCopy
 - **Apply governance** tags and monitor storage costs
