@@ -331,7 +331,7 @@ Back in **Create Advisor Alerts**, the new action group `skycraft-advisor-ag` is
 
 10. Click **Create alert**
 
-**Expected Result**: The Portal confirms with the notification **Successfully created alert** ("Successfully created alert for Azure Advisor"), and **Alerts (Preview)** lists `Advisor-Cost-Recommendations`. From now on, you'll receive alerts when Advisor identifies new cost-saving opportunities.
+**Expected Result**: The Portal confirms with the notification **Successfully created alert** ("Successfully created alert for Azure Advisor"), and **Alerts (Preview)** lists `Advisor-Cost-Recommendations`. The action group has no notification or action, so the alert sends you no email or other message when Advisor finds a new cost-saving opportunity; to be notified, add an email notification to `skycraft-advisor-ag`.
 
 ![Configure Advisor Alerts](./images/step-1.3.7b.png)
 
@@ -390,6 +390,10 @@ Now assign the second tag policy of this step, `Inherit-Project-Tag`. It copies 
 
 - **Create a Managed Identity**: checked
 - **Type of Managed Identity**: System assigned managed identity
+
+> [!WARNING]
+> Check the next field before you click **Create**: an assignment's identity location cannot be changed after the assignment is created ([Azure Policy assignment structure, Identity](https://learn.microsoft.com/azure/governance/policy/concepts/assignment-structure#identity)). To fix a wrong region, you would have to delete `Inherit-Project-Tag` and assign it again.
+
 - **System assigned identity location**: Sweden Central
 
 **Note**: A Modify policy changes resources, so its assignment needs a managed identity. When you click **Create**, the Portal also gives this identity, by default and without asking, the role that the policy definition lists: **Contributor** on your whole subscription. This opens access: the identity can change any resource in the subscription. Leave it as the Portal sets it, because the optional remediation task in Step 1.3.10 needs it; adding the tag to a new resource needs no role. `scripts/Remove-LabResource.ps1` removes the role together with the assignment. If your account cannot assign roles (Contributor alone, see Prerequisites), the Portal says so after **Create**; the assignment is still created and still tags new resources.
@@ -492,10 +496,13 @@ The list is a multi-select with a filter box; with both regions ticked, the fiel
 
 5. In the left menu, click **Compliance**
 6. Click **Inherit-Project-Tag**
+
+**Note**: **Compliance** lists an assignment by its display name. If you created the assignment with the Bicep path, `scripts/Invoke-LabGovernance.ps1` or the PowerShell or CLI commands of Step 1.3.8, its display name is `Inherit Project Tag from Resource Group`: click that one instead.
+
 7. Click **Create remediation task**
 8. Click **Remediate**
 
-The **New remediation task** page opens with `Inherit-Project-Tag` already selected, so **Remediate** is the only thing to click there.
+The **New remediation task** page opens with that assignment already selected, so **Remediate** is the only thing to click there.
 
 **Expected Result**: The Portal confirms that the remediation task was created. Once the task has finished (a few minutes), `Advisor-Cost-Recommendations` carries `Project` = `SkyCraft`, and after the next compliance evaluation `Inherit-Project-Tag` shows it as compliant.
 
@@ -897,7 +904,7 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 | `lock-no-delete-prod`, `lock-no-delete-platform` | prod and platform resource groups | 0 | Block every delete in those groups, including a later lab's cleanup, until the locks are removed |
 | Tags on the three resource groups | dev, prod and platform resource groups | 0 | The `Project` tag that `Inherit-Project-Tag` copies to new resources |
 | `SkyCraft-Monthly-Budget`, `SkyCraft-Prod-Monthly` | Subscription, prod resource group | 0 | Send emails at their thresholds; they never stop a deployment |
-| `Advisor-Cost-Recommendations` and its action group `skycraft-advisor-ag` | prod resource group | 0 | Send an email when Advisor has a new cost recommendation |
+| `Advisor-Cost-Recommendations` and its action group `skycraft-advisor-ag` | prod resource group | 0 | Nothing reaches you: Step 1.3.7 creates the action group without any notification or action, so a new Advisor cost recommendation sends no email or other message |
 
 `scripts/Remove-LabResource.ps1` removes all of these except the tags, whichever path created them. It removes the locks first, and the identity's role before its assignment. Run it before Lab 1.2's cleanup deletes the resource groups, because the locks block that delete.
 
