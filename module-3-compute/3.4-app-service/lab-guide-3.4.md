@@ -82,9 +82,9 @@ The Az PowerShell blocks in Steps 3.4.4, 3.4.6 and 3.4.7 deploy the dashboard an
 
 Steps without an Az PowerShell block in this guide: 3.4.1, 3.4.2, 3.4.5, 3.4.8-3.4.11, and the startup command in Step 3.4.4. Their scripted path is the Bicep. Steps without a Bicep counterpart: 3.4.3 (a file on your computer), 3.4.4, 3.4.6 and 3.4.7 (deploying content and swapping are operations, not resources), 3.4.12 (reference only) and 3.4.13 (automatic backups need no configuration).
 
-The Bicep also sets what the Portal's create wizard leaves without being asked: **Always on** on, **Session affinity** and **Session affinity proxy** off, basic authentication for FTP and SCM publishing off, and **Outbound internet traffic** through the VNet checked.
+The Bicep also sets what the Portal's create wizard leaves without being asked: **Always on** on, **Session affinity** and **Session affinity proxy** off, and basic authentication for FTP and SCM publishing off. It also sets the VNet integration with **Outbound internet traffic** checked, which the Portal path adds in Step 3.4.10.
 
-The paths differ only in names and tags, which `Test-Lab.ps1` does not check: the Portal names the autoscale setting `dev-skycraft-swc-asp-Autoscale-<number>`, the Bicep `dev-skycraft-swc-asp-autoscale`; `Test-Lab.ps1` and `Remove-LabResource.ps1` find it through the plan it scales. In the Portal, the slot and the autoscale setting get only the `Project` tag (from `Inherit-Project-Tag`); the Bicep gives them all four SkyCraft tags.
+The paths are meant to differ only in names and tags, which `Test-Lab.ps1` does not check (the slot's settings on the Portal path are still to be confirmed in a live walk): the Portal names the autoscale setting `dev-skycraft-swc-asp-Autoscale-<number>`, the Bicep `dev-skycraft-swc-asp-autoscale`; `Test-Lab.ps1` and `Remove-LabResource.ps1` find it through the plan it scales. In the Portal, the slot and the autoscale setting get only the `Project` tag (from `Inherit-Project-Tag`); the Bicep gives them all four SkyCraft tags.
 
 ---
 
@@ -568,24 +568,25 @@ In the Portal, the same order:
 5. Under **Settings**, select **Networking**
 6. Under **Outbound traffic configuration**, click the value of _Virtual network integration_ (it names `AppServiceSubnet`)
 7. Click **Disconnect**, and confirm
-8. In Azure Portal, search for **App Services**
-9. Click **dev-skycraft-swc-app01**
-10. Under **Settings**, select **Networking**
-11. Under **Outbound traffic configuration**, click the value of _Virtual network integration_ (it names `AppServiceSubnet`)
-12. Click **Disconnect**, and confirm
-13. Under **Settings**, select **Networking**, and verify:
+8. Verify that the slot's **Networking** page shows _Virtual network integration_: **Not configured**
+9. In Azure Portal, search for **App Services**
+10. Click **dev-skycraft-swc-app01**
+11. Under **Settings**, select **Networking**
+12. Under **Outbound traffic configuration**, click the value of _Virtual network integration_ (it names `AppServiceSubnet`)
+13. Click **Disconnect**, and confirm
+14. Under **Settings**, select **Networking**, and verify:
     - _Virtual network integration_: **Not configured**
-14. Click **Overview**, click **Delete**, and confirm. The `staging` slot is deleted with the app.
-15. In Azure Portal, search for **Resource groups**
-16. Click **dev-skycraft-swc-rg**
-17. Check **Show hidden types**
-18. Click the plan's autoscale setting: `dev-skycraft-swc-asp-Autoscale-<number>` if you built the lab in the Portal, `dev-skycraft-swc-asp-autoscale` if you deployed the Bicep
-19. Click **Delete**, and confirm
-20. In Azure Portal, search for **App Service plans**
-21. Click **dev-skycraft-swc-asp**
-22. Click **Delete**, and confirm
+15. Click **Overview**, click **Delete**, and confirm. The `staging` slot is deleted with the app.
+16. In Azure Portal, search for **Resource groups**
+17. Click **dev-skycraft-swc-rg**
+18. Check **Show hidden types**
+19. Click the plan's autoscale setting: `dev-skycraft-swc-asp-Autoscale-<number>` if you built the lab in the Portal, `dev-skycraft-swc-asp-autoscale` if you deployed the Bicep
+20. Click **Delete**, and confirm
+21. In Azure Portal, search for **App Service plans**
+22. Click **dev-skycraft-swc-asp**. If it is not listed, App Service deleted the plan with its last app in item 15, and the list ends here
+23. Click **Delete**, and confirm
 
-**Note**: Do not go on to item 14 until both **Networking** pages show _Virtual network integration_ as **Not configured**: the app's (item 13) and the slot's (items 1-5).
+**Note**: Do not go on to item 15 until both **Networking** pages show _Virtual network integration_ as **Not configured**: the slot's (item 8) and the app's (item 14). An integration left in place keeps a link on `AppServiceSubnet` that blocks Lab 2.1's subnet from being changed or deleted.
 
 The script does not delete the resource group or the VNet: Lab 2.1 owns them.
 
