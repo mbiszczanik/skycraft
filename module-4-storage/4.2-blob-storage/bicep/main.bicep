@@ -3,7 +3,7 @@ SUMMARY: Lab 4.2 - Implement Azure Blob Storage
 DESCRIPTION: Configures the production and development storage accounts from Lab 4.1 with containers, blob versioning and lifecycle management rules via the Azure Verified Module for storage accounts
 EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
-VERSION: 2.0.0
+VERSION: 2.1.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -67,12 +67,16 @@ var varContainersProd = [
   { name: 'game-logs', publicAccess: 'None' }
 ]
 
-// Development container - created private; allowBlobPublicAccess is blocked at subscription level
+// Development container - created private; the account keeps allowBlobPublicAccess false (guide Step 4.2.12)
 var varContainersDev = [
   { name: 'public-demo', publicAccess: 'None' }
 ]
 
-// Lifecycle management - production only
+// Lifecycle management - production only. Each rule is limited to its own container by a prefix
+// filter: without 'game-logs/', tier-game-logs would delete every block blob in the account after
+// 365 days, game assets and player backups included (#356). Test-Lab.ps1 fails a rule without it.
+// daysAfterLastTierChangeGreaterThan is the Portal's "Skip blobs that have been rehydrated in the
+// last [7] days", ticked by default on an archive block, so all three paths write it.
 var varLifecycleRules = [
   {
     enabled: true
@@ -83,12 +87,13 @@ var varLifecycleRules = [
         baseBlob: {
           tierToCool: { daysAfterModificationGreaterThan: 30 }
           tierToCold: { daysAfterModificationGreaterThan: 90 }
-          tierToArchive: { daysAfterModificationGreaterThan: 180 }
+          tierToArchive: { daysAfterModificationGreaterThan: 180, daysAfterLastTierChangeGreaterThan: 7 }
           delete: { daysAfterModificationGreaterThan: 365 }
         }
       }
       filters: {
         blobTypes: ['blockBlob']
+        prefixMatch: ['game-logs/']
       }
     }
   }
@@ -99,7 +104,7 @@ var varLifecycleRules = [
     definition: {
       actions: {
         baseBlob: {
-          tierToArchive: { daysAfterModificationGreaterThan: 7 }
+          tierToArchive: { daysAfterModificationGreaterThan: 7, daysAfterLastTierChangeGreaterThan: 7 }
         }
       }
       filters: {

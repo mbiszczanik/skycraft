@@ -1,17 +1,20 @@
 <#
 .SYNOPSIS
-    Pester 5 tests: the Lab 4.2 validator reads unset dev versioning as the Portal default, off.
+    Pester 5 tests: the Lab 4.2 validator accepts what every path builds, reads unset dev
+    versioning as the Portal default, and fails a lifecycle rule that is not limited to its prefix.
 
 .DESCRIPTION
-    Regression cover for issue #355. Test-Lab.ps1 required the dev account's
-    IsVersioningEnabled to equal $false. The Bicep writes $false, but a dev account created in
-    the Portal never sets the property, so it reads $null and a learner who followed every step
-    failed "DEV: Versioning disabled" (10/11, exit 1). These tests run the real Test-Lab.ps1 in a
-    child pwsh against a generated stub of the Az commands it calls, and assert that:
+    Regression cover for issues #355 and #356. These tests run the real Test-Lab.ps1 in a child
+    pwsh against a generated stub of the Az commands it calls, and assert that:
 
-      1. Unset ($null, the Portal path) and $false (the Bicep path) both pass, and exit 0.
-      2. Versioning on fails, counted, and exits 1.
-      3. A blob service read that fails is a failure that says why, not an "off".
+      1. Unset dev versioning ($null, the Portal path) and $false (the Bicep path) both pass, and
+         exit 0 (#355). Versioning on fails, counted, and exits 1.
+      2. A blob service read that fails is a failure that says why, not an "off".
+      3. A 'tier-game-logs' rule without a prefix filter fails: it applies to every block blob in
+         the account, and its delete action would remove game assets and player backups after
+         365 days (#356). So does a rule with a prefix outside 'game-logs/', and an
+         'archive-backups' rule without 'player-backups/'.
+      4. Production soft delete that is off fails.
 
     No subscription is needed, and none is used: tests/Support/LabScriptStub.psm1 (issue #112)
     imports the real modules first, the stub last, and aborts the child with exit 99 unless every
@@ -23,7 +26,7 @@
 .NOTES
     Project: SkyCraft
     Lab: 4.2 - Blob Storage
-    Issue: #355
+    Issue: #355, #356
 #>
 
 #Requires -Version 7.0
@@ -44,9 +47,14 @@ BeforeAll {
         'Get-AzStorageAccountManagementPolicy'
     )
 
-    # Both accounts as the guide leaves them; only the dev blob service's versioning varies:
+    # Both accounts as the guide leaves them; one property varies per scenario:
     #   SKYCRAFT_STUB_DEVVERSIONING   'null' (never set, the Portal path), 'false' (the Bicep
     #                                 path), 'true' (turned on), or 'fail' (the read fails)
+    #   SKYCRAFT_STUB_LOGSPREFIX      the prefixes of tier-game-logs, comma-separated; 'none' for
+    #                                 a rule without a prefix filter (the Portal's "Apply rule to
+    #                                 all blobs in your storage account")
+    #   SKYCRAFT_STUB_BACKUPSPREFIX   the same for archive-backups
+    #   SKYCRAFT_STUB_PRODSOFTDELETE  'on' (7 days, blobs and containers) or 'off' (blobs off)
     $script:StubBody = @'
 function Get-AzStorageAccount {
     [CmdletBinding()]
@@ -61,7 +69,14 @@ function Get-AzStorageAccount {
 function Get-AzStorageBlobServiceProperty {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$StorageAccountName, [Parameter(ValueFromRemainingArguments)]$Rest)
-    if ($StorageAccountName -like 'prod*') { return [pscustomobject]@{ IsVersioningEnabled = $true } }
+    if ($StorageAccountName -like 'prod*') {
+        $blobOn = $env:SKYCRAFT_STUB_PRODSOFTDELETE -ne 'off'
+        return [pscustomobject]@{
+            IsVersioningEnabled            = $true
+            DeleteRetentionPolicy          = [pscustomobject]@{ Enabled = $blobOn; Days = $(if ($blobOn) { 7 } else { $null }) }
+            ContainerDeleteRetentionPolicy = [pscustomobject]@{ Enabled = $true; Days = 7 }
+        }
+    }
     switch ($env:SKYCRAFT_STUB_DEVVERSIONING) {
         'null'  { return [pscustomobject]@{ IsVersioningEnabled = $null } }
         'false' { return [pscustomobject]@{ IsVersioningEnabled = $false } }
@@ -82,7 +97,23 @@ function Get-AzStorageContainer {
 function Get-AzStorageAccountManagementPolicy {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$StorageAccountName, [Parameter(ValueFromRemainingArguments)]$Rest)
-    [pscustomobject]@{ Rules = @([pscustomobject]@{ Name = 'tier-game-logs' }, [pscustomobject]@{ Name = 'archive-backups' }) }
+    function New-StubRule([string]$RuleName, [string]$Prefixes) {
+        # The Portal's "Apply rule to all blobs" writes no prefixMatch: Az reads it as $null.
+        $prefixMatch = if ($Prefixes -eq 'none') { $null } else { [string[]]($Prefixes -split ',') }
+        [pscustomobject]@{
+            Name       = $RuleName
+            Enabled    = $true
+            Definition = [pscustomobject]@{
+                Filters = [pscustomobject]@{ BlobTypes = @('blockBlob'); PrefixMatch = $prefixMatch }
+            }
+        }
+    }
+    [pscustomobject]@{
+        Rules = @(
+            New-StubRule 'tier-game-logs' $env:SKYCRAFT_STUB_LOGSPREFIX
+            New-StubRule 'archive-backups' $env:SKYCRAFT_STUB_BACKUPSPREFIX
+        )
+    }
 }
 '@
 
@@ -90,10 +121,17 @@ function Get-AzStorageAccountManagementPolicy {
         param(
             [pscustomobject]$Stub,
             [ValidateSet('null', 'false', 'true', 'fail')]
-            [string]$DevVersioning
+            [string]$DevVersioning = 'null',
+            [string]$LogsPrefix = 'game-logs/',
+            [string]$BackupsPrefix = 'player-backups/',
+            [ValidateSet('on', 'off')]
+            [string]$ProdSoftDelete = 'on'
         )
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
-            SKYCRAFT_STUB_DEVVERSIONING = $DevVersioning
+            SKYCRAFT_STUB_DEVVERSIONING  = $DevVersioning
+            SKYCRAFT_STUB_LOGSPREFIX     = $LogsPrefix
+            SKYCRAFT_STUB_BACKUPSPREFIX  = $BackupsPrefix
+            SKYCRAFT_STUB_PRODSOFTDELETE = $ProdSoftDelete
         }
         return [pscustomobject]@{
             ExitCode = $run.ExitCode
@@ -106,11 +144,17 @@ function Get-AzStorageAccountManagementPolicy {
         -Body $script:StubBody -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
-    $script:PortalUnset = Invoke-ValidatorScript -Stub $script:Stub -DevVersioning 'null'
-    $script:BicepFalse  = Invoke-ValidatorScript -Stub $script:Stub -DevVersioning 'false'
-    $script:TurnedOn    = Invoke-ValidatorScript -Stub $script:Stub -DevVersioning 'true'
-    $script:ReadFails   = Invoke-ValidatorScript -Stub $script:Stub -DevVersioning 'fail'
-    $script:AllRuns     = @($script:PortalUnset, $script:BicepFalse, $script:TurnedOn, $script:ReadFails)
+    $script:PortalUnset    = Invoke-ValidatorScript -Stub $script:Stub -DevVersioning 'null'
+    $script:BicepFalse     = Invoke-ValidatorScript -Stub $script:Stub -DevVersioning 'false'
+    $script:TurnedOn       = Invoke-ValidatorScript -Stub $script:Stub -DevVersioning 'true'
+    $script:ReadFails      = Invoke-ValidatorScript -Stub $script:Stub -DevVersioning 'fail'
+    $script:LogsUnfiltered = Invoke-ValidatorScript -Stub $script:Stub -LogsPrefix 'none'
+    $script:LogsOutside    = Invoke-ValidatorScript -Stub $script:Stub -LogsPrefix 'game-logs/,game-assets/'
+    $script:LogsNarrower   = Invoke-ValidatorScript -Stub $script:Stub -LogsPrefix 'game-logs/server'
+    $script:BackupsNone    = Invoke-ValidatorScript -Stub $script:Stub -BackupsPrefix 'none'
+    $script:SoftDeleteOff  = Invoke-ValidatorScript -Stub $script:Stub -ProdSoftDelete 'off'
+    $script:AllRuns        = @($script:PortalUnset, $script:BicepFalse, $script:TurnedOn, $script:ReadFails,
+        $script:LogsUnfiltered, $script:LogsOutside, $script:LogsNarrower, $script:BackupsNone, $script:SoftDeleteOff)
 }
 
 AfterAll {
@@ -133,13 +177,29 @@ Describe 'Lab 4.2 Test-Lab.ps1 - test harness' {
     }
 }
 
+Describe 'Lab 4.2 Test-Lab.ps1 - the state every path builds' {
+
+    It 'passes the full end state and checks every container, soft delete and both rules' {
+        $run = $script:PortalUnset
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Tests Passed: 23 / 23'
+        $run.Output | Should -Match 'SUCCESS: Lab 4.2 compliant!'
+        foreach ($name in 'game-assets', 'player-backups', 'server-config', 'game-logs') {
+            $run.Output | Should -Match "PROD: '$name' is PRIVATE \.\.\. PASS"
+        }
+        $run.Output | Should -Match 'PROD: Soft delete for blobs on, 7 days \.\.\. PASS'
+        $run.Output | Should -Match 'PROD: Soft delete for containers on, 7 days \.\.\. PASS'
+        $run.Output | Should -Match "PROD: 'tier-game-logs' rule limited to 'game-logs/' \.\.\. PASS \(Prefix game-logs/\)"
+        $run.Output | Should -Match "PROD: 'archive-backups' rule limited to 'player-backups/' \.\.\. PASS \(Prefix player-backups/\)"
+    }
+}
+
 Describe 'Lab 4.2 Test-Lab.ps1 - unset dev versioning is the Portal default, off (#355)' {
 
     It 'passes a dev account whose versioning the Portal never set' {
         $run = $script:PortalUnset
         $run.ExitCode | Should -Be 0 -Because "a learner who took the Portal path built what the guide asks for; output was:`n$($run.Output)"
         $run.Output | Should -Match 'DEV: Versioning disabled \(scope check\) \.\.\. PASS \(Versioning not set \(Portal default: off\)\)'
-        $run.Output | Should -Match 'Tests Passed: 11 / 11'
     }
 
     It 'passes a dev account whose versioning the Bicep set to false' {
@@ -152,7 +212,7 @@ Describe 'Lab 4.2 Test-Lab.ps1 - unset dev versioning is the Portal default, off
         $run = $script:TurnedOn
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match 'DEV: Versioning disabled \(scope check\) \.\.\. FAIL \(Versioning ON\)'
-        $run.Output | Should -Match 'Tests Passed: 10 / 11'
+        $run.Output | Should -Match 'Tests Passed: 22 / 23'
     }
 
     It 'fails a blob service read that fails, says why, and still reaches the summary' {
@@ -160,5 +220,42 @@ Describe 'Lab 4.2 Test-Lab.ps1 - unset dev versioning is the Portal default, off
         $run.ExitCode | Should -Be 1 -Because "a read that failed is not an 'off'; output was:`n$($run.Output)"
         $run.Output | Should -Match 'DEV: Versioning disabled \(scope check\) \.\.\. FAIL \(Could not read the blob service: stub lookup failure'
         $run.Output | Should -Match 'Test Summary'
+    }
+}
+
+Describe 'Lab 4.2 Test-Lab.ps1 - each lifecycle rule stays on its own container (#356)' {
+
+    It 'fails tier-game-logs without a prefix filter, says it applies to every blob, and exits 1' {
+        $run = $script:LogsUnfiltered
+        $run.ExitCode | Should -Be 1 -Because "an unfiltered rule deletes every block blob in the account after 365 days; output was:`n$($run.Output)"
+        $run.Output | Should -Match "PROD: 'tier-game-logs' rule limited to 'game-logs/' \.\.\. FAIL \(No prefix filter: the rule applies to every blob in the account"
+        $run.Output | Should -Match 'Tests Passed: 22 / 23'
+    }
+
+    It 'fails tier-game-logs with a prefix outside game-logs/, and names it' {
+        $run = $script:LogsOutside
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "PROD: 'tier-game-logs' rule limited to 'game-logs/' \.\.\. FAIL \(Prefix filter game-assets/ reaches outside 'game-logs/'\)"
+    }
+
+    It 'passes tier-game-logs with a narrower prefix inside game-logs/' {
+        $run = $script:LogsNarrower
+        $run.ExitCode | Should -Be 0 -Because "a prefix inside the container still keeps the rule there; output was:`n$($run.Output)"
+    }
+
+    It 'fails archive-backups without a prefix filter' {
+        $run = $script:BackupsNone
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "PROD: 'archive-backups' rule limited to 'player-backups/' \.\.\. FAIL \(No prefix filter"
+    }
+}
+
+Describe 'Lab 4.2 Test-Lab.ps1 - production soft delete' {
+
+    It 'fails blob soft delete that is off, and exits 1' {
+        $run = $script:SoftDeleteOff
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'PROD: Soft delete for blobs on, 7 days \.\.\. FAIL \(Off\)'
+        $run.Output | Should -Match 'PROD: Soft delete for containers on, 7 days \.\.\. PASS'
     }
 }
