@@ -127,6 +127,8 @@ function Get-MgContext {
         TenantId = '00000000-0000-0000-0000-000000000000'
         Account  = 'stub-admin@contoso.example'
         AppName  = $null
+        # Every scope the lab's scripts request, so the context is reused (#273).
+        Scopes   = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All')
     }
 }
 
@@ -446,5 +448,9 @@ Describe 'Lab 1.1 Test-Lab.ps1 - signs in with the scopes the lab already consen
         $scopes = @(($logged[0] -replace '^Connect-MgGraph:Scopes=', '') -split ',' | Sort-Object)
         # Exactly these: the Read.All scopes it used to ask for are consented nowhere else in the lab.
         $scopes | Should -Be @('Directory.ReadWrite.All', 'Group.ReadWrite.All', 'User.ReadWrite.All')
+    }
+
+    It 'reuses a context that holds those scopes instead of signing in again (#273)' {
+        $script:AllPass.Calls | Should -Not -Contain 'Connect-MgGraph' -Because "the stub's context holds every scope the lab requests; calls were: $($script:AllPass.Calls -join ', ')"
     }
 }

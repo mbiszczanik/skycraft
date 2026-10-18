@@ -18,15 +18,21 @@
     configured, half configured, not configured at all, and not configured in a session that cannot
     prompt - are pinned here.
 
-    The three copies of the decision are asserted identical rather than factored into a shared
-    module: docs/powershell-standards.md 7.3 requires every lab folder to stay readable on its
-    own.
+    The copies of the decision are asserted identical rather than factored into a shared module:
+    docs/powershell-standards.md 7.3 requires every lab folder to stay readable on its own. Lab
+    1.2's New-LabRoleAssignment.ps1 reads Lab 1.1's users through Graph and carries a fourth copy
+    (issue #273), so it is held to the same tests.
 
     Issue #242 adds two more. Connect-MgGraph can return without an error and without a context
     (a delegated sign-in for scopes the account never consented to), so Connect-LabGraph - lifted
     the same way, with the Graph commands replaced by plain functions - must throw on an empty
     context rather than return it. And the validator must ask only for scopes the setup and
     cleanup scripts ask for too, so the consent the lab already has covers it.
+
+    Issue #273 adds the last case of the reuse path: a signed-in delegated context is reused only
+    when its scopes cover every scope the script requests (a ReadWrite scope covers its Read
+    counterpart); otherwise the script signs in again with the scopes it needs. An app-only
+    context is reused as before.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Lab11-Graph-Auth.Tests.ps1
@@ -41,7 +47,14 @@ BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     $script:LabRoot  = Join-Path $script:RepoRoot 'module-1-identities-governance/1.1-entra-users-groups/scripts'
 
-    $script:LabScriptName = @('New-LabUser.ps1', 'Test-Lab.ps1', 'Remove-LabResource.ps1')
+    # Every script that signs in to Microsoft Graph, by file name (unique across the two labs).
+    $script:LabScriptPath = [ordered]@{
+        'New-LabUser.ps1'           = Join-Path $script:LabRoot 'New-LabUser.ps1'
+        'Test-Lab.ps1'              = Join-Path $script:LabRoot 'Test-Lab.ps1'
+        'Remove-LabResource.ps1'    = Join-Path $script:LabRoot 'Remove-LabResource.ps1'
+        'New-LabRoleAssignment.ps1' = Join-Path $script:RepoRoot 'module-1-identities-governance/1.2-rbac/scripts/New-LabRoleAssignment.ps1'
+    }
+    $script:LabScriptName = @($script:LabScriptPath.Keys)
 
     function Get-TopLevelFunctionAst {
         param([string]$Path)
@@ -57,11 +70,11 @@ BeforeAll {
 
     $script:FunctionByScript = @{}
     foreach ($name in $script:LabScriptName) {
-        $script:FunctionByScript[$name] = Get-TopLevelFunctionAst -Path (Join-Path $script:LabRoot $name)
+        $script:FunctionByScript[$name] = Get-TopLevelFunctionAst -Path $script:LabScriptPath[$name]
     }
 
     # The decision under test comes from New-LabUser.ps1; the parity Describe below is what makes
-    # that a statement about all three scripts.
+    # that a statement about all four scripts.
     $planAst = $script:FunctionByScript['New-LabUser.ps1'] |
         Where-Object { $_.Name -eq 'Get-LabGraphAuthPlan' }
     if (-not $planAst) { throw 'New-LabUser.ps1 does not define Get-LabGraphAuthPlan.' }
@@ -91,29 +104,32 @@ BeforeAll {
     $script:EmptyEnv = Get-EnvFixture
 }
 
-Describe 'Lab 1.1 Graph sign-in - the three scripts share one decision' {
+Describe 'Module 1 Graph sign-in - the four scripts share one decision' {
 
     It "'<name>' defines Get-LabGraphAuthPlan and Connect-LabGraph" -ForEach @(
         @{ name = 'New-LabUser.ps1' }, @{ name = 'Test-Lab.ps1' }, @{ name = 'Remove-LabResource.ps1' }
+        @{ name = 'New-LabRoleAssignment.ps1' }
     ) {
         $defined = @($script:FunctionByScript[$name].Name)
         $defined | Should -Contain 'Get-LabGraphAuthPlan'
         $defined | Should -Contain 'Connect-LabGraph'
     }
 
-    It 'ships byte-identical copies of <function> in all three scripts' -ForEach @(
+    It 'ships byte-identical copies of <function> in all four scripts' -ForEach @(
         @{ function = 'Get-LabGraphAuthPlan' }, @{ function = 'Connect-LabGraph' }
     ) {
         $text = foreach ($name in $script:LabScriptName) {
             ($script:FunctionByScript[$name] | Where-Object { $_.Name -eq $function }).Extent.Text -replace "`r`n", "`n"
         }
+        @($text).Count | Should -Be 4
         ($text | Sort-Object -Unique).Count | Should -Be 1 -Because 'a lab folder is self-contained (7.3), so the copies must not drift'
     }
 
     It "'<name>' calls Connect-MgGraph only from inside Connect-LabGraph" -ForEach @(
         @{ name = 'New-LabUser.ps1' }, @{ name = 'Test-Lab.ps1' }, @{ name = 'Remove-LabResource.ps1' }
+        @{ name = 'New-LabRoleAssignment.ps1' }
     ) {
-        $path = Join-Path $script:LabRoot $name
+        $path = $script:LabScriptPath[$name]
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null)
 
         $calls = $ast.FindAll({
@@ -131,20 +147,22 @@ Describe 'Lab 1.1 Graph sign-in - the three scripts share one decision' {
 
     It "'<name>' no longer installs the Microsoft.Graph meta-module behind the learner's back" -ForEach @(
         @{ name = 'New-LabUser.ps1' }, @{ name = 'Test-Lab.ps1' }, @{ name = 'Remove-LabResource.ps1' }
+        @{ name = 'New-LabRoleAssignment.ps1' }
     ) {
         # #Requires already blocks the script when a submodule is missing, so the old
         # 'Install-Module Microsoft.Graph -Force' block could only ever fire when the submodules
         # were installed correctly - installing ~40 modules, for minutes, for nothing.
-        $text = Get-Content -Raw -LiteralPath (Join-Path $script:LabRoot $name)
+        $text = Get-Content -Raw -LiteralPath $script:LabScriptPath[$name]
         $text | Should -Not -Match 'Install-Module'
     }
 
     It "'<name>' declares every Graph submodule it uses" -ForEach @(
-        @{ name = 'New-LabUser.ps1';        required = @('Microsoft.Graph.Identity.DirectoryManagement', 'Microsoft.Graph.Identity.SignIns') }
-        @{ name = 'Test-Lab.ps1';           required = @('Microsoft.Graph.Identity.DirectoryManagement') }
-        @{ name = 'Remove-LabResource.ps1'; required = @('Microsoft.Graph.Identity.DirectoryManagement') }
+        @{ name = 'New-LabUser.ps1';           required = @('Microsoft.Graph.Identity.DirectoryManagement', 'Microsoft.Graph.Identity.SignIns') }
+        @{ name = 'Test-Lab.ps1';              required = @('Microsoft.Graph.Identity.DirectoryManagement') }
+        @{ name = 'Remove-LabResource.ps1';    required = @('Microsoft.Graph.Identity.DirectoryManagement') }
+        @{ name = 'New-LabRoleAssignment.ps1'; required = @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Identity.DirectoryManagement') }
     ) {
-        $head = (Get-Content -LiteralPath (Join-Path $script:LabRoot $name) -TotalCount 60) -join "`n"
+        $head = (Get-Content -LiteralPath $script:LabScriptPath[$name] -TotalCount 60) -join "`n"
         foreach ($module in $required) {
             $head | Should -Match ([regex]::Escape($module))
         }
@@ -158,7 +176,7 @@ Describe 'Lab 1.1 Graph sign-in - one consent covers all three scripts (#242)' {
         function Get-RequestedScope {
             param([string]$Name)
 
-            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:LabRoot $Name), [ref]$null, [ref]$null)
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:LabScriptPath[$Name], [ref]$null, [ref]$null)
             $calls = @($ast.FindAll({
                 param($node)
                 $node -is [System.Management.Automation.Language.CommandAst] -and
@@ -180,17 +198,23 @@ Describe 'Lab 1.1 Graph sign-in - one consent covers all three scripts (#242)' {
 
         $script:SetupScope    = Get-RequestedScope -Name 'New-LabUser.ps1'
         $script:CleanupScope  = Get-RequestedScope -Name 'Remove-LabResource.ps1'
-        $script:ValidateScope = Get-RequestedScope -Name 'Test-Lab.ps1'
+        $script:RequestedScope = @{
+            'Test-Lab.ps1'              = Get-RequestedScope -Name 'Test-Lab.ps1'
+            'New-LabRoleAssignment.ps1' = Get-RequestedScope -Name 'New-LabRoleAssignment.ps1'
+        }
     }
 
-    It 'Test-Lab.ps1 requests scopes' {
-        $script:ValidateScope | Should -Not -BeNullOrEmpty
+    It '<name> requests scopes' -ForEach @(@{ name = 'Test-Lab.ps1' }, @{ name = 'New-LabRoleAssignment.ps1' }) {
+        $script:RequestedScope[$name] | Should -Not -BeNullOrEmpty
     }
 
-    It 'Test-Lab.ps1 requests only scopes that New-LabUser.ps1 and Remove-LabResource.ps1 request too' {
-        # A scope only the validator asks for is a consent the lab's own setup never gave: in a
-        # tenant where it is missing, Connect-MgGraph returned no context and no prompt (#242).
-        foreach ($scope in $script:ValidateScope) {
+    It '<name> requests only scopes that New-LabUser.ps1 and Remove-LabResource.ps1 request too' -ForEach @(
+        @{ name = 'Test-Lab.ps1' }, @{ name = 'New-LabRoleAssignment.ps1' }
+    ) {
+        # A scope only a reader asks for is a consent the lab's own setup never gave: in a tenant
+        # where it is missing, Connect-MgGraph returned no context and no prompt (#242). And a
+        # context Lab 1.1's setup left in the session covers it, so it is reused (#273).
+        foreach ($scope in $script:RequestedScope[$name]) {
             $script:SetupScope   | Should -Contain $scope -Because "New-LabUser.ps1 must already have consented to $scope"
             $script:CleanupScope | Should -Contain $scope -Because "Remove-LabResource.ps1 must already have consented to $scope"
         }
@@ -207,9 +231,16 @@ Describe 'Connect-LabGraph - a sign-in that leaves no Graph context is a failed 
 
         # Plain functions in place of the SDK and of the plan, scoped to this Describe. Get-MgContext
         # returns $script:ContextBefore until Connect-MgGraph has run, $script:ContextAfter after.
+        # Connect-MgGraph also keeps the scopes it was asked for, in $script:ConnectScopes.
         function Get-LabGraphAuthPlan { $script:Plan }
         function Get-MgContext { if ($script:Connected) { $script:ContextAfter } else { $script:ContextBefore } }
-        function Connect-MgGraph { $script:Connected = $true }
+        function Connect-MgGraph {
+            [CmdletBinding()]
+            param([string[]]$Scopes, [Parameter(ValueFromRemainingArguments)]$Rest)
+            $null = $Rest
+            $script:Connected     = $true
+            $script:ConnectScopes = $Scopes
+        }
         function Disconnect-MgGraph { }
 
         $script:InteractivePlan = [pscustomobject]@{
@@ -229,6 +260,7 @@ Describe 'Connect-LabGraph - a sign-in that leaves no Graph context is a failed 
     BeforeEach {
         $script:Plan          = $script:InteractivePlan
         $script:Connected     = $false
+        $script:ConnectScopes = $null
         $script:ContextBefore = $null
         $script:ContextAfter  = $null
     }
@@ -263,8 +295,8 @@ Describe 'Connect-LabGraph - a sign-in that leaves no Graph context is a failed 
         $context.AppName | Should -Be 'SkyCraft-Lab-Automation'
     }
 
-    It 'still reuses a signed-in context without calling Connect-MgGraph' {
-        $script:ContextBefore = [pscustomobject]@{ TenantId = $script:TenantId; Account = 'admin@contoso.example'; AppName = $null }
+    It 'still reuses a signed-in context that holds the requested scopes, without calling Connect-MgGraph' {
+        $script:ContextBefore = [pscustomobject]@{ TenantId = $script:TenantId; Account = 'admin@contoso.example'; AppName = $null; Scopes = $script:Scope }
         $context = Connect-LabGraph -Scope $script:Scope
         $context.Account     | Should -Be 'admin@contoso.example'
         $script:Connected    | Should -BeFalse
@@ -289,6 +321,137 @@ Describe 'Connect-LabGraph - a sign-in that leaves no Graph context is a failed 
         $script:ContextBefore = [pscustomobject]@{ TenantId = $script:TenantId; Account = $null; AppName = $null }
         { Connect-LabGraph -Scope $script:Scope } | Should -Throw '*sign-in did not complete*'
         $script:Connected | Should -BeTrue
+    }
+}
+
+Describe 'Connect-LabGraph - a context is reused only when its scopes cover the request (#273)' {
+
+    BeforeAll {
+        # The same lifting and the same plain functions as the Describe above.
+        $connectAst = $script:FunctionByScript['New-LabUser.ps1'] |
+            Where-Object { $_.Name -eq 'Connect-LabGraph' }
+        . ([scriptblock]::Create($connectAst.Extent.Text))
+
+        function Get-LabGraphAuthPlan { $script:Plan }
+        function Get-MgContext { if ($script:Connected) { $script:ContextAfter } else { $script:ContextBefore } }
+        function Connect-MgGraph {
+            [CmdletBinding()]
+            param([string[]]$Scopes, [Parameter(ValueFromRemainingArguments)]$Rest)
+            $null = $Rest
+            $script:Connected     = $true
+            $script:ConnectScopes = $Scopes
+        }
+        function Disconnect-MgGraph { $script:Disconnected = $true }
+
+        # What New-LabUser.ps1 requests: writes, a Read scope and a scope with no Read/ReadWrite pair.
+        $script:SetupScope = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All')
+
+        function Get-DelegatedContextFixture {
+            param([string[]]$Scopes, [string]$AuthType = 'Delegated')
+            [pscustomobject]@{ TenantId = $script:TenantId; Account = 'admin@contoso.example'; AppName = 'Microsoft Graph Command Line Tools'; AuthType = $AuthType; Scopes = $Scopes }
+        }
+    }
+
+    BeforeEach {
+        $script:Plan = [pscustomobject]@{
+            Mode             = 'Interactive'
+            Reason           = 'stub interactive plan'
+            TenantId         = $null
+            ConnectParameter = @{ Scopes = $script:SetupScope; ErrorAction = 'Stop' }
+        }
+        $script:Connected     = $false
+        $script:Disconnected  = $false
+        $script:ConnectScopes = $null
+        $script:ContextBefore = $null
+        # What a successful sign-in leaves: the requested scopes.
+        $script:ContextAfter  = Get-DelegatedContextFixture -Scopes $script:SetupScope
+    }
+
+    It 'signs in again, with the requested scopes, when the context lacks a write scope (the #273 repro)' {
+        # Connect-MgGraph -Scopes User.Read.All, then New-LabUser.ps1: the context is signed in
+        # but cannot write, and reusing it failed later with a 403.
+        $script:ContextBefore = Get-DelegatedContextFixture -Scopes @('User.Read.All')
+
+        $context = Connect-LabGraph -Scope $script:SetupScope 6>$null
+
+        $script:Connected     | Should -BeTrue -Because 'a context that cannot write must not be reused'
+        $script:ConnectScopes | Should -Be $script:SetupScope
+        $context.Scopes       | Should -Be $script:SetupScope
+    }
+
+    It 'signs in again when the context lacks only <case>' -ForEach @(
+        @{ case = 'User.Invite.All, which has no Read counterpart'; scopes = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All') }
+        @{ case = 'Group.ReadWrite.All, held as Group.Read.All';     scopes = @('User.ReadWrite.All', 'Group.Read.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All') }
+    ) {
+        $script:ContextBefore = Get-DelegatedContextFixture -Scopes $scopes
+        $null = Connect-LabGraph -Scope $script:SetupScope 6>$null
+        $script:Connected | Should -BeTrue
+    }
+
+    It 'names the scopes the context lacks before it signs in again' {
+        $script:ContextBefore = Get-DelegatedContextFixture -Scopes @('User.Read.All')
+        $message = Connect-LabGraph -Scope $script:SetupScope 6>&1 | Where-Object { $_ -is [System.Management.Automation.InformationRecord] } | Out-String
+        $message | Should -Match 'lacks User\.ReadWrite\.All, Group\.ReadWrite\.All, Directory\.ReadWrite\.All, Domain\.Read\.All, User\.Invite\.All'
+    }
+
+    It 'reuses a context whose scopes are exactly the requested ones' {
+        $script:ContextBefore = Get-DelegatedContextFixture -Scopes $script:SetupScope
+        $context = Connect-LabGraph -Scope $script:SetupScope
+        $script:Connected | Should -BeFalse
+        $context.Account  | Should -Be 'admin@contoso.example'
+    }
+
+    It 'reuses a context whose ReadWrite scopes cover the requested Read scopes' {
+        # Test-Lab.ps1 run after New-LabUser.ps1, or a Lab 1.2 reader after Lab 1.1's setup.
+        $script:ContextBefore = Get-DelegatedContextFixture -Scopes @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.ReadWrite.All', 'User.Invite.All', 'openid', 'profile')
+        $null = Connect-LabGraph -Scope @('User.Read.All', 'Group.Read.All', 'Directory.Read.All', 'Domain.Read.All', 'User.Invite.All')
+        $script:Connected | Should -BeFalse
+    }
+
+    It 'compares scope names without regard to case' {
+        $script:ContextBefore = Get-DelegatedContextFixture -Scopes @($script:SetupScope | ForEach-Object { $_.ToLowerInvariant() })
+        $null = Connect-LabGraph -Scope $script:SetupScope
+        $script:Connected | Should -BeFalse
+    }
+
+    It 'does not read a Read scope as covering its ReadWrite counterpart' {
+        $script:ContextBefore = Get-DelegatedContextFixture -Scopes @('User.Read.All', 'Group.Read.All', 'Directory.Read.All', 'Domain.Read.All', 'User.Invite.All')
+        $null = Connect-LabGraph -Scope $script:SetupScope 6>$null
+        $script:Connected | Should -BeTrue
+    }
+
+    It 'does not read ReadBasic or another scope sharing the prefix as covering' {
+        $script:ContextBefore = Get-DelegatedContextFixture -Scopes @('User.ReadBasic.All', 'User.ReadWrite')
+        $null = Connect-LabGraph -Scope @('User.Read.All') 6>$null
+        $script:Connected | Should -BeTrue
+    }
+
+    It 'reuses an app-only context whatever its scopes, as before (<case>)' -ForEach @(
+        @{ case = 'AuthType AppOnly';             context = @{ TenantId = '11111111-1111-1111-1111-111111111111'; Account = $null; AppName = 'SkyCraft-Lab-Automation'; AuthType = 'AppOnly'; Scopes = @('User.Read.All') } }
+        @{ case = 'no account and no AuthType';   context = @{ TenantId = '11111111-1111-1111-1111-111111111111'; Account = $null; AppName = 'SkyCraft-Lab-Automation'; Scopes = $null } }
+    ) {
+        # An app-only context holds the app's application permissions; signing in again with
+        # -Scopes cannot add to them.
+        $script:ContextBefore = [pscustomobject]$context
+        $result = Connect-LabGraph -Scope $script:SetupScope
+        $script:Connected | Should -BeFalse
+        $result.AppName   | Should -Be 'SkyCraft-Lab-Automation'
+    }
+
+    It 'still prefers a configured service principal over any cached context' {
+        $script:Plan = [pscustomobject]@{
+            Mode             = 'ClientSecret'
+            Reason           = 'stub app-only plan'
+            TenantId         = $script:TenantId
+            ConnectParameter = @{ TenantId = $script:TenantId; ErrorAction = 'Stop' }
+        }
+        $script:ContextBefore = Get-DelegatedContextFixture -Scopes $script:SetupScope
+        $script:ContextAfter  = [pscustomobject]@{ TenantId = $script:TenantId; Account = $null; AppName = 'SkyCraft-Lab-Automation' }
+
+        $null = Connect-LabGraph -Scope $script:SetupScope 6>$null
+
+        $script:Disconnected | Should -BeTrue
+        $script:Connected    | Should -BeTrue
     }
 }
 

@@ -59,10 +59,10 @@ param()
 # different account from the one that administers Entra ID - consuming them would sign Graph in as
 # the wrong principal, silently. See TROUBLESHOOTING.md for how to set these from a secret store.
 #
-# Duplicated verbatim in New-LabUser.ps1, Test-Lab.ps1 and Remove-LabResource.ps1 rather than
-# factored into a shared helper: docs/powershell-standards.md 7.3 requires every lab folder to be
-# readable on its own, and tests/Lab11-Graph-Auth.Tests.ps1 asserts that the three
-# copies do not drift apart.
+# Duplicated verbatim in New-LabUser.ps1, Test-Lab.ps1 and Remove-LabResource.ps1, and in Lab
+# 1.2's New-LabRoleAssignment.ps1, which reads Lab 1.1's users, rather than factored into a shared
+# helper: docs/powershell-standards.md 7.3 requires every lab folder to be readable on its own,
+# and tests/Lab11-Graph-Auth.Tests.ps1 asserts that the four copies do not drift apart.
 function Get-LabGraphAuthPlan {
     [CmdletBinding()]
     param(
@@ -216,6 +216,20 @@ function Connect-LabGraph {
     # context reused below and the one a sign-in leaves.
     $isSignedIn = { param($context) [bool]($context -and $context.TenantId -and ($context.Account -or $context.AppName)) }
 
+    # The requested scopes a delegated context does not hold (issue #273). A context left in the
+    # session by an earlier `Connect-MgGraph -Scopes User.Read.All`, or by another tool, is signed
+    # in but cannot write: reused as is, the script failed later with a 403 on its first write. A
+    # ReadWrite scope covers its Read counterpart (User.ReadWrite.All covers User.Read.All), as it
+    # does in Microsoft Graph; the comparison ignores case, as scope names do.
+    $missingScope = {
+        param($context, [string[]]$requested)
+        $granted = @($context.Scopes | ForEach-Object { [string]$_ })
+        @($requested | Where-Object {
+            $readWrite = $_ -replace '^([^.]+)\.Read(?=\.|$)', '$1.ReadWrite'
+            ($granted -notcontains $_) -and ($granted -notcontains $readWrite)
+        })
+    }
+
     $plan = Get-LabGraphAuthPlan -Scope $Scope -TenantId $TenantId
 
     if ($plan.Mode -eq 'Blocked') { throw $plan.Reason }
@@ -223,10 +237,18 @@ function Connect-LabGraph {
     if ($plan.Mode -eq 'Interactive') {
         # Reuse a signed-in context, which is what a learner running the lab expects. Note this is
         # only reached when no service principal is configured: an unattended run never gets here.
-        # A partial one is not reused: the sign-in below replaces it.
+        # A partial one is not reused: the sign-in below replaces it. A delegated one is reused
+        # only when its scopes cover every scope this script requests; an app-only one (no
+        # account) holds the app's application permissions, which a new sign-in with -Scopes
+        # cannot add to, so it is reused as before.
         $existingContext = Get-MgContext
         if ((& $isSignedIn $existingContext) -and (-not $plan.TenantId -or $existingContext.TenantId -eq $plan.TenantId)) {
-            return $existingContext
+            $isAppOnly = ("$($existingContext.AuthType)" -eq 'AppOnly') -or (-not $existingContext.Account)
+            $missing = @(if (-not $isAppOnly) { & $missingScope $existingContext $Scope })
+            if ($missing.Count -eq 0) {
+                return $existingContext
+            }
+            Write-Host "  -> The Microsoft Graph context in this session lacks $($missing -join ', ') - signing in again with the scopes this script requests." -ForegroundColor Yellow
         }
     }
     elseif (Get-MgContext) {
@@ -246,6 +268,31 @@ function Connect-LabGraph {
     }
 
     return $context
+}
+
+# --- The users' domain (issues #193, #237) --------------------------------------------------
+# Lab 1.1 creates its users on the tenant's INITIAL *.onmicrosoft.com domain, the one the guide's
+# '<name>@[yourtenant].onmicrosoft.com' means. Not the default domain: in a tenant whose default
+# is a custom domain, that names users the guide never creates. And no guess when the tenant
+# lists no initial domain: a guessed domain creates, checks, assigns or deletes users nobody
+# meant. Every Module 1 script that builds a Lab 1.1 user's address picks the domain with this
+# function, given the tenant's domains as Get-MgDomain (or GET /v1.0/domains) returns them:
+# New-LabUser.ps1, Test-Lab.ps1 and Remove-LabResource.ps1 here, New-LabRoleAssignment.ps1 and
+# Deploy-Bicep.ps1 in Lab 1.2. The copies are byte-identical, for the reason given above
+# Get-LabGraphAuthPlan, and tests/Module1-Initial-Domain.Tests.ps1 holds them together.
+function Select-LabInitialDomain {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowNull()]
+        [object[]]$Domain
+    )
+
+    $initial = @($Domain | Where-Object { $_ -and $_.IsInitial -eq $true } | ForEach-Object { [string]$_.Id } | Where-Object { $_ })
+    if ($initial.Count -eq 0) { throw 'the tenant lists no domain marked IsInitial' }
+    return $initial[0]
 }
 
 $ErrorActionPreference = 'Stop'
@@ -275,12 +322,11 @@ catch {
     Exit-Lab -FailureCount 1
 }
 
-# Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain, the one the guide's
-# '<name>@[yourtenant].onmicrosoft.com' means (issue #193). Not the default domain, and no guess
-# when the lookup fails - a guessed domain reports users the learner did create as missing.
+# Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain (Select-LabInitialDomain
+# above). Not the default domain, and no guess when the lookup fails - a guessed domain reports
+# users the learner did create as missing.
 try {
-    $domain = Get-MgDomain -ErrorAction Stop | Where-Object { $_.IsInitial } | Select-Object -First 1 -ExpandProperty Id
-    if (-not $domain) { throw 'the tenant lists no domain marked IsInitial' }
+    $domain = Select-LabInitialDomain -Domain @(Get-MgDomain -ErrorAction Stop)
     Write-Host "Initial domain: $domain" -ForegroundColor Gray
 }
 catch {

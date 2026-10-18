@@ -30,19 +30,19 @@ This guide addresses common issues encountered while setting up or running the S
 
 ### Lab 1.1: "Microsoft Graph sign-in did not complete"
 
-**Symptoms**: `New-LabUser.ps1`, `Test-Lab.ps1` or `Remove-LabResource.ps1` in Lab 1.1 stop right after "Checking Microsoft Graph connection..." with `[ERROR] Failed to connect to Microsoft Graph: Microsoft Graph sign-in did not complete ...` and exit 1. No sign-in or consent prompt appeared.
+**Symptoms**: `New-LabUser.ps1`, `Test-Lab.ps1` or `Remove-LabResource.ps1` in Lab 1.1, or `New-LabRoleAssignment.ps1` in Lab 1.2, stop right after "Checking Microsoft Graph connection..." with `[ERROR] Failed to connect to Microsoft Graph: Microsoft Graph sign-in did not complete ...` and exit 1. No sign-in or consent prompt appeared.
 
 **Cause**: `Connect-MgGraph` returned without an error but also without a signed-in context. A delegated sign-in for scopes the account has never consented to can do exactly that. Before the scripts checked for it, they printed `Connected to Tenant:  as` with empty values and every Graph call after it failed with "Authentication needed" (issue #242).
 
 **Solution**:
 
-1.  Interactive sign-in: all three scripts request `User.ReadWrite.All`, `Group.ReadWrite.All` and `Directory.ReadWrite.All` (`New-LabUser.ps1` adds `Domain.Read.All` and `User.Invite.All`), so one consent covers the whole lab. Since the scripts showed no prompt, sign in with a device code instead - its sign-in and consent happen in a browser you open yourself - using the full set `New-LabUser.ps1` requests:
+1.  Interactive sign-in: all four scripts request `User.ReadWrite.All`, `Group.ReadWrite.All` and `Directory.ReadWrite.All` (`New-LabUser.ps1` adds `Domain.Read.All` and `User.Invite.All`), so one consent covers Lab 1.1 and Lab 1.2's role assignment script. Since the scripts showed no prompt, sign in with a device code instead - its sign-in and consent happen in a browser you open yourself - using the full set `New-LabUser.ps1` requests:
 
     ```powershell
     Connect-MgGraph -UseDeviceCode -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All'
     ```
 
-    Open the address it prints, enter the code, accept the consent, then re-run the script: it reuses that context. Where the tenant requires admin consent, a Global Administrator runs the same command once and ticks **Consent on behalf of your organization**. `New-LabUser.ps1 -DemoMode` requests the same scopes and creates nothing, so it is another way to see whether the consent is in place.
+    Open the address it prints, enter the code, accept the consent, then re-run the script: it reuses that context, because its scopes cover what every Module 1 script requests. A context whose scopes do not cover the script's (for example one left by `Connect-MgGraph -Scopes User.Read.All`) is not reused: the script names the scopes it lacks and signs in again with the ones it needs (issue #273). Where the tenant requires admin consent, a Global Administrator runs the same command once and ticks **Consent on behalf of your organization**. `New-LabUser.ps1 -DemoMode` requests the same scopes and creates nothing, so it is another way to see whether the consent is in place.
 2.  App-only sign-in (`SKYCRAFT_GRAPH_*` set): less likely, since a principal missing an application permission usually still gets a token and fails later with "Insufficient privileges". Still, check that the app registration holds the application permissions listed in [Creating the Lab 1.1 service principal](#creating-the-lab-11-service-principal) and that admin consent was granted for them.
 
 ### Lab 1.1 hangs at "Checking Microsoft Graph connection..."
@@ -51,11 +51,11 @@ This guide addresses common issues encountered while setting up or running the S
 
 **Cause**: `Connect-MgGraph -Scopes ...` binds the **delegated** parameter set, which signs a *person* in. When the cached token needs a refresh that the broker cannot complete silently, the SDK falls back to a prompt — and a run with no console has nobody to answer it. Turning WAM off does not help; the prompt simply moves.
 
-**If you are running the lab by hand** — which is how SkyCraft runs Lab 1.1 today — answer the prompt. It is a real sign-in and the scripts wait for it on purpose. If no prompt appears at all, the browser handoff failed rather than the token: check that a default browser is set, or sign in first with `Connect-MgGraph -UseDeviceCode` and re-run the script, which will reuse that context.
+**If you are running the lab by hand** — which is how SkyCraft runs Lab 1.1 today — answer the prompt. It is a real sign-in and the scripts wait for it on purpose. If no prompt appears at all, the browser handoff failed rather than the token: check that a default browser is set, or sign in first with `Connect-MgGraph -UseDeviceCode` and the scopes shown under [Lab 1.1: "Microsoft Graph sign-in did not complete"](#lab-11-microsoft-graph-sign-in-did-not-complete), then re-run the script. It reuses that context only when the context's scopes cover the ones the script requests; otherwise it signs in again.
 
 **If the run is unattended** — a scheduler, CI, `tools/Invoke-LabCycle.ps1`, anything with no console — there is nothing to answer the prompt, and the only real fix is to stop asking for one: give the lab a **service principal** so it signs in app-only (client credentials). This is **optional**, and today's cycle does not need it: `tools/lab-cycle-manifest.psd1` runs 1.2 through 5.3 and does not include Lab 1.1. Set it up when you automate 1.1, not before.
 
-The three Lab 1.1 scripts pick a service principal up automatically when these variables are set:
+The three Lab 1.1 scripts, and Lab 1.2's `New-LabRoleAssignment.ps1`, which reads Lab 1.1's users, pick a service principal up automatically when these variables are set:
 
 | Variable | Meaning |
 | :--- | :--- |

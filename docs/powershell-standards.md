@@ -343,6 +343,7 @@ These are deliberate decisions where SkyCraft departs from the official Microsof
 - **Microsoft says**: Don't repeat yourself; factor shared setup (the `Get-AzContext` / `Connect-AzAccount` / `az account show` connection check) into a single shared module dot-sourced by every script.
 - **We do**: Each lab's scripts carry their own self-contained connection-check block.
 - **Why**: Every lab folder must be readable end-to-end without chasing a shared helper up the tree. (It runs inside a clone of the repository: the one shared module, `tools/LabCommon.psm1`, only ends the script with the right exit code - §7.5.) The connection step is itself part of the lesson — students should see *how* a script verifies it is authenticated before acting. A shared `Common.ps1` would couple labs together and hide a teaching moment behind an abstraction.
+- **Across labs**: when one lab's scripts must reach another lab's objects the same way, they carry byte-identical copies of the other lab's function, and a repository test fails when a copy drifts. Lab 1.2's `New-LabRoleAssignment.ps1` signs in to Microsoft Graph with Lab 1.1's `Get-LabGraphAuthPlan` and `Connect-LabGraph` ([`tests/Lab11-Graph-Auth.Tests.ps1`](../tests/Lab11-Graph-Auth.Tests.ps1), issue #273), and it and Lab 1.2's `Deploy-Bicep.ps1` pick the tenant's initial domain with Lab 1.1's `Select-LabInitialDomain` ([`tests/Module1-Initial-Domain.Tests.ps1`](../tests/Module1-Initial-Domain.Tests.ps1), issue #237).
 
 ### 7.4 `-Force` Switch on Destructive Scripts
 

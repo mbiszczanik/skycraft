@@ -105,6 +105,8 @@ function Get-MgContext {
         TenantId = '00000000-0000-0000-0000-000000000000'
         Account  = 'stub-admin@contoso.example'
         AppName  = $null
+        # Every scope the lab's scripts request, so the context is reused (#273).
+        Scopes   = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All')
     }
 }
 
