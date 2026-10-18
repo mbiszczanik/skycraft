@@ -313,12 +313,9 @@ foreach ($lock in $locks) {
     }
 }
 
-# $Host.SetShouldExit goes with every non-zero exit: '#Requires -Modules' makes 'pwsh -File' drop
-# a bare 'exit 1' (issue #104).
 if ($script:governanceFailures -gt 0) {
     Write-Host "`nImperative Deployment finished with $($script:governanceFailures) error(s). See the [ERROR] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount $script:governanceFailures
 }
 
 Write-Host "`nImperative Deployment Complete." -ForegroundColor Green
