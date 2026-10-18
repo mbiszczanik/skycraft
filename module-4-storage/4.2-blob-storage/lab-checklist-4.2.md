@@ -184,6 +184,8 @@ Get-AzStorageBlob -Container game-assets -Context $ctx |
 ./scripts/Test-Lab.ps1
 
 # Expected: "SUCCESS: Lab 4.2 compliant!" and exit code 0 ($LASTEXITCODE)
+# It fails a lifecycle rule that is disabled, has no prefix filter, or has other actions or days
+# than the guide (a block left at "Delete the blob"), and a storage account that is not Succeeded.
 ```
 
 ### Verify Blob Versioning

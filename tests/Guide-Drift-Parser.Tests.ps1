@@ -1420,6 +1420,18 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         $step.expected | Should -Match 'Blob access tier \(default\): Hot'
     }
 
+    # Since the #359 review, step 4.2.8 fills its four If/Then blocks one item at a time: the
+    # informational table above them gives no item, so each block's days and action are list items.
+    It 'reads every block of step 4.2.8: days, action and + Add conditions in the order the Portal needs' {
+        $items = @((Get-StateStep '4.2' '4.2.8').items)
+        $sequence = @($items | ForEach-Object {
+                if ($_.kind -eq 'field' -and $_.label -ceq 'More than (days ago)') { "days=$($_.value)" }
+                elseif ($_.kind -eq 'action' -and @($_.labels).Count -eq 1 -and $_.labels[0] -cin '+ Add conditions', 'Move to cool storage', 'Move to cold storage', 'Move to archive storage', 'Delete the blob') { $_.labels[0] }
+            })
+        $sequence | Should -Be @('days=30', 'Move to cool storage', '+ Add conditions', 'days=90', 'Move to cold storage',
+            '+ Add conditions', 'days=180', 'Move to archive storage', '+ Add conditions', 'days=365', 'Delete the blob')
+    }
+
     It 'gives no item of any guide a label its line puts right after "under"' {
         $leaks = @(foreach ($lab in $script:StateLabs.Keys) {
                 $lines = Get-Content -LiteralPath (Join-Path $script:RepoRoot $script:StateLabs[$lab].guide) -Encoding utf8

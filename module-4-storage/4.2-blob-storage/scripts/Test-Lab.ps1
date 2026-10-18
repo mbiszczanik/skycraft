@@ -8,10 +8,16 @@
 
       - Production: anonymous access off, the four containers private, soft delete for blobs and
         for containers at 7 days, versioning on.
+      - Both accounts in the provisioning state Succeeded: an account Azure left in Failed does
+        not count as built (#371).
       - Production lifecycle policy: rules 'tier-game-logs' and 'archive-backups', each enabled
         and limited by a prefix filter to its own container ('game-logs/', 'player-backups/'). A
         rule without the filter applies to every block blob in the account, and tier-game-logs
         would then delete game assets and player backups after 365 days (#356); such a rule fails.
+      - The base blob actions of each rule, by days since the last modification: tier-game-logs
+        Cool 30, Cold 90, Archive 180, Delete 365; archive-backups Archive 7 and no delete. The
+        Portal's first If/Then block starts at "Delete the blob", so a rule saved with that
+        default deletes logs after 30 days or every player backup after 7; such a rule fails.
       - Development: anonymous access off, versioning off, container 'public-demo' private.
 
     A property the Portal never sets reads as $null and counts as its Portal default: dev
@@ -101,11 +107,16 @@ function Get-LabBlobServiceProperty {
 # Checks that a lifecycle rule exists, is enabled and is limited by a prefix filter to $Prefix:
 # at least one prefix, and every prefix starts with $Prefix (prefixes are case-sensitive). A rule
 # without a prefix applies to every block blob in the account.
+#
+# $Actions lists the base blob actions the rule must have, in the order Get-LifecycleActionText
+# reports them, each with its days since the last modification; any other base blob action, or
+# other days, fails the check.
 function Assert-LifecycleRule {
     param(
         [object[]]$Rules,
         [string]$Name,
-        [string]$Prefix
+        [string]$Prefix,
+        [System.Collections.Specialized.OrderedDictionary]$Actions
     )
     $rule = @($Rules | Where-Object { $_.Name -eq $Name }) | Select-Object -First 1
     Assert-Check "PROD: '$Name' rule present" -Condition ($null -ne $rule)
@@ -128,6 +139,36 @@ function Assert-LifecycleRule {
         -Condition ($prefixes.Count -gt 0 -and $outside.Count -eq 0) `
         -SuccessMessage "Prefix $($prefixes -join ', ')" `
         -FailureMessage $failure
+
+    $expected = (@($Actions.Keys | ForEach-Object { "$_ $($Actions[$_])" }) -join ', ')
+    $actual = Get-LifecycleActionText -BaseBlob $rule.Definition.Actions.BaseBlob
+    $deletes = $rule.Definition.Actions.BaseBlob.Delete
+    $actionFailure = "Actions $actual, expected $expected"
+    if ($deletes -and (-not $Actions.Contains('Delete') -or $deletes.DaysAfterModificationGreaterThan -ne $Actions['Delete'])) {
+        $actionFailure += ". The rule deletes blobs the guide keeps: the Portal's first block starts at 'Delete the blob' (guide Step 4.2.8/4.2.9)"
+    }
+    Assert-Check "PROD: '$Name' rule actions" `
+        -Condition ($actual -ceq $expected) `
+        -SuccessMessage $actual `
+        -FailureMessage $actionFailure
+}
+
+# The base blob actions of a lifecycle rule as text, in a fixed order: 'TierToCool 30, Delete 365'.
+# The days are those since the last modification; an action on another condition shows it
+# ('Delete created 30', 'TierToCool accessed 30'), so it never matches an expected action.
+function Get-LifecycleActionText {
+    param([object]$BaseBlob)
+    if ($null -eq $BaseBlob) { return 'none' }
+    $parts = foreach ($action in 'TierToHot', 'TierToCool', 'TierToCold', 'TierToArchive', 'Delete') {
+        $when = $BaseBlob.$action
+        if ($null -eq $when) { continue }
+        if ($null -ne $when.DaysAfterModificationGreaterThan) { "$action $($when.DaysAfterModificationGreaterThan)" }
+        elseif ($null -ne $when.DaysAfterCreationGreaterThan) { "$action created $($when.DaysAfterCreationGreaterThan)" }
+        elseif ($null -ne $when.DaysAfterLastAccessTimeGreaterThan) { "$action accessed $($when.DaysAfterLastAccessTimeGreaterThan)" }
+        else { "$action (no days)" }
+    }
+    if (@($parts).Count -eq 0) { return 'none' }
+    return (@($parts) -join ', ')
 }
 
 Write-Host "`n=== Lab 4.2: Verifying Blob Storage Configuration ===" -ForegroundColor Cyan
@@ -144,6 +185,12 @@ catch {
 
 # 2. Production Security Verification (Privacy & Versioning)
 Write-Host "`n--- Production Verification (Secure) ---" -ForegroundColor Yellow
+
+# An account Azure left in Failed is listed and readable, but the lab did not build it (#371).
+Assert-Check "PROD: Storage account provisioned" `
+    -Condition ("$($prodSa.ProvisioningState)" -eq 'Succeeded') `
+    -SuccessMessage "Succeeded" `
+    -FailureMessage "Provisioning state '$($prodSa.ProvisioningState)', expected Succeeded"
 
 # AllowBlobPublicAccess MUST be False
 Assert-Check "PROD: AllowBlobPublicAccess is disabled" `
@@ -196,12 +243,19 @@ Assert-Check "PROD: Lifecycle Policy exists" `
 
 if ($prodPolicy) {
     $rules = @($prodPolicy.Rules)
-    Assert-LifecycleRule -Rules $rules -Name 'tier-game-logs' -Prefix 'game-logs/'
-    Assert-LifecycleRule -Rules $rules -Name 'archive-backups' -Prefix 'player-backups/'
+    Assert-LifecycleRule -Rules $rules -Name 'tier-game-logs' -Prefix 'game-logs/' `
+        -Actions ([ordered]@{ TierToCool = 30; TierToCold = 90; TierToArchive = 180; Delete = 365 })
+    Assert-LifecycleRule -Rules $rules -Name 'archive-backups' -Prefix 'player-backups/' `
+        -Actions ([ordered]@{ TierToArchive = 7 })
 }
 
 # 3. Development Verification
 Write-Host "`n--- Development Verification ---" -ForegroundColor Yellow
+
+Assert-Check "DEV: Storage account provisioned" `
+    -Condition ("$($devSa.ProvisioningState)" -eq 'Succeeded') `
+    -SuccessMessage "Succeeded" `
+    -FailureMessage "Provisioning state '$($devSa.ProvisioningState)', expected Succeeded"
 
 # AllowBlobPublicAccess MUST be False (guide Step 4.2.12)
 Assert-Check "DEV: AllowBlobPublicAccess is disabled" `

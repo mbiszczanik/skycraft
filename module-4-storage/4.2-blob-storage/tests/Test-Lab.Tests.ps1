@@ -15,6 +15,11 @@
          365 days (#356). So does a rule with a prefix outside 'game-logs/', and an
          'archive-backups' rule without 'player-backups/'.
       4. Production soft delete that is off fails.
+      5. A rule whose actions differ from the guide fails: tier-game-logs saved with the Portal's
+         first block at "Delete the blob" (logs deleted after 30 days), and archive-backups that
+         deletes every backup after 7 days (#359). So does a disabled rule.
+      6. A missing production container fails, and so does a storage account in the provisioning
+         state Failed (#371).
 
     No subscription is needed, and none is used: tests/Support/LabScriptStub.psm1 (issue #112)
     imports the real modules first, the stub last, and aborts the child with exit 99 unless every
@@ -26,7 +31,7 @@
 .NOTES
     Project: SkyCraft
     Lab: 4.2 - Blob Storage
-    Issue: #355, #356
+    Issue: #355, #356, #359, #371
 #>
 
 #Requires -Version 7.0
@@ -54,6 +59,12 @@ BeforeAll {
     #                                 a rule without a prefix filter (the Portal's "Apply rule to
     #                                 all blobs in your storage account")
     #   SKYCRAFT_STUB_BACKUPSPREFIX   the same for archive-backups
+    #   SKYCRAFT_STUB_LOGSACTIONS     the base blob actions of tier-game-logs, 'Action=days' by
+    #                                 days since the last modification, comma-separated
+    #   SKYCRAFT_STUB_BACKUPSACTIONS  the same for archive-backups
+    #   SKYCRAFT_STUB_LOGSENABLED     'true' or 'false', the state of tier-game-logs
+    #   SKYCRAFT_STUB_MISSING         a production container the listing leaves out, or ''
+    #   SKYCRAFT_STUB_PRODSTATE       the production account's provisioning state
     #   SKYCRAFT_STUB_PRODSOFTDELETE  'on' (7 days, blobs and containers) or 'off' (blobs off)
     $script:StubBody = @'
 function Get-AzStorageAccount {
@@ -61,6 +72,7 @@ function Get-AzStorageAccount {
     param([string]$ResourceGroupName, [string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
     [pscustomobject]@{
         StorageAccountName    = $Name
+        ProvisioningState     = $(if ($Name -like 'prod*') { $env:SKYCRAFT_STUB_PRODSTATE } else { 'Succeeded' })
         AllowBlobPublicAccess = $false
         Context               = [pscustomobject]@{ StorageAccountName = $Name }
     }
@@ -90,28 +102,35 @@ function Get-AzStorageContainer {
     param($Context, [string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
     if ($Name) { return [pscustomobject]@{ Name = $Name; PublicAccess = 'Off' } }
     foreach ($n in 'game-assets', 'player-backups', 'server-config', 'game-logs') {
-        [pscustomobject]@{ Name = $n; PublicAccess = 'Off' }
+        if ($n -ne $env:SKYCRAFT_STUB_MISSING) { [pscustomobject]@{ Name = $n; PublicAccess = 'Off' } }
     }
 }
 
 function Get-AzStorageAccountManagementPolicy {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$StorageAccountName, [Parameter(ValueFromRemainingArguments)]$Rest)
-    function New-StubRule([string]$RuleName, [string]$Prefixes) {
+    function New-StubRule([string]$RuleName, [string]$Prefixes, [string]$Actions, [bool]$Enabled) {
         # The Portal's "Apply rule to all blobs" writes no prefixMatch: Az reads it as $null.
         $prefixMatch = if ($Prefixes -eq 'none') { $null } else { [string[]]($Prefixes -split ',') }
+        # PSManagementPolicyBaseBlob: an action the rule does not have reads as $null.
+        $baseBlob = [pscustomobject]@{ TierToHot = $null; TierToCool = $null; TierToCold = $null; TierToArchive = $null; Delete = $null }
+        foreach ($pair in ($Actions -split ',' | Where-Object { $_ })) {
+            $action, $days = $pair -split '='
+            $baseBlob.$action = [pscustomobject]@{ DaysAfterModificationGreaterThan = [int]$days; DaysAfterCreationGreaterThan = $null; DaysAfterLastAccessTimeGreaterThan = $null }
+        }
         [pscustomobject]@{
             Name       = $RuleName
-            Enabled    = $true
+            Enabled    = $Enabled
             Definition = [pscustomobject]@{
+                Actions = [pscustomobject]@{ BaseBlob = $baseBlob }
                 Filters = [pscustomobject]@{ BlobTypes = @('blockBlob'); PrefixMatch = $prefixMatch }
             }
         }
     }
     [pscustomobject]@{
         Rules = @(
-            New-StubRule 'tier-game-logs' $env:SKYCRAFT_STUB_LOGSPREFIX
-            New-StubRule 'archive-backups' $env:SKYCRAFT_STUB_BACKUPSPREFIX
+            New-StubRule 'tier-game-logs' $env:SKYCRAFT_STUB_LOGSPREFIX $env:SKYCRAFT_STUB_LOGSACTIONS ($env:SKYCRAFT_STUB_LOGSENABLED -eq 'true')
+            New-StubRule 'archive-backups' $env:SKYCRAFT_STUB_BACKUPSPREFIX $env:SKYCRAFT_STUB_BACKUPSACTIONS $true
         )
     }
 }
@@ -124,6 +143,12 @@ function Get-AzStorageAccountManagementPolicy {
             [string]$DevVersioning = 'null',
             [string]$LogsPrefix = 'game-logs/',
             [string]$BackupsPrefix = 'player-backups/',
+            [string]$LogsActions = 'TierToCool=30,TierToCold=90,TierToArchive=180,Delete=365',
+            [string]$BackupsActions = 'TierToArchive=7',
+            [ValidateSet('true', 'false')]
+            [string]$LogsEnabled = 'true',
+            [string]$Missing = '',
+            [string]$ProdState = 'Succeeded',
             [ValidateSet('on', 'off')]
             [string]$ProdSoftDelete = 'on'
         )
@@ -131,6 +156,11 @@ function Get-AzStorageAccountManagementPolicy {
             SKYCRAFT_STUB_DEVVERSIONING  = $DevVersioning
             SKYCRAFT_STUB_LOGSPREFIX     = $LogsPrefix
             SKYCRAFT_STUB_BACKUPSPREFIX  = $BackupsPrefix
+            SKYCRAFT_STUB_LOGSACTIONS    = $LogsActions
+            SKYCRAFT_STUB_BACKUPSACTIONS = $BackupsActions
+            SKYCRAFT_STUB_LOGSENABLED    = $LogsEnabled
+            SKYCRAFT_STUB_MISSING        = $Missing
+            SKYCRAFT_STUB_PRODSTATE      = $ProdState
             SKYCRAFT_STUB_PRODSOFTDELETE = $ProdSoftDelete
         }
         return [pscustomobject]@{
@@ -153,8 +183,15 @@ function Get-AzStorageAccountManagementPolicy {
     $script:LogsNarrower   = Invoke-ValidatorScript -Stub $script:Stub -LogsPrefix 'game-logs/server'
     $script:BackupsNone    = Invoke-ValidatorScript -Stub $script:Stub -BackupsPrefix 'none'
     $script:SoftDeleteOff  = Invoke-ValidatorScript -Stub $script:Stub -ProdSoftDelete 'off'
+    # The Portal's first If/Then block left at its default, "Delete the blob" (#359).
+    $script:LogsDeleteFirst  = Invoke-ValidatorScript -Stub $script:Stub -LogsActions 'TierToCold=90,TierToArchive=180,Delete=30'
+    $script:BackupsDeleted   = Invoke-ValidatorScript -Stub $script:Stub -BackupsActions 'Delete=7'
+    $script:LogsDisabled     = Invoke-ValidatorScript -Stub $script:Stub -LogsEnabled 'false'
+    $script:ContainerMissing = Invoke-ValidatorScript -Stub $script:Stub -Missing 'server-config'
+    $script:ProdFailed       = Invoke-ValidatorScript -Stub $script:Stub -ProdState 'Failed'
     $script:AllRuns        = @($script:PortalUnset, $script:BicepFalse, $script:TurnedOn, $script:ReadFails,
-        $script:LogsUnfiltered, $script:LogsOutside, $script:LogsNarrower, $script:BackupsNone, $script:SoftDeleteOff)
+        $script:LogsUnfiltered, $script:LogsOutside, $script:LogsNarrower, $script:BackupsNone, $script:SoftDeleteOff,
+        $script:LogsDeleteFirst, $script:BackupsDeleted, $script:LogsDisabled, $script:ContainerMissing, $script:ProdFailed)
 }
 
 AfterAll {
@@ -182,7 +219,7 @@ Describe 'Lab 4.2 Test-Lab.ps1 - the state every path builds' {
     It 'passes the full end state and checks every container, soft delete and both rules' {
         $run = $script:PortalUnset
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match 'Tests Passed: 23 / 23'
+        $run.Output | Should -Match 'Tests Passed: 27 / 27'
         $run.Output | Should -Match 'SUCCESS: Lab 4.2 compliant!'
         foreach ($name in 'game-assets', 'player-backups', 'server-config', 'game-logs') {
             $run.Output | Should -Match "PROD: '$name' is PRIVATE \.\.\. PASS"
@@ -212,7 +249,7 @@ Describe 'Lab 4.2 Test-Lab.ps1 - unset dev versioning is the Portal default, off
         $run = $script:TurnedOn
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match 'DEV: Versioning disabled \(scope check\) \.\.\. FAIL \(Versioning ON\)'
-        $run.Output | Should -Match 'Tests Passed: 22 / 23'
+        $run.Output | Should -Match 'Tests Passed: 26 / 27'
     }
 
     It 'fails a blob service read that fails, says why, and still reaches the summary' {
@@ -229,7 +266,7 @@ Describe 'Lab 4.2 Test-Lab.ps1 - each lifecycle rule stays on its own container 
         $run = $script:LogsUnfiltered
         $run.ExitCode | Should -Be 1 -Because "an unfiltered rule deletes every block blob in the account after 365 days; output was:`n$($run.Output)"
         $run.Output | Should -Match "PROD: 'tier-game-logs' rule limited to 'game-logs/' \.\.\. FAIL \(No prefix filter: the rule applies to every blob in the account"
-        $run.Output | Should -Match 'Tests Passed: 22 / 23'
+        $run.Output | Should -Match 'Tests Passed: 26 / 27'
     }
 
     It 'fails tier-game-logs with a prefix outside game-logs/, and names it' {
@@ -257,5 +294,53 @@ Describe 'Lab 4.2 Test-Lab.ps1 - production soft delete' {
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match 'PROD: Soft delete for blobs on, 7 days \.\.\. FAIL \(Off\)'
         $run.Output | Should -Match 'PROD: Soft delete for containers on, 7 days \.\.\. PASS'
+    }
+}
+
+Describe 'Lab 4.2 Test-Lab.ps1 - each lifecycle rule does what the guide says (#359)' {
+
+    It 'checks the actions of both rules in the full end state' {
+        $run = $script:PortalUnset
+        $run.Output | Should -Match "PROD: 'tier-game-logs' rule actions \.\.\. PASS \(TierToCool 30, TierToCold 90, TierToArchive 180, Delete 365\)"
+        $run.Output | Should -Match "PROD: 'archive-backups' rule actions \.\.\. PASS \(TierToArchive 7\)"
+    }
+
+    It 'fails tier-game-logs saved with its first block at "Delete the blob", and exits 1' {
+        $run = $script:LogsDeleteFirst
+        $run.ExitCode | Should -Be 1 -Because "the rule deletes every log after 30 days; output was:`n$($run.Output)"
+        $run.Output | Should -Match "PROD: 'tier-game-logs' rule actions \.\.\. FAIL \(Actions TierToCold 90, TierToArchive 180, Delete 30, expected TierToCool 30, TierToCold 90, TierToArchive 180, Delete 365\. The rule deletes blobs the guide keeps"
+        $run.Output | Should -Match 'Tests Passed: 26 / 27'
+    }
+
+    It 'fails archive-backups that deletes every backup after 7 days, and exits 1' {
+        $run = $script:BackupsDeleted
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "PROD: 'archive-backups' rule actions \.\.\. FAIL \(Actions Delete 7, expected TierToArchive 7\. The rule deletes blobs the guide keeps"
+    }
+
+    It 'fails a disabled tier-game-logs rule, and exits 1' {
+        $run = $script:LogsDisabled
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "PROD: 'tier-game-logs' rule enabled \.\.\. FAIL \(Disabled\)"
+        $run.Output | Should -Match 'Tests Passed: 26 / 27'
+    }
+}
+
+Describe 'Lab 4.2 Test-Lab.ps1 - containers and provisioning state' {
+
+    It 'fails a production container that is missing, and exits 1' {
+        $run = $script:ContainerMissing
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "PROD: 'server-config' container exists \.\.\. FAIL"
+        $run.Output | Should -Match "PROD: 'game-assets' container exists \.\.\. PASS"
+        $run.Output | Should -Match 'Tests Passed: 25 / 26'
+    }
+
+    It 'fails a storage account Azure left in the Failed state, and exits 1 (#371)' {
+        $run = $script:ProdFailed
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "PROD: Storage account provisioned \.\.\. FAIL \(Provisioning state 'Failed', expected Succeeded\)"
+        $run.Output | Should -Match 'DEV: Storage account provisioned \.\.\. PASS \(Succeeded\)'
+        $run.Output | Should -Match 'Tests Passed: 26 / 27'
     }
 }

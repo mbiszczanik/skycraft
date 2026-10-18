@@ -68,7 +68,7 @@ Before starting this lab:
 - [ ] PowerShell 7+ and the `Az` module (Az.Accounts, Az.Resources, Az.Storage). The Azure CLI is optional.
 - [ ] A text editor to create two small local files (Steps 4.2.11-4.2.13).
 
-If you completed Lab 1.3, its policies are still assigned to your subscription. This lab creates no new Azure resource: the containers, the lifecycle policy and the blob settings are parts of the two storage accounts from Lab 4.1, which already carry the region (Sweden Central) and the SkyCraft tags. `Restrict-Azure-Regions`, `Enforce-Project-Tag` and `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8) evaluate only resources that have a location and tags, so no step below asks for a region or tags, and none is refused by them. The Bicep path sets the same region and four tags on both accounts as Lab 4.1 did.
+If you completed Lab 1.3, its policies are still assigned to your subscription. This lab creates no new Azure resource: the containers, the lifecycle policy and the blob settings are parts of the two storage accounts from Lab 4.1, which already carry the region (Sweden Central) and the SkyCraft tags. `Enforce-Project-Tag` and `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8) and `Restrict-Azure-Regions` (Step 1.3.9) evaluate only resources that have a location and tags, so no step below asks for a region or tags, and none is refused by them. The Bicep path sets the same region and four tags on both accounts as Lab 4.1 did. No step of this lab creates a resource group or makes Azure create one. Lab 1.3's delete lock on `prod-skycraft-swc-rg` (`lock-no-delete-prod`, Step 1.3.11) does not stop the steps below: they create containers and change settings in that group, which a delete lock allows. It does stop this lab's cleanup (see What This Lab Leaves Behind).
 
 Check the prerequisites with Az PowerShell (signed in with `Connect-AzAccount` to the subscription you use for the course):
 
@@ -426,10 +426,7 @@ This rule tiers the blobs in the `game-logs` container to cheaper tiers as they 
 
 4. Click the **Base blobs** tab.
 
-The tab shows one If / Then block: the condition Last modified, a box More than (days ago), and under Then the action Delete the blob. The rule needs four such blocks.
-
-5. Click **+ Add conditions** three times, so the tab shows four blocks. Each new block preselects the next action, but check every block yourself.
-6. In each block, leave the condition at Last modified, type the days and choose the action:
+The tab shows one If / Then block: the condition Last modified, a box More than (days ago), and under Then the action Delete the blob. The rule needs four such blocks, one per row of this table, each with the condition Last modified:
 
 | Block | More than (days ago) | Then                    |
 | ----- | -------------------- | ----------------------- |
@@ -438,19 +435,33 @@ The tab shows one If / Then block: the condition Last modified, a box More than 
 | 3     | 180                  | Move to archive storage |
 | 4     | 365                  | Delete the blob         |
 
+Items 5-16 fill the blocks in that order. Each item works on the newest block, the lowest on the tab.
+
+5. **More than (days ago)**: `30`
+6. Under **Then**, choose **Move to cool storage**.
+
 > **Warning**: The first block starts at **Delete the blob**. Change it to **Move to cool storage**; a rule saved with the first block at its default deletes every log after 30 days.
 
-7. Leave **Skip blobs that have been rehydrated in the last** (in the archive block, at `7` days) checked - it keeps a blob you bring back from Archive out of Archive for 7 days, so the rule does not archive it again the next day and charge you a second rehydration.
-8. Click the **Filter set** tab.
-9. **Blob prefix**: `game-logs/`
-10. Click **Add**.
+7. Click **+ Add conditions**. A second block appears below the first; it may preselect the next action, so set it yourself.
+8. **More than (days ago)**: `90`
+9. Under **Then**, choose **Move to cold storage**.
+10. Click **+ Add conditions** for the third block.
+11. **More than (days ago)**: `180`
+12. Under **Then**, choose **Move to archive storage**.
+13. Leave **Skip blobs that have been rehydrated in the last** (in the archive block, at `7` days) checked - it keeps a blob you bring back from Archive out of Archive for 7 days, so the rule does not archive it again the next day and charge you a second rehydration.
+14. Click **+ Add conditions** for the fourth block.
+15. **More than (days ago)**: `365`
+16. Under **Then**, choose **Delete the blob**.
+17. Click the **Filter set** tab.
+18. **Blob prefix**: `game-logs/`
+19. Click **Add**.
 
 > [!TIP]
 > Since `prodskycraftswcsa` uses **GRS** redundancy, the "Move to archive storage" action is available in the dropdown. If you don't see this option, verify the storage account is not using ZRS/GZRS.
 
 **Expected Result**: `tier-game-logs` is listed on the **List View** tab as **Enabled**. On the **Code View** tab, its `filters` hold `"prefixMatch": ["game-logs/"]` and `"blobTypes": ["blockBlob"]`.
 
-**With Az PowerShell** (instead of items 1-10):
+**With Az PowerShell** (instead of items 1-19):
 
 ```powershell
 $action = Add-AzStorageAccountManagementPolicyAction -BaseBlobAction TierToCool -DaysAfterModificationGreaterThan 30
@@ -604,7 +615,7 @@ Upload a sample file to the **Production** container to verify upload capability
 
 **Expected Result**: `game-assets` holds the folder `textures` with the blob `test-asset.txt`, access tier **Hot (Inferred)**.
 
-> **Note**: If opening the `game-assets` container keeps loading, use **Storage browser** in the account's left menu (**Blob containers** → `game-assets`), or list the blobs with the PowerShell block below.
+> **Note**: If opening the `game-assets` container keeps loading, use **Storage browser** (in the account's left menu, a top-level entry above the **Data storage** group, not inside any group): **Blob containers** → `game-assets`. Or list the blobs with the PowerShell block below.
 
 **With Az PowerShell** (instead of items 1-8). The account's context uses the account key, which your Owner or Contributor role may read:
 
@@ -650,14 +661,14 @@ az storage blob upload \
    > `Deploy-Bicep.ps1` deploys the switch that way (`allowBlobPublicAccess: false`). Look at it, but leave it **Disabled** and do not click **Save**. If you do enable it, set it back to **Disabled** and **Save** again at once, or `Test-Lab.ps1` fails `DEV: AllowBlobPublicAccess is disabled`. (Organizations commonly pin this switch with a **Deny** assignment of the built-in policy *Storage account public access should be disallowed*; on such a subscription the save is refused with **RequestDisallowedByPolicy**. The SkyCraft course does not assign it.)
 
 2. **Create the `public-demo` container - Private**:
-   - Go to **Containers** → **+ Add container**
+   - Go to **Containers** (in the left menu, under **Data storage**) → **+ Add container**
    - Name: `public-demo`
    - Click **Create**
 
    > In the **New container** pane, **Anonymous access level** is greyed out at Private (no anonymous access), with the note "The access level is set to private because anonymous access is disabled on this storage account." That is the account switch of item 1 at work: while it is off, the pane offers no other level. Leave the **Advanced** section as it is (Step 4.2.2).
 
 3. **Prove the container is not anonymous**:
-   - **Containers** → `public-demo`
+   - **Containers** (under **Data storage**) → `public-demo`
    - Click **Upload**, select a small local text file named `file.txt`, and click **Upload**
    - Select `file.txt` → **Overview** → copy its **URL** (`https://devskycraftswcsa.blob.core.windows.net/public-demo/file.txt`)
    - Open the URL in an incognito/private browser window
@@ -693,7 +704,7 @@ Overwrite the blob of Step 4.2.11 to create a new version. Use the same blob nam
 6. Expand **Advanced**.
 7. **Upload to folder**: `textures`
 8. Click **Upload**.
-9. Open `prodskycraftswcsa` → **Containers** → `game-assets` → `textures` → `test-asset.txt` → **Versions**.
+9. Open `prodskycraftswcsa` → **Containers** (under **Data storage**) → `game-assets` → `textures` → `test-asset.txt` → **Versions**.
 
 **Expected Result**: The **Versions** tab of `textures/test-asset.txt` lists two versions: the current one and the version of Step 4.2.11.
 
@@ -730,7 +741,7 @@ Run the lab's validator from the lab folder:
 ./scripts/Test-Lab.ps1
 ```
 
-**Expected Result**: `SUCCESS: Lab 4.2 compliant!`, exit code 0. It checks the two accounts, the five containers, the data protection settings and both lifecycle rules with their prefix filters; it does not check the blobs.
+**Expected Result**: `SUCCESS: Lab 4.2 compliant!`, exit code 0. It checks the two accounts (provisioned, anonymous access off), the five containers, the data protection settings and both lifecycle rules: enabled, limited by their prefix filters, and with the actions and days of Steps 4.2.8 and 4.2.9, so a block left at **Delete the blob** fails. It does not check the blobs.
 
 **For detailed verification**, see [lab-checklist-4.2.md](lab-checklist-4.2.md)
 
@@ -738,11 +749,11 @@ Run the lab's validator from the lab folder:
 
 ## 📦 What This Lab Leaves Behind
 
-No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` lists no lab that depends on Lab 4.2. Labs 4.3 and 4.4 work on the same storage accounts, and Lab 4.4's Bicep declares the same five containers. The accounts themselves, and their cost, come from Lab 4.1. The daily costs below are approximate list prices for Sweden Central; check the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) for your own.
+No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` lists no lab that depends on Lab 4.2. Labs 4.3 and 4.4 work on the same storage accounts. Lab 4.4's Bicep declares the same five containers again, next to its own `dev-assets`, so it recreates them if they are gone, and its Step 4.4.3 works on any container you pick. The accounts themselves, and their cost, come from Lab 4.1. The daily costs below are approximate list prices for Sweden Central; check the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) for your own.
 
 | Left behind | Where | Daily cost | What it does in later labs |
 | --- | --- | --- | --- |
-| Containers `game-assets`, `player-backups`, `server-config`, `game-logs` | `prodskycraftswcsa` | 0 (a container costs nothing; its blobs do) | Lab 4.4 sets stored access policies and SAS on them |
+| Containers `game-assets`, `player-backups`, `server-config`, `game-logs` | `prodskycraftswcsa` | 0 (a container costs nothing; its blobs do) | Nothing needs them; Lab 4.4's Step 4.4.3 may use one of them as "any container" for its stored access policy |
 | `textures/test-asset.txt`, two versions; `file.txt` in `public-demo` | `prodskycraftswcsa`, `devskycraftswcsa` | well under 0.01 EUR (a few bytes each) | Nothing |
 | Lifecycle policy (`tier-game-logs`, `archive-backups`) | `prodskycraftswcsa` | 0 (the policy is free; each tier change it makes is billed as one write operation) | Nothing; it acts only on blobs under `game-logs/` and `player-backups/` |
 | Versioning, soft delete (7 days) | `prodskycraftswcsa` | every kept version and every soft-deleted blob is billed as stored data | Re-running Lab 4.1's Bicep turns versioning back off |
@@ -755,7 +766,11 @@ To remove what this lab added, run the lab's cleanup from the lab folder:
 ./scripts/Remove-LabResource.ps1
 ```
 
-It asks before it changes anything (`-WhatIf` lists the changes; `-Force` skips the questions). It deletes the four production containers and `public-demo` with their blobs, removes the lifecycle policy, turns production versioning off and keeps anonymous access off on the dev account. It keeps both storage accounts. Deleted containers and blobs stay recoverable, and billed, for the 7 days of soft delete. The cleanup does not remove a role assignment; remove the optional one with:
+It asks before it changes anything (`-WhatIf` lists the changes; `-Force` skips the questions). It deletes the four production containers and `public-demo` with their blobs, removes the lifecycle policy, turns production versioning off and keeps anonymous access off on the dev account. It keeps both storage accounts. Deleted containers and blobs stay recoverable, and billed, for the 7 days of soft delete. The cleanup removes no diagnostic setting: this lab creates none.
+
+While Lab 1.3's delete lock (`lock-no-delete-prod`) is on `prod-skycraft-swc-rg`, Azure refuses to delete the four production containers and the lifecycle policy (`ScopeLocked`). The script reports each refusal as `[ERROR]`, carries on with the rest (versioning off, the dev account) and exits 1; it does not remove the lock itself (tracked in [issue #372](https://github.com/mbiszczanik/skycraft/issues/372)). To clean up completely, remove `lock-no-delete-prod` by hand (`prod-skycraft-swc-rg` → **Locks**, under **Settings**), run the script again, and then create the lock again as in Lab 1.3, Step 1.3.11. Or leave the production containers and the policy in place: they cost next to nothing (see the table).
+
+The cleanup does not remove a role assignment; remove the optional one with:
 
 ```powershell
 $scope = (Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa').Id
