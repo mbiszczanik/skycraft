@@ -72,7 +72,7 @@ Every step that changes Azure in this lab has a Bicep counterpart in the lab's `
 | 1.2.5, 1.2.10-1.2.12 | Nothing (they read the assignments) | Portal-only; the checklist's validation commands read the same assignments | none |
 | 1.2.13 (optional) | Nothing (a sign-in test as Khadgar Archmage) | Portal-only | none |
 
-The Portal steps and `resource-groups.bicep` give each resource group the same four tags (`Project`, `Environment`, `CostCenter`, `Owner`), so every path leaves the same groups behind. `scripts/New-LabResourceGroup.ps1` is not one of this lab's paths: it sets only three of the tags, with `Project` = `Skycraft`. Pick one path per subscription for the role assignments: the Bicep cannot take over assignments that the Portal or the script already created (see the checklist's Automation section).
+The Portal steps and `resource-groups.bicep` give each resource group the same four tags (`Project`, `Environment`, `CostCenter`, `Owner`), so every path leaves the same groups behind. `scripts/New-LabResourceGroup.ps1` creates the same three groups with the same four tags, but it is not one of this lab's paths. Pick one path per subscription for the role assignments: the Bicep cannot take over assignments that the Portal or the script already created (see the checklist's Automation section).
 
 ---
 
@@ -501,7 +501,7 @@ Your own account, and any other assignment made on the subscription, is listed w
 
 ### Step 1.2.13: Test Effective Permissions (Optional but Recommended)
 
-To see the permissions from Khadgar's side, sign in as him. This step changes nothing in Azure. Its first and last items happen outside the Portal, in your browser; a guide drift recording skips this optional step.
+To see the permissions from Khadgar's side, sign in as him. This step changes nothing in Azure. Its first and last items happen outside the Portal, in your browser.
 
 1. Open a private browser window and sign in to the Azure portal as Khadgar Archmage (the user name and password from Lab 1.1)
 2. In Azure Portal, search for **Resource groups**
@@ -721,7 +721,9 @@ Test your understanding with these questions:
 | Owner for Malfurion Stormrage on the subscription, without a condition | No later lab | None |
 | Contributor for SkyCraft-Developers and Reader for SkyCraft-Testers on `dev-skycraft-swc-rg`, Reader for SkyCraft-Testers on `prod-skycraft-swc-rg`, Reader for Illidan Stormrage on `platform-skycraft-swc-rg` | No later lab | None |
 
-Nothing in this lab costs money or deletes data, and every change can be undone. The Owner assignment gives Malfurion Stormrage, and anyone who signs in as him, full control of the subscription, including the right to grant any role: remove it when you no longer need it. `scripts/Remove-LabResource.ps1` removes it and deletes the three resource groups, which removes the four assignments on them; run it only when you are done with the whole course, since every later lab uses these groups.
+Nothing in this lab costs money or deletes data. The Owner assignment gives Malfurion Stormrage, and anyone who signs in as him, full control of the subscription, including the right to grant any role: remove it when you no longer need it. `scripts/Remove-LabResource.ps1` removes it and deletes the three resource groups, which removes the four assignments on them.
+
+**Warning**: Deleting the resource groups cannot be undone, and by the end of the course they hold every later lab's resources. Run `scripts/Remove-LabResource.ps1` only when you are done with the whole course, and run Lab 1.3's `scripts/Remove-LabResource.ps1` first: Lab 1.3 puts delete locks on `prod-skycraft-swc-rg` and `platform-skycraft-swc-rg`, and a locked group cannot be deleted.
 
 ---
 
