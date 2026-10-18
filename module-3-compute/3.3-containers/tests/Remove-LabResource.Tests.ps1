@@ -26,6 +26,10 @@
          the Az getters do, so a script that passes -ErrorAction SilentlyContinue swallows it.
       4. A failure does not stop the later steps.
       5. -Environment and the name overrides reach the delete calls; -WhatIf deletes nothing.
+      6. Issue #374: the Log Analytics workspace the Portal creates for a Container Apps
+         environment is deleted after the environment - the one the environment sends its logs
+         to and the one with the Portal's automatic name, in the lab's resource group only - and
+         kept when the environment could not be removed or the lookup failed.
     Which errors mean "not found" is pinned for every cleanup that carries the helpers by
     tests/Lab-Cleanup-Lookup.Tests.ps1.
     No Azure connection is needed, and none is used: the script runs through
@@ -76,7 +80,8 @@ function Write-StubCall {
 function Invoke-StubGate {
     param([string]$Name, [string]$Target)
     Write-StubCall -Name "$Name $Target"
-    if (@($env:SKYCRAFT_STUB_FAIL -split ',') -contains $Name) { throw "stub failure: $Name $Target" }
+    $fail = @($env:SKYCRAFT_STUB_FAIL -split ',')
+    if ($fail -contains $Name -or $fail -contains "$($Name):$Target") { throw "stub failure: $Name $Target" }
 }
 
 function Test-StubEmpty { return $env:SKYCRAFT_STUB_EMPTY -eq '1' }
@@ -115,14 +120,42 @@ function Invoke-StubLookup {
 
 function Get-AzResource {
     [CmdletBinding()]
-    param($ResourceGroupName, $ResourceType, $Name)
-    Write-StubCall -Name "Get-AzResource $Name"
-    if (Invoke-StubLookup -Name "Get-AzResource:$Name" -ResourceGroup $ResourceGroupName) { return }
+    param($ResourceGroupName, $ResourceType, $Name, [switch]$ExpandProperties)
+    # A lookup without a name lists a type: it is logged and keyed by the type.
+    $key = if ($Name) { $Name } else { $ResourceType }
+    Write-StubCall -Name "Get-AzResource $key"
+    if (Invoke-StubLookup -Name "Get-AzResource:$key" -ResourceGroup $ResourceGroupName) { return }
     if (Test-StubEmpty) { return }
+
+    # The workspaces in the group: SKYCRAFT_STUB_WORKSPACES 'name:customerId,...'.
+    if (-not $Name -and $ResourceType -eq 'Microsoft.OperationalInsights/workspaces') {
+        foreach ($entry in @($env:SKYCRAFT_STUB_WORKSPACES -split ',' | Where-Object { $_ })) {
+            $workspaceName, $customerId = $entry -split ':', 2
+            [pscustomobject]@{
+                Name         = $workspaceName
+                ResourceType = $ResourceType
+                ResourceId   = "/subscriptions/0/resourceGroups/$ResourceGroupName/providers/$ResourceType/$workspaceName"
+                Properties   = [pscustomobject]@{ customerId = $customerId }
+            }
+        }
+        return
+    }
+
+    $properties = $null
+    if ($ResourceType -eq 'Microsoft.App/managedEnvironments' -and $ExpandProperties) {
+        # SKYCRAFT_STUB_CAE_CUSTOMERID: the workspace the environment sends its logs to, if any.
+        $logs = if ($env:SKYCRAFT_STUB_CAE_CUSTOMERID) {
+            [pscustomobject]@{ destination = 'log-analytics'; logAnalyticsConfiguration = [pscustomobject]@{ customerId = $env:SKYCRAFT_STUB_CAE_CUSTOMERID } }
+        } else {
+            [pscustomobject]@{ destination = 'azure-monitor' }
+        }
+        $properties = [pscustomobject]@{ appLogsConfiguration = $logs }
+    }
     [pscustomobject]@{
         Name         = $Name
         ResourceType = $ResourceType
         ResourceId   = "/subscriptions/0/resourceGroups/$ResourceGroupName/providers/$ResourceType/$Name"
+        Properties   = $properties
     }
 }
 
@@ -151,6 +184,8 @@ function Remove-AzContainerRegistry {
             [string[]]$Fail = @(),
             [string[]]$Lookup = @(),
             [string[]]$Arguments = @('-Force'),
+            [string[]]$Workspace = @(),
+            [string]$CaeCustomerId = '',
             [switch]$Empty
         )
 
@@ -158,10 +193,12 @@ function Remove-AzContainerRegistry {
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
 
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList $Arguments -Environment @{
-            SKYCRAFT_STUB_FAIL   = $Fail -join ','
-            SKYCRAFT_STUB_LOOKUP = $Lookup -join ','
-            SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
-            SKYCRAFT_STUB_LOG    = $logPath
+            SKYCRAFT_STUB_FAIL           = $Fail -join ','
+            SKYCRAFT_STUB_LOOKUP         = $Lookup -join ','
+            SKYCRAFT_STUB_EMPTY          = if ($Empty) { '1' } else { '0' }
+            SKYCRAFT_STUB_LOG            = $logPath
+            SKYCRAFT_STUB_WORKSPACES     = $Workspace -join ','
+            SKYCRAFT_STUB_CAE_CUSTOMERID = $CaeCustomerId
         }
 
         $calls = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { @() }
@@ -192,9 +229,24 @@ function Remove-AzContainerRegistry {
     )
     $script:AppDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzResource:dev-skycraft-swc-aca-world=denied'
 
+    # #374: the Portal's auto-named workspace, the workspace the environment sends its logs to,
+    # and an unrelated workspace that must stay.
+    $script:LabWorkspaces = @(
+        'workspacedevskycraftswcrg1a2b:aaaaaaaa-0000-0000-0000-000000000001'
+        'dev-skycraft-swc-law-reports:bbbbbbbb-0000-0000-0000-000000000002'
+        'my-env-logs:cccccccc-0000-0000-0000-000000000003'
+    )
+    $script:Workspaces = Invoke-CleanupScript -Stub $script:Stub -Workspace $script:LabWorkspaces `
+        -CaeCustomerId 'cccccccc-0000-0000-0000-000000000003'
+    $script:EnvStuck = Invoke-CleanupScript -Stub $script:Stub -Workspace $script:LabWorkspaces `
+        -CaeCustomerId 'cccccccc-0000-0000-0000-000000000003' -Fail 'Remove-AzResource:dev-skycraft-swc-cae-02'
+    $script:WorkspaceDenied = Invoke-CleanupScript -Stub $script:Stub -Workspace $script:LabWorkspaces `
+        -Lookup 'Get-AzResource:Microsoft.OperationalInsights/workspaces=denied'
+
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:AciStuck, $script:TwoStuck, $script:Prod, $script:WhatIf,
-        $script:NotFound, $script:LookupsFail, $script:AppDenied
+        $script:NotFound, $script:LookupsFail, $script:AppDenied, $script:Workspaces, $script:EnvStuck,
+        $script:WorkspaceDenied
     )
 }
 
@@ -273,7 +325,9 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
 
     It 'does not report what it could not see as absent, and deletes none of it' {
         $run = $script:LookupsFail
-        $run.Output | Should -Not -Match 'Not found'
+        # The workspace step legitimately finds none (#374); the two failed lookups must not read so.
+        $run.Output | Should -Not -Match 'Removing Container Instance: [^\r\n]*\r?\n\s*-> \[INFO\] Not found'
+        $run.Output | Should -Not -Match 'Removing Container Registry: [^\r\n]*\r?\n\s*-> \[INFO\] Not found'
         $run.Calls  | Should -Not -Contain 'Remove-AzContainerGroup dev-skycraft-swc-aci-auth'
         $run.Calls  | Should -Not -Contain 'Remove-AzContainerRegistry devskycraftswcacr01'
     }
@@ -292,6 +346,58 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
         $run.Calls    | Should -Not -Contain 'Remove-AzResource dev-skycraft-swc-cae-02'
         $run.Calls    | Should -Contain 'Remove-AzContainerGroup dev-skycraft-swc-aci-auth'
         $run.Calls    | Should -Contain 'Remove-AzContainerRegistry devskycraftswcacr01'
+    }
+}
+
+Describe 'Lab 3.3 Remove-LabResource.ps1 - the Portal''s Log Analytics workspace (#374)' {
+
+    It 'deletes the auto-named workspace and the one the environment logs to, and nothing else' {
+        $run = $script:Workspaces
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls | Should -Contain 'Remove-AzResource workspacedevskycraftswcrg1a2b'
+        $run.Calls | Should -Contain 'Remove-AzResource my-env-logs'
+        $run.Calls | Should -Not -Contain 'Remove-AzResource dev-skycraft-swc-law-reports'
+        $run.Output | Should -Match 'Cleanup Complete'
+    }
+
+    It 'deletes the workspaces after the environment, and before the instance and the registry' {
+        $calls = $script:Workspaces.Calls
+        $env = [array]::IndexOf($calls, 'Remove-AzResource dev-skycraft-swc-cae-02')
+        $workspace = [array]::IndexOf($calls, 'Remove-AzResource workspacedevskycraftswcrg1a2b')
+        $aci = [array]::IndexOf($calls, 'Remove-AzContainerGroup dev-skycraft-swc-aci-auth')
+        $env | Should -BeGreaterOrEqual 0
+        $workspace | Should -BeGreaterThan $env
+        $aci | Should -BeGreaterThan $workspace
+    }
+
+    It 'finds nothing to delete on the guide''s path, where no workspace exists' {
+        $script:Clean.Output | Should -Match "Removing Log Analytics workspace: any the Portal created for dev-skycraft-swc-cae-02\.\.\.\s+-> \[INFO\] Not found - nothing to delete\."
+        @($script:Clean.Calls | Where-Object { $_ -like 'Remove-AzResource workspace*' }) | Should -BeNullOrEmpty
+    }
+
+    It 'keeps the workspaces when the environment could not be deleted, counted once' {
+        $run = $script:EnvStuck
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[ERROR\] Could not delete Container Apps Environment 'dev-skycraft-swc-cae-02': stub failure"
+        $run.Output | Should -Match 'Kept: the Container Apps Environment could not be deleted and may still send its logs to it'
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        @($run.Calls | Where-Object { $_ -in 'Remove-AzResource workspacedevskycraftswcrg1a2b', 'Remove-AzResource my-env-logs' }) | Should -BeNullOrEmpty
+        $run.Calls | Should -Contain 'Remove-AzContainerRegistry devskycraftswcacr01'
+    }
+
+    It 'keeps the workspaces when the app could not be looked up, which keeps the environment too' {
+        $run = $script:AppDenied
+        $run.Output | Should -Match 'Kept: the Container App could not be looked up and may still send its logs to it'
+        $run.Calls | Should -Not -Contain 'Get-AzResource Microsoft.OperationalInsights/workspaces'
+    }
+
+    It 'counts a failed workspace lookup and deletes none of them' {
+        $run = $script:WorkspaceDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[ERROR\] Could not look up Log Analytics workspace 'any the Portal created for dev-skycraft-swc-cae-02'[^\r\n]*does not have authorization"
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        @($run.Calls | Where-Object { $_ -like 'Remove-AzResource workspace*' -or $_ -eq 'Remove-AzResource my-env-logs' }) | Should -BeNullOrEmpty
+        $run.Calls | Should -Contain 'Remove-AzContainerGroup dev-skycraft-swc-aci-auth'
     }
 }
 

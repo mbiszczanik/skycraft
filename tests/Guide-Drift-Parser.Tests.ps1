@@ -1088,7 +1088,7 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
 
     It 'reads the registry, image and tag of step 3.3.7 as three fields' {
         $fields = @((Get-GapStep '3.3' '3.3.7').items | Where-Object kind -eq 'field')
-        ($fields | Where-Object label -ceq 'Registry').value | Should -BeExactly '[Select your registry]'
+        ($fields | Where-Object label -ceq 'Registry').value | Should -BeExactly 'devskycraftswcacr01'
         ($fields | Where-Object label -ceq 'Image').value | Should -BeExactly 'skycraft-auth'
         ($fields | Where-Object label -ceq 'Image tag').value | Should -BeExactly 'v1'
     }
@@ -1284,7 +1284,8 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @{ lab = '4.4'; id = '4.4.2'; text = 'Check **Add your client IP address**.'; kind = 'action'; labels = @('Add your client IP address'); key = 'checked'; indices = @(0) }
         @{ lab = '3.3'; id = '3.3.7'; text = 'Uncheck **Use quickstart image**.'; kind = 'action'; labels = @('Use quickstart image'); key = 'unchecked'; indices = @(0) }
         @{ lab = '4.2'; id = '4.2.5'; text = 'Under **Recovery**, enable **Enable soft delete for blobs**'; kind = 'action'; labels = @('Enable soft delete for blobs'); key = 'checked'; indices = @(0) }
-        @{ lab = '3.3'; id = '3.3.2'; text = 'Toggle **Admin user** to **Enabled**.'; kind = 'action'; labels = @('Admin user'); key = 'checked'; indices = @(0) }
+        @{ lab = '3.3'; id = '3.3.2'; text = 'Check **Admin user**.'; kind = 'action'; labels = @('Admin user'); key = 'checked'; indices = @(0) }
+        @{ lab = '3.3'; id = '3.3.8'; text = 'Check **Ingress** (it is off by default).'; kind = 'action'; labels = @('Ingress'); key = 'checked'; indices = @(0) }
         @{ lab = '4.3'; id = '4.3.6'; text = '... -> check **Overwrite if files already exist** -> **Upload**'; kind = 'navigation'; labels = @('Upload', 'Overwrite if files already exist', 'Upload'); key = 'checked'; indices = @(1) }
     ) {
         $items = @(($script:StateLabs[$lab].steps | Where-Object id -eq $id).items |
@@ -1350,7 +1351,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '1.3.9/Allowed locations | Sweden Central | North Europe/checked=1,2'
             '3.3.7/Use quickstart image/unchecked=0'
             '3.3.2/Admin user/checked=0'
-            '3.3.2/Admin user/stateOnly=0'
+            '3.3.8/Ingress/checked=0'
             '4.2.5/Enable soft delete for blobs/checked=0'
             '4.2.6/Enable soft delete for containers/checked=0'
             '4.2.7/Enable versioning for blobs/checked=0'
@@ -1375,10 +1376,17 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @(Get-StatedItem | Sort-Object) | Should -Be @($expected | Sort-Object)
     }
 
-    It 'never clicks the value a switch is set to: Enabled in step 3.3.2' {
-        $labels = @((Get-StateStep '3.3' '3.3.2').items | ForEach-Object { $_.labels })
+    # Step 3.3.2 said 'Toggle **Admin user** to **Enabled**.' until the Portal pass of 2026-10-15
+    # found a check box (#229); no guide line has the switch-value shape now, and test_parse.py
+    # keeps the rule pinned on a fixture.
+    It 'never clicks a state word in step 3.3.2: Access keys is opened, then Admin user is ticked' {
+        $items  = @((Get-StateStep '3.3' '3.3.2').items)
+        $labels = @($items | ForEach-Object { $_.labels })
         $labels | Should -Not -Contain 'Enabled'
         $labels | Should -Contain 'Access keys'
+        $access = @($items | Where-Object { (@($_.labels) -join "`n") -ceq 'Access keys' })[0]
+        $admin  = @($items | Where-Object { (@($_.labels) -join "`n") -ceq 'Admin user' })[0]
+        [array]::IndexOf($items, $admin) | Should -BeGreaterThan ([array]::IndexOf($items, $access))
     }
 
     # A menu group or a section heading: clicking a Portal menu group collapses it.
@@ -1386,7 +1394,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @{ lab = '1.3'; id = '1.3.18'; text = 'Under **Cost Management** click **Cost analysis**'; labels = @('Cost analysis') }
         @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Settings**, select **Networking**.'; labels = @('Networking') }
         @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Outbound traffic configuration**, click **VNet integration**.'; labels = @('VNet integration') }
-        @{ lab = '3.3'; id = '3.3.2'; text = 'In the left menu, under **Settings**, select **Access keys**.'; labels = @('Access keys') }
+        @{ lab = '3.3'; id = '3.3.2'; text = 'In the left menu, under **Settings** (expand it if it is collapsed), click **Access keys**.'; labels = @('Access keys') }
         @{ lab = '4.2'; id = '4.2.2'; text = 'Click **Containers** under **Data storage**'; labels = @('Containers') }
         @{ lab = '5.2'; id = '5.2.2'; text = 'Under **Instant restore**, fill in **Azure Backup Resource Group**: ...'; labels = @('Azure Backup Resource Group') }
     ) {

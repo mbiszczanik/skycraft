@@ -7,6 +7,16 @@
     created for Lab 3.3. It preserves the Resource Group (<Environment>-skycraft-swc-rg) as it
     may contain resources from other labs (e.g., VNets).
 
+    It also removes the Log Analytics workspace the Portal creates when the Container Apps
+    environment is created with the wizard's default logs destination (issue #374): a workspace
+    in the resource group that the environment sends its logs to, or whose name is the Portal's
+    automatic one ('workspace' followed by the resource group's name without dashes and a short
+    suffix). Left behind, Module 5 wizards offer it as their default workspace. The lab guide
+    chooses Azure Monitor, which creates no workspace, so on the guide's path and the Bicep path
+    this step finds nothing. A workspace with any other name, or in another resource group, is
+    never touched. The workspace stays when the environment could not be looked up or deleted:
+    the environment may still send its logs to it.
+
     A resource that does not exist is reported and skipped. A resource that exists but cannot
     be deleted is reported as [ERROR] with the Azure error message and counted; the later
     steps still run, and the script exits 1 if any step failed, so an orchestrated cycle can
@@ -185,9 +195,17 @@ if (-not $context) {
     Exit-Lab -FailureCount 1
 }
 
+# The name the Portal gives the workspace it creates for a new Container Apps environment:
+# 'workspace', the resource group's name without dashes, and a short suffix (#374).
+$autoWorkspacePattern = '^workspace-?' + [regex]::Escape(($ResourceGroupName -replace '[^A-Za-z0-9]', '').ToLowerInvariant()) + '[0-9a-z]*$'
+# The customer id of the workspace the environment sends its logs to, read when the environment
+# is looked up and before it is deleted.
+$script:caeWorkspaceCustomerId = $null
+
 $resourcesToDelete = @(
     @{ Name = $AcaName; Type = "Container App" },
     @{ Name = $CaeName; Type = "Container Apps Environment" },
+    @{ Name = "any the Portal created for $CaeName"; Type = "Log Analytics workspace" },
     @{ Name = $AciName; Type = "Container Instance" },
     @{ Name = $AcrName; Type = "Container Registry" }
 )
@@ -200,13 +218,29 @@ foreach ($res in $resourcesToDelete) {
 
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
 
-# Delete order matters: the app must go before its environment, and the environment stays when
-# the app could not be looked up or deleted (KeepWhenFailed names the step whose failure keeps it).
+# Delete order matters: the app must go before its environment, the environment stays when the
+# app could not be looked up or deleted, and the environment's workspace stays when the
+# environment could not be (KeepWhenFailed names the steps whose failure keeps it, KeepReason
+# says why). A step without Find looks its one resource up by name.
 $steps = @(
     @{ Type = 'Container App';              Name = $AcaName; ResourceType = 'Microsoft.App/containerApps'
        Remove = { param($r) Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null } }
     @{ Type = 'Container Apps Environment'; Name = $CaeName; ResourceType = 'Microsoft.App/managedEnvironments'
-       KeepWhenFailed = 'Container App'
+       KeepWhenFailed = @('Container App'); KeepReason = 'may still be in it'
+       # Expanded, so the workspace step below can find the workspace this environment logs to.
+       Find = { Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.App/managedEnvironments' -Name $CaeName -ExpandProperties -ErrorAction Stop }
+       Remove = { param($r) Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null } }
+    @{ Type = 'Log Analytics workspace';    Name = "any the Portal created for $CaeName"; ResourceType = 'Microsoft.OperationalInsights/workspaces'
+       KeepWhenFailed = @('Container App', 'Container Apps Environment'); KeepReason = 'may still send its logs to it'
+       # Only in this resource group, and only the environment's own workspace or one with the
+       # Portal's automatic name (#374); every other workspace is left alone.
+       Find = {
+           Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.OperationalInsights/workspaces' -ExpandProperties -ErrorAction Stop |
+               Where-Object {
+                   $_.Name -match $autoWorkspacePattern -or
+                   ($script:caeWorkspaceCustomerId -and "$($_.Properties.customerId)" -eq $script:caeWorkspaceCustomerId)
+               }
+       }
        Remove = { param($r) Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null } }
     @{ Type = 'Container Instance';         Name = $AciName; ResourceType = 'Microsoft.ContainerInstance/containerGroups'
        Remove = { param($r) Remove-AzContainerGroup -Name $r.Name -ResourceGroupName $ResourceGroupName -ErrorAction Stop | Out-Null } }
@@ -214,41 +248,50 @@ $steps = @(
        Remove = { param($r) Remove-AzContainerRegistry -Name $r.Name -ResourceGroupName $ResourceGroupName -ErrorAction Stop | Out-Null } }
 )
 
-# The steps that failed, by type: 'looked up' or 'deleted', for the message of the step they keep.
+# The steps that did not remove their resource, by type: 'looked up' or 'deleted', for the message
+# of the steps they keep. A kept step counts as not deleted for the steps that depend on it.
 $stepFailed = @{}
 
 foreach ($step in $steps) {
     Write-Host "Removing $($step.Type): $($step.Name)..." -ForegroundColor Yellow
-    if ($step.KeepWhenFailed -and $stepFailed[$step.KeepWhenFailed]) {
+    $keptBy = @($step.KeepWhenFailed | Where-Object { $_ -and $stepFailed[$_] }) | Select-Object -First 1
+    if ($keptBy) {
         # Not counted again: the failure that keeps it already is.
-        Write-Host "  -> [SKIP] Kept: the $($step.KeepWhenFailed) could not be $($stepFailed[$step.KeepWhenFailed]) and may still be in it." -ForegroundColor Yellow
+        Write-Host "  -> [SKIP] Kept: the $keptBy could not be $($stepFailed[$keptBy]) and $($step.KeepReason)." -ForegroundColor Yellow
+        $stepFailed[$step.Type] = 'deleted'
         continue
     }
     if (-not $PSCmdlet.ShouldProcess($step.Name, "Remove $($step.Type)")) { continue }
 
     # The Container Apps types have no base-module cmdlet in the Az gold-path, so every step
-    # resolves its target through the generic ARM lookup and the app/environment steps delete
-    # through it too.
-    $lookup = Invoke-LabLookup -Target "$($step.Type) '$($step.Name)'" -Lookup {
-        Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType $step.ResourceType -Name $step.Name -ErrorAction Stop
-    }
+    # resolves its target through the generic ARM lookup and the app/environment/workspace steps
+    # delete through it too.
+    $find = if ($step.Find) { $step.Find } else { { Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType $step.ResourceType -Name $step.Name -ErrorAction Stop } }
+    $lookup = Invoke-LabLookup -Target "$($step.Type) '$($step.Name)'" -Lookup $find
     if ($lookup.Failed) {
         $stepFailed[$step.Type] = 'looked up'
         continue
     }
-    $resource = $lookup.Value | Select-Object -First 1
-    if (-not $resource) {
+    $found = @($lookup.Value | Where-Object { $_ })
+    if ($step.Type -eq 'Container Apps Environment' -and $found) {
+        $script:caeWorkspaceCustomerId = $found[0].Properties.appLogsConfiguration.logAnalyticsConfiguration.customerId
+    }
+    # A lookup by name finds at most one resource; the workspace step may find several.
+    if ($step.Type -ne 'Log Analytics workspace') { $found = @($found | Select-Object -First 1) }
+    if ($found.Count -eq 0) {
         Write-Host "  -> [INFO] Not found - nothing to delete." -ForegroundColor Gray
         continue
     }
 
-    try {
-        & $step.Remove $resource
-        Write-Host "  -> Deleted" -ForegroundColor Green
-    } catch {
-        $script:cleanupFailures++
-        $stepFailed[$step.Type] = 'deleted'
-        Write-Host "  -> [ERROR] Could not delete $($step.Type) '$($step.Name)': $_" -ForegroundColor Red
+    foreach ($resource in $found) {
+        try {
+            & $step.Remove $resource
+            Write-Host "  -> Deleted $($resource.Name)" -ForegroundColor Green
+        } catch {
+            $script:cleanupFailures++
+            $stepFailed[$step.Type] = 'deleted'
+            Write-Host "  -> [ERROR] Could not delete $($step.Type) '$($resource.Name)': $_" -ForegroundColor Red
+        }
     }
 }
 
