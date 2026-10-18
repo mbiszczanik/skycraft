@@ -93,9 +93,9 @@ Get-AzResourceGroup -Name platform-skycraft-swc-rg, dev-skycraft-swc-rg, prod-sk
 > **Run the Module 4 labs in order (4.1 → 4.2 → 4.3 → 4.4).** All four configure the **same**
 > three storage accounts, and they are cumulative forward: each lab replaces the account-level
 > properties and the sub-services it owns, while leaving the sub-services it does not own alone.
-> Re-running Lab 4.2 after Lab 4.3 resets file-share retention from 14 days back to 7; re-running
-> Lab 4.1 after Lab 4.2 turns production blob versioning back off, and after Lab 4.3 it too resets
-> file-share retention to 7 days. See `docs/bicep-standards.md`
+> Re-running Lab 4.1 after Lab 4.2 turns production blob versioning back off, and after Lab 4.3
+> it resets file-share retention from 14 days back to 7. Lab 4.2's and Lab 4.4's Bicep leave the
+> file service alone, so re-running them keeps the 14 days. See `docs/bicep-standards.md`
 > §4.5 for the mechanism.
 
 **Preview - the AVM module call the Bicep path makes**:
