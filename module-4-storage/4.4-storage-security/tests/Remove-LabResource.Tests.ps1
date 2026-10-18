@@ -356,6 +356,10 @@ Describe 'Lab 4.4 Remove-LabResource.ps1 - a failed step is counted' {
         $run.Output   | Should -Match '\[ERROR\] Failed to revert firewall'
         $run.Output   | Should -Match '\[ERROR\] Failed to remove assignment 1 of 2\.'
         $run.Output   | Should -Not -Match "'first'"
+        # The holder removed after the failure is reported by its place in the list too, never by name or id.
+        $run.Output   | Should -Match '-> Removed assignment 2 of 2\.'
+        $run.Output   | Should -Not -Match "'second'"
+        $run.Output   | Should -Not -Match '22222222-2222-2222-2222-222222222222'
         $run.Output   | Should -Match 'Cleanup finished with 2 failure\(s\)'
         $run.Output   | Should -Not -Match 'Cleanup Complete'
     }

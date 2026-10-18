@@ -166,15 +166,15 @@ The storage firewall works on the **data plane** only: requests to the blobs, fi
 Lab 2.2 (Step 2.2.15) added the `Microsoft.Storage` service endpoint to `WorldSubnet`, so this step is a check: you change something only if the endpoint is missing.
 
 1. In Azure Portal, search for **Virtual networks**
-2. Click `prod-skycraft-swc-vnet`
-3. In the left menu, under **Settings**, click **Subnets**
-4. Click `WorldSubnet`. The *Edit subnet* pane opens.
-5. Check that the services table under *Service Endpoints* lists `Microsoft.Storage`.
-6. Only if `Microsoft.Storage` is not in the table: open the **Select a service endpoint** dropdown, select **Microsoft.Storage** and click **Save**. Otherwise click **Cancel**.
+2. Select `prod-skycraft-swc-vnet` → **Subnets** (in the left menu, under **Settings**) → `WorldSubnet`. The *Edit subnet* pane opens.
+3. Check that the services table under *Service Endpoints* lists `Microsoft.Storage`.
+4. If the table lists `Microsoft.Storage`, click **Cancel**: the endpoint is in place.
+
+   Only if `Microsoft.Storage` is not in the table: instead of **Cancel**, open the **Select a service endpoint** dropdown, select **Microsoft.Storage** and click **Save**.
 
 **Expected Result**: The **Services** table of `WorldSubnet` lists `Microsoft.Storage`.
 
-**With Az PowerShell** (instead of items 1-6; it adds the endpoint only if it is missing, and keeps the subnet's other settings):
+**With Az PowerShell** (instead of items 1-4; it adds the endpoint only if it is missing, and keeps the subnet's other settings):
 
 ```powershell
 $vnet   = Get-AzVirtualNetwork -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prod-skycraft-swc-vnet'
@@ -191,19 +191,18 @@ if ($subnet.ServiceEndpoints.Service -notcontains 'Microsoft.Storage') {
 ### Step 4.4.2: Configure Storage Firewall
 
 > [!WARNING]
-> **This step can lock you out of the account's data.** After **Save**, the account answers data requests only from `WorldSubnet` and from the IP addresses you list. Your browser, the PowerShell blocks of Sections 2 and 4 and `Test-Lab.ps1` all reach the data from your computer's public IP address, so add it (item 7). If that address changes later - another network, a VPN, a mobile hotspot - the Portal's container views show *This request is not authorized to perform this operation* until you add the new address on the same page (Troubleshooting, Issue 1).
+> **This step can lock you out of the account's data.** After **Save**, the account answers data requests only from `WorldSubnet` and from the IP addresses you list. Your browser, the PowerShell blocks of Sections 2 and 4 and `Test-Lab.ps1` all reach the data from your computer's public IP address, so add it (item 6). If that address changes later - another network, a VPN, a mobile hotspot - the Portal's container views show *This request is not authorized to perform this operation* until you add the new address on the same page (Troubleshooting, Issue 1).
 >
 > Do not choose **Disable** or **Secured by perimeter** under **Public network access**: either one closes the public endpoint to your computer too, and only a private endpoint or a network security perimeter would let you in again.
 
 1. In Azure Portal, search for **Storage accounts**
-2. Click `prodskycraftswcsa`
-3. In the left menu, under **Security + networking**, click **Networking**
-4. Next to *Public network access* (it shows *Enabled from all networks*), click **Manage**. The *Public network access* page opens.
-5. Under **Public network access**, leave **Enable** selected
-6. Under **Public network access scope**, select **Enabled from selected networks**
-7. Under **IPv4 Addresses**, click **+ Add your client IPv4 address**. Your address appears in the list.
-8. Under **Virtual Networks**, click **+ Add a virtual network**, then **Add existing virtual network**. The *Add networks* pane opens.
-9. In the *Add networks* pane, fill in:
+2. Select `prodskycraftswcsa` → **Networking** (in the left menu, under **Security + networking**)
+3. Next to *Public network access* (it shows *Enabled from all networks*), click **Manage**. The *Public network access* page opens.
+4. Under **Public network access**, leave **Enable** selected
+5. Under **Public network access scope**, select **Enabled from selected networks**
+6. Under **IPv4 Addresses**, click **+ Add your client IPv4 address**. Your address appears in the list.
+7. Under **Virtual Networks**, click **+ Add a virtual network**, then **Add existing virtual network**. The *Add networks* pane opens.
+8. In the *Add networks* pane, fill in:
 
 | Field | Value |
 | ----- | ----- |
@@ -213,15 +212,15 @@ if ($subnet.ServiceEndpoints.Service -notcontains 'Microsoft.Storage') {
 
    A subnet marked *(Service endpoint required)* has no `Microsoft.Storage` endpoint: go back to Step 4.4.1. Leave the other subnets out; each one you add is let through the firewall.
 
-10. In the *Add networks* pane, click **Add**
-11. Under **Exceptions**, leave **Allow Azure services on the trusted services list to access this storage account** checked
-12. Click **Save** at the bottom of the page.
+9. In the *Add networks* pane, click **Add**
+10. Under **Exceptions**, leave **Allow Azure services on the trusted services list to access this storage account** checked
+11. Click **Save** at the bottom of the page.
 
 The trusted services exception lets Azure services such as Azure Backup (Lab 5.2) reach the account; the Bicep path sets the same exception (`bypass: AzureServices`). The other two exceptions, read access to storage logging and to storage metrics from any network, stay unchecked: each would open the account's logs or metrics to every network. Leave **Resource instances** empty as well: an entry there lets one resource of another service through the firewall.
 
 **Expected Result**: Back on the **Networking** page, **Public network access** shows *Enabled from selected networks*, with a summary of *Virtual networks 1*, *IPv4 addresses 1* and *Exceptions 1*. The firewall applies within a minute or so; if a container view fails right after **Save**, wait and reload.
 
-**With Az PowerShell** (instead of items 1-12). Run it on your own computer: the IP address it adds is the one this computer uses.
+**With Az PowerShell** (instead of items 1-11). Run it on your own computer: the IP address it adds is the one this computer uses.
 
 ```powershell
 $clientIp = (Invoke-RestMethod -Uri 'https://api.ipify.org').Trim()
@@ -263,13 +262,12 @@ A stored access policy works only with a **service SAS** signed with an account 
 On every path the policy lives on the container `dev-assets`, which this step creates. The Bicep path creates the same container.
 
 1. In Azure Portal, search for **Storage accounts**
-2. Click `prodskycraftswcsa`
-3. In the left menu, under **Data storage**, click **Containers**
-4. Only if `dev-assets` is not in the containers list: click **+ Add container**. If it is there already - from an earlier run of this lab or from the Bicep path - go on to item 7.
+2. Select `prodskycraftswcsa` → **Containers** (in the left menu, under **Data storage**)
+3. Only if `dev-assets` is not in the containers list: click **+ Add container**. If it is there already - from an earlier run of this lab or from the Bicep path - go on to item 6.
 
    If you deleted `dev-assets` less than a minute ago - this lab's cleanup deletes it - wait a minute before you create it again: Azure refuses the name of a deleted container for at least 30 seconds, and **Create** then fails with a message that the container is being deleted (Troubleshooting, Issue 5).
 
-5. In the *New container* pane, fill in:
+4. In the *New container* pane, fill in:
 
 | Field | Value |
 | ----- | ----- |
@@ -277,10 +275,10 @@ On every path the policy lives on the container `dev-assets`, which this step cr
 
    **Anonymous access level** is greyed out at **Private (no anonymous access)**: Lab 4.1 turned anonymous access off for the account. Leave the **Advanced** section as it is: version-level immutability support, once turned on for a container, cannot be turned off, and an immutability policy would stop this lab's cleanup from deleting the container's blobs.
 
-6. Click **Create**
-7. In the containers list, on the `dev-assets` row, click **...** (More), then **Access policy**. You do not need to open the container first.
-8. Under **Stored access policies**, click **+ Add policy**. The *Add policy* pane opens.
-9. In the *Add policy* pane, fill in:
+5. Click **Create**
+6. In the containers list, on the `dev-assets` row, click **...** (More), then **Access policy**. You do not need to open the container first.
+7. Under **Stored access policies**, click **+ Add policy**. The *Add policy* pane opens.
+8. In the *Add policy* pane, fill in:
 
 | Field | Value |
 | ----- | ----- |
@@ -291,14 +289,14 @@ On every path the policy lives on the container `dev-assets`, which this step cr
 
    Select no other permission: **Write**, **Delete**, **Add**, **Create** and the rest let anyone who holds a token change or delete the container's blobs. Keep the expiry short: every token that names the policy works until then, unless you delete the policy first. Type the date and time, or pick them; do not press Escape in a date field - it closes the whole pane and loses what you typed.
 
-10. In the *Add policy* pane, click **OK**
-11. On the toolbar of the *Access policy* page, click **Save**
+9. In the *Add policy* pane, click **OK**
+10. On the toolbar of the *Access policy* page, click **Save**
 
 **Expected Result**: The **Access policy** page of `dev-assets` lists `DevRevokePolicy` under **Stored access policies**, with permissions `rl` and tomorrow's expiry. Without **Save** the policy is not stored.
 
 > **Note**: Opening a container by its name may keep loading in today's Portal; this step uses the row's **...** menu for that reason. If the menu has no **Access policy** entry, use the PowerShell block below.
 
-**With Az PowerShell** (instead of items 1-11). The account's context uses the account key, which your Owner role may read; run it on the computer whose address Step 4.4.2 allowed:
+**With Az PowerShell** (instead of items 1-10). The account's context uses the account key, which your Owner role may read; run it on the computer whose address Step 4.4.2 allowed:
 
 ```powershell
 # Only if dev-assets is not there yet (an earlier run, or the Bicep path). If you deleted it less
@@ -323,7 +321,7 @@ You create a token that names the policy, use it, revoke it by deleting the poli
 > [!WARNING]
 > The **Blob SAS URL** this step shows is a password to the container: anyone who has it can list the container until the policy is deleted or expires. Do not paste it into a chat, an issue or a screenshot. Item 12 revokes it.
 
-1. Go back to `prodskycraftswcsa` → **Containers** (in the left menu, under **Data storage**)
+1. Go to `prodskycraftswcsa` → **Containers** (in the left menu, under **Data storage**)
 2. On the `dev-assets` row, click **...** (More), then **Generate SAS**
 3. In the *Generate SAS* pane, fill in:
 
@@ -338,7 +336,7 @@ You create a token that names the policy, use it, revoke it by deleting the poli
    With a stored access policy selected, **Permissions**, **Start** and **Expiry** are greyed out: the token takes them from the policy. Without a policy the pane's own defaults apply - **Read** and an expiry about eight hours away - and such an ad hoc token can be revoked only by rotating the key that signed it (Section 3). **User delegation key** cannot use a stored access policy. An address in **Allowed IP addresses** would narrow the token further; the firewall of Step 4.4.2 already does that here.
 
 4. Click **Generate SAS token and URL**
-5. Copy the **Blob SAS URL**
+5. Copy the URL that the pane shows under *Blob SAS URL*
 6. Open a new browser tab, paste the URL, add `&restype=container&comp=list` to its end, and press Enter.
 
 **Expected Result**: The browser shows an XML document, `EnumerationResults`, for the container `dev-assets` - an empty list of blobs. The token lists the container because the policy grants **List**. If you saved the policy in Step 4.4.3 less than 30 seconds ago, the answer may instead be an XML error with the code `AuthenticationFailed` (HTTP 403): a new stored access policy takes up to 30 seconds to take effect, too. Wait 30 seconds and reload the tab.
@@ -395,17 +393,16 @@ A rotation invalidates everything signed with the old key: connection strings, L
 > A rotation cannot be undone: the old key stops working at once, and everything signed with it fails until it gets the new key.
 
 1. In Azure Portal, search for **Storage accounts**
-2. Click `prodskycraftswcsa`
-3. In the left menu, under **Security + networking**, click **Access keys**
-4. Note the date that `key1`'s *Last rotated* shows
-5. Next to `key1`, click **Rotate key**
-6. In the confirmation dialog, click **Yes**
+2. Select `prodskycraftswcsa` → **Access keys** (in the left menu, under **Security + networking**)
+3. Note the date that `key1`'s *Last rotated* shows
+4. Next to `key1`, click **Rotate key**
+5. In the confirmation dialog, click **Yes**
 
 **Expected Result**: `key1`'s *Last rotated* shows today's date. Do not click **Show** to check the new value: a key shown on screen is a password to the whole account, and does not belong in a screenshot.
 
 > **Note**: The page also offers **Set rotation reminder**, which records a reminder interval (a key expiration policy) on the account; it is free, and this lab sets none. The **Security + networking** group also lists **Microsoft Defender for Cloud**: leave Defender for Storage off - it is billed per storage account each month, and its malware scanning per GB scanned.
 
-**With Az PowerShell** (instead of items 1-6). The output shows each key's name and creation time, not its value:
+**With Az PowerShell** (instead of items 1-5). The output shows each key's name and creation time, not its value:
 
 ```powershell
 New-AzStorageAccountKey -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa' -KeyName 'key1' | Out-Null
@@ -454,17 +451,16 @@ An **Owner** of the subscription has no data role. It reaches the blobs only by 
 If you ran the optional Azure CLI commands of Lab 4.2 (Step 4.2.11), you hold this role on the account already: the wizard below then reports that the role assignment already exists. That is the state this step wants; go on to Step 4.4.8.
 
 1. In Azure Portal, search for **Storage accounts**
-2. Click `prodskycraftswcsa`
-3. In the left menu, click **Access control (IAM)**
-4. Click **+ Add** → **Add role assignment**
-5. On the **Role** tab:
+2. Select `prodskycraftswcsa` → **Access control (IAM)** (in the left menu)
+3. Click **+ Add** → **Add role assignment**
+4. On the **Role** tab:
 
    - Click **Job function roles**
    - Search for **"Storage Blob Data Contributor"**
    - Click **Storage Blob Data Contributor** (not Storage Blob Data Owner, which can also change the access rules, nor Storage Blob Data Reader, which cannot write)
    - Click **Next**
 
-6. On the **Members** tab:
+5. On the **Members** tab:
 
    - **Assign access to**: User, group, or service principal
    - Click **+ Select members**
@@ -473,21 +469,21 @@ If you ran the optional Azure CLI commands of Lab 4.2 (Step 4.2.11), you hold th
    - Click **Select**
    - Click **Next**
 
-7. The **Conditions** tab opens: storage data roles can carry a condition that narrows them, for example to one container. Add no condition here.
-8. Only if the wizard shows an Assignment type tab:
+6. The **Conditions** tab opens: storage data roles can carry a condition that narrows them, for example to one container. Add no condition here.
+7. Only if the wizard shows an Assignment type tab:
 
    - **Assignment type**: Active
    - **Assignment duration**: Permanent
 
    An **Eligible** assignment gives no access until you activate it.
 
-9. Click the **Review + assign** tab, then click **Review + assign**
+8. Click the **Review + assign** tab, then click **Review + assign**
 
 **Expected Result**: On the **Role assignments** tab of **Access control (IAM)**, **Storage Blob Data Contributor** lists your account with the scope *This resource*.
 
 **Wait about five minutes** before Step 4.4.8: a new role assignment takes a few minutes to take effect on the data plane.
 
-**With Az PowerShell** (instead of items 1-9). It assigns the role only if you do not hold it on the account already (Lab 4.2, Step 4.2.11): a second assignment fails with `RoleAssignmentExists`.
+**With Az PowerShell** (instead of items 1-8). It assigns the role only if you do not hold it on the account already (Lab 4.2, Step 4.2.11): a second assignment fails with `RoleAssignmentExists`.
 
 ```powershell
 $scope    = (Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa').Id
@@ -502,16 +498,15 @@ if (-not $existing) {
 ### Step 4.4.8: Access Blobs with Your Entra ID Identity
 
 1. On your computer, create a text file named `hello-skycraft.txt` that contains the line `Hello from SkyCraft`.
-2. In Azure Portal, go to `prodskycraftswcsa` → **Containers** (in the left menu, under **Data storage**)
-3. Click `dev-assets`
-4. Next to *Authentication method* (it shows *Access key*), click **Switch to Microsoft Entra user account**
-5. Click **Upload**, then **Browse for files**, choose your `hello-skycraft.txt` and click **Upload**
+2. Go to `prodskycraftswcsa` → **Containers** (in the left menu, under **Data storage**) → `dev-assets`
+3. Next to *Authentication method* (it shows *Access key*), click **Switch to Microsoft Entra user account**
+4. Click **Upload**, then **Browse for files**, choose your `hello-skycraft.txt` and click **Upload**
 
 **Expected Result**: **Authentication method** shows *Microsoft Entra user account*, and `hello-skycraft.txt` is listed in `dev-assets`. The upload used your role, not the account key. If the Portal says you do not have permissions to list the data using your user account, the role has not taken effect yet: wait a few minutes and reload.
 
 > **Note**: If the `dev-assets` container page keeps loading, use the PowerShell block below; it does the same with your identity.
 
-**With Az PowerShell** (instead of items 1-5). `-UseConnectedAccount` signs the requests with your Az session's identity; no key is read:
+**With Az PowerShell** (instead of items 1-4). `-UseConnectedAccount` signs the requests with your Az session's identity; no key is read:
 
 ```powershell
 'Hello from SkyCraft' | Out-File -FilePath 'hello-skycraft.txt' -Encoding utf8
@@ -575,32 +570,32 @@ While Lab 1.3's delete lock (`lock-no-delete-prod`) is on `prod-skycraft-swc-rg`
 ### Issue 1: "This request is not authorized to perform this operation" in Portal
 
 **Symptom**: After Step 4.4.2 the Portal cannot list the containers or their blobs, or shows *This request is not authorized to perform this operation*.
-**Cause**: The Portal reads the data from your browser's public IP address. If that address is not in the firewall - you skipped item 7 of Step 4.4.2, or you are now on another network or a VPN - the account refuses it.
+**Root Cause**: The Portal reads the data from your browser's public IP address. If that address is not in the firewall - you skipped item 6 of Step 4.4.2, or you are now on another network or a VPN - the account refuses it.
 **Solution**: `prodskycraftswcsa` → **Networking** (under **Security + networking**) → **Manage** → under **IPv4 Addresses**, click **+ Add your client IPv4 address** → **Save**, then wait a minute. This page is part of the control plane, which the firewall does not block.
 
 ### Issue 2: Key rotation breaks legacy mounting
 
 **Symptom**: Lab 4.3's file share mounts (drive `Z:` on Windows, the Linux mount) fail after Step 4.4.5.
-**Cause**: Mounting via Storage Key uses that specific key, and Lab 4.3's commands used `key1`.
+**Root Cause**: Mounting via Storage Key uses that specific key, and Lab 4.3's commands used `key1`.
 **Solution**: Mount the share again with the current key (Lab 4.3, Steps 4.3.7 and 4.3.8 read it afresh). In production, use the other key for mounting first: move the mounts to `key2`, rotate `key1`, move them back to the new `key1`, rotate `key2`.
 
 ### Issue 3: SAS Token still works after policy deletion
 
 **Symptom**: Access remains for a short period.
-**Cause**: A change to a stored access policy takes up to 30 seconds to take effect. Or the policy was deleted from the list but not saved.
+**Root Cause**: A change to a stored access policy takes up to 30 seconds to take effect. Or the policy was deleted from the list but not saved.
 **Solution**: Make sure you clicked **Save** on the **Access policy** page, wait 30 seconds and retry.
 
 ### Issue 4: The upload with your identity fails with `AuthorizationPermissionMismatch`
 
 **Symptom**: Step 4.4.8 fails, in the Portal with a message that you do not have permissions to list the data using your user account, or in PowerShell with `AuthorizationPermissionMismatch`.
-**Cause**: The role of Step 4.4.7 has not taken effect yet, or it was assigned to another account, or at another scope.
+**Root Cause**: The role of Step 4.4.7 has not taken effect yet, or it was assigned to another account, or at another scope.
 **Solution**: Wait about five minutes after the assignment. Then check **Access control (IAM)** → **Role assignments** of `prodskycraftswcsa` for **Storage Blob Data Contributor** with your account.
 
 ### Issue 5: Creating `dev-assets` fails in Step 4.4.3
 
 **Symptom**: **Create** in the *New container* pane fails with a message that the container is being deleted, or that it already exists; `New-AzRmStorageContainer` fails with a conflict (HTTP 409) that says the same.
-**Cause**: After a container is deleted, Azure refuses its name for at least 30 seconds - longer while the delete is still being processed. This lab's cleanup deletes `dev-assets`, so a re-run right after it hits this. Or `dev-assets` is there already, from an earlier run or from the Bicep path.
-**Solution**: If it is being deleted, wait a minute and click **Create** again. If it exists, do not create it again: go on to item 7 of Step 4.4.3 and add the policy to the existing container.
+**Root Cause**: After a container is deleted, Azure refuses its name for at least 30 seconds - longer while the delete is still being processed. This lab's cleanup deletes `dev-assets`, so a re-run right after it hits this. Or `dev-assets` is there already, from an earlier run or from the Bicep path.
+**Solution**: If it is being deleted, wait a minute and click **Create** again. If it exists, do not create it again: go on to item 6 of Step 4.4.3 and add the policy to the existing container.
 
 ## 🎓 Knowledge Check
 
