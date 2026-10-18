@@ -5,10 +5,14 @@
 .DESCRIPTION
     Verifies storage accounts exist with correct configuration:
     - Naming conventions
-    - Redundancy settings (LRS/GRS/GZRS)
+    - Redundancy settings (LRS for dev, GRS for platform and prod; RA-GRS fails with a hint)
     - Security settings (TLS 1.2, HTTPS only, no public access)
     - Required tags (Project, Environment, CostCenter)
     - Encryption settings
+    - Soft delete for blobs, containers and file shares
+
+    Every path in the guide (Portal, Az PowerShell, Azure CLI, Bicep) sets all of these. A lookup
+    of the blob or file service properties that fails is a counted [FAIL] with its error.
 
 .PARAMETER Environment
     Validate specific environment only. If not specified, validates all.
@@ -24,8 +28,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 4.1 - Storage Accounts
-    Version: 1.0.0
-    Date: 2026-02-05
+    Version: 1.1.0
+    Date: 2026-10-18
 #>
 
 #Requires -Version 7.0
@@ -131,11 +135,16 @@ foreach ($env in $envsToTest) {
         continue
     }
     
-    # Test redundancy/SKU
+    # Test redundancy/SKU. RA-GRS is what the Portal's Basics tab makes of GRS when "Make read access
+    # to data available in the event of regional unavailability" is left checked (#358).
+    $skuHint = if ($sa.Sku.Name -like '*RAGRS') {
+        " - 'Make read access to data available in the event of regional unavailability' was checked on the Basics tab (guide, Troubleshooting Issue 8)"
+    }
+    else { '' }
     Test-Condition `
         -Description "Redundancy is $($config.ExpectedSku)" `
         -Condition ($sa.Sku.Name -eq $config.ExpectedSku) `
-        -FailMessage "Actual: $($sa.Sku.Name)" | Out-Null
+        -FailMessage "Actual: $($sa.Sku.Name)$skuHint" | Out-Null
     
     # Test location
     Test-Condition `
@@ -187,14 +196,16 @@ foreach ($env in $envsToTest) {
         -Condition ($tags['CostCenter'] -eq 'MSDN') `
         -FailMessage "Actual: $($tags['CostCenter'])" | Out-Null
     
-    # Test blob service properties (soft delete)
+    # Test blob service properties (soft delete). A lookup that fails is a counted [FAIL] with its
+    # error, not a warning: it cannot tell whether soft delete is on (docs/powershell-standards.md
+    # section 4, rule 7).
     try {
         $blobProps = Get-AzStorageBlobServiceProperty -StorageAccountName $config.Name -ResourceGroupName $config.ResourceGroup -ErrorAction Stop
-        
+
         Test-Condition `
             -Description "Blob soft delete enabled" `
             -Condition ($blobProps.DeleteRetentionPolicy.Enabled -eq $true) | Out-Null
-        
+
         if ($blobProps.ContainerDeleteRetentionPolicy) {
             Test-Condition `
                 -Description "Container soft delete enabled" `
@@ -202,7 +213,24 @@ foreach ($env in $envsToTest) {
         }
     }
     catch {
-        Test-Warning -Description "Could not check blob service properties" -Message $_.Exception.Message
+        Test-Condition -Description "Blob service properties readable" -Condition $false `
+            -FailMessage $_.Exception.Message | Out-Null
+    }
+
+    # Test file service properties (file share soft delete). The Portal's Data protection tab, the
+    # guide's PowerShell and CLI blocks and the Bicep all turn it on for 7 days (#358); Lab 4.3
+    # changes the retention, never the switch, so only the switch is checked.
+    try {
+        $fileProps = Get-AzStorageFileServiceProperty -StorageAccountName $config.Name -ResourceGroupName $config.ResourceGroup -ErrorAction Stop
+
+        Test-Condition `
+            -Description "File share soft delete enabled" `
+            -Condition ($fileProps.ShareDeleteRetentionPolicy.Enabled -eq $true) `
+            -FailMessage "Enable soft delete for classic file shares (Data protection) is off" | Out-Null
+    }
+    catch {
+        Test-Condition -Description "File service properties readable" -Condition $false `
+            -FailMessage $_.Exception.Message | Out-Null
     }
 }
 

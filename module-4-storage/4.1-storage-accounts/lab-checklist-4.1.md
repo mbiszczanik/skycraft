@@ -13,7 +13,7 @@
 - [ ] Resource group: `platform-skycraft-swc-rg`
 - [ ] Performance tier: **Standard**
 - [ ] Account kind: **StorageV2 (general-purpose v2)**
-- [ ] Redundancy: **Geo-redundant storage (GRS)**
+- [ ] Redundancy: **Geo-redundant storage (GRS)**, without read access (not RA-GRS)
 - [ ] Access tier: **Hot**
 
 ### Security Settings
@@ -22,7 +22,14 @@
 - [ ] Allow Blob anonymous access: **Disabled**
 - [ ] Minimum TLS version: **TLS 1.2**
 - [ ] Storage account key access: **Enabled**
-- [ ] Encryption: **Microsoft-managed keys**
+- [ ] Encryption: **Microsoft-managed keys**, infrastructure encryption **Disabled**
+
+### Data Protection
+
+- [ ] Soft delete for blobs: **Enabled** (7 days)
+- [ ] Soft delete for containers: **Enabled** (7 days)
+- [ ] Soft delete for file shares: **Enabled** (7 days)
+- [ ] Versioning for blobs: **Disabled** (Lab 4.2 turns it on for production)
 
 ### Tags
 
@@ -50,7 +57,15 @@
 - [ ] Secure transfer required: **Enabled**
 - [ ] Allow Blob anonymous access: **Disabled**
 - [ ] Minimum TLS version: **TLS 1.2**
-- [ ] Encryption: **Microsoft-managed keys**
+- [ ] Storage account key access: **Enabled**
+- [ ] Encryption: **Microsoft-managed keys**, infrastructure encryption **Disabled**
+
+### Data Protection
+
+- [ ] Soft delete for blobs: **Enabled** (7 days)
+- [ ] Soft delete for containers: **Enabled** (7 days)
+- [ ] Soft delete for file shares: **Enabled** (7 days)
+- [ ] Versioning for blobs: **Disabled** (Lab 4.2 turns it on for production)
 
 ### Tags
 
@@ -70,7 +85,7 @@
 - [ ] Resource group: `prod-skycraft-swc-rg`
 - [ ] Performance tier: **Standard**
 - [ ] Account kind: **StorageV2 (general-purpose v2)**
-- [ ] Redundancy: **Geo-redundant storage (GRS)**
+- [ ] Redundancy: **Geo-redundant storage (GRS)**, without read access (not RA-GRS)
 - [ ] Access tier: **Hot**
 
 ### Security Settings
@@ -78,7 +93,15 @@
 - [ ] Secure transfer required: **Enabled**
 - [ ] Allow Blob anonymous access: **Disabled**
 - [ ] Minimum TLS version: **TLS 1.2**
-- [ ] Encryption: **Microsoft-managed keys**
+- [ ] Storage account key access: **Enabled**
+- [ ] Encryption: **Microsoft-managed keys**, infrastructure encryption **Disabled**
+
+### Data Protection
+
+- [ ] Soft delete for blobs: **Enabled** (7 days)
+- [ ] Soft delete for containers: **Enabled** (7 days)
+- [ ] Soft delete for file shares: **Enabled** (7 days)
+- [ ] Versioning for blobs: **Disabled** (Lab 4.2 turns it on for production)
 
 ### Tags
 
@@ -87,11 +110,21 @@
 - [ ] Tag: `CostCenter` = `MSDN`
 - [ ] Tag: `Owner` = `mbiszczanik`
 
+### Access Keys
+
+- [ ] key1 rotated in Step 4.1.13: its _Last rotated_ date (Portal, **Security + networking** > **Access keys**) is the day you did the lab
+
 ---
 
 ## 🔍 Validation Commands
 
 Run these Az PowerShell commands to validate your lab setup:
+
+The lab's validator checks the redundancy, location, security settings, encryption, soft delete and the `Project`, `Environment` and `CostCenter` tags of the three accounts, whichever path built them, and exits 0 when all pass:
+
+```powershell
+.\scripts\Test-Lab.ps1
+```
 
 ### Verify All Storage Accounts Exist
 
@@ -154,21 +187,43 @@ Get-AzStorageAccount |
 # Project     SkyCraft
 ```
 
+### Verify Soft Delete
+
+```powershell
+# Check blob, container and file share soft delete on each account
+foreach ($account in @(
+        @{ Name = 'platformskycraftswcsa'; ResourceGroup = 'platform-skycraft-swc-rg' }
+        @{ Name = 'devskycraftswcsa';      ResourceGroup = 'dev-skycraft-swc-rg' }
+        @{ Name = 'prodskycraftswcsa';     ResourceGroup = 'prod-skycraft-swc-rg' })) {
+    $blob = Get-AzStorageBlobServiceProperty -ResourceGroupName $account.ResourceGroup -StorageAccountName $account.Name
+    $file = Get-AzStorageFileServiceProperty -ResourceGroupName $account.ResourceGroup -StorageAccountName $account.Name
+    [pscustomobject]@{
+        Account        = $account.Name
+        BlobSoftDelete = $blob.DeleteRetentionPolicy.Days
+        ContainerSoft  = $blob.ContainerDeleteRetentionPolicy.Days
+        ShareSoftDel   = $file.ShareDeleteRetentionPolicy.Days
+    }
+}
+
+# Expected output: 7 in every column for every account (Lab 4.3 later raises ShareSoftDel to 14 on prod)
+```
+
 ### Verify Encryption Settings
 
 ```powershell
 # Check encryption configuration
 $encryption = (Get-AzStorageAccount -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa).Encryption
 [pscustomobject]@{
-    KeySource      = $encryption.KeySource
-    BlobEncryption = $encryption.Services.Blob.Enabled
-    FileEncryption = $encryption.Services.File.Enabled
+    KeySource       = $encryption.KeySource
+    BlobEncryption  = $encryption.Services.Blob.Enabled
+    FileEncryption  = $encryption.Services.File.Enabled
+    InfraEncryption = [bool]$encryption.RequireInfrastructureEncryption
 }
 
 # Expected output:
-# KeySource          BlobEncryption    FileEncryption
-# ---------          --------------    --------------
-# Microsoft.Storage  True              True
+# KeySource          BlobEncryption    FileEncryption    InfraEncryption
+# ---------          --------------    --------------    ---------------
+# Microsoft.Storage  True              True              False
 ```
 
 ---
@@ -248,11 +303,12 @@ $encryption = (Get-AzStorageAccount -ResourceGroupName prod-skycraft-swc-rg -Nam
 **All Verification Items Complete**:
 
 - [ ] All three storage accounts created with correct names
-- [ ] Appropriate redundancy levels configured (LRS, GRS, GZRS)
-- [ ] Security settings applied (TLS 1.2, HTTPS only, no public access)
+- [ ] Appropriate redundancy levels configured (LRS for development, GRS for platform and production)
+- [ ] Security settings applied (TLS 1.2, HTTPS only, no anonymous blob access)
+- [ ] Soft delete on for blobs, containers and file shares (7 days)
 - [ ] All required tags applied (Project, Environment, CostCenter, Owner)
 - [ ] Encryption verified (Microsoft-managed keys)
-- [ ] Access keys reviewed
+- [ ] Access keys reviewed, and key1 of `prodskycraftswcsa` rotated
 - [ ] All validation commands executed successfully
 - [ ] All reflection questions answered
 - [ ] Ready to proceed to Lab 4.2
@@ -280,7 +336,7 @@ You've completed **Lab 4.1: Configure and Manage Storage Accounts**!
 - Creating storage accounts via Portal and CLI/PowerShell
 - Selecting appropriate redundancy options
 - Configuring security best practices
-- Managing access keys
+- Managing and rotating access keys
 
 **Next**: [Lab 4.2: Implement Azure Blob Storage →](../4.2-blob-storage/lab-guide-4.2.md)
 

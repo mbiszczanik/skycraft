@@ -716,12 +716,13 @@ Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#
     It 'reads step <id> as <labels> and the list to verify as its Expected Result' -ForEach @(
         @{ lab = '2.2'; id = '2.2.11'; labels = @('Bastions', 'platform-skycraft-swc-bas')
            expected = 'Bastion is operational and ready to provide secure connectivity to VMs in all peered VNets. Status: Succeeded; Virtual network: platform-skycraft-swc-vnet; Subnet: AzureBastionSubnet; Public IP: platform-skycraft-swc-bas-pip' }
-        @{ lab = '4.1'; id = '4.1.8'; labels = @('prodskycraftswcsa', 'Security + networking', 'Encryption')
+        # 'Under **Security + networking**, select **Encryption**' names the menu group as a place (#346, #358).
+        @{ lab = '4.1'; id = '4.1.8'; labels = @('Storage accounts', 'Resources', 'prodskycraftswcsa', 'Encryption')
            expected = 'Encryption type: Microsoft-managed keys; This is always enabled and cannot be disabled' }
-        @{ lab = '4.1'; id = '4.1.10'; labels = @('prodskycraftswcsa', 'Configuration')
-           expected = 'Minimum TLS version: 1.2; Secure transfer required: Enabled' }
+        @{ lab = '4.1'; id = '4.1.10'; labels = @('Configuration')
+           expected = 'Minimum TLS version: Version 1.2; Secure transfer required: Enabled' }
         @{ lab = '4.1'; id = '4.1.11'; labels = @('Configuration')
-           expected = 'Allow Blob anonymous access: Disabled' }
+           expected = 'The **Configuration** page of `prodskycraftswcsa` shows the values of Steps 4.1.10 and 4.1.11, and **Blob access tier (default)** **Hot**. Allow Blob anonymous access: Disabled; Allow storage account key access: Enabled' }
     ) {
         $step = $script:CheckLabs[$lab].steps | Where-Object id -eq $id
         @($step.items | Where-Object kind -eq 'field') | Should -BeNullOrEmpty
@@ -732,7 +733,7 @@ Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#
     It 'reads the list after the Expected Result of step 4.1.2 into its text, not as a Name field' {
         $step = $script:CheckLabs['4.1'].steps | Where-Object id -eq '4.1.2'
         # The checks of the Encryption table follow (#246, pinned below).
-        $step.expected.StartsWith('Deployment succeeds in 30-60 seconds. Navigate to the resource to verify: ' +
+        $step.expected.StartsWith('The deployment succeeds in about a minute. Navigate to the resource to verify: ' +
             'Name: platformskycraftswcsa; Location: Sweden Central; Replication: Geo-redundant storage (GRS); Access tier: Hot;',
             [System.StringComparison]::Ordinal) | Should -BeTrue
         @($step.items | Where-Object { $_.kind -eq 'field' -and $_.label -ceq 'Name' }) | Should -BeNullOrEmpty
@@ -756,12 +757,18 @@ Describe 'parse.py - labs 2.2, 3.2, 4.1 and 5.2, Verify and Confirm introduce ch
 
     It 'checks the Encryption table of step 4.1.2 instead of filling it, and still clicks the Encryption tab' {
         $step = $script:IntroLabs['4.1'].steps | Where-Object id -eq '4.1.2'
-        @($step.items | Where-Object { $_.kind -eq 'field' -and $_.line -ge 258 -and $_.line -le 264 }) | Should -BeNullOrEmpty
-        @($step.items | Where-Object line -eq 258).labels | Should -Be @('Encryption')
-        $step.expected | Should -Be ('Deployment succeeds in 30-60 seconds. Navigate to the resource to verify: ' +
+        # 'Click the **Encryption** tab', then 'Verify these values, ...:' and the table: the tab is
+        # clicked, and nothing between it and the Tags tab is a field to fill (#358 split the line).
+        $encryption = @($step.items | Where-Object { $_.kind -eq 'action' -and @($_.labels) -ceq 'Encryption' })
+        $tags       = @($step.items | Where-Object { $_.kind -eq 'action' -and @($_.labels) -ceq 'Tags' })
+        $encryption.Count | Should -Be 1
+        $tags.Count | Should -Be 1
+        @($step.items | Where-Object { $_.kind -eq 'field' -and $_.line -gt $encryption[0].line -and $_.line -lt $tags[0].line }) |
+            Should -BeNullOrEmpty
+        $step.expected | Should -Be ('The deployment succeeds in about a minute. Navigate to the resource to verify: ' +
             'Name: platformskycraftswcsa; Location: Sweden Central; Replication: Geo-redundant storage (GRS); Access tier: Hot; ' +
             'Encryption type: Microsoft-managed keys (MMK); Enable support for customer-managed keys: Blobs and files only; ' +
-            'Enable infrastructure encryption: ❌ Disabled')
+            'Enable infrastructure encryption: unchecked')
     }
 
     It 'reads step <id> as <labels> and what it introduces with Verify or Confirm into its Expected Result' -ForEach @(
@@ -1351,6 +1358,15 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '3.3.7/Use quickstart image/unchecked=0'
             '3.3.2/Admin user/checked=0'
             '3.3.2/Admin user/stateOnly=0'
+            # The two check boxes under Redundancy that cost money stay unticked (#358).
+            '4.1.2/Make read access to data available in the event of regional unavailability/unchecked=0'
+            '4.1.2/Make read access to data available in the event of regional unavailability/stateOnly=0'
+            '4.1.2/Geo priority replication/unchecked=0'
+            '4.1.2/Geo priority replication/stateOnly=0'
+            '4.1.4/Make read access to data available in the event of regional unavailability/unchecked=0'
+            '4.1.4/Make read access to data available in the event of regional unavailability/stateOnly=0'
+            '4.1.4/Geo priority replication/unchecked=0'
+            '4.1.4/Geo priority replication/stateOnly=0'
             '4.2.5/Enable soft delete for blobs/checked=0'
             '4.2.6/Enable soft delete for containers/checked=0'
             '4.2.7/Enable versioning for blobs/checked=0'
