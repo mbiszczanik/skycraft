@@ -14,7 +14,11 @@
        identity holds in the subscription are removed (Inherit-Project-Tag's Contributor role,
        issue #350): removed after it, they would stay behind as role assignments of an unknown
        identity. If they cannot be listed or removed, the assignment is kept, so a second run
-       can finish both.
+       can finish both. Any assignment with an identity is handled so, not only
+       Inherit-Project-Tag: the Bicep path's three Deny assignments made before main.bicep set
+       managedIdentities to {} carry an identity too (the AVM module's default), with no role.
+       When the role assignments cannot be listed, all of them are kept; the failed listing is
+       one [ERROR], and the run exits 1.
     3. The two budgets: SkyCraft-Monthly-Budget on the subscription (step 1.3.15) and
        SkyCraft-Prod-Monthly on prod-skycraft-swc-rg (step 1.3.17).
     4. The Advisor alert Advisor-Cost-Recommendations (step 1.3.7), an activity log alert in
@@ -243,6 +247,9 @@ if (-not $policyLookup.Failed) {
         # The identity's role assignments go first: once the assignment, and with it the identity,
         # is gone, they would stay as role assignments of an unknown principal (issue #350). The
         # subscription's role assignments are listed once, the first time an identity needs them.
+        # A Deny assignment the Bicep path made before main.bicep set managedIdentities to {} has
+        # an identity too (with no role); it goes the same way, and is kept with the rest when the
+        # listing fails.
         $identity = Get-LabPolicyAssignmentIdentity -Assignment $assignment
         if ($identity.PrincipalId) {
             if ($null -eq $roleLookup) {

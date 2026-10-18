@@ -58,7 +58,7 @@
 - [ ] Scope: Subscription level
 - [ ] Parameter: Tag name = `Project`
 - [ ] Managed identity: system-assigned, location Sweden Central
-- [ ] The identity holds **Contributor** on the subscription (the Portal grants it on **Create**; only a remediation task uses it)
+- [ ] The identity holds **Contributor** on the subscription (the Portal grants it on **Create** when your account may assign roles, see the guide's Prerequisites; only a remediation task uses it)
 - [ ] Understand why Modify and Deny work together: Modify adds the group's `Project` tag before `Enforce-Project-Tag` checks the request
 
 > **Assignment names**: the Portal's **Assignment name** field sets the assignment's display name;
@@ -76,6 +76,7 @@
 - [ ] Accessed Policy Compliance dashboard
 - [ ] Reviewed overall compliance percentage
 - [ ] Viewed compliance details for each policy
+- [ ] Optional: started a remediation task for `Inherit-Project-Tag` (at least five minutes after its role was granted); `Advisor-Cost-Recommendations` then carries `Project` = `SkyCraft`
 - [ ] Understand compliant vs. non-compliant states
 
 ---

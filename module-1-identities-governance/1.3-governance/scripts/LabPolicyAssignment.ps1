@@ -14,8 +14,13 @@
     tag to a resource created without one, before Enforce-Project-Tag's Deny evaluates the
     request. It carries a system-assigned managed identity, which the Portal gives the role its
     definition names (Contributor) on the subscription; the Bicep path and
-    Invoke-LabGovernance.ps1 grant the same role, so all three paths end in the same state. The
-    role is used only by a remediation task: a request-time Modify needs none.
+    Invoke-LabGovernance.ps1 grant the same role, so all three paths end in the same state when
+    the learner may assign roles (Owner). The role is used only by a remediation task: a
+    request-time Modify needs none. The three Deny assignments carry no identity in any path:
+    bicep/main.bicep sets managedIdentities to {} on them, because the AVM module would otherwise
+    give each one a system-assigned identity. A Deny assignment made by the Bicep path before
+    that change still has one, with no role; Remove-LabResource.ps1 handles it like any other
+    assignment with an identity.
 
     The two paths name an assignment differently:
     - bicep/main.bicep and Invoke-LabGovernance.ps1 set the resource name (Enforce-Project-Tag)

@@ -20,6 +20,11 @@
     3. Creating Resource Locks (New-AzResourceLock). A lock that already exists under the guide's
        name but with another level is set to CanNotDelete, and the script says so (issue #258).
 
+    Every [ERROR] is counted, and the script exits 1 when there was one; a resource group it
+    cannot tag is a [WARN] and does not count. Granting the role needs Owner (or User Access
+    Administrator) on the subscription: with Contributor alone, Inherit-Project-Tag is created,
+    the grant fails, and the run exits 1.
+
 .PARAMETER SubscriptionId
     Target Subscription ID. Defaults to current context.
 
@@ -63,7 +68,11 @@ $ErrorActionPreference = "Stop"
 function Write-Success { param([string]$Message) Write-Host "  -> [SUCCESS] $Message" -ForegroundColor Green }
 function Write-Info { param([string]$Message) Write-Host "$Message" -ForegroundColor Yellow }
 function Write-Header { param([string]$Message) Write-Host "$Message" -ForegroundColor Cyan }
-function Write-Error-Custom { param([string]$Message) Write-Host "  -> [ERROR] $Message" -ForegroundColor Red }
+# Every [ERROR] is counted, and the script exits 1 at the end when there was one, so a caller sees
+# that an assignment, a role or a lock is missing (issue #350: an account that may not assign
+# roles got exit 0 and an Inherit-Project-Tag whose identity holds no role).
+$script:governanceFailures = 0
+function Write-Error-Custom { param([string]$Message) $script:governanceFailures++; Write-Host "  -> [ERROR] $Message" -ForegroundColor Red }
 
 Write-Host "=== Lab 1.3: Governance Deployment (Imperative) ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -301,6 +310,14 @@ foreach ($lock in $locks) {
             Write-Error-Custom "Failed to lock $($lock.RG): $_"
         }
     }
+}
+
+# $Host.SetShouldExit goes with every non-zero exit: '#Requires -Modules' makes 'pwsh -File' drop
+# a bare 'exit 1' (issue #104).
+if ($script:governanceFailures -gt 0) {
+    Write-Host "`nImperative Deployment finished with $($script:governanceFailures) error(s). See the [ERROR] lines above." -ForegroundColor Red
+    $Host.SetShouldExit(1)
+    exit 1
 }
 
 Write-Host "`nImperative Deployment Complete." -ForegroundColor Green

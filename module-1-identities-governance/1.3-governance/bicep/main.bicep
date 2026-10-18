@@ -125,11 +125,16 @@ module modRgPlatform 'br/public:avm/res/resources/resource-group:0.4.4' = {
 // 3. Policy assignments at subscription scope via AVM. definitionVersion pins the built-in
 //    definitions' major version explicitly (Azure stores '1.*.*' by default) so what-if reports
 //    NoChange on re-runs instead of a spurious Modify.
+//    The module defaults managedIdentities to { systemAssigned: true }, so every assignment would
+//    get an identity. The three Deny assignments set it to {} - no identity - as the Portal and
+//    Invoke-LabGovernance.ps1 create them: a Deny changes nothing and needs none. Only
+//    Inherit-Project-Tag (Modify) carries an identity in every path.
 module modRequireTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
   name: 'Require-Environment-Tag-RG'
   params: {
     name: 'Require-Environment-Tag-RG'
     location: parLocation
+    managedIdentities: {}
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/96670d01-0a4d-4649-9c89-2d3abc0a5025'
     definitionVersion: '1.*.*'
     displayName: 'Require Environment Tag on Resource Groups'
@@ -152,6 +157,7 @@ module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assign
   params: {
     name: 'Enforce-Project-Tag'
     location: parLocation
+    managedIdentities: {}
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/1e30110a-5ceb-460c-a204-c1c3969c6d62'
     definitionVersion: '1.*.*'
     displayName: 'Enforce Project Tag Value'
@@ -179,7 +185,9 @@ module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assign
 // managed identity; the identity gets Contributor on the subscription, the role the built-in
 // definition lists in roleDefinitionIds and the one the Portal grants itself, so the Portal and
 // Bicep paths end in the same state. Only a remediation task uses the role: a request-time
-// Modify needs none.
+// Modify needs none. Granting it needs Owner (or User Access Administrator) on the subscription:
+// with Contributor alone the module's role-assignment deployment fails, while the Portal creates
+// the assignment without the role (the guide's Prerequisites say so).
 module modInheritProjectTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
   name: 'Inherit-Project-Tag'
   params: {
@@ -208,6 +216,7 @@ module modAllowedLocationsPolicy 'br/public:avm/res/authorization/policy-assignm
   params: {
     name: 'Restrict-Azure-Regions'
     location: parLocation
+    managedIdentities: {}
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c'
     definitionVersion: '1.*.*'
     displayName: 'Restrict to Allowed Regions'

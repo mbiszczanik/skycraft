@@ -30,7 +30,10 @@
          assignments its identity holds in the subscription go first, found in a listing by
          principal id (never with -ObjectId); a role assignment of another principal, or one
          inherited from a management group, is left alone. When that listing or a removal
-         fails, the assignment is kept for a second run: an [ERROR], counted, exit 1.
+         fails, the assignment is kept for a second run: an [ERROR], counted, exit 1. The Bicep
+         path's Deny assignments made before main.bicep set managedIdentities to {} carry an
+         identity with no role: they are removed as usual, and kept with the rest when the
+         listing fails.
 
     Scope limit, as in the Lab 5.2 suite: the child is launched with -Command, so these tests
     prove the failure counter reaches `exit`, not that `pwsh -File` carries the code out of the
@@ -221,6 +224,15 @@ function Get-AzPolicyAssignment {
     foreach ($assignment in $lab) {
         $identity = [bool]$assignment.Identity
         if ($set -in 'bicep', 'both') {
+            # Before main.bicep set managedIdentities to {} on them, the AVM default gave the
+            # Bicep path's Deny assignments an identity too, each with its own principal and no role.
+            if (-not $identity -and $env:SKYCRAFT_STUB_DENYIDENTITY -eq '1') {
+                $old = New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope
+                $old | Add-Member -NotePropertyName IdentityType -NotePropertyValue 'SystemAssigned'
+                $old | Add-Member -NotePropertyName IdentityPrincipalId -NotePropertyValue "33333333-3333-3333-3333-00000000000$([array]::IndexOf($lab, $assignment))"
+                $old
+                continue
+            }
             New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope -Identity:$identity
         }
         if ($set -in 'portal', 'both') {
@@ -347,6 +359,7 @@ function Start-Sleep {
             [string[]]$LockElsewhere = @(),
             [ValidateSet('bicep', 'portal', 'both')]
             [string]$PolicySet = 'bicep',
+            [switch]$DenyIdentity,
             [switch]$Empty
         )
 
@@ -359,6 +372,7 @@ function Start-Sleep {
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
             SKYCRAFT_STUB_LOCKELSEWHERE = $LockElsewhere -join ','
             SKYCRAFT_STUB_POLICYSET = $PolicySet
+            SKYCRAFT_STUB_DENYIDENTITY = if ($DenyIdentity) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG    = $logPath
         }
 
@@ -416,11 +430,17 @@ function Start-Sleep {
     # The identity's role assignments cannot be listed, or one cannot be removed (#350).
     $script:RoleLookupFails  = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzRoleAssignment:subscription=throttled'
     $script:RoleRemovalFails = Invoke-CleanupScript -Stub $script:Stub -PolicySet 'portal' -Fail 'Remove-AzRoleAssignment:ra-identity-sub'
+    # The Bicep path's Deny assignments from before main.bicep set managedIdentities to {} carry
+    # identities with no role: removed like the others, or kept with the rest when the role
+    # assignments cannot be listed.
+    $script:DenyIdentity           = Invoke-CleanupScript -Stub $script:Stub -DenyIdentity
+    $script:DenyIdentityRoleFails  = Invoke-CleanupScript -Stub $script:Stub -DenyIdentity -Lookup 'Get-AzRoleAssignment:subscription=throttled'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:ProdGone, $script:NewLookupsFail,
         $script:OldLookupsFail, $script:NewRemovalsFail, $script:OldRemovalsFail, $script:LockElsewhere,
-        $script:PortalMade, $script:TwoSets, $script:RoleLookupFails, $script:RoleRemovalFails
+        $script:PortalMade, $script:TwoSets, $script:RoleLookupFails, $script:RoleRemovalFails,
+        $script:DenyIdentity, $script:DenyIdentityRoleFails
     )
 }
 
@@ -575,6 +595,27 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes Inherit-Project-Tag after its
         $run.Output | Should -Match '\[ERROR\] Failed to remove role assignment Contributor at /subscriptions/00000000-0000-0000-0000-000000000000 for the identity of Inherit-Project-Tag'
         $run.Calls  | Should -Not -Contain 'Remove-AzPolicyAssignment:aaaaaaaaaaaaaaaaaaaaaaa4'
         $run.Calls  | Should -Contain 'Remove-AzPolicyAssignment:aaaaaaaaaaaaaaaaaaaaaaa2'
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+    }
+
+    It 'removes the older Bicep path''s Deny assignments that carry an identity with no role' {
+        $run = $script:DenyIdentity
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        foreach ($name in 'Require-Environment-Tag-RG', 'Enforce-Project-Tag', 'Inherit-Project-Tag', 'Restrict-Azure-Regions') {
+            $run.Calls | Should -Contain "Remove-AzPolicyAssignment:$name"
+        }
+        @($run.Calls | Where-Object { $_ -like 'Remove-AzRoleAssignment:*' }) | Should -Be @('Remove-AzRoleAssignment:ra-identity-sub')
+        @($run.Calls | Where-Object { $_ -eq 'Get-AzRoleAssignment:subscription' }).Count | Should -Be 1
+    }
+
+    It 'keeps every assignment with an identity, the older Bicep path''s Deny ones included, when the role assignments cannot be listed, and exits 1' {
+        $run = $script:DenyIdentityRoleFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        foreach ($name in 'Require-Environment-Tag-RG', 'Enforce-Project-Tag', 'Inherit-Project-Tag', 'Restrict-Azure-Regions') {
+            $run.Calls  | Should -Not -Contain "Remove-AzPolicyAssignment:$name"
+            $run.Output | Should -Match "Keeping policy $name"
+        }
+        # One failed listing, counted once, however many assignments it keeps.
         $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
     }
 }

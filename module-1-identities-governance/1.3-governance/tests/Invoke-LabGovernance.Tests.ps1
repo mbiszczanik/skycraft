@@ -22,6 +22,8 @@
       5. The identity of Inherit-Project-Tag gets Contributor on the subscription, as the Portal
          gives it, unless it holds it there already; an existing Inherit-Project-Tag without an
          identity is an [ERROR]. Role assignments are listed by scope, never with -ObjectId.
+      6. Any [ERROR] - a duplicate, a failed listing, an identity missing, a role grant refused
+         (an account with Contributor alone) - makes the run exit 1; a clean run exits 0.
 
     The tags and locks steps are left to their own behaviour; their stubs only make them run.
 
@@ -183,6 +185,9 @@ function New-AzRoleAssignment {
     [CmdletBinding()]
     param([string]$ObjectId, [string]$ObjectType, [string]$RoleDefinitionId, [string]$Scope)
     Write-StubCall -Name "New-AzRoleAssignment:$ObjectId|$ObjectType|$RoleDefinitionId|$Scope"
+    if ($env:SKYCRAFT_STUB_GRANTFAIL -eq '1') {
+        throw "stub: AuthorizationFailed - the client does not have authorization to perform action 'Microsoft.Authorization/roleAssignments/write'"
+    }
 }
 
 function Get-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
@@ -197,7 +202,8 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
             [string]$PolicySet = 'none',
             [switch]$LookupFail,
             [switch]$RoleHeld,
-            [switch]$NoIdentity
+            [switch]$NoIdentity,
+            [switch]$GrantFail
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
@@ -208,6 +214,7 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
             SKYCRAFT_STUB_LOOKUPFAIL = if ($LookupFail) { '1' } else { '0' }
             SKYCRAFT_STUB_ROLEHELD   = if ($RoleHeld) { '1' } else { '0' }
             SKYCRAFT_STUB_NOIDENTITY = if ($NoIdentity) { '1' } else { '0' }
+            SKYCRAFT_STUB_GRANTFAIL  = if ($GrantFail) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG        = $logPath
         }
 
@@ -233,9 +240,11 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
     $script:ListFails  = Invoke-GovernanceScript -Stub $script:Stub -LookupFail
     $script:RoleHeld   = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'portal' -RoleHeld
     $script:NoIdentity = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'portal' -NoIdentity
+    # An account with Contributor alone: the assignment is created, the role grant is refused.
+    $script:GrantFails = Invoke-GovernanceScript -Stub $script:Stub -GrantFail
 
     $script:AllRuns = @($script:Fresh, $script:BicepMade, $script:PortalMade, $script:TwoSets, $script:ListFails,
-        $script:RoleHeld, $script:NoIdentity)
+        $script:RoleHeld, $script:NoIdentity, $script:GrantFails)
 }
 
 AfterAll {
@@ -327,5 +336,34 @@ Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - the identity of Inherit-Project-Tag
     It 'lists role assignments by scope, never with -ObjectId (a Microsoft Graph lookup)' {
         @($script:Fresh.Calls | Where-Object { $_ -like 'Get-AzRoleAssignment:*' }) |
             Should -Be @('Get-AzRoleAssignment:/subscriptions/00000000-0000-0000-0000-000000000000')
+    }
+
+    It 'reports a refused role grant as an [ERROR] after creating the assignment' {
+        $run = $script:GrantFails
+        $run.Created.Count | Should -Be 4 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Failed to grant role b24988ac-6180-42a0-ab88-20f7382dd24c to the identity of Inherit-Project-Tag[^\r\n]*AuthorizationFailed'
+    }
+}
+
+Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - exits 1 when anything failed (#350)' {
+
+    It 'exits 0 when every assignment, role and lock is in place' {
+        foreach ($run in $script:Fresh, $script:BicepMade, $script:PortalMade, $script:RoleHeld) {
+            $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+            $run.Output | Should -Match 'Imperative Deployment Complete'
+        }
+    }
+
+    It 'exits 1 after an [ERROR]: a duplicate, a failed listing, an identity missing, a role refused' {
+        foreach ($run in $script:TwoSets, $script:ListFails, $script:NoIdentity, $script:GrantFails) {
+            $run.ExitCode | Should -Be 1 -Because "a caller must see what is missing; output was:`n$($run.Output)"
+            $run.Output | Should -Match 'Imperative Deployment finished with \d+ error\(s\)'
+            $run.Output | Should -Not -Match 'Imperative Deployment Complete'
+        }
+    }
+
+    It 'still applies the locks after a policy [ERROR]' {
+        # The locks step runs whatever the policy step reported; the exit code comes at the end.
+        $script:GrantFails.Output | Should -Match '=== 3\. Applying Locks'
     }
 }

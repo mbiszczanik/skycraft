@@ -104,6 +104,22 @@ Describe 'Lab 1.3 policy assignment lookup - the guide''s four assignments' {
         $module | Should -Match 'location: parLocation'
     }
 
+    It 'gives the three Deny assignments in bicep/main.bicep no managed identity, as the Portal and the script do' {
+        # AVM policy-assignment/sub-scope defaults managedIdentities to { systemAssigned: true }:
+        # left out, every Deny assignment of the Bicep path got an identity the other paths do not
+        # create, and the paths ended in different states.
+        $bicep = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'bicep' 'main.bicep')
+        $modules = @([regex]::Matches($bicep, "(?s)module \w+ 'br/public:avm/res/authorization/policy-assignment/sub-scope:[^']+' = \{.*?\r?\n}\r?\n") |
+            ForEach-Object { $_.Value })
+        $modules.Count | Should -Be 4
+        foreach ($deny in @($script:Specs | Where-Object { -not $_.ManagedIdentity })) {
+            $module = @($modules | Where-Object { $_ -match [regex]::Escape("policyDefinitionId: '$($deny.PolicyDefinitionId)'") })
+            $module.Count | Should -Be 1 -Because $deny.Name
+            $module[0] | Should -Match 'managedIdentities: \{\}' -Because "$($deny.Name) is a Deny assignment"
+            $module[0] | Should -Not -Match 'roleDefinitionIds' -Because $deny.Name
+        }
+    }
+
     It 'holds the same definition ids and display names as bicep/main.bicep' {
         # The Bicep path sets the names itself; a drift between the two would make the scripts
         # miss every Bicep-made assignment.

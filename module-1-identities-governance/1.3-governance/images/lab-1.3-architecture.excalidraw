@@ -101,8 +101,8 @@
     },
     {
       "type": "text", "id": "c1d", "x": 20, "y": 180, "width": 270, "height": 69,
-      "text": "blocks creation\n\nRequire a tag on resources\nAllowed locations:\n  swedencentral, northeurope",
-      "originalText": "blocks creation\n\nRequire a tag on resources\nAllowed locations:\n  swedencentral, northeurope",
+      "text": "blocks or changes creation\n\nDeny: tags, allowed regions\n  swedencentral, northeurope\nModify: inherit Project tag",
+      "originalText": "blocks or changes creation\n\nDeny: tags, allowed regions\n  swedencentral, northeurope\nModify: inherit Project tag",
       "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
@@ -210,7 +210,7 @@
     },
     {
       "type": "text", "id": "s2_t2", "x": 240, "y": 366, "width": 140, "height": 28,
-      "text": "policy evaluates\ndeny or allow", "originalText": "policy evaluates\ndeny or allow",
+      "text": "policy evaluates\nmodify, then deny", "originalText": "policy evaluates\nmodify, then deny",
       "fontSize": 11, "fontFamily": 3, "textAlign": "center", "verticalAlign": "top",
       "strokeColor": "#b45309", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
@@ -279,8 +279,8 @@
     },
     {
       "type": "text", "id": "ev1_t", "x": 36, "y": 478, "width": 780, "height": 90,
-      "text": "az policy assignment create --name allowed-locations \\\n  --policy /providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c \\\n  --scope /subscriptions/<id> \\\n  --params '{\"listOfAllowedLocations\":{\"value\":[\"swedencentral\",\"northeurope\"]}}'\n\naz lock create -n prod-no-delete --lock-type CanNotDelete -g prod-skycraft-swc-rg",
-      "originalText": "az policy assignment create --name allowed-locations \\\n  --policy /providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c \\\n  --scope /subscriptions/<id> \\\n  --params '{\"listOfAllowedLocations\":{\"value\":[\"swedencentral\",\"northeurope\"]}}'\n\naz lock create -n prod-no-delete --lock-type CanNotDelete -g prod-skycraft-swc-rg",
+      "text": "az policy assignment create --name Restrict-Azure-Regions \\\n  --policy /providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c \\\n  --scope /subscriptions/<id> \\\n  --params '{\"listOfAllowedLocations\":{\"value\":[\"swedencentral\",\"northeurope\"]}}'\n\naz lock create -n lock-no-delete-prod --lock-type CanNotDelete -g prod-skycraft-swc-rg",
+      "originalText": "az policy assignment create --name Restrict-Azure-Regions \\\n  --policy /providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c \\\n  --scope /subscriptions/<id> \\\n  --params '{\"listOfAllowedLocations\":{\"value\":[\"swedencentral\",\"northeurope\"]}}'\n\naz lock create -n lock-no-delete-prod --lock-type CanNotDelete -g prod-skycraft-swc-rg",
       "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#166534", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
