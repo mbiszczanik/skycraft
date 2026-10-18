@@ -70,7 +70,7 @@ Before starting, ensure you have:
 2. **Start with Lab 4.1** - Create and configure storage accounts with redundancy
 3. **Progress to Lab 4.2** - Implement blob containers, tiers, and lifecycle policies
 4. **Complete Lab 4.3** - Configure Azure Files with snapshots and soft delete
-5. **Complete Lab 4.4** - Secure storage with SAS, firewalls, and encryption
+5. **Complete Lab 4.4** - Secure storage with a firewall, revocable SAS, key rotation and Entra ID data roles
 6. **Take the module assessment** to validate learning
 
 > [!IMPORTANT]

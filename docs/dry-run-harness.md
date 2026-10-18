@@ -115,7 +115,7 @@ which a raw command against the checked-in parameter file cannot always reproduc
 
 - **Module 5 (5.1, 5.2, 5.3)**: the `.bicepparam` files carry well-formed **placeholder** resource IDs under the zero subscription GUID, purely so `az bicep build-params` can validate them offline against `@minLength(1)`. The deploy scripts resolve the real IDs from Azure at run time, so a raw what-if for these labs previews against the placeholders and is not meaningful.
 - **Lab 3.2**: `parSshPublicKey` is read from the `SKYCRAFT_SSH_PUBLIC_KEY` environment variable and defaults to empty. `Deploy-Bicep.ps1` supplies the key directly.
-- **Lab 4.4**: `parClientIp` is auto-detected by the script; a raw what-if previews an empty firewall rule instead.
+- **Lab 4.4**: `parClientIp` and `parDataContributorPrincipalId` are resolved by the script (your public IP; the signed-in identity, unless it holds Storage Blob Data Contributor on the account already); a raw what-if previews an empty firewall rule and no role assignment instead.
 
 A raw what-if cmdlet is still listed where the script does not cover a template:
 Lab 3.3's resource-group-scope `acr.bicep` bootstrap.
