@@ -15,11 +15,14 @@
     (issue #355): VM insights names its rule 'MSVMI-<...>' in the VM's group, the data collection
     rule wizard takes any group, and the Bicep creates 'skycraft-vm-dcr' in the platform group.
     The rules associated with the VMs of the dev and prod groups are read, and the one that sends
-    to the lab's workspace is checked ('skycraft-vm-dcr' first if several do). Names stay literal
-    where the guide has the learner type both name and group: the action group, the alert rule
-    and the diagnostic setting. When the alert rule is not where the guide puts it, the failure
-    names the rules found on a SkyCraft VM through their scope, since the Portal defaults the
-    rule's group to the VM's.
+    to the lab's workspace is checked ('skycraft-vm-dcr' first if several do); a group, VM or
+    rule that cannot be read is skipped and named, never allowed to hide a rule found elsewhere.
+    The alert rule is found through its scope (issues #355, #365): the rule named
+    'skycraft-cpu-alert' that watches a SkyCraft VM, in whatever group it sits, since the Portal
+    defaults the rule's group to the VM's. Its name stays literal because the guide has the
+    learner type it and VM insights' recommended alerts put other rules on the same VM. Names
+    stay literal where the guide has the learner type both name and group: the action group and
+    the diagnostic setting.
 
 .PARAMETER Environment
     Target environment prefix when checking VM resources: its group's VMs are searched first for
@@ -136,23 +139,35 @@ $vmGroups = @("$Environment-skycraft-swc-rg") + @(@('dev', 'prod') | Where-Objec
 $dcrResource    = $null
 $dcrVmNames     = @()
 $dcrLookupError = $null
+$dcrUnread      = @()   # what could not be read, when what was read shows no rule
 try {
-    $ruleVms     = [ordered]@{}   # rule id (lower case) -> names of the VMs it is associated with
-    $groupErrors = @()
+    $ruleVms    = [ordered]@{}   # rule id (lower case) -> names of the VMs it is associated with
+    $readErrors = @()
+    $vmsRead    = 0
+    # Each group, VM and rule is read on its own: one that cannot be read (a missing group, a
+    # failed call, an association left pointing at a deleted rule or at a rule in another
+    # subscription) is noted and skipped, so it never hides the lab's rule found elsewhere.
     foreach ($group in $vmGroups) {
         try {
             $vms = @(Get-AzResource -ResourceGroupName $group -ResourceType 'Microsoft.Compute/virtualMachines' -ErrorAction Stop | Where-Object { $_ })
         }
         catch {
-            $groupErrors += "VMs in '$group': $($_.Exception.Message)"
+            $readErrors += "VMs in '$group': $($_.Exception.Message)"
             continue
         }
         foreach ($vm in $vms) {
-            $response = Invoke-AzRestMethod -Method GET -Path "$($vm.ResourceId)/providers/Microsoft.Insights/dataCollectionRuleAssociations?api-version=2023-03-11" -ErrorAction Stop
-            if ($response.StatusCode -ne 200) {
-                $groupErrors += "associations of '$($vm.Name)': HTTP $($response.StatusCode)"
+            try {
+                $response = Invoke-AzRestMethod -Method GET -Path "$($vm.ResourceId)/providers/Microsoft.Insights/dataCollectionRuleAssociations?api-version=2023-03-11" -ErrorAction Stop
+            }
+            catch {
+                $readErrors += "associations of '$($vm.Name)': $($_.Exception.Message)"
                 continue
             }
+            if ($response.StatusCode -ne 200) {
+                $readErrors += "associations of '$($vm.Name)': HTTP $($response.StatusCode)"
+                continue
+            }
+            $vmsRead++
             foreach ($association in @(($response.Content | ConvertFrom-Json).value)) {
                 # An association with a data collection endpoint names no rule.
                 $ruleId = "$($association.properties.dataCollectionRuleId)"
@@ -165,7 +180,17 @@ try {
     }
 
     $rules = foreach ($entry in $ruleVms.Values) {
-        $rule = Get-AzResource -ResourceId $entry.Id -ExpandProperties -ErrorAction Stop
+        try {
+            $rule = Get-AzResource -ResourceId $entry.Id -ExpandProperties -ErrorAction Stop
+        }
+        catch {
+            $readErrors += "rule '$($entry.Id)': $($_.Exception.Message)"
+            continue
+        }
+        if (-not $rule) {
+            $readErrors += "rule '$($entry.Id)': not found"
+            continue
+        }
         $sendsHere = $null -ne $wsCache -and (@($rule.Properties.destinations.logAnalytics | ForEach-Object { "$($_.workspaceResourceId)" }) -contains $wsCache.ResourceId)
         [pscustomobject]@{ Resource = $rule; Vms = $entry.Vms; SendsHere = $sendsHere; Preferred = ($rule.Name -eq $dcrName) }
     }
@@ -177,8 +202,13 @@ try {
         $dcrResource = $chosen.Resource
         $dcrVmNames  = $chosen.Vms
     }
-    elseif ($groupErrors.Count -gt 0) {
-        throw "could not read $($groupErrors -join '; ')"
+    elseif ($readErrors.Count -gt 0 -and ($vmsRead -eq 0 -or $ruleVms.Count -gt 0)) {
+        # Nothing was read, or every associated rule was unreadable: the lookup itself failed.
+        throw "could not read $($readErrors -join '; ')"
+    }
+    else {
+        # What was read carries no rule; what was not is said next to the step to take.
+        $dcrUnread = $readErrors
     }
 }
 catch {
@@ -188,7 +218,8 @@ catch {
 Invoke-Test "Data collection rule associated with a VM in $($vmGroups -join ' or ')" {
     if ($dcrLookupError) { throw $dcrLookupError }
     if (-not $dcrResource) {
-        Write-Host " (no rule is associated with these VMs - Step 5.1.2)" -NoNewline -ForegroundColor Gray
+        $unread = if ($dcrUnread.Count -gt 0) { "; could not read $($dcrUnread -join '; ')" } else { '' }
+        Write-Host " (no rule is associated with these VMs - Step 5.1.2$unread)" -NoNewline -ForegroundColor Gray
         return $false
     }
     Write-Host " ('$($dcrResource.Name)' in $($dcrResource.ResourceGroupName), on $($dcrVmNames -join ', '))" -NoNewline -ForegroundColor Gray
@@ -244,51 +275,70 @@ Invoke-Test "Action Group is enabled" {
 Write-Host ""
 Write-Host "[Metric Alert]" -ForegroundColor Yellow
 
-Invoke-Test "Alert rule '$alertRuleName' exists" {
+# Found through its scope, not by group (#355, #365): the Portal defaults the rule's group to the
+# watched VM's group, so the rule the learner named 'skycraft-cpu-alert' is looked for on a
+# SkyCraft VM in any group. The name stays the guide's: VM insights' recommended alerts put
+# several other CPU and memory rules on the same VM, so the scope alone cannot tell the lab's
+# rule apart. All the alert checks below read the rule found here.
+$vmScope          = '/providers/Microsoft\.Compute/virtualMachines/(dev|prod)-skycraft-swc-'
+$alert            = $null
+$alertOnVm        = $false
+$alertListError   = $null
+$alertOtherOnVm   = @()
+try {
+    $allAlertRules = @(Get-AzMetricAlertRuleV2 -ErrorAction Stop | Where-Object { $_ })
+    $alertRulesOnVm = @($allAlertRules | Where-Object { @($_.Scopes | Where-Object { "$_" -match $vmScope }).Count -gt 0 })
+    # A named rule on a SkyCraft VM first, in the guide's group before any other; then a named
+    # rule in the guide's group that watches something else, which the checks below still read.
+    $alert = @($allAlertRules | Where-Object { $_.Name -eq $alertRuleName -and ($_ -in $alertRulesOnVm -or $_.ResourceGroup -eq $platformRg) }) |
+        Sort-Object -Property @{ Expression = { $_ -in $alertRulesOnVm }; Descending = $true }, @{ Expression = { $_.ResourceGroup -eq $platformRg }; Descending = $true } |
+        Select-Object -First 1
+    $alertOnVm      = $null -ne $alert -and $alert -in $alertRulesOnVm
+    $alertOtherOnVm = @($alertRulesOnVm | Where-Object { $_.Name -ne $alertRuleName })
+}
+catch {
+    # Listing the subscription failed: the guide's own group and name still find the rule.
+    $alertListError = $_.Exception.Message
     $alert = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
-    if ($null -ne $alert -and $alert.Name -eq $alertRuleName) { return $true }
-    # The guide has the learner type both name and group, so the check stays literal. But the
-    # Portal defaults the rule's group to the watched VM's group, so say where a rule on a
-    # SkyCraft VM ended up, found through its scope (#355). The hint never replaces the FAIL.
-    $vmScope = '/providers/Microsoft\.Compute/virtualMachines/(dev|prod)-skycraft-swc-'
-    $elsewhere = @()
-    try {
-        $elsewhere = @(Get-AzMetricAlertRuleV2 -ErrorAction Stop | Where-Object {
-                $_ -and ($_.Name -eq $alertRuleName -or @($_.Scopes | Where-Object { "$_" -match $vmScope }).Count -gt 0)
-            })
+}
+
+Invoke-Test "Alert rule '$alertRuleName' exists" {
+    if ($null -ne $alert -and $alert.Name -eq $alertRuleName) {
+        $where = if ($alert.ResourceGroup -and $alert.ResourceGroup -ne $platformRg) { "; Step 5.1.5 puts it in $platformRg, either group works" } else { '' }
+        $watches = if ($alertOnVm) { ", on a SkyCraft VM" } else { '' }
+        Write-Host " (in $($alert.ResourceGroup)$watches$where)" -NoNewline -ForegroundColor Gray
+        return $true
     }
-    catch {
-        Write-Host " (no rule named '$alertRuleName' in $platformRg; the subscription's alert rules could not be listed: $($_.Exception.Message))" -NoNewline -ForegroundColor Gray
+    if ($alertListError) {
+        Write-Host " (no rule named '$alertRuleName' in $platformRg; the subscription's alert rules could not be listed: $alertListError)" -NoNewline -ForegroundColor Gray
     }
-    if ($elsewhere.Count -gt 0) {
-        $found = ($elsewhere | ForEach-Object { "'$($_.Name)' in $($_.ResourceGroup)" }) -join ', '
-        Write-Host " (not in ${platformRg}; found $found on a SkyCraft VM - Step 5.1.5 names the rule '$alertRuleName' and sets Details > Resource group to $platformRg)" -NoNewline -ForegroundColor Gray
+    elseif ($alertOtherOnVm.Count -gt 0) {
+        $found = ($alertOtherOnVm | ForEach-Object { "'$($_.Name)' in $($_.ResourceGroup)" }) -join ', '
+        Write-Host " (no rule named '$alertRuleName' on a SkyCraft VM; found $found - Step 5.1.5 names the rule '$alertRuleName')" -NoNewline -ForegroundColor Gray
+    }
+    else {
+        Write-Host " (no rule named '$alertRuleName' on a SkyCraft VM - Step 5.1.5)" -NoNewline -ForegroundColor Gray
     }
     return $false
 }
 
 Invoke-Test "Alert rule is enabled" {
-    $alert = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
-    return ($alert.Enabled -eq $true)
+    return ($null -ne $alert -and $alert.Enabled -eq $true)
 }
 
 Invoke-Test "Alert rule severity is 2 (Warning)" {
-    $alert = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
-    return ($alert.Severity -eq 2)
+    return ($null -ne $alert -and $alert.Severity -eq 2)
 }
 
 Invoke-Test "Alert rule window size is 5 minutes" {
-    $alert = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
     return ($null -ne $alert -and $alert.WindowSize -eq [System.TimeSpan]::FromMinutes(5))
 }
 
 Invoke-Test "Alert rule evaluation frequency is 1 minute" {
-    $alert = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
     return ($null -ne $alert -and $alert.EvaluationFrequency -eq [System.TimeSpan]::FromMinutes(1))
 }
 
 Invoke-Test "Alert rule threshold is > 80% CPU" {
-    $alert = Get-AzMetricAlertRuleV2 -ResourceGroupName $platformRg -Name $alertRuleName -ErrorAction SilentlyContinue
     if (-not $alert) { return $false }
     # Read criteria from raw ARM (camelCase) — the typed PSMetricCriteria object
     # does not reliably expose metricName/operator across Az.Monitor versions.

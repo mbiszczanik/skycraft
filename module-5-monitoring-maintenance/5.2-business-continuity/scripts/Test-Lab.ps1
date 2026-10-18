@@ -15,7 +15,7 @@
       Off. A vault created in the Portal is AlwaysOn, which cannot be undone, so the lab creates
       it with Az PowerShell or the Bicep (decision on issue #366); the check says so when it
       fails, and accepts On/AlwaysOn once $backupVaultSoftDeleteAccepted is widened for the GA
-      of secure by default in the region
+      of secure by default in the region (issue #376)
     - Blob Backup Policy (SkyCraft-Blob-Policy): AzureBlob datasource, 30-day retention
     - Blob backup instance configured for prodskycraftswcsa
 
@@ -58,7 +58,8 @@ $snapshotRgName   = "${snapshotRgPrefix}1${snapshotRgSuffix}"
 # Backup vault soft delete states the lab accepts (#355, decision on #366). 'Off' while the option
 # exists in Sweden Central: secure by default is in preview for Backup vaults there, and Microsoft
 # Learn says the option to turn soft delete off may go when it reaches GA. Once it does, add 'On'
-# and 'AlwaysOn' here; the Recovery Services vault check below already expects AlwaysON.
+# and 'AlwaysOn' here (tracked in #376); the Recovery Services vault check below already expects
+# AlwaysON.
 $backupVaultSoftDeleteAccepted = @('Off')
 
 $passCount = 0
