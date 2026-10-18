@@ -749,11 +749,11 @@ Run the lab's validator from the lab folder:
 
 ## 📦 What This Lab Leaves Behind
 
-The lab cycle's `tools/lab-cycle-manifest.psd1` lists no lab that depends on Lab 4.2, because it builds Lab 4.4 with Lab 4.4's Bicep. Labs 4.3 and 4.4 work on the same storage accounts. Lab 4.4's Bicep declares the same five containers again, next to its own `dev-assets`, so it recreates them if they are gone. Lab 4.4's Portal path creates no container, and its Step 4.4.3 sets a stored access policy on one you pick: if you run this lab's cleanup before Lab 4.4, create any container first (as in Step 4.2.2). The accounts themselves, and their cost, come from Lab 4.1. The daily costs below are approximate list prices for Sweden Central; check the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) for your own.
+The lab cycle's `tools/lab-cycle-manifest.psd1` lists no lab that depends on Lab 4.2, because it builds Lab 4.4 with Lab 4.4's Bicep. Labs 4.3 and 4.4 work on the same storage accounts. Lab 4.4's Bicep declares the same five containers again, so it recreates them if they are gone. Lab 4.4 sets its stored access policy on its own container `dev-assets`, which its Step 4.4.3 creates on every path, so this lab's cleanup does not get in its way. The accounts themselves, and their cost, come from Lab 4.1. The daily costs below are approximate list prices for Sweden Central; check the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) for your own.
 
 | Left behind | Where | Daily cost | What it does in later labs |
 | --- | --- | --- | --- |
-| Containers `game-assets`, `player-backups`, `server-config`, `game-logs` | `prodskycraftswcsa` | 0 (a container costs nothing; its blobs do) | On Lab 4.4's Portal path, Step 4.4.3 sets its stored access policy on one of them |
+| Containers `game-assets`, `player-backups`, `server-config`, `game-logs` | `prodskycraftswcsa` | 0 (a container costs nothing; its blobs do) | Nothing; Lab 4.4 uses its own `dev-assets` container |
 | `textures/test-asset.txt`, two versions; `file.txt` in `public-demo` | `prodskycraftswcsa`, `devskycraftswcsa` | well under 0.01 EUR (a few bytes each) | Nothing |
 | Lifecycle policy (`tier-game-logs`, `archive-backups`) | `prodskycraftswcsa` | 0 (the policy is free; each tier change it makes is billed as one write operation) | Nothing; it acts only on blobs under `game-logs/` and `player-backups/` |
 | Versioning, soft delete (7 days) | `prodskycraftswcsa` | every kept version and every soft-deleted blob is billed as stored data | Re-running Lab 4.1's Bicep turns versioning back off |
