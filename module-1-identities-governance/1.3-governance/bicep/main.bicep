@@ -3,7 +3,7 @@ SUMMARY: Lab 1.3 - Governance Orchestrator
 DESCRIPTION: Orchestrates deployment of tags, policies, and locks for Lab 1.3 via AVM (requires the Lab 1.2 resource groups to exist)
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Owner mbiszczanik
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.2.1
+VERSION: 0.3.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -13,7 +13,7 @@ targetScope = 'subscription'
 *    Parameters    *
 *******************/
 
-@description('Deployment region; stored as location metadata on the policy assignments (only relevant if a managed identity is added later)')
+@description('Deployment region; the location of the policy assignments and of the managed identity of Inherit-Project-Tag')
 @allowed([
   'swedencentral'
   'northeurope'
@@ -125,11 +125,16 @@ module modRgPlatform 'br/public:avm/res/resources/resource-group:0.4.4' = {
 // 3. Policy assignments at subscription scope via AVM. definitionVersion pins the built-in
 //    definitions' major version explicitly (Azure stores '1.*.*' by default) so what-if reports
 //    NoChange on re-runs instead of a spurious Modify.
+//    The module defaults managedIdentities to { systemAssigned: true }, so every assignment would
+//    get an identity. The three Deny assignments set it to {} - no identity - as the Portal and
+//    Invoke-LabGovernance.ps1 create them: a Deny changes nothing and needs none. Only
+//    Inherit-Project-Tag (Modify) carries an identity in every path.
 module modRequireTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
   name: 'Require-Environment-Tag-RG'
   params: {
     name: 'Require-Environment-Tag-RG'
     location: parLocation
+    managedIdentities: {}
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/96670d01-0a4d-4649-9c89-2d3abc0a5025'
     definitionVersion: '1.*.*'
     displayName: 'Require Environment Tag on Resource Groups'
@@ -152,6 +157,7 @@ module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assign
   params: {
     name: 'Enforce-Project-Tag'
     location: parLocation
+    managedIdentities: {}
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/1e30110a-5ceb-460c-a204-c1c3969c6d62'
     definitionVersion: '1.*.*'
     displayName: 'Enforce Project Tag Value'
@@ -172,11 +178,45 @@ module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assign
   }
 }
 
+// Modify assignment next to Enforce-Project-Tag (issue #350): a resource created without the
+// Project tag gets its resource group's value. Azure Policy runs Modify before Deny, so resources
+// a learner cannot tag (VM extensions, autoscale settings, deployment slots, resources a service
+// creates) pass Enforce-Project-Tag when their group carries the tag. A Modify assignment needs a
+// managed identity; the identity gets Contributor on the subscription, the role the built-in
+// definition lists in roleDefinitionIds and the one the Portal grants itself, so the Portal and
+// Bicep paths end in the same state. Only a remediation task uses the role: a request-time
+// Modify needs none. Granting it needs Owner (or User Access Administrator) on the subscription:
+// with Contributor alone the module's role-assignment deployment fails, while the Portal creates
+// the assignment without the role (the guide's Prerequisites say so).
+module modInheritProjectTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
+  name: 'Inherit-Project-Tag'
+  params: {
+    name: 'Inherit-Project-Tag'
+    location: parLocation
+    policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070'
+    definitionVersion: '1.*.*'
+    displayName: 'Inherit Project Tag from Resource Group'
+    description: 'Resources get the Project tag of their resource group when they are created without it'
+    parameters: {
+      tagName: {
+        value: 'Project'
+      }
+    }
+    managedIdentities: {
+      systemAssigned: true
+    }
+    roleDefinitionIds: [
+      '/providers/Microsoft.Authorization/roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c'
+    ]
+  }
+}
+
 module modAllowedLocationsPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
   name: 'Restrict-Azure-Regions'
   params: {
     name: 'Restrict-Azure-Regions'
     location: parLocation
+    managedIdentities: {}
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c'
     definitionVersion: '1.*.*'
     displayName: 'Restrict to Allowed Regions'

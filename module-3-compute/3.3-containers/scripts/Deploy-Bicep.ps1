@@ -80,6 +80,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 3.3 - Deploy Bicep Configuration ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -87,8 +89,7 @@ Write-Host "=== Lab 3.3 - Deploy Bicep Configuration ===" -ForegroundColor Cyan 
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 Write-Host "  Environment:    $Environment" -ForegroundColor Gray
@@ -103,8 +104,7 @@ $deploymentName = "Lab-3.3-Containers-$Environment"
 
 if (-not (Test-Path $mainBicep)) {
     Write-Host "[ERROR] Bicep file not found: $mainBicep" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 $deployParams = @{
@@ -118,6 +118,37 @@ $deployParams = @{
         parAcrName           = $AcrName
     }
     ErrorAction             = 'Stop'
+}
+
+# An environment deployed by an older version of this template is Consumption-only (no workload
+# profiles). main.bicep now declares the Consumption workload profile, and Azure cannot turn one
+# type into the other, so the deployment would fail on it after Phase 1. Stop here instead, with
+# what to do. The lookup lists by name across the subscription, so a missing resource group reads
+# as "no environment", not as an error.
+# The lab's tests/Deploy-Bicep.Tests.ps1 lifts this function out with the parser.
+function Get-LabConsumptionOnlyEnvironment {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$ResourceGroupName,
+        [Parameter(Mandatory = $true)] [string]$Name
+    )
+    Get-AzResource -ResourceType 'Microsoft.App/managedEnvironments' -Name $Name -ExpandProperties -ErrorAction Stop |
+        Where-Object { $_ -and $_.ResourceGroupName -eq $ResourceGroupName -and -not @($_.Properties.workloadProfiles | Where-Object { $_ }) } |
+        Select-Object -First 1
+}
+
+$caeName = "$Environment-skycraft-swc-cae-02"   # main.bicep's parCaeName default
+try {
+    $legacyCae = Get-LabConsumptionOnlyEnvironment -ResourceGroupName $ResourceGroupName -Name $caeName
+} catch {
+    Write-Host "[ERROR] Could not check for an existing Container Apps environment '$caeName': $_" -ForegroundColor Red
+    Exit-Lab -FailureCount 1
+}
+if ($legacyCae) {
+    Write-Host "[ERROR] The Container Apps environment '$caeName' in $ResourceGroupName is a Consumption-only environment, deployed by an older version of this lab." -ForegroundColor Red
+    Write-Host "  This template creates a Workload profiles environment (the type the Portal creates), and Azure cannot change an environment's type." -ForegroundColor Gray
+    Write-Host "  Delete it first - .\Remove-LabResource.ps1 -Environment $Environment -ResourceGroupName $ResourceGroupName removes the app, the environment (up to 25 minutes) and the rest of the lab - then run this script again." -ForegroundColor Gray
+    Exit-Lab -FailureCount 1
 }
 
 # What-if runs before Phase 1: bootstrapping the registry and importing the image are real
@@ -140,8 +171,7 @@ try {
     }
 } catch {
     Write-Host "[ERROR] Failed to create Resource Group: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 # ==============================================================================
@@ -176,13 +206,11 @@ if (-not $repoExists) {
 
             if ($acrDeployment.ProvisioningState -ne 'Succeeded') {
                 Write-Host "[ERROR] ACR Bootstrap finished with state: $($acrDeployment.ProvisioningState)" -ForegroundColor Red
-                $Host.SetShouldExit(1)
-                exit 1
+                Exit-Lab -FailureCount 1
             }
         } catch {
             Write-Host "[ERROR] ACR Bootstrap Failed: $_" -ForegroundColor Red
-            $Host.SetShouldExit(1)
-            exit 1
+            Exit-Lab -FailureCount 1
         }
     }
 
@@ -195,8 +223,7 @@ if (-not $repoExists) {
         Write-Host "  -> Image Build Success" -ForegroundColor Green
     } catch {
         Write-Host "[ERROR] Failed to build image: $_" -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 }
 
@@ -223,15 +250,13 @@ try {
     }
     else {
         Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 }
 catch {
     Write-Host "`n[ERROR] Deployment failed with exception:" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nNext Step: Run .\Test-Lab.ps1 to verify the configuration." -ForegroundColor Yellow

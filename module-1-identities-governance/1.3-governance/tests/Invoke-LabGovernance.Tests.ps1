@@ -10,13 +10,20 @@
     script in a child pwsh process against a generated stub of the Az commands it calls, and
     assert the contract of the policy step:
 
-      1. With no assignment on the subscription, it creates the three, under the fixed names and
-         display names the Bicep path uses, from the built-in definitions read by id.
-      2. With the three already made - by the Bicep path, or in the Portal under generated names
+      1. With no assignment on the subscription, it creates the four, under the fixed names and
+         display names the Bicep path uses, from the built-in definitions read by id; the Modify
+         assignment Inherit-Project-Tag (issue #350) with a system-assigned identity in
+         swedencentral.
+      2. With the four already made - by the Bicep path, or in the Portal under generated names
          - it creates nothing and says each one is already assigned.
       3. With an assignment made twice, it creates nothing for it and reports an [ERROR] that
          names both.
       4. When the listing fails, it creates nothing: an assignment it could not see may exist.
+      5. The identity of Inherit-Project-Tag gets Contributor on the subscription, as the Portal
+         gives it, unless it holds it there already; an existing Inherit-Project-Tag without an
+         identity is an [ERROR]. Role assignments are listed by scope, never with -ObjectId.
+      6. Any [ERROR] - a duplicate, a failed listing, an identity missing, a role grant refused
+         (an account with Contributor alone) - makes the run exit 1; a clean run exits 0.
 
     The tags and locks steps are left to their own behaviour; their stubs only make them run.
 
@@ -53,6 +60,8 @@ BeforeAll {
         'Get-AzPolicyDefinition'
         'Get-AzPolicyAssignment'
         'New-AzPolicyAssignment'
+        'Get-AzRoleAssignment'
+        'New-AzRoleAssignment'
         'Get-AzResourceLock'
         'New-AzResourceLock'
     )
@@ -62,6 +71,9 @@ BeforeAll {
     #   SKYCRAFT_STUB_POLICYSET   'none' (the default), 'bicep' (fixed names), 'portal' (generated
     #                             names, the guide's names as display names) or 'both'
     #   SKYCRAFT_STUB_LOOKUPFAIL  '1' makes the policy assignment listing fail
+    #   SKYCRAFT_STUB_ROLEHELD    '1' makes Inherit-Project-Tag's identity hold Contributor on the
+    #                             subscription already
+    #   SKYCRAFT_STUB_NOIDENTITY  '1' lists Inherit-Project-Tag without a managed identity
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 
@@ -98,15 +110,24 @@ function Get-AzPolicyDefinition {
     [pscustomobject]@{ Id = $Id; Name = ($Id -split '/')[-1] }
 }
 
+$script:PrincipalId = '11111111-1111-1111-1111-111111111111'
+
+# Shaped like Get-AzPolicyAssignment's output in Az.Resources 7 and later; -Identity adds a
+# system-assigned identity at the top level, as the real cmdlet returns it.
 function New-StubAssignment {
-    param([string]$Name, [string]$DisplayName, [string]$Definition, [string]$Scope)
-    [pscustomobject]@{
+    param([string]$Name, [string]$DisplayName, [string]$Definition, [string]$Scope, [switch]$Identity)
+    $assignment = [pscustomobject]@{
         Name               = $Name
         DisplayName        = $DisplayName
         PolicyDefinitionId = "/providers/Microsoft.Authorization/policyDefinitions/$Definition"
         Scope              = $Scope
         Id                 = "$Scope/providers/Microsoft.Authorization/policyAssignments/$Name"
     }
+    if ($Identity) {
+        $assignment | Add-Member -NotePropertyName IdentityType -NotePropertyValue 'SystemAssigned'
+        $assignment | Add-Member -NotePropertyName IdentityPrincipalId -NotePropertyValue $script:PrincipalId
+    }
+    $assignment
 }
 
 function Get-AzPolicyAssignment {
@@ -119,15 +140,17 @@ function Get-AzPolicyAssignment {
     $lab = @(
         @{ Name = 'Require-Environment-Tag-RG'; Bicep = 'Require Environment Tag on Resource Groups'; Definition = '96670d01-0a4d-4649-9c89-2d3abc0a5025'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa1' }
         @{ Name = 'Enforce-Project-Tag'; Bicep = 'Enforce Project Tag Value'; Definition = '1e30110a-5ceb-460c-a204-c1c3969c6d62'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa2' }
+        @{ Name = 'Inherit-Project-Tag'; Bicep = 'Inherit Project Tag from Resource Group'; Definition = 'ea3f2387-9b95-492a-a190-fcdc54f7b070'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa4'; Identity = $true }
         @{ Name = 'Restrict-Azure-Regions'; Bicep = 'Restrict to Allowed Regions'; Definition = 'e56962a6-4747-49cd-b67b-bf8b01975c4c'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa3' }
     )
     $set = $env:SKYCRAFT_STUB_POLICYSET
     foreach ($assignment in $lab) {
+        $identity = [bool]$assignment.Identity -and $env:SKYCRAFT_STUB_NOIDENTITY -ne '1'
         if ($set -in 'bicep', 'both') {
-            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope
+            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope -Identity:$identity
         }
         if ($set -in 'portal', 'both') {
-            New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope
+            New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Identity:$identity
         }
     }
     # Inherited from a management group under the guide's name: not the lab's assignment.
@@ -137,8 +160,34 @@ function Get-AzPolicyAssignment {
 
 function New-AzPolicyAssignment {
     [CmdletBinding()]
-    param([string]$Name, [string]$DisplayName, [string]$Scope, [object]$PolicyDefinition, [object]$PolicyParameterObject)
-    Write-StubCall -Name "New-AzPolicyAssignment:$Name|$DisplayName|$Scope|$($PolicyDefinition.Name)"
+    param([string]$Name, [string]$DisplayName, [string]$Scope, [object]$PolicyDefinition, [object]$PolicyParameterObject,
+        [string]$IdentityType, [string]$Location)
+    $parameters = ($PolicyParameterObject.GetEnumerator() | Sort-Object Key | ForEach-Object { "$($_.Key)=$(@($_.Value) -join ',')" }) -join ';'
+    Write-StubCall -Name "New-AzPolicyAssignment:$Name|$DisplayName|$Scope|$($PolicyDefinition.Name)|$parameters|$IdentityType|$Location"
+    New-StubAssignment -Name $Name -DisplayName $DisplayName -Definition $PolicyDefinition.Name -Scope $Scope -Identity:($IdentityType -eq 'SystemAssigned')
+}
+
+# Role assignments on the subscription: one held by someone else, one inherited from a
+# management group by the identity, and - with SKYCRAFT_STUB_ROLEHELD - the identity's Contributor.
+function Get-AzRoleAssignment {
+    [CmdletBinding()]
+    param([string]$Scope, [string]$ObjectId, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($ObjectId) { throw 'stub: the lab lists role assignments by scope, not by -ObjectId (a Microsoft Graph lookup)' }
+    Write-StubCall -Name "Get-AzRoleAssignment:$Scope"
+    [pscustomobject]@{ ObjectId = '22222222-2222-2222-2222-222222222222'; Scope = $Scope; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; RoleDefinitionName = 'Contributor' }
+    [pscustomobject]@{ ObjectId = $script:PrincipalId; Scope = '/providers/Microsoft.Management/managementGroups/stub-mg'; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; RoleDefinitionName = 'Contributor' }
+    if ($env:SKYCRAFT_STUB_ROLEHELD -eq '1') {
+        [pscustomobject]@{ ObjectId = $script:PrincipalId; Scope = $Scope; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; RoleDefinitionName = 'Contributor' }
+    }
+}
+
+function New-AzRoleAssignment {
+    [CmdletBinding()]
+    param([string]$ObjectId, [string]$ObjectType, [string]$RoleDefinitionId, [string]$Scope)
+    Write-StubCall -Name "New-AzRoleAssignment:$ObjectId|$ObjectType|$RoleDefinitionId|$Scope"
+    if ($env:SKYCRAFT_STUB_GRANTFAIL -eq '1') {
+        throw "stub: AuthorizationFailed - the client does not have authorization to perform action 'Microsoft.Authorization/roleAssignments/write'"
+    }
 }
 
 function Get-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
@@ -151,7 +200,10 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
             [pscustomobject]$Stub,
             [ValidateSet('none', 'bicep', 'portal', 'both')]
             [string]$PolicySet = 'none',
-            [switch]$LookupFail
+            [switch]$LookupFail,
+            [switch]$RoleHeld,
+            [switch]$NoIdentity,
+            [switch]$GrantFail
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
@@ -160,6 +212,9 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
             SKYCRAFT_STUB_POLICYSET  = $PolicySet
             SKYCRAFT_STUB_LOOKUPFAIL = if ($LookupFail) { '1' } else { '0' }
+            SKYCRAFT_STUB_ROLEHELD   = if ($RoleHeld) { '1' } else { '0' }
+            SKYCRAFT_STUB_NOIDENTITY = if ($NoIdentity) { '1' } else { '0' }
+            SKYCRAFT_STUB_GRANTFAIL  = if ($GrantFail) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG        = $logPath
         }
 
@@ -170,6 +225,7 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
             Output   = $run.Output
             Calls    = $calls
             Created  = @($calls | Where-Object { $_ -like 'New-AzPolicyAssignment:*' })
+            Granted  = @($calls | Where-Object { $_ -like 'New-AzRoleAssignment:*' })
         }
     }
 
@@ -182,8 +238,13 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
     $script:PortalMade = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'portal'
     $script:TwoSets    = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'both'
     $script:ListFails  = Invoke-GovernanceScript -Stub $script:Stub -LookupFail
+    $script:RoleHeld   = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'portal' -RoleHeld
+    $script:NoIdentity = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'portal' -NoIdentity
+    # An account with Contributor alone: the assignment is created, the role grant is refused.
+    $script:GrantFails = Invoke-GovernanceScript -Stub $script:Stub -GrantFail
 
-    $script:AllRuns = @($script:Fresh, $script:BicepMade, $script:PortalMade, $script:TwoSets, $script:ListFails)
+    $script:AllRuns = @($script:Fresh, $script:BicepMade, $script:PortalMade, $script:TwoSets, $script:ListFails,
+        $script:RoleHeld, $script:NoIdentity, $script:GrantFails)
 }
 
 AfterAll {
@@ -201,12 +262,13 @@ Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - test harness' {
 
 Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - never creates a second set of policy assignments (#330)' {
 
-    It 'creates the three assignments under the Bicep path''s names when none exists' {
+    It 'creates the four assignments under the Bicep path''s names when none exists' {
         $subscription = '/subscriptions/00000000-0000-0000-0000-000000000000'
         $script:Fresh.Created | Should -Be @(
-            "New-AzPolicyAssignment:Require-Environment-Tag-RG|Require Environment Tag on Resource Groups|$subscription|96670d01-0a4d-4649-9c89-2d3abc0a5025"
-            "New-AzPolicyAssignment:Enforce-Project-Tag|Enforce Project Tag Value|$subscription|1e30110a-5ceb-460c-a204-c1c3969c6d62"
-            "New-AzPolicyAssignment:Restrict-Azure-Regions|Restrict to Allowed Regions|$subscription|e56962a6-4747-49cd-b67b-bf8b01975c4c"
+            "New-AzPolicyAssignment:Require-Environment-Tag-RG|Require Environment Tag on Resource Groups|$subscription|96670d01-0a4d-4649-9c89-2d3abc0a5025|tagName=Environment||"
+            "New-AzPolicyAssignment:Enforce-Project-Tag|Enforce Project Tag Value|$subscription|1e30110a-5ceb-460c-a204-c1c3969c6d62|tagName=Project;tagValue=SkyCraft||"
+            "New-AzPolicyAssignment:Inherit-Project-Tag|Inherit Project Tag from Resource Group|$subscription|ea3f2387-9b95-492a-a190-fcdc54f7b070|tagName=Project|SystemAssigned|swedencentral"
+            "New-AzPolicyAssignment:Restrict-Azure-Regions|Restrict to Allowed Regions|$subscription|e56962a6-4747-49cd-b67b-bf8b01975c4c|listOfAllowedLocations=swedencentral,northeurope||"
         ) -Because "an assignment inherited from a management group is not the lab's; output was:`n$($script:Fresh.Output)"
         $script:Fresh.Output | Should -Not -Match '\[ERROR\]'
     }
@@ -240,5 +302,68 @@ Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - never creates a second set of polic
 
     It 'lists the subscription''s assignments once, rather than reading each by name' {
         @($script:Fresh.Calls | Where-Object { $_ -eq 'Get-AzPolicyAssignment' }).Count | Should -Be 1
+    }
+}
+
+Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - the identity of Inherit-Project-Tag gets the Portal''s role (#350)' {
+
+    It 'grants Contributor on the subscription to the new assignment''s identity, as the Portal does' {
+        $script:Fresh.Granted | Should -Be @(
+            'New-AzRoleAssignment:11111111-1111-1111-1111-111111111111|ServicePrincipal|b24988ac-6180-42a0-ab88-20f7382dd24c|/subscriptions/00000000-0000-0000-0000-000000000000'
+        ) -Because "a role inherited from a management group or held by someone else is not the identity's on the subscription; output was:`n$($script:Fresh.Output)"
+        $script:Fresh.Output | Should -Match '\[SUCCESS\] Granted role b24988ac-6180-42a0-ab88-20f7382dd24c on the subscription to the identity of Inherit-Project-Tag'
+    }
+
+    It 'grants the role to an existing assignment''s identity that does not hold it yet' {
+        # The Bicep-made set: the assignment exists, its identity holds no role on the subscription.
+        $script:BicepMade.Granted.Count | Should -Be 1
+    }
+
+    It 'grants nothing when the identity holds the role already' {
+        $run = $script:RoleHeld
+        $run.Granted | Should -BeNullOrEmpty
+        $run.Output | Should -Match 'Identity of Inherit-Project-Tag already holds role b24988ac-6180-42a0-ab88-20f7382dd24c on the subscription'
+        $run.Output | Should -Not -Match '\[ERROR\]'
+    }
+
+    It 'reports an existing Inherit-Project-Tag without a managed identity as an [ERROR], and grants nothing' {
+        $run = $script:NoIdentity
+        $run.Granted | Should -BeNullOrEmpty
+        $run.Created | Should -BeNullOrEmpty
+        $run.Output | Should -Match "\[ERROR\] Inherit-Project-Tag 'Inherit-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa4\) has no managed identity"
+    }
+
+    It 'lists role assignments by scope, never with -ObjectId (a Microsoft Graph lookup)' {
+        @($script:Fresh.Calls | Where-Object { $_ -like 'Get-AzRoleAssignment:*' }) |
+            Should -Be @('Get-AzRoleAssignment:/subscriptions/00000000-0000-0000-0000-000000000000')
+    }
+
+    It 'reports a refused role grant as an [ERROR] after creating the assignment' {
+        $run = $script:GrantFails
+        $run.Created.Count | Should -Be 4 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Failed to grant role b24988ac-6180-42a0-ab88-20f7382dd24c to the identity of Inherit-Project-Tag[^\r\n]*AuthorizationFailed'
+    }
+}
+
+Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - exits 1 when anything failed (#350)' {
+
+    It 'exits 0 when every assignment, role and lock is in place' {
+        foreach ($run in $script:Fresh, $script:BicepMade, $script:PortalMade, $script:RoleHeld) {
+            $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+            $run.Output | Should -Match 'Imperative Deployment Complete'
+        }
+    }
+
+    It 'exits 1 after an [ERROR]: a duplicate, a failed listing, an identity missing, a role refused' {
+        foreach ($run in $script:TwoSets, $script:ListFails, $script:NoIdentity, $script:GrantFails) {
+            $run.ExitCode | Should -Be 1 -Because "a caller must see what is missing; output was:`n$($run.Output)"
+            $run.Output | Should -Match 'Imperative Deployment finished with \d+ error\(s\)'
+            $run.Output | Should -Not -Match 'Imperative Deployment Complete'
+        }
+    }
+
+    It 'still applies the locks after a policy [ERROR]' {
+        # The locks step runs whatever the policy step reported; the exit code comes at the end.
+        $script:GrantFails.Output | Should -Match '=== 3\. Applying Locks'
     }
 }
