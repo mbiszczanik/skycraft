@@ -15,9 +15,9 @@
          Scope limit: the child is launched with -Command, so these tests prove the failure
          counter reaches `exit`, not that `pwsh -File` carries the code out of the process.
          PowerShell 7 drops it there when the script declares #Requires -Modules for a module it
-         has to auto-import, which is why the script pairs every non-zero exit with
-         $Host.SetShouldExit - that half of the contract is issue #104's guard, enforced
-         repo-wide by tests/Exit-Code-Propagation.Tests.ps1.
+         has to auto-import, which is why the script ends through Exit-Lab
+         (tools/LabCommon.psm1, issues #104 and #257) - that half of the contract is proven
+         with real pwsh processes by tests/Exit-Code-Propagation.Tests.ps1.
       2. Failures do not stop the run: later steps still execute.
       3. The Recovery Services Vault failure hint names the tooling requirement first.
       4. The orphaned restore point collection and its emptied AzureBackupRG_* group are removed.

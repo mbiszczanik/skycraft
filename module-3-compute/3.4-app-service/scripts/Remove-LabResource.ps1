@@ -6,7 +6,9 @@
     Detaches the regional VNet integration from the Web App and from every deployment slot, then
     verifies per site that the integration is really gone, reports the state of the integration
     subnet, and finally deletes the Web App (with its slots), the autoscale setting and the App
-    Service Plan - in that order.
+    Service Plan - in that order. The autoscale setting is the one with the Bicep's name or the
+    one that targets the plan, so the setting the Portal names '<plan>-Autoscale-<n>' goes too
+    (issue #355).
 
     Once the integration is detached, the site's networkConfig/virtualNetwork route answers 404
     on some stamps and 200 with an empty subnetResourceId on others, so the verification counts
@@ -37,9 +39,10 @@
     App stays when its slots could not be listed, because their integration could not be detached.
     The subnet checks are diagnostic: a VNet they cannot read is a [WARN], not a failure.
 
-    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
-    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
-    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+    Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
+    otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
+    (issue #104), it also sets the process exit code; run at a prompt or by another script,
+    it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
     Does NOT delete the Resource Group or the VNet (shared resources).
 
@@ -98,6 +101,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
 # Counts lookups that failed and resources that exist but could not be deleted. Absent resources
@@ -176,7 +181,7 @@ Write-Host "=== Cleanup Lab 3.4: App Service ===" -ForegroundColor Cyan
 Write-Host "Target Resource Group: $RgName" -ForegroundColor Yellow
 
 # 1. Verify Connection
-if (-not (Get-AzContext)) { Write-Host "Not logged in." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
+if (-not (Get-AzContext)) { Write-Host "Not logged in." -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 
 # The AVM modules deploy Microsoft.Web/* at 2025-03-01; the networkConfig/virtualNetwork sub-resource
 # route is unchanged across both versions, so pinning the older one here is deliberate.
@@ -387,26 +392,34 @@ try {
         }
     }
 
-    # 7. Delete the autoscale setting
-    if ($PSCmdlet.ShouldProcess($autoscaleName, 'Remove Autoscale Setting')) {
-        Write-Host "Removing autoscale setting '$autoscaleName'..." -ForegroundColor Yellow
-        # Listed and picked by name: Get-AzAutoscaleSetting is a generated cmdlet, and asked for
-        # one name that does not exist it throws a plain "[code] : message" exception with no
+    # 7. Delete the plan's autoscale settings
+    if ($PSCmdlet.ShouldProcess("autoscale settings of '$AspName'", 'Remove Autoscale Setting')) {
+        Write-Host "Removing the autoscale settings of '$AspName'..." -ForegroundColor Yellow
+        # Listed, not asked for by name: Get-AzAutoscaleSetting is a generated cmdlet, and asked
+        # for one name that does not exist it throws a plain "[code] : message" exception with no
         # status, which is not a recognised not-found error. A missing setting is an empty match.
+        # A setting is the plan's when it carries the Bicep's name or targets the plan: the
+        # Portal names it '<plan>-Autoscale-<n>' (issue #355), so the name alone would leave the
+        # Portal path's setting behind. The target id is compared by its tail and without case,
+        # as ARM returns ids in either casing.
         $autoscaleLookup = Invoke-LabLookup -Target "the autoscale settings in '$RgName'" -Lookup {
             Get-AzAutoscaleSetting -ResourceGroupName $RgName -ErrorAction Stop
         }
-        if ($autoscaleLookup.Value | Where-Object { $_.Name -eq $autoscaleName }) {
+        $planIdTail = "/resourceGroups/$RgName/providers/Microsoft.Web/serverfarms/$AspName"
+        $planSettings = @($autoscaleLookup.Value | Where-Object {
+                $_.Name -eq $autoscaleName -or "$($_.TargetResourceUri)".EndsWith($planIdTail, [System.StringComparison]::OrdinalIgnoreCase)
+            })
+        foreach ($setting in $planSettings) {
             try {
-                Remove-AzAutoscaleSetting -ResourceGroupName $RgName -Name $autoscaleName -ErrorAction Stop | Out-Null
-                Write-Host "  -> Deleted" -ForegroundColor Green
+                Remove-AzAutoscaleSetting -ResourceGroupName $RgName -Name $setting.Name -ErrorAction Stop | Out-Null
+                Write-Host "  -> Deleted '$($setting.Name)'" -ForegroundColor Green
             }
             catch {
                 $script:cleanupFailures++
-                Write-Host "  -> [ERROR] Could not delete autoscale setting '$autoscaleName': $_" -ForegroundColor Red
+                Write-Host "  -> [ERROR] Could not delete autoscale setting '$($setting.Name)': $_" -ForegroundColor Red
             }
         }
-        elseif (-not $autoscaleLookup.Failed) {
+        if ($planSettings.Count -eq 0 -and -not $autoscaleLookup.Failed) {
             Write-Host "  -> Not found or already deleted." -ForegroundColor Gray
         }
     }
@@ -444,8 +457,7 @@ catch {
 
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s). See the [ERROR] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "Cleanup completed successfully." -ForegroundColor Green

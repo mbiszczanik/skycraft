@@ -1344,6 +1344,9 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
     # stating verb is added here.
     It 'gives a state to these labels only' {
         $expected = @(
+            # Inherit-Project-Tag (#350): open the Remediation tab, leave the task box unticked.
+            '1.3.8/Remediation | Create a remediation task/unchecked=1'
+            '1.3.8/Remediation | Create a remediation task/stateOnly=1'
             '1.3.9/Allowed locations | Sweden Central | North Europe/checked=1,2'
             '3.3.7/Use quickstart image/unchecked=0'
             '3.3.2/Admin user/checked=0'
@@ -1381,14 +1384,15 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
     # A menu group or a section heading: clicking a Portal menu group collapses it.
     It 'reads step <id>''s "<text>" as <labels>, the place no label' -ForEach @(
         @{ lab = '1.3'; id = '1.3.18'; text = 'Under **Cost Management** click **Cost analysis**'; labels = @('Cost analysis') }
-        @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Settings**, select **Networking**.'; labels = @('Networking') }
-        @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Outbound traffic configuration**, click **VNet integration**.'; labels = @('VNet integration') }
+        # Step 3.4.10 connects the app and then the staging slot, so each line is there twice.
+        @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Settings**, select **Networking**.'; labels = @('Networking'); count = 2 }
+        @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Outbound traffic configuration**, click **Not configured** (the value of _Virtual network integration_).'; labels = @('Not configured'); count = 2 }
         @{ lab = '3.3'; id = '3.3.2'; text = 'In the left menu, under **Settings**, select **Access keys**.'; labels = @('Access keys') }
         @{ lab = '4.2'; id = '4.2.2'; text = 'Click **Containers** under **Data storage**'; labels = @('Containers') }
         @{ lab = '5.2'; id = '5.2.2'; text = 'Under **Instant restore**, fill in **Azure Backup Resource Group**: ...'; labels = @('Azure Backup Resource Group') }
     ) {
         $items = @((Get-StateStep $lab $id).items | Where-Object { (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
-        $items.Count | Should -Be 1
+        $items.Count | Should -Be ($(if ($count) { $count } else { 1 }))
     }
 
     It 'reads no item from "Under **Blob access tier (default)**, select the desired tier" in step 4.2.4' {
