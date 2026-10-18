@@ -678,9 +678,18 @@ Describe 'parse.py - lab 1.2, global and in-blade searches' {
     }
 
     It 'reads the role and member searches of step 1.2.4 as searches in the open blade' {
+        # The step opens the subscription with a global search first (#325); the role and the
+        # member are then searched in the wizard's own boxes.
         $searches = @(($script:Lab12.steps | Where-Object id -eq '1.2.4').items | Where-Object kind -eq 'search')
-        @($searches | ForEach-Object { $_.labels }) | Should -Be @('Owner', 'Malfurion Stormrage')
-        @($searches.scope) | Should -Be @('blade', 'blade')
+        @($searches | ForEach-Object { $_.labels }) | Should -Be @('Subscriptions', 'Owner', 'Malfurion Stormrage')
+        @($searches.scope) | Should -Be @('global', 'blade', 'blade')
+    }
+
+    It 'opens the Privileged administrator roles list before searching for Owner in step 1.2.4' {
+        $labels = @(($script:Lab12.steps | Where-Object id -eq '1.2.4').items | ForEach-Object { $_.labels })
+        $labels.IndexOf('Privileged administrator roles') | Should -BeGreaterOrEqual 0
+        $labels.IndexOf('Privileged administrator roles') | Should -BeLessThan $labels.IndexOf('Owner')
+        $labels | Should -Contain 'Allow user to assign all roles (highly privileged)'
     }
 }
 
