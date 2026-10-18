@@ -749,11 +749,11 @@ Run the lab's validator from the lab folder:
 
 ## 📦 What This Lab Leaves Behind
 
-No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` lists no lab that depends on Lab 4.2. Labs 4.3 and 4.4 work on the same storage accounts. Lab 4.4's Bicep declares the same five containers again, next to its own `dev-assets`, so it recreates them if they are gone, and its Step 4.4.3 works on any container you pick. The accounts themselves, and their cost, come from Lab 4.1. The daily costs below are approximate list prices for Sweden Central; check the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) for your own.
+The lab cycle's `tools/lab-cycle-manifest.psd1` lists no lab that depends on Lab 4.2, because it builds Lab 4.4 with Lab 4.4's Bicep. Labs 4.3 and 4.4 work on the same storage accounts. Lab 4.4's Bicep declares the same five containers again, next to its own `dev-assets`, so it recreates them if they are gone. Lab 4.4's Portal path creates no container, and its Step 4.4.3 sets a stored access policy on one you pick: if you run this lab's cleanup before Lab 4.4, create any container first (as in Step 4.2.2). The accounts themselves, and their cost, come from Lab 4.1. The daily costs below are approximate list prices for Sweden Central; check the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) for your own.
 
 | Left behind | Where | Daily cost | What it does in later labs |
 | --- | --- | --- | --- |
-| Containers `game-assets`, `player-backups`, `server-config`, `game-logs` | `prodskycraftswcsa` | 0 (a container costs nothing; its blobs do) | Nothing needs them; Lab 4.4's Step 4.4.3 may use one of them as "any container" for its stored access policy |
+| Containers `game-assets`, `player-backups`, `server-config`, `game-logs` | `prodskycraftswcsa` | 0 (a container costs nothing; its blobs do) | On Lab 4.4's Portal path, Step 4.4.3 sets its stored access policy on one of them |
 | `textures/test-asset.txt`, two versions; `file.txt` in `public-demo` | `prodskycraftswcsa`, `devskycraftswcsa` | well under 0.01 EUR (a few bytes each) | Nothing |
 | Lifecycle policy (`tier-game-logs`, `archive-backups`) | `prodskycraftswcsa` | 0 (the policy is free; each tier change it makes is billed as one write operation) | Nothing; it acts only on blobs under `game-logs/` and `player-backups/` |
 | Versioning, soft delete (7 days) | `prodskycraftswcsa` | every kept version and every soft-deleted blob is billed as stored data | Re-running Lab 4.1's Bicep turns versioning back off |
@@ -768,7 +768,7 @@ To remove what this lab added, run the lab's cleanup from the lab folder:
 
 It asks before it changes anything (`-WhatIf` lists the changes; `-Force` skips the questions). It deletes the four production containers and `public-demo` with their blobs, removes the lifecycle policy, turns production versioning off and keeps anonymous access off on the dev account. It keeps both storage accounts. Deleted containers and blobs stay recoverable, and billed, for the 7 days of soft delete. The cleanup removes no diagnostic setting: this lab creates none.
 
-While Lab 1.3's delete lock (`lock-no-delete-prod`) is on `prod-skycraft-swc-rg`, Azure refuses to delete the four production containers and the lifecycle policy (`ScopeLocked`). The script reports each refusal as `[ERROR]`, carries on with the rest (versioning off, the dev account) and exits 1; it does not remove the lock itself (tracked in [issue #372](https://github.com/mbiszczanik/skycraft/issues/372)). To clean up completely, remove `lock-no-delete-prod` by hand (`prod-skycraft-swc-rg` → **Locks**, under **Settings**), run the script again, and then create the lock again as in Lab 1.3, Step 1.3.11. Or leave the production containers and the policy in place: they cost next to nothing (see the table).
+While Lab 1.3's delete lock (`lock-no-delete-prod`) is on `prod-skycraft-swc-rg`, Azure refuses to delete the four production containers and the lifecycle policy (`ScopeLocked`). The script reports each refusal as `[ERROR]`, carries on with the rest (versioning off, the dev account) and exits 1; it does not remove the lock itself (tracked in [issue #372](https://github.com/mbiszczanik/skycraft/issues/372)). To clean up completely, remove `lock-no-delete-prod` by hand (`prod-skycraft-swc-rg` → **Locks**, under **Settings**), run the script again, wait a minute, and then create the lock again as in Lab 1.3, Step 1.3.11. Or leave the production containers and the policy in place: they cost next to nothing (see the table).
 
 The cleanup does not remove a role assignment; remove the optional one with:
 
@@ -886,7 +886,7 @@ Get-AzStorageBlob -Container 'game-assets' -IncludeDeleted -Context $ctx | Selec
 
 **Solution**:
 
-- Delete all blobs first, or delete the whole container from **Containers** (it takes its blobs with it)
+- Delete all blobs first, or delete the whole container from **Containers** (under **Data storage**; it takes its blobs with it)
 - A container with version-level immutability cannot be deleted while it holds a blob (Step 4.2.2)
 
 ---
@@ -950,7 +950,7 @@ Get-AzStorageBlob -Container 'game-assets' -IncludeDeleted -Context $ctx | Selec
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: In Azure Portal: go to the storage account → Containers → switch the filter from "Only show active containers" to show deleted containers → select the deleted container → click "Undelete". Via Az PowerShell: `Restore-AzRmStorageContainer -ResourceGroupName <rg> -StorageAccountName <account> -Name <container-name> -DeletedContainerVersion <version>`. The container and all its blobs are restored to their state at deletion time.
+   **Answer**: In Azure Portal: go to the storage account → **Data storage** → **Containers** → switch the filter from "Only show active containers" to show deleted containers → select the deleted container → click "Undelete". Via Az PowerShell: `Restore-AzRmStorageContainer -ResourceGroupName <rg> -StorageAccountName <account> -Name <container-name> -DeletedContainerVersion <version>`. The container and all its blobs are restored to their state at deletion time.
    </details>
 
 8. **Why does each lifecycle rule in this lab carry a prefix filter?**

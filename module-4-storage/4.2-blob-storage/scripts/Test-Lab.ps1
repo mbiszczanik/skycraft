@@ -156,16 +156,20 @@ function Assert-LifecycleRule {
 # The base blob actions of a lifecycle rule as text, in a fixed order: 'TierToCool 30, Delete 365'.
 # The days are those since the last modification; an action on another condition shows it
 # ('Delete created 30', 'TierToCool accessed 30'), so it never matches an expected action.
+# An action with the Portal's "Skip blobs that have been rehydrated in the last" days adds them
+# ('TierToArchive 180 rehydrated 7'), so a rule saved with that box unticked fails.
 function Get-LifecycleActionText {
     param([object]$BaseBlob)
     if ($null -eq $BaseBlob) { return 'none' }
     $parts = foreach ($action in 'TierToHot', 'TierToCool', 'TierToCold', 'TierToArchive', 'Delete') {
         $when = $BaseBlob.$action
         if ($null -eq $when) { continue }
-        if ($null -ne $when.DaysAfterModificationGreaterThan) { "$action $($when.DaysAfterModificationGreaterThan)" }
+        $text = if ($null -ne $when.DaysAfterModificationGreaterThan) { "$action $($when.DaysAfterModificationGreaterThan)" }
         elseif ($null -ne $when.DaysAfterCreationGreaterThan) { "$action created $($when.DaysAfterCreationGreaterThan)" }
         elseif ($null -ne $when.DaysAfterLastAccessTimeGreaterThan) { "$action accessed $($when.DaysAfterLastAccessTimeGreaterThan)" }
         else { "$action (no days)" }
+        if ($null -ne $when.DaysAfterLastTierChangeGreaterThan) { $text += " rehydrated $($when.DaysAfterLastTierChangeGreaterThan)" }
+        $text
     }
     if (@($parts).Count -eq 0) { return 'none' }
     return (@($parts) -join ', ')
@@ -244,9 +248,9 @@ Assert-Check "PROD: Lifecycle Policy exists" `
 if ($prodPolicy) {
     $rules = @($prodPolicy.Rules)
     Assert-LifecycleRule -Rules $rules -Name 'tier-game-logs' -Prefix 'game-logs/' `
-        -Actions ([ordered]@{ TierToCool = 30; TierToCold = 90; TierToArchive = 180; Delete = 365 })
+        -Actions ([ordered]@{ TierToCool = 30; TierToCold = 90; TierToArchive = '180 rehydrated 7'; Delete = 365 })
     Assert-LifecycleRule -Rules $rules -Name 'archive-backups' -Prefix 'player-backups/' `
-        -Actions ([ordered]@{ TierToArchive = 7 })
+        -Actions ([ordered]@{ TierToArchive = '7 rehydrated 7' })
 }
 
 # 3. Development Verification
