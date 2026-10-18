@@ -19,7 +19,9 @@
     It signs in to Microsoft Graph the way Lab 1.1's scripts do, reusing a Graph context already
     in the session only when that context holds the scopes it requests, and it looks Lab 1.1's
     users up on the tenant's initial *.onmicrosoft.com domain, where Lab 1.1 creates them. When
-    the tenant lists no initial domain it stops with [ERROR] and exit code 1.
+    the tenant lists no initial domain it stops with [ERROR] and exit code 1. When a Microsoft
+    Graph module it calls is not installed (Azure Cloud Shell does not ship Microsoft.Graph.Users),
+    it names the module and the command that installs it, and exits 1 before signing in (issue #375).
 
     It sets up Azure PowerShell first, running Connect-AzAccount when the session has no Az
     context, then signs in to Microsoft Graph in the tenant SKYCRAFT_GRAPH_TENANT_ID names, else in
@@ -52,7 +54,7 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.Resources, Microsoft.Graph.Authentication, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Users, Microsoft.Graph.Groups
+#Requires -Modules Az.Accounts, Az.Resources
 
 [CmdletBinding()]
 param()
@@ -368,6 +370,20 @@ $ErrorActionPreference = "Stop"
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
 # The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
+
+# The Microsoft Graph modules this script calls, checked here rather than with '#Requires -Modules'
+# (issue #375): Azure Cloud Shell does not ship Microsoft.Graph.Users, and #Requires would stop the
+# script with PowerShell's own error, which names no install command. Test-LabModule names the
+# missing module and the command that installs it. The Az modules stay in #Requires: Cloud Shell ships
+# them. Imported after them and in this order, as #Requires did.
+$labModule = @(
+    'Microsoft.Graph.Authentication'
+    'Microsoft.Graph.Identity.DirectoryManagement'
+    'Microsoft.Graph.Users'
+    'Microsoft.Graph.Groups'
+)
+if (-not (Test-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
+Import-Module -Name $labModule -Verbose:$false
 
 Write-Host "=== Lab 1.2: RBAC Role Assignment ===" -ForegroundColor Cyan -BackgroundColor Black
 

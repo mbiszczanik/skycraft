@@ -3,7 +3,8 @@
     Shared helpers for the lab scripts. Today: Exit-Lab, which ends a lab script with the right
     exit code without closing the learner's PowerShell session, the role assignment helpers,
     which read, create and remove Azure role assignments without Microsoft Graph, and the budget
-    helpers, which list and delete Cost Management budgets without Az.Billing.
+    helpers, which list and delete Cost Management budgets without Az.Billing, and Test-LabModule,
+    which tells the learner which module to install when one the script needs is missing.
 
 .DESCRIPTION
     Every lab script serves two callers at once (issue #301):
@@ -73,6 +74,17 @@
     They follow the same rule as the role assignment helpers: a status outside 2xx throws with
     the status, the error code and the service's message, so a failed read is never "no budget".
 
+    Test-LabModule (issue #375) checks the modules a script needs where `#Requires -Modules`
+    cannot help the learner: Azure Cloud Shell ships the Az modules and a basic set of Microsoft
+    Graph modules, but not Microsoft.Graph.Users, and `#Requires` stops the script with
+    PowerShell's own error, which names no install command. Test-LabModule prints the missing
+    module and the `Install-Module <name> -Scope CurrentUser` line, and returns $false; the script
+    then ends itself with `Exit-Lab -FailureCount 1`:
+
+        $labModule = @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Users')
+        if (-not (Test-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
+        Import-Module -Name $labModule -Verbose:$false
+
     The rest of #301 (Invoke-LabCheck, Get-LabResourceOrFail, Assert-LabSubscription) is not here
     yet. tests/Exit-Code-Propagation.Tests.ps1 requires every lab script, except a helper that
     lab scripts dot-source, to import this module and call Exit-Lab, forbids a direct
@@ -84,7 +96,7 @@
 
 .NOTES
     Project: SkyCraft
-    Issues: #257, #301, #397, #411
+    Issues: #257, #301, #375, #397, #411
 #>
 
 #Requires -Version 7.0
@@ -721,4 +733,63 @@ function Remove-LabArmBudget {
     Invoke-LabArmRequest -Method DELETE -Path "$scopePath/providers/Microsoft.Consumption/budgets/$($Name)?api-version=$script:LabBudgetApiVersion" | Out-Null
 }
 
-Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget
+function Test-LabModule {
+    <#
+    .SYNOPSIS
+        Tells whether every module a lab script needs is installed, and names the install command
+        for the ones that are not.
+
+    .DESCRIPTION
+        Returns $true when Get-Module -ListAvailable finds every module in -Name. Otherwise it
+        prints an [ERROR] line naming each missing module, the command that installs them for the
+        current user (`Install-Module <name>, <name> -Scope CurrentUser`, which needs no
+        administrator rights and works in Azure Cloud Shell), and returns $false.
+
+        It ends nothing itself: the script calls `Exit-Lab -FailureCount 1` when it returns
+        $false, so the entry-point check in Exit-Lab sees the script, not this module (issue
+        #257).
+
+        Use it instead of `#Requires -Modules` for a module Azure Cloud Shell does not ship
+        (Microsoft.Graph.Users, issue #375). `#Requires` stops the script before its first line
+        with PowerShell's own error, which names the module but not how to install it.
+
+    .PARAMETER Name
+        The modules the script needs, by name.
+
+    .OUTPUTS
+        [bool] $true when every module is installed.
+
+    .EXAMPLE
+        if (-not (Test-LabModule -Name 'Microsoft.Graph.Authentication', 'Microsoft.Graph.Users')) { Exit-Lab -FailureCount 1 }
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #375
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$Name
+    )
+
+    $missing = @($Name | Where-Object { -not (Get-Module -ListAvailable -Name $_ -Verbose:$false) })
+    if ($missing.Count -eq 0) { return $true }
+
+    $list = $missing -join ', '
+    if ($missing.Count -eq 1) {
+        Write-Host "[ERROR] This script needs the PowerShell module $list, which is not installed." -ForegroundColor Red
+        $it = 'it'
+    }
+    else {
+        Write-Host "[ERROR] This script needs these PowerShell modules, which are not installed: $list." -ForegroundColor Red
+        $it = 'them'
+    }
+    Write-Host "        Install $it for your account, then run the script again:" -ForegroundColor Yellow
+    Write-Host "            Install-Module $list -Scope CurrentUser" -ForegroundColor Yellow
+    Write-Host "        In Azure Cloud Shell without a storage account, what you install is deleted when the session ends: install $it again in each new session." -ForegroundColor Yellow
+    return $false
+}
+
+Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Test-LabModule

@@ -164,9 +164,10 @@ Describe 'Module 1 Graph sign-in - the four scripts share one decision' {
         @{ name = 'New-LabUser.ps1' }, @{ name = 'Test-Lab.ps1' }, @{ name = 'Remove-LabResource.ps1' }
         @{ name = 'New-LabRoleAssignment.ps1' }
     ) {
-        # #Requires already blocks the script when a submodule is missing, so the old
-        # 'Install-Module Microsoft.Graph -Force' block could only ever fire when the submodules
-        # were installed correctly - installing ~40 modules, for minutes, for nothing.
+        # The module check already blocks the script when a submodule is missing (#Requires
+        # then, Test-LabModule since #375, which prints the install command for the learner to
+        # run), so the old 'Install-Module Microsoft.Graph -Force' block could only ever fire when
+        # the submodules were installed correctly - installing ~40 modules, for minutes, for nothing.
         $text = Get-Content -Raw -LiteralPath $script:LabScriptPath[$name]
         $text | Should -Not -Match 'Install-Module'
     }
@@ -177,9 +178,18 @@ Describe 'Module 1 Graph sign-in - the four scripts share one decision' {
         @{ name = 'Remove-LabResource.ps1';    required = @('Microsoft.Graph.Identity.DirectoryManagement') }
         @{ name = 'New-LabRoleAssignment.ps1'; required = @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Identity.DirectoryManagement') }
     ) {
-        $head = (Get-Content -LiteralPath $script:LabScriptPath[$name] -TotalCount 60) -join "`n"
+        # The script's $labModule list, which Test-LabModule checks (issue #375).
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:LabScriptPath[$name], [ref]$null, [ref]$null)
+        $assignment = @($ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+            $node.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            $node.Left.VariablePath.UserPath -eq 'labModule'
+        }, $false))
+        $assignment.Count | Should -Be 1
+        $declared = @($assignment[0].Right.FindAll({ $args[0] -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true).Value)
         foreach ($module in $required) {
-            $head | Should -Match ([regex]::Escape($module))
+            $declared | Should -Contain $module
         }
     }
 

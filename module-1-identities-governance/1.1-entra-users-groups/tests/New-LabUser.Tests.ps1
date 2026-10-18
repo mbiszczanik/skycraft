@@ -113,7 +113,7 @@ Describe 'New-LabUser.ps1 — a sign-in that leaves no Graph context is a failed
     BeforeAll {
         Import-Module (Join-Path $PSScriptRoot '..' '..' '..' 'tests' 'Support' 'LabScriptStub.psm1') -Force
 
-        # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
+        # Exactly the script's $labModule list (issue #375): imported for real before the stub.
         $requiredModules = @(
             'Microsoft.Graph.Authentication'
             'Microsoft.Graph.Users'

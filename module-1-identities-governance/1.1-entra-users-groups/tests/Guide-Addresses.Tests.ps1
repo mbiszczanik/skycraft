@@ -63,7 +63,7 @@ BeforeAll {
     $script:GuideGuest = $guestMatch.Groups['email'].Value
 
     $script:StubModuleName = 'SkyCraftGraphAddressStub'
-    # The union of the three scripts' '#Requires -Modules' lines: imported for real before the stub.
+    # The union of the three scripts' $labModule lists (issue #375): imported for real before the stub.
     $script:RequiredModules = @(
         'Microsoft.Graph.Authentication'
         'Microsoft.Graph.Users'

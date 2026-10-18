@@ -53,6 +53,13 @@ You'll set up the following identity structure in Microsoft Entra ID:
 - [ ] Azure Portal access
 - [ ] Global Administrator or User Administrator role
 - [ ] Understanding of user vs. group concepts
+- [ ] Only for the scripts in `scripts/` and the checklist commands (the Portal steps need none): PowerShell 7 with the Microsoft Graph modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Users`, `Microsoft.Graph.Groups`, `Microsoft.Graph.Identity.DirectoryManagement` and `Microsoft.Graph.Identity.SignIns`. Install them for your account:
+
+  ```powershell
+  Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Identity.SignIns -Scope CurrentUser
+  ```
+
+  In Azure Cloud Shell (PowerShell) all of them are preinstalled except `Microsoft.Graph.Users`: run `Install-Module Microsoft.Graph.Users -Scope CurrentUser` first. A script that finds a module missing stops before it signs in and prints this command. A Cloud Shell session without a storage account can run the scripts once the module is installed in it, but it deletes the clone of the repository and the module when it ends, so install the module again in each new session. Details and sources: [Module 1 prerequisites](../README.md#-prerequisites).
 
 ---
 

@@ -54,6 +54,14 @@ Before starting this lab:
 - [ ] Azure subscription with Owner or User Access Administrator role, assigned without a condition that keeps you from assigning Owner (Troubleshooting, Issue 1, shows how to check)
 - [ ] Understanding of resource groups concept
 - [ ] Azure Portal access
+- [ ] Only for the scripts in `scripts/` and the checklist commands (the Portal steps need none): PowerShell 7 with `Az.Accounts` and `Az.Resources`, and, for `New-LabRoleAssignment.ps1`, the Microsoft Graph modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Identity.DirectoryManagement`, `Microsoft.Graph.Users` and `Microsoft.Graph.Groups`. Install them for your account:
+
+  ```powershell
+  Install-Module Az.Accounts, Az.Resources -Scope CurrentUser
+  Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Users, Microsoft.Graph.Groups -Scope CurrentUser
+  ```
+
+  In Azure Cloud Shell (PowerShell) all of them are preinstalled except `Microsoft.Graph.Users`: run `Install-Module Microsoft.Graph.Users -Scope CurrentUser` before `New-LabRoleAssignment.ps1`, which otherwise stops before it signs in and prints this command. A Cloud Shell session without a storage account can run the scripts once the module is installed in it, but it deletes the clone of the repository and the module when it ends, so install the module again in each new session. Details and sources: [Module 1 prerequisites](../README.md#-prerequisites).
 
 **Verify Lab 1.1 completion**: Confirm these exist:
 

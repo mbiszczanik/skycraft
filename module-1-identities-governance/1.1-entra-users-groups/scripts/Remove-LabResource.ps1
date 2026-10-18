@@ -27,8 +27,9 @@
 
     Exit codes:
       0  every object that exists was deleted (or -WhatIf / a declined prompt skipped it)
-      1  Microsoft Graph sign-in failed or the initial domain could not be determined (nothing
-         was deleted), or at least one lookup or deletion failed
+      1  a Microsoft Graph module is missing (the script names it and the command that installs it,
+         issue #375), Microsoft Graph sign-in failed or the initial domain could not be
+         determined (nothing was deleted), or at least one lookup or deletion failed
 
     Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
     otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
@@ -54,7 +55,6 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Identity.DirectoryManagement
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -393,6 +393,19 @@ function Select-LabInitialDomain {
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
+
+# The Microsoft Graph modules this script calls, checked here rather than with '#Requires -Modules'
+# (issue #375): Azure Cloud Shell does not ship Microsoft.Graph.Users, and #Requires would stop the
+# script with PowerShell's own error, which names no install command. Test-LabModule names the
+# missing module and the command that installs it. Imported in this order, as #Requires did.
+$labModule = @(
+    'Microsoft.Graph.Authentication'
+    'Microsoft.Graph.Users'
+    'Microsoft.Graph.Groups'
+    'Microsoft.Graph.Identity.DirectoryManagement'
+)
+if (-not (Test-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
+Import-Module -Name $labModule -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
 Write-Host "=== Lab 1.1 - Resource Cleanup ===" -ForegroundColor Cyan -BackgroundColor Black

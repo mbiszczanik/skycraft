@@ -57,9 +57,41 @@ Before starting, ensure you have:
 - [ ] On a subscription created for this course: the `Microsoft.Insights` resource provider registered before Lab 1.3 (Lab 1.3, Prerequisites, shows how)
 - [ ] Azure Portal access (https://portal.azure.com)
 - [ ] Azure CLI installed locally (or use Cloud Shell)
-- [ ] PowerShell 7+ installed (Windows, macOS, or Linux)
+- [ ] PowerShell 7+ installed (Windows, macOS, or Linux), or Azure Cloud Shell (PowerShell)
+- [ ] The PowerShell modules below, if you run the labs' scripts or checklist commands (the Portal steps need none of them)
 - [ ] Basic understanding of cloud computing concepts
 - [ ] Text editor (VS Code recommended)
+
+### PowerShell modules for the scripts
+
+| Module | Used by | In Azure Cloud Shell |
+| --- | --- | --- |
+| `Microsoft.Graph.Authentication` | Lab 1.1 scripts, Lab 1.2 `New-LabRoleAssignment.ps1` | Preinstalled |
+| `Microsoft.Graph.Users` | Lab 1.1 scripts, Lab 1.2 `New-LabRoleAssignment.ps1` | **Not installed**: install it |
+| `Microsoft.Graph.Groups` | Lab 1.1 scripts, Lab 1.2 `New-LabRoleAssignment.ps1` | Preinstalled |
+| `Microsoft.Graph.Identity.DirectoryManagement` | Lab 1.1 scripts, Lab 1.2 `New-LabRoleAssignment.ps1` | Preinstalled |
+| `Microsoft.Graph.Identity.SignIns` | Lab 1.1 `New-LabUser.ps1` | Preinstalled |
+| `Az.Accounts`, `Az.Resources` | Lab 1.2 and Lab 1.3 scripts | Preinstalled |
+| `Az.Billing` | Lab 1.3 `Test-Lab.ps1` and `Remove-LabResource.ps1` | Preinstalled |
+| `Az.Monitor` | Lab 1.3 `Remove-LabResource.ps1` | Preinstalled |
+| `Az.PolicyInsights` | Lab 1.3 checklist (`Get-AzPolicyStateSummary`) | Preinstalled |
+
+On your own machine, install them for your account (no administrator rights needed). If PowerShell asks whether to trust the PSGallery repository, answer `Y`:
+
+```powershell
+Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Identity.SignIns -Scope CurrentUser
+Install-Module Az.Accounts, Az.Resources, Az.Billing, Az.Monitor, Az.PolicyInsights -Scope CurrentUser
+```
+
+In Azure Cloud Shell (PowerShell), Azure PowerShell and a basic set of Microsoft Graph modules are preinstalled, but `Microsoft.Graph.Users` is not ([Features & tools for Azure Cloud Shell](https://learn.microsoft.com/azure/cloud-shell/features#other-microsoft-services)). Install it before you run a Lab 1.1 or Lab 1.2 script:
+
+```powershell
+Install-Module Microsoft.Graph.Users -Scope CurrentUser
+```
+
+When a module is missing, the Lab 1.1 scripts and Lab 1.2's `New-LabRoleAssignment.ps1` stop before they sign in, name the module and print the `Install-Module` command for it.
+
+**Cloud Shell without a storage account.** Choosing **No storage account required** (or *Continue without storage*) starts an *ephemeral session*. You can write files to your `$HOME` folder there, so you can clone the repository and run the scripts, but everything you saved, the clone and any module you installed included, is deleted when the session ends ([Get started with Azure Cloud Shell ephemeral sessions](https://learn.microsoft.com/azure/cloud-shell/get-started/ephemeral), [Cloud Shell FAQ](https://learn.microsoft.com/azure/cloud-shell/faq-troubleshooting)). A session ends after 20 minutes without interaction. So in each new session, clone the repository and run `Install-Module Microsoft.Graph.Users -Scope CurrentUser` again. Microsoft Learn documents installing your own PowerShell modules for sessions with a storage account ([Installing your own tools](https://learn.microsoft.com/azure/cloud-shell/features#installing-your-own-tools)); if the install fails in a session without one, mount a storage account (**Settings** > **Reset User Settings**, then choose a storage account) or run the scripts in PowerShell 7 on your own machine. With a storage account, your `$HOME` folder, and the modules installed in it, stays across sessions ([Persist files in Azure Cloud Shell](https://learn.microsoft.com/azure/cloud-shell/persisting-shell-storage)).
 
 ---
 

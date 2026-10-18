@@ -58,7 +58,8 @@ BeforeAll {
 
     $script:ScriptPath = (Resolve-Path (Join-Path $PSScriptRoot '..' 'scripts' 'New-LabRoleAssignment.ps1')).Path
 
-    # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
+    # Exactly the script's '#Requires -Modules' line, then its $labModule list (issue #375):
+    # imported for real before the stub.
     $script:RequiredModules = @(
         'Az.Accounts'
         'Az.Resources'

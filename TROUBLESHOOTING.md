@@ -193,6 +193,20 @@ Rotation:
 
 3.  Re-run the script. The `#Requires` line at the top of each script lists exactly which modules it needs.
 
+### "[ERROR] This script needs the PowerShell module Microsoft.Graph.Users, which is not installed"
+
+**Cause**: The Lab 1.1 scripts and Lab 1.2's `New-LabRoleAssignment.ps1` check their Microsoft Graph modules themselves instead of with `#Requires` (issue #375), so a missing module stops them before they sign in, with the module's name and the command that installs it. Azure Cloud Shell ships Azure PowerShell and a basic set of Microsoft Graph modules, but not `Microsoft.Graph.Users` ([Features & tools for Azure Cloud Shell](https://learn.microsoft.com/azure/cloud-shell/features#other-microsoft-services)).
+**Solution**:
+
+1.  Run the command the script printed, for example:
+
+    ```powershell
+    Install-Module Microsoft.Graph.Users -Scope CurrentUser
+    ```
+
+2.  Re-run the script.
+3.  In a Cloud Shell session without a storage account, the module is deleted when the session ends: install it again in each new session. See [Module 1 prerequisites](module-1-identities-governance/README.md#-prerequisites).
+
 ## ☁️ Deployment Errors
 
 ### "QuotaExceeded"
