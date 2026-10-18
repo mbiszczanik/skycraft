@@ -3,8 +3,9 @@
     Shared helpers for the lab scripts. Today: Exit-Lab, which ends a lab script with the right
     exit code without closing the learner's PowerShell session, the role assignment helpers,
     which read, create and remove Azure role assignments without Microsoft Graph, and the budget
-    helpers, which list and delete Cost Management budgets without Az.Billing, and Test-LabModule,
-    which tells the learner which module to install when one the script needs is missing.
+    helpers, which list and delete Cost Management budgets without Az.Billing, and Import-LabModule, which
+    imports the modules a script needs, the Microsoft Graph ones at one version, or tells the
+    learner what to install.
 
 .DESCRIPTION
     Every lab script serves two callers at once (issue #301):
@@ -74,16 +75,16 @@
     They follow the same rule as the role assignment helpers: a status outside 2xx throws with
     the status, the error code and the service's message, so a failed read is never "no budget".
 
-    Test-LabModule (issue #375) checks the modules a script needs where `#Requires -Modules`
+    Import-LabModule (issue #375) imports the modules a script needs where `#Requires -Modules`
     cannot help the learner: Azure Cloud Shell ships the Az modules and a basic set of Microsoft
     Graph modules, but not Microsoft.Graph.Users, and `#Requires` stops the script with
-    PowerShell's own error, which names no install command. Test-LabModule prints the missing
-    module and the `Install-Module <name> -Scope CurrentUser` line, and returns $false; the script
-    then ends itself with `Exit-Lab -FailureCount 1`:
+    PowerShell's own error, which names no install command. It imports the Graph modules at one
+    version, since a session loads only one Microsoft.Graph.Authentication; when a module is
+    missing or not installed at that version, it prints the `Install-Module` line for it and
+    returns $false, and the script ends itself with `Exit-Lab -FailureCount 1`:
 
         $labModule = @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Users')
-        if (-not (Test-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
-        Import-Module -Name $labModule -Verbose:$false
+        if (-not (Import-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
 
     The rest of #301 (Invoke-LabCheck, Get-LabResourceOrFail, Assert-LabSubscription) is not here
     yet. tests/Exit-Code-Propagation.Tests.ps1 requires every lab script, except a helper that
@@ -733,34 +734,54 @@ function Remove-LabArmBudget {
     Invoke-LabArmRequest -Method DELETE -Path "$scopePath/providers/Microsoft.Consumption/budgets/$($Name)?api-version=$script:LabBudgetApiVersion" | Out-Null
 }
 
-function Test-LabModule {
+function Import-LabModule {
     <#
     .SYNOPSIS
-        Tells whether every module a lab script needs is installed, and names the install command
-        for the ones that are not.
+        Imports the modules a lab script needs, the Microsoft Graph ones at one version, or names
+        the commands that install what is missing and returns $false.
 
     .DESCRIPTION
-        Returns $true when Get-Module -ListAvailable finds every module in -Name. Otherwise it
-        prints an [ERROR] line naming each missing module, the command that installs them for the
-        current user (`Install-Module <name>, <name> -Scope CurrentUser`, which needs no
-        administrator rights and works in Azure Cloud Shell), and returns $false.
+        Use it instead of `#Requires -Modules` for a module Azure Cloud Shell does not ship
+        (Microsoft.Graph.Users, issue #375). `#Requires` stops the script before its first line
+        with PowerShell's own error, which names the module but not how to install it.
+
+        Every Microsoft.Graph.* submodule pins Microsoft.Graph.Authentication to its own version
+        in its manifest, and a session can load only one Authentication assembly. Importing
+        Microsoft.Graph.Users 2.28.0 and then Microsoft.Graph.Groups 2.24.0 fails with "Could
+        not load file or assembly 'Microsoft.Graph.Authentication, Version=2.24.0.0' ... Assembly
+        with same name is already loaded". That is what a plain `Install-Module
+        Microsoft.Graph.Users` sets up in Cloud Shell when the PowerShell Gallery holds a newer
+        version than the Graph modules Cloud Shell ships. So the Graph modules in -Name are
+        imported together at one version:
+
+          - the version of Microsoft.Graph.Authentication already loaded in the session, when
+            one is (another lab script or Connect-MgGraph loaded it), since no other can load;
+          - otherwise the installed version that most of them share, the newest on a tie, which
+            is the newest version all of them share when there is one.
+
+        The other modules in -Name are imported by name.
+
+        Returns $true when every module is imported. Otherwise it imports nothing and prints an
+        [ERROR] line naming each module that is missing or not installed at that version, and the
+        commands that install it for the current user (`Install-Module <name> -RequiredVersion
+        <version> -Scope CurrentUser` for a Graph module where a version is set, `Install-Module
+        <name>, <name> -Scope CurrentUser` otherwise), and returns $false. An import that fails all
+        the same prints its error and returns $false, so the script still stops through Exit-Lab
+        rather than with an unhandled error.
 
         It ends nothing itself: the script calls `Exit-Lab -FailureCount 1` when it returns
         $false, so the entry-point check in Exit-Lab sees the script, not this module (issue
         #257).
 
-        Use it instead of `#Requires -Modules` for a module Azure Cloud Shell does not ship
-        (Microsoft.Graph.Users, issue #375). `#Requires` stops the script before its first line
-        with PowerShell's own error, which names the module but not how to install it.
-
     .PARAMETER Name
-        The modules the script needs, by name.
+        The modules the script needs, by name, in the order they are imported.
 
     .OUTPUTS
-        [bool] $true when every module is installed.
+        [bool] $true when every module is imported.
 
     .EXAMPLE
-        if (-not (Test-LabModule -Name 'Microsoft.Graph.Authentication', 'Microsoft.Graph.Users')) { Exit-Lab -FailureCount 1 }
+        $labModule = @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Users')
+        if (-not (Import-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
 
     .NOTES
         Project: SkyCraft
@@ -774,22 +795,83 @@ function Test-LabModule {
         [string[]]$Name
     )
 
-    $missing = @($Name | Where-Object { -not (Get-Module -ListAvailable -Name $_ -Verbose:$false) })
-    if ($missing.Count -eq 0) { return $true }
+    $installed = @{}
+    foreach ($module in $Name) {
+        $installed[$module] = @(Get-Module -ListAvailable -Name $module -Verbose:$false |
+                ForEach-Object { [version]$_.Version } | Sort-Object -Unique -Descending)
+    }
 
-    $list = $missing -join ', '
+    # The Graph modules share one version: the one already loaded, or the one most of them have.
+    $graph         = @($Name | Where-Object { $_ -like 'Microsoft.Graph.*' })
+    $graphVersion  = $null
+    $loadedVersion = $null
+    if ($graph.Count -gt 0) {
+        $loaded = @(Get-Module -Name 'Microsoft.Graph.Authentication' -Verbose:$false | Where-Object { $_ })
+        if ($loaded.Count -gt 0) {
+            $loadedVersion = [version]$loaded[0].Version
+            $graphVersion  = $loadedVersion
+        }
+        else {
+            $candidate = @($graph | ForEach-Object { $installed[$_] } | Sort-Object -Unique -Descending)
+            $best = 0
+            foreach ($version in $candidate) {
+                $count = @($graph | Where-Object { $installed[$_] -contains $version }).Count
+                if ($count -gt $best) { $best = $count; $graphVersion = $version }
+            }
+        }
+    }
+
+    $needsVersion = @(if ($graphVersion) { $graph | Where-Object { $installed[$_] -notcontains $graphVersion } })
+    $needsAny     = @($Name | Where-Object { $installed[$_].Count -eq 0 -and $needsVersion -notcontains $_ })
+    $missing      = @($Name | Where-Object { $installed[$_].Count -eq 0 })
+    $otherVersion = @($needsVersion | Where-Object { $installed[$_].Count -gt 0 })
+
+    if ($needsVersion.Count -eq 0 -and $needsAny.Count -eq 0) {
+        foreach ($module in $Name) {
+            # -Global: imported from inside this module, a module is otherwise visible only here,
+            # not to the lab script that called Import-LabModule.
+            $import = @{ Name = $module; Global = $true; Verbose = $false; ErrorAction = 'Stop' }
+            if ($graphVersion -and $graph -contains $module) { $import['RequiredVersion'] = $graphVersion }
+            try {
+                Import-Module @import
+            }
+            catch {
+                Write-Host "[ERROR] Could not import the PowerShell module $module$(if ($import['RequiredVersion']) { " $graphVersion" }): $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host '        Open a new PowerShell session and run the script again.' -ForegroundColor Yellow
+                return $false
+            }
+        }
+        return $true
+    }
+
     if ($missing.Count -eq 1) {
-        Write-Host "[ERROR] This script needs the PowerShell module $list, which is not installed." -ForegroundColor Red
-        $it = 'it'
+        Write-Host "[ERROR] This script needs the PowerShell module $($missing[0]), which is not installed." -ForegroundColor Red
     }
-    else {
-        Write-Host "[ERROR] This script needs these PowerShell modules, which are not installed: $list." -ForegroundColor Red
-        $it = 'them'
+    elseif ($missing.Count -gt 1) {
+        Write-Host "[ERROR] This script needs these PowerShell modules, which are not installed: $($missing -join ', ')." -ForegroundColor Red
     }
+    if ($otherVersion.Count -gt 0) {
+        $found = @($otherVersion | ForEach-Object { "$_ ($($installed[$_] -join ', '))" }) -join ', '
+        Write-Host "[ERROR] This script needs its Microsoft Graph modules at one version, $graphVersion, and these are installed only at another: $found." -ForegroundColor Red
+    }
+    if ($graphVersion -and $needsVersion.Count -gt 0) {
+        $why = if ($loadedVersion) { "the Microsoft.Graph.Authentication this session has already loaded" } else { "the Microsoft Graph modules installed here" }
+        Write-Host "        Microsoft Graph modules load only at one version per session; $graphVersion is the version of $why." -ForegroundColor Yellow
+    }
+
+    $it = if (($needsVersion.Count + $needsAny.Count) -eq 1) { 'it' } else { 'them' }
     Write-Host "        Install $it for your account, then run the script again:" -ForegroundColor Yellow
-    Write-Host "            Install-Module $list -Scope CurrentUser" -ForegroundColor Yellow
+    foreach ($module in $needsVersion) {
+        Write-Host "            Install-Module $module -RequiredVersion $graphVersion -Scope CurrentUser" -ForegroundColor Yellow
+    }
+    if ($needsAny.Count -gt 0) {
+        Write-Host "            Install-Module $($needsAny -join ', ') -Scope CurrentUser" -ForegroundColor Yellow
+    }
+    if ($loadedVersion) {
+        Write-Host "        Or open a new PowerShell session, which has no Microsoft Graph module loaded yet, and run the script there." -ForegroundColor Yellow
+    }
     Write-Host "        In Azure Cloud Shell without a storage account, what you install is deleted when the session ends: install $it again in each new session." -ForegroundColor Yellow
     return $false
 }
 
-Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Test-LabModule
+Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule

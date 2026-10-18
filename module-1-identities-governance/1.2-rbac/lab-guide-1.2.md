@@ -61,7 +61,14 @@ Before starting this lab:
   Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Users, Microsoft.Graph.Groups -Scope CurrentUser
   ```
 
-  In Azure Cloud Shell (PowerShell) all of them are preinstalled except `Microsoft.Graph.Users`: run `Install-Module Microsoft.Graph.Users -Scope CurrentUser` before `New-LabRoleAssignment.ps1`, which otherwise stops before it signs in and prints this command. A Cloud Shell session without a storage account can run the scripts once the module is installed in it, but it deletes the clone of the repository and the module when it ends, so install the module again in each new session. Details and sources: [Module 1 prerequisites](../README.md#-prerequisites).
+  In Azure Cloud Shell (PowerShell) all of them are preinstalled except `Microsoft.Graph.Users`. Install it before `New-LabRoleAssignment.ps1`, at the version of the preinstalled Graph modules: the script loads its Graph modules at one version only.
+
+  ```powershell
+  $graphVersion = (Get-Module -ListAvailable Microsoft.Graph.Authentication | Sort-Object Version -Descending | Select-Object -First 1).Version
+  Install-Module Microsoft.Graph.Users -RequiredVersion $graphVersion -Scope CurrentUser
+  ```
+
+  When a module is missing, or not installed at the version the other Graph modules share, `New-LabRoleAssignment.ps1` stops before it signs in and prints the `Install-Module` command with the version to install. A Cloud Shell session without a storage account can run the other scripts of this lab, which need only preinstalled modules. It can run `New-LabRoleAssignment.ps1` only if this install works there, which Microsoft Learn does not document; if it fails, mount a storage account or run the script in PowerShell 7 on your own machine. An ephemeral session also deletes the clone of the repository and the module when it ends, so install the module again in each new session. Details and sources: [Module 1 prerequisites](../README.md#-prerequisites).
 
 **Verify Lab 1.1 completion**: Confirm these exist:
 

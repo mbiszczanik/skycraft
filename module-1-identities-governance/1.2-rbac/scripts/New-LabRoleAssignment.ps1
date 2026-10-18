@@ -371,19 +371,19 @@ $ErrorActionPreference = "Stop"
 # The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
-# The Microsoft Graph modules this script calls, checked here rather than with '#Requires -Modules'
+# The Microsoft Graph modules this script calls, imported here rather than with '#Requires -Modules'
 # (issue #375): Azure Cloud Shell does not ship Microsoft.Graph.Users, and #Requires would stop the
-# script with PowerShell's own error, which names no install command. Test-LabModule names the
-# missing module and the command that installs it. The Az modules stay in #Requires: Cloud Shell ships
-# them. Imported after them and in this order, as #Requires did.
+# script with PowerShell's own error, which names no install command. Import-LabModule imports them
+# in this order and at one version (a session loads only one Microsoft.Graph.Authentication), or
+# names the command that installs what is missing and returns $false.
+# The Az modules stay in #Requires: Cloud Shell ships them, and they are imported before these.
 $labModule = @(
     'Microsoft.Graph.Authentication'
     'Microsoft.Graph.Identity.DirectoryManagement'
     'Microsoft.Graph.Users'
     'Microsoft.Graph.Groups'
 )
-if (-not (Test-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
-Import-Module -Name $labModule -Verbose:$false
+if (-not (Import-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
 
 Write-Host "=== Lab 1.2: RBAC Role Assignment ===" -ForegroundColor Cyan -BackgroundColor Black
 

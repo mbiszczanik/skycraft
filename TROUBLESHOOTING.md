@@ -170,7 +170,7 @@ Rotation:
 
 ### "The script ... cannot be run because the following modules ... are missing" (`#Requires`)
 
-**Cause**: Scripts declare their dependencies with `#Requires -Version 7.0` and `#Requires -Modules ...`, so they fail fast on a host that lacks PowerShell 7 or the required Az / Microsoft Graph modules.
+**Cause**: Scripts declare their dependencies with `#Requires -Version 7.0` and `#Requires -Modules ...`, so they fail fast on a host that lacks PowerShell 7 or the required Az modules. The Lab 1.1 scripts and Lab 1.2's `New-LabRoleAssignment.ps1` import their Microsoft Graph modules themselves instead and name the command that installs a missing one (next two entries).
 **Solution**:
 
 1.  Ensure you are on **PowerShell 7+** (`$PSVersionTable.PSVersion`); install from <https://aka.ms/powershell>.
@@ -191,21 +191,30 @@ Rotation:
         -Scope CurrentUser -Force
     ```
 
-3.  Re-run the script. The `#Requires` line at the top of each script lists exactly which modules it needs.
+3.  Re-run the script. The `#Requires` line at the top of each script lists exactly which modules it needs; in the Lab 1.1 scripts and Lab 1.2's `New-LabRoleAssignment.ps1`, the `$labModule` list below it holds the Microsoft Graph ones.
 
 ### "[ERROR] This script needs the PowerShell module Microsoft.Graph.Users, which is not installed"
 
-**Cause**: The Lab 1.1 scripts and Lab 1.2's `New-LabRoleAssignment.ps1` check their Microsoft Graph modules themselves instead of with `#Requires` (issue #375), so a missing module stops them before they sign in, with the module's name and the command that installs it. Azure Cloud Shell ships Azure PowerShell and a basic set of Microsoft Graph modules, but not `Microsoft.Graph.Users` ([Features & tools for Azure Cloud Shell](https://learn.microsoft.com/azure/cloud-shell/features#other-microsoft-services)).
+**Cause**: The Lab 1.1 scripts and Lab 1.2's `New-LabRoleAssignment.ps1` import their Microsoft Graph modules themselves instead of with `#Requires` (issue #375), so a missing module stops them before they sign in, with the module's name and the command that installs it. Azure Cloud Shell ships Azure PowerShell and a basic set of Microsoft Graph modules, but not `Microsoft.Graph.Users` ([Features & tools for Azure Cloud Shell](https://learn.microsoft.com/azure/cloud-shell/features#other-microsoft-services)).
 **Solution**:
 
-1.  Run the command the script printed, for example:
+1.  Run the command the script printed. Where other Microsoft Graph modules are installed, it names their version, for example:
 
     ```powershell
-    Install-Module Microsoft.Graph.Users -Scope CurrentUser
+    Install-Module Microsoft.Graph.Users -RequiredVersion 2.28.0 -Scope CurrentUser
     ```
 
 2.  Re-run the script.
 3.  In a Cloud Shell session without a storage account, the module is deleted when the session ends: install it again in each new session. See [Module 1 prerequisites](module-1-identities-governance/README.md#-prerequisites).
+
+### "[ERROR] This script needs its Microsoft Graph modules at one version"
+
+**Cause**: Every Microsoft Graph module requires `Microsoft.Graph.Authentication` at exactly its own version, and a PowerShell session loads only one version of it. Without `-RequiredVersion`, `Install-Module Microsoft.Graph.Users` installs the newest version from the PowerShell Gallery, which in Cloud Shell can be newer than the preinstalled `Microsoft.Graph.Groups` and `Microsoft.Graph.Identity.DirectoryManagement`. The scripts check this before they import anything (issue #375); without the check, the import stops with `Could not load file or assembly 'Microsoft.Graph.Authentication, Version=...' ... Assembly with same name is already loaded`.
+**Solution**:
+
+1.  Run the `Install-Module <module> -RequiredVersion <version> -Scope CurrentUser` lines the script printed. They install the modules it names at the version the other Graph modules share.
+2.  If the script says this session has already loaded `Microsoft.Graph.Authentication`, you can instead start a new PowerShell session (in Cloud Shell, type `pwsh`, which keeps your files) and run the script there.
+3.  Re-run the script.
 
 ## ☁️ Deployment Errors
 

@@ -165,7 +165,7 @@ Describe 'Module 1 Graph sign-in - the four scripts share one decision' {
         @{ name = 'New-LabRoleAssignment.ps1' }
     ) {
         # The module check already blocks the script when a submodule is missing (#Requires
-        # then, Test-LabModule since #375, which prints the install command for the learner to
+        # then, Import-LabModule since #375, which prints the install command for the learner to
         # run), so the old 'Install-Module Microsoft.Graph -Force' block could only ever fire when
         # the submodules were installed correctly - installing ~40 modules, for minutes, for nothing.
         $text = Get-Content -Raw -LiteralPath $script:LabScriptPath[$name]
@@ -178,7 +178,7 @@ Describe 'Module 1 Graph sign-in - the four scripts share one decision' {
         @{ name = 'Remove-LabResource.ps1';    required = @('Microsoft.Graph.Identity.DirectoryManagement') }
         @{ name = 'New-LabRoleAssignment.ps1'; required = @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Identity.DirectoryManagement') }
     ) {
-        # The script's $labModule list, which Test-LabModule checks (issue #375).
+        # The script's $labModule list, which Import-LabModule imports (issue #375).
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:LabScriptPath[$name], [ref]$null, [ref]$null)
         $assignment = @($ast.FindAll({
             param($node)

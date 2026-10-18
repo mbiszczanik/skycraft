@@ -10,23 +10,39 @@
     PowerShell's own error, which names no install command, and the Module 1 prerequisites named
     no Graph module at all.
 
-    The scripts now keep their Graph modules in a $labModule list, check it with Test-LabModule
-    from tools/LabCommon.psm1 right after importing that module, and end with
-    'Exit-Lab -FailureCount 1' when one is missing. This suite holds that in place:
+    The scripts now keep their Graph modules in a $labModule list, import it with
+    Import-LabModule from tools/LabCommon.psm1 right after importing that module, and end with
+    'Exit-Lab -FailureCount 1' when it returns $false. Every Graph module pins
+    Microsoft.Graph.Authentication to its own version and a session loads only one, so after a
+    plain 'Install-Module Microsoft.Graph.Users' in Cloud Shell (the newest Users next to older
+    preinstalled Groups) a plain 'Import-Module -Name $labModule' stops with "Assembly with same
+    name is already loaded". Import-LabModule imports them at one version or says what to
+    install. This suite holds that in place:
 
-      - Test-LabModule itself: $true when every module is installed; $false, with the missing
-        module and 'Install-Module <name> -Scope CurrentUser' printed, when one is not.
+      - Import-LabModule itself, in a child pwsh against manifest-only Graph modules: $true with
+        every Graph module loaded at one shared version (not the newest of each); $false, with
+        the missing module or the one at another version and the 'Install-Module <name>
+        -RequiredVersion <version> -Scope CurrentUser' line, when there is none; $false with the
+        error when an import fails.
+      - Get-LabScriptModule (tools/LabCycle.psm1), which tools/Invoke-GuideDrift.ps1 and this
+        suite use to read a script's modules: its #Requires line, then its top-level $labModule.
       - No script under module-*/ or scripts/ declares a Microsoft.Graph module in #Requires.
       - Every module-* script that calls a Microsoft Graph cmdlet has a $labModule list that
-        holds exactly the modules of the cmdlets it calls (no fewer, no more), checks it before
-        its first Graph call and ends through Exit-Lab when the check fails.
+        holds exactly the modules of the cmdlets it calls (no fewer, no more), imports it with
+        Import-LabModule before its first Graph call, ends through Exit-Lab when that fails, and
+        imports it nowhere else by name.
       - Run for real (tests/Support/LabScriptStub.psm1, nothing reaches a tenant) with
         Microsoft.Graph.Users hidden, each script exits 1, names the module and the install
         command, and calls no Graph or Az command.
       - The Module 1 README's prerequisites and each Module 1 lab guide's prerequisites name every
         module their scripts require, with an 'Install-Module ... -Scope CurrentUser' line, and
-        any prerequisites section in a module README or lab guide that offers Cloud Shell says
-        what a session without a storage account does.
+        the Cloud Shell install of Microsoft.Graph.Users at the preinstalled Graph version.
+      - Any prerequisites section in a module README or lab guide that offers Cloud Shell says
+        whether a session without a storage account can run the scripts, and where the scripts
+        need Microsoft.Graph.Users, that it can only if the install works there (not documented
+        on Microsoft Learn; the live check is tracked in issue #375). Cloud Shell offered inside a
+        lab step for one command of a preinstalled tool (Labs 3.2, 3.3, 3.4, 5.3) is not the
+        lab's scripts and is not checked here.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Module1-Graph-Modules.Tests.ps1
@@ -86,6 +102,8 @@ BeforeDiscovery {
 BeforeAll {
     $script:RepoRoot      = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     $script:LabCommonPath = Join-Path $script:RepoRoot 'tools/LabCommon.psm1'
+    # Get-LabScriptModule, which tools/Invoke-GuideDrift.ps1 uses too.
+    $script:LabCycle      = Import-Module (Join-Path $script:RepoRoot 'tools/LabCycle.psm1') -Force -PassThru
 
     # The module of every Microsoft Graph cmdlet a Module 1 script calls. A script that starts
     # calling another one fails 'calls only Graph cmdlets this suite knows the module of' until
@@ -137,13 +155,11 @@ BeforeAll {
         , @($assignment[0].Right.FindAll({ $args[0] -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true).Value)
     }
 
-    # Every module a script needs: its '#Requires -Modules' line, then its $labModule list.
+    # Every module a script needs: its '#Requires -Modules' line, then its $labModule list, read
+    # the way tools/Invoke-GuideDrift.ps1 reads it ('Get-LabScriptModule' below covers it).
     function Get-ScriptModule {
         param([string]$Path)
-        $ast = Get-ScriptAst -Path $Path
-        $required = @($ast.ScriptRequirements.RequiredModules | ForEach-Object { $_.Name })
-        $listed   = Get-LabModuleList -Ast $ast
-        @($required) + @($listed) | Where-Object { $_ } | Select-Object -Unique
+        Get-LabScriptModule -Path $Path
     }
 
     # The '## ... Prerequisites' section of a Markdown file, up to the next level-2 heading.
@@ -154,23 +170,35 @@ BeforeAll {
         if ($match.Success) { $match.Groups['body'].Value } else { '' }
     }
 
-    # The module names of every 'Install-Module <a>, <b> -Scope CurrentUser' line in a text.
+    # The module names of every 'Install-Module <a>, <b> [-RequiredVersion <v>] -Scope
+    # CurrentUser' line in a text.
     function Get-InstalledByCommand {
         param([string]$Text)
-        foreach ($m in [regex]::Matches($Text, 'Install-Module\s+(?<names>[A-Za-z0-9.]+(?:\s*,\s*[A-Za-z0-9.]+)*)\s+-Scope\s+CurrentUser')) {
+        foreach ($m in [regex]::Matches($Text, 'Install-Module\s+(?<names>[A-Za-z0-9.]+(?:\s*,\s*[A-Za-z0-9.]+)*)\s+(?:-RequiredVersion\s+\S+\s+)?-Scope\s+CurrentUser')) {
             $m.Groups['names'].Value -split '\s*,\s*'
         }
     }
+
+    # The Cloud Shell install of Microsoft.Graph.Users: at the version of the preinstalled
+    # Microsoft.Graph.Authentication, never a plain install of Users alone. A plain one takes the
+    # newest Users and Authentication from the PowerShell Gallery, and the older preinstalled
+    # Groups then cannot load next to them.
+    function Assert-CloudShellGraphInstall {
+        param([string]$Section)
+        $Section | Should -Match '\$graphVersion\s*=\s*\(Get-Module\s+-ListAvailable\s+Microsoft\.Graph\.Authentication\b' -Because 'the version comes from the preinstalled Authentication module'
+        $Section | Should -Match ([regex]::Escape('Install-Module Microsoft.Graph.Users -RequiredVersion $graphVersion -Scope CurrentUser')) -Because 'Azure Cloud Shell does not ship Microsoft.Graph.Users'
+        $Section | Should -Not -Match 'Install-Module\s+Microsoft\.Graph\.Users\s+-Scope' -Because 'a plain install of Users alone can bring a newer version than the preinstalled Graph modules'
+    }
 }
 
-Describe 'Test-LabModule - names a missing module and its install command (#375)' {
+Describe 'Import-LabModule - imports the modules or names their install command (#375)' {
 
     BeforeAll {
         $script:LabCommon = Import-Module $script:LabCommonPath -Force -PassThru
 
-        function Invoke-TestLabModule {
+        function Invoke-ImportLabModule {
             param([string[]]$Name)
-            $output = @(Test-LabModule -Name $Name 6>&1)
+            $output = @(Import-LabModule -Name $Name 6>&1)
             [pscustomobject]@{
                 Result = @($output | Where-Object { $_ -is [bool] })
                 Text   = (@($output | Where-Object { $_ -isnot [bool] }) | ForEach-Object { "$_" }) -join "`n"
@@ -183,13 +211,13 @@ Describe 'Test-LabModule - names a missing module and its install command (#375)
     }
 
     It 'returns $true and prints nothing when every module is installed' {
-        $run = Invoke-TestLabModule -Name 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Management'
+        $run = Invoke-ImportLabModule -Name 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Management'
         $run.Result | Should -Be @($true)
         $run.Text | Should -BeNullOrEmpty
     }
 
     It 'returns $false and names the missing module and the install command' {
-        $run = Invoke-TestLabModule -Name 'Microsoft.PowerShell.Utility', 'SkyCraft.NoSuchModule375'
+        $run = Invoke-ImportLabModule -Name 'Microsoft.PowerShell.Utility', 'SkyCraft.NoSuchModule375'
         $run.Result | Should -Be @($false)
         $run.Text | Should -Match '\[ERROR\] This script needs the PowerShell module SkyCraft\.NoSuchModule375, which is not installed\.'
         $run.Text | Should -Match ([regex]::Escape('Install-Module SkyCraft.NoSuchModule375 -Scope CurrentUser'))
@@ -198,10 +226,204 @@ Describe 'Test-LabModule - names a missing module and its install command (#375)
     }
 
     It 'names every missing module in one install command' {
-        $run = Invoke-TestLabModule -Name 'SkyCraft.NoSuchModuleA', 'Microsoft.PowerShell.Utility', 'SkyCraft.NoSuchModuleB'
+        $run = Invoke-ImportLabModule -Name 'SkyCraft.NoSuchModuleA', 'Microsoft.PowerShell.Utility', 'SkyCraft.NoSuchModuleB'
         $run.Result | Should -Be @($false)
         $run.Text | Should -Match 'these PowerShell modules, which are not installed: SkyCraft\.NoSuchModuleA, SkyCraft\.NoSuchModuleB\.'
         $run.Text | Should -Match ([regex]::Escape('Install-Module SkyCraft.NoSuchModuleA, SkyCraft.NoSuchModuleB -Scope CurrentUser'))
+    }
+}
+
+Describe 'Import-LabModule - loads the Microsoft Graph modules at one version (#375)' {
+
+    # Each case runs Import-LabModule in a child pwsh whose PSModulePath holds only $PSHOME's
+    # modules and manifest-only Microsoft.Graph.* modules written here, so neither the real Graph
+    # modules nor any loaded in this session take part. Each Graph module but Authentication
+    # requires Microsoft.Graph.Authentication at exactly its own version, as the real ones do.
+    # The fakes load no assembly, so the clash itself ('Assembly with same name is already
+    # loaded') is not reproduced; the cases prove which version is chosen and what is printed.
+    # Their versions (91.0.0 and up) are ones Microsoft Graph never published: an import by name
+    # puts the real module folders back on PSModulePath, and a real version must not match.
+
+    BeforeAll {
+        $script:GraphRunner = Join-Path $TestDrive 'Invoke-ImportLabModule.ps1'
+        Set-Content -LiteralPath $script:GraphRunner -Encoding utf8 -Value @'
+param([string]$LabCommon, [string]$ModuleRoot, [string]$Names, [string]$Preload)
+$env:PSModulePath = $ModuleRoot + [System.IO.Path]::PathSeparator + (Join-Path $PSHOME 'Modules')
+Import-Module $LabCommon -Force
+if ($Preload) {
+    Import-Module Microsoft.Graph.Authentication -RequiredVersion $Preload
+    # An import by name puts the user's and the machine's module folders back on PSModulePath.
+    $env:PSModulePath = $ModuleRoot + [System.IO.Path]::PathSeparator + (Join-Path $PSHOME 'Modules')
+}
+$output = @(Import-LabModule -Name ($Names -split ',') 6>&1)
+[pscustomobject]@{
+    Result = @($output | Where-Object { $_ -is [bool] })
+    Text   = (@($output | Where-Object { $_ -isnot [bool] }) | ForEach-Object { "$_" }) -join "`n"
+    Loaded = @(Get-Module -Name 'Microsoft.Graph.*' | Sort-Object Name, Version | ForEach-Object { "$($_.Name) $($_.Version)" })
+} | ConvertTo-Json -Compress
+'@
+
+        # Installs the fakes: @{ 'Microsoft.Graph.Users' = '92.0.0', '91.0.0' } and so on.
+        function Build-GraphModuleRoot {
+            param([hashtable]$Installed, [string[]]$Broken = @())
+            $root = Join-Path $TestDrive ('graph-' + [guid]::NewGuid().ToString('N'))
+            foreach ($name in $Installed.Keys) {
+                foreach ($version in @($Installed[$name])) {
+                    $dir = Join-Path $root $name $version
+                    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+                    $manifest = @{ Path = (Join-Path $dir "$name.psd1"); ModuleVersion = $version; FunctionsToExport = @() }
+                    if ($name -ne 'Microsoft.Graph.Authentication') {
+                        $manifest['RequiredModules'] = @(@{ ModuleName = 'Microsoft.Graph.Authentication'; RequiredVersion = $version })
+                    }
+                    if ($Broken -contains "$name $version") {
+                        Set-Content -LiteralPath (Join-Path $dir "$name.psm1") -Value "throw 'broken on purpose'"
+                        $manifest['RootModule'] = "$name.psm1"
+                    }
+                    New-ModuleManifest @manifest
+                }
+            }
+            $root
+        }
+
+        function Invoke-GraphCase {
+            param([hashtable]$Installed, [string[]]$Name, [string]$Preload, [string[]]$Broken = @())
+            $root = Build-GraphModuleRoot -Installed $Installed -Broken $Broken
+            $arguments = @('-NoProfile', '-NonInteractive', '-File', $script:GraphRunner,
+                '-LabCommon', $script:LabCommonPath, '-ModuleRoot', $root, '-Names', ($Name -join ','))
+            if ($Preload) { $arguments += @('-Preload', $Preload) }
+            $json = & pwsh @arguments
+            $LASTEXITCODE | Should -Be 0 -Because ($json -join "`n")
+            $json | ConvertFrom-Json
+        }
+
+        $script:Script11 = @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Users', 'Microsoft.Graph.Groups', 'Microsoft.Graph.Identity.DirectoryManagement')
+    }
+
+    It 'in Cloud Shell today (Users missing) names Users at the version of the preinstalled Graph modules' {
+        $run = Invoke-GraphCase -Name $script:Script11 -Installed @{
+            'Microsoft.Graph.Authentication'               = '91.0.0'
+            'Microsoft.Graph.Groups'                       = '91.0.0'
+            'Microsoft.Graph.Identity.DirectoryManagement' = '91.0.0'
+        }
+        @($run.Result) | Should -Be @($false)
+        $run.Text | Should -Match 'needs the PowerShell module Microsoft\.Graph\.Users, which is not installed'
+        $run.Text | Should -Match ([regex]::Escape('Install-Module Microsoft.Graph.Users -RequiredVersion 91.0.0 -Scope CurrentUser'))
+        $run.Text | Should -Not -Match 'Install-Module Microsoft\.Graph\.(Authentication|Groups|Identity)'
+        @($run.Loaded) | Should -BeNullOrEmpty -Because 'nothing is imported when a module is missing'
+    }
+
+    It 'after a plain Install-Module of a newer Users, names the Users version that matches instead of failing at the import' {
+        $run = Invoke-GraphCase -Name $script:Script11 -Installed @{
+            'Microsoft.Graph.Authentication'               = '92.0.0', '91.0.0'
+            'Microsoft.Graph.Users'                        = '92.0.0'
+            'Microsoft.Graph.Groups'                       = '91.0.0'
+            'Microsoft.Graph.Identity.DirectoryManagement' = '91.0.0'
+        }
+        @($run.Result) | Should -Be @($false)
+        $run.Text | Should -Match 'needs its Microsoft Graph modules at one version, 91\.0\.0, and these are installed only at another: Microsoft\.Graph\.Users \(92\.0\.0\)\.'
+        $run.Text | Should -Match ([regex]::Escape('Install-Module Microsoft.Graph.Users -RequiredVersion 91.0.0 -Scope CurrentUser'))
+        @($run.Loaded) | Should -BeNullOrEmpty -Because 'a Graph module imported at the wrong version would block the right one for the rest of the session'
+    }
+
+    It 'imports every Graph module at the version they share, not the newest of each' {
+        $run = Invoke-GraphCase -Name $script:Script11 -Installed @{
+            'Microsoft.Graph.Authentication'               = '92.0.0', '91.0.0'
+            'Microsoft.Graph.Users'                        = '92.0.0', '91.0.0'
+            'Microsoft.Graph.Groups'                       = '91.0.0'
+            'Microsoft.Graph.Identity.DirectoryManagement' = '91.0.0'
+        }
+        @($run.Result) | Should -Be @($true) -Because $run.Text
+        $run.Text | Should -BeNullOrEmpty
+        @($run.Loaded) | Should -Be @(
+            'Microsoft.Graph.Authentication 91.0.0'
+            'Microsoft.Graph.Groups 91.0.0'
+            'Microsoft.Graph.Identity.DirectoryManagement 91.0.0'
+            'Microsoft.Graph.Users 91.0.0'
+        )
+    }
+
+    It 'imports the newest version they all share' {
+        $run = Invoke-GraphCase -Name $script:Script11 -Installed @{
+            'Microsoft.Graph.Authentication'               = '93.0.0', '92.0.0', '91.0.0'
+            'Microsoft.Graph.Users'                        = '92.0.0', '91.0.0'
+            'Microsoft.Graph.Groups'                       = '93.0.0', '92.0.0', '91.0.0'
+            'Microsoft.Graph.Identity.DirectoryManagement' = '92.0.0', '91.0.0'
+        }
+        @($run.Result) | Should -Be @($true) -Because $run.Text
+        @($run.Loaded) | Should -Be @(
+            'Microsoft.Graph.Authentication 92.0.0'
+            'Microsoft.Graph.Groups 92.0.0'
+            'Microsoft.Graph.Identity.DirectoryManagement 92.0.0'
+            'Microsoft.Graph.Users 92.0.0'
+        )
+    }
+
+    It 'follows the Authentication version the session already loaded, and offers a new session' {
+        $run = Invoke-GraphCase -Name $script:Script11 -Preload '92.0.0' -Installed @{
+            'Microsoft.Graph.Authentication'               = '92.0.0', '91.0.0'
+            'Microsoft.Graph.Users'                        = '92.0.0', '91.0.0'
+            'Microsoft.Graph.Groups'                       = '91.0.0'
+            'Microsoft.Graph.Identity.DirectoryManagement' = '91.0.0'
+        }
+        @($run.Result) | Should -Be @($false)
+        $run.Text | Should -Match ([regex]::Escape('Install-Module Microsoft.Graph.Groups -RequiredVersion 92.0.0 -Scope CurrentUser'))
+        $run.Text | Should -Match ([regex]::Escape('Install-Module Microsoft.Graph.Identity.DirectoryManagement -RequiredVersion 92.0.0 -Scope CurrentUser'))
+        $run.Text | Should -Not -Match 'Install-Module Microsoft\.Graph\.Users'
+        $run.Text | Should -Match 'new PowerShell session'
+        @($run.Loaded) | Should -Be @('Microsoft.Graph.Authentication 92.0.0') -Because 'only the module the session loaded before the call'
+    }
+
+    It 'names every Graph module in one plain install command when none is installed' {
+        $run = Invoke-GraphCase -Name 'Microsoft.Graph.Authentication', 'Microsoft.Graph.Users' -Installed @{}
+        @($run.Result) | Should -Be @($false)
+        $run.Text | Should -Match ([regex]::Escape('Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Users -Scope CurrentUser'))
+        $run.Text | Should -Not -Match '-RequiredVersion' -Because 'with nothing installed, the newest of all of them is one version'
+    }
+
+    It 'returns $false with the error when an import fails all the same' {
+        $run = Invoke-GraphCase -Name $script:Script11 -Broken 'Microsoft.Graph.Groups 91.0.0' -Installed @{
+            'Microsoft.Graph.Authentication'               = '91.0.0'
+            'Microsoft.Graph.Users'                        = '91.0.0'
+            'Microsoft.Graph.Groups'                       = '91.0.0'
+            'Microsoft.Graph.Identity.DirectoryManagement' = '91.0.0'
+        }
+        @($run.Result) | Should -Be @($false) -Because 'the script must still stop through Exit-Lab, not with an unhandled error'
+        $run.Text | Should -Match '\[ERROR\] Could not import the PowerShell module Microsoft\.Graph\.Groups 91\.0\.0: .*broken on purpose'
+        $run.Text | Should -Match 'Open a new PowerShell session'
+    }
+}
+
+Describe 'Get-LabScriptModule - reads a lab script''s modules (#375)' {
+
+    It 'lists the #Requires modules, then the top-level $labModule list, once each' {
+        $fixture = Join-Path $TestDrive 'Fixture-LabScript.ps1'
+        Set-Content -LiteralPath $fixture -Encoding utf8 -Value @'
+#Requires -Version 7.0
+#Requires -Modules Az.Accounts, Az.Resources
+# $labModule = @('Commented.Out')
+$labModule = @(
+    'Microsoft.Graph.Authentication'
+    'Az.Resources'
+    'Microsoft.Graph.Users'
+)
+function Get-Something {
+    $labModule = @('Inside.A.Function')
+}
+Write-Host "`$labModule = @('In.A.String')"
+'@
+        @(Get-LabScriptModule -Path $fixture) | Should -Be @('Az.Accounts', 'Az.Resources', 'Microsoft.Graph.Authentication', 'Microsoft.Graph.Users')
+    }
+
+    It 'lists only the #Requires modules of a script without $labModule' {
+        $fixture = Join-Path $TestDrive 'Fixture-NoList.ps1'
+        Set-Content -LiteralPath $fixture -Encoding utf8 -Value "#Requires -Modules Az.Accounts`nWrite-Host 'x'"
+        @(Get-LabScriptModule -Path $fixture) | Should -Be @('Az.Accounts')
+    }
+
+    It 'is what tools/Invoke-GuideDrift.ps1 reads the cleanup script''s modules with' {
+        $text = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'tools/Invoke-GuideDrift.ps1')
+        $text | Should -Match 'Get-LabScriptModule\s+-Path\s+\$cleanupScript'
+        $text | Should -Not -Match 'ScriptRequirements' -Because 'a second reader of the modules could drift from the one this suite tests'
     }
 }
 
@@ -210,7 +432,7 @@ Describe 'Microsoft Graph modules are never a #Requires line (#375)' {
     It "'<file>' declares no Microsoft.Graph module in #Requires -Modules" -ForEach $ScriptCases {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null)
         $graph = @($ast.ScriptRequirements.RequiredModules | Where-Object { $_.Name -like 'Microsoft.Graph*' } | ForEach-Object { $_.Name })
-        $graph | Should -BeNullOrEmpty -Because 'Azure Cloud Shell does not ship every Graph module; list them in $labModule and check them with Test-LabModule (docs/powershell-standards.md section 1)'
+        $graph | Should -BeNullOrEmpty -Because 'Azure Cloud Shell does not ship every Graph module; list them in $labModule and import them with Import-LabModule (docs/powershell-standards.md section 1)'
     }
 }
 
@@ -243,7 +465,7 @@ Describe 'Module 1 Graph scripts check exactly the modules they call (#375)' {
         @($listed | Sort-Object -Unique) | Should -Be $needed -Because 'the list holds every module the script calls and no other (the smallest set)'
     }
 
-    It "'<file>' checks `$labModule with Test-LabModule and ends through Exit-Lab, before any Graph call" -ForEach $GraphScriptCases {
+    It "'<file>' imports `$labModule with Import-LabModule and ends through Exit-Lab, before any Graph call" -ForEach $GraphScriptCases {
         $ast = Get-ScriptAst -Path $path
 
         $check = @($ast.FindAll({
@@ -251,11 +473,11 @@ Describe 'Module 1 Graph scripts check exactly the modules they call (#375)' {
                     $node -is [System.Management.Automation.Language.IfStatementAst] -and
                     @($node.Clauses[0].Item1.FindAll({
                                 $args[0] -is [System.Management.Automation.Language.CommandAst] -and
-                                $args[0].GetCommandName() -eq 'Test-LabModule' -and
+                                $args[0].GetCommandName() -eq 'Import-LabModule' -and
                                 $args[0].Extent.Text -match '-Name\s+\$labModule\b'
                             }, $true)).Count -gt 0
                 }, $true) | Where-Object { -not (Test-InsideFunction -Node $_) })
-        $check.Count | Should -Be 1 -Because "'if (-not (Test-LabModule -Name `$labModule)) { Exit-Lab -FailureCount 1 }' runs once, at the top level"
+        $check.Count | Should -Be 1 -Because "'if (-not (Import-LabModule -Name `$labModule)) { Exit-Lab -FailureCount 1 }' runs once, at the top level"
 
         $exitCall = @($check[0].Clauses[0].Item2.FindAll({
                     $args[0] -is [System.Management.Automation.Language.CommandAst] -and $args[0].GetCommandName() -eq 'Exit-Lab'
@@ -282,13 +504,18 @@ Describe 'Module 1 Graph scripts check exactly the modules they call (#375)' {
             $call.Extent.StartOffset | Should -BeGreaterThan $check[0].Extent.EndOffset -Because "'$($call.GetCommandName())' must not run before the module check"
         }
 
-        $import = @($ast.FindAll({
+        # A plain import by name loads the newest of each Graph module and undoes the one version
+        # Import-LabModule chose: after a newer Microsoft.Graph.Users next to older preinstalled
+        # Groups, that import stops with "Assembly with same name is already loaded".
+        $listed = @(Get-LabModuleList -Ast $ast)
+        $byName = @($ast.FindAll({
                     $args[0] -is [System.Management.Automation.Language.CommandAst] -and
-                    $args[0].GetCommandName() -eq 'Import-Module' -and
-                    $args[0].Extent.Text -match '-Name\s+\$labModule\b'
-                }, $true) | Where-Object { -not (Test-InsideFunction -Node $_) })
-        $import.Count | Should -Be 1 -Because 'the modules are imported in the order #Requires imported them'
-        $import[0].Extent.StartOffset | Should -BeGreaterThan $check[0].Extent.EndOffset
+                    $args[0].GetCommandName() -eq 'Import-Module'
+                }, $true) | Where-Object {
+                    $text = $_.Extent.Text
+                    $text -match '\$labModule\b' -or @($listed | Where-Object { $text -match [regex]::Escape($_) }).Count -gt 0
+                })
+        $byName | ForEach-Object { $_.Extent.Text } | Should -BeNullOrEmpty -Because 'Import-LabModule imports the $labModule list, at one version'
     }
 
     It "the module each cmdlet is mapped to exports it (where Microsoft Graph is installed)" -Skip:(-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Users')) {
@@ -365,7 +592,9 @@ function Get-Module {
         $run.Refused | Should -BeFalse -Because $run.Output
         $run.ExitCode | Should -Be 1 -Because $run.Output
         $run.Output | Should -Match 'needs the PowerShell module Microsoft\.Graph\.Users, which is not installed'
-        $run.Output | Should -Match ([regex]::Escape('Install-Module Microsoft.Graph.Users -Scope CurrentUser'))
+        # The harness imported the other Graph modules (or their placeholders) before the script,
+        # so the version to install is theirs.
+        $run.Output | Should -Match 'Install-Module Microsoft\.Graph\.Users -RequiredVersion \d+(\.\d+)+ -Scope CurrentUser'
         @(Get-Content -LiteralPath $log | Where-Object { $_ }) | Should -BeNullOrEmpty -Because 'the script stops before it signs in or looks anything up'
     }
 }
@@ -389,7 +618,7 @@ Describe 'Module 1 prerequisites name every module and its install command (#375
             $section | Should -Match ('`' + [regex]::Escape($module) + '`') -Because "the prerequisites name $module"
             $installed | Should -Contain $module -Because "an 'Install-Module ... -Scope CurrentUser' line installs $module"
         }
-        $section | Should -Match ([regex]::Escape('Install-Module Microsoft.Graph.Users -Scope CurrentUser')) -Because 'Cloud Shell lacks only this one'
+        Assert-CloudShellGraphInstall -Section $section
     }
 
     It "lab <lab>'s guide names every module its scripts require, with Install-Module" -ForEach $GuideCases {
@@ -405,14 +634,26 @@ Describe 'Module 1 prerequisites name every module and its install command (#375
             $installed | Should -Contain $module -Because "an 'Install-Module ... -Scope CurrentUser' line installs $module"
         }
         if ($needed -contains 'Microsoft.Graph.Users') {
-            $section | Should -Match ([regex]::Escape('Install-Module Microsoft.Graph.Users -Scope CurrentUser')) -Because 'Azure Cloud Shell does not ship Microsoft.Graph.Users'
+            Assert-CloudShellGraphInstall -Section $section
         }
     }
 
-    It "'<file>' says what a Cloud Shell session without a storage account does, where its prerequisites offer Cloud Shell" -ForEach $PrerequisiteDocs {
+    It "'<file>' says whether a Cloud Shell session without a storage account can run the scripts, where its prerequisites offer Cloud Shell" -ForEach $PrerequisiteDocs {
         $section = Get-PrerequisiteSection -Path $path
-        if ($section -match 'Cloud Shell') {
-            $section | Should -Match 'without a storage account' -Because 'issue #375: a guide that offers Cloud Shell says whether a session without storage can run the scripts'
+        if ($section -notmatch 'Cloud Shell') {
+            Set-ItResult -Skipped -Because 'its prerequisites do not offer Cloud Shell'
+            return
+        }
+        # The paragraph that answers it: names the session and says 'can run' or 'cannot run'.
+        $answer = @(($section -replace "`r`n", "`n") -split '\n\s*\n' | ForEach-Object { $_ -replace '\s+', ' ' } |
+                Where-Object { $_ -match 'without a storage account' -and $_ -match '\b(can|cannot) run\b' })
+        $answer | Should -Not -BeNullOrEmpty -Because 'issue #375: a guide that offers Cloud Shell says whether a session without a storage account can run the scripts, in so many words'
+
+        # Microsoft Learn documents installing your own modules only with a storage account, so
+        # a doc whose scripts need Microsoft.Graph.Users must not promise more until the live
+        # check in issue #375 shows that the install works without one.
+        if ($section -match 'Microsoft\.Graph\.Users') {
+            ($answer -join ' ') | Should -Match '\bcan run\b.{0,120}?\bonly if\b' -Because 'whether Install-Module works in an ephemeral session is not documented'
         }
     }
 }

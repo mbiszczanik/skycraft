@@ -619,7 +619,7 @@ Describe 'SkyCraft PowerShell - Exit-Lab tells the entry point of a pwsh -File p
         $result | Should -Be $expected
     }
 
-    It 'exports Exit-Lab, the role assignment helpers of #397 the budget helpers of #411 and Test-LabModule (#375), and nothing else yet' {
+    It 'exports Exit-Lab, the role assignment helpers of #397 the budget helpers of #411 and Import-LabModule (#375), and nothing else yet' {
         # The helpers have their own suites, tests/LabCommon-RoleAssignment.Tests.ps1 and
         # tests/LabCommon-Budget.Tests.ps1.
         @($script:LabCommon.ExportedFunctions.Keys | Sort-Object) | Should -Be @(
@@ -628,10 +628,10 @@ Describe 'SkyCraft PowerShell - Exit-Lab tells the entry point of a pwsh -File p
             'Get-LabArmRoleAssignment'
             'Get-LabBuiltInRoleId'
             'Get-LabGraphSignInHint'
+            'Import-LabModule'
             'New-LabArmRoleAssignment'
             'Remove-LabArmBudget'
             'Remove-LabArmRoleAssignment'
-            'Test-LabModule'
         )
     }
 }

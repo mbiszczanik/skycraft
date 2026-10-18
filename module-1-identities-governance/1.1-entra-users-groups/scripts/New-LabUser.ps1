@@ -431,10 +431,11 @@ $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
-# The Microsoft Graph modules this script calls, checked here rather than with '#Requires -Modules'
+# The Microsoft Graph modules this script calls, imported here rather than with '#Requires -Modules'
 # (issue #375): Azure Cloud Shell does not ship Microsoft.Graph.Users, and #Requires would stop the
-# script with PowerShell's own error, which names no install command. Test-LabModule names the
-# missing module and the command that installs it. Imported in this order, as #Requires did.
+# script with PowerShell's own error, which names no install command. Import-LabModule imports them
+# in this order and at one version (a session loads only one Microsoft.Graph.Authentication), or
+# names the command that installs what is missing and returns $false.
 $labModule = @(
     'Microsoft.Graph.Authentication'
     'Microsoft.Graph.Users'
@@ -442,8 +443,7 @@ $labModule = @(
     'Microsoft.Graph.Identity.DirectoryManagement'
     'Microsoft.Graph.Identity.SignIns'
 )
-if (-not (Test-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
-Import-Module -Name $labModule -Verbose:$false
+if (-not (Import-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
 
 # Connect to Graph
 try {

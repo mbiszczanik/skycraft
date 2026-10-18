@@ -367,21 +367,10 @@ if (-not $SkipCleanup) {
         $missingModule = @()
         if (Test-Path -LiteralPath $cleanupScript) {
             # The modules the lab script itself declares, so this list cannot drift from it: its
-            # '#Requires -Modules' line and the $labModule list it checks with Test-LabModule
-            # (issue #375 moved the Microsoft Graph modules there).
-            $cleanupAst = [System.Management.Automation.Language.Parser]::ParseFile($cleanupScript, [ref]$null, [ref]$null)
-            $declaredModule = @($cleanupAst.ScriptRequirements.RequiredModules | ForEach-Object { $_.Name })
-            $labModuleAssignment = $cleanupAst.FindAll({
-                param($node)
-                $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
-                $node.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
-                $node.Left.VariablePath.UserPath -eq 'labModule'
-            }, $false)
-            foreach ($assignment in $labModuleAssignment) {
-                $declaredModule += @($assignment.Right.FindAll({ $args[0] -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true).Value)
-            }
-            $missingModule = @($declaredModule |
-                Select-Object -Unique |
+            # '#Requires -Modules' line and the $labModule list it imports with Import-LabModule
+            # (issue #375 moved the Microsoft Graph modules there). Get-LabScriptModule is in
+            # LabCycle.psm1 and tests/Module1-Graph-Modules.Tests.ps1 covers it.
+            $missingModule = @(Get-LabScriptModule -Path $cleanupScript |
                 Where-Object { -not (Get-Module -ListAvailable -Name $_) })
         }
         if (-not (Test-Path -LiteralPath $cleanupScript)) {
