@@ -12,7 +12,7 @@
 - [ ] Location: **Sweden Central**
 - [ ] Resource group: `platform-skycraft-swc-rg`
 - [ ] Performance tier: **Standard**
-- [ ] Account kind: **StorageV2 (general-purpose v2)**
+- [ ] Account kind: **StorageV2 (general purpose v2)**
 - [ ] Redundancy: **Geo-redundant storage (GRS)**, without read access (not RA-GRS)
 - [ ] Access tier: **Hot**
 
@@ -48,7 +48,7 @@
 - [ ] Location: **Sweden Central**
 - [ ] Resource group: `dev-skycraft-swc-rg`
 - [ ] Performance tier: **Standard**
-- [ ] Account kind: **StorageV2 (general-purpose v2)**
+- [ ] Account kind: **StorageV2 (general purpose v2)**
 - [ ] Redundancy: **Locally-redundant storage (LRS)**
 - [ ] Access tier: **Hot**
 
@@ -84,7 +84,7 @@
 - [ ] Location: **Sweden Central**
 - [ ] Resource group: `prod-skycraft-swc-rg`
 - [ ] Performance tier: **Standard**
-- [ ] Account kind: **StorageV2 (general-purpose v2)**
+- [ ] Account kind: **StorageV2 (general purpose v2)**
 - [ ] Redundancy: **Geo-redundant storage (GRS)**, without read access (not RA-GRS)
 - [ ] Access tier: **Hot**
 

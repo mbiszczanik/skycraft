@@ -136,11 +136,11 @@ You can create the three accounts in the Portal (Steps 4.1.2-4.1.4), with Az Pow
 
 Steps that change nothing in Azure, and so have no scripted or Bicep counterpart: 4.1.1 (reading), 4.1.7 (lists the accounts; it has CLI and PowerShell commands), 4.1.8 and 4.1.10-4.1.11 (verify in the Portal; the checklist's validation commands read the same values), 4.1.9 (a look at the customer-managed key form, saved nowhere), 4.1.12 and 4.1.14 (view keys and connection strings), 4.1.15 (Storage Explorer or Storage browser). Step 4.1.13 rotates a key: it has Az PowerShell and CLI commands but no Bicep counterpart, because a rotation is an operation, not a resource.
 
-Three differences between the paths are known. `Test-Lab.ps1` checks none of them, and none changes what the later labs do:
+Three differences between the paths are known, and `Test-Lab.ps1` checks none of them. The first two change nothing in the later labs; the third can stop the Bicep path of Labs 4.1-4.4 (#390):
 
 - **Require Encryption in Transit for SMB**: the Portal's Advanced tab ticks it by default; the PowerShell, CLI and Bicep paths do not set it. With **Require secure transfer for REST API operations** on, as on every path here, Azure Files already requires an encrypted SMB connection ([Create a storage account](https://learn.microsoft.com/azure/storage/common/storage-account-create#security-tab)), so file shares behave the same.
 - **Local users** (`isLocalUserEnabled`): the Bicep turns them off, which is the default of the module it uses; the Portal, PowerShell and CLI paths leave Azure's own value. Local users sign in over SFTP or NFS v3, which every path leaves off, so no lab uses them. A `Deploy-Bicep.ps1 -WhatIf` over accounts built another way lists this property as a change.
-- **Large file shares**: the wizard no longer offers this setting, and today every pay-as-you-go file share can grow to 100 TiB whatever it shows ([Azure Files scale targets](https://learn.microsoft.com/azure/storage/files/storage-files-scale-targets#classic-file-share-scale-targets-microsoftstorage)). The Bicep sends **Disabled** for the locally redundant `devskycraftswcsa` (its module's default) and nothing for the two GRS accounts; the other paths send nothing, and an account's **Configuration** page can show **Large file shares** **Enabled** and greyed out, as in the screenshot of Step 4.1.11. Azure does not let an enabled setting be turned off, so if `Deploy-Bicep.ps1` stops on `devskycraftswcsa` with an error about large file shares, the account was built by another path with the setting on: leave the account as it is and do not run the Bicep over it.
+- **Large file shares**: the wizard no longer offers this setting, and today every pay-as-you-go file share can grow to 100 TiB whatever it shows ([Azure Files scale targets](https://learn.microsoft.com/azure/storage/files/storage-files-scale-targets#classic-file-share-scale-targets-microsoftstorage)). The Bicep sends **Disabled** for the locally redundant `devskycraftswcsa` (its module's default) and nothing for the two GRS accounts; the other paths send nothing, and an account's **Configuration** page may show **Large file shares** **Enabled** and greyed out. Azure does not let an enabled setting be turned off, so if `Deploy-Bicep.ps1` stops on `devskycraftswcsa` with an error about large file shares, the account was built by another path with the setting on: leave the account as it is, and do not run the Bicep of this lab or of Labs 4.2-4.4 over it. Issue #390 tracks the live check and the fix.
 
 ---
 
@@ -445,7 +445,7 @@ The **Create a storage account** wizard has eight tabs, listed on its left: **Ba
 
 This section is the scripted path for Steps 4.1.2-4.1.4: use it **instead of** Section 2, not after it. If you created the accounts in the Portal, read Steps 4.1.5 and 4.1.6 to see how each wizard setting maps to a parameter, and go on to Step 4.1.7. Step 4.1.6 (Az PowerShell) is the lab's scripted path; Step 4.1.5 does the same with the Azure CLI.
 
-The commands set every value the wizard sets in Section 2, including the ones the wizard ticks by default: soft delete is a separate command, because creating an account from a script does not turn it on.
+The commands set every value the wizard sets in Section 2, including the ones the wizard ticks by default, except **Require Encryption in Transit for SMB** (see the Paths section above): soft delete is a separate command, because creating an account from a script does not turn it on.
 
 ### Step 4.1.5: Create Storage Account with Azure CLI
 
@@ -617,7 +617,7 @@ A SKU of `Standard_RAGRS` means **Make read access to data available in the even
 
 ## 📖 Section 4: Verify Encryption and Security (20 min)
 
-This section changes nothing in Azure: the accounts got their encryption and security settings when they were created in Section 2 or 3. Step 4.1.9 keeps its title, but only opens the customer-managed key form and closes it again.
+This section changes nothing in Azure: the accounts got their encryption and security settings when they were created in Section 2 or 3. Step 4.1.9 only opens the customer-managed key form and closes it again.
 
 ### Step 4.1.8: Verify Encryption at Rest
 
@@ -639,7 +639,7 @@ Azure Storage automatically encrypts all data at rest using 256-bit AES encrypti
 | **Customer-managed keys (CMK)**  | You manage keys in Key Vault                           | Compliance requirements                |
 | **Infrastructure encryption**    | A second layer of encryption, chosen at creation only  | High-security workloads                |
 
-### Step 4.1.9: Configure Customer-Managed Keys (Optional)
+### Step 4.1.9: Review the Customer-Managed Key Option
 
 This step is a look at the form only: the lab keeps Microsoft-managed keys, which `Test-Lab.ps1` and the later labs expect, so nothing here is saved. Stay on the **Encryption** page of `prodskycraftswcsa` from Step 4.1.8.
 
@@ -779,7 +779,7 @@ AccountKey=<key>;EndpointSuffix=core.windows.net
 
 Use these in applications to connect to storage. A connection string contains the key: keep it out of screenshots, issues and source code.
 
-### Step 4.1.15: Install Azure Storage Explorer
+### Step 4.1.15: Browse Storage with Storage Browser or Storage Explorer
 
 Azure Storage Explorer is a cross-platform desktop app for managing storage. The Portal's **Storage browser** shows the same tree without installing anything; use either.
 
