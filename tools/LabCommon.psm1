@@ -42,8 +42,9 @@
         Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
     The rest of #301 (Invoke-LabCheck, Get-LabResourceOrFail, Assert-LabSubscription) is not here
-    yet. tests/Exit-Code-Propagation.Tests.ps1 requires every lab script to end through Exit-Lab
-    and proves both callers with real pwsh processes.
+    yet. tests/Exit-Code-Propagation.Tests.ps1 requires every lab script, except a helper that
+    lab scripts dot-source, to import this module and call Exit-Lab, forbids a direct
+    $Host.SetShouldExit and any non-zero `exit`, and proves both callers with real pwsh processes.
 
 .EXAMPLE
     Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
@@ -68,8 +69,9 @@ function Test-LabProcessEntryPoint {
 
           - the command line starts the process with -File (any prefix of it, with -, -- or /),
             or with a bare .ps1 path in its place, and carries no -NoExit before it. Arguments
-            after the script path belong to the script and are not read. -Command and
-            -EncodedCommand make it false: the process then runs typed text, not the script.
+            after the script path belong to the script and are not read. -Command,
+            -CommandWithArgs and -EncodedCommand make it false: the process then runs typed
+            text, not the script.
           - the outermost frame of the call stack is the calling script itself.
 
         A pure function of its inputs so the suite can test every shape of command line without
@@ -116,7 +118,8 @@ function Test-LabProcessEntryPoint {
             $name = $Matches['name'].ToLowerInvariant()
             if ('file'.StartsWith($name)) { $fileMode = $true; break }
             if ($name.Length -ge 3 -and 'noexit'.StartsWith($name)) { $noExit = $true; continue }
-            if ('command'.StartsWith($name) -or $name -in 'e', 'ec' -or
+            # -CommandWithArgs (-cwa, pwsh 7.4+) is not a prefix of -Command, so it is named.
+            if ('command'.StartsWith($name) -or $name -in 'e', 'ec', 'cwa', 'commandwithargs' -or
                 ($name.Length -ge 2 -and 'encodedcommand'.StartsWith($name))) {
                 return $false
             }
@@ -147,6 +150,15 @@ function Exit-Lab {
         script dot-sources: the entry-point check compares the caller's file with the script the
         process started.
 
+        Typed at the prompt, outside any script, it does nothing but warn. A lab script imports
+        the module into the session it runs in, so Exit-Lab stays available there afterwards, and
+        an `exit` from the prompt would close the learner's session (#257).
+
+        With -Verbose it says which way it ends - "SetShouldExit(<code>)" as the entry point,
+        "plain exit <code>" otherwise - so the suite can prove the entry-point decision in a real
+        `pwsh -File` process on a machine without Az.Accounts, where the #104 fault itself does
+        not reproduce.
+
     .PARAMETER FailureCount
         How many checks, steps or preconditions failed. Above zero exits 1, zero exits 0. The count
         is never the exit code itself, which would wrap at 256.
@@ -167,7 +179,13 @@ function Exit-Lab {
         [int]$FailureCount
     )
 
-    $code = if ($FailureCount -gt 0) { 1 } else { 0 }
+    $code   = if ($FailureCount -gt 0) { 1 } else { 0 }
+    $caller = [string]$MyInvocation.PSCommandPath
+
+    if (-not $caller) {
+        Write-Warning "Exit-Lab ends a lab script; typed at the prompt it does nothing (it would have exited $code)."
+        return
+    }
 
     $stack     = @(Get-PSCallStack)
     $outermost = if ($stack.Count -gt 0) { [string]$stack[-1].ScriptName } else { '' }
@@ -175,10 +193,14 @@ function Exit-Lab {
     $entryPoint = Test-LabProcessEntryPoint `
         -CommandLineArgs ([Environment]::GetCommandLineArgs()) `
         -OutermostScript $outermost `
-        -CallerScript ([string]$MyInvocation.PSCommandPath)
+        -CallerScript $caller
 
     if ($entryPoint) {
+        Write-Verbose "Exit-Lab: entry point of a pwsh -File process, SetShouldExit($code)"
         $Host.SetShouldExit($code)
+    }
+    else {
+        Write-Verbose "Exit-Lab: not the process entry point, plain exit $code"
     }
 
     exit $code

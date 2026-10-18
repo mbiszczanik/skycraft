@@ -82,7 +82,7 @@ param (
 #
 # Duplicated verbatim in New-LabUser.ps1, Test-Lab.ps1 and Remove-LabResource.ps1 rather than
 # factored into a shared helper: docs/powershell-standards.md 7.3 requires every lab folder to be
-# runnable and readable on its own, and tests/Lab11-Graph-Auth.Tests.ps1 asserts that the three
+# readable on its own, and tests/Lab11-Graph-Auth.Tests.ps1 asserts that the three
 # copies do not drift apart.
 function Get-LabGraphAuthPlan {
     [CmdletBinding()]

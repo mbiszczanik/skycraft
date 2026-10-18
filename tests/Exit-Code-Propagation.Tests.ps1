@@ -21,12 +21,24 @@
 
       - structurally, over every lab script (module-*/**/scripts/*.ps1 and scripts/*.ps1): no
         direct $Host.SetShouldExit, no non-zero `exit` (`exit $failCount` included, which wraps
-        to 0 at 256 failures), and every script that calls Exit-Lab imports the module by a path
-        relative to $PSScriptRoot that resolves to tools/LabCommon.psm1, before the first call;
+        to 0 at 256 failures), and every lab script calls Exit-Lab and imports the module by a
+        path relative to $PSScriptRoot that resolves to tools/LabCommon.psm1, before the first
+        call. A script that never calls Exit-Lab exits 0 after printing [FAIL] (#104, #241), so
+        the only lab scripts excused are the helpers listed in $DotSourcedHelpers, which other
+        lab scripts dot-source and which end nothing themselves - the suite holds them to that;
       - for the entry-point decision, every command-line shape it has to tell apart;
       - behaviourally, with real pwsh processes and no Azure: `pwsh -File` returns 1 for a failed
-        run, an interactive session keeps running after the script with $LASTEXITCODE 1, and
-        `-Command` and the lab cycle's launcher shim (tools/Invoke-LabScript.ps1) see 1 too.
+        run and takes the SetShouldExit branch, an interactive session keeps running after the
+        script with $LASTEXITCODE 1, and `-Command` and the lab cycle's launcher shim
+        (tools/Invoke-LabScript.ps1) see 1 too through a plain `exit`.
+
+    WHAT CI PROVES, AND WHAT ONLY A LOCAL RUN DOES. The #104 fault needs a module that has to be
+    auto-imported from the module path; Az.Accounts qualifies, and a dummy module next to the
+    fixture does not reproduce it. The CI runner has no Az.Accounts, so the test that shows a
+    `pwsh -File` run would lose its code without SetShouldExit is skipped there. CI still proves
+    the decision Exit-Lab makes in each real process - Exit-Lab says with -Verbose which branch it
+    took - so a broken entry-point detection fails CI; that SetShouldExit is what carries the code
+    out under #104 is proven only where Az.Accounts is installed (the maintainer's machine).
 
     THE TOOLS KEEP THE OLD RULE (#124). The maintainer tools under tools/ are process entry points
     with exit codes above 1 (the lab cycle reports a count), not lab scripts. A tools script that
@@ -61,9 +73,9 @@ function Test-RequiresModule {
 # Every non-zero `exit` site in a tools script, with the statement that precedes it. Parsed
 # rather than regex-matched so that `exit` inside a string or a comment is not counted.
 function Get-ExitSite {
-    param([string]$Path)
+    param([string]$Text)
 
-    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$null)
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$null, [ref]$null)
 
     foreach ($exit in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ExitStatementAst] }, $true)) {
 
@@ -102,7 +114,9 @@ function Get-LabExitShape {
         $n.Member.Extent.Text -eq 'SetShouldExit'
     }, $true) | ForEach-Object { "line $($_.Extent.StartLineNumber): $($_.Extent.Text)" })
 
-    $nonZeroExit = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ExitStatementAst] }, $true) |
+    $exits = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ExitStatementAst] }, $true))
+
+    $nonZeroExit = @($exits |
         Where-Object { $_.Pipeline -and $_.Pipeline.Extent.Text.Trim() -ne '0' } |
         ForEach-Object { "line $($_.Extent.StartLineNumber): $($_.Extent.Text)" })
 
@@ -124,6 +138,7 @@ function Get-LabExitShape {
     [PSCustomObject]@{
         SetShouldExit  = $setShouldExit
         NonZeroExit    = $nonZeroExit
+        ExitCount      = $exits.Count
         ExitLabCount   = $exitLab.Count
         FirstExitLabAt = if ($exitLab.Count) { ($exitLab | Measure-Object -Property { $_.Extent.StartOffset } -Minimum).Minimum } else { $null }
         ImportAt       = if ($import) { $import.Extent.StartOffset } else { $null }
@@ -141,12 +156,25 @@ $LabScriptFiles = @(
     Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'scripts') -File -Filter '*.ps1'
 )
 
+# The lab scripts that are not run on their own but dot-sourced by the other scripts of their
+# lab, so they share one function definition. They end nothing: the script that dot-sources
+# them calls Exit-Lab. Each entry is held to that below, so the list cannot hide a lab script.
+$DotSourcedHelpers = @(
+    'module-1-identities-governance/1.3-governance/scripts/LabPolicyAssignment.ps1'
+)
+
 $LabCases = foreach ($item in $LabScriptFiles) {
-    $shape = Get-LabExitShape -Text (Get-Content -Raw -LiteralPath $item.FullName) -ScriptDirectory $item.DirectoryName
+    $text  = Get-Content -Raw -LiteralPath $item.FullName
+    $shape = Get-LabExitShape -Text $text -ScriptDirectory $item.DirectoryName
+    $file  = $item.FullName.Substring($RepoRoot.Length + 1) -replace '\\', '/'
     @{
-        file           = $item.FullName.Substring($RepoRoot.Length + 1) -replace '\\', '/'
+        file           = $file
+        name           = $item.Name
+        directory      = $item.DirectoryName
+        helper         = $file -in $DotSourcedHelpers
         setShouldExit  = $shape.SetShouldExit
         nonZeroExit    = $shape.NonZeroExit
+        exitCount      = $shape.ExitCount
         exitLabCount   = $shape.ExitLabCount
         firstExitLabAt = $shape.FirstExitLabAt
         importAt       = $shape.ImportAt
@@ -154,17 +182,47 @@ $LabCases = foreach ($item in $LabScriptFiles) {
         labCommonPath  = $LabCommonPath
     }
 }
-$ExitLabCases = @($LabCases | Where-Object { $_.exitLabCount -gt 0 })
+$EntryLabCases = @($LabCases | Where-Object { -not $_.helper })
+$HelperCases   = @($DotSourcedHelpers | ForEach-Object {
+    $entry = $_
+    $case  = $LabCases | Where-Object { $_.file -eq $entry } | Select-Object -First 1
+    $dotSource = if ($case) { '\.\s*\(Join-Path \$PSScriptRoot ''' + [regex]::Escape($case.name) + '''\)' }
+    @{
+        file         = $entry
+        found        = [bool]$case
+        exitCount    = if ($case) { $case.exitCount } else { $null }
+        exitLabCount = if ($case) { $case.exitLabCount } else { $null }
+        dotSourcedBy = @(if ($case) {
+            Get-ChildItem -LiteralPath $case.directory -File -Filter '*.ps1' |
+                Where-Object { $_.Name -ne $case.name -and (Get-Content -Raw -LiteralPath $_.FullName) -match $dotSource } |
+                ForEach-Object Name
+        })
+    }
+})
 
-# Tools that declare a module requirement keep the #104 guard (none do today).
-$ToolExitCases = Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tools') -File -Filter '*.ps1' |
+# Tools that declare a module requirement keep the #104 guard. None does today, so the per-site
+# test below generates no case; the reader it relies on is held to its fixtures instead.
+$ToolScriptFiles = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'tools') -File -Filter '*.ps1')
+$ToolExitCases = $ToolScriptFiles |
     Where-Object { Test-RequiresModule -Text (Get-Content -Raw -LiteralPath $_.FullName) } |
     ForEach-Object {
         $file = $_.FullName.Substring($RepoRoot.Length + 1) -replace '\\', '/'
-        foreach ($site in Get-ExitSite -Path $_.FullName) {
+        foreach ($site in Get-ExitSite -Text (Get-Content -Raw -LiteralPath $_.FullName)) {
             @{ file = $file; line = $site.Line; code = $site.Code; previous = $site.Previous }
         }
     }
+
+$ExitSiteFixtures = @(
+    @{ name = 'a guarded exit carries its guard'
+       sites = @(Get-ExitSite -Text "Write-Host x`n`$Host.SetShouldExit(2)`nexit 2")
+       expected = @{ count = 1; code = '2'; previous = '$Host.SetShouldExit(2)' } }
+    @{ name = 'an unguarded exit carries the statement before it'
+       sites = @(Get-ExitSite -Text "Write-Host x`nexit 3")
+       expected = @{ count = 1; code = '3'; previous = 'Write-Host x' } }
+    @{ name = 'exit 0 and a bare exit are not sites'
+       sites = @(Get-ExitSite -Text "exit 0`nexit")
+       expected = @{ count = 0 } }
+)
 
 # Fixtures that hold the structural rule to failing what it is there to fail.
 $FixtureDirectory = Join-Path $RepoRoot 'module-0-fixture/0.1-fixture/scripts'
@@ -188,6 +246,15 @@ $FixtureCases = @(
 )
 
 $ImportFixtures = @(
+    @{ name = 'a script that prints [FAIL] and falls off the end calls no Exit-Lab and imports nothing'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "`$failCount = 1`nWrite-Host '[FAIL] x'"
+       check = { param($s) $s.ExitLabCount -eq 0 -and $null -eq $s.ImportAt } }
+    @{ name = 'a script that imports the module but never calls Exit-Lab calls no Exit-Lab'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "$FixtureImport`nWrite-Host '[FAIL] x'"
+       check = { param($s) $s.ExitLabCount -eq 0 -and $null -ne $s.ImportAt } }
+    @{ name = 'a bare exit is an exit, so a helper that has one is caught'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "function Get-X { }`nexit"
+       check = { param($s) $s.ExitCount -eq 1 } }
     @{ name = 'an Exit-Lab with no import has no import'
        shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text 'Exit-Lab -FailureCount 1'
        check = { param($s) $null -eq $s.ImportAt } }
@@ -217,10 +284,10 @@ BeforeAll {
 
 Describe 'SkyCraft PowerShell - every lab script ends through Exit-Lab (#257)' {
 
-    It 'has lab scripts in scope to check' -ForEach @(@{ count = @($LabCases).Count; withExitLab = $ExitLabCases.Count }) {
+    It 'has lab scripts in scope to check' -ForEach @(@{ count = @($LabCases).Count; entry = $EntryLabCases.Count }) {
         # A filter that matches nothing produces a Describe that passes by asserting nothing.
         $count | Should -BeGreaterThan 0
-        $withExitLab | Should -BeGreaterThan 0
+        $entry | Should -BeGreaterThan 0
     }
 
     It "'<file>' calls no `$Host.SetShouldExit" -ForEach $LabCases {
@@ -235,10 +302,23 @@ Describe 'SkyCraft PowerShell - every lab script ends through Exit-Lab (#257)' {
         $nonZeroExit | Should -BeNullOrEmpty -Because 'a lab script ends with Exit-Lab -FailureCount <n> (tools/LabCommon.psm1)'
     }
 
-    It "'<file>' imports tools/LabCommon.psm1 by a path relative to `$PSScriptRoot, before its first Exit-Lab" -ForEach $ExitLabCases {
+    It "'<file>' calls Exit-Lab" -ForEach $EntryLabCases {
+        # A lab script that never calls it exits 0 after printing [FAIL] (#104, #241). A helper
+        # that other lab scripts dot-source belongs in $DotSourcedHelpers instead.
+        $exitLabCount | Should -BeGreaterThan 0 -Because 'a lab script ends a failed run with Exit-Lab -FailureCount <n> (tools/LabCommon.psm1)'
+    }
+
+    It "'<file>' imports tools/LabCommon.psm1 by a path relative to `$PSScriptRoot, before its first Exit-Lab" -ForEach $EntryLabCases {
         $importAt | Should -Not -BeNullOrEmpty -Because "Import-Module (Join-Path `$PSScriptRoot '<relative>/tools/LabCommon.psm1') makes Exit-Lab available"
         $importPath | Should -Be ([System.IO.Path]::GetFullPath($labCommonPath)) -Because 'the path must hold in any clone, Cloud Shell included'
-        $importAt | Should -BeLessThan $firstExitLabAt
+        if ($null -ne $firstExitLabAt) { $importAt | Should -BeLessThan $firstExitLabAt }
+    }
+
+    It "'<file>', excused as a dot-sourced helper, is one: a sibling dot-sources it and it ends nothing" -ForEach $HelperCases {
+        $found | Should -BeTrue -Because 'a stale entry in $DotSourcedHelpers excuses nothing and hides a rename'
+        $dotSourcedBy | Should -Not -BeNullOrEmpty -Because "a lab script in the same folder runs it with . (Join-Path `$PSScriptRoot '<helper file name>')"
+        $exitLabCount | Should -Be 0 -Because 'Exit-Lab belongs to the script that dot-sources the helper (its entry-point check compares files)'
+        $exitCount | Should -Be 0 -Because 'an exit in a dot-sourced file ends the script that loaded it'
     }
 }
 
@@ -254,6 +334,20 @@ Describe 'SkyCraft PowerShell - the lab script rule fails what it is there to fa
 }
 
 Describe 'SkyCraft PowerShell - a tools script declaring #Requires -Modules guards a non-zero exit (#104)' {
+
+    It 'has tools scripts in scope to read' -ForEach @(@{ count = $ToolScriptFiles.Count }) {
+        # The per-site test below has no case today (no tools script declares a module
+        # requirement); this keeps an empty discovery from passing as well.
+        $count | Should -BeGreaterThan 0
+    }
+
+    It 'the exit-site reader: <name>' -ForEach $ExitSiteFixtures {
+        $sites.Count | Should -Be $expected.count
+        if ($expected.count -gt 0) {
+            $sites[0].Code | Should -BeExactly $expected.code
+            $sites[0].Previous | Should -BeExactly $expected.previous
+        }
+    }
 
     It "'<file>':<line> guards 'exit <code>' with `$Host.SetShouldExit(<code>)" -ForEach $ToolExitCases {
         $previous | Should -Match '^\$Host\.SetShouldExit\('
@@ -297,6 +391,8 @@ Describe 'SkyCraft PowerShell - Exit-Lab tells the entry point of a pwsh -File p
         @{ name = 'pwsh -Command runs typed text, so it is not';                cmd = @('pwsh', '-Command', '& LAB');                          outer = 'LAB';  expected = $false }
         @{ name = 'pwsh -c runs typed text, so it is not';                      cmd = @('pwsh', '-c', '& LAB');                                outer = 'LAB';  expected = $false }
         @{ name = 'pwsh -EncodedCommand runs typed text, so it is not';         cmd = @('pwsh', '-EncodedCommand', 'AAAA');                    outer = 'LAB';  expected = $false }
+        @{ name = 'pwsh -CommandWithArgs runs typed text, so it is not';        cmd = @('pwsh', '-CommandWithArgs', '& LAB', 'x.ps1');         outer = 'LAB';  expected = $false }
+        @{ name = 'pwsh -cwa runs typed text, so it is not';                    cmd = @('pwsh', '-cwa', '& LAB', 'x.ps1');                     outer = 'LAB';  expected = $false }
         @{ name = 'an interactive prompt is not';                               cmd = @('pwsh');                                               outer = '';     expected = $false }
         @{ name = 'a lab script run by the launcher shim is not';               cmd = @('pwsh', '-NoProfile', '-File', 'SHIM');                outer = 'SHIM'; expected = $false }
         @{ name = 'a lab script typed at a -Command prompt is not';             cmd = @('pwsh', '-NoProfile', '-NoExit', '-Command', '-');     outer = '';     expected = $false }
@@ -323,18 +419,19 @@ Describe 'SkyCraft PowerShell - Exit-Lab reaches both callers (real pwsh process
         $script:HasAz = [bool](Get-Module -ListAvailable -Name Az.Accounts)
 
         # A lab-shaped script: it declares Az.Accounts where it is installed - the condition the
-        # #104 fault needs - and ends the way every lab script does.
+        # #104 fault needs - and ends the way every lab script does. -Trace makes Exit-Lab say
+        # which branch it took, which is how CI, without Az.Accounts, sees the decision.
         $requires = if ($script:HasAz) { '#Requires -Modules Az.Accounts' } else { '' }
         $script:LabScript = Join-Path $TestDrive 'Lab-Fixture.ps1'
         @(
             '#Requires -Version 7.0'
             $requires
             '[CmdletBinding()]'
-            'param([int]$Count)'
+            'param([int]$Count, [switch]$Trace)'
             "`$ErrorActionPreference = 'Stop'"
             "Import-Module '$LabCommonPath' -Force -Verbose:`$false"
             'Write-Host "lab: $Count failure(s)"'
-            'Exit-Lab -FailureCount $Count'
+            'Exit-Lab -FailureCount $Count -Verbose:$Trace'
         ) | Set-Content -LiteralPath $script:LabScript -Encoding utf8
 
         # The #104 idiom the lab scripts used before #257, for the control case.
@@ -358,6 +455,33 @@ Describe 'SkyCraft PowerShell - Exit-Lab reaches both callers (real pwsh process
         # The #104 case: without SetShouldExit, a script declaring Az.Accounts exits 0 here.
         & $script:Pwsh -NoProfile -File $script:LabScript -Count 3 | Out-Null
         $LASTEXITCODE | Should -Be 1
+    }
+
+    It 'pwsh -File takes the SetShouldExit branch; -Command, the launcher shim and a prompt take a plain exit' {
+        # Runs without Az.Accounts, so CI proves the entry-point decision in real processes even
+        # where the test above is skipped. A broken detection shows up here as the wrong branch.
+        $file = & $script:Pwsh -NoProfile -File $script:LabScript -Count 3 -Trace 2>&1 | Out-String
+        $file | Should -Match 'Exit-Lab: entry point of a pwsh -File process, SetShouldExit\(1\)' -Because "output was:`n$file"
+
+        $command = & $script:Pwsh -NoProfile -Command "& '$($script:LabScript)' -Count 3 -Trace" 2>&1 | Out-String
+        $command | Should -Match 'Exit-Lab: not the process entry point, plain exit 1' -Because "output was:`n$command"
+
+        $shim = & $script:Pwsh -NoProfile -File (Join-Path $RepoRoot 'tools/Invoke-LabScript.ps1') `
+            -TargetScript $script:LabScript -ArgumentJson '{"Count":3,"Trace":true}' 2>&1 | Out-String
+        $shim | Should -Match 'Exit-Lab: not the process entry point, plain exit 1' -Because "output was:`n$shim"
+
+        $prompt = Invoke-InteractiveSession -Line @("& '$($script:LabScript)' -Count 3 -Trace")
+        $prompt | Should -Match 'Exit-Lab: not the process entry point, plain exit 1' -Because "output was:`n$prompt"
+    }
+
+    It 'Exit-Lab typed at the prompt, after a lab script loaded it, warns and leaves the session open' {
+        $output = Invoke-InteractiveSession -Line @(
+            "& '$($script:LabScript)' -Count 0"
+            'Exit-Lab -FailureCount 1'
+            'Write-Host "MARKER after Exit-Lab at the prompt"'
+        )
+        $output | Should -Match 'typed at the prompt it does nothing' -Because "output was:`n$output"
+        $output | Should -Match 'MARKER after Exit-Lab at the prompt' -Because "output was:`n$output"
     }
 
     It 'pwsh -File returns 0 for a passing run and 1, not 0, for 256 failures' {

@@ -11,7 +11,7 @@
     The fix is two helpers in each Remove-LabResource.ps1: Test-LabNotFoundError, which decides
     whether an error means "not found", and Invoke-LabLookup, which runs a lookup, reads a
     not-found error as absent and counts any other error as a failure. Each lab carries its own
-    copy, because a lab folder must stay runnable on its own (docs/powershell-standards.md
+    copy, because a lab folder must stay readable on its own (docs/powershell-standards.md
     section 7.5). Copies drift, so this suite holds every copy to the same contract instead of
     each lab suite repeating it:
 
