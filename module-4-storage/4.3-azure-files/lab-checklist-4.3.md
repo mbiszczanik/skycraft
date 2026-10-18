@@ -34,8 +34,8 @@
 
 ### Soft Delete
 
-- [ ] Soft delete **enabled** for file shares (on since Lab 4.1)
-- [ ] Retention period: **14 days** (Step 4.3.3; Lab 4.1 set 7)
+- [ ] Soft delete **enabled** for file shares (Step 4.3.3; Lab 4.1's Portal wizard and Bicep turn it on)
+- [ ] Retention period: **14 days** (Step 4.3.3; Lab 4.1's Portal wizard and Bicep set 7)
 
 ### Snapshots
 

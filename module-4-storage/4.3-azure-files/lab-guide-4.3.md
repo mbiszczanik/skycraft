@@ -72,7 +72,7 @@ This diagram shows the Azure Files infrastructure you will deploy inside the pro
 
 Before starting this lab:
 
-- [ ] Lab 4.1 completed: storage account `prodskycraftswcsa` (StorageV2, Standard_GRS) in `prod-skycraft-swc-rg`, in Sweden Central, with its four SkyCraft tags and 7-day file share soft delete. `tools/lab-cycle-manifest.psd1` lists Lab 4.1 as this lab's only dependency; Lab 4.2 normally comes first (see the note below), but nothing in this lab uses its containers.
+- [ ] Lab 4.1 completed: storage account `prodskycraftswcsa` (StorageV2, Standard_GRS) in `prod-skycraft-swc-rg`, in Sweden Central, with its four SkyCraft tags. Lab 4.1's Portal wizard (**Data protection** tab) and its Bicep turn file share soft delete on with 7 days; if the account was built another way, soft delete may be off, and Step 4.3.3 turns it on. `tools/lab-cycle-manifest.psd1` lists Lab 4.1 as this lab's only dependency; Lab 4.2 normally comes first (see the note below), but nothing in this lab uses its containers.
 - [ ] **Owner** or **Contributor** on `prod-skycraft-swc-rg`. The Portal and the Az PowerShell blocks reach the files with the account key, which these roles may read, so no data role is needed.
 - [ ] PowerShell 7+ with the `Az` module (Az.Accounts, Az.Resources, Az.Storage; `scripts/Test-Lab.ps1` also uses Az.RecoveryServices), signed in with `Connect-AzAccount`. The Azure CLI is optional (Option 3 blocks).
 - [ ] For Step 4.3.7: a Windows computer that can reach port 445 on the internet (many home and corporate networks block it; the step says how to test).
@@ -89,7 +89,7 @@ Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycra
 (Get-AzStorageFileServiceProperty -ResourceGroupName 'prod-skycraft-swc-rg' -StorageAccountName 'prodskycraftswcsa').ShareDeleteRetentionPolicy
 ```
 
-**Expected Result**: `prodskycraftswcsa` in `swedencentral`, `Standard_GRS`, `StorageV2`, `Succeeded`; file share soft delete `Enabled` `True` with `Days` `7` (Lab 4.1). `Days` reads 14 if you ran this lab before.
+**Expected Result**: `prodskycraftswcsa` in `swedencentral`, `Standard_GRS`, `StorageV2`, `Succeeded`; file share soft delete `Enabled` `True` with `Days` `7` if Lab 4.1's Portal wizard or Bicep built the account. If the account was built another way, `Enabled` may read `False`; Step 4.3.3 turns it on. `Days` reads 14 if you ran this lab before.
 
 > [!IMPORTANT]
 > **Run the Module 4 labs in order (4.1 → 4.2 → 4.3 → 4.4).** All four configure the **same**
@@ -212,7 +212,7 @@ We need a share named `skycraft-config` with a 100 GiB quota. This share stores 
 
 4. Under **Data storage**, select **Classic file shares**
 
-**Note**: The page may open with a banner, "Action required: Windows Kerberos RC4 hardening may affect your Azure Files access". It concerns accounts that use Active Directory (Kerberos) authentication; this lab mounts with the account key, so there is nothing to do. Under **Classic file share settings**, the page lists **Identity-based access** (**Not configured**), **Default share-level permissions** (**Disabled**), **Soft delete** (**7 days**, from Lab 4.1) and **Security** (**Maximum compatibility (Recommended)**). Leave **Security** as it is: its **Maximum security** profile allows only Kerberos and AES-256-GCM, so the account key mounts of Steps 4.3.7 and 4.3.8 (NTLMv2) would be refused, and Windows clients older than Windows 11 could not connect at all ([SMB security settings](https://learn.microsoft.com/azure/storage/files/files-smb-protocol#smb-security-settings)).
+**Note**: The page may open with a banner, "Action required: Windows Kerberos RC4 hardening may affect your Azure Files access". It concerns accounts that use Active Directory (Kerberos) authentication; this lab mounts with the account key, so there is nothing to do. Under **Classic file share settings**, the page lists **Identity-based access** (**Not configured**), **Default share-level permissions** (**Disabled**), **Soft delete** (**7 days** after Lab 4.1's Portal wizard or Bicep, **Disabled** if it is off) and **Security** (**Maximum compatibility (Recommended)**). Leave **Security** as it is: its **Maximum security** profile allows only Kerberos and AES-256-GCM, so the account key mounts of Steps 4.3.7 and 4.3.8 (NTLMv2) would be refused, and Windows clients older than Windows 11 could not connect at all ([SMB security settings](https://learn.microsoft.com/azure/storage/files/files-smb-protocol#smb-security-settings)).
 
 5. Click **+ Classic file share**
 6. On the **Basics** tab, fill in:
@@ -357,18 +357,18 @@ Snapshots are **read-only, point-in-time copies** of an entire file share. They 
 
 **Soft delete** adds a second safety net: if an entire file share is accidentally deleted, it can be recovered within the retention period.
 
-> **SkyCraft Choice**: We raise share soft delete from Lab 4.1's 7 days to **14 days** because it covers two full sprint cycles — enough time for the team to notice even "silent" deletions. For snapshots, we take a manual snapshot here; scheduled backups come with Azure Backup in Lab 5.2, which is why Steps 4.3.1 and 4.3.2 leave **Enable backup** unticked.
+> **SkyCraft Choice**: We set share soft delete to **14 days** (Lab 4.1's Portal wizard and Bicep set 7) because it covers two full sprint cycles — enough time for the team to notice even "silent" deletions. For snapshots, we take a manual snapshot here; scheduled backups come with Azure Backup in Lab 5.2, which is why Steps 4.3.1 and 4.3.2 leave **Enable backup** unticked.
 
 ### Step 4.3.3: Configure Soft Delete
 
-Protect against accidental deletion of the file shares. Lab 4.1 already turned share soft delete on with 7 days (the **Data protection** tab of its wizard, its PowerShell and CLI blocks, or its Bicep); this step raises the retention to 14 days.
+Protect against accidental deletion of the file shares. Lab 4.1's Portal wizard (the **Data protection** tab) and its Bicep turn share soft delete on with 7 days; if the account was built another way, soft delete may be off. Either way, this step turns it on with a retention of 14 days.
 
 #### Option 1: Azure Portal (GUI)
 
 1. Navigate to `prodskycraftswcsa` → **Classic file shares** (in the left menu, under **Data storage**; expand the group if it is collapsed)
-2. Click **7 days** next to _Soft delete_
+2. Click the link next to _Soft delete_ (**7 days** or **Disabled**)
 
-**Note**: The link next to **Soft delete** shows the current retention: **7 days** after Lab 4.1, or **Disabled** if soft delete was turned off. Click it either way. It opens the **Soft delete** pane.
+**Note**: The link next to **Soft delete** shows the current retention: **7 days** after Lab 4.1's Portal wizard or Bicep, or **Disabled** if soft delete is off. Click it either way. It opens the **Soft delete** pane.
 
 3. Make sure **Soft delete for all classic file shares** is enabled
 4. Fill in:
@@ -559,6 +559,7 @@ Set-AzStorageFileContent -ShareName "skycraft-config" -Source ".\config.txt" -Pa
 $snapshotTime = (Get-AzRmStorageShare -ResourceGroupName "prod-skycraft-swc-rg" -StorageAccountName "prodskycraftswcsa" `
     -IncludeSnapshot | Where-Object { $_.Name -eq "skycraft-config" -and $_.SnapshotTime } |
     Sort-Object SnapshotTime -Descending | Select-Object -First 1).SnapshotTime
+if (-not $snapshotTime) { throw "No snapshot of skycraft-config found; run Step 4.3.5 first" }
 # Azure reports the snapshot time in UTC, and -SnapshotTime takes a DateTimeOffset: mark the time
 # as UTC so the conversion cannot shift it by your time zone and miss the snapshot
 $snapshotUtc = if ($snapshotTime.Kind -eq 'Local') { $snapshotTime.ToUniversalTime() } else { [DateTime]::SpecifyKind($snapshotTime, 'Utc') }
