@@ -147,7 +147,7 @@ try {
 if ($legacyCae) {
     Write-Host "[ERROR] The Container Apps environment '$caeName' in $ResourceGroupName is a Consumption-only environment, deployed by an older version of this lab." -ForegroundColor Red
     Write-Host "  This template creates a Workload profiles environment (the type the Portal creates), and Azure cannot change an environment's type." -ForegroundColor Gray
-    Write-Host "  Delete it first - .\Remove-LabResource.ps1 -Environment $Environment removes the app, the environment (up to 25 minutes) and the rest of the lab - then run this script again." -ForegroundColor Gray
+    Write-Host "  Delete it first - .\Remove-LabResource.ps1 -Environment $Environment -ResourceGroupName $ResourceGroupName removes the app, the environment (up to 25 minutes) and the rest of the lab - then run this script again." -ForegroundColor Gray
     Exit-Lab -FailureCount 1
 }
 
