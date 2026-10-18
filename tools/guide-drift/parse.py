@@ -255,7 +255,7 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     ('public-demo', 4.2.12); 4.3's chains therefore open their file share from the storage
     account. Later in a
     chain a name is looked for on screen only, where the label before it should have listed it:
-    a container ('game-assets', 4.2.11; 'scripts', 4.4.3) or a file share's folder or file
+    a container ('game-assets', 4.2.13; 'scripts', 4.4.3) or a file share's folder or file
     ('common', 'config.txt', 4.3.6). Either is reported as a missing resource whenever it is not
     on screen (#199).
   * 4.3.6 opens the snapshot by its Comment cell ('select `Pre-update backup`'): the Portal

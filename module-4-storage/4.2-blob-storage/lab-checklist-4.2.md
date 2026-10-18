@@ -13,14 +13,14 @@
 
 - [ ] Container name: `public-demo`
 - [ ] Location: **dev-skycraft-swc-rg / devskycraftswcsa**
-- [ ] Anonymous access level: **Private (no anonymous access)** - the portal still offers Blob/Container; leave it at Private
+- [ ] Anonymous access level: **Private (no anonymous access)** - greyed out in the New container pane while the account's anonymous access is disabled
 - [ ] Anonymous request to a test blob URL is refused with `PublicAccessNotPermitted`
 
 ### player-backups Container (Private)
 
 - [ ] Container name: `player-backups`
 - [ ] Public access level: **Private (no anonymous access)**
-- [ ] Lifecycle rule applied: `archive-backups` (archive after 7 days)
+- [ ] Lifecycle rule applied: `archive-backups` (prefix `player-backups/`, archive after 7 days)
 
 ### server-config Container (Private)
 
@@ -32,7 +32,7 @@
 
 - [ ] Container name: `game-logs`
 - [ ] Public access level: **Private (no anonymous access)**
-- [ ] Lifecycle rule applied: `tier-game-logs`
+- [ ] Lifecycle rule applied: `tier-game-logs` (prefix `game-logs/`)
 
 ---
 
@@ -50,8 +50,16 @@
 
 ### Blob Versioning
 
-- [ ] Feature: **Enabled**
+- [ ] Feature: **Enabled**, **Keep all versions**
 - [ ] Versions created on overwrite: **Yes**
+
+### Left Off (cost, data loss or no undo)
+
+- [ ] Azure Backup for blobs: **Off** (Lab 5.2 covers backup)
+- [ ] Point-in-time restore for containers: **Off**
+- [ ] Permanent delete for soft deleted items: **Off**
+- [ ] Blob change feed: **Off**
+- [ ] Version-level immutability support: **Off** (it cannot be turned off once on)
 
 ---
 
@@ -61,21 +69,22 @@
 
 - [ ] Rule name: `tier-game-logs`
 - [ ] Status: **Enabled**
-- [ ] Scope: **All blobs**
+- [ ] Scope: **Limit blobs with filters**, Blob prefix `game-logs/` - never the whole account: the rule deletes blobs after 365 days
 - [ ] Blob types: **Block blobs**
 - [ ] Actions:
   - [ ] Move to **Cool** after **30 days**
   - [ ] Move to **Cold** after **90 days**
-  - [ ] Move to **Archive** after **180 days**
+  - [ ] Move to **Archive** after **180 days**, skipping blobs rehydrated in the last **7 days**
   - [ ] **Delete** after **365 days**
 
 ### archive-backups Rule
 
 - [ ] Rule name: `archive-backups`
 - [ ] Status: **Enabled**
-- [ ] Filter: Blob prefix `player-backups/`
+- [ ] Scope: **Limit blobs with filters**, Blob prefix `player-backups/`
+- [ ] Blob types: **Block blobs**
 - [ ] Actions:
-  - [ ] Move to **Archive** after **7 days**
+  - [ ] Move to **Archive** after **7 days**, skipping blobs rehydrated in the last **7 days** (no delete action)
 
 ---
 
@@ -83,7 +92,7 @@
 
 - [ ] Private blob uploaded: `prod-skycraft-swc-rg / prodskycraftswcsa / game-assets`
 - [ ] Blob name: `textures/test-asset.txt`
-- [ ] Version created after overwrite
+- [ ] Version created after overwrite (same blob name on every path, Step 4.2.13)
 - [ ] Access tier: **Hot**
 
 ---
@@ -142,15 +151,15 @@ $props = Get-AzStorageBlobServiceProperty -ResourceGroupName prod-skycraft-swc-r
 ### Verify Lifecycle Policies
 
 ```powershell
-# List lifecycle policies
+# List lifecycle rules with their prefix filters
 $policy = Get-AzStorageAccountManagementPolicy -ResourceGroupName prod-skycraft-swc-rg -StorageAccountName prodskycraftswcsa
-$policy.Rules | Select-Object Name, Enabled, Type | Format-Table
+$policy.Rules | Select-Object Name, Enabled, @{ n = 'Prefix'; e = { $_.Definition.Filters.PrefixMatch -join ', ' } } | Format-Table
 
-# Expected output:
-# Name             Enabled Type
-# ----             ------- ----
-# tier-game-logs   True    Lifecycle
-# archive-backups  True    Lifecycle
+# Expected output (an empty Prefix means the rule applies to the whole account - fix it, Step 4.2.10):
+# Name             Enabled Prefix
+# ----             ------- ------
+# tier-game-logs   True    game-logs/
+# archive-backups  True    player-backups/
 ```
 
 ### Verify Test Blob
@@ -166,6 +175,15 @@ Get-AzStorageBlob -Container game-assets -Context $ctx |
 # Name                          AccessTier  Length
 # ----                          ----------  ------
 # textures/test-asset.txt       Hot         XX
+```
+
+### Run the Lab Validator
+
+```powershell
+# From the lab folder
+./scripts/Test-Lab.ps1
+
+# Expected: "SUCCESS: Lab 4.2 compliant!" and exit code 0 ($LASTEXITCODE)
 ```
 
 ### Verify Blob Versioning
@@ -207,7 +225,7 @@ Get-AzStorageBlob -Container game-assets -Prefix 'textures/test-asset.txt' -Incl
 
 | Rule Name       | Scope           | Actions                                        |
 | --------------- | --------------- | ---------------------------------------------- |
-| tier-game-logs  | All blobs       | Cool(30d)→Cold(90d)→Archive(180d)→Delete(365d) |
+| tier-game-logs  | game-logs/      | Cool(30d)→Cold(90d)→Archive(180d)→Delete(365d) |
 | archive-backups | player-backups/ | Archive(7d)                                    |
 
 ---
@@ -294,8 +312,9 @@ Get-AzStorageBlob -Container game-assets -Prefix 'textures/test-asset.txt' -Incl
 - [ ] Soft delete enabled for blobs (7 days)
 - [ ] Soft delete enabled for containers (7 days)
 - [ ] Blob versioning enabled
-- [ ] `tier-game-logs` lifecycle rule created and enabled
-- [ ] `archive-backups` lifecycle rule created and enabled
+- [ ] `tier-game-logs` lifecycle rule created and enabled, limited to `game-logs/`
+- [ ] `archive-backups` lifecycle rule created and enabled, limited to `player-backups/`
+- [ ] `./scripts/Test-Lab.ps1` exits 0
 - [ ] Test blob uploaded and verified
 - [ ] All validation commands executed successfully
 - [ ] All reflection questions answered
