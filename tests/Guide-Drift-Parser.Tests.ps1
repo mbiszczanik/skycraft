@@ -844,7 +844,7 @@ Describe 'parse.py - labs 4.2, 4.3, 5.1, 5.2 and 5.3, pickers, worded resource s
         @{ lab = '5.3'; id = '5.3.5'; count = 1; field = 'Flow log type'; labels = @('Virtual network', '+ Select target resource', 'Virtual network', 'prod-skycraft-swc-vnet', 'Confirm selection'); resources = @(3) }
         # 'Browse to `common/config.txt`': a path opens each segment; 4.3.8 opens its share from the account.
         @{ lab = '4.3'; id = '4.3.6'; count = 1; field = ''; labels = @('common', 'config.txt', 'Restore'); resources = @(0, 1) }
-        @{ lab = '4.3'; id = '4.3.8'; count = 1; field = ''; labels = @('prodskycraftswcsa', 'File shares', 'skycraft-config', 'Overview', 'Connect'); resources = @(0, 2) }
+        @{ lab = '4.3'; id = '4.3.8'; count = 1; field = ''; labels = @('prodskycraftswcsa', 'Classic file shares', 'skycraft-config', 'Overview', 'Connect'); resources = @(0, 2) }
         # '`public-demo` -> **Change access level**. The **Anonymous access level** dropdown lists ...':
         # the sentence after the chain describes the dialog.
         @{ lab = '4.2'; id = '4.2.12'; count = 1; field = ''; labels = @('public-demo', 'Change access level'); resources = @(0) }
@@ -951,7 +951,7 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
     ) {
         $first = @((Get-GapStep '4.3' $id).items)[0]
         $first.kind | Should -Be 'navigation'
-        @($first.labels) | Should -Be (@('prodskycraftswcsa', 'File shares', 'skycraft-config') + $rest)
+        @($first.labels) | Should -Be (@('prodskycraftswcsa', 'Classic file shares', 'skycraft-config') + $rest)
         @($first.resources) | Should -Be $resources
     }
 
@@ -1344,6 +1344,9 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
     # stating verb is added here.
     It 'gives a state to these labels only' {
         $expected = @(
+            # Inherit-Project-Tag (#350): open the Remediation tab, leave the task box unticked.
+            '1.3.8/Remediation | Create a remediation task/unchecked=1'
+            '1.3.8/Remediation | Create a remediation task/stateOnly=1'
             '1.3.9/Allowed locations | Sweden Central | North Europe/checked=1,2'
             '3.3.7/Use quickstart image/unchecked=0'
             '3.3.2/Admin user/checked=0'
@@ -1351,6 +1354,11 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '4.2.5/Enable soft delete for blobs/checked=0'
             '4.2.6/Enable soft delete for containers/checked=0'
             '4.2.7/Enable versioning for blobs/checked=0'
+            # The Backup tab ticks Enable backup by default (#360); soft delete stays on (4.3.3).
+            '4.3.1/Enable backup/unchecked=0'
+            '4.3.2/Enable backup/unchecked=0'
+            '4.3.3/Soft delete for all classic file shares/checked=0'
+            '4.3.3/Soft delete for all classic file shares/stateOnly=0'
             '4.3.6/Upload | Overwrite if files already exist | Upload/checked=1'
             '4.4.2/Add your client IP address/checked=0'
             '5.1.7/StorageRead | StorageWrite/checked=0,1'

@@ -39,6 +39,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 4.1: Validate Storage Accounts ===" -ForegroundColor Cyan
 Write-Host ""
@@ -166,8 +168,9 @@ foreach ($env in $envsToTest) {
         -Description "File encryption enabled" `
         -Condition ($sa.Encryption.Services.File.Enabled -eq $true) | Out-Null
     
-    # Test tags
-    $tags = $sa.Tags
+    # Test tags. An account without tags returns $null, and indexing $null throws "Cannot index
+    # into a null array", which would end the script without a summary (#355): read it as empty.
+    $tags = if ($sa.Tags) { $sa.Tags } else { @{} }
     
     Test-Condition `
         -Description "Tag 'Project' = 'SkyCraft'" `
@@ -218,6 +221,5 @@ if ($script:testsFailed -eq 0) {
 }
 else {
     Write-Host "Some tests failed. Review the errors above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }

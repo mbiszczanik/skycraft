@@ -32,6 +32,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 $failCount = 0
 
 Write-Host "=== Lab 3.1 Validation Script ($Environment) ===" -ForegroundColor Cyan
@@ -54,8 +56,7 @@ catch {
     $failCount++
     # Cannot proceed with VNet/NSG/LB checks if the RG is missing
     Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor Red
-    $Host.SetShouldExit($failCount)
-    exit $failCount
+    Exit-Lab -FailureCount $failCount
 }
 
 # 2. Verify VNet
@@ -132,5 +133,4 @@ catch {
 }
 
 Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor $(if ($failCount -eq 0) { 'Cyan' } else { 'Red' })
-$Host.SetShouldExit($failCount)
-exit $failCount
+Exit-Lab -FailureCount $failCount

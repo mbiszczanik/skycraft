@@ -848,8 +848,8 @@ Write-Host ''
 #
 # $Host.SetShouldExit as well as `exit`: a script carrying '#Requires -Modules' launched with
 # 'pwsh -File' has its `exit` discarded and the process reports 0 regardless. This script declares
-# no module requirement, so `exit` alone would work today - but tests/Exit-Code-Propagation.Tests.ps1
-# holds the whole repository to the pattern, and an orchestrator whose entire value is a
-# trustworthy exit code is the last place to make an exception.
+# no module requirement, so `exit` alone would work today, and tests/Exit-Code-Propagation.Tests.ps1
+# requires the guard only of a tools script that declares one (#124) - but an orchestrator whose
+# entire value is a trustworthy exit code is the last place to depend on that staying true.
 $Host.SetShouldExit($failedCount)
 exit $failedCount
