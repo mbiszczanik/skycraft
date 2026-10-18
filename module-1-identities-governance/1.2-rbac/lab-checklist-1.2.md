@@ -4,14 +4,17 @@
 
 - [ ] **dev-skycraft-swc-rg** created
   - Region: Sweden Central
+  - Tags: Environment = Development, Project = SkyCraft, CostCenter = MSDN, Owner = mbiszczanik
   - Purpose: Development and testing environment
   
 - [ ] **prod-skycraft-swc-rg** created
   - Region: Sweden Central
+  - Tags: Environment = Production, Project = SkyCraft, CostCenter = MSDN, Owner = mbiszczanik
   - Purpose: Production deployment
   
 - [ ] **platform-skycraft-swc-rg** created
   - Region: Sweden Central
+  - Tags: Environment = Platform, Project = SkyCraft, CostCenter = MSDN, Owner = mbiszczanik
   - Purpose: Shared services (monitoring, logging)
 
 ---

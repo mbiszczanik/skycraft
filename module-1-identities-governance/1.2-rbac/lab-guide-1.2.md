@@ -62,17 +62,17 @@ Before starting this lab:
 
 ### Portal, PowerShell and Bicep: three ways to the same result
 
-Every step that changes Azure in this lab has a scripted and a Bicep counterpart in the lab's `scripts/` and `bicep/` folders. The steps that only look at what is there, and the optional sign-in test, are Portal-only. `scripts/Test-Lab.ps1` checks the three resource groups and the five role assignments, whichever way you built them.
+Every step that changes Azure in this lab has a Bicep counterpart in the lab's `bicep/` folder, deployed by `scripts/Deploy-Bicep.ps1`; the role assignments also have an Az PowerShell one. The steps that only look at what is there, and the optional sign-in test, are Portal-only. `scripts/Test-Lab.ps1` checks the three resource groups, the five role assignments and that Malfurion Stormrage's Owner assignment has no condition, whichever way you built them.
 
 | Guide step | What it changes | PowerShell (`scripts/`) | Bicep (`bicep/`) |
 | --- | --- | --- | --- |
-| 1.2.1-1.2.3 | Three resource groups in Sweden Central | `New-LabResourceGroup.ps1` | `resource-groups.bicep`, deployed by `Deploy-Bicep.ps1` |
+| 1.2.1-1.2.3 | Three resource groups in Sweden Central, with four tags | None of its own: both paths of the checklist's Automation section create the groups with `Deploy-Bicep.ps1` | `resource-groups.bicep`, deployed by `Deploy-Bicep.ps1` |
 | 1.2.4 | Owner for Malfurion Stormrage on the subscription, without a condition | `New-LabRoleAssignment.ps1` | `role-assignments.bicep`, deployed by `Deploy-Bicep.ps1 -IncludeRoleAssignments` |
 | 1.2.6-1.2.9 | Contributor and three Reader assignments on the resource groups | `New-LabRoleAssignment.ps1` | `role-assignments.bicep`, deployed by `Deploy-Bicep.ps1 -IncludeRoleAssignments` |
 | 1.2.5, 1.2.10-1.2.12 | Nothing (they read the assignments) | Portal-only; the checklist's validation commands read the same assignments | none |
 | 1.2.13 (optional) | Nothing (a sign-in test as Khadgar Archmage) | Portal-only | none |
 
-The scripted and Bicep paths also tag the resource groups (`Project`, `Environment`, `CostCenter`; the Bicep adds `Owner`). The Portal steps leave the **Tags** tab empty: Lab 1.3, Steps 1.3.1-1.3.3, adds the same four tags in the Portal, so after Lab 1.3 all three paths leave the same groups behind. Pick one path per subscription for the role assignments: the Bicep cannot take over assignments that the Portal or the script already created (see the checklist's Automation section).
+The Portal steps and `resource-groups.bicep` give each resource group the same four tags (`Project`, `Environment`, `CostCenter`, `Owner`), so every path leaves the same groups behind. `scripts/New-LabResourceGroup.ps1` is not one of this lab's paths: it sets only three of the tags, with `Project` = `Skycraft`. Pick one path per subscription for the role assignments: the Bicep cannot take over assignments that the Portal or the script already created (see the checklist's Automation section).
 
 ---
 
@@ -137,7 +137,7 @@ Management Group (broadest)
 
 Before assigning roles, create resource groups for the SkyCraft project.
 
-All three groups go to **Sweden Central**: the `swc` in their names stands for it, and Lab 1.3's **Allowed locations** assignment accepts only Sweden Central and North Europe. The wizard's **Region** list may open on another region, so set it on every group. Leave the **Tags** tab empty: Lab 1.3, Steps 1.3.1-1.3.3, tags the groups.
+All three groups go to **Sweden Central**: the `swc` in their names stands for it, and the scripts and the Bicep create them there. The wizard's **Region** list may open on another region, so set it on every group. Each group also gets four tags on the wizard's **Tags** tab, the ones the Bicep sets and Lab 1.3 checks in Steps 1.3.1-1.3.3: there, **Apply** then stays greyed out, because the tags are already in place.
 
 ### Step 1.2.1: Create Development Resource Group
 
@@ -151,7 +151,16 @@ All three groups go to **Sweden Central**: the `swc` in their names stands for i
 | Resource group | dev-skycraft-swc-rg |
 | Region         | Sweden Central      |
 
-4. Click **Review + create**, then **Create**
+4. Click the **Tags** tab and add:
+
+| Name        | Value       |
+| ----------- | ----------- |
+| Environment | Development |
+| Project     | SkyCraft    |
+| CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
+
+5. Click **Review + create**, then **Create**
 
 **Expected Result**: Resource group `dev-skycraft-swc-rg` appears in the list.
 
@@ -168,7 +177,16 @@ All three groups go to **Sweden Central**: the `swc` in their names stands for i
 | Resource group | prod-skycraft-swc-rg |
 | Region         | Sweden Central       |
 
-3. Click **Review + create**, then **Create**
+3. Click the **Tags** tab and add:
+
+| Name        | Value       |
+| ----------- | ----------- |
+| Environment | Production  |
+| Project     | SkyCraft    |
+| CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
+
+4. Click **Review + create**, then **Create**
 
 **Expected Result**: Resource group `prod-skycraft-swc-rg` appears in the list.
 
@@ -183,7 +201,16 @@ All three groups go to **Sweden Central**: the `swc` in their names stands for i
 | Resource group | platform-skycraft-swc-rg |
 | Region         | Sweden Central           |
 
-3. Click **Review + create**, then **Create**
+3. Click the **Tags** tab and add:
+
+| Name        | Value       |
+| ----------- | ----------- |
+| Environment | Platform    |
+| Project     | SkyCraft    |
+| CostCenter  | MSDN        |
+| Owner       | mbiszczanik |
+
+4. Click **Review + create**, then **Create**
 
 **Expected Result**: Three resource groups created:
 
@@ -201,7 +228,7 @@ Every role assignment in this lab goes through the same **Add role assignment** 
 
 - The **Role** tab has two lists. **Job function roles** opens first and holds roles such as Reader. **Privileged administrator roles** holds Owner, Contributor, User Access Administrator and Role Based Access Control Administrator: Owner and Contributor are not on the first list.
 - **Owner** adds a **Conditions** tab after **Members**, so **Next** on the **Members** tab opens **Conditions**, not **Review + assign**. Contributor and Reader have no **Conditions** tab.
-- In a tenant with a Microsoft Entra ID P2 or Microsoft Entra ID Governance licence, the wizard also has an **Assignment type** tab before **Review + assign**. This lab's assignments are **Active** and **Permanent**, as the scripts and the Bicep create them: an **Eligible** assignment gives no access until the user activates it. Without such a licence the tab is not there.
+- In a tenant with a Microsoft Entra ID P2 or Microsoft Entra ID Governance licence, the wizard also has an **Assignment type** tab before **Review + assign**. This lab's assignments are **Active** and **Permanent**, as the scripts and the Bicep create them: an **Eligible** assignment gives no access until the user activates it. Without such a licence the tab is not there: skip the two fields the steps list under "Only if the wizard shows an Assignment type tab". Each step then opens the **Review + assign** tab by its name, so it works with the tab and without it.
 
 ### Step 1.2.4: Assign Owner Role to Admin User
 
@@ -244,11 +271,10 @@ Select the last option whichever one is selected when the tab opens. The scenari
 
    - **Assignment type**: Active
    - **Assignment duration**: Permanent
-   - Click **Next**
 
-10. On the **Review + assign** tab, click **Review + assign**
+10. Click the **Review + assign** tab, then click **Review + assign**
 
-**Expected Result**: A notification reports that the role assignment was added: Malfurion Stormrage now has the Owner role at subscription scope.
+**Expected Result**: A notification reports that the role assignment was added. Step 1.2.5 finds it in the subscription's list.
 
 ### Step 1.2.5: Verify Role Assignment
 
@@ -299,11 +325,12 @@ Now assign more specific roles at resource group level for the development team.
 
    - **Assignment type**: Active
    - **Assignment duration**: Permanent
-   - Click **Next**
 
-8. On the **Review + assign** tab, click **Review + assign**
+8. Click the **Review + assign** tab, then click **Review + assign**
 
-**Expected Result**: SkyCraft-Developers group can now create and manage resources in `dev-skycraft-swc-rg`.
+**Expected Result**: A notification reports that the role assignment was added. Step 1.2.12 finds it in the list of `dev-skycraft-swc-rg`.
+
+**Note**: Contributor lets the members of SkyCraft-Developers create and manage resources in `dev-skycraft-swc-rg`, but not grant access to anyone.
 
 ### Step 1.2.7: Assign Reader Role to Testers Group (Dev Environment)
 
@@ -330,11 +357,12 @@ You are still on the **Access control (IAM)** page of `dev-skycraft-swc-rg`.
 
    - **Assignment type**: Active
    - **Assignment duration**: Permanent
-   - Click **Next**
 
-5. On the **Review + assign** tab, click **Review + assign**
+5. Click the **Review + assign** tab, then click **Review + assign**
 
-**Expected Result**: SkyCraft-Testers can view resources but not modify them.
+**Expected Result**: A notification reports that the role assignment was added. Step 1.2.12 finds it in the list of `dev-skycraft-swc-rg`.
+
+**Note**: Reader lets the members of SkyCraft-Testers view the resources in `dev-skycraft-swc-rg`, but not change them.
 
 ### Step 1.2.8: Assign Reader Role to Testers (Production Environment)
 
@@ -362,11 +390,12 @@ You are still on the **Access control (IAM)** page of `dev-skycraft-swc-rg`.
 
    - **Assignment type**: Active
    - **Assignment duration**: Permanent
-   - Click **Next**
 
-8. On the **Review + assign** tab, click **Review + assign**
+8. Click the **Review + assign** tab, then click **Review + assign**
 
-**Expected Result**: Testers can view production resources but cannot make changes.
+**Expected Result**: A notification reports that the role assignment was added. Step 1.2.11 checks it from `prod-skycraft-swc-rg`.
+
+**Note**: The testers can now view the production resources, but not change them.
 
 ### Step 1.2.9: Assign Limited Access to External Partner
 
@@ -396,11 +425,12 @@ For the external partner, grant access only to the shared services resource grou
 
    - **Assignment type**: Active
    - **Assignment duration**: Permanent
-   - Click **Next**
 
-8. On the **Review + assign** tab, click **Review + assign**
+8. Click the **Review + assign** tab, then click **Review + assign**
 
-**Expected Result**: External partner has read-only access to shared services only, not dev or prod.
+**Expected Result**: A notification reports that the role assignment was added.
+
+**Note**: The external partner can now view `platform-skycraft-swc-rg`, and has no access to the dev and prod groups.
 
 ---
 
@@ -429,7 +459,7 @@ A new role assignment can take a few minutes to take effect; in this course's Po
 
 ### Step 1.2.11: Check Access for Tester
 
-1. Close Khadgar Archmage's assignments pane
+1. Click **Close** at the top right of Khadgar Archmage's assignments pane
 2. Click the **Check access** button
 3. Select **User, group, or service principal**
 4. Search for **"Chromie Timewalker"**
@@ -437,7 +467,7 @@ A new role assignment can take a few minutes to take effect; in this course's Po
 
 **Note**: This pane shows Chromie's Reader at `dev-skycraft-swc-rg` only. Her Reader at `prod-skycraft-swc-rg` sits on a resource group beside this one, not above it, so Check access lists it only when you open it from that group, which the next items do.
 
-6. Close Chromie Timewalker's assignments pane
+6. Click **Close** at the top right of Chromie Timewalker's assignments pane
 7. In Azure Portal, search for **Resource groups**
 8. Click **prod-skycraft-swc-rg**
 9. In the left menu, click **Access control (IAM)**
@@ -471,12 +501,16 @@ Your own account, and any other assignment made on the subscription, is listed w
 
 ### Step 1.2.13: Test Effective Permissions (Optional but Recommended)
 
-To see the permissions from Khadgar's side, sign in as him. This step changes nothing in Azure.
+To see the permissions from Khadgar's side, sign in as him. This step changes nothing in Azure. Its first and last items happen outside the Portal, in your browser; a guide drift recording skips this optional step.
 
 1. Open a private browser window and sign in to the Azure portal as Khadgar Archmage (the user name and password from Lab 1.1)
-2. Search for **Resource groups**: the list shows `dev-skycraft-swc-rg` only, the one group where Khadgar has a role
-3. Open `dev-skycraft-swc-rg` → **Access control (IAM)** → **+ Add**. The **Add role assignment** item is greyed out, because Contributor cannot grant access
-4. Close the private window
+2. In Azure Portal, search for **Resource groups**
+3. Click **dev-skycraft-swc-rg**
+4. In the left menu, click **Access control (IAM)**
+5. Click **+ Add**
+6. Close the private window
+
+**Expected Result**: In the private window, the list of resource groups showed `dev-skycraft-swc-rg` only, the one group where Khadgar has a role, and under + Add the Add role assignment item was greyed out, because Contributor cannot grant access.
 
 **Note**: Do not test the role by deleting the resource group. Contributor on a resource group can delete that group, and everything in it would be gone. For lab purposes, checking access in IAM is sufficient verification.
 
@@ -559,11 +593,11 @@ Complete this checklist to verify successful lab completion:
 **Causes**:
 
 - You don't have Owner or User Access Administrator role
-- Your own Owner assignment has a condition that keeps you from assigning privileged roles such as Owner (Step 1.2.4) or Contributor (Step 1.2.6)
+- Your own Owner assignment has a condition. The option Microsoft recommends on the **Conditions** tab keeps you from assigning Owner (Step 1.2.4); a condition that allows only selected roles can also keep you from assigning Contributor (Step 1.2.6) or Reader (Steps 1.2.7-1.2.9)
 
 **Solutions**:
 
-1. Verify your own role: open your subscription, then **Access control (IAM)** → **Check access** tab → **View my access**. The pane lists your role assignments; a **Condition** other than None limits the roles you can assign
+1. Verify your own role: open your subscription, then **Access control (IAM)** → **Check access** tab → **View my access**. The pane lists your role assignments; a **Condition** other than None limits the roles you can assign. In a tenant with a Microsoft Entra ID P2 or Microsoft Entra ID Governance licence there is no **View my access** button: the **Check access** tab lists your role assignments itself (Microsoft Learn, [Check access for a user to a single Azure resource](https://learn.microsoft.com/azure/role-based-access-control/check-access), step 2)
 2. You need Owner or User Access Administrator, without a condition that excludes the roles of this lab, to assign roles
 3. Contact your subscription administrator
 
@@ -612,14 +646,15 @@ Complete this checklist to verify successful lab completion:
 
 **Symptom**: In Step 1.2.5, the **Condition** column of Malfurion Stormrage's Owner assignment shows **View/Edit** instead of None
 
-**Root Cause**: On the **Conditions** tab of Step 1.2.4, another option than **Allow user to assign all roles (highly privileged)** was selected. The assignment works, but it is not the one the scripts and the Bicep create.
+**Root Cause**: On the **Conditions** tab of Step 1.2.4, another option than **Allow user to assign all roles (highly privileged)** was selected. The assignment works, but it is not the one the scripts and the Bicep create, and `scripts/Test-Lab.ps1` fails it.
 
 **Solution**:
 
 1. On the subscription's **Access control (IAM)** page, click the **Role assignments** tab
 2. Check the box of Malfurion Stormrage's Owner assignment
 3. Click **Delete**, then **Yes**
-4. Repeat Step 1.2.4
+4. Wait a minute, so that the deletion has taken effect before you assign the same role to the same user again
+5. Repeat Step 1.2.4
 
 ---
 
@@ -675,6 +710,18 @@ Test your understanding with these questions:
 - [Steps to assign an Azure role](https://learn.microsoft.com/en-us/azure/role-based-access-control/role-assignments-steps)
 - [Best practices for Azure RBAC](https://learn.microsoft.com/en-us/azure/role-based-access-control/best-practices)
 - [Understand scope for Azure RBAC](https://learn.microsoft.com/en-us/azure/role-based-access-control/scope-overview)
+
+---
+
+## 📦 What This Lab Leaves Behind
+
+| What | Used by | Daily cost |
+| --- | --- | --- |
+| `dev-skycraft-swc-rg`, `prod-skycraft-swc-rg` and `platform-skycraft-swc-rg` in Sweden Central, each with the tags `Environment`, `Project`, `CostCenter` and `Owner` | Lab 1.3 (tags, policies, locks and budgets on them) and every later lab, which deploys its resources into them | None: an empty resource group costs nothing |
+| Owner for Malfurion Stormrage on the subscription, without a condition | No later lab | None |
+| Contributor for SkyCraft-Developers and Reader for SkyCraft-Testers on `dev-skycraft-swc-rg`, Reader for SkyCraft-Testers on `prod-skycraft-swc-rg`, Reader for Illidan Stormrage on `platform-skycraft-swc-rg` | No later lab | None |
+
+Nothing in this lab costs money or deletes data, and every change can be undone. The Owner assignment gives Malfurion Stormrage, and anyone who signs in as him, full control of the subscription, including the right to grant any role: remove it when you no longer need it. `scripts/Remove-LabResource.ps1` removes it and deletes the three resource groups, which removes the four assignments on them; run it only when you are done with the whole course, since every later lab uses these groups.
 
 ---
 
