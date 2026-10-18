@@ -82,10 +82,9 @@ The Az PowerShell blocks in Steps 3.4.4, 3.4.6 and 3.4.7 deploy the dashboard an
 
 Steps without an Az PowerShell block in this guide: 3.4.1, 3.4.2, 3.4.5, 3.4.8-3.4.11, and the startup command in Step 3.4.4. Their scripted path is the Bicep. Steps without a Bicep counterpart: 3.4.3 (a file on your computer), 3.4.4, 3.4.6 and 3.4.7 (deploying content and swapping are operations, not resources), 3.4.12 (reference only) and 3.4.13 (automatic backups need no configuration).
 
-The paths differ in what `Test-Lab.ps1` does not check:
+The Bicep also sets what the Portal's create wizard leaves without being asked: **Always on** on, **Session affinity** and **Session affinity proxy** off, basic authentication for FTP and SCM publishing off, and **Outbound internet traffic** through the VNet checked.
 
-- **Names and tags of the slot and the autoscale setting.** The Portal names the autoscale setting `dev-skycraft-swc-asp-Autoscale-<number>`, the Bicep `dev-skycraft-swc-asp-autoscale`; `Test-Lab.ps1` and `Remove-LabResource.ps1` find it through the plan it scales. In the Portal, the slot and the autoscale setting get only the `Project` tag (from `Inherit-Project-Tag`); the Bicep gives them all four SkyCraft tags.
-- **Always On.** The Portal's wizard may turn **Always on** on; the Bicep leaves it off. The plan costs the same either way.
+The paths differ only in names and tags, which `Test-Lab.ps1` does not check: the Portal names the autoscale setting `dev-skycraft-swc-asp-Autoscale-<number>`, the Bicep `dev-skycraft-swc-asp-autoscale`; `Test-Lab.ps1` and `Remove-LabResource.ps1` find it through the plan it scales. In the Portal, the slot and the autoscale setting get only the `Project` tag (from `Inherit-Project-Tag`); the Bicep gives them all four SkyCraft tags.
 
 ---
 
@@ -163,7 +162,7 @@ For this lab, we will use **Premium V4 P0V4**. The lab needs **deployment slots*
 | ------------------------------ | -------------------------------------------------- |
 | Subscription                   | [Your Subscription]                                |
 | Resource Group                 | `dev-skycraft-swc-rg`                              |
-| Name                           | `dev-skycraft-swc-app01` (must be globally unique) |
+| Name                           | `dev-skycraft-swc-app01`                           |
 | Secure unique default hostname | **On**                                             |
 | Publish                        | **Code**                                           |
 | Runtime stack                  | **Node 22 LTS**                                    |
@@ -176,7 +175,9 @@ For this lab, we will use **Premium V4 P0V4**. The lab needs **deployment slots*
 **Note**: **Node 20 LTS** is no longer offered; the list has Node 22 LTS, Node 24 LTS and a preview. This lab uses **Node 22 LTS**. A Node runtime does not serve a static `index.html` on its own; Step 3.4.4 sets the startup command that does.
 
 > [!WARNING]
-> **Secure unique default hostname** can be set only when the app is created. Leave it **On**: the app's address gets a random part (`dev-skycraft-swc-app01-<16 characters>.swedencentral-01.azurewebsites.net`) that nobody else can claim after you delete the app. To change it later, you would have to create the app again.
+> **Secure unique default hostname** can be set only when the app is created. Leave it **On**: the app's address gets a random part (`dev-skycraft-swc-app01-<16 characters>.swedencentral-01.azurewebsites.net`) that nobody else can claim after you delete the app. To change it later, you would have to delete the app, wait a minute, and create it again.
+
+**Note**: The form checks the **Name** as you type. If it says the name is not available, add a suffix such as your initials, and use that name wherever this guide says `dev-skycraft-swc-app01`; pass it to `scripts/Test-Lab.ps1` and `scripts/Remove-LabResource.ps1` as `-AppName`.
 
 4. Click the **Networking** tab and fill in:
 
@@ -209,8 +210,6 @@ For this lab, we will use **Premium V4 P0V4**. The lab needs **deployment slots*
 **Note**: The review page may say "Basic authentication for this app is currently disabled and may impact deployments". Leave it disabled: `Publish-AzWebApp` in Step 3.4.4 deploys with your Azure sign-in (seen working 2026-10-15).
 
 **Expected Result**: The Web App is deployed. On its **Overview**, copy the **Default domain**: it has the form `dev-skycraft-swc-app01-<16 characters>.swedencentral-01.azurewebsites.net`. Open `https://` followed by that domain: you see the default "Your web app is running and waiting for your content" landing page.
-
-![Create Web App](./images/step-3.4.2.png)
 
 ---
 
@@ -313,8 +312,6 @@ Deployment slots allow you to deploy different versions of your app (e.g., "Stag
 
 **Note**: The **Add Slot** pane has no tags. With Lab 1.3's assignments in place, `Inherit-Project-Tag` gives the slot the `Project` tag of `dev-skycraft-swc-rg`, and `Enforce-Project-Tag` accepts it. If the slot is refused with "All resources must be tagged with Project=SkyCraft", see Troubleshooting, Issue 3.
 
-![Create Staging Slot](./images/step-3.4.5.png)
-
 **Expected Result**: The list shows the production app and `dev-skycraft-swc-app01-staging`, both **Running**. The slot's address has its own random part: `dev-skycraft-swc-app01-staging-<16 characters>.swedencentral-01.azurewebsites.net`.
 
 ### Step 3.4.6: Deploy V2 to Staging
@@ -325,7 +322,7 @@ Deployment slots allow you to deploy different versions of your app (e.g., "Stag
 4. Verify:
    - **Startup Command**: `pm2 serve /home/site/wwwroot --no-daemon`
 
-**Note**: If **Startup Command** is empty on the slot, enter `pm2 serve /home/site/wwwroot --no-daemon`, click **Save**, then **Continue**: without it, the slot shows the default page instead of the dashboard.
+**Note**: If **Startup Command** is empty on the slot, enter `pm2 serve /home/site/wwwroot --no-daemon`, click **Save**, then **Continue**: without it, the slot shows the default page instead of the dashboard. If the menu item reads **Configuration (preview)**, the startup command is on its **Stack settings** tab, and the button is **Apply**.
 
 5. Click **Overview** and copy the slot's **Default domain**
 6. Modify your local `index.html` to say **"Version: 2.0 (Staging)"** and change the status color to **Blue**.
@@ -362,9 +359,9 @@ Publish-AzWebApp `
 8. Click **Start Swap**
 9. Click **Close** when the swap has finished
 
-![Swap Slots](./images/step-3.4.7.png)
-
 **Expected Result**: After the swap completes (Wait ~1-2 mins), refresh the **Production** URL. It should now show "Version 2.0". The Staging URL will now show "Version 1.0" (they swapped places).
+
+![Swap Slots](./images/step-3.4.7.png)
 
 The same swap with Az PowerShell:
 
@@ -409,6 +406,8 @@ We want the dashboard to scale out if too many Game Masters use it simultaneousl
 
 **Note**: The page proposes the **Autoscale setting name** `dev-skycraft-swc-asp-Autoscale-<number>` in `dev-skycraft-swc-rg`, in the plan's region. Keep it: `Test-Lab.ps1` finds the setting through the plan, whatever its name. The page has no tags; `Inherit-Project-Tag` adds `Project` when you save in Step 3.4.9.
 
+**Expected Result**: The pane closes, and the **Default** scale condition lists the rule under **Rules**, **Scale out**. Nothing is saved until Step 3.4.9.
+
 ![Configure Scale Out Rule](./images/step-3.4.8.png)
 
 ### Step 3.4.9: Configure Scale In Rule
@@ -433,8 +432,6 @@ Always pair a scale-out rule with a scale-in rule to save costs!
 
 **Expected Result**: The plan will now auto-scale between 1 and 3 instances based on CPU load. If **Save** seems to do nothing, open the notifications (the bell): a refusal "disallowed by policy" means `dev-skycraft-swc-rg` lacks `Project` = `SkyCraft` (Troubleshooting, Issue 3).
 
-![Configure Scale In Rule](./images/step-3.4.9.png)
-
 ---
 
 ## 📖 Section 6: Networking & Security (15 minutes)
@@ -451,18 +448,24 @@ To allow the dashboard to connect to the Game Servers (e.g., to query status dir
 6. **Virtual network**: `dev-skycraft-swc-vnet`
 7. **Subnet**: `AppServiceSubnet`
 8. Click **Connect**
-9. Under **Deployment**, select **Deployment slots**
-10. Click **dev-skycraft-swc-app01-staging**
-11. Under **Settings**, select **Networking**
-12. Under **Outbound traffic configuration**, click **Not configured** (the value of _Virtual network integration_).
-13. Click **Add virtual network integration**
-14. **Virtual network**: `dev-skycraft-swc-vnet`
-15. **Subnet**: `AppServiceSubnet`
-16. Click **Connect**
+9. On the **Virtual Network Integration** page, verify:
+   - **Outbound internet traffic** (under **Application routing**): checked
+10. Under **Deployment**, select **Deployment slots**
+11. Click **dev-skycraft-swc-app01-staging**
+12. Under **Settings**, select **Networking**
+13. Under **Outbound traffic configuration**, click **Not configured** (the value of _Virtual network integration_).
+14. Click **Add virtual network integration**
+15. **Virtual network**: `dev-skycraft-swc-vnet`
+16. **Subnet**: `AppServiceSubnet`
+17. Click **Connect**
+18. On the **Virtual Network Integration** page, verify:
+    - **Outbound internet traffic** (under **Application routing**): checked
+
+**Note**: If **Outbound internet traffic** is unchecked on the app or on the slot, check it and click **Apply**. Checked, the app sends its outbound traffic, internet traffic included, through the VNet ([Manage virtual network integration routing](https://learn.microsoft.com/azure/app-service/configure-vnet-integration-routing)); the Bicep path sets the same, and `Test-Lab.ps1` checks it.
 
 **Note**: The subnet list groups the subnets by whether they can be used; `AppServiceSubnet` (10.1.4.0/24) is among those that can. Lab 2.1 created it for this purpose and delegated it to `Microsoft.Web/serverFarms`. There is no **Existing subnet** choice any more.
 
-**Expected Result**: The app and the slot are connected to the VNet: their **Virtual Network Integration** page shows `dev-skycraft-swc-vnet` and `AppServiceSubnet`, and under **Application routing**, **Outbound internet traffic** is checked (all outbound traffic goes through the VNet, as the Bicep path sets it). They can reach private IPs (like the database or VMs) within that VNet.
+**Expected Result**: The app and the slot are connected to the VNet: their **Virtual Network Integration** page shows `dev-skycraft-swc-vnet` and `AppServiceSubnet`, and under **Application routing**, **Outbound internet traffic** is checked. They can reach private IPs (like the database or VMs) within that VNet.
 
 ![VNet Integration](./images/step-3.4.10.png)
 
@@ -478,7 +481,7 @@ The create wizard already turns **HTTPS only** on and sets the minimum TLS versi
    - **HTTPS only**: checked
    - **Minimum Inbound TLS Version**: 1.2
 
-**Note**: If **HTTPS only** is unchecked, check it and click **Save**.
+**Note**: If **HTTPS only** is unchecked, check it and click **Save**. If the menu item reads **Configuration (preview)**, the same two settings are on its **General settings** tab, and the button is **Apply**.
 
 **Note**: **HTTPS only** and the TLS version are settings of each slot. To check the `staging` slot as well, open `dev-skycraft-swc-app01-staging` and verify the same two settings there.
 
@@ -493,7 +496,7 @@ In a real production environment, you wouldn't use the `azurewebsites.net` domai
 **Steps to configure (For Reference Only):**
 
 1. Buy a domain from a registrar (GoDaddy, Namecheap, etc.).
-2. In App Service -> **Custom domains** -> **+ Add custom domain**.
+2. In the app, under **Settings**, select **Custom domains**, then **+ Add custom domain**.
 3. **Domain provider**: All other domain services.
 4. **TLS/SSL certificate**: Managed certificate (Free).
 5. **Validation**: Add the `TXT` and `CNAME` records provided by Azure to your domain registrar's DNS settings.
@@ -502,7 +505,7 @@ In a real production environment, you wouldn't use the `azurewebsites.net` domai
 > [!NOTE]
 > We skip this step in the lab because it requires purchasing a real domain name.
 
-### Step 3.4.13: Configure Backups
+### Step 3.4.13: Review Backups
 
 App Service backs up every app on the Basic tier and above automatically, every hour, at no extra cost and with nothing to configure. The platform keeps these automatic backups for 30 days, and you can restore any of them to the app or to a slot ([Back up and restore your app](https://learn.microsoft.com/azure/app-service/manage-backup)). This lab relies on them and configures no custom backup; neither does the Bicep path.
 
@@ -558,12 +561,31 @@ The script does it in that order, checks that both integrations are gone before 
 
 In the Portal, the same order:
 
-1. Open `dev-skycraft-swc-app01-staging`, select **Networking**, open the virtual network integration and click **Disconnect**.
-2. Do the same on `dev-skycraft-swc-app01`.
-3. Wait until both **Networking** pages show _Virtual network integration_ as **Not configured**.
-4. Delete `dev-skycraft-swc-app01` (its `staging` slot is deleted with it).
-5. Open `dev-skycraft-swc-rg`, check **Show hidden types**, and delete the autoscale setting `dev-skycraft-swc-asp-Autoscale-<number>`.
-6. Delete `dev-skycraft-swc-asp`.
+1. In Azure Portal, search for **App Services**
+2. Click **dev-skycraft-swc-app01**
+3. Under **Deployment**, select **Deployment slots**
+4. Click **dev-skycraft-swc-app01-staging**
+5. Under **Settings**, select **Networking**
+6. Under **Outbound traffic configuration**, click the value of _Virtual network integration_ (it names `AppServiceSubnet`)
+7. Click **Disconnect**, and confirm
+8. In Azure Portal, search for **App Services**
+9. Click **dev-skycraft-swc-app01**
+10. Under **Settings**, select **Networking**
+11. Under **Outbound traffic configuration**, click the value of _Virtual network integration_ (it names `AppServiceSubnet`)
+12. Click **Disconnect**, and confirm
+13. Under **Settings**, select **Networking**, and verify:
+    - _Virtual network integration_: **Not configured**
+14. Click **Overview**, click **Delete**, and confirm. The `staging` slot is deleted with the app.
+15. In Azure Portal, search for **Resource groups**
+16. Click **dev-skycraft-swc-rg**
+17. Check **Show hidden types**
+18. Click the plan's autoscale setting: `dev-skycraft-swc-asp-Autoscale-<number>` if you built the lab in the Portal, `dev-skycraft-swc-asp-autoscale` if you deployed the Bicep
+19. Click **Delete**, and confirm
+20. In Azure Portal, search for **App Service plans**
+21. Click **dev-skycraft-swc-asp**
+22. Click **Delete**, and confirm
+
+**Note**: Do not go on to item 14 until both **Networking** pages show _Virtual network integration_ as **Not configured**: the app's (item 13) and the slot's (items 1-5).
 
 The script does not delete the resource group or the VNet: Lab 2.1 owns them.
 
@@ -599,7 +621,7 @@ The script does not delete the resource group or the VNet: Lab 2.1 owns them.
 
 **Symptom**: `dev-skycraft-swc-rg` holds a plan named `ASP-<resource group without hyphens>-<4 characters>` next to `dev-skycraft-swc-asp`.
 **Cause**: In Step 3.4.2, **Linux Plan** was left at the new plan the form proposes.
-**Solution**: Move the app to `dev-skycraft-swc-asp` with the app's **Change App Service plan** page, then delete the extra plan: it bills on its own. If the move is not offered, delete the app and the extra plan, and repeat Step 3.4.2.
+**Solution**: Move the app to `dev-skycraft-swc-asp`, then delete the extra plan: it bills on its own. To move it, open the app; under **App Service plan**, select **App Service plan**, click **Change plan**, select `dev-skycraft-swc-asp`, and click **Save** ([Move an app to another App Service plan](https://learn.microsoft.com/azure/app-service/app-service-plan-manage#move-an-app-to-another-app-service-plan)). Disconnect the VNet integration first if Step 3.4.10 is done. If `dev-skycraft-swc-asp` is not in the list, delete the app and the extra plan, wait a minute, and repeat Step 3.4.2 with the same name.
 
 ---
 

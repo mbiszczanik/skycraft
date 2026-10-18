@@ -8,7 +8,8 @@
     The web app and its staging slot must run Node 22 LTS with the startup command
     'pm2 serve /home/site/wwwroot --no-daemon' (issue #231, maintainer decision 2026-10-16): a
     Node runtime without it shows the default page instead of the dashboard. Both carry the
-    regional VNet integration (guide step 3.4.10, the Bicep's slot inherits it from the app).
+    regional VNet integration with outbound internet traffic routed through it (guide step
+    3.4.10, the Bicep's slot inherits it from the app), and both must be Running.
 
     Whether the production URL shows the dashboard is reported as [WARN], not counted: the Bicep
     path deploys no content (guide steps 3.4.3-3.4.4 do), and the page check is an HTTPS request
@@ -71,18 +72,32 @@ function Test-SiteRuntime {
     Assert-Resource "$Label startup command is '$command'" ($command -match $startupPattern) "$Label startup command is 'pm2 serve /home/site/wwwroot --no-daemon'"
 }
 
-# The regional VNet integration, read from the site's raw ARM body (no az CLI dependency).
+# The regional VNet integration and its outbound routing, read from the site's raw ARM body
+# (no az CLI dependency).
 function Test-SiteVnetIntegration {
     param($Site, [string]$Label)
-    $subnetId = $null
+    $props = $null
     try {
-        $subnetId = (Get-AzResource -ResourceId $Site.Id -ExpandProperties -ErrorAction Stop).Properties.virtualNetworkSubnetId
+        $props = (Get-AzResource -ResourceId $Site.Id -ExpandProperties -ErrorAction Stop).Properties
     } catch {
         Write-Host "  [FAIL] $Label VNet integration could not be read: $($_.Exception.Message)" -ForegroundColor Red
         $script:failures++
         return
     }
+    $subnetId = $props.virtualNetworkSubnetId
     Assert-Resource "$Label subnet: '$subnetId'" ("$subnetId" -like "*/subnets/AppServiceSubnet") "$Label VNet integration uses AppServiceSubnet"
+
+    # Outbound internet traffic through the VNet (guide step 3.4.10). The Portal's check box sets
+    # outboundVnetRouting.applicationTraffic, the Bicep sets the same; allTraffic and the legacy
+    # vnetRouteAllEnabled flag mean the same or more, so any of them passes. A body that carries
+    # none of them (another API version) is reported, not counted.
+    $routing = @($props.outboundVnetRouting.applicationTraffic, $props.outboundVnetRouting.allTraffic,
+        $props.vnetRouteAllEnabled, $props.siteConfig.vnetRouteAllEnabled) | Where-Object { $null -ne $_ }
+    if (@($routing).Count -eq 0) {
+        Write-Host "  [WARN] $Label outbound routing could not be read (not counted): check Networking > Virtual network integration > Outbound internet traffic." -ForegroundColor Yellow
+    } else {
+        Assert-Resource "$Label Outbound internet traffic is unchecked" (@($routing) -contains $true) "$Label routes outbound internet traffic through the VNet"
+    }
 }
 
 # 2. Check App Service Plan
@@ -115,6 +130,7 @@ Write-Host "3. Checking Deployment Slots..." -ForegroundColor Yellow
 $slot = Get-AzWebAppSlot -ResourceGroupName $RgName -Name $AppName -Slot "staging" -ErrorAction SilentlyContinue
 Assert-Resource "staging" ($null -ne $slot) "Slot 'staging' exists"
 if ($slot) {
+    Assert-Resource "staging is '$($slot.State)'" ($slot.State -eq "Running") "Slot 'staging' is Running"
     # Cloned from the app in step 3.4.5 (Portal) or inherited from it (Bicep).
     Test-SiteRuntime -Site $slot -Label "Slot 'staging'"
     # VNet integration is a slot setting: it is neither cloned nor swapped (step 3.4.10).

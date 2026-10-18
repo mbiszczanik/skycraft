@@ -15,7 +15,7 @@
 
 ### Scaling
 
-- [ ] An autoscale setting targets the plan (the Portal names it `dev-skycraft-swc-asp-Autoscale-<number>`, the Bicep `dev-skycraft-swc-asp-autoscale`)
+- [ ] An autoscale setting targets the plan (whatever its name: `Test-Lab.ps1` finds it through the plan)
 - [ ] Scale Out Rule: **CPU > 70%** (Increase by 1)
 - [ ] Scale In Rule: **CPU < 30%** (Decrease by 1)
 - [ ] Instance Limits: **Min: 1**, **Max: 3**
@@ -26,7 +26,7 @@
 
 ### Configuration
 
-- [ ] Name: `dev-skycraft-swc-app01` (globally unique)
+- [ ] Name: `dev-skycraft-swc-app01` (or the name you chose in Step 3.4.2)
 - [ ] Default domain: `dev-skycraft-swc-app01-<16 characters>.swedencentral-01.azurewebsites.net` (secure unique default hostname)
 - [ ] Runtime Stack: **Node 22 LTS**
 - [ ] Startup Command: `pm2 serve /home/site/wwwroot --no-daemon`
@@ -37,7 +37,7 @@
 
 ### Deployment Slots
 
-- [ ] Slot `staging` exists, with Node 22 LTS and the same startup command
+- [ ] Slot `staging` exists and is **Running**, with Node 22 LTS and the same startup command
 - [ ] **Production** URL displays "Version 2.0" (Post-swap state)
 - [ ] **Staging** URL displays "Version 1.0" (Post-swap state)
 
@@ -46,7 +46,7 @@
 - [ ] VNet Integration Status: **Connected**, on the app and on the `staging` slot
 - [ ] VNet: `dev-skycraft-swc-vnet`
 - [ ] Subnet: `AppServiceSubnet` (10.1.4.0/24)
-- [ ] Outbound internet traffic: routed through the VNet (checked)
+- [ ] Outbound internet traffic: routed through the VNet (checked), on the app and on the `staging` slot (Step 3.4.10)
 
 ---
 
@@ -112,8 +112,8 @@ Get-AzAutoscaleSetting -ResourceGroupName dev-skycraft-swc-rg |
 ### Run the Lab Validator
 
 ```powershell
-# Checks the plan, the app and the slot (runtime, startup command, HTTPS only, VNet
-# integration) and the autoscale setting; exits 0 when everything passes
+# Checks the plan, the app and the slot (state, runtime, startup command, HTTPS only, VNet
+# integration and its outbound routing) and the autoscale setting; exits 0 when everything passes
 .\scripts\Test-Lab.ps1
 ```
 
@@ -126,7 +126,7 @@ Get-AzAutoscaleSetting -ResourceGroupName dev-skycraft-swc-rg |
 | **App Service Plan** | dev-skycraft-swc-asp   | Linux, Premium V4 P0V4   | ✅     |
 | **Web App (Prod)**   | dev-skycraft-swc-app01 | Node 22 LTS, VNet Integrated | ✅     |
 | **Slot (Staging)**   | .../slots/staging      | Deployment Target, VNet Integrated | ✅     |
-| **Autoscale**        | dev-skycraft-swc-asp-Autoscale-&lt;number&gt; (Portal) or dev-skycraft-swc-asp-autoscale (Bicep) | 1-3 Instances | ✅     |
+| **Autoscale**        | The setting that targets dev-skycraft-swc-asp | 1-3 Instances | ✅     |
 
 ---
 

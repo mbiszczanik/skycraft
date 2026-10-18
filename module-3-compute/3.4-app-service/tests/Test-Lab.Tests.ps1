@@ -19,6 +19,9 @@
          without the command, is a counted [FAIL]; so is a slot without VNet integration.
       5. A production URL that does not show the dashboard is a [WARN], not counted: the Bicep
          path deploys no content.
+      6. A stopped slot, and an app or slot whose outbound internet traffic does not go through
+         the VNet, are counted [FAIL]s; the Portal's applicationTraffic and the legacy
+         vnetRouteAllEnabled flag both pass, and a body without routing properties is a [WARN].
 
     No subscription is needed, and none is used: tests/Support/LabScriptStub.psm1 (issue #112)
     imports the real modules first, the stub last, and aborts the child with exit 99 unless every
@@ -68,6 +71,11 @@ BeforeAll {
     #                             'slotbare' the slot with the runtime but no startup command and
     #                                      no VNet integration (a Portal slot not cloned, not
     #                                      integrated)
+    #                             'slotstopped' the slot stopped
+    #                             'noroute' app and slot integrated, Outbound internet traffic
+    #                                      unchecked on both
+    #                             'unknownroute' app and slot integrated, the body carries no
+    #                                      routing property
     #   SKYCRAFT_STUB_PAGE        'dashboard' the production URL shows the dashboard
     #                             'default'   it shows the default page
     #                             'fail'      the request fails
@@ -122,6 +130,7 @@ function Get-AzWebAppSlot {
     [pscustomobject]@{
         Name       = "$Name/$Slot"
         Id         = "$script:Sub/resourceGroups/$ResourceGroupName/providers/Microsoft.Web/sites/$Name/slots/$Slot"
+        State      = if ($env:SKYCRAFT_STUB_SITE -eq 'slotstopped') { 'Stopped' } else { 'Running' }
         SiteConfig = $config
     }
 }
@@ -168,9 +177,21 @@ function Get-AzResource {
         # The app's or the slot's raw body, read for its VNet integration.
         $subnet = "$script:Rg/providers/Microsoft.Network/virtualNetworks/dev-skycraft-swc-vnet/subnets/AppServiceSubnet"
         if ($env:SKYCRAFT_STUB_SITE -eq 'slotbare' -and $ResourceId -like '*/slots/*') { $subnet = $null }
+        $props = [ordered]@{ virtualNetworkSubnetId = $subnet }
+        switch ($env:SKYCRAFT_STUB_SITE) {
+            # Outbound internet traffic unchecked on both, as the API returns it.
+            'noroute'      { $props.outboundVnetRouting = [pscustomobject]@{ applicationTraffic = $false; allTraffic = $false }; $props.vnetRouteAllEnabled = $false }
+            # A body without any routing property (another API version).
+            'unknownroute' { }
+            default {
+                # The app as the Portal's check box leaves it, the slot under the legacy flag only.
+                if ($ResourceId -like '*/slots/*') { $props.vnetRouteAllEnabled = $true }
+                else { $props.outboundVnetRouting = [pscustomobject]@{ applicationTraffic = $true; allTraffic = $false } }
+            }
+        }
         return [pscustomobject]@{
             ResourceId = $ResourceId
-            Properties = [pscustomobject]@{ virtualNetworkSubnetId = $subnet }
+            Properties = [pscustomobject]$props
         }
     }
     if ($ResourceType -ne 'Microsoft.Insights/autoscalesettings') { throw "stub: unexpected Get-AzResource -ResourceType $ResourceType" }
@@ -193,7 +214,7 @@ function Get-AzResource {
             [pscustomobject]$Stub,
             [ValidateSet('bicep', 'portal', 'other', 'none', 'fail')]
             [string]$Autoscale,
-            [ValidateSet('good', 'stale', 'slotbare')]
+            [ValidateSet('good', 'stale', 'slotbare', 'slotstopped', 'noroute', 'unknownroute')]
             [string]$Site = 'good',
             [ValidateSet('dashboard', 'default', 'fail')]
             [string]$Page = 'dashboard'
@@ -225,8 +246,11 @@ function Get-AzResource {
     $script:BareSlot   = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'portal' -Site 'slotbare'
     $script:NoContent  = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'bicep' -Page 'default'
     $script:NoPage     = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'bicep' -Page 'fail'
+    $script:SlotDown   = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'portal' -Site 'slotstopped'
+    $script:NoRoute    = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'portal' -Site 'noroute'
+    $script:OddRoute   = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'portal' -Site 'unknownroute'
     $script:AllRuns    = @($script:BicepMade, $script:PortalMade, $script:OtherOnly, $script:NoneMade, $script:ListFails,
-        $script:StaleApp, $script:BareSlot, $script:NoContent, $script:NoPage)
+        $script:StaleApp, $script:BareSlot, $script:NoContent, $script:NoPage, $script:SlotDown, $script:NoRoute, $script:OddRoute)
 }
 
 AfterAll {
@@ -315,6 +339,38 @@ Describe 'Lab 3.4 Test-Lab.ps1 - Node 22 LTS with the pm2 serve startup command 
         $run.Output | Should -Match "\[FAIL\] Slot 'staging' startup command is"
         $run.Output | Should -Match "\[FAIL\] Slot 'staging' VNet integration uses AppServiceSubnet"
         $run.FailLines | Should -Be 2
+    }
+}
+
+Describe 'Lab 3.4 Test-Lab.ps1 - a running slot and outbound internet traffic through the VNet (#231, #362)' {
+
+    It 'passes the routing the Portal''s check box sets on the app and the legacy flag on the slot' {
+        $run = $script:PortalMade
+        $run.Output | Should -Match "\[OK\] Slot 'staging' is Running"
+        $run.Output | Should -Match '\[OK\] Web App routes outbound internet traffic through the VNet'
+        $run.Output | Should -Match "\[OK\] Slot 'staging' routes outbound internet traffic through the VNet"
+    }
+
+    It 'fails, counted, a stopped slot' {
+        $run = $script:SlotDown
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[FAIL\] Slot 'staging' is Running \(staging is 'Stopped'\)"
+        $run.FailLines | Should -Be 1
+    }
+
+    It 'fails, counted, an app and a slot with Outbound internet traffic unchecked' {
+        $run = $script:NoRoute
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[FAIL\] Web App routes outbound internet traffic through the VNet'
+        $run.Output | Should -Match "\[FAIL\] Slot 'staging' routes outbound internet traffic through the VNet"
+        $run.FailLines | Should -Be 2
+    }
+
+    It 'warns, without failing, when the body carries no routing property' {
+        $run = $script:OddRoute
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.FailLines | Should -Be 0
+        $run.Output | Should -Match '\[WARN\] Web App outbound routing could not be read \(not counted\)'
     }
 }
 
