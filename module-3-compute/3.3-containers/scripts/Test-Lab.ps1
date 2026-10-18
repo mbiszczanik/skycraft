@@ -203,7 +203,7 @@ try {
     # Step 3.3.4 unchecks "Enable container instance logs": checked, it sends the logs to a new
     # workspace in East US (#374).
     if ($aci.LogAnalyticWorkspaceId) {
-        Write-Host "  - [FAIL] Container instance logs go to a Log Analytics workspace (workspace id $($aci.LogAnalyticWorkspaceId)). Step 3.3.4 unchecks 'Enable container instance logs'; recreate the instance without them. Remove-LabResource.ps1 names that workspace (the subscription's shared DefaultWorkspace-...) without deleting it; delete it only if nothing else uses it." -ForegroundColor Red
+        Write-Host "  - [FAIL] Container instance logs go to a Log Analytics workspace (workspace id $($aci.LogAnalyticWorkspaceId)). Step 3.3.4 unchecks 'Enable container instance logs'; recreate the instance without them. Remove-LabResource.ps1 deletes that workspace (Azure's default DefaultWorkspace-..., which no other lab uses) and its resource group if nothing else is in it, but finds it only while this instance sends its logs there: once you recreate the instance, delete the workspace yourself (guide, What This Lab Leaves Behind)." -ForegroundColor Red
         $failCount++
     } else {
         Write-Host "  - No container instance logs (no Log Analytics workspace)" -ForegroundColor Green

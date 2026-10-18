@@ -7,24 +7,30 @@
     created for Lab 3.3. It preserves the Resource Group (<Environment>-skycraft-swc-rg) as it
     may contain resources from other labs (e.g., VNets).
 
-    It also removes the Log Analytics workspace the Portal creates when the Container Apps
-    environment is created with the wizard's default logs destination (issue #374): a workspace
-    in the resource group whose name is the Portal's automatic one ('workspace' followed by the
-    resource group's name without dashes and a short suffix). Left behind, Module 5 wizards
-    offer it as their default workspace. The lab guide chooses Azure Monitor, which creates no
-    workspace, so on the guide's path and the Bicep path this step finds nothing. Only that name
-    is deleted: a workspace with any other name, in this resource group or another, is never
-    deleted - not even the one the environment sent its logs to, which the script names so the
-    learner can decide - and '<Environment>-skycraft-swc-law' (Lab 5.1's shared workspace) is
-    excluded even if its name ever matched. The workspace stays when the environment could not
-    be looked up or deleted: the environment may still send its logs to it.
-
-    The container instance's logs are a different case. The ACI wizard's default ("Enable
-    container instance logs") sends them to DefaultWorkspace-<subscription id>-<region> in
-    DefaultResourceGroup-<region>, a workspace Azure shares between every service of the
-    subscription that asks for a default one. When the instance still sends its logs there, the
-    script names that workspace and its resource group and prints the command to delete it, but
-    does not delete it: it cannot tell whether anything else in the subscription uses it.
+    It also removes the Log Analytics workspaces that exist only because of this lab (issue #374);
+    no other lab uses them (Module 5 uses '<Environment>-skycraft-swc-law'), and left behind they
+    cost money per GB and Module 5 wizards offer them as their default workspace. The lab guide
+    turns both workspace-creating defaults off, so on the guide's path and the Bicep path these
+    steps find nothing.
+      - The Container Apps environment's workspace: the one the environment sends its logs to,
+        found by relation (the customer id in its appLogsConfiguration) anywhere in the
+        subscription and whatever its name, and any workspace in the resource group that carries
+        the Portal's automatic name ('workspace' followed by the resource group's name without
+        dashes and a short suffix), which stays behind when the learner switched the environment
+        to Azure Monitor afterwards. They are deleted after the environment, and kept when the
+        environment could not be looked up or deleted: it may still send its logs to them.
+      - The container instance's workspace: the ACI wizard's default ("Enable container instance
+        logs") sends the logs to Azure's default workspace, DefaultWorkspace-<subscription id>-
+        <region> in DefaultResourceGroup-<region>. When the instance sends its logs to that
+        workspace (found by relation, through the customer id in its diagnostics), it is deleted
+        after the instance, and kept when the instance could not be deleted. A workspace with any
+        other name is named and kept. The script finds it only through the instance: once the
+        instance is recreated without logs, as the guide says, the old workspace is deleted by hand.
+      - Azure's default resource group: once its default workspace is deleted, the group is
+        deleted too when nothing else is in it; otherwise it stays and the script names what is
+        in it.
+    A workspace named '<anything>-skycraft-swc-law' (Lab 5.1's shared workspace) is never
+    deleted, whatever points at it: the script names it with a [WARN] and keeps it.
 
     Under -WhatIf, and at the confirmation prompt, every delete names the resource it targets:
     the lookups run first (they change nothing), then each resource found is confirmed by name.
@@ -168,6 +174,23 @@ function Test-LabNotFoundError {
     return $text -match '\bResource(Group)?NotFound\b|was not found|Resource group .{0,100}could not be found|invalid status code ''NotFound''|\b404 \(Not Found\)'
 }
 
+# Whether a workspace is Azure's default one: DefaultWorkspace-<subscription id>-<region> in
+# DefaultResourceGroup-<region>, with the subscription it lives in and the same region code in
+# both names. Only such a workspace, found through the container instance, is deleted (#374).
+function Test-LabDefaultWorkspace {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Workspace
+    )
+
+    if ("$($Workspace.ResourceId)" -notmatch '^/subscriptions/(?<subscription>[^/]+)/') { return $false }
+    $subscriptionId = $Matches.subscription
+    if ("$($Workspace.Name)" -notmatch "^DefaultWorkspace-$([regex]::Escape($subscriptionId))-(?<region>[A-Za-z0-9]+)$") { return $false }
+    return "$($Workspace.ResourceGroupName)" -eq "DefaultResourceGroup-$($Matches.region)"
+}
+
 # Runs one lookup with -ErrorAction Stop inside $Lookup, and returns what it found:
 #   Value     the lookup's output, as an array - empty when the resource is absent
 #   NotFound  the getter reported the resource as not found (Test-LabNotFoundError)
@@ -208,22 +231,27 @@ if (-not $context) {
 }
 
 # The name the Portal gives the workspace it creates for a new Container Apps environment:
-# 'workspace', the resource group's name without dashes, and a short suffix (#374). Only a
-# workspace with this name is deleted; Lab 5.1's shared workspace never is, whatever the pattern.
+# 'workspace', the resource group's name without dashes, and a short suffix (#374).
 $autoWorkspacePattern = '^workspace-?' + [regex]::Escape(($ResourceGroupName -replace '[^A-Za-z0-9]', '').ToLowerInvariant()) + '[0-9a-z]*$'
-$sharedWorkspaceName  = "$Environment-skycraft-swc-law"
-$autoWorkspaceLabel   = "named workspace$(($ResourceGroupName -replace '[^A-Za-z0-9]', '').ToLowerInvariant())... (the Portal's automatic name)"
+# Lab 5.1's shared workspace, '<env>-skycraft-swc-law' for any environment: Module 5 uses it, so
+# it is never deleted, whatever points at it.
+$sharedWorkspacePattern = '^.+-skycraft-swc-law$'
+$caeWorkspaceLabel = "the one $CaeName logs to (never *-skycraft-swc-law), and any named workspace$(($ResourceGroupName -replace '[^A-Za-z0-9]', '').ToLowerInvariant())... (the Portal's automatic name)"
 # The customer ids of the workspaces the environment and the container instance send their logs
 # to, read when each is looked up and before it is deleted.
 $script:caeWorkspaceCustomerId = $null
 $script:aciWorkspaceCustomerId = $null
+# Azure's default workspaces deleted (or, under -WhatIf, that would be): their resource groups are
+# checked at the end and deleted when nothing else is in them.
+$script:removedDefaultWorkspaces = [System.Collections.Generic.List[object]]::new()
 
 $resourcesToDelete = @(
     @{ Name = $AcaName; Type = "Container App" },
     @{ Name = $CaeName; Type = "Container Apps Environment" },
-    @{ Name = $autoWorkspaceLabel; Type = "Log Analytics workspace" },
+    @{ Name = $caeWorkspaceLabel; Type = "Log Analytics workspace" },
     @{ Name = $AciName; Type = "Container Instance" },
-    @{ Name = $AcrName; Type = "Container Registry" }
+    @{ Name = $AcrName; Type = "Container Registry" },
+    @{ Name = "DefaultWorkspace-<subscription id>-<region>, only if $AciName sends its logs to it, then DefaultResourceGroup-<region> if nothing else is in it"; Type = "Log Analytics workspace" }
 )
 
 # Summary of resources targeted for deletion
@@ -246,14 +274,22 @@ $steps = @(
        # Expanded, so the workspace step below can find the workspace this environment logs to.
        Find = { Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.App/managedEnvironments' -Name $CaeName -ExpandProperties -ErrorAction Stop }
        Remove = { param($r) Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null } }
-    @{ Type = 'Log Analytics workspace';    Name = $autoWorkspaceLabel; ResourceType = 'Microsoft.OperationalInsights/workspaces'
-       KeepWhenFailed = @('Container App', 'Container Apps Environment'); KeepReason = 'may still send its logs to it'
-       # Every workspace in this resource group; the loop below keeps only the Portal's automatic
-       # name for deletion (#374) and names the environment's workspace if it has another name.
-       Find = { Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.OperationalInsights/workspaces' -ExpandProperties -ErrorAction Stop }
+    @{ Type = 'Log Analytics workspace';    Name = $caeWorkspaceLabel; ResourceType = 'Microsoft.OperationalInsights/workspaces'
+       KeepWhenFailed = @('Container App', 'Container Apps Environment'); KeepReason = 'may still send its logs to them'
+       # The workspaces in this resource group with the Portal's automatic name, and the one the
+       # environment sends its logs to, found by its customer id anywhere in the subscription
+       # (#374). If either listing fails, the step fails and deletes none of them.
+       Find = {
+           Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.OperationalInsights/workspaces' -ErrorAction Stop |
+               Where-Object { $_.Name -match $autoWorkspacePattern }
+           if ($script:caeWorkspaceCustomerId) {
+               Get-AzResource -ResourceType 'Microsoft.OperationalInsights/workspaces' -ExpandProperties -ErrorAction Stop |
+                   Where-Object { "$($_.Properties.customerId)" -eq $script:caeWorkspaceCustomerId }
+           }
+       }
        Remove = { param($r) Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null } }
     @{ Type = 'Container Instance';         Name = $AciName; ResourceType = 'Microsoft.ContainerInstance/containerGroups'
-       # Expanded, so the report after the loop can name the workspace the instance logs to.
+       # Expanded, so the step after the loop can find the workspace the instance logs to.
        Find = { Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.ContainerInstance/containerGroups' -Name $AciName -ExpandProperties -ErrorAction Stop }
        Remove = { param($r) Remove-AzContainerGroup -Name $r.Name -ResourceGroupName $ResourceGroupName -ErrorAction Stop | Out-Null } }
     @{ Type = 'Container Registry';         Name = $AcrName; ResourceType = 'Microsoft.ContainerRegistry/registries'
@@ -291,14 +327,13 @@ foreach ($step in $steps) {
         $script:aciWorkspaceCustomerId = "$($found[0].Properties.diagnostics.logAnalytics.workspaceId)"
     }
     if ($step.Type -eq 'Log Analytics workspace') {
-        # The environment's workspace under another name was not created by the Portal's default
-        # (or was renamed by the learner), so it is named here and left alone (#374).
-        foreach ($other in @($found | Where-Object {
-                    $_.Name -notmatch $autoWorkspacePattern -and $script:caeWorkspaceCustomerId -and
-                    "$($_.Properties.customerId)" -eq $script:caeWorkspaceCustomerId })) {
-            Write-Host "  -> [INFO] Kept $($other.Name): $CaeName sent its logs to it, but it does not carry the Portal's automatic name, so this script does not delete it. Delete it yourself if nothing else uses it." -ForegroundColor Gray
+        # The environment's workspace often carries the automatic name too: delete it once.
+        $found = @($found | Sort-Object -Property ResourceId -Unique)
+        # Only a relation can bring Lab 5.1's shared workspace here: the automatic name never matches it.
+        foreach ($shared in @($found | Where-Object { $_.Name -match $sharedWorkspacePattern })) {
+            Write-Host "  -> [WARN] Kept $($shared.Name) in $($shared.ResourceGroupName): $CaeName sent its logs to it, but it is Lab 5.1's shared workspace, which Module 5 uses, so this script never deletes it." -ForegroundColor Yellow
         }
-        $found = @($found | Where-Object { $_.Name -match $autoWorkspacePattern -and $_.Name -ne $sharedWorkspaceName })
+        $found = @($found | Where-Object { $_.Name -notmatch $sharedWorkspacePattern })
     } else {
         # A lookup by name finds at most one resource; the workspace step may find several.
         $found = @($found | Select-Object -First 1)
@@ -309,10 +344,16 @@ foreach ($step in $steps) {
     }
 
     foreach ($resource in $found) {
-        if (-not $PSCmdlet.ShouldProcess($resource.Name, "Remove $($step.Type)")) { continue }
+        $isDefaultWorkspace = $step.Type -eq 'Log Analytics workspace' -and (Test-LabDefaultWorkspace -Workspace $resource)
+        if (-not $PSCmdlet.ShouldProcess($resource.Name, "Remove $($step.Type)")) {
+            # Under -WhatIf the default group check still runs, so it shows what it would delete.
+            if ($WhatIfPreference -and $isDefaultWorkspace) { $script:removedDefaultWorkspaces.Add($resource) }
+            continue
+        }
         try {
             & $step.Remove $resource
             Write-Host "  -> Deleted $($resource.Name)" -ForegroundColor Green
+            if ($isDefaultWorkspace) { $script:removedDefaultWorkspaces.Add($resource) }
         } catch {
             $script:cleanupFailures++
             $stepFailed[$step.Type] = 'deleted'
@@ -321,23 +362,76 @@ foreach ($step in $steps) {
     }
 }
 
-# The container instance's logs (#374): the ACI wizard's default sends them to the subscription's
-# shared DefaultWorkspace-<subscription id>-<region>. It is named here, with the command to delete
-# it, and never deleted: other services of the subscription may send their logs to it too.
+# The container instance's logs (#374): the ACI wizard's default ("Enable container instance
+# logs") sends them to Azure's default workspace, DefaultWorkspace-<subscription id>-<region> in
+# DefaultResourceGroup-<region>. No other lab uses it (Module 5 uses <env>-skycraft-swc-law), so
+# once the instance is gone it is deleted - found through the customer id the instance sent its
+# logs to, never by its name alone. A workspace with any other name is named and kept.
 if ($script:aciWorkspaceCustomerId) {
-    Write-Host "Checking the Log Analytics workspace $AciName sent its logs to..." -ForegroundColor Yellow
-    $aciWorkspaceLookup = Invoke-LabLookup -Target "the Log Analytics workspace of $AciName (customer id $($script:aciWorkspaceCustomerId))" -Lookup {
-        Get-AzResource -ResourceType 'Microsoft.OperationalInsights/workspaces' -ExpandProperties -ErrorAction Stop |
-            Where-Object { "$($_.Properties.customerId)" -eq $script:aciWorkspaceCustomerId }
-    }
-    if (-not $aciWorkspaceLookup.Failed) {
-        $aciWorkspace = @($aciWorkspaceLookup.Value | Where-Object { $_ }) | Select-Object -First 1
-        if ($aciWorkspace) {
-            Write-Host "  -> [WARN] $AciName sent its logs to Log Analytics workspace '$($aciWorkspace.Name)' in resource group '$($aciWorkspace.ResourceGroupName)' (the Portal's 'Enable container instance logs'). This script does not delete it, because other services of your subscription may use it too. If nothing else does, delete it - and its resource group, if that is then empty - with:" -ForegroundColor Yellow
-            Write-Host "     Remove-AzResource -ResourceId '$($aciWorkspace.ResourceId)' -Force" -ForegroundColor Yellow
-        } else {
-            Write-Host "  -> [INFO] No workspace with customer id $($script:aciWorkspaceCustomerId) in this subscription - nothing left behind." -ForegroundColor Gray
+    Write-Host "Removing the Log Analytics workspace $AciName sent its logs to (only Azure's default DefaultWorkspace-...)..." -ForegroundColor Yellow
+    if ($stepFailed['Container Instance']) {
+        # Not counted again: the instance's failure already is.
+        Write-Host "  -> [SKIP] Kept: the Container Instance could not be $($stepFailed['Container Instance']) and may still send its logs to it." -ForegroundColor Yellow
+    } else {
+        $aciWorkspaceLookup = Invoke-LabLookup -Target "the Log Analytics workspace of $AciName (customer id $($script:aciWorkspaceCustomerId))" -Lookup {
+            Get-AzResource -ResourceType 'Microsoft.OperationalInsights/workspaces' -ExpandProperties -ErrorAction Stop |
+                Where-Object { "$($_.Properties.customerId)" -eq $script:aciWorkspaceCustomerId }
         }
+        $aciWorkspace = @($aciWorkspaceLookup.Value | Where-Object { $_ }) | Select-Object -First 1
+        if ($aciWorkspaceLookup.Failed) {
+            # Counted by Invoke-LabLookup; the workspace it could not see is left alone.
+        } elseif (-not $aciWorkspace) {
+            Write-Host "  -> [INFO] No workspace with customer id $($script:aciWorkspaceCustomerId) in this subscription - nothing left behind." -ForegroundColor Gray
+        } elseif ($aciWorkspace.Name -match $sharedWorkspacePattern) {
+            Write-Host "  -> [WARN] Kept $($aciWorkspace.Name) in $($aciWorkspace.ResourceGroupName): $AciName sent its logs to it, but it is Lab 5.1's shared workspace, which Module 5 uses, so this script never deletes it." -ForegroundColor Yellow
+        } elseif (-not (Test-LabDefaultWorkspace -Workspace $aciWorkspace)) {
+            Write-Host "  -> [WARN] Kept $($aciWorkspace.Name) in $($aciWorkspace.ResourceGroupName): $AciName sent its logs to it, but it is not Azure's default workspace (DefaultWorkspace-<subscription id>-<region> in DefaultResourceGroup-<region>), so this script does not delete it. If nothing else uses it, delete it with:" -ForegroundColor Yellow
+            Write-Host "     Remove-AzResource -ResourceId '$($aciWorkspace.ResourceId)' -Force" -ForegroundColor Yellow
+        } elseif (-not $PSCmdlet.ShouldProcess($aciWorkspace.Name, 'Remove Log Analytics workspace')) {
+            # Under -WhatIf the default group check still runs, so it shows what it would delete.
+            if ($WhatIfPreference) { $script:removedDefaultWorkspaces.Add($aciWorkspace) }
+        } else {
+            try {
+                Remove-AzResource -ResourceId $aciWorkspace.ResourceId -Force -ErrorAction Stop | Out-Null
+                Write-Host "  -> Deleted $($aciWorkspace.Name)" -ForegroundColor Green
+                $script:removedDefaultWorkspaces.Add($aciWorkspace)
+            } catch {
+                $script:cleanupFailures++
+                Write-Host "  -> [ERROR] Could not delete Log Analytics workspace '$($aciWorkspace.Name)': $_" -ForegroundColor Red
+            }
+        }
+    }
+}
+
+# Azure's default resource group, once its default workspace is deleted (#374): deleted when
+# nothing else is in it, kept and its contents named otherwise. Only a group that held a default
+# workspace this run deleted is checked, so no other group is ever a candidate.
+foreach ($defaultGroup in @($script:removedDefaultWorkspaces | Group-Object -Property ResourceGroupName)) {
+    $defaultGroupName = $defaultGroup.Name
+    Write-Host "Removing resource group $defaultGroupName if nothing else is in it..." -ForegroundColor Yellow
+    $groupLookup = Invoke-LabLookup -Target "the resources in resource group '$defaultGroupName'" -Lookup {
+        Get-AzResource -ResourceGroupName $defaultGroupName -ErrorAction Stop
+    }
+    if ($groupLookup.Failed) { continue }
+    if ($groupLookup.NotFound) {
+        Write-Host "  -> [INFO] Not found - nothing to delete." -ForegroundColor Gray
+        continue
+    }
+    # The deleted workspace is left out: under -WhatIf it is still there, and ARM may still list a
+    # resource for a moment after its delete returns.
+    $deletedIds = @($defaultGroup.Group | ForEach-Object { "$($_.ResourceId)" })
+    $remaining = @($groupLookup.Value | Where-Object { $_ -and "$($_.ResourceId)" -notin $deletedIds })
+    if ($remaining.Count -gt 0) {
+        Write-Host "  -> [INFO] Kept $($defaultGroupName): it still holds $(@($remaining | ForEach-Object { "$($_.Name) ($($_.ResourceType))" }) -join ', ')." -ForegroundColor Gray
+        continue
+    }
+    if (-not $PSCmdlet.ShouldProcess($defaultGroupName, 'Remove resource group')) { continue }
+    try {
+        Remove-AzResourceGroup -Name $defaultGroupName -Force -ErrorAction Stop | Out-Null
+        Write-Host "  -> Deleted $defaultGroupName" -ForegroundColor Green
+    } catch {
+        $script:cleanupFailures++
+        Write-Host "  -> [ERROR] Could not delete resource group '$defaultGroupName': $_" -ForegroundColor Red
     }
 }
 
