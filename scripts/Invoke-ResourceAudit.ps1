@@ -82,6 +82,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../tools/LabCommon.psm1') -Force -Verbose:$false
 
 function Get-KnownResourceName {
     <#
@@ -416,8 +418,7 @@ Write-Host "=== SkyCraft - Resource Audit ===" -ForegroundColor Cyan -Background
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nSubscription : $($context.Subscription.Name) ($($context.Subscription.Id))" -ForegroundColor Gray
@@ -471,5 +472,4 @@ Write-Host "`nReview each one before acting. This audit reports; it deletes noth
 
 if ($PassThru) { $drift }
 
-$Host.SetShouldExit(1)
-exit 1
+Exit-Lab -FailureCount 1

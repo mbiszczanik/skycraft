@@ -801,7 +801,8 @@ Describe 'parse.py - labs 3.2, 4.2 and 5.2, resource names in navigation chains 
     It 'reads the chain of step <id> as <labels>, resource names at <resources>' -ForEach @(
         @{ lab = '3.2'; id = '3.2.13'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Backend pools'); resources = @(1) }
         @{ lab = '3.2'; id = '3.2.14'; labels = @('Virtual machines', 'dev-skycraft-swc-world-vm'); resources = @(1) }
-        @{ lab = '4.2'; id = '4.2.11'; labels = @('prodskycraftswcsa', 'Containers', 'game-assets'); resources = @(0, 2) }
+        # 4.2.11 uploads from the containers list's toolbar since #359; it no longer opens game-assets.
+        @{ lab = '4.2'; id = '4.2.11'; labels = @('prodskycraftswcsa', 'Containers'); resources = @(0) }
         # 'waiting for 02:00: **Protected items** -> ...': no space after the first colon, so the
         # text before it is no field label and the chain keeps its resource (picker_field, #250).
         @{ lab = '5.2'; id = '5.2.3'; labels = @('Protected items', 'Backup items', 'Azure Virtual Machine', 'dev-skycraft-swc-auth-vm', 'Backup now', 'OK'); resources = @(3) }
@@ -1344,13 +1345,31 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
     # stating verb is added here.
     It 'gives a state to these labels only' {
         $expected = @(
+            # Inherit-Project-Tag (#350): open the Remediation tab, leave the task box unticked.
+            '1.3.8/Remediation | Create a remediation task/unchecked=1'
+            '1.3.8/Remediation | Create a remediation task/stateOnly=1'
             '1.3.9/Allowed locations | Sweden Central | North Europe/checked=1,2'
             '3.3.7/Use quickstart image/unchecked=0'
             '3.3.2/Admin user/checked=0'
             '3.3.2/Admin user/stateOnly=0'
             '4.2.5/Enable soft delete for blobs/checked=0'
+            # The Recovery boxes that cost money or erase data stay unticked (#359).
+            '4.2.5/Enable Azure Backup for blobs/unchecked=0'
+            '4.2.5/Enable Azure Backup for blobs/stateOnly=0'
+            '4.2.5/Enable point-in-time restore for containers/unchecked=0'
+            '4.2.5/Enable point-in-time restore for containers/stateOnly=0'
+            '4.2.5/Enable permanent delete for soft deleted items/unchecked=0'
+            '4.2.5/Enable permanent delete for soft deleted items/stateOnly=0'
             '4.2.6/Enable soft delete for containers/checked=0'
             '4.2.7/Enable versioning for blobs/checked=0'
+            '4.2.7/Enable blob change feed/unchecked=0'
+            '4.2.7/Enable blob change feed/stateOnly=0'
+            # The archive block's rehydration box is ticked by default and stays so (#359).
+            '4.2.8/Skip blobs that have been rehydrated in the last/checked=0'
+            '4.2.8/Skip blobs that have been rehydrated in the last/stateOnly=0'
+            '4.2.9/Skip blobs that have been rehydrated in the last/checked=0'
+            '4.2.9/Skip blobs that have been rehydrated in the last/stateOnly=0'
+            '4.2.13/Overwrite if files already exist/checked=0'
             '4.3.6/Upload | Overwrite if files already exist | Upload/checked=1'
             '4.4.2/Add your client IP address/checked=0'
             '5.1.7/StorageRead | StorageWrite/checked=0,1'
@@ -1384,17 +1403,33 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Settings**, select **Networking**.'; labels = @('Networking') }
         @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Outbound traffic configuration**, click **VNet integration**.'; labels = @('VNet integration') }
         @{ lab = '3.3'; id = '3.3.2'; text = 'In the left menu, under **Settings**, select **Access keys**.'; labels = @('Access keys') }
-        @{ lab = '4.2'; id = '4.2.2'; text = 'Click **Containers** under **Data storage**'; labels = @('Containers') }
+        @{ lab = '4.2'; id = '4.2.6'; text = 'On the same page, under **Recovery**, enable **Enable soft delete for containers** ...'; labels = @('Enable soft delete for containers') }
         @{ lab = '5.2'; id = '5.2.2'; text = 'Under **Instant restore**, fill in **Azure Backup Resource Group**: ...'; labels = @('Azure Backup Resource Group') }
     ) {
         $items = @((Get-StateStep $lab $id).items | Where-Object { (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
         $items.Count | Should -Be 1
     }
 
-    It 'reads no item from "Under **Blob access tier (default)**, select the desired tier" in step 4.2.4' {
-        $labels = @((Get-StateStep '4.2' '4.2.4').items | ForEach-Object { $_.labels })
-        $labels | Should -Not -Contain 'Blob access tier (default)'
-        $labels | Should -Contain 'Save'
+    # Since #359 step 4.2.4 only looks at the default tier: 'Verify:' then
+    # '- **Blob access tier (default)**: **Hot**' is a check, and nothing on the page is clicked.
+    It 'reads step 4.2.4''s default tier as a check and clicks nothing on the Configuration page' {
+        $step = Get-StateStep '4.2' '4.2.4'
+        $labels = @($step.items | ForEach-Object { $_.labels; $_.label })
+        foreach ($label in 'Blob access tier (default)', 'Hot', 'Save') { $labels | Should -Not -Contain $label }
+        $labels | Should -Contain 'Configuration'
+        $step.expected | Should -Match 'Blob access tier \(default\): Hot'
+    }
+
+    # Since the #359 review, step 4.2.8 fills its four If/Then blocks one item at a time: the
+    # informational table above them gives no item, so each block's days and action are list items.
+    It 'reads every block of step 4.2.8: days, action and + Add conditions in the order the Portal needs' {
+        $items = @((Get-StateStep '4.2' '4.2.8').items)
+        $sequence = @($items | ForEach-Object {
+                if ($_.kind -eq 'field' -and $_.label -ceq 'More than (days ago)') { "days=$($_.value)" }
+                elseif ($_.kind -eq 'action' -and @($_.labels).Count -eq 1 -and $_.labels[0] -cin '+ Add conditions', 'Move to cool storage', 'Move to cold storage', 'Move to archive storage', 'Delete the blob') { $_.labels[0] }
+            })
+        $sequence | Should -Be @('days=30', 'Move to cool storage', '+ Add conditions', 'days=90', 'Move to cold storage',
+            '+ Add conditions', 'days=180', 'Move to archive storage', '+ Add conditions', 'days=365', 'Delete the blob')
     }
 
     It 'gives no item of any guide a label its line puts right after "under"' {

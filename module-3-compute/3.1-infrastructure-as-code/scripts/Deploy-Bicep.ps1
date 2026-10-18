@@ -71,6 +71,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 # Runs an Az lookup and returns its result, or $null when the resource (or its resource group)
 # does not exist. Any other failure is rethrown: treating "could not read it" as "absent" would
@@ -110,8 +112,7 @@ Write-Host "=== Lab 3.1 - Deploy Infrastructure ($Environment) ===" -ForegroundC
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
@@ -119,7 +120,7 @@ Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 $bicepPath = Join-Path $PSScriptRoot "..\bicep\main.bicep"
 $paramPath = Join-Path $PSScriptRoot "..\bicep\parameters\$Environment.bicepparam"
 
-if (-not (Test-Path $bicepPath)) { Write-Host "Bicep file missing: $bicepPath" -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
+if (-not (Test-Path $bicepPath)) { Write-Host "Bicep file missing: $bicepPath" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 
 $deploymentName = "SkyCraft-$Environment-$(Get-Date -Format 'yyyyMMdd-HHmm')"
 
@@ -175,16 +176,14 @@ try {
         }
         else {
             Write-Host "`n[FAILED] State: $($dep.ProvisioningState)" -ForegroundColor Red
-            $Host.SetShouldExit(1)
-            exit 1
+            Exit-Lab -FailureCount 1
         }
     }
 }
 catch {
     Write-Host "`n[ERROR] Deployment failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 finally {
     # The flags describe this run only; a later direct deployment must not inherit them.

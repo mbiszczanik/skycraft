@@ -61,8 +61,22 @@ Before starting this lab:
 - [ ] Completed Lab 1.1 (users and groups)
 - [ ] Completed Lab 1.2 (RBAC and resource groups)
 - [ ] Three resource groups exist: dev-skycraft-swc-rg, prod-skycraft-swc-rg, platform-skycraft-swc-rg
-- [ ] Owner or Contributor role at subscription level
+- [ ] Owner role at subscription level, or Contributor together with User Access Administrator (Step 1.3.8 gives a managed identity a role on the subscription, which Contributor alone may not do)
 - [ ] Understanding of compliance and governance concepts
+
+**Note**: With Contributor alone, the paths below end differently at Step 1.3.8. The Portal creates `Inherit-Project-Tag` without the identity's role and says so after **Create**: new resources still get the tag, but the optional remediation task in Step 1.3.10 fails. `scripts/Deploy-Bicep.ps1` fails at the role assignment. `scripts/Invoke-LabGovernance.ps1` creates the assignment, reports `[ERROR]` for the role and exits 1. With Contributor alone, use the Portal and skip the remediation task.
+
+## 🛠️ Portal, PowerShell and Bicep Paths
+
+You can build this lab in the Portal by following this guide, with Az PowerShell, or with Bicep. With the Owner role (see Prerequisites), the three paths end in the same state: the same four policy assignments, of which only `Inherit-Project-Tag` carries a managed identity, holding Contributor on the subscription. `scripts/Test-Lab.ps1` accepts that state whichever path built it:
+
+| Path | What it creates |
+| ---- | --------------- |
+| Portal (this guide) | Everything in the steps below |
+| `scripts/Invoke-LabGovernance.ps1` (Az PowerShell) | The tags of Steps 1.3.1-1.3.3; the four policy assignments of Steps 1.3.5, 1.3.8 and 1.3.9, including the managed identity of `Inherit-Project-Tag` and its role; the locks of Steps 1.3.11 and 1.3.13 |
+| `scripts/Deploy-Bicep.ps1` (Bicep, `bicep/main.bicep`) | The same as the PowerShell script |
+
+Step 1.3.8 also shows the Az PowerShell and Azure CLI commands for `Inherit-Project-Tag`, and Step 1.3.10 the Az PowerShell command for its optional remediation task, which neither script runs. These steps have no scripted or Bicep counterpart, because they test, view or explore rather than create, or because the lab keeps them in the Portal: 1.3.4, 1.3.6 (policy test), 1.3.7 (Advisor alert and its action group), 1.3.10 (compliance view; its remediation task has only the command above), 1.3.12 (lock test), 1.3.14, 1.3.15-1.3.17 (budgets), 1.3.18-1.3.22. `Test-Lab.ps1` does not check the budgets or the Advisor alert.
 
 ## 📖 Section 1: Apply and Manage Tags (30 minutes)
 
@@ -80,7 +94,7 @@ Before starting this lab:
 - Maximum 50 tags per resource
 - Tag name: 512 characters (storage accounts: 128 characters)
 - Tag value: 256 characters
-- Tags are not inherited from parent scopes (need Azure Policy for inheritance)
+- Tags are not inherited from parent scopes (need Azure Policy for inheritance; Step 1.3.8 assigns such a policy)
 
 ### Step 1.3.1: Apply Tags to Resource Groups
 
@@ -163,7 +177,7 @@ The **Tags** service lists every tag in your subscription as one name : value pa
 
 - **Audit** resources that don't meet requirements
 - **Deny** creation of non-compliant resources
-- **Modify** resources to meet requirements (e.g., add tags)
+- **Modify** resources to meet requirements (e.g., add tags, as `Inherit-Project-Tag` does in Step 1.3.8)
 - **Deploy** resources automatically (DeployIfNotExists)
 
 ### Built-in vs. Custom Policies
@@ -272,7 +286,7 @@ After a refresh, `rg-test-with-tag` is no longer listed in **Resource groups**.
 ### Step 1.3.7: Configure Advisor Alerts
 
 > [!IMPORTANT]
-> This step belongs to Section 5 (Azure Advisor), but you do it here, before the next policy step. Step 1.3.8 assigns `Enforce-Project-Tag`, which refuses every new resource without the tag `Project` = `SkyCraft`. The **Create Advisor Alerts** form has no tags, so once that assignment is in place the Portal cannot create the alert.
+> This step belongs to Section 5 (Azure Advisor), but you do it here, before the next policy step. Step 1.3.8 assigns `Enforce-Project-Tag`, which refuses every new resource without the tag `Project` = `SkyCraft`, and `Inherit-Project-Tag`, which adds that tag from the resource group. The **Create Advisor Alerts** form has no tags, so after Step 1.3.8 the alert is created only while `Inherit-Project-Tag` is in effect and `prod-skycraft-swc-rg` carries `Project` = `SkyCraft`. Created here, it does not depend on either. It stays without tags, and Step 1.3.10 shows it as the resource a remediation task tags.
 
 1. In Azure Portal, search for **Advisor**
 2. In the left menu, under **Monitoring** (expand it if it is collapsed), click **Alerts (Preview)**
@@ -317,7 +331,7 @@ Back in **Create Advisor Alerts**, the new action group `skycraft-advisor-ag` is
 
 10. Click **Create alert**
 
-**Expected Result**: The Portal confirms with the notification **Successfully created alert** ("Successfully created alert for Azure Advisor"), and **Alerts (Preview)** lists `Advisor-Cost-Recommendations`. From now on, you'll receive alerts when Advisor identifies new cost-saving opportunities.
+**Expected Result**: The Portal confirms with the notification **Successfully created alert** ("Successfully created alert for Azure Advisor"), and **Alerts (Preview)** lists `Advisor-Cost-Recommendations`. The action group has no notification or action, so the alert sends you no email or other message when Advisor finds a new cost-saving opportunity; to be notified, add an email notification to `skycraft-advisor-ag`.
 
 ![Configure Advisor Alerts](./images/step-1.3.7b.png)
 
@@ -350,7 +364,82 @@ Back in **Create Advisor Alerts**, the new action group `skycraft-advisor-ag` is
 
 7. Click **Review + create**, then **Create**
 
-**Note**: From now on, the Portal refuses every new resource in this subscription that does not carry the tag `Project` = `SkyCraft`. Resource groups are not resources in this sense: the definition checks resources only.
+**Note**: From now on, the Portal refuses every new resource in this subscription that does not carry the tag `Project` = `SkyCraft`, unless the assignment below adds the tag for it. Resource groups are not resources in this sense: the definition checks resources only.
+
+Now assign the second tag policy of this step, `Inherit-Project-Tag`. It copies the `Project` tag of a resource group to every new resource created in it without the tag:
+
+8. In the left menu, under **Authoring**, click **Assignments**
+9. Click **Assign policy**
+10. On the **Basics** tab, fill in:
+
+- **Scope**: Your subscription
+- Click the "..." button at the end of **Policy definition**
+  - Search for **Inherit a tag from the resource group if missing**
+  - Select **Inherit a tag from the resource group if missing**, then click **Add**
+- **Assignment name**: `Inherit-Project-Tag`
+- **Description**: `Resources get the Project tag of their resource group when they are created without it`
+
+**Note**: The search also lists **Inherit a tag from the resource group**, without "if missing": that one overwrites a tag the resource already has. Take the one that ends in "if missing". As in Step 1.3.5, replace the definition's name that the wizard fills into **Assignment name**.
+
+11. Click the **Parameters** tab and set:
+
+- **Tag Name**: `Project`
+
+12. Click the **Remediation** tab and leave **Create a remediation task** unchecked
+13. Click the **Managed identity** tab and set:
+
+- **Create a Managed Identity**: checked
+- **Type of Managed Identity**: System assigned managed identity
+
+> [!WARNING]
+> Check the next field before you click **Create**: an assignment's identity location cannot be changed after the assignment is created ([Azure Policy assignment structure, Identity](https://learn.microsoft.com/azure/governance/policy/concepts/assignment-structure#identity)). To fix a wrong region, you would have to delete `Inherit-Project-Tag` and assign it again.
+
+- **System assigned identity location**: Sweden Central
+
+**Note**: A Modify policy changes resources, so its assignment needs a managed identity. When you click **Create**, the Portal also gives this identity, by default and without asking, the role that the policy definition lists: **Contributor** on your whole subscription. This opens access: the identity can change any resource in the subscription. Leave it as the Portal sets it, because the optional remediation task in Step 1.3.10 needs it; adding the tag to a new resource needs no role. `scripts/Remove-LabResource.ps1` removes the role together with the assignment. If your account cannot assign roles (Contributor alone, see Prerequisites), the Portal says so after **Create**; the assignment is still created and still tags new resources.
+
+14. Click **Review + create**, then **Create**
+
+**Expected Result**: **Assignments** lists `Enforce-Project-Tag` and `Inherit-Project-Tag`.
+
+**Why two tag policies**: Azure Policy evaluates a create or update request in a fixed order: Modify policies change the request first, and Deny policies check the changed request afterwards. When you create a resource without the `Project` tag in a resource group that carries `Project` = `SkyCraft`, `Inherit-Project-Tag` adds the tag, and `Enforce-Project-Tag` then lets the resource pass. In later labs this covers resources you cannot tag yourself: VM extensions, autoscale settings, deployment slots, and resources a service creates for you in a tagged group (a backup's restore point collection, for example). Two cases stay refused, because there is nothing to inherit: a resource in a group without the `Project` tag (such as `NetworkWatcherRG`, which Azure creates on its own without tags), and a resource group that a service creates itself, such as Site Recovery's target group or `DefaultResourceGroup-*` (refused by `Require-Environment-Tag-RG`). Before you reach such a step in a later lab, create the group yourself, in the region where the service would create it, with the four SkyCraft tags (as in Step 1.3.1, with the **Environment** value of the lab's environment), and pick it where the wizard asks for a group; see Troubleshooting, Issue 7.
+
+**With Az PowerShell** (instead of items 8-14; the other assignments, the tags and the locks of this lab are created by `scripts/Invoke-LabGovernance.ps1`):
+
+```powershell
+$subscriptionScope = "/subscriptions/$((Get-AzContext).Subscription.Id)"
+$definition = Get-AzPolicyDefinition -Id '/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070'
+$assignment = New-AzPolicyAssignment -Name 'Inherit-Project-Tag' `
+    -DisplayName 'Inherit Project Tag from Resource Group' `
+    -Scope $subscriptionScope `
+    -PolicyDefinition $definition `
+    -PolicyParameterObject @{ tagName = 'Project' } `
+    -IdentityType 'SystemAssigned' `
+    -Location 'swedencentral'
+
+# The Portal grants this role itself; from PowerShell you grant it. If Azure answers that the
+# principal does not exist, the new identity is not replicated yet: wait a minute and run it again.
+New-AzRoleAssignment -ObjectId $assignment.IdentityPrincipalId -ObjectType 'ServicePrincipal' `
+    -RoleDefinitionId 'b24988ac-6180-42a0-ab88-20f7382dd24c' -Scope $subscriptionScope
+```
+
+**With the Azure CLI**:
+
+```bash
+subscriptionScope="/subscriptions/$(az account show --query id --output tsv)"
+az policy assignment create \
+  --name Inherit-Project-Tag \
+  --display-name "Inherit Project Tag from Resource Group" \
+  --scope "$subscriptionScope" \
+  --policy "/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070" \
+  --params '{"tagName": {"value": "Project"}}' \
+  --mi-system-assigned \
+  --location swedencentral \
+  --identity-scope "$subscriptionScope" \
+  --role Contributor
+```
+
+**Note**: Pass `--policy` the full definition path, as above. With the bare id (`ea3f2387-...`), the current Azure CLI fails with `PolicyDefinitionNotFound`, although `az policy definition show` finds the same definition.
 
 ### Step 1.3.9: Assign Policy to Enforce Allowed Locations
 
@@ -400,6 +489,38 @@ The list is a multi-select with a filter box; with both regions ticked, the fiel
 **Note**: A new assignment appears in Compliance only after its first evaluation, which can take up to 30 minutes after you assign it. If `Require-Environment-Tag-RG` is not listed yet, come back to this step after Section 3.
 
 ![Assign a Built-in Policy](./images/step-1.3.10.png)
+
+**Optional: tag the resources that existed before Step 1.3.8.** `Inherit-Project-Tag` adds the tag when a resource is created or updated; a resource that already existed without the `Project` tag stays as it is and is listed as non-compliant under `Inherit-Project-Tag` here in **Compliance**. In this lab that is the Advisor alert `Advisor-Cost-Recommendations` from Step 1.3.7, whose form has no tags. A **remediation task** tags such resources. It runs as the assignment's managed identity, with the Contributor role the identity got in Step 1.3.8. Skip these items if your account could not grant that role (see Prerequisites): the task would fail.
+
+**Note**: A role takes about five minutes to take effect after it is granted. Do not start the remediation task sooner than five minutes after Step 1.3.8 (in the Portal, or with the PowerShell or CLI commands there). If the task fails with an authorization error, wait a few minutes and create it again.
+
+5. In the left menu, click **Compliance**
+6. Click **Inherit-Project-Tag**
+
+**Note**: **Compliance** lists an assignment by its display name. If you created the assignment with the Bicep path, `scripts/Invoke-LabGovernance.ps1` or the PowerShell or CLI commands of Step 1.3.8, its display name is `Inherit Project Tag from Resource Group`: click that one instead.
+
+7. Click **Create remediation task**
+8. Click **Remediate**
+
+The **New remediation task** page opens with that assignment already selected, so **Remediate** is the only thing to click there.
+
+**Expected Result**: The Portal confirms that the remediation task was created. Once the task has finished (a few minutes), `Advisor-Cost-Recommendations` carries `Project` = `SkyCraft`, and after the next compliance evaluation `Inherit-Project-Tag` shows it as compliant.
+
+The same with Az PowerShell (the `Start-AzPolicyRemediation` cmdlet ships in the Az.PolicyInsights module):
+
+```powershell
+$subscriptionScope = "/subscriptions/$((Get-AzContext).Subscription.Id)"
+# The Portal names the assignment with a generated id, so find it by its definition and by the
+# name the guide gives it (the Bicep path and Invoke-LabGovernance.ps1 set the display name below).
+$assignment = @(Get-AzPolicyAssignment -Scope $subscriptionScope | Where-Object {
+        $_.PolicyDefinitionId -like '*/ea3f2387-9b95-492a-a190-fcdc54f7b070' -and $_.Scope -eq $subscriptionScope -and
+        ($_.Name -eq 'Inherit-Project-Tag' -or $_.DisplayName -in 'Inherit-Project-Tag', 'Inherit Project Tag from Resource Group')
+    })
+if ($assignment.Count -ne 1) {
+    throw "Found $($assignment.Count) Inherit-Project-Tag assignments on the subscription, expected one. Check Policy > Assignments."
+}
+Start-AzPolicyRemediation -Name 'remediate-project-tag' -PolicyAssignmentId $assignment[0].Id
+```
 
 ---
 
@@ -732,8 +853,9 @@ Tenant Root Group
 
 - [ ] Policy: Require Environment tag on resource groups
 - [ ] Policy: Require Project=SkyCraft on all resources
+- [ ] Policy: Inherit the Project tag from the resource group (Modify, with a system-assigned managed identity)
 - [ ] Policy: Restrict resources to Sweden Central and North Europe
-- [ ] Policy compliance dashboard shows all three policies
+- [ ] Policy compliance dashboard shows all four policies
 - [ ] Tested policy enforcement (tried creating resource without tag)
 
 ### Resource Locks Configured
@@ -768,6 +890,26 @@ Tenant Root Group
 
 ---
 
+## 📦 What This Lab Leaves Behind
+
+No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` lists no lab that depends on Lab 1.3. Every later lab in this subscription runs under its policies and locks, though, and they change what you can create and delete there. Everything below costs nothing per day.
+
+| Left behind | Where | Daily cost | What it does in later labs |
+| --- | --- | --- | --- |
+| `Require-Environment-Tag-RG` | Subscription | 0 | Refuses a new resource group without an `Environment` tag, including a group a service would create itself (Troubleshooting, Issue 7) |
+| `Enforce-Project-Tag` | Subscription | 0 | Refuses a new resource without `Project` = `SkyCraft`, unless `Inherit-Project-Tag` adds it |
+| `Inherit-Project-Tag` | Subscription | 0 | Adds the resource group's `Project` tag to a new resource created without it, so resources you cannot tag (VM extensions, autoscale settings, deployment slots) pass `Enforce-Project-Tag` in a tagged group |
+| Managed identity of `Inherit-Project-Tag`, with Contributor | Subscription | 0 | Can change any resource in the subscription; only a remediation task uses it |
+| `Restrict-Azure-Regions` | Subscription | 0 | Refuses a resource outside Sweden Central and North Europe |
+| `lock-no-delete-prod`, `lock-no-delete-platform` | prod and platform resource groups | 0 | Block every delete in those groups, including a later lab's cleanup, until the locks are removed |
+| Tags on the three resource groups | dev, prod and platform resource groups | 0 | The `Project` tag that `Inherit-Project-Tag` copies to new resources |
+| `SkyCraft-Monthly-Budget`, `SkyCraft-Prod-Monthly` | Subscription, prod resource group | 0 | Send emails at their thresholds; they never stop a deployment |
+| `Advisor-Cost-Recommendations` and its action group `skycraft-advisor-ag` | prod resource group | 0 | Nothing reaches you: Step 1.3.7 creates the action group without any notification or action, so a new Advisor cost recommendation sends no email or other message |
+
+`scripts/Remove-LabResource.ps1` removes all of these except the tags, whichever path created them. It removes the locks first, and the identity's role before its assignment. Run it before Lab 1.2's cleanup deletes the resource groups, because the locks block that delete.
+
+---
+
 ## 🔧 Troubleshooting
 
 ### Issue 1: Cannot assign policy - insufficient permissions
@@ -776,7 +918,8 @@ Tenant Root Group
 
 **Solution**:
 
-- Need Owner, Contributor, or Resource Policy Contributor role
+- Need Owner, Contributor, or Resource Policy Contributor role to assign a policy
+- `Inherit-Project-Tag` (Step 1.3.8) also gives its managed identity a role, which needs Owner or User Access Administrator. Without it, the Portal creates the assignment without the role, the Bicep path fails and `Invoke-LabGovernance.ps1` exits 1 (see Prerequisites)
 - Check permissions: **Subscription** → **Access control (IAM)** → **Check access**
 
 ### Issue 2: Policy doesn't show as enforced
@@ -830,7 +973,31 @@ Tenant Root Group
 **Solutions**:
 
 - Action group: set **Region** to Sweden Central. `Restrict-Azure-Regions` (Step 1.3.9) refuses the default East US
-- Alert: `Enforce-Project-Tag` (Step 1.3.8) is already assigned in your subscription, for example from an earlier run of this lab or its Bicep path. The **Create Advisor Alerts** form has no tags, so the policy refuses the alert. **Alerts (Preview)** may still list it, but it does not exist. Create the alert before Step 1.3.8, as the guide orders it; `Test-Lab.ps1` does not check the alert
+- Alert: `Enforce-Project-Tag` (Step 1.3.8) is in effect in your subscription, for example from an earlier run of this lab or its Bicep path, and `Inherit-Project-Tag` does not add the tag for the alert. The **Create Advisor Alerts** form has no tags, so the alert passes `Enforce-Project-Tag` only through `Inherit-Project-Tag`. **Alerts (Preview)** may still list the refused alert, but it does not exist. Check that **Policy** → **Assignments** lists `Inherit-Project-Tag` (assigned more than about ten minutes ago, with **Tag Name** `Project`) and that `prod-skycraft-swc-rg` carries `Project` = `SkyCraft` on its **Tags** page, then create the alert again. `Test-Lab.ps1` does not check the alert
+
+### Issue 7: A resource without tags is refused although `Inherit-Project-Tag` is assigned
+
+**Symptom**: In this lab or a later one, creating a resource fails with `RequestDisallowedByPolicy` and "All resources must be tagged with Project=SkyCraft", or a resource group fails with the Environment tag message, although Step 1.3.8 assigned `Inherit-Project-Tag`
+
+**Root Cause**: `Inherit-Project-Tag` copies the tag from the resource's own resource group. It has nothing to copy when that group has no `Project` tag, and it does not apply to resource groups at all. It also takes effect only some minutes after you assign it, like every assignment.
+
+**Solutions**:
+
+- Check that the resource group carries `Project` = `SkyCraft` (**Resource groups** → the group → **Tags**). A group Azure creates on its own, such as `NetworkWatcherRG`, has no tags until you add them
+- A resource group that a service would create itself (Site Recovery's target group, `DefaultResourceGroup-*`) is refused by `Require-Environment-Tag-RG`: create the group yourself, in the region where the service would create it, with the four SkyCraft tags, then pick it in the wizard. `NetworkWatcherRG`, which Azure creates without tags, gets them the same way: add the four tags on its **Tags** page before you create anything in it
+- Check that `Inherit-Project-Tag` is the definition that ends in "if missing", with **Tag Name** `Project`, and that **Assignments** lists it; `Test-Lab.ps1` checks both
+- Right after Step 1.3.8, wait about ten minutes and try again
+
+### Issue 8: The Bicep deployment fails with `RoleAssignmentUpdateNotPermitted`
+
+**Symptom**: `scripts/Deploy-Bicep.ps1` fails on the role assignment of `Inherit-Project-Tag` with `RoleAssignmentUpdateNotPermitted` ("Tenant ID, application ID, principal ID, and scope are not allowed to be updated")
+
+**Root Cause**: The Bicep path names the identity's role assignment from the subscription, the role, the region and the assignment's name, so every run uses the same name. When `Inherit-Project-Tag` was deleted in the Portal, its role assignment stayed behind, held by an identity that no longer exists. The next deployment creates a new identity and tries to give the old role assignment to it, which Azure does not allow.
+
+**Solutions**:
+
+- Remove the stale role assignment yourself: **Subscriptions** → your subscription → **Access control (IAM)** → **Role assignments**, find the **Contributor** row whose name is **Identity not found**, check it, click **Delete**, then deploy again. `scripts/Remove-LabResource.ps1` does not find it: it removes the role assignments of the policy assignments that still exist
+- Next time, remove the lab with `scripts/Remove-LabResource.ps1` rather than in the Portal: it removes the identity's role assignment before the policy assignment, so none is left behind
 
 ---
 
@@ -859,7 +1026,7 @@ Test your understanding with these questions:
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: No, tags are NOT automatically inherited. You must use Azure Policy with "Modify" effect to inherit tags, or apply tags directly to resources.
+   **Answer**: No, tags are NOT automatically inherited. You must use Azure Policy with "Modify" effect to inherit tags (as `Inherit-Project-Tag` does from Step 1.3.8 on), or apply tags directly to resources.
    </details>
 
 4. **What happens when a budget threshold is reached?**
@@ -927,7 +1094,7 @@ Congratulations! You've completed **Module 1: Manage Azure Identities and Govern
 
 **Governance Components Implemented**:
 
-- 3 Azure Policy assignments
+- 4 Azure Policy assignments (three Deny, one Modify with a managed identity)
 - 2 resource locks
 - 12 tags across resource groups (4 canonical tags per resource group)
 - 2 budgets with multiple alert thresholds

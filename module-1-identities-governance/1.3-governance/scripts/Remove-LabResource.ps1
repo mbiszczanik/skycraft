@@ -6,10 +6,19 @@
     Removes, in this order:
     1. The resource locks on the production and platform resource groups
        (lock-no-delete-prod, lock-no-delete-platform).
-    2. The three subscription-level policy assignments, whether the Bicep path made them under
+    2. The four subscription-level policy assignments, whether the Bicep path made them under
        fixed names or the learner made them in the Portal under generated names (issue #330;
        LabPolicyAssignment.ps1 says which assignment counts). An assignment made twice is not
        removed: that is an [ERROR], because which of the two is the lab's cannot be told.
+       Before an assignment with a managed identity is removed, the role assignments that
+       identity holds in the subscription are removed (Inherit-Project-Tag's Contributor role,
+       issue #350): removed after it, they would stay behind as role assignments of an unknown
+       identity. If they cannot be listed or removed, the assignment is kept, so a second run
+       can finish both. Any assignment with an identity is handled so, not only
+       Inherit-Project-Tag: the Bicep path's three Deny assignments made before main.bicep set
+       managedIdentities to {} carry an identity too (the AVM module's default), with no role.
+       When the role assignments cannot be listed, all of them are kept; the failed listing is
+       one [ERROR], and the run exits 1.
     3. The two budgets: SkyCraft-Monthly-Budget on the subscription (step 1.3.15) and
        SkyCraft-Prod-Monthly on prod-skycraft-swc-rg (step 1.3.17).
     4. The Advisor alert Advisor-Cost-Recommendations (step 1.3.7), an activity log alert in
@@ -37,9 +46,10 @@
     Students, Sponsorship) no budget can exist, but the read still fails; confirm in the Portal
     that Cost Management is unavailable for the subscription, and then ignore that error.
 
-    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
-    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
-    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+    Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
+    otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
+    (issue #104), it also sets the process exit code; run at a prompt or by another script,
+    it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
 .PARAMETER Force
     Skip confirmation prompt.
@@ -66,6 +76,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
 $prodRg = "prod-skycraft-swc-rg"
@@ -206,7 +218,7 @@ if ($lockRemoved) {
 # The Portal's Assignment name sets only an assignment's display name; its resource name is a
 # generated id, so a lookup by name missed every Portal-made assignment and left two deny
 # policies on the subscription (issue #330). The subscription's assignments are listed once, and
-# each of the guide's three is picked by its definition and by the name the guide gives it, as
+# each of the guide's four is picked by its definition and by the name the guide gives it, as
 # resource name or display name - LabPolicyAssignment.ps1, shared with Test-Lab.ps1, says which
 # match. A match is removed by its id. Two matches for one assignment are an [ERROR] and neither
 # is removed: which one the learner meant cannot be told.
@@ -217,6 +229,7 @@ $subscriptionScope = "/subscriptions/$subId"
 $policyLookup = Invoke-LabLookup -Target "the policy assignments on the subscription" -Lookup {
     Get-AzPolicyAssignment -Scope $subscriptionScope -ErrorAction Stop
 }
+$roleLookup = $null
 if (-not $policyLookup.Failed) {
     foreach ($spec in Get-LabPolicyAssignmentSpec) {
         $found = @(Select-LabPolicyAssignment -Assignment $policyLookup.Value -SubscriptionId $subId -Spec $spec)
@@ -233,6 +246,44 @@ if (-not $policyLookup.Failed) {
 
         $assignment = $found[0]
         $label = "$($spec.Name) $(Format-LabPolicyAssignment -Assignment $assignment)"
+
+        # The identity's role assignments go first: once the assignment, and with it the identity,
+        # is gone, they would stay as role assignments of an unknown principal (issue #350). The
+        # subscription's role assignments are listed once, the first time an identity needs them.
+        # A Deny assignment the Bicep path made before main.bicep set managedIdentities to {} has
+        # an identity too (with no role); it goes the same way, and is kept with the rest when the
+        # listing fails.
+        $identity = Get-LabPolicyAssignmentIdentity -Assignment $assignment
+        if ($identity.PrincipalId) {
+            if ($null -eq $roleLookup) {
+                $roleLookup = Invoke-LabLookup -Target "the role assignments on the subscription" -Lookup {
+                    Get-AzRoleAssignment -Scope $subscriptionScope -ErrorAction Stop
+                }
+            }
+            if ($roleLookup.Failed) {
+                Write-Host "  -> [INFO] Keeping policy ${label}: the role assignments of its identity could not be listed. Run this script again." -ForegroundColor Gray
+                continue
+            }
+            $roleFailed = $false
+            foreach ($roleAssignment in @(Select-LabPolicyIdentityRoleAssignment -RoleAssignment $roleLookup.Value -PrincipalId $identity.PrincipalId -SubscriptionId $subId)) {
+                $roleLabel = "$($roleAssignment.RoleDefinitionName) at $($roleAssignment.Scope) for the identity of $($spec.Name)"
+                if (-not $PSCmdlet.ShouldProcess($roleLabel, 'Remove role assignment')) { continue }
+                try {
+                    Remove-AzRoleAssignment -InputObject $roleAssignment -ErrorAction Stop | Out-Null
+                    Write-Host "  -> [SUCCESS] Removed role assignment: $roleLabel" -ForegroundColor Green
+                }
+                catch {
+                    $script:cleanupFailures++
+                    $roleFailed = $true
+                    Write-Host "  -> [ERROR] Failed to remove role assignment ${roleLabel}: $_" -ForegroundColor Red
+                }
+            }
+            if ($roleFailed) {
+                Write-Host "  -> [INFO] Keeping policy $label until its identity's role assignments are gone. Run this script again." -ForegroundColor Gray
+                continue
+            }
+        }
+
         if ($PSCmdlet.ShouldProcess("$label on $subscriptionScope", 'Remove policy assignment')) {
             try {
                 Remove-AzPolicyAssignment -Id (Get-LabPolicyAssignmentId -Assignment $assignment) -ErrorAction Stop | Out-Null
@@ -331,8 +382,7 @@ if (-not $actionGroupLookup.Failed) {
 
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s). See the [ERROR] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nCleanup complete." -ForegroundColor Green
