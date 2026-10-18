@@ -641,8 +641,8 @@ Describe 'parse.py - values that are instructions, placeholders or check box sta
     }
 
     It "marks '<label>' of step <step> literal: false" -ForEach @(
-        @{ guide = 'module-1-identities-governance/1.3-governance/lab-guide-1.3.md'; step = '1.3.5'; label = 'Scope'; value = 'Click the "..." button' }
-        @{ guide = 'module-1-identities-governance/1.3-governance/lab-guide-1.3.md'; step = '1.3.9'; label = 'Allowed locations'; value = 'Select:' }
+        @{ guide = 'module-1-identities-governance/1.3-governance/lab-guide-1.3.md'; step = '1.3.8'; label = 'Scope'; value = 'Your subscription' }
+        @{ guide = 'module-1-identities-governance/1.3-governance/lab-guide-1.3.md'; step = '1.3.16'; label = 'Alert recipients (email)'; value = '[your email address]' }
         @{ guide = 'module-2-networking/2.3-name-resolution/lab-guide-2.3.md'; step = '2.3.2'; label = 'IP address'; value = '[IP of dev-skycraft-swc-lb-pip]' }
     ) {
         $field = Get-GuideField -Guide $guide -StepId $step -Label $label
@@ -1348,6 +1348,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
     # stating verb is added here.
     It 'gives a state to these labels only' {
         $expected = @(
+            '1.3.9/Allowed locations | Sweden Central | North Europe/checked=1,2'
             '2.3.11/Enable TCP Reset/checked=0'
             '2.3.12/Enable TCP Reset/checked=0'
             '3.3.7/Use quickstart image/unchecked=0'
