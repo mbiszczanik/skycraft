@@ -206,8 +206,15 @@ function Get-AzAutoscaleSetting {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$Name)
     if (Invoke-StubLookup -Name 'Get-AzAutoscaleSetting' -ResourceGroup $ResourceGroupName) { return }
-    $settings = @([pscustomobject]@{ Name = 'unrelated-autoscale' })
-    if (-not (Test-StubEmpty)) { $settings += [pscustomobject]@{ Name = 'dev-skycraft-swc-asp-autoscale' } }
+    $rg = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/dev-skycraft-swc-rg'
+    # One setting the lab did not create (it scales a VM scale set), and, unless the stub is empty,
+    # the plan's setting under the Bicep's name and one under a Portal name (#355), whose target
+    # id comes back in other casing, as ARM ids do.
+    $settings = @([pscustomobject]@{ Name = 'unrelated-autoscale'; TargetResourceUri = "$rg/providers/Microsoft.Compute/virtualMachineScaleSets/dev-skycraft-swc-vmss" })
+    if (-not (Test-StubEmpty)) {
+        $settings += [pscustomobject]@{ Name = 'dev-skycraft-swc-asp-autoscale'; TargetResourceUri = "$rg/providers/Microsoft.Web/serverfarms/dev-skycraft-swc-asp" }
+        $settings += [pscustomobject]@{ Name = 'dev-skycraft-swc-asp-Autoscale-713'; TargetResourceUri = ("$rg/providers/Microsoft.Web/serverFarms/dev-skycraft-swc-asp" -replace '/resourceGroups/', '/resourcegroups/') }
+    }
     # -Name only from the cleanup before #290; filtered here as the real getter would.
     if ($Name) { $settings = @($settings | Where-Object { $_.Name -eq $Name }) }
     $settings
@@ -350,6 +357,14 @@ Describe 'Lab 3.4 Remove-LabResource.ps1 - removes what the lab creates' {
         [array]::IndexOf($calls, "Invoke-AzRestMethod:DELETE:$siteId/networkConfig/virtualNetwork") |
             Should -BeLessThan ([array]::IndexOf($calls, 'Remove-AzWebApp:dev-skycraft-swc-app01'))
         [array]::IndexOf($calls, 'Remove-AzWebApp:dev-skycraft-swc-app01') |
+            Should -BeLessThan ([array]::IndexOf($calls, 'Remove-AzAppServicePlan:dev-skycraft-swc-asp'))
+    }
+
+    It 'removes the autoscale setting the Portal names, found through the plan it targets (#355)' {
+        $calls = $script:Clean.Calls
+        $calls | Should -Contain 'Remove-AzAutoscaleSetting:dev-skycraft-swc-asp-Autoscale-713'
+        $script:Clean.Output | Should -Match "Deleted 'dev-skycraft-swc-asp-Autoscale-713'"
+        [array]::IndexOf($calls, 'Remove-AzAutoscaleSetting:dev-skycraft-swc-asp-Autoscale-713') |
             Should -BeLessThan ([array]::IndexOf($calls, 'Remove-AzAppServicePlan:dev-skycraft-swc-asp'))
     }
 }

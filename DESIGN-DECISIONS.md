@@ -172,8 +172,9 @@ lab; this section is the architect's view in one place.
 ### 11. Cost controls — burstable, optional, deletable
 
 - **Lab:** B-series burstable VMs by default. Bastion default-off. LRS for Dev
-  storage. App Service P0V4 used in Lab 3.4 *deliberately* to teach Premium
-  features, but its cost is called out explicitly.
+  storage. App Service P0V4 in Lab 3.4 has the slots and autoscale the lab
+  teaches at about the price of Standard S1, and the guide states its daily
+  cost and deletes the plan in its Clean Up.
 - **Production gap:** No Azure Reservations, no Savings Plans, no Spot VMs, no
   budget alerts deployed by Bicep (Lab 1.3 mentions them but defers to portal).
 - **Why it matters:** Lab-grade cost discipline is "delete when done."

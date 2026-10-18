@@ -1385,7 +1385,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
     It 'reads step <id>''s "<text>" as <labels>, the place no label' -ForEach @(
         @{ lab = '1.3'; id = '1.3.18'; text = 'Under **Cost Management** click **Cost analysis**'; labels = @('Cost analysis') }
         @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Settings**, select **Networking**.'; labels = @('Networking') }
-        @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Outbound traffic configuration**, click **VNet integration**.'; labels = @('VNet integration') }
+        @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Outbound traffic configuration**, click **Not configured** (the value of _Virtual network integration_).'; labels = @('Not configured') }
         @{ lab = '3.3'; id = '3.3.2'; text = 'In the left menu, under **Settings**, select **Access keys**.'; labels = @('Access keys') }
         @{ lab = '4.2'; id = '4.2.2'; text = 'Click **Containers** under **Data storage**'; labels = @('Containers') }
         @{ lab = '5.2'; id = '5.2.2'; text = 'Under **Instant restore**, fill in **Azure Backup Resource Group**: ...'; labels = @('Azure Backup Resource Group') }

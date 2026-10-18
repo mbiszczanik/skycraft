@@ -6,7 +6,9 @@
     Detaches the regional VNet integration from the Web App and from every deployment slot, then
     verifies per site that the integration is really gone, reports the state of the integration
     subnet, and finally deletes the Web App (with its slots), the autoscale setting and the App
-    Service Plan - in that order.
+    Service Plan - in that order. The autoscale setting is the one with the Bicep's name or the
+    one that targets the plan, so the setting the Portal names '<plan>-Autoscale-<n>' goes too
+    (issue #355).
 
     Once the integration is detached, the site's networkConfig/virtualNetwork route answers 404
     on some stamps and 200 with an empty subnetResourceId on others, so the verification counts
@@ -390,26 +392,34 @@ try {
         }
     }
 
-    # 7. Delete the autoscale setting
-    if ($PSCmdlet.ShouldProcess($autoscaleName, 'Remove Autoscale Setting')) {
-        Write-Host "Removing autoscale setting '$autoscaleName'..." -ForegroundColor Yellow
-        # Listed and picked by name: Get-AzAutoscaleSetting is a generated cmdlet, and asked for
-        # one name that does not exist it throws a plain "[code] : message" exception with no
+    # 7. Delete the plan's autoscale settings
+    if ($PSCmdlet.ShouldProcess("autoscale settings of '$AspName'", 'Remove Autoscale Setting')) {
+        Write-Host "Removing the autoscale settings of '$AspName'..." -ForegroundColor Yellow
+        # Listed, not asked for by name: Get-AzAutoscaleSetting is a generated cmdlet, and asked
+        # for one name that does not exist it throws a plain "[code] : message" exception with no
         # status, which is not a recognised not-found error. A missing setting is an empty match.
+        # A setting is the plan's when it carries the Bicep's name or targets the plan: the
+        # Portal names it '<plan>-Autoscale-<n>' (issue #355), so the name alone would leave the
+        # Portal path's setting behind. The target id is compared by its tail and without case,
+        # as ARM returns ids in either casing.
         $autoscaleLookup = Invoke-LabLookup -Target "the autoscale settings in '$RgName'" -Lookup {
             Get-AzAutoscaleSetting -ResourceGroupName $RgName -ErrorAction Stop
         }
-        if ($autoscaleLookup.Value | Where-Object { $_.Name -eq $autoscaleName }) {
+        $planIdTail = "/resourceGroups/$RgName/providers/Microsoft.Web/serverfarms/$AspName"
+        $planSettings = @($autoscaleLookup.Value | Where-Object {
+                $_.Name -eq $autoscaleName -or "$($_.TargetResourceUri)".EndsWith($planIdTail, [System.StringComparison]::OrdinalIgnoreCase)
+            })
+        foreach ($setting in $planSettings) {
             try {
-                Remove-AzAutoscaleSetting -ResourceGroupName $RgName -Name $autoscaleName -ErrorAction Stop | Out-Null
-                Write-Host "  -> Deleted" -ForegroundColor Green
+                Remove-AzAutoscaleSetting -ResourceGroupName $RgName -Name $setting.Name -ErrorAction Stop | Out-Null
+                Write-Host "  -> Deleted '$($setting.Name)'" -ForegroundColor Green
             }
             catch {
                 $script:cleanupFailures++
-                Write-Host "  -> [ERROR] Could not delete autoscale setting '$autoscaleName': $_" -ForegroundColor Red
+                Write-Host "  -> [ERROR] Could not delete autoscale setting '$($setting.Name)': $_" -ForegroundColor Red
             }
         }
-        elseif (-not $autoscaleLookup.Failed) {
+        if ($planSettings.Count -eq 0 -and -not $autoscaleLookup.Failed) {
             Write-Host "  -> Not found or already deleted." -ForegroundColor Gray
         }
     }
