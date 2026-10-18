@@ -121,10 +121,21 @@ Assert-Check "DEV: AllowBlobPublicAccess is disabled" `
     -SuccessMessage "Public Access Disabled" `
     -FailureMessage "Public Access Enabled (unexpected)"
 
-# Versioning should be Disabled (default)
-$devBlobService = Get-AzStorageBlobServiceProperty -ResourceGroupName $DevRgName -StorageAccountName $DevSaName -ErrorAction SilentlyContinue
+# Versioning should be Disabled (default). A dev account created in the Portal never sets the
+# property, so it reads $null; the Bicep writes $false. Both are the default, off (#355). A blob
+# service that could not be read is a failure, not an "off".
+$devBlobService = $null
+$devBlobServiceError = $null
+try {
+    $devBlobService = Get-AzStorageBlobServiceProperty -ResourceGroupName $DevRgName -StorageAccountName $DevSaName -ErrorAction Stop
+}
+catch {
+    $devBlobServiceError = $_.Exception.Message
+}
 Assert-Check "DEV: Versioning disabled (scope check)" `
-    -Condition ($devBlobService.IsVersioningEnabled -eq $false)
+    -Condition ($null -ne $devBlobService -and -not $devBlobService.IsVersioningEnabled) `
+    -SuccessMessage $(if ($null -eq $devBlobService.IsVersioningEnabled) { "Versioning not set (Portal default: off)" } else { "Versioning OFF" }) `
+    -FailureMessage $(if ($devBlobServiceError) { "Could not read the blob service: $devBlobServiceError" } elseif ($null -eq $devBlobService) { "Blob service properties not returned" } else { "Versioning ON" })
 
 # Container Verification — public-demo exists as private container
 $devCtx = $devSa.Context
