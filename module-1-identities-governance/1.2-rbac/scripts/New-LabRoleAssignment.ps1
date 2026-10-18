@@ -281,6 +281,7 @@ function Select-LabInitialDomain {
     if ($initial.Count -eq 0) { throw 'the tenant lists no domain marked IsInitial' }
     return $initial[0]
 }
+
 $ErrorActionPreference = "Stop"
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false

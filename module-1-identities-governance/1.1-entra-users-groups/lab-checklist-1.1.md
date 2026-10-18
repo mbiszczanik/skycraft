@@ -77,9 +77,10 @@ Execute these validation steps to confirm success:
 ### Step 1: List all users with Microsoft Graph PowerShell
 
 ```powershell
-# Sign in with scopes the lab's scripts already use: each ReadWrite scope includes
-# its Read counterpart, and the Read.All scopes may never have been consented
-Connect-MgGraph -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All'
+# Sign in with the scopes New-LabUser.ps1 requests: each ReadWrite scope includes
+# its Read counterpart, the Read.All scopes may never have been consented, and
+# the lab's scripts reuse this sign-in only when it holds every scope they ask for
+Connect-MgGraph -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All'
 
 Get-MgUser -All |
     Select-Object UserPrincipalName, DisplayName |
