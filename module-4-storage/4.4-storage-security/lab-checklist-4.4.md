@@ -153,7 +153,7 @@ Get-AzStorageBlob -Container dev-assets -Context $entraContext | Select-Object N
 
 ### Question 4: Key Rotation
 
-**Which clients would have stopped working if you had rotated both keys at the same time, and why does the order key2 → key1 → key2 avoid that?**
+**Which clients would have stopped working if you had rotated both keys at the same time, and why does the order - move to `key2`, rotate `key1`, move to the new `key1`, rotate `key2` - avoid that?**
 
 ---
 

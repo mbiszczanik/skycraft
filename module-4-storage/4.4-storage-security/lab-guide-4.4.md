@@ -54,6 +54,7 @@ By completing this lab, you will:
 - **Section 3**: Key Management & Rotation (20 min)
 - **Section 4**: Identity-Based Access (RBAC) (30 min)
 - **What This Lab Leaves Behind** (5 min)
+- **Lab Checklist and Knowledge Check** (10 min)
 
 ## ✅ Prerequisites
 
@@ -64,7 +65,7 @@ Before starting this lab:
       service endpoint, which Lab 2.2 adds. The storage firewall rejects a virtual network rule
       for a subnet without it.
 - [ ] Completed **Lab 4.1: Storage Accounts** - `prodskycraftswcsa` in `prod-skycraft-swc-rg`
-- [ ] Account with **User Access Administrator** or **Owner** role on the subscription (Step 4.4.7 assigns a role)
+- [ ] Account with **User Access Administrator** or **Owner** role on the subscription (Step 4.4.7 assigns a role, and so does `scripts/Deploy-Bicep.ps1` unless you pass `-SkipDataRoleAssignment`)
 - [ ] PowerShell 7+ and the `Az` module (Az.Accounts, Az.Resources, Az.Storage, Az.Network), run on **your own computer**: after Step 4.4.2 the storage account accepts data requests only from your computer's public IP address, so the data-plane commands of Sections 2 and 4 fail from Azure Cloud Shell, which uses another address.
 - [ ] `dev` or `prod` environment. `platform` is rejected by both the template and the
       scripts: the hub VNet has only `AzureBastionSubnet` and `GatewaySubnet`, so it has no
@@ -113,11 +114,11 @@ Steps without a Bicep counterpart, and why: 4.4.1 only checks Lab 2.2's service 
 
 Known differences between the paths:
 
-- **Who gets the role.** The Portal and PowerShell steps assign it to your account. `Deploy-Bicep.ps1` assigns it to whoever runs the script - you, or a service principal in an automated run - unless you pass `-DataPrincipalId`. If that identity holds the role on the account already, the script sends no assignment, because Azure refuses a second assignment of the same role to the same principal at the same scope.
+- **Who gets the role.** The Portal and PowerShell steps assign it to your account. `Deploy-Bicep.ps1` assigns it to whoever runs the script - you, or a service principal in an automated run - unless you pass `-DataPrincipalId`. If that identity holds the role on the account already, the script sends no assignment, because Azure refuses a second assignment of the same role to the same principal at the same scope. Creating a role assignment needs **Owner** or **User Access Administrator**: an identity with only **Contributor**, which is enough for the rest of the template, fails the whole deployment with `AuthorizationFailed` on `Microsoft.Authorization/roleAssignments/write`. Run it then with `-SkipDataRoleAssignment`, and have the role assigned as in Step 4.4.7.
 - **Which IP address is allowed.** The Portal adds the address your browser uses. `Deploy-Bicep.ps1` asks `api.ipify.org` for the address the script runs from and prints it: do not paste that output into a public issue. Behind a VPN, or from Cloud Shell, the two differ, and the Portal's data views then fail until you add your browser's address (Step 4.4.2). A Bicep deployment replaces the whole list of IP rules.
 - **What else the Bicep restates.** To create `dev-assets`, the template has to pass the whole blob service configuration, so it also declares Lab 4.2's containers and the soft delete and versioning settings of Labs 4.1 and 4.2 (see the preview below). If you did those labs, nothing changes; if you did not, the Bicep creates those containers and the Portal path does not.
-- **Properties the template's module sets.** A `Deploy-Bicep.ps1 -WhatIf` over a lab built in the Portal lists a few account properties as changes - `isLocalUserEnabled`, `isSftpEnabled`, `customDomain` and others - because the module writes its own defaults where the Portal leaves Azure's. None of them changes what this lab teaches (Lab 4.1, Portal, PowerShell and Bicep Paths).
-- **Large file shares on the dev account.** With `-Environment dev`, the Bicep deploys over `devskycraftswcsa`. If another path built that account and it shows **Large file shares** **Enabled**, the deployment may stop with an error about large file shares: leave the account as it is and do not run the Bicep over it ([issue #390](https://github.com/mbiszczanik/skycraft/issues/390); Lab 4.1's Paths section). The steps below use the production account only.
+- **Properties the template's module sets.** A `Deploy-Bicep.ps1 -WhatIf` over a lab built in the Portal lists a few account properties as changes - `isLocalUserEnabled`, `isSftpEnabled`, `customDomain` and others - because the module writes its own defaults where the Portal leaves Azure's. None of them changes what this lab teaches.
+- **Large file shares on the dev account.** With `-Environment dev`, the Bicep deploys over `devskycraftswcsa`. If another path built that account and it shows **Large file shares** **Enabled**, the deployment may stop with an error about large file shares: leave the account as it is and do not run the Bicep over it ([issue #390](https://github.com/mbiszczanik/skycraft/issues/390)). The steps below use the production account only.
 
 **Preview - the AVM module call the Bicep path makes**:
 
@@ -264,14 +265,17 @@ On every path the policy lives on the container `dev-assets`, which this step cr
 1. In Azure Portal, search for **Storage accounts**
 2. Click `prodskycraftswcsa`
 3. In the left menu, under **Data storage**, click **Containers**
-4. Click **+ Add container**
+4. Only if `dev-assets` is not in the containers list: click **+ Add container**. If it is there already - from an earlier run of this lab or from the Bicep path - go on to item 7.
+
+   If you deleted `dev-assets` less than a minute ago - this lab's cleanup deletes it - wait a minute before you create it again: Azure refuses the name of a deleted container for at least 30 seconds, and **Create** then fails with a message that the container is being deleted (Troubleshooting, Issue 5).
+
 5. In the *New container* pane, fill in:
 
 | Field | Value |
 | ----- | ----- |
 | Name  | `dev-assets` |
 
-   **Anonymous access level** is greyed out at **Private (no anonymous access)**: Lab 4.1 turned anonymous access off for the account. Leave the **Advanced** section as it is (Lab 4.2, Step 4.2.2: version-level immutability cannot be undone and blocks this lab's cleanup).
+   **Anonymous access level** is greyed out at **Private (no anonymous access)**: Lab 4.1 turned anonymous access off for the account. Leave the **Advanced** section as it is: version-level immutability support, once turned on for a container, cannot be turned off, and an immutability policy would stop this lab's cleanup from deleting the container's blobs.
 
 6. Click **Create**
 7. In the containers list, on the `dev-assets` row, click **...** (More), then **Access policy**. You do not need to open the container first.
@@ -297,8 +301,14 @@ On every path the policy lives on the container `dev-assets`, which this step cr
 **With Az PowerShell** (instead of items 1-11). The account's context uses the account key, which your Owner role may read; run it on the computer whose address Step 4.4.2 allowed:
 
 ```powershell
-New-AzRmStorageContainer -ResourceGroupName 'prod-skycraft-swc-rg' -StorageAccountName 'prodskycraftswcsa' `
-    -Name 'dev-assets' -PublicAccess None
+# Only if dev-assets is not there yet (an earlier run, or the Bicep path). If you deleted it less
+# than a minute ago, wait a minute first: Azure refuses the name for at least 30 seconds.
+$existing = Get-AzRmStorageContainer -ResourceGroupName 'prod-skycraft-swc-rg' -StorageAccountName 'prodskycraftswcsa' |
+    Where-Object Name -eq 'dev-assets'
+if (-not $existing) {
+    New-AzRmStorageContainer -ResourceGroupName 'prod-skycraft-swc-rg' -StorageAccountName 'prodskycraftswcsa' `
+        -Name 'dev-assets' -PublicAccess None
+}
 
 $ctx = (Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa').Context
 New-AzStorageContainerStoredAccessPolicy -Container 'dev-assets' -Policy 'DevRevokePolicy' `
@@ -331,7 +341,7 @@ You create a token that names the policy, use it, revoke it by deleting the poli
 5. Copy the **Blob SAS URL**
 6. Open a new browser tab, paste the URL, add `&restype=container&comp=list` to its end, and press Enter.
 
-**Expected Result**: The browser shows an XML document, `EnumerationResults`, for the container `dev-assets` - an empty list of blobs. The token lists the container because the policy grants **List**.
+**Expected Result**: The browser shows an XML document, `EnumerationResults`, for the container `dev-assets` - an empty list of blobs. The token lists the container because the policy grants **List**. If you saved the policy in Step 4.4.3 less than 30 seconds ago, the answer may instead be an XML error with the code `AuthenticationFailed` (HTTP 403): a new stored access policy takes up to 30 seconds to take effect, too. Wait 30 seconds and reload the tab.
 
 7. Optional, to see the firewall at work: open the same URL on a phone that uses mobile data, with Wi-Fi off. The answer is an XML error with the code `AuthorizationFailure` (HTTP 403): the token is valid, but the request comes from a network the firewall does not allow. Use your own phone only, and close the tab afterwards.
 8. Back in the Portal, on the `dev-assets` row of the containers list, click **...** (More), then **Access policy**
@@ -349,6 +359,7 @@ $ctx = (Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'pr
 $sas = New-AzStorageContainerSASToken -Name 'dev-assets' -Policy 'DevRevokePolicy' -Protocol HttpsOnly -Context $ctx
 $url = "https://prodskycraftswcsa.blob.core.windows.net/dev-assets?$($sas.TrimStart('?'))&restype=container&comp=list"
 
+Start-Sleep -Seconds 30     # the policy of Step 4.4.3 takes up to 30 seconds to take effect; until then the token gets 403
 (Invoke-WebRequest -Uri $url -SkipHttpErrorCheck).StatusCode     # 200: the token works
 
 Remove-AzStorageContainerStoredAccessPolicy -Container 'dev-assets' -Policy 'DevRevokePolicy' -Context $ctx
@@ -476,11 +487,16 @@ If you ran the optional Azure CLI commands of Lab 4.2 (Step 4.2.11), you hold th
 
 **Wait about five minutes** before Step 4.4.8: a new role assignment takes a few minutes to take effect on the data plane.
 
-**With Az PowerShell** (instead of items 1-9):
+**With Az PowerShell** (instead of items 1-9). It assigns the role only if you do not hold it on the account already (Lab 4.2, Step 4.2.11): a second assignment fails with `RoleAssignmentExists`.
 
 ```powershell
-$scope = (Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa').Id
-New-AzRoleAssignment -ObjectId (Get-AzADUser -SignedIn).Id -RoleDefinitionName 'Storage Blob Data Contributor' -Scope $scope
+$scope    = (Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa').Id
+$objectId = (Get-AzADUser -SignedIn).Id
+$existing = Get-AzRoleAssignment -ObjectId $objectId -RoleDefinitionName 'Storage Blob Data Contributor' -Scope $scope |
+    Where-Object Scope -eq $scope      # on the account itself, not inherited from the group or the subscription
+if (-not $existing) {
+    New-AzRoleAssignment -ObjectId $objectId -RoleDefinitionName 'Storage Blob Data Contributor' -Scope $scope
+}
 ```
 
 ### Step 4.4.8: Access Blobs with Your Entra ID Identity
@@ -580,6 +596,12 @@ While Lab 1.3's delete lock (`lock-no-delete-prod`) is on `prod-skycraft-swc-rg`
 **Cause**: The role of Step 4.4.7 has not taken effect yet, or it was assigned to another account, or at another scope.
 **Solution**: Wait about five minutes after the assignment. Then check **Access control (IAM)** → **Role assignments** of `prodskycraftswcsa` for **Storage Blob Data Contributor** with your account.
 
+### Issue 5: Creating `dev-assets` fails in Step 4.4.3
+
+**Symptom**: **Create** in the *New container* pane fails with a message that the container is being deleted, or that it already exists; `New-AzRmStorageContainer` fails with a conflict (HTTP 409) that says the same.
+**Cause**: After a container is deleted, Azure refuses its name for at least 30 seconds - longer while the delete is still being processed. This lab's cleanup deletes `dev-assets`, so a re-run right after it hits this. Or `dev-assets` is there already, from an earlier run or from the Bicep path.
+**Solution**: If it is being deleted, wait a minute and click **Create** again. If it exists, do not create it again: go on to item 7 of Step 4.4.3 and add the policy to the existing container.
+
 ## 🎓 Knowledge Check
 
 1. **You issued a SAS token with a 5-year expiry. The laptop containing the token was stolen. How do you revoke it quickly?**
@@ -604,6 +626,12 @@ While Lab 1.3's delete lock (`lock-no-delete-prod`) is on `prod-skycraft-swc-rg`
    <details>
      <summary>**Click to see the answer**</summary>
    **Answer**: So that applications never lose access: move them to `key2`, rotate `key1`, move them to the new `key1`, rotate `key2`.
+   </details>
+
+5. **You hold Storage Blob Data Contributor on the account, yet an upload from a café's Wi-Fi fails with `AuthorizationFailure`. Why, and why can you still open the account's Networking page?**
+   <details>
+     <summary>**Click to see the answer**</summary>
+   **Answer**: The firewall is checked before the role: the café's public IP address is not in the account's IP rules, so the data request is refused whoever sends it. The **Networking** page is part of the control plane, which goes through Azure Resource Manager and is not subject to the storage firewall, so you can add the new address there.
    </details>
 
 ## 📚 Additional Resources

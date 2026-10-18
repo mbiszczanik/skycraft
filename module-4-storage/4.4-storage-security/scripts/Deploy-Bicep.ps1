@@ -14,6 +14,11 @@
     the optional Azure CLI commands of Lab 4.2), the template is given no assignment: ARM refuses
     a second assignment of the same role to the same principal at the same scope.
 
+    Creating the assignment needs Owner or User Access Administrator. An identity with only
+    Contributor, which is enough for the rest of the template, fails the whole deployment on
+    Microsoft.Authorization/roleAssignments/write: run it with -SkipDataRoleAssignment, and have
+    the role assigned as in guide Step 4.4.7.
+
     The script prints your public IP address when it detects it: do not paste its output into a
     public issue.
 .PARAMETER Location
@@ -27,6 +32,9 @@
 .PARAMETER DataPrincipalId
     Object id of the user or service principal that gets Storage Blob Data Contributor on the
     account. Defaults to the signed-in identity.
+.PARAMETER SkipDataRoleAssignment
+    Sends no role assignment, for an identity that may not create one (Contributor only).
+    Test-Lab.ps1 then fails its role check until the role is assigned as in guide Step 4.4.7.
 .PARAMETER WhatIf
     Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
 .EXAMPLE
@@ -34,6 +42,9 @@
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment prod -WhatIf
     Previews the storage firewall deployment without changing anything.
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -Environment prod -SkipDataRoleAssignment
+    Deploys with an identity that holds Contributor only; the role is assigned separately.
 .NOTES
     Project: SkyCraft
     Author: SkyCraft
@@ -58,6 +69,9 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$DataPrincipalId = '',
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipDataRoleAssignment,
 
     [Parameter(Mandatory = $false)]
     [switch]$WhatIf
@@ -120,6 +134,43 @@ function Test-LabDataRoleAssigned {
     }
 }
 
+# The object id the template assigns Storage Blob Data Contributor to (guide Step 4.4.7), or ''
+# for no assignment: when -SkipDataRoleAssignment is set, when no identity can be read, or when
+# that identity holds the role on the account already.
+function Resolve-LabDataPrincipalId {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Scope,
+
+        [Parameter(Mandatory = $false)]
+        [string]$PrincipalId = '',
+
+        [Parameter(Mandatory = $false)]
+        [switch]$Skip
+    )
+
+    if ($Skip) {
+        Write-Host "  -> -SkipDataRoleAssignment: the template assigns no role. Assign '$dataRoleName' as in guide Step 4.4.7; Test-Lab.ps1 fails its role check until then." -ForegroundColor Yellow
+        return ''
+    }
+    if ([string]::IsNullOrWhiteSpace($PrincipalId)) {
+        Write-Host "Reading the signed-in identity for the '$dataRoleName' assignment..." -ForegroundColor Yellow
+        $PrincipalId = Get-LabSignedInObjectId
+        if (-not $PrincipalId) {
+            Write-Host "  -> [WARNING] Could not read the signed-in identity. No role assignment will be made; pass -DataPrincipalId, or assign the role as in Step 4.4.7." -ForegroundColor Yellow
+            return ''
+        }
+    }
+    if (Test-LabDataRoleAssigned -Scope $Scope -PrincipalId $PrincipalId) {
+        Write-Host "  -> The identity holds '$dataRoleName' on the account already; the template leaves that assignment as it is." -ForegroundColor Green
+        return ''
+    }
+    Write-Host "  -> The template assigns '$dataRoleName' on the account to the identity. That needs Owner or User Access Administrator; with Contributor only, run the script with -SkipDataRoleAssignment." -ForegroundColor Green
+    return $PrincipalId
+}
+
 Write-Host "=== Lab 4.4: Deploying Storage Security ===" -ForegroundColor Cyan
 
 # 1. Verify Connection
@@ -142,24 +193,8 @@ if ([string]::IsNullOrWhiteSpace($ClientIp)) {
 }
 
 # 3. Who gets Storage Blob Data Contributor on the account (guide Step 4.4.7)
-$assignPrincipalId = ''
-if ([string]::IsNullOrWhiteSpace($DataPrincipalId)) {
-    Write-Host "Reading the signed-in identity for the '$dataRoleName' assignment..." -ForegroundColor Yellow
-    $DataPrincipalId = Get-LabSignedInObjectId
-    if (-not $DataPrincipalId) {
-        Write-Host "  -> [WARNING] Could not read the signed-in identity. No role assignment will be made; pass -DataPrincipalId, or assign the role as in Step 4.4.7." -ForegroundColor Yellow
-    }
-}
-if ($DataPrincipalId) {
-    $accountScope = "/subscriptions/$($context.Subscription.Id)/resourceGroups/$Environment-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/${Environment}skycraftswcsa"
-    if (Test-LabDataRoleAssigned -Scope $accountScope -PrincipalId $DataPrincipalId) {
-        Write-Host "  -> The identity holds '$dataRoleName' on the account already; the template leaves that assignment as it is." -ForegroundColor Green
-    }
-    else {
-        $assignPrincipalId = $DataPrincipalId
-        Write-Host "  -> The template assigns '$dataRoleName' on the account to the identity." -ForegroundColor Green
-    }
-}
+$accountScope = "/subscriptions/$($context.Subscription.Id)/resourceGroups/$Environment-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/${Environment}skycraftswcsa"
+$assignPrincipalId = Resolve-LabDataPrincipalId -Scope $accountScope -PrincipalId $DataPrincipalId -Skip:$SkipDataRoleAssignment
 
 # 4. Deploy Bicep
 try {
@@ -201,5 +236,8 @@ try {
 catch {
     Write-Host "`n [ERROR] Deployment failed!" -ForegroundColor Red
     Write-Host "  -> Cause: $($_.Exception.Message)" -ForegroundColor Red
+    if ($assignPrincipalId -and "$($_.Exception.Message)" -match 'roleAssignments/write') {
+        Write-Host "  -> The identity may not create role assignments. Run the script again with -SkipDataRoleAssignment, and have the role assigned as in guide Step 4.4.7." -ForegroundColor Yellow
+    }
     Exit-Lab -FailureCount 1
 }

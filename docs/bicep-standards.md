@@ -517,7 +517,7 @@ resource resUpdate 'Microsoft.Storage/storageAccounts@2023-01-01' = {
 
 **Rule**: A concept should be **taught once** (in its most natural module) and **referenced** elsewhere. If a step exists in two labs, consolidate it to the earlier lab and add a cross-reference.
 
-**Example**: Key rotation is shown in Lab 4.1 (Step 4.1.13: the **Access keys** page and one rotation of `key1`). Lab 4.4 (Section 3) does not repeat that page tour: it refers back to Step 4.1.13 and runs the two-key rotation order, tied to what a rotation revokes. Lab 4.4 had dropped its rotation section under this rule while its plan and checklist still promised it; the maintainer decided on issue #357 (2026-10-16) to write the section rather than drop the promise.
+**Example**: Key rotation is shown in Lab 4.1 (Step 4.1.13: the **Access keys** page and one rotation of `key1`). Lab 4.4 (Section 3) does not repeat that page tour: it refers back to Step 4.1.13 and runs the two-key rotation order, tied to what a rotation revokes. Lab 4.4 had dropped its rotation section under this rule while its plan and checklist still promised it; the maintainer decided on issue #361 (2026-10-16) to write the section rather than drop the promise.
 
 ### 10.4 Azure Backup Policy Cannot Be Updated via ARM (E003)
 

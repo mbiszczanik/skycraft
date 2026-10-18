@@ -203,16 +203,20 @@ if ($sa) {
             if ($assignments.Count -eq 0) {
                 Write-Host "  -> [INFO] No 'Storage Blob Data Contributor' assignments found." -ForegroundColor Gray
             }
+            # Each assignment is named by its place in the list, not by its holder: a display name is a
+            # real person's name, and the output may be pasted as evidence.
+            $position = 0
             foreach ($assignment in $assignments) {
+                $position++
                 try {
                     Remove-AzRoleAssignment -ObjectId $assignment.ObjectId `
                         -RoleDefinitionName 'Storage Blob Data Contributor' `
                         -Scope $storageId -ErrorAction Stop
-                    Write-Host "  -> Removed assignment for '$($assignment.DisplayName)'." -ForegroundColor Green
+                    Write-Host "  -> Removed assignment $position of $($assignments.Count)." -ForegroundColor Green
                 }
                 catch {
                     $script:cleanupFailures++
-                    Write-Host "  -> [ERROR] Failed to remove the assignment for '$($assignment.DisplayName)'." -ForegroundColor Red
+                    Write-Host "  -> [ERROR] Failed to remove assignment $position of $($assignments.Count)." -ForegroundColor Red
                     Write-Host $_.Exception.Message -ForegroundColor Red
                 }
             }

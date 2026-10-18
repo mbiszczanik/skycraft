@@ -39,11 +39,11 @@ BeforeAll {
     function Get-AzAccessToken { param([string]$ResourceUrl) $null = $ResourceUrl }
     function Get-AzRoleAssignment { param([string]$Scope) $null = $Scope }
 
-    # The script's own $dataRoleName and the two functions, as the script defines them.
+    # The script's own $dataRoleName and its functions, as the script defines them.
     $roleAssignment = $script:Ast.Find({ param($n)
             $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$dataRoleName' }, $true)
     . ([scriptblock]::Create($roleAssignment.Extent.Text))
-    foreach ($name in 'Get-LabSignedInObjectId', 'Test-LabDataRoleAssigned') {
+    foreach ($name in 'Get-LabSignedInObjectId', 'Test-LabDataRoleAssigned', 'Resolve-LabDataPrincipalId') {
         $definition = $script:Ast.Find({ param($n)
                 $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
         $definition | Should -Not -BeNullOrEmpty -Because "Deploy-Bicep.ps1 defines $name"
@@ -119,6 +119,47 @@ Describe 'Lab 4.4 Deploy-Bicep.ps1 - an assignment that exists already is not se
         Mock Write-Host { }
         Test-LabDataRoleAssigned -Scope $script:Scope -PrincipalId $script:Oid | Should -BeFalse
         Should -Invoke Write-Host -ParameterFilter { "$Object" -match '\[WARNING\] Could not read the role assignments' }
+    }
+}
+
+Describe 'Lab 4.4 Deploy-Bicep.ps1 - which principal the template is given' {
+
+    BeforeEach {
+        Mock Write-Host { }
+    }
+
+    It 'gives none, and reads nothing, with -SkipDataRoleAssignment (an identity with Contributor only)' {
+        Mock Get-AzAccessToken { throw 'stub: must not be called' }
+        Mock Get-AzRoleAssignment { throw 'stub: must not be called' }
+        Resolve-LabDataPrincipalId -Scope $script:Scope -Skip | Should -BeExactly ''
+        Resolve-LabDataPrincipalId -Scope $script:Scope -PrincipalId $script:Oid -Skip | Should -BeExactly ''
+        Should -Invoke Get-AzAccessToken -Times 0
+        Should -Invoke Get-AzRoleAssignment -Times 0
+        Should -Invoke Write-Host -ParameterFilter { "$Object" -match '-SkipDataRoleAssignment: the template assigns no role' }
+    }
+
+    It 'gives the signed-in identity when it does not hold the role, and says what that needs' {
+        $jwt = Get-TestJwt -Claims @{ oid = $script:Oid }
+        Mock Get-AzAccessToken { [pscustomobject]@{ Token = $jwt } }
+        Mock Get-AzRoleAssignment { }
+        Resolve-LabDataPrincipalId -Scope $script:Scope | Should -BeExactly $script:Oid
+        Should -Invoke Write-Host -ParameterFilter { "$Object" -match 'Owner or User Access Administrator' }
+    }
+
+    It 'gives none when the identity holds the role on the account already' {
+        Mock Get-AzRoleAssignment { [pscustomobject]@{ ObjectId = $script:Oid; RoleDefinitionName = 'Storage Blob Data Contributor'; Scope = $script:Scope } }
+        Resolve-LabDataPrincipalId -Scope $script:Scope -PrincipalId $script:Oid | Should -BeExactly ''
+    }
+
+    It 'gives none when the signed-in identity cannot be read' {
+        Mock Get-AzAccessToken { throw 'stub: no token' }
+        Resolve-LabDataPrincipalId -Scope $script:Scope | Should -BeExactly ''
+    }
+
+    It 'declares -SkipDataRoleAssignment and passes it on' {
+        $scriptText = Get-Content -Raw -LiteralPath $script:ScriptPath
+        $scriptText | Should -Match '\[switch\]\$SkipDataRoleAssignment'
+        $scriptText | Should -Match 'Resolve-LabDataPrincipalId -Scope \$accountScope -PrincipalId \$DataPrincipalId -Skip:\$SkipDataRoleAssignment'
     }
 }
 

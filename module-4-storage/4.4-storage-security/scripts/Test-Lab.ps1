@@ -211,10 +211,10 @@ if ($sa) {
         $assignments = @(Get-AzRoleAssignment -Scope $sa.Id -ErrorAction Stop |
             Where-Object { $_.RoleDefinitionName -eq $roleName -and $_.Scope -eq $sa.Id })
         if ($assignments.Count -gt 0) {
-            foreach ($assignment in $assignments) {
-                $who = if ($assignment.DisplayName) { $assignment.DisplayName } else { $assignment.ObjectId }
-                Write-Host "  -> '$roleName' is assigned on the account to '$who' ($($assignment.ObjectType))." -ForegroundColor Green
-            }
+            # Who holds it is not printed: a display name is a real person's name, and an object id
+            # identifies the directory. The output may be pasted as evidence, so it names the kind only.
+            $kinds = (@($assignments | ForEach-Object { if ($_.ObjectType) { "$($_.ObjectType)" } else { 'Unknown' } }) | Sort-Object -Unique) -join ', '
+            Write-Host "  -> '$roleName' is assigned on the account: $($assignments.Count) assignment(s), principal type(s): $kinds." -ForegroundColor Green
         }
         else {
             Write-Host "  -> [FAIL] No '$roleName' assignment on '$storageAccountName' itself. Step 4.4.7 assigns it to your account." -ForegroundColor Red

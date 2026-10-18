@@ -354,7 +354,8 @@ Describe 'Lab 4.4 Remove-LabResource.ps1 - a failed step is counted' {
         $run = $script:StepsFail
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output   | Should -Match '\[ERROR\] Failed to revert firewall'
-        $run.Output   | Should -Match "\[ERROR\] Failed to remove the assignment for 'first'"
+        $run.Output   | Should -Match '\[ERROR\] Failed to remove assignment 1 of 2\.'
+        $run.Output   | Should -Not -Match "'first'"
         $run.Output   | Should -Match 'Cleanup finished with 2 failure\(s\)'
         $run.Output   | Should -Not -Match 'Cleanup Complete'
     }

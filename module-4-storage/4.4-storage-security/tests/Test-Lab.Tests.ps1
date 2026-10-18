@@ -295,9 +295,11 @@ Describe 'Lab 4.4 Test-Lab.ps1 - the SAS exercise container dev-assets and its s
 
 Describe 'Lab 4.4 Test-Lab.ps1 - Storage Blob Data Contributor on the account (Step 4.4.7)' {
 
-    It 'passes an assignment made on the account and names who holds it' {
+    It 'passes an assignment made on the account and prints neither the name nor the object id of who holds it' {
         $run = $script:Done
-        $run.Output | Should -Match "'Storage Blob Data Contributor' is assigned on the account to 'Learner' \(User\)\."
+        $run.Output | Should -Match "'Storage Blob Data Contributor' is assigned on the account: 1 assignment\(s\), principal type\(s\): User\."
+        $run.Output | Should -Not -Match 'Learner'
+        $run.Output | Should -Not -Match '11111111-1111-1111-1111-111111111111'
     }
 
     It 'fails when no assignment exists, and names the step' {
