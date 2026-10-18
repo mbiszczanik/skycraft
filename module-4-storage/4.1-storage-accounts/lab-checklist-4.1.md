@@ -120,7 +120,7 @@
 
 Run these Az PowerShell commands to validate your lab setup:
 
-The lab's validator checks the redundancy, location, security settings, encryption, soft delete and the `Project`, `Environment` and `CostCenter` tags of the three accounts, whichever path built them, and exits 0 when all pass:
+The lab's validator checks that each account finished provisioning (state **Succeeded**), its redundancy, location, security settings, encryption, soft delete and the `Project`, `Environment` and `CostCenter` tags of the three accounts, whichever path built them, and exits 0 when all pass:
 
 ```powershell
 .\scripts\Test-Lab.ps1
@@ -333,7 +333,7 @@ You've completed **Lab 4.1: Configure and Manage Storage Accounts**!
 
 **Key Skills Demonstrated**:
 
-- Creating storage accounts via Portal and CLI/PowerShell
+- Creating storage accounts on one path (Portal, Az PowerShell, Azure CLI or Bicep) and mapping each Portal setting to its parameter
 - Selecting appropriate redundancy options
 - Configuring security best practices
 - Managing and rotating access keys

@@ -14,7 +14,7 @@ By completing this lab, you will:
 - Explore an account's data with Azure Storage Explorer or the Portal's Storage browser
 
 > [!NOTE]
-> Object replication and AzCopy are AZ-104 topics that this lab does not practise: object replication needs blob versioning and change feed on both accounts, which Module 4 keeps off on these accounts, and AzCopy needs a data role or a SAS token, which Lab 4.4 introduces. See Additional Resources for both.
+> Object replication and AzCopy are AZ-104 topics that this lab does not practise. Object replication copies blobs from a source account to a destination account, and needs blob versioning on both and change feed on the source ([Object replication for block blobs](https://learn.microsoft.com/azure/storage/blobs/object-replication-overview#prerequisites-and-caveats-for-object-replication)); Module 4 keeps change feed off on all three accounts, and only `prodskycraftswcsa` gets versioning (Lab 4.2). AzCopy needs a Microsoft Entra data role, such as **Storage Blob Data Contributor**, which Lab 4.2 has you assign on `prodskycraftswcsa` for its Azure CLI upload, or a SAS token, which Lab 4.4 creates. See Additional Resources for both.
 
 ---
 
@@ -56,10 +56,10 @@ This lab deploys storage accounts across all three SkyCraft environments with en
 - **Section 1**: Azure Storage Fundamentals (30 min)
 - **Section 2**: Create Storage Accounts via Portal (35 min)
 - **Section 3**: Create Storage Accounts via CLI/PowerShell (20 min)
-- **Section 4**: Configure Encryption and Security (20 min)
+- **Section 4**: Verify Encryption and Security (20 min)
 - **Section 5**: Access Keys and Data Management (15 min)
 
-Sections 2 and 3 are two ways to create the same three accounts: do one of them (see Portal, PowerShell and Bicep Paths).
+Sections 2 and 3 are two ways to create the same three accounts: run one of them (see Portal, PowerShell and Bicep Paths). If you run Section 2, the 20 minutes of Section 3 go to reading how Steps 4.1.5 and 4.1.6 map each wizard setting to a parameter, and to Step 4.1.7, which every path runs.
 
 ---
 
@@ -75,9 +75,9 @@ Before starting this lab:
 - [ ] PowerShell 7 with the Az module (`Install-Module -Name Az`), signed in with `Connect-AzAccount`
 - [ ] Azure CLI (version 2.50.0 or later), only for the Azure CLI blocks of Steps 4.1.5, 4.1.7 and 4.1.13
 - [ ] Azure Storage Explorer (optional, Step 4.1.15)
-- [ ] If you completed Lab 1.3: the three resource groups carry the tag `Project` = `SkyCraft` (Step 1.3.1), and its policy assignments are in place (Steps 1.3.5, 1.3.8 and 1.3.9)
+- [ ] If you completed Lab 1.3: the three resource groups carry the tag `Project` = `SkyCraft` (Steps 1.3.1-1.3.3), and its policy assignments are in place (Steps 1.3.5, 1.3.8 and 1.3.9)
 
-**Why the last item matters**: Lab 1.3's `Restrict-Azure-Regions` refuses every region except Sweden Central and North Europe, and `Enforce-Project-Tag` refuses every new resource without `Project` = `SkyCraft`. Every create step in this lab sets the region (Sweden Central) and all four SkyCraft tags itself, so both policies let the accounts through. If you forget the `Project` tag, `Inherit-Project-Tag` copies it from the resource group; the other three tags are only what you type, and `Test-Lab.ps1` checks them. Lab 1.3 also puts a delete lock on `platform-skycraft-swc-rg` and `prod-skycraft-swc-rg`: it does not stop you creating or changing the accounts, only deleting them (see Clean Up).
+**Why the last item matters**: Lab 1.3's `Restrict-Azure-Regions` refuses every region except Sweden Central and North Europe, and `Enforce-Project-Tag` refuses every new resource without `Project` = `SkyCraft`. Every create step in this lab sets the region (Sweden Central) and all four SkyCraft tags itself, so both policies let the accounts through. If you forget the `Project` tag, `Inherit-Project-Tag` copies it from the resource group; no policy adds the other three tags, so they are only what you type. `Test-Lab.ps1` checks `Project`, `Environment` and `CostCenter`; it does not check `Owner`. Lab 1.3 also puts a delete lock on `platform-skycraft-swc-rg` and `prod-skycraft-swc-rg`: it does not stop you creating or changing the accounts, only deleting them (see Clean Up).
 
 Nothing in this lab uses a virtual machine or a network from Modules 2 and 3.
 
@@ -94,7 +94,8 @@ Get-AzResourceGroup -Name platform-skycraft-swc-rg, dev-skycraft-swc-rg, prod-sk
 > three storage accounts, and they are cumulative forward: each lab replaces the account-level
 > properties and the sub-services it owns, while leaving the sub-services it does not own alone.
 > Re-running Lab 4.2 after Lab 4.3 resets file-share retention from 14 days back to 7; re-running
-> Lab 4.1 after Lab 4.2 turns production blob versioning back off. See `docs/bicep-standards.md`
+> Lab 4.1 after Lab 4.2 turns production blob versioning back off, and after Lab 4.3 it too resets
+> file-share retention to 7 days. See `docs/bicep-standards.md`
 > §4.5 for the mechanism.
 
 **Preview - the AVM module call the Bicep path makes**:
@@ -125,7 +126,7 @@ locking it.
 
 ## 🛠️ Portal, PowerShell and Bicep Paths
 
-You can create the three accounts in the Portal (Steps 4.1.2-4.1.4), with Az PowerShell (Step 4.1.6) or the Azure CLI (Step 4.1.5), or with Bicep. **Pick one path**: all of them create the same three accounts with the same names, so running a second path after the first adds nothing. Every path ends in the same state, which `scripts/Test-Lab.ps1` accepts whichever path built it: three StorageV2 accounts in Sweden Central (`platformskycraftswcsa` and `prodskycraftswcsa` on GRS, `devskycraftswcsa` on LRS), access tier Hot, secure transfer required, minimum TLS 1.2, anonymous blob access off, account key access on, cross-tenant replication off, public network access enabled from all networks, Microsoft-managed keys without infrastructure encryption, 7-day soft delete for blobs, containers and file shares, blob versioning and change feed off, and the four SkyCraft tags.
+You can create the three accounts in the Portal (Steps 4.1.2-4.1.4), with Az PowerShell (Step 4.1.6) or the Azure CLI (Step 4.1.5), or with Bicep. **Pick one path**: all of them create the same three accounts with the same names, so running a second path after the first adds nothing. Every path ends in the state that `scripts/Test-Lab.ps1` accepts whichever path built it, and apart from the three known differences below the paths set the same values: three StorageV2 accounts in Sweden Central (`platformskycraftswcsa` and `prodskycraftswcsa` on GRS, `devskycraftswcsa` on LRS), access tier Hot, secure transfer required, minimum TLS 1.2, anonymous blob access off, account key access on, cross-tenant replication off, public network access enabled from all networks, Microsoft-managed keys without infrastructure encryption, 7-day soft delete for blobs, containers and file shares, blob versioning and change feed off, and the four SkyCraft tags.
 
 | Path | What it creates |
 | ---- | --------------- |
@@ -135,7 +136,11 @@ You can create the three accounts in the Portal (Steps 4.1.2-4.1.4), with Az Pow
 
 Steps that change nothing in Azure, and so have no scripted or Bicep counterpart: 4.1.1 (reading), 4.1.7 (lists the accounts; it has CLI and PowerShell commands), 4.1.8 and 4.1.10-4.1.11 (verify in the Portal; the checklist's validation commands read the same values), 4.1.9 (a look at the customer-managed key form, saved nowhere), 4.1.12 and 4.1.14 (view keys and connection strings), 4.1.15 (Storage Explorer or Storage browser). Step 4.1.13 rotates a key: it has Az PowerShell and CLI commands but no Bicep counterpart, because a rotation is an operation, not a resource.
 
-One difference between the paths is known and harmless: the Portal's Advanced tab ticks **Require Encryption in Transit for SMB** by default, which the PowerShell, CLI and Bicep paths do not set. With **Require secure transfer for REST API operations** on, as on every path here, Azure Files already requires an encrypted SMB connection ([Create a storage account](https://learn.microsoft.com/azure/storage/common/storage-account-create#security-tab)), so file shares behave the same. `Test-Lab.ps1` does not check it.
+Three differences between the paths are known. `Test-Lab.ps1` checks none of them, and none changes what the later labs do:
+
+- **Require Encryption in Transit for SMB**: the Portal's Advanced tab ticks it by default; the PowerShell, CLI and Bicep paths do not set it. With **Require secure transfer for REST API operations** on, as on every path here, Azure Files already requires an encrypted SMB connection ([Create a storage account](https://learn.microsoft.com/azure/storage/common/storage-account-create#security-tab)), so file shares behave the same.
+- **Local users** (`isLocalUserEnabled`): the Bicep turns them off, which is the default of the module it uses; the Portal, PowerShell and CLI paths leave Azure's own value. Local users sign in over SFTP or NFS v3, which every path leaves off, so no lab uses them. A `Deploy-Bicep.ps1 -WhatIf` over accounts built another way lists this property as a change.
+- **Large file shares**: the wizard no longer offers this setting, and today every pay-as-you-go file share can grow to 100 TiB whatever it shows ([Azure Files scale targets](https://learn.microsoft.com/azure/storage/files/storage-files-scale-targets#classic-file-share-scale-targets-microsoftstorage)). The Bicep sends **Disabled** for the locally redundant `devskycraftswcsa` (its module's default) and nothing for the two GRS accounts; the other paths send nothing, and an account's **Configuration** page can show **Large file shares** **Enabled** and greyed out, as in the screenshot of Step 4.1.11. Azure does not let an enabled setting be turned off, so if `Deploy-Bicep.ps1` stops on `devskycraftswcsa` with an error about large file shares, the account was built by another path with the setting on: leave the account as it is and do not run the Bicep over it.
 
 ---
 
@@ -610,7 +615,9 @@ A SKU of `Standard_RAGRS` means **Make read access to data available in the even
 
 ---
 
-## 📖 Section 4: Configure Encryption and Security (20 min)
+## 📖 Section 4: Verify Encryption and Security (20 min)
+
+This section changes nothing in Azure: the accounts got their encryption and security settings when they were created in Section 2 or 3. Step 4.1.9 keeps its title, but only opens the customer-managed key form and closes it again.
 
 ### Step 4.1.8: Verify Encryption at Rest
 
@@ -667,7 +674,7 @@ Stay on `prodskycraftswcsa`.
 
 This prevents accidental exposure of sensitive data through misconfigured container access levels.
 
-**Expected Result**: The **Configuration** page of `prodskycraftswcsa` shows the values of Steps 4.1.10 and 4.1.11, and **Blob access tier (default)** **Hot**.
+**Expected Result**: The **Configuration** page of `prodskycraftswcsa` shows **Account kind** **StorageV2 (general purpose v2)**, **Performance** **Standard**, the values of Steps 4.1.10 and 4.1.11, and **Blob access tier (default)** **Hot**.
 
 ![Verify TLS Settings](./images/step-4.1.11.png)
 
@@ -826,7 +833,7 @@ The three accounts are the storage of Modules 4 and 5: `tools/lab-cycle-manifest
 | Soft-deleted data (7 days) | Each account | about 0 | Data you delete in later labs stays, and is billed, for 7 days before it is gone |
 | A rotated key1 on `prodskycraftswcsa` | `prodskycraftswcsa` | 0 | Nothing; later labs read the current key |
 
-**Re-running this lab later** changes what later labs set: re-running `Deploy-Bicep.ps1` after Lab 4.2 turns production blob versioning off again, and after Lab 4.4 opens the production account's firewall again (`networkAcls` back to **Allow**). Run the Module 4 labs in order (see Prerequisites).
+**Re-running this lab later** changes what later labs set: re-running `Deploy-Bicep.ps1` after Lab 4.2 turns production blob versioning off again, after Lab 4.3 sets the production file-share soft delete retention back from 14 days to 7, and after Lab 4.4 opens the production account's firewall again (`networkAcls` back to **Allow**). Run the Module 4 labs in order (see Prerequisites).
 
 ---
 
@@ -1048,7 +1055,7 @@ Update-AzTag -ResourceId $account.Id -Operation Merge -Tag @{
 - CostCenter: MSDN
 - Owner: mbiszczanik
 
-✅ Learned both Portal and CLI/PowerShell methods for automation
+✅ Created the accounts on one path, and saw how each Portal setting maps to an Az PowerShell and Azure CLI parameter
 
 ✅ Rotated an access key and understood key management best practices
 

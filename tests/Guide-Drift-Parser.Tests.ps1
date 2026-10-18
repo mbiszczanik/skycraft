@@ -722,7 +722,7 @@ Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#
         @{ lab = '4.1'; id = '4.1.10'; labels = @('Configuration')
            expected = 'Minimum TLS version: Version 1.2; Secure transfer required: Enabled' }
         @{ lab = '4.1'; id = '4.1.11'; labels = @('Configuration')
-           expected = 'The **Configuration** page of `prodskycraftswcsa` shows the values of Steps 4.1.10 and 4.1.11, and **Blob access tier (default)** **Hot**. Allow Blob anonymous access: Disabled; Allow storage account key access: Enabled' }
+           expected = 'The **Configuration** page of `prodskycraftswcsa` shows **Account kind** **StorageV2 (general purpose v2)**, **Performance** **Standard**, the values of Steps 4.1.10 and 4.1.11, and **Blob access tier (default)** **Hot**. Allow Blob anonymous access: Disabled; Allow storage account key access: Enabled' }
     ) {
         $step = $script:CheckLabs[$lab].steps | Where-Object id -eq $id
         @($step.items | Where-Object kind -eq 'field') | Should -BeNullOrEmpty

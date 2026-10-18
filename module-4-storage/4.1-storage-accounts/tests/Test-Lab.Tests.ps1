@@ -17,7 +17,8 @@
       4. An account without file share soft delete fails that check, counted (#358: the guide's
          PowerShell and CLI blocks now turn it on, as the Portal and the Bicep do).
       5. A blob service lookup that fails is a counted [FAIL] with its error, not a warning
-         (docs/powershell-standards.md section 4, rule 7).
+         (docs/powershell-standards.md section 4, rule 7), and so is a file service lookup.
+      6. An account that Azure left in a Failed provisioning state fails, counted (#371, #329).
 
     No subscription is needed, and none is used: tests/Support/LabScriptStub.psm1 (issue #112)
     imports the real modules first, the stub last, and aborts the child with exit 99 unless every
@@ -29,7 +30,7 @@
 .NOTES
     Project: SkyCraft
     Lab: 4.1 - Storage Accounts
-    Issue: #355, #358
+    Issue: #355, #358, #371
 #>
 
 #Requires -Version 7.0
@@ -53,6 +54,8 @@ BeforeAll {
     #   SKYCRAFT_STUB_RAGRS          storage account names whose SKU is Standard_RAGRS
     #   SKYCRAFT_STUB_NOSHARESD      storage account names with file share soft delete off
     #   SKYCRAFT_STUB_BLOBPROPS_FAIL storage account names whose blob service lookup throws
+    #   SKYCRAFT_STUB_FILEPROPS_FAIL storage account names whose file service lookup throws
+    #   SKYCRAFT_STUB_FAILED         storage account names whose provisioning state is Failed
     $script:StubBody = @'
 function Test-StubListed {
     param([string]$Variable, [string]$Name)
@@ -66,8 +69,10 @@ function Get-AzStorageAccount {
     $sku            = @{ platform = 'Standard_GRS'; dev = 'Standard_LRS'; prod = 'Standard_GRS' }[($ResourceGroupName -split '-')[0]]
     if (Test-StubListed 'SKYCRAFT_STUB_RAGRS' $Name) { $sku = 'Standard_RAGRS' }
     $tags = if (Test-StubListed 'SKYCRAFT_STUB_NOTAGS' $Name) { $null } else { @{ Project = 'SkyCraft'; Environment = $environmentTag; CostCenter = 'MSDN' } }
+    $state = if (Test-StubListed 'SKYCRAFT_STUB_FAILED' $Name) { 'Failed' } else { 'Succeeded' }
     [pscustomobject]@{
         StorageAccountName     = $Name
+        ProvisioningState      = $state
         Sku                    = [pscustomobject]@{ Name = $sku }
         PrimaryLocation        = 'swedencentral'
         MinimumTlsVersion      = 'TLS1_2'
@@ -93,6 +98,9 @@ function Get-AzStorageBlobServiceProperty {
 function Get-AzStorageFileServiceProperty {
     [CmdletBinding()]
     param([string]$StorageAccountName, [string]$ResourceGroupName, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if (Test-StubListed 'SKYCRAFT_STUB_FILEPROPS_FAIL' $StorageAccountName) {
+        throw "Operation returned an invalid status code 'Forbidden'"
+    }
     $enabled = -not (Test-StubListed 'SKYCRAFT_STUB_NOSHARESD' $StorageAccountName)
     [pscustomobject]@{
         ShareDeleteRetentionPolicy = [pscustomobject]@{ Enabled = $enabled; Days = $(if ($enabled) { 7 } else { 0 }) }
@@ -106,13 +114,17 @@ function Get-AzStorageFileServiceProperty {
             [string[]]$NoTags = @(),
             [string[]]$RaGrs = @(),
             [string[]]$NoShareSoftDelete = @(),
-            [string[]]$BlobPropsFail = @()
+            [string[]]$BlobPropsFail = @(),
+            [string[]]$FilePropsFail = @(),
+            [string[]]$Failed = @()
         )
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
             SKYCRAFT_STUB_NOTAGS         = $NoTags -join ','
             SKYCRAFT_STUB_RAGRS          = $RaGrs -join ','
             SKYCRAFT_STUB_NOSHARESD      = $NoShareSoftDelete -join ','
             SKYCRAFT_STUB_BLOBPROPS_FAIL = $BlobPropsFail -join ','
+            SKYCRAFT_STUB_FILEPROPS_FAIL = $FilePropsFail -join ','
+            SKYCRAFT_STUB_FAILED         = $Failed -join ','
         }
         return [pscustomobject]@{
             ExitCode  = $run.ExitCode
@@ -131,7 +143,10 @@ function Get-AzStorageFileServiceProperty {
     $script:ReadAccessGeo   = Invoke-ValidatorScript -Stub $script:Stub -RaGrs 'prodskycraftswcsa'
     $script:NoShareSoftDel  = Invoke-ValidatorScript -Stub $script:Stub -NoShareSoftDelete 'platformskycraftswcsa'
     $script:BlobLookupFails = Invoke-ValidatorScript -Stub $script:Stub -BlobPropsFail 'devskycraftswcsa'
-    $script:AllRuns         = @($script:AllTagged, $script:Untagged, $script:ReadAccessGeo, $script:NoShareSoftDel, $script:BlobLookupFails)
+    $script:FileLookupFails = Invoke-ValidatorScript -Stub $script:Stub -FilePropsFail 'prodskycraftswcsa'
+    $script:FailedAccount   = Invoke-ValidatorScript -Stub $script:Stub -Failed 'devskycraftswcsa'
+    $script:AllRuns         = @($script:AllTagged, $script:Untagged, $script:ReadAccessGeo, $script:NoShareSoftDel,
+        $script:BlobLookupFails, $script:FileLookupFails, $script:FailedAccount)
 }
 
 AfterAll {
@@ -161,6 +176,7 @@ Describe 'Lab 4.1 Test-Lab.ps1 - an untagged account is a failed check, not a cr
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         $run.FailLines | Should -Be 0
         $run.Output | Should -Match '\[PASS\] File share soft delete enabled'
+        $run.Output | Should -Match '\[PASS\] Provisioning state is Succeeded'
     }
 
     It 'fails the three tag checks of an untagged account and still reaches the summary' {
@@ -198,6 +214,28 @@ Describe 'Lab 4.1 Test-Lab.ps1 - the Portal defaults the guide names (#358)' {
         $run.Output | Should -Match '\[FAIL\] Blob service properties readable'
         $run.Output | Should -Match "invalid status code 'Forbidden'"
         $run.Output | Should -Not -Match '\[WARN\]'
+        $run.FailLines | Should -Be 1
+        $run.Output | Should -Match 'Tests Failed:\s+1'
+    }
+
+    It 'fails, counted, a file service lookup that fails, and prints its error' {
+        $run = $script:FileLookupFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[FAIL\] File service properties readable'
+        $run.Output | Should -Match "invalid status code 'Forbidden'"
+        $run.Output | Should -Not -Match '\[WARN\]'
+        $run.FailLines | Should -Be 1
+        $run.Output | Should -Match 'Tests Failed:\s+1'
+    }
+}
+
+Describe 'Lab 4.1 Test-Lab.ps1 - an account in a Failed state is not a working account (#371)' {
+
+    It 'fails, counted, an account whose provisioning state is Failed' {
+        $run = $script:FailedAccount
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[FAIL\] Provisioning state is Succeeded'
+        $run.Output | Should -Match 'Actual: Failed'
         $run.FailLines | Should -Be 1
         $run.Output | Should -Match 'Tests Failed:\s+1'
     }

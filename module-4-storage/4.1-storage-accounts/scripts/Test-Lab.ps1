@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Verifies storage accounts exist with correct configuration:
-    - Naming conventions
+    - Naming conventions, and a provisioning state of Succeeded (a Failed account fails, #371)
     - Redundancy settings (LRS for dev, GRS for platform and prod; RA-GRS fails with a hint)
     - Security settings (TLS 1.2, HTTPS only, no public access)
     - Required tags (Project, Environment, CostCenter)
@@ -134,7 +134,13 @@ foreach ($env in $envsToTest) {
         Test-Condition -Description "Storage account exists" -Condition $false -FailMessage "Not found: $($config.Name)" | Out-Null
         continue
     }
-    
+
+    # An account that Azure left in a Failed state exists but does not work (#371, #329).
+    Test-Condition `
+        -Description "Provisioning state is Succeeded" `
+        -Condition ("$($sa.ProvisioningState)" -eq 'Succeeded') `
+        -FailMessage "Actual: $($sa.ProvisioningState)" | Out-Null
+
     # Test redundancy/SKU. RA-GRS is what the Portal's Basics tab makes of GRS when "Make read access
     # to data available in the event of regional unavailability" is left checked (#358).
     $skuHint = if ($sa.Sku.Name -like '*RAGRS') {
