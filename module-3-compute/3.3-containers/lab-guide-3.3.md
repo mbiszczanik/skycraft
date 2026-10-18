@@ -33,7 +33,7 @@ You will deploy a containerized environment for the SkyCraft authentication serv
 - **Section 1**: Azure Container Registry (30 min)
 - **Section 2**: Azure Container Instances (30 min)
 - **Section 3**: Azure Container Apps (45 min, including about 5 minutes of deployment)
-- **What This Lab Leaves Behind** and cleanup (15 min)
+- **What This Lab Leaves Behind** and cleanup (15 min of your time; the Container Apps environment's delete then runs up to 25 minutes on its own, and you do not need to watch it)
 
 ## ✅ Prerequisites
 
@@ -49,7 +49,7 @@ If you completed Lab 1.3, its policies are still assigned to your subscription a
 
 - `Restrict-Azure-Regions` refuses a resource outside **Sweden Central** and **North Europe**. The Container App wizard starts in **West US 2**, and the container instance logs it would create go to **East US**; every create step below names the region and says what to change.
 - `Enforce-Project-Tag` refuses a resource without `Project` = `SkyCraft`. Every create step below sets the four SkyCraft tags on its **Tags** tab. `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8) adds `Project` from `dev-skycraft-swc-rg` to anything created in it without the tag, so a resource the **Tags** tab does not reach is still accepted.
-- `Require-Environment-Tag-RG` refuses a resource group without an `Environment` tag, including one Azure would create for you (`DefaultResourceGroup-*`). The steps below choose options that need no such group. The one group Azure does create here, the Container Apps environment's infrastructure group (Step 3.3.6), was not refused in the agent Portal pass of 2026-10-15.
+- `Require-Environment-Tag-RG` refuses a resource group without an `Environment` tag, including one Azure would create for you (`DefaultResourceGroup-*`). The steps below turn off the one option known to need such a group (the container instance logs of Step 3.3.4). In the agent Portal pass of 2026-10-15 the activity log still showed a refused attempt to create `DefaultResourceGroup-SEC`; which step caused it was not recorded, and nothing the lab checks was missing because of it (Troubleshooting, Issue 4). The one group Azure does create here, the Container Apps environment's infrastructure group (Step 3.3.6), was not refused in that pass.
 
 Check the prerequisites with Az PowerShell (signed in with `Connect-AzAccount` to the subscription you use for the course):
 
@@ -77,9 +77,11 @@ The end state on every path:
 - `dev-skycraft-swc-aca-world`: container `worldserver` (0.25 CPU cores, 0.5 Gi memory) pulling with the registry's admin credentials, external HTTP ingress on port 80 without insecure connections, 1-3 replicas with the HTTP rule `http-load` at 10 concurrent requests.
 - The four SkyCraft tags on all four resources.
 
-Two values differ by path and are meant to: the DNS label's suffix (yours in the Portal and PowerShell, a 13-character hash of the resource group's id in Bicep), and the image (built from source by ACR Tasks in Step 3.3.3, imported from Microsoft Container Registry by `Deploy-Bicep.ps1`, which has no build command to call; both images serve the same "Welcome to Azure Container Instances!" page).
+Three values differ by path and are meant to: the DNS label's suffix (yours in the Portal and PowerShell, a 13-character hash of the resource group's id in Bicep); the image (built from source by ACR Tasks in Step 3.3.3, imported from Microsoft Container Registry by `Deploy-Bicep.ps1`, which has no build command to call; both images serve the same "Welcome to Azure Container Instances!" page); and the name of the environment's infrastructure resource group, which Azure creates and you never use (`ME_dev-skycraft-swc-cae-02` on the Bicep path; on the other two Azure chooses it, and it starts with `ME_`).
 
 Steps without a PowerShell or Bicep counterpart: 3.3.3 has only its Azure CLI command (no Az PowerShell cmdlet builds an image from source; see the note there), and 3.3.5 only reads the result. Steps 3.3.6-3.3.9 share one PowerShell block, under Step 3.3.8, because the Portal creates the environment and the app in one deployment.
+
+If you deployed this lab with `scripts/Deploy-Bicep.ps1` before its template declared the Consumption workload profile, your existing environment is a Consumption-only environment, and Azure cannot change an environment's type. `Deploy-Bicep.ps1` then stops before it changes anything and says so: run `./scripts/Remove-LabResource.ps1` first (it deletes the app, the environment and the rest of the lab), then deploy again.
 
 ---
 
@@ -109,8 +111,6 @@ For SkyCraft, we need a secure place to store our proprietary game server images
 
 > **Note**: The registry name must be globally unique and contain only alphanumeric characters. If `devskycraftswcacr01` is taken, use another name (for example `devskycraftswcacr02`) everywhere this guide says `devskycraftswcacr01`, and pass it to the lab's scripts with `-AcrName`.
 
-![Create Container Registry](./images/step-3.3.1.png)
-
 4. Click the **Tags** tab and add:
 
 | Name        | Value       |
@@ -126,6 +126,8 @@ For SkyCraft, we need a secure place to store our proprietary game server images
 
 - Validation passes and deployment succeeds. Without the tags, the Portal refuses validation once Lab 1.3's `Enforce-Project-Tag` is assigned.
 - The registry `devskycraftswcacr01` is listed in `dev-skycraft-swc-rg`.
+
+![Create Container Registry](./images/step-3.3.1.png)
 
 **Cost**: A Standard registry costs about 0.60 EUR per day for as long as it exists, whether you use it or not. Delete it when you finish the lab (see What This Lab Leaves Behind).
 
@@ -252,7 +254,7 @@ We will use ACI to deploy a single instance of the AuthServer for testing.
 
 Replace `[suffix]` with four to six lowercase letters and digits of your own, for example your initials and two digits. The label must be unique in Sweden Central in this scope. Leave the ports list as it is: one row, port 80, protocol TCP.
 
-> **Warning**: As soon as you type a DNS name label, **DNS name label scope reuse** changes from **Any reuse (unsecure)** to **Tenant**. Set it back to **Any reuse (unsecure)**. **Tenant** is the safer choice: it adds a hash segment to the address (`<label>.<hash>.swedencentral.azurecontainer.io`), so nobody outside your tenant can take the name over after you delete the container. This lab uses **Any reuse (unsecure)** because it is the only scope all three paths can set: Az PowerShell's `New-AzContainerGroup` has no scope parameter, and the lab's Bicep and its FQDN output use the same scope. Keep **Tenant** for anything you build after this course.
+> **Warning**: As soon as you type a DNS name label, **DNS name label scope reuse** changes from **Any reuse (unsecure)** to **Tenant**. Set it back to **Any reuse (unsecure)**. **Tenant** is the safer choice: it adds a hash segment to the address (`<label>.<hash>.swedencentral.azurecontainer.io`), so nobody outside your tenant can take the name over after you delete the container. This lab uses **Any reuse (unsecure)** because it is the only scope all three paths reach: Az PowerShell's `New-AzContainerGroup` has no scope parameter and gets Azure's default, **Any reuse (unsecure)**, and the lab's Bicep leaves the same default (its FQDN output assumes it). Keep **Tenant** for anything you build after this course.
 
 7. Click **Next: Monitoring**, and fill in:
 
@@ -260,7 +262,7 @@ Replace `[suffix]` with four to six lowercase letters and digits of your own, fo
 | ---------------------------------- | ----------- |
 | **Enable container instance logs** | **Uncheck** |
 
-> **Warning**: **Enable container instance logs** is checked by default and creates a new Log Analytics workspace, `DefaultWorkspace-<subscription id>-EUS`, in a default resource group in **East US**. That workspace costs money for every log it stores, sits outside the regions Lab 1.3 allows, and later Module 5 wizards would offer it as a default. Uncheck the box. If you create the instance with the box checked, delete the instance and create it again; wait a minute after the delete before you reuse the name `dev-skycraft-swc-aci-auth`.
+> **Warning**: **Enable container instance logs** is checked by default and creates a new Log Analytics workspace, `DefaultWorkspace-<subscription id>-EUS`, in a default resource group in **East US**. That workspace costs money for every log it stores, sits outside the regions Lab 1.3 allows, and later Module 5 wizards would offer it as a default. Uncheck the box. If you create the instance with the box checked, delete the instance and create it again; wait a minute after the delete before you reuse the name `dev-skycraft-swc-aci-auth`. The workspace stays after the instance is gone: `DefaultWorkspace-...` is the subscription's shared default workspace, which other services may also write to, so no script of this lab deletes it (`scripts/Remove-LabResource.ps1` names it while the instance still sends logs to it). If you created it here and nothing else uses it, delete it, and then `DefaultResourceGroup-EUS` if it is empty (What This Lab Leaves Behind).
 
 8. Click **Next: Advanced**, and fill in:
 
@@ -371,14 +373,16 @@ Leave the **Workload profiles** tab as it is: the environment gets the **Consump
 
 7. Click **Create**.
 
-The page closes and the app wizard shows `dev-skycraft-swc-cae-02` (new) under **Container Apps environment**. Nothing is created yet: the environment is created together with the app in Step 3.3.8.
+**Expected Result**:
 
-> [!NOTE]
-> The `-02` suffix on the environment is deliberate. A Container Apps environment names its infrastructure resource group `ME_<environment-name>` and that name is immutable, so the first environment's leftovers cannot be redeployed onto; `bicep/main.bicep`, `scripts/Test-Lab.ps1` and `scripts/Remove-LabResource.ps1` all use `dev-skycraft-swc-cae-02` (see `ARCHITECTURE.md` §5). The app carries no suffix: nothing immutable hangs off its name, and `platform-skycraft-swc-aca-world-02` would exceed the 32 characters a Container App allows. Every name in this lab takes the environment as its prefix - `Deploy-Bicep.ps1 -Environment prod` deploys `prodskycraftswcacr01`, `prod-skycraft-swc-aci-auth`, `prod-skycraft-swc-cae-02` and `prod-skycraft-swc-aca-world` into `prod-skycraft-swc-rg`.
-
-The infrastructure resource group (`ME_` followed by the environment's name) is created and managed by Azure, and deleted with the environment. Do not create, tag or change it: Azure creates it without your tags, and Lab 1.3's policies did not refuse it in the agent Portal pass of 2026-10-15.
+- The page closes, and the app wizard shows `dev-skycraft-swc-cae-02` (new) under **Container Apps environment**. Nothing is created yet: the environment is created together with the app in Step 3.3.8.
 
 ![Create Container Apps Environment](./images/step-3.3.6.png)
+
+> [!NOTE]
+> The `-02` suffix on the environment is deliberate. On the Bicep path the environment's infrastructure resource group is named `ME_<environment-name>`, and that name cannot be changed once the environment exists, so the first environment's leftovers cannot be redeployed onto; `bicep/main.bicep`, `scripts/Test-Lab.ps1` and `scripts/Remove-LabResource.ps1` all use `dev-skycraft-swc-cae-02` (see `ARCHITECTURE.md` §5). The app carries no suffix: nothing immutable hangs off its name, and `platform-skycraft-swc-aca-world-02` would exceed the 32 characters a Container App allows. Every name in this lab takes the environment as its prefix - `Deploy-Bicep.ps1 -Environment prod` deploys `prodskycraftswcacr01`, `prod-skycraft-swc-aci-auth`, `prod-skycraft-swc-cae-02` and `prod-skycraft-swc-aca-world` into `prod-skycraft-swc-rg`.
+
+The infrastructure resource group is created and managed by Azure, and deleted with the environment. Its name starts with `ME_`: the Bicep template asks for `ME_` followed by the environment's name, while the Portal and the PowerShell block leave the rest of the name to Azure. Do not create, tag or change it: Azure creates it without your tags, and Lab 1.3's policies did not refuse it in the agent Portal pass of 2026-10-15.
 
 ### Step 3.3.7: Configure Container Settings
 
@@ -404,6 +408,10 @@ The app reuses the `skycraft-auth` image for the lab demo.
 
 > **Note**: **Authentication type** may start at **Managed identity**, with **System assigned Identity (environment)** and the remark "Required role assignment: ACR pull". That choice makes the Portal grant a role on the registry, which needs Owner or User Access Administrator. This lab uses **Secret**: the app pulls with the registry's admin user from Step 3.3.2, as the container instance and the Bicep path do, and no role is granted.
 
+**Expected Result**:
+
+- The **Container** tab shows the container `worldserver` with the image `skycraft-auth:v1` from `devskycraftswcacr01`, **Secret** authentication and 0.25 CPU cores with 0.5 Gi memory. Nothing is created yet: Step 3.3.8 ends the wizard.
+
 ![Configure Container Settings](./images/step-3.3.7.png)
 
 ### Step 3.3.8: Configure Ingress
@@ -422,8 +430,6 @@ The app reuses the `skycraft-auth` image for the lab demo.
 
 > **Warning**: **Ingress traffic** starts at **Limited to Container Apps Environment**. **Accepting traffic from anywhere** gives the app a public HTTPS address that anyone on the internet can open; this lab needs it to check the app from your browser. Leave **Insecure connections** unchecked so that plain HTTP is redirected to HTTPS.
 
-![Configure Ingress](./images/step-3.3.8.png)
-
 4. Click the **Tags** tab, and add (the tags apply to the app and the new environment):
 
 | Name        | Value       |
@@ -440,6 +446,8 @@ The app reuses the `skycraft-auth` image for the lab demo.
 - Deployment succeeds after a few minutes (the environment takes most of the time).
 - `dev-skycraft-swc-rg` lists the Container Apps environment `dev-skycraft-swc-cae-02` and the container app `dev-skycraft-swc-aca-world`, and no new Log Analytics workspace.
 - On the app's **Overview** page, **Application Url** opens the same "Welcome to Azure Container Instances!" page over HTTPS.
+
+![Configure Ingress](./images/step-3.3.8.png)
 
 **With Az PowerShell** (instead of Steps 3.3.6-3.3.9; it creates the environment and the app with the scale settings of Step 3.3.9):
 
@@ -477,7 +485,7 @@ New-AzContainerApp -ResourceGroupName $rg -Name 'dev-skycraft-swc-aca-world' -Lo
 ### Step 3.3.9: Configure Scaling
 
 1. Navigate to `dev-skycraft-swc-aca-world` → **Overview**
-2. In the left menu, under **Application** (expand it if it is collapsed), click **Scale**.
+2. In the left menu, under **App** (expand it if it is collapsed), click **Scale**.
 3. Fill in:
 
 | Field            | Value |
@@ -499,13 +507,13 @@ The page starts at **Min replicas** 0 and **Max replicas** 10, with one scale ru
 6. Click **Add**.
 7. Click **Save as a new revision**.
 
-![Configure Scaling](./images/step-3.3.9.png)
-
 **Expected Result**:
 
 - A new revision is created with the scaling rules applied.
 - **Scale** shows **Min replicas** 1, **Max replicas** 3 and the single rule `http-load`.
 - If traffic increases beyond 10 concurrent requests, ACA will automatically spin up more replicas (up to 3).
+
+![Configure Scaling](./images/step-3.3.9.png)
 
 The Az PowerShell block under Step 3.3.8 sets the same scale settings when it creates the app.
 
@@ -544,14 +552,24 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 | `dev-skycraft-swc-cae-02` (Consumption profile) | `dev-skycraft-swc-rg`, plus its `ME_` infrastructure group | 0 on its own | Nothing |
 | `dev-skycraft-swc-aca-world` (1 replica always ready) | `dev-skycraft-swc-rg` | up to about 0.20 EUR, less while the monthly free grant lasts | Nothing |
 | The Portal's Log Analytics workspace `workspacedevskycraftswcrg...`, **only** if you kept **Azure Log Analytics** in Step 3.3.6 | `dev-skycraft-swc-rg` | per GB of logs stored | Module 5 wizards offer it as their default workspace; remove it |
+| `DefaultWorkspace-<subscription id>-EUS`, **only** if you left **Enable container instance logs** checked in Step 3.3.4 and Lab 1.3's policies did not refuse it | `DefaultResourceGroup-EUS` (East US) | per GB of logs stored | Module 5 wizards may offer it as a default; delete it yourself if nothing else in your subscription uses it |
 
-To remove everything above, run the lab's cleanup from the lab folder:
+To remove the first five rows, run the lab's cleanup from the lab folder:
 
 ```powershell
 ./scripts/Remove-LabResource.ps1
 ```
 
-It deletes the app before its environment, then any Log Analytics workspace in `dev-skycraft-swc-rg` that the environment sent logs to or that carries the Portal's automatic name, then the container instance and the registry. It leaves `dev-skycraft-swc-rg` and its tags in place. The environment's delete takes up to 25 minutes. In the Portal, delete the same resources in the same order from `dev-skycraft-swc-rg`.
+It asks before each delete and names the resource it is about to delete (`-WhatIf` lists them without deleting anything; `-Force` skips the questions). It deletes the app before its environment, then a Log Analytics workspace in `dev-skycraft-swc-rg` that carries the Portal's automatic name (`workspace` followed by the resource group's name without dashes), then the container instance and the registry. A workspace with any other name stays: if the environment sent its logs to one, the script names it, and you decide. It leaves `dev-skycraft-swc-rg` and its tags in place. The environment's delete takes up to 25 minutes. In the Portal, delete the same resources in the same order from `dev-skycraft-swc-rg`.
+
+The last row is not deleted by the script. `DefaultWorkspace-<subscription id>-EUS` is the default workspace Azure shares between every service of your subscription that asks for one, so the script cannot tell whether something else writes to it. If the container instance still sends its logs there, the script names the workspace and prints the command to delete it. If you created it in this lab and nothing else uses it, delete it, and then `DefaultResourceGroup-EUS` if it is empty:
+
+```powershell
+Get-AzResource -ResourceGroupName 'DefaultResourceGroup-EUS' -ResourceType 'Microsoft.OperationalInsights/workspaces' |
+    Select-Object Name, ResourceId
+# Only if nothing else uses it:
+Remove-AzResource -ResourceId '<ResourceId from above>' -Force
+```
 
 ---
 
@@ -575,7 +593,7 @@ It deletes the app before its environment, then any Log Analytics workspace in `
 ### Issue 4: A create is refused by policy
 
 **Symptom**: Validation fails or the notification bell shows `RequestDisallowedByPolicy` with "All resources must be tagged with Project=SkyCraft" or "Resources must be deployed to Sweden Central or North Europe regions only".
-**Solution**: Lab 1.3's policies are in effect. Fill in the **Tags** tab with the four tags of the step and choose **Sweden Central** as the region; in Step 3.3.6, check that **Resource group** and **Region** are not the wizard's pre-filled values. The activity log may also show that Azure tried to create `DefaultResourceGroup-SEC` and was refused by `Require-Environment-Tag-RG`. That attempt is harmless: the choices in Steps 3.3.4 and 3.3.6 need no default group, and nothing in this lab is missing because of it.
+**Solution**: Lab 1.3's policies are in effect. Fill in the **Tags** tab with the four tags of the step and choose **Sweden Central** as the region; in Step 3.3.6, check that **Resource group** and **Region** are not the wizard's pre-filled values. The activity log may also show that Azure tried to create `DefaultResourceGroup-SEC` and was refused by `Require-Environment-Tag-RG`. The agent Portal pass of 2026-10-15 saw that refusal without recording which step caused it; none of the lab's resources is in that group, and `scripts/Test-Lab.ps1` still passed. If a create step itself fails with this refusal, check that **Enable container instance logs** is unchecked in Step 3.3.4 and that **Logs destination** is **Azure Monitor** in Step 3.3.6.
 
 ### Issue 5: `az acr build` is not available
 

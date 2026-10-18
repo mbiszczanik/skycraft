@@ -25,11 +25,15 @@
          when its app could not be looked up or deleted. The stub reports the failure with Write-Error, as
          the Az getters do, so a script that passes -ErrorAction SilentlyContinue swallows it.
       4. A failure does not stop the later steps.
-      5. -Environment and the name overrides reach the delete calls; -WhatIf deletes nothing.
+      5. -Environment and the name overrides reach the delete calls; -WhatIf deletes nothing and
+         names each resource it would delete.
       6. Issue #374: the Log Analytics workspace the Portal creates for a Container Apps
-         environment is deleted after the environment - the one the environment sends its logs
-         to and the one with the Portal's automatic name, in the lab's resource group only - and
-         kept when the environment could not be removed or the lookup failed.
+         environment is deleted after the environment - only the one with the Portal's automatic
+         name, in the lab's resource group - and kept when the environment could not be removed
+         or the lookup failed. A workspace the environment logs to under another name is named
+         and kept; Lab 5.1's shared <env>-skycraft-swc-law is never deleted.
+      7. The subscription's default workspace that the ACI wizard's logs default sends the
+         instance's logs to is named with its delete command, never deleted.
     Which errors mean "not found" is pinned for every cleanup that carries the helpers by
     tests/Lab-Cleanup-Lookup.Tests.ps1.
     No Azure connection is needed, and none is used: the script runs through
@@ -121,27 +125,40 @@ function Invoke-StubLookup {
 function Get-AzResource {
     [CmdletBinding()]
     param($ResourceGroupName, $ResourceType, $Name, [switch]$ExpandProperties)
-    # A lookup without a name lists a type: it is logged and keyed by the type.
-    $key = if ($Name) { $Name } else { $ResourceType }
+    # A lookup without a name lists a type: it is logged and keyed by the type, and one without a
+    # resource group (the whole subscription) by the type followed by '@subscription'.
+    $key = if ($Name) { $Name } elseif ($ResourceGroupName) { $ResourceType } else { "$ResourceType@subscription" }
     Write-StubCall -Name "Get-AzResource $key"
     if (Invoke-StubLookup -Name "Get-AzResource:$key" -ResourceGroup $ResourceGroupName) { return }
     if (Test-StubEmpty) { return }
 
-    # The workspaces in the group: SKYCRAFT_STUB_WORKSPACES 'name:customerId,...'.
+    # The workspaces: SKYCRAFT_STUB_WORKSPACES 'name:customerId[:resourceGroup],...', in the lab's
+    # group unless one is named. A listing by group returns that group's; one without, all of them.
     if (-not $Name -and $ResourceType -eq 'Microsoft.OperationalInsights/workspaces') {
         foreach ($entry in @($env:SKYCRAFT_STUB_WORKSPACES -split ',' | Where-Object { $_ })) {
-            $workspaceName, $customerId = $entry -split ':', 2
+            $workspaceName, $customerId, $group = $entry -split ':', 3
+            if (-not $group) { $group = $env:SKYCRAFT_STUB_LAB_RG }
+            if ($ResourceGroupName -and $group -ne $ResourceGroupName) { continue }
             [pscustomobject]@{
-                Name         = $workspaceName
-                ResourceType = $ResourceType
-                ResourceId   = "/subscriptions/0/resourceGroups/$ResourceGroupName/providers/$ResourceType/$workspaceName"
-                Properties   = [pscustomobject]@{ customerId = $customerId }
+                Name              = $workspaceName
+                ResourceType      = $ResourceType
+                ResourceGroupName = $group
+                ResourceId        = "/subscriptions/0/resourceGroups/$group/providers/$ResourceType/$workspaceName"
+                Properties        = [pscustomobject]@{ customerId = $customerId }
             }
         }
         return
     }
 
     $properties = $null
+    if ($ResourceType -eq 'Microsoft.ContainerInstance/containerGroups' -and $ExpandProperties) {
+        # SKYCRAFT_STUB_ACI_CUSTOMERID: the workspace the container instance sends its logs to, if any.
+        $properties = if ($env:SKYCRAFT_STUB_ACI_CUSTOMERID) {
+            [pscustomobject]@{ diagnostics = [pscustomobject]@{ logAnalytics = [pscustomobject]@{ workspaceId = $env:SKYCRAFT_STUB_ACI_CUSTOMERID } } }
+        } else {
+            [pscustomobject]@{ diagnostics = $null }
+        }
+    }
     if ($ResourceType -eq 'Microsoft.App/managedEnvironments' -and $ExpandProperties) {
         # SKYCRAFT_STUB_CAE_CUSTOMERID: the workspace the environment sends its logs to, if any.
         $logs = if ($env:SKYCRAFT_STUB_CAE_CUSTOMERID) {
@@ -186,6 +203,8 @@ function Remove-AzContainerRegistry {
             [string[]]$Arguments = @('-Force'),
             [string[]]$Workspace = @(),
             [string]$CaeCustomerId = '',
+            [string]$AciCustomerId = '',
+            [string]$LabResourceGroup = 'dev-skycraft-swc-rg',
             [switch]$Empty
         )
 
@@ -199,6 +218,8 @@ function Remove-AzContainerRegistry {
             SKYCRAFT_STUB_LOG            = $logPath
             SKYCRAFT_STUB_WORKSPACES     = $Workspace -join ','
             SKYCRAFT_STUB_CAE_CUSTOMERID = $CaeCustomerId
+            SKYCRAFT_STUB_ACI_CUSTOMERID = $AciCustomerId
+            SKYCRAFT_STUB_LAB_RG         = $LabResourceGroup
         }
 
         $calls = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { @() }
@@ -242,11 +263,30 @@ function Remove-AzContainerRegistry {
         -CaeCustomerId 'cccccccc-0000-0000-0000-000000000003' -Fail 'Remove-AzResource:dev-skycraft-swc-cae-02'
     $script:WorkspaceDenied = Invoke-CleanupScript -Stub $script:Stub -Workspace $script:LabWorkspaces `
         -Lookup 'Get-AzResource:Microsoft.OperationalInsights/workspaces=denied'
+    $script:WhatIfWorkspaces = Invoke-CleanupScript -Stub $script:Stub -Workspace $script:LabWorkspaces `
+        -CaeCustomerId 'cccccccc-0000-0000-0000-000000000003' -Arguments '-WhatIf'
+    # Review of #374: with -Environment platform the lab's group also holds Lab 5.1's shared
+    # workspace; an environment pointed at it must not get it deleted.
+    $script:PlatformShared = Invoke-CleanupScript -Stub $script:Stub -Arguments '-Force', '-Environment', 'platform' `
+        -LabResourceGroup 'platform-skycraft-swc-rg' -CaeCustomerId 'dddddddd-0000-0000-0000-000000000004' -Workspace @(
+            'platform-skycraft-swc-law:dddddddd-0000-0000-0000-000000000004'
+            'workspaceplatformskycraftswcrg9f8e:eeeeeeee-0000-0000-0000-000000000005'
+        )
+    # The ACI wizard's default sends the instance's logs to the subscription's shared default
+    # workspace in another group: it is named, never deleted.
+    $script:AciDefaultWorkspace = @(
+        'DefaultWorkspace-00000000-0000-0000-0000-000000000000-EUS:ffffffff-0000-0000-0000-000000000006:DefaultResourceGroup-EUS'
+    )
+    $script:AciLogs = Invoke-CleanupScript -Stub $script:Stub -Workspace $script:AciDefaultWorkspace `
+        -AciCustomerId 'ffffffff-0000-0000-0000-000000000006'
+    $script:AciLogsDenied = Invoke-CleanupScript -Stub $script:Stub -Workspace $script:AciDefaultWorkspace `
+        -AciCustomerId 'ffffffff-0000-0000-0000-000000000006' -Lookup 'Get-AzResource:Microsoft.OperationalInsights/workspaces@subscription=denied'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:AciStuck, $script:TwoStuck, $script:Prod, $script:WhatIf,
         $script:NotFound, $script:LookupsFail, $script:AppDenied, $script:Workspaces, $script:EnvStuck,
-        $script:WorkspaceDenied
+        $script:WorkspaceDenied, $script:WhatIfWorkspaces, $script:PlatformShared, $script:AciLogs,
+        $script:AciLogsDenied
     )
 }
 
@@ -351,13 +391,36 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
 
 Describe 'Lab 3.3 Remove-LabResource.ps1 - the Portal''s Log Analytics workspace (#374)' {
 
-    It 'deletes the auto-named workspace and the one the environment logs to, and nothing else' {
+    It 'deletes only the workspace with the Portal''s automatic name' {
         $run = $script:Workspaces
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         $run.Calls | Should -Contain 'Remove-AzResource workspacedevskycraftswcrg1a2b'
-        $run.Calls | Should -Contain 'Remove-AzResource my-env-logs'
+        $run.Calls | Should -Not -Contain 'Remove-AzResource my-env-logs'
         $run.Calls | Should -Not -Contain 'Remove-AzResource dev-skycraft-swc-law-reports'
         $run.Output | Should -Match 'Cleanup Complete'
+    }
+
+    It 'names the workspace the environment logs to under another name, and keeps it' {
+        $run = $script:Workspaces
+        $run.Output | Should -Match '\[INFO\] Kept my-env-logs: dev-skycraft-swc-cae-02 sent its logs to it'
+        $run.Output | Should -Not -Match 'Kept dev-skycraft-swc-law-reports'
+    }
+
+    It 'never deletes Lab 5.1''s shared workspace, even when the environment logs to it' {
+        $run = $script:PlatformShared
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls | Should -Contain 'Get-AzResource Microsoft.OperationalInsights/workspaces'
+        $run.Calls | Should -Not -Contain 'Remove-AzResource platform-skycraft-swc-law'
+        $run.Calls | Should -Contain 'Remove-AzResource workspaceplatformskycraftswcrg9f8e'
+        $run.Output | Should -Match '\[INFO\] Kept platform-skycraft-swc-law: platform-skycraft-swc-cae-02 sent its logs to it'
+    }
+
+    It 'names each workspace it would delete under -WhatIf, and deletes none' {
+        $run = $script:WhatIfWorkspaces
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'What if: Performing the operation "Remove Log Analytics workspace" on target "workspacedevskycraftswcrg1a2b"'
+        $run.Output | Should -Not -Match 'What if: [^\r\n]*"(my-env-logs|dev-skycraft-swc-law-reports)"'
+        $run.Calls  | Should -Not -Match '^Remove-'
     }
 
     It 'deletes the workspaces after the environment, and before the instance and the registry' {
@@ -371,7 +434,7 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - the Portal''s Log Analytics workspace
     }
 
     It 'finds nothing to delete on the guide''s path, where no workspace exists' {
-        $script:Clean.Output | Should -Match "Removing Log Analytics workspace: any the Portal created for dev-skycraft-swc-cae-02\.\.\.\s+-> \[INFO\] Not found - nothing to delete\."
+        $script:Clean.Output | Should -Match "Removing Log Analytics workspace: named workspacedevskycraftswcrg\.\.\. \(the Portal's automatic name\)\.\.\.\s+-> \[INFO\] Not found - nothing to delete\."
         @($script:Clean.Calls | Where-Object { $_ -like 'Remove-AzResource workspace*' }) | Should -BeNullOrEmpty
     }
 
@@ -394,10 +457,34 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - the Portal''s Log Analytics workspace
     It 'counts a failed workspace lookup and deletes none of them' {
         $run = $script:WorkspaceDenied
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match "\[ERROR\] Could not look up Log Analytics workspace 'any the Portal created for dev-skycraft-swc-cae-02'[^\r\n]*does not have authorization"
+        $run.Output | Should -Match "\[ERROR\] Could not look up Log Analytics workspace 'named workspacedevskycraftswcrg\.\.\. \(the Portal's automatic name\)'[^\r\n]*does not have authorization"
         $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
         @($run.Calls | Where-Object { $_ -like 'Remove-AzResource workspace*' -or $_ -eq 'Remove-AzResource my-env-logs' }) | Should -BeNullOrEmpty
         $run.Calls | Should -Contain 'Remove-AzContainerGroup dev-skycraft-swc-aci-auth'
+    }
+}
+
+Describe 'Lab 3.3 Remove-LabResource.ps1 - the container instance''s default workspace (#374)' {
+
+    It 'names the shared default workspace the instance logged to, with the delete command, and keeps it' {
+        $run = $script:AciLogs
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[WARN\] dev-skycraft-swc-aci-auth sent its logs to Log Analytics workspace 'DefaultWorkspace-00000000-0000-0000-0000-000000000000-EUS' in resource group 'DefaultResourceGroup-EUS'"
+        $run.Output | Should -Match "Remove-AzResource -ResourceId '/subscriptions/0/resourceGroups/DefaultResourceGroup-EUS/providers/Microsoft\.OperationalInsights/workspaces/DefaultWorkspace-00000000-0000-0000-0000-000000000000-EUS' -Force"
+        $run.Calls | Should -Not -Contain 'Remove-AzResource DefaultWorkspace-00000000-0000-0000-0000-000000000000-EUS'
+        $run.Calls | Should -Contain 'Remove-AzContainerGroup dev-skycraft-swc-aci-auth'
+    }
+
+    It 'does not look for it when the instance sent no logs' {
+        $script:Clean.Calls | Should -Not -Contain 'Get-AzResource Microsoft.OperationalInsights/workspaces@subscription'
+        $script:Clean.Output | Should -Not -Match '\[WARN\]'
+    }
+
+    It 'counts a failed lookup of it as a failure' {
+        $run = $script:AciLogsDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Could not look up the Log Analytics workspace of dev-skycraft-swc-aci-auth \(customer id ffffffff-0000-0000-0000-000000000006\)'
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
     }
 }
 

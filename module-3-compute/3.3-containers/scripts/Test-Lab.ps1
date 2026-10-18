@@ -4,14 +4,18 @@
 
 .DESCRIPTION
     This script runs validation checks against the deployed SkyCraft Lab 3.3 resources:
-    - Azure Container Registry (ACR) and Image existence.
-    - Azure Container Instance (ACI) running state, public IP, DNS name label, and no container
-      instance logs (the Portal's default creates a Log Analytics workspace in East US).
-    - Azure Container Apps (ACA) running state, ingress, scaling config, and the logs destination
-      of its environment, found through the app (docs/powershell-standards.md rule 7).
+    - Azure Container Registry (ACR) provisioning state, SKU, admin user and image existence.
+    - Azure Container Instance (ACI) provisioning state, OS type, SKU, restart policy, size, public
+      IP, DNS name label, and no container instance logs (the Portal's default creates a Log
+      Analytics workspace in East US).
+    - Azure Container Apps (ACA) provisioning state, ingress, scaling config, and the provisioning
+      state, workload profile and logs destination of its environment, found through the app
+      (docs/powershell-standards.md rule 7).
     - No Log Analytics workspace with the Portal's automatic name in the resource group: the
       Container Apps wizard's default creates one, and Module 5 wizards then offer it as their
       default workspace (#374).
+    - The region and the Project, Environment and CostCenter tags of the four resources.
+    A resource left in a Failed provisioning state fails its check (#371).
 
     It accepts the state each path of the lab guide leaves - the Portal steps, the Az PowerShell
     blocks and Deploy-Bicep.ps1 (#362).
@@ -106,6 +110,14 @@ $acr = Get-AzContainerRegistry -ResourceGroupName $ResourceGroupName -Name $AcrN
 if ($acr) {
     Write-Host "[OK] ACR found: $AcrName" -ForegroundColor Green
 
+    # A registry whose create failed still shows up by name (#371).
+    if ("$($acr.ProvisioningState)" -eq 'Succeeded') {
+        Write-Host "  - Provisioning State: Succeeded" -ForegroundColor Green
+    } else {
+        Write-Host "  - [FAIL] Provisioning State is '$($acr.ProvisioningState)' (Expected: Succeeded)" -ForegroundColor Red
+        $failCount++
+    }
+
     if ($acr.SkuName -eq "Standard") {
         Write-Host "  - SKU Standard verified" -ForegroundColor Green
     } else {
@@ -147,6 +159,25 @@ try {
         $failCount++
     }
 
+    # The settings Step 3.3.4 chooses, as all three paths set them.
+    $aciExpected = [ordered]@{ 'OS type' = @('Linux', $aci.OSType); 'SKU' = @('Standard', $aci.Sku); 'Restart policy' = @('Always', $aci.RestartPolicy) }
+    foreach ($setting in $aciExpected.Keys) {
+        $expected, $actual = $aciExpected[$setting]
+        if ("$actual" -eq $expected) {
+            Write-Host "  - $($setting): $expected" -ForegroundColor Green
+        } else {
+            Write-Host "  - [FAIL] $setting is '$actual' (Expected: $expected, Step 3.3.4)" -ForegroundColor Red
+            $failCount++
+        }
+    }
+    $aciContainer = @($aci.Container)[0]
+    if ($aciContainer -and [double]"$($aciContainer.RequestCpu)" -eq 1 -and [double]"$($aciContainer.RequestMemoryInGb)" -eq 1) {
+        Write-Host "  - Size: 1 CPU core, 1 GiB memory" -ForegroundColor Green
+    } else {
+        Write-Host "  - [FAIL] Size is '$($aciContainer.RequestCpu)' CPU cores and '$($aciContainer.RequestMemoryInGb)' GiB memory (Expected: 1 and 1, Step 3.3.4 Change size)" -ForegroundColor Red
+        $failCount++
+    }
+
     if ($aci.IpAddress.Ip) {
         Write-Host "  - Public IP: $($aci.IpAddress.Ip)" -ForegroundColor Green
     } else {
@@ -172,7 +203,7 @@ try {
     # Step 3.3.4 unchecks "Enable container instance logs": checked, it sends the logs to a new
     # workspace in East US (#374).
     if ($aci.LogAnalyticWorkspaceId) {
-        Write-Host "  - [FAIL] Container instance logs go to a Log Analytics workspace (workspace id $($aci.LogAnalyticWorkspaceId)). Step 3.3.4 unchecks 'Enable container instance logs'; recreate the instance without them and delete the workspace if nothing else uses it." -ForegroundColor Red
+        Write-Host "  - [FAIL] Container instance logs go to a Log Analytics workspace (workspace id $($aci.LogAnalyticWorkspaceId)). Step 3.3.4 unchecks 'Enable container instance logs'; recreate the instance without them. Remove-LabResource.ps1 names that workspace (the subscription's shared DefaultWorkspace-...) without deleting it; delete it only if nothing else uses it." -ForegroundColor Red
         $failCount++
     } else {
         Write-Host "  - No container instance logs (no Log Analytics workspace)" -ForegroundColor Green
@@ -260,6 +291,21 @@ if ($aca) {
     if ($envId) {
         try {
             $cae = Get-AzResource -ResourceId $envId -ExpandProperties -ErrorAction Stop
+            # An environment whose create failed still shows up by id (#371).
+            if ("$($cae.Properties.provisioningState)" -eq 'Succeeded') {
+                Write-Host "  - Environment provisioning state: Succeeded" -ForegroundColor Green
+            } else {
+                Write-Host "  - [FAIL] Environment provisioning state is '$($cae.Properties.provisioningState)' (Expected: Succeeded)" -ForegroundColor Red
+                $failCount++
+            }
+            # Step 3.3.6 leaves the Workload profiles tab with its Consumption profile; the
+            # PowerShell block and the Bicep declare the same.
+            if (@($cae.Properties.workloadProfiles) | Where-Object { $_ -and "$($_.workloadProfileType)" -eq 'Consumption' }) {
+                Write-Host "  - Environment workload profile: Consumption" -ForegroundColor Green
+            } else {
+                Write-Host "  - [FAIL] The environment has no Consumption workload profile (a Consumption-only environment, or another profile). Step 3.3.6 creates a Workload profiles environment with the Consumption profile." -ForegroundColor Red
+                $failCount++
+            }
             $logs = $cae.Properties.appLogsConfiguration
             if ("$($logs.destination)" -eq 'log-analytics') {
                 Write-Host "  - [FAIL] The environment sends its logs to a Log Analytics workspace (customer id $($logs.logAnalyticsConfiguration.customerId)). Step 3.3.6 chooses Azure Monitor: under Monitoring > Logging options, choose Azure Monitor, then run Remove-LabResource.ps1 or delete the workspace (#374)." -ForegroundColor Red
@@ -299,6 +345,49 @@ try {
     }
 } catch {
     Write-Host "[FAIL] Could not list the Log Analytics workspaces in $($ResourceGroupName): $_" -ForegroundColor Red
+    $failCount++
+}
+
+# 5. Region and tags of the four resources
+Write-Host "`n=== 5. Validating region and tags ===" -ForegroundColor Cyan
+
+# Every create step sets the region and the SkyCraft tags (Owner is the learner's own, so it is not
+# compared). A resource that sections 1-3 did not find is not reported again here.
+$expectedEnvironmentTag = @{ dev = 'Development'; prod = 'Production'; platform = 'Platform' }[$Environment]
+$allowedRegions = @('swedencentral', 'northeurope')
+$labResources = @(
+    @{ Type = 'Microsoft.ContainerRegistry/registries';      Name = $AcrName }
+    @{ Type = 'Microsoft.ContainerInstance/containerGroups'; Name = $AciName }
+    @{ Type = 'Microsoft.App/managedEnvironments';           Name = $CaeName }
+    @{ Type = 'Microsoft.App/containerApps';                 Name = $AcaName }
+)
+try {
+    $inGroup = @(Get-AzResource -ResourceGroupName $ResourceGroupName -ErrorAction Stop)
+    foreach ($expected in $labResources) {
+        $resource = $inGroup | Where-Object { $_ -and $_.ResourceType -eq $expected.Type -and $_.Name -eq $expected.Name } | Select-Object -First 1
+        if (-not $resource) { continue }
+
+        if ("$($resource.Location)" -in $allowedRegions) {
+            Write-Host "  - $($expected.Name): region $($resource.Location)" -ForegroundColor Green
+        } else {
+            Write-Host "  - [FAIL] $($expected.Name) is in '$($resource.Location)' (Expected: swedencentral, or northeurope as in Troubleshooting Issue 1)" -ForegroundColor Red
+            $failCount++
+        }
+
+        $tags = if ($resource.Tags) { $resource.Tags } else { @{} }
+        $expectedTags = [ordered]@{ Project = 'SkyCraft'; Environment = $expectedEnvironmentTag; CostCenter = 'MSDN' }
+        $wrongTags = foreach ($tag in $expectedTags.GetEnumerator()) {
+            if ("$($tags[$tag.Key])" -ne $tag.Value) { "$($tag.Key) is '$($tags[$tag.Key])' (Expected: $($tag.Value))" }
+        }
+        if (-not $wrongTags) {
+            Write-Host "  - $($expected.Name): tags Project, Environment and CostCenter verified" -ForegroundColor Green
+        } else {
+            Write-Host "  - [FAIL] $($expected.Name): tag $($wrongTags -join '; tag '). Every create step sets the four SkyCraft tags on its Tags tab." -ForegroundColor Red
+            $failCount++
+        }
+    }
+} catch {
+    Write-Host "[FAIL] Could not list the resources in $($ResourceGroupName): $_" -ForegroundColor Red
     $failCount++
 }
 
