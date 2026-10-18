@@ -62,6 +62,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 2.2 - Deploy Security Configuration ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -69,8 +71,7 @@ Write-Host "=== Lab 2.2 - Deploy Security Configuration ===" -ForegroundColor Cy
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
@@ -81,8 +82,7 @@ $mainBicep = Join-Path $bicepPath "main.bicep"
 # Verify Bicep file exists
 if (-not (Test-Path $mainBicep)) {
     Write-Host "[ERROR] Bicep file not found: $mainBicep" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nDeploying Lab 2.2 resources..." -ForegroundColor Cyan
@@ -143,13 +143,11 @@ try {
     }
     else {
         Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 }
 catch {
     Write-Host "`n[ERROR] Deployment failed with exception:" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }

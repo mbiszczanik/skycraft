@@ -82,7 +82,7 @@ param (
 #
 # Duplicated verbatim in New-LabUser.ps1, Test-Lab.ps1 and Remove-LabResource.ps1 rather than
 # factored into a shared helper: docs/powershell-standards.md 7.3 requires every lab folder to be
-# runnable and readable on its own, and tests/Lab11-Graph-Auth.Tests.ps1 asserts that the three
+# readable on its own, and tests/Lab11-Graph-Auth.Tests.ps1 asserts that the three
 # copies do not drift apart.
 function Get-LabGraphAuthPlan {
     [CmdletBinding()]
@@ -299,6 +299,8 @@ else {
 Write-Host "=== Lab 1.1: Create Users & Groups ===" -ForegroundColor Cyan -BackgroundColor Black
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 # Connect to Graph
 try {
@@ -315,8 +317,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Microsoft Graph: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 # Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain, the one the guide's
@@ -331,8 +332,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Could not determine the tenant's initial *.onmicrosoft.com domain: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 # Define Users (Warcraft Theme)

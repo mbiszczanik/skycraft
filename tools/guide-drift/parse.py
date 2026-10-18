@@ -38,9 +38,9 @@ without a browser. Rules (issue #189):
     Expected Result in a step is kept.
   * A line whose text, markup stripped, ends with the word 'verify:' introduces a check list
     (#224): '3. Verify:' (2.2.11), '1. In **Configuration**, verify:' (4.1.11). So does one
-    that starts with 'Verify' or 'Confirm' and ends with a colon (#246): '11. Verify
-    **Encryption** settings:' (4.1.2), '2. Confirm **Service endpoints** shows:' (2.2.21),
-    '4. Verify both backend pools have VMs:' (3.2.13). A form table right after the line (blank
+    that starts with 'Verify' or 'Confirm' and ends with a colon (#246): '16. Verify these
+    values, which are the tab's defaults:' (4.1.2), '2. Confirm **Service endpoints**
+    shows:' (2.2.21), '4. Verify both backend pools have VMs:' (3.2.13). A form table right after the line (blank
     lines between are allowed; table_form) is a check list of one 'Label: value' per row,
     whatever the line's indent: 4.1.2's Encryption table is checked, not filled in. An
     informational table is not read, as anywhere else ('Verify peering exists:' before a
@@ -54,7 +54,7 @@ without a browser. Rules (issue #189):
     The checks are not items, so 'Status: **Succeeded**' is never a field to fill; they are
     joined with '; ', markup stripped, and joined to the step's Expected Result, or are its
     Expected Result alone when it has none. The introducing line is read as any other item
-    (a click on **Configuration**, on the wizard's **Encryption** tab), except a list item
+    (a click on **Configuration**, 4.1.11), except a list item
     'Verify **X** shows:' or 'Confirm **X** shows:' (SHOWN_LABEL), whose bold span names the
     setting to read, not a control to click (2.2.21). A check list is read where items are: one in
     the body of an option that is not read is dropped with it.

@@ -42,6 +42,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 1.3: Governance Deployment ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -56,16 +58,14 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Azure: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 # 2. Deployment
 $templateFile = Join-Path $PSScriptRoot "..\bicep\main.bicep"
 if (-not (Test-Path $templateFile)) {
     Write-Host "  -> [ERROR] Template file not found at: $templateFile" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 $deploymentName = "Lab-1.3-Gov-$(Get-Date -Format 'yyyyMMdd-HHmm')"
@@ -123,15 +123,13 @@ try {
              Write-Host "Failed Operation: $($op.Properties.TargetResource.ResourceName)" -ForegroundColor Yellow
              Write-Host "Status Message: $($op.Properties.StatusMessage)" -ForegroundColor Red
         }
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 }
 catch {
     Write-Host "  -> [ERROR] Deployment failed: $_" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nDeployment Complete." -ForegroundColor Green
