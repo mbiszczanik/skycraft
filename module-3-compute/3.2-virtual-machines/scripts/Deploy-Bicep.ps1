@@ -27,7 +27,7 @@
 .PARAMETER Force
     Skip the confirmation prompt so the script can run non-interactively
     (lab-cycle orchestration, CI). Without it, a session that cannot prompt
-    aborts with exit code 2 instead of silently deploying nothing.
+    aborts with exit code 1 instead of silently deploying nothing.
 
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment dev
@@ -82,6 +82,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 # Script configuration
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -99,8 +101,7 @@ Write-Host "[1/5] Validating prerequisites..." -ForegroundColor Yellow
 $context = Get-AzContext
 if (-not $context) {
     Write-Error "Not logged into Azure. Run Connect-AzAccount first."
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
 
@@ -108,8 +109,7 @@ Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
 if (-not (Test-Path $SshKeyPath)) {
     Write-Error "SSH public key not found at: $SshKeyPath"
     Write-Host "  Generate one with: ssh-keygen -t rsa -b 4096 -f `"$HOME\.ssh\skycraft-dev`" -N `"`""
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 $sshPublicKey = (Get-Content $SshKeyPath -Raw).Trim()
 $sshPublicKeySecure = ConvertTo-SecureString -String $sshPublicKey -AsPlainText -Force
@@ -124,24 +124,21 @@ $lbName = "$Environment-skycraft-swc-lb"
 $rgExists = Get-AzResourceGroup -Name $rgName -ErrorAction SilentlyContinue
 if (-not $rgExists) {
     Write-Error "Resource group '$rgName' not found. Deploy Lab 2.1 (or 3.1) first."
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "  ✓ Resource group exists: $rgName" -ForegroundColor Green
 
 $vnetExists = Get-AzVirtualNetwork -Name $vnetName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
 if (-not $vnetExists) {
     Write-Error "VNet '$vnetName' not found. Deploy Lab 2.1 (or 3.1) first."
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "  ✓ VNet exists: $vnetName" -ForegroundColor Green
 
 $lbExists = Get-AzLoadBalancer -Name $lbName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
 if (-not $lbExists) {
     Write-Error "Load Balancer '$lbName' not found. Deploy Lab 2.3 (or 3.1) first."
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "  ✓ Load Balancer exists: $lbName" -ForegroundColor Green
 
@@ -159,7 +156,7 @@ Write-Host "  Deployment Name:      $deploymentName"
 # returns an empty answer at EOF, which used to cancel the deployment and still
 # exit 0 - an automated caller then treated the skipped deployment as a success.
 # Automation passes -Force; every other outcome (declined, or no console to ask
-# on) exits 2 and deploys nothing.
+# on) exits 1 and deploys nothing.
 if (-not $WhatIf -and -not $Force) {
     $choices = [System.Management.Automation.Host.ChoiceDescription[]]@(
         [System.Management.Automation.Host.ChoiceDescription]::new('&Yes', 'Deploy the resources listed above.')
@@ -173,14 +170,12 @@ if (-not $WhatIf -and -not $Force) {
         Write-Host "`n[ABORTED] Cannot ask for confirmation: this session has no interactive console." -ForegroundColor Red
         Write-Host "  Re-run with -Force to deploy non-interactively. Deployment cancelled." -ForegroundColor Gray
         Write-Verbose "PromptForChoice failed: $($_.Exception.Message)"
-        $Host.SetShouldExit(2)
-        exit 2
+        Exit-Lab -FailureCount 1
     }
 
     if ($answer -ne 0) {
         Write-Host "Deployment cancelled." -ForegroundColor Yellow
-        $Host.SetShouldExit(2)
-        exit 2
+        Exit-Lab -FailureCount 1
     }
 }
 
@@ -209,8 +204,7 @@ try {
 
         if ($deployment.ProvisioningState -ne 'Succeeded') {
             Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-            $Host.SetShouldExit(1)
-            exit 1
+            Exit-Lab -FailureCount 1
         }
 
         Write-Host "`n[5/5] Deployment Results:" -ForegroundColor Yellow
@@ -230,8 +224,7 @@ try {
 }
 catch {
     Write-Error "Deployment failed: $($_.Exception.Message)"
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan

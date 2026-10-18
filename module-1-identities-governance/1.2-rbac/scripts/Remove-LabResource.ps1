@@ -14,9 +14,10 @@
     as not found, means "absent" - Test-LabNotFoundError tells the two apart (issue #255, as #238
     did for Lab 5.2).
 
-    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
-    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
-    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+    Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
+    otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
+    (issue #104), it also sets the process exit code; run at a prompt or by another script,
+    it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
 .PARAMETER Force
     Skip confirmation prompt.
@@ -39,6 +40,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
 # Counts lookups that failed and objects that exist but could not be removed. Absent objects
@@ -188,8 +191,7 @@ if (-not $rgLookup.Failed) {
 
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s). See the [ERROR] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nCleanup complete." -ForegroundColor Green
