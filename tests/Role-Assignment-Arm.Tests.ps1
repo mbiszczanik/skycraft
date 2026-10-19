@@ -21,11 +21,19 @@
       2. a call to Get-LabArmRoleAssignment with -ErrorAction SilentlyContinue or Ignore, which
          would turn a failed read back into "no assignment".
 
-    The guides and checklists are not scanned: a learner who types Get-AzRoleAssignment or
-    New-AzRoleAssignment at an interactive prompt can answer the Graph sign-in it asks for. Lab
-    tests/ folders are not scanned either; their stubs name the cmdlets on purpose. The test
-    fails when it finds no file, or no call to the ARM helpers, so a broken scan cannot pass as a
-    green check, and a fixture proves each rule catches what it is meant to catch.
+    The guides and checklists (module-*/*/*.md) may keep the cmdlets in the PowerShell blocks a
+    learner types, because those blocks teach them. They fail there in the same way: Az does not
+    prompt for the Graph sign-in in the middle of a command, it reports "User interaction is
+    required". So the test also fails on:
+
+      3. a guide or checklist with a PowerShell block that calls one of the three cmdlets, but
+         that does not name MicrosoftGraphEndpointResourceId, the error text a learner searches
+         for in TROUBLESHOOTING.md, whose entry gives the sign-in that provides the token.
+
+    Lab tests/ folders are not scanned; their stubs name the cmdlets on purpose. The test fails
+    when it finds no file, no call to the ARM helpers or no such block in the guides, so a broken
+    scan cannot pass as a green check, and a fixture proves each rule catches what it is meant to
+    catch.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Role-Assignment-Arm.Tests.ps1
@@ -44,6 +52,12 @@ BeforeDiscovery {
     $tracked = @(git -C $repoRoot ls-files -- 'module-*' 'tools')
     $script:Files = foreach ($relative in $tracked) {
         if ($relative -notmatch '^(module-[^/]+/[^/]+/scripts/[^/]+|tools/.+)\.(ps1|psm1)$') { continue }
+        @{ file = $relative; path = (Join-Path $repoRoot $relative) }
+    }
+
+    # The lab guides and checklists: the Markdown files at the root of each lab folder.
+    $script:Docs = foreach ($relative in $tracked) {
+        if ($relative -notmatch '^module-[^/]+/[^/]+/[^/]+\.md$') { continue }
         @{ file = $relative; path = (Join-Path $repoRoot $relative) }
     }
 }
@@ -86,6 +100,19 @@ BeforeAll {
             ParseErrors = @($errors).Count
         }
     }
+
+    # A guide's or checklist's PowerShell blocks that call one of the role cmdlets, and whether the
+    # file names the error a learner meets with them (rule 3).
+    function Get-RoleCmdletDocFinding {
+        param([string]$Text)
+
+        $blocks = [regex]::Matches($Text, '(?ms)^[ \t]*```(?:powershell|pwsh|ps1)[ \t]*\r?$(?<body>.*?)^[ \t]*```')
+        $calling = @($blocks | Where-Object { $_.Groups['body'].Value -match '\b(Get|New|Remove)-AzRoleAssignment\b' })
+        [pscustomobject]@{
+            Blocks      = $calling.Count
+            NamesError  = $Text -match 'MicrosoftGraphEndpointResourceId'
+        }
+    }
 }
 
 Describe 'Role assignments without Microsoft Graph - the rule catches what it should (#397)' {
@@ -115,6 +142,21 @@ Describe 'Role assignments without Microsoft Graph - the rule catches what it sh
     It 'does not flag a read that lets its error through' {
         (Get-RoleAssignmentFinding -Text 'Get-LabArmRoleAssignment -Scope $s -PrincipalId $p').Silenced | Should -BeNullOrEmpty
     }
+
+    It 'finds a guide''s PowerShell block that calls a role cmdlet, and sees whether the file names the error' {
+        $fence = '```'
+        $block = "Text`r`n`r`n$($fence)powershell`r`nGet-AzRoleAssignment -Scope `$scope`r`n$fence`r`n"
+        $finding = Get-RoleCmdletDocFinding -Text $block
+        $finding.Blocks | Should -Be 1
+        $finding.NamesError | Should -BeFalse
+        (Get-RoleCmdletDocFinding -Text "$block`r`nIf it fails with ``MicrosoftGraphEndpointResourceId``, see TROUBLESHOOTING.md.").NamesError | Should -BeTrue
+    }
+
+    It 'does not count a role cmdlet named in prose or in a Bash block' {
+        $fence = '```'
+        $text = "Get-AzRoleAssignment calls Microsoft Graph.`n`n$($fence)bash`naz role assignment list # not Get-AzRoleAssignment`n$fence`n"
+        (Get-RoleCmdletDocFinding -Text $text).Blocks | Should -Be 0
+    }
 }
 
 Describe 'Role assignments without Microsoft Graph - every lab script and tool (#397)' {
@@ -136,5 +178,21 @@ Describe 'Role assignments without Microsoft Graph - every lab script and tool (
         $finding.ParseErrors | Should -Be 0
         $finding.Cmdlets | Should -BeNullOrEmpty -Because 'Get-/New-/Remove-AzRoleAssignment call Microsoft Graph; use Get-/New-/Remove-LabArmRoleAssignment from tools/LabCommon.psm1 (issue #397)'
         $finding.Silenced | Should -BeNullOrEmpty -Because 'a failed role assignment read is a failure, never "no assignment" (issue #397)'
+    }
+}
+
+Describe 'Role assignments without Microsoft Graph - the guides and checklists a learner types from (#397)' {
+
+    It 'finds lab guides and checklists, and role cmdlet blocks among them, to check' -TestCases @(@{ docs = $script:Docs }) {
+        @($docs).Count | Should -BeGreaterThan 20 -Because 'finding none means the scan is broken'
+        $blocks = 0
+        foreach ($entry in $docs) { $blocks += (Get-RoleCmdletDocFinding -Text (Get-Content -Raw -LiteralPath $entry.path)).Blocks }
+        $blocks | Should -BeGreaterThan 0 -Because 'Lab 1.2''s checklist and Lab 1.3''s guide teach the role cmdlets'
+    }
+
+    It '<file> names MicrosoftGraphEndpointResourceId where a learner types a role cmdlet' -ForEach $script:Docs {
+        $finding = Get-RoleCmdletDocFinding -Text (Get-Content -Raw -LiteralPath $path)
+        if ($finding.Blocks -eq 0) { return }
+        $finding.NamesError | Should -BeTrue -Because "$($finding.Blocks) PowerShell block(s) call Get-/New-/Remove-AzRoleAssignment, which fail without a Microsoft Graph token; name the error and point to TROUBLESHOOTING.md (issue #397)"
     }
 }

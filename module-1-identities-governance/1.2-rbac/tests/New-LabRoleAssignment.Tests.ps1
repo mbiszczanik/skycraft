@@ -99,9 +99,11 @@ function Write-StubCall {
     if ($script:LogPath) { Add-Content -LiteralPath $script:LogPath -Value $Name }
 }
 
+# With SKYCRAFT_STUB_MGSIGNINFAIL '1' no one is signed in to Microsoft Graph and the sign-in fails.
 function Get-MgContext {
     [CmdletBinding()]
     param()
+    if ($env:SKYCRAFT_STUB_MGSIGNINFAIL -eq '1') { return }
     if ($env:SKYCRAFT_STUB_NOCONTEXT -eq '1') { return }
     if ($env:SKYCRAFT_STUB_MGFRESH -eq '1' -and -not $script:MgConnected) { return }
     [pscustomobject]@{
@@ -117,6 +119,7 @@ function Connect-MgGraph {
     [CmdletBinding()]
     param([string[]]$Scopes, [string]$TenantId, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name 'Connect-MgGraph'
+    if ($env:SKYCRAFT_STUB_MGSIGNINFAIL -eq '1') { throw 'InteractiveBrowserCredential authentication failed: User canceled authentication. (stub)' }
     Write-StubCall -Name "Connect-MgGraph:Scopes=$($Scopes -join ',')"
     Write-StubCall -Name "Connect-MgGraph:TenantId=$TenantId"
     $script:Scopes      = $Scopes
@@ -163,8 +166,10 @@ function Get-MgDomain {
 }
 
 # With SKYCRAFT_STUB_PRINCIPALS '1' the tenant holds Lab 1.1's principals; otherwise it is empty.
+# With SKYCRAFT_STUB_MGLOOKUPFAIL '1' every user and group lookup fails.
 function Get-StubPrincipalId {
     param([string]$Key)
+    if ($env:SKYCRAFT_STUB_MGLOOKUPFAIL -eq '1') { throw 'Insufficient privileges to complete the operation. (stub)' }
     if ($env:SKYCRAFT_STUB_PRINCIPALS -ne '1') { return }
     $ids = @{
         'malfurion' = 'aaaaaaaa-0000-0000-0000-000000000001'
@@ -190,7 +195,9 @@ function Get-MgGroup {
 }
 
 # Role assignments, served by the ARM role assignments API fake appended to this body (issue
-# #397). With SKYCRAFT_STUB_HELD '1' Malfurion already holds Owner on the subscription; with
+# #397). With SKYCRAFT_STUB_HELD '1' Malfurion already holds Owner on the subscription, and
+# SKYCRAFT-Developers holds Contributor on the subscription too, which ARM lists at the dev group
+# as inherited: it is not the group-level assignment the lab makes. With
 # SKYCRAFT_STUB_ROLELOOKUPFAIL '1' every listing is refused (HTTP 403).
 function Get-StubRoleAssignment {
     [CmdletBinding()]
@@ -200,8 +207,12 @@ function Get-StubRoleAssignment {
         Write-Error -ErrorId 'AuthorizationFailed' -Message "The client 'stub' does not have authorization to perform action 'Microsoft.Authorization/roleAssignments/read' over scope '$Scope'."
         return
     }
-    if ($env:SKYCRAFT_STUB_HELD -eq '1' -and $Scope -eq '/subscriptions/11111111-1111-1111-1111-111111111111') {
+    $sub = '/subscriptions/11111111-1111-1111-1111-111111111111'
+    if ($env:SKYCRAFT_STUB_HELD -eq '1' -and $Scope -eq $sub) {
         [pscustomobject]@{ Name = 'ra-held'; Scope = $Scope; PrincipalId = 'aaaaaaaa-0000-0000-0000-000000000001'; RoleDefinitionId = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635' }
+    }
+    if ($env:SKYCRAFT_STUB_HELD -eq '1' -and ($Scope -eq $sub -or $Scope -like "$sub/*")) {
+        [pscustomobject]@{ Name = 'ra-inherited'; Scope = $sub; PrincipalId = 'aaaaaaaa-0000-0000-0000-000000000002'; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; PrincipalType = 'Group' }
     }
 }
 
@@ -219,7 +230,7 @@ function New-StubRoleAssignment {
     $script:Lab11Scopes     = 'User.ReadWrite.All,Group.ReadWrite.All,Directory.ReadWrite.All,Domain.Read.All,User.Invite.All'
 
     function Invoke-RoleAssignmentScript {
-        param([string]$Domain = 'custom', [string]$Scopes = $script:Lab11Scopes, [switch]$NoContext, [string]$MgTenant = '', [switch]$MgFresh, [switch]$NoAzContext, [switch]$Principals, [switch]$Held, [switch]$RoleLookupFail)
+        param([string]$Domain = 'custom', [string]$Scopes = $script:Lab11Scopes, [switch]$NoContext, [string]$MgTenant = '', [switch]$MgFresh, [switch]$NoAzContext, [switch]$Principals, [switch]$Held, [switch]$RoleLookupFail, [switch]$MgSignInFail, [switch]$MgLookupFail)
 
         $logPath = Join-Path $script:Stub.Directory 'calls.log'
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
@@ -234,6 +245,8 @@ function New-StubRoleAssignment {
             SKYCRAFT_STUB_PRINCIPALS       = if ($Principals) { '1' } else { '0' }
             SKYCRAFT_STUB_HELD             = if ($Held) { '1' } else { '0' }
             SKYCRAFT_STUB_ROLELOOKUPFAIL   = if ($RoleLookupFail) { '1' } else { '0' }
+            SKYCRAFT_STUB_MGSIGNINFAIL     = if ($MgSignInFail) { '1' } else { '0' }
+            SKYCRAFT_STUB_MGLOOKUPFAIL     = if ($MgLookupFail) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG              = $logPath
             # Interactive plan, so the script reuses the stub's context or calls the stub's
             # Connect-MgGraph instead of signing in.
@@ -271,6 +284,9 @@ function New-StubRoleAssignment {
     # Lab 1.1's principals exist (issue #397): the roles are read and created through the ARM API.
     $script:Assigns   = Invoke-RoleAssignmentScript -Principals -Held
     $script:ReadFails = Invoke-RoleAssignmentScript -Principals -RoleLookupFail
+    # Microsoft Graph PowerShell cannot sign in, or cannot read the directory.
+    $script:SignInFails = Invoke-RoleAssignmentScript -MgSignInFail
+    $script:LookupFails = Invoke-RoleAssignmentScript -Principals -MgLookupFail
 }
 
 AfterAll {
@@ -280,7 +296,7 @@ AfterAll {
 Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - test harness' {
 
     It 'shadows the real Microsoft Graph and Az commands instead of touching a tenant' {
-        foreach ($run in @($script:Custom, $script:Fail, $script:NoInitial, $script:ReadOnly, $script:NoContext, $script:OtherTenant, $script:NoAz, $script:Assigns, $script:ReadFails)) {
+        foreach ($run in @($script:Custom, $script:Fail, $script:NoInitial, $script:ReadOnly, $script:NoContext, $script:OtherTenant, $script:NoAz, $script:Assigns, $script:ReadFails, $script:SignInFails, $script:LookupFails)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real commands (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -386,5 +402,29 @@ Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - role assignments without the Az ro
         ([regex]::Matches($run.Output, '\[ERROR\] Could not read the role assignments at [^\r\n]*HTTP 403 \(AuthorizationFailed\)')).Count | Should -Be 5
         $run.Calls | Should -Not -Contain 'New-RoleAssignment'
         $run.Output | Should -Match 'Role assignment finished with 5 error\(s\)'
+    }
+}
+
+Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - a failed directory lookup names the Microsoft Graph sign-in (#397)' {
+
+    It 'stops with [ERROR], the Connect-MgGraph sign-in and exit 1 when Microsoft Graph cannot be signed in to' {
+        $run = $script:SignInFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Failed to connect to Microsoft Graph'
+        $run.Output | Should -Match "Connect-MgGraph -Scopes User\.ReadWrite\.All,Group\.ReadWrite\.All,Directory\.ReadWrite\.All"
+        $run.Calls | Should -Not -Contain 'New-RoleAssignment'
+    }
+
+    It 'counts every principal whose lookup fails, names the sign-in on each, creates nothing and exits 1' {
+        $run = $script:LookupFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        ([regex]::Matches($run.Output, '\[ERROR\] Failed to resolve principal: [^\r\n]*Insufficient privileges[^\r\n]*Connect-MgGraph -Scopes')).Count | Should -Be 5
+        @($run.Calls | Where-Object { $_ -like 'Get-RoleAssignment|*' -or $_ -eq 'New-RoleAssignment' }) | Should -BeNullOrEmpty
+        $run.Output | Should -Match 'Role assignment finished with 5 error\(s\)'
+    }
+
+    It 'does not name the sign-in when the directory simply holds no such principal' {
+        $script:Custom.Output | Should -Match '\[SKIP\] Principal not found in Entra ID'
+        $script:Custom.Output | Should -Not -Match 'Connect-MgGraph -Scopes'
     }
 }

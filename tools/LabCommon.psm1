@@ -307,7 +307,7 @@ function Get-LabGraphSignInHint {
     if ($Client -eq 'Az') {
         return "Finding users and groups by name needs Microsoft Graph; sign in again with 'Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId' and run the script again."
     }
-    return "Finding users and groups by name needs Microsoft Graph; sign in with 'Connect-MgGraph -Scopes User.Read.All,Group.Read.All,Directory.Read.All' and run the script again."
+    return "Finding users and groups by name needs Microsoft Graph; sign in with 'Connect-MgGraph -Scopes User.ReadWrite.All,Group.ReadWrite.All,Directory.ReadWrite.All' (Lab 1.1's scopes) and run the script again."
 }
 
 # Sends one request to the role assignments API and returns the parsed body ($null when there is

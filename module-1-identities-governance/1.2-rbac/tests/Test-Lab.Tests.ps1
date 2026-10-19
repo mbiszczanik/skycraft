@@ -23,7 +23,8 @@
       7. The role assignments are read through the ARM role assignments API (issue #397), never
          through Get-AzRoleAssignment, which calls Microsoft Graph; only the principals are
          looked up in Entra ID. When that lookup cannot reach Graph, each role check fails and
-         names the sign-in that provides it.
+         names the sign-in that provides it; a principal that is missing or held twice fails its
+         check without that hint, since signing in again would not help.
 
     Scope limit, as in the Lab 1.1 suite: the child is launched with -Command, so these tests
     prove the failure counter reaches `exit`, not that `pwsh -File` carries the code out of the
@@ -82,6 +83,7 @@ BeforeAll {
     #   SKYCRAFT_STUB_OWNERCONDITION  '1' gives Malfurion's Owner assignment a condition, as any
     #                                 Conditions-tab option but "Allow user to assign all roles"
     #                                 does in the Portal (#325)
+    #   SKYCRAFT_STUB_DUPLICATEPRINCIPAL  principals (by name) the directory holds twice
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:SubId   = '00000000-0000-0000-0000-000000000000'
@@ -131,6 +133,9 @@ function Find-StubPrincipal {
     }
     if (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGPRINCIPAL' -Name $Name) { return }
     [pscustomobject]@{ Id = $script:Principal[$Name]; DisplayName = $Name }
+    if (Test-StubListed -Variable 'SKYCRAFT_STUB_DUPLICATEPRINCIPAL' -Name $Name) {
+        [pscustomobject]@{ Id = 'cccccccc-0000-0000-0000-000000000009'; DisplayName = $Name }
+    }
 }
 
 function Get-AzADUser {
@@ -200,6 +205,7 @@ function Get-StubRoleAssignment {
             [switch]$OwnerCondition,
             [switch]$GraphFail,
             [string[]]$MissingPrincipal = @(),
+            [string[]]$DuplicatePrincipal = @(),
             [switch]$NoContext,
             [string[]]$ArgumentList = @()
         )
@@ -214,6 +220,7 @@ function Get-StubRoleAssignment {
             SKYCRAFT_STUB_OWNERCONDITION = if ($OwnerCondition) { '1' } else { '0' }
             SKYCRAFT_STUB_GRAPHFAIL      = if ($GraphFail) { '1' } else { '0' }
             SKYCRAFT_STUB_MISSINGPRINCIPAL = $MissingPrincipal -join ','
+            SKYCRAFT_STUB_DUPLICATEPRINCIPAL = $DuplicatePrincipal -join ','
             SKYCRAFT_STUB_NOCONTEXT      = if ($NoContext) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG            = $logPath
         }
@@ -243,6 +250,7 @@ function Get-StubRoleAssignment {
     # The Az sign-in cannot get a Graph token without interaction (issue #397).
     $script:GraphFail      = Invoke-ValidatorScript -Stub $script:Stub -GraphFail
     $script:NoDevelopers   = Invoke-ValidatorScript -Stub $script:Stub -MissingPrincipal 'SkyCraft-Developers'
+    $script:TwoDevelopers  = Invoke-ValidatorScript -Stub $script:Stub -DuplicatePrincipal 'SkyCraft-Developers'
     $script:NoContext      = Invoke-ValidatorScript -Stub $script:Stub -NoContext
     # The lab cycle's run: resource groups deployed, no role assignment made.
     $script:CycleRun       = Invoke-ValidatorScript -Stub $script:Stub -ArgumentList '-SkipRoleAssignments' `
@@ -252,7 +260,8 @@ function Get-StubRoleAssignment {
 
     $script:AllRuns = @(
         $script:AllPass, $script:RgMissing, $script:RoleMissing, $script:RoleLookupFail,
-        $script:OwnerCondition, $script:NoContext, $script:CycleRun, $script:CycleRgMissing, $script:GraphFail, $script:NoDevelopers
+        $script:OwnerCondition, $script:NoContext, $script:CycleRun, $script:CycleRgMissing, $script:GraphFail, $script:NoDevelopers,
+        $script:TwoDevelopers
     )
 }
 
@@ -362,6 +371,17 @@ Describe 'Lab 1.2 Test-Lab.ps1 - role assignments without Microsoft Graph (#397)
         $run = $script:NoDevelopers
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "Developers Group\.\.\. \[FAIL\] 'SkyCraft-Developers' not found in Entra ID\. Complete Lab 1\.1 first\."
+        $run.Output | Should -Not -Match 'AuthScope' -Because 'signing in again does not create a principal'
+        $run.Output | Should -Match 'Passed: 7\b'
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'fails the check of a principal the directory holds twice, without naming the Graph sign-in' {
+        # The lookup worked: the hint would send the learner to sign in again for nothing.
+        $run = $script:TwoDevelopers
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Developers Group\.\.\. \[FAIL\] 'SkyCraft-Developers' matched 2 principals in Entra ID; expected exactly one\."
+        $run.Output | Should -Not -Match 'AuthScope'
         $run.Output | Should -Match 'Passed: 7\b'
         $run.Output | Should -Match 'Failed: 1\b'
     }

@@ -4,7 +4,7 @@ DESCRIPTION: Orchestrates role assignments for SkyCraft users and groups via AVM
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.4.0
-DEPLOYMENT: .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments (resolves the four principal IDs from Entra ID and passes them as overrides; the template has no .bicepparam because object IDs are tenant-specific). Imperative alternative: .\scripts\New-LabRoleAssignment.ps1 via New-AzRoleAssignment.
+DEPLOYMENT: .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments (resolves the four principal IDs from Entra ID and passes them as overrides; the template has no .bicepparam because object IDs are tenant-specific). Imperative alternative: .\scripts\New-LabRoleAssignment.ps1 through the ARM role assignments API.
 ======================================================*/
 
 targetScope = 'subscription'

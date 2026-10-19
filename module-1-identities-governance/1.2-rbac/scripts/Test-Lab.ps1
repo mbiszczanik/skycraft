@@ -109,7 +109,8 @@ $checks = @(
 # token: Malfurion by userPrincipalName prefix (the domain varies), a group by display name, the
 # guest by mail (a guest's userPrincipalName is rewritten to <alias>_<domain>#EXT#@<tenant>).
 # Returns the object id, $null when the directory holds no such principal, and throws when the
-# lookup fails or finds more than one.
+# lookup fails or finds more than one. Only a failed lookup names the sign-in that provides
+# Microsoft Graph (issue #397): signing in again does not change what the directory holds.
 function Find-LabPrincipalId {
     [CmdletBinding()]
     param(
@@ -117,17 +118,22 @@ function Find-LabPrincipalId {
         [string]$Name
     )
 
-    $found = if ($Name -like 'SkyCraft-*') {
-        @(Get-AzADGroup -DisplayName $Name -ErrorAction Stop)
+    try {
+        $found = if ($Name -like 'SkyCraft-*') {
+            @(Get-AzADGroup -DisplayName $Name -ErrorAction Stop)
+        }
+        elseif ($Name -like '*@*') {
+            @(Get-AzADUser -Filter "mail eq '$Name'" -ErrorAction Stop)
+        }
+        else {
+            @(Get-AzADUser -Filter "startsWith(userPrincipalName,'$Name@')" -ErrorAction Stop)
+        }
     }
-    elseif ($Name -like '*@*') {
-        @(Get-AzADUser -Filter "mail eq '$Name'" -ErrorAction Stop)
-    }
-    else {
-        @(Get-AzADUser -Filter "startsWith(userPrincipalName,'$Name@')" -ErrorAction Stop)
+    catch {
+        throw "Could not look up '$Name' in Entra ID: $($_.Exception.Message) $(Get-LabGraphSignInHint -Client Az)"
     }
     $found = @($found | Where-Object { $_ })
-    if ($found.Count -gt 1) { throw "'$Name' matched $($found.Count) principals; expected exactly one." }
+    if ($found.Count -gt 1) { throw "'$Name' matched $($found.Count) principals in Entra ID; expected exactly one." }
     if ($found.Count -eq 0) { return $null }
     return [string]$found[0].Id
 }
@@ -136,8 +142,8 @@ if ($SkipRoleAssignments) {
     Write-Host "[SKIP] $($checks.Count) role-assignment checks not run (-SkipRoleAssignments) and not counted." -ForegroundColor Yellow
 }
 else {
-    # Each principal is looked up once. A lookup that fails is remembered with its error, so
-    # every check of that principal fails and says why.
+    # Each principal is looked up once. A lookup that fails or is ambiguous is remembered with its
+    # error, so every check of that principal fails and says why.
     $principalIds = @{}
     $principalErrors = @{}
     foreach ($name in @($checks | ForEach-Object { $_.Principal } | Select-Object -Unique)) {
@@ -148,13 +154,12 @@ else {
             $principalErrors[$name] = $_.Exception.Message
         }
     }
-    $graphHint = Get-LabGraphSignInHint -Client Az
 
     foreach ($check in $checks) {
         Write-Host "Checking: $($check.Name)..." -NoNewline
 
         if ($principalErrors.ContainsKey($check.Principal)) {
-            Write-Host " [FAIL] Could not look up '$($check.Principal)' in Entra ID: $($principalErrors[$check.Principal]) $graphHint" -ForegroundColor Red
+            Write-Host " [FAIL] $($principalErrors[$check.Principal])" -ForegroundColor Red
             $failCount++
             continue
         }

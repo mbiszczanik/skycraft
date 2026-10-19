@@ -117,6 +117,8 @@ The portal steps above have two scripted equivalents in `scripts/`. Pick one per
 
 Execute these validation steps to confirm success:
 
+> Steps 2-4 use `Get-AzRoleAssignment`, which also needs a Microsoft Graph token. If it fails with `Authentication failed against resource MicrosoftGraphEndpointResourceId`, sign in with `Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId` and run the step again; see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md#authentication-failed-against-resource-microsoftgraphendpointresourceid). `.\scripts\Test-Lab.ps1` reads the role assignments without that token, but finds the users and groups by name, which needs it too.
+
 ### Step 1: List all resource groups
 
 ```powershell

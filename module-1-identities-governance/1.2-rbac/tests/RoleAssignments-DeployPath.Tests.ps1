@@ -53,13 +53,19 @@ BeforeAll {
         @($commands | Where-Object { $_.GetCommandName() -eq $Name }).Count
     }
 
+    # The script's own helpers: Get-LabGraphSignInHint, Get-LabBuiltInRoleId and
+    # Get-LabArmRoleAssignment (mocked below, so no request is sent).
+    Import-Module (Join-Path $script:LabRoot '../../tools/LabCommon.psm1') -Force
+
     # Top level only ($false): a nested helper would not be callable on its own.
-    $resolverAst = $script:ScriptAst.FindAll({
-        param($n)
-        $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Resolve-LabPrincipalId'
-    }, $false) | Select-Object -First 1
-    if (-not $resolverAst) { throw 'Deploy-Bicep.ps1 does not define Resolve-LabPrincipalId.' }
-    . ([scriptblock]::Create($resolverAst.Extent.Text))
+    foreach ($functionName in 'Resolve-LabPrincipalId', 'Get-LabExistingAssignmentCount') {
+        $functionAst = $script:ScriptAst.FindAll({
+            param($n)
+            $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $functionName
+        }, $false) | Select-Object -First 1
+        if (-not $functionAst) { throw "Deploy-Bicep.ps1 does not define $functionName." }
+        . ([scriptblock]::Create($functionAst.Extent.Text))
+    }
 
     foreach ($helper in 'Get-LabDirectoryDomain', 'Select-LabInitialDomain') {
         $helperAst = $script:ScriptAst.FindAll({
@@ -356,5 +362,91 @@ function Get-AzDeploymentWhatIfResult {
         @($run.Calls | Where-Object { $_ -like 'Invoke-AzRestMethod|GET https://graph.microsoft.com/v1.0/domains*' }).Count | Should -Be 1
         @($run.Calls | Where-Object { $_ -like 'Get-AzADUser|*' -or $_ -like 'Get-AzADGroup|*' -or $_ -eq 'Get-AzResourceGroup' }) |
             Should -BeNullOrEmpty -Because 'nothing may be looked up or deployed on a guessed domain'
+    }
+}
+
+Describe 'Lab 1.2 - Resolve-LabPrincipalId names the Graph sign-in only when the lookup fails (#397)' {
+
+    BeforeEach {
+        Mock Get-AzADUser  { }
+        Mock Get-AzADGroup { }
+    }
+
+    It 'throws with the sign-in that provides Microsoft Graph when the directory cannot be read' {
+        Mock Get-AzADGroup { throw 'Authentication failed against resource MicrosoftGraphEndpointResourceId. User interaction is required. (stub)' }
+        $thrown = $null
+        try { Resolve-LabPrincipalId -Type Group -Name 'SkyCraft-Developers' } catch { $thrown = $_ }
+        $thrown | Should -Not -BeNullOrEmpty
+        "$thrown" | Should -Match "Could not look up Group 'SkyCraft-Developers' in Entra ID: Authentication failed"
+        "$thrown" | Should -Match 'Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId'
+    }
+
+    It 'does not name the sign-in when the principal <case>: signing in again does not help' -ForEach @(
+        @{ case = 'does not exist'; twice = $false }
+        @{ case = 'matches twice'; twice = $true }
+    ) {
+        if ($twice) {
+            Mock Get-AzADGroup {
+                [pscustomobject]@{ Id = 'dddddddd-0000-0000-0000-000000000004' }
+                [pscustomobject]@{ Id = 'eeeeeeee-0000-0000-0000-000000000005' }
+            }
+        }
+        $thrown = $null
+        try { Resolve-LabPrincipalId -Type Group -Name 'SkyCraft-Developers' } catch { $thrown = $_ }
+        $thrown | Should -Not -BeNullOrEmpty
+        "$thrown" | Should -Not -Match 'AuthScope|Connect-'
+    }
+}
+
+Describe 'Lab 1.2 - Get-LabExistingAssignmentCount reads exactly, and a failed read stops the run (#397)' {
+
+    BeforeAll {
+        $script:Sub = '/subscriptions/00000000-0000-0000-0000-000000000000'
+        $script:Desired = @(
+            @{ ObjectId = 'aaaaaaaa-0000-0000-0000-000000000001'; Role = 'Owner';  Scope = $script:Sub }
+            @{ ObjectId = 'aaaaaaaa-0000-0000-0000-000000000003'; Role = 'Reader'; Scope = "$script:Sub/resourceGroups/dev-skycraft-swc-rg" }
+        )
+    }
+
+    It 'counts an assignment made at the scope, and not one of the same role inherited from above' {
+        # The Testers' Reader on the subscription is listed at the resource group too, but it is
+        # not the resource-group assignment the template makes.
+        Mock Get-LabArmRoleAssignment {
+            if ($PrincipalId -eq 'aaaaaaaa-0000-0000-0000-000000000001') {
+                [pscustomobject]@{ RoleDefinitionId = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635'; Scope = $Scope }
+            }
+            else {
+                [pscustomobject]@{ RoleDefinitionId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; Scope = '/subscriptions/00000000-0000-0000-0000-000000000000' }
+            }
+        }
+        Get-LabExistingAssignmentCount -Desired $script:Desired | Should -Be 1
+        Should -Invoke Get-LabArmRoleAssignment -Times 2 -Exactly
+    }
+
+    It 'does not count an assignment of another role at the scope' {
+        Mock Get-LabArmRoleAssignment { [pscustomobject]@{ RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; Scope = $Scope } }
+        Get-LabExistingAssignmentCount -Desired $script:Desired | Should -Be 0
+    }
+
+    It 'throws, naming the scope, when a read fails, instead of counting the assignment as missing' {
+        Mock Get-LabArmRoleAssignment { throw 'ARM GET /subscriptions/0/providers/Microsoft.Authorization/roleAssignments returned HTTP 403 (AuthorizationFailed): stub' }
+        { Get-LabExistingAssignmentCount -Desired $script:Desired } |
+            Should -Throw -ExpectedMessage "Could not read the role assignments at $script:Sub*HTTP 403 (AuthorizationFailed)*"
+    }
+
+    It 'is what the script calls before it deploys, inside the block whose catch ends the run with exit 1' {
+        # The catch around the role deployment prints [ERROR] and calls Exit-Lab -FailureCount 1;
+        # the count must happen inside that try, so a failed read never reaches the deployment.
+        $tryAst = $script:ScriptAst.FindAll({
+            param($n)
+            $n -is [System.Management.Automation.Language.TryStatementAst] -and
+            $n.Body.Extent.Text -match 'Get-LabExistingAssignmentCount' -and
+            $n.Body.Extent.Text -match 'New-AzSubscriptionDeployment'
+        }, $true) | Select-Object -First 1
+        $tryAst | Should -Not -BeNullOrEmpty
+        $count = $tryAst.Body.Extent.Text.IndexOf('Get-LabExistingAssignmentCount')
+        $deploy = $tryAst.Body.Extent.Text.IndexOf('New-AzSubscriptionDeployment')
+        $count | Should -BeLessThan $deploy
+        $tryAst.CatchClauses[0].Body.Extent.Text | Should -Match 'Exit-Lab -FailureCount 1'
     }
 }

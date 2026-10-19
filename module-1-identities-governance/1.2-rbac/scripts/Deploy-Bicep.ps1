@@ -79,8 +79,11 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 # (issue #237; see Select-LabInitialDomain below), and the guest by mail, because a guest's
 # userPrincipalName is rewritten to <alias>_<domain>#EXT#@<tenant> on invitation. Absence and
 # ambiguity both throw: assigning Owner to whichever object came back first is worse than
-# stopping. Kept as top-level functions so tests/RoleAssignments-DeployPath.Tests.ps1 can lift
-# them out with the parser and exercise them without a tenant.
+# stopping. A lookup that fails throws with the sign-in that provides Microsoft Graph
+# (Get-LabGraphSignInHint, issue #397); absence and ambiguity do not name it, because signing in
+# again does not change what the directory holds. Kept as top-level functions so
+# tests/RoleAssignments-DeployPath.Tests.ps1 can lift them out with the parser and exercise them
+# without a tenant.
 function Resolve-LabPrincipalId {
     [CmdletBinding()]
     param(
@@ -92,10 +95,15 @@ function Resolve-LabPrincipalId {
         [string]$Name
     )
 
-    switch ($Type) {
-        'Group' { $found = @(Get-AzADGroup -DisplayName $Name -ErrorAction Stop) }
-        'Guest' { $found = @(Get-AzADUser -Filter "mail eq '$Name'" -ErrorAction Stop) }
-        'User'  { $found = @(Get-AzADUser -Filter "userPrincipalName eq '$Name'" -ErrorAction Stop) }
+    try {
+        switch ($Type) {
+            'Group' { $found = @(Get-AzADGroup -DisplayName $Name -ErrorAction Stop) }
+            'Guest' { $found = @(Get-AzADUser -Filter "mail eq '$Name'" -ErrorAction Stop) }
+            'User'  { $found = @(Get-AzADUser -Filter "userPrincipalName eq '$Name'" -ErrorAction Stop) }
+        }
+    }
+    catch {
+        throw "Could not look up $Type '$Name' in Entra ID: $($_.Exception.Message) $(Get-LabGraphSignInHint -Client Az)"
     }
 
     if ($found.Count -eq 0) {
@@ -146,6 +154,38 @@ function Select-LabInitialDomain {
     $initial = @($Domain | Where-Object { $_ -and $_.IsInitial -eq $true } | ForEach-Object { [string]$_.Id } | Where-Object { $_ })
     if ($initial.Count -eq 0) { throw 'the tenant lists no domain marked IsInitial' }
     return $initial[0]
+}
+
+# --- Existing assignments (issue #397) -----------------------------------------------------
+# Counts how many of the template's assignments ($Desired: ObjectId, Role, Scope) already exist.
+# Read through the ARM role assignments API (Get-LabArmRoleAssignment), not Get-AzRoleAssignment,
+# which calls Microsoft Graph. The listing also returns assignments inherited from above, so the
+# role and the scope must match exactly: a Reader at subscription level is not the RG-level Reader
+# the template makes. A read that fails throws: counting it as "not there" would deploy on top of
+# assignments that may exist. Top-level, like Resolve-LabPrincipalId, so
+# tests/RoleAssignments-DeployPath.Tests.ps1 can exercise it without a subscription.
+function Get-LabExistingAssignmentCount {
+    [CmdletBinding()]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable[]]$Desired
+    )
+
+    $existingCount = 0
+    foreach ($item in $Desired) {
+        $scope = $item.Scope
+        $roleId = Get-LabBuiltInRoleId -Name $item.Role
+        try {
+            $match = @(Get-LabArmRoleAssignment -Scope $scope -PrincipalId $item.ObjectId |
+                Where-Object { $_.RoleDefinitionId -eq $roleId -and $_.Scope -eq $scope })
+        }
+        catch {
+            throw "Could not read the role assignments at ${scope}: $($_.Exception.Message)"
+        }
+        if ($match.Count -gt 0) { $existingCount++ }
+    }
+    return $existingCount
 }
 
 Write-Host "=== Lab 1.2: Infrastructure Deployment ===" -ForegroundColor Cyan -BackgroundColor Black
@@ -208,7 +248,6 @@ if ($IncludeRoleAssignments) {
     }
     catch {
         Write-Host "  -> [ERROR] $_" -ForegroundColor Red
-        Write-Host "     $(Get-LabGraphSignInHint -Client Az)" -ForegroundColor Gray
         Exit-Lab -FailureCount 1
     }
 }
@@ -292,25 +331,9 @@ try {
         exit 0
     }
 
-    # Read through the ARM role assignments API (Get-LabArmRoleAssignment), not
-    # Get-AzRoleAssignment, which calls Microsoft Graph (issue #397). The listing also returns
-    # assignments inherited from above, so match the role and the scope exactly: a Reader at
-    # subscription level is not the RG-level Reader the template makes. A read that fails stops
-    # the run with an [ERROR] (the catch below): counting it as "not there" would deploy on top of
-    # assignments that may exist.
-    $existingCount = 0
-    foreach ($item in $desired) {
-        $scope = $item.Scope
-        $roleId = Get-LabBuiltInRoleId -Name $item.Role
-        try {
-            $match = @(Get-LabArmRoleAssignment -Scope $scope -PrincipalId $item.ObjectId |
-                Where-Object { $_.RoleDefinitionId -eq $roleId -and $_.Scope -eq $scope })
-        }
-        catch {
-            throw "Could not read the role assignments at ${scope}: $($_.Exception.Message)"
-        }
-        if ($match.Count -gt 0) { $existingCount++ }
-    }
+    # Exact role and scope, through the ARM API (Get-LabExistingAssignmentCount above). A read that
+    # fails throws into the catch below: an [ERROR] and exit 1, nothing deployed.
+    $existingCount = Get-LabExistingAssignmentCount -Desired $desired
     Write-Host "  Existing assignments: $existingCount of $($desired.Count)" -ForegroundColor Gray
 
     $roleParams = @{

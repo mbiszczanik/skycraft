@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Pester 5 tests for the Lab 5.2 cleanup script's failure reporting and exit code.
 
@@ -199,8 +199,9 @@ function Get-AzStorageAccount {
 }
 
 # Served through the ARM role assignments API fake appended to this body (issue #397): the Backup
-# Vault identity holds both of its roles on the storage account, named after the role, and a third
-# role inherited from the resource group, which the cleanup must leave alone.
+# Vault identity holds both of its roles on the storage account, named after the role, and two
+# roles inherited from the resource group, which the cleanup must leave alone: a Reader, and a
+# Storage Blob Data Owner - the same role as one the lab assigns, so only the scope tells them apart.
 function Get-StubRoleAssignment {
     [CmdletBinding()]
     param([string]$Scope, [string]$PrincipalId)
@@ -209,6 +210,7 @@ function Get-StubRoleAssignment {
     [pscustomobject]@{ Name = 'blob-data-owner'; PrincipalId = $PrincipalId; Scope = $Scope; RoleDefinitionId = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'; PrincipalType = 'ServicePrincipal' }
     [pscustomobject]@{ Name = 'backup-contributor'; PrincipalId = $PrincipalId; Scope = $Scope; RoleDefinitionId = 'e5e2a7ff-d759-4cd2-bb51-3152d37e2eb1'; PrincipalType = 'ServicePrincipal' }
     [pscustomobject]@{ Name = 'inherited-reader'; PrincipalId = $PrincipalId; Scope = $rg; RoleDefinitionId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; PrincipalType = 'ServicePrincipal' }
+    [pscustomobject]@{ Name = 'inherited-blob-data-owner'; PrincipalId = $PrincipalId; Scope = $rg; RoleDefinitionId = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'; PrincipalType = 'ServicePrincipal' }
 }
 
 function Remove-StubRoleAssignment {
@@ -428,13 +430,16 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - exit code contract' {
 
 Describe 'Lab 5.2 Remove-LabResource.ps1 - role assignments without Microsoft Graph (#397)' {
 
-    It 'removes the vault identity''s two roles on the storage account, through the ARM API, and leaves an inherited one alone' {
+    It 'removes the vault identity''s two roles on the storage account, through the ARM API, and leaves the inherited ones alone' {
         # The stub defines no Az role cmdlet: the assignments are reached only through the
-        # Invoke-AzRestMethod fake, filtered by the vault identity's principal id.
+        # Invoke-AzRestMethod fake, filtered by the vault identity's principal id. The inherited
+        # Storage Blob Data Owner has the role of one the lab assigns: only the exact scope keeps
+        # the cleanup from removing it.
         $calls = $script:Clean.Calls
         $calls | Should -Contain 'Remove-RoleAssignment:blob-data-owner'
         $calls | Should -Contain 'Remove-RoleAssignment:backup-contributor'
         $calls | Should -Not -Contain 'Remove-RoleAssignment:inherited-reader'
+        $calls | Should -Not -Contain 'Remove-RoleAssignment:inherited-blob-data-owner'
         @($calls | Where-Object { $_ -eq 'Get-RoleAssignment' }).Count | Should -Be 2
     }
 }

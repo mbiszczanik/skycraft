@@ -106,13 +106,20 @@ $requiredRoles = @(
 # Read and granted through the ARM role assignments API (tools/LabCommon.psm1), not
 # Get-AzRoleAssignment / New-AzRoleAssignment: those resolve the principal through Microsoft Graph
 # and fail where the Az sign-in cannot get a Graph token (issue #397). A role the identity holds on
-# the account or above it (the resource group, the subscription) counts as held, as before. A read
-# that fails stops the run: it cannot tell whether the role is there.
+# the account or above it (the resource group, the subscription, a management group or the root)
+# counts as held, as Get-AzRoleAssignment -Scope counted it; one held only below the account (on a
+# container) does not cover the account. A read that fails stops the run: it cannot tell whether
+# the role is there.
+$coversAccount = {
+    param([string]$Scope)
+    $Scope -eq $storageId -or $storageId -like "$Scope/*" -or $Scope -eq '/' -or
+        $Scope -like '/providers/Microsoft.Management/managementGroups/*'
+}
 foreach ($role in $requiredRoles) {
     Write-Host "  Checking: $($role.Name)..." -ForegroundColor Gray
     try {
         $existing = @(Get-LabArmRoleAssignment -Scope $storageId -PrincipalId $bvPrincipalId |
-            Where-Object { $_.RoleDefinitionId -eq $role.RoleId -and ($_.Scope -eq $storageId -or $storageId -like "$($_.Scope)/*") })
+            Where-Object { $_.RoleDefinitionId -eq $role.RoleId -and (& $coversAccount $_.Scope) })
     } catch {
         Write-Host "  [ERROR] Could not read the role assignments of the Backup Vault identity on '$storageAccount': $_" -ForegroundColor Red
         Exit-Lab -FailureCount 1
