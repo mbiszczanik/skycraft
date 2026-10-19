@@ -309,7 +309,7 @@ function Get-LabArmRoleAssignmentStub {
           Get-StubRoleAssignment -Scope <scope> -PrincipalId <id or ''>     (required, with
               [CmdletBinding()]) returns the assignments ARM lists for the scope - those at it,
               above it and below it - as records with Name, Scope, PrincipalId, RoleDefinitionId
-              (the role's GUID) and optionally PrincipalType. The fake keeps those of -PrincipalId
+              (the role's GUID) and optionally PrincipalType and Condition. The fake keeps those of -PrincipalId
               when the request filters by principal. An error written with Write-Error
               -ErrorId <code> becomes an ARM error reply with that code: AuthorizationFailed 403,
               TooManyRequests 429, *NotFound 404, anything else 500.
@@ -364,7 +364,7 @@ function ConvertTo-StubArmAssignment {
     param([object]$Record)
     $subscription = if ([string]$Record.Scope -match '^(/subscriptions/[^/]+)') { $Matches[1] } else { '/subscriptions/00000000-0000-0000-0000-000000000000' }
     $principalType = if ($Record.PrincipalType) { [string]$Record.PrincipalType } else { 'User' }
-    [ordered]@{
+    $assignment = [ordered]@{
         id         = "$($Record.Scope)/providers/Microsoft.Authorization/roleAssignments/$($Record.Name)"
         name       = [string]$Record.Name
         type       = 'Microsoft.Authorization/roleAssignments'
@@ -375,6 +375,8 @@ function ConvertTo-StubArmAssignment {
             scope            = [string]$Record.Scope
         }
     }
+    if ($Record.Condition) { $assignment.properties.condition = [string]$Record.Condition }
+    $assignment
 }
 
 function Invoke-AzRestMethod {

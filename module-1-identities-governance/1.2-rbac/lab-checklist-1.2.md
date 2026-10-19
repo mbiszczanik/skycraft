@@ -103,7 +103,7 @@ The portal steps above have two scripted equivalents in `scripts/`. Pick one per
   .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments -WhatIf   # preview
   .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments           # deploy
   ```
-- [ ] Imperative - the same five assignments through `New-AzRoleAssignment`:
+- [ ] Imperative - the same five assignments through the Azure Resource Manager role assignments API:
   ```powershell
   .\scripts\Deploy-Bicep.ps1              # resource groups only
   .\scripts\New-LabRoleAssignment.ps1     # Graph sign-in in the lab tenant (see below)

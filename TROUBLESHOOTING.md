@@ -18,7 +18,19 @@ This guide addresses common issues encountered while setting up or running the S
 
 **Symptoms**: The role-assignments deployment fails with `RoleAssignmentExists` although `Test-Lab.ps1` reports every assignment present.
 **Cause**: Azure allows one assignment per (scope, role, principal). `New-LabRoleAssignment.ps1` and the portal create assignments under random names; `role-assignments.bicep` names its own with `guid(scope, role, principal)` and cannot adopt one that already exists under another name. The script skips the template when all five assignments exist, so this appears only when some of them were created outside the template.
-**Solution**: Either keep using `New-LabRoleAssignment.ps1` (it skips what exists) or remove the foreign assignments with `Remove-AzRoleAssignment` and re-run the deployment. Deleting the three resource groups removes their RG-scoped assignments; the subscription-scoped Owner assignment must be removed by hand.
+**Solution**: Either keep using `New-LabRoleAssignment.ps1` (it skips what exists) or remove the foreign assignments with `Remove-AzRoleAssignment` (or in the Portal, under **Access control (IAM)**) and re-run the deployment. `Remove-AzRoleAssignment` needs a Microsoft Graph token; see the next entry if it fails with `MicrosoftGraphEndpointResourceId`. Deleting the three resource groups removes their RG-scoped assignments; the subscription-scoped Owner assignment must be removed by hand.
+
+### "Authentication failed against resource MicrosoftGraphEndpointResourceId"
+
+**Symptoms**: `Get-AzRoleAssignment`, `New-AzRoleAssignment`, `Remove-AzRoleAssignment`, `Get-AzADUser` or `Get-AzADGroup` fails with `Authentication failed against resource MicrosoftGraphEndpointResourceId. User interaction is required`, although other Az commands work and you hold Owner on the subscription.
+**Cause**: These cmdlets call Microsoft Graph to resolve users, groups and service principals. Your tenant's Conditional Access (MFA, for example) asks for interaction before it issues a Graph token to Azure PowerShell, and the sign-in you made did not include one. The lab scripts read, create and remove role assignments through the Azure Resource Manager API instead, so their role steps do not need Graph (#397); only the steps that find a user or group by name do (Lab 1.2's `Test-Lab.ps1`, `Remove-LabResource.ps1` and `Deploy-Bicep.ps1 -IncludeRoleAssignments`).
+**Solution**: Sign in again with a Graph token, then rerun the command or the script:
+
+```powershell
+Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId
+```
+
+`New-LabRoleAssignment.ps1` finds the principals through Microsoft Graph PowerShell instead; it asks for its own sign-in (`Connect-MgGraph`).
 
 ### "Insufficient Privileges" for Graph
 

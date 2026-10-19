@@ -4,7 +4,16 @@
 
 .DESCRIPTION
     This script assigns the required Azure RBAC roles to the Warcraft-themed users and groups.
-    It resolves users via Microsoft Graph and assigns roles via Azure PowerShell.
+    It finds the users and groups by name through Microsoft Graph PowerShell (Connect-MgGraph),
+    and reads and creates the role assignments through the Azure Resource Manager role
+    assignments API (tools/LabCommon.psm1), which needs only the Az sign-in's ARM token. The Az
+    role cmdlets are not used: every form of Get-AzRoleAssignment, and New-AzRoleAssignment,
+    calls Microsoft Graph through the Az sign-in and fails where the tenant asks for interaction
+    before it issues that token (issue #397).
+
+    A principal that cannot be looked up, a role assignment read that fails and a create that
+    fails are each an [ERROR] and counted; the script exits 1 when there was one. A failed read
+    is never taken for "not assigned yet".
 
     It signs in to Microsoft Graph the way Lab 1.1's scripts do, reusing a Graph context already
     in the session only when that context holds the scopes it requests, and it looks Lab 1.1's
@@ -355,6 +364,7 @@ function Select-LabInitialDomain {
 
 $ErrorActionPreference = "Stop"
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+# The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 1.2: RBAC Role Assignment ===" -ForegroundColor Cyan -BackgroundColor Black
@@ -396,6 +406,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Microsoft Graph: $_" -ForegroundColor Red
+    Write-Host "     $(Get-LabGraphSignInHint -Client MgGraph)" -ForegroundColor Gray
     Exit-Lab -FailureCount 1
 }
 
@@ -467,34 +478,30 @@ $assignments = @(
 
 Write-Host "`n=== Processing Assignments ===" -ForegroundColor Cyan
 
+# Every [ERROR] below is counted, and the script exits 1 at the end when there was one.
+$failCount = 0
+
 foreach ($item in $assignments) {
     Write-Host "Processing: $($item.PrincipalName) -> $($item.Role) on $($item.ScopeName)..." -NoNewline
-    
-    # A. Resolve Principal ObjectId
+
+    # A. Resolve Principal ObjectId (Microsoft Graph). A guest is found by mail: its
+    # userPrincipalName is rewritten to <alias>_<domain>#EXT#@<tenant> on invitation.
     $objectId = $null
     try {
         if ($item.Type -eq "Group") {
             $obj = Get-MgGroup -Filter "DisplayName eq '$($item.PrincipalName)'" -ErrorAction Stop
-            $objectId = $obj.Id
         }
         elseif ($item.Type -eq "Guest") {
-             # Guests might be found by Mail or UPN depending on invitation state
-             # Try Mail first
-             $obj = Get-MgUser -Filter "Mail eq '$($item.PrincipalName)'" -ErrorAction SilentlyContinue
-             if (-not $obj) {
-                 # Fallback to broad search if needed or check UPN if known format
-                 # For now, assume UPN might be complex for guest, so stick to mail filter
-             }
-             $objectId = $obj.Id
+            $obj = Get-MgUser -Filter "Mail eq '$($item.PrincipalName)'" -ErrorAction Stop
         }
         else {
-            # Standard User
             $obj = Get-MgUser -Filter "UserPrincipalName eq '$($item.PrincipalName)'" -ErrorAction Stop
-            $objectId = $obj.Id
         }
+        $objectId = @($obj | Where-Object { $_ } | Select-Object -First 1 -ExpandProperty Id)[0]
     }
     catch {
-        Write-Host " [ERROR] Failed to resolve principal." -ForegroundColor Red
+        $failCount++
+        Write-Host " [ERROR] Failed to resolve principal: $_ $(Get-LabGraphSignInHint -Client MgGraph)" -ForegroundColor Red
         continue
     }
 
@@ -503,23 +510,38 @@ foreach ($item in $assignments) {
         continue
     }
 
-    # B. Assign Role
+    # B. Assign Role, through the ARM role assignments API (issue #397). Only an assignment made
+    # at the scope itself counts as there: one inherited from above is not the lab's, as in
+    # Deploy-Bicep.ps1 and Test-Lab.ps1. A read that fails creates nothing and is counted.
+    $roleId = Get-LabBuiltInRoleId -Name $item.Role
     try {
-        # Check if exists to avoid error
-        # Note: Get-AzRoleAssignment needs exact scope
-        $exists = Get-AzRoleAssignment -ObjectId $objectId -RoleDefinitionName $item.Role -Scope $item.Scope -ErrorAction SilentlyContinue
-        
-        if ($exists) {
-            Write-Host " [SKIPPED] Already assigned." -ForegroundColor Yellow
-        }
-        else {
-            New-AzRoleAssignment -ObjectId $objectId -RoleDefinitionName $item.Role -Scope $item.Scope -ErrorAction Stop | Out-Null
-            Write-Host " [SUCCESS]" -ForegroundColor Green
-        }
+        $exists = @(Get-LabArmRoleAssignment -Scope $item.Scope -PrincipalId $objectId |
+            Where-Object { $_.RoleDefinitionId -eq $roleId -and $_.Scope -eq $item.Scope })
     }
     catch {
-        Write-Host " [FAIL] $_" -ForegroundColor Red
+        $failCount++
+        Write-Host " [ERROR] Could not read the role assignments at $($item.ScopeName): $_" -ForegroundColor Red
+        continue
     }
+
+    if ($exists.Count -gt 0) {
+        Write-Host " [SKIPPED] Already assigned." -ForegroundColor Yellow
+        continue
+    }
+    try {
+        $principalType = if ($item.Type -eq 'Group') { 'Group' } else { 'User' }
+        New-LabArmRoleAssignment -Scope $item.Scope -RoleDefinitionId $roleId -PrincipalId $objectId -PrincipalType $principalType | Out-Null
+        Write-Host " [SUCCESS]" -ForegroundColor Green
+    }
+    catch {
+        $failCount++
+        Write-Host " [ERROR] Failed to assign the role: $_" -ForegroundColor Red
+    }
+}
+
+if ($failCount -gt 0) {
+    Write-Host "`nRole assignment finished with $failCount error(s). See the [ERROR] lines above." -ForegroundColor Red
+    Exit-Lab -FailureCount $failCount
 }
 
 Write-Host "`nRole assignment complete." -ForegroundColor Green

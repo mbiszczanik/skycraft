@@ -28,6 +28,10 @@
          Connect-AzAccount the script runs. A Graph sign-in in another tenant than the Az context
          is neither reused nor replaced: the script stops with [ERROR] and exit 1 and names both,
          since that Az context may be one Az PowerShell restored from an earlier session.
+      5. The role assignments are read and created through the ARM role assignments API (issue
+         #397), not through the Az role cmdlets, which call Microsoft Graph: an assignment held
+         at its scope is skipped, a missing one is created with its principal type, and a read
+         that fails creates nothing and is an [ERROR], counted, exit 1.
 
     No tenant or subscription is needed, and none is used: the script runs through
     tests/Support/LabScriptStub.psm1 (issue #112), which aborts the child with exit 99 unless
@@ -67,8 +71,7 @@ BeforeAll {
         'Get-MgDomain'
         'Get-MgUser'
         'Get-MgGroup'
-        'Get-AzRoleAssignment'
-        'New-AzRoleAssignment'
+        'Invoke-AzRestMethod'
     )
 
     # An empty tenant with one subscription: every principal lookup succeeds and finds nothing, so
@@ -159,26 +162,54 @@ function Get-MgDomain {
     }
 }
 
+# With SKYCRAFT_STUB_PRINCIPALS '1' the tenant holds Lab 1.1's principals; otherwise it is empty.
+function Get-StubPrincipalId {
+    param([string]$Key)
+    if ($env:SKYCRAFT_STUB_PRINCIPALS -ne '1') { return }
+    $ids = @{
+        'malfurion' = 'aaaaaaaa-0000-0000-0000-000000000001'
+        'SkyCraft-Developers' = 'aaaaaaaa-0000-0000-0000-000000000002'
+        'SkyCraft-Testers' = 'aaaaaaaa-0000-0000-0000-000000000003'
+        'istormrage' = 'aaaaaaaa-0000-0000-0000-000000000004'
+    }
+    [pscustomobject]@{ Id = $ids[$Key] }
+}
+
 function Get-MgUser {
     [CmdletBinding()]
     param([string]$Filter, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name "Get-MgUser|$Filter"
+    if ($Filter -like '*malfurion.stormrage@*') { Get-StubPrincipalId -Key 'malfurion' }
+    elseif ($Filter -eq "Mail eq 'istormrage@illidari.com'") { Get-StubPrincipalId -Key 'istormrage' }
 }
 
 function Get-MgGroup {
     [CmdletBinding()]
     param([string]$Filter, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($Filter -match "DisplayName eq '(?<name>[^']+)'") { Get-StubPrincipalId -Key $Matches['name'] }
 }
 
-function Get-AzRoleAssignment {
+# Role assignments, served by the ARM role assignments API fake appended to this body (issue
+# #397). With SKYCRAFT_STUB_HELD '1' Malfurion already holds Owner on the subscription; with
+# SKYCRAFT_STUB_ROLELOOKUPFAIL '1' every listing is refused (HTTP 403).
+function Get-StubRoleAssignment {
     [CmdletBinding()]
-    param([Parameter(ValueFromRemainingArguments)]$Rest)
+    param([string]$Scope, [string]$PrincipalId)
+    Write-StubCall -Name "Get-RoleAssignment|$Scope|$PrincipalId"
+    if ($env:SKYCRAFT_STUB_ROLELOOKUPFAIL -eq '1') {
+        Write-Error -ErrorId 'AuthorizationFailed' -Message "The client 'stub' does not have authorization to perform action 'Microsoft.Authorization/roleAssignments/read' over scope '$Scope'."
+        return
+    }
+    if ($env:SKYCRAFT_STUB_HELD -eq '1' -and $Scope -eq '/subscriptions/11111111-1111-1111-1111-111111111111') {
+        [pscustomobject]@{ Name = 'ra-held'; Scope = $Scope; PrincipalId = 'aaaaaaaa-0000-0000-0000-000000000001'; RoleDefinitionId = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635' }
+    }
 }
 
-function New-AzRoleAssignment {
+function New-StubRoleAssignment {
     [CmdletBinding()]
-    param([Parameter(ValueFromRemainingArguments)]$Rest)
-    Write-StubCall -Name 'New-AzRoleAssignment'
+    param([string]$Scope, [string]$Name, [string]$RoleDefinitionId, [string]$PrincipalId, [string]$PrincipalType)
+    Write-StubCall -Name 'New-RoleAssignment'
+    Write-StubCall -Name "New-RoleAssignment:$PrincipalId|$PrincipalType|$(($RoleDefinitionId -split '/')[-1])|$Scope"
 }
 '@
 
@@ -188,7 +219,7 @@ function New-AzRoleAssignment {
     $script:Lab11Scopes     = 'User.ReadWrite.All,Group.ReadWrite.All,Directory.ReadWrite.All,Domain.Read.All,User.Invite.All'
 
     function Invoke-RoleAssignmentScript {
-        param([string]$Domain = 'custom', [string]$Scopes = $script:Lab11Scopes, [switch]$NoContext, [string]$MgTenant = '', [switch]$MgFresh, [switch]$NoAzContext)
+        param([string]$Domain = 'custom', [string]$Scopes = $script:Lab11Scopes, [switch]$NoContext, [string]$MgTenant = '', [switch]$MgFresh, [switch]$NoAzContext, [switch]$Principals, [switch]$Held, [switch]$RoleLookupFail)
 
         $logPath = Join-Path $script:Stub.Directory 'calls.log'
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
@@ -200,6 +231,9 @@ function New-AzRoleAssignment {
             SKYCRAFT_STUB_MGTENANT         = $MgTenant
             SKYCRAFT_STUB_MGFRESH          = if ($MgFresh) { '1' } else { '0' }
             SKYCRAFT_STUB_NOAZCONTEXT      = if ($NoAzContext) { '1' } else { '0' }
+            SKYCRAFT_STUB_PRINCIPALS       = if ($Principals) { '1' } else { '0' }
+            SKYCRAFT_STUB_HELD             = if ($Held) { '1' } else { '0' }
+            SKYCRAFT_STUB_ROLELOOKUPFAIL   = if ($RoleLookupFail) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG              = $logPath
             # Interactive plan, so the script reuses the stub's context or calls the stub's
             # Connect-MgGraph instead of signing in.
@@ -220,7 +254,7 @@ function New-AzRoleAssignment {
     }
 
     $script:Stub = Initialize-LabScriptStub -Name 'SkyCraftLab12Stub' -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmRoleAssignmentStub)) -RequiredModule $script:RequiredModules
 
     # One invocation per scenario - each child process costs several seconds.
     $script:Custom    = Invoke-RoleAssignmentScript -Domain 'custom'
@@ -234,6 +268,9 @@ function New-AzRoleAssignment {
     $script:OtherTenant = Invoke-RoleAssignmentScript -MgTenant '99999999-9999-9999-9999-999999999999'
     # The #300 shape: a fresh session, no Az context and no Graph context.
     $script:NoAz = Invoke-RoleAssignmentScript -MgFresh -NoAzContext
+    # Lab 1.1's principals exist (issue #397): the roles are read and created through the ARM API.
+    $script:Assigns   = Invoke-RoleAssignmentScript -Principals -Held
+    $script:ReadFails = Invoke-RoleAssignmentScript -Principals -RoleLookupFail
 }
 
 AfterAll {
@@ -243,7 +280,7 @@ AfterAll {
 Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - test harness' {
 
     It 'shadows the real Microsoft Graph and Az commands instead of touching a tenant' {
-        foreach ($run in @($script:Custom, $script:Fail, $script:NoInitial, $script:ReadOnly, $script:NoContext, $script:OtherTenant, $script:NoAz)) {
+        foreach ($run in @($script:Custom, $script:Fail, $script:NoInitial, $script:ReadOnly, $script:NoContext, $script:OtherTenant, $script:NoAz, $script:Assigns, $script:ReadFails)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real commands (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -265,7 +302,7 @@ Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - Lab 1.1''s users on the initial do
         $run.ExitCode | Should -Be 1 -Because "a guessed domain names users Lab 1.1 never created; output was:`n$($run.Output)"
         $run.Output | Should -Match '\[ERROR\][^\r\n]*initial \*\.onmicrosoft\.com domain'
         $run.Calls | Should -Contain 'Get-MgDomain'
-        @($run.Calls | Where-Object { $_ -like 'Get-MgUser|*' -or $_ -eq 'New-AzRoleAssignment' }) |
+        @($run.Calls | Where-Object { $_ -like 'Get-MgUser|*' -or $_ -eq 'New-RoleAssignment' }) |
             Should -BeNullOrEmpty -Because 'nothing may be looked up or assigned on a guessed domain'
     }
 }
@@ -293,7 +330,7 @@ Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - signs in to Microsoft Graph the wa
         $run.Output | Should -Not -Match 'Connected to Tenant'
         $run.Calls | Should -Contain 'Connect-MgGraph'
         $run.Calls | Should -Not -Contain 'Get-MgDomain'
-        @($run.Calls | Where-Object { $_ -like 'Get-MgUser|*' -or $_ -eq 'New-AzRoleAssignment' }) | Should -BeNullOrEmpty
+        @($run.Calls | Where-Object { $_ -like 'Get-MgUser|*' -or $_ -like 'New-RoleAssignment:*' }) | Should -BeNullOrEmpty
     }
 }
 
@@ -305,7 +342,7 @@ Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - signs in to Microsoft Graph in the
         $run.Output | Should -Match '\[ERROR\] Failed to connect to Microsoft Graph: [^\r\n]*99999999-9999-9999-9999-999999999999[^\r\n]*00000000-0000-0000-0000-000000000000'
         $run.Calls | Should -Not -Contain 'Connect-MgGraph' -Because 'the Graph context must not be replaced silently'
         $run.Calls | Should -Not -Contain 'Get-MgDomain'
-        @($run.Calls | Where-Object { $_ -like 'Get-MgUser|*' -or $_ -eq 'New-AzRoleAssignment' }) | Should -BeNullOrEmpty
+        @($run.Calls | Where-Object { $_ -like 'Get-MgUser|*' -or $_ -like 'New-RoleAssignment:*' }) | Should -BeNullOrEmpty
     }
 
     It 'with no Az context, runs Connect-AzAccount before Connect-MgGraph and signs in to Graph in the new Az tenant' {
@@ -321,5 +358,33 @@ Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - signs in to Microsoft Graph in the
 
     It 'prints no missing-tenant hint when the Az context names the tenant' {
         $script:Custom.Output | Should -Not -Match 'No tenant named'
+    }
+}
+
+Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - role assignments without the Az role cmdlets (#397)' {
+
+    It 'creates the four missing assignments through the ARM API, each with its principal type, and skips the one held' {
+        $run = $script:Assigns
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $sub = '/subscriptions/11111111-1111-1111-1111-111111111111'
+        @($run.Calls | Where-Object { $_ -like 'New-RoleAssignment:*' }) | Should -Be @(
+            "New-RoleAssignment:aaaaaaaa-0000-0000-0000-000000000002|Group|b24988ac-6180-42a0-ab88-20f7382dd24c|$sub/resourceGroups/dev-skycraft-swc-rg"
+            "New-RoleAssignment:aaaaaaaa-0000-0000-0000-000000000003|Group|acdd72a7-3385-48ef-bd42-f606fba81ae7|$sub/resourceGroups/dev-skycraft-swc-rg"
+            "New-RoleAssignment:aaaaaaaa-0000-0000-0000-000000000003|Group|acdd72a7-3385-48ef-bd42-f606fba81ae7|$sub/resourceGroups/prod-skycraft-swc-rg"
+            "New-RoleAssignment:aaaaaaaa-0000-0000-0000-000000000004|User|acdd72a7-3385-48ef-bd42-f606fba81ae7|$sub/resourceGroups/platform-skycraft-swc-rg"
+        )
+        $run.Output | Should -Match 'malfurion\.stormrage@contoso\.onmicrosoft\.com -> Owner on Subscription Root\.\.\. \[SKIPPED\] Already assigned'
+        @($run.Calls | Where-Object { $_ -like 'Get-RoleAssignment|*' }).Count | Should -Be 5
+        $run.Calls | Should -Contain "Get-RoleAssignment|$sub|aaaaaaaa-0000-0000-0000-000000000001"
+    }
+
+    It 'creates nothing when the role assignments cannot be read, counts each read, and exits 1' {
+        # The read used -ErrorAction SilentlyContinue: a refused read looked like "not assigned
+        # yet", and the create that followed hid the cause.
+        $run = $script:ReadFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        ([regex]::Matches($run.Output, '\[ERROR\] Could not read the role assignments at [^\r\n]*HTTP 403 \(AuthorizationFailed\)')).Count | Should -Be 5
+        $run.Calls | Should -Not -Contain 'New-RoleAssignment'
+        $run.Output | Should -Match 'Role assignment finished with 5 error\(s\)'
     }
 }

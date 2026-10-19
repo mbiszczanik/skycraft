@@ -16,7 +16,7 @@
     run is a no-op.
 
     The imperative alternative, New-LabRoleAssignment.ps1, creates the same five assignments
-    through New-AzRoleAssignment under different names. The two paths do not adopt each other's
+    through the ARM role assignments API under different names. The two paths do not adopt each other's
     assignments: this script skips the template when all five already exist (whichever path
     created them), and a partial overlap surfaces as RoleAssignmentExists from ARM.
 
@@ -26,7 +26,11 @@
 .PARAMETER IncludeRoleAssignments
     Also deploys role-assignments.bicep after the resource groups. Requires Lab 1.1's users and
     groups to exist and an Az context that can read Entra ID (Get-AzADUser / Get-AzADGroup, and
-    the tenant's domains through Invoke-AzRestMethod).
+    the tenant's domains through Invoke-AzRestMethod), which needs Microsoft Graph through the Az
+    sign-in's Graph token. Where the tenant asks for interaction before it issues that token, sign
+    in with 'Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId' first; a failed lookup
+    says so. The existing assignments are read through the Azure Resource Manager API, which needs
+    no Graph (issue #397).
 
 .PARAMETER WhatIf
     Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
@@ -63,6 +67,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+# The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 # --- Principal resolution (issue #81) ------------------------------------------------------
@@ -203,6 +208,7 @@ if ($IncludeRoleAssignments) {
     }
     catch {
         Write-Host "  -> [ERROR] $_" -ForegroundColor Red
+        Write-Host "     $(Get-LabGraphSignInHint -Client Az)" -ForegroundColor Gray
         Exit-Lab -FailureCount 1
     }
 }
@@ -265,8 +271,8 @@ Write-Host "`nStarting Role Assignment Deployment..." -ForegroundColor Cyan
 Write-Host "  Template: $roleTemplateFile" -ForegroundColor Gray
 Write-Host "  DeploymentName: $roleDeploymentName" -ForegroundColor Gray
 
-# The five assignments the template declares, in the shape Get-AzRoleAssignment filters on. Kept
-# in step with the template by hand; Test-Lab.ps1 asserts the same five.
+# The five assignments the template declares: principal, role and exact scope. Kept in step with
+# the template by hand; Test-Lab.ps1 asserts the same five.
 $desired = @(
     @{ ObjectId = $principal.parAdminPrincipalId;          Role = 'Owner';       Scope = "/subscriptions/$subscriptionId" }
     @{ ObjectId = $principal.parDeveloperGroupPrincipalId; Role = 'Contributor'; Scope = "/subscriptions/$subscriptionId/resourceGroups/dev-skycraft-swc-rg" }
@@ -286,13 +292,23 @@ try {
         exit 0
     }
 
-    # Get-AzRoleAssignment -Scope also returns assignments inherited from above, so match the
-    # scope exactly: a Reader at subscription level is not the RG-level Reader the template makes.
+    # Read through the ARM role assignments API (Get-LabArmRoleAssignment), not
+    # Get-AzRoleAssignment, which calls Microsoft Graph (issue #397). The listing also returns
+    # assignments inherited from above, so match the role and the scope exactly: a Reader at
+    # subscription level is not the RG-level Reader the template makes. A read that fails stops
+    # the run with an [ERROR] (the catch below): counting it as "not there" would deploy on top of
+    # assignments that may exist.
     $existingCount = 0
     foreach ($item in $desired) {
         $scope = $item.Scope
-        $match = @(Get-AzRoleAssignment -ObjectId $item.ObjectId -RoleDefinitionName $item.Role -Scope $scope -ErrorAction SilentlyContinue |
-            Where-Object { $_.Scope -eq $scope })
+        $roleId = Get-LabBuiltInRoleId -Name $item.Role
+        try {
+            $match = @(Get-LabArmRoleAssignment -Scope $scope -PrincipalId $item.ObjectId |
+                Where-Object { $_.RoleDefinitionId -eq $roleId -and $_.Scope -eq $scope })
+        }
+        catch {
+            throw "Could not read the role assignments at ${scope}: $($_.Exception.Message)"
+        }
         if ($match.Count -gt 0) { $existingCount++ }
     }
     Write-Host "  Existing assignments: $existingCount of $($desired.Count)" -ForegroundColor Gray

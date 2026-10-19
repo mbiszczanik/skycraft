@@ -18,7 +18,9 @@
        Inherit-Project-Tag: the Bicep path's three Deny assignments made before main.bicep set
        managedIdentities to {} carry an identity too (the AVM module's default), with no role.
        When the role assignments cannot be listed, all of them are kept; the failed listing is
-       one [ERROR], and the run exits 1.
+       one [ERROR], and the run exits 1. The role assignments are listed and removed through the
+       Azure Resource Manager API (tools/LabCommon.psm1), so the cleanup needs no Microsoft Graph
+       sign-in (issue #397).
     3. The two budgets: SkyCraft-Monthly-Budget on the subscription (step 1.3.15) and
        SkyCraft-Prod-Monthly on prod-skycraft-swc-rg (step 1.3.17).
     4. The Advisor alert Advisor-Cost-Recommendations (step 1.3.7), an activity log alert in
@@ -77,6 +79,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+# The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
@@ -256,8 +259,11 @@ if (-not $policyLookup.Failed) {
         $identity = Get-LabPolicyAssignmentIdentity -Assignment $assignment
         if ($identity.PrincipalId) {
             if ($null -eq $roleLookup) {
+                # Through the ARM role assignments API, not Get-AzRoleAssignment: every form of
+                # that cmdlet resolves the principals through Microsoft Graph and fails where the
+                # Az sign-in cannot get a Graph token (issue #397).
                 $roleLookup = Invoke-LabLookup -Target "the role assignments on the subscription" -Lookup {
-                    Get-AzRoleAssignment -Scope $subscriptionScope -ErrorAction Stop
+                    Get-LabArmRoleAssignment -Scope $subscriptionScope
                 }
             }
             if ($roleLookup.Failed) {
@@ -266,10 +272,11 @@ if (-not $policyLookup.Failed) {
             }
             $roleFailed = $false
             foreach ($roleAssignment in @(Select-LabPolicyIdentityRoleAssignment -RoleAssignment $roleLookup.Value -PrincipalId $identity.PrincipalId -SubscriptionId $subId)) {
-                $roleLabel = "$($roleAssignment.RoleDefinitionName) at $($roleAssignment.Scope) for the identity of $($spec.Name)"
+                $roleName = if ($roleAssignment.RoleDefinitionName) { $roleAssignment.RoleDefinitionName } else { "role $($roleAssignment.RoleDefinitionId)" }
+                $roleLabel = "$roleName at $($roleAssignment.Scope) for the identity of $($spec.Name)"
                 if (-not $PSCmdlet.ShouldProcess($roleLabel, 'Remove role assignment')) { continue }
                 try {
-                    Remove-AzRoleAssignment -InputObject $roleAssignment -ErrorAction Stop | Out-Null
+                    Remove-LabArmRoleAssignment -Id $roleAssignment.RoleAssignmentId
                     Write-Host "  -> [SUCCESS] Removed role assignment: $roleLabel" -ForegroundColor Green
                 }
                 catch {

@@ -389,6 +389,7 @@ function ConvertTo-LabArmRoleAssignment {
         RoleDefinitionId         = $definitionGuid
         RoleDefinitionResourceId = $definitionId
         RoleDefinitionName       = $definitionName
+        Condition                = [string]$properties.condition
     }
 }
 
@@ -424,7 +425,8 @@ function Get-LabArmRoleAssignment {
     .OUTPUTS
         SkyCraft.LabRoleAssignment objects: RoleAssignmentId, RoleAssignmentName, Scope, ObjectId,
         PrincipalId, ObjectType, PrincipalType, RoleDefinitionId (the role's GUID),
-        RoleDefinitionResourceId and RoleDefinitionName (built-in roles the labs use only).
+        RoleDefinitionResourceId, RoleDefinitionName (built-in roles the labs use only) and
+        Condition (empty when the assignment has none).
 
     .EXAMPLE
         Get-LabArmRoleAssignment -Scope "/subscriptions/$subId" -PrincipalId $principalId

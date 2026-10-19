@@ -12,7 +12,10 @@
        prodskycraftswcsa to the SkyCraft-Blob-Policy backup policy.
 
     Requires Owner or User Access Administrator role at storage account scope
-    to create role assignments.
+    to create role assignments. The role assignments are read and created
+    through the Azure Resource Manager role assignments API
+    (tools/LabCommon.psm1), so the script needs no Microsoft Graph sign-in
+    (issue #397); a read that fails stops the run with exit 1.
 
 .PARAMETER WhatIf
     Display planned actions without making changes.
@@ -41,6 +44,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+# The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 $platformRg     = 'platform-skycraft-swc-rg'
@@ -99,23 +103,33 @@ $requiredRoles = @(
     @{ Name = 'Storage Account Backup Contributor'; RoleId = 'e5e2a7ff-d759-4cd2-bb51-3152d37e2eb1' }
 )
 
+# Read and granted through the ARM role assignments API (tools/LabCommon.psm1), not
+# Get-AzRoleAssignment / New-AzRoleAssignment: those resolve the principal through Microsoft Graph
+# and fail where the Az sign-in cannot get a Graph token (issue #397). A role the identity holds on
+# the account or above it (the resource group, the subscription) counts as held, as before. A read
+# that fails stops the run: it cannot tell whether the role is there.
 foreach ($role in $requiredRoles) {
     Write-Host "  Checking: $($role.Name)..." -ForegroundColor Gray
-    $existing = Get-AzRoleAssignment `
-        -ObjectId $bvPrincipalId `
-        -RoleDefinitionId $role.RoleId `
-        -Scope $storageId `
-        -ErrorAction SilentlyContinue
-    if (@($existing).Count -gt 0) {
+    try {
+        $existing = @(Get-LabArmRoleAssignment -Scope $storageId -PrincipalId $bvPrincipalId |
+            Where-Object { $_.RoleDefinitionId -eq $role.RoleId -and ($_.Scope -eq $storageId -or $storageId -like "$($_.Scope)/*") })
+    } catch {
+        Write-Host "  [ERROR] Could not read the role assignments of the Backup Vault identity on '$storageAccount': $_" -ForegroundColor Red
+        Exit-Lab -FailureCount 1
+    }
+    if ($existing.Count -gt 0) {
         Write-Host "  ✓ Already assigned: $($role.Name)" -ForegroundColor Green
     } elseif ($WhatIf) {
         Write-Host "  [WhatIf] Would assign: $($role.Name)" -ForegroundColor Cyan
     } else {
         try {
-            New-AzRoleAssignment `
-                -ObjectId $bvPrincipalId `
+            # ServicePrincipal: the vault's managed identity, so ARM does not look it up in the
+            # directory first.
+            New-LabArmRoleAssignment `
+                -Scope $storageId `
                 -RoleDefinitionId $role.RoleId `
-                -Scope $storageId | Out-Null
+                -PrincipalId $bvPrincipalId `
+                -PrincipalType 'ServicePrincipal' | Out-Null
             Write-Host "  ✓ Assigned: $($role.Name)" -ForegroundColor Green
         } catch {
             Write-Host "  [ERROR] Failed to assign '$($role.Name)': $_" -ForegroundColor Red
