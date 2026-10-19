@@ -274,6 +274,8 @@ The blade only lists licenses: assignments are added and removed in the Microsof
 
 **Expected Result**: You see the guest user access and guest invite settings of your tenant.
 
+**Note**: In a new tenant, **Guest invite restrictions** is set to "Anyone in the organization can invite guest users including guests and non-admins (most inclusive)": every member, and every guest, can invite more guests. Leave it as it is for this lab. In a production tenant you would usually limit invitations to members or to the admin roles that manage guests ([Configure external collaboration settings](https://learn.microsoft.com/entra/external-id/external-collaboration-settings-configure)).
+
 ![Review B2B Collaboration Settings](./images/Step-1.1.14.png)
 
 ---
