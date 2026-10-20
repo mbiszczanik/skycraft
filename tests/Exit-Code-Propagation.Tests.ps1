@@ -29,6 +29,9 @@
       - the successful run too: a lab script's last top-level statement is an Exit-Lab call or an
         `exit`. One that falls off its end after a closing Write-Host, a try or an if leaves
         $LASTEXITCODE as the previous command set it, so a passing re-run reads 1 (#398);
+      - the failure paths too: a lab script that sets $ErrorActionPreference to 'Stop' calls no
+        Write-Error outside a function. Under Stop it ends the script before the Exit-Lab after
+        it, so at the prompt a failed run leaves the previous run's $LASTEXITCODE (#398);
       - for the entry-point decision, every command-line shape it has to tell apart;
       - behaviourally, with real pwsh processes and no Azure: `pwsh -File` returns 1 for a failed
         run and takes the SetShouldExit branch, an interactive session keeps running after the
@@ -148,8 +151,32 @@ function Get-LabExitShape {
         $last.PipelineElements[0] -is [System.Management.Automation.Language.CommandAst] -and
         $last.PipelineElements[0].GetCommandName() -eq 'Exit-Lab')
 
+    # Write-Error outside a function under a script-level 'Stop' preference (#398). One with its
+    # own -ErrorAction does not terminate on the preference.
+    $inFunction = {
+        param($node)
+        for ($p = $node.Parent; $p; $p = $p.Parent) {
+            if ($p -is [System.Management.Automation.Language.FunctionDefinitionAst]) { return $true }
+        }
+        return $false
+    }
+    $stopPreference = @($ast.FindAll({ param($n)
+        $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $n.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+        $n.Left.VariablePath.UserPath -match '^((script|global):)?ErrorActionPreference$' -and
+        $n.Right.Extent.Text -match '\bStop\b'
+    }, $true) | Where-Object { -not (& $inFunction $_) }).Count -gt 0
+    $writeError = @($ast.FindAll({ param($n)
+        $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Write-Error' -and
+        -not ($n.CommandElements | Where-Object {
+            $_ -is [System.Management.Automation.Language.CommandParameterAst] -and $_.ParameterName -match '^(ErrorAction|ea)$'
+        })
+    }, $true) | Where-Object { -not (& $inFunction $_) } |
+        ForEach-Object { "line $($_.Extent.StartLineNumber): $($_.Extent.Text)" })
+
     [PSCustomObject]@{
         EndsThroughExit = $endsThroughExit
+        StopWriteError = if ($stopPreference) { $writeError } else { @() }
         LastStatement  = if ($last) { "line $($last.Extent.StartLineNumber): $(($last.Extent.Text -split '\r?\n')[0].Trim())" } else { '' }
         SetShouldExit  = $setShouldExit
         NonZeroExit    = $nonZeroExit
@@ -197,6 +224,7 @@ $LabCases = foreach ($item in $LabScriptFiles) {
         labCommonPath  = $LabCommonPath
         endsThroughExit = $shape.EndsThroughExit
         lastStatement  = $shape.LastStatement
+        stopWriteError = $shape.StopWriteError
     }
 }
 $EntryLabCases = @($LabCases | Where-Object { -not $_.helper })
@@ -310,6 +338,30 @@ $LastStatementFixtures = @(
        expected = $true }
 )
 
+$StopWriteErrorFixtures = @(
+    @{ name = 'Write-Error before Exit-Lab under a Stop preference is caught'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "`$ErrorActionPreference = 'Stop'`nif (`$f) { Write-Error 'x'; Exit-Lab -FailureCount 1 }`nExit-Lab -FailureCount 0"
+       expected = 1 }
+    @{ name = 'Write-Error in a catch block under a Stop preference is caught'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "`$ErrorActionPreference = `"Stop`"`ntry { Get-X } catch { Write-Error `$_; Exit-Lab -FailureCount 1 }`nExit-Lab -FailureCount 0"
+       expected = 1 }
+    @{ name = 'Write-Error without a Stop preference is not caught'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "if (`$f) { Write-Error 'x'; Exit-Lab -FailureCount 1 }`nExit-Lab -FailureCount 0"
+       expected = 0 }
+    @{ name = 'Write-Error inside a function is not caught'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "`$ErrorActionPreference = 'Stop'`nfunction Get-X { Write-Error 'x' }`nExit-Lab -FailureCount 0"
+       expected = 0 }
+    @{ name = 'Write-Error with its own -ErrorAction is not caught'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "`$ErrorActionPreference = 'Stop'`nWrite-Error 'x' -ErrorAction Continue`nExit-Lab -FailureCount 1"
+       expected = 0 }
+    @{ name = 'a Stop preference set only inside a function is not a script-level one'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "function Get-X { `$ErrorActionPreference = 'Stop' }`nWrite-Error 'x'`nExit-Lab -FailureCount 1"
+       expected = 0 }
+    @{ name = 'an [ERROR] line before Exit-Lab under a Stop preference is not caught'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "`$ErrorActionPreference = 'Stop'`nWrite-Host '[ERROR] x' -ForegroundColor Red`nExit-Lab -FailureCount 1"
+       expected = 0 }
+)
+
 # Discovery and run are separate phases in Pester 5: what the It blocks need at run time is set
 # up again here.
 BeforeAll {
@@ -364,6 +416,12 @@ Describe 'SkyCraft PowerShell - every lab script ends through Exit-Lab (#257)' {
         $endsThroughExit | Should -BeTrue -Because "the last top-level statement is '$lastStatement'; end the successful run with Exit-Lab -FailureCount 0 (or the count)"
     }
 
+    It "'<file>', under a Stop error preference, calls no Write-Error outside a function (#398)" -ForEach $LabCases {
+        # Under Stop, Write-Error ends the script before the Exit-Lab after it, so at the prompt a
+        # failed run leaves the previous run's $LASTEXITCODE.
+        $stopWriteError | Should -BeNullOrEmpty -Because "report the failure with Write-Host '[ERROR] <message>' -ForegroundColor Red, then Exit-Lab -FailureCount <n>"
+    }
+
     It "'<file>', excused as a dot-sourced helper, is one: a sibling dot-sources it and it ends nothing" -ForEach $HelperCases {
         $found | Should -BeTrue -Because 'a stale entry in $DotSourcedHelpers excuses nothing and hides a rename'
         $dotSourcedBy | Should -Not -BeNullOrEmpty -Because "a lab script in the same folder runs it with . (Join-Path `$PSScriptRoot '<helper file name>')"
@@ -384,6 +442,10 @@ Describe 'SkyCraft PowerShell - the lab script rule fails what it is there to fa
 
     It '<name>' -ForEach $LastStatementFixtures {
         $shape.EndsThroughExit | Should -Be $expected
+    }
+
+    It '<name>' -ForEach $StopWriteErrorFixtures {
+        @($shape.StopWriteError).Count | Should -Be $expected
     }
 }
 
@@ -581,6 +643,24 @@ Describe 'SkyCraft PowerShell - Exit-Lab reaches both callers (real pwsh process
             'Write-Host "MARKER after the re-run, LASTEXITCODE=$LASTEXITCODE"'
         )
         $output | Should -Match 'MARKER after the re-run, LASTEXITCODE=1' -Because "output was:`n$output"
+    }
+
+    It 'control: a Write-Error before Exit-Lab under Stop keeps the passing run''s $LASTEXITCODE (#398)' {
+        # Proves the Write-Error rule guards a real fault: the failed run reads as a pass.
+        $writeError = Join-Path $TestDrive 'Write-Error-Stop.ps1'
+        @(
+            '#Requires -Version 7.0'
+            "`$ErrorActionPreference = 'Stop'"
+            "Import-Module '$LabCommonPath' -Force -Verbose:`$false"
+            'Write-Error "not signed in"'
+            'Exit-Lab -FailureCount 1'
+        ) | Set-Content -LiteralPath $writeError -Encoding utf8
+        $output = Invoke-InteractiveSession -Line @(
+            "& '$($script:LabScript)' -Count 0"
+            "try { & '$writeError' } catch { }"
+            'Write-Host "MARKER after the failed run, LASTEXITCODE=$LASTEXITCODE"'
+        )
+        $output | Should -Match 'MARKER after the failed run, LASTEXITCODE=0' -Because "output was:`n$output"
     }
 
     It 'control: the old SetShouldExit idiom ends the same session before the next command' {
