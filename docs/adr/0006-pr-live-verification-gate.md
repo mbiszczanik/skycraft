@@ -83,7 +83,10 @@ would be tracked rather than forgotten.
    Done for a lab fix is "merged and works after tests", and in the
    2026-10-20 pass fix PRs were deferred while every fix had only offline
    evidence: PR #382's fix could run in the test tenant and passed when
-   it was run (Lab 1.1 `Test-Lab.ps1` 10/10, Lab 1.2 8/8, exit 0), and an
+   it was run (at local merges of the open Module 1 PRs that include
+   #382, `a27ca9b` and `498c164`: Lab 1.1 `Test-Lab.ps1` passed 10/10,
+   exit 0 as a child process; Lab 1.2 `Test-Lab.ps1` passed 8/8 with no
+   exit code set, #398), and an
    implementer's partial test run reported 0 failures while CI failed on
    a suite it had left out. From now on:
 
@@ -102,10 +105,13 @@ would be tracked rather than forgotten.
      ```
 
      and the gate fails a deferred PR without it, with two of them, or
-     with a blank or placeholder reason (`<...>`, `TBD`, `TODO`, `n/a`,
-     `none`). The blocker is a separate line so the deferred line and the
-     PR bodies written before this amendment keep their form; they fail
-     only until the line is added or the live check is run.
+     with a blank or placeholder reason (`<...>`, `TBD`, `TBA`, `TODO`,
+     `n/a`, `none`, `unknown`, `see above`, `-`, `...`, `?`, with Markdown
+     emphasis ignored). The same placeholders are refused on the
+     `Live-verified:` line. The blocker is a separate line so the
+     deferred line and the PR bodies written before this amendment keep
+     their form; they fail only until the line is added or the live
+     check is run.
    - **(c) Repeat on `main`.** After merge the live check runs again on
      `main`, because stacked and overlapping PRs can break each other. Its
      result is recorded on the issue that tracks the live check, and only

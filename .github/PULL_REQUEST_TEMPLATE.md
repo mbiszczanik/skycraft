@@ -4,11 +4,11 @@
 
 ## Related issue
 
-<!-- Link the issue this PR addresses, e.g. Closes #123.
-     If the live verification below is deferred, write Refs #123 instead - the merge
-     must not close an issue whose live acceptance criterion is still open (ADR-0006). -->
+<!-- Link the issue with Refs #N when it tracks a live check (verified or deferred): it is
+     closed by hand after the live check runs again on main (ADR-0006 decision 6c).
+     Closes #N only for an issue with no live acceptance criterion. -->
 
-Closes #
+Refs #
 
 ## Live verification
 

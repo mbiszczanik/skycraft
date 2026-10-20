@@ -196,9 +196,11 @@ Describe 'Get-PrGateVerdict' {
     }
 
     It 'ignores declarations that sit inside an HTML comment (the template shows the syntax there)' {
-        $body = "<!-- Live-verified: <run id>  or  Live-verification: deferred -> #<issue> -->`nCloses #79"
+        # Multi-line, as in the template: the line-start anchor alone would accept these.
+        $body = "Closes #79`n<!--`n  Live-verified: Lab 1.1 Test-Lab 10/10, test tenant, 2026-10-20, exit 0`n-->"
         $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body $body
-        $v.Pass | Should -BeFalse
+        $v.Pass   | Should -BeFalse
+        $v.Reason | Should -Match 'declares no live verification'
     }
 
     It 'matches the declaration keys case-insensitively and with surrounding whitespace' {
@@ -219,7 +221,9 @@ Describe 'Get-PrGateVerdict' {
     It "fails a blank or placeholder blocker reason: '<why>'" -ForEach @(
         @{ why = '' }, @{ why = '   ' }, @{ why = '<why the live check cannot run in the test environment>' },
         @{ why = '<reason>' }, @{ why = 'TBD' }, @{ why = 'todo' }, @{ why = 'N/A' }, @{ why = 'none' },
-        @{ why = '-' }, @{ why = '...' }
+        @{ why = '-' }, @{ why = '...' }, @{ why = '`TBD`' }, @{ why = '**none**' }, @{ why = 'TBA' },
+        @{ why = '<why> pending' }, @{ why = 'see above' }, @{ why = 'unknown' }, @{ why = '?' },
+        @{ why = [string][char]0x2026 }
     ) {
         $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Refs #79`nLive-verification: deferred -> #141`nLive-verification-blocker: $why" `
             -Label @('live-deferral-approved')
@@ -235,9 +239,10 @@ Describe 'Get-PrGateVerdict' {
     }
 
     It 'ignores a blocker line inside an HTML comment' {
-        $body = "Refs #79`nLive-verification: deferred -> #141`n<!-- $script:Blocker -->"
+        $body = "Refs #79`nLive-verification: deferred -> #141`n<!--`n  $script:Blocker`n-->"
         $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body $body -Label @('live-deferral-approved')
-        $v.Pass | Should -BeFalse
+        $v.Pass   | Should -BeFalse
+        $v.Reason | Should -Match "no 'Live-verification-blocker:' line"
     }
 
     It 'does not read the blocker line as a second deferred declaration' {
@@ -252,9 +257,45 @@ Describe 'Get-PrGateVerdict' {
         (Get-PrGateVerdict -ChangedFile $script:NotGated -Body "Live-verification: deferred -> #141`nLive-verification-blocker:").Pass  | Should -BeTrue
     }
 
+    It "fails a placeholder Live-verified line: '<what>'" -ForEach @(
+        @{ what = 'TBD' }, @{ what = 'n/a' }, @{ what = '<what ran, where, date, exit codes>' }, @{ what = '**TBD**' }
+    ) {
+        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Closes #79`nLive-verified: $what"
+        $v.Pass   | Should -BeFalse
+        $v.Reason | Should -Match "'Live-verified:' line gives no run"
+    }
+
     It 'counts a cross-repository closing keyword as closing too' {
         # GitHub honours "closes owner/repo#1" as well as "closes #1".
         $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "closes mbiszczanik/other#1`nLive-verification: deferred -> #141"
         $v.Pass | Should -BeFalse
+    }
+}
+
+# Issue #404: the template asks for what the gate and ADR-0006 decision 6 expect.
+Describe 'PULL_REQUEST_TEMPLATE.md asks for the declarations ADR-0006 decision 6 expects' {
+    BeforeAll {
+        $script:Template = Get-Content -Raw -LiteralPath (Join-Path $RepoRoot '.github/PULL_REQUEST_TEMPLATE.md')
+        # Only lines outside HTML comments land in a PR body as written.
+        $script:Visible  = [regex]::Replace($script:Template, '(?s)<!--.*?-->', '')
+    }
+
+    It 'shows the Live-verified form with run, place, date and exit codes' {
+        $script:Template | Should -Match '(?m)^\s*Live-verified: <what ran, where, date, exit codes>\s*$'
+    }
+
+    It 'shows the deferred and blocker lines for a deferral' {
+        $script:Template | Should -Match '(?m)^\s*Live-verification: deferred -> #<issue[^>]*>\s*$'
+        $script:Template | Should -Match '(?m)^\s*Live-verification-blocker: <why the live check cannot run in the test environment>\s*$'
+    }
+
+    It 'leaves a visible Live-verified line and an Offline checks line naming the CI run' {
+        $script:Visible | Should -Match '(?m)^Live-verified:'
+        $script:Visible | Should -Match '(?m)^Offline checks: full CI test set, CI run <id>\s*$'
+    }
+
+    It 'links the issue with Refs, not a closing keyword, by default' {
+        $script:Visible | Should -Match '(?m)^Refs #\s*$'
+        $script:Visible | Should -Not -Match '(?im)^\s*(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+#'
     }
 }
