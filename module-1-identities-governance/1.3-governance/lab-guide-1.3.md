@@ -68,7 +68,7 @@ Before starting this lab:
 
 ## 🛠️ Portal, PowerShell and Bicep Paths
 
-You can build this lab in the Portal by following this guide, with Az PowerShell, or with Bicep. With the Owner role (see Prerequisites), the three paths end in the same state: the same four policy assignments, of which only `Inherit-Project-Tag` carries a managed identity, holding Contributor on the subscription. `scripts/Test-Lab.ps1` accepts that state whichever path built it:
+You can build this lab in the Portal by following this guide, with Az PowerShell, or with Bicep. With the Owner role (see Prerequisites), the three paths end in the same state: the same four policy assignments, with the assignment names, descriptions, non-compliance messages and parameters this guide gives, of which only `Inherit-Project-Tag` carries a managed identity, holding Contributor on the subscription. The one difference is the assignment's resource name: the Portal generates an id, the scripts use the assignment name. `scripts/Test-Lab.ps1` accepts that state whichever path built it:
 
 | Path | What it creates |
 | ---- | --------------- |
@@ -76,7 +76,11 @@ You can build this lab in the Portal by following this guide, with Az PowerShell
 | `scripts/Invoke-LabGovernance.ps1` (Az PowerShell) | The tags of Steps 1.3.1-1.3.3; the four policy assignments of Steps 1.3.5, 1.3.8 and 1.3.9, including the managed identity of `Inherit-Project-Tag` and its role; the locks of Steps 1.3.11 and 1.3.13 |
 | `scripts/Deploy-Bicep.ps1` (Bicep, `bicep/main.bicep`) | The same as the PowerShell script |
 
+You can also run a script after building the lab in the Portal. `scripts/Invoke-LabGovernance.ps1` and `scripts/Deploy-Bicep.ps1` find your assignments by their policy definition, their scope and the assignment name this guide gives, whatever their resource name, and create no second one; `Deploy-Bicep.ps1` prints `[KEEP]` for each and grants the identity's role only when it does not hold it yet. When one of your assignments has other parameters, another enforcement mode or exclusions that this guide does not give, both scripts name the difference and leave the assignment as it is, and `Deploy-Bicep.ps1` deploys nothing (Troubleshooting, Issue 9). They also stop, rather than create a second assignment, when one of yours has the right definition under another assignment name, or this guide's assignment name on another definition (Issue 10).
+
 Step 1.3.8 also shows the Az PowerShell and Azure CLI commands for `Inherit-Project-Tag`, and Step 1.3.10 the Az PowerShell command for its optional remediation task, which neither script runs. These steps have no scripted or Bicep counterpart, because they test, view or explore rather than create, or because the lab keeps them in the Portal: 1.3.4, 1.3.6 (policy test), 1.3.7 (Advisor alert and its action group), 1.3.10 (compliance view; its remediation task has only the command above), 1.3.12 (lock test), 1.3.14, 1.3.15-1.3.17 (budgets), 1.3.18-1.3.22. `Test-Lab.ps1` does not check the budgets or the Advisor alert.
+
+The Advisor alert `Advisor-Cost-Recommendations` and its action group `skycraft-advisor-ag` (Step 1.3.7) and the budgets `SkyCraft-Monthly-Budget` and `SkyCraft-Prod-Monthly` (Steps 1.3.15-1.3.17) are Portal-only on purpose. A budget sends its alerts to your own email address, which the scripts do not know, and the alert is what the Portal's **Create Advisor Alerts** form writes, a form whose result no script reproduces exactly. A `Deploy-Bicep.ps1 -WhatIf` over a lab built in the Portal reports the alert and the action group as Ignore (they exist, the template does not declare them), so the Bicep path neither copies nor removes them; `Remove-LabResource.ps1` removes them whichever way you made them.
 
 ## 📖 Section 1: Apply and Manage Tags (30 minutes)
 
@@ -410,7 +414,8 @@ Now assign the second tag policy of this step, `Inherit-Project-Tag`. It copies 
 $subscriptionScope = "/subscriptions/$((Get-AzContext).Subscription.Id)"
 $definition = Get-AzPolicyDefinition -Id '/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070'
 $assignment = New-AzPolicyAssignment -Name 'Inherit-Project-Tag' `
-    -DisplayName 'Inherit Project Tag from Resource Group' `
+    -DisplayName 'Inherit-Project-Tag' `
+    -Description 'Resources get the Project tag of their resource group when they are created without it' `
     -Scope $subscriptionScope `
     -PolicyDefinition $definition `
     -PolicyParameterObject @{ tagName = 'Project' } `
@@ -429,7 +434,8 @@ New-AzRoleAssignment -ObjectId $assignment.IdentityPrincipalId -ObjectType 'Serv
 subscriptionScope="/subscriptions/$(az account show --query id --output tsv)"
 az policy assignment create \
   --name Inherit-Project-Tag \
-  --display-name "Inherit Project Tag from Resource Group" \
+  --display-name Inherit-Project-Tag \
+  --description "Resources get the Project tag of their resource group when they are created without it" \
   --scope "$subscriptionScope" \
   --policy "/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070" \
   --params '{"tagName": {"value": "Project"}}' \
@@ -497,7 +503,7 @@ The list is a multi-select with a filter box; with both regions ticked, the fiel
 5. In the left menu, click **Compliance**
 6. Click **Inherit-Project-Tag**
 
-**Note**: **Compliance** lists an assignment by its display name. If you created the assignment with the Bicep path, `scripts/Invoke-LabGovernance.ps1` or the PowerShell or CLI commands of Step 1.3.8, its display name is `Inherit Project Tag from Resource Group`: click that one instead.
+**Note**: **Compliance** lists an assignment by its display name, `Inherit-Project-Tag` on every path. An assignment made with the Bicep path or `scripts/Invoke-LabGovernance.ps1` before they used the guide's names shows as `Inherit Project Tag from Resource Group`: click that one instead.
 
 7. Click **Create remediation task**
 8. Click **Remediate**
@@ -511,10 +517,10 @@ The same with Az PowerShell (the `Start-AzPolicyRemediation` cmdlet ships in the
 ```powershell
 $subscriptionScope = "/subscriptions/$((Get-AzContext).Subscription.Id)"
 # The Portal names the assignment with a generated id, so find it by its definition and by the
-# name the guide gives it (the Bicep path and Invoke-LabGovernance.ps1 set the display name below).
+# name the guide gives it, which every path sets as the display name.
 $assignment = @(Get-AzPolicyAssignment -Scope $subscriptionScope | Where-Object {
         $_.PolicyDefinitionId -like '*/ea3f2387-9b95-492a-a190-fcdc54f7b070' -and $_.Scope -eq $subscriptionScope -and
-        ($_.Name -eq 'Inherit-Project-Tag' -or $_.DisplayName -in 'Inherit-Project-Tag', 'Inherit Project Tag from Resource Group')
+        ($_.Name -eq 'Inherit-Project-Tag' -or $_.DisplayName -eq 'Inherit-Project-Tag')
     })
 if ($assignment.Count -ne 1) {
     throw "Found $($assignment.Count) Inherit-Project-Tag assignments on the subscription, expected one. Check Policy > Assignments."
@@ -998,6 +1004,33 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 
 - Remove the stale role assignment yourself: **Subscriptions** → your subscription → **Access control (IAM)** → **Role assignments**, find the **Contributor** row whose name is **Identity not found**, check it, click **Delete**, then deploy again. `scripts/Remove-LabResource.ps1` does not find it: it removes the role assignments of the policy assignments that still exist
 - Next time, remove the lab with `scripts/Remove-LabResource.ps1` rather than in the Portal: it removes the identity's role assignment before the policy assignment, so none is left behind
+
+### Issue 9: `Deploy-Bicep.ps1` or `Invoke-LabGovernance.ps1` says an assignment "differs from the lab's"
+
+**Symptom**: After you built the lab in the Portal, `scripts/Deploy-Bicep.ps1` prints `[ERROR] ... differs from the lab's: ...` and "Nothing deployed", or `scripts/Invoke-LabGovernance.ps1` prints the same `[ERROR]` and exits 1
+
+**Root Cause**: The script found your assignment by its policy definition and assignment name, but one of its parameters (a tag name or value, the allowed regions), its enforcement mode, its exclusions (**Basics** → **Exclusions**: an excluded resource group escapes the policy), or its managed identity is not what the step gives. The script does not overwrite your assignment and does not create a second one next to it.
+
+**Solutions**:
+
+- The message names each difference and the step. In **Policy** → **Assignments**, open the assignment, click **Edit assignment**, set the values of that step, then run the script again
+- Or delete the assignment and run the script again: it creates the assignment with the lab's values. For `Inherit-Project-Tag`, use `scripts/Remove-LabResource.ps1` or remove the identity's role first (Issue 8)
+
+### Issue 10: `Deploy-Bicep.ps1` or `Invoke-LabGovernance.ps1` says "none matches" for an assignment
+
+**Symptom**: `scripts/Deploy-Bicep.ps1` prints `[ERROR] <assignment>: none matches, and the template would create it next to: ...` and "Nothing deployed", or `scripts/Invoke-LabGovernance.ps1` prints `[ERROR] Policy <assignment> not created: none matches ...` and exits 1
+
+**Root Cause**: No assignment on the subscription has both the step's policy definition and its assignment name, but one has one of the two:
+
+- the right definition under another name, usually the definition's own name, which the wizard fills into **Assignment name** (for example `Require a tag on resource groups`)
+- the step's assignment name on another definition, such as **Inherit a tag from the resource group** (without "if missing") or **Allowed locations for resource groups**, which the steps warn about
+
+Creating the step's assignment next to it would leave two policies doing similar work, so the script creates nothing.
+
+**Solutions**:
+
+- For the right definition under another name: in **Policy** → **Assignments**, open the assignment, click **Edit assignment**, set **Assignment name** to the one the step gives, then run the script again
+- For another definition: delete that assignment (for a Modify assignment with an identity, remove the identity's role too, Issue 8) and run the script again, or follow the step in the Portal
 
 ---
 

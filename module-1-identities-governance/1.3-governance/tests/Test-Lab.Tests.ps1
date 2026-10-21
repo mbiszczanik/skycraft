@@ -83,7 +83,9 @@ BeforeAll {
     #   SKYCRAFT_STUB_INHERITIDENTITY 'none' leaves Inherit-Project-Tag without a managed identity
     #   SKYCRAFT_STUB_POLICYSET       who made the four policy assignments: 'bicep' (the default:
     #                                 fixed names), 'portal' (generated names, the guide's names
-    #                                 as display names) or 'both' (two of each)
+    #                                 as display names), 'scripted' (fixed names, the guide's
+    #                                 names as display names: the Bicep and script paths since
+    #                                 issue #406) or 'both' (two of each)
     #   SKYCRAFT_STUB_MISSINGPOLICY   policy assignments (by the guide's name) left out of the
     #                                 listing
     #   SKYCRAFT_STUB_NOLOCK          resource groups that carry no lock
@@ -191,6 +193,9 @@ function Get-AzPolicyAssignment {
         if ($set -in 'bicep', 'both') {
             New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope -Modify:$modify
         }
+        if ($set -eq 'scripted') {
+            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Modify:$modify
+        }
         if ($set -in 'portal', 'both') {
             New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Modify:$modify
         }
@@ -259,7 +264,7 @@ function Get-AzConsumptionBudget {
             [string[]]$NoTags = @(),
             [string[]]$WrongTag = @(),
             [string[]]$MissingPolicy = @(),
-            [ValidateSet('bicep', 'portal', 'both')]
+            [ValidateSet('bicep', 'portal', 'scripted', 'both')]
             [string]$PolicySet = 'bicep',
             [string[]]$NoLock = @(),
             [hashtable]$LockKind = @{},
@@ -324,6 +329,7 @@ function Get-AzConsumptionBudget {
     $script:LockOnSub     = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'subscription' }
     $script:LockReadFails = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'fail' }
     $script:PortalMade    = Invoke-ValidatorScript -Stub $script:Stub -PolicySet 'portal'
+    $script:ScriptMade    = Invoke-ValidatorScript -Stub $script:Stub -PolicySet 'scripted'
     $script:TwoSets       = Invoke-ValidatorScript -Stub $script:Stub -PolicySet 'both'
     $script:InheritMissing    = Invoke-ValidatorScript -Stub $script:Stub -MissingPolicy 'Inherit-Project-Tag'
     $script:InheritWrongTag   = Invoke-ValidatorScript -Stub $script:Stub -InheritTag 'Environment'
@@ -333,7 +339,7 @@ function Get-AzConsumptionBudget {
         $script:AllPass, $script:PolicyMissing, $script:LockMissing, $script:WrongTag,
         $script:NoTags, $script:RgMissing, $script:LookupsFail, $script:NoContext, $script:NoBudget, $script:BudgetFails,
         $script:LockReadOnly, $script:LockWrongName, $script:LockOnChild, $script:LockOnSub, $script:LockReadFails,
-        $script:PortalMade, $script:TwoSets, $script:InheritMissing, $script:InheritWrongTag, $script:InheritNoIdentity
+        $script:PortalMade, $script:ScriptMade, $script:TwoSets, $script:InheritMissing, $script:InheritWrongTag, $script:InheritNoIdentity
     )
 }
 
@@ -371,7 +377,7 @@ Describe 'Lab 1.3 Test-Lab.ps1 - failures are counted and set the exit code (#25
         $run.ExitCode | Should -Be 1 -Because "a missing policy assignment must not look like a passed validation; output was:`n$($run.Output)"
         # The assignment inherited from a management group under the same name, and the unrelated
         # one under a guide display name, are both in the listing and must not stand in for it.
-        $run.Output | Should -Match "Policy: Enforce-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Require a tag and its value on resources' on the subscription itself, named 'Enforce-Project-Tag' or 'Enforce Project Tag Value', step 1\.3\.8\."
+        $run.Output | Should -Match "Policy: Enforce-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Require a tag and its value on resources' on the subscription itself, named 'Enforce-Project-Tag' \(resource name or display name\), step 1\.3\.8\."
         $run.FailLines | Should -Be 1
         $run.Output | Should -Match 'Passed: 8\b'
         $run.Output | Should -Match 'Failed: 1\b'
@@ -554,6 +560,14 @@ Describe 'Lab 1.3 Test-Lab.ps1 - finds the policy assignments whichever path mad
         $run.Output | Should -Match 'Passed: 9\b'
     }
 
+    It 'passes the assignments the Bicep and script paths make since #406: fixed names, the guide''s display names' {
+        $run = $script:ScriptMade
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Policy: Enforce-Project-Tag : 'Enforce-Project-Tag' \(name Enforce-Project-Tag\) \[OK\]"
+        $run.Output | Should -Match "Policy: Inherit-Project-Tag : 'Inherit-Project-Tag' \(name Inherit-Project-Tag\) \[OK\]"
+        $run.Output | Should -Match 'Passed: 9\b'
+    }
+
     It 'lists the subscription''s assignments once, rather than reading each by name' {
         @($script:AllPass.Calls | Where-Object { $_ -eq 'Get-AzPolicyAssignment' }).Count | Should -Be 1
     }
@@ -583,7 +597,7 @@ Describe 'Lab 1.3 Test-Lab.ps1 - checks the Modify assignment Inherit-Project-Ta
     It 'fails when Inherit-Project-Tag is missing, and names its definition and step' {
         $run = $script:InheritMissing
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match "Policy: Inherit-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Inherit a tag from the resource group if missing' on the subscription itself, named 'Inherit-Project-Tag' or 'Inherit Project Tag from Resource Group', step 1\.3\.8\."
+        $run.Output | Should -Match "Policy: Inherit-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Inherit a tag from the resource group if missing' on the subscription itself, named 'Inherit-Project-Tag' \(resource name or display name\), step 1\.3\.8\."
         $run.FailLines | Should -Be 1
         $run.OkLines | Should -Be 8
         $run.Output | Should -Match 'Failed: 1\b'
