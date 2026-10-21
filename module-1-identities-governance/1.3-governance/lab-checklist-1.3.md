@@ -78,7 +78,7 @@
 - [ ] Accessed Policy Compliance dashboard
 - [ ] Reviewed overall compliance percentage
 - [ ] Viewed compliance details for each policy
-- [ ] Optional: started a remediation task for `Inherit-Project-Tag` (at least five minutes after its role was granted); `Advisor-Cost-Recommendations` then carries `Project` = `SkyCraft`
+- [ ] Optional: started a remediation task for `Inherit-Project-Tag` (at least five minutes after its role was granted) and checked its result: the **Tags** page of `Advisor-Cost-Recommendations` shows `Project` = `SkyCraft` (if a task remediated 0 resources, a new one was created)
 - [ ] Understand compliant vs. non-compliant states
 
 ---
@@ -132,8 +132,8 @@
 - [ ] Accessed Cost Analysis dashboard
 - [ ] Explored "Cost by resource" view
 - [ ] Explored "Cost by service" view
-- [ ] Applied filter: Tag = Project:SkyCraft
-- [ ] Applied filter: Resource group = prod-skycraft-swc-rg
+- [ ] Applied filter: Tag = Project:SkyCraft (on a new subscription, once Cost analysis loads, which can take up to 48 hours; guide, Step 1.3.18)
+- [ ] Applied filter: Resource group = prod-skycraft-swc-rg (on a new subscription, once Cost analysis loads)
 - [ ] Reviewed daily cost trends
 - [ ] Understand cost breakdown visualizations
 
@@ -155,6 +155,7 @@
 ### Advisor Configuration
 - [ ] Reviewed Advisor Configuration settings
 - [ ] Explored filtering options (include/exclude resources)
+- [ ] On a new subscription, registered the `Microsoft.Insights` resource provider before Step 1.3.7 (guide, Prerequisites)
 - [ ] Created Advisor alert rule (Step 1.3.7, before the tag policy of Step 1.3.8)
 - [ ] Alert name: `Advisor-Cost-Recommendations`
 - [ ] Alert category: Cost

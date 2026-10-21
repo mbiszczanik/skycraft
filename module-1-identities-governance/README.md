@@ -54,6 +54,7 @@ This module establishes the identity and governance layer that every subsequent 
 Before starting, ensure you have:
 
 - [ ] Active Azure subscription (with at least $50 credit available)
+- [ ] On a subscription created for this course: the `Microsoft.Insights` resource provider registered before Lab 1.3 (Lab 1.3, Prerequisites, shows how)
 - [ ] Azure Portal access (https://portal.azure.com)
 - [ ] Azure CLI installed locally (or use Cloud Shell)
 - [ ] PowerShell 7+ installed (Windows, macOS, or Linux)
