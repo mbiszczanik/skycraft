@@ -36,9 +36,11 @@
 
     The live pass of 2026-10-20 (#300), with a personal Microsoft account, adds the tenant and the
     app-only test. With neither -TenantId nor SKYCRAFT_GRAPH_TENANT_ID, the sign-in now takes the
-    tenant of the Az context when Get-AzContext is in the session, and otherwise prints a hint and
-    names no tenant. A context is app-only by its AuthType alone: a delegated one whose Account is
-    empty, as that account's sign-in left it, gets the scope check of #273.
+    tenant of the Az context when Az.Accounts is imported, and otherwise names no tenant and prints
+    a hint just before it signs in. That Az context can be one Az PowerShell restored from an
+    earlier session, so it never silently replaces a Graph sign-in in another tenant: the script
+    stops and names both. A context is app-only by its AuthType alone: a delegated one whose
+    Account is empty, as that account's sign-in left it, gets the scope check of #273.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Lab11-Graph-Auth.Tests.ps1
@@ -198,14 +200,21 @@ Describe 'Module 1 Graph sign-in - the four scripts share one decision' {
         & $identityOf $delegated          | Should -Be 'admin@contoso.example'
     }
 
-    It "New-LabUser.ps1's help names the tenant sources the sign-in reads (#300)" {
-        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:LabScriptPath['New-LabUser.ps1'], [ref]$null, [ref]$null)
-        $help = $ast.GetHelpContent().Parameters['TENANTID']
+    It "'<name>' help names the tenant sources the sign-in reads (#300)" -ForEach @(
+        @{ name = 'New-LabUser.ps1' }, @{ name = 'Test-Lab.ps1' }, @{ name = 'Remove-LabResource.ps1' }
+        @{ name = 'New-LabRoleAssignment.ps1' }
+    ) {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:LabScriptPath[$name], [ref]$null, [ref]$null)
+        $content = $ast.GetHelpContent()
+        $help = (@($content.Description) + @($content.Parameters.Values)) -join "`n"
         $help | Should -Match 'SKYCRAFT_GRAPH_TENANT_ID'
         $help | Should -Match 'Az context'
+        $help | Should -Match 'restored from an earlier session' -Because 'an imported Az.Accounts brings back a saved context, not only one signed in in this session'
+        $help | Should -Match 'stops with \[ERROR\]' -Because 'a Graph sign-in in another tenant than the Az context stops the script'
+        $help | Should -Not -Match 'Connect-AzAccount (has )?r[au]n in (this|the same)'
 
         # The help's claim holds only while the shared sign-in reads the Az context.
-        $connectAst = $script:FunctionByScript['New-LabUser.ps1'] | Where-Object { $_.Name -eq 'Connect-LabGraph' }
+        $connectAst = $script:FunctionByScript[$name] | Where-Object { $_.Name -eq 'Connect-LabGraph' }
         $connectAst.Extent.Text | Should -Match 'Get-AzContext'
     }
 }
@@ -610,7 +619,19 @@ Describe 'Connect-LabGraph - the tenant comes from -TenantId, SKYCRAFT_GRAPH_TEN
         $message | Should -Match 'SKYCRAFT_GRAPH_TENANT_ID'
         $message | Should -Match '-TenantId'
         $message | Should -Match 'personal Microsoft account'
+        $message | Should -Match 'Connect-MgGraph -TenantId' -Because 'the documented Lab 1.1 path needs no Az'
         if ($noModule) { $script:AzContextRead | Should -BeFalse -Because 'Lab 1.1 neither requires nor imports Az' }
+    }
+
+    It 'prints no hint when it reuses a signed-in context and names no tenant' {
+        # Lab 1.1 without Az, after the checklist's Connect-MgGraph -TenantId: no sign-in follows.
+        $script:AzModuleLoaded = $false
+        $script:ContextBefore  = [pscustomobject]@{ TenantId = $script:LabTenant; Account = 'admin@contoso.example'; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = $script:SetupScope }
+
+        $message = Get-HintText { Connect-LabGraph -Scope $script:SetupScope }
+
+        $script:Connected | Should -BeFalse
+        $message | Should -Not -Match 'No tenant named'
     }
 
     It 'does not import Az.Accounts to look for an Az context' -Skip:(-not (Get-Module -ListAvailable -Name Az.Accounts)) {
@@ -640,16 +661,53 @@ function Disconnect-MgGraph { }
         $message | Should -Not -Match 'personal Microsoft account'
     }
 
-    It 'refuses to reuse a covering context from another tenant when the Az tenant is known, and signs in to the Az tenant' {
+    It 'refuses to reuse a covering context from another tenant when <source> names the tenant, and signs in to it' -ForEach @(
+        @{ source = 'SKYCRAFT_GRAPH_TENANT_ID'; useParam = $false }
+        @{ source = '-TenantId';                useParam = $true }
+    ) {
         # The personal account's own directory, left in the session by an earlier sign-in.
         $script:ContextBefore = [pscustomobject]@{ TenantId = $script:HomeTenant; Account = ''; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = $script:SetupScope }
-        $script:AzTenantId    = $script:LabTenant
+        $script:AzTenantId    = $script:HomeTenant
+        $param = if ($useParam) { $script:LabTenant } else { $env:SKYCRAFT_GRAPH_TENANT_ID = $script:LabTenant; '' }
 
-        $context = Connect-LabGraph -Scope $script:SetupScope 6>$null
+        $context = Connect-LabGraph -Scope $script:SetupScope -TenantId $param 6>$null
 
         $script:Connected       | Should -BeTrue
         $script:ConnectTenantId | Should -Be $script:LabTenant
         $context.TenantId       | Should -Be $script:LabTenant
+    }
+
+    It 'stops before Connect-MgGraph, naming both tenants, when only the Az context names a tenant and Graph is signed in to another (<case>)' -ForEach @(
+        # The #381 step 3 shape: Connect-MgGraph -TenantId <lab tenant>, while the saved Az
+        # context points at another tenant.
+        @{ case = 'covering scopes'; scopes = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All') }
+        @{ case = 'missing scopes';  scopes = @('User.Read.All') }
+    ) {
+        $script:ContextBefore = [pscustomobject]@{ TenantId = $script:LabTenant; Account = 'admin@contoso.example'; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = $scopes }
+        $script:AzTenantId    = $script:HomeTenant
+
+        $failure = $null
+        try { $null = Connect-LabGraph -Scope $script:SetupScope 6>$null } catch { $failure = "$_" }
+
+        $failure                | Should -Not -BeNullOrEmpty -Because 'neither tenant is the learner''s stated choice'
+        $script:Connected       | Should -BeFalse -Because 'no sign-in may replace the Graph context silently'
+        $failure | Should -Match ([regex]::Escape($script:LabTenant))
+        $failure | Should -Match ([regex]::Escape($script:HomeTenant))
+        $failure | Should -Match 'SKYCRAFT_GRAPH_TENANT_ID'
+        $failure | Should -Match 'Connect-AzAccount -TenantId'
+        $failure | Should -Match 'Disconnect-MgGraph'
+        $failure | Should -Match 'restored'
+    }
+
+    It 'signs in to the Az tenant when the Graph context in the session is not signed in (the personal-account shape)' {
+        # What the live pass saw: a context with no tenant, which never counts as signed in.
+        $script:ContextBefore = [pscustomobject]@{ TenantId = $null; Account = ''; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = $script:SetupScope }
+        $script:AzTenantId    = $script:LabTenant
+
+        $null = Connect-LabGraph -Scope $script:SetupScope 6>$null
+
+        $script:Connected       | Should -BeTrue
+        $script:ConnectTenantId | Should -Be $script:LabTenant
     }
 
     It 'reuses a covering context in the Az tenant' {

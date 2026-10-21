@@ -11,9 +11,11 @@
     users up on the tenant's initial *.onmicrosoft.com domain, where Lab 1.1 creates them. When
     the tenant lists no initial domain it stops with [ERROR] and exit code 1.
 
-    The Graph sign-in goes to the tenant SKYCRAFT_GRAPH_TENANT_ID names, else to the tenant of the
-    current Az context, so after Connect-AzAccount to the lab tenant a personal Microsoft account
-    reaches that tenant too.
+    It sets up Azure PowerShell first, running Connect-AzAccount when the session has no Az
+    context, then signs in to Microsoft Graph in the tenant SKYCRAFT_GRAPH_TENANT_ID names, else in
+    the Az context's tenant, so a personal Microsoft account reaches the lab tenant too. The Az
+    context can be one Az PowerShell restored from an earlier session: if a Microsoft Graph sign-in
+    in this session is in another tenant, the script stops with [ERROR] and names both tenants.
 
     This is the imperative path. The declarative equivalent is bicep/role-assignments.bicep,
     deployed by Deploy-Bicep.ps1 -IncludeRoleAssignments, which creates the same five assignments
@@ -58,7 +60,9 @@ param()
 #     counterpart). This script used to reuse any context at all, an empty one included (#273).
 #   - A sign-in that returns without a signed-in context is an error, not a connection (#242).
 #   - The interactive sign-in uses SKYCRAFT_GRAPH_TENANT_ID, else the Az context's tenant, so a
-#     personal Microsoft account reaches the lab tenant after Connect-AzAccount alone (#300).
+#     personal Microsoft account reaches the lab tenant after Connect-AzAccount alone (#300). A
+#     Graph sign-in in another tenant than the Az context's stops the script instead of being
+#     replaced: the Az context may be one Az PowerShell restored from an earlier session.
 function Get-LabGraphAuthPlan {
     [CmdletBinding()]
     param(
@@ -249,8 +253,9 @@ function Connect-LabGraph {
     }
 
     # The Az context's tenant, for a plan given no other. Read only when Az.Accounts is already
-    # imported (Connect-AzAccount ran in this session): Lab 1.1 does not require Az, and this must
-    # not import it. Get-Command -Name would: it auto-loads the module, even with -ListImported.
+    # imported: Lab 1.1 does not require Az, and this must not import it. Get-Command -Name would:
+    # it auto-loads the module, even with -ListImported. Imported is not signed in here: Az
+    # PowerShell restores the context it saved in an earlier session (context autosave).
     $azContextTenantId = $null
     if (Get-Module -Name Az.Accounts) {
         try { $azContextTenantId = [string](Get-AzContext -ErrorAction Stop).Tenant.Id } catch { $azContextTenantId = $null }
@@ -261,18 +266,23 @@ function Connect-LabGraph {
     if ($plan.Mode -eq 'Blocked') { throw $plan.Reason }
 
     if ($plan.Mode -eq 'Interactive') {
-        if (-not $plan.TenantId) {
-            Write-Host "  -> [INFO] No tenant named (-TenantId, SKYCRAFT_GRAPH_TENANT_ID or an Az context), so Microsoft Graph picks the account's home tenant. With a personal Microsoft account, set SKYCRAFT_GRAPH_TENANT_ID to the lab tenant's ID, or run Connect-AzAccount -TenantId <tenant id> first." -ForegroundColor Gray
+        $existingContext = Get-MgContext
+
+        # A tenant taken from the Az context, which may be a restored one, does not silently
+        # replace a Graph sign-in in another tenant: the learner chooses, before anything is
+        # created, checked or deleted in either (#300).
+        if ($plan.TenantSource -eq 'the Az context' -and (& $isSignedIn $existingContext) -and $existingContext.TenantId -ne $plan.TenantId) {
+            throw "Microsoft Graph is signed in to tenant $($existingContext.TenantId) in this session, but the Az context names tenant $($plan.TenantId) (Az PowerShell may have restored it from an earlier session). To use tenant $($existingContext.TenantId), set SKYCRAFT_GRAPH_TENANT_ID to it or run Connect-AzAccount -TenantId $($existingContext.TenantId). To use tenant $($plan.TenantId), run Disconnect-MgGraph. Then run the script again."
         }
 
         # Reuse a signed-in context, which is what a learner running the lab expects. Note this is
         # only reached when no service principal is configured: an unattended run never gets here.
         # A partial one is not reused: the sign-in below replaces it, as it does one in a tenant
-        # other than the plan's. A delegated one is reused only when its scopes cover every scope
-        # this script requests, also when it reports no account, as a personal Microsoft account's
-        # sign-in can (#300). An app-only one, told by AuthType alone, holds the app's application
-        # permissions, which a new sign-in with -Scopes cannot add to, so it is reused as before.
-        $existingContext = Get-MgContext
+        # other than the one -TenantId or SKYCRAFT_GRAPH_TENANT_ID names. A delegated one is reused
+        # only when its scopes cover every scope this script requests, also when it reports no
+        # account, as a personal Microsoft account's sign-in can (#300). An app-only one, told by
+        # AuthType alone, holds the app's application permissions, which a new sign-in with -Scopes
+        # cannot add to, so it is reused as before.
         if ((& $isSignedIn $existingContext) -and (-not $plan.TenantId -or $existingContext.TenantId -eq $plan.TenantId)) {
             $isAppOnly = "$($existingContext.AuthType)" -eq 'AppOnly'
             $missing = @(if (-not $isAppOnly) { & $missingScope $existingContext $Scope })
@@ -289,6 +299,9 @@ function Connect-LabGraph {
     }
 
     Write-Host "  -> $($plan.Reason)" -ForegroundColor Yellow
+    if ($plan.Mode -eq 'Interactive' -and -not $plan.TenantId) {
+        Write-Host "  -> [INFO] No tenant named (-TenantId, SKYCRAFT_GRAPH_TENANT_ID or an Az context), so Microsoft Graph picks the account's home tenant. With a personal Microsoft account, sign in first with Connect-MgGraph -TenantId <tenant id> and the scopes in TROUBLESHOOTING.md, or set SKYCRAFT_GRAPH_TENANT_ID to the lab tenant's ID, then run the script again." -ForegroundColor Gray
+    }
 
     $connectParameter = $plan.ConnectParameter
     Connect-MgGraph @connectParameter
@@ -329,7 +342,25 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 
 Write-Host "=== Lab 1.2: RBAC Role Assignment ===" -ForegroundColor Cyan -BackgroundColor Black
 
-# 1. Connect to Microsoft Graph (for User/Group/Domain resolution)
+# 1. Connect to Azure PowerShell (for Role Assignment). First, so the Graph sign-in below can take
+# its tenant from the Az context, also one Connect-AzAccount creates here (#300).
+try {
+    Write-Host "`nChecking Azure PowerShell connection..." -ForegroundColor Yellow
+    $azContext = Get-AzContext
+    if (-not $azContext) {
+        Write-Host "Connecting to Azure..." -ForegroundColor Yellow
+        Connect-AzAccount -ErrorAction Stop
+        $azContext = Get-AzContext
+    }
+    $subscriptionId = $azContext.Subscription.Id
+    Write-Host "Connected to Subscription: $($azContext.Subscription.Name) ($subscriptionId)" -ForegroundColor Green
+}
+catch {
+    Write-Host "  -> [ERROR] Failed to connect to Azure: $_" -ForegroundColor Red
+    Exit-Lab -FailureCount 1
+}
+
+# 2. Connect to Microsoft Graph (for User/Group/Domain resolution)
 try {
     Write-Host "`nChecking Microsoft Graph connection..." -ForegroundColor Yellow
     # The scopes Lab 1.1's Test-Lab.ps1 requests, although this script only reads: each ReadWrite
@@ -351,31 +382,14 @@ catch {
     Exit-Lab -FailureCount 1
 }
 
-# 2. Connect to Azure PowerShell (for Role Assignment)
-try {
-    Write-Host "`nChecking Azure PowerShell connection..." -ForegroundColor Yellow
-    $azContext = Get-AzContext
-    if (-not $azContext) {
-        Write-Host "Connecting to Azure..." -ForegroundColor Yellow
-        Connect-AzAccount -ErrorAction Stop
-        $azContext = Get-AzContext
-    }
-    $subscriptionId = $azContext.Subscription.Id
-    Write-Host "Connected to Subscription: $($azContext.Subscription.Name) ($subscriptionId)" -ForegroundColor Green
-
-    # Tenant Check
-    if ($azContext.Tenant.Id -ne $mgContext.TenantId) {
-        Write-Host "`n[WARNING] Tenant Mismatch Detected!" -ForegroundColor Red
-        Write-Host "Azure Subscription Tenant: $($azContext.Tenant.Id)" -ForegroundColor Yellow
-        Write-Host "Microsoft Graph Tenant:    $($mgContext.TenantId)" -ForegroundColor Yellow
-        Write-Host "Role Assignments between different tenants are not possible unless B2B is configured." -ForegroundColor Red
-        Write-Host "Please ensure your Azure Context and Graph Context point to the same directory." -ForegroundColor Red
-        # We will not exit, but subsequent commands will likely fail with BadRequest
-    }
-}
-catch {
-    Write-Host "  -> [ERROR] Failed to connect to Azure: $_" -ForegroundColor Red
-    Exit-Lab -FailureCount 1
+# Tenant Check
+if ($azContext.Tenant.Id -ne $mgContext.TenantId) {
+    Write-Host "`n[WARNING] Tenant Mismatch Detected!" -ForegroundColor Red
+    Write-Host "Azure Subscription Tenant: $($azContext.Tenant.Id)" -ForegroundColor Yellow
+    Write-Host "Microsoft Graph Tenant:    $($mgContext.TenantId)" -ForegroundColor Yellow
+    Write-Host "Role Assignments between different tenants are not possible unless B2B is configured." -ForegroundColor Red
+    Write-Host "Please ensure your Azure Context and Graph Context point to the same directory." -ForegroundColor Red
+    # We will not exit, but subsequent commands will likely fail with BadRequest
 }
 
 # 3. Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain, where Lab 1.1

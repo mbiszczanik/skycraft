@@ -24,8 +24,10 @@
          sign-in that leaves no context is an [ERROR] and exit 1 (issue #242). The script used to
          reuse any context, an empty one included.
       4. With no SKYCRAFT_GRAPH_TENANT_ID, the Graph sign-in goes to the Az context's tenant
-         (#300): a Graph context from another tenant, such as a personal Microsoft account's own
-         directory, is not reused.
+         (#300). Azure PowerShell is set up first, so with no Az context the tenant comes from the
+         Connect-AzAccount the script runs. A Graph sign-in in another tenant than the Az context
+         is neither reused nor replaced: the script stops with [ERROR] and exit 1 and names both,
+         since that Az context may be one Az PowerShell restored from an earlier session.
 
     No tenant or subscription is needed, and none is used: the script runs through
     tests/Support/LabScriptStub.psm1 (issue #112), which aborts the child with exit 99 unless
@@ -77,11 +79,17 @@ BeforeAll {
     # as 'Connect-MgGraph:Scopes=a,b,c'. SKYCRAFT_STUB_NOCONTEXT '1' leaves no context at all,
     # before or after the sign-in (the #242 shape). SKYCRAFT_STUB_MGTENANT is the tenant of the Graph
     # context found in the session (default: the Az context's); Connect-MgGraph logs the tenant it
-    # was asked for, as 'Connect-MgGraph:TenantId=<id>', and leaves a context in the Az tenant.
+    # was asked for, as 'Connect-MgGraph:TenantId=<id>', and leaves a context in that tenant (the
+    # Az context's when it was asked for none). SKYCRAFT_STUB_MGFRESH '1' leaves no Graph context
+    # until Connect-MgGraph has run. SKYCRAFT_STUB_NOAZCONTEXT '1' leaves no Az context until
+    # Connect-AzAccount has run, which signs in to tenant 88888888-8888-8888-8888-888888888888.
     $script:StubBody = @'
 $script:LogPath  = $env:SKYCRAFT_STUB_LOG
 $script:Scopes   = @($env:SKYCRAFT_STUB_SCOPES -split ',' | Where-Object { $_ })
 $script:MgTenant = if ($env:SKYCRAFT_STUB_MGTENANT) { $env:SKYCRAFT_STUB_MGTENANT } else { '00000000-0000-0000-0000-000000000000' }
+$script:AzTenant = '00000000-0000-0000-0000-000000000000'
+$script:MgConnected = $false
+$script:AzConnected = $false
 
 function Write-StubCall {
     param([string]$Name)
@@ -92,6 +100,7 @@ function Get-MgContext {
     [CmdletBinding()]
     param()
     if ($env:SKYCRAFT_STUB_NOCONTEXT -eq '1') { return }
+    if ($env:SKYCRAFT_STUB_MGFRESH -eq '1' -and -not $script:MgConnected) { return }
     [pscustomobject]@{
         TenantId = $script:MgTenant
         Account  = 'stub-admin@contoso.example'
@@ -107,8 +116,9 @@ function Connect-MgGraph {
     Write-StubCall -Name 'Connect-MgGraph'
     Write-StubCall -Name "Connect-MgGraph:Scopes=$($Scopes -join ',')"
     Write-StubCall -Name "Connect-MgGraph:TenantId=$TenantId"
-    $script:Scopes   = $Scopes
-    $script:MgTenant = '00000000-0000-0000-0000-000000000000'
+    $script:Scopes      = $Scopes
+    $script:MgTenant    = if ($TenantId) { $TenantId } else { $script:AzTenant }
+    $script:MgConnected = $true
 }
 
 function Disconnect-MgGraph {
@@ -120,9 +130,10 @@ function Disconnect-MgGraph {
 function Get-AzContext {
     [CmdletBinding()]
     param()
+    if ($env:SKYCRAFT_STUB_NOAZCONTEXT -eq '1' -and -not $script:AzConnected) { return }
     [pscustomobject]@{
         Subscription = [pscustomobject]@{ Id = '11111111-1111-1111-1111-111111111111'; Name = 'stub-subscription' }
-        Tenant       = [pscustomobject]@{ Id = '00000000-0000-0000-0000-000000000000' }
+        Tenant       = [pscustomobject]@{ Id = $script:AzTenant }
     }
 }
 
@@ -130,6 +141,8 @@ function Connect-AzAccount {
     [CmdletBinding()]
     param([Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name 'Connect-AzAccount'
+    $script:AzConnected = $true
+    $script:AzTenant    = '88888888-8888-8888-8888-888888888888'
 }
 
 function Get-MgDomain {
@@ -175,7 +188,7 @@ function New-AzRoleAssignment {
     $script:Lab11Scopes     = 'User.ReadWrite.All,Group.ReadWrite.All,Directory.ReadWrite.All,Domain.Read.All,User.Invite.All'
 
     function Invoke-RoleAssignmentScript {
-        param([string]$Domain = 'custom', [string]$Scopes = $script:Lab11Scopes, [switch]$NoContext, [string]$MgTenant = '')
+        param([string]$Domain = 'custom', [string]$Scopes = $script:Lab11Scopes, [switch]$NoContext, [string]$MgTenant = '', [switch]$MgFresh, [switch]$NoAzContext)
 
         $logPath = Join-Path $script:Stub.Directory 'calls.log'
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
@@ -185,6 +198,8 @@ function New-AzRoleAssignment {
             SKYCRAFT_STUB_SCOPES           = $Scopes
             SKYCRAFT_STUB_NOCONTEXT        = if ($NoContext) { '1' } else { '0' }
             SKYCRAFT_STUB_MGTENANT         = $MgTenant
+            SKYCRAFT_STUB_MGFRESH          = if ($MgFresh) { '1' } else { '0' }
+            SKYCRAFT_STUB_NOAZCONTEXT      = if ($NoAzContext) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG              = $logPath
             # Interactive plan, so the script reuses the stub's context or calls the stub's
             # Connect-MgGraph instead of signing in.
@@ -215,8 +230,10 @@ function New-AzRoleAssignment {
     $script:ReadOnly  = Invoke-RoleAssignmentScript -Scopes 'User.Read.All'
     # The #242 shape: a sign-in that returns without a context.
     $script:NoContext = Invoke-RoleAssignmentScript -NoContext
-    # The #300 shape: a covering Graph context from another tenant (a personal account's own).
+    # The #381 step 3 shape: a covering Graph context in one tenant, the Az context in another.
     $script:OtherTenant = Invoke-RoleAssignmentScript -MgTenant '99999999-9999-9999-9999-999999999999'
+    # The #300 shape: a fresh session, no Az context and no Graph context.
+    $script:NoAz = Invoke-RoleAssignmentScript -MgFresh -NoAzContext
 }
 
 AfterAll {
@@ -226,7 +243,7 @@ AfterAll {
 Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - test harness' {
 
     It 'shadows the real Microsoft Graph and Az commands instead of touching a tenant' {
-        foreach ($run in @($script:Custom, $script:Fail, $script:NoInitial, $script:ReadOnly, $script:NoContext, $script:OtherTenant)) {
+        foreach ($run in @($script:Custom, $script:Fail, $script:NoInitial, $script:ReadOnly, $script:NoContext, $script:OtherTenant, $script:NoAz)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real commands (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -282,11 +299,23 @@ Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - signs in to Microsoft Graph the wa
 
 Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - signs in to Microsoft Graph in the Az context''s tenant (#300)' {
 
-    It 'signs in again, to the Az tenant, when the Graph context in the session belongs to another tenant' {
+    It 'stops with [ERROR] and exit 1, naming both tenants, when the Graph context in the session belongs to another tenant' {
         $run = $script:OtherTenant
+        $run.ExitCode | Should -Be 1 -Because "the Az context may be a restored one; output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Failed to connect to Microsoft Graph: [^\r\n]*99999999-9999-9999-9999-999999999999[^\r\n]*00000000-0000-0000-0000-000000000000'
+        $run.Calls | Should -Not -Contain 'Connect-MgGraph' -Because 'the Graph context must not be replaced silently'
+        $run.Calls | Should -Not -Contain 'Get-MgDomain'
+        @($run.Calls | Where-Object { $_ -like 'Get-MgUser|*' -or $_ -eq 'New-AzRoleAssignment' }) | Should -BeNullOrEmpty
+    }
+
+    It 'with no Az context, runs Connect-AzAccount before Connect-MgGraph and signs in to Graph in the new Az tenant' {
+        $run = $script:NoAz
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
-        $run.Calls | Should -Contain 'Connect-MgGraph:TenantId=00000000-0000-0000-0000-000000000000'
-        $run.Output | Should -Match 'signing in interactively to tenant 00000000-0000-0000-0000-000000000000 \(from the Az context\)'
+        $azIndex = [array]::IndexOf([string[]]$run.Calls, 'Connect-AzAccount')
+        $mgIndex = [array]::IndexOf([string[]]$run.Calls, 'Connect-MgGraph')
+        $azIndex | Should -BeGreaterOrEqual 0 -Because "calls were: $($run.Calls -join ', ')"
+        $mgIndex | Should -BeGreaterThan $azIndex
+        $run.Calls | Should -Contain 'Connect-MgGraph:TenantId=88888888-8888-8888-8888-888888888888'
         $run.Output | Should -Not -Match 'Tenant Mismatch'
     }
 
