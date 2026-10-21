@@ -105,8 +105,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Could not list the policy assignments on the subscription, so nothing is deployed (an assignment it could not see may exist): $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 $plan = @(Get-LabPolicyAssignmentPlan -Assignment $assignments -SubscriptionId $subscriptionId)
@@ -188,8 +187,7 @@ if ($inherit.Count -eq 1) {
 
 if ($problemCount -gt 0) {
     Write-Host "`n  -> [ERROR] Nothing deployed: $problemCount problem(s) above. Fix them and run this script again." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount $problemCount
 }
 
 $deploymentName = "Lab-1.3-Gov-$(Get-Date -Format 'yyyyMMdd-HHmm')"
