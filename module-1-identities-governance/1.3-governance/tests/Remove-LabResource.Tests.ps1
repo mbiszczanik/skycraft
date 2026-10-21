@@ -12,12 +12,16 @@
       1. Every object the guide creates is removed when it is present: the locks, the policy
          assignments, the subscription and resource group budgets, the Advisor alert, and its
          action group (under the current name, and the one used before #225). An unrelated
-         action group in the same resource group is left alone.
+         action group in the same resource group is left alone. The budgets are listed and
+         deleted through the Consumption API at 2023-05-01 (Get-LabArmBudget,
+         Remove-LabArmBudget; issue #411), served by the shared ARM fake, never through Az.Billing.
       2. An object that is absent - an empty listing, a policy assignment reported as not
          found, or a resource group that is gone - is not a failure: the run exits 0.
       3. A lookup that fails with an error is an [ERROR], counted, and the run exits 1 without
          touching the object it could not see. The stub reports the failure with Write-Error, as
          the Az getters do, so a script that passes -ErrorAction SilentlyContinue swallows it.
+         A failed budget read prints its HTTP status and the service's message, and names no
+         cause the message does not give (no offer without Cost Management, issue #411).
       4. A removal that fails is an [ERROR], counted, and the later steps still run: exit 1.
       5. -WhatIf removes nothing and does not wait for lock propagation.
       6. Which errors mean "not found" is pinned by lifting Test-LabNotFoundError out of the
@@ -63,7 +67,7 @@ BeforeAll {
     $script:ScriptPath     = (Resolve-Path (Join-Path $PSScriptRoot '..' 'scripts' 'Remove-LabResource.ps1')).Path
     $script:StubModuleName = 'SkyCraftLab13CleanupStub'
     # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
-    $script:RequiredModules = @('Az.Accounts', 'Az.Resources', 'Az.Billing', 'Az.Monitor')
+    $script:RequiredModules = @('Az.Accounts', 'Az.Resources', 'Az.Monitor')
 
     $script:StubCommands = @(
         'Get-AzContext'
@@ -72,8 +76,6 @@ BeforeAll {
         'Get-AzPolicyAssignment'
         'Remove-AzPolicyAssignment'
         'Invoke-AzRestMethod'
-        'Get-AzConsumptionBudget'
-        'Remove-AzConsumptionBudget'
         'Get-AzActivityLogAlert'
         'Remove-AzActivityLogAlert'
         'Get-AzActionGroup'
@@ -88,7 +90,8 @@ BeforeAll {
     #   SKYCRAFT_STUB_POLICYSET  who made the four policy assignments: 'bicep' (the default:
     #                         fixed names), 'portal' (generated names, the guide's names as
     #                         display names) or 'both' (two of each)
-    #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled) or
+    #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled,
+    #                         unprocessable: the 422 current subscriptions gave Az.Billing) or
     #                         report its resource group gone (rgnotfound)
     #   SKYCRAFT_STUB_FAIL    '<Remove-command>:<name>,...' makes one removal throw
     #   SKYCRAFT_STUB_LOCKELSEWHERE  resource groups whose own lock is missing, while a lock with
@@ -97,7 +100,7 @@ BeforeAll {
     #                         real cmdlet returns them
     # A lookup is named after its command and what it reads: 'Get-AzResourceLock:<rg>',
     # 'Get-AzPolicyAssignment:subscription', 'Get-RoleAssignment:subscription',
-    # 'Get-AzConsumptionBudget:<rg or subscription>',
+    # 'Get-Budget:<rg or subscription>',
     # 'Get-AzActivityLogAlert:<rg>', 'Get-AzActionGroup:<rg>'. A removal is logged both bare and
     # with the object's name, so the assertions can be generic or precise.
     $script:StubBody = @'
@@ -138,6 +141,10 @@ function Invoke-StubLookup {
         }
         'rgnotfound' {
             Write-Error -ErrorId 'ResourceGroupNotFound' -Message "Resource group 'prod-skycraft-swc-rg' could not be found."
+            return $true
+        }
+        'unprocessable' {
+            Write-Error -ErrorId '422' -Message 'This operation is not supported in the version specified in the request. Please use version 2018-12-01-preview or later.'
             return $true
         }
     }
@@ -283,13 +290,23 @@ function Remove-StubRoleAssignment {
     Invoke-StubRemoval -Command 'Remove-RoleAssignment' -Name $Name
 }
 
-function Get-AzConsumptionBudget {
+# Budgets, served through the Consumption API fake appended to this body (issue #411). The ARM
+# scope is logged as 'subscription' or the resource group's name; one under another subscription
+# is a script bug.
+function Get-StubBudgetScopeLabel {
+    param([string]$Scope)
+    if ($Scope -notlike '/subscriptions/00000000-0000-0000-0000-000000000000*') { throw "stub: budget scope outside the context's subscription ($Scope)" }
+    if ($Scope -match '/resourceGroups/(?<rg>[^/]+)$') { return $Matches['rg'] }
+    return 'subscription'
+}
+
+function Get-StubBudget {
     [CmdletBinding()]
-    param([string]$ResourceGroupName, [string]$Name)
-    $scope = if ($ResourceGroupName) { $ResourceGroupName } else { 'subscription' }
-    if (Invoke-StubLookup -Name "Get-AzConsumptionBudget:$scope") { return }
+    param([string]$Scope)
+    $label = Get-StubBudgetScopeLabel -Scope $Scope
+    if (Invoke-StubLookup -Name "Get-Budget:$label") { return }
     if (Test-StubEmpty) { return }
-    if ($ResourceGroupName) {
+    if ($label -ne 'subscription') {
         [pscustomobject]@{ Name = 'SkyCraft-Prod-Monthly' }
     } else {
         # A subscription listing can hold budgets this lab did not create.
@@ -298,12 +315,12 @@ function Get-AzConsumptionBudget {
     }
 }
 
-function Remove-AzConsumptionBudget {
+function Remove-StubBudget {
     [CmdletBinding()]
-    param([string]$Name, [string]$ResourceGroupName)
-    $scope = if ($ResourceGroupName) { $ResourceGroupName } else { 'subscription' }
-    Write-StubCall -Name "Remove-AzConsumptionBudget@${scope}:$Name"
-    Invoke-StubRemoval -Command 'Remove-AzConsumptionBudget' -Name $Name
+    param([string]$Scope, [string]$Name)
+    $label = Get-StubBudgetScopeLabel -Scope $Scope
+    Write-StubCall -Name "Remove-Budget@${label}:$Name"
+    Invoke-StubRemoval -Command 'Remove-Budget' -Name $Name
 }
 
 function Get-AzActivityLogAlert {
@@ -382,7 +399,7 @@ function Start-Sleep {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body ($script:StubBody + (Get-LabArmRoleAssignmentStub)) -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmStub -Api RoleAssignment, Budget)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs
@@ -393,22 +410,27 @@ function Start-Sleep {
     # prod-skycraft-swc-rg is gone (a later lab's cleanup deleted it); the rest is in place.
     $script:ProdGone = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
         'Get-AzResourceLock:prod-skycraft-swc-rg=rgnotfound'
-        'Get-AzConsumptionBudget:prod-skycraft-swc-rg=rgnotfound'
+        'Get-Budget:prod-skycraft-swc-rg=rgnotfound'
         'Get-AzActivityLogAlert:prod-skycraft-swc-rg=rgnotfound'
         'Get-AzActionGroup:prod-skycraft-swc-rg=rgnotfound'
     )
     $script:NewLookupsFail = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
-        'Get-AzConsumptionBudget:subscription=denied'
-        'Get-AzConsumptionBudget:prod-skycraft-swc-rg=throttled'
+        'Get-Budget:subscription=denied'
+        'Get-Budget:prod-skycraft-swc-rg=throttled'
         'Get-AzActivityLogAlert:prod-skycraft-swc-rg=denied'
         'Get-AzActionGroup:prod-skycraft-swc-rg=throttled'
+    )
+    # The service refuses both budget reads with the 422 Az.Billing met (#411).
+    $script:BudgetReadsRefused = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
+        'Get-Budget:subscription=unprocessable'
+        'Get-Budget:prod-skycraft-swc-rg=unprocessable'
     )
     $script:OldLookupsFail = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
         'Get-AzResourceLock:prod-skycraft-swc-rg=denied'
         'Get-AzPolicyAssignment:subscription=throttled'
     )
     $script:NewRemovalsFail = Invoke-CleanupScript -Stub $script:Stub -Fail @(
-        'Remove-AzConsumptionBudget:SkyCraft-Monthly-Budget'
+        'Remove-Budget:SkyCraft-Monthly-Budget'
         'Remove-AzActivityLogAlert:Advisor-Cost-Recommendations'
         'Remove-AzActionGroup:skycraft-advisor-ag'
     )
@@ -435,7 +457,7 @@ function Start-Sleep {
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:ProdGone, $script:NewLookupsFail,
-        $script:OldLookupsFail, $script:NewRemovalsFail, $script:OldRemovalsFail, $script:LockElsewhere,
+        $script:BudgetReadsRefused, $script:OldLookupsFail, $script:NewRemovalsFail, $script:OldRemovalsFail, $script:LockElsewhere,
         $script:PortalMade, $script:ScriptMade, $script:TwoSets, $script:RoleLookupFails, $script:RoleRemovalFails,
         $script:DenyIdentity, $script:DenyIdentityRoleFails
     )
@@ -473,17 +495,17 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes everything the guide creates 
     }
 
     It 'removes the subscription budget from the subscription (step 1.3.15)' {
-        $script:Clean.Calls  | Should -Contain 'Remove-AzConsumptionBudget@subscription:SkyCraft-Monthly-Budget'
+        $script:Clean.Calls  | Should -Contain 'Remove-Budget@subscription:SkyCraft-Monthly-Budget'
         $script:Clean.Output | Should -Match '\[SUCCESS\] Removed budget: SkyCraft-Monthly-Budget'
     }
 
     It 'removes the resource group budget from prod-skycraft-swc-rg (step 1.3.17)' {
-        $script:Clean.Calls  | Should -Contain 'Remove-AzConsumptionBudget@prod-skycraft-swc-rg:SkyCraft-Prod-Monthly'
+        $script:Clean.Calls  | Should -Contain 'Remove-Budget@prod-skycraft-swc-rg:SkyCraft-Prod-Monthly'
         $script:Clean.Output | Should -Match '\[SUCCESS\] Removed budget: SkyCraft-Prod-Monthly'
     }
 
     It 'leaves a budget the lab did not create alone' {
-        $script:Clean.Calls | Should -Not -Contain 'Remove-AzConsumptionBudget:Someone-Elses-Budget'
+        $script:Clean.Calls | Should -Not -Contain 'Remove-Budget:Someone-Elses-Budget'
     }
 
     It 'removes the Advisor alert (step 1.3.7)' {
@@ -507,7 +529,7 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes everything the guide creates 
         $sleep = [array]::IndexOf($calls, 'Start-Sleep:45')
         $alert = [array]::IndexOf($calls, 'Remove-AzActivityLogAlert:Advisor-Cost-Recommendations')
         $group = [array]::IndexOf($calls, 'Remove-AzActionGroup:skycraft-advisor-ag')
-        $rgBudget = [array]::IndexOf($calls, 'Remove-AzConsumptionBudget:SkyCraft-Prod-Monthly')
+        $rgBudget = [array]::IndexOf($calls, 'Remove-Budget:SkyCraft-Prod-Monthly')
         $sleep    | Should -BeGreaterThan $lock
         $rgBudget | Should -BeGreaterThan $sleep
         $alert    | Should -BeGreaterThan $sleep
@@ -558,7 +580,7 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes the policy assignments whiche
         $run.Calls | Should -Not -Contain 'Remove-AzPolicyAssignment'
         $run.Output | Should -Match "\[ERROR\] 2 assignments match Enforce-Project-Tag: 'Enforce Project Tag Value' \(name Enforce-Project-Tag\), 'Enforce-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa2\)\. Removing none of them"
         $run.Output | Should -Match 'Cleanup finished with 4 failure\(s\)'
-        $run.Calls | Should -Contain 'Remove-AzConsumptionBudget:SkyCraft-Monthly-Budget'
+        $run.Calls | Should -Contain 'Remove-Budget:SkyCraft-Monthly-Budget'
         # Neither Inherit-Project-Tag is removed, so neither identity's role is either.
         $run.Calls | Should -Not -Contain 'Remove-RoleAssignment'
     }
@@ -673,11 +695,11 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - an absent object is not a failure (#2
         $run.ExitCode | Should -Be 0 -Because "a group that is gone holds nothing to remove; output was:`n$($run.Output)"
         $run.Output | Should -Not -Match '\[ERROR\]'
         $run.Calls  | Should -Not -Contain 'Remove-AzResourceLock:lock-no-delete-prod'
-        $run.Calls  | Should -Not -Contain 'Remove-AzConsumptionBudget:SkyCraft-Prod-Monthly'
+        $run.Calls  | Should -Not -Contain 'Remove-Budget:SkyCraft-Prod-Monthly'
         $run.Calls  | Should -Not -Contain 'Remove-AzActivityLogAlert'
         $run.Calls  | Should -Not -Contain 'Remove-AzActionGroup'
         $run.Calls  | Should -Contain 'Remove-AzResourceLock:lock-no-delete-platform'
-        $run.Calls  | Should -Contain 'Remove-AzConsumptionBudget:SkyCraft-Monthly-Budget'
+        $run.Calls  | Should -Contain 'Remove-Budget:SkyCraft-Monthly-Budget'
     }
 }
 
@@ -695,15 +717,32 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - a failed lookup is not "absent" (#252
         $run.Output | Should -Not -Match 'Budget SkyCraft-Monthly-Budget not found'
     }
 
-    It 'tells the learner what a failed budget read means on an offer without Cost Management' {
-        $hints = [regex]::Matches($script:NewLookupsFail.Output, 'confirm in the Portal that Cost Management is unavailable')
-        $hints.Count | Should -Be 2 -Because 'each failed budget read carries the hint, and nothing else does'
+    It 'prints the HTTP status and the service''s message of each failed budget read (#411)' {
+        $run = $script:NewLookupsFail
+        $run.Output | Should -Match '\[ERROR\] Could not look up budget SkyCraft-Monthly-Budget on the subscription: ARM GET /subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft\.Consumption/budgets returned HTTP 403 \(AuthorizationFailed\)'
+        $run.Output | Should -Match '\[ERROR\] Could not look up budget SkyCraft-Prod-Monthly on prod-skycraft-swc-rg: ARM GET /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft\.Consumption/budgets returned HTTP 429 \(TooManyRequests\)'
+    }
+
+    It 'points each failed budget read to the Portal, and nothing else' {
+        $hints = [regex]::Matches($script:NewLookupsFail.Output, 'Check Cost Management > Budgets in the Portal')
+        $hints.Count | Should -Be 2 -Because 'each failed budget read carries the pointer, and nothing else does'
         $script:OldLookupsFail.Output | Should -Not -Match 'Cost Management'
+    }
+
+    It 'counts a 422 on both budget reads, with the service''s message, and guesses no cause it does not give (#411)' {
+        $run = $script:BudgetReadsRefused
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Could not look up budget SkyCraft-Monthly-Budget on the subscription: [^\r\n]*HTTP 422 \(422\): This operation is not supported in the version specified in the request\. Please use version 2018-12-01-preview or later\.'
+        $run.Output | Should -Match 'Could not look up budget SkyCraft-Prod-Monthly on prod-skycraft-swc-rg: [^\r\n]*HTTP 422'
+        $run.Output | Should -Match 'Cleanup finished with 2 failure\(s\)'
+        $run.Output | Should -Not -Match 'Budget SkyCraft-[A-Za-z-]+ not found'
+        $run.Output | Should -Not -Match 'Azure for Students|Sponsorship|without Cost Management|Cost Management is unavailable' -Because 'the message names the API version, not the offer (R5)'
+        $run.Calls  | Should -Not -Contain 'Remove-Budget'
     }
 
     It 'removes nothing it could not look up, and still runs every other step' {
         $run = $script:NewLookupsFail
-        $run.Calls | Should -Not -Contain 'Remove-AzConsumptionBudget'
+        $run.Calls | Should -Not -Contain 'Remove-Budget'
         $run.Calls | Should -Not -Contain 'Remove-AzActivityLogAlert'
         $run.Calls | Should -Not -Contain 'Remove-AzActionGroup'
         $run.Calls | Should -Contain 'Remove-AzResourceLock:lock-no-delete-prod'
@@ -738,7 +777,7 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - a failed removal is counted (#252)' {
 
     It 'keeps going after a failed removal' {
         $run = $script:NewRemovalsFail
-        $run.Calls | Should -Contain 'Remove-AzConsumptionBudget:SkyCraft-Prod-Monthly'
+        $run.Calls | Should -Contain 'Remove-Budget:SkyCraft-Prod-Monthly'
         $run.Calls | Should -Contain 'Remove-AzActionGroup:skycraft-advisor-ag'
         $run.Calls | Should -Contain 'Remove-AzActionGroup:prod-skycraft-swc-rg'
     }
@@ -759,7 +798,7 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - -WhatIf' {
         $run = $script:WhatIf
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         @($run.Calls | Where-Object { $_ -match '^(Remove-|Start-Sleep)' }) | Should -BeNullOrEmpty
-        $run.Calls  | Should -Contain 'Get-AzConsumptionBudget:subscription'
+        $run.Calls  | Should -Contain 'Get-Budget:subscription'
         $run.Calls  | Should -Contain 'Get-AzActionGroup:prod-skycraft-swc-rg'
         $run.Output | Should -Match 'What if: .*SkyCraft-Monthly-Budget'
         $run.Output | Should -Match 'What if: .*Advisor-Cost-Recommendations'
@@ -779,8 +818,27 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - which lookup errors mean "not found"'
             $script:LiftedName += $function.Name
         }
 
-        # The shape of the SDK exceptions the getters raise: the ARM error code in Body and the
-        # status in Response (Get-AzConsumptionBudget), ResponseStatusCode (generated cmdlets) or
+        # The errors the LabCommon budget helper raises (#411), made by the helper itself from a
+        # canned ARM reply, so a change to their wording is seen here.
+        $script:LabCommon = Import-Module (Join-Path $PSScriptRoot '..' '..' '..' 'tools' 'LabCommon.psm1') -Force -PassThru
+        function global:Invoke-AzRestMethod {
+            [CmdletBinding()]
+            param([string]$Path, [string]$Method = 'GET', [string]$Payload)
+            $global:SkyCraftLab13ArmReply
+        }
+        function Get-HelperErrorFixture {
+            param([int]$StatusCode, [string]$Code, [string]$Message)
+            $global:SkyCraftLab13ArmReply = [pscustomobject]@{
+                StatusCode = $StatusCode
+                Content    = @{ error = @{ code = $Code; message = $Message } } | ConvertTo-Json -Compress
+            }
+            try { Get-LabArmBudget -Scope '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg' | Out-Null }
+            catch { return $_ }
+            throw 'Get-LabArmBudget did not throw on an error reply'
+        }
+
+        # The shape of the SDK exceptions the Az getters raise: the ARM error code in Body and the
+        # status in Response (older Az SDK exceptions), ResponseStatusCode (generated cmdlets) or
         # HttpStatus (Get-AzResourceLock).
         if (-not ('SkyCraftLab13StubAzureException' -as [type])) {
             Add-Type -TypeDefinition @'
@@ -813,6 +871,12 @@ public class SkyCraftLab13StubAzureException : System.Exception
         }
     }
 
+    AfterAll {
+        Remove-Item -Path Function:\Invoke-AzRestMethod -ErrorAction SilentlyContinue
+        Remove-Variable -Name SkyCraftLab13ArmReply -Scope Global -ErrorAction SilentlyContinue
+        if ($script:LabCommon) { Remove-Module -ModuleInfo $script:LabCommon -Force -ErrorAction SilentlyContinue }
+    }
+
     It 'lifts Test-LabNotFoundError and Invoke-LabLookup out of the script' {
         $script:LiftedName | Should -Contain 'Test-LabNotFoundError'
         $script:LiftedName | Should -Contain 'Invoke-LabLookup'
@@ -827,10 +891,12 @@ public class SkyCraftLab13StubAzureException : System.Exception
            Record = { Get-LookupErrorFixture -Message "Resource group 'prod-skycraft-swc-rg' could not be found." } }
         @{ Shape  = 'a 404 HttpStatus (Get-AzResourceLock)'
            Record = { Get-LookupErrorFixture -HttpStatus ([System.Net.HttpStatusCode]::NotFound) } }
-        @{ Shape  = 'a 404 on the response with no error body (Get-AzConsumptionBudget)'
+        @{ Shape  = 'a 404 on the response with no error body (older Az SDK exceptions)'
            Record = { Get-LookupErrorFixture -StatusCode ([System.Net.HttpStatusCode]::NotFound) -Message "Operation returned an invalid status code 'NotFound'" } }
         @{ Shape  = 'a 404 on a generated cmdlet RestException (Get-AzActionGroup)'
            Record = { Get-LookupErrorFixture -ResponseStatusCode ([System.Net.HttpStatusCode]::NotFound) } }
+        @{ Shape  = 'a budget read on a resource group that is gone (Get-LabArmBudget, HTTP 404 ResourceGroupNotFound)'
+           Record = { Get-HelperErrorFixture -StatusCode 404 -Code 'ResourceGroupNotFound' -Message "Resource group 'prod-skycraft-swc-rg' could not be found." } }
     ) {
         Test-LabNotFoundError -ErrorRecord (& $Record) | Should -BeTrue
     }
@@ -846,6 +912,12 @@ public class SkyCraftLab13StubAzureException : System.Exception
            Record = { Get-LookupErrorFixture -Message 'An error occurred while sending the request.' } }
         @{ Shape  = 'a missing subscription, although ARM answers it with 404'
            Record = { Get-LookupErrorFixture -Code 'SubscriptionNotFound' -StatusCode ([System.Net.HttpStatusCode]::NotFound) -Message "The subscription '00000000-0000-0000-0000-000000000000' could not be found." } }
+        @{ Shape  = 'a budget read the service refuses for its API version (Get-LabArmBudget, HTTP 422)'
+           Record = { Get-HelperErrorFixture -StatusCode 422 -Code '422' -Message 'This operation is not supported in the version specified in the request. Please use version 2018-12-01-preview or later.' } }
+        @{ Shape  = 'a budget read without permission (Get-LabArmBudget, HTTP 403)'
+           Record = { Get-HelperErrorFixture -StatusCode 403 -Code 'AuthorizationFailed' -Message "The client 'stub' does not have authorization to perform action 'Microsoft.Consumption/budgets/read'." } }
+        @{ Shape  = 'a budget read on a missing subscription (Get-LabArmBudget, HTTP 404 SubscriptionNotFound)'
+           Record = { Get-HelperErrorFixture -StatusCode 404 -Code 'SubscriptionNotFound' -Message "The subscription '00000000-0000-0000-0000-000000000000' could not be found." } }
     ) {
         Test-LabNotFoundError -ErrorRecord (& $Record) | Should -BeFalse
     }

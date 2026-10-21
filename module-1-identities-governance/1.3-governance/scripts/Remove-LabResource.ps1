@@ -44,9 +44,10 @@
     did for Lab 5.2).
 
     A budget read that fails is counted too, although Test-Lab.ps1 leaves budgets to a manual
-    check: a 403 means the budget may still exist. On an offer without Cost Management (Azure for
-    Students, Sponsorship) no budget can exist, but the read still fails; confirm in the Portal
-    that Cost Management is unavailable for the subscription, and then ignore that error.
+    check: a 403 means the budget may still exist. The budgets are listed and deleted through the
+    Consumption API (Get-LabArmBudget, Remove-LabArmBudget in tools/LabCommon.psm1), not
+    Az.Billing, whose api-version 2018-01-31 current subscriptions refuse with 422 (issue #411).
+    A failed read or delete prints its HTTP status and the service's message, which says why.
 
     Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
     otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
@@ -70,7 +71,7 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.Resources, Az.Billing, Az.Monitor
+#Requires -Modules Az.Accounts, Az.Resources, Az.Monitor
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -79,7 +80,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
-# The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
+# The module's role assignment helpers use the ARM API, not Microsoft Graph (#397); its budget
+# helpers use the Consumption API, not Az.Billing (#411).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
@@ -95,8 +97,10 @@ $script:cleanupFailures = 0
 # "Resource group '<rg>' could not be found.", code ResourceGroupNotFound. PolicyAssignmentNotFound
 # is what Get-AzPolicyAssignment reports for a read by name, which this script no longer makes
 # (issue #330); it is still read as not found. The status
-# travels in Response.StatusCode (Get-AzConsumptionBudget), ResponseStatusCode (the generated
-# Az.Monitor and policy cmdlets) or HttpStatus (Get-AzResourceLock). A missing subscription is a
+# travels in Response.StatusCode (older Az SDK exceptions), ResponseStatusCode (the generated
+# Az.Monitor and policy cmdlets) or HttpStatus (Get-AzResourceLock); the LabCommon role
+# assignment and budget helpers put the ARM code in the message ("HTTP 404
+# (ResourceGroupNotFound): ..."). A missing subscription is a
 # 404 too, but it means the context is wrong, not that the object is gone, so it never reads as
 # "absent".
 function Test-LabNotFoundError {
@@ -304,7 +308,8 @@ if (-not $policyLookup.Failed) {
     }
 }
 
-# 3. Remove Budgets (Get-AzConsumptionBudget and Remove-AzConsumptionBudget ship in Az.Billing)
+# 3. Remove Budgets, through the Consumption API (tools/LabCommon.psm1): Az.Billing's
+#    api-version 2018-01-31 is refused with 422 on current subscriptions (#411).
 Write-Host "`n3. Removing Budgets..." -ForegroundColor Cyan
 $budgets = @(
     @{ Name = "SkyCraft-Monthly-Budget"; RG = $null; Scope = "the subscription" },
@@ -312,16 +317,14 @@ $budgets = @(
 )
 
 foreach ($budget in $budgets) {
-    # Without -ResourceGroupName both cmdlets work on the subscription's budgets.
-    $budgetScope = @{}
-    if ($budget.RG) { $budgetScope.ResourceGroupName = $budget.RG }
+    $budgetScope = if ($budget.RG) { "$subscriptionScope/resourceGroups/$($budget.RG)" } else { $subscriptionScope }
     $budgetLookup = Invoke-LabLookup -Target "budget $($budget.Name) on $($budget.Scope)" -Lookup {
-        Get-AzConsumptionBudget @budgetScope -ErrorAction Stop | Where-Object { $_.Name -eq $budget.Name }
+        Get-LabArmBudget -Scope $budgetScope | Where-Object { $_.Name -eq $budget.Name }
     }
     if ($budgetLookup.Failed) {
         # Counted, unlike Test-Lab.ps1's manual budget check: a 403 means the budget may exist.
-        Write-Host "     On an offer without Cost Management (Azure for Students, Sponsorship) no budget can exist, but this read still fails:" -ForegroundColor Gray
-        Write-Host "     confirm in the Portal that Cost Management is unavailable for the subscription, and then ignore this error." -ForegroundColor Gray
+        # The line above carries the status and the service's message; no cause is guessed here.
+        Write-Host "     Check Cost Management > Budgets in the Portal, and delete the budget there if it exists." -ForegroundColor Gray
         continue
     }
     if ($budgetLookup.Value.Count -eq 0) {
@@ -330,7 +333,7 @@ foreach ($budget in $budgets) {
     }
     if ($PSCmdlet.ShouldProcess("$($budget.Name) on $($budget.Scope)", 'Remove budget')) {
         try {
-            Remove-AzConsumptionBudget -Name $budget.Name @budgetScope -ErrorAction Stop | Out-Null
+            Remove-LabArmBudget -Scope $budgetScope -Name $budget.Name
             Write-Host "  -> [SUCCESS] Removed budget: $($budget.Name)" -ForegroundColor Green
         }
         catch {

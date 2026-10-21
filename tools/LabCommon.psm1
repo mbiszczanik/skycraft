@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
     Shared helpers for the lab scripts. Today: Exit-Lab, which ends a lab script with the right
-    exit code without closing the learner's PowerShell session, and the role assignment helpers,
-    which read, create and remove Azure role assignments without Microsoft Graph.
+    exit code without closing the learner's PowerShell session, the role assignment helpers,
+    which read, create and remove Azure role assignments without Microsoft Graph, and the budget
+    helpers, which list and delete Cost Management budgets without Az.Billing.
 
 .DESCRIPTION
     Every lab script serves two callers at once (issue #301):
@@ -60,6 +61,18 @@
     a principal: finding a user or a group by name still needs Microsoft Graph, and a script that
     does so says which sign-in provides it (Get-LabGraphSignInHint).
 
+    Budgets (issue #411). Az.Billing 2.3.0 sends every Consumption request, Get-AzConsumptionBudget
+    and Remove-AzConsumptionBudget included, at api-version 2018-01-31, which current
+    subscriptions refuse with 422 ("Please use version 2018-12-01-preview or later"). Lab scripts
+    therefore go to the Consumption budgets API through Invoke-AzRestMethod, at 2023-05-01 (the
+    version az consumption uses):
+
+        Get-LabArmBudget     lists the budgets at a subscription or resource group scope
+        Remove-LabArmBudget  deletes one by name at such a scope
+
+    They follow the same rule as the role assignment helpers: a status outside 2xx throws with
+    the status, the error code and the service's message, so a failed read is never "no budget".
+
     The rest of #301 (Invoke-LabCheck, Get-LabResourceOrFail, Assert-LabSubscription) is not here
     yet. tests/Exit-Code-Propagation.Tests.ps1 requires every lab script, except a helper that
     lab scripts dot-source, to import this module and call Exit-Lab, forbids a direct
@@ -71,7 +84,7 @@
 
 .NOTES
     Project: SkyCraft
-    Issues: #257, #301, #397
+    Issues: #257, #301, #397, #411
 #>
 
 #Requires -Version 7.0
@@ -310,11 +323,11 @@ function Get-LabGraphSignInHint {
     return "Finding users and groups by name needs Microsoft Graph; sign in with 'Connect-MgGraph -Scopes User.ReadWrite.All,Group.ReadWrite.All,Directory.ReadWrite.All' (Lab 1.1's scopes) and run the script again."
 }
 
-# Sends one request to the role assignments API and returns the parsed body ($null when there is
-# none). A status outside 2xx throws with the status, ARM's error code and its message, so no
+# Sends one ARM request (role assignments, budgets) and returns the parsed body ($null when there
+# is none). A status outside 2xx throws with the status, ARM's error code and its message, so no
 # caller can read a refused or failed request as an empty answer. Invoke-AzRestMethod itself throws
 # when it cannot get a token or reach ARM.
-function Invoke-LabArmRoleRequest {
+function Invoke-LabArmRequest {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -356,6 +369,34 @@ function Invoke-LabArmRoleRequest {
     }
 
     return $body
+}
+
+# GETs a list and follows nextLink to the last page, returning every item of 'value'. A 2xx
+# answer without 'value', or a nextLink already followed, throws under the caller's name.
+function Invoke-LabArmList {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$Caller
+    )
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    while ($Path) {
+        if (-not $seen.Add($Path)) { throw "${Caller}: ARM returned the same nextLink twice ($Path)." }
+        $body = Invoke-LabArmRequest -Method GET -Path $Path
+        if ($null -eq $body -or $body.PSObject.Properties.Name -notcontains 'value') {
+            throw "${Caller}: ARM answered GET $(($Path -split '\?')[0]) without a 'value' list."
+        }
+        foreach ($item in @($body.value)) {
+            if ($item) { $item }
+        }
+        # nextLink is an absolute URL on the ARM endpoint; Invoke-AzRestMethod -Path takes the
+        # part after the host.
+        $Path = if ($body.nextLink) { ([uri][string]$body.nextLink).PathAndQuery } else { $null }
+    }
 }
 
 # One role assignment as ARM returns it, in the shape the lab scripts read: the field names of
@@ -457,19 +498,8 @@ function Get-LabArmRoleAssignment {
     }
 
     $path = "$($Scope.TrimEnd('/'))/providers/Microsoft.Authorization/roleAssignments?$query"
-    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    while ($path) {
-        if (-not $seen.Add($path)) { throw "Get-LabArmRoleAssignment: ARM returned the same nextLink twice ($path)." }
-        $body = Invoke-LabArmRoleRequest -Method GET -Path $path
-        if ($null -eq $body -or $body.PSObject.Properties.Name -notcontains 'value') {
-            throw "Get-LabArmRoleAssignment: ARM answered GET $(($path -split '\?')[0]) without a 'value' list."
-        }
-        foreach ($item in @($body.value)) {
-            if ($item) { ConvertTo-LabArmRoleAssignment -Item $item }
-        }
-        # nextLink is an absolute URL on the ARM endpoint; Invoke-AzRestMethod -Path takes the
-        # part after the host.
-        $path = if ($body.nextLink) { ([uri][string]$body.nextLink).PathAndQuery } else { $null }
+    foreach ($item in Invoke-LabArmList -Path $path -Caller 'Get-LabArmRoleAssignment') {
+        ConvertTo-LabArmRoleAssignment -Item $item
     }
 }
 
@@ -544,7 +574,7 @@ function New-LabArmRoleAssignment {
     $name = [guid]::NewGuid().ToString()
     $path = "$scopePath/providers/Microsoft.Authorization/roleAssignments/$($name)?api-version=$script:LabRoleAssignmentApiVersion"
     if (-not $PSCmdlet.ShouldProcess("$PrincipalId on $scopePath", "Assign role $definition")) { return }
-    $body = Invoke-LabArmRoleRequest -Method PUT -Path $path -Payload $payload
+    $body = Invoke-LabArmRequest -Method PUT -Path $path -Payload $payload
     if ($body -and $body.properties) { ConvertTo-LabArmRoleAssignment -Item $body }
 }
 
@@ -578,7 +608,117 @@ function Remove-LabArmRoleAssignment {
     )
 
     if (-not $PSCmdlet.ShouldProcess($Id, 'Remove role assignment')) { return }
-    Invoke-LabArmRoleRequest -Method DELETE -Path "$($Id)?api-version=$script:LabRoleAssignmentApiVersion" | Out-Null
+    Invoke-LabArmRequest -Method DELETE -Path "$($Id)?api-version=$script:LabRoleAssignmentApiVersion" | Out-Null
 }
 
-Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment
+# --- Budgets through the Consumption API (issue #411) -----------------------------------------
+
+# Az.Billing 2.3.0 sends 2018-01-31, which current subscriptions answer with 422; 2019-01-01 and
+# later work. 2023-05-01 is what az consumption budget uses.
+$script:LabBudgetApiVersion = '2023-05-01'
+
+# One budget as the Consumption API returns it, in the shape the lab scripts read. Unit is the
+# currency of currentSpend; the budget itself carries none.
+function ConvertTo-LabArmBudget {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object]$Item
+    )
+
+    $properties = $Item.properties
+    $id = [string]$Item.id
+    [pscustomobject]@{
+        PSTypeName   = 'SkyCraft.LabBudget'
+        Name         = [string]$Item.name
+        Id           = $id
+        Scope        = $id -replace '/providers/Microsoft\.Consumption/budgets/[^/]+$', ''
+        Amount       = $properties.amount
+        Category     = [string]$properties.category
+        TimeGrain    = [string]$properties.timeGrain
+        CurrentSpend = $properties.currentSpend.amount
+        Unit         = [string]$properties.currentSpend.unit
+    }
+}
+
+function Get-LabArmBudget {
+    <#
+    .SYNOPSIS
+        Lists the budgets at a subscription or resource group scope from the Consumption API,
+        without Az.Billing.
+
+    .DESCRIPTION
+        GET <scope>/providers/Microsoft.Consumption/budgets (api-version 2023-05-01) through
+        Invoke-AzRestMethod, following nextLink until the last page. A status outside 2xx throws
+        with the status, the error code and the service's message: a failed read is never an empty
+        list. Get-AzConsumptionBudget is not used, because Az.Billing 2.3.0 sends api-version
+        2018-01-31, which current subscriptions refuse with 422 (issue #411).
+
+    .PARAMETER Scope
+        /subscriptions/<id>, or /subscriptions/<id>/resourceGroups/<name>.
+
+    .OUTPUTS
+        SkyCraft.LabBudget objects: Name, Id, Scope (the part of Id before the budget), Amount,
+        Category, TimeGrain, CurrentSpend and Unit (the currency of CurrentSpend).
+
+    .EXAMPLE
+        Get-LabArmBudget -Scope "/subscriptions/$subId/resourceGroups/prod-skycraft-swc-rg"
+
+    .NOTES
+        Project: SkyCraft
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidatePattern('^/subscriptions/[^/?#\s]+(/resourceGroups/[^/?#\s]+)?/?$')]
+        [string]$Scope
+    )
+
+    $path = "$($Scope.TrimEnd('/'))/providers/Microsoft.Consumption/budgets?api-version=$script:LabBudgetApiVersion"
+    foreach ($item in Invoke-LabArmList -Path $path -Caller 'Get-LabArmBudget') {
+        ConvertTo-LabArmBudget -Item $item
+    }
+}
+
+function Remove-LabArmBudget {
+    <#
+    .SYNOPSIS
+        Deletes a budget by name at a subscription or resource group scope through the
+        Consumption API, without Az.Billing.
+
+    .DESCRIPTION
+        DELETE <scope>/providers/Microsoft.Consumption/budgets/<name> (api-version 2023-05-01)
+        through Invoke-AzRestMethod. Any 2xx is success. Any other status throws with the status,
+        the error code and the service's message, a 404 included: the caller lists the budgets
+        first, so a budget that vanished in between is reported, not assumed gone.
+        Remove-AzConsumptionBudget is not used, for the reason Get-LabArmBudget gives (issue #411).
+
+    .PARAMETER Scope
+        /subscriptions/<id>, or /subscriptions/<id>/resourceGroups/<name>.
+
+    .PARAMETER Name
+        The budget's name: letters, digits, hyphens and underscores, as Azure allows.
+
+    .EXAMPLE
+        Remove-LabArmBudget -Scope "/subscriptions/$subId" -Name 'SkyCraft-Monthly-Budget'
+
+    .NOTES
+        Project: SkyCraft
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)]
+        [ValidatePattern('^/subscriptions/[^/?#\s]+(/resourceGroups/[^/?#\s]+)?/?$')]
+        [string]$Scope,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern('^[A-Za-z0-9_-]{1,63}$')]
+        [string]$Name
+    )
+
+    $scopePath = $Scope.TrimEnd('/')
+    if (-not $PSCmdlet.ShouldProcess("$Name on $scopePath", 'Remove budget')) { return }
+    Invoke-LabArmRequest -Method DELETE -Path "$scopePath/providers/Microsoft.Consumption/budgets/$($Name)?api-version=$script:LabBudgetApiVersion" | Out-Null
+}
+
+Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget
