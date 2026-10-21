@@ -39,6 +39,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 4.1: Validate Storage Accounts ===" -ForegroundColor Cyan
 Write-Host ""
@@ -214,10 +216,8 @@ Write-Host ""
 
 if ($script:testsFailed -eq 0) {
     Write-Host "All tests passed! Lab 4.1 completed successfully." -ForegroundColor Green
-    exit 0
 }
 else {
     Write-Host "Some tests failed. Review the errors above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
 }
+Exit-Lab -FailureCount $script:testsFailed

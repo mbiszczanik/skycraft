@@ -23,11 +23,10 @@
       1  Microsoft Graph sign-in failed or the initial domain could not be determined (nothing
          was deleted), or at least one lookup or deletion failed
 
-    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
-    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
-    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
-    A caller that dot-sources this script, or runs "& .\Remove-LabResource.ps1" with further
-    statements after it, still ends with its own exit code rather than this one.
+    Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
+    otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
+    (issue #104), it also sets the process exit code; run at a prompt or by another script,
+    it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
 .PARAMETER Force
     Skip the confirmation prompt.
@@ -84,7 +83,7 @@ param(
 #
 # Duplicated verbatim in New-LabUser.ps1, Test-Lab.ps1 and Remove-LabResource.ps1 rather than
 # factored into a shared helper: docs/powershell-standards.md 7.3 requires every lab folder to be
-# runnable and readable on its own, and tests/Lab11-Graph-Auth.Tests.ps1 asserts that the three
+# readable on its own, and tests/Lab11-Graph-Auth.Tests.ps1 asserts that the three
 # copies do not drift apart.
 function Get-LabGraphAuthPlan {
     [CmdletBinding()]
@@ -272,6 +271,8 @@ function Connect-LabGraph {
 }
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
 Write-Host "=== Lab 1.1 - Resource Cleanup ===" -ForegroundColor Cyan -BackgroundColor Black
@@ -289,8 +290,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Microsoft Graph: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 # Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain, the one the guide's
@@ -304,8 +304,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Could not determine the tenant's initial *.onmicrosoft.com domain: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
@@ -424,8 +423,8 @@ foreach ($groupName in $groupsToDelete) {
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s)." -ForegroundColor Red
     Write-Host "  See the [ERROR] lines above - this run exits 1, nothing was masked." -ForegroundColor Gray
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nCleanup Complete." -ForegroundColor Green
+Exit-Lab -FailureCount 0

@@ -50,6 +50,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 $ProgressPreference = 'SilentlyContinue'
 
 # Color functions
@@ -82,8 +84,7 @@ try {
 }
 catch {
     Write-Error-Custom "Error: $($_.Exception.Message)"
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Info "Setting subscription context..."
@@ -140,3 +141,4 @@ foreach ($rg in $resourceGroups) {
 }
 
 Write-Success "Resource Group creation script complete!"
+Exit-Lab -FailureCount 0

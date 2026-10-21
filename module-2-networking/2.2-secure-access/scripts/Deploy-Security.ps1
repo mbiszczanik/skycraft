@@ -90,6 +90,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 2.2 - Deploy Security Configuration (PowerShell) ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -97,8 +99,7 @@ Write-Host "=== Lab 2.2 - Deploy Security Configuration (PowerShell) ===" -Foreg
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
@@ -152,8 +153,7 @@ foreach ($config in $asgConfigs) {
     catch {
         Write-Host "  -> [ERROR] Failed to create ASG: $($config.Name)" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 }
 
@@ -178,8 +178,7 @@ function New-SkyCraftNSG {
         return $nsg
     } catch {
         Write-Host "  -> [ERROR] Failed to create NSG: $Name - $_" -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 }
 
@@ -335,8 +334,7 @@ else {
 
             if (-not $bastionSubnet) {
                 Write-Host "  -> [ERROR] AzureBastionSubnet not found in $PlatformVnetName" -ForegroundColor Red
-                $Host.SetShouldExit(1)
-                exit 1
+                Exit-Lab -FailureCount 1
             }
 
             Write-Host "Creating Azure Bastion (this will take ~15 minutes)..." -ForegroundColor Yellow
@@ -363,9 +361,9 @@ else {
 if ($script:taskFailures -gt 0) {
     Write-Host "`n=== Deployment finished with $($script:taskFailures) failure(s) ===" -ForegroundColor Red -BackgroundColor Black
     Write-Host "See the [ERROR] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`n=== Deployment Complete ===" -ForegroundColor Cyan -BackgroundColor Black
 Write-Host "Run Test-Lab.ps1 to verify the deployment" -ForegroundColor Green
+Exit-Lab -FailureCount 0

@@ -19,9 +19,10 @@
     stays when its container app could not be looked up or deleted: the app may still be running
     in it. The kept environment is not counted again - the app's failure already is.
 
-    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
-    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
-    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+    Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
+    otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
+    (issue #104), it also sets the process exit code; run at a prompt or by another script,
+    it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
 .PARAMETER Force
     Skip the confirmation prompt.
@@ -96,6 +97,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
 # Absence and failure are different outcomes and are reported differently (#121 live pass):
@@ -179,8 +182,7 @@ Write-Host "=== Lab 3.3 - Resource Cleanup ===" -ForegroundColor Cyan -Backgroun
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 $resourcesToDelete = @(
@@ -253,8 +255,8 @@ foreach ($step in $steps) {
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s)." -ForegroundColor Red
     Write-Host "  See the [ERROR] lines above - the resources named there may still be in $ResourceGroupName. Re-run this script once the cause is cleared." -ForegroundColor Gray
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nCleanup Complete." -ForegroundColor Green
+Exit-Lab -FailureCount 0

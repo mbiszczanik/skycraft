@@ -44,11 +44,10 @@
       there for a rerun to remove the assignments with;
     - an AzureBackupRG_* group survives a failed check that it is empty.
 
-    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
-    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
-    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
-    A caller that dot-sources this script, or runs "& .\Remove-LabResource.ps1" with further
-    statements after it, still ends with its own exit code rather than this one.
+    Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
+    otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
+    (issue #104), it also sets the process exit code; run at a prompt or by another script,
+    it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
 .PARAMETER Force
     Skip confirmation prompts.
@@ -76,6 +75,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
 $platformRg     = 'platform-skycraft-swc-rg'
@@ -188,8 +189,7 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 # Azure Backup "secure by default" keeps soft delete AlwaysON on every new Recovery Services
@@ -542,8 +542,7 @@ if ($script:cleanupFailures -gt 0) {
     Write-Host "  VMs, VNets, and Storage Accounts were NOT deleted." -ForegroundColor Gray
     Write-Host "  ASR replication resources must be removed via Azure Portal." -ForegroundColor Gray
     Write-Host "========================================`n" -ForegroundColor Cyan
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "  Cleanup Complete" -ForegroundColor Cyan
@@ -551,3 +550,4 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  VMs, VNets, and Storage Accounts were NOT deleted." -ForegroundColor Gray
 Write-Host "  ASR replication resources must be removed via Azure Portal." -ForegroundColor Gray
 Write-Host "========================================`n" -ForegroundColor Cyan
+Exit-Lab -FailureCount 0

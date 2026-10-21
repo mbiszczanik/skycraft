@@ -58,6 +58,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 # --- Principal resolution (issue #81) ------------------------------------------------------
 # role-assignments.bicep takes principal IDs, not names: Bicep cannot query Entra ID. The lookups
@@ -110,8 +112,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Azure: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 $subscriptionId = $context.Subscription.Id
@@ -120,15 +121,13 @@ $subscriptionId = $context.Subscription.Id
 $templateFile = Join-Path $PSScriptRoot "..\bicep\resource-groups.bicep"
 if (-not (Test-Path $templateFile)) {
     Write-Host "  -> [ERROR] Template file not found at: $templateFile" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 $roleTemplateFile = Join-Path $PSScriptRoot "..\bicep\role-assignments.bicep"
 if ($IncludeRoleAssignments -and -not (Test-Path $roleTemplateFile)) {
     Write-Host "  -> [ERROR] Template file not found at: $roleTemplateFile" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 $rgs = @("dev-skycraft-swc-rg", "prod-skycraft-swc-rg", "platform-skycraft-swc-rg")
@@ -151,8 +150,7 @@ if ($IncludeRoleAssignments) {
     }
     catch {
         Write-Host "  -> [ERROR] $_" -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 }
 
@@ -181,8 +179,7 @@ try {
 
         if ($deployment.ProvisioningState -ne 'Succeeded') {
             Write-Host "  -> [FAILED] Deployment finished with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-            $Host.SetShouldExit(1)
-            exit 1
+            Exit-Lab -FailureCount 1
         }
 
         Write-Host "  -> [SUCCESS] Resource Groups deployed successfully." -ForegroundColor Green
@@ -199,8 +196,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Deployment failed: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 if (-not $IncludeRoleAssignments) {
@@ -271,8 +267,7 @@ try {
 
         if ($roleDeployment.ProvisioningState -ne 'Succeeded') {
             Write-Host "  -> [FAILED] Deployment finished with state: $($roleDeployment.ProvisioningState)" -ForegroundColor Red
-            $Host.SetShouldExit(1)
-            exit 1
+            Exit-Lab -FailureCount 1
         }
 
         Write-Host "  -> [SUCCESS] Role assignments deployed successfully." -ForegroundColor Green
@@ -284,8 +279,8 @@ catch {
         Write-Host "     An assignment for the same principal, role and scope exists under a name this template does not own -" -ForegroundColor Yellow
         Write-Host "     typically one created by New-LabRoleAssignment.ps1 or in the portal. Remove it, or keep using that path." -ForegroundColor Yellow
     }
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nDeployment Complete." -ForegroundColor Green
+Exit-Lab -FailureCount 0

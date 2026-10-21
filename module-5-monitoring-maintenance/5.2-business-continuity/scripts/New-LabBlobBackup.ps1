@@ -40,6 +40,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 $platformRg     = 'platform-skycraft-swc-rg'
 $prodRg         = 'prod-skycraft-swc-rg'
@@ -58,8 +60,7 @@ Write-Host "[1/4] Validating prerequisites..." -ForegroundColor Yellow
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
 
@@ -69,8 +70,7 @@ Write-Host "`n[2/4] Resolving resource IDs..." -ForegroundColor Yellow
 $bv = Get-AzDataProtectionBackupVault -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction SilentlyContinue
 if (-not $bv) {
     Write-Host "  [ERROR] Backup Vault '$bvName' not found. Run Deploy-Bicep.ps1 first." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 $bvPrincipalId = $bv.IdentityPrincipalId
 Write-Host "  ✓ Backup Vault found: $bvName (Principal: $bvPrincipalId)" -ForegroundColor Green
@@ -78,8 +78,7 @@ Write-Host "  ✓ Backup Vault found: $bvName (Principal: $bvPrincipalId)" -Fore
 $storage = Get-AzStorageAccount -ResourceGroupName $prodRg -Name $storageAccount -ErrorAction SilentlyContinue
 if (-not $storage) {
     Write-Host "  [ERROR] Storage account '$storageAccount' not found in '$prodRg'. Deploy Lab 4.1 first." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 $storageId = $storage.Id
 Write-Host "  ✓ Storage account found: $storageAccount" -ForegroundColor Green
@@ -87,8 +86,7 @@ Write-Host "  ✓ Storage account found: $storageAccount" -ForegroundColor Green
 $policy = Get-AzDataProtectionBackupPolicy -ResourceGroupName $platformRg -VaultName $bvName -Name $policyName -ErrorAction SilentlyContinue
 if (-not $policy) {
     Write-Host "  [ERROR] Backup policy '$policyName' not found. Run Deploy-Bicep.ps1 first." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 $policyId = $policy.Id
 Write-Host "  ✓ Backup policy found: $policyName" -ForegroundColor Green
@@ -122,8 +120,7 @@ foreach ($role in $requiredRoles) {
         } catch {
             Write-Host "  [ERROR] Failed to assign '$($role.Name)': $_" -ForegroundColor Red
             Write-Host "  Ensure you have Owner or User Access Administrator on the storage account." -ForegroundColor Yellow
-            $Host.SetShouldExit(1)
-            exit 1
+            Exit-Lab -FailureCount 1
         }
     }
 }
@@ -170,8 +167,7 @@ if ($existingInstance) {
     } catch {
         Write-Host "  [ERROR] Failed to create blob backup instance: $_" -ForegroundColor Red
         Write-Host "  If the error is 'UserErrorMissingRequiredPermissions', wait 5-10 minutes and retry." -ForegroundColor Yellow
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 }
 
@@ -181,3 +177,4 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 Write-Host "  Next Steps:" -ForegroundColor Cyan
 Write-Host "    1. Run .\Test-Lab.ps1 to validate full BCDR deployment" -ForegroundColor Gray
 Write-Host "    2. Configure Azure Site Recovery via Azure Portal (Step 5.2.6)" -ForegroundColor Gray
+Exit-Lab -FailureCount 0

@@ -18,9 +18,10 @@
     as not found, means "absent" - Test-LabNotFoundError tells the two apart (issue #290, as #255
     did for Labs 1.2-2.3). A resource that could not be looked up is left alone.
 
-    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
-    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
-    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+    Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
+    otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
+    (issue #104), it also sets the process exit code; run at a prompt or by another script,
+    it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
 .PARAMETER Environment
     Target environment (dev or prod). Default: dev
@@ -61,6 +62,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
 # Counts lookups that failed and resources that exist but could not be deleted. Absent resources
@@ -145,9 +148,8 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 # Verify Azure context
 $context = Get-AzContext
 if (-not $context) {
-    Write-Error "Not logged into Azure. Run Connect-AzAccount first."
-    $Host.SetShouldExit(1)
-    exit 1
+    Write-Host "[ERROR] Not logged into Azure. Run Connect-AzAccount first." -ForegroundColor Red
+    Exit-Lab -FailureCount 1
 }
 
 # List resources to be deleted
@@ -268,8 +270,7 @@ foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'KeyVault'
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s). See the [ERROR] lines above." -ForegroundColor Red
     Write-Host "  The resources named there may still exist in $rgName. Re-run this script once the cause is cleared." -ForegroundColor Gray
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
@@ -277,3 +278,4 @@ Write-Host "  Cleanup Complete" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Lab 3.1 resources (VNets, NSGs, LB) were NOT deleted." -ForegroundColor Gray
 Write-Host "========================================`n" -ForegroundColor Cyan
+Exit-Lab -FailureCount 0

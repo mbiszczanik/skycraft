@@ -62,6 +62,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 $scriptPath     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $templatePath   = Join-Path $scriptPath '..\bicep\main.bicep'
@@ -86,8 +88,7 @@ Write-Host "[1/7] Validating prerequisites..." -ForegroundColor Yellow
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
 
@@ -108,16 +109,14 @@ Write-Host "`n[2/7] Resolving existing resource IDs..." -ForegroundColor Yellow
 $platformRgExists = Get-AzResourceGroup -Name $platformRg -ErrorAction SilentlyContinue
 if (-not $platformRgExists) {
     Write-Host "  [ERROR] Resource group '$platformRg' not found. Complete earlier labs first." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "  ✓ Platform RG found: $platformRg" -ForegroundColor Green
 
 $workspace = Get-AzOperationalInsightsWorkspace -ResourceGroupName $platformRg -Name $workspaceName -ErrorAction SilentlyContinue
 if (-not $workspace) {
     Write-Host "  [ERROR] Log Analytics Workspace '$workspaceName' not found. Deploy Lab 5.1 first." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 $workspaceId = $workspace.ResourceId
 Write-Host "  ✓ Log Analytics Workspace found: $workspaceName" -ForegroundColor Green
@@ -161,8 +160,7 @@ try {
     }
 } catch {
     Write-Host "`n  [ERROR] Deployment failed: $($_.Exception.Message)" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 if ($WhatIf) {
@@ -171,8 +169,7 @@ if ($WhatIf) {
 } else {
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host "`n  [FAILED] Deployment finished with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 
     Write-Host "  ✓ Vaults deployed successfully!" -ForegroundColor Green
@@ -495,9 +492,9 @@ if ($script:deployFailures -gt 0) {
     Write-Host "  See the [ERROR] lines above - this run exits 1, nothing was masked." -ForegroundColor Gray
     Write-Host "  A missing VM (Lab 3.2 not run) is a skip, not a failure." -ForegroundColor Gray
     Write-Host "========================================`n" -ForegroundColor Cyan
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "  Deployment Complete" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
+Exit-Lab -FailureCount 0

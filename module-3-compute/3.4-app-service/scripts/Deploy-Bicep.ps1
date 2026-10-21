@@ -45,6 +45,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 $BicepFile = Join-Path $PSScriptRoot "..\bicep\main.bicep"
 $DeploymentName = "deploy-lab3.4-$Environment"
@@ -54,7 +56,7 @@ Write-Host "=== Lab 3.4 Deployment: App Service ($Environment) ===" -ForegroundC
 # 1. Verify Connection
 $context = Get-AzContext
 if (-not $context) {
-    Write-Host "Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
+    Write-Host "Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; Exit-Lab -FailureCount 1
 }
 
 # 2. Deploy Bicep
@@ -87,8 +89,7 @@ try {
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host "[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 
     Write-Host "Deployment '$DeploymentName' completed successfully." -ForegroundColor Green
@@ -96,6 +97,7 @@ try {
 catch {
     Write-Host "Deployment failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
+
+Exit-Lab -FailureCount 0

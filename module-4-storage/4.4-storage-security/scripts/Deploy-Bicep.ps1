@@ -46,13 +46,15 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 4.4: Deploying Storage Security ===" -ForegroundColor Cyan
 
 # 1. Verify Connection
 $context = Get-AzContext
 if (-not $context) {
-    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
+    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; Exit-Lab -FailureCount 1
 }
 
 # 2. Auto-detect client IP if not provided
@@ -93,8 +95,7 @@ try {
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host "`n [FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 
     Write-Host "`nSuccessfully deployed Lab 4.4 security configuration!" -ForegroundColor Green
@@ -105,6 +106,7 @@ try {
 catch {
     Write-Host "`n [ERROR] Deployment failed!" -ForegroundColor Red
     Write-Host "  -> Cause: $($_.Exception.Message)" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
+
+Exit-Lab -FailureCount 0

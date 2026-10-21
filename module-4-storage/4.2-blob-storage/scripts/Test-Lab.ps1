@@ -35,6 +35,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 $TestsPassed = 0
 $TestsTotal = 0
 
@@ -65,8 +67,7 @@ try {
 }
 catch {
     Write-Host "FATAL: Could not retrieve storage accounts. Ensure deployment succeeded." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 # 2. Production Security Verification (Privacy & Versioning)
@@ -144,10 +145,8 @@ Write-Host "`n=== Test Summary ===" -ForegroundColor Cyan
 Write-Host "Tests Passed: $TestsPassed / $TestsTotal"
 if ($TestsPassed -eq $TestsTotal) {
     Write-Host "SUCCESS: Lab 4.2 compliant!" -ForegroundColor Green
-    exit 0
 }
 else {
     Write-Host "FAILURE: Some checks failed." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
 }
+Exit-Lab -FailureCount ($TestsTotal - $TestsPassed)

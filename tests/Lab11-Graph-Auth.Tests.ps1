@@ -19,8 +19,8 @@
     prompt - are pinned here.
 
     The three copies of the decision are asserted identical rather than factored into a shared
-    module: docs/powershell-standards.md 7.3 requires every lab folder to stay runnable and
-    readable on its own.
+    module: docs/powershell-standards.md 7.3 requires every lab folder to stay readable on its
+    own.
 
     Issue #242 adds two more. Connect-MgGraph can return without an error and without a context
     (a delegated sign-in for scopes the account never consented to), so Connect-LabGraph - lifted
