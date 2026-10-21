@@ -3,7 +3,7 @@
     Pester 5 tests for New-LabUser.ps1 password handling and Microsoft Graph sign-in.
 
 .DESCRIPTION
-    Verifies four things:
+    Verifies five things:
       1. Regression: the historical hard-coded password is no longer in the file.
       2. Parameter shape: the script exposes -InitialPassword as [SecureString].
       3. Password generator: New-LabRandomPassword yields a 20-character string
@@ -14,6 +14,9 @@
          pwsh with -DemoMode against a generated stub of every Graph command it calls, through
          tests/Support/LabScriptStub.psm1 (issue #112), which refuses to run (exit 99) unless
          every stubbed command resolves to the stub. No tenant is needed, and none is used.
+      5. Context reuse (issue #273): a Graph context already in the session is reused only when
+         its scopes cover the five the script requests; one left by `Connect-MgGraph -Scopes
+         User.Read.All` makes the script sign in again, asking for all five.
 
 .EXAMPLE
     Invoke-Pester -Path .\New-LabUser.Tests.ps1
@@ -136,8 +139,12 @@ Describe 'New-LabUser.ps1 — a sign-in that leaves no Graph context is a failed
 
         # SKYCRAFT_STUB_NOCONTEXT '1' leaves no Graph context, before or after Connect-MgGraph,
         # which returns without an error either way - the shape issue #242 describes.
+        # SKYCRAFT_STUB_SCOPES is the comma-separated scope list of the context found in the
+        # session before the sign-in; after Connect-MgGraph the context holds the scopes it was
+        # asked for. Connect-MgGraph logs them, as 'Connect-MgGraph:Scopes=a,b,c'.
         $stubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
+$script:Scopes  = @($env:SKYCRAFT_STUB_SCOPES -split ',' | Where-Object { $_ })
 
 function Write-StubCall {
     param([string]$Name)
@@ -151,7 +158,9 @@ function Get-MgContext {
     [pscustomobject]@{
         TenantId = '00000000-0000-0000-0000-000000000000'
         Account  = 'stub-admin@contoso.example'
-        AppName  = $null
+        AppName  = 'Microsoft Graph Command Line Tools'
+        AuthType = 'Delegated'
+        Scopes   = $script:Scopes
     }
 }
 
@@ -159,6 +168,8 @@ function Connect-MgGraph {
     [CmdletBinding()]
     param([string[]]$Scopes, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name 'Connect-MgGraph'
+    Write-StubCall -Name "Connect-MgGraph:Scopes=$($Scopes -join ',')"
+    $script:Scopes = $Scopes
 }
 
 function Disconnect-MgGraph { [CmdletBinding()] param() }
@@ -179,14 +190,18 @@ function New-MgGroupMember  { [CmdletBinding()] param([Parameter(ValueFromRemain
 function New-MgInvitation   { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) Write-StubCall -Name 'New-MgInvitation' }
 '@
 
+        # The scopes New-LabUser.ps1 requests: a context holding them is reused.
+        $script:SetupScopes = 'User.ReadWrite.All,Group.ReadWrite.All,Directory.ReadWrite.All,Domain.Read.All,User.Invite.All'
+
         function Invoke-SetupScript {
-            param([pscustomobject]$Stub, [switch]$NoContext)
+            param([pscustomobject]$Stub, [switch]$NoContext, [string]$Scopes = $script:SetupScopes)
 
             $logPath = Join-Path $Stub.Directory 'calls.log'
             Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
 
             $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList '-DemoMode' -Environment @{
                 SKYCRAFT_STUB_NOCONTEXT        = if ($NoContext) { '1' } else { '0' }
+                SKYCRAFT_STUB_SCOPES           = $Scopes
                 SKYCRAFT_STUB_LOG              = $logPath
                 # Interactive plan, so the script reuses the stub's context or calls the stub's
                 # Connect-MgGraph instead of signing in.
@@ -213,6 +228,8 @@ function New-MgInvitation   { [CmdletBinding()] param([Parameter(ValueFromRemain
         # so the no-context run's failure is the empty context and nothing else.
         $script:SignedIn  = Invoke-SetupScript -Stub $script:SetupStub
         $script:NoContext = Invoke-SetupScript -Stub $script:SetupStub -NoContext
+        # The #273 repro: `Connect-MgGraph -Scopes User.Read.All` earlier in the session.
+        $script:ReadOnly  = Invoke-SetupScript -Stub $script:SetupStub -Scopes 'User.Read.All'
     }
 
     AfterAll {
@@ -220,15 +237,25 @@ function New-MgInvitation   { [CmdletBinding()] param([Parameter(ValueFromRemain
     }
 
     It 'shadows the real Microsoft Graph commands instead of touching a tenant' {
-        foreach ($run in @($script:SignedIn, $script:NoContext)) {
+        foreach ($run in @($script:SignedIn, $script:NoContext, $script:ReadOnly)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Graph commands (exit $($run.ExitCode)): $($run.Output)"
         }
     }
 
-    It 'gets past the sign-in when a Graph context is there' {
+    It 'gets past the sign-in when a Graph context is there, reusing it when its scopes cover the request' {
         $run = $script:SignedIn
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match 'Connected to Tenant: 00000000-0000-0000-0000-000000000000 as stub-admin@contoso\.example'
+        $run.Calls | Should -Contain 'Get-MgDomain'
+        $run.Calls | Should -Not -Contain 'Connect-MgGraph' -Because 'a context holding every requested scope is reused'
+    }
+
+    It 'signs in again with its own scopes when the context in the session cannot write (#273)' {
+        $run = $script:ReadOnly
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'lacks User\.ReadWrite\.All'
+        @($run.Calls | Where-Object { $_ -like 'Connect-MgGraph:Scopes=*' }) |
+            Should -Be @("Connect-MgGraph:Scopes=$($script:SetupScopes)") -Because 'the new sign-in must ask for every scope the script needs'
         $run.Calls | Should -Contain 'Get-MgDomain'
     }
 

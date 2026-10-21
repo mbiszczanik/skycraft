@@ -39,6 +39,8 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 $platformRg     = 'platform-skycraft-swc-rg'
 $prodRg         = 'prod-skycraft-swc-rg'
@@ -85,8 +87,7 @@ Write-Host ""
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "  Account: $($context.Account.Id)" -ForegroundColor Gray
 Write-Host ""
@@ -436,5 +437,4 @@ Write-Host "  Note: Azure Site Recovery (ASR) replication and test failover" -Fo
 Write-Host "  must be verified manually in the Azure Portal (Steps 5.2.6-5.2.7)." -ForegroundColor Gray
 Write-Host ""
 
-$Host.SetShouldExit($failCount)
-exit $failCount
+Exit-Lab -FailureCount $failCount

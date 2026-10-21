@@ -25,6 +25,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 $failCount = 0
 
 $resourceGroupName  = "$Environment-skycraft-swc-rg"
@@ -35,7 +37,7 @@ Write-Host "=== Lab 4.4: Validating Storage Security ===" -ForegroundColor Cyan
 
 # 1. Verify Connection
 if (-not (Get-AzContext)) {
-    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
+    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; Exit-Lab -FailureCount 1
 }
 
 # 2. Check Storage Firewall
@@ -135,5 +137,4 @@ if ($sa) {
 }
 
 Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor $(if ($failCount -eq 0) { 'Cyan' } else { 'Red' })
-$Host.SetShouldExit($failCount)
-exit $failCount
+Exit-Lab -FailureCount $failCount
