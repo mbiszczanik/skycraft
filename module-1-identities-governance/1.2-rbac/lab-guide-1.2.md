@@ -455,7 +455,7 @@ A new role assignment can take a few minutes to take effect; in this course's Po
 - **Contributor** (inherited from SkyCraft-Developers group)
 - Scope: This resource (`dev-skycraft-swc-rg`)
 
-**Analysis**: The user doesn't have the role directly—they inherit it through group membership. This confirms best practice (assign to groups, not users).
+**Analysis**: The user doesn't have the role directly: they inherit it through group membership. This confirms best practice (assign to groups, not users).
 
 ### Step 1.2.11: Check Access for Tester
 
@@ -498,6 +498,8 @@ A new role assignment can take a few minutes to take effect; in this course's Po
 | Malfurion Stormrage | User | Owner | Subscription (Inherited) |
 
 Your own account, and any other assignment made on the subscription, is listed with the scope Subscription (Inherited) as well.
+
+In the **Condition** column, Malfurion Stormrage's inherited row shows **None**: the assignment has no condition.
 
 ### Step 1.2.13: Test Effective Permissions (Optional but Recommended)
 
@@ -675,7 +677,7 @@ Test your understanding with these questions:
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: Groups are easier to manage—add/remove users from groups without changing role assignments. Also helps minimize role assignment count (4000 limit per subscription).
+   **Answer**: Groups are easier to manage: add/remove users from groups without changing role assignments. Also helps minimize role assignment count (4000 limit per subscription).
    </details>
 
 3. **If Khadgar Archmage has Contributor at resource group level, can they create a new resource group?**
