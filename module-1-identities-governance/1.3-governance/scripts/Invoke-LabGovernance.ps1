@@ -63,6 +63,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 # Color output functions
 function Write-Success { param([string]$Message) Write-Host "  -> [SUCCESS] $Message" -ForegroundColor Green }
@@ -94,8 +96,7 @@ try {
 }
 catch {
     Write-Error-Custom "Failed to connect: $_"
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 # 2. Apply Tags
@@ -312,12 +313,9 @@ foreach ($lock in $locks) {
     }
 }
 
-# $Host.SetShouldExit goes with every non-zero exit: '#Requires -Modules' makes 'pwsh -File' drop
-# a bare 'exit 1' (issue #104).
 if ($script:governanceFailures -gt 0) {
     Write-Host "`nImperative Deployment finished with $($script:governanceFailures) error(s). See the [ERROR] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount $script:governanceFailures
 }
 
 Write-Host "`nImperative Deployment Complete." -ForegroundColor Green

@@ -1089,6 +1089,7 @@ class LabCaptionTests(unittest.TestCase):
     def test_a_lab_caption_is_a_label_in_any_other_lab(self) -> None:
         items = self.steps("1.2", self.MARKDOWN)[0]["items"]
         self.assertEqual(items, [{"kind": "action", "labels": ["Validation"], "line": 3},
+                                 {"kind": "action", "labels": ["group"], "line": 4},
                                  {"kind": "field", "label": "Bind", "value": "x", "line": 5}])
 
     def test_a_shared_caption_is_dropped_in_every_lab(self) -> None:

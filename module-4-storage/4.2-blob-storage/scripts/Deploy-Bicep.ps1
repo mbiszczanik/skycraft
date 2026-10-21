@@ -37,6 +37,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 $ScriptPath = $PSScriptRoot
 $TemplateFile = Join-Path $ScriptPath "../bicep/main.bicep"
 
@@ -45,12 +47,12 @@ Write-Host "=== Lab 4.2: Deploying Blob Storage Infrastructure ===" -ForegroundC
 # 1. Verify Login
 $context = Get-AzContext
 if (-not $context) {
-    Write-Host "Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
+    Write-Host "Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; Exit-Lab -FailureCount 1
 }
 
 # 2. Check Template Existence
 if (-not (Test-Path $TemplateFile)) {
-    Write-Host "Template file not found: $TemplateFile" -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
+    Write-Host "Template file not found: $TemplateFile" -ForegroundColor Red; Exit-Lab -FailureCount 1
 }
 
 # 3. Deploy
@@ -76,8 +78,7 @@ try {
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host "[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 
     Write-Host "Deployment Successful!" -ForegroundColor Green
@@ -93,6 +94,5 @@ try {
 catch {
     Write-Host "Deployment Failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }

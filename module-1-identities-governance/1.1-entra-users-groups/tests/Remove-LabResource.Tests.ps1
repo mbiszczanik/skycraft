@@ -24,8 +24,8 @@
 
     Scope limit, as in Lab 5.2's suite: the child is launched with -Command, so these tests prove
     the failure counter reaches `exit`, not that `pwsh -File` carries the code out of the process.
-    That half is issue #104's guard ($Host.SetShouldExit before every non-zero exit), enforced
-    repo-wide by tests/Exit-Code-Propagation.Tests.ps1.
+    That half is Exit-Lab's (tools/LabCommon.psm1, issues #104 and #257), proven with real pwsh
+    processes by tests/Exit-Code-Propagation.Tests.ps1.
 
     No tenant is needed, and none is used. The script runs through tests/Support/LabScriptStub.psm1
     (issue #112), which imports the real modules first, the stub module last, and aborts the child
@@ -105,6 +105,8 @@ function Get-MgContext {
         TenantId = '00000000-0000-0000-0000-000000000000'
         Account  = 'stub-admin@contoso.example'
         AppName  = $null
+        # Every scope the lab's scripts request, so the context is reused (#273).
+        Scopes   = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All')
     }
 }
 

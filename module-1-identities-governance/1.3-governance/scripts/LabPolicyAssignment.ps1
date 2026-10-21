@@ -7,8 +7,9 @@
     Test-Lab.ps1, Remove-LabResource.ps1 and Invoke-LabGovernance.ps1 all need to find the four
     assignments of steps 1.3.5, 1.3.8 (two: Enforce-Project-Tag and Inherit-Project-Tag) and
     1.3.9. They dot-source this file so that the scripts share one answer to "which assignment is
-    the guide's" (issue #330). It lives in the lab's own scripts/ folder, so the lab still runs
-    and reads on its own (docs/powershell-standards.md, sections 7.3 and 7.5).
+    the guide's" (issue #330). It lives in the lab's own scripts/ folder, so the lab still reads
+    on its own, and it ends nothing: the script that dot-sources it calls Exit-Lab
+    (docs/powershell-standards.md, sections 7.3 and 7.5).
 
     Inherit-Project-Tag (issue #350) is a Modify assignment: it adds the resource group's Project
     tag to a resource created without one, before Enforce-Project-Tag's Deny evaluates the

@@ -114,7 +114,7 @@ Step 1.3.8 also shows the Az PowerShell and Azure CLI commands for `Inherit-Proj
 
 5. Click **Apply**
 
-**Note**: If the group already carries these four tags with these values (Lab 1.2's Bicep path creates the groups with them), **Apply** stays greyed out: there is nothing to change. Check the values against the table and go on.
+**Note**: If the group already carries these four tags with these values (Lab 1.2 creates the groups with them, on every path), **Apply** stays greyed out: there is nothing to change. Check the values against the table and go on.
 
 **Expected Result**: Tags are saved and visible in the Tags blade.
 
