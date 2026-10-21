@@ -8,7 +8,10 @@
     It adheres to the SkyCraft PowerShell standards.
 
 .PARAMETER TenantId
-    The Microsoft Entra Tenant ID to use. If omitted, it will be detected from the current Azure context.
+    The Microsoft Entra tenant ID to sign in to Microsoft Graph with. If omitted, the script uses
+    SKYCRAFT_GRAPH_TENANT_ID, else the tenant of the current Az context when Connect-AzAccount has
+    run in this PowerShell session. With none of them, Microsoft Graph picks the account's home
+    tenant, which for a personal Microsoft account (most free Azure accounts) is not the lab tenant.
 
 .PARAMETER DemoMode
     If specified, the script will simulate the creation process and output what would happen
@@ -25,7 +28,13 @@
 
 .EXAMPLE
     .\New-LabUser.ps1
-    Executes the creation process using the current Azure context and an auto-generated password.
+    Creates the users and groups with an auto-generated password, in the tenant that
+    SKYCRAFT_GRAPH_TENANT_ID or the current Az context names (see -TenantId).
+
+.EXAMPLE
+    .\New-LabUser.ps1 -TenantId '<your tenant id>'
+    Creates them in the named tenant (Microsoft Entra ID > Overview > Tenant ID), for example for
+    a personal Microsoft account that has not run Connect-AzAccount in this session.
 
 .EXAMPLE
     $pwd = Read-Host -AsSecureString 'Lab password'
@@ -75,6 +84,11 @@ param (
 # returns neither: falling back to a prompt there would reintroduce exactly the hang this exists
 # to remove, so a half-configured principal is reported rather than degraded into.
 #
+# The interactive sign-in names a tenant: -TenantId (New-LabUser.ps1 only), else
+# SKYCRAFT_GRAPH_TENANT_ID, else the Az context's tenant when Connect-AzAccount ran in this session.
+# With none, Microsoft Graph picks the account's home tenant, which for a personal Microsoft account
+# is not the lab tenant (#300).
+#
 # The variables are deliberately NOT the Azure SDK's AZURE_CLIENT_ID / AZURE_TENANT_ID trio. Those
 # are commonly already exported for the ARM subscription identity, which in this project is a
 # different account from the one that administers Entra ID - consuming them would sign Graph in as
@@ -92,6 +106,10 @@ function Get-LabGraphAuthPlan {
 
         [Parameter(Mandatory = $false)]
         [string]$TenantId,
+
+        # The current Az context's tenant, passed in so the decision makes no Az call itself.
+        [Parameter(Mandatory = $false)]
+        [string]$AzContextTenantId,
 
         [Parameter(Mandatory = $false)]
         [hashtable]$EnvironmentValue,
@@ -127,12 +145,24 @@ function Get-LabGraphAuthPlan {
     }
 
     # An explicit -TenantId beats the environment: the caller knows which tenant it means.
-    if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $setting['TenantId'] = $TenantId.Trim() }
+    $tenantSource = if ($setting['TenantId']) { 'SKYCRAFT_GRAPH_TENANT_ID' } else { $null }
+    if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
+        $setting['TenantId'] = $TenantId.Trim()
+        $tenantSource = '-TenantId'
+    }
 
     $credentialSet = @('ClientId', 'ClientSecret', 'CertThumbprint') |
         Where-Object { $setting[$_] }
 
     if (@($credentialSet).Count -eq 0) {
+        # Then the Az context's tenant. Without any tenant, a personal Microsoft account's sign-in
+        # lands outside the lab tenant (live pass of 2026-10-20, #300). Interactive only: an
+        # app-only principal names its tenant in its own configuration.
+        if (-not $setting['TenantId'] -and -not [string]::IsNullOrWhiteSpace($AzContextTenantId)) {
+            $setting['TenantId'] = $AzContextTenantId.Trim()
+            $tenantSource = 'the Az context'
+        }
+
         if ($Unattended) {
             return [pscustomobject]@{
                 Mode             = 'Blocked'
@@ -146,12 +176,17 @@ function Get-LabGraphAuthPlan {
         # No ContextScope here on purpose: the interactive sign-in writes to the user token cache,
         # so a learner running three scripts in a row authenticates once, as before.
         $interactiveParameter = @{ Scopes = $Scope; ErrorAction = 'Stop' }
-        if ($setting['TenantId']) { $interactiveParameter['TenantId'] = $setting['TenantId'] }
+        $reason = 'No service principal configured - signing in interactively.'
+        if ($setting['TenantId']) {
+            $interactiveParameter['TenantId'] = $setting['TenantId']
+            $reason = "No service principal configured - signing in interactively to tenant $($setting['TenantId']) (from $tenantSource)."
+        }
 
         return [pscustomobject]@{
             Mode             = 'Interactive'
-            Reason           = 'No service principal configured - signing in interactively.'
+            Reason           = $reason
             TenantId         = $setting['TenantId']
+            TenantSource     = $tenantSource
             ClientId         = $null
             ConnectParameter = $interactiveParameter
         }
@@ -230,11 +265,12 @@ function Connect-LabGraph {
     )
 
     # A context is signed in only when it names a tenant and an identity - an account, or an app
-    # name app-only. Connect-MgGraph can leave one that names neither and still return without an
-    # error: a delegated sign-in for scopes the account has never consented to does exactly that,
-    # with no consent prompt (issue #242). Accepting it printed "Connected to Tenant:  as", and
-    # every Graph call after it failed with "Authentication needed". One test, used for both the
-    # context reused below and the one a sign-in leaves.
+    # name (app-only, or a delegated sign-in that reports no account, #300). Connect-MgGraph can
+    # leave one that names neither and still return without an error: a delegated sign-in for
+    # scopes the account has never consented to does exactly that, with no consent prompt (issue
+    # #242). Accepting it printed "Connected to Tenant:  as", and every Graph call after it failed
+    # with "Authentication needed". One test, used for both the context reused below and the one
+    # a sign-in leaves.
     $isSignedIn = { param($context) [bool]($context -and $context.TenantId -and ($context.Account -or $context.AppName)) }
 
     # The requested scopes a delegated context does not hold (issue #273). A context left in the
@@ -251,20 +287,33 @@ function Connect-LabGraph {
         })
     }
 
-    $plan = Get-LabGraphAuthPlan -Scope $Scope -TenantId $TenantId
+    # The Az context's tenant, for a plan given no other. Read only when Az.Accounts is already
+    # imported (Connect-AzAccount ran in this session): Lab 1.1 does not require Az, and this must
+    # not import it. Get-Command -Name would: it auto-loads the module, even with -ListImported.
+    $azContextTenantId = $null
+    if (Get-Module -Name Az.Accounts) {
+        try { $azContextTenantId = [string](Get-AzContext -ErrorAction Stop).Tenant.Id } catch { $azContextTenantId = $null }
+    }
+
+    $plan = Get-LabGraphAuthPlan -Scope $Scope -TenantId $TenantId -AzContextTenantId $azContextTenantId
 
     if ($plan.Mode -eq 'Blocked') { throw $plan.Reason }
 
     if ($plan.Mode -eq 'Interactive') {
+        if (-not $plan.TenantId) {
+            Write-Host "  -> [INFO] No tenant named (-TenantId, SKYCRAFT_GRAPH_TENANT_ID or an Az context), so Microsoft Graph picks the account's home tenant. With a personal Microsoft account, set SKYCRAFT_GRAPH_TENANT_ID to the lab tenant's ID, or run Connect-AzAccount -TenantId <tenant id> first." -ForegroundColor Gray
+        }
+
         # Reuse a signed-in context, which is what a learner running the lab expects. Note this is
         # only reached when no service principal is configured: an unattended run never gets here.
-        # A partial one is not reused: the sign-in below replaces it. A delegated one is reused
-        # only when its scopes cover every scope this script requests; an app-only one (no
-        # account) holds the app's application permissions, which a new sign-in with -Scopes
-        # cannot add to, so it is reused as before.
+        # A partial one is not reused: the sign-in below replaces it, as it does one in a tenant
+        # other than the plan's. A delegated one is reused only when its scopes cover every scope
+        # this script requests, also when it reports no account, as a personal Microsoft account's
+        # sign-in can (#300). An app-only one, told by AuthType alone, holds the app's application
+        # permissions, which a new sign-in with -Scopes cannot add to, so it is reused as before.
         $existingContext = Get-MgContext
         if ((& $isSignedIn $existingContext) -and (-not $plan.TenantId -or $existingContext.TenantId -eq $plan.TenantId)) {
-            $isAppOnly = ("$($existingContext.AuthType)" -eq 'AppOnly') -or (-not $existingContext.Account)
+            $isAppOnly = "$($existingContext.AuthType)" -eq 'AppOnly'
             $missing = @(if (-not $isAppOnly) { & $missingScope $existingContext $Scope })
             if ($missing.Count -eq 0) {
                 return $existingContext
@@ -359,7 +408,8 @@ try {
         'Domain.Read.All'
         'User.Invite.All'
     )
-    $identity = if ($mgContext.Account) { $mgContext.Account } else { $mgContext.AppName }
+    # A delegated sign-in can report no account (#300); its AppName is the client tool, not the user.
+    $identity = if ($mgContext.Account) { $mgContext.Account } elseif ("$($mgContext.AuthType)" -eq 'AppOnly') { $mgContext.AppName } else { 'a delegated sign-in (no account reported)' }
     Write-Host "Connected to Tenant: $($mgContext.TenantId) as $identity" -ForegroundColor Green
 }
 catch {

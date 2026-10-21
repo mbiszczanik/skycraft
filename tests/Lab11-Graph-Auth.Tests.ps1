@@ -34,6 +34,12 @@
     counterpart); otherwise the script signs in again with the scopes it needs. An app-only
     context is reused as before.
 
+    The live pass of 2026-10-20 (#300), with a personal Microsoft account, adds the tenant and the
+    app-only test. With neither -TenantId nor SKYCRAFT_GRAPH_TENANT_ID, the sign-in now takes the
+    tenant of the Az context when Get-AzContext is in the session, and otherwise prints a hint and
+    names no tenant. A context is app-only by its AuthType alone: a delegated one whose Account is
+    empty, as that account's sign-in left it, gets the scope check of #273.
+
 .EXAMPLE
     Invoke-Pester -Path .\tests\Lab11-Graph-Auth.Tests.ps1
 
@@ -167,6 +173,41 @@ Describe 'Module 1 Graph sign-in - the four scripts share one decision' {
             $head | Should -Match ([regex]::Escape($module))
         }
     }
+
+    It "'<name>' prints the app name as the identity only for an app-only context (#300)" -ForEach @(
+        @{ name = 'New-LabUser.ps1' }, @{ name = 'Test-Lab.ps1' }, @{ name = 'Remove-LabResource.ps1' }
+        @{ name = 'New-LabRoleAssignment.ps1' }
+    ) {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:LabScriptPath[$name], [ref]$null, [ref]$null)
+        $assignment = @($ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+            $node.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            $node.Left.VariablePath.UserPath -eq 'identity'
+        }, $true))
+        $assignment.Count | Should -Be 1
+        $identityOf = [scriptblock]::Create("param(`$mgContext)`n$($assignment[0].Extent.Text)`n`$identity")
+
+        $delegatedNoAccount = [pscustomobject]@{ TenantId = $script:TenantId; Account = ''; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated' }
+        $appOnly            = [pscustomobject]@{ TenantId = $script:TenantId; Account = $null; AppName = 'SkyCraft-Lab-Automation'; AuthType = 'AppOnly' }
+        $delegated          = [pscustomobject]@{ TenantId = $script:TenantId; Account = 'admin@contoso.example'; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated' }
+
+        & $identityOf $delegatedNoAccount | Should -Not -Be 'Microsoft Graph Command Line Tools' -Because 'the client tool is not the signed-in user'
+        & $identityOf $delegatedNoAccount | Should -Match 'delegated sign-in'
+        & $identityOf $appOnly            | Should -Be 'SkyCraft-Lab-Automation'
+        & $identityOf $delegated          | Should -Be 'admin@contoso.example'
+    }
+
+    It "New-LabUser.ps1's help names the tenant sources the sign-in reads (#300)" {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:LabScriptPath['New-LabUser.ps1'], [ref]$null, [ref]$null)
+        $help = $ast.GetHelpContent().Parameters['TENANTID']
+        $help | Should -Match 'SKYCRAFT_GRAPH_TENANT_ID'
+        $help | Should -Match 'Az context'
+
+        # The help's claim holds only while the shared sign-in reads the Az context.
+        $connectAst = $script:FunctionByScript['New-LabUser.ps1'] | Where-Object { $_.Name -eq 'Connect-LabGraph' }
+        $connectAst.Extent.Text | Should -Match 'Get-AzContext'
+    }
 }
 
 Describe 'Lab 1.1 Graph sign-in - one consent covers all three scripts (#242)' {
@@ -242,6 +283,8 @@ Describe 'Connect-LabGraph - a sign-in that leaves no Graph context is a failed 
             $script:ConnectScopes = $Scopes
         }
         function Disconnect-MgGraph { }
+        # No Az context: the plan is the stub above, and the real Get-AzContext stays unread.
+        function Get-AzContext { }
 
         $script:InteractivePlan = [pscustomobject]@{
             Mode             = 'Interactive'
@@ -342,6 +385,7 @@ Describe 'Connect-LabGraph - a context is reused only when its scopes cover the 
             $script:ConnectScopes = $Scopes
         }
         function Disconnect-MgGraph { $script:Disconnected = $true }
+        function Get-AzContext { }
 
         # What New-LabUser.ps1 requests: writes, a Read scope and a scope with no Read/ReadWrite pair.
         $script:SetupScope = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All')
@@ -426,16 +470,32 @@ Describe 'Connect-LabGraph - a context is reused only when its scopes cover the 
         $script:Connected | Should -BeTrue
     }
 
-    It 'reuses an app-only context whatever its scopes, as before (<case>)' -ForEach @(
-        @{ case = 'AuthType AppOnly';             context = @{ TenantId = '11111111-1111-1111-1111-111111111111'; Account = $null; AppName = 'SkyCraft-Lab-Automation'; AuthType = 'AppOnly'; Scopes = @('User.Read.All') } }
-        @{ case = 'no account and no AuthType';   context = @{ TenantId = '11111111-1111-1111-1111-111111111111'; Account = $null; AppName = 'SkyCraft-Lab-Automation'; Scopes = $null } }
-    ) {
+    It 'reuses an app-only context whatever its scopes, as before' {
         # An app-only context holds the app's application permissions; signing in again with
         # -Scopes cannot add to them.
-        $script:ContextBefore = [pscustomobject]$context
+        $script:ContextBefore = [pscustomobject]@{ TenantId = $script:TenantId; Account = $null; AppName = 'SkyCraft-Lab-Automation'; AuthType = 'AppOnly'; Scopes = @('User.Read.All') }
         $result = Connect-LabGraph -Scope $script:SetupScope
         $script:Connected | Should -BeFalse
         $result.AppName   | Should -Be 'SkyCraft-Lab-Automation'
+    }
+
+    It 'checks the scopes of a context with no account that is not AuthType AppOnly, and signs in again (<case>, #300)' -ForEach @(
+        # What Get-MgContext showed after a personal Microsoft account's sign-in through WAM.
+        @{ case = 'Delegated, empty Account'; context = @{ TenantId = '11111111-1111-1111-1111-111111111111'; Account = ''; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = @('User.Read.All') } }
+        @{ case = 'no AuthType, no Account';  context = @{ TenantId = '11111111-1111-1111-1111-111111111111'; Account = $null; AppName = 'Microsoft Graph Command Line Tools'; Scopes = @('User.Read.All') } }
+    ) {
+        $script:ContextBefore = [pscustomobject]$context
+        $message = Connect-LabGraph -Scope $script:SetupScope 6>&1 | Where-Object { $_ -is [System.Management.Automation.InformationRecord] } | Out-String
+        $script:Connected     | Should -BeTrue -Because 'an empty Account does not make a delegated context app-only'
+        $script:ConnectScopes | Should -Be $script:SetupScope
+        $message              | Should -Match 'lacks User\.ReadWrite\.All'
+    }
+
+    It 'reuses a Delegated context with an empty Account when its scopes cover the request (#300)' {
+        $script:ContextBefore = [pscustomobject]@{ TenantId = $script:TenantId; Account = ''; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = $script:SetupScope }
+        $result = Connect-LabGraph -Scope $script:SetupScope 6>$null
+        $script:Connected | Should -BeFalse
+        $result.TenantId  | Should -Be $script:TenantId
     }
 
     It 'still prefers a configured service principal over any cached context' {
@@ -452,6 +512,151 @@ Describe 'Connect-LabGraph - a context is reused only when its scopes cover the 
 
         $script:Disconnected | Should -BeTrue
         $script:Connected    | Should -BeTrue
+    }
+}
+
+Describe 'Connect-LabGraph - the tenant comes from -TenantId, SKYCRAFT_GRAPH_TENANT_ID, then the Az context (#300)' {
+
+    BeforeAll {
+        # The real Get-LabGraphAuthPlan from the top-level BeforeAll; Graph and Az are plain functions.
+        $connectAst = $script:FunctionByScript['New-LabUser.ps1'] |
+            Where-Object { $_.Name -eq 'Connect-LabGraph' }
+        . ([scriptblock]::Create($connectAst.Extent.Text))
+
+        function Get-MgContext { if ($script:Connected) { $script:ContextAfter } else { $script:ContextBefore } }
+        function Connect-MgGraph {
+            [CmdletBinding()]
+            param([string[]]$Scopes, [string]$TenantId, [Parameter(ValueFromRemainingArguments)]$Rest)
+            $null = $Scopes, $Rest
+            $script:Connected       = $true
+            $script:ConnectTenantId = $TenantId
+        }
+        function Disconnect-MgGraph { }
+        function Get-AzContext {
+            [CmdletBinding()]
+            param()
+            $script:AzContextRead = $true
+            if ($script:AzContextThrows) { throw 'stub failure: Get-AzContext' }
+            if ($script:AzTenantId) { [pscustomobject]@{ Tenant = [pscustomobject]@{ Id = $script:AzTenantId } } }
+        }
+
+        # Az.Accounts counts as imported only while $script:AzModuleLoaded is set.
+        Mock Get-Module { if ($script:AzModuleLoaded) { [pscustomobject]@{ Name = 'Az.Accounts' } } } -ParameterFilter { $Name -contains 'Az.Accounts' }
+
+        $script:LabTenant  = '44444444-4444-4444-4444-444444444444'
+        $script:HomeTenant = '55555555-5555-5555-5555-555555555555'
+        $script:SetupScope = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All')
+        $script:GraphVariable = 'SKYCRAFT_GRAPH_TENANT_ID', 'SKYCRAFT_GRAPH_CLIENT_ID', 'SKYCRAFT_GRAPH_CLIENT_SECRET', 'SKYCRAFT_GRAPH_CERT_THUMBPRINT', 'SKYCRAFT_UNATTENDED'
+
+        function Get-HintText {
+            param([scriptblock]$Action)
+            & $Action 6>&1 | Where-Object { $_ -is [System.Management.Automation.InformationRecord] } | Out-String
+        }
+    }
+
+    BeforeEach {
+        $script:SavedVariable = @{}
+        foreach ($name in $script:GraphVariable) {
+            $script:SavedVariable[$name] = [Environment]::GetEnvironmentVariable($name)
+            [Environment]::SetEnvironmentVariable($name, $null)
+        }
+        $script:Connected       = $false
+        $script:ConnectTenantId = $null
+        $script:AzModuleLoaded  = $true
+        $script:AzTenantId      = $null
+        $script:AzContextThrows = $false
+        $script:AzContextRead   = $false
+        $script:ContextBefore   = $null
+        $script:ContextAfter    = [pscustomobject]@{ TenantId = $script:LabTenant; Account = 'admin@contoso.example'; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = $script:SetupScope }
+    }
+
+    AfterEach {
+        foreach ($name in $script:GraphVariable) { [Environment]::SetEnvironmentVariable($name, $script:SavedVariable[$name]) }
+    }
+
+    It "signs in to the Az context's tenant when neither -TenantId nor SKYCRAFT_GRAPH_TENANT_ID is set" {
+        $script:AzTenantId = $script:LabTenant
+        $null = Connect-LabGraph -Scope $script:SetupScope 6>$null
+        $script:Connected       | Should -BeTrue
+        $script:ConnectTenantId | Should -Be $script:LabTenant
+    }
+
+    It 'takes the tenant from <expected> when <case>' -ForEach @(
+        @{ case = 'all three are set';           param = '77777777-7777-7777-7777-777777777777'; envValue = '66666666-6666-6666-6666-666666666666'; az = '44444444-4444-4444-4444-444444444444'; expected = '-TenantId';                tenant = '77777777-7777-7777-7777-777777777777' }
+        @{ case = 'the variable and Az are set'; param = '';                                     envValue = '66666666-6666-6666-6666-666666666666'; az = '44444444-4444-4444-4444-444444444444'; expected = 'SKYCRAFT_GRAPH_TENANT_ID'; tenant = '66666666-6666-6666-6666-666666666666' }
+        @{ case = 'only Az is set';              param = '';                                     envValue = '';                                     az = '44444444-4444-4444-4444-444444444444'; expected = 'the Az context';           tenant = '44444444-4444-4444-4444-444444444444' }
+    ) {
+        if ($envValue) { $env:SKYCRAFT_GRAPH_TENANT_ID = $envValue }
+        $script:AzTenantId = $az
+        $message = Get-HintText { Connect-LabGraph -Scope $script:SetupScope -TenantId $param }
+        $script:ConnectTenantId | Should -Be $tenant
+        $message | Should -Match ([regex]::Escape("(from $expected)"))
+    }
+
+    It 'names no tenant and prints the hint when <case>' -ForEach @(
+        @{ case = 'Az.Accounts is not imported';   noModule = $true;  throws = $false }
+        @{ case = 'the session has no Az context'; noModule = $false; throws = $false }
+        @{ case = 'Get-AzContext fails';           noModule = $false; throws = $true }
+    ) {
+        $script:AzModuleLoaded  = -not $noModule
+        $script:AzContextThrows = $throws
+        # A tenant Get-AzContext would return, so only the guard can keep it out.
+        if ($noModule) { $script:AzTenantId = $script:LabTenant }
+
+        $message = Get-HintText { Connect-LabGraph -Scope $script:SetupScope }
+
+        $script:Connected       | Should -BeTrue
+        $script:ConnectTenantId | Should -BeNullOrEmpty -Because 'without a source the sign-in keeps today''s behaviour'
+        $message | Should -Match 'SKYCRAFT_GRAPH_TENANT_ID'
+        $message | Should -Match '-TenantId'
+        $message | Should -Match 'personal Microsoft account'
+        if ($noModule) { $script:AzContextRead | Should -BeFalse -Because 'Lab 1.1 neither requires nor imports Az' }
+    }
+
+    It 'does not import Az.Accounts to look for an Az context' -Skip:(-not (Get-Module -ListAvailable -Name Az.Accounts)) {
+        # A fresh runspace, so nothing this session imported counts. Get-Command -Name Get-AzContext
+        # imported Az.Accounts there even with -ListImported, and Lab 1.1 then read the Az context of
+        # whatever account the machine last used.
+        $functionText = ($script:FunctionByScript['New-LabUser.ps1'] |
+            Where-Object { $_.Name -in 'Get-LabGraphAuthPlan', 'Connect-LabGraph' }).Extent.Text -join "`n"
+        $stubText = @'
+function Get-MgContext { [pscustomobject]@{ TenantId = 't'; Account = 'a@contoso.example'; AppName = 'x'; AuthType = 'Delegated'; Scopes = @('User.Read.All') } }
+function Connect-MgGraph { }
+function Disconnect-MgGraph { }
+'@
+        $runspace = [powershell]::Create()
+        try {
+            $null = $runspace.AddScript("$functionText`n$stubText`n`$null = Connect-LabGraph -Scope 'User.Read.All' 6>`$null`n[bool](Get-Module -Name Az.Accounts)")
+            $imported = $runspace.Invoke()
+            $runspace.Streams.Error | Should -BeNullOrEmpty
+            $imported | Should -Be $false
+        }
+        finally { $runspace.Dispose() }
+    }
+
+    It 'prints no hint when a tenant is known' {
+        $script:AzTenantId = $script:LabTenant
+        $message = Get-HintText { Connect-LabGraph -Scope $script:SetupScope }
+        $message | Should -Not -Match 'personal Microsoft account'
+    }
+
+    It 'refuses to reuse a covering context from another tenant when the Az tenant is known, and signs in to the Az tenant' {
+        # The personal account's own directory, left in the session by an earlier sign-in.
+        $script:ContextBefore = [pscustomobject]@{ TenantId = $script:HomeTenant; Account = ''; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = $script:SetupScope }
+        $script:AzTenantId    = $script:LabTenant
+
+        $context = Connect-LabGraph -Scope $script:SetupScope 6>$null
+
+        $script:Connected       | Should -BeTrue
+        $script:ConnectTenantId | Should -Be $script:LabTenant
+        $context.TenantId       | Should -Be $script:LabTenant
+    }
+
+    It 'reuses a covering context in the Az tenant' {
+        $script:ContextBefore = [pscustomobject]@{ TenantId = $script:LabTenant; Account = 'admin@contoso.example'; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = $script:SetupScope }
+        $script:AzTenantId    = $script:LabTenant
+        $null = Connect-LabGraph -Scope $script:SetupScope 6>$null
+        $script:Connected | Should -BeFalse
     }
 }
 
@@ -513,6 +718,41 @@ Describe 'Get-LabGraphAuthPlan - nothing configured' {
 
         $plan.Mode                      | Should -Be 'Interactive'
         $plan.ConnectParameter.TenantId | Should -Be $script:TenantId
+    }
+
+    It "takes the Az context's tenant when neither -TenantId nor the environment names one (#300)" {
+        $plan = Get-LabGraphAuthPlan -Scope $script:Scope -AzContextTenantId " $($script:TenantId) " `
+            -EnvironmentValue $script:EmptyEnv -Unattended $false
+
+        $plan.TenantId                  | Should -Be $script:TenantId
+        $plan.TenantSource              | Should -Be 'the Az context'
+        $plan.ConnectParameter.TenantId | Should -Be $script:TenantId
+        $plan.Reason                    | Should -Match ([regex]::Escape($script:TenantId))
+    }
+
+    It 'ranks the tenant sources -TenantId, then the environment, then the Az context: <case> (#300)' -ForEach @(
+        @{ case = 'all three';         param = 'p-tenant'; envTenant = 'e-tenant'; az = 'a-tenant'; tenant = 'p-tenant'; source = '-TenantId' }
+        @{ case = 'environment and Az'; param = '';         envTenant = 'e-tenant'; az = 'a-tenant'; tenant = 'e-tenant'; source = 'SKYCRAFT_GRAPH_TENANT_ID' }
+        @{ case = '-TenantId and Az';   param = 'p-tenant'; envTenant = '';         az = 'a-tenant'; tenant = 'p-tenant'; source = '-TenantId' }
+    ) {
+        $plan = Get-LabGraphAuthPlan -Scope $script:Scope -TenantId $param -AzContextTenantId $az `
+            -EnvironmentValue (Get-EnvFixture -TenantId $envTenant) -Unattended $false
+
+        $plan.ConnectParameter.TenantId | Should -Be $tenant
+        $plan.TenantSource              | Should -Be $source
+    }
+
+    It 'names no tenant when no source does' {
+        $plan = Get-LabGraphAuthPlan -Scope $script:Scope -AzContextTenantId '  ' -EnvironmentValue $script:EmptyEnv -Unattended $false
+        $plan.TenantId              | Should -BeNullOrEmpty
+        $plan.ConnectParameter.Keys | Should -Not -Contain 'TenantId'
+    }
+
+    It 'does not let the Az context complete a half-configured service principal' {
+        $fixture = Get-EnvFixture -ClientId $script:ClientId -ClientSecret $script:Secret
+        $plan = Get-LabGraphAuthPlan -Scope $script:Scope -AzContextTenantId $script:TenantId -EnvironmentValue $fixture -Unattended $false
+        $plan.Mode   | Should -Be 'Blocked'
+        $plan.Reason | Should -Match 'SKYCRAFT_GRAPH_TENANT_ID'
     }
 }
 
