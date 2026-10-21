@@ -30,7 +30,6 @@ BeforeAll {
 
     $guide = Get-Content -Raw -LiteralPath (Join-Path $script:Lab11 'lab-guide-1.1.md')
     $script:Guest = [regex]::Match($guide, '(?ms)^### Step 1\.1\.5:.*?^\|\s*Email\s*\|\s*(?<email>[^\s|]+)\s*\|').Groups['email'].Value
-    $script:GuestAlias = ($script:Guest -split '@')[0]
 
     function Get-FileText {
         param([string]$Path)
@@ -69,9 +68,11 @@ Describe 'Lab 1.1 guest address - one address everywhere (#193)' {
     }
 
     It 'Lab 1.2 Test-Lab.ps1 looks for the External Partner by the guide''s guest' {
-        # A guest's sign-in name is rewritten to <alias>_<domain>#EXT#@<tenant>, hence the [@_].
-        # Anchored with ^, so a sign-in name that merely contains the alias does not count.
+        # The validator finds the guest in Entra ID by mail (a guest's userPrincipalName is
+        # rewritten to <alias>_<domain>#EXT#@<tenant>) and then reads its role assignments by
+        # object id through the ARM API (#397), so the check names the guide's address itself.
         $text = Get-FileText (Join-Path $script:Lab12 'scripts' 'Test-Lab.ps1')
-        $text | Should -Match ('Name="External Partner";\s*Principal="\^' + [regex]::Escape($script:GuestAlias) + '\[@_\]"')
+        $text | Should -Match ('Name="External Partner";\s*Principal="' + [regex]::Escape($script:Guest) + '"')
+        $text | Should -Match ([regex]::Escape('Get-AzADUser -Filter "mail eq ''$Name''"'))
     }
 }

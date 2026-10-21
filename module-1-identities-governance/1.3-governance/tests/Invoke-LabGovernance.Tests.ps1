@@ -21,7 +21,9 @@
       4. When the listing fails, it creates nothing: an assignment it could not see may exist.
       5. The identity of Inherit-Project-Tag gets Contributor on the subscription, as the Portal
          gives it, unless it holds it there already; an existing Inherit-Project-Tag without an
-         identity is an [ERROR]. Role assignments are listed by scope, never with -ObjectId.
+         identity is an [ERROR]. Role assignments are read and created through the ARM role
+         assignments API (tools/LabCommon.psm1), never with the Az role cmdlets, which call
+         Microsoft Graph (issue #397); a read that fails grants nothing and is an [ERROR].
       6. Any [ERROR] - a duplicate, a failed listing, an identity missing, a role grant refused
          (an account with Contributor alone) - makes the run exit 1; a clean run exits 0.
       7. New assignments carry the guide's descriptions and non-compliance messages (issue #406).
@@ -63,8 +65,7 @@ BeforeAll {
         'Get-AzPolicyDefinition'
         'Get-AzPolicyAssignment'
         'New-AzPolicyAssignment'
-        'Get-AzRoleAssignment'
-        'New-AzRoleAssignment'
+        'Invoke-AzRestMethod'
         'Get-AzResourceLock'
         'New-AzResourceLock'
     )
@@ -82,6 +83,11 @@ BeforeAll {
     #   SKYCRAFT_STUB_NOIDENTITY  '1' lists Inherit-Project-Tag without a managed identity
     #   SKYCRAFT_STUB_DRIFT       '1' lists Enforce-Project-Tag with tagValue 'Contoso' and
     #                             Restrict-Azure-Regions with enforcement mode DoNotEnforce
+    #   SKYCRAFT_STUB_ROLELOOKUPFAIL  '1' makes the role assignment listing fail (HTTP 403)
+    #   SKYCRAFT_STUB_GRANTFAIL   '1' makes the role grant fail (HTTP 403, AuthorizationFailed)
+    # Role assignments go through the ARM API (issue #397): the fake of Invoke-AzRestMethod from
+    # tests/Support/LabScriptStub.psm1 is appended to this body and calls Get-StubRoleAssignment
+    # and New-StubRoleAssignment below.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 
@@ -197,26 +203,32 @@ function New-AzPolicyAssignment {
     New-StubAssignment -Name $Name -DisplayName $DisplayName -Definition $PolicyDefinition.Name -Scope $Scope -Identity:($IdentityType -eq 'SystemAssigned')
 }
 
-# Role assignments on the subscription: one held by someone else, one inherited from a
-# management group by the identity, and - with SKYCRAFT_STUB_ROLEHELD - the identity's Contributor.
-function Get-AzRoleAssignment {
+# Role assignments the ARM API lists for the subscription: one held by someone else, one
+# inherited from a management group by the identity, the identity's Reader on the subscription
+# (another role than the spec's), and - with SKYCRAFT_STUB_ROLEHELD - the identity's
+# Contributor. The fake keeps the requested principal's only.
+function Get-StubRoleAssignment {
     [CmdletBinding()]
-    param([string]$Scope, [string]$ObjectId, [Parameter(ValueFromRemainingArguments)]$Rest)
-    if ($ObjectId) { throw 'stub: the lab lists role assignments by scope, not by -ObjectId (a Microsoft Graph lookup)' }
-    Write-StubCall -Name "Get-AzRoleAssignment:$Scope"
-    [pscustomobject]@{ ObjectId = '22222222-2222-2222-2222-222222222222'; Scope = $Scope; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; RoleDefinitionName = 'Contributor' }
-    [pscustomobject]@{ ObjectId = $script:PrincipalId; Scope = '/providers/Microsoft.Management/managementGroups/stub-mg'; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; RoleDefinitionName = 'Contributor' }
+    param([string]$Scope, [string]$PrincipalId)
+    Write-StubCall -Name "Get-RoleAssignment:$Scope|$PrincipalId"
+    if ($env:SKYCRAFT_STUB_ROLELOOKUPFAIL -eq '1') {
+        Write-Error -ErrorId 'AuthorizationFailed' -Message "The client 'stub' does not have authorization to perform action 'Microsoft.Authorization/roleAssignments/read' over scope '$Scope'."
+        return
+    }
+    [pscustomobject]@{ Name = 'ra-other-sub'; PrincipalId = '22222222-2222-2222-2222-222222222222'; Scope = $Scope; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c' }
+    [pscustomobject]@{ Name = 'ra-identity-mg'; PrincipalId = $script:PrincipalId; Scope = '/providers/Microsoft.Management/managementGroups/stub-mg'; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; PrincipalType = 'ServicePrincipal' }
+    [pscustomobject]@{ Name = 'ra-identity-reader'; PrincipalId = $script:PrincipalId; Scope = $Scope; RoleDefinitionId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; PrincipalType = 'ServicePrincipal' }
     if ($env:SKYCRAFT_STUB_ROLEHELD -eq '1') {
-        [pscustomobject]@{ ObjectId = $script:PrincipalId; Scope = $Scope; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; RoleDefinitionName = 'Contributor' }
+        [pscustomobject]@{ Name = 'ra-identity-sub'; PrincipalId = $script:PrincipalId; Scope = $Scope; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; PrincipalType = 'ServicePrincipal' }
     }
 }
 
-function New-AzRoleAssignment {
+function New-StubRoleAssignment {
     [CmdletBinding()]
-    param([string]$ObjectId, [string]$ObjectType, [string]$RoleDefinitionId, [string]$Scope)
-    Write-StubCall -Name "New-AzRoleAssignment:$ObjectId|$ObjectType|$RoleDefinitionId|$Scope"
+    param([string]$Scope, [string]$Name, [string]$RoleDefinitionId, [string]$PrincipalId, [string]$PrincipalType)
+    Write-StubCall -Name "New-RoleAssignment:$PrincipalId|$PrincipalType|$RoleDefinitionId|$Scope"
     if ($env:SKYCRAFT_STUB_GRANTFAIL -eq '1') {
-        throw "stub: AuthorizationFailed - the client does not have authorization to perform action 'Microsoft.Authorization/roleAssignments/write'"
+        throw "AuthorizationFailed: The client 'stub' does not have authorization to perform action 'Microsoft.Authorization/roleAssignments/write'"
     }
 }
 
@@ -234,7 +246,8 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
             [switch]$RoleHeld,
             [switch]$NoIdentity,
             [switch]$GrantFail,
-            [switch]$Drift
+            [switch]$Drift,
+            [switch]$RoleLookupFail
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
@@ -247,6 +260,7 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
             SKYCRAFT_STUB_NOIDENTITY = if ($NoIdentity) { '1' } else { '0' }
             SKYCRAFT_STUB_GRANTFAIL  = if ($GrantFail) { '1' } else { '0' }
             SKYCRAFT_STUB_DRIFT      = if ($Drift) { '1' } else { '0' }
+            SKYCRAFT_STUB_ROLELOOKUPFAIL = if ($RoleLookupFail) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG        = $logPath
         }
 
@@ -258,12 +272,12 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
             Calls    = $calls
             Created  = @($calls | Where-Object { $_ -like 'New-AzPolicyAssignment:*' })
             Texts    = @($calls | Where-Object { $_ -like 'New-AzPolicyAssignment-Text:*' })
-            Granted  = @($calls | Where-Object { $_ -like 'New-AzRoleAssignment:*' })
+            Granted  = @($calls | Where-Object { $_ -like 'New-RoleAssignment:*' })
         }
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmRoleAssignmentStub)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     $script:Fresh      = Invoke-GovernanceScript -Stub $script:Stub
@@ -278,9 +292,12 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
     $script:Drifted    = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'portal' -RoleHeld -Drift
     $script:DefaultName = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'portal-default-name' -RoleHeld
     $script:WrongDef   = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'wrong-definition' -RoleHeld
+    # The identity's role assignments cannot be read (issue #397: a failed read is not "no role").
+    $script:RoleListFails = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'portal' -RoleLookupFail
 
     $script:AllRuns = @($script:Fresh, $script:BicepMade, $script:PortalMade, $script:TwoSets, $script:ListFails,
-        $script:RoleHeld, $script:NoIdentity, $script:GrantFails, $script:Drifted, $script:DefaultName, $script:WrongDef)
+        $script:RoleHeld, $script:NoIdentity, $script:GrantFails, $script:Drifted, $script:DefaultName, $script:WrongDef,
+        $script:RoleListFails)
 }
 
 AfterAll {
@@ -375,8 +392,8 @@ Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - the identity of Inherit-Project-Tag
 
     It 'grants Contributor on the subscription to the new assignment''s identity, as the Portal does' {
         $script:Fresh.Granted | Should -Be @(
-            'New-AzRoleAssignment:11111111-1111-1111-1111-111111111111|ServicePrincipal|b24988ac-6180-42a0-ab88-20f7382dd24c|/subscriptions/00000000-0000-0000-0000-000000000000'
-        ) -Because "a role inherited from a management group or held by someone else is not the identity's on the subscription; output was:`n$($script:Fresh.Output)"
+            'New-RoleAssignment:11111111-1111-1111-1111-111111111111|ServicePrincipal|/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Authorization/roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c|/subscriptions/00000000-0000-0000-0000-000000000000'
+        ) -Because "a role inherited from a management group, held by someone else or of another role is not the identity's Contributor on the subscription; output was:`n$($script:Fresh.Output)"
         $script:Fresh.Output | Should -Match '\[SUCCESS\] Granted role b24988ac-6180-42a0-ab88-20f7382dd24c on the subscription to the identity of Inherit-Project-Tag'
     }
 
@@ -400,9 +417,17 @@ Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - the identity of Inherit-Project-Tag
         $run.Output | Should -Match "\[ERROR\] Policy Inherit-Project-Tag 'Inherit-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa4\) differs from the lab's: it has no managed identity"
     }
 
-    It 'lists role assignments by scope, never with -ObjectId (a Microsoft Graph lookup)' {
-        @($script:Fresh.Calls | Where-Object { $_ -like 'Get-AzRoleAssignment:*' }) |
-            Should -Be @('Get-AzRoleAssignment:/subscriptions/00000000-0000-0000-0000-000000000000')
+    It 'reads the identity''s role assignments once, through the ARM API filtered by its principal id (#397)' {
+        @($script:Fresh.Calls | Where-Object { $_ -like 'Get-RoleAssignment:*' }) |
+            Should -Be @('Get-RoleAssignment:/subscriptions/00000000-0000-0000-0000-000000000000|11111111-1111-1111-1111-111111111111')
+    }
+
+    It 'grants nothing and reports an [ERROR] when the role assignments cannot be read (#397)' {
+        # A failed read is not "the identity holds no role": granting on it would answer
+        # RoleAssignmentExists at best, and a silent pass would hide a refused read.
+        $run = $script:RoleListFails
+        $run.Granted | Should -BeNullOrEmpty
+        $run.Output | Should -Match "\[ERROR\] Could not list the role assignments on the subscription[^\r\n]*HTTP 403 \(AuthorizationFailed\)"
     }
 
     It 'reports a refused role grant as an [ERROR] after creating the assignment' {
@@ -422,7 +447,7 @@ Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - exits 1 when anything failed (#350)
     }
 
     It 'exits 1 after an [ERROR]: a duplicate, a failed listing, an identity missing, a role refused' {
-        foreach ($run in $script:TwoSets, $script:ListFails, $script:NoIdentity, $script:GrantFails) {
+        foreach ($run in $script:TwoSets, $script:ListFails, $script:NoIdentity, $script:GrantFails, $script:RoleListFails) {
             $run.ExitCode | Should -Be 1 -Because "a caller must see what is missing; output was:`n$($run.Output)"
             $run.Output | Should -Match 'Imperative Deployment finished with \d+ error\(s\)'
             $run.Output | Should -Not -Match 'Imperative Deployment Complete'

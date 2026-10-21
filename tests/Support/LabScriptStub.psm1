@@ -292,4 +292,166 @@ function Test-LabScriptHarnessText {
     }
 }
 
-Export-ModuleMember -Function Initialize-LabScriptStub, Invoke-LabScriptWithStub, Test-LabScriptHarnessText
+function Get-LabArmRoleAssignmentStub {
+    <#
+    .SYNOPSIS
+        Returns stub module text that answers the ARM role assignments API in place of
+        Invoke-AzRestMethod.
+
+    .DESCRIPTION
+        The lab scripts read, create and remove role assignments through tools/LabCommon.psm1
+        (Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment), which
+        call Invoke-AzRestMethod rather than the Az role cmdlets (issue #397). A suite appends this
+        text to its stub body and adds 'Invoke-AzRestMethod' to the stubbed commands; the fake
+        then turns each request into a call to functions the suite defines in its own body, so
+        the suite keeps describing the subscription in records rather than in HTTP:
+
+          Get-StubRoleAssignment -Scope <scope> -PrincipalId <id or ''>     (required, with
+              [CmdletBinding()]) returns the assignments ARM lists for the scope - those at it,
+              above it and below it - as records with Name, Scope, PrincipalId, RoleDefinitionId
+              (the role's GUID) and optionally PrincipalType and Condition. The fake keeps those of -PrincipalId
+              when the request filters by principal. An error written with Write-Error
+              -ErrorId <code> becomes an ARM error reply with that code: AuthorizationFailed 403,
+              TooManyRequests 429, *NotFound 404, anything else 500.
+          New-StubRoleAssignment -Scope -Name -RoleDefinitionId -PrincipalId -PrincipalType
+              (optional) records a create; a throw becomes an error reply whose code is the
+              first ARM code named in the message (AuthorizationFailed, PrincipalNotFound,
+              RoleAssignmentExists...). Without it, a create stops the script.
+          Remove-StubRoleAssignment -Id -Scope -Name (optional) records a delete and throws to
+              fail it the same way; returning 'absent' answers 204. Without it, a delete stops
+              the script.
+
+        Any other request throws, so a script that reaches for another API through
+        Invoke-AzRestMethod fails its suite instead of passing unseen.
+
+    .OUTPUTS
+        System.String - PowerShell text for a stub module body.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    return @'
+
+# --- ARM role assignments API fake (tests/Support/LabScriptStub.psm1, issue #397) -------------
+
+function ConvertTo-StubArmReply {
+    param([int]$StatusCode, [object]$Body)
+    $content = if ($null -eq $Body) { '' } else { $Body | ConvertTo-Json -Depth 10 -Compress }
+    [pscustomobject]@{ StatusCode = $StatusCode; Content = $content }
+}
+
+function ConvertTo-StubArmError {
+    param([string]$Code, [string]$Message)
+    $status = switch -Regex ($Code) {
+        '^AuthorizationFailed$'      { 403; break }
+        '^TooManyRequests$'          { 429; break }
+        'NotFound$'                  { 404; break }
+        '^RoleAssignmentExists$'     { 409; break }
+        '^PrincipalNotFound$'        { 400; break }
+        default                      { 500 }
+    }
+    ConvertTo-StubArmReply -StatusCode $status -Body @{ error = @{ code = $Code; message = $Message } }
+}
+
+function Get-StubArmErrorCode {
+    param([string]$Message)
+    if ($Message -match '\b(?<code>AuthorizationFailed|PrincipalNotFound|RoleAssignmentExists|TooManyRequests|RoleAssignmentNotFound)\b') { return $Matches['code'] }
+    return 'InternalServerError'
+}
+
+function ConvertTo-StubArmAssignment {
+    param([object]$Record)
+    $subscription = if ([string]$Record.Scope -match '^(/subscriptions/[^/]+)') { $Matches[1] } else { '/subscriptions/00000000-0000-0000-0000-000000000000' }
+    $principalType = if ($Record.PrincipalType) { [string]$Record.PrincipalType } else { 'User' }
+    $assignment = [ordered]@{
+        id         = "$($Record.Scope)/providers/Microsoft.Authorization/roleAssignments/$($Record.Name)"
+        name       = [string]$Record.Name
+        type       = 'Microsoft.Authorization/roleAssignments'
+        properties = [ordered]@{
+            roleDefinitionId = "$subscription/providers/Microsoft.Authorization/roleDefinitions/$($Record.RoleDefinitionId)"
+            principalId      = [string]$Record.PrincipalId
+            principalType    = $principalType
+            scope            = [string]$Record.Scope
+        }
+    }
+    if ($Record.Condition) { $assignment.properties.condition = [string]$Record.Condition }
+    $assignment
+}
+
+function Invoke-AzRestMethod {
+    [CmdletBinding()]
+    param([string]$Path, [string]$Method = 'GET', [string]$Payload, [Parameter(ValueFromRemainingArguments)]$Rest)
+
+    $resource, $query = $Path -split '\?', 2
+    $filter = ''
+    foreach ($pair in @([string]$query -split '&')) {
+        $key, $value = $pair -split '=', 2
+        if ([uri]::UnescapeDataString([string]$key) -eq '$filter') { $filter = [uri]::UnescapeDataString([string]$value) }
+    }
+    if ($query -notmatch '(^|&)api-version=2022-04-01(&|$)') { throw "stub: unexpected api-version in $Method $Path" }
+
+    if ($Method -eq 'GET' -and $resource -match '^(?<scope>.*)/providers/Microsoft\.Authorization/roleAssignments$') {
+        $scope = $Matches['scope']
+        $principal = ''
+        if ($filter -match "^principalId eq '(?<id>[^']+)'$") { $principal = $Matches['id'] }
+        elseif ($filter) { throw "stub: unexpected role assignment filter '$filter'" }
+
+        $stubErrors = $null
+        $records = @(Get-StubRoleAssignment -Scope $scope -PrincipalId $principal -ErrorAction SilentlyContinue -ErrorVariable stubErrors)
+        if ($stubErrors) {
+            $first = $stubErrors[0]
+            return ConvertTo-StubArmError -Code ([string]$first.FullyQualifiedErrorId -split ',')[0] -Message $first.Exception.Message
+        }
+        $items = @(foreach ($record in $records) {
+            if (-not $record) { continue }
+            if ($principal -and [string]$record.PrincipalId -ne $principal) { continue }
+            ConvertTo-StubArmAssignment -Record $record
+        })
+        return ConvertTo-StubArmReply -StatusCode 200 -Body @{ value = $items }
+    }
+
+    if ($resource -match '^(?<scope>.*)/providers/Microsoft\.Authorization/roleAssignments/(?<name>[^/]+)$') {
+        $scope = $Matches['scope']
+        $name = $Matches['name']
+
+        if ($Method -eq 'PUT') {
+            if (-not (Get-Command -Name New-StubRoleAssignment -CommandType Function -ErrorAction SilentlyContinue)) {
+                throw "stub: this script must not create role assignments ($Path)"
+            }
+            $properties = ($Payload | ConvertFrom-Json).properties
+            try {
+                New-StubRoleAssignment -Scope $scope -Name $name -RoleDefinitionId ([string]$properties.roleDefinitionId) `
+                    -PrincipalId ([string]$properties.principalId) -PrincipalType ([string]$properties.principalType)
+            }
+            catch {
+                return ConvertTo-StubArmError -Code (Get-StubArmErrorCode -Message "$_") -Message "$_"
+            }
+            $created = [pscustomobject]@{
+                Name = $name; Scope = $scope; PrincipalId = $properties.principalId; PrincipalType = $properties.principalType
+                RoleDefinitionId = ([string]$properties.roleDefinitionId -split '/')[-1]
+            }
+            return ConvertTo-StubArmReply -StatusCode 201 -Body (ConvertTo-StubArmAssignment -Record $created)
+        }
+
+        if ($Method -eq 'DELETE') {
+            if (-not (Get-Command -Name Remove-StubRoleAssignment -CommandType Function -ErrorAction SilentlyContinue)) {
+                throw "stub: this script must not remove role assignments ($Path)"
+            }
+            try {
+                $outcome = Remove-StubRoleAssignment -Id $resource -Scope $scope -Name $name
+            }
+            catch {
+                return ConvertTo-StubArmError -Code (Get-StubArmErrorCode -Message "$_") -Message "$_"
+            }
+            if ($outcome -eq 'absent') { return ConvertTo-StubArmReply -StatusCode 204 }
+            return ConvertTo-StubArmReply -StatusCode 200 -Body @{ id = $resource; name = $name }
+        }
+    }
+
+    throw "stub: unexpected ARM request $Method $Path"
+}
+'@
+}
+
+Export-ModuleMember -Function Initialize-LabScriptStub, Invoke-LabScriptWithStub, Test-LabScriptHarnessText, Get-LabArmRoleAssignmentStub

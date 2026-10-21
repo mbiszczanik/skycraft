@@ -96,14 +96,14 @@
 
 ## 🤖 Automation (optional)
 
-The portal steps above have two scripted equivalents in `scripts/`. Pick one per subscription: each skips assignments that already exist, but the Bicep template cannot adopt assignments the imperative script created.
+The portal steps above have two scripted equivalents in `scripts/`. Both skip the assignments that already exist, whichever way they were made, so either one can finish a lab started in the Portal or with the other: `Deploy-Bicep.ps1` prints `Existing assignments: n of 5` and `[KEEP]` or `[CREATE]` for each of the five, and deploys only the missing ones. One exception: if Malfurion's Owner assignment has a condition (guide Troubleshooting, Issue 6), both report `[ERROR]` and end with exit code 1, because neither can replace it. Remove it in the Portal and run the script again.
 
 - [ ] Declarative - resource groups and the five role assignments from `bicep/role-assignments.bicep`, with principal IDs resolved from Entra ID:
   ```powershell
   .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments -WhatIf   # preview
   .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments           # deploy
   ```
-- [ ] Imperative - the same five assignments through `New-AzRoleAssignment`:
+- [ ] Imperative - the same five assignments through the Azure Resource Manager role assignments API:
   ```powershell
   .\scripts\Deploy-Bicep.ps1              # resource groups only
   .\scripts\New-LabRoleAssignment.ps1     # Graph sign-in in the lab tenant (see below)
@@ -116,6 +116,8 @@ The portal steps above have two scripted equivalents in `scripts/`. Pick one per
 ## 🔍 Validation Steps
 
 Execute these validation steps to confirm success:
+
+> Steps 2-4 use `Get-AzRoleAssignment`, which also needs a Microsoft Graph token. If it fails with `Authentication failed against resource MicrosoftGraphEndpointResourceId`, sign in with `Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId` and run the step again; see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md#authentication-failed-against-resource-microsoftgraphendpointresourceid). `.\scripts\Test-Lab.ps1` reads the role assignments without that token, but finds the users and groups by name, which needs it too.
 
 ### Step 1: List all resource groups
 

@@ -481,10 +481,12 @@ function Get-LabPolicyAssignmentNearMiss {
 }
 
 # The role assignments that the principal $PrincipalId holds in the subscription: on the
-# subscription itself or on a scope below it. Get-AzRoleAssignment -Scope also lists assignments
-# inherited from a management group; those are not the lab's. Read from a listing rather than
-# with Get-AzRoleAssignment -ObjectId, which looks the principal up in Microsoft Graph first and
-# fails where the Az context cannot reach Graph.
+# subscription itself or on a scope below it. $RoleAssignment is a listing from
+# Get-LabArmRoleAssignment (tools/LabCommon.psm1), which reads the ARM role assignments API and
+# also returns assignments inherited from a management group; those are not the lab's, so they
+# are dropped here. The listing does not come from Get-AzRoleAssignment: every form of it, -Scope
+# alone included, resolves the principals through Microsoft Graph and fails where the Az sign-in
+# cannot get a Graph token (issue #397).
 function Select-LabPolicyIdentityRoleAssignment {
     [CmdletBinding()]
     param(

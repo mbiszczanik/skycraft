@@ -427,6 +427,10 @@ $assignment = New-AzPolicyAssignment -Name 'Inherit-Project-Tag' `
 
 # The Portal grants this role itself; from PowerShell you grant it. If Azure answers that the
 # principal does not exist, the new identity is not replicated yet: wait a minute and run it again.
+# New-AzRoleAssignment also needs a Microsoft Graph token. If it fails with
+# "Authentication failed against resource MicrosoftGraphEndpointResourceId", run
+# Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId and run it again
+# (TROUBLESHOOTING.md in the repository root).
 New-AzRoleAssignment -ObjectId $assignment.IdentityPrincipalId -ObjectType 'ServicePrincipal' `
     -RoleDefinitionId 'b24988ac-6180-42a0-ab88-20f7382dd24c' -Scope $subscriptionScope
 ```
