@@ -62,7 +62,10 @@ Before starting this lab:
 - [ ] Completed Lab 1.2 (RBAC and resource groups)
 - [ ] Three resource groups exist: dev-skycraft-swc-rg, prod-skycraft-swc-rg, platform-skycraft-swc-rg
 - [ ] Owner role at subscription level, or Contributor together with User Access Administrator (Step 1.3.8 gives a managed identity a role on the subscription, which Contributor alone may not do)
+- [ ] On a new subscription: the `Microsoft.Insights` resource provider registered (Step 1.3.7 creates an action group and an alert in that namespace, and the Portal does not register it for you; see the note below)
 - [ ] Understanding of compliance and governance concepts
+
+**Note**: To register `Microsoft.Insights`, search for **Subscriptions**, click your subscription, and in the left menu, under **Settings**, click **Resource providers**. Search for `Microsoft.Insights`, select its row and click **Register** (if the first click only selects the row, click **Register** again). Its status changes from **NotRegistered** to **Registering** and, after about a minute, to **Registered**. A subscription you have used before usually has it already; without it, Step 1.3.7 fails (Troubleshooting, Issue 6).
 
 **Note**: With Contributor alone, the paths below end differently at Step 1.3.8. The Portal creates `Inherit-Project-Tag` without the identity's role and says so after **Create**: new resources still get the tag, but the optional remediation task in Step 1.3.10 fails. `scripts/Deploy-Bicep.ps1` fails at the role assignment. `scripts/Invoke-LabGovernance.ps1` creates the assignment, reports `[ERROR]` for the role and exits 1. With Contributor alone, use the Portal and skip the remediation task.
 
@@ -504,7 +507,15 @@ The list is a multi-select with a filter box; with both regions ticked, the fiel
 
 The **New remediation task** page opens with that assignment already selected, so **Remediate** is the only thing to click there.
 
-**Expected Result**: The Portal confirms that the remediation task was created. Once the task has finished (a few minutes), `Advisor-Cost-Recommendations` carries `Project` = `SkyCraft`, and after the next compliance evaluation `Inherit-Project-Tag` shows it as compliant.
+A task can finish as succeeded without remediating anything, so check its result a few minutes later:
+
+9. In the left menu, click **Remediation**, then the **Remediation tasks** tab
+10. Click your task and check how many resources it remediated (its deployments): one, `Advisor-Cost-Recommendations`
+11. Search for **Resource groups**, click `prod-skycraft-swc-rg`, click `Advisor-Cost-Recommendations`, and in the left menu click **Tags**
+
+**Expected Result**: The Portal confirms with **Remediation task creation succeeded**. Once the task has finished (a few minutes), it lists one remediated resource, the **Tags** page of `Advisor-Cost-Recommendations` shows `Project` = `SkyCraft`, and after the next compliance evaluation `Inherit-Project-Tag` shows the alert as compliant.
+
+**Note**: If the task remediated 0 resources and the alert has no `Project` tag, create the task again. On a new subscription a task created about four minutes after **Compliance** first listed the alert as non-compliant under `Inherit-Project-Tag` ended **Succeeded** with 0 deployments; a second task seven minutes later tagged the alert. Wait until **Compliance** has listed the alert as non-compliant under `Inherit-Project-Tag` for a few minutes, then repeat items 5-11. Or, on the **New remediation task** page, tick **Re-evaluate resource compliance before remediating** before you click **Remediate**: the task then evaluates the resources again before it remediates them.
 
 The same with Az PowerShell (the `Start-AzPolicyRemediation` cmdlet ships in the Az.PolicyInsights module):
 
@@ -734,6 +745,8 @@ Create a more specific budget for the production environment. A budget belongs t
 **Expected Result**: Visual charts showing cost breakdown (likely very low since we haven't deployed resources yet).
 
 ![Manage Costs with Budgets and Alerts](./images/step-1.3.18b.png)
+
+**Note**: On a subscription created the same day, Cost analysis can show **Unable to load** instead of the charts, and no **Add filter**, for up to 48 hours: Microsoft says a new subscription may wait that long for all Cost Management features. The **VIEW** menu and **Last 30 days** still work, but items 6-7 cannot be done yet. The budget chart of Step 1.3.15 shows **Cannot load data** for the same reason. Nothing is wrong with the lab: come back to this step later. `Test-Lab.ps1` does not check it.
 
 ---
 
@@ -972,6 +985,7 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 
 **Solutions**:
 
+- Action group, on a new subscription: the bell shows "Create action group: Failed to create action group. Error: The subscription is not registered to use namespace 'microsoft.insights'. See https://aka.ms/rps-not-found for how to register subscriptions." Register the `Microsoft.Insights` resource provider as the note under Prerequisites shows, wait until its status is **Registered**, then click **Create** again on the same form: it keeps what you filled in
 - Action group: set **Region** to Sweden Central. `Restrict-Azure-Regions` (Step 1.3.9) refuses the default East US
 - Alert: `Enforce-Project-Tag` (Step 1.3.8) is in effect in your subscription, for example from an earlier run of this lab or its Bicep path, and `Inherit-Project-Tag` does not add the tag for the alert. The **Create Advisor Alerts** form has no tags, so the alert passes `Enforce-Project-Tag` only through `Inherit-Project-Tag`. **Alerts (Preview)** may still list the refused alert, but it does not exist. Check that **Policy** → **Assignments** lists `Inherit-Project-Tag` (assigned more than about ten minutes ago, with **Tag Name** `Project`) and that `prod-skycraft-swc-rg` carries `Project` = `SkyCraft` on its **Tags** page, then create the alert again. `Test-Lab.ps1` does not check the alert
 
