@@ -678,9 +678,43 @@ Describe 'parse.py - lab 1.2, global and in-blade searches' {
     }
 
     It 'reads the role and member searches of step 1.2.4 as searches in the open blade' {
+        # The step opens the subscription with a global search first (#325); the role and the
+        # member are then searched in the wizard's own boxes.
         $searches = @(($script:Lab12.steps | Where-Object id -eq '1.2.4').items | Where-Object kind -eq 'search')
-        @($searches | ForEach-Object { $_.labels }) | Should -Be @('Owner', 'Malfurion Stormrage')
-        @($searches.scope) | Should -Be @('blade', 'blade')
+        @($searches | ForEach-Object { $_.labels }) | Should -Be @('Subscriptions', 'Owner', 'Malfurion Stormrage')
+        @($searches.scope) | Should -Be @('global', 'blade', 'blade')
+    }
+
+    It 'opens the Privileged administrator roles list before searching for Owner in step 1.2.4' {
+        $labels = @(($script:Lab12.steps | Where-Object id -eq '1.2.4').items | ForEach-Object { $_.labels })
+        $labels.IndexOf('Privileged administrator roles') | Should -BeGreaterOrEqual 0
+        $labels.IndexOf('Privileged administrator roles') | Should -BeLessThan $labels.IndexOf('Owner')
+        $labels | Should -Contain 'Allow user to assign all roles (highly privileged)'
+    }
+
+    It 'reads the four tags of each resource group in steps 1.2.1-1.2.3 as tag items' {
+        # #329: a step that creates a resource sets the SkyCraft tags explicitly.
+        foreach ($id in '1.2.1', '1.2.2', '1.2.3') {
+            $tags = @(($script:Lab12.steps | Where-Object id -eq $id).items | Where-Object kind -eq 'tag')
+            @($tags.name) | Should -Be @('Environment', 'Project', 'CostCenter', 'Owner') -Because "step $id"
+        }
+    }
+
+    It 'opens the Review + assign tab by name after the optional Assignment type fields, with no Next between (<id>)' -ForEach @(
+        @{ id = '1.2.4' }, @{ id = '1.2.6' }, @{ id = '1.2.7' }, @{ id = '1.2.8' }, @{ id = '1.2.9' }
+    ) {
+        # Without an Assignment type tab, a Next there would be one Next too many (#325 review);
+        # clicking the tab by name works with the tab and without it.
+        $items = @(($script:Lab12.steps | Where-Object id -eq $id).items)
+        $duration = [array]::FindIndex([object[]]$items, [Predicate[object]] { param($i) $i.label -eq 'Assignment duration' })
+        $duration | Should -BeGreaterOrEqual 0
+        @($items[$duration + 1].labels) | Should -Be @('Review + assign', 'Review + assign')
+        $items.Count | Should -Be ($duration + 2)
+    }
+
+    It 'closes each assignments pane in step 1.2.11 with a click on Close' {
+        $closes = @(($script:Lab12.steps | Where-Object id -eq '1.2.11').items | Where-Object { @($_.labels) -contains 'Close' })
+        $closes.Count | Should -Be 2
     }
 }
 
