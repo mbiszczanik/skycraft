@@ -71,7 +71,8 @@
 > left with the definition's own name (the wizard fills it in) is not found, and two matching
 > assignments for one policy fail the check. `Deploy-Bicep.ps1` run after the Portal path keeps the
 > Portal's assignments and creates no second one; it stops, and names the difference, when an
-> assignment's parameters or enforcement differ from the ones above.
+> assignment's parameters, enforcement or exclusions differ from the ones above, or when an
+> assignment has the definition but not the dashed name, or the dashed name but another definition.
 
 ### Policy Compliance
 - [ ] Accessed Policy Compliance dashboard
