@@ -238,6 +238,10 @@ function Get-AzPolicyAssignment {
         if ($set -in 'portal', 'both') {
             New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Identity:$identity
         }
+        # The Bicep and script paths since issue #406: fixed names, the guide's names as display names.
+        if ($set -eq 'scripted') {
+            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Identity:$identity
+        }
     }
     New-StubAssignment -Name 'Enforce-Project-Tag' -DisplayName 'Enforce Project Tag Value' -Definition '1e30110a-5ceb-460c-a204-c1c3969c6d62' `
         -Scope '/providers/Microsoft.Management/managementGroups/stub-mg'
@@ -357,7 +361,7 @@ function Start-Sleep {
             [string[]]$Lookup = @(),
             [string[]]$ArgumentList = @('-Force'),
             [string[]]$LockElsewhere = @(),
-            [ValidateSet('bicep', 'portal', 'both')]
+            [ValidateSet('bicep', 'portal', 'scripted', 'both')]
             [string]$PolicySet = 'bicep',
             [switch]$DenyIdentity,
             [switch]$Empty
@@ -427,6 +431,7 @@ function Start-Sleep {
     # the Bicep path or Invoke-LabGovernance.ps1.
     $script:PortalMade = Invoke-CleanupScript -Stub $script:Stub -PolicySet 'portal'
     $script:TwoSets    = Invoke-CleanupScript -Stub $script:Stub -PolicySet 'both'
+    $script:ScriptMade = Invoke-CleanupScript -Stub $script:Stub -PolicySet 'scripted'
     # The identity's role assignments cannot be listed, or one cannot be removed (#350).
     $script:RoleLookupFails  = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzRoleAssignment:subscription=throttled'
     $script:RoleRemovalFails = Invoke-CleanupScript -Stub $script:Stub -PolicySet 'portal' -Fail 'Remove-AzRoleAssignment:ra-identity-sub'
@@ -439,7 +444,7 @@ function Start-Sleep {
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:ProdGone, $script:NewLookupsFail,
         $script:OldLookupsFail, $script:NewRemovalsFail, $script:OldRemovalsFail, $script:LockElsewhere,
-        $script:PortalMade, $script:TwoSets, $script:RoleLookupFails, $script:RoleRemovalFails,
+        $script:PortalMade, $script:ScriptMade, $script:TwoSets, $script:RoleLookupFails, $script:RoleRemovalFails,
         $script:DenyIdentity, $script:DenyIdentityRoleFails
     )
 }
@@ -529,6 +534,15 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes the policy assignments whiche
             $run.Calls | Should -Contain "Remove-AzPolicyAssignment:$name"
         }
         $run.Output | Should -Match "\[SUCCESS\] Removed policy: Enforce-Project-Tag 'Enforce-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa2\)"
+        $run.Output | Should -Not -Match 'Policy [^ ]+ not found'
+    }
+
+    It 'removes the assignments the Bicep and script paths make since #406: fixed names, the guide''s display names' {
+        $run = $script:ScriptMade
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        foreach ($name in 'Require-Environment-Tag-RG', 'Enforce-Project-Tag', 'Inherit-Project-Tag', 'Restrict-Azure-Regions') {
+            $run.Calls | Should -Contain "Remove-AzPolicyAssignment:$name"
+        }
         $run.Output | Should -Not -Match 'Policy [^ ]+ not found'
     }
 

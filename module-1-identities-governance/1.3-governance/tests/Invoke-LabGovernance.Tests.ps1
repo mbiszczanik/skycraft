@@ -10,8 +10,8 @@
     script in a child pwsh process against a generated stub of the Az commands it calls, and
     assert the contract of the policy step:
 
-      1. With no assignment on the subscription, it creates the four, under the fixed names and
-         display names the Bicep path uses, from the built-in definitions read by id; the Modify
+      1. With no assignment on the subscription, it creates the four, under the fixed names the
+         Bicep path uses and the guide's display names, from the built-in definitions read by id; the Modify
          assignment Inherit-Project-Tag (issue #350) with a system-assigned identity in
          swedencentral.
       2. With the four already made - by the Bicep path, or in the Portal under generated names
@@ -24,6 +24,9 @@
          identity is an [ERROR]. Role assignments are listed by scope, never with -ObjectId.
       6. Any [ERROR] - a duplicate, a failed listing, an identity missing, a role grant refused
          (an account with Contributor alone) - makes the run exit 1; a clean run exits 0.
+      7. New assignments carry the guide's descriptions and non-compliance messages (issue #406).
+         An existing assignment whose parameters or enforcement mode differ from the lab's is an
+         [ERROR] that names each difference, and is not changed.
 
     The tags and locks steps are left to their own behaviour; their stubs only make them run.
 
@@ -74,6 +77,8 @@ BeforeAll {
     #   SKYCRAFT_STUB_ROLEHELD    '1' makes Inherit-Project-Tag's identity hold Contributor on the
     #                             subscription already
     #   SKYCRAFT_STUB_NOIDENTITY  '1' lists Inherit-Project-Tag without a managed identity
+    #   SKYCRAFT_STUB_DRIFT       '1' lists Enforce-Project-Tag with tagValue 'Contoso' and
+    #                             Restrict-Azure-Regions with enforcement mode DoNotEnforce
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 
@@ -112,16 +117,22 @@ function Get-AzPolicyDefinition {
 
 $script:PrincipalId = '11111111-1111-1111-1111-111111111111'
 
-# Shaped like Get-AzPolicyAssignment's output in Az.Resources 7 and later; -Identity adds a
-# system-assigned identity at the top level, as the real cmdlet returns it.
+# Shaped like Get-AzPolicyAssignment's output in Az.Resources 7 and later: parameters under
+# Parameter.<name>.value; -Identity adds a system-assigned identity at the top level, as the real
+# cmdlet returns it.
 function New-StubAssignment {
-    param([string]$Name, [string]$DisplayName, [string]$Definition, [string]$Scope, [switch]$Identity)
+    param([string]$Name, [string]$DisplayName, [string]$Definition, [string]$Scope, [switch]$Identity,
+        [System.Collections.IDictionary]$Parameter = @{}, [string]$EnforcementMode = 'Default')
+    $bag = [ordered]@{}
+    foreach ($key in $Parameter.Keys) { $bag[$key] = [pscustomobject]@{ value = $Parameter[$key] } }
     $assignment = [pscustomobject]@{
         Name               = $Name
         DisplayName        = $DisplayName
         PolicyDefinitionId = "/providers/Microsoft.Authorization/policyDefinitions/$Definition"
         Scope              = $Scope
         Id                 = "$Scope/providers/Microsoft.Authorization/policyAssignments/$Name"
+        Parameter          = [pscustomobject]$bag
+        EnforcementMode    = $EnforcementMode
     }
     if ($Identity) {
         $assignment | Add-Member -NotePropertyName IdentityType -NotePropertyValue 'SystemAssigned'
@@ -137,20 +148,30 @@ function Get-AzPolicyAssignment {
     if ($env:SKYCRAFT_STUB_LOOKUPFAIL -eq '1') { Write-Error 'stub lookup failure: Get-AzPolicyAssignment'; return }
     if ($Name) { throw "stub: the lab looks assignments up by listing the scope, not by name ($Name)" }
 
+    # Bicep: the display names the Bicep path set before issue #406, still matched by resource name.
+    $drift = $env:SKYCRAFT_STUB_DRIFT -eq '1'
     $lab = @(
-        @{ Name = 'Require-Environment-Tag-RG'; Bicep = 'Require Environment Tag on Resource Groups'; Definition = '96670d01-0a4d-4649-9c89-2d3abc0a5025'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa1' }
-        @{ Name = 'Enforce-Project-Tag'; Bicep = 'Enforce Project Tag Value'; Definition = '1e30110a-5ceb-460c-a204-c1c3969c6d62'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa2' }
-        @{ Name = 'Inherit-Project-Tag'; Bicep = 'Inherit Project Tag from Resource Group'; Definition = 'ea3f2387-9b95-492a-a190-fcdc54f7b070'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa4'; Identity = $true }
-        @{ Name = 'Restrict-Azure-Regions'; Bicep = 'Restrict to Allowed Regions'; Definition = 'e56962a6-4747-49cd-b67b-bf8b01975c4c'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa3' }
+        @{ Name = 'Require-Environment-Tag-RG'; Bicep = 'Require Environment Tag on Resource Groups'; Definition = '96670d01-0a4d-4649-9c89-2d3abc0a5025'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa1'
+            Parameter = @{ tagName = 'Environment' } }
+        @{ Name = 'Enforce-Project-Tag'; Bicep = 'Enforce Project Tag Value'; Definition = '1e30110a-5ceb-460c-a204-c1c3969c6d62'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa2'
+            Parameter = @{ tagName = 'Project'; tagValue = $(if ($drift) { 'Contoso' } else { 'SkyCraft' }) } }
+        @{ Name = 'Inherit-Project-Tag'; Bicep = 'Inherit Project Tag from Resource Group'; Definition = 'ea3f2387-9b95-492a-a190-fcdc54f7b070'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa4'; Identity = $true
+            Parameter = @{ tagName = 'Project' } }
+        # The regions in another order than the lab's: a set, not a list.
+        @{ Name = 'Restrict-Azure-Regions'; Bicep = 'Restrict to Allowed Regions'; Definition = 'e56962a6-4747-49cd-b67b-bf8b01975c4c'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa3'
+            Parameter = @{ listOfAllowedLocations = @('northeurope', 'swedencentral') }; EnforcementMode = $(if ($drift) { 'DoNotEnforce' } else { 'Default' }) }
     )
     $set = $env:SKYCRAFT_STUB_POLICYSET
     foreach ($assignment in $lab) {
         $identity = [bool]$assignment.Identity -and $env:SKYCRAFT_STUB_NOIDENTITY -ne '1'
+        $mode = if ($assignment.EnforcementMode) { $assignment.EnforcementMode } else { 'Default' }
         if ($set -in 'bicep', 'both') {
-            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope -Identity:$identity
+            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope -Identity:$identity `
+                -Parameter $assignment.Parameter -EnforcementMode $mode
         }
         if ($set -in 'portal', 'both') {
-            New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Identity:$identity
+            New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Identity:$identity `
+                -Parameter $assignment.Parameter -EnforcementMode $mode
         }
     }
     # Inherited from a management group under the guide's name: not the lab's assignment.
@@ -160,10 +181,12 @@ function Get-AzPolicyAssignment {
 
 function New-AzPolicyAssignment {
     [CmdletBinding()]
-    param([string]$Name, [string]$DisplayName, [string]$Scope, [object]$PolicyDefinition, [object]$PolicyParameterObject,
-        [string]$IdentityType, [string]$Location)
+    param([string]$Name, [string]$DisplayName, [string]$Description, [string]$Scope, [object]$PolicyDefinition, [object]$PolicyParameterObject,
+        [object[]]$NonComplianceMessage, [string]$IdentityType, [string]$Location)
     $parameters = ($PolicyParameterObject.GetEnumerator() | Sort-Object Key | ForEach-Object { "$($_.Key)=$(@($_.Value) -join ',')" }) -join ';'
+    $messages = @($NonComplianceMessage | ForEach-Object { $_.Message }) -join ','
     Write-StubCall -Name "New-AzPolicyAssignment:$Name|$DisplayName|$Scope|$($PolicyDefinition.Name)|$parameters|$IdentityType|$Location"
+    Write-StubCall -Name "New-AzPolicyAssignment-Text:$Name|$Description|$messages"
     New-StubAssignment -Name $Name -DisplayName $DisplayName -Definition $PolicyDefinition.Name -Scope $Scope -Identity:($IdentityType -eq 'SystemAssigned')
 }
 
@@ -203,7 +226,8 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
             [switch]$LookupFail,
             [switch]$RoleHeld,
             [switch]$NoIdentity,
-            [switch]$GrantFail
+            [switch]$GrantFail,
+            [switch]$Drift
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
@@ -215,6 +239,7 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
             SKYCRAFT_STUB_ROLEHELD   = if ($RoleHeld) { '1' } else { '0' }
             SKYCRAFT_STUB_NOIDENTITY = if ($NoIdentity) { '1' } else { '0' }
             SKYCRAFT_STUB_GRANTFAIL  = if ($GrantFail) { '1' } else { '0' }
+            SKYCRAFT_STUB_DRIFT      = if ($Drift) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG        = $logPath
         }
 
@@ -225,6 +250,7 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
             Output   = $run.Output
             Calls    = $calls
             Created  = @($calls | Where-Object { $_ -like 'New-AzPolicyAssignment:*' })
+            Texts    = @($calls | Where-Object { $_ -like 'New-AzPolicyAssignment-Text:*' })
             Granted  = @($calls | Where-Object { $_ -like 'New-AzRoleAssignment:*' })
         }
     }
@@ -242,9 +268,10 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
     $script:NoIdentity = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'portal' -NoIdentity
     # An account with Contributor alone: the assignment is created, the role grant is refused.
     $script:GrantFails = Invoke-GovernanceScript -Stub $script:Stub -GrantFail
+    $script:Drifted    = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'portal' -RoleHeld -Drift
 
     $script:AllRuns = @($script:Fresh, $script:BicepMade, $script:PortalMade, $script:TwoSets, $script:ListFails,
-        $script:RoleHeld, $script:NoIdentity, $script:GrantFails)
+        $script:RoleHeld, $script:NoIdentity, $script:GrantFails, $script:Drifted)
 }
 
 AfterAll {
@@ -262,15 +289,33 @@ Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - test harness' {
 
 Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - never creates a second set of policy assignments (#330)' {
 
-    It 'creates the four assignments under the Bicep path''s names when none exists' {
+    It 'creates the four assignments under the Bicep path''s names and the guide''s display names when none exists' {
         $subscription = '/subscriptions/00000000-0000-0000-0000-000000000000'
         $script:Fresh.Created | Should -Be @(
-            "New-AzPolicyAssignment:Require-Environment-Tag-RG|Require Environment Tag on Resource Groups|$subscription|96670d01-0a4d-4649-9c89-2d3abc0a5025|tagName=Environment||"
-            "New-AzPolicyAssignment:Enforce-Project-Tag|Enforce Project Tag Value|$subscription|1e30110a-5ceb-460c-a204-c1c3969c6d62|tagName=Project;tagValue=SkyCraft||"
-            "New-AzPolicyAssignment:Inherit-Project-Tag|Inherit Project Tag from Resource Group|$subscription|ea3f2387-9b95-492a-a190-fcdc54f7b070|tagName=Project|SystemAssigned|swedencentral"
-            "New-AzPolicyAssignment:Restrict-Azure-Regions|Restrict to Allowed Regions|$subscription|e56962a6-4747-49cd-b67b-bf8b01975c4c|listOfAllowedLocations=swedencentral,northeurope||"
+            "New-AzPolicyAssignment:Require-Environment-Tag-RG|Require-Environment-Tag-RG|$subscription|96670d01-0a4d-4649-9c89-2d3abc0a5025|tagName=Environment||"
+            "New-AzPolicyAssignment:Enforce-Project-Tag|Enforce-Project-Tag|$subscription|1e30110a-5ceb-460c-a204-c1c3969c6d62|tagName=Project;tagValue=SkyCraft||"
+            "New-AzPolicyAssignment:Inherit-Project-Tag|Inherit-Project-Tag|$subscription|ea3f2387-9b95-492a-a190-fcdc54f7b070|tagName=Project|SystemAssigned|swedencentral"
+            "New-AzPolicyAssignment:Restrict-Azure-Regions|Restrict-Azure-Regions|$subscription|e56962a6-4747-49cd-b67b-bf8b01975c4c|listOfAllowedLocations=swedencentral,northeurope||"
         ) -Because "an assignment inherited from a management group is not the lab's; output was:`n$($script:Fresh.Output)"
         $script:Fresh.Output | Should -Not -Match '\[ERROR\]'
+    }
+
+    It 'gives each new assignment the guide''s description and non-compliance message (#406)' {
+        $script:Fresh.Texts | Should -Be @(
+            'New-AzPolicyAssignment-Text:Require-Environment-Tag-RG|All resource groups must have an Environment tag|Resource group must have an Environment tag (Development, Production, or Platform)'
+            'New-AzPolicyAssignment-Text:Enforce-Project-Tag|All resources must have Project tag set to SkyCraft|All resources must be tagged with Project=SkyCraft'
+            'New-AzPolicyAssignment-Text:Inherit-Project-Tag|Resources get the Project tag of their resource group when they are created without it|'
+            'New-AzPolicyAssignment-Text:Restrict-Azure-Regions|Resources can only be created in Sweden Central and North Europe|Resources must be deployed to Sweden Central or North Europe regions only'
+        )
+    }
+
+    It 'reports an existing assignment whose parameters or enforcement mode differ from the lab''s, and changes nothing (#406)' {
+        $run = $script:Drifted
+        $run.Created | Should -BeNullOrEmpty
+        $run.Output | Should -Match "\[ERROR\] Policy Enforce-Project-Tag 'Enforce-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa2\) differs from the lab's: parameter tagValue is 'Contoso', the lab's is 'SkyCraft'\. Not changing it"
+        $run.Output | Should -Match "\[ERROR\] Policy Restrict-Azure-Regions 'Restrict-Azure-Regions' \(name aaaaaaaaaaaaaaaaaaaaaaa3\) differs from the lab's: enforcement mode is 'DoNotEnforce', the lab's is 'Default'"
+        $run.Output | Should -Not -Match 'Policy Enforce-Project-Tag already assigned'
+        $run.ExitCode | Should -Be 1
     }
 
     It 'creates nothing next to the Bicep-made assignments' {
@@ -330,7 +375,8 @@ Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - the identity of Inherit-Project-Tag
         $run = $script:NoIdentity
         $run.Granted | Should -BeNullOrEmpty
         $run.Created | Should -BeNullOrEmpty
-        $run.Output | Should -Match "\[ERROR\] Inherit-Project-Tag 'Inherit-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa4\) has no managed identity"
+        # Caught as drift (issue #406) before the role grant is tried.
+        $run.Output | Should -Match "\[ERROR\] Policy Inherit-Project-Tag 'Inherit-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa4\) differs from the lab's: it has no managed identity"
     }
 
     It 'lists role assignments by scope, never with -ObjectId (a Microsoft Graph lookup)' {

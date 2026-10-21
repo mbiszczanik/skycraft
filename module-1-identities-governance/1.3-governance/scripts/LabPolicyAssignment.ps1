@@ -22,17 +22,22 @@
     that change still has one, with no role; Remove-LabResource.ps1 handles it like any other
     assignment with an identity.
 
-    The two paths name an assignment differently:
+    The paths name an assignment differently:
     - bicep/main.bicep and Invoke-LabGovernance.ps1 set the resource name (Enforce-Project-Tag)
-      and a display name of their own (Enforce Project Tag Value).
+      and, since issue #406, the guide's name as the display name too.
     - In the Portal's Assign policy wizard, what the learner types into Assignment name becomes
       the display name only (Enforce-Project-Tag); the resource name is a generated id.
 
     An assignment is therefore the guide's when it is applied to the subscription itself (not
     inherited from a management group, not on a resource group), assigns the expected built-in
     policy definition, and carries the guide's name as its resource name or as its display name,
-    or the Bicep display name as its display name. Ids, scopes and names compare without regard
-    to case, as ARM's do.
+    or the display name the scripted paths used before issue #406. Ids, scopes and names compare
+    without regard to case, as ARM's do.
+
+    Every path gives an assignment the guide's display name, description, non-compliance message
+    and parameters (issue #406), so a lab built in the Portal and one built by a script end in
+    the same state, and the deploy scripts can tell a learner's assignment that differs in effect
+    from the lab's (Get-LabPolicyAssignmentDrift).
 
     The lookup returns every match. A caller that would act on the assignment (remove it, or
     create one when none exists) refuses when there is more than one: it cannot tell which one
@@ -50,6 +55,11 @@
     - Get-LabPolicyAssignmentParameterValue  the value an assignment gives one parameter
     - Get-LabPolicyAssignmentIdentity        an assignment's managed identity: type, principal id
     - Get-LabPolicyAssignmentProblem         what in an assignment differs from its spec
+                                             (Test-Lab.ps1's checks)
+    - Get-LabPolicyAssignmentDrift           what in an assignment would change its effect
+                                             compared with the lab's (the deploy scripts)
+    - Get-LabPolicyAssignmentPlan            what a deploy does with each assignment: create,
+                                             adopt, keep a Portal-made one, or stop
     - Select-LabPolicyIdentityRoleAssignment the role assignments an assignment's identity holds
                                              in the subscription
 
@@ -72,10 +82,14 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
-# The four assignments, in the order the guide creates them. Name, DisplayName and
-# PolicyDefinitionId are the values bicep/main.bicep sets (tests/LabPolicyAssignment.Tests.ps1
-# holds the two files together); DefinitionDisplayName is what the learner searches for in the
-# wizard.
+# The four assignments, in the order the guide creates them. Name, DisplayName, Description,
+# NonComplianceMessage and Parameter are what the guide has the learner type and pick in the Assign
+# policy wizard; bicep/main.bicep and Invoke-LabGovernance.ps1 set the same values, so every path
+# ends in the same state (issue #406; tests/LabPolicyAssignment.Tests.ps1 holds the guide, this
+# file and the template together). DefinitionDisplayName is what the learner searches for.
+#   LegacyDisplayName  the display name the Bicep path and Invoke-LabGovernance.ps1 gave before
+#                      issue #406, still matched so the cleanup finds older assignments
+#   Parameter          the lab's parameter values; a found assignment with other values is drift
 #   ExpectedParameter  parameter values Test-Lab.ps1 checks on the assignment it finds
 #   ManagedIdentity    the assignment must carry a system-assigned identity (a Modify needs one)
 #   RoleDefinitionId   the role the identity gets on the subscription: the one the built-in
@@ -87,30 +101,43 @@ function Get-LabPolicyAssignmentSpec {
 
     [pscustomobject]@{
         Name                  = 'Require-Environment-Tag-RG'
-        DisplayName           = 'Require Environment Tag on Resource Groups'
+        DisplayName           = 'Require-Environment-Tag-RG'
+        LegacyDisplayName     = 'Require Environment Tag on Resource Groups'
+        Description           = 'All resource groups must have an Environment tag'
+        NonComplianceMessage  = 'Resource group must have an Environment tag (Development, Production, or Platform)'
         PolicyDefinitionId    = '/providers/Microsoft.Authorization/policyDefinitions/96670d01-0a4d-4649-9c89-2d3abc0a5025'
         DefinitionDisplayName = 'Require a tag on resource groups'
         Step                  = '1.3.5'
+        Parameter             = [ordered]@{ tagName = 'Environment' }
         ExpectedParameter     = @{}
         ManagedIdentity       = $false
         RoleDefinitionId      = $null
     }
     [pscustomobject]@{
         Name                  = 'Enforce-Project-Tag'
-        DisplayName           = 'Enforce Project Tag Value'
+        DisplayName           = 'Enforce-Project-Tag'
+        LegacyDisplayName     = 'Enforce Project Tag Value'
+        Description           = 'All resources must have Project tag set to SkyCraft'
+        NonComplianceMessage  = 'All resources must be tagged with Project=SkyCraft'
         PolicyDefinitionId    = '/providers/Microsoft.Authorization/policyDefinitions/1e30110a-5ceb-460c-a204-c1c3969c6d62'
         DefinitionDisplayName = 'Require a tag and its value on resources'
         Step                  = '1.3.8'
+        Parameter             = [ordered]@{ tagName = 'Project'; tagValue = 'SkyCraft' }
         ExpectedParameter     = @{}
         ManagedIdentity       = $false
         RoleDefinitionId      = $null
     }
     [pscustomobject]@{
         Name                  = 'Inherit-Project-Tag'
-        DisplayName           = 'Inherit Project Tag from Resource Group'
+        DisplayName           = 'Inherit-Project-Tag'
+        LegacyDisplayName     = 'Inherit Project Tag from Resource Group'
+        Description           = 'Resources get the Project tag of their resource group when they are created without it'
+        # The guide's Modify assignment has no non-compliance message.
+        NonComplianceMessage  = $null
         PolicyDefinitionId    = '/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070'
         DefinitionDisplayName = 'Inherit a tag from the resource group if missing'
         Step                  = '1.3.8'
+        Parameter             = [ordered]@{ tagName = 'Project' }
         ExpectedParameter     = @{ tagName = 'Project' }
         ManagedIdentity       = $true
         # Contributor, the definition's roleDefinitionIds.
@@ -118,10 +145,14 @@ function Get-LabPolicyAssignmentSpec {
     }
     [pscustomobject]@{
         Name                  = 'Restrict-Azure-Regions'
-        DisplayName           = 'Restrict to Allowed Regions'
+        DisplayName           = 'Restrict-Azure-Regions'
+        LegacyDisplayName     = 'Restrict to Allowed Regions'
+        Description           = 'Resources can only be created in Sweden Central and North Europe'
+        NonComplianceMessage  = 'Resources must be deployed to Sweden Central or North Europe regions only'
         PolicyDefinitionId    = '/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c'
         DefinitionDisplayName = 'Allowed locations'
         Step                  = '1.3.9'
+        Parameter             = [ordered]@{ listOfAllowedLocations = @('swedencentral', 'northeurope') }
         ExpectedParameter     = @{}
         ManagedIdentity       = $false
         RoleDefinitionId      = $null
@@ -189,7 +220,7 @@ function Select-LabPolicyAssignment {
         if ($definitionId -ne $Spec.PolicyDefinitionId) { continue }
 
         $displayName = Get-LabPolicyAssignmentField -Assignment $item -Field 'DisplayName'
-        if ($item.Name -eq $Spec.Name -or $displayName -in @($Spec.Name, $Spec.DisplayName)) {
+        if ($item.Name -eq $Spec.Name -or $displayName -in @($Spec.Name, $Spec.DisplayName, $Spec.LegacyDisplayName)) {
             $item
         }
     }
@@ -286,6 +317,89 @@ function Get-LabPolicyAssignmentProblem {
         if ($identity.Type -notmatch 'SystemAssigned') {
             $found = if ($identity.Type) { "a $($identity.Type) identity" } else { 'no managed identity' }
             "it has $found, expected a system-assigned managed identity (a Modify policy needs one)"
+        }
+    }
+}
+
+# What in a found assignment would change its effect compared with the lab's, one line each;
+# nothing when it has the lab's parameters, enforcement mode and identity (issue #406). The deploy
+# scripts refuse to accept an assignment that differs rather than leave a learner's assignment
+# with other values in place, or overwrite it, without a word. Lists compare as sets, values
+# without regard to case. Texts (display name, description, message) do not change the effect
+# and are not compared. An assignment that leaves enforcement mode unset enforces (ARM's default).
+function Get-LabPolicyAssignmentDrift {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Assignment,
+
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Spec
+    )
+
+    foreach ($name in @($Spec.Parameter.Keys)) {
+        $expected = @($Spec.Parameter[$name] | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object)
+        $actualValue = Get-LabPolicyAssignmentParameterValue -Assignment $Assignment -Name $name
+        $expectedText = @($Spec.Parameter[$name]) -join ', '
+        if ($null -eq $actualValue) {
+            "parameter $name is not set, the lab's is '$expectedText'"
+            continue
+        }
+        $actual = @($actualValue | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object)
+        if (($actual -join "`n") -ne ($expected -join "`n")) {
+            "parameter $name is '$(@($actualValue) -join ', ')', the lab's is '$expectedText'"
+        }
+    }
+
+    $mode = Get-LabPolicyAssignmentField -Assignment $Assignment -Field 'EnforcementMode'
+    if ($mode -and $mode -ne 'Default') {
+        "enforcement mode is '$mode', the lab's is 'Default'"
+    }
+
+    if ($Spec.ManagedIdentity) {
+        $identity = Get-LabPolicyAssignmentIdentity -Assignment $Assignment
+        if ($identity.Type -notmatch 'SystemAssigned') {
+            $found = if ($identity.Type) { "a $($identity.Type) identity" } else { 'no managed identity' }
+            "it has $found, the lab's has a system-assigned managed identity"
+        }
+    }
+}
+
+# What a deploy script does with each of the four assignments, given the subscription's listing
+# (issue #406). Action is one of:
+#   Create     none exists; the deploy creates it
+#   Adopt      one exists under the fixed resource name (an earlier Bicep or script run); the
+#              deploy writes the lab's values over it
+#   Keep       one exists under another resource name (the Portal's generated id); the deploy
+#              leaves it as it is and creates no second one
+#   Duplicate  more than one matches; the deploy must stop, it cannot tell which is the lab's
+# Drift lists what in the one found assignment differs in effect from the lab's; a deploy must
+# stop then too.
+function Get-LabPolicyAssignmentPlan {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]]$Assignment,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SubscriptionId
+    )
+
+    foreach ($spec in Get-LabPolicyAssignmentSpec) {
+        $found = @(Select-LabPolicyAssignment -Assignment $Assignment -SubscriptionId $SubscriptionId -Spec $spec)
+        $action = if ($found.Count -eq 0) { 'Create' }
+        elseif ($found.Count -gt 1) { 'Duplicate' }
+        elseif ($found[0].Name -eq $spec.Name) { 'Adopt' }
+        else { 'Keep' }
+        $drift = if ($found.Count -eq 1) { @(Get-LabPolicyAssignmentDrift -Assignment $found[0] -Spec $spec) } else { @() }
+        [pscustomobject]@{
+            Spec   = $spec
+            Found  = $found
+            Action = $action
+            Drift  = $drift
         }
     }
 }

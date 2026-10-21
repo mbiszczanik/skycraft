@@ -137,7 +137,7 @@ foreach ($spec in Get-LabPolicyAssignmentSpec) {
         $passCount++
     }
     elseif ($found.Count -eq 0) {
-        Write-Host " [FAIL] Not found. Expected an assignment of '$($spec.DefinitionDisplayName)' on the subscription itself, named '$($spec.Name)' or '$($spec.DisplayName)', step $($spec.Step)." -ForegroundColor Red
+        Write-Host " [FAIL] Not found. Expected an assignment of '$($spec.DefinitionDisplayName)' on the subscription itself, named '$($spec.Name)' (resource name or display name), step $($spec.Step)." -ForegroundColor Red
         $failCount++
     }
     else {

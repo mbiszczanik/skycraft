@@ -72,8 +72,59 @@ Describe 'Lab 1.3 policy assignment lookup - the guide''s four assignments' {
 
     It 'names the four assignments the guide, the Bicep path and Invoke-LabGovernance.ps1 create' {
         $script:Specs.Name | Should -Be @('Require-Environment-Tag-RG', 'Enforce-Project-Tag', 'Inherit-Project-Tag', 'Restrict-Azure-Regions')
-        $script:Specs.DisplayName | Should -Be @('Require Environment Tag on Resource Groups', 'Enforce Project Tag Value', 'Inherit Project Tag from Resource Group', 'Restrict to Allowed Regions')
+        # Every path gives the guide's name as display name (#406).
+        $script:Specs.DisplayName | Should -Be $script:Specs.Name
+        $script:Specs.LegacyDisplayName | Should -Be @('Require Environment Tag on Resource Groups', 'Enforce Project Tag Value', 'Inherit Project Tag from Resource Group', 'Restrict to Allowed Regions')
         $script:Specs.Step | Should -Be @('1.3.5', '1.3.8', '1.3.8', '1.3.9')
+    }
+
+    It 'holds the guide''s assignment names, descriptions and non-compliance messages, as the learner types them (#406)' {
+        # Each '- **Assignment name**: `X`' in the guide opens one assignment; its Description and
+        # Non-compliance message follow before the next one. A spec text that differs from the
+        # guide's would leave the Portal and the scripted paths in different states.
+        $guide = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'lab-guide-1.3.md')
+        $blocks = @([regex]::Split($guide, '(?m)^- \*\*Assignment name\*\*: ') | Select-Object -Skip 1)
+        $blocks.Count | Should -Be 4
+        $fromGuide = foreach ($block in $blocks) {
+            [pscustomobject]@{
+                Name                 = [regex]::Match($block, '^`([^`]+)`').Groups[1].Value
+                Description          = [regex]::Match($block, '(?m)^- \*\*Description\*\*: `([^`]+)`').Groups[1].Value
+                NonComplianceMessage = [regex]::Match($block, '(?m)^- \*\*Non-compliance message\*\*: `([^`]+)`').Groups[1].Value
+            }
+        }
+        $fromGuide.Name | Should -Be $script:Specs.DisplayName
+        $fromGuide.Description | Should -Be $script:Specs.Description
+        foreach ($i in 0..3) {
+            $expected = [string]$script:Specs[$i].NonComplianceMessage
+            $fromGuide[$i].NonComplianceMessage | Should -Be $expected -Because $script:Specs[$i].Name
+        }
+    }
+
+    It 'holds the same texts and parameter values as bicep/main.bicep (#406)' {
+        $bicep = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'bicep' 'main.bicep')
+        foreach ($spec in $script:Specs) {
+            $module = [regex]::Match($bicep, "(?s)module \w+ 'br/public:avm/res/authorization/policy-assignment/sub-scope:[^']+' = if \(!contains\(parExistingPolicyAssignments, '$([regex]::Escape($spec.Name))'\)\) \{.*?\r?\n}\r?\n").Value
+            $module | Should -Not -BeNullOrEmpty -Because "$($spec.Name) is deployed only when it does not exist under another name"
+            $module | Should -Match ([regex]::Escape("description: '$($spec.Description)'")) -Because $spec.Name
+            if ($spec.NonComplianceMessage) {
+                $module | Should -Match ([regex]::Escape("message: '$($spec.NonComplianceMessage)'")) -Because $spec.Name
+            }
+            else {
+                $module | Should -Not -Match 'nonComplianceMessages' -Because $spec.Name
+            }
+            foreach ($name in $spec.Parameter.Keys) {
+                $value = $spec.Parameter[$name]
+                if ($value -is [array]) {
+                    # The regions are a variable of the template.
+                    $module | Should -Match "${name}:\s*\{\s*value: varAllowedLocations" -Because $spec.Name
+                    $list = [regex]::Match($bicep, '(?s)var varAllowedLocations = \[(.*?)\]').Groups[1].Value
+                    @([regex]::Matches($list, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value }) | Should -Be $value
+                }
+                else {
+                    $module | Should -Match "${name}:\s*\{\s*value: '$([regex]::Escape($value))'" -Because $spec.Name
+                }
+            }
+        }
     }
 
     It 'gives each assignment its own definition, so one never counts as another' {
@@ -100,7 +151,8 @@ Describe 'Lab 1.3 policy assignment lookup - the guide''s four assignments' {
         $module | Should -Not -BeNullOrEmpty
         $module | Should -Match "tagName:\s*\{\s*value: 'Project'"
         $module | Should -Match 'systemAssigned: true'
-        $module | Should -Match ([regex]::Escape("'/providers/Microsoft.Authorization/roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c'"))
+        $module | Should -Match 'roleDefinitionIds: parGrantInheritProjectTagRole \? \[varContributorRoleId\] : \[\]'
+        $bicep | Should -Match ([regex]::Escape("var varContributorRoleId = '$($script:Specs[2].RoleDefinitionId)'"))
         $module | Should -Match 'location: parLocation'
     }
 
@@ -109,7 +161,7 @@ Describe 'Lab 1.3 policy assignment lookup - the guide''s four assignments' {
         # left out, every Deny assignment of the Bicep path got an identity the other paths do not
         # create, and the paths ended in different states.
         $bicep = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'bicep' 'main.bicep')
-        $modules = @([regex]::Matches($bicep, "(?s)module \w+ 'br/public:avm/res/authorization/policy-assignment/sub-scope:[^']+' = \{.*?\r?\n}\r?\n") |
+        $modules = @([regex]::Matches($bicep, "(?s)module \w+ 'br/public:avm/res/authorization/policy-assignment/sub-scope:[^']+' = (?:if \([^\r\n]+\) )?\{.*?\r?\n}\r?\n") |
             ForEach-Object { $_.Value })
         $modules.Count | Should -Be 4
         foreach ($deny in @($script:Specs | Where-Object { -not $_.ManagedIdentity })) {
@@ -141,14 +193,19 @@ Describe 'Lab 1.3 policy assignment lookup - which assignment is the guide''s (#
         $found[0].Name | Should -Be 'aaaaaaaaaaaaaaaaaaaaaaa2'
     }
 
-    It 'finds a Bicep-made assignment: fixed name, the Bicep display name' {
-        $bicep = Get-AssignmentFixture -Name 'Enforce-Project-Tag' -DisplayName 'Enforce Project Tag Value'
+    It 'finds a Bicep-made assignment: fixed name, the guide''s name as display name' {
+        $bicep = Get-AssignmentFixture -Name 'Enforce-Project-Tag' -DisplayName 'Enforce-Project-Tag'
         $found = Select-Tag -Assignment @($bicep)
         $found.Count | Should -Be 1
         $found[0].Name | Should -Be 'Enforce-Project-Tag'
     }
 
-    It 'finds an assignment that carries the Bicep display name under a generated name' {
+    It 'finds a Bicep-made assignment from before #406: fixed name, the old Bicep display name' {
+        $bicep = Get-AssignmentFixture -Name 'Enforce-Project-Tag' -DisplayName 'Enforce Project Tag Value'
+        (Select-Tag -Assignment @($bicep)).Count | Should -Be 1
+    }
+
+    It 'finds an assignment that carries the old Bicep display name under a generated name' {
         $typed = Get-AssignmentFixture -Name 'aaaaaaaaaaaaaaaaaaaaaaa2' -DisplayName 'Enforce Project Tag Value'
         (Select-Tag -Assignment @($typed)).Count | Should -Be 1
     }
@@ -306,5 +363,71 @@ Describe 'Lab 1.3 policy assignment lookup - the Modify assignment Inherit-Proje
         )
         $picked = @(Select-LabPolicyIdentityRoleAssignment -RoleAssignment $roles -PrincipalId $script:PrincipalId -SubscriptionId $script:SubscriptionId)
         $picked.Name | Should -Be @('own-sub', 'own-rg')
+    }
+}
+
+Describe 'Lab 1.3 policy assignment lookup - drift and the deploy plan (#406)' {
+
+    BeforeAll {
+        # A Portal-built lab: generated names, the guide's names as display names, the lab's values.
+        function Get-PortalLab {
+            param([string]$TagValue = 'SkyCraft', [string]$RegionMode = 'Default', [switch]$NoIdentity)
+            $values = @{
+                'Require-Environment-Tag-RG' = @{ tagName = 'Environment' }
+                'Enforce-Project-Tag'        = @{ tagName = 'Project'; tagValue = $TagValue }
+                'Inherit-Project-Tag'        = @{ tagName = 'Project' }
+                'Restrict-Azure-Regions'     = @{ listOfAllowedLocations = @('NorthEurope', 'swedencentral') }
+            }
+            $i = 0
+            foreach ($spec in $script:Specs) {
+                $i++
+                $fixture = Get-AssignmentFixture -Name "aaaaaaaaaaaaaaaaaaaaaaa$i" -DisplayName $spec.Name -PolicyDefinitionId $spec.PolicyDefinitionId
+                $bag = [ordered]@{}
+                foreach ($key in $values[$spec.Name].Keys) { $bag[$key] = [pscustomobject]@{ value = $values[$spec.Name][$key] } }
+                $fixture | Add-Member -NotePropertyName Parameter -NotePropertyValue ([pscustomobject]$bag)
+                $fixture | Add-Member -NotePropertyName EnforcementMode -NotePropertyValue $(if ($spec.Name -eq 'Restrict-Azure-Regions') { $RegionMode } else { 'Default' })
+                if ($spec.ManagedIdentity -and -not $NoIdentity) {
+                    $fixture | Add-Member -NotePropertyName IdentityType -NotePropertyValue 'SystemAssigned'
+                    $fixture | Add-Member -NotePropertyName IdentityPrincipalId -NotePropertyValue '11111111-1111-1111-1111-111111111111'
+                }
+                $fixture
+            }
+        }
+    }
+
+    It 'finds no drift in a Portal-built lab: regions in another order and case, enforcement left as Default' {
+        foreach ($assignment in Get-PortalLab) {
+            $spec = $script:Specs | Where-Object { $_.PolicyDefinitionId -eq $assignment.PolicyDefinitionId }
+            @(Get-LabPolicyAssignmentDrift -Assignment $assignment -Spec $spec) | Should -BeNullOrEmpty -Because $spec.Name
+        }
+    }
+
+    It 'reports another parameter value, a disabled enforcement and a missing identity' {
+        $lab = @(Get-PortalLab -TagValue 'Contoso' -RegionMode 'DoNotEnforce' -NoIdentity)
+        @(Get-LabPolicyAssignmentDrift -Assignment $lab[1] -Spec $script:Specs[1]) | Should -Be @("parameter tagValue is 'Contoso', the lab's is 'SkyCraft'")
+        @(Get-LabPolicyAssignmentDrift -Assignment $lab[2] -Spec $script:Specs[2]) | Should -Be @("it has no managed identity, the lab's has a system-assigned managed identity")
+        @(Get-LabPolicyAssignmentDrift -Assignment $lab[3] -Spec $script:Specs[3]) | Should -Be @("enforcement mode is 'DoNotEnforce', the lab's is 'Default'")
+    }
+
+    It 'reports a parameter that is not set, and a region list that differs' {
+        $unset = Get-AssignmentFixture -Name 'aaaaaaaaaaaaaaaaaaaaaaa1' -DisplayName 'Require-Environment-Tag-RG' -PolicyDefinitionId $script:Specs[0].PolicyDefinitionId
+        @(Get-LabPolicyAssignmentDrift -Assignment $unset -Spec $script:Specs[0]) | Should -Be @("parameter tagName is not set, the lab's is 'Environment'")
+        $regions = Get-AssignmentFixture -Name 'aaaaaaaaaaaaaaaaaaaaaaa3' -DisplayName 'Restrict-Azure-Regions' -PolicyDefinitionId $script:Specs[3].PolicyDefinitionId
+        $regions | Add-Member -NotePropertyName Parameter -NotePropertyValue ([pscustomobject]@{ listOfAllowedLocations = [pscustomobject]@{ value = @('swedencentral', 'eastus') } })
+        @(Get-LabPolicyAssignmentDrift -Assignment $regions -Spec $script:Specs[3]) | Should -Be @("parameter listOfAllowedLocations is 'swedencentral, eastus', the lab's is 'swedencentral, northeurope'")
+    }
+
+    It 'keeps every assignment of a Portal-built lab, and creates none' {
+        $plan = @(Get-LabPolicyAssignmentPlan -Assignment @(Get-PortalLab) -SubscriptionId $script:SubscriptionId)
+        $plan.Action | Should -Be @('Keep', 'Keep', 'Keep', 'Keep')
+        @($plan | Where-Object { $_.Drift.Count -gt 0 }) | Should -BeNullOrEmpty
+    }
+
+    It 'creates on an empty subscription, adopts under the fixed name, and stops on a duplicate' {
+        (@(Get-LabPolicyAssignmentPlan -Assignment @() -SubscriptionId $script:SubscriptionId)).Action | Should -Be @('Create', 'Create', 'Create', 'Create')
+        $fixed = Get-AssignmentFixture -Name 'Enforce-Project-Tag' -DisplayName 'Enforce Project Tag Value'
+        $portal = Get-AssignmentFixture -Name 'aaaaaaaaaaaaaaaaaaaaaaa2' -DisplayName 'Enforce-Project-Tag'
+        (@(Get-LabPolicyAssignmentPlan -Assignment @($fixed) -SubscriptionId $script:SubscriptionId))[1].Action | Should -Be 'Adopt'
+        (@(Get-LabPolicyAssignmentPlan -Assignment @($fixed, $portal) -SubscriptionId $script:SubscriptionId))[1].Action | Should -Be 'Duplicate'
     }
 }
