@@ -26,10 +26,11 @@
 
     The budgets are read through the Consumption API (Get-LabArmBudget in tools/LabCommon.psm1),
     not Get-AzConsumptionBudget: Az.Billing 2.3.0 sends api-version 2018-01-31, which current
-    subscriptions refuse with 422 (issue #411). The API lists budgets per scope, so both of the
-    guide's scopes are read: the subscription (SkyCraft-Monthly-Budget) and prod-skycraft-swc-rg
-    (SkyCraft-Prod-Monthly). Each is read on its own; a read that fails prints its HTTP status and
-    the service's message and does not hide the other scope.
+    subscriptions refuse with 422 (issue #411). Both of the guide's scopes are read: the
+    subscription (SkyCraft-Monthly-Budget; its listing also returns resource-group budgets) and
+    prod-skycraft-swc-rg (SkyCraft-Prod-Monthly). Each is read on its own; a read that fails prints
+    its HTTP status and the service's message and does not hide the other scope. Each budget is
+    printed once, with the scope it is set on.
 
 .EXAMPLE
     .\Test-Lab.ps1
@@ -229,8 +230,9 @@ foreach ($target in $lockTargets) {
 # prints [OK] or [FAIL] or touches the counts; a budget lookup that fails says so, rather than
 # reading as "no budgets".
 Write-Host "`n=== 4. Budgets (manual check, not counted) ===" -ForegroundColor Cyan
-# Through the Consumption API at a version it accepts (#411). It lists per scope, so each of the
-# guide's two scopes is read, each in its own try so one failed read does not hide the other.
+# Through the Consumption API at a version it accepts (#411). The subscription's listing also
+# returns resource-group budgets (seen live); the prod group is still read on its own, each in its
+# own try, so one failed read does not hide the other.
 $budgetScopes = @(
     @{ Label = 'the subscription'; Scope = "/subscriptions/$subscriptionId" }
     @{ Label = 'prod-skycraft-swc-rg'; Scope = "/subscriptions/$subscriptionId/resourceGroups/prod-skycraft-swc-rg" }
@@ -243,7 +245,8 @@ foreach ($budgetScope in $budgetScopes) {
             # A budget a wider listing already printed is not repeated.
             foreach ($budget in $budgets | Where-Object { -not $seenBudgetIds.ContainsKey($_.Id) }) {
                 $seenBudgetIds[$budget.Id] = $true
-                Write-Host "  [INFO] Budget found on $($budgetScope.Label): $($budget.Name) (Amount: $($budget.Amount) $($budget.Unit))" -ForegroundColor Gray
+                $setOn = if ($budget.Scope -match '/resourceGroups/([^/]+)$') { $Matches[1] } else { 'the subscription' }
+                Write-Host "  [INFO] Budget found on ${setOn}: $($budget.Name) (Amount: $($budget.Amount) $($budget.Unit))" -ForegroundColor Gray
             }
         }
         else {

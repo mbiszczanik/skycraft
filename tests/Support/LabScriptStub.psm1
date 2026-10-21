@@ -450,7 +450,8 @@ $script:LabArmFakeRoute['Budget'] = @'
 function ConvertTo-StubArmBudget {
     param([string]$Scope, [object]$Record)
     [ordered]@{
-        id         = "$Scope/providers/Microsoft.Consumption/budgets/$($Record.Name)"
+        # A record's own Scope: a resource-group budget listed at the subscription.
+        id         = "$(if ($Record.Scope) { $Record.Scope } else { $Scope })/providers/Microsoft.Consumption/budgets/$($Record.Name)"
         name       = [string]$Record.Name
         type       = 'Microsoft.Consumption/budgets'
         properties = [ordered]@{
@@ -531,8 +532,9 @@ function Get-LabArmStub {
 
           Get-StubBudget -Scope <scope>     (required, with [CmdletBinding()]) returns the
               budgets at the scope, /subscriptions/<id> or /subscriptions/<id>/resourceGroups/
-              <name>, as records with Name and optionally Amount, Unit (the currency), Category
-              and TimeGrain.
+              <name>, as records with Name and optionally Amount, Unit (the currency), Category,
+              TimeGrain and Scope (where the budget is set, when that is below the listed scope:
+              a subscription's listing also returns resource-group budgets).
           Remove-StubBudget -Scope -Name (optional) records a delete; a throw fails it as above.
               Without it, a delete stops the script.
 

@@ -267,8 +267,8 @@ Get-AzResourceLock -ResourceGroupName platform-skycraft-swc-rg |
 `Get-AzConsumptionBudget` (Az.Billing) cannot do this check: it asks for an API version that
 current subscriptions refuse, with `Unprocessable Entity ... Please use version 2018-12-01-preview
 or later`. These commands call the same budgets API through `Invoke-AzRestMethod` (Az.Accounts) at
-a version the service accepts. The listing is per scope: the first shows the subscription's
-budgets, the second the budgets on prod-skycraft-swc-rg.
+a version the service accepts. The first lists every budget in the subscription, resource-group budgets
+included; the second only the budgets on prod-skycraft-swc-rg.
 
 ```powershell
 $subId = (Get-AzContext).Subscription.Id

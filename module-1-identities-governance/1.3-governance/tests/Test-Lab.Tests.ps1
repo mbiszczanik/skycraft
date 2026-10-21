@@ -20,7 +20,8 @@
          validation nor counts as a pass - and a failed lookup is not reported as "found". The
          budgets are read through the Consumption API at 2023-05-01 (Get-LabArmBudget, issue
          #411), served by the shared ARM fake, at both of the guide's scopes: the subscription and
-         prod-skycraft-swc-rg, since the API lists per scope. A failed read prints its HTTP status
+         prod-skycraft-swc-rg (the subscription's listing also returns the group's budget). Each
+         budget is printed once, with the scope it is set on. A failed read prints its HTTP status
          and the service's message, and a failed read at one scope does not hide the other.
       6. A lock check passes only for the guide's lock: its name, level CanNotDelete, applied to
          the group itself (issue #258). A ReadOnly lock, a lock under another name, a lock on a
@@ -250,8 +251,8 @@ function Get-AzResourceLock {
 }
 
 # Served through the Consumption API fake appended to this body (issue #411): the scope is the
-# ARM scope the script lists, logged as given. The API lists per scope, so each budget appears
-# only at its own.
+# ARM scope the script lists, logged as given. As seen live, the subscription's listing also
+# returns the prod group's budget; the group's listing returns only its own.
 function Get-StubBudget {
     [CmdletBinding()]
     param([string]$Scope)
@@ -261,8 +262,9 @@ function Get-StubBudget {
         'none' { return }
         { $_ -eq 'fail' -or ($_ -eq 'rgfail' -and $isProdRg) } { Write-Error -ErrorId 'AuthorizationFailed' -Message "stub lookup failure: no Microsoft.Consumption/budgets/read on $Scope"; return }
     }
-    if ($isProdRg) { [pscustomobject]@{ Name = 'SkyCraft-Prod-Monthly'; Amount = 20; Unit = 'EUR' } }
-    else { [pscustomobject]@{ Name = 'SkyCraft-Monthly-Budget'; Amount = 50; Unit = 'EUR' } }
+    $prod = [pscustomobject]@{ Name = 'SkyCraft-Prod-Monthly'; Amount = 20; Unit = 'EUR'; Scope = ($Scope -replace '/resourceGroups/.*$', '') + '/resourceGroups/prod-skycraft-swc-rg' }
+    if ($isProdRg) { $prod }
+    else { [pscustomobject]@{ Name = 'SkyCraft-Monthly-Budget'; Amount = 50; Unit = 'EUR' }; $prod }
 }
 '@
 
@@ -467,14 +469,15 @@ Describe 'Lab 1.3 Test-Lab.ps1 - budgets are a manual check, not counted' {
         $run = $script:AllPass
         $run.Output | Should -Match '\[INFO\] Budget found on the subscription: SkyCraft-Monthly-Budget \(Amount: 50 EUR\)'
         $run.Output | Should -Match '\[INFO\] Budget found on prod-skycraft-swc-rg: SkyCraft-Prod-Monthly \(Amount: 20 EUR\)'
+        ([regex]::Matches($run.Output, 'Budget found on [^\r\n]*SkyCraft-Prod-Monthly')).Count | Should -Be 1 -Because 'both listings return it; it is printed once, with the group it is set on'
         $run.Output | Should -Match 'manual check, not counted'
         $run.OkLines | Should -Be 9 -Because 'the nine counted checks are the only [OK] lines'
     }
 
     It 'reads the budgets once per scope, the subscription and the prod group, through the Consumption API (#411)' {
         # The fake answers only api-version 2023-05-01, so a read at Az.Billing's 2018-01-31 would
-        # land in the "could not be read" branch and fail the test above. The API lists per
-        # scope, so a subscription read alone would miss SkyCraft-Prod-Monthly.
+        # land in the "could not be read" branch and fail the test above. The group is read on its
+        # own as well, so a refused subscription read does not hide SkyCraft-Prod-Monthly.
         @($script:AllPass.Calls | Where-Object { $_ -like 'Get-Budget:*' }) |
             Should -Be @(
                 'Get-Budget:/subscriptions/00000000-0000-0000-0000-000000000000',
@@ -501,12 +504,12 @@ Describe 'Lab 1.3 Test-Lab.ps1 - budgets are a manual check, not counted' {
         $run.Output | Should -Match 'Passed: 9\b'
     }
 
-    It 'still lists the subscription''s budget when only the prod group''s read fails' {
+    It 'still lists both budgets from the subscription''s listing when only the prod group''s read fails' {
         $run = $script:BudgetRgFails
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match '\[INFO\] Budget found on the subscription: SkyCraft-Monthly-Budget'
         $run.Output | Should -Match '\[INFO\] Budgets on prod-skycraft-swc-rg could not be read: [^\r\n]*HTTP 403 \(AuthorizationFailed\)'
-        $run.Output | Should -Not -Match 'SkyCraft-Prod-Monthly'
+        $run.Output | Should -Match '\[INFO\] Budget found on prod-skycraft-swc-rg: SkyCraft-Prod-Monthly' -Because 'the subscription listing returns the group budget too'
         $run.Output | Should -Match 'Passed: 9\b'
     }
 }
