@@ -17,6 +17,12 @@
       - the principal resolver, lifted out of the script with the PowerShell parser the way
         tests/Lab11-Graph-Auth.Tests.ps1 does, refuses ambiguity and absence rather than deploying
         a role to whichever object came back first
+      - Lab 1.1's user is looked up by its full address on the tenant's initial *.onmicrosoft.com
+        domain, where Lab 1.1 creates it (issue #237): the domain list is read through
+        Invoke-AzRestMethod, a failed read is an error, and a tenant with no initial domain stops
+        the script with [ERROR] and exit 1 before anything is looked up or deployed. That part runs
+        the real script in a child pwsh through tests/Support/LabScriptStub.psm1 (issue #112),
+        which refuses to run (exit 99) unless every stubbed command resolves to the stub.
 
     Evaluating only the FunctionDefinitionAst nodes means no script body runs, so no Azure call is
     made and no Az module is needed - while the code under test is the code the lab ships.
@@ -55,11 +61,21 @@ BeforeAll {
     if (-not $resolverAst) { throw 'Deploy-Bicep.ps1 does not define Resolve-LabPrincipalId.' }
     . ([scriptblock]::Create($resolverAst.Extent.Text))
 
+    foreach ($helper in 'Get-LabDirectoryDomain', 'Select-LabInitialDomain') {
+        $helperAst = $script:ScriptAst.FindAll({
+            param($n)
+            $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $helper
+        }, $false) | Select-Object -First 1
+        if (-not $helperAst) { throw "Deploy-Bicep.ps1 does not define $helper." }
+        . ([scriptblock]::Create($helperAst.Extent.Text))
+    }
+
     # Stubs so the Az.Resources cmdlets can be mocked on a runner that has no Az module. Unmocked
     # they return nothing, which is the "not found" answer; the parameters exist so a
     # -ParameterFilter can bind them.
     function Get-AzADUser  { [CmdletBinding()] param($Filter)      Write-Verbose "stub Get-AzADUser -Filter $Filter" }
     function Get-AzADGroup { [CmdletBinding()] param($DisplayName) Write-Verbose "stub Get-AzADGroup -DisplayName $DisplayName" }
+    function Invoke-AzRestMethod { [CmdletBinding()] param($Method, $Uri) Write-Verbose "stub Invoke-AzRestMethod -Method $Method -Uri $Uri" }
 }
 
 Describe 'Lab 1.2 - role-assignments.bicep has a deployment path (#81)' {
@@ -121,10 +137,10 @@ Describe 'Lab 1.2 - Resolve-LabPrincipalId refuses to guess' {
         Mock Get-AzADGroup { }
     }
 
-    It 'resolves a member user by userPrincipalName prefix, so the tenant domain is never hard-coded' {
+    It 'resolves a member user by its full userPrincipalName, on the domain the caller names (#237)' {
         Mock Get-AzADUser { [pscustomobject]@{ Id = 'aaaaaaaa-0000-0000-0000-000000000001'; UserPrincipalName = 'malfurion.stormrage@contoso.onmicrosoft.com' } }
-        Resolve-LabPrincipalId -Type User -Name 'malfurion.stormrage' | Should -Be 'aaaaaaaa-0000-0000-0000-000000000001'
-        Should -Invoke Get-AzADUser -Times 1 -Exactly -ParameterFilter { $Filter -like "startsWith(userPrincipalName,'malfurion.stormrage@')*" }
+        Resolve-LabPrincipalId -Type User -Name 'malfurion.stormrage@contoso.onmicrosoft.com' | Should -Be 'aaaaaaaa-0000-0000-0000-000000000001'
+        Should -Invoke Get-AzADUser -Times 1 -Exactly -ParameterFilter { $Filter -eq "userPrincipalName eq 'malfurion.stormrage@contoso.onmicrosoft.com'" }
     }
 
     It 'resolves a group by exact display name' {
@@ -156,5 +172,189 @@ Describe 'Lab 1.2 - Resolve-LabPrincipalId refuses to guess' {
         $id = Resolve-LabPrincipalId -Type Group -Name 'SkyCraft-Testers'
         $id | Should -BeOfType [string]
         $id | Should -Be 'ffffffff-0000-0000-0000-000000000006'
+    }
+}
+
+Describe 'Lab 1.2 - Get-LabDirectoryDomain reads the tenant''s domains through the Az token (#237)' {
+
+    It 'returns the domains Microsoft Graph lists, ready for Select-LabInitialDomain' {
+        Mock Invoke-AzRestMethod {
+            [pscustomobject]@{ StatusCode = 200; Content = '{"value":[{"id":"contoso.example","isInitial":false},{"id":"contoso.onmicrosoft.com","isInitial":true}]}' }
+        }
+        $domains = @(Get-LabDirectoryDomain)
+        $domains.Count | Should -Be 2
+        Select-LabInitialDomain -Domain $domains | Should -Be 'contoso.onmicrosoft.com'
+        Should -Invoke Invoke-AzRestMethod -Times 1 -Exactly -ParameterFilter { $Method -eq 'GET' -and $Uri -like 'https://graph.microsoft.com/v1.0/domains*' }
+    }
+
+    It 'throws on an HTTP error instead of returning an empty list' {
+        # Invoke-AzRestMethod answers an HTTP error with a status code, not an exception.
+        Mock Invoke-AzRestMethod { [pscustomobject]@{ StatusCode = 403; Content = '{"error":{"code":"Authorization_RequestDenied"}}' } }
+        { Get-LabDirectoryDomain } | Should -Throw '*403*'
+    }
+}
+
+Describe 'Lab 1.2 - Deploy-Bicep.ps1 -IncludeRoleAssignments looks Lab 1.1''s user up on the initial domain (#237)' {
+
+    BeforeAll {
+        Import-Module (Join-Path $PSScriptRoot '..' '..' '..' 'tests' 'Support' 'LabScriptStub.psm1') -Force
+
+        # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
+        $requiredModules = @('Az.Accounts', 'Az.Resources')
+
+        # Every Az command the script can reach. New-AzDeployment and Get-AzDeploymentWhatIfResult
+        # are what the script's New-AzSubscriptionDeployment and Get-AzSubscriptionDeploymentWhatIfResult
+        # aliases resolve to in Az.Resources: stubbing the alias names would not shadow them, the
+        # targets do. No scenario here should get that far; the stubs throw if one does.
+        $stubCommands = @(
+            'Get-AzContext'
+            'Connect-AzAccount'
+            'Invoke-AzRestMethod'
+            'Get-AzADUser'
+            'Get-AzADGroup'
+            'Get-AzResourceGroup'
+            'Get-AzRoleAssignment'
+            'New-AzDeployment'
+            'Get-AzDeploymentWhatIfResult'
+        )
+
+        # SKYCRAFT_STUB_DOMAIN picks the GET /v1.0/domains answer: 'custom' (a custom default domain
+        # next to the initial one), 'noinitial', 'http403'. Get-AzADGroup finds nothing, so a run
+        # that gets past the user lookup stops at the first group with [ERROR] and exit 1, before
+        # any deployment.
+        $stubBody = @'
+$script:LogPath = $env:SKYCRAFT_STUB_LOG
+
+function Write-StubCall {
+    param([string]$Name)
+    if ($script:LogPath) { Add-Content -LiteralPath $script:LogPath -Value $Name }
+}
+
+function Get-AzContext {
+    [CmdletBinding()]
+    param()
+    [pscustomobject]@{
+        Subscription = [pscustomobject]@{ Id = '11111111-1111-1111-1111-111111111111'; Name = 'stub-subscription' }
+        Tenant       = [pscustomobject]@{ Id = '00000000-0000-0000-0000-000000000000' }
+    }
+}
+
+function Connect-AzAccount {
+    [CmdletBinding()]
+    param([Parameter(ValueFromRemainingArguments)]$Rest)
+    Write-StubCall -Name 'Connect-AzAccount'
+}
+
+function Invoke-AzRestMethod {
+    [CmdletBinding()]
+    param([string]$Method, [string]$Uri, [Parameter(ValueFromRemainingArguments)]$Rest)
+    Write-StubCall -Name "Invoke-AzRestMethod|$Method $Uri"
+    switch ($env:SKYCRAFT_STUB_DOMAIN) {
+        'http403'   { [pscustomobject]@{ StatusCode = 403; Content = '{"error":{"code":"Authorization_RequestDenied"}}' } }
+        'noinitial' { [pscustomobject]@{ StatusCode = 200; Content = '{"value":[{"id":"contoso.example","isDefault":true,"isInitial":false}]}' } }
+        default {
+            [pscustomobject]@{ StatusCode = 200; Content = '{"value":[{"id":"contoso.example","isDefault":true,"isInitial":false},{"id":"contoso.onmicrosoft.com","isDefault":false,"isInitial":true}]}' }
+        }
+    }
+}
+
+function Get-AzADUser {
+    [CmdletBinding()]
+    param([string]$Filter, [Parameter(ValueFromRemainingArguments)]$Rest)
+    Write-StubCall -Name "Get-AzADUser|$Filter"
+    [pscustomobject]@{ Id = 'aaaaaaaa-0000-0000-0000-000000000001' }
+}
+
+function Get-AzADGroup {
+    [CmdletBinding()]
+    param([string]$DisplayName, [Parameter(ValueFromRemainingArguments)]$Rest)
+    Write-StubCall -Name "Get-AzADGroup|$DisplayName"
+}
+
+function Get-AzResourceGroup {
+    [CmdletBinding()]
+    param([Parameter(ValueFromRemainingArguments)]$Rest)
+    Write-StubCall -Name 'Get-AzResourceGroup'
+}
+
+function Get-AzRoleAssignment {
+    [CmdletBinding()]
+    param([Parameter(ValueFromRemainingArguments)]$Rest)
+    Write-StubCall -Name 'Get-AzRoleAssignment'
+}
+
+function New-AzDeployment {
+    [CmdletBinding()]
+    param([Parameter(ValueFromRemainingArguments)]$Rest)
+    Write-StubCall -Name 'New-AzDeployment'
+    throw 'stub: this scenario must not deploy'
+}
+
+function Get-AzDeploymentWhatIfResult {
+    [CmdletBinding()]
+    param([Parameter(ValueFromRemainingArguments)]$Rest)
+    Write-StubCall -Name 'Get-AzDeploymentWhatIfResult'
+    throw 'stub: this scenario must not reach the what-if'
+}
+'@
+
+        $script:DeployScriptPath = (Resolve-Path $script:ScriptPath).Path
+        $script:DeployStub = Initialize-LabScriptStub -Name 'SkyCraftLab12DeployStub' -Command $stubCommands `
+            -Body $stubBody -RequiredModule $requiredModules
+
+        function Invoke-DeployScript {
+            param([string]$Domain)
+
+            $logPath = Join-Path $script:DeployStub.Directory 'calls.log'
+            Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
+
+            $run = Invoke-LabScriptWithStub -Stub $script:DeployStub -ScriptPath $script:DeployScriptPath `
+                -ArgumentList '-IncludeRoleAssignments', '-WhatIf' -Environment @{
+                    SKYCRAFT_STUB_DOMAIN = $Domain
+                    SKYCRAFT_STUB_LOG    = $logPath
+                }
+
+            $calls = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { @() }
+            [pscustomobject]@{ ExitCode = $run.ExitCode; Refused = $run.Refused; Output = $run.Output; Calls = $calls }
+        }
+
+        # One invocation per scenario - each child process costs several seconds.
+        $script:Custom    = Invoke-DeployScript -Domain 'custom'
+        $script:NoInitial = Invoke-DeployScript -Domain 'noinitial'
+        $script:Http403   = Invoke-DeployScript -Domain 'http403'
+    }
+
+    AfterAll {
+        if ($script:DeployStub) { Remove-Item -LiteralPath $script:DeployStub.Directory -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'shadows the real Az commands instead of touching a tenant or a subscription' {
+        foreach ($run in @($script:Custom, $script:NoInitial, $script:Http403)) {
+            $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az commands (exit $($run.ExitCode)): $($run.Output)"
+            $run.Calls | Should -Not -Contain 'New-AzDeployment'
+            $run.Calls | Should -Not -Contain 'Get-AzDeploymentWhatIfResult'
+        }
+    }
+
+    It 'looks Malfurion up on the initial domain in a tenant whose default domain is a custom one' {
+        $run = $script:Custom
+        $run.Calls | Should -Contain "Get-AzADUser|userPrincipalName eq 'malfurion.stormrage@contoso.onmicrosoft.com'" -Because "Lab 1.1 creates him there; output was:`n$($run.Output)"
+        ($run.Calls -join "`n") | Should -Not -Match '@contoso\.example'
+        $run.Output | Should -Match 'Initial domain: contoso\.onmicrosoft\.com'
+        # The stub tenant has no groups, so the run stops at the first one - after the user lookup.
+        $run.Output | Should -Match "\[ERROR\] Group 'SkyCraft-Developers' not found"
+        $run.ExitCode | Should -Be 1
+    }
+
+    It 'stops with [ERROR] and exit 1 when <case>, before any lookup or deployment' -ForEach @(
+        @{ scenario = 'NoInitial'; case = 'the tenant lists no initial domain'; detail = 'no domain marked IsInitial' }
+        @{ scenario = 'Http403';   case = 'the domain list cannot be read';     detail = '403' }
+    ) {
+        $run = Get-Variable -Scope Script -Name $scenario -ValueOnly
+        $run.ExitCode | Should -Be 1 -Because "a guessed domain names users Lab 1.1 never created; output was:`n$($run.Output)"
+        $run.Output | Should -Match ('\[ERROR\] Could not determine the tenant''s initial \*\.onmicrosoft\.com domain: [^\r\n]*' + [regex]::Escape($detail))
+        @($run.Calls | Where-Object { $_ -like 'Invoke-AzRestMethod|GET https://graph.microsoft.com/v1.0/domains*' }).Count | Should -Be 1
+        @($run.Calls | Where-Object { $_ -like 'Get-AzADUser|*' -or $_ -like 'Get-AzADGroup|*' -or $_ -eq 'Get-AzResourceGroup' }) |
+            Should -BeNullOrEmpty -Because 'nothing may be looked up or deployed on a guessed domain'
     }
 }

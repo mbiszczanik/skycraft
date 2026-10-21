@@ -19,14 +19,16 @@
                 cannot be inspected at all, so its outcome is unknowable by construction.
       gated     Some 'if' in the same script tests that variable's 'ProvisioningState'
                 against 'Succeeded', and the branch taken when it does not match ends the
-                script with a non-zero 'exit' (or a 'throw').
+                script with a non-zero 'exit', an 'Exit-Lab' with a non-zero count, or a
+                'throw'.
 
     Which branch is the failure branch follows from the operator: '-ne Succeeded' fails in
     the if body, '-eq Succeeded' fails in the else clause.
 
-    Pairing the guard with the exit code itself is left to Exit-Code-Propagation.Tests.ps1,
-    which requires every non-zero 'exit' in a script declaring '#Requires -Modules' to be preceded
-    by $Host.SetShouldExit. This file keeps the wider scope on purpose (#124): New-Az*Deployment
+    Carrying the exit code out of the process is left to Exit-Code-Propagation.Tests.ps1, which
+    requires every lab script to end through Exit-Lab (#257) and every other script declaring
+    '#Requires -Modules' to precede a non-zero 'exit' with $Host.SetShouldExit (#104). This file
+    keeps the wider scope on purpose (#124): New-Az*Deployment
     returns an ungated 'Failed' whatever the script requires, so the rule here follows the call
     rather than the declaration.
 
@@ -96,9 +98,14 @@ function Get-DeploymentSite {
 
                     if ($null -eq $failureBranch) { continue }
 
+                    # A lab script ends through Exit-Lab (tools/LabCommon.psm1, #257); any count
+                    # other than a literal 0 exits 1.
                     $endsScript = @($failureBranch.FindAll({ param($n)
                         ($n -is [System.Management.Automation.Language.ExitStatementAst] -and
                          $null -ne $n.Pipeline -and $n.Pipeline.Extent.Text.Trim() -ne '0') -or
+                        ($n -is [System.Management.Automation.Language.CommandAst] -and
+                         $n.GetCommandName() -eq 'Exit-Lab' -and
+                         $n.CommandElements[-1].Extent.Text.Trim() -ne '0') -or
                         $n -is [System.Management.Automation.Language.ThrowStatementAst]
                     }, $true)).Count -gt 0
 

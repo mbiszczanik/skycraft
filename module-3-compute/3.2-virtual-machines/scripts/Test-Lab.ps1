@@ -33,6 +33,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 # Configuration
 $rgName = "$Environment-skycraft-swc-rg"
@@ -50,8 +52,7 @@ Write-Host ""
 $context = Get-AzContext
 if (-not $context) {
     Write-Error "Not logged into Azure. Run Connect-AzAccount first."
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 # ============================================================================
@@ -210,5 +211,4 @@ if ($failCount -gt 0) {
 Write-Host "========================================"  -ForegroundColor Cyan
 Write-Host ""
 
-$Host.SetShouldExit($failCount)
-exit $failCount
+Exit-Lab -FailureCount $failCount
