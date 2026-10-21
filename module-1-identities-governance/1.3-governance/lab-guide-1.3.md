@@ -511,7 +511,7 @@ A task can finish as succeeded without remediating anything, so check its result
 
 9. In the left menu, click **Remediation**
 10. Click the **Remediation tasks** tab
-11. Click your task, the newest in the list. Its details page shows its status and lists the resources it remediated: there should be one, `Advisor-Cost-Recommendations`. A task whose list is empty remediated nothing, even when its status says it succeeded
+11. Click your task, the newest in the list. In the list, its Remediated Resources column reads `1 out of 1`; its details page shows the status Complete and lists the resource it remediated, `advisor-cost-recommendations`. A task that reads `0 out of 0` remediated nothing, even when its status says Complete
 12. In Azure Portal, search for **Resource groups**
 13. Click on **prod-skycraft-swc-rg**
 14. Click on **Advisor-Cost-Recommendations**
@@ -662,7 +662,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 **Note**: **Reset period** starts at **Billing month**. Pick **Monthly**, which the list shows under **Calendar months**. The **Amount** field is labelled with your billing currency (for example **Amount (€)**).
 
-**Note**: On a subscription created the same day, the cost chart of **Create a budget** can show **Cannot load data**. That is expected: cost data can take up to 48 hours to appear (note in Step 1.3.18), and the budget is still created.
+**Note**: On a subscription created the same day, the cost chart of **Create a budget** can show **Cannot load data**, and a day later **No data to display**. That is expected: cost data can take up to 48 hours to appear (note in Step 1.3.18), and the budget is still created.
 
 6. Click **Next >**
 
@@ -752,7 +752,7 @@ Create a more specific budget for the production environment. A budget belongs t
 
 ![Manage Costs with Budgets and Alerts](./images/step-1.3.18b.png)
 
-**Note**: On a subscription created the same day, Cost analysis can show **Unable to load** instead of the charts, and no **Add filter**, for up to 48 hours: Microsoft says a new subscription may wait that long for all Cost Management features. The **VIEW** menu and **Last 30 days** still work, but items 6-7 cannot be done yet. The budget chart of Step 1.3.15 shows **Cannot load data** for the same reason. Nothing is wrong with the lab: come back to this step later. `Test-Lab.ps1` does not check it.
+**Note**: On a subscription created the same day, Cost analysis can show **Unable to load** instead of the charts (a day later: empty charts and "No cost reported during this period"), and no **Add filter**, for up to 48 hours: Microsoft says a new subscription may wait that long for all Cost Management features. The **VIEW** menu and **Last 30 days** still work, but items 6-7 cannot be done yet. The budget chart of Step 1.3.15 shows **Cannot load data** for the same reason. Nothing is wrong with the lab: come back to this step later. `Test-Lab.ps1` does not check it.
 
 ---
 
