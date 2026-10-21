@@ -549,3 +549,4 @@ if ($failCount -gt 0) {
 }
 
 Write-Host "`nLab 1.1 validation passed: all $passCount checks passed." -ForegroundColor Green
+Exit-Lab -FailureCount 0
