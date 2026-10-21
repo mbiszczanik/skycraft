@@ -46,7 +46,8 @@
     SKYCRAFT_GRAPH_TENANT_ID and the Az context. A signed-in context that lacks scopes was replaced
     by a sign-in that named no tenant, which took a personal account to its own directory; now the
     new sign-in names that context's tenant and prints no hint. The stop above now reads: the Graph
-    sign-in's tenant is chosen, and an Az context names another.
+    sign-in's tenant is chosen, and an Az context names another. A context in the personal
+    Microsoft account directory, which that failed sign-in leaves, is never a source.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Lab11-Graph-Auth.Tests.ps1
@@ -630,8 +631,9 @@ Describe 'Connect-LabGraph - the tenant comes from -TenantId, SKYCRAFT_GRAPH_TEN
         if ($noModule) { $script:AzContextRead | Should -BeFalse -Because 'Lab 1.1 neither requires nor imports Az' }
     }
 
-    It 'prints no hint when it reuses a signed-in context and names no tenant' {
+    It 'prints no hint and signs in nowhere when it reuses a covering context' {
         # Lab 1.1 without Az, after the checklist's Connect-MgGraph -TenantId: no sign-in follows.
+        # The reused context's tenant is now named by the plan (#408).
         $script:AzModuleLoaded = $false
         $script:ContextBefore  = [pscustomobject]@{ TenantId = $script:LabTenant; Account = 'admin@contoso.example'; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = $script:SetupScope }
 
@@ -639,6 +641,7 @@ Describe 'Connect-LabGraph - the tenant comes from -TenantId, SKYCRAFT_GRAPH_TEN
 
         $script:Connected | Should -BeFalse
         $message | Should -Not -Match 'No tenant named'
+        $message | Should -Not -Match 'signing in'
     }
 
     It 'does not import Az.Accounts to look for an Az context' -Skip:(-not (Get-Module -ListAvailable -Name Az.Accounts)) {
@@ -766,6 +769,31 @@ function Disconnect-MgGraph { }
         $script:Connected       | Should -BeTrue
         $script:ConnectTenantId | Should -BeNullOrEmpty
         $message | Should -Match 'No tenant named'
+    }
+
+    It 'takes no tenant from a Graph context in the personal Microsoft account directory, and prints the hint (#408)' {
+        # What a failed personal-account sign-in leaves: that account's own directory, a built-in id.
+        $script:AzModuleLoaded = $false
+        $script:ContextBefore  = [pscustomobject]@{ TenantId = '9188040d-6c67-4c5b-b112-36a304b66dad'; Account = ''; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = @('User.Read.All') }
+
+        $message = Get-HintText { Connect-LabGraph -Scope $script:SetupScope }
+
+        $script:Connected       | Should -BeTrue
+        $script:ConnectTenantId | Should -BeNullOrEmpty
+        $message | Should -Match 'No tenant named'
+        $message | Should -Not -Match 'from the Microsoft Graph context'
+    }
+
+    It 'signs in to the Az tenant, with no stop, when the Graph context is in the personal Microsoft account directory (#408)' {
+        $script:AzTenantId    = $script:LabTenant
+        $script:ContextBefore = [pscustomobject]@{ TenantId = '9188040d-6c67-4c5b-b112-36a304b66dad'; Account = ''; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = @('User.Read.All') }
+
+        $message = Get-HintText { Connect-LabGraph -Scope $script:SetupScope }
+
+        $script:Connected       | Should -BeTrue
+        $script:ConnectTenantId | Should -Be $script:LabTenant
+        $message | Should -Match ([regex]::Escape('(from the Az context)'))
+        $message | Should -Not -Match 'No tenant named'
     }
 }
 

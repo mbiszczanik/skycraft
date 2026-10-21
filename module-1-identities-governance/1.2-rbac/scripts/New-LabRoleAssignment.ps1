@@ -276,6 +276,8 @@ function Connect-LabGraph {
     # The tenant of a Graph sign-in already in this session, ranked above the Az context (#408).
     $existingContext = Get-MgContext
     $graphContextTenantId = if (& $isSignedIn $existingContext) { [string]$existingContext.TenantId } else { $null }
+    # The personal Microsoft account directory, which a failed sign-in can leave, is never a lab tenant (#408).
+    if ($graphContextTenantId -eq '9188040d-6c67-4c5b-b112-36a304b66dad') { $graphContextTenantId = $null }
 
     $plan = Get-LabGraphAuthPlan -Scope $Scope -TenantId $TenantId -GraphContextTenantId $graphContextTenantId -AzContextTenantId $azContextTenantId
 
