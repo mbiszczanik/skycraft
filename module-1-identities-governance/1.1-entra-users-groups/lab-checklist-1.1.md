@@ -79,8 +79,10 @@ Execute these validation steps to confirm success:
 ```powershell
 # Sign in with the scopes New-LabUser.ps1 requests: each ReadWrite scope includes
 # its Read counterpart, the Read.All scopes may never have been consented, and
-# the lab's scripts reuse this sign-in only when it holds every scope they ask for
-Connect-MgGraph -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All'
+# the lab's scripts reuse this sign-in only when it holds every scope they ask for.
+# -TenantId: Microsoft Entra ID > Overview > Tenant ID. Without it, a personal
+# Microsoft account signs in to its own directory, not the lab tenant.
+Connect-MgGraph -TenantId '<your tenant id>' -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All'
 
 Get-MgUser -All |
     Select-Object UserPrincipalName, DisplayName |
