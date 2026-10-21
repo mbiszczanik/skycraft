@@ -226,8 +226,8 @@ All three groups go to **Sweden Central**: the `swc` in their names stands for i
 
 Every role assignment in this lab goes through the same **Add role assignment** wizard (Microsoft Learn, [Assign Azure roles using the Azure portal](https://learn.microsoft.com/azure/role-based-access-control/role-assignments-portal)). What it shows depends on the role you pick:
 
-- The **Role** tab has two lists. **Job function roles** opens first and holds roles such as Reader. **Privileged administrator roles** holds Owner, Contributor, User Access Administrator and Role Based Access Control Administrator: Owner and Contributor are not on the first list.
-- **Owner** adds a **Conditions** tab after **Members**, so **Next** on the **Members** tab opens **Conditions**, not **Review + assign**. Contributor and Reader have no **Conditions** tab.
+- The **Role** tab has two lists. **Job function roles** opens first and holds roles such as Reader. **Privileged administrator roles** holds five roles: Owner, Contributor, Access Review Operator Service Role, Role Based Access Control Administrator and User Access Administrator. Owner and Contributor are not on the first list.
+- The tab strip shows a **Conditions** tab after **Members**. For **Owner** it is active, so **Next** on the **Members** tab opens **Conditions**, not **Review + assign**. For Contributor and Reader it stays in the strip, greyed out, and **Next** on the **Members** tab skips it.
 - In a tenant with a Microsoft Entra ID P2 or Microsoft Entra ID Governance licence, the wizard also has an **Assignment type** tab before **Review + assign**. This lab's assignments are **Active** and **Permanent**, as the scripts and the Bicep create them: an **Eligible** assignment gives no access until the user activates it. Without such a licence the tab is not there: skip the two fields the steps list under "Only if the wizard shows an Assignment type tab". Each step then opens the **Review + assign** tab by its name, so it works with the tab and without it.
 
 ### Step 1.2.4: Assign Owner Role to Admin User
@@ -289,15 +289,15 @@ You are still on the subscription's **Access control (IAM)** page.
 - Type: User
 - Role: Owner
 - Scope: This resource (the subscription you opened)
-- Condition: None
+- Condition: **Add** (a link to add a condition: the assignment has none)
 
-If **Condition** shows **View/Edit** instead of None, see Troubleshooting, Issue 6.
+At a resource group, rows inherited from the subscription show **None** in the same column (Step 1.2.12). **Add** and **None** both mean no condition. If **Condition** shows **View/Edit**, the assignment has a condition: see Troubleshooting, Issue 6.
 
 ---
 
 ## 📖 Section 4: Assign Roles at Resource Group Scope (30 minutes)
 
-Now assign more specific roles at resource group level for the development team. Contributor is on the **Privileged administrator roles** list and Reader on **Job function roles**; neither adds a **Conditions** tab, so **Next** on the **Members** tab opens **Review + assign** (or **Assignment type**, where your tenant has it).
+Now assign more specific roles at resource group level for the development team. Contributor is on the **Privileged administrator roles** list and Reader on **Job function roles**. For both, the **Conditions** tab stays in the tab strip, greyed out, and **Next** on the **Members** tab opens **Review + assign** (or **Assignment type**, where your tenant has it).
 
 ### Step 1.2.6: Assign Contributor Role to Developers Group (Dev Environment)
 
@@ -528,7 +528,7 @@ To see the permissions from Khadgar's side, sign in as him. This step changes no
 - **Principal ID**: Unique identifier for user/group
 - **Role Definition ID**: Unique identifier for the role
 - **Scope**: Exact resource path where role applies
-- **Condition**: An extra check on the assignment, such as which roles an Owner may assign to others (None on every assignment in this lab: Step 1.2.4 chooses the option without one)
+- **Condition**: An extra check on the assignment, such as which roles an Owner may assign to others (none on any assignment in this lab, so the **Condition** column shows **Add** or **None**, never **View/Edit**: Step 1.2.4 chooses the option without one)
 
 ### Understand Inheritance
 
@@ -558,7 +558,7 @@ Complete this checklist to verify successful lab completion:
 
 ### Subscription-Level Role Assignments
 
-- [ ] Malfurion Stormrage has **Owner** role at subscription scope, with Condition None
+- [ ] Malfurion Stormrage has **Owner** role at subscription scope, with no condition (**Condition** shows **Add**, not **View/Edit**)
 
 ### Resource Group-Level Assignments (dev-skycraft-swc-rg)
 
@@ -597,7 +597,7 @@ Complete this checklist to verify successful lab completion:
 
 **Solutions**:
 
-1. Verify your own role: open your subscription, then **Access control (IAM)** → **Check access** tab → **View my access**. The pane lists your role assignments; a **Condition** other than None limits the roles you can assign. In a tenant with a Microsoft Entra ID P2 or Microsoft Entra ID Governance licence there is no **View my access** button: the **Check access** tab lists your role assignments itself (Microsoft Learn, [Check access for a user to a single Azure resource](https://learn.microsoft.com/azure/role-based-access-control/check-access), step 2)
+1. Verify your own role: open your subscription, then **Access control (IAM)** → **Check access** tab → **View my access**. The pane lists your role assignments; a **Condition** that shows **View/Edit** (not **Add** or **None**) limits the roles you can assign. In a tenant with a Microsoft Entra ID P2 or Microsoft Entra ID Governance licence there is no **View my access** button: the **Check access** tab lists your role assignments itself (Microsoft Learn, [Check access for a user to a single Azure resource](https://learn.microsoft.com/azure/role-based-access-control/check-access), step 2)
 2. You need Owner or User Access Administrator, without a condition that excludes the roles of this lab, to assign roles
 3. Contact your subscription administrator
 
@@ -638,13 +638,13 @@ Complete this checklist to verify successful lab completion:
 
 **Symptom**: On the **Role** tab of **Add role assignment**, searching for Owner or Contributor finds nothing
 
-**Root Cause**: The tab opens on **Job function roles**. Owner, Contributor, User Access Administrator and Role Based Access Control Administrator are on the **Privileged administrator roles** list.
+**Root Cause**: The tab opens on **Job function roles**. Owner and Contributor are on the **Privileged administrator roles** list, with Access Review Operator Service Role, Role Based Access Control Administrator and User Access Administrator.
 
 **Solution**: Click **Privileged administrator roles**, then search again.
 
 ### Issue 6: Malfurion's Owner assignment shows a condition
 
-**Symptom**: In Step 1.2.5, the **Condition** column of Malfurion Stormrage's Owner assignment shows **View/Edit** instead of None
+**Symptom**: In Step 1.2.5, the **Condition** column of Malfurion Stormrage's Owner assignment shows **View/Edit** instead of **Add**. **Add** is a link to add a condition and means the assignment has none; **View/Edit** opens the condition it has
 
 **Root Cause**: On the **Conditions** tab of Step 1.2.4, another option than **Allow user to assign all roles (highly privileged)** was selected. The assignment works, but it is not the one the scripts and the Bicep create, and `scripts/Test-Lab.ps1` fails it.
 

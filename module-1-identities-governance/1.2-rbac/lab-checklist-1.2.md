@@ -24,7 +24,7 @@
 - [ ] **Malfurion Stormrage** has **Owner** role
   - Scope: Subscription
   - Type: User
-  - Condition: None (**Allow user to assign all roles (highly privileged)** on the **Conditions** tab, Step 1.2.4)
+  - Condition: none, so the **Condition** column shows the **Add** link, not **View/Edit** (**Allow user to assign all roles (highly privileged)** on the **Conditions** tab, Step 1.2.4)
   - Assignment type: Active, Permanent (where the wizard shows an **Assignment type** tab)
   - Purpose: Full administrative control
 
