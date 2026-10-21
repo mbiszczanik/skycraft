@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Checks presence of Resource Groups and specific Role Assignments.
-    - Malfurion -> Owner (Subscription)
+    - Malfurion -> Owner (Subscription), without a condition
     - SkyCraft-Developers -> Contributor (dev-rg)
     - SkyCraft-Testers -> Reader (dev-rg, prod-rg)
     - Illidan -> Reader (platform-rg)
@@ -87,7 +87,7 @@ Write-Host "`n=== Validating Role Assignments ===" -ForegroundColor Cyan
 # Define checks
 # Note: We check specifically for the Principal's assignment at the scope
 $checks = @(
-    @{ Name="Malfurion (Admin)"; Principal="malfurion.stormrage@"; Role="Owner"; Scope="/subscriptions/$subId" }
+    @{ Name="Malfurion (Admin)"; Principal="malfurion.stormrage@"; Role="Owner"; Scope="/subscriptions/$subId"; NoCondition=$true }
     @{ Name="Developers Group";  Principal="SkyCraft-Developers";  Role="Contributor"; Scope="/subscriptions/$subId/resourceGroups/dev-skycraft-swc-rg" }
     @{ Name="Testers Group (Dev)"; Principal="SkyCraft-Testers";   Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/dev-skycraft-swc-rg" }
     @{ Name="Testers Group (Prod)"; Principal="SkyCraft-Testers";  Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/prod-skycraft-swc-rg" }
@@ -119,7 +119,15 @@ else {
                 ( ($_.SignInName -match $check.Principal) -or ($_.DisplayName -eq $check.Principal) )
             }
 
-            if ($found) {
+            # Owner without a condition is what the Bicep and New-LabRoleAssignment.ps1 create and
+            # what guide step 1.2.4 selects ("Allow user to assign all roles"). Any other option on
+            # the Portal's Conditions tab adds a condition: the assignment exists but is not the
+            # lab's, so it fails here as well (#325, guide Troubleshooting Issue 6).
+            if ($found -and $check.NoCondition -and -not @($found | Where-Object { -not $_.Condition })) {
+                Write-Host " [FAIL] '$($check.Role)' assignment found, but with a condition; the lab's has none (guide step 1.2.4)." -ForegroundColor Red
+                $failCount++
+            }
+            elseif ($found) {
                 Write-Host " [OK] Found '$($check.Role)' assignment." -ForegroundColor Green
                 $passCount++
             }

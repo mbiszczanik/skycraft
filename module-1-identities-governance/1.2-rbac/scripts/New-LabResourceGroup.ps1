@@ -4,7 +4,8 @@
 
 .DESCRIPTION
     Idempotently creates the resource groups required by Lab 1.2 and stamps each one
-    with the mandatory governance tags (Project, Environment, CostCenter). Skips
+    with the four governance tags resource-groups.bicep sets (Project, Environment,
+    CostCenter, Owner). Skips
     groups that already exist. Use -WhatIf to print planned actions without making changes.
 
 .PARAMETER SubscriptionId
@@ -13,6 +14,9 @@
 
 .PARAMETER Location
     Azure region for all three resource groups. Defaults to 'Sweden Central'.
+
+.PARAMETER Owner
+    Value of the Owner tag. Defaults to the same value as resource-groups.bicep's parOwner.
 
 .PARAMETER WhatIf
     If specified, prints the resource groups that would be created without actually creating them.
@@ -44,6 +48,10 @@ param(
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
     [string]$Location = "Sweden Central",
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Owner = "mbiszczanik",
 
     [Parameter(Mandatory = $false)]
     [switch]$WhatIf
@@ -98,8 +106,9 @@ $resourceGroups = @(
         Location = $Location
         Tags     = @{
             Environment = "Development"
-            Project     = "Skycraft"
+            Project     = "SkyCraft"
             CostCenter  = "MSDN"
+            Owner       = $Owner
         }
     }
     @{
@@ -107,8 +116,9 @@ $resourceGroups = @(
         Location = $Location
         Tags     = @{
             Environment = "Production"
-            Project     = "Skycraft"
+            Project     = "SkyCraft"
             CostCenter  = "MSDN"
+            Owner       = $Owner
         }
     }
     @{
@@ -116,8 +126,9 @@ $resourceGroups = @(
         Location = $Location
         Tags     = @{
             Environment = "Platform"
-            Project     = "Skycraft"
+            Project     = "SkyCraft"
             CostCenter  = "MSDN"
+            Owner       = $Owner
         }
     }
 )
