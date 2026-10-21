@@ -76,7 +76,7 @@
 - [ ] Accessed Policy Compliance dashboard
 - [ ] Reviewed overall compliance percentage
 - [ ] Viewed compliance details for each policy
-- [ ] Optional: started a remediation task for `Inherit-Project-Tag` (at least five minutes after its role was granted) and checked its result: the **Tags** page of `Advisor-Cost-Recommendations` shows `Project` = `SkyCraft` (a task that remediated 0 resources was created again)
+- [ ] Optional: started a remediation task for `Inherit-Project-Tag` (at least five minutes after its role was granted) and checked its result: the **Tags** page of `Advisor-Cost-Recommendations` shows `Project` = `SkyCraft` (if a task remediated 0 resources, a new one was created)
 - [ ] Understand compliant vs. non-compliant states
 
 ---
@@ -130,9 +130,8 @@
 - [ ] Accessed Cost Analysis dashboard
 - [ ] Explored "Cost by resource" view
 - [ ] Explored "Cost by service" view
-- [ ] Applied filter: Tag = Project:SkyCraft
-- [ ] Applied filter: Resource group = prod-skycraft-swc-rg
-- [ ] On a subscription created the same day, Cost analysis can show **Unable to load** and no **Add filter** for up to 48 hours: the two filters can wait (guide, Step 1.3.18)
+- [ ] Applied filter: Tag = Project:SkyCraft (on a new subscription, once Cost analysis loads, which can take up to 48 hours; guide, Step 1.3.18)
+- [ ] Applied filter: Resource group = prod-skycraft-swc-rg (on a new subscription, once Cost analysis loads)
 - [ ] Reviewed daily cost trends
 - [ ] Understand cost breakdown visualizations
 
