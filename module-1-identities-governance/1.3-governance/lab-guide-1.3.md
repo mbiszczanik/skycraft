@@ -509,13 +509,17 @@ The **New remediation task** page opens with that assignment already selected, s
 
 A task can finish as succeeded without remediating anything, so check its result a few minutes later:
 
-9. In the left menu, click **Remediation**, then the **Remediation tasks** tab
-10. Click your task and check how many resources it remediated (its deployments): one, `Advisor-Cost-Recommendations`
-11. Search for **Resource groups**, click `prod-skycraft-swc-rg`, click `Advisor-Cost-Recommendations`, and in the left menu click **Tags**
+9. In the left menu, click **Remediation**
+10. Click the **Remediation tasks** tab
+11. Click your task and check how many resources it remediated (its deployments). It should be one: the Advisor alert
+12. In Azure Portal, search for **Resource groups**
+13. Click on **prod-skycraft-swc-rg**
+14. Click on **Advisor-Cost-Recommendations**
+15. In the left menu, click **Tags**
 
 **Expected Result**: The Portal confirms with **Remediation task creation succeeded**. Once the task has finished (a few minutes), it lists one remediated resource, the **Tags** page of `Advisor-Cost-Recommendations` shows `Project` = `SkyCraft`, and after the next compliance evaluation `Inherit-Project-Tag` shows the alert as compliant.
 
-**Note**: If the task remediated 0 resources and the alert has no `Project` tag, create the task again. On a new subscription a task created about four minutes after **Compliance** first listed the alert as non-compliant under `Inherit-Project-Tag` ended **Succeeded** with 0 deployments; a second task seven minutes later tagged the alert. Wait until **Compliance** has listed the alert as non-compliant under `Inherit-Project-Tag` for a few minutes, then repeat items 5-11. Or, on the **New remediation task** page, tick **Re-evaluate resource compliance before remediating** before you click **Remediate**: the task then evaluates the resources again before it remediates them.
+**Note**: If the task remediated 0 resources and the alert has no `Project` tag, create the task again. On a new subscription a task created about four minutes after **Compliance** first listed the alert as non-compliant under `Inherit-Project-Tag` ended **Succeeded** with 0 deployments; a second task seven minutes later tagged the alert. Wait until **Compliance** has listed the alert as non-compliant under `Inherit-Project-Tag` for a few minutes, then repeat items 5-15. Or, on the **New remediation task** page, tick **Re-evaluate resource compliance before remediating** before you click **Remediate**: the task then evaluates the resources again before it remediates them.
 
 The same with Az PowerShell (the `Start-AzPolicyRemediation` cmdlet ships in the Az.PolicyInsights module):
 
