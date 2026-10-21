@@ -229,3 +229,4 @@ catch {
 }
 
 Write-Host "`nNext Step: Run .\Test-Lab.ps1 to verify the configuration." -ForegroundColor Yellow
+Exit-Lab -FailureCount 0

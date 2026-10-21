@@ -181,3 +181,4 @@ if ($script:cleanupFailures -gt 0) {
 
 Write-Host "`nLab 4.3 Cleanup Complete." -ForegroundColor Cyan
 Write-Host "Note: The shared '$resourceGroupName' resource group and storage account were preserved for Labs 4.2 and 4.4." -ForegroundColor Gray
+Exit-Lab -FailureCount 0

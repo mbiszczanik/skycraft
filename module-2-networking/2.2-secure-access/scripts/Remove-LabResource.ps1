@@ -379,3 +379,4 @@ if ($RemoveBastion -or $RemoveAll) {
 
 Write-Host "`nNote: NSGs and ASGs have no compute costs, only minimal metadata storage." -ForegroundColor Gray
 Write-Host "You can recreate resources anytime using Deploy-Security.ps1 or Deploy-Bicep.ps1" -ForegroundColor Gray
+Exit-Lab -FailureCount 0

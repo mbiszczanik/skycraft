@@ -145,9 +145,8 @@ Write-Host "`n=== Test Summary ===" -ForegroundColor Cyan
 Write-Host "Tests Passed: $TestsPassed / $TestsTotal"
 if ($TestsPassed -eq $TestsTotal) {
     Write-Host "SUCCESS: Lab 4.2 compliant!" -ForegroundColor Green
-    exit 0
 }
 else {
     Write-Host "FAILURE: Some checks failed." -ForegroundColor Red
-    Exit-Lab -FailureCount 1
 }
+Exit-Lab -FailureCount ($TestsTotal - $TestsPassed)

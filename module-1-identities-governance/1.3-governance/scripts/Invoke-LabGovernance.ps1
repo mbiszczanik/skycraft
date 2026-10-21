@@ -220,3 +220,4 @@ foreach ($lock in $locks) {
 }
 
 Write-Host "`nImperative Deployment Complete." -ForegroundColor Green
+Exit-Lab -FailureCount 0

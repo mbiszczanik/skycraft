@@ -247,3 +247,4 @@ Write-Host ""
 Write-Host "=== Next Steps ===" -ForegroundColor Cyan
 Write-Host "1. Run .\scripts\Test-Lab.ps1 to validate deployment" -ForegroundColor White
 Write-Host "2. Proceed to Lab 4.2: Blob Storage" -ForegroundColor White
+Exit-Lab -FailureCount 0

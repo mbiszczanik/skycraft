@@ -550,3 +550,4 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  VMs, VNets, and Storage Accounts were NOT deleted." -ForegroundColor Gray
 Write-Host "  ASR replication resources must be removed via Azure Portal." -ForegroundColor Gray
 Write-Host "========================================`n" -ForegroundColor Cyan
+Exit-Lab -FailureCount 0

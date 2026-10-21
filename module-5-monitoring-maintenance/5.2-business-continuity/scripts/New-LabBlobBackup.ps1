@@ -177,3 +177,4 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 Write-Host "  Next Steps:" -ForegroundColor Cyan
 Write-Host "    1. Run .\Test-Lab.ps1 to validate full BCDR deployment" -ForegroundColor Gray
 Write-Host "    2. Configure Azure Site Recovery via Azure Portal (Step 5.2.6)" -ForegroundColor Gray
+Exit-Lab -FailureCount 0

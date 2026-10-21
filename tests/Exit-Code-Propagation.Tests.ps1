@@ -26,6 +26,9 @@
         call. A script that never calls Exit-Lab exits 0 after printing [FAIL] (#104, #241), so
         the only lab scripts excused are the helpers listed in $DotSourcedHelpers, which other
         lab scripts dot-source and which end nothing themselves - the suite holds them to that;
+      - the successful run too: a lab script's last top-level statement is an Exit-Lab call or an
+        `exit`. One that falls off its end after a closing Write-Host, a try or an if leaves
+        $LASTEXITCODE as the previous command set it, so a passing re-run reads 1 (#398);
       - for the entry-point decision, every command-line shape it has to tell apart;
       - behaviourally, with real pwsh processes and no Azure: `pwsh -File` returns 1 for a failed
         run and takes the SetShouldExit branch, an interactive session keeps running after the
@@ -135,7 +138,19 @@ function Get-LabExitShape {
         $resolved = [System.IO.Path]::GetFullPath((Join-Path $ScriptDirectory $Matches['relative']))
     }
 
+    # The statement a run ends on when nothing exited earlier (#398). A try or an if whose
+    # branches all exit does not count: the rule is the plain last statement.
+    $endStatements = if ($ast.EndBlock) { @($ast.EndBlock.Statements) } else { @() }
+    $last = if ($endStatements.Count) { $endStatements[-1] } else { $null }
+    $endsThroughExit = $last -is [System.Management.Automation.Language.ExitStatementAst] -or (
+        $last -is [System.Management.Automation.Language.PipelineAst] -and
+        $last.PipelineElements.Count -eq 1 -and
+        $last.PipelineElements[0] -is [System.Management.Automation.Language.CommandAst] -and
+        $last.PipelineElements[0].GetCommandName() -eq 'Exit-Lab')
+
     [PSCustomObject]@{
+        EndsThroughExit = $endsThroughExit
+        LastStatement  = if ($last) { "line $($last.Extent.StartLineNumber): $(($last.Extent.Text -split '\r?\n')[0].Trim())" } else { '' }
         SetShouldExit  = $setShouldExit
         NonZeroExit    = $nonZeroExit
         ExitCount      = $exits.Count
@@ -180,6 +195,8 @@ $LabCases = foreach ($item in $LabScriptFiles) {
         importAt       = $shape.ImportAt
         importPath     = $shape.ImportPath
         labCommonPath  = $LabCommonPath
+        endsThroughExit = $shape.EndsThroughExit
+        lastStatement  = $shape.LastStatement
     }
 }
 $EntryLabCases = @($LabCases | Where-Object { -not $_.helper })
@@ -266,6 +283,33 @@ $ImportFixtures = @(
        check = { param($s) $s.ImportPath -eq [System.IO.Path]::GetFullPath((Join-Path $RepoRoot 'tools/LabCommon.psm1')) } }
 )
 
+$LastStatementFixtures = @(
+    @{ name = 'a closing Write-Host after the failure path does not end through an exit'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "if (`$f) { Exit-Lab -FailureCount 1 }`nWrite-Host 'done'"
+       expected = $false }
+    @{ name = 'a closing try whose catch calls Exit-Lab does not end through an exit'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "try { Get-X } catch { Exit-Lab -FailureCount 1 }"
+       expected = $false }
+    @{ name = 'a closing if whose branches both exit does not end through an exit'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "if (`$f) { exit 0 } else { Exit-Lab -FailureCount 1 }"
+       expected = $false }
+    @{ name = 'Exit-Lab quoted in a comment after the last statement is not a call'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "Write-Host 'done'`n# Exit-Lab -FailureCount 0"
+       expected = $false }
+    @{ name = 'a function defined after the last Exit-Lab is the last statement'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "Exit-Lab -FailureCount 0`nfunction Get-X { }"
+       expected = $false }
+    @{ name = 'Exit-Lab -FailureCount 0 as the last statement ends through an exit'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "Write-Host 'done'`nExit-Lab -FailureCount 0"
+       expected = $true }
+    @{ name = 'Exit-Lab with a count as the last statement ends through an exit'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "function Get-X { }`nExit-Lab -FailureCount `$failCount"
+       expected = $true }
+    @{ name = 'exit 0 as the last statement ends through an exit'
+       shape = Get-LabExitShape -ScriptDirectory $FixtureDirectory -Text "Write-Host 'done'`nexit 0"
+       expected = $true }
+)
+
 # Discovery and run are separate phases in Pester 5: what the It blocks need at run time is set
 # up again here.
 BeforeAll {
@@ -314,6 +358,12 @@ Describe 'SkyCraft PowerShell - every lab script ends through Exit-Lab (#257)' {
         if ($null -ne $firstExitLabAt) { $importAt | Should -BeLessThan $firstExitLabAt }
     }
 
+    It "'<file>' ends with an Exit-Lab call or an exit as its last top-level statement (#398)" -ForEach $EntryLabCases {
+        # Falling off the end leaves $LASTEXITCODE at the previous run's value, so a passing
+        # re-run in the same session reads as a failure.
+        $endsThroughExit | Should -BeTrue -Because "the last top-level statement is '$lastStatement'; end the successful run with Exit-Lab -FailureCount 0 (or the count)"
+    }
+
     It "'<file>', excused as a dot-sourced helper, is one: a sibling dot-sources it and it ends nothing" -ForEach $HelperCases {
         $found | Should -BeTrue -Because 'a stale entry in $DotSourcedHelpers excuses nothing and hides a rename'
         $dotSourcedBy | Should -Not -BeNullOrEmpty -Because "a lab script in the same folder runs it with . (Join-Path `$PSScriptRoot '<helper file name>')"
@@ -330,6 +380,10 @@ Describe 'SkyCraft PowerShell - the lab script rule fails what it is there to fa
 
     It '<name>' -ForEach $ImportFixtures {
         & $check $shape | Should -BeTrue
+    }
+
+    It '<name>' -ForEach $LastStatementFixtures {
+        $shape.EndsThroughExit | Should -Be $expected
     }
 }
 
@@ -506,6 +560,27 @@ Describe 'SkyCraft PowerShell - Exit-Lab reaches both callers (real pwsh process
             'Write-Host "MARKER after the script, LASTEXITCODE=$LASTEXITCODE"'
         )
         $output | Should -Match 'MARKER after the script, LASTEXITCODE=0' -Because "output was:`n$output"
+    }
+
+    It 'a passing run after a failed one in the same session sets $LASTEXITCODE back to 0 (#398)' {
+        $output = Invoke-InteractiveSession -Line @(
+            "& '$($script:LabScript)' -Count 3"
+            "& '$($script:LabScript)' -Count 0"
+            'Write-Host "MARKER after the re-run, LASTEXITCODE=$LASTEXITCODE"'
+        )
+        $output | Should -Match 'MARKER after the re-run, LASTEXITCODE=0' -Because "output was:`n$output"
+    }
+
+    It 'control: a passing script that falls off its end keeps the failed run''s $LASTEXITCODE (#398)' {
+        # Proves the case above can fail: this is what #398 reported.
+        $fallsOff = Join-Path $TestDrive 'Falls-Off.ps1'
+        @('#Requires -Version 7.0', 'Write-Host "passed"') | Set-Content -LiteralPath $fallsOff -Encoding utf8
+        $output = Invoke-InteractiveSession -Line @(
+            "& '$($script:LabScript)' -Count 3"
+            "& '$fallsOff'"
+            'Write-Host "MARKER after the re-run, LASTEXITCODE=$LASTEXITCODE"'
+        )
+        $output | Should -Match 'MARKER after the re-run, LASTEXITCODE=1' -Because "output was:`n$output"
     }
 
     It 'control: the old SetShouldExit idiom ends the same session before the next command' {

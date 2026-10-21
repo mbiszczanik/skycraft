@@ -216,9 +216,8 @@ Write-Host ""
 
 if ($script:testsFailed -eq 0) {
     Write-Host "All tests passed! Lab 4.1 completed successfully." -ForegroundColor Green
-    exit 0
 }
 else {
     Write-Host "Some tests failed. Review the errors above." -ForegroundColor Red
-    Exit-Lab -FailureCount 1
 }
+Exit-Lab -FailureCount $script:testsFailed

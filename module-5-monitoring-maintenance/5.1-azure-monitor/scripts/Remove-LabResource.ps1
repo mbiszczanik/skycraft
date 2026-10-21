@@ -400,3 +400,4 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  VMs, VNets, Storage Accounts were NOT deleted." -ForegroundColor Gray
 Write-Host "  Remove the 'SkyCraft-Ops' dashboard manually in the Azure Portal." -ForegroundColor Gray
 Write-Host "========================================`n" -ForegroundColor Cyan
+Exit-Lab -FailureCount 0

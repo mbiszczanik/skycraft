@@ -141,3 +141,4 @@ foreach ($rg in $resourceGroups) {
 }
 
 Write-Success "Resource Group creation script complete!"
+Exit-Lab -FailureCount 0

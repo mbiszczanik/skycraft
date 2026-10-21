@@ -278,3 +278,4 @@ Write-Host "  Cleanup Complete" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Lab 3.1 resources (VNets, NSGs, LB) were NOT deleted." -ForegroundColor Gray
 Write-Host "========================================`n" -ForegroundColor Cyan
+Exit-Lab -FailureCount 0

@@ -366,3 +366,4 @@ if ($script:taskFailures -gt 0) {
 
 Write-Host "`n=== Deployment Complete ===" -ForegroundColor Cyan -BackgroundColor Black
 Write-Host "Run Test-Lab.ps1 to verify the deployment" -ForegroundColor Green
+Exit-Lab -FailureCount 0
