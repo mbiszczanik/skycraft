@@ -102,7 +102,7 @@ The portal steps above have two scripted equivalents in `scripts/`. Pick one per
   .\scripts\Deploy-Bicep.ps1              # resource groups only
   .\scripts\New-LabRoleAssignment.ps1     # Graph sign-in in your Az context's tenant
   ```
-  Run both in the PowerShell session where you ran `Connect-AzAccount -TenantId '<your tenant id>'`: `New-LabRoleAssignment.ps1` signs in to Microsoft Graph in the tenant of the Az context in the session (or the one `SKYCRAFT_GRAPH_TENANT_ID` names), which a personal Microsoft account needs to reach the lab tenant. That Az context can also be one Az PowerShell restored from an earlier session, so check it with `Get-AzContext` first. If Microsoft Graph is already signed in to another tenant, the script stops with `[ERROR]` and names both tenants.
+  Run both in the PowerShell session where you ran `Connect-AzAccount -TenantId '<your tenant id>'`: `New-LabRoleAssignment.ps1` signs in to Microsoft Graph in the tenant of the Az context in the session (or the one `SKYCRAFT_GRAPH_TENANT_ID` names, else that of a Microsoft Graph sign-in already in the session), which a personal Microsoft account needs to reach the lab tenant. That Az context can also be one Az PowerShell restored from an earlier session, so check it with `Get-AzContext` first. If Microsoft Graph is already signed in to another tenant, the script stops with `[ERROR]` and names both tenants.
 - [ ] Validated with `.\scripts\Test-Lab.ps1`
 
 ---

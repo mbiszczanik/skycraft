@@ -18,11 +18,12 @@
     The users are looked up on the tenant's initial *.onmicrosoft.com domain, the one the guide
     creates them on, and the guest by the address the guide invites (issue #193).
 
-    It signs in to the tenant SKYCRAFT_GRAPH_TENANT_ID names, else to the tenant of an Az context
-    in this session, including one Az PowerShell restored from an earlier session. If a Microsoft
-    Graph sign-in in this session is in another tenant than that Az context, it stops with [ERROR]
-    and names both tenants. With neither source, Microsoft Graph picks the account's home tenant,
-    which for a personal Microsoft account is not the lab tenant.
+    It signs in to the tenant SKYCRAFT_GRAPH_TENANT_ID names, else to the tenant of a Microsoft
+    Graph sign-in already in this session (one that lacks a scope it requests is replaced in its
+    own tenant), else to the tenant of an Az context in this session, including one Az PowerShell
+    restored from an earlier session. If that Graph sign-in and that Az context are in different
+    tenants, it stops with [ERROR] and names both. With no source, Microsoft Graph picks the
+    account's home tenant, which for a personal Microsoft account is not the lab tenant.
 
     Exit codes:
       0  every object that exists was deleted (or -WhatIf / a declined prompt skipped it)
@@ -83,10 +84,12 @@ param(
 # to remove, so a half-configured principal is reported rather than degraded into.
 #
 # The interactive sign-in names a tenant: -TenantId (New-LabUser.ps1 only), else
-# SKYCRAFT_GRAPH_TENANT_ID, else the tenant of an Az context in the session, including one Az
-# PowerShell restored from an earlier session. A Graph sign-in in this session in another tenant
-# than that Az context stops the script instead of being replaced. With none, Microsoft Graph picks
-# the account's home tenant, which for a personal Microsoft account is not the lab tenant (#300).
+# SKYCRAFT_GRAPH_TENANT_ID, else the tenant of a Graph sign-in in the session, so one that lacks
+# scopes is replaced in its own tenant (#408), else the tenant of an Az context in the session,
+# including one Az PowerShell restored from an earlier session. A Graph sign-in in another tenant
+# than that Az context stops the script instead of either winning silently. With none, Microsoft
+# Graph picks the account's home tenant, which for a personal Microsoft account is not the lab
+# tenant (#300).
 #
 # The variables are deliberately NOT the Azure SDK's AZURE_CLIENT_ID / AZURE_TENANT_ID trio. Those
 # are commonly already exported for the ARM subscription identity, which in this project is a
@@ -105,6 +108,10 @@ function Get-LabGraphAuthPlan {
 
         [Parameter(Mandatory = $false)]
         [string]$TenantId,
+
+        # The tenant of a signed-in Graph context in the session, passed in for the same reason.
+        [Parameter(Mandatory = $false)]
+        [string]$GraphContextTenantId,
 
         # The current Az context's tenant, passed in so the decision makes no Az call itself.
         [Parameter(Mandatory = $false)]
@@ -154,9 +161,14 @@ function Get-LabGraphAuthPlan {
         Where-Object { $setting[$_] }
 
     if (@($credentialSet).Count -eq 0) {
-        # Then the Az context's tenant. Without any tenant, a personal Microsoft account's sign-in
-        # lands outside the lab tenant (live pass of 2026-10-20, #300). Interactive only: an
-        # app-only principal names its tenant in its own configuration.
+        # Then the tenant of a Graph sign-in in this session, so a sign-in again for missing scopes
+        # stays in it (#408), then the Az context's. Without any tenant, a personal Microsoft
+        # account's sign-in lands outside the lab tenant (live pass of 2026-10-20, #300).
+        # Interactive only: an app-only principal names its tenant in its own configuration.
+        if (-not $setting['TenantId'] -and -not [string]::IsNullOrWhiteSpace($GraphContextTenantId)) {
+            $setting['TenantId'] = $GraphContextTenantId.Trim()
+            $tenantSource = 'the Microsoft Graph context'
+        }
         if (-not $setting['TenantId'] -and -not [string]::IsNullOrWhiteSpace($AzContextTenantId)) {
             $setting['TenantId'] = $AzContextTenantId.Trim()
             $tenantSource = 'the Az context'
@@ -295,18 +307,21 @@ function Connect-LabGraph {
         try { $azContextTenantId = [string](Get-AzContext -ErrorAction Stop).Tenant.Id } catch { $azContextTenantId = $null }
     }
 
-    $plan = Get-LabGraphAuthPlan -Scope $Scope -TenantId $TenantId -AzContextTenantId $azContextTenantId
+    # The tenant of a Graph sign-in already in this session, ranked above the Az context (#408).
+    $existingContext = Get-MgContext
+    $graphContextTenantId = if (& $isSignedIn $existingContext) { [string]$existingContext.TenantId } else { $null }
+
+    $plan = Get-LabGraphAuthPlan -Scope $Scope -TenantId $TenantId -GraphContextTenantId $graphContextTenantId -AzContextTenantId $azContextTenantId
 
     if ($plan.Mode -eq 'Blocked') { throw $plan.Reason }
 
     if ($plan.Mode -eq 'Interactive') {
-        $existingContext = Get-MgContext
-
-        # A tenant taken from the Az context, which may be a restored one, does not silently
-        # replace a Graph sign-in in another tenant: the learner chooses, before anything is
-        # created, checked or deleted in either (#300).
-        if ($plan.TenantSource -eq 'the Az context' -and (& $isSignedIn $existingContext) -and $existingContext.TenantId -ne $plan.TenantId) {
-            throw "Microsoft Graph is signed in to tenant $($existingContext.TenantId) in this session, but the Az context names tenant $($plan.TenantId) (Az PowerShell may have restored it from an earlier session). To use tenant $($existingContext.TenantId), set SKYCRAFT_GRAPH_TENANT_ID to it or run Connect-AzAccount -TenantId $($existingContext.TenantId). To use tenant $($plan.TenantId), run Disconnect-MgGraph. Then run the script again."
+        # The two implicit sources disagree: the Graph sign-in and an Az context, which may be a
+        # restored one. Neither silently wins: the learner chooses, before anything is created,
+        # checked or deleted in either tenant (#300). -TenantId or SKYCRAFT_GRAPH_TENANT_ID decides.
+        if ($plan.TenantSource -eq 'the Microsoft Graph context' -and -not [string]::IsNullOrWhiteSpace($azContextTenantId) -and $azContextTenantId.Trim() -ne $plan.TenantId) {
+            $azTenant = $azContextTenantId.Trim()
+            throw "Microsoft Graph is signed in to tenant $($plan.TenantId) in this session, but the Az context names tenant $azTenant (Az PowerShell may have restored it from an earlier session). To use tenant $($plan.TenantId), set SKYCRAFT_GRAPH_TENANT_ID to it or run Connect-AzAccount -TenantId $($plan.TenantId). To use tenant $azTenant, run Disconnect-MgGraph. Then run the script again."
         }
 
         # Reuse a signed-in context, which is what a learner running the lab expects. Note this is
@@ -334,7 +349,7 @@ function Connect-LabGraph {
 
     Write-Host "  -> $($plan.Reason)" -ForegroundColor Yellow
     if ($plan.Mode -eq 'Interactive' -and -not $plan.TenantId) {
-        Write-Host "  -> [INFO] No tenant named (-TenantId, SKYCRAFT_GRAPH_TENANT_ID or an Az context), so Microsoft Graph picks the account's home tenant. With a personal Microsoft account, sign in first with Connect-MgGraph -TenantId <tenant id> and the scopes in TROUBLESHOOTING.md, or set SKYCRAFT_GRAPH_TENANT_ID to the lab tenant's ID, then run the script again." -ForegroundColor Gray
+        Write-Host "  -> [INFO] No tenant named (-TenantId, SKYCRAFT_GRAPH_TENANT_ID, a Microsoft Graph sign-in or an Az context), so Microsoft Graph picks the account's home tenant. With a personal Microsoft account, sign in first with Connect-MgGraph -TenantId <tenant id> and the scopes in TROUBLESHOOTING.md, or set SKYCRAFT_GRAPH_TENANT_ID to the lab tenant's ID, then run the script again." -ForegroundColor Gray
     }
 
     $connectParameter = $plan.ConnectParameter
