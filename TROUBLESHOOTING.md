@@ -30,19 +30,19 @@ This guide addresses common issues encountered while setting up or running the S
 
 ### Lab 1.1: "Microsoft Graph sign-in did not complete"
 
-**Symptoms**: `New-LabUser.ps1`, `Test-Lab.ps1` or `Remove-LabResource.ps1` in Lab 1.1 stop right after "Checking Microsoft Graph connection..." with `[ERROR] Failed to connect to Microsoft Graph: Microsoft Graph sign-in did not complete ...` and exit 1. No sign-in or consent prompt appeared.
+**Symptoms**: `New-LabUser.ps1`, `Test-Lab.ps1` or `Remove-LabResource.ps1` in Lab 1.1, or `New-LabRoleAssignment.ps1` in Lab 1.2, stop right after "Checking Microsoft Graph connection..." with `[ERROR] Failed to connect to Microsoft Graph: Microsoft Graph sign-in did not complete ...` and exit 1. No sign-in or consent prompt appeared.
 
-**Cause**: `Connect-MgGraph` returned without an error but also without a signed-in context. A delegated sign-in for scopes the account has never consented to can do exactly that. Before the scripts checked for it, they printed `Connected to Tenant:  as` with empty values and every Graph call after it failed with "Authentication needed" (issue #242).
+**Cause**: `Connect-MgGraph` returned without an error but also without a signed-in context. A delegated sign-in for scopes the account has never consented to can do exactly that. Before the scripts checked for it, they printed `Connected to Tenant:  as` with empty values and every Graph call after it failed with "Authentication needed" (issue #242). A personal Microsoft account (the kind behind most free Azure accounts) that signs in without naming the lab tenant ended the same way in the pass of 2026-10-20 (#300). The scripts name a tenant when they know one: `-TenantId` (`New-LabUser.ps1` only), else `SKYCRAFT_GRAPH_TENANT_ID`, else the tenant of a Microsoft Graph sign-in already in the session, else the tenant of an Az context in the session, including one Az PowerShell restored from an earlier session. The Graph sign-in's tenant is what keeps a sign-in again for missing scopes in the lab tenant: without it, `Connect-MgGraph -TenantId <lab tenant> -Scopes User.Read.All` followed by `Test-Lab.ps1` signed in again without a tenant and a personal account landed in its own directory (pass of 2026-10-21, #408). A Graph sign-in in that personal-account directory, which such a failed sign-in leaves behind, is not counted as a tenant. If that Graph sign-in and the Az context are in different tenants, they stop with `[ERROR]` before signing in, name both tenants and say how to choose one: set `SKYCRAFT_GRAPH_TENANT_ID` or run `Connect-AzAccount -TenantId` to keep the Graph tenant, or run `Disconnect-MgGraph` to use the Az one. With no tenant from any of these they print a line that says so just before they sign in.
 
 **Solution**:
 
-1.  Interactive sign-in: all three scripts request `User.ReadWrite.All`, `Group.ReadWrite.All` and `Directory.ReadWrite.All` (`New-LabUser.ps1` adds `Domain.Read.All` and `User.Invite.All`), so one consent covers the whole lab. Since the scripts showed no prompt, sign in with a device code instead - its sign-in and consent happen in a browser you open yourself - using the full set `New-LabUser.ps1` requests:
+1.  Interactive sign-in: all four scripts request `User.ReadWrite.All`, `Group.ReadWrite.All` and `Directory.ReadWrite.All` (`New-LabUser.ps1` adds `Domain.Read.All` and `User.Invite.All`), so one consent covers Lab 1.1 and Lab 1.2's role assignment script. Since the scripts showed no prompt, sign in with a device code instead - its sign-in and consent happen in a browser you open yourself - using the full set `New-LabUser.ps1` requests:
 
     ```powershell
-    Connect-MgGraph -UseDeviceCode -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All'
+    Connect-MgGraph -TenantId '<your tenant id>' -UseDeviceCode -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All'
     ```
 
-    Open the address it prints, enter the code, accept the consent, then re-run the script: it reuses that context. Where the tenant requires admin consent, a Global Administrator runs the same command once and ticks **Consent on behalf of your organization**. `New-LabUser.ps1 -DemoMode` requests the same scopes and creates nothing, so it is another way to see whether the consent is in place.
+    The tenant ID is the **Tenant ID** on the **Microsoft Entra ID** > **Overview** page of the lab tenant. Name it: without it, a personal Microsoft account signs in to its own directory instead of the lab tenant. Then open the address the command prints, enter the code, accept the consent, then re-run the script: it reuses that context, because its scopes cover what every Module 1 script requests. A context whose scopes do not cover the script's (for example one left by `Connect-MgGraph -Scopes User.Read.All`) is not reused: the script names the scopes it lacks and signs in again with the ones it needs, in the same tenant (issues #273, #408). Where the tenant requires admin consent, a Global Administrator runs the same command once and ticks **Consent on behalf of your organization**. `New-LabUser.ps1 -DemoMode` requests the same scopes and creates nothing, so it is another way to see whether the consent is in place.
 2.  App-only sign-in (`SKYCRAFT_GRAPH_*` set): less likely, since a principal missing an application permission usually still gets a token and fails later with "Insufficient privileges". Still, check that the app registration holds the application permissions listed in [Creating the Lab 1.1 service principal](#creating-the-lab-11-service-principal) and that admin consent was granted for them.
 
 ### Lab 1.1 hangs at "Checking Microsoft Graph connection..."
@@ -51,11 +51,11 @@ This guide addresses common issues encountered while setting up or running the S
 
 **Cause**: `Connect-MgGraph -Scopes ...` binds the **delegated** parameter set, which signs a *person* in. When the cached token needs a refresh that the broker cannot complete silently, the SDK falls back to a prompt — and a run with no console has nobody to answer it. Turning WAM off does not help; the prompt simply moves.
 
-**If you are running the lab by hand** — which is how SkyCraft runs Lab 1.1 today — answer the prompt. It is a real sign-in and the scripts wait for it on purpose. If no prompt appears at all, the browser handoff failed rather than the token: check that a default browser is set, or sign in first with `Connect-MgGraph -UseDeviceCode` and re-run the script, which will reuse that context.
+**If you are running the lab by hand**, which is how SkyCraft runs Lab 1.1 today, answer the prompt. It is a real sign-in and the scripts wait for it on purpose. If no prompt appears at all, the browser handoff failed rather than the token: check that a default browser is set, or sign in first with `Connect-MgGraph -TenantId '<your tenant id>' -UseDeviceCode` and the scopes shown under [Lab 1.1: "Microsoft Graph sign-in did not complete"](#lab-11-microsoft-graph-sign-in-did-not-complete), then re-run the script. It reuses that context only when the context's scopes cover the ones the script requests; otherwise it signs in again.
 
 **If the run is unattended** — a scheduler, CI, `tools/Invoke-LabCycle.ps1`, anything with no console — there is nothing to answer the prompt, and the only real fix is to stop asking for one: give the lab a **service principal** so it signs in app-only (client credentials). This is **optional**, and today's cycle does not need it: `tools/lab-cycle-manifest.psd1` runs 1.2 through 5.3 and does not include Lab 1.1. Set it up when you automate 1.1, not before.
 
-The three Lab 1.1 scripts pick a service principal up automatically when these variables are set:
+The three Lab 1.1 scripts, and Lab 1.2's `New-LabRoleAssignment.ps1`, which reads Lab 1.1's users, pick a service principal up automatically when these variables are set:
 
 | Variable | Meaning |
 | :--- | :--- |
@@ -335,15 +335,19 @@ its measured duration.
 
 **Cause, historically**: a lab script that printed a failure and exited 0. Both known instances are
 fixed — [#104](https://github.com/mbiszczanik/skycraft/issues/104) for Lab 2.1's cleanup and
-[#105](https://github.com/mbiszczanik/skycraft/issues/105) for Lab 5.2's — and
-`tests/Exit-Code-Propagation.Tests.ps1` now holds the whole repository to the pattern.
+[#105](https://github.com/mbiszczanik/skycraft/issues/105) for Lab 5.2's. Every lab script now
+ends through `Exit-Lab` from `tools/LabCommon.psm1`
+([#257](https://github.com/mbiszczanik/skycraft/issues/257)), and
+`tests/Exit-Code-Propagation.Tests.ps1` fails a lab script that does not.
 
 Two things make this visible if it recurs:
 
-- `tools/Invoke-LabScript.ps1` is the only process that carries a lab script's real exit code out.
-  A script declaring `#Requires -Modules` and launched with `pwsh -File` has its `exit` **discarded**
-  and the process reports 0 regardless; the shim declares no module requirement, which is the entire
-  reason it works.
+- A lab script returns its exit code (`0`, or `1` when anything failed) whichever way it is
+  started. PowerShell discards the `exit` of a script that declares `#Requires -Modules` and runs
+  as `pwsh -File`, so `Exit-Lab` also calls `$Host.SetShouldExit` when the script is the entry
+  point of such a process; at a prompt, under `-Command` and inside `tools/Invoke-LabScript.ps1`
+  (the lab cycle's launcher) it is a plain `exit`. A run that reports 0 after printing `[FAIL]`
+  means a script that does not end through `Exit-Lab` - the suite above should have failed first.
 - The per-step transcripts under `tools/lab-cycle-logs/` hold exactly what each script printed. Read
   the transcript before believing the status.
 

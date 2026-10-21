@@ -18,11 +18,13 @@
       4. A run with no one signed in exits 1 before anything is looked up.
       5. -SkipRoleAssignments (what the lab cycle passes) checks the resource groups only, does
          not count the role checks, and exits 0 when the resource groups are there.
+      6. An Owner assignment for Malfurion with a condition is a failed check (#325): the lab's
+         has none.
 
     Scope limit, as in the Lab 1.1 suite: the child is launched with -Command, so these tests
     prove the failure counter reaches `exit`, not that `pwsh -File` carries the code out of the
-    process. That half is issue #104's guard ($Host.SetShouldExit before every non-zero exit),
-    enforced repo-wide by tests/Exit-Code-Propagation.Tests.ps1.
+    process. That half is Exit-Lab's (tools/LabCommon.psm1, issues #104 and #257), proven with
+    real pwsh processes by tests/Exit-Code-Propagation.Tests.ps1.
 
     No subscription is needed, and none is used. The script runs through
     tests/Support/LabScriptStub.psm1 (issue #112), which imports the real modules first, the stub
@@ -65,6 +67,9 @@ BeforeAll {
     #   SKYCRAFT_STUB_MISSINGROLE     role assignments left out, by key: owner, developers,
     #                                 testers-dev, testers-prod, partner
     #   SKYCRAFT_STUB_ROLELOOKUPFAIL  '1' makes every role-assignment lookup fail with an error
+    #   SKYCRAFT_STUB_OWNERCONDITION  '1' gives Malfurion's Owner assignment a condition, as any
+    #                                 Conditions-tab option but "Allow user to assign all roles"
+    #                                 does in the Portal (#325)
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:SubId   = '00000000-0000-0000-0000-000000000000'
@@ -81,9 +86,9 @@ function Test-StubListed {
 }
 
 function New-StubAssignment {
-    param([string]$Key, [string]$Role, [string]$SignInName, [string]$DisplayName)
+    param([string]$Key, [string]$Role, [string]$SignInName, [string]$DisplayName, [string]$Condition)
     if (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGROLE' -Name $Key) { return }
-    [pscustomobject]@{ RoleDefinitionName = $Role; SignInName = $SignInName; DisplayName = $DisplayName }
+    [pscustomobject]@{ RoleDefinitionName = $Role; SignInName = $SignInName; DisplayName = $DisplayName; Condition = $Condition }
 }
 
 function Get-AzContext {
@@ -119,7 +124,10 @@ function Get-AzRoleAssignment {
 
     $sub = "/subscriptions/$script:SubId"
     [pscustomobject]@{ RoleDefinitionName = 'Owner'; SignInName = 'operator@contoso.example'; DisplayName = 'Operator' }
-    New-StubAssignment -Key 'owner' -Role 'Owner' -SignInName 'malfurion.stormrage@contoso.example' -DisplayName 'Malfurion Stormrage'
+    # Get-AzRoleAssignment returns a condition as a string in Condition; the validator only asks
+    # whether there is one, so any non-empty text stands for the Portal's options.
+    $ownerCondition = if ($env:SKYCRAFT_STUB_OWNERCONDITION -eq '1') { "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})))" } else { $null }
+    New-StubAssignment -Key 'owner' -Role 'Owner' -SignInName 'malfurion.stormrage@contoso.example' -DisplayName 'Malfurion Stormrage' -Condition $ownerCondition
 
     switch ($Scope) {
         "$sub/resourceGroups/dev-skycraft-swc-rg" {
@@ -144,6 +152,7 @@ function Get-AzRoleAssignment {
             [string[]]$MissingResourceGroup = @(),
             [string[]]$MissingRole = @(),
             [switch]$RoleLookupFail,
+            [switch]$OwnerCondition,
             [switch]$NoContext,
             [string[]]$ArgumentList = @()
         )
@@ -155,6 +164,7 @@ function Get-AzRoleAssignment {
             SKYCRAFT_STUB_MISSINGRG      = $MissingResourceGroup -join ','
             SKYCRAFT_STUB_MISSINGROLE    = $MissingRole -join ','
             SKYCRAFT_STUB_ROLELOOKUPFAIL = if ($RoleLookupFail) { '1' } else { '0' }
+            SKYCRAFT_STUB_OWNERCONDITION = if ($OwnerCondition) { '1' } else { '0' }
             SKYCRAFT_STUB_NOCONTEXT      = if ($NoContext) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG            = $logPath
         }
@@ -180,6 +190,7 @@ function Get-AzRoleAssignment {
     $script:RgMissing      = Invoke-ValidatorScript -Stub $script:Stub -MissingResourceGroup 'platform-skycraft-swc-rg'
     $script:RoleMissing    = Invoke-ValidatorScript -Stub $script:Stub -MissingRole 'testers-prod'
     $script:RoleLookupFail = Invoke-ValidatorScript -Stub $script:Stub -RoleLookupFail
+    $script:OwnerCondition = Invoke-ValidatorScript -Stub $script:Stub -OwnerCondition
     $script:NoContext      = Invoke-ValidatorScript -Stub $script:Stub -NoContext
     # The lab cycle's run: resource groups deployed, no role assignment made.
     $script:CycleRun       = Invoke-ValidatorScript -Stub $script:Stub -ArgumentList '-SkipRoleAssignments' `
@@ -189,7 +200,7 @@ function Get-AzRoleAssignment {
 
     $script:AllRuns = @(
         $script:AllPass, $script:RgMissing, $script:RoleMissing, $script:RoleLookupFail,
-        $script:NoContext, $script:CycleRun, $script:CycleRgMissing
+        $script:OwnerCondition, $script:NoContext, $script:CycleRun, $script:CycleRgMissing
     )
 }
 
@@ -254,6 +265,17 @@ Describe 'Lab 1.2 Test-Lab.ps1 - failures are counted and set the exit code (#25
         $run.Output | Should -Not -Match "\[OK\] Found '"
         $run.Output | Should -Match 'Passed: 3\b'
         $run.Output | Should -Match 'Failed: 5\b'
+    }
+
+    It 'fails an Owner assignment for Malfurion that carries a condition, and exits 1 (#325)' {
+        # Any Conditions-tab option but "Allow user to assign all roles" adds a condition; the
+        # Bicep, the script and guide step 1.2.4 create the assignment without one.
+        $run = $script:OwnerCondition
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Malfurion \(Admin\)\.\.\. \[FAIL\] 'Owner' assignment found, but with a condition"
+        $run.FailLines | Should -Be 1
+        $run.Output | Should -Match 'Passed: 7\b'
+        $run.Output | Should -Match 'Failed: 1\b'
     }
 }
 

@@ -221,8 +221,8 @@ Describe 'SkyCraft PowerShell - Lab 3.2 deployment cannot be silently skipped' {
 
     It "'<file>' exits non-zero when the deployment is declined" -ForEach $Lab32DeployCase {
         $content = Get-Content -Raw -LiteralPath $path
-        $content | Should -Not -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*(\$Host\.SetShouldExit\(0\)[\r\n]+\s*)?exit 0'
-        $content | Should -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*(\$Host\.SetShouldExit\([1-9]\)[\r\n]+\s*)?exit [1-9]'
+        $content | Should -Not -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*(exit 0|Exit-Lab -FailureCount 0)'
+        $content | Should -Match 'Deployment cancelled\.[^\r\n]*[\r\n]+\s*Exit-Lab -FailureCount [1-9]'
     }
 }
 
@@ -236,7 +236,7 @@ Describe 'SkyCraft PowerShell - Lab 5.2 cleanup cannot mask a failure' {
 
     It "'<file>' exits non-zero when a step failed" -ForEach $Lab52CleanupCase {
         $content = Get-Content -Raw -LiteralPath $path
-        $content | Should -Match '(?s)if \(\$script:cleanupFailures -gt 0\).*?exit 1'
+        $content | Should -Match '(?s)if \(\$script:cleanupFailures -gt 0\).*?Exit-Lab -FailureCount 1'
     }
 
     It "'<file>' reports a failed delete as [ERROR], not [WARNING]" -ForEach $Lab52CleanupCase {
@@ -279,7 +279,7 @@ Describe 'SkyCraft PowerShell - Lab 1.1 cleanup cannot mask a failure (#194)' {
 
     It "'<file>' exits non-zero when a deletion failed, after attempting them all" -ForEach $Lab11CleanupCase {
         $content = Get-Content -Raw -LiteralPath $path
-        $content | Should -Match '(?s)if \(\$script:cleanupFailures -gt 0\)\s*\{.*?\$Host\.SetShouldExit\(1\)\s*exit 1'
+        $content | Should -Match '(?s)if \(\$script:cleanupFailures -gt 0\)\s*\{.*?Exit-Lab -FailureCount 1'
         # The verdict comes after the last deletion loop, not inside it.
         $content.LastIndexOf('if ($script:cleanupFailures -gt 0)') |
             Should -BeGreaterThan $content.LastIndexOf('Remove-MgGroup')
@@ -292,7 +292,7 @@ Describe 'SkyCraft PowerShell - Lab 1.1 cleanup cannot mask a failure (#194)' {
 
     It "'<file>' still exits 1 when the Microsoft Graph sign-in fails" -ForEach $Lab11CleanupCase {
         $content = Get-Content -Raw -LiteralPath $path
-        $content | Should -Match '(?s)\[ERROR\] Failed to connect to Microsoft Graph[^\r\n]*[\r\n]+\s*\$Host\.SetShouldExit\(1\)[\r\n]+\s*exit 1'
+        $content | Should -Match '(?s)\[ERROR\] Failed to connect to Microsoft Graph[^\r\n]*[\r\n]+\s*Exit-Lab -FailureCount 1'
     }
 
     It "'<file>' does not read a failed lookup as 'not found' (#227)" -ForEach $Lab11CleanupCase {
@@ -354,7 +354,7 @@ Describe 'SkyCraft PowerShell - Lab 5.2 deployment survives Trusted Launch' {
         $content = Get-Content -Raw -LiteralPath $path
         $content | Should -Match '\$script:deployFailures\s*=\s*0'
         $content | Should -Match '\$script:deployFailures\+\+'
-        $content | Should -Match '(?s)if \(\$script:deployFailures -gt 0\).*?exit 1'
+        $content | Should -Match '(?s)if \(\$script:deployFailures -gt 0\).*?Exit-Lab -FailureCount 1'
     }
 
     It "'<file>' reports a failed VM protection as [ERROR], not [WARNING]" -ForEach $Lab52DeployCase {

@@ -9,8 +9,11 @@
     With -IncludeRoleAssignments it also deploys 'role-assignments.bicep': the four Entra
     principal IDs the template requires are resolved from the directory (the Lab 1.1 users and
     groups) and passed as parameter overrides, so the declarative path is usable without copying
-    object IDs by hand. The AVM role-assignment modules name each assignment with a deterministic
-    guid() of scope, role and principal, so a second run is a no-op.
+    object IDs by hand. Lab 1.1's user is looked up on the tenant's initial *.onmicrosoft.com
+    domain, where Lab 1.1 creates it; when the tenant lists no initial domain the script stops
+    with [ERROR] and exit code 1 before anything is deployed. The AVM role-assignment modules
+    name each assignment with a deterministic guid() of scope, role and principal, so a second
+    run is a no-op.
 
     The imperative alternative, New-LabRoleAssignment.ps1, creates the same five assignments
     through New-AzRoleAssignment under different names. The two paths do not adopt each other's
@@ -22,7 +25,8 @@
 
 .PARAMETER IncludeRoleAssignments
     Also deploys role-assignments.bicep after the resource groups. Requires Lab 1.1's users and
-    groups to exist and an Az context that can read Entra ID (Get-AzADUser / Get-AzADGroup).
+    groups to exist and an Az context that can read Entra ID (Get-AzADUser / Get-AzADGroup, and
+    the tenant's domains through Invoke-AzRestMethod).
 
 .PARAMETER WhatIf
     Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
@@ -58,17 +62,20 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 # --- Principal resolution (issue #81) ------------------------------------------------------
 # role-assignments.bicep takes principal IDs, not names: Bicep cannot query Entra ID. The lookups
 # below are the ones New-LabRoleAssignment.ps1 performs through the Microsoft.Graph module, done
 # here through Az.Resources (Get-AzADUser / Get-AzADGroup call Microsoft Graph with the Az
 # context's own token) so the script needs one sign-in and no extra module. The member user is
-# matched by userPrincipalName prefix rather than by a hard-coded domain, and the guest by mail,
-# because a guest's userPrincipalName is rewritten to <alias>_<domain>#EXT#@<tenant> on invitation.
-# Absence and ambiguity both throw: assigning Owner to whichever object came back first is worse
-# than stopping. Kept as a top-level function so tests/RoleAssignments-DeployPath.Tests.ps1 can
-# lift it out with the parser and exercise it without a tenant.
+# matched by its full userPrincipalName on the tenant's initial domain, where Lab 1.1 creates it
+# (issue #237; see Select-LabInitialDomain below), and the guest by mail, because a guest's
+# userPrincipalName is rewritten to <alias>_<domain>#EXT#@<tenant> on invitation. Absence and
+# ambiguity both throw: assigning Owner to whichever object came back first is worse than
+# stopping. Kept as top-level functions so tests/RoleAssignments-DeployPath.Tests.ps1 can lift
+# them out with the parser and exercise them without a tenant.
 function Resolve-LabPrincipalId {
     [CmdletBinding()]
     param(
@@ -83,7 +90,7 @@ function Resolve-LabPrincipalId {
     switch ($Type) {
         'Group' { $found = @(Get-AzADGroup -DisplayName $Name -ErrorAction Stop) }
         'Guest' { $found = @(Get-AzADUser -Filter "mail eq '$Name'" -ErrorAction Stop) }
-        'User'  { $found = @(Get-AzADUser -Filter "startsWith(userPrincipalName,'$Name@')" -ErrorAction Stop) }
+        'User'  { $found = @(Get-AzADUser -Filter "userPrincipalName eq '$Name'" -ErrorAction Stop) }
     }
 
     if ($found.Count -eq 0) {
@@ -95,6 +102,45 @@ function Resolve-LabPrincipalId {
     }
 
     return [string]$found[0].Id
+}
+
+# The tenant's domains, as Microsoft Graph lists them (GET /v1.0/domains: id, isInitial, ...).
+# Az.Resources has no domain cmdlet, so the list comes through Invoke-AzRestMethod, which calls
+# Graph with the same Az token Get-AzADUser uses: still one sign-in and no extra module. It
+# answers an HTTP error with a status code rather than an exception, so the code is checked here:
+# a failed lookup is an error, never an empty list.
+function Get-LabDirectoryDomain {
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param()
+
+    $response = Invoke-AzRestMethod -Method GET -Uri 'https://graph.microsoft.com/v1.0/domains?$select=id,isInitial' -ErrorAction Stop
+    if ([int]$response.StatusCode -ne 200) {
+        throw "Microsoft Graph answered $($response.StatusCode) to GET /v1.0/domains: $($response.Content)"
+    }
+    return @(($response.Content | ConvertFrom-Json).value)
+}
+
+# --- The users' domain (issues #193, #237) --------------------------------------------------
+# Lab 1.1 creates its users on the tenant's INITIAL *.onmicrosoft.com domain, the one its guide's
+# '<name>@[yourtenant].onmicrosoft.com' means, so this script looks them up there. Not the default
+# domain: in a tenant whose default is a custom domain, that names users Lab 1.1 never created.
+# And no guess when the tenant lists no initial domain. A byte-identical copy of the function in
+# Lab 1.1's scripts and in New-LabRoleAssignment.ps1; tests/Module1-Initial-Domain.Tests.ps1 holds
+# the copies together.
+function Select-LabInitialDomain {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowNull()]
+        [object[]]$Domain
+    )
+
+    $initial = @($Domain | Where-Object { $_ -and $_.IsInitial -eq $true } | ForEach-Object { [string]$_.Id } | Where-Object { $_ })
+    if ($initial.Count -eq 0) { throw 'the tenant lists no domain marked IsInitial' }
+    return $initial[0]
 }
 
 Write-Host "=== Lab 1.2: Infrastructure Deployment ===" -ForegroundColor Cyan -BackgroundColor Black
@@ -110,8 +156,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Azure: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 $subscriptionId = $context.Subscription.Id
@@ -120,15 +165,13 @@ $subscriptionId = $context.Subscription.Id
 $templateFile = Join-Path $PSScriptRoot "..\bicep\resource-groups.bicep"
 if (-not (Test-Path $templateFile)) {
     Write-Host "  -> [ERROR] Template file not found at: $templateFile" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 $roleTemplateFile = Join-Path $PSScriptRoot "..\bicep\role-assignments.bicep"
 if ($IncludeRoleAssignments -and -not (Test-Path $roleTemplateFile)) {
     Write-Host "  -> [ERROR] Template file not found at: $roleTemplateFile" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 $rgs = @("dev-skycraft-swc-rg", "prod-skycraft-swc-rg", "platform-skycraft-swc-rg")
@@ -139,8 +182,17 @@ $principal = $null
 if ($IncludeRoleAssignments) {
     Write-Host "`nResolving Entra ID principals for role-assignments.bicep..." -ForegroundColor Cyan
     try {
+        $domain = Select-LabInitialDomain -Domain @(Get-LabDirectoryDomain)
+        Write-Host "  Initial domain: $domain" -ForegroundColor Gray
+    }
+    catch {
+        Write-Host "  -> [ERROR] Could not determine the tenant's initial *.onmicrosoft.com domain: $_" -ForegroundColor Red
+        Exit-Lab -FailureCount 1
+    }
+
+    try {
         $principal = [ordered]@{
-            parAdminPrincipalId          = Resolve-LabPrincipalId -Type User  -Name 'malfurion.stormrage'
+            parAdminPrincipalId          = Resolve-LabPrincipalId -Type User  -Name "malfurion.stormrage@$domain"
             parDeveloperGroupPrincipalId = Resolve-LabPrincipalId -Type Group -Name 'SkyCraft-Developers'
             parTesterGroupPrincipalId    = Resolve-LabPrincipalId -Type Group -Name 'SkyCraft-Testers'
             parPartnerPrincipalId        = Resolve-LabPrincipalId -Type Guest -Name 'istormrage@illidari.com'
@@ -151,8 +203,7 @@ if ($IncludeRoleAssignments) {
     }
     catch {
         Write-Host "  -> [ERROR] $_" -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 }
 
@@ -181,8 +232,7 @@ try {
 
         if ($deployment.ProvisioningState -ne 'Succeeded') {
             Write-Host "  -> [FAILED] Deployment finished with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-            $Host.SetShouldExit(1)
-            exit 1
+            Exit-Lab -FailureCount 1
         }
 
         Write-Host "  -> [SUCCESS] Resource Groups deployed successfully." -ForegroundColor Green
@@ -199,8 +249,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Deployment failed: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 if (-not $IncludeRoleAssignments) {
@@ -271,8 +320,7 @@ try {
 
         if ($roleDeployment.ProvisioningState -ne 'Succeeded') {
             Write-Host "  -> [FAILED] Deployment finished with state: $($roleDeployment.ProvisioningState)" -ForegroundColor Red
-            $Host.SetShouldExit(1)
-            exit 1
+            Exit-Lab -FailureCount 1
         }
 
         Write-Host "  -> [SUCCESS] Role assignments deployed successfully." -ForegroundColor Green
@@ -284,8 +332,8 @@ catch {
         Write-Host "     An assignment for the same principal, role and scope exists under a name this template does not own -" -ForegroundColor Yellow
         Write-Host "     typically one created by New-LabRoleAssignment.ps1 or in the portal. Remove it, or keep using that path." -ForegroundColor Yellow
     }
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nDeployment Complete." -ForegroundColor Green
+Exit-Lab -FailureCount 0

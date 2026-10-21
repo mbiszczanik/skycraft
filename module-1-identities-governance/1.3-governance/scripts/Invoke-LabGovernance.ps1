@@ -8,10 +8,15 @@
     
     Actions performed:
     1. Applies Tags to Resource Groups (Update-AzTag)
-    2. Assigns Azure Policies at Subscription Scope (New-AzPolicyAssignment). An assignment that
-       already exists - under the fixed name, or made in the Portal under a generated name with
-       the guide's name as display name - is left as it is; one made twice is an [ERROR] and
-       nothing is created for it (issue #330).
+    2. Assigns Azure Policies at Subscription Scope (New-AzPolicyAssignment), with the display
+       names, descriptions, non-compliance messages and parameters the guide has the learner
+       type (issue #406). An assignment that already exists - under the fixed name, or made in
+       the Portal under a generated name with the guide's name as display name - is left as it
+       is; one made twice is an [ERROR] and nothing is created for it (issue #330). An existing
+       assignment whose parameters, enforcement mode, exclusions or identity differ from the
+       lab's is an [ERROR] that names each difference, and so is one with the guide's definition
+       under another name or the guide's name on another definition: nothing is created next to
+       it (issue #406).
        Inherit-Project-Tag, the Modify assignment of step 1.3.8 (issue #350), is created with a
        system-assigned managed identity in -Location, and its identity is given the role the
        definition names (Contributor) on the subscription - what the Portal does itself - unless
@@ -63,6 +68,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 # Color output functions
 function Write-Success { param([string]$Message) Write-Host "  -> [SUCCESS] $Message" -ForegroundColor Green }
@@ -94,8 +101,7 @@ try {
 }
 catch {
     Write-Error-Custom "Failed to connect: $_"
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 # 2. Apply Tags
@@ -127,16 +133,9 @@ foreach ($config in $tagConfigurations) {
 # 3. Assign Policies
 Write-Header "`n=== 2. Assigning Policies (New-AzPolicyAssignment) ==="
 
-# The four assignments - names, display names, definition ids - come from
-# LabPolicyAssignment.ps1, shared with Test-Lab.ps1 and Remove-LabResource.ps1; the parameters
-# are this script's own.
+# The four assignments - names, texts, parameters, definition ids - come from
+# LabPolicyAssignment.ps1, shared with Deploy-Bicep.ps1, Test-Lab.ps1 and Remove-LabResource.ps1.
 . (Join-Path $PSScriptRoot 'LabPolicyAssignment.ps1')
-$policyParams = @{
-    'Require-Environment-Tag-RG' = @{ tagName = "Environment" }
-    'Enforce-Project-Tag'        = @{ tagName = "Project"; tagValue = "SkyCraft" }
-    'Inherit-Project-Tag'        = @{ tagName = "Project" }
-    'Restrict-Azure-Regions'     = @{ listOfAllowedLocations = @("swedencentral", "northeurope") }
-}
 $subscriptionScope = "/subscriptions/$SubscriptionId"
 
 # Gives the managed identity of a Modify assignment the role its definition names, on the
@@ -215,15 +214,27 @@ if (-not $WhatIf) {
     }
 }
 
+$plan = if ($null -ne $assignments) { @(Get-LabPolicyAssignmentPlan -Assignment $assignments -SubscriptionId $SubscriptionId) } else { $null }
+
 foreach ($policy in Get-LabPolicyAssignmentSpec) {
     if ($WhatIf) {
          Write-Host "WHATIF: Would assign policy $($policy.Name)" -ForegroundColor Yellow
          continue
     }
-    if ($null -eq $assignments) { continue }
+    if ($null -eq $plan) { continue }
 
-    $found = @(Select-LabPolicyAssignment -Assignment $assignments -SubscriptionId $SubscriptionId -Spec $policy)
+    $item = @($plan | Where-Object { $_.Spec.Name -eq $policy.Name })[0]
+    $found = @($item.Found)
+    if ($item.Action -eq 'Unmatched') {
+        Write-Error-Custom "Policy $($policy.Name) not created: none matches, and a new one would sit next to: $($item.Drift -join '; ')."
+        continue
+    }
     if ($found.Count -eq 1) {
+        $drift = @($item.Drift)
+        if ($drift.Count -gt 0) {
+            Write-Error-Custom "Policy $($policy.Name) $(Format-LabPolicyAssignment -Assignment $found[0]) differs from the lab's: $($drift -join '; '). Not changing it; set it as step $($policy.Step) does, or delete it, in the Portal (Policy > Assignments)."
+            continue
+        }
         Write-Success "Policy $($policy.Name) already assigned: $(Format-LabPolicyAssignment -Assignment $found[0])"
         if ($policy.RoleDefinitionId) { Grant-LabPolicyIdentityRole -Assignment $found[0] -Spec $policy }
         continue
@@ -240,9 +251,13 @@ foreach ($policy in Get-LabPolicyAssignmentSpec) {
         $assignArgs = @{
             Name                  = $policy.Name
             DisplayName           = $policy.DisplayName
+            Description           = $policy.Description
             Scope                 = $subscriptionScope
             PolicyDefinition      = $def
-            PolicyParameterObject = $policyParams[$policy.Name]
+            PolicyParameterObject = [hashtable]$policy.Parameter
+        }
+        if ($policy.NonComplianceMessage) {
+            $assignArgs.NonComplianceMessage = @(@{ Message = $policy.NonComplianceMessage })
         }
         # A Modify assignment needs a managed identity, and an identity needs a location.
         if ($policy.ManagedIdentity) {
@@ -312,12 +327,10 @@ foreach ($lock in $locks) {
     }
 }
 
-# $Host.SetShouldExit goes with every non-zero exit: '#Requires -Modules' makes 'pwsh -File' drop
-# a bare 'exit 1' (issue #104).
 if ($script:governanceFailures -gt 0) {
     Write-Host "`nImperative Deployment finished with $($script:governanceFailures) error(s). See the [ERROR] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount $script:governanceFailures
 }
 
 Write-Host "`nImperative Deployment Complete." -ForegroundColor Green
+Exit-Lab -FailureCount 0

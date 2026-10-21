@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Checks presence of Resource Groups and specific Role Assignments.
-    - Malfurion -> Owner (Subscription)
+    - Malfurion -> Owner (Subscription), without a condition
     - SkyCraft-Developers -> Contributor (dev-rg)
     - SkyCraft-Testers -> Reader (dev-rg, prod-rg)
     - Illidan -> Reader (platform-rg)
@@ -41,6 +41,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 1.2 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -49,8 +51,7 @@ Write-Host "`nChecking Azure connection..." -ForegroundColor Cyan
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "[ERROR] Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 $subId = $context.Subscription.Id
 Write-Host "Connected to: $($context.Subscription.Name) ($subId)" -ForegroundColor Green
@@ -86,7 +87,7 @@ Write-Host "`n=== Validating Role Assignments ===" -ForegroundColor Cyan
 # Define checks
 # Note: We check specifically for the Principal's assignment at the scope
 $checks = @(
-    @{ Name="Malfurion (Admin)"; Principal="malfurion.stormrage@"; Role="Owner"; Scope="/subscriptions/$subId" }
+    @{ Name="Malfurion (Admin)"; Principal="malfurion.stormrage@"; Role="Owner"; Scope="/subscriptions/$subId"; NoCondition=$true }
     @{ Name="Developers Group";  Principal="SkyCraft-Developers";  Role="Contributor"; Scope="/subscriptions/$subId/resourceGroups/dev-skycraft-swc-rg" }
     @{ Name="Testers Group (Dev)"; Principal="SkyCraft-Testers";   Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/dev-skycraft-swc-rg" }
     @{ Name="Testers Group (Prod)"; Principal="SkyCraft-Testers";  Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/prod-skycraft-swc-rg" }
@@ -118,7 +119,15 @@ else {
                 ( ($_.SignInName -match $check.Principal) -or ($_.DisplayName -eq $check.Principal) )
             }
 
-            if ($found) {
+            # Owner without a condition is what the Bicep and New-LabRoleAssignment.ps1 create and
+            # what guide step 1.2.4 selects ("Allow user to assign all roles"). Any other option on
+            # the Portal's Conditions tab adds a condition: the assignment exists but is not the
+            # lab's, so it fails here as well (#325, guide Troubleshooting Issue 6).
+            if ($found -and $check.NoCondition -and -not @($found | Where-Object { -not $_.Condition })) {
+                Write-Host " [FAIL] '$($check.Role)' assignment found, but with a condition; the lab's has none (guide step 1.2.4)." -ForegroundColor Red
+                $failCount++
+            }
+            elseif ($found) {
                 Write-Host " [OK] Found '$($check.Role)' assignment." -ForegroundColor Green
                 $passCount++
             }
@@ -140,8 +149,8 @@ Write-Host "  Failed: $failCount" -ForegroundColor $(if ($failCount -gt 0) { 'Re
 
 if ($failCount -gt 0) {
     Write-Host "`nLab 1.2 validation failed: $failCount check(s) failed. See the [FAIL] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nLab 1.2 validation passed: all $passCount checks passed." -ForegroundColor Green
+Exit-Lab -FailureCount 0

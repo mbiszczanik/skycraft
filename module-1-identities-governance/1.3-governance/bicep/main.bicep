@@ -3,7 +3,7 @@ SUMMARY: Lab 1.3 - Governance Orchestrator
 DESCRIPTION: Orchestrates deployment of tags, policies, and locks for Lab 1.3 via AVM (requires the Lab 1.2 resource groups to exist)
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Owner mbiszczanik
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.3.0
+VERSION: 0.4.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -23,6 +23,19 @@ param parLocation string = 'swedencentral'
 @description('Resource owner tag value')
 @minLength(1)
 param parOwner string = 'mbiszczanik'
+
+// Parity with a lab built in the Portal (issue #406). The Portal names a policy assignment with a
+// generated id, so a fixed-name module would create a second assignment next to the learner's.
+// Deploy-Bicep.ps1 finds the learner's assignments by definition and scope and fills these three;
+// left at their defaults, the template creates everything itself.
+@description('Guide names of the policy assignments that already exist under another resource name (made in the Portal); the template leaves them as they are')
+param parExistingPolicyAssignments array = []
+
+@description('Whether the Inherit-Project-Tag module grants its identity Contributor; false when the identity holds it already (a second grant fails with RoleAssignmentExists)')
+param parGrantInheritProjectTagRole bool = true
+
+@description('Principal id of an existing Inherit-Project-Tag identity that does not hold Contributor yet; the template grants it')
+param parInheritProjectTagPrincipalId string = ''
 
 /*******************
 *    Variables     *
@@ -59,6 +72,9 @@ var varAllowedLocations = [
   'swedencentral'
   'northeurope'
 ]
+
+// Contributor: the role Inherit-Project-Tag's definition lists in roleDefinitionIds.
+var varContributorRoleId = '/providers/Microsoft.Authorization/roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c'
 
 /*******************
 *    Resources     *
@@ -129,7 +145,10 @@ module modRgPlatform 'br/public:avm/res/resources/resource-group:0.4.4' = {
 //    get an identity. The three Deny assignments set it to {} - no identity - as the Portal and
 //    Invoke-LabGovernance.ps1 create them: a Deny changes nothing and needs none. Only
 //    Inherit-Project-Tag (Modify) carries an identity in every path.
-module modRequireTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
+//    Display names, descriptions and non-compliance messages are the texts the guide has the
+//    learner type (issue #406), so both paths end in the same state. An assignment listed in
+//    parExistingPolicyAssignments exists under a Portal-generated name and is not deployed.
+module modRequireTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = if (!contains(parExistingPolicyAssignments, 'Require-Environment-Tag-RG')) {
   name: 'Require-Environment-Tag-RG'
   params: {
     name: 'Require-Environment-Tag-RG'
@@ -137,7 +156,7 @@ module modRequireTagPolicy 'br/public:avm/res/authorization/policy-assignment/su
     managedIdentities: {}
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/96670d01-0a4d-4649-9c89-2d3abc0a5025'
     definitionVersion: '1.*.*'
-    displayName: 'Require Environment Tag on Resource Groups'
+    displayName: 'Require-Environment-Tag-RG'
     description: 'All resource groups must have an Environment tag'
     parameters: {
       tagName: {
@@ -152,7 +171,7 @@ module modRequireTagPolicy 'br/public:avm/res/authorization/policy-assignment/su
   }
 }
 
-module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
+module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = if (!contains(parExistingPolicyAssignments, 'Enforce-Project-Tag')) {
   name: 'Enforce-Project-Tag'
   params: {
     name: 'Enforce-Project-Tag'
@@ -160,7 +179,7 @@ module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assign
     managedIdentities: {}
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/1e30110a-5ceb-460c-a204-c1c3969c6d62'
     definitionVersion: '1.*.*'
-    displayName: 'Enforce Project Tag Value'
+    displayName: 'Enforce-Project-Tag'
     description: 'All resources must have Project tag set to SkyCraft'
     parameters: {
       tagName: {
@@ -188,14 +207,14 @@ module modEnforceProjectTagPolicy 'br/public:avm/res/authorization/policy-assign
 // Modify needs none. Granting it needs Owner (or User Access Administrator) on the subscription:
 // with Contributor alone the module's role-assignment deployment fails, while the Portal creates
 // the assignment without the role (the guide's Prerequisites say so).
-module modInheritProjectTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
+module modInheritProjectTagPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = if (!contains(parExistingPolicyAssignments, 'Inherit-Project-Tag')) {
   name: 'Inherit-Project-Tag'
   params: {
     name: 'Inherit-Project-Tag'
     location: parLocation
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070'
     definitionVersion: '1.*.*'
-    displayName: 'Inherit Project Tag from Resource Group'
+    displayName: 'Inherit-Project-Tag'
     description: 'Resources get the Project tag of their resource group when they are created without it'
     parameters: {
       tagName: {
@@ -205,13 +224,23 @@ module modInheritProjectTagPolicy 'br/public:avm/res/authorization/policy-assign
     managedIdentities: {
       systemAssigned: true
     }
-    roleDefinitionIds: [
-      '/providers/Microsoft.Authorization/roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c'
-    ]
+    roleDefinitionIds: parGrantInheritProjectTagRole ? [varContributorRoleId] : []
   }
 }
 
-module modAllowedLocationsPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = {
+// The role of a Portal-made Inherit-Project-Tag whose identity does not hold it (the module above
+// is not deployed then). The Portal grants it itself unless the learner may not assign roles.
+module modInheritProjectTagRole 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = if (!empty(parInheritProjectTagPrincipalId)) {
+  name: 'Inherit-Project-Tag-Role'
+  params: {
+    principalId: parInheritProjectTagPrincipalId
+    // The module's built-in name resolves to the subscription-scoped id the Portal writes.
+    roleDefinitionIdOrName: 'Contributor'
+    principalType: 'ServicePrincipal'
+  }
+}
+
+module modAllowedLocationsPolicy 'br/public:avm/res/authorization/policy-assignment/sub-scope:0.1.0' = if (!contains(parExistingPolicyAssignments, 'Restrict-Azure-Regions')) {
   name: 'Restrict-Azure-Regions'
   params: {
     name: 'Restrict-Azure-Regions'
@@ -219,8 +248,8 @@ module modAllowedLocationsPolicy 'br/public:avm/res/authorization/policy-assignm
     managedIdentities: {}
     policyDefinitionId: '/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c'
     definitionVersion: '1.*.*'
-    displayName: 'Restrict to Allowed Regions'
-    description: 'Resources can only be created in specified regions'
+    displayName: 'Restrict-Azure-Regions'
+    description: 'Resources can only be created in Sweden Central and North Europe'
     parameters: {
       listOfAllowedLocations: {
         value: varAllowedLocations
@@ -228,7 +257,7 @@ module modAllowedLocationsPolicy 'br/public:avm/res/authorization/policy-assignm
     }
     nonComplianceMessages: [
       {
-        message: 'Resources must be deployed to approved regions only'
+        message: 'Resources must be deployed to Sweden Central or North Europe regions only'
       }
     ]
   }

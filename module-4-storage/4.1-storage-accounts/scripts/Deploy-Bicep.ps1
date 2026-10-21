@@ -71,6 +71,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 4.1: Deploy Storage Accounts ===" -ForegroundColor Cyan
 Write-Host ""
@@ -80,8 +82,7 @@ Write-Host "--- Verifying Azure Connection ---" -ForegroundColor Yellow
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "[ERROR] Not logged in to Azure. Please run Connect-AzAccount." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "  -> Connected as: $($context.Account.Id)" -ForegroundColor Green
 Write-Host "  -> Subscription: $($context.Subscription.Name)" -ForegroundColor Green
@@ -102,8 +103,7 @@ foreach ($rg in $requiredRGs) {
     if (-not $rgExists) {
         Write-Host "[ERROR] Resource group '$rg' does not exist." -ForegroundColor Red
         Write-Host "  Create it first or complete Module 1 prerequisites." -ForegroundColor Yellow
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
     Write-Host "  [OK] Resource group exists: $rg" -ForegroundColor Green
 }
@@ -194,8 +194,7 @@ try {
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host ""
         Write-Host "[FAILED] Deployment finished with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 
     Write-Host ""
@@ -241,8 +240,7 @@ catch {
         Write-Host "Details: $($_.Exception.InnerException.Message)" -ForegroundColor Red
     }
     
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host ""
