@@ -62,15 +62,16 @@
 - [ ] Understand why Modify and Deny work together: Modify adds the group's `Project` tag before `Enforce-Project-Tag` checks the request
 
 > **Assignment names**: the Portal's **Assignment name** field sets the assignment's display name;
-> Azure names the assignment resource itself with a generated id. The Bicep path sets the name
-> (`Require-Environment-Tag-RG`, ...) and its own display names (`Require Environment Tag on Resource
-> Groups`, `Enforce Project Tag Value`, `Inherit Project Tag from Resource Group`, `Restrict to
-> Allowed Regions`). `Test-Lab.ps1` and
-> `Remove-LabResource.ps1` accept an assignment made at the subscription itself, of the built-in
-> definition named above, whose name or display name is the dashed name, or whose display name is
-> the Bicep one. An assignment left with the definition's own name (the wizard fills it in) is not
-> found, and two matching assignments for one policy (for example from the Portal and the Bicep path)
-> fail the check.
+> Azure names the assignment resource itself with a generated id. The Bicep path and
+> `Invoke-LabGovernance.ps1` set the dashed name as the resource name and as the display name, with
+> the guide's descriptions and non-compliance messages, so every path shows the same names.
+> `Test-Lab.ps1` and `Remove-LabResource.ps1` accept an assignment made at the subscription itself,
+> of the built-in definition named above, whose name or display name is the dashed name (or whose
+> display name is one the Bicep path used before, such as `Enforce Project Tag Value`). An assignment
+> left with the definition's own name (the wizard fills it in) is not found, and two matching
+> assignments for one policy fail the check. `Deploy-Bicep.ps1` run after the Portal path keeps the
+> Portal's assignments and creates no second one; it stops, and names the difference, when an
+> assignment's parameters or enforcement differ from the ones above.
 
 ### Policy Compliance
 - [ ] Accessed Policy Compliance dashboard
@@ -278,7 +279,7 @@ Get-AzConsumptionBudget -ResourceGroupName prod-skycraft-swc-rg |
 
 **Expected Results**:
 - Tags appear on all three resource groups
-- 4 policy assignments visible, each with the dashed name in **Name** (Bicep path) or **DisplayName** (Portal path)
+- 4 policy assignments visible, each with the dashed name in **DisplayName** (every path) and in **Name** (Bicep and PowerShell paths; the Portal path shows a generated id there)
 - `Inherit-Project-Tag` listed with IdentityType `SystemAssigned` and TagName `Project`
 - 2 resource locks confirmed
 - SkyCraft-Monthly-Budget listed by the first budget command
