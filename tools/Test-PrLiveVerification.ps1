@@ -16,9 +16,11 @@
       verified    The body carries exactly one 'Live-verified: <what was run>' line. Pass.
       deferred    The body carries exactly one 'Live-verification: deferred -> #<issue>' line
                   and no GitHub closing keyword (close/fix/resolve + #N), so the merge cannot
-                  close the issue whose live criterion is still open, and the PR carries the
-                  label 'live-deferral-approved': the maintainer's decision that this PR may
-                  merge before its live pass (issue #338). Pass; without the label, fail.
+                  close the issue whose live criterion is still open; exactly one
+                  'Live-verification-blocker: <why>' line saying why the live check cannot run
+                  in the test environment (issue #404), with a real reason, not blank or a
+                  placeholder; and the label 'live-deferral-approved': the maintainer's decision
+                  that this PR may merge before its live pass (issue #338). Pass; otherwise fail.
       otherwise   Fail, with the two accepted forms in the message.
 
     Declarations inside HTML comments are ignored, so the PR template can show the syntax.
@@ -100,6 +102,8 @@ function Get-PrGateVerdict {
 
     # The maintainer's decision to merge a PR before its live pass ran (issue #338).
     $approvalLabel = 'live-deferral-approved'
+    # Template placeholders and filler that say nothing about a blocker (issue #404).
+    $placeholder = '(?i)^(?:<.*>|tbd|todo|n/?a|none|-+|\.+|\?+)\.?$'
 
     $verdict = [PSCustomObject]@{
         Gated      = $false
@@ -107,6 +111,7 @@ function Get-PrGateVerdict {
         Reason     = 'no gated path changed'
         Verified   = $null
         DeferredTo = $null
+        Blocker    = $null
     }
 
     $gatedPaths = @($ChangedFile | Where-Object { Test-GatedPath -Path $_ })
@@ -118,6 +123,8 @@ function Get-PrGateVerdict {
 
     $verified = [regex]::Matches($text, '(?im)^[ \t]*Live-verified:[ \t]*(?<what>\S.*?)[ \t]*\r?$')
     $deferred = [regex]::Matches($text, '(?im)^[ \t]*Live-verification:[ \t]*deferred[ \t]*->[ \t]*#(?<issue>\d+)[ \t]*\r?$')
+    # A separate key, so the deferred regex above and existing PR bodies stay valid (issue #404).
+    $blocker  = [regex]::Matches($text, '(?im)^[ \t]*Live-verification-blocker:[ \t]*(?<why>.*?)[ \t]*\r?$')
     $closing  = [regex]::IsMatch($text, '(?i)\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b[ \t]*:?[ \t]*(?:[\w.-]+/[\w.-]+)?#\d+')
 
     $accepted = "Declare exactly one of:`n" +
@@ -146,12 +153,29 @@ function Get-PrGateVerdict {
         $verdict.Reason = "live verification is deferred to #$($verdict.DeferredTo), but the body carries a closing keyword (close/fix/resolve #N). A merge would close an issue whose live criterion is still open - use 'Refs #N' and close it after the live pass."
         return $verdict
     }
+    $blockerHelp = "A deferral is only for a live check the test environment cannot run: add exactly one line 'Live-verification-blocker: <why the live check cannot run in the test environment>', or run the live check on this branch and declare 'Live-verified: <what ran, where, date, exit codes>'."
+    if ($blocker.Count -gt 1) {
+        $verdict.Pass   = $false
+        $verdict.Reason = "live verification is deferred to #$($verdict.DeferredTo) and the body carries $($blocker.Count) 'Live-verification-blocker:' lines; exactly one is allowed. $blockerHelp"
+        return $verdict
+    }
+    $why = if ($blocker.Count -eq 1) { $blocker[0].Groups['why'].Value.Trim() } else { '' }
+    if (-not $why -or $why -match $placeholder) {
+        $verdict.Pass   = $false
+        $verdict.Reason = if ($blocker.Count -eq 0) {
+            "live verification is deferred to #$($verdict.DeferredTo) but the body has no 'Live-verification-blocker:' line. $blockerHelp"
+        } else {
+            "live verification is deferred to #$($verdict.DeferredTo) but the 'Live-verification-blocker:' line gives no reason ('$why'). $blockerHelp"
+        }
+        return $verdict
+    }
+    $verdict.Blocker = $why
     if (@($Label | ForEach-Object { $_.Trim() }) -notcontains $approvalLabel) {
         $verdict.Pass   = $false
         $verdict.Reason = "live verification is deferred to #$($verdict.DeferredTo) and the PR has no '$approvalLabel' label. Run the live pass and declare 'Live-verified: <what was run>', or, if merging before it is acceptable, the maintainer adds the label."
         return $verdict
     }
-    $verdict.Reason = "live verification deferred to #$($verdict.DeferredTo), merge approved by the '$approvalLabel' label"
+    $verdict.Reason = "live verification deferred to #$($verdict.DeferredTo) (blocker: $why), merge approved by the '$approvalLabel' label"
     return $verdict
 }
 

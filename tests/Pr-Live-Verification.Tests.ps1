@@ -14,7 +14,8 @@
     the template entirely - and a live lab cycle deliberately cannot run in CI. The gate
     makes the decision explicit instead: a PR that touches lab content must declare either
     the verification it ran or the issue that tracks the one it deferred, and a deferred PR
-    must not carry a closing keyword.
+    must not carry a closing keyword, must name why the live check cannot run in the test
+    environment (issue #404) and needs the maintainer's label.
 
 .EXAMPLE
     Invoke-Pester -Path .\tests\Pr-Live-Verification.Tests.ps1
@@ -85,6 +86,7 @@ Describe 'Get-PrGateVerdict' {
     BeforeAll {
         $script:Gated    = @('module-5-monitoring-maintenance/5.1-azure-monitor/lab-guide-5.1.md')
         $script:NotGated = @('docs/adr/0006-pr-live-verification-gate.md', 'CHANGELOG.md')
+        $script:Blocker  = 'Live-verification-blocker: the step needs a subscription created today; the test subscription is months old.'
     }
 
     It 'passes a PR that touches no gated path, whatever its body says' {
@@ -128,8 +130,8 @@ Describe 'Get-PrGateVerdict' {
         $v.Verified | Should -Match '67b14134'
     }
 
-    It 'passes a deferred PR that references its issue and carries the approval label (#338)' {
-        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Refs #79`n`nLive-verification: deferred -> #141" `
+    It 'passes a deferred PR that references its issue, names its blocker and carries the approval label (#338, #404)' {
+        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Refs #79`n`nLive-verification: deferred -> #141`n$script:Blocker" `
             -Label @('documentation', 'live-deferral-approved')
         $v.Pass       | Should -BeTrue
         $v.DeferredTo | Should -Be 141
@@ -137,7 +139,7 @@ Describe 'Get-PrGateVerdict' {
     }
 
     It 'fails a deferred PR without the approval label, naming the label and the way out (#338)' {
-        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Refs #79`n`nLive-verification: deferred -> #141"
+        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Refs #79`n`nLive-verification: deferred -> #141`n$script:Blocker"
         $v.Pass       | Should -BeFalse
         $v.DeferredTo | Should -Be 141
         $v.Reason     | Should -Match 'live-deferral-approved'
@@ -202,6 +204,52 @@ Describe 'Get-PrGateVerdict' {
     It 'matches the declaration keys case-insensitively and with surrounding whitespace' {
         $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "  live-VERIFIED:  labs 5.1-5.3 by hand, 2026-09-20  "
         $v.Pass | Should -BeTrue
+    }
+
+    # Issue #404: a deferral is allowed only for a live check the test environment cannot run,
+    # and the PR says why on its own line. PR #382 was deferred although its fix ran live and passed.
+    It 'fails a labelled deferred PR without a blocker line, naming the line' {
+        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Refs #79`nLive-verification: deferred -> #141" `
+            -Label @('live-deferral-approved')
+        $v.Pass       | Should -BeFalse
+        $v.DeferredTo | Should -Be 141
+        $v.Reason     | Should -Match 'Live-verification-blocker:'
+    }
+
+    It "fails a blank or placeholder blocker reason: '<why>'" -ForEach @(
+        @{ why = '' }, @{ why = '   ' }, @{ why = '<why the live check cannot run in the test environment>' },
+        @{ why = '<reason>' }, @{ why = 'TBD' }, @{ why = 'todo' }, @{ why = 'N/A' }, @{ why = 'none' },
+        @{ why = '-' }, @{ why = '...' }
+    ) {
+        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Refs #79`nLive-verification: deferred -> #141`nLive-verification-blocker: $why" `
+            -Label @('live-deferral-approved')
+        $v.Pass   | Should -BeFalse
+        $v.Reason | Should -Match 'Live-verification-blocker:'
+    }
+
+    It 'fails a deferred PR with two blocker lines' {
+        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Refs #79`nLive-verification: deferred -> #141`n$script:Blocker`n$script:Blocker" `
+            -Label @('live-deferral-approved')
+        $v.Pass   | Should -BeFalse
+        $v.Reason | Should -Match "carries 2 'Live-verification-blocker:' lines"
+    }
+
+    It 'ignores a blocker line inside an HTML comment' {
+        $body = "Refs #79`nLive-verification: deferred -> #141`n<!-- $script:Blocker -->"
+        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body $body -Label @('live-deferral-approved')
+        $v.Pass | Should -BeFalse
+    }
+
+    It 'does not read the blocker line as a second deferred declaration' {
+        $v = Get-PrGateVerdict -ChangedFile $script:Gated -Body "Refs #79`nLive-verification: deferred -> #141`n$script:Blocker" `
+            -Label @('live-deferral-approved')
+        $v.Pass   | Should -BeTrue
+        $v.Reason | Should -Match 'subscription created today'
+    }
+
+    It 'needs no blocker line for a verified or an ungated PR' {
+        (Get-PrGateVerdict -ChangedFile $script:Gated -Body 'Live-verified: Lab 1.1 Test-Lab 10/10, test tenant, 2026-10-20, exit 0').Pass | Should -BeTrue
+        (Get-PrGateVerdict -ChangedFile $script:NotGated -Body "Live-verification: deferred -> #141`nLive-verification-blocker:").Pass  | Should -BeTrue
     }
 
     It 'counts a cross-repository closing keyword as closing too' {
