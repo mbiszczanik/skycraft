@@ -16,7 +16,8 @@
          every stubbed command resolves to the stub. No tenant is needed, and none is used.
       5. Context reuse (issue #273): a Graph context already in the session is reused only when
          its scopes cover the five the script requests; one left by `Connect-MgGraph -Scopes
-         User.Read.All` makes the script sign in again, asking for all five.
+         User.Read.All` makes the script sign in again, asking for all five, in that context's
+         tenant and with no missing-tenant hint (issue #408).
 
 .EXAMPLE
     Invoke-Pester -Path .\New-LabUser.Tests.ps1
@@ -141,7 +142,8 @@ Describe 'New-LabUser.ps1 — a sign-in that leaves no Graph context is a failed
         # which returns without an error either way - the shape issue #242 describes.
         # SKYCRAFT_STUB_SCOPES is the comma-separated scope list of the context found in the
         # session before the sign-in; after Connect-MgGraph the context holds the scopes it was
-        # asked for. Connect-MgGraph logs them, as 'Connect-MgGraph:Scopes=a,b,c'.
+        # asked for. Connect-MgGraph logs them, as 'Connect-MgGraph:Scopes=a,b,c', and the tenant
+        # it was asked for, as 'Connect-MgGraph:TenantId=<id>'.
         $stubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:Scopes  = @($env:SKYCRAFT_STUB_SCOPES -split ',' | Where-Object { $_ })
@@ -166,9 +168,10 @@ function Get-MgContext {
 
 function Connect-MgGraph {
     [CmdletBinding()]
-    param([string[]]$Scopes, [Parameter(ValueFromRemainingArguments)]$Rest)
+    param([string[]]$Scopes, [string]$TenantId, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name 'Connect-MgGraph'
     Write-StubCall -Name "Connect-MgGraph:Scopes=$($Scopes -join ',')"
+    Write-StubCall -Name "Connect-MgGraph:TenantId=$TenantId"
     $script:Scopes = $Scopes
 }
 
@@ -257,6 +260,14 @@ function New-MgInvitation   { [CmdletBinding()] param([Parameter(ValueFromRemain
         @($run.Calls | Where-Object { $_ -like 'Connect-MgGraph:Scopes=*' }) |
             Should -Be @("Connect-MgGraph:Scopes=$($script:SetupScopes)") -Because 'the new sign-in must ask for every scope the script needs'
         $run.Calls | Should -Contain 'Get-MgDomain'
+    }
+
+    It 'signs in again in the tenant of the context it replaces, with no missing-tenant hint (#408)' {
+        # No -TenantId, no SKYCRAFT_GRAPH_TENANT_ID and no Az.Accounts: the live repro's shape.
+        $run = $script:ReadOnly
+        @($run.Calls | Where-Object { $_ -like 'Connect-MgGraph:TenantId=*' }) |
+            Should -Be @('Connect-MgGraph:TenantId=00000000-0000-0000-0000-000000000000') -Because "a personal account signed in without a tenant lands in its own directory; output was:`n$($run.Output)"
+        $run.Output | Should -Not -Match 'No tenant named'
     }
 
     It 'exits 1 with an [ERROR] when the sign-in leaves no Graph context, and looks nothing up' {

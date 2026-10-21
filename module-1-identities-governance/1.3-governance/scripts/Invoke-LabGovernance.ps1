@@ -333,3 +333,4 @@ if ($script:governanceFailures -gt 0) {
 }
 
 Write-Host "`nImperative Deployment Complete." -ForegroundColor Green
+Exit-Lab -FailureCount 0
