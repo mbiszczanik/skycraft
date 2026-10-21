@@ -32,9 +32,11 @@
       - the failure paths too: a lab script that sets $ErrorActionPreference to 'Stop' calls no
         Write-Error outside a function. Under Stop it ends the script before the Exit-Lab after
         it, so at the prompt a failed run leaves the previous run's $LASTEXITCODE (#398);
-      - those two #398 rules only for the lab folders listed in $ConvertedLabs, which each
-        module's pull request extends as it converts its scripts; a listed folder that does not
-        exist, or holds no lab script, fails the suite;
+      - the last-statement rule only for the lab folders listed in $ConvertedLabs ('scripts' is
+        the repository-level scripts/), which each module's pull request extends as it converts
+        its scripts; a listed folder that does not exist, or holds no lab script, fails the suite;
+      - the Write-Error rule for every lab script except the folders in $WriteErrorPendingLabs,
+        each of which must still hold a violation, so a fixed folder cannot stay excused;
       - for the entry-point decision, every command-line shape it has to tell apart;
       - behaviourally, with real pwsh processes and no Azure: `pwsh -File` returns 1 for a failed
         run and takes the SetShouldExit branch, an interactive session keeps running after the
@@ -232,12 +234,19 @@ $LabCases = foreach ($item in $LabScriptFiles) {
 }
 $EntryLabCases = @($LabCases | Where-Object { -not $_.helper })
 
-# Lab folders held to the #398 rules (last statement, Write-Error under Stop). Each module's pull
-# request adds its folders when it converts their scripts, until the list covers every lab.
+# Lab folders held to the #398 last-statement rule. Each module's pull request adds its folders
+# when it converts their scripts, until the list covers every lab. 'scripts' is the
+# repository-level scripts/ folder.
 $ConvertedLabs = @(
     'module-1-identities-governance/1.1-entra-users-groups'
     'module-1-identities-governance/1.2-rbac'
     'module-1-identities-governance/1.3-governance'
+    'scripts'
+)
+
+# Lab folders excused from the #398 Write-Error rule until their fix merges (#379).
+$WriteErrorPendingLabs = @(
+    'module-3-compute/3.2-virtual-machines'
 )
 
 function Test-ConvertedLabScript {
@@ -247,6 +256,10 @@ function Test-ConvertedLabScript {
     )
 
     foreach ($lab in $ConvertedLabs) {
+        if ($lab -eq 'scripts') {
+            if ($File -like 'scripts/*' -and $File -notlike 'scripts/*/*') { return $true }
+            continue
+        }
         if ($File.StartsWith("$($lab.TrimEnd('/'))/scripts/", [System.StringComparison]::Ordinal)) { return $true }
     }
     return $false
@@ -254,6 +267,14 @@ function Test-ConvertedLabScript {
 
 $ConvertedLabCases      = @($LabCases | Where-Object { Test-ConvertedLabScript -File $_.file -ConvertedLabs $ConvertedLabs })
 $ConvertedEntryLabCases = @($ConvertedLabCases | Where-Object { -not $_.helper })
+$WriteErrorLabCases     = @($LabCases | Where-Object { -not (Test-ConvertedLabScript -File $_.file -ConvertedLabs $WriteErrorPendingLabs) })
+$WriteErrorPendingCases = @($WriteErrorPendingLabs | ForEach-Object {
+    $lab = $_
+    @{
+        lab        = $lab
+        violations = @($LabCases | Where-Object { (Test-ConvertedLabScript -File $_.file -ConvertedLabs @($lab)) -and $_.stopWriteError }).Count
+    }
+})
 $ConvertedLabFolderCases = @($ConvertedLabs | ForEach-Object {
     $lab = $_
     @{
@@ -409,6 +430,12 @@ $ConvertedLabFixtures = @(
     @{ name = 'an empty list puts nothing in scope'
        result = Test-ConvertedLabScript -File 'module-1-x/1.1-lab/scripts/Lab-Fixture.ps1' -ConvertedLabs @()
        expected = $false }
+    @{ name = '''scripts'' puts a repository-level script in scope'
+       result = Test-ConvertedLabScript -File 'scripts/Lab-Fixture.ps1' -ConvertedLabs @('scripts')
+       expected = $true }
+    @{ name = '''scripts'' leaves a lab''s scripts folder out of scope'
+       result = Test-ConvertedLabScript -File 'module-1-x/1.1-lab/scripts/Lab-Fixture.ps1' -ConvertedLabs @('scripts')
+       expected = $false }
 )
 
 # Discovery and run are separate phases in Pester 5: what the It blocks need at run time is set
@@ -476,7 +503,12 @@ Describe 'SkyCraft PowerShell - every lab script ends through Exit-Lab (#257)' {
         $endsThroughExit | Should -BeTrue -Because "the last top-level statement is '$lastStatement'; end the successful run with Exit-Lab -FailureCount 0 (or the count)"
     }
 
-    It "'<file>', under a Stop error preference, calls no Write-Error outside a function (#398)" -ForEach $ConvertedLabCases {
+    It "'<lab>', excused from the Write-Error rule, still holds a violation (#398)" -ForEach $WriteErrorPendingCases {
+        # Once the folder is fixed, remove it from $WriteErrorPendingLabs so the rule covers it.
+        $violations | Should -BeGreaterThan 0 -Because 'a stale entry in $WriteErrorPendingLabs excuses a folder the rule could hold'
+    }
+
+    It "'<file>', under a Stop error preference, calls no Write-Error outside a function (#398)" -ForEach $WriteErrorLabCases {
         # Under Stop, Write-Error ends the script before the Exit-Lab after it, so at the prompt a
         # failed run leaves the previous run's $LASTEXITCODE.
         $stopWriteError | Should -BeNullOrEmpty -Because "report the failure with Write-Host '[ERROR] <message>' -ForegroundColor Red, then Exit-Lab -FailureCount <n>"
