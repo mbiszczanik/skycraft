@@ -3,8 +3,8 @@ SUMMARY: Lab 1.2 - RBAC Assignments Orchestrator
 DESCRIPTION: Orchestrates role assignments for SkyCraft users and groups via AVM
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.4.0
-DEPLOYMENT: .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments (resolves the four principal IDs from Entra ID and passes them as overrides; the template has no .bicepparam because object IDs are tenant-specific). Imperative alternative: .\scripts\New-LabRoleAssignment.ps1 through the ARM role assignments API.
+VERSION: 0.5.0
+DEPLOYMENT: .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments (resolves the four principal IDs from Entra ID and passes them as overrides; the template has no .bicepparam because object IDs are tenant-specific. It also lists the assignments that already exist in parExistingAssignments, so the template creates only the missing ones). Imperative alternative: .\scripts\New-LabRoleAssignment.ps1 through the ARM role assignments API.
 ======================================================*/
 
 targetScope = 'subscription'
@@ -48,6 +48,20 @@ param parResourceGroupNameProd string = 'prod-skycraft-swc-rg'
 @maxLength(42) // deployment names prefix this with up to 22 chars; ARM limit is 64
 param parResourceGroupNamePlatform string = 'platform-skycraft-swc-rg'
 
+// Parity with a lab built another way (issue #406). The Portal and New-LabRoleAssignment.ps1 name an
+// assignment with a random GUID, the AVM modules with their own guid(), and ARM refuses a second
+// assignment of one principal, role and scope (RoleAssignmentExists). Deploy-Bicep.ps1 lists the
+// ones that exist; left empty, the template creates all five.
+@description('Keys of the assignments that already exist, whatever their name (made in the Portal or by New-LabRoleAssignment.ps1); the template does not deploy them')
+@allowed([
+  'admin-owner'
+  'developer-contributor-dev'
+  'tester-reader-dev'
+  'tester-reader-prod'
+  'partner-reader-platform'
+])
+param parExistingAssignments array = []
+
 /*******************
 *    Variables     *
 *******************/
@@ -62,7 +76,7 @@ var varReaderRoleId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
 *******************/
 
 /* Subscription-level assignment */
-module modAdminOwnerAssignment 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = {
+module modAdminOwnerAssignment 'br/public:avm/res/authorization/role-assignment/sub-scope:0.1.1' = if (!contains(parExistingAssignments, 'admin-owner')) {
   name: 'admin-owner-sub'
   scope: subscription()
   params: {
@@ -73,7 +87,7 @@ module modAdminOwnerAssignment 'br/public:avm/res/authorization/role-assignment/
 }
 
 /* Resource Group level assignments */
-module modDeveloperContributorAssignment 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
+module modDeveloperContributorAssignment 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = if (!contains(parExistingAssignments, 'developer-contributor-dev')) {
   name: 'developer-contributor-${parResourceGroupNameDev}'
   scope: resourceGroup(parResourceGroupNameDev)
   params: {
@@ -83,7 +97,7 @@ module modDeveloperContributorAssignment 'br/public:avm/res/authorization/role-a
   }
 }
 
-module modTesterReaderAssignment 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
+module modTesterReaderAssignment 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = if (!contains(parExistingAssignments, 'tester-reader-dev')) {
   name: 'tester-reader-${parResourceGroupNameDev}'
   scope: resourceGroup(parResourceGroupNameDev)
   params: {
@@ -93,7 +107,7 @@ module modTesterReaderAssignment 'br/public:avm/res/authorization/role-assignmen
   }
 }
 
-module modTesterProdReaderAssignment 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
+module modTesterProdReaderAssignment 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = if (!contains(parExistingAssignments, 'tester-reader-prod')) {
   name: 'tester-reader-${parResourceGroupNameProd}'
   scope: resourceGroup(parResourceGroupNameProd)
   params: {
@@ -103,7 +117,7 @@ module modTesterProdReaderAssignment 'br/public:avm/res/authorization/role-assig
   }
 }
 
-module modPartnerReaderAssignment 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
+module modPartnerReaderAssignment 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = if (!contains(parExistingAssignments, 'partner-reader-platform')) {
   name: 'partner-reader-${parResourceGroupNamePlatform}'
   scope: resourceGroup(parResourceGroupNamePlatform)
   params: {

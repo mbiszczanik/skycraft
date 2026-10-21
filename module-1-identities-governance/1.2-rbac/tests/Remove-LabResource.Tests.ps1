@@ -130,8 +130,9 @@ function Get-AzADUser {
 }
 
 # What the ARM role assignments API lists for the subscription (served by the fake appended to
-# this body): someone else's Owner assignment, and an Owner assignment for Malfurion inherited
-# from a management group - neither is the lab's. Only the one made at the subscription itself is.
+# this body): someone else's Owner assignment, an Owner assignment for Malfurion inherited from a
+# management group, and a Reader for Malfurion at the subscription - none is the lab's. Only the
+# Owner made at the subscription itself is.
 function Get-StubRoleAssignment {
     [CmdletBinding()]
     param([string]$Scope, [string]$PrincipalId)
@@ -139,6 +140,7 @@ function Get-StubRoleAssignment {
     $owner = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635'
     [pscustomobject]@{ Name = 'ra-other-sub'; PrincipalId = '22222222-2222-2222-2222-222222222222'; Scope = $Scope; RoleDefinitionId = $owner }
     [pscustomobject]@{ Name = 'ra-malfurion-mg'; PrincipalId = '11111111-1111-1111-1111-111111111111'; Scope = '/providers/Microsoft.Management/managementGroups/stub-mg'; RoleDefinitionId = $owner }
+    [pscustomobject]@{ Name = 'ra-malfurion-reader'; PrincipalId = '11111111-1111-1111-1111-111111111111'; Scope = $Scope; RoleDefinitionId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7' }
     if (Test-StubEmpty) { return }
     [pscustomobject]@{ Name = 'ra-malfurion-sub'; PrincipalId = '11111111-1111-1111-1111-111111111111'; Scope = $Scope; RoleDefinitionId = $owner }
 }
@@ -255,6 +257,8 @@ Describe 'Lab 1.2 Remove-LabResource.ps1 - removes what the lab creates' {
     It 'removes Malfurion''s Owner assignment and nobody else''s' {
         $script:Clean.Calls | Should -Contain 'Remove-RoleAssignment:ra-malfurion-sub'
         $script:Clean.Calls | Should -Not -Contain 'Remove-RoleAssignment:ra-other-sub'
+        # His Reader at the same scope is listed first: only the role check passes it by.
+        $script:Clean.Calls | Should -Not -Contain 'Remove-RoleAssignment:ra-malfurion-reader'
     }
 
     It 'removes only the assignment made at the subscription, once, not the inherited one' {

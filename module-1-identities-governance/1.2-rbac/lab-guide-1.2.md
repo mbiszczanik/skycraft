@@ -72,7 +72,7 @@ Every step that changes Azure in this lab has a Bicep counterpart in the lab's `
 | 1.2.5, 1.2.10-1.2.12 | Nothing (they read the assignments) | Portal-only; the checklist's validation commands read the same assignments | none |
 | 1.2.13 (optional) | Nothing (a sign-in test as Khadgar Archmage) | Portal-only | none |
 
-The Portal steps and `resource-groups.bicep` give each resource group the same four tags (`Project`, `Environment`, `CostCenter`, `Owner`), so every path leaves the same groups behind. `scripts/New-LabResourceGroup.ps1` creates the same three groups with the same four tags, but it is not one of this lab's paths. Pick one path per subscription for the role assignments: the Bicep cannot take over assignments that the Portal or the script already created (see the checklist's Automation section).
+The Portal steps and `resource-groups.bicep` give each resource group the same four tags (`Project`, `Environment`, `CostCenter`, `Owner`), so every path leaves the same groups behind. `scripts/New-LabResourceGroup.ps1` creates the same three groups with the same four tags, but it is not one of this lab's paths. The role-assignment paths can be mixed: `Deploy-Bicep.ps1 -IncludeRoleAssignments` keeps the assignments the Portal or the script already created and deploys only the missing ones, and `New-LabRoleAssignment.ps1` skips the ones that exist (see the checklist's Automation section).
 
 ---
 

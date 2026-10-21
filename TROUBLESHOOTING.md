@@ -17,8 +17,8 @@ This guide addresses common issues encountered while setting up or running the S
 ### "RoleAssignmentExists" from Lab 1.2 `Deploy-Bicep.ps1 -IncludeRoleAssignments`
 
 **Symptoms**: The role-assignments deployment fails with `RoleAssignmentExists` although `Test-Lab.ps1` reports every assignment present.
-**Cause**: Azure allows one assignment per (scope, role, principal). `New-LabRoleAssignment.ps1` and the portal create assignments under random names; `role-assignments.bicep` names its own with `guid(scope, role, principal)` and cannot adopt one that already exists under another name. The script skips the template when all five assignments exist, so this appears only when some of them were created outside the template.
-**Solution**: Either keep using `New-LabRoleAssignment.ps1` (it skips what exists) or remove the foreign assignments with `Remove-AzRoleAssignment` (or in the Portal, under **Access control (IAM)**) and re-run the deployment. `Remove-AzRoleAssignment` needs a Microsoft Graph token; see the next entry if it fails with `MicrosoftGraphEndpointResourceId`. Deleting the three resource groups removes their RG-scoped assignments; the subscription-scoped Owner assignment must be removed by hand.
+**Cause**: Azure allows one assignment per (scope, role, principal). `New-LabRoleAssignment.ps1` and the portal create assignments under random names; `role-assignments.bicep` names its own with `guid(scope, role, principal)` and cannot adopt one that already exists under another name. The script reads which of the five exist before it deploys, prints `[KEEP]` for each, and the template skips those (`parExistingAssignments`), so this appears only when an assignment was created between that read and the deployment: in the Portal or by `New-LabRoleAssignment.ps1` while the script ran.
+**Solution**: Run `Deploy-Bicep.ps1 -IncludeRoleAssignments` again. It now finds the assignment, keeps it, and deploys only the ones still missing.
 
 ### "Authentication failed against resource MicrosoftGraphEndpointResourceId"
 

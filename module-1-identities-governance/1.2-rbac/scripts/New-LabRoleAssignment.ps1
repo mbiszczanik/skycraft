@@ -11,9 +11,10 @@
     calls Microsoft Graph through the Az sign-in and fails where the tenant asks for interaction
     before it issues that token (issue #397).
 
-    A principal that cannot be looked up, a role assignment read that fails and a create that
-    fails are each an [ERROR] and counted; the script exits 1 when there was one. A failed read
-    is never taken for "not assigned yet".
+    A principal that cannot be looked up, a name that matches several principals, a role
+    assignment read that fails, an Owner for Malfurion that has a condition (not the lab's; guide
+    Troubleshooting, Issue 6) and a create that fails are each an [ERROR] and counted; the script
+    exits 1 when there was one. A failed read is never taken for "not assigned yet".
 
     It signs in to Microsoft Graph the way Lab 1.1's scripts do, reusing a Graph context already
     in the session only when that context holds the scopes it requests, and it looks Lab 1.1's
@@ -30,9 +31,10 @@
 
     This is the imperative path. The declarative equivalent is bicep/role-assignments.bicep,
     deployed by Deploy-Bicep.ps1 -IncludeRoleAssignments, which creates the same five assignments
-    under names derived from guid(scope, role, principal). Pick one path per subscription: this
-    script skips an assignment that already exists, whichever path created it, but the template
-    cannot adopt an assignment this script created (ARM answers RoleAssignmentExists).
+    under names derived from guid(scope, role, principal). The paths can be mixed: this script
+    skips an assignment that already exists, whichever path created it, and Deploy-Bicep.ps1
+    lists the existing ones in the template's parExistingAssignments, so the template creates
+    only the missing ones (issue #406).
     
     Assignments:
     - Malfurion Stormrage -> Owner (Subscription)
@@ -406,7 +408,10 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Microsoft Graph: $_" -ForegroundColor Red
-    Write-Host "     $(Get-LabGraphSignInHint -Client MgGraph)" -ForegroundColor Gray
+    # Connect-LabGraph's own stops (tenant mismatch, blocked plan, no context) already say what to do.
+    if ("$_" -notmatch 'SKYCRAFT_GRAPH_|TROUBLESHOOTING\.md') {
+        Write-Host "     $(Get-LabGraphSignInHint -Client MgGraph)" -ForegroundColor Gray
+    }
     Exit-Lab -FailureCount 1
 }
 
@@ -441,6 +446,7 @@ $assignments = @(
         Role           = "Owner"
         Scope          = "/subscriptions/$subscriptionId"
         ScopeName      = "Subscription Root"
+        NoCondition    = $true
     },
     # Developers -> Contributor on Dev RG
     @{
@@ -486,7 +492,7 @@ foreach ($item in $assignments) {
 
     # A. Resolve Principal ObjectId (Microsoft Graph). A guest is found by mail: its
     # userPrincipalName is rewritten to <alias>_<domain>#EXT#@<tenant> on invitation.
-    $objectId = $null
+    $found = @()
     try {
         if ($item.Type -eq "Group") {
             $obj = Get-MgGroup -Filter "DisplayName eq '$($item.PrincipalName)'" -ErrorAction Stop
@@ -497,13 +503,21 @@ foreach ($item in $assignments) {
         else {
             $obj = Get-MgUser -Filter "UserPrincipalName eq '$($item.PrincipalName)'" -ErrorAction Stop
         }
-        $objectId = @($obj | Where-Object { $_ } | Select-Object -First 1 -ExpandProperty Id)[0]
+        $found = @($obj | Where-Object { $_ })
     }
     catch {
         $failCount++
         Write-Host " [ERROR] Failed to resolve principal: $_ $(Get-LabGraphSignInHint -Client MgGraph)" -ForegroundColor Red
         continue
     }
+
+    # No guess between namesakes, as in Deploy-Bicep.ps1 and Test-Lab.ps1.
+    if ($found.Count -gt 1) {
+        $failCount++
+        Write-Host " [ERROR] '$($item.PrincipalName)' matched $($found.Count) principals ($(($found | ForEach-Object { $_.Id }) -join ', ')); expected exactly one." -ForegroundColor Red
+        continue
+    }
+    $objectId = if ($found.Count -eq 1) { [string]$found[0].Id } else { $null }
 
     if (-not $objectId) {
         Write-Host " [SKIP] Principal not found in Entra ID." -ForegroundColor Red
@@ -524,6 +538,12 @@ foreach ($item in $assignments) {
         continue
     }
 
+    # As Test-Lab.ps1 checks it; ARM keeps one assignment per principal, role and scope, so it cannot be replaced here.
+    if ($item.NoCondition -and $exists.Count -gt 0 -and -not @($exists | Where-Object { -not $_.Condition })) {
+        $failCount++
+        Write-Host " [ERROR] Assigned, but with a condition; the lab's has none. Remove it in the Portal (guide Troubleshooting, Issue 6) and run again." -ForegroundColor Red
+        continue
+    }
     if ($exists.Count -gt 0) {
         Write-Host " [SKIPPED] Already assigned." -ForegroundColor Yellow
         continue

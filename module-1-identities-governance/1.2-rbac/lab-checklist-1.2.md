@@ -96,7 +96,7 @@
 
 ## 🤖 Automation (optional)
 
-The portal steps above have two scripted equivalents in `scripts/`. Pick one per subscription: each skips assignments that already exist, but the Bicep template cannot adopt assignments the imperative script created.
+The portal steps above have two scripted equivalents in `scripts/`. Both skip the assignments that already exist, whichever way they were made, so either one can finish a lab started in the Portal or with the other: `Deploy-Bicep.ps1` prints `Existing assignments: n of 5` and `[KEEP]` or `[CREATE]` for each of the five, and deploys only the missing ones. One exception: if Malfurion's Owner assignment has a condition (guide Troubleshooting, Issue 6), both report `[ERROR]` and end with exit code 1, because neither can replace it. Remove it in the Portal and run the script again.
 
 - [ ] Declarative - resource groups and the five role assignments from `bicep/role-assignments.bicep`, with principal IDs resolved from Entra ID:
   ```powershell

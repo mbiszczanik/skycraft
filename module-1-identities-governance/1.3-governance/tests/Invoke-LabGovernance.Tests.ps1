@@ -204,8 +204,9 @@ function New-AzPolicyAssignment {
 }
 
 # Role assignments the ARM API lists for the subscription: one held by someone else, one
-# inherited from a management group by the identity, and - with SKYCRAFT_STUB_ROLEHELD - the
-# identity's Contributor. The fake keeps the requested principal's only.
+# inherited from a management group by the identity, the identity's Reader on the subscription
+# (another role than the spec's), and - with SKYCRAFT_STUB_ROLEHELD - the identity's
+# Contributor. The fake keeps the requested principal's only.
 function Get-StubRoleAssignment {
     [CmdletBinding()]
     param([string]$Scope, [string]$PrincipalId)
@@ -216,6 +217,7 @@ function Get-StubRoleAssignment {
     }
     [pscustomobject]@{ Name = 'ra-other-sub'; PrincipalId = '22222222-2222-2222-2222-222222222222'; Scope = $Scope; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c' }
     [pscustomobject]@{ Name = 'ra-identity-mg'; PrincipalId = $script:PrincipalId; Scope = '/providers/Microsoft.Management/managementGroups/stub-mg'; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; PrincipalType = 'ServicePrincipal' }
+    [pscustomobject]@{ Name = 'ra-identity-reader'; PrincipalId = $script:PrincipalId; Scope = $Scope; RoleDefinitionId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; PrincipalType = 'ServicePrincipal' }
     if ($env:SKYCRAFT_STUB_ROLEHELD -eq '1') {
         [pscustomobject]@{ Name = 'ra-identity-sub'; PrincipalId = $script:PrincipalId; Scope = $Scope; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; PrincipalType = 'ServicePrincipal' }
     }
@@ -391,7 +393,7 @@ Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - the identity of Inherit-Project-Tag
     It 'grants Contributor on the subscription to the new assignment''s identity, as the Portal does' {
         $script:Fresh.Granted | Should -Be @(
             'New-RoleAssignment:11111111-1111-1111-1111-111111111111|ServicePrincipal|/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Authorization/roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c|/subscriptions/00000000-0000-0000-0000-000000000000'
-        ) -Because "a role inherited from a management group or held by someone else is not the identity's on the subscription; output was:`n$($script:Fresh.Output)"
+        ) -Because "a role inherited from a management group, held by someone else or of another role is not the identity's Contributor on the subscription; output was:`n$($script:Fresh.Output)"
         $script:Fresh.Output | Should -Match '\[SUCCESS\] Granted role b24988ac-6180-42a0-ab88-20f7382dd24c on the subscription to the identity of Inherit-Project-Tag'
     }
 

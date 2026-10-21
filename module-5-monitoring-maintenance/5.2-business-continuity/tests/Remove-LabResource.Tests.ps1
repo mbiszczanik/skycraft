@@ -434,10 +434,12 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - role assignments without Microsoft Gr
         # The stub defines no Az role cmdlet: the assignments are reached only through the
         # Invoke-AzRestMethod fake, filtered by the vault identity's principal id. The inherited
         # Storage Blob Data Owner has the role of one the lab assigns: only the exact scope keeps
-        # the cleanup from removing it.
+        # the cleanup from removing it. Each role's lookup sees the other role at the same scope:
+        # only the role check keeps either from being removed twice.
         $calls = $script:Clean.Calls
-        $calls | Should -Contain 'Remove-RoleAssignment:blob-data-owner'
-        $calls | Should -Contain 'Remove-RoleAssignment:backup-contributor'
+        foreach ($name in 'blob-data-owner', 'backup-contributor') {
+            @($calls | Where-Object { $_ -eq "Remove-RoleAssignment:$name" }).Count | Should -Be 1 -Because "calls were: $($calls -join ', ')"
+        }
         $calls | Should -Not -Contain 'Remove-RoleAssignment:inherited-reader'
         $calls | Should -Not -Contain 'Remove-RoleAssignment:inherited-blob-data-owner'
         @($calls | Where-Object { $_ -eq 'Get-RoleAssignment' }).Count | Should -Be 2

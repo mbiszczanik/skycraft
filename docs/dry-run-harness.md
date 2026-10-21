@@ -133,7 +133,8 @@ All commands are written to be run from the repository root.
 .\module-1-identities-governance\1.2-rbac\scripts\Deploy-Bicep.ps1 -WhatIf
 # role-assignments.bicep has no parameter file: its four principal IDs are Entra object IDs
 # that only exist once Lab 1.1 has run. -IncludeRoleAssignments resolves them from the
-# directory and previews that template too (the three resource groups must already exist).
+# directory and previews that template too, for the assignments that do not exist yet (the
+# three resource groups must already exist).
 .\module-1-identities-governance\1.2-rbac\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments -WhatIf
 .\module-1-identities-governance\1.2-rbac\scripts\Test-Lab.ps1
 .\module-1-identities-governance\1.2-rbac\scripts\Remove-LabResource.ps1 -WhatIf

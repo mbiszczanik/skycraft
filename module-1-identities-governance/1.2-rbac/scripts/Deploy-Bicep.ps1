@@ -15,10 +15,17 @@
     name each assignment with a deterministic guid() of scope, role and principal, so a second
     run is a no-op.
 
-    The imperative alternative, New-LabRoleAssignment.ps1, creates the same five assignments
-    through the ARM role assignments API under different names. The two paths do not adopt each other's
-    assignments: this script skips the template when all five already exist (whichever path
-    created them), and a partial overlap surfaces as RoleAssignmentExists from ARM.
+    The Portal and the imperative alternative, New-LabRoleAssignment.ps1, create the same five
+    assignments under random names, and ARM refuses a second assignment of one principal, role
+    and scope (RoleAssignmentExists). So before the preview or the deployment the script reads
+    which of the five exist, at their exact scope and whatever their name (issue #406), prints
+    "Existing assignments: n of 5" and one line per assignment:
+      [KEEP]    it exists; the template leaves it as it is (parExistingAssignments)
+      [CREATE]  it does not; the template creates it
+    When all five exist, the script says so and neither previews nor deploys the template. A
+    read that fails stops the script with [ERROR] and exit code 1 before anything is deployed, and
+    so does an Owner for Malfurion that has a condition: it is not the lab's, and ARM keeps no
+    second one beside it (guide Troubleshooting, Issue 6).
 
 .PARAMETER Location
     Azure region for deployment. Default: swedencentral.
@@ -30,7 +37,7 @@
     sign-in's Graph token. Where the tenant asks for interaction before it issues that token, sign
     in with 'Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId' first; a failed lookup
     says so. The existing assignments are read through the Azure Resource Manager API, which needs
-    no Graph (issue #397).
+    no Graph (issue #397); only the missing ones are previewed and deployed (issue #406).
 
 .PARAMETER WhatIf
     Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
@@ -41,7 +48,8 @@
 
 .EXAMPLE
     .\Deploy-Bicep.ps1 -IncludeRoleAssignments
-    Deploys the resource groups, then the five role assignments with principal IDs resolved from Entra ID.
+    Deploys the resource groups, then those of the five role assignments that do not exist yet,
+    with principal IDs resolved from Entra ID.
 
 .EXAMPLE
     .\Deploy-Bicep.ps1 -IncludeRoleAssignments -WhatIf
@@ -156,23 +164,26 @@ function Select-LabInitialDomain {
     return $initial[0]
 }
 
-# --- Existing assignments (issue #397) -----------------------------------------------------
-# Counts how many of the template's assignments ($Desired: ObjectId, Role, Scope) already exist.
-# Read through the ARM role assignments API (Get-LabArmRoleAssignment), not Get-AzRoleAssignment,
-# which calls Microsoft Graph. The listing also returns assignments inherited from above, so the
-# role and the scope must match exactly: a Reader at subscription level is not the RG-level Reader
-# the template makes. A read that fails throws: counting it as "not there" would deploy on top of
-# assignments that may exist. Top-level, like Resolve-LabPrincipalId, so
+# --- Existing assignments (issues #397, #406) ----------------------------------------------
+# Returns the Key of each of the template's assignments ($Desired: Key, ObjectId, Role, Scope,
+# optional NoCondition) that already exists, whatever its name: the template skips those listed
+# in parExistingAssignments, so a lab built in the Portal or by New-LabRoleAssignment.ps1 gets no
+# second one. Read through the
+# ARM role assignments API (Get-LabArmRoleAssignment), not Get-AzRoleAssignment, which calls
+# Microsoft Graph. The listing also returns assignments inherited from above, so the role and the
+# scope must match exactly: a Reader at subscription level is not the RG-level Reader the template
+# makes. A read that fails throws: counting it as "not there" would deploy on top of assignments
+# that may exist. Top-level, like Resolve-LabPrincipalId, so
 # tests/RoleAssignments-DeployPath.Tests.ps1 can exercise it without a subscription.
-function Get-LabExistingAssignmentCount {
+function Get-LabExistingAssignmentKey {
     [CmdletBinding()]
-    [OutputType([int])]
+    [OutputType([string[]])]
     param(
         [Parameter(Mandatory = $true)]
         [hashtable[]]$Desired
     )
 
-    $existingCount = 0
+    $held = [System.Collections.Generic.List[string]]::new()
     foreach ($item in $Desired) {
         $scope = $item.Scope
         $roleId = Get-LabBuiltInRoleId -Name $item.Role
@@ -183,9 +194,13 @@ function Get-LabExistingAssignmentCount {
         catch {
             throw "Could not read the role assignments at ${scope}: $($_.Exception.Message)"
         }
-        if ($match.Count -gt 0) { $existingCount++ }
+        # As Test-Lab.ps1 checks it: a conditioned Owner is not the lab's, and the template cannot replace it.
+        if ($item.NoCondition -and $match.Count -gt 0 -and -not @($match | Where-Object { -not $_.Condition })) {
+            throw "$($item.Key): the $($item.Role) assignment at $scope has a condition; the lab's has none. Remove it in the Portal (guide Troubleshooting, Issue 6) and run again."
+        }
+        if ($match.Count -gt 0) { $held.Add([string]$item.Key) }
     }
-    return $existingCount
+    return $held.ToArray()
 }
 
 Write-Host "=== Lab 1.2: Infrastructure Deployment ===" -ForegroundColor Cyan -BackgroundColor Black
@@ -310,14 +325,14 @@ Write-Host "`nStarting Role Assignment Deployment..." -ForegroundColor Cyan
 Write-Host "  Template: $roleTemplateFile" -ForegroundColor Gray
 Write-Host "  DeploymentName: $roleDeploymentName" -ForegroundColor Gray
 
-# The five assignments the template declares: principal, role and exact scope. Kept in step with
-# the template by hand; Test-Lab.ps1 asserts the same five.
+# The five assignments the template declares: its parExistingAssignments key, principal, role and
+# exact scope. Kept in step with the template by hand; Test-Lab.ps1 asserts the same five.
 $desired = @(
-    @{ ObjectId = $principal.parAdminPrincipalId;          Role = 'Owner';       Scope = "/subscriptions/$subscriptionId" }
-    @{ ObjectId = $principal.parDeveloperGroupPrincipalId; Role = 'Contributor'; Scope = "/subscriptions/$subscriptionId/resourceGroups/dev-skycraft-swc-rg" }
-    @{ ObjectId = $principal.parTesterGroupPrincipalId;    Role = 'Reader';      Scope = "/subscriptions/$subscriptionId/resourceGroups/dev-skycraft-swc-rg" }
-    @{ ObjectId = $principal.parTesterGroupPrincipalId;    Role = 'Reader';      Scope = "/subscriptions/$subscriptionId/resourceGroups/prod-skycraft-swc-rg" }
-    @{ ObjectId = $principal.parPartnerPrincipalId;        Role = 'Reader';      Scope = "/subscriptions/$subscriptionId/resourceGroups/platform-skycraft-swc-rg" }
+    @{ Key = 'admin-owner';               ObjectId = $principal.parAdminPrincipalId;          Role = 'Owner';       Scope = "/subscriptions/$subscriptionId"; NoCondition = $true }
+    @{ Key = 'developer-contributor-dev'; ObjectId = $principal.parDeveloperGroupPrincipalId; Role = 'Contributor'; Scope = "/subscriptions/$subscriptionId/resourceGroups/dev-skycraft-swc-rg" }
+    @{ Key = 'tester-reader-dev';         ObjectId = $principal.parTesterGroupPrincipalId;    Role = 'Reader';      Scope = "/subscriptions/$subscriptionId/resourceGroups/dev-skycraft-swc-rg" }
+    @{ Key = 'tester-reader-prod';        ObjectId = $principal.parTesterGroupPrincipalId;    Role = 'Reader';      Scope = "/subscriptions/$subscriptionId/resourceGroups/prod-skycraft-swc-rg" }
+    @{ Key = 'partner-reader-platform';   ObjectId = $principal.parPartnerPrincipalId;        Role = 'Reader';      Scope = "/subscriptions/$subscriptionId/resourceGroups/platform-skycraft-swc-rg" }
 )
 
 try {
@@ -331,30 +346,41 @@ try {
         exit 0
     }
 
-    # Exact role and scope, through the ARM API (Get-LabExistingAssignmentCount above). A read that
+    # Exact role and scope, through the ARM API (Get-LabExistingAssignmentKey above). A read that
     # fails throws into the catch below: an [ERROR] and exit 1, nothing deployed.
-    $existingCount = Get-LabExistingAssignmentCount -Desired $desired
-    Write-Host "  Existing assignments: $existingCount of $($desired.Count)" -ForegroundColor Gray
-
-    $roleParams = @{
-        Name         = $roleDeploymentName
-        Location     = $Location
-        TemplateFile = $roleTemplateFile
-        ErrorAction  = 'Stop'
-    }
-    foreach ($entry in $principal.GetEnumerator()) { $roleParams[$entry.Key] = $entry.Value }
-
-    if ($WhatIf) {
-        Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
-        Get-AzSubscriptionDeploymentWhatIfResult @roleParams
-        Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
-        exit 0
+    $heldKeys = @(Get-LabExistingAssignmentKey -Desired $desired)
+    Write-Host "  Existing assignments: $($heldKeys.Count) of $($desired.Count)" -ForegroundColor Gray
+    foreach ($item in $desired) {
+        $label = "$($item.Key) ($($item.Role) at $($item.Scope))"
+        if ($heldKeys -contains $item.Key) {
+            Write-Host "  [KEEP]   ${label}: exists already; the template leaves it as it is." -ForegroundColor Gray
+        }
+        else {
+            Write-Host "  [CREATE] ${label}: does not exist; the template creates it." -ForegroundColor Gray
+        }
     }
 
-    if ($existingCount -eq $desired.Count) {
-        Write-Host "  -> [SKIP] All $($desired.Count) role assignments already exist - nothing to deploy." -ForegroundColor Yellow
+    if ($heldKeys.Count -eq $desired.Count) {
+        Write-Host "  -> [SKIP] All $($desired.Count) role assignments already exist - nothing to preview or deploy." -ForegroundColor Yellow
     }
     else {
+        # The template skips the assignments listed here (issue #406).
+        $roleParams = @{
+            Name                   = $roleDeploymentName
+            Location               = $Location
+            TemplateFile           = $roleTemplateFile
+            parExistingAssignments = $heldKeys
+            ErrorAction            = 'Stop'
+        }
+        foreach ($entry in $principal.GetEnumerator()) { $roleParams[$entry.Key] = $entry.Value }
+
+        if ($WhatIf) {
+            Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
+            Get-AzSubscriptionDeploymentWhatIfResult @roleParams
+            Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
+            exit 0
+        }
+
         $roleDeployment = New-AzSubscriptionDeployment @roleParams
 
         if ($roleDeployment.ProvisioningState -ne 'Succeeded') {
@@ -368,11 +394,12 @@ try {
 catch {
     Write-Host "  -> [ERROR] Role assignment deployment failed: $_" -ForegroundColor Red
     if ("$_" -match 'RoleAssignmentExists') {
-        Write-Host "     An assignment for the same principal, role and scope exists under a name this template does not own -" -ForegroundColor Yellow
-        Write-Host "     typically one created by New-LabRoleAssignment.ps1 or in the portal. Remove it, or keep using that path." -ForegroundColor Yellow
+        Write-Host "     One of the assignments was created after this script read the existing ones," -ForegroundColor Yellow
+        Write-Host "     in the portal or by New-LabRoleAssignment.ps1 meanwhile. Run this script again: it keeps those that exist." -ForegroundColor Yellow
     }
     Exit-Lab -FailureCount 1
 }
 
+if ($WhatIf) { exit 0 }
 Write-Host "`nDeployment Complete." -ForegroundColor Green
 Exit-Lab -FailureCount 0

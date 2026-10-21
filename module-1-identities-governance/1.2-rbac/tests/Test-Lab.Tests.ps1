@@ -65,9 +65,9 @@ BeforeAll {
 
     # Every Az command the script calls, recording its own invocation. By default the
     # subscription holds exactly what the lab builds: the three resource groups and the five role
-    # assignments, next to the operator's own Owner assignment and a Reader for SkyCraft-Testers
-    # on the subscription, which every resource group inherits but which is not the lab's
-    # resource-group assignment. The role assignments are served by the ARM role assignments API
+    # assignments, next to the operator's own Owner assignment, a Reader for SkyCraft-Testers on
+    # the subscription, which every resource group inherits but which is not the lab's
+    # resource-group assignment, and a Contributor for SkyCraft-Testers on the prod group. The role assignments are served by the ARM role assignments API
     # fake from tests/Support/LabScriptStub.psm1 (issue #397), which calls Get-StubRoleAssignment.
     # Environment variables take pieces away, so one generated module serves every scenario:
     #   SKYCRAFT_STUB_NOCONTEXT       '1' leaves no Az context, as when no one is signed in
@@ -184,6 +184,8 @@ function Get-StubRoleAssignment {
         @{ Key = 'testers-prod'; Name = 'ra-4'; Principal = $script:Principal['SkyCraft-Testers']; Role = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; Scope = "$sub/resourceGroups/prod-skycraft-swc-rg"; Type = 'Group' }
         @{ Key = 'partner';      Name = 'ra-5'; Principal = $script:Principal['istormrage@illidari.com']; Role = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; Scope = "$sub/resourceGroups/platform-skycraft-swc-rg" }
         @{ Key = 'inherited';    Name = 'ra-6'; Principal = $script:Principal['SkyCraft-Testers']; Role = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; Scope = $sub; Type = 'Group' }
+        # Another role at the exact scope: not the Testers' prod Reader either.
+        @{ Key = 'other-role';   Name = 'ra-7'; Principal = $script:Principal['SkyCraft-Testers']; Role = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; Scope = "$sub/resourceGroups/prod-skycraft-swc-rg"; Type = 'Group' }
     )
     foreach ($entry in $all) {
         if (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGROLE' -Name $entry.Key) { continue }
@@ -309,7 +311,8 @@ Describe 'Lab 1.2 Test-Lab.ps1 - failures are counted and set the exit code (#25
 
     It 'exits 1 and reports 1 failed when one role assignment is missing' {
         # The Testers' Reader on the subscription, which the prod group inherits, is not the
-        # prod-group assignment the lab makes: the check matches the exact scope.
+        # prod-group assignment the lab makes: the check matches the exact scope. Nor is their
+        # Contributor on the prod group: the check matches the role.
         $run = $script:RoleMissing
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "Testers Group \(Prod\)\.\.\. \[FAIL\] Expected Assignment 'Reader' for 'SkyCraft-Testers' NOT found"
