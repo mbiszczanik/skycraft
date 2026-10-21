@@ -16,7 +16,9 @@
       [KEEP]    one exists under another name (made in the Portal); the template leaves it as it
                 is (parExistingPolicyAssignments) and creates no second one
     The identity of Inherit-Project-Tag keeps the Contributor role it holds; the template grants
-    the role only when the identity does not hold it on the subscription yet.
+    the role only when the identity does not hold it on the subscription yet. The role is read
+    through the ARM role assignments API (Get-LabArmRoleAssignment in tools/LabCommon.psm1),
+    never with Get-AzRoleAssignment, which calls Microsoft Graph (issue #397).
 
     The script deploys nothing, and exits 1, and names each problem instead of keeping,
     overwriting or doubling the learner's assignment without a word, when:
@@ -163,8 +165,10 @@ if ($inherit.Count -eq 1) {
         Write-Host "  -> [ERROR] $($inherit.Spec.Name) $(Format-LabPolicyAssignment -Assignment $inherit.Found[0]) reports no principal id for its identity, so its role cannot be checked." -ForegroundColor Red
     }
     else {
+        # ARM REST, not Get-AzRoleAssignment, which needs a Microsoft Graph token (issue #397).
         try {
-            $held = @(Select-LabPolicyIdentityRoleAssignment -RoleAssignment @(Get-AzRoleAssignment -Scope $subscriptionScope -ErrorAction Stop) `
+            $listed = @(Get-LabArmRoleAssignment -Scope $subscriptionScope -PrincipalId $principalId)
+            $held = @(Select-LabPolicyIdentityRoleAssignment -RoleAssignment $listed `
                     -PrincipalId $principalId -SubscriptionId $subscriptionId |
                 Where-Object { ([string]$_.Scope).TrimEnd('/') -eq $subscriptionScope -and [string]$_.RoleDefinitionId -eq $roleGuid })
         }

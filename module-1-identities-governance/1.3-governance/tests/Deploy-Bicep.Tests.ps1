@@ -26,6 +26,8 @@
          fails: the script names the problem, calls neither the what-if nor the deployment, and
          exits 1.
       6. An identity holding another role than Contributor still gets Contributor.
+      7. The identity's role is read through the ARM role assignments API, filtered by its
+         principal id, never with Get-AzRoleAssignment (issue #397).
 
     No subscription is needed, and none is used. The script runs through
     tests/Support/LabScriptStub.psm1 (issue #112), which aborts the child with exit 99 unless
@@ -58,7 +60,7 @@ BeforeAll {
         'Get-AzContext'
         'Connect-AzAccount'
         'Get-AzPolicyAssignment'
-        'Get-AzRoleAssignment'
+        'Invoke-AzRestMethod'
         'Get-AzSubscriptionDeploymentWhatIfResult'
         'New-AzSubscriptionDeployment'
         'Get-AzSubscriptionDeploymentOperation'
@@ -76,7 +78,10 @@ BeforeAll {
     #   SKYCRAFT_STUB_DRIFT       '1' gives Enforce-Project-Tag tagValue 'Contoso' and
     #                             Restrict-Azure-Regions enforcement mode DoNotEnforce
     #   SKYCRAFT_STUB_LOOKUPFAIL  '1' makes the policy assignment listing fail
-    #   SKYCRAFT_STUB_ROLEFAIL    '1' makes the role assignment listing fail
+    #   SKYCRAFT_STUB_ROLEFAIL    '1' makes the role assignment listing fail (HTTP 403)
+    # Role assignments go through the ARM API (issue #397): the fake of Invoke-AzRestMethod from
+    # tests/Support/LabScriptStub.psm1 is appended to this body and calls Get-StubRoleAssignment
+    # below.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:PrincipalId = '11111111-1111-1111-1111-111111111111'
@@ -155,20 +160,24 @@ function Get-AzPolicyAssignment {
         -Scope '/providers/Microsoft.Management/managementGroups/stub-mg' -Parameter @{ tagName = 'Project'; tagValue = 'SkyCraft' } -EnforcementMode 'Default'
 }
 
-function Get-AzRoleAssignment {
+# Role assignments the ARM API lists for the subscription. The fake keeps the requested
+# principal's only.
+function Get-StubRoleAssignment {
     [CmdletBinding()]
-    param([string]$Scope, [string]$ObjectId, [Parameter(ValueFromRemainingArguments)]$Rest)
-    if ($ObjectId) { throw 'stub: the lab lists role assignments by scope, not by -ObjectId (a Microsoft Graph lookup)' }
-    Write-StubCall -Name "Get-AzRoleAssignment:$Scope"
-    if ($env:SKYCRAFT_STUB_ROLEFAIL -eq '1') { throw 'stub lookup failure: Get-AzRoleAssignment' }
-    [pscustomobject]@{ ObjectId = '22222222-2222-2222-2222-222222222222'; Scope = $Scope; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c' }
+    param([string]$Scope, [string]$PrincipalId)
+    Write-StubCall -Name "Get-RoleAssignment:$Scope|$PrincipalId"
+    if ($env:SKYCRAFT_STUB_ROLEFAIL -eq '1') {
+        Write-Error -ErrorId 'AuthorizationFailed' -Message "stub lookup failure: the client 'stub' does not have authorization to perform action 'Microsoft.Authorization/roleAssignments/read' over scope '$Scope'."
+        return
+    }
+    [pscustomobject]@{ Name = 'ra-other-sub'; PrincipalId = '22222222-2222-2222-2222-222222222222'; Scope = $Scope; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c' }
     # Inherited from a management group: not the identity's role on the subscription.
-    [pscustomobject]@{ ObjectId = $script:PrincipalId; Scope = '/providers/Microsoft.Management/managementGroups/stub-mg'; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c' }
+    [pscustomobject]@{ Name = 'ra-identity-mg'; PrincipalId = $script:PrincipalId; Scope = '/providers/Microsoft.Management/managementGroups/stub-mg'; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; PrincipalType = 'ServicePrincipal' }
     if ($env:SKYCRAFT_STUB_ROLEHELD -eq '1') {
-        [pscustomobject]@{ ObjectId = $script:PrincipalId; Scope = $Scope; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c' }
+        [pscustomobject]@{ Name = 'ra-identity-sub'; PrincipalId = $script:PrincipalId; Scope = $Scope; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; PrincipalType = 'ServicePrincipal' }
     }
     if ($env:SKYCRAFT_STUB_OTHERROLE -eq '1') {
-        [pscustomobject]@{ ObjectId = $script:PrincipalId; Scope = $Scope; RoleDefinitionId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7' }
+        [pscustomobject]@{ Name = 'ra-identity-reader'; PrincipalId = $script:PrincipalId; Scope = $Scope; RoleDefinitionId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; PrincipalType = 'ServicePrincipal' }
     }
 }
 
@@ -282,7 +291,7 @@ function Get-AzSubscriptionDeploymentOperation { [CmdletBinding()] param([Parame
     $script:Compiled = @(if ($resources -is [System.Collections.IDictionary]) { $resources.Values } else { $resources })
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmRoleAssignmentStub)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     $script:Fresh          = Invoke-DeployScript -Stub $script:Stub
@@ -385,9 +394,9 @@ Describe 'Lab 1.3 Deploy-Bicep.ps1 - a lab built in the Portal gets no second as
         (Get-DeployedByTemplate -Parameters $run.Parameters).Policies | Should -BeNullOrEmpty
     }
 
-    It 'reads the role assignments by scope, never with -ObjectId (a Microsoft Graph lookup)' {
-        @($script:Portal.Calls | Where-Object { $_ -like 'Get-AzRoleAssignment:*' }) |
-            Should -Be @('Get-AzRoleAssignment:/subscriptions/00000000-0000-0000-0000-000000000000')
+    It 'reads the identity''s role assignments once, through the ARM API filtered by its principal id (#397)' {
+        @($script:Portal.Calls | Where-Object { $_ -like 'Get-RoleAssignment:*' }) |
+            Should -Be @('Get-RoleAssignment:/subscriptions/00000000-0000-0000-0000-000000000000|11111111-1111-1111-1111-111111111111')
     }
 }
 
@@ -401,7 +410,7 @@ Describe 'Lab 1.3 Deploy-Bicep.ps1 - an empty or Bicep-made lab (#406)' {
         $deployed = Get-DeployedByTemplate -Parameters $run.Parameters
         $deployed.Policies | Should -Be $script:GuideNames -Because 'an assignment inherited from a management group is not the lab''s'
         $deployed.Roles | Should -Be @('Inherit-Project-Tag (module role)')
-        @($run.Calls | Where-Object { $_ -like 'Get-AzRoleAssignment:*' }) | Should -BeNullOrEmpty
+        @($run.Calls | Where-Object { $_ -like 'Get-RoleAssignment:*' }) | Should -BeNullOrEmpty
     }
 
     It 'deploys over Bicep-made assignments and grants no second role when the identity holds it' {
@@ -478,10 +487,12 @@ Describe 'Lab 1.3 Deploy-Bicep.ps1 - deploys nothing it cannot account for (#406
         $run.Output | Should -Match '\[ERROR\] Could not list the policy assignments on the subscription, so nothing is deployed[^\r\n]*stub lookup failure'
     }
 
-    It 'stops when the role assignments cannot be listed' {
+    It 'stops when the role assignments cannot be listed, rather than read the failure as "not held" (#397)' {
         $run = $script:RoleListFails
         $run.ExitCode | Should -Be 1
         $run.Handed | Should -BeNullOrEmpty
-        $run.Output | Should -Match '\[ERROR\] Could not list the role assignments on the subscription[^\r\n]*stub lookup failure'
+        $run.Output | Should -Match '\[ERROR\] Could not list the role assignments on the subscription[^\r\n]*HTTP 403 \(AuthorizationFailed\)[^\r\n]*stub lookup failure'
+        $run.Output | Should -Not -Match '\[GRANT\]'
+        $run.Output | Should -Match 'Nothing deployed: 1 problem\(s\) above'
     }
 }
