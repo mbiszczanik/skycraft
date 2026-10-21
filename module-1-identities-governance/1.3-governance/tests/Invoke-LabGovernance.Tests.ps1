@@ -72,7 +72,10 @@ BeforeAll {
     # Every Az command the script calls, recording its own invocation. Environment variables pick
     # what the subscription already holds:
     #   SKYCRAFT_STUB_POLICYSET   'none' (the default), 'bicep' (fixed names), 'portal' (generated
-    #                             names, the guide's names as display names) or 'both'
+    #                             names, the guide's names as display names), 'both',
+    #                             'portal-default-name' (the Portal set, Require-Environment-Tag-RG
+    #                             under the wizard's prefill) or 'wrong-definition' (the Portal
+    #                             set, Inherit-Project-Tag on "Inherit a tag from the resource group")
     #   SKYCRAFT_STUB_LOOKUPFAIL  '1' makes the policy assignment listing fail
     #   SKYCRAFT_STUB_ROLEHELD    '1' makes Inherit-Project-Tag's identity hold Contributor on the
     #                             subscription already
@@ -169,8 +172,12 @@ function Get-AzPolicyAssignment {
             New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope -Identity:$identity `
                 -Parameter $assignment.Parameter -EnforcementMode $mode
         }
-        if ($set -in 'portal', 'both') {
-            New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Identity:$identity `
+        if ($set -in 'portal', 'both', 'portal-default-name', 'wrong-definition') {
+            $display = $assignment.Name
+            $definition = $assignment.Definition
+            if ($set -eq 'portal-default-name' -and $assignment.Name -eq 'Require-Environment-Tag-RG') { $display = 'Require a tag on resource groups' }
+            if ($set -eq 'wrong-definition' -and $assignment.Name -eq 'Inherit-Project-Tag') { $definition = 'cd3aa116-8754-49c9-a813-ad46512ece54' }
+            New-StubAssignment -Name $assignment.Portal -DisplayName $display -Definition $definition -Scope $Scope -Identity:$identity `
                 -Parameter $assignment.Parameter -EnforcementMode $mode
         }
     }
@@ -221,7 +228,7 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
     function Invoke-GovernanceScript {
         param(
             [pscustomobject]$Stub,
-            [ValidateSet('none', 'bicep', 'portal', 'both')]
+            [ValidateSet('none', 'bicep', 'portal', 'both', 'portal-default-name', 'wrong-definition')]
             [string]$PolicySet = 'none',
             [switch]$LookupFail,
             [switch]$RoleHeld,
@@ -269,9 +276,11 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
     # An account with Contributor alone: the assignment is created, the role grant is refused.
     $script:GrantFails = Invoke-GovernanceScript -Stub $script:Stub -GrantFail
     $script:Drifted    = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'portal' -RoleHeld -Drift
+    $script:DefaultName = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'portal-default-name' -RoleHeld
+    $script:WrongDef   = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'wrong-definition' -RoleHeld
 
     $script:AllRuns = @($script:Fresh, $script:BicepMade, $script:PortalMade, $script:TwoSets, $script:ListFails,
-        $script:RoleHeld, $script:NoIdentity, $script:GrantFails, $script:Drifted)
+        $script:RoleHeld, $script:NoIdentity, $script:GrantFails, $script:Drifted, $script:DefaultName, $script:WrongDef)
 }
 
 AfterAll {
@@ -315,6 +324,18 @@ Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - never creates a second set of polic
         $run.Output | Should -Match "\[ERROR\] Policy Enforce-Project-Tag 'Enforce-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa2\) differs from the lab's: parameter tagValue is 'Contoso', the lab's is 'SkyCraft'\. Not changing it"
         $run.Output | Should -Match "\[ERROR\] Policy Restrict-Azure-Regions 'Restrict-Azure-Regions' \(name aaaaaaaaaaaaaaaaaaaaaaa3\) differs from the lab's: enforcement mode is 'DoNotEnforce', the lab's is 'Default'"
         $run.Output | Should -Not -Match 'Policy Enforce-Project-Tag already assigned'
+        $run.ExitCode | Should -Be 1
+    }
+
+    It 'creates nothing next to an assignment of the guide''s definition under another name, or of another definition under the guide''s name (#406)' {
+        $run = $script:DefaultName
+        $run.Created | Should -BeNullOrEmpty -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[ERROR\] Policy Require-Environment-Tag-RG not created: none matches, and a new one would sit next to: 'Require a tag on resource groups' \(name aaaaaaaaaaaaaaaaaaaaaaa1\) assigns 'Require a tag on resource groups' under another name than the guide's; rename it"
+        $run.ExitCode | Should -Be 1
+        $run = $script:WrongDef
+        $run.Created | Should -BeNullOrEmpty -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[ERROR\] Policy Inherit-Project-Tag not created: none matches, and a new one would sit next to: 'Inherit-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa4\) assigns another definition than 'Inherit a tag from the resource group if missing'; delete it"
+        $run.Granted | Should -BeNullOrEmpty
         $run.ExitCode | Should -Be 1
     }
 

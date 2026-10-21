@@ -20,8 +20,12 @@
       4. A Portal-made Inherit-Project-Tag whose identity lacks the role (a learner with
          Contributor alone) gets the role from the template's own role-assignment module.
       5. An assignment whose parameters or enforcement mode differ from the lab's, two
-         assignments for one of the guide's, or a listing that fails: the script names the
-         problem, calls neither the what-if nor the deployment, and exits 1.
+         assignments for one of the guide's, one with the guide's definition under the
+         wizard's default name or the guide's name on another definition, an identity with no
+         principal id, an adopted identity in another region than -Location, or a listing that
+         fails: the script names the problem, calls neither the what-if nor the deployment, and
+         exits 1.
+      6. An identity holding another role than Contributor still gets Contributor.
 
     No subscription is needed, and none is used. The script runs through
     tests/Support/LabScriptStub.psm1 (issue #112), which aborts the child with exit 99 unless
@@ -62,8 +66,13 @@ BeforeAll {
 
     # Environment variables pick what the subscription already holds:
     #   SKYCRAFT_STUB_POLICYSET   'none', 'portal' (generated names, the guide's display names),
-    #                             'bicep' (fixed names, the pre-#406 Bicep display names) or 'both'
+    #                             'bicep' (fixed names, the pre-#406 Bicep display names), 'both',
+    #                             'portal-default-name' (the Portal set, Require-Environment-Tag-RG
+    #                             under the wizard's prefill) or 'wrong-definition' (the Portal
+    #                             set, Inherit-Project-Tag on "Inherit a tag from the resource group")
     #   SKYCRAFT_STUB_ROLEHELD    '1' makes Inherit-Project-Tag's identity hold Contributor
+    #   SKYCRAFT_STUB_OTHERROLE   '1' makes the identity hold Reader on the subscription
+    #   SKYCRAFT_STUB_NOPRINCIPAL '1' lists the identity without a principal id
     #   SKYCRAFT_STUB_DRIFT       '1' gives Enforce-Project-Tag tagValue 'Contoso' and
     #                             Restrict-Azure-Regions enforcement mode DoNotEnforce
     #   SKYCRAFT_STUB_LOOKUPFAIL  '1' makes the policy assignment listing fail
@@ -103,7 +112,9 @@ function New-StubAssignment {
     }
     if ($Identity) {
         $assignment | Add-Member -NotePropertyName IdentityType -NotePropertyValue 'SystemAssigned'
-        $assignment | Add-Member -NotePropertyName IdentityPrincipalId -NotePropertyValue $script:PrincipalId
+        $assignment | Add-Member -NotePropertyName IdentityPrincipalId -NotePropertyValue $(if ($env:SKYCRAFT_STUB_NOPRINCIPAL -eq '1') { '' } else { $script:PrincipalId })
+        # The guide's region.
+        $assignment | Add-Member -NotePropertyName Location -NotePropertyValue 'swedencentral'
     }
     $assignment
 }
@@ -131,8 +142,12 @@ function Get-AzPolicyAssignment {
         if ($set -in 'bicep', 'both') {
             New-StubAssignment -Name $a.Name -DisplayName $a.Bicep -Definition $a.Definition -Scope $Scope -Identity:([bool]$a.Identity) -Parameter $a.Parameter -EnforcementMode $mode
         }
-        if ($set -in 'portal', 'both') {
-            New-StubAssignment -Name $a.Portal -DisplayName $a.Name -Definition $a.Definition -Scope $Scope -Identity:([bool]$a.Identity) -Parameter $a.Parameter -EnforcementMode $mode
+        if ($set -in 'portal', 'both', 'portal-default-name', 'wrong-definition') {
+            $display = $a.Name
+            $definition = $a.Definition
+            if ($set -eq 'portal-default-name' -and $a.Name -eq 'Require-Environment-Tag-RG') { $display = 'Require a tag on resource groups' }
+            if ($set -eq 'wrong-definition' -and $a.Name -eq 'Inherit-Project-Tag') { $definition = 'cd3aa116-8754-49c9-a813-ad46512ece54' }
+            New-StubAssignment -Name $a.Portal -DisplayName $display -Definition $definition -Scope $Scope -Identity:([bool]$a.Identity) -Parameter $a.Parameter -EnforcementMode $mode
         }
     }
     # Inherited from a management group under the guide's name: not the lab's.
@@ -151,6 +166,9 @@ function Get-AzRoleAssignment {
     [pscustomobject]@{ ObjectId = $script:PrincipalId; Scope = '/providers/Microsoft.Management/managementGroups/stub-mg'; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c' }
     if ($env:SKYCRAFT_STUB_ROLEHELD -eq '1') {
         [pscustomobject]@{ ObjectId = $script:PrincipalId; Scope = $Scope; RoleDefinitionId = 'b24988ac-6180-42a0-ab88-20f7382dd24c' }
+    }
+    if ($env:SKYCRAFT_STUB_OTHERROLE -eq '1') {
+        [pscustomobject]@{ ObjectId = $script:PrincipalId; Scope = $Scope; RoleDefinitionId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7' }
     }
 }
 
@@ -173,9 +191,12 @@ function Get-AzSubscriptionDeploymentOperation { [CmdletBinding()] param([Parame
     function Invoke-DeployScript {
         param(
             [pscustomobject]$Stub,
-            [ValidateSet('none', 'bicep', 'portal', 'both')]
+            [ValidateSet('none', 'bicep', 'portal', 'both', 'portal-default-name', 'wrong-definition')]
             [string]$PolicySet = 'none',
             [switch]$RoleHeld,
+            [switch]$OtherRole,
+            [switch]$NoPrincipal,
+            [string]$Location,
             [switch]$Drift,
             [switch]$LookupFail,
             [switch]$RoleFail,
@@ -185,10 +206,13 @@ function Get-AzSubscriptionDeploymentOperation { [CmdletBinding()] param([Parame
         $logPath = Join-Path $Stub.Directory 'calls.log'
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
 
+        $arguments = @(@(if (-not $Deploy) { '-WhatIf' }) + @(if ($Location) { '-Location', $Location }))
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath `
-            -ArgumentList $(if ($Deploy) { @() } else { @('-WhatIf') }) -Environment @{
-            SKYCRAFT_STUB_POLICYSET  = $PolicySet
-            SKYCRAFT_STUB_ROLEHELD   = if ($RoleHeld) { '1' } else { '0' }
+            -ArgumentList $arguments -Environment @{
+            SKYCRAFT_STUB_POLICYSET   = $PolicySet
+            SKYCRAFT_STUB_ROLEHELD    = if ($RoleHeld) { '1' } else { '0' }
+            SKYCRAFT_STUB_OTHERROLE   = if ($OtherRole) { '1' } else { '0' }
+            SKYCRAFT_STUB_NOPRINCIPAL = if ($NoPrincipal) { '1' } else { '0' }
             SKYCRAFT_STUB_DRIFT      = if ($Drift) { '1' } else { '0' }
             SKYCRAFT_STUB_LOOKUPFAIL = if ($LookupFail) { '1' } else { '0' }
             SKYCRAFT_STUB_ROLEFAIL   = if ($RoleFail) { '1' } else { '0' }
@@ -272,9 +296,16 @@ function Get-AzSubscriptionDeploymentOperation { [CmdletBinding()] param([Parame
     $script:TwoSets        = Invoke-DeployScript -Stub $script:Stub -PolicySet 'both' -RoleHeld
     $script:ListFails      = Invoke-DeployScript -Stub $script:Stub -LookupFail
     $script:RoleListFails  = Invoke-DeployScript -Stub $script:Stub -PolicySet 'portal' -RoleFail
+    $script:DefaultName    = Invoke-DeployScript -Stub $script:Stub -PolicySet 'portal-default-name' -RoleHeld
+    $script:WrongDef       = Invoke-DeployScript -Stub $script:Stub -PolicySet 'wrong-definition' -RoleHeld
+    $script:OtherRole      = Invoke-DeployScript -Stub $script:Stub -PolicySet 'portal' -OtherRole
+    $script:NoPrincipal    = Invoke-DeployScript -Stub $script:Stub -PolicySet 'portal' -NoPrincipal
+    $script:BicepAway      = Invoke-DeployScript -Stub $script:Stub -PolicySet 'bicep' -RoleHeld -Location 'northeurope'
+    $script:PortalAway     = Invoke-DeployScript -Stub $script:Stub -PolicySet 'portal' -RoleHeld -Location 'northeurope'
 
     $script:AllRuns = @($script:Fresh, $script:Portal, $script:PortalDeploy, $script:PortalNoRole, $script:Bicep,
-        $script:BicepNoRole, $script:Drifted, $script:DriftedDeploy, $script:TwoSets, $script:ListFails, $script:RoleListFails)
+        $script:BicepNoRole, $script:Drifted, $script:DriftedDeploy, $script:TwoSets, $script:ListFails, $script:RoleListFails,
+        $script:DefaultName, $script:WrongDef, $script:OtherRole, $script:NoPrincipal, $script:BicepAway, $script:PortalAway)
 }
 
 AfterAll {
@@ -340,6 +371,20 @@ Describe 'Lab 1.3 Deploy-Bicep.ps1 - a lab built in the Portal gets no second as
         $deployed.Roles | Should -Be @('Inherit-Project-Tag-Role')
     }
 
+    It 'grants Contributor when the identity holds another role on the subscription' {
+        $run = $script:OtherRole
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[GRANT\]  Role b24988ac-6180-42a0-ab88-20f7382dd24c of the identity of Inherit-Project-Tag'
+        $run.Parameters.parInheritProjectTagPrincipalId | Should -Be '11111111-1111-1111-1111-111111111111'
+        (Get-DeployedByTemplate -Parameters $run.Parameters).Roles | Should -Be @('Inherit-Project-Tag-Role')
+    }
+
+    It 'keeps a Portal-made identity in another region than -Location: the template does not redeploy it' {
+        $run = $script:PortalAway
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        (Get-DeployedByTemplate -Parameters $run.Parameters).Policies | Should -BeNullOrEmpty
+    }
+
     It 'reads the role assignments by scope, never with -ObjectId (a Microsoft Graph lookup)' {
         @($script:Portal.Calls | Where-Object { $_ -like 'Get-AzRoleAssignment:*' }) |
             Should -Be @('Get-AzRoleAssignment:/subscriptions/00000000-0000-0000-0000-000000000000')
@@ -393,6 +438,37 @@ Describe 'Lab 1.3 Deploy-Bicep.ps1 - deploys nothing it cannot account for (#406
         $run.ExitCode | Should -Be 1
         $run.Handed | Should -BeNullOrEmpty
         $run.Output | Should -Match "\[ERROR\] 2 assignments match Enforce-Project-Tag: 'Enforce Project Tag Value' \(name Enforce-Project-Tag\), 'Enforce-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa2\)"
+    }
+
+    It 'stops on an assignment of the guide''s definition under the wizard''s default name, rather than create a second one' {
+        $run = $script:DefaultName
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Handed | Should -BeNullOrEmpty
+        $run.Output | Should -Match "\[ERROR\] Require-Environment-Tag-RG: none matches, and the template would create it next to: 'Require a tag on resource groups' \(name aaaaaaaaaaaaaaaaaaaaaaa1\) assigns 'Require a tag on resource groups' under another name than the guide's; rename it to 'Require-Environment-Tag-RG' \(Edit assignment > Assignment name\) or delete it"
+        $run.Output | Should -Match 'Nothing deployed: 1 problem\(s\) above'
+    }
+
+    It 'stops on an assignment under the guide''s name with another definition, rather than create the lab''s next to it' {
+        $run = $script:WrongDef
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Handed | Should -BeNullOrEmpty
+        $run.Output | Should -Match "\[ERROR\] Inherit-Project-Tag: none matches, and the template would create it next to: 'Inherit-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa4\) assigns another definition than 'Inherit a tag from the resource group if missing'; delete it"
+    }
+
+    It 'stops when a found identity reports no principal id, rather than claim a grant it cannot make' {
+        $run = $script:NoPrincipal
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Handed | Should -BeNullOrEmpty
+        $run.Output | Should -Match "\[ERROR\] Inherit-Project-Tag 'Inherit-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa4\) reports no principal id for its identity"
+        $run.Output | Should -Not -Match '\[GRANT\]'
+    }
+
+    It 'stops before deploying over an identity in another region than -Location' {
+        $run = $script:BicepAway
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Handed | Should -BeNullOrEmpty
+        $run.Output | Should -Match "\[ERROR\] Inherit-Project-Tag 'Inherit Project Tag from Resource Group' \(name Inherit-Project-Tag\) has its identity in 'swedencentral', and this run deploys it to 'northeurope'[^\r\n]*Run this script with -Location swedencentral"
+        $run.Output | Should -Match 'Nothing deployed: 1 problem\(s\) above'
     }
 
     It 'stops when the policy assignments cannot be listed' {

@@ -32,7 +32,9 @@
     inherited from a management group, not on a resource group), assigns the expected built-in
     policy definition, and carries the guide's name as its resource name or as its display name,
     or the display name the scripted paths used before issue #406. Ids, scopes and names compare
-    without regard to case, as ARM's do.
+    without regard to case, as ARM's do. One on the subscription that has the definition but not
+    the name, or the name but not the definition, is not the guide's either; the deploy scripts
+    stop on it rather than create the guide's next to it (Get-LabPolicyAssignmentNearMiss).
 
     Every path gives an assignment the guide's display name, description, non-compliance message
     and parameters (issue #406), so a lab built in the Portal and one built by a script end in
@@ -58,6 +60,8 @@
                                              (Test-Lab.ps1's checks)
     - Get-LabPolicyAssignmentDrift           what in an assignment would change its effect
                                              compared with the lab's (the deploy scripts)
+    - Get-LabPolicyAssignmentNearMiss        assignments with the definition but not the name,
+                                             or the name but not the definition
     - Get-LabPolicyAssignmentPlan            what a deploy does with each assignment: create,
                                              adopt, keep a Portal-made one, or stop
     - Select-LabPolicyIdentityRoleAssignment the role assignments an assignment's identity holds
@@ -189,6 +193,39 @@ function Get-LabPolicyAssignmentId {
     return $id
 }
 
+# Where an assignment is applied: its Scope, or else its id up to the provider segment.
+function Get-LabPolicyAssignmentScope {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Assignment
+    )
+
+    $scope = Get-LabPolicyAssignmentField -Assignment $Assignment -Field 'Scope'
+    if (-not $scope) {
+        $scope = (Get-LabPolicyAssignmentId -Assignment $Assignment) -replace '/providers/Microsoft\.Authorization/policyAssignments/[^/]+$', ''
+    }
+    return $scope.TrimEnd('/')
+}
+
+# Whether an assignment carries one of $Spec's names: the guide's as resource or display name, or
+# the display name the scripted paths used before issue #406.
+function Test-LabPolicyAssignmentName {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Assignment,
+
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Spec
+    )
+
+    $displayName = Get-LabPolicyAssignmentField -Assignment $Assignment -Field 'DisplayName'
+    return ($Assignment.Name -eq $Spec.Name -or $displayName -in @($Spec.Name, $Spec.DisplayName, $Spec.LegacyDisplayName))
+}
+
 # Returns the assignments in $Assignment that are the guide's $Spec assignment on the
 # subscription: none, one, or - when the Portal and the Bicep path both ran - more.
 function Select-LabPolicyAssignment {
@@ -208,21 +245,12 @@ function Select-LabPolicyAssignment {
     $subscriptionScope = "/subscriptions/$SubscriptionId"
     foreach ($item in $Assignment) {
         if (-not $item) { continue }
-
-        # Where the assignment is applied: its Scope, or else its id up to the provider segment.
-        $scope = Get-LabPolicyAssignmentField -Assignment $item -Field 'Scope'
-        if (-not $scope) {
-            $scope = (Get-LabPolicyAssignmentId -Assignment $item) -replace '/providers/Microsoft\.Authorization/policyAssignments/[^/]+$', ''
-        }
-        if ($scope.TrimEnd('/') -ne $subscriptionScope) { continue }
+        if ((Get-LabPolicyAssignmentScope -Assignment $item) -ne $subscriptionScope) { continue }
 
         $definitionId = Get-LabPolicyAssignmentField -Assignment $item -Field 'PolicyDefinitionId'
         if ($definitionId -ne $Spec.PolicyDefinitionId) { continue }
 
-        $displayName = Get-LabPolicyAssignmentField -Assignment $item -Field 'DisplayName'
-        if ($item.Name -eq $Spec.Name -or $displayName -in @($Spec.Name, $Spec.DisplayName, $Spec.LegacyDisplayName)) {
-            $item
-        }
+        if (Test-LabPolicyAssignmentName -Assignment $item -Spec $Spec) { $item }
     }
 }
 
@@ -322,8 +350,8 @@ function Get-LabPolicyAssignmentProblem {
 }
 
 # What in a found assignment would change its effect compared with the lab's, one line each;
-# nothing when it has the lab's parameters, enforcement mode and identity (issue #406). The deploy
-# scripts refuse to accept an assignment that differs rather than leave a learner's assignment
+# nothing when it has the lab's parameters, enforcement mode, exclusions and identity (issue #406).
+# The deploy scripts refuse to accept an assignment that differs rather than leave a learner's assignment
 # with other values in place, or overwrite it, without a word. Lists compare as sets, values
 # without regard to case. Texts (display name, description, message) do not change the effect
 # and are not compared. An assignment that leaves enforcement mode unset enforces (ARM's default).
@@ -357,6 +385,12 @@ function Get-LabPolicyAssignmentDrift {
         "enforcement mode is '$mode', the lab's is 'Default'"
     }
 
+    # Basics > Exclusions: an excluded scope escapes the policy.
+    $notScopes = @(@($Assignment.NotScope) + @($Assignment.Properties.NotScopes) | Where-Object { $_ })
+    if ($notScopes.Count -gt 0) {
+        "it excludes $($notScopes -join ', '), the lab's excludes nothing"
+    }
+
     if ($Spec.ManagedIdentity) {
         $identity = Get-LabPolicyAssignmentIdentity -Assignment $Assignment
         if ($identity.Type -notmatch 'SystemAssigned') {
@@ -374,8 +408,10 @@ function Get-LabPolicyAssignmentDrift {
 #   Keep       one exists under another resource name (the Portal's generated id); the deploy
 #              leaves it as it is and creates no second one
 #   Duplicate  more than one matches; the deploy must stop, it cannot tell which is the lab's
-# Drift lists what in the one found assignment differs in effect from the lab's; a deploy must
-# stop then too.
+#   Unmatched  none matches, but one has the definition without the guide's name, or the name
+#              without the definition; the deploy must stop, a new one would sit next to it
+# Drift lists what in the one found assignment differs in effect from the lab's, or, for
+# Unmatched, each near miss; a deploy must stop then too.
 function Get-LabPolicyAssignmentPlan {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -390,16 +426,55 @@ function Get-LabPolicyAssignmentPlan {
 
     foreach ($spec in Get-LabPolicyAssignmentSpec) {
         $found = @(Select-LabPolicyAssignment -Assignment $Assignment -SubscriptionId $SubscriptionId -Spec $spec)
-        $action = if ($found.Count -eq 0) { 'Create' }
+        $nearMiss = if ($found.Count -eq 0) { @(Get-LabPolicyAssignmentNearMiss -Assignment $Assignment -SubscriptionId $SubscriptionId -Spec $spec) } else { @() }
+        $action = if ($nearMiss.Count -gt 0) { 'Unmatched' }
+        elseif ($found.Count -eq 0) { 'Create' }
         elseif ($found.Count -gt 1) { 'Duplicate' }
         elseif ($found[0].Name -eq $spec.Name) { 'Adopt' }
         else { 'Keep' }
-        $drift = if ($found.Count -eq 1) { @(Get-LabPolicyAssignmentDrift -Assignment $found[0] -Spec $spec) } else { @() }
+        $drift = if ($found.Count -eq 1) { @(Get-LabPolicyAssignmentDrift -Assignment $found[0] -Spec $spec) } else { @($nearMiss) }
         [pscustomobject]@{
             Spec   = $spec
             Found  = $found
             Action = $action
             Drift  = $drift
+        }
+    }
+}
+
+# The assignments on the subscription that are almost the guide's $Spec one, one line each with
+# what to do: its definition under another name (the learner kept the wizard's prefill), or its
+# name on another definition (a look-alike such as "Inherit a tag from the resource group", which
+# overwrites the tag). A deploy that created the lab's assignment next to one would leave two
+# (issue #406).
+function Get-LabPolicyAssignmentNearMiss {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]]$Assignment,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Spec
+    )
+
+    $subscriptionScope = "/subscriptions/$SubscriptionId"
+    foreach ($item in $Assignment) {
+        if (-not $item) { continue }
+        if ((Get-LabPolicyAssignmentScope -Assignment $item) -ne $subscriptionScope) { continue }
+
+        $sameDefinition = (Get-LabPolicyAssignmentField -Assignment $item -Field 'PolicyDefinitionId') -eq $Spec.PolicyDefinitionId
+        $sameName = Test-LabPolicyAssignmentName -Assignment $item -Spec $Spec
+        $label = Format-LabPolicyAssignment -Assignment $item
+        if ($sameDefinition -and -not $sameName) {
+            "$label assigns '$($Spec.DefinitionDisplayName)' under another name than the guide's; rename it to '$($Spec.DisplayName)' (Edit assignment > Assignment name) or delete it"
+        }
+        elseif ($sameName -and -not $sameDefinition) {
+            "$label assigns another definition than '$($Spec.DefinitionDisplayName)'; delete it"
         }
     }
 }

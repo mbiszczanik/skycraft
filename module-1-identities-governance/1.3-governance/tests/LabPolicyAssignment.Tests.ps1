@@ -105,6 +105,9 @@ Describe 'Lab 1.3 policy assignment lookup - the guide''s four assignments' {
         foreach ($spec in $script:Specs) {
             $module = [regex]::Match($bicep, "(?s)module \w+ 'br/public:avm/res/authorization/policy-assignment/sub-scope:[^']+' = if \(!contains\(parExistingPolicyAssignments, '$([regex]::Escape($spec.Name))'\)\) \{.*?\r?\n}\r?\n").Value
             $module | Should -Not -BeNullOrEmpty -Because "$($spec.Name) is deployed only when it does not exist under another name"
+            $module | Should -Match ([regex]::Escape("name: '$($spec.Name)'")) -Because $spec.Name
+            $module | Should -Match ([regex]::Escape("displayName: '$($spec.DisplayName)'")) -Because $spec.Name
+            $module | Should -Match ([regex]::Escape("policyDefinitionId: '$($spec.PolicyDefinitionId)'")) -Because $spec.Name
             $module | Should -Match ([regex]::Escape("description: '$($spec.Description)'")) -Because $spec.Name
             if ($spec.NonComplianceMessage) {
                 $module | Should -Match ([regex]::Escape("message: '$($spec.NonComplianceMessage)'")) -Because $spec.Name
@@ -409,6 +412,19 @@ Describe 'Lab 1.3 policy assignment lookup - drift and the deploy plan (#406)' {
         @(Get-LabPolicyAssignmentDrift -Assignment $lab[3] -Spec $script:Specs[3]) | Should -Be @("enforcement mode is 'DoNotEnforce', the lab's is 'Default'")
     }
 
+    It 'reports an exclusion, in both Az.Resources shapes' {
+        $lab = @(Get-PortalLab)
+        $excluded = "$script:SubscriptionScope/resourceGroups/dev-skycraft-swc-rg"
+        $lab[3] | Add-Member -NotePropertyName NotScope -NotePropertyValue @($excluded)
+        @(Get-LabPolicyAssignmentDrift -Assignment $lab[3] -Spec $script:Specs[3]) | Should -Be @("it excludes $excluded, the lab's excludes nothing")
+        $old = $lab[0]
+        $old | Add-Member -NotePropertyName Properties -NotePropertyValue ([pscustomobject]@{ NotScopes = @($excluded) })
+        @(Get-LabPolicyAssignmentDrift -Assignment $old -Spec $script:Specs[0]) | Should -Be @("it excludes $excluded, the lab's excludes nothing")
+        $empty = @(Get-PortalLab)[1]
+        $empty | Add-Member -NotePropertyName NotScope -NotePropertyValue @()
+        @(Get-LabPolicyAssignmentDrift -Assignment $empty -Spec $script:Specs[1]) | Should -BeNullOrEmpty
+    }
+
     It 'reports a parameter that is not set, and a region list that differs' {
         $unset = Get-AssignmentFixture -Name 'aaaaaaaaaaaaaaaaaaaaaaa1' -DisplayName 'Require-Environment-Tag-RG' -PolicyDefinitionId $script:Specs[0].PolicyDefinitionId
         @(Get-LabPolicyAssignmentDrift -Assignment $unset -Spec $script:Specs[0]) | Should -Be @("parameter tagName is not set, the lab's is 'Environment'")
@@ -429,5 +445,67 @@ Describe 'Lab 1.3 policy assignment lookup - drift and the deploy plan (#406)' {
         $portal = Get-AssignmentFixture -Name 'aaaaaaaaaaaaaaaaaaaaaaa2' -DisplayName 'Enforce-Project-Tag'
         (@(Get-LabPolicyAssignmentPlan -Assignment @($fixed) -SubscriptionId $script:SubscriptionId))[1].Action | Should -Be 'Adopt'
         (@(Get-LabPolicyAssignmentPlan -Assignment @($fixed, $portal) -SubscriptionId $script:SubscriptionId))[1].Action | Should -Be 'Duplicate'
+    }
+
+    It 'stops, rather than create, next to the definition under the wizard''s prefill or the guide''s name on another definition' {
+        $prefill = Get-AssignmentFixture -Name 'aaaaaaaaaaaaaaaaaaaaaaa2' -DisplayName 'Require a tag and its value on resources'
+        $plan = @(Get-LabPolicyAssignmentPlan -Assignment @($prefill) -SubscriptionId $script:SubscriptionId)
+        $plan.Action | Should -Be @('Create', 'Unmatched', 'Create', 'Create')
+        $plan[1].Found | Should -BeNullOrEmpty
+        $plan[1].Drift | Should -Be @("'Require a tag and its value on resources' (name aaaaaaaaaaaaaaaaaaaaaaa2) assigns 'Require a tag and its value on resources' under another name than the guide's; rename it to 'Enforce-Project-Tag' (Edit assignment > Assignment name) or delete it")
+
+        # "Allowed locations for resource groups", the look-alike step 1.3.9 warns about.
+        $lookAlike = Get-AssignmentFixture -Name 'aaaaaaaaaaaaaaaaaaaaaaa3' -DisplayName 'Restrict-Azure-Regions' `
+            -PolicyDefinitionId '/providers/Microsoft.Authorization/policyDefinitions/e765b5de-1225-4ba3-bd56-1ac6695af988'
+        $plan = @(Get-LabPolicyAssignmentPlan -Assignment @($lookAlike) -SubscriptionId $script:SubscriptionId)
+        $plan.Action | Should -Be @('Create', 'Create', 'Create', 'Unmatched')
+        $plan[3].Drift | Should -Be @("'Restrict-Azure-Regions' (name aaaaaaaaaaaaaaaaaaaaaaa3) assigns another definition than 'Allowed locations'; delete it")
+    }
+
+    It 'looks for near misses only on the subscription itself, and only when nothing matches' {
+        $inherited = Get-AssignmentFixture -Name 'aaaaaaaaaaaaaaaaaaaaaaa2' -DisplayName 'Require a tag and its value on resources' `
+            -Scope '/providers/Microsoft.Management/managementGroups/stub-mg'
+        $onGroup = Get-AssignmentFixture -Name 'aaaaaaaaaaaaaaaaaaaaaaa5' -DisplayName 'Enforce-Project-Tag' `
+            -PolicyDefinitionId '/providers/Microsoft.Authorization/policyDefinitions/00000000-0000-0000-0000-00000000beef' `
+            -Scope "$script:SubscriptionScope/resourceGroups/prod-skycraft-swc-rg"
+        (@(Get-LabPolicyAssignmentPlan -Assignment @($inherited, $onGroup) -SubscriptionId $script:SubscriptionId))[1].Action | Should -Be 'Create'
+        # With the lab's own assignment found, another of the same definition is not the deploy's business.
+        $lab = @(Get-PortalLab)
+        $other = Get-AssignmentFixture -Name 'aaaaaaaaaaaaaaaaaaaaaaa9' -DisplayName 'Require a tag and its value on resources'
+        (@(Get-LabPolicyAssignmentPlan -Assignment ($lab + $other) -SubscriptionId $script:SubscriptionId)).Action | Should -Be @('Keep', 'Keep', 'Keep', 'Keep')
+    }
+}
+
+Describe 'Lab 1.3 guide - every object a step creates is scripted or named Portal-only (#406)' {
+
+    It 'finds each named object of the steps in bicep/main.bicep, in Invoke-LabGovernance.ps1, or in the paths section' {
+        $guide = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'lab-guide-1.3.md')
+        $steps = [regex]::Match($guide, '(?s)\n## [^\n]*Section 1:.*?(?=\n## [^\n]*What This Lab Leaves Behind)').Value
+        $paths = [regex]::Match($guide, '(?s)\n## [^\n]*Portal, PowerShell and Bicep Paths\r?\n.*?(?=\n## )').Value
+        $steps | Should -Not -BeNullOrEmpty
+        $paths | Should -Not -BeNullOrEmpty
+
+        # The names a step has the learner type for a new object.
+        $patterns = @(
+            '(?m)^- \*\*(?:Assignment name|Alert rule name)\*\*: `([^`]+)`'
+            '(?m)^\s*- Lock name: `([^`]+)`'
+            '(?m)^\| (?:Action group name|Lock name|Name) +\| ([^|]+?) +\|'
+        )
+        $names = @(foreach ($pattern in $patterns) {
+                [regex]::Matches($steps, $pattern) | ForEach-Object { $_.Groups[1].Value.Trim() }
+            }) | Where-Object { $_ -ne 'Value' } | Sort-Object -Unique
+        # A parser that finds nothing would pass every check below.
+        $names | Should -Be (@('Advisor-Cost-Recommendations', 'Enforce-Project-Tag', 'Inherit-Project-Tag', 'lock-no-delete-platform',
+                'lock-no-delete-prod', 'Require-Environment-Tag-RG', 'Restrict-Azure-Regions', 'skycraft-advisor-ag',
+                'SkyCraft-Monthly-Budget', 'SkyCraft-Prod-Monthly') | Sort-Object)
+
+        $scripted = (Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'bicep' 'main.bicep')) +
+            (Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'scripts' 'Invoke-LabGovernance.ps1')) +
+            (Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'scripts' 'LabPolicyAssignment.ps1'))
+        foreach ($name in $names) {
+            $inScripts = $scripted -match "'$([regex]::Escape($name))'|`"$([regex]::Escape($name))`""
+            $inPaths = $paths -match "``$([regex]::Escape($name))``"
+            ($inScripts -or $inPaths) | Should -BeTrue -Because "'$name' is created by a step but neither scripted nor named Portal-only in the paths section"
+        }
     }
 }

@@ -8,9 +8,9 @@
 
     A lab built in the Portal is deployed over without a second copy of anything (issue #406).
     Before the deployment, the script lists the subscription's policy assignments, finds each of
-    the guide's four by its definition and scope, whatever its resource name
-    (LabPolicyAssignment.ps1, shared with Test-Lab.ps1 and Remove-LabResource.ps1), and prints
-    what it does with it:
+    the guide's four by its definition, scope and the guide's assignment name, whatever its
+    resource name (LabPolicyAssignment.ps1, shared with Test-Lab.ps1 and Remove-LabResource.ps1),
+    and prints what it does with it:
       [CREATE]  none exists; the template creates it
       [ADOPT]   one exists under the template's own name; the template deploys over it
       [KEEP]    one exists under another name (made in the Portal); the template leaves it as it
@@ -18,11 +18,16 @@
     The identity of Inherit-Project-Tag keeps the Contributor role it holds; the template grants
     the role only when the identity does not hold it on the subscription yet.
 
-    The script deploys nothing, and exits 1, when it cannot list the policy or role assignments,
-    when more than one assignment matches one of the guide's, or when a found assignment differs
-    from the lab's in its parameters, enforcement mode or managed identity: it names each
-    difference instead of keeping or overwriting the learner's assignment without a word. Texts
-    (display name, description, message) are not compared.
+    The script deploys nothing, and exits 1, and names each problem instead of keeping,
+    overwriting or doubling the learner's assignment without a word, when:
+      - it cannot list the policy or role assignments;
+      - more than one assignment matches one of the guide's;
+      - none matches, but one has the guide's definition under another name, or the guide's
+        name on another definition;
+      - a found assignment differs from the lab's in its parameters, enforcement mode,
+        exclusions or managed identity (texts are not compared);
+      - the identity of a found Inherit-Project-Tag reports no principal id;
+      - an assignment it would deploy over carries an identity in another region than -Location.
 
 .PARAMETER Location
     Azure region for deployment. Default: swedencentral.
@@ -114,6 +119,12 @@ foreach ($item in $plan) {
         }
         'Adopt' {
             Write-Host "  [ADOPT]  ${name}: $(Format-LabPolicyAssignment -Assignment $item.Found[0]); the template deploys over it." -ForegroundColor Gray
+            # An identity's location cannot change, so a redeploy from another region fails.
+            $foundLocation = (Get-LabPolicyAssignmentField -Assignment $item.Found[0] -Field 'Location') -replace '\s', ''
+            if ((Get-LabPolicyAssignmentIdentity -Assignment $item.Found[0]).Type -and $foundLocation -and $foundLocation -ne $Location) {
+                $problemCount++
+                Write-Host "  -> [ERROR] $name $(Format-LabPolicyAssignment -Assignment $item.Found[0]) has its identity in '$foundLocation', and this run deploys it to '$Location'; an identity's location cannot change. Run this script with -Location $foundLocation, or delete the assignment in the Portal (Policy > Assignments)." -ForegroundColor Red
+            }
         }
         'Keep' {
             Write-Host "  [KEEP]   ${name}: $(Format-LabPolicyAssignment -Assignment $item.Found[0]), made outside the template; left as it is." -ForegroundColor Gray
@@ -124,8 +135,12 @@ foreach ($item in $plan) {
             $foundList = ($item.Found | ForEach-Object { Format-LabPolicyAssignment -Assignment $_ }) -join ', '
             Write-Host "  -> [ERROR] $($item.Found.Count) assignments match ${name}: $foundList. Delete all but one in the Portal (Policy > Assignments)." -ForegroundColor Red
         }
+        'Unmatched' {
+            $problemCount++
+            Write-Host "  -> [ERROR] ${name}: none matches, and the template would create it next to: $($item.Drift -join '; '). Then run this script again." -ForegroundColor Red
+        }
     }
-    if ($item.Drift.Count -gt 0) {
+    if ($item.Action -in 'Adopt', 'Keep' -and $item.Drift.Count -gt 0) {
         $problemCount++
         Write-Host "  -> [ERROR] $name $(Format-LabPolicyAssignment -Assignment $item.Found[0]) differs from the lab's: $($item.Drift -join '; '). Set it as step $($item.Spec.Step) does, or delete it, in the Portal (Policy > Assignments)." -ForegroundColor Red
     }
@@ -144,14 +159,20 @@ if ($inherit.Count -eq 1) {
     $roleGuid = ($inherit.Spec.RoleDefinitionId -split '/')[-1]
     $roleLabel = "Role $roleGuid of the identity of $($inherit.Spec.Name)"
     $held = $null
-    try {
-        $held = @(Select-LabPolicyIdentityRoleAssignment -RoleAssignment @(Get-AzRoleAssignment -Scope $subscriptionScope -ErrorAction Stop) `
-                -PrincipalId $principalId -SubscriptionId $subscriptionId |
-            Where-Object { ([string]$_.Scope).TrimEnd('/') -eq $subscriptionScope -and [string]$_.RoleDefinitionId -eq $roleGuid })
-    }
-    catch {
+    if (-not $principalId) {
         $problemCount++
-        Write-Host "  -> [ERROR] Could not list the role assignments on the subscription, so the role of $($inherit.Spec.Name)'s identity cannot be checked: $_" -ForegroundColor Red
+        Write-Host "  -> [ERROR] $($inherit.Spec.Name) $(Format-LabPolicyAssignment -Assignment $inherit.Found[0]) reports no principal id for its identity, so its role cannot be checked." -ForegroundColor Red
+    }
+    else {
+        try {
+            $held = @(Select-LabPolicyIdentityRoleAssignment -RoleAssignment @(Get-AzRoleAssignment -Scope $subscriptionScope -ErrorAction Stop) `
+                    -PrincipalId $principalId -SubscriptionId $subscriptionId |
+                Where-Object { ([string]$_.Scope).TrimEnd('/') -eq $subscriptionScope -and [string]$_.RoleDefinitionId -eq $roleGuid })
+        }
+        catch {
+            $problemCount++
+            Write-Host "  -> [ERROR] Could not list the role assignments on the subscription, so the role of $($inherit.Spec.Name)'s identity cannot be checked: $_" -ForegroundColor Red
+        }
     }
     if ($null -ne $held) {
         if ($held.Count -gt 0) {
