@@ -28,6 +28,10 @@
          name, next to a generated resource name. An assignment inherited from a management
          group or of another definition does not count, and two assignments that both match
          fail the check: the cleanup removes neither.
+      8. The Modify assignment Inherit-Project-Tag (issue #350) is a fourth policy check, found
+         by its own definition: it passes with tagName Project and a system-assigned identity,
+         and fails when it is missing, inherits another tag, or has no managed identity. It
+         never stands in for Enforce-Project-Tag.
 
     Scope limit, as in the Lab 1.1 suite: the child is launched with -Command, so these tests
     prove the failure counter reaches `exit`, not that `pwsh -File` carries the code out of the
@@ -67,7 +71,7 @@ BeforeAll {
     )
 
     # Every Az command the script calls, recording its own invocation. By default the
-    # subscription holds exactly what the lab builds: the three tagged resource groups, the three
+    # subscription holds exactly what the lab builds: the three tagged resource groups, the four
     # policy assignments, the guide's CanNotDelete lock on prod and platform, and one budget.
     # Environment variables take pieces away, so one generated module serves every scenario:
     #   SKYCRAFT_STUB_NOCONTEXT       '1' leaves no Az context, as when no one is signed in
@@ -75,9 +79,13 @@ BeforeAll {
     #                                 lookups fail for them, as the real cmdlets do
     #   SKYCRAFT_STUB_NOTAGS          resource groups that carry no tag at all
     #   SKYCRAFT_STUB_WRONGTAG        resource groups whose Project tag is not 'SkyCraft'
-    #   SKYCRAFT_STUB_POLICYSET       who made the three policy assignments: 'bicep' (the default:
+    #   SKYCRAFT_STUB_INHERITTAG      the tagName Inherit-Project-Tag carries (default 'Project')
+    #   SKYCRAFT_STUB_INHERITIDENTITY 'none' leaves Inherit-Project-Tag without a managed identity
+    #   SKYCRAFT_STUB_POLICYSET       who made the four policy assignments: 'bicep' (the default:
     #                                 fixed names), 'portal' (generated names, the guide's names
-    #                                 as display names) or 'both' (two of each)
+    #                                 as display names), 'scripted' (fixed names, the guide's
+    #                                 names as display names: the Bicep and script paths since
+    #                                 issue #406) or 'both' (two of each)
     #   SKYCRAFT_STUB_MISSINGPOLICY   policy assignments (by the guide's name) left out of the
     #                                 listing
     #   SKYCRAFT_STUB_NOLOCK          resource groups that carry no lock
@@ -140,19 +148,30 @@ function Get-AzResourceGroup {
     }
 }
 
+# Shaped like Get-AzPolicyAssignment's output in Az.Resources 7 and later. The Modify assignment
+# (Inherit-Project-Tag) carries its tagName under Parameter and a system-assigned identity at the
+# top level, as the real cmdlet returns them.
 function New-StubAssignment {
-    param([string]$Name, [string]$DisplayName, [string]$Definition, [string]$Scope)
-    [pscustomobject]@{
+    param([string]$Name, [string]$DisplayName, [string]$Definition, [string]$Scope, [switch]$Modify)
+    $assignment = [pscustomobject]@{
         Name               = $Name
         DisplayName        = $DisplayName
         PolicyDefinitionId = "/providers/Microsoft.Authorization/policyDefinitions/$Definition"
         Scope              = $Scope
         Id                 = "$Scope/providers/Microsoft.Authorization/policyAssignments/$Name"
     }
+    if ($Modify) {
+        $tagName = if ($null -ne $env:SKYCRAFT_STUB_INHERITTAG -and $env:SKYCRAFT_STUB_INHERITTAG -ne '') { $env:SKYCRAFT_STUB_INHERITTAG } else { 'Project' }
+        $noIdentity = $env:SKYCRAFT_STUB_INHERITIDENTITY -eq 'none'
+        $assignment | Add-Member -NotePropertyName Parameter -NotePropertyValue ([pscustomobject]@{ tagName = [pscustomobject]@{ value = $tagName } })
+        $assignment | Add-Member -NotePropertyName IdentityType -NotePropertyValue $(if ($noIdentity) { 'None' } else { 'SystemAssigned' })
+        $assignment | Add-Member -NotePropertyName IdentityPrincipalId -NotePropertyValue $(if ($noIdentity) { $null } else { '11111111-1111-1111-1111-111111111111' })
+    }
+    $assignment
 }
 
 # Lists the assignments that apply to the subscription, as the real cmdlet does for -Scope with
-# no -Name: the lab's three, made by the Bicep path, the Portal or both, plus one inherited from a
+# no -Name: the lab's four, made by the Bicep path, the Portal or both, plus one inherited from a
 # management group under the guide's name and an unrelated one under a guide display name.
 function Get-AzPolicyAssignment {
     [CmdletBinding()]
@@ -164,16 +183,21 @@ function Get-AzPolicyAssignment {
     $lab = @(
         @{ Name = 'Require-Environment-Tag-RG'; Bicep = 'Require Environment Tag on Resource Groups'; Definition = '96670d01-0a4d-4649-9c89-2d3abc0a5025'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa1' }
         @{ Name = 'Enforce-Project-Tag'; Bicep = 'Enforce Project Tag Value'; Definition = '1e30110a-5ceb-460c-a204-c1c3969c6d62'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa2' }
+        @{ Name = 'Inherit-Project-Tag'; Bicep = 'Inherit Project Tag from Resource Group'; Definition = 'ea3f2387-9b95-492a-a190-fcdc54f7b070'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa4'; Modify = $true }
         @{ Name = 'Restrict-Azure-Regions'; Bicep = 'Restrict to Allowed Regions'; Definition = 'e56962a6-4747-49cd-b67b-bf8b01975c4c'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa3' }
     )
     $set = if ($env:SKYCRAFT_STUB_POLICYSET) { $env:SKYCRAFT_STUB_POLICYSET } else { 'bicep' }
     foreach ($assignment in $lab) {
         if (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGPOLICY' -Name $assignment.Name) { continue }
+        $modify = [bool]$assignment.Modify
         if ($set -in 'bicep', 'both') {
-            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope
+            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope -Modify:$modify
+        }
+        if ($set -eq 'scripted') {
+            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Modify:$modify
         }
         if ($set -in 'portal', 'both') {
-            New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope
+            New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Modify:$modify
         }
     }
     New-StubAssignment -Name 'Enforce-Project-Tag' -DisplayName 'Enforce Project Tag Value' -Definition '1e30110a-5ceb-460c-a204-c1c3969c6d62' `
@@ -240,12 +264,14 @@ function Get-AzConsumptionBudget {
             [string[]]$NoTags = @(),
             [string[]]$WrongTag = @(),
             [string[]]$MissingPolicy = @(),
-            [ValidateSet('bicep', 'portal', 'both')]
+            [ValidateSet('bicep', 'portal', 'scripted', 'both')]
             [string]$PolicySet = 'bicep',
             [string[]]$NoLock = @(),
             [hashtable]$LockKind = @{},
             [ValidateSet('present', 'none', 'fail')]
             [string]$Budget = 'present',
+            [string]$InheritTag = '',
+            [switch]$InheritNoIdentity,
             [switch]$LookupFail,
             [switch]$NoContext
         )
@@ -262,6 +288,8 @@ function Get-AzConsumptionBudget {
             SKYCRAFT_STUB_NOLOCK        = $NoLock -join ','
             SKYCRAFT_STUB_LOCKKIND      = ($LockKind.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ','
             SKYCRAFT_STUB_BUDGET        = $Budget
+            SKYCRAFT_STUB_INHERITTAG    = $InheritTag
+            SKYCRAFT_STUB_INHERITIDENTITY = if ($InheritNoIdentity) { 'none' } else { 'system' }
             SKYCRAFT_STUB_LOOKUPFAIL    = if ($LookupFail) { '1' } else { '0' }
             SKYCRAFT_STUB_NOCONTEXT     = if ($NoContext) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG           = $logPath
@@ -301,13 +329,17 @@ function Get-AzConsumptionBudget {
     $script:LockOnSub     = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'subscription' }
     $script:LockReadFails = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'fail' }
     $script:PortalMade    = Invoke-ValidatorScript -Stub $script:Stub -PolicySet 'portal'
+    $script:ScriptMade    = Invoke-ValidatorScript -Stub $script:Stub -PolicySet 'scripted'
     $script:TwoSets       = Invoke-ValidatorScript -Stub $script:Stub -PolicySet 'both'
+    $script:InheritMissing    = Invoke-ValidatorScript -Stub $script:Stub -MissingPolicy 'Inherit-Project-Tag'
+    $script:InheritWrongTag   = Invoke-ValidatorScript -Stub $script:Stub -InheritTag 'Environment'
+    $script:InheritNoIdentity = Invoke-ValidatorScript -Stub $script:Stub -PolicySet 'portal' -InheritNoIdentity
 
     $script:AllRuns = @(
         $script:AllPass, $script:PolicyMissing, $script:LockMissing, $script:WrongTag,
         $script:NoTags, $script:RgMissing, $script:LookupsFail, $script:NoContext, $script:NoBudget, $script:BudgetFails,
         $script:LockReadOnly, $script:LockWrongName, $script:LockOnChild, $script:LockOnSub, $script:LockReadFails,
-        $script:PortalMade, $script:TwoSets
+        $script:PortalMade, $script:ScriptMade, $script:TwoSets, $script:InheritMissing, $script:InheritWrongTag, $script:InheritNoIdentity
     )
 }
 
@@ -332,9 +364,9 @@ Describe 'Lab 1.3 Test-Lab.ps1 - failures are counted and set the exit code (#25
         $run = $script:AllPass
         $run.ExitCode | Should -Be 0 -Because "a passing validation must report success; output was:`n$($run.Output)"
         $run.FailLines | Should -Be 0
-        # Three tags, three policy assignments, two locks.
-        $run.OkLines | Should -Be 8
-        $run.Output | Should -Match 'Passed: 8\b'
+        # Three tags, four policy assignments, two locks.
+        $run.OkLines | Should -Be 9
+        $run.Output | Should -Match 'Passed: 9\b'
         $run.Output | Should -Match 'Failed: 0\b'
         $run.Output | Should -Match 'validation passed'
         $run.Output | Should -Not -Match 'validation failed'
@@ -345,9 +377,9 @@ Describe 'Lab 1.3 Test-Lab.ps1 - failures are counted and set the exit code (#25
         $run.ExitCode | Should -Be 1 -Because "a missing policy assignment must not look like a passed validation; output was:`n$($run.Output)"
         # The assignment inherited from a management group under the same name, and the unrelated
         # one under a guide display name, are both in the listing and must not stand in for it.
-        $run.Output | Should -Match "Policy: Enforce-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Require a tag and its value on resources' on the subscription itself, named 'Enforce-Project-Tag' or 'Enforce Project Tag Value', step 1\.3\.8\."
+        $run.Output | Should -Match "Policy: Enforce-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Require a tag and its value on resources' on the subscription itself, named 'Enforce-Project-Tag' \(resource name or display name\), step 1\.3\.8\."
         $run.FailLines | Should -Be 1
-        $run.Output | Should -Match 'Passed: 7\b'
+        $run.Output | Should -Match 'Passed: 8\b'
         $run.Output | Should -Match 'Failed: 1\b'
         $run.Output | Should -Match 'validation failed: 1 check\(s\) failed'
         $run.Output | Should -Not -Match 'validation passed'
@@ -374,20 +406,20 @@ Describe 'Lab 1.3 Test-Lab.ps1 - failures are counted and set the exit code (#25
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match 'Checking dev-skycraft-swc-rg\.\.\. \[FAIL\] No tags found'
         $run.FailLines | Should -Be 1
-        $run.Output | Should -Match 'Passed: 7\b'
+        $run.Output | Should -Match 'Passed: 8\b'
         $run.Output | Should -Match 'Failed: 1\b'
     }
 
     It 'exits 1 and counts both checks that read a missing resource group, and nothing else' {
         # One group gone, everything else in place - unlike the every-lookup-fails case below.
-        # prod carries a tag check and a lock check; both fail, and the other six still pass.
+        # prod carries a tag check and a lock check; both fail, and the other seven still pass.
         $run = $script:RgMissing
         $run.ExitCode | Should -Be 1 -Because "a missing resource group must not look like a passed validation; output was:`n$($run.Output)"
         $run.Output | Should -Match 'Checking prod-skycraft-swc-rg\.\.\. \[FAIL\] Not found or unreadable'
         $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] Could not read locks'
         $run.FailLines | Should -Be 2
-        $run.OkLines | Should -Be 6
-        $run.Output | Should -Match 'Passed: 6\b'
+        $run.OkLines | Should -Be 7
+        $run.Output | Should -Match 'Passed: 7\b'
         $run.Output | Should -Match 'Failed: 2\b'
         $run.Output | Should -Match 'validation failed: 2 check\(s\) failed'
     }
@@ -398,9 +430,9 @@ Describe 'Lab 1.3 Test-Lab.ps1 - failures are counted and set the exit code (#25
         $run = $script:LookupsFail
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.OkLines | Should -Be 0
-        $run.FailLines | Should -Be 8
+        $run.FailLines | Should -Be 9
         $run.Output | Should -Match 'Passed: 0\b'
-        $run.Output | Should -Match 'Failed: 8\b'
+        $run.Output | Should -Match 'Failed: 9\b'
         $run.Output | Should -Match 'stub lookup failure: Get-AzPolicyAssignment'
         $run.Output | Should -Match 'stub lookup failure: Get-AzResourceLock'
     }
@@ -423,14 +455,14 @@ Describe 'Lab 1.3 Test-Lab.ps1 - budgets are a manual check, not counted' {
         $run = $script:AllPass
         $run.Output | Should -Match '\[INFO\] Budget found: SkyCraft-Monthly-Budget'
         $run.Output | Should -Match 'manual check, not counted'
-        $run.OkLines | Should -Be 8 -Because 'the eight counted checks are the only [OK] lines'
+        $run.OkLines | Should -Be 9 -Because 'the nine counted checks are the only [OK] lines'
     }
 
     It 'exits 0 with the same count when no budget exists' {
         $run = $script:NoBudget
         $run.ExitCode | Should -Be 0 -Because "a missing budget is not a failed check; output was:`n$($run.Output)"
         $run.Output | Should -Match '\[INFO\] No budgets found'
-        $run.Output | Should -Match 'Passed: 8\b'
+        $run.Output | Should -Match 'Passed: 9\b'
         $run.Output | Should -Match 'Failed: 0\b'
     }
 
@@ -440,7 +472,7 @@ Describe 'Lab 1.3 Test-Lab.ps1 - budgets are a manual check, not counted' {
         $run.Output | Should -Match '\[INFO\] Budgets could not be read: stub lookup failure'
         $run.Output | Should -Not -Match 'Budget found'
         $run.Output | Should -Not -Match 'No budgets found'
-        $run.Output | Should -Match 'Passed: 8\b'
+        $run.Output | Should -Match 'Passed: 9\b'
     }
 }
 
@@ -460,7 +492,7 @@ Describe 'Lab 1.3 Test-Lab.ps1 - a lock check passes only for the guide''s lock 
         $run.ExitCode | Should -Be 1 -Because "a ReadOnly lock is not the lock step 1.3.11 creates; output was:`n$($run.Output)"
         $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] lock-no-delete-prod has level ReadOnly\. Expected lock-no-delete-prod \(CanNotDelete\) on the group, step 1\.3\.11\.'
         $run.FailLines | Should -Be 1
-        $run.OkLines | Should -Be 7
+        $run.OkLines | Should -Be 8
         $run.Output | Should -Match 'Failed: 1\b'
     }
 
@@ -471,7 +503,7 @@ Describe 'Lab 1.3 Test-Lab.ps1 - a lock check passes only for the guide''s lock 
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] No lock named lock-no-delete-prod; the group carries: my-lock \(CanNotDelete\)\.'
         $run.FailLines | Should -Be 1
-        $run.OkLines | Should -Be 7
+        $run.OkLines | Should -Be 8
         $run.Output | Should -Match 'Failed: 1\b'
     }
 
@@ -483,7 +515,7 @@ Describe 'Lab 1.3 Test-Lab.ps1 - a lock check passes only for the guide''s lock 
         $run.Output | Should -Match 'Lock on platform-skycraft-swc-rg \[FAIL\] Not found on the group itself; locks elsewhere do not count: lock-no-delete-platform \(CanNotDelete\) at /subscriptions/[^ ]+/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft\.Storage/storageAccounts/stubstorage\.'
         $run.Output | Should -Match 'step 1\.3\.13\.'
         $run.FailLines | Should -Be 1
-        $run.OkLines | Should -Be 7
+        $run.OkLines | Should -Be 8
         $run.Output | Should -Match 'Failed: 1\b'
     }
 
@@ -494,7 +526,7 @@ Describe 'Lab 1.3 Test-Lab.ps1 - a lock check passes only for the guide''s lock 
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] Not found on the group itself; locks elsewhere do not count: lock-no-delete-prod \(CanNotDelete\) at /subscriptions/00000000-0000-0000-0000-000000000000\. Expected'
         $run.FailLines | Should -Be 1
-        $run.OkLines | Should -Be 7
+        $run.OkLines | Should -Be 8
         $run.Output | Should -Match 'Failed: 1\b'
     }
 
@@ -504,7 +536,7 @@ Describe 'Lab 1.3 Test-Lab.ps1 - a lock check passes only for the guide''s lock 
         $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] Could not read locks: stub lookup failure: Get-AzResourceLock on prod-skycraft-swc-rg'
         $run.Output | Should -Not -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] Not found'
         $run.FailLines | Should -Be 1
-        $run.OkLines | Should -Be 7
+        $run.OkLines | Should -Be 8
         $run.Output | Should -Match 'Failed: 1\b'
     }
 }
@@ -524,7 +556,16 @@ Describe 'Lab 1.3 Test-Lab.ps1 - finds the policy assignments whichever path mad
         $run.Output | Should -Match "Policy: Require-Environment-Tag-RG : 'Require-Environment-Tag-RG' \(name aaaaaaaaaaaaaaaaaaaaaaa1\) \[OK\]"
         $run.Output | Should -Match "Policy: Enforce-Project-Tag : 'Enforce-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa2\) \[OK\]"
         $run.Output | Should -Match "Policy: Restrict-Azure-Regions : 'Restrict-Azure-Regions' \(name aaaaaaaaaaaaaaaaaaaaaaa3\) \[OK\]"
-        $run.Output | Should -Match 'Passed: 8\b'
+        $run.Output | Should -Match "Policy: Inherit-Project-Tag : 'Inherit-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa4\) \[OK\]"
+        $run.Output | Should -Match 'Passed: 9\b'
+    }
+
+    It 'passes the assignments the Bicep and script paths make since #406: fixed names, the guide''s display names' {
+        $run = $script:ScriptMade
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Policy: Enforce-Project-Tag : 'Enforce-Project-Tag' \(name Enforce-Project-Tag\) \[OK\]"
+        $run.Output | Should -Match "Policy: Inherit-Project-Tag : 'Inherit-Project-Tag' \(name Inherit-Project-Tag\) \[OK\]"
+        $run.Output | Should -Match 'Passed: 9\b'
     }
 
     It 'lists the subscription''s assignments once, rather than reading each by name' {
@@ -535,8 +576,46 @@ Describe 'Lab 1.3 Test-Lab.ps1 - finds the policy assignments whichever path mad
         $run = $script:TwoSets
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "Policy: Enforce-Project-Tag \[FAIL\] 2 assignments match: 'Enforce Project Tag Value' \(name Enforce-Project-Tag\), 'Enforce-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa2\)\. Keep one and delete the others"
-        $run.FailLines | Should -Be 3
+        $run.FailLines | Should -Be 4
         $run.OkLines | Should -Be 5
-        $run.Output | Should -Match 'Failed: 3\b'
+        $run.Output | Should -Match 'Failed: 4\b'
+    }
+}
+
+Describe 'Lab 1.3 Test-Lab.ps1 - checks the Modify assignment Inherit-Project-Tag (#350)' {
+
+    It 'passes the Bicep-made Inherit-Project-Tag, with tagName Project and a system-assigned identity' {
+        $script:AllPass.Output | Should -Match "Policy: Inherit-Project-Tag : 'Inherit Project Tag from Resource Group' \(name Inherit-Project-Tag\) \[OK\]"
+    }
+
+    It 'does not count Inherit-Project-Tag as a second Enforce-Project-Tag' {
+        # Both carry the Project tag; the definition tells them apart, so neither check sees two.
+        $script:AllPass.Output | Should -Match "Policy: Enforce-Project-Tag : 'Enforce Project Tag Value' \(name Enforce-Project-Tag\) \[OK\]"
+        $script:AllPass.Output | Should -Not -Match 'assignments match'
+    }
+
+    It 'fails when Inherit-Project-Tag is missing, and names its definition and step' {
+        $run = $script:InheritMissing
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Policy: Inherit-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Inherit a tag from the resource group if missing' on the subscription itself, named 'Inherit-Project-Tag' \(resource name or display name\), step 1\.3\.8\."
+        $run.FailLines | Should -Be 1
+        $run.OkLines | Should -Be 8
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'fails an Inherit-Project-Tag that inherits another tag' {
+        $run = $script:InheritWrongTag
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Policy: Inherit-Project-Tag : 'Inherit Project Tag from Resource Group' \(name Inherit-Project-Tag\) \[FAIL\] parameter tagName is 'Environment', expected 'Project'\. See step 1\.3\.8\."
+        $run.FailLines | Should -Be 1
+        $run.OkLines | Should -Be 8
+    }
+
+    It 'fails an Inherit-Project-Tag without a managed identity' {
+        $run = $script:InheritNoIdentity
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Policy: Inherit-Project-Tag : 'Inherit-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa4\) \[FAIL\] it has no managed identity, expected a system-assigned managed identity \(a Modify policy needs one\)\. See step 1\.3\.8\."
+        $run.FailLines | Should -Be 1
+        $run.OkLines | Should -Be 8
     }
 }

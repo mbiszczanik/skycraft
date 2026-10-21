@@ -26,6 +26,14 @@
          name the Bicep path sets, or by the display name a learner types into the Portal next
          to a generated resource name. They are removed by id, from the subscription only. An
          assignment made twice is removed neither time: an [ERROR], counted, exit 1.
+      8. The Modify assignment Inherit-Project-Tag (issue #350) is removed too, and the role
+         assignments its identity holds in the subscription go first, found in a listing by
+         principal id (never with -ObjectId); a role assignment of another principal, or one
+         inherited from a management group, is left alone. When that listing or a removal
+         fails, the assignment is kept for a second run: an [ERROR], counted, exit 1. The Bicep
+         path's Deny assignments made before main.bicep set managedIdentities to {} carry an
+         identity with no role: they are removed as usual, and kept with the rest when the
+         listing fails.
 
     Scope limit, as in the Lab 5.2 suite: the child is launched with -Command, so these tests
     prove the failure counter reaches `exit`, not that `pwsh -File` carries the code out of the
@@ -62,6 +70,8 @@ BeforeAll {
         'Remove-AzResourceLock'
         'Get-AzPolicyAssignment'
         'Remove-AzPolicyAssignment'
+        'Get-AzRoleAssignment'
+        'Remove-AzRoleAssignment'
         'Get-AzConsumptionBudget'
         'Remove-AzConsumptionBudget'
         'Get-AzActivityLogAlert'
@@ -75,7 +85,7 @@ BeforeAll {
     # holds everything the guide creates, plus an unrelated action group in prod-skycraft-swc-rg.
     # Environment variables change that, so one generated module serves every scenario:
     #   SKYCRAFT_STUB_EMPTY   '1' leaves nothing to find: every listing comes back empty
-    #   SKYCRAFT_STUB_POLICYSET  who made the three policy assignments: 'bicep' (the default:
+    #   SKYCRAFT_STUB_POLICYSET  who made the four policy assignments: 'bicep' (the default:
     #                         fixed names), 'portal' (generated names, the guide's names as
     #                         display names) or 'both' (two of each)
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled) or
@@ -86,7 +96,8 @@ BeforeAll {
     #                         subscription - both returned by the group's lock listing, as the
     #                         real cmdlet returns them
     # A lookup is named after its command and what it reads: 'Get-AzResourceLock:<rg>',
-    # 'Get-AzPolicyAssignment:subscription', 'Get-AzConsumptionBudget:<rg or subscription>',
+    # 'Get-AzPolicyAssignment:subscription', 'Get-AzRoleAssignment:subscription',
+    # 'Get-AzConsumptionBudget:<rg or subscription>',
     # 'Get-AzActivityLogAlert:<rg>', 'Get-AzActionGroup:<rg>'. A removal is logged both bare and
     # with the object's name, so the assertions can be generic or precise.
     $script:StubBody = @'
@@ -172,21 +183,30 @@ function Remove-AzResourceLock {
     Invoke-StubRemoval -Command 'Remove-AzResourceLock' -Name $LockName
 }
 
+$script:PrincipalId = '11111111-1111-1111-1111-111111111111'
+
+# Shaped like Get-AzPolicyAssignment's output in Az.Resources 7 and later; -Identity adds a
+# system-assigned identity at the top level, as the real cmdlet returns it.
 function New-StubAssignment {
-    param([string]$Name, [string]$DisplayName, [string]$Definition, [string]$Scope)
-    [pscustomobject]@{
+    param([string]$Name, [string]$DisplayName, [string]$Definition, [string]$Scope, [switch]$Identity)
+    $assignment = [pscustomobject]@{
         Name               = $Name
         DisplayName        = $DisplayName
         PolicyDefinitionId = "/providers/Microsoft.Authorization/policyDefinitions/$Definition"
         Scope              = $Scope
         Id                 = "$Scope/providers/Microsoft.Authorization/policyAssignments/$Name"
     }
+    if ($Identity) {
+        $assignment | Add-Member -NotePropertyName IdentityType -NotePropertyValue 'SystemAssigned'
+        $assignment | Add-Member -NotePropertyName IdentityPrincipalId -NotePropertyValue $script:PrincipalId
+    }
+    $assignment
 }
 
 # Lists the assignments that apply to the subscription, as the real cmdlet does for -Scope with
-# no -Name: the lab's three, made by the Bicep path, the Portal or both, plus one inherited from a
+# no -Name: the lab's four, made by the Bicep path, the Portal or both, plus one inherited from a
 # management group under the guide's name and an unrelated one under a guide display name, which
-# must both be left alone.
+# must both be left alone. Inherit-Project-Tag carries a system-assigned identity.
 function Get-AzPolicyAssignment {
     [CmdletBinding()]
     param([string]$Name, [string]$Scope, [Parameter(ValueFromRemainingArguments)]$Rest)
@@ -197,15 +217,30 @@ function Get-AzPolicyAssignment {
     $lab = @(
         @{ Name = 'Require-Environment-Tag-RG'; Bicep = 'Require Environment Tag on Resource Groups'; Definition = '96670d01-0a4d-4649-9c89-2d3abc0a5025'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa1' }
         @{ Name = 'Enforce-Project-Tag'; Bicep = 'Enforce Project Tag Value'; Definition = '1e30110a-5ceb-460c-a204-c1c3969c6d62'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa2' }
+        @{ Name = 'Inherit-Project-Tag'; Bicep = 'Inherit Project Tag from Resource Group'; Definition = 'ea3f2387-9b95-492a-a190-fcdc54f7b070'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa4'; Identity = $true }
         @{ Name = 'Restrict-Azure-Regions'; Bicep = 'Restrict to Allowed Regions'; Definition = 'e56962a6-4747-49cd-b67b-bf8b01975c4c'; Portal = 'aaaaaaaaaaaaaaaaaaaaaaa3' }
     )
     $set = if ($env:SKYCRAFT_STUB_POLICYSET) { $env:SKYCRAFT_STUB_POLICYSET } else { 'bicep' }
     foreach ($assignment in $lab) {
+        $identity = [bool]$assignment.Identity
         if ($set -in 'bicep', 'both') {
-            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope
+            # Before main.bicep set managedIdentities to {} on them, the AVM default gave the
+            # Bicep path's Deny assignments an identity too, each with its own principal and no role.
+            if (-not $identity -and $env:SKYCRAFT_STUB_DENYIDENTITY -eq '1') {
+                $old = New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope
+                $old | Add-Member -NotePropertyName IdentityType -NotePropertyValue 'SystemAssigned'
+                $old | Add-Member -NotePropertyName IdentityPrincipalId -NotePropertyValue "33333333-3333-3333-3333-00000000000$([array]::IndexOf($lab, $assignment))"
+                $old
+                continue
+            }
+            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope -Identity:$identity
         }
         if ($set -in 'portal', 'both') {
-            New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope
+            New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Identity:$identity
+        }
+        # The Bicep and script paths since issue #406: fixed names, the guide's names as display names.
+        if ($set -eq 'scripted') {
+            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Identity:$identity
         }
     }
     New-StubAssignment -Name 'Enforce-Project-Tag' -DisplayName 'Enforce Project Tag Value' -Definition '1e30110a-5ceb-460c-a204-c1c3969c6d62' `
@@ -222,6 +257,38 @@ function Remove-AzPolicyAssignment {
     $assignmentScope = $Id -replace '/providers/Microsoft\.Authorization/policyAssignments/[^/]+$', ''
     Write-StubCall -Name "Remove-AzPolicyAssignment@$assignmentScope"
     Invoke-StubRemoval -Command 'Remove-AzPolicyAssignment' -Name ($Id -split '/')[-1]
+}
+
+# Role assignments on the subscription: Inherit-Project-Tag's identity holds Contributor on the
+# subscription (what the Portal grants it); another principal holds one too, and the identity
+# holds one inherited from a management group - both must be left alone.
+function Get-AzRoleAssignment {
+    [CmdletBinding()]
+    param([string]$Scope, [string]$ObjectId, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($ObjectId) { throw 'stub: the lab lists role assignments by scope, not by -ObjectId (a Microsoft Graph lookup)' }
+    if (Invoke-StubLookup -Name 'Get-AzRoleAssignment:subscription') { return }
+    if (Test-StubEmpty) { return }
+    foreach ($entry in @(
+            @{ Id = 'ra-identity-sub'; ObjectId = $script:PrincipalId; Scope = $Scope }
+            @{ Id = 'ra-other-sub'; ObjectId = '22222222-2222-2222-2222-222222222222'; Scope = $Scope }
+            @{ Id = 'ra-identity-mg'; ObjectId = $script:PrincipalId; Scope = '/providers/Microsoft.Management/managementGroups/stub-mg' }
+        )) {
+        [pscustomobject]@{
+            RoleAssignmentId   = "$($entry.Scope)/providers/Microsoft.Authorization/roleAssignments/$($entry.Id)"
+            ObjectId           = $entry.ObjectId
+            Scope              = $entry.Scope
+            RoleDefinitionId   = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
+            RoleDefinitionName = 'Contributor'
+        }
+    }
+}
+
+# Removes the role assignment the script hands over, logged by the last segment of its id.
+function Remove-AzRoleAssignment {
+    [CmdletBinding()]
+    param([object]$InputObject, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if (-not $InputObject) { throw 'stub: the lab removes a role assignment by the object it listed (-InputObject)' }
+    Invoke-StubRemoval -Command 'Remove-AzRoleAssignment' -Name ($InputObject.RoleAssignmentId -split '/')[-1]
 }
 
 function Get-AzConsumptionBudget {
@@ -294,8 +361,9 @@ function Start-Sleep {
             [string[]]$Lookup = @(),
             [string[]]$ArgumentList = @('-Force'),
             [string[]]$LockElsewhere = @(),
-            [ValidateSet('bicep', 'portal', 'both')]
+            [ValidateSet('bicep', 'portal', 'scripted', 'both')]
             [string]$PolicySet = 'bicep',
+            [switch]$DenyIdentity,
             [switch]$Empty
         )
 
@@ -308,6 +376,7 @@ function Start-Sleep {
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
             SKYCRAFT_STUB_LOCKELSEWHERE = $LockElsewhere -join ','
             SKYCRAFT_STUB_POLICYSET = $PolicySet
+            SKYCRAFT_STUB_DENYIDENTITY = if ($DenyIdentity) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG    = $logPath
         }
 
@@ -362,11 +431,21 @@ function Start-Sleep {
     # the Bicep path or Invoke-LabGovernance.ps1.
     $script:PortalMade = Invoke-CleanupScript -Stub $script:Stub -PolicySet 'portal'
     $script:TwoSets    = Invoke-CleanupScript -Stub $script:Stub -PolicySet 'both'
+    $script:ScriptMade = Invoke-CleanupScript -Stub $script:Stub -PolicySet 'scripted'
+    # The identity's role assignments cannot be listed, or one cannot be removed (#350).
+    $script:RoleLookupFails  = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzRoleAssignment:subscription=throttled'
+    $script:RoleRemovalFails = Invoke-CleanupScript -Stub $script:Stub -PolicySet 'portal' -Fail 'Remove-AzRoleAssignment:ra-identity-sub'
+    # The Bicep path's Deny assignments from before main.bicep set managedIdentities to {} carry
+    # identities with no role: removed like the others, or kept with the rest when the role
+    # assignments cannot be listed.
+    $script:DenyIdentity           = Invoke-CleanupScript -Stub $script:Stub -DenyIdentity
+    $script:DenyIdentityRoleFails  = Invoke-CleanupScript -Stub $script:Stub -DenyIdentity -Lookup 'Get-AzRoleAssignment:subscription=throttled'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:ProdGone, $script:NewLookupsFail,
         $script:OldLookupsFail, $script:NewRemovalsFail, $script:OldRemovalsFail, $script:LockElsewhere,
-        $script:PortalMade, $script:TwoSets
+        $script:PortalMade, $script:ScriptMade, $script:TwoSets, $script:RoleLookupFails, $script:RoleRemovalFails,
+        $script:DenyIdentity, $script:DenyIdentityRoleFails
     )
 }
 
@@ -393,10 +472,10 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes everything the guide creates 
         $script:Clean.Output   | Should -Not -Match '\[ERROR\]'
     }
 
-    It 'still removes both locks and all three policy assignments' {
+    It 'still removes both locks and all four policy assignments' {
         foreach ($call in 'Remove-AzResourceLock:lock-no-delete-prod', 'Remove-AzResourceLock:lock-no-delete-platform',
                 'Remove-AzPolicyAssignment:Require-Environment-Tag-RG', 'Remove-AzPolicyAssignment:Enforce-Project-Tag',
-                'Remove-AzPolicyAssignment:Restrict-Azure-Regions') {
+                'Remove-AzPolicyAssignment:Inherit-Project-Tag', 'Remove-AzPolicyAssignment:Restrict-Azure-Regions') {
             $script:Clean.Calls | Should -Contain $call
         }
     }
@@ -451,17 +530,26 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes the policy assignments whiche
         # so a lookup by name reported them absent and left two deny policies on the subscription.
         $run = $script:PortalMade
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
-        foreach ($name in 'aaaaaaaaaaaaaaaaaaaaaaa1', 'aaaaaaaaaaaaaaaaaaaaaaa2', 'aaaaaaaaaaaaaaaaaaaaaaa3') {
+        foreach ($name in 'aaaaaaaaaaaaaaaaaaaaaaa1', 'aaaaaaaaaaaaaaaaaaaaaaa2', 'aaaaaaaaaaaaaaaaaaaaaaa3', 'aaaaaaaaaaaaaaaaaaaaaaa4') {
             $run.Calls | Should -Contain "Remove-AzPolicyAssignment:$name"
         }
         $run.Output | Should -Match "\[SUCCESS\] Removed policy: Enforce-Project-Tag 'Enforce-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa2\)"
         $run.Output | Should -Not -Match 'Policy [^ ]+ not found'
     }
 
+    It 'removes the assignments the Bicep and script paths make since #406: fixed names, the guide''s display names' {
+        $run = $script:ScriptMade
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        foreach ($name in 'Require-Environment-Tag-RG', 'Enforce-Project-Tag', 'Inherit-Project-Tag', 'Restrict-Azure-Regions') {
+            $run.Calls | Should -Contain "Remove-AzPolicyAssignment:$name"
+        }
+        $run.Output | Should -Not -Match 'Policy [^ ]+ not found'
+    }
+
     It 'removes from the subscription only, and leaves an inherited or unrelated assignment alone' {
         foreach ($run in $script:Clean, $script:PortalMade) {
             @($run.Calls | Where-Object { $_ -like 'Remove-AzPolicyAssignment@*' }) |
-                Should -Be (@('Remove-AzPolicyAssignment@/subscriptions/00000000-0000-0000-0000-000000000000') * 3)
+                Should -Be (@('Remove-AzPolicyAssignment@/subscriptions/00000000-0000-0000-0000-000000000000') * 4)
             $run.Calls | Should -Not -Contain 'Remove-AzPolicyAssignment:bbbbbbbbbbbbbbbbbbbbbbb1'
         }
     }
@@ -477,8 +565,72 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes the policy assignments whiche
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Calls | Should -Not -Contain 'Remove-AzPolicyAssignment'
         $run.Output | Should -Match "\[ERROR\] 2 assignments match Enforce-Project-Tag: 'Enforce Project Tag Value' \(name Enforce-Project-Tag\), 'Enforce-Project-Tag' \(name aaaaaaaaaaaaaaaaaaaaaaa2\)\. Removing none of them"
-        $run.Output | Should -Match 'Cleanup finished with 3 failure\(s\)'
+        $run.Output | Should -Match 'Cleanup finished with 4 failure\(s\)'
         $run.Calls | Should -Contain 'Remove-AzConsumptionBudget:SkyCraft-Monthly-Budget'
+        # Neither Inherit-Project-Tag is removed, so neither identity's role is either.
+        $run.Calls | Should -Not -Contain 'Remove-AzRoleAssignment'
+    }
+}
+
+Describe 'Lab 1.3 Remove-LabResource.ps1 - removes Inherit-Project-Tag after its identity''s role (#350)' {
+
+    It 'removes the identity''s role assignment on the subscription before the assignment' {
+        foreach ($run in $script:Clean, $script:PortalMade) {
+            $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+            $role = [array]::IndexOf($run.Calls, 'Remove-AzRoleAssignment:ra-identity-sub')
+            $policy = [array]::IndexOf($run.Calls, $(if ($run -eq $script:Clean) { 'Remove-AzPolicyAssignment:Inherit-Project-Tag' } else { 'Remove-AzPolicyAssignment:aaaaaaaaaaaaaaaaaaaaaaa4' }))
+            $role | Should -BeGreaterThan -1
+            $policy | Should -BeGreaterThan $role -Because 'removed after the assignment, the role assignment would stay behind for an unknown identity'
+        }
+        $script:Clean.Output | Should -Match '\[SUCCESS\] Removed role assignment: Contributor at /subscriptions/00000000-0000-0000-0000-000000000000 for the identity of Inherit-Project-Tag'
+    }
+
+    It 'leaves another principal''s role assignment and one inherited from a management group alone' {
+        @($script:Clean.Calls | Where-Object { $_ -like 'Remove-AzRoleAssignment:*' }) | Should -Be @('Remove-AzRoleAssignment:ra-identity-sub')
+    }
+
+    It 'lists the role assignments once, by scope, never with -ObjectId' {
+        @($script:Clean.Calls | Where-Object { $_ -eq 'Get-AzRoleAssignment:subscription' }).Count | Should -Be 1
+    }
+
+    It 'keeps Inherit-Project-Tag when its identity''s role assignments cannot be listed, and exits 1' {
+        $run = $script:RoleLookupFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Could not look up the role assignments on the subscription'
+        $run.Output | Should -Match 'Keeping policy Inherit-Project-Tag'
+        $run.Calls  | Should -Not -Contain 'Remove-AzPolicyAssignment:Inherit-Project-Tag'
+        $run.Calls  | Should -Contain 'Remove-AzPolicyAssignment:Enforce-Project-Tag'
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+    }
+
+    It 'keeps Inherit-Project-Tag when its identity''s role assignment cannot be removed, and exits 1' {
+        $run = $script:RoleRemovalFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Failed to remove role assignment Contributor at /subscriptions/00000000-0000-0000-0000-000000000000 for the identity of Inherit-Project-Tag'
+        $run.Calls  | Should -Not -Contain 'Remove-AzPolicyAssignment:aaaaaaaaaaaaaaaaaaaaaaa4'
+        $run.Calls  | Should -Contain 'Remove-AzPolicyAssignment:aaaaaaaaaaaaaaaaaaaaaaa2'
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+    }
+
+    It 'removes the older Bicep path''s Deny assignments that carry an identity with no role' {
+        $run = $script:DenyIdentity
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        foreach ($name in 'Require-Environment-Tag-RG', 'Enforce-Project-Tag', 'Inherit-Project-Tag', 'Restrict-Azure-Regions') {
+            $run.Calls | Should -Contain "Remove-AzPolicyAssignment:$name"
+        }
+        @($run.Calls | Where-Object { $_ -like 'Remove-AzRoleAssignment:*' }) | Should -Be @('Remove-AzRoleAssignment:ra-identity-sub')
+        @($run.Calls | Where-Object { $_ -eq 'Get-AzRoleAssignment:subscription' }).Count | Should -Be 1
+    }
+
+    It 'keeps every assignment with an identity, the older Bicep path''s Deny ones included, when the role assignments cannot be listed, and exits 1' {
+        $run = $script:DenyIdentityRoleFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        foreach ($name in 'Require-Environment-Tag-RG', 'Enforce-Project-Tag', 'Inherit-Project-Tag', 'Restrict-Azure-Regions') {
+            $run.Calls  | Should -Not -Contain "Remove-AzPolicyAssignment:$name"
+            $run.Output | Should -Match "Keeping policy $name"
+        }
+        # One failed listing, counted once, however many assignments it keeps.
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
     }
 }
 
