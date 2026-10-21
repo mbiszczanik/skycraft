@@ -336,3 +336,4 @@ catch {
 }
 
 Write-Host "`nDeployment Complete." -ForegroundColor Green
+Exit-Lab -FailureCount 0

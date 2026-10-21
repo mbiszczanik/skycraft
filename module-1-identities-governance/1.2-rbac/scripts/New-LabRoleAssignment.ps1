@@ -506,3 +506,4 @@ foreach ($item in $assignments) {
 }
 
 Write-Host "`nRole assignment complete." -ForegroundColor Green
+Exit-Lab -FailureCount 0
