@@ -49,6 +49,14 @@
     sign-in's tenant is chosen, and an Az context names another. A context in the personal
     Microsoft account directory, which that failed sign-in leaves, is never a source.
 
+    The Cloud Shell check of 2026-10-22 (#418) adds a fifth plan. Cloud Shell has no browser for the
+    interactive sign-in, and security defaults refuse a device code (AADSTS530035), so with no
+    service principal the scripts sign in with Cloud Shell's own Graph token (Get-AzAccessToken),
+    which never prompts. That token holds Directory.ReadWrite.All, Group.ReadWrite.All and
+    User.Invite.All, not User.ReadWrite.All: each script names with -CoveredBy the scopes that also
+    allow its calls, and a token that still falls short stops the script before any change.
+    Remove-LabResource.ps1 names none, because deleting a user takes User.ReadWrite.All only.
+
 .EXAMPLE
     Invoke-Pester -Path .\tests\Lab11-Graph-Auth.Tests.ps1
 
@@ -1050,5 +1058,227 @@ Describe 'Get-LabGraphAuthPlan - the parameters bind to a real Connect-MgGraph p
         $plan.Mode | Should -Be $mode
         # Exactly one: a set of parameters that fits two of them would leave the SDK to guess.
         @(Get-MatchingParameterSetName -ConnectParameter $plan.ConnectParameter) | Should -Be @($set)
+    }
+}
+
+Describe 'Get-LabGraphAuthPlan - Azure Cloud Shell (#418)' {
+
+    It 'plans Cloud Shell''s own sign-in when no service principal is configured' {
+        $plan = Get-LabGraphAuthPlan -Scope $script:Scope -EnvironmentValue $script:EmptyEnv -Unattended $false -CloudShell $true
+
+        $plan.Mode                            | Should -Be 'CloudShell'
+        $plan.ConnectParameter                | Should -BeNullOrEmpty
+        $plan.TokenParameter.ResourceTypeName | Should -Be 'MSGraph'
+        $plan.TokenParameter.AsSecureString   | Should -BeTrue
+        $plan.TokenParameter.Keys             | Should -Not -Contain 'TenantId'
+    }
+
+    It 'asks the token for the tenant it resolved, and names the source' {
+        $plan = Get-LabGraphAuthPlan -Scope $script:Scope -EnvironmentValue $script:EmptyEnv -AzContextTenantId $script:TenantId -Unattended $false -CloudShell $true
+
+        $plan.TokenParameter.TenantId | Should -Be $script:TenantId
+        $plan.Reason                  | Should -Match ([regex]::Escape("tenant $($script:TenantId) (from the Az context)"))
+    }
+
+    It 'serves an unattended run, because the token never prompts' {
+        (Get-LabGraphAuthPlan -Scope $script:Scope -EnvironmentValue $script:EmptyEnv -Unattended $true -CloudShell $true).Mode |
+            Should -Be 'CloudShell'
+    }
+
+    It 'still prefers a configured service principal' {
+        $fixture = Get-EnvFixture -TenantId $script:TenantId -ClientId $script:ClientId -ClientSecret $script:Secret
+        (Get-LabGraphAuthPlan -Scope $script:Scope -EnvironmentValue $fixture -Unattended $false -CloudShell $true).Mode |
+            Should -Be 'ClientSecret'
+    }
+
+    It 'reads Cloud Shell from <variable> when -CloudShell is not given' -ForEach @(
+        @{ variable = 'POWERSHELL_DISTRIBUTION_CHANNEL'; value = 'CloudShell' }
+        @{ variable = 'AZUREPS_HOST_ENVIRONMENT';        value = 'cloud-shell/1.0' }
+    ) {
+        $saved = @{
+            POWERSHELL_DISTRIBUTION_CHANNEL = $env:POWERSHELL_DISTRIBUTION_CHANNEL
+            AZUREPS_HOST_ENVIRONMENT        = $env:AZUREPS_HOST_ENVIRONMENT
+        }
+        try {
+            $env:POWERSHELL_DISTRIBUTION_CHANNEL = $null
+            $env:AZUREPS_HOST_ENVIRONMENT        = $null
+            (Get-LabGraphAuthPlan -Scope $script:Scope -EnvironmentValue $script:EmptyEnv -Unattended $false).Mode | Should -Be 'Interactive'
+            Set-Item -Path "Env:$variable" -Value $value
+            (Get-LabGraphAuthPlan -Scope $script:Scope -EnvironmentValue $script:EmptyEnv -Unattended $false).Mode | Should -Be 'CloudShell'
+        }
+        finally {
+            $env:POWERSHELL_DISTRIBUTION_CHANNEL = $saved.POWERSHELL_DISTRIBUTION_CHANNEL
+            $env:AZUREPS_HOST_ENVIRONMENT        = $saved.AZUREPS_HOST_ENVIRONMENT
+        }
+    }
+}
+
+Describe 'Connect-LabGraph - Azure Cloud Shell signs in with its own token (#418)' {
+
+    BeforeAll {
+        $connectAst = $script:FunctionByScript['New-LabUser.ps1'] |
+            Where-Object { $_.Name -eq 'Connect-LabGraph' }
+        . ([scriptblock]::Create($connectAst.Extent.Text))
+
+        function Get-LabGraphAuthPlan { $script:Plan }
+        function Get-MgContext { if ($script:Connected) { $script:ContextAfter } else { $script:ContextBefore } }
+        function Connect-MgGraph {
+            [CmdletBinding()]
+            param([string[]]$Scopes, $AccessToken, [switch]$NoWelcome, [Parameter(ValueFromRemainingArguments)]$Rest)
+            $null = $Rest, $NoWelcome
+            $script:Connected     = $true
+            $script:ConnectScopes = $Scopes
+            $script:ConnectToken  = $AccessToken
+        }
+        function Disconnect-MgGraph { $script:Disconnected = $true }
+        function Get-AzContext { }
+        function Get-AzAccessToken {
+            param([string]$ResourceTypeName, [switch]$AsSecureString, [string]$TenantId, [Parameter(ValueFromRemainingArguments)]$Rest)
+            $null = $Rest
+            $script:TokenCall = @{ ResourceTypeName = $ResourceTypeName; AsSecureString = [bool]$AsSecureString; TenantId = $TenantId }
+            [pscustomobject]@{ Token = 'stub-token' }
+        }
+
+        # What New-LabUser.ps1 requests, and the directory scopes Cloud Shell's token held on 2026-10-22.
+        $script:SetupScope      = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All')
+        $script:CloudShellScope = @('Directory.ReadWrite.All', 'Group.ReadWrite.All', 'User.Invite.All', 'openid', 'profile')
+        $script:SetupCoveredBy  = @{ 'User.ReadWrite.All' = 'Directory.ReadWrite.All'; 'Domain.Read.All' = 'Directory.ReadWrite.All' }
+
+        # What Get-MgContext showed after Connect-MgGraph -AccessToken in Cloud Shell: no account.
+        function Get-CloudShellContextFixture {
+            param([string[]]$Scopes)
+            [pscustomobject]@{ TenantId = $script:TenantId; Account = ''; AppName = 'AzurePortal Console App'; AuthType = 'UserProvidedAccessToken'; Scopes = $Scopes }
+        }
+    }
+
+    BeforeEach {
+        $script:Plan = [pscustomobject]@{
+            Mode             = 'CloudShell'
+            Reason           = 'stub Cloud Shell plan'
+            TenantId         = $script:TenantId
+            TenantSource     = 'the Az context'
+            ConnectParameter = $null
+            TokenParameter   = @{ ResourceTypeName = 'MSGraph'; AsSecureString = $true; TenantId = $script:TenantId; ErrorAction = 'Stop' }
+        }
+        $script:Connected     = $false
+        $script:Disconnected  = $false
+        $script:ConnectScopes = $null
+        $script:ConnectToken  = $null
+        $script:TokenCall     = $null
+        $script:ContextBefore = $null
+        $script:ContextAfter  = Get-CloudShellContextFixture -Scopes $script:CloudShellScope
+    }
+
+    It 'connects with the token Get-AzAccessToken returns for the plan''s tenant, never with -Scopes' {
+        $context = Connect-LabGraph -Scope $script:SetupScope -CoveredBy $script:SetupCoveredBy 6>$null
+
+        $script:TokenCall.ResourceTypeName | Should -Be 'MSGraph'
+        $script:TokenCall.AsSecureString   | Should -BeTrue
+        $script:TokenCall.TenantId         | Should -Be $script:TenantId
+        $script:ConnectToken               | Should -Be 'stub-token'
+        $script:ConnectScopes              | Should -BeNullOrEmpty
+        $context.AppName                   | Should -Be 'AzurePortal Console App'
+    }
+
+    It 'stops, names the scope and disconnects when the token does not cover <case>' -ForEach @(
+        @{ case = 'User.ReadWrite.All with no -CoveredBy (Remove-LabResource.ps1)'; scope = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All'); coveredBy = @{}; missing = 'User.ReadWrite.All' }
+        @{ case = 'Domain.Read.All when only users are covered';                    scope = @('Domain.Read.All');                                                 coveredBy = @{ 'User.ReadWrite.All' = 'Directory.ReadWrite.All' }; missing = 'Domain.Read.All' }
+    ) {
+        { Connect-LabGraph -Scope $scope -CoveredBy $coveredBy 6>$null } |
+            Should -Throw -ExpectedMessage "*lacks $missing*"
+        $script:Disconnected | Should -BeTrue
+    }
+
+    It 'points the learner at their own machine or the Portal, and at device code''s refusal' {
+        { Connect-LabGraph -Scope @('User.ReadWrite.All') 6>$null } |
+            Should -Throw -ExpectedMessage '*530035*PowerShell 7 on your own machine*'
+    }
+
+    It 'reuses a context in the session that already covers the request, without a token' {
+        $script:ContextBefore = Get-CloudShellContextFixture -Scopes $script:CloudShellScope
+
+        $null = Connect-LabGraph -Scope $script:SetupScope -CoveredBy $script:SetupCoveredBy 6>$null
+
+        $script:TokenCall | Should -BeNullOrEmpty
+        $script:Connected | Should -BeFalse
+    }
+
+    It 'prints the plan''s reason and no home-tenant hint before it signs in' {
+        $out = Connect-LabGraph -Scope $script:SetupScope -CoveredBy $script:SetupCoveredBy 6>&1 | Out-String
+        $out | Should -Not -Match 'home tenant'
+        $out | Should -Match 'stub Cloud Shell plan'
+    }
+}
+
+Describe 'Connect-LabGraph - -CoveredBy widens what a context in the session may hold (#418)' {
+
+    BeforeAll {
+        $connectAst = $script:FunctionByScript['New-LabUser.ps1'] |
+            Where-Object { $_.Name -eq 'Connect-LabGraph' }
+        . ([scriptblock]::Create($connectAst.Extent.Text))
+
+        function Get-LabGraphAuthPlan { $script:Plan }
+        function Get-MgContext { if ($script:Connected) { $script:ContextAfter } else { $script:ContextBefore } }
+        function Connect-MgGraph {
+            [CmdletBinding()]
+            param([string[]]$Scopes, [Parameter(ValueFromRemainingArguments)]$Rest)
+            $null = $Rest, $Scopes
+            $script:Connected = $true
+        }
+        function Disconnect-MgGraph { }
+        function Get-AzContext { }
+    }
+
+    BeforeEach {
+        $script:Plan = [pscustomobject]@{
+            Mode             = 'Interactive'
+            Reason           = 'stub interactive plan'
+            TenantId         = $null
+            ConnectParameter = @{ Scopes = @('User.ReadWrite.All'); ErrorAction = 'Stop' }
+        }
+        $script:Connected     = $false
+        $script:ContextBefore = [pscustomobject]@{ TenantId = $script:TenantId; Account = 'admin@contoso.example'; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = @('Directory.ReadWrite.All') }
+        $script:ContextAfter  = [pscustomobject]@{ TenantId = $script:TenantId; Account = 'admin@contoso.example'; AppName = 'Microsoft Graph Command Line Tools'; AuthType = 'Delegated'; Scopes = @('User.ReadWrite.All') }
+    }
+
+    It 'reuses a context holding a scope -CoveredBy names for the requested one' {
+        $null = Connect-LabGraph -Scope @('User.ReadWrite.All') -CoveredBy @{ 'user.readwrite.all' = 'DIRECTORY.READWRITE.ALL' } 6>$null
+        $script:Connected | Should -BeFalse -Because 'scope names compare without regard to case'
+    }
+
+    It 'signs in again without -CoveredBy, as before' {
+        $null = Connect-LabGraph -Scope @('User.ReadWrite.All') 6>$null
+        $script:Connected | Should -BeTrue
+    }
+}
+
+Describe 'Module 1 Graph sign-in - what each script lets Cloud Shell''s token cover (#418)' {
+
+    BeforeAll {
+        # The -CoveredBy argument of a script's Connect-LabGraph call, as text, or $null.
+        function Get-CoveredByText {
+            param([string]$Name)
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:LabScriptPath[$Name], [ref]$null, [ref]$null)
+            $call = $ast.FindAll({
+                    $args[0] -is [System.Management.Automation.Language.CommandAst] -and $args[0].GetCommandName() -eq 'Connect-LabGraph'
+                }, $true) | Select-Object -First 1
+            $element = @($call.CommandElements)
+            for ($i = 0; $i -lt $element.Count - 1; $i++) {
+                if ($element[$i] -is [System.Management.Automation.Language.CommandParameterAst] -and $element[$i].ParameterName -eq 'CoveredBy') {
+                    return $element[$i + 1].Extent.Text
+                }
+            }
+            $null
+        }
+    }
+
+    It 'Remove-LabResource.ps1 passes no -CoveredBy: deleting a user takes User.ReadWrite.All only' {
+        Get-CoveredByText -Name 'Remove-LabResource.ps1' | Should -BeNullOrEmpty
+    }
+
+    It '<name> lets Directory.ReadWrite.All cover User.ReadWrite.All' -ForEach @(
+        @{ name = 'Test-Lab.ps1' }, @{ name = 'New-LabRoleAssignment.ps1' }, @{ name = 'New-LabUser.ps1' }
+    ) {
+        Get-CoveredByText -Name $name | Should -Match "'User\.ReadWrite\.All'\s*=\s*'Directory\.ReadWrite\.All'"
     }
 }
