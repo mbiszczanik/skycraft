@@ -18,7 +18,7 @@
     This suite pins that shape in the Lab 2.3 template; the Lab 3.1 and 3.2 parts follow with
     their own change. Manual port allocation must be a multiple of 8 and admit
     the most instances Module 3 can put into one egress pool: the Lab 3.2 auth and world VMs plus
-    the prod scale set at its autoscale maximum of 4, 6 in all, out of the 63,992 ports the
+    the prod scale set at its autoscale maximum of 4, 6 in all, out of the 63,984 ports the
     frontend offers to its outbound rule.
 
     It also lifts Test-LB out of Lab 2.3's Test-Lab.ps1 with the PowerShell parser and runs it
@@ -42,7 +42,7 @@ BeforeAll {
 
     # Ports the frontend IP offers to its one outbound rule (the Portal's Available frontend
     # ports), and the most instances Module 3 can put into one egress pool (2 VMs + 4 VMSS).
-    $script:FrontendPorts      = 63992
+    $script:FrontendPorts      = 63984
     $script:MaxEgressInstances = 6
 
     Import-Module (Join-Path $script:RepoRoot 'tools' 'BicepCli.psm1') -Force

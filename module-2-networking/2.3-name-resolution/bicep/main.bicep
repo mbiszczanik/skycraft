@@ -106,7 +106,7 @@ var varWorldPort = 8085
 var varProbeIntervalInSeconds = 15
 var varProbeCount = 2
 
-// Outbound rule: manual port allocation, a multiple of 8. The frontend IP offers 63,992 SNAT ports
+// Outbound rule: manual port allocation, a multiple of 8. The frontend IP offers 63,984 SNAT ports
 // to its one outbound rule, so 8,000 per instance admits 7 instances in the egress pool. Module 3
 // puts at most 2 VMs per load balancer there (the Lab 3.2 auth and world VMs); even the prod scale
 // set of Lab 3.2 (up to 4 instances) would fit beside them (2 + 4 = 6). The module's default
