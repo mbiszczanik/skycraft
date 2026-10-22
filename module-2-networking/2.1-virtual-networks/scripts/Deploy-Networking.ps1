@@ -27,6 +27,9 @@
 .PARAMETER PlatformResourceGroup
     The platform resource group name. Default: 'platform-skycraft-swc-rg'
 
+.PARAMETER Owner
+    Value of the canonical Owner tag. Default: 'mbiszczanik'. Mirrors parOwner in the Bicep path.
+
 .EXAMPLE
     .\Deploy-Networking.ps1
     Deploys all networking resources using default settings.
@@ -44,6 +47,10 @@
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Deploy script; idempotent guard (Get-before-New) and az --what-if provide the dry-run safety net.')]
 param(
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Owner = 'mbiszczanik',
+
     [Parameter(Mandatory = $false)]
     [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
@@ -76,14 +83,18 @@ if (-not $context) {
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
 # Define Mandatory Tags
-$TagsPlatform = @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN' }
-$TagsDev = @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN' }
-$TagsProd = @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN' }
+$TagsPlatform = @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = $Owner }
+$TagsDev = @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN'; Owner = $Owner }
+$TagsProd = @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN'; Owner = $Owner }
 
 # AppServiceSubnet is delegated to App Service (Lab 3.4's VNet integration), as main.bicep and the
 # guide's portal steps create it. The delegation is named after its service, as the AVM subnet
 # module names it, so this path and the Bicep path describe the same subnet.
 $appServiceDelegation = New-AzDelegation -Name 'Microsoft.Web/serverFarms' -ServiceName 'Microsoft.Web/serverFarms'
+
+# Every subnet is private (-DefaultOutboundAccess $false), as the portal's Add a subnet pane and
+# main.bicep create it: no default outbound access. The Module 3 VMs reach the internet through
+# Lab 2.3's load balancer outbound rules.
 
 # ===================================
 # Task 2: Create Hub Virtual Network
@@ -91,8 +102,8 @@ $appServiceDelegation = New-AzDelegation -Name 'Microsoft.Web/serverFarms' -Serv
 Write-Host "`n=== Task 2: Creating Hub Virtual Network ===" -ForegroundColor Cyan
 $hubVnetName = 'platform-skycraft-swc-vnet'
 $hubSubnets = @(
-    (New-AzVirtualNetworkSubnetConfig -Name 'AzureBastionSubnet' -AddressPrefix '10.0.0.0/26'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'GatewaySubnet' -AddressPrefix '10.0.1.0/27')
+    (New-AzVirtualNetworkSubnetConfig -Name 'AzureBastionSubnet' -AddressPrefix '10.0.0.0/26' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'GatewaySubnet' -AddressPrefix '10.0.1.0/27' -DefaultOutboundAccess $false)
 )
 
 Write-Host "Creating VNet: $hubVnetName..." -ForegroundColor Yellow
@@ -110,10 +121,10 @@ try {
 Write-Host "`n=== Task 3: Creating Dev Virtual Network ===" -ForegroundColor Cyan
 $devVnetName = 'dev-skycraft-swc-vnet'
 $devSubnets = @(
-    (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.1.1.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.1.2.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.1.3.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.1.4.0/24' -Delegation $appServiceDelegation)
+    (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.1.1.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.1.2.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.1.3.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.1.4.0/24' -Delegation $appServiceDelegation -DefaultOutboundAccess $false)
 )
 
 Write-Host "Creating VNet: $devVnetName..." -ForegroundColor Yellow
@@ -131,10 +142,10 @@ try {
 Write-Host "`n=== Task 4: Creating Prod Virtual Network ===" -ForegroundColor Cyan
 $prodVnetName = 'prod-skycraft-swc-vnet'
 $prodSubnets = @(
-    (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.2.1.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.2.2.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.2.3.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.2.4.0/24' -Delegation $appServiceDelegation)
+    (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.2.1.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.2.2.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.2.3.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.2.4.0/24' -Delegation $appServiceDelegation -DefaultOutboundAccess $false)
 )
 
 Write-Host "Creating VNet: $prodVnetName..." -ForegroundColor Yellow
@@ -184,7 +195,7 @@ function New-SkyCraftPip {
     try {
         $pip = Get-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -ErrorAction SilentlyContinue
         if (-not $pip) {
-            New-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -Location $Location -Sku Standard -AllocationMethod Static -Tag $Tags -ErrorAction Stop | Out-Null
+            New-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -Location $Location -Sku Standard -AllocationMethod Static -Zone 1, 2, 3 -Tag $Tags -ErrorAction Stop | Out-Null
             Write-Host "  -> Created PIP: $Name" -ForegroundColor Green
         } else { Write-Host "  -> exists" -ForegroundColor Gray }
     } catch { Write-Host "  -> [ERROR] Failed to create PIP $Name : $_" -ForegroundColor Red }
