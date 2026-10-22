@@ -173,7 +173,7 @@ The Advisor alert `Advisor-Cost-Recommendations` and its action group `skycraft-
 1. In Azure Portal, search for **Tags**
 2. In the list of tags, click **Project : SkyCraft**
 
-The **Tags** service lists every tag in your subscription as one name : value pair per line (`CostCenter : MSDN`, `Environment : Development`, `Project : SkyCraft`, ...).
+The **Tags** service opens as **Resource Manager | Tags** and lists every tag in your subscription as one name : value pair per line (`CostCenter : MSDN`, `Environment : Development`, `Project : SkyCraft`, ...).
 
 **Expected Result**: **Resources with tag Project : SkyCraft** lists the three resource groups, and any resource that already carries the tag (for example from Lab 1.2's deployment).
 
@@ -218,7 +218,7 @@ The **Tags** service lists every tag in your subscription as one name : value pa
 - **Description**: `All resource groups must have an Environment tag`
 - **Policy enforcement**: Default (enforcement)
 
-**Note**: Once you add the definition, the wizard fills **Assignment name** with the definition's own name (`Require a tag on resource groups`). Replace it with `Require-Environment-Tag-RG`: the lab's scripts (`Test-Lab.ps1`, `Remove-LabResource.ps1`) look for an assignment of this definition with that name. In the Portal, **Assignment name** sets the assignment's display name; Azure names the assignment resource itself with a generated id. The wizard also shows a **Version** field (`1.*.*`): leave it as it is.
+**Note**: Once you add the definition, the wizard fills **Assignment name** with the definition's own name (`Require a tag on resource groups`). Replace it with `Require-Environment-Tag-RG`: the lab's scripts (`Test-Lab.ps1`, `Remove-LabResource.ps1`) look for an assignment of this definition with that name. In the Portal, **Assignment name** sets the assignment's display name; Azure names the assignment resource itself with a generated id. The wizard also shows a **Version** field (`1.*.*`): leave it as it is. **Policy enforcement** may also offer **Enroll**, besides Default and Do not enforce: keep Default.
 
 ![Assign a Built-in Policy](./images/step-1.3.5b.png)
 
@@ -536,7 +536,7 @@ A task can finish as succeeded without remediating anything, so check its result
 
 **Expected Result**: The Portal confirms with **Remediation task creation succeeded**. Once the task has finished (a few minutes), it lists one remediated resource, the **Tags** page of `Advisor-Cost-Recommendations` shows `Project` = `SkyCraft`, and after the next compliance evaluation `Inherit-Project-Tag` shows the alert as compliant.
 
-**Note**: If the task remediated 0 resources and the alert has no `Project` tag, start a new task with the Az PowerShell command below (in Cloud Shell, for example), then check it with items 9-15. That is what worked on a new subscription: a Portal task created about four minutes after **Compliance** first listed the alert as non-compliant under `Inherit-Project-Tag`, with **Locations** left empty, ended **Succeeded** with 0 deployments; a task with the command's settings (no location filter), created seven minutes later, tagged the alert. Why the first task remediated nothing is not known. If you have run the command before, give the new task another `-Name` (for example `remediate-project-tag-2`) instead of reusing the earlier task's name. Two Portal routes may work too but have not been confirmed: create the task again (items 5-15) after the alert has been listed as non-compliant for a few more minutes, or tick **Re-evaluate resource compliance before remediating** on the **New remediation task** page before you click **Remediate**.
+**Note**: If the task remediated 0 resources and the alert has no `Project` tag, wait until about ten minutes have passed since **Compliance** first listed the alert as non-compliant under `Inherit-Project-Tag`, then create a new task in the Portal (items 5-15 again). As an alternative, start the new task with the Az PowerShell command below (in Cloud Shell, for example) and check it with items 9-15. If you have run the command before, give the new task another `-Name` (for example `remediate-project-tag-2`) instead of reusing the earlier task's name. On new subscriptions, a task created about four minutes after the first non-compliant listing remediated nothing (2026-10-20), and one created about eleven minutes after it tagged the alert (2026-10-21).
 
 The same with Az PowerShell (the `Start-AzPolicyRemediation` cmdlet ships in the Az.PolicyInsights module):
 
@@ -677,7 +677,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 | Expiration date | [Leave the default, two years from now]             |
 | Amount          | 100 (in your billing currency; adjust to your needs) |
 
-**Note**: **Reset period** starts at **Billing month**. Pick **Monthly**, which the list shows under **Calendar months**. The **Amount** field is labelled with your billing currency (for example **Amount (€)**).
+**Note**: **Reset period** comes in one of two forms, depending on the billing account, and both are expected: it starts at **Billing month** and shows **Monthly** under **Calendar months**, or it lists only **Monthly**, **Quarterly** and **Annually**, with **Monthly** preselected. Pick **Monthly** in either form. The **Amount** field may show your billing currency in its label (for example **Amount (€)**) or not; enter the number alone.
 
 **Note**: On a subscription created the same day, the cost chart of **Create a budget** can show **Cannot load data**, and a day later **No data to display**. That is expected: cost data can take up to 48 hours to appear (note in Step 1.3.18), and the budget is still created.
 
@@ -688,6 +688,8 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 ### Step 1.3.16: Configure Budget Alerts
 
 On the **Set alerts** step, every alert is one row under **Alert conditions**. A new empty row appears below each row you fill in.
+
+**Note**: Until a recipient is entered, each filled row shows a validation message that moves the rows below it down. Filling in **Alert recipients (email)** (item 2) first avoids that.
 
 1. Fill in three rows under **Alert conditions** (leave the Action group column at None):
 
@@ -727,6 +729,8 @@ Create a more specific budget for the production environment. A budget belongs t
 | Name         | SkyCraft-Prod-Monthly         |
 | Reset period | Monthly                       |
 | Amount       | 50 (in your billing currency) |
+
+**Note**: **Reset period** and **Amount** look as in Step 1.3.15 (see the note there): pick **Monthly** and enter the number alone.
 
 6. Click **Next >**
 7. On the **Set alerts** step, fill in three rows under **Alert conditions**:
@@ -797,6 +801,8 @@ Create a more specific budget for the production environment. A budget belongs t
 - The number of active recommendations
 - The number of impacted resources
 
+A card without recommendations may show only a check mark and "You are following all of our ... recommendations" instead of a score and counts.
+
 The overall score (0-100%) is on the separate **Advisor score** page.
 
 ![Manage Costs with Budgets and Alerts](./images/step-1.3.19.png)
@@ -863,6 +869,8 @@ Tenant Root Group
 2. Click **Management groups** service
 3. You'll see the **Tenant Root Group**
 
+The service opens as **Resource Manager | Management groups**.
+
 ![View Management Groups](./images/step-1.3.22.png)
 
 **Note**: Creating management groups requires specific permissions. For this lab, understanding the concept is sufficient.
@@ -905,7 +913,7 @@ Tenant Root Group
 
 - [ ] Created subscription-level budget (100 per month, in your billing currency)
 - [ ] Configured 3 alert thresholds (50%, 80%, 100%)
-- [ ] Created resource group-specific budget (prod-skycraft-swc-rg, 50 per month)
+- [ ] Created resource group-specific budget (prod-skycraft-swc-rg, 50 per month, in your billing currency)
 - [ ] Explored Cost Analysis with filters (on a new subscription, once Cost analysis loads, which can take up to 48 hours; Step 1.3.18)
 - [ ] Understand daily cost trends
 
@@ -968,7 +976,7 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 
 - A new assignment takes about five minutes to take effect, sometimes longer. If Step 1.3.6 created `rg-test-no-tag`, delete it the way the step deletes `rg-test-with-tag`, wait a few minutes and try again
 - Policy may be in "Audit" mode instead of "Deny" mode
-- Check **Policy enforcement** is set to "Default (enforcement)", not "Do not enforce"
+- Check **Policy enforcement** is set to "Default (enforcement)", not "Do not enforce" or another option such as "Enroll"
 - Review policy effect (should be "Deny" for enforcement)
 
 ### Issue 3: Cannot delete resource despite Owner role
@@ -1035,7 +1043,7 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 
 **Solutions**:
 
-- Remove the stale role assignment yourself: **Subscriptions** → your subscription → **Access control (IAM)** → **Role assignments**, find the **Contributor** row whose name is **Identity not found**, check it, click **Delete**, then deploy again. `scripts/Remove-LabResource.ps1` does not find it: it removes the role assignments of the policy assignments that still exist
+- Remove the stale role assignment yourself: **Subscriptions** → your subscription → **Access control (IAM)** → **Role assignments**, find the **Contributor** row whose Name and Type read **Unknown** (older Portal versions show **Identity not found**), check it, click **Delete**, then deploy again. Whatever its label, it is a **Contributor** row at the subscription with no user, group or service principal behind it: the identity it was given to no longer exists. `scripts/Remove-LabResource.ps1` does not find it: it removes the role assignments of the policy assignments that still exist
 - Next time, remove the lab with `scripts/Remove-LabResource.ps1` rather than in the Portal: it removes the identity's role assignment before the policy assignment, so none is left behind
 
 ### Issue 9: `Deploy-Bicep.ps1` or `Invoke-LabGovernance.ps1` says an assignment "differs from the lab's"
