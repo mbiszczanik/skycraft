@@ -1588,8 +1588,55 @@ function Test-LabCycleToolingFloor {
     $results
 }
 
+function Get-LabScriptModule {
+    <#
+    .SYNOPSIS
+        Lists the modules a lab script needs: its '#Requires -Modules' line, then its $labModule
+        list.
+
+    .DESCRIPTION
+        Read from the parsed script, so a list in a comment or a string is not counted and a tool
+        that checks a lab's modules cannot drift from the script. The Microsoft Graph modules moved
+        from '#Requires -Modules' to a top-level `$labModule = @(...)` assignment that the script
+        imports with Import-LabModule from tools/LabCommon.psm1 (issue #375); both are read here.
+        Each name is listed once, in the order the script imports them.
+
+    .PARAMETER Path
+        The lab script to read.
+
+    .OUTPUTS
+        [string] One module name per item.
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #375
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Path
+    )
+
+    $parseError = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$parseError)
+    if ($parseError) { throw "$Path does not parse: $($parseError[0].Message)" }
+
+    $required = @($ast.ScriptRequirements.RequiredModules | ForEach-Object { $_.Name })
+    $listed = foreach ($assignment in $ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                $node.Left.VariablePath.UserPath -eq 'labModule'
+            }, $false)) {
+        $assignment.Right.FindAll({ $args[0] -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true).Value
+    }
+    @(@($required) + @($listed) | Where-Object { $_ } | Select-Object -Unique)
+}
+
 Export-ModuleMember -Function Get-PhaseOrder, Get-DependentPhase, Get-LabCycleFailedStatus,
     Test-LabCycleStatusBlocksDependent, Invoke-LabScriptProcess,
     Test-LabCycleSubscription, Test-LabCyclePreflight, Test-LabCycleActionAllowed, Invoke-LabCycleCanary,
     Get-LabCycleLockOwner, New-LabCycleLock, Get-LabCycleFailureClass, Write-LabCycleReport,
-    Write-LabCycleResultLine, Compare-LabCycleVersion, Test-LabCycleToolingFloor
+    Write-LabCycleResultLine, Compare-LabCycleVersion, Test-LabCycleToolingFloor, Get-LabScriptModule

@@ -7,6 +7,10 @@
     and sets up security groups (Admins, Developers, Testers) with the corresponding memberships.
     It adheres to the SkyCraft PowerShell standards.
 
+    When a Microsoft Graph module it calls is not installed (Azure Cloud Shell does not ship
+    Microsoft.Graph.Users), it names the module and the command that installs it, and exits 1 before
+    signing in (issue #375).
+
 .PARAMETER TenantId
     The Microsoft Entra tenant ID to sign in to Microsoft Graph with. If omitted, the script uses
     SKYCRAFT_GRAPH_TENANT_ID, else the tenant of a Microsoft Graph sign-in already in this session
@@ -52,7 +56,6 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Identity.SignIns
 
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Lab script; -DemoMode dry-run switch fulfils the ShouldProcess intent.')]
@@ -427,6 +430,20 @@ Write-Host "=== Lab 1.1: Create Users & Groups ===" -ForegroundColor Cyan -Backg
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
+
+# The Microsoft Graph modules this script calls, imported here rather than with '#Requires -Modules'
+# (issue #375): Azure Cloud Shell does not ship Microsoft.Graph.Users, and #Requires would stop the
+# script with PowerShell's own error, which names no install command. Import-LabModule imports them
+# in this order and at one version (a session loads only one Microsoft.Graph.Authentication), or
+# names the command that installs what is missing and returns $false.
+$labModule = @(
+    'Microsoft.Graph.Authentication'
+    'Microsoft.Graph.Users'
+    'Microsoft.Graph.Groups'
+    'Microsoft.Graph.Identity.DirectoryManagement'
+    'Microsoft.Graph.Identity.SignIns'
+)
+if (-not (Import-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
 
 # Connect to Graph
 try {

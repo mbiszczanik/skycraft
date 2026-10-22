@@ -54,7 +54,7 @@ BeforeAll {
 
     $script:ScriptPath     = (Resolve-Path (Join-Path $PSScriptRoot '..' 'scripts' 'Test-Lab.ps1')).Path
     $script:StubModuleName = 'SkyCraftGraphValidatorStub'
-    # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
+    # Exactly the script's $labModule list (issue #375): imported for real before the stub.
     $script:RequiredModules = @(
         'Microsoft.Graph.Authentication'
         'Microsoft.Graph.Users'

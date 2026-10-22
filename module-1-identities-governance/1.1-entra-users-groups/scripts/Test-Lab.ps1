@@ -10,7 +10,9 @@
     Every check prints [OK] or [FAIL] and is counted. The summary states how many passed and how
     many failed, and the script exits 0 only when none failed. It exits 1 when any check failed,
     and also when it cannot sign in to Microsoft Graph or determine the tenant's initial domain,
-    in which case no check runs (issue #241).
+    in which case no check runs (issue #241). When a Microsoft Graph module it calls is not
+    installed (Azure Cloud Shell does not ship Microsoft.Graph.Users), it names the module and the
+    command that installs it, and exits 1 before signing in (issue #375).
 
     It signs in with the same Microsoft Graph scopes as Remove-LabResource.ps1, which
     New-LabUser.ps1 requests too, so the consent given to the lab's setup covers the validator
@@ -35,7 +37,6 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Identity.DirectoryManagement
 
 [CmdletBinding()]
 param()
@@ -371,6 +372,19 @@ function Select-LabInitialDomain {
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
+
+# The Microsoft Graph modules this script calls, imported here rather than with '#Requires -Modules'
+# (issue #375): Azure Cloud Shell does not ship Microsoft.Graph.Users, and #Requires would stop the
+# script with PowerShell's own error, which names no install command. Import-LabModule imports them
+# in this order and at one version (a session loads only one Microsoft.Graph.Authentication), or
+# names the command that installs what is missing and returns $false.
+$labModule = @(
+    'Microsoft.Graph.Authentication'
+    'Microsoft.Graph.Users'
+    'Microsoft.Graph.Groups'
+    'Microsoft.Graph.Identity.DirectoryManagement'
+)
+if (-not (Import-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
 
 Write-Host "=== Lab 1.1 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 

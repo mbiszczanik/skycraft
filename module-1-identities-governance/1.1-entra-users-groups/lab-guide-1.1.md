@@ -53,6 +53,20 @@ You'll set up the following identity structure in Microsoft Entra ID:
 - [ ] Azure Portal access
 - [ ] Global Administrator or User Administrator role
 - [ ] Understanding of user vs. group concepts
+- [ ] Only for the scripts in `scripts/` and the checklist commands (the Portal steps need none): PowerShell 7 with the Microsoft Graph modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Users`, `Microsoft.Graph.Groups`, `Microsoft.Graph.Identity.DirectoryManagement` and `Microsoft.Graph.Identity.SignIns`. Install them for your account:
+
+  ```powershell
+  Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Identity.SignIns -Scope CurrentUser
+  ```
+
+  In Azure Cloud Shell (PowerShell) all of them are preinstalled except `Microsoft.Graph.Users`. Install it first, at the version of the preinstalled Graph modules: a script loads its Graph modules at one version only.
+
+  ```powershell
+  $graphVersion = (Get-Module -ListAvailable Microsoft.Graph.Authentication | Sort-Object Version -Descending | Select-Object -First 1).Version
+  Install-Module Microsoft.Graph.Users -RequiredVersion $graphVersion -Scope CurrentUser
+  ```
+
+  A script that finds a module missing, or not installed at the version the other Graph modules share, stops before it signs in and prints the `Install-Module` command with the version to install. A Cloud Shell session without a storage account can run the scripts only if this install works there, which Microsoft Learn does not document; if it fails, mount a storage account or run the scripts in PowerShell 7 on your own machine. An ephemeral session also deletes the clone of the repository and the module when it ends, so install the module again in each new session. Details and sources: [Module 1 prerequisites](../README.md#-prerequisites).
 
 ---
 

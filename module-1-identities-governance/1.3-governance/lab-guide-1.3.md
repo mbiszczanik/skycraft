@@ -64,6 +64,13 @@ Before starting this lab:
 - [ ] Owner role at subscription level, or Contributor together with User Access Administrator (Step 1.3.8 gives a managed identity a role on the subscription, which Contributor alone may not do)
 - [ ] On a new subscription: the `Microsoft.Insights` resource provider registered (Step 1.3.7 creates an action group and an alert in that namespace, and the Portal does not register it for you; see the note below)
 - [ ] Understanding of compliance and governance concepts
+- [ ] Only for the scripts in `scripts/` and the checklist commands (the Portal steps need none): PowerShell 7 with `Az.Accounts`, `Az.Resources`, `Az.Billing` and `Az.Monitor`, and `Az.PolicyInsights` for the checklist's compliance summary. Install them for your account:
+
+  ```powershell
+  Install-Module Az.Accounts, Az.Resources, Az.Billing, Az.Monitor, Az.PolicyInsights -Scope CurrentUser
+  ```
+
+  Azure Cloud Shell (PowerShell) has all of them preinstalled, so a Cloud Shell session without a storage account can run this lab's scripts too; it deletes the clone of the repository when it ends. Details and sources: [Module 1 prerequisites](../README.md#-prerequisites).
 
 **Note**: To register `Microsoft.Insights`, search for **Subscriptions**, click your subscription, and in the left menu, under **Settings**, click **Resource providers**. Search for `Microsoft.Insights`, select the `Microsoft.Insights` row and click **Register**. Its status changes from **NotRegistered** to **Registering** and, after about a minute, to **Registered**. If it does not change to **Registering**, click **Register** again. A subscription you have used before usually has it already; without it, Step 1.3.7 fails (Troubleshooting, Issue 6).
 
