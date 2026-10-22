@@ -16,7 +16,8 @@
 | SSH Authentication | SSH public key only, disable passwords | Allow password auth or certificate | SSH key is more secure and teaches modern practices. Production enforces key rotation and audits key distribution. |
 | System-Assigned Managed Identity | Enabled on all VMs | None, or User-Assigned only | Enables VMs to fetch encryption keys or secrets without storing credentials. Lab keeps it simple; production layers with User-Assigned identities for fine-grained RBAC. |
 | Encryption Strategy | None (default), EncryptionAtHost, AzureDiskEncryption options | None only | Parameterized to teach the trade-off: no encryption is fast and cheap; EncryptionAtHost adds latency but encrypts at the hypervisor; ADE adds key management complexity. |
-| Load Balancer Backend Pools | Both VMs in pools (Auth in auth pool, World in world pool) | Direct public IPs, or all in one pool | Backend pools teach separation of concerns; each service has its own health probe and rule. Direct public IPs would expose both services independently (not using the LB). |
+| Load Balancer Backend Pools | Each VM in its role pool (Auth in auth pool, World in world pool) and both in the egress pool `<lb>-be-outbound` | Direct public IPs, or all in one pool | Backend pools teach separation of concerns; each service has its own health probe and rule. Direct public IPs would expose both services independently (not using the LB). |
+| Outbound connectivity | Both VM NICs in `<lb>-be-outbound`, the pool of the load balancer's one outbound rule (Lab 2.3) | A NAT gateway on the subnets; a public IP per VM; one outbound rule per role pool | The subnets are private, so a VM outside `be-outbound` has no internet access (package updates, VM extensions). A frontend IP takes only one outbound rule with an overlapping protocol, so the roles share one egress pool. The portal's VM wizard joins a single pool, so the guide adds both VMs to `be-outbound` afterwards; `main.bicep` puts each NIC in both pools and `Test-Lab.ps1` checks it. |
 
 ## 2. Lab simplifications vs production
 
@@ -61,7 +62,7 @@
 
 ## 5. Bicep implementation note (AVM)
 
-- **VMs**: `avm/res/compute/virtual-machine`. The NICs are created by the module from `nicConfigurations` (there is no separate NIC module any more), including the load-balancer backend pool on the IP configuration and `enableAcceleratedNetworking: false`.
+- **VMs**: `avm/res/compute/virtual-machine`. The NICs are created by the module from `nicConfigurations` (there is no separate NIC module any more), including the load-balancer backend pools on the IP configuration (the role pool and `<lb>-be-outbound`) and `enableAcceleratedNetworking: false`.
 - **Data disk**: `avm/res/compute/disk`, attached to the World VM by resource ID (`dataDisks[].managedDisk.resourceId`), so the disk keeps its own lifecycle and zone.
 - **Key Vault** (ADE only): `avm/res/key-vault/vault` with the lab-friction override from docs/bicep-standards.md §4.5 — soft delete forced on with 7-day retention, purge protection off, and `Remove-LabResource.ps1 -IncludeKeyVault` purges the vault after deleting it so the name is free immediately.
 - **Deltas vs the hand-written templates**: the data disk now carries `networkAccessPolicy: DenyAll` / `publicNetworkAccess: Disabled` (AVM defaults; the lab never exports the disk), the OS disk sets `caching: 'ReadWrite'` explicitly (the AVM default is `ReadOnly`), and the NICs carry the canonical four tags only.
