@@ -6,7 +6,7 @@
 
 | Decision | Choice in this lab | Alternatives considered | Why this choice (in a learning context) |
 |---|---|---|---|
-| **NSG placement** | One NSG per subnet (Auth, World, DB) per spoke; Hub NSG is empty at start | One NSG per VNet; NSGs on NICs only; centralized Azure Firewall | Per-subnet NSGs teach the fundamental pattern: firewall rules are *closest* to the protected resource. Empty hub NSG is intentional—it demonstrates that NSGs are allow-lists (default-deny). |
+| **NSG placement** | One NSG per subnet (Auth, World, DB) per spoke; no NSG on the hub subnets | One NSG per VNet; NSGs on NICs only; centralized Azure Firewall | Per-subnet NSGs teach the fundamental pattern: firewall rules are *closest* to the protected resource. The hub holds only AzureBastionSubnet and GatewaySubnet, which Azure manages and an NSG would only get in the way of (issue #345). |
 | **ASG usage** | Define ASGs for Auth/World/DB tiers; *reserve* for future NIC membership | Skip ASGs; inline CIDR rules only | ASGs are "security groups" for logical grouping (like AWS Security Groups). Defining them now teaches the pattern: group *roles*, not IPs. In a real network, an Auth server can be added to the Auth ASG without touching rules. |
 | **Bastion deployment** | Optional (parDeployBastion = false by default) | Mandatory deployment; separate lab | Bastion adds ~€140/mo, so making it optional teaches cost discipline. Optional deployment is a realistic trade-off: some labs skip it to save budget. Default off avoids surprising learners with a big bill. |
 | **Bastion SKU** | Basic SKU (cheaper, no native RDP/SSH file transfer) | Standard SKU (more features, higher cost); no Bastion | Basic SKU is sufficient for lab: students learn the core concept (eliminate public IPs). Real production might upgrade to Standard for auditing. Cost difference: ~€60/mo, worth teaching. |
@@ -47,7 +47,7 @@
 - Azure Bastion (Basic SKU): ~€140/mo (largest cost)
 - Bastion Public IP (Standard): €3.40/mo
 - NSGs (1 Hub + 6 Spokes = 7 total): €0 (free)
-- ASGs (6 total): €0 (free)
+- ASGs (3, dev tiers): €0 (free)
 - **Total with Bastion: ~€143.40/mo**
 - **Total without Bastion (default): ~€0/mo** (inherits Lab 2.1 costs)
 

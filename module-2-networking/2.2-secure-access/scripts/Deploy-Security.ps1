@@ -123,10 +123,7 @@ Write-Host "`n=== Task 1: Creating Application Security Groups ===" -ForegroundC
 $asgConfigs = @(
     @{ Name = 'dev-skycraft-swc-asg-auth'; RG = 'dev-skycraft-swc-rg' },
     @{ Name = 'dev-skycraft-swc-asg-world'; RG = 'dev-skycraft-swc-rg' },
-    @{ Name = 'dev-skycraft-swc-asg-db'; RG = 'dev-skycraft-swc-rg' },
-    @{ Name = 'prod-skycraft-swc-asg-auth'; RG = $ProdResourceGroup },
-    @{ Name = 'prod-skycraft-swc-asg-world'; RG = $ProdResourceGroup },
-    @{ Name = 'prod-skycraft-swc-asg-db'; RG = $ProdResourceGroup }
+    @{ Name = 'dev-skycraft-swc-asg-db'; RG = 'dev-skycraft-swc-rg' }
 )
 
 $asgs = @{}
@@ -190,9 +187,6 @@ $nsgProdAuth  = New-SkyCraftNSG -Name "prod-skycraft-swc-auth-nsg"  -RG $ProdRes
 $nsgProdWorld = New-SkyCraftNSG -Name "prod-skycraft-swc-world-nsg" -RG $ProdResourceGroup -Env "Production"
 $nsgProdDb    = New-SkyCraftNSG -Name "prod-skycraft-swc-db-nsg"    -RG $ProdResourceGroup -Env "Production"
 
-# Platform NSG
-$null = New-SkyCraftNSG -Name "platform-skycraft-swc-nsg" -RG $PlatformResourceGroup -Env "Platform"
-
 # ===================================
 # Task 3 & 4: Configure NSG Rules
 # ===================================
@@ -208,11 +202,12 @@ function Add-Rule {
     # Determine if we use Prefix (Single) or Prefixes (Array)
     # Validated: SourceAddressPrefix parameter accepts string array.
     
+    # Re-adding rather than Set-AzNetworkSecurityRuleConfig: a rule the guide's step 2.2.9 switched to
+    # ASG sources would otherwise carry both ASGs and prefixes, which Azure refuses (#345).
     if ($existing) {
-        $NSG | Set-AzNetworkSecurityRuleConfig -Name $Name -Description $Desc -Access Allow -Protocol Tcp -Direction Inbound -Priority $Priority -SourceAddressPrefix $SrcPrefix -SourcePortRange '*' -DestinationAddressPrefix '*' -DestinationPortRange $DestPort | Out-Null
-    } else {
-        $NSG | Add-AzNetworkSecurityRuleConfig -Name $Name -Description $Desc -Access Allow -Protocol Tcp -Direction Inbound -Priority $Priority -SourceAddressPrefix $SrcPrefix -SourcePortRange '*' -DestinationAddressPrefix '*' -DestinationPortRange $DestPort | Out-Null
+        $NSG | Remove-AzNetworkSecurityRuleConfig -Name $Name | Out-Null
     }
+    $NSG | Add-AzNetworkSecurityRuleConfig -Name $Name -Description $Desc -Access Allow -Protocol Tcp -Direction Inbound -Priority $Priority -SourceAddressPrefix $SrcPrefix -SourcePortRange '*' -DestinationAddressPrefix '*' -DestinationPortRange $DestPort | Out-Null
 }
 
 # Dev Rules
