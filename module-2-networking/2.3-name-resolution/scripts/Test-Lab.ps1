@@ -10,7 +10,10 @@
       - Private DNS zone, its canonical tags, and hub / dev / prod VNet links with the expected
         registration flag
       - Dev and prod load balancers have Standard SKU, >=2 probes, >=2 LB rules, outbound SNAT
-        left enabled on every rule, and the canonical tags for their environment
+        disabled on every LB rule, the egress pool <lb>-be-outbound with an outbound rule for it
+        (protocol All, manual port allocation) - the Module 3 VMs' only path to the internet -
+        and the canonical tags for their environment. The pools are empty until Lab 3.2, so
+        their members are not checked here.
 
 .EXAMPLE
     .\Test-Lab.ps1
@@ -194,14 +197,39 @@ function Test-LB {
              $script:validationErrors++
         }
 
-        # Lab-friction override (docs/bicep-standards.md section 4.5): the AVM load-balancer module
-        # defaults disableOutboundSnat to true, which removes the implicit outbound SNAT the
-        # Module 3 VMs (no public IPs, no NAT gateway) depend on.
-        $snatViolations = @($lb.LoadBalancingRules | Where-Object { $_.DisableOutboundSnat -ne $false })
-        if ($snatViolations.Count -eq 0) {
-            Write-Host "  - [OK] DisableOutboundSnat is false on all $($lb.LoadBalancingRules.Count) rule(s)" -ForegroundColor Green
+        # Egress (docs/bicep-standards.md section 4.5). The Lab 2.1 subnets are private, so the
+        # Module 3 VMs reach the internet only through the outbound rule. A frontend IP takes one
+        # outbound rule with an overlapping protocol, so the rule (protocol All) serves one egress
+        # pool, '<lb>-be-outbound', which Lab 3.2 puts every VM NIC into. Azure then refuses SNAT on
+        # the load balancing rules of that frontend; the check documents the design.
+        $snatOn = @($lb.LoadBalancingRules | Where-Object { $_.DisableOutboundSnat -ne $true })
+        if ($snatOn.Count -eq 0) {
+            Write-Host "  - [OK] Outbound SNAT disabled on all $($lb.LoadBalancingRules.Count) LB rule(s)" -ForegroundColor Green
         } else {
-            Write-Host "  - [FAIL] DisableOutboundSnat is not false on: $(($snatViolations | ForEach-Object { $_.Name }) -join ', ')" -ForegroundColor Red
+            Write-Host "  - [FAIL] Outbound SNAT not disabled on: $(($snatOn | ForEach-Object { $_.Name }) -join ', ')" -ForegroundColor Red
+            $script:validationErrors++
+        }
+
+        $egressPoolName = "$LbName-be-outbound"
+        $egressPool = $lb.BackendAddressPools | Where-Object { $_.Name -eq $egressPoolName }
+        if ($egressPool) {
+            Write-Host "  - [OK] Egress backend pool found: $egressPoolName" -ForegroundColor Green
+            # Pools are compared by name (the last segment of the ID), case-insensitively.
+            $egressRules = @($lb.OutboundRules | Where-Object {
+                $_.BackendAddressPool.Id -and ($_.BackendAddressPool.Id -split '/')[-1] -eq $egressPoolName
+            })
+            $goodRules = @($egressRules | Where-Object { $_.Protocol -eq 'All' -and $_.AllocatedOutboundPorts -gt 0 })
+            if ($goodRules.Count -gt 0) {
+                Write-Host "  - [OK] Outbound rule $($goodRules[0].Name) serves $egressPoolName (All, $($goodRules[0].AllocatedOutboundPorts) ports per instance)" -ForegroundColor Green
+            } elseif ($egressRules.Count -gt 0) {
+                Write-Host "  - [FAIL] Outbound rule $($egressRules[0].Name) for $egressPoolName has protocol $($egressRules[0].Protocol) and $($egressRules[0].AllocatedOutboundPorts) allocated ports (Expected All, more than 0)" -ForegroundColor Red
+                $script:validationErrors++
+            } else {
+                Write-Host "  - [FAIL] No outbound rule uses $egressPoolName - the Module 3 VMs would have no internet access" -ForegroundColor Red
+                $script:validationErrors++
+            }
+        } else {
+            Write-Host "  - [FAIL] Egress backend pool NOT found: $egressPoolName" -ForegroundColor Red
             $script:validationErrors++
         }
 

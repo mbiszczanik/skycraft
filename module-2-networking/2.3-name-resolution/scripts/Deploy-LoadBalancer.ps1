@@ -6,7 +6,13 @@
     Tasks performed:
     1. Deploy Standard Public Load Balancer for Dev.
     2. Deploy Standard Public Load Balancer for Prod.
-    3. Configure Backend Pools, Health Probes, and Rules.
+    3. Configure Backend Pools (world, auth and the egress pool 'be-outbound'), Health Probes,
+       and Load Balancing Rules (outbound SNAT disabled on the rules, which Azure requires once
+       an outbound rule uses the frontend IP).
+    4. Configure one Outbound Rule for the egress pool (protocol All, 8000 ports per instance) -
+       the Module 3 VMs' only path to the internet, since the Lab 2.1 subnets are private. A
+       frontend IP takes only one outbound rule with an overlapping protocol, so Lab 3.2 puts
+       every VM NIC into 'be-outbound' besides its role pool.
 
 .NOTES
     Project: SkyCraft
@@ -106,24 +112,32 @@ function New-SkyCraftLB {
     # Create Backend Pools
     $bePoolWorld = New-AzLoadBalancerBackendAddressPoolConfig -Name "$LbName-be-world"
     $bePoolAuth = New-AzLoadBalancerBackendAddressPoolConfig -Name "$LbName-be-auth"
+    $bePoolOutbound = New-AzLoadBalancerBackendAddressPoolConfig -Name "$LbName-be-outbound"
 
     # Create Health Probes
     $probeWorld = New-AzLoadBalancerProbeConfig -Name "$LbName-probe-world" -Protocol Tcp -Port 8085 -IntervalInSeconds 15 -ProbeCount 2
     $probeAuth = New-AzLoadBalancerProbeConfig -Name "$LbName-probe-auth" -Protocol Tcp -Port 3724 -IntervalInSeconds 15 -ProbeCount 2
 
     # Create Load Balancing Rules
-    $ruleWorld = New-AzLoadBalancerRuleConfig -Name "$LbName-rule-world" -FrontendIpConfiguration $feIp -BackendAddressPool $bePoolWorld -Probe $probeWorld -Protocol Tcp -FrontendPort 8085 -BackendPort 8085 -IdleTimeoutInMinutes 4 -EnableTcpReset
-    $ruleAuth = New-AzLoadBalancerRuleConfig -Name "$LbName-rule-auth" -FrontendIpConfiguration $feIp -BackendAddressPool $bePoolAuth -Probe $probeAuth -Protocol Tcp -FrontendPort 3724 -BackendPort 3724 -IdleTimeoutInMinutes 4 -EnableTcpReset
+    # Outbound SNAT is disabled on the rules: egress comes from the outbound rule below, and Azure
+    # refuses SNAT on a rule whose frontend IP an outbound rule uses.
+    $ruleWorld = New-AzLoadBalancerRuleConfig -Name "$LbName-rule-world" -FrontendIpConfiguration $feIp -BackendAddressPool $bePoolWorld -Probe $probeWorld -Protocol Tcp -FrontendPort 8085 -BackendPort 8085 -IdleTimeoutInMinutes 4 -EnableTcpReset -DisableOutboundSNAT
+    $ruleAuth = New-AzLoadBalancerRuleConfig -Name "$LbName-rule-auth" -FrontendIpConfiguration $feIp -BackendAddressPool $bePoolAuth -Probe $probeAuth -Protocol Tcp -FrontendPort 3724 -BackendPort 3724 -IdleTimeoutInMinutes 4 -EnableTcpReset -DisableOutboundSNAT
+
+    # Create the Outbound Rule - one per frontend IP (a second one with an overlapping protocol is
+    # refused), for the egress pool, with manual port allocation: the frontend offers 63,992
+    # ports, so 8000 per instance admits 7 instances (Module 3 puts at most 2 VMs here).
+    $outbound = New-AzLoadBalancerOutboundRuleConfig -Name "$LbName-outbound" -FrontendIpConfiguration $feIp -BackendAddressPool $bePoolOutbound -Protocol All -IdleTimeoutInMinutes 4 -EnableTcpReset -AllocatedOutboundPort 8000
 
     # Create/Update Load Balancer
     if ($existingLb) {
         # Update existing object logic is complex with pure objects, easiest is to recreate config
         # Or Set-AzLoadBalancer if we modify the object. 
         # For simple labs, New-AzLoadBalancer overwrites/updates.
-        New-AzLoadBalancer -ResourceGroupName $ResourceGroupName -Name $LbName -Location $Location -Sku Standard -LoadBalancingRule $ruleWorld, $ruleAuth -FrontendIpConfiguration $feIp -BackendAddressPool $bePoolWorld, $bePoolAuth -Probe $probeWorld, $probeAuth -Tag $lbTags -Force | Out-Null
+        New-AzLoadBalancer -ResourceGroupName $ResourceGroupName -Name $LbName -Location $Location -Sku Standard -LoadBalancingRule $ruleWorld, $ruleAuth -FrontendIpConfiguration $feIp -BackendAddressPool $bePoolWorld, $bePoolAuth, $bePoolOutbound -Probe $probeWorld, $probeAuth -OutboundRule $outbound -Tag $lbTags -Force | Out-Null
         Write-Host "  -> Load Balancer updated successfully." -ForegroundColor Green
     } else {
-        New-AzLoadBalancer -ResourceGroupName $ResourceGroupName -Name $LbName -Location $Location -Sku Standard -LoadBalancingRule $ruleWorld, $ruleAuth -FrontendIpConfiguration $feIp -BackendAddressPool $bePoolWorld, $bePoolAuth -Probe $probeWorld, $probeAuth -Tag $lbTags -Force | Out-Null
+        New-AzLoadBalancer -ResourceGroupName $ResourceGroupName -Name $LbName -Location $Location -Sku Standard -LoadBalancingRule $ruleWorld, $ruleAuth -FrontendIpConfiguration $feIp -BackendAddressPool $bePoolWorld, $bePoolAuth, $bePoolOutbound -Probe $probeWorld, $probeAuth -OutboundRule $outbound -Tag $lbTags -Force | Out-Null
         Write-Host "  -> Load Balancer created successfully." -ForegroundColor Green
     }
 }
