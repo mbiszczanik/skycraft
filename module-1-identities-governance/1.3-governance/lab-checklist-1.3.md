@@ -262,22 +262,34 @@ Get-AzResourceLock -ResourceGroupName platform-skycraft-swc-rg |
 ### Validate Budgets
 ========================================
 
-### List the budgets (the cmdlet ships in the Az.Billing module)
+### List the budgets (through the Cost Management API)
 
-The listing is per scope: without `-ResourceGroupName` it shows the subscription's budgets, with it
-the budgets on that resource group.
+`Get-AzConsumptionBudget` (Az.Billing) cannot do this check: it asks for an API version that
+current subscriptions refuse, with `Unprocessable Entity ... Please use version 2018-12-01-preview
+or later`. These commands call the same budgets API through `Invoke-AzRestMethod` (Az.Accounts) at
+a version the service accepts. The first lists every budget in the subscription, resource-group budgets
+included; the second only the budgets on prod-skycraft-swc-rg.
 
 ```powershell
+$subId = (Get-AzContext).Subscription.Id
+
 # Subscription budget (step 1.3.15)
-Get-AzConsumptionBudget |
-    Select-Object Name, Amount, Category |
+(Invoke-AzRestMethod -Path "/subscriptions/$subId/providers/Microsoft.Consumption/budgets?api-version=2023-05-01").Content |
+    ConvertFrom-Json | Select-Object -ExpandProperty value |
+    Select-Object name, @{N='Amount';E={$_.properties.amount}}, @{N='Category';E={$_.properties.category}} |
     Format-Table -AutoSize
 
 # Resource group budget (step 1.3.17)
-Get-AzConsumptionBudget -ResourceGroupName prod-skycraft-swc-rg |
-    Select-Object Name, Amount, Category |
+(Invoke-AzRestMethod -Path "/subscriptions/$subId/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft.Consumption/budgets?api-version=2023-05-01").Content |
+    ConvertFrom-Json | Select-Object -ExpandProperty value |
+    Select-Object name, @{N='Amount';E={$_.properties.amount}}, @{N='Category';E={$_.properties.category}} |
     Format-Table -AutoSize
 ```
+
+If a command stops with `Property "value" cannot be found`, the service refused the request: run
+its `Invoke-AzRestMethod` part alone and read `StatusCode` and the error message in `Content`.
+The Portal shows the same budgets under **Cost Management** > **Budgets**, with the scope set to
+the subscription and then to prod-skycraft-swc-rg.
 
 **Expected Results**:
 - Tags appear on all three resource groups

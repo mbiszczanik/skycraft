@@ -292,48 +292,11 @@ function Test-LabScriptHarnessText {
     }
 }
 
-function Get-LabArmRoleAssignmentStub {
-    <#
-    .SYNOPSIS
-        Returns stub module text that answers the ARM role assignments API in place of
-        Invoke-AzRestMethod.
+# The ARM fake, in parts: the core answers Invoke-AzRestMethod and hands each request to the
+# routes Get-LabArmStub names; a route returns $null for a request that is not its API's.
+$script:LabArmFakeCore = @'
 
-    .DESCRIPTION
-        The lab scripts read, create and remove role assignments through tools/LabCommon.psm1
-        (Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment), which
-        call Invoke-AzRestMethod rather than the Az role cmdlets (issue #397). A suite appends this
-        text to its stub body and adds 'Invoke-AzRestMethod' to the stubbed commands; the fake
-        then turns each request into a call to functions the suite defines in its own body, so
-        the suite keeps describing the subscription in records rather than in HTTP:
-
-          Get-StubRoleAssignment -Scope <scope> -PrincipalId <id or ''>     (required, with
-              [CmdletBinding()]) returns the assignments ARM lists for the scope - those at it,
-              above it and below it - as records with Name, Scope, PrincipalId, RoleDefinitionId
-              (the role's GUID) and optionally PrincipalType and Condition. The fake keeps those of -PrincipalId
-              when the request filters by principal. An error written with Write-Error
-              -ErrorId <code> becomes an ARM error reply with that code: AuthorizationFailed 403,
-              TooManyRequests 429, *NotFound 404, anything else 500.
-          New-StubRoleAssignment -Scope -Name -RoleDefinitionId -PrincipalId -PrincipalType
-              (optional) records a create; a throw becomes an error reply whose code is the
-              first ARM code named in the message (AuthorizationFailed, PrincipalNotFound,
-              RoleAssignmentExists...). Without it, a create stops the script.
-          Remove-StubRoleAssignment -Id -Scope -Name (optional) records a delete and throws to
-              fail it the same way; returning 'absent' answers 204. Without it, a delete stops
-              the script.
-
-        Any other request throws, so a script that reaches for another API through
-        Invoke-AzRestMethod fails its suite instead of passing unseen.
-
-    .OUTPUTS
-        System.String - PowerShell text for a stub module body.
-    #>
-    [CmdletBinding()]
-    [OutputType([string])]
-    param()
-
-    return @'
-
-# --- ARM role assignments API fake (tests/Support/LabScriptStub.psm1, issue #397) -------------
+# --- ARM API fake (tests/Support/LabScriptStub.psm1, issues #397 and #411) --------------------
 
 function ConvertTo-StubArmReply {
     param([int]$StatusCode, [object]$Body)
@@ -344,12 +307,13 @@ function ConvertTo-StubArmReply {
 function ConvertTo-StubArmError {
     param([string]$Code, [string]$Message)
     $status = switch -Regex ($Code) {
-        '^AuthorizationFailed$'      { 403; break }
-        '^TooManyRequests$'          { 429; break }
-        'NotFound$'                  { 404; break }
-        '^RoleAssignmentExists$'     { 409; break }
-        '^PrincipalNotFound$'        { 400; break }
-        default                      { 500 }
+        '^AuthorizationFailed$'       { 403; break }
+        '^TooManyRequests$'           { 429; break }
+        'NotFound$'                   { 404; break }
+        '^RoleAssignmentExists$'      { 409; break }
+        '^PrincipalNotFound$'         { 400; break }
+        '^(422|UnprocessableEntity)$' { 422; break }
+        default                       { 500 }
     }
     ConvertTo-StubArmReply -StatusCode $status -Body @{ error = @{ code = $Code; message = $Message } }
 }
@@ -359,6 +323,40 @@ function Get-StubArmErrorCode {
     if ($Message -match '\b(?<code>AuthorizationFailed|PrincipalNotFound|RoleAssignmentExists|TooManyRequests|RoleAssignmentNotFound)\b') { return $Matches['code'] }
     return 'InternalServerError'
 }
+
+# The error reply for the first error a suite's getter wrote, coded by its -ErrorId.
+function ConvertTo-StubArmGetterError {
+    param([object[]]$StubErrors)
+    $first = $StubErrors[0]
+    ConvertTo-StubArmError -Code ([string]$first.FullyQualifiedErrorId -split ',')[0] -Message $first.Exception.Message
+}
+
+function Get-StubArmQueryValue {
+    param([string]$Query, [string]$Key)
+    foreach ($pair in @($Query -split '&')) {
+        $k, $v = $pair -split '=', 2
+        if ([uri]::UnescapeDataString([string]$k) -eq $Key) { return [uri]::UnescapeDataString([string]$v) }
+    }
+}
+
+function Invoke-AzRestMethod {
+    [CmdletBinding()]
+    param([string]$Path, [string]$Method = 'GET', [string]$Payload, [Parameter(ValueFromRemainingArguments)]$Rest)
+
+    $resource, $query = $Path -split '\?', 2
+    foreach ($route in $script:StubArmRoutes) {
+        $reply = & "Invoke-StubArm${route}Route" -Method $Method -Path $Path -Resource $resource -Query ([string]$query) -Payload $Payload
+        if ($null -ne $reply) { return $reply }
+    }
+    throw "stub: unexpected ARM request $Method $Path"
+}
+'@
+
+$script:LabArmFakeRoute = @{}
+
+$script:LabArmFakeRoute['RoleAssignment'] = @'
+
+# Role assignments, api-version 2022-04-01 (issue #397).
 
 function ConvertTo-StubArmAssignment {
     param([object]$Record)
@@ -379,19 +377,14 @@ function ConvertTo-StubArmAssignment {
     $assignment
 }
 
-function Invoke-AzRestMethod {
-    [CmdletBinding()]
-    param([string]$Path, [string]$Method = 'GET', [string]$Payload, [Parameter(ValueFromRemainingArguments)]$Rest)
+function Invoke-StubArmRoleAssignmentRoute {
+    param([string]$Method, [string]$Path, [string]$Resource, [string]$Query, [string]$Payload)
 
-    $resource, $query = $Path -split '\?', 2
-    $filter = ''
-    foreach ($pair in @([string]$query -split '&')) {
-        $key, $value = $pair -split '=', 2
-        if ([uri]::UnescapeDataString([string]$key) -eq '$filter') { $filter = [uri]::UnescapeDataString([string]$value) }
-    }
-    if ($query -notmatch '(^|&)api-version=2022-04-01(&|$)') { throw "stub: unexpected api-version in $Method $Path" }
+    if ($Resource -notmatch '/providers/Microsoft\.Authorization/roleAssignments(/[^/]+)?$') { return }
+    if ($Query -notmatch '(^|&)api-version=2022-04-01(&|$)') { throw "stub: unexpected api-version in $Method $Path" }
+    $filter = [string](Get-StubArmQueryValue -Query $Query -Key '$filter')
 
-    if ($Method -eq 'GET' -and $resource -match '^(?<scope>.*)/providers/Microsoft\.Authorization/roleAssignments$') {
+    if ($Method -eq 'GET' -and $Resource -match '^(?<scope>.*)/providers/Microsoft\.Authorization/roleAssignments$') {
         $scope = $Matches['scope']
         $principal = ''
         if ($filter -match "^principalId eq '(?<id>[^']+)'$") { $principal = $Matches['id'] }
@@ -399,10 +392,7 @@ function Invoke-AzRestMethod {
 
         $stubErrors = $null
         $records = @(Get-StubRoleAssignment -Scope $scope -PrincipalId $principal -ErrorAction SilentlyContinue -ErrorVariable stubErrors)
-        if ($stubErrors) {
-            $first = $stubErrors[0]
-            return ConvertTo-StubArmError -Code ([string]$first.FullyQualifiedErrorId -split ',')[0] -Message $first.Exception.Message
-        }
+        if ($stubErrors) { return ConvertTo-StubArmGetterError -StubErrors $stubErrors }
         $items = @(foreach ($record in $records) {
             if (-not $record) { continue }
             if ($principal -and [string]$record.PrincipalId -ne $principal) { continue }
@@ -411,7 +401,7 @@ function Invoke-AzRestMethod {
         return ConvertTo-StubArmReply -StatusCode 200 -Body @{ value = $items }
     }
 
-    if ($resource -match '^(?<scope>.*)/providers/Microsoft\.Authorization/roleAssignments/(?<name>[^/]+)$') {
+    if ($Resource -match '^(?<scope>.*)/providers/Microsoft\.Authorization/roleAssignments/(?<name>[^/]+)$') {
         $scope = $Matches['scope']
         $name = $Matches['name']
 
@@ -439,19 +429,180 @@ function Invoke-AzRestMethod {
                 throw "stub: this script must not remove role assignments ($Path)"
             }
             try {
-                $outcome = Remove-StubRoleAssignment -Id $resource -Scope $scope -Name $name
+                $outcome = Remove-StubRoleAssignment -Id $Resource -Scope $scope -Name $name
             }
             catch {
                 return ConvertTo-StubArmError -Code (Get-StubArmErrorCode -Message "$_") -Message "$_"
             }
             if ($outcome -eq 'absent') { return ConvertTo-StubArmReply -StatusCode 204 }
-            return ConvertTo-StubArmReply -StatusCode 200 -Body @{ id = $resource; name = $name }
+            return ConvertTo-StubArmReply -StatusCode 200 -Body @{ id = $Resource; name = $name }
         }
     }
 
     throw "stub: unexpected ARM request $Method $Path"
 }
 '@
+
+$script:LabArmFakeRoute['Budget'] = @'
+
+# Budgets, Consumption api-version 2023-05-01 (issue #411).
+
+function ConvertTo-StubArmBudget {
+    param([string]$Scope, [object]$Record)
+    [ordered]@{
+        # A record's own Scope: a resource-group budget listed at the subscription.
+        id         = "$(if ($Record.Scope) { $Record.Scope } else { $Scope })/providers/Microsoft.Consumption/budgets/$($Record.Name)"
+        name       = [string]$Record.Name
+        type       = 'Microsoft.Consumption/budgets'
+        properties = [ordered]@{
+            category     = if ($Record.Category) { [string]$Record.Category } else { 'Cost' }
+            amount       = if ($null -ne $Record.Amount) { $Record.Amount } else { 100 }
+            timeGrain    = if ($Record.TimeGrain) { [string]$Record.TimeGrain } else { 'Monthly' }
+            currentSpend = [ordered]@{ amount = 0; unit = if ($Record.Unit) { [string]$Record.Unit } else { 'USD' } }
+        }
+    }
 }
 
-Export-ModuleMember -Function Initialize-LabScriptStub, Invoke-LabScriptWithStub, Test-LabScriptHarnessText, Get-LabArmRoleAssignmentStub
+function Invoke-StubArmBudgetRoute {
+    param([string]$Method, [string]$Path, [string]$Resource, [string]$Query, [string]$Payload)
+
+    if ($Resource -notmatch '^(?<scope>/subscriptions/[^/]+(/resourceGroups/[^/]+)?)/providers/Microsoft\.Consumption/budgets(/(?<name>[^/]+))?$') { return }
+    $scope = $Matches['scope']
+    $name = $Matches['name']
+    if ($Query -notmatch '(^|&)api-version=2023-05-01(&|$)') { throw "stub: unexpected api-version in $Method $Path" }
+
+    if ($Method -eq 'GET' -and -not $name) {
+        $stubErrors = $null
+        $records = @(Get-StubBudget -Scope $scope -ErrorAction SilentlyContinue -ErrorVariable stubErrors)
+        if ($stubErrors) { return ConvertTo-StubArmGetterError -StubErrors $stubErrors }
+        $items = @(foreach ($record in $records) {
+            if ($record) { ConvertTo-StubArmBudget -Scope $scope -Record $record }
+        })
+        return ConvertTo-StubArmReply -StatusCode 200 -Body @{ value = $items }
+    }
+
+    if ($Method -eq 'DELETE' -and $name) {
+        if (-not (Get-Command -Name Remove-StubBudget -CommandType Function -ErrorAction SilentlyContinue)) {
+            throw "stub: this script must not remove budgets ($Path)"
+        }
+        try {
+            Remove-StubBudget -Scope $scope -Name $name
+        }
+        catch {
+            return ConvertTo-StubArmError -Code (Get-StubArmErrorCode -Message "$_") -Message "$_"
+        }
+        return ConvertTo-StubArmReply -StatusCode 200
+    }
+
+    throw "stub: unexpected ARM request $Method $Path"
+}
+'@
+
+function Get-LabArmStub {
+    <#
+    .SYNOPSIS
+        Returns stub module text that answers the ARM APIs named in place of Invoke-AzRestMethod.
+
+    .DESCRIPTION
+        The lab scripts reach two ARM APIs through tools/LabCommon.psm1 and Invoke-AzRestMethod
+        rather than through Az cmdlets: role assignments (Get-LabArmRoleAssignment,
+        New-LabArmRoleAssignment, Remove-LabArmRoleAssignment; issue #397) and budgets
+        (Get-LabArmBudget, Remove-LabArmBudget; issue #411). A suite appends this text to its stub
+        body and adds 'Invoke-AzRestMethod' to the stubbed commands; the fake then turns each
+        request into a call to functions the suite defines in its own body, so the suite keeps
+        describing the subscription in records rather than in HTTP. Each API answers only at the
+        api-version LabCommon sends for it, so a helper that drifts fails its suite.
+
+        RoleAssignment (api-version 2022-04-01):
+
+          Get-StubRoleAssignment -Scope <scope> -PrincipalId <id or ''>     (required, with
+              [CmdletBinding()]) returns the assignments ARM lists for the scope - those at it,
+              above it and below it - as records with Name, Scope, PrincipalId, RoleDefinitionId
+              (the role's GUID) and optionally PrincipalType and Condition. The fake keeps those
+              of -PrincipalId when the request filters by principal.
+          New-StubRoleAssignment -Scope -Name -RoleDefinitionId -PrincipalId -PrincipalType
+              (optional) records a create; a throw becomes an error reply whose code is the
+              first ARM code named in the message (AuthorizationFailed, PrincipalNotFound,
+              RoleAssignmentExists...). Without it, a create stops the script.
+          Remove-StubRoleAssignment -Id -Scope -Name (optional) records a delete and throws to
+              fail it the same way; returning 'absent' answers 204. Without it, a delete stops
+              the script.
+
+        Budget (Consumption api-version 2023-05-01):
+
+          Get-StubBudget -Scope <scope>     (required, with [CmdletBinding()]) returns the
+              budgets at the scope, /subscriptions/<id> or /subscriptions/<id>/resourceGroups/
+              <name>, as records with Name and optionally Amount, Unit (the currency), Category,
+              TimeGrain and Scope (where the budget is set, when that is below the listed scope:
+              a subscription's listing also returns resource-group budgets).
+          Remove-StubBudget -Scope -Name (optional) records a delete; a throw fails it as above.
+              Without it, a delete stops the script.
+
+        In a getter, an error written with Write-Error -ErrorId <code> becomes an ARM error reply
+        with that code: AuthorizationFailed 403, TooManyRequests 429, *NotFound 404, 422 or
+        UnprocessableEntity 422, anything else 500. Any request no named API answers throws, so a
+        script that reaches for another API through Invoke-AzRestMethod fails its suite instead
+        of passing unseen.
+
+    .PARAMETER Api
+        RoleAssignment, Budget, or both.
+
+    .OUTPUTS
+        System.String - PowerShell text for a stub module body.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('RoleAssignment', 'Budget')]
+        [string[]]$Api
+    )
+
+    $routes = @($Api | Select-Object -Unique)
+    $text = $script:LabArmFakeCore + "`n`$script:StubArmRoutes = @('$($routes -join "', '")')`n"
+    foreach ($route in $routes) { $text += $script:LabArmFakeRoute[$route] }
+    return $text
+}
+
+function Get-LabArmRoleAssignmentStub {
+    <#
+    .SYNOPSIS
+        Returns stub module text that answers the ARM role assignments API in place of
+        Invoke-AzRestMethod: Get-LabArmStub -Api RoleAssignment.
+
+    .DESCRIPTION
+        Kept for the suites written before budgets joined the fake (issue #411). See
+        Get-LabArmStub for the functions a suite defines.
+
+    .OUTPUTS
+        System.String - PowerShell text for a stub module body.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    return Get-LabArmStub -Api RoleAssignment
+}
+
+function Get-LabArmBudgetStub {
+    <#
+    .SYNOPSIS
+        Returns stub module text that answers the Consumption budgets API in place of
+        Invoke-AzRestMethod: Get-LabArmStub -Api Budget.
+
+    .DESCRIPTION
+        For a suite whose script reads budgets and no role assignments. See Get-LabArmStub for
+        the functions a suite defines; a script that needs both takes
+        Get-LabArmStub -Api RoleAssignment, Budget.
+
+    .OUTPUTS
+        System.String - PowerShell text for a stub module body.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    return Get-LabArmStub -Api Budget
+}
+
+Export-ModuleMember -Function Initialize-LabScriptStub, Invoke-LabScriptWithStub, Test-LabScriptHarnessText, Get-LabArmStub, Get-LabArmRoleAssignmentStub, Get-LabArmBudgetStub
