@@ -4,9 +4,9 @@
 
 ## Related issue
 
-<!-- Link the issue with Refs #N when it tracks a live check (verified or deferred): it is
-     closed by hand after the live check runs again on main (ADR-0006 decision 6c).
-     Closes #N only for an issue with no live acceptance criterion. -->
+<!-- Closes #N when every live item of the issue ran on this branch, or the issue has none.
+     Otherwise Refs #N, list what is still owed, and write no closing keyword next to
+     that number anywhere in this body (ADR-0006 decision 6c). -->
 
 Refs #
 
@@ -28,8 +28,8 @@ Refs #
 
      A deferred PR is opened as a draft (gh pr create --draft), links its issue with Refs, and
      can merge only after the maintainer adds the label live-deferral-approved.
-     After merge the live check runs again on main; its result goes on the tracking issue,
-     which is then closed by hand. -->
+     The check is not repeated on main after the merge. If the branch changes after the
+     check, run it again or say here why the change cannot affect it. -->
 
 Live-verified:
 
