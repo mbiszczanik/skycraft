@@ -99,6 +99,12 @@ param (
 # Graph picks the account's home tenant, which for a personal Microsoft account is not the lab
 # tenant (#300).
 #
+# In Azure Cloud Shell, with no service principal, the plan is Cloud Shell's own sign-in: its Graph
+# token comes from Get-AzAccessToken and never prompts. An interactive sign-in there waits for a
+# browser Cloud Shell does not have, and security defaults refuse a device code (#418). That token
+# holds the scopes Cloud Shell was granted, so each script names, with -CoveredBy, the scopes that
+# also allow its calls; when the token still falls short, the script stops before any change.
+#
 # The variables are deliberately NOT the Azure SDK's AZURE_CLIENT_ID / AZURE_TENANT_ID trio. Those
 # are commonly already exported for the ARM subscription identity, which in this project is a
 # different account from the one that administers Entra ID - consuming them would sign Graph in as
@@ -129,8 +135,16 @@ function Get-LabGraphAuthPlan {
         [hashtable]$EnvironmentValue,
 
         [Parameter(Mandatory = $false)]
-        [bool]$Unattended
+        [bool]$Unattended,
+
+        # Running in Azure Cloud Shell; read from the host when omitted.
+        [Parameter(Mandatory = $false)]
+        [bool]$CloudShell
     )
+
+    if (-not $PSBoundParameters.ContainsKey('CloudShell')) {
+        $CloudShell = ($env:POWERSHELL_DISTRIBUTION_CHANNEL -eq 'CloudShell') -or ("$env:AZUREPS_HOST_ENVIRONMENT" -like 'cloud-shell*')
+    }
 
     if (-not $PSBoundParameters.ContainsKey('EnvironmentValue')) {
         $EnvironmentValue = @{
@@ -180,6 +194,29 @@ function Get-LabGraphAuthPlan {
         if (-not $setting['TenantId'] -and -not [string]::IsNullOrWhiteSpace($AzContextTenantId)) {
             $setting['TenantId'] = $AzContextTenantId.Trim()
             $tenantSource = 'the Az context'
+        }
+
+        # Cloud Shell has no browser for an interactive sign-in, and security defaults refuse a
+        # device code (AADSTS530035; on by default in tenants created from 2026-07-01). Its own
+        # sign-in already holds a delegated Graph token, which never prompts, so it serves an
+        # unattended run too (#418). TokenParameter is for Get-AzAccessToken.
+        if ($CloudShell) {
+            $tokenParameter = @{ ResourceTypeName = 'MSGraph'; AsSecureString = $true; ErrorAction = 'Stop' }
+            $reason = "No service principal configured - in Azure Cloud Shell, signing in with Cloud Shell's own sign-in."
+            if ($setting['TenantId']) {
+                $tokenParameter['TenantId'] = $setting['TenantId']
+                $reason = "No service principal configured - in Azure Cloud Shell, signing in with Cloud Shell's own sign-in to tenant $($setting['TenantId']) (from $tenantSource)."
+            }
+
+            return [pscustomobject]@{
+                Mode             = 'CloudShell'
+                Reason           = $reason
+                TenantId         = $setting['TenantId']
+                TenantSource     = $tenantSource
+                ClientId         = $null
+                ConnectParameter = $null
+                TokenParameter   = $tokenParameter
+            }
         }
 
         if ($Unattended) {
@@ -280,7 +317,13 @@ function Connect-LabGraph {
         [string[]]$Scope,
 
         [Parameter(Mandatory = $false)]
-        [string]$TenantId
+        [string]$TenantId,
+
+        # Per requested scope, other scopes that allow every call this script makes with it, as the
+        # Microsoft Graph permissions reference lists them (#418). Per script, not one table:
+        # Directory.ReadWrite.All covers creating and reading users, not deleting them.
+        [Parameter(Mandatory = $false)]
+        [hashtable]$CoveredBy = @{}
     )
 
     # A context is signed in only when it names a tenant and an identity - an account, or an app
@@ -296,13 +339,15 @@ function Connect-LabGraph {
     # session by an earlier `Connect-MgGraph -Scopes User.Read.All`, or by another tool, is signed
     # in but cannot write: reused as is, the script failed later with a 403 on its first write. A
     # ReadWrite scope covers its Read counterpart (User.ReadWrite.All covers User.Read.All), as it
-    # does in Microsoft Graph; the comparison ignores case, as scope names do.
+    # does in Microsoft Graph, and so does a scope -CoveredBy names for it; the comparison ignores
+    # case, as scope names do.
     $missingScope = {
         param($context, [string[]]$requested)
         $granted = @($context.Scopes | ForEach-Object { [string]$_ })
         @($requested | Where-Object {
             $readWrite = $_ -replace '^([^.]+)\.Read(?=\.|$)', '$1.ReadWrite'
-            ($granted -notcontains $_) -and ($granted -notcontains $readWrite)
+            $covering = @($_, $readWrite) + @($CoveredBy[$_])
+            -not ($covering | Where-Object { $_ -and ($granted -contains $_) })
         })
     }
 
@@ -325,7 +370,7 @@ function Connect-LabGraph {
 
     if ($plan.Mode -eq 'Blocked') { throw $plan.Reason }
 
-    if ($plan.Mode -eq 'Interactive') {
+    if ($plan.Mode -in 'Interactive', 'CloudShell') {
         # The two implicit sources disagree: the Graph sign-in and an Az context, which may be a
         # restored one. Neither silently wins: the learner chooses, before anything is created,
         # checked or deleted in either tenant (#300). -TenantId or SKYCRAFT_GRAPH_TENANT_ID decides.
@@ -363,11 +408,26 @@ function Connect-LabGraph {
     }
 
     $connectParameter = $plan.ConnectParameter
+    if ($plan.Mode -eq 'CloudShell') {
+        # Get-AzAccessToken loads Az.Accounts, which Cloud Shell ships.
+        $tokenParameter = $plan.TokenParameter
+        $connectParameter = @{ AccessToken = (Get-AzAccessToken @tokenParameter).Token; NoWelcome = $true; ErrorAction = 'Stop' }
+    }
     Connect-MgGraph @connectParameter
 
     $context = Get-MgContext
     if (-not (& $isSignedIn $context)) {
         throw "Microsoft Graph sign-in did not complete: Connect-MgGraph returned without an error but left no signed-in account or tenant. A likely cause is missing consent for the permissions this script requests ($($Scope -join ', ')), or for the app registration's application permissions when signing in app-only. See TROUBLESHOOTING.md."
+    }
+
+    # Cloud Shell's token holds the scopes Cloud Shell was granted, not the requested ones: stop
+    # before any Graph change when they fall short (#418).
+    if ($plan.Mode -eq 'CloudShell') {
+        $missing = @(& $missingScope $context $Scope)
+        if ($missing.Count -gt 0) {
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+            throw "In Azure Cloud Shell this script signs in with Cloud Shell's own sign-in, and its Microsoft Graph token lacks $($missing -join ', '), which this script needs. Cloud Shell has no browser for a sign-in with other permissions, and a tenant with security defaults refuses a device code sign-in (error 530035). Run this script in PowerShell 7 on your own machine, or do its steps in the Portal. See TROUBLESHOOTING.md."
+        }
     }
 
     return $context
@@ -454,7 +514,12 @@ try {
         'Directory.ReadWrite.All'
         'Domain.Read.All'
         'User.Invite.All'
-    )
+    ) -CoveredBy @{
+        # Directory.ReadWrite.All creates and reads users and lists domains, which Cloud Shell's
+        # token allows (#418). It cannot delete users; this script deletes none.
+        'User.ReadWrite.All' = 'Directory.ReadWrite.All'
+        'Domain.Read.All'    = 'Directory.ReadWrite.All'
+    }
     # A delegated sign-in can report no account (#300); its AppName is the client tool, not the user.
     $identity = if ($mgContext.Account) { $mgContext.Account } elseif ("$($mgContext.AuthType)" -eq 'AppOnly') { $mgContext.AppName } else { 'a delegated sign-in (no account reported)' }
     Write-Host "Connected to Tenant: $($mgContext.TenantId) as $identity" -ForegroundColor Green

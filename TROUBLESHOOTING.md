@@ -54,6 +54,8 @@ Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId
     Connect-MgGraph -TenantId '<your tenant id>' -UseDeviceCode -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All'
     ```
 
+    A tenant with security defaults on refuses a device code sign-in: the device login page ends with error 530035. Microsoft turns security defaults on in tenants created from 2026-07-01 ([Security defaults: block device code flow](https://learn.microsoft.com/entra/fundamentals/security-defaults#block-device-code-flow)). There, run the script in PowerShell 7 on your own machine, where it opens the sign-in in your browser; do not turn security defaults off for it. In Azure Cloud Shell the scripts need neither, see [Lab 1.1 and Lab 1.2 scripts in Azure Cloud Shell](#lab-11-and-lab-12-scripts-in-azure-cloud-shell).
+
     The tenant ID is the **Tenant ID** on the **Microsoft Entra ID** > **Overview** page of the lab tenant. Name it: without it, a personal Microsoft account signs in to its own directory instead of the lab tenant. Then open the address the command prints, enter the code, accept the consent, then re-run the script: it reuses that context, because its scopes cover what every Module 1 script requests. A context whose scopes do not cover the script's (for example one left by `Connect-MgGraph -Scopes User.Read.All`) is not reused: the script names the scopes it lacks and signs in again with the ones it needs, in the same tenant (issues #273, #408). Where the tenant requires admin consent, a Global Administrator runs the same command once and ticks **Consent on behalf of your organization**. `New-LabUser.ps1 -DemoMode` requests the same scopes and creates nothing, so it is another way to see whether the consent is in place.
 2.  App-only sign-in (`SKYCRAFT_GRAPH_*` set): less likely, since a principal missing an application permission usually still gets a token and fails later with "Insufficient privileges". Still, check that the app registration holds the application permissions listed in [Creating the Lab 1.1 service principal](#creating-the-lab-11-service-principal) and that admin consent was granted for them.
 
@@ -63,7 +65,7 @@ Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId
 
 **Cause**: `Connect-MgGraph -Scopes ...` binds the **delegated** parameter set, which signs a *person* in. When the cached token needs a refresh that the broker cannot complete silently, the SDK falls back to a prompt — and a run with no console has nobody to answer it. Turning WAM off does not help; the prompt simply moves.
 
-**If you are running the lab by hand**, which is how SkyCraft runs Lab 1.1 today, answer the prompt. It is a real sign-in and the scripts wait for it on purpose. If no prompt appears at all, the browser handoff failed rather than the token: check that a default browser is set, or sign in first with `Connect-MgGraph -TenantId '<your tenant id>' -UseDeviceCode` and the scopes shown under [Lab 1.1: "Microsoft Graph sign-in did not complete"](#lab-11-microsoft-graph-sign-in-did-not-complete), then re-run the script. It reuses that context only when the context's scopes cover the ones the script requests; otherwise it signs in again.
+**If you are running the lab by hand**, which is how SkyCraft runs Lab 1.1 today, answer the prompt. It is a real sign-in and the scripts wait for it on purpose. If no prompt appears at all, the browser handoff failed rather than the token: check that a default browser is set, or sign in first with `Connect-MgGraph -TenantId '<your tenant id>' -UseDeviceCode` (refused with error 530035 in a tenant with security defaults on) and the scopes shown under [Lab 1.1: "Microsoft Graph sign-in did not complete"](#lab-11-microsoft-graph-sign-in-did-not-complete), then re-run the script. It reuses that context only when the context's scopes cover the ones the script requests; otherwise it signs in again.
 
 **If the run is unattended** — a scheduler, CI, `tools/Invoke-LabCycle.ps1`, anything with no console — there is nothing to answer the prompt, and the only real fix is to stop asking for one: give the lab a **service principal** so it signs in app-only (client credentials). This is **optional**, and today's cycle does not need it: `tools/lab-cycle-manifest.psd1` runs 1.2 through 5.3 and does not include Lab 1.1. Set it up when you automate 1.1, not before.
 
@@ -206,6 +208,16 @@ Rotation:
 
 2.  Re-run the script.
 3.  In a Cloud Shell session without a storage account, the module is deleted when the session ends: install it again in each new session. See [Module 1 prerequisites](module-1-identities-governance/README.md#-prerequisites).
+
+### Lab 1.1 and Lab 1.2 scripts in Azure Cloud Shell
+
+**Symptoms**: In Cloud Shell, before the fix for issue #418, `Test-Lab.ps1` and the other Lab 1.1 scripts stayed at "signing in interactively to tenant ..." with no prompt, and the device code sign-in the guide offered as the fallback ended with error 530035.
+
+**Cause**: Cloud Shell has no browser for the interactive sign-in, and a tenant with security defaults on refuses a device code sign-in ([Security defaults: block device code flow](https://learn.microsoft.com/entra/fundamentals/security-defaults#block-device-code-flow)).
+
+**What the scripts do**: With no `SKYCRAFT_GRAPH_*` service principal set, the Lab 1.1 scripts and Lab 1.2's `New-LabRoleAssignment.ps1` sign in with Cloud Shell's own sign-in, the one you made when you opened Cloud Shell, through `Get-AzAccessToken -ResourceTypeName MSGraph`. Nothing prompts. That sign-in's Microsoft Graph token carries the permissions Cloud Shell was given, not the ones the scripts ask for: `Directory.ReadWrite.All`, `Group.ReadWrite.All` and `User.Invite.All`, but not `User.ReadWrite.All`. That is enough to create, invite and read users, create groups and add members (`New-LabUser.ps1`, `Test-Lab.ps1`, `New-LabRoleAssignment.ps1`), but not to delete a user, which takes `User.ReadWrite.All` and nothing else ([Delete a user](https://learn.microsoft.com/graph/api/user-delete)).
+
+**Solution**: Nothing to do for `New-LabUser.ps1`, `Test-Lab.ps1` and `New-LabRoleAssignment.ps1`. `Remove-LabResource.ps1` stops with `[ERROR] ... lacks User.ReadWrite.All` and exit 1 before it deletes anything. Run it in PowerShell 7 on your own machine, or delete the four lab users and three groups in the Portal (**Microsoft Entra ID** > **Users**, then **Groups**: select them and choose **Delete**).
 
 ### "[ERROR] This script needs its Microsoft Graph modules at one version"
 
