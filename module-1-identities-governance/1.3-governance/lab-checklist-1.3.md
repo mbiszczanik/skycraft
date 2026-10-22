@@ -125,6 +125,7 @@
 - [ ] Budget created: `SkyCraft-Prod-Monthly`
 - [ ] Scope: prod-skycraft-swc-rg (created from the resource group's own **Budgets**, not with a filter)
 - [ ] Amount: 50 in your billing currency (or your chosen amount)
+- [ ] Reset period: Monthly
 - [ ] Alerts configured (60%, 85%, 100%)
 - [ ] Email recipients configured
 
