@@ -52,7 +52,7 @@ would be tracked rather than forgotten.
    keyword (`close`/`fix`/`resolve` + `#N`) fails the gate; the PR links
    its issue with `Refs #N`, and the issue is closed by hand once the
    live pass has run - normally from the follow-up issue the declaration
-   names.
+   names. A verified PR may close its issue (decision 6c).
 
 3. **The gate is a required status check.** `.github/workflows/pr-gate.yml`
    runs `tools/Test-PrLiveVerification.ps1` on every PR event that can
@@ -78,8 +78,8 @@ would be tracked rather than forgotten.
    deferring was the default rather than a decision (PR #337 went green
    while a step's success path had never been seen live).
 
-6. **A lab fix is done when it ran live on its branch and again on
-   `main`** (amended 2026-10-20, #404). The maintainer's Definition of
+6. **A lab fix is done when it ran live on its branch** (amended
+   2026-10-20, #404; narrowed 2026-10-22, see (c)). The maintainer's Definition of
    Done for a lab fix is "merged and works after tests", and in the
    2026-10-20 pass fix PRs were deferred while every fix had only offline
    evidence: PR #382's fix could run in the test tenant and passed when
@@ -112,10 +112,21 @@ would be tracked rather than forgotten.
      deferred line and the PR bodies written before this amendment keep
      their form; they fail only until the line is added or the live
      check is run.
-   - **(c) Repeat on `main`.** After merge the live check runs again on
-     `main`, because stacked and overlapping PRs can break each other. Its
-     result is recorded on the issue that tracks the live check, and only
-     then is that issue closed by hand.
+   - **(c) Branch, not `main`** (narrowed 2026-10-22). The live check on
+     the PR's branch before the merge is the Definition of Done; it is not
+     repeated on `main`. If the branch changes after the check (a rebase,
+     a fix from review), the check runs again, or the PR states why the
+     change cannot affect it. A PR closes an issue (`Closes #N`) only when
+     every live item of that issue ran on its branch, or the issue has
+     none; otherwise it links `Refs #N` and lists what is still owed, and
+     no closing keyword stands next to that number in the PR body or in a
+     commit message that reaches `main`. An issue that only tracks live
+     checks, with no PR of its own, is closed by hand with a comment that
+     cites the evidence. Until 2026-10-22 the check was repeated on `main`
+     and every live-check issue was closed by hand; the maintainer dropped
+     the repeat because the branch check already proves the fix, and the
+     changed-branch rule covers the stacked and overlapping PRs that
+     motivated it.
    - **(d) Full offline evidence.** A PR's offline evidence is the full
      test set CI runs (`./tests` and every `module-*/**/tests` suite, as
      `.github/workflows/lint.yml` runs them) plus the green CI run id at
