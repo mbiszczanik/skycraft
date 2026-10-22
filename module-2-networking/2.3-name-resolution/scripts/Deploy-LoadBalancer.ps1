@@ -14,6 +14,9 @@
        frontend IP takes only one outbound rule with an overlapping protocol, so Lab 3.2 puts
        every VM NIC into 'be-outbound' besides its role pool.
 
+.PARAMETER Owner
+    Value of the canonical Owner tag. Default: 'mbiszczanik'. Mirrors parOwner in the Bicep path.
+
 .NOTES
     Project: SkyCraft
     Lab: 2.3 - Name Resolution & Load Balancing
@@ -28,6 +31,10 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Deploy script; idempotent Get-before-New guards cover ShouldProcess intent.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Location', Justification = 'Consumed inside New-SkyCraftLB via parent-scope resolution; PSSA nested-scope false positive.')]
 param(
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Owner = 'mbiszczanik',
+
     [Parameter(Mandatory = $false)]
     [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
@@ -73,6 +80,7 @@ if (-not $context) {
 $Tags = @{
     Project     = 'SkyCraft'
     CostCenter  = 'MSDN'
+    Owner       = $Owner
 }
 
 function New-SkyCraftLB {

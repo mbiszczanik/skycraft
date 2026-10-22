@@ -27,6 +27,9 @@
 .PARAMETER PlatformResourceGroup
     The platform resource group name. Default: 'platform-skycraft-swc-rg'
 
+.PARAMETER Owner
+    Value of the canonical Owner tag. Default: 'mbiszczanik'. Mirrors parOwner in the Bicep path.
+
 .EXAMPLE
     .\Deploy-Networking.ps1
     Deploys all networking resources using default settings.
@@ -44,6 +47,10 @@
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Deploy script; idempotent guard (Get-before-New) and az --what-if provide the dry-run safety net.')]
 param(
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Owner = 'mbiszczanik',
+
     [Parameter(Mandatory = $false)]
     [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
@@ -76,9 +83,9 @@ if (-not $context) {
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
 # Define Mandatory Tags
-$TagsPlatform = @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN' }
-$TagsDev = @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN' }
-$TagsProd = @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN' }
+$TagsPlatform = @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = $Owner }
+$TagsDev = @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN'; Owner = $Owner }
+$TagsProd = @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN'; Owner = $Owner }
 
 # AppServiceSubnet is delegated to App Service (Lab 3.4's VNet integration), as main.bicep and the
 # guide's portal steps create it. The delegation is named after its service, as the AVM subnet
@@ -188,7 +195,7 @@ function New-SkyCraftPip {
     try {
         $pip = Get-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -ErrorAction SilentlyContinue
         if (-not $pip) {
-            New-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -Location $Location -Sku Standard -AllocationMethod Static -Tag $Tags -ErrorAction Stop | Out-Null
+            New-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -Location $Location -Sku Standard -AllocationMethod Static -Zone 1, 2, 3 -Tag $Tags -ErrorAction Stop | Out-Null
             Write-Host "  -> Created PIP: $Name" -ForegroundColor Green
         } else { Write-Host "  -> exists" -ForegroundColor Gray }
     } catch { Write-Host "  -> [ERROR] Failed to create PIP $Name : $_" -ForegroundColor Red }
