@@ -2,21 +2,23 @@
 
 ## ✅ Azure Bastion Verification
 
+Bastion is optional and costs about 0.1672 EUR per hour (about 122 EUR per month, plus about 3.21 EUR per month for its public IP; retail prices of 2026-10-22). Tick this section only if you deployed it.
+
 ### Bastion Resource
 - [ ] Resource name: `platform-skycraft-swc-bas`
 - [ ] Resource group: `platform-skycraft-swc-rg`
 - [ ] Location: **Sweden Central**
-- [ ] Tier: **Basic**
+- [ ] Tier: **Basic** (the create form calls it **SKU** and defaults to Premium)
 - [ ] Virtual network: `platform-skycraft-swc-vnet`
 - [ ] Subnet: `AzureBastionSubnet (10.0.0.0/26)`
-- [ ] Deployment status: **Succeeded**
+- [ ] Provisioning state: **Succeeded**
 
 ### Bastion Public IP
 - [ ] Public IP name: `platform-skycraft-swc-bas-pip`
 - [ ] SKU: **Standard**
 - [ ] IP allocation: **Static**
 - [ ] IP address assigned: [Record IP: ____________]
-- [ ] Associated with: `platform-skycraft-swc-bas`
+- [ ] Associated with: `platform-skycraft-swc-bas` (Overview shows it as **Public IPv4 address**)
 
 ### Bastion Tags
 - [ ] Tag: `Project` = `SkyCraft`
@@ -95,7 +97,7 @@
   - Action: Allow
 
 - [ ] Priority 110: `Allow-MySQL-From-AppTier`
-  - Source: `10.1.1.0/24,10.1.2.0/24` (Auth and World subnets)
+  - Source: `10.1.1.0/24,10.1.2.0/24` (Auth and World subnets); after the optional Step 2.2.9 demonstration, the two dev ASGs `dev-skycraft-swc-asg-auth` and `dev-skycraft-swc-asg-world` (the Source column shows **(multiple)**)
   - Destination port: `3306`
   - Protocol: TCP
   - Action: Allow
@@ -105,6 +107,14 @@
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
 - [ ] Tag: `Owner` = `mbiszczanik`
+
+---
+
+## ✅ Default Rules (Step 2.2.13)
+
+- [ ] Under **Inbound security rules** of any NSG: **AllowVnetInBound** (65000), **AllowAzureLoadBalancerInBound** (65001), **DenyAllInBound** (65500)
+- [ ] Under **Outbound security rules**: **AllowVnetOutBound** (65000), **AllowInternetOutBound** (65001), **DenyAllOutBound** (65500)
+- [ ] Understood that **Effective security rules** (under **Help**) shows nothing until a VM or network interface exists (Module 3)
 
 ---
 
@@ -195,26 +205,26 @@
 - [ ] Subnet: `DatabaseSubnet (10.1.3.0/24)`
 - [ ] Service endpoint: **Microsoft.Sql** enabled
 - [ ] Service endpoint: **Microsoft.Storage** enabled
-- [ ] Status: **Succeeded**
+- [ ] Saved without an error notification; the subnet's **Edit subnet** pane lists the service(s)
 
 ### Development World Subnet
 - [ ] VNet: `dev-skycraft-swc-vnet`
 - [ ] Subnet: `WorldSubnet (10.1.2.0/24)`
 - [ ] Service endpoint: **Microsoft.Storage** enabled - required by Lab 4.4
-- [ ] Status: **Succeeded**
+- [ ] Saved without an error notification; the subnet's **Edit subnet** pane lists the service(s)
 
 ### Production Database Subnet
 - [ ] VNet: `prod-skycraft-swc-vnet`
 - [ ] Subnet: `DatabaseSubnet (10.2.3.0/24)`
 - [ ] Service endpoint: **Microsoft.Sql** enabled
 - [ ] Service endpoint: **Microsoft.Storage** enabled
-- [ ] Status: **Succeeded**
+- [ ] Saved without an error notification; the subnet's **Edit subnet** pane lists the service(s)
 
 ### Production World Subnet
 - [ ] VNet: `prod-skycraft-swc-vnet`
 - [ ] Subnet: `WorldSubnet (10.2.2.0/24)`
 - [ ] Service endpoint: **Microsoft.Storage** enabled - required by Lab 4.4
-- [ ] Status: **Succeeded**
+- [ ] Saved without an error notification; the subnet's **Edit subnet** pane lists the service(s)
 
 ---
 
@@ -550,7 +560,7 @@ _________________________________________________________________
 ## ✅ Final Lab 2.2 Sign-off
 
 **All Verification Items Complete**:
-- [ ] Azure Bastion deployed and operational in hub VNet
+- [ ] Azure Bastion (optional) deployed and operational in hub VNet, and deleted again when no longer needed
 - [ ] 6 Network Security Groups created (3 dev, 3 prod)
 - [ ] All NSGs have proper inbound security rules configured
 - [ ] All NSGs associated with correct subnets
