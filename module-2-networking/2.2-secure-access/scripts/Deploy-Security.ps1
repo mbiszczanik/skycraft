@@ -320,6 +320,7 @@ else {
                 -Location $Location `
                 -AllocationMethod Static `
                 -Sku Standard `
+                -Zone 1, 2, 3 `
                 -Tag $PlatformTags
             Write-Host "  -> Created Bastion Public IP" -ForegroundColor Green
 

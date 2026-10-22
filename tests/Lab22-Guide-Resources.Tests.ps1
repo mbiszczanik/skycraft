@@ -48,6 +48,13 @@ Describe 'Lab 2.2 - only the resources the guide creates' {
         $commands | Should -Not -Contain 'Set-AzNetworkSecurityRuleConfig' -Because 'updating in place keeps the ASG sources and Azure refuses the rule'
     }
 
+    It 'Deploy-Security.ps1 creates the Bastion public IP zone-redundant, as the Portal and the Bicep do' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Lab22 'scripts/Deploy-Security.ps1'), [ref]$null, [ref]$null)
+        $pip = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'New-AzPublicIpAddress' }, $true)
+        @($pip).Count | Should -Be 1
+        $pip[0].Extent.Text | Should -Match '-Zone 1, 2, 3' -Because "the Portal's 'No Zone' address fails in Sweden Central (#348)"
+    }
+
     It 'the cleanup still removes them from estates built before #345' {
         $text = Get-Content -Raw -LiteralPath (Join-Path $script:Lab22 'scripts/Remove-LabResource.ps1')
         foreach ($name in $script:Removed) { $text | Should -Match ([regex]::Escape($name)) }
