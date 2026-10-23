@@ -113,13 +113,13 @@
   - Protocol: TCP
   - Port: `8085`
   - Interval: 15 seconds
-  - Unhealthy threshold: 1 from the Portal (its pane has no such field), 2 from PowerShell or Bicep
+  - Unhealthy threshold: 1
 
 - [ ] **Health probe 2**: `dev-skycraft-swc-lb-probe-auth`
   - Protocol: TCP
   - Port: `3724`
   - Interval: 15 seconds
-  - Unhealthy threshold: 1 from the Portal, 2 from PowerShell or Bicep
+  - Unhealthy threshold: 1
 
 ### Load Balancing Rules
 - [ ] **Rule 1**: `dev-skycraft-swc-lb-rule-world`
@@ -199,13 +199,13 @@
   - Protocol: TCP
   - Port: `8085`
   - Interval: 15 seconds
-  - Unhealthy threshold: 1 from the Portal, 2 from PowerShell or Bicep
+  - Unhealthy threshold: 1
 
 - [ ] **Health probe 2**: `prod-skycraft-swc-lb-probe-auth`
   - Protocol: TCP
   - Port: `3724`
   - Interval: 15 seconds
-  - Unhealthy threshold: 1 from the Portal, 2 from PowerShell or Bicep
+  - Unhealthy threshold: 1
 
 ### Load Balancing Rules
 - [ ] **Rule 1**: `prod-skycraft-swc-lb-rule-world`
@@ -364,15 +364,15 @@ $lb.BackendAddressPools |
 
 # List health probes
 $lb.Probes |
-    Select-Object Name, Protocol, Port, IntervalInSeconds, NumberOfProbes |
+    Select-Object Name, Protocol, Port, IntervalInSeconds, ProbeThreshold |
     Format-Table -AutoSize
 
 # Expected output:
-# Name                             Protocol Port IntervalInSeconds NumberOfProbes
+# Name                             Protocol Port IntervalInSeconds ProbeThreshold
 # ----                             -------- ---- ----------------- --------------
-# dev-skycraft-swc-lb-probe-world  Tcp      8085 15                2
-# dev-skycraft-swc-lb-probe-auth   Tcp      3724 15                2
-# (NumberOfProbes is 1 for probes created in the Portal, whose pane has no threshold field)
+# dev-skycraft-swc-lb-probe-world   Tcp      8085 15                1
+# dev-skycraft-swc-lb-probe-auth    Tcp      3724 15                1
+# The legacy NumberOfProbes field is separate from ProbeThreshold.
 
 # List load balancing rules
 $lb.LoadBalancingRules |
@@ -460,8 +460,8 @@ Use this table to document your deployed architecture:
 | └─ Backend Pool | dev-skycraft-swc-lb-be-world | Empty | Ready for VMs | ✅ |
 | └─ Backend Pool | dev-skycraft-swc-lb-be-auth | Empty | Ready for VMs | ✅ |
 | └─ Backend Pool | dev-skycraft-swc-lb-be-outbound | Empty | Egress pool, both VMs in Lab 3.2 | ✅ |
-| └─ Health Probe | dev-skycraft-swc-lb-probe-world | TCP:8085 | 15s interval, threshold 1 (Portal) or 2 (PowerShell, Bicep) | ✅ |
-| └─ Health Probe | dev-skycraft-swc-lb-probe-auth | TCP:3724 | 15s interval, threshold 1 (Portal) or 2 (PowerShell, Bicep) | ✅ |
+| └─ Health Probe | dev-skycraft-swc-lb-probe-world | TCP:8085 | 15s interval, threshold 1 | ✅ |
+| └─ Health Probe | dev-skycraft-swc-lb-probe-auth | TCP:3724 | 15s interval, threshold 1 | ✅ |
 | └─ Outbound Rule | dev-skycraft-swc-lb-outbound | All | be-outbound, 8000 ports per instance | ✅ |
 | **Prod Load Balancer** | prod-skycraft-swc-lb | Standard Public | 3 pools, 2 probes, 2 rules, 1 outbound rule | ✅ |
 | └─ Frontend IP | prod-skycraft-swc-lb-frontend | Public IP | prod-skycraft-swc-lb-pip | ✅ |

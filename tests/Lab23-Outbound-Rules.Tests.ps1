@@ -82,6 +82,19 @@ AfterAll {
 
 Describe 'Lab 2.3 template - one outbound rule per frontend, for the egress pool' {
 
+    It 'uses the Portal health-probe threshold in Bicep and the PowerShell deployment script' {
+        $script = Get-Content -Raw -LiteralPath (Join-Path $script:Lab23 'scripts/Deploy-LoadBalancer.ps1')
+
+        foreach ($deployment in 'deploy-dev-lb', 'deploy-prod-lb') {
+            $probes = (Get-TemplateModule -Template $script:Template23 -DeploymentName $deployment).properties.parameters.probes.value
+            @($probes).Count | Should -Be 2
+            foreach ($probe in $probes) {
+                (Resolve-TemplateValue -Template $script:Template23 -Value $probe.probeThreshold) | Should -Be 1
+            }
+        }
+        @([regex]::Matches($script, '-ProbeCount 2 -ProbeThreshold 1')).Count | Should -Be 2
+    }
+
     It "'<deployment>' keeps outbound SNAT off on its load balancing rules" -ForEach @(
         @{ deployment = 'deploy-dev-lb' }
         @{ deployment = 'deploy-prod-lb' }

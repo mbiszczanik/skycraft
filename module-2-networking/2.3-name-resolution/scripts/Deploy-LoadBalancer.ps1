@@ -123,8 +123,8 @@ function New-SkyCraftLB {
     $bePoolOutbound = New-AzLoadBalancerBackendAddressPoolConfig -Name "$LbName-be-outbound"
 
     # Create Health Probes
-    $probeWorld = New-AzLoadBalancerProbeConfig -Name "$LbName-probe-world" -Protocol Tcp -Port 8085 -IntervalInSeconds 15 -ProbeCount 2
-    $probeAuth = New-AzLoadBalancerProbeConfig -Name "$LbName-probe-auth" -Protocol Tcp -Port 3724 -IntervalInSeconds 15 -ProbeCount 2
+    $probeWorld = New-AzLoadBalancerProbeConfig -Name "$LbName-probe-world" -Protocol Tcp -Port 8085 -IntervalInSeconds 15 -ProbeCount 2 -ProbeThreshold 1
+    $probeAuth = New-AzLoadBalancerProbeConfig -Name "$LbName-probe-auth" -Protocol Tcp -Port 3724 -IntervalInSeconds 15 -ProbeCount 2 -ProbeThreshold 1
 
     # Create Load Balancing Rules
     # Outbound SNAT is disabled on the rules: egress comes from the outbound rule below, and Azure

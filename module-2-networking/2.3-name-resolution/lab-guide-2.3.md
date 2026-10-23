@@ -81,9 +81,9 @@ Get-AzPublicIpAddress | Where-Object Name -like '*-skycraft-swc-lb-pip' | Select
 
 ## 🛠️ Portal, PowerShell and Bicep Paths
 
-You can build this lab in the Portal by following this guide, with the Az PowerShell blocks under each step, with the lab's Az PowerShell scripts (`scripts/Deploy-DNS.ps1` and `scripts/Deploy-LoadBalancer.ps1`), or with Bicep (`scripts/Deploy-Bicep.ps1`). All paths end in the state `scripts/Test-Lab.ps1` checks. Two settings differ by path, and are meant to:
+You can build this lab in the Portal by following this guide, with the Az PowerShell blocks under each step, with the lab's Az PowerShell scripts (`scripts/Deploy-DNS.ps1` and `scripts/Deploy-LoadBalancer.ps1`), or with Bicep (`scripts/Deploy-Bicep.ps1`). All paths end in the state `scripts/Test-Lab.ps1` checks.
 
-- **Health probe failures**: the Portal's **Add health probe** pane has no field for the number of failed probes (the unhealthy threshold) and creates every probe with a threshold of 1 (Step 2.3.10). The Az PowerShell blocks below, the two Az PowerShell scripts and the Bicep set 2 (`-ProbeCount 2`, `numberOfProbes`).
+- **Health probe threshold**: every path uses `probeThreshold: 1` (PowerShell `-ProbeThreshold 1`). The scripted paths keep the separate legacy field `numberOfProbes: 2` (PowerShell `-ProbeCount 2`), matching [AVM 0.8.0](https://github.com/Azure/bicep-registry-modules/blob/avm/res/network/load-balancer/0.8.0/avm/res/network/load-balancer/main.bicep). The Portal has no threshold field and writes 1.
 - **Tags on the private DNS virtual network links**: the Portal's **Add Virtual Network Link** page has no tags, so a link created in the Portal has none. The Az PowerShell blocks, scripts and the Bicep tag each link with the four SkyCraft tags. `Test-Lab.ps1` does not check tags on the links.
 
 ---
@@ -566,7 +566,7 @@ Health probes check if backend VMs are healthy before sending traffic.
 
 The pane starts at port 80 and an interval of 5. **Used by** is read-only and stays empty until a rule uses the probe.
 
-> **Note**: The pane has no field for the number of failed probes (the unhealthy threshold) and saves every probe with a threshold of 1. The Az PowerShell block below, the lab's scripts and the Bicep set 2 (`-ProbeCount 2`, `numberOfProbes`), which PowerShell and Bicep can do and the Portal pane cannot.
+> **Note**: The pane has no threshold field and saves `probeThreshold: 1`. The Az PowerShell block, script and Bicep explicitly set the same threshold. The separate legacy field `numberOfProbes` stays 2, matching AVM 0.8.0.
 
 4. Click **Save**.
 
@@ -579,11 +579,11 @@ The pane starts at port 80 and an interval of 5. **Used by** is read-only and st
 ```powershell
 $lb = Get-AzLoadBalancer -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-lb'
 $lb | Add-AzLoadBalancerProbeConfig -Name 'dev-skycraft-swc-lb-probe-world' -Protocol Tcp -Port 8085 `
-    -IntervalInSeconds 15 -ProbeCount 2 | Out-Null
+    -IntervalInSeconds 15 -ProbeCount 2 -ProbeThreshold 1 | Out-Null
 $lb | Set-AzLoadBalancer | Out-Null
 ```
 
-PowerShell may print a warning that `-ProbeThreshold` is in preview. The block does not use that parameter; ignore the warning.
+PowerShell may print a preview warning for `-ProbeThreshold`. The block uses this parameter to set the threshold explicitly to 1.
 
 ### Step 2.3.11: Create Load Balancing Rule
 
@@ -691,7 +691,7 @@ Create health probe and rule for authentication servers:
 ```powershell
 $lb = Get-AzLoadBalancer -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-lb'
 $lb | Add-AzLoadBalancerProbeConfig -Name 'dev-skycraft-swc-lb-probe-auth' -Protocol Tcp -Port 3724 `
-    -IntervalInSeconds 15 -ProbeCount 2 | Out-Null
+    -IntervalInSeconds 15 -ProbeCount 2 -ProbeThreshold 1 | Out-Null
 $lb | Add-AzLoadBalancerBackendAddressPoolConfig -Name 'dev-skycraft-swc-lb-be-auth' | Out-Null
 $lb | Set-AzLoadBalancer | Out-Null
 
@@ -907,9 +907,9 @@ As in Step 2.3.10, the pane has no unhealthy threshold, and the Portal saves a t
 ```powershell
 $lb = Get-AzLoadBalancer -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prod-skycraft-swc-lb'
 $lb | Add-AzLoadBalancerProbeConfig -Name 'prod-skycraft-swc-lb-probe-world' -Protocol Tcp -Port 8085 `
-    -IntervalInSeconds 15 -ProbeCount 2 | Out-Null
+    -IntervalInSeconds 15 -ProbeCount 2 -ProbeThreshold 1 | Out-Null
 $lb | Add-AzLoadBalancerProbeConfig -Name 'prod-skycraft-swc-lb-probe-auth' -Protocol Tcp -Port 3724 `
-    -IntervalInSeconds 15 -ProbeCount 2 | Out-Null
+    -IntervalInSeconds 15 -ProbeCount 2 -ProbeThreshold 1 | Out-Null
 $lb | Set-AzLoadBalancer | Out-Null
 ```
 
@@ -1128,7 +1128,7 @@ Load Balancer Decision: Send 100% traffic to VM1 only
 **Scenario 3: Backend recovers**
 
 ```
-After 2 consecutive successful probes (30 seconds):
+After the next successful probe (threshold 1):
 VM2 marked healthy again → Load Balancer resumes 50/50 distribution
 ```
 
@@ -1282,16 +1282,16 @@ Test your understanding with these questions:
    - Protocol: TCP
    - Port: 8085 (world server)
    - Interval: 15 seconds (how often to check)
-   - Unhealthy threshold: 2 consecutive failures (the Bicep and PowerShell setting; the Portal's **Add health probe** pane has no field for it and saves 1)
+   - Health threshold: 1 consecutive failure or success (`probeThreshold`), the same on every path
 
    **Process**:
 
    1. Every 15 seconds, load balancer attempts TCP connection to port 8085
    2. **Healthy**: If TCP handshake succeeds → VM marked healthy
    3. **Unhealthy**: If connection fails/times out → increment failure counter
-   4. After 2 consecutive failures (30 seconds) → VM marked unhealthy
+   4. After one failed probe (threshold 1) → VM marked unhealthy
    5. Unhealthy VM removed from load balancing rotation
-   6. After 2 consecutive successes → VM marked healthy again
+   6. After one successful probe → VM marked healthy again
 
    **HTTP health probes** (alternative) expect 200 OK response from specified path (e.g., `/health`).
 

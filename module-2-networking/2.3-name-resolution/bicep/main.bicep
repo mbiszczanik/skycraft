@@ -105,6 +105,7 @@ var varAuthPort = 3724
 var varWorldPort = 8085
 var varProbeIntervalInSeconds = 15
 var varProbeCount = 2
+var varProbeThreshold = 1
 
 // Outbound rule: manual port allocation, a multiple of 8. The frontend IP offers 63,984 SNAT ports
 // to its one outbound rule, so 8,000 per instance admits 7 instances in the egress pool. Module 3
@@ -231,6 +232,7 @@ module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
         port: varWorldPort
         intervalInSeconds: varProbeIntervalInSeconds
         numberOfProbes: varProbeCount
+        probeThreshold: varProbeThreshold
       }
       {
         name: '${varLbNameDev}-probe-auth'
@@ -238,6 +240,7 @@ module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
         port: varAuthPort
         intervalInSeconds: varProbeIntervalInSeconds
         numberOfProbes: varProbeCount
+        probeThreshold: varProbeThreshold
       }
     ]
     loadBalancingRules: [
@@ -315,6 +318,7 @@ module modProdLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
         port: varWorldPort
         intervalInSeconds: varProbeIntervalInSeconds
         numberOfProbes: varProbeCount
+        probeThreshold: varProbeThreshold
       }
       {
         name: '${varLbNameProd}-probe-auth'
@@ -322,6 +326,7 @@ module modProdLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
         port: varAuthPort
         intervalInSeconds: varProbeIntervalInSeconds
         numberOfProbes: varProbeCount
+        probeThreshold: varProbeThreshold
       }
     ]
     loadBalancingRules: [
