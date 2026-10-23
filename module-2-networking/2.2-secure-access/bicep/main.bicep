@@ -1,6 +1,6 @@
 /*=====================================================
 SUMMARY: Lab 2.2 - Secure Access (NSG/ASG/Bastion)
-DESCRIPTION: Deploys the Dev/Prod ASGs and NSGs, attaches the NSGs (and service endpoints) to the spoke subnets, and deploys the Hub NSG and the optional Azure Bastion via AVM (requires the Lab 2.1 virtual networks to exist)
+DESCRIPTION: Deploys the Dev ASGs and the Dev/Prod NSGs, attaches the NSGs (and service endpoints) to the spoke subnets, and deploys the optional Azure Bastion via AVM (requires the Lab 2.1 virtual networks to exist)
 EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
 VERSION: 0.5.0
@@ -86,7 +86,6 @@ var varTagsProd = {
 // about their trusted source (ARCHITECTURE.md, "NSG rule specificity").
 var varBastionSubnetCidr = '10.0.0.0/26'
 
-var varNsgNameHub = 'platform-skycraft-swc-nsg'
 var varBastionName = 'platform-skycraft-swc-bas'
 var varBastionPipName = 'platform-skycraft-swc-bas-pip'
 
@@ -131,35 +130,18 @@ resource resVnetHub 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
 *     Modules      *
 *******************/
 
-// --- Application Security Groups (logical tiers; Module 3 adds the VM NICs) ---
+// --- Application Security Groups (dev tiers only, as the guide creates them; Lab 3.2 puts the
+//     VM NICs in them, issue #345) ---
 
-module modAsgAuth 'br/public:avm/res/network/application-security-group:0.2.2' = [for spoke in varSpokes: {
-  name: '${spoke.prefix}-asg-auth-deployment'
-  scope: resourceGroup(spoke.resourceGroupName)
-  params: {
-    name: '${spoke.prefix}-skycraft-swc-asg-auth'
-    location: parLocation
-    tags: spoke.tags
-  }
-}]
+var varAsgTiers = ['auth', 'world', 'db']
 
-module modAsgWorld 'br/public:avm/res/network/application-security-group:0.2.2' = [for spoke in varSpokes: {
-  name: '${spoke.prefix}-asg-world-deployment'
-  scope: resourceGroup(spoke.resourceGroupName)
+module modAsg 'br/public:avm/res/network/application-security-group:0.2.2' = [for tier in varAsgTiers: {
+  name: 'dev-asg-${tier}-deployment'
+  scope: resourceGroup(parResourceGroupNameDev)
   params: {
-    name: '${spoke.prefix}-skycraft-swc-asg-world'
+    name: 'dev-skycraft-swc-asg-${tier}'
     location: parLocation
-    tags: spoke.tags
-  }
-}]
-
-module modAsgDb 'br/public:avm/res/network/application-security-group:0.2.2' = [for spoke in varSpokes: {
-  name: '${spoke.prefix}-asg-db-deployment'
-  scope: resourceGroup(spoke.resourceGroupName)
-  params: {
-    name: '${spoke.prefix}-skycraft-swc-asg-db'
-    location: parLocation
-    tags: spoke.tags
+    tags: varTagsDev
   }
 }]
 
@@ -357,19 +339,6 @@ module modSubnetDb 'br/public:avm/res/network/virtual-network/subnet:0.2.0' = [f
   ]
 }]
 
-// --- Hub NSG: empty allow-list on purpose (NSGs are default-deny for inbound internet traffic) ---
-
-module modNsgHub 'br/public:avm/res/network/network-security-group:0.5.3' = {
-  name: 'hub-nsg-deployment'
-  scope: resRgPlatform
-  params: {
-    name: varNsgNameHub
-    location: parLocation
-    tags: varTagsPlatform
-    securityRules: []
-  }
-}
-
 // --- Azure Bastion (optional, Basic SKU). The AVM module creates the Standard static
 //     Public IP itself from publicIPAddressObject; the PIP name is the one
 //     Remove-LabResource.ps1 deletes. ---
@@ -397,5 +366,4 @@ module modBastion 'br/public:avm/res/network/bastion-host:0.8.2' = if (parDeploy
 ******************/
 
 output outProdNsgAuthId string = modNsgAuth[1].outputs.resourceId // varSpokes[1] = prod
-output outPlatformNsgId string = modNsgHub.outputs.resourceId
 output outBastionId string = modBastion.?outputs.resourceId ?? ''
