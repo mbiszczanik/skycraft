@@ -97,7 +97,7 @@ Bastion is optional and costs about 0.1672 EUR per hour (about 122 EUR per month
   - Action: Allow
 
 - [ ] Priority 110: `Allow-MySQL-From-AppTier`
-  - Source: `10.1.1.0/24,10.1.2.0/24` (Auth and World subnets); after the optional Step 2.2.9 demonstration, the two dev ASGs `dev-skycraft-swc-asg-auth` and `dev-skycraft-swc-asg-world` (the Source column shows **(multiple)**)
+  - Source: `10.1.1.0/24,10.1.2.0/24` (Auth and World subnets); cancel the optional Step 2.2.9 demonstration without saving
   - Destination port: `3306`
   - Protocol: TCP
   - Action: Allow

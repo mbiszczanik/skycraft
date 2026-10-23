@@ -93,7 +93,7 @@ The end state on every path:
 - When you deploy it: Bastion `platform-skycraft-swc-bas` (Basic) with the Standard, static public IP `platform-skycraft-swc-bas-pip`.
 - The four SkyCraft tags on every resource (Environment Development, Production or Platform).
 
-Differences that are meant: Step 2.2.9 is a Portal-only demonstration (it puts the two dev ASGs in the database rule's source, where Bicep and `Deploy-Security.ps1` keep the two subnet prefixes; running either of them puts the prefixes back). Steps 2.2.11, 2.2.13 and 2.2.16-2.2.21 only read or explain, and have no block.
+Differences that are meant: Step 2.2.9 is a Portal-only demonstration. It shows the ASG picker without saving, so the database rule keeps the two subnet prefixes used by Bicep and `Deploy-Security.ps1`. Steps 2.2.11, 2.2.13 and 2.2.16-2.2.21 only read or explain, and have no block.
 
 ---
 
@@ -521,36 +521,19 @@ New-AzApplicationSecurityGroup -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'd
 
 ### Step 2.2.9: Update NSG Rule to Use ASG (Optional Demonstration)
 
-To demonstrate ASG usage, let's update the database NSG rule:
+To demonstrate the ASG picker without changing the final rule, open the database NSG rule:
 
 1. Navigate to **dev-skycraft-swc-db-nsg**. Under **Settings** (expand it if it is collapsed), click **Inbound security rules**.
 2. Click on the rule **Allow-MySQL-From-AppTier**.
 3. Change **Source** to **Application security group**.
 4. In **Source application security groups**, pick `dev-skycraft-swc-asg-auth`. The picker is grouped by resource group, and each pick adds a row and a new empty picker. Pick `dev-skycraft-swc-asg-world` in the new one.
-5. Click **Save**.
+5. Click **Cancel**. The rule keeps the two application-subnet prefixes. Lab 3.2 uses ASGs for real when VM network interfaces exist.
 
 ![Update-NSG-Rule](./images/step-2.2.9.png)
 
-**Expected Result**: The rule's **Source** column shows **(multiple)**, with an information icon that lists the two ASGs.
+**Expected Result**: The picker showed the two dev ASGs. After **Cancel**, the saved rule still uses `10.1.1.0/24` and `10.1.2.0/24` as its source.
 
-**Note**: This changes what the rule allows. Until a network interface joins `dev-skycraft-swc-asg-auth` or `dev-skycraft-swc-asg-world`, no source matches, so the rule admits no MySQL traffic. That is fine here, because no VM exists yet. In Module 3, when we create VMs, we'll assign them to these ASGs.
-
-> **Note**: This step is a Portal-only demonstration. The Bicep template and `scripts/Deploy-Security.ps1` keep the two subnet prefixes (`10.1.1.0/24` and `10.1.2.0/24`) as the rule's source, so running either of them after this step puts the prefixes back. To undo the demonstration by hand, edit the rule, set **Source** to **IP Addresses**, and enter the two CIDR ranges of Step 2.2.5. `scripts/Test-Lab.ps1` checks the rule's name, port and action, so it accepts either source.
-
-**With Az PowerShell** (instead of items 1-5):
-
-```powershell
-$nsg = Get-AzNetworkSecurityGroup -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-db-nsg'
-$asgAuth = Get-AzApplicationSecurityGroup -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-asg-auth'
-$asgWorld = Get-AzApplicationSecurityGroup -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-asg-world'
-# A rule cannot carry both address prefixes and ASGs as its source, so replace the rule.
-$nsg | Remove-AzNetworkSecurityRuleConfig -Name 'Allow-MySQL-From-AppTier' | Out-Null
-$nsg | Add-AzNetworkSecurityRuleConfig -Name 'Allow-MySQL-From-AppTier' `
-    -Description 'Allow MySQL from Auth and World servers' -Access Allow -Protocol Tcp -Direction Inbound `
-    -Priority 110 -SourceApplicationSecurityGroup $asgAuth, $asgWorld -SourcePortRange '*' `
-    -DestinationAddressPrefix '*' -DestinationPortRange '3306' | Out-Null
-$nsg | Set-AzNetworkSecurityGroup | Select-Object Name, ProvisioningState
-```
+This step makes no change, so it has no PowerShell block. ASGs group VM network interfaces; Lab 3.2 provides the hands-on practice (#353).
 
 ---
 
@@ -1168,7 +1151,7 @@ In the Portal, delete in this order:
 1. **Bastions** → `platform-skycraft-swc-bas` → **Delete**. Wait until it is gone.
 2. **Public IP addresses** → `platform-skycraft-swc-bas-pip` → **Delete**. A public IP in use by Bastion cannot be deleted.
 3. For each of the six NSGs, under **Settings** (expand it if it is collapsed), click **Subnets**, select the subnet and click **Dissociate**; then delete the NSG. An NSG that is still associated cannot be deleted.
-4. The three ASGs → **Delete**. Delete the NSGs first: a rule that still names an ASG as its source (Step 2.2.9) blocks its deletion.
+4. The three ASGs → **Delete**.
 5. Only if you leave the course here: on each subnet's **Edit subnet** pane, remove the service endpoints (the **Remove service endpoint** column) and click **Save**.
 
 ---
