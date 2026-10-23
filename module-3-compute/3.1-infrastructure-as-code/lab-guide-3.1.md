@@ -886,6 +886,7 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2023-05-01' = {
         port: probe.port
         intervalInSeconds: probe.intervalInSeconds
         numberOfProbes: probe.numberOfProbes
+        probeThreshold: probe.probeThreshold
       }
     }]
     loadBalancingRules: [for (rule, i) in lbRules: {
@@ -1248,6 +1249,7 @@ module devLoadBalancer 'modules/loadbalancer.bicep' = {
         port: 8085
         intervalInSeconds: 15
         numberOfProbes: 2
+        probeThreshold: 1
       }
       {
         name: 'dev-${project}-${locationShortCode}-lb-probe-auth'
@@ -1255,6 +1257,7 @@ module devLoadBalancer 'modules/loadbalancer.bicep' = {
         port: 3724
         intervalInSeconds: 15
         numberOfProbes: 2
+        probeThreshold: 1
       }
     ]
     lbRules: [

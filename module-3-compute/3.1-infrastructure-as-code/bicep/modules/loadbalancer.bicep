@@ -38,6 +38,10 @@ type healthProbeConfig = {
   @minValue(1)
   numberOfProbes: int
 
+  @description('Consecutive successful or failed probes to change endpoint health')
+  @minValue(1)
+  probeThreshold: int
+
   @description('Request path for Http/Https probes (ignored for Tcp)')
   requestPath: string?
 }
@@ -163,6 +167,7 @@ resource resLoadBalancer 'Microsoft.Network/loadBalancers@2023-11-01' = {
         port: probe.port
         intervalInSeconds: probe.intervalInSeconds
         numberOfProbes: probe.numberOfProbes
+        probeThreshold: probe.probeThreshold
         requestPath: probe.?requestPath
       }
     }]

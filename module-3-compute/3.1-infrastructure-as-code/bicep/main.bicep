@@ -308,6 +308,7 @@ module modDevLoadBalancer 'modules/loadbalancer.bicep' = if (!parDevLbExists) {
         port: 8085
         intervalInSeconds: 15
         numberOfProbes: 2
+        probeThreshold: 1
       }
       {
         name: '${varDevPrefix}-lb-probe-auth'
@@ -315,6 +316,7 @@ module modDevLoadBalancer 'modules/loadbalancer.bicep' = if (!parDevLbExists) {
         port: 3724
         intervalInSeconds: 15
         numberOfProbes: 2
+        probeThreshold: 1
       }
     ]
     parLbRules: [

@@ -127,6 +127,17 @@ Describe 'Lab 2.3 template - one outbound rule per frontend, for the egress pool
 
 Describe 'Lab 3.1 template - the hand-written load balancer follows the same design' {
 
+    It 'uses the Portal health-probe threshold of one failed probe' {
+        $guide = Get-Content -Raw -LiteralPath (Join-Path $script:Lab31 'lab-guide-3.1.md')
+
+        $lb = Get-TemplateModule -Template $script:Template31 -DeploymentName 'devLoadBalancerDeployment'
+        $probes = $lb.properties.parameters.parHealthProbes.value
+        @($probes).Count | Should -Be 2
+        foreach ($probe in $probes) { $probe.probeThreshold | Should -Be 1 }
+        $guide | Should -Match 'probeThreshold: probe.probeThreshold'
+        @([regex]::Matches($guide, 'probeThreshold: 1')).Count | Should -Be 2
+    }
+
     It 'keeps outbound SNAT off and allows at most one outbound rule' {
         $text = Get-Content -Raw -LiteralPath (Join-Path $script:Lab31 'bicep/modules/loadbalancer.bicep')
         $text | Should -Match '(?m)^\s*disableOutboundSnat: true\s*$'
