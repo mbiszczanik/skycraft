@@ -28,6 +28,8 @@
     other than "not found" stops the script, so an unreadable resource is never redeployed by
     mistake.
 
+    On success the script prints every deployment output with its value (step 3.1.19).
+
 .PARAMETER Location
     The Azure region deployment target. Default: 'swedencentral'
 
@@ -106,6 +108,22 @@ function Test-NotFoundError {
     return [bool]($text -match '\bResourceNotFound\b|\bResourceGroupNotFound\b|StatusCode:\s*404|was not found|could not be found')
 }
 
+# One row per deployment output. Each entry is a DeploymentVariable whose value is in .Value;
+# Format-Table on the dictionary itself prints the names with blank values.
+function Get-DeploymentOutputRow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        [System.Collections.IDictionary]$Outputs
+    )
+
+    if (-not $Outputs) { return }
+    foreach ($name in @($Outputs.Keys) | Sort-Object) {
+        [pscustomobject]@{ Name = $name; Value = $Outputs[$name].Value }
+    }
+}
+
 Write-Host "=== Lab 3.1 - Deploy Infrastructure ($Environment) ===" -ForegroundColor Cyan
 
 # 1. Verify Azure Connection
@@ -171,8 +189,11 @@ try {
         $dep = New-AzSubscriptionDeployment @deployParams
 
         if ($dep.ProvisioningState -eq 'Succeeded') {
-            Write-Host "`n[SUCCESS] Deployment complete!" -ForegroundColor Green
-            $dep.Outputs | Format-Table -AutoSize
+            Write-Host "`n[SUCCESS] Deployment complete: $deploymentName" -ForegroundColor Green
+            Write-Host "`nOutputs:" -ForegroundColor Cyan
+            foreach ($row in Get-DeploymentOutputRow -Outputs $dep.Outputs) {
+                Write-Host ("  {0,-30} {1}" -f $row.Name, $row.Value)
+            }
         }
         else {
             Write-Host "`n[FAILED] State: $($dep.ProvisioningState)" -ForegroundColor Red
