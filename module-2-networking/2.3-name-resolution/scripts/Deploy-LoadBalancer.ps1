@@ -160,3 +160,4 @@ New-SkyCraftLB -ResourceGroupName $ProdRG -LbName $ProdLbName -PipName $ProdPipN
 if (Test-Path "lb.json") { Remove-Item "lb.json" }
 
 Write-Host "`n=== Load Balancer Deployment Complete ===" -ForegroundColor Cyan -BackgroundColor Black
+Exit-Lab -FailureCount 0

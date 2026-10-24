@@ -206,3 +206,4 @@ New-SkyCraftPip -Name 'prod-skycraft-swc-lb-pip' -RgName $ProdResourceGroup -Tag
 
 Write-Host "`n=== Deployment Complete ===" -ForegroundColor Cyan -BackgroundColor Black
 Write-Host "Run Test-Lab.ps1 to verify the networking configuration" -ForegroundColor Green
+Exit-Lab -FailureCount 0

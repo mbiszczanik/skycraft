@@ -259,5 +259,5 @@ if ($validationErrors -eq 0) {
     Write-Host "Lab 2.3 validation complete. All checks passed!" -ForegroundColor Green -BackgroundColor Black
 } else {
     Write-Host "Lab 2.3 validation failed with $validationErrors error(s). Please review the logs above." -ForegroundColor Red -BackgroundColor Black
-    Exit-Lab -FailureCount 1
 }
+Exit-Lab -FailureCount $validationErrors
