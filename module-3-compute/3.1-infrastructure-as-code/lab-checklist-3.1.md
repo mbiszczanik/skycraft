@@ -22,7 +22,7 @@
 ## ✅ ARM Template Export and Analysis
 
 ### Exported ARM Template
-- [ ] Exported existing resource group as ARM template
+- [ ] Exported existing resource group as ARM template (resource group menu, **Automation** > **Export template**, **ARM template** tab)
   - Resource group exported: [Name: ____________]
   - Export date: [Date: ____________]
   - Template size: [Lines/KB: ____________]
@@ -218,16 +218,21 @@
 ### Network Resources in Dev
 - [ ] VNet: `dev-skycraft-swc-vnet`
   - Address space: `10.1.0.0/16`
-  - Number of subnets: [Record: ______]
+  - Number of subnets: [Record: ______] (4: AuthSubnet, WorldSubnet, DatabaseSubnet, AppServiceSubnet)
   - Provisioning state: Succeeded
+
+- [ ] Subnet: `AppServiceSubnet`
+  - Delegated to `Microsoft.Web/serverFarms` (Lab 3.4 needs it): [Yes/No]
 
 - [ ] NSG: `auth-nsg`
   - Number of security rules: [Record: ______]
-  - Associated to subnet: [Yes/No]
+  - Associated to subnet: [Yes/No] (Yes on a dev VNet this lab created; No on Module 2's, whose subnets keep Lab 2.2's NSGs)
 
 - [ ] NSG: `world-nsg`
   - Number of security rules: [Record: ______]
-  - Associated to subnet: [Yes/No]
+  - Associated to subnet: [Yes/No] (as for `auth-nsg`)
+
+- [ ] Understood what the NSGs do not block: both hold only Allow rules, and the default `AllowVnetInBound` rule (priority 65000) still admits any traffic between the VNet's subnets
 
 ### Load Balancer Resources in Dev
 - [ ] Public IP: `dev-skycraft-swc-lb-pip`
@@ -238,19 +243,20 @@
 - [ ] Load Balancer: `dev-skycraft-swc-lb`
   - SKU: `Standard`
   - Frontend IP configurations: 1
-  - Backend pools: [Record: ______]
+  - Backend pools: [Record: ______] (3: `-be-world`, `-be-auth`, egress pool `-be-outbound`)
   - Health probes: [Record: ______]
   - Load balancing rules: [Record: ______]
+  - Outbound rules: [Record: ______] (1, for `-be-outbound`)
 
 ### Deployment Outputs
-- [ ] Retrieved deployment outputs successfully
+- [ ] Retrieved deployment outputs successfully (`Deploy-Bicep.ps1` prints them with their values)
 - [ ] Documented output values:
-  - `platformResourceGroupName`: [____________]
-  - `devResourceGroupName`: [____________]
-  - `hubVnetId`: [____________]
-  - `devVnetId`: [____________]
-  - `devLoadBalancerId`: [____________]
-  - `devLoadBalancerPublicIp`: [____________]
+  - `outPlatformResourceGroupName`: [____________]
+  - `outDevResourceGroupName`: [____________]
+  - `outHubVnetId`: [____________]
+  - `outDevVnetId`: [____________]
+  - `outDevLoadBalancerId`: [____________]
+  - `outDevLoadBalancerPublicIp`: [____________]
 
 ---
 
@@ -357,7 +363,7 @@ Get-AzLoadBalancer -ResourceGroupName dev-skycraft-swc-rg |
         @{N='Rules';E={$_.LoadBalancingRules.Count}} |
     Format-Table -AutoSize
 
-# Expected output: 1 load balancer (Standard SKU) with 2 backend pools, 2 probes, 2 rules
+# Expected output: 1 load balancer (Standard SKU) with 3 backend pools, 2 probes, 2 rules
 # Your result: ________________
 ```
 

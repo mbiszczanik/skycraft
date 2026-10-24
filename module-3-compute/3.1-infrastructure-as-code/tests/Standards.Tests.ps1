@@ -108,6 +108,7 @@ Describe 'Lab 3.1 guide - verification steps match main.bicep' {
     BeforeAll {
         $script:Main  = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'bicep' 'main.bicep')
         $guide        = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'lab-guide-3.1.md')
+        $script:Step19 = [regex]::Match($guide, '(?s)### Step 3\.1\.19:.*?### Step 3\.1\.20:').Value
         $script:Step21 = [regex]::Match($guide, '(?s)### Step 3\.1\.21:.*?### Step 3\.1\.22:').Value
         $script:Step22 = [regex]::Match($guide, '(?s)### Step 3\.1\.22:.*?### Step 3\.1\.23:').Value
         $script:Outputs = @([regex]::Matches($script:Main, '(?m)^output\s+(\w+)') | ForEach-Object { $_.Groups[1].Value })
@@ -119,6 +120,26 @@ Describe 'Lab 3.1 guide - verification steps match main.bicep' {
         $declared | Should -BeGreaterThan 0
         $expected = [regex]::Match($script:Step21, 'dev-skycraft-swc-vnet\s+10\.1\.0\.0/16\s+(\d+)')
         $expected.Success | Should -BeTrue -Because 'step 3.1.21 shows the dev VNet with its subnet count'
+        [int]$expected.Groups[1].Value | Should -Be $declared
+    }
+
+    It "step 3.1.19 shows Deploy-Bicep.ps1 printing every template output with a value" {
+        $rows = @([regex]::Matches($script:Step19, '(?m)^  (out\w+) +(\S+)') | ForEach-Object { $_.Groups[1].Value })
+        $rows.Count | Should -BeGreaterThan 0
+        ($rows | Sort-Object) | Should -Be ($script:Outputs | Sort-Object)
+    }
+
+    It 'step 3.1.21 expects the App Service subnet with its delegation' {
+        $script:Step21 | Should -Match "\[OK\] Subnet 'AppServiceSubnet' found, delegated to Microsoft\.Web/serverFarms"
+        $script:Step21 | Should -Match 'AppServiceSubnet\s+Microsoft\.Web/serverFarms'
+    }
+
+    It 'step 3.1.21 expects as many backend pools as the dev load balancer declares' {
+        $block = [regex]::Match($script:Main, '(?s)parBackendPools: \[(.*?)\]').Groups[1].Value
+        $declared = [regex]::Matches($block, "name: '").Count
+        $declared | Should -BeGreaterThan 0
+        $expected = [regex]::Match($script:Step21, 'dev-skycraft-swc-lb\s+Standard\s+(\d+)')
+        $expected.Success | Should -BeTrue
         [int]$expected.Groups[1].Value | Should -Be $declared
     }
 
