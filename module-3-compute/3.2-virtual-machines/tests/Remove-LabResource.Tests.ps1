@@ -18,6 +18,9 @@
          with Write-Error, as the Az getters do, so a script that passes -ErrorAction
          SilentlyContinue swallows it.
       4. A deletion that fails is an [ERROR], counted, and the later steps still run: exit 1.
+         The key vault is the exception: while the ADE-encrypted auth VM may still exist (its
+         lookup or its deletion failed), the vault is kept, because a purged secret cannot be
+         recovered and the VM needs it to start. -KeyVaultName names another vault.
       5. The scale set of Steps 3.2.29-3.2.33, which lives in the dev group since the decision of
          2026-10-16 (#353), is removed with the autoscale setting that targets it and the
          basicNsg<nic> NSG its wizard leaves behind; nothing else in the group is touched. The
@@ -297,11 +300,14 @@ function Remove-AzKeyVault {
     $script:PurgeFails = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzKeyVault:purge:dev-skycraft-swc-kv'
     $script:VmssDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzVmss:dev-skycraft-swc-world-vmss=denied'
     $script:VmssFails  = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzVmss:dev-skycraft-swc-world-vmss'
+    # The auth VM is the ADE-encrypted one: it needs the vault's secret to start.
+    $script:AuthVmFails = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzVM:dev-skycraft-swc-auth-vm'
+    $script:OwnVault    = Invoke-CleanupScript -Stub $script:Stub -ArgumentList '-Force', '-IncludeKeyVault', '-KeyVaultName', 'dev-skycraft-swc-kv-mb'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:NotFound, $script:LookupsFail,
         $script:AuthDenied, $script:WorldDenied, $script:DiskDenied, $script:RemovalsFail, $script:PurgeFails,
-        $script:VmssDenied, $script:VmssFails
+        $script:VmssDenied, $script:VmssFails, $script:AuthVmFails, $script:OwnVault
     )
 }
 
@@ -345,6 +351,14 @@ Describe 'Lab 3.2 Remove-LabResource.ps1 - removes what the lab creates' {
             'Remove-AzNetworkSecurityGroup:basicNsgdev-skycraft-swc-vnet-nic01') {
             $script:Clean.Calls | Should -Contain $call
         }
+    }
+
+    It 'deletes and purges the vault -KeyVaultName names, when the default name was taken' {
+        $run = $script:OwnVault
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls | Should -Contain 'Remove-AzKeyVault:dev-skycraft-swc-kv-mb'
+        $run.Calls | Should -Contain 'Remove-AzKeyVault:purge:dev-skycraft-swc-kv-mb'
+        $run.Calls | Should -Not -Contain 'Get-AzKeyVault:dev-skycraft-swc-kv'
     }
 
     It 'leaves the NSGs and autoscale settings of other labs alone' {
@@ -392,14 +406,16 @@ Describe 'Lab 3.2 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
         @($run.Calls | Where-Object { $_ -match '^Remove-' }) | Should -BeNullOrEmpty
     }
 
-    It 'still removes the other resources when one VM could not be looked up' {
+    It 'still removes the other resources when one VM could not be looked up, but keeps the vault the auth VM needs' {
         $run = $script:AuthDenied
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Output | Should -Match '\[SKIP\] Key Vault dev-skycraft-swc-kv kept: VM dev-skycraft-swc-auth-vm'
         $run.Calls  | Should -Not -Contain 'Remove-AzVM:dev-skycraft-swc-auth-vm'
         $run.Calls  | Should -Contain 'Remove-AzVM:dev-skycraft-swc-world-vm'
         $run.Calls  | Should -Contain 'Remove-AzDisk:dev-skycraft-swc-world-datadisk'
-        $run.Calls  | Should -Contain 'Remove-AzKeyVault:dev-skycraft-swc-kv'
+        $run.Calls  | Should -Not -Contain 'Remove-AzKeyVault:dev-skycraft-swc-kv'
+        $run.Calls  | Should -Not -Contain 'Remove-AzKeyVault:purge:dev-skycraft-swc-kv'
     }
 
     It 'leaves the data disk alone when the VM that holds it could not be looked up' {
@@ -439,6 +455,16 @@ Describe 'Lab 3.2 Remove-LabResource.ps1 - a failed deletion is counted' {
         $run.Calls | Should -Contain 'Remove-AzVM:dev-skycraft-swc-auth-vm'
         $run.Calls | Should -Contain 'Remove-AzDisk:dev-skycraft-swc-world-datadisk'
         $run.Calls | Should -Not -Contain 'Remove-AzKeyVault:purge:dev-skycraft-swc-kv'
+    }
+
+    It 'keeps the vault when the encrypted auth VM could not be deleted, because a purged secret cannot be recovered' {
+        $run = $script:AuthVmFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Could not delete VM dev-skycraft-swc-auth-vm: stub failure'
+        $run.Output | Should -Match '\[SKIP\] Key Vault dev-skycraft-swc-kv kept: VM dev-skycraft-swc-auth-vm'
+        $run.Calls  | Should -Not -Contain 'Remove-AzKeyVault:dev-skycraft-swc-kv'
+        $run.Calls  | Should -Not -Contain 'Remove-AzKeyVault:purge:dev-skycraft-swc-kv'
+        $run.Calls  | Should -Contain 'Remove-AzVM:dev-skycraft-swc-world-vm'
     }
 
     It 'exits 1 when the vault was deleted but could not be purged, and says how to purge it' {

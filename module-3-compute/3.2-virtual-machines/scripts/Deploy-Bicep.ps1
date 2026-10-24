@@ -29,6 +29,11 @@
     With AzureDiskEncryption, deploy the Key Vault but do not run Enable-Encryption.ps1. Run it
     yourself later; until then Test-Lab.ps1 reports the Auth VM as not encrypted.
 
+.PARAMETER KeyVaultName
+    Key vault name for the AzureDiskEncryption strategy, when the default is taken (key vault
+    names are globally unique). Pass the same name to Enable-Encryption.ps1, Test-Lab.ps1 and
+    Remove-LabResource.ps1. Default: <env>-skycraft-swc-kv
+
 .PARAMETER SshKeyPath
     Path to SSH public key file. Default: $HOME\.ssh\skycraft-dev.pub
 
@@ -86,6 +91,10 @@ param(
     [switch]$SkipEncryption,
 
     [Parameter()]
+    [ValidatePattern('^[a-zA-Z][a-zA-Z0-9-]{1,22}[a-zA-Z0-9]$')]
+    [string]$KeyVaultName,
+
+    [Parameter()]
     [string]$SshKeyPath = "$HOME\.ssh\skycraft-dev.pub",
 
     [Parameter()]
@@ -104,6 +113,7 @@ $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $templatePath = Join-Path $scriptPath "..\bicep\main.bicep"
 $location = 'swedencentral'
 $deploymentName = "lab32-$Environment-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+if (-not $KeyVaultName) { $KeyVaultName = "$Environment-skycraft-swc-kv" }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Lab 3.2 - Virtual Machines Deployment" -ForegroundColor Cyan
@@ -174,6 +184,7 @@ Write-Host "  Environment:          $Environment"
 Write-Host "  VM Size:              $VmSize"
 Write-Host "  Encryption Strategy:  $EncryptionStrategy"
 if ($EncryptionStrategy -eq 'AzureDiskEncryption') {
+    Write-Host "  Key vault:            $KeyVaultName"
     if ($SkipEncryption) {
         Write-Host "  Disk encryption:      skipped (-SkipEncryption); run .\Enable-Encryption.ps1 later"
     } else {
@@ -223,6 +234,7 @@ try {
         parEnvironment      = $Environment
         parVmSize           = $VmSize
         parEncryptionStrategy = $EncryptionStrategy
+        parKeyVaultName     = $KeyVaultName
         parSshPublicKey     = $sshPublicKeySecure
         ErrorAction         = 'Stop'
     }
@@ -252,12 +264,12 @@ try {
         if ($EncryptionStrategy -eq 'AzureDiskEncryption') {
             if ($SkipEncryption) {
                 Write-Host "`n  Azure Disk Encryption skipped. Encrypt the Auth VM later:" -ForegroundColor Yellow
-                Write-Host "     Run: .\Enable-Encryption.ps1 -Environment $Environment"
+                Write-Host "     Run: .\Enable-Encryption.ps1 -Environment $Environment -KeyVaultName $KeyVaultName"
             } else {
                 # The deployment was confirmed above, so the encryption needs no second prompt.
                 Write-Host "`n  Encrypting the Auth VM (Enable-Encryption.ps1)..." -ForegroundColor Yellow
                 $global:LASTEXITCODE = 0
-                & (Join-Path $scriptPath 'Enable-Encryption.ps1') -Environment $Environment -Force
+                & (Join-Path $scriptPath 'Enable-Encryption.ps1') -Environment $Environment -KeyVaultName $KeyVaultName -Force
                 if ($LASTEXITCODE -ne 0) {
                     Write-Host "`n[FAILED] The VMs are deployed, but the Auth VM is not encrypted. See the [ERROR] lines above." -ForegroundColor Red
                     Exit-Lab -FailureCount 1

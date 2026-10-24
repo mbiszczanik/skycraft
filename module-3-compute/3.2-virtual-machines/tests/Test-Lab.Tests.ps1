@@ -157,7 +157,8 @@ function Get-AzVmss {
             [switch]$WorldEncrypted,
             [switch]$NoKeyVault,
             [switch]$NoWorldVm,
-            [switch]$LeftoverVmss
+            [switch]$LeftoverVmss,
+            [string]$KeyVaultName = 'dev-skycraft-swc-kv'
         )
         $rg      = '/subscriptions/s/resourceGroups/dev-skycraft-swc-rg/providers'
         $subnets = "$rg/Microsoft.Network/virtualNetworks/dev-skycraft-swc-vnet/subnets"
@@ -194,16 +195,16 @@ function Get-AzVmss {
                 'dev-skycraft-swc-lb-be-world'    = @("$worldNic/ipConfigurations/ipconfig1")
                 'dev-skycraft-swc-lb-be-outbound' = $egress
             } }
-            keyVault = $(if ($NoKeyVault) { $null } else { @{ name = 'dev-skycraft-swc-kv'; enabledForDiskEncryption = $true } })
+            keyVault = $(if ($NoKeyVault) { $null } else { @{ name = $KeyVaultName; enabledForDiskEncryption = $true } })
             vmss     = @(if ($LeftoverVmss) { 'dev-skycraft-swc-world-vmss' })
         }
     }
 
     function Invoke-Validator {
-        param([hashtable]$Estate)
+        param([hashtable]$Estate, [string[]]$ArgumentList = @())
         $path = Join-Path $script:Stub.Directory ('estate-' + [guid]::NewGuid().ToString('N') + '.json')
         $Estate | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding utf8
-        Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $script:ScriptPath -Environment @{ SKYCRAFT_STUB_ESTATE = $path }
+        Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $script:ScriptPath -ArgumentList $ArgumentList -Environment @{ SKYCRAFT_STUB_ESTATE = $path }
     }
 
     $script:Stub = Initialize-LabScriptStub -Name 'SkyCraftLab32TestLabStub' -Command $script:StubCommands `
@@ -220,10 +221,13 @@ function Get-AzVmss {
     $script:NoKeyVault      = Invoke-Validator (Get-StubEstate -NoKeyVault)
     $script:NoWorldVm       = Invoke-Validator (Get-StubEstate -NoWorldVm)
     $script:LeftoverVmss    = Invoke-Validator (Get-StubEstate -LeftoverVmss)
+    # Key vault names are globally unique: a learner may have had to pick another one.
+    $script:OwnVault        = Invoke-Validator (Get-StubEstate -KeyVaultName 'dev-skycraft-swc-kv-mb') -ArgumentList '-KeyVaultName', 'dev-skycraft-swc-kv-mb'
 
     $script:AllRuns = @(
         $script:Portal, $script:BicepBuilt, $script:NoAuthAsg, $script:NoEgress, $script:NoDataDisk,
-        $script:AuthUnencrypted, $script:WorldEncrypted, $script:NoKeyVault, $script:NoWorldVm, $script:LeftoverVmss
+        $script:AuthUnencrypted, $script:WorldEncrypted, $script:NoKeyVault, $script:NoWorldVm, $script:LeftoverVmss,
+        $script:OwnVault
     )
 }
 
@@ -243,12 +247,17 @@ Describe 'Lab 3.2 Test-Lab.ps1 - passes whichever path built the lab (#355, #362
     It 'passes a lab built in the Portal, whose NICs are named after the VM plus digits' {
         $script:Portal.ExitCode | Should -Be 0 -Because "output was:`n$($script:Portal.Output)"
         $script:Portal.Output   | Should -Match 'Failed: 0'
-        $script:Portal.Output   | Should -Not -MatchExactly 'FAIL'
+        $script:Portal.Output   | Should -Not -MatchExactly '\bFAIL\b'
     }
 
     It 'passes a lab built with the Bicep, whose NICs carry the template names' {
         $script:BicepBuilt.ExitCode | Should -Be 0 -Because "output was:`n$($script:BicepBuilt.Output)"
         $script:BicepBuilt.Output   | Should -Match 'Failed: 0'
+    }
+
+    It 'passes with the vault -KeyVaultName names, when the default name was taken' {
+        $script:OwnVault.ExitCode | Should -Be 0 -Because "output was:`n$($script:OwnVault.Output)"
+        $script:OwnVault.Output   | Should -Match 'Key vault dev-skycraft-swc-kv-mb enabled for disk encryption[^\r\n]*PASS'
     }
 
     It 'warns about a scale set left behind without failing the run' {

@@ -14,7 +14,9 @@
     1. Check the key vault and the Auth VM; an Auth VM that is already encrypted is left alone
     2. Resize a 4 GB size (Standard_B2ls_v2 / Standard_B2als_v2) to its 8 GB sibling
        (Standard_B2s_v2 / Standard_B2as_v2) - ADE for Linux needs 8 GB RAM
-    3. Install the AzureDiskEncryptionForLinux extension (VolumeType All). The extension takes no
+    3. Install the AzureDiskEncryptionForLinux extension (VolumeType All, -SkipVmBackup: Az.Compute
+       refuses a Linux VM with managed disks without it, and the VM has no backup before
+       Lab 5.2; in production take a snapshot or a backup first). The extension takes no
        tags: Lab 1.3's Inherit-Project-Tag assignment copies Project from the resource group, and
        without that assignment Enforce-Project-Tag refuses it
     4. Wait until the OS volume reads Encrypted (about 2 hours on Standard_B2s_v2 in the pass of
@@ -27,6 +29,10 @@
 
 .PARAMETER Environment
     Target environment (dev or prod). Default: dev
+
+.PARAMETER KeyVaultName
+    The key vault of Step 3.2.17, for a learner whose vault name differs because the default was
+    taken (key vault names are globally unique). Default: <env>-skycraft-swc-kv
 
 .PARAMETER ResizeBack
     Resize the VM back to its original size after encryption completes. Default: true
@@ -65,6 +71,10 @@ param(
     [string]$Environment = 'dev',
 
     [Parameter()]
+    [ValidatePattern('^[a-zA-Z][a-zA-Z0-9-]{1,22}[a-zA-Z0-9]$')]
+    [string]$KeyVaultName,
+
+    [Parameter()]
     [bool]$ResizeBack = $true,
 
     [Parameter()]
@@ -85,7 +95,7 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 
 # Configuration
 $rgName = "$Environment-skycraft-swc-rg"
-$kvName = "$Environment-skycraft-swc-kv"
+$kvName = if ($KeyVaultName) { $KeyVaultName } else { "$Environment-skycraft-swc-kv" }
 $vmName = "$Environment-skycraft-swc-auth-vm"
 $worldVmName = "$Environment-skycraft-swc-world-vm"
 # ADE for Linux requires 8 GB RAM: 4 GB B v2 sizes are resized to their 8 GB sibling for the duration of the encryption.
@@ -173,9 +183,10 @@ if ($targetSize) {
 try {
     Write-Host "`n[4/5] Enabling Azure Disk Encryption on $vmName..." -ForegroundColor Yellow
     try {
+        # Az.Compute refuses a Linux VM with managed disks without -SkipVmBackup; the lab VM has no backup before Lab 5.2.
         Set-AzVMDiskEncryptionExtension -ResourceGroupName $rgName -VMName $vmName `
             -DiskEncryptionKeyVaultUrl $kv.VaultUri -DiskEncryptionKeyVaultId $kv.ResourceId `
-            -VolumeType All -Force -ErrorAction Stop | Out-Null
+            -VolumeType All -SkipVmBackup -Force -ErrorAction Stop | Out-Null
         $initiated = $true
         Write-Host "  ✓ Encryption initiated" -ForegroundColor Green
     } catch {

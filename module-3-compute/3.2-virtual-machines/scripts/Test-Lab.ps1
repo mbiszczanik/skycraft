@@ -21,6 +21,10 @@
 .PARAMETER Environment
     Target environment (dev or prod). Default: dev
 
+.PARAMETER KeyVaultName
+    The key vault of Step 3.2.17, when the default name was taken (key vault names are globally
+    unique). Default: <env>-skycraft-swc-kv
+
 .EXAMPLE
     .\Test-Lab.ps1 -Environment dev
 
@@ -38,7 +42,11 @@
 param(
     [Parameter()]
     [ValidateSet('dev', 'prod')]
-    [string]$Environment = 'dev'
+    [string]$Environment = 'dev',
+
+    [Parameter()]
+    [ValidatePattern('^[a-zA-Z][a-zA-Z0-9-]{1,22}[a-zA-Z0-9]$')]
+    [string]$KeyVaultName
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,6 +56,7 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 # Configuration
 $rgName = "$Environment-skycraft-swc-rg"
 $namePrefix = "$Environment-skycraft-swc"
+$kvName = if ($KeyVaultName) { $KeyVaultName } else { "$namePrefix-kv" }
 $script:passCount = 0
 $script:failCount = 0
 
@@ -188,8 +197,8 @@ foreach ($role in $roles) {
 Write-Host ""
 Write-Host "[Disk Encryption]" -ForegroundColor Yellow
 
-Invoke-Test "Key vault $namePrefix-kv enabled for disk encryption" {
-    $kv = Get-AzKeyVault -VaultName "$namePrefix-kv" -ResourceGroupName $rgName -ErrorAction Stop
+Invoke-Test "Key vault $kvName enabled for disk encryption" {
+    $kv = Get-AzKeyVault -VaultName $kvName -ResourceGroupName $rgName -ErrorAction Stop
     $kv -and $kv.EnabledForDiskEncryption
 }
 

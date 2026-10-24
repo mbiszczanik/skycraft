@@ -12,7 +12,8 @@
        <prefix>-world-vm-data), and the older Bicep name <prefix>-world-datadisk
     4. The basicNsg<nic> NSGs the scale set wizard creates when its NIC NSG is left at Basic
     5. Key Vault (if exists; deleted and purged - a vault that could not be purged is a failure,
-       because it keeps its name taken for the retention period)
+       because it keeps its name taken for the retention period). It is kept while the
+       ADE-encrypted Auth VM could not be looked up or deleted.
 
     Note: This does NOT remove Lab 3.1 resources (VNets, NSGs, Load Balancer).
 
@@ -36,6 +37,12 @@
 
 .PARAMETER IncludeKeyVault
     Also remove the Key Vault and purge it from the soft-deleted state (requires purge permission on the vault).
+    The vault is kept while the ADE-encrypted Auth VM may still exist (its lookup or deletion
+    failed): the VM needs the secret to start, and a purged secret cannot be recovered.
+
+.PARAMETER KeyVaultName
+    The key vault of Step 3.2.17, when the default name was taken (key vault names are globally
+    unique). Default: <env>-skycraft-swc-kv
 
 .EXAMPLE
     .\Remove-LabResource.ps1 -Environment dev
@@ -63,7 +70,11 @@ param(
     [switch]$Force,
 
     [Parameter()]
-    [switch]$IncludeKeyVault
+    [switch]$IncludeKeyVault,
+
+    [Parameter()]
+    [ValidatePattern('^[a-zA-Z][a-zA-Z0-9-]{1,22}[a-zA-Z0-9]$')]
+    [string]$KeyVaultName
 )
 
 $ErrorActionPreference = 'Stop'
@@ -232,7 +243,7 @@ foreach ($dataDisk in $dataDisks) {
 
 # Check Key Vault
 if ($IncludeKeyVault) {
-    $kvName = "$namePrefix-kv"
+    $kvName = if ($KeyVaultName) { $KeyVaultName } else { "$namePrefix-kv" }
     $kvLookup = Invoke-LabLookup -Target "Key Vault $kvName" -Lookup {
         Get-AzKeyVault -VaultName $kvName -ResourceGroupName $rgName -ErrorAction Stop
     }
@@ -286,6 +297,9 @@ foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'Vmss' }) 
 }
 
 # Delete VMs (NICs and OS disks auto-delete via deleteOption=Delete)
+# The ADE-encrypted auth VM needs the vault's secret to start, so the vault waits for it.
+$authVmName = "$namePrefix-auth-vm"
+$authVmKept = [bool]$vmLookupFailed[$authVmName]
 foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'VM' }) {
     if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove virtual machine')) {
         Write-Host "  Deleting VM: $($resource.Name)..." -ForegroundColor Gray
@@ -296,7 +310,10 @@ foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'VM' }) {
         catch {
             $script:cleanupFailures++
             Write-Host "  [ERROR] Could not delete VM $($resource.Name): $_" -ForegroundColor Red
+            if ($resource.Name -eq $authVmName) { $authVmKept = $true }
         }
+    } elseif ($resource.Name -eq $authVmName -and -not $WhatIfPreference) {
+        $authVmKept = $true
     }
 }
 
@@ -336,6 +353,11 @@ foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'BasicNsg'
 
 # Delete and purge the Key Vault (soft delete cannot be disabled; the lab keeps 7-day retention and no purge protection)
 foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'KeyVault' }) {
+    if ($authVmKept) {
+        # Not counted again: the VM's lookup or deletion already is.
+        Write-Host "  [SKIP] Key Vault $($resource.Name) kept: VM $authVmName may still exist and needs its disk encryption secret to start." -ForegroundColor Yellow
+        continue
+    }
     if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove and purge Key Vault')) {
         $vault = $resource.Vault
         Write-Host "  Deleting Key Vault: $($resource.Name)..." -ForegroundColor Gray

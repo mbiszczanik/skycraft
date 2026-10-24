@@ -12,8 +12,9 @@
     encryption had not finished. These tests run the real script in a child pwsh process against a
     generated stub of the Az commands it calls and assert the contract:
 
-      1. With -Force it resizes the auth VM to 8 GB, encrypts it, waits for the OS volume, resizes
-         it back and exits 0. It never touches the world VM.
+      1. With -Force it resizes the auth VM to 8 GB, encrypts it with -SkipVmBackup (Az.Compute
+         refuses a Linux VM with managed disks without it), waits for the OS volume, resizes it
+         back and exits 0. It never touches the world VM. -KeyVaultName picks another vault.
       2. An auth VM that is already encrypted is left as it is: exit 0, no extension call.
       3. An extension refused by policy is exit 1, names the Inherit-Project-Tag assignment of
          Lab 1.3, and the VM gets its size back.
@@ -61,7 +62,7 @@ $script:LogPath = $env:SKYCRAFT_STUB_LOG
 
 function Write-StubCall { param([string]$Name) Add-Content -LiteralPath $script:LogPath -Value $Name }
 
-function Test-StubCalled { param([string]$Name) (Test-Path -LiteralPath $script:LogPath) -and @(Get-Content -LiteralPath $script:LogPath) -contains $Name }
+function Test-StubCalled { param([string]$Like) (Test-Path -LiteralPath $script:LogPath) -and @(Get-Content -LiteralPath $script:LogPath | Where-Object { $_ -like $Like }).Count -gt 0 }
 
 function Get-AzContext {
     [CmdletBinding()]
@@ -102,7 +103,9 @@ function Set-AzVMDiskEncryptionExtension {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$VMName, [string]$DiskEncryptionKeyVaultUrl, [string]$DiskEncryptionKeyVaultId,
         [string]$VolumeType, [switch]$Force, [switch]$SkipVmBackup)
-    Write-StubCall "Set-AzVMDiskEncryptionExtension:${VMName}:$VolumeType"
+    # Az.Compute refuses a Linux VM with managed disks without -SkipVmBackup.
+    if (-not $SkipVmBackup) { throw '-skipVmBackup parameter is a required parameter for encrypting Linux VMs with managed disks.' }
+    Write-StubCall "Set-AzVMDiskEncryptionExtension:${VMName}:${VolumeType}:SkipVmBackup:$DiskEncryptionKeyVaultId"
     if ($env:SKYCRAFT_STUB_ADE -eq 'refused') {
         throw "(RequestDisallowedByPolicy) Resource 'AzureDiskEncryptionForLinux' was disallowed by policy. Reasons: 'All resources must be tagged with Project=SkyCraft'."
     }
@@ -113,7 +116,7 @@ function Get-AzVMDiskEncryptionStatus {
     param([string]$ResourceGroupName, [string]$VMName)
     $os = 'NotEncrypted'
     if ($VMName -like '*-auth-vm') {
-        $set = Test-StubCalled "Set-AzVMDiskEncryptionExtension:${VMName}:All"
+        $set = Test-StubCalled "Set-AzVMDiskEncryptionExtension:${VMName}:All:*"
         $os = switch ($env:SKYCRAFT_STUB_ADE) {
             'already'   { 'Encrypted' }
             'completes' { if ($set) { 'Encrypted' } else { 'NotEncrypted' } }
@@ -146,8 +149,9 @@ function Get-AzVMDiskEncryptionStatus {
     $script:TimesOut   = Invoke-EncryptionScript -Ade 'never' -ArgumentList '-Force', '-PollSeconds', '0', '-TimeoutMinutes', '0'
     $script:NoKv       = Invoke-EncryptionScript -NoKeyVault
     $script:NoConsole  = Invoke-EncryptionScript -ArgumentList '-PollSeconds', '0'
+    $script:OwnVault   = Invoke-EncryptionScript -ArgumentList '-Force', '-PollSeconds', '0', '-KeyVaultName', 'dev-skycraft-swc-kv-mb'
 
-    $script:AllRuns = @($script:Completes, $script:Already, $script:PolicyDeny, $script:TimesOut, $script:NoKv, $script:NoConsole)
+    $script:AllRuns = @($script:Completes, $script:Already, $script:PolicyDeny, $script:TimesOut, $script:NoKv, $script:NoConsole, $script:OwnVault)
 }
 
 AfterAll {
@@ -163,12 +167,19 @@ Describe 'Lab 3.2 Enable-Encryption.ps1 - test harness' {
 }
 
 Describe 'Lab 3.2 Enable-Encryption.ps1 - encrypts the auth VM only (#368)' {
-    It 'resizes the auth VM to 8 GB, encrypts it, resizes it back and exits 0' {
+    It 'resizes the auth VM to 8 GB, encrypts it with -SkipVmBackup, resizes it back and exits 0' {
         $run = $script:Completes
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         $run.Calls | Should -Contain 'Update-AzVM:dev-skycraft-swc-auth-vm:Standard_B2s_v2'
-        $run.Calls | Should -Contain 'Set-AzVMDiskEncryptionExtension:dev-skycraft-swc-auth-vm:All'
+        $run.Calls | Should -Contain 'Set-AzVMDiskEncryptionExtension:dev-skycraft-swc-auth-vm:All:SkipVmBackup:/stub/vaults/dev-skycraft-swc-kv'
         $run.Calls[-1] | Should -Be 'Update-AzVM:dev-skycraft-swc-auth-vm:Standard_B2ls_v2'
+    }
+
+    It 'uses the vault -KeyVaultName names, for a learner whose default name was taken' {
+        $run = $script:OwnVault
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls | Should -Contain 'Get-AzKeyVault:dev-skycraft-swc-kv-mb'
+        $run.Calls | Should -Contain 'Set-AzVMDiskEncryptionExtension:dev-skycraft-swc-auth-vm:All:SkipVmBackup:/stub/vaults/dev-skycraft-swc-kv-mb'
     }
 
     It 'never encrypts or resizes the world VM' {

@@ -58,6 +58,11 @@ param parVmSize string = 'Standard_B2ls_v2'
 ])
 param parEncryptionStrategy string = 'AzureDiskEncryption'
 
+@description('Key Vault name (globally unique; pass another one when the default is taken)')
+@minLength(3)
+@maxLength(24)
+param parKeyVaultName string = '${parEnvironment}-${parProject}-swc-kv'
+
 @description('Worldserver data disk size in GB')
 @minValue(4)
 @maxValue(32767)
@@ -80,7 +85,6 @@ var varNamePrefix = '${parEnvironment}-${parProject}-${varLocationShortCode}'
 var varResourceGroupName = '${varNamePrefix}-rg'
 var varVnetName = '${varNamePrefix}-vnet'
 var varLbName = '${varNamePrefix}-lb'
-var varKeyVaultName = '${varNamePrefix}-kv'
 // Lab 2.2 creates the ASGs in dev only.
 var varUseAsgs = parEnvironment == 'dev'
 
@@ -157,7 +161,7 @@ module modKeyVault 'br/public:avm/res/key-vault/vault:0.14.2' = if (parEncryptio
   name: 'keyvault-deployment'
   scope: resRg
   params: {
-    name: varKeyVaultName
+    name: parKeyVaultName
     location: parLocation
     tags: varCommonTags
     sku: 'standard'
@@ -246,6 +250,8 @@ module modAuthVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
     managedIdentities: {
       systemAssigned: true
     }
+    // As the guide's Security type row; API 2025-11-01 defaults an unset value to Trusted launch.
+    securityType: 'Standard'
     encryptionAtHost: parEncryptionStrategy == 'EncryptionAtHost'
     bootDiagnostics: false
   }
@@ -309,6 +315,8 @@ module modWorldVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
     managedIdentities: {
       systemAssigned: true
     }
+    // As the guide's Security type row; API 2025-11-01 defaults an unset value to Trusted launch.
+    securityType: 'Standard'
     encryptionAtHost: parEncryptionStrategy == 'EncryptionAtHost'
     bootDiagnostics: false
   }
