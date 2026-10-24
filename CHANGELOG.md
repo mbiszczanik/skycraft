@@ -9,6 +9,41 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0](https://github.com/mbiszczanik/skycraft/compare/v0.18.0...v0.19.0) (2026-10-24)
+
+
+### Features
+
+* **guide-drift:** record Lab 1.3 and bring its guide and screenshots to the run ([#341](https://github.com/mbiszczanik/skycraft/issues/341)) ([aca732a](https://github.com/mbiszczanik/skycraft/commit/aca732a1392876919ec4c30a456f666da8b36454))
+* **guide-drift:** wait for a Portal deployment to finish before the next element ([#333](https://github.com/mbiszczanik/skycraft/issues/333)) ([6ea74cf](https://github.com/mbiszczanik/skycraft/commit/6ea74cfa2ea2028f101aac3ededc3e1b534f4c39))
+* **pr-gate:** a deferred lab fix names why the live check cannot run in the test environment ([#405](https://github.com/mbiszczanik/skycraft/issues/405)) ([60319bc](https://github.com/mbiszczanik/skycraft/commit/60319bc0fc0180ff2bedcedd0196322c447c4235))
+* **pr-gate:** a deferred live verification needs the maintainer's label to merge ([#339](https://github.com/mbiszczanik/skycraft/issues/339)) ([6c43c53](https://github.com/mbiszczanik/skycraft/commit/6c43c53257a6f5a09cba91592224f936b3aa1ddb))
+
+
+### Bug Fixes
+
+* **lab-1.3:** add Inherit-Project-Tag so resources inherit Project from their group ([#377](https://github.com/mbiszczanik/skycraft/issues/377)) ([62de632](https://github.com/mbiszczanik/skycraft/commit/62de632bf9968cc5083d24e4e30211cf94e84d59))
+* **lab-1.3:** follow today's Portal in the guide and the checklist ([#337](https://github.com/mbiszczanik/skycraft/issues/337)) ([27e2cd4](https://github.com/mbiszczanik/skycraft/commit/27e2cd4a1d89e23e9fd2b9f1ea9042dddfaea1a4))
+* **lab-1.3:** read and delete the budgets through the Consumption API, not Az.Billing ([#412](https://github.com/mbiszczanik/skycraft/issues/412)) ([3c0cb27](https://github.com/mbiszczanik/skycraft/commit/3c0cb2726af91eed597f32b0e40b38c2bb4bc9cc))
+* **lab-2.2:** create and expect only the ASGs and NSGs the guide creates ([#422](https://github.com/mbiszczanik/skycraft/issues/422)) ([09e4349](https://github.com/mbiszczanik/skycraft/commit/09e434989b2c4f04fbe3d266b52e4654361f0e47))
+* **labs-1.x:** end Module 1 lab scripts through Exit-Lab, success path included ([#410](https://github.com/mbiszczanik/skycraft/issues/410)) ([9ccc744](https://github.com/mbiszczanik/skycraft/commit/9ccc744a0be884f50a91bddaef9dbe29137da8ec))
+* **labs-2.1-2.3:** private subnets and one outbound rule per load balancer over a shared egress pool ([#420](https://github.com/mbiszczanik/skycraft/issues/420)) ([12881e3](https://github.com/mbiszczanik/skycraft/commit/12881e3b84c7873f9b443df352ae79c4c9d6e36f))
+* **labs:** find the Lab 1.3 policy assignments the Portal names by display name ([#336](https://github.com/mbiszczanik/skycraft/issues/336)) ([c53239d](https://github.com/mbiszczanik/skycraft/commit/c53239d504bd1baf0cd79678646b25d078390d2a))
+* **labs:** read, create and remove role assignments without Microsoft Graph ([#399](https://github.com/mbiszczanik/skycraft/issues/399)) ([48dfb79](https://github.com/mbiszczanik/skycraft/commit/48dfb796979aaabc2c5ff027ed14542a7e7a39ab))
+* **module-1:** name the Graph modules the scripts need and import them at one version ([#396](https://github.com/mbiszczanik/skycraft/issues/396)) ([4961862](https://github.com/mbiszczanik/skycraft/commit/49618626dcf698e6280bda4d7bc0004378eb9de2))
+* **module-1:** reach Lab 1.1's users with the Graph scopes and the initial domain Lab 1.1 uses ([#382](https://github.com/mbiszczanik/skycraft/issues/382)) ([57205de](https://github.com/mbiszczanik/skycraft/commit/57205de9fcb8204af434a0dd178ef3bbcb317874))
+* **module-1:** sign in again in the Graph sign-in's tenant when its scopes fall short ([#409](https://github.com/mbiszczanik/skycraft/issues/409)) ([4fa1cf9](https://github.com/mbiszczanik/skycraft/commit/4fa1cf9449daf5534a226c89a4d0fa8c8090471c))
+* **module-1:** sign in to Microsoft Graph with Cloud Shell's own token in Azure Cloud Shell ([#419](https://github.com/mbiszczanik/skycraft/issues/419)) ([7dab3d0](https://github.com/mbiszczanik/skycraft/commit/7dab3d05a3c2b02c87729113e9ed30872d25fd97))
+* **module-2:** reset exit codes after successful lab scripts ([#423](https://github.com/mbiszczanik/skycraft/issues/423)) ([b21cdc9](https://github.com/mbiszczanik/skycraft/commit/b21cdc9852314b552e09be01c9440fdf8e357cb4))
+
+
+### Documentation
+
+* **adr-0006:** a lab fix is done when it ran live on its branch, and a verified PR closes its issue ([#417](https://github.com/mbiszczanik/skycraft/issues/417)) ([75e494a](https://github.com/mbiszczanik/skycraft/commit/75e494a9ad53f583144416840a58293a75e0bc76))
+* **lab-1.1:** name the default guest invite setting in Step 1.1.14 ([#401](https://github.com/mbiszczanik/skycraft/issues/401)) ([f70c447](https://github.com/mbiszczanik/skycraft/commit/f70c447d23b08186fc227b73cfda91f8dd67b9d6))
+* **lab-1.2:** follow today's Access control (IAM) pages in the guide and the checklist ([#383](https://github.com/mbiszczanik/skycraft/issues/383)) ([028c706](https://github.com/mbiszczanik/skycraft/commit/028c70646c775f5e478e0c1fdfc9f45bc5b2d524))
+* **lab-1.3:** follow the Portal of 2026-10-21 in the guide and the checklist ([#416](https://github.com/mbiszczanik/skycraft/issues/416)) ([cd7199e](https://github.com/mbiszczanik/skycraft/commit/cd7199e1f9e62f7529a8a605f101cb0dd5eeaca3))
+
 ## [0.18.0](https://github.com/mbiszczanik/skycraft/compare/v0.17.0...v0.18.0) (2026-10-12)
 
 
