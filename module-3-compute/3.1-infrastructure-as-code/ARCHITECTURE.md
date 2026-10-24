@@ -8,7 +8,7 @@
 |---|---|---|---|
 | Region allowance | swedencentral, northeurope | Single region only | Two allowed regions teach multi-region awareness; westeurope is excluded — the Lab 1.3 Restrict-Azure-Regions policy denies it at the ARM layer. |
 | VNet sizing | /16 per environment (Hub 10.0.0.0/16, Dev 10.1.0.0/16, Prod 10.2.0.0/16) | Tightly sized /24 or /25 | Generous spacing keeps the lab uncluttered; students can add subnets without re-addressing. In production, you size based on actual VM forecasts and leave headroom for growth. |
-| Subnet segmentation | Four /24 subnets in the dev spoke (AuthSubnet, WorldSubnet, DatabaseSubnet, AppServiceSubnet delegated to Microsoft.Web/serverFarms) | Single flat subnet per VNet | Segmentation teaches network layering early; each service subnet (Auth, World) gets its own NSG, preventing uncontrolled lateral movement. |
+| Subnet segmentation | Four /24 subnets in the dev spoke (AuthSubnet, WorldSubnet, DatabaseSubnet, AppServiceSubnet delegated to Microsoft.Web/serverFarms) | Single flat subnet per VNet | Segmentation teaches network layering early; each service subnet (Auth, World) gets its own NSG, which controls what reaches it from outside the VNet. It does not stop traffic between the subnets: see section 6 for what the deployed rules permit. |
 | Hub VNet purpose | Bastion host (AzureBastionSubnet /26) plus a reserved GatewaySubnet /27 - the same layout Lab 2.1 builds | Hub for shared services (DNS, routing, egress) | Simplified for a lab; production hubs hold firewall, DNS forwarders, and central egress inspection. |
 | Load Balancer SKU | Standard, Regional tier | Basic LB (deprecated) | Standard is now the only supported option; teaches modern best practices. Regional tier prevents cross-region asymmetry. |
 | NSG rules | Bastion SSH (from 10.0.0.0/26), service ports (3724 Auth, 8085 World from any source) | Restrict service ports to VNet only | Public inbound on game ports teaches port mapping; production closes these to VNet+known client ranges only. |
@@ -17,7 +17,7 @@
 
 | Aspect | What the lab does | What production would require | Why it matters |
 |---|---|---|---|
-| Network isolation | NSGs only, no firewall | Azure Firewall or NVA in hub | Stateless NSG rules cannot inspect encrypted traffic or enforce application-layer policies. Enterprise deployments centralize inspection. |
+| Network isolation | NSGs with Allow rules only, no firewall; subnets reach each other through the default `AllowVnetInBound` rule | Explicit Deny rules between tiers, plus Azure Firewall or an NVA in the hub | NSG rules match addresses, ports and protocols only; they cannot inspect encrypted traffic or enforce application-layer policies. Enterprise deployments deny east-west traffic by default and centralize inspection. |
 | DNS | Azure-provided default (internal only) | Private DNS Zones + conditional forwarder | Required for custom domain names (e.g., auth.skycraft.local) and cross-VNet name resolution. |
 | VNet Peering | None declared; Lab 2.1 owns the hub-spoke peerings | Hub-spoke with auto-peering via automation | The lab creates RGs and networks only where they are missing. A VNet deployment replaces the VNet's peerings, so an existing hub or dev VNet is referenced instead of redeployed (see section 5); peering is typically automated or done in a separate orchestration step. |
 | Public IP allocation | Static on Load Balancer | Static with auto-release / reserved addresses | Lab uses Static to keep the public IP stable during the lab. Production reserves public IPs to avoid IP exhaustion in shared subscriptions. |
@@ -28,7 +28,7 @@
 - **Dominant pillar:** Operational Excellence (IaC-first, templated, repeatable)
 - **Cost Management:** Generous sizing and static allocation teach students to resize later; production uses reserved instances or spot VMs.
 - **Reliability:** Availability zones are prepared (zone selection in parameters) but NSGs/LB rules can block traffic if misconfigured; production adds health probes and network policies.
-- **Security:** NSG-only defense is simple but flat; no encryption in transit on NSGs.
+- **Security:** NSG-only defense is simple but flat: every subnet of the dev VNet can reach every other on any port (section 6); NSGs do not encrypt traffic.
 - **Performance:** Standard LB with TCP health checks covers basic needs; production adds HTTP path-based routing and connection draining.
 
 ## 4. Cost / FinOps note
@@ -58,3 +58,23 @@
 - **Existing VNets are referenced, not redeployed.** `network.bicep` declares no peerings, so redeploying a VNet that Lab 2.1 has peered removes its peerings (issue #188: a dev deploy removed `hub-to-prod`). `scripts/Deploy-Bicep.ps1` looks up the hub and dev VNets and passes `parHubVnetExists` / `parDevVnetExists` through the parameter files (`SKYCRAFT_HUB_VNET_EXISTS`, `SKYCRAFT_DEV_VNET_EXISTS`); `main.bicep` deploys a VNet only when its flag is false. On a dev VNet that Module 2 built, this lab's `auth-nsg` and `world-nsg` are still created but stay unattached: the subnets keep Lab 2.2's NSGs. The trade-off: once a VNet exists, edits to its subnets in `main.bicep` no longer reach Azure through this script - delete the VNet (or the resource group) to redeploy it from the template.
 - **An existing dev load balancer and its public IP are left alone.** Zones are fixed when a public IP is created, so redeploying `publicip.bicep`'s zone-redundant declaration over a `dev-skycraft-swc-lb-pip` made without zones (Lab 2.1's `Deploy-Networking.ps1`, the portal) fails, and `dev-skycraft-swc-lb` is also the load balancer Lab 2.3 builds: a load balancer deployment replaces the whole resource, so redeploying this lab's declaration would overwrite what Lab 2.3 set on it (issue #263). `scripts/Deploy-Bicep.ps1` looks both up and passes `parDevLbPipExists` / `parDevLbExists` through the parameter files (`SKYCRAFT_DEV_LB_PIP_EXISTS`, `SKYCRAFT_DEV_LB_EXISTS`); a missing load balancer is built on whichever public IP stands. The outputs `outDevLoadBalancerId` and `outDevLoadBalancerPublicIp` are read by name, so they describe the resources either way.
 - **Outbound connectivity.** As in Lab 2.3 (docs/bicep-standards.md §4.5): `loadbalancer.bicep` takes a typed outbound rule (`parOutboundRules`, at most one - Azure refuses a second outbound rule with an overlapping protocol on the same frontend IP), and `main.bicep` passes one, `dev-skycraft-swc-lb-outbound` (protocol All, 8000 ports per instance), for the egress pool `dev-skycraft-swc-lb-be-outbound` that Lab 3.2 puts every VM NIC into. The load-balancing rules set `disableOutboundSnat: true`, which Azure requires once an outbound rule uses the frontend, and `enableTcpReset: true`, which the Lab 2.3 guide ticks on both rules. `network.bicep` declares every subnet private (`defaultOutboundAccess: false`), as Lab 2.1 and the portal create it, so the outbound rule is the VMs' only path to the internet. The guide's module snippets (Steps 3.1.11, 3.1.13, 3.1.15) follow the same design.
+
+## 6. Reachability the NSG rules permit
+
+`bicep/main.bicep` gives `auth-nsg` and `world-nsg` two custom rules each, both **Allow**, and `modules/nsg.bicep` adds no Deny rule. Every NSG also keeps Azure's [default rules](https://learn.microsoft.com/azure/virtual-network/network-security-groups-overview#default-security-rules): inbound `AllowVnetInBound` (65000, source and destination `VirtualNetwork`, which includes peered VNets), `AllowAzureLoadBalancerInBound` (65001) and `DenyAllInBound` (65500). Inbound traffic on a dev VNet this lab creates is therefore evaluated as follows:
+
+| Destination subnet | NSG | Custom Allow rules | Also allowed by the default rules |
+|---|---|---|---|
+| AuthSubnet | `auth-nsg` | TCP 22 from `10.0.0.0/26` (100); TCP 3724 from any source (110) | Any port and protocol from the VNet and its peered VNets (65000); load balancer health probes (65001) |
+| WorldSubnet | `world-nsg` | TCP 22 from `10.0.0.0/26` (100); TCP 8085 from any source (110) | As for AuthSubnet |
+| DatabaseSubnet | none | none | No NSG filters this subnet |
+| AppServiceSubnet | none | none | No NSG filters this subnet |
+
+What follows from it:
+
+- From outside the VNet and its peered VNets, only TCP 3724 to AuthSubnet and TCP 8085 to WorldSubnet are admitted (through the load balancer once Lab 3.2's VMs are in its pools); `DenyAllInBound` drops the rest.
+- Between the subnets nothing is blocked. For example, WorldSubnet to AuthSubnet on TCP 22 misses rule 100 (its source is not `10.0.0.0/26`) and matches `AllowVnetInBound`; any subnet reaches DatabaseSubnet on any port. The separate NSGs do not prevent lateral movement.
+- Lab 3.2's NICs have no NIC-level NSG, so the subnet NSGs are the only filter.
+- On a dev VNet that Module 2 built, the subnets keep Lab 2.2's NSGs and this lab's two NSGs stay unattached; Lab 2.2's guide describes those rules.
+
+These are evaluations of the rule set, not connection tests: this lab deploys no VMs. Isolating the tiers would take explicit Deny rules between them (see Microsoft's [example of a database deny rule](https://learn.microsoft.com/azure/virtual-network/application-security-groups#deny-database-all)); that is a network-policy change outside this lab.
