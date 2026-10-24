@@ -669,7 +669,7 @@ foreach ($role in 'auth', 'world') {
 
 **Read the effective security rules.** Azure evaluates NSG rules per network interface: the rules of the subnet's NSG and of the NIC's own NSG, with every ASG in a rule resolved to the private IPs of its member NICs.
 
-14. Navigate to **Virtual machines** → `dev-skycraft-swc-auth-vm` → **Networking** → **Network settings**, then click **Effective security rules**. You see `dev-skycraft-swc-auth-nsg` (from `AuthSubnet`) with its custom rules and the default rules (65000-65500)
+14. Navigate to **Virtual machines** → `dev-skycraft-swc-auth-vm` → **Networking** → **Network settings**, then, under **Essentials**, click the value next to **Effective security rules**. You see `dev-skycraft-swc-auth-nsg` (from `AuthSubnet`) with its custom rules and the default rules (65000-65500)
 15. Now the database side. Navigate to **Network security groups** → `dev-skycraft-swc-db-nsg` → **Settings** → **Inbound security rules**. `Allow-MySQL-From-AppTier` lets port 3306 in from the application tier: from the two subnet ranges, or, if you saved Step 2.2.9 of Lab 2.2, from `dev-skycraft-swc-asg-auth` and `dev-skycraft-swc-asg-world`. With the NICs in the groups, that ASG source now means exactly these two VMs, whatever their IP addresses
 16. On the same NSG, under **Help**, click **Effective security rules**. The page lists no network interface: effective rules exist only for a NIC the NSG applies to, and `DatabaseSubnet` holds no VM yet. A database VM placed there later would show `Allow-MySQL-From-AppTier` with its source resolved to the private IPs of the auth and world VMs
 
@@ -700,7 +700,7 @@ The Worldserver VM needs additional storage for:
 
 1. Navigate to **Virtual machines** → `dev-skycraft-swc-world-vm`
 2. In the left menu, under **Settings** (expand it if it is collapsed), click **Disks**
-3. Click **+ Create and attach a new disk**. A new row appears in the Data disks table, pre-filled with Premium SSD, 4 GiB and host caching Read-only. Set its cells:
+3. Click **+ Create and attach a new disk**. A new row appears in the Data disks table, pre-filled with Premium SSD v2, 1 GiB and host caching None (2026-10-24). Choosing Standard SSD resets the size to 4 GiB, so set the storage type first and the size after it. Set its cells:
 
 **Data disk configuration**:
 
@@ -712,7 +712,7 @@ The Worldserver VM needs additional storage for:
 | Size               | **64 GiB** (E6)                              |
 | Host caching       | Read-only (the default)                      |
 
-4. Click **Apply** at the top of the page
+4. Click **Apply** at the bottom of the page
 
 The inline row has no tags field. `Inherit-Project-Tag` (Lab 1.3) gives the new disk `Project` from the resource group. If your subscription has `Enforce-Project-Tag` without `Inherit-Project-Tag`, **Apply** seems to do nothing: the reason, "disallowed by policy", is only under the notification bell. Then create the disk with its tags instead, with the block below or under **Disks** → **+ Create** (zone 2, the four tags), and attach it with **Attach existing disks**.
 
@@ -1183,14 +1183,14 @@ Get-AzComputeResourceSku -Location swedencentral |
 # Standard_B4s_v2  4     16
 ```
 
-The SKU list is large: the query can take a few minutes (`az vm list-skus` took 2-4 minutes on 2026-10-15).
+The SKU list is large: the query takes from a few seconds to a few minutes (`Get-AzComputeResourceSku` took 10 seconds on 2026-10-24, `az vm list-skus` 2-4 minutes on 2026-10-15).
 
 ### Step 3.2.26: Resize Worldserver VM (Example)
 
 If player load increases, you might need to resize:
 
 1. Navigate to **Virtual machines** → `dev-skycraft-swc-world-vm`
-2. Click **Stop** to deallocate the VM (required for most resizes), then **Yes** in the confirmation bar at the top
+2. Click **Stop** to deallocate the VM (required for most resizes), then **Yes** in the **Stop this virtual machine** box under the toolbar (leave **Apply force deallocate** cleared)
 
 > [!WARNING]
 > Resizing requires stopping the VM in most cases. Plan for downtime or use availability sets/zones with multiple instances.
@@ -1326,7 +1326,7 @@ The scale set goes into **`dev-skycraft-swc-rg`**. Lab 1.3 puts a `CanNotDelete`
 
 | Field           | Value                                      |
 | --------------- | ------------------------------------------ |
-| Image           | **Ubuntu Server 22.04 LTS - x64 Gen2** (the default; the same image as the VMs) |
+| Image           | **Ubuntu Server 24.04 LTS - x64 Gen2** (the default; the scale set does not run the lab's services, so it needs no particular release) |
 | VM architecture | **x64**                                    |
 | Size            | **Standard_B2ls_v2** (2 vCPUs, 4 GB)       |
 
@@ -1494,7 +1494,7 @@ New-AzAutoscaleSetting -Name dev-skycraft-swc-world-vmss-autoscale -ResourceGrou
 
 8. Back on **Scaling**, verify the scale-out and scale-in rules are configured
 
-**Expected Result**: VMSS shows 2 running instances with autoscale configured (1-4 instances, CPU above 70% adds one, below 30% removes one).
+**Expected Result**: autoscale is configured (1-4 instances, CPU above 70% adds one, below 30% removes one). The idle instances run far below 30% CPU, so within about 10 minutes the scale-in rule takes the scale set from 2 instances to 1: that is the rule working, not a fault (seen on 2026-10-24).
 
 ### Step 3.2.31: Test Manual Scaling
 

@@ -154,7 +154,7 @@
 - [ ] Resource group: `dev-skycraft-swc-rg` (prod carries Lab 1.3's delete lock)
 - [ ] VMSS name: `dev-skycraft-swc-world-vmss`
 - [ ] Orchestration mode: Uniform; security type: Standard
-- [ ] Image: Ubuntu Server 22.04 LTS - x64 Gen2
+- [ ] Image: Ubuntu Server 24.04 LTS - x64 Gen2 (the wizard's default)
 - [ ] Initial instances: 2
 - [ ] Availability zones: 1, 2, 3
 - [ ] VM size: Standard_B2ls_v2
