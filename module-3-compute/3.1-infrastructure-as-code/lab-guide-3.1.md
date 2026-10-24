@@ -227,8 +227,8 @@ Let's export your existing dev environment to see what ARM looks like:
 > redeploys the group's resources as exported and can overwrite what Module 2 set on them since.
 > This lab deploys only with `.\scripts\Deploy-Bicep.ps1` (Section 7).
 
-4. On the **ARM template** tab, leave **Include parameters** ticked (the default) and click **Download** to save the ZIP file locally
-5. Extract the ZIP file. It holds:
+4. Stay on the ARM template tab and leave **Include parameters** ticked (the default)
+5. Click **Download** to save the ZIP file locally, then extract it. It holds:
    - `template.json` (ARM template)
    - `parameters.json` (parameter values, present when **Include parameters** is ticked)
 
