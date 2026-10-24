@@ -8,9 +8,11 @@
       - Hungarian notation for param / resource / module / output
       - Resource API versions pinned to 2023-11-01 (network stack) or 2023-07-01 (RG)
       - No preview API versions
-      - CostCenter tag present in main.bicep
       - Compiles successfully via 'bicep build' (resolved by tools/BicepCli.psm1)
       - The guide's verification steps (3.1.21, 3.1.22) expect what main.bicep deploys (#263)
+
+    Tag rules (the canonical four, ManagedBy and DeploymentDate forbidden) are not restated
+    here: tests/Bicep-Tags.Tests.ps1 enforces docs/bicep-standards.md section 5 (#326).
 
 .EXAMPLE
     Invoke-Pester -Path .\Standards.Tests.ps1
@@ -85,23 +87,6 @@ Describe 'Lab 3.1 Bicep - API versions' {
         foreach ($api in $apis) {
             $api | Should -Not -Match 'preview' -Because "preview APIs violate bicep-standards.md §2 in '$file'"
             $api | Should -Be '2023-11-01' -Because "Lab 2 gold standard is 2023-11-01 in '$file'"
-        }
-    }
-}
-
-Describe 'Lab 3.1 Bicep - CostCenter tag coverage' {
-    BeforeAll {
-        $script:MainFile = (Resolve-Path (Join-Path $PSScriptRoot '..\bicep\main.bicep')).Path
-    }
-
-    It 'main.bicep defines CostCenter in varCommonTags' {
-        Get-Content -Raw -LiteralPath $script:MainFile | Should -Match 'CostCenter'
-    }
-
-    It 'main.bicep is not relying on ManagedBy instead of CostCenter' {
-        $text = Get-Content -Raw -LiteralPath $script:MainFile
-        if ($text -match 'ManagedBy') {
-            $text | Should -Match 'CostCenter' -Because 'ManagedBy is OK as extra metadata, but CostCenter must also be present'
         }
     }
 }
