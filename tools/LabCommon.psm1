@@ -86,6 +86,11 @@
         $labModule = @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Users')
         if (-not (Import-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
 
+    Write-LabDeploymentOutput (issue #354) prints a deployment's outputs, one line per name with
+    its value. Each entry of New-AzSubscriptionDeployment's Outputs is a DeploymentVariable whose
+    value sits in .Value, so `$deployment.Outputs | Format-Table` prints the names without the
+    values.
+
     The rest of #301 (Invoke-LabCheck, Get-LabResourceOrFail, Assert-LabSubscription) is not here
     yet. tests/Exit-Code-Propagation.Tests.ps1 requires every lab script, except a helper that
     lab scripts dot-source, to import this module and call Exit-Lab, forbids a direct
@@ -97,7 +102,7 @@
 
 .NOTES
     Project: SkyCraft
-    Issues: #257, #301, #375, #397, #411
+    Issues: #257, #301, #354, #375, #397, #411
 #>
 
 #Requires -Version 7.0
@@ -874,4 +879,37 @@ function Import-LabModule {
     return $false
 }
 
-Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule
+function Write-LabDeploymentOutput {
+    <#
+    .SYNOPSIS
+        Prints each output of a deployment with its value, sorted by name.
+
+    .DESCRIPTION
+        Takes the Outputs of New-AzSubscriptionDeployment or New-AzResourceGroupDeployment: a
+        dictionary of output name to DeploymentVariable, whose value is in .Value. Prints nothing
+        when there are no outputs.
+
+    .PARAMETER Outputs
+        The deployment's Outputs dictionary.
+
+    .EXAMPLE
+        Write-LabDeploymentOutput -Outputs $deployment.Outputs
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #354
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        [System.Collections.IDictionary]$Outputs
+    )
+
+    if (-not $Outputs) { return }
+    foreach ($name in @($Outputs.Keys) | Sort-Object) {
+        Write-Host ('  {0,-30} {1}' -f $name, $Outputs[$name].Value)
+    }
+}
+
+Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput
