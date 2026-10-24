@@ -360,6 +360,12 @@
             # workspace; its PostDeploy New-LabBlobBackup.ps1 exits 1 on a missing 4.1
             # prodskycraftswcsa (needs 4.1 -All). Its VM check only warns.
             #
+            # Known failure until the Lab 5.2 half of #368 lands: Lab 3.2 leaves the auth VM
+            # ADE-encrypted, and this deploy enables backup on it without first granting Backup
+            # Management Service the Key Vault Administrator role on the 3.2 vault, so the VM
+            # backup fails with 400198 UserErrorKeyVaultPermissionsNotConfigured and the phase
+            # exits 1. A Portal-built Lab 3.2 hands Lab 5.2 the same VM.
+            #
             # This is the lab that creates the Recovery Services Vault. See Remove-LabCycle.ps1 and
             # TROUBLESHOOTING.md for why its teardown needs a minimum az CLI / Az PowerShell.
         }
@@ -410,10 +416,11 @@
     # the full name because lab 3.2 builds its vault name at run time as
     # "$Environment-skycraft-swc-kv", so the whole name appears nowhere in the source.
     #
-    # ON LAB 3.2's KEY VAULT: no phase passes -EncryptionStrategy, which defaults to 'None', and
-    # the vault is created only for 'AzureDiskEncryption'. So this cycle does not create it. It is
-    # guarded anyway, because an earlier manual run with encryption enabled leaves exactly this
-    # obstacle behind, and the cost of looking is one query.
+    # ON LAB 3.2's KEY VAULT: the 3.2 phase deploys with -EncryptionStrategy at its default,
+    # AzureDiskEncryption, so this cycle creates the vault, and its teardown passes
+    # -IncludeKeyVault, which deletes and purges it. A teardown that could not purge it (or kept it
+    # because the encrypted auth VM is still there) leaves the name taken, which is what this
+    # guard catches.
     SoftDeleteGuards = @(
         @{ Kind = 'KeyVault';              Name = 'dev-skycraft-swc-kv';       Needle = 'skycraft-swc-kv';  ResourceGroup = 'dev-skycraft-swc-rg';      Lab = 'module-3-compute/3.2-virtual-machines' }
         @{ Kind = 'KeyVault';              Name = 'prod-skycraft-swc-kv';      Needle = 'skycraft-swc-kv';  ResourceGroup = 'prod-skycraft-swc-rg';     Lab = 'module-3-compute/3.2-virtual-machines' }

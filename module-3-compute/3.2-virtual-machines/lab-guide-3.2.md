@@ -82,7 +82,7 @@ Before starting this lab:
 The gates in `scripts/Deploy-Bicep.ps1` are the SSH public key at `$HOME\.ssh\skycraft-dev.pub` (`[1/5]`, override with `-SshKeyPath`) and the resource group, VNet, load balancer and, in dev, the two application security groups (`[2/5] Checking prerequisites`), each looked up by name. `tools/lab-cycle-manifest.psd1` declares this lab as depending on Labs 2.2 and 2.3.
 
 > [!NOTE]
-> **Lab 1.3's tag policies.** Three things in this lab are created without tags, because their Portal forms and commands have no tags field: the inline data disk (Step 3.2.14), the disk encryption extension (Step 3.2.19) and the scale set's autoscale setting (Step 3.2.30). Lab 1.3's `Inherit-Project-Tag` assignment copies `Project` = `SkyCraft` from `dev-skycraft-swc-rg` to them, so `Enforce-Project-Tag` lets them pass. This lab relies on that assignment. If your Lab 1.3 has `Enforce-Project-Tag` but not `Inherit-Project-Tag`, add it (Lab 1.3, Step 1.3.8) before you start, or use the tagged alternatives those steps give.
+> **Lab 1.3's tag policies.** Three things in this lab are created without tags, because their Portal forms and commands have no tags field: the inline data disk (Step 3.2.14), the disk encryption extension (Step 3.2.19) and the scale set's autoscale setting (Step 3.2.30). Lab 1.3's `Inherit-Project-Tag` assignment copies `Project` = `SkyCraft` from `dev-skycraft-swc-rg` to them, so `Enforce-Project-Tag` lets them pass. This lab relies on that assignment. If your Lab 1.3 has `Enforce-Project-Tag` but not `Inherit-Project-Tag`, add it (Lab 1.3, Step 1.3.8) before you start. Steps 3.2.14 and 3.2.30 also give a tagged alternative; Step 3.2.19 has none and needs the assignment.
 
 **Verify prerequisites**:
 
@@ -877,6 +877,8 @@ exit
 
 Set the region explicitly: the form defaults to **East US**, which Lab 1.3's `Restrict-Azure-Regions` refuses. Seven days and no purge protection match the Bicep path and let `Remove-LabResource.ps1 -IncludeKeyVault` purge the vault, so its name is free again at once.
 
+Key vault names are unique across all of Azure. If the form says `dev-skycraft-swc-kv` is taken, add a short suffix of your own, for example `dev-skycraft-swc-kv-ab` (24 characters at most), use that name wherever this lab says `dev-skycraft-swc-kv`, and pass it to the lab scripts with `-KeyVaultName` (`Deploy-Bicep.ps1`, `Enable-Encryption.ps1`, `Test-Lab.ps1`, `Remove-LabResource.ps1`).
+
 ![Configure Azure Disk Encryption](./images/step-3.2.17.png)
 
 2. Click **Next: Access configuration**
@@ -964,7 +966,7 @@ Azure Disk Encryption for Linux VMs is enabled with **Az PowerShell** or the **A
 ```powershell
 $kv = Get-AzKeyVault -VaultName dev-skycraft-swc-kv -ResourceGroupName dev-skycraft-swc-rg
 Set-AzVMDiskEncryptionExtension -ResourceGroupName dev-skycraft-swc-rg -VMName dev-skycraft-swc-auth-vm `
-    -DiskEncryptionKeyVaultUrl $kv.VaultUri -DiskEncryptionKeyVaultId $kv.ResourceId -VolumeType All -Force
+    -DiskEncryptionKeyVaultUrl $kv.VaultUri -DiskEncryptionKeyVaultId $kv.ResourceId -VolumeType All -SkipVmBackup -Force
 ```
 
 The Azure CLI equivalent is `az vm encryption enable --name dev-skycraft-swc-auth-vm --resource-group dev-skycraft-swc-rg --disk-encryption-keyvault dev-skycraft-swc-kv --volume-type All`.
@@ -977,6 +979,7 @@ The Azure CLI equivalent is `az vm encryption enable --name dev-skycraft-swc-aut
 | `-DiskEncryptionKeyVaultUrl` | the vault's URI             | Where ADE stores the disk encryption secret          |
 | `-DiskEncryptionKeyVaultId`  | the vault's resource ID     | The same vault, by ID                                |
 | `-VolumeType`                | `All`                       | OS and data volumes; the Authserver has no data disk, so its data volume reads `NotMounted` |
+| `-SkipVmBackup`              | (switch)                    | Required for a Linux VM with managed disks: without it the command stops with "-skipVmBackup parameter is a required parameter for encrypting Linux VMs with managed disks". Azure takes no backup before the encryption, and this VM has none yet (Lab 5.2 adds one); in production, take a snapshot or a backup first |
 
 2. About tags: the command installs the VM extension `AzureDiskEncryptionForLinux`, and neither command has a tags option. This lab relies on Lab 1.3's `Inherit-Project-Tag` assignment, which gives the extension `Project` = `SkyCraft` from `dev-skycraft-swc-rg`. Without that assignment `Enforce-Project-Tag` refuses the extension with `RequestDisallowedByPolicy` (Troubleshooting, Issue 4).
 
@@ -1634,10 +1637,10 @@ Labs 5.1, 5.2 and 5.3 use the two VMs (`tools/lab-cycle-manifest.psd1`: 5.1, 5.3
 
 | Left behind | Where | Daily cost | What a later lab does with it |
 | --- | --- | --- | --- |
-| `dev-skycraft-swc-auth-vm`, Standard_B2ls_v2, zone 1, **encrypted with Azure Disk Encryption** (OS volume) | `dev-skycraft-swc-rg` | about 1 EUR while running, plus its 30 GB OS disk (about 0.12 EUR) | Lab 5.2 backs it up (Step 5.2.3) after granting the Microsoft Entra app *Backup Management Service* the *Key Vault Administrator* role on `dev-skycraft-swc-kv`; without that role *Enable backup* fails with `400198 UserErrorKeyVaultPermissionsNotConfigured`. Labs 5.1 and 5.3 monitor it |
-| `dev-skycraft-swc-world-vm`, Standard_B2ls_v2, zone 2, **not encrypted** | `dev-skycraft-swc-rg` | about 1 EUR while running, plus its OS disk | Lab 5.2 restores single files from its backup and replicates it with Site Recovery; file-level recovery is not available for an ADE-encrypted VM. Site Recovery also needs the VM's kernel to be one its Mobility service supports: a newer kernel fails with `ASRMobilityServiceKernelNotSupportedV2` (seen on 2026-10-17 with the 22.04 image's `6.8.0-1065-azure`). Lab 5.2 shows how to check and fix the kernel |
+| `dev-skycraft-swc-auth-vm`, Standard_B2ls_v2, zone 1, **encrypted with Azure Disk Encryption** (OS volume) | `dev-skycraft-swc-rg` | about 1 EUR while running, plus its 30 GB OS disk (about 0.12 EUR) | Lab 5.2 backs it up (Step 5.2.3). Azure Backup needs the Microsoft Entra app *Backup Management Service* to hold the *Key Vault Administrator* role on `dev-skycraft-swc-kv` first; without that role *Enable backup* fails with `400198 UserErrorKeyVaultPermissionsNotConfigured`. Lab 5.2 does not have that step yet (#368): until it does, grant the role on the vault's **Access control (IAM)** page before Step 5.2.3. Labs 5.1 and 5.3 monitor it |
+| `dev-skycraft-swc-world-vm`, Standard_B2ls_v2, zone 2, **not encrypted** | `dev-skycraft-swc-rg` | about 1 EUR while running, plus its OS disk | Lab 5.2 restores single files from its backup and replicates it with Site Recovery; file-level recovery is not available for an ADE-encrypted VM. Site Recovery also needs the VM's kernel to be one its Mobility service supports: a newer kernel fails with `ASRMobilityServiceKernelNotSupportedV2` (seen on 2026-10-17 with the 22.04 image's `6.8.0-1065-azure`). Lab 5.2 does not cover that yet (#366) |
 | `dev-skycraft-swc-world-vm-data`, 64 GB Standard SSD at LUN 0, mounted at `/data` | `dev-skycraft-swc-rg` | about 0.25 EUR | Replicated with the world VM in Lab 5.2 (30 + 64 GB to copy) |
-| `dev-skycraft-swc-kv`, Standard, Azure RBAC, enabled for disk encryption | `dev-skycraft-swc-rg` | close to 0 (billed per operation) | Holds the Authserver's disk encryption secret: do not delete it while that VM exists, because the VM needs the secret to start. Lab 5.2 gives Azure Backup a role on it |
+| `dev-skycraft-swc-kv`, Standard, Azure RBAC, enabled for disk encryption | `dev-skycraft-swc-rg` | close to 0 (billed per operation) | Holds the Authserver's disk encryption secret: do not delete it while that VM exists, because the VM needs the secret to start. Azure Backup needs a role on it before Lab 5.2 backs up the Authserver (see the first row) |
 | Both NICs in their role pools and in `dev-skycraft-swc-lb-be-outbound` | `dev-skycraft-swc-lb` | 0 (the load balancer is Lab 2.3's) | Lab 2.3's Bicep can no longer be re-run while the NICs are in its pools (#352) |
 | Both NICs in `dev-skycraft-swc-asg-auth` / `-asg-world` | Lab 2.2's ASGs | 0 | An NSG rule that names these ASGs now applies to these VMs |
 
@@ -1939,6 +1942,7 @@ sudo reboot
 **Solution**:
 
 - `RequestDisallowedByPolicy` ... `All resources must be tagged with Project=SkyCraft`: the extension has no tags option, and Lab 1.3's `Enforce-Project-Tag` refuses it unless `Inherit-Project-Tag` adds the tag. Assign `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8), wait about 10 minutes, and run Step 3.2.19 again
+- `-skipVmBackup parameter is a required parameter for encrypting Linux VMs with managed disks`: add `-SkipVmBackup` to `Set-AzVMDiskEncryptionExtension`, as Step 3.2.19 does
 - Ensure Key Vault has "Azure Disk Encryption for volume encryption" enabled (**Access configuration** → **Resource access**)
 - Verify VM is running (not stopped) and has 8 GB RAM (Step 3.2.18)
 - Wait for any pending operations to complete
