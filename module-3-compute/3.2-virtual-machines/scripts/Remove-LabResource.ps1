@@ -4,9 +4,14 @@
 
 .DESCRIPTION
     Cleans up Lab 3.2 resources in the following order:
-    1. Virtual Machines (which auto-deletes NICs and OS disks via deleteOption=Delete)
-    2. Data Disks
-    3. Key Vault (if exists; deleted and purged - a vault that could not be purged is a failure,
+    1. The autoscale setting that targets the scale set <prefix>-world-vmss, then the scale set
+       itself (Steps 3.2.29-3.2.33 build it in the dev group since the decision of 2026-10-16,
+       #353; one left over in prod by an older guide is found the same way with -Environment prod)
+    2. Virtual Machines (which auto-deletes NICs and OS disks via deleteOption=Delete)
+    3. Data Disks: those the world VM holds, found through the VM (the guide's
+       <prefix>-world-vm-data), and the older Bicep name <prefix>-world-datadisk
+    4. The basicNsg<nic> NSGs the scale set wizard creates when its NIC NSG is left at Basic
+    5. Key Vault (if exists; deleted and purged - a vault that could not be purged is a failure,
        because it keeps its name taken for the retention period)
 
     Note: This does NOT remove Lab 3.1 resources (VNets, NSGs, Load Balancer).
@@ -46,7 +51,7 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.Compute, Az.KeyVault
+#Requires -Modules Az.Accounts, Az.Compute, Az.KeyVault, Az.Network, Az.Resources
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -157,10 +162,42 @@ Write-Host "Resources to be deleted:" -ForegroundColor Yellow
 
 $resourcesToDelete = @()
 
+# Check the scale set (Steps 3.2.29-3.2.33). When it could not be looked up, its autoscale
+# setting and its basicNsg are left alone too: the scale set may still use them.
+$vmssName = "$namePrefix-world-vmss"
+$vmssLookup = Invoke-LabLookup -Target "scale set $vmssName" -Lookup {
+    Get-AzVmss -ResourceGroupName $rgName -VMScaleSetName $vmssName -ErrorAction Stop
+}
+if ($vmssLookup.Value) {
+    $resourcesToDelete += @{ Type = 'Vmss'; Name = $vmssName }
+    Write-Host "  - Scale set: $vmssName" -ForegroundColor Gray
+}
+
+if (-not $vmssLookup.Failed) {
+    # The Portal names the autoscale setting itself, so it is found through its target.
+    $autoscaleLookup = Invoke-LabLookup -Target "autoscale settings in $rgName" -Lookup {
+        Get-AzResource -ResourceGroupName $rgName -ResourceType 'Microsoft.Insights/autoscalesettings' -ExpandProperties -ErrorAction Stop
+    }
+    foreach ($setting in $autoscaleLookup.Value | Where-Object { "$($_.Properties.targetResourceUri)" -like "*/virtualMachineScaleSets/$vmssName" }) {
+        $resourcesToDelete += @{ Type = 'Autoscale'; Name = $setting.Name; ResourceId = $setting.ResourceId }
+        Write-Host "  - Autoscale setting: $($setting.Name)" -ForegroundColor Gray
+    }
+
+    $nsgLookup = Invoke-LabLookup -Target "NSGs in $rgName" -Lookup {
+        Get-AzNetworkSecurityGroup -ResourceGroupName $rgName -ErrorAction Stop
+    }
+    foreach ($nsg in $nsgLookup.Value | Where-Object { $_.Name -like 'basicNsg*' }) {
+        $resourcesToDelete += @{ Type = 'BasicNsg'; Name = $nsg.Name }
+        Write-Host "  - NSG left by the scale set wizard: $($nsg.Name)" -ForegroundColor Gray
+    }
+}
+
 # Check VMs
 $vms = @("$namePrefix-auth-vm", "$namePrefix-world-vm")
 # The VMs whose lookup failed, by name.
 $vmLookupFailed = @{}
+# Data disks the world VM holds, by name: the Portal path names the disk itself.
+$heldDisks = @()
 foreach ($vm in $vms) {
     $vmLookup = Invoke-LabLookup -Target "VM $vm" -Lookup {
         Get-AzVM -Name $vm -ResourceGroupName $rgName -ErrorAction Stop
@@ -169,16 +206,21 @@ foreach ($vm in $vms) {
     if ($vmLookup.Value) {
         $resourcesToDelete += @{ Type = 'VM'; Name = $vm }
         Write-Host "  - VM: $vm" -ForegroundColor Gray
+        if ($vm -eq "$namePrefix-world-vm") {
+            $heldDisks = @($vmLookup.Value | ForEach-Object { $_.StorageProfile.DataDisks } | ForEach-Object { $_.Name } | Where-Object { $_ })
+        }
     }
 }
 
-# Check Data Disks. The data disk belongs to the world VM: when that VM could not be looked up, it
-# may still hold the disk, so the disk is left alone too (not counted again - the lookup is).
-$dataDisk = "$namePrefix-world-datadisk"
-if ($vmLookupFailed["$namePrefix-world-vm"]) {
-    Write-Host "  [SKIP] Disk $dataDisk kept: VM $namePrefix-world-vm could not be looked up and may still use it." -ForegroundColor Yellow
-}
-else {
+# Check Data Disks: the older Bicep name, the guide's name and any other disk the world VM holds.
+# When that VM could not be looked up, it may still hold them, so they are left alone too (not
+# counted again - the lookup is).
+$dataDisks = @("$namePrefix-world-datadisk", "$namePrefix-world-vm-data") + $heldDisks | Select-Object -Unique
+foreach ($dataDisk in $dataDisks) {
+    if ($vmLookupFailed["$namePrefix-world-vm"]) {
+        Write-Host "  [SKIP] Disk $dataDisk kept: VM $namePrefix-world-vm could not be looked up and may still use it." -ForegroundColor Yellow
+        continue
+    }
     $diskLookup = Invoke-LabLookup -Target "disk $dataDisk" -Lookup {
         Get-AzDisk -DiskName $dataDisk -ResourceGroupName $rgName -ErrorAction Stop
     }
@@ -210,7 +252,40 @@ if ($resourcesToDelete.Count -eq 0 -and $script:cleanupFailures -eq 0) {
 # Delete resources
 Write-Host "`nDeleting resources..." -ForegroundColor Yellow
 
-# Delete VMs first (NICs and OS disks auto-delete via deleteOption=Delete)
+# Delete the autoscale setting, then the scale set with its instances
+foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'Autoscale' }) {
+    if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove autoscale setting')) {
+        Write-Host "  Deleting autoscale setting: $($resource.Name)..." -ForegroundColor Gray
+        try {
+            Remove-AzResource -ResourceId $resource.ResourceId -Force -ErrorAction Stop | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        }
+        catch {
+            $script:cleanupFailures++
+            Write-Host "  [ERROR] Could not delete autoscale setting $($resource.Name): $_" -ForegroundColor Red
+        }
+    }
+}
+
+# The basicNsg is removed only once the scale set that uses it is gone.
+$vmssGone = -not $vmssLookup.Failed
+foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'Vmss' }) {
+    $vmssGone = $false
+    if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove virtual machine scale set')) {
+        Write-Host "  Deleting scale set: $($resource.Name)..." -ForegroundColor Gray
+        try {
+            Remove-AzVmss -ResourceGroupName $rgName -VMScaleSetName $resource.Name -Force -ErrorAction Stop | Out-Null
+            $vmssGone = $true
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        }
+        catch {
+            $script:cleanupFailures++
+            Write-Host "  [ERROR] Could not delete scale set $($resource.Name): $_" -ForegroundColor Red
+        }
+    }
+}
+
+# Delete VMs (NICs and OS disks auto-delete via deleteOption=Delete)
 foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'VM' }) {
     if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove virtual machine')) {
         Write-Host "  Deleting VM: $($resource.Name)..." -ForegroundColor Gray
@@ -236,6 +311,25 @@ foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'Disk' }) 
         catch {
             $script:cleanupFailures++
             Write-Host "  [ERROR] Could not delete disk $($resource.Name): $_" -ForegroundColor Red
+        }
+    }
+}
+
+# Delete the NSGs the scale set wizard created
+foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'BasicNsg' }) {
+    if (-not $vmssGone) {
+        Write-Host "  [SKIP] NSG $($resource.Name) kept: scale set $vmssName still exists and may use it." -ForegroundColor Yellow
+        continue
+    }
+    if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove network security group')) {
+        Write-Host "  Deleting NSG: $($resource.Name)..." -ForegroundColor Gray
+        try {
+            Remove-AzNetworkSecurityGroup -Name $resource.Name -ResourceGroupName $rgName -Force -ErrorAction Stop | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        }
+        catch {
+            $script:cleanupFailures++
+            Write-Host "  [ERROR] Could not delete NSG $($resource.Name): $_" -ForegroundColor Red
         }
     }
 }

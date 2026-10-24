@@ -18,6 +18,11 @@
          with Write-Error, as the Az getters do, so a script that passes -ErrorAction
          SilentlyContinue swallows it.
       4. A deletion that fails is an [ERROR], counted, and the later steps still run: exit 1.
+      5. The scale set of Steps 3.2.29-3.2.33, which lives in the dev group since the decision of
+         2026-10-16 (#353), is removed with the autoscale setting that targets it and the
+         basicNsg<nic> NSG its wizard leaves behind; nothing else in the group is touched. The
+         data disk is found through the world VM as well as by name, so the disk the guide names
+         (#355) goes too.
 
     Which errors mean "not found" is pinned for every cleanup that carries the helpers by
     tests/Lab-Cleanup-Lookup.Tests.ps1.
@@ -47,7 +52,7 @@ BeforeAll {
     $script:ScriptPath     = (Resolve-Path (Join-Path $PSScriptRoot '..' 'scripts' 'Remove-LabResource.ps1')).Path
     $script:StubModuleName = 'SkyCraftLab32CleanupStub'
     # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
-    $script:RequiredModules = @('Az.Accounts', 'Az.Compute', 'Az.KeyVault')
+    $script:RequiredModules = @('Az.Accounts', 'Az.Compute', 'Az.KeyVault', 'Az.Network', 'Az.Resources')
 
     $script:StubCommands = @(
         'Get-AzContext'
@@ -57,10 +62,18 @@ BeforeAll {
         'Remove-AzDisk'
         'Get-AzKeyVault'
         'Remove-AzKeyVault'
+        'Get-AzVmss'
+        'Remove-AzVmss'
+        'Get-AzResource'
+        'Remove-AzResource'
+        'Get-AzNetworkSecurityGroup'
+        'Remove-AzNetworkSecurityGroup'
     )
 
     # Every command the script calls, recording its own invocation. By default the resource group
-    # holds everything the lab creates: both VMs, the data disk and the Key Vault. Environment
+    # holds everything the lab creates: both VMs, the data disk (the world VM holds the one the
+    # guide names), the Key Vault, the scale set with its autoscale setting and its basicNsg, and
+    # beside them an NSG and an autoscale setting of other labs that must survive. Environment
     # variables change that, so one generated module serves every scenario:
     #   SKYCRAFT_STUB_EMPTY   '1' leaves nothing to find: Get-AzVM and Get-AzDisk report
     #                         ResourceNotFound, as the real ones do, and Get-AzKeyVault returns
@@ -69,7 +82,8 @@ BeforeAll {
     #                         report its resource not found (notfound, rgnotfound)
     #   SKYCRAFT_STUB_FAIL    '<Remove-command>:<name>,...' makes one removal throw
     # A lookup is named after its command and the resource it reads: 'Get-AzVM:<vm>',
-    # 'Get-AzDisk:<disk>', 'Get-AzKeyVault:<vault>'. The vault purge is logged as
+    # 'Get-AzDisk:<disk>', 'Get-AzKeyVault:<vault>', 'Get-AzVmss:<scale set>',
+    # 'Get-AzResource:autoscale', 'Get-AzNetworkSecurityGroup:nsgs'. The vault purge is logged as
     # 'Remove-AzKeyVault:purge:<vault>'.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
@@ -133,7 +147,8 @@ function Get-AzVM {
     [CmdletBinding()]
     param([string]$Name, [string]$ResourceGroupName)
     if (Invoke-StubLookup -Name "Get-AzVM:$Name" -ResourceGroup $ResourceGroupName -Named) { return }
-    [pscustomobject]@{ Name = $Name }
+    $dataDisks = @(if ($Name -like '*-world-vm') { [pscustomobject]@{ Lun = 0; Name = ($Name + '-data') } })
+    [pscustomobject]@{ Name = $Name; StorageProfile = [pscustomobject]@{ DataDisks = $dataDisks } }
 }
 
 function Remove-AzVM {
@@ -161,6 +176,52 @@ function Get-AzKeyVault {
     if (Invoke-StubLookup -Name "Get-AzKeyVault:$VaultName" -ResourceGroup $ResourceGroupName) { return }
     if (Test-StubEmpty) { return }
     [pscustomobject]@{ VaultName = $VaultName; Location = 'swedencentral' }
+}
+
+function Get-AzVmss {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$VMScaleSetName)
+    if (Invoke-StubLookup -Name "Get-AzVmss:$VMScaleSetName" -ResourceGroup $ResourceGroupName -Named) { return }
+    [pscustomobject]@{ Name = $VMScaleSetName; Id = "/subscriptions/s/resourceGroups/$ResourceGroupName/providers/Microsoft.Compute/virtualMachineScaleSets/$VMScaleSetName" }
+}
+
+function Remove-AzVmss {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$VMScaleSetName, [switch]$Force)
+    Invoke-StubRemoval -Command 'Remove-AzVmss' -Name $VMScaleSetName
+}
+
+function Get-AzResource {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$ResourceType, [switch]$ExpandProperties)
+    if (Invoke-StubLookup -Name 'Get-AzResource:autoscale' -ResourceGroup $ResourceGroupName) { return }
+    if (Test-StubEmpty) { return }
+    $providers = "/subscriptions/s/resourceGroups/$ResourceGroupName/providers"
+    [pscustomobject]@{ Name = 'dev-skycraft-swc-world-vmssautoscale'; ResourceId = "$providers/Microsoft.Insights/autoscalesettings/dev-skycraft-swc-world-vmssautoscale"
+        Properties = [pscustomobject]@{ targetResourceUri = "$providers/Microsoft.Compute/virtualMachineScaleSets/dev-skycraft-swc-world-vmss" } }
+    [pscustomobject]@{ Name = 'dev-skycraft-swc-asp-Autoscale-1'; ResourceId = "$providers/Microsoft.Insights/autoscalesettings/dev-skycraft-swc-asp-Autoscale-1"
+        Properties = [pscustomobject]@{ targetResourceUri = "$providers/Microsoft.Web/serverfarms/dev-skycraft-swc-asp" } }
+}
+
+function Remove-AzResource {
+    [CmdletBinding()]
+    param([string]$ResourceId, [switch]$Force)
+    Invoke-StubRemoval -Command 'Remove-AzResource' -Name ($ResourceId -split '/')[-1]
+}
+
+function Get-AzNetworkSecurityGroup {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName)
+    if (Invoke-StubLookup -Name 'Get-AzNetworkSecurityGroup:nsgs' -ResourceGroup $ResourceGroupName) { return }
+    if (Test-StubEmpty) { return }
+    [pscustomobject]@{ Name = 'dev-skycraft-swc-auth-nsg' }
+    [pscustomobject]@{ Name = 'basicNsgdev-skycraft-swc-vnet-nic01' }
+}
+
+function Remove-AzNetworkSecurityGroup {
+    [CmdletBinding()]
+    param([string]$Name, [string]$ResourceGroupName, [switch]$Force)
+    Invoke-StubRemoval -Command 'Remove-AzNetworkSecurityGroup' -Name $Name
 }
 
 function Remove-AzKeyVault {
@@ -218,11 +279,13 @@ function Remove-AzKeyVault {
         'Get-AzDisk:dev-skycraft-swc-world-datadisk=rgnotfound'
     )
     # Every lookup fails: nothing is found, which must not read as "nothing to delete". The data
-    # disk is not even looked up: its VM could not be.
+    # disk is not even looked up: its VM could not be; nor are the scale set's autoscale setting
+    # and NSGs.
     $script:LookupsFail = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
         'Get-AzVM:dev-skycraft-swc-auth-vm=denied'
         'Get-AzVM:dev-skycraft-swc-world-vm=throttled'
         'Get-AzKeyVault:dev-skycraft-swc-kv=denied'
+        'Get-AzVmss:dev-skycraft-swc-world-vmss=throttled'
     )
     $script:AuthDenied   = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzVM:dev-skycraft-swc-auth-vm=denied'
     $script:WorldDenied  = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzVM:dev-skycraft-swc-world-vm=denied'
@@ -232,10 +295,13 @@ function Remove-AzKeyVault {
         'Remove-AzKeyVault:dev-skycraft-swc-kv'
     )
     $script:PurgeFails = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzKeyVault:purge:dev-skycraft-swc-kv'
+    $script:VmssDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzVmss:dev-skycraft-swc-world-vmss=denied'
+    $script:VmssFails  = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzVmss:dev-skycraft-swc-world-vmss'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:NotFound, $script:LookupsFail,
-        $script:AuthDenied, $script:WorldDenied, $script:DiskDenied, $script:RemovalsFail, $script:PurgeFails
+        $script:AuthDenied, $script:WorldDenied, $script:DiskDenied, $script:RemovalsFail, $script:PurgeFails,
+        $script:VmssDenied, $script:VmssFails
     )
 }
 
@@ -269,6 +335,22 @@ Describe 'Lab 3.2 Remove-LabResource.ps1 - removes what the lab creates' {
             $script:Clean.Calls | Should -Contain $call
         }
     }
+
+    It 'removes the data disk the world VM holds, under the name the guide gives it (#355)' {
+        $script:Clean.Calls | Should -Contain 'Remove-AzDisk:dev-skycraft-swc-world-vm-data'
+    }
+
+    It 'removes the scale set in the dev group, its autoscale setting and the basicNsg it left behind (#353)' {
+        foreach ($call in 'Remove-AzVmss:dev-skycraft-swc-world-vmss', 'Remove-AzResource:dev-skycraft-swc-world-vmssautoscale',
+            'Remove-AzNetworkSecurityGroup:basicNsgdev-skycraft-swc-vnet-nic01') {
+            $script:Clean.Calls | Should -Contain $call
+        }
+    }
+
+    It 'leaves the NSGs and autoscale settings of other labs alone' {
+        $script:Clean.Calls | Should -Not -Contain 'Remove-AzNetworkSecurityGroup:dev-skycraft-swc-auth-nsg'
+        $script:Clean.Calls | Should -Not -Contain 'Remove-AzResource:dev-skycraft-swc-asp-Autoscale-1'
+    }
 }
 
 Describe 'Lab 3.2 Remove-LabResource.ps1 - an absent resource is not a failure' {
@@ -300,7 +382,7 @@ Describe 'Lab 3.2 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
         $run.Output | Should -Match '\[ERROR\] Could not look up VM dev-skycraft-swc-auth-vm[^\r\n]*does not have authorization'
         $run.Output | Should -Match '\[ERROR\] Could not look up VM dev-skycraft-swc-world-vm[^\r\n]*requests exceeded the limit'
         $run.Output | Should -Match '\[ERROR\] Could not look up Key Vault dev-skycraft-swc-kv'
-        $run.Output | Should -Match 'Cleanup finished with 3 failure\(s\)'
+        $run.Output | Should -Match 'Cleanup finished with 4 failure\(s\)'
         $run.Output | Should -Not -Match 'Cleanup Complete'
     }
 
@@ -367,6 +449,27 @@ Describe 'Lab 3.2 Remove-LabResource.ps1 - a failed deletion is counted' {
         $run.Output | Should -Match 'Purge manually: Remove-AzKeyVault -VaultName dev-skycraft-swc-kv'
         $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
         $run.Calls  | Should -Contain 'Remove-AzKeyVault:dev-skycraft-swc-kv'
+    }
+}
+
+Describe 'Lab 3.2 Remove-LabResource.ps1 - the scale set and what it leaves behind' {
+
+    It 'exits 1 when the scale set could not be looked up, and leaves its autoscale setting and basicNsg alone' {
+        $run = $script:VmssDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Could not look up scale set dev-skycraft-swc-world-vmss'
+        $run.Calls  | Should -Not -Contain 'Remove-AzVmss:dev-skycraft-swc-world-vmss'
+        $run.Calls  | Should -Not -Contain 'Remove-AzResource:dev-skycraft-swc-world-vmssautoscale'
+        $run.Calls  | Should -Not -Contain 'Remove-AzNetworkSecurityGroup:basicNsgdev-skycraft-swc-vnet-nic01'
+        $run.Calls  | Should -Contain 'Remove-AzVM:dev-skycraft-swc-world-vm'
+    }
+
+    It 'exits 1 when the scale set could not be deleted, and keeps the basicNsg it still uses' {
+        $run = $script:VmssFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Could not delete scale set dev-skycraft-swc-world-vmss: stub failure'
+        $run.Calls  | Should -Not -Contain 'Remove-AzNetworkSecurityGroup:basicNsgdev-skycraft-swc-vnet-nic01'
+        $run.Calls  | Should -Contain 'Remove-AzVM:dev-skycraft-swc-auth-vm'
     }
 }
 
