@@ -5,18 +5,18 @@
 By completing this lab, you will:
 
 - Create and configure Network Security Groups (NSGs) to control traffic flow
-- Implement Application Security Groups (ASGs) for role-based network security
+- Create Application Security Groups (ASGs) for later use with VM network interfaces
 - Deploy Azure Bastion for secure administrative access without public IPs
 - Read the default rules of an NSG and know where **Effective security rules** is read (with the VMs of Module 3)
 - Configure service endpoints for Azure PaaS services
-- Implement private endpoints for fully private connectivity
+- Explain how private endpoints provide private connectivity
 - Understand the difference between service and private endpoints
 
 ---
 
 ## 🏗️ Architecture Overview
 
-You'll implement comprehensive network security on the existing hub-spoke topology:
+You'll configure subnet security rules, application security groups, service endpoints and an optional Bastion host on the existing hub-spoke topology:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/lab-2.2-architecture.dark.svg">
@@ -28,15 +28,15 @@ You'll implement comprehensive network security on the existing hub-spoke topolo
 
 ## 📋 Real-World Scenario
 
-**Situation**: The SkyCraft network infrastructure is deployed, but all resources are currently unprotected. Virtual machines will be exposed to the internet without proper security controls. The development team needs secure SSH access for administration, game servers need to accept player connections, and databases must only accept traffic from application servers, all without exposing unnecessary services.
+**Situation**: The SkyCraft virtual networks are deployed, and the next step is to configure subnet security before adding servers. This lab adds explicit rules for administrative access, game traffic and database connections. It retains Azure's default VNet allow rule, so complete isolation between application tiers needs additional hardening.
 
 **Your Task**: Implement defense-in-depth security by:
 
 - Deploying Network Security Groups to control traffic at subnet level
-- Using Application Security Groups to simplify management of server roles
+- Creating Application Security Groups for the VM roles introduced in Lab 3.2
 - Deploying Azure Bastion for secure administrative access (no public IPs on VMs)
-- Configuring private endpoints to keep Azure SQL traffic on Microsoft backbone
-- Testing and verifying effective security rules
+- Configuring service endpoints for SQL and Storage traffic
+- Inspecting saved NSG rules and evaluating example traffic; effective VM rules are checked in Lab 3.2
 
 ---
 
@@ -47,7 +47,7 @@ You'll implement comprehensive network security on the existing hub-spoke topolo
 - **Section 3**: Create Application Security Groups (20 min)
 - **Section 4**: Deploy Azure Bastion (25 min)
 - **Section 5**: Configure NSGs for production environment (20 min)
-- **Section 6**: Configure service and private endpoints (20 min)
+- **Section 6**: Configure service endpoints and review private endpoint concepts (20 min)
 - **Section 7**: Test and verify security rules (20 min)
 
 ---
@@ -59,7 +59,7 @@ Before starting this lab:
 - [ ] Completed Lab 2.1 (Virtual Networks and Peering)
 - [ ] Three VNets exist: platform-skycraft-swc-vnet, dev-skycraft-swc-vnet, prod-skycraft-swc-vnet - `bicep/main.bicep` attaches the NSGs to their subnets and Bastion to the hub's `AzureBastionSubnet`, so all three must be in place
 - [ ] VNet peering connections operational (hub-to-dev, hub-to-prod)
-- [ ] Decide on Bastion before running `scripts/Deploy-Bicep.ps1`: it asks `Do you want to deploy Azure Bastion? (y/N)` and defaults to **no**, because Bastion is the one resource in the course with a standing hourly cost. Section 4 is optional for the automation path; the portal steps deploy it explicitly
+- [ ] Decide on Bastion before running `scripts/Deploy-Bicep.ps1`: it asks `Do you want to deploy Azure Bastion? (y/N)` and defaults to **no** to avoid its hourly charges. Section 4 is optional for the automation path; the Portal steps deploy it explicitly
 - [ ] Owner or Contributor role at subscription level
 - [ ] Understanding of TCP/IP ports and network security concepts
 
@@ -113,8 +113,8 @@ Differences that are meant: Step 2.2.9 is a Portal-only demonstration. It shows 
 | Feature      | NSG                     | Azure Firewall                      | ASG                       |
 | ------------ | ----------------------- | ----------------------------------- | ------------------------- |
 | **Purpose**  | Basic traffic filtering | Advanced network security           | Logical grouping          |
-| **Scope**    | Subnet or NIC           | Entire VNet or subscription         | Tag for use in NSG rules  |
-| **Cost**     | Free                    | ~$1.25/hour                         | Free                      |
+| **Scope**    | Subnet or NIC           | Traffic routed through the firewall | Tag for use in NSG rules  |
+| **Cost**     | Free                    | Billed separately by SKU and usage | Free                      |
 | **Features** | 5-tuple rules           | FQDN filtering, threat intelligence | Simplifies NSG management |
 | **Use Case** | Standard protection     | Enterprise security                 | Group VMs by role         |
 
@@ -123,10 +123,12 @@ Differences that are meant: Step 2.2.9 is a Portal-only demonstration. It shows 
 | Aspect           | Service Endpoint                          | Private Endpoint                        |
 | ---------------- | ----------------------------------------- | --------------------------------------- |
 | **Traffic Path** | Microsoft backbone (still uses public IP) | Fully private (private IP in your VNet) |
-| **DNS**          | Public DNS unchanged                      | Private DNS zone required               |
-| **Cost**         | Free                                      | ~$7.50/month per endpoint               |
-| **Security**     | Service-level filtering                   | Network-level isolation                 |
-| **Use Case**     | Cost-effective for trusted services       | Maximum security for sensitive data     |
+| **DNS**          | Public DNS unchanged                      | DNS resolves to the endpoint's private IP |
+| **Cost**         | No separate endpoint charge               | Endpoint hours plus data processing     |
+| **Security**     | Subnet identity for service firewall rules | Private path to a specific resource     |
+| **Use Case**     | Restrict a public service endpoint by subnet | Access a resource through a private IP |
+
+Enabling either endpoint type does not by itself disable the service's public access. Configure the target service's firewall and public network access separately. See [Microsoft's access-method comparison](https://learn.microsoft.com/azure/networking/design-guide/private-platform-as-a-service#how-to-choose).
 
 ### Defense-in-Depth Strategy for SkyCraft
 
@@ -158,7 +160,7 @@ Layer 5: VM-level firewalls (OS-level protection)
 > **Note**: **Resource group** is empty when the form opens: pick `dev-skycraft-swc-rg`. Lab 1.3's policies refuse a resource outside **Sweden Central** and **North Europe**, and a resource without the tag `Project` = `SkyCraft`, so the **Region** and the tags below are not optional.
 
 4. Click **Next : Tags >**.
-5. Type the four tags into the **Name** and **Value** boxes (they are plain text boxes, not drop-down lists):
+5. Enter the four tags in the **Name** and **Value** fields, using a new row for each pair:
 
 | Name        | Value       |
 | ----------- | ----------- |
@@ -399,14 +401,16 @@ $vnet | Set-AzVirtualNetwork | Select-Object Name, ProvisioningState
 
 The source is the Auth and World subnets; the box accepts two CIDR ranges separated by a comma. Reopening the rule later shows **Service** **MySQL**.
 
-> **Warning**: Change the pane's defaults here too (**Destination port ranges** 8080, **Protocol** Any), as in Step 2.2.2. A rule that allows every protocol from the application subnets would also open SSH from them.
+> **Warning**: Change the pane's defaults here too (**Destination port ranges** 8080, **Protocol** Any), as in Step 2.2.2. Set port `3306` and **TCP** so this custom rule describes MySQL access. The default VNet allow rule remains in place, as explained below.
 
 **Associate with Subnet**:
 
 6. Under **Settings** (expand it if it is collapsed), click **Subnets**, then **+ Associate**.
 7. Select **Virtual network** `dev-skycraft-swc-vnet` and **Subnet** `DatabaseSubnet` (check both, as in Step 2.2.4), then click **OK**.
 
-**Expected Result**: Database subnet only accepts MySQL traffic from application tiers and SSH from Bastion.
+**Expected Result**: The database subnet has custom allow rules for MySQL from the application subnets and SSH from the Bastion subnet.
+
+> **Note**: The default `AllowVnetInBound` rule still permits other traffic within the `VirtualNetwork` service tag, including the same VNet and directly peered networks. These custom allow rules do not establish exclusive database isolation. A production design needs explicit deny rules below its required allow rules to override that default. See [default NSG rules](https://learn.microsoft.com/azure/virtual-network/network-security-groups-overview#default-security-rules).
 
 **With Az PowerShell** (instead of items 1-7):
 
@@ -466,7 +470,7 @@ Allow SSH from ASG "AuthServers" (VMs automatically get rule when added to ASG)
 > **Note**: As on the NSG form, **Resource group** is empty when the form opens.
 
 4. Click **Next : Tags >**.
-5. Type the four tags (Project SkyCraft, Environment Development, CostCenter MSDN, Owner mbiszczanik) into the plain text boxes.
+5. Enter the four tags (Project SkyCraft, Environment Development, CostCenter MSDN, Owner mbiszczanik) in the **Name** and **Value** fields, using a new row for each pair.
 6. Click **Review + create**, then **Create**.
 
 **Expected Result**: ASG `dev-skycraft-swc-asg-auth` created. The review page does not list the tags you typed, but the ASG carries them.
@@ -550,7 +554,7 @@ This step makes no change, so it has no PowerShell block. ASGs group VM network 
 
 ### Step 2.2.10: Deploy Azure Bastion
 
-> **Warning**: Azure Bastion is the one resource of this course that bills by the hour for as long as it exists, used or not. Basic costs about 0.1672 EUR per hour (about 122 EUR per month), and its public IP address about 3.21 EUR per month (Azure retail prices of 2026-10-22, Sweden Central). The create form defaults to the **Premium** SKU, which costs more. Pick **Basic**, and delete the Bastion and its public IP when you finish (What This Lab Leaves Behind).
+> **Warning**: Azure Bastion bills by the hour for as long as it exists, used or not. Basic costs about 0.1672 EUR per hour (about 122 EUR per 730-hour month), and its public IP address about 3.21 EUR per month (Azure retail prices checked 2026-10-24, Sweden Central). Transfer charges are additional. The create form defaults to the **Premium** SKU, which costs more. Pick **Basic**, and delete the Bastion and its public IP when you finish (What This Lab Leaves Behind).
 
 1. In the Azure Portal, search for **Bastions**.
 2. Click **+ Create**.
@@ -582,7 +586,7 @@ This step makes no change, so it has no PowerShell block. ASGs group VM network 
 
 ![Create-Azure-Bastion](./images/step-2.2.10.png)
 
-5. Click **Next : Tags >** and type the four tags (the Portal also gives them to the new public IP address):
+5. Click **Next** to open **Tags** and enter the four tags (the Portal also gives them to the new public IP address):
 
 | Name        | Value       |
 | ----------- | ----------- |
@@ -785,11 +789,11 @@ $vnet | Set-AzVirtualNetwork | Select-Object Name, ProvisioningState
 - Need to access PaaS services over VPN/ExpressRoute from on-premises
 - Want to completely disable public access to Azure services
 
-**Cost consideration**: ~$7.50/month per private endpoint
+**Cost consideration**: Private endpoints incur an hourly charge plus data processing charges. Check the target region and expected traffic before deploying one; this lab's base path creates none.
 
 ### Step 2.2.17: Create Private Endpoint (Conceptual)
 
-**Note**: We will use a **Storage Account** for this conceptual step, as it is a lighter resource if you choose to provision it for testing.
+**Note**: Review this example using a **Storage Account**. Creating that account and its private endpoint is outside this lab's base deployment.
 
 To create a private endpoint for an Azure Storage Account:
 
@@ -883,6 +887,21 @@ Evaluation:
 ❌ Rule 100: No match (port 22, not 8085)
 ✅ Rule 110 (Allow-World-GamePort): MATCH - ALLOW
 ```
+
+**Scenario 4**: SSH from an application subnet to the database subnet
+
+```text
+Source: 10.1.1.10 (Auth Server)
+Destination: 10.1.3.10 (Database Server)
+Port: 22 (SSH)
+
+Evaluation:
+Rule 100: No match (source not 10.0.0.0/26)
+Rule 110: No match (port 3306, not 22)
+Default rule 65000 (AllowVnetInBound): MATCH - ALLOW
+```
+
+This is a rule evaluation exercise, not a live connection test. The lab has no VMs yet. It demonstrates why explicit allow rules alone do not isolate the database tier.
 
 ### Step 2.2.20: Verify Azure Bastion Connectivity
 
@@ -1053,14 +1072,14 @@ Test your understanding with these questions:
    | ----------------------- | --------------------------------- | ------------------------------------ |
    | **IP addressing**       | Service keeps public IP           | Service gets private IP in your VNet |
    | **Traffic path**        | Microsoft backbone (not internet) | Fully private (your VNet)            |
-   | **DNS**                 | Public DNS unchanged              | Requires private DNS zone            |
-   | **Security**            | Service-level firewall rules      | Network-level isolation              |
-   | **Cost**                | Free                              | ~$7.50/month per endpoint            |
-   | **Access from on-prem** | No (public IP)                    | Yes (via VPN/ExpressRoute)           |
+   | **DNS**                 | Public DNS unchanged              | Resolve the service name to the private IP |
+   | **Security**            | Subnet identity for service firewall rules | Private path to a specific resource |
+   | **Cost**                | No separate endpoint charge       | Endpoint hours plus data processing |
+   | **Access from on-prem** | No VNet service-endpoint identity | Private route via VPN/ExpressRoute plus DNS |
 
    **Use service endpoints when**: Cost is a concern, traffic stays within Azure
 
-   **Use private endpoints when**: Maximum security needed, compliance requires no public IPs, accessing from on-premises
+   **Use private endpoints when**: A resource-specific private IP or private access from on-premises is needed, with the corresponding routing, DNS and service access settings
    </details>
 
 5. **If two NSG rules have the same priority, which one takes precedence?**
@@ -1068,9 +1087,9 @@ Test your understanding with these questions:
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: **You cannot have two rules with the same priority in the same NSG.**
+   **Answer**: **Two rules cannot share a priority within the same direction in an NSG.**
 
-   Azure enforces unique priorities within each NSG. If you try to create a rule with an existing priority, deployment fails with error: "Priority X is already used by another rule."
+   Inbound rules have unique priorities, and outbound rules have unique priorities. An inbound rule and an outbound rule can both use priority 100. A duplicate within one direction is rejected.
 
    **Rule evaluation order**:
 
@@ -1127,7 +1146,7 @@ Test your understanding with these questions:
 
 ## 📦 What This Lab Leaves Behind
 
-Azure Bastion costs money every hour it exists; the rest of this lab is free. The costs below are approximate Azure retail prices for Sweden Central of 2026-10-22; check the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) for your own.
+The optional Bastion and its public IP incur hourly charges while they exist. NSGs, ASGs and service endpoint settings add no fixed charge; Lab 2.1's IP and transfer charges continue. The costs below use approximate Azure retail prices for Sweden Central checked 2026-10-24; check the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) for your own. Transfer charges are additional.
 
 | Left behind | Where | Cost | What it does in later labs |
 | --- | --- | --- | --- |
@@ -1270,18 +1289,18 @@ In the Portal, delete in this order:
 
 - ✅ Deployed Azure Bastion for secure administrative access (no VMs need public IPs); delete it when you no longer need it
 - ✅ Created 6 Network Security Groups (3 for dev, 3 for prod) with custom rules
-- ✅ Implemented Application Security Groups for role-based security
-- ✅ Configured service endpoints on database subnets for secure PaaS access
+- ✅ Created Application Security Groups for use with VM network interfaces in Lab 3.2
+- ✅ Configured Storage service endpoints on WorldSubnet and SQL plus Storage endpoints on DatabaseSubnet, in both environments
 - ✅ Understand the difference between service and private endpoints
-- ✅ Implemented defense-in-depth security for the SkyCraft infrastructure
+- ✅ Reviewed the components of a layered security design
 
 **Security Posture**:
 
-- 🔒 All subnets protected by NSGs with least-privilege rules
-- 🔒 Administrative access only through Azure Bastion (no SSH/RDP from internet)
-- 🔒 Database subnets only accept traffic from application tiers
-- 🔒 Game servers only expose required ports (3724, 8085)
-- 🔒 Azure PaaS services accessed over Microsoft backbone (service endpoints)
+- 🔒 AuthSubnet, WorldSubnet and DatabaseSubnet each have an NSG in dev and prod; AppServiceSubnet has no NSG in this lab
+- 🔒 SSH has an explicit allow rule from the Bastion subnet; internet SSH does not match an allow rule
+- 🔒 Database NSGs have an explicit MySQL allow rule from the application subnets; the default VNet allow rule still permits other internal traffic
+- 🔒 Custom game rules allow TCP ports 3724 and 8085 from any source
+- 🔒 Service endpoints provide a Microsoft backbone path to the selected PaaS services; service firewalls need separate configuration
 
 **Time Spent**: ~2.5 hours
 

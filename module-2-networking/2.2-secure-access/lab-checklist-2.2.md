@@ -2,7 +2,7 @@
 
 ## ✅ Azure Bastion Verification
 
-Bastion is optional and costs about 0.1672 EUR per hour (about 122 EUR per month, plus about 3.21 EUR per month for its public IP; retail prices of 2026-10-22). Tick this section only if you deployed it.
+Bastion is optional and costs about 0.1672 EUR per hour (about 122 EUR per 730-hour month, plus about 3.21 EUR per month for its public IP; Sweden Central retail prices checked 2026-10-24). Transfer charges are additional. Tick this section only if you deployed it.
 
 ### Bastion Resource
 - [ ] Resource name: `platform-skycraft-swc-bas`
@@ -432,6 +432,8 @@ Use this table to document your deployed security architecture:
 
 Document the security rules deployed:
 
+The tables list custom allow rules. The default `AllowVnetInBound` rule also remains and permits other internal traffic; these rules do not establish exclusive database isolation. See the rule evaluation in [Step 2.2.19](lab-guide-2.2.md#step-2219-test-nsg-rule-logic-conceptual).
+
 ### Development Environment
 
 | NSG | Priority | Rule Name | Source | Dest Port | Protocol | Action |
@@ -581,27 +583,27 @@ _________________________________________________________________
 
 ## 🎉 Congratulations!
 
-You've successfully implemented **comprehensive network security** for the SkyCraft infrastructure!
+You've configured the subnet security components used by the later SkyCraft labs.
 
 **What You Built**:
 - ✅ Azure Bastion for secure administrative access (no public IPs on VMs needed)
-- ✅ 6 Network Security Groups with least-privilege access rules
-- ✅ 3 Application Security Groups for role-based management
-- ✅ Service endpoints for secure Azure PaaS connectivity
-- ✅ Defense-in-depth security architecture
+- ✅ 6 Network Security Groups with explicit custom allow rules and Azure's default rules
+- ✅ 3 Application Security Groups for use with VM network interfaces in Lab 3.2
+- ✅ Service endpoints for the specified SQL and Storage paths
+- ✅ Layered security concepts reviewed
 
 **Security Achievements**:
-- 🔒 **Layer 1**: Azure Bastion blocks direct SSH/RDP from internet
+- 🔒 **Layer 1**: Azure Bastion provides private VM administration when deployed
 - 🔒 **Layer 2**: NSGs control traffic at subnet level
-- 🔒 **Layer 3**: ASGs simplify VM role-based security
-- 🔒 **Layer 4**: Service endpoints secure PaaS traffic
-- 🔒 **Layer 5**: Private endpoints ready for maximum security
+- 🔒 **Layer 3**: ASGs are created for use with VM network interfaces in Lab 3.2
+- 🔒 **Layer 4**: Service endpoints provide a Microsoft backbone path; PaaS firewalls are configured separately
+- 🔒 **Layer 5**: Private endpoint concepts reviewed; no private endpoint deployed
 
 **Network Security Posture**:
-- All administrative access goes through Bastion
-- Game servers only expose required ports (3724 for auth, 8085 for world)
-- Databases only accept connections from application tiers
-- Azure SQL and Storage accessed over Microsoft backbone (not public internet)
+- SSH has an explicit allow rule from the Bastion subnet; internet SSH does not match an allow rule
+- Custom game rules allow TCP 3724 for auth and TCP 8085 for world from any source
+- Database custom rules allow MySQL from application subnets, while the default VNet allow rule still permits other internal traffic
+- Service endpoints provide a Microsoft backbone path to SQL and Storage; service firewalls need separate configuration
 
 **Next Steps**: In **Lab 2.3**, you'll configure Azure DNS for custom domain resolution and deploy Azure Load Balancer to distribute traffic across multiple game servers for high availability.
 
