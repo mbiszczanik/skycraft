@@ -7,7 +7,7 @@ By completing this lab, you will:
 - Design and deploy hub-spoke virtual network topology
 - Create virtual networks with multiple subnets using CIDR notation
 - Configure VNet peering between hub and spoke networks
-- Implement user-defined routes for traffic control
+- Explain the routing limits of VNet peering
 - Configure public and private IP addresses
 - Troubleshoot network connectivity issues
 
@@ -82,7 +82,7 @@ Run each PowerShell block once, in the order of the steps, in one `pwsh` session
 - **Hub VNet** contains shared services (Bastion, VPN Gateway, Firewall)
 - **Spoke VNets** contain workload-specific resources (application tiers)
 - Spokes connect to the hub via **VNet peering**
-- Spokes do NOT directly peer with each other (traffic routes through hub)
+- Spokes do not directly peer with each other. This lab has no spoke-to-spoke route: peering alone does not provide transit through the hub.
 
 ### Benefits for SkyCraft
 
@@ -130,7 +130,7 @@ Run each PowerShell block once, in the order of the steps, in one `pwsh` session
 
 > **Note**: Lab 1.3's policies are in force from here on. `Restrict-Azure-Regions` refuses a resource outside Sweden Central and North Europe, and `Enforce-Project-Tag` refuses a resource without `Project` = `SkyCraft`. That is why every create form in this lab names the region and the four SkyCraft tags.
 
-1. In the search box at the top of the Azure Portal, type **Virtual network** and click the result **Virtual network** (service **Network foundation**). The page **Network foundation | Virtual networks** opens.
+1. In the search box at the top of the Azure Portal, type **Virtual network**. If the service is not among the first matches, click **See more** in **Services**. Click **Virtual network** (service **Network foundation**). The page **Network foundation | Virtual networks** opens.
 2. Click **+ Create**.
 3. On the **Basics** tab, fill in:
 
@@ -171,7 +171,7 @@ The Az PowerShell block for this step is under Step 2.1.4, because the Portal cr
 
 Set **Subnet purpose** first. The list offers **Default**, **Azure Bastion**, **Azure Firewall**, **Firewall Management (forced tunneling)**, **Virtual Network Gateway** and **Route Server**. The name `AzureBastionSubnet` is reserved for the **Azure Bastion** purpose: with **Default** left in place, typing the name gives "Please select 'Azure Bastion' in Subnet purpose dropdown to use the name 'AzureBastionSubnet'." and **Add** stays greyed out. After you pick **Azure Bastion**, the name fills in and cannot be edited.
 
-> **Warning**: The pane starts with a **Size** of `/24`. Pick `/26` (64 addresses, the minimum Bastion accepts). A `/24` starting at `10.0.0.0` also covers `10.0.1.0`, where the next step puts `GatewaySubnet`, and the two subnets would overlap.
+> **Note**: Selecting **Azure Bastion** sets **Size** to `/26` (64 addresses, the minimum Bastion accepts). Confirm `/26` to match this lab's address plan. A `/24` would reserve 256 addresses; it would not overlap the planned gateway subnet at `10.0.1.0/27`.
 
 **Note**: The pane ticks **Enable private subnet (no default outbound access)** by default. Leave it ticked, here and on every subnet of this lab. A private subnet has no implicit outbound internet access, and the lab's checks (`Test-Lab.ps1`, the Bicep and the PowerShell script) expect every subnet to be private. Lab 2.3 gives the Module 3 VMs an explicit outbound path through load balancer outbound rules.
 
@@ -560,7 +560,7 @@ Create public IPs for future load balancers (used in Lab 2.3).
 
 **Dev Load Balancer Public IP**:
 
-1. In the search box at the top, type **Public IP address** and click the result **Public IP address** (it is listed second, after **Subscriptions**).
+1. In the search box at the top, type **Public IP address** and click **Public IP address** (service **Network foundation**).
 2. Click **+ Create**. The tabs are **Basics**, **DDoS Protection**, **Tags** and **Review + create**.
 3. On the **Basics** tab, fill in:
 
@@ -652,7 +652,7 @@ New-AzPublicIpAddress -Name 'prod-skycraft-swc-lb-pip' -ResourceGroupName 'prod-
 ### Step 2.1.14: Use Azure Network Watcher Topology
 
 1. In the search box at the top, type **Network Watcher** and click the result. The page **Networking monitoring & management | Network Watcher** opens.
-2. Look for a network watcher in **Sweden Central**. When Azure creates a virtual network in a region with no watcher, it tries to create `NetworkWatcher_swedencentral` in the resource group `NetworkWatcherRG` on its own. Lab 1.3's `Require-Environment-Tag-RG` refuses that, because Azure creates the group without tags, so the list shows "No network watchers to display". Your VNets are not affected; only the watcher is missing.
+2. Look for a network watcher in **Sweden Central**. If `NetworkWatcher_swedencentral` already exists and `NetworkWatcherRG` has the four tags below, continue at item 5. When Azure creates a virtual network in a region with no watcher, it tries to create `NetworkWatcher_swedencentral` in the resource group `NetworkWatcherRG` on its own. Lab 1.3's `Require-Environment-Tag-RG` refuses that, because Azure creates the group without tags, so the list shows "No network watchers to display". Your VNets are not affected; only the watcher is missing.
 
 > **Warning**: Do not try **+ Create** → **Add network watcher** yet. It has no resource group field, so it would create `NetworkWatcherRG` untagged, and the Portal answers: "Failed to start deployment ... Resource 'NetworkWatcherRG' was disallowed by policy. Reasons: 'Resource group must have an Environment tag (Development, Production, or Platform)'." (the message appears under the notification bell). Create the group yourself first, with its tags (next item).
 
@@ -694,13 +694,13 @@ if (-not (Get-AzNetworkWatcher -Location 'swedencentral' -ErrorAction SilentlyCo
 ```
 
 5. In the left menu, under **Monitoring** (expand it if it is collapsed), click **Topology**.
-6. The map can open scrolled to the Americas. Click the fit to view button on the map; it shows Sweden Central. Double-click the Sweden Central region card (a single click opens an **Insights** pane instead) and press **Expand**:
+6. The map can open scrolled to the Americas. Click **Zoom to Fit** on the map, then the expand button on the **Sweden Central** region card. After the region opens, click **Zoom to Fit** again to show its networks and connections:
 
 ![Network Watcher Topology](./images/step-2.1.14.png)
 
 **Expected View**: Visual diagram showing hub VNet with peering connections to spoke VNets.
 
-7. To look at one resource group, click the **Scope** chip → **Select Scope** → **Resource Groups**, pick `dev-skycraft-swc-rg`, and click **Save**. The map folds back to the geo map: expand Sweden Central as in item 6.
+7. To look at one resource group, click the **Scope** chip and open **Resource Groups** in the pane. If **Select All** is checked, clear it, then select only `dev-skycraft-swc-rg`. Close the list and click **Save**. The map folds back to the geo map: expand Sweden Central as in item 6. Connected networks in other groups can also appear.
 8. Do the same for `prod-skycraft-swc-rg`.
 
 **Expected Result**: Topology diagram displays your hub-spoke architecture visually.
