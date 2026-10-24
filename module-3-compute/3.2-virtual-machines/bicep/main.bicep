@@ -163,7 +163,8 @@ module modKeyVault 'br/public:avm/res/key-vault/vault:0.14.2' = if (parEncryptio
     sku: 'standard'
     enableVaultForDeployment: true
     enableVaultForDiskEncryption: true
-    enableVaultForTemplateDeployment: true
+    // Step 3.2.17 leaves it unchecked; ADE does not need it.
+    enableVaultForTemplateDeployment: false
     enableRbacAuthorization: true
     publicNetworkAccess: 'Enabled'
     networkAcls: {
