@@ -46,7 +46,13 @@ BeforeAll {
         param([string]$ResourceType, [string]$Name, [string]$ResourceGroupName, [switch]$ExpandProperties)
         $script:LookupCalls.Add("$ResourceType|$Name|$ResourceGroupName|$ExpandProperties")
         if ($script:LookupError) { Write-Error -ErrorId 'AuthorizationFailed' -Message $script:LookupError }
-        $script:Environments | Where-Object { $_.Name -eq $Name }
+        # As Az.Resources did live on 2026-10-24: a lookup by name without a resource group, with
+        # -ExpandProperties, fails with ResourceNotFound under group '<null>' for a resource that exists.
+        if ($Name -and -not $ResourceGroupName -and $ExpandProperties -and @($script:Environments | Where-Object { $_.Name -eq $Name })) {
+            Write-Error -ErrorId 'ResourceNotFound' -Message "ResourceNotFound : The Resource '$ResourceType/$Name' under resource group '<null>' was not found."
+            return
+        }
+        $script:Environments | Where-Object { -not $Name -or $_.Name -eq $Name }
     }
 
     function Get-StubEnvironment {
@@ -71,7 +77,7 @@ Describe 'Lab 3.3 Deploy-Bicep.ps1 - a Consumption-only environment stops the de
         $script:Environments = @(Get-StubEnvironment -Name 'dev-skycraft-swc-cae-02' -ResourceGroupName 'dev-skycraft-swc-rg' -WorkloadProfiles $null)
         $found = Get-LabConsumptionOnlyEnvironment -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-cae-02'
         $found.Name | Should -Be 'dev-skycraft-swc-cae-02'
-        $script:LookupCalls | Should -Contain 'Microsoft.App/managedEnvironments|dev-skycraft-swc-cae-02||True'
+        $script:LookupCalls | Should -Contain 'Microsoft.App/managedEnvironments|||True'
     }
 
     It 'returns nothing for a Workload profiles environment, which the template deploys onto' {
