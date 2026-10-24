@@ -96,7 +96,14 @@ function Invoke-StubGate {
     Write-StubCall -Name "$Name $Target"
     $fail = @($env:SKYCRAFT_STUB_FAIL -split ',')
     if ($fail -contains $Name -or $fail -contains "$($Name):$Target") { throw "stub failure: $Name $Target" }
+    # As Azure: a second delete of the same resource finds nothing.
+    if ($script:Removed[$Target]) { throw "ResourceNotFound : The Resource '$Target' was not found." }
     $script:Removed[$Target] = $true
+    # SKYCRAFT_STUB_DELETE_NOTFOUND 'name,...': the delete goes through, then the cmdlet reports the
+    # resource it just deleted as not found (seen live on a Log Analytics workspace, 2026-10-24).
+    if (@($env:SKYCRAFT_STUB_DELETE_NOTFOUND -split ',') -contains $Target) {
+        throw "ResourceNotFound : The Resource 'Microsoft.OperationalInsights/workspaces/$Target' under resource group 'stub' was not found."
+    }
 }
 
 # The workspaces still standing: SKYCRAFT_STUB_WORKSPACES 'name:customerId[:resourceGroup],...',
@@ -152,7 +159,16 @@ function Invoke-StubLookup {
 
 function Get-AzResource {
     [CmdletBinding()]
-    param($ResourceGroupName, $ResourceType, $Name, [switch]$ExpandProperties)
+    param($ResourceGroupName, $ResourceType, $Name, $ResourceId, [switch]$ExpandProperties)
+    # A lookup by id: not found once the stub removed it; SKYCRAFT_STUB_STILL_THERE 'name,...' keeps it.
+    if ($ResourceId) {
+        $idName = ($ResourceId -split '/')[-1]
+        Write-StubCall -Name "Get-AzResource id:$idName"
+        if ($script:Removed[$idName] -and @($env:SKYCRAFT_STUB_STILL_THERE -split ',') -notcontains $idName) {
+            throw "ResourceNotFound : The Resource '$idName' was not found."
+        }
+        return [pscustomobject]@{ Name = $idName; ResourceId = $ResourceId }
+    }
     # A lookup without a name lists a type: it is logged and keyed by the type, and one without a
     # resource group (the whole subscription) by the type followed by '@subscription'. A lookup
     # with neither lists a resource group's contents, keyed 'group:<name>'.
@@ -245,6 +261,8 @@ function Remove-AzResourceGroup {
             [string]$AciCustomerId = '',
             [string]$LabResourceGroup = 'dev-skycraft-swc-rg',
             [string[]]$GroupExtra = @(),
+            [string[]]$DeleteNotFound = @(),
+            [string[]]$StillThere = @(),
             [switch]$Empty
         )
 
@@ -261,6 +279,8 @@ function Remove-AzResourceGroup {
             SKYCRAFT_STUB_ACI_CUSTOMERID = $AciCustomerId
             SKYCRAFT_STUB_LAB_RG         = $LabResourceGroup
             SKYCRAFT_STUB_GROUP_EXTRA    = $GroupExtra -join ','
+            SKYCRAFT_STUB_DELETE_NOTFOUND = $DeleteNotFound -join ','
+            SKYCRAFT_STUB_STILL_THERE    = $StillThere -join ','
         }
 
         $calls = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { @() }
@@ -301,6 +321,18 @@ function Remove-AzResourceGroup {
     )
     $script:Workspaces = Invoke-CleanupScript -Stub $script:Stub -Workspace $script:LabWorkspaces `
         -CaeCustomerId 'cccccccc-0000-0000-0000-000000000003'
+    # Seen live on 2026-10-24: the environment logs to the Portal's auto-named workspace itself, so
+    # the name and the relation find the same workspace.
+    $script:SameWorkspace = Invoke-CleanupScript -Stub $script:Stub `
+        -Workspace 'workspacedevskycraftswcrg1a2b:aaaaaaaa-0000-0000-0000-000000000001' `
+        -CaeCustomerId 'aaaaaaaa-0000-0000-0000-000000000001'
+    $script:DeleteQuirk = Invoke-CleanupScript -Stub $script:Stub `
+        -Workspace 'workspacedevskycraftswcrg1a2b:aaaaaaaa-0000-0000-0000-000000000001' `
+        -CaeCustomerId 'aaaaaaaa-0000-0000-0000-000000000001' -DeleteNotFound 'workspacedevskycraftswcrg1a2b'
+    $script:DeleteQuirkStill = Invoke-CleanupScript -Stub $script:Stub `
+        -Workspace 'workspacedevskycraftswcrg1a2b:aaaaaaaa-0000-0000-0000-000000000001' `
+        -CaeCustomerId 'aaaaaaaa-0000-0000-0000-000000000001' -DeleteNotFound 'workspacedevskycraftswcrg1a2b' `
+        -StillThere 'workspacedevskycraftswcrg1a2b'
     $script:EnvStuck = Invoke-CleanupScript -Stub $script:Stub -Workspace $script:LabWorkspaces `
         -CaeCustomerId 'cccccccc-0000-0000-0000-000000000003' -Fail 'Remove-AzResource:dev-skycraft-swc-cae-02'
     $script:WorkspaceDenied = Invoke-CleanupScript -Stub $script:Stub -Workspace $script:LabWorkspaces `
@@ -460,6 +492,26 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - the Container Apps environment''s Log
         $run.Calls | Should -Contain 'Remove-AzResource my-env-logs'
         $run.Calls | Should -Not -Contain 'Remove-AzResource dev-skycraft-swc-law-reports'
         $run.Output | Should -Match 'Cleanup Complete'
+    }
+
+    It 'deletes a workspace that both the name and the relation find once, and exits 0' {
+        $run = $script:SameWorkspace
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        @($run.Calls | Where-Object { $_ -eq 'Remove-AzResource workspacedevskycraftswcrg1a2b' }).Count | Should -Be 1
+        $run.Output | Should -Match 'Cleanup Complete'
+    }
+
+    It 'counts a workspace as deleted when the delete reports it not found and a fresh lookup agrees' {
+        $run = $script:DeleteQuirk
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls | Should -Contain 'Get-AzResource id:workspacedevskycraftswcrg1a2b'
+        $run.Output | Should -Match '-> Deleted workspacedevskycraftswcrg1a2b'
+    }
+
+    It 'fails when the delete reports not found but the workspace is still there' {
+        $run = $script:DeleteQuirkStill
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Could not delete Log Analytics workspace 'workspacedevskycraftswcrg1a2b'"
     }
 
     It 'finds the environment''s workspace by its customer id across the subscription' {

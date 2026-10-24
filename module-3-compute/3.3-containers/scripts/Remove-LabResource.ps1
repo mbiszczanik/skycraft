@@ -177,6 +177,26 @@ function Test-LabNotFoundError {
 # Whether a workspace is Azure's default one: DefaultWorkspace-<subscription id>-<region> in
 # DefaultResourceGroup-<region>, with the subscription it lives in and the same region code in
 # both names. Only such a workspace, found through the container instance, is deleted (#374).
+# Deletes a Log Analytics workspace. The delete is asynchronous, and Remove-AzResource can report
+# the workspace it has just deleted as ResourceNotFound (seen 2026-10-24): that counts as deleted
+# only when a fresh lookup by id also reports it not found.
+function Invoke-LabWorkspaceDelete {
+    param([Parameter(Mandatory)][string]$ResourceId)
+    try {
+        Remove-AzResource -ResourceId $ResourceId -Force -ErrorAction Stop | Out-Null
+    } catch {
+        if (-not (Test-LabNotFoundError -ErrorRecord $_)) { throw }
+        $deleteError = $_
+        try {
+            $null = Get-AzResource -ResourceId $ResourceId -ErrorAction Stop
+        } catch {
+            if (Test-LabNotFoundError -ErrorRecord $_) { return }
+            throw
+        }
+        throw $deleteError
+    }
+}
+
 function Test-LabDefaultWorkspace {
     [CmdletBinding()]
     [OutputType([bool])]
@@ -287,7 +307,7 @@ $steps = @(
                    Where-Object { "$($_.Properties.customerId)" -eq $script:caeWorkspaceCustomerId }
            }
        }
-       Remove = { param($r) Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null } }
+       Remove = { param($r) Invoke-LabWorkspaceDelete -ResourceId $r.ResourceId } }
     @{ Type = 'Container Instance';         Name = $AciName; ResourceType = 'Microsoft.ContainerInstance/containerGroups'
        # Expanded, so the step after the loop can find the workspace the instance logs to.
        Find = { Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.ContainerInstance/containerGroups' -Name $AciName -ExpandProperties -ErrorAction Stop }
@@ -392,7 +412,7 @@ if ($script:aciWorkspaceCustomerId) {
             if ($WhatIfPreference) { $script:removedDefaultWorkspaces.Add($aciWorkspace) }
         } else {
             try {
-                Remove-AzResource -ResourceId $aciWorkspace.ResourceId -Force -ErrorAction Stop | Out-Null
+                Invoke-LabWorkspaceDelete -ResourceId $aciWorkspace.ResourceId
                 Write-Host "  -> Deleted $($aciWorkspace.Name)" -ForegroundColor Green
                 $script:removedDefaultWorkspaces.Add($aciWorkspace)
             } catch {
