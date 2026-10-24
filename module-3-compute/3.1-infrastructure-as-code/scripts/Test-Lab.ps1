@@ -5,7 +5,8 @@
 .DESCRIPTION
     Checks presence and configuration of:
     - Resource Groups (Platform, Dev, Prod)
-    - Virtual Networks and Subnets
+    - Virtual Networks and Subnets, including AppServiceSubnet and its delegation to
+      Microsoft.Web/serverFarms (found by service, so a Portal-named delegation passes)
     - Network Security Groups (Auth, World) and Rules
     - Load Balancers and Public IPs
 
@@ -73,6 +74,25 @@ try {
             Write-Host "  - [FAIL] Subnet '$sub' MISSING." -ForegroundColor Red
             $failCount++
         }
+    }
+
+    # Lab 3.4's VNet integration needs the delegation. Matched by service: the Portal names the
+    # delegation itself, Bicep after its service.
+    $appSubnetName  = 'AppServiceSubnet'
+    $appServiceName = 'Microsoft.Web/serverFarms'
+    $appSubnet = $vnet.Subnets | Where-Object Name -eq $appSubnetName | Select-Object -First 1
+    if (-not $appSubnet) {
+        Write-Host "  - [FAIL] Subnet '$appSubnetName' MISSING." -ForegroundColor Red
+        $failCount++
+    }
+    elseif (@($appSubnet.Delegations.ServiceName) -contains $appServiceName) {
+        Write-Host "  - [OK] Subnet '$appSubnetName' found, delegated to $appServiceName." -ForegroundColor Green
+    }
+    else {
+        $actual = @($appSubnet.Delegations.ServiceName | Where-Object { $_ })
+        $shown  = if ($actual.Count) { $actual -join ', ' } else { 'none' }
+        Write-Host "  - [FAIL] Subnet '$appSubnetName' is not delegated to $appServiceName (delegations: $shown)." -ForegroundColor Red
+        $failCount++
     }
 }
 catch {
