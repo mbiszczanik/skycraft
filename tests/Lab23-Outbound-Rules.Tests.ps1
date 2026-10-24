@@ -144,6 +144,16 @@ Describe 'Lab 3.1 template - the hand-written load balancer follows the same des
         $text | Should -Match '(?m)^@maxLength\(1\)\s*\r?\nparam parOutboundRules ' -Because 'one frontend IP takes one outbound rule'
     }
 
+    It 'sends a TCP reset on idle timeout on every load-balancing rule, as Lab 2.3 does' {
+        $rules = [regex]::Match((Get-Content -Raw -LiteralPath (Join-Path $script:Lab31 'bicep/modules/loadbalancer.bicep')),
+            '(?s)loadBalancingRules: \[.*?outboundRules: \[').Value
+        $rules | Should -Match '(?m)^\s*enableTcpReset: true\s*$' -Because 'Lab 2.3 ticks Enable TCP reset on both rules and Lab 3.1 describes the same load balancer'
+
+        $guide = Get-Content -Raw -LiteralPath (Join-Path $script:Lab31 'lab-guide-3.1.md')
+        $guideRules = [regex]::Match($guide, '(?s)loadBalancingRules: \[for \(rule, i\) in lbRules:.*?outboundRules: \[').Value
+        $guideRules | Should -Match '(?m)^\s*enableTcpReset: true\b'
+    }
+
     It 'passes the egress pool and one outbound rule for it' {
         $lb = Get-TemplateModule -Template $script:Template31 -DeploymentName 'devLoadBalancerDeployment'
         $lb | Should -Not -BeNullOrEmpty

@@ -188,6 +188,8 @@ resource resLoadBalancer 'Microsoft.Network/loadBalancers@2023-11-01' = {
         backendPort: rule.backendPort
         enableFloatingIP: false
         idleTimeoutInMinutes: 4
+        // As in Lab 2.3, whose guide ticks Enable TCP reset on both rules.
+        enableTcpReset: true
         loadDistribution: 'Default'
         // As in Lab 2.3 (docs/bicep-standards.md section 4.5): egress comes from the outbound
         // rule below, and Azure requires SNAT off on every rule whose frontend IP an outbound

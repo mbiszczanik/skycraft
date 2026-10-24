@@ -906,6 +906,7 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2023-05-01' = {
         backendPort: rule.backendPort
         enableFloatingIP: false
         idleTimeoutInMinutes: 4
+        enableTcpReset: true  // As Lab 2.3 sets it on both rules
         loadDistribution: 'Default'
         // Required once an outbound rule uses this frontend IP: egress comes from that rule
         disableOutboundSnat: true
