@@ -212,22 +212,22 @@ Let's export your existing dev environment to see what ARM looks like:
 
 1. In the **Azure Portal**, search for **Resource groups** and open `dev-skycraft-swc-rg`
 2. In the left menu, expand **Automation** (it is collapsed when the page opens) and click **Export template**
-3. Wait for Azure to generate the template: about 40 seconds for the Module 2 resources in this group
+3. Wait for Azure to generate the template: about 30-40 seconds for the Module 2 resources in this group
 
 ![Export ARM Template](images/step-3.1.1.png)
 
 **What You See**:
 
-- Three tabs: **ARM Template**, **Bicep** and **Terraform (preview)**. The Portal exports Bicep directly as well; this section works with the **ARM Template** tab, and Step 3.1.8 converts it to Bicep with the Bicep CLI.
-- On the **ARM Template** tab, an **Include parameters** check box and two sub-tabs: **Template**, the complete ARM JSON (often 500-2000+ lines), and **Parameters**, the parameter values
-- A toolbar with **Download**, **Copy content**, **Deploy** and **Feedback**
+- Three tabs: **ARM template**, **Bicep** and **Terraform**. The Portal exports Bicep directly as well; this section works with the **ARM template** tab, and Step 3.1.8 converts it to Bicep with the Bicep CLI.
+- A toolbar with **Download**, **Copy** and **Deploy**
+- On the **ARM template** tab, an **Include parameters** check box and two sub-tabs: **Template**, the complete ARM JSON (often 500-2000+ lines), and **Parameters**, the parameter values
 
 > [!WARNING]
 > Do not click **Deploy**. It opens a custom deployment of the exported template; completing it
 > redeploys the group's resources as exported and can overwrite what Module 2 set on them since.
 > This lab deploys only with `.\scripts\Deploy-Bicep.ps1` (Section 7).
 
-4. Stay on the ARM Template tab and leave **Include parameters** ticked (tick it if it is not)
+4. Stay on the ARM template tab and leave **Include parameters** ticked (tick it if it is not)
 5. Click **Download** to save the ZIP file locally, then extract it. It holds `template.json` (the
    ARM template); with **Include parameters** ticked, also `parameters.json` (the parameter
    values). This lab uses no other file the ZIP may hold.
