@@ -72,7 +72,8 @@
 
 What follows from it:
 
-- From outside the VNet and its peered VNets, only TCP 3724 to AuthSubnet and TCP 8085 to WorldSubnet are admitted (through the load balancer once Lab 3.2's VMs are in its pools); `DenyAllInBound` drops the rest.
+- From outside the VNet and its peered VNets, `auth-nsg` admits only TCP 3724 to AuthSubnet and `world-nsg` only TCP 8085 to WorldSubnet (through the load balancer once Lab 3.2's VMs are in its pools); `DenyAllInBound` drops the rest of the traffic to those two subnets.
+- DatabaseSubnet and AppServiceSubnet have no inbound filter at all. Nothing on the internet reaches them only because no public IP or load balancer rule points at them, not because a rule blocks it.
 - Between the subnets nothing is blocked. For example, WorldSubnet to AuthSubnet on TCP 22 misses rule 100 (its source is not `10.0.0.0/26`) and matches `AllowVnetInBound`; any subnet reaches DatabaseSubnet on any port. The separate NSGs do not prevent lateral movement.
 - Lab 3.2's NICs have no NIC-level NSG, so the subnet NSGs are the only filter.
 - On a dev VNet that Module 2 built, the subnets keep Lab 2.2's NSGs and this lab's two NSGs stay unattached; Lab 2.2's guide describes those rules.
