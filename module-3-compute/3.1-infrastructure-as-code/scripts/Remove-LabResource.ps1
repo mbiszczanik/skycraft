@@ -143,7 +143,7 @@ if ($Environment -eq 'all') {
 
 if ($groupsToRemove.Count -eq 0) {
     Write-Host "No groups selected." -ForegroundColor Yellow
-    exit
+    Exit-Lab -FailureCount 0
 }
 
 Write-Host "The following Resource Groups will be DELETED:" -ForegroundColor Red
@@ -182,3 +182,4 @@ if ($script:cleanupFailures -gt 0) {
 }
 
 Write-Host "`nCleanup Complete." -ForegroundColor Cyan
+Exit-Lab -FailureCount 0

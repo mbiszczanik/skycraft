@@ -114,7 +114,7 @@ Write-Host "`n[3/5] Enabling Azure Disk Encryption (4 GB sizes are resized to 8 
 $confirm = Read-Host "Proceed with encryption? This will restart VMs. (y/N)"
 if ($confirm -ne 'y') {
     Write-Host "Operation cancelled." -ForegroundColor Yellow
-    exit 0
+    Exit-Lab -FailureCount 0
 }
 
 # Process each VM
@@ -217,9 +217,10 @@ foreach ($vmName in $VmNames) {
 }
 
 if ($failed.Count -gt 0) {
-    Write-Error "Encryption failed for: $($failed -join ', ')"
+    Write-Host "Encryption failed for: $($failed -join ', ')" -ForegroundColor Red
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Azure Disk Encryption Complete" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
+Exit-Lab -FailureCount $failed.Count

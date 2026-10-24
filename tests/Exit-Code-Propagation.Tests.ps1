@@ -244,6 +244,10 @@ $ConvertedLabs = @(
     'module-2-networking/2.1-virtual-networks'
     'module-2-networking/2.2-secure-access'
     'module-2-networking/2.3-name-resolution'
+    'module-3-compute/3.1-infrastructure-as-code'
+    'module-3-compute/3.2-virtual-machines'
+    'module-3-compute/3.3-containers'
+    'module-3-compute/3.4-app-service'
     'scripts'
 )
 
