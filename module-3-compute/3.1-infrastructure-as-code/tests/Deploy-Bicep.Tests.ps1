@@ -31,7 +31,7 @@ BeforeAll {
     if ($script:Definition) { . ([scriptblock]::Create($script:Definition.Extent.Text)) }
 
     # The shape New-AzSubscriptionDeployment returns: name -> DeploymentVariable (Type, Value).
-    function New-StubOutputs {
+    function Get-StubOutputDictionary {
         $outputs = [System.Collections.Generic.Dictionary[string, object]]::new()
         $outputs['outDevVnetId']               = [pscustomobject]@{ Type = 'String'; Value = '/subscriptions/stub/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Network/virtualNetworks/dev-skycraft-swc-vnet' }
         $outputs['outDevLoadBalancerPublicIp'] = [pscustomobject]@{ Type = 'String'; Value = '203.0.113.10' }
@@ -47,7 +47,7 @@ Describe 'Lab 3.1 Deploy-Bicep.ps1 - deployment outputs printout (#354)' {
     }
 
     It 'returns every output with its value, sorted by name' {
-        $rows = @(Get-DeploymentOutputRow -Outputs (New-StubOutputs))
+        $rows = @(Get-DeploymentOutputRow -Outputs (Get-StubOutputDictionary))
         @($rows.Name) | Should -Be @('outDevLoadBalancerPublicIp', 'outDevVnetDeployed', 'outDevVnetId')
         $rows[0].Value | Should -Be '203.0.113.10'
         $rows[1].Value | Should -BeFalse
