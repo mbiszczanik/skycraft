@@ -1,4 +1,4 @@
-# Architecture Notes: Lab 2.3 — Name Resolution
+# Architecture Notes: Lab 2.3 : Name Resolution
 
 > Learning context. These notes explain the reasoning behind the lab's design and how it would change in a real environment. The lab deliberately favors clarity over production hardening.
 
@@ -7,10 +7,10 @@
 | Decision | Choice in this lab | Alternatives considered | Why this choice (in a learning context) |
 |---|---|---|---|
 | **Public DNS zone name** | skycraft.example.com (placeholder, not registered) | Use a real registered domain; subdomain of student's own domain | Using a placeholder domain teaches DNS concepts without requiring domain registration. In production, use a real registered domain and delegate nameservers to Azure DNS. A "bring your own domain" path is offered as an optional advanced variant: students who own a domain can delegate the Azure DNS nameservers and validate real external resolution end to end. |
-| **Private DNS zone name** | skycraft.internal (arbitrary RFC 1918 name) | Use environment-specific names (dev.internal, prod.internal); use TLD-style (.local, .corp) | Single shared zone teaches VNet Link concept: one zone can serve multiple VNets with auto-registration per VNet. Realistic for small deployments; large production splits zones per environment. |
+| **Private DNS zone name** | skycraft.internal (private DNS namespace) | Use environment-specific names (dev.internal, prod.internal); use TLD-style (.local, .corp) | Single shared zone teaches VNet Link concept: one zone can serve multiple VNets with auto-registration per VNet. Realistic for small deployments; large production splits zones per environment. |
 | **DNS zone scope** | Private zone links all three VNets (hub + dev + prod); auto-registration only on spokes | Link hub separately with registration disabled, spokes with auto-registration enabled | This design (the private-dns-zone module's `virtualNetworkLinks` in main.bicep) reflects reality: shared services (hub) are static; workloads (spokes) are dynamic. Only spokes auto-register VMs so DNS always has current IPs. |
 | **DNS A records** | Placeholder A records (dev-db @ 10.1.3.10, prod-db @ 10.2.3.10) with TTL=300s | Automatic records via auto-registration; conditional forwarders to on-premises; round-robin CNAME | Placeholder records teach zone structure. Real databases get auto-registered once VMs exist. TTL=300s (5 min) balances freshness and query load; production tunes per workload SLA. |
-| **Load Balancer SKU** | Standard SKU, Regional tier | Basic SKU (retired); Global tier | Standard LB is required for production (Basic deprecated ~2025). Regional tier is correct for single-region hub-spoke. Regional enables zone-redundancy if VMs are deployed across zones. |
+| **Load Balancer SKU** | Standard SKU, Regional tier | Basic SKU (retired); Global tier | Basic Load Balancer retired on September 30, 2025. Regional tier is correct for single-region hub-spoke. Regional enables zone-redundancy if VMs are deployed across zones. |
 | **LB health probe config** | TCP probes on game ports (3724 auth, 8085 world); 15s interval, probeThreshold 1 | HTTPS probes (require app HTTP endpoint); longer intervals or higher thresholds | The threshold matches the Portal and AVM 0.8.0 defaults. One consecutive failure or success changes backend health. The legacy numberOfProbes field stays 2, as in AVM; it is separate from probeThreshold. |
 | **LB rule load distribution** | Default (5-tuple hash: src IP, src port, dest IP, dest port, protocol) | SourceIP affinity (sticky sessions); SourceIPProtocol affinity (more aggressive stickiness) | Default hash distributes traffic fairly across backends. Sticky sessions help with game server state (player connections persist on one server). Lab uses default for simplicity; production would evaluate per-game requirements. |
 | **Public DNS records** | Two A records (dev, play) pointing to LB IPs; one CNAME (game → play) | Wildcard entry (*); SRV records for service discovery; geodistribution (Traffic Manager) | Simple two-record setup teaches DNS fundamentals. Wildcard would catch misspellings. SRV records are advanced. Geodistribution requires Azure Traffic Manager (future). |
@@ -43,27 +43,27 @@
 
 - **Operational Excellence**: LB centralizes traffic ingestion; Private DNS simplifies internal service discovery.
 - **Security**: Private DNS hides internal topology from external queries; health probes validate only responding backends get traffic.
-- **Cost Optimization**: Standard LB is ~€20/mo + data processing. Private DNS is ~€0.40/mo. Game is free. Public DNS is ~€0.50/mo.
+- **Cost Optimization**: both DNS zones and both load balancers continue to accrue charges. The estimate below separates fixed references from usage.
 
 ## 4. Cost / FinOps note
 
-**Monthly cost (if left running):**
-- 2 Standard Load Balancers (dev + prod): 2 × €20 = €40
-- Data processing through LBs (~10 GB outbound): ~€1.50 (rough estimate; scales with traffic)
-- 2 Standard Public IPs (LB frontend IPs, already counted in Lab 2.1): already included
-- 1 Public DNS Zone (skycraft.example.com): ~€0.50
-- 1 Private DNS Zone (skycraft.internal): ~€0.40
-- Private DNS zone links (3 VNets × 2 zones): €0 (free)
-- **Total: ~€42.40 / month** (additive to Lab 2.1)
+**Retail lookup: 2026-10-23, EUR, 730 hours/month.**
+
+| Resource | Monthly fixed cost or reference | Usage |
+| --- | --- | --- |
+| Public DNS zone | EUR 0.44, Global first-25-zone tier | EUR 0.352/million queries at the base tier |
+| Private DNS zone | EUR 0.44, Global first-25-zone tier | EUR 0.352/million queries at the base tier |
+| Three private-zone VNet links | No separate fixed meter found | Zone/query meters above |
+| Two Standard Load Balancers | Sweden Central price unknown; Global reference EUR 16.06 each | Global reference EUR 0.0044/GB processed; extra rules can add rule-hours |
+| Two inherited Standard IPv4 public IPs | EUR 6.424 combined, already counted in Lab 2.1 | Charged while attached or unattached |
+
+The two zones add EUR 0.88/month. Both LBs add a Global fixed-cost reference of EUR 32.12/month for their first five rules each (the lab uses three each). Lab 2.3's fixed-cost reference increment is EUR 33.00/month. Including the inherited IPs gives EUR 39.424/month for Module 2 excluding optional Bastion, plus usage. The confirmed regional total remains unknown because no Sweden Central-specific LB meter was returned. The links are three links to one zone, not links to both zones.
+
+Sources: [DNS pricing](https://azure.microsoft.com/pricing/details/dns/), [Load Balancer pricing](https://azure.microsoft.com/pricing/details/load-balancer/), and the Azure Retail Prices API. The LB Global meter is a reference, not a confirmed Sweden Central quote. Record-set overages do not apply at lab volume.
 
 **Lab cost controls:**
-- LB is the big cost. If not actively learning LB, stop the deployment and delete.
-- DNS zones are cheap (~€0.90/mo combined) and can stay.
-- Public IPs stay (inherited from Lab 2.1; only bill if not disassociated).
 
-**Cleanup reminders after lab:**
-1. Delete Load Balancers if not testing in Module 3 (€20 each).
-2. Delete Public DNS zone if not using it (€0.50/mo is negligible, but good practice).
-3. Keep Private DNS zone: it's used for service discovery in Module 3+ (VMs will auto-register and query it).
-4. Keep Private DNS zone links: they're free and enable resource discovery.
-5. Verify no orphaned resources: check for unattached Public IPs (if LB was deleted but PIP remained).
+- Keep the load balancers and private DNS zone when continuing to Module 3.
+- Remove the Lab 2.3 resources through its cleanup script when finished; nested pools, probes and rules are removed with each LB.
+- Removing an LB retains its public IP and its hourly charge. Lab 2.1's cleanup removes those IPs.
+- Remove private-zone links before deleting the private zone.

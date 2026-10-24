@@ -83,8 +83,8 @@ Get-AzPublicIpAddress | Where-Object Name -like '*-skycraft-swc-lb-pip' | Select
 
 You can build this lab in the Portal by following this guide, with the Az PowerShell blocks under each step, with the lab's Az PowerShell scripts (`scripts/Deploy-DNS.ps1` and `scripts/Deploy-LoadBalancer.ps1`), or with Bicep (`scripts/Deploy-Bicep.ps1`). All paths end in the state `scripts/Test-Lab.ps1` checks.
 
-- **Health probe threshold**: every path uses `probeThreshold: 1` (PowerShell `-ProbeThreshold 1`). The scripted paths keep the separate legacy field `numberOfProbes: 2` (PowerShell `-ProbeCount 2`), matching [AVM 0.8.0](https://github.com/Azure/bicep-registry-modules/blob/avm/res/network/load-balancer/0.8.0/avm/res/network/load-balancer/main.bicep). The Portal has no threshold field and writes 1.
-- **Tags on the private DNS virtual network links**: the Portal's **Add Virtual Network Link** page has no tags, so a link created in the Portal has none. The Az PowerShell blocks, scripts and the Bicep tag each link with the four SkyCraft tags. `Test-Lab.ps1` does not check tags on the links.
+- **Health probe threshold**: every path uses `probeThreshold: 1` (PowerShell `-ProbeThreshold 1`). The scripted paths keep the separate legacy field `numberOfProbes: 2` (PowerShell `-ProbeCount 2`), matching [AVM 0.8.0](https://github.com/Azure/bicep-registry-modules/blob/avm/res/network/load-balancer/0.8.0/avm/res/network/load-balancer/main.bicep). The Portal has no threshold field and saves both `probeThreshold: 1` and legacy `numberOfProbes: 1`. Microsoft documents the [legacy field as not respected](https://learn.microsoft.com/azure/load-balancer/whats-new#known-issues); the effective threshold comes from `probeThreshold`. This legacy serialization difference remains visible in what-if.
+- **Tags on the private DNS virtual network links**: the Portal's **Add Virtual Network Link** page has no tags, so tags cannot be entered there. In the test subscription, these links carried only the `Project` tag. The Az PowerShell blocks, scripts and the Bicep tag each link with the four SkyCraft tags. `Test-Lab.ps1` does not check tags on the links.
 
 ---
 
@@ -94,7 +94,7 @@ You can build this lab in the Portal by following this guide, with the Az PowerS
 
 **Azure DNS** provides name resolution using Microsoft's global DNS infrastructure. It offers:
 
-- **High availability**: 100% uptime SLA
+- **High availability**: a [100% authoritative DNS availability SLA, subject to its conditions](https://learn.microsoft.com/azure/reliability/reliability-dns)
 - **Global coverage**: Anycast network (query answered by nearest DNS server)
 - **Security**: RBAC, activity logs, resource locking
 - **Integration**: Managed alongside other Azure resources
@@ -105,9 +105,9 @@ You can build this lab in the Portal by following this guide, with the Az PowerS
 | ---------------- | ----------------------------------- | ------------------------------------- |
 | **Visibility**   | Internet-accessible                 | VNet-internal only                    |
 | **Use Case**     | External domains (skycraft.com)     | Internal services (database.internal) |
-| **Records**      | Standard DNS records (A, CNAME, MX) | A, AAAA, CNAME only                   |
+| **Records**      | Standard DNS records (A, CNAME, MX) | A, AAAA, CNAME, MX, PTR, SOA, SRV, TXT                   |
 | **Registration** | Can use registered domains          | Any name (no registration needed)     |
-| **Cost**         | $0.50/zone/month + queries          | $0.10/zone/month (no query charges)   |
+| **Cost**         | Per zone and per query          | Per zone and per query   |
 
 ### Azure Load Balancer Overview
 
@@ -130,9 +130,9 @@ You can build this lab in the Portal by following this guide, with the Az PowerS
 | **Availability Zones** | No              | Yes                              |
 | **SLA**                | None            | 99.99%                           |
 | **Security**           | Open by default | Closed by default (requires NSG) |
-| **Cost**               | Free            | ~$18/month + data processing     |
+| **Cost**               | Free            | Rule-hours + processed data     |
 
-**For SkyCraft**: Standard SKU required for production workloads and zone redundancy.
+**For SkyCraft**: use Standard. [Basic Load Balancer retired on September 30, 2025](https://learn.microsoft.com/azure/load-balancer/skus). The comparison above describes the retired SKU for context.
 
 ### Load Distribution Modes
 
@@ -371,7 +371,7 @@ Leave **I know the resource ID** unchecked. The **Virtual Network** list groups 
 
 9. Click **Create**.
 
-> **Note**: The **Add Virtual Network Link** page has no **Tags** field, so a link made in the Portal has no tags. The Az PowerShell block below, `scripts/Deploy-DNS.ps1` and the Bicep give each link the four SkyCraft tags. The links are not checked for tags by `Test-Lab.ps1`.
+> **Note**: The **Add Virtual Network Link** page has no **Tags** field, so tags cannot be entered there. In the test subscription, these links carried only the `Project` tag. The Az PowerShell block below, `scripts/Deploy-DNS.ps1` and the Bicep give each link the four SkyCraft tags. The links are not checked for tags by `Test-Lab.ps1`.
 
 **Expected Result**:
 
@@ -480,7 +480,7 @@ The **Public IP address** list groups the addresses into "Can be associated with
 6. Click **Save**.
 7. Click **Next: Backend pools** (skip for now, we'll create them later).
 8. Click **Next: Inbound rules** (skip, we'll create the rules after deployment).
-9. Click **Next: Outbound rules** (leave default).
+9. Click **Next: Outbound rule** (leave default).
 10. Click **Next: Tags** and add:
 
 | Name        | Value       |
@@ -500,7 +500,7 @@ The **Public IP address** list groups the addresses into "Can be associated with
 
 ![Step 2.3.8](./images/step-2.3.8.png)
 
-**Cost**: A Standard load balancer costs about 0.60 USD per day (about 18 USD a month for up to five rules, plus data processed) for as long as it exists. Delete it when you finish the module (see What This Lab Leaves Behind).
+**Cost**: Standard Load Balancer is billed by configured rule-hours and processed data. See the dated estimate in **What This Lab Leaves Behind** and the [regional pricing page](https://azure.microsoft.com/pricing/details/load-balancer/). Delete it when you finish the module unless you are continuing to Module 3.
 
 **With Az PowerShell** (instead of items 1-11):
 
@@ -566,7 +566,7 @@ Health probes check if backend VMs are healthy before sending traffic.
 
 The pane starts at port 80 and an interval of 5. **Used by** is read-only and stays empty until a rule uses the probe.
 
-> **Note**: The pane has no threshold field and saves `probeThreshold: 1`. The Az PowerShell block, script and Bicep explicitly set the same threshold. The separate legacy field `numberOfProbes` stays 2, matching AVM 0.8.0.
+> **Note**: The pane has no threshold field and saves `probeThreshold: 1`. The Az PowerShell block, script and Bicep explicitly set the same threshold. The scripted paths retain legacy `numberOfProbes: 2`, matching AVM 0.8.0; the Portal saves that legacy field as 1. Microsoft documents the legacy field as not respected. `Test-Lab.ps1` checks the modern `ProbeThreshold`, which must be 1.
 
 4. Click **Save**.
 
@@ -793,7 +793,7 @@ Repeat the load balancer creation process for production:
 | **Public IP address** | `prod-skycraft-swc-lb-pip` (use existing) |
 
 4. Click **Save**.
-5. Click **Next: Backend pools**, **Next: Inbound rules**, **Next: Outbound rules** (skip all three: you create them after deployment), then **Next: Tags**, and add:
+5. Click **Next: Backend pools**, **Next: Inbound rules**, **Next: Outbound rule** (skip all three: you create them after deployment), then **Next: Tags**, and add:
 
 | Name        | Value       |
 | ----------- | ----------- |
@@ -804,7 +804,7 @@ Repeat the load balancer creation process for production:
 
 6. Click **Review + create**, then **Create**.
 
-**Expected Result**: Load balancer `prod-skycraft-swc-lb` created with the frontend `prod-skycraft-swc-lb-frontend` on `prod-skycraft-swc-lb-pip`. It costs about 0.60 USD per day, like the dev load balancer.
+**Expected Result**: Load balancer `prod-skycraft-swc-lb` created with the frontend `prod-skycraft-swc-lb-frontend` on `prod-skycraft-swc-lb-pip`. Its ongoing rule-hour and data charges follow the same pricing model as the dev load balancer; see the dated estimate in **What This Lab Leaves Behind**.
 
 **With Az PowerShell** (instead of items 1-6):
 
@@ -1113,7 +1113,7 @@ nslookup game.skycraft.example.com
 Health Probe → VM1 (10.1.2.10:8085) → Response OK → Mark healthy
 Health Probe → VM2 (10.1.2.11:8085) → Response OK → Mark healthy
 
-Load Balancer Decision: Distribute traffic 50/50 to VM1 and VM2
+Load Balancer Decision: Select VM1 or VM2 for each new flow using the configured hash
 ```
 
 **Scenario 2: One backend fails**
@@ -1129,7 +1129,7 @@ Load Balancer Decision: Send 100% traffic to VM1 only
 
 ```
 After the next successful probe (threshold 1):
-VM2 marked healthy again → Load Balancer resumes 50/50 distribution
+VM2 marked healthy again → Load Balancer can select both healthy backends for new flows
 ```
 
 ---
@@ -1193,17 +1193,21 @@ Run the lab's validator from the lab folder:
 
 ## 📦 What This Lab Leaves Behind
 
-Lab 3.2 uses the load balancers this lab creates (`tools/lab-cycle-manifest.psd1` lists Lab 2.3 as its dependency), and the VMs of Module 3 register themselves in the private DNS zone. The DNS zones are used by no later lab. The load balancers cost money every day they exist; the daily costs below are approximate list prices (a Standard load balancer is about 18 USD a month for up to five rules, plus data processed), so check the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) for your own.
+Lab 3.2 uses these load balancers and the private DNS zone. The public zone uses a reserved example domain, so public recursive resolvers cannot discover it through domain delegation. You can query its Azure authoritative name servers directly.
 
-| Left behind | Where | Daily cost | What it does in later labs |
+Retail lookup: **2026-10-23**, EUR, 730 hours per month. DNS uses Global first-25-zone meters. The Retail Prices API returned no Sweden Central-specific Standard Load Balancer meter, so its regional rate and the confirmed total remain unknown. The Global primary LB meter below is a reference, not a regional quote. See [DNS pricing](https://azure.microsoft.com/pricing/details/dns/) and [Load Balancer pricing](https://azure.microsoft.com/pricing/details/load-balancer/).
+
+| Left behind | Where | Monthly fixed cost or reference | What it does in later labs |
 | --- | --- | --- | --- |
-| `skycraft.example.com` with `dev`, `play` and `game` | `platform-skycraft-swc-rg` | about 0.02 USD (0.50 USD a month, Section 1) plus queries | Nothing; it cannot answer from the internet until you delegate a real domain to it |
-| `skycraft.internal` with `dev-db` and `prod-db` | `platform-skycraft-swc-rg` | about 0.003 USD (0.10 USD a month, Section 1) | The VMs of Lab 3.2 register their own A records here (the dev and prod links have auto registration) |
-| `hub-vnet-link`, `dev-vnet-link`, `prod-vnet-link` | Child resources of `skycraft.internal` | 0 | Make the private zone resolve in the three VNets |
-| `dev-skycraft-swc-lb`, `prod-skycraft-swc-lb` (Standard) | `dev-skycraft-swc-rg`, `prod-skycraft-swc-rg` | about 0.60 USD each | Lab 3.2 puts its VMs into the world and auth pools; Lab 3.1 creates the dev load balancer only if it is missing |
-| `dev-skycraft-swc-lb-be-outbound`, `prod-skycraft-swc-lb-be-outbound` and the two outbound rules | The load balancers | 0 | Lab 3.2 puts every VM into the egress pool; the outbound rule is the VMs' only way to the internet |
+| `skycraft.example.com` with `dev`, `play` and `game` | `platform-skycraft-swc-rg` | EUR 0.44 plus queries | Optional public DNS practice; the example domain is not delegated |
+| `skycraft.internal` with `dev-db` and `prod-db` | `platform-skycraft-swc-rg` | EUR 0.44 plus queries | Future spoke VMs register their own A records here |
+| `hub-vnet-link`, `dev-vnet-link`, `prod-vnet-link` | Child resources of `skycraft.internal` | No separate fixed meter found | Make the private zone resolve in the three VNets |
+| `dev-skycraft-swc-lb`, `prod-skycraft-swc-lb` (Standard) | Spoke resource groups | Sweden Central rate unknown; Global reference EUR 16.06 each | Lab 3.2 adds the auth and world VM NICs |
+| The two outbound pools and rules | The load balancers | Included in the reference above, three rules per LB | Lab 3.2 adds every VM NIC to its environment's egress pool |
 
-The load balancers use the public IPs `dev-skycraft-swc-lb-pip` and `prod-skycraft-swc-lb-pip` of Lab 2.1. Deleting a load balancer leaves its public IP in place; Lab 2.1's cleanup removes it.
+The two zones add EUR 0.88/month. The two LBs add a Global fixed-cost reference of EUR 32.12/month, making the Lab 2.3 reference increment EUR 33.00/month. Both public and private DNS queries add EUR 0.352 per million at the base tier. The LB reference adds EUR 0.0044/GB processed; additional rule-hours can increase the charge. Record-set overage charges do not apply at this lab's volume.
+
+The load balancers use the two public IPs inherited from Lab 2.1, EUR 6.424/month combined at the dated Sweden Central rate, whether attached or unattached. These are already charged and are not part of the Lab 2.3 increment. Deleting a load balancer retains its IP; Lab 2.1's cleanup removes it. The Module 2 fixed-cost reference excluding optional Bastion is EUR 39.424/month plus usage; the confirmed regional total remains unknown because of the LB meter limit above.
 
 To remove the lab, run its cleanup from the lab folder:
 
@@ -1237,7 +1241,7 @@ Test your understanding with these questions:
    - Used for registered domains (skycraft.com)
    - Resolves names for external clients (game players)
    - Requires domain registration and NS delegation
-   - Cost: $0.50/zone/month + query charges
+   - Cost: zone-hours and query charges; see the dated estimate above
 
    **Private DNS Zones**:
 
@@ -1245,7 +1249,7 @@ Test your understanding with these questions:
    - Used for internal services (database.internal)
    - No domain registration needed (any name works)
    - Supports auto-registration of VM DNS records
-   - Cost: $0.10/zone/month (no query charges)
+   - Cost: Per zone and per query
 
    **For SkyCraft**: Public DNS for player-facing services (play.skycraft.com), Private DNS for internal communication (auth-server.skycraft.internal, database.skycraft.internal).
    </details>
@@ -1267,7 +1271,7 @@ Test your understanding with these questions:
    | **Monitoring**              | Basic metrics   | Comprehensive metrics + logs      |
    | **Multi-dimension metrics** | No              | Yes                               |
 
-   **For production workloads like SkyCraft**: Standard is required for SLA guarantees, zone redundancy, and comprehensive monitoring. Basic SKU is being deprecated.
+   **For SkyCraft**: use Standard for zone redundancy and its SLA, subject to the SLA terms. [Basic Load Balancer retired on September 30, 2025](https://learn.microsoft.com/azure/load-balancer/skus).
    </details>
 
 3. **How does the health probe determine if a backend VM is healthy?**
@@ -1368,14 +1372,14 @@ Test your understanding with these questions:
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: **Load balancer enters degraded state and stops accepting new connections.**
+   **Answer**: **No new flows are sent to a pool whose instances are all probe-down.**
 
    **Behavior**:
 
    1. All VMs marked unhealthy (no healthy backends available)
-   2. Load balancer health status → **Degraded**
-   3. **New connections**: Rejected (connection refused or timeout)
-   4. **Existing connections**: May continue if already established (TCP)
+   2. All-probes-down does not by itself determine the load balancer resource-health status
+   3. **New flows**: No healthy backend is selected
+   4. **Existing flows**: Standard Load Balancer can retain established TCP flows when the pool has more than one backend; UDP flows terminate. See [health probe behavior](https://learn.microsoft.com/azure/load-balancer/load-balancer-custom-probe-overview)
    5. Azure Monitor alerts fire (if configured)
 
    **Monitoring**:
@@ -1411,12 +1415,12 @@ Test your understanding with these questions:
    **Our SkyCraft TTL**: 300 seconds (5 minutes)
 
    - Change A record from 20.240.50.10 to 20.240.50.20
-   - Azure updates immediately
-   - Public resolvers refresh after 5 minutes (max)
+   - Azure DNS name servers reflect updates within 60 seconds
+   - Recursive and client caches can retain the old answer until its cached TTL expires; a previously higher TTL can delay the change beyond five minutes
 
    **Best Practices**:
 
-   - **Before change**: Lower TTL to 60 seconds (1 hour in advance)
+   - **Before change**: Lower TTL to 60 seconds at least the previous TTL before the planned change
    - **Make change**: Update record
    - **After change**: Wait 2× old TTL before critical operations
    - **Restore**: Increase TTL back to normal (3600-86400)
