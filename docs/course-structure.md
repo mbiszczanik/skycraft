@@ -107,7 +107,7 @@
 **Hours 20-23**: VM Infrastructure for SkyCraft Servers
 
 - Create a virtual machine (Ubuntu Linux for Authserver and Worldserver)
-- Configure Azure Disk Encryption (encrypt OS and data disks)
+- Configure Azure Disk Encryption (encrypt the Authserver VM; the Worldserver stays unencrypted for Lab 5.2) and compare it with encryption at host
 - Move a virtual machine to another resource group, subscription, or region
 - Manage virtual machine sizes (resize VMs based on player load)
 - Manage virtual machine disks (add data disks for database storage)

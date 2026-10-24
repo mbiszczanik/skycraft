@@ -556,7 +556,7 @@ The **Choose by** option and the port fields are in the **Outbound ports** secti
 
 13. Click **Save**
 
-> **SkyCraft Choice**: We chose **8000 ports per instance**. The frontend IP offers 63,992 ports to its outbound rule (**Available frontend ports**), so 8000 admits 7 instances (**Maximum number of backend instances**: 7). Module 3 puts 2 VMs into this pool, and even the prod scale set of Lab 3.2 (up to 4 instances) would fit beside them. 8000 is a multiple of 8, as Azure requires, and a fixed number per instance means a VM added later does not shrink the ports of the others.
+> **SkyCraft Choice**: We chose **8000 ports per instance**. The frontend IP offers 63,992 ports to its outbound rule (**Available frontend ports**), so 8000 admits 7 instances (**Maximum number of backend instances**: 7). Module 3 puts 2 VMs into this pool, and even the scale set of Lab 3.2 (up to 4 instances, in dev) would fit beside them. 8000 is a multiple of 8, as Azure requires, and a fixed number per instance means a VM added later does not shrink the ports of the others.
 
 **Expected Result**: Dev load balancer has the empty backend pool `dev-skycraft-swc-lb-be-outbound` and one outbound rule, `dev-skycraft-swc-lb-outbound`, that serves it with 8000 ports per instance. In Lab 3.2 both VMs join this pool and reach the internet through `dev-skycraft-swc-lb-pip`.
 
