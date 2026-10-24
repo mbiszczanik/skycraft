@@ -241,6 +241,9 @@ $ConvertedLabs = @(
     'module-1-identities-governance/1.1-entra-users-groups'
     'module-1-identities-governance/1.2-rbac'
     'module-1-identities-governance/1.3-governance'
+    'module-2-networking/2.1-virtual-networks'
+    'module-2-networking/2.2-secure-access'
+    'module-2-networking/2.3-name-resolution'
     'scripts'
 )
 
