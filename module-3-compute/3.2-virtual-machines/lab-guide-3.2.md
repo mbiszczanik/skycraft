@@ -5,12 +5,13 @@
 By completing this lab, you will:
 
 - Create Azure Virtual Machines (Ubuntu Linux) for SkyCraft game servers
-- Configure Azure Disk Encryption for OS and data disks
+- Configure Azure Disk Encryption on the Authserver VM, and compare it with encryption at host
 - Manage virtual machine sizes and resize VMs based on workload requirements
 - Add and configure managed data disks for database storage
 - Deploy VMs to availability zones for high availability
-- Understand Azure Virtual Machine Scale Sets for auto-scaling Worldserver instances
-- Move virtual machines between resource groups (conceptual)
+- Put VM network interfaces into application security groups and read the effective security rules
+- Create, scale and delete an Azure Virtual Machine Scale Set with autoscale rules
+- Explain what moving a VM to another resource group involves (a concept section in Section 7, no step changes Azure)
 
 ---
 
@@ -37,7 +38,7 @@ You'll deploy this VM infrastructure for SkyCraft game servers:
 
 - Run Ubuntu 22.04 LTS (AzerothCore's recommended OS)
 - Are distributed across availability zones for high availability
-- Have encrypted disks for security compliance
+- Encrypt the Authserver's disks for security compliance (the Worldserver stays unencrypted for the backup and disaster recovery exercises of Lab 5.2)
 - Include additional data disks for database storage
 - Are properly sized for the expected player load (starting small, can resize later)
 - Connect to the existing load balancer for public access
@@ -55,12 +56,12 @@ You'll deploy this VM infrastructure for SkyCraft game servers:
 
 - **Section 1**: Understanding Azure Virtual Machines (20 min)
 - **Section 2**: Create Authserver Virtual Machine (45 min)
-- **Section 3**: Create Worldserver Virtual Machine (40 min)
+- **Section 3**: Create Worldserver Virtual Machine (30 min)
 - **Section 4**: Configure managed data disks (30 min)
-- **Section 5**: Configure Azure Disk Encryption (35 min)
+- **Section 5**: Configure Azure Disk Encryption (35 min of work; the encryption itself then runs for about 2 hours while you continue with Sections 6-8)
 - **Section 6**: Deploy VMs to availability zones (25 min)
 - **Section 7**: Manage VM sizes (25 min)
-- **Section 8**: Introduction to Virtual Machine Scale Sets (20 min)
+- **Section 8**: Create a Virtual Machine Scale Set (30 min)
 
 ---
 
@@ -71,13 +72,17 @@ Before starting this lab:
 - [ ] Completed Lab 2.1 (Virtual Networks) **or** Lab 3.1 - either one creates `dev-skycraft-swc-rg` and `dev-skycraft-swc-vnet` with the `AuthSubnet` and `WorldSubnet` subnets
 - [ ] Completed Lab 2.3 (Name Resolution) **or** Lab 3.1 - either one creates the load balancer `dev-skycraft-swc-lb` with its `dev-skycraft-swc-lb-be-auth` and `dev-skycraft-swc-lb-be-world` backend pools, which the VM NICs join
 - [ ] Completed Lab 3.1 (Infrastructure as Code) - Bicep knowledge (recommended; not a resource dependency when Lab 2.3 has run)
-- [ ] Optional: Lab 2.2's NSGs and Azure Bastion. The VMs deploy without them; Bastion (`platform-skycraft-swc-bas`) is only needed for the portal SSH sessions (Step 3.2.14 onwards, and Step 3.2.32) and is the one standing-cost resource in the course, so Lab 2.2's script leaves it off unless you answer `y`
+- [ ] Completed Lab 2.2 (Secure Access) - its application security groups `dev-skycraft-swc-asg-auth` and `dev-skycraft-swc-asg-world` take the VM network interfaces in Step 3.2.13, and its NSGs filter the VM subnets
+- [ ] Optional: Lab 2.2's Azure Bastion (`platform-skycraft-swc-bas`). It is only needed for the portal SSH sessions (Step 3.2.15 and Step 3.2.32) and is the one standing-cost resource in the course, so Lab 2.2's script leaves it off unless you answer `y`. Step 3.2.15 shows **Run command**, which needs no Bastion
 - [ ] Contributor or Owner role on the subscription (`Deploy-Bicep.ps1` runs a subscription-scope deployment)
 - [ ] SSH key from Step 3.2.1 (option A or option B). The deploy script reads the public key from `$HOME\.ssh\skycraft-dev.pub` and exits if the file is missing; with option B, export the stored key to a file and pass it with `-SshKeyPath` (Step 3.2.1 shows the commands)
 - [ ] PowerShell 7+ and the `Az` module (Az.Accounts, Az.Resources, Az.Network, Az.Compute)
 - [ ] Bicep CLI on `PATH` - Az PowerShell compiles `main.bicep` through it
 
-The gates in `scripts/Deploy-Bicep.ps1` are the SSH public key at `$HOME\.ssh\skycraft-dev.pub` (`[1/5]`, override with `-SshKeyPath`) and the resource group, VNet and load balancer (`[2/5] Checking prerequisites`), each looked up by name. `tools/lab-cycle-manifest.psd1` declares this lab as depending on Lab 2.3.
+The gates in `scripts/Deploy-Bicep.ps1` are the SSH public key at `$HOME\.ssh\skycraft-dev.pub` (`[1/5]`, override with `-SshKeyPath`) and the resource group, VNet, load balancer and, in dev, the two application security groups (`[2/5] Checking prerequisites`), each looked up by name. `tools/lab-cycle-manifest.psd1` declares this lab as depending on Labs 2.2 and 2.3.
+
+> [!NOTE]
+> **Lab 1.3's tag policies.** Three things in this lab are created without tags, because their Portal forms and commands have no tags field: the inline data disk (Step 3.2.14), the disk encryption extension (Step 3.2.19) and the scale set's autoscale setting (Step 3.2.30). Lab 1.3's `Inherit-Project-Tag` assignment copies `Project` = `SkyCraft` from `dev-skycraft-swc-rg` to them, so `Enforce-Project-Tag` lets them pass. This lab relies on that assignment. If your Lab 1.3 has `Enforce-Project-Tag` but not `Inherit-Project-Tag`, add it (Lab 1.3, Step 1.3.8) before you start, or use the tagged alternatives those steps give.
 
 **Verify prerequisites**:
 
@@ -94,6 +99,9 @@ $vnet.Subnets.Name
 
 # Check the load balancer and its backend pools exist (Lab 2.3 or 3.1)
 (Get-AzLoadBalancer -Name dev-skycraft-swc-lb -ResourceGroupName dev-skycraft-swc-rg).BackendAddressPools.Name
+
+# Check the application security groups exist (Lab 2.2)
+(Get-AzApplicationSecurityGroup -ResourceGroupName dev-skycraft-swc-rg).Name
 ```
 
 ---
@@ -200,7 +208,7 @@ Your Browser → HTTPS (443) → Azure Bastion → SSH (22) → VM
 The NSG rules created in Lab 2.2 allow SSH (port 22) from the Bastion subnet (10.0.0.0/26) to the VM subnets.
 
 > [!IMPORTANT]
-> **Prerequisite Check**: Azure Bastion (`platform-skycraft-swc-bas`) must be deployed in the hub VNet before proceeding. If you haven't completed Lab 2.2, deploy Azure Bastion first, or the SSH connection steps in this lab will not work.
+> **Prerequisite Check**: the SSH sessions in Step 3.2.15 and Step 3.2.32 need Azure Bastion (`platform-skycraft-swc-bas`) in the hub VNet. Without it, run the commands of Step 3.2.15 through **Run command** instead (a tip there shows how); Step 3.2.32 then has nothing to connect with.
 
 ### Step 3.2.1: Generate SSH Key Pair
 
@@ -315,11 +323,29 @@ resource sshKey 'Microsoft.Compute/sshPublicKeys@2024-07-01' existing = {
 
 ### Step 3.2.2: Create Authserver VM via Azure Portal
 
-1. In Azure Portal, search for **Virtual machines**. The portal opens the list inside **Compute infrastructure** (**Infrastructure** → **Virtual machines**)
+1. In Azure Portal, search for **Virtual machines**. The search opens the Compute infrastructure hub; its list of VMs is **Virtual machines** under the **Infrastructure** group of the left menu (expand the group if it is collapsed)
 2. Click **+ Create** → **Virtual machine**
 
 > [!NOTE]
 > The portal may open a preview of a new Create-VM experience (a banner at the top of the Basics tab says so). Some field names there differ from the tables below; the banner's **Click here to access the previous experience** link switches back.
+
+> [!WARNING]
+> The wizard pre-fills values this lab does not use. Each row of the tables in Steps 3.2.2-3.2.5 sets one of them; a row you skip keeps the Portal's default:
+>
+> | Field | Portal default | Lab value |
+> | --- | --- | --- |
+> | Security type | Trusted launch | Standard |
+> | Size | Standard_D2s_v3 | Standard_B2ls_v2 |
+> | SSH public key source | Generate new key pair | Use existing public key (or the stored key) |
+> | Public inbound ports | Allow selected ports (SSH 22) | None |
+> | OS disk type | Premium SSD | Standard SSD |
+> | Virtual network | a new VNet `vnet-swedencentral-1` | `dev-skycraft-swc-vnet` |
+> | Subnet | a new subnet | `AuthSubnet` (`WorldSubnet` for the Worldserver) |
+> | Public IP | a new public IP | None |
+> | Backend pool | the first pool of the load balancer | `dev-skycraft-swc-lb-be-auth` (`-be-world` for the Worldserver) |
+> | System assigned managed identity | off | on |
+> | Auto-shutdown | on, 7:00 PM, with your e-mail address | off |
+> | Boot diagnostics | Enable with managed storage account | Disable |
 
 **Basics tab**:
 
@@ -331,7 +357,7 @@ resource sshKey 'Microsoft.Compute/sshPublicKeys@2024-07-01' existing = {
 | Region               | **Sweden Central**                           |
 | Availability options | **Availability zone**                        |
 | Availability zone    | **Zone 1**                                   |
-| Security type        | Standard                                     |
+| Security type        | **Standard** (the default is Trusted launch) |
 | Image                | **Ubuntu Server 22.04 LTS - x64 Gen2**       |
 | VM architecture      | x64                                          |
 | Size                 | **Standard_B2ls_v2** (2 vCPUs, 4 GiB memory) |
@@ -380,6 +406,8 @@ With option B from Step 3.2.1, set **SSH public key source** to **Use existing k
 | Delete with VM | ✅ Checked                                   |
 | Key management | Platform-managed key                         |
 
+Leave **Encryption at host** unchecked: it is greyed out unless the subscription registered the feature (Step 3.2.21), and this lab encrypts the Authserver with Azure Disk Encryption instead (Section 5). A VM that has encryption at host cannot get Azure Disk Encryption.
+
 **Why Standard SSD for Development?**
 
 - Cost-effective for non-production workloads (~50% cheaper than Premium SSD)
@@ -399,7 +427,8 @@ With option B from Step 3.2.1, set **SSH public key source** to **Use existing k
 | Public IP                     | **None**                         |
 | NIC network security group    | **None** (NSG already on subnet) |
 | Delete NIC when VM is deleted | ✅ Checked                       |
-| Load balancing                | **Yes**                          |
+
+The wizard pre-fills a new VNet, a new subnet and a new public IP: change all three. With a public IP selected, the delete check box reads **Delete public IP and NIC when VM is deleted**.
 
 **Load balancing options**:
 
@@ -421,13 +450,14 @@ With option B from Step 3.2.1, set **SSH public key source** to **Use existing k
 
 | Field                       | Value                                            |
 | --------------------------- | ------------------------------------------------ |
-| Enable basic plan for free  | ✅ Checked (or uncheck if already have Defender) |
 | Identity                    | ✅ Enable system assigned managed identity       |
 | Microsoft Entra ID          | ❌ Unchecked                                     |
-| Auto-shutdown               | ❌ Disabled (for dev, you may enable)            |
+| Auto-shutdown               | ❌ Disabled (the wizard turns it on, for 7:00 PM with your e-mail address) |
 | Backup                      | ❌ Unchecked                                     |
 | Enable periodic assesment   | ❌ Unchecked                                     |
 | Patch orchestration options | ✅ Image default                                 |
+
+The Management tab has no Microsoft Defender for Cloud row; Defender is a subscription setting.
 
 7. Click **Next: Monitoring**
 
@@ -436,7 +466,7 @@ With option B from Step 3.2.1, set **SSH public key source** to **Use existing k
 | Field                          | Value         |
 | ------------------------------ | ------------- |
 | Alerts                         | Leave default |
-| Boot diagnostics               | Disable       |
+| Boot diagnostics               | Disable (the default is Enable with managed storage account) |
 | OS guest diagnostics           | Leave default |
 | Application health monitoringh | Leave default |
 
@@ -455,7 +485,7 @@ With option B from Step 3.2.1, set **SSH public key source** to **Use existing k
 | Owner       | mbiszczanik |
 
 10. Click **Review + create**
-11. Review the configuration summary
+11. Review the configuration summary. The page also shows the signed-in account's name, e-mail address and phone number: crop them out of any screenshot you share
 12. Click **Create**
 
 **Expected Result**:
@@ -480,18 +510,18 @@ With option B from Step 3.2.1, set **SSH public key source** to **Use existing k
 | Public IP address      | None                             |
 | Virtual network/subnet | dev-skycraft-swc-vnet/AuthSubnet |
 
-4. Click **Networking** in the left menu
+4. In the left menu, under **Networking** (expand it if it is collapsed), click **Network settings**
 5. Verify the private IP address is in the 10.1.1.x range
 
 **Expected Result**: VM running with private IP in AuthSubnet range.
 
 ---
 
-## 📖 Section 3: Create Worldserver Virtual Machine (40 minutes)
+## 📖 Section 3: Create Worldserver Virtual Machine (30 minutes)
 
 ### Step 3.2.8: Create Worldserver VM
 
-Repeat the VM creation process for the Worldserver:
+Repeat the VM creation process for the Worldserver. The wizard pre-fills the same defaults as for the Authserver (the warning in Step 3.2.2), so set every row below:
 
 1. Navigate to **Virtual machines** → **+ Create** → **Virtual machine**
 
@@ -504,7 +534,7 @@ Repeat the VM creation process for the Worldserver:
 | Region               | **Sweden Central**                      |
 | Availability options | **Availability zone**                   |
 | Availability zone    | **Zone 2** (different from Authserver!) |
-| Security type        | Standard                                |
+| Security type        | **Standard** (the default is Trusted launch) |
 | Image                | **Ubuntu Server 22.04 LTS - x64 Gen2**  |
 | Size                 | **Standard_B2ls_v2**                    |
 | Authentication type  | **SSH public key**                      |
@@ -521,7 +551,7 @@ Repeat the VM creation process for the Worldserver:
 
 | Field          | Value            |
 | -------------- | ---------------- |
-| OS disk type   | **Standard SSD** |
+| OS disk type   | **Standard SSD** (the default is Premium SSD) |
 | Delete with VM | ✅ Checked       |
 
 2. Click **Next: Networking**
@@ -537,9 +567,11 @@ Repeat the VM creation process for the Worldserver:
 | Public IP                  | **None**                       |
 | NIC network security group | **None**                       |
 | Delete NIC when VM is deleted | ✅ Checked                  |
-| Load balancing             | **Yes**                        |
+| Load balancing options     | **Azure load balancer**        |
 | Select a load balancer     | `dev-skycraft-swc-lb`          |
 | Select a backend pool      | `dev-skycraft-swc-lb-be-world` |
+
+As in Step 3.2.4, replace the new VNet, subnet and public IP the wizard pre-fills.
 
 ![Worldserver Networking](images/step-3.2.10.png)
 
@@ -549,10 +581,9 @@ Repeat the VM creation process for the Worldserver:
 
 | Field                       | Value                                            |
 | --------------------------- | ------------------------------------------------ |
-| Enable basic plan for free  | ✅ Checked (or uncheck if already have Defender) |
 | Identity                    | ✅ Enable system assigned managed identity       |
 | Microsoft Entra ID          | ❌ Unchecked                                     |
-| Auto-shutdown               | ❌ Disabled (for dev, you may enable)            |
+| Auto-shutdown               | ❌ Disabled (the wizard turns it on, for 7:00 PM with your e-mail address) |
 | Backup                      | ❌ Unchecked                                     |
 | Enable periodic assesment   | ❌ Unchecked                                     |
 | Patch orchestration options | ✅ Image default                                 |
@@ -562,7 +593,7 @@ Repeat the VM creation process for the Worldserver:
 | Field                          | Value         |
 | ------------------------------ | ------------- |
 | Alerts                         | Leave default |
-| Boot diagnostics               | Disable       |
+| Boot diagnostics               | Disable (the default is Enable with managed storage account) |
 | OS guest diagnostics           | Leave default |
 | Application health monitoringh | Leave default |
 
@@ -595,6 +626,8 @@ Repeat the VM creation process for the Worldserver:
 | dev-skycraft-swc-auth-vm  | 1    | AuthSubnet  | Standard_B2ls_v2 | Running |
 | dev-skycraft-swc-world-vm | 2    | WorldSubnet | Standard_B2ls_v2 | Running |
 
+The list's **Public IP address** column shows the load balancer's public IP for both VMs. That is the address of the frontend they sit behind, not an address of their own: neither VM has a public IP.
+
 3. Navigate to **Load balancers** → `dev-skycraft-swc-lb` → **Backend pools**
 4. Verify both backend pools have VMs:
    - `dev-skycraft-swc-lb-be-auth`: 1 VM
@@ -612,7 +645,35 @@ The subnets are private (Lab 2.1), so the VMs reach the internet (package update
 
 If the pool list was already open when the pool was created, it shows the pool only after **Refresh**.
 
-**Expected Result**: Both VMs running in different availability zones, connected to respective load balancer backend pools, and `dev-skycraft-swc-lb-be-outbound` lists 2 VMs (auth and world).
+#### Put Both NICs into Their Application Security Groups
+
+Lab 2.2 created the application security groups `dev-skycraft-swc-asg-auth` and `dev-skycraft-swc-asg-world` with no members. An ASG groups network interfaces by role, so an NSG rule can name the role instead of IP ranges. Now that the VMs exist, put each VM's network interface into its group:
+
+10. Navigate to **Virtual machines** → `dev-skycraft-swc-auth-vm` → **Networking** → **Application security groups** (Networking is a group of the left menu; expand it if it is collapsed)
+11. Click **Add application security groups**, tick `dev-skycraft-swc-asg-auth` and click **Add**
+12. Navigate to **Virtual machines** → `dev-skycraft-swc-world-vm` → **Networking** → **Application security groups**
+13. Click **Add application security groups**, tick `dev-skycraft-swc-asg-world` and click **Add**
+
+The same with Az PowerShell. The network interface is found through the VM, because the Portal names it after the VM with a few digits added:
+
+```powershell
+$rg = 'dev-skycraft-swc-rg'
+foreach ($role in 'auth', 'world') {
+    $vm  = Get-AzVM -ResourceGroupName $rg -Name "dev-skycraft-swc-$role-vm"
+    $nic = Get-AzNetworkInterface -ResourceId $vm.NetworkProfile.NetworkInterfaces[0].Id
+    $asg = Get-AzApplicationSecurityGroup -ResourceGroupName $rg -Name "dev-skycraft-swc-asg-$role"
+    $nic.IpConfigurations[0].ApplicationSecurityGroups = @($asg)
+    $nic | Set-AzNetworkInterface | Out-Null
+}
+```
+
+**Read the effective security rules.** Azure evaluates NSG rules per network interface: the rules of the subnet's NSG and of the NIC's own NSG, with every ASG in a rule resolved to the private IPs of its member NICs.
+
+14. Navigate to **Virtual machines** → `dev-skycraft-swc-auth-vm` → **Networking** → **Network settings**, then click **Effective security rules**. You see `dev-skycraft-swc-auth-nsg` (from `AuthSubnet`) with its custom rules and the default rules (65000-65500)
+15. Now the database side. Navigate to **Network security groups** → `dev-skycraft-swc-db-nsg` → **Settings** → **Inbound security rules**. `Allow-MySQL-From-AppTier` lets port 3306 in from the application tier: from the two subnet ranges, or, if you saved Step 2.2.9 of Lab 2.2, from `dev-skycraft-swc-asg-auth` and `dev-skycraft-swc-asg-world`. With the NICs in the groups, that ASG source now means exactly these two VMs, whatever their IP addresses
+16. On the same NSG, under **Help**, click **Effective security rules**. The page lists no network interface: effective rules exist only for a NIC the NSG applies to, and `DatabaseSubnet` holds no VM yet. A database VM placed there later would show `Allow-MySQL-From-AppTier` with its source resolved to the private IPs of the auth and world VMs
+
+**Expected Result**: Both VMs running in different availability zones, connected to respective load balancer backend pools, `dev-skycraft-swc-lb-be-outbound` lists 2 VMs (auth and world), and each VM's network interface is in its application security group.
 
 ![Worldserver Backend Pools](images/step-3.2.13.png)
 
@@ -638,8 +699,8 @@ The Worldserver VM needs additional storage for:
 ### Step 3.2.14: Add Data Disk to Worldserver VM
 
 1. Navigate to **Virtual machines** → `dev-skycraft-swc-world-vm`
-2. In the left menu, click **Disks**
-3. Click **+ Create and attach a new disk**
+2. In the left menu, under **Settings** (expand it if it is collapsed), click **Disks**
+3. Click **+ Create and attach a new disk**. A new row appears in the Data disks table, pre-filled with Premium SSD, 4 GiB and host caching Read-only. Set its cells:
 
 **Data disk configuration**:
 
@@ -649,15 +710,26 @@ The Worldserver VM needs additional storage for:
 | Disk name          | `dev-skycraft-swc-world-vm-data`             |
 | Storage type       | **Standard SSD (locally-redundant storage)** |
 | Size               | **64 GiB** (E6)                              |
-| Encryption         | Platform-managed key                         |
-| Enable shared disk | ❌ No                                        |
+| Host caching       | Read-only (the default)                      |
 
-4. Click **Save**
+4. Click **Apply** at the top of the page
+
+The inline row has no tags field. `Inherit-Project-Tag` (Lab 1.3) gives the new disk `Project` from the resource group. If your subscription has `Enforce-Project-Tag` without `Inherit-Project-Tag`, **Apply** seems to do nothing: the reason, "disallowed by policy", is only under the notification bell. Then create the disk with its tags instead, with the block below or under **Disks** → **+ Create** (zone 2, the four tags), and attach it with **Attach existing disks**.
+
+```powershell
+$rg = 'dev-skycraft-swc-rg'
+$diskConfig = New-AzDiskConfig -Location swedencentral -Zone 2 -CreateOption Empty -DiskSizeGB 64 -SkuName StandardSSD_LRS `
+    -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN'; Owner = 'mbiszczanik' }
+$disk = New-AzDisk -ResourceGroupName $rg -DiskName dev-skycraft-swc-world-vm-data -Disk $diskConfig
+$vm = Get-AzVM -ResourceGroupName $rg -Name dev-skycraft-swc-world-vm
+$vm = Add-AzVMDataDisk -VM $vm -Name $disk.Name -ManagedDiskId $disk.Id -Lun 0 -CreateOption Attach -Caching ReadOnly
+Update-AzVM -ResourceGroupName $rg -VM $vm
+```
 
 **Expected Result**:
 
 - Data disk creation starts
-- Disk appears in the Data disks list with status "Attached"
+- Disk appears in the Data disks list at LUN 0
 - Total: 1 OS disk + 1 Data disk
 
 ### Step 3.2.15: Initialize Data Disk Inside VM
@@ -685,6 +757,7 @@ The data disk is attached but not yet formatted. You need to connect to the VM v
 > - Ensure your browser allows pop-ups from Azure Portal
 > - The SSH session opens in a new browser tab
 > - If connection fails, verify: (1) VM is running, (2) VNet peering is connected, (3) NSG allows SSH from 10.0.0.0/26
+> - **No Bastion?** Run the commands below without an SSH session: on the VM, under **Operations**, click **Run command** → **RunShellScript**, paste them and click **Run**. Each run takes a minute or two and shows the output when it ends
 
 **Connection Flow Visualization:**
 
@@ -694,55 +767,51 @@ You (Browser) → Azure Portal → Bastion (10.0.0.x) → Peering → WorldServe
 
 7. Once connected, run these commands to initialize the disk:
 
+`Standard_B2ls_v2` has no temporary disk, so the new data disk is the second disk the kernel sees, `/dev/sdb`, not `/dev/sdc` as on sizes with a temporary disk. A device letter can change between boots; the Azure Linux agent therefore adds a stable name for each data disk by its LUN, `/dev/disk/azure/scsi1/lun0` for LUN 0, and the commands below use only that name.
+
 ```bash
-# List attached disks
-lsblk
+# List the disks: the 64 GB disk without partitions is the new data disk
+lsblk -o NAME,SIZE,TYPE,MOUNTPOINT
 
-# Expected output:
-# NAME    MAJ:MIN RM  SIZE RO TYPE MOUNTPOINT
-# sda       8:0    0   30G  0 disk
-# ├─sda1    8:1    0 29.9G  0 part /
-# sdb       8:16   0    4G  0 disk
-# └─sdb1    8:17   0    4G  0 part /mnt
-# sdc       8:32   0   64G  0 disk  <-- This is the new data disk
+# Expected output (partial):
+# NAME     SIZE TYPE MOUNTPOINT
+# sda       30G disk
+# ├─sda1  29.9G part /
+# ├─sda14    4M part
+# └─sda15  106M part /boot/efi
+# sdb       64G disk           <-- the new data disk (LUN 0)
 
-# Partition the disk (use the correct device, likely /dev/sdc)
-sudo fdisk /dev/sdc
+# The stable name of LUN 0 points to it
+ls -l /dev/disk/azure/scsi1/lun0
+# Expected: ... /dev/disk/azure/scsi1/lun0 -> ../../../sdb
 
-# In fdisk:
-# Type: n (new partition)
-# Type: p (primary)
-# Type: 1 (partition number)
-# Press Enter (default first sector)
-# Press Enter (default last sector)
-# Type: w (write changes)
+# Create one partition over the whole disk (GPT)
+sudo parted /dev/disk/azure/scsi1/lun0 --script mklabel gpt mkpart data ext4 0% 100%
+sudo partprobe /dev/disk/azure/scsi1/lun0
+
+# The partition's stable name is lun0-part1
+ls -l /dev/disk/azure/scsi1/lun0-part1
 
 # Format the partition with ext4
-sudo mkfs.ext4 /dev/sdc1
+sudo mkfs.ext4 /dev/disk/azure/scsi1/lun0-part1
 
-# Create mount point
-sudo mkdir /data
+# Create the mount point and mount the partition
+sudo mkdir -p /data
+sudo mount /dev/disk/azure/scsi1/lun0-part1 /data
 
-# Mount the disk
-sudo mount /dev/sdc1 /data
-
-# Get UUID for persistent mount
-sudo blkid /dev/sdc1
-# Copy the UUID value shown
-
-# Add to fstab for persistent mount
-echo "UUID=<YOUR-UUID-HERE> /data ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab
+# Mount it at every boot, by its stable name; nofail lets the VM boot without the disk
+echo "/dev/disk/azure/scsi1/lun0-part1 /data ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab
 
 # Verify mount
 df -h /data
-# Expected: /dev/sdc1  64G  24K  61G   1% /data
+# Expected: /dev/sdb1 of about 63G, mounted on /data
 ```
 
 **Expected Result**:
 
-- Data disk formatted with ext4
+- Data disk partitioned and formatted with ext4
 - Mounted at `/data`
-- Configured for persistent mount after reboot
+- Configured in `/etc/fstab` by its stable name for persistent mount after reboot
 
 ### Step 3.2.16: Verify Data Disk Configuration
 
@@ -781,7 +850,14 @@ exit
 - Meets security and compliance requirements
 - Transparent to applications
 
-**For SkyCraft**: Encrypt all disks to protect player data and game configurations.
+> [!WARNING]
+> **Retirement**: Azure Disk Encryption retires on **September 15, 2028**, and Microsoft recommends **encryption at host** for new deployments. AZ-104 (skills measured as of April 17, 2026) lists *Configure encryption at host for Azure virtual machines*, not ADE. This lab still uses ADE on one VM because Lab 5.2 teaches the key vault permission Azure Backup needs for an encrypted VM; Step 3.2.21 shows encryption at host.
+
+> **SkyCraft Choice**: Encrypt the **Authserver VM only**. The Worldserver stays unencrypted on purpose: Lab 5.2 restores single files from its backup and replicates it with Site Recovery, and file-level recovery is not available for a VM encrypted with ADE. Lab 5.2 backs up the encrypted Authserver, after giving Azure Backup a role on the key vault.
+
+**Duration**: the steps take about 35 minutes. The encryption of the OS volume then runs inside the VM for about 2 hours (measured on `Standard_B2s_v2` on 2026-10-15); continue with Sections 6-8 meanwhile, which do not touch the Authserver.
+
+`scripts/Enable-Encryption.ps1` does Steps 3.2.18-3.2.20 in one run (resize, encrypt, wait, resize back), and `scripts/Deploy-Bicep.ps1` runs it after deploying the key vault.
 
 ### Step 3.2.17: Create Azure Key Vault for Encryption Keys
 
@@ -789,13 +865,17 @@ exit
 
 **Basics tab**:
 
-| Field          | Value                                   |
-| -------------- | --------------------------------------- |
-| Subscription   | [Your subscription]                     |
-| Resource group | `dev-skycraft-swc-rg`                   |
-| Key vault name | `dev-skycraft-swc-kv` (globally unique) |
-| Region         | **Sweden Central**                      |
-| Pricing tier   | **Standard**                            |
+| Field                        | Value                                   |
+| ---------------------------- | --------------------------------------- |
+| Subscription                 | [Your subscription]                     |
+| Resource group               | `dev-skycraft-swc-rg`                   |
+| Key vault name               | `dev-skycraft-swc-kv` (globally unique) |
+| Region                       | **Sweden Central**                      |
+| Pricing tier                 | **Standard**                            |
+| Days to retain deleted vaults | `7`                                    |
+| Purge protection             | **Disable purge protection**            |
+
+Set the region explicitly: the form defaults to **East US**, which Lab 1.3's `Restrict-Azure-Regions` refuses. Seven days and no purge protection match the Bicep path and let `Remove-LabResource.ps1 -IncludeKeyVault` purge the vault, so its name is free again at once.
 
 ![Configure Azure Disk Encryption](./images/step-3.2.17.png)
 
@@ -806,17 +886,19 @@ exit
 | Field                                       | Value                                             |
 | ------------------------------------------- | ------------------------------------------------- |
 | Permission model                            | **Azure role-based access control (recommended)** |
-| Enable access to:                           |                                                   |
-| Azure Virtual Machines for deployment       | ✅ Enabled                                        |
-| Azure Disk Encryption for volume encryption | ✅ Enabled                                        |
+| Azure Virtual Machines for deployment       | ✅ Checked                                        |
+| Azure Disk Encryption for volume encryption | ✅ Checked                                        |
+
+The two check boxes are under **Resource access**. Leave Azure Resource Manager for template deployment unchecked; ADE does not need it.
 
 3. Click **Next: Networking**
 
 **Networking**:
 
-| Field                | Value                                     |
-| -------------------- | ----------------------------------------- |
-| Network connectivity | **Allow public access from all networks** |
+| Field                | Value                |
+| -------------------- | -------------------- |
+| Enable public access | ✅ Checked           |
+| Allow access from    | **All networks**     |
 
 > [!NOTE]
 > For production, you should restrict access to specific VNets. For this lab, we allow public access for simplicity.
@@ -834,127 +916,105 @@ exit
 
 5. Click **Review + create** → **Create**
 
+The same with Az PowerShell (the permission model is Azure RBAC by default):
+
+```powershell
+New-AzKeyVault -Name dev-skycraft-swc-kv -ResourceGroupName dev-skycraft-swc-rg -Location swedencentral `
+    -Sku Standard -EnabledForDeployment -EnabledForDiskEncryption -SoftDeleteRetentionInDays 7 `
+    -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN'; Owner = 'mbiszczanik' }
+```
+
 **Expected Result**: Key vault `dev-skycraft-swc-kv` created with disk encryption enabled.
 
-### Step 3.2.18: Resize VMs for Azure Disk Encryption (step takes about 15-30 mins)
+<a id="step-3218-resize-vms-for-azure-disk-encryption-step-takes-about-15-30-mins"></a>
 
-> [!WARNING]
-> **Deprecation Notice**: Azure Disk Encryption (ADE) is scheduled for retirement on **September 15, 2028**. Microsoft recommends using **Encryption at Host** for new deployments. However, ADE is still part of the **AZ-104 exam** curriculum, so we cover it here for certification preparation. See [Step 3.2.21](#step-3221-optional-enable-encryption-at-host-best-practice) for the modern approach.
+### Step 3.2.18: Resize the Authserver VM for Azure Disk Encryption
 
-Azure Disk Encryption for Linux VMs requires **8 GB RAM minimum** for OS disk encryption. Our `Standard_B2ls_v2` VMs have only 4 GB, so we temporarily resize them to their 8 GB sibling `Standard_B2s_v2`.
+Azure Disk Encryption for Linux VMs requires **8 GB RAM minimum** for OS disk encryption. `Standard_B2ls_v2` has only 4 GB, so resize the Authserver VM to its 8 GB sibling `Standard_B2s_v2` for the duration of the encryption. The Worldserver is not encrypted and keeps its size.
 
 > [!IMPORTANT]
 > **Memory Requirement**: ADE for Linux requires 8 GB RAM. The encryption process uses significant memory to encrypt the OS volume.
 
 > [!NOTE]
-> `Standard_B2ls_v2` and `Standard_B2s_v2` are in the same Bsv2 family (same hardware cluster), so the resize happens in place: the VM restarts, but no deallocation is needed. The `Enable-Encryption.ps1` script performs exactly these two resizes for you.
+> `Standard_B2ls_v2` and `Standard_B2s_v2` are in the same Bsv2 family (same hardware cluster), so the resize happens in place: the VM restarts, but no deallocation is needed. It took about 40 seconds on 2026-10-15.
 
-1. Open **Azure Cloud Shell** (Bash) from the Azure Portal
+1. Open **Azure Cloud Shell** (PowerShell) from the Azure Portal, or a local PowerShell signed in with `Connect-AzAccount`
 
-2. Resize Authserver VM to 8 GB RAM:
+2. Resize the Authserver VM to 8 GB RAM:
 
-```azurecli
-# Resize to Standard_B2s_v2 (8 GB RAM) - in-place, the VM restarts
-az vm resize \
-  --name dev-skycraft-swc-auth-vm \
-  --resource-group dev-skycraft-swc-rg \
-  --size Standard_B2s_v2
+```powershell
+# Resize to Standard_B2s_v2 (8 GB RAM) - in place, the VM restarts
+$vm = Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-vm
+$vm.HardwareProfile.VmSize = 'Standard_B2s_v2'
+Update-AzVM -ResourceGroupName dev-skycraft-swc-rg -VM $vm
 ```
 
-3. Resize Worldserver VM to 8 GB RAM:
+In the Portal the same is **Availability + scale** → **Size** on the VM (Step 3.2.26).
 
-```azurecli
-# Resize to Standard_B2s_v2 (8 GB RAM) - in-place, the VM restarts
-az vm resize \
-  --name dev-skycraft-swc-world-vm \
-  --resource-group dev-skycraft-swc-rg \
-  --size Standard_B2s_v2
+**Expected Result**: `dev-skycraft-swc-auth-vm` running with `Standard_B2s_v2` (2 vCPUs, 8 GB RAM).
+
+<a id="step-3219-enable-azure-disk-encryption-on-both-vms"></a>
+
+### Step 3.2.19: Enable Azure Disk Encryption on the Authserver VM
+
+Azure Disk Encryption for Linux VMs is enabled with **Az PowerShell** or the **Azure CLI**; the Portal has no ADE option for a Linux VM.
+
+1. Enable encryption on the Authserver VM:
+
+```powershell
+$kv = Get-AzKeyVault -VaultName dev-skycraft-swc-kv -ResourceGroupName dev-skycraft-swc-rg
+Set-AzVMDiskEncryptionExtension -ResourceGroupName dev-skycraft-swc-rg -VMName dev-skycraft-swc-auth-vm `
+    -DiskEncryptionKeyVaultUrl $kv.VaultUri -DiskEncryptionKeyVaultId $kv.ResourceId -VolumeType All -Force
 ```
 
-**Expected Result**: Both VMs running with `Standard_B2s_v2` size (2 vCPUs, 8 GB RAM).
-
-### Step 3.2.19: Enable Azure Disk Encryption on Both VMs
-
-Azure Disk Encryption for Linux VMs must be enabled via **Azure CLI** or **PowerShell** (not available in Azure Portal for Linux).
-
-1. Enable encryption on Authserver:
-
-```azurecli
-# Enable Azure Disk Encryption on Authserver VM
-az vm encryption enable \
-  --name dev-skycraft-swc-auth-vm \
-  --resource-group dev-skycraft-swc-rg \
-  --disk-encryption-keyvault dev-skycraft-swc-kv \
-  --volume-type All
-```
-
-2. Wait for encryption to complete (15-30 minutes), then enable on Worldserver:
-
-```azurecli
-# Enable Azure Disk Encryption on Worldserver VM (includes data disk)
-az vm encryption enable \
-  --name dev-skycraft-swc-world-vm \
-  --resource-group dev-skycraft-swc-rg \
-  --disk-encryption-keyvault dev-skycraft-swc-kv \
-  --volume-type All
-```
+The Azure CLI equivalent is `az vm encryption enable --name dev-skycraft-swc-auth-vm --resource-group dev-skycraft-swc-rg --disk-encryption-keyvault dev-skycraft-swc-kv --volume-type All`.
 
 **Command Parameters Explained**:
 
-| Parameter                    | Value                 | Description                           |
-| ---------------------------- | --------------------- | ------------------------------------- |
-| `--name`                     | VM name               | Target VM to encrypt                  |
-| `--resource-group`           | `dev-skycraft-swc-rg` | Resource group containing the VM      |
-| `--disk-encryption-keyvault` | `dev-skycraft-swc-kv` | Key Vault for storing encryption keys |
-| `--volume-type`              | `All`                 | Encrypt both OS and data disks        |
+| Parameter                    | Value                       | Description                                          |
+| ---------------------------- | --------------------------- | ---------------------------------------------------- |
+| `-VMName`                    | `dev-skycraft-swc-auth-vm`  | The only VM this lab encrypts                        |
+| `-DiskEncryptionKeyVaultUrl` | the vault's URI             | Where ADE stores the disk encryption secret          |
+| `-DiskEncryptionKeyVaultId`  | the vault's resource ID     | The same vault, by ID                                |
+| `-VolumeType`                | `All`                       | OS and data volumes; the Authserver has no data disk, so its data volume reads `NotMounted` |
+
+2. About tags: the command installs the VM extension `AzureDiskEncryptionForLinux`, and neither command has a tags option. This lab relies on Lab 1.3's `Inherit-Project-Tag` assignment, which gives the extension `Project` = `SkyCraft` from `dev-skycraft-swc-rg`. Without that assignment `Enforce-Project-Tag` refuses the extension with `RequestDisallowedByPolicy` (Troubleshooting, Issue 4).
+
+3. Wait for the encryption. The command can return before the OS volume is done; the encryption then runs inside the VM and took about 2 hours on `Standard_B2s_v2` (2026-10-15). Check it with Step 3.2.20 and continue with Sections 6-8 meanwhile.
 
 > [!CAUTION]
-> Do not interrupt the encryption process. The VM may be unavailable during encryption. Plan encryption during maintenance windows for production systems.
+> Do not restart, stop or resize the Authserver VM until Step 3.2.20 shows `Encrypted`: that interrupts the encryption. Plan encryption during maintenance windows for production systems.
 
 ### Step 3.2.20: Verify Disk Encryption and Resize Back
 
-1. Check encryption status for both VMs:
+1. Check the encryption status of both VMs:
 
-```azurecli
-# Check Authserver encryption status
-az vm encryption show \
-  --name dev-skycraft-swc-auth-vm \
-  --resource-group dev-skycraft-swc-rg
-
-# Check Worldserver encryption status
-az vm encryption show \
-  --name dev-skycraft-swc-world-vm \
-  --resource-group dev-skycraft-swc-rg
+```powershell
+Get-AzVMDiskEncryptionStatus -ResourceGroupName dev-skycraft-swc-rg -VMName dev-skycraft-swc-auth-vm
+Get-AzVMDiskEncryptionStatus -ResourceGroupName dev-skycraft-swc-rg -VMName dev-skycraft-swc-world-vm
 ```
 
 **Expected Output**:
 
-```
-Status                  Message
-----------------------  ------------------------------------
-Provisioning succeeded  Encryption succeeded for all volumes
-```
+| VM | OsVolumeEncrypted | DataVolumesEncrypted |
+| --- | --- | --- |
+| `dev-skycraft-swc-auth-vm` | `Encrypted` (`EncryptionInProgress` while it runs) | `NotMounted` (no data disk) |
+| `dev-skycraft-swc-world-vm` | `NotEncrypted` | `NotEncrypted` |
 
-> [!TIP]
-> The detailed encryption status is in the JSON output. Use `--output json` to see:
->
-> - `disks[].statuses[].code` shows `EncryptionState/encrypted`
-> - `substatus[].message` shows `{"os": "Encrypted", "data": "Encrypted"}`
+The Worldserver's `NotEncrypted` is the intended state, not a failure: Lab 5.2 needs it.
 
-2. **(Optional)** Resize VMs back to `Standard_B2ls_v2` to save costs:
+2. Once the Authserver reads `Encrypted`, resize it back to `Standard_B2ls_v2` to save costs:
 
-```azurecli
-# Resize Authserver back to B2ls_v2
-az vm resize --name dev-skycraft-swc-auth-vm --resource-group dev-skycraft-swc-rg --size Standard_B2ls_v2
-
-# Resize Worldserver back to B2ls_v2
-az vm resize --name dev-skycraft-swc-world-vm --resource-group dev-skycraft-swc-rg --size Standard_B2ls_v2
+```powershell
+$vm = Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-vm
+$vm.HardwareProfile.VmSize = 'Standard_B2ls_v2'
+Update-AzVM -ResourceGroupName dev-skycraft-swc-rg -VM $vm
 ```
 
 > [!TIP]
 > Resize back only after encryption has completed - the resize restarts the VM and would interrupt an encryption that is still running. `Enable-Encryption.ps1` does this for you when `-ResizeBack $true` (the default), and skips it when the encryption did not complete.
 
-**Expected Result**: All disks encrypted, VMs optionally resized back to `Standard_B2ls_v2`.
+**Expected Result**: The Authserver's OS volume encrypted and the VM back at `Standard_B2ls_v2`; the Worldserver not encrypted.
 
 ---
 
@@ -970,56 +1030,38 @@ az vm resize --name dev-skycraft-swc-world-vm --resource-group dev-skycraft-swc-
 > [!NOTE]
 > **Feature Registration Required**: Encryption at Host must be registered on your subscription before use.
 
+> [!WARNING]
+> **Not on the Authserver.** Encryption at host cannot be enabled on a VM that has, or ever had, Azure Disk Encryption, so the commands below target the Worldserver. Site Recovery still protects a VM with encryption at host (Lab 5.2), but the failover VM does not keep the setting.
+
 1. Register the EncryptionAtHost feature (one-time per subscription):
 
-```azurecli
+```powershell
 # Register the feature
-az feature register \
-  --name EncryptionAtHost \
-  --namespace Microsoft.Compute
+Register-AzProviderFeature -FeatureName EncryptionAtHost -ProviderNamespace Microsoft.Compute
 
-# Check registration status (wait until "Registered")
-az feature show \
-  --name EncryptionAtHost \
-  --namespace Microsoft.Compute \
-  --query "properties.state" \
-  --output tsv
+# Check registration status (wait until RegistrationState is Registered)
+Get-AzProviderFeature -FeatureName EncryptionAtHost -ProviderNamespace Microsoft.Compute
 
 # Propagate the registration
-az provider register --namespace Microsoft.Compute
+Register-AzResourceProvider -ProviderNamespace Microsoft.Compute
 ```
 
-2. Enable Encryption at Host on a VM:
+2. Enable Encryption at Host on the Worldserver VM (it must be deallocated):
 
-```azurecli
-# Deallocate VM first
-az vm deallocate \
-  --name dev-skycraft-swc-auth-vm \
-  --resource-group dev-skycraft-swc-rg
-
-# Enable Encryption at Host
-az vm update \
-  --name dev-skycraft-swc-auth-vm \
-  --resource-group dev-skycraft-swc-rg \
-  --set securityProfile.encryptionAtHost=true
-
-# Start VM
-az vm start \
-  --name dev-skycraft-swc-auth-vm \
-  --resource-group dev-skycraft-swc-rg
+```powershell
+Stop-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-world-vm -Force
+$vm = Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-world-vm
+Update-AzVM -ResourceGroupName dev-skycraft-swc-rg -VM $vm -EncryptionAtHost $true
+Start-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-world-vm
 ```
 
 3. Verify Encryption at Host is enabled:
 
-```azurecli
-az vm show \
-  --name dev-skycraft-swc-auth-vm \
-  --resource-group dev-skycraft-swc-rg \
-  --query "securityProfile.encryptionAtHost" \
-  --output tsv
+```powershell
+(Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-world-vm).SecurityProfile.EncryptionAtHost
 ```
 
-**Expected Output**: `true`
+**Expected Output**: `True`
 
 **Comparison: ADE vs Encryption at Host**:
 
@@ -1031,12 +1073,11 @@ az vm show \
 | **Temp disk encrypted**  | No                    | Yes                     |
 | **Disk cache encrypted** | No                    | Yes                     |
 | **Future support**       | Retiring Sept 2028    | Recommended             |
+| **On AZ-104**            | No                    | Yes                     |
 
-2. You can also verify in Azure Portal:
-   - Navigate to **Virtual machines** → Select VM → **Disks**
-   - Check the **Encryption** column shows encryption type
+4. You can also verify in Azure Portal: on the VM, under **Settings**, click **Disks**; encryption at host is shown there.
 
-**Expected Result**: All disks show encryption status as enabled/encrypted.
+**Expected Result**: The Worldserver reports `EncryptionAtHost` = `True` if you ran this optional step; nothing changed otherwise.
 
 ---
 
@@ -1059,35 +1100,41 @@ az vm show \
 
 Your VMs should already be in different zones:
 
-```azurecli
+```powershell
 # List VMs with their availability zones
-az vm list \
-  --resource-group dev-skycraft-swc-rg \
-  --query "[].{Name:name,Zone:zones[0],Size:hardwareProfile.vmSize}" \
-  --output table
+Get-AzVM -ResourceGroupName dev-skycraft-swc-rg |
+    Select-Object Name, @{N='Zone';E={$_.Zones -join ','}}, @{N='Size';E={$_.HardwareProfile.VmSize}} |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                        Zone  Size
-# --------------------------  ----  -----------------
-# dev-skycraft-swc-auth-vm    1     Standard_B2ls_v2
-# dev-skycraft-swc-world-vm   2     Standard_B2ls_v2
+# Name                      Zone Size
+# ----                      ---- ----
+# dev-skycraft-swc-auth-vm  1    Standard_B2ls_v2
+# dev-skycraft-swc-world-vm 2    Standard_B2ls_v2
 ```
+
+While the Authserver is still encrypting (Step 3.2.19), it shows `Standard_B2s_v2`.
 
 **Expected Result**: VMs are distributed across Zone 1 and Zone 2.
 
 ### Step 3.2.23: Understand Zone-Redundant Load Balancing
 
-Your Standard Load Balancer automatically distributes traffic across zones:
+A Standard load balancer serves backends in every zone. Whether its frontend survives a zone failure depends on the frontend's public IP: an IP in zones 1, 2 and 3 is zone-redundant. The load balancer's **Overview** does not say so; the public IP does.
 
 1. Navigate to **Load balancers** → `dev-skycraft-swc-lb`
-2. Click **Overview**
-3. Note: Standard SKU load balancers are **zone-redundant by default**
-4. Click **Frontend IP configuration**
-5. The public IP is zone-redundant, meaning:
+2. Under **Settings**, click **Frontend IP configuration** and open the public IP of `dev-skycraft-swc-lb-frontend`
+3. On the public IP's **Overview**, read its availability zones: zones 1, 2 and 3 make it zone-redundant, meaning:
    - If Zone 1 fails, traffic routes to Zone 2
    - Players experience no interruption
 
-**Expected Result**: Load balancer configured for zone-redundant access.
+The same with Az PowerShell:
+
+```powershell
+(Get-AzPublicIpAddress -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-lb-pip).Zones
+# Expected: 1, 2, 3
+```
+
+**Expected Result**: The load balancer's frontend is zone-redundant, because its public IP is in zones 1, 2 and 3.
 
 ### Step 3.2.24: Test High Availability (Conceptual)
 
@@ -1115,30 +1162,32 @@ For this lab, we'll document the expected behavior:
 
 Before resizing, check available sizes:
 
-```azurecli
-# List available B-series sizes in Sweden Central
-az vm list-skus \
-  --location swedencentral \
-  --size Standard_B \
-  --resource-type virtualMachines \
-  --query "[].{Name:name,vCPUs:capabilities[?name=='vCPUs'].value|[0],Memory:capabilities[?name=='MemoryGB'].value|[0]}" \
-  --output table
+```powershell
+# List the B-series v2 sizes in Sweden Central
+Get-AzComputeResourceSku -Location swedencentral |
+    Where-Object { $_.ResourceType -eq 'virtualMachines' -and $_.Name -like 'Standard_B*_v2' } |
+    Select-Object Name,
+        @{N='vCPUs';E={($_.Capabilities | Where-Object Name -eq 'vCPUs').Value}},
+        @{N='MemoryGB';E={($_.Capabilities | Where-Object Name -eq 'MemoryGB').Value}} |
+    Format-Table -AutoSize
 
 # Expected output (partial):
-# Name               vCPUs    Memory
-# ------------------ -------  --------
-# Standard_B2ls_v2   2        4
-# Standard_B2s_v2    2        8
-# Standard_B4ls_v2   4        8
-# Standard_B4s_v2    4        16
+# Name             vCPUs MemoryGB
+# ----             ----- --------
+# Standard_B2ls_v2 2     4
+# Standard_B2s_v2  2     8
+# Standard_B4ls_v2 4     8
+# Standard_B4s_v2  4     16
 ```
+
+The SKU list is large: the query can take a few minutes (`az vm list-skus` took 2-4 minutes on 2026-10-15).
 
 ### Step 3.2.26: Resize Worldserver VM (Example)
 
 If player load increases, you might need to resize:
 
 1. Navigate to **Virtual machines** → `dev-skycraft-swc-world-vm`
-2. Click **Stop** to deallocate the VM (required for most resizes)
+2. Click **Stop** to deallocate the VM (required for most resizes), then **Yes** in the confirmation bar at the top
 
 > [!WARNING]
 > Resizing requires stopping the VM in most cases. Plan for downtime or use availability sets/zones with multiple instances.
@@ -1146,13 +1195,13 @@ If player load increases, you might need to resize:
 > [!NOTE]
 > A resize inside the same family (`Standard_B2ls_v2` to `Standard_B2s_v2`, both Bsv2) does not need a deallocation - Azure restarts the VM in place. The stop/start below is the general procedure that also covers cross-family resizes.
 
-3. Wait for VM to fully stop (Status: Stopped (deallocated))
-4. In the left menu, click **Size**
+3. Wait for VM to fully stop (Status: Stopped (deallocated)). The Overview keeps showing Running until you click **Refresh**
+4. In the left menu, under **Availability + scale** (expand it if it is collapsed), click **Size**
 5. Search for `Standard_B2s_v2` (upgrade to 8 GB RAM)
 6. Select **Standard_B2s_v2**
 7. Click **Resize**
 8. Wait for resize to complete (1-2 minutes)
-9. Click **Start** to restart the VM
+9. Click **Start** to restart the VM (click **Refresh** to see the new state)
 
 ![Resize Worldserver VM](./images/step-3.2.26.png)
 
@@ -1180,14 +1229,16 @@ For this lab, resize back to B2ls_v2 to minimize costs:
 
 Not all sizes are available in all zones or regions:
 
-```azurecli
-# Check if specific size is available in zone
-az vm list-skus \
-  --location swedencentral \
-  --size Standard_D4s_v3 \
-  --query "[].{Name:name,Zones:locationInfo[0].zones}" \
-  --output table
+```powershell
+# Check in which zones a size is offered, and whether this subscription may use it
+Get-AzComputeResourceSku -Location swedencentral |
+    Where-Object { $_.ResourceType -eq 'virtualMachines' -and $_.Name -eq 'Standard_D4s_v3' } |
+    Select-Object Name,
+        @{N='Zones';E={$_.LocationInfo.Zones -join ','}},
+        @{N='Restrictions';E={$_.Restrictions.ReasonCode -join ','}}
 ```
+
+An empty **Zones** column does not mean the size has no zones. Read **Restrictions** too: `NotAvailableForSubscription` means this subscription may not use the size there, which is how a lab subscription can lack a size that the region offers (as the B-series v1 sizes in Section 1). On 2026-10-15 the `az vm list-skus` form of this query printed no zones at all on the lab subscription.
 
 | Constraint         | Resolution                             |
 | ------------------ | -------------------------------------- |
@@ -1195,6 +1246,17 @@ az vm list-skus \
 | Size not in region | Choose different region or size family |
 | Quota exceeded     | Request quota increase                 |
 | Disk constraints   | Some sizes don't support Premium SSD   |
+
+### Moving a VM to Another Resource Group (Concept)
+
+Resource groups organise resources; a VM can move to another group, or another subscription, without being recreated. This lab does not move a VM: a move changes every resource ID, and the load balancer pools, ASGs and later labs refer to these VMs by ID. What a move involves:
+
+- **The Portal path**: on the VM's **Overview**, **Move** → **Move to another resource group**. Azure lists the related resources (network interface, disks) to move with it and validates the move before it starts.
+- **What moves together**: a VM moves with its disks and network interface. Resources it depends on that stay behind (the VNet, the load balancer) keep working across groups in the same subscription.
+- **What changes**: the resource IDs. Scripts, RBAC assignments scoped to the old group, and policies of the old group no longer apply; the new group's policies and locks do (Lab 1.3).
+- **What does not change**: the VM keeps running, its private IP and its zone stay the same.
+
+Read more in [Move a VM to another resource group or subscription](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/move-resource-group-and-subscription).
 
 ---
 
@@ -1221,15 +1283,28 @@ az vm list-skus \
 
 ### Step 3.2.29: Create a Virtual Machine Scale Set
 
+The scale set goes into **`dev-skycraft-swc-rg`**. Lab 1.3 puts a `CanNotDelete` lock on `prod-skycraft-swc-rg`, so a scale set there could not be deleted in Step 3.2.33 (`ScopeLocked`); the dev group has no lock.
+
 1. In Azure Portal, search for **Virtual machine scale sets** and click **+ Create**
+
+> [!WARNING]
+> As the VM wizard, this one pre-fills values the lab does not use:
+>
+> | Field | Portal default | Lab value |
+> | --- | --- | --- |
+> | Orchestration mode | Flexible | Uniform |
+> | Security type | Trusted launch | Standard |
+> | Scaling mode | (choose) | Manually update the capacity |
+> | Virtual network | a new VNet | `dev-skycraft-swc-vnet` |
+> | NIC network security group | Basic | None |
 
 **Basics tab - Orchestration**:
 
 | Field                          | Value                          |
 | ------------------------------ | ------------------------------ |
 | Subscription                   | Your subscription              |
-| Resource group                 | `prod-skycraft-swc-rg`         |
-| Virtual machine scale set name | `prod-skycraft-swc-world-vmss` |
+| Resource group                 | `dev-skycraft-swc-rg`          |
+| Virtual machine scale set name | `dev-skycraft-swc-world-vmss`  |
 | Region                         | **Sweden Central**             |
 | Availability zone              | **Zones 1, 2, 3** (select all) |
 | Orchestration mode             | **Uniform**                    |
@@ -1237,54 +1312,18 @@ az vm list-skus \
 
 **Basics tab - Scaling**:
 
-| Field          | Value           |
-| -------------- | --------------- |
-| Scaling mode   | **Autoscaling** |
-| Instance count | **2**           |
+| Field          | Value                              |
+| -------------- | ---------------------------------- |
+| Scaling mode   | **Manually update the capacity**   |
+| Instance count | **2**                              |
 
-Click **Configure scaling options** to set autoscale rules:
-
-![Configure scaling options](./images/step-3.2.29a.png)
-
-1. The **Default condition** is already created. Click **Edit** (pencil icon) to configure it:
-
-**Edit Condition - Instance limits**:
-
-| Field   | Value |
-| ------- | ----- |
-| Minimum | **1** |
-| Maximum | **4** |
-
-**Edit Condition - Scale out**:
-
-| Field                      | Value  |
-| -------------------------- | ------ |
-| CPU threshold greater than | **70** |
-| Increase instance count by | **1**  |
-
-**Edit Condition - Scale in**:
-
-| Field                      | Value  |
-| -------------------------- | ------ |
-| CPU threshold less than    | **30** |
-| Decrease instance count by | **1**  |
-
-**Query duration**:
-
-| Field   | Value |
-| ------- | ----- |
-| Minutes | **5** |
-
-![Configure scaling options](./images/step-3.2.29b.png)
-
-2. Click **Save** to close the condition editor
-3. Click **Save** to save the scaling configuration
+> **SkyCraft Choice**: The scale set starts with a fixed count, and Step 3.2.30 adds the autoscale rules afterwards. Choosing **Autoscaling** here makes the wizard create an autoscale setting, and the wizard's **Tags** tab cannot tag it (autoscale settings are not in its resource list). Under Lab 1.3's `Enforce-Project-Tag` alone, **Review + create** then stops at validation with `RequestDisallowedByPolicy` (seen on 2026-10-15). The two-step route works with or without `Inherit-Project-Tag`.
 
 **Basics tab - Instance details**:
 
 | Field           | Value                                      |
 | --------------- | ------------------------------------------ |
-| Image           | **Ubuntu Server 24.04 LTS - x64 Gen2**     |
+| Image           | **Ubuntu Server 22.04 LTS - x64 Gen2** (the default; the same image as the VMs) |
 | VM architecture | **x64**                                    |
 | Size            | **Standard_B2ls_v2** (2 vCPUs, 4 GB)       |
 
@@ -1309,33 +1348,44 @@ Click **Configure scaling options** to set autoscale rules:
 
 | Field              | Value            |
 | ------------------ | ---------------- |
-| Encryption at host | ✅ Checked       |
 | OS disk type       | **Standard SSD** |
+| Encryption at host | ❌ Unchecked     |
+
+**Encryption at host** is greyed out with "Encryption at host is not registered for the selected subscription" unless you registered the feature in the optional Step 3.2.21; leave it unchecked either way.
 
 4. Click **Next: Networking**
 
 **Networking tab**:
 
-| Field                      | Value                    |
-| -------------------------- | ------------------------ |
-| Virtual network            | `prod-skycraft-swc-vnet` |
-| Network interface - Subnet | `WorldSubnet`            |
-| Public IP address          | **Disabled**             |
+| Field           | Value                   |
+| --------------- | ----------------------- |
+| Virtual network | `dev-skycraft-swc-vnet` |
+| Subnet          | `WorldSubnet`           |
+
+5. In the **Network interface** table, click the pencil icon of the network interface and set:
+
+| Field                      | Value        |
+| -------------------------- | ------------ |
+| Subnet                     | `WorldSubnet` |
+| NIC network security group | **None**     |
+| Public IP address          | **Disabled** |
+
+Choose **None** for the NIC's NSG: `WorldSubnet` already has `dev-skycraft-swc-world-nsg` from Lab 2.2. The default, **Basic**, creates an extra NSG named `basicNsg<nic-name>`, and that NSG stays behind when the scale set is deleted. Click **OK**.
 
 **Load balancing**:
 
-| Field                  | Value                           |
-| ---------------------- | ------------------------------- |
-| Load balancing options | **Azure load balancer**         |
-| Select a load balancer | `prod-skycraft-swc-lb`          |
-| Select a backend pool  | `prod-skycraft-swc-lb-be-world` |
+| Field                  | Value                          |
+| ---------------------- | ------------------------------ |
+| Load balancing options | **Azure load balancer**        |
+| Select a load balancer | `dev-skycraft-swc-lb`          |
+| Select a backend pool  | `dev-skycraft-swc-lb-be-world` |
 
 > [!NOTE]
-> The VMSS instances will be added to the load balancer backend pool for automatic traffic distribution.
+> The VMSS instances will be added to the load balancer backend pool for automatic traffic distribution. The wizard joins one pool only, so the instances are **not** in the egress pool `dev-skycraft-swc-lb-be-outbound` and have **no internet access**: the subnet is private and the load balancer's outbound rule serves that pool alone. This lab installs nothing on them, so they need none. A production scale set would add the egress pool to its network profile, or use a NAT gateway.
 
 ![Create VMSS](./images/step-3.2.29c.png)
 
-5. Click **Next: Management**
+6. Click **Next: Management**
 
 **Management tab**:
 
@@ -1343,77 +1393,123 @@ Click **Configure scaling options** to set autoscale rules:
 | -------------- | ---------- |
 | Upgrade policy | **Manual** |
 
-6. Click **Next: Health**
+7. Click **Next: Health**
 
 **Health tab**:
 
 - Leave defaults
 
-7. Click **Next: Advanced**
+8. Click **Next: Advanced**
 
 **Advanced tab**:
 
 - Leave defaults
 
-8. Click **Next: Tags**
+9. Click **Next: Tags**
 
 **Tags**:
 
 | Name        | Value       |
 | ----------- | ----------- |
 | Project     | SkyCraft    |
-| Environment | Production  |
+| Environment | Development |
 | CostCenter  | MSDN        |
 | Owner       | mbiszczanik |
 
-9. Click **Review + create** → **Create**
+10. Click **Review + create** → **Create**
 
-**Expected Result**: VMSS created with 2 initial instances across availability zones.
+**Expected Result**: VMSS `dev-skycraft-swc-world-vmss` created in `dev-skycraft-swc-rg` with 2 initial instances across availability zones.
 
 ### Step 3.2.30: Verify VMSS Deployment
 
-1. Navigate to **Virtual machine scale sets** → `prod-skycraft-swc-world-vmss`
+1. Navigate to **Virtual machine scale sets** → `dev-skycraft-swc-world-vmss`
 
 2. Click **Instances** in the left menu
 
 3. Verify you see 2 instances running in different zones:
 
-```azurecli
+```powershell
 # List VMSS instances
-az vmss list-instances \
-  --resource-group prod-skycraft-swc-rg \
-  --name prod-skycraft-swc-world-vmss \
-  --query "[].{Name:name,Zone:zones[0],State:provisioningState}" \
-  --output table
+Get-AzVmssVM -ResourceGroupName dev-skycraft-swc-rg -VMScaleSetName dev-skycraft-swc-world-vmss |
+    Select-Object Name, @{N='Zone';E={$_.Zones -join ','}}, ProvisioningState |
+    Format-Table -AutoSize
 
 # Expected output:
-# Name                              Zone    State
-# --------------------------------  ------  ---------
-# prod-skycraft-swc-world-vmss_0    1       Succeeded
-# prod-skycraft-swc-world-vmss_1    2       Succeeded
+# Name                          Zone ProvisioningState
+# ----                          ---- -----------------
+# dev-skycraft-swc-world-vmss_0 1    Succeeded
+# dev-skycraft-swc-world-vmss_1 2    Succeeded
 ```
 
-4. Click **Scaling** in the left menu to view autoscale configuration
+#### Add the Autoscale Rules
 
-5. Verify the scale-out and scale-in rules are configured
+4. In the left menu, under **Availability + scale**, click **Scaling**
+5. Select the **Custom autoscale** card. In the Default condition, choose **Scale based on a metric** and set the instance limits:
 
-**Expected Result**: VMSS shows 2 running instances with autoscale configured.
+| Field   | Value |
+| ------- | ----- |
+| Minimum | **1** |
+| Maximum | **4** |
+| Default | **2** |
+
+6. Click **+ Add a rule** and add the scale-out rule; then add the scale-in rule the same way:
+
+| Field                    | Scale out           | Scale in            |
+| ------------------------ | ------------------- | ------------------- |
+| Metric name              | Percentage CPU      | Percentage CPU      |
+| Operator                 | Greater than        | Less than           |
+| Metric threshold         | **70**              | **30**              |
+| Duration (minutes)       | **5**               | **5**               |
+| Operation                | Increase count by   | Decrease count by   |
+| Instance count           | **1**               | **1**               |
+
+7. Click **Save** at the top
+
+The autoscale setting has no tags field here either. `Inherit-Project-Tag` (Lab 1.3) gives it `Project` from `dev-skycraft-swc-rg`; without that assignment, **Save** fails with `RequestDisallowedByPolicy`, shown under the notification bell. The Az PowerShell route sets the tags itself and works in both cases:
+
+```powershell
+$rg   = 'dev-skycraft-swc-rg'
+$vmss = Get-AzVmss -ResourceGroupName $rg -VMScaleSetName dev-skycraft-swc-world-vmss
+$ruleArgs = @{
+    MetricTriggerMetricName        = 'Percentage CPU'
+    MetricTriggerMetricResourceUri = $vmss.Id
+    MetricTriggerTimeGrain         = [TimeSpan]::FromMinutes(1)
+    MetricTriggerStatistic         = 'Average'
+    MetricTriggerTimeWindow        = [TimeSpan]::FromMinutes(5)
+    MetricTriggerTimeAggregation   = 'Average'
+    ScaleActionType                = 'ChangeCount'
+    ScaleActionValue               = '1'
+    ScaleActionCooldown            = [TimeSpan]::FromMinutes(5)
+}
+$scaleOut = New-AzAutoscaleScaleRuleObject @ruleArgs -MetricTriggerOperator GreaterThan -MetricTriggerThreshold 70 -ScaleActionDirection Increase
+$scaleIn  = New-AzAutoscaleScaleRuleObject @ruleArgs -MetricTriggerOperator LessThan -MetricTriggerThreshold 30 -ScaleActionDirection Decrease
+$autoscaleProfile = New-AzAutoscaleProfileObject -Name 'Default' -CapacityDefault 2 -CapacityMinimum 1 -CapacityMaximum 4 -Rule $scaleOut, $scaleIn
+New-AzAutoscaleSetting -Name dev-skycraft-swc-world-vmss-autoscale -ResourceGroupName $rg -Location swedencentral `
+    -Profile $autoscaleProfile -Enabled -TargetResourceUri $vmss.Id `
+    -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN'; Owner = 'mbiszczanik' }
+```
+
+8. Back on **Scaling**, verify the scale-out and scale-in rules are configured
+
+**Expected Result**: VMSS shows 2 running instances with autoscale configured (1-4 instances, CPU above 70% adds one, below 30% removes one).
 
 ### Step 3.2.31: Test Manual Scaling
 
-1. In the VMSS blade, click **Scaling**
+1. In the VMSS blade, under **Availability + scale**, click **Scaling**
 
-2. Click **Manual scale**
+2. Select the **Manual scale** card. This turns the autoscale rules off until you select Custom autoscale again
 
 3. Change **Instance count** to `3`
 
-4. Click **Save**
+4. Click **Save** at the top
 
 5. Click **Instances** to watch a new instance being created
 
 6. Wait for the 3rd instance to reach **Running** state
 
 7. Return to **Scaling** and scale back to **2** instances
+
+8. Select **Custom autoscale** and click **Save** to turn the rules of Step 3.2.30 back on
 
 **Expected Result**: VMSS successfully scales from 2 → 3 → 2 instances.
 
@@ -1423,7 +1519,7 @@ az vmss list-instances \
 
 1. In the VMSS blade, click **Instances**
 
-2. Select an instance (e.g., `prod-skycraft-swc-world-vmss_0`)
+2. Select an instance (e.g., `dev-skycraft-swc-world-vmss_0`)
 
 3. Click **Connect** → **Bastion**
 
@@ -1434,32 +1530,41 @@ az vmss list-instances \
 
 5. Click **Connect**
 
-**Expected Result**: Connected to VMSS instance via Bastion.
+**Expected Result**: Connected to VMSS instance via Bastion. The instance has no internet access (Step 3.2.29), so `sudo apt update` there times out; that is expected.
 
 ### Step 3.2.33: Cleanup - Delete VMSS (Important for Cost)
 
 > [!IMPORTANT]
 > VMSS instances incur costs. Delete the VMSS after completing this lab section to avoid unnecessary charges.
 
-1. Navigate to **Virtual machine scale sets** → `prod-skycraft-swc-world-vmss`
+1. Navigate to **Virtual machine scale sets** → `dev-skycraft-swc-world-vmss`
 
 2. Click **Delete**
 
-3. Type the VMSS name to confirm: `prod-skycraft-swc-world-vmss`
+3. The confirmation is a bar with Yes and No buttons and an Apply force delete check box. Leave the check box cleared and click **Yes**
 
-4. Click **Delete**
+4. The scale set's instances, with their disks and network interfaces, go with it. Two resources may stay in `dev-skycraft-swc-rg`: the autoscale setting of Step 3.2.30 (tick Show hidden types in the resource group's list to see it) and, if the NIC's NSG was left at Basic, `basicNsg<nic-name>`. Delete them too
 
-**Or via Azure CLI**:
+**Or via Az PowerShell**:
 
-```azurecli
-# Delete VMSS
-az vmss delete \
-  --resource-group prod-skycraft-swc-rg \
-  --name prod-skycraft-swc-world-vmss \
-  --no-wait
+```powershell
+$rg = 'dev-skycraft-swc-rg'
+Remove-AzVmss -ResourceGroupName $rg -VMScaleSetName dev-skycraft-swc-world-vmss -Force
+
+# The autoscale setting that targeted it, whatever its name
+Get-AzAutoscaleSetting -ResourceGroupName $rg |
+    Where-Object TargetResourceUri -like '*/virtualMachineScaleSets/dev-skycraft-swc-world-vmss' |
+    ForEach-Object { Remove-AzAutoscaleSetting -ResourceGroupName $rg -Name $_.Name }
+
+# An NSG the wizard created with NIC NSG = Basic
+Get-AzNetworkSecurityGroup -ResourceGroupName $rg |
+    Where-Object Name -like 'basicNsg*' |
+    ForEach-Object { Remove-AzNetworkSecurityGroup -ResourceGroupName $rg -Name $_.Name -Force }
 ```
 
-**Expected Result**: VMSS deleted. You've completed the VMSS hands-on section.
+`scripts/Remove-LabResource.ps1` removes the scale set, its autoscale setting and that NSG as well.
+
+**Expected Result**: VMSS deleted, with nothing left behind in `dev-skycraft-swc-rg`. You've completed the VMSS hands-on section.
 
 ### VMSS vs AKS for Game Servers
 
@@ -1496,15 +1601,21 @@ Quick verification before proceeding:
 - [ ] Authserver added to load balancer backend pool (be-auth)
 - [ ] Worldserver added to load balancer backend pool (be-world)
 - [ ] Both VMs added to the outbound pool (be-outbound), their only internet access
-- [ ] SSH access verified via Azure Bastion
+- [ ] Authserver NIC in `dev-skycraft-swc-asg-auth`, Worldserver NIC in `dev-skycraft-swc-asg-world`
+- [ ] SSH access verified via Azure Bastion (or the commands run through Run command)
 
 ### Disk Configuration
 
-- [ ] OS disks using Premium SSD
-- [ ] Data disk (64 GB) attached to Worldserver VM
-- [ ] Data disk mounted at /data inside VM
-- [ ] Azure Disk Encryption enabled on all disks
+- [ ] OS disks using Standard SSD
+- [ ] Data disk (64 GB) attached to Worldserver VM at LUN 0
+- [ ] Data disk mounted at /data inside VM, through `/dev/disk/azure/scsi1/lun0-part1`
+- [ ] Azure Disk Encryption enabled on the Authserver VM (OS volume `Encrypted`)
+- [ ] Worldserver VM not encrypted with Azure Disk Encryption (Lab 5.2 needs it so)
 - [ ] Key vault created for encryption keys
+
+### Scale Set
+
+- [ ] `dev-skycraft-swc-world-vmss` created in `dev-skycraft-swc-rg`, scaled 2 → 3 → 2, and deleted with its autoscale setting
 
 ### Tags Applied
 
@@ -1514,6 +1625,23 @@ Quick verification before proceeding:
 - [ ] Owner = mbiszczanik
 
 **For detailed verification**, see [lab-checklist-3.2.md](lab-checklist-3.2.md)
+
+---
+
+## 📦 What This Lab Leaves Behind
+
+Labs 5.1, 5.2 and 5.3 use the two VMs (`tools/lab-cycle-manifest.psd1`: 5.1, 5.3 <- 3.2), and Lab 5.2 relies on which one is encrypted. Daily costs are approximate, for Sweden Central, from the monthly figures in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+| Left behind | Where | Daily cost | What a later lab does with it |
+| --- | --- | --- | --- |
+| `dev-skycraft-swc-auth-vm`, Standard_B2ls_v2, zone 1, **encrypted with Azure Disk Encryption** (OS volume) | `dev-skycraft-swc-rg` | about 1 EUR while running, plus its 30 GB OS disk (about 0.12 EUR) | Lab 5.2 backs it up (Step 5.2.3) after granting the Microsoft Entra app *Backup Management Service* the *Key Vault Administrator* role on `dev-skycraft-swc-kv`; without that role *Enable backup* fails with `400198 UserErrorKeyVaultPermissionsNotConfigured`. Labs 5.1 and 5.3 monitor it |
+| `dev-skycraft-swc-world-vm`, Standard_B2ls_v2, zone 2, **not encrypted** | `dev-skycraft-swc-rg` | about 1 EUR while running, plus its OS disk | Lab 5.2 restores single files from its backup and replicates it with Site Recovery; file-level recovery is not available for an ADE-encrypted VM. Site Recovery also needs the VM's kernel to be one its Mobility service supports: a newer kernel fails with `ASRMobilityServiceKernelNotSupportedV2` (seen on 2026-10-17 with the 22.04 image's `6.8.0-1065-azure`). Lab 5.2 shows how to check and fix the kernel |
+| `dev-skycraft-swc-world-vm-data`, 64 GB Standard SSD at LUN 0, mounted at `/data` | `dev-skycraft-swc-rg` | about 0.25 EUR | Replicated with the world VM in Lab 5.2 (30 + 64 GB to copy) |
+| `dev-skycraft-swc-kv`, Standard, Azure RBAC, enabled for disk encryption | `dev-skycraft-swc-rg` | close to 0 (billed per operation) | Holds the Authserver's disk encryption secret: do not delete it while that VM exists, because the VM needs the secret to start. Lab 5.2 gives Azure Backup a role on it |
+| Both NICs in their role pools and in `dev-skycraft-swc-lb-be-outbound` | `dev-skycraft-swc-lb` | 0 (the load balancer is Lab 2.3's) | Lab 2.3's Bicep can no longer be re-run while the NICs are in its pools (#352) |
+| Both NICs in `dev-skycraft-swc-asg-auth` / `-asg-world` | Lab 2.2's ASGs | 0 | An NSG rule that names these ASGs now applies to these VMs |
+
+Nothing is left from the scale set if Step 3.2.33 ran; `Test-Lab.ps1` warns when `dev-skycraft-swc-world-vmss` still exists. `scripts/Remove-LabResource.ps1` removes the VMs, the data disk, a leftover scale set with its autoscale setting and `basicNsg` NSG, and, with `-IncludeKeyVault`, deletes and purges the key vault. Run it only after Module 5, which needs the VMs.
 
 ---
 
@@ -1642,9 +1770,9 @@ Test your understanding with these questions:
    - Temporary disks (not encrypted by ADE, use host encryption)
 
    **For SkyCraft**:
-   - Player account data in database is encrypted at rest
-   - Game configuration files are protected
-   - Disk snapshots are also encrypted
+   - The Authserver, which handles player logins, is encrypted with ADE
+   - The Worldserver stays unencrypted so Lab 5.2 can restore single files from its backup and replicate it with Site Recovery
+   - ADE retires on September 15, 2028; AZ-104 asks for encryption at host, which encrypts at the hypervisor and needs no key vault (Step 3.2.21)
 
    </details>
 
@@ -1770,7 +1898,7 @@ Test your understanding with these questions:
 
 **Solution**:
 
-- Check current quota: `az vm list-usage --location swedencentral --output table`
+- Check current quota: `Get-AzVMUsage -Location swedencentral | Where-Object CurrentValue -gt 0`
 - Request quota increase: Azure Portal → Subscriptions → Usage + quotas → Request increase
 - Alternatively, use smaller VM size or different region
 - MSDN subscriptions have limited quotas (~20 cores)
@@ -1806,15 +1934,15 @@ sudo reboot
 
 ### Issue 4: Disk encryption fails
 
-**Symptom**: "Disk encryption failed" error after enabling ADE
+**Symptom**: "Disk encryption failed" error after enabling ADE, or `RequestDisallowedByPolicy` naming `AzureDiskEncryptionForLinux`
 
 **Solution**:
 
-- Ensure Key Vault has "Azure Disk Encryption for volume encryption" enabled
-- Verify VM is running (not stopped)
-- Check VM size supports encryption (most sizes do)
+- `RequestDisallowedByPolicy` ... `All resources must be tagged with Project=SkyCraft`: the extension has no tags option, and Lab 1.3's `Enforce-Project-Tag` refuses it unless `Inherit-Project-Tag` adds the tag. Assign `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8), wait about 10 minutes, and run Step 3.2.19 again
+- Ensure Key Vault has "Azure Disk Encryption for volume encryption" enabled (**Access configuration** → **Resource access**)
+- Verify VM is running (not stopped) and has 8 GB RAM (Step 3.2.18)
 - Wait for any pending operations to complete
-- View detailed error: `az vm encryption show --name <vm> --resource-group <rg>`
+- View the status: `Get-AzVMDiskEncryptionStatus -ResourceGroupName <rg> -VMName <vm>`
 
 ### Issue 5: VM won't resize to desired size
 
@@ -1823,7 +1951,7 @@ sudo reboot
 **Solution**:
 
 - Stop (deallocate) VM completely before resizing
-- Check size availability in zone: `az vm list-skus --location swedencentral --size <size> --zone <zone>`
+- Check size availability in zone: the `Get-AzComputeResourceSku` query of Step 3.2.28, with the size you want
 - Try different zone or availability set
 - Some sizes require specific hardware features
 
@@ -1851,6 +1979,22 @@ $publicKey = (Get-AzSshKey -ResourceGroupName platform-skycraft-swc-rg -Name pla
 ```
 
 Pass `$publicKey` to `az vm create --ssh-key-values`, to `Add-AzVMSshPublicKey -KeyData`, or export it to a file for `Deploy-Bicep.ps1 -SshKeyPath` (Step 3.2.1).
+
+### Issue 8: Apply or Save seems to do nothing
+
+**Symptom**: In Step 3.2.14 (**Apply** after **+ Create and attach a new disk**) or Step 3.2.30 (**Save** on **Custom autoscale**) the page does not change and shows no error
+
+**Cause**: The resource the page creates has no tags field, and Lab 1.3's `Enforce-Project-Tag` refused it. The Portal shows the refusal only under the notification bell: "... was disallowed by policy. Reasons: 'All resources must be tagged with Project=SkyCraft'".
+
+**Solution**: Assign `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8) and try again after about 10 minutes, or use the tagged Az PowerShell block of that step.
+
+### Issue 9: Deleting the scale set fails with `ScopeLocked`
+
+**Symptom**: Step 3.2.33 fails with `ScopeLocked`
+
+**Cause**: The scale set is in `prod-skycraft-swc-rg`, as an earlier version of this guide said, and Lab 1.3's `CanNotDelete` lock protects that group.
+
+**Solution**: This guide creates the scale set in `dev-skycraft-swc-rg`, which has no lock. To delete one already in prod, remove the lock `lock-no-delete-prod` (**prod-skycraft-swc-rg** → **Settings** → **Locks**), delete the scale set, and create the lock again as Lab 1.3 describes; or run `scripts/Remove-LabResource.ps1 -Environment prod` with the lock removed.
 
 ---
 
@@ -1894,26 +2038,29 @@ Pass `$publicKey` to `az vm create --ssh-key-values`, to `Add-AzVMSshPublicKey -
 - ✅ Configured SSH authentication with key pairs
 - ✅ Connected VMs to existing VNet subnets (AuthSubnet, WorldSubnet)
 - ✅ Added VMs to load balancer backend pools, and both to the outbound pool for internet access
+- ✅ Put the VM network interfaces into their application security groups and read the effective security rules
 - ✅ Attached and initialized 64 GB data disk for database storage
-- ✅ Enabled Azure Disk Encryption on all disks
+- ✅ Enabled Azure Disk Encryption on the Authserver VM, and kept the Worldserver unencrypted for Lab 5.2
 - ✅ Created Azure Key Vault for encryption keys
 - ✅ Practiced VM resizing for workload optimization
-- ✅ Understood VM Scale Sets for production auto-scaling
+- ✅ Created, scaled and deleted a VM Scale Set with autoscale rules
 
 **Infrastructure Deployed**:
 | Resource | Name | Configuration |
 |----------|------|---------------|
 | VM (Authserver) | dev-skycraft-swc-auth-vm | Zone 1, B2ls_v2, AuthSubnet |
 | VM (Worldserver) | dev-skycraft-swc-world-vm | Zone 2, B2ls_v2, WorldSubnet |
-| Data Disk | dev-skycraft-swc-world-vm-data | 64 GB Premium SSD |
-| Key Vault | dev-skycraft-swc-kv | Disk encryption keys |
+| Data Disk | dev-skycraft-swc-world-vm-data | 64 GB Standard SSD, LUN 0 |
+| Key Vault | dev-skycraft-swc-kv | Disk encryption secret of the Authserver VM |
 
 **Skills Gained**:
 
 - Azure VM creation and configuration
 - Availability zone deployment strategies
 - Managed disk management
-- Azure Disk Encryption implementation
+- Azure Disk Encryption implementation, and where encryption at host replaces it
+- Application security groups and effective security rules
+- VM Scale Sets and autoscale rules
 - VM sizing and optimization
 - Azure Bastion secure access
 
