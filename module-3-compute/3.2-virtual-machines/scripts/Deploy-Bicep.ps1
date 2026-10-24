@@ -4,10 +4,15 @@
 
 .DESCRIPTION
     This script deploys the Lab 3.2 Bicep templates to Azure, including:
-    - Network Interfaces for Auth and World VMs
+    - Network Interfaces for Auth and World VMs, in dev also in the Lab 2.2 ASGs
     - Virtual Machines with SSH key authentication
-    - Managed Data Disk for Worldserver
-    - Key Vault (if AzureDiskEncryption strategy is selected)
+    - Managed Data Disk for Worldserver (<prefix>-world-vm-data, the guide's name)
+    - Key Vault (AzureDiskEncryption strategy, the default)
+
+    With the AzureDiskEncryption strategy it then runs Enable-Encryption.ps1, which encrypts the
+    Auth VM only, so this path ends where the guide ends (#362, #368): the Auth VM encrypted with
+    Azure Disk Encryption, the World VM not, because Lab 5.2 runs file-level recovery and Site
+    Recovery on it. The encryption takes about 2 hours; -SkipEncryption leaves it for later.
 
 .PARAMETER Environment
     Target environment (dev or prod). Default: dev
@@ -16,7 +21,13 @@
     Azure VM size (B-series v2 or D-series; B v1 is not available in Sweden Central on this subscription). Default: Standard_B2ls_v2
 
 .PARAMETER EncryptionStrategy
-    Encryption approach: None, EncryptionAtHost, or AzureDiskEncryption. Default: None
+    Encryption approach: None, EncryptionAtHost, or AzureDiskEncryption. Default: AzureDiskEncryption,
+    the guide's end state. The other two leave Lab 3.2's Test-Lab with encryption failures and
+    give Lab 5.2 no key vault to teach the Azure Backup role on.
+
+.PARAMETER SkipEncryption
+    With AzureDiskEncryption, deploy the Key Vault but do not run Enable-Encryption.ps1. Run it
+    yourself later; until then Test-Lab.ps1 reports the Auth VM as not encrypted.
 
 .PARAMETER SshKeyPath
     Path to SSH public key file. Default: $HOME\.ssh\skycraft-dev.pub
@@ -69,7 +80,10 @@ param(
 
     [Parameter()]
     [ValidateSet('None', 'EncryptionAtHost', 'AzureDiskEncryption')]
-    [string]$EncryptionStrategy = 'None',
+    [string]$EncryptionStrategy = 'AzureDiskEncryption',
+
+    [Parameter()]
+    [switch]$SkipEncryption,
 
     [Parameter()]
     [string]$SshKeyPath = "$HOME\.ssh\skycraft-dev.pub",
@@ -142,11 +156,30 @@ if (-not $lbExists) {
 }
 Write-Host "  ✓ Load Balancer exists: $lbName" -ForegroundColor Green
 
+# Lab 2.2 creates the ASGs the NICs join, in dev only.
+if ($Environment -eq 'dev') {
+    foreach ($asgName in "$Environment-skycraft-swc-asg-auth", "$Environment-skycraft-swc-asg-world") {
+        $asgExists = Get-AzApplicationSecurityGroup -Name $asgName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
+        if (-not $asgExists) {
+            Write-Host "[ERROR] Application security group '$asgName' not found. Deploy Lab 2.2 first." -ForegroundColor Red
+            Exit-Lab -FailureCount 1
+        }
+        Write-Host "  ✓ ASG exists: $asgName" -ForegroundColor Green
+    }
+}
+
 # Display deployment configuration
 Write-Host "`n[3/5] Deployment Configuration:" -ForegroundColor Yellow
 Write-Host "  Environment:          $Environment"
 Write-Host "  VM Size:              $VmSize"
 Write-Host "  Encryption Strategy:  $EncryptionStrategy"
+if ($EncryptionStrategy -eq 'AzureDiskEncryption') {
+    if ($SkipEncryption) {
+        Write-Host "  Disk encryption:      skipped (-SkipEncryption); run .\Enable-Encryption.ps1 later"
+    } else {
+        Write-Host "  Disk encryption:      $Environment-skycraft-swc-auth-vm only, after the deployment (about 2 hours)"
+    }
+}
 Write-Host "  Location:             $location"
 Write-Host "  Template:             $templatePath"
 Write-Host "  Deployment Name:      $deploymentName"
@@ -217,8 +250,19 @@ try {
         Write-Host "    Encryption:       $($deployment.Outputs['outEncryptionStrategy'].Value)"
 
         if ($EncryptionStrategy -eq 'AzureDiskEncryption') {
-            Write-Host "`n  Azure Disk Encryption requires additional step:" -ForegroundColor Yellow
-            Write-Host "     Run: .\Enable-Encryption.ps1 -Environment $Environment"
+            if ($SkipEncryption) {
+                Write-Host "`n  Azure Disk Encryption skipped. Encrypt the Auth VM later:" -ForegroundColor Yellow
+                Write-Host "     Run: .\Enable-Encryption.ps1 -Environment $Environment"
+            } else {
+                # The deployment was confirmed above, so the encryption needs no second prompt.
+                Write-Host "`n  Encrypting the Auth VM (Enable-Encryption.ps1)..." -ForegroundColor Yellow
+                $global:LASTEXITCODE = 0
+                & (Join-Path $scriptPath 'Enable-Encryption.ps1') -Environment $Environment -Force
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "`n[FAILED] The VMs are deployed, but the Auth VM is not encrypted. See the [ERROR] lines above." -ForegroundColor Red
+                    Exit-Lab -FailureCount 1
+                }
+            }
         }
     }
 }

@@ -534,6 +534,7 @@ Describe 'Manifest - the dependency graph is sound' {
     It "skips <Lab> when <Dependency>, which its gate needs, fails to deploy" -ForEach @(
         @{ Lab = '3.2'; Dependency = '2.1' }   # dev resource group and VNet
         @{ Lab = '3.2'; Dependency = '2.3' }   # load balancer 'dev-skycraft-swc-lb' (or 3.1)
+        @{ Lab = '3.2'; Dependency = '2.2' }   # dev ASGs the VM NICs join (#353)
         @{ Lab = '5.1'; Dependency = '3.2' }
         @{ Lab = '5.1'; Dependency = '4.1' }
         @{ Lab = '5.2'; Dependency = '4.1' }   # PostDeploy New-LabBlobBackup.ps1

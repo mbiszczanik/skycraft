@@ -147,7 +147,7 @@ function Get-AzVmss {
 
     # A dev estate as the guide leaves it. -Bicep switches to the names main.bicep gives the NICs;
     # every other switch breaks one thing.
-    function New-Estate {
+    function Get-StubEstate {
         param(
             [switch]$Bicep,
             [switch]$NoAuthAsg,
@@ -210,16 +210,16 @@ function Get-AzVmss {
         -Body $script:StubBody -RequiredModule $script:RequiredModules
 
     # One child process per scenario, reused by the assertions below.
-    $script:Portal          = Invoke-Validator (New-Estate)
-    $script:BicepBuilt      = Invoke-Validator (New-Estate -Bicep)
-    $script:NoAuthAsg       = Invoke-Validator (New-Estate -NoAuthAsg)
-    $script:NoEgress        = Invoke-Validator (New-Estate -WorldNotInEgress)
-    $script:NoDataDisk      = Invoke-Validator (New-Estate -NoDataDisk)
-    $script:AuthUnencrypted = Invoke-Validator (New-Estate -AuthUnencrypted)
-    $script:WorldEncrypted  = Invoke-Validator (New-Estate -WorldEncrypted)
-    $script:NoKeyVault      = Invoke-Validator (New-Estate -NoKeyVault)
-    $script:NoWorldVm       = Invoke-Validator (New-Estate -NoWorldVm)
-    $script:LeftoverVmss    = Invoke-Validator (New-Estate -LeftoverVmss)
+    $script:Portal          = Invoke-Validator (Get-StubEstate)
+    $script:BicepBuilt      = Invoke-Validator (Get-StubEstate -Bicep)
+    $script:NoAuthAsg       = Invoke-Validator (Get-StubEstate -NoAuthAsg)
+    $script:NoEgress        = Invoke-Validator (Get-StubEstate -WorldNotInEgress)
+    $script:NoDataDisk      = Invoke-Validator (Get-StubEstate -NoDataDisk)
+    $script:AuthUnencrypted = Invoke-Validator (Get-StubEstate -AuthUnencrypted)
+    $script:WorldEncrypted  = Invoke-Validator (Get-StubEstate -WorldEncrypted)
+    $script:NoKeyVault      = Invoke-Validator (Get-StubEstate -NoKeyVault)
+    $script:NoWorldVm       = Invoke-Validator (Get-StubEstate -NoWorldVm)
+    $script:LeftoverVmss    = Invoke-Validator (Get-StubEstate -LeftoverVmss)
 
     $script:AllRuns = @(
         $script:Portal, $script:BicepBuilt, $script:NoAuthAsg, $script:NoEgress, $script:NoDataDisk,

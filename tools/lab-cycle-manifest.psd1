@@ -214,18 +214,24 @@
             # the VMs were silently never created - which is the failure this whole orchestrator
             # exists to make impossible.
             #
-            # -EncryptionStrategy is left at its default of 'None'. The AzureDiskEncryption path
-            # creates a Key Vault with purge protection, and nothing in this cycle removes it.
+            # -EncryptionStrategy is left at its default, AzureDiskEncryption, the guide's end
+            # state (#362, #368): the deploy creates the Key Vault (7-day soft delete, no purge
+            # protection) and then runs Enable-Encryption.ps1 -Force on the auth VM only. The OS
+            # encryption took about 2 hours on Standard_B2s_v2 (2026-10-15), and the script waits
+            # up to 180 minutes, so the limit is 4 hours; the 2.2-minute measurement below predates
+            # the encryption. The teardown passes -IncludeKeyVault, so the vault is purged.
             Deploy       = @{ Force = $true }
             PostDeploy   = $null
             Test         = @{}
-            DependsOn    = @('2.3')
-            TimeoutMs    = 2400000
+            DependsOn    = @('2.2', '2.3')
+            TimeoutMs    = 14400000
             StdinAnswers = $null
             Excluded     = $null
             # gate: verified - exits 1 on a missing $HOME\.ssh\skycraft-dev.pub, dev resource
             # group, dev VNet or dev-skycraft-swc-lb. The load balancer comes from Lab 2.3 or 3.1;
             # the manifest cannot express OR, and 2.3 (which implies 2.1) matches the measured order.
+            # gate: verified - in dev it also exits 1 on a missing dev-skycraft-swc-asg-auth or
+            # -asg-world, which Lab 2.2 creates (#353).
         }
         @{
             Id           = '3.3'
@@ -449,8 +455,7 @@
         # Apps Environment, and the previous 20-minute limit killed it mid-delete. See the TIMEOUTS
         # note at the top.
         @{ Lab = 'module-3-compute/3.3-containers';                         Invocations = @(@{ Force = $true }); TimeoutMs = 2700000 }
-        @{ Lab = 'module-3-compute/3.2-virtual-machines';                   Invocations = @(@{ Environment = 'dev'; Force = $true }); TimeoutMs = 1800000
-           LeavesBehind = @(@{ What = "Key Vault '<env>-skycraft-swc-kv', if an earlier run created one"; Why = 'removal requires -IncludeKeyVault, which this cycle deliberately does not pass, so the vault is left untouched rather than soft-deleted. This cycle never creates one: it deploys with -EncryptionStrategy at its default of None.' }) }
+        @{ Lab = 'module-3-compute/3.2-virtual-machines';                   Invocations = @(@{ Environment = 'dev'; Force = $true; IncludeKeyVault = $true }); TimeoutMs = 1800000 }
         @{ Lab = 'module-3-compute/3.1-infrastructure-as-code';             Invocations = @(@{ Environment = 'all'; Force = $true }); TimeoutMs = 1200000 }
         @{ Lab = 'module-2-networking/2.3-name-resolution';                 Invocations = @(@{ Force = $true }); TimeoutMs = 1200000 }
         @{ Lab = 'module-2-networking/2.2-secure-access';                   Invocations = @(@{ Force = $true }); TimeoutMs = 1200000 }
