@@ -79,7 +79,7 @@ Write-Host "    Consider using Encryption at Host for new deployments.`n" -Foreg
 # Check Azure connection
 $account = Get-AzContext
 if (-not $account) {
-    Write-Error "Not logged into Azure. Run 'Connect-AzAccount' first."
+    Write-Host "[ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
     Exit-Lab -FailureCount 1
 }
 Write-Host "✓ Logged in as: $($account.Account.Id)" -ForegroundColor Green
@@ -88,7 +88,7 @@ Write-Host "✓ Logged in as: $($account.Account.Id)" -ForegroundColor Green
 Write-Host "`n[1/5] Checking Key Vault..." -ForegroundColor Yellow
 $kv = Get-AzKeyVault -VaultName $kvName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
 if (-not $kv) {
-    Write-Error "Key Vault '$kvName' not found. Deploy with -EncryptionStrategy AzureDiskEncryption first."
+    Write-Host "[ERROR] Key Vault '$kvName' not found. Deploy with -EncryptionStrategy AzureDiskEncryption first." -ForegroundColor Red
     Exit-Lab -FailureCount 1
 }
 Write-Host "  ✓ Key Vault found: $kvName" -ForegroundColor Green
@@ -99,7 +99,7 @@ $vmInfo = @{}
 foreach ($vmName in $VmNames) {
     $vm = Get-AzVM -ResourceGroupName $rgName -Name $vmName -ErrorAction SilentlyContinue
     if (-not $vm) {
-        Write-Error "VM '$vmName' not found in resource group '$rgName'"
+        Write-Host "[ERROR] VM '$vmName' not found in resource group '$rgName'" -ForegroundColor Red
         Exit-Lab -FailureCount 1
     }
     $powerState = (Get-AzVM -ResourceGroupName $rgName -Name $vmName -Status).Statuses |
@@ -217,10 +217,11 @@ foreach ($vmName in $VmNames) {
 }
 
 if ($failed.Count -gt 0) {
-    Write-Host "Encryption failed for: $($failed -join ', ')" -ForegroundColor Red
+    Write-Host "[ERROR] Encryption failed for: $($failed -join ', ')" -ForegroundColor Red
+    Exit-Lab -FailureCount $failed.Count
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Azure Disk Encryption Complete" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
-Exit-Lab -FailureCount $failed.Count
+Exit-Lab -FailureCount 0

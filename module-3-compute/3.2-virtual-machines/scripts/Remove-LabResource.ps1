@@ -148,7 +148,7 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 # Verify Azure context
 $context = Get-AzContext
 if (-not $context) {
-    Write-Error "Not logged into Azure. Run Connect-AzAccount first."
+    Write-Host "[ERROR] Not logged into Azure. Run Connect-AzAccount first." -ForegroundColor Red
     Exit-Lab -FailureCount 1
 }
 

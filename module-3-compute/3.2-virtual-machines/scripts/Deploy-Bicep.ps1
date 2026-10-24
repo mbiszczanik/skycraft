@@ -100,14 +100,14 @@ Write-Host "[1/5] Validating prerequisites..." -ForegroundColor Yellow
 
 $context = Get-AzContext
 if (-not $context) {
-    Write-Error "Not logged into Azure. Run Connect-AzAccount first."
+    Write-Host "[ERROR] Not logged into Azure. Run Connect-AzAccount first." -ForegroundColor Red
     Exit-Lab -FailureCount 1
 }
 Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
 
 # Check SSH key exists
 if (-not (Test-Path $SshKeyPath)) {
-    Write-Error "SSH public key not found at: $SshKeyPath"
+    Write-Host "[ERROR] SSH public key not found at: $SshKeyPath" -ForegroundColor Red
     Write-Host "  Generate one with: ssh-keygen -t rsa -b 4096 -f `"$HOME\.ssh\skycraft-dev`" -N `"`""
     Exit-Lab -FailureCount 1
 }
@@ -123,21 +123,21 @@ $lbName = "$Environment-skycraft-swc-lb"
 
 $rgExists = Get-AzResourceGroup -Name $rgName -ErrorAction SilentlyContinue
 if (-not $rgExists) {
-    Write-Error "Resource group '$rgName' not found. Deploy Lab 2.1 (or 3.1) first."
+    Write-Host "[ERROR] Resource group '$rgName' not found. Deploy Lab 2.1 (or 3.1) first." -ForegroundColor Red
     Exit-Lab -FailureCount 1
 }
 Write-Host "  ✓ Resource group exists: $rgName" -ForegroundColor Green
 
 $vnetExists = Get-AzVirtualNetwork -Name $vnetName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
 if (-not $vnetExists) {
-    Write-Error "VNet '$vnetName' not found. Deploy Lab 2.1 (or 3.1) first."
+    Write-Host "[ERROR] VNet '$vnetName' not found. Deploy Lab 2.1 (or 3.1) first." -ForegroundColor Red
     Exit-Lab -FailureCount 1
 }
 Write-Host "  ✓ VNet exists: $vnetName" -ForegroundColor Green
 
 $lbExists = Get-AzLoadBalancer -Name $lbName -ResourceGroupName $rgName -ErrorAction SilentlyContinue
 if (-not $lbExists) {
-    Write-Error "Load Balancer '$lbName' not found. Deploy Lab 2.3 (or 3.1) first."
+    Write-Host "[ERROR] Load Balancer '$lbName' not found. Deploy Lab 2.3 (or 3.1) first." -ForegroundColor Red
     Exit-Lab -FailureCount 1
 }
 Write-Host "  ✓ Load Balancer exists: $lbName" -ForegroundColor Green
@@ -223,7 +223,7 @@ try {
     }
 }
 catch {
-    Write-Error "Deployment failed: $($_.Exception.Message)"
+    Write-Host "[ERROR] Deployment failed: $($_.Exception.Message)" -ForegroundColor Red
     Exit-Lab -FailureCount 1
 }
 
