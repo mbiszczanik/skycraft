@@ -150,7 +150,7 @@ You can build this lab in the Portal by following this guide, with the Az PowerS
 
 **Note**: For this lab, we'll use a placeholder domain. In production, you'd register a real domain (e.g., godaddy.com, namecheap.com) and delegate DNS to Azure.
 
-1. In the **Azure Portal**, search for **DNS zones**. The search lists two results with that name; open the one that shows the page "Network foundation | Public DNS zones", not "Private DNS zones".
+1. In the **Azure Portal**, search for **DNS zones** and open the public DNS service. If the selected result opens **Network foundation | Overview**, expand **DNS** in its left menu and select **Public DNS zones**. Check that the destination page is **Public DNS zones**, then continue.
 2. Click **+ Create**. The page "Create a DNS Zone" has the tabs Basics, DNS Zone Editor, Tags and Review + Create.
 3. On the **Basics** tab, fill in:
 
