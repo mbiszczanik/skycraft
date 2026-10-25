@@ -463,6 +463,8 @@ Items 5-16 fill the blocks in that order. Each item works on the newest block, t
 
 **Expected Result**: `tier-game-logs` is listed on the **List View** tab as **Enabled**. On the **Code View** tab, its `filters` hold `"prefixMatch": ["game-logs/"]` and `"blobTypes": ["blockBlob"]`.
 
+![The four blocks of tier-game-logs on the Base blobs tab](./images/step-4.2.8.png)
+
 **With Az PowerShell** (instead of items 1-19):
 
 ```powershell
@@ -668,6 +670,8 @@ az storage blob upload \
    - Click **Create**
 
    > In the **New container** pane, **Anonymous access level** is greyed out at Private (no anonymous access), with the note "The access level is set to private because anonymous access is disabled on this storage account." That is the account switch of item 1 at work: while it is off, the pane offers no other level. Leave the **Advanced** section as it is (Step 4.2.2).
+
+   ![New container pane with the access level greyed out](./images/step-4.2.12.png)
 
 3. **Prove the container is not anonymous**:
    - **Containers** (under **Data storage**) → `public-demo`
