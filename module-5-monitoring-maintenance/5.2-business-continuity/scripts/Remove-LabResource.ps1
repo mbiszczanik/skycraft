@@ -20,7 +20,10 @@
     Notes:
     - The role assignments are removed before the Backup Vault so its managed
       identity is still resolvable; otherwise they would be orphaned on the
-      storage account after the vault (and its identity) is deleted.
+      storage account after the vault (and its identity) is deleted. They are
+      read and removed through the Azure Resource Manager role assignments API
+      (tools/LabCommon.psm1), so the cleanup needs no Microsoft Graph sign-in
+      (issue #397).
     - Azure Site Recovery resources (ASR fabric, replication, cache storage
       account) must be cleaned up manually via the Azure Portal before
       deleting the Recovery Services Vault.
@@ -76,6 +79,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+# The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
@@ -121,8 +125,10 @@ $backupRoles = @(
 #     messages, with the code as the error id ("ResourceNotFound,Get-AzDataProtectionBackupVault").
 #   - Azure.Core clients: "Status: 404 (Not Found)" and "ErrorCode: ResourceNotFound".
 # The list getters - Get-AzResourceGroup, Get-AzResource, Get-AzRecoveryServicesBackupItem and
-# Get-AzRoleAssignment - return nothing when nothing matches; Get-AzResource still reports a
-# group that is gone as ResourceGroupNotFound. A missing subscription is a 404 too, but it means
+# Get-LabArmRoleAssignment (tools/LabCommon.psm1, the ARM role assignments API, issue #397) -
+# return nothing when nothing matches; Get-AzResource still reports a group that is gone as
+# ResourceGroupNotFound, and Get-LabArmRoleAssignment throws ARM's error code (ResourceNotFound
+# for a storage account that is gone) in its message. A missing subscription is a 404 too, but it means
 # the context is wrong, not that the resource is gone, so it never reads as "absent".
 function Test-LabNotFoundError {
     [CmdletBinding()]
@@ -382,8 +388,13 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BlobInstance' })
 foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RoleAssignment' }) {
     if (-not $PSCmdlet.ShouldProcess("$($r.Name) -> $storageAccount", 'Remove role assignment')) { continue }
     Write-Host "  Removing role assignment '$($r.Name)' on $storageAccount..." -ForegroundColor Gray
+    # Through the ARM role assignments API (tools/LabCommon.psm1), not Get-AzRoleAssignment /
+    # Remove-AzRoleAssignment, which resolve the principal through Microsoft Graph and fail where
+    # the Az sign-in cannot get a Graph token (issue #397). The listing also returns assignments
+    # inherited from above; only the one made on the storage account itself is the lab's.
     $assignmentLookup = Invoke-LabLookup -Target "role assignment '$($r.Name)' on $storageAccount" -Lookup {
-        Get-AzRoleAssignment -ObjectId $r.PrincipalId -RoleDefinitionId $r.RoleId -Scope $r.Scope -ErrorAction Stop
+        Get-LabArmRoleAssignment -Scope $r.Scope -PrincipalId $r.PrincipalId |
+            Where-Object { $_.RoleDefinitionId -eq $r.RoleId -and $_.Scope -eq $r.Scope }
     }
     if ($assignmentLookup.Failed) {
         $script:backupVaultMustStay = $true
@@ -391,7 +402,9 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RoleAssignment' 
     }
     try {
         if ($assignmentLookup.Value.Count -gt 0) {
-            Remove-AzRoleAssignment -ObjectId $r.PrincipalId -RoleDefinitionId $r.RoleId -Scope $r.Scope -ErrorAction Stop | Out-Null
+            foreach ($assignment in $assignmentLookup.Value) {
+                Remove-LabArmRoleAssignment -Id $assignment.RoleAssignmentId
+            }
             Write-Host "  ✓ Removed role assignment: $($r.Name)" -ForegroundColor Green
         } else {
             Write-Host "  ✓ Role assignment already absent: $($r.Name)" -ForegroundColor Green

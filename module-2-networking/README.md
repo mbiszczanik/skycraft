@@ -52,7 +52,7 @@ Before starting, ensure you have:
 
 - [ ] Completed Module 1 (Identity, RBAC, Governance)
 - [ ] Active Azure subscription with Owner or Contributor role
-- [ ] Azure CLI installed locally (or use Cloud Shell)
+- [ ] Azure CLI installed locally (or use Cloud Shell). Azure Cloud Shell has Azure PowerShell, the Azure CLI and the Bicep CLI preinstalled ([Features & tools for Azure Cloud Shell](https://learn.microsoft.com/azure/cloud-shell/features#azure-tools)), so a session without a storage account can run this module's scripts too; it deletes your clone of the repository when the session ends ([Get started with Azure Cloud Shell ephemeral sessions](https://learn.microsoft.com/azure/cloud-shell/get-started/ephemeral))
 - [ ] Understanding of IP addressing and subnetting (CIDR notation)
 - [ ] Familiarity with OSI model and network security concepts
 

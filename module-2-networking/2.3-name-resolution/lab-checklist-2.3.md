@@ -105,6 +105,11 @@
   - IP version: IPv4
   - VMs in pool: 0 (ready for Module 3)
 
+- [ ] **Backend pool 3** (outbound): `dev-skycraft-swc-lb-be-outbound`
+  - Virtual network: `dev-skycraft-swc-vnet`
+  - Backend pool configuration: NIC
+  - VMs in pool: 0 (Lab 3.2 adds both VMs)
+
 ### Health Probes
 - [ ] **Health probe 1**: `dev-skycraft-swc-lb-probe-world`
   - Protocol: TCP
@@ -140,6 +145,17 @@
   - Session persistence: None
   - Idle timeout: 4 minutes
 
+- [ ] Both rules: **Outbound source network address translation (SNAT)** left at **(Recommended) Use outbound rules to provide backend pool members access to the internet.**
+
+### Outbound Rule
+- [ ] **Outbound rule**: `dev-skycraft-swc-lb-outbound` (the only one: a frontend IP carries one outbound rule)
+  - Frontend IP: `dev-skycraft-swc-lb-frontend`
+  - Backend pool: `dev-skycraft-swc-lb-be-outbound`
+  - Protocol: All
+  - Idle timeout: 4 minutes
+  - TCP reset: Enabled
+  - Default port allocation: off; Allocated outbound ports (per instance): 8000
+
 ### Tags
 - [ ] Tag: `Project` = `SkyCraft`
 - [ ] Tag: `Environment` = `Development`
@@ -174,6 +190,11 @@
   - Backend pool configuration: NIC
   - VMs in pool: 0 (ready for Module 3)
 
+- [ ] **Backend pool 3** (outbound): `prod-skycraft-swc-lb-be-outbound`
+  - Virtual network: `prod-skycraft-swc-vnet`
+  - Backend pool configuration: NIC
+  - VMs in pool: 0 (ready for Module 3)
+
 ### Health Probes
 - [ ] **Health probe 1**: `prod-skycraft-swc-lb-probe-world`
   - Protocol: TCP
@@ -197,6 +218,11 @@
   - Port: `3724` → Backend port: `3724`
   - Backend pool: `prod-skycraft-swc-lb-be-auth`
   - Health probe: `prod-skycraft-swc-lb-probe-auth`
+
+### Outbound Rule
+- [ ] **Outbound rule**: `prod-skycraft-swc-lb-outbound`
+  - Backend pool: `prod-skycraft-swc-lb-be-outbound`
+  - Protocol: All, 8000 ports per instance
 
 ### Tags
 - [ ] Tag: `Project` = `SkyCraft`
@@ -329,8 +355,9 @@ $lb.BackendAddressPools |
 # Expected output:
 # Name                          BackendIPConfigurations
 # ----                          -----------------------
-# dev-skycraft-swc-lb-be-world  0
-# dev-skycraft-swc-lb-be-auth   0
+# dev-skycraft-swc-lb-be-world     0
+# dev-skycraft-swc-lb-be-auth      0
+# dev-skycraft-swc-lb-be-outbound  0
 
 # List health probes
 $lb.Probes |
@@ -353,6 +380,17 @@ $lb.LoadBalancingRules |
 # ----                            -------- ------------ ----------- ----------------
 # dev-skycraft-swc-lb-rule-world  Tcp      8085         8085        Default
 # dev-skycraft-swc-lb-rule-auth   Tcp      3724         3724        Default
+
+# List outbound rules (one: it serves the outbound pool)
+$lb.OutboundRules |
+    Select-Object Name, Protocol, AllocatedOutboundPorts, IdleTimeoutInMinutes,
+        @{N='BackendPool';E={($_.BackendAddressPool.Id -split '/')[-1]}} |
+    Format-Table -AutoSize
+
+# Expected output:
+# Name                          Protocol AllocatedOutboundPorts IdleTimeoutInMinutes BackendPool
+# ----                          -------- ---------------------- -------------------- -----------
+# dev-skycraft-swc-lb-outbound  All      8000                   4                    dev-skycraft-swc-lb-be-outbound
 ```
 
 ### Verify Production Load Balancer
@@ -363,12 +401,13 @@ Get-AzLoadBalancer -ResourceGroupName prod-skycraft-swc-rg -Name prod-skycraft-s
     Select-Object Name, @{N='SKU';E={$_.Sku.Name}},
         @{N='BackendPools';E={$_.BackendAddressPools.Count}},
         @{N='Probes';E={$_.Probes.Count}},
-        @{N='Rules';E={$_.LoadBalancingRules.Count}}
+        @{N='Rules';E={$_.LoadBalancingRules.Count}},
+        @{N='OutboundRules';E={$_.OutboundRules.Count}}
 
 # Expected output:
-# Name                 SKU      BackendPools Probes Rules
-# ----                 ---      ------------ ------ -----
-# prod-skycraft-swc-lb Standard 2            2      2
+# Name                 SKU      BackendPools Probes Rules OutboundRules
+# ----                 ---      ------------ ------ ----- -------------
+# prod-skycraft-swc-lb Standard 3            2      2     1
 ```
 
 ### Verify Tags
@@ -412,16 +451,20 @@ Use this table to document your deployed architecture:
 | **Private DNS Zone** | skycraft.internal | Private | 2 records, 3 VNet links | ✅ |
 | └─ A Record | dev-db.skycraft.internal | A | 10.1.3.10 | ✅ |
 | └─ A Record | prod-db.skycraft.internal | A | 10.2.3.10 | ✅ |
-| **Dev Load Balancer** | dev-skycraft-swc-lb | Standard Public | 2 pools, 2 probes, 2 rules | ✅ |
+| **Dev Load Balancer** | dev-skycraft-swc-lb | Standard Public | 3 pools, 2 probes, 2 rules, 1 outbound rule | ✅ |
 | └─ Frontend IP | dev-skycraft-swc-lb-frontend | Public IP | dev-skycraft-swc-lb-pip | ✅ |
 | └─ Backend Pool | dev-skycraft-swc-lb-be-world | Empty | Ready for VMs | ✅ |
 | └─ Backend Pool | dev-skycraft-swc-lb-be-auth | Empty | Ready for VMs | ✅ |
+| └─ Backend Pool | dev-skycraft-swc-lb-be-outbound | Empty | Egress pool, both VMs in Lab 3.2 | ✅ |
 | └─ Health Probe | dev-skycraft-swc-lb-probe-world | TCP:8085 | 15s interval, threshold 2 | ✅ |
 | └─ Health Probe | dev-skycraft-swc-lb-probe-auth | TCP:3724 | 15s interval, threshold 2 | ✅ |
-| **Prod Load Balancer** | prod-skycraft-swc-lb | Standard Public | 2 pools, 2 probes, 2 rules | ✅ |
+| └─ Outbound Rule | dev-skycraft-swc-lb-outbound | All | be-outbound, 8000 ports per instance | ✅ |
+| **Prod Load Balancer** | prod-skycraft-swc-lb | Standard Public | 3 pools, 2 probes, 2 rules, 1 outbound rule | ✅ |
 | └─ Frontend IP | prod-skycraft-swc-lb-frontend | Public IP | prod-skycraft-swc-lb-pip | ✅ |
 | └─ Backend Pool | prod-skycraft-swc-lb-be-world | Empty | Ready for VMs | ✅ |
 | └─ Backend Pool | prod-skycraft-swc-lb-be-auth | Empty | Ready for VMs | ✅ |
+| └─ Backend Pool | prod-skycraft-swc-lb-be-outbound | Empty | Egress pool | ✅ |
+| └─ Outbound Rule | prod-skycraft-swc-lb-outbound | All | be-outbound, 8000 ports per instance | ✅ |
 
 ---
 
@@ -584,9 +627,10 @@ _________________________________________________________________
 - [ ] Private DNS zone created with 3 VNet links and 2 A records
 - [ ] Dev load balancer deployed with Standard SKU
 - [ ] Prod load balancer deployed with Standard SKU
-- [ ] 4 backend pools created (2 per load balancer)
+- [ ] 6 backend pools created (world, auth and outbound per load balancer)
 - [ ] 4 health probes configured (TCP ports 3724, 8085)
 - [ ] 4 load balancing rules configured
+- [ ] 2 outbound rules configured (one per load balancer, for its outbound pool, 8000 ports per instance)
 - [ ] All resources have required tags (Project, Environment, CostCenter, Owner)
 - [ ] All validation commands executed successfully
 - [ ] All reflection questions answered

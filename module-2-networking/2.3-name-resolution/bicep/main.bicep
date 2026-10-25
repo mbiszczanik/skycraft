@@ -3,7 +3,7 @@ SUMMARY: Lab 2.3 - DNS and Load Balancing
 DESCRIPTION: Deploys the Dev/Prod Standard Load Balancers, the public DNS zone with its records and the private DNS zone with its VNet links via AVM (requires the Lab 2.1 virtual networks and public IPs to exist)
 EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.2.1
+VERSION: 0.3.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -106,6 +106,14 @@ var varWorldPort = 8085
 var varProbeIntervalInSeconds = 15
 var varProbeCount = 2
 
+// Outbound rule: manual port allocation, a multiple of 8. The frontend IP offers 63,992 SNAT ports
+// to its one outbound rule, so 8,000 per instance admits 7 instances in the egress pool. Module 3
+// puts at most 2 VMs per load balancer there (the Lab 3.2 auth and world VMs); even the prod scale
+// set of Lab 3.2 (up to 4 instances) would fit beside them (2 + 4 = 6). The module's default
+// (63,984 per instance) would admit a single instance.
+var varOutboundPortsPerInstance = 8000
+var varOutboundIdleTimeoutInMinutes = 4
+
 // Placeholder database records (VMs auto-register their own names in Module 3)
 var varDevDbIp = '10.1.3.10'
 var varProdDbIp = '10.2.3.10'
@@ -180,9 +188,16 @@ module modProdPip 'modules/get-public-ip.bicep' = {
 }
 
 // 2. Load balancers (Standard SKU, regional). Frontends use the Lab 2.1 public IPs; the
-//    backend pools stay empty until Module 3 adds the VM NICs (Lab 3.2 references '-be-auth').
-//    disableOutboundSnat is set explicitly: the AVM default (true) would remove the implicit
-//    outbound SNAT through the frontend IP that the Module 3 VMs rely on (docs/bicep-standards.md, Section 4.5).
+//    backend pools stay empty until Module 3 adds the VM NICs (Lab 3.2 references all three).
+//    Egress: the subnets are private (Lab 2.1), so the Module 3 VMs reach the internet only
+//    through the load balancer's outbound rule. Azure refuses a second outbound rule with an
+//    overlapping protocol on the same frontend IP
+//    (MoreThanOneOutboundRuleUsingSameFrontendIPConfigurationAndProtocolIsNotSupported), so there
+//    is one rule, protocol All, for a dedicated egress pool, '-be-outbound', which Lab 3.2 puts
+//    every VM NIC into besides its role pool. Once an outbound rule uses the
+//    frontend, Azure requires disableOutboundSnat true on every load-balancing rule on it
+//    (LoadBalancingRuleMustDisableSNATSinceSameFrontendIPConfigurationIsReferencedByOutboundRule),
+//    which is also the Portal's recommended option (docs/bicep-standards.md, Section 4.5).
 module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
   name: 'deploy-dev-lb'
   scope: resDevRG
@@ -204,6 +219,9 @@ module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
       }
       {
         name: '${varLbNameDev}-be-auth'
+      }
+      {
+        name: '${varLbNameDev}-be-outbound'
       }
     ]
     probes: [
@@ -233,7 +251,7 @@ module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
         backendPort: varWorldPort
         idleTimeoutInMinutes: 4
         enableTcpReset: true
-        disableOutboundSnat: false
+        disableOutboundSnat: true
         loadDistribution: 'Default'
       }
       {
@@ -246,8 +264,19 @@ module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
         backendPort: varAuthPort
         idleTimeoutInMinutes: 4
         enableTcpReset: true
-        disableOutboundSnat: false
+        disableOutboundSnat: true
         loadDistribution: 'Default'
+      }
+    ]
+    outboundRules: [
+      {
+        name: '${varLbNameDev}-outbound'
+        frontendIPConfigurationName: '${varLbNameDev}-frontend'
+        backendAddressPoolName: '${varLbNameDev}-be-outbound'
+        protocol: 'All'
+        allocatedOutboundPorts: varOutboundPortsPerInstance
+        enableTcpReset: true
+        idleTimeoutInMinutes: varOutboundIdleTimeoutInMinutes
       }
     ]
   }
@@ -274,6 +303,9 @@ module modProdLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
       }
       {
         name: '${varLbNameProd}-be-auth'
+      }
+      {
+        name: '${varLbNameProd}-be-outbound'
       }
     ]
     probes: [
@@ -303,7 +335,7 @@ module modProdLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
         backendPort: varWorldPort
         idleTimeoutInMinutes: 4
         enableTcpReset: true
-        disableOutboundSnat: false
+        disableOutboundSnat: true
         loadDistribution: 'Default'
       }
       {
@@ -316,8 +348,19 @@ module modProdLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
         backendPort: varAuthPort
         idleTimeoutInMinutes: 4
         enableTcpReset: true
-        disableOutboundSnat: false
+        disableOutboundSnat: true
         loadDistribution: 'Default'
+      }
+    ]
+    outboundRules: [
+      {
+        name: '${varLbNameProd}-outbound'
+        frontendIPConfigurationName: '${varLbNameProd}-frontend'
+        backendAddressPoolName: '${varLbNameProd}-be-outbound'
+        protocol: 'All'
+        allocatedOutboundPorts: varOutboundPortsPerInstance
+        enableTcpReset: true
+        idleTimeoutInMinutes: varOutboundIdleTimeoutInMinutes
       }
     ]
   }

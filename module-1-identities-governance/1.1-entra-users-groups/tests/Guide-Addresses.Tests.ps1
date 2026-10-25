@@ -63,7 +63,7 @@ BeforeAll {
     $script:GuideGuest = $guestMatch.Groups['email'].Value
 
     $script:StubModuleName = 'SkyCraftGraphAddressStub'
-    # The union of the three scripts' '#Requires -Modules' lines: imported for real before the stub.
+    # The union of the three scripts' $labModule lists (issue #375): imported for real before the stub.
     $script:RequiredModules = @(
         'Microsoft.Graph.Authentication'
         'Microsoft.Graph.Users'
@@ -107,6 +107,8 @@ function Get-MgContext {
         TenantId = '00000000-0000-0000-0000-000000000000'
         Account  = 'stub-admin@contoso.example'
         AppName  = $null
+        # Every scope the lab's scripts request, so the context is reused (#273).
+        Scopes   = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All')
     }
 }
 

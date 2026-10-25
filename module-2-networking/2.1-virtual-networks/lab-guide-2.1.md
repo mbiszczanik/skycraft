@@ -143,6 +143,8 @@ You'll deploy this three-VNet hub-spoke architecture:
 
 **Important**: The name **must be exactly** `AzureBastionSubnet` (case-sensitive). Azure Bastion requires this specific name.
 
+**Note**: The **Add a subnet** pane ticks **Enable private subnet (no default outbound access)** by default. Leave **Enable private subnet (no default outbound access)** checked, here and on every subnet of this lab: new VNets in Azure no longer get implicit outbound internet access, and Lab 2.3 gives the Module 3 VMs an explicit outbound path through load balancer outbound rules.
+
 3. Click **Add**
 
 ![Azure Bastion Subnet](./images/step-2.1.2.png)

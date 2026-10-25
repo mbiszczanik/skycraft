@@ -504,7 +504,6 @@ NON_UI_BOLD = {
 # listed. Once a lab is recorded, its entries can move to its recording as 'ignore' decisions;
 # lab 1.1, the only lab recorded so far, has none.
 LAB_CAPTIONS: dict[str, frozenset[str]] = {
-    "1.2": frozenset({"group"}),                           # "Select the **group** (not individual users)"
     "1.3": frozenset({"WITHOUT",                           # emphasis
                       "resource"}),                        # "Locks at **resource** level"
     "2.2": frozenset({"fully private", "private IP"}),     # emphasis

@@ -42,6 +42,11 @@
                template, Deploy-Networking.ps1 and the guide's portal steps - because a re-run
                no longer touches an existing subnet and so cannot add a missing delegation.
 
+    Issue #279 adds one more value of the same kind: every subnet Lab 2.1 and 2.2 declare,
+    and every subnet Deploy-Networking.ps1 creates, is private (defaultOutboundAccess false), as
+    the portal creates it. Unset, the AVM subnet module sends null, which allows default outbound
+    access, so a Bicep-built estate would not match a portal-built one.
+
     Three layers: the compiled templates (what ARM receives), the deploy scripts' decision
     helpers lifted from their AST, and both deploy scripts run end to end with -WhatIf in a child
     pwsh whose Az cmdlets are stubs (tests/Support/LabScriptStub.psm1), so no Azure call is made.
@@ -51,7 +56,7 @@
 
 .NOTES
     Project: SkyCraft
-    Issue: #188, #263
+    Issue: #188, #263, #279
 #>
 
 #Requires -Version 7.0
@@ -237,6 +242,8 @@ Describe 'Lab 2.2 template - a re-run declares everything the spoke subnets carr
         $module.Count | Should -Be 1
         $p = $module[0].properties.parameters
         $p.privateEndpointNetworkPolicies.value | Should -Be 'Disabled' -Because 'unset, every re-run flipped the subnets to Enabled (#263)'
+        $p.defaultOutboundAccess.value | Should -BeFalse -Because 'unset, the module sends null and the subnet allows default outbound access (#279)'
+        $p.ContainsKey('defaultOutboundAccess') | Should -BeTrue
         $p.addressPrefix.value | Should -Be "[variables('varSpokes')[copyIndex()].$cidr]"
         $p.networkSecurityGroupResourceId.value | Should -Match 'nsg-'
         @($p.serviceEndpoints.value | Where-Object { $_ }) | Should -Be $endpoints
@@ -258,6 +265,7 @@ Describe 'Lab 2.2 template - a re-run declares everything the spoke subnets carr
         $entry.dbSubnetCidr    | Should -Be $plan['DatabaseSubnet'].addressPrefix
         foreach ($name in 'AuthSubnet', 'WorldSubnet', 'DatabaseSubnet') {
             $plan[$name].privateEndpointNetworkPolicies | Should -Be 'Disabled' -Because 'Lab 2.2 restates the value Lab 2.1 creates the subnet with'
+            $plan[$name].defaultOutboundAccess | Should -BeFalse -Because 'Lab 2.2 restates the value Lab 2.1 creates the subnet with'
             $plan[$name].ContainsKey('delegation') | Should -BeFalse -Because 'Lab 2.2 declares no delegation on this subnet'
         }
     }
@@ -287,6 +295,7 @@ Describe 'Lab 2.1 template - a re-run leaves what later labs set alone' {
         $module.copy.count | Should -Be "[length(if(parameters('$flag'), variables('$variable'), createArray()))]"
         $module.copy.batchSize | Should -Be 1 -Because 'subnet updates on one VNet must not overlap'
         $module.properties.parameters.privateEndpointNetworkPolicies.value | Should -Match 'privateEndpointNetworkPolicies'
+        $module.properties.parameters.defaultOutboundAccess.value | Should -Match 'defaultOutboundAccess' -Because 'a subnet added to an existing VNet must be private too (#279)'
         $script:Template21.variables[$variable] | Should -Match ([regex]::Escape("parameters('parExistingSubnets').$vnet"))
         $script:Template21.variables[$variable] | Should -Match '^\[filter\('
         $script:Template21.variables[$variable] | Should -Match 'toLower\(.*toLower\(' -Because 'Azure subnet names are case-insensitive, so a Portal-made Authsubnet must count as AuthSubnet'
@@ -307,6 +316,18 @@ Describe 'Lab 2.1 template - a re-run leaves what later labs set alone' {
         # Unset, the #188 what-if showed existing 'Disabled' subnets going to 'Enabled'.
         foreach ($subnet in $script:Template21.variables[$variable]) {
             $subnet.privateEndpointNetworkPolicies | Should -Be 'Disabled' -Because "$($subnet.name) must match the portal and the existing subnets"
+        }
+    }
+
+    It "declares every subnet of '<variable>' private (defaultOutboundAccess false)" -ForEach @(
+        @{ variable = 'varHubSubnets' }
+        @{ variable = 'varDevSubnets' }
+        @{ variable = 'varProdSubnets' }
+    ) {
+        # The portal's Add a subnet pane creates private subnets; unset, the module sends null (#279).
+        foreach ($subnet in $script:Template21.variables[$variable]) {
+            $subnet.ContainsKey('defaultOutboundAccess') | Should -BeTrue -Because "$($subnet.name) must state the value"
+            $subnet.defaultOutboundAccess | Should -BeFalse -Because "$($subnet.name) must match the portal"
         }
     }
 
@@ -374,6 +395,13 @@ Describe 'AppServiceSubnet delegation - every Lab 2.1 path creates the same subn
         $calls = [regex]::Matches($text, "New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet'[^\r\n]*")
         $calls.Count | Should -Be 2
         foreach ($call in $calls) { $call.Value | Should -Match '-Delegation \$appServiceDelegation' }
+    }
+
+    It 'Deploy-Networking.ps1 creates every subnet private' {
+        $text = Get-Content -Raw -LiteralPath (Join-Path $script:Lab21 'scripts/Deploy-Networking.ps1')
+        $calls = [regex]::Matches($text, 'New-AzVirtualNetworkSubnetConfig -Name [^\r\n]*')
+        $calls.Count | Should -Be 10 -Because 'the hub has 2 subnets and each spoke 4'
+        foreach ($call in $calls) { $call.Value | Should -Match '-DefaultOutboundAccess \$false' -Because "$($call.Value) must match the portal and main.bicep (#279)" }
     }
 
     It "the guide's portal steps delegate the dev and prod AppServiceSubnet" {

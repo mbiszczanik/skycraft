@@ -18,6 +18,13 @@
       4. A run with no one signed in exits 1 before anything is looked up.
       5. -SkipRoleAssignments (what the lab cycle passes) checks the resource groups only, does
          not count the role checks, and exits 0 when the resource groups are there.
+      6. An Owner assignment for Malfurion with a condition is a failed check (#325): the lab's
+         has none.
+      7. The role assignments are read through the ARM role assignments API (issue #397), never
+         through Get-AzRoleAssignment, which calls Microsoft Graph; only the principals are
+         looked up in Entra ID. When that lookup cannot reach Graph, each role check fails and
+         names the sign-in that provides it; a principal that is missing or held twice fails its
+         check without that hint, since signing in again would not help.
 
     Scope limit, as in the Lab 1.1 suite: the child is launched with -Command, so these tests
     prove the failure counter reaches `exit`, not that `pwsh -File` carries the code out of the
@@ -51,23 +58,41 @@ BeforeAll {
     $script:StubCommands = @(
         'Get-AzContext'
         'Get-AzResourceGroup'
-        'Get-AzRoleAssignment'
+        'Get-AzADUser'
+        'Get-AzADGroup'
+        'Invoke-AzRestMethod'
     )
 
     # Every Az command the script calls, recording its own invocation. By default the
     # subscription holds exactly what the lab builds: the three resource groups and the five role
-    # assignments. Environment variables take pieces away, so one generated module serves every
-    # scenario:
+    # assignments, next to the operator's own Owner assignment, a Reader for SkyCraft-Testers on
+    # the subscription, which every resource group inherits but which is not the lab's
+    # resource-group assignment, and a Contributor for SkyCraft-Testers on the prod group. The role assignments are served by the ARM role assignments API
+    # fake from tests/Support/LabScriptStub.psm1 (issue #397), which calls Get-StubRoleAssignment.
+    # Environment variables take pieces away, so one generated module serves every scenario:
     #   SKYCRAFT_STUB_NOCONTEXT       '1' leaves no Az context, as when no one is signed in
     #   SKYCRAFT_STUB_MISSINGRG       resource groups (by name) that do not exist: the group
-    #                                 lookup fails, as the real cmdlet does, and the role lookup
-    #                                 at the group's scope returns no assignment at all
+    #                                 lookup fails, as the real cmdlet does, and ARM answers a role
+    #                                 assignment listing at the group's scope with 404
     #   SKYCRAFT_STUB_MISSINGROLE     role assignments left out, by key: owner, developers,
     #                                 testers-dev, testers-prod, partner
-    #   SKYCRAFT_STUB_ROLELOOKUPFAIL  '1' makes every role-assignment lookup fail with an error
+    #   SKYCRAFT_STUB_ROLELOOKUPFAIL  '1' makes every role assignment listing fail (HTTP 403)
+    #   SKYCRAFT_STUB_GRAPHFAIL       '1' makes every Entra ID lookup fail the way Az does when the
+    #                                 tenant wants interaction before it issues a Graph token
+    #   SKYCRAFT_STUB_MISSINGPRINCIPAL  principals (by name) the directory does not hold
+    #   SKYCRAFT_STUB_OWNERCONDITION  '1' gives Malfurion's Owner assignment a condition, as any
+    #                                 Conditions-tab option but "Allow user to assign all roles"
+    #                                 does in the Portal (#325)
+    #   SKYCRAFT_STUB_DUPLICATEPRINCIPAL  principals (by name) the directory holds twice
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:SubId   = '00000000-0000-0000-0000-000000000000'
+$script:Principal = @{
+    'malfurion.stormrage'     = 'aaaaaaaa-0000-0000-0000-000000000001'
+    'SkyCraft-Developers'     = 'aaaaaaaa-0000-0000-0000-000000000002'
+    'SkyCraft-Testers'        = 'aaaaaaaa-0000-0000-0000-000000000003'
+    'istormrage@illidari.com' = 'aaaaaaaa-0000-0000-0000-000000000004'
+}
 
 function Write-StubCall {
     param([string]$Name)
@@ -78,12 +103,6 @@ function Test-StubListed {
     param([string]$Variable, [string]$Name)
     if (-not $Name) { return $false }
     return (@([System.Environment]::GetEnvironmentVariable($Variable) -split ',') -contains $Name)
-}
-
-function New-StubAssignment {
-    param([string]$Key, [string]$Role, [string]$SignInName, [string]$DisplayName)
-    if (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGROLE' -Name $Key) { return }
-    [pscustomobject]@{ RoleDefinitionName = $Role; SignInName = $SignInName; DisplayName = $DisplayName }
 }
 
 function Get-AzContext {
@@ -106,32 +125,73 @@ function Get-AzResourceGroup {
     [pscustomobject]@{ ResourceGroupName = $Name; Location = 'swedencentral' }
 }
 
-# Returns what the real cmdlet returns for a scope: the assignments made there plus the ones
-# inherited from above. The operator's own Owner assignment on the subscription is always among
-# them, so a scope never comes back empty just because a lab assignment is missing. The one
-# empty answer is a resource group that does not exist: nothing is assigned at its scope.
-function Get-AzRoleAssignment {
+# The directory lookups Az makes through Microsoft Graph with its own token.
+function Find-StubPrincipal {
+    param([string]$Name)
+    if ($env:SKYCRAFT_STUB_GRAPHFAIL -eq '1') {
+        throw 'Authentication failed against resource MicrosoftGraphEndpointResourceId. User interaction is required. (stub)'
+    }
+    if (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGPRINCIPAL' -Name $Name) { return }
+    [pscustomobject]@{ Id = $script:Principal[$Name]; DisplayName = $Name }
+    if (Test-StubListed -Variable 'SKYCRAFT_STUB_DUPLICATEPRINCIPAL' -Name $Name) {
+        [pscustomobject]@{ Id = 'cccccccc-0000-0000-0000-000000000009'; DisplayName = $Name }
+    }
+}
+
+function Get-AzADUser {
     [CmdletBinding()]
-    param([string]$Scope, [Parameter(ValueFromRemainingArguments)]$Rest)
-    Write-StubCall -Name 'Get-AzRoleAssignment'
-    if ($env:SKYCRAFT_STUB_ROLELOOKUPFAIL -eq '1') { Write-Error 'stub lookup failure: Get-AzRoleAssignment'; return }
-    if ($Scope -match '/resourceGroups/([^/]+)$' -and (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGRG' -Name $Matches[1])) { return }
+    param([string]$Filter)
+    Write-StubCall -Name "Get-AzADUser|$Filter"
+    switch ($Filter) {
+        "startsWith(userPrincipalName,'malfurion.stormrage@')" { Find-StubPrincipal -Name 'malfurion.stormrage' }
+        "mail eq 'istormrage@illidari.com'" { Find-StubPrincipal -Name 'istormrage@illidari.com' }
+        default { throw "stub: unexpected Get-AzADUser filter '$Filter'" }
+    }
+}
+
+function Get-AzADGroup {
+    [CmdletBinding()]
+    param([string]$DisplayName)
+    Write-StubCall -Name "Get-AzADGroup|$DisplayName"
+    if ($DisplayName -notin 'SkyCraft-Developers', 'SkyCraft-Testers') { throw "stub: unexpected group '$DisplayName'" }
+    Find-StubPrincipal -Name $DisplayName
+}
+
+# What ARM lists for a scope: the assignments at it, above it and below it. A resource group that
+# does not exist is a 404.
+function Get-StubRoleAssignment {
+    [CmdletBinding()]
+    param([string]$Scope, [string]$PrincipalId)
+    Write-StubCall -Name 'Get-RoleAssignment'
+    if ($env:SKYCRAFT_STUB_ROLELOOKUPFAIL -eq '1') {
+        Write-Error -ErrorId 'AuthorizationFailed' -Message "The client 'stub' does not have authorization to perform action 'Microsoft.Authorization/roleAssignments/read' over scope '$Scope'."
+        return
+    }
+    if ($Scope -match '/resourceGroups/([^/]+)$' -and (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGRG' -Name $Matches[1])) {
+        Write-Error -ErrorId 'ResourceGroupNotFound' -Message "Resource group '$($Matches[1])' could not be found."
+        return
+    }
 
     $sub = "/subscriptions/$script:SubId"
-    [pscustomobject]@{ RoleDefinitionName = 'Owner'; SignInName = 'operator@contoso.example'; DisplayName = 'Operator' }
-    New-StubAssignment -Key 'owner' -Role 'Owner' -SignInName 'malfurion.stormrage@contoso.example' -DisplayName 'Malfurion Stormrage'
-
-    switch ($Scope) {
-        "$sub/resourceGroups/dev-skycraft-swc-rg" {
-            New-StubAssignment -Key 'developers'  -Role 'Contributor' -DisplayName 'SkyCraft-Developers'
-            New-StubAssignment -Key 'testers-dev' -Role 'Reader'      -DisplayName 'SkyCraft-Testers'
-        }
-        "$sub/resourceGroups/prod-skycraft-swc-rg" {
-            New-StubAssignment -Key 'testers-prod' -Role 'Reader' -DisplayName 'SkyCraft-Testers'
-        }
-        "$sub/resourceGroups/platform-skycraft-swc-rg" {
-            New-StubAssignment -Key 'partner' -Role 'Reader' -SignInName 'istormrage_example.com#EXT#@contoso.example' -DisplayName 'Illidan Stormrage'
-        }
+    # ARM returns a condition as a string in properties.condition; the validator only asks whether
+    # there is one, so any non-empty text stands for the Portal's options.
+    $ownerCondition = if ($env:SKYCRAFT_STUB_OWNERCONDITION -eq '1') { "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})))" } else { '' }
+    $all = @(
+        @{ Key = 'operator';     Name = 'ra-0'; Principal = 'bbbbbbbb-0000-0000-0000-000000000099'; Role = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635'; Scope = $sub }
+        @{ Key = 'owner';        Name = 'ra-1'; Principal = $script:Principal['malfurion.stormrage']; Role = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635'; Scope = $sub; Condition = $ownerCondition }
+        @{ Key = 'developers';   Name = 'ra-2'; Principal = $script:Principal['SkyCraft-Developers']; Role = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; Scope = "$sub/resourceGroups/dev-skycraft-swc-rg"; Type = 'Group' }
+        @{ Key = 'testers-dev';  Name = 'ra-3'; Principal = $script:Principal['SkyCraft-Testers']; Role = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; Scope = "$sub/resourceGroups/dev-skycraft-swc-rg"; Type = 'Group' }
+        @{ Key = 'testers-prod'; Name = 'ra-4'; Principal = $script:Principal['SkyCraft-Testers']; Role = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; Scope = "$sub/resourceGroups/prod-skycraft-swc-rg"; Type = 'Group' }
+        @{ Key = 'partner';      Name = 'ra-5'; Principal = $script:Principal['istormrage@illidari.com']; Role = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; Scope = "$sub/resourceGroups/platform-skycraft-swc-rg" }
+        @{ Key = 'inherited';    Name = 'ra-6'; Principal = $script:Principal['SkyCraft-Testers']; Role = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; Scope = $sub; Type = 'Group' }
+        # Another role at the exact scope: not the Testers' prod Reader either.
+        @{ Key = 'other-role';   Name = 'ra-7'; Principal = $script:Principal['SkyCraft-Testers']; Role = 'b24988ac-6180-42a0-ab88-20f7382dd24c'; Scope = "$sub/resourceGroups/prod-skycraft-swc-rg"; Type = 'Group' }
+    )
+    foreach ($entry in $all) {
+        if (Test-StubListed -Variable 'SKYCRAFT_STUB_MISSINGROLE' -Name $entry.Key) { continue }
+        $related = $entry.Scope -eq $Scope -or $Scope -like "$($entry.Scope)/*" -or $entry.Scope -like "$Scope/*"
+        if (-not $related) { continue }
+        [pscustomobject]@{ Name = $entry.Name; Scope = $entry.Scope; PrincipalId = $entry.Principal; RoleDefinitionId = $entry.Role; PrincipalType = $(if ($entry.Type) { $entry.Type } else { 'User' }); Condition = $entry.Condition }
     }
 }
 '@
@@ -144,6 +204,10 @@ function Get-AzRoleAssignment {
             [string[]]$MissingResourceGroup = @(),
             [string[]]$MissingRole = @(),
             [switch]$RoleLookupFail,
+            [switch]$OwnerCondition,
+            [switch]$GraphFail,
+            [string[]]$MissingPrincipal = @(),
+            [string[]]$DuplicatePrincipal = @(),
             [switch]$NoContext,
             [string[]]$ArgumentList = @()
         )
@@ -155,6 +219,10 @@ function Get-AzRoleAssignment {
             SKYCRAFT_STUB_MISSINGRG      = $MissingResourceGroup -join ','
             SKYCRAFT_STUB_MISSINGROLE    = $MissingRole -join ','
             SKYCRAFT_STUB_ROLELOOKUPFAIL = if ($RoleLookupFail) { '1' } else { '0' }
+            SKYCRAFT_STUB_OWNERCONDITION = if ($OwnerCondition) { '1' } else { '0' }
+            SKYCRAFT_STUB_GRAPHFAIL      = if ($GraphFail) { '1' } else { '0' }
+            SKYCRAFT_STUB_MISSINGPRINCIPAL = $MissingPrincipal -join ','
+            SKYCRAFT_STUB_DUPLICATEPRINCIPAL = $DuplicatePrincipal -join ','
             SKYCRAFT_STUB_NOCONTEXT      = if ($NoContext) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG            = $logPath
         }
@@ -171,7 +239,7 @@ function Get-AzRoleAssignment {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmRoleAssignmentStub)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs
@@ -180,6 +248,11 @@ function Get-AzRoleAssignment {
     $script:RgMissing      = Invoke-ValidatorScript -Stub $script:Stub -MissingResourceGroup 'platform-skycraft-swc-rg'
     $script:RoleMissing    = Invoke-ValidatorScript -Stub $script:Stub -MissingRole 'testers-prod'
     $script:RoleLookupFail = Invoke-ValidatorScript -Stub $script:Stub -RoleLookupFail
+    $script:OwnerCondition = Invoke-ValidatorScript -Stub $script:Stub -OwnerCondition
+    # The Az sign-in cannot get a Graph token without interaction (issue #397).
+    $script:GraphFail      = Invoke-ValidatorScript -Stub $script:Stub -GraphFail
+    $script:NoDevelopers   = Invoke-ValidatorScript -Stub $script:Stub -MissingPrincipal 'SkyCraft-Developers'
+    $script:TwoDevelopers  = Invoke-ValidatorScript -Stub $script:Stub -DuplicatePrincipal 'SkyCraft-Developers'
     $script:NoContext      = Invoke-ValidatorScript -Stub $script:Stub -NoContext
     # The lab cycle's run: resource groups deployed, no role assignment made.
     $script:CycleRun       = Invoke-ValidatorScript -Stub $script:Stub -ArgumentList '-SkipRoleAssignments' `
@@ -189,7 +262,8 @@ function Get-AzRoleAssignment {
 
     $script:AllRuns = @(
         $script:AllPass, $script:RgMissing, $script:RoleMissing, $script:RoleLookupFail,
-        $script:NoContext, $script:CycleRun, $script:CycleRgMissing
+        $script:OwnerCondition, $script:NoContext, $script:CycleRun, $script:CycleRgMissing, $script:GraphFail, $script:NoDevelopers,
+        $script:TwoDevelopers
     )
 }
 
@@ -221,14 +295,13 @@ Describe 'Lab 1.2 Test-Lab.ps1 - failures are counted and set the exit code (#25
         $run.Output | Should -Not -Match 'validation failed'
     }
 
-    It 'exits 1 and counts both the missing resource group and the empty scope it leaves' {
-        # The platform group holds only the External Partner assignment, so with the group gone
-        # that check meets a scope with no assignment at all - the "No assignments at scope"
-        # branch, which must be a counted [FAIL] like any other.
+    It 'exits 1 and counts both the missing resource group and the role check at its scope' {
+        # ARM answers a role assignment listing at a resource group that does not exist with 404:
+        # the External Partner check must be a counted [FAIL] like any other, never a pass.
         $run = $script:RgMissing
         $run.ExitCode | Should -Be 1 -Because "a missing resource group must not look like a passed validation; output was:`n$($run.Output)"
         $run.Output | Should -Match '\[FAIL\] Resource Group missing or unreadable: platform-skycraft-swc-rg'
-        $run.Output | Should -Match 'External Partner\.\.\. \[FAIL\] No assignments at scope'
+        $run.Output | Should -Match 'External Partner\.\.\. \[FAIL\] Could not read role assignments at scope[^\r\n]*HTTP 404 \(ResourceGroupNotFound\)'
         $run.FailLines | Should -Be 2
         $run.Output | Should -Match 'Passed: 6\b'
         $run.Output | Should -Match 'Failed: 2\b'
@@ -237,6 +310,9 @@ Describe 'Lab 1.2 Test-Lab.ps1 - failures are counted and set the exit code (#25
     }
 
     It 'exits 1 and reports 1 failed when one role assignment is missing' {
+        # The Testers' Reader on the subscription, which the prod group inherits, is not the
+        # prod-group assignment the lab makes: the check matches the exact scope. Nor is their
+        # Contributor on the prod group: the check matches the role.
         $run = $script:RoleMissing
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "Testers Group \(Prod\)\.\.\. \[FAIL\] Expected Assignment 'Reader' for 'SkyCraft-Testers' NOT found"
@@ -250,10 +326,67 @@ Describe 'Lab 1.2 Test-Lab.ps1 - failures are counted and set the exit code (#25
         # [ERROR]: a lookup that failed must be a failed check, not a pass and not nothing.
         $run = $script:RoleLookupFail
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        ([regex]::Matches($run.Output, '\[FAIL\] Could not read role assignments')).Count | Should -Be 5
+        ([regex]::Matches($run.Output, '\[FAIL\] Could not read role assignments at scope[^\r\n]*HTTP 403 \(AuthorizationFailed\)')).Count | Should -Be 5
         $run.Output | Should -Not -Match "\[OK\] Found '"
         $run.Output | Should -Match 'Passed: 3\b'
         $run.Output | Should -Match 'Failed: 5\b'
+    }
+
+    It 'fails an Owner assignment for Malfurion that carries a condition, and exits 1 (#325)' {
+        # Any Conditions-tab option but "Allow user to assign all roles" adds a condition; the
+        # Bicep, the script and guide step 1.2.4 create the assignment without one.
+        $run = $script:OwnerCondition
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Malfurion \(Admin\)\.\.\. \[FAIL\] 'Owner' assignment found, but with a condition"
+        $run.FailLines | Should -Be 1
+        $run.Output | Should -Match 'Passed: 7\b'
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+}
+
+Describe 'Lab 1.2 Test-Lab.ps1 - role assignments without Microsoft Graph (#397)' {
+
+    It 'reads the role assignments through the ARM API, once per check, filtered by principal' {
+        # Get-RoleAssignment is logged by the ARM fake's callback: Invoke-AzRestMethod, not the
+        # Az role cmdlets (which the stub does not define, so a call to them would reach the real
+        # module and fail the harness check).
+        @($script:AllPass.Calls | Where-Object { $_ -eq 'Get-RoleAssignment' }).Count | Should -Be 5
+    }
+
+    It 'looks each principal up once, by the names Lab 1.1 gives them' {
+        $calls = $script:AllPass.Calls
+        $calls | Should -Contain "Get-AzADUser|startsWith(userPrincipalName,'malfurion.stormrage@')"
+        $calls | Should -Contain "Get-AzADUser|mail eq 'istormrage@illidari.com'"
+        @($calls | Where-Object { $_ -eq 'Get-AzADGroup|SkyCraft-Testers' }).Count | Should -Be 1
+        @($calls | Where-Object { $_ -eq 'Get-AzADGroup|SkyCraft-Developers' }).Count | Should -Be 1
+    }
+
+    It 'fails every role check, names the sign-in that provides Graph, and reads no role assignment, when Graph is out of reach' {
+        $run = $script:GraphFail
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        ([regex]::Matches($run.Output, "\[FAIL\] Could not look up '[^']+' in Entra ID: [^\r\n]*MicrosoftGraphEndpointResourceId[^\r\n]*Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId")).Count | Should -Be 5
+        $run.Output | Should -Match 'Passed: 3\b'
+        $run.Output | Should -Match 'Failed: 5\b'
+        $run.Calls | Should -Not -Contain 'Get-RoleAssignment'
+    }
+
+    It 'fails the check of a principal Lab 1.1 did not create, and still checks the rest' {
+        $run = $script:NoDevelopers
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Developers Group\.\.\. \[FAIL\] 'SkyCraft-Developers' not found in Entra ID\. Complete Lab 1\.1 first\."
+        $run.Output | Should -Not -Match 'AuthScope' -Because 'signing in again does not create a principal'
+        $run.Output | Should -Match 'Passed: 7\b'
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'fails the check of a principal the directory holds twice, without naming the Graph sign-in' {
+        # The lookup worked: the hint would send the learner to sign in again for nothing.
+        $run = $script:TwoDevelopers
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Developers Group\.\.\. \[FAIL\] 'SkyCraft-Developers' matched 2 principals in Entra ID; expected exactly one\."
+        $run.Output | Should -Not -Match 'AuthScope'
+        $run.Output | Should -Match 'Passed: 7\b'
+        $run.Output | Should -Match 'Failed: 1\b'
     }
 }
 
@@ -267,7 +400,8 @@ Describe 'Lab 1.2 Test-Lab.ps1 - no one signed in is a failed validation (#254)'
         $run.Output | Should -Not -Match '\[OK\]'
         $run.Output | Should -Not -Match 'validation passed'
         $run.Calls | Should -Not -Contain 'Get-AzResourceGroup'
-        $run.Calls | Should -Not -Contain 'Get-AzRoleAssignment'
+        $run.Calls | Should -Not -Contain 'Get-RoleAssignment'
+        @($run.Calls | Where-Object { $_ -like 'Get-AzAD*' }) | Should -BeNullOrEmpty
     }
 }
 
@@ -277,7 +411,8 @@ Describe 'Lab 1.2 Test-Lab.ps1 -SkipRoleAssignments - the lab cycle''s run' {
         $run = $script:CycleRun
         $run.ExitCode | Should -Be 0 -Because "the cycle deploys no role assignment; output was:`n$($run.Output)"
         $run.Output | Should -Match '\[SKIP\] 5 role-assignment checks not run'
-        $run.Calls | Should -Not -Contain 'Get-AzRoleAssignment'
+        $run.Calls | Should -Not -Contain 'Get-RoleAssignment'
+        @($run.Calls | Where-Object { $_ -like 'Get-AzAD*' }) | Should -BeNullOrEmpty -Because 'the lab cycle''s run needs no Microsoft Graph'
         $run.Output | Should -Match 'Passed: 3\b'
         $run.Output | Should -Match 'Failed: 0\b'
     }
