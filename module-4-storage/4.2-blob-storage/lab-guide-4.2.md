@@ -233,7 +233,7 @@ The **Anonymous access level** field is greyed out at **Private (no anonymous ac
 
 5. Click **Create**.
 
-**Expected Result**: Container `game-assets` is listed with **Anonymous access level** **Private**. The list may also show `$logs`, a system container Azure creates for the account's own logs; leave it alone.
+**Expected Result**: Container `game-assets` is listed with **Anonymous access level** **Private**. The list may also show `$logs`, a system container Azure creates for the account's own logs, and `$blobchangefeed`, which appears once the blob change feed is on (Lab 5.2's blob backup turns it on); leave both alone.
 
 **With Az PowerShell** (instead of items 1-5):
 
@@ -320,6 +320,8 @@ Data protection features prevent accidental data loss and support compliance req
 Steps 4.2.5-4.2.7 are made on one page, **Data protection**, and saved once at the end of Step 4.2.7. Lab 4.1's wizard turned both soft delete settings on at 7 days already, so Steps 4.2.5 and 4.2.6 are checks: you change something only if your account differs.
 
 ### Step 4.2.5: Enable Soft Delete for Blobs
+
+**Note**: If you come back to this lab after Lab 5.2, its blob backup protects the account, and the **Data protection** page greys out what the backup needs: soft delete for blobs at 35 days, point-in-time restore, versioning and the change feed. Leave those settings as they are. This lab's `Test-Lab.ps1` then reports soft delete for blobs at 35 days instead of 7, and this lab's `Deploy-Bicep.ps1` would set them back under an active backup, so do not run it (issue #364).
 
 1. Navigate to `prodskycraftswcsa` → **Data protection** (in the left menu, under **Data management**).
 2. Under **Recovery**, enable **Enable soft delete for blobs** (it is checked already if you created the account in Lab 4.1's wizard).
