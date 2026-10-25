@@ -7,8 +7,8 @@
     they meet the Lab 2.2 requirements, including separate NSGs per subnet and Development environment resources.
 
     It validates:
-    - ASGs: Checks existence of all 6 ASGs (3 Dev, 3 Prod).
-    - NSGs: Checks existence of all 7 NSGs (3 Dev, 3 Prod, 1 Platform).
+    - ASGs: Checks existence of the 3 Dev ASGs the guide creates.
+    - NSGs: Checks existence of the 6 subnet NSGs (3 Dev, 3 Prod).
     - NSG Rules: Verifies key rules (SSH, Game Ports, DB Ports) on each NSG.
     - Subnet Associations: Ensures specific NSGs are associated with specific subnets.
     - Service Endpoints: Microsoft.Storage on World subnets, Microsoft.Sql and Microsoft.Storage on Database subnets.
@@ -58,10 +58,7 @@ Write-Host "`n=== 1. Validating Application Security Groups ===" -ForegroundColo
 $expectedAsgs = @(
     @{ Name="dev-skycraft-swc-asg-auth"; RG=$devRg },
     @{ Name="dev-skycraft-swc-asg-world"; RG=$devRg },
-    @{ Name="dev-skycraft-swc-asg-db"; RG=$devRg },
-    @{ Name="prod-skycraft-swc-asg-auth"; RG=$prodRg },
-    @{ Name="prod-skycraft-swc-asg-world"; RG=$prodRg },
-    @{ Name="prod-skycraft-swc-asg-db"; RG=$prodRg }
+    @{ Name="dev-skycraft-swc-asg-db"; RG=$devRg }
 )
 
 foreach ($item in $expectedAsgs) {
@@ -81,8 +78,7 @@ $nsgs = @(
     @{ Name="dev-skycraft-swc-db-nsg"; RG=$devRg; Rule="Allow-MySQL-From-AppTier"; Port="3306" },
     @{ Name="prod-skycraft-swc-auth-nsg"; RG=$prodRg; Rule="Allow-Auth-GamePort"; Port="3724" },
     @{ Name="prod-skycraft-swc-world-nsg"; RG=$prodRg; Rule="Allow-World-GamePort"; Port="8085" },
-    @{ Name="prod-skycraft-swc-db-nsg"; RG=$prodRg; Rule="Allow-MySQL-From-AppTier"; Port="3306" },
-    @{ Name="platform-skycraft-swc-nsg"; RG=$platRg; Rule=$null; Port=$null }
+    @{ Name="prod-skycraft-swc-db-nsg"; RG=$prodRg; Rule="Allow-MySQL-From-AppTier"; Port="3306" }
 )
 
 foreach ($nsgInfo in $nsgs) {

@@ -17,8 +17,20 @@ This guide addresses common issues encountered while setting up or running the S
 ### "RoleAssignmentExists" from Lab 1.2 `Deploy-Bicep.ps1 -IncludeRoleAssignments`
 
 **Symptoms**: The role-assignments deployment fails with `RoleAssignmentExists` although `Test-Lab.ps1` reports every assignment present.
-**Cause**: Azure allows one assignment per (scope, role, principal). `New-LabRoleAssignment.ps1` and the portal create assignments under random names; `role-assignments.bicep` names its own with `guid(scope, role, principal)` and cannot adopt one that already exists under another name. The script skips the template when all five assignments exist, so this appears only when some of them were created outside the template.
-**Solution**: Either keep using `New-LabRoleAssignment.ps1` (it skips what exists) or remove the foreign assignments with `Remove-AzRoleAssignment` and re-run the deployment. Deleting the three resource groups removes their RG-scoped assignments; the subscription-scoped Owner assignment must be removed by hand.
+**Cause**: Azure allows one assignment per (scope, role, principal). `New-LabRoleAssignment.ps1` and the portal create assignments under random names; `role-assignments.bicep` names its own with `guid(scope, role, principal)` and cannot adopt one that already exists under another name. The script reads which of the five exist before it deploys, prints `[KEEP]` for each, and the template skips those (`parExistingAssignments`), so this appears only when an assignment was created between that read and the deployment: in the Portal or by `New-LabRoleAssignment.ps1` while the script ran.
+**Solution**: Run `Deploy-Bicep.ps1 -IncludeRoleAssignments` again. It now finds the assignment, keeps it, and deploys only the ones still missing.
+
+### "Authentication failed against resource MicrosoftGraphEndpointResourceId"
+
+**Symptoms**: `Get-AzRoleAssignment`, `New-AzRoleAssignment`, `Remove-AzRoleAssignment`, `Get-AzADUser` or `Get-AzADGroup` fails with `Authentication failed against resource MicrosoftGraphEndpointResourceId. User interaction is required`, although other Az commands work and you hold Owner on the subscription.
+**Cause**: These cmdlets call Microsoft Graph to resolve users, groups and service principals. Your tenant's Conditional Access (MFA, for example) asks for interaction before it issues a Graph token to Azure PowerShell, and the sign-in you made did not include one. The lab scripts read, create and remove role assignments through the Azure Resource Manager API instead, so their role steps do not need Graph (#397); only the steps that find a user or group by name do (Lab 1.2's `Test-Lab.ps1`, `Remove-LabResource.ps1` and `Deploy-Bicep.ps1 -IncludeRoleAssignments`).
+**Solution**: Sign in again with a Graph token, then rerun the command or the script:
+
+```powershell
+Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId
+```
+
+`New-LabRoleAssignment.ps1` finds the principals through Microsoft Graph PowerShell instead; it asks for its own sign-in (`Connect-MgGraph`).
 
 ### "Insufficient Privileges" for Graph
 
@@ -30,19 +42,21 @@ This guide addresses common issues encountered while setting up or running the S
 
 ### Lab 1.1: "Microsoft Graph sign-in did not complete"
 
-**Symptoms**: `New-LabUser.ps1`, `Test-Lab.ps1` or `Remove-LabResource.ps1` in Lab 1.1 stop right after "Checking Microsoft Graph connection..." with `[ERROR] Failed to connect to Microsoft Graph: Microsoft Graph sign-in did not complete ...` and exit 1. No sign-in or consent prompt appeared.
+**Symptoms**: `New-LabUser.ps1`, `Test-Lab.ps1` or `Remove-LabResource.ps1` in Lab 1.1, or `New-LabRoleAssignment.ps1` in Lab 1.2, stop right after "Checking Microsoft Graph connection..." with `[ERROR] Failed to connect to Microsoft Graph: Microsoft Graph sign-in did not complete ...` and exit 1. No sign-in or consent prompt appeared.
 
-**Cause**: `Connect-MgGraph` returned without an error but also without a signed-in context. A delegated sign-in for scopes the account has never consented to can do exactly that. Before the scripts checked for it, they printed `Connected to Tenant:  as` with empty values and every Graph call after it failed with "Authentication needed" (issue #242).
+**Cause**: `Connect-MgGraph` returned without an error but also without a signed-in context. A delegated sign-in for scopes the account has never consented to can do exactly that. Before the scripts checked for it, they printed `Connected to Tenant:  as` with empty values and every Graph call after it failed with "Authentication needed" (issue #242). A personal Microsoft account (the kind behind most free Azure accounts) that signs in without naming the lab tenant ended the same way in the pass of 2026-10-20 (#300). The scripts name a tenant when they know one: `-TenantId` (`New-LabUser.ps1` only), else `SKYCRAFT_GRAPH_TENANT_ID`, else the tenant of a Microsoft Graph sign-in already in the session, else the tenant of an Az context in the session, including one Az PowerShell restored from an earlier session. The Graph sign-in's tenant is what keeps a sign-in again for missing scopes in the lab tenant: without it, `Connect-MgGraph -TenantId <lab tenant> -Scopes User.Read.All` followed by `Test-Lab.ps1` signed in again without a tenant and a personal account landed in its own directory (pass of 2026-10-21, #408). A Graph sign-in in that personal-account directory, which such a failed sign-in leaves behind, is not counted as a tenant. If that Graph sign-in and the Az context are in different tenants, they stop with `[ERROR]` before signing in, name both tenants and say how to choose one: set `SKYCRAFT_GRAPH_TENANT_ID` or run `Connect-AzAccount -TenantId` to keep the Graph tenant, or run `Disconnect-MgGraph` to use the Az one. With no tenant from any of these they print a line that says so just before they sign in.
 
 **Solution**:
 
-1.  Interactive sign-in: all three scripts request `User.ReadWrite.All`, `Group.ReadWrite.All` and `Directory.ReadWrite.All` (`New-LabUser.ps1` adds `Domain.Read.All` and `User.Invite.All`), so one consent covers the whole lab. Since the scripts showed no prompt, sign in with a device code instead - its sign-in and consent happen in a browser you open yourself - using the full set `New-LabUser.ps1` requests:
+1.  Interactive sign-in: all four scripts request `User.ReadWrite.All`, `Group.ReadWrite.All` and `Directory.ReadWrite.All` (`New-LabUser.ps1` adds `Domain.Read.All` and `User.Invite.All`), so one consent covers Lab 1.1 and Lab 1.2's role assignment script. Since the scripts showed no prompt, sign in with a device code instead - its sign-in and consent happen in a browser you open yourself - using the full set `New-LabUser.ps1` requests:
 
     ```powershell
-    Connect-MgGraph -UseDeviceCode -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All'
+    Connect-MgGraph -TenantId '<your tenant id>' -UseDeviceCode -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All'
     ```
 
-    Open the address it prints, enter the code, accept the consent, then re-run the script: it reuses that context. Where the tenant requires admin consent, a Global Administrator runs the same command once and ticks **Consent on behalf of your organization**. `New-LabUser.ps1 -DemoMode` requests the same scopes and creates nothing, so it is another way to see whether the consent is in place.
+    A tenant with security defaults on refuses a device code sign-in: the device login page ends with error 530035. Microsoft turns security defaults on in tenants created from 2026-07-01 ([Security defaults: block device code flow](https://learn.microsoft.com/entra/fundamentals/security-defaults#block-device-code-flow)). There, run the script in PowerShell 7 on your own machine, where it opens the sign-in in your browser; do not turn security defaults off for it. In Azure Cloud Shell the scripts need neither, see [Lab 1.1 and Lab 1.2 scripts in Azure Cloud Shell](#lab-11-and-lab-12-scripts-in-azure-cloud-shell).
+
+    The tenant ID is the **Tenant ID** on the **Microsoft Entra ID** > **Overview** page of the lab tenant. Name it: without it, a personal Microsoft account signs in to its own directory instead of the lab tenant. Then open the address the command prints, enter the code, accept the consent, then re-run the script: it reuses that context, because its scopes cover what every Module 1 script requests. A context whose scopes do not cover the script's (for example one left by `Connect-MgGraph -Scopes User.Read.All`) is not reused: the script names the scopes it lacks and signs in again with the ones it needs, in the same tenant (issues #273, #408). Where the tenant requires admin consent, a Global Administrator runs the same command once and ticks **Consent on behalf of your organization**. `New-LabUser.ps1 -DemoMode` requests the same scopes and creates nothing, so it is another way to see whether the consent is in place.
 2.  App-only sign-in (`SKYCRAFT_GRAPH_*` set): less likely, since a principal missing an application permission usually still gets a token and fails later with "Insufficient privileges". Still, check that the app registration holds the application permissions listed in [Creating the Lab 1.1 service principal](#creating-the-lab-11-service-principal) and that admin consent was granted for them.
 
 ### Lab 1.1 hangs at "Checking Microsoft Graph connection..."
@@ -51,11 +65,11 @@ This guide addresses common issues encountered while setting up or running the S
 
 **Cause**: `Connect-MgGraph -Scopes ...` binds the **delegated** parameter set, which signs a *person* in. When the cached token needs a refresh that the broker cannot complete silently, the SDK falls back to a prompt — and a run with no console has nobody to answer it. Turning WAM off does not help; the prompt simply moves.
 
-**If you are running the lab by hand** — which is how SkyCraft runs Lab 1.1 today — answer the prompt. It is a real sign-in and the scripts wait for it on purpose. If no prompt appears at all, the browser handoff failed rather than the token: check that a default browser is set, or sign in first with `Connect-MgGraph -UseDeviceCode` and re-run the script, which will reuse that context.
+**If you are running the lab by hand**, which is how SkyCraft runs Lab 1.1 today, answer the prompt. It is a real sign-in and the scripts wait for it on purpose. If no prompt appears at all, the browser handoff failed rather than the token: check that a default browser is set, or sign in first with `Connect-MgGraph -TenantId '<your tenant id>' -UseDeviceCode` (refused with error 530035 in a tenant with security defaults on) and the scopes shown under [Lab 1.1: "Microsoft Graph sign-in did not complete"](#lab-11-microsoft-graph-sign-in-did-not-complete), then re-run the script. It reuses that context only when the context's scopes cover the ones the script requests; otherwise it signs in again.
 
 **If the run is unattended** — a scheduler, CI, `tools/Invoke-LabCycle.ps1`, anything with no console — there is nothing to answer the prompt, and the only real fix is to stop asking for one: give the lab a **service principal** so it signs in app-only (client credentials). This is **optional**, and today's cycle does not need it: `tools/lab-cycle-manifest.psd1` runs 1.2 through 5.3 and does not include Lab 1.1. Set it up when you automate 1.1, not before.
 
-The three Lab 1.1 scripts pick a service principal up automatically when these variables are set:
+The three Lab 1.1 scripts, and Lab 1.2's `New-LabRoleAssignment.ps1`, which reads Lab 1.1's users, pick a service principal up automatically when these variables are set:
 
 | Variable | Meaning |
 | :--- | :--- |
@@ -158,7 +172,7 @@ Rotation:
 
 ### "The script ... cannot be run because the following modules ... are missing" (`#Requires`)
 
-**Cause**: Scripts declare their dependencies with `#Requires -Version 7.0` and `#Requires -Modules ...`, so they fail fast on a host that lacks PowerShell 7 or the required Az / Microsoft Graph modules.
+**Cause**: Scripts declare their dependencies with `#Requires -Version 7.0` and `#Requires -Modules ...`, so they fail fast on a host that lacks PowerShell 7 or the required Az modules. The Lab 1.1 scripts and Lab 1.2's `New-LabRoleAssignment.ps1` import their Microsoft Graph modules themselves instead and name the command that installs a missing one (next two entries).
 **Solution**:
 
 1.  Ensure you are on **PowerShell 7+** (`$PSVersionTable.PSVersion`); install from <https://aka.ms/powershell>.
@@ -179,7 +193,40 @@ Rotation:
         -Scope CurrentUser -Force
     ```
 
-3.  Re-run the script. The `#Requires` line at the top of each script lists exactly which modules it needs.
+3.  Re-run the script. The `#Requires` line at the top of each script lists exactly which modules it needs; in the Lab 1.1 scripts and Lab 1.2's `New-LabRoleAssignment.ps1`, the `$labModule` list below it holds the Microsoft Graph ones.
+
+### "[ERROR] This script needs the PowerShell module Microsoft.Graph.Users, which is not installed"
+
+**Cause**: The Lab 1.1 scripts and Lab 1.2's `New-LabRoleAssignment.ps1` import their Microsoft Graph modules themselves instead of with `#Requires` (issue #375), so a missing module stops them before they sign in, with the module's name and the command that installs it. Azure Cloud Shell ships Azure PowerShell and a basic set of Microsoft Graph modules, but not `Microsoft.Graph.Users` ([Features & tools for Azure Cloud Shell](https://learn.microsoft.com/azure/cloud-shell/features#other-microsoft-services)).
+**Solution**:
+
+1.  Run the command the script printed. Where other Microsoft Graph modules are installed, it names their version, for example:
+
+    ```powershell
+    Install-Module Microsoft.Graph.Users -RequiredVersion 2.28.0 -Scope CurrentUser
+    ```
+
+2.  Re-run the script.
+3.  In a Cloud Shell session without a storage account, the module is deleted when the session ends: install it again in each new session. See [Module 1 prerequisites](module-1-identities-governance/README.md#-prerequisites).
+
+### Lab 1.1 and Lab 1.2 scripts in Azure Cloud Shell
+
+**Symptoms**: In Cloud Shell, before the fix for issue #418, `Test-Lab.ps1` and the other Lab 1.1 scripts stayed at "signing in interactively to tenant ..." with no prompt, and the device code sign-in the guide offered as the fallback ended with error 530035.
+
+**Cause**: Cloud Shell has no browser for the interactive sign-in, and a tenant with security defaults on refuses a device code sign-in ([Security defaults: block device code flow](https://learn.microsoft.com/entra/fundamentals/security-defaults#block-device-code-flow)).
+
+**What the scripts do**: With no `SKYCRAFT_GRAPH_*` service principal set, the Lab 1.1 scripts and Lab 1.2's `New-LabRoleAssignment.ps1` sign in with Cloud Shell's own sign-in, the one you made when you opened Cloud Shell, through `Get-AzAccessToken -ResourceTypeName MSGraph`. Nothing prompts. That sign-in's Microsoft Graph token carries the permissions Cloud Shell was given, not the ones the scripts ask for: `Directory.ReadWrite.All`, `Group.ReadWrite.All` and `User.Invite.All`, but not `User.ReadWrite.All`. That is enough to create, invite and read users, create groups and add members (`New-LabUser.ps1`, `Test-Lab.ps1`, `New-LabRoleAssignment.ps1`), but not to delete a user, which takes `User.ReadWrite.All` and nothing else ([Delete a user](https://learn.microsoft.com/graph/api/user-delete)).
+
+**Solution**: Nothing to do for `New-LabUser.ps1`, `Test-Lab.ps1` and `New-LabRoleAssignment.ps1`. `Remove-LabResource.ps1` stops with `[ERROR] ... lacks User.ReadWrite.All` and exit 1 before it deletes anything. Run it in PowerShell 7 on your own machine, or delete the four lab users and three groups in the Portal (**Microsoft Entra ID** > **Users**, then **Groups**: select them and choose **Delete**).
+
+### "[ERROR] This script needs its Microsoft Graph modules at one version"
+
+**Cause**: Every Microsoft Graph module requires `Microsoft.Graph.Authentication` at exactly its own version, and a PowerShell session loads only one version of it. Without `-RequiredVersion`, `Install-Module Microsoft.Graph.Users` installs the newest version from the PowerShell Gallery, which in Cloud Shell can be newer than the preinstalled `Microsoft.Graph.Groups` and `Microsoft.Graph.Identity.DirectoryManagement`. The scripts check this before they import anything (issue #375); without the check, the import stops with `Could not load file or assembly 'Microsoft.Graph.Authentication, Version=...' ... Assembly with same name is already loaded`.
+**Solution**:
+
+1.  Run the `Install-Module <module> -RequiredVersion <version> -Scope CurrentUser` lines the script printed. They install the modules it names at the version the other Graph modules share.
+2.  If the script says this session has already loaded `Microsoft.Graph.Authentication`, you can instead start a new PowerShell session (in Cloud Shell, type `pwsh`, which keeps your files) and run the script there.
+3.  Re-run the script.
 
 ## ☁️ Deployment Errors
 

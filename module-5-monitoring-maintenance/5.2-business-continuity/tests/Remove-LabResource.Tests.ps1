@@ -69,8 +69,7 @@ BeforeAll {
         'Remove-AzDataProtectionBackupInstance'
         'Remove-AzDataProtectionBackupVault'
         'Get-AzStorageAccount'
-        'Get-AzRoleAssignment'
-        'Remove-AzRoleAssignment'
+        'Invoke-AzRestMethod'
         'Get-AzRecoveryServicesVault'
         'Get-AzRecoveryServicesBackupItem'
         'Disable-AzRecoveryServicesBackupProtection'
@@ -199,17 +198,26 @@ function Get-AzStorageAccount {
     [pscustomobject]@{ Id = "/subscriptions/0/resourceGroups/$ResourceGroupName/providers/Microsoft.Storage/storageAccounts/$Name" }
 }
 
-function Get-AzRoleAssignment {
+# Served through the ARM role assignments API fake appended to this body (issue #397): the Backup
+# Vault identity holds both of its roles on the storage account, named after the role, and two
+# roles inherited from the resource group, which the cleanup must leave alone: a Reader, and a
+# Storage Blob Data Owner - the same role as one the lab assigns, so only the scope tells them apart.
+function Get-StubRoleAssignment {
     [CmdletBinding()]
-    param($ObjectId, $RoleDefinitionId, $Scope)
-    if (Invoke-StubLookup -Name 'Get-AzRoleAssignment') { return }
-    [pscustomobject]@{ RoleDefinitionId = $RoleDefinitionId }
+    param([string]$Scope, [string]$PrincipalId)
+    if (Invoke-StubLookup -Name 'Get-RoleAssignment') { return }
+    $rg = $Scope -replace '/providers/Microsoft\.Storage/storageAccounts/[^/]+$', ''
+    [pscustomobject]@{ Name = 'blob-data-owner'; PrincipalId = $PrincipalId; Scope = $Scope; RoleDefinitionId = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'; PrincipalType = 'ServicePrincipal' }
+    [pscustomobject]@{ Name = 'backup-contributor'; PrincipalId = $PrincipalId; Scope = $Scope; RoleDefinitionId = 'e5e2a7ff-d759-4cd2-bb51-3152d37e2eb1'; PrincipalType = 'ServicePrincipal' }
+    [pscustomobject]@{ Name = 'inherited-reader'; PrincipalId = $PrincipalId; Scope = $rg; RoleDefinitionId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; PrincipalType = 'ServicePrincipal' }
+    [pscustomobject]@{ Name = 'inherited-blob-data-owner'; PrincipalId = $PrincipalId; Scope = $rg; RoleDefinitionId = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'; PrincipalType = 'ServicePrincipal' }
 }
 
-function Remove-AzRoleAssignment {
+function Remove-StubRoleAssignment {
     [CmdletBinding()]
-    param($ObjectId, $RoleDefinitionId, $Scope)
-    Invoke-StubGate -Name 'Remove-AzRoleAssignment'
+    param([string]$Id, [string]$Scope, [string]$Name)
+    Write-StubCall -Name "Remove-RoleAssignment:$Name"
+    Invoke-StubGate -Name 'Remove-RoleAssignment'
 }
 
 function Get-AzRecoveryServicesVault {
@@ -322,7 +330,7 @@ function Remove-AzResourceGroup {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmRoleAssignmentStub)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs
@@ -350,7 +358,7 @@ function Remove-AzResourceGroup {
     )
     $script:ListingDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
         'Get-AzResource:inventory=denied'
-        'Get-AzRoleAssignment=denied'
+        'Get-RoleAssignment=denied'
     )
     $script:NotFound = Invoke-CleanupScript -Stub $script:Stub -Empty -Lookup @(
         'Get-AzDataProtectionBackupVault=notfound'
@@ -361,11 +369,11 @@ function Remove-AzResourceGroup {
         'Get-AzStorageAccount=notfound'
         'Get-AzResource:recheck=rgnotfound'
     )
-    $script:RoleNotFound = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzRoleAssignment=notfound'
+    $script:RoleNotFound = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-RoleAssignment=notfound'
     $script:VaultDenied  = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzRecoveryServicesVault=denied'
     $script:RecheckDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzResource:recheck=denied'
     $script:StorageDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzStorageAccount=denied'
-    $script:RoleStuck     = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzRoleAssignment'
+    $script:RoleStuck     = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-RoleAssignment'
 }
 
 AfterAll {
@@ -417,6 +425,24 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - exit code contract' {
         $script:FirstStuck.Calls    | Should -Contain 'Remove-AzRecoveryServicesVault'
         $script:FirstStuck.Calls    | Should -Contain 'Remove-AzResource'
         $script:FirstStuck.ExitCode | Should -Be 1
+    }
+}
+
+Describe 'Lab 5.2 Remove-LabResource.ps1 - role assignments without Microsoft Graph (#397)' {
+
+    It 'removes the vault identity''s two roles on the storage account, through the ARM API, and leaves the inherited ones alone' {
+        # The stub defines no Az role cmdlet: the assignments are reached only through the
+        # Invoke-AzRestMethod fake, filtered by the vault identity's principal id. The inherited
+        # Storage Blob Data Owner has the role of one the lab assigns: only the exact scope keeps
+        # the cleanup from removing it. Each role's lookup sees the other role at the same scope:
+        # only the role check keeps either from being removed twice.
+        $calls = $script:Clean.Calls
+        foreach ($name in 'blob-data-owner', 'backup-contributor') {
+            @($calls | Where-Object { $_ -eq "Remove-RoleAssignment:$name" }).Count | Should -Be 1 -Because "calls were: $($calls -join ', ')"
+        }
+        $calls | Should -Not -Contain 'Remove-RoleAssignment:inherited-reader'
+        $calls | Should -Not -Contain 'Remove-RoleAssignment:inherited-blob-data-owner'
+        @($calls | Where-Object { $_ -eq 'Get-RoleAssignment' }).Count | Should -Be 2
     }
 }
 
@@ -536,7 +562,7 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - a failed lookup is not "absent" (#238
         $run.Output | Should -Match '\[ERROR\] Could not look up storage account prodskycraftswcsa'
         $run.Output | Should -Match '\[ERROR\] Could not look up the VM backup items in platform-skycraft-swc-rsv'
         $run.Output | Should -Match 'Cleanup finished with 3 failure\(s\)'
-        $run.Calls  | Should -Not -Contain 'Remove-AzRoleAssignment'
+        $run.Calls  | Should -Not -Contain 'Remove-RoleAssignment'
         $run.Calls  | Should -Contain 'Remove-AzRecoveryServicesVault'
     }
 
@@ -618,7 +644,7 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - a failed lookup is not "absent" (#238
         ([regex]::Matches($run.Output, '\[ERROR\] Could not look up role assignment')).Count | Should -Be 2
         $run.Output | Should -Not -Match 'Role assignment already absent'
         $run.Output | Should -Match 'Cleanup finished with 3 failure\(s\)'
-        $run.Calls  | Should -Not -Contain 'Remove-AzRoleAssignment'
+        $run.Calls  | Should -Not -Contain 'Remove-RoleAssignment'
     }
 }
 
@@ -637,7 +663,7 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - a resource reported as not found is a
         $run.Output | Should -Not -Match '\[ERROR\]'
         $run.Output | Should -Match 'Cleanup Complete'
         $run.Calls  | Should -Not -Contain 'Remove-AzDataProtectionBackupInstance'
-        $run.Calls  | Should -Not -Contain 'Remove-AzRoleAssignment'
+        $run.Calls  | Should -Not -Contain 'Remove-RoleAssignment'
         $run.Calls  | Should -Contain 'Remove-AzDataProtectionBackupVault'
     }
 
@@ -650,7 +676,7 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - a resource reported as not found is a
         $run = $script:RoleNotFound
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         ([regex]::Matches($run.Output, 'Role assignment already absent')).Count | Should -Be 2
-        $run.Calls | Should -Not -Contain 'Remove-AzRoleAssignment'
+        $run.Calls | Should -Not -Contain 'Remove-RoleAssignment'
     }
 }
 

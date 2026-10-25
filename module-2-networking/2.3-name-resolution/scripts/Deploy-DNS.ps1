@@ -8,6 +8,9 @@
     2. Create Private DNS Zone (skycraft.internal) & Records.
     3. Link Private DNS to VNets (Hub, Dev, Prod).
 
+.PARAMETER Owner
+    Value of the canonical Owner tag. Default: 'mbiszczanik'. Mirrors parOwner in the Bicep path.
+
 .NOTES
     Project: SkyCraft
     Lab: 2.3 - Name Resolution & Load Balancing
@@ -21,6 +24,10 @@
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Deploy script; idempotent Get-before-New guards cover ShouldProcess intent.')]
 param(
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Owner = 'mbiszczanik',
+
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
     [string]$PublicDnsZoneName = 'skycraft.example.com',
@@ -79,6 +86,7 @@ $Tags = @{
     Project     = 'SkyCraft'
     Environment = 'Platform'
     CostCenter  = 'MSDN'
+    Owner       = $Owner
 }
 
 # ==========================================
@@ -177,7 +185,7 @@ function New-PrivateDnsLink {
         Write-Host "Linking VNet: $VnetName..." -ForegroundColor Yellow
         $vnet = Get-AzVirtualNetwork -ResourceGroupName $VnetRG -Name $VnetName
         if ($vnet) {
-            New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $LinkName -VirtualNetworkId $vnet.Id -EnableRegistration:$AutoReg -Tag @{ Project = 'SkyCraft' } | Out-Null
+            New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $LinkName -VirtualNetworkId $vnet.Id -EnableRegistration:$AutoReg -Tag $Tags | Out-Null
             Write-Host "  -> Link created (AutoReg: $AutoReg)" -ForegroundColor Green
         } else {
              Write-Host "  -> [ERROR] VNet '$VnetName' not found!" -ForegroundColor Red
