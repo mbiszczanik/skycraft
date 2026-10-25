@@ -7,6 +7,14 @@
     Removes the subscription-level Owner assignment for Malfurion Stormrage.
     Prompts for confirmation unless -Force is specified.
 
+    The Owner assignment is read and removed through the Azure Resource Manager role assignments
+    API (tools/LabCommon.psm1), not through Get-AzRoleAssignment / Remove-AzRoleAssignment, which
+    call Microsoft Graph (issue #397). Finding Malfurion by his userPrincipalName still needs
+    Microsoft Graph, through the Az sign-in's Graph token (Get-AzADUser). Where the tenant asks
+    for interaction before it issues that token, sign in with
+    'Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId'; a lookup that fails is an
+    [ERROR] that names that sign-in, and the resource groups are still deleted.
+
     Every step continues on error, so one stuck object does not strand the rest. A lookup that
     fails (a 403, throttling, a transient ARM error) or a deletion that fails is reported as
     [ERROR] and counted; if anything failed the script exits 1. An object that does not exist is
@@ -41,6 +49,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+# The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
@@ -131,30 +140,59 @@ Write-Host "Using Subscription: $($context.Subscription.Name)" -ForegroundColor 
 
 
 Write-Host "`n1. Removing Subscription-Level Role Assignment (Owner)..." -ForegroundColor Cyan
-# Need to find it first because Remove-AzRoleAssignment by logic can be tricky.
-# We search the subscription's assignments by SignInName for simplicity.
-$assignmentLookup = Invoke-LabLookup -Target "the role assignments on /subscriptions/$subId" -Lookup {
-    Get-AzRoleAssignment -Scope "/subscriptions/$subId" -IncludeClassicAdministrators:$false -ErrorAction Stop
+# Malfurion is found in Entra ID by his userPrincipalName prefix (the domain varies), through the
+# Az sign-in's Graph token - the one Microsoft Graph call left in this script (issue #397). A
+# lookup that fails is counted and names the sign-in that provides Graph; a directory without him
+# leaves no assignment this script can attribute to him.
+$subscriptionScope = "/subscriptions/$subId"
+$userLookup = Invoke-LabLookup -Target 'Malfurion in Entra ID' -Lookup {
+    Get-AzADUser -Filter "startsWith(userPrincipalName,'malfurion.stormrage@')" -ErrorAction Stop
 }
-if (-not $assignmentLookup.Failed) {
-    # Only the assignment made at the subscription itself: the listing also returns assignments
-    # inherited from a management group, which this lab did not create and cannot remove here.
-    # ARM holds one assignment per principal, role and scope, so the first match is the one.
-    $malfurion = $assignmentLookup.Value |
-        Where-Object { ($_.SignInName -like "malfurion.stormrage@*") -and ($_.RoleDefinitionName -eq "Owner") -and ($_.Scope -eq "/subscriptions/$subId") } |
-        Select-Object -First 1
-
-    if (-not $malfurion) {
-        Write-Host "  -> [INFO] Assignment not found." -ForegroundColor Gray
+$malfurionId = $null
+if ($userLookup.Failed) {
+    Write-Host "     $(Get-LabGraphSignInHint -Client Az)" -ForegroundColor Gray
+}
+else {
+    $users = @($userLookup.Value | Where-Object { $_ })
+    if ($users.Count -gt 1) {
+        $script:cleanupFailures++
+        Write-Host "  -> [ERROR] $($users.Count) users match malfurion.stormrage@*; removing no Owner assignment. Remove the right one in the Portal (Subscription > Access control (IAM))." -ForegroundColor Red
     }
-    elseif ($PSCmdlet.ShouldProcess("/subscriptions/$subId", "Remove Owner role assignment for Malfurion")) {
-        try {
-            Remove-AzRoleAssignment -ObjectId $malfurion.ObjectId -RoleDefinitionName "Owner" -Scope "/subscriptions/$subId" -ErrorAction Stop
-            Write-Host "  -> [SUCCESS] Removed Owner role for Malfurion." -ForegroundColor Green
+    elseif ($users.Count -eq 0) {
+        Write-Host "  -> [INFO] Malfurion not found in Entra ID; no Owner assignment of his to remove." -ForegroundColor Gray
+    }
+    else {
+        $malfurionId = [string]$users[0].Id
+    }
+}
+
+if ($malfurionId) {
+    # His assignments, read through the ARM role assignments API rather than Get-AzRoleAssignment,
+    # which resolves every principal through Microsoft Graph (issue #397).
+    $assignmentLookup = Invoke-LabLookup -Target "the role assignments on $subscriptionScope" -Lookup {
+        Get-LabArmRoleAssignment -Scope $subscriptionScope -PrincipalId $malfurionId
+    }
+    if (-not $assignmentLookup.Failed) {
+        # Only the assignment made at the subscription itself: the listing also returns assignments
+        # inherited from a management group, which this lab did not create and cannot remove here.
+        # ARM holds one assignment per principal, role and scope, so the first match is the one.
+        $ownerRoleId = Get-LabBuiltInRoleId -Name 'Owner'
+        $malfurion = $assignmentLookup.Value |
+            Where-Object { ($_.RoleDefinitionId -eq $ownerRoleId) -and ($_.Scope -eq $subscriptionScope) } |
+            Select-Object -First 1
+
+        if (-not $malfurion) {
+            Write-Host "  -> [INFO] Assignment not found." -ForegroundColor Gray
         }
-        catch {
-            $script:cleanupFailures++
-            Write-Host "  -> [ERROR] Failed to remove role: $_" -ForegroundColor Red
+        elseif ($PSCmdlet.ShouldProcess($subscriptionScope, "Remove Owner role assignment for Malfurion")) {
+            try {
+                Remove-LabArmRoleAssignment -Id $malfurion.RoleAssignmentId
+                Write-Host "  -> [SUCCESS] Removed Owner role for Malfurion." -ForegroundColor Green
+            }
+            catch {
+                $script:cleanupFailures++
+                Write-Host "  -> [ERROR] Failed to remove role: $_" -ForegroundColor Red
+            }
         }
     }
 }
@@ -195,3 +233,4 @@ if ($script:cleanupFailures -gt 0) {
 }
 
 Write-Host "`nCleanup complete." -ForegroundColor Green
+Exit-Lab -FailureCount 0

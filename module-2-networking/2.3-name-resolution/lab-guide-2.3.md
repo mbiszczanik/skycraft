@@ -466,11 +466,13 @@ Health probes check if backend VMs are healthy before sending traffic.
 | TCP reset              | Enabled                              |
 | Floating IP            | Disabled                             |
 
-3. Click **Add**
+3. Check **Enable TCP Reset**
+4. Under **Outbound source network address translation (SNAT)**, leave the default **(Recommended) Use outbound rules to provide backend pool members access to the internet.** The backend VMs get their outbound access from the outbound rule you create in Step 2.3.12, because the VNet subnets are private (Lab 2.1) and give them none of their own.
+5. Click **Add**
 
 **Expected Result**: Load balancing rule created. Traffic to port 8085 on frontend IP will distribute to backend pool VMs.
 
-### Step 2.3.12: Create Additional Rules for Auth Server (Optional)
+### Step 2.3.12: Create Additional Rules for Auth Server
 
 Create health probe and rule for authentication servers:
 
@@ -515,9 +517,48 @@ Create health probe and rule for authentication servers:
 | Health probe        | `dev-skycraft-swc-lb-probe-auth` |
 | Session persistence | None                             |
 
-6. Click **Add**
+6. Check **Enable TCP Reset**
+7. Under **Outbound source network address translation (SNAT)**, leave the default **(Recommended) Use outbound rules to provide backend pool members access to the internet.** (as in Step 2.3.11)
+8. Click **Add**
 
 **Expected Result**: Dev load balancer now has two sets of rules (auth port 3724, world port 8085).
+
+#### Outbound Pool and Outbound Rule
+
+The load balancing rules do not give the backend VMs outbound access, and the VNet subnets are private, so a Module 3 VM reaches the internet (package installs, VM extensions) only through an outbound rule. One frontend IP can carry only one outbound rule, so the VMs do not get a rule per role pool: they share one egress pool, `dev-skycraft-swc-lb-be-outbound`, which Lab 3.2 puts both VMs into besides their role pools.
+
+9. Click **Backend pools** → **+ Add**
+
+| Field                      | Value                             |
+| -------------------------- | --------------------------------- |
+| Name                       | `dev-skycraft-swc-lb-be-outbound` |
+| Virtual network            | `dev-skycraft-swc-vnet`           |
+| Backend Pool Configuration | **NIC**                           |
+
+10. Click **Save** (leave the pool empty: Lab 3.2 adds both VMs)
+11. Under **Settings**, click **Outbound rules**
+12. Click **+ Add**
+
+| Field                                            | Value                                       |
+| ------------------------------------------------ | ------------------------------------------- |
+| Name                                             | `dev-skycraft-swc-lb-outbound`              |
+| IP version                                       | IPv4                                        |
+| Frontend IP address                              | `dev-skycraft-swc-lb-frontend`              |
+| Protocol                                         | **All**                                     |
+| Idle timeout (minutes)                           | 4                                           |
+| Enable TCP Reset                                 | checked                                     |
+| Backend pool                                     | `dev-skycraft-swc-lb-be-outbound`           |
+| Enable default port allocation (not recommended) | unchecked                                   |
+| Choose by                                        | **Allocated outbound ports (per instance)** |
+| Allocated outbound ports (per instance)          | `8000`                                      |
+
+The **Choose by** option and the port fields are in the **Outbound ports** section, which also shows **Available frontend ports** and **Maximum number of backend instances** (read-only).
+
+13. Click **Save**
+
+> **SkyCraft Choice**: We chose **8000 ports per instance**. The frontend IP offers 63,992 ports to its outbound rule (**Available frontend ports**), so 8000 admits 7 instances (**Maximum number of backend instances**: 7). Module 3 puts 2 VMs into this pool, and even the prod scale set of Lab 3.2 (up to 4 instances) would fit beside them. 8000 is a multiple of 8, as Azure requires, and a fixed number per instance means a VM added later does not shrink the ports of the others.
+
+**Expected Result**: Dev load balancer has the empty backend pool `dev-skycraft-swc-lb-be-outbound` and one outbound rule, `dev-skycraft-swc-lb-outbound`, that serves it with 8000 ports per instance. In Lab 3.2 both VMs join this pool and reach the internet through `dev-skycraft-swc-lb-pip`.
 
 ---
 
@@ -566,6 +607,10 @@ Repeat the load balancer creation process for production:
 
 3. Create second backend pool: `prod-skycraft-swc-lb-be-auth`
 
+**Backend Pool 3** (Outbound):
+
+4. Create third backend pool: `prod-skycraft-swc-lb-be-outbound` (the egress pool for the outbound rule in Step 2.3.16; leave it empty)
+
 ### Step 2.3.15: Configure Production Health Probes
 
 1. Click **Health probes** → **+ Add**
@@ -605,7 +650,28 @@ Repeat the load balancer creation process for production:
 
 3. Create second rule for auth (port 3724, appropriate backend pool and probe)
 
-**Expected Result**: Production load balancer fully configured with 2 backend pools, 2 health probes, 2 load balancing rules.
+In both rules, check **Enable TCP Reset** and leave the **Outbound source network address translation (SNAT)** default, as in Step 2.3.11.
+
+#### Production Outbound Rule
+
+4. Under **Settings**, click **Outbound rules** → **+ Add**
+
+| Field                                            | Value                                       |
+| ------------------------------------------------ | ------------------------------------------- |
+| Name                                             | `prod-skycraft-swc-lb-outbound`             |
+| Frontend IP address                              | `prod-skycraft-swc-lb-frontend`             |
+| Protocol                                         | **All**                                     |
+| Enable TCP Reset                                 | checked                                     |
+| Backend pool                                     | `prod-skycraft-swc-lb-be-outbound`          |
+| Enable default port allocation (not recommended) | unchecked                                   |
+| Choose by                                        | **Allocated outbound ports (per instance)** |
+| Allocated outbound ports (per instance)          | `8000`                                      |
+
+Keep IP version and Idle timeout (minutes) as in Step 2.3.12.
+
+5. Click **Save**
+
+**Expected Result**: Production load balancer fully configured with 3 backend pools (world, auth, outbound), 2 health probes, 2 load balancing rules and 1 outbound rule.
 
 ---
 
@@ -683,9 +749,10 @@ nslookup game.skycraft.example.com
 2. Click **Overview**
 3. Verify:
    - Frontend IP: 1 (dev-skycraft-swc-lb-frontend with public IP)
-   - Backend pools: 2 (world, auth)
+   - Backend pools: 3 (world, auth, outbound)
    - Load balancing rules: 2 (port 8085, port 3724)
    - Health probes: 2 (world, auth)
+   - Outbound rules: 1 (`dev-skycraft-swc-lb-outbound` for the outbound pool; listed under **Settings** → **Outbound rules**)
 
 **Prod Load Balancer**:
 
@@ -756,14 +823,17 @@ Quick verification before proceeding:
 - [ ] Health probe: TCP port 3724 (auth) configured
 - [ ] Load balancing rule: port 8085 → world backend pool
 - [ ] Load balancing rule: port 3724 → auth backend pool
+- [ ] Backend pool: `dev-skycraft-swc-lb-be-outbound` created (empty until Lab 3.2)
+- [ ] Outbound rule: `dev-skycraft-swc-lb-outbound` → outbound pool (All, 8000 ports per instance)
 
 ### Prod Load Balancer
 
 - [ ] `prod-skycraft-swc-lb` created (Standard SKU, Public)
 - [ ] Frontend IP uses `prod-skycraft-swc-lb-pip`
-- [ ] Backend pools created (world, auth)
+- [ ] Backend pools created (world, auth, outbound)
 - [ ] Health probes configured (8085, 3724)
 - [ ] Load balancing rules configured (8085, 3724)
+- [ ] Outbound rule configured for the outbound pool (8000 ports per instance)
 - [ ] All resources have proper tags
 
 **For detailed verification**, see [lab-checklist-2.3.md](lab-checklist-2.3.md)
@@ -1101,6 +1171,7 @@ Test your understanding with these questions:
 - ✅ Created 4 backend pools for distributing game server traffic
 - ✅ Implemented health probes (TCP ports 3724, 8085)
 - ✅ Configured load balancing rules for auth and world servers
+- ✅ Gave the Module 3 VMs outbound internet access through an egress pool and one outbound rule per load balancer
 - ✅ Linked Private DNS zones to all three VNets
 
 **Infrastructure Ready**:
