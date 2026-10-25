@@ -597,7 +597,7 @@ While Lab 1.3's delete lock (`lock-no-delete-prod`) is on `prod-skycraft-swc-rg`
 
 ### Issue 5: Creating `dev-assets` fails in Step 4.4.3
 
-**Symptom**: **Create** in the *New container* pane fails with a message that the container is being deleted, or that it already exists; `New-AzRmStorageContainer` fails with a conflict (HTTP 409) that says the same.
+**Symptom**: **Create** in the *New container* pane fails with a message that the container is being deleted, or that it already exists; `New-AzRmStorageContainer` (and `az storage container-rm create`) fails with `ContainerOperationFailure`: "The specified container is being deleted. Try operation later."
 **Root Cause**: After a container is deleted, Azure refuses its name for at least 30 seconds - longer while the delete is still being processed. This lab's cleanup deletes `dev-assets`, so a re-run right after it hits this. Or `dev-assets` is there already, from an earlier run or from the Bicep path.
 **Solution**: If it is being deleted, wait a minute and click **Create** again. If it exists, do not create it again: go on to item 6 of Step 4.4.3 and add the policy to the existing container.
 

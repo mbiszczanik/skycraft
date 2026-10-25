@@ -157,7 +157,7 @@ if ($sa) {
             Write-Host "Reverting storage firewall to 'Allow' default..." -ForegroundColor Yellow
             Update-AzStorageAccountNetworkRuleSet -ResourceGroupName $resourceGroupName `
                 -Name $storageAccountName `
-                -DefaultAction Allow -ErrorAction Stop
+                -DefaultAction Allow -ErrorAction Stop | Out-Null   # the rule set lists the client IP addresses
             Write-Host "  -> Firewall reverted to 'Allow'." -ForegroundColor Green
         }
         catch {

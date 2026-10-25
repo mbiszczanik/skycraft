@@ -144,6 +144,8 @@ function Update-AzStorageAccountNetworkRuleSet {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$Name, [string]$DefaultAction)
     Invoke-StubRemoval -Command 'Update-AzStorageAccountNetworkRuleSet' -Name "${Name}:$DefaultAction"
+    # The real cmdlet returns the rule set, client IP addresses included.
+    [pscustomobject]@{ Bypass = 'AzureServices'; DefaultAction = $DefaultAction; IpRules = '[203.0.113.7]'; VirtualNetworkRules = '[]'; ResourceAccessRules = '' }
 }
 
 function Get-AzRmStorageContainer {
@@ -282,6 +284,10 @@ Describe 'Lab 4.4 Remove-LabResource.ps1 - reverts what the lab changes' {
         $script:Clean.ExitCode | Should -Be 0 -Because "a clean teardown must report success; output was:`n$($script:Clean.Output)"
         $script:Clean.Output   | Should -Match 'Cleanup Complete'
         $script:Clean.Output   | Should -Not -Match '\[ERROR\]'
+    }
+
+    It 'prints no client IP address from the reverted rule set' {
+        $script:Clean.Output | Should -Not -Match '203\.0\.113\.7' -Because 'the output may be pasted as evidence'
     }
 
     It 'reverts the firewall, removes dev-assets and the lab''s role assignments on the account' {
