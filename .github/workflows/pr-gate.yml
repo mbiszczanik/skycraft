@@ -1,7 +1,9 @@
 name: PR Gate
 
 # A pull request that touches lab content must say what live verification it ran, or which
-# issue tracks the one it deferred - and a deferred PR must not carry a closing keyword.
+# issue tracks the one it deferred - and a deferred PR must not carry a closing keyword and
+# must say on a 'Live-verification-blocker:' line why the test environment cannot run the
+# live check (issue #404).
 # The decision lives in tools/Test-PrLiveVerification.ps1 (pinned by
 # tests/Pr-Live-Verification.Tests.ps1); this workflow only feeds it the PR body and the
 # changed paths. Rationale and the merge rule: docs/adr/0006-pr-live-verification-gate.md.

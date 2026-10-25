@@ -3,24 +3,29 @@
 ## ✅ Resource Groups Creation
 
 - [ ] **dev-skycraft-swc-rg** created
-  - Region: Sweden Central (or selected region)
+  - Region: Sweden Central
+  - Tags: Environment = Development, Project = SkyCraft, CostCenter = MSDN, Owner = mbiszczanik
   - Purpose: Development and testing environment
   
 - [ ] **prod-skycraft-swc-rg** created
   - Region: Sweden Central
+  - Tags: Environment = Production, Project = SkyCraft, CostCenter = MSDN, Owner = mbiszczanik
   - Purpose: Production deployment
   
 - [ ] **platform-skycraft-swc-rg** created
   - Region: Sweden Central
+  - Tags: Environment = Platform, Project = SkyCraft, CostCenter = MSDN, Owner = mbiszczanik
   - Purpose: Shared services (monitoring, logging)
 
 ---
 
 ## ✅ Subscription-Level Role Assignments
 
-- [ ] **SkyCraft Admin** has **Owner** role
+- [ ] **Malfurion Stormrage** has **Owner** role
   - Scope: Subscription
   - Type: User
+  - Condition: none, so the **Condition** column shows the **Add** link, not **View/Edit** (**Allow user to assign all roles (highly privileged)** on the **Conditions** tab, Step 1.2.4)
+  - Assignment type: Active, Permanent (where the wizard shows an **Assignment type** tab)
   - Purpose: Full administrative control
 
 ---
@@ -29,7 +34,7 @@
 
 - [ ] **SkyCraft-Developers** (group) has **Contributor** role
   - Can create and manage resources
-  - Cannot delete resource group
+  - Can also delete the resource group itself (Contributor at this scope includes it)
   - Cannot assign roles
   
 - [ ] **SkyCraft-Testers** (group) has **Reader** role
@@ -49,7 +54,7 @@
 
 ## ✅ Resource Group: platform-skycraft-swc-rg
 
-- [ ] **External Partner Consultant** (user) has **Reader** role
+- [ ] **Illidan Stormrage** (guest user) has **Reader** role
   - Limited to shared services only
   - No access to dev or prod
   - Guest user with restricted scope
@@ -58,19 +63,20 @@
 
 ## ✅ Access Verification
 
-- [ ] Verified SkyCraft Developer access (Check access feature)
-  - Shows Contributor via group membership
-  - Scope: dev-skycraft-swc-rg
+- [ ] Verified Khadgar Archmage's access (**Check access** tab → **Check access** button, opened on dev-skycraft-swc-rg)
+  - Shows Contributor via SkyCraft-Developers
+  - Scope: This resource (dev-skycraft-swc-rg)
   
-- [ ] Verified SkyCraft Tester access
-  - Shows Reader via group membership
-  - Scope: dev-skycraft-swc-rg and prod-skycraft-swc-rg
+- [ ] Verified Chromie Timewalker's access, once from each resource group
+  - Opened on dev-skycraft-swc-rg: Reader via SkyCraft-Testers, scope This resource
+  - Opened on prod-skycraft-swc-rg: Reader via SkyCraft-Testers, scope This resource
+  - Check access lists the scope it is opened on and the scopes above it, never a sibling resource group
   
-- [ ] Reviewed all role assignments in IAM blade
-  - Subscription: 1 assignment
-  - dev-skycraft-swc-rg: 2 assignments
-  - prod-skycraft-swc-rg: 1 assignment
-  - platform-skycraft-swc-rg: 1 assignment
+- [ ] Reviewed the role assignments made by this lab (**Role assignments** tab; each scope also lists the ones it inherits, such as your own)
+  - Subscription: Malfurion Stormrage, Owner
+  - dev-skycraft-swc-rg: 2 assignments at This resource
+  - prod-skycraft-swc-rg: 1 assignment at This resource
+  - platform-skycraft-swc-rg: 1 assignment at This resource
   
 - [ ] Understand inheritance model
   - Subscription → Resource Group → Resource
@@ -90,18 +96,19 @@
 
 ## 🤖 Automation (optional)
 
-The portal steps above have two scripted equivalents in `scripts/`. Pick one per subscription: each skips assignments that already exist, but the Bicep template cannot adopt assignments the imperative script created.
+The portal steps above have two scripted equivalents in `scripts/`. Both skip the assignments that already exist, whichever way they were made, so either one can finish a lab started in the Portal or with the other: `Deploy-Bicep.ps1` prints `Existing assignments: n of 5` and `[KEEP]` or `[CREATE]` for each of the five, and deploys only the missing ones. One exception: if Malfurion's Owner assignment has a condition (guide Troubleshooting, Issue 6), both report `[ERROR]` and end with exit code 1, because neither can replace it. Remove it in the Portal and run the script again.
 
 - [ ] Declarative - resource groups and the five role assignments from `bicep/role-assignments.bicep`, with principal IDs resolved from Entra ID:
   ```powershell
   .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments -WhatIf   # preview
   .\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments           # deploy
   ```
-- [ ] Imperative - the same five assignments through `New-AzRoleAssignment`:
+- [ ] Imperative - the same five assignments through the Azure Resource Manager role assignments API:
   ```powershell
   .\scripts\Deploy-Bicep.ps1              # resource groups only
-  .\scripts\New-LabRoleAssignment.ps1
+  .\scripts\New-LabRoleAssignment.ps1     # Graph sign-in in the lab tenant (see below)
   ```
+  Run both in the PowerShell session where you ran `Connect-AzAccount -TenantId '<your tenant id>'`: `New-LabRoleAssignment.ps1` signs in to Microsoft Graph in the tenant `SKYCRAFT_GRAPH_TENANT_ID` names, else in the tenant of a Microsoft Graph sign-in already in the session, else in the Az context's tenant, which a personal Microsoft account needs to reach the lab tenant. That Az context can also be one Az PowerShell restored from an earlier session, so check it with `Get-AzContext` first. If Microsoft Graph is already signed in to another tenant, the script stops with `[ERROR]` and names both tenants.
 - [ ] Validated with `.\scripts\Test-Lab.ps1`
 
 ---
@@ -109,6 +116,8 @@ The portal steps above have two scripted equivalents in `scripts/`. Pick one per
 ## 🔍 Validation Steps
 
 Execute these validation steps to confirm success:
+
+> Steps 2-4 use `Get-AzRoleAssignment`, which also needs a Microsoft Graph token. If it fails with `Authentication failed against resource MicrosoftGraphEndpointResourceId`, sign in with `Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId` and run the step again; see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md#authentication-failed-against-resource-microsoftgraphendpointresourceid). `.\scripts\Test-Lab.ps1` reads the role assignments without that token, but finds the users and groups by name, which needs it too.
 
 ### Step 1: List all resource groups
 
@@ -123,9 +132,12 @@ Get-AzResourceGroup |
 ```powershell
 $subscriptionId = (Get-AzContext).Subscription.Id
 Get-AzRoleAssignment -Scope "/subscriptions/$subscriptionId" |
-    Select-Object DisplayName, RoleDefinitionName, Scope |
+    Where-Object Scope -eq "/subscriptions/$subscriptionId" |
+    Select-Object DisplayName, RoleDefinitionName, Scope, Condition |
     Format-Table -AutoSize
 ```
+
+Malfurion Stormrage's Owner row has an empty `Condition`.
 
 ### Step 3: Check role assignments for dev-skycraft-swc-rg
 ```powershell
@@ -136,10 +148,13 @@ Get-AzRoleAssignment -ResourceGroupName dev-skycraft-swc-rg |
 
 ### Step 4: Check specific user's roles
 ```powershell
-Get-AzRoleAssignment -SignInName 'skycraft-dev@[yourtenant].onmicrosoft.com' |
-    Select-Object RoleDefinitionName, Scope |
+# -ExpandPrincipalGroups adds the roles Khadgar has through his groups, as Check access shows them
+Get-AzRoleAssignment -SignInName 'khadgar.archmage@[yourtenant].onmicrosoft.com' -ExpandPrincipalGroups |
+    Select-Object DisplayName, RoleDefinitionName, Scope |
     Format-Table -AutoSize
 ```
+
+Khadgar Archmage has one row: SkyCraft-Developers, Contributor, on `dev-skycraft-swc-rg`.
 
 **Expected Output**:
 - 3 resource groups listed
@@ -152,11 +167,11 @@ Get-AzRoleAssignment -SignInName 'skycraft-dev@[yourtenant].onmicrosoft.com' |
 
 | Principal | Type | Role | Scope | Purpose |
 |-----------|------|------|-------|---------|
-| SkyCraft Admin | User | Owner | Subscription | Full admin access |
+| Malfurion Stormrage | User | Owner | Subscription | Full admin access |
 | SkyCraft-Developers | Group | Contributor | dev-skycraft-swc-rg | Dev environment management |
 | SkyCraft-Testers | Group | Reader | dev-skycraft-swc-rg | Dev monitoring |
 | SkyCraft-Testers | Group | Reader | prod-skycraft-swc-rg | Prod monitoring |
-| External Partner | User (Guest) | Reader | platform-skycraft-swc-rg | Limited shared access |
+| Illidan Stormrage | User (Guest) | Reader | platform-skycraft-swc-rg | Limited shared access |
 
 **Total Assignments**: 5
 
