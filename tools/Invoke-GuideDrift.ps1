@@ -366,10 +366,11 @@ if (-not $SkipCleanup) {
         $cleanupScript = Join-Path $labDir.FullName 'scripts/Remove-LabResource.ps1'
         $missingModule = @()
         if (Test-Path -LiteralPath $cleanupScript) {
-            # The modules the lab script itself declares, so this list cannot drift from it.
-            $cleanupAst = [System.Management.Automation.Language.Parser]::ParseFile($cleanupScript, [ref]$null, [ref]$null)
-            $missingModule = @($cleanupAst.ScriptRequirements.RequiredModules |
-                ForEach-Object { $_.Name } |
+            # The modules the lab script itself declares, so this list cannot drift from it: its
+            # '#Requires -Modules' line and the $labModule list it imports with Import-LabModule
+            # (issue #375 moved the Microsoft Graph modules there). Get-LabScriptModule is in
+            # LabCycle.psm1 and tests/Module1-Graph-Modules.Tests.ps1 covers it.
+            $missingModule = @(Get-LabScriptModule -Path $cleanupScript |
                 Where-Object { -not (Get-Module -ListAvailable -Name $_) })
         }
         if (-not (Test-Path -LiteralPath $cleanupScript)) {
@@ -379,7 +380,7 @@ if (-not $SkipCleanup) {
         }
         if ($missingModule.Count -gt 0) {
             Write-Host "[ERROR] The cleanup of lab $Lab needs module(s) that are not installed: $($missingModule -join ', ')." -ForegroundColor Red
-            Write-Host '        Install them (Install-Module Microsoft.Graph -Scope CurrentUser), or pass -SkipCleanup and remove what the run creates by hand.' -ForegroundColor Yellow
+            Write-Host "        Install them (Install-Module $($missingModule -join ', ') -Scope CurrentUser), or pass -SkipCleanup and remove what the run creates by hand." -ForegroundColor Yellow
             $Host.SetShouldExit(1)
             exit 1
         }

@@ -144,6 +144,8 @@ $DiagnosticCatch = @(
        why  = 'in the same preflight, a link target that cannot be read is reported "target unverified", never "orphaned" (#110)' }
     @{ file = 'module-3-compute/3.4-app-service/scripts/Remove-LabResource.ps1'; command = 'Get-AzVirtualNetwork'; count = 1
        why  = 'Get-SubnetLinkSnapshot feeds the informational subnet report; it returns $null for "unknown", and the plan is kept or deleted on other, counted grounds' }
+    @{ file = 'module-1-identities-governance/1.1-entra-users-groups/scripts/Remove-LabResource.ps1'; command = 'Get-AzContext'; count = 1
+       why  = 'the Graph sign-in''s tenant probe (#300): an unreadable Az context means no tenant and the hint line; nothing is deleted on that path' }
 )
 foreach ($case in $RatchetCases) {
     $case.allowed = @($DiagnosticCatch | Where-Object { $_.file -eq $case.file })

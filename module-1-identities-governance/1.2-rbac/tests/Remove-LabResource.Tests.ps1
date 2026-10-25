@@ -16,6 +16,10 @@
          with Write-Error, as the Az getters do, so a script that passes -ErrorAction
          SilentlyContinue swallows it - the defect #255 describes.
       4. A removal that fails is an [ERROR], counted, and the later steps still run: exit 1.
+      5. The Owner assignment is read and removed through the ARM role assignments API (issue
+         #397), never through the Az role cmdlets, which call Microsoft Graph. Malfurion is still
+         found in Entra ID; when that lookup cannot reach Graph it is an [ERROR] that names the
+         sign-in providing it, and the resource groups are still deleted.
 
     Which errors mean "not found" is pinned for every cleanup that carries the helpers by
     tests/Lab-Cleanup-Lookup.Tests.ps1.
@@ -49,8 +53,8 @@ BeforeAll {
 
     $script:StubCommands = @(
         'Get-AzContext'
-        'Get-AzRoleAssignment'
-        'Remove-AzRoleAssignment'
+        'Get-AzADUser'
+        'Invoke-AzRestMethod'
         'Get-AzResourceGroup'
         'Remove-AzResourceGroup'
     )
@@ -98,6 +102,10 @@ function Invoke-StubLookup {
             Write-Error -ErrorId 'TooManyRequests' -Message "Number of 'read' requests exceeded the limit for $Name. Please try again after '17' seconds."
             return $true
         }
+        'graph' {
+            Write-Error -ErrorId 'AuthenticationFailed' -Message 'Authentication failed against resource MicrosoftGraphEndpointResourceId. User interaction is required. (stub)'
+            return $true
+        }
     }
     return $false
 }
@@ -110,25 +118,38 @@ function Get-AzContext {
     }
 }
 
-function Get-AzRoleAssignment {
+# The one Microsoft Graph lookup left in the cleanup (issue #397): Malfurion by his
+# userPrincipalName prefix, through the Az sign-in's Graph token.
+function Get-AzADUser {
     [CmdletBinding()]
-    param([string]$Scope, [switch]$IncludeClassicAdministrators)
-    if (Invoke-StubLookup -Name 'Get-AzRoleAssignment') { return }
-    # Every listing holds someone else's Owner assignment, and an Owner assignment for Malfurion
-    # inherited from a management group - neither is the lab's. Only the one made at the
-    # subscription itself is.
-    $subscription = '/subscriptions/00000000-0000-0000-0000-000000000000'
-    [pscustomobject]@{ SignInName = 'someone.else@contoso.example'; RoleDefinitionName = 'Owner'; ObjectId = '22222222-2222-2222-2222-222222222222'; Scope = $subscription }
-    [pscustomobject]@{ SignInName = 'malfurion.stormrage@contoso.example'; RoleDefinitionName = 'Owner'; ObjectId = '11111111-1111-1111-1111-111111111111'; Scope = '/providers/Microsoft.Management/managementGroups/stub-mg' }
-    if (Test-StubEmpty) { return }
-    [pscustomobject]@{ SignInName = 'malfurion.stormrage@contoso.example'; RoleDefinitionName = 'Owner'; ObjectId = '11111111-1111-1111-1111-111111111111'; Scope = $subscription }
+    param([string]$Filter)
+    if ($Filter -ne "startsWith(userPrincipalName,'malfurion.stormrage@')") { throw "stub: unexpected Get-AzADUser filter '$Filter'" }
+    if (Invoke-StubLookup -Name 'Get-AzADUser') { return }
+    if ($env:SKYCRAFT_STUB_NOUSER -eq '1') { return }
+    [pscustomobject]@{ Id = '11111111-1111-1111-1111-111111111111'; UserPrincipalName = 'malfurion.stormrage@contoso.example' }
 }
 
-function Remove-AzRoleAssignment {
+# What the ARM role assignments API lists for the subscription (served by the fake appended to
+# this body): someone else's Owner assignment, an Owner assignment for Malfurion inherited from a
+# management group, and a Reader for Malfurion at the subscription - none is the lab's. Only the
+# Owner made at the subscription itself is.
+function Get-StubRoleAssignment {
     [CmdletBinding()]
-    param([string]$ObjectId, [string]$RoleDefinitionName, [string]$Scope)
-    Write-StubCall -Name "Remove-AzRoleAssignment@$Scope"
-    Invoke-StubRemoval -Command 'Remove-AzRoleAssignment' -Name $ObjectId
+    param([string]$Scope, [string]$PrincipalId)
+    if (Invoke-StubLookup -Name 'Get-RoleAssignment') { return }
+    $owner = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635'
+    [pscustomobject]@{ Name = 'ra-other-sub'; PrincipalId = '22222222-2222-2222-2222-222222222222'; Scope = $Scope; RoleDefinitionId = $owner }
+    [pscustomobject]@{ Name = 'ra-malfurion-mg'; PrincipalId = '11111111-1111-1111-1111-111111111111'; Scope = '/providers/Microsoft.Management/managementGroups/stub-mg'; RoleDefinitionId = $owner }
+    [pscustomobject]@{ Name = 'ra-malfurion-reader'; PrincipalId = '11111111-1111-1111-1111-111111111111'; Scope = $Scope; RoleDefinitionId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7' }
+    if (Test-StubEmpty) { return }
+    [pscustomobject]@{ Name = 'ra-malfurion-sub'; PrincipalId = '11111111-1111-1111-1111-111111111111'; Scope = $Scope; RoleDefinitionId = $owner }
+}
+
+function Remove-StubRoleAssignment {
+    [CmdletBinding()]
+    param([string]$Id, [string]$Scope, [string]$Name)
+    Write-StubCall -Name "Remove-RoleAssignment@$Scope"
+    Invoke-StubRemoval -Command 'Remove-RoleAssignment' -Name $Name
 }
 
 function Get-AzResourceGroup {
@@ -158,7 +179,8 @@ function Remove-AzResourceGroup {
             [string[]]$Fail = @(),
             [string[]]$Lookup = @(),
             [string[]]$ArgumentList = @('-Force'),
-            [switch]$Empty
+            [switch]$Empty,
+            [switch]$NoUser
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
@@ -168,6 +190,7 @@ function Remove-AzResourceGroup {
             SKYCRAFT_STUB_FAIL   = $Fail -join ','
             SKYCRAFT_STUB_LOOKUP = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
+            SKYCRAFT_STUB_NOUSER = if ($NoUser) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG    = $logPath
         }
 
@@ -181,7 +204,7 @@ function Remove-AzResourceGroup {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmRoleAssignmentStub)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs
@@ -190,18 +213,21 @@ function Remove-AzResourceGroup {
     $script:Nothing = Invoke-CleanupScript -Stub $script:Stub -Empty
     $script:WhatIf  = Invoke-CleanupScript -Stub $script:Stub -ArgumentList '-WhatIf'
     $script:LookupsFail = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
-        'Get-AzRoleAssignment=denied'
+        'Get-RoleAssignment=denied'
         'Get-AzResourceGroup=throttled'
     )
-    $script:AssignmentDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzRoleAssignment=denied'
+    $script:AssignmentDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-RoleAssignment=denied'
+    # The Az sign-in cannot get a Graph token without interaction (issue #397).
+    $script:GraphDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzADUser=graph'
+    $script:NoUser      = Invoke-CleanupScript -Stub $script:Stub -NoUser
     $script:RemovalsFail = Invoke-CleanupScript -Stub $script:Stub -Fail @(
-        'Remove-AzRoleAssignment:11111111-1111-1111-1111-111111111111'
+        'Remove-RoleAssignment:ra-malfurion-sub'
         'Remove-AzResourceGroup:dev-skycraft-swc-rg'
     )
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:LookupsFail, $script:AssignmentDenied,
-        $script:RemovalsFail
+        $script:RemovalsFail, $script:GraphDenied, $script:NoUser
     )
 }
 
@@ -229,13 +255,15 @@ Describe 'Lab 1.2 Remove-LabResource.ps1 - removes what the lab creates' {
     }
 
     It 'removes Malfurion''s Owner assignment and nobody else''s' {
-        $script:Clean.Calls | Should -Contain 'Remove-AzRoleAssignment:11111111-1111-1111-1111-111111111111'
-        $script:Clean.Calls | Should -Not -Contain 'Remove-AzRoleAssignment:22222222-2222-2222-2222-222222222222'
+        $script:Clean.Calls | Should -Contain 'Remove-RoleAssignment:ra-malfurion-sub'
+        $script:Clean.Calls | Should -Not -Contain 'Remove-RoleAssignment:ra-other-sub'
+        # His Reader at the same scope is listed first: only the role check passes it by.
+        $script:Clean.Calls | Should -Not -Contain 'Remove-RoleAssignment:ra-malfurion-reader'
     }
 
     It 'removes only the assignment made at the subscription, once, not the inherited one' {
-        @($script:Clean.Calls | Where-Object { $_ -eq 'Remove-AzRoleAssignment' }).Count | Should -Be 1
-        $script:Clean.Calls | Should -Contain 'Remove-AzRoleAssignment@/subscriptions/00000000-0000-0000-0000-000000000000'
+        @($script:Clean.Calls | Where-Object { $_ -eq 'Remove-RoleAssignment' }).Count | Should -Be 1
+        $script:Clean.Calls | Should -Contain 'Remove-RoleAssignment@/subscriptions/00000000-0000-0000-0000-000000000000'
         # With only the inherited assignment left, there is nothing for the lab to remove.
         $script:Nothing.Output | Should -Match 'Assignment not found'
     }
@@ -293,12 +321,40 @@ Describe 'Lab 1.2 Remove-LabResource.ps1 - a failed lookup is not "absent" (#255
     }
 }
 
+Describe 'Lab 1.2 Remove-LabResource.ps1 - role assignments without Microsoft Graph (#397)' {
+
+    It 'reads Malfurion''s assignments through the ARM API, filtered by his object id' {
+        # The stub defines no Az role cmdlet: the listing reaches Get-StubRoleAssignment only
+        # through the Invoke-AzRestMethod fake, which keeps Malfurion's assignments only.
+        $script:Clean.Calls | Should -Contain 'Get-RoleAssignment'
+        $script:Clean.Calls | Should -Not -Contain 'Remove-RoleAssignment:ra-other-sub'
+    }
+
+    It 'counts a Graph lookup that needs interaction, names the sign-in that provides Graph, and still deletes the groups' {
+        $run = $script:GraphDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Could not look up Malfurion in Entra ID[^\r\n]*MicrosoftGraphEndpointResourceId'
+        $run.Output | Should -Match "Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId"
+        $run.Output | Should -Not -Match 'Assignment not found'
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls  | Should -Not -Contain 'Get-RoleAssignment'
+        $run.Calls  | Should -Contain 'Remove-AzResourceGroup:dev-skycraft-swc-rg'
+    }
+
+    It 'reports Malfurion absent from Entra ID as nothing to remove, not as a failure' {
+        $run = $script:NoUser
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Malfurion not found in Entra ID'
+        $run.Calls  | Should -Not -Contain 'Remove-RoleAssignment'
+    }
+}
+
 Describe 'Lab 1.2 Remove-LabResource.ps1 - a failed removal is counted' {
 
     It 'exits 1 and counts each removal that failed' {
         $run = $script:RemovalsFail
         $run.ExitCode | Should -Be 1 -Because "a stuck object must not look like a clean cleanup; output was:`n$($run.Output)"
-        $run.Output | Should -Match '\[ERROR\] Failed to remove role: stub failure'
+        $run.Output | Should -Match '\[ERROR\] Failed to remove role: ARM DELETE [^\r\n]*/roleAssignments/ra-malfurion-sub returned HTTP 500[^\r\n]*stub failure'
         $run.Output | Should -Match '\[ERROR\] Failed to delete dev-skycraft-swc-rg: stub failure'
         $run.Output | Should -Match 'Cleanup finished with 2 failure\(s\)'
         $run.Output | Should -Not -Match 'Cleanup complete'
@@ -316,7 +372,7 @@ Describe 'Lab 1.2 Remove-LabResource.ps1 - -WhatIf' {
         $run = $script:WhatIf
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         @($run.Calls | Where-Object { $_ -match '^Remove-' }) | Should -BeNullOrEmpty
-        $run.Calls  | Should -Contain 'Get-AzRoleAssignment'
+        $run.Calls  | Should -Contain 'Get-RoleAssignment'
         $run.Calls  | Should -Contain 'Get-AzResourceGroup'
         $run.Output | Should -Match 'What if: .*prod-skycraft-swc-rg'
     }

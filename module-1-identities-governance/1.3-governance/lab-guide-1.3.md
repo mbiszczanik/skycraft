@@ -62,13 +62,23 @@ Before starting this lab:
 - [ ] Completed Lab 1.2 (RBAC and resource groups)
 - [ ] Three resource groups exist: dev-skycraft-swc-rg, prod-skycraft-swc-rg, platform-skycraft-swc-rg
 - [ ] Owner role at subscription level, or Contributor together with User Access Administrator (Step 1.3.8 gives a managed identity a role on the subscription, which Contributor alone may not do)
+- [ ] On a new subscription: the `Microsoft.Insights` resource provider registered (Step 1.3.7 creates an action group and an alert in that namespace, and the Portal does not register it for you; see the note below)
 - [ ] Understanding of compliance and governance concepts
+- [ ] Only for the scripts in `scripts/` and the checklist commands (the Portal steps need none): PowerShell 7 with `Az.Accounts`, `Az.Resources`, `Az.Billing` and `Az.Monitor`, and `Az.PolicyInsights` for the checklist's compliance summary. Install them for your account:
+
+  ```powershell
+  Install-Module Az.Accounts, Az.Resources, Az.Billing, Az.Monitor, Az.PolicyInsights -Scope CurrentUser
+  ```
+
+  Azure Cloud Shell (PowerShell) has all of them preinstalled, so a Cloud Shell session without a storage account can run this lab's scripts too; it deletes the clone of the repository when it ends. Details and sources: [Module 1 prerequisites](../README.md#-prerequisites).
+
+**Note**: To register `Microsoft.Insights`, search for **Subscriptions**, click your subscription, and in the left menu, under **Settings**, click **Resource providers**. Search for `Microsoft.Insights`, select the `Microsoft.Insights` row and click **Register**. Its status changes from **NotRegistered** to **Registering** and, after about a minute, to **Registered**. If it does not change to **Registering**, click **Register** again. A subscription you have used before usually has it already; without it, Step 1.3.7 fails (Troubleshooting, Issue 6).
 
 **Note**: With Contributor alone, the paths below end differently at Step 1.3.8. The Portal creates `Inherit-Project-Tag` without the identity's role and says so after **Create**: new resources still get the tag, but the optional remediation task in Step 1.3.10 fails. `scripts/Deploy-Bicep.ps1` fails at the role assignment. `scripts/Invoke-LabGovernance.ps1` creates the assignment, reports `[ERROR]` for the role and exits 1. With Contributor alone, use the Portal and skip the remediation task.
 
 ## 🛠️ Portal, PowerShell and Bicep Paths
 
-You can build this lab in the Portal by following this guide, with Az PowerShell, or with Bicep. With the Owner role (see Prerequisites), the three paths end in the same state: the same four policy assignments, of which only `Inherit-Project-Tag` carries a managed identity, holding Contributor on the subscription. `scripts/Test-Lab.ps1` accepts that state whichever path built it:
+You can build this lab in the Portal by following this guide, with Az PowerShell, or with Bicep. With the Owner role (see Prerequisites), the three paths end in the same state: the same four policy assignments, with the assignment names, descriptions, non-compliance messages and parameters this guide gives, of which only `Inherit-Project-Tag` carries a managed identity, holding Contributor on the subscription. The one difference is the assignment's resource name: the Portal generates an id, the scripts use the assignment name. `scripts/Test-Lab.ps1` accepts that state whichever path built it:
 
 | Path | What it creates |
 | ---- | --------------- |
@@ -76,7 +86,11 @@ You can build this lab in the Portal by following this guide, with Az PowerShell
 | `scripts/Invoke-LabGovernance.ps1` (Az PowerShell) | The tags of Steps 1.3.1-1.3.3; the four policy assignments of Steps 1.3.5, 1.3.8 and 1.3.9, including the managed identity of `Inherit-Project-Tag` and its role; the locks of Steps 1.3.11 and 1.3.13 |
 | `scripts/Deploy-Bicep.ps1` (Bicep, `bicep/main.bicep`) | The same as the PowerShell script |
 
+You can also run a script after building the lab in the Portal. `scripts/Invoke-LabGovernance.ps1` and `scripts/Deploy-Bicep.ps1` find your assignments by their policy definition, their scope and the assignment name this guide gives, whatever their resource name, and create no second one; `Deploy-Bicep.ps1` prints `[KEEP]` for each and grants the identity's role only when it does not hold it yet. When one of your assignments has other parameters, another enforcement mode or exclusions that this guide does not give, both scripts name the difference and leave the assignment as it is, and `Deploy-Bicep.ps1` deploys nothing (Troubleshooting, Issue 9). They also stop, rather than create a second assignment, when one of yours has the right definition under another assignment name, or this guide's assignment name on another definition (Issue 10).
+
 Step 1.3.8 also shows the Az PowerShell and Azure CLI commands for `Inherit-Project-Tag`, and Step 1.3.10 the Az PowerShell command for its optional remediation task, which neither script runs. These steps have no scripted or Bicep counterpart, because they test, view or explore rather than create, or because the lab keeps them in the Portal: 1.3.4, 1.3.6 (policy test), 1.3.7 (Advisor alert and its action group), 1.3.10 (compliance view; its remediation task has only the command above), 1.3.12 (lock test), 1.3.14, 1.3.15-1.3.17 (budgets), 1.3.18-1.3.22. `Test-Lab.ps1` does not check the budgets or the Advisor alert.
+
+The Advisor alert `Advisor-Cost-Recommendations` and its action group `skycraft-advisor-ag` (Step 1.3.7) and the budgets `SkyCraft-Monthly-Budget` and `SkyCraft-Prod-Monthly` (Steps 1.3.15-1.3.17) are Portal-only on purpose. A budget sends its alerts to your own email address, which the scripts do not know, and the alert is what the Portal's **Create Advisor Alerts** form writes, a form whose result no script reproduces exactly. A `Deploy-Bicep.ps1 -WhatIf` over a lab built in the Portal reports the alert and the action group as Ignore (they exist, the template does not declare them), so the Bicep path neither copies nor removes them; `Remove-LabResource.ps1` removes them whichever way you made them.
 
 ## 📖 Section 1: Apply and Manage Tags (30 minutes)
 
@@ -114,7 +128,7 @@ Step 1.3.8 also shows the Az PowerShell and Azure CLI commands for `Inherit-Proj
 
 5. Click **Apply**
 
-**Note**: If the group already carries these four tags with these values (Lab 1.2's Bicep path creates the groups with them), **Apply** stays greyed out: there is nothing to change. Check the values against the table and go on.
+**Note**: If the group already carries these four tags with these values (Lab 1.2 creates the groups with them, on every path), **Apply** stays greyed out: there is nothing to change. Check the values against the table and go on.
 
 **Expected Result**: Tags are saved and visible in the Tags blade.
 
@@ -159,7 +173,7 @@ Step 1.3.8 also shows the Az PowerShell and Azure CLI commands for `Inherit-Proj
 1. In Azure Portal, search for **Tags**
 2. In the list of tags, click **Project : SkyCraft**
 
-The **Tags** service lists every tag in your subscription as one name : value pair per line (`CostCenter : MSDN`, `Environment : Development`, `Project : SkyCraft`, ...).
+The **Tags** service opens as **Resource Manager | Tags** and lists every tag in your subscription as one name : value pair per line (`CostCenter : MSDN`, `Environment : Development`, `Project : SkyCraft`, ...).
 
 **Expected Result**: **Resources with tag Project : SkyCraft** lists the three resource groups, and any resource that already carries the tag (for example from Lab 1.2's deployment).
 
@@ -204,7 +218,7 @@ The **Tags** service lists every tag in your subscription as one name : value pa
 - **Description**: `All resource groups must have an Environment tag`
 - **Policy enforcement**: Default (enforcement)
 
-**Note**: Once you add the definition, the wizard fills **Assignment name** with the definition's own name (`Require a tag on resource groups`). Replace it with `Require-Environment-Tag-RG`: the lab's scripts (`Test-Lab.ps1`, `Remove-LabResource.ps1`) look for an assignment of this definition with that name. In the Portal, **Assignment name** sets the assignment's display name; Azure names the assignment resource itself with a generated id. The wizard also shows a **Version** field (`1.*.*`): leave it as it is.
+**Note**: Once you add the definition, the wizard fills **Assignment name** with the definition's own name (`Require a tag on resource groups`). Replace it with `Require-Environment-Tag-RG`: the lab's scripts (`Test-Lab.ps1`, `Remove-LabResource.ps1`) look for an assignment of this definition with that name. In the Portal, **Assignment name** sets the assignment's display name; Azure names the assignment resource itself with a generated id. The wizard also shows a **Version** field (`1.*.*`): leave it as it is. **Policy enforcement** may also offer **Enroll**, besides Default and Do not enforce: keep Default.
 
 ![Assign a Built-in Policy](./images/step-1.3.5b.png)
 
@@ -410,7 +424,8 @@ Now assign the second tag policy of this step, `Inherit-Project-Tag`. It copies 
 $subscriptionScope = "/subscriptions/$((Get-AzContext).Subscription.Id)"
 $definition = Get-AzPolicyDefinition -Id '/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070'
 $assignment = New-AzPolicyAssignment -Name 'Inherit-Project-Tag' `
-    -DisplayName 'Inherit Project Tag from Resource Group' `
+    -DisplayName 'Inherit-Project-Tag' `
+    -Description 'Resources get the Project tag of their resource group when they are created without it' `
     -Scope $subscriptionScope `
     -PolicyDefinition $definition `
     -PolicyParameterObject @{ tagName = 'Project' } `
@@ -419,6 +434,10 @@ $assignment = New-AzPolicyAssignment -Name 'Inherit-Project-Tag' `
 
 # The Portal grants this role itself; from PowerShell you grant it. If Azure answers that the
 # principal does not exist, the new identity is not replicated yet: wait a minute and run it again.
+# New-AzRoleAssignment also needs a Microsoft Graph token. If it fails with
+# "Authentication failed against resource MicrosoftGraphEndpointResourceId", run
+# Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId and run it again
+# (TROUBLESHOOTING.md in the repository root).
 New-AzRoleAssignment -ObjectId $assignment.IdentityPrincipalId -ObjectType 'ServicePrincipal' `
     -RoleDefinitionId 'b24988ac-6180-42a0-ab88-20f7382dd24c' -Scope $subscriptionScope
 ```
@@ -429,7 +448,8 @@ New-AzRoleAssignment -ObjectId $assignment.IdentityPrincipalId -ObjectType 'Serv
 subscriptionScope="/subscriptions/$(az account show --query id --output tsv)"
 az policy assignment create \
   --name Inherit-Project-Tag \
-  --display-name "Inherit Project Tag from Resource Group" \
+  --display-name Inherit-Project-Tag \
+  --description "Resources get the Project tag of their resource group when they are created without it" \
   --scope "$subscriptionScope" \
   --policy "/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070" \
   --params '{"tagName": {"value": "Project"}}' \
@@ -497,24 +517,36 @@ The list is a multi-select with a filter box; with both regions ticked, the fiel
 5. In the left menu, click **Compliance**
 6. Click **Inherit-Project-Tag**
 
-**Note**: **Compliance** lists an assignment by its display name. If you created the assignment with the Bicep path, `scripts/Invoke-LabGovernance.ps1` or the PowerShell or CLI commands of Step 1.3.8, its display name is `Inherit Project Tag from Resource Group`: click that one instead.
+**Note**: **Compliance** lists an assignment by its display name, `Inherit-Project-Tag` on every path. An assignment made with the Bicep path or `scripts/Invoke-LabGovernance.ps1` before they used the guide's names shows as `Inherit Project Tag from Resource Group`: click that one instead.
 
 7. Click **Create remediation task**
 8. Click **Remediate**
 
 The **New remediation task** page opens with that assignment already selected, so **Remediate** is the only thing to click there.
 
-**Expected Result**: The Portal confirms that the remediation task was created. Once the task has finished (a few minutes), `Advisor-Cost-Recommendations` carries `Project` = `SkyCraft`, and after the next compliance evaluation `Inherit-Project-Tag` shows it as compliant.
+A task can finish as succeeded without remediating anything, so check its result a few minutes later:
+
+9. In the left menu, click **Remediation**
+10. Click the **Remediation tasks** tab
+11. Click your task, the newest in the list. In the list, its Remediated Resources column reads `1 out of 1`; its details page shows the status Complete and lists the resource it remediated, `advisor-cost-recommendations`. A task that reads `0 out of 0` remediated nothing, even when its status says Complete
+12. In Azure Portal, search for **Resource groups**
+13. Click on **prod-skycraft-swc-rg**
+14. Click on **Advisor-Cost-Recommendations**
+15. In the left menu, click **Tags**
+
+**Expected Result**: The Portal confirms with **Remediation task creation succeeded**. Once the task has finished (a few minutes), it lists one remediated resource, the **Tags** page of `Advisor-Cost-Recommendations` shows `Project` = `SkyCraft`, and after the next compliance evaluation `Inherit-Project-Tag` shows the alert as compliant.
+
+**Note**: If the task remediated 0 resources and the alert has no `Project` tag, wait until about ten minutes have passed since **Compliance** first listed the alert as non-compliant under `Inherit-Project-Tag`, then create a new task in the Portal (items 5-15 again). As an alternative, start the new task with the Az PowerShell command below (in Cloud Shell, for example) and check it with items 9-15. If you have run the command before, give the new task another `-Name` (for example `remediate-project-tag-2`) instead of reusing the earlier task's name. On new subscriptions, a task created about four minutes after the first non-compliant listing remediated nothing (2026-10-20), and one created about eleven minutes after it tagged the alert (2026-10-21).
 
 The same with Az PowerShell (the `Start-AzPolicyRemediation` cmdlet ships in the Az.PolicyInsights module):
 
 ```powershell
 $subscriptionScope = "/subscriptions/$((Get-AzContext).Subscription.Id)"
 # The Portal names the assignment with a generated id, so find it by its definition and by the
-# name the guide gives it (the Bicep path and Invoke-LabGovernance.ps1 set the display name below).
+# name the guide gives it, which every path sets as the display name.
 $assignment = @(Get-AzPolicyAssignment -Scope $subscriptionScope | Where-Object {
         $_.PolicyDefinitionId -like '*/ea3f2387-9b95-492a-a190-fcdc54f7b070' -and $_.Scope -eq $subscriptionScope -and
-        ($_.Name -eq 'Inherit-Project-Tag' -or $_.DisplayName -in 'Inherit-Project-Tag', 'Inherit Project Tag from Resource Group')
+        ($_.Name -eq 'Inherit-Project-Tag' -or $_.DisplayName -eq 'Inherit-Project-Tag')
     })
 if ($assignment.Count -ne 1) {
     throw "Found $($assignment.Count) Inherit-Project-Tag assignments on the subscription, expected one. Check Policy > Assignments."
@@ -645,7 +677,9 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 | Expiration date | [Leave the default, two years from now]             |
 | Amount          | 100 (in your billing currency; adjust to your needs) |
 
-**Note**: **Reset period** starts at **Billing month**. Pick **Monthly**, which the list shows under **Calendar months**. The **Amount** field is labelled with your billing currency (for example **Amount (€)**).
+**Note**: **Reset period** comes in one of two forms, depending on the billing account, and both are expected: it starts at **Billing month** and shows **Monthly** under **Calendar months**, or it lists only **Monthly**, **Quarterly** and **Annually**, with **Monthly** preselected. Pick **Monthly** in either form. The **Amount** field may show your billing currency in its label (for example **Amount (€)**) or not; enter the number alone.
+
+**Note**: On a subscription created the same day, the cost chart of **Create a budget** can show **Cannot load data**, and a day later **No data to display**. That is expected: cost data can take up to 48 hours to appear (note in Step 1.3.18), and the budget is still created.
 
 6. Click **Next >**
 
@@ -654,6 +688,8 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 ### Step 1.3.16: Configure Budget Alerts
 
 On the **Set alerts** step, every alert is one row under **Alert conditions**. A new empty row appears below each row you fill in.
+
+**Note**: Until a recipient is entered, each filled row shows a validation message that moves the rows below it down. Filling in **Alert recipients (email)** (item 2) first avoids that.
 
 1. Fill in three rows under **Alert conditions** (leave the Action group column at None):
 
@@ -693,6 +729,8 @@ Create a more specific budget for the production environment. A budget belongs t
 | Name         | SkyCraft-Prod-Monthly         |
 | Reset period | Monthly                       |
 | Amount       | 50 (in your billing currency) |
+
+**Note**: **Reset period** and **Amount** look as in Step 1.3.15 (see the note there): pick **Monthly** and enter the number alone.
 
 6. Click **Next >**
 7. On the **Set alerts** step, fill in three rows under **Alert conditions**:
@@ -735,6 +773,8 @@ Create a more specific budget for the production environment. A budget belongs t
 
 ![Manage Costs with Budgets and Alerts](./images/step-1.3.18b.png)
 
+**Note**: On a subscription created the same day, Cost analysis can show **Unable to load** instead of the charts (a day later: empty charts and "No cost reported during this period"), and no **Add filter**, for up to 48 hours: Microsoft says a new subscription may wait that long for all Cost Management features. The **VIEW** menu and **Last 30 days** still work, but items 6-7 cannot be done yet. The budget chart of Step 1.3.15 shows **Cannot load data** for the same reason. Nothing is wrong with the lab: come back to this step later. `Test-Lab.ps1` does not check it.
+
 ---
 
 ## 📖 Section 5: Use Azure Advisor (30 minutes)
@@ -760,6 +800,8 @@ Create a more specific budget for the production environment. A budget belongs t
 - Its own score ("Score --%" until Advisor has assessed the category)
 - The number of active recommendations
 - The number of impacted resources
+
+A card without recommendations may show only a check mark and "You are following all of our ... recommendations" instead of a score and counts.
 
 The overall score (0-100%) is on the separate **Advisor score** page.
 
@@ -827,6 +869,8 @@ Tenant Root Group
 2. Click **Management groups** service
 3. You'll see the **Tenant Root Group**
 
+The service opens as **Resource Manager | Management groups**.
+
 ![View Management Groups](./images/step-1.3.22.png)
 
 **Note**: Creating management groups requires specific permissions. For this lab, understanding the concept is sufficient.
@@ -869,14 +913,15 @@ Tenant Root Group
 
 - [ ] Created subscription-level budget (100 per month, in your billing currency)
 - [ ] Configured 3 alert thresholds (50%, 80%, 100%)
-- [ ] Created resource group-specific budget (prod-skycraft-swc-rg, 50 per month)
-- [ ] Explored Cost Analysis with filters
+- [ ] Created resource group-specific budget (prod-skycraft-swc-rg, 50 per month, in your billing currency)
+- [ ] Explored Cost Analysis with filters (on a new subscription, once Cost analysis loads, which can take up to 48 hours; Step 1.3.18)
 - [ ] Understand daily cost trends
 
 ### Azure Advisor
 
 - [ ] Accessed Advisor dashboard
 - [ ] Reviewed recommendations by category
+- [ ] On a new subscription, registered the `Microsoft.Insights` resource provider before Step 1.3.7 (Prerequisites)
 - [ ] Configured Advisor alert for cost recommendations (Step 1.3.7, before Step 1.3.8)
 - [ ] Understand how to act on recommendations
 
@@ -905,8 +950,9 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 | Tags on the three resource groups | dev, prod and platform resource groups | 0 | The `Project` tag that `Inherit-Project-Tag` copies to new resources |
 | `SkyCraft-Monthly-Budget`, `SkyCraft-Prod-Monthly` | Subscription, prod resource group | 0 | Send emails at their thresholds; they never stop a deployment |
 | `Advisor-Cost-Recommendations` and its action group `skycraft-advisor-ag` | prod resource group | 0 | Nothing reaches you: Step 1.3.7 creates the action group without any notification or action, so a new Advisor cost recommendation sends no email or other message |
+| `Microsoft.Insights` resource provider registered (on a new subscription, Prerequisites) | Subscription | 0 | Lets later labs create action groups, alert rules and diagnostic settings |
 
-`scripts/Remove-LabResource.ps1` removes all of these except the tags, whichever path created them. It removes the locks first, and the identity's role before its assignment. Run it before Lab 1.2's cleanup deletes the resource groups, because the locks block that delete.
+`scripts/Remove-LabResource.ps1` removes all of these except the tags and the resource provider registration, whichever path created them. It removes the locks first, and the identity's role before its assignment. Run it before Lab 1.2's cleanup deletes the resource groups, because the locks block that delete.
 
 ---
 
@@ -930,7 +976,7 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 
 - A new assignment takes about five minutes to take effect, sometimes longer. If Step 1.3.6 created `rg-test-no-tag`, delete it the way the step deletes `rg-test-with-tag`, wait a few minutes and try again
 - Policy may be in "Audit" mode instead of "Deny" mode
-- Check **Policy enforcement** is set to "Default (enforcement)", not "Do not enforce"
+- Check **Policy enforcement** is set to "Default (enforcement)", not "Do not enforce" or another option such as "Enroll"
 - Review policy effect (should be "Deny" for enforcement)
 
 ### Issue 3: Cannot delete resource despite Owner role
@@ -972,6 +1018,7 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 
 **Solutions**:
 
+- Action group, on a new subscription: the bell shows "Create action group: Failed to create action group. Error: The subscription is not registered to use namespace 'microsoft.insights'. See https://aka.ms/rps-not-found for how to register subscriptions." Register the `Microsoft.Insights` resource provider as the note under Prerequisites shows, wait until its status is **Registered**, then click **Create** again on the same form: it keeps what you filled in
 - Action group: set **Region** to Sweden Central. `Restrict-Azure-Regions` (Step 1.3.9) refuses the default East US
 - Alert: `Enforce-Project-Tag` (Step 1.3.8) is in effect in your subscription, for example from an earlier run of this lab or its Bicep path, and `Inherit-Project-Tag` does not add the tag for the alert. The **Create Advisor Alerts** form has no tags, so the alert passes `Enforce-Project-Tag` only through `Inherit-Project-Tag`. **Alerts (Preview)** may still list the refused alert, but it does not exist. Check that **Policy** → **Assignments** lists `Inherit-Project-Tag` (assigned more than about ten minutes ago, with **Tag Name** `Project`) and that `prod-skycraft-swc-rg` carries `Project` = `SkyCraft` on its **Tags** page, then create the alert again. `Test-Lab.ps1` does not check the alert
 
@@ -996,8 +1043,35 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 
 **Solutions**:
 
-- Remove the stale role assignment yourself: **Subscriptions** → your subscription → **Access control (IAM)** → **Role assignments**, find the **Contributor** row whose name is **Identity not found**, check it, click **Delete**, then deploy again. `scripts/Remove-LabResource.ps1` does not find it: it removes the role assignments of the policy assignments that still exist
+- Remove the stale role assignment yourself: **Subscriptions** → your subscription → **Access control (IAM)** → **Role assignments**, find the **Contributor** row whose Name and Type read **Unknown** (older Portal versions show **Identity not found**), check it, click **Delete**, then deploy again. Whatever its label, it is a **Contributor** row at the subscription with no user, group or service principal behind it: the identity it was given to no longer exists. `scripts/Remove-LabResource.ps1` does not find it: it removes the role assignments of the policy assignments that still exist
 - Next time, remove the lab with `scripts/Remove-LabResource.ps1` rather than in the Portal: it removes the identity's role assignment before the policy assignment, so none is left behind
+
+### Issue 9: `Deploy-Bicep.ps1` or `Invoke-LabGovernance.ps1` says an assignment "differs from the lab's"
+
+**Symptom**: After you built the lab in the Portal, `scripts/Deploy-Bicep.ps1` prints `[ERROR] ... differs from the lab's: ...` and "Nothing deployed", or `scripts/Invoke-LabGovernance.ps1` prints the same `[ERROR]` and exits 1
+
+**Root Cause**: The script found your assignment by its policy definition and assignment name, but one of its parameters (a tag name or value, the allowed regions), its enforcement mode, its exclusions (**Basics** → **Exclusions**: an excluded resource group escapes the policy), or its managed identity is not what the step gives. The script does not overwrite your assignment and does not create a second one next to it.
+
+**Solutions**:
+
+- The message names each difference and the step. In **Policy** → **Assignments**, open the assignment, click **Edit assignment**, set the values of that step, then run the script again
+- Or delete the assignment and run the script again: it creates the assignment with the lab's values. For `Inherit-Project-Tag`, use `scripts/Remove-LabResource.ps1` or remove the identity's role first (Issue 8)
+
+### Issue 10: `Deploy-Bicep.ps1` or `Invoke-LabGovernance.ps1` says "none matches" for an assignment
+
+**Symptom**: `scripts/Deploy-Bicep.ps1` prints `[ERROR] <assignment>: none matches, and the template would create it next to: ...` and "Nothing deployed", or `scripts/Invoke-LabGovernance.ps1` prints `[ERROR] Policy <assignment> not created: none matches ...` and exits 1
+
+**Root Cause**: No assignment on the subscription has both the step's policy definition and its assignment name, but one has one of the two:
+
+- the right definition under another name, usually the definition's own name, which the wizard fills into **Assignment name** (for example `Require a tag on resource groups`)
+- the step's assignment name on another definition, such as **Inherit a tag from the resource group** (without "if missing") or **Allowed locations for resource groups**, which the steps warn about
+
+Creating the step's assignment next to it would leave two policies doing similar work, so the script creates nothing.
+
+**Solutions**:
+
+- For the right definition under another name: in **Policy** → **Assignments**, open the assignment, click **Edit assignment**, set **Assignment name** to the one the step gives, then run the script again
+- For another definition: delete that assignment (for a Modify assignment with an identity, remove the identity's role too, Issue 8) and run the script again, or follow the step in the Portal
 
 ---
 

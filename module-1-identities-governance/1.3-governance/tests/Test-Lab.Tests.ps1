@@ -17,7 +17,12 @@
          a lookup that failed must not read as a pass.
       4. A run with no one signed in exits 1 before anything is looked up.
       5. Budgets are a manual check: their absence, or a budget lookup that fails, neither fails
-         validation nor counts as a pass - and a failed lookup is not reported as "found".
+         validation nor counts as a pass - and a failed lookup is not reported as "found". The
+         budgets are read through the Consumption API at 2023-05-01 (Get-LabArmBudget, issue
+         #411), served by the shared ARM fake, at both of the guide's scopes: the subscription and
+         prod-skycraft-swc-rg (the subscription's listing also returns the group's budget). Each
+         budget is printed once, with the scope it is set on. A failed read prints its HTTP status
+         and the service's message, and a failed read at one scope does not hide the other.
       6. A lock check passes only for the guide's lock: its name, level CanNotDelete, applied to
          the group itself (issue #258). A ReadOnly lock, a lock under another name, a lock on a
          resource inside the group or on the subscription above it, or a lock lookup that fails
@@ -60,14 +65,14 @@ BeforeAll {
     $script:ScriptPath     = (Resolve-Path (Join-Path $PSScriptRoot '..' 'scripts' 'Test-Lab.ps1')).Path
     $script:StubModuleName = 'SkyCraftLab13ValidatorStub'
     # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
-    $script:RequiredModules = @('Az.Accounts', 'Az.Resources', 'Az.Billing')
+    $script:RequiredModules = @('Az.Accounts', 'Az.Resources')
 
     $script:StubCommands = @(
         'Get-AzContext'
         'Get-AzResourceGroup'
         'Get-AzPolicyAssignment'
         'Get-AzResourceLock'
-        'Get-AzConsumptionBudget'
+        'Invoke-AzRestMethod'
     )
 
     # Every Az command the script calls, recording its own invocation. By default the
@@ -83,7 +88,9 @@ BeforeAll {
     #   SKYCRAFT_STUB_INHERITIDENTITY 'none' leaves Inherit-Project-Tag without a managed identity
     #   SKYCRAFT_STUB_POLICYSET       who made the four policy assignments: 'bicep' (the default:
     #                                 fixed names), 'portal' (generated names, the guide's names
-    #                                 as display names) or 'both' (two of each)
+    #                                 as display names), 'scripted' (fixed names, the guide's
+    #                                 names as display names: the Bicep and script paths since
+    #                                 issue #406) or 'both' (two of each)
     #   SKYCRAFT_STUB_MISSINGPOLICY   policy assignments (by the guide's name) left out of the
     #                                 listing
     #   SKYCRAFT_STUB_NOLOCK          resource groups that carry no lock
@@ -94,6 +101,8 @@ BeforeAll {
     #                                 makes that group's lock lookup fail
     #   SKYCRAFT_STUB_LOOKUPFAIL      '1' makes every resource, policy and lock lookup fail
     #   SKYCRAFT_STUB_BUDGET          'none' returns no budget, 'fail' makes the lookup fail
+    #                                 with a 403 at every scope, 'rgfail' at the resource group
+    #                                 only (through the ARM fake, Get-StubBudget)
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 
@@ -191,6 +200,9 @@ function Get-AzPolicyAssignment {
         if ($set -in 'bicep', 'both') {
             New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Bicep -Definition $assignment.Definition -Scope $Scope -Modify:$modify
         }
+        if ($set -eq 'scripted') {
+            New-StubAssignment -Name $assignment.Name -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Modify:$modify
+        }
         if ($set -in 'portal', 'both') {
             New-StubAssignment -Name $assignment.Portal -DisplayName $assignment.Name -Definition $assignment.Definition -Scope $Scope -Modify:$modify
         }
@@ -238,15 +250,21 @@ function Get-AzResourceLock {
     }
 }
 
-function Get-AzConsumptionBudget {
+# Served through the Consumption API fake appended to this body (issue #411): the scope is the
+# ARM scope the script lists, logged as given. As seen live, the subscription's listing also
+# returns the prod group's budget; the group's listing returns only its own.
+function Get-StubBudget {
     [CmdletBinding()]
-    param([Parameter(ValueFromRemainingArguments)]$Rest)
-    Write-StubCall -Name 'Get-AzConsumptionBudget'
+    param([string]$Scope)
+    Write-StubCall -Name "Get-Budget:$Scope"
+    $isProdRg = $Scope -like '*/resourceGroups/prod-skycraft-swc-rg'
     switch ($env:SKYCRAFT_STUB_BUDGET) {
         'none' { return }
-        'fail' { Write-Error 'stub lookup failure: Get-AzConsumptionBudget'; return }
+        { $_ -eq 'fail' -or ($_ -eq 'rgfail' -and $isProdRg) } { Write-Error -ErrorId 'AuthorizationFailed' -Message "stub lookup failure: no Microsoft.Consumption/budgets/read on $Scope"; return }
     }
-    [pscustomobject]@{ Name = 'SkyCraft-Monthly-Budget'; Amount = 50; Unit = 'EUR' }
+    $prod = [pscustomobject]@{ Name = 'SkyCraft-Prod-Monthly'; Amount = 20; Unit = 'EUR'; Scope = ($Scope -replace '/resourceGroups/.*$', '') + '/resourceGroups/prod-skycraft-swc-rg' }
+    if ($isProdRg) { $prod }
+    else { [pscustomobject]@{ Name = 'SkyCraft-Monthly-Budget'; Amount = 50; Unit = 'EUR' }; $prod }
 }
 '@
 
@@ -259,11 +277,11 @@ function Get-AzConsumptionBudget {
             [string[]]$NoTags = @(),
             [string[]]$WrongTag = @(),
             [string[]]$MissingPolicy = @(),
-            [ValidateSet('bicep', 'portal', 'both')]
+            [ValidateSet('bicep', 'portal', 'scripted', 'both')]
             [string]$PolicySet = 'bicep',
             [string[]]$NoLock = @(),
             [hashtable]$LockKind = @{},
-            [ValidateSet('present', 'none', 'fail')]
+            [ValidateSet('present', 'none', 'fail', 'rgfail')]
             [string]$Budget = 'present',
             [string]$InheritTag = '',
             [switch]$InheritNoIdentity,
@@ -303,7 +321,7 @@ function Get-AzConsumptionBudget {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmBudgetStub)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs
@@ -318,12 +336,14 @@ function Get-AzConsumptionBudget {
     $script:NoContext     = Invoke-ValidatorScript -Stub $script:Stub -NoContext
     $script:NoBudget      = Invoke-ValidatorScript -Stub $script:Stub -Budget 'none'
     $script:BudgetFails   = Invoke-ValidatorScript -Stub $script:Stub -Budget 'fail'
+    $script:BudgetRgFails = Invoke-ValidatorScript -Stub $script:Stub -Budget 'rgfail'
     $script:LockReadOnly  = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'readonly' }
     $script:LockWrongName = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'wrongname' }
     $script:LockOnChild   = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'platform-skycraft-swc-rg' = 'child' }
     $script:LockOnSub     = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'subscription' }
     $script:LockReadFails = Invoke-ValidatorScript -Stub $script:Stub -LockKind @{ 'prod-skycraft-swc-rg' = 'fail' }
     $script:PortalMade    = Invoke-ValidatorScript -Stub $script:Stub -PolicySet 'portal'
+    $script:ScriptMade    = Invoke-ValidatorScript -Stub $script:Stub -PolicySet 'scripted'
     $script:TwoSets       = Invoke-ValidatorScript -Stub $script:Stub -PolicySet 'both'
     $script:InheritMissing    = Invoke-ValidatorScript -Stub $script:Stub -MissingPolicy 'Inherit-Project-Tag'
     $script:InheritWrongTag   = Invoke-ValidatorScript -Stub $script:Stub -InheritTag 'Environment'
@@ -331,9 +351,9 @@ function Get-AzConsumptionBudget {
 
     $script:AllRuns = @(
         $script:AllPass, $script:PolicyMissing, $script:LockMissing, $script:WrongTag,
-        $script:NoTags, $script:RgMissing, $script:LookupsFail, $script:NoContext, $script:NoBudget, $script:BudgetFails,
+        $script:NoTags, $script:RgMissing, $script:LookupsFail, $script:NoContext, $script:NoBudget, $script:BudgetFails, $script:BudgetRgFails,
         $script:LockReadOnly, $script:LockWrongName, $script:LockOnChild, $script:LockOnSub, $script:LockReadFails,
-        $script:PortalMade, $script:TwoSets, $script:InheritMissing, $script:InheritWrongTag, $script:InheritNoIdentity
+        $script:PortalMade, $script:ScriptMade, $script:TwoSets, $script:InheritMissing, $script:InheritWrongTag, $script:InheritNoIdentity
     )
 }
 
@@ -371,7 +391,7 @@ Describe 'Lab 1.3 Test-Lab.ps1 - failures are counted and set the exit code (#25
         $run.ExitCode | Should -Be 1 -Because "a missing policy assignment must not look like a passed validation; output was:`n$($run.Output)"
         # The assignment inherited from a management group under the same name, and the unrelated
         # one under a guide display name, are both in the listing and must not stand in for it.
-        $run.Output | Should -Match "Policy: Enforce-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Require a tag and its value on resources' on the subscription itself, named 'Enforce-Project-Tag' or 'Enforce Project Tag Value', step 1\.3\.8\."
+        $run.Output | Should -Match "Policy: Enforce-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Require a tag and its value on resources' on the subscription itself, named 'Enforce-Project-Tag' \(resource name or display name\), step 1\.3\.8\."
         $run.FailLines | Should -Be 1
         $run.Output | Should -Match 'Passed: 8\b'
         $run.Output | Should -Match 'Failed: 1\b'
@@ -445,17 +465,31 @@ Describe 'Lab 1.3 Test-Lab.ps1 - no one signed in is a failed validation' {
 
 Describe 'Lab 1.3 Test-Lab.ps1 - budgets are a manual check, not counted' {
 
-    It 'lists a budget it finds as [INFO], not as a counted [OK]' {
+    It 'lists both of the guide''s budgets as [INFO], not as a counted [OK]' {
         $run = $script:AllPass
-        $run.Output | Should -Match '\[INFO\] Budget found: SkyCraft-Monthly-Budget'
+        $run.Output | Should -Match '\[INFO\] Budget found on the subscription: SkyCraft-Monthly-Budget \(Amount: 50 EUR\)'
+        $run.Output | Should -Match '\[INFO\] Budget found on prod-skycraft-swc-rg: SkyCraft-Prod-Monthly \(Amount: 20 EUR\)'
+        ([regex]::Matches($run.Output, 'Budget found on [^\r\n]*SkyCraft-Prod-Monthly')).Count | Should -Be 1 -Because 'both listings return it; it is printed once, with the group it is set on'
         $run.Output | Should -Match 'manual check, not counted'
         $run.OkLines | Should -Be 9 -Because 'the nine counted checks are the only [OK] lines'
+    }
+
+    It 'reads the budgets once per scope, the subscription and the prod group, through the Consumption API (#411)' {
+        # The fake answers only api-version 2023-05-01, so a read at Az.Billing's 2018-01-31 would
+        # land in the "could not be read" branch and fail the test above. The group is read on its
+        # own as well, so a refused subscription read does not hide SkyCraft-Prod-Monthly.
+        @($script:AllPass.Calls | Where-Object { $_ -like 'Get-Budget:*' }) |
+            Should -Be @(
+                'Get-Budget:/subscriptions/00000000-0000-0000-0000-000000000000',
+                'Get-Budget:/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg'
+            )
     }
 
     It 'exits 0 with the same count when no budget exists' {
         $run = $script:NoBudget
         $run.ExitCode | Should -Be 0 -Because "a missing budget is not a failed check; output was:`n$($run.Output)"
-        $run.Output | Should -Match '\[INFO\] No budgets found'
+        $run.Output | Should -Match '\[INFO\] No budgets found on the subscription\.'
+        $run.Output | Should -Match '\[INFO\] No budgets found on prod-skycraft-swc-rg\.'
         $run.Output | Should -Match 'Passed: 9\b'
         $run.Output | Should -Match 'Failed: 0\b'
     }
@@ -463,9 +497,19 @@ Describe 'Lab 1.3 Test-Lab.ps1 - budgets are a manual check, not counted' {
     It 'reports a budget lookup that fails as unreadable, not as found or absent, and exits 0' {
         $run = $script:BudgetFails
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match '\[INFO\] Budgets could not be read: stub lookup failure'
+        $run.Output | Should -Match '\[INFO\] Budgets on the subscription could not be read: [^\r\n]*HTTP 403 \(AuthorizationFailed\): stub lookup failure' -Because 'the status and the service''s message say why (#411)'
+        $run.Output | Should -Match '\[INFO\] Budgets on prod-skycraft-swc-rg could not be read: [^\r\n]*HTTP 403 \(AuthorizationFailed\)'
         $run.Output | Should -Not -Match 'Budget found'
         $run.Output | Should -Not -Match 'No budgets found'
+        $run.Output | Should -Match 'Passed: 9\b'
+    }
+
+    It 'still lists both budgets from the subscription''s listing when only the prod group''s read fails' {
+        $run = $script:BudgetRgFails
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[INFO\] Budget found on the subscription: SkyCraft-Monthly-Budget'
+        $run.Output | Should -Match '\[INFO\] Budgets on prod-skycraft-swc-rg could not be read: [^\r\n]*HTTP 403 \(AuthorizationFailed\)'
+        $run.Output | Should -Match '\[INFO\] Budget found on prod-skycraft-swc-rg: SkyCraft-Prod-Monthly' -Because 'the subscription listing returns the group budget too'
         $run.Output | Should -Match 'Passed: 9\b'
     }
 }
@@ -554,6 +598,14 @@ Describe 'Lab 1.3 Test-Lab.ps1 - finds the policy assignments whichever path mad
         $run.Output | Should -Match 'Passed: 9\b'
     }
 
+    It 'passes the assignments the Bicep and script paths make since #406: fixed names, the guide''s display names' {
+        $run = $script:ScriptMade
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Policy: Enforce-Project-Tag : 'Enforce-Project-Tag' \(name Enforce-Project-Tag\) \[OK\]"
+        $run.Output | Should -Match "Policy: Inherit-Project-Tag : 'Inherit-Project-Tag' \(name Inherit-Project-Tag\) \[OK\]"
+        $run.Output | Should -Match 'Passed: 9\b'
+    }
+
     It 'lists the subscription''s assignments once, rather than reading each by name' {
         @($script:AllPass.Calls | Where-Object { $_ -eq 'Get-AzPolicyAssignment' }).Count | Should -Be 1
     }
@@ -583,7 +635,7 @@ Describe 'Lab 1.3 Test-Lab.ps1 - checks the Modify assignment Inherit-Project-Ta
     It 'fails when Inherit-Project-Tag is missing, and names its definition and step' {
         $run = $script:InheritMissing
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match "Policy: Inherit-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Inherit a tag from the resource group if missing' on the subscription itself, named 'Inherit-Project-Tag' or 'Inherit Project Tag from Resource Group', step 1\.3\.8\."
+        $run.Output | Should -Match "Policy: Inherit-Project-Tag \[FAIL\] Not found\. Expected an assignment of 'Inherit a tag from the resource group if missing' on the subscription itself, named 'Inherit-Project-Tag' \(resource name or display name\), step 1\.3\.8\."
         $run.FailLines | Should -Be 1
         $run.OkLines | Should -Be 8
         $run.Output | Should -Match 'Failed: 1\b'
