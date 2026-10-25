@@ -790,7 +790,7 @@ Azure Storage Explorer is a cross-platform desktop app for managing storage. The
 3. Click **devskycraftswcsa**
 4. Click **Storage browser**
 
-**Expected Result**: **Storage browser** lists **Blob containers**, **File shares**, **Queues** and **Tables**. They are empty until Lab 4.2 adds containers.
+**Expected Result**: **Storage browser** lists **Blob containers**, **Classic file shares**, **Queues** and **Tables**. They are empty until Lab 4.2 adds containers. If the view keeps loading, press F5.
 
 #### Option 2: Azure Storage Explorer (desktop)
 
