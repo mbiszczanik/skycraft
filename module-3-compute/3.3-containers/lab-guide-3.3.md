@@ -145,13 +145,13 @@ To allow simple authentication for our labs, we will enable the Admin user. The 
 
 1. Navigate to `devskycraftswcacr01` → **Overview**
 2. In the left menu, under **Settings** (expand it if it is collapsed), click **Access keys**.
-3. Check **Admin user**.
+3. Check **Admin user**, unless it is checked already.
 4. Note the login server (`devskycraftswcacr01.azurecr.io`), the username and the passwords shown on the page. The Portal reads them itself in the next steps; you need them only for the troubleshooting items below.
 
 **Expected Result**:
 
 - Admin user is checked.
-- The username is `devskycraftswcacr01`, and two passwords are shown with copy buttons.
+- The username is `devskycraftswcacr01`, and two passwords are shown masked, each with a **Show** button.
 
 ![Enable Admin User](./images/step-3.3.2.png)
 
@@ -181,7 +181,7 @@ az acr build --registry [your-acr-name] --image skycraft-auth:v1 --output json h
 > this course is Az PowerShell ([powershell-standards.md](../../docs/powershell-standards.md)
 > §5), because the az CLI and Az PowerShell can be signed in to different
 > subscriptions. `az acr build` stays because Az PowerShell has **no cmdlet that
-> builds an image from source** — there is no equivalent to swap in.
+> builds an image from source**: there is no equivalent to swap in.
 >
 > Before running it, confirm the az CLI is on the same subscription as your
 > Az PowerShell session:
@@ -496,7 +496,7 @@ New-AzContainerApp -ResourceGroupName $rg -Name 'dev-skycraft-swc-aca-world' -Lo
 The page starts at **Min replicas** 0 and **Max replicas** 10, with one scale rule the Portal added, `http-scaler` (HTTP, 10 concurrent requests). A minimum of 1 keeps one replica always ready, so the first request does not wait for a replica to start; it also means the app is billed all day (see What This Lab Leaves Behind).
 
 4. In the row of the scale rule `http-scaler`, click **Delete**.
-5. Click **Add scale rule**, and fill in:
+5. Click **+ Add**, and fill in:
 
 | Field                   | Value            |
 | ----------------------- | ---------------- |
