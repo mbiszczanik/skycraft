@@ -74,7 +74,7 @@ Before starting this lab:
 
 - [ ] Lab 4.1 completed: storage account `prodskycraftswcsa` (StorageV2, Standard_GRS) in `prod-skycraft-swc-rg`, in Sweden Central, with its four SkyCraft tags. Lab 4.1's Portal wizard (**Data protection** tab) and its Bicep turn file share soft delete on with 7 days; if the account was built another way, soft delete may be off, and Step 4.3.3 turns it on. `tools/lab-cycle-manifest.psd1` lists Lab 4.1 as this lab's only dependency; Lab 4.2 normally comes first (see the note below), but nothing in this lab uses its containers.
 - [ ] **Owner** or **Contributor** on `prod-skycraft-swc-rg`. The Portal and the Az PowerShell blocks reach the files with the account key, which these roles may read, so no data role is needed.
-- [ ] PowerShell 7+ with the `Az` module (Az.Accounts, Az.Resources, Az.Storage; `scripts/Test-Lab.ps1` also uses Az.RecoveryServices), signed in with `Connect-AzAccount`. The Azure CLI is optional (Option 3 blocks).
+- [ ] PowerShell 7+ with the `Az` module (Az.Accounts, Az.Resources, Az.Storage; `scripts/Test-Lab.ps1` also uses Az.RecoveryServices), signed in with `Connect-AzAccount`. Step 4.3.6's Az PowerShell block needs Az.Storage 9.0.0 or later: `Get-Module Az.Storage -ListAvailable` lists the versions you have. The Azure CLI is optional (Option 3 blocks).
 - [ ] For Step 4.3.7: a Windows computer that can reach port 445 on the internet (many home and corporate networks block it; the step says how to test).
 - [ ] For Step 4.3.8: a Linux machine with `cifs-utils`, such as Lab 3.2's `dev-skycraft-swc-auth-vm` (reached through Azure Bastion from Lab 2.2) or WSL2 on your computer.
 - [ ] Understanding of SMB protocol basics and file system concepts
@@ -549,6 +549,8 @@ Simulate a bad config push by modifying the test file, then restore the original
 
 ```powershell
 $saContext = (Get-AzStorageAccount -ResourceGroupName "prod-skycraft-swc-rg" -Name "prodskycraftswcsa").Context
+# Older Az.Storage cannot read a file through a snapshot's ShareClient
+if ((Get-Module Az.Storage).Version -lt [version]"9.0.0") { throw "Step 4.3.6 needs Az.Storage 9.0.0 or later; see the note below this block" }
 
 # Simulate the bad config push
 "server-name=BROKEN" | Out-File -FilePath ".\config.txt" -Encoding utf8
@@ -567,13 +569,15 @@ $snapshot = Get-AzStorageShare -Name "skycraft-config" -SnapshotTime ([DateTimeO
 
 # Copy the file from the snapshot over the live one, then read the live one back
 Get-AzStorageFileContent -ShareClient $snapshot.ShareClient -Path "common/config.txt" `
-  -Destination ".\config-snapshot.txt" -Force
+  -Destination ".\config-snapshot.txt" -Context $saContext -Force
 Set-AzStorageFileContent -ShareName "skycraft-config" -Source ".\config-snapshot.txt" -Path "common/config.txt" `
   -Context $saContext -Force
 Get-AzStorageFileContent -ShareName "skycraft-config" -Path "common/config.txt" -Destination ".\config-check.txt" `
   -Context $saContext -Force
 Get-Content ".\config-check.txt"
 ```
+
+**Note**: With Az.Storage 7.x, `Get-AzStorageFileContent -ShareClient` stops with "missing mandatory parameters: Share", and without `-Context` Az.Storage 9.0.0 stops with "Could not get the storage context". If the block throws because your Az.Storage is older, run `Install-Module Az.Storage -MinimumVersion 9.0.0 -Scope CurrentUser`, open a new PowerShell window, run `Import-Module Az.Storage -MinimumVersion 9.0.0` before any other Az.Storage command, and run the block again.
 
 > [!TIP]
 > In production, you can restore individual files without restoring the entire share. This is much faster than full-share restore for targeted rollbacks.
