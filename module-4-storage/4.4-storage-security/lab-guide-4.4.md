@@ -277,7 +277,7 @@ On every path the policy lives on the container `dev-assets`, which this step cr
 
 5. Click **Create**
 6. In the containers list, on the `dev-assets` row, click **...** (More), then **Access policy**. You do not need to open the container first.
-7. Under **Stored access policies**, click **+ Add policy**. The *Add policy* pane opens.
+7. Under **Stored access policies**, click **+ Add policy**. The *Add policy* pane opens. The page has a second **+ Add policy**, under **Immutable blob storage**: it creates a retention policy or legal hold that keeps the container's blobs from being changed or deleted. Do not use it.
 8. In the *Add policy* pane, fill in:
 
 | Field | Value |
@@ -333,7 +333,7 @@ You create a token that names the policy, use it, revoke it by deleting the poli
 | Allowed IP addresses | leave empty |
 | Allowed protocols | **HTTPS only** |
 
-   With a stored access policy selected, **Permissions**, **Start** and **Expiry** are greyed out: the token takes them from the policy. Without a policy the pane's own defaults apply - **Read** and an expiry about eight hours away - and such an ad hoc token can be revoked only by rotating the key that signed it (Section 3). **User delegation key** cannot use a stored access policy. An address in **Allowed IP addresses** would narrow the token further; the firewall of Step 4.4.2 already does that here.
+   With a stored access policy selected, **Permissions** and **Expiry** are greyed out: the token takes them from the policy. **Start** stays editable, because this policy sets no start time. Without a policy the pane's own defaults apply - **Read** and an expiry about eight hours away - and such an ad hoc token can be revoked only by rotating the key that signed it (Section 3). **User delegation key** cannot use a stored access policy. An address in **Allowed IP addresses** would narrow the token further; the firewall of Step 4.4.2 already does that here.
 
 4. Click **Generate SAS token and URL**
 5. Copy the URL that the pane shows under *Blob SAS URL*
