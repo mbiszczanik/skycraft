@@ -86,6 +86,9 @@ The Bicep also sets what the Portal's create wizard leaves without being asked: 
 
 The paths differ only in names and tags, which `Test-Lab.ps1` does not check (walked in the Portal on 2026-10-24: the slot cloned the runtime, the startup command, HTTPS only and TLS 1.2): the Portal names the autoscale setting `dev-skycraft-swc-asp-Autoscale-<number>`, the Bicep `dev-skycraft-swc-asp-autoscale`; `Test-Lab.ps1` and `Remove-LabResource.ps1` find it through the plan it scales. In the Portal, the slot and the autoscale setting get only the `Project` tag (from `Inherit-Project-Tag`); the Bicep gives them all four SkyCraft tags.
 
+> [!WARNING]
+> Pick one path per lab. Do not run `Deploy-Bicep.ps1` on a lab you built in the Portal: because the names differ, it adds a second autoscale setting to the plan, and Azure allows only one per resource. Run `Remove-LabResource.ps1` first, then deploy.
+
 ---
 
 ## 📖 Section 1: Understanding App Service Plans (15 minutes)
