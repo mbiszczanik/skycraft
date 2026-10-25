@@ -197,7 +197,7 @@ if ($subnet.ServiceEndpoints.Service -notcontains 'Microsoft.Storage') {
 
 1. In Azure Portal, search for **Storage accounts**
 2. Select `prodskycraftswcsa` → **Networking** (in the left menu, under **Security + networking**)
-3. Next to *Public network access* (it shows *Enabled from all networks*), click **Manage**. The *Public network access* page opens.
+3. Next to *Public network access* (it shows *Enabled from all networks*), click **Manage**. The *Public network access* page opens. The page has a second **Manage**, under *Resource settings: Virtual networks, IP addresses, and exceptions*; use the one next to *Public network access*.
 4. Under **Public network access**, leave **Enable** selected
 5. Under **Public network access scope**, select **Enabled from selected networks**
 6. Under **IPv4 Addresses**, click **+ Add your client IPv4 address**. Your address appears in the list.
@@ -213,7 +213,7 @@ if ($subnet.ServiceEndpoints.Service -notcontains 'Microsoft.Storage') {
    A subnet marked *(Service endpoint required)* has no `Microsoft.Storage` endpoint: go back to Step 4.4.1. Leave the other subnets out; each one you add is let through the firewall.
 
 9. In the *Add networks* pane, click **Add**
-10. Under **Exceptions**, leave **Allow Azure services on the trusted services list to access this storage account** checked
+10. Under **Exceptions**, leave **Allow trusted Microsoft services to access this resource** checked
 11. Click **Save** at the bottom of the page.
 
 The trusted services exception lets Azure services such as Azure Backup (Lab 5.2) reach the account; the Bicep path sets the same exception (`bypass: AzureServices`). The other two exceptions, read access to storage logging and to storage metrics from any network, stay unchecked: each would open the account's logs or metrics to every network. Leave **Resource instances** empty as well: an entry there lets one resource of another service through the firewall.
@@ -287,7 +287,7 @@ On every path the policy lives on the container `dev-assets`, which this step cr
 | Start time | leave empty |
 | Expiry time | Enter tomorrow's date and the current time, in your time zone |
 
-   Select no other permission: **Write**, **Delete**, **Add**, **Create** and the rest let anyone who holds a token change or delete the container's blobs. Keep the expiry short: every token that names the policy works until then, unless you delete the policy first. Type the date and time, or pick them; do not press Escape in a date field - it closes the whole pane and loses what you typed.
+   Select no other permission: **Write**, **Delete**, **Add**, **Create** and the rest let anyone who holds a token change or delete the container's blobs. Keep the expiry short: every token that names the policy works until then, unless you delete the policy first. Type the date and time, or pick them; do not press Escape in a date field - it closes the whole pane and loses what you typed. If the time goes back to 12:00:00 AM after you type it, leave it: the policy then expires at the start of tomorrow's date, which is enough for this lab.
 
 9. In the *Add policy* pane, click **OK**
 10. On the toolbar of the *Access policy* page, click **Save**
