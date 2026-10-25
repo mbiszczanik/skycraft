@@ -18,7 +18,9 @@
     Remove-AzRmStorageContainer), which the storage firewall does not apply to: the firewall revert
     above it takes up to a minute to apply, and the data plane would answer 403 until then. Only
     role assignments made on the account itself are removed, not ones inherited from a resource
-    group or the subscription.
+    group or the subscription. They are listed and removed through the Azure Resource Manager
+    role assignments API (tools/LabCommon.psm1), so the cleanup needs no Microsoft Graph sign-in
+    (issue #397).
 
     Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
     otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
@@ -52,6 +54,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+# The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
@@ -190,15 +193,19 @@ if ($sa) {
     if ($PSCmdlet.ShouldProcess($storageAccountName, "Remove 'Storage Blob Data Contributor' role assignments")) {
         Write-Host "Removing 'Storage Blob Data Contributor' role assignments..." -ForegroundColor Yellow
         $storageId = $sa.Id
+        # Through the ARM role assignments API (tools/LabCommon.psm1), not Get-AzRoleAssignment /
+        # Remove-AzRoleAssignment: those resolve every principal through Microsoft Graph and fail
+        # where the Az sign-in cannot get a Graph token (issue #397).
         $assignmentLookup = Invoke-LabLookup -Target "the role assignments on '$storageAccountName'" -Lookup {
-            Get-AzRoleAssignment -Scope $storageId -ErrorAction Stop
+            Get-LabArmRoleAssignment -Scope $storageId
         }
         if (-not $assignmentLookup.Failed) {
             # Only the assignments made on the account itself: the listing also returns ones
             # inherited from the resource group or the subscription, which this lab did not create
             # and which cannot be removed at this scope.
+            $blobContributor = Get-LabBuiltInRoleId -Name 'Storage Blob Data Contributor'
             $assignments = @($assignmentLookup.Value |
-                Where-Object { $_.RoleDefinitionName -eq 'Storage Blob Data Contributor' -and $_.Scope -eq $storageId })
+                Where-Object { $_.RoleDefinitionId -eq $blobContributor -and $_.Scope -eq $storageId })
 
             if ($assignments.Count -eq 0) {
                 Write-Host "  -> [INFO] No 'Storage Blob Data Contributor' assignments found." -ForegroundColor Gray
@@ -209,9 +216,7 @@ if ($sa) {
             foreach ($assignment in $assignments) {
                 $position++
                 try {
-                    Remove-AzRoleAssignment -ObjectId $assignment.ObjectId `
-                        -RoleDefinitionName 'Storage Blob Data Contributor' `
-                        -Scope $storageId -ErrorAction Stop
+                    Remove-LabArmRoleAssignment -Id $assignment.RoleAssignmentId
                     Write-Host "  -> Removed assignment $position of $($assignments.Count)." -ForegroundColor Green
                 }
                 catch {

@@ -92,7 +92,7 @@ gitleaks detect --source . --redact
 
 `Deploy-Bicep.ps1 -WhatIf`, `Test-Lab.ps1` and `Remove-LabResource.ps1` all need an Az PowerShell session (`Connect-AzAccount`; Lab 1.1 uses `Connect-MgGraph` instead) plus, in most cases, resources that a previous lab created. They are deliberately **not** executed by the harness — a pre-push gate must not depend on the state of a subscription. Section 4 lists the commands to run by hand.
 
-What CI *does* enforce is that a PR touching lab content **says** whether they were run: the `Live Verification Declared` check ([`.github/workflows/pr-gate.yml`](../.github/workflows/pr-gate.yml), [ADR-0006](adr/0006-pr-live-verification-gate.md)) requires a `Live-verified: <what was run>` or `Live-verification: deferred -> #<issue>` line in the PR body, and a deferred PR also needs the maintainer's `live-deferral-approved` label before it can merge. Run the same check locally on an open PR with `.\tools\Test-PrLiveVerification.ps1 -Body (gh pr view <n> --json body -q .body) -ChangedFile (gh pr diff <n> --name-only) -Label (gh pr view <n> --json labels -q '.labels[].name')`.
+What CI *does* enforce is that a PR touching lab content **says** whether they were run: the `Live Verification Declared` check ([`.github/workflows/pr-gate.yml`](../.github/workflows/pr-gate.yml), [ADR-0006](adr/0006-pr-live-verification-gate.md)) requires a `Live-verified: <what ran, where, date, exit codes>` or `Live-verification: deferred -> #<issue>` line in the PR body, and a deferred PR also needs a `Live-verification-blocker: <why the live check cannot run in the test environment>` line and the maintainer's `live-deferral-approved` label before it can merge. Run the same check locally on an open PR with `.\tools\Test-PrLiveVerification.ps1 -Body (gh pr view <n> --json body -q .body) -ChangedFile (gh pr diff <n> --name-only) -Label (gh pr view <n> --json labels -q '.labels[].name')`.
 
 One qualification. The `Pester` check runs the lab-local suites in-process on your box, and a suite that exercises a lab script in a child `pwsh` (Lab 5.2's `Remove-LabResource.Tests.ps1`) does so with your installed Az and your current `Get-AzContext` in reach. Those suites must go through `tests/Support/LabScriptStub.psm1`, which refuses to run the script unless every Az command it calls resolves to the stub — see [PowerShell standards §6](powershell-standards.md#suites-that-run-a-lab-script-in-a-child-process) and issue #112. A refusal shows up as a failed test with exit code 99 in its message, never as a live teardown.
 
@@ -133,7 +133,8 @@ All commands are written to be run from the repository root.
 .\module-1-identities-governance\1.2-rbac\scripts\Deploy-Bicep.ps1 -WhatIf
 # role-assignments.bicep has no parameter file: its four principal IDs are Entra object IDs
 # that only exist once Lab 1.1 has run. -IncludeRoleAssignments resolves them from the
-# directory and previews that template too (the three resource groups must already exist).
+# directory and previews that template too, for the assignments that do not exist yet (the
+# three resource groups must already exist).
 .\module-1-identities-governance\1.2-rbac\scripts\Deploy-Bicep.ps1 -IncludeRoleAssignments -WhatIf
 .\module-1-identities-governance\1.2-rbac\scripts\Test-Lab.ps1
 .\module-1-identities-governance\1.2-rbac\scripts\Remove-LabResource.ps1 -WhatIf

@@ -10,7 +10,9 @@
     against a generated stub of the Az commands it calls, and assert the observable contract:
 
       1. Everything the lab changes is reverted or removed when it is present, and the run exits
-         0. Only the role assignments made on the account itself are removed.
+         0. Only the role assignments made on the account itself are removed. They are listed
+         and removed through the ARM role assignments API (issue #397), whose fake the stub
+         carries; the Az role cmdlets, which call Microsoft Graph, are not stubbed at all.
       2. An object that is absent - an empty listing, or an account the getter reports not found
          - is not a failure: the run exits 0.
       3. A lookup that fails with an error is an [ERROR], counted, and the run exits 1 without
@@ -60,8 +62,7 @@ BeforeAll {
         'Remove-AzRmStorageContainer'
         'Get-AzStorageContainer'
         'Remove-AzStorageContainer'
-        'Get-AzRoleAssignment'
-        'Remove-AzRoleAssignment'
+        'Invoke-AzRestMethod'
     )
 
     # Every command the script calls, recording its own invocation. By default the account holds
@@ -75,7 +76,7 @@ BeforeAll {
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled)
     #   SKYCRAFT_STUB_FAIL    '<command>:<name>,...' makes one change throw
     # A lookup is named after its command: 'Get-AzStorageAccount', 'Get-AzRmStorageContainer',
-    # 'Get-AzRoleAssignment'. A container removal is logged as 'Remove-AzRmStorageContainer:<name>'
+    # 'Get-RoleAssignment' (the role assignment listing, served by the ARM fake). A container removal is logged as 'Remove-AzRmStorageContainer:<name>'
     # by both container stubs.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
@@ -177,22 +178,25 @@ function Remove-AzStorageContainer {
     Invoke-StubRemoval -Command 'Remove-AzRmStorageContainer' -Name $Name
 }
 
-function Get-AzRoleAssignment {
+# Served through the ARM role assignments API fake appended to this body (issue #397). Each
+# assignment is named after its principal here, so the removal log reads by principal.
+function Get-StubRoleAssignment {
     [CmdletBinding()]
-    param([string]$Scope)
-    if (Invoke-StubLookup -Name 'Get-AzRoleAssignment') { return }
+    param([string]$Scope, [string]$PrincipalId)
+    if (Invoke-StubLookup -Name 'Get-RoleAssignment') { return }
     $rg = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg'
-    [pscustomobject]@{ ObjectId = '33333333-3333-3333-3333-333333333333'; DisplayName = 'inherited'; RoleDefinitionName = 'Storage Blob Data Contributor'; Scope = $rg }
-    [pscustomobject]@{ ObjectId = '44444444-4444-4444-4444-444444444444'; DisplayName = 'reader'; RoleDefinitionName = 'Reader'; Scope = $Scope }
+    $blobContributor = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+    [pscustomobject]@{ Name = '33333333-3333-3333-3333-333333333333'; PrincipalId = '33333333-3333-3333-3333-333333333333'; RoleDefinitionId = $blobContributor; Scope = $rg }
+    [pscustomobject]@{ Name = '44444444-4444-4444-4444-444444444444'; PrincipalId = '44444444-4444-4444-4444-444444444444'; RoleDefinitionId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; Scope = $Scope }
     if (Test-StubBare) { return }
-    [pscustomobject]@{ ObjectId = '11111111-1111-1111-1111-111111111111'; DisplayName = 'first'; RoleDefinitionName = 'Storage Blob Data Contributor'; Scope = $Scope }
-    [pscustomobject]@{ ObjectId = '22222222-2222-2222-2222-222222222222'; DisplayName = 'second'; RoleDefinitionName = 'Storage Blob Data Contributor'; Scope = $Scope }
+    [pscustomobject]@{ Name = '11111111-1111-1111-1111-111111111111'; PrincipalId = '11111111-1111-1111-1111-111111111111'; RoleDefinitionId = $blobContributor; Scope = $Scope }
+    [pscustomobject]@{ Name = '22222222-2222-2222-2222-222222222222'; PrincipalId = '22222222-2222-2222-2222-222222222222'; RoleDefinitionId = $blobContributor; Scope = $Scope; PrincipalType = 'Group' }
 }
 
-function Remove-AzRoleAssignment {
+function Remove-StubRoleAssignment {
     [CmdletBinding()]
-    param([string]$ObjectId, [string]$RoleDefinitionName, [string]$Scope)
-    Invoke-StubRemoval -Command 'Remove-AzRoleAssignment' -Name $ObjectId
+    param([string]$Id, [string]$Scope, [string]$Name)
+    Invoke-StubRemoval -Command 'Remove-RoleAssignment' -Name $Name
 }
 '@
 
@@ -229,7 +233,7 @@ function Remove-AzRoleAssignment {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmRoleAssignmentStub)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # A change the script makes: a removal or an update.
@@ -244,11 +248,11 @@ function Remove-AzRoleAssignment {
     $script:AccountDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzStorageAccount=denied'
     $script:LookupsFail   = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
         'Get-AzRmStorageContainer=denied'
-        'Get-AzRoleAssignment=throttled'
+        'Get-RoleAssignment=throttled'
     )
     $script:StepsFail = Invoke-CleanupScript -Stub $script:Stub -Fail @(
         'Update-AzStorageAccountNetworkRuleSet:prodskycraftswcsa:Allow'
-        'Remove-AzRoleAssignment:11111111-1111-1111-1111-111111111111'
+        'Remove-RoleAssignment:11111111-1111-1111-1111-111111111111'
     )
 
     $script:AllRuns = @(
@@ -285,8 +289,8 @@ Describe 'Lab 4.4 Remove-LabResource.ps1 - reverts what the lab changes' {
         $calls | Should -Contain 'Update-AzStorageAccountNetworkRuleSet:prodskycraftswcsa:Allow'
         $calls | Should -Contain 'Remove-AzRmStorageContainer:dev-assets'
         $calls | Should -Not -Contain 'Remove-AzRmStorageContainer:unrelated'
-        $calls | Should -Contain 'Remove-AzRoleAssignment:11111111-1111-1111-1111-111111111111'
-        $calls | Should -Contain 'Remove-AzRoleAssignment:22222222-2222-2222-2222-222222222222'
+        $calls | Should -Contain 'Remove-RoleAssignment:11111111-1111-1111-1111-111111111111'
+        $calls | Should -Contain 'Remove-RoleAssignment:22222222-2222-2222-2222-222222222222'
     }
 
     It 'lists and removes the container through the control plane, which the firewall revert does not wait for' {
@@ -296,8 +300,8 @@ Describe 'Lab 4.4 Remove-LabResource.ps1 - reverts what the lab changes' {
     }
 
     It 'leaves an inherited assignment and another role alone' {
-        $script:Clean.Calls | Should -Not -Contain 'Remove-AzRoleAssignment:33333333-3333-3333-3333-333333333333'
-        $script:Clean.Calls | Should -Not -Contain 'Remove-AzRoleAssignment:44444444-4444-4444-4444-444444444444'
+        $script:Clean.Calls | Should -Not -Contain 'Remove-RoleAssignment:33333333-3333-3333-3333-333333333333'
+        $script:Clean.Calls | Should -Not -Contain 'Remove-RoleAssignment:44444444-4444-4444-4444-444444444444'
     }
 }
 
@@ -366,7 +370,7 @@ Describe 'Lab 4.4 Remove-LabResource.ps1 - a failed step is counted' {
 
     It 'keeps going after a failed step' {
         $script:StepsFail.Calls | Should -Contain 'Remove-AzRmStorageContainer:dev-assets'
-        $script:StepsFail.Calls | Should -Contain 'Remove-AzRoleAssignment:22222222-2222-2222-2222-222222222222'
+        $script:StepsFail.Calls | Should -Contain 'Remove-RoleAssignment:22222222-2222-2222-2222-222222222222'
     }
 }
 
