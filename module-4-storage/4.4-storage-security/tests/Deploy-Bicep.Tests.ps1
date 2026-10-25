@@ -37,7 +37,7 @@ BeforeAll {
     # Stubs of the Az commands the two functions call, so Mock has something to replace on a
     # machine without Az (the CI runner).
     function Get-AzAccessToken { param([string]$ResourceUrl) $null = $ResourceUrl }
-    function Get-AzRoleAssignment { param([string]$Scope) $null = $Scope }
+    function Get-LabArmRoleAssignment { param([string]$Scope, [string]$PrincipalId) $null = $Scope, $PrincipalId }
 
     # The script's own $dataRoleName and its functions, as the script defines them.
     $roleAssignment = $script:Ast.Find({ param($n)
@@ -98,7 +98,7 @@ Describe 'Lab 4.4 Deploy-Bicep.ps1 - the signed-in object id comes from the ARM 
 Describe 'Lab 4.4 Deploy-Bicep.ps1 - an assignment that exists already is not sent again' {
 
     It 'finds the role assigned to the principal on the account itself' {
-        Mock Get-AzRoleAssignment {
+        Mock Get-LabArmRoleAssignment {
             [pscustomobject]@{ ObjectId = $script:Oid; RoleDefinitionName = 'Owner'; Scope = '/subscriptions/00000000-0000-0000-0000-000000000000' }
             [pscustomobject]@{ ObjectId = $script:Oid; RoleDefinitionName = 'Storage Blob Data Contributor'; Scope = $script:Scope }
         }
@@ -110,12 +110,12 @@ Describe 'Lab 4.4 Deploy-Bicep.ps1 - an assignment that exists already is not se
         @{ case = 'the role held by another principal'; objectId = '99999999-2222-3333-4444-555555555555'; role = 'Storage Blob Data Contributor'; assignedScope = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/prodskycraftswcsa' }
         @{ case = 'another role on the account'; objectId = '11111111-2222-3333-4444-555555555555'; role = 'Storage Blob Data Reader'; assignedScope = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/prodskycraftswcsa' }
     ) {
-        Mock Get-AzRoleAssignment { [pscustomobject]@{ ObjectId = $objectId; RoleDefinitionName = $role; Scope = $assignedScope } }
+        Mock Get-LabArmRoleAssignment { [pscustomobject]@{ ObjectId = $objectId; RoleDefinitionName = $role; Scope = $assignedScope } }
         Test-LabDataRoleAssigned -Scope $script:Scope -PrincipalId $script:Oid | Should -BeFalse
     }
 
     It 'answers no, with a warning, when the lookup fails, so the deployment tries the assignment' {
-        Mock Get-AzRoleAssignment { throw 'stub: lookup failed' }
+        Mock Get-LabArmRoleAssignment { throw 'stub: lookup failed' }
         Mock Write-Host { }
         Test-LabDataRoleAssigned -Scope $script:Scope -PrincipalId $script:Oid | Should -BeFalse
         Should -Invoke Write-Host -ParameterFilter { "$Object" -match '\[WARNING\] Could not read the role assignments' }
@@ -130,24 +130,24 @@ Describe 'Lab 4.4 Deploy-Bicep.ps1 - which principal the template is given' {
 
     It 'gives none, and reads nothing, with -SkipDataRoleAssignment (an identity with Contributor only)' {
         Mock Get-AzAccessToken { throw 'stub: must not be called' }
-        Mock Get-AzRoleAssignment { throw 'stub: must not be called' }
+        Mock Get-LabArmRoleAssignment { throw 'stub: must not be called' }
         Resolve-LabDataPrincipalId -Scope $script:Scope -Skip | Should -BeExactly ''
         Resolve-LabDataPrincipalId -Scope $script:Scope -PrincipalId $script:Oid -Skip | Should -BeExactly ''
         Should -Invoke Get-AzAccessToken -Times 0
-        Should -Invoke Get-AzRoleAssignment -Times 0
+        Should -Invoke Get-LabArmRoleAssignment -Times 0
         Should -Invoke Write-Host -ParameterFilter { "$Object" -match '-SkipDataRoleAssignment: the template assigns no role' }
     }
 
     It 'gives the signed-in identity when it does not hold the role, and says what that needs' {
         $jwt = Get-TestJwt -Claims @{ oid = $script:Oid }
         Mock Get-AzAccessToken { [pscustomobject]@{ Token = $jwt } }
-        Mock Get-AzRoleAssignment { }
+        Mock Get-LabArmRoleAssignment { }
         Resolve-LabDataPrincipalId -Scope $script:Scope | Should -BeExactly $script:Oid
         Should -Invoke Write-Host -ParameterFilter { "$Object" -match 'Owner or User Access Administrator' }
     }
 
     It 'gives none when the identity holds the role on the account already' {
-        Mock Get-AzRoleAssignment { [pscustomobject]@{ ObjectId = $script:Oid; RoleDefinitionName = 'Storage Blob Data Contributor'; Scope = $script:Scope } }
+        Mock Get-LabArmRoleAssignment { [pscustomobject]@{ ObjectId = $script:Oid; RoleDefinitionName = 'Storage Blob Data Contributor'; Scope = $script:Scope } }
         Resolve-LabDataPrincipalId -Scope $script:Scope -PrincipalId $script:Oid | Should -BeExactly ''
     }
 

@@ -121,8 +121,9 @@ function Test-LabDataRoleAssigned {
         [string]$PrincipalId
     )
 
+    # The ARM API, not Get-AzRoleAssignment, which needs a Microsoft Graph token (#397).
     try {
-        $existing = @(Get-AzRoleAssignment -Scope $Scope -ErrorAction Stop | Where-Object {
+        $existing = @(Get-LabArmRoleAssignment -Scope $Scope -PrincipalId $PrincipalId | Where-Object {
                 $_.ObjectId -eq $PrincipalId -and $_.RoleDefinitionName -eq $dataRoleName -and $_.Scope -eq $Scope
             })
         return $existing.Count -gt 0

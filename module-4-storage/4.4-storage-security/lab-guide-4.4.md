@@ -66,7 +66,7 @@ Before starting this lab:
       for a subnet without it.
 - [ ] Completed **Lab 4.1: Storage Accounts** - `prodskycraftswcsa` in `prod-skycraft-swc-rg`
 - [ ] Account with **User Access Administrator** or **Owner** role on the subscription (Step 4.4.7 assigns a role, and so does `scripts/Deploy-Bicep.ps1` unless you pass `-SkipDataRoleAssignment`)
-- [ ] PowerShell 7+ and the `Az` module (Az.Accounts, Az.Resources, Az.Storage, Az.Network), run on **your own computer**: after Step 4.4.2 the storage account accepts data requests only from your computer's public IP address, so the data-plane commands of Sections 2 and 4 fail from Azure Cloud Shell, which uses another address.
+- [ ] PowerShell 7+ and the `Az` module (Az.Accounts, Az.Resources, Az.Storage, Az.Network), run on **your own computer**: after Step 4.4.2 the storage account accepts data requests only from your computer's public IP address, so the data-plane commands of Sections 2 and 4 fail from Azure Cloud Shell, which uses another address. That holds with a storage account or without one: a Cloud Shell session without a storage account cannot run those commands either.
 - [ ] `dev` or `prod` environment. `platform` is rejected by both the template and the
       scripts: the hub VNet has only `AzureBastionSubnet` and `GatewaySubnet`, so it has no
       workload subnet to allow through the storage firewall.
@@ -486,6 +486,10 @@ If you ran the optional Azure CLI commands of Lab 4.2 (Step 4.2.11), you hold th
 **With Az PowerShell** (instead of items 1-8). It assigns the role only if you do not hold it on the account already (Lab 4.2, Step 4.2.11): a second assignment fails with `RoleAssignmentExists`.
 
 ```powershell
+# Get-AzADUser, Get-AzRoleAssignment and New-AzRoleAssignment need a Microsoft Graph token. If one
+# fails with "Authentication failed against resource MicrosoftGraphEndpointResourceId", run
+# Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId and run it again
+# (TROUBLESHOOTING.md in the repository root).
 $scope    = (Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa').Id
 $objectId = (Get-AzADUser -SignedIn).Id
 $existing = Get-AzRoleAssignment -ObjectId $objectId -RoleDefinitionName 'Storage Blob Data Contributor' -Scope $scope |

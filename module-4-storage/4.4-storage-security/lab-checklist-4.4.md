@@ -93,6 +93,9 @@ Get-AzStorageAccountKey -ResourceGroupName prod-skycraft-swc-rg -Name prodskycra
 ### 4. Verify the Role Assignment
 
 ```powershell
+# Get-AzRoleAssignment needs a Microsoft Graph token. If it fails with "Authentication failed
+# against resource MicrosoftGraphEndpointResourceId", run Connect-AzAccount -AuthScope
+# MicrosoftGraphEndpointResourceId and run it again (TROUBLESHOOTING.md in the repository root).
 $account = Get-AzStorageAccount -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa
 Get-AzRoleAssignment -Scope $account.Id |
     Where-Object { $_.RoleDefinitionName -eq 'Storage Blob Data Contributor' -and $_.Scope -eq $account.Id } |

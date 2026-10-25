@@ -52,7 +52,7 @@ BeforeAll {
         'Get-AzVirtualNetwork'
         'Get-AzRmStorageContainer'
         'Get-AzStorageContainerStoredAccessPolicy'
-        'Get-AzRoleAssignment'
+        'Invoke-AzRestMethod'
     )
 
     # WorldSubnet with its service endpoint is always in place. The rest varies:
@@ -142,21 +142,25 @@ function Get-AzStorageContainerStoredAccessPolicy {
     }
 }
 
-function Get-AzRoleAssignment {
+# Served through the ARM role assignments API fake appended to this body (issue #397).
+function Get-StubRoleAssignment {
     [CmdletBinding()]
-    param([string]$Scope, [Parameter(ValueFromRemainingArguments)]$Rest)
+    param([string]$Scope, [string]$PrincipalId)
+    $blobContributor = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+    $owner           = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635'
+    $learner         = '11111111-1111-1111-1111-111111111111'
     switch ($env:SKYCRAFT_STUB_ROLE) {
-        'fail'      { Write-Error 'stub lookup failure: Get-AzRoleAssignment'; return }
+        'fail'      { Write-Error -ErrorId 'AuthorizationFailed' -Message 'stub lookup failure: role assignments'; return }
         'none'      { return }
         'inherited' {
-            [pscustomobject]@{ RoleDefinitionName = 'Storage Blob Data Contributor'; ObjectType = 'User'; DisplayName = 'Learner'
-                               ObjectId = '11111111-1111-1111-1111-111111111111'; Scope = ($Scope -replace '/providers/Microsoft\.Storage/.*$', '') }
+            [pscustomobject]@{ Name = '33333333-3333-3333-3333-333333333333'; PrincipalId = $learner; PrincipalType = 'User'
+                               RoleDefinitionId = $blobContributor; Scope = ($Scope -replace '/providers/Microsoft\.Storage/.*$', '') }
         }
         default {
-            [pscustomobject]@{ RoleDefinitionName = 'Owner'; ObjectType = 'User'; DisplayName = 'Learner'
-                               ObjectId = '11111111-1111-1111-1111-111111111111'; Scope = '/subscriptions/00000000-0000-0000-0000-000000000000' }
-            [pscustomobject]@{ RoleDefinitionName = 'Storage Blob Data Contributor'; ObjectType = 'User'; DisplayName = 'Learner'
-                               ObjectId = '11111111-1111-1111-1111-111111111111'; Scope = $Scope }
+            [pscustomobject]@{ Name = '44444444-4444-4444-4444-444444444444'; PrincipalId = $learner; PrincipalType = 'User'
+                               RoleDefinitionId = $owner; Scope = '/subscriptions/00000000-0000-0000-0000-000000000000' }
+            [pscustomobject]@{ Name = '55555555-5555-5555-5555-555555555555'; PrincipalId = $learner; PrincipalType = 'User'
+                               RoleDefinitionId = $blobContributor; Scope = $Scope }
         }
     }
 }
@@ -188,7 +192,7 @@ function Get-AzRoleAssignment {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmStub -Api RoleAssignment)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     $script:WithPolicy       = Invoke-ValidatorScript -Stub $script:Stub -Containers 'policy'
@@ -318,7 +322,7 @@ Describe 'Lab 4.4 Test-Lab.ps1 - Storage Blob Data Contributor on the account (S
     It 'counts a role assignment lookup that fails, says why, and still reaches the summary' {
         $run = $script:RoleFails
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match "\[FAIL\] Could not read the role assignments of 'prodskycraftswcsa': stub lookup failure: Get-AzRoleAssignment"
+        $run.Output | Should -Match "\[FAIL\] Could not read the role assignments of 'prodskycraftswcsa': .*stub lookup failure: role assignments"
         $run.Output | Should -Match 'Validation Complete\. Failures: 1'
     }
 }

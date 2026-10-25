@@ -207,8 +207,9 @@ if ($sa) {
 $roleName = 'Storage Blob Data Contributor'
 if ($sa) {
     Write-Host "Checking '$roleName' role assignments on '$storageAccountName'..." -ForegroundColor Yellow
+    # The ARM API, not Get-AzRoleAssignment, which needs a Microsoft Graph token (#397).
     try {
-        $assignments = @(Get-AzRoleAssignment -Scope $sa.Id -ErrorAction Stop |
+        $assignments = @(Get-LabArmRoleAssignment -Scope $sa.Id |
             Where-Object { $_.RoleDefinitionName -eq $roleName -and $_.Scope -eq $sa.Id })
         if ($assignments.Count -gt 0) {
             # Who holds it is not printed: a display name is a real person's name, and an object id
