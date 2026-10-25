@@ -84,7 +84,7 @@ Steps without an Az PowerShell block in this guide: 3.4.1, 3.4.2, 3.4.5, 3.4.8-3
 
 The Bicep also sets what the Portal's create wizard leaves without being asked: **Always on** on, **Session affinity** and **Session affinity proxy** off, and basic authentication for FTP and SCM publishing off. It also sets the VNet integration with **Outbound internet traffic** checked, which the Portal path adds in Step 3.4.10.
 
-The paths are meant to differ only in names and tags, which `Test-Lab.ps1` does not check (the slot's settings on the Portal path are still to be confirmed in a live walk): the Portal names the autoscale setting `dev-skycraft-swc-asp-Autoscale-<number>`, the Bicep `dev-skycraft-swc-asp-autoscale`; `Test-Lab.ps1` and `Remove-LabResource.ps1` find it through the plan it scales. In the Portal, the slot and the autoscale setting get only the `Project` tag (from `Inherit-Project-Tag`); the Bicep gives them all four SkyCraft tags.
+The paths differ only in names and tags, which `Test-Lab.ps1` does not check (walked in the Portal on 2026-10-24: the slot cloned the runtime, the startup command, HTTPS only and TLS 1.2): the Portal names the autoscale setting `dev-skycraft-swc-asp-Autoscale-<number>`, the Bicep `dev-skycraft-swc-asp-autoscale`; `Test-Lab.ps1` and `Remove-LabResource.ps1` find it through the plan it scales. In the Portal, the slot and the autoscale setting get only the `Project` tag (from `Inherit-Project-Tag`); the Bicep gives them all four SkyCraft tags.
 
 ---
 
@@ -163,19 +163,19 @@ For this lab, we will use **Premium V4 P0V4**. The lab needs **deployment slots*
 | Subscription                   | [Your Subscription]                                |
 | Resource Group                 | `dev-skycraft-swc-rg`                              |
 | Name                           | `dev-skycraft-swc-app01`                           |
-| Secure unique default hostname | **On**                                             |
 | Publish                        | **Code**                                           |
 | Runtime stack                  | **Node 22 LTS**                                    |
 | Operating System               | **Linux**                                          |
 | Region                         | **Sweden Central**                                 |
 | Linux Plan                     | `dev-skycraft-swc-asp`                             |
 
-**Note**: Set **Region** before **Linux Plan**: the plan list shows only plans in the selected region. The form starts at West US 3 with a new plan already filled in, named `ASP-<resource group without hyphens>-<4 characters>` on Premium V3 P0V3. Select `dev-skycraft-swc-asp` from Step 3.4.1, not the proposed new plan: left as it is, the form creates a second plan that bills on its own. **Pricing plan** then shows Premium V4 P0V4.
+**Note**: Set **Region** before **Linux Plan**: the plan list shows only plans in the selected region. The form starts at West US 3 with a new plan already filled in, named `ASP-<resource group without hyphens>-<4 characters>` on Premium V3 P0V3. Once **Region** is Sweden Central, the form selects `dev-skycraft-swc-asp (P0v4)` from Step 3.4.1 (seen 2026-10-24). Check that it did: a proposed new plan left in place bills on its own. **Pricing plan** then shows Premium V4 P0V4.
+
+**Note**: The **Basics** tab has no **Secure unique default hostname** control any more: the form gives every new app a random part in its address, shown under **Name** as you type (`-<16 characters>.swedencentral-01.azurewebsites.net` once the region is set). The **Review + create** page lists it as **Secure unique default hostname: Enabled**. Nobody else can claim that address after you delete the app.
+
+**Note**: Leave the **Database** and **Deployment** tabs as they are: no database, **Continuous deployment** Disable, **Basic authentication** Disable.
 
 **Note**: **Node 20 LTS** is no longer offered; the list has Node 22 LTS, Node 24 LTS and a preview. This lab uses **Node 22 LTS**. A Node runtime does not serve a static `index.html` on its own; Step 3.4.4 sets the startup command that does.
-
-> [!WARNING]
-> **Secure unique default hostname** can be set only when the app is created. Leave it **On**: the app's address gets a random part (`dev-skycraft-swc-app01-<16 characters>.swedencentral-01.azurewebsites.net`) that nobody else can claim after you delete the app. To change it later, you would have to delete the app, wait a minute, and create it again.
 
 **Note**: The form checks the **Name** as you type. If it says the name is not available, add a suffix such as your initials, and use that name wherever this guide says `dev-skycraft-swc-app01`; pass it to `scripts/Test-Lab.ps1` and `scripts/Remove-LabResource.ps1` as `-AppName`.
 
@@ -264,17 +264,19 @@ First give the app the command that serves the dashboard, then deploy it. A Node
 1. In Azure Portal, search for **App Services**
 2. Click **dev-skycraft-swc-app01**
 3. Under **Settings**, select **Configuration**
-4. Click the **General settings** tab
-5. **Startup Command**: `pm2 serve /home/site/wwwroot --no-daemon`
-6. Click **Save**, then **Continue** to confirm that the app restarts
+4. Click the **Stack settings** tab
+5. **Startup command**: `pm2 serve /home/site/wwwroot --no-daemon`
+6. Click **Apply** at the bottom
+
+**Expected Result**: A notification says "Successfully updated the stack settings", and the app restarts. No confirmation is asked (seen 2026-10-24).
 
 > [!NOTE]
-> If the menu item reads **Configuration (preview)**, the startup command is on its **Stack settings** tab, and the button is **Apply**.
+> If the page has no **Stack settings** tab (the older layout), the startup command is on the **General settings** tab: enter it there, click **Save**, then **Continue** to confirm that the app restarts.
 
 Azure App Service supports simple deployment by uploading a ZIP file.
 
 7. Compress `index.html` into a zip file named `dashboard.zip`.
-8. Deploy the zip with Az PowerShell. Run this from the folder that holds `dashboard.zip` — either your local PowerShell 7 session or Cloud Shell (PowerShell).
+8. Deploy the zip with Az PowerShell. Run this from the folder that holds `dashboard.zip`: either your local PowerShell 7 session or Cloud Shell (PowerShell).
 
 **If using Cloud Shell**:
 
@@ -302,11 +304,12 @@ Deployment slots allow you to deploy different versions of your app (e.g., "Stag
 1. In Azure Portal, search for **App Services**
 2. Click **dev-skycraft-swc-app01**
 3. Under **Deployment**, select **Deployment slots**
-4. Click **Add**
+4. Click **+ Add** in the toolbar (the empty page says "No slots have been added")
 5. **Name**: `staging`
-6. **Clone settings from**: `dev-skycraft-swc-app01`
+6. **Clone settings from**: `dev-skycraft-swc-app01` (the list starts at **Do not clone settings**)
 7. Click **Add**
-8. Click **Close**
+
+**Note**: The pane closes by itself once you click **Add**; the slot appears in the list within about a minute (seen 2026-10-24). If the pane stays open, click **Close** when it reports the slot as created.
 
 **Note**: Clone the settings from the app, so the slot gets the runtime (Node 22 LTS) and the startup command too. A slot starts without content, whichever you choose.
 
@@ -318,11 +321,11 @@ Deployment slots allow you to deploy different versions of your app (e.g., "Stag
 
 1. In the **Deployment slots** list of Step 3.4.5, click **dev-skycraft-swc-app01-staging**
 2. Under **Settings**, select **Configuration**
-3. Click the **General settings** tab
+3. Click the **Stack settings** tab
 4. Verify:
-   - **Startup Command**: `pm2 serve /home/site/wwwroot --no-daemon`
+   - **Startup command**: `pm2 serve /home/site/wwwroot --no-daemon`
 
-**Note**: If **Startup Command** is empty on the slot, enter `pm2 serve /home/site/wwwroot --no-daemon`, click **Save**, then **Continue**: without it, the slot shows the default page instead of the dashboard. If the menu item reads **Configuration (preview)**, the startup command is on its **Stack settings** tab, and the button is **Apply**.
+**Note**: If **Startup command** is empty on the slot, enter `pm2 serve /home/site/wwwroot --no-daemon` and click **Apply**: without it, the slot shows the default page instead of the dashboard. In the older layout without a **Stack settings** tab, the field is on **General settings**, and the button is **Save**, then **Continue**.
 
 5. Click **Overview** and copy the slot's **Default domain**
 6. Modify your local `index.html` to say **"Version: 2.0 (Staging)"** and change the status color to **Blue**.
@@ -353,11 +356,12 @@ Publish-AzWebApp `
 2. Click **dev-skycraft-swc-app01**
 3. Under **Deployment**, select **Deployment slots**
 4. Click **Swap**
-5. **Source**: `staging`
-6. **Target**: `production`
-7. **Perform swap with preview**: leave unchecked
+5. **Source**: `dev-skycraft-swc-app01-staging` (pre-selected)
+6. **Target**: `dev-skycraft-swc-app01`, marked **PRODUCTION** (pre-selected)
+7. **Perform swap with preview**: leave unchecked (it is greyed out: preview needs slot settings, which this lab has none of)
 8. Click **Start Swap**
-9. Click **Close** when the swap has finished
+
+**Note**: The pane closes by itself, and the list greys out while the swap runs (seen 2026-10-24). If the pane stays open, click **Close** when the swap has finished.
 
 **Expected Result**: After the swap completes (Wait ~1-2 mins), refresh the **Production** URL. It should now show "Version 2.0". The Staging URL will now show "Version 1.0" (they swapped places).
 
@@ -388,12 +392,12 @@ We want the dashboard to scale out if too many Game Masters use it simultaneousl
 2. Click **dev-skycraft-swc-asp**
 3. Under **Settings**, select **Scale out (App Service plan)**.
    > _Note: The UI might say "Apps in this plan will scale together"._
-4. Select **Rules Based**
-5. Click **Configure**
+4. Under **Scale out method**, select **Rules Based** (the page starts at **Manual**)
+5. Click **Configure** at the bottom of the page
 6. Select **Custom autoscale**
-7. **Scale mode**: **Scale based on a metric**
-8. Click **Add a rule**
-9. In the pane that opens, fill in:
+7. **Scale mode**: **Scale based on a metric** (it starts at **Scale to a specific instance count**)
+8. Click **Add a rule**: with no rule yet, it is a link inside the warning "Scale is based on metric trigger rules but no rule(s) is defined"
+9. In the pane that opens, check (the pane opens with these values filled in, seen 2026-10-24):
    - **Metric namespace**: Standard metrics
    - **Metric name**: CPU Percentage
    - **Operator**: Greater than
@@ -414,8 +418,8 @@ We want the dashboard to scale out if too many Game Masters use it simultaneousl
 
 Always pair a scale-out rule with a scale-in rule to save costs!
 
-1. Click **Add a rule**
-2. In the pane that opens, fill in:
+1. Click **+ Add a rule** under the scale-out rule
+2. In the pane that opens, fill in (it opens with the scale-out values again: change **Operator**, the threshold and **Operation**):
    - **Metric name**: CPU Percentage
    - **Operator**: Less than
    - **Metric threshold to trigger scale action**: 30
@@ -424,11 +428,11 @@ Always pair a scale-out rule with a scale-in rule to save costs!
    - **Instance count**: 1
    - **Cool down (minutes)**: 5
 3. Click **Add**
-4. Under **Instance limits**, fill in:
+4. Under **Instance limits**, fill in (all three start at 1):
    - **Minimum**: 1
    - **Maximum**: 3
    - **Default**: 1
-5. Click **Save**
+5. Click **Save** in the toolbar
 
 **Expected Result**: The plan will now auto-scale between 1 and 3 instances based on CPU load. If **Save** seems to do nothing, open the notifications (the bell): a refusal "disallowed by policy" means `dev-skycraft-swc-rg` lacks `Project` = `SkyCraft` (Troubleshooting, Issue 3).
 
@@ -455,8 +459,8 @@ To allow the dashboard to connect to the Game Servers (e.g., to query status dir
 12. Under **Settings**, select **Networking**
 13. Under **Outbound traffic configuration**, click **Not configured** (the value of _Virtual network integration_).
 14. Click **Add virtual network integration**
-15. **Virtual network**: `dev-skycraft-swc-vnet`
-16. **Subnet**: `AppServiceSubnet`
+15. Under **App Service Plan connections**, select `dev-skycraft-swc-vnet/AppServiceSubnet`: the connection the plan already has from the app. The pane opens with **New connection** selected.
+16. Check that the pane shows no **Virtual Network** or **Subnet** fields any more: they belong to **New connection**
 17. Click **Connect**
 18. On the **Virtual Network Integration** page, verify:
     - **Outbound internet traffic** (under **Application routing**): checked
@@ -481,11 +485,11 @@ The create wizard already turns **HTTPS only** on and sets the minimum TLS versi
    - **HTTPS only**: checked
    - **Minimum Inbound TLS Version**: 1.2
 
-**Note**: If **HTTPS only** is unchecked, check it and click **Save**. If the menu item reads **Configuration (preview)**, the same two settings are on its **General settings** tab, and the button is **Apply**.
+**Note**: If **HTTPS only** is unchecked, check it and click **Apply** at the bottom (**Save** in the older layout without a **Stack settings** tab).
 
-**Note**: **HTTPS only** and the TLS version are settings of each slot. To check the `staging` slot as well, open `dev-skycraft-swc-app01-staging` and verify the same two settings there.
+**Note**: **HTTPS only** and the TLS version are settings of each slot. To check the `staging` slot as well, open `dev-skycraft-swc-app01-staging` and verify the same two settings there (the slot cloned both, seen 2026-10-24).
 
-**Expected Result**: All HTTP requests are redirected to HTTPS.
+**Expected Result**: All HTTP requests are redirected to HTTPS: `http://` followed by the app's default domain answers with a 301 redirect to the `https://` address.
 
 ![HTTPS Only](./images/step-3.4.11.png)
 
