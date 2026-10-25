@@ -240,7 +240,7 @@ We need a share named `skycraft-config` with a 100 GiB quota. This share stores 
 
 | Field       | Value |
 | :---------- | :---- |
-| Quota (GiB) | `100` |
+| Quota       | `100` |
 
 13. Click **OK**
 14. Click **Refresh**
@@ -281,6 +281,8 @@ az storage share-rm create \
 | Access Tier | Hot               |
 | Backup      | Not configured    |
 
+![Backup Tab with Enable Backup Unchecked](images/step-4.3.1.png)
+
 ---
 
 ### Step 4.3.2: Create Shared Data Share
@@ -307,7 +309,7 @@ Create a second share `skycraft-shared` for larger game assets such as maps, tex
 
 | Field       | Value |
 | :---------- | :---- |
-| Quota (GiB) | `500` |
+| Quota       | `500` |
 
 10. Click **OK**
 11. Click **Refresh**
