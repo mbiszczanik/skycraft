@@ -358,6 +358,8 @@ The **Create a storage account** wizard has eight tabs, listed on its left: **Ba
 - Replication: Geo-redundant storage (GRS)
 - Access tier: Hot
 
+![Security Tab of the Create Wizard](./images/step-4.1.2.png)
+
 ### Step 4.1.3: Create Development Storage Account
 
 1. In Azure Portal, search for **Storage accounts**
