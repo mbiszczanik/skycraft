@@ -775,6 +775,10 @@ While Lab 1.3's delete lock (`lock-no-delete-prod`) is on `prod-skycraft-swc-rg`
 The cleanup does not remove a role assignment; remove the optional one with:
 
 ```powershell
+# Get-AzADUser and Remove-AzRoleAssignment need a Microsoft Graph token. If one
+# fails with "Authentication failed against resource MicrosoftGraphEndpointResourceId", run
+# Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId and run it again
+# (TROUBLESHOOTING.md in the repository root).
 $scope = (Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa').Id
 Remove-AzRoleAssignment -ObjectId (Get-AzADUser -SignedIn).Id -RoleDefinitionName 'Storage Blob Data Contributor' -Scope $scope
 ```
