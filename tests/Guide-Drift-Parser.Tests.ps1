@@ -812,9 +812,11 @@ Describe 'parse.py - labs 2.2, 3.2, 4.1 and 5.2, Verify and Confirm introduce ch
            labels = @('dev-skycraft-swc-vnet', 'Subnets', 'DatabaseSubnet', 'Subnets', 'WorldSubnet',
                       'prod-skycraft-swc-vnet', 'Subnets', 'DatabaseSubnet', 'Subnets', 'WorldSubnet')
            expected = 'Database subnets can access Azure SQL and Storage over Microsoft backbone (private routing), and both `WorldSubnet`s carry `Microsoft.Storage` for Lab 4.4. Microsoft.Sql; Microsoft.Storage; Microsoft.Storage; Microsoft.Sql; Microsoft.Storage; Microsoft.Storage' }
+        # #344: the step then adds both VMs to the egress pool; ticking a row of the panel's table is no label.
         @{ lab = '3.2'; id = '3.2.13'
-           labels = @('Virtual machines', 'Load balancers', 'dev-skycraft-swc-lb', 'Backend pools')
-           expected = 'Both VMs running in different availability zones, connected to respective load balancer backend pools. dev-skycraft-swc-lb-be-auth: 1 VM; dev-skycraft-swc-lb-be-world: 1 VM' }
+           labels = @('Virtual machines', 'Load balancers', 'dev-skycraft-swc-lb', 'Backend pools',
+                      'Backend pools', 'dev-skycraft-swc-lb-be-outbound', '+ Add', 'Add', 'Save')
+           expected = 'Both VMs running in different availability zones, connected to respective load balancer backend pools, and `dev-skycraft-swc-lb-be-outbound` lists 2 VMs (auth and world). dev-skycraft-swc-lb-be-auth: 1 VM; dev-skycraft-swc-lb-be-world: 1 VM' }
         # The alert to look for is not a click.
         @{ lab = '5.2'; id = '5.2.9'; labels = @('Backup center', 'Alerts')
            expected = 'Modify policy with shorter retention (0 - Critical) - raised because Deploy-Bicep.ps1 shortens instant-restore retention to 2 days after creating the Enhanced policy. Expected; it is a security alert about the change, not a failure.' }
@@ -840,7 +842,9 @@ Describe 'parse.py - labs 3.2, 4.2 and 5.2, resource names in navigation chains 
     }
 
     It 'reads the chain of step <id> as <labels>, resource names at <resources>' -ForEach @(
-        @{ lab = '3.2'; id = '3.2.13'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Backend pools'); resources = @(1) }
+        # Step 3.2.13 has two chains since #344: the load balancer's pools, then the egress pool.
+        @{ lab = '3.2'; id = '3.2.13'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Backend pools'); resources = @(1); count = 2; index = 0 }
+        @{ lab = '3.2'; id = '3.2.13'; labels = @('Backend pools', 'dev-skycraft-swc-lb-be-outbound'); resources = @(1); count = 2; index = 1 }
         @{ lab = '3.2'; id = '3.2.14'; labels = @('Virtual machines', 'dev-skycraft-swc-world-vm'); resources = @(1) }
         # 4.2.11 uploads from the containers list's toolbar since #359; it no longer opens game-assets.
         @{ lab = '4.2'; id = '4.2.11'; labels = @('prodskycraftswcsa', 'Containers'); resources = @(0) }
@@ -850,8 +854,8 @@ Describe 'parse.py - labs 3.2, 4.2 and 5.2, resource names in navigation chains 
     ) {
         $chains = @(($script:ChainLabs[$lab].steps | Where-Object id -eq $id).items |
             Where-Object { $_.PSObject.Properties.Name -contains 'resources' })
-        $chains.Count | Should -Be 1
-        $chain = $chains[0]
+        $chains.Count | Should -Be $(if ($count) { $count } else { 1 })
+        $chain = $chains[$(if ($index) { $index } else { 0 })]
         $chain.kind | Should -Be 'navigation'
         @($chain.labels) | Should -Be $labels
         @($chain.resources) | Should -Be $resources
@@ -886,7 +890,7 @@ Describe 'parse.py - labs 4.2, 4.3, 5.1, 5.2 and 5.3, pickers, worded resource s
         @{ lab = '5.3'; id = '5.3.5'; count = 1; field = 'Flow log type'; labels = @('Virtual network', '+ Select target resource', 'Virtual network', 'prod-skycraft-swc-vnet', 'Confirm selection'); resources = @(3) }
         # 'Browse to `common/config.txt`': a path opens each segment; 4.3.8 opens its share from the account.
         @{ lab = '4.3'; id = '4.3.6'; count = 1; field = ''; labels = @('common', 'config.txt', 'Restore'); resources = @(0, 1) }
-        @{ lab = '4.3'; id = '4.3.8'; count = 1; field = ''; labels = @('prodskycraftswcsa', 'File shares', 'skycraft-config', 'Overview', 'Connect'); resources = @(0, 2) }
+        @{ lab = '4.3'; id = '4.3.8'; count = 1; field = ''; labels = @('prodskycraftswcsa', 'Classic file shares', 'skycraft-config', 'Overview', 'Connect'); resources = @(0, 2) }
         # '`public-demo` -> **Change access level**. The **Anonymous access level** dropdown lists ...':
         # the sentence after the chain describes the dialog.
         @{ lab = '4.2'; id = '4.2.12'; count = 1; field = ''; labels = @('public-demo', 'Change access level'); resources = @(0) }
@@ -993,7 +997,7 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
     ) {
         $first = @((Get-GapStep '4.3' $id).items)[0]
         $first.kind | Should -Be 'navigation'
-        @($first.labels) | Should -Be (@('prodskycraftswcsa', 'File shares', 'skycraft-config') + $rest)
+        @($first.labels) | Should -Be (@('prodskycraftswcsa', 'Classic file shares', 'skycraft-config') + $rest)
         @($first.resources) | Should -Be $resources
     }
 
@@ -1426,6 +1430,11 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '4.2.9/Skip blobs that have been rehydrated in the last/checked=0'
             '4.2.9/Skip blobs that have been rehydrated in the last/stateOnly=0'
             '4.2.13/Overwrite if files already exist/checked=0'
+            # The Backup tab ticks Enable backup by default (#360); soft delete stays on (4.3.3).
+            '4.3.1/Enable backup/unchecked=0'
+            '4.3.2/Enable backup/unchecked=0'
+            '4.3.3/Soft delete for all classic file shares/checked=0'
+            '4.3.3/Soft delete for all classic file shares/stateOnly=0'
             '4.3.6/Upload | Overwrite if files already exist | Upload/checked=1'
             # 4.4.2 (#361): the public network access radio stays on Enable; the trusted services exception stays ticked.
             '4.4.2/Enable/checked=0'

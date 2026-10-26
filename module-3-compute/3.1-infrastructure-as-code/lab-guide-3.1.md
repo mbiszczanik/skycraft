@@ -474,6 +474,7 @@ resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-05-01' = {
   name: 'AuthSubnet'
   properties: {
     addressPrefix: '10.1.1.0/24'
+    defaultOutboundAccess: false  // Private subnet, as the portal creates it
   }
 }
 ```
@@ -621,6 +622,7 @@ resource virtualNetworks_dev_skycraft_swc_vnet 'Microsoft.Network/virtualNetwork
           networkSecurityGroup: {
             id: networkSecurityGroups_auth_nsg.id
           }
+          defaultOutboundAccess: false
         }
       }
     ]
@@ -753,6 +755,9 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
         networkSecurityGroup: contains(subnet, 'nsgId') ? {
           id: subnet.nsgId
         } : null
+        // Private subnet, as the portal and Lab 2.1 create it: no default outbound access.
+        // The VMs reach the internet through the load balancer's outbound rule.
+        defaultOutboundAccess: false
       }
     }]
   }
@@ -840,6 +845,14 @@ param healthProbes array
 @description('Load balancing rule configurations')
 param lbRules array
 
+@description('Name of the backend pool the outbound rule gives internet access (must exist in backendPools)')
+param outboundPoolName string
+
+@description('SNAT ports per instance for the outbound rule (a multiple of 8)')
+@minValue(8)
+@maxValue(63992)
+param outboundPortsPerInstance int = 8000
+
 @description('Resource tags')
 param tags object
 
@@ -873,6 +886,7 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2023-05-01' = {
         port: probe.port
         intervalInSeconds: probe.intervalInSeconds
         numberOfProbes: probe.numberOfProbes
+        probeThreshold: probe.probeThreshold
       }
     }]
     loadBalancingRules: [for (rule, i) in lbRules: {
@@ -892,9 +906,33 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2023-05-01' = {
         backendPort: rule.backendPort
         enableFloatingIP: false
         idleTimeoutInMinutes: 4
+        enableTcpReset: true  // As Lab 2.3 sets it on both rules
         loadDistribution: 'Default'
+        // Required once an outbound rule uses this frontend IP: egress comes from that rule
+        disableOutboundSnat: true
       }
     }]
+    // One outbound rule per frontend IP (a second one with an overlapping protocol is refused),
+    // so every VM that needs the internet joins the one egress pool it serves
+    outboundRules: [
+      {
+        name: '${namePrefix}-lb-outbound'
+        properties: {
+          frontendIPConfigurations: [
+            {
+              id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', '${namePrefix}-lb', '${namePrefix}-lb-frontend')
+            }
+          ]
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', '${namePrefix}-lb', outboundPoolName)
+          }
+          protocol: 'All'
+          allocatedOutboundPorts: outboundPortsPerInstance
+          enableTcpReset: true
+          idleTimeoutInMinutes: 4
+        }
+      }
+    ]
   }
 }
 
@@ -1203,6 +1241,7 @@ module devLoadBalancer 'modules/loadbalancer.bicep' = {
     backendPools: [
       { name: 'dev-${project}-${locationShortCode}-lb-be-world' }
       { name: 'dev-${project}-${locationShortCode}-lb-be-auth' }
+      { name: 'dev-${project}-${locationShortCode}-lb-be-outbound' } // egress pool; Lab 3.2 adds every VM
     ]
     healthProbes: [
       {
@@ -1211,6 +1250,7 @@ module devLoadBalancer 'modules/loadbalancer.bicep' = {
         port: 8085
         intervalInSeconds: 15
         numberOfProbes: 2
+        probeThreshold: 1
       }
       {
         name: 'dev-${project}-${locationShortCode}-lb-probe-auth'
@@ -1218,6 +1258,7 @@ module devLoadBalancer 'modules/loadbalancer.bicep' = {
         port: 3724
         intervalInSeconds: 15
         numberOfProbes: 2
+        probeThreshold: 1
       }
     ]
     lbRules: [
@@ -1238,6 +1279,7 @@ module devLoadBalancer 'modules/loadbalancer.bicep' = {
         probeName: 'dev-${project}-${locationShortCode}-lb-probe-auth'
       }
     ]
+    outboundPoolName: 'dev-${project}-${locationShortCode}-lb-be-outbound'
     tags: union(tags, { Environment: 'Development' })
   }
 }

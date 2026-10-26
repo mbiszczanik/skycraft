@@ -504,6 +504,7 @@ Repeat the VM creation process for the Worldserver:
 | Region               | **Sweden Central**                      |
 | Availability options | **Availability zone**                   |
 | Availability zone    | **Zone 2** (different from Authserver!) |
+| Security type        | Standard                                |
 | Image                | **Ubuntu Server 22.04 LTS - x64 Gen2**  |
 | Size                 | **Standard_B2ls_v2**                    |
 | Authentication type  | **SSH public key**                      |
@@ -535,6 +536,7 @@ Repeat the VM creation process for the Worldserver:
 | Subnet                     | **WorldSubnet (10.1.2.0/24)**  |
 | Public IP                  | **None**                       |
 | NIC network security group | **None**                       |
+| Delete NIC when VM is deleted | ✅ Checked                  |
 | Load balancing             | **Yes**                        |
 | Select a load balancer     | `dev-skycraft-swc-lb`          |
 | Select a backend pool      | `dev-skycraft-swc-lb-be-world` |
@@ -598,7 +600,19 @@ Repeat the VM creation process for the Worldserver:
    - `dev-skycraft-swc-lb-be-auth`: 1 VM
    - `dev-skycraft-swc-lb-be-world`: 1 VM
 
-**Expected Result**: Both VMs running in different availability zones, connected to respective load balancer backend pools.
+#### Add Both VMs to the Outbound Pool
+
+The subnets are private (Lab 2.1), so the VMs reach the internet (package updates, VM extensions) only through the load balancer's outbound rule from Lab 2.3, `dev-skycraft-swc-lb-outbound`. One frontend IP can carry only one outbound rule, so that rule serves one pool, `dev-skycraft-swc-lb-be-outbound`, and both VMs share it. The VM wizard puts a VM into a single backend pool, so add both VMs to the outbound pool here.
+
+5. Click **Backend pools** → `dev-skycraft-swc-lb-be-outbound`
+6. Under **IP configurations**, click **+ Add**
+7. Under **Add IP configurations to backend pool**, tick the rows of `dev-skycraft-swc-auth-vm` and `dev-skycraft-swc-world-vm`
+8. Click **Add**
+9. Click **Save**
+
+If the pool list was already open when the pool was created, it shows the pool only after **Refresh**.
+
+**Expected Result**: Both VMs running in different availability zones, connected to respective load balancer backend pools, and `dev-skycraft-swc-lb-be-outbound` lists 2 VMs (auth and world).
 
 ![Worldserver Backend Pools](images/step-3.2.13.png)
 
@@ -1481,6 +1495,7 @@ Quick verification before proceeding:
 - [ ] Worldserver VM connected to WorldSubnet (10.1.2.0/24)
 - [ ] Authserver added to load balancer backend pool (be-auth)
 - [ ] Worldserver added to load balancer backend pool (be-world)
+- [ ] Both VMs added to the outbound pool (be-outbound), their only internet access
 - [ ] SSH access verified via Azure Bastion
 
 ### Disk Configuration
@@ -1878,7 +1893,7 @@ Pass `$publicKey` to `az vm create --ssh-key-values`, to `Add-AzVMSshPublicKey -
 - ✅ Deployed VMs across Availability Zones 1 and 2 for high availability
 - ✅ Configured SSH authentication with key pairs
 - ✅ Connected VMs to existing VNet subnets (AuthSubnet, WorldSubnet)
-- ✅ Added VMs to load balancer backend pools
+- ✅ Added VMs to load balancer backend pools, and both to the outbound pool for internet access
 - ✅ Attached and initialized 64 GB data disk for database storage
 - ✅ Enabled Azure Disk Encryption on all disks
 - ✅ Created Azure Key Vault for encryption keys
