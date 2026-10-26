@@ -228,9 +228,9 @@ Let's export your existing dev environment to see what ARM looks like:
 > This lab deploys only with `.\scripts\Deploy-Bicep.ps1` (Section 7).
 
 4. Stay on the ARM template tab and leave **Include parameters** ticked (tick it if it is not)
-5. Click **Download** to save the ZIP file locally, then extract it. It holds `template.json` (the
-   ARM template); with **Include parameters** ticked, also `parameters.json` (the parameter
-   values). This lab uses no other file the ZIP may hold.
+5. On the **Template** sub-tab, click **Download**. The browser saves `template.json` (the ARM
+   template), not a ZIP file. On the **Parameters** sub-tab, **Download** saves `parameters.json`
+   (the parameter values); this lab does not need it.
 
 **Az PowerShell alternative**: `.\scripts\Export-ARM.ps1 -OutputFile template.json` exports the
 same group with `Export-AzResourceGroup`. It writes a single template file and no
@@ -576,10 +576,11 @@ Bicep CLI can automatically convert ARM JSON to Bicep. The Portal's **Bicep** ta
 gives a similar file without the CLI; decompiling also works for templates that do not come from
 the Portal, such as one saved from a deployment's history. Compare the two results if you like.
 
-1. Navigate to the folder you extracted the ZIP file to:
+1. Open a terminal in the folder where the browser saved `template.json`, usually your Downloads
+   folder:
 
 ```bash
-cd ~/Downloads/dev-skycraft-swc-rg-export
+cd ~/Downloads
 ```
 
 2. **Decompile ARM to Bicep**:
@@ -588,12 +589,25 @@ cd ~/Downloads/dev-skycraft-swc-rg-export
 az bicep decompile --file template.json
 ```
 
-**Expected Output**:
+**Expected Output**: the command writes `template.bicep` and exits with code 1. After the
+best-effort warning it lists errors in the generated file, for example:
 
+```text
+WARNING: Decompilation is a best-effort process, as there is no guaranteed mapping from ARM JSON to Bicep Template or Bicep Parameters.
+template.bicep(65,13) : Error BCP080: The expression is involved in a cycle ("networkSecurityGroups_auth_nsg_name_AllowBastionSSH" -> "networkSecurityGroups_auth_nsg_name_resource").
+template.bicep(350,16) : Error BCP079: This expression is referencing its own declaration, which is not allowed.
+template.bicep(492,5) : Error BCP062: The referenced declaration with name "loadBalancers_dev_skycraft_swc_lb_name_resource" is not valid.
 ```
-Decompilation complete. Output file: template.bicep
-Warning: Decompilation is a best-effort process. Review the generated file carefully.
-```
+
+The errors are expected, and the file is still written. The decompiler declares every subnet,
+security rule, peering and backend pool twice: as a resource of its own, and inside its parent
+with an `id:` line that points at that resource, so each refers to the other (`BCP080`, then
+`BCP062` for everything that references them). Lab 2.3's load balancer also refers to its own
+frontend, pools and probes by `id` (`BCP079`). Deleting the `id:` lines from the parent arrays
+(`securityRules`, `subnets`, `virtualNetworkPeerings`, `backendAddressPools`) clears the cycles of
+the network security groups and the virtual network, but not the load balancer's
+self-references. Do not try to make this file deployable: read it in Step 3.1.9, and Section 5
+writes clean modules instead.
 
 3. **Review generated Bicep file**:
 
@@ -1707,7 +1721,7 @@ After deployment, export to compare:
 # Export resource group as ARM template (wraps Export-AzResourceGroup)
 .\scripts\Export-ARM.ps1 -ResourceGroup dev-skycraft-swc-rg -OutputFile deployed-template.json
 
-# Convert to Bicep to see clean version (local file operation - no subscription touched)
+# Convert to Bicep (local file operation - no subscription touched); it exits 1 with the errors of Step 3.1.8
 az bicep decompile --file deployed-template.json
 
 # Compare with your original bicep/main.bicep
