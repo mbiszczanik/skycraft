@@ -283,7 +283,7 @@ Azure App Service supports simple deployment by uploading a ZIP file.
 
 **If using Cloud Shell**:
 
-1. Switch Cloud Shell to **PowerShell** and upload `dashboard.zip` using the **Upload/Download files** icon.
+1. Switch Cloud Shell to **PowerShell** and upload `dashboard.zip` with **Manage files** > **Upload**. A session without a storage account (**No storage account required**) can do this too: the file lands in your home directory, which Cloud Shell deletes when the session ends.
 2. Run:
 
 ```powershell
