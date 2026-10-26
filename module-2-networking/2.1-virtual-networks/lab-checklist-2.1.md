@@ -29,6 +29,15 @@
 - [ ] Tag: `CostCenter` = `MSDN`
 - [ ] Tag: `Owner` = `mbiszczanik`
 
+### Network Watcher Resource Group
+
+- [ ] Resource group name: `NetworkWatcherRG`
+- [ ] Location: **Sweden Central**
+- [ ] Tag: `Project` = `SkyCraft`
+- [ ] Tag: `Environment` = `Platform`
+- [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `mbiszczanik`
+
 ---
 
 ## ✅ Hub Virtual Network (platform-skycraft-swc-vnet)
@@ -51,18 +60,19 @@
   - Name: `GatewaySubnet` (exact match, case-sensitive)
   - Address range: `10.0.1.0/27`
   - Available IPs: 27 (32 total - 5 reserved)
+- [ ] Both subnets are private: **Private subnet** (**Enable private subnet (no default outbound access)**) ticked, `DefaultOutboundAccess` = `False`
 
 ### Peering Connections
 
 - [ ] Peering name: `hub-to-dev`
   - Remote VNet: `dev-skycraft-swc-vnet`
-  - Peering status: **Connected**
+  - Peering state: **Connected** (Peering sync status: **Fully Synchronized**)
   - Allow virtual network access: **Enabled**
   - Allow forwarded traffic: **Enabled**
   - Allow gateway transit: **Disabled**
 - [ ] Peering name: `hub-to-prod`
   - Remote VNet: `prod-skycraft-swc-vnet`
-  - Peering status: **Connected**
+  - Peering state: **Connected** (Peering sync status: **Fully Synchronized**)
   - Allow virtual network access: **Enabled**
   - Allow forwarded traffic: **Enabled**
   - Allow gateway transit: **Disabled**
@@ -109,12 +119,13 @@
   - Available IPs: 251
   - Subnet delegation: `Microsoft.Web/serverFarms`
   - Purpose: App Service instances
+- [ ] All four subnets are private: **Private subnet** ticked, `DefaultOutboundAccess` = `False`
 
 ### Peering Connections
 
 - [ ] Peering name: `dev-to-hub`
   - Remote VNet: `platform-skycraft-swc-vnet`
-  - Peering status: **Connected**
+  - Peering state: **Connected** (Peering sync status: **Fully Synchronized**)
   - Allow virtual network access: **Enabled**
   - Allow forwarded traffic: **Enabled**
   - Use remote virtual network gateway: **Disabled**
@@ -161,12 +172,13 @@
   - Available IPs: 251
   - Subnet delegation: `Microsoft.Web/serverFarms`
   - Purpose: App Service instances
+- [ ] All four subnets are private: **Private subnet** ticked, `DefaultOutboundAccess` = `False`
 
 ### Peering Connections
 
 - [ ] Peering name: `prod-to-hub`
   - Remote VNet: `platform-skycraft-swc-vnet`
-  - Peering status: **Connected**
+  - Peering state: **Connected** (Peering sync status: **Fully Synchronized**)
   - Allow virtual network access: **Enabled**
   - Allow forwarded traffic: **Enabled**
   - Use remote virtual network gateway: **Disabled**
@@ -187,7 +199,9 @@
 - [ ] Name: `dev-skycraft-swc-lb-pip`
 - [ ] Resource group: `dev-skycraft-swc-rg`
 - [ ] Location: **Sweden Central**
-- [ ] SKU: **Standard**
+- [ ] SKU: **Standard** (not Standard V2)
+- [ ] Availability zone: **Zone-redundant**
+- [ ] Tier: **Regional**
 - [ ] IP assignment: **Static**
 - [ ] IP address assigned: [Record IP: ____________]
 - [ ] Tags applied: Project, Environment, CostCenter, Owner
@@ -197,7 +211,9 @@
 - [ ] Name: `prod-skycraft-swc-lb-pip`
 - [ ] Resource group: `prod-skycraft-swc-rg`
 - [ ] Location: **Sweden Central**
-- [ ] SKU: **Standard**
+- [ ] SKU: **Standard** (not Standard V2)
+- [ ] Availability zone: **Zone-redundant**
+- [ ] Tier: **Regional**
 - [ ] IP assignment: **Static**
 - [ ] IP address assigned: [Record IP: ____________]
 - [ ] Tags applied: Project, Environment, CostCenter, Owner
@@ -208,7 +224,7 @@
 
 ### Network Watcher
 
-- [ ] Network Watcher enabled for **Sweden Central** region
+- [ ] Network Watcher `NetworkWatcher_swedencentral` in `NetworkWatcherRG`, enabled for the **Sweden Central** region
 - [ ] Can access Network Watcher service
 - [ ] Topology view displays hub-spoke architecture
 
@@ -281,14 +297,14 @@ Get-AzVirtualNetwork |
 ```powershell
 # List hub VNet subnets
 (Get-AzVirtualNetwork -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platform-skycraft-swc-vnet').Subnets |
-    Select-Object Name, @{N='AddressPrefix'; E={ $_.AddressPrefix }} |
+    Select-Object Name, @{N='AddressPrefix'; E={ $_.AddressPrefix }}, DefaultOutboundAccess |
     Format-Table -AutoSize
 
 # Expected output:
-# Name                AddressPrefix
-# ------------------  -------------
-# AzureBastionSubnet  10.0.0.0/26
-# GatewaySubnet       10.0.1.0/27
+# Name                AddressPrefix  DefaultOutboundAccess
+# ------------------  -------------  ---------------------
+# AzureBastionSubnet  10.0.0.0/26                    False
+# GatewaySubnet       10.0.1.0/27                    False
 ```
 
 ### Verify Dev VNet Subnets
@@ -296,16 +312,17 @@ Get-AzVirtualNetwork |
 ```powershell
 # List dev VNet subnets
 (Get-AzVirtualNetwork -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-vnet').Subnets |
-    Select-Object Name, @{N='AddressPrefix'; E={ $_.AddressPrefix }} |
+    Select-Object Name, @{N='AddressPrefix'; E={ $_.AddressPrefix }}, DefaultOutboundAccess,
+        @{N='Delegation'; E={ $_.Delegations.ServiceName }} |
     Format-Table -AutoSize
 
 # Expected output:
-# Name              AddressPrefix
-# ----------------  -------------
-# AuthSubnet        10.1.1.0/24
-# WorldSubnet       10.1.2.0/24
-# DatabaseSubnet    10.1.3.0/24
-# AppServiceSubnet  10.1.4.0/24
+# Name              AddressPrefix  DefaultOutboundAccess  Delegation
+# ----------------  -------------  ---------------------  ---------------------------
+# AuthSubnet        10.1.1.0/24                  False
+# WorldSubnet       10.1.2.0/24                  False
+# DatabaseSubnet    10.1.3.0/24                  False
+# AppServiceSubnet  10.1.4.0/24                  False  Microsoft.Web/serverFarms
 ```
 
 ### Verify Prod VNet Subnets
@@ -313,16 +330,17 @@ Get-AzVirtualNetwork |
 ```powershell
 # List prod VNet subnets
 (Get-AzVirtualNetwork -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prod-skycraft-swc-vnet').Subnets |
-    Select-Object Name, @{N='AddressPrefix'; E={ $_.AddressPrefix }} |
+    Select-Object Name, @{N='AddressPrefix'; E={ $_.AddressPrefix }}, DefaultOutboundAccess,
+        @{N='Delegation'; E={ $_.Delegations.ServiceName }} |
     Format-Table -AutoSize
 
 # Expected output:
-# Name              AddressPrefix
-# ----------------  -------------
-# AuthSubnet        10.2.1.0/24
-# WorldSubnet       10.2.2.0/24
-# DatabaseSubnet    10.2.3.0/24
-# AppServiceSubnet  10.2.4.0/24
+# Name              AddressPrefix  DefaultOutboundAccess  Delegation
+# ----------------  -------------  ---------------------  ---------------------------
+# AuthSubnet        10.2.1.0/24                  False
+# WorldSubnet       10.2.2.0/24                  False
+# DatabaseSubnet    10.2.3.0/24                  False
+# AppServiceSubnet  10.2.4.0/24                  False  Microsoft.Web/serverFarms
 ```
 
 ### Verify VNet Peering
@@ -333,7 +351,7 @@ Get-AzVirtualNetworkPeering -ResourceGroupName 'platform-skycraft-swc-rg' -Virtu
     Select-Object Name, PeeringState, AllowVirtualNetworkAccess, AllowForwardedTraffic |
     Format-Table -AutoSize
 
-# Expected: 2 peerings (hub-to-dev, hub-to-prod) with PeeringState "Connected"
+# Expected: 2 peerings (hub-to-dev, hub-to-prod) with PeeringState "Connected" and both Allow columns True
 
 # List peering for dev VNet
 Get-AzVirtualNetworkPeering -ResourceGroupName 'dev-skycraft-swc-rg' -VirtualNetworkName 'dev-skycraft-swc-vnet' |
@@ -355,15 +373,29 @@ Get-AzVirtualNetworkPeering -ResourceGroupName 'prod-skycraft-swc-rg' -VirtualNe
 ```powershell
 # List all public IPs
 Get-AzPublicIpAddress |
-    Select-Object Name, ResourceGroupName, Sku, IpAddress,
-        @{N='Allocation'; E={ $_.PublicIpAllocationMethod }} |
+    Select-Object Name, ResourceGroupName, @{N='Sku'; E={ $_.Sku.Name }}, IpAddress,
+        @{N='Allocation'; E={ $_.PublicIpAllocationMethod }},
+        @{N='Zones'; E={ $_.Zones -join ',' }} |
     Format-Table -AutoSize
 
 # Expected output:
-# Name                      ResourceGroupName        Sku      IpAddress    Allocation
-# ------------------------  -----------------------  -------  -----------  ----------
-# dev-skycraft-swc-lb-pip   dev-skycraft-swc-rg       Standard [Public IP]  Static
-# prod-skycraft-swc-lb-pip  prod-skycraft-swc-rg      Standard [Public IP]  Static
+# Name                      ResourceGroupName     Sku       IpAddress    Allocation  Zones
+# ------------------------  --------------------  --------  -----------  ----------  -----
+# dev-skycraft-swc-lb-pip   dev-skycraft-swc-rg   Standard  [Public IP]  Static      1,2,3
+# prod-skycraft-swc-lb-pip  prod-skycraft-swc-rg  Standard  [Public IP]  Static      1,2,3
+```
+
+### Verify Network Watcher
+
+```powershell
+# The watcher and the tags on its resource group
+Get-AzNetworkWatcher -Location 'swedencentral' |
+    Select-Object Name, ResourceGroupName, Location, ProvisioningState |
+    Format-Table -AutoSize
+(Get-AzResourceGroup -Name 'NetworkWatcherRG').Tags
+
+# Expected: NetworkWatcher_swedencentral in NetworkWatcherRG, Succeeded; the group has
+# Project, Environment (Platform), CostCenter and Owner
 ```
 
 ### Verify Tags
@@ -392,14 +424,16 @@ Use this table to document your deployed architecture:
 | **Hub VNet**       | platform-skycraft-swc-vnet | 10.0.0.0/16   | 2       | 2        | ✅     |
 | └─ Bastion Subnet  | AzureBastionSubnet         | 10.0.0.0/26   | N/A     | N/A      | ✅     |
 | └─ Gateway Subnet  | GatewaySubnet              | 10.0.1.0/27   | N/A     | N/A      | ✅     |
-| **Dev VNet**       | dev-skycraft-swc-vnet      | 10.1.0.0/16   | 3       | 1        | ✅     |
+| **Dev VNet**       | dev-skycraft-swc-vnet      | 10.1.0.0/16   | 4       | 1        | ✅     |
 | └─ Auth Subnet     | AuthSubnet                 | 10.1.1.0/24   | N/A     | N/A      | ✅     |
 | └─ World Subnet    | WorldSubnet                | 10.1.2.0/24   | N/A     | N/A      | ✅     |
 | └─ Database Subnet | DatabaseSubnet             | 10.1.3.0/24   | N/A     | N/A      | ✅     |
-| **Prod VNet**      | prod-skycraft-swc-vnet     | 10.2.0.0/16   | 3       | 1        | ✅     |
+| └─ App Service Subnet | AppServiceSubnet        | 10.1.4.0/24   | N/A     | N/A      | ✅     |
+| **Prod VNet**      | prod-skycraft-swc-vnet     | 10.2.0.0/16   | 4       | 1        | ✅     |
 | └─ Auth Subnet     | AuthSubnet                 | 10.2.1.0/24   | N/A     | N/A      | ✅     |
 | └─ World Subnet    | WorldSubnet                | 10.2.2.0/24   | N/A     | N/A      | ✅     |
 | └─ Database Subnet | DatabaseSubnet             | 10.2.3.0/24   | N/A     | N/A      | ✅     |
+| └─ App Service Subnet | AppServiceSubnet        | 10.2.4.0/24   | N/A     | N/A      | ✅     |
 
 ---
 
@@ -465,14 +499,15 @@ Answer these questions to document your hands-on experience and demonstrate unde
 
 **All Verification Items Complete**:
 
-- [ ] All resource groups created with proper tags
+- [ ] All resource groups (including `NetworkWatcherRG`) created with proper tags
 - [ ] Hub VNet deployed with correct subnets and peerings
 - [ ] Dev VNet deployed with correct subnets and peering
 - [ ] Prod VNet deployed with correct subnets and peering
 - [ ] All VNet peering connections show "Connected" status
-- [ ] 2 public IP addresses created (2 LB IPs)
+- [ ] 2 public IP addresses created (2 LB IPs, Standard, zone-redundant)
+- [ ] Every subnet is private (**Private subnet** ticked)
 - [ ] All resources follow naming conventions (platform/dev/prod-skycraft-swc-\*)
-- [ ] All Azure CLI validation commands executed successfully
+- [ ] All Az PowerShell validation commands executed successfully
 - [ ] Network Watcher topology verified
 - [ ] All reflection questions answered correctly
 - [ ] No overlapping IP address ranges
