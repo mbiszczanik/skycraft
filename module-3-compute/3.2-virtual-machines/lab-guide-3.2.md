@@ -2074,4 +2074,4 @@ Pass `$publicKey` to `az vm create --ssh-key-values`, to `Add-AzVMSshPublicKey -
 
 ---
 
-_Note: The VMs are now ready for software installation. In a future lab or project step, you would install AzerothCore on these VMs to run the actual game server. The focus of this lab was Azure VM infrastructure._
+*Note: The VMs are now ready for software installation. In a future lab or project step, you would install AzerothCore on these VMs to run the actual game server. The focus of this lab was Azure VM infrastructure.*
