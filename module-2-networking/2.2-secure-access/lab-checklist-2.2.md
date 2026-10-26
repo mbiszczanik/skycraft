@@ -2,21 +2,23 @@
 
 ## ✅ Azure Bastion Verification
 
+Bastion is optional and costs about 0.1672 EUR per hour (about 122 EUR per 730-hour month, plus about 3.21 EUR per month for its public IP; Sweden Central retail prices checked 2026-10-24). Transfer charges are additional. Tick this section only if you deployed it.
+
 ### Bastion Resource
 - [ ] Resource name: `platform-skycraft-swc-bas`
 - [ ] Resource group: `platform-skycraft-swc-rg`
 - [ ] Location: **Sweden Central**
-- [ ] Tier: **Basic**
+- [ ] Tier: **Basic** (the create form calls it **SKU** and defaults to Premium)
 - [ ] Virtual network: `platform-skycraft-swc-vnet`
 - [ ] Subnet: `AzureBastionSubnet (10.0.0.0/26)`
-- [ ] Deployment status: **Succeeded**
+- [ ] Provisioning state: **Succeeded**
 
 ### Bastion Public IP
 - [ ] Public IP name: `platform-skycraft-swc-bas-pip`
 - [ ] SKU: **Standard**
 - [ ] IP allocation: **Static**
 - [ ] IP address assigned: [Record IP: ____________]
-- [ ] Associated with: `platform-skycraft-swc-bas`
+- [ ] Associated with: `platform-skycraft-swc-bas` (Overview shows it as **Public IPv4 address**)
 
 ### Bastion Tags
 - [ ] Tag: `Project` = `SkyCraft`
@@ -95,7 +97,7 @@
   - Action: Allow
 
 - [ ] Priority 110: `Allow-MySQL-From-AppTier`
-  - Source: `10.1.1.0/24,10.1.2.0/24` (Auth and World subnets)
+  - Source: `10.1.1.0/24,10.1.2.0/24` (Auth and World subnets); cancel the optional Step 2.2.9 demonstration without saving
   - Destination port: `3306`
   - Protocol: TCP
   - Action: Allow
@@ -105,6 +107,14 @@
 - [ ] Tag: `Environment` = `Development`
 - [ ] Tag: `CostCenter` = `MSDN`
 - [ ] Tag: `Owner` = `mbiszczanik`
+
+---
+
+## ✅ Default Rules (Step 2.2.13)
+
+- [ ] Under **Inbound security rules** of any NSG: **AllowVnetInBound** (65000), **AllowAzureLoadBalancerInBound** (65001), **DenyAllInBound** (65500)
+- [ ] Under **Outbound security rules**: **AllowVnetOutBound** (65000), **AllowInternetOutBound** (65001), **DenyAllOutBound** (65500)
+- [ ] Understood that **Effective security rules** (under **Help**) shows nothing until a VM or network interface exists (Module 3)
 
 ---
 
@@ -195,26 +205,26 @@
 - [ ] Subnet: `DatabaseSubnet (10.1.3.0/24)`
 - [ ] Service endpoint: **Microsoft.Sql** enabled
 - [ ] Service endpoint: **Microsoft.Storage** enabled
-- [ ] Status: **Succeeded**
+- [ ] Saved without an error notification; the subnet's **Edit subnet** pane lists the service(s)
 
 ### Development World Subnet
 - [ ] VNet: `dev-skycraft-swc-vnet`
 - [ ] Subnet: `WorldSubnet (10.1.2.0/24)`
 - [ ] Service endpoint: **Microsoft.Storage** enabled - required by Lab 4.4
-- [ ] Status: **Succeeded**
+- [ ] Saved without an error notification; the subnet's **Edit subnet** pane lists the service(s)
 
 ### Production Database Subnet
 - [ ] VNet: `prod-skycraft-swc-vnet`
 - [ ] Subnet: `DatabaseSubnet (10.2.3.0/24)`
 - [ ] Service endpoint: **Microsoft.Sql** enabled
 - [ ] Service endpoint: **Microsoft.Storage** enabled
-- [ ] Status: **Succeeded**
+- [ ] Saved without an error notification; the subnet's **Edit subnet** pane lists the service(s)
 
 ### Production World Subnet
 - [ ] VNet: `prod-skycraft-swc-vnet`
 - [ ] Subnet: `WorldSubnet (10.2.2.0/24)`
 - [ ] Service endpoint: **Microsoft.Storage** enabled - required by Lab 4.4
-- [ ] Status: **Succeeded**
+- [ ] Saved without an error notification; the subnet's **Edit subnet** pane lists the service(s)
 
 ---
 
@@ -422,6 +432,8 @@ Use this table to document your deployed security architecture:
 
 Document the security rules deployed:
 
+The tables list custom allow rules. The default `AllowVnetInBound` rule also remains and permits other internal traffic; these rules do not establish exclusive database isolation. See the rule evaluation in [Step 2.2.19](lab-guide-2.2.md#step-2219-test-nsg-rule-logic-conceptual).
+
 ### Development Environment
 
 | NSG | Priority | Rule Name | Source | Dest Port | Protocol | Action |
@@ -550,7 +562,7 @@ _________________________________________________________________
 ## ✅ Final Lab 2.2 Sign-off
 
 **All Verification Items Complete**:
-- [ ] Azure Bastion deployed and operational in hub VNet
+- [ ] Azure Bastion (optional) deployed and operational in hub VNet, and deleted again when no longer needed
 - [ ] 6 Network Security Groups created (3 dev, 3 prod)
 - [ ] All NSGs have proper inbound security rules configured
 - [ ] All NSGs associated with correct subnets
@@ -571,27 +583,27 @@ _________________________________________________________________
 
 ## 🎉 Congratulations!
 
-You've successfully implemented **comprehensive network security** for the SkyCraft infrastructure!
+You've configured the subnet security components used by the later SkyCraft labs.
 
 **What You Built**:
 - ✅ Azure Bastion for secure administrative access (no public IPs on VMs needed)
-- ✅ 6 Network Security Groups with least-privilege access rules
-- ✅ 3 Application Security Groups for role-based management
-- ✅ Service endpoints for secure Azure PaaS connectivity
-- ✅ Defense-in-depth security architecture
+- ✅ 6 Network Security Groups with explicit custom allow rules and Azure's default rules
+- ✅ 3 Application Security Groups for use with VM network interfaces in Lab 3.2
+- ✅ Service endpoints for the specified SQL and Storage paths
+- ✅ Layered security concepts reviewed
 
 **Security Achievements**:
-- 🔒 **Layer 1**: Azure Bastion blocks direct SSH/RDP from internet
+- 🔒 **Layer 1**: Azure Bastion provides private VM administration when deployed
 - 🔒 **Layer 2**: NSGs control traffic at subnet level
-- 🔒 **Layer 3**: ASGs simplify VM role-based security
-- 🔒 **Layer 4**: Service endpoints secure PaaS traffic
-- 🔒 **Layer 5**: Private endpoints ready for maximum security
+- 🔒 **Layer 3**: ASGs are created for use with VM network interfaces in Lab 3.2
+- 🔒 **Layer 4**: Service endpoints provide a Microsoft backbone path; PaaS firewalls are configured separately
+- 🔒 **Layer 5**: Private endpoint concepts reviewed; no private endpoint deployed
 
 **Network Security Posture**:
-- All administrative access goes through Bastion
-- Game servers only expose required ports (3724 for auth, 8085 for world)
-- Databases only accept connections from application tiers
-- Azure SQL and Storage accessed over Microsoft backbone (not public internet)
+- SSH has an explicit allow rule from the Bastion subnet; internet SSH does not match an allow rule
+- Custom game rules allow TCP 3724 for auth and TCP 8085 for world from any source
+- Database custom rules allow MySQL from application subnets, while the default VNet allow rule still permits other internal traffic
+- Service endpoints provide a Microsoft backbone path to SQL and Storage; service firewalls need separate configuration
 
 **Next Steps**: In **Lab 2.3**, you'll configure Azure DNS for custom domain resolution and deploy Azure Load Balancer to distribute traffic across multiple game servers for high availability.
 

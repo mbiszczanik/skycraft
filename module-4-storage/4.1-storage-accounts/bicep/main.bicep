@@ -3,7 +3,7 @@ SUMMARY: Lab 4.1 - Storage Accounts - Orchestrator
 DESCRIPTION: Deploys the SkyCraft storage accounts (platform, development, production) via the Azure Verified Module for storage accounts, with environment-specific redundancy, the canonical tags and blob/file soft delete
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev
 AUTHOR/S: Marcin Biszczanik
-VERSION: 2.0.0
+VERSION: 2.1.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -112,6 +112,8 @@ module modStorageAccount 'br/public:avm/res/storage/storage-account:0.33.0' = [f
     supportsHttpsTrafficOnly: true
     allowBlobPublicAccess: false
     allowSharedKeyAccess: true
+    // The Portal's Advanced tab leaves "Allow cross-tenant replication" unchecked; stated here so the guide's three paths visibly agree (#358)
+    allowCrossTenantReplication: false
     publicNetworkAccess: parPublicNetworkAccess
     // Creation-only property; AVM defaults it to true while Azure's own default is false (standards section 4.5)
     requireInfrastructureEncryption: parEnableInfrastructureEncryption

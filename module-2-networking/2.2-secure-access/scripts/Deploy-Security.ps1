@@ -211,29 +211,29 @@ function Add-Rule {
 }
 
 # Dev Rules
-Add-Rule -NSG $nsgDevAuth  -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH from Bastion"
-Add-Rule -NSG $nsgDevAuth  -Name "Allow-Auth-GamePort"    -Priority 110 -DestPort 3724 -Desc "Allow Auth Game Port"
+Add-Rule -NSG $nsgDevAuth  -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH access from Azure Bastion subnet"
+Add-Rule -NSG $nsgDevAuth  -Name "Allow-Auth-GamePort"    -Priority 110 -DestPort 3724 -Desc "Allow game authentication traffic (port 3724)"
 $nsgDevAuth | Set-AzNetworkSecurityGroup | Out-Null
 
-Add-Rule -NSG $nsgDevWorld -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH from Bastion"
-Add-Rule -NSG $nsgDevWorld -Name "Allow-World-GamePort"   -Priority 110 -DestPort 8085 -Desc "Allow World Game Port"
+Add-Rule -NSG $nsgDevWorld -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH access from Azure Bastion subnet"
+Add-Rule -NSG $nsgDevWorld -Name "Allow-World-GamePort"   -Priority 110 -DestPort 8085 -Desc "Allow world server connections (port 8085)"
 $nsgDevWorld | Set-AzNetworkSecurityGroup | Out-Null
 
-Add-Rule -NSG $nsgDevDb    -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH from Bastion"
-Add-Rule -NSG $nsgDevDb    -Name "Allow-MySQL-From-AppTier" -Priority 110 -DestPort 3306 -SrcPrefix @("10.1.1.0/24","10.1.2.0/24") -Desc "Allow MySQL from App Subnets"
+Add-Rule -NSG $nsgDevDb    -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH access from Azure Bastion subnet"
+Add-Rule -NSG $nsgDevDb    -Name "Allow-MySQL-From-AppTier" -Priority 110 -DestPort 3306 -SrcPrefix @("10.1.1.0/24","10.1.2.0/24") -Desc "Allow MySQL from Auth and World servers"
 $nsgDevDb | Set-AzNetworkSecurityGroup | Out-Null
 
 # Prod Rules
-Add-Rule -NSG $nsgProdAuth  -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH from Bastion"
-Add-Rule -NSG $nsgProdAuth  -Name "Allow-Auth-GamePort"    -Priority 110 -DestPort 3724 -Desc "Allow Auth Game Port"
+Add-Rule -NSG $nsgProdAuth  -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH access from Azure Bastion subnet"
+Add-Rule -NSG $nsgProdAuth  -Name "Allow-Auth-GamePort"    -Priority 110 -DestPort 3724 -Desc "Allow game authentication traffic (port 3724)"
 $nsgProdAuth | Set-AzNetworkSecurityGroup | Out-Null
 
-Add-Rule -NSG $nsgProdWorld -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH from Bastion"
-Add-Rule -NSG $nsgProdWorld -Name "Allow-World-GamePort"   -Priority 110 -DestPort 8085 -Desc "Allow World Game Port"
+Add-Rule -NSG $nsgProdWorld -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH access from Azure Bastion subnet"
+Add-Rule -NSG $nsgProdWorld -Name "Allow-World-GamePort"   -Priority 110 -DestPort 8085 -Desc "Allow world server connections (port 8085)"
 $nsgProdWorld | Set-AzNetworkSecurityGroup | Out-Null
 
-Add-Rule -NSG $nsgProdDb    -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH from Bastion"
-Add-Rule -NSG $nsgProdDb    -Name "Allow-MySQL-From-AppTier" -Priority 110 -DestPort 3306 -SrcPrefix @("10.2.1.0/24","10.2.2.0/24") -Desc "Allow MySQL from App Subnets"
+Add-Rule -NSG $nsgProdDb    -Name "Allow-SSH-From-Bastion" -Priority 100 -DestPort 22 -SrcPrefix "10.0.0.0/26" -Desc "Allow SSH access from Azure Bastion subnet"
+Add-Rule -NSG $nsgProdDb    -Name "Allow-MySQL-From-AppTier" -Priority 110 -DestPort 3306 -SrcPrefix @("10.2.1.0/24","10.2.2.0/24") -Desc "Allow MySQL from Auth and World servers"
 $nsgProdDb | Set-AzNetworkSecurityGroup | Out-Null
 
 # ===================================
