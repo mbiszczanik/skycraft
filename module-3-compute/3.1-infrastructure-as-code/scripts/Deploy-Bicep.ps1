@@ -191,3 +191,4 @@ finally {
         Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
     }
 }
+Exit-Lab -FailureCount 0
