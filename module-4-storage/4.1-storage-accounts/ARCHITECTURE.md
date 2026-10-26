@@ -20,7 +20,7 @@
 | Network isolation | Public endpoints accessible from internet | Private endpoints + service endpoints only | Lab 4.1 teaches resource creation; Lab 4.4 teaches network security. Production needs zero public exposure for sensitive data. |
 | Encryption key management | Microsoft-managed keys (default) | Customer-managed keys (CMK) in Key Vault | CMK provides key rotation control and regulatory compliance (HIPAA, PCI-DSS); added complexity for a lab. |
 | Access controls | Shared key access enabled | Disable shared keys, RBAC only | Shared keys are legacy; RBAC is role-based least privilege. Lab doesn't enforce this choice. |
-| Monitoring & diagnostics | Not configured in this lab | Storage Analytics + Azure Monitor logs | Lab 4.5 (or later module) would add monitoring. Storage diagnostics help with troubleshooting and capacity planning. |
+| Monitoring & diagnostics | Not configured in this lab | Storage Analytics + Azure Monitor logs | Lab 5.1 adds a diagnostic setting to the platform account. Storage diagnostics help with troubleshooting and capacity planning. |
 
 ## 3. Well-Architected lens (light)
 
@@ -37,11 +37,11 @@
   - Dev LRS: ~€18/month (€0.018/GB/month × 1000 GB)
   - Prod GRS: ~€36/month
   - **Total: ~€90/month for 1 TB across all three environments**
-- **Lab cost controls:** Resource groups can be deleted after lab; no auto-shutdown needed (storage is always-on, but can be deleted immediately).
+- **Lab cost controls:** The lab stores a few megabytes, so the three accounts cost cents per month; an account has no fixed fee. Keep them until Module 5 is done: Labs 4.2-4.4 and 5.1-5.3 use them (the guide's "What This Lab Leaves Behind"). The Portal defaults that would add cost - read access to the secondary region (RA-GRS), geo priority replication, Microsoft Defender for Storage, a private endpoint - are named in Step 4.1.2 and left off.
 - **Cleanup reminder:**
   - Delete storage accounts to stop billing (data is deleted with the account unless backed up elsewhere).
   - Soft-deleted blobs/containers remain for 7 days after deletion; no additional cleanup needed.
-  - Ensure no external locks on storage accounts before RG deletion.
+  - Lab 1.3's `CanNotDelete` locks on `platform-skycraft-swc-rg` and `prod-skycraft-swc-rg` block deleting `platformskycraftswcsa` and `prodskycraftswcsa`; `Remove-LabResource.ps1` reports them as failed until the locks are removed (Lab 1.3's cleanup removes them).
 
 ## 5. Bicep implementation note (AVM)
 
@@ -49,4 +49,8 @@
 - **One copy loop, three environments**: the three near-identical conditional module calls collapsed into `[for env in varEnvironments: ...]` with `scope: resourceGroup('${env}-skycraft-swc-rg')`. `parDeployAllEnvironments` decides whether the loop runs over `platform, dev, prod` or over the single `parEnvironment`, and the three named outputs are rebuilt with `indexOf`, returning `not-deployed` for an environment this run skipped. The three `existing` resource-group lookups disappeared with the loop.
 - **Lab-friction overrides** (docs/bicep-standards.md §4.5): `networkAcls: { bypass: 'AzureServices', defaultAction: 'Allow' }` — the module emits `Deny` when the parameter is omitted, which would lock the account before Lab 4.4 teaches it; and `requireInfrastructureEncryption: false` — the module defaults it to `true` while Azure's own default is `false`, and the property is creation-only. Lab 4.1 wires the second one to `parEnableInfrastructureEncryption`, so `Deploy-Bicep.ps1 -InfraEncryption` still works on a brand-new account.
 - **`parIsNewDeployment` is gone**, and with it the `-NewDeployment` switch. The old template switched between two encryption objects so an update would not send the creation-only `keyType`; the AVM module leaves `keyType` unset unless it is passed, and the resulting encryption block is exactly the old update-safe one. The deploy script keeps its existing-account scan, because that scan still has a job: forcing infrastructure encryption off when the account already exists.
-- **Behavioural deltas from AVM defaults**, accepted rather than overridden: `allowCrossTenantReplication: false` (Azure's default is `true`) and `isLocalUserEnabled: false`.
+- **Behavioural deltas from AVM defaults**, accepted rather than overridden: `isLocalUserEnabled: false`. `allowCrossTenantReplication: false` is also the module's default, and `main.bicep` states it anyway (#358), because the Portal's Advanced tab leaves **Allow cross-tenant replication** unchecked and the guide's PowerShell and CLI blocks pass `$false`, so the three paths visibly agree.
+- **Paths that agree** (#358, #362): the Portal steps, the guide's Az PowerShell and CLI blocks and this template set the same account properties and the same 7-day soft delete for blobs, containers and file shares. Three known differences, listed in the guide's Paths section, none checked by `Test-Lab.ps1`:
+  - **Require Encryption in Transit for SMB** (Portal Advanced tab, checked by default) has no counterpart here. With `supportsHttpsTrafficOnly: true`, SMB already requires encryption, so file shares behave the same.
+  - **`isLocalUserEnabled: false`** comes from the AVM default (above); the Portal, PowerShell and CLI paths leave Azure's value. The Lab 4.4 parity run on a Portal-built account (#362) listed it as a what-if change.
+  - **`largeFileSharesState`**: AVM 0.33.0 sends its default `Disabled` when `skuName` is `Standard_LRS` or `Standard_ZRS` (so for `devskycraftswcsa`) and nothing for GRS; the other paths send nothing, and the Portal no longer offers the setting (#358). Azure refuses to turn it off once on, so a Bicep run over a dev account that another path left with it on may fail. Labs 4.2-4.4 call the same module for the dev account. Not yet checked live: `Deploy-Bicep.ps1 -WhatIf` over a Portal-built `devskycraftswcsa`, tracked with the class fix in #390.

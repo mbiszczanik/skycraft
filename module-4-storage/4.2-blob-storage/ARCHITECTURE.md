@@ -6,17 +6,17 @@
 
 | Decision | Choice in this lab | Alternatives considered | Why this choice (in a learning context) |
 |---|---|---|---|
-| Container isolation | Production: 4 private containers; Dev: 1 container (`public-demo`), also private | All private with lifecycle, all public with RBAC | Mirrors real scenarios: prod stores game-assets, backups, configs, logs (all private); dev carries the container the AZ-104 public-access walk-through uses. Its name records the intent; the subscription policy decides the outcome. |
-| Public access model | Both switches shown, both left off: `allowBlobPublicAccess: false` on every account, `publicAccess: 'None'` on every container | Account-level public access on Dev (the pre-v0.7 design) | The subscription's Azure Policy denies `allowBlobPublicAccess = true`, so the lab teaches the two-level model through the policy refusal (guide Step 4.2.12) instead of by opening the dev account. Lab 4.4 then hardens the accounts further. |
-| Lifecycle tiers | Prod logs: Hot→Cool (30d)→Cold (90d)→Archive (180d)→Delete (365d); backups: Archive (7d) | All tiers kept Hot, or delete after X days | Tiering teaches cost optimization: Cool/Cold/Archive are cheaper per-GB but have retrieval latency. Backups → Archive quickly (7d) reflects backup storage model. Logs aging to deletion (365d) teaches retention policies. |
+| Container isolation | Production: 4 private containers; Dev: 1 container (`public-demo`), also private | All private with lifecycle, all public with RBAC | Mirrors real scenarios: prod stores game-assets, backups, configs, logs (all private); dev carries the container the AZ-104 public-access walk-through uses. Its name records the intent; the account switch (`allowBlobPublicAccess: false`) keeps it private, and `Test-Lab.ps1` fails it when it is not. |
+| Public access model | Both switches shown, both left off: `allowBlobPublicAccess: false` on every account, `publicAccess: 'None'` on every container | Account-level public access on Dev (the pre-v0.7 design) | The lab teaches the two-level model as a walk-through (guide Step 4.2.12): the account switch stays off, so the New container pane offers only Private and an anonymous request is refused with `PublicAccessNotPermitted`. The course assigns no policy that pins the switch; Test-Lab fails it when it is on. Lab 4.4 then hardens the accounts further. |
+| Lifecycle tiers | Prod logs (`game-logs/` only): Hot→Cool (30d)→Cold (90d)→Archive (180d)→Delete (365d); backups (`player-backups/` only): Archive (7d); both archive actions skip blobs rehydrated in the last 7 days | All tiers kept Hot, or delete after X days | Tiering teaches cost optimization: Cool/Cold/Archive are cheaper per-GB but have retrieval latency. Backups → Archive quickly (7d) reflects backup storage model. Logs aging to deletion (365d) teaches retention policies. |
 | Blob versioning | Enabled (Prod only) | Disabled, or versioning with immutable snapshots | Versioning enables rollback of accidental overwrites; disabled in Dev (less critical). Production would enable for game-assets and configs. |
-| Lifecycle filters | Prefix matching on `player-backups/` | No prefix filtering, or wildcard patterns | Prefix filtering teaches selective rules; backups in a dedicated prefix is a real pattern. |
+| Lifecycle filters | Every rule has a prefix filter: `game-logs/` and `player-backups/` | An account-wide tiering rule (the design before #356) | A rule without a filter applies to every block blob in the account: `tier-game-logs` deleted game assets and player backups after 365 days. Each rule now names its container, and `Test-Lab.ps1` fails a rule whose prefix is missing or reaches outside it. |
 
 ## 2. Lab simplifications vs production
 
 | Aspect | What the lab does | What production would require | Why it matters |
 |---|---|---|---|
-| Retention compliance | Lifecycle auto-deletes after 365 days | Multi-year retention with legal hold / immutable storage | Game logs may have regulatory or audit requirements (GDPR, SOC2). Immutable blobs prevent deletion once set. |
+| Retention compliance | Lifecycle auto-deletes logs under `game-logs/` after 365 days | Multi-year retention with legal hold / immutable storage | Game logs may have regulatory or audit requirements (GDPR, SOC2). Immutable blobs prevent deletion once set. |
 | Rehydration cost | Not addressed | Explicitly budget rehydration cost when retrieving from Archive | Rehydration can take hours and cost 10–100x more than initial storage. Production must track access patterns. |
 | Backup strategy | Backups archived after 7 days (still deletable) | Immutable snapshots or cross-region replication | Lab doesn't teach active/passive backup failover; snapshots are point-in-time but mutable. |
 | Change tracking | Versioning enabled (no change feed) | Change feed + event-driven pipelines | Versioning tracks overwrites; change feed integrates with Event Grid for real-time processing. Lab is simpler. |
@@ -27,8 +27,8 @@
 - **Dominant pillar:** Cost Optimization & Compliance
 - **Cost Optimization:** Lifecycle policies tiering logs down automatically reduce storage costs by 60–80%; Archive tier at €0.004/GB/month vs Hot at €0.018/GB/month.
 - **Reliability:** Versioning (Prod) enables rollback; multi-region replication would be next step.
-- **Security:** Every account has `allowBlobPublicAccess: false` and every container is private, Dev included; the public-access walk-through in the guide is a read-only tour of the switches and of the policy that pins them. RBAC/SAS token controls not shown here (Lab 4.4).
-- **Compliance:** 365-day retention before deletion reflects audit requirements; immutable storage not yet needed.
+- **Security:** Every account has `allowBlobPublicAccess: false` and every container is private, Dev included; the public-access walk-through in the guide is a read-only tour of the two switches. RBAC/SAS token controls not shown here (Lab 4.4).
+- **Compliance:** 365-day retention before deletion applies to logs only; game assets and backups are never deleted by a rule. Immutable storage is not used: version-level immutability cannot be turned off once enabled, which a lab cannot afford.
 
 ## 4. Cost / FinOps note
 
@@ -50,7 +50,8 @@
 
 - **Containers and lifecycle rules are parameters, not resources**: both prod and dev go through `avm/res/storage/storage-account` (pinned in docs/bicep-standards.md §4.4), with the containers as `blobServices.containers` and the two tiering rules as `managementPolicyRules`. The lab's `modules/blobContainer.bicep` is deleted.
 - **The cross-lab import is gone.** This template used to import `../../4.1-storage-accounts/bicep/modules/storageAccount.bicep`, coupling two labs at compile time; each lab now calls the AVM module directly.
-- **The `PublicAccessNotPermitted` race no longer exists.** `blobContainer.bicep` was a workaround for creating a `Blob`-level container before `allowBlobPublicAccess` had settled. Every container in this lab is `publicAccess: 'None'` — the subscription policy blocks anything else — so the race cannot occur and the container declaration moved inside the module call.
+- **The `PublicAccessNotPermitted` race no longer exists.** `blobContainer.bicep` was a workaround for creating a `Blob`-level container before `allowBlobPublicAccess` had settled. Every container in this lab is `publicAccess: 'None'` — the account switch stays off — so the race cannot occur and the container declaration moved inside the module call.
 - **`fileServices` is omitted on purpose.** The module skips a sub-service entirely when its parameter is empty, so Lab 4.1's file-share soft delete (and later Lab 4.3's shares) survive this deployment untouched. See the cumulative-lab note in docs/bicep-standards.md §4.5.
 - **Lab-friction overrides** (docs/bicep-standards.md §4.5): `networkAcls` default action `Allow` and `requireInfrastructureEncryption: false`, as in Lab 4.1.
 - **`Deploy-Bicep.ps1` now passes `parLocation`.** It accepted `-Location` but only used it as the deployment location, so the template always kept its own default.
+- **Lifecycle rules match the Portal's defaults.** Both `tierToArchive` actions carry `daysAfterLastTierChangeGreaterThan: 7`, which the Portal writes when **Skip blobs that have been rehydrated in the last** is left ticked on an archive block, so the Portal, Az PowerShell and Bicep paths write the same policy (#359, #362).

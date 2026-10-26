@@ -243,8 +243,8 @@
     },
     {
       "type": "text", "id": "ev_t", "x": 36, "y": 454, "width": 780, "height": 83,
-      "text": "a caller with the account key clears gate 2 and never faces gate 3\n  -> RBAC cannot restrict it, the audit log cannot name the person\n\naz storage account update -n prodskycraftswcsa \\\n  --allow-shared-key-access false      # forces every caller through Entra ID",
-      "originalText": "a caller with the account key clears gate 2 and never faces gate 3\n  -> RBAC cannot restrict it, the audit log cannot name the person\n\naz storage account update -n prodskycraftswcsa \\\n  --allow-shared-key-access false      # forces every caller through Entra ID",
+      "text": "a caller with the account key clears gate 2 and never faces gate 3\n  -> RBAC cannot restrict it, the audit log cannot name the person\n\nthe cure - Allow storage account key access set to Disabled - ends a move to Entra ID\nthis course keeps it Enabled - the SAS of Section 2 and the file share mounts use the key",
+      "originalText": "a caller with the account key clears gate 2 and never faces gate 3\n  -> RBAC cannot restrict it, the audit log cannot name the person\n\nthe cure - Allow storage account key access set to Disabled - ends a move to Entra ID\nthis course keeps it Enabled - the SAS of Section 2 and the file share mounts use the key",
       "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#166534", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
