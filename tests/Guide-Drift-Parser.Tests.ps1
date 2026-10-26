@@ -749,7 +749,7 @@ Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#
 
     It 'reads step <id> as <labels> and the list to verify as its Expected Result' -ForEach @(
         @{ lab = '2.2'; id = '2.2.11'; labels = @('Bastions', 'platform-skycraft-swc-bas')
-           expected = 'Bastion is operational and ready to provide secure connectivity to VMs in all peered VNets. Status: Succeeded; Virtual network: platform-skycraft-swc-vnet; Subnet: AzureBastionSubnet; Public IP: platform-skycraft-swc-bas-pip' }
+           expected = 'Bastion is operational and ready to provide secure connectivity to VMs in all peered VNets. Provisioning state: Succeeded; Virtual network/subnet: platform-skycraft-swc-vnet/AzureBastionSubnet; Public IPv4 address: platform-skycraft-swc-bas-pip; Tier: Basic' }
         @{ lab = '4.1'; id = '4.1.8'; labels = @('prodskycraftswcsa', 'Security + networking', 'Encryption')
            expected = 'Encryption type: Microsoft-managed keys; This is always enabled and cannot be disabled' }
         @{ lab = '4.1'; id = '4.1.10'; labels = @('prodskycraftswcsa', 'Configuration')
@@ -1384,6 +1384,9 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '1.3.9/Allowed locations | Sweden Central | North Europe/checked=1,2'
             '2.3.11/Enable TCP Reset/checked=0'
             '2.3.12/Enable TCP Reset/checked=0'
+            # One per production load balancing rule (world, auth).
+            '2.3.16/Enable TCP Reset/checked=0'
+            '2.3.16/Enable TCP Reset/checked=0'
             '3.3.7/Use quickstart image/unchecked=0'
             '3.3.2/Admin user/checked=0'
             '3.3.2/Admin user/stateOnly=0'

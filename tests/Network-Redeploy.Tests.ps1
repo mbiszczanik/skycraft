@@ -408,7 +408,7 @@ Describe 'AppServiceSubnet delegation - every Lab 2.1 path creates the same subn
         $guide = Get-Content -Raw -LiteralPath (Join-Path $script:Lab21 'lab-guide-2.1.md')
         $dev  = [regex]::Match($guide, '(?s)### Step 2\.1\.6:.*?### Step 2\.1\.7:').Value
         $prod = [regex]::Match($guide, '(?s)### Step 2\.1\.8:.*?## ').Value
-        $dev  | Should -Match '\| Delegate subnet to a service \| `Microsoft\.Web/serverFarms` \|'
+        $dev  | Should -Match '\| (\*\*)?Delegate subnet to a service(\*\*)?\s+\| `Microsoft\.Web/serverFarms`\s+\|'
         $prod | Should -Match '\*\*Delegate subnet to a service\*\* to `Microsoft\.Web/serverFarms`'
     }
 }
