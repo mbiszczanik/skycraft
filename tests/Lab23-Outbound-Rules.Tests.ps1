@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
-    Pester 5 test: each Lab 2.3 load balancer gives the Module 3 VMs their egress through one
-    outbound rule and a shared egress pool, and Lab 2.3's Test-Lab.ps1 fails on any other shape.
+    Pester 5 test: each Module 2/3 load balancer gives the VMs their egress through one outbound
+    rule and a shared egress pool, Lab 3.2 puts every VM NIC into that pool, and Lab 2.3's
+    Test-Lab.ps1 fails on any other shape.
 
 .DESCRIPTION
     Issue #344. The subnets are private (#279), so the Module 3 VMs reach the internet only through
@@ -15,8 +16,8 @@
       - so each load balancer has one outbound rule, protocol All, for a dedicated egress pool
         '<lb>-be-outbound', and every VM NIC sits in that pool besides its role pool.
 
-    This suite pins that shape in the Lab 2.3 template; the Lab 3.1 and 3.2 parts follow with
-    their own change. Manual port allocation must be a multiple of 8 and admit
+    This suite pins that shape in the Lab 2.3 and Lab 3.1 templates, the Lab 3.2 VM NICs and the
+    Lab 3.1 guide's own module snippets. Manual port allocation must be a multiple of 8 and admit
     the most instances Module 3 can put into one egress pool: the Lab 3.2 auth and world VMs plus
     the prod scale set at its autoscale maximum of 4, 6 in all, out of the 63,984 ports the
     frontend offers to its outbound rule.
@@ -39,6 +40,8 @@
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     $script:Lab23    = Join-Path $script:RepoRoot 'module-2-networking/2.3-name-resolution'
+    $script:Lab31    = Join-Path $script:RepoRoot 'module-3-compute/3.1-infrastructure-as-code'
+    $script:Lab32    = Join-Path $script:RepoRoot 'module-3-compute/3.2-virtual-machines'
 
     # Ports the frontend IP offers to its one outbound rule (the Portal's Available frontend
     # ports), and the most instances Module 3 can put into one egress pool (2 VMs + 4 VMSS).
@@ -74,6 +77,8 @@ BeforeAll {
     }
 
     $script:Template23 = ConvertFrom-BicepFile -Path (Join-Path $script:Lab23 'bicep/main.bicep') -Name 'lab23'
+    $script:Template31 = ConvertFrom-BicepFile -Path (Join-Path $script:Lab31 'bicep/main.bicep') -Name 'lab31'
+    $script:Template32 = ConvertFrom-BicepFile -Path (Join-Path $script:Lab32 'bicep/main.bicep') -Name 'lab32'
 }
 
 AfterAll {
@@ -130,6 +135,80 @@ Describe 'Lab 2.3 template - one outbound rule per frontend, for the egress pool
         $ports | Should -BeOfType [long] -Because 'manual allocation; the module default (63984) admits a single instance'
         $ports % 8 | Should -Be 0 -Because 'Azure allocates outbound ports in multiples of 8'
         [math]::Floor($script:FrontendPorts / $ports) | Should -BeGreaterOrEqual $script:MaxEgressInstances -Because 'the egress pool must admit every instance Module 3 can put there'
+    }
+}
+
+Describe 'Lab 3.1 template - the hand-written load balancer follows the same design' {
+
+    It 'uses the Portal health-probe threshold of one failed probe' {
+        $guide = Get-Content -Raw -LiteralPath (Join-Path $script:Lab31 'lab-guide-3.1.md')
+
+        $lb = Get-TemplateModule -Template $script:Template31 -DeploymentName 'devLoadBalancerDeployment'
+        $probes = $lb.properties.parameters.parHealthProbes.value
+        @($probes).Count | Should -Be 2
+        foreach ($probe in $probes) { $probe.probeThreshold | Should -Be 1 }
+        $guide | Should -Match 'probeThreshold: probe.probeThreshold'
+        @([regex]::Matches($guide, 'probeThreshold: 1')).Count | Should -Be 2
+    }
+
+    It 'keeps outbound SNAT off and allows at most one outbound rule' {
+        $text = Get-Content -Raw -LiteralPath (Join-Path $script:Lab31 'bicep/modules/loadbalancer.bicep')
+        $text | Should -Match '(?m)^\s*disableOutboundSnat: true\s*$'
+        $text | Should -Match '(?m)^@maxLength\(1\)\s*\r?\nparam parOutboundRules ' -Because 'one frontend IP takes one outbound rule'
+    }
+
+    It 'sends a TCP reset on idle timeout on every load-balancing rule, as Lab 2.3 does' {
+        $rules = [regex]::Match((Get-Content -Raw -LiteralPath (Join-Path $script:Lab31 'bicep/modules/loadbalancer.bicep')),
+            '(?s)loadBalancingRules: \[.*?outboundRules: \[').Value
+        $rules | Should -Match '(?m)^\s*enableTcpReset: true\s*$' -Because 'Lab 2.3 ticks Enable TCP reset on both rules and Lab 3.1 describes the same load balancer'
+
+        $guide = Get-Content -Raw -LiteralPath (Join-Path $script:Lab31 'lab-guide-3.1.md')
+        $guideRules = [regex]::Match($guide, '(?s)loadBalancingRules: \[for \(rule, i\) in lbRules:.*?outboundRules: \[').Value
+        $guideRules | Should -Match '(?m)^\s*enableTcpReset: true\b'
+    }
+
+    It 'passes the egress pool and one outbound rule for it' {
+        $lb = Get-TemplateModule -Template $script:Template31 -DeploymentName 'devLoadBalancerDeployment'
+        $lb | Should -Not -BeNullOrEmpty
+        $params = $lb.properties.parameters
+        $egressPool = "[format('{0}-lb-be-outbound', variables('varDevPrefix'))]"
+        @($params.parBackendPools.value | ForEach-Object { $_.name }) | Should -Contain $egressPool
+        $outbound = @($params.parOutboundRules.value)
+        $outbound.Count | Should -Be 1
+        $outbound[0].backendPoolName | Should -Be $egressPool
+        $outbound[0].protocol | Should -Be 'All'
+        $outbound[0].allocatedOutboundPorts | Should -Be 8000 -Because 'Lab 3.1 builds the same load balancer as Lab 2.3'
+        $outbound[0].idleTimeoutInMinutes | Should -Be 4
+        $outbound[0].enableTcpReset | Should -BeTrue
+    }
+
+    It "the guide's own module snippets declare the same design" {
+        $guide = Get-Content -Raw -LiteralPath (Join-Path $script:Lab31 'lab-guide-3.1.md')
+        $guide | Should -Match 'disableOutboundSnat: true'
+        $guide | Should -Match 'outboundRules: \['
+        $guide | Should -Match 'lb-be-outbound'
+        $guide | Should -Match 'defaultOutboundAccess: false'
+    }
+}
+
+Describe 'Lab 3.2 template - every VM NIC is in its role pool and the egress pool' {
+
+    It "'<deployment>' puts its NIC into '<rolePool>' and the egress pool" -ForEach @(
+        @{ deployment = 'auth-vm-deployment'; rolePool = 'be-auth' }
+        @{ deployment = 'world-vm-deployment'; rolePool = 'be-world' }
+    ) {
+        $vm = Get-TemplateModule -Template $script:Template32 -DeploymentName $deployment
+        $vm | Should -Not -BeNullOrEmpty
+        $pools = @($vm.properties.parameters.nicConfigurations.value[0].ipConfigurations[0].loadBalancerBackendAddressPools | ForEach-Object { $_.id })
+        $pools.Count | Should -Be 2
+        @($pools | Where-Object { $_ -match [regex]::Escape("-$rolePool") }).Count | Should -Be 1
+        @($pools | Where-Object { $_ -match 'be-outbound' }).Count | Should -Be 1 -Because 'the outbound rule gives internet access to the egress pool only'
+    }
+
+    It 'Test-Lab.ps1 checks both VM NICs in the egress pool by their NIC IDs' {
+        $text = Get-Content -Raw -LiteralPath (Join-Path $script:Lab32 'scripts/Test-Lab.ps1')
+        $text | Should -Match '-lb-be-outbound'
+        $text | Should -Match 'NetworkProfile\.NetworkInterfaces'
     }
 }
 

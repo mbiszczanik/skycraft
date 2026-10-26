@@ -42,7 +42,7 @@
                template, Deploy-Networking.ps1 and the guide's portal steps - because a re-run
                no longer touches an existing subnet and so cannot add a missing delegation.
 
-    Issue #279 adds one more value of the same kind: every subnet Lab 2.1 and 2.2 declare,
+    Issue #279 adds one more value of the same kind: every subnet Lab 2.1, 2.2 and 3.1 declare,
     and every subnet Deploy-Networking.ps1 creates, is private (defaultOutboundAccess false), as
     the portal creates it. Unset, the AVM subnet module sends null, which allows default outbound
     access, so a Bicep-built estate would not match a portal-built one.
@@ -154,6 +154,11 @@ Describe 'Lab 3.1 template - an existing VNet is referenced, not redeployed' {
     It "creates subnets with privateEndpointNetworkPolicies 'Disabled', as Lab 2.1 does" {
         Get-Content -Raw -LiteralPath (Join-Path $script:Lab31 'bicep/modules/network.bicep') |
             Should -Match "privateEndpointNetworkPolicies: 'Disabled'"
+    }
+
+    It 'creates private subnets (defaultOutboundAccess false), as Lab 2.1 does' {
+        Get-Content -Raw -LiteralPath (Join-Path $script:Lab31 'bicep/modules/network.bicep') |
+            Should -Match '(?m)^\s*defaultOutboundAccess: false\s*$'
     }
 
     It 'no longer claims that a re-run after Module 2 changes nothing' {
