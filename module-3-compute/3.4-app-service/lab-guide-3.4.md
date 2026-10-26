@@ -583,12 +583,12 @@ In the Portal, the same order:
 13. Click **Disconnect**, and confirm
 14. Under **Settings**, select **Networking**, and verify:
     - _Virtual network integration_: **Not configured**
-15. Click **Overview**, click **Delete**, and confirm. The `staging` slot is deleted with the app.
+15. Click **Overview**, click **Delete**, type the app's name, and click **Delete**. The pane lists the app, its `staging` slot and, when this is the plan's last app, the plan with **Delete App Service plan** set to **Yes**: all three are deleted.
 16. In Azure Portal, search for **Resource groups**
 17. Click **dev-skycraft-swc-rg**
-18. Check **Show hidden types**
+18. Click **Manage view**, then **Show hidden types**
 19. Click the plan's autoscale setting: `dev-skycraft-swc-asp-Autoscale-<number>` if you built the lab in the Portal, `dev-skycraft-swc-asp-autoscale` if you deployed the Bicep
-20. Click **Delete**, and confirm
+20. The setting's own page has no **Delete**: go back to the resource list, tick its row, click **Delete** on the toolbar, and confirm
 21. In Azure Portal, search for **App Service plans**
 22. Click **dev-skycraft-swc-asp**. If it is not listed, App Service deleted the plan with its last app in item 15, and the list ends here
 23. Click **Delete**, and confirm
