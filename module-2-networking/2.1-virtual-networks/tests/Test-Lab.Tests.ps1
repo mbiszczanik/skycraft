@@ -40,6 +40,7 @@ BeforeAll {
     $script:RequiredModules = @('Az.Accounts', 'Az.Network')
 
     $script:StubCommands = @(
+        'Get-AzContext'
         'Get-AzVirtualNetwork'
         'Get-AzVirtualNetworkPeering'
         'Get-AzPublicIpAddress'
@@ -59,6 +60,12 @@ function New-StubSubnet {
 function New-StubDelegation {
     param([string]$Name, [string]$ServiceName)
     [pscustomobject]@{ Name = $Name; ServiceName = $ServiceName }
+}
+
+function Get-AzContext {
+    [CmdletBinding()]
+    param()
+    [pscustomobject]@{ Subscription = [pscustomobject]@{ Id = '00000000-0000-0000-0000-000000000000'; Name = 'stub-subscription' } }
 }
 
 function Get-AzVirtualNetwork {
