@@ -164,7 +164,7 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 # Verify Azure context
 $context = Get-AzContext
 if (-not $context) {
-    Write-Error "Not logged into Azure. Run Connect-AzAccount first."
+    Write-Host "[ERROR] Not logged into Azure. Run Connect-AzAccount first." -ForegroundColor Red
     Exit-Lab -FailureCount 1
 }
 
@@ -257,7 +257,7 @@ if ($IncludeKeyVault) {
 
 if ($resourcesToDelete.Count -eq 0 -and $script:cleanupFailures -eq 0) {
     Write-Host "`nNo Lab 3.2 resources found to delete." -ForegroundColor Green
-    exit 0
+    Exit-Lab -FailureCount 0
 }
 
 # Delete resources
@@ -394,3 +394,4 @@ Write-Host "  Cleanup Complete" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Lab 3.1 resources (VNets, NSGs, LB) were NOT deleted." -ForegroundColor Gray
 Write-Host "========================================`n" -ForegroundColor Cyan
+Exit-Lab -FailureCount 0
