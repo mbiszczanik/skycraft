@@ -16,7 +16,7 @@ By completing this module, you will be able to:
 - **Implement blob storage** with containers, versioning, soft delete, and lifecycle management
 - **Configure Azure Files** with file shares, quotas and access tiers, snapshots and soft delete, and SMB mounts on Windows and Linux
 - **Secure storage** using SAS tokens, stored access policies, firewalls, and encryption
-- **Manage data** using Azure Storage Explorer and AzCopy
+- **Manage data** using Azure Storage Explorer and the Portal's Storage browser (AzCopy is referenced in Lab 4.1, not practised)
 - **Apply governance** tags and monitor storage costs
 
 ---
@@ -70,7 +70,7 @@ Before starting, ensure you have:
 2. **Start with Lab 4.1** - Create and configure storage accounts with redundancy
 3. **Progress to Lab 4.2** - Implement blob containers, tiers, and lifecycle policies
 4. **Complete Lab 4.3** - Configure Azure Files with snapshots and soft delete
-5. **Complete Lab 4.4** - Secure storage with SAS, firewalls, and encryption
+5. **Complete Lab 4.4** - Secure storage with a firewall, revocable SAS, key rotation and Entra ID data roles
 6. **Take the module assessment** to validate learning
 
 > [!IMPORTANT]
