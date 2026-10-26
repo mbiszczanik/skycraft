@@ -19,7 +19,7 @@
     This suite pins that shape in the Lab 2.3 and Lab 3.1 templates, the Lab 3.2 VM NICs and the
     Lab 3.1 guide's own module snippets. Manual port allocation must be a multiple of 8 and admit
     the most instances Module 3 can put into one egress pool: the Lab 3.2 auth and world VMs plus
-    the prod scale set at its autoscale maximum of 4, 6 in all, out of the 63,992 ports the
+    the prod scale set at its autoscale maximum of 4, 6 in all, out of the 63,984 ports the
     frontend offers to its outbound rule.
 
     It also lifts Test-LB out of Lab 2.3's Test-Lab.ps1 with the PowerShell parser and runs it
@@ -45,7 +45,7 @@ BeforeAll {
 
     # Ports the frontend IP offers to its one outbound rule (the Portal's Available frontend
     # ports), and the most instances Module 3 can put into one egress pool (2 VMs + 4 VMSS).
-    $script:FrontendPorts      = 63992
+    $script:FrontendPorts      = 63984
     $script:MaxEgressInstances = 6
 
     Import-Module (Join-Path $script:RepoRoot 'tools' 'BicepCli.psm1') -Force
@@ -86,6 +86,19 @@ AfterAll {
 }
 
 Describe 'Lab 2.3 template - one outbound rule per frontend, for the egress pool' {
+
+    It 'uses the Portal health-probe threshold in Bicep and the PowerShell deployment script' {
+        $script = Get-Content -Raw -LiteralPath (Join-Path $script:Lab23 'scripts/Deploy-LoadBalancer.ps1')
+
+        foreach ($deployment in 'deploy-dev-lb', 'deploy-prod-lb') {
+            $probes = (Get-TemplateModule -Template $script:Template23 -DeploymentName $deployment).properties.parameters.probes.value
+            @($probes).Count | Should -Be 2
+            foreach ($probe in $probes) {
+                (Resolve-TemplateValue -Template $script:Template23 -Value $probe.probeThreshold) | Should -Be 1
+            }
+        }
+        @([regex]::Matches($script, '-ProbeCount 2 -ProbeThreshold 1')).Count | Should -Be 2
+    }
 
     It "'<deployment>' keeps outbound SNAT off on its load balancing rules" -ForEach @(
         @{ deployment = 'deploy-dev-lb' }
@@ -221,11 +234,15 @@ Describe "Lab 2.3 Test-Lab.ps1 - the egress pool and its outbound rule are requi
             param(
                 [string[]]$Pools = @('lb-be-world', 'lb-be-auth', 'lb-be-outbound'),
                 [object[]]$OutboundRules = @([pscustomobject]@{ Name = 'lb-outbound'; Protocol = 'All'; AllocatedOutboundPorts = 8000; BackendAddressPool = (New-StubPoolRef 'LB-BE-OUTBOUND') }),
-                [bool]$SnatOnAuthRule = $false
+                [bool]$SnatOnAuthRule = $false,
+                [object[]]$Probes = @(
+                    [pscustomobject]@{ Name = 'probe-world'; ProbeThreshold = 1 }
+                    [pscustomobject]@{ Name = 'probe-auth'; ProbeThreshold = 1 }
+                )
             )
             $script:StubLb = [pscustomobject]@{
                 Sku                 = [pscustomobject]@{ Name = 'Standard' }
-                Probes              = @('probe-world', 'probe-auth')
+                Probes              = $Probes
                 BackendAddressPools = @($Pools | ForEach-Object { [pscustomobject]@{ Name = $_ } })
                 LoadBalancingRules  = @(
                     [pscustomobject]@{ Name = 'rule-world'; DisableOutboundSnat = $true }
@@ -255,6 +272,27 @@ Describe "Lab 2.3 Test-Lab.ps1 - the egress pool and its outbound rule are requi
         )
         $run.Errors | Should -Be 1
         $run.Output | Should -Contain '  - [FAIL] Egress backend pool NOT found: lb-be-outbound'
+    }
+
+    It 'fails a probe with <condition>' -ForEach @(
+        @{ condition = 'a threshold of two'; probe = [pscustomobject]@{ Name = 'probe-world'; ProbeThreshold = 2 } }
+        @{ condition = 'a null threshold'; probe = [pscustomobject]@{ Name = 'probe-world'; ProbeThreshold = $null } }
+        @{ condition = 'no threshold property'; probe = [pscustomobject]@{ Name = 'probe-world' } }
+    ) {
+        $run = Invoke-StubTestLb -Probes @($probe, [pscustomobject]@{ Name = 'probe-auth'; ProbeThreshold = 1 })
+        $run.Errors | Should -Be 1
+        $run.Output | Should -Contain '  - [FAIL] Health probe threshold must be 1 on: probe-world'
+    }
+
+    It 'accepts modern threshold one with ignored legacy count <legacy>' -ForEach @(
+        @{ legacy = 1 }
+        @{ legacy = 2 }
+    ) {
+        $run = Invoke-StubTestLb -Probes @(
+            [pscustomobject]@{ Name = 'probe-world'; ProbeThreshold = 1; NumberOfProbes = $legacy }
+            [pscustomobject]@{ Name = 'probe-auth'; ProbeThreshold = 1; NumberOfProbes = $legacy }
+        )
+        $run.Errors | Should -Be 0
     }
 
     It 'fails when no outbound rule uses the egress pool' {

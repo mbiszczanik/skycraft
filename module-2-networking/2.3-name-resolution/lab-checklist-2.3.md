@@ -5,24 +5,23 @@
 ### DNS Zone Configuration
 - [ ] DNS zone name: `skycraft.example.com`
 - [ ] Resource group: `platform-skycraft-swc-rg`
-- [ ] Location: **Sweden Central**
-- [ ] Status: **Running**
-- [ ] Name servers assigned: 4 (ns1-XX.azure-dns.com format)
+- [ ] Resource group location: **Sweden Central** (greyed out in the Portal, follows the resource group)
+- [ ] Name servers assigned: 4 (ns1-XX.azure-dns.com format), shown on the zone's **Overview**
 
 ### DNS Records
 - [ ] **A record**: `dev.skycraft.example.com`
   - Type: A
-  - TTL: 300 seconds
+  - TTL: 300 seconds (**TTL unit** set to **Seconds**, not the default **Hours**)
   - IP address: [Record IP: ____________] (dev-skycraft-swc-lb-pip)
 
 - [ ] **A record**: `play.skycraft.example.com`
   - Type: A
-  - TTL: 300 seconds
+  - TTL: 300 seconds (**TTL unit** set to **Seconds**)
   - IP address: [Record IP: ____________] (prod-skycraft-swc-lb-pip)
 
 - [ ] **CNAME record**: `game.skycraft.example.com`
   - Type: CNAME
-  - TTL: 3600 seconds
+  - TTL: 3600 seconds (1 hour, the pane's default of 1 **Hours**)
   - Alias: `play.skycraft.example.com`
 
 ### Tags
@@ -38,14 +37,15 @@
 ### Private DNS Zone Configuration
 - [ ] DNS zone name: `skycraft.internal`
 - [ ] Resource group: `platform-skycraft-swc-rg`
-- [ ] Location: **Sweden Central**
-- [ ] Virtual network links: 3 (hub, dev, prod)
+- [ ] Resource group location: **Sweden Central** (greyed out in the Portal, follows the resource group)
+- [ ] Virtual network links: 3 (hub, dev, prod); **Virtual Network Links With Registration**: 2
 
 ### Virtual Network Links
 - [ ] **Link 1**: `hub-vnet-link`
   - Virtual network: `platform-skycraft-swc-vnet`
   - Auto-registration: **Disabled**
   - Link state: **Completed**
+  - Tags: none from the Portal (its link page has no tags); the four SkyCraft tags from PowerShell or Bicep
 
 - [ ] **Link 2**: `dev-vnet-link`
   - Virtual network: `dev-skycraft-swc-vnet`
@@ -60,7 +60,7 @@
 ### Private DNS Records
 - [ ] **A record**: `dev-db.skycraft.internal`
   - Type: A
-  - TTL: 300 seconds
+  - TTL: 300 seconds (**TTL unit** set to **Seconds**)
   - IP address: `10.1.3.10`
 
 - [ ] **A record**: `prod-db.skycraft.internal`
@@ -81,9 +81,9 @@
 ### Load Balancer Configuration
 - [ ] Resource name: `dev-skycraft-swc-lb`
 - [ ] Resource group: `dev-skycraft-swc-rg`
-- [ ] Location: **Sweden Central**
+- [ ] Region: **Sweden Central**
 - [ ] SKU: **Standard**
-- [ ] Type: **Public**
+- [ ] Type: **Public** (the Portal starts at **Internal**)
 - [ ] Tier: **Regional**
 
 ### Frontend IP Configuration
@@ -96,13 +96,11 @@
 - [ ] **Backend pool 1**: `dev-skycraft-swc-lb-be-world`
   - Virtual network: `dev-skycraft-swc-vnet`
   - Backend pool configuration: NIC
-  - IP version: IPv4
   - VMs in pool: 0 (ready for Module 3)
 
 - [ ] **Backend pool 2**: `dev-skycraft-swc-lb-be-auth`
   - Virtual network: `dev-skycraft-swc-vnet`
   - Backend pool configuration: NIC
-  - IP version: IPv4
   - VMs in pool: 0 (ready for Module 3)
 
 - [ ] **Backend pool 3** (outbound): `dev-skycraft-swc-lb-be-outbound`
@@ -115,13 +113,13 @@
   - Protocol: TCP
   - Port: `8085`
   - Interval: 15 seconds
-  - Unhealthy threshold: 2
+  - Unhealthy threshold: 1
 
 - [ ] **Health probe 2**: `dev-skycraft-swc-lb-probe-auth`
   - Protocol: TCP
   - Port: `3724`
   - Interval: 15 seconds
-  - Unhealthy threshold: 2
+  - Unhealthy threshold: 1
 
 ### Load Balancing Rules
 - [ ] **Rule 1**: `dev-skycraft-swc-lb-rule-world`
@@ -133,7 +131,7 @@
   - Health probe: `dev-skycraft-swc-lb-probe-world`
   - Session persistence: None (5-tuple hash)
   - Idle timeout: 4 minutes
-  - TCP reset: Enabled
+  - TCP reset: Enabled (**Enable TCP Reset** is unchecked by default in the Portal)
 
 - [ ] **Rule 2**: `dev-skycraft-swc-lb-rule-auth`
   - Frontend IP: `dev-skycraft-swc-lb-frontend`
@@ -144,6 +142,7 @@
   - Health probe: `dev-skycraft-swc-lb-probe-auth`
   - Session persistence: None
   - Idle timeout: 4 minutes
+  - TCP reset: Enabled
 
 - [ ] Both rules: **Outbound source network address translation (SNAT)** left at **(Recommended) Use outbound rules to provide backend pool members access to the internet.**
 
@@ -169,9 +168,9 @@
 ### Load Balancer Configuration
 - [ ] Resource name: `prod-skycraft-swc-lb`
 - [ ] Resource group: `prod-skycraft-swc-rg`
-- [ ] Location: **Sweden Central**
+- [ ] Region: **Sweden Central**
 - [ ] SKU: **Standard**
-- [ ] Type: **Public**
+- [ ] Type: **Public** (the Portal starts at **Internal**)
 - [ ] Tier: **Regional**
 
 ### Frontend IP Configuration
@@ -200,24 +199,28 @@
   - Protocol: TCP
   - Port: `8085`
   - Interval: 15 seconds
-  - Unhealthy threshold: 2
+  - Unhealthy threshold: 1
 
 - [ ] **Health probe 2**: `prod-skycraft-swc-lb-probe-auth`
   - Protocol: TCP
   - Port: `3724`
   - Interval: 15 seconds
-  - Unhealthy threshold: 2
+  - Unhealthy threshold: 1
 
 ### Load Balancing Rules
 - [ ] **Rule 1**: `prod-skycraft-swc-lb-rule-world`
   - Port: `8085` → Backend port: `8085`
   - Backend pool: `prod-skycraft-swc-lb-be-world`
   - Health probe: `prod-skycraft-swc-lb-probe-world`
+  - TCP reset: Enabled
 
 - [ ] **Rule 2**: `prod-skycraft-swc-lb-rule-auth`
   - Port: `3724` → Backend port: `3724`
   - Backend pool: `prod-skycraft-swc-lb-be-auth`
   - Health probe: `prod-skycraft-swc-lb-probe-auth`
+  - TCP reset: Enabled
+
+- [ ] Both rules: **Outbound source network address translation (SNAT)** left at **(Recommended) Use outbound rules to provide backend pool members access to the internet.**
 
 ### Outbound Rule
 - [ ] **Outbound rule**: `prod-skycraft-swc-lb-outbound`
@@ -361,14 +364,15 @@ $lb.BackendAddressPools |
 
 # List health probes
 $lb.Probes |
-    Select-Object Name, Protocol, Port, IntervalInSeconds, NumberOfProbes |
+    Select-Object Name, Protocol, Port, IntervalInSeconds, ProbeThreshold |
     Format-Table -AutoSize
 
 # Expected output:
-# Name                             Protocol Port IntervalInSeconds NumberOfProbes
+# Name                             Protocol Port IntervalInSeconds ProbeThreshold
 # ----                             -------- ---- ----------------- --------------
-# dev-skycraft-swc-lb-probe-world  Tcp      8085 15                2
-# dev-skycraft-swc-lb-probe-auth   Tcp      3724 15                2
+# dev-skycraft-swc-lb-probe-world   Tcp      8085 15                1
+# dev-skycraft-swc-lb-probe-auth    Tcp      3724 15                1
+# The legacy NumberOfProbes field is separate from ProbeThreshold.
 
 # List load balancing rules
 $lb.LoadBalancingRules |
@@ -456,8 +460,8 @@ Use this table to document your deployed architecture:
 | └─ Backend Pool | dev-skycraft-swc-lb-be-world | Empty | Ready for VMs | ✅ |
 | └─ Backend Pool | dev-skycraft-swc-lb-be-auth | Empty | Ready for VMs | ✅ |
 | └─ Backend Pool | dev-skycraft-swc-lb-be-outbound | Empty | Egress pool, both VMs in Lab 3.2 | ✅ |
-| └─ Health Probe | dev-skycraft-swc-lb-probe-world | TCP:8085 | 15s interval, threshold 2 | ✅ |
-| └─ Health Probe | dev-skycraft-swc-lb-probe-auth | TCP:3724 | 15s interval, threshold 2 | ✅ |
+| └─ Health Probe | dev-skycraft-swc-lb-probe-world | TCP:8085 | 15s interval, threshold 1 | ✅ |
+| └─ Health Probe | dev-skycraft-swc-lb-probe-auth | TCP:3724 | 15s interval, threshold 1 | ✅ |
 | └─ Outbound Rule | dev-skycraft-swc-lb-outbound | All | be-outbound, 8000 ports per instance | ✅ |
 | **Prod Load Balancer** | prod-skycraft-swc-lb | Standard Public | 3 pools, 2 probes, 2 rules, 1 outbound rule | ✅ |
 | └─ Frontend IP | prod-skycraft-swc-lb-frontend | Public IP | prod-skycraft-swc-lb-pip | ✅ |
@@ -629,10 +633,11 @@ _________________________________________________________________
 - [ ] Prod load balancer deployed with Standard SKU
 - [ ] 6 backend pools created (world, auth and outbound per load balancer)
 - [ ] 4 health probes configured (TCP ports 3724, 8085)
-- [ ] 4 load balancing rules configured
+- [ ] 4 load balancing rules configured, **Enable TCP Reset** checked and the recommended SNAT option left on each
 - [ ] 2 outbound rules configured (one per load balancer, for its outbound pool, 8000 ports per instance)
 - [ ] All resources have required tags (Project, Environment, CostCenter, Owner)
 - [ ] All validation commands executed successfully
+- [ ] `./scripts/Test-Lab.ps1` exits with code 0
 - [ ] All reflection questions answered
 - [ ] DNS name servers documented for future domain delegation
 - [ ] Load balancer public IPs documented for DNS records
@@ -652,7 +657,7 @@ You've successfully completed **Lab 2.3** and **Module 2: Virtual Networking**!
 - ✅ Azure Public DNS zone with friendly domain names for game servers
 - ✅ Azure Private DNS zone for internal service discovery
 - ✅ 2 Azure Standard Load Balancers for high availability
-- ✅ 4 backend pools ready to receive VM traffic
+- ✅ 6 backend pools ready to receive VM traffic (world, auth and outbound per load balancer)
 - ✅ 4 health probes for automatic failure detection
 - ✅ 4 load balancing rules for traffic distribution
 

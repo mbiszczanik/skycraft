@@ -351,8 +351,8 @@
     },
     {
       "type": "text", "id": "s3_note", "x": 20, "y": 574, "width": 640, "height": 14,
-      "text": "Unhealthy threshold 2 · the VM stays in the backend pool, it simply stops receiving traffic",
-      "originalText": "Unhealthy threshold 2 · the VM stays in the backend pool, it simply stops receiving traffic",
+      "text": "Health threshold 1 · the VM stays in the backend pool, it simply stops receiving traffic",
+      "originalText": "Health threshold 1 · the VM stays in the backend pool, it simply stops receiving traffic",
       "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
