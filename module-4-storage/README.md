@@ -16,7 +16,7 @@ By completing this module, you will be able to:
 - **Implement blob storage** with containers, versioning, soft delete, and lifecycle management
 - **Configure Azure Files** with file shares, snapshots, and identity-based access
 - **Secure storage** using SAS tokens, stored access policies, firewalls, and encryption
-- **Manage data** using Azure Storage Explorer and AzCopy
+- **Manage data** using Azure Storage Explorer and the Portal's Storage browser (AzCopy is referenced in Lab 4.1, not practised)
 - **Apply governance** tags and monitor storage costs
 
 ---
