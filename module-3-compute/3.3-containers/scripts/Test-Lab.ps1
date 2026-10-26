@@ -187,7 +187,9 @@ if ($aca) {
     }
 
     # Validate Image Tag
-    $containerImage = $props.template.containers[0].image
+    # @() first: a template without containers would otherwise throw "Cannot index into a null
+    # array" and end the script without its summary (#355).
+    $containerImage = @($props.template.containers)[0].image
     if ($containerImage -match ":$imageTag$") {
         Write-Host "  - Image Tag '$imageTag' verified" -ForegroundColor Green
     } else {

@@ -168,8 +168,9 @@ foreach ($env in $envsToTest) {
         -Description "File encryption enabled" `
         -Condition ($sa.Encryption.Services.File.Enabled -eq $true) | Out-Null
     
-    # Test tags
-    $tags = $sa.Tags
+    # Test tags. An account without tags returns $null, and indexing $null throws "Cannot index
+    # into a null array", which would end the script without a summary (#355): read it as empty.
+    $tags = if ($sa.Tags) { $sa.Tags } else { @{} }
     
     Test-Condition `
         -Description "Tag 'Project' = 'SkyCraft'" `
