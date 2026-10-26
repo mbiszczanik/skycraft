@@ -123,8 +123,8 @@ function New-SkyCraftLB {
     $bePoolOutbound = New-AzLoadBalancerBackendAddressPoolConfig -Name "$LbName-be-outbound"
 
     # Create Health Probes
-    $probeWorld = New-AzLoadBalancerProbeConfig -Name "$LbName-probe-world" -Protocol Tcp -Port 8085 -IntervalInSeconds 15 -ProbeCount 2
-    $probeAuth = New-AzLoadBalancerProbeConfig -Name "$LbName-probe-auth" -Protocol Tcp -Port 3724 -IntervalInSeconds 15 -ProbeCount 2
+    $probeWorld = New-AzLoadBalancerProbeConfig -Name "$LbName-probe-world" -Protocol Tcp -Port 8085 -IntervalInSeconds 15 -ProbeCount 2 -ProbeThreshold 1
+    $probeAuth = New-AzLoadBalancerProbeConfig -Name "$LbName-probe-auth" -Protocol Tcp -Port 3724 -IntervalInSeconds 15 -ProbeCount 2 -ProbeThreshold 1
 
     # Create Load Balancing Rules
     # Outbound SNAT is disabled on the rules: egress comes from the outbound rule below, and Azure
@@ -133,7 +133,7 @@ function New-SkyCraftLB {
     $ruleAuth = New-AzLoadBalancerRuleConfig -Name "$LbName-rule-auth" -FrontendIpConfiguration $feIp -BackendAddressPool $bePoolAuth -Probe $probeAuth -Protocol Tcp -FrontendPort 3724 -BackendPort 3724 -IdleTimeoutInMinutes 4 -EnableTcpReset -DisableOutboundSNAT
 
     # Create the Outbound Rule - one per frontend IP (a second one with an overlapping protocol is
-    # refused), for the egress pool, with manual port allocation: the frontend offers 63,992
+    # refused), for the egress pool, with manual port allocation: the frontend offers 63,984
     # ports, so 8000 per instance admits 7 instances (Module 3 puts at most 2 VMs here).
     $outbound = New-AzLoadBalancerOutboundRuleConfig -Name "$LbName-outbound" -FrontendIpConfiguration $feIp -BackendAddressPool $bePoolOutbound -Protocol All -IdleTimeoutInMinutes 4 -EnableTcpReset -AllocatedOutboundPort 8000
 
