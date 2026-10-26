@@ -243,7 +243,7 @@ We will use ACI to deploy a single instance of the AuthServer for testing.
 | **Number of CPU cores**  | 1     |
 | **Memory (GiB)**         | 1     |
 
-5. Click **OK**.
+5. Click **Ok** (the pane is titled **Change container size**).
 6. Click **Next: Networking**, and fill in:
 
 | Field                             | Value                                  |
@@ -262,7 +262,7 @@ Replace `[suffix]` with four to six lowercase letters and digits of your own, fo
 | ---------------------------------- | ----------- |
 | **Enable container instance logs** | **Uncheck** |
 
-> **Warning**: **Enable container instance logs** is checked by default and creates a new Log Analytics workspace, `DefaultWorkspace-<subscription id>-EUS`, in a default resource group in **East US**. That workspace costs money for every log it stores, sits outside the regions Lab 1.3 allows, and later Module 5 wizards would offer it as a default. Uncheck the box. If you create the instance with the box checked, delete the instance and create it again; wait a minute after the delete before you reuse the name `dev-skycraft-swc-aci-auth`. The workspace stays after the instance is gone, and no other lab of this course uses it (Module 5 uses `platform-skycraft-swc-law`), so delete it, and then `DefaultResourceGroup-EUS` if nothing else is in it (What This Lab Leaves Behind). `scripts/Remove-LabResource.ps1` deletes both for you only while the instance it deletes still sends its logs to that workspace: it finds the workspace through the instance, so once you have recreated the instance without logs, it no longer sees the old workspace.
+> **Warning**: **Enable container instance logs** is checked by default. With no Log Analytics workspace in your subscription it creates a new one, `DefaultWorkspace-<subscription id>-EUS`, in a default resource group in **East US**; once Module 5 has created `platform-skycraft-swc-law`, the tab offers that workspace instead (**Log Analytics workspace**). That workspace costs money for every log it stores, sits outside the regions Lab 1.3 allows, and later Module 5 wizards would offer it as a default. Uncheck the box. If you create the instance with the box checked, delete the instance and create it again; wait a minute after the delete before you reuse the name `dev-skycraft-swc-aci-auth`. The workspace stays after the instance is gone, and no other lab of this course uses it (Module 5 uses `platform-skycraft-swc-law`), so delete it, and then `DefaultResourceGroup-EUS` if nothing else is in it (What This Lab Leaves Behind). `scripts/Remove-LabResource.ps1` deletes both for you only while the instance it deletes still sends its logs to that workspace: it finds the workspace through the instance, so once you have recreated the instance without logs, it no longer sees the old workspace.
 
 8. Click **Next: Advanced**, and fill in:
 
@@ -365,9 +365,9 @@ Leave the **Workload profiles** tab as it is: the environment gets the **Consump
 
 | Field                 | Value             |
 | --------------------- | ----------------- |
-| **Logs destination**  | **Azure Monitor** |
+| **Logs Destination**  | **Azure Monitor** |
 
-> **Warning**: **Logs destination** starts at **Azure Log Analytics** with a new workspace named `workspace` followed by the resource group's name without dashes (for example `workspacedevskycraftswcrg1a2b`). That workspace stays in `dev-skycraft-swc-rg` after this lab, costs money for every log it stores, and four Module 5 wizards then offer it as their default workspace instead of `platform-skycraft-swc-law` (issue #374). **Azure Monitor** creates no workspace: the environment sends its logs only where a diagnostic setting tells it to, and this lab adds none. The Bicep path makes the same choice. If you created the workspace by mistake, delete it from **Log Analytics workspaces** once the environment is gone; no other lab uses it. `scripts/Remove-LabResource.ps1` deletes it too, as part of deleting the whole lab (registry, container instance, environment and app): the workspace the environment sends its logs to, whatever its name and resource group, and a workspace in `dev-skycraft-swc-rg` that keeps the Portal's automatic name. It never deletes a workspace named `<environment>-skycraft-swc-law`, such as `platform-skycraft-swc-law`, the shared workspace of Lab 5.1: if you pointed the environment at one, the script names it and keeps it.
+> **Warning**: **Logs Destination** starts at **Azure Log Analytics** with a new workspace named `workspace` followed by the resource group's name without dashes (for example `workspacedevskycraftswcrg1a2b`). That workspace stays in `dev-skycraft-swc-rg` after this lab, costs money for every log it stores, and four Module 5 wizards then offer it as their default workspace instead of `platform-skycraft-swc-law` (issue #374). **Azure Monitor** creates no workspace: the environment sends its logs only where a diagnostic setting tells it to, and this lab adds none. The Bicep path makes the same choice. If you created the workspace by mistake, delete it from **Log Analytics workspaces** once the environment is gone; no other lab uses it. `scripts/Remove-LabResource.ps1` deletes it too, as part of deleting the whole lab (registry, container instance, environment and app): the workspace the environment sends its logs to, whatever its name and resource group, and a workspace in `dev-skycraft-swc-rg` that keeps the Portal's automatic name. It never deletes a workspace named `<environment>-skycraft-swc-law`, such as `platform-skycraft-swc-law`, the shared workspace of Lab 5.1: if you pointed the environment at one, the script names it and keeps it.
 
 > **Warning**: Check the page before the next item. An environment's name, its zone redundancy and its type (Workload profiles) cannot be changed after it is created; to change one, you delete the environment, which takes up to 25 minutes, and create it again.
 
@@ -400,17 +400,17 @@ The app reuses the `skycraft-auth` image for the lab demo.
 | **Registry**            | `devskycraftswcacr01`                |
 | **Image**               | `skycraft-auth`                      |
 | **Image tag**           | `v1`                                 |
-| **Authentication type** | **Secret**                           |
+| **Authentication type** | **Secrets**                          |
 | **Workload profile**    | **Consumption**                      |
 | **CPU and memory**      | **0.25 CPU cores, 0.5 Gi memory**    |
 
 **Name** is pre-filled with the app's name; replace it with `worldserver`. **CPU and memory** starts at 0.5 CPU cores and 1 Gi memory; the smaller size is enough for this demo and costs half as much.
 
-> **Note**: **Authentication type** may start at **Managed identity**, with **System assigned Identity (environment)** and the remark "Required role assignment: ACR pull". That choice makes the Portal grant a role on the registry, which needs Owner or User Access Administrator. This lab uses **Secret**: the app pulls with the registry's admin user from Step 3.3.2, as the container instance and the Bicep path do, and no role is granted.
+> **Note**: **Authentication type** may start at **Managed identity**, with **System assigned Identity (environment)** and the remark "Required role assignment: ACR pull". That choice makes the Portal grant a role on the registry, which needs Owner or User Access Administrator. This lab uses **Secrets**: the app pulls with the registry's admin user from Step 3.3.2, as the container instance and the Bicep path do, and no role is granted.
 
 **Expected Result**:
 
-- The **Container** tab shows the container `worldserver` with the image `skycraft-auth:v1` from `devskycraftswcacr01`, **Secret** authentication and 0.25 CPU cores with 0.5 Gi memory. Nothing is created yet: Step 3.3.8 ends the wizard.
+- The **Container** tab shows the container `worldserver` with the image `skycraft-auth:v1` from `devskycraftswcacr01`, **Secrets** authentication and 0.25 CPU cores with 0.5 Gi memory. Nothing is created yet: Step 3.3.8 ends the wizard.
 
 ![Configure Container Settings](./images/step-3.3.7.png)
 
@@ -440,6 +440,8 @@ The app reuses the `skycraft-auth` image for the lab demo.
 | Owner       | mbiszczanik |
 
 5. Click **Review + create**, then **Create**.
+
+The **Review + create** page can still list a **Log Analytics workspace (New)** under the new environment after you chose **Azure Monitor** in Step 3.3.6. The template behind it (**Download a template for automation**) holds only the environment and the app, and no workspace is created.
 
 **Expected Result**:
 
@@ -504,7 +506,7 @@ The page starts at **Min replicas** 0 and **Max replicas** 10, with one scale ru
 | **Type**                | **HTTP scaling** |
 | **Concurrent requests** | 10               |
 
-6. Click **Add**.
+6. Click **Add scale rule**.
 7. Click **Save as a new revision**.
 
 **Expected Result**:
