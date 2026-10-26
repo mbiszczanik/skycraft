@@ -10,7 +10,9 @@
     it calls, and assert the observable contract:
 
       1. Everything the lab created is removed when it is present, and the run exits 0. Objects
-         the lab did not create are left alone.
+         the lab did not create are left alone. The alert rule and the data collection rule are
+         found as Test-Lab.ps1 finds them, by what they watch or apply to, so a rule the Portal
+         left in the VM's group is removed too (#362).
       2. An object that is absent - an empty listing, or a getter that reports it not found - is
          not a failure: the run exits 0.
       3. A lookup that fails with an error is an [ERROR], counted, and the run exits 1 without
@@ -81,18 +83,24 @@ BeforeAll {
     #                         lab's own objects
     #   SKYCRAFT_STUB_TWO     '1' puts a second storage account in the platform group, listed
     #                         after the first; the lab's diagnostic setting is on the second one
+    #   SKYCRAFT_STUB_PORTAL  '1' builds the alert rule and the data collection rule as the Portal
+    #                         does (#362): the alert rule left in the VM's group, and VM insights'
+    #                         'MSVMI-<vm>' rule in the VM's group instead of 'skycraft-vm-dcr'
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled)
     #   SKYCRAFT_STUB_FAIL    '<command>:<name>,...' makes one deletion throw
     # A lookup is named after its command ('Get-AzDiagnosticSetting:<account>' for the diagnostic
-    # settings); a deletion is logged as '<command>:<name>' ('<account>/<name>' for a setting).
-    # The bare subscription's data collection rule is reported missing the way Az.Resources can
-    # report it: a status-only 404 (an exception whose inner CloudException carries the 404
-    # response) with no not-found wording.
+    # settings, 'Get-AzVM:<group>' for a group's VMs, 'Get-AzResource:<name>' for a data collection
+    # rule); a deletion is logged as '<command>:<name>' ('<account>/<name>' for a setting), and as
+    # '<command>:<group>/<name>' too for an alert rule or a data collection rule.
+    # A missing data collection rule is reported the way Az.Resources can report it: a status-only
+    # 404 (an exception whose inner CloudException carries the 404 response) with no not-found
+    # wording.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:SubscriptionId = '00000000-0000-0000-0000-000000000000'
 $script:VmId = "/subscriptions/$($script:SubscriptionId)/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Compute/virtualMachines/dev-skycraft-swc-auth-vm"
 $script:StorageRoot = "/subscriptions/$($script:SubscriptionId)/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts"
+$script:RuleRoot = "/subscriptions/$($script:SubscriptionId)/resourceGroups/{0}/providers/Microsoft.Insights/dataCollectionRules"
 
 # The shape of a status-only 404 from Az.Resources: ResourceManagerCloudException around the SDK's
 # CloudException, whose Response carries the status. Neither message says "not found".
@@ -126,11 +134,15 @@ function Write-StubCall {
 
 function Test-StubEmpty { return $env:SKYCRAFT_STUB_EMPTY -eq '1' }
 function Test-StubBare { return $env:SKYCRAFT_STUB_BARE -eq '1' }
+function Test-StubPortal { return $env:SKYCRAFT_STUB_PORTAL -eq '1' }
 
+# A deletion is logged as '<command>:<name>' and, for an object in a group, as
+# '<command>:<group>/<name>' as well.
 function Invoke-StubRemoval {
-    param([string]$Command, [string]$Name)
+    param([string]$Command, [string]$Name, [string]$Group)
     Write-StubCall -Name $Command
     Write-StubCall -Name "${Command}:$Name"
+    if ($Group) { Write-StubCall -Name "${Command}:$Group/$Name" }
     if (@($env:SKYCRAFT_STUB_FAIL -split ',') -contains "${Command}:$Name") { throw "stub failure: ${Command} $Name" }
 }
 
@@ -186,31 +198,77 @@ function Get-AzContext {
     }
 }
 
+function New-StubAlert {
+    param([string]$Name, [string]$Group, [string]$Scope)
+    [pscustomobject]@{
+        Name          = $Name
+        ResourceGroup = $Group
+        Id            = "/subscriptions/$($script:SubscriptionId)/resourceGroups/$Group/providers/Microsoft.Insights/metricAlerts/$Name"
+        Scopes        = @($Scope)
+    }
+}
+
+# The subscription's alert rules. The lab's rule watches the VM, from the platform group, or from
+# the VM's group as the Portal defaults it (SKYCRAFT_STUB_PORTAL). Next to it: an unrelated rule in
+# the platform group, a VM insights recommended rule on the same VM, and a rule that carries the
+# lab's name but sits in another group and watches another VM - not the lab's either.
 function Get-AzMetricAlertRuleV2 {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$Name)
-    if (Invoke-StubLookup -Name 'Get-AzMetricAlertRuleV2' -Gone 'group') { return }
-    Select-StubItem -Own 'skycraft-cpu-alert' -Other 'unrelated-alert' -Name $Name
+    if (Invoke-StubLookup -Name 'Get-AzMetricAlertRuleV2') { return }
+    if (Test-StubEmpty) { return }
+    $otherVm = "/subscriptions/$($script:SubscriptionId)/resourceGroups/other-rg/providers/Microsoft.Compute/virtualMachines/other-vm"
+    $items = @(
+        New-StubAlert -Name 'unrelated-alert' -Group 'platform-skycraft-swc-rg' -Scope $script:StorageRoot
+        New-StubAlert -Name 'unrelated-recommended-cpu' -Group 'dev-skycraft-swc-rg' -Scope $script:VmId
+        New-StubAlert -Name 'skycraft-cpu-alert' -Group 'other-rg' -Scope $otherVm
+    )
+    if (-not (Test-StubBare)) {
+        $group = if (Test-StubPortal) { 'dev-skycraft-swc-rg' } else { 'platform-skycraft-swc-rg' }
+        $items += New-StubAlert -Name 'skycraft-cpu-alert' -Group $group -Scope $script:VmId
+    }
+    if ($ResourceGroupName) { $items = @($items | Where-Object { $_.ResourceGroup -eq $ResourceGroupName }) }
+    if ($Name) { $items = @($items | Where-Object { $_.Name -eq $Name }) }
+    $items
 }
 
 function Remove-AzMetricAlertRuleV2 {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$Name)
-    Invoke-StubRemoval -Command 'Remove-AzMetricAlertRuleV2' -Name $Name
+    Invoke-StubRemoval -Command 'Remove-AzMetricAlertRuleV2' -Name $Name -Group $ResourceGroupName
 }
 
+# The VMs of a group: the dev group holds the lab's VM, the prod group none. Looked up as
+# 'Get-AzVM:<group>'.
 function Get-AzVM {
     [CmdletBinding()]
     param([string]$Name, [string]$ResourceGroupName)
-    if (Invoke-StubLookup -Name 'Get-AzVM' -Gone 'resource') { return }
-    [pscustomobject]@{ Name = $Name; Id = $script:VmId }
+    if (Invoke-StubLookup -Name "Get-AzVM:$ResourceGroupName" -Gone 'group') { return }
+    if ($ResourceGroupName -ne 'dev-skycraft-swc-rg') { return }
+    $vm = [pscustomobject]@{ Name = 'dev-skycraft-swc-auth-vm'; Id = $script:VmId }
+    if ($Name -and $Name -ne $vm.Name) { return }
+    $vm
 }
 
+# The VM's associations: the lab's (the Bicep's to skycraft-vm-dcr, or the Portal's to its MSVMI
+# rule in the VM's group), one to an unrelated rule that sends elsewhere, and one to a data
+# collection endpoint, which names no rule.
 function Get-AzDataCollectionRuleAssociation {
     [CmdletBinding()]
     param([string]$ResourceUri, [string]$AssociationName)
     if (Invoke-StubLookup -Name 'Get-AzDataCollectionRuleAssociation' -Gone 'resource') { return }
-    Select-StubItem -Own 'skycraft-vminsights-dcr-assoc' -Other 'unrelated-assoc' -Name $AssociationName
+    $items = @(
+        [pscustomobject]@{ Name = 'unrelated-assoc'; DataCollectionRuleId = "$($script:RuleRoot -f 'other-rg')/unrelated-dcr" }
+        [pscustomobject]@{ Name = 'configurationAccessEndpoint'; DataCollectionRuleId = $null }
+    )
+    if (Test-StubPortal) {
+        $items += [pscustomobject]@{ Name = 'MSVMI-dev-skycraft-swc-auth-vm-assoc'; DataCollectionRuleId = "$($script:RuleRoot -f 'dev-skycraft-swc-rg')/MSVMI-dev-skycraft-swc-auth-vm" }
+    }
+    elseif (-not (Test-StubBare)) {
+        $items += [pscustomobject]@{ Name = 'skycraft-vminsights-dcr-assoc'; DataCollectionRuleId = "$($script:RuleRoot -f 'platform-skycraft-swc-rg')/skycraft-vm-dcr" }
+    }
+    if ($AssociationName) { $items = @($items | Where-Object { $_.Name -eq $AssociationName }) }
+    $items
 }
 
 function Remove-AzDataCollectionRuleAssociation {
@@ -219,21 +277,43 @@ function Remove-AzDataCollectionRuleAssociation {
     Invoke-StubRemoval -Command 'Remove-AzDataCollectionRuleAssociation' -Name $AssociationName
 }
 
+# A data collection rule, read by its id and looked up as 'Get-AzResource:<name>'. The lab's rules
+# send to the lab's workspace; the unrelated one sends to another. The Bicep's rule exists unless
+# the subscription is bare or Portal-built, the MSVMI rule only when it is Portal-built; a missing
+# rule is reported as a status-only 404.
 function Get-AzResource {
     [CmdletBinding()]
-    param([string]$ResourceId)
-    if (Invoke-StubLookup -Name 'Get-AzResource' -Gone 'group') { return }
-    if (Test-StubBare) {
+    param([string]$ResourceId, [switch]$ExpandProperties)
+    $name  = ($ResourceId -split '/')[-1]
+    $group = ($ResourceId -split '/')[4]
+    if (Invoke-StubLookup -Name "Get-AzResource:$name" -Gone 'group') { return }
+    $exists = switch ($name) {
+        'skycraft-vm-dcr'                { -not (Test-StubBare) -and -not (Test-StubPortal) }
+        'MSVMI-dev-skycraft-swc-auth-vm' { Test-StubPortal }
+        'unrelated-dcr'                  { $true }
+        default                          { $false }
+    }
+    if (-not $exists) {
         Write-StubStatus404
         return
     }
-    [pscustomobject]@{ Name = ($ResourceId -split '/')[-1]; ResourceId = $ResourceId }
+    $workspace = if ($name -eq 'unrelated-dcr') { 'unrelated-law' } else { 'platform-skycraft-swc-law' }
+    [pscustomobject]@{
+        Name              = $name
+        ResourceGroupName = $group
+        ResourceId        = $ResourceId
+        Properties        = [pscustomobject]@{
+            destinations = [pscustomobject]@{
+                logAnalytics = @([pscustomobject]@{ workspaceResourceId = "/subscriptions/$($script:SubscriptionId)/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.OperationalInsights/workspaces/$workspace" })
+            }
+        }
+    }
 }
 
 function Remove-AzResource {
     [CmdletBinding()]
     param([string]$ResourceId, [switch]$Force)
-    Invoke-StubRemoval -Command 'Remove-AzResource' -Name (($ResourceId -split '/')[-1])
+    Invoke-StubRemoval -Command 'Remove-AzResource' -Name (($ResourceId -split '/')[-1]) -Group (($ResourceId -split '/')[4])
 }
 
 function Get-AzActionGroup {
@@ -304,7 +384,8 @@ function Remove-AzOperationalInsightsWorkspace {
             [string[]]$ArgumentList = @('-Force'),
             [switch]$Empty,
             [switch]$Bare,
-            [switch]$Two
+            [switch]$Two,
+            [switch]$Portal
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
@@ -316,6 +397,7 @@ function Remove-AzOperationalInsightsWorkspace {
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
             SKYCRAFT_STUB_BARE   = if ($Bare) { '1' } else { '0' }
             SKYCRAFT_STUB_TWO    = if ($Two) { '1' } else { '0' }
+            SKYCRAFT_STUB_PORTAL = if ($Portal) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG    = $logPath
         }
 
@@ -346,17 +428,21 @@ function Remove-AzOperationalInsightsWorkspace {
         'Get-AzDataCollectionRuleAssociation=throttled'
         'Get-AzOperationalInsightsWorkspace=denied'
     )
-    $script:VmDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzVM=denied'
+    $script:VmDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzVM:dev-skycraft-swc-rg=denied'
     $script:StepsFail = Invoke-CleanupScript -Stub $script:Stub -Fail @(
         'Remove-AzMetricAlertRuleV2:skycraft-cpu-alert'
         'Remove-AzDiagnosticSetting:platformskycraftswcsa/skycraft-storage-diag'
     )
     $script:TwoAccounts       = Invoke-CleanupScript -Stub $script:Stub -Two
     $script:TwoAccountsDenied = Invoke-CleanupScript -Stub $script:Stub -Two -Lookup 'Get-AzDiagnosticSetting:platformskycraftswcsa=denied'
+    $script:Portal            = Invoke-CleanupScript -Stub $script:Stub -Portal
+    $script:PortalRuleDenied  = Invoke-CleanupScript -Stub $script:Stub -Portal -Lookup 'Get-AzResource:MSVMI-dev-skycraft-swc-auth-vm=denied'
+    $script:PortalAssocFails  = Invoke-CleanupScript -Stub $script:Stub -Portal -Fail 'Remove-AzDataCollectionRuleAssociation:MSVMI-dev-skycraft-swc-auth-vm-assoc'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:Bare, $script:WhatIf, $script:LookupsFail, $script:VmDenied,
-        $script:StepsFail, $script:TwoAccounts, $script:TwoAccountsDenied
+        $script:StepsFail, $script:TwoAccounts, $script:TwoAccountsDenied, $script:Portal, $script:PortalRuleDenied,
+        $script:PortalAssocFails
     )
 }
 
@@ -385,16 +471,62 @@ Describe 'Lab 5.1 Remove-LabResource.ps1 - removes what the lab created' {
 
     It 'removes the alert, the association, the rule, the action group, the diagnostic setting and the workspace' {
         $calls = $script:Clean.Calls
-        $calls | Should -Contain 'Remove-AzMetricAlertRuleV2:skycraft-cpu-alert'
+        $calls | Should -Contain 'Remove-AzMetricAlertRuleV2:platform-skycraft-swc-rg/skycraft-cpu-alert'
         $calls | Should -Contain 'Remove-AzDataCollectionRuleAssociation:skycraft-vminsights-dcr-assoc'
-        $calls | Should -Contain 'Remove-AzResource:skycraft-vm-dcr'
+        $calls | Should -Contain 'Remove-AzResource:platform-skycraft-swc-rg/skycraft-vm-dcr'
         $calls | Should -Contain 'Remove-AzActionGroup:skycraft-ops-ag'
         $calls | Should -Contain 'Remove-AzDiagnosticSetting:platformskycraftswcsa/skycraft-storage-diag'
         $calls | Should -Contain 'Remove-AzOperationalInsightsWorkspace:platform-skycraft-swc-law'
     }
 
     It 'leaves the objects the lab did not create alone' {
-        @($script:Clean.Calls | Where-Object { $_ -match ':unrelated-' }) | Should -BeNullOrEmpty
+        foreach ($run in $script:Clean, $script:Portal) {
+            # A lookup may name an unrelated object ('Get-AzResource:unrelated-dcr'); a deletion may not.
+            @($run.Calls | Where-Object { $_ -match '^Remove-.*:(.*/)?unrelated-' }) | Should -BeNullOrEmpty
+            # A rule that carries the lab's name but watches another VM from another group, and an
+            # association to a data collection endpoint.
+            $run.Calls | Should -Not -Contain 'Remove-AzMetricAlertRuleV2:other-rg/skycraft-cpu-alert'
+            $run.Calls | Should -Not -Contain 'Remove-AzDataCollectionRuleAssociation:configurationAccessEndpoint'
+        }
+    }
+}
+
+Describe 'Lab 5.1 Remove-LabResource.ps1 - removes what Test-Lab.ps1 accepts, wherever it sits (#362)' {
+
+    It 'removes the alert rule and the VM insights rule that the Portal left in the VM''s group' {
+        $run = $script:Portal
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Match 'Cleanup Complete'
+        $run.Calls    | Should -Contain 'Remove-AzMetricAlertRuleV2:dev-skycraft-swc-rg/skycraft-cpu-alert'
+        $run.Calls    | Should -Contain 'Remove-AzDataCollectionRuleAssociation:MSVMI-dev-skycraft-swc-auth-vm-assoc'
+        $run.Calls    | Should -Contain 'Remove-AzResource:dev-skycraft-swc-rg/MSVMI-dev-skycraft-swc-auth-vm'
+        $run.Calls    | Should -Contain 'Remove-AzActionGroup:skycraft-ops-ag'
+        $run.Calls    | Should -Contain 'Remove-AzOperationalInsightsWorkspace:platform-skycraft-swc-law'
+    }
+
+    It 'leaves the VM insights recommended alert on the same VM alone' {
+        $script:Portal.Calls | Should -Not -Contain 'Remove-AzMetricAlertRuleV2:unrelated-recommended-cpu'
+        $script:Clean.Calls  | Should -Not -Contain 'Remove-AzMetricAlertRuleV2:unrelated-recommended-cpu'
+    }
+
+    It 'counts a rule that could not be read and keeps the workspace it may send to' {
+        $run = $script:PortalRuleDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Match "\[ERROR\] Could not look up data collection rule 'MSVMI-dev-skycraft-swc-auth-vm'"
+        $run.Output   | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        @($run.Calls | Where-Object { $_ -like 'Remove-AzResource:*MSVMI-*' }) | Should -BeNullOrEmpty
+        $run.Calls    | Should -Not -Contain 'Remove-AzOperationalInsightsWorkspace:platform-skycraft-swc-law'
+        $run.Output   | Should -Match "Kept Log Analytics Workspace 'platform-skycraft-swc-law'"
+    }
+
+    It 'keeps a rule whose association could not be deleted, and the workspace with it' {
+        $run = $script:PortalAssocFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Match "\[ERROR\] Could not delete DCR Association 'MSVMI-dev-skycraft-swc-auth-vm-assoc'"
+        $run.Output   | Should -Match "Kept Data Collection Rule 'MSVMI-dev-skycraft-swc-auth-vm'"
+        $run.Calls    | Should -Not -Contain 'Remove-AzResource:dev-skycraft-swc-rg/MSVMI-dev-skycraft-swc-auth-vm'
+        $run.Calls    | Should -Not -Contain 'Remove-AzOperationalInsightsWorkspace:platform-skycraft-swc-law'
+        $run.Calls    | Should -Contain 'Remove-AzMetricAlertRuleV2:dev-skycraft-swc-rg/skycraft-cpu-alert'
     }
 }
 
@@ -418,7 +550,7 @@ Describe 'Lab 5.1 Remove-LabResource.ps1 - an absent object is not a failure' {
     It 'reads a status-only 404 for the data collection rule as absent, not as a failed lookup' {
         # The bare subscription's rule is reported missing with no not-found wording at all: only
         # the 404 on the inner CloudException's response says so.
-        $script:Bare.Calls  | Should -Contain 'Get-AzResource'
+        $script:Bare.Calls  | Should -Contain 'Get-AzResource:skycraft-vm-dcr'
         $script:Bare.Output | Should -Not -Match 'Could not look up data collection rule'
     }
 }
@@ -450,7 +582,7 @@ Describe 'Lab 5.1 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
     It 'exits 1 and counts each failed lookup' {
         $run = $script:LookupsFail
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output   | Should -Match "\[ERROR\] Could not look up the metric alerts in 'platform-skycraft-swc-rg'[^\r\n]*does not have authorization"
+        $run.Output   | Should -Match "\[ERROR\] Could not look up the metric alert rules in the subscription[^\r\n]*does not have authorization"
         $run.Output   | Should -Match "\[ERROR\] Could not look up the data collection rule associations on 'dev-skycraft-swc-auth-vm'[^\r\n]*requests exceeded the limit"
         $run.Output   | Should -Match "\[ERROR\] Could not look up the Log Analytics workspaces in 'platform-skycraft-swc-rg'"
         $run.Output   | Should -Match 'Cleanup finished with 3 failure\(s\)'
@@ -477,7 +609,7 @@ Describe 'Lab 5.1 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
     It 'keeps the rule and the workspace when the VM could not be looked up' {
         $run = $script:VmDenied
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output   | Should -Match "\[ERROR\] Could not look up VM 'dev-skycraft-swc-auth-vm'"
+        $run.Output   | Should -Match "\[ERROR\] Could not look up the VMs in 'dev-skycraft-swc-rg'"
         $run.Output   | Should -Match 'Cleanup finished with 1 failure\(s\)'
         $run.Calls    | Should -Not -Contain 'Remove-AzResource:skycraft-vm-dcr'
         $run.Calls    | Should -Not -Contain 'Remove-AzOperationalInsightsWorkspace:platform-skycraft-swc-law'

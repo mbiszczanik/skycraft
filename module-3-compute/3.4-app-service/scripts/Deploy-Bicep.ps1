@@ -82,7 +82,7 @@ try {
         Write-Host "  Running in what-if mode (dry run)..." -ForegroundColor Cyan
         Get-AzSubscriptionDeploymentWhatIfResult @deployParams
         Write-Host "`n  What-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
-        exit 0
+        Exit-Lab -FailureCount 0
     }
 
     $deployment = New-AzSubscriptionDeployment @deployParams
@@ -99,3 +99,4 @@ catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
     Exit-Lab -FailureCount 1
 }
+Exit-Lab -FailureCount 0
