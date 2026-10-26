@@ -90,6 +90,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 2.2 - Deploy Security Configuration (PowerShell) ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -97,8 +99,7 @@ Write-Host "=== Lab 2.2 - Deploy Security Configuration (PowerShell) ===" -Foreg
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
@@ -122,10 +123,7 @@ Write-Host "`n=== Task 1: Creating Application Security Groups ===" -ForegroundC
 $asgConfigs = @(
     @{ Name = 'dev-skycraft-swc-asg-auth'; RG = 'dev-skycraft-swc-rg' },
     @{ Name = 'dev-skycraft-swc-asg-world'; RG = 'dev-skycraft-swc-rg' },
-    @{ Name = 'dev-skycraft-swc-asg-db'; RG = 'dev-skycraft-swc-rg' },
-    @{ Name = 'prod-skycraft-swc-asg-auth'; RG = $ProdResourceGroup },
-    @{ Name = 'prod-skycraft-swc-asg-world'; RG = $ProdResourceGroup },
-    @{ Name = 'prod-skycraft-swc-asg-db'; RG = $ProdResourceGroup }
+    @{ Name = 'dev-skycraft-swc-asg-db'; RG = 'dev-skycraft-swc-rg' }
 )
 
 $asgs = @{}
@@ -152,8 +150,7 @@ foreach ($config in $asgConfigs) {
     catch {
         Write-Host "  -> [ERROR] Failed to create ASG: $($config.Name)" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 }
 
@@ -178,8 +175,7 @@ function New-SkyCraftNSG {
         return $nsg
     } catch {
         Write-Host "  -> [ERROR] Failed to create NSG: $Name - $_" -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 }
 
@@ -190,9 +186,6 @@ $nsgDevDb    = New-SkyCraftNSG -Name "dev-skycraft-swc-db-nsg"    -RG "dev-skycr
 $nsgProdAuth  = New-SkyCraftNSG -Name "prod-skycraft-swc-auth-nsg"  -RG $ProdResourceGroup -Env "Production"
 $nsgProdWorld = New-SkyCraftNSG -Name "prod-skycraft-swc-world-nsg" -RG $ProdResourceGroup -Env "Production"
 $nsgProdDb    = New-SkyCraftNSG -Name "prod-skycraft-swc-db-nsg"    -RG $ProdResourceGroup -Env "Production"
-
-# Platform NSG
-$null = New-SkyCraftNSG -Name "platform-skycraft-swc-nsg" -RG $PlatformResourceGroup -Env "Platform"
 
 # ===================================
 # Task 3 & 4: Configure NSG Rules
@@ -209,11 +202,12 @@ function Add-Rule {
     # Determine if we use Prefix (Single) or Prefixes (Array)
     # Validated: SourceAddressPrefix parameter accepts string array.
     
+    # Re-adding rather than Set-AzNetworkSecurityRuleConfig: a rule the guide's step 2.2.9 switched to
+    # ASG sources would otherwise carry both ASGs and prefixes, which Azure refuses (#345).
     if ($existing) {
-        $NSG | Set-AzNetworkSecurityRuleConfig -Name $Name -Description $Desc -Access Allow -Protocol Tcp -Direction Inbound -Priority $Priority -SourceAddressPrefix $SrcPrefix -SourcePortRange '*' -DestinationAddressPrefix '*' -DestinationPortRange $DestPort | Out-Null
-    } else {
-        $NSG | Add-AzNetworkSecurityRuleConfig -Name $Name -Description $Desc -Access Allow -Protocol Tcp -Direction Inbound -Priority $Priority -SourceAddressPrefix $SrcPrefix -SourcePortRange '*' -DestinationAddressPrefix '*' -DestinationPortRange $DestPort | Out-Null
+        $NSG | Remove-AzNetworkSecurityRuleConfig -Name $Name | Out-Null
     }
+    $NSG | Add-AzNetworkSecurityRuleConfig -Name $Name -Description $Desc -Access Allow -Protocol Tcp -Direction Inbound -Priority $Priority -SourceAddressPrefix $SrcPrefix -SourcePortRange '*' -DestinationAddressPrefix '*' -DestinationPortRange $DestPort | Out-Null
 }
 
 # Dev Rules
@@ -326,6 +320,7 @@ else {
                 -Location $Location `
                 -AllocationMethod Static `
                 -Sku Standard `
+                -Zone 1, 2, 3 `
                 -Tag $PlatformTags
             Write-Host "  -> Created Bastion Public IP" -ForegroundColor Green
 
@@ -335,8 +330,7 @@ else {
 
             if (-not $bastionSubnet) {
                 Write-Host "  -> [ERROR] AzureBastionSubnet not found in $PlatformVnetName" -ForegroundColor Red
-                $Host.SetShouldExit(1)
-                exit 1
+                Exit-Lab -FailureCount 1
             }
 
             Write-Host "Creating Azure Bastion (this will take ~15 minutes)..." -ForegroundColor Yellow
@@ -363,9 +357,9 @@ else {
 if ($script:taskFailures -gt 0) {
     Write-Host "`n=== Deployment finished with $($script:taskFailures) failure(s) ===" -ForegroundColor Red -BackgroundColor Black
     Write-Host "See the [ERROR] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`n=== Deployment Complete ===" -ForegroundColor Cyan -BackgroundColor Black
 Write-Host "Run Test-Lab.ps1 to verify the deployment" -ForegroundColor Green
+Exit-Lab -FailureCount 0

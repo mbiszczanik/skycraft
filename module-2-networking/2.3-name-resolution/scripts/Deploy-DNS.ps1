@@ -8,6 +8,9 @@
     2. Create Private DNS Zone (skycraft.internal) & Records.
     3. Link Private DNS to VNets (Hub, Dev, Prod).
 
+.PARAMETER Owner
+    Value of the canonical Owner tag. Default: 'mbiszczanik'. Mirrors parOwner in the Bicep path.
+
 .NOTES
     Project: SkyCraft
     Lab: 2.3 - Name Resolution & Load Balancing
@@ -21,6 +24,10 @@
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Deploy script; idempotent Get-before-New guards cover ShouldProcess intent.')]
 param(
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Owner = 'mbiszczanik',
+
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
     [string]$PublicDnsZoneName = 'skycraft.example.com',
@@ -63,6 +70,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 2.3 - Deploy DNS Configuration (PowerShell) ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -70,14 +79,14 @@ Write-Host "=== Lab 2.3 - Deploy DNS Configuration (PowerShell) ===" -Foreground
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 $Tags = @{
     Project     = 'SkyCraft'
     Environment = 'Platform'
     CostCenter  = 'MSDN'
+    Owner       = $Owner
 }
 
 # ==========================================
@@ -176,7 +185,7 @@ function New-PrivateDnsLink {
         Write-Host "Linking VNet: $VnetName..." -ForegroundColor Yellow
         $vnet = Get-AzVirtualNetwork -ResourceGroupName $VnetRG -Name $VnetName
         if ($vnet) {
-            New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $LinkName -VirtualNetworkId $vnet.Id -EnableRegistration:$AutoReg -Tag @{ Project = 'SkyCraft' } | Out-Null
+            New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $LinkName -VirtualNetworkId $vnet.Id -EnableRegistration:$AutoReg -Tag $Tags | Out-Null
             Write-Host "  -> Link created (AutoReg: $AutoReg)" -ForegroundColor Green
         } else {
              Write-Host "  -> [ERROR] VNet '$VnetName' not found!" -ForegroundColor Red

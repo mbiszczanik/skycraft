@@ -28,11 +28,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 3.4 Validation: App Service ===" -ForegroundColor Cyan
 
 # 1. Verify Connection
-if (-not (Get-AzContext)) { Write-Host "Not logged in." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
+if (-not (Get-AzContext)) { Write-Host "Not logged in." -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 
 $failures = 0
 
@@ -122,5 +124,4 @@ if ($failures -eq 0) {
 } else {
     Write-Host "FAILURE: Found $failures issues." -ForegroundColor Red
 }
-$Host.SetShouldExit($failures)
-exit $failures
+Exit-Lab -FailureCount $failures

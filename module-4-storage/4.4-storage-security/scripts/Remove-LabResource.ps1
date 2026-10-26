@@ -18,11 +18,14 @@
     Remove-AzRmStorageContainer), which the storage firewall does not apply to: the firewall revert
     above it takes up to a minute to apply, and the data plane would answer 403 until then. Only
     role assignments made on the account itself are removed, not ones inherited from a resource
-    group or the subscription.
+    group or the subscription. They are listed and removed through the Azure Resource Manager
+    role assignments API (tools/LabCommon.psm1), so the cleanup needs no Microsoft Graph sign-in
+    (issue #397).
 
-    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
-    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
-    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
+    Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
+    otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
+    (issue #104), it also sets the process exit code; run at a prompt or by another script,
+    it leaves the session open and the code in $LASTEXITCODE (issue #257).
 .PARAMETER Environment
     The environment to clean up (prod or dev). Default: prod.
 .PARAMETER Force
@@ -50,6 +53,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+# The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 if ($Force) { $ConfirmPreference = 'None' }
 
 # Counts lookups that failed and steps that could not be carried out. Absent objects are not
@@ -132,7 +138,7 @@ Write-Host "=== Lab 4.4: Cleaning Up Security Configuration ===" -ForegroundColo
 
 # 1. Verify Connection
 if (-not (Get-AzContext)) {
-    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
+    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; Exit-Lab -FailureCount 1
 }
 
 # 2. Look the storage account up once. Every step below works inside it.
@@ -187,29 +193,33 @@ if ($sa) {
     if ($PSCmdlet.ShouldProcess($storageAccountName, "Remove 'Storage Blob Data Contributor' role assignments")) {
         Write-Host "Removing 'Storage Blob Data Contributor' role assignments..." -ForegroundColor Yellow
         $storageId = $sa.Id
+        # Through the ARM role assignments API (tools/LabCommon.psm1), not Get-AzRoleAssignment /
+        # Remove-AzRoleAssignment: those resolve every principal through Microsoft Graph and fail
+        # where the Az sign-in cannot get a Graph token (issue #397). ARM returns principals by
+        # object id only, so the lines below name them that way.
         $assignmentLookup = Invoke-LabLookup -Target "the role assignments on '$storageAccountName'" -Lookup {
-            Get-AzRoleAssignment -Scope $storageId -ErrorAction Stop
+            Get-LabArmRoleAssignment -Scope $storageId
         }
         if (-not $assignmentLookup.Failed) {
             # Only the assignments made on the account itself: the listing also returns ones
             # inherited from the resource group or the subscription, which this lab did not create
             # and which cannot be removed at this scope.
+            $blobContributor = Get-LabBuiltInRoleId -Name 'Storage Blob Data Contributor'
             $assignments = @($assignmentLookup.Value |
-                Where-Object { $_.RoleDefinitionName -eq 'Storage Blob Data Contributor' -and $_.Scope -eq $storageId })
+                Where-Object { $_.RoleDefinitionId -eq $blobContributor -and $_.Scope -eq $storageId })
 
             if ($assignments.Count -eq 0) {
                 Write-Host "  -> [INFO] No 'Storage Blob Data Contributor' assignments found." -ForegroundColor Gray
             }
             foreach ($assignment in $assignments) {
+                $principal = "$($assignment.PrincipalType) $($assignment.ObjectId)".Trim()
                 try {
-                    Remove-AzRoleAssignment -ObjectId $assignment.ObjectId `
-                        -RoleDefinitionName 'Storage Blob Data Contributor' `
-                        -Scope $storageId -ErrorAction Stop
-                    Write-Host "  -> Removed assignment for '$($assignment.DisplayName)'." -ForegroundColor Green
+                    Remove-LabArmRoleAssignment -Id $assignment.RoleAssignmentId
+                    Write-Host "  -> Removed assignment for '$principal'." -ForegroundColor Green
                 }
                 catch {
                     $script:cleanupFailures++
-                    Write-Host "  -> [ERROR] Failed to remove the assignment for '$($assignment.DisplayName)'." -ForegroundColor Red
+                    Write-Host "  -> [ERROR] Failed to remove the assignment for '$principal'." -ForegroundColor Red
                     Write-Host $_.Exception.Message -ForegroundColor Red
                 }
             }
@@ -225,8 +235,7 @@ Write-Host "       It belongs to Lab 2.2; remove it with that lab's cleanup if y
 
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s). See the [ERROR] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nCleanup Complete." -ForegroundColor Cyan

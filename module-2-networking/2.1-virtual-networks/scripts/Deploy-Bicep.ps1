@@ -81,6 +81,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 # Runs an Az lookup and returns its result, or $null when the resource (or its resource group)
 # does not exist. Any other failure is rethrown: treating "could not read it" as "absent" would
@@ -137,8 +139,7 @@ Write-Host "=== Lab 2.1 - Deploy Networking Configuration ===" -ForegroundColor 
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
@@ -149,8 +150,7 @@ $mainBicep = Join-Path $bicepPath "main.bicep"
 # Verify Bicep file exists
 if (-not (Test-Path $mainBicep)) {
     Write-Host "[ERROR] Bicep file not found: $mainBicep" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nDeploying Lab 2.1 Resources..." -ForegroundColor Cyan
@@ -253,15 +253,14 @@ try {
             Write-Host "Failed Operation: $($op.Properties.TargetResource.ResourceName)" -ForegroundColor Yellow
             Write-Host "Status Message: $($op.Properties.StatusMessage)" -ForegroundColor Red
         }
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 }
 catch {
     Write-Host "`n[ERROR] Deployment failed with exception:" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nNext Step: Run .\Test-Lab.ps1 to verify the configuration." -ForegroundColor Yellow
+Exit-Lab -FailureCount 0

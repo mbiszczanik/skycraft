@@ -53,6 +53,20 @@ You'll set up the following identity structure in Microsoft Entra ID:
 - [ ] Azure Portal access
 - [ ] Global Administrator or User Administrator role
 - [ ] Understanding of user vs. group concepts
+- [ ] Only for the scripts in `scripts/` and the checklist commands (the Portal steps need none): PowerShell 7 with the Microsoft Graph modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Users`, `Microsoft.Graph.Groups`, `Microsoft.Graph.Identity.DirectoryManagement` and `Microsoft.Graph.Identity.SignIns`. Install them for your account:
+
+  ```powershell
+  Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Identity.SignIns -Scope CurrentUser
+  ```
+
+  In Azure Cloud Shell (PowerShell) all of them are preinstalled except `Microsoft.Graph.Users`. Install it first, at the version of the preinstalled Graph modules: a script loads its Graph modules at one version only.
+
+  ```powershell
+  $graphVersion = (Get-Module -ListAvailable Microsoft.Graph.Authentication | Sort-Object Version -Descending | Select-Object -First 1).Version
+  Install-Module Microsoft.Graph.Users -RequiredVersion $graphVersion -Scope CurrentUser
+  ```
+
+  A script that finds a module missing, or not installed at the version the other Graph modules share, stops before it signs in and prints the `Install-Module` command with the version to install. A Cloud Shell session without a storage account can run the scripts only if this install works there, which Microsoft Learn does not document; if it fails, mount a storage account or run the scripts in PowerShell 7 on your own machine. An ephemeral session also deletes the clone of the repository and the module when it ends, so install the module again in each new session. In Cloud Shell the scripts sign in to Microsoft Graph with Cloud Shell's own sign-in, without a prompt; it cannot delete users, so run `Remove-LabResource.ps1` on your own machine or delete the lab users in the Portal ([TROUBLESHOOTING.md](../../TROUBLESHOOTING.md#lab-11-and-lab-12-scripts-in-azure-cloud-shell)). Details and sources: [Module 1 prerequisites](../README.md#-prerequisites).
 
 ---
 
@@ -274,6 +288,8 @@ The blade only lists licenses: assignments are added and removed in the Microsof
 
 **Expected Result**: You see the guest user access and guest invite settings of your tenant.
 
+**Note**: In a new tenant, **Guest invite restrictions** is set to "Anyone in the organization can invite guest users including guests and non-admins (most inclusive)": every member, and every guest, can invite more guests. Leave it as it is for this lab. In a production tenant you would usually limit invitations to members or to the admin roles that manage guests ([Configure external collaboration settings](https://learn.microsoft.com/entra/external-id/external-collaboration-settings-configure)).
+
 ![Review B2B Collaboration Settings](./images/Step-1.1.14.png)
 
 ---
@@ -315,7 +331,7 @@ Complete this checklist to verify you've successfully completed the lab:
 **Issue**: The lab scripts stop at "Checking Microsoft Graph connection..." and never come back
 
 - **Cause**: `Connect-MgGraph -Scopes ...` signs a person in, and a cached token that needs a refresh the broker cannot complete silently falls back to a prompt. A run with no console has nobody to answer it.
-- **Solution**: Running by hand, answer the prompt — it is a real sign-in. If none appears, sign in once with `Connect-MgGraph -UseDeviceCode` and re-run the script. For an unattended run there is nobody to answer it, so set `SKYCRAFT_GRAPH_TENANT_ID`, `SKYCRAFT_GRAPH_CLIENT_ID` and `SKYCRAFT_GRAPH_CERT_THUMBPRINT` and the scripts sign in app-only instead — see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md).
+- **Solution**: Running by hand, answer the prompt: it is a real sign-in. In Azure Cloud Shell the scripts do not prompt: they use Cloud Shell's own sign-in, and `Remove-LabResource.ps1` cannot delete users there ([TROUBLESHOOTING.md](../../TROUBLESHOOTING.md#lab-11-and-lab-12-scripts-in-azure-cloud-shell)). If no prompt appears on your own machine, sign in once with `Connect-MgGraph -TenantId '<your tenant id>' -UseDeviceCode -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All'` and re-run the script. A tenant with security defaults on, the default for tenants created from 2026-07-01, refuses that sign-in with error 530035; there, check that a default browser is set and run the script again. The tenant ID is the **Tenant ID** on **Microsoft Entra ID** > **Overview**; name it, because a personal Microsoft account (most free Azure accounts) otherwise signs in to its own directory, not the lab tenant. The scripts reuse a sign-in only when it holds the scopes they request, and sign in again otherwise, so name the scopes. For an unattended run there is nobody to answer it, so set `SKYCRAFT_GRAPH_TENANT_ID`, `SKYCRAFT_GRAPH_CLIENT_ID` and `SKYCRAFT_GRAPH_CERT_THUMBPRINT` and the scripts sign in app-only instead, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md).
 
 ---
 

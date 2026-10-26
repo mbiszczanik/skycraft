@@ -53,6 +53,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 $deploymentName = "Lab-2.3-DNS-$(Get-Date -Format 'yyyyMMdd-HHmm')"
 
@@ -61,8 +63,7 @@ Write-Host "=== Lab 2.3 - Deploy Bicep (DNS) ===" -ForegroundColor Cyan -Backgro
 # Verify Bicep File
 if (-not (Test-Path $TemplateFile)) {
     Write-Host "Error: Template file not found at $TemplateFile" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "Starting deployment: $deploymentName..." -ForegroundColor Yellow
@@ -86,14 +87,14 @@ try {
 
     if ($deployment.ProvisioningState -ne 'Succeeded') {
         Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-        $Host.SetShouldExit(1)
-        exit 1
+        Exit-Lab -FailureCount 1
     }
 
     Write-Host "`n[OK] Deployment completed successfully!" -ForegroundColor Green
 }
 catch {
     Write-Host "`n[ERROR] Deployment failed: $($_.Exception.Message)" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
+
+Exit-Lab -FailureCount 0

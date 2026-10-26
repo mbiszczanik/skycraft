@@ -5,8 +5,11 @@
 .DESCRIPTION
     Checks for the existence and correct configuration of:
     1. Resource Group Tags
-    2. Policy Assignments (the guide's three on the subscription, made in the Portal or by the
-       Bicep path; see LabPolicyAssignment.ps1 for which assignment counts)
+    2. Policy Assignments (the guide's four on the subscription, made in the Portal or by the
+       Bicep path; see LabPolicyAssignment.ps1 for which assignment counts). Inherit-Project-Tag,
+       the Modify assignment of step 1.3.8 (issue #350), passes only with tagName Project and a
+       system-assigned managed identity. Its identity's role is not checked: a request-time
+       Modify needs none, and only a remediation task uses it.
     3. Resource Locks (the guide's lock, by name and CanNotDelete level, on the group itself)
     4. Budgets (manual check)
 
@@ -21,6 +24,14 @@
     subscriptions do not grant - so their absence cannot fail validation, and their presence is
     not counted as a pass. Confirm them in the portal under Cost Management > Budgets.
 
+    The budgets are read through the Consumption API (Get-LabArmBudget in tools/LabCommon.psm1),
+    not Get-AzConsumptionBudget: Az.Billing 2.3.0 sends api-version 2018-01-31, which current
+    subscriptions refuse with 422 (issue #411). Both of the guide's scopes are read: the
+    subscription (SkyCraft-Monthly-Budget; its listing also returns resource-group budgets) and
+    prod-skycraft-swc-rg (SkyCraft-Prod-Monthly). Each is read on its own; a read that fails prints
+    its HTTP status and the service's message and does not hide the other scope. Each budget is
+    printed once, with the scope it is set on.
+
 .EXAMPLE
     .\Test-Lab.ps1
 
@@ -30,12 +41,15 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.Resources, Az.Billing
+#Requires -Modules Az.Accounts, Az.Resources
 
 [CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+# Get-LabArmBudget reads the budgets without Az.Billing (#411).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 1.3: Validation ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -43,8 +57,7 @@ Write-Host "=== Lab 1.3: Validation ===" -ForegroundColor Cyan -BackgroundColor 
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "[ERROR] Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
@@ -98,9 +111,10 @@ foreach ($rgName in $resourceGroups) {
 # 2. Validate Policies
 # The Portal's Assignment name sets only an assignment's display name; its resource name is a
 # generated id (issue #330). So the subscription's assignments are listed once, and each of the
-# guide's three is picked by its definition and by the name the guide gives it, as resource name
-# or display name - LabPolicyAssignment.ps1, shared with the cleanup, says which match. A listing
-# that fails fails all three checks and says why.
+# guide's four is picked by its definition and by the name the guide gives it, as resource name
+# or display name - LabPolicyAssignment.ps1, shared with the cleanup, says which match. Matching
+# by definition first keeps the Modify assignment Inherit-Project-Tag from counting as a second
+# Enforce-Project-Tag (issue #350). A listing that fails fails all four checks and says why.
 Write-Host "`n=== 2. Validating Policy Assignments ===" -ForegroundColor Cyan
 . (Join-Path $PSScriptRoot 'LabPolicyAssignment.ps1')
 
@@ -123,11 +137,17 @@ foreach ($spec in Get-LabPolicyAssignmentSpec) {
     $found = @(Select-LabPolicyAssignment -Assignment $assignments -SubscriptionId $subscriptionId -Spec $spec)
     if ($found.Count -eq 1) {
         Write-Host " : $(Format-LabPolicyAssignment -Assignment $found[0])" -NoNewline
+        $problems = @(Get-LabPolicyAssignmentProblem -Assignment $found[0] -Spec $spec)
+        if ($problems.Count -gt 0) {
+            Write-Host " [FAIL] $($problems -join '; '). See step $($spec.Step)." -ForegroundColor Red
+            $failCount++
+            continue
+        }
         Write-Host " [OK]" -ForegroundColor Green
         $passCount++
     }
     elseif ($found.Count -eq 0) {
-        Write-Host " [FAIL] Not found. Expected an assignment of '$($spec.DefinitionDisplayName)' on the subscription itself, named '$($spec.Name)' or '$($spec.DisplayName)', step $($spec.Step)." -ForegroundColor Red
+        Write-Host " [FAIL] Not found. Expected an assignment of '$($spec.DefinitionDisplayName)' on the subscription itself, named '$($spec.Name)' (resource name or display name), step $($spec.Step)." -ForegroundColor Red
         $failCount++
     }
     else {
@@ -210,20 +230,32 @@ foreach ($target in $lockTargets) {
 # prints [OK] or [FAIL] or touches the counts; a budget lookup that fails says so, rather than
 # reading as "no budgets".
 Write-Host "`n=== 4. Budgets (manual check, not counted) ===" -ForegroundColor Cyan
-# Budgets are technically Consumption resources.
-try {
-    $budgets = @(Get-AzConsumptionBudget -ErrorAction Stop | Where-Object { $_ })
-    if ($budgets.Count -gt 0) {
-        foreach ($budget in $budgets) {
-            Write-Host "  [INFO] Budget found: $($budget.Name) (Amount: $($budget.Amount) $($budget.Unit))" -ForegroundColor Gray
+# Through the Consumption API at a version it accepts (#411). The subscription's listing also
+# returns resource-group budgets (seen live); the prod group is still read on its own, each in its
+# own try, so one failed read does not hide the other.
+$budgetScopes = @(
+    @{ Label = 'the subscription'; Scope = "/subscriptions/$subscriptionId" }
+    @{ Label = 'prod-skycraft-swc-rg'; Scope = "/subscriptions/$subscriptionId/resourceGroups/prod-skycraft-swc-rg" }
+)
+$seenBudgetIds = @{}
+foreach ($budgetScope in $budgetScopes) {
+    try {
+        $budgets = @(Get-LabArmBudget -Scope $budgetScope.Scope | Where-Object { $_ })
+        if ($budgets.Count -gt 0) {
+            # A budget a wider listing already printed is not repeated.
+            foreach ($budget in $budgets | Where-Object { -not $seenBudgetIds.ContainsKey($_.Id) }) {
+                $seenBudgetIds[$budget.Id] = $true
+                $setOn = if ($budget.Scope -match '/resourceGroups/([^/]+)$') { $Matches[1] } else { 'the subscription' }
+                Write-Host "  [INFO] Budget found on ${setOn}: $($budget.Name) (Amount: $($budget.Amount) $($budget.Unit))" -ForegroundColor Gray
+            }
+        }
+        else {
+            Write-Host "  [INFO] No budgets found on $($budgetScope.Label). (If you created them recently, they might take time to appear)" -ForegroundColor Yellow
         }
     }
-    else {
-        Write-Host "  [INFO] No budgets found. (If you created them recently, they might take time to appear)" -ForegroundColor Yellow
+    catch {
+        Write-Host "  [INFO] Budgets on $($budgetScope.Label) could not be read: $($_.Exception.Message)" -ForegroundColor Yellow
     }
-}
-catch {
-    Write-Host "  [INFO] Budgets could not be read: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 Write-Host "  Confirm your budgets in the portal: Cost Management > Budgets." -ForegroundColor Gray
 
@@ -234,8 +266,8 @@ Write-Host "  (Budgets are a manual check and are not counted.)" -ForegroundColo
 
 if ($failCount -gt 0) {
     Write-Host "`nLab 1.3 validation failed: $failCount check(s) failed. See the [FAIL] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nLab 1.3 validation passed: all $passCount checks passed." -ForegroundColor Green
+Exit-Lab -FailureCount 0

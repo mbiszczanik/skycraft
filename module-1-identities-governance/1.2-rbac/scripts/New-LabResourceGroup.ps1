@@ -4,7 +4,8 @@
 
 .DESCRIPTION
     Idempotently creates the resource groups required by Lab 1.2 and stamps each one
-    with the mandatory governance tags (Project, Environment, CostCenter). Skips
+    with the four governance tags resource-groups.bicep sets (Project, Environment,
+    CostCenter, Owner). Skips
     groups that already exist. Use -WhatIf to print planned actions without making changes.
 
 .PARAMETER SubscriptionId
@@ -13,6 +14,9 @@
 
 .PARAMETER Location
     Azure region for all three resource groups. Defaults to 'Sweden Central'.
+
+.PARAMETER Owner
+    Value of the Owner tag. Defaults to the same value as resource-groups.bicep's parOwner.
 
 .PARAMETER WhatIf
     If specified, prints the resource groups that would be created without actually creating them.
@@ -46,10 +50,16 @@ param(
     [string]$Location = "Sweden Central",
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Owner = "mbiszczanik",
+
+    [Parameter(Mandatory = $false)]
     [switch]$WhatIf
 )
 
 $ErrorActionPreference = "Stop"
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 $ProgressPreference = 'SilentlyContinue'
 
 # Color functions
@@ -82,8 +92,7 @@ try {
 }
 catch {
     Write-Error-Custom "Error: $($_.Exception.Message)"
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Info "Setting subscription context..."
@@ -97,8 +106,9 @@ $resourceGroups = @(
         Location = $Location
         Tags     = @{
             Environment = "Development"
-            Project     = "Skycraft"
+            Project     = "SkyCraft"
             CostCenter  = "MSDN"
+            Owner       = $Owner
         }
     }
     @{
@@ -106,8 +116,9 @@ $resourceGroups = @(
         Location = $Location
         Tags     = @{
             Environment = "Production"
-            Project     = "Skycraft"
+            Project     = "SkyCraft"
             CostCenter  = "MSDN"
+            Owner       = $Owner
         }
     }
     @{
@@ -115,8 +126,9 @@ $resourceGroups = @(
         Location = $Location
         Tags     = @{
             Environment = "Platform"
-            Project     = "Skycraft"
+            Project     = "SkyCraft"
             CostCenter  = "MSDN"
+            Owner       = $Owner
         }
     }
 )
@@ -140,3 +152,4 @@ foreach ($rg in $resourceGroups) {
 }
 
 Write-Success "Resource Group creation script complete!"
+Exit-Lab -FailureCount 0

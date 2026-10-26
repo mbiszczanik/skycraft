@@ -8,18 +8,39 @@
     
     Actions performed:
     1. Applies Tags to Resource Groups (Update-AzTag)
-    2. Assigns Azure Policies at Subscription Scope (New-AzPolicyAssignment). An assignment that
-       already exists - under the fixed name, or made in the Portal under a generated name with
-       the guide's name as display name - is left as it is; one made twice is an [ERROR] and
-       nothing is created for it (issue #330).
+    2. Assigns Azure Policies at Subscription Scope (New-AzPolicyAssignment), with the display
+       names, descriptions, non-compliance messages and parameters the guide has the learner
+       type (issue #406). An assignment that already exists - under the fixed name, or made in
+       the Portal under a generated name with the guide's name as display name - is left as it
+       is; one made twice is an [ERROR] and nothing is created for it (issue #330). An existing
+       assignment whose parameters, enforcement mode, exclusions or identity differ from the
+       lab's is an [ERROR] that names each difference, and so is one with the guide's definition
+       under another name or the guide's name on another definition: nothing is created next to
+       it (issue #406).
+       Inherit-Project-Tag, the Modify assignment of step 1.3.8 (issue #350), is created with a
+       system-assigned managed identity in -Location, and its identity is given the role the
+       definition names (Contributor) on the subscription - what the Portal does itself - unless
+       it holds it already. The role is used only by a remediation task; a new identity can take
+       a minute to replicate, so the grant is retried while Azure reports the principal unknown.
+       The role assignments are read and created through the Azure Resource Manager API, so the
+       script needs no Microsoft Graph sign-in (issue #397).
     3. Creating Resource Locks (New-AzResourceLock). A lock that already exists under the guide's
        name but with another level is set to CanNotDelete, and the script says so (issue #258).
+
+    Every [ERROR] is counted, and the script exits 1 when there was one; a resource group it
+    cannot tag is a [WARN] and does not count. Granting the role needs Owner (or User Access
+    Administrator) on the subscription: with Contributor alone, Inherit-Project-Tag is created,
+    the grant fails, and the run exits 1.
 
 .PARAMETER SubscriptionId
     Target Subscription ID. Defaults to current context.
 
 .PARAMETER Owner
     Value for the canonical Owner tag. Default: mbiszczanik.
+
+.PARAMETER Location
+    Location of the managed identity of Inherit-Project-Tag (the guide's "System assigned
+    identity location"). Default: swedencentral.
 
 .EXAMPLE
     .\Invoke-LabGovernance.ps1
@@ -41,16 +62,27 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$Owner = 'mbiszczanik',
 
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('swedencentral', 'northeurope')]
+    [string]$Location = 'swedencentral',
+
     [switch]$WhatIf
 )
 
 $ErrorActionPreference = "Stop"
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+# The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 # Color output functions
 function Write-Success { param([string]$Message) Write-Host "  -> [SUCCESS] $Message" -ForegroundColor Green }
 function Write-Info { param([string]$Message) Write-Host "$Message" -ForegroundColor Yellow }
 function Write-Header { param([string]$Message) Write-Host "$Message" -ForegroundColor Cyan }
-function Write-Error-Custom { param([string]$Message) Write-Host "  -> [ERROR] $Message" -ForegroundColor Red }
+# Every [ERROR] is counted, and the script exits 1 at the end when there was one, so a caller sees
+# that an assignment, a role or a lock is missing (issue #350: an account that may not assign
+# roles got exit 0 and an Inherit-Project-Tag whose identity holds no role).
+$script:governanceFailures = 0
+function Write-Error-Custom { param([string]$Message) $script:governanceFailures++; Write-Host "  -> [ERROR] $Message" -ForegroundColor Red }
 
 Write-Host "=== Lab 1.3: Governance Deployment (Imperative) ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -72,8 +104,7 @@ try {
 }
 catch {
     Write-Error-Custom "Failed to connect: $_"
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 # 2. Apply Tags
@@ -105,16 +136,75 @@ foreach ($config in $tagConfigurations) {
 # 3. Assign Policies
 Write-Header "`n=== 2. Assigning Policies (New-AzPolicyAssignment) ==="
 
-# The three assignments - names, display names, definition ids - come from
-# LabPolicyAssignment.ps1, shared with Test-Lab.ps1 and Remove-LabResource.ps1; the parameters
-# are this script's own.
+# The four assignments - names, texts, parameters, definition ids - come from
+# LabPolicyAssignment.ps1, shared with Deploy-Bicep.ps1, Test-Lab.ps1 and Remove-LabResource.ps1.
 . (Join-Path $PSScriptRoot 'LabPolicyAssignment.ps1')
-$policyParams = @{
-    'Require-Environment-Tag-RG' = @{ tagName = "Environment" }
-    'Enforce-Project-Tag'        = @{ tagName = "Project"; tagValue = "SkyCraft" }
-    'Restrict-Azure-Regions'     = @{ listOfAllowedLocations = @("swedencentral", "northeurope") }
-}
 $subscriptionScope = "/subscriptions/$SubscriptionId"
+
+# Gives the managed identity of a Modify assignment the role its definition names, on the
+# subscription, unless it holds it there already - what the Portal does when it creates the
+# assignment (issue #350). The role is used only by a remediation task: a request-time Modify
+# needs none. The identity's role assignments are read, and the role granted, through the ARM
+# role assignments API (Get-LabArmRoleAssignment and New-LabArmRoleAssignment in
+# tools/LabCommon.psm1), not through Get-AzRoleAssignment and New-AzRoleAssignment: those resolve
+# principals through Microsoft Graph and fail where the Az sign-in cannot get a Graph token
+# (issue #397). The grant names the principal a ServicePrincipal, so ARM does not look the new
+# identity up in the directory; it is still retried while Azure reports the principal unknown.
+function Grant-LabPolicyIdentityRole {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Assignment,
+
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Spec
+    )
+
+    $label = Format-LabPolicyAssignment -Assignment $Assignment
+    $identity = Get-LabPolicyAssignmentIdentity -Assignment $Assignment
+    if (-not $identity.PrincipalId) {
+        Write-Error-Custom "$($Spec.Name) $label has no managed identity, so its remediation role cannot be granted. Delete it in the Portal (Policy > Assignments) and run this script again, or follow step $($Spec.Step)."
+        return
+    }
+
+    $roleGuid = ($Spec.RoleDefinitionId -split '/')[-1]
+    try {
+        $listed = @(Get-LabArmRoleAssignment -Scope $subscriptionScope -PrincipalId $identity.PrincipalId)
+        $held = @(Select-LabPolicyIdentityRoleAssignment -RoleAssignment $listed `
+                -PrincipalId $identity.PrincipalId -SubscriptionId $SubscriptionId |
+            Where-Object { ([string]$_.Scope).TrimEnd('/') -eq $subscriptionScope -and [string]$_.RoleDefinitionId -eq $roleGuid })
+    }
+    catch {
+        Write-Error-Custom "Could not list the role assignments on the subscription, so the role of $($Spec.Name)'s identity is not granted: $_"
+        return
+    }
+    if ($held.Count -gt 0) {
+        Write-Success "Identity of $($Spec.Name) already holds role $roleGuid on the subscription"
+        return
+    }
+
+    $attempt = 0
+    while ($true) {
+        $attempt++
+        try {
+            New-LabArmRoleAssignment `
+                -Scope $subscriptionScope `
+                -RoleDefinitionId $roleGuid `
+                -PrincipalId $identity.PrincipalId `
+                -PrincipalType 'ServicePrincipal' | Out-Null
+            Write-Success "Granted role $roleGuid on the subscription to the identity of $($Spec.Name)"
+            return
+        }
+        catch {
+            if ($attempt -lt 6 -and "$_" -match 'PrincipalNotFound|does not exist in the directory') {
+                Write-Host "  -> [WAIT] The identity of $($Spec.Name) is not replicated yet; retrying in 10 seconds ($attempt/5)." -ForegroundColor Gray
+                Start-Sleep -Seconds 10
+                continue
+            }
+            Write-Error-Custom "Failed to grant role $roleGuid to the identity of $($Spec.Name): $_"
+            return
+        }
+    }
+}
 
 # An assignment the learner made in the Portal has a generated resource name and the guide's
 # name as its display name (issue #330). Checking by resource name missed it and created a second
@@ -130,16 +220,29 @@ if (-not $WhatIf) {
     }
 }
 
+$plan = if ($null -ne $assignments) { @(Get-LabPolicyAssignmentPlan -Assignment $assignments -SubscriptionId $SubscriptionId) } else { $null }
+
 foreach ($policy in Get-LabPolicyAssignmentSpec) {
     if ($WhatIf) {
          Write-Host "WHATIF: Would assign policy $($policy.Name)" -ForegroundColor Yellow
          continue
     }
-    if ($null -eq $assignments) { continue }
+    if ($null -eq $plan) { continue }
 
-    $found = @(Select-LabPolicyAssignment -Assignment $assignments -SubscriptionId $SubscriptionId -Spec $policy)
+    $item = @($plan | Where-Object { $_.Spec.Name -eq $policy.Name })[0]
+    $found = @($item.Found)
+    if ($item.Action -eq 'Unmatched') {
+        Write-Error-Custom "Policy $($policy.Name) not created: none matches, and a new one would sit next to: $($item.Drift -join '; ')."
+        continue
+    }
     if ($found.Count -eq 1) {
+        $drift = @($item.Drift)
+        if ($drift.Count -gt 0) {
+            Write-Error-Custom "Policy $($policy.Name) $(Format-LabPolicyAssignment -Assignment $found[0]) differs from the lab's: $($drift -join '; '). Not changing it; set it as step $($policy.Step) does, or delete it, in the Portal (Policy > Assignments)."
+            continue
+        }
         Write-Success "Policy $($policy.Name) already assigned: $(Format-LabPolicyAssignment -Assignment $found[0])"
+        if ($policy.RoleDefinitionId) { Grant-LabPolicyIdentityRole -Assignment $found[0] -Spec $policy }
         continue
     }
     if ($found.Count -gt 1) {
@@ -151,18 +254,30 @@ foreach ($policy in Get-LabPolicyAssignmentSpec) {
     try {
         # Read by id: a search by display name can pick a custom definition of the same name.
         $def = Get-AzPolicyDefinition -Id $policy.PolicyDefinitionId -ErrorAction Stop
-        New-AzPolicyAssignment `
-            -Name $policy.Name `
-            -DisplayName $policy.DisplayName `
-            -Scope $subscriptionScope `
-            -PolicyDefinition $def `
-            -PolicyParameterObject $policyParams[$policy.Name] `
-            -ErrorAction Stop | Out-Null
+        $assignArgs = @{
+            Name                  = $policy.Name
+            DisplayName           = $policy.DisplayName
+            Description           = $policy.Description
+            Scope                 = $subscriptionScope
+            PolicyDefinition      = $def
+            PolicyParameterObject = [hashtable]$policy.Parameter
+        }
+        if ($policy.NonComplianceMessage) {
+            $assignArgs.NonComplianceMessage = @(@{ Message = $policy.NonComplianceMessage })
+        }
+        # A Modify assignment needs a managed identity, and an identity needs a location.
+        if ($policy.ManagedIdentity) {
+            $assignArgs.IdentityType = 'SystemAssigned'
+            $assignArgs.Location = $Location
+        }
+        $created = New-AzPolicyAssignment @assignArgs -ErrorAction Stop
         Write-Success "Assigned policy $($policy.Name)"
     }
     catch {
         Write-Error-Custom "Failed to assign $($policy.Name): $_"
+        continue
     }
+    if ($policy.RoleDefinitionId) { Grant-LabPolicyIdentityRole -Assignment $created -Spec $policy }
 }
 
 # 4. Apply Locks
@@ -218,4 +333,10 @@ foreach ($lock in $locks) {
     }
 }
 
+if ($script:governanceFailures -gt 0) {
+    Write-Host "`nImperative Deployment finished with $($script:governanceFailures) error(s). See the [ERROR] lines above." -ForegroundColor Red
+    Exit-Lab -FailureCount $script:governanceFailures
+}
+
 Write-Host "`nImperative Deployment Complete." -ForegroundColor Green
+Exit-Lab -FailureCount 0

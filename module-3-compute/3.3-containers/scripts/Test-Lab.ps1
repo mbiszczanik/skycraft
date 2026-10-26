@@ -74,6 +74,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 $failCount = 0
 
 Write-Host "=== Lab 3.3 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
@@ -82,8 +84,7 @@ Write-Host "=== Lab 3.3 Validation Script ===" -ForegroundColor Cyan -Background
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 Write-Host "Environment: $Environment (resource group $ResourceGroupName)" -ForegroundColor Gray
@@ -217,5 +218,4 @@ if ($failCount -eq 0) {
     Write-Host "Lab 3.3 validation found $failCount issue(s)." -ForegroundColor Red
 }
 
-$Host.SetShouldExit($failCount)
-exit $failCount
+Exit-Lab -FailureCount $failCount

@@ -3,7 +3,7 @@ SUMMARY: Lab 2.1 - Virtual Networks
 DESCRIPTION: Orchestrates the Hub VNet, the Dev/Prod Spoke VNets, the Hub-Spoke peerings and the Load Balancer Public IPs via AVM (requires the Lab 1.2 resource groups to exist). Only what is missing is deployed: an existing VNet, subnet or public IP is left untouched (see parHubVnetExists).
 EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.4.0
+VERSION: 0.5.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -38,6 +38,9 @@ type subnetSpecType = {
 
   @description('Private endpoint network policies')
   privateEndpointNetworkPolicies: 'Disabled' | 'Enabled'
+
+  @description('Default outbound access (false = private subnet)')
+  defaultOutboundAccess: bool
 }
 
 /*******************
@@ -153,18 +156,22 @@ var varTagsProd = {
 // see docs/bicep-standards.md Section 10.2).
 // privateEndpointNetworkPolicies is set explicitly (docs/bicep-standards.md Section 4.5): with it
 // unset, the #188 what-if showed existing 'Disabled' subnets going to 'Enabled', and 'Disabled' is
-// what the portal creates.
+// what the portal creates. defaultOutboundAccess is false for the same reason: the portal creates
+// private subnets (Enable private subnet is ticked by default), and Lab 2.3's load balancer
+// outbound rules give the Module 3 VMs their explicit outbound path.
 var varHubAddressPrefix = '10.0.0.0/16'
 var varHubSubnets subnetSpecType[] = [
   {
     name: 'AzureBastionSubnet'
     addressPrefix: '10.0.0.0/26'
     privateEndpointNetworkPolicies: 'Disabled'
+    defaultOutboundAccess: false
   }
   {
     name: 'GatewaySubnet'
     addressPrefix: '10.0.1.0/27'
     privateEndpointNetworkPolicies: 'Disabled'
+    defaultOutboundAccess: false
   }
 ]
 
@@ -174,22 +181,26 @@ var varDevSubnets subnetSpecType[] = [
     name: 'AuthSubnet'
     addressPrefix: '10.1.1.0/24'
     privateEndpointNetworkPolicies: 'Disabled'
+    defaultOutboundAccess: false
   }
   {
     name: 'WorldSubnet'
     addressPrefix: '10.1.2.0/24'
     privateEndpointNetworkPolicies: 'Disabled'
+    defaultOutboundAccess: false
   }
   {
     name: 'DatabaseSubnet'
     addressPrefix: '10.1.3.0/24'
     privateEndpointNetworkPolicies: 'Disabled'
+    defaultOutboundAccess: false
   }
   {
     name: 'AppServiceSubnet'
     addressPrefix: '10.1.4.0/24'
     delegation: 'Microsoft.Web/serverFarms'
     privateEndpointNetworkPolicies: 'Disabled'
+    defaultOutboundAccess: false
   }
 ]
 
@@ -199,22 +210,26 @@ var varProdSubnets subnetSpecType[] = [
     name: 'AuthSubnet'
     addressPrefix: '10.2.1.0/24'
     privateEndpointNetworkPolicies: 'Disabled'
+    defaultOutboundAccess: false
   }
   {
     name: 'WorldSubnet'
     addressPrefix: '10.2.2.0/24'
     privateEndpointNetworkPolicies: 'Disabled'
+    defaultOutboundAccess: false
   }
   {
     name: 'DatabaseSubnet'
     addressPrefix: '10.2.3.0/24'
     privateEndpointNetworkPolicies: 'Disabled'
+    defaultOutboundAccess: false
   }
   {
     name: 'AppServiceSubnet'
     addressPrefix: '10.2.4.0/24'
     delegation: 'Microsoft.Web/serverFarms'
     privateEndpointNetworkPolicies: 'Disabled'
+    defaultOutboundAccess: false
   }
 ]
 
@@ -340,6 +355,7 @@ module modSubnetHub 'br/public:avm/res/network/virtual-network/subnet:0.2.0' = [
       virtualNetworkName: parVnetNamePlatform
       addressPrefix: subnet.addressPrefix
       privateEndpointNetworkPolicies: subnet.privateEndpointNetworkPolicies
+      defaultOutboundAccess: subnet.defaultOutboundAccess
     }
   }
 ]
@@ -355,6 +371,7 @@ module modSubnetDev 'br/public:avm/res/network/virtual-network/subnet:0.2.0' = [
       addressPrefix: subnet.addressPrefix
       delegation: subnet.?delegation
       privateEndpointNetworkPolicies: subnet.privateEndpointNetworkPolicies
+      defaultOutboundAccess: subnet.defaultOutboundAccess
     }
   }
 ]
@@ -370,6 +387,7 @@ module modSubnetProd 'br/public:avm/res/network/virtual-network/subnet:0.2.0' = 
       addressPrefix: subnet.addressPrefix
       delegation: subnet.?delegation
       privateEndpointNetworkPolicies: subnet.privateEndpointNetworkPolicies
+      defaultOutboundAccess: subnet.defaultOutboundAccess
     }
   }
 ]

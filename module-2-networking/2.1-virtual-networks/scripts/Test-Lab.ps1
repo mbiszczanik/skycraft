@@ -10,6 +10,7 @@
     - Hub VNet and all 2 subnets.
     - Dev VNet and all 4 subnets (AuthSubnet, WorldSubnet, DatabaseSubnet, AppServiceSubnet).
     - Prod VNet and all 4 subnets.
+    - Every subnet is private (DefaultOutboundAccess false), as the portal creates it.
     - VNet Peering state (Connected) and settings (Forwarded traffic, VNet access).
     - Public IPs existence and SKU (Standard/Static).
 
@@ -31,6 +32,8 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 $script:failCount = 0
 
 Write-Host "=== Lab 2.1 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
@@ -39,10 +42,24 @@ Write-Host "=== Lab 2.1 Validation Script ===" -ForegroundColor Cyan -Background
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
+
+# Every subnet is private: the portal's Add a subnet pane ticks Enable private subnet by default,
+# and main.bicep and Deploy-Networking.ps1 declare the same. The Module 3 VMs get their outbound
+# path from Lab 2.3's load balancer outbound rules instead of default outbound access.
+function Test-PrivateSubnet {
+    param($Subnet)
+    if ($Subnet.DefaultOutboundAccess -eq $false) {
+        Write-Host "    - [OK] Subnet $($Subnet.Name) is private (DefaultOutboundAccess: False)." -ForegroundColor Green
+    }
+    else {
+        $actual = if ($null -eq $Subnet.DefaultOutboundAccess) { 'not set' } else { $Subnet.DefaultOutboundAccess }
+        Write-Host "    - [FAIL] Subnet $($Subnet.Name) allows default outbound access (DefaultOutboundAccess: $actual, Expected: False)" -ForegroundColor Red
+        $script:failCount++
+    }
+}
 
 # 1. Validate Hub VNet
 Write-Host "`n=== 1. Validating Hub VNet ===" -ForegroundColor Cyan
@@ -75,6 +92,7 @@ try {
                 Write-Host "  - [FAIL] Subnet $subnetName found but address range is $($subnet.AddressPrefix) (Expected: $($hubExpectedSubnets[$subnetName]))" -ForegroundColor Red
                 $script:failCount++
             }
+            Test-PrivateSubnet -Subnet $subnet
         }
         else {
             Write-Host "  - [FAIL] Subnet $subnetName not found." -ForegroundColor Red
@@ -110,6 +128,7 @@ function Test-SpokeVNet {
                     Write-Host "  - [FAIL] Subnet $subnetName found but address range is $($subnet.AddressPrefix) (Expected: $($ExpectedSubnets[$subnetName]))" -ForegroundColor Red
                     $script:failCount++
                 }
+                Test-PrivateSubnet -Subnet $subnet
             } else {
                 Write-Host "  - [FAIL] Subnet $subnetName not found." -ForegroundColor Red
                 $script:failCount++
@@ -201,5 +220,4 @@ Test-PIP -Name "prod-skycraft-swc-lb-pip" -RgName "prod-skycraft-swc-rg"
 
 Write-Host "`n=== Validation Summary ===" -ForegroundColor Cyan
 Write-Host "Lab 2.1 validation complete. Failures: $($script:failCount)" -ForegroundColor $(if ($script:failCount -eq 0) { 'Green' } else { 'Red' })
-$Host.SetShouldExit($script:failCount)
-exit $script:failCount
+Exit-Lab -FailureCount $script:failCount

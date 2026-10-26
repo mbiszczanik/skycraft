@@ -27,6 +27,9 @@
 .PARAMETER PlatformResourceGroup
     The platform resource group name. Default: 'platform-skycraft-swc-rg'
 
+.PARAMETER Owner
+    Value of the canonical Owner tag. Default: 'mbiszczanik'. Mirrors parOwner in the Bicep path.
+
 .EXAMPLE
     .\Deploy-Networking.ps1
     Deploys all networking resources using default settings.
@@ -45,6 +48,10 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Deploy script; idempotent guard (Get-before-New) and az --what-if provide the dry-run safety net.')]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Owner = 'mbiszczanik',
+
+    [Parameter(Mandatory = $false)]
     [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
@@ -62,6 +69,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 2.1 - Deploy Networking Configuration (PowerShell) ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -69,20 +78,23 @@ Write-Host "=== Lab 2.1 - Deploy Networking Configuration (PowerShell) ===" -For
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
 # Define Mandatory Tags
-$TagsPlatform = @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN' }
-$TagsDev = @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN' }
-$TagsProd = @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN' }
+$TagsPlatform = @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = $Owner }
+$TagsDev = @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN'; Owner = $Owner }
+$TagsProd = @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN'; Owner = $Owner }
 
 # AppServiceSubnet is delegated to App Service (Lab 3.4's VNet integration), as main.bicep and the
 # guide's portal steps create it. The delegation is named after its service, as the AVM subnet
 # module names it, so this path and the Bicep path describe the same subnet.
 $appServiceDelegation = New-AzDelegation -Name 'Microsoft.Web/serverFarms' -ServiceName 'Microsoft.Web/serverFarms'
+
+# Every subnet is private (-DefaultOutboundAccess $false), as the portal's Add a subnet pane and
+# main.bicep create it: no default outbound access. The Module 3 VMs reach the internet through
+# Lab 2.3's load balancer outbound rules.
 
 # ===================================
 # Task 2: Create Hub Virtual Network
@@ -90,8 +102,8 @@ $appServiceDelegation = New-AzDelegation -Name 'Microsoft.Web/serverFarms' -Serv
 Write-Host "`n=== Task 2: Creating Hub Virtual Network ===" -ForegroundColor Cyan
 $hubVnetName = 'platform-skycraft-swc-vnet'
 $hubSubnets = @(
-    (New-AzVirtualNetworkSubnetConfig -Name 'AzureBastionSubnet' -AddressPrefix '10.0.0.0/26'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'GatewaySubnet' -AddressPrefix '10.0.1.0/27')
+    (New-AzVirtualNetworkSubnetConfig -Name 'AzureBastionSubnet' -AddressPrefix '10.0.0.0/26' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'GatewaySubnet' -AddressPrefix '10.0.1.0/27' -DefaultOutboundAccess $false)
 )
 
 Write-Host "Creating VNet: $hubVnetName..." -ForegroundColor Yellow
@@ -101,7 +113,7 @@ try {
         $hubVnet = New-AzVirtualNetwork -ResourceGroupName $PlatformResourceGroup -Name $hubVnetName -Location $Location -AddressPrefix '10.0.0.0/16' -Subnet $hubSubnets -Tag $TagsPlatform -ErrorAction Stop
         Write-Host "  -> Created Hub VNet: $hubVnetName" -ForegroundColor Green
     } else { Write-Host "  -> exists" -ForegroundColor Gray }
-} catch { Write-Host "  -> [ERROR] Failed to create Hub VNet: $_" -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
+} catch { Write-Host "  -> [ERROR] Failed to create Hub VNet: $_" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 
 # ===================================
 # Task 3: Create Dev Virtual Network
@@ -109,10 +121,10 @@ try {
 Write-Host "`n=== Task 3: Creating Dev Virtual Network ===" -ForegroundColor Cyan
 $devVnetName = 'dev-skycraft-swc-vnet'
 $devSubnets = @(
-    (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.1.1.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.1.2.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.1.3.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.1.4.0/24' -Delegation $appServiceDelegation)
+    (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.1.1.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.1.2.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.1.3.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.1.4.0/24' -Delegation $appServiceDelegation -DefaultOutboundAccess $false)
 )
 
 Write-Host "Creating VNet: $devVnetName..." -ForegroundColor Yellow
@@ -122,7 +134,7 @@ try {
         $devVnet = New-AzVirtualNetwork -ResourceGroupName $DevResourceGroup -Name $devVnetName -Location $Location -AddressPrefix '10.1.0.0/16' -Subnet $devSubnets -Tag $TagsDev -ErrorAction Stop
         Write-Host "  -> Created Dev VNet: $devVnetName" -ForegroundColor Green
     } else { Write-Host "  -> exists" -ForegroundColor Gray }
-} catch { Write-Host "  -> [ERROR] Failed to create Dev VNet: $_" -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
+} catch { Write-Host "  -> [ERROR] Failed to create Dev VNet: $_" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 
 # ===================================
 # Task 4: Create Prod Virtual Network
@@ -130,10 +142,10 @@ try {
 Write-Host "`n=== Task 4: Creating Prod Virtual Network ===" -ForegroundColor Cyan
 $prodVnetName = 'prod-skycraft-swc-vnet'
 $prodSubnets = @(
-    (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.2.1.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.2.2.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.2.3.0/24'),
-    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.2.4.0/24' -Delegation $appServiceDelegation)
+    (New-AzVirtualNetworkSubnetConfig -Name 'AuthSubnet' -AddressPrefix '10.2.1.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'WorldSubnet' -AddressPrefix '10.2.2.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'DatabaseSubnet' -AddressPrefix '10.2.3.0/24' -DefaultOutboundAccess $false),
+    (New-AzVirtualNetworkSubnetConfig -Name 'AppServiceSubnet' -AddressPrefix '10.2.4.0/24' -Delegation $appServiceDelegation -DefaultOutboundAccess $false)
 )
 
 Write-Host "Creating VNet: $prodVnetName..." -ForegroundColor Yellow
@@ -143,7 +155,7 @@ try {
         $prodVnet = New-AzVirtualNetwork -ResourceGroupName $ProdResourceGroup -Name $prodVnetName -Location $Location -AddressPrefix '10.2.0.0/16' -Subnet $prodSubnets -Tag $TagsProd -ErrorAction Stop
         Write-Host "  -> Created Prod VNet: $prodVnetName" -ForegroundColor Green
     } else { Write-Host "  -> exists" -ForegroundColor Gray }
-} catch { Write-Host "  -> [ERROR] Failed to create Prod VNet: $_" -ForegroundColor Red; $Host.SetShouldExit(1); exit 1 }
+} catch { Write-Host "  -> [ERROR] Failed to create Prod VNet: $_" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 
 # ===================================
 # Task 5: Configure VNet Peering
@@ -183,7 +195,7 @@ function New-SkyCraftPip {
     try {
         $pip = Get-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -ErrorAction SilentlyContinue
         if (-not $pip) {
-            New-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -Location $Location -Sku Standard -AllocationMethod Static -Tag $Tags -ErrorAction Stop | Out-Null
+            New-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -Location $Location -Sku Standard -AllocationMethod Static -Zone 1, 2, 3 -Tag $Tags -ErrorAction Stop | Out-Null
             Write-Host "  -> Created PIP: $Name" -ForegroundColor Green
         } else { Write-Host "  -> exists" -ForegroundColor Gray }
     } catch { Write-Host "  -> [ERROR] Failed to create PIP $Name : $_" -ForegroundColor Red }
@@ -194,3 +206,4 @@ New-SkyCraftPip -Name 'prod-skycraft-swc-lb-pip' -RgName $ProdResourceGroup -Tag
 
 Write-Host "`n=== Deployment Complete ===" -ForegroundColor Cyan -BackgroundColor Black
 Write-Host "Run Test-Lab.ps1 to verify the networking configuration" -ForegroundColor Green
+Exit-Lab -FailureCount 0

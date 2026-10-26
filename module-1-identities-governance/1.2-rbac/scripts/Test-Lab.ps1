@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Checks presence of Resource Groups and specific Role Assignments.
-    - Malfurion -> Owner (Subscription)
+    - Malfurion -> Owner (Subscription), without a condition
     - SkyCraft-Developers -> Contributor (dev-rg)
     - SkyCraft-Testers -> Reader (dev-rg, prod-rg)
     - Illidan -> Reader (platform-rg)
@@ -12,6 +12,15 @@
     Every check prints [OK] or [FAIL] and is counted. The summary states how many passed and how
     many failed, and the script exits 0 only when none failed. It exits 1 when any check failed,
     and also when no one is signed in to Azure, in which case no check runs (issue #254).
+
+    The role assignments are read through the Azure Resource Manager role assignments API
+    (Get-LabArmRoleAssignment in tools/LabCommon.psm1), filtered by principal and matched on the
+    exact scope and the role's id. Finding the four principals by name - Malfurion by his
+    userPrincipalName, the two groups by display name, Illidan by his mail - needs Microsoft
+    Graph, through the Az sign-in's Graph token (Get-AzADUser, Get-AzADGroup). Where the tenant
+    asks for interaction before it issues that token, sign in with
+    'Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId'; a principal that cannot be
+    looked up fails its checks with that hint (issue #397). -SkipRoleAssignments needs no Graph.
 
 .PARAMETER SkipRoleAssignments
     Checks the resource groups only. The five role-assignment checks are reported as skipped and
@@ -41,6 +50,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+# The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Lab 1.2 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -49,8 +61,7 @@ Write-Host "`nChecking Azure connection..." -ForegroundColor Cyan
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "[ERROR] Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 $subId = $context.Subscription.Id
 Write-Host "Connected to: $($context.Subscription.Name) ($subId)" -ForegroundColor Green
@@ -83,42 +94,99 @@ foreach ($rg in $rgs) {
 # 2. Validate Role Assignments
 Write-Host "`n=== Validating Role Assignments ===" -ForegroundColor Cyan
 
-# Define checks
-# Note: We check specifically for the Principal's assignment at the scope
+# The five assignments the lab makes: each principal, its role and the exact scope the guide
+# assigns it at. An assignment inherited from above (a subscription Reader, say) is not the
+# resource-group assignment the lab asks for, as in Deploy-Bicep.ps1 and Remove-LabResource.ps1.
 $checks = @(
-    @{ Name="Malfurion (Admin)"; Principal="malfurion.stormrage@"; Role="Owner"; Scope="/subscriptions/$subId" }
+    @{ Name="Malfurion (Admin)"; Principal="malfurion.stormrage"; Role="Owner"; Scope="/subscriptions/$subId"; NoCondition=$true }
     @{ Name="Developers Group";  Principal="SkyCraft-Developers";  Role="Contributor"; Scope="/subscriptions/$subId/resourceGroups/dev-skycraft-swc-rg" }
     @{ Name="Testers Group (Dev)"; Principal="SkyCraft-Testers";   Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/dev-skycraft-swc-rg" }
     @{ Name="Testers Group (Prod)"; Principal="SkyCraft-Testers";  Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/prod-skycraft-swc-rg" }
-    @{ Name="External Partner";  Principal="^istormrage[@_]";     Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/platform-skycraft-swc-rg" }
+    @{ Name="External Partner";  Principal="istormrage@illidari.com"; Role="Reader";   Scope="/subscriptions/$subId/resourceGroups/platform-skycraft-swc-rg" }
 )
+
+# Finds one of Lab 1.1's principals by name, through Microsoft Graph with the Az sign-in's own
+# token: Malfurion by userPrincipalName prefix (the domain varies), a group by display name, the
+# guest by mail (a guest's userPrincipalName is rewritten to <alias>_<domain>#EXT#@<tenant>).
+# Returns the object id, $null when the directory holds no such principal, and throws when the
+# lookup fails or finds more than one. Only a failed lookup names the sign-in that provides
+# Microsoft Graph (issue #397): signing in again does not change what the directory holds.
+function Find-LabPrincipalId {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    try {
+        $found = if ($Name -like 'SkyCraft-*') {
+            @(Get-AzADGroup -DisplayName $Name -ErrorAction Stop)
+        }
+        elseif ($Name -like '*@*') {
+            @(Get-AzADUser -Filter "mail eq '$Name'" -ErrorAction Stop)
+        }
+        else {
+            @(Get-AzADUser -Filter "startsWith(userPrincipalName,'$Name@')" -ErrorAction Stop)
+        }
+    }
+    catch {
+        throw "Could not look up '$Name' in Entra ID: $($_.Exception.Message) $(Get-LabGraphSignInHint -Client Az)"
+    }
+    $found = @($found | Where-Object { $_ })
+    if ($found.Count -gt 1) { throw "'$Name' matched $($found.Count) principals in Entra ID; expected exactly one." }
+    if ($found.Count -eq 0) { return $null }
+    return [string]$found[0].Id
+}
 
 if ($SkipRoleAssignments) {
     Write-Host "[SKIP] $($checks.Count) role-assignment checks not run (-SkipRoleAssignments) and not counted." -ForegroundColor Yellow
 }
 else {
+    # Each principal is looked up once. A lookup that fails or is ambiguous is remembered with its
+    # error, so every check of that principal fails and says why.
+    $principalIds = @{}
+    $principalErrors = @{}
+    foreach ($name in @($checks | ForEach-Object { $_.Principal } | Select-Object -Unique)) {
+        try {
+            $principalIds[$name] = Find-LabPrincipalId -Name $name
+        }
+        catch {
+            $principalErrors[$name] = $_.Exception.Message
+        }
+    }
+
     foreach ($check in $checks) {
         Write-Host "Checking: $($check.Name)..." -NoNewline
 
-        # Get assignments at scope. -ErrorAction Stop: a lookup that fails is a failed check that
+        if ($principalErrors.ContainsKey($check.Principal)) {
+            Write-Host " [FAIL] $($principalErrors[$check.Principal])" -ForegroundColor Red
+            $failCount++
+            continue
+        }
+        $principalId = $principalIds[$check.Principal]
+        if (-not $principalId) {
+            Write-Host " [FAIL] '$($check.Principal)' not found in Entra ID. Complete Lab 1.1 first." -ForegroundColor Red
+            $failCount++
+            continue
+        }
+
+        # Through the ARM role assignments API, not Get-AzRoleAssignment, which resolves every
+        # principal through Microsoft Graph (issue #397). A read that fails is a failed check that
         # says why, not an empty scope.
         try {
-            $assignments = Get-AzRoleAssignment -Scope $check.Scope -ErrorAction Stop
-            if (-not $assignments) {
-                Write-Host " [FAIL] No assignments at scope." -ForegroundColor Red
+            $roleId = Get-LabBuiltInRoleId -Name $check.Role
+            $found = @(Get-LabArmRoleAssignment -Scope $check.Scope -PrincipalId $principalId |
+                Where-Object { $_.RoleDefinitionId -eq $roleId -and $_.Scope -eq $check.Scope })
+
+            # Owner without a condition is what the Bicep and New-LabRoleAssignment.ps1 create and
+            # what guide step 1.2.4 selects ("Allow user to assign all roles"). Any other option on
+            # the Portal's Conditions tab adds a condition: the assignment exists but is not the
+            # lab's, so it fails here as well (#325, guide Troubleshooting Issue 6).
+            if ($found.Count -gt 0 -and $check.NoCondition -and -not @($found | Where-Object { -not $_.Condition })) {
+                Write-Host " [FAIL] '$($check.Role)' assignment found, but with a condition; the lab's has none (guide step 1.2.4)." -ForegroundColor Red
                 $failCount++
-                continue
             }
-
-            # Filter for role and principal
-            # Using match for UPN because domain might vary, or DisplayName for groups.
-            # Guest sign-in names are rewritten to <alias>_<domain>#EXT#@<tenant>, hence the [@_] pattern for the guest (Illidan).
-            $found = $assignments | Where-Object {
-                ($_.RoleDefinitionName -eq $check.Role) -and
-                ( ($_.SignInName -match $check.Principal) -or ($_.DisplayName -eq $check.Principal) )
-            }
-
-            if ($found) {
+            elseif ($found.Count -gt 0) {
                 Write-Host " [OK] Found '$($check.Role)' assignment." -ForegroundColor Green
                 $passCount++
             }
@@ -140,8 +208,8 @@ Write-Host "  Failed: $failCount" -ForegroundColor $(if ($failCount -gt 0) { 'Re
 
 if ($failCount -gt 0) {
     Write-Host "`nLab 1.2 validation failed: $failCount check(s) failed. See the [FAIL] lines above." -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nLab 1.2 validation passed: all $passCount checks passed." -ForegroundColor Green
+Exit-Lab -FailureCount 0

@@ -18,16 +18,23 @@
     The users are looked up on the tenant's initial *.onmicrosoft.com domain, the one the guide
     creates them on, and the guest by the address the guide invites (issue #193).
 
+    It signs in to the tenant SKYCRAFT_GRAPH_TENANT_ID names, else to the tenant of a Microsoft
+    Graph sign-in already in this session (one that lacks a scope it requests is replaced in its
+    own tenant), else to the tenant of an Az context in this session, including one Az PowerShell
+    restored from an earlier session. If that Graph sign-in and that Az context are in different
+    tenants, it stops with [ERROR] and names both. With no source, Microsoft Graph picks the
+    account's home tenant, which for a personal Microsoft account is not the lab tenant.
+
     Exit codes:
       0  every object that exists was deleted (or -WhatIf / a declined prompt skipped it)
-      1  Microsoft Graph sign-in failed or the initial domain could not be determined (nothing
-         was deleted), or at least one lookup or deletion failed
+      1  a Microsoft Graph module is missing (the script names it and the command that installs it,
+         issue #375), Microsoft Graph sign-in failed or the initial domain could not be
+         determined (nothing was deleted), or at least one lookup or deletion failed
 
-    Each non-zero exit is paired with $Host.SetShouldExit: a bare "exit 1" is dropped under
-    "pwsh -File" for any script that declares #Requires -Modules for a module it has to
-    auto-import, and the process would exit 0 with the failure still on screen (issue #104).
-    A caller that dot-sources this script, or runs "& .\Remove-LabResource.ps1" with further
-    statements after it, still ends with its own exit code rather than this one.
+    Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
+    otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
+    (issue #104), it also sets the process exit code; run at a prompt or by another script,
+    it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
 .PARAMETER Force
     Skip the confirmation prompt.
@@ -48,7 +55,6 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Identity.DirectoryManagement
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -77,15 +83,29 @@ param(
 # returns neither: falling back to a prompt there would reintroduce exactly the hang this exists
 # to remove, so a half-configured principal is reported rather than degraded into.
 #
+# The interactive sign-in names a tenant: -TenantId (New-LabUser.ps1 only), else
+# SKYCRAFT_GRAPH_TENANT_ID, else the tenant of a Graph sign-in in the session, so one that lacks
+# scopes is replaced in its own tenant (#408), else the tenant of an Az context in the session,
+# including one Az PowerShell restored from an earlier session. A Graph sign-in in another tenant
+# than that Az context stops the script instead of either winning silently. With none, Microsoft
+# Graph picks the account's home tenant, which for a personal Microsoft account is not the lab
+# tenant (#300).
+#
+# In Azure Cloud Shell, with no service principal, the plan is Cloud Shell's own sign-in: its Graph
+# token comes from Get-AzAccessToken and never prompts. An interactive sign-in there waits for a
+# browser Cloud Shell does not have, and security defaults refuse a device code (#418). That token
+# holds the scopes Cloud Shell was granted, so each script names, with -CoveredBy, the scopes that
+# also allow its calls; when the token still falls short, the script stops before any change.
+#
 # The variables are deliberately NOT the Azure SDK's AZURE_CLIENT_ID / AZURE_TENANT_ID trio. Those
 # are commonly already exported for the ARM subscription identity, which in this project is a
 # different account from the one that administers Entra ID - consuming them would sign Graph in as
 # the wrong principal, silently. See TROUBLESHOOTING.md for how to set these from a secret store.
 #
-# Duplicated verbatim in New-LabUser.ps1, Test-Lab.ps1 and Remove-LabResource.ps1 rather than
-# factored into a shared helper: docs/powershell-standards.md 7.3 requires every lab folder to be
-# runnable and readable on its own, and tests/Lab11-Graph-Auth.Tests.ps1 asserts that the three
-# copies do not drift apart.
+# Duplicated verbatim in New-LabUser.ps1, Test-Lab.ps1 and Remove-LabResource.ps1, and in Lab
+# 1.2's New-LabRoleAssignment.ps1, which reads Lab 1.1's users, rather than factored into a shared
+# helper: docs/powershell-standards.md 7.3 requires every lab folder to be readable on its own,
+# and tests/Lab11-Graph-Auth.Tests.ps1 asserts that the four copies do not drift apart.
 function Get-LabGraphAuthPlan {
     [CmdletBinding()]
     param(
@@ -95,12 +115,28 @@ function Get-LabGraphAuthPlan {
         [Parameter(Mandatory = $false)]
         [string]$TenantId,
 
+        # The tenant of a signed-in Graph context in the session, passed in for the same reason.
+        [Parameter(Mandatory = $false)]
+        [string]$GraphContextTenantId,
+
+        # The current Az context's tenant, passed in so the decision makes no Az call itself.
+        [Parameter(Mandatory = $false)]
+        [string]$AzContextTenantId,
+
         [Parameter(Mandatory = $false)]
         [hashtable]$EnvironmentValue,
 
         [Parameter(Mandatory = $false)]
-        [bool]$Unattended
+        [bool]$Unattended,
+
+        # Running in Azure Cloud Shell; read from the host when omitted.
+        [Parameter(Mandatory = $false)]
+        [bool]$CloudShell
     )
+
+    if (-not $PSBoundParameters.ContainsKey('CloudShell')) {
+        $CloudShell = ($env:POWERSHELL_DISTRIBUTION_CHANNEL -eq 'CloudShell') -or ("$env:AZUREPS_HOST_ENVIRONMENT" -like 'cloud-shell*')
+    }
 
     if (-not $PSBoundParameters.ContainsKey('EnvironmentValue')) {
         $EnvironmentValue = @{
@@ -129,12 +165,52 @@ function Get-LabGraphAuthPlan {
     }
 
     # An explicit -TenantId beats the environment: the caller knows which tenant it means.
-    if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $setting['TenantId'] = $TenantId.Trim() }
+    $tenantSource = if ($setting['TenantId']) { 'SKYCRAFT_GRAPH_TENANT_ID' } else { $null }
+    if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
+        $setting['TenantId'] = $TenantId.Trim()
+        $tenantSource = '-TenantId'
+    }
 
     $credentialSet = @('ClientId', 'ClientSecret', 'CertThumbprint') |
         Where-Object { $setting[$_] }
 
     if (@($credentialSet).Count -eq 0) {
+        # Then the tenant of a Graph sign-in in this session, so a sign-in again for missing scopes
+        # stays in it (#408), then the Az context's. Without any tenant, a personal Microsoft
+        # account's sign-in lands outside the lab tenant (live pass of 2026-10-20, #300).
+        # Interactive only: an app-only principal names its tenant in its own configuration.
+        if (-not $setting['TenantId'] -and -not [string]::IsNullOrWhiteSpace($GraphContextTenantId)) {
+            $setting['TenantId'] = $GraphContextTenantId.Trim()
+            $tenantSource = 'the Microsoft Graph context'
+        }
+        if (-not $setting['TenantId'] -and -not [string]::IsNullOrWhiteSpace($AzContextTenantId)) {
+            $setting['TenantId'] = $AzContextTenantId.Trim()
+            $tenantSource = 'the Az context'
+        }
+
+        # Cloud Shell has no browser for an interactive sign-in, and security defaults refuse a
+        # device code (AADSTS530035; on by default in tenants created from 2026-07-01). Its own
+        # sign-in already holds a delegated Graph token, which never prompts, so it serves an
+        # unattended run too (#418). TokenParameter is for Get-AzAccessToken.
+        if ($CloudShell) {
+            $tokenParameter = @{ ResourceTypeName = 'MSGraph'; AsSecureString = $true; ErrorAction = 'Stop' }
+            $reason = "No service principal configured - in Azure Cloud Shell, signing in with Cloud Shell's own sign-in."
+            if ($setting['TenantId']) {
+                $tokenParameter['TenantId'] = $setting['TenantId']
+                $reason = "No service principal configured - in Azure Cloud Shell, signing in with Cloud Shell's own sign-in to tenant $($setting['TenantId']) (from $tenantSource)."
+            }
+
+            return [pscustomobject]@{
+                Mode             = 'CloudShell'
+                Reason           = $reason
+                TenantId         = $setting['TenantId']
+                TenantSource     = $tenantSource
+                ClientId         = $null
+                ConnectParameter = $null
+                TokenParameter   = $tokenParameter
+            }
+        }
+
         if ($Unattended) {
             return [pscustomobject]@{
                 Mode             = 'Blocked'
@@ -148,12 +224,17 @@ function Get-LabGraphAuthPlan {
         # No ContextScope here on purpose: the interactive sign-in writes to the user token cache,
         # so a learner running three scripts in a row authenticates once, as before.
         $interactiveParameter = @{ Scopes = $Scope; ErrorAction = 'Stop' }
-        if ($setting['TenantId']) { $interactiveParameter['TenantId'] = $setting['TenantId'] }
+        $reason = 'No service principal configured - signing in interactively.'
+        if ($setting['TenantId']) {
+            $interactiveParameter['TenantId'] = $setting['TenantId']
+            $reason = "No service principal configured - signing in interactively to tenant $($setting['TenantId']) (from $tenantSource)."
+        }
 
         return [pscustomobject]@{
             Mode             = 'Interactive'
-            Reason           = 'No service principal configured - signing in interactively.'
+            Reason           = $reason
             TenantId         = $setting['TenantId']
+            TenantSource     = $tenantSource
             ClientId         = $null
             ConnectParameter = $interactiveParameter
         }
@@ -228,28 +309,83 @@ function Connect-LabGraph {
         [string[]]$Scope,
 
         [Parameter(Mandatory = $false)]
-        [string]$TenantId
+        [string]$TenantId,
+
+        # Per requested scope, other scopes that allow every call this script makes with it, as the
+        # Microsoft Graph permissions reference lists them (#418). Per script, not one table:
+        # Directory.ReadWrite.All covers creating and reading users, not deleting them.
+        [Parameter(Mandatory = $false)]
+        [hashtable]$CoveredBy = @{}
     )
 
     # A context is signed in only when it names a tenant and an identity - an account, or an app
-    # name app-only. Connect-MgGraph can leave one that names neither and still return without an
-    # error: a delegated sign-in for scopes the account has never consented to does exactly that,
-    # with no consent prompt (issue #242). Accepting it printed "Connected to Tenant:  as", and
-    # every Graph call after it failed with "Authentication needed". One test, used for both the
-    # context reused below and the one a sign-in leaves.
+    # name (app-only, or a delegated sign-in that reports no account, #300). Connect-MgGraph can
+    # leave one that names neither and still return without an error: a delegated sign-in for
+    # scopes the account has never consented to does exactly that, with no consent prompt (issue
+    # #242). Accepting it printed "Connected to Tenant:  as", and every Graph call after it failed
+    # with "Authentication needed". One test, used for both the context reused below and the one
+    # a sign-in leaves.
     $isSignedIn = { param($context) [bool]($context -and $context.TenantId -and ($context.Account -or $context.AppName)) }
 
-    $plan = Get-LabGraphAuthPlan -Scope $Scope -TenantId $TenantId
+    # The requested scopes a delegated context does not hold (issue #273). A context left in the
+    # session by an earlier `Connect-MgGraph -Scopes User.Read.All`, or by another tool, is signed
+    # in but cannot write: reused as is, the script failed later with a 403 on its first write. A
+    # ReadWrite scope covers its Read counterpart (User.ReadWrite.All covers User.Read.All), as it
+    # does in Microsoft Graph, and so does a scope -CoveredBy names for it; the comparison ignores
+    # case, as scope names do.
+    $missingScope = {
+        param($context, [string[]]$requested)
+        $granted = @($context.Scopes | ForEach-Object { [string]$_ })
+        @($requested | Where-Object {
+            $readWrite = $_ -replace '^([^.]+)\.Read(?=\.|$)', '$1.ReadWrite'
+            $covering = @($_, $readWrite) + @($CoveredBy[$_])
+            -not ($covering | Where-Object { $_ -and ($granted -contains $_) })
+        })
+    }
+
+    # The Az context's tenant, for a plan given no other. Read only when Az.Accounts is already
+    # imported: Lab 1.1 does not require Az, and this must not import it. Get-Command -Name would:
+    # it auto-loads the module, even with -ListImported. Imported is not signed in here: Az
+    # PowerShell restores the context it saved in an earlier session (context autosave).
+    $azContextTenantId = $null
+    if (Get-Module -Name Az.Accounts) {
+        try { $azContextTenantId = [string](Get-AzContext -ErrorAction Stop).Tenant.Id } catch { $azContextTenantId = $null }
+    }
+
+    # The tenant of a Graph sign-in already in this session, ranked above the Az context (#408).
+    $existingContext = Get-MgContext
+    $graphContextTenantId = if (& $isSignedIn $existingContext) { [string]$existingContext.TenantId } else { $null }
+    # The personal Microsoft account directory, which a failed sign-in can leave, is never a lab tenant (#408).
+    if ($graphContextTenantId -eq '9188040d-6c67-4c5b-b112-36a304b66dad') { $graphContextTenantId = $null }
+
+    $plan = Get-LabGraphAuthPlan -Scope $Scope -TenantId $TenantId -GraphContextTenantId $graphContextTenantId -AzContextTenantId $azContextTenantId
 
     if ($plan.Mode -eq 'Blocked') { throw $plan.Reason }
 
-    if ($plan.Mode -eq 'Interactive') {
+    if ($plan.Mode -in 'Interactive', 'CloudShell') {
+        # The two implicit sources disagree: the Graph sign-in and an Az context, which may be a
+        # restored one. Neither silently wins: the learner chooses, before anything is created,
+        # checked or deleted in either tenant (#300). -TenantId or SKYCRAFT_GRAPH_TENANT_ID decides.
+        if ($plan.TenantSource -eq 'the Microsoft Graph context' -and -not [string]::IsNullOrWhiteSpace($azContextTenantId) -and $azContextTenantId.Trim() -ne $plan.TenantId) {
+            $azTenant = $azContextTenantId.Trim()
+            throw "Microsoft Graph is signed in to tenant $($plan.TenantId) in this session, but the Az context names tenant $azTenant (Az PowerShell may have restored it from an earlier session). To use tenant $($plan.TenantId), set SKYCRAFT_GRAPH_TENANT_ID to it or run Connect-AzAccount -TenantId $($plan.TenantId). To use tenant $azTenant, run Disconnect-MgGraph. Then run the script again."
+        }
+
         # Reuse a signed-in context, which is what a learner running the lab expects. Note this is
         # only reached when no service principal is configured: an unattended run never gets here.
-        # A partial one is not reused: the sign-in below replaces it.
-        $existingContext = Get-MgContext
+        # A partial one is not reused: the sign-in below replaces it, as it does one in a tenant
+        # other than the one -TenantId or SKYCRAFT_GRAPH_TENANT_ID names. A delegated one is reused
+        # only when its scopes cover every scope this script requests, also when it reports no
+        # account, as a personal Microsoft account's sign-in can (#300). An app-only one, told by
+        # AuthType alone, holds the app's application permissions, which a new sign-in with -Scopes
+        # cannot add to, so it is reused as before.
         if ((& $isSignedIn $existingContext) -and (-not $plan.TenantId -or $existingContext.TenantId -eq $plan.TenantId)) {
-            return $existingContext
+            $isAppOnly = "$($existingContext.AuthType)" -eq 'AppOnly'
+            $missing = @(if (-not $isAppOnly) { & $missingScope $existingContext $Scope })
+            if ($missing.Count -eq 0) {
+                return $existingContext
+            }
+            Write-Host "  -> The Microsoft Graph context in this session lacks $($missing -join ', ') - signing in again with the scopes this script requests." -ForegroundColor Yellow
         }
     }
     elseif (Get-MgContext) {
@@ -259,8 +395,16 @@ function Connect-LabGraph {
     }
 
     Write-Host "  -> $($plan.Reason)" -ForegroundColor Yellow
+    if ($plan.Mode -eq 'Interactive' -and -not $plan.TenantId) {
+        Write-Host "  -> [INFO] No tenant named (-TenantId, SKYCRAFT_GRAPH_TENANT_ID, a Microsoft Graph sign-in or an Az context), so Microsoft Graph picks the account's home tenant. With a personal Microsoft account, sign in first with Connect-MgGraph -TenantId <tenant id> and the scopes in TROUBLESHOOTING.md, or set SKYCRAFT_GRAPH_TENANT_ID to the lab tenant's ID, then run the script again." -ForegroundColor Gray
+    }
 
     $connectParameter = $plan.ConnectParameter
+    if ($plan.Mode -eq 'CloudShell') {
+        # Get-AzAccessToken loads Az.Accounts, which Cloud Shell ships.
+        $tokenParameter = $plan.TokenParameter
+        $connectParameter = @{ AccessToken = (Get-AzAccessToken @tokenParameter).Token; NoWelcome = $true; ErrorAction = 'Stop' }
+    }
     Connect-MgGraph @connectParameter
 
     $context = Get-MgContext
@@ -268,10 +412,60 @@ function Connect-LabGraph {
         throw "Microsoft Graph sign-in did not complete: Connect-MgGraph returned without an error but left no signed-in account or tenant. A likely cause is missing consent for the permissions this script requests ($($Scope -join ', ')), or for the app registration's application permissions when signing in app-only. See TROUBLESHOOTING.md."
     }
 
+    # Cloud Shell's token holds the scopes Cloud Shell was granted, not the requested ones: stop
+    # before any Graph change when they fall short (#418).
+    if ($plan.Mode -eq 'CloudShell') {
+        $missing = @(& $missingScope $context $Scope)
+        if ($missing.Count -gt 0) {
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+            throw "In Azure Cloud Shell this script signs in with Cloud Shell's own sign-in, and its Microsoft Graph token lacks $($missing -join ', '), which this script needs. Cloud Shell has no browser for a sign-in with other permissions, and a tenant with security defaults refuses a device code sign-in (error 530035). Run this script in PowerShell 7 on your own machine, or do its steps in the Portal. See TROUBLESHOOTING.md."
+        }
+    }
+
     return $context
 }
 
+# --- The users' domain (issues #193, #237) --------------------------------------------------
+# Lab 1.1 creates its users on the tenant's INITIAL *.onmicrosoft.com domain, the one the guide's
+# '<name>@[yourtenant].onmicrosoft.com' means. Not the default domain: in a tenant whose default
+# is a custom domain, that names users the guide never creates. And no guess when the tenant
+# lists no initial domain: a guessed domain creates, checks, assigns or deletes users nobody
+# meant. Every Module 1 script that builds a Lab 1.1 user's address picks the domain with this
+# function, given the tenant's domains as Get-MgDomain (or GET /v1.0/domains) returns them:
+# New-LabUser.ps1, Test-Lab.ps1 and Remove-LabResource.ps1 here, New-LabRoleAssignment.ps1 and
+# Deploy-Bicep.ps1 in Lab 1.2. The copies are byte-identical, for the reason given above
+# Get-LabGraphAuthPlan, and tests/Module1-Initial-Domain.Tests.ps1 holds them together.
+function Select-LabInitialDomain {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowNull()]
+        [object[]]$Domain
+    )
+
+    $initial = @($Domain | Where-Object { $_ -and $_.IsInitial -eq $true } | ForEach-Object { [string]$_.Id } | Where-Object { $_ })
+    if ($initial.Count -eq 0) { throw 'the tenant lists no domain marked IsInitial' }
+    return $initial[0]
+}
+
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
+
+# The Microsoft Graph modules this script calls, imported here rather than with '#Requires -Modules'
+# (issue #375): Azure Cloud Shell does not ship Microsoft.Graph.Users, and #Requires would stop the
+# script with PowerShell's own error, which names no install command. Import-LabModule imports them
+# in this order and at one version (a session loads only one Microsoft.Graph.Authentication), or
+# names the command that installs what is missing and returns $false.
+$labModule = @(
+    'Microsoft.Graph.Authentication'
+    'Microsoft.Graph.Users'
+    'Microsoft.Graph.Groups'
+    'Microsoft.Graph.Identity.DirectoryManagement'
+)
+if (-not (Import-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
 if ($Force) { $ConfirmPreference = 'None' }
 
 Write-Host "=== Lab 1.1 - Resource Cleanup ===" -ForegroundColor Cyan -BackgroundColor Black
@@ -279,33 +473,33 @@ Write-Host "=== Lab 1.1 - Resource Cleanup ===" -ForegroundColor Cyan -Backgroun
 # Check Microsoft Graph Connection
 try {
     Write-Host "Checking Microsoft Graph connection..." -ForegroundColor Yellow
+    # No -CoveredBy: deleting a user takes User.ReadWrite.All and nothing else, so in Cloud Shell,
+    # whose token lacks it, the sign-in stops before anything is deleted (#418).
     $mgContext = Connect-LabGraph -Scope @(
         'User.ReadWrite.All'
         'Group.ReadWrite.All'
         'Directory.ReadWrite.All'
     )
-    $identity = if ($mgContext.Account) { $mgContext.Account } else { $mgContext.AppName }
+    # A delegated sign-in can report no account (#300); its AppName is the client tool, not the user.
+    $identity = if ($mgContext.Account) { $mgContext.Account } elseif ("$($mgContext.AuthType)" -eq 'AppOnly') { $mgContext.AppName } else { 'a delegated sign-in (no account reported)' }
     Write-Host "Connected to Tenant: $($mgContext.TenantId) as $identity" -ForegroundColor Green
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Microsoft Graph: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
-# Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain, the one the guide's
-# '<name>@[yourtenant].onmicrosoft.com' means (issue #193). Not the default domain, which in a
-# tenant with a custom default domain leaves the guide's users in place, and no guess when the
-# lookup fails: nothing is deleted by a name this script could not work out.
+# Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain (Select-LabInitialDomain
+# above). Not the default domain, which in a tenant with a custom default domain leaves the
+# guide's users in place, and no guess when the lookup fails: nothing is deleted by a name this
+# script could not work out.
 try {
-    $domain = Get-MgDomain -ErrorAction Stop | Where-Object { $_.IsInitial } | Select-Object -First 1 -ExpandProperty Id
-    if (-not $domain) { throw 'the tenant lists no domain marked IsInitial' }
+    $domain = Select-LabInitialDomain -Domain @(Get-MgDomain -ErrorAction Stop)
     Write-Host "Initial domain: $domain" -ForegroundColor Gray
 }
 catch {
     Write-Host "  -> [ERROR] Could not determine the tenant's initial *.onmicrosoft.com domain: $_" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
@@ -424,8 +618,8 @@ foreach ($groupName in $groupsToDelete) {
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s)." -ForegroundColor Red
     Write-Host "  See the [ERROR] lines above - this run exits 1, nothing was masked." -ForegroundColor Gray
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 
 Write-Host "`nCleanup Complete." -ForegroundColor Green
+Exit-Lab -FailureCount 0

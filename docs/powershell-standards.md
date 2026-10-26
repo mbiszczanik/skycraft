@@ -45,6 +45,14 @@ param(...)
 
 - `#Requires -Version 7.0` is mandatory in every script.
 - Add `#Requires -Modules <Name>` for each Az module the script imports (e.g., `Az.Accounts`, `Az.Network`). Scripts that only shell out to the `az` CLI omit the module requirement.
+- A module that Azure Cloud Shell does not ship (today `Microsoft.Graph.Users`, which the Lab 1.1 scripts and Lab 1.2's `New-LabRoleAssignment.ps1` call) goes in a `$labModule` list imported with `Import-LabModule` from [`tools/LabCommon.psm1`](../tools/LabCommon.psm1), not in `#Requires` (issue #375). `#Requires` stops the script with PowerShell's own error, which names no install command; `Import-LabModule` names a missing module and prints the `Install-Module` line for it, and the script ends itself with `Exit-Lab`. It also imports the Microsoft Graph modules at one version: each pins `Microsoft.Graph.Authentication` to its own version and a session loads only one, so a plain `Import-Module -Name $labModule` after `Install-Module Microsoft.Graph.Users` in Cloud Shell can stop with "Assembly with same name is already loaded". When no version is installed for all of them, it prints `Install-Module <name> -RequiredVersion <version> -Scope CurrentUser` instead. Keep a script's Microsoft Graph modules together in that list, in the order `#Requires` imported them, right after the `LabCommon` import, and do not import them again by name:
+
+  ```powershell
+  $labModule = @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Users')
+  if (-not (Import-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
+  ```
+
+  [`tests/Module1-Graph-Modules.Tests.ps1`](../tests/Module1-Graph-Modules.Tests.ps1) fails a `module-*` script that declares a `Microsoft.Graph.*` module in `#Requires`, a list that misses a module the script calls or names one it does not, and Module 1 prerequisites that do not name every module and its install command.
 
 ## 2. Naming Conventions
 
@@ -125,8 +133,16 @@ Scripts interacting with Azure **must** use `try...catch` blocks to handle API f
 2. Use `try...catch` for all Azure cmdlets.
 3. Do not read a lookup that failed as "absent". `-ErrorAction SilentlyContinue` on an existence check turns a 403, throttling or a transient ARM error into "not found", and a cleanup then skips a resource that still exists and exits `0` (issue #255). Look up with `-ErrorAction Stop` and tell the two apart: the lab cleanups run each lookup through `Invoke-LabLookup`, which reads "found nothing" and a not-found error (`Test-LabNotFoundError`) as absent, and reports any other error as `[ERROR]`, counted like a failed delete - and the resource it could not see is left alone. `Test-LabNotFoundError` recognises the ARM not-found shapes (`ResourceNotFound`, `ResourceGroupNotFound`, a 404 status), not every cmdlet's own wording: `Get-AzResourceGroup -Name` reports a missing group as "Provided resource group does not exist.", and `Get-AzStorageContainer -Name` a missing container as "Can not find the container", which both read as a failed lookup. Generated cmdlets can do the same: `Get-AzAutoscaleSetting -Name` reports a missing setting as a plain exception with no status. List instead and pick by name (`Get-AzResourceGroup`; for containers `Get-AzRmStorageContainer`, a control-plane call the storage firewall does not block; the Az.Monitor objects in Lab 5.1), so a missing object is an empty match rather than an error to interpret. Each cleanup carries its own copy of the two helpers (§7.5). [`tests/Lab-Cleanup-Lookup.Tests.ps1`](../tests/Lab-Cleanup-Lookup.Tests.ps1) holds every copy to the same contract, and fails any cleanup that silences a lookup another way: a `*-Az*` command given `-ErrorAction SilentlyContinue` or `Ignore`, directly or through a splatted hashtable the script builds; `$ErrorActionPreference` set to either, at any scope; a `$PSDefaultParameterValues` entry that gives Az commands either as their `ErrorAction`; or a catch clause around a `*-Az*` command (`Invoke-AzRestMethod` aside) that, on the path a failure takes, neither counts the error (`++` or `+=` on `$script:cleanupFailures`, scope written out) nor throws or exits - the way Labs 3.1 and 4.4 read any error as "not there" before #297. `Test-LabNotFoundError` satisfies that rule only as the test that decides which branch is the failure path; `if (Test-LabNotFoundError $_) { }` on its own is flagged. A few diagnostics report a failure as `[WARN]` on purpose, because their answer must not change the exit code; the suite lists those catch clauses by file and command, and fails an entry that no longer matches. It reads all of this from the syntax tree, never from comments or strings, and only in the spellings its fixtures cover; a value held in another variable is not resolved. The catch rule sees only commands written inside the `try` block: a scriptblock invoked with `&` inside it, and a `trap`, are not read. Nor is an error hidden without silencing the command: `-ErrorAction Continue` with `2>$null` or `*>$null`, or `$ErrorActionPreference = 'Continue'`. The lab cycle's `tools/Remove-LabCycle.ps1`, which asserts what the cleanups left behind, and `tools/LabCycle.psm1`, whose preflight checks for leftovers before a run, are held to the same rules except the one about catch clauses: they report a check that failed as a failed result or a failed preflight check, not in `$script:cleanupFailures`. No lab is exempt from these rules, only the listed diagnostic catch clauses are: a new lab's cleanup meets them from its first commit.
 4. Use `-ErrorAction Stop` when a failure should trigger the `catch` block for retries or termination.
-5. Signal failure to the caller with `$Host.SetShouldExit(<code>)` immediately before every non-zero `exit <code>`. PowerShell 7 discards `exit <code>` from a script run as `pwsh -File` when that script declares `#Requires -Modules` for a module it has to auto-import - every `Az.*` module qualifies. The `exit` still unwinds the script, but the host never applies the code, so the process exits `0` and a failed run looks clean to the automated lab cycle. Keep the `exit` as well, so execution still stops. `exit 0` needs no guard. Enforced by [`tests/Exit-Code-Propagation.Tests.ps1`](../tests/Exit-Code-Propagation.Tests.ps1) (issue #104) on every script that declares `#Requires -Modules` - the condition the fault needs. A script that declares none carries its exit code out unaided, so the rule does not apply to it (issue #124).
-6. Gate every deployment on its result. `New-Az*Deployment` does not throw for every unhappy ending - a deployment whose resources fail to provision returns an object with `ProvisioningState` set to `Failed` or `Canceled` and the pipeline carries on. Assign the result to a variable and end the script with a non-zero `exit` when it is not `Succeeded`; a deployment piped to `Out-Null` cannot be checked at all. Enforced by [`tests/Deployment-State-Gating.Tests.ps1`](../tests/Deployment-State-Gating.Tests.ps1) (issue #75).
+5. End a lab script with `Exit-Lab -FailureCount <n>` from [`tools/LabCommon.psm1`](../tools/LabCommon.psm1), never with a non-zero `exit` or `$Host.SetShouldExit`. A lab script has two callers: the learner, who runs it at the prompt (`.\scripts\Test-Lab.ps1`) and keeps working in that session, and the lab cycle or CI, which start it as a process. PowerShell 7 discards `exit <code>` from a script run as `pwsh -File` when the script declares `#Requires -Modules` for a module it has to auto-import - `Az.Accounts` qualifies - so the process exits `0` and a failed run looks clean (issue #104). `$Host.SetShouldExit(<code>)` carries the code out, but it ends the whole process: at the prompt it closes the learner's PowerShell window, even with code `0` (issue #257). `Exit-Lab` exits `1` when the count is above zero and `0` otherwise, and calls `$Host.SetShouldExit` only when the script is the entry point of a `pwsh -File` process (`-File` on the command line, no `-NoExit`, and the script at the bottom of the call stack). At a prompt, under `-Command` and inside the lab cycle's launcher shim it is a plain `exit`: the session stays open and `$LASTEXITCODE` holds the code. Pass the failure count, not an exit code: `exit $failCount` wraps to `0` at 256 failures. `exit 0` stays as it is. The successful run ends through it too: the last top-level statement of a lab script is `Exit-Lab -FailureCount <n>` (`Exit-Lab -FailureCount 0` after the failure paths have exited) or an `exit`, not a closing `Write-Host` or a `try`/`if` block. A script that falls off its end leaves `$LASTEXITCODE` as the previous command set it, so a passing re-run in the same session still reads `1` (issue #398). Report a failure with `Write-Host "[ERROR] <message>" -ForegroundColor Red` before that `Exit-Lab`, not with `Write-Error`: under `$ErrorActionPreference = 'Stop'` a `Write-Error` ends the script before `Exit-Lab` runs, so at the prompt a failed run keeps the previous run's `$LASTEXITCODE` and reads as a pass. Import the module right after `$ErrorActionPreference`, by a path relative to the script so it holds in any clone and in Cloud Shell, and call `Exit-Lab` from the script itself, not from a file it dot-sources:
+
+   ```powershell
+   $ErrorActionPreference = 'Stop'
+   # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+   Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
+   ```
+
+   [`tests/Exit-Code-Propagation.Tests.ps1`](../tests/Exit-Code-Propagation.Tests.ps1) enforces this on every `module-*/**/scripts/*.ps1` and `scripts/*.ps1` (a helper that the lab's other scripts dot-source excepted, §7.5), and proves both callers with real `pwsh` processes: `pwsh -File` returns `1` for a failed run, and an interactive session keeps running after it with `$LASTEXITCODE` `1`. Both rules are read from each script's syntax tree (issue #398). The last-statement rule applies to the lab folders listed in `$ConvertedLabs` in that suite, Module 1 and `scripts/` today; the pull request that converts a module's scripts adds its lab folders there. The `Write-Error` rule applies to every lab script except the folders in `$WriteErrorPendingLabs`, Lab 3.2 today, and fails if a listed folder no longer holds a violation. The maintainer tools under `tools/` are process entry points with exit codes above `1` and keep the #104 rule: a tools script that declares `#Requires -Modules` precedes every non-zero `exit <code>` with `$Host.SetShouldExit(<code>)`; one that declares none carries its exit code out unaided (issue #124). Run them with `pwsh -File`, not at the prompt.
+6. Gate every deployment on its result. `New-Az*Deployment` does not throw for every unhappy ending - a deployment whose resources fail to provision returns an object with `ProvisioningState` set to `Failed` or `Canceled` and the pipeline carries on. Assign the result to a variable and end the script with `Exit-Lab -FailureCount 1` (or a non-zero `exit` in a tool) when it is not `Succeeded`; a deployment piped to `Out-Null` cannot be checked at all. Enforced by [`tests/Deployment-State-Gating.Tests.ps1`](../tests/Deployment-State-Gating.Tests.ps1) (issue #75).
 7. A `Test-Lab.ps1` checks the state a learner reaches on any path - the Portal steps, the Az PowerShell blocks or the Bicep (issue #355). Look a resource up by a literal name only where the guide has the learner type that name and its resource group. Find a resource the Portal names itself through what it belongs to: an autoscale setting through the plan it targets (Lab 3.4), a data collection rule through the VM it is associated with (Lab 5.1), a container through the stored access policy the guide names (Lab 4.4), a VM's network interface through the VM. Lab 3.2's script does not follow this rule yet: it still finds its network interfaces and data disk by Bicep names and indexes into lookups without a guard, until the Lab 3.2 guide PR (issue #353, after PR #351) brings it in line; #355 stays open until then. Read a property the Portal leaves unset (`$null`) as that property's default, not as a failure (Lab 4.2's blob versioning). A lookup that fails is a counted `[FAIL]` that prints the error, never a crash before the summary: do not index into a lookup's result (`.IpConfigurations[0]`, `$tags['Project']`) without first making sure it is there.
 
 ```powershell
@@ -134,8 +150,7 @@ $deployment = New-AzSubscriptionDeployment @deployParams
 
 if ($deployment.ProvisioningState -ne 'Succeeded') {
     Write-Host "[FAILED] Deployment finished with state: $($deployment.ProvisioningState)" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
 ```
 
@@ -165,9 +180,8 @@ if ($vnetLookup.Value.Count -eq 0) {    # found nothing, or reported as not foun
 ```powershell
 if ($script:cleanupFailures -gt 0) {
     Write-Host "Cleanup finished with $($script:cleanupFailures) failure(s)." -ForegroundColor Red
-    $Host.SetShouldExit(1)   # without this, `pwsh -File` reports success anyway
-    exit 1
 }
+Exit-Lab -FailureCount $script:cleanupFailures   # 1 when anything failed, 0 otherwise
 ```
 
 ## 5. Best Practices
@@ -196,6 +210,10 @@ if ($script:cleanupFailures -gt 0) {
 - **Secrets handling**: Never accept or store credentials as plain `[string]`. Use `[SecureString]` / `[PSCredential]` parameters (`Get-Credential`), and never echo secret values with `Write-Host`. Generated passwords go to Key Vault, not to the console or a file.
 
 - **Az PowerShell vs. `az` CLI**: Prefer **Az PowerShell cmdlets** (`Get-AzContext`, `New-AzSubscriptionDeployment`, ...) as the default in scripts — they return objects, not text. Dropping to the **`az` CLI** is acceptable where its coverage is better (e.g., `az backup`, `az bicep`), but never mix both for the *same* resource within one script, and always follow the `--output json` rule below. The same rule governs the course material that is **operational** rather than educational — lab checklists ([checklist-standards.md](checklist-standards.md) section 3.2) and the prerequisite checks in each `module-*/README.md`: both gate a deployment `Deploy-Bicep.ps1` then makes under the Az context, so an `az` block silently checks a different subscription. `tests/Docs-Az-PowerShell.Tests.ps1` pins both surfaces. Lab guides are **partly** in scope (#141): their teaching steps stay multi-modal — Portal, CLI and PowerShell side by side ([lab-guide-standards.md](lab-guide-standards.md)) — but a guide step that deploys, exports or deletes the lab's own infrastructure is operational like a checklist, and uses the lab's `scripts/` or an Az cmdlet. The same test pins that, as a fixed list of operational `az` verbs rather than a blanket ban, so `az vm resize`, `az storage ...` and the "Option 2: Azure CLI" blocks are untouched. `az bicep` (in lab guides only) and `az acr build` remain accepted exceptions: the first is a local compile that never reaches a subscription, the second has no cmdlet that builds an image from source. Repository tooling and Pester suites do not call `az bicep`: they compile through the standalone CLI that `tools/BicepCli.psm1` resolves, the same binary the Az deployment cmdlets use (#144), and `tests/Bicep-Cli.Tests.ps1` enforces it.
+
+- **Role assignments through the ARM API, not the Az role cmdlets**: A lab script reads, creates and removes role assignments with `Get-LabArmRoleAssignment`, `New-LabArmRoleAssignment` and `Remove-LabArmRoleAssignment` from `tools/LabCommon.psm1`, never with `Get-AzRoleAssignment`, `New-AzRoleAssignment` or `Remove-AzRoleAssignment`. Every form of those cmdlets, `-Scope` alone included, calls Microsoft Graph to resolve the principals; where the tenant asks for interaction before it issues a Graph token to Azure PowerShell, they fail although the Azure Resource Manager token works (#397). The helpers call the role assignments API through `Invoke-AzRestMethod`, and a status outside 2xx throws, so a failed read is counted and printed, never read as "no assignment". A script that still needs Graph to find a user or group by name says so in its help and names the sign-in in its failure message (`Get-LabGraphSignInHint`). `tests/Role-Assignment-Arm.Tests.ps1` enforces the rule for every script under `module-*/*/scripts/` and `tools/`. The guides and checklists may keep the cmdlets in blocks a learner types, because those blocks teach them; but the cmdlets fail there in the same way, since Az does not prompt for the Graph sign-in in the middle of a command. So a guide or checklist with such a block names `MicrosoftGraphEndpointResourceId` next to it and points to the [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) entry, which gives the sign-in that provides the token (`Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId`); the same test enforces that.
+
+- **Budgets through the Consumption API, not Az.Billing**: A lab script lists and deletes budgets with `Get-LabArmBudget` and `Remove-LabArmBudget` from `tools/LabCommon.psm1`, never with `Get-AzConsumptionBudget`, `New-AzConsumptionBudget`, `Set-AzConsumptionBudget` or `Remove-AzConsumptionBudget`. Az.Billing 2.3.0 sends every Consumption request at api-version `2018-01-31`, which current subscriptions refuse with 422 ("Please use version 2018-12-01-preview or later") (#411). The helpers call the budgets API through `Invoke-AzRestMethod` at `2023-05-01`, and a status outside 2xx throws with the status and the service's message, so a failed read is counted and printed, never read as "no budget", and a script names no cause the message does not give. Unlike the role cmdlets, the budget cmdlets cannot stay in a guide or checklist either: they fail for every learner, not only in some tenants, so a learner's budget check uses the Portal or the same API through `Invoke-AzRestMethod`. `tests/Budget-Consumption-Api.Tests.ps1` enforces the rule for every script under `module-*/*/scripts/` and `tools/`, for the guides and checklists, and for any budgets path written with an api-version before `2019-01-01`.
 
 - **Retry Logic**: Implement retry loops for "stubborn" Azure resources (like NSGs) that suffer from eventual consistency delays.
 
@@ -302,7 +320,7 @@ Two PowerShell behaviours make the obvious approaches fail without an error:
 - **`PSModulePath` is not an isolation mechanism.** pwsh 7 prepends the CurrentUser and AllUsers module directories to any inherited `PSModulePath`, so a stub directory placed first by the parent is not first in the child and an installed Az wins resolution.
 - **Importing a stub module before the script is not enough.** The script's `#Requires -Modules` line imports the real modules *after* the stub, and among same-kind commands the later import wins. Modules that export cmdlets stay shadowed (a function outranks a cmdlet); autorest-generated modules such as `Az.DataProtection` export functions, so theirs replace the stub's. The session is half real.
 
-The helper therefore does, inside the child and in this order: import every module the script requires, import the stub **last**, assert that every stubbed command's `Source` is the stub module, and `exit 99` without running the script if any is not. It also writes manifest-only `Az.*` placeholders so `#Requires -Modules` is satisfiable on the `ubuntu-latest` runner, which installs no Az. The stub must export **functions** (not aliases or cmdlets), listed explicitly in the manifest, and `-RequiredModule` must be the script's `#Requires -Modules` line exactly — a module missing from that list is the second failure above, one lab at a time.
+The helper therefore does, inside the child and in this order: import every module the script requires, import the stub **last**, assert that every stubbed command's `Source` is the stub module, and `exit 99` without running the script if any is not. It also writes manifest-only `Az.*` placeholders so `#Requires -Modules` is satisfiable on the `ubuntu-latest` runner, which installs no Az. The stub must export **functions** (not aliases or cmdlets), listed explicitly in the manifest, and `-RequiredModule` must be the script's `#Requires -Modules` line exactly, followed by its `$labModule` list where it has one (§1) — a module missing from that list is the second failure above, one lab at a time. The placeholders are on `PSModulePath` in the child, so `Import-LabModule` finds them on a runner without the real modules.
 
 ```powershell
 Import-Module (Join-Path $PSScriptRoot '..' '..' '..' 'tests' 'Support' 'LabScriptStub.psm1') -Force
@@ -337,7 +355,8 @@ These are deliberate decisions where SkyCraft departs from the official Microsof
 
 - **Microsoft says**: Don't repeat yourself; factor shared setup (the `Get-AzContext` / `Connect-AzAccount` / `az account show` connection check) into a single shared module dot-sourced by every script.
 - **We do**: Each lab's scripts carry their own self-contained connection-check block.
-- **Why**: Every lab folder must be runnable in isolation and readable end-to-end without chasing a shared helper up the tree. The connection step is itself part of the lesson — students should see *how* a script verifies it is authenticated before acting. A shared `Common.ps1` would couple labs together and hide a teaching moment behind an abstraction.
+- **Why**: Every lab folder must be readable end-to-end without chasing a shared helper up the tree. (It runs inside a clone of the repository: the one shared module, `tools/LabCommon.psm1`, only ends the script with the right exit code - §7.5.) The connection step is itself part of the lesson — students should see *how* a script verifies it is authenticated before acting. A shared `Common.ps1` would couple labs together and hide a teaching moment behind an abstraction.
+- **Across labs**: when one lab's scripts must reach another lab's objects the same way, they carry byte-identical copies of the other lab's function, and a repository test fails when a copy drifts. Lab 1.2's `New-LabRoleAssignment.ps1` signs in to Microsoft Graph with Lab 1.1's `Get-LabGraphAuthPlan` and `Connect-LabGraph` ([`tests/Lab11-Graph-Auth.Tests.ps1`](../tests/Lab11-Graph-Auth.Tests.ps1), issue #273), and it and Lab 1.2's `Deploy-Bicep.ps1` pick the tenant's initial domain with Lab 1.1's `Select-LabInitialDomain` ([`tests/Module1-Initial-Domain.Tests.ps1`](../tests/Module1-Initial-Domain.Tests.ps1), issue #237).
 
 ### 7.4 `-Force` Switch on Destructive Scripts
 
@@ -349,8 +368,9 @@ These are deliberate decisions where SkyCraft departs from the official Microsof
 
 - **Microsoft says**: Don't repeat yourself; a helper used by many scripts belongs in one module that they import.
 - **We do**: Every `Remove-LabResource.ps1` that looks resources up carries its own copy of `Test-LabNotFoundError` and `Invoke-LabLookup` (rule 3 in §4). A copy may recognise extra not-found shapes its own getters produce (Lab 1.3 adds `PolicyAssignmentNotFound`); the common behaviour is the same in all of them.
-- **Why**: The reason in §7.3 holds here too: a lab folder must run, and read, on its own. A shared runtime module would be the first thing a lab script imports from outside its folder. The cost of copies is drift, so [`tests/Lab-Cleanup-Lookup.Tests.ps1`](../tests/Lab-Cleanup-Lookup.Tests.ps1) lifts every copy with the parser and runs it on the same error shapes, and requires both helpers in every cleanup that calls `Invoke-LabLookup`.
-- **Within one lab**: the rule is about the lab folder, not the file. Scripts of the same lab may dot-source a helper file kept in that lab's own `scripts/` folder when they must give the same answer: Lab 1.3's `Test-Lab.ps1`, `Remove-LabResource.ps1` and `Invoke-LabGovernance.ps1` share `scripts/LabPolicyAssignment.ps1`, which decides which policy assignment is the guide's (issue #330). The lab still runs and reads on its own, and the file meets every rule a lab script does (help header, `#Requires -Version 7.0`, `[CmdletBinding()]`, `$ErrorActionPreference = 'Stop'`). A cleanup's `Test-LabNotFoundError` and `Invoke-LabLookup` stay in the cleanup itself, where `tests/Lab-Cleanup-Lookup.Tests.ps1` reads them.
+- **Why**: The reason in §7.3 holds here too: a lab folder must read on its own, and the lookup is part of what it teaches. The cost of copies is drift, so [`tests/Lab-Cleanup-Lookup.Tests.ps1`](../tests/Lab-Cleanup-Lookup.Tests.ps1) lifts every copy with the parser and runs it on the same error shapes, and requires both helpers in every cleanup that calls `Invoke-LabLookup`.
+- **Within one lab**: the rule is about the lab folder, not the file. Scripts of the same lab may dot-source a helper file kept in that lab's own `scripts/` folder when they must give the same answer: Lab 1.3's `Test-Lab.ps1`, `Remove-LabResource.ps1` and `Invoke-LabGovernance.ps1` share `scripts/LabPolicyAssignment.ps1`, which decides which policy assignment is the guide's (issue #330). The lab still reads on its own and runs inside a clone like any other (§7.3), and the file meets every rule a lab script does (help header, `#Requires -Version 7.0`, `[CmdletBinding()]`, `$ErrorActionPreference = 'Stop'`) except rule 5 of §4: it ends nothing, so it neither imports `tools/LabCommon.psm1` nor calls `Exit-Lab` or `exit` - the script that dot-sources it does. `tests/Exit-Code-Propagation.Tests.ps1` lists such helpers by path and fails an entry that no sibling dot-sources or that ends anything. A cleanup's `Test-LabNotFoundError` and `Invoke-LabLookup` stay in the cleanup itself, where `tests/Lab-Cleanup-Lookup.Tests.ps1` reads them.
+- **The one shared module**: every lab script imports [`tools/LabCommon.psm1`](../tools/LabCommon.psm1) for `Exit-Lab` (rule 5 in §4, issues #257 and #301), and a script that needs a module Cloud Shell does not ship uses its `Import-LabModule` (§1, issue #375). How a script hands its exit code to two different callers teaches nothing about Azure, and getting it wrong in one of 60 copies either closes the learner's session or hides a failure from the lab cycle, so it lives in one place. A lab folder therefore runs inside a clone of the repository (Cloud Shell included), not copied out on its own. Connection checks and lookups stay in each lab.
 
 ## 8. Script Boilerplate
 
@@ -380,13 +400,15 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Script Title ===" -ForegroundColor Cyan
 
 # 1. Verify Connection
 $context = Get-AzContext
 if (-not $context) {
-    Write-Host "Not logged in." -ForegroundColor Red; $Host.SetShouldExit(1); exit 1
+    Write-Host "Not logged in." -ForegroundColor Red; Exit-Lab -FailureCount 1
 }
 
 # 2. Logic with Error Handling
@@ -398,9 +420,10 @@ try {
 catch {
     Write-Host "Failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
+
+Exit-Lab -FailureCount 0
 ```
 
 ### Destructive Script Boilerplate (`Remove-Lab*.ps1`)
@@ -432,6 +455,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
+Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
 Write-Host "=== Cleanup: $ResourceGroupName ===" -ForegroundColor Cyan
 
@@ -444,7 +469,8 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] $($_.Exception.Message)" -ForegroundColor Red
-    $Host.SetShouldExit(1)
-    exit 1
+    Exit-Lab -FailureCount 1
 }
+
+Exit-Lab -FailureCount 0
 ```
