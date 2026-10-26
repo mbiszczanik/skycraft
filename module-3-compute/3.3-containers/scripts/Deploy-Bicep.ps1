@@ -159,7 +159,7 @@ if ($WhatIf) {
     Write-Host "  Phase 1 (resource group, ACR bootstrap, image import) is skipped, not simulated." -ForegroundColor Gray
     Get-AzSubscriptionDeploymentWhatIfResult @deployParams
     Write-Host "`nWhat-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
-    exit 0
+    Exit-Lab -FailureCount 0
 }
 
 # Ensure RG exists (needed for module deployment / bootstrapping)
@@ -261,3 +261,4 @@ catch {
 }
 
 Write-Host "`nNext Step: Run .\Test-Lab.ps1 to verify the configuration." -ForegroundColor Yellow
+Exit-Lab -FailureCount 0
