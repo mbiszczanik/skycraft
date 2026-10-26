@@ -700,7 +700,7 @@ The Worldserver VM needs additional storage for:
 
 1. Navigate to **Virtual machines** → `dev-skycraft-swc-world-vm`
 2. In the left menu, under **Settings** (expand it if it is collapsed), click **Disks**
-3. Click **+ Create and attach a new disk**. A new row appears in the Data disks table, pre-filled with Premium SSD v2, 1 GiB and host caching None (2026-10-24). Choosing Standard SSD resets the size to 4 GiB, so set the storage type first and the size after it. Set its cells:
+3. Click **+ Create and attach a new disk**. A new row appears in the Data disks table, pre-filled with Premium SSD v2, 1 GiB and host caching None (2026-10-24). Choosing Standard SSD resets the size to 4 GiB and keeps host caching at None, so set the storage type first and the size and caching after it. Set its cells:
 
 **Data disk configuration**:
 
@@ -710,9 +710,11 @@ The Worldserver VM needs additional storage for:
 | Disk name          | `dev-skycraft-swc-world-vm-data`             |
 | Storage type       | **Standard SSD (locally-redundant storage)** |
 | Size               | **64 GiB** (E6)                              |
-| Host caching       | Read-only (the default)                      |
+| Host caching       | **Read-only**                                |
 
 4. Click **Apply** at the bottom of the page
+
+**Note**: On 2026-10-26 **Apply** turned grey as soon as **Storage type** was changed from the pre-filled Premium SSD v2, with every cell valid, in three tries. If **Apply** stays grey, click **Discard changes** and create the disk with the Az PowerShell block below.
 
 The inline row has no tags field. `Inherit-Project-Tag` (Lab 1.3) gives the new disk `Project` from the resource group. If your subscription has `Enforce-Project-Tag` without `Inherit-Project-Tag`, **Apply** seems to do nothing: the reason, "disallowed by policy", is only under the notification bell. Then create the disk with its tags instead, with the block below or under **Disks** → **+ Create** (zone 2, the four tags), and attach it with **Attach existing disks**.
 
@@ -1373,7 +1375,7 @@ The scale set goes into **`dev-skycraft-swc-rg`**. Lab 1.3 puts a `CanNotDelete`
 | NIC network security group | **None**     |
 | Public IP address          | **Disabled** |
 
-Choose **None** for the NIC's NSG: `WorldSubnet` already has `dev-skycraft-swc-world-nsg` from Lab 2.2. The default, **Basic**, creates an extra NSG named `basicNsg<nic-name>`, and that NSG stays behind when the scale set is deleted. Click **OK**.
+The pane opens on the first subnet of the VNet (`AppServiceSubnet`) with **Public IP address** **Enabled**, whatever the **Subnet** above says (seen 2026-10-26): set all three. Choose **None** for the NIC's NSG: `WorldSubnet` already has `dev-skycraft-swc-world-nsg` from Lab 2.2. The default, **Basic**, creates an extra NSG named `basicNsg<nic-name>`, and that NSG stays behind when the scale set is deleted. Click **OK**.
 
 **Load balancing**:
 
