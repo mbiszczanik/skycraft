@@ -898,6 +898,7 @@ Get-AzStorageBlob -Container 'game-assets' -IncludeDeleted -Context $ctx | Selec
 
 - Delete all blobs first, or delete the whole container from **Containers** (under **Data storage**; it takes its blobs with it)
 - A container with version-level immutability cannot be deleted while it holds a blob (Step 4.2.2)
+- While Lab 1.3's `lock-no-delete-prod` is on, a container of `prodskycraftswcsa` cannot be deleted: the Portal's *Delete confirmation* offers **Attempt override of delete lock**, which deletes it permanently. Leave it unchecked and choose **Go back** (What This Lab Leaves Behind)
 
 ---
 
