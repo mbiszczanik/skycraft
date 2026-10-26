@@ -749,13 +749,14 @@ Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#
 
     It 'reads step <id> as <labels> and the list to verify as its Expected Result' -ForEach @(
         @{ lab = '2.2'; id = '2.2.11'; labels = @('Bastions', 'platform-skycraft-swc-bas')
-           expected = 'Bastion is operational and ready to provide secure connectivity to VMs in all peered VNets. Status: Succeeded; Virtual network: platform-skycraft-swc-vnet; Subnet: AzureBastionSubnet; Public IP: platform-skycraft-swc-bas-pip' }
-        @{ lab = '4.1'; id = '4.1.8'; labels = @('prodskycraftswcsa', 'Security + networking', 'Encryption')
+           expected = 'Bastion is operational and ready to provide secure connectivity to VMs in all peered VNets. Provisioning state: Succeeded; Virtual network/subnet: platform-skycraft-swc-vnet/AzureBastionSubnet; Public IPv4 address: platform-skycraft-swc-bas-pip; Tier: Basic' }
+        # 'Under **Security + networking**, select **Encryption**' names the menu group as a place (#346, #358).
+        @{ lab = '4.1'; id = '4.1.8'; labels = @('Storage accounts', 'Resources', 'prodskycraftswcsa', 'Encryption')
            expected = 'Encryption type: Microsoft-managed keys; This is always enabled and cannot be disabled' }
-        @{ lab = '4.1'; id = '4.1.10'; labels = @('prodskycraftswcsa', 'Configuration')
-           expected = 'Minimum TLS version: 1.2; Secure transfer required: Enabled' }
+        @{ lab = '4.1'; id = '4.1.10'; labels = @('Configuration')
+           expected = 'Minimum TLS version: Version 1.2; Secure transfer required: Enabled' }
         @{ lab = '4.1'; id = '4.1.11'; labels = @('Configuration')
-           expected = 'Allow Blob anonymous access: Disabled' }
+           expected = 'The **Configuration** page of `prodskycraftswcsa` shows **Account kind** **StorageV2 (general purpose v2)**, **Performance** **Standard**, the values of Steps 4.1.10 and 4.1.11, and **Blob access tier (default)** **Hot**. Allow Blob anonymous access: Disabled; Allow storage account key access: Enabled' }
     ) {
         $step = $script:CheckLabs[$lab].steps | Where-Object id -eq $id
         @($step.items | Where-Object kind -eq 'field') | Should -BeNullOrEmpty
@@ -766,7 +767,7 @@ Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#
     It 'reads the list after the Expected Result of step 4.1.2 into its text, not as a Name field' {
         $step = $script:CheckLabs['4.1'].steps | Where-Object id -eq '4.1.2'
         # The checks of the Encryption table follow (#246, pinned below).
-        $step.expected.StartsWith('Deployment succeeds in 30-60 seconds. Navigate to the resource to verify: ' +
+        $step.expected.StartsWith('The deployment succeeds in about a minute. Navigate to the resource to verify: ' +
             'Name: platformskycraftswcsa; Location: Sweden Central; Replication: Geo-redundant storage (GRS); Access tier: Hot;',
             [System.StringComparison]::Ordinal) | Should -BeTrue
         @($step.items | Where-Object { $_.kind -eq 'field' -and $_.label -ceq 'Name' }) | Should -BeNullOrEmpty
@@ -790,12 +791,18 @@ Describe 'parse.py - labs 2.2, 3.2, 4.1 and 5.2, Verify and Confirm introduce ch
 
     It 'checks the Encryption table of step 4.1.2 instead of filling it, and still clicks the Encryption tab' {
         $step = $script:IntroLabs['4.1'].steps | Where-Object id -eq '4.1.2'
-        @($step.items | Where-Object { $_.kind -eq 'field' -and $_.line -ge 258 -and $_.line -le 264 }) | Should -BeNullOrEmpty
-        @($step.items | Where-Object line -eq 258).labels | Should -Be @('Encryption')
-        $step.expected | Should -Be ('Deployment succeeds in 30-60 seconds. Navigate to the resource to verify: ' +
+        # 'Click the **Encryption** tab', then 'Verify these values, ...:' and the table: the tab is
+        # clicked, and nothing between it and the Tags tab is a field to fill (#358 split the line).
+        $encryption = @($step.items | Where-Object { $_.kind -eq 'action' -and @($_.labels) -ceq 'Encryption' })
+        $tags       = @($step.items | Where-Object { $_.kind -eq 'action' -and @($_.labels) -ceq 'Tags' })
+        $encryption.Count | Should -Be 1
+        $tags.Count | Should -Be 1
+        @($step.items | Where-Object { $_.kind -eq 'field' -and $_.line -gt $encryption[0].line -and $_.line -lt $tags[0].line }) |
+            Should -BeNullOrEmpty
+        $step.expected | Should -Be ('The deployment succeeds in about a minute. Navigate to the resource to verify: ' +
             'Name: platformskycraftswcsa; Location: Sweden Central; Replication: Geo-redundant storage (GRS); Access tier: Hot; ' +
             'Encryption type: Microsoft-managed keys (MMK); Enable support for customer-managed keys: Blobs and files only; ' +
-            'Enable infrastructure encryption: ❌ Disabled')
+            'Enable infrastructure encryption: unchecked')
     }
 
     It 'reads step <id> as <labels> and what it introduces with Verify or Confirm into its Expected Result' -ForEach @(
@@ -835,7 +842,8 @@ Describe 'parse.py - labs 3.2, 4.2 and 5.2, resource names in navigation chains 
     It 'reads the chain of step <id> as <labels>, resource names at <resources>' -ForEach @(
         @{ lab = '3.2'; id = '3.2.13'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Backend pools'); resources = @(1) }
         @{ lab = '3.2'; id = '3.2.14'; labels = @('Virtual machines', 'dev-skycraft-swc-world-vm'); resources = @(1) }
-        @{ lab = '4.2'; id = '4.2.11'; labels = @('prodskycraftswcsa', 'Containers', 'game-assets'); resources = @(0, 2) }
+        # 4.2.11 uploads from the containers list's toolbar since #359; it no longer opens game-assets.
+        @{ lab = '4.2'; id = '4.2.11'; labels = @('prodskycraftswcsa', 'Containers'); resources = @(0) }
         # 'waiting for 02:00: **Protected items** -> ...': no space after the first colon, so the
         # text before it is no field label and the chain keeps its resource (picker_field, #250).
         @{ lab = '5.2'; id = '5.2.3'; labels = @('Protected items', 'Backup items', 'Azure Virtual Machine', 'dev-skycraft-swc-auth-vm', 'Backup now', 'OK'); resources = @(3) }
@@ -1315,7 +1323,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
     }
 
     It 'reads step <id>''s "<text>" as <kind> <labels>, <key> at <indices>' -ForEach @(
-        @{ lab = '4.4'; id = '4.4.2'; text = 'Check **Add your client IP address**.'; kind = 'action'; labels = @('Add your client IP address'); key = 'checked'; indices = @(0) }
+        @{ lab = '4.4'; id = '4.4.2'; text = 'Under **Exceptions**, leave **Allow trusted Microsoft services to access this resource** checked'; kind = 'action'; labels = @('Allow trusted Microsoft services to access this resource'); key = 'checked'; indices = @(0) }
         @{ lab = '3.3'; id = '3.3.7'; text = 'Uncheck **Use quickstart image**.'; kind = 'action'; labels = @('Use quickstart image'); key = 'unchecked'; indices = @(0) }
         @{ lab = '4.2'; id = '4.2.5'; text = 'Under **Recovery**, enable **Enable soft delete for blobs**'; kind = 'action'; labels = @('Enable soft delete for blobs'); key = 'checked'; indices = @(0) }
         @{ lab = '3.3'; id = '3.3.2'; text = 'Toggle **Admin user** to **Enabled**.'; kind = 'action'; labels = @('Admin user'); key = 'checked'; indices = @(0) }
@@ -1384,14 +1392,45 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '1.3.9/Allowed locations | Sweden Central | North Europe/checked=1,2'
             '2.3.11/Enable TCP Reset/checked=0'
             '2.3.12/Enable TCP Reset/checked=0'
+            # One per production load balancing rule (world, auth).
+            '2.3.16/Enable TCP Reset/checked=0'
+            '2.3.16/Enable TCP Reset/checked=0'
             '3.3.7/Use quickstart image/unchecked=0'
             '3.3.2/Admin user/checked=0'
             '3.3.2/Admin user/stateOnly=0'
+            # The two check boxes under Redundancy that cost money stay unticked (#358).
+            '4.1.2/Make read access to data available in the event of regional unavailability/unchecked=0'
+            '4.1.2/Make read access to data available in the event of regional unavailability/stateOnly=0'
+            '4.1.2/Geo priority replication/unchecked=0'
+            '4.1.2/Geo priority replication/stateOnly=0'
+            '4.1.4/Make read access to data available in the event of regional unavailability/unchecked=0'
+            '4.1.4/Make read access to data available in the event of regional unavailability/stateOnly=0'
+            '4.1.4/Geo priority replication/unchecked=0'
+            '4.1.4/Geo priority replication/stateOnly=0'
             '4.2.5/Enable soft delete for blobs/checked=0'
+            # The Recovery boxes that cost money or erase data stay unticked (#359).
+            '4.2.5/Enable Azure Backup for blobs/unchecked=0'
+            '4.2.5/Enable Azure Backup for blobs/stateOnly=0'
+            '4.2.5/Enable point-in-time restore for containers/unchecked=0'
+            '4.2.5/Enable point-in-time restore for containers/stateOnly=0'
+            '4.2.5/Enable permanent delete for soft deleted items/unchecked=0'
+            '4.2.5/Enable permanent delete for soft deleted items/stateOnly=0'
             '4.2.6/Enable soft delete for containers/checked=0'
             '4.2.7/Enable versioning for blobs/checked=0'
+            '4.2.7/Enable blob change feed/unchecked=0'
+            '4.2.7/Enable blob change feed/stateOnly=0'
+            # The archive block's rehydration box is ticked by default and stays so (#359).
+            '4.2.8/Skip blobs that have been rehydrated in the last/checked=0'
+            '4.2.8/Skip blobs that have been rehydrated in the last/stateOnly=0'
+            '4.2.9/Skip blobs that have been rehydrated in the last/checked=0'
+            '4.2.9/Skip blobs that have been rehydrated in the last/stateOnly=0'
+            '4.2.13/Overwrite if files already exist/checked=0'
             '4.3.6/Upload | Overwrite if files already exist | Upload/checked=1'
-            '4.4.2/Add your client IP address/checked=0'
+            # 4.4.2 (#361): the public network access radio stays on Enable; the trusted services exception stays ticked.
+            '4.4.2/Enable/checked=0'
+            '4.4.2/Enable/stateOnly=0'
+            '4.4.2/Allow trusted Microsoft services to access this resource/checked=0'
+            '4.4.2/Allow trusted Microsoft services to access this resource/stateOnly=0'
             '5.1.7/StorageRead | StorageWrite/checked=0,1'
             '5.1.7/Send to Log Analytics workspace/checked=0'
             '5.2.8/Core Azure Backup Data/checked=0'
@@ -1424,17 +1463,33 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Settings**, select **Networking**.'; labels = @('Networking'); count = 2 }
         @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Outbound traffic configuration**, click **Not configured** (the value of _Virtual network integration_).'; labels = @('Not configured'); count = 2 }
         @{ lab = '3.3'; id = '3.3.2'; text = 'In the left menu, under **Settings**, select **Access keys**.'; labels = @('Access keys') }
-        @{ lab = '4.2'; id = '4.2.2'; text = 'Click **Containers** under **Data storage**'; labels = @('Containers') }
+        @{ lab = '4.2'; id = '4.2.6'; text = 'On the same page, under **Recovery**, enable **Enable soft delete for containers** ...'; labels = @('Enable soft delete for containers') }
         @{ lab = '5.2'; id = '5.2.2'; text = 'Under **Instant restore**, fill in **Azure Backup Resource Group**: ...'; labels = @('Azure Backup Resource Group') }
     ) {
         $items = @((Get-StateStep $lab $id).items | Where-Object { (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
         $items.Count | Should -Be ($(if ($count) { $count } else { 1 }))
     }
 
-    It 'reads no item from "Under **Blob access tier (default)**, select the desired tier" in step 4.2.4' {
-        $labels = @((Get-StateStep '4.2' '4.2.4').items | ForEach-Object { $_.labels })
-        $labels | Should -Not -Contain 'Blob access tier (default)'
-        $labels | Should -Contain 'Save'
+    # Since #359 step 4.2.4 only looks at the default tier: 'Verify:' then
+    # '- **Blob access tier (default)**: **Hot**' is a check, and nothing on the page is clicked.
+    It 'reads step 4.2.4''s default tier as a check and clicks nothing on the Configuration page' {
+        $step = Get-StateStep '4.2' '4.2.4'
+        $labels = @($step.items | ForEach-Object { $_.labels; $_.label })
+        foreach ($label in 'Blob access tier (default)', 'Hot', 'Save') { $labels | Should -Not -Contain $label }
+        $labels | Should -Contain 'Configuration'
+        $step.expected | Should -Match 'Blob access tier \(default\): Hot'
+    }
+
+    # Since the #359 review, step 4.2.8 fills its four If/Then blocks one item at a time: the
+    # informational table above them gives no item, so each block's days and action are list items.
+    It 'reads every block of step 4.2.8: days, action and + Add conditions in the order the Portal needs' {
+        $items = @((Get-StateStep '4.2' '4.2.8').items)
+        $sequence = @($items | ForEach-Object {
+                if ($_.kind -eq 'field' -and $_.label -ceq 'More than (days ago)') { "days=$($_.value)" }
+                elseif ($_.kind -eq 'action' -and @($_.labels).Count -eq 1 -and $_.labels[0] -cin '+ Add conditions', 'Move to cool storage', 'Move to cold storage', 'Move to archive storage', 'Delete the blob') { $_.labels[0] }
+            })
+        $sequence | Should -Be @('days=30', 'Move to cool storage', '+ Add conditions', 'days=90', 'Move to cold storage',
+            '+ Add conditions', 'days=180', 'Move to archive storage', '+ Add conditions', 'days=365', 'Delete the blob')
     }
 
     It 'gives no item of any guide a label its line puts right after "under"' {

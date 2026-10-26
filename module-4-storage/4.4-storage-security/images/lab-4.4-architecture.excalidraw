@@ -341,8 +341,8 @@
     },
     {
       "type": "text", "id": "ev_l", "x": 20, "y": 532, "width": 560, "height": 14,
-      "text": "az CLI — close the door first, then hand out identity",
-      "originalText": "az CLI — close the door first, then hand out identity",
+      "text": "Guide sections — close the door first, then hand out identity",
+      "originalText": "Guide sections — close the door first, then hand out identity",
       "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
@@ -360,8 +360,8 @@
     },
     {
       "type": "text", "id": "ev_t", "x": 36, "y": 562, "width": 780, "height": 90,
-      "text": "az storage account update -n prodskycraftswcsa --default-action Deny\n\naz storage account network-rule add -n prodskycraftswcsa \\\n  --vnet-name prod-skycraft-swc-vnet --subnet WorldSubnet\n\naz role assignment create --role \"Storage Blob Data Contributor\" \\\n  --assignee <objectId> --scope <storage account id>",
-      "originalText": "az storage account update -n prodskycraftswcsa --default-action Deny\n\naz storage account network-rule add -n prodskycraftswcsa \\\n  --vnet-name prod-skycraft-swc-vnet --subnet WorldSubnet\n\naz role assignment create --role \"Storage Blob Data Contributor\" \\\n  --assignee <objectId> --scope <storage account id>",
+      "text": "Section 1   firewall: rules for WorldSubnet and your IP first, then default action Deny\nSection 2   stored access policy DevRevokePolicy on dev-assets: Read and List, one day\n            a SAS that names the policy works until the policy is deleted\nSection 3   rotate key1, then key2 - whatever the old key signed stops working\nSection 4   Storage Blob Data Contributor on the account itself, for your own account\n            -> your Entra ID identity reaches the blobs without the account key\n            commands: the Az PowerShell block under each step of the guide",
+      "originalText": "Section 1   firewall: rules for WorldSubnet and your IP first, then default action Deny\nSection 2   stored access policy DevRevokePolicy on dev-assets: Read and List, one day\n            a SAS that names the policy works until the policy is deleted\nSection 3   rotate key1, then key2 - whatever the old key signed stops working\nSection 4   Storage Blob Data Contributor on the account itself, for your own account\n            -> your Entra ID identity reaches the blobs without the account key\n            commands: the Az PowerShell block under each step of the guide",
       "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#166534", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
