@@ -14,9 +14,9 @@ By completing this module, you will be able to:
 
 - **Create and configure** storage accounts with appropriate redundancy and access tiers
 - **Implement blob storage** with containers, versioning, soft delete, and lifecycle management
-- **Configure Azure Files** with file shares, snapshots, and identity-based access
+- **Configure Azure Files** with file shares, quotas and access tiers, snapshots and soft delete, and SMB mounts on Windows and Linux
 - **Secure storage** using SAS tokens, stored access policies, firewalls, and encryption
-- **Manage data** using Azure Storage Explorer and AzCopy
+- **Manage data** using Azure Storage Explorer and the Portal's Storage browser (AzCopy is referenced in Lab 4.1, not practised)
 - **Apply governance** tags and monitor storage costs
 
 ---
@@ -70,16 +70,17 @@ Before starting, ensure you have:
 2. **Start with Lab 4.1** - Create and configure storage accounts with redundancy
 3. **Progress to Lab 4.2** - Implement blob containers, tiers, and lifecycle policies
 4. **Complete Lab 4.3** - Configure Azure Files with snapshots and soft delete
-5. **Complete Lab 4.4** - Secure storage with SAS, firewalls, and encryption
+5. **Complete Lab 4.4** - Secure storage with a firewall, revocable SAS, key rotation and Entra ID data roles
 6. **Take the module assessment** to validate learning
 
 > [!IMPORTANT]
 > **The order matters.** All four labs configure the **same** three storage accounts through
 > `avm/res/storage/storage-account`, and they are cumulative forward: each lab replaces the
 > account-level properties and the sub-services it owns, and leaves the sub-services it does not
-> own untouched. Re-running Lab 4.2 after Lab 4.3 resets file-share retention from 14 days back
-> to 7; re-running Lab 4.1 after Lab 4.2 turns production blob versioning back off. The mechanism
-> is documented in `docs/bicep-standards.md` §4.5.
+> own untouched. Re-running Lab 4.1 after Lab 4.2 turns production blob versioning back off, and
+> after Lab 4.3 it resets file-share retention from 14 days back to 7; Lab 4.2's and Lab 4.4's
+> Bicep leave the file service alone. The mechanism is documented in `docs/bicep-standards.md`
+> §4.5.
 
 ---
 

@@ -157,7 +157,7 @@ if ($sa) {
             Write-Host "Reverting storage firewall to 'Allow' default..." -ForegroundColor Yellow
             Update-AzStorageAccountNetworkRuleSet -ResourceGroupName $resourceGroupName `
                 -Name $storageAccountName `
-                -DefaultAction Allow -ErrorAction Stop
+                -DefaultAction Allow -ErrorAction Stop | Out-Null   # the rule set lists the client IP addresses
             Write-Host "  -> Firewall reverted to 'Allow'." -ForegroundColor Green
         }
         catch {
@@ -195,8 +195,7 @@ if ($sa) {
         $storageId = $sa.Id
         # Through the ARM role assignments API (tools/LabCommon.psm1), not Get-AzRoleAssignment /
         # Remove-AzRoleAssignment: those resolve every principal through Microsoft Graph and fail
-        # where the Az sign-in cannot get a Graph token (issue #397). ARM returns principals by
-        # object id only, so the lines below name them that way.
+        # where the Az sign-in cannot get a Graph token (issue #397).
         $assignmentLookup = Invoke-LabLookup -Target "the role assignments on '$storageAccountName'" -Lookup {
             Get-LabArmRoleAssignment -Scope $storageId
         }
@@ -211,15 +210,18 @@ if ($sa) {
             if ($assignments.Count -eq 0) {
                 Write-Host "  -> [INFO] No 'Storage Blob Data Contributor' assignments found." -ForegroundColor Gray
             }
+            # Each assignment is named by its place in the list, not by its holder: a display name is a
+            # real person's name, and the output may be pasted as evidence.
+            $position = 0
             foreach ($assignment in $assignments) {
-                $principal = "$($assignment.PrincipalType) $($assignment.ObjectId)".Trim()
+                $position++
                 try {
                     Remove-LabArmRoleAssignment -Id $assignment.RoleAssignmentId
-                    Write-Host "  -> Removed assignment for '$principal'." -ForegroundColor Green
+                    Write-Host "  -> Removed assignment $position of $($assignments.Count)." -ForegroundColor Green
                 }
                 catch {
                     $script:cleanupFailures++
-                    Write-Host "  -> [ERROR] Failed to remove the assignment for '$principal'." -ForegroundColor Red
+                    Write-Host "  -> [ERROR] Failed to remove assignment $position of $($assignments.Count)." -ForegroundColor Red
                     Write-Host $_.Exception.Message -ForegroundColor Red
                 }
             }
