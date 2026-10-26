@@ -289,7 +289,7 @@ The region is read-only: the Portal takes it from the resource group.
 ![Download the private key when creating the SSH key](images/step-3.2.1c.png)
 
 > [!IMPORTANT]
-> The `.pem` file is offered for download **only once**. If you lose it, delete the key resource and create a new one. On a shared computer, move the file to your own storage and delete it from the Downloads folder.
+> The `.pem` file is offered for download **only once**. If you lose it, delete the key resource and create a new one. Lab 1.3 puts `lock-no-delete-platform` on `platform-skycraft-swc-rg`, so remove that lock first and put it back afterwards (Lab 1.3, Troubleshooting Issue 3). If the Portal's delete box offers **Attempt override of delete lock**, leave it unchecked: the override deletes the resource permanently. On a shared computer, move the file to your own storage and delete it from the Downloads folder.
 
 **To use the Bicep solution with option B**, export the stored public key to its own file and point `Deploy-Bicep.ps1` at it with `-SshKeyPath`. A separate file name keeps an option A `skycraft-dev.pub`, if you have one, intact:
 
@@ -940,7 +940,7 @@ Azure Disk Encryption for Linux VMs requires **8 GB RAM minimum** for OS disk en
 > [!NOTE]
 > `Standard_B2ls_v2` and `Standard_B2s_v2` are in the same Bsv2 family (same hardware cluster), so the resize happens in place: the VM restarts, but no deallocation is needed. It took about 40 seconds on 2026-10-15.
 
-1. Open **Azure Cloud Shell** (PowerShell) from the Azure Portal, or a local PowerShell signed in with `Connect-AzAccount`
+1. Open **Azure Cloud Shell** (PowerShell) from the Azure Portal, or a local PowerShell signed in with `Connect-AzAccount`. A Cloud Shell session without a storage account (**No storage account required**) can run these commands.
 
 2. Resize the Authserver VM to 8 GB RAM:
 
