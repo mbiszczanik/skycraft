@@ -9,7 +9,7 @@
         must point at the load balancer public IPs reserved in Lab 2.1
       - Private DNS zone, its canonical tags, and hub / dev / prod VNet links with the expected
         registration flag
-      - Dev and prod load balancers have Standard SKU, >=2 probes, >=2 LB rules, outbound SNAT
+      - Dev and prod load balancers have Standard SKU, >=2 probes with threshold 1, >=2 LB rules, outbound SNAT
         disabled on every LB rule, the egress pool <lb>-be-outbound with an outbound rule for it
         (protocol All, manual port allocation) - the Module 3 VMs' only path to the internet -
         and the canonical tags for their environment. The pools are empty until Lab 3.2, so
@@ -187,6 +187,14 @@ function Test-LB {
         } else {
              Write-Host "  - [FAIL] Missing Health Probes (Found $($lb.Probes.Count))" -ForegroundColor Red
              $script:validationErrors++
+        }
+
+        $wrongThreshold = @($lb.Probes | Where-Object { $_.ProbeThreshold -ne 1 })
+        if ($lb.Probes.Count -ge 2 -and $wrongThreshold.Count -eq 0) {
+            Write-Host "  - [OK] Health probe thresholds are 1" -ForegroundColor Green
+        } elseif ($wrongThreshold.Count -gt 0) {
+            Write-Host "  - [FAIL] Health probe threshold must be 1 on: $(($wrongThreshold | ForEach-Object { $_.Name }) -join ', ')" -ForegroundColor Red
+            $script:validationErrors++
         }
 
         # Check Rules
