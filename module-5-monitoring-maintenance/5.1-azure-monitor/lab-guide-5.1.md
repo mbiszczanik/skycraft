@@ -152,7 +152,7 @@ Perf
 
 ### Step 5.1.5: Create a Metric Alert (CPU > 80%)
 
-The alert rule and its action group are **platform** resources - they live in `platform-skycraft-swc-rg` next to the workspace, even though the rule watches a dev VM. Whichever blade you start from, the portal defaults the rule's resource group to the target VM's group (`dev-skycraft-swc-rg`), so set **Details** → **Resource group** to `platform-skycraft-swc-rg` explicitly; `scripts/Test-Lab.ps1` looks for `skycraft-cpu-alert` there by name.
+The alert rule and its action group are **platform** resources - they live in `platform-skycraft-swc-rg` next to the workspace, even though the rule watches a dev VM. Whichever blade you start from, the portal defaults the rule's resource group to the target VM's group (`dev-skycraft-swc-rg`), so set **Details** → **Resource group** to `platform-skycraft-swc-rg` explicitly. `scripts/Test-Lab.ps1` finds `skycraft-cpu-alert` through the VM it watches, so a rule left in the VM's group still passes, but the name must be `skycraft-cpu-alert`.
 
 1. Navigate to **Monitor** → **Alerts** → **+ Create** → **Alert rule**.
 2. **Scope**:

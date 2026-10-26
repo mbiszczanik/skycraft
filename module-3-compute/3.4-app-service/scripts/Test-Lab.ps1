@@ -5,6 +5,10 @@
 .DESCRIPTION
     Checks if the App Service Plan, Web App, Slots, and Autoscale rules are correctly configured.
 
+    The autoscale setting is found through the plan it scales (its target resource), not by
+    name: the Bicep names it '<plan>-autoscale', the Portal '<plan>-Autoscale-<n>' (issue #355).
+    A lookup that fails is a counted [FAIL] that says why, never a crash or a "not found".
+
 .EXAMPLE
     .\Test-Lab.ps1
 
@@ -79,18 +83,38 @@ Assert-Resource "staging" ($null -ne $slot) "Slot 'staging' exists"
 
 # 5. Check Autoscale Settings
 Write-Host "4. Checking Autoscale Rules..." -ForegroundColor Yellow
-$autoScaleName = "${AspName}-autoscale"
-# Get-AzAutoscaleSetting returns an empty .Profiles collection in this Az.Monitor
-# version, so read the raw ARM body via Get-AzResource where profiles (capacity +
-# rules, camelCase) are populated.
-$asRes = Get-AzResource -ResourceGroupName $RgName -ResourceType 'Microsoft.Insights/autoscalesettings' -Name $autoScaleName -ExpandProperties -ErrorAction SilentlyContinue
-$asProfile = if ($asRes) { $asRes.Properties.profiles | Select-Object -First 1 } else { $null }
-
-if ($asProfile) {
-    Assert-Resource "Autoscale" ($asProfile.capacity.minimum -eq "1" -and $asProfile.capacity.maximum -eq "3") "Instance limits (1-3) correct"
-    Assert-Resource "Autoscale" ($asProfile.rules.Count -ge 2) "Found $($asProfile.rules.Count) scaling rules"
+# Found through the plan it scales, not by name (#355): the Bicep names the setting
+# '<plan>-autoscale', the Portal '<plan>-Autoscale-<n>', and either may sit in another group.
+# Get-AzAutoscaleSetting returns an empty .Profiles collection in this Az.Monitor version, so
+# the subscription's settings are listed through Get-AzResource, whose raw ARM body carries
+# targetResourceUri and the profiles (capacity + rules, camelCase).
+if (-not $asp) {
+    Write-Host "  [FAIL] Autoscale setting not checked: App Service Plan '$AspName' not found, and the setting is found through the plan it scales." -ForegroundColor Red; $failures++
 } else {
-    Write-Host "  [FAIL] Autoscale setting '$autoScaleName' not found!" -ForegroundColor Red; $failures++
+    $asRes = $null
+    $lookupError = $null
+    try {
+        $asRes = @(Get-AzResource -ResourceType 'Microsoft.Insights/autoscalesettings' -ExpandProperties -ErrorAction Stop |
+                Where-Object { $_ -and "$($_.Properties.targetResourceUri)" -eq $asp.Id }) |
+            Select-Object -First 1
+    } catch {
+        $lookupError = $_.Exception.Message
+    }
+
+    if ($lookupError) {
+        Write-Host "  [FAIL] Could not list the autoscale settings: $lookupError" -ForegroundColor Red; $failures++
+    } elseif (-not $asRes) {
+        Write-Host "  [FAIL] No autoscale setting targets App Service Plan '$AspName' (Scale out (App Service plan) > Custom autoscale)." -ForegroundColor Red; $failures++
+    } else {
+        Write-Host "  Autoscale setting '$($asRes.Name)' in '$($asRes.ResourceGroupName)' targets '$AspName'." -ForegroundColor Gray
+        $asProfile = $asRes.Properties.profiles | Select-Object -First 1
+        if ($asProfile) {
+            Assert-Resource $asRes.Name ($asProfile.capacity.minimum -eq "1" -and $asProfile.capacity.maximum -eq "3") "Instance limits (1-3) correct"
+            Assert-Resource $asRes.Name (@($asProfile.rules).Count -ge 2) "Found $(@($asProfile.rules).Count) scaling rules"
+        } else {
+            Write-Host "  [FAIL] Autoscale setting '$($asRes.Name)' has no profile." -ForegroundColor Red; $failures++
+        }
+    }
 }
 
 # Summary
