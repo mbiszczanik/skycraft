@@ -1323,7 +1323,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
     }
 
     It 'reads step <id>''s "<text>" as <kind> <labels>, <key> at <indices>' -ForEach @(
-        @{ lab = '4.4'; id = '4.4.2'; text = 'Check **Add your client IP address**.'; kind = 'action'; labels = @('Add your client IP address'); key = 'checked'; indices = @(0) }
+        @{ lab = '4.4'; id = '4.4.2'; text = 'Under **Exceptions**, leave **Allow trusted Microsoft services to access this resource** checked'; kind = 'action'; labels = @('Allow trusted Microsoft services to access this resource'); key = 'checked'; indices = @(0) }
         @{ lab = '3.3'; id = '3.3.7'; text = 'Uncheck **Use quickstart image**.'; kind = 'action'; labels = @('Use quickstart image'); key = 'unchecked'; indices = @(0) }
         @{ lab = '4.2'; id = '4.2.5'; text = 'Under **Recovery**, enable **Enable soft delete for blobs**'; kind = 'action'; labels = @('Enable soft delete for blobs'); key = 'checked'; indices = @(0) }
         @{ lab = '3.3'; id = '3.3.2'; text = 'Toggle **Admin user** to **Enabled**.'; kind = 'action'; labels = @('Admin user'); key = 'checked'; indices = @(0) }
@@ -1426,7 +1426,11 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '4.2.9/Skip blobs that have been rehydrated in the last/stateOnly=0'
             '4.2.13/Overwrite if files already exist/checked=0'
             '4.3.6/Upload | Overwrite if files already exist | Upload/checked=1'
-            '4.4.2/Add your client IP address/checked=0'
+            # 4.4.2 (#361): the public network access radio stays on Enable; the trusted services exception stays ticked.
+            '4.4.2/Enable/checked=0'
+            '4.4.2/Enable/stateOnly=0'
+            '4.4.2/Allow trusted Microsoft services to access this resource/checked=0'
+            '4.4.2/Allow trusted Microsoft services to access this resource/stateOnly=0'
             '5.1.7/StorageRead | StorageWrite/checked=0,1'
             '5.1.7/Send to Log Analytics workspace/checked=0'
             '5.2.8/Core Azure Backup Data/checked=0'

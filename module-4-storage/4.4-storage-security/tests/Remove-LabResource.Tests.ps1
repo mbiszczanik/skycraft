@@ -144,6 +144,8 @@ function Update-AzStorageAccountNetworkRuleSet {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$Name, [string]$DefaultAction)
     Invoke-StubRemoval -Command 'Update-AzStorageAccountNetworkRuleSet' -Name "${Name}:$DefaultAction"
+    # The real cmdlet returns the rule set, client IP addresses included.
+    [pscustomobject]@{ Bypass = 'AzureServices'; DefaultAction = $DefaultAction; IpRules = '[203.0.113.7]'; VirtualNetworkRules = '[]'; ResourceAccessRules = '' }
 }
 
 function Get-AzRmStorageContainer {
@@ -284,6 +286,10 @@ Describe 'Lab 4.4 Remove-LabResource.ps1 - reverts what the lab changes' {
         $script:Clean.Output   | Should -Not -Match '\[ERROR\]'
     }
 
+    It 'prints no client IP address from the reverted rule set' {
+        $script:Clean.Output | Should -Not -Match '203\.0\.113\.7' -Because 'the output may be pasted as evidence'
+    }
+
     It 'reverts the firewall, removes dev-assets and the lab''s role assignments on the account' {
         $calls = $script:Clean.Calls
         $calls | Should -Contain 'Update-AzStorageAccountNetworkRuleSet:prodskycraftswcsa:Allow'
@@ -358,7 +364,12 @@ Describe 'Lab 4.4 Remove-LabResource.ps1 - a failed step is counted' {
         $run = $script:StepsFail
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output   | Should -Match '\[ERROR\] Failed to revert firewall'
-        $run.Output   | Should -Match "\[ERROR\] Failed to remove the assignment for 'User 11111111-1111-1111-1111-111111111111'"
+        $run.Output   | Should -Match '\[ERROR\] Failed to remove assignment 1 of 2\.'
+        $run.Output   | Should -Not -Match "'first'"
+        # The holder removed after the failure is reported by its place in the list too, never by name or id.
+        $run.Output   | Should -Match '-> Removed assignment 2 of 2\.'
+        $run.Output   | Should -Not -Match "'second'"
+        $run.Output   | Should -Not -Match '22222222-2222-2222-2222-222222222222'
         $run.Output   | Should -Match 'Cleanup finished with 2 failure\(s\)'
         $run.Output   | Should -Not -Match 'Cleanup Complete'
     }
