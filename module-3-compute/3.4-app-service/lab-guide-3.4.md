@@ -180,7 +180,7 @@ For this lab, we will use **Premium V4 P0V4**. The lab needs **deployment slots*
 
 **Note**: **Node 20 LTS** is no longer offered; the list has Node 22 LTS, Node 24 LTS and a preview. This lab uses **Node 22 LTS**. A Node runtime does not serve a static `index.html` on its own; Step 3.4.4 sets the startup command that does.
 
-**Note**: The form checks the **Name** as you type. If it says the name is not available, add a suffix such as your initials, and use that name wherever this guide says `dev-skycraft-swc-app01`; pass it to `scripts/Test-Lab.ps1` and `scripts/Remove-LabResource.ps1` as `-AppName`.
+**Note**: The form checks the **Name** as you type. If it says the name is not available (`The app name <name> is not available in <region>`, seen 2026-10-26), add a suffix such as your initials, and use that name wherever this guide says `dev-skycraft-swc-app01`; pass it to `scripts/Test-Lab.ps1` and `scripts/Remove-LabResource.ps1` as `-AppName`.
 
 4. Click the **Networking** tab and fill in:
 
@@ -213,6 +213,8 @@ For this lab, we will use **Premium V4 P0V4**. The lab needs **deployment slots*
 **Note**: The review page may say "Basic authentication for this app is currently disabled and may impact deployments". Leave it disabled: `Publish-AzWebApp` in Step 3.4.4 deploys with your Azure sign-in (seen working 2026-10-15).
 
 **Expected Result**: The Web App is deployed. On its **Overview**, copy the **Default domain**: it has the form `dev-skycraft-swc-app01-<16 characters>.swedencentral-01.azurewebsites.net`. Open `https://` followed by that domain: you see the default "Your web app is running and waiting for your content" landing page.
+
+![Create Web App](./images/step-3.4.2.png)
 
 ---
 
@@ -319,6 +321,8 @@ Deployment slots allow you to deploy different versions of your app (e.g., "Stag
 **Note**: The **Add Slot** pane has no tags. With Lab 1.3's assignments in place, `Inherit-Project-Tag` gives the slot the `Project` tag of `dev-skycraft-swc-rg`, and `Enforce-Project-Tag` accepts it. If the slot is refused with "All resources must be tagged with Project=SkyCraft", see Troubleshooting, Issue 3.
 
 **Expected Result**: The list shows the production app and `dev-skycraft-swc-app01-staging`, both **Running**. The slot's address has its own random part: `dev-skycraft-swc-app01-staging-<16 characters>.swedencentral-01.azurewebsites.net`.
+
+![Create Staging Slot](./images/step-3.4.5.png)
 
 ### Step 3.4.6: Deploy V2 to Staging
 
@@ -439,6 +443,8 @@ Always pair a scale-out rule with a scale-in rule to save costs!
 
 **Expected Result**: The plan will now auto-scale between 1 and 3 instances based on CPU load. If **Save** seems to do nothing, open the notifications (the bell): a refusal "disallowed by policy" means `dev-skycraft-swc-rg` lacks `Project` = `SkyCraft` (Troubleshooting, Issue 3).
 
+![Configure Scale In Rule](./images/step-3.4.9.png)
+
 ---
 
 ## 📖 Section 6: Networking & Security (15 minutes)
@@ -521,6 +527,8 @@ App Service backs up every app on the Basic tier and above automatically, every 
 3. Under **Settings**, select **Backups**
 
 **Expected Result**: The **Backups** page shows the automatic backups, taken **Every 1 hour**. The first one can take up to an hour after the app was created.
+
+![Review Backups](./images/step-3.4.13.png)
 
 **Custom backups are not part of this lab.** **Configure custom backups** writes backups on a schedule you choose to a storage account and container you choose. That storage account costs money, the lab's cleanup does not delete it, and the pane's **Create new** control for it has no tags. Use custom backups when you need backups you can download, keep longer than 30 days or take over a virtual network.
 
