@@ -510,9 +510,7 @@ LAB_CAPTIONS: dict[str, frozenset[str]] = {
     "3.1": frozenset({"Install Bicep CLI",                 # captions of local-tools steps
                       "Install VS Code Extension",
                       "Review generated Bicep file"}),
-    "3.2": frozenset({"(Optional)",                        # caption
-                      "zone-redundant by default",         # emphasis
-                      "Simulating zone failure",           # captions in a conceptual step
+    "3.2": frozenset({"Simulating zone failure",           # captions in a conceptual step
                       "Verifying traffic routing",
                       "Restoring service"}),
     "3.4": frozenset({"Version: 2.0 (Staging)",            # text of the local index.html
