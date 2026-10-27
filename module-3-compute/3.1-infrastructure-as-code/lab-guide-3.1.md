@@ -210,24 +210,34 @@ Bicep is a **transparent abstraction** over ARM - everything possible in ARM is 
 
 Let's export your existing dev environment to see what ARM looks like:
 
-1. In **Azure Portal**, navigate to **Resource groups** → **dev-skycraft-swc-rg**
-2. In left menu, click **Export template**
-3. Wait 10-15 seconds for Azure to generate template
+1. In the **Azure Portal**, search for **Resource groups** and open `dev-skycraft-swc-rg`
+2. In the left menu, expand **Automation** (it is collapsed when the page opens) and click **Export template**
+3. Wait for Azure to generate the template: about 30-40 seconds for the Module 2 resources in this group
 
 ![Export ARM Template](images/step-3.1.1.png)
 
 **What You See**:
 
-- **Template** tab: Complete ARM JSON (often 500-2000+ lines)
-- **Parameters** tab: Extracted parameters
-- **Download** button: Get template as ZIP file
+- Three tabs: **ARM template**, **Bicep** and **Terraform**. The Portal exports Bicep directly as well; this section works with the **ARM template** tab, and Step 3.1.8 converts it to Bicep with the Bicep CLI.
+- A toolbar with **Download**, **Copy** and **Deploy**
+- On the **ARM template** tab, an **Include parameters** check box and two sub-tabs: **Template**, the complete ARM JSON (often 500-2000+ lines), and **Parameters**, the parameter values
 
-4. Click **Download** to save locally
-5. Extract ZIP file - contains:
-   - `template.json` (ARM template)
-   - `parameters.json` (parameter values)
-   - `deploy.ps1` (PowerShell deployment script)
-   - `deploy.sh` (Bash deployment script)
+> [!WARNING]
+> Do not click **Deploy**. It opens a custom deployment of the exported template; completing it
+> redeploys the group's resources as exported and can overwrite what Module 2 set on them since.
+> This lab deploys only with `.\scripts\Deploy-Bicep.ps1` (Section 7).
+
+4. Stay on the ARM template tab and leave **Include parameters** ticked (tick it if it is not)
+5. On the **Template** sub-tab, click **Download**. The browser saves `template.json` (the ARM
+   template), not a ZIP file. On the **Parameters** sub-tab, **Download** saves `parameters.json`
+   (the parameter values); this lab does not need it.
+
+**Az PowerShell alternative**: `.\scripts\Export-ARM.ps1 -OutputFile template.json` exports the
+same group with `Export-AzResourceGroup`. It writes a single template file and no
+`parameters.json`. Bicep has no counterpart: a Bicep file declares resources, it does not read
+them back.
+
+**Expected Result**: The export page shows the ARM template of `dev-skycraft-swc-rg`, and `template.json` is on your computer.
 
 ### Step 3.1.2: Analyze Exported ARM Template Structure
 
@@ -562,12 +572,15 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-05-01' = {
 
 ### Step 3.1.8: Decompile ARM Template to Bicep
 
-Bicep CLI can automatically convert ARM JSON to Bicep:
+Bicep CLI can automatically convert ARM JSON to Bicep. The Portal's **Bicep** tab (Step 3.1.1)
+gives a similar file without the CLI; decompiling also works for templates that do not come from
+the Portal, such as one saved from a deployment's history. Compare the two results if you like.
 
-1. Navigate to your exported template directory:
+1. Open a terminal in the folder where the browser saved `template.json`, usually your Downloads
+   folder:
 
 ```bash
-cd ~/Downloads/dev-skycraft-swc-rg-export
+cd ~/Downloads
 ```
 
 2. **Decompile ARM to Bicep**:
@@ -576,12 +589,25 @@ cd ~/Downloads/dev-skycraft-swc-rg-export
 az bicep decompile --file template.json
 ```
 
-**Expected Output**:
+**Expected Output**: the command writes `template.bicep` and exits with code 1. After the
+best-effort warning it lists errors in the generated file, for example:
 
+```text
+WARNING: Decompilation is a best-effort process, as there is no guaranteed mapping from ARM JSON to Bicep Template or Bicep Parameters.
+template.bicep(65,13) : Error BCP080: The expression is involved in a cycle ("networkSecurityGroups_auth_nsg_name_AllowBastionSSH" -> "networkSecurityGroups_auth_nsg_name_resource").
+template.bicep(350,16) : Error BCP079: This expression is referencing its own declaration, which is not allowed.
+template.bicep(492,5) : Error BCP062: The referenced declaration with name "loadBalancers_dev_skycraft_swc_lb_name_resource" is not valid.
 ```
-Decompilation complete. Output file: template.bicep
-Warning: Decompilation is a best-effort process. Review the generated file carefully.
-```
+
+The errors are expected, and the file is still written. The decompiler declares every subnet,
+security rule, peering and backend pool twice: as a resource of its own, and inside its parent
+with an `id:` line that points at that resource, so each refers to the other (`BCP080`, then
+`BCP062` for everything that references them). Lab 2.3's load balancer also refers to its own
+frontend, pools and probes by `id` (`BCP079`). Deleting the `id:` lines from the parent arrays
+(`securityRules`, `subnets`, `virtualNetworkPeerings`, `backendAddressPools`) clears the cycles of
+the network security groups and the virtual network, but not the load balancer's
+self-references. Do not try to make this file deployable: read it in Step 3.1.9, and Section 5
+writes clean modules instead.
 
 3. **Review generated Bicep file**:
 
@@ -758,6 +784,15 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
         // Private subnet, as the portal and Lab 2.1 create it: no default outbound access.
         // The VMs reach the internet through the load balancer's outbound rule.
         defaultOutboundAccess: false
+        // Optional delegation, e.g. Microsoft.Web/serverFarms for App Service VNet integration
+        delegations: contains(subnet, 'delegation') ? [
+          {
+            name: subnet.delegation
+            properties: {
+              serviceName: subnet.delegation
+            }
+          }
+        ] : []
       }
     }]
   }
@@ -1171,6 +1206,10 @@ module hubVnet 'modules/network.bicep' = {
         name: 'AzureBastionSubnet'
         addressPrefix: '10.0.0.0/26'
       }
+      {
+        name: 'GatewaySubnet'
+        addressPrefix: '10.0.1.0/27'
+      }
     ]
     tags: union(tags, { Environment: 'Platform', Purpose: 'HubNetwork' })
   }
@@ -1202,6 +1241,11 @@ module devVnet 'modules/network.bicep' = {
       {
         name: 'DatabaseSubnet'
         addressPrefix: '10.1.3.0/24'
+      }
+      {
+        name: 'AppServiceSubnet'
+        addressPrefix: '10.1.4.0/24'
+        delegation: 'Microsoft.Web/serverFarms' // Lab 3.4's VNet integration needs it
       }
     ]
     tags: union(tags, { Environment: 'Development' })
@@ -1298,6 +1342,17 @@ output devVnetId string = devVnet.outputs.vnetId
 output devLoadBalancerId string = devLoadBalancer.outputs.loadBalancerId
 output devLoadBalancerPublicIp string = devLbPublicIp.outputs.ipAddress
 ```
+
+> [!NOTE]
+> **What the two NSGs allow, and what they do not block.** Both rule arrays above contain only
+> **Allow** rules. Every NSG also keeps Azure's default inbound rules, among them
+> `AllowVnetInBound` (priority 65000: any port from the virtual network, including peered VNets).
+> So `auth-nsg` and `world-nsg` admit their service port from any source and SSH from the Bastion
+> subnet, and they still admit any traffic from the other subnets of the VNet: they do **not**
+> isolate AuthSubnet and WorldSubnet from each other or from DatabaseSubnet, which (like
+> AppServiceSubnet) gets no NSG from this lab. Isolating them needs explicit **Deny** rules, which
+> this lab does not add. This is an evaluation of the rules; the lab deploys no VMs to test a
+> connection.
 
 ### Step 3.1.16: Create Public IP Module
 
@@ -1448,7 +1503,15 @@ If you completed Module 2, the output looks different: the script reports that
 `platform-skycraft-swc-vnet`, `dev-skycraft-swc-vnet`, `dev-skycraft-swc-lb-pip` and
 `dev-skycraft-swc-lb` already exist, so none of them appears in the what-if at all. Only
 `auth-nsg` and `world-nsg` are created; the resource groups already exist and show as unchanged
-or modified.
+or modified. The summary line then reads, for example (the counts depend on what else stands in
+the groups):
+
+```
+Resource changes: 2 to create, 3 no change, 25 to ignore.
+```
+
+The resources "to ignore" stand in the groups but are not declared by this deployment, such as the
+VNets and the load balancer the script left out because they exist; the deployment leaves them alone.
 
 **Color Legend**:
 
@@ -1478,9 +1541,32 @@ for you.
 4. `New-AzSubscriptionDeployment` submits the deployment
 5. Creates resource groups
 6. Deploys resources in parallel (where possible)
-7. Prints the deployment outputs on success, and exits non-zero on failure
+7. Prints each deployment output with its value on success, and exits non-zero on failure
 
 **Expected Duration**: 3-5 minutes for network infrastructure
+
+**Expected Output** at the end, on a subscription where Module 2 built the VNets and the load
+balancer (your IP address and subscription ID differ; the `...Deployed` values are `True` for what
+this run created):
+
+```
+[SUCCESS] Deployment complete: SkyCraft-dev-20260112-2050
+
+Outputs:
+  outConfigEnvironment           dev
+  outConfigProdVnetPrefix        10.2.0.0/16
+  outDevLbPublicIpDeployed       False
+  outDevLoadBalancerDeployed     False
+  outDevLoadBalancerId           /subscriptions/.../resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Network/loadBalancers/dev-skycraft-swc-lb
+  outDevLoadBalancerPublicIp     20.240.50.10
+  outDevResourceGroupName        dev-skycraft-swc-rg
+  outDevVnetDeployed             False
+  outDevVnetId                   /subscriptions/.../resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Network/virtualNetworks/dev-skycraft-swc-vnet
+  outHubVnetDeployed             False
+  outHubVnetId                   /subscriptions/.../resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.Network/virtualNetworks/platform-skycraft-swc-vnet
+  outPlatformResourceGroupName   platform-skycraft-swc-rg
+  outProdResourceGroupName       prod-skycraft-swc-rg
+```
 
 ### Step 3.1.20: Monitor Deployment Progress
 
@@ -1499,11 +1585,39 @@ Get-AzSubscriptionDeployment |
 ### Step 3.1.21: Verify Deployed Resources
 
 The lab ships a validation script that checks the resource groups, VNets and
-subnets, NSGs and their rules, and the load balancers and public IPs in one pass:
+subnets (including `AppServiceSubnet` and its delegation to `Microsoft.Web/serverFarms`, which
+Lab 3.4 needs), NSGs and their rules, and the load balancers and public IPs in one pass:
 
 ```powershell
 .\scripts\Test-Lab.ps1 -Environment dev
 ```
+
+**Expected Result**: the script ends with `Validation Complete. Failures: 0` and exits 0. The
+subnet part reads:
+
+```
+  - [OK] Subnet 'AuthSubnet' found.
+  - [OK] Subnet 'WorldSubnet' found.
+  - [OK] Subnet 'DatabaseSubnet' found.
+  - [OK] Subnet 'AppServiceSubnet' found, delegated to Microsoft.Web/serverFarms.
+```
+
+If `AppServiceSubnet` is reported as not delegated (a dev VNet built in the Portal without
+Lab 2.1's **Delegate subnet to a service** setting), open `dev-skycraft-swc-vnet` in the Portal,
+under **Settings** click **Subnets**, open `AppServiceSubnet`, set **Delegate subnet to a
+service** to `Microsoft.Web/serverFarms` and click **Save**, then run the script again. With Az
+PowerShell:
+
+```powershell
+$vnet = Get-AzVirtualNetwork -Name dev-skycraft-swc-vnet -ResourceGroupName dev-skycraft-swc-rg
+$subnet = Get-AzVirtualNetworkSubnetConfig -Name AppServiceSubnet -VirtualNetwork $vnet
+Add-AzDelegation -Name 'Microsoft.Web/serverFarms' -ServiceName 'Microsoft.Web/serverFarms' -Subnet $subnet | Out-Null
+$vnet | Set-AzVirtualNetwork | Out-Null
+```
+
+Running `.\scripts\Deploy-Bicep.ps1` again does not fix it: the script leaves an existing dev
+VNet alone (see Prerequisites), so the template's delegation never reaches it. If `AppServiceSubnet` is
+reported as `MISSING`, add it as Lab 2.1 does, with its delegation, then run the script again.
 
 To inspect the same resources by hand:
 
@@ -1533,23 +1647,36 @@ Get-AzVirtualNetwork -ResourceGroupName dev-skycraft-swc-rg |
 # ---------------------  ------------  -------
 # dev-skycraft-swc-vnet  10.1.0.0/16   4
 
+# Check the App Service subnet's delegation (Lab 3.4 needs it)
+(Get-AzVirtualNetwork -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-vnet).Subnets |
+  Where-Object Name -eq 'AppServiceSubnet' |
+  Select-Object Name, @{N = 'Delegation'; E = { $_.Delegations.ServiceName } } |
+  Format-Table -AutoSize
+
+# Expected output:
+# Name              Delegation
+# ----------------  -------------------------
+# AppServiceSubnet  Microsoft.Web/serverFarms
+
 # Verify load balancer
 Get-AzLoadBalancer -ResourceGroupName dev-skycraft-swc-rg |
   Select-Object Name,
     @{N = 'SKU'; E = { $_.Sku.Name } },
-    @{N = 'BackendPools'; E = { $_.BackendAddressPools.Count } } |
+    @{N = 'BackendPools'; E = { $_.BackendAddressPools.Count } },
+    @{N = 'OutboundRules'; E = { $_.OutboundRules.Count } } |
   Format-Table -AutoSize
 
-# Expected output:
-# Name                 SKU       BackendPools
-# -------------------  --------  ------------
-# dev-skycraft-swc-lb  Standard  2
+# Expected output (pools: -be-world, -be-auth and the egress pool -be-outbound):
+# Name                 SKU       BackendPools  OutboundRules
+# -------------------  --------  ------------  -------------
+# dev-skycraft-swc-lb  Standard  3             1
 ```
 
 ### Step 3.1.22: View Deployment Outputs
 
 The outputs are the `output` lines at the end of `bicep/main.bicep`; their names start with
-`out`.
+`out`. `Deploy-Bicep.ps1` printed them with their values at the end of Step 3.1.19; this step
+reads the same values back from the deployment record, as another script would.
 
 ```powershell
 # Get deployment outputs (use the deployment name Deploy-Bicep.ps1 printed)
@@ -1594,7 +1721,7 @@ After deployment, export to compare:
 # Export resource group as ARM template (wraps Export-AzResourceGroup)
 .\scripts\Export-ARM.ps1 -ResourceGroup dev-skycraft-swc-rg -OutputFile deployed-template.json
 
-# Convert to Bicep to see clean version (local file operation - no subscription touched)
+# Convert to Bicep (local file operation - no subscription touched); it exits 1 with the errors of Step 3.1.8
 az bicep decompile --file deployed-template.json
 
 # Compare with your original bicep/main.bicep
@@ -1619,6 +1746,49 @@ If you want to test redeployment:
 > `Remove-LabResource.ps1` is destructive. It supports `-WhatIf` and `-Confirm`
 > ([powershell-standards.md](../../docs/powershell-standards.md) §5) — preview
 > first, and pass `-Force` only when you are sure.
+>
+> Skip this step after Module 2. The three groups hold everything Module 2 built in them: the
+> deletion removes the VNet peerings, Lab 2.2's NSGs and Bastion, and Lab 2.3's DNS zones and
+> prod load balancer, and the redeploy recreates only this lab's resources.
+>
+> While Lab 1.3's `CanNotDelete` locks are on `platform-skycraft-swc-rg` and
+> `prod-skycraft-swc-rg`, deleting those groups fails with `ScopeLocked`: remove the locks first
+> (Lab 1.3's cleanup). The script does not handle the locks itself yet (issue #372).
+
+---
+
+## 📦 What This Lab Leaves Behind
+
+Lab 3.1 creates a resource only where it is missing. On a subscription where Module 2 is
+complete, it adds just `auth-nsg` and `world-nsg` to `dev-skycraft-swc-rg` (free, and not attached
+to any subnet: the subnets keep Lab 2.2's NSGs). On a subscription without Module 2 it leaves the
+resources below. Leave them in place if you go on to Module 3.
+
+| Left behind | Where | Approximate cost | What it does in later labs |
+| --- | --- | --- | --- |
+| The three resource groups | Subscription | 0 | Every later lab deploys into them |
+| `platform-skycraft-swc-vnet` with `AzureBastionSubnet` and `GatewaySubnet`, **not peered** to the dev VNet | `platform-skycraft-swc-rg` | 0 | Lab 2.1 adds the peerings |
+| `dev-skycraft-swc-vnet` with `AuthSubnet`, `WorldSubnet` and `DatabaseSubnet` (private: no default outbound access) | `dev-skycraft-swc-rg` | 0 | Lab 3.2 places its VMs in `AuthSubnet` and `WorldSubnet` |
+| `AppServiceSubnet`, delegated to `Microsoft.Web/serverFarms` | `dev-skycraft-swc-vnet` | 0 | Lab 3.4 connects the web app to it |
+| `auth-nsg` (TCP 3724 from any source) and `world-nsg` (TCP 8085 from any source), attached to `AuthSubnet` and `WorldSubnet` | `dev-skycraft-swc-rg` | 0 | Filter the traffic to Lab 3.2's VMs |
+| `dev-skycraft-swc-lb-pip` (Standard, static) | `dev-skycraft-swc-rg` | about 0.11 EUR a day (3.21 EUR a month, 0.0044 EUR per hour), whether in use or not | The load balancer's frontend address |
+| `dev-skycraft-swc-lb` (Standard) with the pools `-be-world`, `-be-auth`, `-be-outbound` and one outbound rule | `dev-skycraft-swc-rg` | Sweden Central rate unknown; Global reference about 0.53 EUR a day (16.06 EUR a month), plus 0.0044 EUR per GB processed | Lab 3.2 adds each VM to its role pool and to the egress pool `-be-outbound`, its only path to the internet |
+
+The prices are the retail prices Labs 2.1 and 2.3 looked up (public IP: 2026-10-22, Sweden
+Central; load balancer: 2026-10-23, where the price list showed only a Global meter). Check the
+[Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/) for your own. The load
+balancer and its public IP cost money while they exist, with or without VMs behind them.
+
+**Access it opens.** On a dev VNet this lab created, `auth-nsg` and `world-nsg` allow the game
+ports from any source, so once Lab 3.2's VMs are in the backend pools, ports 3724 and 8085 are
+reachable from the internet through the load balancer. Between subnets nothing is blocked: the
+NSGs hold only Allow rules and keep the default `AllowVnetInBound` rule (see the note after
+Step 3.1.15). On Module 2's VNet the same ports are opened by Lab 2.2's NSGs, and this lab's two
+NSGs, attached to no subnet, filter nothing.
+
+**Re-running.** `.\scripts\Deploy-Bicep.ps1` leaves an existing hub VNet, dev VNet, public IP and
+load balancer alone. A direct `New-AzSubscriptionDeployment` with `dev.bicepparam` does not: it
+redeploys them and removes Module 2's peerings and settings (Step 3.1.17).
 
 ---
 
@@ -1673,6 +1843,7 @@ Quick verification before proceeding:
 - [ ] Previewed changes with what-if analysis
 - [ ] Deployed Bicep template successfully
 - [ ] Verified deployed resources in Azure Portal
+- [ ] `Test-Lab.ps1` exited 0, including `AppServiceSubnet` delegated to `Microsoft.Web/serverFarms`
 - [ ] Retrieved deployment outputs
 
 **For detailed verification**, see [lab-checklist-3.1.md](lab-checklist-3.1.md)

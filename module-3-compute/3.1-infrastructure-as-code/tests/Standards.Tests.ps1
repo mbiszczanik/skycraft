@@ -8,9 +8,11 @@
       - Hungarian notation for param / resource / module / output
       - Resource API versions pinned to 2023-11-01 (network stack) or 2023-07-01 (RG)
       - No preview API versions
-      - CostCenter tag present in main.bicep
       - Compiles successfully via 'bicep build' (resolved by tools/BicepCli.psm1)
       - The guide's verification steps (3.1.21, 3.1.22) expect what main.bicep deploys (#263)
+
+    Tag rules (the canonical four, ManagedBy and DeploymentDate forbidden) are not restated
+    here: tests/Bicep-Tags.Tests.ps1 enforces docs/bicep-standards.md section 5 (#326).
 
 .EXAMPLE
     Invoke-Pester -Path .\Standards.Tests.ps1
@@ -89,23 +91,6 @@ Describe 'Lab 3.1 Bicep - API versions' {
     }
 }
 
-Describe 'Lab 3.1 Bicep - CostCenter tag coverage' {
-    BeforeAll {
-        $script:MainFile = (Resolve-Path (Join-Path $PSScriptRoot '..\bicep\main.bicep')).Path
-    }
-
-    It 'main.bicep defines CostCenter in varCommonTags' {
-        Get-Content -Raw -LiteralPath $script:MainFile | Should -Match 'CostCenter'
-    }
-
-    It 'main.bicep is not relying on ManagedBy instead of CostCenter' {
-        $text = Get-Content -Raw -LiteralPath $script:MainFile
-        if ($text -match 'ManagedBy') {
-            $text | Should -Match 'CostCenter' -Because 'ManagedBy is OK as extra metadata, but CostCenter must also be present'
-        }
-    }
-}
-
 Describe 'Lab 3.1 Bicep - compilation' {
     BeforeAll {
         # The same compiler the deploy scripts use - see tools/BicepCli.psm1 (#144).
@@ -123,6 +108,7 @@ Describe 'Lab 3.1 guide - verification steps match main.bicep' {
     BeforeAll {
         $script:Main  = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'bicep' 'main.bicep')
         $guide        = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' 'lab-guide-3.1.md')
+        $script:Step19 = [regex]::Match($guide, '(?s)### Step 3\.1\.19:.*?### Step 3\.1\.20:').Value
         $script:Step21 = [regex]::Match($guide, '(?s)### Step 3\.1\.21:.*?### Step 3\.1\.22:').Value
         $script:Step22 = [regex]::Match($guide, '(?s)### Step 3\.1\.22:.*?### Step 3\.1\.23:').Value
         $script:Outputs = @([regex]::Matches($script:Main, '(?m)^output\s+(\w+)') | ForEach-Object { $_.Groups[1].Value })
@@ -134,6 +120,26 @@ Describe 'Lab 3.1 guide - verification steps match main.bicep' {
         $declared | Should -BeGreaterThan 0
         $expected = [regex]::Match($script:Step21, 'dev-skycraft-swc-vnet\s+10\.1\.0\.0/16\s+(\d+)')
         $expected.Success | Should -BeTrue -Because 'step 3.1.21 shows the dev VNet with its subnet count'
+        [int]$expected.Groups[1].Value | Should -Be $declared
+    }
+
+    It "step 3.1.19 shows Deploy-Bicep.ps1 printing every template output with a value" {
+        $rows = @([regex]::Matches($script:Step19, '(?m)^  (out\w+) +(\S+)') | ForEach-Object { $_.Groups[1].Value })
+        $rows.Count | Should -BeGreaterThan 0
+        ($rows | Sort-Object) | Should -Be ($script:Outputs | Sort-Object)
+    }
+
+    It 'step 3.1.21 expects the App Service subnet with its delegation' {
+        $script:Step21 | Should -Match "\[OK\] Subnet 'AppServiceSubnet' found, delegated to Microsoft\.Web/serverFarms"
+        $script:Step21 | Should -Match 'AppServiceSubnet\s+Microsoft\.Web/serverFarms'
+    }
+
+    It 'step 3.1.21 expects as many backend pools as the dev load balancer declares' {
+        $block = [regex]::Match($script:Main, '(?s)parBackendPools: \[(.*?)\]').Groups[1].Value
+        $declared = [regex]::Matches($block, "name: '").Count
+        $declared | Should -BeGreaterThan 0
+        $expected = [regex]::Match($script:Step21, 'dev-skycraft-swc-lb\s+Standard\s+(\d+)')
+        $expected.Success | Should -BeTrue
         [int]$expected.Groups[1].Value | Should -Be $declared
     }
 

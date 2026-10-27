@@ -28,6 +28,8 @@
     other than "not found" stops the script, so an unreadable resource is never redeployed by
     mistake.
 
+    On success the script prints every deployment output with its value (step 3.1.19).
+
 .PARAMETER Location
     The Azure region deployment target. Default: 'swedencentral'
 
@@ -171,8 +173,9 @@ try {
         $dep = New-AzSubscriptionDeployment @deployParams
 
         if ($dep.ProvisioningState -eq 'Succeeded') {
-            Write-Host "`n[SUCCESS] Deployment complete!" -ForegroundColor Green
-            $dep.Outputs | Format-Table -AutoSize
+            Write-Host "`n[SUCCESS] Deployment complete: $deploymentName" -ForegroundColor Green
+            Write-Host "`nOutputs:" -ForegroundColor Cyan
+            Write-LabDeploymentOutput -Outputs $dep.Outputs
         }
         else {
             Write-Host "`n[FAILED] State: $($dep.ProvisioningState)" -ForegroundColor Red
