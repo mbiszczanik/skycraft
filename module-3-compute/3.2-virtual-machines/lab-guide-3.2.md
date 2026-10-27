@@ -463,12 +463,12 @@ The Management tab has no Microsoft Defender for Cloud row; Defender is a subscr
 
 **Monitoring tab**:
 
-| Field                          | Value         |
-| ------------------------------ | ------------- |
-| Alerts                         | Leave default |
-| Boot diagnostics               | Disable (the default is Enable with managed storage account) |
-| OS guest diagnostics           | Leave default |
-| Application health monitoring  | Leave default |
+| Field                                | Value         |
+| ------------------------------------ | ------------- |
+| Enable recommended alert rules       | Leave unchecked (the default) |
+| Boot diagnostics                     | **Disabled** (the default is Enable with managed storage account) |
+| Enable OS guest diagnostics          | Leave unchecked (the default) |
+| Enable application health monitoring | Leave unchecked (the default) |
 
 8. Click **Next: Advanced** (leave defaults)
 9. Click **Next: Tags**
@@ -590,12 +590,12 @@ As in Step 3.2.4, replace the new VNet, subnet and public IP the wizard pre-fill
 
 **Monitoring tab**:
 
-| Field                          | Value         |
-| ------------------------------ | ------------- |
-| Alerts                         | Leave default |
-| Boot diagnostics               | Disable (the default is Enable with managed storage account) |
-| OS guest diagnostics           | Leave default |
-| Application health monitoring  | Leave default |
+| Field                                | Value         |
+| ------------------------------------ | ------------- |
+| Enable recommended alert rules       | Leave unchecked (the default) |
+| Boot diagnostics                     | **Disabled** (the default is Enable with managed storage account) |
+| Enable OS guest diagnostics          | Leave unchecked (the default) |
+| Enable application health monitoring | Leave unchecked (the default) |
 
 ### Step 3.2.12: Configure Tags and Create Worldserver
 
