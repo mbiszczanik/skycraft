@@ -813,10 +813,18 @@ Describe 'parse.py - labs 2.2, 3.2, 4.1 and 5.2, Verify and Confirm introduce ch
                       'prod-skycraft-swc-vnet', 'Subnets', 'DatabaseSubnet', 'Subnets', 'WorldSubnet')
            expected = 'Database subnets can access Azure SQL and Storage over Microsoft backbone (private routing), and both `WorldSubnet`s carry `Microsoft.Storage` for Lab 4.4. Microsoft.Sql; Microsoft.Storage; Microsoft.Storage; Microsoft.Sql; Microsoft.Storage; Microsoft.Storage' }
         # #344: the step then adds both VMs to the egress pool; ticking a row of the panel's table is no label.
+        # #353: then both NICs into their ASGs, and the effective rules on the VM and the DB NSG.
         @{ lab = '3.2'; id = '3.2.13'
            labels = @('Virtual machines', 'Load balancers', 'dev-skycraft-swc-lb', 'Backend pools',
-                      'Backend pools', 'dev-skycraft-swc-lb-be-outbound', '+ Add', 'Add', 'Save')
-           expected = 'Both VMs running in different availability zones, connected to respective load balancer backend pools, and `dev-skycraft-swc-lb-be-outbound` lists 2 VMs (auth and world). dev-skycraft-swc-lb-be-auth: 1 VM; dev-skycraft-swc-lb-be-world: 1 VM' }
+                      'Backend pools', 'dev-skycraft-swc-lb-be-outbound', '+ Add', 'Add', 'Save',
+                      'Virtual machines', 'dev-skycraft-swc-auth-vm', 'Networking', 'Application security groups',
+                      'Add application security groups', 'Add',
+                      'Virtual machines', 'dev-skycraft-swc-world-vm', 'Networking', 'Application security groups',
+                      'Add application security groups', 'Add',
+                      'Virtual machines', 'dev-skycraft-swc-auth-vm', 'Networking', 'Network settings', 'Effective security rules',
+                      'Network security groups', 'dev-skycraft-swc-db-nsg', 'Settings', 'Inbound security rules',
+                      'Effective security rules')
+           expected = 'Both VMs running in different availability zones, connected to respective load balancer backend pools, `dev-skycraft-swc-lb-be-outbound` lists 2 VMs (auth and world), and each VM''s network interface is in its application security group. dev-skycraft-swc-lb-be-auth: 1 VM; dev-skycraft-swc-lb-be-world: 1 VM' }
         # The alert to look for is not a click.
         @{ lab = '5.2'; id = '5.2.9'; labels = @('Backup center', 'Alerts')
            expected = 'Modify policy with shorter retention (0 - Critical) - raised because Deploy-Bicep.ps1 shortens instant-restore retention to 2 days after creating the Enhanced policy. Expected; it is a security alert about the change, not a failure.' }
@@ -842,9 +850,11 @@ Describe 'parse.py - labs 3.2, 4.2 and 5.2, resource names in navigation chains 
     }
 
     It 'reads the chain of step <id> as <labels>, resource names at <resources>' -ForEach @(
-        # Step 3.2.13 has two chains since #344: the load balancer's pools, then the egress pool.
-        @{ lab = '3.2'; id = '3.2.13'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Backend pools'); resources = @(1); count = 2; index = 0 }
-        @{ lab = '3.2'; id = '3.2.13'; labels = @('Backend pools', 'dev-skycraft-swc-lb-be-outbound'); resources = @(1); count = 2; index = 1 }
+        # Step 3.2.13 has six chains: the load balancer's pools, the egress pool (#344), each VM's
+        # ASGs, the auth VM's effective rules and the DB NSG's rules (#353).
+        @{ lab = '3.2'; id = '3.2.13'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Backend pools'); resources = @(1); count = 6; index = 0 }
+        @{ lab = '3.2'; id = '3.2.13'; labels = @('Backend pools', 'dev-skycraft-swc-lb-be-outbound'); resources = @(1); count = 6; index = 1 }
+        @{ lab = '3.2'; id = '3.2.13'; labels = @('Network security groups', 'dev-skycraft-swc-db-nsg', 'Settings', 'Inbound security rules'); resources = @(1); count = 6; index = 5 }
         @{ lab = '3.2'; id = '3.2.14'; labels = @('Virtual machines', 'dev-skycraft-swc-world-vm'); resources = @(1) }
         # 4.2.11 uploads from the containers list's toolbar since #359; it no longer opens game-assets.
         @{ lab = '4.2'; id = '4.2.11'; labels = @('prodskycraftswcsa', 'Containers'); resources = @(0) }

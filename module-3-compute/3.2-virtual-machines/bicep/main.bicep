@@ -1,9 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 3.2 - Virtual Machines Orchestrator
-DESCRIPTION: Deploys the Auth and World Linux VMs (NICs via the AVM VM module), the World data disk and the optional Key Vault for Azure Disk Encryption into the Lab 3.1 network, via Azure Verified Modules
+DESCRIPTION: Deploys the Auth and World Linux VMs (NICs via the AVM VM module, in the Lab 2.2 ASGs in dev), the World data disk and the Key Vault for Azure Disk Encryption into the Lab 3.1 network, via Azure Verified Modules. Deploy-Bicep.ps1 then encrypts the Auth VM only (Enable-Encryption.ps1, #368). The scale set of Steps 3.2.29-3.2.33 is a Portal exercise the guide deletes again, so the template does not create it.
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev -SshKeyPath $HOME\.ssh\skycraft-dev.pub
 AUTHOR/S: Marcin Biszczanik
-VERSION: 1.2.0
+VERSION: 1.3.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -50,13 +50,18 @@ param parAdminUsername string = 'azureuser'
 ])
 param parVmSize string = 'Standard_B2ls_v2'
 
-@description('Encryption strategy for VMs')
+@description('Encryption strategy for VMs. AzureDiskEncryption (the guide\'s end state) creates the Key Vault; Enable-Encryption.ps1 then encrypts the Auth VM only.')
 @allowed([
   'None'
   'EncryptionAtHost'
   'AzureDiskEncryption'
 ])
-param parEncryptionStrategy string = 'None'
+param parEncryptionStrategy string = 'AzureDiskEncryption'
+
+@description('Key Vault name (globally unique; pass another one when the default is taken)')
+@minLength(3)
+@maxLength(24)
+param parKeyVaultName string = '${parEnvironment}-${parProject}-swc-kv'
 
 @description('Worldserver data disk size in GB')
 @minValue(4)
@@ -80,7 +85,8 @@ var varNamePrefix = '${parEnvironment}-${parProject}-${varLocationShortCode}'
 var varResourceGroupName = '${varNamePrefix}-rg'
 var varVnetName = '${varNamePrefix}-vnet'
 var varLbName = '${varNamePrefix}-lb'
-var varKeyVaultName = '${varNamePrefix}-kv'
+// Lab 2.2 creates the ASGs in dev only.
+var varUseAsgs = parEnvironment == 'dev'
 
 var varEnvironmentTag = parEnvironment == 'dev' ? 'Development' : 'Production'
 var varCommonTags = {
@@ -135,6 +141,17 @@ resource resLbPoolOutbound 'Microsoft.Network/loadBalancers/backendAddressPools@
   scope: resRg
 }
 
+// Lab 2.2 ASGs (dev only); referenced by ID only, so prod never reads them
+resource resAsgAuth 'Microsoft.Network/applicationSecurityGroups@2023-11-01' existing = {
+  name: '${varNamePrefix}-asg-auth'
+  scope: resRg
+}
+
+resource resAsgWorld 'Microsoft.Network/applicationSecurityGroups@2023-11-01' existing = {
+  name: '${varNamePrefix}-asg-world'
+  scope: resRg
+}
+
 /*******************
 *     Modules      *
 *******************/
@@ -144,13 +161,14 @@ module modKeyVault 'br/public:avm/res/key-vault/vault:0.14.2' = if (parEncryptio
   name: 'keyvault-deployment'
   scope: resRg
   params: {
-    name: varKeyVaultName
+    name: parKeyVaultName
     location: parLocation
     tags: varCommonTags
     sku: 'standard'
     enableVaultForDeployment: true
     enableVaultForDiskEncryption: true
-    enableVaultForTemplateDeployment: true
+    // Step 3.2.17 leaves it unchecked; ADE does not need it.
+    enableVaultForTemplateDeployment: false
     enableRbacAuthorization: true
     publicNetworkAccess: 'Enabled'
     networkAcls: {
@@ -166,12 +184,12 @@ module modKeyVault 'br/public:avm/res/key-vault/vault:0.14.2' = if (parEncryptio
   }
 }
 
-// Data disk for the Worldserver database
+// Data disk for the Worldserver database, named as Step 3.2.14 names it (#355)
 module modWorldDataDisk 'br/public:avm/res/compute/disk:0.6.1' = {
   name: 'world-datadisk-deployment'
   scope: resRg
   params: {
-    name: '${varNamePrefix}-world-datadisk'
+    name: '${varNamePrefix}-world-vm-data'
     location: parLocation
     tags: varCommonTags
     sku: 'StandardSSD_LRS'
@@ -182,7 +200,7 @@ module modWorldDataDisk 'br/public:avm/res/compute/disk:0.6.1' = {
   }
 }
 
-// Auth VM (NIC created by the module, in the Auth backend pool and the egress pool)
+// Auth VM (NIC created by the module, in the Auth backend pool, the egress pool and, in dev, the Auth ASG)
 module modAuthVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
   name: 'auth-vm-deployment'
   scope: resRg
@@ -224,6 +242,7 @@ module modAuthVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
               { id: resLbPoolAuth.id }
               { id: resLbPoolOutbound.id }
             ]
+            applicationSecurityGroups: varUseAsgs ? [{ id: resAsgAuth.id }] : []
           }
         ]
       }
@@ -231,12 +250,14 @@ module modAuthVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
     managedIdentities: {
       systemAssigned: true
     }
+    // As the guide's Security type row; API 2025-11-01 defaults an unset value to Trusted launch.
+    securityType: 'Standard'
     encryptionAtHost: parEncryptionStrategy == 'EncryptionAtHost'
     bootDiagnostics: false
   }
 }
 
-// World VM (NIC in the World backend pool and the egress pool, data disk attached)
+// World VM (NIC in the World backend pool, the egress pool and, in dev, the World ASG; data disk attached)
 module modWorldVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
   name: 'world-vm-deployment'
   scope: resRg
@@ -286,6 +307,7 @@ module modWorldVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
               { id: resLbPoolWorld.id }
               { id: resLbPoolOutbound.id }
             ]
+            applicationSecurityGroups: varUseAsgs ? [{ id: resAsgWorld.id }] : []
           }
         ]
       }
@@ -293,6 +315,8 @@ module modWorldVm 'br/public:avm/res/compute/virtual-machine:0.22.3' = {
     managedIdentities: {
       systemAssigned: true
     }
+    // As the guide's Security type row; API 2025-11-01 defaults an unset value to Trusted launch.
+    securityType: 'Standard'
     encryptionAtHost: parEncryptionStrategy == 'EncryptionAtHost'
     bootDiagnostics: false
   }
