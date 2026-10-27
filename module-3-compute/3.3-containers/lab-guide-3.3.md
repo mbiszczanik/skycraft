@@ -77,7 +77,7 @@ The end state on every path:
 - `dev-skycraft-swc-aca-world`: container `worldserver` (0.25 CPU cores, 0.5 Gi memory) pulling with the registry's admin credentials, external HTTP ingress on port 80 without insecure connections, 1-3 replicas with the HTTP rule `http-load` at 10 concurrent requests.
 - The four SkyCraft tags on all four resources.
 
-Three values differ by path and are meant to: the DNS label's suffix (yours in the Portal and PowerShell, a 13-character hash of the resource group's id in Bicep); the image (built from source by ACR Tasks in Step 3.3.3, imported from Microsoft Container Registry by `Deploy-Bicep.ps1`, which has no build command to call; both images serve the same "Welcome to Azure Container Instances!" page); and the name of the environment's infrastructure resource group, which Azure creates and you never use (`ME_dev-skycraft-swc-cae-02` on the Bicep path; on the other two Azure chooses it, and it starts with `ME_`).
+Two values differ by path and are meant to: the DNS label's suffix (yours in the Portal and PowerShell, a 13-character hash of the resource group's id in Bicep); the image (built from source by ACR Tasks in Step 3.3.3, imported from Microsoft Container Registry by `Deploy-Bicep.ps1`, which has no build command to call; both images serve the same "Welcome to Azure Container Instances!" page).
 
 Steps without a PowerShell or Bicep counterpart: 3.3.3 has only its Azure CLI command (no Az PowerShell cmdlet builds an image from source; see the note there), and 3.3.5 only reads the result. Steps 3.3.6-3.3.9 share one PowerShell block, under Step 3.3.8, because the Portal creates the environment and the app in one deployment.
 
@@ -380,9 +380,9 @@ Leave the **Workload profiles** tab as it is: the environment gets the **Consump
 ![Create Container Apps Environment](./images/step-3.3.6.png)
 
 > [!NOTE]
-> The `-02` suffix on the environment is deliberate. On the Bicep path the environment's infrastructure resource group is named `ME_<environment-name>`, and that name cannot be changed once the environment exists, so the first environment's leftovers cannot be redeployed onto; `bicep/main.bicep`, `scripts/Test-Lab.ps1` and `scripts/Remove-LabResource.ps1` all use `dev-skycraft-swc-cae-02` (see `ARCHITECTURE.md` §5). The app carries no suffix: nothing immutable hangs off its name, and `platform-skycraft-swc-aca-world-02` would exceed the 32 characters a Container App allows. Every name in this lab takes the environment as its prefix - `Deploy-Bicep.ps1 -Environment prod` deploys `prodskycraftswcacr01`, `prod-skycraft-swc-aci-auth`, `prod-skycraft-swc-cae-02` and `prod-skycraft-swc-aca-world` into `prod-skycraft-swc-rg`.
+> The environment's name ends in `-02`, and `bicep/main.bicep`, `scripts/Test-Lab.ps1` and `scripts/Remove-LabResource.ps1` all use `dev-skycraft-swc-cae-02`: use that name. The app carries no suffix: `platform-skycraft-swc-aca-world-02` would exceed the 32 characters a Container App allows. Every name in this lab takes the environment as its prefix - `Deploy-Bicep.ps1 -Environment prod` deploys `prodskycraftswcacr01`, `prod-skycraft-swc-aci-auth`, `prod-skycraft-swc-cae-02` and `prod-skycraft-swc-aca-world` into `prod-skycraft-swc-rg`.
 
-The infrastructure resource group is created and managed by Azure, and deleted with the environment. Its name starts with `ME_`: the Bicep template asks for `ME_` followed by the environment's name, while the Portal and the PowerShell block leave the rest of the name to Azure. Do not create, tag or change it: Azure creates it without your tags, and Lab 1.3's policies did not refuse it in the agent Portal pass of 2026-10-15.
+This environment has no virtual network of its own, so Azure creates no infrastructure resource group (`ME_...`) for it: on 2026-10-26 neither the Portal path nor the Bicep path left one, and the environment's `infrastructureResourceGroup` stayed empty. Should one appear in your subscription, Azure manages it and deletes it with the environment: do not create, tag or change it.
 
 ### Step 3.3.7: Configure Container Settings
 
@@ -551,7 +551,7 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 | --- | --- | --- | --- |
 | `devskycraftswcacr01` (Standard) | `dev-skycraft-swc-rg` | about 0.60 EUR | Nothing; Lab 3.4 does not use it |
 | `dev-skycraft-swc-aci-auth` (1 CPU core, 1 GiB, running) | `dev-skycraft-swc-rg` | about 1.20 EUR | Nothing |
-| `dev-skycraft-swc-cae-02` (Consumption profile) | `dev-skycraft-swc-rg`, plus its `ME_` infrastructure group | 0 on its own | Nothing |
+| `dev-skycraft-swc-cae-02` (Consumption profile) | `dev-skycraft-swc-rg` | 0 on its own | Nothing |
 | `dev-skycraft-swc-aca-world` (1 replica always ready) | `dev-skycraft-swc-rg` | up to about 0.20 EUR, less while the monthly free grant lasts | Nothing |
 | The Log Analytics workspace the environment sends its logs to (the Portal's `workspacedevskycraftswcrg...`), **only** if you kept **Azure Log Analytics** in Step 3.3.6 | `dev-skycraft-swc-rg`, or the group you picked | per GB of logs stored | Nothing; Module 5 wizards would offer it as their default workspace |
 | `DefaultWorkspace-<subscription id>-EUS`, **only** if you left **Enable container instance logs** checked in Step 3.3.4 and Lab 1.3's policies did not refuse it | `DefaultResourceGroup-EUS` (East US) | per GB of logs stored | Nothing; Module 5 wizards may offer it as a default |

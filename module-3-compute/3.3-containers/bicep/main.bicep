@@ -42,9 +42,8 @@ param parAcrName string = '${parEnvironment}skycraftswcacr01'
 @maxLength(63)
 param parAciName string = '${parEnvironment}-skycraft-swc-aci-auth'
 
-// The -02 suffix is load-bearing here: the managed-environment module names the environment's
-// infrastructure resource group ME_<name> (its default, take('ME_<name>', 63)), and that name cannot
-// be changed once the environment exists (lab guide, Step 3.3.6 note).
+// The guide, Test-Lab and Remove-LabResource use this -02 name. No ME_ infrastructure group is
+// created for it (no infrastructure subnet, seen 2026-10-26); #433 decides whether -02 stays.
 @description('Name of the Container Apps Environment')
 @minLength(1)
 @maxLength(60)
