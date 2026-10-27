@@ -167,9 +167,8 @@ All commands are written to be run from the repository root.
 ### 4.3 Module 3 — Compute
 
 ```powershell
-# Lab 3.1 - Infrastructure as code (dev and prod parameter sets)
+# Lab 3.1 - Infrastructure as code (dev only; -Environment prod stops by design, #275)
 .\module-3-compute\3.1-infrastructure-as-code\scripts\Deploy-Bicep.ps1 -Environment dev -WhatIf
-.\module-3-compute\3.1-infrastructure-as-code\scripts\Deploy-Bicep.ps1 -Environment prod -WhatIf
 .\module-3-compute\3.1-infrastructure-as-code\scripts\Test-Lab.ps1
 .\module-3-compute\3.1-infrastructure-as-code\scripts\Remove-LabResource.ps1 -WhatIf
 

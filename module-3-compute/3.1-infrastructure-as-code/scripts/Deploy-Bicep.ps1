@@ -34,7 +34,10 @@
     The Azure region deployment target. Default: 'swedencentral'
 
 .PARAMETER Environment
-    Target environment (dev, prod). Default: 'dev'
+    Target environment. Default: 'dev'. Only dev is deployed: main.bicep builds the dev VNet,
+    NSGs and load balancer whatever parEnvironment says, so -Environment prod stops with an
+    [ERROR] instead of deploying dev resources under a prod name (#275). prod.bicepparam is the
+    parameter file the guide has you write; it is compiled, not deployed.
 
 .PARAMETER WhatIf
     Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
@@ -109,6 +112,13 @@ function Test-NotFoundError {
 }
 
 Write-Host "=== Lab 3.1 - Deploy Infrastructure ($Environment) ===" -ForegroundColor Cyan
+
+# main.bicep declares only dev resources; parEnvironment feeds an output and nothing else (#275).
+if ($Environment -ne 'dev') {
+    Write-Host "[ERROR] Lab 3.1 deploys the dev environment only: main.bicep builds the dev VNet, NSGs and load balancer whatever -Environment says." -ForegroundColor Red
+    Write-Host "  parameters/$Environment.bicepparam is the file the guide has you write; it is compiled, not deployed. Run: .\Deploy-Bicep.ps1 -Environment dev" -ForegroundColor Gray
+    Exit-Lab -FailureCount 1
+}
 
 # 1. Verify Azure Connection
 $context = Get-AzContext

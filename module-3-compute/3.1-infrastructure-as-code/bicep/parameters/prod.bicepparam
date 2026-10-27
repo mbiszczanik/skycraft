@@ -1,7 +1,7 @@
 /*=====================================================
 SUMMARY: Lab 3.1 - Prod Parameters
 DESCRIPTION: Parameter values for Production Environment
-EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment prod
+EXAMPLE: compiled only (az bicep build-params); Deploy-Bicep.ps1 deploys dev only (#275)
 AUTHOR/S: Marcin Biszczanik
 VERSION: 1.3.0
 ======================================================*/
