@@ -1477,7 +1477,7 @@ deployment would use, so the preview cannot drift from the deploy.
 created, each with its subnets):
 
 ```
-Resource changes: 15 to create, 0 to modify, 0 to delete.
+Resource changes: 9 to create, 0 to modify, 0 to delete.
 
 + Microsoft.Resources/resourceGroups
   ~ platform-skycraft-swc-rg [Create]
@@ -2223,7 +2223,9 @@ Test your understanding with these questions:
    > Deploying `main.bicep` directly like this also redeploys the hub and dev VNets
    > and removes their peerings; `Deploy-Bicep.ps1` is what prevents that.
    > The lab's real deployment path is
-   > `.\scripts\Deploy-Bicep.ps1 -Environment dev|prod -Location swedencentral|northeurope`.
+   > `.\scripts\Deploy-Bicep.ps1 -Environment dev -Location swedencentral|northeurope`; it
+   > deploys dev only and stops on `-Environment prod`, because `main.bicep` builds the dev
+   > resources whatever `parEnvironment` says.
 
    **Approach 2: Loop Over Regions** (Advanced)
 
