@@ -11,6 +11,8 @@
     - Dev VNet and all 4 subnets (AuthSubnet, WorldSubnet, DatabaseSubnet, AppServiceSubnet).
     - Prod VNet and all 4 subnets.
     - Every subnet is private (DefaultOutboundAccess false), as the portal creates it.
+    - AppServiceSubnet is delegated to Microsoft.Web/serverFarms (found by service, so a
+      Portal-named delegation passes).
     - VNet Peering state (Connected) and settings (Forwarded traffic, VNet access).
     - Public IPs existence and SKU (Standard/Static).
 
@@ -105,6 +107,22 @@ catch {
     $script:failCount++
 }
 
+# Lab 3.4's VNet integration needs it. Matched by service: the Portal names the delegation itself,
+# Bicep after its service.
+function Test-AppServiceDelegation {
+    param($Subnet)
+    $service = 'Microsoft.Web/serverFarms'
+    if (@($Subnet.Delegations.ServiceName) -contains $service) {
+        Write-Host "    - [OK] Subnet $($Subnet.Name) is delegated to $service." -ForegroundColor Green
+    }
+    else {
+        $actual = @($Subnet.Delegations.ServiceName | Where-Object { $_ })
+        $shown  = if ($actual.Count) { $actual -join ', ' } else { 'none' }
+        Write-Host "    - [FAIL] Subnet $($Subnet.Name) is not delegated to $service (delegations: $shown)." -ForegroundColor Red
+        $script:failCount++
+    }
+}
+
 function Test-SpokeVNet {
     param($VnetName, $RgName, $Prefix, $ExpectedSubnets)
     Write-Host "`n=== Validating VNet: $VnetName ===" -ForegroundColor Cyan
@@ -129,6 +147,7 @@ function Test-SpokeVNet {
                     $script:failCount++
                 }
                 Test-PrivateSubnet -Subnet $subnet
+                if ($subnetName -eq 'AppServiceSubnet') { Test-AppServiceDelegation -Subnet $subnet }
             } else {
                 Write-Host "  - [FAIL] Subnet $subnetName not found." -ForegroundColor Red
                 $script:failCount++

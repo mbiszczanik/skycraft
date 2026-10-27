@@ -1399,6 +1399,9 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             # One per production load balancing rule (world, auth).
             '2.3.16/Enable TCP Reset/checked=0'
             '2.3.16/Enable TCP Reset/checked=0'
+            # Export template (#354): leave the default tick, never click it.
+            '3.1.1/Include parameters/checked=0'
+            '3.1.1/Include parameters/stateOnly=0'
             '3.3.7/Use quickstart image/unchecked=0'
             '3.3.2/Admin user/checked=0'
             '3.3.2/Admin user/stateOnly=0'
