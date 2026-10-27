@@ -139,7 +139,7 @@ try {
     if ($deployment.ProvisioningState -eq 'Succeeded') {
         Write-Host "`n[SUCCESS] Deployment completed successfully!" -ForegroundColor Green
         Write-Host "`nDeployment Outputs:" -ForegroundColor Cyan
-        $deployment.Outputs | Format-Table -AutoSize
+        Write-LabDeploymentOutput -Outputs $deployment.Outputs
     }
     else {
         Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red

@@ -120,6 +120,38 @@ $deployParams = @{
     ErrorAction             = 'Stop'
 }
 
+# An environment deployed by an older version of this template is Consumption-only (no workload
+# profiles). main.bicep now declares the Consumption workload profile, and Azure cannot turn one
+# type into the other, so the deployment would fail on it after Phase 1. Stop here instead, with
+# what to do. The lookup lists the type across the subscription and filters by name and group, so a
+# missing resource group reads as "no environment", not as an error. A lookup by -Name without the
+# group fails with ResourceNotFound for an environment that exists (seen 2026-10-24).
+# The lab's tests/Deploy-Bicep.Tests.ps1 lifts this function out with the parser.
+function Get-LabConsumptionOnlyEnvironment {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$ResourceGroupName,
+        [Parameter(Mandatory = $true)] [string]$Name
+    )
+    Get-AzResource -ResourceType 'Microsoft.App/managedEnvironments' -ExpandProperties -ErrorAction Stop |
+        Where-Object { $_ -and $_.Name -eq $Name -and $_.ResourceGroupName -eq $ResourceGroupName -and -not @($_.Properties.workloadProfiles | Where-Object { $_ }) } |
+        Select-Object -First 1
+}
+
+$caeName = "$Environment-skycraft-swc-cae-02"   # main.bicep's parCaeName default
+try {
+    $legacyCae = Get-LabConsumptionOnlyEnvironment -ResourceGroupName $ResourceGroupName -Name $caeName
+} catch {
+    Write-Host "[ERROR] Could not check for an existing Container Apps environment '$caeName': $_" -ForegroundColor Red
+    Exit-Lab -FailureCount 1
+}
+if ($legacyCae) {
+    Write-Host "[ERROR] The Container Apps environment '$caeName' in $ResourceGroupName is a Consumption-only environment, deployed by an older version of this lab." -ForegroundColor Red
+    Write-Host "  This template creates a Workload profiles environment (the type the Portal creates), and Azure cannot change an environment's type." -ForegroundColor Gray
+    Write-Host "  Delete it first - .\Remove-LabResource.ps1 -Environment $Environment -ResourceGroupName $ResourceGroupName removes the app, the environment (up to 25 minutes) and the rest of the lab - then run this script again." -ForegroundColor Gray
+    Exit-Lab -FailureCount 1
+}
+
 # What-if runs before Phase 1: bootstrapping the registry and importing the image are real
 # changes, so a preview must not perform them. The preview covers main.bicep only.
 if ($WhatIf) {
@@ -215,7 +247,7 @@ try {
     if ($deployment.ProvisioningState -eq 'Succeeded') {
         Write-Host "`n[SUCCESS] Deployment completed successfully!" -ForegroundColor Green
         Write-Host "`nDeployment Outputs:" -ForegroundColor Cyan
-        $deployment.Outputs | Format-Table -AutoSize
+        Write-LabDeploymentOutput -Outputs $deployment.Outputs
     }
     else {
         Write-Host "`n[FAILED] Deployment failed with state: $($deployment.ProvisioningState)" -ForegroundColor Red

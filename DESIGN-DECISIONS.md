@@ -160,9 +160,11 @@ lab; this section is the architect's view in one place.
 
 ### 10. Encryption — optional and lab-friendly
 
-- **Lab:** VM disk encryption is *opt-in* (`None` / `EncryptionAtHost` /
-  `AzureDiskEncryption`, Lab 3.2). Storage infrastructure encryption is a
-  creation-only flag, default off. Customer-managed keys never used.
+- **Lab:** Lab 3.2 encrypts one VM, the Auth VM, with Azure Disk Encryption
+  on every path; the World VM stays unencrypted so Lab 5.2 can restore files
+  from it and replicate it (#368). `EncryptionAtHost` and `None` remain
+  template options. Storage infrastructure encryption is a creation-only flag,
+  default off. Customer-managed keys never used.
 - **Production gap:** No CMK in Key Vault, no key rotation policies, no Double
   Encryption mandated for regulated workloads.
 - **Why it matters:** Encryption-at-rest is on by default with

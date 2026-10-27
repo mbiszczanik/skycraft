@@ -813,10 +813,18 @@ Describe 'parse.py - labs 2.2, 3.2, 4.1 and 5.2, Verify and Confirm introduce ch
                       'prod-skycraft-swc-vnet', 'Subnets', 'DatabaseSubnet', 'Subnets', 'WorldSubnet')
            expected = 'Database subnets can access Azure SQL and Storage over Microsoft backbone (private routing), and both `WorldSubnet`s carry `Microsoft.Storage` for Lab 4.4. Microsoft.Sql; Microsoft.Storage; Microsoft.Storage; Microsoft.Sql; Microsoft.Storage; Microsoft.Storage' }
         # #344: the step then adds both VMs to the egress pool; ticking a row of the panel's table is no label.
+        # #353: then both NICs into their ASGs, and the effective rules on the VM and the DB NSG.
         @{ lab = '3.2'; id = '3.2.13'
            labels = @('Virtual machines', 'Load balancers', 'dev-skycraft-swc-lb', 'Backend pools',
-                      'Backend pools', 'dev-skycraft-swc-lb-be-outbound', '+ Add', 'Add', 'Save')
-           expected = 'Both VMs running in different availability zones, connected to respective load balancer backend pools, and `dev-skycraft-swc-lb-be-outbound` lists 2 VMs (auth and world). dev-skycraft-swc-lb-be-auth: 1 VM; dev-skycraft-swc-lb-be-world: 1 VM' }
+                      'Backend pools', 'dev-skycraft-swc-lb-be-outbound', '+ Add', 'Add', 'Save',
+                      'Virtual machines', 'dev-skycraft-swc-auth-vm', 'Networking', 'Application security groups',
+                      'Add application security groups', 'Add',
+                      'Virtual machines', 'dev-skycraft-swc-world-vm', 'Networking', 'Application security groups',
+                      'Add application security groups', 'Add',
+                      'Virtual machines', 'dev-skycraft-swc-auth-vm', 'Networking', 'Network settings', 'Effective security rules',
+                      'Network security groups', 'dev-skycraft-swc-db-nsg', 'Settings', 'Inbound security rules',
+                      'Effective security rules')
+           expected = 'Both VMs running in different availability zones, connected to respective load balancer backend pools, `dev-skycraft-swc-lb-be-outbound` lists 2 VMs (auth and world), and each VM''s network interface is in its application security group. dev-skycraft-swc-lb-be-auth: 1 VM; dev-skycraft-swc-lb-be-world: 1 VM' }
         # The alert to look for is not a click.
         @{ lab = '5.2'; id = '5.2.9'; labels = @('Backup center', 'Alerts')
            expected = 'Modify policy with shorter retention (0 - Critical) - raised because Deploy-Bicep.ps1 shortens instant-restore retention to 2 days after creating the Enhanced policy. Expected; it is a security alert about the change, not a failure.' }
@@ -842,9 +850,11 @@ Describe 'parse.py - labs 3.2, 4.2 and 5.2, resource names in navigation chains 
     }
 
     It 'reads the chain of step <id> as <labels>, resource names at <resources>' -ForEach @(
-        # Step 3.2.13 has two chains since #344: the load balancer's pools, then the egress pool.
-        @{ lab = '3.2'; id = '3.2.13'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Backend pools'); resources = @(1); count = 2; index = 0 }
-        @{ lab = '3.2'; id = '3.2.13'; labels = @('Backend pools', 'dev-skycraft-swc-lb-be-outbound'); resources = @(1); count = 2; index = 1 }
+        # Step 3.2.13 has six chains: the load balancer's pools, the egress pool (#344), each VM's
+        # ASGs, the auth VM's effective rules and the DB NSG's rules (#353).
+        @{ lab = '3.2'; id = '3.2.13'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Backend pools'); resources = @(1); count = 6; index = 0 }
+        @{ lab = '3.2'; id = '3.2.13'; labels = @('Backend pools', 'dev-skycraft-swc-lb-be-outbound'); resources = @(1); count = 6; index = 1 }
+        @{ lab = '3.2'; id = '3.2.13'; labels = @('Network security groups', 'dev-skycraft-swc-db-nsg', 'Settings', 'Inbound security rules'); resources = @(1); count = 6; index = 5 }
         @{ lab = '3.2'; id = '3.2.14'; labels = @('Virtual machines', 'dev-skycraft-swc-world-vm'); resources = @(1) }
         # 4.2.11 uploads from the containers list's toolbar since #359; it no longer opens game-assets.
         @{ lab = '4.2'; id = '4.2.11'; labels = @('prodskycraftswcsa', 'Containers'); resources = @(0) }
@@ -1134,7 +1144,7 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
 
     It 'reads the registry, image and tag of step 3.3.7 as three fields' {
         $fields = @((Get-GapStep '3.3' '3.3.7').items | Where-Object kind -eq 'field')
-        ($fields | Where-Object label -ceq 'Registry').value | Should -BeExactly '[Select your registry]'
+        ($fields | Where-Object label -ceq 'Registry').value | Should -BeExactly 'devskycraftswcacr01'
         ($fields | Where-Object label -ceq 'Image').value | Should -BeExactly 'skycraft-auth'
         ($fields | Where-Object label -ceq 'Image tag').value | Should -BeExactly 'v1'
     }
@@ -1330,7 +1340,8 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @{ lab = '4.4'; id = '4.4.2'; text = 'Under **Exceptions**, leave **Allow trusted Microsoft services to access this resource** checked'; kind = 'action'; labels = @('Allow trusted Microsoft services to access this resource'); key = 'checked'; indices = @(0) }
         @{ lab = '3.3'; id = '3.3.7'; text = 'Uncheck **Use quickstart image**.'; kind = 'action'; labels = @('Use quickstart image'); key = 'unchecked'; indices = @(0) }
         @{ lab = '4.2'; id = '4.2.5'; text = 'Under **Recovery**, enable **Enable soft delete for blobs**'; kind = 'action'; labels = @('Enable soft delete for blobs'); key = 'checked'; indices = @(0) }
-        @{ lab = '3.3'; id = '3.3.2'; text = 'Toggle **Admin user** to **Enabled**.'; kind = 'action'; labels = @('Admin user'); key = 'checked'; indices = @(0) }
+        @{ lab = '3.3'; id = '3.3.2'; text = 'Check **Admin user**.'; kind = 'action'; labels = @('Admin user'); key = 'checked'; indices = @(0) }
+        @{ lab = '3.3'; id = '3.3.8'; text = 'Check **Ingress** (it is off by default).'; kind = 'action'; labels = @('Ingress'); key = 'checked'; indices = @(0) }
         @{ lab = '4.3'; id = '4.3.6'; text = '... -> check **Overwrite if files already exist** -> **Upload**'; kind = 'navigation'; labels = @('Upload', 'Overwrite if files already exist', 'Upload'); key = 'checked'; indices = @(1) }
     ) {
         $items = @(($script:StateLabs[$lab].steps | Where-Object id -eq $id).items |
@@ -1399,9 +1410,12 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             # One per production load balancing rule (world, auth).
             '2.3.16/Enable TCP Reset/checked=0'
             '2.3.16/Enable TCP Reset/checked=0'
+            # Export template (#354): leave the default tick, never click it.
+            '3.1.1/Include parameters/checked=0'
+            '3.1.1/Include parameters/stateOnly=0'
             '3.3.7/Use quickstart image/unchecked=0'
             '3.3.2/Admin user/checked=0'
-            '3.3.2/Admin user/stateOnly=0'
+            '3.3.8/Ingress/checked=0'
             # The two check boxes under Redundancy that cost money stay unticked (#358).
             '4.1.2/Make read access to data available in the event of regional unavailability/unchecked=0'
             '4.1.2/Make read access to data available in the event of regional unavailability/stateOnly=0'
@@ -1459,19 +1473,25 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @(Get-StatedItem | Sort-Object) | Should -Be @($expected | Sort-Object)
     }
 
-    It 'never clicks the value a switch is set to: Enabled in step 3.3.2' {
-        $labels = @((Get-StateStep '3.3' '3.3.2').items | ForEach-Object { $_.labels })
+    # Step 3.3.2 said 'Toggle **Admin user** to **Enabled**.' until the Portal pass of 2026-10-15
+    # found a check box (#229); no guide line has the switch-value shape now, and test_parse.py
+    # keeps the rule pinned on a fixture.
+    It 'never clicks a state word in step 3.3.2: Access keys is opened, then Admin user is ticked' {
+        $items  = @((Get-StateStep '3.3' '3.3.2').items)
+        $labels = @($items | ForEach-Object { $_.labels })
         $labels | Should -Not -Contain 'Enabled'
         $labels | Should -Contain 'Access keys'
+        $access = @($items | Where-Object { (@($_.labels) -join "`n") -ceq 'Access keys' })[0]
+        $admin  = @($items | Where-Object { (@($_.labels) -join "`n") -ceq 'Admin user' })[0]
+        [array]::IndexOf($items, $admin) | Should -BeGreaterThan ([array]::IndexOf($items, $access))
     }
 
     # A menu group or a section heading: clicking a Portal menu group collapses it.
     It 'reads step <id>''s "<text>" as <labels>, the place no label' -ForEach @(
         @{ lab = '1.3'; id = '1.3.18'; text = 'Under **Cost Management** click **Cost analysis**'; labels = @('Cost analysis') }
-        # Step 3.4.10 connects the app and then the staging slot, so each line is there twice.
         @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Settings**, select **Networking**.'; labels = @('Networking'); count = 2 }
         @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Outbound traffic configuration**, click **Not configured** (the value of _Virtual network integration_).'; labels = @('Not configured'); count = 2 }
-        @{ lab = '3.3'; id = '3.3.2'; text = 'In the left menu, under **Settings**, select **Access keys**.'; labels = @('Access keys') }
+        @{ lab = '3.3'; id = '3.3.2'; text = 'In the left menu, under **Settings** (expand it if it is collapsed), click **Access keys**.'; labels = @('Access keys') }
         @{ lab = '4.2'; id = '4.2.6'; text = 'On the same page, under **Recovery**, enable **Enable soft delete for containers** ...'; labels = @('Enable soft delete for containers') }
         @{ lab = '5.2'; id = '5.2.2'; text = 'Under **Instant restore**, fill in **Azure Backup Resource Group**: ...'; labels = @('Azure Backup Resource Group') }
     ) {

@@ -176,7 +176,7 @@ without a browser. Rules (issue #189):
     verb. 'Toggle', 'Turn' and 'Switch' state a state with the way the switch is
     to go (TOGGLE_BEFORE): 'Turn on **X**', 'Switch off **X**', 'Turn **X** on', or a bold value
     of TOGGLE_VALUES (Enabled, Disabled, On, Off, in any case) right after the label, with an
-    optional 'to': 'Toggle **Admin user** to **Enabled**.' (3.3.2). That value is the state,
+    optional 'to': 'Toggle **Admin user** to **Enabled**.' (3.3.2 until #229). That value is the state,
     not a label, and is not clicked; the same rule applies to what may follow it. 'Switch Cloud
     Shell to **PowerShell**' (3.4.4) and 'Toggle **X**' state nothing. Labels listed after such
     a label with commas and 'and' take its state ('Uncheck **A**, **B** and **C**'). Other
@@ -272,7 +272,7 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     description and clicks nothing, and '**Note**: Open handles are listed in **Handles**'
     is read as an instruction and clicks Handles. No guide has either shape today.
   * Some values that are not text to type still read as literal; #202 does not cover them, and
-    each is found when its lab is recorded (#204): 'empty' (3.3.7),
+    each is found when its lab is recorded (#204): 'empty' (3.3.7 until #229),
     'Default (30 GiB)' (3.2.3), relative times ('1 month from now', 'Current time'), a list of
     tag pairs in one field ('Tags: Project = SkyCraft, ...', 5.1-5.3) and an angle-bracket
     placeholder ('Owner = <your name>', 5.3). A table row with an empty value that captions the
@@ -452,7 +452,7 @@ STATE_AFTER = re.compile(
     r"\s*(?:$|→|->|>\s|[,;:]|[-–—]\s|(?:and|then|or)\b)", re.IGNORECASE)
 # 'Toggle', 'Turn' and 'Switch' state a switch's state with the way it is to go: before the label
 # ('Turn on **X**', 'Switch off **X**'), after it ('Turn **X** on'), or as a value in a bold span
-# after it, with an optional 'to' (TOGGLE_VALUES: 'Toggle **Admin user** to **Enabled**', 3.3.2).
+# after it, with an optional 'to' (TOGGLE_VALUES: 'Toggle **Admin user** to **Enabled**', 3.3.2 until #229).
 # That value is the state, not a label to click. Where they start is as for STATE_BEFORE.
 TOGGLE_BEFORE = re.compile(
     STATE_POSITION + r"(?:toggle|turn|switch)\s+(?:(?P<way>on|off)\s+)?(?:the\s+)?$", re.IGNORECASE)
@@ -494,7 +494,7 @@ NON_UI_BOLD = {
     # Captions found in more than one guide, or generic enough for any; no Portal element the
     # guides name is called so. A supervised run answers the rest once.
     "Azure Portal",                            # 1.1-5.2: "Open **Azure Portal**", the site itself
-    "Example",          # 2.3: "**Example** (our SkyCraft config):"; 3.3: plain "Example: `skycraft-auth-...`"
+    "Example",          # 2.3: "**Example** (our SkyCraft config):"; 3.3: plain "Example: `dev-skycraft-swc-aci-auth-...`"
     "Result",                                  # 2.2, 4.2: caption ("**Result**: PublicAccess...")
 }
 
@@ -510,9 +510,7 @@ LAB_CAPTIONS: dict[str, frozenset[str]] = {
     "3.1": frozenset({"Install Bicep CLI",                 # captions of local-tools steps
                       "Install VS Code Extension",
                       "Review generated Bicep file"}),
-    "3.2": frozenset({"(Optional)",                        # caption
-                      "zone-redundant by default",         # emphasis
-                      "Simulating zone failure",           # captions in a conceptual step
+    "3.2": frozenset({"Simulating zone failure",           # captions in a conceptual step
                       "Verifying traffic routing",
                       "Restoring service"}),
     "3.4": frozenset({"Version: 2.0 (Staging)",            # text of the local index.html
