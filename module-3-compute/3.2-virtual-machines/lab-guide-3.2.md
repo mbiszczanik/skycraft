@@ -454,7 +454,7 @@ The wizard pre-fills a new VNet, a new subnet and a new public IP: change all th
 | Microsoft Entra ID          | ❌ Unchecked                                     |
 | Auto-shutdown               | ❌ Disabled (the wizard turns it on, for 7:00 PM with your e-mail address) |
 | Backup                      | ❌ Unchecked                                     |
-| Enable periodic assesment   | ❌ Unchecked                                     |
+| Enable periodic assessment  | ❌ Unchecked                                     |
 | Patch orchestration options | ✅ Image default                                 |
 
 The Management tab has no Microsoft Defender for Cloud row; Defender is a subscription setting.
@@ -463,12 +463,12 @@ The Management tab has no Microsoft Defender for Cloud row; Defender is a subscr
 
 **Monitoring tab**:
 
-| Field                          | Value         |
-| ------------------------------ | ------------- |
-| Alerts                         | Leave default |
-| Boot diagnostics               | Disable (the default is Enable with managed storage account) |
-| OS guest diagnostics           | Leave default |
-| Application health monitoringh | Leave default |
+| Field                                | Value         |
+| ------------------------------------ | ------------- |
+| Enable recommended alert rules       | Leave unchecked (the default) |
+| Boot diagnostics                     | **Disabled** (the default is Enable with managed storage account) |
+| Enable OS guest diagnostics          | Leave unchecked (the default) |
+| Enable application health monitoring | Leave unchecked (the default) |
 
 8. Click **Next: Advanced** (leave defaults)
 9. Click **Next: Tags**
@@ -585,17 +585,17 @@ As in Step 3.2.4, replace the new VNet, subnet and public IP the wizard pre-fill
 | Microsoft Entra ID          | ❌ Unchecked                                     |
 | Auto-shutdown               | ❌ Disabled (the wizard turns it on, for 7:00 PM with your e-mail address) |
 | Backup                      | ❌ Unchecked                                     |
-| Enable periodic assesment   | ❌ Unchecked                                     |
+| Enable periodic assessment  | ❌ Unchecked                                     |
 | Patch orchestration options | ✅ Image default                                 |
 
 **Monitoring tab**:
 
-| Field                          | Value         |
-| ------------------------------ | ------------- |
-| Alerts                         | Leave default |
-| Boot diagnostics               | Disable (the default is Enable with managed storage account) |
-| OS guest diagnostics           | Leave default |
-| Application health monitoringh | Leave default |
+| Field                                | Value         |
+| ------------------------------------ | ------------- |
+| Enable recommended alert rules       | Leave unchecked (the default) |
+| Boot diagnostics                     | **Disabled** (the default is Enable with managed storage account) |
+| Enable OS guest diagnostics          | Leave unchecked (the default) |
+| Enable application health monitoring | Leave unchecked (the default) |
 
 ### Step 3.2.12: Configure Tags and Create Worldserver
 
