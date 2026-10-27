@@ -14,6 +14,14 @@
       2. A setting with the Bicep's name that scales something else does not count.
       3. No setting for the plan is a counted [FAIL]; so is a listing that fails, which also
          prints the error and still reaches the summary instead of ending the script.
+      4. The app and its staging slot must run Node 22 LTS with the startup command
+         'pm2 serve /home/site/wwwroot --no-daemon' (issue #231): a Node 20 app, or a slot
+         without the command, is a counted [FAIL]; so is a slot without VNet integration.
+      5. A production URL that does not show the dashboard is a [WARN], not counted: the Bicep
+         path deploys no content.
+      6. A stopped slot, and an app or slot whose outbound internet traffic does not go through
+         the VNet, are counted [FAIL]s; the Portal's applicationTraffic and the legacy
+         vnetRouteAllEnabled flag both pass, and a body without routing properties is a [WARN].
 
     No subscription is needed, and none is used: tests/Support/LabScriptStub.psm1 (issue #112)
     imports the real modules first, the stub last, and aborts the child with exit 99 unless every
@@ -25,7 +33,7 @@
 .NOTES
     Project: SkyCraft
     Lab: 3.4 - App Service
-    Issue: #355
+    Issue: #355, #231
 #>
 
 #Requires -Version 7.0
@@ -45,6 +53,7 @@ BeforeAll {
         'Get-AzWebApp'
         'Get-AzWebAppSlot'
         'Get-AzResource'
+        'Invoke-WebRequest'
     )
 
     # The lab as built: the plan, the app with its VNet integration and staging slot, and the
@@ -56,6 +65,20 @@ BeforeAll {
     #                                      scale set, not the plan
     #                             'none'   no setting besides the unrelated one
     #                             'fail'   the listing fails
+    #   SKYCRAFT_STUB_SITE        'good'   app and slot on NODE|22-lts with the pm2 serve command,
+    #                                      both integrated with AppServiceSubnet
+    #                             'stale'  the app on NODE|20-lts without a startup command
+    #                             'slotbare' the slot with the runtime but no startup command and
+    #                                      no VNet integration (a Portal slot not cloned, not
+    #                                      integrated)
+    #                             'slotstopped' the slot stopped
+    #                             'noroute' app and slot integrated, Outbound internet traffic
+    #                                      unchecked on both
+    #                             'unknownroute' app and slot integrated, the body carries no
+    #                                      routing property
+    #   SKYCRAFT_STUB_PAGE        'dashboard' the production URL shows the dashboard
+    #                             'default'   it shows the default page
+    #                             'fail'      the request fails
     $script:StubBody = @'
 $script:Sub = '/subscriptions/00000000-0000-0000-0000-000000000000'
 $script:Rg  = "$script:Sub/resourceGroups/dev-skycraft-swc-rg"
@@ -78,21 +101,48 @@ function Get-AzAppServicePlan {
     }
 }
 
+function New-StubSiteConfig {
+    param([string]$Runtime, [string]$Command)
+    [pscustomobject]@{ LinuxFxVersion = $Runtime; AppCommandLine = $Command }
+}
+
 function Get-AzWebApp {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
+    $config = if ($env:SKYCRAFT_STUB_SITE -eq 'stale') { New-StubSiteConfig -Runtime 'NODE|20-lts' -Command '' }
+              else { New-StubSiteConfig -Runtime 'NODE|22-lts' -Command 'pm2 serve /home/site/wwwroot --no-daemon' }
     [pscustomobject]@{
-        Name      = $Name
-        Id        = "$script:Sub/resourceGroups/$ResourceGroupName/providers/Microsoft.Web/sites/$Name"
-        State     = 'Running'
-        HttpsOnly = $true
+        Name            = $Name
+        Id              = "$script:Sub/resourceGroups/$ResourceGroupName/providers/Microsoft.Web/sites/$Name"
+        State           = 'Running'
+        HttpsOnly       = $true
+        DefaultHostName = "$Name-0123456789abcdef.swedencentral-01.azurewebsites.net"
+        SiteConfig      = $config
     }
 }
 
 function Get-AzWebAppSlot {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$Name, [string]$Slot, [Parameter(ValueFromRemainingArguments)]$Rest)
-    [pscustomobject]@{ Name = "$Name/$Slot" }
+    # The runtime as ARM may spell it, in other casing.
+    $config = if ($env:SKYCRAFT_STUB_SITE -eq 'slotbare') { New-StubSiteConfig -Runtime 'node|22-LTS' -Command $null }
+              else { New-StubSiteConfig -Runtime 'node|22-LTS' -Command 'pm2 serve /home/site/wwwroot --no-daemon' }
+    [pscustomobject]@{
+        Name       = "$Name/$Slot"
+        Id         = "$script:Sub/resourceGroups/$ResourceGroupName/providers/Microsoft.Web/sites/$Name/slots/$Slot"
+        State      = if ($env:SKYCRAFT_STUB_SITE -eq 'slotstopped') { 'Stopped' } else { 'Running' }
+        SiteConfig = $config
+    }
+}
+
+function Invoke-WebRequest {
+    [CmdletBinding()]
+    param([string]$Uri, [int]$TimeoutSec, [Parameter(ValueFromRemainingArguments)]$Rest)
+    switch ($env:SKYCRAFT_STUB_PAGE) {
+        'default' { [pscustomobject]@{ StatusCode = 200; Content = '<title>Your web app is running and waiting for your content</title>' } }
+        'fail'    { Write-Error 'stub page failure: the remote name could not be resolved' }
+        default   { [pscustomobject]@{ StatusCode = 200; Content = '<h1>SkyCraft GM Dashboard</h1><p>Version: 2.0 (Staging)</p>' } }
+    }
 }
 
 function New-StubAutoscale {
@@ -124,10 +174,24 @@ function Get-AzResource {
         [Parameter(ValueFromRemainingArguments)]$Rest
     )
     if ($ResourceId) {
-        # The web app's raw body, read for its VNet integration.
+        # The app's or the slot's raw body, read for its VNet integration.
+        $subnet = "$script:Rg/providers/Microsoft.Network/virtualNetworks/dev-skycraft-swc-vnet/subnets/AppServiceSubnet"
+        if ($env:SKYCRAFT_STUB_SITE -eq 'slotbare' -and $ResourceId -like '*/slots/*') { $subnet = $null }
+        $props = [ordered]@{ virtualNetworkSubnetId = $subnet }
+        switch ($env:SKYCRAFT_STUB_SITE) {
+            # Outbound internet traffic unchecked on both, as the API returns it.
+            'noroute'      { $props.outboundVnetRouting = [pscustomobject]@{ applicationTraffic = $false; allTraffic = $false }; $props.vnetRouteAllEnabled = $false }
+            # A body without any routing property (another API version).
+            'unknownroute' { }
+            default {
+                # The app as the Portal's check box leaves it, the slot under the legacy flag only.
+                if ($ResourceId -like '*/slots/*') { $props.vnetRouteAllEnabled = $true }
+                else { $props.outboundVnetRouting = [pscustomobject]@{ applicationTraffic = $true; allTraffic = $false } }
+            }
+        }
         return [pscustomobject]@{
             ResourceId = $ResourceId
-            Properties = [pscustomobject]@{ virtualNetworkSubnetId = "$script:Rg/providers/Microsoft.Network/virtualNetworks/dev-skycraft-swc-vnet/subnets/AppServiceSubnet" }
+            Properties = [pscustomobject]$props
         }
     }
     if ($ResourceType -ne 'Microsoft.Insights/autoscalesettings') { throw "stub: unexpected Get-AzResource -ResourceType $ResourceType" }
@@ -149,10 +213,16 @@ function Get-AzResource {
         param(
             [pscustomobject]$Stub,
             [ValidateSet('bicep', 'portal', 'other', 'none', 'fail')]
-            [string]$Autoscale
+            [string]$Autoscale,
+            [ValidateSet('good', 'stale', 'slotbare', 'slotstopped', 'noroute', 'unknownroute')]
+            [string]$Site = 'good',
+            [ValidateSet('dashboard', 'default', 'fail')]
+            [string]$Page = 'dashboard'
         )
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
             SKYCRAFT_STUB_AUTOSCALE = $Autoscale
+            SKYCRAFT_STUB_SITE      = $Site
+            SKYCRAFT_STUB_PAGE      = $Page
         }
         return [pscustomobject]@{
             ExitCode  = $run.ExitCode
@@ -172,7 +242,15 @@ function Get-AzResource {
     $script:OtherOnly  = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'other'
     $script:NoneMade   = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'none'
     $script:ListFails  = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'fail'
-    $script:AllRuns    = @($script:BicepMade, $script:PortalMade, $script:OtherOnly, $script:NoneMade, $script:ListFails)
+    $script:StaleApp   = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'portal' -Site 'stale'
+    $script:BareSlot   = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'portal' -Site 'slotbare'
+    $script:NoContent  = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'bicep' -Page 'default'
+    $script:NoPage     = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'bicep' -Page 'fail'
+    $script:SlotDown   = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'portal' -Site 'slotstopped'
+    $script:NoRoute    = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'portal' -Site 'noroute'
+    $script:OddRoute   = Invoke-ValidatorScript -Stub $script:Stub -Autoscale 'portal' -Site 'unknownroute'
+    $script:AllRuns    = @($script:BicepMade, $script:PortalMade, $script:OtherOnly, $script:NoneMade, $script:ListFails,
+        $script:StaleApp, $script:BareSlot, $script:NoContent, $script:NoPage, $script:SlotDown, $script:NoRoute, $script:OddRoute)
 }
 
 AfterAll {
@@ -233,5 +311,80 @@ Describe 'Lab 3.4 Test-Lab.ps1 - finds the autoscale setting through its target 
         $run.Output | Should -Match '\[FAIL\] Could not list the autoscale settings: stub lookup failure'
         $run.Output | Should -Match 'Validation Summary'
         $run.Output | Should -Match 'FAILURE: Found 1 issues'
+    }
+}
+
+Describe 'Lab 3.4 Test-Lab.ps1 - Node 22 LTS with the pm2 serve startup command (#231)' {
+
+    It 'passes an app and a slot on Node 22 LTS with the startup command, whatever the casing of the runtime' {
+        $run = $script:PortalMade
+        $run.Output | Should -Match '\[OK\] Web App runtime is Node 22 LTS'
+        $run.Output | Should -Match "\[OK\] Web App startup command is 'pm2 serve /home/site/wwwroot --no-daemon'"
+        $run.Output | Should -Match "\[OK\] Slot 'staging' runtime is Node 22 LTS"
+        $run.Output | Should -Match "\[OK\] Slot 'staging' startup command is"
+        $run.Output | Should -Match "\[OK\] Slot 'staging' VNet integration uses AppServiceSubnet"
+    }
+
+    It 'fails, counted, an app on Node 20 LTS without the startup command' {
+        $run = $script:StaleApp
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[FAIL\] Web App runtime is Node 22 LTS \(NODE\|22-lts\) \(Web App runs 'NODE\|20-lts'\)"
+        $run.Output | Should -Match "\[FAIL\] Web App startup command is 'pm2 serve /home/site/wwwroot --no-daemon' \(Web App startup command is ''\)"
+        $run.FailLines | Should -Be 2
+    }
+
+    It 'fails, counted, a slot without the startup command and without VNet integration' {
+        $run = $script:BareSlot
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[FAIL\] Slot 'staging' startup command is"
+        $run.Output | Should -Match "\[FAIL\] Slot 'staging' VNet integration uses AppServiceSubnet"
+        $run.FailLines | Should -Be 2
+    }
+}
+
+Describe 'Lab 3.4 Test-Lab.ps1 - a running slot and outbound internet traffic through the VNet (#231, #362)' {
+
+    It 'passes the routing the Portal''s check box sets on the app and the legacy flag on the slot' {
+        $run = $script:PortalMade
+        $run.Output | Should -Match "\[OK\] Slot 'staging' is Running"
+        $run.Output | Should -Match '\[OK\] Web App routes outbound internet traffic through the VNet'
+        $run.Output | Should -Match "\[OK\] Slot 'staging' routes outbound internet traffic through the VNet"
+    }
+
+    It 'fails, counted, a stopped slot' {
+        $run = $script:SlotDown
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[FAIL\] Slot 'staging' is Running \(staging is 'Stopped'\)"
+        $run.FailLines | Should -Be 1
+    }
+
+    It 'fails, counted, an app and a slot with Outbound internet traffic unchecked' {
+        $run = $script:NoRoute
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[FAIL\] Web App routes outbound internet traffic through the VNet'
+        $run.Output | Should -Match "\[FAIL\] Slot 'staging' routes outbound internet traffic through the VNet"
+        $run.FailLines | Should -Be 2
+    }
+
+    It 'warns, without failing, when the body carries no routing property' {
+        $run = $script:OddRoute
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.FailLines | Should -Be 0
+        $run.Output | Should -Match '\[WARN\] Web App outbound routing could not be read \(not counted\)'
+    }
+}
+
+Describe 'Lab 3.4 Test-Lab.ps1 - the dashboard page is reported, not counted' {
+
+    It 'reports the dashboard when the production URL shows it' {
+        $script:BicepMade.Output | Should -Match '\[OK\] https://dev-skycraft-swc-app01-0123456789abcdef\.swedencentral-01\.azurewebsites\.net shows the SkyCraft GM Dashboard'
+    }
+
+    It 'warns, without failing, when the URL shows another page or cannot be loaded' {
+        foreach ($run in $script:NoContent, $script:NoPage) {
+            $run.ExitCode | Should -Be 0 -Because "the Bicep path deploys no content; output was:`n$($run.Output)"
+            $run.FailLines | Should -Be 0
+            $run.Output | Should -Match '\[WARN\] https://dev-skycraft-swc-app01-0123456789abcdef\.swedencentral-01\.azurewebsites\.net .*\(not counted\)'
+        }
     }
 }

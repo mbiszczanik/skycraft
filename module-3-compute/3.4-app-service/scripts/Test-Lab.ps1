@@ -5,6 +5,16 @@
 .DESCRIPTION
     Checks if the App Service Plan, Web App, Slots, and Autoscale rules are correctly configured.
 
+    The web app and its staging slot must run Node 22 LTS with the startup command
+    'pm2 serve /home/site/wwwroot --no-daemon' (issue #231, maintainer decision 2026-10-16): a
+    Node runtime without it shows the default page instead of the dashboard. Both carry the
+    regional VNet integration with outbound internet traffic routed through it (guide step
+    3.4.10, the Bicep's slot inherits it from the app), and both must be Running.
+
+    Whether the production URL shows the dashboard is reported as [WARN], not counted: the Bicep
+    path deploys no content (guide steps 3.4.3-3.4.4 do), and the page check is an HTTPS request
+    to the app, not a read of its configuration.
+
     The autoscale setting is found through the plan it scales (its target resource), not by
     name: the Bicep names it '<plan>-autoscale', the Portal '<plan>-Autoscale-<n>' (issue #355).
     A lookup that fails is a counted [FAIL] that says why, never a crash or a "not found".
@@ -49,6 +59,47 @@ function Assert-Resource {
     }
 }
 
+# The runtime and the startup command the dashboard needs (#231). The Portal writes the runtime
+# as 'NODE|22-lts'; compared without case, as ARM may return it in either.
+$expectedRuntime = 'NODE|22-lts'
+$startupPattern = '^\s*pm2\s+serve\s+/home/site/wwwroot/?\s+--no-daemon\s*$'
+
+function Test-SiteRuntime {
+    param($Site, [string]$Label)
+    $runtime = "$($Site.SiteConfig.LinuxFxVersion)"
+    $command = "$($Site.SiteConfig.AppCommandLine)"
+    Assert-Resource "$Label runs '$runtime'" ($runtime -eq $expectedRuntime) "$Label runtime is Node 22 LTS ($expectedRuntime)"
+    Assert-Resource "$Label startup command is '$command'" ($command -match $startupPattern) "$Label startup command is 'pm2 serve /home/site/wwwroot --no-daemon'"
+}
+
+# The regional VNet integration and its outbound routing, read from the site's raw ARM body
+# (no az CLI dependency).
+function Test-SiteVnetIntegration {
+    param($Site, [string]$Label)
+    $props = $null
+    try {
+        $props = (Get-AzResource -ResourceId $Site.Id -ExpandProperties -ErrorAction Stop).Properties
+    } catch {
+        Write-Host "  [FAIL] $Label VNet integration could not be read: $($_.Exception.Message)" -ForegroundColor Red
+        $script:failures++
+        return
+    }
+    $subnetId = $props.virtualNetworkSubnetId
+    Assert-Resource "$Label subnet: '$subnetId'" ("$subnetId" -like "*/subnets/AppServiceSubnet") "$Label VNet integration uses AppServiceSubnet"
+
+    # Outbound internet traffic through the VNet (guide step 3.4.10). The Portal's check box sets
+    # outboundVnetRouting.applicationTraffic, the Bicep sets the same; allTraffic and the legacy
+    # vnetRouteAllEnabled flag mean the same or more, so any of them passes. A body that carries
+    # none of them (another API version) is reported, not counted.
+    $routing = @($props.outboundVnetRouting.applicationTraffic, $props.outboundVnetRouting.allTraffic,
+        $props.vnetRouteAllEnabled, $props.siteConfig.vnetRouteAllEnabled) | Where-Object { $null -ne $_ }
+    if (@($routing).Count -eq 0) {
+        Write-Host "  [WARN] $Label outbound routing could not be read (not counted): check Networking > Virtual network integration > Outbound internet traffic." -ForegroundColor Yellow
+    } else {
+        Assert-Resource "$Label Outbound internet traffic is unchecked" (@($routing) -contains $true) "$Label routes outbound internet traffic through the VNet"
+    }
+}
+
 # 2. Check App Service Plan
 Write-Host "1. Checking App Service Plan..." -ForegroundColor Yellow
 $asp = Get-AzAppServicePlan -ResourceGroupName $RgName -Name $AspName -ErrorAction SilentlyContinue
@@ -68,10 +119,8 @@ $app = Get-AzWebApp -ResourceGroupName $RgName -Name $AppName -ErrorAction Silen
 if ($app) {
     Assert-Resource $AppName ($app.State -eq "Running") "App is Running"
     Assert-Resource $AppName ($app.HttpsOnly -eq $true) "HTTPS Only is Enabled"
-    
-    # Check VNet Integration via ARM properties (no az CLI dependency)
-    $vnetId = (Get-AzResource -ResourceId $app.Id -ExpandProperties -ErrorAction SilentlyContinue).Properties.virtualNetworkSubnetId
-    Assert-Resource $AppName ($vnetId -like "*AppServiceSubnet*") "VNet Integration Configured"
+    Test-SiteRuntime -Site $app -Label "Web App"
+    Test-SiteVnetIntegration -Site $app -Label "Web App"
 } else {
     Write-Host "  [FAIL] Web App '$AppName' not found!" -ForegroundColor Red; $failures++
 }
@@ -80,6 +129,13 @@ if ($app) {
 Write-Host "3. Checking Deployment Slots..." -ForegroundColor Yellow
 $slot = Get-AzWebAppSlot -ResourceGroupName $RgName -Name $AppName -Slot "staging" -ErrorAction SilentlyContinue
 Assert-Resource "staging" ($null -ne $slot) "Slot 'staging' exists"
+if ($slot) {
+    Assert-Resource "staging is '$($slot.State)'" ($slot.State -eq "Running") "Slot 'staging' is Running"
+    # Cloned from the app in step 3.4.5 (Portal) or inherited from it (Bicep).
+    Test-SiteRuntime -Site $slot -Label "Slot 'staging'"
+    # VNet integration is a slot setting: it is neither cloned nor swapped (step 3.4.10).
+    Test-SiteVnetIntegration -Site $slot -Label "Slot 'staging'"
+}
 
 # 5. Check Autoscale Settings
 Write-Host "4. Checking Autoscale Rules..." -ForegroundColor Yellow
@@ -115,6 +171,24 @@ if (-not $asp) {
             Write-Host "  [FAIL] Autoscale setting '$($asRes.Name)' has no profile." -ForegroundColor Red; $failures++
         }
     }
+}
+
+# 6. Check the dashboard page - reported, not counted (see .DESCRIPTION)
+Write-Host "5. Checking the dashboard page..." -ForegroundColor Yellow
+if ($app -and $app.DefaultHostName) {
+    $url = "https://$($app.DefaultHostName)"
+    try {
+        $page = Invoke-WebRequest -Uri $url -TimeoutSec 30 -ErrorAction Stop
+        if ("$($page.Content)" -match 'SkyCraft GM Dashboard') {
+            Write-Host "  [OK] $url shows the SkyCraft GM Dashboard" -ForegroundColor Green
+        } else {
+            Write-Host "  [WARN] $url does not show the SkyCraft GM Dashboard (not counted): deploy it as in steps 3.4.3-3.4.4, and check the startup command." -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "  [WARN] $url could not be loaded (not counted): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "  [WARN] No web app hostname to check (not counted)." -ForegroundColor Yellow
 }
 
 # Summary
