@@ -1489,14 +1489,14 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
     # A menu group or a section heading: clicking a Portal menu group collapses it.
     It 'reads step <id>''s "<text>" as <labels>, the place no label' -ForEach @(
         @{ lab = '1.3'; id = '1.3.18'; text = 'Under **Cost Management** click **Cost analysis**'; labels = @('Cost analysis') }
-        @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Settings**, select **Networking**.'; labels = @('Networking') }
-        @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Outbound traffic configuration**, click **VNet integration**.'; labels = @('VNet integration') }
+        @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Settings**, select **Networking**.'; labels = @('Networking'); count = 2 }
+        @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Outbound traffic configuration**, click **Not configured** (the value of _Virtual network integration_).'; labels = @('Not configured'); count = 2 }
         @{ lab = '3.3'; id = '3.3.2'; text = 'In the left menu, under **Settings** (expand it if it is collapsed), click **Access keys**.'; labels = @('Access keys') }
         @{ lab = '4.2'; id = '4.2.6'; text = 'On the same page, under **Recovery**, enable **Enable soft delete for containers** ...'; labels = @('Enable soft delete for containers') }
         @{ lab = '5.2'; id = '5.2.2'; text = 'Under **Instant restore**, fill in **Azure Backup Resource Group**: ...'; labels = @('Azure Backup Resource Group') }
     ) {
         $items = @((Get-StateStep $lab $id).items | Where-Object { (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
-        $items.Count | Should -Be 1
+        $items.Count | Should -Be ($(if ($count) { $count } else { 1 }))
     }
 
     # Since #359 step 4.2.4 only looks at the default tier: 'Verify:' then
