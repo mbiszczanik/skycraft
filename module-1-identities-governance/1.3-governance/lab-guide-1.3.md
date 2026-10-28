@@ -203,7 +203,7 @@ The **Tags** service opens as **Resource Manager | Tags** and lists every tag in
 ### Step 1.3.5: Assign a Built-in Policy (Require Tag on Resource Groups)
 
 1. In Azure Portal, search for **Policy**
-2. In the left menu, under **Authoring**, click **Assignments**
+2. In the left menu, under **Authoring** (expand it if it is collapsed), click **Assignments**
 3. Click **Assign policy**
 
 ![Assign a Built-in Policy](./images/step-1.3.5a.png)
@@ -354,7 +354,7 @@ Back in **Create Advisor Alerts**, the new action group `skycraft-advisor-ag` is
 ### Step 1.3.8: Assign Policy for Resource Naming Convention
 
 1. In Azure Portal, search for **Policy**
-2. In the left menu, under **Authoring**, click **Assignments**
+2. In the left menu, under **Authoring** (expand it if it is collapsed), click **Assignments**
 3. Click **Assign policy**
 4. On the **Basics** tab, fill in:
 
@@ -382,7 +382,7 @@ Back in **Create Advisor Alerts**, the new action group `skycraft-advisor-ag` is
 
 Now assign the second tag policy of this step, `Inherit-Project-Tag`. It copies the `Project` tag of a resource group to every new resource created in it without the tag:
 
-8. In the left menu, under **Authoring**, click **Assignments**
+8. In the left menu, under **Authoring** (expand it if it is collapsed), click **Assignments**
 9. Click **Assign policy**
 10. On the **Basics** tab, fill in:
 
@@ -465,7 +465,7 @@ az policy assignment create \
 
 Prevent resource creation in unintended regions:
 
-1. In the left menu, under **Authoring**, click **Assignments**
+1. In the left menu, under **Authoring** (expand it if it is collapsed), click **Assignments**
 2. Click **Assign policy**
 3. On the **Basics** tab, fill in:
 
@@ -662,7 +662,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 1. In Azure Portal, search for **Cost Management + Billing**
 2. In the left menu, click **Cost Management**
-3. In the left menu, under **Monitoring**, click **Budgets**
+3. In the left menu, under **Monitoring** (expand it if it is collapsed), click **Budgets**
 4. Click **+ Add**
 
 **Note**: Cost Management + Billing opens on **Billing scopes**. **Cost Management** then opens at a scope the Portal picks for you (sometimes a **Scope automatically selected** popover says so) and names it at the top of the page, after **Scope**. It should be your subscription; if it is another scope, click **Change scope** in the left menu and pick your subscription before you continue.
@@ -755,7 +755,7 @@ Create a more specific budget for the production environment. A budget belongs t
 
 1. In Azure Portal, search for **Subscriptions**
 2. Click your subscription
-3. Under **Cost Management** click **Cost analysis**
+3. In the left menu, under **Cost Management** (expand it if it is collapsed), click **Cost analysis**
 4. Open the **VIEW** menu and, under **Built-in views**, explore:
    - **Cost by resource** - See spending per resource
    - **Cost by service** - See spending per Azure service
@@ -809,7 +809,7 @@ The overall score (0-100%) is on the separate **Advisor score** page.
 
 ### Step 1.3.20: Review Cost Recommendations
 
-1. In the left menu, under **Recommendations**, click **Cost**
+1. In the left menu, under **Recommendations** (expand it if it is collapsed), click **Cost**
 2. Review recommendations (may be none if newly created)
 
 **Common recommendations**:
@@ -823,7 +823,7 @@ The overall score (0-100%) is on the separate **Advisor score** page.
 
 ### Step 1.3.21: Review Security Recommendations
 
-1. In the left menu, under **Recommendations**, click **Security**
+1. In the left menu, under **Recommendations** (expand it if it is collapsed), click **Security**
 2. Review recommendations
 
 **Common recommendations**:
@@ -835,11 +835,11 @@ The overall score (0-100%) is on the separate **Advisor score** page.
 
 ![Review Security Recommendations](./images/step-1.3.21.png)
 
-**Advisor alerts**: you created the Advisor alert for cost recommendations in [Step 1.3.7](#step-137-configure-advisor-alerts), in Section 2, before the tag policy of Step 1.3.8 could refuse it. To see it, open **Alerts (Preview)** under **Monitoring** in Advisor's left menu.
+**Advisor alerts**: you created the Advisor alert for cost recommendations in [Step 1.3.7](#step-137-configure-advisor-alerts), in Section 2, before the tag policy of Step 1.3.8 could refuse it. To see it, open **Alerts (Preview)** under **Monitoring** (expand it if it is collapsed) in Advisor's left menu.
 
 ---
 
-# 📖 Section 6: Understand Management Groups (15 minutes)
+## 📖 Section 6: Understand Management Groups (15 minutes)
 
 ### What are Management Groups?
 
@@ -884,7 +884,7 @@ The service opens as **Resource Manager | Management groups**.
 
 ---
 
-# ✅ Lab Checklist
+## ✅ Lab Checklist
 
 ### Tags Applied
 
@@ -985,7 +985,7 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 
 **Solution**:
 
-- Check for resource locks: **Resource** → **Locks**
+- Check for resource locks: **Resource** → **Settings** (expand it if it is collapsed) → **Locks**
 - Remove lock temporarily (document why)
 - Delete resource
 - Re-apply lock if needed
