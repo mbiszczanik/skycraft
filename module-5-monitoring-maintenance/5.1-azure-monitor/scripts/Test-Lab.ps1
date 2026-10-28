@@ -139,6 +139,7 @@ Write-Host "[VM Insights Data Collection Rule]" -ForegroundColor Yellow
 $vmGroups = @("$Environment-skycraft-swc-rg") + @(@('dev', 'prod') | Where-Object { $_ -ne $Environment } | ForEach-Object { "$_-skycraft-swc-rg" })
 $dcrResource    = $null
 $dcrVmNames     = @()
+$dcrNotSucceeded = @()   # associations of the chosen rule not in state Succeeded
 $dcrLookupError = $null
 $dcrUnread      = @()   # what could not be read, when what was read shows no rule
 try {
@@ -174,8 +175,11 @@ try {
                 $ruleId = "$($association.properties.dataCollectionRuleId)"
                 if (-not $ruleId) { continue }
                 $key = $ruleId.ToLowerInvariant()
-                if (-not $ruleVms.Contains($key)) { $ruleVms[$key] = [pscustomobject]@{ Id = $ruleId; Vms = @() } }
+                if (-not $ruleVms.Contains($key)) { $ruleVms[$key] = [pscustomobject]@{ Id = $ruleId; Vms = @(); NotSucceeded = @() } }
                 $ruleVms[$key].Vms += $vm.Name
+                if ("$($association.properties.provisioningState)" -ne 'Succeeded') {
+                    $ruleVms[$key].NotSucceeded += "$($vm.Name): '$($association.properties.provisioningState)'"
+                }
             }
         }
     }
@@ -193,7 +197,7 @@ try {
             continue
         }
         $sendsHere = $null -ne $wsCache -and (@($rule.Properties.destinations.logAnalytics | ForEach-Object { "$($_.workspaceResourceId)" }) -contains $wsCache.ResourceId)
-        [pscustomobject]@{ Resource = $rule; Vms = $entry.Vms; SendsHere = $sendsHere; Preferred = ($rule.Name -eq $dcrName) }
+        [pscustomobject]@{ Resource = $rule; Vms = $entry.Vms; NotSucceeded = $entry.NotSucceeded; SendsHere = $sendsHere; Preferred = ($rule.Name -eq $dcrName) }
     }
     # The rule that sends to the lab's workspace is the lab's; the Bicep's name breaks a tie.
     $chosen = @($rules) | Where-Object { $_ } |
@@ -202,6 +206,7 @@ try {
     if ($chosen) {
         $dcrResource = $chosen.Resource
         $dcrVmNames  = $chosen.Vms
+        $dcrNotSucceeded = @($chosen.NotSucceeded)
     }
     elseif ($readErrors.Count -gt 0 -and ($vmsRead -eq 0 -or $ruleVms.Count -gt 0)) {
         # Nothing was read, or every associated rule was unreadable: the lookup itself failed.
@@ -224,6 +229,15 @@ Invoke-Test "Data collection rule associated with a VM in $($vmGroups -join ' or
         return $false
     }
     Write-Host " ('$($dcrResource.Name)' in $($dcrResource.ResourceGroupName), on $($dcrVmNames -join ', '))" -NoNewline -ForegroundColor Gray
+    $ruleState = "$($dcrResource.Properties.provisioningState)"
+    if ($ruleState -ne 'Succeeded') {
+        Write-Host " (rule provisioning state is '$ruleState', expected Succeeded)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
+    if ($dcrNotSucceeded.Count -gt 0) {
+        Write-Host " (association provisioning state is not Succeeded on $($dcrNotSucceeded -join ', '))" -NoNewline -ForegroundColor Gray
+        return $false
+    }
     return $true
 }
 

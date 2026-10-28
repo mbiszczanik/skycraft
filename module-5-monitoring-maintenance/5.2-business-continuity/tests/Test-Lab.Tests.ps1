@@ -111,8 +111,26 @@ function Get-AzResourceGroup { [CmdletBinding()] param([Parameter(ValueFromRemai
 function Get-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzVM { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzDataProtectionBackupPolicy { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
-function Get-AzDataProtectionBackupInstance { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
-function Get-AzStorageAccount { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
+function Get-AzStorageAccount {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
+    [pscustomobject]@{ Name = $Name; Id = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/prodskycraftswcsa' }
+}
+# SKYCRAFT_STUB_BLOBINSTANCE: 'ok', 'protectionerror', 'provisioningfailed', 'nostate' or 'none' (no instance)
+function Get-AzDataProtectionBackupInstance {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$VaultName, [Parameter(ValueFromRemainingArguments)]$Rest)
+    $mode = $env:SKYCRAFT_STUB_BLOBINSTANCE
+    if (-not $mode -or $mode -eq 'none') { return }
+    [pscustomobject]@{
+        Name     = 'prodskycraftswcsa-instance'
+        Property = [pscustomobject]@{
+            DataSourceInfo         = [pscustomobject]@{ ResourceId = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/prodskycraftswcsa' }
+            CurrentProtectionState = switch ($mode) { 'protectionerror' { 'ProtectionError' } 'nostate' { $null } default { 'ProtectionConfigured' } }
+            ProvisioningState      = switch ($mode) { 'provisioningfailed' { 'Failed' } 'nostate' { $null } default { 'Succeeded' } }
+        }
+    }
+}
 function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 '@
 
@@ -120,10 +138,12 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
         param(
             [pscustomobject]$Stub,
             [ValidateSet('Off', 'AlwaysOn', 'On')]
-            [string]$SoftDelete
+            [string]$SoftDelete,
+            [string]$BlobInstance = 'none'
         )
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
             SKYCRAFT_STUB_BVSOFTDELETE = $SoftDelete
+            SKYCRAFT_STUB_BLOBINSTANCE = $BlobInstance
         }
         return [pscustomobject]@{
             ExitCode = $run.ExitCode
@@ -141,7 +161,13 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
     $script:ScriptedVault = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off'
     $script:PortalVault   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'AlwaysOn'
     $script:OnVault       = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'On'
-    $script:AllRuns       = @($script:ScriptedVault, $script:PortalVault, $script:OnVault)
+    $script:BlobOk        = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'ok'
+    $script:BlobProtErr   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'protectionerror'
+    $script:BlobProvFail  = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'provisioningfailed'
+    $script:BlobNoState   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'nostate'
+    $script:BlobNone      = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'none'
+    $script:AllRuns       = @($script:ScriptedVault, $script:PortalVault, $script:OnVault, $script:BlobOk,
+        $script:BlobProtErr, $script:BlobProvFail, $script:BlobNoState, $script:BlobNone)
 }
 
 AfterAll {
@@ -181,5 +207,31 @@ Describe 'Lab 5.2 Test-Lab.ps1 - Backup vault soft delete (#355, decision on #36
         $line = $script:OnVault.Line
         $line | Should -Match 'FAIL$' -Because "output was:`n$($script:OnVault.Output)"
         $line | Should -Match "state is 'On' - set it to Off: Update-AzDataProtectionBackupVault -SoftDeleteState Off"
+    }
+}
+
+Describe 'Lab 5.2 Test-Lab.ps1 - blob backup instance protection (#371)' {
+
+    It 'passes an instance with protection configured and provisioning Succeeded' {
+        $script:BlobOk.Output | Should -Match 'Testing: Blob backup instance exists for[^\r\n]*PASS'
+        $script:BlobOk.Output | Should -Match 'Testing: Blob backup instance protection is configured and provisioned\.\.\. PASS'
+    }
+
+    It 'fails an instance in protection state ProtectionError, and names the state' {
+        $script:BlobProtErr.ExitCode | Should -Be 1 -Because "output was:`n$($script:BlobProtErr.Output)"
+        $script:BlobProtErr.Output | Should -Match "Blob backup instance exists for[^\r\n]*PASS"
+        $script:BlobProtErr.Output | Should -Match "protection state 'ProtectionError', provisioning state 'Succeeded'[^\r\n]*FAIL"
+    }
+
+    It 'fails an instance whose provisioning state is Failed' {
+        $script:BlobProvFail.Output | Should -Match "protection state 'ProtectionConfigured', provisioning state 'Failed'[^\r\n]*FAIL"
+    }
+
+    It 'fails an instance that reports no state at all' {
+        $script:BlobNoState.Output | Should -Match "protection state '', provisioning state ''[^\r\n]*FAIL"
+    }
+
+    It 'fails the protection check when there is no instance' {
+        $script:BlobNone.Output | Should -Match 'Blob backup instance protection is configured and provisioned\.\.\. FAIL'
     }
 }

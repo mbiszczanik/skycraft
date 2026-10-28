@@ -198,6 +198,7 @@ function Get-AzResource {
             ResourceGroupName = $rule.Group
             ResourceId        = $ResourceId
             Properties        = [pscustomobject]@{
+                provisioningState = if ($env:SKYCRAFT_STUB_DCRSTATE -eq 'rulefailed') { 'Failed' } else { 'Succeeded' }
                 destinations = [pscustomobject]@{ logAnalytics = @([pscustomobject]@{ name = 'la-dest'; workspaceResourceId = $rule.Workspace }) }
                 dataFlows    = @([pscustomobject]@{ streams = $rule.Streams; destinations = @('la-dest') })
             }
@@ -220,19 +221,20 @@ function Invoke-AzRestMethod {
     $associations = @()
     if ($Path -like '*/virtualMachines/dev-skycraft-swc-auth-vm/*') {
         $rules = (Get-StubRules).Keys
-        $bicepAssociation = @{ name = 'skycraft-vminsights-dcr-assoc'; properties = @{ dataCollectionRuleId = ($rules | Where-Object { $_ -like '*/skycraft-vm-dcr' }) } }
+        $assocState = switch ($env:SKYCRAFT_STUB_DCRSTATE) { 'assocfailed' { 'Failed' } 'assocnull' { $null } default { 'Succeeded' } }
+        $bicepAssociation = @{ name = 'skycraft-vminsights-dcr-assoc'; properties = @{ dataCollectionRuleId = ($rules | Where-Object { $_ -like '*/skycraft-vm-dcr' }); provisioningState = $assocState } }
         switch ($env:SKYCRAFT_STUB_DCR) {
             { $_ -in 'bicep', 'vmthrows' } {
                 $associations += $bicepAssociation
             }
             'dangling' {
-                $associations += @{ name = 'left-behind'; properties = @{ dataCollectionRuleId = "$script:DevRg/providers/Microsoft.Insights/dataCollectionRules/deleted-dcr" } }
+                $associations += @{ name = 'left-behind'; properties = @{ dataCollectionRuleId = "$script:DevRg/providers/Microsoft.Insights/dataCollectionRules/deleted-dcr"; provisioningState = $assocState } }
                 $associations += $bicepAssociation
             }
             'portal' {
                 $associations += @{ name = 'configurationAccessEndpoint'; properties = @{ dataCollectionEndpointId = "$script:DevRg/providers/Microsoft.Insights/dataCollectionEndpoints/stub-dce" } }
-                $associations += @{ name = 'security-assoc'; properties = @{ dataCollectionRuleId = ($rules | Where-Object { $_ -like '*/security-events-dcr' }) } }
-                $associations += @{ name = 'vmi-assoc'; properties = @{ dataCollectionRuleId = ($rules | Where-Object { $_ -like '*/MSVMI-*' }) } }
+                $associations += @{ name = 'security-assoc'; properties = @{ dataCollectionRuleId = ($rules | Where-Object { $_ -like '*/security-events-dcr' }); provisioningState = 'Succeeded' } }
+                $associations += @{ name = 'vmi-assoc'; properties = @{ dataCollectionRuleId = ($rules | Where-Object { $_ -like '*/MSVMI-*' }); provisioningState = $assocState } }
             }
         }
     }
@@ -283,11 +285,14 @@ function Get-AzDiagnosticSetting {
             [ValidateSet('bicep', 'portal', 'none', 'nonepartial', 'fail', 'vmthrows', 'dangling')]
             [string]$Dcr,
             [ValidateSet('platform', 'vmgroup', 'recommended', 'listfails', 'listfailsplatform')]
-            [string]$Alert = 'platform'
+            [string]$Alert = 'platform',
+            [ValidateSet('ok', 'rulefailed', 'assocfailed', 'assocnull')]
+            [string]$State = 'ok'
         )
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
             SKYCRAFT_STUB_DCR   = $Dcr
             SKYCRAFT_STUB_ALERT = $Alert
+            SKYCRAFT_STUB_DCRSTATE = $State
         }
         return [pscustomobject]@{
             ExitCode = $run.ExitCode
@@ -311,7 +316,11 @@ function Get-AzDiagnosticSetting {
     $script:AlertRecommended = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Alert 'recommended'
     $script:AlertListFails = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Alert 'listfails'
     $script:AlertListFailsPlatform = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Alert 'listfailsplatform'
+    $script:RuleFailed  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -State 'rulefailed'
+    $script:AssocFailed = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -State 'assocfailed'
+    $script:AssocNull   = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -State 'assocnull'
     $script:AllRuns    = @(
+        $script:RuleFailed, $script:AssocFailed, $script:AssocNull,
         $script:BicepMade, $script:PortalMade, $script:NoRule, $script:ReadFails, $script:NoRulePartial,
         $script:VmThrows, $script:Dangling, $script:AlertInVmGroup, $script:AlertRecommended,
         $script:AlertListFails, $script:AlertListFailsPlatform
@@ -407,6 +416,28 @@ Describe 'Lab 5.1 Test-Lab.ps1 - finds the data collection rule through the VM i
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "Data collection rule associated with a VM in dev-skycraft-swc-rg or prod-skycraft-swc-rg\.\.\. \(no rule is associated with these VMs - Step 5\.1\.2; could not read VMs in 'prod-skycraft-swc-rg': stub lookup failure: Resource group 'prod-skycraft-swc-rg' could not be read\.\) FAIL"
         $run.Output | Should -Match 'Failed: 4\b'
+    }
+}
+
+Describe 'Lab 5.1 Test-Lab.ps1 - the rule and its association must be Succeeded (#371)' {
+
+    It 'fails a rule left in provisioning state Failed, and says so' {
+        $run = $script:RuleFailed
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "rule provisioning state is 'Failed', expected Succeeded\) FAIL"
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'fails an association left in provisioning state Failed, and names the VM' {
+        $run = $script:AssocFailed
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "association provisioning state is not Succeeded on dev-skycraft-swc-auth-vm: 'Failed'\) FAIL"
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'fails an association that reports no provisioning state' {
+        $script:AssocNull.ExitCode | Should -Be 1 -Because "output was:`n$($script:AssocNull.Output)"
+        $script:AssocNull.Output | Should -Match "association provisioning state is not Succeeded on dev-skycraft-swc-auth-vm: ''\) FAIL"
     }
 }
 

@@ -241,6 +241,7 @@ Describe "Lab 2.3 Test-Lab.ps1 - the egress pool and its outbound rule are requi
                 )
             )
             $script:StubLb = [pscustomobject]@{
+                ProvisioningState   = 'Succeeded'
                 Sku                 = [pscustomobject]@{ Name = 'Standard' }
                 Probes              = $Probes
                 BackendAddressPools = @($Pools | ForEach-Object { [pscustomobject]@{ Name = $_ } })

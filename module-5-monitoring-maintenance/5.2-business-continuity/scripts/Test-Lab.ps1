@@ -17,7 +17,7 @@
       fails, and accepts On/AlwaysOn once $backupVaultSoftDeleteAccepted is widened for the GA
       of secure by default in the region (issue #376)
     - Blob Backup Policy (SkyCraft-Blob-Policy): AzureBlob datasource, 30-day retention
-    - Blob backup instance configured for prodskycraftswcsa
+    - Blob backup instance configured for prodskycraftswcsa, protection configured and provisioned
 
     Property reads with uncertain typed-object names (storage type, identity,
     soft-delete state, datasource type, retention) use Get-AzResource against the
@@ -414,6 +414,20 @@ Invoke-Test "Blob backup instance exists for '$storageAccount'" {
     $instances = Get-AzDataProtectionBackupInstance -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction SilentlyContinue
     $instance = $instances | Where-Object { $_.Property.DataSourceInfo.ResourceId -eq $storageId }
     return ($null -ne $instance)
+}
+
+Invoke-Test "Blob backup instance protection is configured and provisioned" {
+    if (-not $bv) { return $false }
+    $storageId = (Get-AzStorageAccount -ResourceGroupName $prodRg -Name $storageAccount -ErrorAction SilentlyContinue).Id
+    if (-not $storageId) { return $false }
+    $instances = Get-AzDataProtectionBackupInstance -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction SilentlyContinue
+    $instance = @($instances | Where-Object { $_.Property.DataSourceInfo.ResourceId -eq $storageId }) | Select-Object -First 1
+    if (-not $instance) { return $false }
+    $protection = "$($instance.Property.CurrentProtectionState)"
+    $provisioning = "$($instance.Property.ProvisioningState)"
+    if ($protection -eq 'ProtectionConfigured' -and $provisioning -eq 'Succeeded') { return $true }
+    Write-Host " (protection state '$protection', provisioning state '$provisioning'; expected ProtectionConfigured and Succeeded)" -NoNewline -ForegroundColor Gray
+    return $false
 }
 
 # ============================================================================

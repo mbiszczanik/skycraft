@@ -5,10 +5,10 @@
 .DESCRIPTION
     Validates that all Lab 5.3 network monitoring resources are deployed correctly:
     - Network Watcher enabled for Sweden Central in NetworkWatcherRG
-    - VNet Flow Log (prod-skycraft-swc-vnet-flowlog) exists, is enabled,
+    - VNet Flow Log (prod-skycraft-swc-vnet-flowlog) exists, is Succeeded and enabled,
       uses Version 2 format, retains logs for 7 days, and has Traffic Analytics
       linked to the platform Log Analytics Workspace
-    - Connection Monitor (skycraft-hub-spoke-cm) exists and is running,
+    - Connection Monitor (skycraft-hub-spoke-cm) exists, is Succeeded and Running (a null status fails),
       with the correct source, destination, and test configuration
 
 .EXAMPLE
@@ -114,6 +114,14 @@ Invoke-Test "Flow log '$flowLogName' exists" {
     return ($null -ne $fl -and $fl.Name -eq $flowLogName)
 }
 
+Invoke-Test "Flow log provisioning state is Succeeded" {
+    $fl = Get-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $flowLogName -ErrorAction SilentlyContinue
+    if (-not $fl) { return $false }
+    if ("$($fl.ProvisioningState)" -eq 'Succeeded') { return $true }
+    Write-Host " (state is '$($fl.ProvisioningState)')" -NoNewline -ForegroundColor Gray
+    return $false
+}
+
 Invoke-Test "Flow log is enabled" {
     $fl = Get-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $flowLogName -ErrorAction SilentlyContinue
     return ($fl.Enabled -eq $true)
@@ -171,11 +179,21 @@ Invoke-Test "Connection Monitor '$connectionMonitorName' exists" {
     return ($null -ne $cm -and $cm.Name -eq $connectionMonitorName)
 }
 
-Invoke-Test "Connection Monitor monitoring status is Running or not-null" {
+Invoke-Test "Connection Monitor provisioning state is Succeeded" {
     $cm = Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction SilentlyContinue
-    # Accept Running or empty (may be empty in the first ~30s after creation)
-    # Explicitly reject Stopped/Failed states
-    return ($null -ne $cm -and $cm.Properties.monitoringStatus -notin @('Stopped', 'Failed'))
+    if (-not $cm) { return $false }
+    if ("$($cm.Properties.provisioningState)" -eq 'Succeeded') { return $true }
+    Write-Host " (state is '$($cm.Properties.provisioningState)')" -NoNewline -ForegroundColor Gray
+    return $false
+}
+
+Invoke-Test "Connection Monitor monitoring status is Running" {
+    $cm = Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction SilentlyContinue
+    if (-not $cm) { return $false }
+    # A null status fails: Azure reports Running within about a minute of creation.
+    if ("$($cm.Properties.monitoringStatus)" -eq 'Running') { return $true }
+    Write-Host " (status is '$($cm.Properties.monitoringStatus)')" -NoNewline -ForegroundColor Gray
+    return $false
 }
 
 Invoke-Test "Connection Monitor has test group 'hub-spoke-ssh'" {

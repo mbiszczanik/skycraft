@@ -137,6 +137,9 @@ foreach ($role in $roles) {
     }
 }
 foreach ($role in $roles) {
+    Invoke-Test "$($role.Label) VM provisioning state is Succeeded" { "$($role.Model.ProvisioningState)" -eq 'Succeeded' }
+}
+foreach ($role in $roles) {
     Invoke-Test "$($role.Label) VM in Zone $($role.Zone)" { @($role.Model.Zones) -contains $role.Zone }
 }
 
