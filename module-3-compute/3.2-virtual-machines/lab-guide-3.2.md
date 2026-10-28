@@ -670,8 +670,8 @@ foreach ($role in 'auth', 'world') {
 **Read the effective security rules.** Azure evaluates NSG rules per network interface: the rules of the subnet's NSG and of the NIC's own NSG, with every ASG in a rule resolved to the private IPs of its member NICs.
 
 14. Navigate to **Virtual machines** → `dev-skycraft-swc-auth-vm` → **Networking** → **Network settings**, then, under **Essentials**, click the value next to **Effective security rules**. You see `dev-skycraft-swc-auth-nsg` (from `AuthSubnet`) with its custom rules and the default rules (65000-65500)
-15. Now the database side. Navigate to **Network security groups** → `dev-skycraft-swc-db-nsg` → **Settings** → **Inbound security rules**. `Allow-MySQL-From-AppTier` lets port 3306 in from the application tier: from the two subnet ranges, or, if you saved Step 2.2.9 of Lab 2.2, from `dev-skycraft-swc-asg-auth` and `dev-skycraft-swc-asg-world`. With the NICs in the groups, that ASG source now means exactly these two VMs, whatever their IP addresses
-16. On the same NSG, under **Help**, click **Effective security rules**. The page lists no network interface: effective rules exist only for a NIC the NSG applies to, and `DatabaseSubnet` holds no VM yet. A database VM placed there later would show `Allow-MySQL-From-AppTier` with its source resolved to the private IPs of the auth and world VMs
+15. Now the database side. Navigate to **Network security groups** → `dev-skycraft-swc-db-nsg` → **Settings** (expand it if it is collapsed) → **Inbound security rules**. `Allow-MySQL-From-AppTier` lets port 3306 in from the application tier: from the two subnet ranges, or, if you saved Step 2.2.9 of Lab 2.2, from `dev-skycraft-swc-asg-auth` and `dev-skycraft-swc-asg-world`. With the NICs in the groups, that ASG source now means exactly these two VMs, whatever their IP addresses
+16. On the same NSG, under **Help** (expand it if it is collapsed), click **Effective security rules**. The page lists no network interface: effective rules exist only for a NIC the NSG applies to, and `DatabaseSubnet` holds no VM yet. A database VM placed there later would show `Allow-MySQL-From-AppTier` with its source resolved to the private IPs of the auth and world VMs
 
 **Expected Result**: Both VMs running in different availability zones, connected to respective load balancer backend pools, `dev-skycraft-swc-lb-be-outbound` lists 2 VMs (auth and world), and each VM's network interface is in its application security group.
 
@@ -759,7 +759,7 @@ The data disk is attached but not yet formatted. You need to connect to the VM v
 > - Ensure your browser allows pop-ups from Azure Portal
 > - The SSH session opens in a new browser tab
 > - If connection fails, verify: (1) VM is running, (2) VNet peering is connected, (3) NSG allows SSH from 10.0.0.0/26
-> - **No Bastion?** Run the commands below without an SSH session: on the VM, under **Operations**, click **Run command** → **RunShellScript**, paste them and click **Run**. Each run takes a minute or two and shows the output when it ends
+> - **No Bastion?** Run the commands below without an SSH session: on the VM, under **Operations** (expand it if it is collapsed), click **Run command** → **RunShellScript**, paste them and click **Run**. Each run takes a minute or two and shows the output when it ends
 
 **Connection Flow Visualization:**
 
@@ -1080,7 +1080,7 @@ Start-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-world-v
 | **Future support**       | Retiring Sept 2028    | Recommended             |
 | **On AZ-104**            | No                    | Yes                     |
 
-4. You can also verify in Azure Portal: on the VM, under **Settings**, click **Disks**; encryption at host is shown there.
+4. You can also verify in Azure Portal: on the VM, under **Settings** (expand it if it is collapsed), click **Disks**; encryption at host is shown there.
 
 **Expected Result**: The Worldserver reports `EncryptionAtHost` = `True` if you ran this optional step; nothing changed otherwise.
 
@@ -1127,7 +1127,7 @@ While the Authserver is still encrypting (Step 3.2.19), it shows `Standard_B2s_v
 A Standard load balancer serves backends in every zone. Whether its frontend survives a zone failure depends on the frontend's public IP: an IP in zones 1, 2 and 3 is zone-redundant. The load balancer's **Overview** does not say so; the public IP does.
 
 1. Navigate to **Load balancers** → `dev-skycraft-swc-lb`
-2. Under **Settings**, click **Frontend IP configuration** and open the public IP of `dev-skycraft-swc-lb-frontend`
+2. Under **Settings** (expand it if it is collapsed), click **Frontend IP configuration** and open the public IP of `dev-skycraft-swc-lb-frontend`
 3. On the public IP's **Overview**, read its availability zones: zones 1, 2 and 3 make it zone-redundant, meaning:
    - If Zone 1 fails, traffic routes to Zone 2
    - Players experience no interruption
@@ -1448,7 +1448,7 @@ Get-AzVmssVM -ResourceGroupName dev-skycraft-swc-rg -VMScaleSetName dev-skycraft
 
 #### Add the Autoscale Rules
 
-4. In the left menu, under **Availability + scale**, click **Scaling**
+4. In the left menu, under **Availability + scale** (expand it if it is collapsed), click **Scaling**
 5. Select the **Custom autoscale** card. In the Default condition, choose **Scale based on a metric** and set the instance limits:
 
 | Field   | Value |
@@ -1500,7 +1500,7 @@ New-AzAutoscaleSetting -Name dev-skycraft-swc-world-vmss-autoscale -ResourceGrou
 
 ### Step 3.2.31: Test Manual Scaling
 
-1. In the VMSS blade, under **Availability + scale**, click **Scaling**
+1. In the VMSS blade, under **Availability + scale** (expand it if it is collapsed), click **Scaling**
 
 2. Select the **Manual scale** card. This turns the autoscale rules off until you select Custom autoscale again
 
