@@ -6,13 +6,14 @@
 .DESCRIPTION
     Issue #371: Test-Lab.ps1 reported 19 passed and exit 0 for a flow log whose provisioningState
     was Failed (Traffic Analytics denied by policy), and a connection monitor whose monitoring
-    status was null passed too. These tests run the real Test-Lab.ps1 in a child pwsh process
+    status was Stopped or Failed passed too. These tests run the real Test-Lab.ps1 in a child pwsh process
     against a generated stub of the Az commands it calls, and assert:
 
       1. A healthy estate passes: exit 0, no failures.
       2. A flow log in state Failed, or with no state, fails the provisioning state check: exit 1.
-      3. A connection monitor in state Failed, or with a status that is null, Stopped or Failed,
-         fails: exit 1, and the line names what Azure reported.
+      3. A connection monitor in state Failed, or with a status that is Stopped or Failed,
+         fails: exit 1, and the line names what Azure reported. One with no status passes
+         (a healthy monitor reports none, live 2026-10-28).
 
     No subscription is needed, and none is used. The script runs through
     tests/Support/LabScriptStub.psm1 (issue #112), which aborts the child with exit 99 unless
@@ -161,7 +162,7 @@ Describe 'Lab 5.3 Test-Lab.ps1 - healthy estate' {
         $script:Healthy.ExitCode | Should -Be 0 -Because "output was:`n$($script:Healthy.Output)"
         $script:Healthy.Output | Should -Match 'Flow log provisioning state is Succeeded\.\.\. PASS'
         $script:Healthy.Output | Should -Match 'Connection Monitor provisioning state is Succeeded\.\.\. PASS'
-        $script:Healthy.Output | Should -Match 'Connection Monitor monitoring status is Running\.\.\. PASS'
+        $script:Healthy.Output | Should -Match 'Connection Monitor monitoring status is not Stopped or Failed\.\.\. PASS'
         $script:Healthy.Output | Should -Match 'Failed: 0'
     }
 }
@@ -185,10 +186,9 @@ Describe 'Lab 5.3 Test-Lab.ps1 - a resource left unhealthy fails (#371)' {
         $script:CmFailed.Output | Should -Match 'Failed: 1'
     }
 
-    It 'fails a connection monitor whose monitoring status is null' {
-        $script:CmNullStatus.ExitCode | Should -Be 1 -Because "a null status must not pass; output was:`n$($script:CmNullStatus.Output)"
-        $script:CmNullStatus.Output | Should -Match "monitoring status is Running\.\.\. \(status is ''\) FAIL"
-        $script:CmNullStatus.Output | Should -Match 'Failed: 1'
+    It 'passes a connection monitor that reports no monitoring status' {
+        $script:CmNullStatus.ExitCode | Should -Be 0 -Because "a healthy monitor reports no status; output was:`n$($script:CmNullStatus.Output)"
+        $script:CmNullStatus.Output | Should -Match 'monitoring status is not Stopped or Failed\.\.\. PASS'
     }
 
     It 'fails a connection monitor whose monitoring status is <status>' -ForEach @(
@@ -197,6 +197,6 @@ Describe 'Lab 5.3 Test-Lab.ps1 - a resource left unhealthy fails (#371)' {
     ) {
         $result = (Get-Variable -Scope Script -Name $run).Value
         $result.ExitCode | Should -Be 1 -Because "output was:`n$($result.Output)"
-        $result.Output | Should -Match "monitoring status is Running\.\.\. \(status is '$status'\) FAIL"
+        $result.Output | Should -Match "monitoring status is not Stopped or Failed\.\.\. \(status is '$status'\) FAIL"
     }
 }

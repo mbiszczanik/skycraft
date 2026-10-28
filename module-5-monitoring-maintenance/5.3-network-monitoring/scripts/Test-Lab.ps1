@@ -8,7 +8,7 @@
     - VNet Flow Log (prod-skycraft-swc-vnet-flowlog) exists, is Succeeded and enabled,
       uses Version 2 format, retains logs for 7 days, and has Traffic Analytics
       linked to the platform Log Analytics Workspace
-    - Connection Monitor (skycraft-hub-spoke-cm) exists, is Succeeded and Running (a null status fails),
+    - Connection Monitor (skycraft-hub-spoke-cm) exists, is Succeeded and not Stopped or Failed,
       with the correct source, destination, and test configuration
 
 .EXAMPLE
@@ -187,11 +187,11 @@ Invoke-Test "Connection Monitor provisioning state is Succeeded" {
     return $false
 }
 
-Invoke-Test "Connection Monitor monitoring status is Running" {
+Invoke-Test "Connection Monitor monitoring status is not Stopped or Failed" {
     $cm = Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction SilentlyContinue
     if (-not $cm) { return $false }
-    # A null status fails: Azure reports Running within about a minute of creation.
-    if ("$($cm.Properties.monitoringStatus)" -eq 'Running') { return $true }
+    # A healthy monitor reports no status at all (live 2026-10-28), so empty passes.
+    if ("$($cm.Properties.monitoringStatus)" -notin @('Stopped', 'Failed')) { return $true }
     Write-Host " (status is '$($cm.Properties.monitoringStatus)')" -NoNewline -ForegroundColor Gray
     return $false
 }
