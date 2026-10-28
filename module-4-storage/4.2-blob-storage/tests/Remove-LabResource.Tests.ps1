@@ -60,6 +60,8 @@ BeforeAll {
         'Remove-AzStorageContainer'
         'Get-AzStorageAccountManagementPolicy'
         'Remove-AzStorageAccountManagementPolicy'
+        'Get-AzStorageBlobServiceProperty'
+        'Disable-AzStorageBlobRestorePolicy'
         'Update-AzStorageBlobServiceProperty'
         'Set-AzStorageAccount'
     )
@@ -73,11 +75,14 @@ BeforeAll {
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled) or
     #                         report its object not found (notfound)
     #   SKYCRAFT_STUB_FAIL    '<command>:<name>,...' makes one removal or update throw
+    #   SKYCRAFT_STUB_RESTORE '1' starts prod with point-in-time restore on; like Azure, the
+    #                         versioning update then throws until Disable-AzStorageBlobRestorePolicy ran
     # A lookup is named after its command and the object it reads: 'Get-AzStorageAccount:<sa>',
     # 'Get-AzRmStorageContainer:<sa>', 'Get-AzStorageAccountManagementPolicy:<sa>'. A container
 # removal is logged as 'Remove-AzRmStorageContainer:<container>' by both container stubs.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
+$script:RestoreOn = $env:SKYCRAFT_STUB_RESTORE -eq '1'
 
 function Write-StubCall {
     param([string]$Name)
@@ -176,9 +181,24 @@ function Remove-AzStorageAccountManagementPolicy {
     Invoke-StubRemoval -Command 'Remove-AzStorageAccountManagementPolicy' -Name $StorageAccountName
 }
 
+function Get-AzStorageBlobServiceProperty {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$StorageAccountName)
+    if (Invoke-StubLookup -Name "Get-AzStorageBlobServiceProperty:$StorageAccountName" -ResourceGroup $ResourceGroupName) { return }
+    [pscustomobject]@{ RestorePolicy = [pscustomobject]@{ Enabled = $script:RestoreOn } }
+}
+
+function Disable-AzStorageBlobRestorePolicy {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$StorageAccountName)
+    Invoke-StubRemoval -Command 'Disable-AzStorageBlobRestorePolicy' -Name $StorageAccountName
+    $script:RestoreOn = $false
+}
+
 function Update-AzStorageBlobServiceProperty {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$StorageAccountName, [bool]$IsVersioningEnabled)
+    if ($script:RestoreOn) { throw "Conflicting feature 'restorePolicy' is enabled. Please disable it and retry." }
     Invoke-StubRemoval -Command 'Update-AzStorageBlobServiceProperty' -Name $StorageAccountName
 }
 
@@ -197,7 +217,8 @@ function Set-AzStorageAccount {
             [string[]]$Fail = @(),
             [string[]]$Lookup = @(),
             [string[]]$ArgumentList = @('-Force'),
-            [switch]$Empty
+            [switch]$Empty,
+            [switch]$RestorePolicy
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
@@ -208,6 +229,7 @@ function Set-AzStorageAccount {
             SKYCRAFT_STUB_LOOKUP = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG    = $logPath
+            SKYCRAFT_STUB_RESTORE = if ($RestorePolicy) { '1' } else { '0' }
         }
 
         $calls = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { @() }
@@ -224,7 +246,7 @@ function Set-AzStorageAccount {
     $script:StubDir = $script:Stub.Directory
 
     # A change the script makes: a removal, an update or a setting.
-    $script:ChangePattern = '^(Remove|Update|Set)-'
+    $script:ChangePattern = '^(Remove|Update|Set|Disable)-'
 
     # One invocation per scenario, reused by the assertions below - each child process costs
     # several seconds.
@@ -242,10 +264,13 @@ function Set-AzStorageAccount {
         'Remove-AzRmStorageContainer:game-assets'
         'Update-AzStorageBlobServiceProperty:prodskycraftswcsa'
     )
+    $script:RestoreOn     = Invoke-CleanupScript -Stub $script:Stub -RestorePolicy
+    $script:RestoreUnread = Invoke-CleanupScript -Stub $script:Stub -RestorePolicy -Lookup 'Get-AzStorageBlobServiceProperty:prodskycraftswcsa=denied'
+    $script:RestoreStuck  = Invoke-CleanupScript -Stub $script:Stub -RestorePolicy -Fail 'Disable-AzStorageBlobRestorePolicy:prodskycraftswcsa'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:NotFound, $script:AccountDenied, $script:LookupsFail,
-        $script:StepsFail
+        $script:StepsFail, $script:RestoreOn, $script:RestoreUnread, $script:RestoreStuck
     )
 }
 
@@ -358,6 +383,44 @@ Describe 'Lab 4.2 Remove-LabResource.ps1 - a failed step is counted' {
         $calls | Should -Contain 'Remove-AzStorageAccountManagementPolicy:prodskycraftswcsa'
         $calls | Should -Contain 'Remove-AzRmStorageContainer:public-demo'
         $calls | Should -Contain 'Set-AzStorageAccount:devskycraftswcsa'
+    }
+}
+
+Describe 'Lab 4.2 Remove-LabResource.ps1 - point-in-time restore blocks versioning (#453)' {
+
+    It 'leaves point-in-time restore alone when it is off' {
+        $script:Clean.ExitCode | Should -Be 0 -Because "output was:`n$($script:Clean.Output)"
+        $script:Clean.Calls | Should -Contain 'Get-AzStorageBlobServiceProperty:prodskycraftswcsa'
+        $script:Clean.Calls | Should -Not -Contain 'Disable-AzStorageBlobRestorePolicy'
+        $script:Clean.Calls | Should -Contain 'Update-AzStorageBlobServiceProperty:prodskycraftswcsa'
+    }
+
+    It 'disables it before versioning when it is on, and exits 0' {
+        $run = $script:RestoreOn
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Disabled point-in-time restore'
+        $run.Output | Should -Match 'Disabled Versioning'
+        $disabled = $run.Calls.IndexOf('Disable-AzStorageBlobRestorePolicy:prodskycraftswcsa')
+        $disabled | Should -BeGreaterThan -1
+        $disabled | Should -BeLessThan $run.Calls.IndexOf('Update-AzStorageBlobServiceProperty:prodskycraftswcsa')
+    }
+
+    It 'reports an unreadable blob service as one [ERROR], changes nothing there, and exits 1' {
+        $run = $script:RestoreUnread
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Could not disable versioning: .*does not have authorization'
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls | Should -Not -Contain 'Disable-AzStorageBlobRestorePolicy'
+        $run.Calls | Should -Not -Contain 'Update-AzStorageBlobServiceProperty'
+    }
+
+    It 'reports a failed disable as one [ERROR], does not try versioning, and exits 1' {
+        $run = $script:RestoreStuck
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Could not disable versioning: stub failure: Disable-AzStorageBlobRestorePolicy'
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls | Should -Not -Contain 'Update-AzStorageBlobServiceProperty'
+        $run.Calls | Should -Contain 'Set-AzStorageAccount:devskycraftswcsa'
     }
 }
 
