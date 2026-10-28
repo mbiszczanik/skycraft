@@ -17,13 +17,13 @@
 
 ### IP Flow Verify
 
-- [ ] Successful check for inbound traffic on port 80 (Allowed or Denied)
-- [ ] Identification of the specific NSG rule governing the flow
+- [ ] **Verify IP flow** run for inbound TCP port 8080 from `8.8.8.8` to `dev-skycraft-swc-auth-vm`: **Access denied**
+- [ ] Identification of the specific NSG rule governing the flow (`DenyAllInBound`)
 - [ ] (Optional) Tested outbound traffic to `8.8.8.8` on port 53
 
 ### Next Hop
 
-- [ ] Verified **Internet** as next hop for external IPs
+- [ ] Verified **Internet** as next hop for external IPs (from `prod-skycraft-swc-auth-vm`, or `dev-skycraft-swc-world-vm` in a dev-only environment)
 - [ ] Verified **VNetPeering** or **VirtualNetwork** for internal cross-vnet traffic
 
 ---
@@ -32,12 +32,12 @@
 
 ### Connection Troubleshooter
 
-- [ ] Relationship between Hub and Spoke verified
-- [ ] Hop-by-hop latency and status results obtained
+- [ ] **Run diagnostic tests** run from the source VM to `dev-skycraft-swc-auth-vm` on TCP port 22
+- [ ] Result table obtained: **Connectivity test** (**Reachable** with the dev fallback source), **Outbound** and **Inbound NSG diagnostic**, **Next hop**, **Destination port accessible**
 
 ### Topology
 
-- [ ] Visual diagram of `dev-skycraft-swc-rg` generated
+- [ ] Visual diagram of `dev-skycraft-swc-rg` generated (**Scope** set to that group, Sweden Central expanded)
 - [ ] Diagram accurately reflects subnets and VMs created in Modules 2-3
 
 ---
@@ -46,12 +46,13 @@
 
 - [ ] Flow log name: `prod-skycraft-swc-vnet-flowlog` (under `NetworkWatcher_swedencentral` in `NetworkWatcherRG`)
 - [ ] Target resource: `prod-skycraft-swc-vnet`
-- [ ] Status: **Enabled**
+- [ ] Status: **Enabled**, provisioning state **Succeeded** (a flow log left **Failed** by a refused Traffic Analytics enablement records nothing)
 - [ ] Storage account: `platformskycraftswcsa`
 - [ ] Format: JSON, **Version 2**
 - [ ] Retention: **7 days**
 - [ ] Traffic Analytics: **Enabled**, interval **10 minutes**, workspace `platform-skycraft-swc-law`
-- [ ] Tags: `Project = SkyCraft`, `Environment = Production`, `CostCenter = MSDN`
+- [ ] Tags: `Project = SkyCraft`, `Environment = Production`, `CostCenter = MSDN`, `Owner`
+- [ ] Under Lab 1.3's policies: the `NWTA-*` data collection endpoint and rule in `platform-skycraft-swc-rg` exist and carry `Project = SkyCraft` (added by `Inherit-Project-Tag`)
 
 ---
 
@@ -62,8 +63,8 @@
 - [ ] Test group `hub-spoke-ssh`: source endpoint `prod-auth-source` (`prod-skycraft-swc-auth-vm`, or `dev-skycraft-swc-world-vm` when no prod VM exists) → destination endpoint `dev-auth-destination` (`dev-skycraft-swc-auth-vm`)
 - [ ] Test configuration `tcp-22-every-5m`: **TCP** port **22**, every **300 seconds**, thresholds 10 % failed / 100 ms RTT
 - [ ] Output workspace: `platform-skycraft-swc-law`
-- [ ] NetworkWatcherAgent extension present on both endpoint VMs
-- [ ] Tags: `Project = SkyCraft`, `Environment = Production`, `CostCenter = MSDN`
+- [ ] Network Watcher agent extension present on both endpoint VMs (`AzureNetworkWatcherExtension` when the Portal wizard installed it, `NetworkWatcherAgentLinux` otherwise), tagged `Project = SkyCraft`
+- [ ] Tags: `Project = SkyCraft`, `Environment = Production`, `CostCenter = MSDN`, `Owner`
 
 ---
 
@@ -98,7 +99,7 @@ Test-AzNetworkWatcherIPFlow -NetworkWatcher $watcher -TargetVirtualMachineId $vm
 # Flow log: target, format version, retention, Traffic Analytics
 $nw = Get-AzNetworkWatcher -Location swedencentral
 Get-AzNetworkWatcherFlowLog -NetworkWatcher $nw -Name prod-skycraft-swc-vnet-flowlog |
-  Select-Object Name, Enabled, TargetResourceId, @{n='Version';e={$_.Format.Version}}, @{n='RetentionDays';e={$_.RetentionPolicy.Days}},
+  Select-Object Name, ProvisioningState, Enabled, TargetResourceId, @{n='Version';e={$_.Format.Version}}, @{n='RetentionDays';e={$_.RetentionPolicy.Days}},
     @{n='TA';e={$_.FlowAnalyticsConfiguration.NetworkWatcherFlowAnalyticsConfiguration.Enabled}},
     @{n='Interval';e={$_.FlowAnalyticsConfiguration.NetworkWatcherFlowAnalyticsConfiguration.TrafficAnalyticsInterval}}
 
