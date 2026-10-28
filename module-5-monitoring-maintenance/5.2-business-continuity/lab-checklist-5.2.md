@@ -11,8 +11,8 @@
 - [x] Vault name: `platform-skycraft-swc-rsv`
 - [x] Location: **Sweden Central**
 - [x] Resource group: `platform-skycraft-swc-rg`
-- [x] Storage replication type: **Locally-redundant (LRS)**
-- [x] Soft delete: **AlwaysON** (platform-enforced by Azure Backup "secure by default"; not configurable)
+- [x] Storage replication type: **Locally-redundant (LRS)**, set at creation on the **Redundancy** tab
+- [x] Soft delete: **AlwaysON** (platform-enforced by Azure Backup "secure by default"; only the retention, 14 days, is chosen at creation)
 
 ### Tags
 
@@ -33,30 +33,43 @@
 - [x] Backup time: **02:00 AM UTC**
 - [x] Instant Restore retention: **2 days**
 - [x] Azure Backup Resource Group: name `platform-skycraft-swc-rpc`, suffix `-rg`
-- [x] Daily backup retention: **30 days**
+- [x] Daily backup retention: **30 days** (the form's default is 180)
 
 ### Instant-Restore Snapshot Resource Group
 
 - [x] Resource group `platform-skycraft-swc-rpc1-rg` in **Sweden Central**
 - [x] Tags: `Project` = `SkyCraft`, `Environment` = `Platform`, `CostCenter` = `MSDN`, `Owner` set
 - [x] No resource lock on the group (Azure Backup deletes expired snapshots from it)
+- [x] Restore point collections `AzureBackup_<vm>_<n>` in the group carry `Project` = `SkyCraft` (inherited through Lab 1.3's `Inherit-Project-Tag`)
 
 ### Blob Backup Policy
 
-- [x] Policy name: `SkyCraft-Blob-Policy`
-- [x] Retention: **30 days**
+- [x] Policy name: `SkyCraft-Blob-Policy`, created by `New-LabBlobBackup.ps1` (not in the Portal)
+- [x] Operational backup only: one retention rule, **30 days** in the OperationalStore
+- [x] No vaulted backup rule (no Azure Backup charge)
 - [x] Associated vault: `platform-skycraft-swc-bv`
 
 ---
 
 ## ✅ Protected Items Verification
 
+### Key Vault Access for Encrypted VM Backup
+
+- [x] Microsoft Entra app **Backup Management Service** holds **Key Vault Administrator** on `dev-skycraft-swc-kv`
+- [x] Granted before *Enable backup* of the ADE-encrypted `dev-skycraft-swc-auth-vm`
+
 ### VM Backup
 
-- [x] VM `dev-skycraft-swc-auth-vm` listed under **Backup items** → Azure Virtual Machine
-- [x] Policy assigned: `SkyCraft-Daily-Prod`
-- [x] Initial backup triggered (status: **Completed** or **In progress**, never **Failed** - a failure here is Troubleshooting, Issue 2 in the lab guide)
+- [x] VMs `dev-skycraft-swc-auth-vm` and `dev-skycraft-swc-world-vm` listed under **Backup items** → Azure Virtual Machine
+- [x] Policy assigned to both: `SkyCraft-Daily-Prod`
+- [x] Initial backup of each: **Take Snapshot** sub-task **Completed**; job **Completed** or **In progress**, never **Failed** (a failure here is Troubleshooting, Issues 2 and 4 in the lab guide)
 - [x] Last backup status: **Success** (once completed)
+
+### File-Level Recovery
+
+- [ ] File recovery script run on `dev-skycraft-swc-world-vm` from `/root/flr`: `Connection succeeded!`
+- [ ] `/root/flr/<vm>-<time>/Volume1/opt/skycraft/flr-marker.txt` read back
+- [ ] **Unmount Disks** done on the File Recovery pane
 
 ---
 
@@ -69,7 +82,7 @@
 - [x] Resource group: `platform-skycraft-swc-rg`
 - [x] Storage redundancy: **Locally-redundant (LRS)**
 - [x] Identity type: **System Assigned**
-- [x] Soft delete: **Off** (lab-friction override for cleanup)
+- [x] Soft delete: **Off** (lab-friction override for cleanup), so created with Az PowerShell or the Bicep: the Portal creates it AlwaysOn, which cannot be undone
 
 ### Tags
 
@@ -101,7 +114,17 @@
 
 - [ ] Diagnostic setting `rsv-backup-reports-diag` on `platform-skycraft-swc-rsv` → workspace `platform-skycraft-swc-law` (resource-specific categories `CoreAzureBackup`, `AddonAzureBackupJobs`, `AddonAzureBackupPolicy`, `AddonAzureBackupStorage`, `AddonAzureBackupProtectedInstance`, `AzureBackupOperations`; not the legacy `AzureBackupReport`)
 - [ ] Diagnostic setting `bv-backup-reports-diag` on `platform-skycraft-swc-bv` → workspace `platform-skycraft-swc-law` (the four `CoreAzureBackup`/`Addon*` categories)
-- [ ] Backup Instances report in Backup center shows all protected items (up to 24 h after the settings exist)
+- [ ] Backup Instances report in **Resiliency** → **Reports** shows all protected items (up to 24 h after the settings exist)
+
+---
+
+## ✅ Alert Processing Rule Verification
+
+- [ ] Rule `skycraft-backup-critical-apr` in `platform-skycraft-swc-rg`, enabled
+- [ ] Scope: `platform-skycraft-swc-rsv`
+- [ ] Filter: **Severity** **Equals** **Sev0** (Critical)
+- [ ] Rule type: **Apply action group** with `skycraft-ops-ag` (not **Suppress notifications**)
+- [ ] Tags: `Project` = `SkyCraft`, `Environment` = `Platform`, `CostCenter` = `MSDN`
 
 ---
 
@@ -178,6 +201,52 @@ Get-AzDataProtectionBackupPolicy -ResourceGroupName 'platform-skycraft-swc-rg' -
 # Name                   DatasourceType
 # ----                   --------------
 # SkyCraft-Blob-Policy   Microsoft.Storage/storageAccounts/blobServices
+
+# The rules: one AzureRetentionRule, OperationalStore, P30D; no AzureBackupRule (vaulted)
+$bv = Get-AzDataProtectionBackupVault -ResourceGroupName 'platform-skycraft-swc-rg' -VaultName 'platform-skycraft-swc-bv'
+(Get-AzResource -ResourceId "$($bv.Id)/backupPolicies/SkyCraft-Blob-Policy" -ApiVersion '2023-01-01' -ExpandProperties).Properties.policyRules |
+  Select-Object name, objectType, @{N='Store';E={$_.lifecycles.sourceDataStore.dataStoreType}}, @{N='Keep';E={$_.lifecycles.deleteAfter.duration}} |
+  Format-Table
+
+# Expected output:
+# name    objectType          Store            Keep
+# ----    ----------          -----            ----
+# Default AzureRetentionRule  OperationalStore P30D
+```
+
+### Verify Key Vault Role for Azure Backup
+
+```powershell
+$kv = Get-AzKeyVault -ResourceGroupName 'dev-skycraft-swc-rg' -VaultName 'dev-skycraft-swc-kv'
+Get-AzRoleAssignment -Scope $kv.ResourceId -RoleDefinitionName 'Key Vault Administrator' |
+  Where-Object { $_.DisplayName -eq 'Backup Management Service' } |
+  Select-Object DisplayName, RoleDefinitionName, ObjectType |
+  Format-Table
+
+# Expected output:
+# DisplayName                RoleDefinitionName       ObjectType
+# -----------                ------------------       ----------
+# Backup Management Service  Key Vault Administrator  ServicePrincipal
+```
+
+`Get-AzRoleAssignment` resolves the principals through Microsoft Graph. If it fails with `MicrosoftGraphEndpointResourceId`, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md); `Test-Lab.ps1` reads the role through the Azure Resource Manager API instead.
+
+### Verify Alert Processing Rule
+
+```powershell
+$aprId = "/subscriptions/$((Get-AzContext).Subscription.Id)/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.AlertsManagement/actionRules/skycraft-backup-critical-apr"
+$apr = (Get-AzResource -ResourceId $aprId -ApiVersion '2021-08-08' -ExpandProperties).Properties
+[pscustomobject]@{
+  Enabled  = $apr.enabled
+  Action   = $apr.actions.actionType
+  Group    = ($apr.actions.actionGroupIds -split '/')[-1]
+  Severity = ($apr.conditions | Where-Object field -eq 'Severity').values -join ','
+} | Format-Table
+
+# Expected output:
+# Enabled Action          Group           Severity
+# ------- ------          -----           --------
+#    True AddActionGroups skycraft-ops-ag Sev0
 ```
 
 ### Verify Blob Backup Instance
@@ -221,9 +290,11 @@ Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $containe
 | :-------------------------- | :-------------------------- | :------------ | :----- |
 | **Recovery Services Vault** | `platform-skycraft-swc-rsv` | LRS           | [x]    |
 | **VM Backup Policy**        | `SkyCraft-Daily-Prod`       | Daily, 30-day | [x]    |
-| **Protected VM**            | `dev-skycraft-swc-auth-vm` | VM Backup     | [x]    |
-| **Backup Vault**            | `platform-skycraft-swc-bv`  | LRS           | [x]    |
-| **Blob Policy**             | `SkyCraft-Blob-Policy`      | 30-day        | [x]    |
+| **Protected VMs**           | `dev-skycraft-swc-auth-vm`, `dev-skycraft-swc-world-vm` | VM Backup | [x] |
+| **Key Vault role**          | Backup Management Service on `dev-skycraft-swc-kv` | Key Vault Administrator | [x] |
+| **Backup Vault**            | `platform-skycraft-swc-bv`  | LRS, soft delete Off | [x] |
+| **Blob Policy**             | `SkyCraft-Blob-Policy`      | Operational, 30-day | [x] |
+| **Alert processing rule**   | `skycraft-backup-critical-apr` | Sev0 → `skycraft-ops-ag` | [ ] |
 | **Site Recovery**           | ASR → Norway East           | Continuous    | [ ]    |
 | **Test Failover**           | Completed + cleaned up      | Validated     | [ ]    |
 
