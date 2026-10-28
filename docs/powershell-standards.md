@@ -226,6 +226,8 @@ Exit-Lab -FailureCount $script:cleanupFailures   # 1 when anything failed, 0 oth
 
   [`tests/LabCommon-ResourceLock.Tests.ps1`](../tests/LabCommon-ResourceLock.Tests.ps1) pins the helper and holds the Lab 4.1-5.3 cleanups to that call; their own suites run them against Lab 1.3's locks through the `Lock` route of the ARM fake (`Get-LabArmStub -Api Lock`). Labs 2.1-3.4 still delete under the lock and are owed the same change (#372).
 
+- **Resources by id with an explicit `-ApiVersion`**: A lab script, tool, guide or checklist calls `Get-AzResource -ResourceId` and `New-AzResource` with `-ApiVersion` set to a GA version that Sweden Central serves (take the one the lab's Bicep already uses for the type, or one the provider lists as GA). Without it ARM uses the newest version the provider lists, and a region may not serve that yet: on 2026-10-28 `2026-07-01` for connection monitors failed every Lab 5.3 lookup (#452). In `Test-Lab.ps1`, read through a helper that returns `$null` only for a not-found error and throws any other error (see `Get-LabArmResource` in Lab 5.1-5.3), never `-ErrorAction SilentlyContinue`, so a failed lookup is reported as an error and not as a missing resource. `tests/Arm-Api-Version.Tests.ps1` fails on a call without `-ApiVersion`; the calls in Modules 1 to 3, pinned by the running course (#300), are listed there as owed and the list can only shrink.
+
 - **Retry Logic**: Implement retry loops for "stubborn" Azure resources (like NSGs) that suffer from eventual consistency delays.
 
 - **Dependencies First**: Dissociate resources (e.g., NSG from Subnet) before attempting deletion.

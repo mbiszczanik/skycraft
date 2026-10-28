@@ -178,7 +178,7 @@ function Get-AzContext {
 
 function Get-AzResource {
     [CmdletBinding()]
-    param([string]$ResourceId, [string]$ResourceGroupName, [switch]$ExpandProperties)
+    param([string]$ResourceId, [string]$ResourceGroupName, [switch]$ExpandProperties, [string]$ApiVersion)
     if ($ResourceId -like '*/connectionMonitors/*') {
         if (Invoke-StubLookup -Name 'ConnectionMonitor' -Gone -GoneKind 'status404') { return }
         return [pscustomobject]@{

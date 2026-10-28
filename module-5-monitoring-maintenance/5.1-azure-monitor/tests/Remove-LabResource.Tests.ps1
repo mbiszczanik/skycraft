@@ -285,7 +285,7 @@ function Remove-AzDataCollectionRuleAssociation {
 # rule is reported as a status-only 404.
 function Get-AzResource {
     [CmdletBinding()]
-    param([string]$ResourceId, [switch]$ExpandProperties)
+    param([string]$ResourceId, [switch]$ExpandProperties, [string]$ApiVersion)
     $name  = ($ResourceId -split '/')[-1]
     $group = ($ResourceId -split '/')[4]
     if (Invoke-StubLookup -Name "Get-AzResource:$name" -Gone 'group') { return }

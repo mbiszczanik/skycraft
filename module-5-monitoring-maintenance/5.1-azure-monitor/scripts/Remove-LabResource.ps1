@@ -259,7 +259,7 @@ $labRuleKeys = [System.Collections.Generic.HashSet[string]]::new()
 foreach ($ruleId in @($candidateRuleIds.Values)) {
     $ruleName = ($ruleId -split '/')[-1]
     $ruleLookup = Invoke-LabLookup -Target "data collection rule '$ruleName'" -Lookup {
-        Get-AzResource -ResourceId $ruleId -ExpandProperties -ErrorAction Stop
+        Get-AzResource -ResourceId $ruleId -ApiVersion '2023-03-11' -ExpandProperties -ErrorAction Stop
     }
     if ($ruleLookup.Failed) {
         if (-not $keepWorkspaceReason) {

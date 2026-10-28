@@ -287,7 +287,7 @@ $law = Get-AzOperationalInsightsWorkspace -Name platform-skycraft-swc-law -Resou
 # Install the agent on both endpoints; New-AzResource (not Set-AzVMExtension, which has no -Tag)
 # so the extension carries the tag the lab cleanup selects on
 foreach ($vm in $src, $dst) {
-  New-AzResource -ResourceId "$($vm.Id)/extensions/NetworkWatcherAgentLinux" -Location $vm.Location `
+  New-AzResource -ResourceId "$($vm.Id)/extensions/NetworkWatcherAgentLinux" -Location $vm.Location -ApiVersion 2024-07-01 `
     -Properties @{ publisher = 'Microsoft.Azure.NetworkWatcher'; type = 'NetworkWatcherAgentLinux'; typeHandlerVersion = '1.4'; autoUpgradeMinorVersion = $true } `
     -Tag @{ Project = 'SkyCraft' } -Force
 }

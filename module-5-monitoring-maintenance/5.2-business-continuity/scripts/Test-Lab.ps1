@@ -64,8 +64,69 @@ $snapshotRgName   = "${snapshotRgPrefix}1${snapshotRgSuffix}"
 # AlwaysON.
 $backupVaultSoftDeleteAccepted = @('Off')
 
+# Explicit api-versions for the raw ARM reads (#452); Sweden Central serves both.
+$vaultApiVersion       = '2024-04-01'
+$backupVaultApiVersion = '2024-04-01'
+
 $passCount = 0
 $failCount = 0
+
+# Whether a lookup's error says the object does not exist rather than that the lookup failed.
+# Same rule as Test-LabNotFoundError in this lab's Remove-LabResource.ps1.
+function Test-LabNotFoundError {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    $evidence = [System.Collections.Generic.List[string]]::new()
+    $evidence.Add([string]$ErrorRecord)
+    $evidence.Add([string]$ErrorRecord.FullyQualifiedErrorId)
+    $status404 = $false
+    for ($exception = $ErrorRecord.Exception; $exception; $exception = $exception.InnerException) {
+        $evidence.Add([string]$exception.Message)
+        foreach ($code in @($exception.Body.Code, $exception.Body.Error.Code, $exception.ErrorCode)) {
+            if ($code) { $evidence.Add([string]$code) }
+        }
+        foreach ($status in @($exception.Response.StatusCode, $exception.ResponseStatusCode, $exception.Status)) {
+            if ("$status" -in @('404', 'NotFound')) { $status404 = $true }
+        }
+    }
+    $text = $evidence -join "`n"
+
+    if ($text -match 'SubscriptionNotFound|subscription .{0,80}(could not be|was not) found') { return $false }
+    if ($status404) { return $true }
+    return $text -match '\bResource(Group)?NotFound\b|was not found|Resource group .{0,100}could not be found|invalid status code ''NotFound''|\b404 \(Not Found\)'
+}
+
+# Reads one resource by id at an explicit api-version (#452: without one ARM uses the newest version
+# the provider lists, which a region may not serve yet). A missing resource is $null; any other
+# error throws, so the check that asked fails with the error instead of reading the resource as missing.
+function Get-LabArmResource {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ApiVersion,
+
+        [switch]$ExpandProperties
+    )
+
+    try {
+        if ($ExpandProperties) {
+            return Get-AzResource -ResourceId $ResourceId -ApiVersion $ApiVersion -ExpandProperties -ErrorAction Stop
+        }
+        return Get-AzResource -ResourceId $ResourceId -ApiVersion $ApiVersion -ErrorAction Stop
+    }
+    catch {
+        if (Test-LabNotFoundError -ErrorRecord $_) { return $null }
+        throw
+    }
+}
 
 function Invoke-Test {
     param(
@@ -126,17 +187,25 @@ Invoke-Test "RSV storage redundancy is LocallyRedundant" {
 
 # Read tags from the raw ARM resource — Get-AzRecoveryServicesVault does not
 # reliably populate .Tags across Az.RecoveryServices versions.
-$rsvTags = if ($rsv) { (Get-AzResource -ResourceId $rsv.ID -ErrorAction SilentlyContinue).Tags } else { $null }
+# A lookup error other than not found is kept and thrown by the checks that read the tags.
+$rsvTags = $null
+$rsvTagsError = $null
+if ($rsv) {
+    try { $rsvTags = (Get-LabArmResource -ResourceId $rsv.ID -ApiVersion $vaultApiVersion).Tags } catch { $rsvTagsError = $_ }
+}
 
 Invoke-Test "RSV tag 'Project' = 'SkyCraft'" {
+    if ($rsvTagsError) { throw $rsvTagsError }
     return ($null -ne $rsvTags -and $rsvTags.Project -eq 'SkyCraft')
 }
 
 Invoke-Test "RSV tag 'Environment' = 'Platform'" {
+    if ($rsvTagsError) { throw $rsvTagsError }
     return ($null -ne $rsvTags -and $rsvTags.Environment -eq 'Platform')
 }
 
 Invoke-Test "RSV tag 'CostCenter' = 'MSDN'" {
+    if ($rsvTagsError) { throw $rsvTagsError }
     return ($null -ne $rsvTags -and $rsvTags.CostCenter -eq 'MSDN')
 }
 
@@ -146,7 +215,7 @@ Invoke-Test "RSV soft delete is AlwaysON (platform-enforced, docs/bicep-standard
     # "secure by default" enforces AlwaysON on every new vault; the template sends no
     # softDeleteSettings at all, and no API version or tool can turn it off.
     $state = $null
-    $cfg = Get-AzResource -ResourceId "$($rsv.ID)/backupconfig/vaultconfig" -ApiVersion '2023-06-01' -ExpandProperties -ErrorAction SilentlyContinue
+    $cfg = Get-LabArmResource -ResourceId "$($rsv.ID)/backupconfig/vaultconfig" -ApiVersion '2023-06-01' -ExpandProperties
     if ($cfg) { $state = $cfg.Properties.softDeleteFeatureState }
     if (-not $state) {
         $props = Get-AzRecoveryServicesVaultProperty -VaultId $rsv.ID -ErrorAction SilentlyContinue
@@ -185,7 +254,7 @@ Invoke-Test "Policy instant restore retention is 2 days" {
     if (-not $rsvPolicy -or -not $rsv) { return $false }
     # SnapshotRetentionInDays naming is version-sensitive; read the raw ARM property
     # instantRpRetentionRangeInDays and fall back to the typed property.
-    $pol = Get-AzResource -ResourceId "$($rsv.ID)/backupPolicies/SkyCraft-Daily-Prod" -ApiVersion '2023-06-01' -ExpandProperties -ErrorAction SilentlyContinue
+    $pol = Get-LabArmResource -ResourceId "$($rsv.ID)/backupPolicies/SkyCraft-Daily-Prod" -ApiVersion '2023-06-01' -ExpandProperties
     if ($pol -and $null -ne $pol.Properties.instantRpRetentionRangeInDays) {
         return ($pol.Properties.instantRpRetentionRangeInDays -eq 2)
     }
@@ -212,7 +281,7 @@ Invoke-Test "Policy stores instant-restore snapshots in '$snapshotRgName'" {
     if (-not $rsvPolicy -or -not $rsv) { return $false }
     # Without a named group Azure Backup creates an untagged AzureBackupRG_* group, which Lab 1.3's
     # Require-Environment-Tag-RG denies (#184). Raw ARM first, typed properties as the fallback.
-    $pol = Get-AzResource -ResourceId "$($rsv.ID)/backupPolicies/SkyCraft-Daily-Prod" -ApiVersion '2023-06-01' -ExpandProperties -ErrorAction SilentlyContinue
+    $pol = Get-LabArmResource -ResourceId "$($rsv.ID)/backupPolicies/SkyCraft-Daily-Prod" -ApiVersion '2023-06-01' -ExpandProperties
     $details = if ($pol) { $pol.Properties.instantRPDetails } else { $null }
     if ($details -and $details.azureBackupRGNamePrefix) {
         return ($details.azureBackupRGNamePrefix -eq $snapshotRgPrefix -and "$($details.azureBackupRGNameSuffix)" -eq $snapshotRgSuffix)
@@ -315,7 +384,11 @@ Write-Host "[Backup Vault]" -ForegroundColor Yellow
 $bv = Get-AzDataProtectionBackupVault -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction SilentlyContinue
 # Raw ARM body — reliable for storageSettings, identity and tag casing (typed
 # object exposes these as .StorageSetting/.IdentityPrincipalId/.Tag which vary by module version).
-$bvArm = if ($bv) { Get-AzResource -ResourceId $bv.Id -ExpandProperties -ErrorAction SilentlyContinue } else { $null }
+$bvArm = $null
+$bvArmError = $null
+if ($bv) {
+    try { $bvArm = Get-LabArmResource -ResourceId $bv.Id -ApiVersion $backupVaultApiVersion -ExpandProperties } catch { $bvArmError = $_ }
+}
 
 Invoke-Test "Backup Vault '$bvName' exists" {
     return ($null -ne $bv -and $bv.Name -eq $bvName)
@@ -327,11 +400,13 @@ Invoke-Test "Backup Vault location is swedencentral" {
 }
 
 Invoke-Test "Backup Vault storage type is LocallyRedundant" {
+    if ($bvArmError) { throw $bvArmError }
     if (-not $bvArm) { return $false }
     return ($bvArm.Properties.storageSettings[0].type -eq 'LocallyRedundant')
 }
 
 Invoke-Test "Backup Vault has system-assigned managed identity" {
+    if ($bvArmError) { throw $bvArmError }
     if (-not $bvArm) { return $false }
     # Identity is a top-level ARM block; fall back to the typed object if absent.
     $idType    = if ($bvArm.Identity) { "$($bvArm.Identity.Type)" }        else { "$($bv.IdentityType)" }
@@ -340,21 +415,25 @@ Invoke-Test "Backup Vault has system-assigned managed identity" {
 }
 
 Invoke-Test "Backup Vault tag 'Project' = 'SkyCraft'" {
+    if ($bvArmError) { throw $bvArmError }
     if (-not $bvArm) { return $false }
     return ($bvArm.Tags.Project -eq 'SkyCraft')
 }
 
 Invoke-Test "Backup Vault tag 'Environment' = 'Platform'" {
+    if ($bvArmError) { throw $bvArmError }
     if (-not $bvArm) { return $false }
     return ($bvArm.Tags.Environment -eq 'Platform')
 }
 
 Invoke-Test "Backup Vault tag 'CostCenter' = 'MSDN'" {
+    if ($bvArmError) { throw $bvArmError }
     if (-not $bvArm) { return $false }
     return ($bvArm.Tags.CostCenter -eq 'MSDN')
 }
 
 Invoke-Test "Backup Vault soft delete is $($backupVaultSoftDeleteAccepted -join ' or ') (lab-friction override, docs/bicep-standards.md section 4.5)" {
+    if ($bvArmError) { throw $bvArmError }
     if (-not $bvArm) { return $false }
     $softDeleteState = "$($bvArm.Properties.securitySettings.softDeleteSettings.state)"
     if ($softDeleteState -in $backupVaultSoftDeleteAccepted) { return $true }
@@ -376,20 +455,24 @@ Write-Host "[Blob Backup Policy]" -ForegroundColor Yellow
 $blobPolicy = Get-AzDataProtectionBackupPolicy -ResourceGroupName $platformRg -VaultName $bvName -Name 'SkyCraft-Blob-Policy' -ErrorAction SilentlyContinue
 # Raw ARM body — typed object property is ambiguously DatasourceType vs DatasourceTypes
 # across module versions; ARM exposes the canonical 'datasourceTypes' array.
-$blobPolicyArm = if ($bv) {
-    Get-AzResource -ResourceId "$($bv.Id)/backupPolicies/SkyCraft-Blob-Policy" -ApiVersion '2023-01-01' -ExpandProperties -ErrorAction SilentlyContinue
-} else { $null }
+$blobPolicyArm = $null
+$blobPolicyArmError = $null
+if ($bv) {
+    try { $blobPolicyArm = Get-LabArmResource -ResourceId "$($bv.Id)/backupPolicies/SkyCraft-Blob-Policy" -ApiVersion '2023-01-01' -ExpandProperties } catch { $blobPolicyArmError = $_ }
+}
 
 Invoke-Test "Policy 'SkyCraft-Blob-Policy' exists" {
     return ($null -ne $blobPolicy -and $blobPolicy.Name -eq 'SkyCraft-Blob-Policy')
 }
 
 Invoke-Test "Blob policy datasource type is AzureBlob" {
+    if ($blobPolicyArmError) { throw $blobPolicyArmError }
     if (-not $blobPolicyArm) { return $false }
     return ($blobPolicyArm.Properties.datasourceTypes -contains 'Microsoft.Storage/storageAccounts/blobServices')
 }
 
 Invoke-Test "Blob policy operational retention is 30 days" {
+    if ($blobPolicyArmError) { throw $blobPolicyArmError }
     if (-not $blobPolicyArm) { return $false }
     # Operational retention is an ISO-8601 duration (P30D) on a lifecycle deleteAfter.
     $found = $false

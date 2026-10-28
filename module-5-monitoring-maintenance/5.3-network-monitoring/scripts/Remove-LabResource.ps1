@@ -78,6 +78,9 @@ $script:cleanupFailures = 0
 $networkWatcherRg      = 'NetworkWatcherRG'
 $networkWatcherName    = 'NetworkWatcher_swedencentral'
 $connectionMonitorName = 'skycraft-hub-spoke-cm'
+# Explicit api-versions for the raw ARM reads (#452); Sweden Central serves both.
+$connectionMonitorApiVersion = '2024-05-01'
+$vmExtensionApiVersion       = '2024-07-01'
 $flowLogName           = 'prod-skycraft-swc-vnet-flowlog'
 $platformRg            = 'platform-skycraft-swc-rg'
 $location              = 'swedencentral'
@@ -290,7 +293,7 @@ $endpointVmIds = @()
 # NetworkWatcherAgent extension removed in step [3/4], and they cannot be read once the monitor is
 # gone.
 $cmLookup = Invoke-LabLookup -Target "Connection Monitor '$connectionMonitorName'" -Lookup {
-    Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction Stop
+    Get-AzResource -ResourceId $connectionMonitorResourceId -ApiVersion $connectionMonitorApiVersion -ExpandProperties -ErrorAction Stop
 }
 $cmResource = $cmLookup.Value | Select-Object -First 1
 if ($cmResource) {
@@ -390,7 +393,7 @@ foreach ($target in $agentTargets) {
         # The ownership tag decides whether the agent is the lab's to remove. A tag that could not
         # be read leaves the agent in place; one that is gone with its extension leaves nothing.
         $tagLookup = Invoke-LabLookup -Target "the tags of $($agent.Name) on $vmName" -Lookup {
-            Get-AzResource -ResourceId $agent.Id -ErrorAction Stop
+            Get-AzResource -ResourceId $agent.Id -ApiVersion $vmExtensionApiVersion -ErrorAction Stop
         }
         if ($tagLookup.Failed) { continue }
         $agentResource = $tagLookup.Value | Select-Object -First 1
