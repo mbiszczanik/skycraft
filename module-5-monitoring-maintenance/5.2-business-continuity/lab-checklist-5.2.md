@@ -124,7 +124,7 @@
 - [ ] Scope: `platform-skycraft-swc-rsv`
 - [ ] Filter: **Severity** **Equals** **Sev0** (Critical)
 - [ ] Rule type: **Apply action group** with `skycraft-ops-ag` (not **Suppress notifications**)
-- [ ] Tags: `Project` = `SkyCraft`, `Environment` = `Platform`, `CostCenter` = `MSDN`
+- [ ] Tags: `Project` = `SkyCraft`, `Environment` = `Platform`, `CostCenter` = `MSDN`, `Owner` set
 
 ---
 

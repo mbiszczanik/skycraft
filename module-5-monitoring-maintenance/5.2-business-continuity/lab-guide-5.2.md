@@ -471,7 +471,7 @@ Azure Backup raises built-in Azure Monitor alerts on the vault. No alert rule of
 **a. Review the alerts**
 
 1. Search for **Resiliency** and, under **Backup and recovery**, click **Alerts**.
-2. Verify if any Critical or Warning alerts exist. After a fresh deployment expect one built-in alert on `platform-skycraft-swc-rsv`:
+2. Verify if any Critical or Warning alerts exist. After `Deploy-Bicep.ps1` expect one built-in alert on `platform-skycraft-swc-rsv` (a policy you created in the Portal with 2 days from the start raises none):
    - **Modify policy with shorter retention** (0 - Critical) - raised because `Deploy-Bicep.ps1` shortens instant-restore retention to 2 days after creating the Enhanced policy. Expected; it is a security alert about the change, not a failure.
 
    A **Backup Failure** (1 - Error) alert is **not** expected. It means a VM has no recovery point; open the failed job under **Backup jobs** and see Troubleshooting, Issues 2 and 4.
@@ -496,7 +496,7 @@ AG=$(az monitor action-group show -g platform-skycraft-swc-rg -n skycraft-ops-ag
 az monitor alert-processing-rule create --name skycraft-backup-critical-apr --resource-group platform-skycraft-swc-rg \
   --scopes "$RSV" --rule-type AddActionGroups --action-groups "$AG" --filter-severity Equals Sev0 \
   --description "Send Critical alerts of platform-skycraft-swc-rsv to skycraft-ops-ag" \
-  --tags Project=SkyCraft Environment=Platform CostCenter=MSDN
+  --tags Project=SkyCraft Environment=Platform CostCenter=MSDN Owner="<your name>"
 ```
 
 #### Azure PowerShell
@@ -508,7 +508,7 @@ $ag  = Get-AzActionGroup -ResourceGroupName platform-skycraft-swc-rg -Name skycr
 Set-AzAlertProcessingRule -ResourceGroupName platform-skycraft-swc-rg -Name skycraft-backup-critical-apr `
   -Scope $rsv.ID -AlertProcessingRuleType AddActionGroups -ActionGroupId $ag.Id -FilterSeverity 'Equals:Sev0' `
   -Enabled 'True' -Description 'Send Critical alerts of platform-skycraft-swc-rsv to skycraft-ops-ag' `
-  -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN' }
+  -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = '<your name>' }
 ```
 
 **Preview - the Bicep path** (`bicep/main.bicep`):
@@ -546,7 +546,7 @@ The steps below run commands on the VM with **Run command**, which needs no Bast
    ```
 
    Then take **Backup now** for the world VM and wait for **Take Snapshot** to complete, as in Step 5.2.3 c.
-2. In the vault, under **Protected items**, click **Backup items** → **Azure Virtual Machine** → `dev-skycraft-swc-world-vm` → **File Recovery**.
+2. In the vault, under **Protected items** (expand it if it is collapsed), click **Backup items** → **Azure Virtual Machine** → `dev-skycraft-swc-world-vm` → **File Recovery**.
 3. Under **Select restore point**, select the recovery point you just took.
 4. Click **Download Script**. Generating it took about 1.5 minutes in a live run. Next to the button the pane shows a 15-character password: copy it, the script asks for it. The script and its password are valid for 12 hours.
 5. Copy the script to the VM. In Cloud Shell, upload it (**Manage files** → **Upload**), then send it with Run command into `/root/flr`:
@@ -622,8 +622,8 @@ The steps below run commands on the VM with **Run command**, which needs no Bast
 **Solution**: Give the policy a tagged snapshot group, as in Step 5.2.2:
 
 1. Create `platform-skycraft-swc-rpc1-rg` with the SkyCraft tags (Step 5.2.2, step 1), or re-run `Deploy-Bicep.ps1`, which creates the group and updates the existing policy for you.
-2. In the portal: **Backup policies** → `SkyCraft-Daily-Prod` → **Modify** → **Instant restore** → **Azure Backup Resource Group**: name `platform-skycraft-swc-rpc`, suffix `-rg` → **Update**.
-3. Run **Backup now** again (Step 5.2.3, step 8).
+2. In the portal: open the vault and, under **Manage** (expand it if it is collapsed), click **Backup policies** → `SkyCraft-Daily-Prod` → **Modify**. At the bottom of the form, under **Azure Backup Resource Group**, fill in name `platform-skycraft-swc-rpc`, suffix `-rg` → **Update**.
+3. Run **Backup now** again (Step 5.2.3 c, step 1).
 
 If the Activity Log names the restore point collection, check that `platform-skycraft-swc-rpc1-rg` carries `Project` = `SkyCraft` and that Lab 1.3's `Inherit-Project-Tag` assignment exists (Lab 1.3 `Test-Lab.ps1`). A new assignment takes several minutes to apply. Do not delete Lab 1.3's assignments: Lab 1.3's `Test-Lab.ps1` checks them.
 
