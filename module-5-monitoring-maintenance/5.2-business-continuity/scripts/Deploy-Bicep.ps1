@@ -523,6 +523,10 @@ if ($WhatIf) {
                         Write-Host "    resource Azure Backup creates for the snapshot - see lab-guide-5.2.md, Troubleshooting, Issue 2." -ForegroundColor Gray
                     } elseif ($snapshotStatus -eq 'Completed' -or $job.Status -in @('Completed', 'CompletedWithWarnings')) {
                         Write-Host "  ✓ Take Snapshot completed for $vmName - it has a recovery point; job status: $($job.Status)" -ForegroundColor Green
+                    } elseif ($job.Status -ne 'InProgress') {
+                        # Cancelled, for example: the job ended without a snapshot.
+                        $script:deployFailures++
+                        Write-Host "  [ERROR] Backup job for $vmName ended $($job.Status) before Take Snapshot completed (Take Snapshot: $snapshotLabel)." -ForegroundColor Red
                     } else {
                         $script:deployFailures++
                         Write-Host "  [ERROR] Take Snapshot for $vmName did not finish within $snapshotWatchMinutes minutes (Take Snapshot: $snapshotLabel, job: $($job.Status))." -ForegroundColor Red

@@ -16,6 +16,7 @@
     7. Orphaned Azure Backup restore point collections and the AzureBackupRG_<location>_*
        resource groups that held them, once those groups are empty. Only a policy created
        before issue #184 leaves these behind.
+    8. The alert processing rule skycraft-backup-critical-apr (Step 5.2.9, issue #366).
 
     Notes:
     - The role assignments are removed before the Backup Vault so its managed
@@ -28,6 +29,9 @@
       account) must be cleaned up manually via the Azure Portal before
       deleting the Recovery Services Vault.
     - VMs and Storage Accounts from earlier labs are NOT removed by this script.
+    - The Key Vault Administrator role of the Backup Management Service app on Lab 3.2's
+      dev-skycraft-swc-kv stays: finding that app needs Microsoft Graph (issue #397). Remove it
+      on the key vault's Access control (IAM) page while the key vault stays.
 
     Every step continues on error, so a single stuck resource does not strand the rest. A step
     that fails is reported as [ERROR] with the Azure error message and counted; if any step
@@ -64,8 +68,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.3.0
-    Date: 2026-10-09
+    Version: 1.4.0
+    Date: 2026-10-28
 #>
 
 #Requires -Version 7.0
@@ -89,6 +93,7 @@ $rsvName        = 'platform-skycraft-swc-rsv'
 $bvName         = 'platform-skycraft-swc-bv'
 $storageAccount = 'prodskycraftswcsa'
 $location       = 'swedencentral'
+$aprName        = 'skycraft-backup-critical-apr'
 # Azure Backup names the snapshot group <prefix><n><suffix>; main.bicep creates n = 1, and the
 # service adds n = 2, 3, ... only when one group fills up. The pattern covers all of them.
 $snapshotRgPattern = 'platform-skycraft-swc-rpc*-rg'
@@ -297,6 +302,15 @@ if ($rsvExists) {
     }
     $resourcesToDelete.Add(@{ Type = 'RSV'; Name = $rsvName })
     Write-Host "  - Recovery Services Vault: $rsvName" -ForegroundColor Gray
+}
+
+# The alert processing rule of Step 5.2.9 (#366).
+$aprLookup = Invoke-LabLookup -Target "alert processing rule $aprName" -Lookup {
+    Get-AzResource -ResourceGroupName $platformRg -ResourceType 'Microsoft.AlertsManagement/actionRules' -Name $aprName -ErrorAction Stop
+}
+foreach ($apr in $aprLookup.Value) {
+    $resourcesToDelete.Add(@{ Type = 'AlertProcessingRule'; Name = $apr.Name; ResourceId = $apr.ResourceId })
+    Write-Host "  - Alert processing rule: $($apr.Name)" -ForegroundColor Gray
 }
 
 # One listing serves both scans below. If it fails, neither group kind is planned: the run
@@ -544,6 +558,19 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BackupResourceGr
     } catch {
         $script:cleanupFailures++
         Write-Host "  [ERROR] Could not delete resource group '$($r.Name)': $_" -ForegroundColor Red
+    }
+}
+
+# 8. Delete the alert processing rule.
+foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'AlertProcessingRule' }) {
+    if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete alert processing rule')) { continue }
+    Write-Host "  Deleting alert processing rule: $($r.Name)..." -ForegroundColor Gray
+    try {
+        Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null
+        Write-Host "  ✓ Deleted" -ForegroundColor Green
+    } catch {
+        $script:cleanupFailures++
+        Write-Host "  [ERROR] Could not delete alert processing rule '$($r.Name)': $_" -ForegroundColor Red
     }
 }
 
