@@ -83,7 +83,7 @@ In the Azure Portal, search **Network Watcher** and open it: the page is titled 
 2. In the left menu, under **Network diagnostics** (expand it if it is collapsed), click **IP flow verify**.
 3. Select the VM and its network interface:
    - **Select virtual machine**: `dev-skycraft-swc-auth-vm`
-   - **Network interface**: the VM's only network interface
+   - The network interface field then shows the VM's only network interface.
 4. Configure the check: <!-- confirm in Portal pass: field labels Protocol, Direction, Local port, Remote IP address, Remote port -->
    - **Protocol**: **TCP**
    - **Direction**: **Inbound**
@@ -103,7 +103,7 @@ In the Azure Portal, search **Network Watcher** and open it: the page is titled 
 1. In Network Watcher, in the left menu, under **Network diagnostics**, click **Next hop**. <!-- confirm in Portal pass: Next hop sits under Network diagnostics -->
 2. **Virtual machine**: `prod-skycraft-swc-auth-vm`.
    - **Fallback** - if only the dev environment exists (the default of Lab 3.2): pick `dev-skycraft-swc-world-vm` instead.
-3. **Source IP address**: leave the value the Portal fills in (the VM's private IP).
+3. Leave the source IP address the Portal fills in (the VM's private IP).
 4. **Destination IP address**: `1.1.1.1` (a public DNS resolver).
 5. Click **Next hop**.
 
@@ -111,7 +111,7 @@ In the Azure Portal, search **Network Watcher** and open it: the page is titled 
 
 ### Step 5.3.3: Visualize Topology
 
-1. In Network Watcher, in the left menu, under **Monitoring** (expand it if it is collapsed), click **Topology**. The page opens on a world map; there is no resource group field and no **View topology** button.
+1. In Network Watcher, in the left menu, under **Monitoring** (expand it if it is collapsed), click **Topology**. The page opens on a world map; there is no resource group field and no View topology button.
 2. Click the **Scope** chip and open **Resource Groups** in the pane. If **Select All** is checked, clear it, then select only `dev-skycraft-swc-rg`. Close the list and click **Save**.
 3. The map can open scrolled to the Americas. Click **Zoom to Fit** on the map, then the expand button on the **Sweden Central** region card. <!-- confirm in Portal pass: the 2026-10-16 pass of this lab called the button Fit to screen, Lab 2.1's pass of 2026-10-26 Zoom to Fit -->
 4. Click **+** on `dev-skycraft-swc-vnet` to show its subnets, then **+** on `AuthSubnet` to show the VM in it.
@@ -132,9 +132,10 @@ In the Azure Portal, search **Network Watcher** and open it: the page is titled 
 3. **Destination**:
    - **Destination type**: **Select a virtual machine**
    - **Virtual machine**: `dev-skycraft-swc-auth-vm`
-4. **Probe settings**: **Protocol** **TCP**, **Destination port** `22` (SSH).
-5. **Diagnostic tests**: leave the defaults checked (**Connectivity**, **NSG diagnostic**, **Next hop**, **Port scanner**).
-6. Click **Run diagnostic tests**.
+4. **Protocol**: **TCP**
+5. **Destination port**: `22` (SSH)
+6. Leave the default diagnostic tests checked: Connectivity, NSG diagnostic, Next hop and Port scanner.
+7. Click **Run diagnostic tests**.
 
 **Expected Result**: After about 20 seconds the tool shows a result table, not a hop-by-hop list: **Connectivity test**, **Outbound NSG diagnostic**, **Inbound NSG diagnostic**, **Next hop** and **Destination port accessible**. With the dev fallback source, **Connectivity test** reports **Reachable**: both VMs share `dev-skycraft-swc-vnet`. With the prod source it reports unreachable, for the reason Step 5.3.6 explains. Source and destination must be two distinct VMs; neither needs the Network Watcher agent for this one-off test.
 
@@ -157,17 +158,19 @@ Under Lab 1.3's policies, enabling Traffic Analytics makes Azure create a data c
 
 #### Azure Portal
 
+In the wizard, the VNet you add appears as a row of a table whose name cell you can edit; it is pre-filled with a name built from the VNet and its group. The retention days field appears only after you pick the storage account, empty and required.
+
 1. In **Network Watcher**, in the left menu, under **Logs** (expand it if it is collapsed), click **Flow logs** → **+ Create**.
-2. Under the **Basics** tab (there is no flow log type to choose; the target decides it):
-   - Click **+ Add virtual networks**, select `prod-skycraft-swc-vnet` (region **Sweden Central**) and confirm the selection. <!-- confirm in Portal pass: label of the picker's confirm button --> The flow log is created in the region of its target, Sweden Central.
-   - The VNet appears in a table with an editable **Name** cell, pre-filled with a name built from the VNet and its group. Replace it with `prod-skycraft-swc-vnet-flowlog`.
+2. **Basics** (there is no flow log type to choose; the target decides it):
+   - **+ Add virtual networks** → `prod-skycraft-swc-vnet` (in Sweden Central) → confirm the selection. The flow log is created in the region of its target, Sweden Central. <!-- confirm in Portal pass: label of the picker's confirm button -->
+   - **Name**: `prod-skycraft-swc-vnet-flowlog`
    - **Storage account**: `platformskycraftswcsa`
-   - **Retention days**: `7` (the field appears only after you pick the storage account, empty and required)
-3. Under the **Analytics** tab (VNet flow logs are always format version 2; there is no version field):
+   - **Retention days**: `7`
+3. **Analytics** (VNet flow logs are always format version 2; there is no version field):
    - **Enable traffic analytics**: checked
    - **Traffic analytics processing interval**: **Every 10 mins** (the wizard defaults to **Every 1 hour**) <!-- confirm in Portal pass: label of the 10-minute option -->
    - **Log Analytics workspace**: `platform-skycraft-swc-law`
-4. Under the **Tags** tab: `Project = SkyCraft`, `Environment = Production`, `CostCenter = MSDN`, `Owner = <your name>`.
+4. **Tags**: `Project = SkyCraft`, `Environment = Production`, `CostCenter = MSDN`, `Owner = <your name>`.
 5. Click **Review + create** → **Create**.
 
 #### Azure CLI
@@ -234,12 +237,11 @@ The monitor itself lives in `NetworkWatcherRG`. The Portal wizard has no Tags ta
 #### Azure Portal
 
 1. In **Network Watcher**, in the left menu, under **Monitoring** (expand it if it is collapsed), click **Connection monitor**. Click **+ Create**, which opens a menu, and choose **Manual Create** (not *Auto Create (Preview)*).
-2. Under the **Basics** tab:
+2. **Basics**:
    - **Connection Monitor Name**: `skycraft-hub-spoke-cm`
    - **Subscription**: yours
    - **Region**: **Sweden Central** (the wizard defaults to East US; the region picks the Network Watcher, `Test-Lab.ps1` looks under `NetworkWatcher_swedencentral`, and Lab 1.3's `Restrict-Azure-Regions` refuses East US)
-   - **Workspace configuration**: select **Custom Workspace**, not **Default (Recommended)**, which sends the results to a default workspace instead of the lab's, then **Subscription**: yours and **Workspace**: `platform-skycraft-swc-law`. The list can preselect another workspace, for example one an earlier lab left in `dev-skycraft-swc-rg`: change it. <!-- confirm in Portal pass: whether the workspace radio sits on Basics or on its own tab, and its field labels -->
-3. Under the **Test groups** tab, click **+ Add test group**:
+3. **Test groups** → **+ Add test group**
    - **Test group name**: `hub-spoke-ssh`
    - **+ Add sources** → **Azure endpoints** → select `prod-skycraft-swc-auth-vm` → **Add endpoints** <!-- confirm in Portal pass: endpoint picker labels Azure endpoints and Add endpoints -->
      - **Fallback** - if only the dev environment exists: pick `dev-skycraft-swc-world-vm` instead (the deployment script makes the same substitution)
@@ -249,16 +251,19 @@ The monitor itself lives in `NetworkWatcherRG`. The Portal wizard has no Tags ta
    - **Add Test configuration** → **New configuration**. A new configuration starts as HTTP, port 80, every 30 seconds; change it to: <!-- confirm in Portal pass: labels of the test configuration fields -->
      - **Test configuration name**: `tcp-22-every-5m`
      - **Protocol**: **TCP**
+     - **Disable traceroute**: leave unchecked
      - **Destination port**: `22`
-     - **Listen on port**: unchecked
-     - **Disable traceroute**: unchecked
+     - **Listen on port**: leave unchecked
      - **Test Frequency**: **Every 5 minutes**
      - **Checks failed (%)**: `10`
      - **Round trip time (ms)**: `100`
    - **Add Test configuration** → **Add Test Group**
-4. Under the **Create alert** tab, leave **Create alert** unchecked. <!-- confirm in Portal pass: the Create alert tab -->
-5. Click **Review + create** → **Create**. When you add the VM endpoints, the wizard enables the Network Watcher agent on any VM without one, so the deployment can take a few minutes. If it fails, read the reason under the notification bell (the page itself shows none) and see Troubleshooting, Issue 5. Do not use **Redeploy** on the failed monitor.
-6. Back on **Connection monitor**, `skycraft-hub-spoke-cm` appears in **Sweden Central**.
+4. **Workspace**:
+   - Select **Custom Workspace** (not *Default (Recommended)*, which sends the results to a default workspace instead of the lab's). The workspace list can preselect another workspace, for example one an earlier lab left in `dev-skycraft-swc-rg`: change it. <!-- confirm in Portal pass: the radio's labels and the fields under Custom Workspace -->
+   - **Workspace**: `platform-skycraft-swc-law`
+5. **Create alert**:
+   - **Create alert**: leave unchecked <!-- confirm in Portal pass: the Create alert tab -->
+6. Click **Review + create** → **Create**. When you add the VM endpoints, the wizard enables the Network Watcher agent on any VM without one, so the deployment can take a few minutes. If it fails, read the reason under the notification bell (the page itself shows none) and see Troubleshooting, Issue 5. Do not use **Redeploy** on the failed monitor.
 7. Add the other three tags, which `Test-Lab.ps1` checks (`CostCenter`) and the cost reports use. In the search box at the top, type **Resource groups**, open `NetworkWatcherRG`, check **Show hidden types**, click `skycraft-hub-spoke-cm`, then **Tags**. `Project` = `SkyCraft` is already there. Add `Environment` = `Production`, `CostCenter` = `MSDN` and `Owner` = `<your name>`, then click **Apply**. <!-- confirm in Portal pass: the connection monitor is listed in NetworkWatcherRG and has a Tags page -->
 
    If the monitor is not listed there, set the same tags from Cloud Shell (PowerShell):
