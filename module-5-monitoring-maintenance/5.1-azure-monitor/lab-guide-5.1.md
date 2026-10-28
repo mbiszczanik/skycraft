@@ -375,10 +375,10 @@ StorageBlobLogs
 
 A **metric alert** (Step 5.1.5) watches a number the platform measures for every VM. A **log search alert** runs a KQL query on a schedule and fires on what the query returns, so it can watch anything the workspace holds. Here it fires when the VM sends no `Heartbeat` row for 5 minutes: the agent, the VM or its network is down, which a CPU alert never notices.
 
-| Alert type        | Signal                          | Evaluated         | Fits                                         |
-| :---------------- | :------------------------------ | :---------------- | :------------------------------------------- |
-| Metric alert      | A platform metric (CPU, memory) | Every 1 minute    | Thresholds on numbers, near real time        |
-| Log search alert  | The result of a KQL query       | Every 5 minutes+  | Missing data, events, joins across tables    |
+| Alert type       | Signal                          | Evaluated                                    | Fits                                      |
+| :--------------- | :------------------------------ | :------------------------------------------- | :---------------------------------------- |
+| Metric alert     | A platform metric (CPU, memory) | Every minute or less often                   | Thresholds on numbers, near real time     |
+| Log search alert | The result of a KQL query       | Every minute or less often (here: 5 minutes) | Missing data, events, joins across tables |
 
 ### Step 5.1.8: Create a log search alert for a missing Heartbeat
 
@@ -387,7 +387,7 @@ The rule watches the VM itself, as the CPU alert does: a log search alert scoped
 1. Navigate to **Monitor** → **Alerts** → **+ Create** → **Alert rule**.
 2. **Scope**:
    - Scope level: **Subscription** (the default)
-   - **+ Select scope** → expand `dev-skycraft-swc-rg` and check `dev-skycraft-swc-auth-vm` (the VM that carries the rule of Step 5.1.2) → **Apply**
+   - **+ Select scope** → expand `dev-skycraft-swc-rg` and check `dev-skycraft-swc-auth-vm` (the VM that carries the rule of Step 5.1.2, or `prod-skycraft-swc-auth-vm` under `prod-skycraft-swc-rg` if only the prod environment exists) → **Apply**
 3. **Condition** → **Signal name**: **Custom log search**. Then configure:
    - **Search query**: `Heartbeat`
    - Measure: **Table rows**
