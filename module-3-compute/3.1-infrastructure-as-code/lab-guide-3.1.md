@@ -2353,7 +2353,7 @@ Test your understanding with these questions:
 
 - Bicep deployments are **idempotent** but resource names must be unique
 - Use `what-if` to see if deployment will conflict
-- Option 1: Delete existing resource: `az network vnet delete`
+- Option 1: Delete existing resource: `az network vnet delete`. After Lab 2.3, delete the VNet's link in `skycraft.internal` (`dev-vnet-link`) as well, or Lab 2.3 cannot be deployed again; its `Deploy-Bicep.ps1` deletes a link left behind by a VNet created again
 - Option 2: Change resource name in parameter file
 - Option 3: Import existing resource (advanced): Use `existing` keyword
 

@@ -66,6 +66,30 @@ if (-not (Test-Path $TemplateFile)) {
     Exit-Lab -FailureCount 1
 }
 
+# A link made for a dev or prod VNet that was deleted and created again no longer serves it, and
+# the deployment is refused when it writes that link (Conflict, "delete all the stale virtual
+# network links", #444). Delete it first; the deployment recreates it.
+$privateZoneName = 'skycraft.internal'
+try {
+    $staleLinks = @(Get-LabDnsLink -ResourceGroupName 'platform-skycraft-swc-rg' | Where-Object { $_.Stale -and $_.Name -like "$privateZoneName/*" })
+} catch {
+    Write-Host "[ERROR] Could not check the VNet links of ${privateZoneName}: $($_.Exception.Message)" -ForegroundColor Red
+    Exit-Lab -FailureCount 1
+}
+foreach ($staleLink in $staleLinks) {
+    if ($WhatIf) {
+        Write-Host "  [INFO] Link $($staleLink.Name) was made for a VNet created again since; a deployment deletes it first." -ForegroundColor Yellow
+        continue
+    }
+    Write-Host "  Deleting link $($staleLink.Name): its VNet was created again after it, so it no longer serves that VNet..." -ForegroundColor Yellow
+    try {
+        Remove-LabDnsLink -Id $staleLink.Id -Confirm:$false
+    } catch {
+        Write-Host "[ERROR] Could not delete the stale link $($staleLink.Name): $($_.Exception.Message)" -ForegroundColor Red
+        Exit-Lab -FailureCount 1
+    }
+}
+
 Write-Host "Starting deployment: $deploymentName..." -ForegroundColor Yellow
 
 try {

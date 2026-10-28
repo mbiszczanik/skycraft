@@ -174,6 +174,19 @@ New-PrivateDnsRecord -Name 'prod-db' -Ip '10.2.3.10'
 # ==========================================
 Write-Host "`n=== Task 3: Linking Virtual Networks ===" -ForegroundColor Cyan
 
+# A link made for a VNet that was deleted and created again no longer serves it, yet still reads as
+# existing, so the name check below would keep it (#444). Delete it first; the check then recreates it.
+try {
+    $staleLinks = @(Get-LabDnsLink -ResourceGroupName $PlatformRG | Where-Object { $_.Stale -and $_.Name -like "$PrivateDnsZoneName/*" })
+    foreach ($staleLink in $staleLinks) {
+        Write-Host "  Deleting link $($staleLink.Name): its VNet was created again after it, so it no longer serves that VNet..." -ForegroundColor Yellow
+        Remove-LabDnsLink -Id $staleLink.Id -Confirm:$false
+    }
+} catch {
+    Write-Host "  -> [ERROR] Could not check or delete the stale VNet links of ${PrivateDnsZoneName}: $($_.Exception.Message)" -ForegroundColor Red
+    Exit-Lab -FailureCount 1
+}
+
 function New-PrivateDnsLink {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper; parent script guards idempotency via Get-before-New.')]
     param($LinkName, $VnetRG, $VnetName, $AutoReg)
