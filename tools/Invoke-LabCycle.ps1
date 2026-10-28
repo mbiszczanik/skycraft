@@ -93,6 +93,17 @@
 
     Not needed when -Labs selects nothing that requires it.
 
+.PARAMETER UniqueNames
+    Names of your own for the resources whose names are unique across Azure, by the lab scripts'
+    parameter name: @{ KeyVaultName = '...'; AcrName = '...'; AppName = '...' }. The manifest's
+    UniqueNames section says which lab each belongs to. Each value goes to that lab's Deploy, Test
+    and teardown invocations and to the soft-delete guard for that name, so the run checks,
+    validates and removes the resource it created (#438). A key the manifest does not declare stops
+    the run before anything is deployed.
+
+    Not stored in the run state: pass the same names again with -Resume, and to a later
+    Remove-LabCycle.ps1.
+
 .PARAMETER Labs
     Run only these labs, by phase id - '5.1', '5.2'. Everything else in the manifest is left out of
     the plan entirely rather than reported as skipped, because it was never part of this run.
@@ -189,6 +200,11 @@
 
     Re-runs lab 5.2 alone against what an earlier run left standing, and leaves it standing.
 
+.EXAMPLE
+    .\Invoke-LabCycle.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000 -Labs 3.2,3.3 -UniqueNames @{ KeyVaultName = 'dev-skycraft-swc-kv-ab'; AcrName = 'devskycraftswcacr01ab' } -Yes
+
+    Runs labs 3.2 and 3.3 under a vault and registry name of your own, when the defaults are taken.
+
 .NOTES
     Project: SkyCraft
     Issue:   #73
@@ -213,6 +229,9 @@ param(
 
     [Parameter()]
     [string]$OpsEmail,
+
+    [Parameter()]
+    [hashtable]$UniqueNames = @{},
 
     [Parameter()]
     [AllowEmptyCollection()]
@@ -363,6 +382,16 @@ if ($needsOpsEmail.Count -gt 0 -and [string]::IsNullOrWhiteSpace($OpsEmail)) {
     exit 2
 }
 
+# -- -UniqueNames ----------------------------------------------------------------------------
+# A misspelt key would be dropped without a word and the lab would deploy under its taken default.
+$uniqueNameProblems = @(Get-LabCycleUnknownUniqueName -Declared $manifest.UniqueNames -UniqueNames $UniqueNames)
+if ($uniqueNameProblems.Count -gt 0) {
+    foreach ($problem in $uniqueNameProblems) { Write-Host "[ERROR] -UniqueNames: $problem" -ForegroundColor Red }
+    $Host.SetShouldExit(2)
+    exit 2
+}
+$guards = @(Get-LabCycleSoftDeleteGuard -Guards $manifest.SoftDeleteGuards -Declared $manifest.UniqueNames -UniqueNames $UniqueNames)
+
 # Ordering happens before anything runs. A cycle throws out of Get-PhaseOrder, and that is the
 # intended behaviour rather than something to catch and continue past: half a cyclic graph
 # deployed is resources left behind that the run cannot reason about.
@@ -456,6 +485,9 @@ if ($DryRun) { Write-Host '  DRY RUN - nothing will be deployed' -ForegroundColo
 if ($selected) {
     Write-Host "  -Labs: only $($selected -join ', '). Dependencies outside the selection are assumed already deployed; each lab's own prerequisite gate is what checks that." -ForegroundColor Yellow
 }
+if ($UniqueNames.Count -gt 0) {
+    Write-Host "  -UniqueNames: $(@($UniqueNames.Keys | Sort-Object | ForEach-Object { "$_=$($UniqueNames[$_])" }) -join ', ')" -ForegroundColor Gray
+}
 if ($Yes)         { Write-Host '  -Yes: the plan will not be confirmed before it runs' -ForegroundColor Gray }
 if ($SkipCleanup) { Write-Host '  -SkipCleanup: nothing will be torn down; every lab is left standing' -ForegroundColor Yellow }
 if ($Resume)      { Write-Host "  -Resume: continuing from $StatePath; phases that already succeeded will not be re-run unless a dependency is" -ForegroundColor Gray }
@@ -474,7 +506,7 @@ Write-Host ''
 if (-not $PreflightRunner) {
     $PreflightRunner = {
         Test-LabCyclePreflight -SubscriptionId $SubscriptionId `
-            -Guards $manifest.SoftDeleteGuards `
+            -Guards $guards `
             -LockPath $LockPath `
             -ContextProbe $ContextProbe
     }.GetNewClosure()
@@ -598,6 +630,15 @@ foreach ($id in $order) {
     if ($phase.Deploy) { foreach ($key in $phase.Deploy.Keys) { $deployArguments[$key] = $phase.Deploy[$key] } }
     if ($phase.RequiresOpsEmail) { $deployArguments['OpsEmail'] = $OpsEmail }
 
+    # Test gets the same names as Deploy, or it validates the taken default the deploy avoided.
+    $testArguments = @{}
+    if ($phase.Test) { foreach ($key in $phase.Test.Keys) { $testArguments[$key] = $phase.Test[$key] } }
+    $labNames = Get-LabCycleUniqueNameArgument -Declared $manifest.UniqueNames -UniqueNames $UniqueNames -Lab $phase.Lab
+    foreach ($key in $labNames.Keys) {
+        $deployArguments[$key] = $labNames[$key]
+        $testArguments[$key]   = $labNames[$key]
+    }
+
     # '$null -ne' rather than @() around it, and this is the $null-collection trap the header warns
     # about doing real damage: @($null) is a ONE-element array holding $null, which the runner reads
     # as 'there is an answer to feed'. Every phase would then have its stdin redirected and closed,
@@ -617,7 +658,7 @@ foreach ($id in $order) {
         Write-Host "  [SKIP] $id Test - $($phase.TestExcluded)" -ForegroundColor Yellow
     }
     else {
-        $steps.Add(@{ Kind = 'Test'; Arguments = $phase.Test })
+        $steps.Add(@{ Kind = 'Test'; Arguments = $testArguments })
     }
 
     $started       = [datetime]::UtcNow
@@ -749,6 +790,7 @@ if (-not $SkipCleanup -and -not $DryRun) {
             Confirm        = $false
         }
         if ($selected) { $removeArguments['Labs'] = $selected }
+        if ($UniqueNames.Count -gt 0) { $removeArguments['UniqueNames'] = $UniqueNames }
 
         $teardown = & $RemoveScriptPath @removeArguments
         if ($teardown) {

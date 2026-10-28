@@ -3,7 +3,7 @@ SUMMARY: Lab 3.4 - App Service Orchestrator
 DESCRIPTION: Deploys the Linux App Service Plan (P0v4), the Node 22 LTS web app (startup command pm2 serve) with a staging slot and regional VNet integration, and the CPU autoscale setting for SkyCraft Lab 3.4 via Azure Verified Modules (autoscale via a local fallback module)
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.4.0
+VERSION: 0.5.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -40,12 +40,16 @@ param parVnetName string = 'dev-skycraft-swc-vnet'
 @maxLength(80)
 param parSubnetName string = 'AppServiceSubnet'
 
+@description('Web app name, unique per region across Azure: add a suffix if the default is taken')
+@minLength(2)
+@maxLength(60)
+param parAppName string = '${parEnvironment}-skycraft-swc-app01'
+
 /*******************
 *    Variables     *
 *******************/
 
 var varAppServicePlanName = '${parEnvironment}-skycraft-swc-asp'
-var varAppName = '${parEnvironment}-skycraft-swc-app01' // Change it if the deployment refuses the name as taken
 var varEnvironmentTag = parEnvironment == 'dev' ? 'Development' : 'Production'
 var varCommonTags = {
   Project: 'SkyCraft'
@@ -93,7 +97,7 @@ module modWebApp 'br/public:avm/res/web/site:0.24.0' = {
   name: 'webapp-deployment'
   scope: resRg
   params: {
-    name: varAppName
+    name: parAppName
     location: parLocation
     tags: varCommonTags
     kind: 'app,linux'

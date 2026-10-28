@@ -158,6 +158,13 @@
     error (docs/powershell-standards.md rule 3), and by the time the vaults are checked their
     resource group has usually been deleted by the sweep, so a lookup scoped to it would fail.
 
+.PARAMETER UniqueNames
+    The names of your own the deploy run used for resources whose names are unique across Azure,
+    as passed to Invoke-LabCycle.ps1 -UniqueNames. Each value goes to its lab's teardown
+    invocations, so the teardown removes the resource the run created rather than looking for the
+    default (#438). A key the manifest does not declare stops the teardown before anything is
+    deleted.
+
 .PARAMETER SkipSweep
     Run the per-lab teardowns and stop. No residue sweep, no resource group deletes, no assertions.
     For a teardown that is deliberately partial.
@@ -277,6 +284,9 @@ param(
     },
 
     [Parameter()]
+    [hashtable]$UniqueNames = @{},
+
+    [Parameter()]
     [switch]$SkipSweep
 )
 
@@ -309,6 +319,13 @@ if (-not (Test-Path -LiteralPath $ManifestPath)) {
     exit 2
 }
 $manifest = Import-PowerShellDataFile -LiteralPath $ManifestPath
+
+$uniqueNameProblems = @(Get-LabCycleUnknownUniqueName -Declared $manifest.UniqueNames -UniqueNames $UniqueNames)
+if ($uniqueNameProblems.Count -gt 0) {
+    foreach ($problem in $uniqueNameProblems) { Write-Host "[ERROR] -UniqueNames: $problem" -ForegroundColor Red }
+    $Host.SetShouldExit(2)
+    exit 2
+}
 
 $teardowns = @($manifest.Teardowns)
 $partial   = $false
@@ -396,7 +413,12 @@ foreach ($entry in $teardowns) {
     $worstExit = 0
     $ran       = $false
 
-    foreach ($invocation in @($entry.Invocations)) {
+    $labNames = Get-LabCycleUniqueNameArgument -Declared $manifest.UniqueNames -UniqueNames $UniqueNames -Lab $entry.Lab
+    foreach ($manifestInvocation in @($entry.Invocations)) {
+        # Copied, so the names do not leak into the manifest hashtable.
+        $invocation = @{}
+        foreach ($key in $manifestInvocation.Keys) { $invocation[$key] = $manifestInvocation[$key] }
+        foreach ($key in $labNames.Keys) { $invocation[$key] = $labNames[$key] }
         $described = ($invocation.Keys | Sort-Object | ForEach-Object { "-$_ $($invocation[$_])" }) -join ' '
         if (-not $PSCmdlet.ShouldProcess("$($entry.Lab) [$described]", 'run Remove-LabResource.ps1')) { continue }
 

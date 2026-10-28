@@ -428,6 +428,18 @@
         @{ Kind = 'RecoveryServicesVault'; Name = 'platform-skycraft-swc-rsv'; Needle = 'skycraft-swc-rsv'; ResourceGroup = 'platform-skycraft-swc-rg'; Lab = 'module-5-monitoring-maintenance/5.2-business-continuity' }
     )
 
+    # -- Unique names ---------------------------------------------------------------------------
+    # Names unique across Azure that a lab script takes as a parameter (#438). The defaults were
+    # taken outside the test subscription on 2026-10-27, so a run there passes its own through
+    # Invoke-LabCycle.ps1 -UniqueNames. The value goes to the lab's Deploy, Test and teardown
+    # invocations, and replaces Default in the soft-delete guard that names it. The cycle deploys
+    # dev only, so each lab listed here has one teardown invocation (a manifest test pins that).
+    UniqueNames = @(
+        @{ Parameter = 'KeyVaultName'; Lab = 'module-3-compute/3.2-virtual-machines'; Default = 'dev-skycraft-swc-kv' }
+        @{ Parameter = 'AcrName';      Lab = 'module-3-compute/3.3-containers';       Default = 'devskycraftswcacr01' }
+        @{ Parameter = 'AppName';      Lab = 'module-3-compute/3.4-app-service';      Default = 'dev-skycraft-swc-app01' }
+    )
+
     # -- Teardown -------------------------------------------------------------------------------
     # ONE ENTRY PER LAB, and the order here is the order Remove-LabCycle.ps1 runs them in. It is
     # NOT simply the reverse of the deploy order: lab 1.3 is hoisted to the front because it owns

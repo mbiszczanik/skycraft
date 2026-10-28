@@ -180,7 +180,7 @@ For this lab, we will use **Premium V4 P0V4**. The lab needs **deployment slots*
 
 **Note**: **Node 20 LTS** is no longer offered; the list has Node 22 LTS, Node 24 LTS and a preview. This lab uses **Node 22 LTS**. A Node runtime does not serve a static `index.html` on its own; Step 3.4.4 sets the startup command that does.
 
-**Note**: The form checks the **Name** as you type. If it says the name is not available (`The app name <name> is not available in <region>`, seen 2026-10-26), add a suffix such as your initials, and use that name wherever this guide says `dev-skycraft-swc-app01`; pass it to `scripts/Test-Lab.ps1` and `scripts/Remove-LabResource.ps1` as `-AppName`.
+**Note**: The form checks the **Name** as you type. If it says the name is not available (`The app name <name> is not available in <region>`, seen 2026-10-26), add a suffix such as your initials, and use that name wherever this guide says `dev-skycraft-swc-app01`; pass it to `scripts/Deploy-Bicep.ps1`, `scripts/Test-Lab.ps1` and `scripts/Remove-LabResource.ps1` as `-AppName`. In a class, every learner needs a different name in the same region, so add your initials from the start. `Deploy-Bicep.ps1` checks the name before it deploys and stops if it is taken.
 
 4. Click the **Networking** tab and fill in:
 

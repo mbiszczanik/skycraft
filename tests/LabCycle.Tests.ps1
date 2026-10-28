@@ -111,6 +111,16 @@ $TeardownArgumentCases = @(
     }
 )
 
+# Every script a -UniqueNames value is passed to must declare the parameter, or the run fails on
+# parameter binding an hour in (#438).
+$UniqueNameCases = @(
+    foreach ($entry in @($Manifest.UniqueNames)) {
+        foreach ($script in 'Deploy-Bicep.ps1', 'Test-Lab.ps1', 'Remove-LabResource.ps1') {
+            @{ Lab = $entry.Lab; Parameter = $entry.Parameter; Script = $script; Path = (Join-Path (Join-Path (Join-Path $RepoRoot $entry.Lab) 'scripts') $script) }
+        }
+    }
+)
+
 $PhasePathCases = @(
     foreach ($phase in $Manifest.Phases) {
         @{
@@ -490,6 +500,33 @@ Describe 'Manifest - every argument is a real parameter of the script it is pass
     It "teardown of <Lab> passes -<Parameter>, which Remove-LabResource.ps1 declares" -ForEach $TeardownArgumentCases {
         Test-Path -LiteralPath $Path | Should -BeTrue
         (Get-ScriptParameterName -Path $Path) | Should -Contain $Parameter
+    }
+
+    It "-UniqueNames passes -<Parameter> to <Script> of <Lab>, which declares it" -ForEach $UniqueNameCases {
+        Test-Path -LiteralPath $Path | Should -BeTrue
+        (Get-ScriptParameterName -Path $Path) | Should -Contain $Parameter
+    }
+}
+
+Describe 'Manifest - unique names (#438)' {
+    It 'declares the three names unique across Azure that labs 3.2-3.4 create' {
+        @($script:Manifest.UniqueNames | ForEach-Object { $_.Parameter }) | Should -Be @('KeyVaultName', 'AcrName', 'AppName')
+    }
+
+    It 'gives each lab it names a live phase and exactly one teardown invocation' {
+        # The value replaces the name in every invocation of the lab, so a second invocation for
+        # another environment would get the dev name.
+        foreach ($entry in @($script:Manifest.UniqueNames)) {
+            @($script:LivePhases | Where-Object { $_.Lab -eq $entry.Lab }).Count | Should -Be 1 -Because "$($entry.Parameter) belongs to $($entry.Lab)"
+            $teardown = @($script:Manifest.Teardowns | Where-Object { $_.Lab -eq $entry.Lab })
+            @($teardown.Invocations).Count | Should -Be 1 -Because "$($entry.Lab) is torn down once, in dev"
+        }
+    }
+
+    It 'names, as the vault default, the name lab 3.2''s dev soft-delete guard checks' {
+        # Otherwise the guard keeps checking the default while the run deploys another name.
+        $vault = $script:Manifest.UniqueNames | Where-Object { $_.Parameter -eq 'KeyVaultName' }
+        @($script:Manifest.SoftDeleteGuards | Where-Object { $_.Lab -eq $vault.Lab -and $_.Name -eq $vault.Default }).Count | Should -Be 1
     }
 }
 
@@ -1525,6 +1562,112 @@ Describe 'Engine - -OpsEmail is demanded before the run, not an hour into it' {
     }
 }
 
+Describe 'Engine - -UniqueNames (#438)' {
+    BeforeAll {
+        $script:NamesManifest = New-FixtureManifest -Body @'
+@{
+    Phases = @(
+        @{ Id = 'vault'; Lab = 'module-3-compute/3.2-virtual-machines'; ParamFile = 'x'; Deploy = @{ Force = $true }; PostDeploy = $null; Test = @{}; DependsOn = @(); TimeoutMs = 1000; Excluded = $null }
+        @{ Id = 'other'; Lab = 'module-2-networking/2.1-virtual-networks'; ParamFile = 'x'; Deploy = @{}; PostDeploy = $null; Test = @{}; DependsOn = @(); TimeoutMs = 1000; Excluded = $null }
+    )
+    SoftDeleteGuards = @(
+        @{ Kind = 'KeyVault'; Name = 'dev-skycraft-swc-kv';  Needle = 'skycraft-swc-kv'; ResourceGroup = 'dev-skycraft-swc-rg';  Lab = 'module-3-compute/3.2-virtual-machines' }
+        @{ Kind = 'KeyVault'; Name = 'prod-skycraft-swc-kv'; Needle = 'skycraft-swc-kv'; ResourceGroup = 'prod-skycraft-swc-rg'; Lab = 'module-3-compute/3.2-virtual-machines' }
+    )
+    UniqueNames = @(
+        @{ Parameter = 'KeyVaultName'; Lab = 'module-3-compute/3.2-virtual-machines'; Default = 'dev-skycraft-swc-kv' }
+    )
+    CompileOnly = @()
+    Teardowns = @()
+}
+'@
+        $script:NamesRemove = Join-Path $script:Scratch 'Fake-Remove-Names.ps1'
+        Set-Content -LiteralPath $script:NamesRemove -Value @'
+[CmdletBinding(SupportsShouldProcess)]
+param(
+    [string]$SubscriptionId, [string]$ManifestPath, [string]$LabRoot, [string]$LogDirectory,
+    [string]$ResultsPath, [string]$RunId, [string[]]$Labs, [hashtable]$UniqueNames
+)
+Set-Content -LiteralPath (Join-Path $LogDirectory 'fake-remove-names.txt') -Value "$($UniqueNames.KeyVaultName)"
+[pscustomobject]@{ Teardowns = @(); LeftBehind = @(); Assertions = @() }
+'@
+    }
+
+    It 'passes the name to the Deploy and Test steps of its lab, and only that lab' {
+        $captured = @{}
+        $runner = { param($Invocation) $captured["$($Invocation.Phase.Id).$($Invocation.Kind)"] = $Invocation.Arguments; 0 }.GetNewClosure()
+
+        & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:NamesManifest `
+            -UniqueNames @{ KeyVaultName = 'dev-skycraft-swc-kv-ab' } -PhaseRunner $runner -PreflightRunner { @() } `
+            -ContextProbe $script:GoodContext -Yes -SkipCleanup @script:OfflinePaths | Out-Null
+
+        $LASTEXITCODE | Should -Be 0
+        $captured['vault.Deploy'].KeyVaultName | Should -Be 'dev-skycraft-swc-kv-ab'
+        $captured['vault.Deploy'].Force | Should -BeTrue -Because 'the manifest''s own arguments stay'
+        $captured['vault.Test'].KeyVaultName | Should -Be 'dev-skycraft-swc-kv-ab'
+        $captured['other.Deploy'].Keys | Should -Not -Contain 'KeyVaultName'
+        $captured['other.Test'].Keys | Should -Not -Contain 'KeyVaultName'
+    }
+
+    It 'leaves the manifest''s own Deploy and Test hashtables unmutated' {
+        $captured = @{}
+        $runner = { param($Invocation) $captured[$Invocation.Kind] = $Invocation.Phase; 0 }.GetNewClosure()
+
+        & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:NamesManifest -Labs 'vault' `
+            -UniqueNames @{ KeyVaultName = 'dev-skycraft-swc-kv-ab' } -PhaseRunner $runner -PreflightRunner { @() } `
+            -ContextProbe $script:GoodContext -Yes -SkipCleanup @script:OfflinePaths | Out-Null
+
+        $captured['Deploy'].Deploy.Keys | Should -Not -Contain 'KeyVaultName'
+        $captured['Test'].Test.Keys | Should -Not -Contain 'KeyVaultName'
+    }
+
+    It 'refuses to start on a key the manifest does not declare, and runs nothing' {
+        $ran = [System.Collections.Generic.List[string]]::new()
+        $runner = { param($Invocation) $ran.Add($Invocation.Phase.Id); 0 }.GetNewClosure()
+
+        & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:NamesManifest `
+            -UniqueNames @{ KeyVaultNmae = 'dev-skycraft-swc-kv-ab' } -PhaseRunner $runner -PreflightRunner { @() } `
+            -ContextProbe $script:GoodContext -Yes -SkipCleanup @script:OfflinePaths | Out-Null
+
+        $LASTEXITCODE | Should -Be 2
+        $ran.Count | Should -Be 0
+    }
+
+    It 'refuses to start on a key given no value' {
+        & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:NamesManifest `
+            -UniqueNames @{ KeyVaultName = ' ' } -PhaseRunner { 0 } -PreflightRunner { @() } `
+            -ContextProbe $script:GoodContext -Yes -SkipCleanup @script:OfflinePaths | Out-Null
+        $LASTEXITCODE | Should -Be 2
+    }
+
+    It 'hands the names to the teardown script' {
+        $logs = Join-Path $script:Scratch "names-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $logs -Force | Out-Null
+        $paths = @{} + $script:OfflinePaths
+        $paths.LogDirectory = $logs
+
+        & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:NamesManifest `
+            -UniqueNames @{ KeyVaultName = 'dev-skycraft-swc-kv-ab' } -PhaseRunner { 0 } -PreflightRunner { @() } `
+            -ContextProbe $script:GoodContext -RemoveScriptPath $script:NamesRemove -Yes @paths | Out-Null
+
+        (Get-Content -Raw -LiteralPath (Join-Path $logs 'fake-remove-names.txt')).Trim() | Should -Be 'dev-skycraft-swc-kv-ab'
+    }
+
+    It 'checks the given vault name, not the default, in the soft-delete guard' {
+        $manifest = Import-PowerShellDataFile -LiteralPath $script:NamesManifest
+        $guards = @(Get-LabCycleSoftDeleteGuard -Guards $manifest.SoftDeleteGuards -Declared $manifest.UniqueNames -UniqueNames @{ KeyVaultName = 'dev-skycraft-swc-kv-ab' })
+
+        @($guards | ForEach-Object { $_.Name }) | Should -Be @('dev-skycraft-swc-kv-ab', 'prod-skycraft-swc-kv') -Because 'only the guard naming the replaced default changes'
+        $manifest.SoftDeleteGuards[0].Name | Should -Be 'dev-skycraft-swc-kv' -Because 'the guards are copied'
+    }
+
+    It 'keeps every guard as it is without -UniqueNames' {
+        $manifest = Import-PowerShellDataFile -LiteralPath $script:NamesManifest
+        @(Get-LabCycleSoftDeleteGuard -Guards $manifest.SoftDeleteGuards -Declared $manifest.UniqueNames -UniqueNames @{} | ForEach-Object { $_.Name }) |
+            Should -Be @('dev-skycraft-swc-kv', 'prod-skycraft-swc-kv')
+    }
+}
+
 Describe 'Engine - hands off to the teardown script and carries its answer back' {
     BeforeAll {
         $script:HandoffManifest = New-FixtureManifest -Body @'
@@ -1799,6 +1942,39 @@ Describe 'Teardown - order, failure handling and -WhatIf' {
             -LogDirectory $script:OfflinePaths.LogDirectory -ResultsPath $script:OfflinePaths.ResultsPath `
             @script:CleanProbes | Out-Null
         $LASTEXITCODE | Should -Be 2
+    }
+
+    It 'passes a -UniqueNames value to its own lab''s invocation only (#438)' {
+        $manifestPath = New-FixtureManifest -Body ((Get-Content -Raw -LiteralPath $script:TeardownManifest) -replace 'SoftDeleteGuards = @\(\)', @'
+SoftDeleteGuards = @()
+    UniqueNames = @(
+        @{ Parameter = 'AcrName'; Lab = 'module-2-networking/2.1-virtual-networks'; Default = 'devskycraftswcacr01' }
+    )
+'@)
+        $seen = @{}
+        $runner = { param($Invocation) $seen[$Invocation.Lab] = $Invocation.Arguments; 0 }.GetNewClosure()
+
+        & $script:RemoveCycle -SubscriptionId 'fixture-subscription' -ManifestPath $manifestPath `
+            -UniqueNames @{ AcrName = 'devskycraftswcacr01ab' } -TeardownRunner $runner -Confirm:$false `
+            -LogDirectory $script:OfflinePaths.LogDirectory -ResultsPath $script:OfflinePaths.ResultsPath `
+            @script:CleanProbes | Out-Null
+
+        $seen['module-2-networking/2.1-virtual-networks'].AcrName | Should -Be 'devskycraftswcacr01ab'
+        $seen['module-2-networking/2.1-virtual-networks'].Force | Should -BeTrue
+        $seen['module-1-identities-governance/1.3-governance'].Keys | Should -Not -Contain 'AcrName'
+    }
+
+    It 'refuses a -UniqueNames key the manifest does not declare, and deletes nothing (#438)' {
+        $ran = [System.Collections.Generic.List[string]]::new()
+        $runner = { param($Invocation) $ran.Add($Invocation.Lab); 0 }.GetNewClosure()
+
+        & $script:RemoveCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:TeardownManifest `
+            -UniqueNames @{ AcrName = 'devskycraftswcacr01ab' } -TeardownRunner $runner -Confirm:$false `
+            -LogDirectory $script:OfflinePaths.LogDirectory -ResultsPath $script:OfflinePaths.ResultsPath `
+            @script:CleanProbes | Out-Null
+
+        $LASTEXITCODE | Should -Be 2
+        $ran.Count | Should -Be 0
     }
 
     It 'reports documented residue without counting it as a failure' {
