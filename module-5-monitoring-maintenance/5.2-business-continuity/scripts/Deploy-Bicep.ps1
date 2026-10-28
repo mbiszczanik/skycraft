@@ -97,6 +97,10 @@ foreach ($ns in @('Microsoft.RecoveryServices', 'Microsoft.DataProtection')) {
     $provider = Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction SilentlyContinue | Select-Object -First 1
     $state = if ($provider) { $provider.RegistrationState } else { 'NotRegistered' }
     if ($state -ne 'Registered') {
+        if ($WhatIf) {
+            Write-Host "  What-if: would register provider $ns (skipped)" -ForegroundColor Cyan
+            continue
+        }
         Write-Host "  Registering provider: $ns..." -ForegroundColor Gray
         Register-AzResourceProvider -ProviderNamespace $ns | Out-Null
         Write-Host "  ✓ Registered: $ns" -ForegroundColor Green
