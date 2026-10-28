@@ -9,6 +9,60 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0](https://github.com/mbiszczanik/skycraft/compare/v0.18.0...v0.19.0) (2026-10-28)
+
+
+### Features
+
+* **guide-drift:** record Lab 1.3 and bring its guide and screenshots to the run ([#341](https://github.com/mbiszczanik/skycraft/issues/341)) ([aca732a](https://github.com/mbiszczanik/skycraft/commit/aca732a1392876919ec4c30a456f666da8b36454))
+* **guide-drift:** wait for a Portal deployment to finish before the next element ([#333](https://github.com/mbiszczanik/skycraft/issues/333)) ([6ea74cf](https://github.com/mbiszczanik/skycraft/commit/6ea74cfa2ea2028f101aac3ededc3e1b534f4c39))
+* **pr-gate:** a deferred lab fix names why the live check cannot run in the test environment ([#405](https://github.com/mbiszczanik/skycraft/issues/405)) ([60319bc](https://github.com/mbiszczanik/skycraft/commit/60319bc0fc0180ff2bedcedd0196322c447c4235))
+* **pr-gate:** a deferred live verification needs the maintainer's label to merge ([#339](https://github.com/mbiszczanik/skycraft/issues/339)) ([6c43c53](https://github.com/mbiszczanik/skycraft/commit/6c43c53257a6f5a09cba91592224f936b3aa1ddb))
+
+
+### Bug Fixes
+
+* **lab-1.3:** add Inherit-Project-Tag so resources inherit Project from their group ([#377](https://github.com/mbiszczanik/skycraft/issues/377)) ([62de632](https://github.com/mbiszczanik/skycraft/commit/62de632bf9968cc5083d24e4e30211cf94e84d59))
+* **lab-1.3:** follow today's Portal in the guide and the checklist ([#337](https://github.com/mbiszczanik/skycraft/issues/337)) ([27e2cd4](https://github.com/mbiszczanik/skycraft/commit/27e2cd4a1d89e23e9fd2b9f1ea9042dddfaea1a4))
+* **lab-1.3:** read and delete the budgets through the Consumption API, not Az.Billing ([#412](https://github.com/mbiszczanik/skycraft/issues/412)) ([3c0cb27](https://github.com/mbiszczanik/skycraft/commit/3c0cb2726af91eed597f32b0e40b38c2bb4bc9cc))
+* **lab-2.2:** create and expect only the ASGs and NSGs the guide creates ([#422](https://github.com/mbiszczanik/skycraft/issues/422)) ([09e4349](https://github.com/mbiszczanik/skycraft/commit/09e434989b2c4f04fbe3d266b52e4654361f0e47))
+* **lab-3.1:** stop on -Environment prod and count the nine resources step 3.1.18 lists ([#435](https://github.com/mbiszczanik/skycraft/issues/435)) ([7c58a53](https://github.com/mbiszczanik/skycraft/commit/7c58a532da3dc91faf995e8b611a45e249a4845b))
+* **lab-3.2:** align the guide with the current Portal, encrypt only the auth VM and find NICs by relation ([#430](https://github.com/mbiszczanik/skycraft/issues/430)) ([e4831eb](https://github.com/mbiszczanik/skycraft/commit/e4831ebbaf639fac7d6bed9303f66aab290dfb99))
+* **lab-3.3:** follow today's Portal and agree with the Bicep in guide, checklist and scripts ([#385](https://github.com/mbiszczanik/skycraft/issues/385)) ([ec2db5a](https://github.com/mbiszczanik/skycraft/commit/ec2db5a258bacb883e6e3eba37d8b14c7d894fb7))
+* **lab-3.3:** read the container instance's IP settings by the names Get-AzContainerGroup returns ([#443](https://github.com/mbiszczanik/skycraft/issues/443)) ([0e4bc1c](https://github.com/mbiszczanik/skycraft/commit/0e4bc1c05db91a2a90098f82e34080d264639d22))
+* **lab-3.4:** follow today's Portal and agree with itself on tier, runtime, backups and end state ([#386](https://github.com/mbiszczanik/skycraft/issues/386)) ([f5d6385](https://github.com/mbiszczanik/skycraft/commit/f5d63855f12b4b2cc5c3f7524afc58a15454f6e5))
+* **lab-4.1:** follow today's Portal, name every path difference and teach every promised section ([#391](https://github.com/mbiszczanik/skycraft/issues/391)) ([f5f3dab](https://github.com/mbiszczanik/skycraft/commit/f5f3dabad8e0dc619abbaf37a8177f8ed0f1928e))
+* **lab-4.2:** follow today's Portal in the guide and keep tier-game-logs on game-logs/ ([#392](https://github.com/mbiszczanik/skycraft/issues/392)) ([23ce440](https://github.com/mbiszczanik/skycraft/commit/23ce44017aa2a07cc64cd2362ef62702efd18d74))
+* **lab-4.3:** follow today's Portal and keep Azure Backup off the file shares ([#394](https://github.com/mbiszczanik/skycraft/issues/394)) ([30c1f10](https://github.com/mbiszczanik/skycraft/commit/30c1f100dde2f6a4e93316600dfd41735db6ddbc))
+* **lab-4.4:** follow today's Portal and teach key rotation and the data role ([#395](https://github.com/mbiszczanik/skycraft/issues/395)) ([e60f242](https://github.com/mbiszczanik/skycraft/commit/e60f242df10a921c55e2cb324a331316c97c1cf4))
+* **labs-1.x:** end Module 1 lab scripts through Exit-Lab, success path included ([#410](https://github.com/mbiszczanik/skycraft/issues/410)) ([9ccc744](https://github.com/mbiszczanik/skycraft/commit/9ccc744a0be884f50a91bddaef9dbe29137da8ec))
+* **labs-2.1-2.3:** private subnets and one outbound rule per load balancer over a shared egress pool ([#420](https://github.com/mbiszczanik/skycraft/issues/420)) ([12881e3](https://github.com/mbiszczanik/skycraft/commit/12881e3b84c7873f9b443df352ae79c4c9d6e36f))
+* **labs-3.1-3.2:** private subnets and the shared egress pool in Lab 3.1 and 3.2 ([#421](https://github.com/mbiszczanik/skycraft/issues/421)) ([c733a6b](https://github.com/mbiszczanik/skycraft/commit/c733a6bd00fe531ea4490fd392334d675274855b))
+* **labs:** find the Lab 1.3 policy assignments the Portal names by display name ([#336](https://github.com/mbiszczanik/skycraft/issues/336)) ([c53239d](https://github.com/mbiszczanik/skycraft/commit/c53239d504bd1baf0cd79678646b25d078390d2a))
+* **labs:** read, create and remove role assignments without Microsoft Graph ([#399](https://github.com/mbiszczanik/skycraft/issues/399)) ([48dfb79](https://github.com/mbiszczanik/skycraft/commit/48dfb796979aaabc2c5ff027ed14542a7e7a39ab))
+* **labs:** stop on a taken vault, registry or web app name, and let the cycle pass its own ([#445](https://github.com/mbiszczanik/skycraft/issues/445)) ([5da0a5d](https://github.com/mbiszczanik/skycraft/commit/5da0a5d9d12f997c13b750d91b6cfaa20a42bd25))
+* **module-1:** name the Graph modules the scripts need and import them at one version ([#396](https://github.com/mbiszczanik/skycraft/issues/396)) ([4961862](https://github.com/mbiszczanik/skycraft/commit/49618626dcf698e6280bda4d7bc0004378eb9de2))
+* **module-1:** reach Lab 1.1's users with the Graph scopes and the initial domain Lab 1.1 uses ([#382](https://github.com/mbiszczanik/skycraft/issues/382)) ([57205de](https://github.com/mbiszczanik/skycraft/commit/57205de9fcb8204af434a0dd178ef3bbcb317874))
+* **module-1:** sign in again in the Graph sign-in's tenant when its scopes fall short ([#409](https://github.com/mbiszczanik/skycraft/issues/409)) ([4fa1cf9](https://github.com/mbiszczanik/skycraft/commit/4fa1cf9449daf5534a226c89a4d0fa8c8090471c))
+* **module-1:** sign in to Microsoft Graph with Cloud Shell's own token in Azure Cloud Shell ([#419](https://github.com/mbiszczanik/skycraft/issues/419)) ([7dab3d0](https://github.com/mbiszczanik/skycraft/commit/7dab3d05a3c2b02c87729113e9ed30872d25fd97))
+* **module-2:** reset exit codes after successful lab scripts ([#423](https://github.com/mbiszczanik/skycraft/issues/423)) ([b21cdc9](https://github.com/mbiszczanik/skycraft/commit/b21cdc9852314b552e09be01c9440fdf8e357cb4))
+* **module-3:** reset exit codes after successful lab scripts ([#428](https://github.com/mbiszczanik/skycraft/issues/428)) ([83518f2](https://github.com/mbiszczanik/skycraft/commit/83518f247d1ac6dece966fdb3bbc244dce512595))
+* **networking:** align Lab 2.3 Portal guide and probe validation ([#427](https://github.com/mbiszczanik/skycraft/issues/427)) ([c827b70](https://github.com/mbiszczanik/skycraft/commit/c827b70f318e12869bcdd0a2eec00249593bc5a2))
+* **test-lab:** find Portal-named resources by relation and read Portal-unset properties as defaults ([#378](https://github.com/mbiszczanik/skycraft/issues/378)) ([6eccb1f](https://github.com/mbiszczanik/skycraft/commit/6eccb1fc0dea10664d93bea308a192b92f15f700))
+
+
+### Documentation
+
+* **adr-0006:** a lab fix is done when it ran live on its branch, and a verified PR closes its issue ([#417](https://github.com/mbiszczanik/skycraft/issues/417)) ([75e494a](https://github.com/mbiszczanik/skycraft/commit/75e494a9ad53f583144416840a58293a75e0bc76))
+* **lab-1.1:** name the default guest invite setting in Step 1.1.14 ([#401](https://github.com/mbiszczanik/skycraft/issues/401)) ([f70c447](https://github.com/mbiszczanik/skycraft/commit/f70c447d23b08186fc227b73cfda91f8dd67b9d6))
+* **lab-1.2:** follow today's Access control (IAM) pages in the guide and the checklist ([#383](https://github.com/mbiszczanik/skycraft/issues/383)) ([028c706](https://github.com/mbiszczanik/skycraft/commit/028c70646c775f5e478e0c1fdfc9f45bc5b2d524))
+* **lab-1.3:** follow the Portal of 2026-10-21 in the guide and the checklist ([#416](https://github.com/mbiszczanik/skycraft/issues/416)) ([cd7199e](https://github.com/mbiszczanik/skycraft/commit/cd7199e1f9e62f7529a8a605f101cb0dd5eeaca3))
+* **lab-2.1:** align the guide with the current Portal ([#424](https://github.com/mbiszczanik/skycraft/issues/424)) ([81634b4](https://github.com/mbiszczanik/skycraft/commit/81634b475ba037d52e297fa36938810ec87e9fd9))
+* **lab-2.2:** align Portal steps and security descriptions ([#426](https://github.com/mbiszczanik/skycraft/issues/426)) ([dbf9bba](https://github.com/mbiszczanik/skycraft/commit/dbf9bba0d1ba2714cdb705a4cec719ac2b650e55))
+* **lab-3.1:** align the guide with the current Portal and check the App Service subnet ([#429](https://github.com/mbiszczanik/skycraft/issues/429)) ([4920e11](https://github.com/mbiszczanik/skycraft/commit/4920e1132fe3b20b57c8f1aec121c8722957ef5b))
+* **lab-3.2:** use the Portal's labels on the VM Management and Monitoring tabs ([#436](https://github.com/mbiszczanik/skycraft/issues/436)) ([277395f](https://github.com/mbiszczanik/skycraft/commit/277395f4fe62b52a951ae68312449e3e5f96e205))
+* **lab-3.3:** drop the ME_ infrastructure group the environment never gets ([#434](https://github.com/mbiszczanik/skycraft/issues/434)) ([0dd0a6d](https://github.com/mbiszczanik/skycraft/commit/0dd0a6ddc1abed88d5e8862274bf90198157426d))
+
 ## [0.18.0](https://github.com/mbiszczanik/skycraft/compare/v0.17.0...v0.18.0) (2026-10-12)
 
 
