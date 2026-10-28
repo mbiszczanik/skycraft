@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-    Pester 5 tests for the role assignments Lab 5.2's New-LabBlobBackup.ps1 gives the Backup Vault
-    identity.
+    Pester 5 tests for Lab 5.2's New-LabBlobBackup.ps1: the blob backup policy it creates and the
+    role assignments it gives the Backup Vault identity.
 
 .DESCRIPTION
     New-LabBlobBackup.ps1 gives the Backup Vault's managed identity two roles on
@@ -21,6 +21,12 @@
       3. A read that fails stops the run with [ERROR] and exit 1 before anything is created,
          before the wait for RBAC propagation and before the backup instance.
       4. A create that fails stops the run with [ERROR] and exit 1.
+      5. With no SkyCraft-Blob-Policy, the script creates it with exactly one retention rule,
+         'Default', OperationalStore, P30D, and no vaulted (AzureBackupRule) rule, whatever the
+         template ships (issues #306, #366).
+      6. A SkyCraft-Blob-Policy with a vaulted rule (one made in the Portal) stops the run with
+         [ERROR] and exit 1 before any role is touched.
+      7. -PolicyOnly ends after the policy: no role, no wait, no backup instance.
 
     No subscription is needed, and none is used: the script runs through
     tests/Support/LabScriptStub.psm1 (issue #112), which aborts the child with exit 99 unless
@@ -33,7 +39,7 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Issue: #397
+    Issue: #397, #306
 #>
 
 #Requires -Version 7.0
@@ -53,6 +59,10 @@ BeforeAll {
         'Get-AzDataProtectionBackupInstance'
         'Initialize-AzDataProtectionBackupInstance'
         'New-AzDataProtectionBackupInstance'
+        'Get-AzResource'
+        'Get-AzDataProtectionPolicyTemplate'
+        'New-AzDataProtectionRetentionLifeCycleClientObject'
+        'New-AzDataProtectionBackupPolicy'
         'Invoke-AzRestMethod'
         'Start-Sleep'
     )
@@ -67,11 +77,14 @@ BeforeAll {
     #                                  account)
     #   SKYCRAFT_STUB_ROLELOOKUPFAIL   '1' refuses every role assignment listing (HTTP 403)
     #   SKYCRAFT_STUB_CREATEFAIL       '1' refuses every role assignment create (HTTP 403)
+    #   SKYCRAFT_STUB_POLICY           'operational' (default, the script's own), 'vaulted' (the
+    #                                  Portal's) or 'none'
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:VaultPrincipal = '11111111-1111-1111-1111-111111111111'
 $script:Rg = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg'
 $script:StorageId = "$script:Rg/providers/Microsoft.Storage/storageAccounts/prodskycraftswcsa"
+$script:BvId = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.DataProtection/backupVaults/platform-skycraft-swc-bv'
 
 function Write-StubCall {
     param([string]$Name)
@@ -87,7 +100,7 @@ function Get-AzContext {
 function Get-AzDataProtectionBackupVault {
     [CmdletBinding()]
     param($ResourceGroupName, $VaultName)
-    [pscustomobject]@{ Name = $VaultName; IdentityPrincipalId = $script:VaultPrincipal }
+    [pscustomobject]@{ Name = $VaultName; Id = $script:BvId; IdentityPrincipalId = $script:VaultPrincipal }
 }
 
 function Get-AzStorageAccount {
@@ -99,7 +112,59 @@ function Get-AzStorageAccount {
 function Get-AzDataProtectionBackupPolicy {
     [CmdletBinding()]
     param($ResourceGroupName, $VaultName, $Name)
-    [pscustomobject]@{ Id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.DataProtection/backupVaults/$VaultName/backupPolicies/$Name" }
+    if ($env:SKYCRAFT_STUB_POLICY -eq 'none') { return }
+    [pscustomobject]@{ Id = "$script:BvId/backupPolicies/$Name" }
+}
+
+# The policy's raw ARM body.
+function Get-AzResource {
+    [CmdletBinding()]
+    param([string]$ResourceId, [string]$ApiVersion, [switch]$ExpandProperties)
+    Write-StubCall -Name "Get-AzResource:$ResourceId"
+    $operational = [pscustomobject]@{
+        name = 'Default'; objectType = 'AzureRetentionRule'; isDefault = $true
+        lifecycles = @([pscustomobject]@{
+                deleteAfter     = [pscustomobject]@{ duration = 'P30D'; objectType = 'AbsoluteDeleteOption' }
+                sourceDataStore = [pscustomobject]@{ dataStoreType = 'OperationalStore'; objectType = 'DataStoreInfoBase' }
+            })
+    }
+    $rules = if ($env:SKYCRAFT_STUB_POLICY -eq 'vaulted') {
+        @(
+            [pscustomobject]@{ name = 'BackupDaily'; objectType = 'AzureBackupRule'; dataStore = [pscustomobject]@{ dataStoreType = 'VaultStore' } }
+            $operational
+        )
+    } else { @($operational) }
+    [pscustomobject]@{ Properties = [pscustomobject]@{ policyRules = $rules } }
+}
+
+# What Az.DataProtection 3.x ships: a vaulted weekly rule and a 7-day VaultStore retention.
+function Get-AzDataProtectionPolicyTemplate {
+    [CmdletBinding()]
+    param([string]$DatasourceType)
+    [pscustomobject]@{
+        DatasourceType = @('Microsoft.Storage/storageAccounts/blobServices')
+        ObjectType     = 'BackupPolicy'
+        PolicyRule     = @(
+            [pscustomobject]@{ Name = 'BackupWeekly'; ObjectType = 'AzureBackupRule'; DataStoreType = 'VaultStore' }
+            [pscustomobject]@{
+                Name = 'Default'; ObjectType = 'AzureRetentionRule'; IsDefault = $true
+                Lifecycle = @([pscustomobject]@{ DeleteAfterDuration = 'P7D'; SourceDataStoreType = 'VaultStore' })
+            }
+        )
+    }
+}
+
+function New-AzDataProtectionRetentionLifeCycleClientObject {
+    [CmdletBinding()]
+    param([string]$SourceDataStore, [string]$SourceRetentionDurationType, [int]$SourceRetentionDurationCount)
+    [pscustomobject]@{ DeleteAfterDuration = "P$($SourceRetentionDurationCount)D"; SourceDataStoreType = $SourceDataStore }
+}
+
+function New-AzDataProtectionBackupPolicy {
+    [CmdletBinding()]
+    param($ResourceGroupName, $VaultName, $Name, $Policy)
+    Write-StubCall -Name "New-AzDataProtectionBackupPolicy:$Name|$($Policy | ConvertTo-Json -Depth 6 -Compress)"
+    [pscustomobject]@{ Id = "$script:BvId/backupPolicies/$Name" }
 }
 
 function Get-AzDataProtectionBackupInstance {
@@ -162,12 +227,13 @@ function New-StubRoleAssignment {
 '@
 
     function Invoke-BlobBackupScript {
-        param([string]$Roles = 'none', [switch]$RoleLookupFail, [switch]$CreateFail)
+        param([string]$Roles = 'none', [switch]$RoleLookupFail, [switch]$CreateFail, [string]$Policy = 'operational', [string[]]$ArgumentList = @())
 
         $logPath = Join-Path $script:Stub.Directory 'calls.log'
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
 
-        $run = Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $script:ScriptPath -Environment @{
+        $run = Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $script:ScriptPath -ArgumentList $ArgumentList -Environment @{
+            SKYCRAFT_STUB_POLICY         = $Policy
             SKYCRAFT_STUB_ROLES          = $Roles
             SKYCRAFT_STUB_ROLELOOKUPFAIL = if ($RoleLookupFail) { '1' } else { '0' }
             SKYCRAFT_STUB_CREATEFAIL     = if ($CreateFail) { '1' } else { '0' }
@@ -197,6 +263,10 @@ function New-StubRoleAssignment {
     $script:HeldBelow  = Invoke-BlobBackupScript -Roles 'below'
     $script:ReadFails  = Invoke-BlobBackupScript -RoleLookupFail
     $script:CreateFail = Invoke-BlobBackupScript -CreateFail
+    $script:NewPolicy  = Invoke-BlobBackupScript -Policy 'none' -Roles 'above'
+    $script:Vaulted    = Invoke-BlobBackupScript -Policy 'vaulted'
+    $script:PolicyOnly = Invoke-BlobBackupScript -Policy 'none' -ArgumentList '-PolicyOnly'
+    $script:AllRuns    = @($script:Fresh, $script:HeldAbove, $script:HeldBelow, $script:ReadFails, $script:CreateFail, $script:NewPolicy, $script:Vaulted, $script:PolicyOnly)
 }
 
 AfterAll {
@@ -206,7 +276,7 @@ AfterAll {
 Describe 'Lab 5.2 New-LabBlobBackup.ps1 - test harness' {
 
     It 'shadows the real Az commands instead of touching a subscription' {
-        foreach ($run in @($script:Fresh, $script:HeldAbove, $script:HeldBelow, $script:ReadFails, $script:CreateFail)) {
+        foreach ($run in $script:AllRuns) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az commands (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -257,5 +327,48 @@ Describe 'Lab 5.2 New-LabBlobBackup.ps1 - the vault identity''s roles through th
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "\[ERROR\] Failed to assign 'Storage Blob Data Owner':[^\r\n]*AuthorizationFailed"
         @($run.Calls | Where-Object { $_ -like 'Start-Sleep:*' -or $_ -like '*BackupInstance' }) | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Lab 5.2 New-LabBlobBackup.ps1 - SkyCraft-Blob-Policy, operational only (#306)' {
+
+    It 'creates the policy with one 30-day OperationalStore rule and no vaulted rule, whatever the template ships' {
+        $run = $script:NewPolicy
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $created = @($run.Calls | Where-Object { $_ -like 'New-AzDataProtectionBackupPolicy:*' })
+        $created.Count | Should -Be 1
+        $name, $json = ($created[0] -replace '^New-AzDataProtectionBackupPolicy:', '') -split '\|', 2
+        $name | Should -Be 'SkyCraft-Blob-Policy'
+        $policy = $json | ConvertFrom-Json
+        @($policy.PolicyRule).Count | Should -Be 1
+        $rule = @($policy.PolicyRule)[0]
+        $rule.ObjectType | Should -Be 'AzureRetentionRule'
+        $rule.Name | Should -Be 'Default'
+        $rule.IsDefault | Should -BeTrue
+        @($rule.Lifecycle).Count | Should -Be 1
+        @($rule.Lifecycle)[0].SourceDataStoreType | Should -Be 'OperationalStore'
+        @($rule.Lifecycle)[0].DeleteAfterDuration | Should -Be 'P30D'
+        $run.Output | Should -Match 'Policy created: SkyCraft-Blob-Policy \(OperationalStore 30 days, no vaulted rule'
+        $run.Calls | Should -Contain 'Get-AzDataProtectionBackupInstance'
+    }
+
+    It 'stops with [ERROR] and exit 1 on a policy with a vaulted rule, before any role is touched' {
+        $run = $script:Vaulted
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[ERROR\] 'SkyCraft-Blob-Policy' is not the lab's policy: vaulted backup rule 'BackupDaily'"
+        $run.Output | Should -Match 'UserErrorBMSUpdatePolicyNotSupported'
+        @($run.Calls | Where-Object { $_ -like 'Get-RoleAssignment|*' -or $_ -like 'New-RoleAssignment:*' -or $_ -like 'New-AzDataProtectionBackupPolicy:*' -or $_ -like '*BackupInstance' }) | Should -BeNullOrEmpty
+    }
+
+    It 'keeps an existing operational policy and creates none' {
+        @($script:Fresh.Calls | Where-Object { $_ -like 'New-AzDataProtectionBackupPolicy:*' }) | Should -BeNullOrEmpty
+        $script:Fresh.Output | Should -Match 'Policy found: SkyCraft-Blob-Policy \(operational, 30 days, no vaulted rule\)'
+    }
+
+    It 'ends after the policy with -PolicyOnly: no role, no wait, no backup instance' {
+        $run = $script:PolicyOnly
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        @($run.Calls | Where-Object { $_ -like 'New-AzDataProtectionBackupPolicy:SkyCraft-Blob-Policy|*' }).Count | Should -Be 1
+        @($run.Calls | Where-Object { $_ -like '*RoleAssignment*' -or $_ -like 'Start-Sleep:*' -or $_ -like '*BackupInstance' }) | Should -BeNullOrEmpty
     }
 }

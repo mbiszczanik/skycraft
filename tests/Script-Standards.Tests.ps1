@@ -325,7 +325,11 @@ Describe 'SkyCraft PowerShell - Lab 5.2 VM backup survives Lab 1.3 (#184)' {
     It "'<file>' counts a failed initial backup job as a deployment failure" -ForEach $Lab52DeployCase {
         $content = Get-Content -Raw -LiteralPath $path
         $content | Should -Match 'Get-AzRecoveryServicesBackupJob -JobId'
-        $content | Should -Match "(?s)if \(\`$job\.Status -eq 'Failed'\) \{\s*\`$script:deployFailures\+\+"
+        $content | Should -Match "(?s)if \(\`$job\.Status -eq 'Failed' -or \`$snapshotStatus -eq 'Failed'\) \{\s*\`$script:deployFailures\+\+"
+        # The watch ends at Take Snapshot's outcome (#366), and a phase not seen to finish is a failure.
+        $content | Should -Match "Where-Object \{ \`$_\.Name -eq 'Take Snapshot' \}"
+        $content | Should -Match '(?s)did not finish within \$snapshotWatchMinutes minutes'
+        $content | Should -Match '(?s)\} else \{\s*\$script:deployFailures\+\+\s*Write-Host "  \[ERROR\] Take Snapshot
     }
 
     It "'<file>' checks the backup job outcome, not only the configuration" -ForEach $Lab52TestCase {
