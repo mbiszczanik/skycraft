@@ -1448,7 +1448,7 @@ Get-AzVmssVM -ResourceGroupName dev-skycraft-swc-rg -VMScaleSetName dev-skycraft
 
 #### Add the Autoscale Rules
 
-4. In the left menu, under **Availability + scale**, click **Scaling**
+4. In the left menu, under **Availability + scale** (expand it if it is collapsed), click **Scaling**
 5. Select the **Custom autoscale** card. In the Default condition, choose **Scale based on a metric** and set the instance limits:
 
 | Field   | Value |
