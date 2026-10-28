@@ -27,11 +27,13 @@
          listed, the guide's group and name still find it.
       6. When ARM refuses the raw read of the alert rule's criteria (AuthorizationFailed), the
          threshold check fails and prints that error, and the script exits 1 (#452).
+      6. The Azure Monitor Agent is checked on the rule's VMs (#369): a missing, non-Succeeded or
+         unreadable agent fails; zero Heartbeat rows, a query that throws and a query that
+         returns an error fail; a late first row is waited for only while the agent is Succeeded.
 
-    Known gap, kept visible on purpose: the VM insights rule in the 'portal' case carries the
-    streams VM insights really sends (InsightsMetrics, no Syslog), so 'DCR includes Syslog
-    stream' fails on it. Which streams the lab collects is decided on #369 and changed with the
-    Lab 5.1 guide PR; this suite does not pretend a Portal-built 5.1 passes today.
+    The VM insights rule in the 'portal' case carries the streams VM insights really sends
+    (InsightsMetrics, no Perf or Syslog), so the Perf and Syslog checks fail on it: the guide's
+    path is the data collection rules wizard (#369), VM insights only its Portal shortcut.
 
     No subscription is needed, and none is used: tests/Support/LabScriptStub.psm1 (issue #112)
     imports the real modules first, the stub last, and aborts the child with exit 99 unless every
@@ -43,7 +45,7 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.1 - Azure Monitor
-    Issue: #355
+    Issue: #355, #369
 #>
 
 #Requires -Version 7.0
@@ -66,6 +68,9 @@ BeforeAll {
         'Get-AzMetricAlertRuleV2'
         'Get-AzStorageAccount'
         'Get-AzDiagnosticSetting'
+        'Invoke-AzOperationalInsightsQuery'
+        # Shadowed so a wait for Heartbeat rows is counted, not slept.
+        'Start-Sleep'
     )
 
     # The workspace, action group, alert rule and storage diagnostic setting are always as the
@@ -105,7 +110,7 @@ function Get-StubRules {
     $vmi   = "$script:DevRg/providers/Microsoft.Insights/dataCollectionRules/MSVMI-swedencentral-dev-skycraft-swc-auth-vm"
     $other = "$script:DevRg/providers/Microsoft.Insights/dataCollectionRules/security-events-dcr"
     @{
-        $bicep = @{ Name = 'skycraft-vm-dcr'; Group = 'platform-skycraft-swc-rg'; Workspace = $script:WorkspaceId; Streams = @('Microsoft-InsightsMetrics', 'Microsoft-Syslog') }
+        $bicep = @{ Name = 'skycraft-vm-dcr'; Group = 'platform-skycraft-swc-rg'; Workspace = $script:WorkspaceId; Streams = @('Microsoft-Perf', 'Microsoft-InsightsMetrics', 'Microsoft-Syslog') }
         $vmi   = @{ Name = 'MSVMI-swedencentral-dev-skycraft-swc-auth-vm'; Group = 'dev-skycraft-swc-rg'; Workspace = $script:WorkspaceId; Streams = @('Microsoft-InsightsMetrics') }
         $other = @{ Name = 'security-events-dcr'; Group = 'dev-skycraft-swc-rg'; Workspace = "$script:Sub/resourceGroups/security-rg/providers/Microsoft.OperationalInsights/workspaces/security-law"; Streams = @('Microsoft-SecurityEvent') }
     }
@@ -152,6 +157,7 @@ function Get-AzOperationalInsightsWorkspace {
     [pscustomobject]@{
         Name            = $Name
         ResourceId      = $script:WorkspaceId
+        CustomerId      = '11111111-1111-1111-1111-111111111111'
         Sku             = 'PerGB2018'
         RetentionInDays = 30
         Location        = 'swedencentral'
@@ -217,6 +223,7 @@ function Get-AzResource {
 function Invoke-AzRestMethod {
     [CmdletBinding()]
     param([string]$Method, [string]$Path, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($Path -match '/virtualMachines/[^/]+/extensions\?') { return Get-StubExtensions -Path $Path }
     if ($Path -notmatch '/providers/Microsoft\.Insights/dataCollectionRuleAssociations\?') { throw "stub: unexpected REST path $Path" }
     if ($env:SKYCRAFT_STUB_DCR -eq 'fail') { throw 'stub lookup failure: Invoke-AzRestMethod dataCollectionRuleAssociations' }
     if ($env:SKYCRAFT_STUB_DCR -eq 'vmthrows' -and $Path -like '*/virtualMachines/dev-skycraft-swc-world-vm/*') {
@@ -243,6 +250,48 @@ function Invoke-AzRestMethod {
         }
     }
     [pscustomobject]@{ StatusCode = 200; Content = (@{ value = $associations } | ConvertTo-Json -Depth 5) }
+}
+
+# Lists a VM's extensions, as GET <vm id>/extensions does. Every VM carries the Network Watcher
+# agent; the Azure Monitor Agent varies with SKYCRAFT_STUB_AGENT.
+function Get-StubExtensions {
+    param([string]$Path)
+    if ($env:SKYCRAFT_STUB_AGENT -eq 'unreadable') { throw 'stub lookup failure: extensions' }
+    $extensions = @(@{ name = 'NetworkWatcherAgentLinux'; properties = @{ publisher = 'Microsoft.Azure.NetworkWatcher'; type = 'NetworkWatcherAgentLinux'; provisioningState = 'Succeeded' } })
+    $state = switch ($env:SKYCRAFT_STUB_AGENT) { 'missing' { $null } 'failed' { 'Failed' } default { 'Succeeded' } }
+    if ($state) {
+        $extensions += @{ name = 'AzureMonitorLinuxAgent'; properties = @{ publisher = 'Microsoft.Azure.Monitor'; type = 'AzureMonitorLinuxAgent'; provisioningState = $state } }
+    }
+    [pscustomobject]@{ StatusCode = 200; Content = (@{ value = $extensions } | ConvertTo-Json -Depth 5) }
+}
+
+# Answers the Heartbeat query with a row for every VM id it names, as SKYCRAFT_STUB_HEARTBEAT says:
+#   'rows' (default) at once, 'late' from the second query on, 'none' never, 'fail' throws,
+#   'error' returns the partial-error shape the service uses for a failed query.
+$script:QueryCount = 0
+function Invoke-AzOperationalInsightsQuery {
+    [CmdletBinding()]
+    param([string]$WorkspaceId, [string]$Query, [Parameter(ValueFromRemainingArguments)]$Rest)
+    $script:QueryCount++
+    Write-Host "[stub-query $script:QueryCount]" -NoNewline
+    if ($WorkspaceId -ne '11111111-1111-1111-1111-111111111111') { throw "stub: unexpected workspace id '$WorkspaceId'" }
+    if ($Query -notmatch '^Heartbeat\b' -or $Query -notmatch 'ago\(15m\)') { throw "stub: unexpected query $Query" }
+    switch ($env:SKYCRAFT_STUB_HEARTBEAT) {
+        'fail'  { throw 'stub lookup failure: workspace query' }
+        'error' { return [pscustomobject]@{ Results = @(); Error = [pscustomobject]@{ Message = 'stub query error: PartialError' } } }
+    }
+    $rows = @()
+    $answer = $env:SKYCRAFT_STUB_HEARTBEAT -in '', 'rows' -or ($env:SKYCRAFT_STUB_HEARTBEAT -eq 'late' -and $script:QueryCount -gt 1)
+    if ($answer) {
+        $rows = @([regex]::Matches($Query, "'(/subscriptions/[^']+)'") | ForEach-Object { [pscustomobject]@{ VmId = $_.Groups[1].Value; LastHeartbeat = '2026-10-28T10:00:00Z' } })
+    }
+    [pscustomobject]@{ Results = $rows; Error = $null }
+}
+
+function Start-Sleep {
+    [CmdletBinding()]
+    param([int]$Seconds, [Parameter(ValueFromRemainingArguments)]$Rest)
+    Write-Host "[stub-sleep $Seconds]" -NoNewline
 }
 
 function Get-AzActionGroup {
@@ -289,11 +338,19 @@ function Get-AzDiagnosticSetting {
             [ValidateSet('bicep', 'portal', 'none', 'nonepartial', 'fail', 'vmthrows', 'dangling')]
             [string]$Dcr,
             [ValidateSet('platform', 'vmgroup', 'recommended', 'listfails', 'listfailsplatform', 'criteriadenied')]
-            [string]$Alert = 'platform'
+            [string]$Alert = 'platform',
+            [ValidateSet('succeeded', 'missing', 'failed', 'unreadable')]
+            [string]$Agent = 'succeeded',
+            [ValidateSet('rows', 'late', 'none', 'fail', 'error')]
+            [string]$Heartbeat = 'rows',
+            # 0 by default: a run that waited would spin on the real clock with the stubbed sleep.
+            [int]$WaitMinutes = 0
         )
-        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
-            SKYCRAFT_STUB_DCR   = $Dcr
-            SKYCRAFT_STUB_ALERT = $Alert
+        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList @("-HeartbeatWaitMinutes $WaitMinutes") -Environment @{
+            SKYCRAFT_STUB_DCR       = $Dcr
+            SKYCRAFT_STUB_ALERT     = $Alert
+            SKYCRAFT_STUB_AGENT     = $Agent
+            SKYCRAFT_STUB_HEARTBEAT = $Heartbeat
         }
         return [pscustomobject]@{
             ExitCode = $run.ExitCode
@@ -318,10 +375,20 @@ function Get-AzDiagnosticSetting {
     $script:AlertListFails = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Alert 'listfails'
     $script:AlertListFailsPlatform = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Alert 'listfailsplatform'
     $script:CriteriaDenied = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Alert 'criteriadenied'
+    $script:AgentMissing     = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Agent 'missing'
+    $script:AgentFailed      = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Agent 'failed'
+    $script:AgentUnreadable  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Agent 'unreadable'
+    $script:AgentFailedNoRow = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Agent 'failed' -Heartbeat 'none' -WaitMinutes 1
+    $script:NoHeartbeat      = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none'
+    $script:HeartbeatLate    = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'late' -WaitMinutes 1
+    $script:QueryThrows      = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'fail'
+    $script:QueryError       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'error'
     $script:AllRuns    = @(
         $script:BicepMade, $script:PortalMade, $script:NoRule, $script:ReadFails, $script:NoRulePartial,
         $script:VmThrows, $script:Dangling, $script:AlertInVmGroup, $script:AlertRecommended,
-        $script:AlertListFails, $script:AlertListFailsPlatform, $script:CriteriaDenied
+        $script:AlertListFails, $script:AlertListFailsPlatform, $script:AgentMissing, $script:AgentFailed,
+        $script:AgentUnreadable, $script:AgentFailedNoRow, $script:NoHeartbeat, $script:HeartbeatLate,
+        $script:QueryThrows, $script:QueryError, $script:CriteriaDenied
     )
 }
 
@@ -358,16 +425,17 @@ Describe 'Lab 5.1 Test-Lab.ps1 - finds the data collection rule through the VM i
     It 'finds a rule under a Portal-generated name in the VM''s group, and reads it' {
         $run = $script:PortalMade
         $run.Output | Should -Match "\('MSVMI-swedencentral-dev-skycraft-swc-auth-vm' in dev-skycraft-swc-rg, on dev-skycraft-swc-auth-vm\) PASS"
-        $run.Output | Should -Match 'DCR has InsightsMetrics data flow\.\.\. PASS'
+        $run.Output | Should -Match 'DCR destination points to workspace\.\.\. PASS'
     }
 
-    It 'still fails the Syslog check on a VM insights rule, which sends no Syslog (known gap, #369)' {
-        # Finding the rule is fixed here; which streams the lab collects is not. This pins the
-        # gap so the Lab 5.1 guide PR that settles the streams (#369) has to change this line.
+    It 'fails the Perf and Syslog checks on a VM insights rule, whose InsightsMetrics leaves Step 5.1.4 empty (#369)' {
+        # The guide's path is the data collection rules wizard (Perf and Syslog); VM insights is
+        # only the Portal shortcut.
         $run = $script:PortalMade
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'DCR has Perf data flow\.\.\. FAIL'
         $run.Output | Should -Match 'DCR includes Syslog stream\.\.\. FAIL'
-        $run.Output | Should -Match 'Failed: 1\b'
+        $run.Output | Should -Match 'Failed: 2\b'
     }
 
     It 'passes the lab''s rule when another VM''s association call throws' {
@@ -397,8 +465,10 @@ Describe 'Lab 5.1 Test-Lab.ps1 - finds the data collection rule through the VM i
         $run = $script:NoRule
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match 'Data collection rule associated with a VM in dev-skycraft-swc-rg or prod-skycraft-swc-rg\.\.\. \(no rule is associated with these VMs - Step 5\.1\.2\) FAIL'
-        # Found, destination, InsightsMetrics and Syslog all read the rule.
-        $run.Output | Should -Match 'Failed: 4\b'
+        # Found, destination, Perf and Syslog read the rule; the agent and Heartbeat its VMs.
+        $run.Output | Should -Match "Azure Monitor Agent Succeeded on the rule's VMs\.\.\. \(no VM carries the lab's rule - Step 5\.1\.2\) FAIL"
+        $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\. \(no VM carries the lab's rule - Step 5\.1\.2\) FAIL"
+        $run.Output | Should -Match 'Failed: 6\b'
     }
 
     It 'counts an association lookup that fails everywhere as a FAIL with the error, and still reaches the summary' {
@@ -406,14 +476,14 @@ Describe 'Lab 5.1 Test-Lab.ps1 - finds the data collection rule through the VM i
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "Data collection rule associated with a VM in dev-skycraft-swc-rg or prod-skycraft-swc-rg\.\.\. FAIL \(could not read associations of 'dev-skycraft-swc-auth-vm': stub lookup failure: Invoke-AzRestMethod dataCollectionRuleAssociations"
         $run.Output | Should -Match 'Test Results Summary'
-        $run.Output | Should -Match 'Failed: 4\b'
+        $run.Output | Should -Match 'Failed: 6\b'
     }
 
     It 'says no rule is associated, and names the group it could not read, when the readable VMs carry none' {
         $run = $script:NoRulePartial
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "Data collection rule associated with a VM in dev-skycraft-swc-rg or prod-skycraft-swc-rg\.\.\. \(no rule is associated with these VMs - Step 5\.1\.2; could not read VMs in 'prod-skycraft-swc-rg': stub lookup failure: Resource group 'prod-skycraft-swc-rg' could not be read\.\) FAIL"
-        $run.Output | Should -Match 'Failed: 4\b'
+        $run.Output | Should -Match 'Failed: 6\b'
     }
 }
 
@@ -467,5 +537,75 @@ Describe 'Lab 5.1 Test-Lab.ps1 - a raw ARM read that fails is not a missing reso
 
     It 'exits 1' {
         $script:CriteriaDenied.ExitCode | Should -Be 1
+    }
+}
+
+Describe 'Lab 5.1 Test-Lab.ps1 - checks the Azure Monitor Agent and its Heartbeat on the rule''s VMs (#369)' {
+
+    It 'passes a Succeeded agent whose VM sends Heartbeat, and names the VM' {
+        $run = $script:BicepMade
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Azure Monitor Agent Succeeded on the rule's VMs\.\.\. \(dev-skycraft-swc-auth-vm Succeeded\) PASS"
+        # A PASS proves the query named the VM: the stub answers only for the ids it is given.
+        $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\.\[stub-query 1\] PASS"
+        $run.Output | Should -Match 'DCR has Perf data flow\.\.\. PASS'
+        $run.Output | Should -Not -Match 'stub-sleep'
+    }
+
+    It 'fails, counted, when the VM has no Azure Monitor Agent, and names the step' {
+        $run = $script:AgentMissing
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Azure Monitor Agent Succeeded on the rule's VMs\.\.\. \(dev-skycraft-swc-auth-vm missing - Step 5\.1\.2 installs it\) FAIL"
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'fails, counted, when the agent is not Succeeded' {
+        $run = $script:AgentFailed
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Azure Monitor Agent Succeeded on the rule's VMs\.\.\. \(dev-skycraft-swc-auth-vm Failed - Step 5\.1\.2 installs it\) FAIL"
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'counts an extension read that fails as a FAIL with the error, never a pass' {
+        $run = $script:AgentUnreadable
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Azure Monitor Agent Succeeded on the rule's VMs\.\.\. FAIL \(could not read the extensions of 'dev-skycraft-swc-auth-vm' \(stub lookup failure: extensions\)\)"
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'fails, counted, when no Heartbeat row has arrived from the VM, and names it' {
+        $run = $script:NoHeartbeat
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\.\[stub-query 1\] \(no row from dev-skycraft-swc-auth-vm - Steps 5\.1\.2 and 5\.1\.3\) FAIL"
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'waits for a first Heartbeat while the agent is Succeeded, and passes when it arrives' {
+        $run = $script:HeartbeatLate
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\.\[stub-query 1\]\.\[stub-sleep 60\]\[stub-query 2\] PASS"
+    }
+
+    It 'does not wait for Heartbeat from an agent that is not Succeeded' {
+        $run = $script:AgentFailedNoRow
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Not -Match 'stub-sleep'
+        $run.Output | Should -Not -Match 'stub-query 2'
+        $run.Output | Should -Match 'Failed: 2\b'
+    }
+
+    It 'counts a workspace query that throws as a FAIL with the error, and still reaches the summary' {
+        $run = $script:QueryThrows
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\.\[stub-query 1\] FAIL \(stub lookup failure: workspace query\)"
+        $run.Output | Should -Match 'Test Results Summary'
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'counts a workspace query that returns an error as a FAIL, not as zero rows' {
+        $run = $script:QueryError
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\.\[stub-query 1\] FAIL \(the workspace query failed: stub query error: PartialError\)"
+        $run.Output | Should -Match 'Failed: 1\b'
     }
 }

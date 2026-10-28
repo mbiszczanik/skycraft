@@ -5,7 +5,7 @@
 By completing this lab, you will:
 
 - Create and configure a **Log Analytics Workspace**
-- Enable **VM Insights** for SkyCraft virtual machines
+- Connect SkyCraft virtual machines with the **Azure Monitor Agent** and a **data collection rule**
 - Create **Log Search Alerts** based on KQL queries
 - Configure **Metric Alerts** for high CPU utilization
 - Build a custom **Azure Dashboard** for multi-resource visibility
@@ -102,20 +102,53 @@ A **Log Analytics Workspace** is a unique environment for Azure Monitor log data
 
 ### Step 5.1.2: Connect Virtual Machines
 
-1. Navigate to **Monitor** (portal sidebar) → **Virtual Machines**.
-2. Click the **Not monitored** tab.
-3. Find your `dev-skycraft-swc-auth-vm` (or equivalent).
-4. Click **Enable**.
-5. Select the **Azure Monitor agent** (recommended).
-6. Under **Data Collection Rule**, click **Create New**:
-   - Name: `skycraft-vm-dcr`
-   - Destination: `platform-skycraft-swc-law` (the one you just created)
-7. Click **Enable**.
+Two pieces connect a VM to the workspace: the **Azure Monitor Agent (AMA)**, a VM extension that collects the data, and a **Data Collection Rule (DCR)**, which says what to collect and where to send it. The lab creates the rule with the **Data Collection Rules** wizard, which has a **Tags** tab, and installs the agent with the SkyCraft tags: Lab 1.3's `Enforce-Project-Tag` policy refuses an untagged extension. `scripts/Test-Lab.ps1` checks that the agent shows **Provisioning succeeded** on the rule's VM and that its `Heartbeat` reaches the workspace.
 
 > [!NOTE]
-> This process installs the **Azure Monitor Agent (AMA)** and configures a **Data Collection Rule (DCR)** to stream performance counters and Syslog/Event logs to your LAW.
+> **VM insights** (**Monitor** → **Insights** → **Virtual Machines**) is the Portal shortcut that creates a rule and installs the agent in one wizard. It has no Tags field, so under Lab 1.3's policies it ends in *Onboarding failed*, and its rule sends `InsightsMetrics`, not the `Perf` table Step 5.1.4 queries.
 
-**Expected Result**: After 5-10 minutes, the VM status changes to "Monitored".
+1. Navigate to **Monitor** → **Data Collection Rules** (under **Settings**) → **+ Create**.
+2. **Basics**:
+
+| Field                    | Value                      |
+| :----------------------- | :------------------------- |
+| Rule Name                | `skycraft-vm-dcr`          |
+| Subscription             | [Your Subscription]        |
+| Resource Group           | `platform-skycraft-swc-rg` |
+| Region                   | **Sweden Central**         |
+| Platform Type            | **Linux**                  |
+| Data Collection Endpoint | leave empty                |
+
+3. **Resources** → **+ Add resources** → expand `dev-skycraft-swc-rg`, check `dev-skycraft-swc-auth-vm` (or `prod-skycraft-swc-auth-vm` if only the prod environment exists) → **Apply**.
+4. **Collect and deliver** → **+ Add data source**:
+   - Data source type: **Performance Counters**, **Basic** (CPU, memory, disk and network)
+   - **Next : Destination** → **+ Add destination**: Destination type **Azure Monitor Logs**, account `platform-skycraft-swc-law` → **Add data source**
+5. **+ Add data source** again:
+   - Data source type: **Linux Syslog**, the facilities at their defaults
+   - Destination: **Azure Monitor Logs**, `platform-skycraft-swc-law` → **Add data source**
+6. **Tags**: `Project = SkyCraft`, `Environment = Platform`, `CostCenter = MSDN`, `Owner = <your name>`.
+7. Click **Review + create** → **Create**.
+8. Open the VM → **Extensions + applications**. If `AzureMonitorLinuxAgent` is not listed with **Provisioning succeeded**, install it with the tags from Cloud Shell (PowerShell). The Portal offers no tags field for it, and running the block over an installed agent only sets its tags:
+
+   ```powershell
+   $vm = Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-vm
+   New-AzResource -ResourceId "$($vm.Id)/extensions/AzureMonitorLinuxAgent" -Location $vm.Location `
+     -Properties @{ publisher = 'Microsoft.Azure.Monitor'; type = 'AzureMonitorLinuxAgent'; typeHandlerVersion = '1.0'; autoUpgradeMinorVersion = $true; enableAutomaticUpgrade = $true } `
+     -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN'; Owner = '<your name>' } -Force
+   ```
+
+   The same install in Cloud Shell (Bash):
+
+   ```azurecli
+   VM=$(az vm show -g dev-skycraft-swc-rg -n dev-skycraft-swc-auth-vm --query id -o tsv)
+   az resource create --id "$VM/extensions/AzureMonitorLinuxAgent" --is-full-object --properties '{
+     "location": "swedencentral",
+     "tags": { "Project": "SkyCraft", "Environment": "Development", "CostCenter": "MSDN", "Owner": "<your name>" },
+     "properties": { "publisher": "Microsoft.Azure.Monitor", "type": "AzureMonitorLinuxAgent", "typeHandlerVersion": "1.0", "autoUpgradeMinorVersion": true, "enableAutomaticUpgrade": true }
+   }'
+   ```
+
+**Expected Result**: `skycraft-vm-dcr` lists `dev-skycraft-swc-auth-vm` under **Resources**, the VM shows `AzureMonitorLinuxAgent` with **Provisioning succeeded**, and after 5-10 minutes the queries in Steps 5.1.3 and 5.1.4 return rows.
 
 ---
 
@@ -294,7 +327,7 @@ module modCpuAlert 'br/public:avm/res/insights/metric-alert:0.4.1' = {
 }
 ```
 
-The data collection rule and the action group follow the same pattern. The storage diagnostic setting is the one resource without an AVM module and lives in `bicep/modules/storage-blob-diagnostics.bicep` (see `ARCHITECTURE.md` §5).
+The data collection rule, the action group and the tagged Azure Monitor Agent (`avm/res/compute/virtual-machine/extension`, installed on the VM the rule is associated with) follow the same pattern. The storage diagnostic setting is the one resource without an AVM module and lives in `bicep/modules/storage-blob-diagnostics.bicep` (see `ARCHITECTURE.md` §5).
 
 ---
 
@@ -302,7 +335,7 @@ The data collection rule and the action group follow the same pattern. The stora
 
 - [ ] Log Analytics Workspace `platform-skycraft-swc-law` created
 - [ ] At least one VM connected using Azure Monitor Agent
-- [ ] KQL query returned `Heartbeat` data
+- [ ] KQL queries returned `Heartbeat` and `Perf` data
 - [ ] Alert rule `skycraft-cpu-alert` (>80% CPU, severity 2) with action group `skycraft-ops-ag` in `platform-skycraft-swc-rg`
 - [ ] Azure Dashboard contains at least one pinned chart
 - [ ] Diagnostic setting `skycraft-storage-diag` streams `StorageRead`/`StorageWrite` from `platformskycraftswcsa` to the workspace
@@ -320,8 +353,10 @@ The data collection rule and the action group follow the same pattern. The stora
 **Solution**:
 
 - Ensure the VM is **Running**.
+- Check that the VM lists `AzureMonitorLinuxAgent` under **Extensions + applications** with **Provisioning succeeded**; if not, run the install block in Step 5.1.2.
 - Wait up to 10 minutes for the AMA agent to finalize configuration.
 - Check if the **Data Collection Rule** is correctly associated with the VM.
+- `Heartbeat` has rows but `Perf` is empty: the rule must send **Performance Counters** to **Azure Monitor Logs**. A rule made by VM insights sends `InsightsMetrics` instead.
 
 ---
 
@@ -363,7 +398,7 @@ The data collection rule and the action group follow the same pattern. The stora
 **What You Accomplished:**
 
 ✅ Created a centralized Log Analytics Workspace for SkyCraft telemetry
-✅ Enabled VM Insights using Azure Monitor Agent (AMA)
+✅ Connected VMs with the Azure Monitor Agent (AMA) and a data collection rule
 ✅ Queried performance data using Kusto Query Language (KQL)
 ✅ Configured metric alerts for CPU threshold monitoring
 ✅ Built a custom Azure Dashboard for operational visibility
