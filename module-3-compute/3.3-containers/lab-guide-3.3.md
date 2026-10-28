@@ -109,7 +109,7 @@ For SkyCraft, we need a secure place to store our proprietary game server images
 | **Pricing plan**                      | **Standard**                  |
 | **Role assignment permissions mode**  | **RBAC Registry Permissions** |
 
-> **Note**: The registry name must be globally unique and contain only alphanumeric characters. If `devskycraftswcacr01` is taken, use another name (for example `devskycraftswcacr02`) everywhere this guide says `devskycraftswcacr01`, and pass it to the lab's scripts with `-AcrName`.
+> **Note**: The registry name must be globally unique and contain only alphanumeric characters. If `devskycraftswcacr01` is taken, use another name (for example `devskycraftswcacr01ab`, with your initials) everywhere this guide says `devskycraftswcacr01`, and pass it to the lab's scripts with `-AcrName`. In a class, every learner needs a different name, so add your initials from the start. `Deploy-Bicep.ps1` checks the name before it deploys and stops if it is taken.
 
 4. Click the **Tags** tab and add:
 

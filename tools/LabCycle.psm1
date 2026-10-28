@@ -1635,7 +1635,129 @@ function Get-LabScriptModule {
     @(@($required) + @($listed) | Where-Object { $_ } | Select-Object -Unique)
 }
 
+function Get-LabCycleUnknownUniqueName {
+    <#
+    .SYNOPSIS
+        Lists the -UniqueNames keys the manifest does not declare, and the keys given no value.
+
+    .DESCRIPTION
+        A misspelt key would otherwise be dropped without a word, and the lab would deploy under
+        its taken default (#438).
+
+    .PARAMETER Declared
+        The manifest's UniqueNames entries (Parameter, Lab, Default).
+
+    .PARAMETER UniqueNames
+        The names the operator passed, parameter name to value.
+
+    .OUTPUTS
+        [string] One problem per item.
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #438
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter()] [AllowNull()] [object[]]$Declared,
+        [Parameter()] [AllowNull()] [hashtable]$UniqueNames
+    )
+
+    if (-not $UniqueNames) { return }
+    $known = @($Declared | Where-Object { $_ } | ForEach-Object { $_.Parameter })
+    foreach ($key in @($UniqueNames.Keys | Sort-Object)) {
+        if ($key -notin $known) { "'$key' is not a unique name the manifest declares (known: $($known -join ', '))" }
+        elseif ([string]::IsNullOrWhiteSpace([string]$UniqueNames[$key])) { "'$key' has no value" }
+    }
+}
+
+function Get-LabCycleUniqueNameArgument {
+    <#
+    .SYNOPSIS
+        Returns the -UniqueNames values that belong to one lab, as script arguments.
+
+    .DESCRIPTION
+        The same values go to the lab's Deploy, Test and teardown invocations, so all three act on
+        the resource the deploy created (#438).
+
+    .PARAMETER Declared
+        The manifest's UniqueNames entries (Parameter, Lab, Default).
+
+    .PARAMETER UniqueNames
+        The names the operator passed, parameter name to value.
+
+    .PARAMETER Lab
+        The lab path, as the manifest's phases and teardowns name it.
+
+    .OUTPUTS
+        [hashtable] Parameter name to value; empty when the lab has none.
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #438
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter()] [AllowNull()] [object[]]$Declared,
+        [Parameter()] [AllowNull()] [hashtable]$UniqueNames,
+        [Parameter(Mandatory)] [string]$Lab
+    )
+
+    $arguments = @{}
+    if (-not $UniqueNames) { return $arguments }
+    foreach ($entry in @($Declared | Where-Object { $_ -and $_.Lab -eq $Lab })) {
+        if ($UniqueNames.ContainsKey($entry.Parameter)) { $arguments[$entry.Parameter] = [string]$UniqueNames[$entry.Parameter] }
+    }
+    $arguments
+}
+
+function Get-LabCycleSoftDeleteGuard {
+    <#
+    .SYNOPSIS
+        Returns the manifest's soft-delete guards with the -UniqueNames values in place of the
+        defaults they replace.
+
+    .DESCRIPTION
+        A guard checks a default name for a soft-deleted leftover. When the run deploys under
+        another name, the guard must check that name instead (#438).
+
+    .PARAMETER Guards
+        The manifest's SoftDeleteGuards.
+
+    .PARAMETER Declared
+        The manifest's UniqueNames entries (Parameter, Lab, Default).
+
+    .PARAMETER UniqueNames
+        The names the operator passed, parameter name to value.
+
+    .OUTPUTS
+        [hashtable] One guard per item, copied.
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #438
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter()] [AllowNull()] [object[]]$Guards,
+        [Parameter()] [AllowNull()] [object[]]$Declared,
+        [Parameter()] [AllowNull()] [hashtable]$UniqueNames
+    )
+
+    foreach ($guard in @($Guards | Where-Object { $_ })) {
+        $copy = @{}
+        foreach ($key in $guard.Keys) { $copy[$key] = $guard[$key] }
+        $match = @($Declared | Where-Object { $_ -and $_.Lab -eq $guard.Lab -and $_.Default -eq $guard.Name }) | Select-Object -First 1
+        if ($match -and $UniqueNames -and $UniqueNames.ContainsKey($match.Parameter)) { $copy.Name = [string]$UniqueNames[$match.Parameter] }
+        $copy
+    }
+}
+
 Export-ModuleMember -Function Get-PhaseOrder, Get-DependentPhase, Get-LabCycleFailedStatus,
+    Get-LabCycleUnknownUniqueName, Get-LabCycleUniqueNameArgument, Get-LabCycleSoftDeleteGuard,
     Test-LabCycleStatusBlocksDependent, Invoke-LabScriptProcess,
     Test-LabCycleSubscription, Test-LabCyclePreflight, Test-LabCycleActionAllowed, Invoke-LabCycleCanary,
     Get-LabCycleLockOwner, New-LabCycleLock, Get-LabCycleFailureClass, Write-LabCycleReport,

@@ -879,7 +879,7 @@ exit
 
 Set the region explicitly: the form defaults to **East US**, which Lab 1.3's `Restrict-Azure-Regions` refuses. Seven days and no purge protection match the Bicep path and let `Remove-LabResource.ps1 -IncludeKeyVault` purge the vault, so its name is free again at once.
 
-Key vault names are unique across all of Azure. If the form says `dev-skycraft-swc-kv` is taken, add a short suffix of your own, for example `dev-skycraft-swc-kv-ab` (24 characters at most), use that name wherever this lab says `dev-skycraft-swc-kv`, and pass it to the lab scripts with `-KeyVaultName` (`Deploy-Bicep.ps1`, `Enable-Encryption.ps1`, `Test-Lab.ps1`, `Remove-LabResource.ps1`).
+Key vault names are unique across all of Azure. If the form says `dev-skycraft-swc-kv` is taken, add a short suffix of your own, for example `dev-skycraft-swc-kv-ab` (24 characters at most), use that name wherever this lab says `dev-skycraft-swc-kv`, and pass it to the lab scripts with `-KeyVaultName` (`Deploy-Bicep.ps1`, `Enable-Encryption.ps1`, `Test-Lab.ps1`, `Remove-LabResource.ps1`). In a class, every learner needs a different name, so add your initials from the start. `Deploy-Bicep.ps1` checks the name before it deploys and stops if it is taken.
 
 ![Configure Azure Disk Encryption](./images/step-3.2.17.png)
 

@@ -152,6 +152,12 @@ if ($legacyCae) {
     Exit-Lab -FailureCount 1
 }
 
+# A taken registry name otherwise fails the bootstrap, as AlreadyInUse (#438).
+$acrOwned = [bool](Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.ContainerRegistry/registries' -Name $AcrName -ErrorAction SilentlyContinue)
+if (-not (Test-LabGlobalName -Kind ContainerRegistry -Name $AcrName -ParameterName 'AcrName' -Owned $acrOwned)) {
+    Exit-Lab -FailureCount 1
+}
+
 # What-if runs before Phase 1: bootstrapping the registry and importing the image are real
 # changes, so a preview must not perform them. The preview covers main.bicep only.
 if ($WhatIf) {
