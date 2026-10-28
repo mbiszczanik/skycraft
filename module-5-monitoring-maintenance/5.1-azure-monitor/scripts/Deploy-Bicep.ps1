@@ -5,8 +5,9 @@
 .DESCRIPTION
     This script deploys the Lab 5.1 Bicep templates to Azure, including:
     - Log Analytics Workspace (platform-skycraft-swc-law)
-    - VM Insights Data Collection Rule (skycraft-vm-dcr)
-    - DCR Association with the target VM
+    - VM Data Collection Rule (skycraft-vm-dcr): Perf, InsightsMetrics and Syslog
+    - Azure Monitor Agent (AzureMonitorLinuxAgent), tagged, on the VM the rule is associated with
+    - DCR Association with that VM
     - Action Group (skycraft-ops-ag) with email notification
     - Metric Alert (skycraft-cpu-alert) for CPU > 80%
     - Storage Account Diagnostic Settings (skycraft-storage-diag)
@@ -164,6 +165,7 @@ $deployParams = @{
     TemplateFile                = $templatePath
     parOpsEmail                 = $OpsEmail
     parProdVmResourceId         = $prodVmId
+    parAgentVmResourceId        = $devVmId
     parStorageAccountResourceId = $storageId
     ErrorAction                 = 'Stop'
 }
@@ -178,7 +180,7 @@ if ($WhatIf) {
 }
 else {
     # A freshly-created Log Analytics workspace needs a minute before its
-    # InsightsMetrics/Syslog tables exist; the DCR deploy fails with
+    # Perf/InsightsMetrics/Syslog tables exist; the DCR deploy fails with
     # InvalidOutputTable until then. Retry on that transient error.
     $maxAttempts = 4
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
@@ -238,6 +240,7 @@ if ($WhatIf) {
         Write-Host "    Workspace ID:         $($deployment.Outputs['outWorkspaceId'].Value)"
         Write-Host "    Workspace Customer ID: $($deployment.Outputs['outWorkspaceCustomerId'].Value)"
         Write-Host "    DCR ID:               $($deployment.Outputs['outDcrId'].Value)"
+        Write-Host "    Monitor Agent ID:     $($deployment.Outputs['outMonitorAgentId'].Value)"
         Write-Host "    Action Group ID:      $($deployment.Outputs['outActionGroupId'].Value)"
         Write-Host "    Alert Rule ID:        $($deployment.Outputs['outAlertRuleId'].Value)"
     } else {
@@ -245,9 +248,8 @@ if ($WhatIf) {
     }
 
     Write-Host "`n  Next Steps:" -ForegroundColor Cyan
-    Write-Host "    1. Install AMA on VMs via Monitor → Virtual Machines → Enable monitoring" -ForegroundColor Gray
-    Write-Host "    2. Wait 5-10 minutes for data to appear in the workspace" -ForegroundColor Gray
-    Write-Host "    3. Run .\Test-Lab.ps1 to validate deployment" -ForegroundColor Gray
+    Write-Host "    1. Wait 5-10 minutes for Heartbeat and Perf rows to appear in the workspace" -ForegroundColor Gray
+    Write-Host "    2. Run .\Test-Lab.ps1 to validate deployment" -ForegroundColor Gray
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
