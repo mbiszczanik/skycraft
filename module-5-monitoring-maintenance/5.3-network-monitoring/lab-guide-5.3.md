@@ -58,7 +58,7 @@ Before starting this lab:
 
 These are the same checks `scripts/Deploy-Bicep.ps1` performs before it deploys anything - the cheapest chain that satisfies them is 1.2 → 2.1 → 2.3 → 3.2 (dev) → 4.1 `-All` → 5.1 → 5.2 → 5.3. If Lab 4.1 had to use another name than `platformskycraftswcsa` (storage account names are unique across Azure), pass it to `Deploy-Bicep.ps1` as `-PlatformSaName`.
 
-**If you did Lab 1.3**, its policies are still in force. `Enforce-Project-Tag` refuses every resource without `Project` = `SkyCraft`, and this lab makes Azure create three you cannot tag yourself: the Network Watcher agent on each endpoint VM, the connection monitor (its wizard has no Tags tab) and the `NWTA-*` data collection endpoint and rule that Traffic Analytics adds. Each one passes only because `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8) copies `Project` from its resource group. Before you start, check that **Policy** → under **Authoring**, **Assignments** lists `Inherit-Project-Tag`, and that `dev-skycraft-swc-rg`, `NetworkWatcherRG` and `platform-skycraft-swc-rg` (and `prod-skycraft-swc-rg` if you use the prod VM) carry `Project` = `SkyCraft` on their **Tags** page. See Troubleshooting, Issue 5 if a create is refused.
+**If you did Lab 1.3**, its policies are still in force. `Enforce-Project-Tag` refuses every resource without `Project` = `SkyCraft`, and this lab makes Azure create resources you cannot tag yourself: the `NWTA-*` data collection endpoint and rule that Traffic Analytics adds (every path), and on the Portal path the Network Watcher agent on each endpoint VM and the connection monitor (the wizard has no tags field for either). Each one passes only because `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8) copies `Project` from its resource group. Before you start, check that **Policy** → under **Authoring** (expand it if it is collapsed), **Assignments** lists `Inherit-Project-Tag`, and that `dev-skycraft-swc-rg`, `NetworkWatcherRG` and `platform-skycraft-swc-rg` (and `prod-skycraft-swc-rg` if you use the prod VM) carry `Project` = `SkyCraft` on their **Tags** page. See Troubleshooting, Issue 5 if a create is refused.
 
 ---
 
@@ -337,7 +337,7 @@ New-AzNetworkWatcherConnectionMonitor -NetworkWatcher $nw -Name skycraft-hub-spo
   -Tag @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN'; Owner = '<your name>' }
 ```
 
-**Expected Result**: `skycraft-hub-spoke-cm` appears under Connection monitor with monitoring status **Running** and carries the four tags, both endpoint VMs list a Network Watcher agent with `Project` = `SkyCraft`, and `NWConnectionMonitorTestResult` in `platform-skycraft-swc-law` starts receiving rows within about 10 minutes. What `hub-spoke-ssh` reports depends on the source:
+**Expected Result**: `skycraft-hub-spoke-cm` appears under Connection monitor with monitoring status **Running** and carries the four tags, both endpoint VMs list a Network Watcher agent with `Project` = `SkyCraft` (on the Portal path only under Lab 1.3's policies), and `NWConnectionMonitorTestResult` in `platform-skycraft-swc-law` starts receiving rows within about 10 minutes. What `hub-spoke-ssh` reports depends on the source:
 
 - **Dev fallback source** (`dev-skycraft-swc-world-vm`): **Pass** - source and destination share `dev-skycraft-swc-vnet`.
 - **Production source** (`prod-skycraft-swc-auth-vm`): **Fail**. The prod and dev spokes are each peered only to the hub, and VNet peering is not transitive, so traffic to the dev `AuthSubnet` (`10.1.1.0/24`) matches the system route `10.0.0.0/8 → None` and is dropped. Confirm it with **Next hop** (Step 5.3.2) from `prod-skycraft-swc-auth-vm` to the private IP of `dev-skycraft-swc-auth-vm`: this is the monitor doing its job, not a broken lab. Issue #178 tracks the route the lab should provide.
@@ -413,7 +413,7 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 
 **Solution**:
 
-- Check that **Policy** → under **Authoring**, **Assignments** lists `Inherit-Project-Tag` with **Tag Name** `Project`. If it is missing, assign it as in Lab 1.3, Step 1.3.8, and wait about ten minutes. Do not delete `Enforce-Project-Tag`: Lab 1.3's `Test-Lab.ps1` checks it.
+- Check that **Policy** → under **Authoring** (expand it if it is collapsed), **Assignments** lists `Inherit-Project-Tag` with **Tag Name** `Project`. If it is missing, assign it as in Lab 1.3, Step 1.3.8, and wait about ten minutes. Do not delete `Enforce-Project-Tag`: Lab 1.3's `Test-Lab.ps1` checks it.
 - Check that `platform-skycraft-swc-rg` carries `Project` = `SkyCraft` on its **Tags** page.
 - Delete the Failed flow log (under **Logs**, **Flow logs**, select `prod-skycraft-swc-vnet-flowlog` → **Delete**) and create it again with Step 5.3.5. <!-- confirm in Portal pass: Delete on the Flow logs list -->
 
