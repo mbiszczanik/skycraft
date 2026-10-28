@@ -78,9 +78,10 @@ $script:cleanupFailures = 0
 $networkWatcherRg      = 'NetworkWatcherRG'
 $networkWatcherName    = 'NetworkWatcher_swedencentral'
 $connectionMonitorName = 'skycraft-hub-spoke-cm'
-# Explicit api-versions for the raw ARM reads (#452); Sweden Central serves both.
+# Explicit api-versions for the raw ARM calls (#452).
 $connectionMonitorApiVersion = '2024-05-01'
 $vmExtensionApiVersion       = '2024-07-01'
+$dataCollectionApiVersion    = '2023-03-11'   # NWTA-* rules and endpoints
 $flowLogName           = 'prod-skycraft-swc-vnet-flowlog'
 $platformRg            = 'platform-skycraft-swc-rg'
 $location              = 'swedencentral'
@@ -469,7 +470,7 @@ if ($taFlowLogLookup.Failed) {
                     $taKind = ($taResource.ResourceType -split '/')[-1]
                     if ($PSCmdlet.ShouldProcess($taResource.Name, "Remove Traffic Analytics $taKind")) {
                         try {
-                            Remove-AzResource -ResourceId $taResource.ResourceId -Force -ErrorAction Stop | Out-Null
+                            Remove-AzResource -ResourceId $taResource.ResourceId -ApiVersion $dataCollectionApiVersion -Force -ErrorAction Stop | Out-Null
                             Write-Host "  ✓ Traffic Analytics $taKind removed: $($taResource.Name)" -ForegroundColor Green
                         } catch {
                             $script:cleanupFailures++

@@ -25,6 +25,8 @@
          (the Portal's default), and every alert check reads it. VM insights' recommended
          alerts on the same VM are not taken for it. When the subscription's rules cannot be
          listed, the guide's group and name still find it.
+      6. When ARM refuses the raw read of the alert rule's criteria (AuthorizationFailed), the
+         threshold check fails and prints that error, and the script exits 1 (#452).
 
     Known gap, kept visible on purpose: the VM insights rule in the 'portal' case carries the
     streams VM insights really sends (InsightsMetrics, no Syslog), so 'DCR includes Syslog
@@ -89,6 +91,7 @@ BeforeAll {
     #   'recommended'  no rule by the guide's name; VM insights' recommended alerts sit on the VM
     #   'listfails'    as 'vmgroup', and listing the subscription's rules fails
     #   'listfailsplatform' as 'platform', and listing the subscription's rules fails
+    #   'criteriadenied' as 'platform', and the raw read of the rule's criteria is refused
     # Every case also lists an unrelated rule on a SQL server.
     $script:StubBody = @'
 $script:Sub = '/subscriptions/00000000-0000-0000-0000-000000000000'
@@ -185,6 +188,9 @@ function Get-AzResource {
         throw "stub lookup failure: ResourceNotFound '$ResourceId'"
     }
     if ($ResourceId -like '*/providers/Microsoft.Insights/metricAlerts/*') {
+        if ($env:SKYCRAFT_STUB_ALERT -eq 'criteriadenied') {
+            throw "AuthorizationFailed: The client does not have authorization to perform action 'Microsoft.Insights/metricAlerts/read' over scope '$ResourceId'."
+        }
         return [pscustomobject]@{
             ResourceId = $ResourceId
             Properties = [pscustomobject]@{ criteria = [pscustomobject]@{ allOf = @([pscustomobject]@{ metricName = 'Percentage CPU'; threshold = 80; operator = 'GreaterThan' }) } }
@@ -282,7 +288,7 @@ function Get-AzDiagnosticSetting {
             [pscustomobject]$Stub,
             [ValidateSet('bicep', 'portal', 'none', 'nonepartial', 'fail', 'vmthrows', 'dangling')]
             [string]$Dcr,
-            [ValidateSet('platform', 'vmgroup', 'recommended', 'listfails', 'listfailsplatform')]
+            [ValidateSet('platform', 'vmgroup', 'recommended', 'listfails', 'listfailsplatform', 'criteriadenied')]
             [string]$Alert = 'platform'
         )
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
@@ -311,10 +317,11 @@ function Get-AzDiagnosticSetting {
     $script:AlertRecommended = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Alert 'recommended'
     $script:AlertListFails = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Alert 'listfails'
     $script:AlertListFailsPlatform = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Alert 'listfailsplatform'
+    $script:CriteriaDenied = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Alert 'criteriadenied'
     $script:AllRuns    = @(
         $script:BicepMade, $script:PortalMade, $script:NoRule, $script:ReadFails, $script:NoRulePartial,
         $script:VmThrows, $script:Dangling, $script:AlertInVmGroup, $script:AlertRecommended,
-        $script:AlertListFails, $script:AlertListFailsPlatform
+        $script:AlertListFails, $script:AlertListFailsPlatform, $script:CriteriaDenied
     )
 }
 
@@ -448,5 +455,17 @@ Describe 'Lab 5.1 Test-Lab.ps1 - finds the alert rule through its scope (#355, #
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "Alert rule 'skycraft-cpu-alert' exists\.\.\. \(in platform-skycraft-swc-rg\) PASS"
         $run.Output | Should -Match 'Failed: 0\b'
+    }
+}
+
+Describe 'Lab 5.1 Test-Lab.ps1 - a raw ARM read that fails is not a missing resource (#452)' {
+
+    It 'fails the threshold check with the lookup error' {
+        $line = ($script:CriteriaDenied.Output -split '\r?\n' | Where-Object { $_ -match 'Testing: Alert rule threshold' }) -join "`n"
+        $line | Should -Match 'FAIL \(.*AuthorizationFailed' -Because "output was:`n$($script:CriteriaDenied.Output)"
+    }
+
+    It 'exits 1' {
+        $script:CriteriaDenied.ExitCode | Should -Be 1
     }
 }

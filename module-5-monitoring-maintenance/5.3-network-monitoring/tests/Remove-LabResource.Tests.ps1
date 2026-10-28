@@ -208,7 +208,7 @@ function Get-AzResource {
 
 function Remove-AzResource {
     [CmdletBinding()]
-    param([string]$ResourceId, [switch]$Force)
+    param([string]$ResourceId, [string]$ApiVersion, [switch]$Force)
     $segment = $ResourceId -split '/'
     Invoke-StubRemoval -Command 'Remove-AzResource' -Name "$($segment[-2])/$($segment[-1])"
 }

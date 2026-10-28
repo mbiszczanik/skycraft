@@ -4,8 +4,8 @@
     without an explicit -ApiVersion.
 
 .DESCRIPTION
-    Get-AzResource -ResourceId and New-AzResource without -ApiVersion use the newest version the
-    resource provider lists. On 2026-10-28 the provider listed 2026-07-01 for
+    Az.Resources asks the resource provider for its newest listed version whenever a call reads,
+    writes or deletes one resource by id without -ApiVersion. On 2026-10-28 the provider listed 2026-07-01 for
     Microsoft.Network/networkWatchers/connectionMonitors before Sweden Central served it, so every
     lookup of Lab 5.3's connection monitor failed and seven checks reported a monitor that existed
     as missing (issue #452). The same call works or fails depending on what Azure has rolled out
@@ -13,8 +13,15 @@
 
     The test parses every tracked PowerShell file under module-*/*/scripts/ and tools/, and every
     PowerShell block in the lab guides and checklists (module-*/*.md and module-*/*/*.md), and
-    fails on a call to Get-AzResource with -ResourceId, or to New-AzResource, that has no
-    -ApiVersion. A call that splats its arguments cannot be checked and counts as a finding.
+    fails on:
+    - New-AzResource, Set-AzResource or Remove-AzResource without -ApiVersion;
+    - Get-AzResource with -ResourceId, or with -Name, -ResourceGroupName and -ResourceType (the
+      cmdlet builds the id and reads it by id), without -ApiVersion;
+    - Get-AzResource -ExpandProperties on a listing, with or without -ApiVersion. The cmdlet reads
+      every listed resource by id at the provider's newest version, and an -ApiVersion it is given
+      also goes to the listing itself, a Microsoft.Resources call. List without -ExpandProperties
+      and read each resource with -ResourceId and -ApiVersion instead.
+    A call that splats its arguments cannot be checked and counts as a finding.
 
     Modules 1 to 3 are pinned by the running course (issue #300), so their calls are listed in
     $AllowedCalls with the number of calls allowed per file. The list is exact: a new call in a
@@ -41,9 +48,15 @@ BeforeDiscovery {
     # Owed for Modules 1 to 3 (pinned, #300): file -> number of unversioned calls it holds today.
     $script:AllowedCalls = @{
         'module-2-networking/2.1-virtual-networks/scripts/Remove-LabResource.ps1' = 1
-        'module-3-compute/3.3-containers/scripts/Remove-LabResource.ps1'          = 1
-        'module-3-compute/3.3-containers/scripts/Test-Lab.ps1'                    = 1
-        'module-3-compute/3.4-app-service/scripts/Test-Lab.ps1'                   = 1
+        'module-3-compute/3.2-virtual-machines/scripts/Deploy-Bicep.ps1'          = 1
+        'module-3-compute/3.2-virtual-machines/scripts/Remove-LabResource.ps1'    = 2
+        'module-3-compute/3.3-containers/scripts/Deploy-Bicep.ps1'                = 2
+        'module-3-compute/3.3-containers/scripts/Remove-LabResource.ps1'          = 9
+        'module-3-compute/3.3-containers/scripts/Test-Lab.ps1'                    = 2
+        'module-3-compute/3.3-containers/lab-checklist-3.3.md'                    = 1
+        'module-3-compute/3.3-containers/lab-guide-3.3.md'                        = 1
+        'module-3-compute/3.4-app-service/scripts/Deploy-Bicep.ps1'               = 1
+        'module-3-compute/3.4-app-service/scripts/Test-Lab.ps1'                   = 2
     }
 
     # Tracked files only: a worktree under .claude/ or a scratch file is not the repository.
@@ -60,6 +73,8 @@ BeforeDiscovery {
 }
 
 BeforeAll {
+    $script:ArmCmdlets = 'Get-AzResource', 'New-AzResource', 'Set-AzResource', 'Remove-AzResource'
+
     # The calls in PowerShell text that read or write a resource by id without -ApiVersion, as
     # 'line: text' strings. Line numbers start at $FirstLine.
     function Get-UnversionedArmCall {
@@ -71,14 +86,19 @@ BeforeAll {
         $commands = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true)
         foreach ($command in $commands) {
             $name = "$($command.GetCommandName())" -replace '^Az\.Resources\\', ''
-            if ($name -notin 'Get-AzResource', 'New-AzResource') { continue }
+            if ($name -notin $script:ArmCmdlets) { continue }
             $parameters = @($command.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.CommandParameterAst] })
             $hasSplat = [bool]($command.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.VariableExpressionAst] -and $_.Splatted })
-            $named = { param($p) @($parameters | Where-Object { $_.ParameterName.Length -ge 3 -and $p.StartsWith($_.ParameterName, [System.StringComparison]::OrdinalIgnoreCase) }) }
-            # Get-AzResource only reads one resource by id with -ResourceId; a list by type or group is out of scope.
-            if ($name -eq 'Get-AzResource' -and -not $hasSplat -and (& $named 'ResourceId').Count -eq 0) { continue }
-            if (-not $hasSplat -and (& $named 'ApiVersion').Count -gt 0) { continue }
-            "$($command.Extent.StartLineNumber + $FirstLine - 1): $($command.Extent.Text -replace '\s+', ' ')"
+            $has = { param($p) [bool]@($parameters | Where-Object { $_.ParameterName.Length -ge 3 -and $p.StartsWith($_.ParameterName, [System.StringComparison]::OrdinalIgnoreCase) }).Count }
+            $finding = "$($command.Extent.StartLineNumber + $FirstLine - 1): $($command.Extent.Text -replace '\s+', ' ')"
+            if ($hasSplat) { $finding; continue }
+            if ($name -eq 'Get-AzResource') {
+                $byId = (& $has 'ResourceId') -or ((& $has 'Name') -and (& $has 'ResourceGroupName') -and (& $has 'ResourceType'))
+                # A listing with -ExpandProperties reads each resource at the provider's newest version.
+                if (-not $byId -and (& $has 'ExpandProperties')) { $finding; continue }
+                if (-not $byId) { continue }
+            }
+            if (-not (& $has 'ApiVersion')) { $finding }
         }
     }
 
@@ -99,8 +119,11 @@ BeforeAll {
         $tokens = $null
         $errors = $null
         $ast = [System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$tokens, [ref]$errors)
-        @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in 'Get-AzResource', 'New-AzResource' }, $true)).Count -
-            @(Get-UnversionedArmCall -Text $Text).Count
+        @($ast.FindAll({
+            param($n)
+            $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in $script:ArmCmdlets -and
+                @($n.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.CommandParameterAst] -and $_.ParameterName -eq 'ApiVersion' }).Count
+        }, $true)).Count
     }
 }
 
@@ -114,6 +137,11 @@ Describe 'ARM calls with an explicit api-version - the rule catches what it shou
         @{ case = 'New-AzResource over two lines'; text = "New-AzResource -ResourceId `$id -Location `$l ``n    -Properties @{} -Force" }
         @{ case = 'a splatted call'; text = 'Get-AzResource @arguments' }
         @{ case = 'a -ApiVersion that is only in a comment'; text = "Get-AzResource -ResourceId `$id # -ApiVersion 2024-05-01" }
+        @{ case = 'Get-AzResource by name, group and type'; text = "Get-AzResource -ResourceGroupName `$rg -ResourceType 'Microsoft.App/containerApps' -Name `$n -ErrorAction Stop" }
+        @{ case = 'a listing with -ExpandProperties'; text = "Get-AzResource -ResourceType 'Microsoft.OperationalInsights/workspaces' -ExpandProperties -ErrorAction Stop" }
+        @{ case = 'a listing with -ExpandProperties and -ApiVersion'; text = "Get-AzResource -ResourceGroupName `$rg -ExpandProperties -ApiVersion 2023-09-01" }
+        @{ case = 'Remove-AzResource'; text = 'Remove-AzResource -ResourceId $id -Force -ErrorAction Stop' }
+        @{ case = 'Set-AzResource'; text = 'Set-AzResource -ResourceId $id -Tag @{} -Force' }
     ) {
         @(Get-UnversionedArmCall -Text $text).Count | Should -Be 1
     }
@@ -124,6 +152,10 @@ Describe 'ARM calls with an explicit api-version - the rule catches what it shou
         @{ case = 'a versioned write'; text = "New-AzResource -ResourceId `$id -Location `$l -ApiVersion 2024-07-01 -Properties @{} -Force" }
         @{ case = 'a list by type'; text = "Get-AzResource -ResourceType 'Microsoft.RecoveryServices/vaults' -ErrorAction Stop" }
         @{ case = 'a list by group'; text = 'Get-AzResource -ResourceGroupName $rg -ErrorAction Stop' }
+        @{ case = 'a list by group and type'; text = "Get-AzResource -ResourceGroupName `$rg -ResourceType 'Microsoft.Insights/dataCollectionRules'" }
+        @{ case = 'a versioned read by name, group and type'; text = "Get-AzResource -ResourceGroupName `$rg -ResourceType `$t -Name `$n -ApiVersion 2023-03-11 -ExpandProperties" }
+        @{ case = 'a versioned delete'; text = "Remove-AzResource -ResourceId `$id -ApiVersion '2023-03-11' -Force" }
+        @{ case = 'another cmdlet that starts with the same name'; text = 'Remove-AzResourceGroup -Name $rg -Force' }
         @{ case = 'a comment or a string that names them'; text = "# Get-AzResource -ResourceId is not used`nWrite-Host 'New-AzResource -ResourceId x'" }
         @{ case = 'another cmdlet with a similar name'; text = 'New-AzResourceGroup -Name x -Location y' }
     ) {
@@ -159,13 +191,13 @@ Describe 'ARM calls with an explicit api-version - every lab script, tool, guide
         foreach ($entry in @($files | Where-Object { $_.file -like 'module-5-*' })) {
             $calls += Get-VersionedArmCallCount -Text (Get-Content -Raw -LiteralPath $entry.path)
         }
-        $calls | Should -BeGreaterOrEqual 5 -Because 'Lab 5.1, 5.2 and 5.3 read resources by id with an explicit -ApiVersion'
+        $calls | Should -BeGreaterOrEqual 10 -Because 'Lab 5.1, 5.2 and 5.3 read and delete resources by id with an explicit -ApiVersion'
     }
 
     It '<file> has no ARM call without -ApiVersion beyond its allowance' -ForEach @(@($script:Files) + @($script:Docs)) {
         $text = Get-Content -Raw -LiteralPath $path
         $findings = @(if ($kind -eq 'doc') { Get-UnversionedArmDocCall -Text $text } else { Get-UnversionedArmCall -Text $text })
-        $findings.Count | Should -Be $allowed -Because "Get-AzResource -ResourceId and New-AzResource need an explicit -ApiVersion that Sweden Central serves (#452). Found:`n$($findings -join "`n")"
+        $findings.Count | Should -Be $allowed -Because "an ARM call by id needs an explicit -ApiVersion that Sweden Central serves, and a listing must not use -ExpandProperties (#452). Found:`n$($findings -join "`n")"
     }
 
     It 'lists in the allowance only files that exist' -TestCases @(@{ allowed = $script:Allowed; files = @(@($script:Files) + @($script:Docs) | ForEach-Object { $_.file }) }) {

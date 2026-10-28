@@ -16,9 +16,11 @@
          the vault has to be recreated with Az PowerShell or the Bicep, naming both.
       3. A vault with soft delete On fails it, and the line names the state and the command that
          turns it off.
+      4. When ARM refuses the raw reads (AuthorizationFailed), the RSV tag and soft delete, Backup
+         vault and blob policy checks fail and print that error, and the script exits 1 (#452).
 
-    Only the Backup vault is modelled; every other lookup returns nothing, so the other checks
-    fail and are not asserted here. No subscription is needed, and none is used:
+    Only the Backup vault, and in run 4 the Recovery Services vault, is modelled; every other
+    lookup returns nothing, so the other checks fail and are not asserted here. No subscription is needed, and none is used:
     tests/Support/LabScriptStub.psm1 (issue #112) imports the real modules first, the stub last,
     and aborts the child with exit 99 unless every stubbed command resolves to the stub.
 
@@ -64,6 +66,8 @@ BeforeAll {
 
     #   SKYCRAFT_STUB_BVSOFTDELETE   the Backup vault's softDeleteSettings.state: 'Off' (Az
     #                                PowerShell or Bicep), 'AlwaysOn' (the Portal), or 'On'
+    #   SKYCRAFT_STUB_ARM            'denied': the Recovery Services vault exists and every
+    #                                Get-AzResource read throws AuthorizationFailed
     $script:StubBody = @'
 $script:BvId = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.DataProtection/backupVaults/platform-skycraft-swc-bv'
 
@@ -85,6 +89,9 @@ function Get-AzDataProtectionBackupVault {
 function Get-AzResource {
     [CmdletBinding()]
     param([string]$ResourceId, [switch]$ExpandProperties, [string]$ApiVersion, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($env:SKYCRAFT_STUB_ARM -eq 'denied') {
+        throw "AuthorizationFailed: The client does not have authorization to perform action 'read' over scope '$ResourceId'."
+    }
     if ($ResourceId -ne $script:BvId) { return }
     [pscustomobject]@{
         ResourceId = $ResourceId
@@ -99,8 +106,18 @@ function Get-AzResource {
     }
 }
 
+function Get-AzRecoveryServicesVault {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($env:SKYCRAFT_STUB_ARM -ne 'denied') { return }
+    [pscustomobject]@{
+        Name     = $Name
+        ID       = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/$ResourceGroupName/providers/Microsoft.RecoveryServices/vaults/$Name"
+        Location = 'swedencentral'
+    }
+}
+
 # Everything else in the lab is absent: these return nothing.
-function Get-AzRecoveryServicesVault { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzRecoveryServicesBackupProperty { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzRecoveryServicesVaultProperty { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzRecoveryServicesBackupProtectionPolicy { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
@@ -120,10 +137,13 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
         param(
             [pscustomobject]$Stub,
             [ValidateSet('Off', 'AlwaysOn', 'On')]
-            [string]$SoftDelete
+            [string]$SoftDelete,
+            [ValidateSet('', 'denied')]
+            [string]$Arm = ''
         )
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
             SKYCRAFT_STUB_BVSOFTDELETE = $SoftDelete
+            SKYCRAFT_STUB_ARM          = $Arm
         }
         return [pscustomobject]@{
             ExitCode = $run.ExitCode
@@ -141,7 +161,8 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
     $script:ScriptedVault = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off'
     $script:PortalVault   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'AlwaysOn'
     $script:OnVault       = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'On'
-    $script:AllRuns       = @($script:ScriptedVault, $script:PortalVault, $script:OnVault)
+    $script:Denied        = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Arm 'denied'
+    $script:AllRuns       = @($script:ScriptedVault, $script:PortalVault, $script:OnVault, $script:Denied)
 }
 
 AfterAll {
@@ -181,5 +202,23 @@ Describe 'Lab 5.2 Test-Lab.ps1 - Backup vault soft delete (#355, decision on #36
         $line = $script:OnVault.Line
         $line | Should -Match 'FAIL$' -Because "output was:`n$($script:OnVault.Output)"
         $line | Should -Match "state is 'On' - set it to Off: Update-AzDataProtectionBackupVault -SoftDeleteState Off"
+    }
+}
+
+Describe 'Lab 5.2 Test-Lab.ps1 - a raw ARM read that fails is not a missing resource (#452)' {
+
+    It 'fails <label> with the lookup error' -ForEach @(
+        @{ label = "RSV tag 'Project'"; pattern = "Testing: RSV tag 'Project'" }
+        @{ label = 'RSV soft delete'; pattern = 'Testing: RSV soft delete' }
+        @{ label = 'Backup Vault storage type'; pattern = 'Testing: Backup Vault storage type' }
+        @{ label = 'Backup Vault soft delete'; pattern = 'Testing: Backup Vault soft delete' }
+        @{ label = 'blob policy datasource type'; pattern = 'Testing: Blob policy datasource type' }
+    ) {
+        $line = ($script:Denied.Output -split '\r?\n' | Where-Object { $_ -match $pattern }) -join "`n"
+        $line | Should -Match 'FAIL \(.*AuthorizationFailed' -Because "output was:`n$($script:Denied.Output)"
+    }
+
+    It 'exits 1' {
+        $script:Denied.ExitCode | Should -Be 1
     }
 }

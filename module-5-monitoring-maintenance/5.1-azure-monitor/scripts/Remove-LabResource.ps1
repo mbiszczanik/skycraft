@@ -394,7 +394,7 @@ $lockFailures = Invoke-LabWithoutLock -ResourceGroupName $lockGroups -WhatIf:$Wh
         if ($PSCmdlet.ShouldProcess("$($r.ResourceGroup)/$($r.Name)", 'Remove Data Collection Rule')) {
             Write-Host "  Deleting Data Collection Rule: $($r.Name) (in $($r.ResourceGroup))..." -ForegroundColor Gray
             try {
-                Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null
+                Remove-AzResource -ResourceId $r.ResourceId -ApiVersion '2023-03-11' -Force -ErrorAction Stop | Out-Null
                 Write-Host "  ✓ Deleted" -ForegroundColor Green
             } catch {
                 $script:cleanupFailures++

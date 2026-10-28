@@ -527,7 +527,7 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RestorePointColl
     if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete orphaned restore point collection')) { continue }
     Write-Host "  Deleting restore point collection: $($r.Name)..." -ForegroundColor Gray
     try {
-        Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null
+        Remove-AzResource -ResourceId $r.ResourceId -ApiVersion '2024-07-01' -Force -ErrorAction Stop | Out-Null
         Write-Host "  ✓ Deleted" -ForegroundColor Green
     } catch {
         $script:cleanupFailures++
