@@ -72,7 +72,7 @@ Before starting this lab:
 
   Azure Cloud Shell (PowerShell) has all of them preinstalled, so a Cloud Shell session without a storage account can run this lab's scripts too; it deletes the clone of the repository when it ends. Details and sources: [Module 1 prerequisites](../README.md#-prerequisites).
 
-**Note**: To register `Microsoft.Insights`, search for **Subscriptions**, click your subscription, and in the left menu, under **Settings**, click **Resource providers**. Search for `Microsoft.Insights`, select the `Microsoft.Insights` row and click **Register**. Its status changes from **NotRegistered** to **Registering** and, after about a minute, to **Registered**. If it does not change to **Registering**, click **Register** again. A subscription you have used before usually has it already; without it, Step 1.3.7 fails (Troubleshooting, Issue 6).
+**Note**: To register `Microsoft.Insights`, search for **Subscriptions**, click your subscription, and in the left menu, under **Settings** (expand it if it is collapsed), click **Resource providers**. Search for `Microsoft.Insights`, select the `Microsoft.Insights` row and click **Register**. Its status changes from **NotRegistered** to **Registering** and, after about a minute, to **Registered**. If it does not change to **Registering**, click **Register** again. A subscription you have used before usually has it already; without it, Step 1.3.7 fails (Troubleshooting, Issue 6).
 
 **Note**: With Contributor alone, the paths below end differently at Step 1.3.8. The Portal creates `Inherit-Project-Tag` without the identity's role and says so after **Create**: new resources still get the tag, but the optional remediation task in Step 1.3.10 fails. `scripts/Deploy-Bicep.ps1` fails at the role assignment. `scripts/Invoke-LabGovernance.ps1` creates the assignment, reports `[ERROR]` for the role and exits 1. With Contributor alone, use the Portal and skip the remediation task.
 
@@ -1020,7 +1020,7 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 
 - Action group, on a new subscription: the bell shows "Create action group: Failed to create action group. Error: The subscription is not registered to use namespace 'microsoft.insights'. See https://aka.ms/rps-not-found for how to register subscriptions." Register the `Microsoft.Insights` resource provider as the note under Prerequisites shows, wait until its status is **Registered**, then click **Create** again on the same form: it keeps what you filled in
 - Action group: set **Region** to Sweden Central. `Restrict-Azure-Regions` (Step 1.3.9) refuses the default East US
-- Alert: `Enforce-Project-Tag` (Step 1.3.8) is in effect in your subscription, for example from an earlier run of this lab or its Bicep path, and `Inherit-Project-Tag` does not add the tag for the alert. The **Create Advisor Alerts** form has no tags, so the alert passes `Enforce-Project-Tag` only through `Inherit-Project-Tag`. **Alerts (Preview)** may still list the refused alert, but it does not exist. Check that **Policy** → **Assignments** lists `Inherit-Project-Tag` (assigned more than about ten minutes ago, with **Tag Name** `Project`) and that `prod-skycraft-swc-rg` carries `Project` = `SkyCraft` on its **Tags** page, then create the alert again. `Test-Lab.ps1` does not check the alert
+- Alert: `Enforce-Project-Tag` (Step 1.3.8) is in effect in your subscription, for example from an earlier run of this lab or its Bicep path, and `Inherit-Project-Tag` does not add the tag for the alert. The **Create Advisor Alerts** form has no tags, so the alert passes `Enforce-Project-Tag` only through `Inherit-Project-Tag`. **Alerts (Preview)** may still list the refused alert, but it does not exist. Check that **Policy** → **Authoring** (expand it if it is collapsed) → **Assignments** lists `Inherit-Project-Tag` (assigned more than about ten minutes ago, with **Tag Name** `Project`) and that `prod-skycraft-swc-rg` carries `Project` = `SkyCraft` on its **Tags** page, then create the alert again. `Test-Lab.ps1` does not check the alert
 
 ### Issue 7: A resource without tags is refused although `Inherit-Project-Tag` is assigned
 
@@ -1054,7 +1054,7 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 
 **Solutions**:
 
-- The message names each difference and the step. In **Policy** → **Assignments**, open the assignment, click **Edit assignment**, set the values of that step, then run the script again
+- The message names each difference and the step. In **Policy** → **Authoring** (expand it if it is collapsed) → **Assignments**, open the assignment, click **Edit assignment**, set the values of that step, then run the script again
 - Or delete the assignment and run the script again: it creates the assignment with the lab's values. For `Inherit-Project-Tag`, use `scripts/Remove-LabResource.ps1` or remove the identity's role first (Issue 8)
 
 ### Issue 10: `Deploy-Bicep.ps1` or `Invoke-LabGovernance.ps1` says "none matches" for an assignment
@@ -1070,7 +1070,7 @@ Creating the step's assignment next to it would leave two policies doing similar
 
 **Solutions**:
 
-- For the right definition under another name: in **Policy** → **Assignments**, open the assignment, click **Edit assignment**, set **Assignment name** to the one the step gives, then run the script again
+- For the right definition under another name: in **Policy** → **Authoring** (expand it if it is collapsed) → **Assignments**, open the assignment, click **Edit assignment**, set **Assignment name** to the one the step gives, then run the script again
 - For another definition: delete that assignment (for a Modify assignment with an identity, remove the identity's role too, Issue 8) and run the script again, or follow the step in the Portal
 
 ---
