@@ -57,7 +57,7 @@ BeforeAll {
     $script:ScriptPath     = (Resolve-Path (Join-Path $PSScriptRoot '..' 'scripts' 'Remove-LabResource.ps1')).Path
     $script:StubModuleName = 'SkyCraftAzStub'
     # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
-    $script:RequiredModules = @('Az.Accounts', 'Az.RecoveryServices', 'Az.DataProtection', 'Az.Resources', 'Az.Storage')
+    $script:RequiredModules = @('Az.Accounts', 'Az.RecoveryServices', 'Az.DataProtection', 'Az.Resources', 'Az.Storage', 'Az.Monitor')
 
     # Exported explicitly: a manifest with FunctionsToExport = '*' leaves the export list to the
     # module analyser, which infers it with a lightweight scan and can stop partway through.
@@ -68,6 +68,8 @@ BeforeAll {
         'Get-AzDataProtectionBackupInstance'
         'Remove-AzDataProtectionBackupInstance'
         'Remove-AzDataProtectionBackupVault'
+        'Get-AzDiagnosticSetting'
+        'Remove-AzDiagnosticSetting'
         'Get-AzStorageAccount'
         'Invoke-AzRestMethod'
         'Get-AzRecoveryServicesVault'
@@ -168,7 +170,11 @@ function Get-AzDataProtectionBackupVault {
     param($ResourceGroupName, $VaultName)
     if (Invoke-StubLookup -Name 'Get-AzDataProtectionBackupVault') { return }
     if (Test-StubEmpty) { return }
-    [pscustomobject]@{ Name = $VaultName; IdentityPrincipalId = '11111111-1111-1111-1111-111111111111' }
+    [pscustomobject]@{
+        Name                = $VaultName
+        Id                  = "/subscriptions/0/resourceGroups/$ResourceGroupName/providers/Microsoft.DataProtection/backupVaults/$VaultName"
+        IdentityPrincipalId = '11111111-1111-1111-1111-111111111111'
+    }
 }
 
 function Get-AzDataProtectionBackupInstance {
@@ -189,6 +195,30 @@ function Remove-AzDataProtectionBackupVault {
     [CmdletBinding()]
     param($ResourceGroupName, $VaultName)
     Invoke-StubGate -Name 'Remove-AzDataProtectionBackupVault'
+}
+
+# Both vaults carry settings (#373): the lab's own, and on the Recovery Services Vault one a learner
+# named in the Portal. Lookups fail per vault: 'Get-AzDiagnosticSetting:rsv' and ':bv'. A removal
+# is logged as 'Remove-AzDiagnosticSetting:<setting name>'.
+function Get-AzDiagnosticSetting {
+    [CmdletBinding()]
+    param($ResourceId)
+    $vault = if ($ResourceId -match 'backupVaults') { 'bv' } else { 'rsv' }
+    if (Invoke-StubLookup -Name "Get-AzDiagnosticSetting:$vault") { return }
+    if (Test-StubEmpty) { return }
+    if ($vault -eq 'bv') {
+        [pscustomobject]@{ Name = 'bv-backup-reports-diag' }
+    } else {
+        [pscustomobject]@{ Name = 'rsv-backup-reports-diag' }
+        [pscustomobject]@{ Name = 'learner-rsv-diag' }
+    }
+}
+
+function Remove-AzDiagnosticSetting {
+    [CmdletBinding()]
+    param($ResourceId, $Name)
+    Write-StubCall -Name 'Remove-AzDiagnosticSetting'
+    Invoke-StubGate -Name "Remove-AzDiagnosticSetting:$Name"
 }
 
 function Get-AzStorageAccount {
@@ -384,6 +414,13 @@ function Remove-AzResourceGroup {
     $script:Locked         = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg'
     $script:LockedFail     = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg' -Fail 'Remove-AzRecoveryServicesVault'
     $script:LockUnreadable = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg' -LockFail 'GET:platform-skycraft-swc-rg'
+
+    # Issue #373: diagnostic settings are removed before their vault, and a failure keeps the vault.
+    $script:RsvDiagDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzDiagnosticSetting:rsv=denied'
+    $script:BvDiagDenied  = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzDiagnosticSetting:bv=throttled'
+    $script:RsvDiagStuck  = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzDiagnosticSetting:learner-rsv-diag'
+    $script:BvDiagStuck   = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzDiagnosticSetting:bv-backup-reports-diag'
+    $script:DiagNotFound  = Invoke-CleanupScript -Stub $script:Stub -Lookup @('Get-AzDiagnosticSetting:rsv=notfound', 'Get-AzDiagnosticSetting:bv=rgnotfound')
 }
 
 AfterAll {
@@ -399,7 +436,8 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - test harness' {
         foreach ($run in @($script:Clean, $script:Nothing, $script:VaultStuck, $script:TwoStuck, $script:FirstStuck, $script:StaleModule, $script:NoFriendly, $script:SnapshotRgStuck, $script:StillProtected,
                 $script:TopLevelDenied, $script:DependantsFailed, $script:ListingDenied, $script:NotFound,
                 $script:DependantsNotFound, $script:RoleNotFound, $script:VaultDenied, $script:RecheckDenied,
-                $script:StorageDenied, $script:RoleStuck)) {
+                $script:StorageDenied, $script:RoleStuck, $script:RsvDiagDenied, $script:BvDiagDenied,
+                $script:RsvDiagStuck, $script:BvDiagStuck, $script:DiagNotFound)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az cmdlets (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -453,6 +491,62 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - role assignments without Microsoft Gr
         $calls | Should -Not -Contain 'Remove-RoleAssignment:inherited-reader'
         $calls | Should -Not -Contain 'Remove-RoleAssignment:inherited-blob-data-owner'
         @($calls | Where-Object { $_ -eq 'Get-RoleAssignment' }).Count | Should -Be 2
+    }
+}
+
+Describe 'Lab 5.2 Remove-LabResource.ps1 - diagnostic settings go with their vault (#373)' {
+
+    It 'removes every setting on both vaults, whatever its name, before deleting the vault' {
+        $script:Clean.ExitCode | Should -Be 0 -Because "output was:`n$($script:Clean.Output)"
+        $calls = $script:Clean.Calls
+        foreach ($name in 'rsv-backup-reports-diag', 'learner-rsv-diag', 'bv-backup-reports-diag') {
+            @($calls | Where-Object { $_ -eq "Remove-AzDiagnosticSetting:$name" }).Count | Should -Be 1 -Because "calls were: $($calls -join ', ')"
+        }
+        $calls.IndexOf('Remove-AzDiagnosticSetting:bv-backup-reports-diag') | Should -BeLessThan $calls.IndexOf('Remove-AzDataProtectionBackupVault')
+        $calls.IndexOf('Remove-AzDiagnosticSetting:learner-rsv-diag') | Should -BeLessThan $calls.IndexOf('Remove-AzRecoveryServicesVault')
+        $calls.IndexOf('Remove-AzDiagnosticSetting:rsv-backup-reports-diag') | Should -BeLessThan $calls.IndexOf('Remove-AzRecoveryServicesVault')
+    }
+
+    It 'removes nothing when there are no vaults' {
+        $script:Nothing.Calls | Should -Not -Contain 'Remove-AzDiagnosticSetting'
+    }
+
+    It 'exits 1, counts the failed listing and keeps the Recovery Services Vault when its settings cannot be listed' {
+        $run = $script:RsvDiagDenied
+        $run.ExitCode | Should -Be 1 -Because "a listing that failed is not 'no settings'; output was:`n$($run.Output)"
+        $run.Output   | Should -Match '\[ERROR\] Could not look up the diagnostic settings of Microsoft\.RecoveryServices/vaults/[^\r\n]*does not have authorization'
+        $run.Output   | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls    | Should -Not -Contain 'Remove-AzRecoveryServicesVault'
+        $run.Calls    | Should -Contain 'Remove-AzDataProtectionBackupVault'
+    }
+
+    It 'exits 1 and keeps the Backup Vault when its settings cannot be listed' {
+        $run = $script:BvDiagDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls    | Should -Not -Contain 'Remove-AzDataProtectionBackupVault'
+        $run.Calls    | Should -Contain 'Remove-AzRecoveryServicesVault'
+    }
+
+    It 'exits 1 and keeps the vault when a setting cannot be removed, after trying the others' {
+        $run = $script:RsvDiagStuck
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Match '\[ERROR\] Could not remove diagnostic setting ''learner-rsv-diag'''
+        $run.Calls    | Should -Contain 'Remove-AzDiagnosticSetting:rsv-backup-reports-diag'
+        $run.Calls    | Should -Not -Contain 'Remove-AzRecoveryServicesVault'
+
+        $script:BvDiagStuck.ExitCode | Should -Be 1
+        $script:BvDiagStuck.Calls    | Should -Not -Contain 'Remove-AzDataProtectionBackupVault'
+        $script:BvDiagStuck.Calls    | Should -Contain 'Remove-AzRecoveryServicesVault'
+    }
+
+    It 'reads a listing that reports the vault not found as no settings, and deletes the vaults' {
+        $run = $script:DiagNotFound
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Not -Match '\[ERROR\]'
+        $run.Calls    | Should -Contain 'Remove-AzRecoveryServicesVault'
+        $run.Calls    | Should -Contain 'Remove-AzDataProtectionBackupVault'
+        $run.Calls    | Should -Not -Contain 'Remove-AzDiagnosticSetting'
     }
 }
 
