@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Cleans up Lab 5.1 monitoring resources in the following order:
-    1. Metric Alert (skycraft-cpu-alert)
+    1. Metric Alert (skycraft-cpu-alert) and the missing-Heartbeat Log Search Alert
     2. VM Insights DCR associations
     3. VM Insights Data Collection Rules (skycraft-vm-dcr, or the Portal's MSVMI-<...>)
     4. Action Group (skycraft-ops-ag)
@@ -18,7 +18,9 @@
     are those associated with a VM of the dev or prod group that send to the lab's workspace or
     are named 'skycraft-vm-dcr', in whatever group they sit (VM insights puts its 'MSVMI-<...>'
     rule in the VM's group); their associations go with them. The Bicep's 'skycraft-vm-dcr' in the
-    platform group is removed even when no VM uses it any more.
+    platform group is removed even when no VM uses it any more. The log search alert is a rule
+    whose query reads Heartbeat, that watches a SkyCraft VM or the lab's workspace, and that
+    notifies the lab's action group or is named 'skycraft-heartbeat-alert' (issue #357).
 
     Every step continues on error, so one stuck object does not strand the rest. A lookup that
     fails (a 403, throttling, a transient error) or a deletion that fails is reported as [ERROR]
@@ -161,6 +163,7 @@ $workspaceName   = 'platform-skycraft-swc-law'
 $dcrName         = 'skycraft-vm-dcr'
 $actionGroupName = 'skycraft-ops-ag'
 $alertRuleName   = 'skycraft-cpu-alert'
+$heartbeatAlertName = 'skycraft-heartbeat-alert'
 $diagSettingName = 'skycraft-storage-diag'
 $devRgName       = "$DevEnvironment-skycraft-swc-rg"
 # The scope Test-Lab.ps1 reads as a SkyCraft VM, in any group.
@@ -207,6 +210,25 @@ foreach ($alertRule in @($alertLookup.Value | Where-Object { $_ -and $_.Name -eq
     if (-not $onLabVm -and $alertRg -ne $platformRg) { continue }
     $resourcesToDelete.Add(@{ Type = 'Alert'; Name = $alertRuleName; ResourceGroup = $alertRg })
     Write-Host "  - Metric Alert: $alertRuleName (in $alertRg)" -ForegroundColor Gray
+}
+
+# Log Search Alert - found as Test-Lab.ps1 finds it (#357): a rule on Heartbeat that watches a
+# SkyCraft VM or the lab's workspace, under any name and in any group. Only one that notifies the
+# lab's action group or carries the Bicep's name is the lab's; another Heartbeat rule is left alone.
+$actionGroupPattern = "/resourceGroups/$platformRg/providers/Microsoft\.Insights/actionGroups/$actionGroupName$"
+$logAlertLookup = Invoke-LabLookup -Target 'the log search alert rules in the subscription' -Lookup {
+    Get-AzResource -ResourceType 'Microsoft.Insights/scheduledQueryRules' -ExpandProperties -ErrorAction Stop
+}
+if ($logAlertLookup.Failed) {
+    $keepActionGroupReason = "the log search alert rules could not be looked up, and one may still use the action group"
+}
+foreach ($logAlert in @($logAlertLookup.Value | Where-Object { $_ })) {
+    $watchesLab = @($logAlert.Properties.scopes | Where-Object { "$_" -match $labVmScope -or "$_" -eq $workspaceId }).Count -gt 0
+    $readsHeartbeat = @($logAlert.Properties.criteria.allOf | Where-Object { "$($_.query)" -match '\bHeartbeat\b' }).Count -gt 0
+    $notifiesLab = @($logAlert.Properties.actions.actionGroups | Where-Object { "$_" -match $actionGroupPattern }).Count -gt 0
+    if (-not ($watchesLab -and $readsHeartbeat -and ($notifiesLab -or $logAlert.Name -eq $heartbeatAlertName))) { continue }
+    $resourcesToDelete.Add(@{ Type = 'LogAlert'; Name = "$($logAlert.Name)"; ResourceId = "$($logAlert.ResourceId)"; ResourceGroup = "$($logAlert.ResourceGroupName)" })
+    Write-Host "  - Log Search Alert: $($logAlert.Name) (in $($logAlert.ResourceGroupName))" -ForegroundColor Gray
 }
 
 # Data Collection Rules and their associations - found as Test-Lab.ps1 finds the rule (#355,
@@ -342,6 +364,21 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'Alert' }) {
             $script:cleanupFailures++
             $keepActionGroupReason = "metric alert '$($r.Name)' could not be deleted, and it may still use the action group"
             Write-Host "  [ERROR] Could not delete Metric Alert '$($r.Name)' in '$($r.ResourceGroup)': $_" -ForegroundColor Red
+        }
+    }
+}
+
+# 1b. Log Search Alert
+foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'LogAlert' }) {
+    if ($PSCmdlet.ShouldProcess("$($r.ResourceGroup)/$($r.Name)", 'Remove Log Search Alert')) {
+        Write-Host "  Deleting Log Search Alert: $($r.Name) (in $($r.ResourceGroup))..." -ForegroundColor Gray
+        try {
+            Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        } catch {
+            $script:cleanupFailures++
+            $keepActionGroupReason = "log search alert '$($r.Name)' could not be deleted, and it may still use the action group"
+            Write-Host "  [ERROR] Could not delete Log Search Alert '$($r.Name)' in '$($r.ResourceGroup)': $_" -ForegroundColor Red
         }
     }
 }
