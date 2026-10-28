@@ -1371,7 +1371,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
     # Recovery Services vault's list (5.2.8), and 'Under **Logs**, check **A** and **B**.' (5.1.7).
     It 'reads every log category of step <id> as checked and Logs as no label' -ForEach @(
         @{ lab = '5.2'; id = '5.2.8'; categories = @('Core Azure Backup Data', 'Addon Azure Backup Job Data', 'Addon Azure Backup Policy Data', 'Addon Azure Backup Storage Data', 'Addon Azure Backup Protected Instance Data', 'Azure Backup Operations'); perItem = $true }
-        @{ lab = '5.1'; id = '5.1.7'; categories = @('StorageRead', 'StorageWrite'); perItem = $false }
+        @{ lab = '5.1'; id = '5.1.7'; categories = @('Storage Read', 'Storage Write'); perItem = $false }
     ) {
         $items = @((Get-StateStep $lab $id).items)
         if ($perItem) {
@@ -1454,7 +1454,13 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '4.4.2/Enable/stateOnly=0'
             '4.4.2/Allow trusted Microsoft services to access this resource/checked=0'
             '4.4.2/Allow trusted Microsoft services to access this resource/stateOnly=0'
-            '5.1.7/StorageRead | StorageWrite/checked=0,1'
+            # 5.1.3 (#365): Logs opens in Agent mode; the switch ends Off. The action group's e-mail box
+            # (5.1.5) and the log search alert's two Advanced options (5.1.8, #357) end ticked.
+            '5.1.3/Agent/unchecked=0'
+            '5.1.3/Agent/stateOnly=0'
+            '5.1.5/Email/checked=0'
+            '5.1.7/Storage Read | Storage Write/checked=0,1'
+            '5.1.8/Enable upon creation | Automatically resolve alerts/checked=0,1'
             '5.1.7/Send to Log Analytics workspace/checked=0'
             '5.2.8/Core Azure Backup Data/checked=0'
             '5.2.8/Addon Azure Backup Job Data/checked=0'

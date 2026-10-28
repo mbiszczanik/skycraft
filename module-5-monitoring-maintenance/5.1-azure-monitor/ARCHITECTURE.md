@@ -12,6 +12,9 @@
 | Agent install | Tagged `AzureMonitorLinuxAgent` extension (Bicep, or a Cloud Shell block in the guide) | VM insights wizard, Azure Policy that deploys the agent | Lab 1.3's `Enforce-Project-Tag` denies an untagged extension, and neither the VM insights wizard nor the extension picker sets tags; an explicit, tagged install works on every path. |
 | Metric alert threshold | CPU > 80% on prod VM | 50%, 90%, dynamic | 80% is a reasonable middle ground for a lab VM; triggers often enough to demonstrate alerting without noise, but not so sensitive as to spam on normal variance. |
 | Storage account diagnostics | StorageRead & StorageWrite logs | All category options | Captures the essential audit trail of blob access for compliance auditing; excludes Delete operations to reduce log volume in a teaching context. |
+| Missing-Heartbeat alert | Log search alert `skycraft-heartbeat-alert` scoped to the monitored VM: `Heartbeat` rows Count < 1 over 5 minutes, evaluated every 5 minutes, severity 1 | Metric alert on VM availability, workspace-scoped query with a `Computer` filter, 1-minute evaluation | It teaches the second alert type the AZ-104 outline names (log search alerts from KQL) on a signal a CPU alert cannot see: a VM, agent or network that stops reporting. Scoping it to the VM keeps the query a bare `Heartbeat`; 5 minutes leaves room for ingestion delay and costs less than 1-minute evaluation. |
+| Action group region | Global | Sweden Central (regional processing) | The Portal starts at East US, which Lab 1.3's region policy refuses; Global is what the CLI, PowerShell and Bicep create and the *Allowed locations* policy lets through, so the three paths end in the same state. |
+| Dashboard | Private dashboard `SkyCraft-Ops` | Shared (published) dashboard | A private dashboard is stored with the learner's Portal settings, not as a resource, so no region or tag policy applies; a shared one would need Sweden Central and the four tags. The cleanup script does not see it. |
 | Action Group receivers | Email notification only | Teams, Slack, webhooks, logic apps | Email is universally available and demonstrates core alerting; escalation to external systems is deferred to production labs. |
 
 ## 2. Lab simplifications vs production
@@ -41,6 +44,7 @@
   - 30-day retention avoids old-data storage cost.
   - Syslog + perf counters only; no verbose application traces.
   - Email action group free (no SMS or voice charges).
+  - One log search alert at a 5-minute evaluation; log search alerts are billed per rule by evaluation frequency, so 1-minute evaluation would cost more.
 - **Cleanup reminder:**
   - **Do not delete the workspace until the lab is complete.** Deleting the RG does not immediately delete the workspace; it may persist and incur ingestion costs if agents are still writing to it.
   - After lab completion: Delete the workspace explicitly to stop ingestion charges. If flow logs from Lab 5.3 are also routing to this workspace, coordinate deletion to avoid query failure in dependent labs.
@@ -48,8 +52,9 @@
 
 ## 5. Bicep implementation note (AVM)
 
-- **Modules**: `avm/res/operational-insights/workspace`, `avm/res/insights/data-collection-rule`, `avm/res/compute/virtual-machine/extension` (the Azure Monitor Agent, in the monitored VM's group, with the canonical tags), `avm/res/insights/action-group` and `avm/res/insights/metric-alert` (all pinned in docs/bicep-standards.md §4.4), called directly from `main.bicep`. The local `modules/monitoring.bicep` is gone.
+- **Modules**: `avm/res/operational-insights/workspace`, `avm/res/insights/data-collection-rule`, `avm/res/compute/virtual-machine/extension` (the Azure Monitor Agent, in the monitored VM's group, with the canonical tags), `avm/res/insights/action-group`, `avm/res/insights/metric-alert` and `avm/res/insights/scheduled-query-rule` (the missing-Heartbeat log search alert, scoped to the VM that gets the agent; all pinned in docs/bicep-standards.md §4.4), called directly from `main.bicep`. The local `modules/monitoring.bicep` is gone.
 - **Local fallback**: `modules/storage-blob-diagnostics.bicep` attaches `skycraft-storage-diag` to the platform storage account's blob service. `avm/res/insights/diagnostic-setting` is a subscription-scope module (activity log) and cannot target a resource, and re-declaring the storage account through `avm/res/storage/storage-account` from this lab would replace Lab 4.1's account-level configuration (standards §4.3).
 - **Still in `Deploy-Bicep.ps1`**: the DCR association (the monitored VM's resource ID is only known at run time) — unchanged.
 - **Behavioural deltas from AVM defaults**, accepted rather than overridden: the workspace is created with `features.disableLocalAuth: true` and `forceCmkForQuery: true` (Azure's own defaults are `false`). Nothing in Module 5 uses the workspace shared keys — VM Insights runs through the Azure Monitor Agent and the DCR, Traffic Analytics and the connection monitor write through service-side integrations, and every query authenticates with Entra ID. Data retention is passed explicitly (`parRetentionInDays`, 30 days) because the module defaults to 365.
+- **Log search alert**: `skipQueryValidation` is set because a first deploy creates the rule before the agent has sent a row; the Portal and PowerShell paths of Step 5.1.8 run after Step 5.1.3 shows data, so they validate the query.
 - **Metric alert criteria** are expressed through the module's `alertResourceType` (`odata.type` + lowercase `allof`); the deployed rule carries the same `Percentage CPU > 80` criterion, severity 2, 1-minute evaluation over a 5-minute window.

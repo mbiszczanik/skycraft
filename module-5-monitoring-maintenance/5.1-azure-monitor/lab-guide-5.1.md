@@ -1,4 +1,4 @@
-# Lab 5.1: Azure Monitor and Insights (1.5 hours)
+# Lab 5.1: Azure Monitor and Insights (2 hours)
 
 ## 🎯 Learning Objectives
 
@@ -6,10 +6,11 @@ By completing this lab, you will:
 
 - Create and configure a **Log Analytics Workspace**
 - Connect SkyCraft virtual machines with the **Azure Monitor Agent** and a **data collection rule**
-- Create **Log Search Alerts** based on KQL queries
+- Create a **Log Search Alert** from a KQL query that fires when a VM stops sending `Heartbeat`
 - Configure **Metric Alerts** for high CPU utilization
 - Build a custom **Azure Dashboard** for multi-resource visibility
 - Query logs using **Kusto Query Language (KQL)**
+- Route a storage account's blob logs to the workspace with a **diagnostic setting**
 
 ---
 
@@ -33,13 +34,15 @@ By completing this lab, you will:
 
 ---
 
-## ⏱️ Estimated Time: 1.5 hours
+## ⏱️ Estimated Time: 2 hours
 
-- **Section 1**: Log Analytics & Monitoring Fundamentals (20 min)
+- **Section 1**: Monitoring Fundamentals (20 min)
 - **Section 2**: Deploy Log Analytics Workspace (20 min)
-- **Section 3**: Enable VM Insights & Data Collection (20 min)
+- **Section 3**: Connect VMs and Collect Data (20 min)
 - **Section 4**: Querying with KQL (15 min)
-- **Section 5**: Configure Alerts & Dashboards (15 min)
+- **Section 5**: Configure Alerts & Dashboards (20 min)
+- **Section 6**: Route Storage Diagnostics to the Workspace (10 min)
+- **Section 7**: Alert on a Missing Heartbeat (15 min)
 
 ---
 
@@ -92,20 +95,46 @@ A **Log Analytics Workspace** is a unique environment for Azure Monitor log data
 | Name           | `platform-skycraft-swc-law` |
 | Region         | **Sweden Central**          |
 
-4. Click **Review + Create** → **Create**.
+4. Click the **Tags** tab and add the four SkyCraft tags. Lab 1.3's `Enforce-Project-Tag` refuses a workspace without `Project`, and *Review + Create* then ends in *Validation failed* (`RequestDisallowedByPolicy`):
 
-**Expected Result**: The workspace `platform-skycraft-swc-law` is created successfully.
+| Name        | Value         |
+| :---------- | :------------ |
+| Project     | `SkyCraft`    |
+| Environment | `Platform`    |
+| CostCenter  | `MSDN`        |
+| Owner       | `<your name>` |
+
+5. Click **Review + Create** → **Create**.
+
+#### Azure CLI
+
+```azurecli
+az monitor log-analytics workspace create \
+  --resource-group platform-skycraft-swc-rg --workspace-name platform-skycraft-swc-law \
+  --location swedencentral --sku PerGB2018 --retention-time 30 \
+  --tags Project=SkyCraft Environment=Platform CostCenter=MSDN Owner="<your name>"
+```
+
+#### Azure PowerShell
+
+```powershell
+New-AzOperationalInsightsWorkspace -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-law `
+  -Location swedencentral -Sku PerGB2018 -RetentionInDays 30 `
+  -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = '<your name>' }
+```
+
+**Expected Result**: The workspace `platform-skycraft-swc-law` is listed under **Log Analytics workspaces** in Sweden Central, with the four tags on its **Tags** page.
 
 ---
 
-## 📖 Section 3: Enable VM Insights (20 min)
+## 📖 Section 3: Connect VMs and Collect Data (20 min)
 
 ### Step 5.1.2: Connect Virtual Machines
 
 Two pieces connect a VM to the workspace: the **Azure Monitor Agent (AMA)**, a VM extension that collects the data, and a **Data Collection Rule (DCR)**, which says what to collect and where to send it. The lab creates the rule with the **Data Collection Rules** wizard, which has a **Tags** tab, and installs the agent with the SkyCraft tags: Lab 1.3's `Enforce-Project-Tag` policy refuses an untagged extension. `scripts/Test-Lab.ps1` checks that the agent shows **Provisioning succeeded** on the rule's VM and that its `Heartbeat` reaches the workspace.
 
 > [!NOTE]
-> **VM insights** (**Monitor** → **Insights** → **Virtual Machines**) is the Portal shortcut that creates a rule and installs the agent in one wizard. It has no Tags field, so under Lab 1.3's policies it ends in *Onboarding failed*, and its rule sends `InsightsMetrics`, not the `Perf` table Step 5.1.4 queries.
+> **VM insights** (**Monitor** → **Insights** (expand it if it is collapsed) → **Virtual Machines** → **Configure Insights**) is the Portal shortcut that creates a rule and installs the agent in one wizard. It has no Tags field, so under Lab 1.3's policies it ends in *Onboarding failed*, and its rule sends `InsightsMetrics`, not the `Perf` table Step 5.1.4 queries. Its defaults are also not the lab's: **OpenTelemetry metrics** to a new Azure Monitor workspace (the Log Analytics path is the unticked **[Classic] Log-based metrics**), **Enable recommended alerts** ticked (eight alert rules that e-mail you), a workspace other than `platform-skycraft-swc-law`, and a rule named `MSVMI-<...>` in the VM's resource group.
 
 1. Navigate to **Monitor** → **Data Collection Rules** (under **Settings**) → **+ Create**.
 2. **Basics**:
@@ -158,15 +187,19 @@ Two pieces connect a VM to the workspace: the **Azure Monitor Agent (AMA)**, a V
 
 1. Navigate to your **Log Analytics workspace** (`platform-skycraft-swc-law`).
 2. Click **Logs** in the left menu.
-3. Close the "Queries" overlay.
-4. Paste the following query to check heartbeat (connectivity) of your VMs:
+3. Close the *Welcome to Log Analytics* and *Queries hub* windows if they open.
+4. Logs may open in Agent mode: a chat box that writes queries for you, with no query editor. Toggle **Agent** to **Off**, and confirm *Discard changes* if the Portal asks.
+5. The editor then opens in *Simple mode*. Set the mode dropdown to **KQL mode**.
+6. Paste the following query to check heartbeat (connectivity) of your VMs:
 
 ```kusto
 Heartbeat
 | summarize LastHeartbeat = max(TimeGenerated) by Computer
 ```
 
-5. Click **Run**.
+7. Click **Run**.
+
+**Expected Result**: One row per connected VM, such as `dev-skycraft-swc-auth-vm`, with a `LastHeartbeat` from the last few minutes. No rows: see Troubleshooting, Issue 1.
 
 ### Step 5.1.4: Query Performance Data
 
@@ -179,9 +212,11 @@ Perf
 | render timechart
 ```
 
+**Expected Result**: A time chart with one line per VM. The query editor stays in **KQL mode** for Step 5.1.6.
+
 ---
 
-## 📖 Section 5: Configure Alerts & Dashboards (15 min)
+## 📖 Section 5: Configure Alerts & Dashboards (20 min)
 
 ### Step 5.1.5: Create a Metric Alert (CPU > 80%)
 
@@ -198,27 +233,43 @@ The alert rule and its action group are **platform** resources - they live in `p
    - Threshold value: **80**
    - Check every: **1 minute**
    - Lookback period: **5 minutes**
-4. **Actions** → **+ Create action group**:
+4. **Actions** → **+ Create action group**. On its **Basics** tab:
+
+| Field             | Value                      |
+| :---------------- | :------------------------- |
+| Resource group    | `platform-skycraft-swc-rg` |
+| Region            | **Global**                 |
+| Action group name | `skycraft-ops-ag`          |
+| Display name      | `SkyCraftOps`              |
+
+*Region* starts at *(US) East US*, which Lab 1.3's `Restrict-Azure-Regions` refuses. Global is what the CLI, PowerShell and Bicep paths create, and the *Allowed locations* policy lets it through. *Display name* takes at most 12 characters.
+
+5. Click the **Notifications** tab of the action group:
+   - Notification type: **Email/SMS message/Push/Voice**
+   - Name: `ops-email`
+   - In the pane that opens, check **Email** and enter your address
+   - Enable the common alert schema: **Yes** (the Bicep sets it too)
+   - Click **OK**
+
+   The pane notes that e-mails must be verified before the action group can send notifications: confirm the message Azure sends to that address.
+
+6. Click the **Tags** tab of the action group and add the four tags from step 8 below, then **Review + create** → **Create**. The new group is selected on the rule's *Actions* tab.
+7. **Details**:
    - Resource group: `platform-skycraft-swc-rg`
-   - Action group name: `skycraft-ops-ag`
-   - Display name: `SkyCraftOps`
-   - Notification: type **Email/SMS message/Push/Voice**, name `ops-email` (enter your email)
-5. **Details**:
-   - Resource group: `platform-skycraft-swc-rg`
-   - Severity: **2 - Warning**
+   - Severity: **2 - Warning** (it starts at *3 - Informational*)
    - Alert rule name: `skycraft-cpu-alert`
    - **Advanced options** → Enable upon creation: **checked**
-6. **Tags**: `Project = SkyCraft`, `Environment = Platform`, `CostCenter = MSDN`.
-7. Click **Review + create** → **Create**.
+8. **Tags**: `Project = SkyCraft`, `Environment = Platform`, `CostCenter = MSDN`, `Owner = <your name>`.
+9. Click **Review + create** → **Create**.
 
 #### Azure CLI
 
 ```azurecli
 az monitor action-group create \
   --name skycraft-ops-ag --short-name SkyCraftOps \
-  --resource-group platform-skycraft-swc-rg \
-  --action email ops-email you@example.com \
-  --tags Project=SkyCraft Environment=Platform CostCenter=MSDN
+  --resource-group platform-skycraft-swc-rg --location global \
+  --action email ops-email you@example.com usecommonalertschema \
+  --tags Project=SkyCraft Environment=Platform CostCenter=MSDN Owner="<your name>"
 
 az monitor metrics alert create \
   --name skycraft-cpu-alert \
@@ -227,16 +278,16 @@ az monitor metrics alert create \
   --condition "avg Percentage CPU > 80" \
   --window-size 5m --evaluation-frequency 1m --severity 2 \
   --action skycraft-ops-ag \
-  --tags Project=SkyCraft Environment=Platform CostCenter=MSDN
+  --tags Project=SkyCraft Environment=Platform CostCenter=MSDN Owner="<your name>"
 ```
 
 #### Azure PowerShell
 
 ```powershell
-$email = New-AzActionGroupEmailReceiverObject -Name ops-email -EmailAddress you@example.com
+$email = New-AzActionGroupEmailReceiverObject -Name ops-email -EmailAddress you@example.com -UseCommonAlertSchema $true
 # -Enabled is a switch that defaults to off; Test-Lab.ps1 asserts the group is enabled
 $ag = New-AzActionGroup -Name skycraft-ops-ag -ShortName SkyCraftOps -ResourceGroupName platform-skycraft-swc-rg -Location Global -EmailReceiver $email -Enabled `
-  -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN' }
+  -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = '<your name>' }
 
 $vm = Get-AzVM -Name dev-skycraft-swc-auth-vm -ResourceGroupName dev-skycraft-swc-rg
 $criteria = New-AzMetricAlertRuleV2Criteria -MetricName 'Percentage CPU' -MetricNamespace 'Microsoft.Compute/virtualMachines' `
@@ -249,28 +300,43 @@ Add-AzMetricAlertRuleV2 -Name skycraft-cpu-alert -ResourceGroupName platform-sky
 
 # Add-AzMetricAlertRuleV2 has no -Tag parameter; tag the rule afterwards
 Update-AzTag -ResourceId (Get-AzMetricAlertRuleV2 -ResourceGroupName platform-skycraft-swc-rg -Name skycraft-cpu-alert).Id `
-  -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN' } -Operation Merge
+  -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = '<your name>' } -Operation Merge
 ```
 
-**Expected Result**: `skycraft-cpu-alert` is listed under **Monitor** → **Alerts** → **Alert rules** in `platform-skycraft-swc-rg`, enabled, severity 2, with `skycraft-ops-ag` as its action.
+**Expected Result**: `skycraft-cpu-alert` is listed under **Monitor** → **Alerts** → **Alert rules** in `platform-skycraft-swc-rg`, enabled, severity 2, with `skycraft-ops-ag` as its action. The action group `skycraft-ops-ag` shows **Global** as its location.
 
 ### Step 5.1.6: Pin to Dashboard
 
 1. Run the CPU query from Step 5.1.4 again.
-2. Click **Pin to** → **Azure Dashboard**.
-3. Create a new dashboard named `SkyCraft-Ops`.
+2. Click **Save** → **Pin to Azure dashboard**. The same menu offers *Pin to Grafana dashboard* and *Send to workbook*; this lab uses the Azure dashboard.
+3. In the pane that opens, click **Create new**:
+   - Type: **Private**
+   - Dashboard name: `SkyCraft-Ops`
+4. Click **Create and pin**.
+
+If `SkyCraft-Ops` exists from an earlier run, pick it under *Existing* instead of creating a new one, or the Portal creates `SkyCraft-Ops (2)`.
+
+> **SkyCraft Choice**: We pin to a **Private** dashboard. It is stored with your Portal settings, not as a resource in a resource group, so no region or tag policy applies to it. A **Shared** dashboard is a resource in a group: it would need Sweden Central and the four tags. `scripts/Remove-LabResource.ps1` does not see a private dashboard: delete it yourself under **Dashboard**.
+
+**Expected Result**: **Dashboard** → `SkyCraft-Ops` shows the CPU time chart as a tile.
+
+---
+
+## 📖 Section 6: Route Storage Diagnostics to the Workspace (10 min)
 
 ### Step 5.1.7: Route storage diagnostics to the workspace
 
 Beyond VM telemetry, this lab also routes the **platform storage account's blob logs** to the workspace, centralizing storage access auditing alongside VM metrics and logs. The setting is attached to the **blob service** of the account, not to the account itself.
 
-1. Navigate to **Storage accounts** → `platformskycraftswcsa` → **Monitoring** → **Diagnostic settings**.
+1. Navigate to **Storage accounts** → `platformskycraftswcsa` → **Monitoring** (expand it if it is collapsed) → **Diagnostic settings**. The menu also lists **Diagnostic settings (classic)**: that is the older storage analytics logging, not this step.
 2. In the list of resources, select **blob**, then **+ Add diagnostic setting**.
 3. Diagnostic setting name: `skycraft-storage-diag`
-4. Under **Logs**, check **StorageRead** and **StorageWrite**.
+4. Under **Logs**, check **Storage Read** and **Storage Write**.
 5. Check **Send to Log Analytics workspace**.
 6. Log Analytics workspace: `platform-skycraft-swc-law`.
 7. Click **Save**.
+
+The category groups (*audit*, *allLogs*) and *Storage Delete* stay unticked. The workspace dropdown may preselect another workspace, such as one that VM insights created in a VM's resource group: pick `platform-skycraft-swc-law`.
 
 #### Azure CLI
 
@@ -301,6 +367,82 @@ StorageBlobLogs
 | summarize Requests = count() by Category, OperationName
 ```
 
+---
+
+## 📖 Section 7: Alert on a Missing Heartbeat (15 min)
+
+A **metric alert** (Step 5.1.5) watches a number the platform measures for every VM. A **log search alert** runs a KQL query on a schedule and fires on what the query returns, so it can watch anything the workspace holds. Here it fires when the VM sends no `Heartbeat` row for 5 minutes: the agent, the VM or its network is down, which a CPU alert never notices.
+
+| Alert type       | Signal                          | Evaluated                                    | Fits                                      |
+| :--------------- | :------------------------------ | :------------------------------------------- | :---------------------------------------- |
+| Metric alert     | A platform metric (CPU, memory) | Every minute or less often                   | Thresholds on numbers, near real time     |
+| Log search alert | The result of a KQL query       | Every minute or less often (here: 5 minutes) | Missing data, events, joins across tables |
+
+### Step 5.1.8: Create a log search alert for a missing Heartbeat
+
+The rule watches the VM itself, as the CPU alert does: a log search alert scoped to a VM queries that VM's rows in whatever workspace holds them, so the query needs no filter. It notifies the action group from Step 5.1.5. `scripts/Test-Lab.ps1` finds the rule through what it watches and what its query reads, not by name.
+
+1. Navigate to **Monitor** → **Alerts** → **+ Create** → **Alert rule**.
+2. **Scope**:
+   - Scope level: **Subscription** (the default)
+   - **+ Select scope** → expand `dev-skycraft-swc-rg` and check `dev-skycraft-swc-auth-vm` (the VM that carries the rule of Step 5.1.2, or `prod-skycraft-swc-auth-vm` under `prod-skycraft-swc-rg` if only the prod environment exists) → **Apply**
+3. **Condition** → **Signal name**: **Custom log search**. Then configure:
+   - **Search query**: `Heartbeat`
+   - Measure: **Table rows**
+   - Aggregation type: **Count**
+   - Aggregation granularity: **5 minutes**
+   - Operator: **Less than**
+   - Threshold value: **1**
+   - Frequency of evaluation: **5 minutes**
+
+   If a separate Logs pane opens for the query, click *Run*, then *Continue Editing Alert*.
+4. **Actions** → **Select action groups** → check `skycraft-ops-ag` → **Select**.
+5. **Details**:
+   - Resource group: `platform-skycraft-swc-rg`
+   - Severity: **1 - Error**
+   - Alert rule name: `skycraft-heartbeat-alert`
+   - Region: **Sweden Central**
+   - Identity: **None** (the rule runs its query with the permissions of whoever last saved it; a managed identity would need a role assignment first)
+   - Under **Advanced options**, check **Enable upon creation** and **Automatically resolve alerts**
+6. **Tags**: `Project = SkyCraft`, `Environment = Platform`, `CostCenter = MSDN`, `Owner = <your name>`.
+7. Click **Review + create** → **Create**.
+
+#### Azure CLI
+
+The first run of `az monitor scheduled-query` installs its CLI extension; Cloud Shell asks once.
+
+```azurecli
+VM=$(az vm show -g dev-skycraft-swc-rg -n dev-skycraft-swc-auth-vm --query id -o tsv)
+AG=$(az monitor action-group show -g platform-skycraft-swc-rg -n skycraft-ops-ag --query id -o tsv)
+
+az monitor scheduled-query create \
+  --name skycraft-heartbeat-alert --resource-group platform-skycraft-swc-rg --location swedencentral \
+  --scopes "$VM" \
+  --condition "count 'HB' < 1" --condition-query HB="Heartbeat" \
+  --window-size 5m --evaluation-frequency 5m --severity 1 \
+  --action-groups "$AG" \
+  --description "No Heartbeat from the SkyCraft VM in 5 minutes" \
+  --tags Project=SkyCraft Environment=Platform CostCenter=MSDN Owner="<your name>"
+```
+
+#### Azure PowerShell
+
+```powershell
+$vm = Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-vm
+$ag = Get-AzActionGroup -ResourceGroupName platform-skycraft-swc-rg -Name skycraft-ops-ag
+$condition = New-AzScheduledQueryRuleConditionObject -Query 'Heartbeat' -TimeAggregation Count -Operator LessThan -Threshold 1 `
+  -FailingPeriodNumberOfEvaluationPeriod 1 -FailingPeriodMinFailingPeriodsToAlert 1
+
+# -Enabled and -AutoMitigate are switches that default to off
+New-AzScheduledQueryRule -Name skycraft-heartbeat-alert -ResourceGroupName platform-skycraft-swc-rg -Location swedencentral `
+  -DisplayName skycraft-heartbeat-alert -Description 'No Heartbeat from the SkyCraft VM in 5 minutes' `
+  -Scope $vm.Id -CriterionAllOf $condition -ActionGroupResourceId $ag.Id `
+  -WindowSize ([TimeSpan]::FromMinutes(5)) -EvaluationFrequency ([TimeSpan]::FromMinutes(5)) -Severity 1 -Enabled -AutoMitigate `
+  -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = '<your name>' }
+```
+
+**Expected Result**: `skycraft-heartbeat-alert` is listed under **Monitor** → **Alerts** → **Alert rules** with signal type **Log search**, enabled, severity 1, in Sweden Central, with `skycraft-ops-ag` as its action. While the VM runs, the rule does not fire. Stop (deallocate) the VM to see it fire: within about 10 minutes **Monitor** → **Alerts** lists `skycraft-heartbeat-alert` as **Fired**, and `skycraft-ops-ag` sends you an e-mail. Start the VM again before you run `scripts/Test-Lab.ps1`, which waits for a fresh `Heartbeat`; the alert resolves on its own.
+
 **Preview - the AVM module calls the Bicep path makes** (`bicep/main.bicep`; versions pinned in `docs/bicep-standards.md` §4.4):
 
 ```bicep
@@ -325,6 +467,19 @@ module modCpuAlert 'br/public:avm/res/insights/metric-alert:0.4.1' = {
     actions: [modActionGroup.outputs.resourceId]
   }
 }
+
+module modHeartbeatAlert 'br/public:avm/res/insights/scheduled-query-rule:0.6.0' = {
+  ...
+  params: {
+    scopes: [parAgentVmResourceId]          // the VM that gets the agent
+    evaluationFrequency: 'PT5M'
+    windowSize: 'PT5M'
+    criterias: {
+      allOf: [ { query: 'Heartbeat', timeAggregation: 'Count', operator: 'LessThan', threshold: 1, ... } ]
+    }
+    actions: { actionGroupResourceIds: [modActionGroup.outputs.resourceId] }
+  }
+}
 ```
 
 The data collection rule, the action group and the tagged Azure Monitor Agent (`avm/res/compute/virtual-machine/extension`, installed on the VM the rule is associated with) follow the same pattern. The storage diagnostic setting is the one resource without an AVM module and lives in `bicep/modules/storage-blob-diagnostics.bicep` (see `ARCHITECTURE.md` §5).
@@ -336,9 +491,10 @@ The data collection rule, the action group and the tagged Azure Monitor Agent (`
 - [ ] Log Analytics Workspace `platform-skycraft-swc-law` created
 - [ ] At least one VM connected using Azure Monitor Agent
 - [ ] KQL queries returned `Heartbeat` and `Perf` data
-- [ ] Alert rule `skycraft-cpu-alert` (>80% CPU, severity 2) with action group `skycraft-ops-ag` in `platform-skycraft-swc-rg`
+- [ ] Alert rule `skycraft-cpu-alert` (>80% CPU, severity 2) with action group `skycraft-ops-ag` (region Global) in `platform-skycraft-swc-rg`
 - [ ] Azure Dashboard contains at least one pinned chart
 - [ ] Diagnostic setting `skycraft-storage-diag` streams `StorageRead`/`StorageWrite` from `platformskycraftswcsa` to the workspace
+- [ ] Log search alert `skycraft-heartbeat-alert` (Heartbeat rows < 1 in 5 minutes, severity 1) notifies `skycraft-ops-ag`
 
 **For detailed verification**, see [lab-checklist-5.1.md](lab-checklist-5.1.md)
 
@@ -357,6 +513,48 @@ The data collection rule, the action group and the tagged Azure Monitor Agent (`
 - Wait up to 10 minutes for the AMA agent to finalize configuration.
 - Check if the **Data Collection Rule** is correctly associated with the VM.
 - `Heartbeat` has rows but `Perf` is empty: the rule must send **Performance Counters** to **Azure Monitor Logs**. A rule made by VM insights sends `InsightsMetrics` instead.
+
+### Issue 2: Create fails with "disallowed by policy"
+
+**Symptom**: **Review + create** ends in *Validation failed* (`RequestDisallowedByPolicy`), or the notification bell shows *Resource ... was disallowed by policy*, naming *Enforce Project Tag Value* or *Resources must be deployed to Sweden Central or North Europe regions only*.
+
+**Root Cause**: Lab 1.3's `Enforce-Project-Tag` refuses a resource without `Project` = `SkyCraft`, and `Restrict-Azure-Regions` refuses one outside Sweden Central and North Europe. The workspace and alert wizards start with no tags, and the action group's **Region** starts at **(US) East US**.
+
+**Solution**:
+
+- Fill the **Tags** tab of every wizard with the four tags the step lists, including the action group's own **Tags** tab in Step 5.1.5.
+- Set the action group's **Region** to **Global**; set every other region to **Sweden Central**.
+
+### Issue 3: Logs shows a chat box and no query editor
+
+**Symptom**: **Logs** opens with a prompt box and suggestions, and there is nowhere to paste KQL.
+
+**Root Cause**: The Logs page opens in **Agent** mode, and after that in **Simple mode**.
+
+**Solution**:
+
+- Toggle **Agent** to **Off**, confirm **Discard changes**, then switch **Simple mode** to **KQL mode** (Step 5.1.3).
+
+### Issue 4: `skycraft-heartbeat-alert` fires while the VM is running
+
+**Symptom**: **Monitor** → **Alerts** lists `skycraft-heartbeat-alert` as **Fired** although the VM is **Running**.
+
+**Root Cause**: The rule counts the VM's `Heartbeat` rows, and there are none: the Azure Monitor Agent is missing or failed, the data collection rule is not associated with the VM, or the rule watches another VM than the one the data collection rule covers.
+
+**Solution**:
+
+- Run the `Heartbeat` query of Step 5.1.3; if it returns no row for the VM, fix the agent as in Issue 1.
+- Open the rule → **Scope** and check that it is the VM listed under the data collection rule's **Resources**.
+
+### Issue 5: `Test-Lab.ps1` does not find `skycraft-storage-diag`
+
+**Symptom**: `Diagnostic setting 'skycraft-storage-diag' exists on blob service... FAIL`, although a setting was saved.
+
+**Root Cause**: The setting was saved on the storage account rather than its **blob** service, under **Diagnostic settings (classic)**, or under another name.
+
+**Solution**:
+
+- Open **Monitoring** → **Diagnostic settings** (not the classic entry), select **blob**, and check that `skycraft-storage-diag` is listed there; create it there if not (Step 5.1.7).
 
 ---
 
@@ -402,7 +600,9 @@ The data collection rule, the action group and the tagged Azure Monitor Agent (`
 ✅ Queried performance data using Kusto Query Language (KQL)
 ✅ Configured metric alerts for CPU threshold monitoring
 ✅ Built a custom Azure Dashboard for operational visibility
+✅ Routed the platform storage account's blob logs to the workspace
+✅ Created a log search alert that fires when a VM stops sending Heartbeat
 
-**Time Spent**: ~1.5 hours
+**Time Spent**: ~2 hours
 
 **Ready for Lab 5.2?** Next, you'll implement backup and disaster recovery for SkyCraft VMs.

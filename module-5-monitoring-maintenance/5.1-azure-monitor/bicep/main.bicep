@@ -1,9 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 5.1 - Azure Monitor & Insights - Orchestrator
-DESCRIPTION: Deploys the SkyCraft monitoring hub into platform-skycraft-swc-rg through Azure Verified Modules - the Log Analytics workspace, the VM data collection rule (Perf, InsightsMetrics and Syslog), the tagged Azure Monitor Agent on the monitored VM, the operations action group and the CPU metric alert - plus the platform storage account's blob diagnostic setting through a local fallback module
+DESCRIPTION: Deploys the SkyCraft monitoring hub into platform-skycraft-swc-rg through Azure Verified Modules - the Log Analytics workspace, the VM data collection rule (Perf, InsightsMetrics and Syslog), the tagged Azure Monitor Agent on the monitored VM, the operations action group, the CPU metric alert and the missing-Heartbeat log search alert - plus the platform storage account's blob diagnostic setting through a local fallback module
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -OpsEmail ops@example.com
 AUTHOR/S: Marcin Biszczanik
-VERSION: 2.1.0
+VERSION: 2.2.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -68,6 +68,7 @@ var varDcrName = 'skycraft-vm-dcr'
 var varDcrDestinationName = 'VMInsightsPerf-Logs-Dest'
 var varActionGroupName = 'skycraft-ops-ag'
 var varAlertRuleName = 'skycraft-cpu-alert'
+var varHeartbeatAlertName = 'skycraft-heartbeat-alert'
 var varStorageDiagName = 'skycraft-storage-diag'
 
 // The storage account lives wherever its resource ID says (Lab 4.1 puts the platform account in the platform group)
@@ -230,6 +231,44 @@ module modCpuAlert 'br/public:avm/res/insights/metric-alert:0.4.1' = {
   }
 }
 
+// 4b. Log search alert - no Heartbeat row from the agent's VM in 5 minutes (#357). Scoped to the VM,
+//     so the query reads that VM's rows from any workspace. Validation is skipped: on a first deploy
+//     the agent has sent nothing yet.
+module modHeartbeatAlert 'br/public:avm/res/insights/scheduled-query-rule:0.6.0' = {
+  name: 'heartbeat-alert-deployment'
+  scope: resourceGroup(varPlatformRgName)
+  params: {
+    name: varHeartbeatAlertName
+    location: parLocation
+    tags: varCommonTags
+    alertDescription: 'No Heartbeat from the SkyCraft VM in 5 minutes'
+    severity: 1
+    enabled: true
+    autoMitigate: true
+    scopes: [parAgentVmResourceId]
+    evaluationFrequency: 'PT5M'
+    windowSize: 'PT5M'
+    skipQueryValidation: true
+    criterias: {
+      allOf: [
+        {
+          query: 'Heartbeat'
+          timeAggregation: 'Count'
+          operator: 'LessThan'
+          threshold: 1
+          failingPeriods: {
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
+          }
+        }
+      ]
+    }
+    actions: {
+      actionGroupResourceIds: [modActionGroup.outputs.resourceId]
+    }
+  }
+}
+
 // 5. Platform storage account blob diagnostics - local fallback module (docs/bicep-standards.md section 4.3):
 //    avm/res/insights/diagnostic-setting is subscription-scope only and cannot target a resource
 module modStorageDiagnostics 'modules/storage-blob-diagnostics.bicep' = {
@@ -263,6 +302,9 @@ output outActionGroupId string = modActionGroup.outputs.resourceId
 
 @description('Resource ID of the metric alert rule')
 output outAlertRuleId string = modCpuAlert.outputs.resourceId
+
+@description('Resource ID of the missing-Heartbeat log search alert rule')
+output outHeartbeatAlertId string = modHeartbeatAlert.outputs.resourceId
 
 @description('Resource ID of the storage blob diagnostic setting')
 output outStorageDiagnosticSettingId string = modStorageDiagnostics.outputs.outDiagnosticSettingId
