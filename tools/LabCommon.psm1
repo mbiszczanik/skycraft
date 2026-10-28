@@ -1063,4 +1063,137 @@ function Test-LabGlobalName {
     return $true
 }
 
-Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName
+# The resources of one type in a subscription or group, with the creation time ARM keeps for them.
+function Get-LabArmResourceCreated {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$SubscriptionId,
+        [Parameter(Mandatory)] [string]$ResourceType,
+        [Parameter()] [string]$ResourceGroupName
+    )
+
+    $scope = if ($ResourceGroupName) { "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName" } else { "/subscriptions/$SubscriptionId" }
+    $filter = [uri]::EscapeDataString("resourceType eq '$ResourceType'")
+    Invoke-LabArmList -Path "$scope/resources?`$filter=$filter&`$expand=createdTime&api-version=2021-04-01" -Caller 'Get-LabArmResourceCreated'
+}
+
+function Get-LabDnsLink {
+    <#
+    .SYNOPSIS
+        Lists the private DNS zone virtual network links of a subscription, with the VNet each one
+        points at, and whether that VNet was created again after the link.
+
+    .DESCRIPTION
+        A link keeps the identity of the VNet it was made for. When that VNet is deleted and
+        created again under the same name, the link still reads as Succeeded and Completed but no
+        longer serves the new VNet, and Azure refuses to update it ("Virtual network resource
+        identity ... already in use ... delete all the stale virtual network links", Conflict).
+        The only sign is the age: a link is always made after its VNet, so a VNet created after its
+        link is a new one (#444). A failed lookup throws.
+
+    .PARAMETER SubscriptionId
+        The subscription to list. Default: the current context's.
+
+    .PARAMETER ResourceGroupName
+        Only the links of the zones in this group.
+
+    .OUTPUTS
+        [pscustomobject] Id, Name ('<zone>/<link>'), ResourceGroupName, VirtualNetworkId,
+        VirtualNetworkExists, Stale.
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #444
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter()] [string]$SubscriptionId,
+        [Parameter()] [string]$ResourceGroupName
+    )
+
+    if (-not $SubscriptionId) { $SubscriptionId = (Get-AzContext).Subscription.Id }
+    $links = @(Get-LabArmResourceCreated -SubscriptionId $SubscriptionId -ResourceType 'Microsoft.Network/privateDnsZones/virtualNetworkLinks' -ResourceGroupName $ResourceGroupName)
+    if ($links.Count -eq 0) { return }
+    $vnetCreated = @{}
+    foreach ($vnet in @(Get-LabArmResourceCreated -SubscriptionId $SubscriptionId -ResourceType 'Microsoft.Network/virtualNetworks')) {
+        $vnetCreated[$vnet.id.ToLowerInvariant()] = [datetime]$vnet.createdTime
+    }
+
+    foreach ($link in $links) {
+        # The resource list lags: a link Azure has just deleted is still listed for a while.
+        try {
+            $detail = Invoke-LabArmRequest -Method GET -Path "$($link.id)?api-version=2024-06-01"
+        }
+        catch {
+            if ($_.Exception.Data['StatusCode'] -eq 404) { continue }
+            throw
+        }
+        $vnetId = [string]$detail.properties.virtualNetwork.id
+        $key = $vnetId.ToLowerInvariant()
+        $exists = $vnetCreated.ContainsKey($key)
+        [pscustomobject]@{
+            Id                   = $link.id
+            Name                 = $link.name
+            ResourceGroupName    = ($link.id -split '/')[4]
+            VirtualNetworkId     = $vnetId
+            VirtualNetworkExists = $exists
+            Stale                = $exists -and $vnetCreated[$key] -gt [datetime]$link.createdTime
+        }
+    }
+}
+
+function Remove-LabDnsLink {
+    <#
+    .SYNOPSIS
+        Deletes one private DNS zone virtual network link and waits until it is gone.
+
+    .DESCRIPTION
+        The delete is asynchronous, and a deployment that writes the same link while it runs is
+        refused ("Another operation is pending"), so this returns only once a GET answers 404.
+        Azure queues a delete of its own for a link whose VNet was deleted, but runs it minutes
+        later (2026-10-28); a delete already queued is waited for, not repeated. Throws when the
+        delete is refused or the link is still there after the wait.
+
+    .PARAMETER Id
+        The link's resource id.
+
+    .PARAMETER TimeoutSeconds
+        How long to wait for the link to go. Default: 300.
+
+    .PARAMETER PollSeconds
+        How often to look. Default: 10.
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #444
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)] [string]$Id,
+        [Parameter()] [int]$TimeoutSeconds = 300,
+        [Parameter()] [int]$PollSeconds = 10
+    )
+
+    if (-not $PSCmdlet.ShouldProcess($Id, 'Delete private DNS zone virtual network link')) { return }
+    try {
+        Invoke-LabArmRequest -Method DELETE -Path "$($Id)?api-version=2024-06-01" | Out-Null
+    }
+    catch {
+        if ($_.Exception.Data['StatusCode'] -eq 404) { return }
+        if (-not ($_.Exception.Data['StatusCode'] -eq 409 -and "$($_.Exception.Message)" -match 'DeleteVirtualNetworkLink')) { throw }
+    }
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ($true) {
+        try {
+            Invoke-LabArmRequest -Method GET -Path "$($Id)?api-version=2024-06-01" | Out-Null
+        }
+        catch {
+            if ($_.Exception.Data['StatusCode'] -eq 404) { return }
+            throw
+        }
+        if ((Get-Date) -ge $deadline) { throw "The link $Id was still there $TimeoutSeconds seconds after its delete." }
+        Start-Sleep -Seconds $PollSeconds
+    }
+}
+
+Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabDnsLink, Remove-LabDnsLink

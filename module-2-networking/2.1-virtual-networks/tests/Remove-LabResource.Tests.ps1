@@ -61,6 +61,7 @@ BeforeAll {
         'Get-AzPublicIpAddress'
         'Remove-AzPublicIpAddress'
         'Get-AzResource'
+        'Invoke-AzRestMethod'
     )
 
     # Every command the script calls, recording its own invocation. By default the subscription
@@ -73,6 +74,9 @@ BeforeAll {
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled) or
     #                         report its resource not found (notfound, rgnotfound)
     #   SKYCRAFT_STUB_FAIL    '<Remove-command>:<name>,...' makes one removal throw
+    #   SKYCRAFT_STUB_DNS     '1' gives skycraft.internal a link to the dev VNet and another zone a
+    #                         link to an unrelated VNet; 'denied' makes the ARM link listing fail
+    #                         (#444). Invoke-AzRestMethod answers the ARM calls LabCommon makes.
     # A lookup is named after its command and the resource it reads: 'Get-AzVirtualNetwork:<vnet>',
     # 'Get-AzPublicIpAddress:<pip>', 'Get-AzResource:<last id segment>'. A VNet is read twice - by
     # the preflight and once for the delete steps - and both reads follow the same entry.
@@ -152,6 +156,7 @@ function Get-AzVirtualNetwork {
     }
     [pscustomobject]@{
         Name                   = $Name
+        Id                     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/$ResourceGroupName/providers/Microsoft.Network/virtualNetworks/$Name"
         VirtualNetworkPeerings = @($peerings | ForEach-Object { [pscustomobject]@{ Name = $_ } })
         Subnets                = @([pscustomobject]@{ Name = 'AppServiceSubnet'; ServiceAssociationLinks = $links })
     }
@@ -188,6 +193,42 @@ function Get-AzResource {
     if (Invoke-StubLookup -Name "Get-AzResource:$(($ResourceId -split '/')[-1])") { return }
     [pscustomobject]@{ ResourceId = $ResourceId }
 }
+
+# The ARM calls of Get-LabDnsLink and Remove-LabDnsLink: the resource lists, a link's GET and its
+# DELETE. A deleted link answers 404 afterwards, as ARM does once the delete has run.
+$script:DeletedLinks = @{}
+function Invoke-AzRestMethod {
+    [CmdletBinding()]
+    param([string]$Path, [string]$Method = 'GET', [string]$Payload)
+    $sub   = '/subscriptions/00000000-0000-0000-0000-000000000000'
+    $links = @{
+        "$sub/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.Network/privateDnsZones/skycraft.internal/virtualNetworkLinks/dev-vnet-link" = "$sub/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Network/virtualNetworks/dev-skycraft-swc-vnet"
+        "$sub/resourceGroups/other-rg/providers/Microsoft.Network/privateDnsZones/other.zone/virtualNetworkLinks/other-link" = "$sub/resourceGroups/other-rg/providers/Microsoft.Network/virtualNetworks/other-vnet"
+    }
+    $reply = { param($Status, $Body) [pscustomobject]@{ StatusCode = $Status; Content = ($Body | ConvertTo-Json -Depth 6 -Compress) } }
+    $target = ($Path -split '\?')[0]
+    Write-StubCall -Name "Invoke-AzRestMethod:$Method"
+
+    if ($env:SKYCRAFT_STUB_DNS -eq 'denied') { return & $reply 403 @{ error = @{ code = 'AuthorizationFailed'; message = "The client 'stub' does not have authorization to list $target." } } }
+    if ($Path -match 'privateDnsZones%2FvirtualNetworkLinks') {
+        $value = if ($env:SKYCRAFT_STUB_DNS -eq '1') { @($links.Keys | ForEach-Object { @{ id = $_; name = (($_ -split '/privateDnsZones/')[1] -replace '/virtualNetworkLinks/', '/'); createdTime = '2026-10-01T00:00:00Z' } }) } else { @() }
+        return & $reply 200 @{ value = $value }
+    }
+    if ($Path -match 'Microsoft.Network%2FvirtualNetworks%27') {
+        $value = foreach ($id in $links.Values) { @{ id = $id; name = ($id -split '/')[-1]; createdTime = '2026-09-01T00:00:00Z' } }
+        return & $reply 200 @{ value = @($value) }
+    }
+    if ($links.ContainsKey($target)) {
+        if ($Method -eq 'DELETE') {
+            Invoke-StubRemoval -Command 'Remove-LabDnsLink' -Name (($target -split '/privateDnsZones/')[1] -replace '/virtualNetworkLinks/', '/')
+            $script:DeletedLinks[$target] = $true
+            return & $reply 202 $null
+        }
+        if ($script:DeletedLinks[$target]) { return & $reply 404 @{ error = @{ code = 'NotFound'; message = 'gone' } } }
+        return & $reply 200 @{ id = $target; properties = @{ virtualNetwork = @{ id = $links[$target] } } }
+    }
+    throw "stub: no ARM answer for $Method $Path"
+}
 '@
 
     # Runs the real script in a child process with the stubs shadowing the Az commands, and
@@ -199,7 +240,8 @@ function Get-AzResource {
             [string[]]$Lookup = @(),
             [string[]]$ArgumentList = @('-Force'),
             [switch]$Empty,
-            [switch]$Link
+            [switch]$Link,
+            [string]$Dns = '0'
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
@@ -210,6 +252,7 @@ function Get-AzResource {
             SKYCRAFT_STUB_LOOKUP = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
             SKYCRAFT_STUB_LINK   = if ($Link) { '1' } else { '0' }
+            SKYCRAFT_STUB_DNS    = $Dns
             SKYCRAFT_STUB_LOG    = $logPath
         }
 
@@ -246,9 +289,13 @@ function Get-AzResource {
     $script:LinkOrphaned   = Invoke-CleanupScript -Stub $script:Stub -Link -Lookup 'Get-AzResource:prod-skycraft-swc-asp=notfound'
     $script:LinkUnverified = Invoke-CleanupScript -Stub $script:Stub -Link -Lookup 'Get-AzResource:prod-skycraft-swc-asp=denied'
 
+    $script:DnsLinks     = Invoke-CleanupScript -Stub $script:Stub -Dns '1'
+    $script:DnsDenied    = Invoke-CleanupScript -Stub $script:Stub -Dns 'denied'
+    $script:DnsWhatIf    = Invoke-CleanupScript -Stub $script:Stub -Dns '1' -ArgumentList '-WhatIf'
+
     $script:AllRuns = @(
         $script:Clean, $script:WhatIf, $script:Nothing, $script:NotFound, $script:LookupsFail, $script:RemovalsFail,
-        $script:LinkOrphaned, $script:LinkUnverified
+        $script:LinkOrphaned, $script:LinkUnverified, $script:DnsLinks, $script:DnsDenied, $script:DnsWhatIf
     )
 }
 
@@ -377,6 +424,33 @@ Describe 'Lab 2.1 Remove-LabResource.ps1 - the preflight tells an orphan from an
     It 'never changes the exit code on its own' {
         $script:LinkOrphaned.ExitCode   | Should -Be 0 -Because "output was:`n$($script:LinkOrphaned.Output)"
         $script:LinkUnverified.ExitCode | Should -Be 0 -Because "output was:`n$($script:LinkUnverified.Output)"
+    }
+}
+
+Describe 'Lab 2.1 Remove-LabResource.ps1 - private DNS links to the deleted VNets (#444)' {
+
+    It 'removes the link to a lab VNet before the VNet, and exits 0' {
+        $run = $script:DnsLinks
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls | Should -Contain 'Remove-LabDnsLink:skycraft.internal/dev-vnet-link'
+        [array]::IndexOf($run.Calls, 'Remove-LabDnsLink:skycraft.internal/dev-vnet-link') |
+            Should -BeLessThan ([array]::IndexOf($run.Calls, 'Remove-AzVirtualNetwork:dev-skycraft-swc-vnet'))
+    }
+
+    It 'leaves a link to a VNet it does not delete' {
+        $script:DnsLinks.Calls | Should -Not -Contain 'Remove-LabDnsLink:other.zone/other-link'
+    }
+
+    It 'counts a link listing that fails, and still removes the VNets' {
+        $run = $script:DnsDenied
+        $run.ExitCode | Should -Be 1 -Because "a link that may still exist must not look like a clean cleanup; output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Could not look up the private DNS zone links to the lab VNets'
+        $run.Calls | Should -Contain 'Remove-AzVirtualNetwork:dev-skycraft-swc-vnet'
+    }
+
+    It 'removes no link under -WhatIf' {
+        $script:DnsWhatIf.Calls | Should -Not -Contain 'Remove-LabDnsLink:skycraft.internal/dev-vnet-link'
+        $script:DnsWhatIf.Output | Should -Match 'What if: .*skycraft.internal/dev-vnet-link'
     }
 }
 

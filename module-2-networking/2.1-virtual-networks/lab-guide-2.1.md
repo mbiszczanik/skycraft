@@ -871,7 +871,7 @@ To remove what this lab created, run the lab's cleanup from the lab folder:
 ./scripts/Remove-LabResource.ps1
 ```
 
-It asks before each delete (`-WhatIf` lists them without deleting anything; `-Force` skips the questions). It removes the peerings first, then the three VNets, then the two public IPs. In the Portal, delete in the same order: the four peerings (**Settings** → **Peerings** on each VNet), then the VNets (a VNet that still holds a network interface, a private endpoint or a gateway cannot be deleted: remove those first, the resources of later labs before those of earlier ones), then the public IPs (a public IP still used by a load balancer cannot be deleted: remove the load balancer of Lab 2.3 first). Delete `NetworkWatcherRG` yourself only after Lab 5.3, if you want it gone.
+It asks before each delete (`-WhatIf` lists them without deleting anything; `-Force` skips the questions). It removes the peerings first, then the links of Lab 2.3's private DNS zone to these VNets, then the three VNets, then the two public IPs. A link left behind no longer serves a VNet you create again under the same name, and Lab 2.3 cannot be deployed again until it is deleted. In the Portal, delete in the same order: the four peerings (**Settings** → **Peerings** on each VNet), the links (`skycraft.internal` → **Virtual Network Links**) if you did Lab 2.3, then the VNets (a VNet that still holds a network interface, a private endpoint or a gateway cannot be deleted: remove those first, the resources of later labs before those of earlier ones), then the public IPs (a public IP still used by a load balancer cannot be deleted: remove the load balancer of Lab 2.3 first). Delete `NetworkWatcherRG` yourself only after Lab 5.3, if you want it gone.
 
 ---
 

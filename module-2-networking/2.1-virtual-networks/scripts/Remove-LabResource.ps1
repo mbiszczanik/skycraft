@@ -4,7 +4,8 @@
 
 .DESCRIPTION
     This script removes the Hub and Spoke Virtual Networks (Dev/Prod), their peering
-    configurations, and Public IPs. It prompts for confirmation unless the -Force switch is used.
+    configurations, the private DNS zone links that point at them (Lab 2.3's, #444), and Public
+    IPs. It prompts for confirmation unless the -Force switch is used.
 
     A resource that is genuinely absent is reported as [INFO] and is not an error. A resource
     that exists but cannot be deleted is reported as [ERROR] with the Azure error message, and
@@ -41,7 +42,7 @@
     Project: SkyCraft
     Lab: 2.1 - Virtual Networks
     Author: Marcin Biszczanik
-    Version: 2.3.0
+    Version: 2.4.0
     Date: 2026-10-10
 #>
 
@@ -314,6 +315,26 @@ function Remove-VNetPeering {
 Remove-VNetPeering -VnetName $hubVnetName -RgName $hubRgName -Lookup $vnetLookups[$hubVnetName]
 Remove-VNetPeering -VnetName $devVnetName -RgName $devRgName -Lookup $vnetLookups[$devVnetName]
 Remove-VNetPeering -VnetName $prodVnetName -RgName $prodRgName -Lookup $vnetLookups[$prodVnetName]
+
+# Private DNS zone links (Lab 2.3's skycraft.internal) outlive the VNet they point at. Left behind,
+# they no longer serve a VNet created again under the same name, and Lab 2.3 cannot deploy until
+# they are deleted (#444). Only links to the VNets this cleanup deletes are touched.
+$labVnetIds = @($labVnets | ForEach-Object { ($vnetLookups[$_.Name].Value | Select-Object -First 1).Id } | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() })
+if ($labVnetIds.Count -gt 0) {
+    $dnsLinkLookup = Invoke-LabLookup -Target 'the private DNS zone links to the lab VNets' -Lookup { Get-LabDnsLink }
+    foreach ($dnsLink in @($dnsLinkLookup.Value | Where-Object { $_ -and $_.VirtualNetworkId.ToLowerInvariant() -in $labVnetIds })) {
+        try {
+            Write-Host "Removing private DNS link: $($dnsLink.Name)..." -ForegroundColor Yellow
+            if ($PSCmdlet.ShouldProcess($dnsLink.Name, 'Remove private DNS zone link')) {
+                Remove-LabDnsLink -Id $dnsLink.Id -Confirm:$false
+                Write-Host "  -> Success" -ForegroundColor Green
+            }
+        } catch {
+            $script:cleanupFailures++
+            Write-Host "  - [ERROR] Failed to remove private DNS link $($dnsLink.Name): $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
+}
 
 # Function to remove VNet
 function Remove-VNet {
