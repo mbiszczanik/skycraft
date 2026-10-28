@@ -39,6 +39,13 @@
     storage diagnostic setting may still send to it. The kept object is not counted again - the
     failure that keeps it already is.
 
+    Lab 1.3's CanNotDelete lock on the platform and prod groups refuses deleting the rules, the
+    action group, the diagnostic setting, the workspace and an association on a prod VM
+    (ScopeLocked, issue #372). Those deletes run inside Invoke-LabWithoutLock
+    (tools/LabCommon.psm1), which lifts the lock, runs them and puts it back with the same name,
+    level and notes, also when one fails. A lock it cannot read, lift or restore is an [ERROR]
+    and counted; any other lock is left alone.
+
     Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
     otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
@@ -331,111 +338,127 @@ if ($resourcesToDelete.Count -eq 0) {
 # ── Delete resources in dependency order ──────────────────────────────────
 Write-Host "`nDeleting resources..." -ForegroundColor Yellow
 
-# 1. Metric Alert
-foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'Alert' }) {
-    if ($PSCmdlet.ShouldProcess("$($r.ResourceGroup)/$($r.Name)", 'Remove Metric Alert')) {
-        Write-Host "  Deleting Metric Alert: $($r.Name) (in $($r.ResourceGroup))..." -ForegroundColor Gray
-        try {
-            Remove-AzMetricAlertRuleV2 -ResourceGroupName $r.ResourceGroup -Name $r.Name -ErrorAction Stop | Out-Null
-            Write-Host "  ✓ Deleted" -ForegroundColor Green
-        } catch {
-            $script:cleanupFailures++
-            $keepActionGroupReason = "metric alert '$($r.Name)' could not be deleted, and it may still use the action group"
-            Write-Host "  [ERROR] Could not delete Metric Alert '$($r.Name)' in '$($r.ResourceGroup)': $_" -ForegroundColor Red
-        }
+# Lab 1.3's CanNotDelete locks on the platform and prod groups refuse these deletes (ScopeLocked):
+# the rules, the action group, the workspace, a diagnostic setting on the platform account and an
+# association on a prod VM. Invoke-LabWithoutLock lifts them for the deletes and puts them back
+# (#372).
+$lockGroups = @(foreach ($r in $resourcesToDelete) {
+    switch ($r.Type) {
+        'DCRAssoc'    { ($r.VmId -split '/')[4] }
+        'StorageDiag' { ($r.BlobServiceId -split '/')[4] }
+        'ActionGroup' { $platformRg }
+        'Workspace'   { $platformRg }
+        default       { $r.ResourceGroup }
     }
-}
-
-# 2. DCR Associations - a rule whose association could not be deleted is kept in step 3.
-$keepRuleReasons = @{}   # rule id (lower case) -> why that rule is kept
-foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'DCRAssoc' }) {
-    if ($PSCmdlet.ShouldProcess("$($r.VmName)/$($r.Name)", 'Remove DCR Association')) {
-        Write-Host "  Deleting DCR Association: $($r.Name) (on $($r.VmName))..." -ForegroundColor Gray
-        try {
-            Remove-AzDataCollectionRuleAssociation -ResourceUri $r.VmId -AssociationName $r.Name -ErrorAction Stop | Out-Null
-            Write-Host "  ✓ Deleted" -ForegroundColor Green
-        } catch {
-            $script:cleanupFailures++
-            $keepRuleReasons[$r.RuleKey] = "association '$($r.Name)' could not be deleted, and it still ties the rule to '$($r.VmName)'"
-            Write-Host "  [ERROR] Could not delete DCR Association '$($r.Name)' on '$($r.VmName)': $_" -ForegroundColor Red
-        }
-    }
-}
-
-# 3. Data Collection Rules
-foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'DCR' }) {
-    $keepReason = if ($keepDcrReason) { $keepDcrReason } else { $keepRuleReasons[$r.ResourceId.ToLowerInvariant()] }
-    if ($keepReason) {
-        $keepWorkspaceReason = "data collection rule '$($r.Name)' was kept, and it still sends to the workspace"
-        Write-Host "  [SKIP] Kept Data Collection Rule '$($r.Name)': $keepReason." -ForegroundColor Yellow
-        continue
-    }
-    if ($PSCmdlet.ShouldProcess("$($r.ResourceGroup)/$($r.Name)", 'Remove Data Collection Rule')) {
-        Write-Host "  Deleting Data Collection Rule: $($r.Name) (in $($r.ResourceGroup))..." -ForegroundColor Gray
-        try {
-            Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null
-            Write-Host "  ✓ Deleted" -ForegroundColor Green
-        } catch {
-            $script:cleanupFailures++
-            $keepWorkspaceReason = "data collection rule '$($r.Name)' could not be deleted, and it still sends to the workspace"
-            Write-Host "  [ERROR] Could not delete Data Collection Rule '$($r.Name)': $_" -ForegroundColor Red
-        }
-    }
-}
-
-# 4. Action Group
-foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'ActionGroup' }) {
-    if ($keepActionGroupReason) {
-        Write-Host "  [SKIP] Kept Action Group '$($r.Name)': $keepActionGroupReason." -ForegroundColor Yellow
-        continue
-    }
-    if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Action Group')) {
-        Write-Host "  Deleting Action Group: $($r.Name)..." -ForegroundColor Gray
-        try {
-            Remove-AzActionGroup -ResourceGroupName $platformRg -Name $r.Name -ErrorAction Stop | Out-Null
-            Write-Host "  ✓ Deleted" -ForegroundColor Green
-        } catch {
-            $script:cleanupFailures++
-            Write-Host "  [ERROR] Could not delete Action Group '$($r.Name)': $_" -ForegroundColor Red
-        }
-    }
-}
-
-# 5. Storage Diagnostic Settings
-foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'StorageDiag' }) {
-    if ($PSCmdlet.ShouldProcess("$($r.Account)/$($r.Name)", 'Remove Storage Diagnostic Settings')) {
-        Write-Host "  Deleting Storage Diagnostic Settings: $($r.Name) (on $($r.Account))..." -ForegroundColor Gray
-        try {
-            Remove-AzDiagnosticSetting -ResourceId $r.BlobServiceId -Name $r.Name -ErrorAction Stop | Out-Null
-            Write-Host "  ✓ Deleted" -ForegroundColor Green
-        } catch {
-            $script:cleanupFailures++
-            if (-not $keepWorkspaceReason) {
-                $keepWorkspaceReason = "diagnostic setting '$($r.Name)' on '$($r.Account)' could not be deleted, and it still sends to the workspace"
+})
+$lockFailures = Invoke-LabWithoutLock -ResourceGroupName $lockGroups -WhatIf:$WhatIfPreference -Action {
+    # 1. Metric Alert
+    foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'Alert' }) {
+        if ($PSCmdlet.ShouldProcess("$($r.ResourceGroup)/$($r.Name)", 'Remove Metric Alert')) {
+            Write-Host "  Deleting Metric Alert: $($r.Name) (in $($r.ResourceGroup))..." -ForegroundColor Gray
+            try {
+                Remove-AzMetricAlertRuleV2 -ResourceGroupName $r.ResourceGroup -Name $r.Name -ErrorAction Stop | Out-Null
+                Write-Host "  ✓ Deleted" -ForegroundColor Green
+            } catch {
+                $script:cleanupFailures++
+                $keepActionGroupReason = "metric alert '$($r.Name)' could not be deleted, and it may still use the action group"
+                Write-Host "  [ERROR] Could not delete Metric Alert '$($r.Name)' in '$($r.ResourceGroup)': $_" -ForegroundColor Red
             }
-            Write-Host "  [ERROR] Could not delete Storage Diagnostic Settings '$($r.Name)' on '$($r.Account)': $_" -ForegroundColor Red
         }
     }
-}
 
-# 6. Log Analytics Workspace (soft-delete by default — 14 days recovery window)
-foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'Workspace' }) {
-    if ($keepWorkspaceReason) {
-        Write-Host "  [SKIP] Kept Log Analytics Workspace '$($r.Name)': $keepWorkspaceReason." -ForegroundColor Yellow
-        continue
+    # 2. DCR Associations - a rule whose association could not be deleted is kept in step 3.
+    $keepRuleReasons = @{}   # rule id (lower case) -> why that rule is kept
+    foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'DCRAssoc' }) {
+        if ($PSCmdlet.ShouldProcess("$($r.VmName)/$($r.Name)", 'Remove DCR Association')) {
+            Write-Host "  Deleting DCR Association: $($r.Name) (on $($r.VmName))..." -ForegroundColor Gray
+            try {
+                Remove-AzDataCollectionRuleAssociation -ResourceUri $r.VmId -AssociationName $r.Name -ErrorAction Stop | Out-Null
+                Write-Host "  ✓ Deleted" -ForegroundColor Green
+            } catch {
+                $script:cleanupFailures++
+                $keepRuleReasons[$r.RuleKey] = "association '$($r.Name)' could not be deleted, and it still ties the rule to '$($r.VmName)'"
+                Write-Host "  [ERROR] Could not delete DCR Association '$($r.Name)' on '$($r.VmName)': $_" -ForegroundColor Red
+            }
+        }
     }
-    if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Log Analytics Workspace')) {
-        Write-Host "  Deleting Log Analytics Workspace: $($r.Name)..." -ForegroundColor Gray
-        try {
-            Remove-AzOperationalInsightsWorkspace -ResourceGroupName $platformRg -Name $r.Name -Force -ErrorAction Stop | Out-Null
-            Write-Host "  ✓ Deleted (soft-delete: 14-day recovery window)" -ForegroundColor Green
-            Write-Host "    To permanently purge: Remove-AzOperationalInsightsWorkspace -ResourceGroupName $platformRg -Name $($r.Name) -ForceDelete" -ForegroundColor Gray
-        } catch {
-            $script:cleanupFailures++
-            Write-Host "  [ERROR] Could not delete Log Analytics Workspace '$($r.Name)': $_" -ForegroundColor Red
+
+    # 3. Data Collection Rules
+    foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'DCR' }) {
+        $keepReason = if ($keepDcrReason) { $keepDcrReason } else { $keepRuleReasons[$r.ResourceId.ToLowerInvariant()] }
+        if ($keepReason) {
+            $keepWorkspaceReason = "data collection rule '$($r.Name)' was kept, and it still sends to the workspace"
+            Write-Host "  [SKIP] Kept Data Collection Rule '$($r.Name)': $keepReason." -ForegroundColor Yellow
+            continue
+        }
+        if ($PSCmdlet.ShouldProcess("$($r.ResourceGroup)/$($r.Name)", 'Remove Data Collection Rule')) {
+            Write-Host "  Deleting Data Collection Rule: $($r.Name) (in $($r.ResourceGroup))..." -ForegroundColor Gray
+            try {
+                Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null
+                Write-Host "  ✓ Deleted" -ForegroundColor Green
+            } catch {
+                $script:cleanupFailures++
+                $keepWorkspaceReason = "data collection rule '$($r.Name)' could not be deleted, and it still sends to the workspace"
+                Write-Host "  [ERROR] Could not delete Data Collection Rule '$($r.Name)': $_" -ForegroundColor Red
+            }
+        }
+    }
+
+    # 4. Action Group
+    foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'ActionGroup' }) {
+        if ($keepActionGroupReason) {
+            Write-Host "  [SKIP] Kept Action Group '$($r.Name)': $keepActionGroupReason." -ForegroundColor Yellow
+            continue
+        }
+        if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Action Group')) {
+            Write-Host "  Deleting Action Group: $($r.Name)..." -ForegroundColor Gray
+            try {
+                Remove-AzActionGroup -ResourceGroupName $platformRg -Name $r.Name -ErrorAction Stop | Out-Null
+                Write-Host "  ✓ Deleted" -ForegroundColor Green
+            } catch {
+                $script:cleanupFailures++
+                Write-Host "  [ERROR] Could not delete Action Group '$($r.Name)': $_" -ForegroundColor Red
+            }
+        }
+    }
+
+    # 5. Storage Diagnostic Settings
+    foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'StorageDiag' }) {
+        if ($PSCmdlet.ShouldProcess("$($r.Account)/$($r.Name)", 'Remove Storage Diagnostic Settings')) {
+            Write-Host "  Deleting Storage Diagnostic Settings: $($r.Name) (on $($r.Account))..." -ForegroundColor Gray
+            try {
+                Remove-AzDiagnosticSetting -ResourceId $r.BlobServiceId -Name $r.Name -ErrorAction Stop | Out-Null
+                Write-Host "  ✓ Deleted" -ForegroundColor Green
+            } catch {
+                $script:cleanupFailures++
+                if (-not $keepWorkspaceReason) {
+                    $keepWorkspaceReason = "diagnostic setting '$($r.Name)' on '$($r.Account)' could not be deleted, and it still sends to the workspace"
+                }
+                Write-Host "  [ERROR] Could not delete Storage Diagnostic Settings '$($r.Name)' on '$($r.Account)': $_" -ForegroundColor Red
+            }
+        }
+    }
+
+    # 6. Log Analytics Workspace (soft-delete by default — 14 days recovery window)
+    foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'Workspace' }) {
+        if ($keepWorkspaceReason) {
+            Write-Host "  [SKIP] Kept Log Analytics Workspace '$($r.Name)': $keepWorkspaceReason." -ForegroundColor Yellow
+            continue
+        }
+        if ($PSCmdlet.ShouldProcess($r.Name, 'Remove Log Analytics Workspace')) {
+            Write-Host "  Deleting Log Analytics Workspace: $($r.Name)..." -ForegroundColor Gray
+            try {
+                Remove-AzOperationalInsightsWorkspace -ResourceGroupName $platformRg -Name $r.Name -Force -ErrorAction Stop | Out-Null
+                Write-Host "  ✓ Deleted (soft-delete: 14-day recovery window)" -ForegroundColor Green
+                Write-Host "    To permanently purge: Remove-AzOperationalInsightsWorkspace -ResourceGroupName $platformRg -Name $($r.Name) -ForceDelete" -ForegroundColor Gray
+            } catch {
+                $script:cleanupFailures++
+                Write-Host "  [ERROR] Could not delete Log Analytics Workspace '$($r.Name)': $_" -ForegroundColor Red
+            }
         }
     }
 }
+$script:cleanupFailures += $lockFailures
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 if ($script:cleanupFailures -gt 0) {

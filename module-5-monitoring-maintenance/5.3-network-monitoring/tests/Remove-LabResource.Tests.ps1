@@ -68,6 +68,8 @@ BeforeAll {
         'Get-AzVMExtension'
         'Remove-AzVMExtension'
         'Remove-AzResourceGroup'
+        'Invoke-AzRestMethod'
+        'Start-Sleep'
     )
 
     # Every command records its own invocation. By default the connection monitor exists with the
@@ -283,6 +285,8 @@ function Remove-AzResourceGroup {
             [pscustomobject]$Stub,
             [string[]]$Fail = @(),
             [string[]]$Lookup = @(),
+            [string[]]$Locks = @(),
+            [string[]]$LockFail = @(),
             [string[]]$ArgumentList = @('-Force'),
             [switch]$Empty
         )
@@ -295,6 +299,8 @@ function Remove-AzResourceGroup {
             SKYCRAFT_STUB_LOOKUP = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG    = $logPath
+            SKYCRAFT_STUB_LOCKS = $Locks -join ','
+            SKYCRAFT_STUB_LOCK_FAIL = $LockFail -join ','
         }
 
         $calls = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { @() }
@@ -307,7 +313,7 @@ function Remove-AzResourceGroup {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmStub -Api Lock)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # A removal the script makes.
@@ -331,6 +337,12 @@ function Remove-AzResourceGroup {
         'Remove-AzNetworkWatcherConnectionMonitor:skycraft-hub-spoke-cm'
         'Remove-AzVMExtension:dev-skycraft-swc-auth-vm/NetworkWatcherAgentLinux'
     )
+
+    # Lab 1.3's delete locks (#372): the cleanup lifts them for its deletes and puts them back.
+    $script:Locked         = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg'
+    $script:LockedFail     = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg' -Fail 'Remove-AzResource:dataCollectionRules/NWTA-0000-swedencentral'
+    $script:LockUnreadable = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg' -LockFail 'GET:platform-skycraft-swc-rg'
+    $script:LockedWhatIf   = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg' -ArgumentList '-WhatIf'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:CmDenied, $script:GroupListFails,
@@ -490,5 +502,48 @@ Describe 'Lab 5.3 Remove-LabResource.ps1 - -WhatIf' {
         # The flow log was not removed, so it still feeds Traffic Analytics and step [4/4] leaves
         # the NWTA-* resources alone.
         $run.Output   | Should -Match 'still use Traffic Analytics'
+    }
+}
+
+Describe 'Lab 5.3 Remove-LabResource.ps1 - under Lab 1.3''s delete lock (#372)' {
+
+    It 'runs every lock scenario against the stub' {
+        foreach ($run in @($script:Locked, $script:LockedFail, $script:LockUnreadable, $script:LockedWhatIf)) {
+            $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az commands (exit $($run.ExitCode)): $($run.Output)"
+        }
+    }
+
+    It 'lifts the lock before the deletes, puts it back as it was after them, and exits 0' {
+        $run = $script:Locked
+        $run.ExitCode | Should -Be 0 -Because "the lock is no longer in the way; output was:`n$($run.Output)"
+        $calls = @($run.Calls)
+        $lift = [array]::IndexOf($calls, 'Lock:DELETE:platform-skycraft-swc-rg')
+        $lift | Should -BeGreaterOrEqual 0 -Because 'the lock must be lifted'
+        [array]::IndexOf($calls, 'Remove-AzResource:dataCollectionRules/NWTA-0000-swedencentral') | Should -BeGreaterThan $lift
+        [array]::IndexOf($calls, 'Lock:PUT:platform-skycraft-swc-rg') | Should -BeGreaterThan ([array]::IndexOf($calls, 'Remove-AzResource:dataCollectionRules/NWTA-0000-swedencentral'))
+        $calls | Should -Contain 'Lock:PUT-BODY:platform-skycraft-swc-rg:{"properties":{"level":"CanNotDelete","notes":"Cannot delete resource or child resources."}}'
+        $calls | Should -Contain 'Start-Sleep:45'
+    }
+
+    It 'puts the lock back after a delete that failed, and exits 1' {
+        $run = $script:LockedFail
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $calls = @($run.Calls)
+        [array]::IndexOf($calls, 'Remove-AzResource:dataCollectionRules/NWTA-0000-swedencentral') | Should -BeGreaterOrEqual 0
+        [array]::IndexOf($calls, 'Lock:PUT:platform-skycraft-swc-rg') | Should -BeGreaterThan ([array]::IndexOf($calls, 'Remove-AzResource:dataCollectionRules/NWTA-0000-swedencentral'))
+    }
+
+    It 'deletes nothing in the group and exits 1 when the lock cannot be read' {
+        $run = $script:LockUnreadable
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[ERROR\] Could not read Lab 1\.3's lock 'lock-no-delete-[a-z]+' on 'platform-skycraft-swc-rg'"
+        $run.Calls | Should -Not -Contain 'Remove-AzResource:dataCollectionRules/NWTA-0000-swedencentral'
+        $run.Calls | Should -Not -Contain 'Lock:DELETE:platform-skycraft-swc-rg'
+    }
+
+    It 'lifts no lock under -WhatIf' {
+        $script:LockedWhatIf.ExitCode | Should -Be 0 -Because "output was:`n$($script:LockedWhatIf.Output)"
+        $script:LockedWhatIf.Calls | Should -Not -Match '^Lock:(DELETE|PUT):'
+        $script:LockedWhatIf.Calls | Should -Not -Contain 'Remove-AzResource:dataCollectionRules/NWTA-0000-swedencentral'
     }
 }

@@ -41,7 +41,7 @@
 - **Cleanup reminder:**
   - Delete storage accounts to stop billing (data is deleted with the account unless backed up elsewhere).
   - Soft-deleted blobs/containers remain for 7 days after deletion; no additional cleanup needed.
-  - Lab 1.3's `CanNotDelete` locks on `platform-skycraft-swc-rg` and `prod-skycraft-swc-rg` block deleting `platformskycraftswcsa` and `prodskycraftswcsa`; `Remove-LabResource.ps1` reports them as failed until the locks are removed (Lab 1.3's cleanup removes them).
+  - Lab 1.3's `CanNotDelete` locks on `platform-skycraft-swc-rg` and `prod-skycraft-swc-rg` block deleting `platformskycraftswcsa` and `prodskycraftswcsa`; `Remove-LabResource.ps1` lifts the lock of each group it deletes in and restores it with the same name, level and notes, also when a delete fails (`Invoke-LabWithoutLock` in `tools/LabCommon.psm1`, issue #372).
 
 ## 5. Bicep implementation note (AVM)
 

@@ -215,6 +215,17 @@ Exit-Lab -FailureCount $script:cleanupFailures   # 1 when anything failed, 0 oth
 
 - **Budgets through the Consumption API, not Az.Billing**: A lab script lists and deletes budgets with `Get-LabArmBudget` and `Remove-LabArmBudget` from `tools/LabCommon.psm1`, never with `Get-AzConsumptionBudget`, `New-AzConsumptionBudget`, `Set-AzConsumptionBudget` or `Remove-AzConsumptionBudget`. Az.Billing 2.3.0 sends every Consumption request at api-version `2018-01-31`, which current subscriptions refuse with 422 ("Please use version 2018-12-01-preview or later") (#411). The helpers call the budgets API through `Invoke-AzRestMethod` at `2023-05-01`, and a status outside 2xx throws with the status and the service's message, so a failed read is counted and printed, never read as "no budget", and a script names no cause the message does not give. Unlike the role cmdlets, the budget cmdlets cannot stay in a guide or checklist either: they fail for every learner, not only in some tenants, so a learner's budget check uses the Portal or the same API through `Invoke-AzRestMethod`. `tests/Budget-Consumption-Api.Tests.ps1` enforces the rule for every script under `module-*/*/scripts/` and `tools/`, for the guides and checklists, and for any budgets path written with an api-version before `2019-01-01`.
 
+- **Deletes in a group Lab 1.3 locks**: Lab 1.3 puts a `CanNotDelete` lock on `platform-skycraft-swc-rg` (`lock-no-delete-platform`) and `prod-skycraft-swc-rg` (`lock-no-delete-prod`), and while it is there every delete in the group fails with `ScopeLocked`, a child resource or a role assignment included (#372). A cleanup looks up what it will delete first, then runs the deletes in those groups inside `Invoke-LabWithoutLock` from `tools/LabCommon.psm1`, which lifts Lab 1.3's lock, waits for ARM, runs them and puts the lock back with the same name, level and notes in a `finally` block. It touches no other lock (Azure Backup's on a protected account stays, and the delete fails as before). A lock it cannot read, lift or restore is an `[ERROR]`; it runs no delete when it could not read or lift one, and prints the command that recreates a lock it could not restore. Pass `-WhatIf:$WhatIfPreference` (a module function does not see the script's `-WhatIf`), name only the groups the cleanup found something to delete in, count the failures in `$script:` variables inside the block, and add the returned count in a statement of its own: `$script:cleanupFailures += Invoke-LabWithoutLock ...` reads the count before the block raises it.
+
+  ```powershell
+  $lockFailures = Invoke-LabWithoutLock -ResourceGroupName $groups -WhatIf:$WhatIfPreference -Action {
+      foreach ($share in $presentShares) { <# ShouldProcess, delete, $script:cleanupFailures++ on error #> }
+  }
+  $script:cleanupFailures += $lockFailures
+  ```
+
+  [`tests/LabCommon-ResourceLock.Tests.ps1`](../tests/LabCommon-ResourceLock.Tests.ps1) pins the helper and holds the Lab 4.1-5.3 cleanups to that call; their own suites run them against Lab 1.3's locks through the `Lock` route of the ARM fake (`Get-LabArmStub -Api Lock`). Labs 2.1-3.4 still delete under the lock and are owed the same change (#372).
+
 - **Retry Logic**: Implement retry loops for "stubborn" Azure resources (like NSGs) that suffer from eventual consistency delays.
 
 - **Dependencies First**: Dissociate resources (e.g., NSG from Subnet) before attempting deletion.

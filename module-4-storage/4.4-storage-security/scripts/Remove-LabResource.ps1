@@ -22,6 +22,12 @@
     role assignments API (tools/LabCommon.psm1), so the cleanup needs no Microsoft Graph sign-in
     (issue #397).
 
+    Lab 1.3's CanNotDelete lock on the prod group refuses deleting the container and the role
+    assignments (ScopeLocked, issue #372). Those deletes run inside Invoke-LabWithoutLock
+    (tools/LabCommon.psm1), which lifts the lock, runs them and puts it back with the same name,
+    level and notes, also when one fails. A lock it cannot read, lift or restore is an [ERROR]
+    and counted; any other lock is left alone.
+
     Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
     otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
@@ -167,65 +173,74 @@ if ($sa) {
         }
     }
 
-    # 4. Remove dev-assets container - picked from a listing; a listing that fails touches nothing.
-    if ($PSCmdlet.ShouldProcess('dev-assets', 'Remove storage container')) {
-        Write-Host "Removing 'dev-assets' container..." -ForegroundColor Yellow
-        $containerLookup = Invoke-LabLookup -Target "the containers in '$storageAccountName'" -Lookup {
-            Get-AzRmStorageContainer -ResourceGroupName $resourceGroupName -StorageAccountName $storageAccountName -ErrorAction Stop
-        }
-        if ($containerLookup.Value | Where-Object { $_.Name -eq 'dev-assets' }) {
-            try {
-                Remove-AzRmStorageContainer -ResourceGroupName $resourceGroupName -StorageAccountName $storageAccountName -Name 'dev-assets' -Force -ErrorAction Stop
-                Write-Host "  -> Container 'dev-assets' removed." -ForegroundColor Green
-            }
-            catch {
-                $script:cleanupFailures++
-                Write-Host "  -> [ERROR] Failed to remove container 'dev-assets'." -ForegroundColor Red
-                Write-Host $_.Exception.Message -ForegroundColor Red
-            }
-        }
-        elseif (-not $containerLookup.Failed) {
-            Write-Host "  -> [INFO] Container 'dev-assets' not found or already removed." -ForegroundColor Gray
+    # 4. Look the dev-assets container up - picked from a listing; a listing that fails touches nothing.
+    $containerLookup = Invoke-LabLookup -Target "the containers in '$storageAccountName'" -Lookup {
+        Get-AzRmStorageContainer -ResourceGroupName $resourceGroupName -StorageAccountName $storageAccountName -ErrorAction Stop
+    }
+    $hasContainer = [bool]($containerLookup.Value | Where-Object { $_.Name -eq 'dev-assets' })
+    if (-not $hasContainer -and -not $containerLookup.Failed) {
+        Write-Host "  -> [INFO] Container 'dev-assets' not found or already removed." -ForegroundColor Gray
+    }
+
+    # 5. Look the RBAC assignments (Storage Blob Data Contributor) up
+    $storageId = $sa.Id
+    # Through the ARM role assignments API (tools/LabCommon.psm1), not Get-AzRoleAssignment /
+    # Remove-AzRoleAssignment: those resolve every principal through Microsoft Graph and fail
+    # where the Az sign-in cannot get a Graph token (issue #397).
+    $assignmentLookup = Invoke-LabLookup -Target "the role assignments on '$storageAccountName'" -Lookup {
+        Get-LabArmRoleAssignment -Scope $storageId
+    }
+    $assignments = @()
+    if (-not $assignmentLookup.Failed) {
+        # Only the assignments made on the account itself: the listing also returns ones
+        # inherited from the resource group or the subscription, which this lab did not create
+        # and which cannot be removed at this scope.
+        $blobContributor = Get-LabBuiltInRoleId -Name 'Storage Blob Data Contributor'
+        $assignments = @($assignmentLookup.Value |
+            Where-Object { $_.RoleDefinitionId -eq $blobContributor -and $_.Scope -eq $storageId })
+
+        if ($assignments.Count -eq 0) {
+            Write-Host "  -> [INFO] No 'Storage Blob Data Contributor' assignments found." -ForegroundColor Gray
         }
     }
 
-    # 5. Remove RBAC assignments (Storage Blob Data Contributor)
-    if ($PSCmdlet.ShouldProcess($storageAccountName, "Remove 'Storage Blob Data Contributor' role assignments")) {
-        Write-Host "Removing 'Storage Blob Data Contributor' role assignments..." -ForegroundColor Yellow
-        $storageId = $sa.Id
-        # Through the ARM role assignments API (tools/LabCommon.psm1), not Get-AzRoleAssignment /
-        # Remove-AzRoleAssignment: those resolve every principal through Microsoft Graph and fail
-        # where the Az sign-in cannot get a Graph token (issue #397).
-        $assignmentLookup = Invoke-LabLookup -Target "the role assignments on '$storageAccountName'" -Lookup {
-            Get-LabArmRoleAssignment -Scope $storageId
-        }
-        if (-not $assignmentLookup.Failed) {
-            # Only the assignments made on the account itself: the listing also returns ones
-            # inherited from the resource group or the subscription, which this lab did not create
-            # and which cannot be removed at this scope.
-            $blobContributor = Get-LabBuiltInRoleId -Name 'Storage Blob Data Contributor'
-            $assignments = @($assignmentLookup.Value |
-                Where-Object { $_.RoleDefinitionId -eq $blobContributor -and $_.Scope -eq $storageId })
-
-            if ($assignments.Count -eq 0) {
-                Write-Host "  -> [INFO] No 'Storage Blob Data Contributor' assignments found." -ForegroundColor Gray
-            }
-            # Each assignment is named by its place in the list, not by its holder: a display name is a
-            # real person's name, and the output may be pasted as evidence.
-            $position = 0
-            foreach ($assignment in $assignments) {
-                $position++
+    # Lab 1.3's CanNotDelete lock on the prod group refuses both deletes (ScopeLocked);
+    # Invoke-LabWithoutLock lifts it for them and puts it back (#372).
+    if ($hasContainer -or $assignments.Count -gt 0) {
+        $lockFailures = Invoke-LabWithoutLock -ResourceGroupName $resourceGroupName -WhatIf:$WhatIfPreference -Action {
+            if ($hasContainer -and $PSCmdlet.ShouldProcess('dev-assets', 'Remove storage container')) {
+                Write-Host "Removing 'dev-assets' container..." -ForegroundColor Yellow
                 try {
-                    Remove-LabArmRoleAssignment -Id $assignment.RoleAssignmentId
-                    Write-Host "  -> Removed assignment $position of $($assignments.Count)." -ForegroundColor Green
+                    Remove-AzRmStorageContainer -ResourceGroupName $resourceGroupName -StorageAccountName $storageAccountName -Name 'dev-assets' -Force -ErrorAction Stop
+                    Write-Host "  -> Container 'dev-assets' removed." -ForegroundColor Green
                 }
                 catch {
                     $script:cleanupFailures++
-                    Write-Host "  -> [ERROR] Failed to remove assignment $position of $($assignments.Count)." -ForegroundColor Red
+                    Write-Host "  -> [ERROR] Failed to remove container 'dev-assets'." -ForegroundColor Red
                     Write-Host $_.Exception.Message -ForegroundColor Red
                 }
             }
+
+            if ($assignments.Count -gt 0 -and $PSCmdlet.ShouldProcess($storageAccountName, "Remove 'Storage Blob Data Contributor' role assignments")) {
+                Write-Host "Removing 'Storage Blob Data Contributor' role assignments..." -ForegroundColor Yellow
+                # Each assignment is named by its place in the list, not by its holder: a display name is a
+                # real person's name, and the output may be pasted as evidence.
+                $position = 0
+                foreach ($assignment in $assignments) {
+                    $position++
+                    try {
+                        Remove-LabArmRoleAssignment -Id $assignment.RoleAssignmentId
+                        Write-Host "  -> Removed assignment $position of $($assignments.Count)." -ForegroundColor Green
+                    }
+                    catch {
+                        $script:cleanupFailures++
+                        Write-Host "  -> [ERROR] Failed to remove assignment $position of $($assignments.Count)." -ForegroundColor Red
+                        Write-Host $_.Exception.Message -ForegroundColor Red
+                    }
+                }
+            }
         }
+        $script:cleanupFailures += $lockFailures
     }
 }
 
