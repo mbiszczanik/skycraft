@@ -236,8 +236,8 @@
     },
     {
       "type": "text", "id": "l2", "x": 86, "y": 396, "width": 740, "height": 15,
-      "text": "5.2  continuity — VM backup, blob backup, file-level restore, ASR to North Europe",
-      "originalText": "5.2  continuity — VM backup, blob backup, file-level restore, ASR to North Europe",
+      "text": "5.2  continuity - VM backup, blob backup, file-level restore, ASR to North Europe",
+      "originalText": "5.2  continuity - VM backup, blob backup, file-level restore, ASR to North Europe",
       "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
