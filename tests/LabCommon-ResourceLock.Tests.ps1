@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Pester 5 tests for Invoke-LabWithoutLock in tools/LabCommon.psm1 (issue #372).
 
@@ -344,6 +344,22 @@ Describe 'Module 4-5 cleanups route their locked-group deletes through Invoke-La
             $variable = $assignment.Left.VariablePath.UserPath
             $source = $ast.Extent.Text
             $source | Should -Match ('\$script:cleanupFailures \+= \$' + [regex]::Escape($variable) + '\b')
+        }
+    }
+
+    # A delete outside the locked groups can still remove a child inside one: deleting Lab 5.3's
+    # flow log (NetworkWatcherRG) deletes the lifecycle policy on the platform storage account.
+    It 'Lab 5.3 deletes the flow log inside Invoke-LabWithoutLock' {
+        $file = Join-Path $PSScriptRoot '..' 'module-5-monitoring-maintenance/5.3-network-monitoring' 'scripts' 'Remove-LabResource.ps1'
+        $tokens = $null; $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
+        $deletes = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Remove-AzNetworkWatcherFlowLog' }, $true))
+        $deletes.Count | Should -BeGreaterThan 0
+        foreach ($delete in $deletes) {
+            $wrapper = $delete.Parent
+            while ($wrapper -and -not ($wrapper -is [System.Management.Automation.Language.CommandAst] -and $wrapper.GetCommandName() -eq 'Invoke-LabWithoutLock')) { $wrapper = $wrapper.Parent }
+            $wrapper | Should -Not -BeNullOrEmpty -Because 'the flow log delete removes a child in the platform group, which Lab 1.3 locks'
+            $wrapper.Extent.Text | Should -Match 'platformRg'
         }
     }
 }

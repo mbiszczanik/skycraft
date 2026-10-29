@@ -25,8 +25,9 @@
     that failed is not an empty group - nothing is deleted on the strength of it. An agent whose
     ownership tag could not be read is left in place.
 
-    Lab 1.3's CanNotDelete lock on the prod and platform groups refuses deleting the agent on a
-    prod VM and the NWTA-* resources (ScopeLocked, issue #372). Those deletes run inside Invoke-
+    Lab 1.3's CanNotDelete lock on the prod and platform groups refuses deleting the flow log
+    (it also removes the lifecycle policy on the platform storage account), the agent on a prod
+    VM and the NWTA-* resources (ScopeLocked, issue #372). Those deletes run inside Invoke-
     LabWithoutLock (tools/LabCommon.psm1), which lifts the lock, runs them and puts it back with
     the same name, level and notes, also when one fails. A lock it cannot read, lift or restore
     is an [ERROR] and counted; any other lock is left alone.
@@ -315,15 +316,21 @@ $flowLogLookup = Invoke-LabLookup -Target "the flow logs of '$networkWatcherName
     Get-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -ErrorAction Stop
 }
 if ($flowLogLookup.Value | Where-Object { $_.Name -eq $flowLogName }) {
-    if ($PSCmdlet.ShouldProcess($flowLogName, 'Remove VNet Flow Log')) {
-        try {
-            Remove-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $flowLogName -Confirm:$false -ErrorAction Stop | Out-Null
-            Write-Host "  ✓ VNet Flow Log removed: $flowLogName" -ForegroundColor Green
-        } catch {
-            $script:cleanupFailures++
-            Write-Host "  [ERROR] Failed to remove VNet Flow Log: $($_.Exception.Message)" -ForegroundColor Red
+    # The flow log sits in NetworkWatcherRG, but deleting it also deletes the lifecycle policy
+    # (managementPolicies/default) on the platform storage account, which Lab 1.3's lock refuses
+    # (ScopeLocked). Invoke-LabWithoutLock lifts the platform lock for the delete (#372).
+    $lockFailures = Invoke-LabWithoutLock -ResourceGroupName $platformRg -WhatIf:$WhatIfPreference -Action {
+        if ($PSCmdlet.ShouldProcess($flowLogName, 'Remove VNet Flow Log')) {
+            try {
+                Remove-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $flowLogName -Confirm:$false -ErrorAction Stop | Out-Null
+                Write-Host "  ✓ VNet Flow Log removed: $flowLogName" -ForegroundColor Green
+            } catch {
+                $script:cleanupFailures++
+                Write-Host "  [ERROR] Failed to remove VNet Flow Log: $($_.Exception.Message)" -ForegroundColor Red
+            }
         }
     }
+    $script:cleanupFailures += $lockFailures
 } elseif (-not $flowLogLookup.Failed) {
     Write-Host "  ✓ VNet Flow Log not found (already removed): $flowLogName" -ForegroundColor Gray
 }
