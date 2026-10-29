@@ -9,7 +9,11 @@
          - Storage Blob Data Owner
          - Storage Account Backup Contributor
     2. Creates the blob backup protection instance (backup instance) connecting
-       prodskycraftswcsa to the SkyCraft-Blob-Policy backup policy.
+       prodskycraftswcsa to the SkyCraft-Blob-Policy backup policy. The policy is
+       operational plus vaulted (issue #306), and vaulted backup protects the containers
+       the instance lists, so the instance names every container in the account (Lab 4.2
+       creates them). An account with no container stops the run: Microsoft Learn says
+       vaulted backup needs at least one.
 
     Requires Owner or User Access Administrator role at storage account scope
     to create role assignments. The role assignments are read and created
@@ -29,8 +33,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.0.0
-    Date: 2026-04-06
+    Version: 1.1.0
+    Date: 2026-10-28
 #>
 
 #Requires -Version 7.0
@@ -86,6 +90,22 @@ if (-not $storage) {
 }
 $storageId = $storage.Id
 Write-Host "  ✓ Storage account found: $storageAccount" -ForegroundColor Green
+
+# SkyCraft-Blob-Policy is operational plus vaulted (#306): the operational part covers the
+# whole account, the vaulted part only the containers the backup configuration lists.
+# Get-AzRmStorageContainer is a control-plane listing, which the storage firewall does not block.
+try {
+    $containerNames = @(Get-AzRmStorageContainer -ResourceGroupName $prodRg -StorageAccountName $storageAccount -ErrorAction Stop |
+        ForEach-Object { $_.Name } | Where-Object { $_ })
+} catch {
+    Write-Host "  [ERROR] Could not list the containers of '$storageAccount': $_" -ForegroundColor Red
+    Exit-Lab -FailureCount 1
+}
+if ($containerNames.Count -eq 0) {
+    Write-Host "  [ERROR] '$storageAccount' has no container. Vaulted blob backup needs at least one: run Lab 4.2 first." -ForegroundColor Red
+    Exit-Lab -FailureCount 1
+}
+Write-Host "  Containers for vaulted backup: $($containerNames -join ', ')" -ForegroundColor Gray
 
 $policy = Get-AzDataProtectionBackupPolicy -ResourceGroupName $platformRg -VaultName $bvName -Name $policyName -ErrorAction SilentlyContinue
 if (-not $policy) {
@@ -165,17 +185,19 @@ if ($existingInstance) {
     Write-Host "  [WhatIf] Would create blob backup instance for $storageAccount" -ForegroundColor Cyan
 } else {
     try {
-        # SkyCraft-Blob-Policy is an operational (continuous) blob policy and protects the whole
-        # storage account. A backup configuration listing containers belongs to vaulted blob
-        # backup; passing one here makes the service reject the request with
-        # 'UserErrorInvalidRequestParameter: Parameter NO_PARAM in request is invalid'.
         # -ErrorAction Stop is required because the autorest DataProtection cmdlets emit
         # non-terminating errors, which previously printed a false "created" success.
+        $backupConfig = New-AzDataProtectionBackupConfigurationClientObject `
+            -DatasourceType AzureBlob `
+            -VaultedBackupContainer $containerNames `
+            -ErrorAction Stop
+
         $backupInstance = Initialize-AzDataProtectionBackupInstance `
             -DatasourceType AzureBlob `
             -DatasourceLocation $location `
             -DatasourceId $storageId `
             -PolicyId $policyId `
+            -BackupConfiguration $backupConfig `
             -ErrorAction Stop
 
         New-AzDataProtectionBackupInstance `

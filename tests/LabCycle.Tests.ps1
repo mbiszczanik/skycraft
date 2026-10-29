@@ -575,6 +575,7 @@ Describe 'Manifest - the dependency graph is sound' {
         @{ Lab = '5.1'; Dependency = '3.2' }
         @{ Lab = '5.1'; Dependency = '4.1' }
         @{ Lab = '5.2'; Dependency = '4.1' }   # PostDeploy New-LabBlobBackup.ps1
+        @{ Lab = '5.2'; Dependency = '4.2' }   # PostDeploy New-LabBlobBackup.ps1: vaulted backup needs a container (#306)
         @{ Lab = '5.2'; Dependency = '5.1' }
         @{ Lab = '5.3'; Dependency = '2.1' }
         @{ Lab = '5.3'; Dependency = '3.2' }

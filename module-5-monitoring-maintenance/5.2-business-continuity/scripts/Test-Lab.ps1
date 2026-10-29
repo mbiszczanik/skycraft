@@ -8,6 +8,11 @@
     - VM Backup Policy (SkyCraft-Daily-Prod): daily schedule, 30-day retention, instant-restore
       snapshots in platform-skycraft-swc-rpc1-rg
     - Snapshot resource group (platform-skycraft-swc-rpc1-rg): exists, tagged, not locked
+    - When dev-skycraft-swc-auth-vm is encrypted with Azure Disk Encryption (Lab 3.2): the
+      Microsoft Entra app Backup Management Service holds Key Vault Administrator on the VM's
+      key vault, which Azure Backup needs to back the VM up (issue #368). A failed lookup of
+      the encryption, the app or the role assignments fails the check. Finding the app needs
+      Microsoft Graph unless -BackupManagementServiceObjectId is given.
     - VM backup protection enabled on dev-skycraft-swc-auth-vm (skipped if VM absent), and
       its latest backup job did not fail - configuration alone stayed green while every
       backup was refused by policy (issue #184)
@@ -16,7 +21,9 @@
       it with Az PowerShell or the Bicep (decision on issue #366); the check says so when it
       fails, and accepts On/AlwaysOn once $backupVaultSoftDeleteAccepted is widened for the GA
       of secure by default in the region (issue #376)
-    - Blob Backup Policy (SkyCraft-Blob-Policy): AzureBlob datasource, 30-day retention
+    - Blob Backup Policy (SkyCraft-Blob-Policy): AzureBlob datasource, 30-day operational
+      retention, and a daily vaulted backup kept 7 days in the vault: a new blob policy
+      cannot be operational only (issue #306)
     - Blob backup instance configured for prodskycraftswcsa
 
     Property reads with uncertain typed-object names (storage type, identity,
@@ -26,21 +33,30 @@
     Note: Azure Site Recovery replication status must be verified manually
     in the Azure Portal (the ASR replication flow is portal-only per Step 5.2.6).
 
+.PARAMETER BackupManagementServiceObjectId
+    Object id of the Backup Management Service app in this tenant, for a sign-in that cannot
+    get a Microsoft Graph token. In Azure Cloud Shell:
+    (Get-AzADServicePrincipal -ApplicationId 262044b1-e2ce-469f-a196-69ab7ada62d3).Id
+
 .EXAMPLE
     .\Test-Lab.ps1
 
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.1.0
-    Date: 2026-10-06
+    Version: 1.2.0
+    Date: 2026-10-28
 #>
 
 #Requires -Version 7.0
 #Requires -Modules Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Storage, Az.Compute
 
 [CmdletBinding()]
-param()
+param(
+    [Parameter()]
+    [ValidatePattern('^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$')]
+    [string]$BackupManagementServiceObjectId
+)
 
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
@@ -257,6 +273,45 @@ $devVm = Get-AzVM -Name $vmName -ResourceGroupName $vmRg -ErrorAction SilentlyCo
 if (-not $devVm) {
     Write-Host "  [WARNING] VM '$vmName' not found in '$vmRg' — skipping VM backup protection checks (not counted as failures)." -ForegroundColor Yellow
 } else {
+    # Azure Backup reads an ADE VM's key vault as the Backup Management Service app, which needs
+    # Key Vault Administrator on an RBAC key vault (Microsoft Learn, "Back up and restore encrypted
+    # Azure virtual machines"; #368). A lookup that fails is a FAIL, never "not encrypted".
+    $adeVaultIds = @()
+    $adeLookupError = $null
+    try {
+        $adeVaultIds = @(Get-LabAdeKeyVaultId -ResourceGroupName $vmRg -VMName $vmName)
+    } catch {
+        $adeLookupError = $_
+    }
+    if ($adeLookupError) {
+        Invoke-Test "Disk encryption of '$vmName' read for the key vault role check" { throw $adeLookupError }
+    } elseif ($adeVaultIds.Count -eq 0) {
+        Write-Host "  [INFO] '$vmName' is not encrypted with Azure Disk Encryption - no key vault role to check." -ForegroundColor Gray
+    } else {
+        $kvAdminRoleId = Get-LabBuiltInRoleId -Name 'Key Vault Administrator'
+        $principalId = $null
+        $principalError = $null
+        try {
+            $principalId = Get-LabBackupManagementServiceId -ObjectId $BackupManagementServiceObjectId
+        } catch {
+            $principalError = $_
+        }
+        foreach ($adeVaultId in $adeVaultIds) {
+            Invoke-Test "Backup Management Service holds Key Vault Administrator on '$(($adeVaultId -split '/')[-1])' (ADE)" {
+                if ($principalError) { throw $principalError }
+                $held = @(Get-LabArmRoleAssignment -Scope $adeVaultId -PrincipalId $principalId | Where-Object {
+                        $_.RoleDefinitionId -eq $kvAdminRoleId -and (
+                            $_.Scope -eq $adeVaultId -or $adeVaultId -like "$($_.Scope)/*" -or $_.Scope -eq '/' -or
+                            $_.Scope -like '/providers/Microsoft.Management/managementGroups/*')
+                    })
+                if ($held.Count -eq 0) {
+                    Write-Host " (not assigned - Step 5.2.3, step 1)" -NoNewline -ForegroundColor Gray
+                }
+                return ($held.Count -gt 0)
+            }
+        }
+    }
+
     $vmItems = if ($rsv) {
         Get-AzRecoveryServicesBackupItem -VaultId $rsv.ID -BackupManagementType AzureVM -WorkloadType AzureVM -ErrorAction SilentlyContinue
     } else { $null }
@@ -389,16 +444,32 @@ Invoke-Test "Blob policy datasource type is AzureBlob" {
     return ($blobPolicyArm.Properties.datasourceTypes -contains 'Microsoft.Storage/storageAccounts/blobServices')
 }
 
+# Retention is an ISO-8601 duration (P30D) on a lifecycle's deleteAfter, per data store.
+$blobLifecycles = if ($blobPolicyArm) {
+    @(foreach ($rule in @($blobPolicyArm.Properties.policyRules)) {
+            if ($rule.objectType -eq 'AzureRetentionRule') { @($rule.lifecycles) }
+        })
+} else { @() }
+
 Invoke-Test "Blob policy operational retention is 30 days" {
     if (-not $blobPolicyArm) { return $false }
-    # Operational retention is an ISO-8601 duration (P30D) on a lifecycle deleteAfter.
-    $found = $false
-    foreach ($rule in @($blobPolicyArm.Properties.policyRules)) {
-        foreach ($lc in @($rule.lifecycles)) {
-            if ("$($lc.deleteAfter.duration)" -eq 'P30D') { $found = $true }
-        }
+    return ($null -ne ($blobLifecycles | Where-Object {
+                $_.sourceDataStore.dataStoreType -eq 'OperationalStore' -and "$($_.deleteAfter.duration)" -eq 'P30D' }))
+}
+
+# A new blob policy cannot be operational only: vaulted backup is part of it (#306).
+Invoke-Test "Blob policy takes a daily vaulted backup, kept 7 days in the vault" {
+    if (-not $blobPolicyArm) { return $false }
+    $daily = @($blobPolicyArm.Properties.policyRules | Where-Object {
+            $_.objectType -eq 'AzureBackupRule' -and $_.dataStore.dataStoreType -eq 'VaultStore' -and
+            @($_.trigger.schedule.repeatingTimeIntervals | Where-Object { "$_" -like '*/P1D' }).Count -gt 0
+        })
+    $kept = @($blobLifecycles | Where-Object {
+            $_.sourceDataStore.dataStoreType -eq 'VaultStore' -and "$($_.deleteAfter.duration)" -eq 'P7D' })
+    if ($daily.Count -eq 0 -or $kept.Count -eq 0) {
+        Write-Host " (an operational-only policy from before issue #306 - see lab-guide-5.2.md, Step 5.2.5)" -NoNewline -ForegroundColor Gray
     }
-    return $found
+    return ($daily.Count -gt 0 -and $kept.Count -gt 0)
 }
 
 # ============================================================================

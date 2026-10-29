@@ -7,6 +7,8 @@ By completing this lab, you will:
 - Deploy an **Azure Recovery Services Vault (RSV)**
 - Configure **Backup Policies** for different SLA requirements
 - Implement **Azure VM Backup** for production workloads
+- Give Azure Backup access to the **key vault** of a VM encrypted with Azure Disk Encryption
+- Protect blobs with a policy that combines **operational** and **vaulted** backup
 - Perform a **File-Level Recovery (FLR)** from a backup snapshot
 - Understand the difference between **LRS** and **GRS** for backup data
 - Understand **Soft Delete** for protected items (and why Azure now enforces it)
@@ -32,7 +34,7 @@ By completing this lab, you will:
 **Your Task**: Implement a multi-layered BCDR strategy:
 
 1. **Azure Backup**: Protect VMs using RSV.
-2. **Backup Vault**: Protect Blob Storage operational data.
+2. **Backup Vault**: Protect Blob Storage with operational and vaulted backups.
 3. **Site Recovery**: Enable replication to Norway East for the production server.
 
 ---
@@ -53,14 +55,15 @@ By completing this lab, you will:
 Before starting this lab:
 
 - [ ] Completed **Lab 5.1: Azure Monitor** (`platform-skycraft-swc-law` must exist - both vaults send their diagnostics to it, and `Deploy-Bicep.ps1` stops if the workspace is missing)
-- [ ] Completed **Lab 3.2: Virtual Machines** (`dev-skycraft-swc-auth-vm` in `dev-skycraft-swc-rg` is the VM the lab protects; without it the deployment script skips VM backup with a warning)
+- [ ] Completed **Lab 3.2: Virtual Machines** (`dev-skycraft-swc-auth-vm` in `dev-skycraft-swc-rg` is the VM the lab protects; without it the deployment script skips VM backup with a warning). Lab 3.2 encrypts this VM with Azure Disk Encryption, using the key vault `dev-skycraft-swc-kv` with the RBAC permission model, so Step 5.2.3 first gives Azure Backup access to that vault. `dev-skycraft-swc-world-vm` is not encrypted: Step 5.2.6 and Step 5.2.10 use it
 - [ ] Completed **Lab 4.1: Storage Accounts** with the production account (`prodskycraftswcsa` in `prod-skycraft-swc-rg` is the blob backup datasource - run 4.1 with `-All`, the dev-only cycle does not create it)
+- [ ] Completed **Lab 4.2: Blob Storage** (the containers in `prodskycraftswcsa`: vaulted blob backup needs at least one container)
 - [ ] Resource group `platform-skycraft-swc-rg` exists (Lab 1.2)
 - [ ] **Section 4 only** (portal, not automated): quota for 2 vCPUs in **Norway East** for the Site Recovery test failover
 
-The first four are what the scripts check: `scripts/Deploy-Bicep.ps1` stops on a missing resource group or workspace and only warns about the VM at step [7/7], after the deployment; `scripts/New-LabBlobBackup.ps1` stops on a missing storage account. The shortest chain that also satisfies the gates of the labs it runs is 1.2 → 2.1 → 2.3 → 3.2 (dev, needs `~/.ssh/skycraft-dev.pub`) → 4.1 `-All` → 5.1 → 5.2 (see `tools/lab-cycle-manifest.psd1`).
+The first five are what the scripts check: `scripts/Deploy-Bicep.ps1` stops on a missing resource group or workspace and only warns about the VM at step [7/7], after the deployment; `scripts/New-LabBlobBackup.ps1` stops on a missing storage account and on an account without a container. The shortest chain that also satisfies the gates of the labs it runs is 1.2 → 2.1 → 2.3 → 3.2 (dev, needs `~/.ssh/skycraft-dev.pub`) → 4.1 `-All` → 4.2 → 5.1 → 5.2 (see `tools/lab-cycle-manifest.psd1`).
 
-Both scripts also need PowerShell 7 with Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights and Az.Storage, a signed-in `Connect-AzAccount` context, permission to register the `Microsoft.RecoveryServices` and `Microsoft.DataProtection` resource providers (`Deploy-Bicep.ps1` registers them if needed), and **Owner** or **User Access Administrator** on `prodskycraftswcsa` (`New-LabBlobBackup.ps1` assigns the Backup Vault identity two roles there).
+Both scripts also need PowerShell 7 with Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights and Az.Storage, a signed-in `Connect-AzAccount` context, permission to register the `Microsoft.RecoveryServices` and `Microsoft.DataProtection` resource providers (`Deploy-Bicep.ps1` registers them if needed), and **Owner** or **User Access Administrator** on `prodskycraftswcsa` (`New-LabBlobBackup.ps1` assigns the Backup Vault identity two roles there) and on `dev-skycraft-swc-kv` (`Deploy-Bicep.ps1` assigns the Backup Management Service app a role there). To find that app, `Deploy-Bicep.ps1`, `Test-Lab.ps1` and `Remove-LabResource.ps1` need a Microsoft Graph token: if they fail with `MicrosoftGraphEndpointResourceId`, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md), or pass the app's object id with `-BackupManagementServiceObjectId` (a session that has Microsoft Graph gives it: `(Get-AzADServicePrincipal -ApplicationId 262044b1-e2ce-469f-a196-69ab7ada62d3).Id`).
 
 ---
 
@@ -157,21 +160,89 @@ Azure Backup keeps a VM's instant-restore snapshots in a resource group of their
 
 The Bicep path does the same: `bicep/main.bicep` creates the tagged group through `avm/res/resources/resource-group`, and `Deploy-Bicep.ps1` passes `-BackupSnapshotResourceGroup 'platform-skycraft-swc-rpc'` and `-BackupSnapshotResourceGroupSuffix '-rg'` to `New-AzRecoveryServicesBackupProtectionPolicy`. On a policy that already exists, it sets them with `Set-AzRecoveryServicesBackupProtectionPolicy`.
 
+#### Azure PowerShell
+
+The same group and policy from Azure Cloud Shell (PowerShell). An Enhanced policy keeps instant-restore snapshots for 7 days when it is created, so the last two commands bring that down to 2; they pass the snapshot group again so the update keeps it.
+
+```powershell
+New-AzResourceGroup -Name platform-skycraft-swc-rpc1-rg -Location swedencentral `
+  -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = '<your name>' }
+
+$vault   = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-rsv
+$runTime = [datetime]::SpecifyKind([datetime]'02:00:00', [System.DateTimeKind]::Utc)
+
+$schedule = Get-AzRecoveryServicesBackupSchedulePolicyObject -WorkloadType AzureVM -BackupManagementType AzureVM -PolicySubType Enhanced -ScheduleRunFrequency Daily
+$schedule.DailySchedule.ScheduleRunTimes.Clear()
+$schedule.DailySchedule.ScheduleRunTimes.Add($runTime)
+
+$retention = Get-AzRecoveryServicesBackupRetentionPolicyObject -WorkloadType AzureVM -BackupManagementType AzureVM -ScheduleRunFrequency Daily
+$retention.DailySchedule.DurationCountInDays = 30
+$retention.DailySchedule.RetentionTimes.Clear()
+$retention.DailySchedule.RetentionTimes.Add($runTime)
+
+New-AzRecoveryServicesBackupProtectionPolicy -Name SkyCraft-Daily-Prod -WorkloadType AzureVM -BackupManagementType AzureVM `
+  -SchedulePolicy $schedule -RetentionPolicy $retention `
+  -BackupSnapshotResourceGroup platform-skycraft-swc-rpc -BackupSnapshotResourceGroupSuffix '-rg' -VaultId $vault.ID
+
+$policy = Get-AzRecoveryServicesBackupProtectionPolicy -Name SkyCraft-Daily-Prod -VaultId $vault.ID
+$policy.SnapshotRetentionInDays = 2
+Set-AzRecoveryServicesBackupProtectionPolicy -Policy $policy `
+  -BackupSnapshotResourceGroup platform-skycraft-swc-rpc -BackupSnapshotResourceGroupSuffix '-rg' -VaultId $vault.ID
+```
+
+**Expected Result**: `platform-skycraft-swc-rpc1-rg` exists with the four SkyCraft tags and no lock, and `SkyCraft-Daily-Prod` (Enhanced) shows **Azure Backup Resource Group** `platform-skycraft-swc-rpc` / `-rg` under **Instant restore**.
+
 ---
 
 ### Step 5.2.3: Protect the Production VM
 
-1. In the vault, click **Overview** → **+ Backup**.
-2. Where is your workload running? **Azure**.
-3. What do you want to back up? **Virtual machine**.
-4. Click **Configure Backup**.
-5. Select the policy: `SkyCraft-Daily-Prod`.
-6. Select Virtual Machines: Find and select `dev-skycraft-swc-auth-vm`.
+Lab 3.2 encrypted `dev-skycraft-swc-auth-vm` with **Azure Disk Encryption (ADE)**: its disk encryption key is a secret in `dev-skycraft-swc-kv`. Azure Backup backs up that key along with the disks, and it reads the key vault as the Microsoft Entra app **Backup Management Service**, not as the Recovery Services vault's identity. For a key vault with the RBAC permission model, Microsoft Learn ([Back up and restore encrypted Azure virtual machines](https://learn.microsoft.com/azure/backup/backup-azure-vms-encryption)) has you assign that app the **Key Vault Administrator** role on the vault. Without it, **Enable Backup** fails with `400198 UserErrorKeyVaultPermissionsNotConfigured`, so step 1 comes first.
+
+> [!NOTE]
+> ADE retires in September 2028, and AZ-104 lists *Configure encryption at host for Azure virtual machines* instead. The key vault step is still worth knowing: it is what Azure Backup needs for any VM whose keys live in a key vault.
+
+1. Give Azure Backup access to the key vault:
+   1. Open `dev-skycraft-swc-kv` (resource group `dev-skycraft-swc-rg`) → **Access control (IAM)** → **+ Add** → **Add role assignment**.
+   2. Role: **Key Vault Administrator** → **Next**.
+   3. Assign access to: **User, group, or service principal** → **+ Select members** → search for `Backup Management Service` → select it → **Select**.
+   4. **Review + assign** → **Review + assign**.
+   5. Wait about two minutes for the role to take effect before step 7.
+2. In the vault, click **Overview** → **+ Backup**.
+3. Where is your workload running? **Azure**.
+4. What do you want to back up? **Virtual machine**.
+5. Click **Configure Backup**.
+6. Select the policy: `SkyCraft-Daily-Prod`. Select Virtual Machines: Find and select `dev-skycraft-swc-auth-vm`.
 7. Click **Enable Backup**.
 8. Run the first backup now instead of waiting for 02:00: **Protected items** → **Backup items** → **Azure Virtual Machine** → `dev-skycraft-swc-auth-vm` → **Backup now** → **OK**.
-9. Open **Monitoring** → **Backup jobs**. The **Take Snapshot** phase finishes within minutes, which gives Step 5.2.10 its recovery point. The job stays **In progress** until the transfer to the vault ends. A job that turns **Failed** within seconds with `UserErrorRequestDisallowedByPolicy` means a policy refused the snapshot group: see Troubleshooting, Issue 2.
+9. Open **Monitoring** → **Backup jobs**. The **Take Snapshot** phase finishes within minutes and gives the VM its first recovery point. The job stays **In progress** until the transfer to the vault ends. A job that turns **Failed** within seconds with `UserErrorRequestDisallowedByPolicy` means a policy refused the snapshot group: see Troubleshooting, Issue 2. **Enable Backup** failing with `UserErrorKeyVaultPermissionsNotConfigured` is Troubleshooting, Issue 3.
 
-`Deploy-Bicep.ps1` triggers this backup itself whenever the VM has no recovery point yet, and fails if the job fails. `Test-Lab.ps1` fails if the latest backup job of the VM failed.
+#### Azure CLI
+
+```azurecli
+KV=$(az keyvault show -g dev-skycraft-swc-rg -n dev-skycraft-swc-kv --query id -o tsv)
+# 262044b1-e2ce-469f-a196-69ab7ada62d3 is the app id of Backup Management Service in every tenant.
+az role assignment create --assignee 262044b1-e2ce-469f-a196-69ab7ada62d3 --role "Key Vault Administrator" --scope "$KV"
+
+az backup protection enable-for-vm -g platform-skycraft-swc-rg -v platform-skycraft-swc-rsv \
+  --vm $(az vm show -g dev-skycraft-swc-rg -n dev-skycraft-swc-auth-vm --query id -o tsv) --policy-name SkyCraft-Daily-Prod
+```
+
+#### Azure PowerShell
+
+```powershell
+$kv = Get-AzKeyVault -ResourceGroupName dev-skycraft-swc-rg -VaultName dev-skycraft-swc-kv
+New-AzRoleAssignment -ApplicationId 262044b1-e2ce-469f-a196-69ab7ada62d3 -RoleDefinitionName 'Key Vault Administrator' -Scope $kv.ResourceId
+
+$vault  = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-rsv
+$policy = Get-AzRecoveryServicesBackupProtectionPolicy -Name SkyCraft-Daily-Prod -VaultId $vault.ID
+Enable-AzRecoveryServicesBackupProtection -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-vm -Policy $policy -VaultId $vault.ID
+```
+
+`New-AzRoleAssignment` looks the app up in Microsoft Graph. If it fails with `MicrosoftGraphEndpointResourceId`, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md); Azure Cloud Shell has the Graph token it needs.
+
+`Deploy-Bicep.ps1` assigns the role itself when the VM is ADE-encrypted (it finds the vault from the VM's encryption settings), then enables protection, and triggers this backup whenever the VM has no recovery point yet; it fails if the job fails. `Test-Lab.ps1` checks the role assignment and fails if the latest backup job of the VM failed.
+
+**Expected Result**: `dev-skycraft-swc-kv` → **Access control (IAM)** → **Role assignments** lists **Backup Management Service** with **Key Vault Administrator**, and `dev-skycraft-swc-auth-vm` is listed under **Backup items** with a backup job **In progress** or **Completed**.
 
 > [!TIP]
 > The first backup is an **Initial Replica** (full backup). Subsequent backups are **Incrementals** (only changed blocks), making them faster and cheaper.
@@ -196,15 +267,26 @@ The Bicep path does the same: `bicep/main.bicep` creates the tagged group throug
 
 Create the blob backup **policy**, then grant the vault identity access and protect the storage account.
 
+Blob backup has two tiers, and one policy can carry both ([Overview of Azure Blob backup](https://learn.microsoft.com/azure/backup/blob-backup-overview)):
+
+| Tier | Where the backup is | Schedule | Restores to |
+| :--- | :--- | :--- | :--- |
+| **Operational** | In the source account itself (point-in-time restore, blob soft delete, versioning, change feed), nothing is copied to the vault | Continuous, none to set | The same account |
+| **Vaulted** | Copied to the Backup vault: an offsite copy that survives the account | Daily or weekly | A different account |
+
+A new policy cannot be operational only: Microsoft Learn says vaulted backup is selected by default in a new policy and cannot be turned off. SkyCraft keeps the vaulted part small: one backup a day, kept 7 days. Vaulted backup is billed, per protected instance and per GB stored in the vault (see [Azure Backup pricing](https://azure.microsoft.com/pricing/details/backup/)); the lab's containers hold little data.
+
 **a. Create the blob backup policy**
 
-1. Open `platform-skycraft-swc-bv` (your new Backup vault) → **Manage** → **Backup policies**.
-2. Create a new policy:
-   - Datasource type: **Azure Blobs**
-   - Policy name: `SkyCraft-Blob-Policy`
-   - Vault: `platform-skycraft-swc-bv`
-   - Retention: **30 days** (operational)
-3. Review and create the policy.
+1. Open `platform-skycraft-swc-bv` (your new Backup vault) → **Manage** → **Backup policies** → **+ Add**.
+2. Datasource type: **Azure Blobs (Azure Storage)** → **Continue**.
+3. **Basics**: Policy name `SkyCraft-Blob-Policy`; vault `platform-skycraft-swc-bv` → **Next**.
+4. **Schedule + retention**:
+   - **Operational backups**: checked. Edit its **Default** retention rule to **30 days**.
+   - **Vaulted backups**: checked, and greyed out: it cannot be cleared. Backup frequency **Daily**, time **3:30 AM**, timezone **(UTC) Coordinated Universal Time**. Edit its **Default** retention rule (90 days when the policy is new) to **7 days**.
+5. **Review + create** → **Create**.
+
+`Deploy-Bicep.ps1` creates the same policy through the Data Protection REST API, with the request body Microsoft Learn shows for an operational plus vaulted policy ([Create Azure Data Protection backup policies for blobs using REST API](https://learn.microsoft.com/azure/backup/backup-azure-dataprotection-use-rest-api-create-update-blob-policy)): two **Default** retention rules (`OperationalStore` 30 days, `VaultStore` 7 days) and a daily `VaultStore` backup rule. Azure does not change a blob policy in place, so a `SkyCraft-Blob-Policy` left by an earlier run of this lab, operational only, is reported as an error: see Troubleshooting, Issue 4.
 
 **b. Grant the Backup Vault identity access to the storage account**
 
@@ -229,11 +311,15 @@ Assign one role at a time. The wizard's **Review + assign** button first opens i
 1. Open `platform-skycraft-swc-bv` → **+ Backup**.
 2. Datasource type: **Azure Blobs (Azure Storage)**.
 3. Backup policy: `SkyCraft-Blob-Policy`.
-4. Select the storage account: `prodskycraftswcsa`.
-5. **Review + configure** to create the **backup instance** that protects the account.
+4. **Datasources**: select the storage account `prodskycraftswcsa`. Because the policy is vaulted too, choose which containers the vault copies: under **Selected containers**, click **Change** → **Backup all present containers** → **Select**. Do not pick **Backup all present and future containers**: Microsoft Learn says that choice is permanent. A storage account without a container cannot be configured for vaulted backup, which is why Lab 4.2 is a prerequisite.
+5. Wait until the **Backup readiness** column shows success, then open **Review + configure** and start the configuration to create the **backup instance** that protects the account.
+
+Configuring vaulted backup turns on blob versioning and the change feed in the account and adds an object replication rule there (**Data management** → **Object replication**). Operational backup adds point-in-time restore, blob soft delete and a delete lock owned by Azure Backup. Removing the backup instance removes the object replication rule again.
 
 > [!TIP]
-> The automation script `New-LabBlobBackup.ps1` performs steps **b** and **c** for you (role assignments + backup instance); the portal flow above is the manual equivalent.
+> The automation script `New-LabBlobBackup.ps1` performs steps **b** and **c** for you (role assignments + backup instance). It lists the account's containers and passes all of them to `New-AzDataProtectionBackupConfigurationClientObject -VaultedBackupContainer`; the portal flow above is the manual equivalent.
+
+**Expected Result**: `SkyCraft-Blob-Policy` lists an operational retention of 30 days and a daily vaulted backup kept 7 days, and `platform-skycraft-swc-bv` → **Backup instances** lists `prodskycraftswcsa` as **Protection configured**.
 
 ---
 
@@ -241,7 +327,12 @@ Assign one role at a time. The wizard's **Review + assign** button first opens i
 
 ### Step 5.2.6: Enable Replication
 
-1. Navigate to your VM: `dev-skycraft-swc-auth-vm`.
+Replicate `dev-skycraft-swc-world-vm`, the VM Lab 3.2 leaves unencrypted.
+
+> [!NOTE]
+> For a VM encrypted with Azure Disk Encryption, such as `dev-skycraft-swc-auth-vm`, the replication wizard asks for more ([Replicate Azure Disk Encryption-enabled virtual machines to another Azure region](https://learn.microsoft.com/azure/site-recovery/azure-to-azure-how-to-enable-replication-ade-vms)): under **Encryption settings** the wizard creates a disk encryption key vault in the target region (its name ends in `asr`) and copies the VM's keys and secrets into it, and with an RBAC key vault you, the user enabling replication, need **Key Vault Administrator** on the source vault and on the target vault. The lab skips that by replicating the unencrypted VM.
+
+1. Navigate to your VM: `dev-skycraft-swc-world-vm`.
 2. Access **Disaster recovery** in the left menu.
 3. Target region: **Norway East** (or another available European region).
 4. Click **Advanced settings** to review resources (ASR creates a cache storage account and target resources).
@@ -354,16 +445,59 @@ New-AzDiagnosticSetting -Name bv-backup-reports-diag  -ResourceId $bv.Id  -Works
 
 ### Step 5.2.10: File-Level Recovery
 
-Instead of restoring the whole VM, we can mount a specific recovery point as a drive:
+Instead of restoring the whole VM, you can mount a recovery point's disks and copy single files out of them ([Recover files from Azure virtual machine backup](https://learn.microsoft.com/azure/backup/backup-azure-restore-files-from-vm)). On a Linux VM, Azure Backup generates a Python script that connects the recovery point's disks over iSCSI and mounts their volumes under the folder you run it in; there are no drive letters.
 
-1. In the vault, go to **Protected items** → **Backup items**.
-2. Select **Azure Virtual Machine** → Click on your VM name.
-3. Click **File Recovery**.
-4. Select a Recovery Point (the one you just triggered or a recent one).
-5. Click **Download Script**.
-6. Run the script on the VM to mount the backup disk as a local volume.
+File recovery from an encrypted VM backup is not supported: for an ADE-encrypted VM, Microsoft Learn says you restore its disks and create a VM from them to get at files and folders. So this step uses `dev-skycraft-swc-world-vm`, which Lab 3.2 leaves unencrypted, and gives it a backup of its own first.
 
-**Expected Result**: You see the files from the backup point listed in a new drive letter on the VM.
+**a. Back up the World VM with a file to find**
+
+1. Open `dev-skycraft-swc-world-vm` → **Operations** → **Run command** → **RunShellScript**, paste the line below and click **Run**:
+
+   ```bash
+   echo "SkyCraft file recovery test, written $(date -u)" | sudo tee /home/azureuser/skycraft-flr-marker.txt
+   ```
+
+2. Protect the VM as in Step 5.2.3, steps 2-8: policy `SkyCraft-Daily-Prod`, virtual machine `dev-skycraft-swc-world-vm`, then **Backup now**. It is not encrypted, so it needs no key vault role.
+3. Open **Monitoring** → **Backup jobs** and the job's details, and wait until its Take Snapshot phase has completed. The snapshot recovery point is enough for file recovery.
+
+`Deploy-Bicep.ps1` protects only `dev-skycraft-swc-auth-vm`; this backup is a Portal step, and `Remove-LabResource.ps1` removes it with the vault's other backup items.
+
+**b. Download the script**
+
+1. Open `dev-skycraft-swc-world-vm` → **Backup** → **File Recovery**. The VM's entry under the vault's Backup items leads to the same pane.
+2. Under **Select restore point**, select the recovery point from part a.
+3. Click **Download Script**. The file name starts with the VM name and the region code, and ends in `.py`.
+4. Copy the password the pane shows: the script asks for it.
+
+**c. Run the script on the VM**
+
+The script needs root, Python 3 and bash, and it asks to install `open-iscsi` and `lshw` if they are missing. It reaches `download.microsoft.com` on port 443 and the Recovery Services endpoint of the vault's region (`pod01-rec2.<region code>.backup.windowsazure.com`, or the `AzureBackup` service tag) on port **3260**, outbound.
+
+1. Open an SSH session to `dev-skycraft-swc-world-vm` through Lab 2.2's Bastion (as in Step 3.2.15).
+2. Put the script on the VM under its downloaded name: create the file in the SSH session and paste the script's content into it (`nano <script name>.py`), or, with a Bastion SKU that supports the native client, copy it with `scp` through `az network bastion tunnel`.
+3. Run it as root, and enter the password when it asks:
+
+   ```bash
+   mkdir -p ~/flr && cd ~/flr
+   sudo python3 ./<script name>.py
+   ```
+
+4. The script prints `Connection succeeded!` and then the recovery point's volumes with their mount paths, for example `.../<vm name>-<time>/Volume1` (the OS disk, ext4). Volumes it cannot mount, such as the BIOS boot partition, are listed as not mountable.
+5. Browse the OS disk's volume and read the file from part a:
+
+   ```bash
+   sudo ls <Volume1 mount path>/home/azureuser/
+   sudo cat <Volume1 mount path>/home/azureuser/skycraft-flr-marker.txt
+   ```
+
+**d. Close the connection**
+
+1. In the Portal, on the **File Recovery** pane, click **Unmount Disks**.
+2. On the VM, remove the mount paths the script leaves behind: `sudo python3 ./<script name>.py clean`.
+
+An open connection makes the VM's next backup fail with `UserErrorUnableToOpenMount`, and the script's access ends by itself after 12 hours.
+
+**Expected Result**: The script lists the recovery point's volumes as mount paths under the folder it ran in, and `skycraft-flr-marker.txt` with the text from part a is in that volume's `home/azureuser` folder. After **Unmount Disks** and `clean`, the mount paths are gone.
 
 ---
 
@@ -371,9 +505,11 @@ Instead of restoring the whole VM, we can mount a specific recovery point as a d
 
 - [ ] Vault `platform-skycraft-swc-rsv` deployed and configured (LRS/GRS)
 - [ ] Backup policy `SkyCraft-Daily-Prod` created with 30-day retention, instant-restore snapshots in the tagged `platform-skycraft-swc-rpc1-rg`
+- [ ] Backup Management Service holds **Key Vault Administrator** on `dev-skycraft-swc-kv`
 - [ ] `dev-skycraft-swc-auth-vm` registered for backup
 - [ ] Initial backup job **In progress** or **Completed**, not **Failed**
-- [ ] Backup Vault `platform-skycraft-swc-bv` with `SkyCraft-Blob-Policy` protecting `prodskycraftswcsa`
+- [ ] Backup Vault `platform-skycraft-swc-bv` with `SkyCraft-Blob-Policy` (operational 30 days, vaulted daily kept 7 days) protecting `prodskycraftswcsa`
+- [ ] A file restored from a recovery point of `dev-skycraft-swc-world-vm`, and the disks unmounted
 - [ ] Diagnostic settings `rsv-backup-reports-diag` and `bv-backup-reports-diag` send backup logs to `platform-skycraft-swc-law`
 - [ ] Detailed verification performed (see checklist)
 
@@ -405,6 +541,26 @@ Instead of restoring the whole VM, we can mount a specific recovery point as a d
 3. Run **Backup now** again (Step 5.2.3, step 8).
 
 If the job still fails with the same code, the Activity Log entry names the resource that was refused and the policy assignment that refused it. Do not delete Lab 1.3's assignments: Lab 1.3's `Test-Lab.ps1` checks them.
+
+### Issue 3: Enable Backup fails with `UserErrorKeyVaultPermissionsNotConfigured`
+
+**Symptom**: **Enable Backup** for `dev-skycraft-swc-auth-vm` ends with a **ConfigureBackup** job **Failed**, error `400198 UserErrorKeyVaultPermissionsNotConfigured`: *Azure Backup Service does not have sufficient permissions to Key Vault for Backup of Encrypted Virtual Machines*. `Deploy-Bicep.ps1` prints the same message at step [7/7].
+
+**Root Cause**: Lab 3.2 encrypted the VM with Azure Disk Encryption, and its key vault `dev-skycraft-swc-kv` uses the RBAC permission model. Azure Backup reads the vault as the Backup Management Service app, which holds no role there. A role on the Recovery Services vault's own identity does not help: Microsoft Learn says VM backup uses the Backup Management Service app, not the vault's managed identity.
+
+**Solution**:
+
+1. Assign **Backup Management Service** the **Key Vault Administrator** role on `dev-skycraft-swc-kv` (Step 5.2.3, step 1), or re-run `Deploy-Bicep.ps1`, which assigns it.
+2. Wait about two minutes, then **Enable Backup** again. A role assigned seconds before can still fail the same way: wait a few more minutes and retry.
+3. If `Deploy-Bicep.ps1` cannot find the app (`MicrosoftGraphEndpointResourceId`), see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md), or pass `-BackupManagementServiceObjectId` (Prerequisites).
+
+### Issue 4: `Deploy-Bicep.ps1` reports `SkyCraft-Blob-Policy` as operational only
+
+**Symptom**: Step [6/7] prints `[ERROR] Policy 'SkyCraft-Blob-Policy' exists but is operational only`, and `Test-Lab.ps1` fails **Blob policy takes a daily vaulted backup, kept 7 days in the vault**.
+
+**Root Cause**: An earlier version of this lab created an operational-only blob policy. Azure keeps existing policies working, but a new policy is always operational plus vaulted (Step 5.2.5), and Azure does not update a blob policy in place.
+
+**Solution**: Run `Remove-LabResource.ps1` and deploy again, or delete the blob backup instance of `prodskycraftswcsa` and then the policy (**Backup policies** → `SkyCraft-Blob-Policy` → **Delete**), re-run `Deploy-Bicep.ps1` and then `New-LabBlobBackup.ps1`.
 
 ---
 

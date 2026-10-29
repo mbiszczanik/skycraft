@@ -624,14 +624,17 @@ Describe 'SkyCraft PowerShell - Exit-Lab tells the entry point of a pwsh -File p
         $result | Should -Be $expected
     }
 
-    It 'exports Exit-Lab, the role assignment helpers of #397 the budget helpers of #411, Import-LabModule (#375), Write-LabDeploymentOutput (#354), the name check of #438 and the DNS link helpers of #444, and nothing else yet' {
+    It 'exports Exit-Lab, the role assignment helpers of #397 the budget helpers of #411, Import-LabModule (#375), Write-LabDeploymentOutput (#354), the name check of #438 and the DNS link helpers of #444, the ADE backup helpers of #368, and nothing else yet' {
         # The helpers have their own suites, tests/LabCommon-RoleAssignment.Tests.ps1,
         # tests/LabCommon-Budget.Tests.ps1, tests/LabCommon-DeploymentOutput.Tests.ps1,
-        # tests/LabCommon-GlobalName.Tests.ps1 and tests/LabCommon-DnsLink.Tests.ps1.
+        # tests/LabCommon-GlobalName.Tests.ps1, tests/LabCommon-DnsLink.Tests.ps1 and
+        # tests/LabCommon-BackupKeyVault.Tests.ps1.
         @($script:LabCommon.ExportedFunctions.Keys | Sort-Object) | Should -Be @(
             'Exit-Lab'
+            'Get-LabAdeKeyVaultId'
             'Get-LabArmBudget'
             'Get-LabArmRoleAssignment'
+            'Get-LabBackupManagementServiceId'
             'Get-LabBuiltInRoleId'
             'Get-LabDnsLink'
             'Get-LabGraphSignInHint'

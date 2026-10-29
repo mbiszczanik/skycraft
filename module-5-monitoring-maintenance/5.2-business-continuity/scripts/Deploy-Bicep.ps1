@@ -13,8 +13,15 @@
       Azure Backup does not create an untagged AzureBackupRG_* group that Lab 1.3's
       Require-Environment-Tag-RG policy denies (issue #184)
     - Backup Vault (platform-skycraft-swc-bv) with LRS and system-assigned identity
-    - Blob Backup Policy (SkyCraft-Blob-Policy): 30-day operational retention
+    - Blob Backup Policy (SkyCraft-Blob-Policy): 30-day operational retention plus a daily
+      vaulted backup kept 7 days. Azure no longer creates an operational-only blob policy
+      (issue #306), so the policy carries both, as Microsoft Learn's REST example does.
     - Diagnostic settings for both vaults -> Log Analytics Workspace
+    - When dev-skycraft-swc-auth-vm is encrypted with Azure Disk Encryption (Lab 3.2), the
+      Key Vault Administrator role for the Microsoft Entra app Backup Management Service on
+      the VM's key vault, before backup is enabled (issue #368). Without it Enable backup
+      fails with 400198 UserErrorKeyVaultPermissionsNotConfigured. Finding the app needs
+      Microsoft Graph unless -BackupManagementServiceObjectId is given.
     - VM backup protection enabled on dev-skycraft-swc-auth-vm (when present), plus an
       on-demand backup whenever the VM has no recovery point yet. A backup job that fails
       within the first minutes counts as a deployment failure.
@@ -33,6 +40,11 @@
 .PARAMETER Force
     Skip the confirmation prompt for non-interactive execution (master-lab-cycle.ps1 passes this).
 
+.PARAMETER BackupManagementServiceObjectId
+    Object id of the Backup Management Service app in this tenant, for a sign-in that cannot
+    get a Microsoft Graph token. In Azure Cloud Shell:
+    (Get-AzADServicePrincipal -ApplicationId 262044b1-e2ce-469f-a196-69ab7ada62d3).Id
+
 .EXAMPLE
     .\Deploy-Bicep.ps1
 
@@ -45,8 +57,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.1.0
-    Date: 2026-10-06
+    Version: 1.2.0
+    Date: 2026-10-28
 #>
 
 #Requires -Version 7.0
@@ -58,7 +70,11 @@ param(
     [switch]$WhatIf,
 
     [Parameter()]
-    [switch]$Force
+    [switch]$Force,
+
+    [Parameter()]
+    [ValidatePattern('^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$')]
+    [string]$BackupManagementServiceObjectId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -73,6 +89,105 @@ $workspaceName  = 'platform-skycraft-swc-law'
 $vmName         = 'dev-skycraft-swc-auth-vm'
 $vmRg           = 'dev-skycraft-swc-rg'
 $deploymentName = "lab52-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+$blobPolicyName = 'SkyCraft-Blob-Policy'
+$dataProtectionApiVersion = '2024-04-01'
+# Observed 2026-10-16: the new role took effect within two minutes (#368).
+$keyVaultRoleWaitSeconds = 120
+
+# The blob backup policy body, operational plus vaulted, in the shape of Microsoft Learn's REST
+# example ("Create Azure Data Protection backup policies for blobs using REST API"): two Default
+# retention rules, OperationalStore and VaultStore, and a daily VaultStore backup rule. The
+# Az.DataProtection client objects hold one Default rule only, so the body is sent as JSON.
+function Get-LabBlobPolicyBody {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter()] [int]$OperationalRetentionDays = 30,
+        [Parameter()] [int]$VaultRetentionDays = 7,
+        [Parameter()] [string]$DailyRunTimeUtc = '03:30:00'
+    )
+
+    $retention = {
+        param([string]$DataStore, [int]$Days)
+        [ordered]@{
+            name       = 'Default'
+            objectType = 'AzureRetentionRule'
+            isDefault  = $true
+            lifecycles = @(
+                [ordered]@{
+                    deleteAfter                 = [ordered]@{ duration = "P$($Days)D"; objectType = 'AbsoluteDeleteOption' }
+                    sourceDataStore             = [ordered]@{ dataStoreType = $DataStore; objectType = 'DataStoreInfoBase' }
+                    targetDataStoreCopySettings = @()
+                }
+            )
+        }
+    }
+    $backupRule = [ordered]@{
+        name             = 'BackupDaily'
+        objectType       = 'AzureBackupRule'
+        backupParameters = [ordered]@{ backupType = 'Discrete'; objectType = 'AzureBackupParams' }
+        dataStore        = [ordered]@{ dataStoreType = 'VaultStore'; objectType = 'DataStoreInfoBase' }
+        trigger          = [ordered]@{
+            objectType      = 'ScheduleBasedTriggerContext'
+            # A date and a time: Learn says the service takes no time without a date.
+            schedule        = [ordered]@{ timeZone = 'UTC'; repeatingTimeIntervals = @("R/2026-01-01T$($DailyRunTimeUtc)+00:00/P1D") }
+            taggingCriteria = @(
+                [ordered]@{ isDefault = $true; taggingPriority = 99; tagInfo = [ordered]@{ id = 'Default_'; tagName = 'Default' } }
+            )
+        }
+    }
+    $body = [ordered]@{
+        properties = [ordered]@{
+            datasourceTypes = @('Microsoft.Storage/storageAccounts/blobServices')
+            objectType      = 'BackupPolicy'
+            policyRules     = @(
+                (& $retention 'OperationalStore' $OperationalRetentionDays)
+                (& $retention 'VaultStore' $VaultRetentionDays)
+                $backupRule
+            )
+        }
+    }
+    $body | ConvertTo-Json -Depth 20 -Compress
+}
+
+# Whether a blob policy as ARM returns it backs up to the vault: a VaultStore backup rule and a
+# VaultStore retention lifecycle. An operational-only policy from before issue #306 has neither.
+function Test-LabBlobPolicyVaulted {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)] [object]$Policy)
+
+    $rules = @($Policy.properties.policyRules)
+    $backupRules = @($rules | Where-Object { $_.objectType -eq 'AzureBackupRule' -and $_.dataStore.dataStoreType -eq 'VaultStore' })
+    $vaultLifecycles = @($rules | Where-Object { $_.objectType -eq 'AzureRetentionRule' } |
+            ForEach-Object { @($_.lifecycles) } | Where-Object { $_.sourceDataStore.dataStoreType -eq 'VaultStore' })
+    $backupRules.Count -gt 0 -and $vaultLifecycles.Count -gt 0
+}
+
+# Grants Backup Management Service the Key Vault Administrator role on one key vault: the role
+# Microsoft Learn names for backing up ADE VMs with an RBAC key vault ("Back up and restore
+# encrypted Azure virtual machines", "Back up ADE-encrypted VMs with RBAC-enabled key vaults").
+# A role held on the vault or above it counts. Returns 'Held' or 'Created'; a failed read or
+# create throws.
+function Grant-LabBackupKeyVaultRole {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [string]$KeyVaultId,
+        [Parameter(Mandatory)] [string]$PrincipalId
+    )
+
+    $roleId = Get-LabBuiltInRoleId -Name 'Key Vault Administrator'
+    $held = @(Get-LabArmRoleAssignment -Scope $KeyVaultId -PrincipalId $PrincipalId | Where-Object {
+            $_.RoleDefinitionId -eq $roleId -and (
+                $_.Scope -eq $KeyVaultId -or $KeyVaultId -like "$($_.Scope)/*" -or $_.Scope -eq '/' -or
+                $_.Scope -like '/providers/Microsoft.Management/managementGroups/*')
+        })
+    if ($held.Count -gt 0) { return 'Held' }
+    # ServicePrincipal: ARM skips its directory check of the principal.
+    New-LabArmRoleAssignment -Scope $KeyVaultId -RoleDefinitionId $roleId -PrincipalId $PrincipalId -PrincipalType 'ServicePrincipal' | Out-Null
+    'Created'
+}
 
 # Counts lab resources that were meant to be created but were not. A step that only warns
 # and lets the script exit 0 lets an orchestrated cycle record a half-built lab as a success.
@@ -315,43 +430,38 @@ if ($WhatIf) {
     }
 
     # ── Create Blob Backup Policy (idempotent) ────────────────────────────
-    $existingBlobPolicy = Get-AzDataProtectionBackupPolicy `
-        -ResourceGroupName $platformRg `
-        -VaultName 'platform-skycraft-swc-bv' `
-        -Name 'SkyCraft-Blob-Policy' `
-        -ErrorAction SilentlyContinue
+    # Microsoft Learn ("Overview of Azure Blob backup"): a new blob policy cannot be operational
+    # only; vaulted backup is part of it and cannot be turned off (#306). Read and written through
+    # ARM, so the stored rules are what is checked and a failed read is not "absent".
+    $blobPolicyPath = "$($deployment.Outputs['outBvId'].Value)/backupPolicies/$($blobPolicyName)?api-version=$dataProtectionApiVersion"
+    $existingBlobPolicy = $null
+    $blobPolicyReadFailed = $false
+    try {
+        $existingBlobPolicy = Invoke-LabArmRequest -Method GET -Path $blobPolicyPath
+    } catch {
+        if ($_.Exception.Data['StatusCode'] -ne 404) {
+            $blobPolicyReadFailed = $true
+            $script:deployFailures++
+            Write-Host "  [ERROR] Could not read policy '$blobPolicyName': $_" -ForegroundColor Red
+        }
+    }
 
-    if ($existingBlobPolicy) {
-        Write-Host "  ✓ Policy 'SkyCraft-Blob-Policy' already exists in Backup Vault" -ForegroundColor Green
+    if ($blobPolicyReadFailed) {
+        Write-Host "    The policy was not created or checked; re-run this script." -ForegroundColor Gray
+    } elseif ($existingBlobPolicy -and (Test-LabBlobPolicyVaulted -Policy $existingBlobPolicy)) {
+        Write-Host "  ✓ Policy '$blobPolicyName' already exists in Backup Vault (operational + vaulted)" -ForegroundColor Green
+    } elseif ($existingBlobPolicy) {
+        # Azure does not update a blob policy in place, and a policy in use cannot be deleted.
+        $script:deployFailures++
+        Write-Host "  [ERROR] Policy '$blobPolicyName' exists but is operational only (created before issue #306)." -ForegroundColor Red
+        Write-Host "    Azure no longer creates such a policy, and New-LabBlobBackup.ps1 now configures vaulted" -ForegroundColor Gray
+        Write-Host "    backup. Run Remove-LabResource.ps1 for a clean rebuild, or delete the blob backup" -ForegroundColor Gray
+        Write-Host "    instance and the policy, then re-run this script." -ForegroundColor Gray
     } else {
-        Write-Host "  Creating 'SkyCraft-Blob-Policy' blob backup policy (30-day operational retention)..." -ForegroundColor Gray
+        Write-Host "  Creating '$blobPolicyName' blob backup policy (operational 30 days, vaulted daily kept 7 days)..." -ForegroundColor Gray
         try {
-            $blobPolicyTemplate = Get-AzDataProtectionPolicyTemplate -DatasourceType AzureBlob
-            # Override the template default: set operational (continuous) retention to 30 days
-            $blobLifecycle = New-AzDataProtectionRetentionLifeCycleClientObject `
-                -SourceDataStore OperationalStore `
-                -SourceRetentionDurationType Days `
-                -SourceRetentionDurationCount 30
-            $blobPolicyTemplate = Edit-AzDataProtectionPolicyRetentionRuleClientObject `
-                -Policy $blobPolicyTemplate `
-                -Name Default `
-                -LifeCycles $blobLifecycle `
-                -IsDefault $true
-            # Current Az.DataProtection templates ship a vaulted 'BackupWeekly' AzureBackupRule
-            # alongside the retention rule. This lab wants operational (continuous) backup only,
-            # so the backup rule is dropped - leaving it in stores a policy whose backup rule
-            # writes to VaultStore while its only retention lifecycle targets OperationalStore,
-            # and Azure then rejects every backup instance built from it with
-            # 'UserErrorInvalidRequestParameter: Parameter NO_PARAM in request is invalid'.
-            $blobPolicyTemplate.PolicyRule = @(
-                $blobPolicyTemplate.PolicyRule | Where-Object { $_.ObjectType -ne 'AzureBackupRule' }
-            )
-            New-AzDataProtectionBackupPolicy `
-                -ResourceGroupName $platformRg `
-                -VaultName 'platform-skycraft-swc-bv' `
-                -Name 'SkyCraft-Blob-Policy' `
-                -Policy $blobPolicyTemplate | Out-Null
-            Write-Host "  ✓ Policy 'SkyCraft-Blob-Policy' created (30-day retention)" -ForegroundColor Green
+            Invoke-LabArmRequest -Method PUT -Path $blobPolicyPath -Payload (Get-LabBlobPolicyBody) | Out-Null
+            Write-Host "  ✓ Policy '$blobPolicyName' created (operational 30 days; vaulted daily 03:30 UTC, kept 7 days)" -ForegroundColor Green
         } catch {
             $script:deployFailures++
             Write-Host "  [ERROR] Failed to create Blob policy: $_" -ForegroundColor Red
@@ -362,6 +472,58 @@ if ($WhatIf) {
     # The automated cycle deploys a standalone dev VM only; no prod VM exists.
     # If the dev VM is absent (Lab 3.2 not run), WARN and skip — do not fail.
     Write-Host "`n[7/7] Ensuring VM backup protection for $vmName..." -ForegroundColor Yellow
+    $vm = Get-AzVM -Name $vmName -ResourceGroupName $vmRg -ErrorAction SilentlyContinue
+    # Set when Azure Backup may lack access to the VM's key vault: enabling or running a backup
+    # would only fail with 400198 UserErrorKeyVaultPermissionsNotConfigured.
+    $vmBackupBlocked = $false
+
+    # Azure Backup reads an ADE VM's key vault as the Backup Management Service app, not as the
+    # vault's identity, and needs the role before Enable backup (#368). Lab 3.2 stays unchanged.
+    if ($vm) {
+        $keyVaultIds = @()
+        try {
+            $keyVaultIds = @(Get-LabAdeKeyVaultId -ResourceGroupName $vmRg -VMName $vmName)
+        } catch {
+            $vmBackupBlocked = $true
+            $script:deployFailures++
+            Write-Host "  [ERROR] Could not read the disk encryption of ${vmName}: $_" -ForegroundColor Red
+        }
+        if ($keyVaultIds.Count -eq 0 -and -not $vmBackupBlocked) {
+            Write-Host "  ✓ $vmName is not encrypted with Azure Disk Encryption - no key vault role needed" -ForegroundColor Green
+        } elseif ($keyVaultIds.Count -gt 0) {
+            $backupServiceId = $null
+            try {
+                $backupServiceId = Get-LabBackupManagementServiceId -ObjectId $BackupManagementServiceObjectId
+            } catch {
+                $vmBackupBlocked = $true
+                $script:deployFailures++
+                Write-Host "  [ERROR] $_" -ForegroundColor Red
+            }
+            $roleCreated = $false
+            foreach ($keyVaultId in @(if ($backupServiceId) { $keyVaultIds })) {
+                $keyVaultName = ($keyVaultId -split '/')[-1]
+                try {
+                    $outcome = Grant-LabBackupKeyVaultRole -KeyVaultId $keyVaultId -PrincipalId $backupServiceId
+                    if ($outcome -eq 'Created') {
+                        $roleCreated = $true
+                        Write-Host "  ✓ Backup Management Service granted Key Vault Administrator on $keyVaultName" -ForegroundColor Green
+                    } else {
+                        Write-Host "  ✓ Backup Management Service already holds Key Vault Administrator on $keyVaultName" -ForegroundColor Green
+                    }
+                } catch {
+                    $vmBackupBlocked = $true
+                    $script:deployFailures++
+                    Write-Host "  [ERROR] Could not grant Backup Management Service Key Vault Administrator on ${keyVaultName}: $_" -ForegroundColor Red
+                    Write-Host "    Assigning a role needs Owner, User Access Administrator or Role Based Access Control Administrator on the key vault." -ForegroundColor Gray
+                }
+            }
+            if ($roleCreated -and -not $vmBackupBlocked) {
+                Write-Host "  Waiting $keyVaultRoleWaitSeconds seconds for the role to take effect..." -ForegroundColor Gray
+                Start-Sleep -Seconds $keyVaultRoleWaitSeconds
+            }
+        }
+    }
+
     $vmItems = Get-AzRecoveryServicesBackupItem `
         -VaultId $vault.ID `
         -BackupManagementType AzureVM `
@@ -374,11 +536,13 @@ if ($WhatIf) {
         $_.FriendlyName -eq $vmName -or ($_.ContainerName -split ';')[-1] -eq $vmName
     }
 
-    if ($vmItem) {
+    if ($vmBackupBlocked) {
+        Write-Host "  [SKIP] VM backup not enabled or run: Azure Backup may not be able to read the key vault of $vmName (see the [ERROR] above)." -ForegroundColor Yellow
+        $vmItem = $null
+    } elseif ($vmItem) {
         Write-Host "  ✓ $vmName is already protected (policy: $($vmItem.ProtectionPolicyName))" -ForegroundColor Green
     } else {
         Write-Host "  Enabling backup protection for $vmName..." -ForegroundColor Gray
-        $vm = Get-AzVM -Name $vmName -ResourceGroupName $vmRg -ErrorAction SilentlyContinue
         if (-not $vm) {
             Write-Host "  [WARNING] VM '$vmName' not found in '$vmRg'. Skipping VM-backup steps." -ForegroundColor Yellow
             Write-Host "  Complete Lab 3.2 (dev VM) first and re-run this script if VM backup is required." -ForegroundColor Yellow
@@ -403,6 +567,8 @@ if ($WhatIf) {
                 Write-Host "  [ERROR] Could not enable VM backup: $_" -ForegroundColor Red
                 Write-Host "    If this is UserErrorThisVMBackupIsSupportedUsingEnhancedPolicy, the vault still" -ForegroundColor Gray
                 Write-Host "    holds a Standard 'SkyCraft-Daily-Prod' from an earlier run - see step [6/7]." -ForegroundColor Gray
+                Write-Host "    If this is UserErrorKeyVaultPermissionsNotConfigured, the key vault role above has not" -ForegroundColor Gray
+                Write-Host "    taken effect yet: wait a few minutes and re-run (lab-guide-5.2.md, Troubleshooting, Issue 3)." -ForegroundColor Gray
                 Write-Host "    Enable manually: Enable-AzRecoveryServicesBackupProtection (Step 5.2.3)" -ForegroundColor Gray
             }
         }
@@ -473,7 +639,7 @@ if ($WhatIf) {
             Write-Host "  [ERROR] Could not run the initial backup of ${vmName}: $_" -ForegroundColor Red
             Write-Host "    Trigger it manually: vault -> Backup items -> Azure Virtual Machine -> Backup now (Step 5.2.3)" -ForegroundColor Gray
         }
-    } elseif ($vm) {
+    } elseif ($vm -and -not $vmBackupBlocked) {
         # Protection was just enabled, but the vault does not list the item yet.
         Write-Host "  [WARNING] $vmName is protected but not listed as a backup item yet - no initial backup was triggered." -ForegroundColor Yellow
         Write-Host "    Re-run this script in a few minutes, or use Backup now (Step 5.2.3)." -ForegroundColor Gray
