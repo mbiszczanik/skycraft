@@ -353,13 +353,18 @@
             PostDeploy   = @{ Script = 'New-LabBlobBackup.ps1'; Arguments = @{} }
             Test         = @{}
             DependsOn    = @('4.1', '5.1')
-            TimeoutMs    = 1800000
+            # 90 minutes: the deploy waits for Site Recovery's initial replication of the world VM
+            # (about 45 minutes live on 2026-10-17, #366) on top of the 12.5 minutes it took before.
+            TimeoutMs    = 5400000
             StdinAnswers = $null
             Excluded     = $null
             # gate: verified - exits 1 on a missing platform resource group, a missing 5.1
             # workspace or a missing 5.1 action group (skycraft-ops-ag); its PostDeploy
             # New-LabBlobBackup.ps1 creates SkyCraft-Blob-Policy and exits 1 on a missing 4.1
             # prodskycraftswcsa (needs 4.1 -All). Its VM and key vault checks only warn.
+            #
+            # The deploy also runs Enable-SiteRecovery.ps1 for the unencrypted world VM (replication
+            # to North Europe, Test-Lab checks it Protected), and the teardown disables it.
             #
             # Lab 3.2 leaves the auth VM ADE-encrypted; the deploy grants Backup Management
             # Service Key Vault Administrator on the 3.2 vault before it enables backup (#368).
