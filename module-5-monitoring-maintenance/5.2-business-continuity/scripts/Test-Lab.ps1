@@ -30,8 +30,12 @@
     soft-delete state, datasource type, retention) use Get-AzResource against the
     raw ARM body for reliability.
 
-    Note: Azure Site Recovery replication status must be verified manually
-    in the Azure Portal (the ASR replication flow is portal-only per Step 5.2.6).
+    - Azure Site Recovery (Step 5.2.6, issue #366), checked with the world VM: the target group
+      platform-skycraft-neu-asr-rg exists in North Europe with the four SkyCraft tags (Lab 1.3
+      denies what Site Recovery creates in an untagged group), holds a Recovery Services vault,
+      and that vault has a replication item for dev-skycraft-swc-world-vm that reads Protected
+      with health Normal. A lookup that fails is a FAIL, never a skip. The test failover of
+      Step 5.2.7 is cleaned up by its own step and is not checked here.
 
 .EXAMPLE
     .\Test-Lab.ps1
@@ -39,8 +43,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.2.0
-    Date: 2026-10-28
+    Version: 1.3.0
+    Date: 2026-10-29
 #>
 
 #Requires -Version 7.0
@@ -64,6 +68,11 @@ $vmRg           = 'dev-skycraft-swc-rg'
 $storageAccount = 'prodskycraftswcsa'
 $keyVaultName   = 'dev-skycraft-swc-kv'
 $aprName        = 'skycraft-backup-critical-apr'
+# Azure Site Recovery target (Step 5.2.6): main.bicep creates the group and vault, or the learner does.
+$asrVm          = 'dev-skycraft-swc-world-vm'
+$asrRgName      = 'platform-skycraft-neu-asr-rg'
+$asrLocation    = 'northeurope'
+$asrTags        = @('Project', 'Environment', 'CostCenter', 'Owner')
 $actionGroupName = 'skycraft-ops-ag'
 # Built-in ids, the same in every tenant: the Backup Management Service app and Key Vault Administrator.
 $backupManagementServiceAppId = '262044b1-e2ce-469f-a196-69ab7ada62d3'
@@ -537,6 +546,82 @@ Invoke-Test "Alert processing rule filters on Critical (Sev0) alerts" {
 }
 
 # ============================================================================
+# Azure Site Recovery Tests (Step 5.2.6)
+# ============================================================================
+Write-Host ""
+Write-Host "[Azure Site Recovery]" -ForegroundColor Yellow
+
+$asrRg = Get-AzResourceGroup -Name $asrRgName -ErrorAction SilentlyContinue
+
+Invoke-Test "Target group '$asrRgName' exists in North Europe" {
+    return ($null -ne $asrRg -and $asrRg.Location -eq $asrLocation)
+}
+
+Invoke-Test "Target group carries the tags $($asrTags -join ', ')" {
+    if (-not $asrRg) { return $false }
+    $missing = @($asrTags | Where-Object { -not $asrRg.Tags -or -not $asrRg.Tags.ContainsKey($_) -or -not $asrRg.Tags[$_] })
+    if ($missing.Count -gt 0) {
+        Write-Host " (missing: $($missing -join ', ') - Lab 1.3 denies what Site Recovery creates in an untagged group)" -NoNewline -ForegroundColor Gray
+    }
+    return ($missing.Count -eq 0)
+}
+
+# The vaults of the target group: main.bicep makes one, the Portal wizard may make its own.
+$asrVaults = @()
+$asrItem = $null
+$asrLookupError = $null
+if ($asrRg) {
+    try {
+        $asrVaults = @(Get-AzRecoveryServicesVault -ResourceGroupName $asrRgName -ErrorAction Stop)
+        foreach ($vault in $asrVaults) {
+            if ($asrItem) { break }
+            Set-AzRecoveryServicesAsrVaultContext -Vault $vault | Out-Null
+            foreach ($fabric in @(Get-AzRecoveryServicesAsrFabric -ErrorAction Stop)) {
+                foreach ($container in @(Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric -ErrorAction Stop)) {
+                    if (-not $asrItem) {
+                        $asrItem = Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $container -ErrorAction Stop |
+                            Where-Object { $_.FriendlyName -eq $asrVm } | Select-Object -First 1
+                    }
+                }
+            }
+        }
+    } catch {
+        $asrLookupError = $_.Exception.Message
+    }
+}
+
+Invoke-Test "Target group holds a Recovery Services vault" {
+    if ($asrLookupError) { Write-Host " (lookup failed: $asrLookupError)" -NoNewline -ForegroundColor Gray }
+    return ($asrVaults.Count -gt 0)
+}
+
+# A VM never deployed (Lab 3.2 skipped) has nothing to replicate: a WARN and a skip, as for its backup.
+if (-not (Get-AzVM -Name $asrVm -ResourceGroupName $vmRg -ErrorAction SilentlyContinue)) {
+    Write-Host "  [WARNING] VM '$asrVm' not found in '$vmRg' - skipping its replication checks (not counted as failures)." -ForegroundColor Yellow
+} else {
+    Invoke-Test "'$asrVm' has a replication item in the vault" {
+        if ($asrLookupError) { Write-Host " (lookup failed: $asrLookupError)" -NoNewline -ForegroundColor Gray }
+        return ($null -ne $asrItem)
+    }
+
+    Invoke-Test "Replication of '$asrVm' is Protected" {
+        if (-not $asrItem) { return $false }
+        if ($asrItem.ProtectionState -ne 'Protected') {
+            Write-Host " (state is '$($asrItem.ProtectionState)' - the initial replication takes about 45 minutes; Lab 5.2 Troubleshooting Issue 7)" -NoNewline -ForegroundColor Gray
+        }
+        return ($asrItem.ProtectionState -eq 'Protected')
+    }
+
+    Invoke-Test "Replication health of '$asrVm' is Normal" {
+        if (-not $asrItem) { return $false }
+        if ($asrItem.ReplicationHealth -ne 'Normal') {
+            Write-Host " (health is '$($asrItem.ReplicationHealth)')" -NoNewline -ForegroundColor Gray
+        }
+        return ($asrItem.ReplicationHealth -eq 'Normal')
+    }
+}
+
+# ============================================================================
 # Summary
 # ============================================================================
 Write-Host ""
@@ -551,8 +636,4 @@ if ($failCount -gt 0) {
 }
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Note: Azure Site Recovery (ASR) replication and test failover" -ForegroundColor Gray
-Write-Host "  must be verified manually in the Azure Portal (Steps 5.2.6-5.2.7)." -ForegroundColor Gray
-Write-Host ""
-
 Exit-Lab -FailureCount $failCount

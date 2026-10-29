@@ -112,8 +112,8 @@
     },
     {
       "type": "text", "id": "c2d", "x": 300, "y": 176, "width": 270, "height": 55,
-      "text": "platform-...-swc-rsv  VMs\nplatform-...-swc-bv   blobs\nasr-skycraft-ne-rsv\nsecondary: Norway East",
-      "originalText": "platform-...-swc-rsv  VMs\nplatform-...-swc-bv   blobs\nasr-skycraft-ne-rsv\nsecondary: Norway East",
+      "text": "platform-...-swc-rsv  VMs\nplatform-...-swc-bv   blobs\n...-neu-asr-rsv\nsecondary: North Europe",
+      "originalText": "platform-...-swc-rsv  VMs\nplatform-...-swc-bv   blobs\n...-neu-asr-rsv\nsecondary: North Europe",
       "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
@@ -236,8 +236,8 @@
     },
     {
       "type": "text", "id": "l2", "x": 86, "y": 396, "width": 740, "height": 15,
-      "text": "5.2  continuity — VM backup, blob backup, file-level restore, ASR to Norway East",
-      "originalText": "5.2  continuity — VM backup, blob backup, file-level restore, ASR to Norway East",
+      "text": "5.2  continuity - VM backup, blob backup, file-level restore, ASR to North Europe",
+      "originalText": "5.2  continuity - VM backup, blob backup, file-level restore, ASR to North Europe",
       "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
@@ -285,8 +285,8 @@
     },
     {
       "type": "text", "id": "ev_t", "x": 36, "y": 522, "width": 780, "height": 83,
-      "text": "5.1  needs the dev VMs from Lab 3.2\n5.2  needs quota for 2 vCPUs in Norway East before ASR will replicate\n5.3  needs platformskycraftswcsa from Lab 4.1 to hold the flow logs\n\n# monitoring is the last module because it can only watch what already exists",
-      "originalText": "5.1  needs the dev VMs from Lab 3.2\n5.2  needs quota for 2 vCPUs in Norway East before ASR will replicate\n5.3  needs platformskycraftswcsa from Lab 4.1 to hold the flow logs\n\n# monitoring is the last module because it can only watch what already exists",
+      "text": "5.1  needs the dev VMs from Lab 3.2\n5.2  needs quota for 2 vCPUs in North Europe before ASR will replicate\n5.3  needs platformskycraftswcsa from Lab 4.1 to hold the flow logs\n\n# monitoring is the last module because it can only watch what already exists",
+      "originalText": "5.1  needs the dev VMs from Lab 3.2\n5.2  needs quota for 2 vCPUs in North Europe before ASR will replicate\n5.3  needs platformskycraftswcsa from Lab 4.1 to hold the flow logs\n\n# monitoring is the last module because it can only watch what already exists",
       "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#166534", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,

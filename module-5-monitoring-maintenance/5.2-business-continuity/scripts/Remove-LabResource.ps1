@@ -17,6 +17,10 @@
        resource groups that held them, once those groups are empty. Only a policy created
        before issue #184 leaves these behind.
     8. The alert processing rule skycraft-backup-critical-apr (Step 5.2.9, issue #366).
+    9. Azure Site Recovery (Step 5.2.6, issue #366): the replication of the world VM is disabled,
+       a test failover left uncleaned is cleaned up first, and then the target group
+       platform-skycraft-neu-asr-rg is deleted with the vault, cache storage account, target VNet
+       and replica disks in it.
 
     Notes:
     - The role assignments are removed before the Backup Vault so its managed
@@ -25,9 +29,10 @@
       read and removed through the Azure Resource Manager role assignments API
       (tools/LabCommon.psm1), so the cleanup needs no Microsoft Graph sign-in
       (issue #397).
-    - Azure Site Recovery resources (ASR fabric, replication, cache storage
-      account) must be cleaned up manually via the Azure Portal before
-      deleting the Recovery Services Vault.
+    - The Site Recovery replication is disabled before its target group is deleted: a vault
+      that still holds a replication item cannot be deleted. Disabling it also removes the
+      Mobility service extension from the VM. A replication item that could not be looked up or
+      disabled keeps the group in place, so a rerun finds it.
     - VMs and Storage Accounts from earlier labs are NOT removed by this script.
     - The Key Vault Administrator role of the Backup Management Service app on Lab 3.2's
       dev-skycraft-swc-kv stays: finding that app needs Microsoft Graph (issue #397). Remove it
@@ -68,8 +73,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.4.0
-    Date: 2026-10-28
+    Version: 1.5.0
+    Date: 2026-10-29
 #>
 
 #Requires -Version 7.0
@@ -94,6 +99,9 @@ $bvName         = 'platform-skycraft-swc-bv'
 $storageAccount = 'prodskycraftswcsa'
 $location       = 'swedencentral'
 $aprName        = 'skycraft-backup-critical-apr'
+# Azure Site Recovery target (main.bicep or Step 5.2.6): everything it needs lives in this group.
+$asrRgName      = 'platform-skycraft-neu-asr-rg'
+$asrVaultName   = 'platform-skycraft-neu-asr-rsv'
 # Azure Backup names the snapshot group <prefix><n><suffix>; main.bicep creates n = 1, and the
 # service adds n = 2, 3, ... only when one group fills up. The pattern covers all of them.
 $snapshotRgPattern = 'platform-skycraft-swc-rpc*-rg'
@@ -112,6 +120,10 @@ $script:protectionStillOn = $false
 # (step 3). Deleting it takes its identity along, and an assignment left on the storage account
 # would be orphaned for good: a rerun finds no vault and exits 0.
 $script:backupVaultMustStay = $false
+# Set when the Site Recovery vault or its replication items could not be looked up, or a
+# replication could not be disabled; the target group must then survive (step 10): deleting it
+# would fail on the vault, or hide an item that is still billing.
+$script:asrGroupMustStay = $false
 
 # Roles granted to the Backup Vault identity by New-LabBlobBackup.ps1 (must be revoked here)
 $backupRoles = @(
@@ -319,6 +331,32 @@ $rgLookup = Invoke-LabLookup -Target 'the resource groups in the subscription' -
     Get-AzResourceGroup -ErrorAction Stop
 }
 
+# Azure Site Recovery (#366): replication items to disable, then the target group.
+$asrGroup = $rgLookup.Value | Where-Object { $_.ResourceGroupName -eq $asrRgName } | Select-Object -First 1
+if ($asrGroup) {
+    $asrVaultLookup = Invoke-LabLookup -Target "Site Recovery vault $asrVaultName" -Lookup {
+        Get-AzRecoveryServicesVault -ResourceGroupName $asrRgName -ErrorAction Stop
+    }
+    if ($asrVaultLookup.Failed) { $script:asrGroupMustStay = $true }
+    foreach ($asrVault in $asrVaultLookup.Value) {
+        Set-AzRecoveryServicesAsrVaultContext -Vault $asrVault | Out-Null
+        $asrItemLookup = Invoke-LabLookup -Target "the replication items in $($asrVault.Name)" -Lookup {
+            foreach ($fabric in @(Get-AzRecoveryServicesAsrFabric -ErrorAction Stop)) {
+                foreach ($container in @(Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric -ErrorAction Stop)) {
+                    Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $container -ErrorAction Stop
+                }
+            }
+        }
+        if ($asrItemLookup.Failed) { $script:asrGroupMustStay = $true }
+        foreach ($asrItem in $asrItemLookup.Value) {
+            $resourcesToDelete.Add(@{ Type = 'AsrReplicationItem'; Name = $asrItem.FriendlyName; Item = $asrItem; Vault = $asrVault })
+            Write-Host "  - Site Recovery replication: $($asrItem.FriendlyName)" -ForegroundColor Gray
+        }
+    }
+    $resourcesToDelete.Add(@{ Type = 'AsrResourceGroup'; Name = $asrRgName })
+    Write-Host "  - Site Recovery target resource group: $asrRgName" -ForegroundColor Gray
+}
+
 # The instant-restore snapshot group the VM backup policy names (#184). Unlike AzureBackupRG_*,
 # nothing outside this lab writes to it, so it goes as a whole - restore point collection included.
 $snapshotRgs = $rgLookup.Value | Where-Object { $_.ResourceGroupName -like $snapshotRgPattern }
@@ -375,7 +413,6 @@ if ($resourcesToDelete.Count -eq 0) {
 } else {
     # ── Confirm deletion (per-operation via ShouldProcess; pass -Force or -Confirm:$false to skip) ──
     Write-Host "`n[WARNING] This will permanently delete the above resources." -ForegroundColor Yellow
-    Write-Host "  Ensure ASR replication has been removed via Azure Portal first." -ForegroundColor Gray
     Write-Host "  VMs, VNets, and Storage Accounts will NOT be deleted." -ForegroundColor Gray
 
     Write-Host "`nDeleting resources..." -ForegroundColor Yellow
@@ -574,13 +611,49 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'AlertProcessingR
     }
 }
 
+# 9. Disable the Site Recovery replication. A test failover left uncleaned blocks it, so it is
+#    cleaned up first; a failure of either is counted and keeps the target group.
+foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'AsrReplicationItem' }) {
+    if (-not $PSCmdlet.ShouldProcess($r.Name, 'Disable Site Recovery replication')) { continue }
+    Write-Host "  Disabling Site Recovery replication: $($r.Name)..." -ForegroundColor Gray
+    try {
+        Set-AzRecoveryServicesAsrVaultContext -Vault $r.Vault | Out-Null
+        if ("$($r.Item.TestFailoverState)" -notin @('', 'None', 'NotStarted')) {
+            Start-AzRecoveryServicesAsrTestFailoverCleanupJob -ReplicationProtectedItem $r.Item -Comment 'Lab 5.2 cleanup' -ErrorAction Stop | Out-Null
+        }
+        Remove-AzRecoveryServicesAsrReplicationProtectedItem -InputObject $r.Item -Force -WaitForCompletion -ErrorAction Stop | Out-Null
+        Write-Host "  ✓ Replication disabled" -ForegroundColor Green
+    } catch {
+        $script:cleanupFailures++
+        $script:asrGroupMustStay = $true
+        Write-Host "  [ERROR] Could not disable the replication of '$($r.Name)': $_" -ForegroundColor Red
+    }
+}
+
+# 10. Delete the Site Recovery target group (vault, cache storage account, target VNet, replica
+#     disks, any test failover VM). It stays while a replication may still be on.
+foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'AsrResourceGroup' }) {
+    if ($script:asrGroupMustStay) {
+        Write-Host "  [INFO] $($r.Name) left in place - a replication may still be on (see the [ERROR] above)." -ForegroundColor Gray
+        continue
+    }
+    if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete Site Recovery target resource group')) { continue }
+    Write-Host "  Deleting Site Recovery target resource group: $($r.Name)..." -ForegroundColor Gray
+    try {
+        Remove-AzResourceGroup -Name $r.Name -Force -ErrorAction Stop | Out-Null
+        Write-Host "  ✓ Deleted" -ForegroundColor Green
+    } catch {
+        $script:cleanupFailures++
+        Write-Host "  [ERROR] Could not delete Site Recovery target resource group '$($r.Name)': $_" -ForegroundColor Red
+    }
+}
+
 Write-Host "`n========================================" -ForegroundColor Cyan
 if ($script:cleanupFailures -gt 0) {
     Write-Host "  Cleanup finished with $($script:cleanupFailures) failure(s)" -ForegroundColor Red
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "  See the [ERROR] lines above - this run exits 1, nothing was masked." -ForegroundColor Gray
     Write-Host "  VMs, VNets, and Storage Accounts were NOT deleted." -ForegroundColor Gray
-    Write-Host "  ASR replication resources must be removed via Azure Portal." -ForegroundColor Gray
     Write-Host "========================================`n" -ForegroundColor Cyan
     Exit-Lab -FailureCount 1
 }
@@ -588,5 +661,4 @@ if ($script:cleanupFailures -gt 0) {
 Write-Host "  Cleanup Complete" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  VMs, VNets, and Storage Accounts were NOT deleted." -ForegroundColor Gray
-Write-Host "  ASR replication resources must be removed via Azure Portal." -ForegroundColor Gray
 Write-Host "========================================`n" -ForegroundColor Cyan

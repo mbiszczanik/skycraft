@@ -11,12 +11,13 @@ By completing this lab, you will:
 - Understand the difference between **LRS** and **GRS** for backup data
 - Understand **Soft Delete** for protected items (and why Azure now enforces it)
 - Route backup alerts to an action group with an **alert processing rule**
+- Replicate a VM to a second region with **Azure Site Recovery** and run a test failover
 
 ---
 
 ## 🏗️ Architecture Overview
 
-[Description]: Recovery Services Vault stores VM snapshots. Backup Vault stores Blob/Disk backups. Site Recovery replicates the VM to a secondary region (Norway East).
+[Description]: Recovery Services Vault stores VM snapshots. Backup Vault stores Blob/Disk backups. Site Recovery replicates the world VM to a secondary region (North Europe).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/lab-5.2-architecture.dark.svg">
@@ -34,7 +35,7 @@ By completing this lab, you will:
 
 1. **Azure Backup**: Protect VMs using RSV.
 2. **Backup Vault**: Protect Blob Storage operational data.
-3. **Site Recovery**: Enable replication to Norway East for the production server.
+3. **Site Recovery**: Enable replication of the world VM to North Europe and prove it with a test failover.
 
 ---
 
@@ -58,11 +59,11 @@ Before starting this lab:
 - [ ] **Owner** or **User Access Administrator** on `dev-skycraft-swc-kv` (Step 5.2.3 grants the *Backup Management Service* app a role there)
 - [ ] Completed **Lab 4.1: Storage Accounts** with the production account (`prodskycraftswcsa` in `prod-skycraft-swc-rg` is the blob backup datasource - run 4.1 with `-All`, the dev-only cycle does not create it)
 - [ ] Resource group `platform-skycraft-swc-rg` exists (Lab 1.2)
-- [ ] **Section 4 only** (portal, not automated): quota for 2 vCPUs in **Norway East** for the Site Recovery test failover
+- [ ] **Section 4 only**: quota in **North Europe** for the failover VM, 2 vCPUs for `Standard_B2ls_v2` (the test failover starts it there). Lab 1.3 allows Sweden Central and North Europe only, so those are the only regions Site Recovery can target
 
 The Lab 5.1, Lab 3.2, Lab 4.1 and resource group items are what the scripts check: `scripts/Deploy-Bicep.ps1` stops on a missing resource group, workspace or action group, and only warns about a missing key vault (step [2/7]) or VM (step [7/7]); `scripts/New-LabBlobBackup.ps1` stops on a missing Backup vault or storage account. The shortest chain that also satisfies the gates of the labs it runs is 1.2 → 2.1 → 2.3 → 3.2 (dev, needs `~/.ssh/skycraft-dev.pub`) → 4.1 `-All` → 5.1 → 5.2 (see `tools/lab-cycle-manifest.psd1`).
 
-Both scripts also need PowerShell 7 with Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights and Az.Storage, a signed-in `Connect-AzAccount` context, permission to register the `Microsoft.RecoveryServices` and `Microsoft.DataProtection` resource providers (`Deploy-Bicep.ps1` registers them if needed), and **Owner** or **User Access Administrator** on `prodskycraftswcsa` (`New-LabBlobBackup.ps1` assigns the Backup Vault identity two roles there). `Deploy-Bicep.ps1` and `Test-Lab.ps1` find the *Backup Management Service* app with `Get-AzADServicePrincipal`, which needs a Microsoft Graph token in your Az sign-in: if they report `MicrosoftGraphEndpointResourceId`, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md). The guide's own blocks for Steps 5.2.3 and 5.2.9 also use Az.KeyVault and Az.AlertsManagement, both part of the Az module.
+Both scripts also need PowerShell 7 with Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights and Az.Storage, a signed-in `Connect-AzAccount` context, permission to register the `Microsoft.RecoveryServices` and `Microsoft.DataProtection` resource providers (`Deploy-Bicep.ps1` registers them if needed), and **Owner** or **User Access Administrator** on `prodskycraftswcsa` (`New-LabBlobBackup.ps1` assigns the Backup Vault identity two roles there). `Deploy-Bicep.ps1` and `Test-Lab.ps1` find the *Backup Management Service* app with `Get-AzADServicePrincipal`, which needs a Microsoft Graph token in your Az sign-in: if they report `MicrosoftGraphEndpointResourceId`, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md). The guide's own blocks for Steps 5.2.3 and 5.2.9 also use Az.KeyVault and Az.AlertsManagement, both part of the Az module. `Deploy-Bicep.ps1` finishes by running `scripts/Enable-SiteRecovery.ps1` (Az.Network and Az.Storage as well) and waits for the replication, about 45 minutes; `-SkipSiteRecovery` leaves it for Step 5.2.6.
 
 ---
 
@@ -366,23 +367,132 @@ Assign one role at a time. The wizard's **Review + assign** button first opens i
 
 ### Step 5.2.6: Enable Replication
 
-1. Navigate to your VM: `dev-skycraft-swc-auth-vm`.
-2. Access **Disaster recovery** in the left menu.
-3. Target region: **Norway East** (or another available European region).
-4. Click **Advanced settings** to review resources (ASR creates a cache storage account and target resources).
-5. Click **Review + Start replication**.
+Site Recovery copies `dev-skycraft-swc-world-vm` to a second region, so that losing Sweden Central still leaves a copy to start. It replicates the world VM, not the auth VM: the auth VM is encrypted with Azure Disk Encryption, and the wizard then asks for a target key vault and a copy of its secrets before it replicates.
 
-> [!NOTE]
-> Initial synchronization can take 15-30 minutes depending on disk size.
+> **SkyCraft Choice**: We replicate to **North Europe** because Lab 1.3 allows only Sweden Central and North Europe, and the wizard's default, East US, is denied. Everything the replication needs goes into **one** tagged group that you create first: Site Recovery's own default groups are created without tags, and Lab 1.3's `Require-Environment-Tag-RG` assignment denies them.
+
+The initial replication of the two disks (30 GB and 64 GB) took about 45 minutes in a live run, not the 15 to 30 minutes older guides promise. Start it first and do Steps 5.2.8 to 5.2.10 while it runs.
+
+**a. Create the target resource group**
+
+#### Target group: Azure Portal (GUI)
+
+1. Search for **Resource groups** → **+ Create**:
+
+   | Field          | Value                                                                                          |
+   | :------------- | :--------------------------------------------------------------------------------------------- |
+   | Resource group | `platform-skycraft-neu-asr-rg`                                                                 |
+   | Region         | **North Europe**                                                                               |
+   | Tags           | `Project` = `SkyCraft`, `Environment` = `Platform`, `CostCenter` = `MSDN`, `Owner` = your name |
+
+2. **Review + create** → **Create**.
+
+#### Target group: Azure PowerShell and Bicep
+
+The group is created in the Az PowerShell context that the lab's scripts use, so there is no Azure CLI block: the CLI can be signed in to a different subscription.
+
+```powershell
+New-AzResourceGroup -Name platform-skycraft-neu-asr-rg -Location northeurope `
+  -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = '<your name>' }
+$tags = (Get-AzResourceGroup -Name platform-skycraft-neu-asr-rg).Tags
+$asrVault = New-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-neu-asr-rg -Name platform-skycraft-neu-asr-rsv -Location northeurope -Tag $tags
+Set-AzRecoveryServicesBackupProperty -Vault $asrVault -BackupStorageRedundancy LocallyRedundant
+```
+
+The Bicep path does both: `bicep/main.bicep` creates the group and the vault `platform-skycraft-neu-asr-rsv` through `avm/res/resources/resource-group` and `avm/res/recovery-services/vault`. The Portal wizard creates its own vault in the group, so the Portal path needs no vault of its own.
+
+**Expected Result**: `platform-skycraft-neu-asr-rg` exists in North Europe with its four tags.
+
+**b. Check the kernel**
+
+Site Recovery's Mobility service accepts an Ubuntu VM only when the full version of the running kernel is on its list. A VM from `Deploy-Bicep.ps1` of Lab 3.2 boots `6.8.0-1030-azure`, which Microsoft Learn's support matrix lists from Mobility service 9.66 on. Open `dev-skycraft-swc-world-vm` and, under **Operations** (expand it if it is collapsed), click **Run command** → **RunShellScript**, and run:
+
+```bash
+uname -r
+```
+
+The output must be a kernel on the [supported kernels list](https://github.com/Azure/Azure-SiteRecovery/tree/main/MobilityAgent/AzureToAzure/SupportedKernels) for Ubuntu 22.04. A VM that you built in the Portal got the newest image, which booted `6.8.0-1065-azure` on 2026-10-16: Troubleshooting Issue 7 shows how to boot a listed kernel. Replication of an unlisted kernel fails with `ASRMobilityServiceKernelNotSupportedV2`.
+
+**c. Enable replication**
+
+#### Replication: Azure Portal (GUI)
+
+1. Open `dev-skycraft-swc-world-vm` and, under **Backup + disaster recovery** (expand it if it is collapsed), click **Disaster recovery**.
+2. On the **Basics** tab set **Target region** to **North Europe** (the default is East US), then click **Next: Advanced settings**.
+3. On the **Advanced settings** tab, review what Site Recovery creates. Set:
+
+   | Field                   | Value                                                                                                         |
+   | :---------------------- | :------------------------------------------------------------------------------------------------------------ |
+   | VM resource group       | `platform-skycraft-neu-asr-rg` (the default is a new group `<source group>-asr` without tags)                  |
+   | Vault resource group    | `platform-skycraft-neu-asr-rg` (the default is a new group `Site-recovery-vault-RG` without tags)              |
+   | Update settings         | **Allow ASR to manage**, and click **Create** under **Automation account** before you go on                   |
+
+   Leave the other fields as proposed: the wizard creates the target virtual network, the cache storage account in Sweden Central and the replica disks in the group. Without a click on **Create**, the wizard stops with "You have selected to create new automation account. Click on create to proceed".
+4. Click **Review + Start replication**, then **Start replication**.
+5. Open the VM's **Disaster recovery** page again and wait until the replication status reads **Protected**. Allow about 45 minutes.
+
+#### Replication: Azure PowerShell
+
+```powershell
+.\scripts\Enable-SiteRecovery.ps1
+```
+
+The script is the Portal wizard in Az PowerShell, ending in the same state. It checks that the group is tagged and holds the vault, then creates what is missing (the target VNet `platform-skycraft-neu-asr-vnet` with `WorldSubnet`, the cache storage account, both fabrics and protection containers, the 24-hour replication policy, the container and network mappings in both directions), enables replication of both disks into the group, waits for **Protected** and sets the failover VM size to the size of the source VM. It asks before it starts; `-Force` skips the question. It does not create the automation account: that account only keeps the Mobility service up to date.
+
+#### Replication: Azure CLI and Bicep
+
+Azure CLI has no complete equivalent for Site Recovery; use the Portal or Az PowerShell for the replication itself. The Bicep path is `.\scripts\Deploy-Bicep.ps1`: the template creates the group and the vault, and the script then runs `Enable-SiteRecovery.ps1 -Force`. The replication needs fabrics, protection containers, a policy and mappings first, each an asynchronous job, so a script creates them with an existence check, as it does for the backup policies (`docs/bicep-standards.md` section 10.4).
+
+**Expected Result**: `platform-skycraft-neu-asr-rg` holds the vault, the cache storage account, the target virtual network and the replica disks, all tagged or inheriting `Project` from Lab 1.3's `Inherit-Project-Tag` assignment, and the replication of `dev-skycraft-swc-world-vm` reads **Protected** with a healthy status. If the Activity Log shows a denied write of `NetworkWatcher_northeurope` in `NetworkWatcherRG`, it is Azure switching Network Watcher on for the new region, and the replication does not depend on it.
+
+---
 
 ### Step 5.2.7: Perform Test Failover
 
-1. Once status is **Protected**, click **Test Failover**.
-2. Recovery Point: **Latest processed**.
-3. Azure Virtual Network: Select the created ASR VNet in the target region.
-4. Click **Test Failover**.
-5. Once complete, verify the new VM exists in the target region.
-6. Click **Cleanup test failover** to remove temporary resources.
+A test failover starts a copy of the VM from a recovery point in the target region, in a network of your choice, and leaves the source VM and the replication untouched. You prove the copy boots, then clean it up so that it stops costing money.
+
+The recovery size of the copy defaults to `Standard_DC4as_cc_v5`, a 4-vCPU confidential size that your quota may not cover. Set it to the size of the source VM first.
+
+#### Test failover: Azure Portal (GUI)
+
+1. Open the Recovery Services vault in `platform-skycraft-neu-asr-rg` (the one the wizard created; the Bicep and Az PowerShell paths name it `platform-skycraft-neu-asr-rsv`) and, under **Protected items** (expand it if it is collapsed), click **Replicated items** → `dev-skycraft-swc-world-vm`.
+2. Click **Compute and Network** → **Edit**, set **Size** to the size of the source VM (`Standard_B2ls_v2` unless you resized it in Lab 3.2) → **Save**.
+3. Click **Test Failover**:
+
+   | Field                | Value                                                              |
+   | :------------------- | :----------------------------------------------------------------- |
+   | Recovery point       | **Latest processed (low RTO)**                                     |
+   | Azure virtual network | the virtual network in `platform-skycraft-neu-asr-rg`             |
+
+4. Click **OK** and open the job under **Site Recovery jobs**. It took under 3 minutes in a live run.
+5. Open **Virtual machines**: `dev-skycraft-swc-world-vm-test` runs in North Europe, in the target network's `WorldSubnet`, with the source VM's tags.
+6. Back on the replicated item, click **Cleanup test failover**, tick **Testing is complete. Delete test failover virtual machine(s)** → **OK**.
+
+#### Test failover: Azure PowerShell
+
+```powershell
+$vault = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-neu-asr-rg | Select-Object -First 1
+Set-AzRecoveryServicesAsrVaultContext -Vault $vault | Out-Null
+$item = foreach ($fabric in Get-AzRecoveryServicesAsrFabric) {
+  foreach ($container in Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric) {
+    Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $container | Where-Object FriendlyName -eq 'dev-skycraft-swc-world-vm'
+  }
+}
+$size = (Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-world-vm).HardwareProfile.VmSize
+Set-AzRecoveryServicesAsrReplicationProtectedItem -InputObject $item -Size $size
+$vnet = Get-AzVirtualNetwork -ResourceGroupName platform-skycraft-neu-asr-rg | Select-Object -First 1
+Start-AzRecoveryServicesAsrTestFailoverJob -ReplicationProtectedItem $item -Direction PrimaryToRecovery -AzureVMNetworkId $vnet.Id
+# When the job has succeeded and you have looked at the test VM:
+Start-AzRecoveryServicesAsrTestFailoverCleanupJob -ReplicationProtectedItem $item -Comment 'Lab 5.2 test failover'
+```
+
+The size update ran as an *Update the virtual machine* job that failed without an error text in one live run; if yours does, set the size in the Portal (Portal, step 2). `.\scripts\Enable-SiteRecovery.ps1 -TestFailover` runs the same sequence and the cleanup, and prints the size of the test VM.
+
+#### Test failover: Azure CLI and Bicep
+
+Azure CLI has no complete equivalent; use the Portal or Az PowerShell. The Bicep path ends with `.\scripts\Enable-SiteRecovery.ps1 -TestFailover`, which is idempotent: it finds the replication that `Deploy-Bicep.ps1` started.
+
+**Expected Result**: The test failover job reads **Succeeded**, `dev-skycraft-swc-world-vm-test` ran in North Europe in the size of the source VM, and after the cleanup it is gone from **Virtual machines** while the replication still reads **Protected**.
 
 ---
 
@@ -592,6 +702,9 @@ The steps below run commands on the VM with **Run command**, which needs no Bast
 - [ ] `SkyCraft-Blob-Policy` (operational only, 30 days, no vaulted rule) protecting `prodskycraftswcsa`
 - [ ] Diagnostic settings `rsv-backup-reports-diag` and `bv-backup-reports-diag` send backup logs to `platform-skycraft-swc-law`
 - [ ] Alert processing rule `skycraft-backup-critical-apr` applies `skycraft-ops-ag` to the vault's Critical alerts
+- [ ] Target group `platform-skycraft-neu-asr-rg` in North Europe, tagged, holding the Site Recovery vault
+- [ ] Replication of `dev-skycraft-swc-world-vm` is **Protected** and healthy
+- [ ] Test failover succeeded in the size of the source VM and its test VM was cleaned up
 - [ ] A file from the world VM's recovery point read back, and the disks unmounted
 - [ ] Detailed verification performed (see checklist)
 
@@ -665,6 +778,43 @@ If the Activity Log names the restore point collection, check that `platform-sky
 
 **Solution**: Sign in with `Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId` and run the script again (see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md)), or grant the role in the Portal (Step 5.2.3 a).
 
+### Issue 7: Enabling replication fails with `ASRMobilityServiceKernelNotSupportedV2`
+
+**Symptom**: The *Enable replication* job fails with `ASRMobilityServiceKernelNotSupportedV2`, naming the kernel of the VM (`6.8.0-1065-azure` in the live run of 2026-10-16) and kernels it supports. `Enable-SiteRecovery.ps1` reports the same job error.
+
+**Root Cause**: For Ubuntu, the Mobility service compares the **full version of the running kernel** with its list; a newer stock kernel is unsupported until a hotfix lists it. The list for 22.04 ended at `6.8.0-1041-azure` for agent 9.66 in [Microsoft Learn's support matrix](https://learn.microsoft.com/azure/site-recovery/azure-to-azure-support-matrix), and the agent that Azure installed on 2026-10-16 was 9.66.7760.1. Lab 3.2's Bicep pins image `22.04.202506200`, which boots `6.8.0-1030-azure`, listed from Mobility service 9.66 on. A VM built in the Portal gets the newest image, and any VM that installed a newer kernel (an unattended upgrade) and restarted (a resize, Step 3.2.26) boots that one.
+
+**Solution**: Boot a kernel on the [supported kernels list](https://github.com/Azure/Azure-SiteRecovery/tree/main/MobilityAgent/AzureToAzure/SupportedKernels) for the VM. With **Run command** → **RunShellScript** on `dev-skycraft-swc-world-vm`:
+
+1. Read the running and the installed kernels: `uname -r; dpkg -l 'linux-image-*-azure' | grep '^ii'`.
+2. Install a listed kernel and make it the GRUB default, then restart:
+
+   ```bash
+   apt-get update && apt-get install -y linux-image-6.8.0-1041-azure
+   sed -i 's|^GRUB_DEFAULT=.*|GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux 6.8.0-1041-azure"|' /etc/default/grub
+   update-grub && shutdown -r +1
+   ```
+
+3. After the restart, `uname -r` must print `6.8.0-1041-azure`. Run **Enable replication** again (Step 5.2.6 c). In the live run this sequence made the replication succeed.
+
+To avoid the problem for new VMs, build Lab 3.2 with `Deploy-Bicep.ps1`, which pins the image.
+
+### Issue 8: Enabling replication is denied by Azure Policy
+
+**Symptom**: The *Enable replication* job fails with `RequestDisallowedByPolicy`, or the *source site* creation fails; the Activity Log names `Site-recovery-vault-RG` or `<source group>-asr`.
+
+**Root Cause**: The wizard's default groups are created without tags, and Lab 1.3's `Require-Environment-Tag-RG` assignment denies a group without them. In the live run, even with **Vault resource group** changed, the first attempt still tried a write to `Site-recovery-vault-RG` and the source site creation failed.
+
+**Solution**: Use the pre-created, tagged `platform-skycraft-neu-asr-rg` for both **VM resource group** and **Vault resource group** (Step 5.2.6 c). If the first attempt still fails, run the **Disaster recovery** wizard again: the second run reuses the vault, policy and cache storage account that the first one created, and went through. Do not delete Lab 1.3's assignments.
+
+### Issue 9: The test VM runs as `Standard_DC4as_cc_v5`, or the size update fails
+
+**Symptom**: The test failover VM is a 4-vCPU confidential size, or fails for lack of quota. `Set-AzRecoveryServicesAsrReplicationProtectedItem -Size` ends with a failed *Update the virtual machine* job and no error text.
+
+**Root Cause**: Site Recovery picks the recovery size itself and, here, chose `Standard_DC4as_cc_v5`. Setting the size through the cmdlet failed once in a live run.
+
+**Solution**: Set the size on the replicated item's **Compute and Network** page (Step 5.2.7, Portal, step 2) before you run the test failover.
+
 ---
 
 ## 🎓 Knowledge Check
@@ -697,6 +847,20 @@ If the Activity Log names the restore point collection, check that `platform-sky
    **Answer**: For an ADE-encrypted VM, Azure Backup copies the disk encryption keys and secrets with the Microsoft Entra app *Backup Management Service*. With a key vault on the Azure RBAC model, that app needs **Key Vault Administrator**; without it *Enable backup* fails with `400198 UserErrorKeyVaultPermissionsNotConfigured`.
    </details>
 
+5. **Why does the lab replicate the unencrypted world VM, and why must the target group exist before the wizard runs?**
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   **Answer**: An Azure Disk Encryption VM needs a target key vault and a copy of its secrets before Site Recovery replicates it, which the lab avoids by encrypting only the auth VM. The wizard's default groups carry no tags, so Lab 1.3's `Require-Environment-Tag-RG` denies them; a tagged group chosen as both the VM group and the vault group gives every resource a place to be created.
+   </details>
+
+6. **What does a test failover change on the source VM, and why do you clean it up?**
+   <details>
+     <summary>**Click to see the answer**</summary>
+
+   **Answer**: Nothing: the source VM keeps running and the replication keeps going, because the copy starts in the target region from a recovery point, in the network you choose. The cleanup deletes the test VM and its disks; until then they cost money, and a test failover left in place blocks disabling the replication.
+   </details>
+
 ---
 
 ## 📚 Additional Resources
@@ -708,6 +872,10 @@ If the Activity Log names the restore point collection, check that `platform-sky
 - [Back up and restore encrypted Azure VMs](https://learn.microsoft.com/en-us/azure/backup/backup-azure-vms-encryption)
 - [Overview of Azure Blob backup](https://learn.microsoft.com/en-us/azure/backup/blob-backup-overview)
 - [Alert processing rules](https://learn.microsoft.com/en-us/azure/azure-monitor/alerts/alerts-processing-rules)
+- [Enable Azure VM disaster recovery between regions](https://learn.microsoft.com/en-us/azure/site-recovery/azure-to-azure-tutorial-enable-replication)
+- [Run a disaster recovery drill for Azure VMs](https://learn.microsoft.com/en-us/azure/site-recovery/azure-to-azure-tutorial-dr-drill)
+- [Support matrix for Azure VM disaster recovery between Azure regions](https://learn.microsoft.com/en-us/azure/site-recovery/azure-to-azure-support-matrix)
+- [Set up disaster recovery for Azure VMs using Azure PowerShell](https://learn.microsoft.com/en-us/azure/site-recovery/azure-to-azure-powershell)
 
 ---
 
@@ -724,8 +892,8 @@ If the Activity Log names the restore point collection, check that `platform-sky
 ✅ Deployed a **Recovery Services Vault** for VM snapshots
 ✅ Deployed a **Backup Vault** for Blob Storage protection
 ✅ Configured backup policies for both Compute and Storage
-✅ Enabled **Azure Site Recovery** to replicate Production to Norway East
-✅ Successfully performed a **Test Failover** to validate BCDR strategy
+✅ Enabled **Azure Site Recovery** to replicate `dev-skycraft-swc-world-vm` to North Europe, into one tagged group
+✅ Performed a **Test Failover** in the source VM's size and cleaned it up
 ✅ Configured **Backup Reports** through the `rsv-backup-reports-diag` and `bv-backup-reports-diag` diagnostic settings
 ✅ Routed Critical backup alerts to `skycraft-ops-ag` with the alert processing rule `skycraft-backup-critical-apr`
 ✅ Granted *Backup Management Service* the key vault role an ADE-encrypted VM backup needs
