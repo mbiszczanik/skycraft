@@ -253,6 +253,7 @@ function Set-AzStorageAccount {
     $script:Clean    = Invoke-CleanupScript -Stub $script:Stub
     $script:Nothing  = Invoke-CleanupScript -Stub $script:Stub -Empty
     $script:WhatIf   = Invoke-CleanupScript -Stub $script:Stub -ArgumentList '-WhatIf'
+    $script:WhatIfRestore = Invoke-CleanupScript -Stub $script:Stub -ArgumentList '-WhatIf' -RestorePolicy
     $script:NotFound = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzStorageAccountManagementPolicy:prodskycraftswcsa=notfound'
     $script:AccountDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzStorageAccount:prodskycraftswcsa=denied'
     $script:LookupsFail   = Invoke-CleanupScript -Stub $script:Stub -Lookup @(
@@ -269,7 +270,7 @@ function Set-AzStorageAccount {
     $script:RestoreStuck  = Invoke-CleanupScript -Stub $script:Stub -RestorePolicy -Fail 'Disable-AzStorageBlobRestorePolicy:prodskycraftswcsa'
 
     $script:AllRuns = @(
-        $script:Clean, $script:Nothing, $script:WhatIf, $script:NotFound, $script:AccountDenied, $script:LookupsFail,
+        $script:Clean, $script:Nothing, $script:WhatIf, $script:WhatIfRestore, $script:NotFound, $script:AccountDenied, $script:LookupsFail,
         $script:StepsFail, $script:RestoreOn, $script:RestoreUnread, $script:RestoreStuck
     )
 }
@@ -391,7 +392,7 @@ Describe 'Lab 4.2 Remove-LabResource.ps1 - point-in-time restore blocks versioni
     It 'leaves point-in-time restore alone when it is off' {
         $script:Clean.ExitCode | Should -Be 0 -Because "output was:`n$($script:Clean.Output)"
         $script:Clean.Calls | Should -Contain 'Get-AzStorageBlobServiceProperty:prodskycraftswcsa'
-        $script:Clean.Calls | Should -Not -Contain 'Disable-AzStorageBlobRestorePolicy'
+        $script:Clean.Calls | Should -Not -Contain 'Disable-AzStorageBlobRestorePolicy:prodskycraftswcsa'
         $script:Clean.Calls | Should -Contain 'Update-AzStorageBlobServiceProperty:prodskycraftswcsa'
     }
 
@@ -410,7 +411,7 @@ Describe 'Lab 4.2 Remove-LabResource.ps1 - point-in-time restore blocks versioni
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match '\[ERROR\] Could not disable versioning: .*does not have authorization'
         $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
-        $run.Calls | Should -Not -Contain 'Disable-AzStorageBlobRestorePolicy'
+        $run.Calls | Should -Not -Contain 'Disable-AzStorageBlobRestorePolicy:prodskycraftswcsa'
         $run.Calls | Should -Not -Contain 'Update-AzStorageBlobServiceProperty'
     }
 
@@ -432,5 +433,12 @@ Describe 'Lab 4.2 Remove-LabResource.ps1 - -WhatIf' {
         @($run.Calls | Where-Object { $_ -match $script:ChangePattern }) | Should -BeNullOrEmpty
         $run.Calls  | Should -Contain 'Get-AzStorageAccount:prodskycraftswcsa'
         $run.Output | Should -Match 'What if: .*prodskycraftswcsa'
+    }
+
+    It 'does not turn point-in-time restore off when it is on' {
+        $run = $script:WhatIfRestore
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls | Should -Not -Contain 'Disable-AzStorageBlobRestorePolicy:prodskycraftswcsa'
+        @($run.Calls | Where-Object { $_ -match $script:ChangePattern }) | Should -BeNullOrEmpty
     }
 }

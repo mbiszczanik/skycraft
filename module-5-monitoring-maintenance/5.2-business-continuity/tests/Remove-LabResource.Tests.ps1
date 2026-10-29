@@ -430,9 +430,9 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - exit code contract' {
 
 Describe 'Lab 5.2 Remove-LabResource.ps1 - point-in-time restore outlives the blob backup (#453)' {
 
-    It 'says point-in-time restore stays on the account once the blob backup instance is deleted' {
+    It 'says point-in-time restore may stay on the account once the blob backup instance is deleted' {
         $script:Clean.Calls  | Should -Contain 'Remove-AzDataProtectionBackupInstance'
-        $script:Clean.Output | Should -Match "Deleted\s+\[INFO\] Point-in-time restore[^\r\n]*stays on prodskycraftswcsa; Lab 4\.2's cleanup turns it off"
+        $script:Clean.Output | Should -Match "Deleted\s+\[INFO\] Point-in-time restore[^\r\n]*may stay on prodskycraftswcsa; Lab 4\.2's cleanup turns it off"
     }
 
     It 'does not say so when the blob backup instance could not be deleted' {
