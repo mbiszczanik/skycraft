@@ -168,6 +168,8 @@ Heartbeat
 
 5. Click **Run**.
 
+> **Wait on a new workspace**: with a workspace that already holds data, rows appear 5-10 minutes after the agent is installed. A **new** workspace has no `Heartbeat` table until its first row arrives, up to about 40 minutes after the workspace was created. Until then the query fails with a `BadRequest` or "Failed to resolve table" error: that means "not ready yet", not a broken setup. Run it again every few minutes. `scripts/Test-Lab.ps1` waits for this itself, up to 45 minutes (`-NewWorkspaceWaitMinutes`), and fails naming the missing table if it never appears.
+
 ### Step 5.1.4: Query Performance Data
 
 Run this query to see top CPU consumers:
@@ -354,7 +356,7 @@ The data collection rule, the action group and the tagged Azure Monitor Agent (`
 
 - Ensure the VM is **Running**.
 - Check that the VM lists `AzureMonitorLinuxAgent` under **Extensions + applications** with **Provisioning succeeded**; if not, run the install block in Step 5.1.2.
-- Wait up to 10 minutes for the AMA agent to finalize configuration.
+- Wait up to 10 minutes for the AMA agent to finalize configuration. On a new workspace the `Heartbeat` table appears with the first row, up to about 40 minutes after the workspace was created; a `BadRequest` or "Failed to resolve table" error before that is expected (Step 5.1.3).
 - Check if the **Data Collection Rule** is correctly associated with the VM.
 - `Heartbeat` has rows but `Perf` is empty: the rule must send **Performance Counters** to **Azure Monitor Logs**. A rule made by VM insights sends `InsightsMetrics` instead.
 

@@ -335,7 +335,8 @@
             PostDeploy = $null
             Test       = @{}
             DependsOn  = @('3.2', '4.1')
-            TimeoutMs  = 1800000
+            # 60 min: Test-Lab waits up to 45 for a new workspace's Heartbeat table (#369).
+            TimeoutMs  = 3600000
             StdinAnswers = $null
             Excluded   = $null
             # gate: verified - exits 1 on a missing platform resource group, on finding no lab-3.2

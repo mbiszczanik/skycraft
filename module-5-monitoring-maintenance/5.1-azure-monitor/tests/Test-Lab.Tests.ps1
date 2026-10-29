@@ -30,6 +30,10 @@
       6. The Azure Monitor Agent is checked on the rule's VMs (#369): a missing, non-Succeeded or
          unreadable agent fails; zero Heartbeat rows, a query that throws and a query that
          returns an error fail; a late first row is waited for only while the agent is Succeeded.
+      7. A fresh workspace has no Heartbeat table and answers BadRequest (#369): while the agent
+         is Succeeded that is waited for, with progress lines, up to -NewWorkspaceWaitMinutes;
+         a table that never appears fails and names the cause; an agent that is not Succeeded
+         is not waited for; a BadRequest after the table existed is a failure.
 
     The VM insights rule in the 'portal' case carries the streams VM insights really sends
     (InsightsMetrics, no Perf or Syslog), so the Perf and Syslog checks fail on it: the guide's
@@ -69,8 +73,9 @@ BeforeAll {
         'Get-AzStorageAccount'
         'Get-AzDiagnosticSetting'
         'Invoke-AzOperationalInsightsQuery'
-        # Shadowed so a wait for Heartbeat rows is counted, not slept.
+        # Shadowed so a wait for Heartbeat rows is counted, not slept: the sleep moves the clock.
         'Start-Sleep'
+        'Get-Date'
     )
 
     # The workspace, action group, alert rule and storage diagnostic setting are always as the
@@ -267,7 +272,11 @@ function Get-StubExtensions {
 
 # Answers the Heartbeat query with a row for every VM id it names, as SKYCRAFT_STUB_HEARTBEAT says:
 #   'rows' (default) at once, 'late' from the second query on, 'none' never, 'fail' throws,
-#   'error' returns the partial-error shape the service uses for a failed query.
+#   'error' returns the partial-error shape the service uses for a failed query,
+#   'notable' throws BadRequest (no Heartbeat table, a fresh workspace) every time,
+#   'tablelate' throws it for the first two queries, then answers with rows,
+#   'tableerror' returns the failed-to-resolve error shape for the first two queries, then rows,
+#   'tablegone' answers with no rows once, then throws BadRequest.
 $script:QueryCount = 0
 function Invoke-AzOperationalInsightsQuery {
     [CmdletBinding()]
@@ -279,18 +288,31 @@ function Invoke-AzOperationalInsightsQuery {
     switch ($env:SKYCRAFT_STUB_HEARTBEAT) {
         'fail'  { throw 'stub lookup failure: workspace query' }
         'error' { return [pscustomobject]@{ Results = @(); Error = [pscustomobject]@{ Message = 'stub query error: PartialError' } } }
+        'notable' { throw "Operation returned an invalid status code 'BadRequest'" }
+        'tablelate' { if ($script:QueryCount -le 2) { throw "Operation returned an invalid status code 'BadRequest'" } }
+        'tableerror' { if ($script:QueryCount -le 2) { return [pscustomobject]@{ Results = @(); Error = [pscustomobject]@{ Message = "Failed to resolve table or column expression named 'Heartbeat'" } } } }
+        'tablegone' { if ($script:QueryCount -gt 1) { throw "Operation returned an invalid status code 'BadRequest'" } }
     }
     $rows = @()
-    $answer = $env:SKYCRAFT_STUB_HEARTBEAT -in '', 'rows' -or ($env:SKYCRAFT_STUB_HEARTBEAT -eq 'late' -and $script:QueryCount -gt 1)
+    $answer = $env:SKYCRAFT_STUB_HEARTBEAT -in '', 'rows', 'tablelate', 'tableerror' -or ($env:SKYCRAFT_STUB_HEARTBEAT -eq 'late' -and $script:QueryCount -gt 1)
     if ($answer) {
         $rows = @([regex]::Matches($Query, "'(/subscriptions/[^']+)'") | ForEach-Object { [pscustomobject]@{ VmId = $_.Groups[1].Value; LastHeartbeat = '2026-10-28T10:00:00Z' } })
     }
     [pscustomobject]@{ Results = $rows; Error = $null }
 }
 
+# A sleep moves the clock the script reads, so a bounded wait ends without waiting.
+$script:ClockSkew = 0
+function Get-Date {
+    [CmdletBinding()]
+    param([Parameter(ValueFromRemainingArguments)]$Rest)
+    [datetime]::Now.AddSeconds($script:ClockSkew)
+}
+
 function Start-Sleep {
     [CmdletBinding()]
     param([int]$Seconds, [Parameter(ValueFromRemainingArguments)]$Rest)
+    $script:ClockSkew += $Seconds
     Write-Host "[stub-sleep $Seconds]" -NoNewline
 }
 
@@ -341,12 +363,12 @@ function Get-AzDiagnosticSetting {
             [string]$Alert = 'platform',
             [ValidateSet('succeeded', 'missing', 'failed', 'unreadable')]
             [string]$Agent = 'succeeded',
-            [ValidateSet('rows', 'late', 'none', 'fail', 'error')]
+            [ValidateSet('rows', 'late', 'none', 'fail', 'error', 'notable', 'tablelate', 'tableerror', 'tablegone')]
             [string]$Heartbeat = 'rows',
-            # 0 by default: a run that waited would spin on the real clock with the stubbed sleep.
-            [int]$WaitMinutes = 0
+            [int]$WaitMinutes = 0,
+            [int]$TableWaitMinutes = 0
         )
-        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList @("-HeartbeatWaitMinutes $WaitMinutes") -Environment @{
+        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList @("-HeartbeatWaitMinutes $WaitMinutes", "-NewWorkspaceWaitMinutes $TableWaitMinutes") -Environment @{
             SKYCRAFT_STUB_DCR       = $Dcr
             SKYCRAFT_STUB_ALERT     = $Alert
             SKYCRAFT_STUB_AGENT     = $Agent
@@ -383,12 +405,19 @@ function Get-AzDiagnosticSetting {
     $script:HeartbeatLate    = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'late' -WaitMinutes 1
     $script:QueryThrows      = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'fail'
     $script:QueryError       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'error'
+    $script:NoTableNoWait    = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'notable'
+    $script:NoTableNever     = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'notable' -TableWaitMinutes 3
+    $script:NoTableAgentFail = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Agent 'failed' -Heartbeat 'notable' -TableWaitMinutes 3
+    $script:TableLate        = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'tablelate' -TableWaitMinutes 5
+    $script:TableErrorLate   = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'tableerror' -TableWaitMinutes 5
+    $script:TableGone        = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'tablegone' -WaitMinutes 5 -TableWaitMinutes 5
     $script:AllRuns    = @(
         $script:BicepMade, $script:PortalMade, $script:NoRule, $script:ReadFails, $script:NoRulePartial,
         $script:VmThrows, $script:Dangling, $script:AlertInVmGroup, $script:AlertRecommended,
         $script:AlertListFails, $script:AlertListFailsPlatform, $script:AgentMissing, $script:AgentFailed,
         $script:AgentUnreadable, $script:AgentFailedNoRow, $script:NoHeartbeat, $script:HeartbeatLate,
-        $script:QueryThrows, $script:QueryError, $script:CriteriaDenied
+        $script:QueryThrows, $script:QueryError, $script:NoTableNoWait, $script:NoTableNever,
+        $script:NoTableAgentFail, $script:TableLate, $script:TableErrorLate, $script:TableGone, $script:CriteriaDenied
     )
 }
 
@@ -607,5 +636,57 @@ Describe 'Lab 5.1 Test-Lab.ps1 - checks the Azure Monitor Agent and its Heartbea
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\.\[stub-query 1\] FAIL \(the workspace query failed: stub query error: PartialError\)"
         $run.Output | Should -Match 'Failed: 1\b'
+    }
+}
+
+Describe 'Lab 5.1 Test-Lab.ps1 - waits for the Heartbeat table of a new workspace (#369)' {
+
+    It 'waits, with progress lines, until the table exists, then passes' {
+        $run = $script:TableLate
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'workspace not ready: no Heartbeat table yet, waited 0 of 5 minutes'
+        $run.Output | Should -Match 'waited 1 of 5 minutes'
+        $run.Output | Should -Match '\[stub-query 3\] PASS'
+        $run.Output | Should -Match 'Failed: 0\b'
+    }
+
+    It 'reads the failed-to-resolve error shape the same way' {
+        $run = $script:TableErrorLate
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'workspace not ready: no Heartbeat table yet'
+        $run.Output | Should -Match '\[stub-query 3\] PASS'
+    }
+
+    It 'fails, counted, when the table never appears, and names the cause and the bound' {
+        $run = $script:NoTableNever
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'the Heartbeat table does not exist in ''platform-skycraft-swc-law'' yet after waiting 3 of 3 minutes: a new workspace creates it with the first row'
+        $run.Output | Should -Match '\[stub-query 4\]'
+        $run.Output | Should -Not -Match 'stub-query 5'
+        $run.Output | Should -Match 'FAIL'
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'fails at once, naming the cause, when the table wait is 0' {
+        $run = $script:NoTableNoWait
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'the Heartbeat table does not exist in ''platform-skycraft-swc-law'' yet:'
+        $run.Output | Should -Not -Match 'stub-sleep'
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'does not wait for the table while the agent is not Succeeded' {
+        $run = $script:NoTableAgentFail
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Not -Match 'stub-sleep'
+        $run.Output | Should -Not -Match 'stub-query 2'
+        $run.Output | Should -Match 'Failed: 2\b'
+    }
+
+    It 'fails a BadRequest that comes after the table existed, instead of waiting' {
+        $run = $script:TableGone
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'FAIL \(Operation returned an invalid status code ''BadRequest''\)'
+        $run.Output | Should -Not -Match 'workspace not ready'
     }
 }
