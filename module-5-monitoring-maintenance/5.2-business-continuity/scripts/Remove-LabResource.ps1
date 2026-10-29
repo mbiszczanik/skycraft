@@ -16,6 +16,7 @@
     7. Orphaned Azure Backup restore point collections and the AzureBackupRG_<location>_*
        resource groups that held them, once those groups are empty. Only a policy created
        before issue #184 leaves these behind.
+    8. The alert processing rule skycraft-backup-critical-apr (Step 5.2.9, issue #366).
 
     Notes:
     - The role assignments are removed before the Backup Vault so its managed
@@ -28,6 +29,9 @@
       account) must be cleaned up manually via the Azure Portal before
       deleting the Recovery Services Vault.
     - VMs and Storage Accounts from earlier labs are NOT removed by this script.
+    - The Key Vault Administrator role of the Backup Management Service app on Lab 3.2's
+      dev-skycraft-swc-kv stays: finding that app needs Microsoft Graph (issue #397). Remove it
+      on the key vault's Access control (IAM) page while the key vault stays.
 
     Every step continues on error, so a single stuck resource does not strand the rest. A step
     that fails is reported as [ERROR] with the Azure error message and counted; if any step
@@ -52,6 +56,11 @@
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
     it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
+.PARAMETER KeyVaultName
+    Name of Lab 3.2's key vault, when it was created under another name. The script does not
+    touch the vault; the name only appears in the note on the Key Vault Administrator role that
+    stays on it. Default: dev-skycraft-swc-kv
+
 .PARAMETER Force
     Skip confirmation prompts.
 
@@ -64,8 +73,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.3.0
-    Date: 2026-10-09
+    Version: 1.5.0
+    Date: 2026-10-29
 #>
 
 #Requires -Version 7.0
@@ -73,6 +82,10 @@
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
+    [Parameter()]
+    [ValidateLength(3, 24)]
+    [string]$KeyVaultName = 'dev-skycraft-swc-kv',
+
     [Parameter()]
     [switch]$Force
 )
@@ -89,6 +102,7 @@ $rsvName        = 'platform-skycraft-swc-rsv'
 $bvName         = 'platform-skycraft-swc-bv'
 $storageAccount = 'prodskycraftswcsa'
 $location       = 'swedencentral'
+$aprName        = 'skycraft-backup-critical-apr'
 # Azure Backup names the snapshot group <prefix><n><suffix>; main.bicep creates n = 1, and the
 # service adds n = 2, 3, ... only when one group fills up. The pattern covers all of them.
 $snapshotRgPattern = 'platform-skycraft-swc-rpc*-rg'
@@ -297,6 +311,15 @@ if ($rsvExists) {
     }
     $resourcesToDelete.Add(@{ Type = 'RSV'; Name = $rsvName })
     Write-Host "  - Recovery Services Vault: $rsvName" -ForegroundColor Gray
+}
+
+# The alert processing rule of Step 5.2.9 (#366).
+$aprLookup = Invoke-LabLookup -Target "alert processing rule $aprName" -Lookup {
+    Get-AzResource -ResourceGroupName $platformRg -ResourceType 'Microsoft.AlertsManagement/actionRules' -Name $aprName -ErrorAction Stop
+}
+foreach ($apr in $aprLookup.Value) {
+    $resourcesToDelete.Add(@{ Type = 'AlertProcessingRule'; Name = $apr.Name; ResourceId = $apr.ResourceId })
+    Write-Host "  - Alert processing rule: $($apr.Name)" -ForegroundColor Gray
 }
 
 # One listing serves both scans below. If it fails, neither group kind is planned: the run
@@ -547,6 +570,27 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BackupResourceGr
     }
 }
 
+# 8. Delete the alert processing rule. The delete is one self-contained block that counts its
+#    failures in $script: so it can run inside Invoke-LabWithoutLock (#372) once that helper lands;
+#    until then Lab 1.3's CanNotDelete lock on the group refuses it (ScopeLocked) and the run exits 1.
+$deleteAlertProcessingRules = {
+    foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'AlertProcessingRule' }) {
+        if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete alert processing rule')) { continue }
+        Write-Host "  Deleting alert processing rule: $($r.Name)..." -ForegroundColor Gray
+        try {
+            Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        } catch {
+            $script:cleanupFailures++
+            Write-Host "  [ERROR] Could not delete alert processing rule '$($r.Name)': $_" -ForegroundColor Red
+            if ("$_" -match 'ScopeLocked') {
+                Write-Host "    A CanNotDelete lock on $platformRg (Lab 1.3) blocks the delete: lift it, rerun, restore it." -ForegroundColor Gray
+            }
+        }
+    }
+}
+& $deleteAlertProcessingRules
+
 Write-Host "`n========================================" -ForegroundColor Cyan
 if ($script:cleanupFailures -gt 0) {
     Write-Host "  Cleanup finished with $($script:cleanupFailures) failure(s)" -ForegroundColor Red
@@ -554,6 +598,7 @@ if ($script:cleanupFailures -gt 0) {
     Write-Host "  See the [ERROR] lines above - this run exits 1, nothing was masked." -ForegroundColor Gray
     Write-Host "  VMs, VNets, and Storage Accounts were NOT deleted." -ForegroundColor Gray
     Write-Host "  ASR replication resources must be removed via Azure Portal." -ForegroundColor Gray
+    Write-Host "  Backup Management Service keeps Key Vault Administrator on $KeyVaultName." -ForegroundColor Gray
     Write-Host "========================================`n" -ForegroundColor Cyan
     Exit-Lab -FailureCount 1
 }
@@ -562,4 +607,5 @@ Write-Host "  Cleanup Complete" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  VMs, VNets, and Storage Accounts were NOT deleted." -ForegroundColor Gray
 Write-Host "  ASR replication resources must be removed via Azure Portal." -ForegroundColor Gray
+Write-Host "  Backup Management Service keeps Key Vault Administrator on $KeyVaultName." -ForegroundColor Gray
 Write-Host "========================================`n" -ForegroundColor Cyan

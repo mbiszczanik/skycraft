@@ -8,16 +8,23 @@
     - VM Backup Policy (SkyCraft-Daily-Prod): daily schedule, 30-day retention, instant-restore
       snapshots in platform-skycraft-swc-rpc1-rg
     - Snapshot resource group (platform-skycraft-swc-rpc1-rg): exists, tagged, not locked
-    - VM backup protection enabled on dev-skycraft-swc-auth-vm (skipped if VM absent), and
-      its latest backup job did not fail - configuration alone stayed green while every
+    - VM backup protection enabled on dev-skycraft-swc-auth-vm and dev-skycraft-swc-world-vm
+      (each skipped if the VM is absent), and each one's latest backup job did not fail - configuration alone stayed green while every
       backup was refused by policy (issue #184)
+    - The Backup Management Service app holds Key Vault Administrator on dev-skycraft-swc-kv,
+      the key vault of the VM's Azure Disk Encryption (issue #368; checked with the VM).
+      Finding the app's service principal needs Microsoft Graph; a lookup that fails is a FAIL
+      that names the sign-in
     - Backup Vault (platform-skycraft-swc-bv): exists, LRS, system-assigned identity, soft delete
       Off. A vault created in the Portal is AlwaysOn, which cannot be undone, so the lab creates
       it with Az PowerShell or the Bicep (decision on issue #366); the check says so when it
       fails, and accepts On/AlwaysOn once $backupVaultSoftDeleteAccepted is widened for the GA
       of secure by default in the region (issue #376)
-    - Blob Backup Policy (SkyCraft-Blob-Policy): AzureBlob datasource, 30-day retention
+    - Blob Backup Policy (SkyCraft-Blob-Policy): AzureBlob datasource, 30-day retention, no
+      vaulted backup rule (a Portal-made policy always has one, and it is billed, issue #306)
     - Blob backup instance configured for prodskycraftswcsa
+    - Alert processing rule (skycraft-backup-critical-apr): enabled, scoped to the Recovery
+      Services vault, Rule type Apply action group with skycraft-ops-ag, Critical (Sev0) alerts
 
     Property reads with uncertain typed-object names (storage type, identity,
     soft-delete state, datasource type, retention) use Get-AzResource against the
@@ -26,21 +33,32 @@
     Note: Azure Site Recovery replication status must be verified manually
     in the Azure Portal (the ASR replication flow is portal-only per Step 5.2.6).
 
+.PARAMETER KeyVaultName
+    Name of Lab 3.2's key vault in dev-skycraft-swc-rg, when it was created under another name
+    (key vault names are globally unique). Default: dev-skycraft-swc-kv
+
 .EXAMPLE
     .\Test-Lab.ps1
+
+.EXAMPLE
+    .\Test-Lab.ps1 -KeyVaultName dev-skycraft-swc-kv-ab
 
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.1.0
-    Date: 2026-10-06
+    Version: 1.3.0
+    Date: 2026-10-29
 #>
 
 #Requires -Version 7.0
 #Requires -Modules Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Storage, Az.Compute
 
 [CmdletBinding()]
-param()
+param(
+    [Parameter()]
+    [ValidateLength(3, 24)]
+    [string]$KeyVaultName = 'dev-skycraft-swc-kv'
+)
 
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
@@ -50,9 +68,16 @@ $platformRg     = 'platform-skycraft-swc-rg'
 $prodRg         = 'prod-skycraft-swc-rg'
 $rsvName        = 'platform-skycraft-swc-rsv'
 $bvName         = 'platform-skycraft-swc-bv'
-$vmName         = 'dev-skycraft-swc-auth-vm'
+# The auth VM is ADE-encrypted (Lab 3.2); the world VM is the one Step 5.2.10 restores files from.
+$encryptedVmName = 'dev-skycraft-swc-auth-vm'
+$backupVmNames  = @($encryptedVmName, 'dev-skycraft-swc-world-vm')
 $vmRg           = 'dev-skycraft-swc-rg'
 $storageAccount = 'prodskycraftswcsa'
+$aprName        = 'skycraft-backup-critical-apr'
+$actionGroupName = 'skycraft-ops-ag'
+# Built-in ids, the same in every tenant: the Backup Management Service app and Key Vault Administrator.
+$backupManagementServiceAppId = '262044b1-e2ce-469f-a196-69ab7ada62d3'
+$keyVaultAdministratorRoleId  = '00482a5a-887f-4fb3-b363-3b7fe8e74483'
 # Azure Backup names the snapshot group <prefix><n><suffix>; main.bicep creates n = 1.
 $snapshotRgPrefix = 'platform-skycraft-swc-rpc'
 $snapshotRgSuffix = '-rg'
@@ -251,16 +276,18 @@ Invoke-Test "Snapshot RG has no resource lock (a lock blocks restore-point clean
 Write-Host ""
 Write-Host "[VM Backup Protection]" -ForegroundColor Yellow
 
-# The cycle protects the dev VM only. If it was never deployed (Lab 3.2 skipped),
-# WARN and skip these checks rather than failing the validation.
-$devVm = Get-AzVM -Name $vmName -ResourceGroupName $vmRg -ErrorAction SilentlyContinue
-if (-not $devVm) {
-    Write-Host "  [WARNING] VM '$vmName' not found in '$vmRg' — skipping VM backup protection checks (not counted as failures)." -ForegroundColor Yellow
-} else {
-    $vmItems = if ($rsv) {
-        Get-AzRecoveryServicesBackupItem -VaultId $rsv.ID -BackupManagementType AzureVM -WorkloadType AzureVM -ErrorAction SilentlyContinue
-    } else { $null }
+$vmItems = if ($rsv) {
+    Get-AzRecoveryServicesBackupItem -VaultId $rsv.ID -BackupManagementType AzureVM -WorkloadType AzureVM -ErrorAction SilentlyContinue
+} else { $null }
 
+# The cycle protects the dev VMs only. A VM never deployed (Lab 3.2 skipped) is a WARN and a skip,
+# not a failure.
+foreach ($vmName in $backupVmNames) {
+    $devVm = Get-AzVM -Name $vmName -ResourceGroupName $vmRg -ErrorAction SilentlyContinue
+    if (-not $devVm) {
+        Write-Host "  [WARNING] VM '$vmName' not found in '$vmRg' - skipping its backup checks (not counted as failures)." -ForegroundColor Yellow
+        continue
+    }
     # The backup item's .FriendlyName is empty; the VM name lives in .Name
     # (e.g. 'VM;iaasvmcontainerv2;<rg>;dev-skycraft-swc-auth-vm').
     Invoke-Test "VM '$vmName' is registered for backup" {
@@ -269,7 +296,7 @@ if (-not $devVm) {
         return ($null -ne $item)
     }
 
-    Invoke-Test "VM backup policy is 'SkyCraft-Daily-Prod'" {
+    Invoke-Test "VM '$vmName' backup policy is 'SkyCraft-Daily-Prod'" {
         if (-not $rsv) { return $false }
         $item = $vmItems | Where-Object { $_.Name -like "*$vmName" }
         return ($null -ne $item -and $item.ProtectionPolicyName -eq 'SkyCraft-Daily-Prod')
@@ -303,6 +330,35 @@ if (-not $devVm) {
             return $false
         }
         return ($lastJob.Status -in @('InProgress', 'Completed', 'CompletedWithWarnings'))
+    }
+
+    if ($vmName -ne $encryptedVmName) { continue }
+
+    # Lab 3.2 encrypts this VM with Azure Disk Encryption; Azure Backup reads its keys as the
+    # Backup Management Service app (#368). Without the role Enable backup fails with 400198.
+    Invoke-Test "Backup Management Service holds Key Vault Administrator on '$keyVaultName'" {
+        $kvId = "/subscriptions/$($context.Subscription.Id)/resourceGroups/$vmRg/providers/Microsoft.KeyVault/vaults/$keyVaultName"
+        $kv = Get-AzResource -ResourceId $kvId -ErrorAction SilentlyContinue
+        if (-not $kv) {
+            Write-Host " (key vault not found in '$vmRg' - Lab 3.2, Step 3.2.17)" -NoNewline -ForegroundColor Gray
+            return $false
+        }
+        try {
+            $sp = Get-AzADServicePrincipal -ApplicationId $backupManagementServiceAppId -ErrorAction Stop | Select-Object -First 1
+        } catch {
+            throw "Microsoft Graph lookup of the Backup Management Service app failed: $($_.Exception.Message) $(Get-LabGraphSignInHint -Client Az)"
+        }
+        if (-not $sp) {
+            Write-Host " (the Backup Management Service app has no service principal in this tenant)" -NoNewline -ForegroundColor Gray
+            return $false
+        }
+        $held = @(Get-LabArmRoleAssignment -Scope $kvId -PrincipalId $sp.Id | Where-Object {
+                $_.RoleDefinitionId -eq $keyVaultAdministratorRoleId -and ($_.Scope -eq $kvId -or $kvId -like "$($_.Scope)/*")
+            })
+        if ($held.Count -eq 0) {
+            Write-Host " (grant it before Enable backup - Step 5.2.3)" -NoNewline -ForegroundColor Gray
+        }
+        return ($held.Count -gt 0)
     }
 }
 
@@ -401,6 +457,19 @@ Invoke-Test "Blob policy operational retention is 30 days" {
     return $found
 }
 
+Invoke-Test "Blob policy has no vaulted backup rule (operational only, no Azure Backup charge)" {
+    if (-not $blobPolicyArm) { return $false }
+    # A policy made in the Portal always adds a vaulted rule (VaultStore), which is billed (#306).
+    $vaulted = @(@($blobPolicyArm.Properties.policyRules) | Where-Object {
+            $_ -and ($_.objectType -eq 'AzureBackupRule' -or
+                @($_.lifecycles | Where-Object { $_ -and "$($_.sourceDataStore.dataStoreType)" -ne 'OperationalStore' }).Count -gt 0)
+        })
+    if ($vaulted.Count -gt 0) {
+        Write-Host " (vaulted rule(s): $(($vaulted | ForEach-Object { $_.name }) -join ', ') - create the policy with New-LabBlobBackup.ps1 -PolicyOnly, Step 5.2.5)" -NoNewline -ForegroundColor Gray
+    }
+    return ($vaulted.Count -eq 0)
+}
+
 # ============================================================================
 # Blob Backup Instance Tests
 # ============================================================================
@@ -434,6 +503,47 @@ Invoke-Test "BV diagnostic setting 'bv-backup-reports-diag' exists and targets L
     if (-not $bv) { return $false }
     $diag = Get-AzDiagnosticSetting -ResourceId $bv.Id -Name 'bv-backup-reports-diag' -ErrorAction SilentlyContinue
     return ($null -ne $diag -and $diag.WorkspaceId -like "*/platform-skycraft-swc-law")
+}
+
+# ============================================================================
+# Alert Processing Rule Tests
+# ============================================================================
+Write-Host ""
+Write-Host "[Alert Processing Rule]" -ForegroundColor Yellow
+
+$aprId = "/subscriptions/$($context.Subscription.Id)/resourceGroups/$platformRg/providers/Microsoft.AlertsManagement/actionRules/$aprName"
+$apr = Get-AzResource -ResourceId $aprId -ApiVersion '2021-08-08' -ExpandProperties -ErrorAction SilentlyContinue
+
+Invoke-Test "Alert processing rule '$aprName' exists and is enabled" {
+    return ($null -ne $apr -and $apr.Properties.enabled -eq $true)
+}
+
+Invoke-Test "Alert processing rule applies to '$rsvName'" {
+    if (-not $apr -or -not $rsv) { return $false }
+    # The vault, its resource group or the subscription: each covers the vault's alerts.
+    $covering = @(@($apr.Properties.scopes) | Where-Object { $_ -and ($rsv.ID -eq $_ -or $rsv.ID -like "$_/*") })
+    return ($covering.Count -gt 0)
+}
+
+Invoke-Test "Alert processing rule adds action group '$actionGroupName' (Rule type: Apply action group)" {
+    if (-not $apr) { return $false }
+    # The Portal's Rule type defaults to Suppress notifications (RemoveAllActionGroups), which
+    # silences the alerts instead (#366).
+    $add = @(@($apr.Properties.actions) | Where-Object { $_ -and $_.actionType -eq 'AddActionGroups' })
+    $groups = @($add | ForEach-Object { @($_.actionGroupIds) } | Where-Object { $_ -like "*/actionGroups/$actionGroupName" })
+    $suppress = @(@($apr.Properties.actions) | Where-Object { $_ -and $_.actionType -eq 'RemoveAllActionGroups' })
+    if ($suppress.Count -gt 0) {
+        Write-Host " (the rule suppresses notifications - set Rule type to Apply action group)" -NoNewline -ForegroundColor Gray
+    }
+    return ($groups.Count -gt 0 -and $suppress.Count -eq 0)
+}
+
+Invoke-Test "Alert processing rule filters on Critical (Sev0) alerts" {
+    if (-not $apr) { return $false }
+    $severity = @(@($apr.Properties.conditions) | Where-Object {
+            $_ -and $_.field -eq 'Severity' -and $_.operator -eq 'Equals' -and @($_.values) -contains 'Sev0'
+        })
+    return ($severity.Count -gt 0)
 }
 
 # ============================================================================
