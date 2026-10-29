@@ -551,51 +551,54 @@ Invoke-Test "Alert processing rule filters on Critical (Sev0) alerts" {
 Write-Host ""
 Write-Host "[Azure Site Recovery]" -ForegroundColor Yellow
 
-if (-not (Get-AzVM -Name $asrVm -ResourceGroupName $vmRg -ErrorAction SilentlyContinue)) {
-    Write-Host "  [WARNING] VM '$asrVm' not found in '$vmRg' - skipping the Site Recovery checks (not counted as failures)." -ForegroundColor Yellow
-} else {
-    $asrRg = Get-AzResourceGroup -Name $asrRgName -ErrorAction SilentlyContinue
+$asrRg = Get-AzResourceGroup -Name $asrRgName -ErrorAction SilentlyContinue
 
-    Invoke-Test "Target group '$asrRgName' exists in North Europe" {
-        return ($null -ne $asrRg -and $asrRg.Location -eq $asrLocation)
+Invoke-Test "Target group '$asrRgName' exists in North Europe" {
+    return ($null -ne $asrRg -and $asrRg.Location -eq $asrLocation)
+}
+
+Invoke-Test "Target group carries the tags $($asrTags -join ', ')" {
+    if (-not $asrRg) { return $false }
+    $missing = @($asrTags | Where-Object { -not $asrRg.Tags -or -not $asrRg.Tags.ContainsKey($_) -or -not $asrRg.Tags[$_] })
+    if ($missing.Count -gt 0) {
+        Write-Host " (missing: $($missing -join ', ') - Lab 1.3 denies what Site Recovery creates in an untagged group)" -NoNewline -ForegroundColor Gray
     }
+    return ($missing.Count -eq 0)
+}
 
-    Invoke-Test "Target group carries the tags $($asrTags -join ', ')" {
-        if (-not $asrRg) { return $false }
-        $missing = @($asrTags | Where-Object { -not $asrRg.Tags -or -not $asrRg.Tags.ContainsKey($_) -or -not $asrRg.Tags[$_] })
-        if ($missing.Count -gt 0) {
-            Write-Host " (missing: $($missing -join ', ') - Lab 1.3 denies what Site Recovery creates in an untagged group)" -NoNewline -ForegroundColor Gray
-        }
-        return ($missing.Count -eq 0)
-    }
-
-    $asrVault = $null
-    $asrItem = $null
-    $asrLookupError = $null
-    if ($asrRg) {
-        try {
-            $asrVault = Get-AzRecoveryServicesVault -ResourceGroupName $asrRgName -ErrorAction Stop | Select-Object -First 1
-            if ($asrVault) {
-                Set-AzRecoveryServicesAsrVaultContext -Vault $asrVault | Out-Null
-                foreach ($fabric in @(Get-AzRecoveryServicesAsrFabric -ErrorAction Stop)) {
-                    foreach ($container in @(Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric -ErrorAction Stop)) {
-                        if (-not $asrItem) {
-                            $asrItem = Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $container -ErrorAction Stop |
-                                Where-Object { $_.FriendlyName -eq $asrVm } | Select-Object -First 1
-                        }
+# The vaults of the target group: main.bicep makes one, the Portal wizard may make its own.
+$asrVaults = @()
+$asrItem = $null
+$asrLookupError = $null
+if ($asrRg) {
+    try {
+        $asrVaults = @(Get-AzRecoveryServicesVault -ResourceGroupName $asrRgName -ErrorAction Stop)
+        foreach ($vault in $asrVaults) {
+            if ($asrItem) { break }
+            Set-AzRecoveryServicesAsrVaultContext -Vault $vault | Out-Null
+            foreach ($fabric in @(Get-AzRecoveryServicesAsrFabric -ErrorAction Stop)) {
+                foreach ($container in @(Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric -ErrorAction Stop)) {
+                    if (-not $asrItem) {
+                        $asrItem = Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $container -ErrorAction Stop |
+                            Where-Object { $_.FriendlyName -eq $asrVm } | Select-Object -First 1
                     }
                 }
             }
-        } catch {
-            $asrLookupError = $_.Exception.Message
         }
+    } catch {
+        $asrLookupError = $_.Exception.Message
     }
+}
 
-    Invoke-Test "Target group holds a Recovery Services vault" {
-        if ($asrLookupError) { Write-Host " (lookup failed: $asrLookupError)" -NoNewline -ForegroundColor Gray }
-        return ($null -ne $asrVault)
-    }
+Invoke-Test "Target group holds a Recovery Services vault" {
+    if ($asrLookupError) { Write-Host " (lookup failed: $asrLookupError)" -NoNewline -ForegroundColor Gray }
+    return ($asrVaults.Count -gt 0)
+}
 
+# A VM never deployed (Lab 3.2 skipped) has nothing to replicate: a WARN and a skip, as for its backup.
+if (-not (Get-AzVM -Name $asrVm -ResourceGroupName $vmRg -ErrorAction SilentlyContinue)) {
+    Write-Host "  [WARNING] VM '$asrVm' not found in '$vmRg' - skipping its replication checks (not counted as failures)." -ForegroundColor Yellow
+} else {
     Invoke-Test "'$asrVm' has a replication item in the vault" {
         if ($asrLookupError) { Write-Host " (lookup failed: $asrLookupError)" -NoNewline -ForegroundColor Gray }
         return ($null -ne $asrItem)

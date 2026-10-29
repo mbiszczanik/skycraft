@@ -395,7 +395,8 @@ The group is created in the Az PowerShell context that the lab's scripts use, so
 New-AzResourceGroup -Name platform-skycraft-neu-asr-rg -Location northeurope `
   -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = '<your name>' }
 $tags = (Get-AzResourceGroup -Name platform-skycraft-neu-asr-rg).Tags
-New-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-neu-asr-rg -Name platform-skycraft-neu-asr-rsv -Location northeurope -Tag $tags
+$asrVault = New-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-neu-asr-rg -Name platform-skycraft-neu-asr-rsv -Location northeurope -Tag $tags
+Set-AzRecoveryServicesBackupProperty -Vault $asrVault -BackupStorageRedundancy LocallyRedundant
 ```
 
 The Bicep path does both: `bicep/main.bicep` creates the group and the vault `platform-skycraft-neu-asr-rsv` through `avm/res/resources/resource-group` and `avm/res/recovery-services/vault`. The Portal wizard creates its own vault in the group, so the Portal path needs no vault of its own.

@@ -87,7 +87,8 @@ BeforeAll {
     #   SKYCRAFT_STUB_ASR            'protected' (tagged group, vault, Protected and Normal),
     #                                'initial' (still replicating), 'unhealthy' (Protected, health
     #                                Critical), 'untagged' (group without Owner), 'nogroup',
-    #                                'lookupfail' (the replication lookup throws)
+    #                                'lookupfail' (the replication lookup throws), 'novm' (the world
+    #                                VM is not deployed: the group checks still run)
     $script:StubBody = @'
 $script:Sub = '/subscriptions/00000000-0000-0000-0000-000000000000'
 $script:BvId = "$script:Sub/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.DataProtection/backupVaults/platform-skycraft-swc-bv"
@@ -157,6 +158,7 @@ function Get-AzRecoveryServicesAsrReplicationProtectedItem {
 function Get-AzVM {
     [CmdletBinding()]
     param([string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($Name -eq 'dev-skycraft-swc-world-vm' -and $env:SKYCRAFT_STUB_ASR -eq 'novm') { return }
     [pscustomobject]@{ Name = $Name }
 }
 
@@ -266,7 +268,7 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
             [string]$BlobPolicy = 'operational',
             [ValidateSet('apply', 'suppress', 'none')]
             [string]$AlertRule = 'apply',
-            [ValidateSet('protected', 'initial', 'unhealthy', 'untagged', 'nogroup', 'lookupfail')]
+            [ValidateSet('protected', 'initial', 'unhealthy', 'untagged', 'nogroup', 'lookupfail', 'novm')]
             [string]$Asr = 'protected'
         )
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
@@ -303,7 +305,8 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
     $script:AsrInitial    = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Asr 'initial'
     $script:AsrUnhealthy  = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Asr 'unhealthy'
     $script:AsrLookupFail = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Asr 'lookupfail'
-    $script:AllRuns       = @($script:ScriptedVault, $script:PortalVault, $script:OnVault, $script:AsrInitial, $script:AsrUnhealthy, $script:AsrLookupFail)
+    $script:AsrNoVm       = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Asr 'novm'
+    $script:AllRuns       = @($script:ScriptedVault, $script:PortalVault, $script:OnVault, $script:AsrInitial, $script:AsrUnhealthy, $script:AsrLookupFail, $script:AsrNoVm)
 }
 
 AfterAll {
@@ -462,5 +465,12 @@ Describe 'Lab 5.2 Test-Lab.ps1 - Azure Site Recovery (#366)' {
         $line = Get-CheckLine -Run $script:AsrLookupFail -Label "'dev-skycraft-swc-world-vm' has a replication item"
         $line | Should -Match 'FAIL$' -Because "output was:`n$($script:AsrLookupFail.Output)"
         $line | Should -Match 'lookup failed: The server returned a throttling error'
+    }
+
+    It 'still checks the group and the vault when the world VM is not deployed, and skips only the replication checks' {
+        Get-CheckLine -Run $script:AsrNoVm -Label "Target group 'platform-skycraft-neu-asr-rg' exists" | Should -Match 'PASS$' -Because "output was:`n$($script:AsrNoVm.Output)"
+        Get-CheckLine -Run $script:AsrNoVm -Label 'Target group holds a Recovery Services vault' | Should -Match 'PASS$'
+        $script:AsrNoVm.Output | Should -Match "VM 'dev-skycraft-swc-world-vm' not found .* skipping its replication checks"
+        Get-CheckLine -Run $script:AsrNoVm -Label "Replication of 'dev-skycraft-swc-world-vm' is Protected" | Should -BeNullOrEmpty
     }
 }
