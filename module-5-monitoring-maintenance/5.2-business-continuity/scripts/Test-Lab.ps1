@@ -26,6 +26,16 @@
     Note: Azure Site Recovery replication status must be verified manually
     in the Azure Portal (the ASR replication flow is portal-only per Step 5.2.6).
 
+.PARAMETER ProtectionTimeoutSeconds
+    How long the blob backup instance check keeps polling while the instance is still
+    configuring (protection state ConfiguringProtection, or provisioning state Creating or
+    Updating), before it fails with the state named. New-LabBlobBackup.ps1 returns before the
+    service finishes configuring protection, so a test right after it sees that state (#371).
+    A terminal state such as Failed or ProtectionError fails at once. Default 300.
+
+.PARAMETER ProtectionPollSeconds
+    Seconds between polls of the instance while it is configuring. Default 15.
+
 .EXAMPLE
     .\Test-Lab.ps1
 
@@ -40,7 +50,15 @@
 #Requires -Modules Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Storage, Az.Compute
 
 [CmdletBinding()]
-param()
+param(
+    [Parameter()]
+    [ValidateRange(0, 3600)]
+    [int]$ProtectionTimeoutSeconds = 300,
+
+    [Parameter()]
+    [ValidateRange(0, 300)]
+    [int]$ProtectionPollSeconds = 15
+)
 
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
@@ -420,14 +438,26 @@ Invoke-Test "Blob backup instance protection is configured and provisioned" {
     if (-not $bv) { return $false }
     $storageId = (Get-AzStorageAccount -ResourceGroupName $prodRg -Name $storageAccount -ErrorAction SilentlyContinue).Id
     if (-not $storageId) { return $false }
-    $instances = Get-AzDataProtectionBackupInstance -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction SilentlyContinue
-    $instance = @($instances | Where-Object { $_.Property.DataSourceInfo.ResourceId -eq $storageId }) | Select-Object -First 1
-    if (-not $instance) { return $false }
-    $protection = "$($instance.Property.CurrentProtectionState)"
-    $provisioning = "$($instance.Property.ProvisioningState)"
-    if ($protection -eq 'ProtectionConfigured' -and $provisioning -eq 'Succeeded') { return $true }
-    Write-Host " (protection state '$protection', provisioning state '$provisioning'; expected ProtectionConfigured and Succeeded)" -NoNewline -ForegroundColor Gray
-    return $false
+    $deadline = (Get-Date).AddSeconds($ProtectionTimeoutSeconds)
+    while ($true) {
+        $instances = Get-AzDataProtectionBackupInstance -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction SilentlyContinue
+        $instance = @($instances | Where-Object { $_.Property.DataSourceInfo.ResourceId -eq $storageId }) | Select-Object -First 1
+        if (-not $instance) { return $false }
+        $protection = "$($instance.Property.CurrentProtectionState)"
+        $provisioning = "$($instance.Property.ProvisioningState)"
+        if ($protection -eq 'ProtectionConfigured' -and $provisioning -eq 'Succeeded') { return $true }
+        # Only an in-progress state is retried; Failed, ProtectionError and the rest fail at once,
+        # also when the other field is still in progress.
+        $terminal = $provisioning -in @('Failed', 'Canceled') -or $protection -like '*Error*' -or $protection -like '*Failed*'
+        $inProgress = -not $terminal -and ($protection -eq 'ConfiguringProtection' -or $provisioning -in @('Creating', 'Updating'))
+        if ($inProgress -and (Get-Date) -lt $deadline) {
+            Write-Host "`n    ... protection state '$protection', provisioning state '$provisioning'; checking again in $ProtectionPollSeconds s" -NoNewline -ForegroundColor Yellow
+            Start-Sleep -Seconds $ProtectionPollSeconds
+            continue
+        }
+        Write-Host " (protection state '$protection', provisioning state '$provisioning'; expected ProtectionConfigured and Succeeded)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
 }
 
 # ============================================================================
