@@ -217,7 +217,7 @@ New-AzRoleAssignment -ObjectId $sp.Id -RoleDefinitionName 'Key Vault Administrat
 
 `Get-AzADServicePrincipal` and `New-AzRoleAssignment` look the app up in Microsoft Graph. If either fails with `MicrosoftGraphEndpointResourceId`, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md) for the sign-in that gives Az a Graph token.
 
-The Bicep path grants the same role: `bicep/main.bicep` calls `avm/ptn/authorization/resource-role-assignment` on `dev-skycraft-swc-kv`, and `Deploy-Bicep.ps1` passes the app's object ID, or nothing when the app holds the role already (a second grant fails with `RoleAssignmentExists`).
+The Bicep path grants the same role: `bicep/main.bicep` calls `avm/ptn/authorization/resource-role-assignment` on `dev-skycraft-swc-kv`, and `Deploy-Bicep.ps1` passes the app's object ID, or nothing when the app holds the role already (a second grant fails with `RoleAssignmentExists`). If you gave Lab 3.2's key vault a name of your own, pass it as `-KeyVaultName` to `Deploy-Bicep.ps1`, `Test-Lab.ps1` and `Remove-LabResource.ps1`.
 
 **b. Enable backup**
 

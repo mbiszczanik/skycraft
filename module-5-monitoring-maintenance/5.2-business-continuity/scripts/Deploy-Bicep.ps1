@@ -40,6 +40,11 @@
     Prerequisites: Lab 3.2 (VM and key vault) and Lab 5.1 (Log Analytics Workspace and action
     group skycraft-ops-ag) must be deployed.
 
+.PARAMETER KeyVaultName
+    Name of Lab 3.2's key vault in dev-skycraft-swc-rg, when it was created under another name
+    (key vault names are globally unique). Pass the same name to Test-Lab.ps1 and
+    Remove-LabResource.ps1. Default: dev-skycraft-swc-kv
+
 .PARAMETER WhatIf
     Run deployment in what-if mode (dry run).
 
@@ -50,6 +55,10 @@
     .\Deploy-Bicep.ps1
 
 .EXAMPLE
+    .\Deploy-Bicep.ps1 -KeyVaultName dev-skycraft-swc-kv-ab
+    Lab 3.2's key vault carries a suffix of its own.
+
+.EXAMPLE
     .\Deploy-Bicep.ps1 -WhatIf
 
 .EXAMPLE
@@ -58,8 +67,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.2.0
-    Date: 2026-10-28
+    Version: 1.3.0
+    Date: 2026-10-29
 #>
 
 #Requires -Version 7.0
@@ -67,6 +76,10 @@
 
 [CmdletBinding()]
 param(
+    [Parameter()]
+    [ValidateLength(3, 24)]
+    [string]$KeyVaultName = 'dev-skycraft-swc-kv',
+
     [Parameter()]
     [switch]$WhatIf,
 
@@ -87,7 +100,6 @@ $workspaceName  = 'platform-skycraft-swc-law'
 $vmNames        = @('dev-skycraft-swc-auth-vm', 'dev-skycraft-swc-world-vm')
 $vmRg           = 'dev-skycraft-swc-rg'
 $actionGroupName = 'skycraft-ops-ag'
-$keyVaultName   = 'dev-skycraft-swc-kv'
 # Built-in ids, the same in every tenant: the Backup Management Service app and Key Vault Administrator.
 $backupManagementServiceAppId = '262044b1-e2ce-469f-a196-69ab7ada62d3'
 $keyVaultAdministratorRoleId  = '00482a5a-887f-4fb3-b363-3b7fe8e74483'
@@ -219,6 +231,7 @@ $deployParams = @{
     TemplateFile   = $templatePath
     parWorkspaceId = $workspaceId
     parBackupManagementServicePrincipalId = $backupServicePrincipalId
+    parKeyVaultName = $KeyVaultName
     ErrorAction    = 'Stop'
 }
 

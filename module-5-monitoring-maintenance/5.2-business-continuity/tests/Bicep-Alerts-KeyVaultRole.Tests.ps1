@@ -91,7 +91,7 @@ Describe 'Lab 5.2 main.bicep - alert processing rule (#366)' {
         $actions | Should -HaveCount 1
         $actions[0].actionType | Should -Be 'AddActionGroups'
         Resolve-TemplateValue @($actions[0].actionGroupIds)[0] |
-            Should -Be "[resourceId(variables('varPlatformRgName'), 'Microsoft.Insights/actionGroups', 'skycraft-ops-ag')]"
+            Should -Be "[resourceId(subscription().subscriptionId, variables('varPlatformRgName'), 'Microsoft.Insights/actionGroups', 'skycraft-ops-ag')]"
     }
 
     It 'filters on Critical (Sev0) alerts' {
@@ -123,9 +123,16 @@ Describe 'Lab 5.2 main.bicep - Key Vault role of Backup Management Service (#368
         Resolve-TemplateValue $p.roleDefinitionId.value | Should -Be '00482a5a-887f-4fb3-b363-3b7fe8e74483'
         $p.principalType.value | Should -Be 'ServicePrincipal'
         $p.principalId.value | Should -Be "[parameters('parBackupManagementServicePrincipalId')]"
-        $p.resourceId.value | Should -Be "[resourceId(variables('varKeyVaultRgName'), 'Microsoft.KeyVault/vaults', variables('varKeyVaultName'))]"
-        $script:Template.variables.varKeyVaultName | Should -Be 'dev-skycraft-swc-kv'
+        $p.resourceId.value | Should -Be "[resourceId(subscription().subscriptionId, variables('varKeyVaultRgName'), 'Microsoft.KeyVault/vaults', parameters('parKeyVaultName'))]"
     }
+
+    It 'takes the vault name as parKeyVaultName, dev-skycraft-swc-kv by default, and Deploy-Bicep.ps1 passes it' {
+        $script:Template.parameters.parKeyVaultName.defaultValue | Should -Be 'dev-skycraft-swc-kv'
+        $script:Template.parameters.parKeyVaultName.minLength | Should -Be 3
+        $script:Template.parameters.parKeyVaultName.maxLength | Should -Be 24
+        $script:DeployText | Should -Match 'parKeyVaultName\s*=\s*\$KeyVaultName'
+    }
+
 
     It 'is fed by Deploy-Bicep.ps1, which finds the app by its built-in application ID' {
         $script:DeployText | Should -Match 'parBackupManagementServicePrincipalId\s*=\s*\$backupServicePrincipalId'

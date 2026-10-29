@@ -296,7 +296,15 @@ function Get-AzResource {
 function Remove-AzResource {
     [CmdletBinding()]
     param($ResourceId, [switch]$Force)
-    if ($ResourceId -like '*/actionRules/*') { Invoke-StubGate -Name 'Remove-AzResource:apr'; return }
+    if ($ResourceId -like '*/actionRules/*') {
+        # What ARM answers while Lab 1.3's CanNotDelete lock is on the group.
+        if ($env:SKYCRAFT_STUB_APRLOCK -eq '1') {
+            Write-StubCall -Name 'Remove-AzResource:apr'
+            throw 'ScopeLocked: The scope ''/subscriptions/0/resourceGroups/platform-skycraft-swc-rg'' cannot perform delete operation because following scope(s) are locked.'
+        }
+        Invoke-StubGate -Name 'Remove-AzResource:apr'
+        return
+    }
     Invoke-StubGate -Name 'Remove-AzResource'
 }
 
@@ -321,13 +329,15 @@ function Remove-AzResourceGroup {
             [string]$RecoveryServicesVersion = '7.7.1',
             [switch]$Empty,
             [switch]$NoFriendlyName,
-            [switch]$AlertRule
+            [switch]$AlertRule,
+            [switch]$AlertRuleLocked,
+            [string]$KeyVaultName
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
 
-        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList '-Force' -Environment @{
+        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList (@('-Force') + $(if ($KeyVaultName) { '-KeyVaultName', $KeyVaultName })) -Environment @{
             SKYCRAFT_STUB_FAIL       = $Fail -join ','
             SKYCRAFT_STUB_LOOKUP     = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY      = if ($Empty) { '1' } else { '0' }
@@ -335,6 +345,7 @@ function Remove-AzResourceGroup {
             SKYCRAFT_STUB_RSVERSION  = $RecoveryServicesVersion
             SKYCRAFT_STUB_NOFRIENDLY = if ($NoFriendlyName) { '1' } else { '0' }
             SKYCRAFT_STUB_APR        = if ($AlertRule) { '1' } else { '0' }
+            SKYCRAFT_STUB_APRLOCK    = if ($AlertRuleLocked) { '1' } else { '0' }
         }
 
         $calls = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { @() }
@@ -397,6 +408,10 @@ function Remove-AzResourceGroup {
     $script:AprStuck  = Invoke-CleanupScript -Stub $script:Stub -AlertRule -Fail 'Remove-AzResource:apr'
     $script:AprDenied = Invoke-CleanupScript -Stub $script:Stub -AlertRule -Lookup 'Get-AzResource:apr=denied'
     $script:AprGone   = Invoke-CleanupScript -Stub $script:Stub -AlertRule -Lookup 'Get-AzResource:apr=notfound'
+    $script:AprLocked = Invoke-CleanupScript -Stub $script:Stub -AlertRule -AlertRuleLocked
+
+    # The Key Vault Administrator role stays on Lab 3.2's key vault, whatever its name.
+    $script:VaultNamed = Invoke-CleanupScript -Stub $script:Stub -KeyVaultName 'dev-skycraft-swc-kv-ab'
 }
 
 AfterAll {
@@ -539,6 +554,38 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - alert processing rule (#366)' {
         $script:AprDenied.ExitCode | Should -Be 1 -Because "output was:`n$($script:AprDenied.Output)"
         $script:AprDenied.Output   | Should -Match '\[ERROR\] Could not look up alert processing rule skycraft-backup-critical-apr'
         $script:AprDenied.Calls    | Should -Not -Contain 'Remove-AzResource:apr'
+    }
+}
+
+Describe 'Lab 5.2 Remove-LabResource.ps1 - alert processing rule under Lab 1.3''s delete lock (#372)' {
+
+    It 'counts a ScopeLocked delete, exits 1 and says which lock to lift' {
+        $script:AprLocked.ExitCode | Should -Be 1 -Because "output was:`n$($script:AprLocked.Output)"
+        $script:AprLocked.Output   | Should -Match "\[ERROR\] Could not delete alert processing rule 'skycraft-backup-critical-apr': ScopeLocked"
+        $script:AprLocked.Output   | Should -Match 'CanNotDelete lock on platform-skycraft-swc-rg \(Lab 1\.3\) blocks the delete'
+    }
+
+    It 'keeps the delete in one block with its counting inside, ready to run inside a lock helper' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$null, [ref]$null)
+        $assign = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$deleteAlertProcessingRules' }, $true)
+        $assign | Should -HaveCount 1
+        $body = $assign[0].Right.Extent.Text
+        $body | Should -Match 'Remove-AzResource -ResourceId \$r\.ResourceId'
+        $body | Should -Match '\$script:cleanupFailures\+\+'
+    }
+}
+
+Describe 'Lab 5.2 Remove-LabResource.ps1 - key vault name (#438)' {
+
+    It 'takes -KeyVaultName and names it in the note on the role that stays' {
+        $script:VaultNamed.ExitCode | Should -Be 0 -Because "output was:`n$($script:VaultNamed.Output)"
+        $script:VaultNamed.Output   | Should -Match 'keeps Key Vault Administrator on dev-skycraft-swc-kv-ab'
+        $script:Clean.Output        | Should -Match 'keeps Key Vault Administrator on dev-skycraft-swc-kv\.'
+    }
+
+    It 'declares the parameter, which the lab cycle passes when it deploys a unique vault name' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$null, [ref]$null)
+        @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath }) | Should -Contain 'KeyVaultName'
     }
 }
 

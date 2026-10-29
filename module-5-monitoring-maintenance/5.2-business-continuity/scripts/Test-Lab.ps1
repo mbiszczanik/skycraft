@@ -33,21 +33,32 @@
     Note: Azure Site Recovery replication status must be verified manually
     in the Azure Portal (the ASR replication flow is portal-only per Step 5.2.6).
 
+.PARAMETER KeyVaultName
+    Name of Lab 3.2's key vault in dev-skycraft-swc-rg, when it was created under another name
+    (key vault names are globally unique). Default: dev-skycraft-swc-kv
+
 .EXAMPLE
     .\Test-Lab.ps1
+
+.EXAMPLE
+    .\Test-Lab.ps1 -KeyVaultName dev-skycraft-swc-kv-ab
 
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.2.0
-    Date: 2026-10-28
+    Version: 1.3.0
+    Date: 2026-10-29
 #>
 
 #Requires -Version 7.0
 #Requires -Modules Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Storage, Az.Compute
 
 [CmdletBinding()]
-param()
+param(
+    [Parameter()]
+    [ValidateLength(3, 24)]
+    [string]$KeyVaultName = 'dev-skycraft-swc-kv'
+)
 
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
@@ -62,7 +73,6 @@ $encryptedVmName = 'dev-skycraft-swc-auth-vm'
 $backupVmNames  = @($encryptedVmName, 'dev-skycraft-swc-world-vm')
 $vmRg           = 'dev-skycraft-swc-rg'
 $storageAccount = 'prodskycraftswcsa'
-$keyVaultName   = 'dev-skycraft-swc-kv'
 $aprName        = 'skycraft-backup-critical-apr'
 $actionGroupName = 'skycraft-ops-ag'
 # Built-in ids, the same in every tenant: the Backup Management Service app and Key Vault Administrator.

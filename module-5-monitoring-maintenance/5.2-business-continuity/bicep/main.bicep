@@ -3,7 +3,7 @@ SUMMARY: Lab 5.2 - Business Continuity & Disaster Recovery - Orchestrator
 DESCRIPTION: Deploys the SkyCraft BCDR vaults into platform-skycraft-swc-rg through Azure Verified Modules - the Recovery Services Vault for VM backup (LRS, platform-enforced AlwaysON soft delete, backup-report diagnostics) and the Backup Vault for blob backup (LRS, system-assigned identity, soft delete Off) - plus the Backup Vault's diagnostic setting through a local fallback module, the tagged resource group that holds the VM's instant-restore snapshots, the alert processing rule that sends the vault's Critical alerts to Lab 5.1's action group, and the Key Vault Administrator role of the Backup Management Service app on Lab 3.2's key vault. Backup policies are created by Deploy-Bicep.ps1 and New-LabBlobBackup.ps1 (docs/bicep-standards.md section 10.4)
 EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
-VERSION: 2.2.0
+VERSION: 2.3.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -32,6 +32,11 @@ param parWorkspaceId string
 @description('Object ID of the service principal of the Backup Management Service app in this tenant. Empty skips the Key Vault role, for a tenant where it is held already (a second grant fails with RoleAssignmentExists)')
 param parBackupManagementServicePrincipalId string = ''
 
+@description('Name of the key vault Lab 3.2 creates in dev-skycraft-swc-rg; pass the unique name when the default is taken')
+@minLength(3)
+@maxLength(24)
+param parKeyVaultName string = 'dev-skycraft-swc-kv'
+
 /*******************
 *    Variables     *
 *******************/
@@ -50,13 +55,12 @@ var varRsvDiagName = 'rsv-backup-reports-diag'
 var varBvDiagName = 'bv-backup-reports-diag'
 
 // Lab 5.1's action group; the alert processing rule adds it to the vault's Critical alerts.
-var varActionGroupId = resourceId(varPlatformRgName, 'Microsoft.Insights/actionGroups', 'skycraft-ops-ag')
+var varActionGroupId = resourceId(subscription().subscriptionId, varPlatformRgName, 'Microsoft.Insights/actionGroups', 'skycraft-ops-ag')
 var varAlertProcessingRuleName = 'skycraft-backup-critical-apr'
 
 // Lab 3.2 encrypts dev-skycraft-swc-auth-vm with Azure Disk Encryption, keys in this vault. VM backup
 // reads them as the Backup Management Service app, not as the vault's identity (issue #368).
 var varKeyVaultRgName = 'dev-skycraft-swc-rg'
-var varKeyVaultName = 'dev-skycraft-swc-kv'
 var varKeyVaultAdministratorRoleId = '00482a5a-887f-4fb3-b363-3b7fe8e74483'
 
 // Instant-restore snapshot group. Azure Backup names it <prefix><n><suffix> with n starting at 1,
@@ -212,7 +216,7 @@ module modBackupKeyVaultRole 'br/public:avm/ptn/authorization/resource-role-assi
   name: 'bcdr-kv-backup-role-deployment'
   scope: resourceGroup(varKeyVaultRgName)
   params: {
-    resourceId: resourceId(varKeyVaultRgName, 'Microsoft.KeyVault/vaults', varKeyVaultName)
+    resourceId: resourceId(subscription().subscriptionId, varKeyVaultRgName, 'Microsoft.KeyVault/vaults', parKeyVaultName)
     roleDefinitionId: varKeyVaultAdministratorRoleId
     roleName: 'Key Vault Administrator'
     principalId: parBackupManagementServicePrincipalId

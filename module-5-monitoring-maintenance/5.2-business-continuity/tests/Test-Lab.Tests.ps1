@@ -73,6 +73,7 @@ BeforeAll {
 
     #   SKYCRAFT_STUB_BVSOFTDELETE   the Backup vault's softDeleteSettings.state: 'Off' (Az
     #                                PowerShell or Bicep), 'AlwaysOn' (the Portal), or 'On'
+    #   SKYCRAFT_STUB_KVNAME         the key vault's name, when Lab 3.2 created it under another one
     #   SKYCRAFT_STUB_KVROLE         'held': the app holds Key Vault Administrator on the vault;
     #                                'missing'; 'graphfail': the app lookup throws
     #   SKYCRAFT_STUB_BLOBPOLICY     'operational' (the script's), 'vaulted' (the Portal's), 'none'
@@ -81,7 +82,8 @@ BeforeAll {
 $script:Sub = '/subscriptions/00000000-0000-0000-0000-000000000000'
 $script:BvId = "$script:Sub/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.DataProtection/backupVaults/platform-skycraft-swc-bv"
 $script:RsvId = "$script:Sub/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.RecoveryServices/vaults/platform-skycraft-swc-rsv"
-$script:KvId = "$script:Sub/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.KeyVault/vaults/dev-skycraft-swc-kv"
+$script:KvName = if ($env:SKYCRAFT_STUB_KVNAME) { $env:SKYCRAFT_STUB_KVNAME } else { 'dev-skycraft-swc-kv' }
+$script:KvId = "$script:Sub/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.KeyVault/vaults/$script:KvName"
 $script:AprId = "$script:Sub/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.AlertsManagement/actionRules/skycraft-backup-critical-apr"
 $script:AgId = "$script:Sub/resourceGroups/platform-skycraft-swc-rg/providers/microsoft.insights/actionGroups/skycraft-ops-ag"
 $script:BackupSp = '22222222-2222-2222-2222-222222222222'
@@ -219,9 +221,12 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
             [ValidateSet('operational', 'vaulted', 'none')]
             [string]$BlobPolicy = 'operational',
             [ValidateSet('apply', 'suppress', 'none')]
-            [string]$AlertRule = 'apply'
+            [string]$AlertRule = 'apply',
+            [string]$KeyVaultName
         )
-        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
+        $arguments = if ($KeyVaultName) { @('-KeyVaultName', $KeyVaultName) } else { @() }
+        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList $arguments -Environment @{
+            SKYCRAFT_STUB_KVNAME       = $KeyVaultName
             SKYCRAFT_STUB_BVSOFTDELETE = $SoftDelete
             SKYCRAFT_STUB_KVROLE       = $KeyVaultRole
             SKYCRAFT_STUB_BLOBPOLICY   = $BlobPolicy
@@ -251,7 +256,8 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
     $script:ScriptedVault = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off'
     $script:PortalVault   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'AlwaysOn' -KeyVaultRole 'missing' -BlobPolicy 'vaulted' -AlertRule 'suppress'
     $script:OnVault       = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'On' -KeyVaultRole 'graphfail' -BlobPolicy 'none' -AlertRule 'none'
-    $script:AllRuns       = @($script:ScriptedVault, $script:PortalVault, $script:OnVault)
+    $script:UniqueVault   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -KeyVaultName 'dev-skycraft-swc-kv-ab'
+    $script:AllRuns       = @($script:ScriptedVault, $script:PortalVault, $script:OnVault, $script:UniqueVault)
 }
 
 AfterAll {
@@ -264,6 +270,14 @@ Describe 'Lab 5.2 Test-Lab.ps1 - test harness' {
         foreach ($run in $script:AllRuns) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az commands (exit $($run.ExitCode)): $($run.Output)"
         }
+    }
+
+    It 'defines each stub function once' {
+        # A second definition (a merge of two suites that both add a stub) silently replaces the first.
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($script:StubBody + (Get-LabArmRoleAssignmentStub), [ref]$null, [ref]$null)
+        $names = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name }
+        @($names | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name) | Should -BeNullOrEmpty
+        @($script:StubCommands | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name) | Should -BeNullOrEmpty
     }
 
     It 'stubs every Az command the script calls' {
@@ -307,6 +321,12 @@ Describe 'Lab 5.2 Test-Lab.ps1 - Key Vault role of Backup Management Service (#3
     It 'passes when the app holds Key Vault Administrator on the key vault' {
         Get-CheckLine -Run $script:ScriptedVault -Label "Backup Management Service holds Key Vault Administrator on 'dev-skycraft-swc-kv'" |
             Should -Match 'PASS$' -Because "output was:`n$($script:ScriptedVault.Output)"
+    }
+
+    It 'checks the key vault named by -KeyVaultName, the unique name of a class' {
+        Get-CheckLine -Run $script:UniqueVault -Label "Backup Management Service holds Key Vault Administrator on 'dev-skycraft-swc-kv-ab'" |
+            Should -Match 'PASS$' -Because "output was:`n$($script:UniqueVault.Output)"
+        Get-CheckLine -Run $script:ScriptedVault -Label "Backup Management Service holds Key Vault Administrator on 'dev-skycraft-swc-kv-ab'" | Should -BeNullOrEmpty
     }
 
     It 'fails when the role is missing and points to Step 5.2.3' {

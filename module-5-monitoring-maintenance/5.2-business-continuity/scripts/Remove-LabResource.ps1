@@ -56,6 +56,11 @@
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
     it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
+.PARAMETER KeyVaultName
+    Name of Lab 3.2's key vault, when it was created under another name. The script does not
+    touch the vault; the name only appears in the note on the Key Vault Administrator role that
+    stays on it. Default: dev-skycraft-swc-kv
+
 .PARAMETER Force
     Skip confirmation prompts.
 
@@ -68,8 +73,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.4.0
-    Date: 2026-10-28
+    Version: 1.5.0
+    Date: 2026-10-29
 #>
 
 #Requires -Version 7.0
@@ -77,6 +82,10 @@
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
+    [Parameter()]
+    [ValidateLength(3, 24)]
+    [string]$KeyVaultName = 'dev-skycraft-swc-kv',
+
     [Parameter()]
     [switch]$Force
 )
@@ -561,18 +570,26 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BackupResourceGr
     }
 }
 
-# 8. Delete the alert processing rule.
-foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'AlertProcessingRule' }) {
-    if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete alert processing rule')) { continue }
-    Write-Host "  Deleting alert processing rule: $($r.Name)..." -ForegroundColor Gray
-    try {
-        Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null
-        Write-Host "  ✓ Deleted" -ForegroundColor Green
-    } catch {
-        $script:cleanupFailures++
-        Write-Host "  [ERROR] Could not delete alert processing rule '$($r.Name)': $_" -ForegroundColor Red
+# 8. Delete the alert processing rule. The delete is one self-contained block that counts its
+#    failures in $script: so it can run inside Invoke-LabWithoutLock (#372) once that helper lands;
+#    until then Lab 1.3's CanNotDelete lock on the group refuses it (ScopeLocked) and the run exits 1.
+$deleteAlertProcessingRules = {
+    foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'AlertProcessingRule' }) {
+        if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete alert processing rule')) { continue }
+        Write-Host "  Deleting alert processing rule: $($r.Name)..." -ForegroundColor Gray
+        try {
+            Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        } catch {
+            $script:cleanupFailures++
+            Write-Host "  [ERROR] Could not delete alert processing rule '$($r.Name)': $_" -ForegroundColor Red
+            if ("$_" -match 'ScopeLocked') {
+                Write-Host "    A CanNotDelete lock on $platformRg (Lab 1.3) blocks the delete: lift it, rerun, restore it." -ForegroundColor Gray
+            }
+        }
     }
 }
+& $deleteAlertProcessingRules
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 if ($script:cleanupFailures -gt 0) {
@@ -581,6 +598,7 @@ if ($script:cleanupFailures -gt 0) {
     Write-Host "  See the [ERROR] lines above - this run exits 1, nothing was masked." -ForegroundColor Gray
     Write-Host "  VMs, VNets, and Storage Accounts were NOT deleted." -ForegroundColor Gray
     Write-Host "  ASR replication resources must be removed via Azure Portal." -ForegroundColor Gray
+    Write-Host "  Backup Management Service keeps Key Vault Administrator on $KeyVaultName." -ForegroundColor Gray
     Write-Host "========================================`n" -ForegroundColor Cyan
     Exit-Lab -FailureCount 1
 }
@@ -589,4 +607,5 @@ Write-Host "  Cleanup Complete" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  VMs, VNets, and Storage Accounts were NOT deleted." -ForegroundColor Gray
 Write-Host "  ASR replication resources must be removed via Azure Portal." -ForegroundColor Gray
+Write-Host "  Backup Management Service keeps Key Vault Administrator on $KeyVaultName." -ForegroundColor Gray
 Write-Host "========================================`n" -ForegroundColor Cyan

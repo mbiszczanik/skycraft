@@ -509,8 +509,10 @@ Describe 'Manifest - every argument is a real parameter of the script it is pass
 }
 
 Describe 'Manifest - unique names (#438)' {
-    It 'declares the three names unique across Azure that labs 3.2-3.4 create' {
-        @($script:Manifest.UniqueNames | ForEach-Object { $_.Parameter }) | Should -Be @('KeyVaultName', 'AcrName', 'AppName')
+    It 'declares the three names unique across Azure that labs 3.2-3.4 create, and the vault lab 5.2 uses' {
+        @($script:Manifest.UniqueNames | ForEach-Object { $_.Parameter }) | Should -Be @('KeyVaultName', 'AcrName', 'AppName', 'KeyVaultName')
+        $script:Manifest.UniqueNames | Where-Object { $_.Parameter -eq 'KeyVaultName' -and $_.Lab -like '*5.2-business-continuity' } |
+            ForEach-Object { $_.Default } | Should -Be 'dev-skycraft-swc-kv'
     }
 
     It 'gives each lab it names a live phase and exactly one teardown invocation' {
@@ -525,7 +527,7 @@ Describe 'Manifest - unique names (#438)' {
 
     It 'names, as the vault default, the name lab 3.2''s dev soft-delete guard checks' {
         # Otherwise the guard keeps checking the default while the run deploys another name.
-        $vault = $script:Manifest.UniqueNames | Where-Object { $_.Parameter -eq 'KeyVaultName' }
+        $vault = $script:Manifest.UniqueNames | Where-Object { $_.Parameter -eq 'KeyVaultName' -and $_.Lab -like '*3.2-virtual-machines' }
         @($script:Manifest.SoftDeleteGuards | Where-Object { $_.Lab -eq $vault.Lab -and $_.Name -eq $vault.Default }).Count | Should -Be 1
     }
 }

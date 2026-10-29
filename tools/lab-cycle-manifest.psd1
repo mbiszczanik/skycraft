@@ -437,6 +437,7 @@
         @{ Parameter = 'KeyVaultName'; Lab = 'module-3-compute/3.2-virtual-machines'; Default = 'dev-skycraft-swc-kv' }
         @{ Parameter = 'AcrName';      Lab = 'module-3-compute/3.3-containers';       Default = 'devskycraftswcacr01' }
         @{ Parameter = 'AppName';      Lab = 'module-3-compute/3.4-app-service';      Default = 'dev-skycraft-swc-app01' }
+        @{ Parameter = 'KeyVaultName'; Lab = 'module-5-monitoring-maintenance/5.2-business-continuity'; Default = 'dev-skycraft-swc-kv' }
     )
 
     # -- Teardown -------------------------------------------------------------------------------
