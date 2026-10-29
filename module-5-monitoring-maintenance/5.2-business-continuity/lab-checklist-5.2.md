@@ -269,7 +269,7 @@ Get-AzDataProtectionBackupInstance -ResourceGroupName 'platform-skycraft-swc-rg'
 
 ```powershell
 # ASR replication lives in the vault of the North Europe target group
-$vault = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-neu-asr-rg -Name platform-skycraft-neu-asr-rsv
+$vault = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-neu-asr-rg | Select-Object -First 1
 Set-AzRecoveryServicesAsrVaultContext -Vault $vault | Out-Null
 $items = foreach ($fabric in Get-AzRecoveryServicesAsrFabric) {
     foreach ($container in Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric) {

@@ -96,8 +96,8 @@ var varCommonTags = {
   Owner: parOwner
 }
 
-// Ubuntu 22.04 LTS Gen2, pinned: 22.04.202506200 boots kernel 6.8.0-1030-azure, which every Azure
-// Site Recovery agent listed supports. 'latest' booted 6.8.0-1065-azure and Lab 5.2's replication
+// Ubuntu 22.04 LTS Gen2, pinned: 22.04.202506200 boots kernel 6.8.0-1030-azure, which the Azure
+// Site Recovery support matrix lists from agent 9.66 on. 'latest' booted 6.8.0-1065-azure and Lab 5.2's replication
 // failed with ASRMobilityServiceKernelNotSupportedV2 (issue #366, decision 2026-10-28).
 var varImageReference = {
   publisher: 'Canonical'

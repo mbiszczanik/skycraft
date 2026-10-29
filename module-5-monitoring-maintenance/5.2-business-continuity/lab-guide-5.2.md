@@ -404,7 +404,7 @@ The Bicep path does both: `bicep/main.bicep` creates the group and the vault `pl
 
 **b. Check the kernel**
 
-Site Recovery's Mobility service accepts an Ubuntu VM only when the full version of the running kernel is on its list. A VM from `Deploy-Bicep.ps1` of Lab 3.2 boots `6.8.0-1030-azure`, which is listed for every agent version. Open `dev-skycraft-swc-world-vm` and, under **Operations** (expand it if it is collapsed), click **Run command** → **RunShellScript**, and run:
+Site Recovery's Mobility service accepts an Ubuntu VM only when the full version of the running kernel is on its list. A VM from `Deploy-Bicep.ps1` of Lab 3.2 boots `6.8.0-1030-azure`, which Microsoft Learn's support matrix lists from Mobility service 9.66 on. Open `dev-skycraft-swc-world-vm` and, under **Operations** (expand it if it is collapsed), click **Run command** → **RunShellScript**, and run:
 
 ```bash
 uname -r
@@ -454,7 +454,7 @@ The recovery size of the copy defaults to `Standard_DC4as_cc_v5`, a 4-vCPU confi
 
 #### Test failover: Azure Portal (GUI)
 
-1. Open the vault `platform-skycraft-neu-asr-rsv` in `platform-skycraft-neu-asr-rg` and, under **Protected items** (expand it if it is collapsed), click **Replicated items** → `dev-skycraft-swc-world-vm`.
+1. Open the Recovery Services vault in `platform-skycraft-neu-asr-rg` (the one the wizard created; the Bicep and Az PowerShell paths name it `platform-skycraft-neu-asr-rsv`) and, under **Protected items** (expand it if it is collapsed), click **Replicated items** → `dev-skycraft-swc-world-vm`.
 2. Click **Compute and Network** → **Edit**, set **Size** to the size of the source VM (`Standard_B2ls_v2` unless you resized it in Lab 3.2) → **Save**.
 3. Click **Test Failover**:
 
@@ -470,7 +470,7 @@ The recovery size of the copy defaults to `Standard_DC4as_cc_v5`, a 4-vCPU confi
 #### Test failover: Azure PowerShell
 
 ```powershell
-$vault = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-neu-asr-rg -Name platform-skycraft-neu-asr-rsv
+$vault = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-neu-asr-rg | Select-Object -First 1
 Set-AzRecoveryServicesAsrVaultContext -Vault $vault | Out-Null
 $item = foreach ($fabric in Get-AzRecoveryServicesAsrFabric) {
   foreach ($container in Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric) {
@@ -781,7 +781,7 @@ If the Activity Log names the restore point collection, check that `platform-sky
 
 **Symptom**: The *Enable replication* job fails with `ASRMobilityServiceKernelNotSupportedV2`, naming the kernel of the VM (`6.8.0-1065-azure` in the live run of 2026-10-16) and kernels it supports. `Enable-SiteRecovery.ps1` reports the same job error.
 
-**Root Cause**: For Ubuntu, the Mobility service compares the **full version of the running kernel** with its list; a newer stock kernel is unsupported until a hotfix lists it. The list for 22.04 ended at `6.8.0-1041-azure` for agent 9.66 in [Microsoft Learn's support matrix](https://learn.microsoft.com/azure/site-recovery/azure-to-azure-support-matrix), and the agent that Azure installed on 2026-10-16 was 9.66.7760.1. Lab 3.2's Bicep pins image `22.04.202506200`, which boots `6.8.0-1030-azure`, listed for every agent version. A VM built in the Portal gets the newest image, and any VM that installed a newer kernel (an unattended upgrade) and restarted (a resize, Step 3.2.26) boots that one.
+**Root Cause**: For Ubuntu, the Mobility service compares the **full version of the running kernel** with its list; a newer stock kernel is unsupported until a hotfix lists it. The list for 22.04 ended at `6.8.0-1041-azure` for agent 9.66 in [Microsoft Learn's support matrix](https://learn.microsoft.com/azure/site-recovery/azure-to-azure-support-matrix), and the agent that Azure installed on 2026-10-16 was 9.66.7760.1. Lab 3.2's Bicep pins image `22.04.202506200`, which boots `6.8.0-1030-azure`, listed from Mobility service 9.66 on. A VM built in the Portal gets the newest image, and any VM that installed a newer kernel (an unattended upgrade) and restarted (a resize, Step 3.2.26) boots that one.
 
 **Solution**: Boot a kernel on the [supported kernels list](https://github.com/Azure/Azure-SiteRecovery/tree/main/MobilityAgent/AzureToAzure/SupportedKernels) for the VM. With **Run command** → **RunShellScript** on `dev-skycraft-swc-world-vm`:
 

@@ -5,8 +5,8 @@
 .DESCRIPTION
     Issue #366 (decision 2026-10-28): 'latest' booted kernel 6.8.0-1065-azure and Lab 5.2's Site
     Recovery replication failed with ASRMobilityServiceKernelNotSupportedV2. Image version
-    22.04.202506200 boots 6.8.0-1030-azure (Canonical manifest of release 20250620), which every
-    Site Recovery agent version lists. The suite compiles main.bicep with the standalone Bicep CLI
+    22.04.202506200 boots 6.8.0-1030-azure (Canonical manifest of release 20250620), which the
+    Site Recovery support matrix lists from Mobility service 9.66 on. The suite compiles main.bicep with the standalone Bicep CLI
     and asserts that the image reference is that version, never 'latest', and that both VMs use it.
     No Azure sign-in is needed.
 
