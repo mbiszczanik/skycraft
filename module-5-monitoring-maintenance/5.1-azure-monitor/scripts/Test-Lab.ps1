@@ -5,7 +5,8 @@
 .DESCRIPTION
     Validates that all Lab 5.1 monitoring resources are deployed correctly:
     - Log Analytics Workspace exists with correct SKU and retention
-    - VM Insights DCR is associated with a SkyCraft VM and sends to the workspace
+    - VM DCR is associated with a SkyCraft VM, sends to the workspace and collects Perf and Syslog
+    - Azure Monitor Agent is Succeeded on those VMs and their Heartbeat reaches the workspace
     - Action Group exists with email receiver configured
     - Metric Alert rule exists and is enabled
     - Storage Diagnostic Settings are configured
@@ -24,9 +25,31 @@
     stay literal where the guide has the learner type both name and group: the action group and
     the diagnostic setting.
 
+    The Azure Monitor Agent is checked on every VM the lab's rule is associated with (issue #369):
+    its extension must be present and Succeeded, and the workspace must hold a Heartbeat row from
+    each of those VMs from the last 15 minutes. A failed extension read or workspace query is a
+    failure, never a pass. While every agent is Succeeded and a VM's Heartbeat is still missing,
+    the query is repeated once a minute for up to -HeartbeatWaitMinutes.
+    A new workspace has no Heartbeat table until the first row arrives, up to about 40 minutes
+    after the workspace is created; until then the query fails with BadRequest (failed to resolve
+    the table). While every agent is Succeeded, that is read as 'workspace not ready' and the
+    query is repeated once a minute for up to -NewWorkspaceWaitMinutes, with a progress line per
+    minute; if the table never appears the check fails and the message names that cause.
+
 .PARAMETER Environment
     Target environment prefix when checking VM resources: its group's VMs are searched first for
     the data collection rule, then the other environment's. Default: dev
+
+.PARAMETER HeartbeatWaitMinutes
+    How long to keep waiting for a first Heartbeat row after the agent is Succeeded; data takes
+    5-10 minutes to arrive after a fresh install. 0 queries once. Counted from the moment the
+    Heartbeat table exists. Default: 10
+
+.PARAMETER NewWorkspaceWaitMinutes
+    How long to keep waiting for the Heartbeat table itself to exist, which a new workspace
+    creates only with its first row (about 40 minutes after the workspace is created). The wait
+    applies only while every agent is Succeeded. 0 fails at once when the table is missing.
+    Default: 45
 
 .EXAMPLE
     .\Test-Lab.ps1
@@ -45,7 +68,15 @@
 param(
     [Parameter()]
     [ValidateSet('dev', 'prod')]
-    [string]$Environment = 'dev'
+    [string]$Environment = 'dev',
+
+    [Parameter()]
+    [ValidateRange(0, 60)]
+    [int]$HeartbeatWaitMinutes = 10,
+
+    [Parameter()]
+    [ValidateRange(0, 120)]
+    [int]$NewWorkspaceWaitMinutes = 45
 )
 
 $ErrorActionPreference = 'Stop'
@@ -139,6 +170,7 @@ Write-Host "[VM Insights Data Collection Rule]" -ForegroundColor Yellow
 $vmGroups = @("$Environment-skycraft-swc-rg") + @(@('dev', 'prod') | Where-Object { $_ -ne $Environment } | ForEach-Object { "$_-skycraft-swc-rg" })
 $dcrResource    = $null
 $dcrVmNames     = @()
+$dcrVmIds       = @()
 $dcrLookupError = $null
 $dcrUnread      = @()   # what could not be read, when what was read shows no rule
 try {
@@ -174,8 +206,9 @@ try {
                 $ruleId = "$($association.properties.dataCollectionRuleId)"
                 if (-not $ruleId) { continue }
                 $key = $ruleId.ToLowerInvariant()
-                if (-not $ruleVms.Contains($key)) { $ruleVms[$key] = [pscustomobject]@{ Id = $ruleId; Vms = @() } }
+                if (-not $ruleVms.Contains($key)) { $ruleVms[$key] = [pscustomobject]@{ Id = $ruleId; Vms = @(); VmIds = @() } }
                 $ruleVms[$key].Vms += $vm.Name
+                $ruleVms[$key].VmIds += $vm.ResourceId
             }
         }
     }
@@ -193,7 +226,7 @@ try {
             continue
         }
         $sendsHere = $null -ne $wsCache -and (@($rule.Properties.destinations.logAnalytics | ForEach-Object { "$($_.workspaceResourceId)" }) -contains $wsCache.ResourceId)
-        [pscustomobject]@{ Resource = $rule; Vms = $entry.Vms; SendsHere = $sendsHere; Preferred = ($rule.Name -eq $dcrName) }
+        [pscustomobject]@{ Resource = $rule; Vms = $entry.Vms; VmIds = $entry.VmIds; SendsHere = $sendsHere; Preferred = ($rule.Name -eq $dcrName) }
     }
     # The rule that sends to the lab's workspace is the lab's; the Bicep's name breaks a tie.
     $chosen = @($rules) | Where-Object { $_ } |
@@ -202,6 +235,7 @@ try {
     if ($chosen) {
         $dcrResource = $chosen.Resource
         $dcrVmNames  = $chosen.Vms
+        $dcrVmIds    = $chosen.VmIds
     }
     elseif ($readErrors.Count -gt 0 -and ($vmsRead -eq 0 -or $ruleVms.Count -gt 0)) {
         # Nothing was read, or every associated rule was unreadable: the lookup itself failed.
@@ -233,14 +267,118 @@ Invoke-Test "DCR destination points to workspace" {
     return ($destWsIds -contains $wsCache.ResourceId)
 }
 
-Invoke-Test "DCR has InsightsMetrics data flow" {
+# Perf, not InsightsMetrics: Step 5.1.4 queries the Perf table (#369).
+Invoke-Test "DCR has Perf data flow" {
     $streams = $dcrResource.Properties.dataFlows | ForEach-Object { $_.streams } | Select-Object -Unique
-    return ($streams -contains 'Microsoft-InsightsMetrics')
+    return ($streams -contains 'Microsoft-Perf')
 }
 
 Invoke-Test "DCR includes Syslog stream" {
     $streams = $dcrResource.Properties.dataFlows | ForEach-Object { $_.streams } | Select-Object -Unique
     return ($streams -contains 'Microsoft-Syslog')
+}
+
+# ============================================================================
+# Azure Monitor Agent Tests (#369)
+# ============================================================================
+Write-Host ""
+Write-Host "[Azure Monitor Agent]" -ForegroundColor Yellow
+
+# The lab's VMs are the ones its rule is associated with; a rule without an agent collects nothing.
+$agentTypes  = @('AzureMonitorLinuxAgent', 'AzureMonitorWindowsAgent')
+$agentStates = [ordered]@{}   # VM name -> provisioning state, 'missing', or the read error
+$agentsReady = $false
+if ($dcrVmIds.Count -gt 0) {
+    for ($i = 0; $i -lt $dcrVmIds.Count; $i++) {
+        try {
+            $response = Invoke-AzRestMethod -Method GET -Path "$($dcrVmIds[$i])/extensions?api-version=2024-07-01" -ErrorAction Stop
+            if ($response.StatusCode -ne 200) { throw "HTTP $($response.StatusCode)" }
+            $agent = @(($response.Content | ConvertFrom-Json).value) |
+                Where-Object { $_.properties.publisher -eq 'Microsoft.Azure.Monitor' -and $_.properties.type -in $agentTypes } |
+                Select-Object -First 1
+            $agentStates[$dcrVmNames[$i]] = if ($agent) { "$($agent.properties.provisioningState)" } else { 'missing' }
+        }
+        catch {
+            $agentStates[$dcrVmNames[$i]] = "unreadable: $($_.Exception.Message)"
+        }
+    }
+    $agentsReady = @($agentStates.Values | Where-Object { $_ -ne 'Succeeded' }).Count -eq 0
+}
+
+Invoke-Test "Azure Monitor Agent Succeeded on the rule's VMs" {
+    if ($agentStates.Count -eq 0) {
+        Write-Host " (no VM carries the lab's rule - Step 5.1.2)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
+    $unread = @($agentStates.Keys | Where-Object { $agentStates[$_] -like 'unreadable:*' })
+    if ($unread.Count -gt 0) {
+        throw "could not read the extensions of $(($unread | ForEach-Object { "'$_' ($($agentStates[$_] -replace '^unreadable: '))" }) -join ', ')"
+    }
+    $summary = ($agentStates.Keys | ForEach-Object { "$_ $($agentStates[$_])" }) -join ', '
+    $step = if ($agentsReady) { '' } else { ' - Step 5.1.2 installs it' }
+    Write-Host " ($summary$step)" -NoNewline -ForegroundColor Gray
+    return $agentsReady
+}
+
+$heartbeatWindow = 15
+# Waiting only helps a Succeeded agent whose first rows, or whose workspace's table, are still on their way.
+$heartbeatWait = if ($agentsReady) { $HeartbeatWaitMinutes } else { 0 }
+$tableWait     = if ($agentsReady) { $NewWorkspaceWaitMinutes } else { 0 }
+# A workspace without its Heartbeat table answers BadRequest: failed to resolve the table.
+$tableMissingPattern = 'BadRequest|Bad Request|Failed to resolve|could not be resolved|SEM0100'
+Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes" {
+    if ($dcrVmIds.Count -eq 0) {
+        Write-Host " (no VM carries the lab's rule - Step 5.1.2)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
+    if (-not $wsCache) { throw "workspace '$workspaceName' not found" }
+    $idList = ($dcrVmIds | ForEach-Object { "'$($_.ToLowerInvariant())'" }) -join ', '
+    $query = "Heartbeat | where TimeGenerated > ago($($heartbeatWindow)m) | where tolower(_ResourceId) in ($idList) | summarize LastHeartbeat = max(TimeGenerated) by VmId = tolower(_ResourceId)"
+    $started       = Get-Date
+    $tableDeadline = $started.AddMinutes($tableWait)
+    $rowDeadline   = $null   # set when the table first exists
+    while ($true) {
+        $tableError = $null
+        $result     = $null
+        try {
+            $result = Invoke-AzOperationalInsightsQuery -WorkspaceId "$($wsCache.CustomerId)" -Query $query -ErrorAction Stop
+        }
+        catch {
+            # Only a missing table is waited for; any other failure is a failure.
+            if ($_.Exception.Message -notmatch $tableMissingPattern -or $null -ne $rowDeadline) { throw }
+            $tableError = $_.Exception.Message
+        }
+        if (-not $tableError) {
+            if ($null -eq $result) { throw 'the workspace query returned nothing' }
+            if ($result.Error) {
+                if ("$($result.Error.Message)" -notmatch $tableMissingPattern -or $null -ne $rowDeadline) { throw "the workspace query failed: $($result.Error.Message)" }
+                $tableError = "$($result.Error.Message)"
+            }
+        }
+        if ($tableError) {
+            $waited = [int][math]::Floor(((Get-Date) - $started).TotalMinutes)
+            if ((Get-Date) -ge $tableDeadline) {
+                $after = if ($tableWait -gt 0) { " after waiting $waited of $tableWait minutes" } else { '' }
+                Write-Host " (the Heartbeat table does not exist in '$workspaceName' yet${after}: a new workspace creates it with the first row, up to about 40 minutes after the workspace is created; run again later - Step 5.1.3. Query said: $tableError)" -NoNewline -ForegroundColor Gray
+                return $false
+            }
+            Write-Host ''
+            Write-Host "    workspace not ready: no Heartbeat table yet, waited $waited of $tableWait minutes, trying again in 60 seconds" -ForegroundColor Gray
+            Start-Sleep -Seconds 60
+            continue
+        }
+        if ($null -eq $rowDeadline) { $rowDeadline = (Get-Date).AddMinutes($heartbeatWait) }
+        $seen = @($result.Results | ForEach-Object { "$($_.VmId)" })
+        $missing = @(for ($i = 0; $i -lt $dcrVmIds.Count; $i++) { if ($dcrVmIds[$i].ToLowerInvariant() -notin $seen) { $dcrVmNames[$i] } })
+        if ($missing.Count -eq 0 -or (Get-Date) -ge $rowDeadline) { break }
+        Write-Host '.' -NoNewline
+        Start-Sleep -Seconds 60
+    }
+    if ($missing.Count -gt 0) {
+        Write-Host " (no row from $($missing -join ', ') - Steps 5.1.2 and 5.1.3)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
+    return $true
 }
 
 # ============================================================================

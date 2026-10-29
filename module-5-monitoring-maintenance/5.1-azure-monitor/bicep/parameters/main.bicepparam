@@ -1,6 +1,6 @@
 /*=====================================================
 SUMMARY: Lab 5.1 - Parameters
-DESCRIPTION: Assigns the parameters the CI "bicep build-params" check requires. The three run-time values (ops e-mail, monitored VM and platform storage account resource IDs) come from environment variables, with well-formed placeholders (zero subscription GUID) as defaults; Deploy-Bicep.ps1 resolves the real values from Azure and passes them directly instead of using this file
+DESCRIPTION: Assigns the parameters the CI "bicep build-params" check requires. The run-time values (ops e-mail, the monitored VM that gets the alert and the agent, and the platform storage account) come from environment variables, with well-formed placeholders (zero subscription GUID) as defaults; Deploy-Bicep.ps1 resolves the real values from Azure and passes them directly instead of using this file
 EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
 VERSION: 1.0.0
@@ -17,7 +17,11 @@ param parProdVmResourceId = readEnvironmentVariable(
   'SKYCRAFT_MONITORED_VM_RESOURCE_ID',
   '${varPlaceholderSubscription}/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Compute/virtualMachines/dev-skycraft-swc-auth-vm'
 )
-param parStorageAccountResourceId = readEnvironmentVariable(
+param parAgentVmResourceId = readEnvironmentVariable(
+  'SKYCRAFT_MONITORED_VM_RESOURCE_ID',
+  '${varPlaceholderSubscription}/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Compute/virtualMachines/dev-skycraft-swc-auth-vm'
+)
+param parStorageAccountResourceId =readEnvironmentVariable(
   'SKYCRAFT_PLATFORM_STORAGE_RESOURCE_ID',
   '${varPlaceholderSubscription}/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/platformskycraftswcsa'
 )

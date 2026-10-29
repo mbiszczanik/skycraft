@@ -116,6 +116,7 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 | `avm/res/authorization/role-assignment/sub-scope` | `0.1.1` | Lab 1.2 |
 | `avm/res/compute/disk` | `0.6.1` | Lab 3.2 |
 | `avm/res/compute/virtual-machine` | `0.22.3` | Lab 3.2 |
+| `avm/res/compute/virtual-machine/extension` | `0.1.0` | Lab 5.1 |
 | `avm/res/container-instance/container-group` | `0.7.1` | Lab 3.3 |
 | `avm/res/container-registry/registry` | `0.13.1` | Lab 3.3 |
 | `avm/res/data-protection/backup-vault` | `0.13.2` | Lab 5.2 |

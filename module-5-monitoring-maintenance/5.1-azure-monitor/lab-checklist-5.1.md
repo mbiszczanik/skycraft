@@ -19,10 +19,10 @@
 
 ### Data Collection
 
-- [ ] VM Insights enabled for at least one VM (e.g., `dev-skycraft-swc-auth-vm`)
-- [ ] Azure Monitor Agent (AMA) installed on the VM
-- [ ] Data Collection Rule (DCR) `skycraft-vm-dcr` created and associated
-- [ ] Syslog and Performance Counters being collected
+- [ ] Data Collection Rule (DCR) `skycraft-vm-dcr` created and associated with at least one VM (e.g., `dev-skycraft-swc-auth-vm`)
+- [ ] Azure Monitor Agent `AzureMonitorLinuxAgent` on that VM: **Provisioning succeeded**, tagged `Project = SkyCraft`
+- [ ] Performance counters (`Perf` table) and Syslog being collected
+- [ ] `Heartbeat` rows from the VM in the last 15 minutes (a new workspace has no `Heartbeat` table for up to about 40 minutes after it was created; a `BadRequest` before that is expected, wait and rerun)
 
 ---
 
@@ -48,13 +48,29 @@ Get-AzOperationalInsightsWorkspace -ResourceGroupName platform-skycraft-swc-rg -
     Format-Table -AutoSize
 ```
 
-### Verify Heartbeat in LAW (Run in Portal)
+### Verify the Azure Monitor Agent
+
+```powershell
+# Provisioning state and Project tag of the agent on the monitored VM
+$vm = Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-vm
+Get-AzResource -ResourceId "$($vm.Id)/extensions/AzureMonitorLinuxAgent" |
+    Select-Object Name, @{N='State';E={$_.Properties.provisioningState}}, @{N='Project';E={$_.Tags.Project}}
+```
+
+### Verify Heartbeat and Perf in LAW (Run in Portal)
 
 ```kusto
 // Run this in LAW Logs blade
 Heartbeat
 | where TimeGenerated > ago(1h)
 | summarize LastCall = max(TimeGenerated) by Computer, OSType, Version
+```
+
+```kusto
+// Rows only when the rule sends Performance Counters to Azure Monitor Logs
+Perf
+| where TimeGenerated > ago(1h) and CounterName == "% Processor Time"
+| summarize Samples = count() by Computer
 ```
 
 ### Verify Alert Rules
@@ -82,7 +98,7 @@ Get-AzDiagnosticSetting -ResourceId "$($sa.Id)/blobServices/default" -Name skycr
 | Component        | Status | Verification Method             |
 | :--------------- | :----- | :------------------------------ |
 | **Central Logs** | [ ]    | LAW exists in Platform RG       |
-| **VM Telemetry** | [ ]    | KQL query returns Heartbeat     |
+| **VM Telemetry** | [ ]    | KQL returns Heartbeat and Perf  |
 | **CPU Alerts**   | [ ]    | Alert rule listed in Monitor    |
 | **Dashboard**    | [ ]    | Ops Dashboard visible in Portal |
 
