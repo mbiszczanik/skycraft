@@ -21,6 +21,10 @@
       3. A read that fails stops the run with [ERROR] and exit 1 before anything is created,
          before the wait for RBAC propagation and before the backup instance.
       4. A create that fails stops the run with [ERROR] and exit 1.
+      5. The backup instance names every container of the account for vaulted backup, since
+         SkyCraft-Blob-Policy is operational plus vaulted (issue #306); an account with no
+         container, or a container listing that fails, stops the run with [ERROR] and exit 1
+         before any role is assigned.
 
     No subscription is needed, and none is used: the script runs through
     tests/Support/LabScriptStub.psm1 (issue #112), which aborts the child with exit 99 unless
@@ -33,7 +37,7 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Issue: #397
+    Issue: #397, #306
 #>
 
 #Requires -Version 7.0
@@ -53,6 +57,8 @@ BeforeAll {
         'Get-AzDataProtectionBackupInstance'
         'Initialize-AzDataProtectionBackupInstance'
         'New-AzDataProtectionBackupInstance'
+        'New-AzDataProtectionBackupConfigurationClientObject'
+        'Get-AzRmStorageContainer'
         'Invoke-AzRestMethod'
         'Start-Sleep'
     )
@@ -67,6 +73,9 @@ BeforeAll {
     #                                  account)
     #   SKYCRAFT_STUB_ROLELOOKUPFAIL   '1' refuses every role assignment listing (HTTP 403)
     #   SKYCRAFT_STUB_CREATEFAIL       '1' refuses every role assignment create (HTTP 403)
+    #   SKYCRAFT_STUB_INSTANCE         'none' when the account is not protected yet
+    #   SKYCRAFT_STUB_CONTAINERS       the account's container names, comma-separated ('' for
+    #                                  none), or 'fail' for a listing that is refused
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:VaultPrincipal = '11111111-1111-1111-1111-111111111111'
@@ -106,13 +115,32 @@ function Get-AzDataProtectionBackupInstance {
     [CmdletBinding()]
     param($ResourceGroupName, $VaultName)
     Write-StubCall -Name 'Get-AzDataProtectionBackupInstance'
+    if ($env:SKYCRAFT_STUB_INSTANCE -eq 'none') { return }
     [pscustomobject]@{ Property = [pscustomobject]@{ DataSourceInfo = [pscustomobject]@{ ResourceId = $script:StorageId } } }
+}
+
+function Get-AzRmStorageContainer {
+    [CmdletBinding()]
+    param($ResourceGroupName, $StorageAccountName)
+    Write-StubCall -Name "Get-AzRmStorageContainer|$ResourceGroupName|$StorageAccountName"
+    if ($env:SKYCRAFT_STUB_CONTAINERS -eq 'fail') {
+        Write-Error -ErrorId 'AuthorizationFailed' -Message "The client 'stub' does not have authorization to perform action 'Microsoft.Storage/storageAccounts/blobServices/containers/read'."
+        return
+    }
+    foreach ($name in @($env:SKYCRAFT_STUB_CONTAINERS -split ',' | Where-Object { $_ })) { [pscustomobject]@{ Name = $name } }
+}
+
+function New-AzDataProtectionBackupConfigurationClientObject {
+    [CmdletBinding()]
+    param($DatasourceType, [string[]]$VaultedBackupContainer, [switch]$IncludeAllContainer)
+    Write-StubCall -Name "New-AzDataProtectionBackupConfigurationClientObject|$DatasourceType|$($VaultedBackupContainer -join ';')"
+    [pscustomobject]@{ ObjectType = 'BlobBackupDatasourceParameters'; ContainersList = $VaultedBackupContainer }
 }
 
 function Initialize-AzDataProtectionBackupInstance {
     [CmdletBinding()]
-    param([Parameter(ValueFromRemainingArguments)]$Rest)
-    Write-StubCall -Name 'Initialize-AzDataProtectionBackupInstance'
+    param($DatasourceType, $DatasourceLocation, $DatasourceId, $PolicyId, $BackupConfiguration)
+    Write-StubCall -Name "Initialize-AzDataProtectionBackupInstance|$($BackupConfiguration.ContainersList -join ';')"
 }
 
 function New-AzDataProtectionBackupInstance {
@@ -162,7 +190,8 @@ function New-StubRoleAssignment {
 '@
 
     function Invoke-BlobBackupScript {
-        param([string]$Roles = 'none', [switch]$RoleLookupFail, [switch]$CreateFail)
+        param([string]$Roles = 'none', [switch]$RoleLookupFail, [switch]$CreateFail, [switch]$Unprotected,
+            [string]$Containers = 'game-assets,player-backups')
 
         $logPath = Join-Path $script:Stub.Directory 'calls.log'
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
@@ -171,6 +200,8 @@ function New-StubRoleAssignment {
             SKYCRAFT_STUB_ROLES          = $Roles
             SKYCRAFT_STUB_ROLELOOKUPFAIL = if ($RoleLookupFail) { '1' } else { '0' }
             SKYCRAFT_STUB_CREATEFAIL     = if ($CreateFail) { '1' } else { '0' }
+            SKYCRAFT_STUB_INSTANCE       = if ($Unprotected) { 'none' } else { 'existing' }
+            SKYCRAFT_STUB_CONTAINERS     = $Containers
             SKYCRAFT_STUB_LOG            = $logPath
         }
 
@@ -197,6 +228,9 @@ function New-StubRoleAssignment {
     $script:HeldBelow  = Invoke-BlobBackupScript -Roles 'below'
     $script:ReadFails  = Invoke-BlobBackupScript -RoleLookupFail
     $script:CreateFail = Invoke-BlobBackupScript -CreateFail
+    $script:NewInstance  = Invoke-BlobBackupScript -Unprotected
+    $script:NoContainer  = Invoke-BlobBackupScript -Unprotected -Containers ''
+    $script:ListingFails = Invoke-BlobBackupScript -Unprotected -Containers 'fail'
 }
 
 AfterAll {
@@ -206,7 +240,8 @@ AfterAll {
 Describe 'Lab 5.2 New-LabBlobBackup.ps1 - test harness' {
 
     It 'shadows the real Az commands instead of touching a subscription' {
-        foreach ($run in @($script:Fresh, $script:HeldAbove, $script:HeldBelow, $script:ReadFails, $script:CreateFail)) {
+        foreach ($run in @($script:Fresh, $script:HeldAbove, $script:HeldBelow, $script:ReadFails, $script:CreateFail,
+                $script:NewInstance, $script:NoContainer, $script:ListingFails)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az commands (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -257,5 +292,27 @@ Describe 'Lab 5.2 New-LabBlobBackup.ps1 - the vault identity''s roles through th
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "\[ERROR\] Failed to assign 'Storage Blob Data Owner':[^\r\n]*AuthorizationFailed"
         @($run.Calls | Where-Object { $_ -like 'Start-Sleep:*' -or $_ -like '*BackupInstance' }) | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Lab 5.2 New-LabBlobBackup.ps1 - vaulted backup of the account''s containers (#306)' {
+
+    It 'names every container of the account in the backup configuration and creates the instance with it' {
+        $run = $script:NewInstance
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls | Should -Contain 'Get-AzRmStorageContainer|prod-skycraft-swc-rg|prodskycraftswcsa'
+        $run.Calls | Should -Contain 'New-AzDataProtectionBackupConfigurationClientObject|AzureBlob|game-assets;player-backups'
+        $run.Calls | Should -Contain 'Initialize-AzDataProtectionBackupInstance|game-assets;player-backups'
+        $run.Calls | Should -Contain 'New-AzDataProtectionBackupInstance'
+    }
+
+    It 'stops with [ERROR] and exit 1 when <case>, before any role is assigned' -ForEach @(
+        @{ case = 'the account has no container'; name = 'NoContainer'; message = "\[ERROR\] 'prodskycraftswcsa' has no container\. Vaulted blob backup needs at least one: run Lab 4\.2 first\." }
+        @{ case = 'the container listing fails'; name = 'ListingFails'; message = "\[ERROR\] Could not list the containers of 'prodskycraftswcsa':[^\r\n]*does not have authorization" }
+    ) {
+        $run = (Get-Variable -Name $name -Scope Script).Value
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match $message
+        @($run.Calls | Where-Object { $_ -like 'Get-RoleAssignment|*' -or $_ -like 'New-RoleAssignment:*' -or $_ -like 'Start-Sleep:*' -or $_ -like '*BackupInstance*' -or $_ -like 'New-AzDataProtectionBackupConfiguration*' }) | Should -BeNullOrEmpty
     }
 }

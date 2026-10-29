@@ -352,19 +352,20 @@
             # deploys correctly and then fails its own check.
             PostDeploy   = @{ Script = 'New-LabBlobBackup.ps1'; Arguments = @{} }
             Test         = @{}
-            DependsOn    = @('4.1', '5.1')
+            DependsOn    = @('4.1', '4.2', '5.1')
             TimeoutMs    = 1800000
             StdinAnswers = $null
             Excluded     = $null
             # gate: verified - exits 1 on a missing platform resource group or a missing 5.1
             # workspace; its PostDeploy New-LabBlobBackup.ps1 exits 1 on a missing 4.1
-            # prodskycraftswcsa (needs 4.1 -All). Its VM check only warns.
+            # prodskycraftswcsa (needs 4.1 -All) and on an account without a container, which
+            # 4.2 creates: the blob policy is operational plus vaulted (#306), and vaulted
+            # backup needs at least one container. Its VM check only warns.
             #
-            # Known failure until the Lab 5.2 half of #368 lands: Lab 3.2 leaves the auth VM
-            # ADE-encrypted, and this deploy enables backup on it without first granting Backup
-            # Management Service the Key Vault Administrator role on the 3.2 vault, so the VM
-            # backup fails with 400198 UserErrorKeyVaultPermissionsNotConfigured and the phase
-            # exits 1. A Portal-built Lab 3.2 hands Lab 5.2 the same VM.
+            # Lab 3.2 leaves the auth VM ADE-encrypted, so this deploy grants Backup Management
+            # Service the Key Vault Administrator role on the VM's key vault before it enables
+            # backup (#368). Finding the app needs a Microsoft Graph token in the cycle's Az
+            # sign-in; without one the phase exits 1 with [ERROR] and names the sign-in.
             #
             # This is the lab that creates the Recovery Services Vault. See Remove-LabCycle.ps1 and
             # TROUBLESHOOTING.md for why its teardown needs a minimum az CLI / Az PowerShell.

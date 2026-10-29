@@ -33,6 +33,12 @@
          -ErrorAction SilentlyContinue swallows it - the defect #238 describes. Which errors
          mean "not found" is pinned by lifting Test-LabNotFoundError and Invoke-LabLookup out of
          the script with the parser and running them on one error per shape.
+      8. The Key Vault Administrator role of Backup Management Service on the key vault of an
+         ADE-encrypted VM (issue #368) is removed from the vault itself, after the VM's
+         protection is gone; a role inherited from above and another role on the vault stay. A
+         VM that is not encrypted has nothing removed and no Graph lookup. A failed read of the
+         encryption, of the app or of the role assignments is an [ERROR] and exits 1, and the
+         role stays while the VM may still be protected.
 
     No Azure connection is needed, and none is used. The script runs through
     tests/Support/LabScriptStub.psm1 (issue #112), which imports the real Az modules first, the
@@ -57,7 +63,7 @@ BeforeAll {
     $script:ScriptPath     = (Resolve-Path (Join-Path $PSScriptRoot '..' 'scripts' 'Remove-LabResource.ps1')).Path
     $script:StubModuleName = 'SkyCraftAzStub'
     # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
-    $script:RequiredModules = @('Az.Accounts', 'Az.RecoveryServices', 'Az.DataProtection', 'Az.Resources', 'Az.Storage')
+    $script:RequiredModules = @('Az.Accounts', 'Az.RecoveryServices', 'Az.DataProtection', 'Az.Resources', 'Az.Storage', 'Az.Compute')
 
     # Exported explicitly: a manifest with FunctionsToExport = '*' leaves the export list to the
     # module analyser, which infers it with a lightweight scan and can stop partway through.
@@ -78,6 +84,10 @@ BeforeAll {
         'Get-AzResource'
         'Remove-AzResource'
         'Remove-AzResourceGroup'
+        # The script's VM lookup and the tools/LabCommon.psm1 helpers of #368.
+        'Get-AzVM'
+        'Get-AzVMDiskEncryptionStatus'
+        'Get-AzADServicePrincipal'
     )
 
     # Every Az command the script calls, implemented as a stub that records its own invocation
@@ -198,13 +208,57 @@ function Get-AzStorageAccount {
     [pscustomobject]@{ Id = "/subscriptions/0/resourceGroups/$ResourceGroupName/providers/Microsoft.Storage/storageAccounts/$Name" }
 }
 
+# The VM of Lab 3.2. SKYCRAFT_STUB_ADE: 'none' (the default: not encrypted), 'encrypted', or
+# 'fail' (the encryption status read fails). Absent when SKYCRAFT_STUB_EMPTY is set.
+$script:KvRg = '/subscriptions/0/resourceGroups/dev-skycraft-swc-rg'
+$script:KvId = "$script:KvRg/providers/Microsoft.KeyVault/vaults/dev-skycraft-swc-kv"
+$script:Bms  = '33333333-3333-3333-3333-333333333333'
+
+function Get-AzVM {
+    [CmdletBinding()]
+    param($ResourceGroupName, $Name, [switch]$Status)
+    if (-not $Status -and (Invoke-StubLookup -Name 'Get-AzVM')) { return }
+    if (Test-StubEmpty) { return }
+    if (-not $Status) { return [pscustomobject]@{ Name = $Name; ResourceGroupName = $ResourceGroupName } }
+    $settings = if ($env:SKYCRAFT_STUB_ADE -eq 'encrypted') {
+        @([pscustomobject]@{ Enabled = $true; DiskEncryptionKey = [pscustomobject]@{ SecretUrl = 'https://dev-skycraft-swc-kv.vault.azure.net/secrets/s/1'; SourceVault = [pscustomobject]@{ Id = $script:KvId } } })
+    } else { $null }
+    [pscustomobject]@{ Name = $Name; Disks = @([pscustomobject]@{ Name = "$Name-osdisk"; EncryptionSettings = $settings }) }
+}
+
+function Get-AzVMDiskEncryptionStatus {
+    [CmdletBinding()]
+    param($ResourceGroupName, $VMName)
+    if ($env:SKYCRAFT_STUB_ADE -eq 'fail') { throw "The client 'stub' does not have authorization to perform action 'read' over scope '$VMName'." }
+    $state = if ($env:SKYCRAFT_STUB_ADE -eq 'encrypted') { 'Encrypted' } else { 'NotEncrypted' }
+    [pscustomobject]@{ OsVolumeEncrypted = $state; DataVolumesEncrypted = 'NotMounted' }
+}
+
+function Get-AzADServicePrincipal {
+    [CmdletBinding()]
+    param($ApplicationId)
+    Write-StubCall -Name "Get-AzADServicePrincipal|$ApplicationId"
+    if (@($env:SKYCRAFT_STUB_FAIL -split ',') -contains 'Get-AzADServicePrincipal') { throw 'Authentication failed against resource MicrosoftGraphEndpointResourceId. User interaction is required.' }
+    [pscustomobject]@{ Id = $script:Bms; AppId = $ApplicationId }
+}
+
 # Served through the ARM role assignments API fake appended to this body (issue #397): the Backup
 # Vault identity holds both of its roles on the storage account, named after the role, and two
 # roles inherited from the resource group, which the cleanup must leave alone: a Reader, and a
 # Storage Blob Data Owner - the same role as one the lab assigns, so only the scope tells them apart.
+# On the key vault (#368), Backup Management Service holds Key Vault Administrator on the vault
+# and on its resource group, and another role on the vault: only the first is the lab's.
 function Get-StubRoleAssignment {
     [CmdletBinding()]
     param([string]$Scope, [string]$PrincipalId)
+    if ($Scope -like '*/providers/Microsoft.KeyVault/vaults/*') {
+        if (Invoke-StubLookup -Name 'Get-RoleAssignment:kv') { return }
+        $kvAdmin = '00482a5a-887f-4fb3-b363-3b7fe8e74483'
+        [pscustomobject]@{ Name = 'kv-admin'; PrincipalId = $PrincipalId; Scope = $Scope; RoleDefinitionId = $kvAdmin; PrincipalType = 'ServicePrincipal' }
+        [pscustomobject]@{ Name = 'kv-admin-inherited'; PrincipalId = $PrincipalId; Scope = $script:KvRg; RoleDefinitionId = $kvAdmin; PrincipalType = 'ServicePrincipal' }
+        [pscustomobject]@{ Name = 'kv-reader'; PrincipalId = $PrincipalId; Scope = $Scope; RoleDefinitionId = '21090545-7ca7-4776-b22c-e363652d74d2'; PrincipalType = 'ServicePrincipal' }
+        return
+    }
     if (Invoke-StubLookup -Name 'Get-RoleAssignment') { return }
     $rg = $Scope -replace '/providers/Microsoft\.Storage/storageAccounts/[^/]+$', ''
     [pscustomobject]@{ Name = 'blob-data-owner'; PrincipalId = $PrincipalId; Scope = $Scope; RoleDefinitionId = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'; PrincipalType = 'ServicePrincipal' }
@@ -305,13 +359,16 @@ function Remove-AzResourceGroup {
             [string[]]$Lookup = @(),
             [string]$RecoveryServicesVersion = '7.7.1',
             [switch]$Empty,
-            [switch]$NoFriendlyName
+            [switch]$NoFriendlyName,
+            [string]$Ade = 'none',
+            [string[]]$ArgumentList = @()
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
 
-        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList '-Force' -Environment @{
+        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList (@('-Force') + $ArgumentList) -Environment @{
+            SKYCRAFT_STUB_ADE        = $Ade
             SKYCRAFT_STUB_FAIL       = $Fail -join ','
             SKYCRAFT_STUB_LOOKUP     = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY      = if ($Empty) { '1' } else { '0' }
@@ -374,6 +431,16 @@ function Remove-AzResourceGroup {
     $script:RecheckDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzResource:recheck=denied'
     $script:StorageDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzStorageAccount=denied'
     $script:RoleStuck     = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-RoleAssignment'
+
+    # Issue #368: the key vault role of an ADE-encrypted VM.
+    $script:Ade            = Invoke-CleanupScript -Stub $script:Stub -Ade 'encrypted'
+    $script:AdeGraphFails  = Invoke-CleanupScript -Stub $script:Stub -Ade 'encrypted' -Fail 'Get-AzADServicePrincipal'
+    $script:AdeObjectId    = Invoke-CleanupScript -Stub $script:Stub -Ade 'encrypted' -Fail 'Get-AzADServicePrincipal' -ArgumentList "-BackupManagementServiceObjectId $('3' * 8)-3333-3333-3333-$('3' * 12)"
+    $script:AdeRoleDenied  = Invoke-CleanupScript -Stub $script:Stub -Ade 'encrypted' -Lookup 'Get-RoleAssignment:kv=denied'
+    $script:AdeRoleGone    = Invoke-CleanupScript -Stub $script:Stub -Ade 'encrypted' -Lookup 'Get-RoleAssignment:kv=notfound'
+    $script:AdeStatusFails = Invoke-CleanupScript -Stub $script:Stub -Ade 'fail'
+    $script:AdeVmDenied    = Invoke-CleanupScript -Stub $script:Stub -Ade 'encrypted' -Lookup 'Get-AzVM=denied'
+    $script:AdeProtected   = Invoke-CleanupScript -Stub $script:Stub -Ade 'encrypted' -Fail 'Disable-AzRecoveryServicesBackupProtection'
 }
 
 AfterAll {
@@ -389,7 +456,8 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - test harness' {
         foreach ($run in @($script:Clean, $script:Nothing, $script:VaultStuck, $script:TwoStuck, $script:FirstStuck, $script:StaleModule, $script:NoFriendly, $script:SnapshotRgStuck, $script:StillProtected,
                 $script:TopLevelDenied, $script:DependantsFailed, $script:ListingDenied, $script:NotFound,
                 $script:DependantsNotFound, $script:RoleNotFound, $script:VaultDenied, $script:RecheckDenied,
-                $script:StorageDenied, $script:RoleStuck)) {
+                $script:StorageDenied, $script:RoleStuck, $script:Ade, $script:AdeGraphFails, $script:AdeObjectId,
+                $script:AdeRoleDenied, $script:AdeRoleGone, $script:AdeStatusFails, $script:AdeVmDenied, $script:AdeProtected)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az cmdlets (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -443,6 +511,60 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - role assignments without Microsoft Gr
         $calls | Should -Not -Contain 'Remove-RoleAssignment:inherited-reader'
         $calls | Should -Not -Contain 'Remove-RoleAssignment:inherited-blob-data-owner'
         @($calls | Where-Object { $_ -eq 'Get-RoleAssignment' }).Count | Should -Be 2
+    }
+}
+
+Describe 'Lab 5.2 Remove-LabResource.ps1 - the key vault role of an ADE-encrypted VM (#368)' {
+
+    It 'removes the Key Vault Administrator role of Backup Management Service on the vault itself, and only that one' {
+        $run = $script:Ade
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        @($run.Calls | Where-Object { $_ -eq 'Remove-RoleAssignment:kv-admin' }).Count | Should -Be 1
+        $run.Calls | Should -Not -Contain 'Remove-RoleAssignment:kv-admin-inherited'
+        $run.Calls | Should -Not -Contain 'Remove-RoleAssignment:kv-reader'
+        $run.Calls | Should -Contain 'Get-AzADServicePrincipal|262044b1-e2ce-469f-a196-69ab7ada62d3'
+    }
+
+    It 'removes it after the VM''s protection is disabled' {
+        $calls = $script:Ade.Calls
+        [array]::IndexOf($calls, 'Disable-AzRecoveryServicesBackupProtection') | Should -BeLessThan ([array]::IndexOf($calls, 'Remove-RoleAssignment:kv-admin'))
+    }
+
+    It 'removes nothing on a key vault, and asks Microsoft Graph nothing, for a VM that is not encrypted' {
+        $run = $script:Clean
+        @($run.Calls | Where-Object { $_ -like 'Remove-RoleAssignment:kv-*' -or $_ -like 'Get-AzADServicePrincipal|*' -or $_ -eq 'Get-RoleAssignment:kv' }) | Should -BeNullOrEmpty
+    }
+
+    It 'uses -BackupManagementServiceObjectId without calling Microsoft Graph' {
+        $run = $script:AdeObjectId
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls | Should -Contain 'Remove-RoleAssignment:kv-admin'
+        @($run.Calls | Where-Object { $_ -like 'Get-AzADServicePrincipal|*' }) | Should -BeNullOrEmpty
+    }
+
+    It 'exits 1 with [ERROR], and removes no key vault role, when <case>' -ForEach @(
+        @{ case = 'Microsoft Graph refuses the app lookup'; name = 'AdeGraphFails'; message = '\[ERROR\] Could not look up the Backup Management Service app[^\r\n]*Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId' }
+        @{ case = 'the key vault role cannot be read'; name = 'AdeRoleDenied'; message = '\[ERROR\] Could not look up the Key Vault Administrator role on dev-skycraft-swc-kv' }
+        @{ case = 'the disk encryption cannot be read'; name = 'AdeStatusFails'; message = '\[ERROR\] Could not look up the disk encryption of dev-skycraft-swc-auth-vm' }
+        @{ case = 'the VM cannot be looked up'; name = 'AdeVmDenied'; message = '\[ERROR\] Could not look up VM dev-skycraft-swc-auth-vm' }
+    ) {
+        $run = (Get-Variable -Name $name -Scope Script).Value
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match $message
+        @($run.Calls | Where-Object { $_ -like 'Remove-RoleAssignment:kv-*' }) | Should -BeNullOrEmpty
+    }
+
+    It 'reports a key vault that is gone as an absent role, without counting it' {
+        $run = $script:AdeRoleGone
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Role assignment already absent: Key Vault Administrator on dev-skycraft-swc-kv'
+    }
+
+    It 'keeps the role while the VM may still be protected' {
+        $run = $script:AdeProtected
+        $run.ExitCode | Should -Be 1
+        $run.Calls | Should -Not -Contain 'Remove-RoleAssignment:kv-admin'
+        $run.Output | Should -Match 'Key Vault Administrator on dev-skycraft-swc-kv left in place - a VM may still be protected'
     }
 }
 

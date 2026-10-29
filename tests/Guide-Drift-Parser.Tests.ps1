@@ -860,7 +860,9 @@ Describe 'parse.py - labs 3.2, 4.2 and 5.2, resource names in navigation chains 
         @{ lab = '4.2'; id = '4.2.11'; labels = @('prodskycraftswcsa', 'Containers'); resources = @(0) }
         # 'waiting for 02:00: **Protected items** -> ...': no space after the first colon, so the
         # text before it is no field label and the chain keeps its resource (picker_field, #250).
-        @{ lab = '5.2'; id = '5.2.3'; labels = @('Protected items', 'Backup items', 'Azure Virtual Machine', 'dev-skycraft-swc-auth-vm', 'Backup now', 'OK'); resources = @(3) }
+        # Step 5.2.3 opens the key vault's access control first (#368).
+        @{ lab = '5.2'; id = '5.2.3'; labels = @('dev-skycraft-swc-kv', 'Access control (IAM)', '+ Add', 'Add role assignment'); resources = @(0); count = 2; index = 0 }
+        @{ lab = '5.2'; id = '5.2.3'; labels = @('Protected items', 'Backup items', 'Azure Virtual Machine', 'dev-skycraft-swc-auth-vm', 'Backup now', 'OK'); resources = @(3); count = 2; index = 1 }
     ) {
         $chains = @(($script:ChainLabs[$lab].steps | Where-Object id -eq $id).items |
             Where-Object { $_.PSObject.Properties.Name -contains 'resources' })
@@ -1058,7 +1060,7 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
 
     It 'opens the vault platform-skycraft-swc-bv by name in step 5.2.5 before its policies and before + Backup' {
         $items = @((Get-GapStep '5.2' '5.2.5').items)
-        foreach ($labels in @(@('platform-skycraft-swc-bv', 'Manage', 'Backup policies'), @('platform-skycraft-swc-bv', '+ Backup'))) {
+        foreach ($labels in @(@('platform-skycraft-swc-bv', 'Manage', 'Backup policies', '+ Add'), @('platform-skycraft-swc-bv', '+ Backup'))) {
             $chain = @($items | Where-Object { $_.kind -eq 'navigation' -and (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
             $chain.Count | Should -Be 1 -Because ($labels -join ' > ')
             @($chain[0].resources) | Should -Be @(0)

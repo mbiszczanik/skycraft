@@ -16,6 +16,12 @@
     7. Orphaned Azure Backup restore point collections and the AzureBackupRG_<location>_*
        resource groups that held them, once those groups are empty. Only a policy created
        before issue #184 leaves these behind.
+    8. The Key Vault Administrator role that Deploy-Bicep.ps1 (or Step 5.2.3) gave the
+       Microsoft Entra app Backup Management Service on the key vault of
+       dev-skycraft-swc-auth-vm, when Lab 3.2 encrypted that VM with Azure Disk Encryption
+       (issue #368). Only the assignment made on the key vault itself is removed; one
+       inherited from above is not the lab's. Finding the app needs Microsoft Graph unless
+       -BackupManagementServiceObjectId is given, and a lookup that fails is an [ERROR].
 
     Notes:
     - The role assignments are removed before the Backup Vault so its managed
@@ -45,7 +51,8 @@
     - the Backup Vault survives a blob backup instance, storage account or role assignment
       lookup that failed, and a role assignment it could not remove, so its identity is still
       there for a rerun to remove the assignments with;
-    - an AzureBackupRG_* group survives a failed check that it is empty.
+    - an AzureBackupRG_* group survives a failed check that it is empty;
+    - the key vault role survives while the VM may still be protected, as the snapshot group does.
 
     Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
     otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
@@ -54,6 +61,11 @@
 
 .PARAMETER Force
     Skip confirmation prompts.
+
+.PARAMETER BackupManagementServiceObjectId
+    Object id of the Backup Management Service app in this tenant, for a sign-in that cannot
+    get a Microsoft Graph token. In Azure Cloud Shell:
+    (Get-AzADServicePrincipal -ApplicationId 262044b1-e2ce-469f-a196-69ab7ada62d3).Id
 
 .EXAMPLE
     .\Remove-LabResource.ps1
@@ -64,17 +76,21 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.3.0
-    Date: 2026-10-09
+    Version: 1.4.0
+    Date: 2026-10-28
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.RecoveryServices, Az.DataProtection, Az.Resources, Az.Storage
+#Requires -Modules Az.Accounts, Az.RecoveryServices, Az.DataProtection, Az.Resources, Az.Storage, Az.Compute
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter()]
-    [switch]$Force
+    [switch]$Force,
+
+    [Parameter()]
+    [ValidatePattern('^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$')]
+    [string]$BackupManagementServiceObjectId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -89,6 +105,8 @@ $rsvName        = 'platform-skycraft-swc-rsv'
 $bvName         = 'platform-skycraft-swc-bv'
 $storageAccount = 'prodskycraftswcsa'
 $location       = 'swedencentral'
+$vmName         = 'dev-skycraft-swc-auth-vm'
+$vmRg           = 'dev-skycraft-swc-rg'
 # Azure Backup names the snapshot group <prefix><n><suffix>; main.bicep creates n = 1, and the
 # service adds n = 2, 3, ... only when one group fills up. The pattern covers all of them.
 $snapshotRgPattern = 'platform-skycraft-swc-rpc*-rg'
@@ -351,6 +369,36 @@ foreach ($backupRg in $backupRgCandidates) {
     }
 }
 
+# The Key Vault Administrator role Lab 5.2 gives Backup Management Service on the key vault of an
+# ADE-encrypted VM (#368). The vault is the one the VM's encryption names, read from the VM.
+$vmLookup = Invoke-LabLookup -Target "VM $vmName" -Lookup {
+    Get-AzVM -ResourceGroupName $vmRg -Name $vmName -ErrorAction Stop
+}
+if ($vmLookup.Value.Count -gt 0) {
+    $adeLookup = Invoke-LabLookup -Target "the disk encryption of $vmName" -Lookup {
+        Get-LabAdeKeyVaultId -ResourceGroupName $vmRg -VMName $vmName
+    }
+    if ($adeLookup.Value.Count -gt 0) {
+        $backupServiceId = $null
+        try {
+            $backupServiceId = Get-LabBackupManagementServiceId -ObjectId $BackupManagementServiceObjectId
+        } catch {
+            $script:cleanupFailures++
+            Write-Host "  [ERROR] $_" -ForegroundColor Red
+            Write-Host "    The Key Vault Administrator role of Backup Management Service could not be checked, so it stays." -ForegroundColor Gray
+        }
+        foreach ($keyVaultId in @(if ($backupServiceId) { $adeLookup.Value })) {
+            $resourcesToDelete.Add(@{
+                Type        = 'KeyVaultRoleAssignment'
+                Name        = ($keyVaultId -split '/')[-1]
+                PrincipalId = $backupServiceId
+                Scope       = $keyVaultId
+            })
+            Write-Host "  - RBAC role assignment: Key Vault Administrator for Backup Management Service on $(($keyVaultId -split '/')[-1])" -ForegroundColor Gray
+        }
+    }
+}
+
 if ($resourcesToDelete.Count -eq 0) {
     # "Nothing found" is only true when every lookup succeeded; otherwise the summary exits 1.
     if ($script:cleanupFailures -eq 0) {
@@ -544,6 +592,37 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BackupResourceGr
     } catch {
         $script:cleanupFailures++
         Write-Host "  [ERROR] Could not delete resource group '$($r.Name)': $_" -ForegroundColor Red
+    }
+}
+
+# 8. Remove the Key Vault Administrator role of Backup Management Service on the VM's key vault,
+#    once the VM is no longer protected: while it may be, its next backup still needs the role.
+#    Only the assignment on the vault itself is the lab's; one inherited from above stays.
+$kvAdminRoleId = Get-LabBuiltInRoleId -Name 'Key Vault Administrator'
+foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'KeyVaultRoleAssignment' }) {
+    if ($script:protectionStillOn) {
+        Write-Host "  [INFO] Key Vault Administrator on $($r.Name) left in place - a VM may still be protected (see the [ERROR] above)." -ForegroundColor Gray
+        continue
+    }
+    if (-not $PSCmdlet.ShouldProcess("Backup Management Service -> $($r.Name)", 'Remove role assignment')) { continue }
+    Write-Host "  Removing Key Vault Administrator for Backup Management Service on $($r.Name)..." -ForegroundColor Gray
+    $assignmentLookup = Invoke-LabLookup -Target "the Key Vault Administrator role on $($r.Name)" -Lookup {
+        Get-LabArmRoleAssignment -Scope $r.Scope -PrincipalId $r.PrincipalId |
+            Where-Object { $_.RoleDefinitionId -eq $kvAdminRoleId -and $_.Scope -eq $r.Scope }
+    }
+    if ($assignmentLookup.Failed) { continue }
+    try {
+        if ($assignmentLookup.Value.Count -gt 0) {
+            foreach ($assignment in $assignmentLookup.Value) {
+                Remove-LabArmRoleAssignment -Id $assignment.RoleAssignmentId
+            }
+            Write-Host "  ✓ Removed role assignment: Key Vault Administrator on $($r.Name)" -ForegroundColor Green
+        } else {
+            Write-Host "  ✓ Role assignment already absent: Key Vault Administrator on $($r.Name)" -ForegroundColor Green
+        }
+    } catch {
+        $script:cleanupFailures++
+        Write-Host "  [ERROR] Could not remove Key Vault Administrator on '$($r.Name)': $_" -ForegroundColor Red
     }
 }
 

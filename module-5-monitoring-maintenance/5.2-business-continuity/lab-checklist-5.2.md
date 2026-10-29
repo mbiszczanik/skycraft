@@ -44,12 +44,18 @@
 ### Blob Backup Policy
 
 - [x] Policy name: `SkyCraft-Blob-Policy`
-- [x] Retention: **30 days**
+- [x] Operational backup retention: **30 days**
+- [x] Vaulted backup: **Daily** at **3:30 AM UTC**, retention **7 days** (a new blob policy cannot be operational only)
 - [x] Associated vault: `platform-skycraft-swc-bv`
 
 ---
 
 ## ✅ Protected Items Verification
+
+### Key Vault Access for Azure Backup
+
+- [x] `dev-skycraft-swc-auth-vm` encrypted with Azure Disk Encryption (Lab 3.2), keys in `dev-skycraft-swc-kv`
+- [x] **Backup Management Service** holds **Key Vault Administrator** on `dev-skycraft-swc-kv`, assigned before **Enable Backup**
 
 ### VM Backup
 
@@ -57,6 +63,17 @@
 - [x] Policy assigned: `SkyCraft-Daily-Prod`
 - [x] Initial backup triggered (status: **Completed** or **In progress**, never **Failed** - a failure here is Troubleshooting, Issue 2 in the lab guide)
 - [x] Last backup status: **Success** (once completed)
+
+### Blob Backup
+
+- [x] `prodskycraftswcsa` listed under **Backup instances** in `platform-skycraft-swc-bv`, **Protection configured**
+- [x] Vaulted backup covers all present containers of the account (Lab 4.2)
+
+### File-Level Recovery
+
+- [ ] `dev-skycraft-swc-world-vm` (not encrypted) protected with `SkyCraft-Daily-Prod` and has a recovery point
+- [ ] `skycraft-flr-marker.txt` read from the recovery point's mounted volume
+- [ ] **Unmount Disks** done and the mount paths cleaned (`clean`)
 
 ---
 
@@ -84,7 +101,7 @@
 
 ### Replication Status
 
-- [ ] VM `dev-skycraft-swc-auth-vm` replication status: **Protected**
+- [ ] VM `dev-skycraft-swc-world-vm` replication status: **Protected**
 - [ ] Target region: **Norway East**
 - [ ] Cache storage account created in source region
 - [ ] Target resource group created in Norway East
@@ -137,6 +154,36 @@ Get-AzRecoveryServicesBackupProtectionPolicy -VaultId $vault.ID -Name 'SkyCraft-
 # SkyCraft-Daily-Prod  AzureVM         Daily
 ```
 
+### Verify Instant-Restore Snapshot Resource Group
+
+```powershell
+$vault  = Get-AzRecoveryServicesVault -ResourceGroupName 'platform-skycraft-swc-rg' -Name 'platform-skycraft-swc-rsv'
+$policy = Get-AzRecoveryServicesBackupProtectionPolicy -VaultId $vault.ID -Name 'SkyCraft-Daily-Prod'
+$policy | Select-Object Name, AzureBackupRGName, AzureBackupRGNameSuffix, SnapshotRetentionInDays | Format-Table
+(Get-AzResourceGroup -Name 'platform-skycraft-swc-rpc1-rg').Tags
+@(Get-AzResourceLock -ResourceGroupName 'platform-skycraft-swc-rpc1-rg').Count
+
+# Expected output:
+# Name                 AzureBackupRGName          AzureBackupRGNameSuffix  SnapshotRetentionInDays
+# ----                 -----------------          -----------------------  -----------------------
+# SkyCraft-Daily-Prod  platform-skycraft-swc-rpc  -rg                      2
+# (tags with Environment = Platform and Project = SkyCraft, then 0 locks)
+```
+
+### Verify Key Vault Access for Azure Backup
+
+```powershell
+$kv = Get-AzKeyVault -ResourceGroupName 'dev-skycraft-swc-rg' -VaultName 'dev-skycraft-swc-kv'
+Get-AzRoleAssignment -Scope $kv.ResourceId -RoleDefinitionName 'Key Vault Administrator' |
+  Where-Object { $_.DisplayName -eq 'Backup Management Service' } |
+  Select-Object DisplayName, RoleDefinitionName, Scope |
+  Format-Table
+
+# Expected output: one row, DisplayName 'Backup Management Service', scope the key vault.
+```
+
+`Get-AzRoleAssignment` resolves names through Microsoft Graph. If it fails with `MicrosoftGraphEndpointResourceId`, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md), or run it in Azure Cloud Shell.
+
 ### Verify Protected Items
 
 ```powershell
@@ -178,6 +225,19 @@ Get-AzDataProtectionBackupPolicy -ResourceGroupName 'platform-skycraft-swc-rg' -
 # Name                   DatasourceType
 # ----                   --------------
 # SkyCraft-Blob-Policy   Microsoft.Storage/storageAccounts/blobServices
+
+# Operational and vaulted retention: one lifecycle per data store
+$bv = Get-AzDataProtectionBackupVault -ResourceGroupName 'platform-skycraft-swc-rg' -VaultName 'platform-skycraft-swc-bv'
+(Get-AzResource -ResourceId "$($bv.Id)/backupPolicies/SkyCraft-Blob-Policy" -ApiVersion '2023-01-01' -ExpandProperties).Properties.policyRules |
+  Where-Object objectType -eq 'AzureRetentionRule' | ForEach-Object { $_.lifecycles } |
+  Select-Object @{N='DataStore';E={$_.sourceDataStore.dataStoreType}}, @{N='Retention';E={$_.deleteAfter.duration}} |
+  Format-Table
+
+# Expected output:
+# DataStore         Retention
+# ---------         ---------
+# OperationalStore  P30D
+# VaultStore        P7D
 ```
 
 ### Verify Blob Backup Instance
@@ -208,7 +268,7 @@ Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $containe
 # Expected output (after replication is enabled):
 # FriendlyName                          ProtectionState
 # ------------                          ---------------
-# dev-skycraft-swc-auth-vm              Protected
+# dev-skycraft-swc-world-vm             Protected
 ```
 
 > **Note**: ASR replication is configured via the Azure Portal (Step 5.2.6) and may not yet be enabled in all environments. Verify status in **Azure Portal → Recovery Services Vault → Replicated items**.
@@ -221,9 +281,9 @@ Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $containe
 | :-------------------------- | :-------------------------- | :------------ | :----- |
 | **Recovery Services Vault** | `platform-skycraft-swc-rsv` | LRS           | [x]    |
 | **VM Backup Policy**        | `SkyCraft-Daily-Prod`       | Daily, 30-day | [x]    |
-| **Protected VM**            | `dev-skycraft-swc-auth-vm` | VM Backup     | [x]    |
+| **Protected VM**            | `dev-skycraft-swc-auth-vm` | VM Backup (ADE, key vault role) | [x]    |
 | **Backup Vault**            | `platform-skycraft-swc-bv`  | LRS           | [x]    |
-| **Blob Policy**             | `SkyCraft-Blob-Policy`      | 30-day        | [x]    |
+| **Blob Policy**             | `SkyCraft-Blob-Policy`      | 30-day operational, 7-day vaulted | [x]    |
 | **Site Recovery**           | ASR → Norway East           | Continuous    | [ ]    |
 | **Test Failover**           | Completed + cleaned up      | Validated     | [ ]    |
 

@@ -269,6 +269,7 @@ $script:LabBuiltInRoles = [ordered]@{
     'Storage Blob Data Contributor'      = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
     'Storage Blob Data Owner'            = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
     'Storage Account Backup Contributor' = 'e5e2a7ff-d759-4cd2-bb51-3152d37e2eb1'
+    'Key Vault Administrator'            = '00482a5a-887f-4fb3-b363-3b7fe8e74483'
 }
 
 function Get-LabBuiltInRoleId {
@@ -277,8 +278,8 @@ function Get-LabBuiltInRoleId {
         Returns the id (a GUID) of a built-in role the labs use, by its name.
 
     .DESCRIPTION
-        Owner, Contributor, Reader, Storage Blob Data Contributor, Storage Blob Data Owner and
-        Storage Account Backup Contributor. A built-in role has the same id in every tenant, so
+        Owner, Contributor, Reader, Storage Blob Data Contributor, Storage Blob Data Owner,
+        Storage Account Backup Contributor and Key Vault Administrator. A built-in role has the same id in every tenant, so
         this reads no directory and no subscription. A name not in the list throws: add it here
         with its id from the Azure built-in roles reference rather than look it up at run time.
 
@@ -1196,4 +1197,123 @@ function Remove-LabDnsLink {
     }
 }
 
-Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabDnsLink, Remove-LabDnsLink
+# --- Azure Backup of a VM encrypted with Azure Disk Encryption (issue #368) -----------------------
+
+# Backup Management Service, the Microsoft Entra app Azure Backup reads an ADE VM's key vault with.
+# Same app id in every tenant (Microsoft Learn, "Back up and restore Azure VMs with PowerShell");
+# the object id a role assignment needs differs per tenant.
+$script:LabBackupManagementServiceAppId = '262044b1-e2ce-469f-a196-69ab7ada62d3'
+
+function Get-LabAdeKeyVaultId {
+    <#
+    .SYNOPSIS
+        Returns the id of each key vault that holds a VM's Azure Disk Encryption keys, or nothing
+        when the VM is not encrypted with ADE.
+
+    .DESCRIPTION
+        Reads the encryption state with Get-AzVMDiskEncryptionStatus and the vault from the VM's
+        instance view (Get-AzVM -Status: each disk's EncryptionSettings, DiskEncryptionKey.
+        SourceVault.Id), the place Microsoft Learn names for finding an encrypted VM's key vault.
+        The vault is read rather than assumed, so a Lab 3.2 run with -KeyVaultName needs nothing
+        extra. Throws when either lookup fails, and when the VM reports an encrypted volume but
+        its instance view names no key vault: a caller must not read either as "not encrypted".
+
+    .PARAMETER ResourceGroupName
+        The VM's resource group.
+
+    .PARAMETER VMName
+        The VM's name.
+
+    .OUTPUTS
+        System.String - zero or more key vault resource ids.
+
+    .EXAMPLE
+        Get-LabAdeKeyVaultId -ResourceGroupName dev-skycraft-swc-rg -VMName dev-skycraft-swc-auth-vm
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #368
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$VMName
+    )
+
+    $status = Get-AzVMDiskEncryptionStatus -ResourceGroupName $ResourceGroupName -VMName $VMName -ErrorAction Stop
+    $encrypted = "$($status.OsVolumeEncrypted)" -eq 'Encrypted' -or "$($status.DataVolumesEncrypted)" -eq 'Encrypted'
+
+    $vm = Get-AzVM -ResourceGroupName $ResourceGroupName -Name $VMName -Status -ErrorAction Stop
+    $vaultIds = @(
+        foreach ($disk in @($vm.Disks)) {
+            foreach ($setting in @($disk.EncryptionSettings)) {
+                $vaultId = [string]$setting.DiskEncryptionKey.SourceVault.Id
+                if ($vaultId) { $vaultId }
+            }
+        }
+    ) | Sort-Object -Unique
+
+    if ($encrypted -and @($vaultIds).Count -eq 0) {
+        throw "$VMName reports an ADE-encrypted volume, but its instance view names no key vault (Get-AzVM -Status, Disks.EncryptionSettings)."
+    }
+    $vaultIds
+}
+
+function Get-LabBackupManagementServiceId {
+    <#
+    .SYNOPSIS
+        Returns the object id of the Backup Management Service app in the signed-in tenant.
+
+    .DESCRIPTION
+        Azure Backup reads the key vault of a VM encrypted with Azure Disk Encryption as the
+        Microsoft Entra app Backup Management Service (app id 262044b1-e2ce-469f-a196-69ab7ada62d3),
+        not as the Recovery Services vault's identity. A role assignment needs its object id, which
+        differs per tenant, and only Microsoft Graph can turn the app id into it
+        (Get-AzADServicePrincipal -ApplicationId). -ObjectId skips that lookup, for a sign-in that
+        cannot get a Graph token. Throws when the lookup fails or finds no service principal; the
+        message names the sign-in that gives Graph and the parameter that avoids it.
+
+    .PARAMETER ObjectId
+        The object id, when the caller already has it; returned as given.
+
+    .OUTPUTS
+        System.String
+
+    .EXAMPLE
+        Get-LabBackupManagementServiceId
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #368
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter()]
+        [AllowEmptyString()]
+        [string]$ObjectId
+    )
+
+    if ($ObjectId) { return $ObjectId }
+
+    $hint = "Finding it needs Microsoft Graph: sign in again with 'Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId', or pass its object id with -BackupManagementServiceObjectId (in Azure Cloud Shell: (Get-AzADServicePrincipal -ApplicationId $script:LabBackupManagementServiceAppId).Id)."
+    try {
+        $principals = @(Get-AzADServicePrincipal -ApplicationId $script:LabBackupManagementServiceAppId -ErrorAction Stop)
+    }
+    catch {
+        throw "Could not look up the Backup Management Service app ($script:LabBackupManagementServiceAppId) in Microsoft Entra ID: $($_.Exception.Message) $hint"
+    }
+    $ids = @($principals | Where-Object { $_.Id } | ForEach-Object { [string]$_.Id })
+    if ($ids.Count -ne 1) {
+        throw "Microsoft Entra ID returned $($ids.Count) service principals for the Backup Management Service app ($script:LabBackupManagementServiceAppId), not one. $hint"
+    }
+    $ids[0]
+}
+
+Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabDnsLink, Remove-LabDnsLink, Get-LabAdeKeyVaultId, Get-LabBackupManagementServiceId
