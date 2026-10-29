@@ -4,7 +4,7 @@
     and fails, without crashing, on a broken one.
 
 .DESCRIPTION
-    Regression cover for issues #353, #355 and #368. Test-Lab.ps1 looked the NICs up by the
+    Regression cover for issues #353, #355, #368 and #371. Test-Lab.ps1 looked the NICs up by the
     names only main.bicep gives them (<prefix>-auth-nic, <prefix>-world-nic) and the data disk by
     <prefix>-world-datadisk. The Portal names a NIC <vm-name><digits> and the guide names the disk
     <prefix>-world-vm-data, so on a Portal-built lab the script stopped with "Cannot index into a
@@ -82,6 +82,7 @@ function Get-AzVM {
     }
     [pscustomobject]@{
         Name           = $Name
+        ProvisioningState = if ($vm.state) { $vm.state } else { 'Succeeded' }
         Zones          = @($vm.zones)
         NetworkProfile = [pscustomobject]@{ NetworkInterfaces = @($vm.nicIds | ForEach-Object { [pscustomobject]@{ Id = $_ } }) }
         StorageProfile = [pscustomobject]@{
@@ -157,6 +158,7 @@ function Get-AzVmss {
             [switch]$WorldEncrypted,
             [switch]$NoKeyVault,
             [switch]$NoWorldVm,
+            [switch]$WorldVmFailed,
             [switch]$LeftoverVmss,
             [string]$KeyVaultName = 'dev-skycraft-swc-kv'
         )
@@ -177,6 +179,7 @@ function Get-AzVmss {
         if (-not $NoWorldVm) {
             $vms['dev-skycraft-swc-world-vm'] = @{
                 power = 'running'; zones = @('2'); nicIds = @($worldNic)
+                state = $(if ($WorldVmFailed) { 'Failed' } else { 'Succeeded' })
                 dataDisks = @(if (-not $NoDataDisk) { @{ lun = 0; name = $diskName; sizeGB = 64 } })
                 ade = $(if ($WorldEncrypted) { @{ os = 'Encrypted'; data = 'Encrypted' } } else { @{ os = 'NotEncrypted'; data = 'NotEncrypted' } })
             }
@@ -221,13 +224,14 @@ function Get-AzVmss {
     $script:NoKeyVault      = Invoke-Validator (Get-StubEstate -NoKeyVault)
     $script:NoWorldVm       = Invoke-Validator (Get-StubEstate -NoWorldVm)
     $script:LeftoverVmss    = Invoke-Validator (Get-StubEstate -LeftoverVmss)
+    $script:WorldVmFailed   = Invoke-Validator (Get-StubEstate -WorldVmFailed)
     # Key vault names are globally unique: a learner may have had to pick another one.
     $script:OwnVault        = Invoke-Validator (Get-StubEstate -KeyVaultName 'dev-skycraft-swc-kv-mb') -ArgumentList '-KeyVaultName', 'dev-skycraft-swc-kv-mb'
 
     $script:AllRuns = @(
         $script:Portal, $script:BicepBuilt, $script:NoAuthAsg, $script:NoEgress, $script:NoDataDisk,
         $script:AuthUnencrypted, $script:WorldEncrypted, $script:NoKeyVault, $script:NoWorldVm, $script:LeftoverVmss,
-        $script:OwnVault
+        $script:WorldVmFailed, $script:OwnVault
     )
 }
 
@@ -273,6 +277,7 @@ Describe 'Lab 3.2 Test-Lab.ps1 - fails on a broken lab' {
         @{ name = 'a world VM without its data disk'; run = 'NoDataDisk'; pattern = 'data disk at LUN 0[^\r\n]*FAIL' }
         @{ name = 'an auth VM that is not encrypted'; run = 'AuthUnencrypted'; pattern = 'Auth VM OS disk encrypted[^\r\n]*FAIL' }
         @{ name = 'a world VM that is encrypted (#368)'; run = 'WorldEncrypted'; pattern = 'World VM not encrypted[^\r\n]*FAIL' }
+        @{ name = 'a VM left in provisioning state Failed (#371)'; run = 'WorldVmFailed'; pattern = 'World VM provisioning state is Succeeded[^\r\n]*FAIL' }
         @{ name = 'a missing key vault'; run = 'NoKeyVault'; pattern = 'Key vault dev-skycraft-swc-kv[^\r\n]*FAIL' }
     ) {
         $result = (Get-Variable -Scope Script -Name $run).Value
