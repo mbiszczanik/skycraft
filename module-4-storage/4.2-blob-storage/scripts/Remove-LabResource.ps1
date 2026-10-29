@@ -5,7 +5,9 @@
 .DESCRIPTION
     Removes the specific containers and configurations created in Lab 4.2.
     Does NOT delete the storage accounts themselves.
-    Reverts Versioning and Public Access settings to Lab 4.1 defaults.
+    Reverts Versioning and Public Access settings to Lab 4.1 defaults. Point-in-time restore, if on
+    (Lab 5.2's operational blob backup enables it), is disabled first because Azure refuses to
+    disable versioning while it is on (issue #453).
 
     Every step continues on error, so one stuck object does not strand the rest. A lookup that
     fails (a 403, throttling, a transient error) or a step that fails is reported as [ERROR] and
@@ -186,8 +188,16 @@ elseif ($prodSa -and $PSCmdlet.ShouldProcess($ProdSaName, 'Remove Lab 4.2 contai
         }
     }
 
-    # Disable Versioning (Update-AzStorageBlobServiceProperty)
+    # Disable Versioning (Update-AzStorageBlobServiceProperty). Azure refuses while point-in-time
+    # restore is on (Lab 5.2's operational blob backup turns it on and leaves it), so that goes
+    # first (#453). One step: a failed read or disable is one failure, not a second one from the
+    # versioning call it would block.
     Invoke-LabStep -Description 'disable versioning' -Action {
+        $blobService = Get-AzStorageBlobServiceProperty -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName -ErrorAction Stop
+        if ($blobService.RestorePolicy.Enabled) {
+            Disable-AzStorageBlobRestorePolicy -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName -ErrorAction Stop | Out-Null
+            Write-Host "  Disabled point-in-time restore" -ForegroundColor Gray
+        }
         Update-AzStorageBlobServiceProperty -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName -IsVersioningEnabled $false -ErrorAction Stop
         Write-Host "  Disabled Versioning" -ForegroundColor Gray
     }

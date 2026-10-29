@@ -377,6 +377,7 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BlobInstance' })
             -VaultName $bvName `
             -Name $r.Name | Out-Null
         Write-Host "  ✓ Deleted" -ForegroundColor Green
+        Write-Host "  [INFO] Point-in-time restore, which blob backup turned on, may stay on $storageAccount; Lab 4.2's cleanup turns it off." -ForegroundColor Gray
     } catch {
         $script:cleanupFailures++
         Write-Host "  [ERROR] Could not delete blob backup instance '$($r.Name)': $_" -ForegroundColor Red
