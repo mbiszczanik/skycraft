@@ -111,7 +111,7 @@ The end state on every path, on `prodskycraftswcsa`:
 - Container `dev-assets`, **Private**, with no stored access policy left (Step 4.4.4 deletes it).
 - **Storage Blob Data Contributor** assigned on the account itself to your account.
 
-Steps without a Bicep counterpart, and why: 4.4.1 only checks Lab 2.2's service endpoint (Lab 2.2's Bicep sets it). The stored access policy of 4.4.3 and the SAS token of 4.4.4 are data-plane objects that a template cannot create, and 4.4.4 deletes the policy again, so the end state is the same. 4.4.5 and 4.4.6 rotate keys, which is an operation, not a resource: `Test-Lab.ps1` reports when the keys were last rotated but does not count it. 4.4.8 uploads a blob, which is data. Every one of these steps has an Az PowerShell block.
+Steps without a Bicep counterpart, and why: 4.4.1 only checks Lab 2.2's service endpoint (Lab 2.2's Bicep sets it). The stored access policy of 4.4.3 and the SAS token of 4.4.4 are data-plane objects that a template cannot create, and 4.4.4 deletes the policy again, so the end state is the same. 4.4.5 and 4.4.6 rotate keys, which is an operation, not a resource: `Test-Lab.ps1` reports when the keys were last rotated but does not count it. 4.4.8 uploads a blob, which is data. Every one of these steps has an Az PowerShell block. Storage account names are unique across Azure: if Lab 4.1 had to use another name than `prodskycraftswcsa`, pass it to `Deploy-Bicep.ps1`, `Test-Lab.ps1` and `Remove-LabResource.ps1` as `-StorageAccountName`. `Deploy-Bicep.ps1` checks the name before it deploys and stops if it is taken by someone else.
 
 Known differences between the paths:
 

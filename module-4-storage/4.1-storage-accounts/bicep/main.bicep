@@ -3,7 +3,7 @@ SUMMARY: Lab 4.1 - Storage Accounts - Orchestrator
 DESCRIPTION: Deploys the SkyCraft storage accounts (platform, development, production) via the Azure Verified Module for storage accounts, with environment-specific redundancy, the canonical tags and blob/file soft delete
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev
 AUTHOR/S: Marcin Biszczanik
-VERSION: 2.1.0
+VERSION: 2.2.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -59,6 +59,22 @@ param parPublicNetworkAccess string = 'Enabled'
 @description('Enable infrastructure (double) encryption. Creation-only - cannot be changed on an existing account.')
 param parEnableInfrastructureEncryption bool = false
 
+// Storage account names are unique across Azure: override one that is taken (#438).
+@description('Platform storage account name: 3-24 lowercase letters and digits')
+@minLength(3)
+@maxLength(24)
+param parPlatformSaName string = 'platformskycraftswcsa'
+
+@description('Development storage account name: 3-24 lowercase letters and digits')
+@minLength(3)
+@maxLength(24)
+param parDevSaName string = 'devskycraftswcsa'
+
+@description('Production storage account name: 3-24 lowercase letters and digits')
+@minLength(3)
+@maxLength(24)
+param parProdSaName string = 'prodskycraftswcsa'
+
 /*******************
 *    Variables     *
 *******************/
@@ -87,6 +103,12 @@ var varTags = {
   }
 }
 
+var varStorageAccountNames = {
+  platform: parPlatformSaName
+  dev: parDevSaName
+  prod: parProdSaName
+}
+
 // Production and Platform hold data worth geo-replicating; Development is recreatable.
 var varSkuNames = {
   platform: 'Standard_GRS'
@@ -102,7 +124,7 @@ module modStorageAccount 'br/public:avm/res/storage/storage-account:0.33.0' = [f
   name: 'sa-deployment-${env}'
   scope: resourceGroup('${env}-skycraft-swc-rg')
   params: {
-    name: '${env}skycraftswcsa'
+    name: varStorageAccountNames[env]
     location: parLocation
     tags: varTags[env]
     skuName: varSkuNames[env]

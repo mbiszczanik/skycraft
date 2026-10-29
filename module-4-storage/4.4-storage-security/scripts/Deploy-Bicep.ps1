@@ -27,6 +27,10 @@
     Target environment (prod or dev). Default: prod.
     platform is not supported: the hub VNet has no workload subnet to allow through
     the storage firewall.
+.PARAMETER StorageAccountName
+    The storage account. Default: '<Environment>skycraftswcsa'. Storage account names are unique
+    across Azure, so use the name Lab 4.1 deployed, and pass it to Test-Lab.ps1 and
+    Remove-LabResource.ps1.
 .PARAMETER ClientIp
     Your client IP to allow through the firewall. Auto-detected if omitted.
 .PARAMETER DataPrincipalId
@@ -63,6 +67,11 @@ param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('prod', 'dev')]
     [string]$Environment = 'prod',
+
+    # The default reads $Environment, so it must be declared first.
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$StorageAccountName = "${Environment}skycraftswcsa",
 
     [Parameter(Mandatory = $false)]
     [string]$ClientIp = '',
@@ -193,8 +202,14 @@ if ([string]::IsNullOrWhiteSpace($ClientIp)) {
     }
 }
 
-# 3. Who gets Storage Blob Data Contributor on the account (guide Step 4.4.7)
-$accountScope = "/subscriptions/$($context.Subscription.Id)/resourceGroups/$Environment-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/${Environment}skycraftswcsa"
+# 3. A taken name otherwise fails the deployment with StorageAccountAlreadyTaken (#438).
+$accountOwned = [bool](Get-AzResource -ResourceGroupName "$Environment-skycraft-swc-rg" -ResourceType 'Microsoft.Storage/storageAccounts' -Name $StorageAccountName -ErrorAction SilentlyContinue)
+if (-not (Test-LabGlobalName -Kind StorageAccount -Name $StorageAccountName -ParameterName 'StorageAccountName' -Owned $accountOwned)) {
+    Exit-Lab -FailureCount 1
+}
+
+# 3b. Who gets Storage Blob Data Contributor on the account (guide Step 4.4.7)
+$accountScope = "/subscriptions/$($context.Subscription.Id)/resourceGroups/$Environment-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/$StorageAccountName"
 $assignPrincipalId = Resolve-LabDataPrincipalId -Scope $accountScope -PrincipalId $DataPrincipalId -Skip:$SkipDataRoleAssignment
 
 # 4. Deploy Bicep
@@ -207,6 +222,7 @@ try {
         TemplateFile                  = (Join-Path $PSScriptRoot "..\bicep\main.bicep")
         parLocation                   = $Location
         parEnvironment                = $Environment
+        parStorageAccountName         = $StorageAccountName
         parClientIp                   = $ClientIp
         parDataContributorPrincipalId = $assignPrincipalId
         ErrorAction                   = 'Stop'

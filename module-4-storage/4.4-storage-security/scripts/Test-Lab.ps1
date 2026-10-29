@@ -24,6 +24,9 @@
     A lookup that fails is a counted [FAIL] that says why. The script ends through Exit-Lab.
 .PARAMETER Environment
     Environment to validate (prod or dev). Default: prod.
+.PARAMETER StorageAccountName
+    The storage account. Default: '<Environment>skycraftswcsa'. Pass the name given to
+    Deploy-Bicep.ps1.
 .EXAMPLE
     .\Test-Lab.ps1 -Environment prod
 .NOTES
@@ -39,7 +42,12 @@
 param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('prod', 'dev')]
-    [string]$Environment = 'prod'
+    [string]$Environment = 'prod',
+
+    # The default reads $Environment, so it must be declared first.
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$StorageAccountName = "${Environment}skycraftswcsa"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,7 +56,6 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 $failCount = 0
 
 $resourceGroupName  = "$Environment-skycraft-swc-rg"
-$storageAccountName = "${Environment}skycraftswcsa"
 $vnetName           = "$Environment-skycraft-swc-vnet"
 $subnetName         = 'WorldSubnet'
 

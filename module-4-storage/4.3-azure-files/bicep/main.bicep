@@ -3,7 +3,7 @@ SUMMARY: Lab 4.3 - Azure Files - Orchestrator
 DESCRIPTION: Configures the file service on a SkyCraft storage account via the Azure Verified Module for storage accounts - raises share soft delete to 14 days and creates the two SkyCraft file shares. Targets Production by default to demonstrate GRS.
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment prod
 AUTHOR/S: Marcin Biszczanik
-VERSION: 2.0.0
+VERSION: 2.1.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -20,6 +20,12 @@ param parLocation string = 'swedencentral'
 @description('Target environment')
 @allowed(['dev', 'prod', 'platform'])
 param parEnvironment string = 'prod'
+
+// Storage account names are unique across Azure: use the name Lab 4.1 deployed (#438).
+@description('Storage account name: 3-24 lowercase letters and digits')
+@minLength(3)
+@maxLength(24)
+param parStorageAccountName string = '${parEnvironment}skycraftswcsa'
 
 @description('Resource owner tag value')
 @minLength(1)
@@ -74,7 +80,7 @@ module modStorage 'br/public:avm/res/storage/storage-account:0.33.0' = {
   name: 'sa-deployment-files'
   scope: resourceGroup('${parEnvironment}-skycraft-swc-rg')
   params: {
-    name: '${parEnvironment}skycraftswcsa'
+    name: parStorageAccountName
     location: parLocation
     tags: varCommonTags
     skuName: varSkuNames[parEnvironment]

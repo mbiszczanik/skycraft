@@ -21,12 +21,27 @@
     Enable infrastructure (double) encryption. Only applies to new deployments.
     Cannot be changed after storage account creation.
 
+.PARAMETER PlatformSaName
+    Platform storage account name. Default: platformskycraftswcsa. Storage account names are
+    unique across Azure, so override this on a collision, and pass the same name to Test-Lab.ps1,
+    Remove-LabResource.ps1 and Labs 4.2-5.3.
+
+.PARAMETER DevSaName
+    Development storage account name. Default: devskycraftswcsa. See -PlatformSaName.
+
+.PARAMETER ProdSaName
+    Production storage account name. Default: prodskycraftswcsa. See -PlatformSaName.
+
 .PARAMETER WhatIf
     Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
 
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment dev
     Deploys storage account to development environment.
+
+.EXAMPLE
+    .\Deploy-Bicep.ps1 -All -PlatformSaName platformskycraftswcsaab -DevSaName devskycraftswcsaab -ProdSaName prodskycraftswcsaab
+    Deploys all three accounts under names of your own, when the defaults are taken.
 
 .EXAMPLE
     .\Deploy-Bicep.ps1 -All
@@ -43,7 +58,7 @@
 .NOTES
     Project: SkyCraft
     Lab: 4.1 - Storage Accounts
-    Version: 2.0.0
+    Version: 2.1.0
     Date: 2026-08-28
 #>
 
@@ -65,6 +80,18 @@ param(
 
     [Parameter(Mandatory = $false)]
     [switch]$InfraEncryption,
+
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$PlatformSaName = 'platformskycraftswcsa',
+
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$DevSaName = 'devskycraftswcsa',
+
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$ProdSaName = 'prodskycraftswcsa',
 
     [Parameter(Mandatory = $false)]
     [switch]$WhatIf
@@ -112,16 +139,12 @@ foreach ($rg in $requiredRGs) {
 Write-Host ""
 Write-Host "--- Checking Existing Resources ---" -ForegroundColor Yellow
 
-$storageAccounts = if ($All) {
-    @(
-        @{ Name = 'platformskycraftswcsa'; RG = 'platform-skycraft-swc-rg' },
-        @{ Name = 'devskycraftswcsa'; RG = 'dev-skycraft-swc-rg' },
-        @{ Name = 'prodskycraftswcsa'; RG = 'prod-skycraft-swc-rg' }
-    )
+$allAccounts = [ordered]@{
+    platform = @{ Name = $PlatformSaName; Parameter = 'PlatformSaName'; RG = 'platform-skycraft-swc-rg' }
+    dev      = @{ Name = $DevSaName; Parameter = 'DevSaName'; RG = 'dev-skycraft-swc-rg' }
+    prod     = @{ Name = $ProdSaName; Parameter = 'ProdSaName'; RG = 'prod-skycraft-swc-rg' }
 }
-else {
-    @(@{ Name = "${Environment}skycraftswcsa"; RG = "$Environment-skycraft-swc-rg" })
-}
+$storageAccounts = if ($All) { @($allAccounts.Values) } else { @($allAccounts[$Environment]) }
 
 $existingAccounts = @()
 $enableInfraEncryption = $InfraEncryption.IsPresent
@@ -135,6 +158,15 @@ foreach ($sa in $storageAccounts) {
     else {
         Write-Host "  [NEW] $($sa.Name) will be created" -ForegroundColor Yellow
     }
+}
+
+# A taken name otherwise fails the deployment with StorageAccountAlreadyTaken (#438).
+$takenNames = 0
+foreach ($sa in $storageAccounts) {
+    if (-not (Test-LabGlobalName -Kind StorageAccount -Name $sa.Name -ParameterName $sa.Parameter -Owned ($sa.Name -in $existingAccounts))) { $takenNames++ }
+}
+if ($takenNames -gt 0) {
+    Exit-Lab -FailureCount $takenNames
 }
 
 # Infrastructure encryption is a creation-only property; forcing it on an existing account fails the deployment.
@@ -160,6 +192,9 @@ $deploymentParams = @{
     parEnableContainerSoftDelete      = $true
     parEnableFileSoftDelete           = $true
     parEnableInfrastructureEncryption = $enableInfraEncryption
+    parPlatformSaName                 = $PlatformSaName
+    parDevSaName                      = $DevSaName
+    parProdSaName                     = $ProdSaName
 }
 
 Write-Host "  Template: $templateFile"

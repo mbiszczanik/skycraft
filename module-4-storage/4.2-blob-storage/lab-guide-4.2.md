@@ -110,7 +110,7 @@ The end state on every path:
 
 One value differs by path and is meant to: dev versioning is never set by the Portal (Azure reports it as unset) and is written as `false` by the Bicep; both mean off.
 
-Steps without a PowerShell or Bicep counterpart: 4.2.1, 4.2.4 and 4.2.10 only read settings. 4.2.11 and 4.2.13 upload a blob, which is data, not configuration: they have PowerShell blocks but no Bicep, and `Test-Lab.ps1` does not check blobs. In 4.2.12, items 1, 3 and 4 are Portal only (a look at a switch, an anonymous request and a dialog you close); its container (item 2) has a PowerShell block and is in the Bicep.
+Steps without a PowerShell or Bicep counterpart: 4.2.1, 4.2.4 and 4.2.10 only read settings. 4.2.11 and 4.2.13 upload a blob, which is data, not configuration: they have PowerShell blocks but no Bicep, and `Test-Lab.ps1` does not check blobs. In 4.2.12, items 1, 3 and 4 are Portal only (a look at a switch, an anonymous request and a dialog you close); its container (item 2) has a PowerShell block and is in the Bicep. Storage account names are unique across Azure: if Lab 4.1 had to use other names than `prodskycraftswcsa` and `devskycraftswcsa`, pass them to `Deploy-Bicep.ps1`, `Test-Lab.ps1` and `Remove-LabResource.ps1` as `-ProdSaName` and `-DevSaName`. `Deploy-Bicep.ps1` checks both names before it deploys and stops if one is taken by someone else.
 
 **Preview - the AVM module call the Bicep path makes**:
 

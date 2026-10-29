@@ -8,6 +8,10 @@
     Azure region for deployment. Default: swedencentral.
 .PARAMETER Environment
     Target environment (prod, dev, platform). Default: prod.
+.PARAMETER StorageAccountName
+    The storage account. Default: '<Environment>skycraftswcsa'. Storage account names are unique
+    across Azure, so use the name Lab 4.1 deployed, and pass it to Test-Lab.ps1 and
+    Remove-LabResource.ps1.
 .PARAMETER WhatIf
     Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
 .EXAMPLE
@@ -34,6 +38,11 @@ param(
     [ValidateSet('prod', 'dev', 'platform')]
     [string]$Environment = 'prod',
 
+    # The default reads $Environment, so it must be declared first.
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$StorageAccountName = "${Environment}skycraftswcsa",
+
     [Parameter(Mandatory = $false)]
     [switch]$WhatIf
 )
@@ -50,7 +59,13 @@ if (-not $context) {
     Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; Exit-Lab -FailureCount 1
 }
 
-# 2. Deploy Bicep
+# 2. A taken name otherwise fails the deployment with StorageAccountAlreadyTaken (#438).
+$accountOwned = [bool](Get-AzResource -ResourceGroupName "$Environment-skycraft-swc-rg" -ResourceType 'Microsoft.Storage/storageAccounts' -Name $StorageAccountName -ErrorAction SilentlyContinue)
+if (-not (Test-LabGlobalName -Kind StorageAccount -Name $StorageAccountName -ParameterName 'StorageAccountName' -Owned $accountOwned)) {
+    Exit-Lab -FailureCount 1
+}
+
+# 3. Deploy Bicep
 try {
     Write-Host "Deploying main.bicep to subscription level..." -ForegroundColor Yellow
     
@@ -60,6 +75,7 @@ try {
         TemplateFile   = (Join-Path $PSScriptRoot "..\bicep\main.bicep")
         parLocation    = $Location
         parEnvironment = $Environment
+        parStorageAccountName = $StorageAccountName
         ErrorAction    = 'Stop'
     }
 

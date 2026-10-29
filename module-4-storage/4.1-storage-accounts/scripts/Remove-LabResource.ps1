@@ -27,6 +27,16 @@
 .PARAMETER Environment
     Target environment to clean up: dev, prod, platform, or all.
 
+.PARAMETER PlatformSaName
+    Platform storage account name. Default: platformskycraftswcsa. Pass the name given to
+    Deploy-Bicep.ps1.
+
+.PARAMETER DevSaName
+    Development storage account name. Default: devskycraftswcsa.
+
+.PARAMETER ProdSaName
+    Production storage account name. Default: prodskycraftswcsa.
+
 .PARAMETER Force
     Skip confirmation prompts.
 
@@ -53,6 +63,18 @@ param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prod', 'platform', 'all')]
     [string]$Environment = 'all',
+
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$PlatformSaName = 'platformskycraftswcsa',
+
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$DevSaName = 'devskycraftswcsa',
+
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$ProdSaName = 'prodskycraftswcsa',
 
     [Parameter(Mandatory = $false)]
     [switch]$Force
@@ -140,17 +162,17 @@ Write-Host ""
 # Storage account configurations
 $storageConfigs = @{
     platform = @{
-        Name          = 'platformskycraftswcsa'
+        Name          = $PlatformSaName
         ResourceGroup = 'platform-skycraft-swc-rg'
         DisplayName   = 'Platform'
     }
     dev      = @{
-        Name          = 'devskycraftswcsa'
+        Name          = $DevSaName
         ResourceGroup = 'dev-skycraft-swc-rg'
         DisplayName   = 'Development'
     }
     prod     = @{
-        Name          = 'prodskycraftswcsa'
+        Name          = $ProdSaName
         ResourceGroup = 'prod-skycraft-swc-rg'
         DisplayName   = 'Production'
     }

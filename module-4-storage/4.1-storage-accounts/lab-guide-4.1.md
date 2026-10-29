@@ -861,7 +861,7 @@ While Lab 1.3's delete locks (`lock-no-delete-platform`, `lock-no-delete-prod`) 
 
 - Storage account names are globally unique
 - If you deleted the account a moment ago, wait a minute and try again with the same name
-- If someone else owns the name, add random numbers or your initials: `prodskycraftswc01sa`. `Test-Lab.ps1` and the later labs use the names of this guide, so with another name you replace it in their commands too.
+- If someone else owns the name, add random numbers or your initials: `prodskycraftswc01sa`. In a class, every learner needs a different name, so add your initials from the start. `Test-Lab.ps1` and the later labs use the names of this guide, so pass your names to the lab scripts as `-PlatformSaName`, `-DevSaName` and `-ProdSaName` (Labs 4.1, 4.2, 5.2 and 5.3 take the ones they use) or `-StorageAccountName` (Labs 4.3 and 4.4). `Deploy-Bicep.ps1` checks the names before it deploys and stops if one is taken by someone else.
 - Check namespace availability:
   ```powershell
   Get-AzStorageAccountNameAvailability -Name prodskycraftswcsa

@@ -34,6 +34,9 @@
     it leaves the session open and the code in $LASTEXITCODE (issue #257).
 .PARAMETER Environment
     The environment to clean up (prod or dev). Default: prod.
+.PARAMETER StorageAccountName
+    The storage account. Default: '<Environment>skycraftswcsa'. Pass the name given to
+    Deploy-Bicep.ps1.
 .PARAMETER Force
     Skip confirmation prompt.
 .EXAMPLE
@@ -53,6 +56,11 @@ param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('prod', 'dev')]
     [string]$Environment = 'prod',
+
+    # The default reads $Environment, so it must be declared first.
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$StorageAccountName = "${Environment}skycraftswcsa",
 
     [Parameter(Mandatory = $false)]
     [switch]$Force
@@ -137,7 +145,6 @@ function Invoke-LabLookup {
 }
 
 $resourceGroupName = "$Environment-skycraft-swc-rg"
-$storageAccountName = "${Environment}skycraftswcsa"
 $vnetName = "$Environment-skycraft-swc-vnet"
 
 Write-Host "=== Lab 4.4: Cleaning Up Security Configuration ===" -ForegroundColor Cyan

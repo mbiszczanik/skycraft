@@ -30,6 +30,13 @@
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
     it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
+.PARAMETER ProdSaName
+    Production storage account name. Default: prodskycraftswcsa. Pass the name given to
+    Deploy-Bicep.ps1.
+
+.PARAMETER DevSaName
+    Development storage account name. Default: devskycraftswcsa.
+
 .PARAMETER Force
     Skip confirmation prompt.
 
@@ -46,6 +53,12 @@
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$ProdSaName = 'prodskycraftswcsa',
+
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$DevSaName = 'devskycraftswcsa',
+
     [switch]$Force
 )
 
@@ -148,9 +161,7 @@ function Invoke-LabStep {
 }
 
 $ProdRgName = 'prod-skycraft-swc-rg'
-$ProdSaName = 'prodskycraftswcsa'
 $DevRgName = 'dev-skycraft-swc-rg'
-$DevSaName = 'devskycraftswcsa'
 
 Write-Host "=== Lab 4.2 Cleanup ===" -ForegroundColor Cyan
 

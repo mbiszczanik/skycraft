@@ -480,7 +480,7 @@ if ($WhatIf) {
     }
 
     Write-Host "`n  Next Steps:" -ForegroundColor Cyan
-    Write-Host "    1. Run .\New-LabBlobBackup.ps1 to configure blob protection on prodskycraftswcsa" -ForegroundColor Gray
+    Write-Host "    1. Run .\New-LabBlobBackup.ps1 to configure blob protection on the production storage account of Lab 4.1 (add -ProdSaName if it has another name)" -ForegroundColor Gray
     Write-Host "    2. Configure Azure Site Recovery via Azure Portal (Step 5.2.6)" -ForegroundColor Gray
     Write-Host "    3. Run .\Test-Lab.ps1 to validate deployment" -ForegroundColor Gray
 }

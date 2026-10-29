@@ -56,9 +56,9 @@ param(
     [string]$ProdRgName = 'prod-skycraft-swc-rg',
     [ValidateNotNullOrEmpty()]
     [string]$DevRgName = 'dev-skycraft-swc-rg',
-    [ValidateNotNullOrEmpty()]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
     [string]$ProdSaName = 'prodskycraftswcsa',
-    [ValidateNotNullOrEmpty()]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
     [string]$DevSaName = 'devskycraftswcsa'
 )
 

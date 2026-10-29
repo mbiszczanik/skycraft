@@ -58,6 +58,10 @@
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
     it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
+.PARAMETER ProdSaName
+    Production storage account name. Default: prodskycraftswcsa. Pass the name given to Lab 4.1's
+    Deploy-Bicep.ps1.
+
 .PARAMETER Force
     Skip confirmation prompts.
 
@@ -80,6 +84,10 @@
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter()]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$ProdSaName = 'prodskycraftswcsa',
+
+    [Parameter()]
     [switch]$Force
 )
 
@@ -93,7 +101,7 @@ $platformRg     = 'platform-skycraft-swc-rg'
 $prodRg         = 'prod-skycraft-swc-rg'
 $rsvName        = 'platform-skycraft-swc-rsv'
 $bvName         = 'platform-skycraft-swc-bv'
-$storageAccount = 'prodskycraftswcsa'
+$storageAccount = $ProdSaName
 $location       = 'swedencentral'
 # Azure Backup names the snapshot group <prefix><n><suffix>; main.bicep creates n = 1, and the
 # service adds n = 2, 3, ... only when one group fills up. The pattern covers all of them.
