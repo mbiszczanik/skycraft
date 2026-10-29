@@ -428,6 +428,19 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - exit code contract' {
     }
 }
 
+Describe 'Lab 5.2 Remove-LabResource.ps1 - point-in-time restore outlives the blob backup (#453)' {
+
+    It 'says point-in-time restore stays on the account once the blob backup instance is deleted' {
+        $script:Clean.Calls  | Should -Contain 'Remove-AzDataProtectionBackupInstance'
+        $script:Clean.Output | Should -Match "Deleted\s+\[INFO\] Point-in-time restore[^\r\n]*stays on prodskycraftswcsa; Lab 4\.2's cleanup turns it off"
+    }
+
+    It 'does not say so when the blob backup instance could not be deleted' {
+        $script:FirstStuck.Output | Should -Match '\[ERROR\] Could not delete blob backup instance'
+        $script:FirstStuck.Output | Should -Not -Match 'Point-in-time restore'
+    }
+}
+
 Describe 'Lab 5.2 Remove-LabResource.ps1 - role assignments without Microsoft Graph (#397)' {
 
     It 'removes the vault identity''s two roles on the storage account, through the ARM API, and leaves the inherited ones alone' {
