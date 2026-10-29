@@ -248,7 +248,7 @@ if ($WhatIf) {
     }
 
     Write-Host "`n  Next Steps:" -ForegroundColor Cyan
-    Write-Host "    1. Wait 5-10 minutes for Heartbeat and Perf rows to appear in the workspace" -ForegroundColor Gray
+    Write-Host "    1. Wait 5-10 minutes for Heartbeat and Perf rows to appear in the workspace (up to about 40 minutes on a new workspace)" -ForegroundColor Gray
     Write-Host "    2. Run .\Test-Lab.ps1 to validate deployment" -ForegroundColor Gray
 }
 

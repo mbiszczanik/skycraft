@@ -30,6 +30,11 @@
     each of those VMs from the last 15 minutes. A failed extension read or workspace query is a
     failure, never a pass. While every agent is Succeeded and a VM's Heartbeat is still missing,
     the query is repeated once a minute for up to -HeartbeatWaitMinutes.
+    A new workspace has no Heartbeat table until the first row arrives, up to about 40 minutes
+    after the workspace is created; until then the query fails with BadRequest (failed to resolve
+    the table). While every agent is Succeeded, that is read as 'workspace not ready' and the
+    query is repeated once a minute for up to -NewWorkspaceWaitMinutes, with a progress line per
+    minute; if the table never appears the check fails and the message names that cause.
 
 .PARAMETER Environment
     Target environment prefix when checking VM resources: its group's VMs are searched first for
@@ -37,7 +42,14 @@
 
 .PARAMETER HeartbeatWaitMinutes
     How long to keep waiting for a first Heartbeat row after the agent is Succeeded; data takes
-    5-10 minutes to arrive after a fresh install. 0 queries once. Default: 10
+    5-10 minutes to arrive after a fresh install. 0 queries once. Counted from the moment the
+    Heartbeat table exists. Default: 10
+
+.PARAMETER NewWorkspaceWaitMinutes
+    How long to keep waiting for the Heartbeat table itself to exist, which a new workspace
+    creates only with its first row (about 40 minutes after the workspace is created). The wait
+    applies only while every agent is Succeeded. 0 fails at once when the table is missing.
+    Default: 45
 
 .EXAMPLE
     .\Test-Lab.ps1
@@ -60,7 +72,11 @@ param(
 
     [Parameter()]
     [ValidateRange(0, 60)]
-    [int]$HeartbeatWaitMinutes = 10
+    [int]$HeartbeatWaitMinutes = 10,
+
+    [Parameter()]
+    [ValidateRange(0, 120)]
+    [int]$NewWorkspaceWaitMinutes = 45
 )
 
 $ErrorActionPreference = 'Stop'
@@ -305,8 +321,11 @@ Invoke-Test "Azure Monitor Agent Succeeded on the rule's VMs" {
 }
 
 $heartbeatWindow = 15
-# Waiting only helps a Succeeded agent whose first rows are still on their way.
+# Waiting only helps a Succeeded agent whose first rows, or whose workspace's table, are still on their way.
 $heartbeatWait = if ($agentsReady) { $HeartbeatWaitMinutes } else { 0 }
+$tableWait     = if ($agentsReady) { $NewWorkspaceWaitMinutes } else { 0 }
+# A workspace without its Heartbeat table answers BadRequest: failed to resolve the table.
+$tableMissingPattern = 'BadRequest|Bad Request|Failed to resolve|could not be resolved|SEM0100'
 Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes" {
     if ($dcrVmIds.Count -eq 0) {
         Write-Host " (no VM carries the lab's rule - Step 5.1.2)" -NoNewline -ForegroundColor Gray
@@ -315,14 +334,43 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
     if (-not $wsCache) { throw "workspace '$workspaceName' not found" }
     $idList = ($dcrVmIds | ForEach-Object { "'$($_.ToLowerInvariant())'" }) -join ', '
     $query = "Heartbeat | where TimeGenerated > ago($($heartbeatWindow)m) | where tolower(_ResourceId) in ($idList) | summarize LastHeartbeat = max(TimeGenerated) by VmId = tolower(_ResourceId)"
-    $deadline = (Get-Date).AddMinutes($heartbeatWait)
+    $started       = Get-Date
+    $tableDeadline = $started.AddMinutes($tableWait)
+    $rowDeadline   = $null   # set when the table first exists
     while ($true) {
-        $result = Invoke-AzOperationalInsightsQuery -WorkspaceId "$($wsCache.CustomerId)" -Query $query -ErrorAction Stop
-        if ($null -eq $result) { throw 'the workspace query returned nothing' }
-        if ($result.Error) { throw "the workspace query failed: $($result.Error.Message)" }
+        $tableError = $null
+        $result     = $null
+        try {
+            $result = Invoke-AzOperationalInsightsQuery -WorkspaceId "$($wsCache.CustomerId)" -Query $query -ErrorAction Stop
+        }
+        catch {
+            # Only a missing table is waited for; any other failure is a failure.
+            if ($_.Exception.Message -notmatch $tableMissingPattern -or $null -ne $rowDeadline) { throw }
+            $tableError = $_.Exception.Message
+        }
+        if (-not $tableError) {
+            if ($null -eq $result) { throw 'the workspace query returned nothing' }
+            if ($result.Error) {
+                if ("$($result.Error.Message)" -notmatch $tableMissingPattern -or $null -ne $rowDeadline) { throw "the workspace query failed: $($result.Error.Message)" }
+                $tableError = "$($result.Error.Message)"
+            }
+        }
+        if ($tableError) {
+            $waited = [int][math]::Floor(((Get-Date) - $started).TotalMinutes)
+            if ((Get-Date) -ge $tableDeadline) {
+                $after = if ($tableWait -gt 0) { " after waiting $waited of $tableWait minutes" } else { '' }
+                Write-Host " (the Heartbeat table does not exist in '$workspaceName' yet${after}: a new workspace creates it with the first row, up to about 40 minutes after the workspace is created; run again later - Step 5.1.3. Query said: $tableError)" -NoNewline -ForegroundColor Gray
+                return $false
+            }
+            Write-Host ''
+            Write-Host "    workspace not ready: no Heartbeat table yet, waited $waited of $tableWait minutes, trying again in 60 seconds" -ForegroundColor Gray
+            Start-Sleep -Seconds 60
+            continue
+        }
+        if ($null -eq $rowDeadline) { $rowDeadline = (Get-Date).AddMinutes($heartbeatWait) }
         $seen = @($result.Results | ForEach-Object { "$($_.VmId)" })
         $missing = @(for ($i = 0; $i -lt $dcrVmIds.Count; $i++) { if ($dcrVmIds[$i].ToLowerInvariant() -notin $seen) { $dcrVmNames[$i] } })
-        if ($missing.Count -eq 0 -or (Get-Date) -ge $deadline) { break }
+        if ($missing.Count -eq 0 -or (Get-Date) -ge $rowDeadline) { break }
         Write-Host '.' -NoNewline
         Start-Sleep -Seconds 60
     }
