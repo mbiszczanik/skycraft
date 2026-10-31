@@ -825,9 +825,7 @@ Describe 'parse.py - labs 2.2, 3.2, 4.1 and 5.2, Verify and Confirm introduce ch
                       'Network security groups', 'dev-skycraft-swc-db-nsg', 'Settings', 'Inbound security rules',
                       'Effective security rules')
            expected = 'Both VMs running in different availability zones, connected to respective load balancer backend pools, `dev-skycraft-swc-lb-be-outbound` lists 2 VMs (auth and world), and each VM''s network interface is in its application security group. dev-skycraft-swc-lb-be-auth: 1 VM; dev-skycraft-swc-lb-be-world: 1 VM' }
-        # The alert to look for is not a click.
-        @{ lab = '5.2'; id = '5.2.9'; labels = @('Backup center', 'Alerts')
-           expected = 'Modify policy with shorter retention (0 - Critical) - raised because Deploy-Bicep.ps1 shortens instant-restore retention to 2 days after creating the Enhanced policy. Expected; it is a security alert about the change, not a failure.' }
+        # Step 5.2.9 left this list in #366: it creates an alert processing rule and has an Expected Result of its own.
     ) {
         $step = $script:IntroLabs[$lab].steps | Where-Object id -eq $id
         @($step.items | Where-Object kind -eq 'field') | Should -BeNullOrEmpty
@@ -858,9 +856,10 @@ Describe 'parse.py - labs 3.2, 4.2 and 5.2, resource names in navigation chains 
         @{ lab = '3.2'; id = '3.2.14'; labels = @('Virtual machines', 'dev-skycraft-swc-world-vm'); resources = @(1) }
         # 4.2.11 uploads from the containers list's toolbar since #359; it no longer opens game-assets.
         @{ lab = '4.2'; id = '4.2.11'; labels = @('prodskycraftswcsa', 'Containers'); resources = @(0) }
-        # 'waiting for 02:00: **Protected items** -> ...': no space after the first colon, so the
-        # text before it is no field label and the chain keeps its resource (picker_field, #250).
-        @{ lab = '5.2'; id = '5.2.3'; labels = @('Protected items', 'Backup items', 'Azure Virtual Machine', 'dev-skycraft-swc-auth-vm', 'Backup now', 'OK'); resources = @(3) }
+        # 'waiting for 02:00: under **Protected items** ..., click **Backup items** -> ...': the group is a
+        # place, and the chain keeps its resource (picker_field, #250). The key vault's IAM chain (#368) is first.
+        @{ lab = '5.2'; id = '5.2.3'; labels = @('Key vaults', 'dev-skycraft-swc-kv', 'Access control (IAM)', '+ Add', 'Add role assignment'); resources = @(1); count = 2; index = 0 }
+        @{ lab = '5.2'; id = '5.2.3'; labels = @('Backup items', 'Azure Virtual Machine', 'dev-skycraft-swc-auth-vm', 'Backup now', 'OK'); resources = @(2); count = 2; index = 1 }
     ) {
         $chains = @(($script:ChainLabs[$lab].steps | Where-Object id -eq $id).items |
             Where-Object { $_.PSObject.Properties.Name -contains 'resources' })
@@ -1493,7 +1492,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @{ lab = '3.4'; id = '3.4.10'; text = 'Under **Outbound traffic configuration**, click **Not configured** (the value of _Virtual network integration_).'; labels = @('Not configured'); count = 2 }
         @{ lab = '3.3'; id = '3.3.2'; text = 'In the left menu, under **Settings** (expand it if it is collapsed), click **Access keys**.'; labels = @('Access keys') }
         @{ lab = '4.2'; id = '4.2.6'; text = 'On the same page, under **Recovery**, enable **Enable soft delete for containers** ...'; labels = @('Enable soft delete for containers') }
-        @{ lab = '5.2'; id = '5.2.2'; text = 'Under **Instant restore**, fill in **Azure Backup Resource Group**: ...'; labels = @('Azure Backup Resource Group') }
+        @{ lab = '5.2'; id = '5.2.9'; text = 'Search for **Resiliency** and, under **Backup and recovery**, click **Alerts**.'; labels = @('Resiliency', 'Alerts') }
     ) {
         $items = @((Get-StateStep $lab $id).items | Where-Object { (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
         $items.Count | Should -Be ($(if ($count) { $count } else { 1 }))

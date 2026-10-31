@@ -109,6 +109,8 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 
 | AVM module | Pinned version | Used in |
 | :--- | :--- | :--- |
+| `avm/ptn/authorization/resource-role-assignment` | `0.1.2` | Lab 5.2 |
+| `avm/res/alerts-management/action-rule` | `0.2.4` | Lab 5.2 |
 | `avm/res/app/container-app` | `0.23.0` | Lab 3.3 |
 | `avm/res/app/managed-environment` | `0.16.0` | Lab 3.3 |
 | `avm/res/authorization/policy-assignment/sub-scope` | `0.1.0` | Lab 1.3 |
