@@ -1316,4 +1316,4 @@ function Get-LabBackupManagementServiceId {
     $ids[0]
 }
 
-Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabDnsLink, Remove-LabDnsLink, Get-LabAdeKeyVaultId, Get-LabBackupManagementServiceId
+Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabDnsLink, Remove-LabDnsLink, Get-LabAdeKeyVaultId, Get-LabBackupManagementServiceId, Invoke-LabArmRequest
