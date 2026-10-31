@@ -369,6 +369,7 @@ $heartbeatWindow = 15
 # $heartbeatWait bounds the row wait only where the agent's install time is not known.
 $heartbeatWait = if ($agentsReady) { $HeartbeatWaitMinutes } else { 0 }
 $tableWait     = if ($agentsReady) { $NewWorkspaceWaitMinutes } else { 0 }
+$installWait   = $AgentInstallWaitMinutes
 # A workspace without its Heartbeat table answers BadRequest: failed to resolve the table.
 $tableMissingPattern = 'BadRequest|Bad Request|Failed to resolve|could not be resolved|SEM0100'
 Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes" {
@@ -429,7 +430,7 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
             }
             $install = $installs[$name]
             if ($install.Time) {
-                if ($now -lt $install.Time.AddMinutes($AgentInstallWaitMinutes)) { $stillWaiting += $name }
+                if ($now -lt $install.Time.AddMinutes($installWait)) { $stillWaiting += $name }
             }
             elseif ((Get-Date) -lt $rowDeadline) { $stillWaiting += $name }
         }
@@ -437,7 +438,7 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
         $progress = foreach ($name in $stillWaiting) {
             if ($installs[$name].Time) {
                 $age = [int][math]::Floor(($now - $installs[$name].Time).TotalMinutes)
-                "$name (agent installed $age of $AgentInstallWaitMinutes minutes ago)"
+                "$name (agent installed $age of $installWait minutes ago)"
             }
             else { "$name (install time unknown, waiting up to $heartbeatWait minutes)" }
         }
@@ -451,7 +452,7 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
             if (-not $install) { $name }
             elseif ($install.Time) {
                 $age = [int][math]::Floor(((Get-Date).ToUniversalTime() - $install.Time).TotalMinutes)
-                "$name (agent installed $age minutes ago, past the $AgentInstallWaitMinutes-minute bound the first row takes: the agent is installed but not sending, check that the VM runs and that the rule is associated with it)"
+                "$name (agent installed $age minutes ago, past the $installWait-minute bound the first row takes: the agent is installed but not sending, check that the VM runs and that the rule is associated with it)"
             }
             else { "$name (install time unknown: $($install.Reason); waited $heartbeatWait minutes)" }
         }
