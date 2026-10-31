@@ -132,7 +132,7 @@ Two pieces connect a VM to the workspace: the **Azure Monitor Agent (AMA)**, a V
 
    ```powershell
    $vm = Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-vm
-   New-AzResource -ResourceId "$($vm.Id)/extensions/AzureMonitorLinuxAgent" -Location $vm.Location `
+   New-AzResource -ResourceId "$($vm.Id)/extensions/AzureMonitorLinuxAgent" -Location $vm.Location -ApiVersion 2024-07-01 `
      -Properties @{ publisher = 'Microsoft.Azure.Monitor'; type = 'AzureMonitorLinuxAgent'; typeHandlerVersion = '1.0'; autoUpgradeMinorVersion = $true; enableAutomaticUpgrade = $true } `
      -Tag @{ Project = 'SkyCraft'; Environment = 'Development'; CostCenter = 'MSDN'; Owner = '<your name>' } -Force
    ```
@@ -141,7 +141,7 @@ Two pieces connect a VM to the workspace: the **Azure Monitor Agent (AMA)**, a V
 
    ```azurecli
    VM=$(az vm show -g dev-skycraft-swc-rg -n dev-skycraft-swc-auth-vm --query id -o tsv)
-   az resource create --id "$VM/extensions/AzureMonitorLinuxAgent" --is-full-object --properties '{
+   az resource create --id "$VM/extensions/AzureMonitorLinuxAgent" --api-version 2024-07-01 --is-full-object --properties '{
      "location": "swedencentral",
      "tags": { "Project": "SkyCraft", "Environment": "Development", "CostCenter": "MSDN", "Owner": "<your name>" },
      "properties": { "publisher": "Microsoft.Azure.Monitor", "type": "AzureMonitorLinuxAgent", "typeHandlerVersion": "1.0", "autoUpgradeMinorVersion": true, "enableAutomaticUpgrade": true }

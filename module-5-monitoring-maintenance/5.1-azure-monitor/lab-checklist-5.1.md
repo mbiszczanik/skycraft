@@ -53,7 +53,7 @@ Get-AzOperationalInsightsWorkspace -ResourceGroupName platform-skycraft-swc-rg -
 ```powershell
 # Provisioning state and Project tag of the agent on the monitored VM
 $vm = Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-vm
-Get-AzResource -ResourceId "$($vm.Id)/extensions/AzureMonitorLinuxAgent" |
+Get-AzResource -ResourceId "$($vm.Id)/extensions/AzureMonitorLinuxAgent" -ApiVersion 2024-07-01 |
     Select-Object Name, @{N='State';E={$_.Properties.provisioningState}}, @{N='Project';E={$_.Tags.Project}}
 ```
 
