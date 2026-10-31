@@ -40,6 +40,13 @@
          lines; an agent installed longer ago than that fails at once and the message names the
          cause; an unreadable or missing install time falls back to -HeartbeatWaitMinutes and
          says so; an agent that is not Succeeded is not waited for.
+      9. A rule built by the data collection rules wizard passes the stream checks (#355): one
+         flow per data source to an 'la-<n>' destination, an outputStream, a lower-case
+         workspace id. Perf and Syslog sent to another workspace do not count.
+      10. The log search alert of Step 5.1.8 is found by relation (#357): a rule on Heartbeat that
+         watches a SkyCraft VM or the lab's workspace, under any name and in any group. A rule
+         that is disabled, does not fire on zero rows or notifies another group fails; no rule
+         and a listing that fails fail.
 
     The VM insights rule in the 'portal' case carries the streams VM insights really sends
     (InsightsMetrics, no Perf or Syslog), so the Perf and Syslog checks fail on it: the guide's
@@ -55,7 +62,7 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.1 - Azure Monitor
-    Issue: #355, #369
+    Issue: #355, #357, #369
 #>
 
 #Requires -Version 7.0
@@ -100,6 +107,11 @@ BeforeAll {
     #                                auth VM carries the Bicep's rule
     #                       'dangling' the dev auth VM carries an association to a deleted rule
     #                                next to the Bicep's rule
+    #                       'wizard' the data collection rules wizard's rule in the platform
+    #                                group: one flow per source to 'la-<n>', outputStream, the
+    #                                workspace id in lower case
+    #                       'elsewhere' a rule that sends InsightsMetrics to the lab's workspace
+    #                                and Perf and Syslog to another one
     # The Portal-named rule carries the streams VM insights sends: InsightsMetrics, no Syslog.
     # The alert rule varies with SKYCRAFT_STUB_ALERT:
     #   'platform'     'skycraft-cpu-alert' in the platform group on the dev auth VM, as the
@@ -110,6 +122,13 @@ BeforeAll {
     #   'listfailsplatform' as 'platform', and listing the subscription's rules fails
     #   'criteriadenied' as 'platform', and the raw read of the rule's criteria is refused
     # Every case also lists an unrelated rule on a SQL server.
+    # The log search alert varies with SKYCRAFT_STUB_LOGALERT:
+    #   'vm'        'skycraft-heartbeat-alert' in the platform group on the dev auth VM, as the
+    #               guide leaves it
+    #   'workspace' a Portal-named rule in the VM's group, scoped to the lab's workspace
+    #   'none'      only a Heartbeat rule on a SQL server and a Perf rule on the VM
+    #   'disabled', 'wrongop' (fires above zero rows), 'noaction' (notifies another group)
+    #   'listfails' listing the rules fails
     $script:StubBody = @'
 $script:Sub = '/subscriptions/00000000-0000-0000-0000-000000000000'
 $script:PlatformRg = "$script:Sub/resourceGroups/platform-skycraft-swc-rg"
@@ -121,10 +140,25 @@ function Get-StubRules {
     $bicep = "$script:PlatformRg/providers/Microsoft.Insights/dataCollectionRules/skycraft-vm-dcr"
     $vmi   = "$script:DevRg/providers/Microsoft.Insights/dataCollectionRules/MSVMI-swedencentral-dev-skycraft-swc-auth-vm"
     $other = "$script:DevRg/providers/Microsoft.Insights/dataCollectionRules/security-events-dcr"
+    $wizard = "$script:PlatformRg/providers/Microsoft.Insights/dataCollectionRules/skycraft-vm-dcr-wizard"
+    $elsewhere = "$script:PlatformRg/providers/Microsoft.Insights/dataCollectionRules/skycraft-vm-dcr-elsewhere"
+    $otherLaw = "$script:Sub/resourceGroups/security-rg/providers/Microsoft.OperationalInsights/workspaces/security-law"
     @{
+        $wizard = @{ Name = 'skycraft-vm-dcr-wizard'; Group = 'platform-skycraft-swc-rg'
+            Destinations = @(@{ name = 'la-1906172418'; workspaceResourceId = $script:WorkspaceId.ToLowerInvariant() })
+            Flows = @(
+                @{ streams = @('Microsoft-Perf'); destinations = @('la-1906172418'); transformKql = 'source'; outputStream = 'Microsoft-Perf' }
+                @{ streams = @('Microsoft-Syslog'); destinations = @('la-1906172418'); transformKql = 'source'; outputStream = 'Microsoft-Syslog' }
+            ) }
+        $elsewhere = @{ Name = 'skycraft-vm-dcr-elsewhere'; Group = 'platform-skycraft-swc-rg'
+            Destinations = @(@{ name = 'la-lab'; workspaceResourceId = $script:WorkspaceId }, @{ name = 'la-other'; workspaceResourceId = $otherLaw })
+            Flows = @(
+                @{ streams = @('Microsoft-InsightsMetrics'); destinations = @('la-lab') }
+                @{ streams = @('Microsoft-Perf', 'Microsoft-Syslog'); destinations = @('la-other') }
+            ) }
         $bicep = @{ Name = 'skycraft-vm-dcr'; Group = 'platform-skycraft-swc-rg'; Workspace = $script:WorkspaceId; Streams = @('Microsoft-Perf', 'Microsoft-InsightsMetrics', 'Microsoft-Syslog') }
         $vmi   = @{ Name = 'MSVMI-swedencentral-dev-skycraft-swc-auth-vm'; Group = 'dev-skycraft-swc-rg'; Workspace = $script:WorkspaceId; Streams = @('Microsoft-InsightsMetrics') }
-        $other = @{ Name = 'security-events-dcr'; Group = 'dev-skycraft-swc-rg'; Workspace = "$script:Sub/resourceGroups/security-rg/providers/Microsoft.OperationalInsights/workspaces/security-law"; Streams = @('Microsoft-SecurityEvent') }
+        $other = @{ Name = 'security-events-dcr'; Group = 'dev-skycraft-swc-rg'; Workspace = $otherLaw; Streams = @('Microsoft-SecurityEvent') }
     }
 }
 
@@ -152,6 +186,39 @@ function Get-StubAlerts {
         default { New-StubAlert 'skycraft-cpu-alert' 'platform-skycraft-swc-rg' $script:DevAuthVmId }
     }
     New-StubAlert 'unrelated-sql-alert' 'other-rg' "$script:Sub/resourceGroups/other-rg/providers/Microsoft.Sql/servers/other-sql"
+}
+
+# Scheduled query rules, in the raw ARM shape Get-AzResource -ExpandProperties returns.
+function New-StubLogAlert {
+    param([string]$Name, [string]$Group, [string]$Scope, [string]$Query = 'Heartbeat', [string]$Operator = 'LessThan',
+        [double]$Threshold = 1, [bool]$Enabled = $true, [string]$ActionGroup = 'platform-skycraft-swc-rg/skycraft-ops-ag')
+    $agGroup, $agName = $ActionGroup -split '/'
+    [pscustomobject]@{
+        Name              = $Name
+        ResourceGroupName = $Group
+        ResourceId        = "$script:Sub/resourceGroups/$Group/providers/Microsoft.Insights/scheduledQueryRules/$Name"
+        Properties        = [pscustomobject]@{
+            enabled  = $Enabled
+            scopes   = @($Scope)
+            criteria = [pscustomobject]@{ allOf = @([pscustomobject]@{ query = $Query; timeAggregation = 'Count'; operator = $Operator; threshold = $Threshold }) }
+            # The Portal writes the id in lower case.
+            actions  = [pscustomobject]@{ actionGroups = @("$script:Sub/resourceGroups/$agGroup/providers/microsoft.insights/actiongroups/$agName".ToLowerInvariant()) }
+        }
+    }
+}
+
+function Get-StubLogAlerts {
+    if ($env:SKYCRAFT_STUB_LOGALERT -eq 'listfails') { throw 'stub lookup failure: scheduledQueryRules list' }
+    New-StubLogAlert 'sql-heartbeat' 'other-rg' "$script:Sub/resourceGroups/other-rg/providers/Microsoft.Sql/servers/other-sql"
+    New-StubLogAlert 'vm-perf-rows' 'dev-skycraft-swc-rg' $script:DevAuthVmId -Query 'Perf | where CounterName == "% Processor Time"'
+    switch ($env:SKYCRAFT_STUB_LOGALERT) {
+        'none'      { }
+        'workspace' { New-StubLogAlert 'No heartbeat from the auth VM' 'dev-skycraft-swc-rg' $script:WorkspaceId.ToLowerInvariant() -Query 'Heartbeat | where Computer == "dev-skycraft-swc-auth-vm"' }
+        'disabled'  { New-StubLogAlert 'skycraft-heartbeat-alert' 'platform-skycraft-swc-rg' $script:DevAuthVmId -Enabled $false }
+        'wrongop'   { New-StubLogAlert 'skycraft-heartbeat-alert' 'platform-skycraft-swc-rg' $script:DevAuthVmId -Operator 'GreaterThan' -Threshold 0 }
+        'noaction'  { New-StubLogAlert 'skycraft-heartbeat-alert' 'platform-skycraft-swc-rg' $script:DevAuthVmId -ActionGroup 'dev-skycraft-swc-rg/RecommendedAlertRules-AG-1' }
+        default     { New-StubLogAlert 'skycraft-heartbeat-alert' 'platform-skycraft-swc-rg' $script:DevAuthVmId }
+    }
 }
 
 function Get-AzContext {
@@ -187,6 +254,9 @@ function Get-AzResource {
         [switch]$ExpandProperties,
         [Parameter(ValueFromRemainingArguments)]$Rest
     )
+    if ($ResourceType -eq 'Microsoft.Insights/scheduledQueryRules') {
+        return @(Get-StubLogAlerts)
+    }
     if ($ResourceType -eq 'Microsoft.Compute/virtualMachines') {
         if ($env:SKYCRAFT_STUB_DCR -in 'portal', 'nonepartial' -and $ResourceGroupName -eq 'prod-skycraft-swc-rg') {
             Write-Error "stub lookup failure: Resource group '$ResourceGroupName' could not be read."
@@ -217,14 +287,16 @@ function Get-AzResource {
     $rules = Get-StubRules
     if ($ResourceId -and $rules.ContainsKey($ResourceId)) {
         $rule = $rules[$ResourceId]
+        $destinations = if ($rule.Destinations) { $rule.Destinations } else { @(@{ name = 'la-dest'; workspaceResourceId = $rule.Workspace }) }
+        $flows = if ($rule.Flows) { $rule.Flows } else { @(@{ streams = $rule.Streams; destinations = @('la-dest') }) }
         return [pscustomobject]@{
             Name              = $rule.Name
             ResourceGroupName = $rule.Group
             ResourceId        = $ResourceId
             Properties        = [pscustomobject]@{
                 provisioningState = if ($env:SKYCRAFT_STUB_DCRSTATE -eq 'rulefailed') { 'Failed' } else { 'Succeeded' }
-                destinations = [pscustomobject]@{ logAnalytics = @([pscustomobject]@{ name = 'la-dest'; workspaceResourceId = $rule.Workspace }) }
-                dataFlows    = @([pscustomobject]@{ streams = $rule.Streams; destinations = @('la-dest') })
+                destinations = [pscustomobject]@{ logAnalytics = @($destinations | ForEach-Object { [pscustomobject]$_ }) }
+                dataFlows    = @($flows | ForEach-Object { [pscustomobject]$_ })
             }
         }
     }
@@ -250,6 +322,9 @@ function Invoke-AzRestMethod {
         switch ($env:SKYCRAFT_STUB_DCR) {
             { $_ -in 'bicep', 'vmthrows' } {
                 $associations += $bicepAssociation
+            }
+            { $_ -in 'wizard', 'elsewhere' } {
+                $associations += @{ name = 'skycraft-vm-dcr-association'; properties = @{ dataCollectionRuleId = ($rules | Where-Object { $_ -like "*/skycraft-vm-dcr-$env:SKYCRAFT_STUB_DCR" }) } }
             }
             'dangling' {
                 $associations += @{ name = 'left-behind'; properties = @{ dataCollectionRuleId = "$script:DevRg/providers/Microsoft.Insights/dataCollectionRules/deleted-dcr" } }
@@ -394,7 +469,7 @@ function Get-AzDiagnosticSetting {
     function Invoke-ValidatorScript {
         param(
             [pscustomobject]$Stub,
-            [ValidateSet('bicep', 'portal', 'none', 'nonepartial', 'fail', 'vmthrows', 'dangling')]
+            [ValidateSet('bicep', 'portal', 'none', 'nonepartial', 'fail', 'vmthrows', 'dangling', 'wizard', 'elsewhere')]
             [string]$Dcr,
             [ValidateSet('platform', 'vmgroup', 'recommended', 'listfails', 'listfailsplatform', 'criteriadenied')]
             [string]$Alert = 'platform',
@@ -402,6 +477,9 @@ function Get-AzDiagnosticSetting {
             [string]$Agent = 'succeeded',
             [ValidateSet('rows', 'late', 'none', 'fail', 'error', 'notable', 'tablelate', 'tableerror', 'tablegone', 'slow')]
             [string]$Heartbeat = 'rows',
+            [ValidateSet('vm', 'workspace', 'none', 'disabled', 'wrongop', 'noaction', 'listfails')]
+            [string]$LogAlert = 'vm',
+            # 0 by default: a run that waited would spin on the real clock with the stubbed sleep.
             [int]$WaitMinutes = 0,
             [int]$TableWaitMinutes = 0,
             [ValidateSet('none', 'recent', 'mid', 'old', 'throws')]
@@ -418,6 +496,7 @@ function Get-AzDiagnosticSetting {
             SKYCRAFT_STUB_AGENT     = $Agent
             SKYCRAFT_STUB_HEARTBEAT = $Heartbeat
             SKYCRAFT_STUB_DCRSTATE  = $State
+            SKYCRAFT_STUB_LOGALERT  = $LogAlert
         }
         return [pscustomobject]@{
             ExitCode = $run.ExitCode
@@ -467,6 +546,14 @@ function Get-AzDiagnosticSetting {
     $script:InstallZeroWait  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 10 -Install 'recent' -InstallWaitMinutes 0
     $script:AgentFailedRecent = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Agent 'failed' -Heartbeat 'none' -WaitMinutes 10 -Install 'recent'
     $script:RuleFailed  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -State 'rulefailed'
+    $script:WizardMade       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'wizard'
+    $script:StreamsElsewhere = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'elsewhere'
+    $script:LogAlertWorkspace = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -LogAlert 'workspace'
+    $script:LogAlertNone      = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -LogAlert 'none'
+    $script:LogAlertDisabled  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -LogAlert 'disabled'
+    $script:LogAlertWrongOp   = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -LogAlert 'wrongop'
+    $script:LogAlertNoAction  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -LogAlert 'noaction'
+    $script:LogAlertListFails = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -LogAlert 'listfails'
     $script:AllRuns    = @(
         $script:RuleFailed,
         $script:BicepMade, $script:PortalMade, $script:NoRule, $script:ReadFails, $script:NoRulePartial,
@@ -477,7 +564,10 @@ function Get-AzDiagnosticSetting {
         $script:NoTableAgentFail, $script:TableLate, $script:TableErrorLate, $script:TableGone,
         $script:SlowAfterInstall, $script:SlowFlatOnly, $script:BoundReached, $script:OldNoRow,
         $script:OldWithRow, $script:InstallLogFails, $script:InstallLogEmpty, $script:InstallZeroWait,
-        $script:AgentFailedRecent, $script:CriteriaDenied
+        $script:AgentFailedRecent, $script:CriteriaDenied,
+        $script:WizardMade, $script:StreamsElsewhere,
+        $script:LogAlertWorkspace, $script:LogAlertNone, $script:LogAlertDisabled, $script:LogAlertWrongOp,
+        $script:LogAlertNoAction, $script:LogAlertListFails
     )
 }
 
@@ -522,8 +612,8 @@ Describe 'Lab 5.1 Test-Lab.ps1 - finds the data collection rule through the VM i
         # only the Portal shortcut.
         $run = $script:PortalMade
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match 'DCR has Perf data flow\.\.\. FAIL'
-        $run.Output | Should -Match 'DCR includes Syslog stream\.\.\. FAIL'
+        $run.Output | Should -Match 'DCR sends Perf to the workspace\.\.\. FAIL'
+        $run.Output | Should -Match 'DCR sends Syslog to the workspace\.\.\. FAIL'
         $run.Output | Should -Match 'Failed: 2\b'
     }
 
@@ -653,7 +743,7 @@ Describe 'Lab 5.1 Test-Lab.ps1 - checks the Azure Monitor Agent and its Heartbea
         $run.Output | Should -Match "Azure Monitor Agent Succeeded on the rule's VMs\.\.\. \(dev-skycraft-swc-auth-vm Succeeded\) PASS"
         # A PASS proves the query named the VM: the stub answers only for the ids it is given.
         $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\.\[stub-query 1\] PASS"
-        $run.Output | Should -Match 'DCR has Perf data flow\.\.\. PASS'
+        $run.Output | Should -Match 'DCR sends Perf to the workspace\.\.\. PASS'
         $run.Output | Should -Not -Match 'stub-sleep'
     }
 
@@ -843,4 +933,81 @@ Describe 'Lab 5.1 Test-Lab.ps1 - waits for the first Heartbeat row up to a bound
         $run.Output | Should -Not -Match 'agent installed'
         $run.Output | Should -Match 'Failed: 2\b'
     }
-}
+}
+
+Describe 'Lab 5.1 Test-Lab.ps1 - passes a rule built by the data collection rules wizard (#355)' {
+
+    It 'passes the wizard''s flows per data source to an la-<n> destination' {
+        $run = $script:WizardMade
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\('skycraft-vm-dcr-wizard' in platform-skycraft-swc-rg, on dev-skycraft-swc-auth-vm\) PASS"
+        $run.Output | Should -Match 'DCR destination points to workspace\.\.\. PASS'
+        $run.Output | Should -Match 'DCR sends Perf to the workspace\.\.\. PASS'
+        $run.Output | Should -Match 'DCR sends Syslog to the workspace\.\.\. PASS'
+        $run.Output | Should -Match 'Failed: 0\b'
+    }
+
+    It 'does not count Perf and Syslog that the rule sends to another workspace' {
+        $run = $script:StreamsElsewhere
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'DCR destination points to workspace\.\.\. PASS'
+        $run.Output | Should -Match 'DCR sends Perf to the workspace\.\.\. FAIL'
+        $run.Output | Should -Match 'DCR sends Syslog to the workspace\.\.\. FAIL'
+        $run.Output | Should -Match 'Failed: 2\b'
+    }
+}
+
+Describe 'Lab 5.1 Test-Lab.ps1 - finds the log search alert by relation (#357)' {
+
+    It 'passes the rule the guide and the Bicep make, and names it' {
+        $run = $script:BicepMade
+        $run.Output | Should -Match "Log search alert on Heartbeat watches a SkyCraft VM or the workspace\.\.\. \('skycraft-heartbeat-alert' in platform-skycraft-swc-rg\) PASS"
+        $run.Output | Should -Match 'Log search alert is enabled\.\.\. PASS'
+        $run.Output | Should -Match 'Log search alert fires when no Heartbeat row arrives \(count < 1\)\.\.\. PASS'
+        $run.Output | Should -Match "Log search alert notifies 'skycraft-ops-ag'\.\.\. PASS"
+    }
+
+    It 'passes a rule under another name, in another group, scoped to the workspace' {
+        $run = $script:LogAlertWorkspace
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\('No heartbeat from the auth VM' in dev-skycraft-swc-rg\) PASS"
+        $run.Output | Should -Match 'Failed: 0\b'
+    }
+
+    It 'fails, counted, when no rule reads Heartbeat on a SkyCraft VM, and names the step' {
+        $run = $script:LogAlertNone
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Log search alert on Heartbeat watches a SkyCraft VM or the workspace\.\.\. \(no log search alert reads Heartbeat on a SkyCraft VM or 'platform-skycraft-swc-law' - Step 5\.1\.8\) FAIL"
+        $run.Output | Should -Not -Match 'sql-heartbeat|vm-perf-rows'
+        $run.Output | Should -Match 'Failed: 4\b'
+    }
+
+    It 'fails a disabled rule' {
+        $run = $script:LogAlertDisabled
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Log search alert is enabled\.\.\. FAIL'
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'fails a rule that does not fire on zero rows, and says what it does' {
+        $run = $script:LogAlertWrongOp
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Log search alert fires when no Heartbeat row arrives \(count < 1\)\.\.\. \(Count GreaterThan 0 - Step 5\.1\.8 counts rows, Less than 1\) FAIL'
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'fails a rule that notifies another action group, and names it' {
+        $run = $script:LogAlertNoAction
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Log search alert notifies 'skycraft-ops-ag'\.\.\. \(notifies recommendedalertrules-ag-1 - Step 5\.1\.8 picks 'skycraft-ops-ag'\) FAIL"
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'counts a listing that fails as a FAIL with the error, never a pass' {
+        $run = $script:LogAlertListFails
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Log search alert on Heartbeat watches a SkyCraft VM or the workspace\.\.\. FAIL \(could not list the log search alert rules: stub lookup failure: scheduledQueryRules list\)'
+        $run.Output | Should -Match 'Test Results Summary'
+        $run.Output | Should -Match 'Failed: 4\b'
+    }
+}

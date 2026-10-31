@@ -9,6 +9,7 @@
     - Azure Monitor Agent is Succeeded on those VMs and their Heartbeat reaches the workspace
     - Action Group exists with email receiver configured
     - Metric Alert rule exists and is enabled
+    - Log Search Alert fires on a missing Heartbeat and notifies the Action Group
     - Storage Diagnostic Settings are configured
     - Tags match governance requirements
 
@@ -18,12 +19,20 @@
     The rules associated with the VMs of the dev and prod groups are read, and the one that sends
     to the lab's workspace is checked ('skycraft-vm-dcr' first if several do); a group, VM or
     rule that cannot be read is skipped and named, never allowed to hide a rule found elsewhere.
+    Its streams count only when a data flow sends them to a destination that is the lab's
+    workspace, by whatever name the destination has: the data collection rules wizard writes one
+    flow per data source to an 'la-<n>' destination, the Bicep one flow to its own name.
     The alert rule is found through its scope (issues #355, #365): the rule named
     'skycraft-cpu-alert' that watches a SkyCraft VM, in whatever group it sits, since the Portal
     defaults the rule's group to the VM's. Its name stays literal because the guide has the
     learner type it and VM insights' recommended alerts put other rules on the same VM. Names
     stay literal where the guide has the learner type both name and group: the action group and
     the diagnostic setting.
+
+    The log search alert is found by relation only (issue #357): a scheduled query rule whose
+    query reads Heartbeat and that watches a SkyCraft VM or the lab's workspace, in any group and
+    under any name; one that notifies the lab's action group is preferred. A listing that fails
+    is a failure, never a pass.
 
     The Azure Monitor Agent is checked on every VM the lab's rule is associated with (issue #369):
     its extension must be present and Succeeded, and the workspace must hold a Heartbeat row from
@@ -351,15 +360,24 @@ Invoke-Test "DCR destination points to workspace" {
     return ($destWsIds -contains $wsCache.ResourceId)
 }
 
-# Perf, not InsightsMetrics: Step 5.1.4 queries the Perf table (#369).
-Invoke-Test "DCR has Perf data flow" {
-    $streams = $dcrResource.Properties.dataFlows | ForEach-Object { $_.streams } | Select-Object -Unique
-    return ($streams -contains 'Microsoft-Perf')
+# Streams that reach the lab's workspace, matched through the destination's workspace, not its
+# name: the wizard names it 'la-<n>' and writes one flow per data source (#355).
+$dcrStreamsHere = @()
+if ($dcrResource -and $wsCache) {
+    $destNames = @($dcrResource.Properties.destinations.logAnalytics |
+        Where-Object { "$($_.workspaceResourceId)" -eq $wsCache.ResourceId } | ForEach-Object { "$($_.name)" })
+    $dcrStreamsHere = @($dcrResource.Properties.dataFlows |
+        Where-Object { @($_.destinations | Where-Object { "$_" -in $destNames }).Count -gt 0 } |
+        ForEach-Object { @($_.streams) + @($_.outputStream) } | Where-Object { $_ } | ForEach-Object { "$_" } | Select-Object -Unique)
 }
 
-Invoke-Test "DCR includes Syslog stream" {
-    $streams = $dcrResource.Properties.dataFlows | ForEach-Object { $_.streams } | Select-Object -Unique
-    return ($streams -contains 'Microsoft-Syslog')
+# Perf, not InsightsMetrics: Step 5.1.4 queries the Perf table (#369).
+Invoke-Test "DCR sends Perf to the workspace" {
+    return ($dcrStreamsHere -contains 'Microsoft-Perf')
+}
+
+Invoke-Test "DCR sends Syslog to the workspace" {
+    return ($dcrStreamsHere -contains 'Microsoft-Syslog')
 }
 
 # ============================================================================
@@ -629,6 +647,69 @@ Invoke-Test "Alert rule threshold is > 80% CPU" {
     # does not reliably expose metricName/operator across Az.Monitor versions.
     $crit = (Get-LabArmResource -ResourceId $alert.Id -ApiVersion $metricAlertApiVersion -ExpandProperties).Properties.criteria.allOf[0]
     return ($crit.metricName -eq 'Percentage CPU' -and [int]$crit.threshold -eq 80 -and $crit.operator -eq 'GreaterThan')
+}
+
+# ============================================================================
+# Log Search Alert Tests (#357)
+# ============================================================================
+Write-Host ""
+Write-Host "[Log Search Alert]" -ForegroundColor Yellow
+
+# Found by relation, not by name or group: a rule whose query reads Heartbeat and that watches a
+# SkyCraft VM or the lab's workspace. One that notifies the lab's action group comes first.
+# Read from the raw ARM body, as the data collection rule is.
+$actionGroupPattern = "/resourceGroups/$platformRg/providers/Microsoft\.Insights/actionGroups/$actionGroupName$"
+$hbAlert          = $null
+$hbAlertListError = $null
+try {
+    $hbCandidates = @(Get-AzResource -ResourceType 'Microsoft.Insights/scheduledQueryRules' -ExpandProperties -ErrorAction Stop |
+        Where-Object { $_ } | Where-Object {
+            $watchesLab = @($_.Properties.scopes | Where-Object { "$_" -match $vmScope -or ($wsCache -and "$_" -eq $wsCache.ResourceId) }).Count -gt 0
+            $readsHeartbeat = @($_.Properties.criteria.allOf | Where-Object { "$($_.query)" -match '\bHeartbeat\b' }).Count -gt 0
+            $watchesLab -and $readsHeartbeat
+        })
+    $hbAlert = $hbCandidates |
+        Sort-Object -Property @{ Expression = { @($_.Properties.actions.actionGroups | Where-Object { "$_" -match $actionGroupPattern }).Count -gt 0 }; Descending = $true } |
+        Select-Object -First 1
+}
+catch {
+    $hbAlertListError = $_.Exception.Message
+}
+
+Invoke-Test "Log search alert on Heartbeat watches a SkyCraft VM or the workspace" {
+    if ($hbAlertListError) { throw "could not list the log search alert rules: $hbAlertListError" }
+    if (-not $hbAlert) {
+        Write-Host " (no log search alert reads Heartbeat on a SkyCraft VM or '$workspaceName' - Step 5.1.8)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
+    Write-Host " ('$($hbAlert.Name)' in $($hbAlert.ResourceGroupName))" -NoNewline -ForegroundColor Gray
+    return $true
+}
+
+Invoke-Test "Log search alert is enabled" {
+    return ($null -ne $hbAlert -and $hbAlert.Properties.enabled -eq $true)
+}
+
+Invoke-Test "Log search alert fires when no Heartbeat row arrives (count < 1)" {
+    if (-not $hbAlert) { return $false }
+    $crit = @($hbAlert.Properties.criteria.allOf | Where-Object { "$($_.query)" -match '\bHeartbeat\b' })[0]
+    $threshold = [double]$crit.threshold
+    $belowOne = ("$($crit.operator)" -eq 'LessThan' -and $threshold -gt 0 -and $threshold -le 1) -or
+        ("$($crit.operator)" -eq 'LessThanOrEqual' -and $threshold -eq 0)
+    if (-not ("$($crit.timeAggregation)" -eq 'Count' -and $belowOne)) {
+        Write-Host " ($($crit.timeAggregation) $($crit.operator) $($crit.threshold) - Step 5.1.8 counts rows, Less than 1)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
+    return $true
+}
+
+Invoke-Test "Log search alert notifies '$actionGroupName'" {
+    if (-not $hbAlert) { return $false }
+    $groups = @($hbAlert.Properties.actions.actionGroups | ForEach-Object { "$_" })
+    if (@($groups | Where-Object { $_ -match $actionGroupPattern }).Count -gt 0) { return $true }
+    $names = if ($groups.Count -gt 0) { ($groups | ForEach-Object { ($_ -split '/')[-1] }) -join ', ' } else { 'no action group' }
+    Write-Host " (notifies $names - Step 5.1.8 picks '$actionGroupName')" -NoNewline -ForegroundColor Gray
+    return $false
 }
 
 # ============================================================================

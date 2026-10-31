@@ -10,6 +10,7 @@
     - DCR Association with that VM
     - Action Group (skycraft-ops-ag) with email notification
     - Metric Alert (skycraft-cpu-alert) for CPU > 80%
+    - Log Search Alert (skycraft-heartbeat-alert) when the VM sends no Heartbeat for 5 minutes
     - Storage Account Diagnostic Settings (skycraft-storage-diag)
 
     Prerequisites: Lab 3.2 (at least one VM, dev preferred) and Lab 4.1 (Storage) must be deployed.
@@ -243,6 +244,7 @@ if ($WhatIf) {
         Write-Host "    Monitor Agent ID:     $($deployment.Outputs['outMonitorAgentId'].Value)"
         Write-Host "    Action Group ID:      $($deployment.Outputs['outActionGroupId'].Value)"
         Write-Host "    Alert Rule ID:        $($deployment.Outputs['outAlertRuleId'].Value)"
+        Write-Host "    Heartbeat Alert ID:   $($deployment.Outputs['outHeartbeatAlertId'].Value)"
     } else {
         Write-Host "`n  Outputs could not be parsed, but deployment completed." -ForegroundColor Yellow
     }

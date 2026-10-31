@@ -31,9 +31,10 @@
 ### Alert Rules
 
 - [ ] Metric Alert: **Percentage CPU > 80%**
-- [ ] Log Search Alert: (Optional) Heartbeat missing
-- [ ] Action Group: `skycraft-ops-ag` created (short name `SkyCraftOps`)
-- [ ] Target email matches your account for testing
+- [ ] Log Search Alert `skycraft-heartbeat-alert`: query `Heartbeat` on the monitored VM, **Count Less than 1** over 5 minutes, enabled, notifies `skycraft-ops-ag`
+- [ ] Action Group: `skycraft-ops-ag` created (short name `SkyCraftOps`), region **Global**, tagged `Project = SkyCraft`
+- [ ] Target email matches your account for testing, and its verification e-mail is confirmed
+- [ ] Dashboard `SkyCraft-Ops` (Private) shows the CPU chart from Step 5.1.6
 
 ---
 
@@ -83,6 +84,17 @@ Get-AzMetricAlertRuleV2 -ResourceGroupName platform-skycraft-swc-rg -Name skycra
     Format-Table -AutoSize
 ```
 
+### Verify the Log Search Alert
+
+```powershell
+# The Heartbeat rule, its scope, condition and action group
+$rule = Get-AzResource -ResourceGroupName platform-skycraft-swc-rg -ResourceType Microsoft.Insights/scheduledQueryRules `
+    -Name skycraft-heartbeat-alert -ExpandProperties
+$rule.Properties.criteria.allOf | Select-Object query, timeAggregation, operator, threshold
+$rule.Properties | Select-Object enabled, severity, windowSize, @{N='Scope';E={$_.scopes -join ', '}},
+    @{N='ActionGroups';E={($_.actions.actionGroups | ForEach-Object { ($_ -split '/')[-1] }) -join ', '}}
+```
+
 ### Verify the Storage Diagnostic Setting
 
 ```powershell
@@ -100,6 +112,7 @@ Get-AzDiagnosticSetting -ResourceId "$($sa.Id)/blobServices/default" -Name skycr
 | **Central Logs** | [ ]    | LAW exists in Platform RG       |
 | **VM Telemetry** | [ ]    | KQL returns Heartbeat and Perf  |
 | **CPU Alerts**   | [ ]    | Alert rule listed in Monitor    |
+| **Heartbeat Alert** | [ ] | Log search rule listed in Monitor |
 | **Dashboard**    | [ ]    | Ops Dashboard visible in Portal |
 
 ---
@@ -133,6 +146,7 @@ Get-AzDiagnosticSetting -ResourceId "$($sa.Id)/blobServices/default" -Name skycr
 - [ ] Log Analytics Workspace correctly deployed
 - [ ] AMA Agent active and reporting to LAW
 - [ ] CPU Threshold alert configured
+- [ ] Missing-Heartbeat log search alert configured
 - [ ] Central dashboard created
 - [ ] All reflection questions answered
 - [ ] Ready to proceed to Lab 5.2
