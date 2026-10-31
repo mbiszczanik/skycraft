@@ -20,8 +20,11 @@
          encrypted has no key vault check.
       3. The blob policy checks pass a policy that is operational (30 days) plus vaulted (daily,
          kept 7 days), and fail the vaulted check for an operational-only policy (#306).
+      4. When ARM refuses the raw reads (AuthorizationFailed), the RSV tag and soft delete, Backup
+         vault and blob policy checks fail and print that error, and the script exits 1 (#452).
 
-    Every other lookup returns nothing, so the other checks fail and are not asserted here. No
+    Only the Backup vault, and in run 4 the Recovery Services vault, is modelled besides the ADE
+    VM and blob policy fakes. Every other lookup returns nothing, so the other checks fail and are not asserted here. No
     subscription is needed, and none is used: tests/Support/LabScriptStub.psm1 (issue #112)
     imports the real modules first, the stub last, and aborts the child with exit 99 unless every
     stubbed command resolves to the stub. The role assignments are served by its ARM role
@@ -82,6 +85,8 @@ BeforeAll {
     #                                is refused)
     #   SKYCRAFT_STUB_BLOBPOLICY     'vaulted' (operational + vaulted), 'operational' (before #306)
     #   SKYCRAFT_STUB_LOG            call log
+    #   SKYCRAFT_STUB_ARM            'denied': the Recovery Services vault exists and every
+    #                                Get-AzResource read throws AuthorizationFailed
     $script:StubBody = @'
 $script:BvId = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.DataProtection/backupVaults/platform-skycraft-swc-bv'
 $script:KvRg = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/dev-skycraft-swc-rg'
@@ -122,6 +127,9 @@ function New-StubRetention {
 function Get-AzResource {
     [CmdletBinding()]
     param([string]$ResourceId, [switch]$ExpandProperties, [string]$ApiVersion, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($env:SKYCRAFT_STUB_ARM -eq 'denied') {
+        throw "AuthorizationFailed: The client does not have authorization to perform action 'read' over scope '$ResourceId'."
+    }
     if ($ResourceId -eq "$script:BvId/backupPolicies/SkyCraft-Blob-Policy") {
         $rules = @(New-StubRetention -DataStore 'OperationalStore' -Duration 'P30D')
         if ($env:SKYCRAFT_STUB_BLOBPOLICY -eq 'vaulted') {
@@ -195,8 +203,18 @@ function Get-StubRoleAssignment {
     }
 }
 
+function Get-AzRecoveryServicesVault {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($env:SKYCRAFT_STUB_ARM -ne 'denied') { return }
+    [pscustomobject]@{
+        Name     = $Name
+        ID       = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/$ResourceGroupName/providers/Microsoft.RecoveryServices/vaults/$Name"
+        Location = 'swedencentral'
+    }
+}
+
 # Everything else in the lab is absent: these return nothing.
-function Get-AzRecoveryServicesVault { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzRecoveryServicesBackupProperty { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzRecoveryServicesVaultProperty { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzRecoveryServicesBackupProtectionPolicy { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
@@ -220,7 +238,9 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
             [string]$Graph = 'ok',
             [string]$KvRole = 'vault',
             [string]$BlobPolicy = 'vaulted',
-            [string[]]$ArgumentList = @()
+            [string[]]$ArgumentList = @(),
+            [ValidateSet('', 'denied')]
+            [string]$Arm = ''
         )
         $logPath = Join-Path $Stub.Directory 'calls.log'
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
@@ -231,6 +251,7 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
             SKYCRAFT_STUB_KVROLE       = $KvRole
             SKYCRAFT_STUB_BLOBPOLICY   = $BlobPolicy
             SKYCRAFT_STUB_LOG          = $logPath
+            SKYCRAFT_STUB_ARM          = $Arm
         }
         $lines = $run.Output -split '\r?\n'
         return [pscustomobject]@{
@@ -257,6 +278,8 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
     $script:PortalVault   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'AlwaysOn'
     $script:OnVault       = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'On'
 
+    $script:Denied        = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Arm 'denied'
+
     $script:AdeHeld        = Invoke-ValidatorScript -Stub $script:Stub -Ade 'encrypted' -KvRole 'vault'
     $script:AdeHeldOnRg    = Invoke-ValidatorScript -Stub $script:Stub -Ade 'encrypted' -KvRole 'rg'
     $script:AdeMissing     = Invoke-ValidatorScript -Stub $script:Stub -Ade 'encrypted' -KvRole 'none'
@@ -269,7 +292,7 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
 
     $script:AllRuns = @($script:ScriptedVault, $script:PortalVault, $script:OnVault, $script:AdeHeld, $script:AdeHeldOnRg,
         $script:AdeMissing, $script:AdeRoleFails, $script:AdeGraphFails, $script:AdeStatusFails, $script:AdeObjectId,
-        $script:NotEncrypted, $script:OperationalOnly)
+        $script:NotEncrypted, $script:OperationalOnly, $script:Denied)
 }
 
 AfterAll {
@@ -364,5 +387,23 @@ Describe 'Lab 5.2 Test-Lab.ps1 - blob policy operational plus vaulted (#306)' {
         $run = $script:OperationalOnly
         $run.OperationalLine | Should -Match 'PASS$' -Because "output was:`n$($run.Output)"
         $run.VaultedLine | Should -Match 'operational-only policy from before issue #306 - see lab-guide-5\.2\.md, Step 5\.2\.5\) FAIL$'
+    }
+}
+
+Describe 'Lab 5.2 Test-Lab.ps1 - a raw ARM read that fails is not a missing resource (#452)' {
+
+    It 'fails <label> with the lookup error' -ForEach @(
+        @{ label = "RSV tag 'Project'"; pattern = "Testing: RSV tag 'Project'" }
+        @{ label = 'RSV soft delete'; pattern = 'Testing: RSV soft delete' }
+        @{ label = 'Backup Vault storage type'; pattern = 'Testing: Backup Vault storage type' }
+        @{ label = 'Backup Vault soft delete'; pattern = 'Testing: Backup Vault soft delete' }
+        @{ label = 'blob policy datasource type'; pattern = 'Testing: Blob policy datasource type' }
+    ) {
+        $line = ($script:Denied.Output -split '\r?\n' | Where-Object { $_ -match $pattern }) -join "`n"
+        $line | Should -Match 'FAIL \(.*AuthorizationFailed' -Because "output was:`n$($script:Denied.Output)"
+    }
+
+    It 'exits 1' {
+        $script:Denied.ExitCode | Should -Be 1
     }
 }

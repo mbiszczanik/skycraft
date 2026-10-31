@@ -112,11 +112,21 @@ $TeardownArgumentCases = @(
 )
 
 # Every script a -UniqueNames value is passed to must declare the parameter, or the run fails on
-# parameter binding an hour in (#438).
+# parameter binding an hour in (#438). The entry's Steps say which scripts get it (default Deploy,
+# Test and Remove), its ScriptParameter what the scripts call it, and the PostDeploy step runs the
+# script its phase names.
 $UniqueNameCases = @(
     foreach ($entry in @($Manifest.UniqueNames)) {
-        foreach ($script in 'Deploy-Bicep.ps1', 'Test-Lab.ps1', 'Remove-LabResource.ps1') {
-            @{ Lab = $entry.Lab; Parameter = $entry.Parameter; Script = $script; Path = (Join-Path (Join-Path (Join-Path $RepoRoot $entry.Lab) 'scripts') $script) }
+        $steps = if ($entry.Steps) { @($entry.Steps) } else { @('Deploy', 'Test', 'Remove') }
+        $declared = if ($entry.ScriptParameter) { $entry.ScriptParameter } else { $entry.Parameter }
+        foreach ($step in $steps) {
+            $script = switch ($step) {
+                'Deploy' { 'Deploy-Bicep.ps1' }
+                'Test' { 'Test-Lab.ps1' }
+                'Remove' { 'Remove-LabResource.ps1' }
+                'PostDeploy' { @($Manifest.Phases | Where-Object { $_.Lab -eq $entry.Lab })[0].PostDeploy.Script }
+            }
+            @{ Lab = $entry.Lab; Parameter = $declared; Script = $script; Path = (Join-Path (Join-Path (Join-Path $RepoRoot $entry.Lab) 'scripts') $script) }
         }
     }
 )
@@ -509,8 +519,50 @@ Describe 'Manifest - every argument is a real parameter of the script it is pass
 }
 
 Describe 'Manifest - unique names (#438)' {
-    It 'declares the three names unique across Azure that labs 3.2-3.4 create' {
-        @($script:Manifest.UniqueNames | ForEach-Object { $_.Parameter }) | Should -Be @('KeyVaultName', 'AcrName', 'AppName')
+    It 'declares the names unique across Azure that labs 3.2-3.4 and 4.1 create, and the labs 4.2-5.3 that use them' {
+        @($script:Manifest.UniqueNames | ForEach-Object { $_.Parameter } | Select-Object -Unique) |
+            Should -Be @('KeyVaultName', 'AcrName', 'AppName', 'PlatformSaName', 'DevSaName', 'ProdSaName')
+        # The three storage accounts are used by these labs and by no others; 5.1 finds its account
+        # in the platform resource group and takes no name.
+        $storage = @($script:Manifest.UniqueNames | Where-Object { $_.Parameter -like '*SaName' } | ForEach-Object { ($_.Lab -split '/')[1] -replace '^(\d\.\d).*', '$1' } | Select-Object -Unique)
+        $storage | Should -Be @('4.1', '4.2', '4.3', '4.4', '5.2', '5.3')
+    }
+
+    It 'gives the storage account of every lab the key says it is' {
+        # The key names the account, not the lab; the default is that account's name.
+        $defaults = @{ PlatformSaName = 'platformskycraftswcsa'; DevSaName = 'devskycraftswcsa'; ProdSaName = 'prodskycraftswcsa' }
+        foreach ($entry in @($script:Manifest.UniqueNames | Where-Object { $_.Parameter -like '*SaName' })) {
+            $entry.Default | Should -Be $defaults[$entry.Parameter] -Because "$($entry.Parameter) of $($entry.Lab)"
+        }
+    }
+
+    It 'runs the labs that take one -StorageAccountName on the environment the key names' {
+        # ProdSaName reaches Labs 4.3 and 4.4 as -StorageAccountName, which is the prod account only
+        # while their Deploy, Test and teardown run on prod (their default, and the cycle's).
+        foreach ($lab in 'module-4-storage/4.3-azure-files', 'module-4-storage/4.4-storage-security') {
+            $entry = @($script:Manifest.UniqueNames | Where-Object { $_.Lab -eq $lab })
+            $entry.Count | Should -Be 1
+            $entry[0].Parameter | Should -Be 'ProdSaName'
+            $entry[0].ScriptParameter | Should -Be 'StorageAccountName'
+            $phase = @($script:Manifest.Phases | Where-Object { $_.Lab -eq $lab })[0]
+            $phase.Deploy.Keys | Should -Not -Contain 'Environment' -Because "$lab deploys its default, prod"
+            $phase.Test.Keys | Should -Not -Contain 'Environment'
+            $teardown = @($script:Manifest.Teardowns | Where-Object { $_.Lab -eq $lab })[0]
+            $teardown.Invocations[0].Environment | Should -Be 'prod'
+        }
+    }
+
+    It 'runs Lab 4.1 with -All, so the three names are all deployed' {
+        $phase = @($script:Manifest.Phases | Where-Object { $_.Lab -eq 'module-4-storage/4.1-storage-accounts' })[0]
+        $phase.Deploy.All | Should -BeTrue
+        @($script:Manifest.Teardowns | Where-Object { $_.Lab -eq 'module-4-storage/4.1-storage-accounts' })[0].Invocations[0].Environment | Should -Be 'all'
+    }
+
+    It 'gives Lab 5.2''s PostDeploy script the production name and Lab 5.3''s Deploy the platform name' {
+        $m52 = @($script:Manifest.UniqueNames | Where-Object { $_.Lab -like '*5.2-business-continuity' })
+        $m52.Steps | Should -Be @('PostDeploy', 'Test', 'Remove')
+        $m53 = @($script:Manifest.UniqueNames | Where-Object { $_.Lab -like '*5.3-network-monitoring' })
+        $m53.Steps | Should -Be @('Deploy')
     }
 
     It 'gives each lab it names a live phase and exactly one teardown invocation' {
@@ -1633,6 +1685,90 @@ Set-Content -LiteralPath (Join-Path $LogDirectory 'fake-remove-names.txt') -Valu
         $LASTEXITCODE | Should -Be 2
         $ran.Count | Should -Be 0
     }
+
+    It 'passes a name to the steps its Steps list names, under its ScriptParameter' {
+        $captured = @{}
+        $runner = { param($Invocation) $captured["$($Invocation.Phase.Id).$($Invocation.Kind)"] = $Invocation.Arguments; 0 }.GetNewClosure()
+        $manifest = New-FixtureManifest -Body @'
+@{
+    Phases = @(
+        @{ Id = 'acct'; Lab = 'module-4-storage/4.3-azure-files'; ParamFile = 'x'; Deploy = @{}; PostDeploy = @{ Script = 'Post.ps1'; Arguments = @{ Keep = $true } }; Test = @{}; DependsOn = @(); TimeoutMs = 1000; Excluded = $null }
+        @{ Id = 'later'; Lab = 'module-5-monitoring-maintenance/5.2-business-continuity'; ParamFile = 'x'; Deploy = @{}; PostDeploy = @{ Script = 'Post.ps1'; Arguments = @{} }; Test = @{}; DependsOn = @(); TimeoutMs = 1000; Excluded = $null }
+        @{ Id = 'read'; Lab = 'module-5-monitoring-maintenance/5.3-network-monitoring'; ParamFile = 'x'; Deploy = @{}; PostDeploy = $null; Test = @{}; DependsOn = @(); TimeoutMs = 1000; Excluded = $null }
+    )
+    SoftDeleteGuards = @()
+    UniqueNames = @(
+        @{ Parameter = 'ProdSaName'; Lab = 'module-4-storage/4.3-azure-files'; Default = 'prodskycraftswcsa'; ScriptParameter = 'StorageAccountName' }
+        @{ Parameter = 'ProdSaName'; Lab = 'module-5-monitoring-maintenance/5.2-business-continuity'; Default = 'prodskycraftswcsa'; Steps = @('PostDeploy', 'Test') }
+        @{ Parameter = 'PlatformSaName'; Lab = 'module-5-monitoring-maintenance/5.3-network-monitoring'; Default = 'platformskycraftswcsa'; Steps = @('Deploy') }
+    )
+    CompileOnly = @()
+    Teardowns = @()
+}
+'@
+
+        & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $manifest `
+            -UniqueNames @{ ProdSaName = 'prodskycraftswcsaab'; PlatformSaName = 'platformskycraftswcsaab' } -PhaseRunner $runner -PreflightRunner { @() } `
+            -ContextProbe $script:GoodContext -Yes -SkipCleanup @script:OfflinePaths | Out-Null
+
+        $LASTEXITCODE | Should -Be 0
+        # ScriptParameter: Lab 4.3 takes one -StorageAccountName, whatever the key is called. With no
+        # Steps the name goes to Deploy and Test, and not to the PostDeploy script.
+        $captured['acct.Deploy'].StorageAccountName | Should -Be 'prodskycraftswcsaab'
+        $captured['acct.Deploy'].Keys | Should -Not -Contain 'ProdSaName'
+        $captured['acct.Test'].StorageAccountName | Should -Be 'prodskycraftswcsaab'
+        $captured['acct.PostDeploy'].Keys | Should -Not -Contain 'StorageAccountName'
+        $captured['acct.PostDeploy'].Keep | Should -BeTrue -Because 'the manifest''s own arguments stay'
+        # Steps: Lab 5.2 gets it on PostDeploy and Test only, Lab 5.3 on Deploy only.
+        $captured['later.PostDeploy'].ProdSaName | Should -Be 'prodskycraftswcsaab'
+        $captured['later.Test'].ProdSaName | Should -Be 'prodskycraftswcsaab'
+        $captured['later.Deploy'].Keys | Should -Not -Contain 'ProdSaName'
+        $captured['read.Deploy'].PlatformSaName | Should -Be 'platformskycraftswcsaab'
+        $captured['read.Test'].Keys | Should -Not -Contain 'PlatformSaName'
+        $captured['read.Deploy'].Keys | Should -Not -Contain 'ProdSaName'
+    }
+
+    It 'leaves the manifest''s PostDeploy arguments unmutated' {
+        $captured = @{}
+        $runner = { param($Invocation) if ($Invocation.Kind -eq 'PostDeploy') { $captured['post'] = $Invocation.Phase.PostDeploy.Arguments }; 0 }.GetNewClosure()
+        $manifest = New-FixtureManifest -Body @'
+@{
+    Phases = @(
+        @{ Id = 'later'; Lab = 'module-5-monitoring-maintenance/5.2-business-continuity'; ParamFile = 'x'; Deploy = @{}; PostDeploy = @{ Script = 'Post.ps1'; Arguments = @{} }; Test = @{}; DependsOn = @(); TimeoutMs = 1000; Excluded = $null }
+    )
+    SoftDeleteGuards = @()
+    UniqueNames = @(
+        @{ Parameter = 'ProdSaName'; Lab = 'module-5-monitoring-maintenance/5.2-business-continuity'; Default = 'prodskycraftswcsa'; Steps = @('PostDeploy') }
+    )
+    CompileOnly = @()
+    Teardowns = @()
+}
+'@
+
+        & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $manifest `
+            -UniqueNames @{ ProdSaName = 'prodskycraftswcsaab' } -PhaseRunner $runner -PreflightRunner { @() } `
+            -ContextProbe $script:GoodContext -Yes -SkipCleanup @script:OfflinePaths | Out-Null
+
+        $captured['post'].Keys | Should -Not -Contain 'ProdSaName'
+    }
+
+    It 'asks Get-LabCycleUniqueNameArgument for one step, one script parameter name and no repeated key' {
+        $declared = @(
+            @{ Parameter = 'ProdSaName'; Lab = 'a'; Default = 'x'; ScriptParameter = 'StorageAccountName' }
+            @{ Parameter = 'ProdSaName'; Lab = 'b'; Default = 'x'; Steps = @('Remove') }
+            @{ Parameter = 'DevSaName'; Lab = 'b'; Default = 'y' }
+        )
+        $names = @{ ProdSaName = 'p'; DevSaName = 'd' }
+        (Get-LabCycleUniqueNameArgument -Declared $declared -UniqueNames $names -Lab 'a').StorageAccountName | Should -Be 'p'
+        (Get-LabCycleUniqueNameArgument -Declared $declared -UniqueNames $names -Lab 'b' -Step Deploy).Keys | Should -Be @('DevSaName')
+        @((Get-LabCycleUniqueNameArgument -Declared $declared -UniqueNames $names -Lab 'b' -Step Remove).Keys | Sort-Object) | Should -Be @('DevSaName', 'ProdSaName')
+        (Get-LabCycleUniqueNameArgument -Declared $declared -UniqueNames @{ DevSaName = 'd' } -Lab 'a').Count | Should -Be 0
+        # A key several labs share is declared, and named once in the message.
+        $problems = @(Get-LabCycleUnknownUniqueName -Declared $declared -UniqueNames @{ Nope = 'z' })
+        $problems.Count | Should -Be 1
+        $problems[0] | Should -Match '\(known: ProdSaName, DevSaName\)'
+    }
+
 
     It 'refuses to start on a key given no value' {
         & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $script:NamesManifest `

@@ -21,6 +21,10 @@
     (tools/LabCommon.psm1), so the script needs no Microsoft Graph sign-in
     (issue #397); a read that fails stops the run with exit 1.
 
+.PARAMETER ProdSaName
+    Production storage account name. Default: prodskycraftswcsa. Pass the name given to Lab 4.1's
+    Deploy-Bicep.ps1.
+
 .PARAMETER WhatIf
     Display planned actions without making changes.
 
@@ -43,6 +47,10 @@
 [CmdletBinding()]
 param(
     [Parameter()]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$ProdSaName = 'prodskycraftswcsa',
+
+    [Parameter()]
     [switch]$WhatIf
 )
 
@@ -54,7 +62,7 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 $platformRg     = 'platform-skycraft-swc-rg'
 $prodRg         = 'prod-skycraft-swc-rg'
 $bvName         = 'platform-skycraft-swc-bv'
-$storageAccount = 'prodskycraftswcsa'
+$storageAccount = $ProdSaName
 $policyName     = 'SkyCraft-Blob-Policy'
 $location       = 'swedencentral'
 

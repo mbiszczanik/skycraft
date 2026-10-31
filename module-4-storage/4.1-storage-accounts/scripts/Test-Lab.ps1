@@ -17,6 +17,16 @@
 .PARAMETER Environment
     Validate specific environment only. If not specified, validates all.
 
+.PARAMETER PlatformSaName
+    Platform storage account name. Default: platformskycraftswcsa. Pass the name given to
+    Deploy-Bicep.ps1.
+
+.PARAMETER DevSaName
+    Development storage account name. Default: devskycraftswcsa.
+
+.PARAMETER ProdSaName
+    Production storage account name. Default: prodskycraftswcsa.
+
 .EXAMPLE
     .\Test-Lab.ps1
     Validates all SkyCraft storage accounts.
@@ -39,7 +49,19 @@
 param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prod', 'platform', 'all')]
-    [string]$Environment = 'all'
+    [string]$Environment = 'all',
+
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$PlatformSaName = 'platformskycraftswcsa',
+
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$DevSaName = 'devskycraftswcsa',
+
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$ProdSaName = 'prodskycraftswcsa'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -89,19 +111,19 @@ function Test-Warning {
 # Storage account configurations to validate
 $storageConfigs = @{
     platform = @{
-        Name                   = 'platformskycraftswcsa'
+        Name                   = $PlatformSaName
         ResourceGroup          = 'platform-skycraft-swc-rg'
         ExpectedSku            = 'Standard_GRS'
         ExpectedEnvironmentTag = 'Platform'
     }
     dev      = @{
-        Name                   = 'devskycraftswcsa'
+        Name                   = $DevSaName
         ResourceGroup          = 'dev-skycraft-swc-rg'
         ExpectedSku            = 'Standard_LRS'
         ExpectedEnvironmentTag = 'Development'
     }
     prod     = @{
-        Name                   = 'prodskycraftswcsa'
+        Name                   = $ProdSaName
         ResourceGroup          = 'prod-skycraft-swc-rg'
         ExpectedSku            = 'Standard_GRS'
         ExpectedEnvironmentTag = 'Production'

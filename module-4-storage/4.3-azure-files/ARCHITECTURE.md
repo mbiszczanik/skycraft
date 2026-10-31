@@ -39,7 +39,7 @@
 - **Cleanup reminder:**
   - Soft-deleted file shares occupy, and are billed for, their used storage for 14 days before purge.
   - `Remove-LabResource.ps1` deletes the shares together with their snapshots (`-Include Snapshots`).
-  - Lab 1.3's `lock-no-delete-prod` on `prod-skycraft-swc-rg` refuses the share deletes (`ScopeLocked`) until it is lifted (issue #372); an Azure Backup delete lock on the account does the same until the backup is stopped.
+  - Lab 1.3's `lock-no-delete-prod` on `prod-skycraft-swc-rg` refuses the share deletes (`ScopeLocked`); the cleanup lifts it for them and restores it (`Invoke-LabWithoutLock` in `tools/LabCommon.psm1`, issue #372). An Azure Backup delete lock on the account does the same, and the cleanup leaves it in place, so the deletes fail until the backup is stopped.
 
 ## 5. Bicep implementation note (AVM)
 

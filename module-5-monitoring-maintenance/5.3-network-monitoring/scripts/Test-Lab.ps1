@@ -38,9 +38,69 @@ $connectionMonitorName = 'skycraft-hub-spoke-cm'
 $workspaceName         = 'platform-skycraft-swc-law'
 $prodVnetName          = 'prod-skycraft-swc-vnet'
 $location              = 'swedencentral'
+# Explicit api-versions for the raw ARM reads (#452); Sweden Central serves both.
+$connectionMonitorApiVersion = '2024-05-01'
+$flowLogApiVersion           = '2024-05-01'
 
 $passCount = 0
 $failCount = 0
+
+# Whether a lookup's error says the object does not exist rather than that the lookup failed.
+# Same rule as Test-LabNotFoundError in this lab's Remove-LabResource.ps1.
+function Test-LabNotFoundError {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    $evidence = [System.Collections.Generic.List[string]]::new()
+    $evidence.Add([string]$ErrorRecord)
+    $evidence.Add([string]$ErrorRecord.FullyQualifiedErrorId)
+    $status404 = $false
+    for ($exception = $ErrorRecord.Exception; $exception; $exception = $exception.InnerException) {
+        $evidence.Add([string]$exception.Message)
+        foreach ($code in @($exception.Body.Code, $exception.Body.Error.Code, $exception.ErrorCode)) {
+            if ($code) { $evidence.Add([string]$code) }
+        }
+        foreach ($status in @($exception.Response.StatusCode, $exception.ResponseStatusCode, $exception.Status)) {
+            if ("$status" -in @('404', 'NotFound')) { $status404 = $true }
+        }
+    }
+    $text = $evidence -join "`n"
+
+    if ($text -match 'SubscriptionNotFound|subscription .{0,80}(could not be|was not) found') { return $false }
+    if ($status404) { return $true }
+    return $text -match '\bResource(Group)?NotFound\b|was not found|Resource group .{0,100}could not be found|invalid status code ''NotFound''|\b404 \(Not Found\)'
+}
+
+# Reads one resource by id at an explicit api-version (#452: without one ARM uses the newest version
+# the provider lists, which a region may not serve yet). A missing resource is $null; any other
+# error throws, so the check that asked fails with the error instead of reading the resource as missing.
+function Get-LabArmResource {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ApiVersion,
+
+        [switch]$ExpandProperties
+    )
+
+    try {
+        if ($ExpandProperties) {
+            return Get-AzResource -ResourceId $ResourceId -ApiVersion $ApiVersion -ExpandProperties -ErrorAction Stop
+        }
+        return Get-AzResource -ResourceId $ResourceId -ApiVersion $ApiVersion -ErrorAction Stop
+    }
+    catch {
+        if (Test-LabNotFoundError -ErrorRecord $_) { return $null }
+        throw
+    }
+}
 
 function Invoke-Test {
     param(
@@ -76,7 +136,7 @@ if (-not $context) {
 }
 Write-Host "  Account: $($context.Account.Id)" -ForegroundColor Gray
 
-# Connection Monitor V2 detail is read from the raw ARM body (Get-AzResource
+# Connection Monitor V2 detail is read from the raw ARM body (Get-LabArmResource
 # -ExpandProperties) because PSConnectionMonitorResultV2 does not surface
 # monitoringStatus and nests endpoints/test configs under test groups.
 $connectionMonitorResourceId = "/subscriptions/$($context.Subscription.Id)/resourceGroups/$networkWatcherRg/providers/Microsoft.Network/networkWatchers/$networkWatcherName/connectionMonitors/$connectionMonitorName"
@@ -156,7 +216,7 @@ Invoke-Test "Flow log has correct tags (Project, Environment, CostCenter)" {
     $fl = Get-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $flowLogName -ErrorAction SilentlyContinue
     if (-not $fl) { return $false }
     # The typed flow-log object does not surface tags; read them from raw ARM.
-    $tags = (Get-AzResource -ResourceId $fl.Id -ErrorAction SilentlyContinue).Tags
+    $tags = (Get-LabArmResource -ResourceId $fl.Id -ApiVersion $flowLogApiVersion).Tags
     return ($null -ne $tags -and $tags.Project -eq 'SkyCraft' -and $tags.CostCenter -eq 'MSDN')
 }
 
@@ -167,37 +227,37 @@ Write-Host ""
 Write-Host "[Connection Monitor]" -ForegroundColor Yellow
 
 Invoke-Test "Connection Monitor '$connectionMonitorName' exists" {
-    $cm = Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction SilentlyContinue
+    $cm = Get-LabArmResource -ResourceId $connectionMonitorResourceId -ApiVersion $connectionMonitorApiVersion -ExpandProperties
     return ($null -ne $cm -and $cm.Name -eq $connectionMonitorName)
 }
 
 Invoke-Test "Connection Monitor monitoring status is Running or not-null" {
-    $cm = Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction SilentlyContinue
+    $cm = Get-LabArmResource -ResourceId $connectionMonitorResourceId -ApiVersion $connectionMonitorApiVersion -ExpandProperties
     # Accept Running or empty (may be empty in the first ~30s after creation)
     # Explicitly reject Stopped/Failed states
     return ($null -ne $cm -and $cm.Properties.monitoringStatus -notin @('Stopped', 'Failed'))
 }
 
 Invoke-Test "Connection Monitor has test group 'hub-spoke-ssh'" {
-    $cm = Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction SilentlyContinue
+    $cm = Get-LabArmResource -ResourceId $connectionMonitorResourceId -ApiVersion $connectionMonitorApiVersion -ExpandProperties
     $tg = $cm.Properties.testGroups | Where-Object { $_.name -eq 'hub-spoke-ssh' }
     return ($null -ne $tg)
 }
 
 Invoke-Test "Connection Monitor test config uses TCP port 22" {
-    $cm = Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction SilentlyContinue
+    $cm = Get-LabArmResource -ResourceId $connectionMonitorResourceId -ApiVersion $connectionMonitorApiVersion -ExpandProperties
     $tc = $cm.Properties.testConfigurations | Where-Object { $_.name -eq 'tcp-22-every-5m' }
     return ($null -ne $tc -and $tc.tcpConfiguration.port -eq 22 -and $tc.protocol -eq 'Tcp')
 }
 
 Invoke-Test "Connection Monitor test frequency is 300 seconds (5 min)" {
-    $cm = Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction SilentlyContinue
+    $cm = Get-LabArmResource -ResourceId $connectionMonitorResourceId -ApiVersion $connectionMonitorApiVersion -ExpandProperties
     $tc = $cm.Properties.testConfigurations | Where-Object { $_.name -eq 'tcp-22-every-5m' }
     return ($tc.testFrequencySec -eq 300)
 }
 
 Invoke-Test "Connection Monitor destination endpoint is dev-skycraft-swc-auth-vm" {
-    $cm = Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction SilentlyContinue
+    $cm = Get-LabArmResource -ResourceId $connectionMonitorResourceId -ApiVersion $connectionMonitorApiVersion -ExpandProperties
     $dest = $cm.Properties.endpoints | Where-Object { $_.name -eq 'dev-auth-destination' }
     # AzureVM endpoint carries resourceId; accept either resourceId or address match
     return ($null -ne $dest -and (
@@ -207,7 +267,7 @@ Invoke-Test "Connection Monitor destination endpoint is dev-skycraft-swc-auth-vm
 }
 
 Invoke-Test "Connection Monitor has correct tags (Project, Environment, CostCenter)" {
-    $cm = Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction SilentlyContinue
+    $cm = Get-LabArmResource -ResourceId $connectionMonitorResourceId -ApiVersion $connectionMonitorApiVersion -ExpandProperties
     return ($cm.Tags.Project -eq 'SkyCraft' -and $cm.Tags.CostCenter -eq 'MSDN')
 }
 

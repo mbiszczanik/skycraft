@@ -177,14 +177,15 @@ Get-AzStorageBlob -Container dev-assets -Context $entraContext | Select-Object N
 - [ ] Container `dev-assets` removed
 - [ ] `Storage Blob Data Contributor` role assignments made on the account removed
 - [ ] `WorldSubnet` **still** carries the `Microsoft.Storage` service endpoint
+- [ ] `lock-no-delete-prod` is **back** on `prod-skycraft-swc-rg` (**Settings** > **Locks**), if Lab 1.3 put it there
 
 > The cleanup deliberately leaves that service endpoint in place: it belongs to Lab 2.2, whose
 > `Test-Lab.ps1` asserts it. Remove it with Lab 2.2's own cleanup if you want it gone. A key
 > rotation cannot be undone and needs no cleanup.
 >
-> While Lab 1.3's delete lock `lock-no-delete-prod` is on `prod-skycraft-swc-rg`, Azure refuses to
-> delete the container and the role assignment (`ScopeLocked`), and the script exits 1. See
-> **What This Lab Leaves Behind** in the guide (issue #372).
+> While Lab 1.3's delete lock `lock-no-delete-prod` is on `prod-skycraft-swc-rg`, the script lifts
+> it for the container and role assignment deletes and creates it again afterwards (issue #372).
+> See **What This Lab Leaves Behind** in the guide.
 
 ---
 

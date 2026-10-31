@@ -12,6 +12,10 @@
     Prerequisites: Labs 2.1 (VNets), 2.2 (NSGs), 3.2 (VMs), 4.1 (Storage),
     and 5.1 (Log Analytics Workspace) must be deployed.
 
+.PARAMETER PlatformSaName
+    Platform storage account name. Default: platformskycraftswcsa. Pass the name given to Lab
+    4.1's Deploy-Bicep.ps1.
+
 .PARAMETER WhatIf
     Run deployment in what-if mode (dry run).
 
@@ -32,6 +36,10 @@
 
 [CmdletBinding()]
 param(
+    [Parameter()]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$PlatformSaName = 'platformskycraftswcsa',
+
     [Parameter()]
     [switch]$WhatIf,
 
@@ -91,7 +99,7 @@ $prodVnetId = $prodVnetObj.Id
 Write-Host "  ✓ Prod VNet found: $prodVnetName" -ForegroundColor Green
 
 # Platform storage account
-$storageName = 'platformskycraftswcsa'
+$storageName = $PlatformSaName
 $storageObj = Get-AzStorageAccount -ResourceGroupName $platformRg -Name $storageName -ErrorAction SilentlyContinue
 if (-not $storageObj) {
     Write-Host "  [ERROR] Storage account '$storageName' not found in '$platformRg'. Deploy Lab 4.1 first." -ForegroundColor Red
@@ -138,13 +146,19 @@ Write-Host "  ✓ Connection Monitor: $($sourceVm.Name) -> $($destVm.Name)" -For
 foreach ($cmVm in @($sourceVm, $destVm)) {
     $hasExt = Get-AzVMExtension -ResourceGroupName $cmVm.ResourceGroupName -VMName $cmVm.Name -ErrorAction SilentlyContinue |
         Where-Object { $_.Publisher -eq 'Microsoft.Azure.NetworkWatcher' }
-    if (-not $hasExt) {
+    if ($WhatIf) {
+        if ($hasExt) {
+            Write-Host "  ✓ NetworkWatcherAgent already present on $($cmVm.Name)" -ForegroundColor Green
+        } else {
+            Write-Host "  What-if: would install NetworkWatcherAgentLinux on $($cmVm.Name) (skipped)" -ForegroundColor Cyan
+        }
+    } elseif (-not $hasExt) {
         Write-Host "  Installing NetworkWatcherAgent on $($cmVm.Name)..." -ForegroundColor Yellow
         try {
             # Use New-AzResource (not Set-AzVMExtension) so the extension carries the
             # Project tag — the Lab 1.3 governance policy denies untagged resources,
             # and Set-AzVMExtension has no -Tag parameter.
-            New-AzResource -ResourceId "$($cmVm.Id)/extensions/NetworkWatcherAgentLinux" -Location $cmVm.Location `
+            New-AzResource -ResourceId "$($cmVm.Id)/extensions/NetworkWatcherAgentLinux" -Location $cmVm.Location -ApiVersion '2024-07-01' `
                 -Properties @{ publisher = 'Microsoft.Azure.NetworkWatcher'; type = 'NetworkWatcherAgentLinux'; typeHandlerVersion = '1.4'; autoUpgradeMinorVersion = $true } `
                 -Tag @{ Project = 'SkyCraft' } -Force -ErrorAction Stop | Out-Null
             Write-Host "  ✓ NetworkWatcherAgent installed on $($cmVm.Name)" -ForegroundColor Green
@@ -159,7 +173,13 @@ foreach ($cmVm in @($sourceVm, $destVm)) {
 
 # Verify Network Watcher exists in the region
 $nwExists = @(Get-AzNetworkWatcher -ErrorAction SilentlyContinue | Where-Object { $_.Location -eq $location })
-if (-not $nwExists -or $nwExists.Count -eq 0) {
+if ($WhatIf) {
+    if (-not $nwExists -or $nwExists.Count -eq 0) {
+        Write-Host "  What-if: would create NetworkWatcherRG (if missing) and Network Watcher for swedencentral (skipped)" -ForegroundColor Cyan
+    } else {
+        Write-Host "  ✓ Network Watcher active for swedencentral" -ForegroundColor Green
+    }
+} elseif (-not $nwExists -or $nwExists.Count -eq 0) {
     Write-Host "  [WARNING] Network Watcher not found for swedencentral. Enabling now..." -ForegroundColor Yellow
     try {
         $nwRg = Get-AzResourceGroup -Name 'NetworkWatcherRG' -ErrorAction SilentlyContinue

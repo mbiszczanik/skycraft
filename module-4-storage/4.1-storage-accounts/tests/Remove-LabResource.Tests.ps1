@@ -48,11 +48,16 @@ BeforeAll {
     $script:ScriptPath     = (Resolve-Path (Join-Path $PSScriptRoot '..' 'scripts' 'Remove-LabResource.ps1')).Path
     $script:StubModuleName = 'SkyCraftLab41CleanupStub'
     # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
-    $script:RequiredModules = @('Az.Accounts', 'Az.Storage')
+    $script:RequiredModules = @('Az.Accounts', 'Az.Storage', 'Az.Monitor')
 
     $script:StubCommands = @(
         'Get-AzStorageAccount'
         'Remove-AzStorageAccount'
+        'Get-AzContext'
+        'Invoke-AzRestMethod'
+        'Start-Sleep'
+        'Get-AzDiagnosticSetting'
+        'Remove-AzDiagnosticSetting'
     )
 
     # Every command the script calls, recording its own invocation. By default the three lab
@@ -64,8 +69,20 @@ BeforeAll {
     #                         (denied, throttled) or report its account not found (notfound,
     #                         rgnotfound)
     #   SKYCRAFT_STUB_FAIL    'Remove-AzStorageAccount:<name>,...' makes one removal throw
+    #
+    # Diagnostic settings (#373) are keyed '<account>' for the account itself and
+    # '<account>/<service>' for a service. Lookups: 'Get-AzDiagnosticSetting:<key>=<kind>'.
+    # Removals: 'Remove-AzDiagnosticSetting:<key>/<setting name>'. The platform account's blob
+    # service carries Lab 5.1's setting and one a learner named in the Portal; the dev account's
+    # file service carries one more.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
+
+function Get-AzContext {
+    [CmdletBinding()]
+    param()
+    [pscustomobject]@{ Subscription = [pscustomobject]@{ Id = '00000000-0000-0000-0000-000000000000'; Name = 'stub-subscription' } }
+}
 
 function Write-StubCall {
     param([string]$Name)
@@ -117,7 +134,36 @@ function Get-AzStorageAccount {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$Name)
     if (Invoke-StubLookup -Name "Get-AzStorageAccount:$Name" -ResourceGroup $ResourceGroupName) { return }
-    [pscustomobject]@{ StorageAccountName = $Name; ResourceGroupName = $ResourceGroupName }
+    [pscustomobject]@{
+        StorageAccountName = $Name
+        ResourceGroupName  = $ResourceGroupName
+        Id                 = "/subscriptions/0/resourceGroups/$ResourceGroupName/providers/Microsoft.Storage/storageAccounts/$Name"
+    }
+}
+
+function Get-StubDiagnosticKey {
+    param([string]$ResourceId)
+    ($ResourceId -replace '^.*/storageAccounts/', '') -replace '/default$', ''
+}
+
+function Get-AzDiagnosticSetting {
+    [CmdletBinding()]
+    param([string]$ResourceId)
+    $key = Get-StubDiagnosticKey -ResourceId $ResourceId
+    if (Invoke-StubLookup -Name "Get-AzDiagnosticSetting:$key" -ResourceGroup 'stub-rg') { return }
+    if ($key -eq 'platformskycraftswcsa/blobServices') {
+        [pscustomobject]@{ Name = 'skycraft-storage-diag' }
+        [pscustomobject]@{ Name = 'learner-blob-diag' }
+    }
+    if ($key -eq 'devskycraftswcsa/fileServices') {
+        [pscustomobject]@{ Name = 'learner-file-diag' }
+    }
+}
+
+function Remove-AzDiagnosticSetting {
+    [CmdletBinding()]
+    param([string]$ResourceId, [string]$Name)
+    Invoke-StubRemoval -Command 'Remove-AzDiagnosticSetting' -Name "$(Get-StubDiagnosticKey -ResourceId $ResourceId)/$Name"
 }
 
 function Remove-AzStorageAccount {
@@ -134,6 +180,8 @@ function Remove-AzStorageAccount {
             [pscustomobject]$Stub,
             [string[]]$Fail = @(),
             [string[]]$Lookup = @(),
+            [string[]]$Locks = @(),
+            [string[]]$LockFail = @(),
             [string[]]$ArgumentList = @('-Force'),
             [switch]$Empty
         )
@@ -146,6 +194,8 @@ function Remove-AzStorageAccount {
             SKYCRAFT_STUB_LOOKUP = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG    = $logPath
+            SKYCRAFT_STUB_LOCKS = $Locks -join ','
+            SKYCRAFT_STUB_LOCK_FAIL = $LockFail -join ','
         }
 
         $calls = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { @() }
@@ -158,7 +208,7 @@ function Remove-AzStorageAccount {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmStub -Api Lock)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs
@@ -173,10 +223,19 @@ function Remove-AzStorageAccount {
     )
     $script:LookupFails  = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzStorageAccount:devskycraftswcsa=denied'
     $script:RemovalFails = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzStorageAccount:platformskycraftswcsa'
+    $script:DiagDenied   = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzDiagnosticSetting:devskycraftswcsa/queueServices=throttled'
+    $script:DiagStuck    = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzDiagnosticSetting:platformskycraftswcsa/blobServices/skycraft-storage-diag'
+    $script:DiagNotFound = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzDiagnosticSetting:prodskycraftswcsa/tableServices=rgnotfound'
+
+    # Lab 1.3's delete locks (#372): the cleanup lifts them for its deletes and puts them back.
+    $script:Locked         = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg'
+    $script:LockedFail     = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg' -Fail 'Remove-AzStorageAccount:prodskycraftswcsa'
+    $script:LockUnreadable = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg' -LockFail 'GET:prod-skycraft-swc-rg'
+    $script:LockedWhatIf   = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg' -ArgumentList '-WhatIf'
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:DevOnly, $script:NotFound, $script:LookupFails,
-        $script:RemovalFails
+        $script:RemovalFails, $script:DiagDenied, $script:DiagStuck, $script:DiagNotFound
     )
 }
 
@@ -268,6 +327,64 @@ Describe 'Lab 4.1 Remove-LabResource.ps1 - a failed deletion is counted' {
     }
 }
 
+Describe 'Lab 4.1 Remove-LabResource.ps1 - diagnostic settings go with their account (#373)' {
+
+    It 'removes every setting on the account and its services, whatever its name, before deleting the account' {
+        $run = $script:Clean
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $removed = @{
+            'Remove-AzDiagnosticSetting:platformskycraftswcsa/blobServices/skycraft-storage-diag' = 'Remove-AzStorageAccount:platformskycraftswcsa'
+            'Remove-AzDiagnosticSetting:platformskycraftswcsa/blobServices/learner-blob-diag'     = 'Remove-AzStorageAccount:platformskycraftswcsa'
+            'Remove-AzDiagnosticSetting:devskycraftswcsa/fileServices/learner-file-diag'          = 'Remove-AzStorageAccount:devskycraftswcsa'
+        }
+        foreach ($call in $removed.Keys) {
+            @($run.Calls | Where-Object { $_ -eq $call }).Count | Should -Be 1 -Because "calls were: $($run.Calls -join ', ')"
+            $run.Calls.IndexOf($call) | Should -BeLessThan $run.Calls.IndexOf($removed[$call])
+        }
+    }
+
+    It 'lists the settings of the account and of its blob, file, queue and table services' {
+        foreach ($account in 'platformskycraftswcsa', 'devskycraftswcsa', 'prodskycraftswcsa') {
+            foreach ($key in $account, "$account/blobServices", "$account/fileServices", "$account/queueServices", "$account/tableServices") {
+                $script:Clean.Calls | Should -Contain "Get-AzDiagnosticSetting:$key"
+            }
+        }
+    }
+
+    It 'exits 1, counts the failed listing and keeps the account when a service''s settings cannot be listed' {
+        $run = $script:DiagDenied
+        $run.ExitCode | Should -Be 1 -Because "a listing that failed is not 'no settings'; output was:`n$($run.Output)"
+        $run.Output   | Should -Match '\[ERROR\] Could not look up the diagnostic settings of Microsoft\.Storage/storageAccounts/devskycraftswcsa/queueServices/default[^\r\n]*exceeded the limit'
+        $run.Output   | Should -Match 'FAILED \(diagnostic settings\)'
+        $run.Output   | Should -Match 'Failed:  1'
+        $run.Calls    | Should -Not -Contain 'Remove-AzStorageAccount:devskycraftswcsa'
+        $run.Calls    | Should -Contain 'Remove-AzStorageAccount:platformskycraftswcsa'
+        $run.Calls    | Should -Contain 'Remove-AzStorageAccount:prodskycraftswcsa'
+    }
+
+    It 'exits 1 and keeps the account when a setting cannot be removed, after trying the other one' {
+        $run = $script:DiagStuck
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Match '\[ERROR\] Could not remove diagnostic setting ''skycraft-storage-diag'''
+        $run.Output   | Should -Match 'Failed:  1'
+        $run.Calls    | Should -Contain 'Remove-AzDiagnosticSetting:platformskycraftswcsa/blobServices/learner-blob-diag'
+        $run.Calls    | Should -Not -Contain 'Remove-AzStorageAccount:platformskycraftswcsa'
+        $run.Calls    | Should -Contain 'Remove-AzStorageAccount:devskycraftswcsa'
+    }
+
+    It 'reads a listing that reports the account not found as no settings, and deletes the account' {
+        $run = $script:DiagNotFound
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Not -Match '\[ERROR\]'
+        $run.Calls    | Should -Contain 'Remove-AzStorageAccount:prodskycraftswcsa'
+    }
+
+    It 'removes no setting when nothing is there, or under -WhatIf' {
+        @($script:Nothing.Calls | Where-Object { $_ -like 'Remove-AzDiagnosticSetting*' }) | Should -BeNullOrEmpty
+        @($script:WhatIf.Calls  | Where-Object { $_ -like 'Remove-AzDiagnosticSetting*' }) | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Lab 4.1 Remove-LabResource.ps1 - -WhatIf' {
 
     It 'looks the accounts up and deletes nothing' {
@@ -276,5 +393,48 @@ Describe 'Lab 4.1 Remove-LabResource.ps1 - -WhatIf' {
         @($run.Calls | Where-Object { $_ -match '^Remove-' }) | Should -BeNullOrEmpty
         $run.Calls    | Should -Contain 'Get-AzStorageAccount:prodskycraftswcsa'
         $run.Output   | Should -Match 'What if: .*prodskycraftswcsa'
+    }
+}
+
+Describe 'Lab 4.1 Remove-LabResource.ps1 - under Lab 1.3''s delete lock (#372)' {
+
+    It 'runs every lock scenario against the stub' {
+        foreach ($run in @($script:Locked, $script:LockedFail, $script:LockUnreadable, $script:LockedWhatIf)) {
+            $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az commands (exit $($run.ExitCode)): $($run.Output)"
+        }
+    }
+
+    It 'lifts the lock before the deletes, puts it back as it was after them, and exits 0' {
+        $run = $script:Locked
+        $run.ExitCode | Should -Be 0 -Because "the lock is no longer in the way; output was:`n$($run.Output)"
+        $calls = @($run.Calls)
+        $lift = [array]::IndexOf($calls, 'Lock:DELETE:prod-skycraft-swc-rg')
+        $lift | Should -BeGreaterOrEqual 0 -Because 'the lock must be lifted'
+        [array]::IndexOf($calls, 'Remove-AzStorageAccount:prodskycraftswcsa') | Should -BeGreaterThan $lift
+        [array]::IndexOf($calls, 'Lock:PUT:prod-skycraft-swc-rg') | Should -BeGreaterThan ([array]::IndexOf($calls, 'Remove-AzStorageAccount:prodskycraftswcsa'))
+        $calls | Should -Contain 'Lock:PUT-BODY:prod-skycraft-swc-rg:{"properties":{"level":"CanNotDelete","notes":"Cannot delete resource or child resources."}}'
+        $calls | Should -Contain 'Start-Sleep:45'
+    }
+
+    It 'puts the lock back after a delete that failed, and exits 1' {
+        $run = $script:LockedFail
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $calls = @($run.Calls)
+        [array]::IndexOf($calls, 'Remove-AzStorageAccount:prodskycraftswcsa') | Should -BeGreaterOrEqual 0
+        [array]::IndexOf($calls, 'Lock:PUT:prod-skycraft-swc-rg') | Should -BeGreaterThan ([array]::IndexOf($calls, 'Remove-AzStorageAccount:prodskycraftswcsa'))
+    }
+
+    It 'deletes nothing in the group and exits 1 when the lock cannot be read' {
+        $run = $script:LockUnreadable
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[ERROR\] Could not read Lab 1\.3's lock 'lock-no-delete-[a-z]+' on 'prod-skycraft-swc-rg'"
+        $run.Calls | Should -Not -Contain 'Remove-AzStorageAccount:prodskycraftswcsa'
+        $run.Calls | Should -Not -Contain 'Lock:DELETE:prod-skycraft-swc-rg'
+    }
+
+    It 'lifts no lock under -WhatIf' {
+        $script:LockedWhatIf.ExitCode | Should -Be 0 -Because "output was:`n$($script:LockedWhatIf.Output)"
+        $script:LockedWhatIf.Calls | Should -Not -Match '^Lock:(DELETE|PUT):'
+        $script:LockedWhatIf.Calls | Should -Not -Contain 'Remove-AzStorageAccount:prodskycraftswcsa'
     }
 }

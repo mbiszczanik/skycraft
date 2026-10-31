@@ -413,7 +413,7 @@ foreach ($entry in $teardowns) {
     $worstExit = 0
     $ran       = $false
 
-    $labNames = Get-LabCycleUniqueNameArgument -Declared $manifest.UniqueNames -UniqueNames $UniqueNames -Lab $entry.Lab
+    $labNames = Get-LabCycleUniqueNameArgument -Declared $manifest.UniqueNames -UniqueNames $UniqueNames -Lab $entry.Lab -Step Remove
     foreach ($manifestInvocation in @($entry.Invocations)) {
         # Copied, so the names do not leak into the manifest hashtable.
         $invocation = @{}

@@ -847,7 +847,7 @@ Do not delete the accounts now: the later labs above use them. When you have fin
 .\scripts\Remove-LabResource.ps1 -Environment all
 ```
 
-While Lab 1.3's delete locks (`lock-no-delete-platform`, `lock-no-delete-prod`) are on `platform-skycraft-swc-rg` and `prod-skycraft-swc-rg`, Azure refuses to delete `platformskycraftswcsa` and `prodskycraftswcsa` (`ScopeLocked`), and the script reports both as failed. Run Lab 1.3's `scripts/Remove-LabResource.ps1` first, which removes the locks, or remove the two locks by hand (under **Settings**, **Locks** of each group) and run this script again.
+While Lab 1.3's delete locks (`lock-no-delete-platform`, `lock-no-delete-prod`) are on `platform-skycraft-swc-rg` and `prod-skycraft-swc-rg`, Azure refuses to delete `platformskycraftswcsa` and `prodskycraftswcsa` (`ScopeLocked`). The script therefore lifts the lock of each group it deletes in, waits 45 seconds for the removal to take effect, and creates each lock again with the same name, level and notes, also when a delete fails. Managing a lock needs **Owner** or **User Access Administrator** on the group, as in Lab 1.3. If the script cannot read, lift or restore a lock, it reports `[ERROR]` and exits 1: it deletes nothing in a group whose lock it could not read or lift, and for a lock it could not restore it prints the `New-AzResourceLock` command that creates it again. `-WhatIf` lifts no lock.
 
 ---
 
@@ -861,7 +861,7 @@ While Lab 1.3's delete locks (`lock-no-delete-platform`, `lock-no-delete-prod`) 
 
 - Storage account names are globally unique
 - If you deleted the account a moment ago, wait a minute and try again with the same name
-- If someone else owns the name, add random numbers or your initials: `prodskycraftswc01sa`. `Test-Lab.ps1` and the later labs use the names of this guide, so with another name you replace it in their commands too.
+- If someone else owns the name, add random numbers or your initials: `prodskycraftswc01sa`. In a class, every learner needs a different name, so add your initials from the start. `Test-Lab.ps1` and the later labs use the names of this guide, so pass your names to the lab scripts as `-PlatformSaName`, `-DevSaName` and `-ProdSaName` (Labs 4.1, 4.2, 5.2 and 5.3 take the ones they use) or `-StorageAccountName` (Labs 4.3 and 4.4). `Deploy-Bicep.ps1` checks the names before it deploys and stops if one is taken by someone else.
 - Check namespace availability:
   ```powershell
   Get-AzStorageAccountNameAvailability -Name prodskycraftswcsa
