@@ -104,7 +104,7 @@ Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycra
 
 ## 🛠️ Portal, PowerShell and Bicep Paths
 
-You can build this lab in the Portal (Option 1 of each step), with the Az PowerShell blocks (Option 2), or with Bicep (`scripts/Deploy-Bicep.ps1`, which deploys `bicep/main.bicep` to `prodskycraftswcsa` by default). The Azure CLI blocks (Option 3) are an optional third way to run Steps 4.3.1-4.3.5. **Pick one path** for Steps 4.3.1-4.3.3: they all create the same two shares and the same setting, and `scripts/Test-Lab.ps1` accepts the result whichever path built it.
+You can build this lab in the Portal (Option 1 of each step), with the Az PowerShell blocks (Option 2), or with Bicep (`scripts/Deploy-Bicep.ps1`, which deploys `bicep/main.bicep` to `prodskycraftswcsa` by default). The Azure CLI blocks (Option 3) are an optional third way to run Steps 4.3.1-4.3.5. **Pick one path** for Steps 4.3.1-4.3.3: they all create the same two shares and the same setting, and `scripts/Test-Lab.ps1` accepts the result whichever path built it. Storage account names are unique across Azure: if Lab 4.1 had to use another name than `prodskycraftswcsa`, pass it to `Deploy-Bicep.ps1`, `Test-Lab.ps1` and `Remove-LabResource.ps1` as `-StorageAccountName`. `Deploy-Bicep.ps1` checks the name before it deploys and stops if it is taken by someone else.
 
 The end state on every path:
 

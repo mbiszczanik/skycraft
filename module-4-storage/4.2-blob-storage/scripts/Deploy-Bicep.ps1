@@ -9,6 +9,14 @@
 .PARAMETER Location
     Azure region for deployment. Default: swedencentral
 
+.PARAMETER ProdSaName
+    Production storage account name. Default: prodskycraftswcsa. Storage account names are unique
+    across Azure, so use the name Lab 4.1 deployed, and pass it to Test-Lab.ps1 and
+    Remove-LabResource.ps1.
+
+.PARAMETER DevSaName
+    Development storage account name. Default: devskycraftswcsa. See -ProdSaName.
+
 .PARAMETER WhatIf
     Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
 
@@ -33,6 +41,12 @@ param(
     [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
 
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$ProdSaName = 'prodskycraftswcsa',
+
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$DevSaName = 'devskycraftswcsa',
+
     [switch]$WhatIf
 )
 
@@ -55,7 +69,19 @@ if (-not (Test-Path $TemplateFile)) {
     Write-Host "Template file not found: $TemplateFile" -ForegroundColor Red; Exit-Lab -FailureCount 1
 }
 
-# 3. Deploy
+# 3. A taken name otherwise fails the deployment with StorageAccountAlreadyTaken (#438).
+$takenNames = 0
+foreach ($sa in @(
+        @{ Name = $ProdSaName; Parameter = 'ProdSaName'; RG = 'prod-skycraft-swc-rg' },
+        @{ Name = $DevSaName; Parameter = 'DevSaName'; RG = 'dev-skycraft-swc-rg' })) {
+    $owned = [bool](Get-AzResource -ResourceGroupName $sa.RG -ResourceType 'Microsoft.Storage/storageAccounts' -Name $sa.Name -ApiVersion '2023-05-01' -ErrorAction SilentlyContinue)
+    if (-not (Test-LabGlobalName -Kind StorageAccount -Name $sa.Name -ParameterName $sa.Parameter -Owned $owned)) { $takenNames++ }
+}
+if ($takenNames -gt 0) {
+    Exit-Lab -FailureCount $takenNames
+}
+
+# 4. Deploy
 try {
     Write-Host "Deploying to Subscription scope..." -ForegroundColor Yellow
     
@@ -63,7 +89,7 @@ try {
         Name                    = "lab-4.2-deploy-$(Get-Date -Format 'yyyyMMdd-HHmm')"
         Location                = $Location
         TemplateFile            = $TemplateFile
-        TemplateParameterObject = @{ parLocation = $Location }
+        TemplateParameterObject = @{ parLocation = $Location; parProdSaName = $ProdSaName; parDevSaName = $DevSaName }
         ErrorAction             = 'Stop'
     }
 

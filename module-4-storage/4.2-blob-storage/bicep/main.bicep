@@ -3,7 +3,7 @@ SUMMARY: Lab 4.2 - Implement Azure Blob Storage
 DESCRIPTION: Configures the production and development storage accounts from Lab 4.1 with containers, blob versioning and lifecycle management rules via the Azure Verified Module for storage accounts
 EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
-VERSION: 2.1.0
+VERSION: 2.2.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -30,6 +30,17 @@ param parResourceGroupNameProd string = 'prod-skycraft-swc-rg'
 @minLength(1)
 @maxLength(90)
 param parResourceGroupNameDev string = 'dev-skycraft-swc-rg'
+
+// Storage account names are unique across Azure: use the names Lab 4.1 deployed (#438).
+@description('Production storage account name: 3-24 lowercase letters and digits')
+@minLength(3)
+@maxLength(24)
+param parProdSaName string = 'prodskycraftswcsa'
+
+@description('Development storage account name: 3-24 lowercase letters and digits')
+@minLength(3)
+@maxLength(24)
+param parDevSaName string = 'devskycraftswcsa'
 
 @description('Blob soft delete retention days (baseline from Lab 4.1)')
 @minValue(1)
@@ -126,7 +137,7 @@ module modStorageProd 'br/public:avm/res/storage/storage-account:0.33.0' = {
   name: 'sa-deployment-prod-42'
   scope: resourceGroup(parResourceGroupNameProd)
   params: {
-    name: 'prodskycraftswcsa'
+    name: parProdSaName
     location: parLocation
     tags: varTagsProd
     skuName: 'Standard_GRS'
@@ -160,7 +171,7 @@ module modStorageDev 'br/public:avm/res/storage/storage-account:0.33.0' = {
   name: 'sa-deployment-dev-42'
   scope: resourceGroup(parResourceGroupNameDev)
   params: {
-    name: 'devskycraftswcsa'
+    name: parDevSaName
     location: parLocation
     tags: varTagsDev
     skuName: 'Standard_LRS'

@@ -29,6 +29,9 @@
     and client-side operations that the Bicep path does not create (the guide's Paths section).
 .PARAMETER Environment
     The environment to validate (prod, dev, platform). Default: prod.
+.PARAMETER StorageAccountName
+    The storage account. Default: '<Environment>skycraftswcsa'. Pass the name given to
+    Deploy-Bicep.ps1.
 .EXAMPLE
     .\Test-Lab.ps1 -Environment prod
 .NOTES
@@ -46,7 +49,12 @@
 param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('prod', 'dev', 'platform')]
-    [string]$Environment = 'prod'
+    [string]$Environment = 'prod',
+
+    # The default reads $Environment, so it must be declared first.
+    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$StorageAccountName = "${Environment}skycraftswcsa"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -55,7 +63,6 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 $script:failCount = 0
 
 $resourceGroupName  = "$Environment-skycraft-swc-rg"
-$storageAccountName = "${Environment}skycraftswcsa"
 $expectedSku        = ($Environment -eq 'prod' -or $Environment -eq 'platform') ? 'Standard_GRS' : 'Standard_LRS'
 
 # The two shares the lab creates, with their quota in GiB. Both use the Hot access tier.

@@ -3,7 +3,7 @@ SUMMARY: Lab 4.4 - Storage Security - Orchestrator
 DESCRIPTION: Locks a SkyCraft storage account down via the Azure Verified Module for storage accounts - firewall default action Deny, a virtual network rule for the lab subnet, an optional client IP rule, the dev-assets container used for SAS and RBAC testing, and an optional Storage Blob Data Contributor assignment on the account
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment prod
 AUTHOR/S: Marcin Biszczanik
-VERSION: 2.1.0
+VERSION: 2.2.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -22,6 +22,12 @@ param parLocation string = 'swedencentral'
 @description('Target environment')
 @allowed(['dev', 'prod'])
 param parEnvironment string = 'prod'
+
+// Storage account names are unique across Azure: use the name Lab 4.1 deployed (#438).
+@description('Storage account name: 3-24 lowercase letters and digits')
+@minLength(3)
+@maxLength(24)
+param parStorageAccountName string = '${parEnvironment}skycraftswcsa'
 
 @description('Resource owner tag value')
 @minLength(1)
@@ -120,7 +126,7 @@ module modStorage 'br/public:avm/res/storage/storage-account:0.33.0' = {
   name: 'sa-deployment-security'
   scope: resourceGroup(varResourceGroupName)
   params: {
-    name: '${parEnvironment}skycraftswcsa'
+    name: parStorageAccountName
     location: parLocation
     tags: varCommonTags
     skuName: varSkuNames[parEnvironment]

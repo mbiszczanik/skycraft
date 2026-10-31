@@ -1665,7 +1665,7 @@ function Get-LabCycleUnknownUniqueName {
     )
 
     if (-not $UniqueNames) { return }
-    $known = @($Declared | Where-Object { $_ } | ForEach-Object { $_.Parameter })
+    $known = @($Declared | Where-Object { $_ } | ForEach-Object { $_.Parameter } | Select-Object -Unique)
     foreach ($key in @($UniqueNames.Keys | Sort-Object)) {
         if ($key -notin $known) { "'$key' is not a unique name the manifest declares (known: $($known -join ', '))" }
         elseif ([string]::IsNullOrWhiteSpace([string]$UniqueNames[$key])) { "'$key' has no value" }
@@ -1681,8 +1681,16 @@ function Get-LabCycleUniqueNameArgument {
         The same values go to the lab's Deploy, Test and teardown invocations, so all three act on
         the resource the deploy created (#438).
 
+        An entry may carry two optional fields. ScriptParameter is the lab scripts' own name for the
+        parameter, when it differs from the key the operator passes: Labs 4.3 and 4.4 take one
+        -StorageAccountName for whichever environment they target, while the key says which account
+        it is (ProdSaName). Steps lists the scripts that take the parameter (Deploy, PostDeploy, Test,
+        Remove); without it the value goes to Deploy, Test and Remove. A script that does not use
+        the name is left out, so it does not need a parameter it would ignore.
+
     .PARAMETER Declared
-        The manifest's UniqueNames entries (Parameter, Lab, Default).
+        The manifest's UniqueNames entries (Parameter, Lab, Default, and optionally ScriptParameter
+        and Steps).
 
     .PARAMETER UniqueNames
         The names the operator passed, parameter name to value.
@@ -1690,8 +1698,12 @@ function Get-LabCycleUniqueNameArgument {
     .PARAMETER Lab
         The lab path, as the manifest's phases and teardowns name it.
 
+    .PARAMETER Step
+        Deploy, PostDeploy, Test or Remove: return only the values that step's script takes. Without
+        it, every value of the lab.
+
     .OUTPUTS
-        [hashtable] Parameter name to value; empty when the lab has none.
+        [hashtable] Script parameter name to value; empty when the lab has none.
 
     .NOTES
         Project: SkyCraft
@@ -1702,13 +1714,18 @@ function Get-LabCycleUniqueNameArgument {
     param(
         [Parameter()] [AllowNull()] [object[]]$Declared,
         [Parameter()] [AllowNull()] [hashtable]$UniqueNames,
-        [Parameter(Mandatory)] [string]$Lab
+        [Parameter(Mandatory)] [string]$Lab,
+        [Parameter()] [ValidateSet('Deploy', 'PostDeploy', 'Test', 'Remove')] [string]$Step
     )
 
     $arguments = @{}
     if (-not $UniqueNames) { return $arguments }
     foreach ($entry in @($Declared | Where-Object { $_ -and $_.Lab -eq $Lab })) {
-        if ($UniqueNames.ContainsKey($entry.Parameter)) { $arguments[$entry.Parameter] = [string]$UniqueNames[$entry.Parameter] }
+        if (-not $UniqueNames.ContainsKey($entry.Parameter)) { continue }
+        $steps = if ($entry.Steps) { @($entry.Steps) } else { @('Deploy', 'Test', 'Remove') }
+        if ($Step -and $Step -notin $steps) { continue }
+        $scriptParameter = if ($entry.ScriptParameter) { $entry.ScriptParameter } else { $entry.Parameter }
+        $arguments[$scriptParameter] = [string]$UniqueNames[$entry.Parameter]
     }
     $arguments
 }

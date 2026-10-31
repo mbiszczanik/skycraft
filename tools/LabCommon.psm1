@@ -928,6 +928,7 @@ $script:LabGlobalNameKinds = @{
     KeyVault          = @{ Label = 'Key vault'; Rule = '3-24 letters, digits and hyphens'; Provider = 'Microsoft.KeyVault'; Type = 'Microsoft.KeyVault/vaults'; ApiVersion = '2023-07-01' }
     ContainerRegistry = @{ Label = 'Container registry'; Rule = '5-50 letters and digits, no hyphens'; Provider = 'Microsoft.ContainerRegistry'; Type = 'Microsoft.ContainerRegistry/registries'; ApiVersion = '2023-07-01' }
     WebApp            = @{ Label = 'Web app'; Rule = '2-60 letters, digits and hyphens'; Provider = 'Microsoft.Web'; Type = 'Site'; ApiVersion = '2024-04-01' }
+    StorageAccount    = @{ Label = 'Storage account'; Rule = '3-24 lowercase letters and digits'; Provider = 'Microsoft.Storage'; Type = 'Microsoft.Storage/storageAccounts'; ApiVersion = '2023-05-01' }
 }
 
 function Get-LabNameUnavailableReason {
@@ -945,7 +946,7 @@ function Get-LabNameUnavailableReason {
         (a secure unique default hostname), which is the check the Portal's create form runs.
 
     .PARAMETER Kind
-        KeyVault, ContainerRegistry or WebApp.
+        KeyVault, ContainerRegistry, WebApp or StorageAccount.
 
     .PARAMETER Name
         The name to check.
@@ -966,7 +967,7 @@ function Get-LabNameUnavailableReason {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('KeyVault', 'ContainerRegistry', 'WebApp')]
+        [ValidateSet('KeyVault', 'ContainerRegistry', 'WebApp', 'StorageAccount')]
         [string]$Kind,
 
         [Parameter(Mandatory)]
@@ -1011,7 +1012,7 @@ function Test-LabGlobalName {
         not checked. If the check cannot run, the deploy stops too.
 
     .PARAMETER Kind
-        KeyVault, ContainerRegistry or WebApp.
+        KeyVault, ContainerRegistry, WebApp or StorageAccount.
 
     .PARAMETER Name
         The name the deploy will use.
@@ -1036,7 +1037,7 @@ function Test-LabGlobalName {
     [OutputType([bool])]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('KeyVault', 'ContainerRegistry', 'WebApp')]
+        [ValidateSet('KeyVault', 'ContainerRegistry', 'WebApp', 'StorageAccount')]
         [string]$Kind,
 
         [Parameter(Mandatory)]

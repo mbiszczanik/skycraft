@@ -26,6 +26,10 @@
     Note: Azure Site Recovery replication status must be verified manually
     in the Azure Portal (the ASR replication flow is portal-only per Step 5.2.6).
 
+.PARAMETER ProdSaName
+    Production storage account name. Default: prodskycraftswcsa. Pass the name given to Lab 4.1's
+    Deploy-Bicep.ps1.
+
 .EXAMPLE
     .\Test-Lab.ps1
 
@@ -40,7 +44,11 @@
 #Requires -Modules Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Storage, Az.Compute
 
 [CmdletBinding()]
-param()
+param(
+    [Parameter()]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$ProdSaName = 'prodskycraftswcsa'
+)
 
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
@@ -52,7 +60,7 @@ $rsvName        = 'platform-skycraft-swc-rsv'
 $bvName         = 'platform-skycraft-swc-bv'
 $vmName         = 'dev-skycraft-swc-auth-vm'
 $vmRg           = 'dev-skycraft-swc-rg'
-$storageAccount = 'prodskycraftswcsa'
+$storageAccount = $ProdSaName
 # Azure Backup names the snapshot group <prefix><n><suffix>; main.bicep creates n = 1.
 $snapshotRgPrefix = 'platform-skycraft-swc-rpc'
 $snapshotRgSuffix = '-rg'

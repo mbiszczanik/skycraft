@@ -434,10 +434,31 @@
     # Invoke-LabCycle.ps1 -UniqueNames. The value goes to the lab's Deploy, Test and teardown
     # invocations, and replaces Default in the soft-delete guard that names it. The cycle deploys
     # dev only, so each lab listed here has one teardown invocation (a manifest test pins that).
+    #
+    # Parameter is the key the operator passes. Two optional fields cover the labs that do not take
+    # it under that name or in every script:
+    #   ScriptParameter  the scripts' own name for it. Labs 4.3 and 4.4 take one -StorageAccountName
+    #                    for whichever environment they target, and the cycle runs them on prod.
+    #   Steps            the scripts that take it (Deploy, PostDeploy, Test, Remove); the default is
+    #                    Deploy, Test and Remove. Lab 5.2 creates no account and 5.3 only reads one.
+    #
+    # The three storage accounts are created by Lab 4.1 and used by the rest of Modules 4 and 5, so
+    # PlatformSaName, DevSaName and ProdSaName each appear on every lab that uses the account. Lab
+    # 5.1 finds the platform account as the only storage account in the platform resource group and
+    # needs no name.
     UniqueNames = @(
-        @{ Parameter = 'KeyVaultName'; Lab = 'module-3-compute/3.2-virtual-machines'; Default = 'dev-skycraft-swc-kv' }
-        @{ Parameter = 'AcrName';      Lab = 'module-3-compute/3.3-containers';       Default = 'devskycraftswcacr01' }
-        @{ Parameter = 'AppName';      Lab = 'module-3-compute/3.4-app-service';      Default = 'dev-skycraft-swc-app01' }
+        @{ Parameter = 'KeyVaultName';   Lab = 'module-3-compute/3.2-virtual-machines'; Default = 'dev-skycraft-swc-kv' }
+        @{ Parameter = 'AcrName';        Lab = 'module-3-compute/3.3-containers';       Default = 'devskycraftswcacr01' }
+        @{ Parameter = 'AppName';        Lab = 'module-3-compute/3.4-app-service';      Default = 'dev-skycraft-swc-app01' }
+        @{ Parameter = 'PlatformSaName'; Lab = 'module-4-storage/4.1-storage-accounts'; Default = 'platformskycraftswcsa' }
+        @{ Parameter = 'DevSaName';      Lab = 'module-4-storage/4.1-storage-accounts'; Default = 'devskycraftswcsa' }
+        @{ Parameter = 'ProdSaName';     Lab = 'module-4-storage/4.1-storage-accounts'; Default = 'prodskycraftswcsa' }
+        @{ Parameter = 'DevSaName';      Lab = 'module-4-storage/4.2-blob-storage';     Default = 'devskycraftswcsa' }
+        @{ Parameter = 'ProdSaName';     Lab = 'module-4-storage/4.2-blob-storage';     Default = 'prodskycraftswcsa' }
+        @{ Parameter = 'ProdSaName';     Lab = 'module-4-storage/4.3-azure-files';      Default = 'prodskycraftswcsa'; ScriptParameter = 'StorageAccountName' }
+        @{ Parameter = 'ProdSaName';     Lab = 'module-4-storage/4.4-storage-security'; Default = 'prodskycraftswcsa'; ScriptParameter = 'StorageAccountName' }
+        @{ Parameter = 'ProdSaName';     Lab = 'module-5-monitoring-maintenance/5.2-business-continuity'; Default = 'prodskycraftswcsa'; Steps = @('PostDeploy', 'Test', 'Remove') }
+        @{ Parameter = 'PlatformSaName'; Lab = 'module-5-monitoring-maintenance/5.3-network-monitoring'; Default = 'platformskycraftswcsa'; Steps = @('Deploy') }
     )
 
     # -- Teardown -------------------------------------------------------------------------------
