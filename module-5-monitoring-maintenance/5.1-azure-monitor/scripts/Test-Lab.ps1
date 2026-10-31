@@ -121,6 +121,7 @@ $storageRg      = 'platform-skycraft-swc-rg'
 # Explicit api-versions for the raw ARM reads (#452); Sweden Central serves both.
 $dcrApiVersion         = '2023-03-11'
 $metricAlertApiVersion = '2018-03-01'
+$scheduledQueryApiVersion = '2023-12-01'
 
 $passCount = 0
 $failCount = 0
@@ -662,7 +663,11 @@ $actionGroupPattern = "/resourceGroups/$platformRg/providers/Microsoft\.Insights
 $hbAlert          = $null
 $hbAlertListError = $null
 try {
-    $hbCandidates = @(Get-AzResource -ResourceType 'Microsoft.Insights/scheduledQueryRules' -ExpandProperties -ErrorAction Stop |
+    # The rules are listed without -ExpandProperties and read one by one by id at an explicit
+    # api-version (#452).
+    $hbCandidates = @(Get-AzResource -ResourceType 'Microsoft.Insights/scheduledQueryRules' -ErrorAction Stop |
+        Where-Object { $_ } |
+        ForEach-Object { Get-LabArmResource -ResourceId $_.ResourceId -ApiVersion $scheduledQueryApiVersion -ExpandProperties } |
         Where-Object { $_ } | Where-Object {
             $watchesLab = @($_.Properties.scopes | Where-Object { "$_" -match $vmScope -or ($wsCache -and "$_" -eq $wsCache.ResourceId) }).Count -gt 0
             $readsHeartbeat = @($_.Properties.criteria.allOf | Where-Object { "$($_.query)" -match '\bHeartbeat\b' }).Count -gt 0

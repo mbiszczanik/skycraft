@@ -89,7 +89,7 @@ Get-AzMetricAlertRuleV2 -ResourceGroupName platform-skycraft-swc-rg -Name skycra
 ```powershell
 # The Heartbeat rule, its scope, condition and action group
 $rule = Get-AzResource -ResourceGroupName platform-skycraft-swc-rg -ResourceType Microsoft.Insights/scheduledQueryRules `
-    -Name skycraft-heartbeat-alert -ExpandProperties
+    -Name skycraft-heartbeat-alert -ApiVersion 2023-12-01 -ExpandProperties
 $rule.Properties.criteria.allOf | Select-Object query, timeAggregation, operator, threshold
 $rule.Properties | Select-Object enabled, severity, windowSize, @{N='Scope';E={$_.scopes -join ', '}},
     @{N='ActionGroups';E={($_.actions.actionGroups | ForEach-Object { ($_ -split '/')[-1] }) -join ', '}}

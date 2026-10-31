@@ -257,6 +257,9 @@ function Get-AzResource {
     if ($ResourceType -eq 'Microsoft.Insights/scheduledQueryRules') {
         return @(Get-StubLogAlerts)
     }
+    if ($ResourceId -like '*/scheduledQueryRules/*') {
+        return @(Get-StubLogAlerts | Where-Object { $_.ResourceId -eq $ResourceId })
+    }
     if ($ResourceType -eq 'Microsoft.Compute/virtualMachines') {
         if ($env:SKYCRAFT_STUB_DCR -in 'portal', 'nonepartial' -and $ResourceGroupName -eq 'prod-skycraft-swc-rg') {
             Write-Error "stub lookup failure: Resource group '$ResourceGroupName' could not be read."
