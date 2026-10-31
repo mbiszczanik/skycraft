@@ -171,7 +171,7 @@ $dcrName         = 'skycraft-vm-dcr'
 $actionGroupName = 'skycraft-ops-ag'
 $alertRuleName   = 'skycraft-cpu-alert'
 $heartbeatAlertName = 'skycraft-heartbeat-alert'
-$scheduledQueryApiVersion = '2023-03-15-preview'
+$scheduledQueryApiVersion = '2023-12-01'
 $diagSettingName = 'skycraft-storage-diag'
 $devRgName       = "$DevEnvironment-skycraft-swc-rg"
 # The scope Test-Lab.ps1 reads as a SkyCraft VM, in any group.
