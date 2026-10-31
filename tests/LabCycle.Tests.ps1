@@ -565,6 +565,12 @@ Describe 'Manifest - unique names (#438)' {
         $m53.Steps | Should -Be @('Deploy')
     }
 
+    It 'passes the vault name to Lab 5.2 as well as Lab 3.2 (#366)' {
+        $row = @($script:Manifest.UniqueNames | Where-Object { $_.Parameter -eq 'KeyVaultName' -and $_.Lab -like '*5.2-business-continuity' })
+        $row.Count | Should -Be 1
+        $row[0].Default | Should -Be 'dev-skycraft-swc-kv'
+    }
+
     It 'gives each lab it names a live phase and exactly one teardown invocation' {
         # The value replaces the name in every invocation of the lab, so a second invocation for
         # another environment would get the dev name.
@@ -577,7 +583,7 @@ Describe 'Manifest - unique names (#438)' {
 
     It 'names, as the vault default, the name lab 3.2''s dev soft-delete guard checks' {
         # Otherwise the guard keeps checking the default while the run deploys another name.
-        $vault = $script:Manifest.UniqueNames | Where-Object { $_.Parameter -eq 'KeyVaultName' }
+        $vault = $script:Manifest.UniqueNames | Where-Object { $_.Parameter -eq 'KeyVaultName' -and $_.Lab -like '*3.2-virtual-machines' }
         @($script:Manifest.SoftDeleteGuards | Where-Object { $_.Lab -eq $vault.Lab -and $_.Name -eq $vault.Default }).Count | Should -Be 1
     }
 }
