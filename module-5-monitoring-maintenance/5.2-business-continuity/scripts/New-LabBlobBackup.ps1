@@ -1,14 +1,21 @@
 ﻿<#
 .SYNOPSIS
-    Configures Azure Blob Backup protection on the production storage account.
+    Creates the blob backup policy and protects the production storage account with it.
 
 .DESCRIPTION
-    Post-deployment script for Lab 5.2. After running Deploy-Bicep.ps1 this script:
-    1. Assigns required RBAC roles to the Backup Vault managed identity on
+    Lab 5.2 script, run after the Backup Vault exists (Step 5.2.4 or Deploy-Bicep.ps1):
+    1. Creates SkyCraft-Blob-Policy in platform-skycraft-swc-bv when it is missing: operational
+       backup only, 30 days in the OperationalStore, no vaulted backup rule, so the policy has
+       no Azure Backup charge. Every retention value is set here; nothing is taken from the
+       defaults of Get-AzDataProtectionPolicyTemplate, which now ships a vaulted weekly rule
+       with 7 days in the VaultStore (issues #306, #366). A policy of that name that has a
+       vaulted rule (one created in the Portal) stops the run: a policy cannot be updated in
+       place.
+    2. Assigns required RBAC roles to the Backup Vault managed identity on
        prodskycraftswcsa:
          - Storage Blob Data Owner
          - Storage Account Backup Contributor
-    2. Creates the blob backup protection instance (backup instance) connecting
+    3. Creates the blob backup protection instance (backup instance) connecting
        prodskycraftswcsa to the SkyCraft-Blob-Policy backup policy.
 
     Requires Owner or User Access Administrator role at storage account scope
@@ -20,9 +27,16 @@
 .PARAMETER ProdSaName
     Production storage account name. Default: prodskycraftswcsa. Pass the name given to Lab 4.1's
     Deploy-Bicep.ps1.
+.PARAMETER PolicyOnly
+    Create (or check) SkyCraft-Blob-Policy and stop: Step 5.2.5 a. The roles and the backup
+    instance are then done in the Portal (Step 5.2.5 b and c), or by running the script again
+    without the switch.
 
 .PARAMETER WhatIf
     Display planned actions without making changes.
+
+.EXAMPLE
+    .\New-LabBlobBackup.ps1 -PolicyOnly
 
 .EXAMPLE
     .\New-LabBlobBackup.ps1
@@ -33,8 +47,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.0.0
-    Date: 2026-04-06
+    Version: 1.1.0
+    Date: 2026-10-28
 #>
 
 #Requires -Version 7.0
@@ -45,6 +59,7 @@ param(
     [Parameter()]
     [ValidatePattern('^[a-z0-9]{3,24}$')]
     [string]$ProdSaName = 'prodskycraftswcsa',
+    [switch]$PolicyOnly,
 
     [Parameter()]
     [switch]$WhatIf
@@ -61,13 +76,38 @@ $bvName         = 'platform-skycraft-swc-bv'
 $storageAccount = $ProdSaName
 $policyName     = 'SkyCraft-Blob-Policy'
 $location       = 'swedencentral'
+$retentionDays  = 30
+
+# What is wrong with a blob policy's ARM body for this lab: a vaulted rule, or no 30-day
+# OperationalStore retention. Empty when it is the lab's policy.
+function Get-LabBlobPolicyProblem {
+    param([object]$Properties)
+
+    $problems = @()
+    $rules = @($Properties.policyRules | Where-Object { $_ })
+    foreach ($rule in $rules) {
+        if ($rule.objectType -eq 'AzureBackupRule') {
+            $problems += "vaulted backup rule '$($rule.name)' (data store $($rule.dataStore.dataStoreType))"
+        }
+        foreach ($lc in @($rule.lifecycles | Where-Object { $_ })) {
+            if ("$($lc.sourceDataStore.dataStoreType)" -ne 'OperationalStore') {
+                $problems += "retention '$($rule.name)' in $($lc.sourceDataStore.dataStoreType)"
+            }
+        }
+    }
+    $operational = @($rules | ForEach-Object { @($_.lifecycles) } | Where-Object {
+            $_ -and "$($_.sourceDataStore.dataStoreType)" -eq 'OperationalStore' -and "$($_.deleteAfter.duration)" -eq "P$($retentionDays)D"
+        })
+    if ($operational.Count -eq 0) { $problems += "no ${retentionDays}-day OperationalStore retention" }
+    return $problems
+}
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Lab 5.2 - Configure Blob Backup" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
-# ── [1/4] Validate prerequisites ──────────────────────────────────────────
-Write-Host "[1/4] Validating prerequisites..." -ForegroundColor Yellow
+# ── [1/5] Validate prerequisites ──────────────────────────────────────────
+Write-Host "[1/5] Validating prerequisites..." -ForegroundColor Yellow
 
 $context = Get-AzContext
 if (-not $context) {
@@ -76,16 +116,77 @@ if (-not $context) {
 }
 Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
 
-# ── [2/4] Resolve resource IDs ────────────────────────────────────────────
-Write-Host "`n[2/4] Resolving resource IDs..." -ForegroundColor Yellow
-
 $bv = Get-AzDataProtectionBackupVault -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction SilentlyContinue
 if (-not $bv) {
-    Write-Host "  [ERROR] Backup Vault '$bvName' not found. Run Deploy-Bicep.ps1 first." -ForegroundColor Red
+    Write-Host "  [ERROR] Backup Vault '$bvName' not found. Create it first (Step 5.2.4, or Deploy-Bicep.ps1)." -ForegroundColor Red
     Exit-Lab -FailureCount 1
 }
 $bvPrincipalId = $bv.IdentityPrincipalId
 Write-Host "  ✓ Backup Vault found: $bvName (Principal: $bvPrincipalId)" -ForegroundColor Green
+
+# ── [2/5] Blob backup policy ──────────────────────────────────────────────
+Write-Host "`n[2/5] Ensuring blob backup policy '$policyName' (operational, $retentionDays days)..." -ForegroundColor Yellow
+
+$policy = Get-AzDataProtectionBackupPolicy -ResourceGroupName $platformRg -VaultName $bvName -Name $policyName -ErrorAction SilentlyContinue
+if ($policy) {
+    # Raw ARM body: the typed object's property names vary across Az.DataProtection versions.
+    $policyArm = Get-AzResource -ResourceId "$($bv.Id)/backupPolicies/$policyName" -ApiVersion '2023-01-01' -ExpandProperties -ErrorAction SilentlyContinue
+    if (-not $policyArm) {
+        Write-Host "  [ERROR] Could not read the rules of '$policyName'." -ForegroundColor Red
+        Exit-Lab -FailureCount 1
+    }
+    $problems = @(Get-LabBlobPolicyProblem -Properties $policyArm.Properties)
+    if ($problems.Count -gt 0) {
+        Write-Host "  [ERROR] '$policyName' is not the lab's policy: $($problems -join '; ')." -ForegroundColor Red
+        Write-Host "    A policy created in the Portal always has a vaulted rule, which is billed." -ForegroundColor Gray
+        Write-Host "    Azure Backup cannot update a policy in place (UserErrorBMSUpdatePolicyNotSupported):" -ForegroundColor Gray
+        Write-Host "    delete it (Lab 1.3's lock on $platformRg blocks the delete, see Troubleshooting) and run this script again." -ForegroundColor Gray
+        Exit-Lab -FailureCount 1
+    }
+    Write-Host "  ✓ Policy found: $policyName (operational, $retentionDays days, no vaulted rule)" -ForegroundColor Green
+} elseif ($WhatIf) {
+    Write-Host "  [WhatIf] Would create $policyName (OperationalStore $retentionDays days, no vaulted rule)" -ForegroundColor Cyan
+} else {
+    try {
+        # Every rule is replaced: the template only supplies the object types. One retention rule,
+        # 'Default', OperationalStore, P30D; no AzureBackupRule, so nothing is copied to the vault.
+        # The lifecycle is set directly because Edit-AzDataProtectionPolicyRetentionRuleClientObject
+        # 3.x reserves 'Default' for the VaultStore.
+        $blobPolicy = Get-AzDataProtectionPolicyTemplate -DatasourceType AzureBlob
+        $retentionRule = @($blobPolicy.PolicyRule | Where-Object { $_.ObjectType -eq 'AzureRetentionRule' }) | Select-Object -First 1
+        if (-not $retentionRule) { throw 'the AzureBlob policy template has no retention rule to build on' }
+        $retentionRule.Name = 'Default'
+        $retentionRule.IsDefault = $true
+        $retentionRule.Lifecycle = @(
+            New-AzDataProtectionRetentionLifeCycleClientObject `
+                -SourceDataStore OperationalStore `
+                -SourceRetentionDurationType Days `
+                -SourceRetentionDurationCount $retentionDays
+        )
+        $blobPolicy.PolicyRule = @($retentionRule)
+
+        $policy = New-AzDataProtectionBackupPolicy `
+            -ResourceGroupName $platformRg `
+            -VaultName $bvName `
+            -Name $policyName `
+            -Policy $blobPolicy `
+            -ErrorAction Stop
+        Write-Host "  ✓ Policy created: $policyName (OperationalStore $retentionDays days, no vaulted rule, no Azure Backup charge)" -ForegroundColor Green
+    } catch {
+        Write-Host "  [ERROR] Failed to create '$policyName': $_" -ForegroundColor Red
+        Exit-Lab -FailureCount 1
+    }
+}
+
+if ($PolicyOnly) {
+    Write-Host "`n  -PolicyOnly: roles and backup instance skipped (Step 5.2.5 b and c)." -ForegroundColor Gray
+    Exit-Lab -FailureCount 0
+}
+
+$policyId = $policy.Id
+
+# ── [3/5] Resolve the storage account ─────────────────────────────────────
+Write-Host "`n[3/5] Resolving the storage account..." -ForegroundColor Yellow
 
 $storage = Get-AzStorageAccount -ResourceGroupName $prodRg -Name $storageAccount -ErrorAction SilentlyContinue
 if (-not $storage) {
@@ -95,16 +196,8 @@ if (-not $storage) {
 $storageId = $storage.Id
 Write-Host "  ✓ Storage account found: $storageAccount" -ForegroundColor Green
 
-$policy = Get-AzDataProtectionBackupPolicy -ResourceGroupName $platformRg -VaultName $bvName -Name $policyName -ErrorAction SilentlyContinue
-if (-not $policy) {
-    Write-Host "  [ERROR] Backup policy '$policyName' not found. Run Deploy-Bicep.ps1 first." -ForegroundColor Red
-    Exit-Lab -FailureCount 1
-}
-$policyId = $policy.Id
-Write-Host "  ✓ Backup policy found: $policyName" -ForegroundColor Green
-
-# ── [3/4] Assign RBAC roles ───────────────────────────────────────────────
-Write-Host "`n[3/4] Assigning RBAC roles to Backup Vault managed identity..." -ForegroundColor Yellow
+# ── [4/5] Assign RBAC roles ───────────────────────────────────────────────
+Write-Host "`n[4/5] Assigning RBAC roles to Backup Vault managed identity..." -ForegroundColor Yellow
 
 $requiredRoles = @(
     @{ Name = 'Storage Blob Data Owner';            RoleId = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b' },
@@ -159,8 +252,8 @@ if (-not $WhatIf) {
     Start-Sleep -Seconds 360
 }
 
-# ── [4/4] Create blob backup instance ────────────────────────────────────
-Write-Host "`n[4/4] Configuring blob backup protection instance..." -ForegroundColor Yellow
+# ── [5/5] Create blob backup instance ────────────────────────────────────
+Write-Host "`n[5/5] Configuring blob backup protection instance..." -ForegroundColor Yellow
 
 $existingInstances = Get-AzDataProtectionBackupInstance -ResourceGroupName $platformRg -VaultName $bvName -ErrorAction SilentlyContinue
 $existingInstance = $existingInstances | Where-Object {
@@ -206,3 +299,4 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 Write-Host "  Next Steps:" -ForegroundColor Cyan
 Write-Host "    1. Run .\Test-Lab.ps1 to validate full BCDR deployment" -ForegroundColor Gray
 Write-Host "    2. Configure Azure Site Recovery via Azure Portal (Step 5.2.6)" -ForegroundColor Gray
+Exit-Lab -FailureCount 0

@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-    Pester 5 tests: the Lab 5.2 validator's Backup vault soft delete check and what it says.
+    Pester 5 tests: the Lab 5.2 validator's Backup vault soft delete, Key Vault role, blob policy
+    and alert processing rule checks, and what they say.
 
 .DESCRIPTION
     Regression cover for issue #355 (decision on #366). Test-Lab.ps1 requires the Backup vault's
@@ -16,11 +17,17 @@
          the vault has to be recreated with Az PowerShell or the Bicep, naming both.
       3. A vault with soft delete On fails it, and the line names the state and the command that
          turns it off.
-      4. When ARM refuses the raw reads (AuthorizationFailed), the RSV tag and soft delete, Backup
+      4. The Backup Management Service app's Key Vault Administrator role on dev-skycraft-swc-kv
+         (issue #368) passes when held, fails when missing, and fails with the Graph sign-in hint
+         when the app cannot be looked up.
+      5. The blob policy passes without a vaulted rule and fails with one (issue #306).
+      6. The alert processing rule passes as Apply action group with skycraft-ops-ag on Sev0 and
+         the vault, fails as Suppress notifications, and fails when missing (issue #366).
+      7. When ARM refuses the raw reads (AuthorizationFailed), the RSV tag and soft delete, Backup
          vault and blob policy checks fail and print that error, and the script exits 1 (#452).
 
-    Only the Backup vault, and in run 4 the Recovery Services vault, is modelled; every other
-    lookup returns nothing, so the other checks fail and are not asserted here. No subscription is needed, and none is used:
+    Only these resources are modelled; every other lookup returns nothing, so the other checks
+    fail and are not asserted here. No subscription is needed, and none is used:
     tests/Support/LabScriptStub.psm1 (issue #112) imports the real modules first, the stub last,
     and aborts the child with exit 99 unless every stubbed command resolves to the stub.
 
@@ -30,7 +37,7 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Issue: #355
+    Issue: #355, #366, #368, #306
 #>
 
 #Requires -Version 7.0
@@ -62,14 +69,28 @@ BeforeAll {
         'Get-AzDataProtectionBackupInstance'
         'Get-AzStorageAccount'
         'Get-AzDiagnosticSetting'
+        'Get-AzADServicePrincipal'
+        'Invoke-AzRestMethod'
     )
 
     #   SKYCRAFT_STUB_BVSOFTDELETE   the Backup vault's softDeleteSettings.state: 'Off' (Az
     #                                PowerShell or Bicep), 'AlwaysOn' (the Portal), or 'On'
     #   SKYCRAFT_STUB_ARM            'denied': the Recovery Services vault exists and every
     #                                Get-AzResource read throws AuthorizationFailed
+    #   SKYCRAFT_STUB_KVNAME         the key vault's name, when Lab 3.2 created it under another one
+    #   SKYCRAFT_STUB_KVROLE         'held': the app holds Key Vault Administrator on the vault;
+    #                                'missing'; 'graphfail': the app lookup throws
+    #   SKYCRAFT_STUB_BLOBPOLICY     'operational' (the script's), 'vaulted' (the Portal's), 'none'
+    #   SKYCRAFT_STUB_APR            'apply', 'suppress' (the Portal's default Rule type), 'none'
     $script:StubBody = @'
-$script:BvId = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.DataProtection/backupVaults/platform-skycraft-swc-bv'
+$script:Sub = '/subscriptions/00000000-0000-0000-0000-000000000000'
+$script:BvId = "$script:Sub/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.DataProtection/backupVaults/platform-skycraft-swc-bv"
+$script:RsvId = "$script:Sub/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.RecoveryServices/vaults/platform-skycraft-swc-rsv"
+$script:KvName = if ($env:SKYCRAFT_STUB_KVNAME) { $env:SKYCRAFT_STUB_KVNAME } else { 'dev-skycraft-swc-kv' }
+$script:KvId = "$script:Sub/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.KeyVault/vaults/$script:KvName"
+$script:AprId = "$script:Sub/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.AlertsManagement/actionRules/skycraft-backup-critical-apr"
+$script:AgId = "$script:Sub/resourceGroups/platform-skycraft-swc-rg/providers/microsoft.insights/actionGroups/skycraft-ops-ag"
+$script:BackupSp = '22222222-2222-2222-2222-222222222222'
 
 function Get-AzContext {
     [CmdletBinding()]
@@ -86,11 +107,87 @@ function Get-AzDataProtectionBackupVault {
     [pscustomobject]@{ Name = $VaultName; Id = $script:BvId; Location = 'swedencentral' }
 }
 
+function Get-AzRecoveryServicesVault {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
+    [pscustomobject]@{ Name = 'platform-skycraft-swc-rsv'; ID = $script:RsvId; Location = 'swedencentral' }
+}
+
+function Get-AzVM {
+    [CmdletBinding()]
+    param([string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
+    [pscustomobject]@{ Name = $Name }
+}
+
+function Get-AzADServicePrincipal {
+    [CmdletBinding()]
+    param([string]$ApplicationId, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($env:SKYCRAFT_STUB_KVROLE -eq 'graphfail') {
+        throw 'Authentication failed against resource MicrosoftGraphEndpointResourceId. User interaction is required.'
+    }
+    if ($ApplicationId -ne '262044b1-e2ce-469f-a196-69ab7ada62d3') { return }
+    [pscustomobject]@{ Id = $script:BackupSp; AppId = $ApplicationId; DisplayName = 'Backup Management Service' }
+}
+
+function Get-StubRoleAssignment {
+    [CmdletBinding()]
+    param([string]$Scope, [string]$PrincipalId)
+    if ($env:SKYCRAFT_STUB_KVROLE -ne 'held') { return }
+    [pscustomobject]@{ Name = 'kv-admin'; Scope = $script:KvId; PrincipalId = $script:BackupSp; RoleDefinitionId = '00482a5a-887f-4fb3-b363-3b7fe8e74483'; PrincipalType = 'ServicePrincipal' }
+}
+
 function Get-AzResource {
     [CmdletBinding()]
     param([string]$ResourceId, [switch]$ExpandProperties, [string]$ApiVersion, [Parameter(ValueFromRemainingArguments)]$Rest)
     if ($env:SKYCRAFT_STUB_ARM -eq 'denied') {
         throw "AuthorizationFailed: The client does not have authorization to perform action 'read' over scope '$ResourceId'."
+    }
+    if ($ResourceId -eq $script:KvId) { return [pscustomobject]@{ ResourceId = $script:KvId } }
+    if ($ResourceId -eq "$script:BvId/backupPolicies/SkyCraft-Blob-Policy") {
+        $operational = [pscustomobject]@{
+            name = 'Default'; objectType = 'AzureRetentionRule'; isDefault = $true
+            lifecycles = @([pscustomobject]@{
+                    deleteAfter     = [pscustomobject]@{ duration = 'P30D'; objectType = 'AbsoluteDeleteOption' }
+                    sourceDataStore = [pscustomobject]@{ dataStoreType = 'OperationalStore'; objectType = 'DataStoreInfoBase' }
+                })
+        }
+        switch ($env:SKYCRAFT_STUB_BLOBPOLICY) {
+            'operational' {
+                return [pscustomobject]@{ Properties = [pscustomobject]@{ datasourceTypes = @('Microsoft.Storage/storageAccounts/blobServices'); policyRules = @($operational) } }
+            }
+            'vaulted' {
+                $rules = @(
+                    [pscustomobject]@{ name = 'BackupDaily'; objectType = 'AzureBackupRule'; dataStore = [pscustomobject]@{ dataStoreType = 'VaultStore' } }
+                    [pscustomobject]@{
+                        name = 'Default'; objectType = 'AzureRetentionRule'; isDefault = $true
+                        lifecycles = @([pscustomobject]@{
+                                deleteAfter     = [pscustomobject]@{ duration = 'P90D' }
+                                sourceDataStore = [pscustomobject]@{ dataStoreType = 'VaultStore' }
+                            })
+                    }
+                    $operational
+                )
+                return [pscustomobject]@{ Properties = [pscustomobject]@{ datasourceTypes = @('Microsoft.Storage/storageAccounts/blobServices'); policyRules = $rules } }
+            }
+        }
+        return
+    }
+    if ($ResourceId -eq $script:AprId) {
+        $action = switch ($env:SKYCRAFT_STUB_APR) {
+            'apply'    { [pscustomobject]@{ actionType = 'AddActionGroups'; actionGroupIds = @($script:AgId) } }
+            'suppress' { [pscustomobject]@{ actionType = 'RemoveAllActionGroups' } }
+            default    { $null }
+        }
+        if (-not $action) { return }
+        return [pscustomobject]@{
+            ResourceId = $script:AprId
+            Properties = [pscustomobject]@{
+                enabled    = $true
+                scopes     = @($script:RsvId)
+                actions    = @($action)
+                conditions = @([pscustomobject]@{ field = 'Severity'; operator = 'Equals'; values = @('Sev0') })
+            }
+        }
     }
     if ($ResourceId -ne $script:BvId) { return }
     [pscustomobject]@{
@@ -106,17 +203,6 @@ function Get-AzResource {
     }
 }
 
-function Get-AzRecoveryServicesVault {
-    [CmdletBinding()]
-    param([string]$ResourceGroupName, [string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
-    if ($env:SKYCRAFT_STUB_ARM -ne 'denied') { return }
-    [pscustomobject]@{
-        Name     = $Name
-        ID       = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/$ResourceGroupName/providers/Microsoft.RecoveryServices/vaults/$Name"
-        Location = 'swedencentral'
-    }
-}
-
 # Everything else in the lab is absent: these return nothing.
 function Get-AzRecoveryServicesBackupProperty { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzRecoveryServicesVaultProperty { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
@@ -126,7 +212,6 @@ function Get-AzRecoveryServicesBackupJob { [CmdletBinding()] param([Parameter(Va
 function Get-AzRecoveryServicesBackupJobDetail { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzResourceGroup { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
-function Get-AzVM { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzDataProtectionBackupPolicy { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzStorageAccount {
     [CmdletBinding()]
@@ -179,12 +264,24 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
             [ValidateSet('', 'denied')]
             [string]$Arm = '',
             [string]$BlobInstance = 'none',
-            [string[]]$ArgumentList = @('-ProtectionTimeoutSeconds', '60', '-ProtectionPollSeconds', '0')
+            [string[]]$ArgumentList = @('-ProtectionTimeoutSeconds', '60', '-ProtectionPollSeconds', '0'),
+            [ValidateSet('held', 'missing', 'graphfail')]
+            [string]$KeyVaultRole = 'held',
+            [ValidateSet('operational', 'vaulted', 'none')]
+            [string]$BlobPolicy = 'operational',
+            [ValidateSet('apply', 'suppress', 'none')]
+            [string]$AlertRule = 'apply',
+            [string]$KeyVaultName
         )
-        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList $ArgumentList -Environment @{
+        $arguments = @($ArgumentList) + $(if ($KeyVaultName) { '-KeyVaultName', $KeyVaultName })
+        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList $arguments -Environment @{
+            SKYCRAFT_STUB_KVNAME       = $KeyVaultName
             SKYCRAFT_STUB_BVSOFTDELETE = $SoftDelete
             SKYCRAFT_STUB_ARM          = $Arm
             SKYCRAFT_STUB_BLOBINSTANCE = $BlobInstance
+            SKYCRAFT_STUB_KVROLE       = $KeyVaultRole
+            SKYCRAFT_STUB_BLOBPOLICY   = $BlobPolicy
+            SKYCRAFT_STUB_APR          = $AlertRule
         }
         return [pscustomobject]@{
             ExitCode = $run.ExitCode
@@ -192,16 +289,25 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
             Output   = $run.Output
             # The one line under test.
             Line     = ($run.Output -split '\r?\n' | Where-Object { $_ -match 'Testing: Backup Vault soft delete' }) -join "`n"
+            Lines    = @($run.Output -split '\r?\n')
         }
     }
 
+    # The line of one check, by the start of its label.
+    function Get-CheckLine {
+        param([pscustomobject]$Run, [string]$Label)
+        ($Run.Lines | Where-Object { $_ -like "*Testing: $Label*" }) -join "`n"
+    }
+
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmRoleAssignmentStub)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
+    # One child process per run; each run also carries one state of the other checks.
     $script:ScriptedVault = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off'
-    $script:PortalVault   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'AlwaysOn'
-    $script:OnVault       = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'On'
+    $script:PortalVault   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'AlwaysOn' -KeyVaultRole 'missing' -BlobPolicy 'vaulted' -AlertRule 'suppress'
+    $script:OnVault       = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'On' -KeyVaultRole 'graphfail' -BlobPolicy 'none' -AlertRule 'none'
+    $script:UniqueVault   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -KeyVaultName 'dev-skycraft-swc-kv-ab'
     $script:Denied        = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Arm 'denied'
     $script:BlobOk        = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'ok'
     $script:BlobProtErr   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'protectionerror'
@@ -217,7 +323,7 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
         -ArgumentList @('-ProtectionTimeoutSeconds', '60', '-ProtectionPollSeconds', '1')
     $script:BlobFailedAtOnce = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'provisioningfailed' `
         -ArgumentList @('-ProtectionTimeoutSeconds', '60', '-ProtectionPollSeconds', '1')
-    $script:AllRuns       = @($script:ScriptedVault, $script:PortalVault, $script:OnVault, $script:Denied, $script:BlobOk,
+    $script:AllRuns       = @($script:ScriptedVault, $script:PortalVault, $script:OnVault, $script:UniqueVault, $script:Denied, $script:BlobOk,
         $script:BlobProtErr, $script:BlobProvFail, $script:BlobNoState, $script:BlobNone,
         $script:BlobConfiguring, $script:BlobCreating, $script:BlobStuck, $script:BlobFailedWhileConfiguring, $script:BlobFailedAtOnce)
 }
@@ -232,6 +338,14 @@ Describe 'Lab 5.2 Test-Lab.ps1 - test harness' {
         foreach ($run in $script:AllRuns) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az commands (exit $($run.ExitCode)): $($run.Output)"
         }
+    }
+
+    It 'defines each stub function once' {
+        # A second definition (a merge of two suites that both add a stub) silently replaces the first.
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($script:StubBody + (Get-LabArmRoleAssignmentStub), [ref]$null, [ref]$null)
+        $names = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name }
+        @($names | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name) | Should -BeNullOrEmpty
+        @($script:StubCommands | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name) | Should -BeNullOrEmpty
     }
 
     It 'stubs every Az command the script calls' {
@@ -333,5 +447,83 @@ Describe 'Lab 5.2 Test-Lab.ps1 - blob backup instance protection (#371)' {
         $out = $script:BlobFailedAtOnce.Output
         $out | Should -Match "provisioning state 'Failed'[^\r\n]*FAIL"
         $out | Should -Not -Match 'checking again'
+    }
+}
+
+Describe 'Lab 5.2 Test-Lab.ps1 - Key Vault role of Backup Management Service (#368)' {
+
+    It 'checks the backup of both dev VMs, and the Key Vault role once, for the encrypted auth VM' {
+        foreach ($vm in @('dev-skycraft-swc-auth-vm', 'dev-skycraft-swc-world-vm')) {
+            @($script:ScriptedVault.Lines | Where-Object { $_ -like "*Testing: VM '$vm' is registered for backup*" }).Count | Should -Be 1 -Because $vm
+            @($script:ScriptedVault.Lines | Where-Object { $_ -like "*Testing: Latest backup job for '$vm' has not failed*" }).Count | Should -Be 1 -Because $vm
+        }
+        @($script:ScriptedVault.Lines | Where-Object { $_ -like '*Testing: Backup Management Service holds Key Vault Administrator*' }).Count | Should -Be 1
+    }
+
+    It 'passes when the app holds Key Vault Administrator on the key vault' {
+        Get-CheckLine -Run $script:ScriptedVault -Label "Backup Management Service holds Key Vault Administrator on 'dev-skycraft-swc-kv'" |
+            Should -Match 'PASS$' -Because "output was:`n$($script:ScriptedVault.Output)"
+    }
+
+    It 'checks the key vault named by -KeyVaultName, the unique name of a class' {
+        Get-CheckLine -Run $script:UniqueVault -Label "Backup Management Service holds Key Vault Administrator on 'dev-skycraft-swc-kv-ab'" |
+            Should -Match 'PASS$' -Because "output was:`n$($script:UniqueVault.Output)"
+        Get-CheckLine -Run $script:ScriptedVault -Label "Backup Management Service holds Key Vault Administrator on 'dev-skycraft-swc-kv-ab'" | Should -BeNullOrEmpty
+    }
+
+    It 'fails when the role is missing and points to Step 5.2.3' {
+        $line = Get-CheckLine -Run $script:PortalVault -Label 'Backup Management Service holds Key Vault Administrator'
+        $line | Should -Match 'FAIL$' -Because "output was:`n$($script:PortalVault.Output)"
+        $line | Should -Match 'grant it before Enable backup - Step 5\.2\.3'
+    }
+
+    It 'fails, not passes, when the app cannot be looked up in Microsoft Graph, and names the sign-in' {
+        $line = Get-CheckLine -Run $script:OnVault -Label 'Backup Management Service holds Key Vault Administrator'
+        $line | Should -Match 'FAIL \(Microsoft Graph lookup of the Backup Management Service app failed' -Because "output was:`n$($script:OnVault.Output)"
+        $line | Should -Match 'Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId'
+    }
+}
+
+Describe 'Lab 5.2 Test-Lab.ps1 - blob policy without a vaulted rule (#306)' {
+
+    It 'passes the operational-only policy the script creates' {
+        Get-CheckLine -Run $script:ScriptedVault -Label 'Blob policy has no vaulted backup rule' |
+            Should -Match 'PASS$' -Because "output was:`n$($script:ScriptedVault.Output)"
+    }
+
+    It 'fails a policy with a vaulted rule and names the script that creates the right one' {
+        $line = Get-CheckLine -Run $script:PortalVault -Label 'Blob policy has no vaulted backup rule'
+        $line | Should -Match 'FAIL$' -Because "output was:`n$($script:PortalVault.Output)"
+        $line | Should -Match 'vaulted rule\(s\): BackupDaily, Default - create the policy with New-LabBlobBackup\.ps1 -PolicyOnly'
+    }
+
+    It 'fails, not passes, when there is no policy' {
+        Get-CheckLine -Run $script:OnVault -Label 'Blob policy has no vaulted backup rule' | Should -Match 'FAIL$'
+    }
+}
+
+Describe 'Lab 5.2 Test-Lab.ps1 - alert processing rule (#366)' {
+
+    It 'passes every check for Apply action group with skycraft-ops-ag on the vault''s Sev0 alerts' {
+        foreach ($label in @(
+                "Alert processing rule 'skycraft-backup-critical-apr' exists and is enabled"
+                "Alert processing rule applies to 'platform-skycraft-swc-rsv'"
+                "Alert processing rule adds action group 'skycraft-ops-ag'"
+                'Alert processing rule filters on Critical (Sev0) alerts'
+            )) {
+            Get-CheckLine -Run $script:ScriptedVault -Label $label | Should -Match 'PASS$' -Because "'$label', output was:`n$($script:ScriptedVault.Output)"
+        }
+    }
+
+    It 'fails a rule that suppresses notifications, the Portal''s default Rule type' {
+        $line = Get-CheckLine -Run $script:PortalVault -Label "Alert processing rule adds action group 'skycraft-ops-ag'"
+        $line | Should -Match 'FAIL$' -Because "output was:`n$($script:PortalVault.Output)"
+        $line | Should -Match 'the rule suppresses notifications - set Rule type to Apply action group'
+    }
+
+    It 'fails every check when the rule is missing' {
+        foreach ($label in @("Alert processing rule 'skycraft-backup-critical-apr' exists", 'Alert processing rule applies to', 'Alert processing rule adds action group', 'Alert processing rule filters on')) {
+            Get-CheckLine -Run $script:OnVault -Label $label | Should -Match 'FAIL$' -Because "'$label'"
+        }
     }
 }
