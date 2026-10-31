@@ -1,6 +1,6 @@
 /*=====================================================
 SUMMARY: Lab 5.2 - Business Continuity & Disaster Recovery - Orchestrator
-DESCRIPTION: Deploys the SkyCraft BCDR vaults into platform-skycraft-swc-rg through Azure Verified Modules - the Recovery Services Vault for VM backup (LRS, platform-enforced AlwaysON soft delete, backup-report diagnostics) and the Backup Vault for blob backup (LRS, system-assigned identity, soft delete Off) - plus the Backup Vault's diagnostic setting through a local fallback module, the tagged resource group that holds the VM's instant-restore snapshots, the alert processing rule that sends the vault's Critical alerts to Lab 5.1's action group, and the Key Vault Administrator role of the Backup Management Service app on Lab 3.2's key vault. Backup policies are created by Deploy-Bicep.ps1 and New-LabBlobBackup.ps1 (docs/bicep-standards.md section 10.4)
+DESCRIPTION: Deploys the SkyCraft BCDR vaults into platform-skycraft-swc-rg through Azure Verified Modules - the Recovery Services Vault for VM backup (LRS, platform-enforced AlwaysON soft delete, backup-report diagnostics) and the Backup Vault for blob backup (LRS, system-assigned identity, soft delete Off) - plus the Backup Vault's diagnostic setting through a local fallback module, the tagged resource group that holds the VM's instant-restore snapshots, the alert processing rule that sends the vault's Critical alerts to Lab 5.1's action group, the Key Vault Administrator role of the Backup Management Service app on Lab 3.2's key vault, and the tagged North Europe resource group with the Recovery Services vault that Azure Site Recovery replicates the world VM into (the replication itself is Enable-SiteRecovery.ps1). Backup policies are created by Deploy-Bicep.ps1 and New-LabBlobBackup.ps1 (docs/bicep-standards.md section 10.4)
 EXAMPLE: .\scripts\Deploy-Bicep.ps1
 AUTHOR/S: Marcin Biszczanik
 VERSION: 2.3.0
@@ -51,6 +51,12 @@ var varCommonTags = {
 var varPlatformRgName = 'platform-skycraft-swc-rg'
 var varRsvName = 'platform-skycraft-swc-rsv'
 var varBvName = 'platform-skycraft-swc-bv'
+// Azure Site Recovery target: one tagged group in North Europe (an allowed region of Lab 1.3) for the
+// vault, the cache storage account, the target VNet and the replica disks. Site Recovery's own default
+// groups are created without tags and Require-Environment-Tag-RG denies them (issue #366).
+var varAsrLocation = 'northeurope'
+var varAsrRgName = 'platform-skycraft-neu-asr-rg'
+var varAsrVaultName = 'platform-skycraft-neu-asr-rsv'
 var varRsvDiagName = 'rsv-backup-reports-diag'
 var varBvDiagName = 'bv-backup-reports-diag'
 
@@ -225,6 +231,36 @@ module modBackupKeyVaultRole 'br/public:avm/ptn/authorization/resource-role-assi
   }
 }
 
+// 7. Azure Site Recovery target group and vault (Step 5.2.6). The wizard and Enable-SiteRecovery.ps1 are
+//    pointed at this group as both the VM group and the vault group; the replication needs fabrics, containers, a policy
+//    and mappings first, each an asynchronous job, so Enable-SiteRecovery.ps1 creates them with existence checks (section 10.4).
+module modAsrResourceGroup 'br/public:avm/res/resources/resource-group:0.4.4' = {
+  name: 'bcdr-asr-rg-deployment'
+  params: {
+    name: varAsrRgName
+    location: varAsrLocation
+    tags: varCommonTags
+  }
+}
+
+module modAsrVault 'br/public:avm/res/recovery-services/vault:0.13.0' = {
+  name: 'bcdr-asr-rsv-deployment'
+  scope: resourceGroup(varAsrRgName)
+  dependsOn: [
+    modAsrResourceGroup
+  ]
+  params: {
+    name: varAsrVaultName
+    location: varAsrLocation
+    tags: varCommonTags
+    // Same lab-friction override as the backup vault (section 4.5).
+    publicNetworkAccess: 'Enabled'
+    redundancySettings: {
+      standardTierStorageRedundancy: 'LocallyRedundant'
+    }
+  }
+}
+
 /******************
 *     Outputs     *
 ******************/
@@ -249,3 +285,9 @@ output outSnapshotRgSuffix string = varSnapshotRgSuffix
 
 @description('Resource ID of the alert processing rule')
 output outAlertProcessingRuleId string = modAlertProcessingRule.outputs.resourceId
+
+@description('Name of the Azure Site Recovery target resource group (North Europe)')
+output outAsrRgName string = modAsrResourceGroup.outputs.name
+
+@description('Name of the Recovery Services vault in the Site Recovery target group')
+output outAsrVaultName string = modAsrVault.outputs.name

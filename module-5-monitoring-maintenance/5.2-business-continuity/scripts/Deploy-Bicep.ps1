@@ -30,14 +30,17 @@
       protection it waits for the vault to list the VM as a backup item (-BackupItemWaitMinutes);
       a VM that is never listed is a deployment failure, not a skipped backup.
 
+    - Azure Site Recovery target: the tagged North Europe group platform-skycraft-neu-asr-rg and
+      its Recovery Services vault platform-skycraft-neu-asr-rsv. Replication of the world VM is
+      started by Enable-SiteRecovery.ps1, which this script runs when the VM exists and waits
+      for Protected (about 45 minutes). -SkipSiteRecovery leaves it for later (issue #366).
+
     The blob backup policy (SkyCraft-Blob-Policy) is created by New-LabBlobBackup.ps1, the
     script the guide has the learner run (issue #306).
 
     After deployment:
     1. Run .\New-LabBlobBackup.ps1 to create the blob backup policy, assign RBAC roles and
        configure blob protection on prodskycraftswcsa.
-    2. Configure Azure Site Recovery (ASR) via the Azure Portal (Step 5.2.6)
-       — ASR replication requires portal-based setup.
 
     Prerequisites: Lab 3.2 (VM and key vault) and Lab 5.1 (Log Analytics Workspace and action
     group skycraft-ops-ag) must be deployed.
@@ -60,6 +63,10 @@
 
 .PARAMETER Force
     Skip the confirmation prompt for non-interactive execution (master-lab-cycle.ps1 passes this).
+
+.PARAMETER SkipSiteRecovery
+    Deploy the Site Recovery target group and vault but do not start replication. Run
+    .\Enable-SiteRecovery.ps1 later.
 
 .EXAMPLE
     .\Deploy-Bicep.ps1
@@ -102,7 +109,10 @@ param(
     [switch]$WhatIf,
 
     [Parameter()]
-    [switch]$Force
+    [switch]$Force,
+
+    [Parameter()]
+    [switch]$SkipSiteRecovery
 )
 
 $ErrorActionPreference = 'Stop'
@@ -616,9 +626,25 @@ if ($WhatIf) {
         }
     }
 
+    # Site Recovery: the target group and vault came from the template; replication is a script
+    # because it needs fabrics, containers, a policy and mappings first, each an asynchronous job (docs/bicep-standards.md section 10.4).
+    Write-Host "`n  Azure Site Recovery (Enable-SiteRecovery.ps1)..." -ForegroundColor Yellow
+    if ($SkipSiteRecovery) {
+        Write-Host "  [SKIP] -SkipSiteRecovery: run .\Enable-SiteRecovery.ps1 later (Step 5.2.6)." -ForegroundColor Gray
+    } elseif (-not (Get-AzVM -Name 'dev-skycraft-swc-world-vm' -ResourceGroupName $vmRg -ErrorAction SilentlyContinue)) {
+        Write-Host "  [WARNING] VM 'dev-skycraft-swc-world-vm' not found in '$vmRg' (Lab 3.2) - no replication started." -ForegroundColor Yellow
+    } else {
+        $global:LASTEXITCODE = 0
+        & (Join-Path $scriptPath 'Enable-SiteRecovery.ps1') -Force
+        if ($LASTEXITCODE -ne 0) {
+            $script:deployFailures++
+            Write-Host "  [ERROR] The world VM is not Protected. See the [ERROR] lines above and Lab 5.2 Troubleshooting." -ForegroundColor Red
+        }
+    }
+
     Write-Host "`n  Next Steps:" -ForegroundColor Cyan
     Write-Host "    1. Run .\New-LabBlobBackup.ps1 to create SkyCraft-Blob-Policy and protect the production storage account of Lab 4.1 (add -ProdSaName if it has another name)" -ForegroundColor Gray
-    Write-Host "    2. Configure Azure Site Recovery via Azure Portal (Step 5.2.6)" -ForegroundColor Gray
+    Write-Host "    2. Step 5.2.7: run the test failover (.nable-SiteRecovery.ps1 -TestFailover, or the Portal)" -ForegroundColor Gray
     Write-Host "    3. Run .\Test-Lab.ps1 to validate deployment" -ForegroundColor Gray
 }
 

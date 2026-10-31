@@ -39,6 +39,9 @@
          is ended before the snapshot group or an orphaned collection is deleted, a delete that
          still reports one is retried, and a delete that never succeeds says so instead of naming
          a lock (issue #366).
+      10. The Site Recovery replication (Step 5.2.6, issue #366) is disabled before its target group
+         is deleted; a test failover left uncleaned is cleaned up first; a replication that cannot
+         be looked up or disabled keeps the group and exits 1.
 
     No Azure connection is needed, and none is used. The script runs through
     tests/Support/LabScriptStub.psm1 (issue #112), which imports the real Az modules first, the
@@ -87,6 +90,12 @@ BeforeAll {
         'Remove-AzResource'
         'Remove-AzResourceGroup'
         'Start-Sleep'
+        'Set-AzRecoveryServicesAsrVaultContext'
+        'Get-AzRecoveryServicesAsrFabric'
+        'Get-AzRecoveryServicesAsrProtectionContainer'
+        'Get-AzRecoveryServicesAsrReplicationProtectedItem'
+        'Remove-AzRecoveryServicesAsrReplicationProtectedItem'
+        'Start-AzRecoveryServicesAsrTestFailoverCleanupJob'
     )
 
     # Every Az command the script calls, implemented as a stub that records its own invocation
@@ -297,6 +306,47 @@ function Get-AzResourceGroup {
     [pscustomobject]@{ ResourceGroupName = 'AzureBackupRG_swedencentral_1'; Location = 'swedencentral' }
     [pscustomobject]@{ ResourceGroupName = 'platform-skycraft-swc-rg';      Location = 'swedencentral' }
     [pscustomobject]@{ ResourceGroupName = 'platform-skycraft-swc-rpc1-rg'; Location = 'swedencentral' }
+    if ($env:SKYCRAFT_STUB_ASR -eq '1') { [pscustomobject]@{ ResourceGroupName = 'platform-skycraft-neu-asr-rg'; Location = 'northeurope' } }
+}
+
+# Site Recovery (#366): the target group holds a vault with one replication item, present only
+# where SKYCRAFT_STUB_ASR is 1. SKYCRAFT_STUB_ASR_TFO is 1 for an item with a test failover left.
+# The real cmdlet throws this on a vault without vaultExtendedInfo (SKYCRAFT_STUB_EXTINFO 'missing').
+function Set-AzRecoveryServicesAsrVaultContext {
+    [CmdletBinding()] param($Vault)
+    if ($env:SKYCRAFT_STUB_EXTINFO -eq 'missing') { throw 'Object reference not set to an instance of an object.' }
+    Write-StubCall -Name 'Set-AzRecoveryServicesAsrVaultContext'
+}
+
+function Get-AzRecoveryServicesAsrFabric {
+    [CmdletBinding()]
+    param()
+    if (Invoke-StubLookup -Name 'Get-AzRecoveryServicesAsrFabric') { return }
+    [pscustomobject]@{ Name = 'asr-a2a-swedencentral' }
+}
+
+function Get-AzRecoveryServicesAsrProtectionContainer {
+    [CmdletBinding()]
+    param($Fabric)
+    [pscustomobject]@{ Name = 'asr-a2a-swc-container' }
+}
+
+function Get-AzRecoveryServicesAsrReplicationProtectedItem {
+    [CmdletBinding()]
+    param($ProtectionContainer)
+    [pscustomobject]@{ FriendlyName = 'dev-skycraft-swc-world-vm'; TestFailoverState = $(if ($env:SKYCRAFT_STUB_ASR_TFO -eq '1') { 'Completed' } else { 'None' }) }
+}
+
+function Remove-AzRecoveryServicesAsrReplicationProtectedItem {
+    [CmdletBinding()]
+    param($InputObject, [switch]$Force, [switch]$WaitForCompletion)
+    Invoke-StubGate -Name 'Remove-AzRecoveryServicesAsrReplicationProtectedItem'
+}
+
+function Start-AzRecoveryServicesAsrTestFailoverCleanupJob {
+    [CmdletBinding()]
+    param($ReplicationProtectedItem, $Comment)
+    Invoke-StubGate -Name 'Start-AzRecoveryServicesAsrTestFailoverCleanupJob'
 }
 
 function Get-AzResource {
@@ -438,7 +488,10 @@ function Invoke-StubArmDiskRestorePointRoute {
             [switch]$AlertRuleLocked,
             [string]$KeyVaultName,
             [ValidateSet('', 'outstanding', 'slow', 'stuck')]
-            [string]$Sas = ''
+            [string]$Sas = '',
+            [switch]$SiteRecovery,
+            [switch]$TestFailoverLeft,
+            [string]$ExtInfo = 'ok'
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
@@ -456,6 +509,9 @@ function Invoke-StubArmDiskRestorePointRoute {
             SKYCRAFT_STUB_APR        = if ($AlertRule) { '1' } else { '0' }
             SKYCRAFT_STUB_APRLOCK    = if ($AlertRuleLocked) { '1' } else { '0' }
             SKYCRAFT_STUB_SAS        = $Sas
+            SKYCRAFT_STUB_ASR        = if ($SiteRecovery) { '1' } else { '0' }
+            SKYCRAFT_STUB_ASR_TFO    = if ($TestFailoverLeft) { '1' } else { '0' }
+            SKYCRAFT_STUB_EXTINFO    = $ExtInfo
         }
 
         $calls = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { @() }
@@ -467,8 +523,26 @@ function Invoke-StubArmDiskRestorePointRoute {
         }
     }
 
+    # The vault's extended information read goes in front of the ARM fake, which answers everything else.
+    $script:ExtInfoStub = @'
+
+$script:ArmFakeRest = ${function:Invoke-AzRestMethod}
+function Invoke-AzRestMethod {
+    [CmdletBinding()]
+    param([string]$Path, [string]$Method = 'GET', [string]$Payload, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($Path -like '*/extendedInformation/vaultExtendedInfo?api-version=*') {
+        Write-StubCall -Name "Rest:${Method}:vaultExtendedInfo"
+        switch ($env:SKYCRAFT_STUB_EXTINFO) {
+            'missing' { return [pscustomobject]@{ StatusCode = 404; Content = '{"error":{"code":"ResourceExtendedInfoNotFound"}}' } }
+            'denied'  { return [pscustomobject]@{ StatusCode = 403; Content = 'stub forbidden' } }
+            default   { return [pscustomobject]@{ StatusCode = 200; Content = '{}' } }
+        }
+    }
+    & $script:ArmFakeRest -Path $Path -Method $Method -Payload $Payload
+}
+'@
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body ($script:StubBody + (Get-LabArmStub -Api RoleAssignment, Lock) + $script:DiskRestorePointStub) -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmStub -Api RoleAssignment, Lock) + $script:DiskRestorePointStub + $script:ExtInfoStub) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs
@@ -542,6 +616,16 @@ function Invoke-StubArmDiskRestorePointRoute {
     $script:RsvDiagStuck  = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzDiagnosticSetting:learner-rsv-diag'
     $script:BvDiagStuck   = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzDiagnosticSetting:bv-backup-reports-diag'
     $script:DiagNotFound  = Invoke-CleanupScript -Stub $script:Stub -Lookup @('Get-AzDiagnosticSetting:rsv=notfound', 'Get-AzDiagnosticSetting:bv=rgnotfound')
+
+    # Issue #366: Site Recovery.
+    $script:AsrClean       = Invoke-CleanupScript -Stub $script:Stub -SiteRecovery
+    $script:AsrTestFailover = Invoke-CleanupScript -Stub $script:Stub -SiteRecovery -TestFailoverLeft
+    $script:AsrStuck       = Invoke-CleanupScript -Stub $script:Stub -SiteRecovery -Fail 'Remove-AzRecoveryServicesAsrReplicationProtectedItem'
+    $script:AsrCleanupStuck = Invoke-CleanupScript -Stub $script:Stub -SiteRecovery -TestFailoverLeft -Fail 'Start-AzRecoveryServicesAsrTestFailoverCleanupJob'
+    $script:AsrDenied      = Invoke-CleanupScript -Stub $script:Stub -SiteRecovery -Lookup 'Get-AzRecoveryServicesAsrFabric=denied'
+    $script:AsrGroupStuck  = Invoke-CleanupScript -Stub $script:Stub -SiteRecovery -Fail 'Remove-AzResourceGroup:platform-skycraft-neu-asr-rg'
+    $script:AsrNoExtInfo   = Invoke-CleanupScript -Stub $script:Stub -SiteRecovery -ExtInfo 'missing'
+    $script:AsrExtInfoDenied = Invoke-CleanupScript -Stub $script:Stub -SiteRecovery -ExtInfo 'denied'
 }
 
 AfterAll {
@@ -560,7 +644,8 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - test harness' {
                 $script:StorageDenied, $script:RoleStuck, $script:RsvDiagDenied, $script:BvDiagDenied,
                 $script:RsvDiagStuck, $script:BvDiagStuck, $script:DiagNotFound, $script:AprClean, $script:AprStuck,
                 $script:AprDenied, $script:AprGone, $script:AprLocked, $script:AprStillLocked,
-                $script:SasRevoked, $script:SasSlow, $script:SasStuck, $script:SasRevokeFails, $script:SasListDenied)) {
+                $script:SasRevoked, $script:SasSlow, $script:SasStuck, $script:SasRevokeFails, $script:SasListDenied,
+                $script:AsrClean, $script:AsrTestFailover, $script:AsrStuck, $script:AsrDenied, $script:AsrGroupStuck, $script:AsrCleanupStuck)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az cmdlets (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -804,6 +889,70 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - key vault name (#438)' {
     It 'declares the parameter, which the lab cycle passes when it deploys a unique vault name' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$null, [ref]$null)
         @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath }) | Should -Contain 'KeyVaultName'
+    }
+}
+
+Describe 'Lab 5.2 Remove-LabResource.ps1 - Azure Site Recovery (#366)' {
+
+    It 'disables the replication, then deletes the target group, and exits 0' {
+        $script:AsrClean.ExitCode | Should -Be 0 -Because $script:AsrClean.Output
+        $calls = $script:AsrClean.Calls
+        $calls | Should -Contain 'Remove-AzRecoveryServicesAsrReplicationProtectedItem'
+        $calls | Should -Contain 'Remove-AzResourceGroup:platform-skycraft-neu-asr-rg'
+        [array]::IndexOf($calls, 'Remove-AzRecoveryServicesAsrReplicationProtectedItem') |
+            Should -BeLessThan ([array]::IndexOf($calls, 'Remove-AzResourceGroup:platform-skycraft-neu-asr-rg'))
+        $calls | Should -Not -Contain 'Start-AzRecoveryServicesAsrTestFailoverCleanupJob'
+    }
+
+    It 'touches nothing of Site Recovery where the target group does not exist' {
+        $script:Clean.Calls | Should -Not -Contain 'Remove-AzRecoveryServicesAsrReplicationProtectedItem'
+        $script:Clean.Calls | Should -Not -Contain 'Remove-AzResourceGroup:platform-skycraft-neu-asr-rg'
+    }
+
+    It 'cleans up a test failover that was left before it disables the replication' {
+        $script:AsrTestFailover.ExitCode | Should -Be 0 -Because $script:AsrTestFailover.Output
+        $calls = $script:AsrTestFailover.Calls
+        [array]::IndexOf($calls, 'Start-AzRecoveryServicesAsrTestFailoverCleanupJob') | Should -BeGreaterOrEqual 0
+        [array]::IndexOf($calls, 'Start-AzRecoveryServicesAsrTestFailoverCleanupJob') |
+            Should -BeLessThan ([array]::IndexOf($calls, 'Remove-AzRecoveryServicesAsrReplicationProtectedItem'))
+    }
+
+    It 'counts a test failover that cannot be cleaned up, exits 1 and keeps the target group' {
+        $script:AsrCleanupStuck.ExitCode | Should -Be 1
+        $script:AsrCleanupStuck.Output | Should -Match "\[ERROR\] Could not disable the replication of 'dev-skycraft-swc-world-vm'"
+        $script:AsrCleanupStuck.Calls | Should -Not -Contain 'Remove-AzRecoveryServicesAsrReplicationProtectedItem'
+        $script:AsrCleanupStuck.Calls | Should -Not -Contain 'Remove-AzResourceGroup:platform-skycraft-neu-asr-rg'
+    }
+
+    It 'counts a replication that cannot be disabled, exits 1 and keeps the target group' {
+        $script:AsrStuck.ExitCode | Should -Be 1
+        $script:AsrStuck.Output | Should -Match "\[ERROR\] Could not disable the replication of 'dev-skycraft-swc-world-vm'"
+        $script:AsrStuck.Calls | Should -Not -Contain 'Remove-AzResourceGroup:platform-skycraft-neu-asr-rg'
+    }
+
+    It 'treats a replication lookup that fails as an error, not as absent, and keeps the target group' {
+        $script:AsrDenied.ExitCode | Should -Be 1
+        $script:AsrDenied.Output | Should -Match '\[ERROR\] Could not look up the replication items in'
+        $script:AsrDenied.Calls | Should -Not -Contain 'Remove-AzResourceGroup:platform-skycraft-neu-asr-rg'
+    }
+
+    It 'deletes the group of a Bicep-made vault that has no extended information, without the context cmdlet that throws on it' {
+        $script:AsrNoExtInfo.ExitCode | Should -Be 0 -Because $script:AsrNoExtInfo.Output
+        $script:AsrNoExtInfo.Calls | Should -Contain 'Rest:GET:vaultExtendedInfo'
+        $script:AsrNoExtInfo.Calls | Should -Not -Contain 'Remove-AzRecoveryServicesAsrReplicationProtectedItem'
+        $script:AsrNoExtInfo.Calls | Should -Contain 'Remove-AzResourceGroup:platform-skycraft-neu-asr-rg'
+        $script:AsrNoExtInfo.Output | Should -Not -Match '\[ERROR\]'
+    }
+
+    It 'treats an extended information read that is denied as an error, not as absent, and keeps the target group' {
+        $script:AsrExtInfoDenied.ExitCode | Should -Be 1
+        $script:AsrExtInfoDenied.Output | Should -Match '\[ERROR\] Could not look up the replication items in .*returned 403'
+        $script:AsrExtInfoDenied.Calls | Should -Not -Contain 'Remove-AzResourceGroup:platform-skycraft-neu-asr-rg'
+    }
+
+    It 'counts a target group that cannot be deleted' {
+        $script:AsrGroupStuck.ExitCode | Should -Be 1
+        $script:AsrGroupStuck.Output | Should -Match "\[ERROR\] Could not delete Site Recovery target resource group 'platform-skycraft-neu-asr-rg'"
     }
 }
 

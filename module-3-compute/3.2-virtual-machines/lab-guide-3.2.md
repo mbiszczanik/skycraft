@@ -347,6 +347,9 @@ resource sshKey 'Microsoft.Compute/sshPublicKeys@2024-07-01' existing = {
 > | Auto-shutdown | on, 7:00 PM, with your e-mail address | off |
 > | Boot diagnostics | Enable with managed storage account | Disable |
 
+> [!NOTE]
+> **Image version.** The Portal wizard cannot pick a Marketplace image version: it always deploys the newest, and the newest Ubuntu 22.04 image boots a kernel (`6.8.0-1065-azure` on 2026-10-16) that Azure Site Recovery, Lab 5.2 Step 5.2.6, rejects with `ASRMobilityServiceKernelNotSupportedV2`. `Deploy-Bicep.ps1` pins image version `22.04.202506200`, which boots kernel `6.8.0-1030-azure`. If you create the VMs in the Portal, Lab 5.2 Troubleshooting (Issue 7) shows how to boot a supported kernel before replication.
+
 **Basics tab**:
 
 | Field                | Value                                        |
@@ -1595,7 +1598,7 @@ Quick verification before proceeding:
 
 - [ ] `dev-skycraft-swc-auth-vm` deployed in Zone 1
 - [ ] `dev-skycraft-swc-world-vm` deployed in Zone 2
-- [ ] Both VMs running Ubuntu 22.04 LTS
+- [ ] Both VMs running Ubuntu 22.04 LTS (the Bicep path: image version `22.04.202506200`, kernel `6.8.0-1030-azure`)
 - [ ] Both VMs sized as Standard_B2ls_v2
 - [ ] Both VMs have no public IP addresses
 
