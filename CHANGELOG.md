@@ -9,6 +9,18 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.1](https://github.com/mbiszczanik/skycraft/compare/v0.19.0...v0.19.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* **labs-4.1-5.2:** remove a resource's diagnostic settings before its cleanup deletes it ([#448](https://github.com/mbiszczanik/skycraft/issues/448)) ([f1ea4af](https://github.com/mbiszczanik/skycraft/commit/f1ea4aff832fc1e3d6901b6dda28d37278a3974d))
+* **labs-4.1-5.3:** lift Lab 1.3's delete lock for cleanup deletes and restore it ([#459](https://github.com/mbiszczanik/skycraft/issues/459)) ([642f9d0](https://github.com/mbiszczanik/skycraft/commit/642f9d0440ef2a1acef3cb539d089017e6918bf1))
+* **labs-5.2-5.3:** make Deploy-Bicep.ps1 -WhatIf only read and report ([#447](https://github.com/mbiszczanik/skycraft/issues/447)) ([ec8fb51](https://github.com/mbiszczanik/skycraft/commit/ec8fb5111348f3b57e989f18c725bb43b1a93be6))
+* **labs:** delete the private DNS link a re-created VNet leaves behind ([#446](https://github.com/mbiszczanik/skycraft/issues/446)) ([b732e1f](https://github.com/mbiszczanik/skycraft/commit/b732e1fe39bacbca7e5ff114e24b68a75da0ae2e))
+* **labs:** let the storage account names of Labs 4.1-5.3 be overridden, and stop on a taken one ([#461](https://github.com/mbiszczanik/skycraft/issues/461)) ([8c00e50](https://github.com/mbiszczanik/skycraft/commit/8c00e5070ffccef9f7dc2986d1dd26cf47ca80f3))
+* **module-5:** explicit api-version on ARM calls and checks that fail on a lookup error (Refs [#452](https://github.com/mbiszczanik/skycraft/issues/452)) ([#460](https://github.com/mbiszczanik/skycraft/issues/460)) ([0849077](https://github.com/mbiszczanik/skycraft/commit/0849077df92c4d2c0d97856ca09c3f9f57db143d))
+
 ## [0.19.0](https://github.com/mbiszczanik/skycraft/compare/v0.18.0...v0.19.0) (2026-10-28)
 
 
