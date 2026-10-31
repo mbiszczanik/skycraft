@@ -12,7 +12,7 @@
     - NSG Rules: Verifies key rules (SSH, Game Ports, DB Ports) on each NSG.
     - Subnet Associations: Ensures specific NSGs are associated with specific subnets.
     - Service Endpoints: Microsoft.Storage on World subnets, Microsoft.Sql and Microsoft.Storage on Database subnets.
-    - Azure Bastion: Checks existence, SKU, public IP and canonical tags when deployed (optional).
+    - Azure Bastion: Checks existence, provisioning state, SKU, public IP and canonical tags when deployed (optional).
 
 .EXAMPLE
     .\Test-Lab.ps1
@@ -183,6 +183,13 @@ if ($bastion) {
         Write-Host "  -> [OK] Bastion SKU is Basic" -ForegroundColor Gray
     } else {
         Write-Host "  -> [FAIL] Bastion SKU is $($bastion.Sku.Name) (Expected Basic)" -ForegroundColor Red
+        $script:failCount++
+    }
+
+    if ("$($bastion.ProvisioningState)" -eq 'Succeeded') {
+        Write-Host "  -> [OK] Bastion provisioning state is Succeeded" -ForegroundColor Gray
+    } else {
+        Write-Host "  -> [FAIL] Bastion provisioning state is '$($bastion.ProvisioningState)' (Expected Succeeded)" -ForegroundColor Red
         $script:failCount++
     }
 

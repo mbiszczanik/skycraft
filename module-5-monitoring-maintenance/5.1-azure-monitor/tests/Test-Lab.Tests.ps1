@@ -222,6 +222,7 @@ function Get-AzResource {
             ResourceGroupName = $rule.Group
             ResourceId        = $ResourceId
             Properties        = [pscustomobject]@{
+                provisioningState = if ($env:SKYCRAFT_STUB_DCRSTATE -eq 'rulefailed') { 'Failed' } else { 'Succeeded' }
                 destinations = [pscustomobject]@{ logAnalytics = @([pscustomobject]@{ name = 'la-dest'; workspaceResourceId = $rule.Workspace }) }
                 dataFlows    = @([pscustomobject]@{ streams = $rule.Streams; destinations = @('la-dest') })
             }
@@ -405,7 +406,9 @@ function Get-AzDiagnosticSetting {
             [int]$TableWaitMinutes = 0,
             [ValidateSet('none', 'recent', 'mid', 'old', 'throws')]
             [string]$Install = 'none',
-            [int]$InstallWaitMinutes = 45
+            [int]$InstallWaitMinutes = 45,
+            [ValidateSet('ok', 'rulefailed')]
+            [string]$State = 'ok'
         )
         $arguments = @("-HeartbeatWaitMinutes $WaitMinutes", "-NewWorkspaceWaitMinutes $TableWaitMinutes", "-AgentInstallWaitMinutes $InstallWaitMinutes")
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList $arguments -Environment @{
@@ -414,6 +417,7 @@ function Get-AzDiagnosticSetting {
             SKYCRAFT_STUB_ALERT     = $Alert
             SKYCRAFT_STUB_AGENT     = $Agent
             SKYCRAFT_STUB_HEARTBEAT = $Heartbeat
+            SKYCRAFT_STUB_DCRSTATE  = $State
         }
         return [pscustomobject]@{
             ExitCode = $run.ExitCode
@@ -462,7 +466,9 @@ function Get-AzDiagnosticSetting {
     $script:InstallLogEmpty  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 2 -Install 'none'
     $script:InstallZeroWait  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 10 -Install 'recent' -InstallWaitMinutes 0
     $script:AgentFailedRecent = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Agent 'failed' -Heartbeat 'none' -WaitMinutes 10 -Install 'recent'
+    $script:RuleFailed  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -State 'rulefailed'
     $script:AllRuns    = @(
+        $script:RuleFailed,
         $script:BicepMade, $script:PortalMade, $script:NoRule, $script:ReadFails, $script:NoRulePartial,
         $script:VmThrows, $script:Dangling, $script:AlertInVmGroup, $script:AlertRecommended,
         $script:AlertListFails, $script:AlertListFailsPlatform, $script:AgentMissing, $script:AgentFailed,
@@ -567,6 +573,22 @@ Describe 'Lab 5.1 Test-Lab.ps1 - finds the data collection rule through the VM i
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "Data collection rule associated with a VM in dev-skycraft-swc-rg or prod-skycraft-swc-rg\.\.\. \(no rule is associated with these VMs - Step 5\.1\.2; could not read VMs in 'prod-skycraft-swc-rg': stub lookup failure: Resource group 'prod-skycraft-swc-rg' could not be read\.\) FAIL"
         $run.Output | Should -Match 'Failed: 6\b'
+    }
+}
+
+Describe 'Lab 5.1 Test-Lab.ps1 - the rule must be Succeeded (#371)' {
+
+    It 'fails a rule left in provisioning state Failed, and says so' {
+        $run = $script:RuleFailed
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "rule provisioning state is 'Failed', expected Succeeded\) FAIL"
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'passes an association that carries no provisioning state (live 2026-10-28: associations have none)' {
+        $run = $script:BicepMade
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Not -Match 'association provisioning state'
     }
 }
 

@@ -8,8 +8,8 @@
       - Public DNS zone, its canonical tags, and required A / CNAME records - the A records
         must point at the load balancer public IPs reserved in Lab 2.1
       - Private DNS zone, its canonical tags, and hub / dev / prod VNet links with the expected
-        registration flag
-      - Dev and prod load balancers have Standard SKU, >=2 probes with threshold 1, >=2 LB rules, outbound SNAT
+        registration flag, all in provisioning state Succeeded
+      - Dev and prod load balancers in provisioning state Succeeded have Standard SKU, >=2 probes with threshold 1, >=2 LB rules, outbound SNAT
         disabled on every LB rule, the egress pool <lb>-be-outbound with an outbound rule for it
         (protocol All, manual port allocation) - the Module 3 VMs' only path to the internet -
         and the canonical tags for their environment. The pools are empty until Lab 3.2, so
@@ -157,6 +157,19 @@ if ($privZone) {
             $validationErrors++
         }
     }
+
+    # A missing link failed above; a link Azure left in another state fails here.
+    foreach ($l in @('hub-vnet-link', 'dev-vnet-link', 'prod-vnet-link')) {
+        $link = $links | Where-Object { $_.Name -eq $l }
+        if ($link) {
+            if ("$($link.ProvisioningState)" -eq 'Succeeded') {
+                Write-Host "  - [OK] Link '$l' provisioning state is Succeeded" -ForegroundColor Green
+            } else {
+                Write-Host "  - [FAIL] Link '$l' provisioning state is '$($link.ProvisioningState)' (Expected Succeeded)" -ForegroundColor Red
+                $validationErrors++
+            }
+        }
+    }
 } else {
     Write-Host "[FAIL] Private DNS Zone NOT found: $PrivateDnsZoneName" -ForegroundColor Red
     $validationErrors++
@@ -173,6 +186,12 @@ function Test-LB {
     $lb = Get-AzLoadBalancer -ResourceGroupName $RgName -Name $LbName -ErrorAction SilentlyContinue
     if ($lb) {
         Write-Host "[OK] Load Balancer found: $LbName" -ForegroundColor Green
+        if ("$($lb.ProvisioningState)" -eq 'Succeeded') {
+            Write-Host "  - [OK] Provisioning state is Succeeded" -ForegroundColor Green
+        } else {
+            Write-Host "  - [FAIL] Provisioning state is '$($lb.ProvisioningState)' (Expected Succeeded)" -ForegroundColor Red
+            $script:validationErrors++
+        }
         # Check SKU
         if ($lb.Sku.Name -eq 'Standard') {
             Write-Host "  - [OK] SKU is Standard" -ForegroundColor Green
