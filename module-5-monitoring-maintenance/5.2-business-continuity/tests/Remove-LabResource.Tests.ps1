@@ -78,6 +78,7 @@ BeforeAll {
         'Get-AzResource'
         'Remove-AzResource'
         'Remove-AzResourceGroup'
+        'Start-Sleep'
     )
 
     # Every Az command the script calls, implemented as a stub that records its own invocation
@@ -159,7 +160,7 @@ function Get-Module {
 function Get-AzContext {
     [CmdletBinding()]
     param()
-    [pscustomobject]@{ Name = 'stub-context' }
+    [pscustomobject]@{ Name = 'stub-context'; Subscription = [pscustomobject]@{ Id = '00000000-0000-0000-0000-000000000000' } }
 }
 
 function Get-AzDataProtectionBackupVault {
@@ -303,6 +304,8 @@ function Remove-AzResourceGroup {
             [pscustomobject]$Stub,
             [string[]]$Fail = @(),
             [string[]]$Lookup = @(),
+            [string[]]$Locks = @(),
+            [string[]]$LockFail = @(),
             [string]$RecoveryServicesVersion = '7.7.1',
             [switch]$Empty,
             [switch]$NoFriendlyName
@@ -316,6 +319,8 @@ function Remove-AzResourceGroup {
             SKYCRAFT_STUB_LOOKUP     = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY      = if ($Empty) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG        = $logPath
+            SKYCRAFT_STUB_LOCKS = $Locks -join ','
+            SKYCRAFT_STUB_LOCK_FAIL = $LockFail -join ','
             SKYCRAFT_STUB_RSVERSION  = $RecoveryServicesVersion
             SKYCRAFT_STUB_NOFRIENDLY = if ($NoFriendlyName) { '1' } else { '0' }
         }
@@ -330,7 +335,7 @@ function Remove-AzResourceGroup {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body ($script:StubBody + (Get-LabArmRoleAssignmentStub)) -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmStub -Api RoleAssignment, Lock)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs
@@ -374,6 +379,11 @@ function Remove-AzResourceGroup {
     $script:RecheckDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzResource:recheck=denied'
     $script:StorageDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzStorageAccount=denied'
     $script:RoleStuck     = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-RoleAssignment'
+
+    # Lab 1.3's delete locks (#372): the cleanup lifts them for its deletes and puts them back.
+    $script:Locked         = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg'
+    $script:LockedFail     = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg' -Fail 'Remove-AzRecoveryServicesVault'
+    $script:LockUnreadable = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg' -LockFail 'GET:platform-skycraft-swc-rg'
 }
 
 AfterAll {
@@ -825,5 +835,42 @@ public class SkyCraftStubAzureException : System.Exception
             @($result.Value).Count | Should -Be 0
             $script:cleanupFailures | Should -Be 1
         }
+    }
+}
+
+Describe 'Lab 5.2 Remove-LabResource.ps1 - under Lab 1.3''s delete lock (#372)' {
+
+    It 'runs every lock scenario against the stub' {
+        foreach ($run in @($script:Locked, $script:LockedFail, $script:LockUnreadable)) {
+            $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az commands (exit $($run.ExitCode)): $($run.Output)"
+        }
+    }
+
+    It 'lifts the lock before the deletes, puts it back as it was after them, and exits 0' {
+        $run = $script:Locked
+        $run.ExitCode | Should -Be 0 -Because "the lock is no longer in the way; output was:`n$($run.Output)"
+        $calls = @($run.Calls)
+        $lift = [array]::IndexOf($calls, 'Lock:DELETE:platform-skycraft-swc-rg')
+        $lift | Should -BeGreaterOrEqual 0 -Because 'the lock must be lifted'
+        [array]::IndexOf($calls, 'Remove-AzRecoveryServicesVault') | Should -BeGreaterThan $lift
+        [array]::IndexOf($calls, 'Lock:PUT:platform-skycraft-swc-rg') | Should -BeGreaterThan ([array]::IndexOf($calls, 'Remove-AzRecoveryServicesVault'))
+        $calls | Should -Contain 'Lock:PUT-BODY:platform-skycraft-swc-rg:{"properties":{"level":"CanNotDelete","notes":"Cannot delete resource or child resources."}}'
+        $calls | Should -Contain 'Start-Sleep:45'
+    }
+
+    It 'puts the lock back after a delete that failed, and exits 1' {
+        $run = $script:LockedFail
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $calls = @($run.Calls)
+        [array]::IndexOf($calls, 'Remove-AzRecoveryServicesVault') | Should -BeGreaterOrEqual 0
+        [array]::IndexOf($calls, 'Lock:PUT:platform-skycraft-swc-rg') | Should -BeGreaterThan ([array]::IndexOf($calls, 'Remove-AzRecoveryServicesVault'))
+    }
+
+    It 'deletes nothing in the group and exits 1 when the lock cannot be read' {
+        $run = $script:LockUnreadable
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[ERROR\] Could not read Lab 1\.3's lock 'lock-no-delete-[a-z]+' on 'platform-skycraft-swc-rg'"
+        $run.Calls | Should -Not -Contain 'Remove-AzRecoveryServicesVault'
+        $run.Calls | Should -Not -Contain 'Lock:DELETE:platform-skycraft-swc-rg'
     }
 }

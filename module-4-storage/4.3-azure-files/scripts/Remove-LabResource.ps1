@@ -15,6 +15,12 @@
     touches no share. A share is removed with its snapshots (Remove-AzRmStorageShare -Include
     Snapshots): the lab takes snapshots, and a share that has them cannot be deleted otherwise.
 
+    Lab 1.3's CanNotDelete lock on the prod group refuses deleting the shares (ScopeLocked,
+    issue #372). Those deletes run inside Invoke-LabWithoutLock (tools/LabCommon.psm1), which
+    lifts the lock, runs them and puts it back with the same name, level and notes, also when
+    one fails. A lock it cannot read, lift or restore is an [ERROR] and counted; any other lock
+    is left alone.
+
     Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
     otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
@@ -154,9 +160,23 @@ if (-not $saLookup.Failed) {
     }
 }
 
+$presentShares = @()
 if ($shareLookup -and -not $shareLookup.Failed) {
     foreach ($shareName in $sharesToRemove) {
         if ($shareLookup.Value | Where-Object { $_.Name -eq $shareName }) {
+            $presentShares += $shareName
+        } else {
+            Write-Host "  -> Share '$shareName' not found, skipping." -ForegroundColor Gray
+        }
+    }
+}
+
+# Lab 1.3's CanNotDelete lock on the prod group refuses these deletes (ScopeLocked);
+# Invoke-LabWithoutLock lifts it for them and puts it back (#372). Azure Backup's own lock on the
+# account is not Lab 1.3's: it stays, and the deletes still fail until the backup is stopped.
+if ($presentShares.Count -gt 0) {
+    $lockFailures = Invoke-LabWithoutLock -ResourceGroupName $resourceGroupName -WhatIf:$WhatIfPreference -Action {
+        foreach ($shareName in $presentShares) {
             Write-Host "Removing file share '$shareName'..." -ForegroundColor Yellow
             try {
                 if ($PSCmdlet.ShouldProcess($shareName, 'Remove file share')) {
@@ -168,10 +188,9 @@ if ($shareLookup -and -not $shareLookup.Failed) {
                 $script:cleanupFailures++
                 Write-Host "  -> [ERROR] Could not remove '$shareName': $($_.Exception.Message)" -ForegroundColor Red
             }
-        } else {
-            Write-Host "  -> Share '$shareName' not found, skipping." -ForegroundColor Gray
         }
     }
+    $script:cleanupFailures += $lockFailures
 }
 
 if ($script:cleanupFailures -gt 0) {

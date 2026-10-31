@@ -25,6 +25,13 @@
     that failed is not an empty group - nothing is deleted on the strength of it. An agent whose
     ownership tag could not be read is left in place.
 
+    Lab 1.3's CanNotDelete lock on the prod and platform groups refuses deleting the flow log
+    (it also removes the lifecycle policy on the platform storage account), the agent on a prod
+    VM and the NWTA-* resources (ScopeLocked, issue #372). Those deletes run inside Invoke-
+    LabWithoutLock (tools/LabCommon.psm1), which lifts the lock, runs them and puts it back with
+    the same name, level and notes, also when one fails. A lock it cannot read, lift or restore
+    is an [ERROR] and counted; any other lock is left alone.
+
     Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
     otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
@@ -309,15 +316,21 @@ $flowLogLookup = Invoke-LabLookup -Target "the flow logs of '$networkWatcherName
     Get-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -ErrorAction Stop
 }
 if ($flowLogLookup.Value | Where-Object { $_.Name -eq $flowLogName }) {
-    if ($PSCmdlet.ShouldProcess($flowLogName, 'Remove VNet Flow Log')) {
-        try {
-            Remove-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $flowLogName -Confirm:$false -ErrorAction Stop | Out-Null
-            Write-Host "  ✓ VNet Flow Log removed: $flowLogName" -ForegroundColor Green
-        } catch {
-            $script:cleanupFailures++
-            Write-Host "  [ERROR] Failed to remove VNet Flow Log: $($_.Exception.Message)" -ForegroundColor Red
+    # The flow log sits in NetworkWatcherRG, but deleting it also deletes the lifecycle policy
+    # (managementPolicies/default) on the platform storage account, which Lab 1.3's lock refuses
+    # (ScopeLocked). Invoke-LabWithoutLock lifts the platform lock for the delete (#372).
+    $lockFailures = Invoke-LabWithoutLock -ResourceGroupName $platformRg -WhatIf:$WhatIfPreference -Action {
+        if ($PSCmdlet.ShouldProcess($flowLogName, 'Remove VNet Flow Log')) {
+            try {
+                Remove-AzNetworkWatcherFlowLog -NetworkWatcherName $networkWatcherName -ResourceGroupName $networkWatcherRg -Name $flowLogName -Confirm:$false -ErrorAction Stop | Out-Null
+                Write-Host "  ✓ VNet Flow Log removed: $flowLogName" -ForegroundColor Green
+            } catch {
+                $script:cleanupFailures++
+                Write-Host "  [ERROR] Failed to remove VNet Flow Log: $($_.Exception.Message)" -ForegroundColor Red
+            }
         }
     }
+    $script:cleanupFailures += $lockFailures
 } elseif (-not $flowLogLookup.Failed) {
     Write-Host "  ✓ VNet Flow Log not found (already removed): $flowLogName" -ForegroundColor Gray
 }
@@ -350,6 +363,7 @@ if ($agentTargets.Count -eq 0) {
     Write-Host "  ✓ No connection monitor endpoint VMs found - nothing to remove" -ForegroundColor Gray
 }
 
+$agentDeletes = [System.Collections.Generic.List[hashtable]]::new()
 foreach ($target in $agentTargets) {
     $vmRg   = $target.ResourceGroupName
     $vmName = $target.Name
@@ -388,16 +402,28 @@ foreach ($target in $agentTargets) {
             Write-Host "  [SKIP] $($agent.Name) on $vmName is not tagged Project=SkyCraft - left in place" -ForegroundColor Gray
             continue
         }
-        if ($PSCmdlet.ShouldProcess("$vmName/$($agent.Name)", 'Remove VM extension')) {
-            try {
-                Remove-AzVMExtension -ResourceGroupName $vmRg -VMName $vmName -Name $agent.Name -Force -ErrorAction Stop | Out-Null
-                Write-Host "  ✓ NetworkWatcherAgent removed from $vmName" -ForegroundColor Green
-            } catch {
-                $script:cleanupFailures++
-                Write-Host "  [ERROR] Failed to remove NetworkWatcherAgent from ${vmName}: $($_.Exception.Message)" -ForegroundColor Red
+        $agentDeletes.Add(@{ ResourceGroupName = $vmRg; VmName = $vmName; Name = $agent.Name })
+    }
+}
+
+# Lab 1.3's CanNotDelete lock on the prod group refuses an extension delete on a prod VM
+# (ScopeLocked); Invoke-LabWithoutLock lifts it for the deletes and puts it back (#372).
+if ($agentDeletes.Count -gt 0) {
+    $lockFailures = Invoke-LabWithoutLock -ResourceGroupName @($agentDeletes | ForEach-Object { $_.ResourceGroupName }) -WhatIf:$WhatIfPreference -Action {
+        foreach ($agentDelete in $agentDeletes) {
+            $vmName = $agentDelete.VmName
+            if ($PSCmdlet.ShouldProcess("$vmName/$($agentDelete.Name)", 'Remove VM extension')) {
+                try {
+                    Remove-AzVMExtension -ResourceGroupName $agentDelete.ResourceGroupName -VMName $vmName -Name $agentDelete.Name -Force -ErrorAction Stop | Out-Null
+                    Write-Host "  ✓ NetworkWatcherAgent removed from $vmName" -ForegroundColor Green
+                } catch {
+                    $script:cleanupFailures++
+                    Write-Host "  [ERROR] Failed to remove NetworkWatcherAgent from ${vmName}: $($_.Exception.Message)" -ForegroundColor Red
+                }
             }
         }
     }
+    $script:cleanupFailures += $lockFailures
 }
 
 # ── [4/4] Remove the Traffic Analytics DCR / DCE ──────────────────────────
@@ -432,17 +458,24 @@ if ($taFlowLogLookup.Failed) {
         if ($taResources.Count -eq 0) {
             Write-Host "  ✓ No NWTA-* data collection resources found (already removed)" -ForegroundColor Gray
         }
-        foreach ($taResource in $taResources) {
-            $taKind = ($taResource.ResourceType -split '/')[-1]
-            if ($PSCmdlet.ShouldProcess($taResource.Name, "Remove Traffic Analytics $taKind")) {
-                try {
-                    Remove-AzResource -ResourceId $taResource.ResourceId -Force -ErrorAction Stop | Out-Null
-                    Write-Host "  ✓ Traffic Analytics $taKind removed: $($taResource.Name)" -ForegroundColor Green
-                } catch {
-                    $script:cleanupFailures++
-                    Write-Host "  [ERROR] Failed to remove $($taResource.Name): $($_.Exception.Message)" -ForegroundColor Red
+        # Lab 1.3's CanNotDelete lock on the platform group refuses these deletes (ScopeLocked);
+        # Invoke-LabWithoutLock lifts it for them and puts it back (#372).
+        if ($taResources.Count -gt 0) {
+            $lockFailures = Invoke-LabWithoutLock -ResourceGroupName $platformRg -WhatIf:$WhatIfPreference -Action {
+                foreach ($taResource in $taResources) {
+                    $taKind = ($taResource.ResourceType -split '/')[-1]
+                    if ($PSCmdlet.ShouldProcess($taResource.Name, "Remove Traffic Analytics $taKind")) {
+                        try {
+                            Remove-AzResource -ResourceId $taResource.ResourceId -Force -ErrorAction Stop | Out-Null
+                            Write-Host "  ✓ Traffic Analytics $taKind removed: $($taResource.Name)" -ForegroundColor Green
+                        } catch {
+                            $script:cleanupFailures++
+                            Write-Host "  [ERROR] Failed to remove $($taResource.Name): $($_.Exception.Message)" -ForegroundColor Red
+                        }
+                    }
                 }
             }
+            $script:cleanupFailures += $lockFailures
         }
     }
 }

@@ -13,6 +13,12 @@
     reports it as not found, means "absent" - Test-LabNotFoundError tells the two apart (issue
     #290, as #255 did for Labs 1.2-2.3).
 
+    Lab 1.3's CanNotDelete lock on the platform and prod groups refuses deleting their accounts
+    (ScopeLocked, issue #372). Those deletes run inside Invoke-LabWithoutLock
+    (tools/LabCommon.psm1), which lifts the lock, runs them and puts it back with the same name,
+    level and notes, also when one fails. A lock it cannot read, lift or restore is an [ERROR]
+    and counted; any other lock is left alone.
+
     Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
     otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
@@ -175,8 +181,9 @@ Write-Host ""
 Write-Host ""
 Write-Host "--- Deleting Storage Accounts ---" -ForegroundColor Yellow
 
-$deleted = 0
+$script:deleted = 0
 $skipped = 0
+$found = [System.Collections.Generic.List[hashtable]]::new()
 
 foreach ($env in $envsToClean) {
     $config = $storageConfigs[$env]
@@ -197,32 +204,43 @@ foreach ($env in $envsToClean) {
         $skipped++
         continue
     }
+    Write-Host "    FOUND" -ForegroundColor White
+    $found.Add($config)
+}
 
-    # Delete
-    if ($PSCmdlet.ShouldProcess($config.Name, "Delete storage account")) {
-        try {
-            Remove-AzStorageAccount `
-                -ResourceGroupName $config.ResourceGroup `
-                -Name $config.Name `
-                -Force `
-                -ErrorAction Stop
+# Lab 1.3's CanNotDelete locks on the platform and prod groups refuse these deletes (ScopeLocked);
+# Invoke-LabWithoutLock lifts them for the deletes and puts them back (#372).
+if ($found.Count -gt 0) {
+    $lockFailures = Invoke-LabWithoutLock -ResourceGroupName @($found | ForEach-Object { $_.ResourceGroup }) -WhatIf:$WhatIfPreference -Action {
+        foreach ($config in $found) {
+            if ($PSCmdlet.ShouldProcess($config.Name, "Delete storage account")) {
+                Write-Host "  $($config.DisplayName) ($($config.Name))..." -ForegroundColor White
+                try {
+                    Remove-AzStorageAccount `
+                        -ResourceGroupName $config.ResourceGroup `
+                        -Name $config.Name `
+                        -Force `
+                        -ErrorAction Stop
 
-            Write-Host "    DELETED" -ForegroundColor Green
-            $deleted++
-        }
-        catch {
-            Write-Host "    FAILED" -ForegroundColor Red
-            Write-Host "    [ERROR] $($_.Exception.Message)" -ForegroundColor Red
-            $script:cleanupFailures++
+                    Write-Host "    DELETED" -ForegroundColor Green
+                    $script:deleted++
+                }
+                catch {
+                    Write-Host "    FAILED" -ForegroundColor Red
+                    Write-Host "    [ERROR] $($_.Exception.Message)" -ForegroundColor Red
+                    $script:cleanupFailures++
+                }
+            }
         }
     }
+    $script:cleanupFailures += $lockFailures
 }
 
 # Summary
 $failed = $script:cleanupFailures
 Write-Host ""
 Write-Host "=== Cleanup Summary ===" -ForegroundColor Cyan
-Write-Host "  Deleted: $deleted" -ForegroundColor Green
+Write-Host "  Deleted: $script:deleted" -ForegroundColor Green
 Write-Host "  Skipped: $skipped" -ForegroundColor Gray
 Write-Host "  Failed:  $failed" -ForegroundColor $(if ($failed -gt 0) { 'Red' } else { 'Green' })
 Write-Host ""
