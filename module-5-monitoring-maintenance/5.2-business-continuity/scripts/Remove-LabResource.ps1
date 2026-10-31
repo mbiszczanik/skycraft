@@ -7,9 +7,10 @@
     1. Blob backup instances (Backup Vault)
     2. RBAC role assignments granted to the Backup Vault identity on the storage account
        (Storage Blob Data Owner, Storage Account Backup Contributor)
-    3. Backup Vault (platform-skycraft-swc-bv)
+    3. Backup Vault (platform-skycraft-swc-bv), after every diagnostic setting on it is removed
     4. VM backup protection item with data deletion
-    5. Recovery Services Vault (platform-skycraft-swc-rsv)
+    5. Recovery Services Vault (platform-skycraft-swc-rsv), after every diagnostic setting on it
+       is removed
     6. The instant-restore snapshot resource group platform-skycraft-swc-rpc<n>-rg, with the
        restore point collection inside it. SkyCraft owns it (main.bicep creates it and the VM
        backup policy names it, issue #184), so it is deleted outright.
@@ -24,6 +25,11 @@
       read and removed through the Azure Resource Manager role assignments API
       (tools/LabCommon.psm1), so the cleanup needs no Microsoft Graph sign-in
       (issue #397).
+    - Deleting a vault does not delete its diagnostic settings, and they re-attach to the next
+      vault created with the same id (issue #373: 'rsv-backup-reports-diag' and
+      'bv-backup-reports-diag' from step 5.2.8). Each vault's diagnostic settings are listed and
+      removed, whatever their names, before the vault is deleted. A listing or a removal that
+      fails is counted and the vault stays, so a rerun can still reach its settings.
     - Azure Site Recovery resources (ASR fabric, replication, cache storage
       account) must be cleaned up manually via the Azure Portal before
       deleting the Recovery Services Vault.
@@ -79,7 +85,7 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.RecoveryServices, Az.DataProtection, Az.Resources, Az.Storage
+#Requires -Modules Az.Accounts, Az.RecoveryServices, Az.DataProtection, Az.Resources, Az.Storage, Az.Monitor
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -200,6 +206,40 @@ function Invoke-LabLookup {
         Write-Host "    A failed lookup is not 'absent': it may still exist, so this counts as a failure." -ForegroundColor Gray
         return [pscustomobject]@{ Value = @(); NotFound = $false; Failed = $true }
     }
+}
+
+# Removes every diagnostic setting on each of $ResourceId, whatever its name, so a recreated
+# resource with the same id does not inherit one (#373). Returns $false when a listing or a
+# removal failed (both are counted): the caller keeps the resource, since deleting it would leave
+# the setting behind for good. A listing that reports the resource not found has nothing to remove.
+function Remove-LabDiagnosticSetting {
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$ResourceId
+    )
+
+    $clean = $true
+    foreach ($id in $ResourceId) {
+        $shortId = ($id -split '/providers/')[-1]
+        $lookup = Invoke-LabLookup -Target "the diagnostic settings of $shortId" -Lookup {
+            Get-AzDiagnosticSetting -ResourceId $id -ErrorAction Stop
+        }
+        if ($lookup.Failed) { $clean = $false; continue }
+        foreach ($setting in @($lookup.Value | Where-Object { $_ })) {
+            if (-not $PSCmdlet.ShouldProcess("$shortId/$($setting.Name)", 'Remove diagnostic setting')) { continue }
+            try {
+                Remove-AzDiagnosticSetting -ResourceId $id -Name $setting.Name -ErrorAction Stop | Out-Null
+                Write-Host "  ✓ Removed diagnostic setting '$($setting.Name)' on $shortId" -ForegroundColor Green
+            } catch {
+                $script:cleanupFailures++
+                $clean = $false
+                Write-Host "  [ERROR] Could not remove diagnostic setting '$($setting.Name)' on $($shortId): $_" -ForegroundColor Red
+            }
+        }
+    }
+    return $clean
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
@@ -450,6 +490,10 @@ $lockFailures = Invoke-LabWithoutLock -ResourceGroupName $lockGroups -WhatIf:$Wh
             continue
         }
         if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete backup vault')) { continue }
+        if (-not (Remove-LabDiagnosticSetting -ResourceId "$($bvExists.Id)")) {
+            Write-Host "  [INFO] $($r.Name) left in place - its diagnostic settings could not be checked or removed (see the [ERROR] above)." -ForegroundColor Gray
+            continue
+        }
         Write-Host "  Deleting Backup Vault: $($r.Name)..." -ForegroundColor Gray
         try {
             Remove-AzDataProtectionBackupVault `
@@ -484,6 +528,10 @@ $lockFailures = Invoke-LabWithoutLock -ResourceGroupName $lockGroups -WhatIf:$Wh
     # 5. Delete Recovery Services Vault
     foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RSV' }) {
         if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete Recovery Services Vault')) { continue }
+        if (-not (Remove-LabDiagnosticSetting -ResourceId "$($rsvExists.ID)")) {
+            Write-Host "  [INFO] $($r.Name) left in place - its diagnostic settings could not be checked or removed (see the [ERROR] above)." -ForegroundColor Gray
+            continue
+        }
         Write-Host "  Deleting Recovery Services Vault: $($r.Name)..." -ForegroundColor Gray
         try {
             Remove-AzRecoveryServicesVault -Vault $rsvExists | Out-Null

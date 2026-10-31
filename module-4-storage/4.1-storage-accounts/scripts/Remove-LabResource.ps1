@@ -19,6 +19,13 @@
     level and notes, also when one fails. A lock it cannot read, lift or restore is an [ERROR]
     and counted; any other lock is left alone.
 
+    Deleting an account does not delete its diagnostic settings, and they re-attach to the next
+    account created with the same id (issue #373: Lab 5.1's 'skycraft-storage-diag' on the platform
+    account's blob service). Before an account is deleted, every diagnostic setting on the account
+    and on its blob, file, queue and table services is listed and removed, whatever its name. A
+    listing or a removal that fails is counted, and the account is left in place, because deleting
+    it would orphan the setting for good.
+
     Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
     otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
@@ -56,7 +63,7 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.Storage
+#Requires -Modules Az.Accounts, Az.Storage, Az.Monitor
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -156,6 +163,41 @@ function Invoke-LabLookup {
     }
 }
 
+# Removes every diagnostic setting on each of $ResourceId, whatever its name, so a recreated
+# resource with the same id does not inherit one (#373). Returns $false when a listing or a
+# removal failed (both are counted): the caller keeps the resource, since deleting it would leave
+# the setting behind for good. A listing that reports the resource not found has nothing to remove.
+function Remove-LabDiagnosticSetting {
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$ResourceId
+    )
+
+    $clean = $true
+    foreach ($id in $ResourceId) {
+        $shortId = ($id -split '/providers/')[-1]
+        $lookup = Invoke-LabLookup -Target "the diagnostic settings of $shortId" -Lookup {
+            Get-AzDiagnosticSetting -ResourceId $id -ErrorAction Stop
+        }
+        if ($lookup.Failed) { $clean = $false; continue }
+        foreach ($setting in @($lookup.Value | Where-Object { $_ })) {
+            if (-not $PSCmdlet.ShouldProcess("$shortId/$($setting.Name)", 'Remove diagnostic setting')) { continue }
+            try {
+                Remove-AzDiagnosticSetting -ResourceId $id -Name $setting.Name -ErrorAction Stop | Out-Null
+                Write-Host "    Removed diagnostic setting '$($setting.Name)' on $shortId" -ForegroundColor Gray
+            }
+            catch {
+                $script:cleanupFailures++
+                $clean = $false
+                Write-Host "    [ERROR] Could not remove diagnostic setting '$($setting.Name)' on $($shortId): $_" -ForegroundColor Red
+            }
+        }
+    }
+    return $clean
+}
+
 Write-Host "=== Lab 4.1: Remove Storage Accounts ===" -ForegroundColor Cyan
 Write-Host ""
 
@@ -206,6 +248,7 @@ Write-Host "--- Deleting Storage Accounts ---" -ForegroundColor Yellow
 $script:deleted = 0
 $skipped = 0
 $found = [System.Collections.Generic.List[hashtable]]::new()
+$accountIds = @{}   # account name -> resource id, for the diagnostic settings
 
 foreach ($env in $envsToClean) {
     $config = $storageConfigs[$env]
@@ -227,6 +270,7 @@ foreach ($env in $envsToClean) {
         continue
     }
     Write-Host "    FOUND" -ForegroundColor White
+    $accountIds[$config.Name] = "$(@($lookup.Value)[0].Id)"
     $found.Add($config)
 }
 
@@ -237,6 +281,14 @@ if ($found.Count -gt 0) {
         foreach ($config in $found) {
             if ($PSCmdlet.ShouldProcess($config.Name, "Delete storage account")) {
                 Write-Host "  $($config.DisplayName) ($($config.Name))..." -ForegroundColor White
+                # The account's diagnostic settings go first (#373); one that cannot be listed or
+                # removed keeps the account, and the failure is already counted.
+                $accountId = $accountIds[$config.Name]
+                $diagIds = @($accountId) + @('blobServices', 'fileServices', 'queueServices', 'tableServices' | ForEach-Object { "$accountId/$_/default" })
+                if (-not (Remove-LabDiagnosticSetting -ResourceId $diagIds)) {
+                    Write-Host "    FAILED (diagnostic settings)" -ForegroundColor Red
+                    continue
+                }
                 try {
                     Remove-AzStorageAccount `
                         -ResourceGroupName $config.ResourceGroup `
