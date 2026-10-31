@@ -644,7 +644,7 @@ if ($WhatIf) {
 
     Write-Host "`n  Next Steps:" -ForegroundColor Cyan
     Write-Host "    1. Run .\New-LabBlobBackup.ps1 to create SkyCraft-Blob-Policy and protect the production storage account of Lab 4.1 (add -ProdSaName if it has another name)" -ForegroundColor Gray
-    Write-Host "    2. Step 5.2.7: run the test failover (.nable-SiteRecovery.ps1 -TestFailover, or the Portal)" -ForegroundColor Gray
+    Write-Host "    2. Step 5.2.7 (optional): run the test failover (.\Enable-SiteRecovery.ps1 -TestFailover, or the Portal) if your subscription can start the failover VM" -ForegroundColor Gray
     Write-Host "    3. Run .\Test-Lab.ps1 to validate deployment" -ForegroundColor Gray
 }
 

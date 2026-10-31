@@ -25,8 +25,8 @@
        use it in North Europe and has the quota, else the nearest size it may use. Site Recovery's
        own pick (Standard_HC44rs, 44 cores) fails the test failover on the core quota, and a size
        the subscription is barred from is refused with an empty size name
-    6. With -TestFailover: run a test failover into the target VNet, wait for the test VM, then
-       clean it up
+    6. With -TestFailover only (Step 5.2.7 is optional): run a test failover into the target VNet,
+       wait for the test VM, then clean it up. The lab's end state is the Protected replication
 
     Exit code 1 when a prerequisite is missing, a job fails or the wait ends before Protected, or
     -TestFailover finds no size it can set; 0 otherwise. A job that ends PartiallySucceeded is a
@@ -37,7 +37,10 @@
     that cannot prompt exits 1 and creates nothing.
 
 .PARAMETER TestFailover
-    After Protected, run the test failover of Step 5.2.7 and its cleanup.
+    After Protected, run the optional test failover of Step 5.2.7 and its cleanup. The size it
+    starts must be offered to the subscription in North Europe and fit its core quota; a Free
+    Trial subscription often cannot (see Troubleshooting, Issue 9). With no size that fits, the
+    script stops with exit code 1 and a message before it starts anything.
 
 .PARAMETER WaitMinutes
     How long to wait for the item to read Protected. Default: 90
@@ -400,7 +403,7 @@ if ($TestFailover) {
         Exit-Lab -FailureCount 1
     }
 } else {
-    Write-Host "`n[6/6] Test failover skipped; run with -TestFailover or use Step 5.2.7." -ForegroundColor Gray
+    Write-Host "`n[6/6] Test failover skipped (optional); run with -TestFailover or use Step 5.2.7 if your subscription can start the failover VM." -ForegroundColor Gray
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan

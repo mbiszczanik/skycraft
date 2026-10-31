@@ -11,7 +11,7 @@ By completing this lab, you will:
 - Understand the difference between **LRS** and **GRS** for backup data
 - Understand **Soft Delete** for protected items (and why Azure now enforces it)
 - Route backup alerts to an action group with an **alert processing rule**
-- Replicate a VM to a second region with **Azure Site Recovery** and run a test failover
+- Replicate a VM to a second region with **Azure Site Recovery** and, where your subscription allows it, run an optional test failover
 
 ---
 
@@ -35,7 +35,7 @@ By completing this lab, you will:
 
 1. **Azure Backup**: Protect VMs using RSV.
 2. **Backup Vault**: Protect Blob Storage operational data.
-3. **Site Recovery**: Enable replication of the world VM to North Europe and prove it with a test failover.
+3. **Site Recovery**: Enable replication of the world VM to North Europe until it reads **Protected**. A test failover is an optional proof on top of that (Step 5.2.7).
 
 ---
 
@@ -59,7 +59,7 @@ Before starting this lab:
 - [ ] **Owner** or **User Access Administrator** on `dev-skycraft-swc-kv` (Step 5.2.3 grants the *Backup Management Service* app a role there)
 - [ ] Completed **Lab 4.1: Storage Accounts** with the production account (`prodskycraftswcsa` in `prod-skycraft-swc-rg` is the blob backup datasource - run 4.1 with `-All`, the dev-only cycle does not create it)
 - [ ] Resource group `platform-skycraft-swc-rg` exists (Lab 1.2)
-- [ ] **Section 4 only**: quota in **North Europe** for the failover VM, 2 vCPUs for `Standard_B2ls_v2` or the nearest size your subscription may use there (the test failover starts it there; check with `Get-AzComputeResourceSku -Location northeurope`). Lab 1.3 allows Sweden Central and North Europe only, so those are the only regions Site Recovery can target
+- [ ] **Section 4, Step 5.2.7 only, and only if you run the optional test failover**: quota in **North Europe** for the failover VM, 2 vCPUs for `Standard_B2ls_v2` or the nearest size your subscription may use there (the test failover starts it there; check with `Get-AzComputeResourceSku -Location northeurope`). Lab 1.3 allows Sweden Central and North Europe only, so those are the only regions Site Recovery can target
 
 The Lab 5.1, Lab 3.2, Lab 4.1 and resource group items are what the scripts check: `scripts/Deploy-Bicep.ps1` stops on a missing resource group, workspace or action group, and only warns about a missing key vault (step [2/7]) or VM (step [7/7]); `scripts/New-LabBlobBackup.ps1` stops on a missing Backup vault or storage account. The shortest chain that also satisfies the gates of the labs it runs is 1.2 → 2.1 → 2.3 → 3.2 (dev, needs `~/.ssh/skycraft-dev.pub`) → 4.1 `-All` → 5.1 → 5.2 (see `tools/lab-cycle-manifest.psd1`).
 
@@ -459,9 +459,11 @@ Azure CLI has no complete equivalent for Site Recovery; use the Portal or Az Pow
 
 ---
 
-### Step 5.2.7: Perform Test Failover
+### Step 5.2.7: Perform Test Failover (optional)
 
 A test failover starts a copy of the VM from a recovery point in the target region, in a network of your choice, and leaves the source VM and the replication untouched. You prove the copy boots, then clean it up so that it stops costing money.
+
+> **This step is optional.** The lab ends when the replication reads **Protected** (Step 5.2.6) and `scripts/Test-Lab.ps1` passes: neither needs a test failover, and no later step depends on one. The failover VM starts in North Europe, so the size you start must be offered to your subscription there and must fit the free cores of its quota. A Free Trial subscription often cannot do that: `Standard_B2ls_v2` is not offered in North Europe, the core quota is 4, every confidential size is refused, and Site Recovery's own default, `Standard_HC44rs`, needs 44 cores. If your subscription is like that, skip this step, or request core quota for North Europe under **Quotas** in the Portal and come back to it. `Enable-SiteRecovery.ps1` runs a test failover only with `-TestFailover`, and with that switch it stops with exit code 1 and a message when no size fits.
 
 Site Recovery picks the recovery size of the copy itself, and its pick can be a size your quota cannot start: `Standard_HC44rs`, 44 cores, in the live run of 2026-10-31, against a limit of 4 cores. Set the size first: the size of the source VM when your subscription may use it in North Europe, else the nearest size it may use (2 vCPUs, at least the memory of the source, not a confidential size). A subscription can be barred from a size in one region: `Standard_B2ls_v2` was not offered in North Europe to the test subscription, and an update to a size Site Recovery cannot use fails with `The selected VM size '' does not support disk controller type 'SCSI'`, whatever the size.
 
@@ -502,9 +504,9 @@ If the size update fails, check whether the subscription may use that size in No
 
 #### Test failover: Azure CLI and Bicep
 
-Azure CLI has no complete equivalent; use the Portal or Az PowerShell. The Bicep path ends with `.\scripts\Enable-SiteRecovery.ps1 -TestFailover`, which is idempotent: it finds the replication that `Deploy-Bicep.ps1` started.
+Azure CLI has no complete equivalent; use the Portal or Az PowerShell. The Bicep path ends with the replication that `Deploy-Bicep.ps1` started. To also run the optional test failover, run `.\scripts\Enable-SiteRecovery.ps1 -TestFailover`, which is idempotent: it finds that replication.
 
-**Expected Result**: The test failover job reads **Succeeded**, `dev-skycraft-swc-world-vm-test` ran in North Europe in the size of the source VM (or the nearest size your subscription may use there), and after the cleanup it is gone from **Virtual machines** while the replication still reads **Protected**.
+**Expected Result** (only if you ran the optional test failover): The test failover job reads **Succeeded**, `dev-skycraft-swc-world-vm-test` ran in North Europe in the size of the source VM (or the nearest size your subscription may use there), and after the cleanup it is gone from **Virtual machines** while the replication still reads **Protected**.
 
 ---
 
@@ -718,7 +720,7 @@ The steps below run commands on the VM with **Run command**, which needs no Bast
 - [ ] Alert processing rule `skycraft-backup-critical-apr` applies `skycraft-ops-ag` to the vault's Critical alerts
 - [ ] Target group `platform-skycraft-neu-asr-rg` in North Europe, tagged, holding the Site Recovery vault
 - [ ] Replication of `dev-skycraft-swc-world-vm` is **Protected** and healthy
-- [ ] Test failover succeeded in the size of the source VM and its test VM was cleaned up
+- [ ] Optional, only if you ran Step 5.2.7: the test failover succeeded in the size of the source VM and its test VM was cleaned up
 - [ ] A file from the world VM's recovery point read back, and the disks unmounted
 - [ ] Detailed verification performed (see checklist)
 
@@ -827,7 +829,7 @@ To avoid the problem for new VMs, build Lab 3.2 with `Deploy-Bicep.ps1`, which p
 
 **Root Cause**: Site Recovery picks the recovery size itself, and its pick can have far more cores than your quota. The refusal does not come from the disk controller, and the message prints an empty size name. In the live run of 2026-10-31 it came for two kinds of size: sizes the subscription is barred from in North Europe (restriction `NotAvailableForSubscription` in `Get-AzComputeResourceSku -Location northeurope`; `Standard_B2ls_v2`, `Standard_B2s` and `Standard_D2s_v3` were among them) and every confidential size (`DC` and `EC` families; five tried). Offered non-confidential sizes were accepted (`Standard_HC44-16rs`, `Standard_M12s_v3`), but all of them have more cores than the 4-core limit of that subscription, so no test failover could run there.
 
-**Solution**: Choose a size the subscription may use in North Europe, is not confidential and fits the free cores of your quota. `Enable-SiteRecovery.ps1` picks the nearest such size, and with `-TestFailover` it stops with exit 1 before the test failover when there is none. Then ask for core quota in North Europe (a quota request in the Portal under **Quotas**) or use a subscription that offers the source size there, and run the test failover after the size reads as you set it.
+**Solution**: The test failover is optional, so you can skip it: the lab is complete with a **Protected** replication. To run it, choose a size the subscription may use in North Europe, is not confidential and fits the free cores of your quota. `Enable-SiteRecovery.ps1` picks the nearest such size, and with `-TestFailover` it stops with exit 1 before the test failover when there is none. Then ask for core quota in North Europe (a quota request in the Portal under **Quotas**) or use a subscription that offers the source size there, and run the test failover after the size reads as you set it.
 
 ### Issue 10: The enable job ends `PartiallySucceeded` with an Entra 401
 
@@ -915,7 +917,7 @@ To avoid the problem for new VMs, build Lab 3.2 with `Deploy-Bicep.ps1`, which p
 ✅ Deployed a **Backup Vault** for Blob Storage protection
 ✅ Configured backup policies for both Compute and Storage
 ✅ Enabled **Azure Site Recovery** to replicate `dev-skycraft-swc-world-vm` to North Europe, into one tagged group
-✅ Performed a **Test Failover** in the source VM's size and cleaned it up
+✅ Optionally performed a **Test Failover** in the source VM's size and cleaned it up (skipped where the subscription cannot start the failover VM)
 ✅ Configured **Backup Reports** through the `rsv-backup-reports-diag` and `bv-backup-reports-diag` diagnostic settings
 ✅ Routed Critical backup alerts to `skycraft-ops-ag` with the alert processing rule `skycraft-backup-critical-apr`
 ✅ Granted *Backup Management Service* the key vault role an ADE-encrypted VM backup needs

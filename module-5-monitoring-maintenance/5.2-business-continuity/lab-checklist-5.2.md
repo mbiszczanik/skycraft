@@ -104,7 +104,9 @@
 - [ ] The group holds the Recovery Services vault, the cache storage account (Sweden Central), the target virtual network and the replica disks
 - [ ] No `Site-recovery-vault-RG` or `<source group>-asr` group exists
 
-### Test Failover
+### Test Failover (optional)
+
+The lab is complete with a **Protected** replication. Tick these only if you ran Step 5.2.7: the failover VM must be offered to your subscription in North Europe and fit its core quota, which a Free Trial subscription often cannot do (skip the step, or request quota).
 
 - [ ] Failover VM size set before the test, to the size of the source VM or the nearest size the subscription may use in North Europe (never Site Recovery's default, `Standard_HC44rs`: 44 cores)
 - [ ] Test failover completed successfully
@@ -301,7 +303,7 @@ $items | Format-Table -AutoSize
 | **Blob Policy**             | `SkyCraft-Blob-Policy`      | Operational, 30-day | [x] |
 | **Alert processing rule**   | `skycraft-backup-critical-apr` | Sev0 → `skycraft-ops-ag` | [ ] |
 | **Site Recovery**           | `dev-skycraft-swc-world-vm` → North Europe, `platform-skycraft-neu-asr-rg` | Continuous    | [ ]    |
-| **Test Failover**           | Completed + cleaned up      | Validated     | [ ]    |
+| **Test Failover** (optional) | Completed + cleaned up, or skipped | Validated or skipped | [ ]    |
 
 ---
 
@@ -374,7 +376,7 @@ You've successfully completed **Lab 5.2: Business Continuity & Disaster Recovery
 - ✅ Multi-layered BCDR strategy with Recovery Services and Backup Vaults
 - ✅ Automated daily VM backups with 30-day retention
 - ✅ Cross-region disaster recovery with Azure Site Recovery
-- ✅ Validated DR strategy with successful test failover
+- ✅ Validated DR strategy with a Protected replication (and, where the subscription allows, a successful test failover)
 
 **Next**: [Lab 5.3: Network Monitoring & Diagnostics →](../5.3-network-monitoring/lab-guide-5.3.md)
 

@@ -35,7 +35,8 @@
       denies what Site Recovery creates in an untagged group), holds a Recovery Services vault,
       and that vault has a replication item for dev-skycraft-swc-world-vm that reads Protected
       with health Normal. A lookup that fails is a FAIL, never a skip. The test failover of
-      Step 5.2.7 is cleaned up by its own step and is not checked here.
+      Step 5.2.7 is optional (a subscription may be unable to start the failover VM): the lab's
+      end state is the Protected replication, so no check reads or requires a test failover.
 
 .PARAMETER ProdSaName
     Production storage account name. Default: prodskycraftswcsa. Pass the name given to Lab 4.1's
