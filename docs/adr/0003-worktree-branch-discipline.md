@@ -34,7 +34,7 @@ For any work that meets **any** of the following criteria, use an isolated
 `git worktree`:
 
 - The work is expected to span **two or more commits**.
-- The work is dispatched to an **automated agent** (Claude Code, IDE
+- The work is dispatched to an **automated agent** (a coding agent, IDE
   extensions doing edits, scripted tooling).
 - The work runs **concurrently** with other ongoing work on the same
   repository.

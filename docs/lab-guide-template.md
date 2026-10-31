@@ -57,8 +57,7 @@ By completing this lab, you will:
        colour inversion, so a dark panel inverts to light. Code and evidence
        panels use fill #e2e8f0, border #cbd5e1, text #166534.
 
-  Render both themes with the excalidraw-diagram skill:
-    cd ~/.claude/skills/excalidraw-diagram/references
+  Render both themes with an Excalidraw-to-SVG renderer, for example:
     uv run python render_excalidraw.py --format svg             <file>.excalidraw
     uv run python render_excalidraw.py --format svg --theme dark <file>.excalidraw
 

@@ -59,7 +59,7 @@ BeforeDiscovery {
         'module-3-compute/3.4-app-service/scripts/Test-Lab.ps1'                   = 2
     }
 
-    # Tracked files only: a worktree under .claude/ or a scratch file is not the repository.
+    # Tracked files only: a worktree under a tool folder or a scratch file is not the repository.
     $tracked = @(git -C $repoRoot ls-files -- 'module-*' 'tools')
     $script:Files = foreach ($relative in $tracked) {
         if ($relative -notmatch '^(module-[^/]+/[^/]+/scripts/[^/]+|tools/.+)\.(ps1|psm1)$') { continue }
