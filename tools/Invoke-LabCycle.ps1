@@ -95,8 +95,10 @@
 
 .PARAMETER UniqueNames
     Names of your own for the resources whose names are unique across Azure, by the lab scripts'
-    parameter name: @{ KeyVaultName = '...'; AcrName = '...'; AppName = '...' }. The manifest's
-    UniqueNames section says which lab each belongs to. Each value goes to that lab's Deploy, Test
+    parameter name: @{ KeyVaultName = '...'; AcrName = '...'; AppName = '...' }, and for the
+    storage accounts of Labs 4.1-5.3 PlatformSaName, DevSaName and ProdSaName (Labs 4.3 and 4.4
+    receive ProdSaName as -StorageAccountName). The manifest's UniqueNames section says which labs
+    each belongs to and which of their scripts take it. Each value goes to those labs' Deploy, Test
     and teardown invocations and to the soft-delete guard for that name, so the run checks,
     validates and removes the resource it created (#438). A key the manifest does not declare stops
     the run before anything is deployed.
@@ -204,6 +206,11 @@
     .\Invoke-LabCycle.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000 -Labs 3.2,3.3 -UniqueNames @{ KeyVaultName = 'dev-skycraft-swc-kv-ab'; AcrName = 'devskycraftswcacr01ab' } -Yes
 
     Runs labs 3.2 and 3.3 under a vault and registry name of your own, when the defaults are taken.
+
+.EXAMPLE
+    .\Invoke-LabCycle.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000 -Labs 4.1,4.2,4.3,4.4 -UniqueNames @{ PlatformSaName = 'platformskycraftswcsaab'; DevSaName = 'devskycraftswcsaab'; ProdSaName = 'prodskycraftswcsaab' } -Yes
+
+    Runs the storage labs under storage account names of your own, when the defaults are taken.
 
 .NOTES
     Project: SkyCraft
@@ -631,12 +638,15 @@ foreach ($id in $order) {
     if ($phase.RequiresOpsEmail) { $deployArguments['OpsEmail'] = $OpsEmail }
 
     # Test gets the same names as Deploy, or it validates the taken default the deploy avoided.
+    # Each step gets only the names its script takes (the manifest entry's Steps).
     $testArguments = @{}
     if ($phase.Test) { foreach ($key in $phase.Test.Keys) { $testArguments[$key] = $phase.Test[$key] } }
-    $labNames = Get-LabCycleUniqueNameArgument -Declared $manifest.UniqueNames -UniqueNames $UniqueNames -Lab $phase.Lab
-    foreach ($key in $labNames.Keys) {
-        $deployArguments[$key] = $labNames[$key]
-        $testArguments[$key]   = $labNames[$key]
+    $postDeployArguments = @{}
+    if ($phase.PostDeploy -and $phase.PostDeploy.Arguments) { foreach ($key in $phase.PostDeploy.Arguments.Keys) { $postDeployArguments[$key] = $phase.PostDeploy.Arguments[$key] } }
+    foreach ($stepName in 'Deploy', 'PostDeploy', 'Test') {
+        $stepNames = Get-LabCycleUniqueNameArgument -Declared $manifest.UniqueNames -UniqueNames $UniqueNames -Lab $phase.Lab -Step $stepName
+        $target = switch ($stepName) { 'Deploy' { $deployArguments } 'PostDeploy' { $postDeployArguments } 'Test' { $testArguments } }
+        foreach ($key in $stepNames.Keys) { $target[$key] = $stepNames[$key] }
     }
 
     # '$null -ne' rather than @() around it, and this is the $null-collection trap the header warns
@@ -648,7 +658,7 @@ foreach ($id in $order) {
 
     $steps = [System.Collections.Generic.List[hashtable]]::new()
     $steps.Add(@{ Kind = 'Deploy'; Arguments = $deployArguments; StdinAnswers = $stdinAnswers })
-    if ($phase.PostDeploy) { $steps.Add(@{ Kind = 'PostDeploy'; Arguments = $phase.PostDeploy.Arguments; Script = $phase.PostDeploy.Script }) }
+    if ($phase.PostDeploy) { $steps.Add(@{ Kind = 'PostDeploy'; Arguments = $postDeployArguments; Script = $phase.PostDeploy.Script }) }
 
     # TestExcluded names a validation this environment cannot perform, and carries the reason. It is
     # not a way to silence an inconvenient validator: the phase still deploys, the reason is printed

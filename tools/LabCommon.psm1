@@ -91,6 +91,16 @@
     value sits in .Value, so `$deployment.Outputs | Format-Table` prints the names without the
     values.
 
+    Invoke-LabWithoutLock (issue #372) runs a cleanup's deletes with Lab 1.3's CanNotDelete lock
+    lifted from platform-skycraft-swc-rg or prod-skycraft-swc-rg, and puts the lock back with
+    the same name, level and notes in a finally block. It touches no other lock, and returns the
+    number of lock reads, removals and restores that failed. Keep it in a variable first:
+    `$script:cleanupFailures += Invoke-LabWithoutLock ...` reads the count before -Action raises
+    it, and loses what -Action counted.
+
+        $lockFailures = Invoke-LabWithoutLock -ResourceGroupName $groups -WhatIf:$WhatIfPreference -Action { ... }
+        $script:cleanupFailures += $lockFailures
+
     The rest of #301 (Invoke-LabCheck, Get-LabResourceOrFail, Assert-LabSubscription) is not here
     yet. tests/Exit-Code-Propagation.Tests.ps1 requires every lab script, except a helper that
     lab scripts dot-source, to import this module and call Exit-Lab, forbids a direct
@@ -102,7 +112,7 @@
 
 .NOTES
     Project: SkyCraft
-    Issues: #257, #301, #354, #375, #397, #411
+    Issues: #257, #301, #354, #372, #375, #397, #411
 #>
 
 #Requires -Version 7.0
@@ -918,6 +928,7 @@ $script:LabGlobalNameKinds = @{
     KeyVault          = @{ Label = 'Key vault'; Rule = '3-24 letters, digits and hyphens'; Provider = 'Microsoft.KeyVault'; Type = 'Microsoft.KeyVault/vaults'; ApiVersion = '2023-07-01' }
     ContainerRegistry = @{ Label = 'Container registry'; Rule = '5-50 letters and digits, no hyphens'; Provider = 'Microsoft.ContainerRegistry'; Type = 'Microsoft.ContainerRegistry/registries'; ApiVersion = '2023-07-01' }
     WebApp            = @{ Label = 'Web app'; Rule = '2-60 letters, digits and hyphens'; Provider = 'Microsoft.Web'; Type = 'Site'; ApiVersion = '2024-04-01' }
+    StorageAccount    = @{ Label = 'Storage account'; Rule = '3-24 lowercase letters and digits'; Provider = 'Microsoft.Storage'; Type = 'Microsoft.Storage/storageAccounts'; ApiVersion = '2023-05-01' }
 }
 
 function Get-LabNameUnavailableReason {
@@ -935,7 +946,7 @@ function Get-LabNameUnavailableReason {
         (a secure unique default hostname), which is the check the Portal's create form runs.
 
     .PARAMETER Kind
-        KeyVault, ContainerRegistry or WebApp.
+        KeyVault, ContainerRegistry, WebApp or StorageAccount.
 
     .PARAMETER Name
         The name to check.
@@ -956,7 +967,7 @@ function Get-LabNameUnavailableReason {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('KeyVault', 'ContainerRegistry', 'WebApp')]
+        [ValidateSet('KeyVault', 'ContainerRegistry', 'WebApp', 'StorageAccount')]
         [string]$Kind,
 
         [Parameter(Mandatory)]
@@ -1001,7 +1012,7 @@ function Test-LabGlobalName {
         not checked. If the check cannot run, the deploy stops too.
 
     .PARAMETER Kind
-        KeyVault, ContainerRegistry or WebApp.
+        KeyVault, ContainerRegistry, WebApp or StorageAccount.
 
     .PARAMETER Name
         The name the deploy will use.
@@ -1026,7 +1037,7 @@ function Test-LabGlobalName {
     [OutputType([bool])]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('KeyVault', 'ContainerRegistry', 'WebApp')]
+        [ValidateSet('KeyVault', 'ContainerRegistry', 'WebApp', 'StorageAccount')]
         [string]$Kind,
 
         [Parameter(Mandatory)]
@@ -1196,4 +1207,216 @@ function Remove-LabDnsLink {
     }
 }
 
-Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabDnsLink, Remove-LabDnsLink
+# --- Lab 1.3's delete locks (issue #372) -------------------------------------------------------
+
+# The CanNotDelete locks Lab 1.3 puts on two groups (Step 1.3.11). No other lock is touched here.
+$script:LabGroupLock = @{
+    'platform-skycraft-swc-rg' = 'lock-no-delete-platform'
+    'prod-skycraft-swc-rg'     = 'lock-no-delete-prod'
+}
+$script:LabLockApiVersion = '2020-05-01'
+
+# The command that recreates a lock as it was recorded: New-AzResourceLock cannot set owners, so
+# a lock that has them is given as the ARM PUT itself.
+function Get-LabLockRestoreCommand {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Lock
+    )
+
+    if (@($Lock.Owners).Count -gt 0) {
+        return "Invoke-AzRestMethod -Method PUT -Path '$($Lock.Path)' -Payload '$($Lock.Payload -replace "'", "''")'"
+    }
+    $command = "New-AzResourceLock -ResourceGroupName '$($Lock.ResourceGroupName)' -LockName '$($Lock.Name)' -LockLevel $($Lock.Level)"
+    if ($Lock.Notes) { $command += " -LockNotes '$($Lock.Notes -replace "'", "''")'" }
+    return "$command -Force"
+}
+
+function Invoke-LabWithoutLock {
+    <#
+    .SYNOPSIS
+        Runs a cleanup's deletes with Lab 1.3's delete lock lifted from the groups they delete in,
+        and restores the lock afterwards, also when a delete fails.
+
+    .DESCRIPTION
+        Lab 1.3 puts a CanNotDelete lock on platform-skycraft-swc-rg (lock-no-delete-platform)
+        and prod-skycraft-swc-rg (lock-no-delete-prod). While it is there, every delete in the
+        group, a child resource or a role assignment included, fails with ScopeLocked (#372).
+
+        For each of those two groups named in -ResourceGroupName, this reads the Lab 1.3 lock
+        through the ARM locks API and records its name, level, notes and owners. It removes the
+        locks it found, waits for ARM to apply the removal (Lab 1.3's cleanup measured the need),
+        runs -Action, and in a finally block puts every removed lock back with the recorded
+        properties, three attempts each. Any other group in -ResourceGroupName is ignored, and so
+        is every other lock: Azure Backup's lock on a protected storage account, a lock someone
+        added by hand.
+
+        A lock that cannot be read or removed is an [ERROR]: the locks already removed are put
+        back and -Action does not run, so the cleanup does not half-run into ScopeLocked. A lock
+        that cannot be put back is an [ERROR] that names the group as unlocked and prints the
+        command that recreates the lock. A group that has no Lab 1.3 lock, or no longer exists,
+        is not an error.
+
+        Under -WhatIf nothing is removed or restored; -Action still runs, and its own
+        ShouldProcess calls report what they would delete. Pass the script's preference:
+        -WhatIf:$WhatIfPreference.
+
+        -Action runs in the calling script's scope chain, so it reads the script's variables and
+        $PSCmdlet and counts its own failures in $script:cleanupFailures. Its output goes to the
+        host. A throw from -Action still restores the locks, then propagates.
+
+    .PARAMETER ResourceGroupName
+        The groups -Action deletes in. Only platform-skycraft-swc-rg and prod-skycraft-swc-rg
+        are acted on; pass a group only when the cleanup found something to delete in it.
+
+    .PARAMETER Action
+        The deletes.
+
+    .PARAMETER SubscriptionId
+        Default: the current context's.
+
+    .PARAMETER PropagationSeconds
+        How long to wait after removing a lock. Default: 45.
+
+    .OUTPUTS
+        [int] The number of lock reads, removals and restores that failed. Add it to the
+        script's failure count in a second statement: `$script:cleanupFailures += <this call>`
+        reads the count before -Action raises it, and loses what -Action counted.
+
+    .EXAMPLE
+        $lockFailures = Invoke-LabWithoutLock -ResourceGroupName 'prod-skycraft-swc-rg' -WhatIf:$WhatIfPreference -Action {
+            Remove-AzRmStorageShare -ResourceGroupName $rg -StorageAccountName $sa -Name $share -Force
+        }
+        $script:cleanupFailures += $lockFailures
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #372
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [string[]]$ResourceGroupName,
+
+        [Parameter(Mandatory)]
+        [scriptblock]$Action,
+
+        [Parameter()]
+        [string]$SubscriptionId,
+
+        [Parameter()]
+        [ValidateRange(0, 600)]
+        [int]$PropagationSeconds = 45
+    )
+
+    $failures = 0
+    $groups = @($ResourceGroupName | Where-Object { $_ -and $script:LabGroupLock.ContainsKey($_) } | Select-Object -Unique)
+    $found = [System.Collections.Generic.List[pscustomobject]]::new()
+    $blocked = $false
+
+    if ($groups.Count -gt 0 -and -not $SubscriptionId) {
+        try {
+            $SubscriptionId = [string](Get-AzContext -ErrorAction Stop).Subscription.Id
+        }
+        catch {
+            Write-Host "  [ERROR] Could not read the Az context: $($_.Exception.Message)" -ForegroundColor Red
+        }
+        if (-not $SubscriptionId) {
+            $failures++
+            $blocked = $true
+            Write-Host "  [ERROR] No subscription in the Az context, so Lab 1.3's locks on $($groups -join ', ') cannot be read. Nothing was deleted there." -ForegroundColor Red
+        }
+    }
+
+    foreach ($group in $(if ($blocked) { @() } else { $groups })) {
+        $name = $script:LabGroupLock[$group]
+        $path = "/subscriptions/$SubscriptionId/resourceGroups/$group/providers/Microsoft.Authorization/locks/$($name)?api-version=$script:LabLockApiVersion"
+        try {
+            $lock = Invoke-LabArmRequest -Method GET -Path $path
+        }
+        catch {
+            if ($_.Exception.Data['StatusCode'] -eq 404) { continue }
+            $failures++
+            $blocked = $true
+            Write-Host "  [ERROR] Could not read Lab 1.3's lock '$name' on '$group': $($_.Exception.Message)" -ForegroundColor Red
+            continue
+        }
+        $properties = [ordered]@{ level = [string]$lock.properties.level }
+        if ($lock.properties.notes) { $properties.notes = [string]$lock.properties.notes }
+        $owners = @($lock.properties.owners | Where-Object { $_ })
+        if ($owners.Count -gt 0) { $properties.owners = $owners }
+        $found.Add([pscustomobject]@{
+                ResourceGroupName = $group
+                Name              = $name
+                Path              = $path
+                Level             = $properties.level
+                Notes             = $properties.notes
+                Owners            = $owners
+                Payload           = (@{ properties = $properties } | ConvertTo-Json -Depth 6 -Compress)
+            })
+    }
+
+    $removed = [System.Collections.Generic.List[pscustomobject]]::new()
+    try {
+        if (-not $blocked) {
+            foreach ($lock in $found) {
+                if (-not $PSCmdlet.ShouldProcess("$($lock.Name) on $($lock.ResourceGroupName)", "Lift Lab 1.3's $($lock.Level) lock for the deletes and restore it afterwards")) { continue }
+                try {
+                    Invoke-LabArmRequest -Method DELETE -Path $lock.Path | Out-Null
+                    $removed.Add($lock)
+                    Write-Host "  [INFO] Lifted Lab 1.3's lock '$($lock.Name)' on '$($lock.ResourceGroupName)' for the deletes; it is restored afterwards." -ForegroundColor Yellow
+                }
+                catch {
+                    $failures++
+                    $blocked = $true
+                    Write-Host "  [ERROR] Could not lift Lab 1.3's lock '$($lock.Name)' on '$($lock.ResourceGroupName)': $($_.Exception.Message)" -ForegroundColor Red
+                    break
+                }
+            }
+        }
+
+        if ($blocked) {
+            Write-Host "  [ERROR] The deletes in $($groups -join ', ') were not attempted: while Lab 1.3's lock is there they fail with ScopeLocked. Remove it by hand (the group's Settings > Locks), run this script again, then create it again as in Lab 1.3, Step 1.3.11." -ForegroundColor Red
+        }
+        else {
+            if ($removed.Count -gt 0 -and $PropagationSeconds -gt 0) {
+                Write-Host "  Waiting $PropagationSeconds seconds for the lock removal to reach ARM..." -ForegroundColor Gray
+                Start-Sleep -Seconds $PropagationSeconds
+            }
+            & $Action | Out-Host
+        }
+    }
+    finally {
+        foreach ($lock in $removed) {
+            $restoreError = $null
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+                try {
+                    Invoke-LabArmRequest -Method PUT -Path $lock.Path -Payload $lock.Payload | Out-Null
+                    $restoreError = $null
+                    break
+                }
+                catch {
+                    $restoreError = $_
+                    if ($attempt -lt 3) { Start-Sleep -Seconds 5 }
+                }
+            }
+            if ($restoreError) {
+                $failures++
+                Write-Host "  [ERROR] Could not restore Lab 1.3's lock '$($lock.Name)' on '$($lock.ResourceGroupName)': $($restoreError.Exception.Message)" -ForegroundColor Red
+                Write-Host "  [ERROR] '$($lock.ResourceGroupName)' is UNLOCKED. Recreate the lock now:" -ForegroundColor Red
+                Write-Host "      $(Get-LabLockRestoreCommand -Lock $lock)" -ForegroundColor Red
+            }
+            else {
+                Write-Host "  [INFO] Restored Lab 1.3's lock '$($lock.Name)' on '$($lock.ResourceGroupName)' ($($lock.Level))." -ForegroundColor Green
+            }
+        }
+    }
+
+    return $failures
+}
+
+Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock

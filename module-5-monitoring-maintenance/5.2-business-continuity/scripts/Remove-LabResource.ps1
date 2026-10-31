@@ -7,9 +7,10 @@
     1. Blob backup instances (Backup Vault)
     2. RBAC role assignments granted to the Backup Vault identity on the storage account
        (Storage Blob Data Owner, Storage Account Backup Contributor)
-    3. Backup Vault (platform-skycraft-swc-bv)
+    3. Backup Vault (platform-skycraft-swc-bv), after every diagnostic setting on it is removed
     4. VM backup protection item with data deletion
-    5. Recovery Services Vault (platform-skycraft-swc-rsv)
+    5. Recovery Services Vault (platform-skycraft-swc-rsv), after every diagnostic setting on it
+       is removed
     6. The instant-restore snapshot resource group platform-skycraft-swc-rpc<n>-rg, with the
        restore point collection inside it. SkyCraft owns it (main.bicep creates it and the VM
        backup policy names it, issue #184), so it is deleted outright.
@@ -24,6 +25,11 @@
       read and removed through the Azure Resource Manager role assignments API
       (tools/LabCommon.psm1), so the cleanup needs no Microsoft Graph sign-in
       (issue #397).
+    - Deleting a vault does not delete its diagnostic settings, and they re-attach to the next
+      vault created with the same id (issue #373: 'rsv-backup-reports-diag' and
+      'bv-backup-reports-diag' from step 5.2.8). Each vault's diagnostic settings are listed and
+      removed, whatever their names, before the vault is deleted. A listing or a removal that
+      fails is counted and the vault stays, so a rerun can still reach its settings.
     - Azure Site Recovery resources (ASR fabric, replication, cache storage
       account) must be cleaned up manually via the Azure Portal before
       deleting the Recovery Services Vault.
@@ -47,10 +53,20 @@
       there for a rerun to remove the assignments with;
     - an AzureBackupRG_* group survives a failed check that it is empty.
 
+    Lab 1.3's CanNotDelete lock on the platform and prod groups refuses steps 1-5 (ScopeLocked,
+    issue #372). Those deletes run inside Invoke-LabWithoutLock (tools/LabCommon.psm1), which
+    lifts the lock, runs them and puts it back with the same name, level and notes, also when
+    one fails. A lock it cannot read, lift or restore is an [ERROR] and counted; any other lock
+    is left alone.
+
     Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
     otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
     it leaves the session open and the code in $LASTEXITCODE (issue #257).
+
+.PARAMETER ProdSaName
+    Production storage account name. Default: prodskycraftswcsa. Pass the name given to Lab 4.1's
+    Deploy-Bicep.ps1.
 
 .PARAMETER Force
     Skip confirmation prompts.
@@ -69,10 +85,14 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.RecoveryServices, Az.DataProtection, Az.Resources, Az.Storage
+#Requires -Modules Az.Accounts, Az.RecoveryServices, Az.DataProtection, Az.Resources, Az.Storage, Az.Monitor
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
+    [Parameter()]
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$ProdSaName = 'prodskycraftswcsa',
+
     [Parameter()]
     [switch]$Force
 )
@@ -87,7 +107,7 @@ $platformRg     = 'platform-skycraft-swc-rg'
 $prodRg         = 'prod-skycraft-swc-rg'
 $rsvName        = 'platform-skycraft-swc-rsv'
 $bvName         = 'platform-skycraft-swc-bv'
-$storageAccount = 'prodskycraftswcsa'
+$storageAccount = $ProdSaName
 $location       = 'swedencentral'
 # Azure Backup names the snapshot group <prefix><n><suffix>; main.bicep creates n = 1, and the
 # service adds n = 2, 3, ... only when one group fills up. The pattern covers all of them.
@@ -186,6 +206,40 @@ function Invoke-LabLookup {
         Write-Host "    A failed lookup is not 'absent': it may still exist, so this counts as a failure." -ForegroundColor Gray
         return [pscustomobject]@{ Value = @(); NotFound = $false; Failed = $true }
     }
+}
+
+# Removes every diagnostic setting on each of $ResourceId, whatever its name, so a recreated
+# resource with the same id does not inherit one (#373). Returns $false when a listing or a
+# removal failed (both are counted): the caller keeps the resource, since deleting it would leave
+# the setting behind for good. A listing that reports the resource not found has nothing to remove.
+function Remove-LabDiagnosticSetting {
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$ResourceId
+    )
+
+    $clean = $true
+    foreach ($id in $ResourceId) {
+        $shortId = ($id -split '/providers/')[-1]
+        $lookup = Invoke-LabLookup -Target "the diagnostic settings of $shortId" -Lookup {
+            Get-AzDiagnosticSetting -ResourceId $id -ErrorAction Stop
+        }
+        if ($lookup.Failed) { $clean = $false; continue }
+        foreach ($setting in @($lookup.Value | Where-Object { $_ })) {
+            if (-not $PSCmdlet.ShouldProcess("$shortId/$($setting.Name)", 'Remove diagnostic setting')) { continue }
+            try {
+                Remove-AzDiagnosticSetting -ResourceId $id -Name $setting.Name -ErrorAction Stop | Out-Null
+                Write-Host "  ✓ Removed diagnostic setting '$($setting.Name)' on $shortId" -ForegroundColor Green
+            } catch {
+                $script:cleanupFailures++
+                $clean = $false
+                Write-Host "  [ERROR] Could not remove diagnostic setting '$($setting.Name)' on $($shortId): $_" -ForegroundColor Red
+            }
+        }
+    }
+    return $clean
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
@@ -367,114 +421,135 @@ if ($resourcesToDelete.Count -eq 0) {
     Write-Host "`nDeleting resources..." -ForegroundColor Yellow
 }
 
-# 1. Delete Blob Backup Instances
-foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BlobInstance' }) {
-    if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete blob backup instance')) { continue }
-    Write-Host "  Deleting Blob Backup Instance: $($r.Name)..." -ForegroundColor Gray
-    try {
-        Remove-AzDataProtectionBackupInstance `
-            -ResourceGroupName $platformRg `
-            -VaultName $bvName `
-            -Name $r.Name | Out-Null
-        Write-Host "  ✓ Deleted" -ForegroundColor Green
-        Write-Host "  [INFO] Point-in-time restore, which blob backup turned on, may stay on $storageAccount; Lab 4.2's cleanup turns it off." -ForegroundColor Gray
-    } catch {
-        $script:cleanupFailures++
-        Write-Host "  [ERROR] Could not delete blob backup instance '$($r.Name)': $_" -ForegroundColor Red
+# Steps 1-5 delete in the groups Lab 1.3 locks with CanNotDelete (ScopeLocked): the vaults and
+# their items in the platform group, the role assignments on the prod storage account.
+# Invoke-LabWithoutLock lifts the locks for them and puts them back (#372). Steps 6 and 7 delete
+# in groups Lab 1.3 does not lock.
+$lockGroups = @(foreach ($r in $resourcesToDelete) {
+    switch ($r.Type) {
+        'RoleAssignment' { $prodRg }
+        { $_ -in @('BlobInstance', 'BackupVault', 'VmBackupItem', 'RSV') } { $platformRg }
     }
-}
-
-# 2. Remove RBAC role assignments granted to the BV identity (before deleting the vault,
-#    so the managed identity is still resolvable and no orphaned assignments remain).
-foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RoleAssignment' }) {
-    if (-not $PSCmdlet.ShouldProcess("$($r.Name) -> $storageAccount", 'Remove role assignment')) { continue }
-    Write-Host "  Removing role assignment '$($r.Name)' on $storageAccount..." -ForegroundColor Gray
-    # Through the ARM role assignments API (tools/LabCommon.psm1), not Get-AzRoleAssignment /
-    # Remove-AzRoleAssignment, which resolve the principal through Microsoft Graph and fail where
-    # the Az sign-in cannot get a Graph token (issue #397). The listing also returns assignments
-    # inherited from above; only the one made on the storage account itself is the lab's.
-    $assignmentLookup = Invoke-LabLookup -Target "role assignment '$($r.Name)' on $storageAccount" -Lookup {
-        Get-LabArmRoleAssignment -Scope $r.Scope -PrincipalId $r.PrincipalId |
-            Where-Object { $_.RoleDefinitionId -eq $r.RoleId -and $_.Scope -eq $r.Scope }
-    }
-    if ($assignmentLookup.Failed) {
-        $script:backupVaultMustStay = $true
-        continue
-    }
-    try {
-        if ($assignmentLookup.Value.Count -gt 0) {
-            foreach ($assignment in $assignmentLookup.Value) {
-                Remove-LabArmRoleAssignment -Id $assignment.RoleAssignmentId
-            }
-            Write-Host "  ✓ Removed role assignment: $($r.Name)" -ForegroundColor Green
-        } else {
-            Write-Host "  ✓ Role assignment already absent: $($r.Name)" -ForegroundColor Green
+})
+$lockFailures = Invoke-LabWithoutLock -ResourceGroupName $lockGroups -WhatIf:$WhatIfPreference -Action {
+    # 1. Delete Blob Backup Instances
+    foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BlobInstance' }) {
+        if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete blob backup instance')) { continue }
+        Write-Host "  Deleting Blob Backup Instance: $($r.Name)..." -ForegroundColor Gray
+        try {
+            Remove-AzDataProtectionBackupInstance `
+                -ResourceGroupName $platformRg `
+                -VaultName $bvName `
+                -Name $r.Name | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+            Write-Host "  [INFO] Point-in-time restore, which blob backup turned on, may stay on $storageAccount; Lab 4.2's cleanup turns it off." -ForegroundColor Gray
+        } catch {
+            $script:cleanupFailures++
+            Write-Host "  [ERROR] Could not delete blob backup instance '$($r.Name)': $_" -ForegroundColor Red
         }
-    } catch {
-        $script:cleanupFailures++
-        $script:backupVaultMustStay = $true
-        Write-Host "  [ERROR] Could not remove role assignment '$($r.Name)': $_" -ForegroundColor Red
     }
-}
 
-# 3. Delete Backup Vault. While its blob backup instances or its role assignments could not be
-#    checked or removed, the vault stays: its identity is what a rerun needs to find and remove
-#    the assignments, and the [ERROR] above already makes this run exit 1.
-foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BackupVault' }) {
-    if ($script:backupVaultMustStay) {
-        Write-Host "  [INFO] $($r.Name) left in place - its backup instances or role assignments could not be checked or removed (see the [ERROR] above)." -ForegroundColor Gray
-        continue
+    # 2. Remove RBAC role assignments granted to the BV identity (before deleting the vault,
+    #    so the managed identity is still resolvable and no orphaned assignments remain).
+    foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RoleAssignment' }) {
+        if (-not $PSCmdlet.ShouldProcess("$($r.Name) -> $storageAccount", 'Remove role assignment')) { continue }
+        Write-Host "  Removing role assignment '$($r.Name)' on $storageAccount..." -ForegroundColor Gray
+        # Through the ARM role assignments API (tools/LabCommon.psm1), not Get-AzRoleAssignment /
+        # Remove-AzRoleAssignment, which resolve the principal through Microsoft Graph and fail where
+        # the Az sign-in cannot get a Graph token (issue #397). The listing also returns assignments
+        # inherited from above; only the one made on the storage account itself is the lab's.
+        $assignmentLookup = Invoke-LabLookup -Target "role assignment '$($r.Name)' on $storageAccount" -Lookup {
+            Get-LabArmRoleAssignment -Scope $r.Scope -PrincipalId $r.PrincipalId |
+                Where-Object { $_.RoleDefinitionId -eq $r.RoleId -and $_.Scope -eq $r.Scope }
+        }
+        if ($assignmentLookup.Failed) {
+            $script:backupVaultMustStay = $true
+            continue
+        }
+        try {
+            if ($assignmentLookup.Value.Count -gt 0) {
+                foreach ($assignment in $assignmentLookup.Value) {
+                    Remove-LabArmRoleAssignment -Id $assignment.RoleAssignmentId
+                }
+                Write-Host "  ✓ Removed role assignment: $($r.Name)" -ForegroundColor Green
+            } else {
+                Write-Host "  ✓ Role assignment already absent: $($r.Name)" -ForegroundColor Green
+            }
+        } catch {
+            $script:cleanupFailures++
+            $script:backupVaultMustStay = $true
+            Write-Host "  [ERROR] Could not remove role assignment '$($r.Name)': $_" -ForegroundColor Red
+        }
     }
-    if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete backup vault')) { continue }
-    Write-Host "  Deleting Backup Vault: $($r.Name)..." -ForegroundColor Gray
-    try {
-        Remove-AzDataProtectionBackupVault `
-            -ResourceGroupName $platformRg `
-            -VaultName $r.Name | Out-Null
-        Write-Host "  ✓ Deleted" -ForegroundColor Green
-    } catch {
-        $script:cleanupFailures++
-        Write-Host "  [ERROR] Could not delete Backup Vault '$($r.Name)': $_" -ForegroundColor Red
-    }
-}
 
-# 4. Disable VM backup protection and delete backup data
-foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'VmBackupItem' }) {
-    if (-not $PSCmdlet.ShouldProcess($r.FriendlyName, 'Disable VM backup protection and delete backup data')) { continue }
-    Write-Host "  Disabling VM backup protection: $($r.FriendlyName)..." -ForegroundColor Gray
-    try {
-        Disable-AzRecoveryServicesBackupProtection `
-            -Item $r.Item `
-            -VaultId $rsvExists.ID `
-            -RemoveRecoveryPoints `
-            -Force | Out-Null
-        Write-Host "  ✓ Protection disabled and backup data deleted" -ForegroundColor Green
-    } catch {
-        $script:cleanupFailures++
-        $script:protectionStillOn = $true
-        Write-Host "  [ERROR] Could not disable backup protection for '$($r.FriendlyName)': $_" -ForegroundColor Red
-        Write-Host "    Manual cleanup may be required via Azure Portal." -ForegroundColor Gray
+    # 3. Delete Backup Vault. While its blob backup instances or its role assignments could not be
+    #    checked or removed, the vault stays: its identity is what a rerun needs to find and remove
+    #    the assignments, and the [ERROR] above already makes this run exit 1.
+    foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'BackupVault' }) {
+        if ($script:backupVaultMustStay) {
+            Write-Host "  [INFO] $($r.Name) left in place - its backup instances or role assignments could not be checked or removed (see the [ERROR] above)." -ForegroundColor Gray
+            continue
+        }
+        if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete backup vault')) { continue }
+        if (-not (Remove-LabDiagnosticSetting -ResourceId "$($bvExists.Id)")) {
+            Write-Host "  [INFO] $($r.Name) left in place - its diagnostic settings could not be checked or removed (see the [ERROR] above)." -ForegroundColor Gray
+            continue
+        }
+        Write-Host "  Deleting Backup Vault: $($r.Name)..." -ForegroundColor Gray
+        try {
+            Remove-AzDataProtectionBackupVault `
+                -ResourceGroupName $platformRg `
+                -VaultName $r.Name | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        } catch {
+            $script:cleanupFailures++
+            Write-Host "  [ERROR] Could not delete Backup Vault '$($r.Name)': $_" -ForegroundColor Red
+        }
     }
-}
 
-# 5. Delete Recovery Services Vault
-foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RSV' }) {
-    if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete Recovery Services Vault')) { continue }
-    Write-Host "  Deleting Recovery Services Vault: $($r.Name)..." -ForegroundColor Gray
-    try {
-        Remove-AzRecoveryServicesVault -Vault $rsvExists | Out-Null
-        Write-Host "  ✓ Deleted" -ForegroundColor Green
-    } catch {
-        $script:cleanupFailures++
-        Write-Host "  [ERROR] Could not delete RSV '$($r.Name)': $_" -ForegroundColor Red
-        Write-Host "    Most likely cause is stale tooling: deleting a vault that still holds" -ForegroundColor Gray
-        Write-Host "    soft-deleted items needs Azure CLI 2.75.0+ or Az PowerShell 7.5.0+" -ForegroundColor Gray
-        Write-Host "    (Az.RecoveryServices $rsvMinModuleVersion+). Older versions require a fully" -ForegroundColor Gray
-        Write-Host "    empty vault and reintroduce the 14-day soft-delete wait." -ForegroundColor Gray
-        Write-Host "    Otherwise the vault still has dependencies this script does not touch:" -ForegroundColor Gray
-        Write-Host "    ASR replicated items, registered storage accounts, or private endpoints." -ForegroundColor Gray
+    # 4. Disable VM backup protection and delete backup data
+    foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'VmBackupItem' }) {
+        if (-not $PSCmdlet.ShouldProcess($r.FriendlyName, 'Disable VM backup protection and delete backup data')) { continue }
+        Write-Host "  Disabling VM backup protection: $($r.FriendlyName)..." -ForegroundColor Gray
+        try {
+            Disable-AzRecoveryServicesBackupProtection `
+                -Item $r.Item `
+                -VaultId $rsvExists.ID `
+                -RemoveRecoveryPoints `
+                -Force | Out-Null
+            Write-Host "  ✓ Protection disabled and backup data deleted" -ForegroundColor Green
+        } catch {
+            $script:cleanupFailures++
+            $script:protectionStillOn = $true
+            Write-Host "  [ERROR] Could not disable backup protection for '$($r.FriendlyName)': $_" -ForegroundColor Red
+            Write-Host "    Manual cleanup may be required via Azure Portal." -ForegroundColor Gray
+        }
+    }
+
+    # 5. Delete Recovery Services Vault
+    foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RSV' }) {
+        if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete Recovery Services Vault')) { continue }
+        if (-not (Remove-LabDiagnosticSetting -ResourceId "$($rsvExists.ID)")) {
+            Write-Host "  [INFO] $($r.Name) left in place - its diagnostic settings could not be checked or removed (see the [ERROR] above)." -ForegroundColor Gray
+            continue
+        }
+        Write-Host "  Deleting Recovery Services Vault: $($r.Name)..." -ForegroundColor Gray
+        try {
+            Remove-AzRecoveryServicesVault -Vault $rsvExists | Out-Null
+            Write-Host "  ✓ Deleted" -ForegroundColor Green
+        } catch {
+            $script:cleanupFailures++
+            Write-Host "  [ERROR] Could not delete RSV '$($r.Name)': $_" -ForegroundColor Red
+            Write-Host "    Most likely cause is stale tooling: deleting a vault that still holds" -ForegroundColor Gray
+            Write-Host "    soft-deleted items needs Azure CLI 2.75.0+ or Az PowerShell 7.5.0+" -ForegroundColor Gray
+            Write-Host "    (Az.RecoveryServices $rsvMinModuleVersion+). Older versions require a fully" -ForegroundColor Gray
+            Write-Host "    empty vault and reintroduce the 14-day soft-delete wait." -ForegroundColor Gray
+            Write-Host "    Otherwise the vault still has dependencies this script does not touch:" -ForegroundColor Gray
+            Write-Host "    ASR replicated items, registered storage accounts, or private endpoints." -ForegroundColor Gray
+        }
     }
 }
+$script:cleanupFailures += $lockFailures
 
 # 6. Delete the snapshot resource group. After the protection is gone, nothing but the released
 #    restore point collection is left in it. While a VM is still protected - or may be, because
@@ -509,7 +584,7 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RestorePointColl
     if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete orphaned restore point collection')) { continue }
     Write-Host "  Deleting restore point collection: $($r.Name)..." -ForegroundColor Gray
     try {
-        Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null
+        Remove-AzResource -ResourceId $r.ResourceId -ApiVersion '2024-07-01' -Force -ErrorAction Stop | Out-Null
         Write-Host "  ✓ Deleted" -ForegroundColor Green
     } catch {
         $script:cleanupFailures++

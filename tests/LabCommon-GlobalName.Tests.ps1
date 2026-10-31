@@ -11,7 +11,8 @@
       2. A request that fails, or an answer without nameAvailable, throws rather than reading as free.
       3. Test-LabGlobalName stops on a taken name and on a check that could not run, names the
          parameter, and does not ask about a name the lab already owns.
-      4. The deploy scripts of Labs 3.2, 3.3 and 3.4 run the check with their own parameter.
+      4. The deploy scripts of Labs 3.2, 3.3 and 3.4 run the check with their own parameter (the storage
+         account deploys of Labs 4.1-4.4 are held in tests/Storage-Account-Names.Tests.ps1).
 
     Nothing reaches Azure: Invoke-AzRestMethod is mocked inside the module.
 
@@ -61,6 +62,7 @@ Describe 'Get-LabNameUnavailableReason (#438)' {
         @{ Kind = 'KeyVault';          Expected = '/subscriptions/sub/providers/Microsoft.KeyVault/checkNameAvailability?api-version=2023-07-01';          Type = 'Microsoft.KeyVault/vaults' }
         @{ Kind = 'ContainerRegistry'; Expected = '/subscriptions/sub/providers/Microsoft.ContainerRegistry/checkNameAvailability?api-version=2023-07-01'; Type = 'Microsoft.ContainerRegistry/registries' }
         @{ Kind = 'WebApp';            Expected = '/subscriptions/sub/providers/Microsoft.Web/locations/northeurope/checknameavailability?api-version=2024-04-01'; Type = 'Site' }
+        @{ Kind = 'StorageAccount';    Expected = '/subscriptions/sub/providers/Microsoft.Storage/checkNameAvailability?api-version=2023-05-01'; Type = 'Microsoft.Storage/storageAccounts' }
     ) {
         Mock -ModuleName LabCommon Invoke-AzRestMethod { Get-ArmAnswer -Content '{"nameAvailable":true}' }
         Get-LabNameUnavailableReason -Kind $Kind -Name 'some-name' -Location 'northeurope' -SubscriptionId 'sub' | Out-Null
@@ -109,6 +111,22 @@ Describe 'Test-LabGlobalName (#438)' {
         $lines[-1] | Should -BeFalse
         ($lines | Out-String) | Should -Match "\[ERROR\] The container registry name 'devskycraftswcacr01' is taken"
         ($lines | Out-String) | Should -Match '-AcrName'
+    }
+
+    It 'stops on a taken storage account name and names the parameter to change (#438)' {
+        Mock -ModuleName LabCommon Get-AzContext { [pscustomobject]@{ Subscription = [pscustomobject]@{ Id = 'sub' } } }
+        Mock -ModuleName LabCommon Invoke-AzRestMethod { Get-ArmAnswer -Content '{"nameAvailable":false,"reason":"AlreadyExists","message":"The storage account named prodskycraftswcsa is already taken."}' }
+        $lines = @(Test-LabGlobalName -Kind StorageAccount -Name 'prodskycraftswcsa' -ParameterName ProdSaName -Owned $false 6>&1)
+        $lines[-1] | Should -BeFalse
+        ($lines | Out-String) | Should -Match "\[ERROR\] The storage account name 'prodskycraftswcsa' is taken \(AlreadyExists"
+        ($lines | Out-String) | Should -Match '-ProdSaName'
+        ($lines | Out-String) | Should -Match '3-24 lowercase letters and digits'
+    }
+
+    It 'lets a free storage account name through' {
+        Mock -ModuleName LabCommon Get-AzContext { [pscustomobject]@{ Subscription = [pscustomobject]@{ Id = 'sub' } } }
+        Mock -ModuleName LabCommon Invoke-AzRestMethod { Get-ArmAnswer -Content '{"nameAvailable":true}' }
+        Test-LabGlobalName -Kind StorageAccount -Name 'prodskycraftswcsaab' -ParameterName ProdSaName -Owned $false 6>$null | Should -BeTrue
     }
 
     It 'stops when the check cannot run, rather than reading it as free' {

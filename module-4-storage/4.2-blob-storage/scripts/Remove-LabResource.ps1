@@ -21,10 +21,23 @@
     still be applying (it takes up to a minute). A storage account that could not be looked up is
     left alone.
 
+    Lab 1.3's CanNotDelete lock on the prod group refuses deleting the containers and the
+    lifecycle policy (ScopeLocked, issue #372). Those deletes run inside Invoke-LabWithoutLock
+    (tools/LabCommon.psm1), which lifts the lock, runs them and puts it back with the same name,
+    level and notes, also when one fails. A lock it cannot read, lift or restore is an [ERROR]
+    and counted; any other lock is left alone.
+
     Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
     otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
     it leaves the session open and the code in $LASTEXITCODE (issue #257).
+
+.PARAMETER ProdSaName
+    Production storage account name. Default: prodskycraftswcsa. Pass the name given to
+    Deploy-Bicep.ps1.
+
+.PARAMETER DevSaName
+    Development storage account name. Default: devskycraftswcsa.
 
 .PARAMETER Force
     Skip confirmation prompt.
@@ -42,6 +55,12 @@
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$ProdSaName = 'prodskycraftswcsa',
+
+    [ValidatePattern('^[a-z0-9]{3,24}$')]
+    [string]$DevSaName = 'devskycraftswcsa',
+
     [switch]$Force
 )
 
@@ -144,9 +163,7 @@ function Invoke-LabStep {
 }
 
 $ProdRgName = 'prod-skycraft-swc-rg'
-$ProdSaName = 'prodskycraftswcsa'
 $DevRgName = 'dev-skycraft-swc-rg'
-$DevSaName = 'devskycraftswcsa'
 
 Write-Host "=== Lab 4.2 Cleanup ===" -ForegroundColor Cyan
 
@@ -166,26 +183,34 @@ elseif ($prodSa -and $PSCmdlet.ShouldProcess($ProdSaName, 'Remove Lab 4.2 contai
     $containerLookup = Invoke-LabLookup -Target "the containers in $ProdSaName" -Lookup {
         Get-AzRmStorageContainer -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName -ErrorAction Stop
     }
+    $prodContainers = @()
     if (-not $containerLookup.Failed) {
-        foreach ($c in $containers) {
-            if ($containerLookup.Value | Where-Object { $_.Name -eq $c }) {
-                Invoke-LabStep -Description "delete container $c" -Action {
-                    Remove-AzRmStorageContainer -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName -Name $c -Force -ErrorAction Stop
-                    Write-Host "  Deleted container: $c" -ForegroundColor Gray
-                }
-            }
-        }
+        $prodContainers = @($containers | Where-Object { $containerLookup.Value.Name -contains $_ })
     }
 
     # Remove Lifecycle Policy
     $policyLookup = Invoke-LabLookup -Target "the lifecycle policy of $ProdSaName" -Lookup {
         Get-AzStorageAccountManagementPolicy -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName -ErrorAction Stop
     }
-    if ($policyLookup.Value) {
-        Invoke-LabStep -Description 'remove the lifecycle policy' -Action {
-            Remove-AzStorageAccountManagementPolicy -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName -ErrorAction Stop
-            Write-Host "  Removed Lifecycle Policy" -ForegroundColor Gray
+
+    # Lab 1.3's CanNotDelete lock on the prod group refuses these deletes (ScopeLocked);
+    # Invoke-LabWithoutLock lifts it for them and puts it back (#372).
+    if ($prodContainers.Count -gt 0 -or $policyLookup.Value) {
+        $lockFailures = Invoke-LabWithoutLock -ResourceGroupName $ProdRgName -WhatIf:$WhatIfPreference -Action {
+            foreach ($c in $prodContainers) {
+                Invoke-LabStep -Description "delete container $c" -Action {
+                    Remove-AzRmStorageContainer -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName -Name $c -Force -ErrorAction Stop
+                    Write-Host "  Deleted container: $c" -ForegroundColor Gray
+                }
+            }
+            if ($policyLookup.Value) {
+                Invoke-LabStep -Description 'remove the lifecycle policy' -Action {
+                    Remove-AzStorageAccountManagementPolicy -ResourceGroupName $ProdRgName -StorageAccountName $ProdSaName -ErrorAction Stop
+                    Write-Host "  Removed Lifecycle Policy" -ForegroundColor Gray
+                }
+            }
         }
+        $script:cleanupFailures += $lockFailures
     }
 
     # Disable Versioning (Update-AzStorageBlobServiceProperty). Azure refuses while point-in-time

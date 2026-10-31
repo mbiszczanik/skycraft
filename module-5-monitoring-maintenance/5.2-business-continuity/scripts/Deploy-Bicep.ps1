@@ -97,6 +97,10 @@ foreach ($ns in @('Microsoft.RecoveryServices', 'Microsoft.DataProtection')) {
     $provider = Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction SilentlyContinue | Select-Object -First 1
     $state = if ($provider) { $provider.RegistrationState } else { 'NotRegistered' }
     if ($state -ne 'Registered') {
+        if ($WhatIf) {
+            Write-Host "  What-if: would register provider $ns (skipped)" -ForegroundColor Cyan
+            continue
+        }
         Write-Host "  Registering provider: $ns..." -ForegroundColor Gray
         Register-AzResourceProvider -ProviderNamespace $ns | Out-Null
         Write-Host "  ✓ Registered: $ns" -ForegroundColor Green
@@ -480,7 +484,7 @@ if ($WhatIf) {
     }
 
     Write-Host "`n  Next Steps:" -ForegroundColor Cyan
-    Write-Host "    1. Run .\New-LabBlobBackup.ps1 to configure blob protection on prodskycraftswcsa" -ForegroundColor Gray
+    Write-Host "    1. Run .\New-LabBlobBackup.ps1 to configure blob protection on the production storage account of Lab 4.1 (add -ProdSaName if it has another name)" -ForegroundColor Gray
     Write-Host "    2. Configure Azure Site Recovery via Azure Portal (Step 5.2.6)" -ForegroundColor Gray
     Write-Host "    3. Run .\Test-Lab.ps1 to validate deployment" -ForegroundColor Gray
 }

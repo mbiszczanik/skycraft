@@ -56,7 +56,7 @@ Before starting this lab:
 - [ ] Completed **Lab 5.1: Azure Monitor** (`platform-skycraft-swc-law` Log Analytics Workspace must exist for Traffic Analytics and Connection Monitor output)
 - [ ] Network Watcher `NetworkWatcher_swedencentral` in `NetworkWatcherRG` (Azure creates it with the first VNet in the region; `Deploy-Bicep.ps1` enables it if missing)
 
-These are the same checks `scripts/Deploy-Bicep.ps1` performs before it deploys anything - the cheapest chain that satisfies them is 1.2 → 2.1 → 2.3 → 3.2 (dev) → 4.1 `-All` → 5.1 → 5.2 → 5.3.
+These are the same checks `scripts/Deploy-Bicep.ps1` performs before it deploys anything - the cheapest chain that satisfies them is 1.2 → 2.1 → 2.3 → 3.2 (dev) → 4.1 `-All` → 5.1 → 5.2 → 5.3. If Lab 4.1 had to use another name than `platformskycraftswcsa` (storage account names are unique across Azure), pass it to `Deploy-Bicep.ps1` as `-PlatformSaName`.
 
 ---
 
@@ -287,7 +287,7 @@ $law = Get-AzOperationalInsightsWorkspace -Name platform-skycraft-swc-law -Resou
 # Install the agent on both endpoints; New-AzResource (not Set-AzVMExtension, which has no -Tag)
 # so the extension carries the tag the lab cleanup selects on
 foreach ($vm in $src, $dst) {
-  New-AzResource -ResourceId "$($vm.Id)/extensions/NetworkWatcherAgentLinux" -Location $vm.Location `
+  New-AzResource -ResourceId "$($vm.Id)/extensions/NetworkWatcherAgentLinux" -Location $vm.Location -ApiVersion 2024-07-01 `
     -Properties @{ publisher = 'Microsoft.Azure.NetworkWatcher'; type = 'NetworkWatcherAgentLinux'; typeHandlerVersion = '1.4'; autoUpgradeMinorVersion = $true } `
     -Tag @{ Project = 'SkyCraft' } -Force
 }

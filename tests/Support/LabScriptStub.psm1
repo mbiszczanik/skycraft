@@ -498,16 +498,72 @@ function Invoke-StubArmBudgetRoute {
 }
 '@
 
+$script:LabArmFakeRoute['Lock'] = @'
+
+# Lab 1.3's resource group locks, api-version 2020-05-01 (issue #372). State comes from the
+# environment: SKYCRAFT_STUB_LOCKS names the groups that hold their Lab 1.3 lock, and
+# SKYCRAFT_STUB_LOCK_FAIL '<METHOD>:<group>,...' refuses those requests with 403. Each request is
+# logged to SKYCRAFT_STUB_LOG as 'Lock:<METHOD>:<group>'.
+
+$script:StubLocks = $null
+
+function Invoke-StubArmLockRoute {
+    param([string]$Method, [string]$Path, [string]$Resource, [string]$Query, [string]$Payload)
+
+    if ($Resource -notmatch '^/subscriptions/[^/]+/resourceGroups/(?<group>[^/]+)/providers/Microsoft\.Authorization/locks/(?<name>[^/]+)$') { return }
+    $group = $Matches['group']
+    $name = $Matches['name']
+    if ($Query -notmatch '(^|&)api-version=2020-05-01(&|$)') { throw "stub: unexpected api-version in $Method $Path" }
+    if ($null -eq $script:StubLocks) {
+        $script:StubLocks = @{}
+        foreach ($locked in @($env:SKYCRAFT_STUB_LOCKS -split ',' | Where-Object { $_ })) {
+            $lockName = if ($locked -like 'platform-*') { 'lock-no-delete-platform' } else { 'lock-no-delete-prod' }
+            $script:StubLocks[$locked] = @{ name = $lockName; properties = @{ level = 'CanNotDelete'; notes = 'Cannot delete resource or child resources.' } }
+        }
+    }
+    if ($env:SKYCRAFT_STUB_LOG) { Add-Content -LiteralPath $env:SKYCRAFT_STUB_LOG -Value "Lock:${Method}:${group}" }
+    if (@($env:SKYCRAFT_STUB_LOCK_FAIL -split ',') -contains "${Method}:${group}") {
+        return ConvertTo-StubArmError -Code 'AuthorizationFailed' -Message "stub: ${Method} of the lock on $group refused"
+    }
+
+    $lock = $script:StubLocks[$group]
+    switch ($Method) {
+        'GET' {
+            if (-not $lock -or $lock.name -ne $name) { return ConvertTo-StubArmError -Code 'LockNotFound' -Message "The lock '$name' was not found." }
+            return ConvertTo-StubArmReply -StatusCode 200 -Body @{ id = $Resource; name = $lock.name; properties = $lock.properties }
+        }
+        'DELETE' {
+            $script:StubLocks.Remove($group)
+            return ConvertTo-StubArmReply -StatusCode 200
+        }
+        'PUT' {
+            $script:StubLocks[$group] = @{ name = $name; properties = ($Payload | ConvertFrom-Json -AsHashtable).properties }
+            if ($env:SKYCRAFT_STUB_LOG) { Add-Content -LiteralPath $env:SKYCRAFT_STUB_LOG -Value "Lock:PUT-BODY:${group}:$Payload" }
+            return ConvertTo-StubArmReply -StatusCode 200 -Body @{ id = $Resource; name = $name; properties = $script:StubLocks[$group].properties }
+        }
+    }
+    throw "stub: unexpected ARM request $Method $Path"
+}
+
+# Invoke-LabWithoutLock waits for a lock removal to reach ARM; the stub logs the wait instead.
+function Start-Sleep {
+    [CmdletBinding()]
+    param([int]$Seconds, [int]$Milliseconds)
+    if ($env:SKYCRAFT_STUB_LOG) { Add-Content -LiteralPath $env:SKYCRAFT_STUB_LOG -Value "Start-Sleep:$Seconds" }
+}
+'@
+
 function Get-LabArmStub {
     <#
     .SYNOPSIS
         Returns stub module text that answers the ARM APIs named in place of Invoke-AzRestMethod.
 
     .DESCRIPTION
-        The lab scripts reach two ARM APIs through tools/LabCommon.psm1 and Invoke-AzRestMethod
+        The lab scripts reach three ARM APIs through tools/LabCommon.psm1 and Invoke-AzRestMethod
         rather than through Az cmdlets: role assignments (Get-LabArmRoleAssignment,
-        New-LabArmRoleAssignment, Remove-LabArmRoleAssignment; issue #397) and budgets
-        (Get-LabArmBudget, Remove-LabArmBudget; issue #411). A suite appends this text to its stub
+        New-LabArmRoleAssignment, Remove-LabArmRoleAssignment; issue #397), budgets
+        (Get-LabArmBudget, Remove-LabArmBudget; issue #411) and Lab 1.3's resource group locks
+        (Invoke-LabWithoutLock; issue #372). A suite appends this text to its stub
         body and adds 'Invoke-AzRestMethod' to the stubbed commands; the fake then turns each
         request into a call to functions the suite defines in its own body, so the suite keeps
         describing the subscription in records rather than in HTTP. Each API answers only at the
@@ -538,6 +594,15 @@ function Get-LabArmStub {
           Remove-StubBudget -Scope -Name (optional) records a delete; a throw fails it as above.
               Without it, a delete stops the script.
 
+        Lock (api-version 2020-05-01, issue #372): Lab 1.3's locks on a resource group, the
+        ones Invoke-LabWithoutLock lifts and restores. No function to define: the environment
+        holds the state. SKYCRAFT_STUB_LOCKS names the groups that hold their Lab 1.3 lock,
+        SKYCRAFT_STUB_LOCK_FAIL '<METHOD>:<group>,...' refuses those requests with 403, and each
+        request is logged to SKYCRAFT_STUB_LOG as 'Lock:<METHOD>:<group>' (a PUT also as
+        'Lock:PUT-BODY:<group>:<payload>'). It also defines Start-Sleep, which logs
+        'Start-Sleep:<seconds>' and returns at once; add 'Start-Sleep' to the stubbed commands,
+        with 'Get-AzContext' returning a Subscription.Id.
+
         In a getter, an error written with Write-Error -ErrorId <code> becomes an ARM error reply
         with that code: AuthorizationFailed 403, TooManyRequests 429, *NotFound 404, 422 or
         UnprocessableEntity 422, anything else 500. Any request no named API answers throws, so a
@@ -545,7 +610,7 @@ function Get-LabArmStub {
         of passing unseen.
 
     .PARAMETER Api
-        RoleAssignment, Budget, or both.
+        RoleAssignment, Budget, Lock, or several of them.
 
     .OUTPUTS
         System.String - PowerShell text for a stub module body.
@@ -554,7 +619,7 @@ function Get-LabArmStub {
     [OutputType([string])]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('RoleAssignment', 'Budget')]
+        [ValidateSet('RoleAssignment', 'Budget', 'Lock')]
         [string[]]$Api
     )
 
