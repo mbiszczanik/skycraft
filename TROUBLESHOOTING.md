@@ -335,6 +335,16 @@ removes *this repository's children* from inside it — the flow log, the connec
 Traffic Analytics DCR/DCE and the NetworkWatcherAgent extensions — and leaves the group itself
 standing. The orchestrator never lists it among the groups it deletes.
 
+### Lab 5.3 reports the NetworkWatcherAgent as "left on <vm> on purpose"
+
+**This is correct, and it is not a failure.** Azure refuses extension changes on a VM that is not
+running (409 `OperationNotAllowed`, "Cannot modify extensions in the VM when the VM is not
+running"), so Lab 5.3's `Remove-LabResource.ps1` leaves the agent on a stopped or deallocated VM and
+exits 0. The leftover is harmless: a stopped VM runs no agent, the extension is not billed, and it
+is deleted with the VM when Lab 3.2's cleanup removes it. To remove it sooner, start the VM, run
+the Lab 5.3 cleanup again and deallocate the VM afterwards. Any other error on the removal still
+fails the cleanup.
+
 ### The Log Analytics workspace name is still reserved
 
 **This is expected, and it is not a failure.** Lab 5.1's teardown deletes the workspace into a

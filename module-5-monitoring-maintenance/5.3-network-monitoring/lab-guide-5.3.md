@@ -444,7 +444,7 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 | `NetworkWatcher_swedencentral`   | Network Watcher                   | `NetworkWatcherRG` | Azure-provisioned per region; re-declared with the SkyCraft tags          |
 | `prod-skycraft-swc-vnet-flowlog` | Flow log (VNet)                   | `NetworkWatcherRG` | Target `prod-skycraft-swc-vnet`, v2, 7-day retention, Traffic Analytics 10 min |
 | `skycraft-hub-spoke-cm`          | Connection Monitor                | `NetworkWatcherRG` | `hub-spoke-ssh` → `tcp-22-every-5m`, output to `platform-skycraft-swc-law` |
-| NetworkWatcherAgent              | VM extension on both endpoint VMs | `dev-skycraft-swc-rg` / `prod-skycraft-swc-rg` | Installed by `Deploy-Bicep.ps1`; removed by `Remove-LabResource.ps1` |
+| NetworkWatcherAgent              | VM extension on both endpoint VMs | `dev-skycraft-swc-rg` / `prod-skycraft-swc-rg` | Installed by `Deploy-Bicep.ps1`; removed by `Remove-LabResource.ps1`, except on a VM that is not running, where Azure refuses the change and the cleanup leaves it (harmless, deleted with the VM) |
 
 **Time Spent**: ~1.5 hours
 

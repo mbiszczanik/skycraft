@@ -75,6 +75,7 @@ Describe 'Lab 5.3 cleanup - the script exposes its decisions as functions' {
                 'Get-VirtualMachineEndpointId'
                 'ConvertTo-VmTarget'
                 'Test-LabOwnedExtension'
+                'Test-LabVmNotRunningError'
                 'Select-TrafficAnalyticsResource')) {
             $script:LiftedName | Should -Contain $name
         }
@@ -175,6 +176,39 @@ Describe 'Lab 5.3 cleanup - extension ownership guard' {
         Test-LabOwnedExtension -Tag $null      | Should -BeFalse
         Test-LabOwnedExtension -Tag @{}        | Should -BeFalse
         Test-LabOwnedExtension -Tag @{ Owner = 'someone' } | Should -BeFalse
+    }
+}
+
+Describe 'Lab 5.3 cleanup - a VM that is not running (#465)' {
+
+    BeforeAll {
+        function Get-ErrorRecordFixture {
+            param([string]$Message)
+            try { throw $Message } catch { $_ }
+        }
+    }
+
+    It 'recognises the 409 Azure gives for an extension change on a stopped VM' {
+        $record = Get-ErrorRecordFixture 'Cannot modify extensions in the VM when the VM is not running. ErrorCode: OperationNotAllowed, StatusCode: 409'
+        Test-LabVmNotRunningError -ErrorRecord $record | Should -BeTrue
+    }
+
+    It 'reads the code from the exception when the message does not carry it' {
+        $exception = [System.Exception]::new('Cannot modify extensions in the VM when the VM is not running.')
+        $exception | Add-Member -NotePropertyName ErrorCode -NotePropertyValue 'OperationNotAllowed'
+        $record = [System.Management.Automation.ErrorRecord]::new($exception, 'x', 'NotSpecified', $null)
+        Test-LabVmNotRunningError -ErrorRecord $record | Should -BeTrue
+    }
+
+    It 'does not treat any other OperationNotAllowed as a stopped VM' {
+        $record = Get-ErrorRecordFixture 'Operation is not allowed while the VM is being deleted. ErrorCode: OperationNotAllowed, StatusCode: 409'
+        Test-LabVmNotRunningError -ErrorRecord $record | Should -BeFalse
+    }
+
+    It 'does not treat the wording without the code, or other errors, as a stopped VM' {
+        Test-LabVmNotRunningError -ErrorRecord (Get-ErrorRecordFixture 'the VM is not running') | Should -BeFalse
+        Test-LabVmNotRunningError -ErrorRecord (Get-ErrorRecordFixture 'ScopeLocked: the scope is locked') | Should -BeFalse
+        Test-LabVmNotRunningError -ErrorRecord (Get-ErrorRecordFixture 'AuthorizationFailed') | Should -BeFalse
     }
 }
 
