@@ -59,9 +59,69 @@ $dcrName        = 'skycraft-vm-dcr'
 $actionGroupName = 'skycraft-ops-ag'
 $alertRuleName  = 'skycraft-cpu-alert'
 $storageRg      = 'platform-skycraft-swc-rg'
+# Explicit api-versions for the raw ARM reads (#452); Sweden Central serves both.
+$dcrApiVersion         = '2023-03-11'
+$metricAlertApiVersion = '2018-03-01'
 
 $passCount = 0
 $failCount = 0
+
+# Whether a lookup's error says the object does not exist rather than that the lookup failed.
+# Same rule as Test-LabNotFoundError in this lab's Remove-LabResource.ps1.
+function Test-LabNotFoundError {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    $evidence = [System.Collections.Generic.List[string]]::new()
+    $evidence.Add([string]$ErrorRecord)
+    $evidence.Add([string]$ErrorRecord.FullyQualifiedErrorId)
+    $status404 = $false
+    for ($exception = $ErrorRecord.Exception; $exception; $exception = $exception.InnerException) {
+        $evidence.Add([string]$exception.Message)
+        foreach ($code in @($exception.Body.Code, $exception.Body.Error.Code, $exception.ErrorCode)) {
+            if ($code) { $evidence.Add([string]$code) }
+        }
+        foreach ($status in @($exception.Response.StatusCode, $exception.ResponseStatusCode, $exception.Status)) {
+            if ("$status" -in @('404', 'NotFound')) { $status404 = $true }
+        }
+    }
+    $text = $evidence -join "`n"
+
+    if ($text -match 'SubscriptionNotFound|subscription .{0,80}(could not be|was not) found') { return $false }
+    if ($status404) { return $true }
+    return $text -match '\bResource(Group)?NotFound\b|was not found|Resource group .{0,100}could not be found|invalid status code ''NotFound''|\b404 \(Not Found\)'
+}
+
+# Reads one resource by id at an explicit api-version (#452: without one ARM uses the newest version
+# the provider lists, which a region may not serve yet). A missing resource is $null; any other
+# error throws, so the check that asked fails with the error instead of reading the resource as missing.
+function Get-LabArmResource {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ApiVersion,
+
+        [switch]$ExpandProperties
+    )
+
+    try {
+        if ($ExpandProperties) {
+            return Get-AzResource -ResourceId $ResourceId -ApiVersion $ApiVersion -ExpandProperties -ErrorAction Stop
+        }
+        return Get-AzResource -ResourceId $ResourceId -ApiVersion $ApiVersion -ErrorAction Stop
+    }
+    catch {
+        if (Test-LabNotFoundError -ErrorRecord $_) { return $null }
+        throw
+    }
+}
 
 function Invoke-Test {
     param(
@@ -182,7 +242,7 @@ try {
 
     $rules = foreach ($entry in $ruleVms.Values) {
         try {
-            $rule = Get-AzResource -ResourceId $entry.Id -ExpandProperties -ErrorAction Stop
+            $rule = Get-AzResource -ResourceId $entry.Id -ApiVersion $dcrApiVersion -ExpandProperties -ErrorAction Stop
         }
         catch {
             $readErrors += "rule '$($entry.Id)': $($_.Exception.Message)"
@@ -343,7 +403,7 @@ Invoke-Test "Alert rule threshold is > 80% CPU" {
     if (-not $alert) { return $false }
     # Read criteria from raw ARM (camelCase) — the typed PSMetricCriteria object
     # does not reliably expose metricName/operator across Az.Monitor versions.
-    $crit = (Get-AzResource -ResourceId $alert.Id -ExpandProperties -ErrorAction SilentlyContinue).Properties.criteria.allOf[0]
+    $crit = (Get-LabArmResource -ResourceId $alert.Id -ApiVersion $metricAlertApiVersion -ExpandProperties).Properties.criteria.allOf[0]
     return ($crit.metricName -eq 'Percentage CPU' -and [int]$crit.threshold -eq 80 -and $crit.operator -eq 'GreaterThan')
 }
 

@@ -282,7 +282,7 @@ function Get-AzResource {
 
 function Remove-AzResource {
     [CmdletBinding()]
-    param($ResourceId, [switch]$Force)
+    param($ResourceId, $ApiVersion, [switch]$Force)
     Invoke-StubGate -Name 'Remove-AzResource'
 }
 

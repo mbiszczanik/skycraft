@@ -144,7 +144,7 @@ foreach ($cmVm in @($sourceVm, $destVm)) {
             # Use New-AzResource (not Set-AzVMExtension) so the extension carries the
             # Project tag — the Lab 1.3 governance policy denies untagged resources,
             # and Set-AzVMExtension has no -Tag parameter.
-            New-AzResource -ResourceId "$($cmVm.Id)/extensions/NetworkWatcherAgentLinux" -Location $cmVm.Location `
+            New-AzResource -ResourceId "$($cmVm.Id)/extensions/NetworkWatcherAgentLinux" -Location $cmVm.Location -ApiVersion '2024-07-01' `
                 -Properties @{ publisher = 'Microsoft.Azure.NetworkWatcher'; type = 'NetworkWatcherAgentLinux'; typeHandlerVersion = '1.4'; autoUpgradeMinorVersion = $true } `
                 -Tag @{ Project = 'SkyCraft' } -Force -ErrorAction Stop | Out-Null
             Write-Host "  ✓ NetworkWatcherAgent installed on $($cmVm.Name)" -ForegroundColor Green

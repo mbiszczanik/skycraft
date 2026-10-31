@@ -78,6 +78,10 @@ $script:cleanupFailures = 0
 $networkWatcherRg      = 'NetworkWatcherRG'
 $networkWatcherName    = 'NetworkWatcher_swedencentral'
 $connectionMonitorName = 'skycraft-hub-spoke-cm'
+# Explicit api-versions for the raw ARM calls (#452).
+$connectionMonitorApiVersion = '2024-05-01'
+$vmExtensionApiVersion       = '2024-07-01'
+$dataCollectionApiVersion    = '2023-03-11'   # NWTA-* rules and endpoints
 $flowLogName           = 'prod-skycraft-swc-vnet-flowlog'
 $platformRg            = 'platform-skycraft-swc-rg'
 $location              = 'swedencentral'
@@ -290,7 +294,7 @@ $endpointVmIds = @()
 # NetworkWatcherAgent extension removed in step [3/4], and they cannot be read once the monitor is
 # gone.
 $cmLookup = Invoke-LabLookup -Target "Connection Monitor '$connectionMonitorName'" -Lookup {
-    Get-AzResource -ResourceId $connectionMonitorResourceId -ExpandProperties -ErrorAction Stop
+    Get-AzResource -ResourceId $connectionMonitorResourceId -ApiVersion $connectionMonitorApiVersion -ExpandProperties -ErrorAction Stop
 }
 $cmResource = $cmLookup.Value | Select-Object -First 1
 if ($cmResource) {
@@ -390,7 +394,7 @@ foreach ($target in $agentTargets) {
         # The ownership tag decides whether the agent is the lab's to remove. A tag that could not
         # be read leaves the agent in place; one that is gone with its extension leaves nothing.
         $tagLookup = Invoke-LabLookup -Target "the tags of $($agent.Name) on $vmName" -Lookup {
-            Get-AzResource -ResourceId $agent.Id -ErrorAction Stop
+            Get-AzResource -ResourceId $agent.Id -ApiVersion $vmExtensionApiVersion -ErrorAction Stop
         }
         if ($tagLookup.Failed) { continue }
         $agentResource = $tagLookup.Value | Select-Object -First 1
@@ -466,7 +470,7 @@ if ($taFlowLogLookup.Failed) {
                     $taKind = ($taResource.ResourceType -split '/')[-1]
                     if ($PSCmdlet.ShouldProcess($taResource.Name, "Remove Traffic Analytics $taKind")) {
                         try {
-                            Remove-AzResource -ResourceId $taResource.ResourceId -Force -ErrorAction Stop | Out-Null
+                            Remove-AzResource -ResourceId $taResource.ResourceId -ApiVersion $dataCollectionApiVersion -Force -ErrorAction Stop | Out-Null
                             Write-Host "  ✓ Traffic Analytics $taKind removed: $($taResource.Name)" -ForegroundColor Green
                         } catch {
                             $script:cleanupFailures++
