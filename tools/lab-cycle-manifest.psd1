@@ -335,7 +335,9 @@
             PostDeploy = $null
             Test       = @{}
             DependsOn  = @('3.2', '4.1')
-            TimeoutMs  = 1800000
+            # 60 min: Test-Lab waits up to 45 for a new workspace's Heartbeat table, then up to 10 for a row
+            # where the agent's install time is unreadable; 45 after the install otherwise (#369).
+            TimeoutMs  = 3600000
             StdinAnswers = $null
             Excluded   = $null
             # gate: verified - exits 1 on a missing platform resource group, on finding no lab-3.2
@@ -356,15 +358,14 @@
             TimeoutMs    = 1800000
             StdinAnswers = $null
             Excluded     = $null
-            # gate: verified - exits 1 on a missing platform resource group or a missing 5.1
-            # workspace; its PostDeploy New-LabBlobBackup.ps1 exits 1 on a missing 4.1
-            # prodskycraftswcsa (needs 4.1 -All). Its VM check only warns.
+            # gate: verified - exits 1 on a missing platform resource group, a missing 5.1
+            # workspace or a missing 5.1 action group (skycraft-ops-ag); its PostDeploy
+            # New-LabBlobBackup.ps1 creates SkyCraft-Blob-Policy and exits 1 on a missing 4.1
+            # prodskycraftswcsa (needs 4.1 -All). Its VM and key vault checks only warn.
             #
-            # Known failure until the Lab 5.2 half of #368 lands: Lab 3.2 leaves the auth VM
-            # ADE-encrypted, and this deploy enables backup on it without first granting Backup
-            # Management Service the Key Vault Administrator role on the 3.2 vault, so the VM
-            # backup fails with 400198 UserErrorKeyVaultPermissionsNotConfigured and the phase
-            # exits 1. A Portal-built Lab 3.2 hands Lab 5.2 the same VM.
+            # Lab 3.2 leaves the auth VM ADE-encrypted; the deploy grants Backup Management
+            # Service Key Vault Administrator on the 3.2 vault before it enables backup (#368).
+            # Finding that app needs a Microsoft Graph token in the Az sign-in (#397).
             #
             # This is the lab that creates the Recovery Services Vault. See Remove-LabCycle.ps1 and
             # TROUBLESHOOTING.md for why its teardown needs a minimum az CLI / Az PowerShell.
@@ -459,6 +460,7 @@
         @{ Parameter = 'ProdSaName';     Lab = 'module-4-storage/4.4-storage-security'; Default = 'prodskycraftswcsa'; ScriptParameter = 'StorageAccountName' }
         @{ Parameter = 'ProdSaName';     Lab = 'module-5-monitoring-maintenance/5.2-business-continuity'; Default = 'prodskycraftswcsa'; Steps = @('PostDeploy', 'Test', 'Remove') }
         @{ Parameter = 'PlatformSaName'; Lab = 'module-5-monitoring-maintenance/5.3-network-monitoring'; Default = 'platformskycraftswcsa'; Steps = @('Deploy') }
+        @{ Parameter = 'KeyVaultName';   Lab = 'module-5-monitoring-maintenance/5.2-business-continuity'; Default = 'dev-skycraft-swc-kv' }
     )
 
     # -- Teardown -------------------------------------------------------------------------------

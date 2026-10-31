@@ -565,6 +565,12 @@ Describe 'Manifest - unique names (#438)' {
         $m53.Steps | Should -Be @('Deploy')
     }
 
+    It 'passes the vault name to Lab 5.2 as well as Lab 3.2 (#366)' {
+        $row = @($script:Manifest.UniqueNames | Where-Object { $_.Parameter -eq 'KeyVaultName' -and $_.Lab -like '*5.2-business-continuity' })
+        $row.Count | Should -Be 1
+        $row[0].Default | Should -Be 'dev-skycraft-swc-kv'
+    }
+
     It 'gives each lab it names a live phase and exactly one teardown invocation' {
         # The value replaces the name in every invocation of the lab, so a second invocation for
         # another environment would get the dev name.
@@ -577,7 +583,7 @@ Describe 'Manifest - unique names (#438)' {
 
     It 'names, as the vault default, the name lab 3.2''s dev soft-delete guard checks' {
         # Otherwise the guard keeps checking the default while the run deploys another name.
-        $vault = $script:Manifest.UniqueNames | Where-Object { $_.Parameter -eq 'KeyVaultName' }
+        $vault = $script:Manifest.UniqueNames | Where-Object { $_.Parameter -eq 'KeyVaultName' -and $_.Lab -like '*3.2-virtual-machines' }
         @($script:Manifest.SoftDeleteGuards | Where-Object { $_.Lab -eq $vault.Lab -and $_.Name -eq $vault.Default }).Count | Should -Be 1
     }
 }
@@ -663,6 +669,13 @@ Describe 'Manifest - teardown covers what the cycle deploys' {
         # failure on every clean run teaches its operator to discount failures.
         $containers = $script:Manifest.Teardowns | Where-Object { $_.Lab -eq 'module-3-compute/3.3-containers' }
         $containers.TimeoutMs | Should -BeGreaterThan 1200000
+    }
+
+    It 'gives lab 5.1 a phase limit above the longest wait of its validator' {
+        # Test-Lab.ps1 waits up to -NewWorkspaceWaitMinutes (45) for the Heartbeat table and then up
+        # to -HeartbeatWaitMinutes (10) for a row where the install time is unreadable (#369).
+        $phase = $script:LivePhases | Where-Object { $_.Id -eq '5.1' }
+        $phase.TimeoutMs | Should -BeGreaterThan ((45 + 10) * 60 * 1000)
     }
 
     It 'tears the remaining labs down in the reverse of the deploy order' {
