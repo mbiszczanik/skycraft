@@ -337,6 +337,11 @@ Invoke-Test "Data collection rule associated with a VM in $($vmGroups -join ' or
         return $false
     }
     Write-Host " ('$($dcrResource.Name)' in $($dcrResource.ResourceGroupName), on $($dcrVmNames -join ', '))" -NoNewline -ForegroundColor Gray
+    $ruleState = "$($dcrResource.Properties.provisioningState)"
+    if ($ruleState -ne 'Succeeded') {
+        Write-Host " (rule provisioning state is '$ruleState', expected Succeeded)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
     return $true
 }
 

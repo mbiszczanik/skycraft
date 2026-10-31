@@ -128,8 +128,46 @@ function Get-AzResourceGroup { [CmdletBinding()] param([Parameter(ValueFromRemai
 function Get-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzVM { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 function Get-AzDataProtectionBackupPolicy { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
-function Get-AzDataProtectionBackupInstance { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
-function Get-AzStorageAccount { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
+function Get-AzStorageAccount {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
+    [pscustomobject]@{ Name = $Name; Id = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/prodskycraftswcsa' }
+}
+# SKYCRAFT_STUB_BLOBINSTANCE: 'ok', 'protectionerror', 'provisioningfailed', 'nostate' or 'none' (no instance);
+# 'configuring' / 'creating' report an in-progress state on the 2nd and 3rd call (the 1st is the
+# exists check) and settle on the 4th; 'stuck' / 'failedconfiguring' never settle.
+$script:InstanceCalls = 0
+function Get-AzDataProtectionBackupInstance {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$VaultName, [Parameter(ValueFromRemainingArguments)]$Rest)
+    $mode = $env:SKYCRAFT_STUB_BLOBINSTANCE
+    if (-not $mode -or $mode -eq 'none') { return }
+    $script:InstanceCalls++
+    $inProgress = $script:InstanceCalls -ge 2 -and $script:InstanceCalls -le 3
+    $protectionState = switch ($mode) {
+        'protectionerror' { 'ProtectionError' }
+        'nostate' { $null }
+        'configuring' { if ($inProgress) { 'ConfiguringProtection' } else { 'ProtectionConfigured' } }
+        'stuck' { if ($script:InstanceCalls -ge 2) { 'ConfiguringProtection' } else { 'ProtectionConfigured' } }
+        'failedconfiguring' { if ($script:InstanceCalls -ge 2) { 'ConfiguringProtection' } else { 'ProtectionConfigured' } }
+        default { 'ProtectionConfigured' }
+    }
+    $provisioningState = switch ($mode) {
+        'provisioningfailed' { 'Failed' }
+        'nostate' { $null }
+        'creating' { if ($inProgress) { 'Creating' } else { 'Succeeded' } }
+        'failedconfiguring' { if ($script:InstanceCalls -ge 3) { 'Failed' } else { 'Succeeded' } }
+        default { 'Succeeded' }
+    }
+    [pscustomobject]@{
+        Name     = 'prodskycraftswcsa-instance'
+        Property = [pscustomobject]@{
+            DataSourceInfo         = [pscustomobject]@{ ResourceId = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/prodskycraftswcsa' }
+            CurrentProtectionState = $protectionState
+            ProvisioningState      = $provisioningState
+        }
+    }
+}
 function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 '@
 
@@ -139,11 +177,14 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
             [ValidateSet('Off', 'AlwaysOn', 'On')]
             [string]$SoftDelete,
             [ValidateSet('', 'denied')]
-            [string]$Arm = ''
+            [string]$Arm = '',
+            [string]$BlobInstance = 'none',
+            [string[]]$ArgumentList = @('-ProtectionTimeoutSeconds', '60', '-ProtectionPollSeconds', '0')
         )
-        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
+        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList $ArgumentList -Environment @{
             SKYCRAFT_STUB_BVSOFTDELETE = $SoftDelete
             SKYCRAFT_STUB_ARM          = $Arm
+            SKYCRAFT_STUB_BLOBINSTANCE = $BlobInstance
         }
         return [pscustomobject]@{
             ExitCode = $run.ExitCode
@@ -162,7 +203,23 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
     $script:PortalVault   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'AlwaysOn'
     $script:OnVault       = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'On'
     $script:Denied        = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Arm 'denied'
-    $script:AllRuns       = @($script:ScriptedVault, $script:PortalVault, $script:OnVault, $script:Denied)
+    $script:BlobOk        = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'ok'
+    $script:BlobProtErr   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'protectionerror'
+    $script:BlobProvFail  = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'provisioningfailed'
+    $script:BlobNoState   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'nostate'
+    $script:BlobNone      = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'none'
+    $script:BlobConfiguring = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'configuring'
+    $script:BlobCreating  = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'creating'
+    $script:BlobStuck     = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'stuck' `
+        -ArgumentList @('-ProtectionTimeoutSeconds', '2', '-ProtectionPollSeconds', '1')
+    # A long window: a terminal state that waited would run to the timeout.
+    $script:BlobFailedWhileConfiguring = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'failedconfiguring' `
+        -ArgumentList @('-ProtectionTimeoutSeconds', '60', '-ProtectionPollSeconds', '1')
+    $script:BlobFailedAtOnce = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'provisioningfailed' `
+        -ArgumentList @('-ProtectionTimeoutSeconds', '60', '-ProtectionPollSeconds', '1')
+    $script:AllRuns       = @($script:ScriptedVault, $script:PortalVault, $script:OnVault, $script:Denied, $script:BlobOk,
+        $script:BlobProtErr, $script:BlobProvFail, $script:BlobNoState, $script:BlobNone,
+        $script:BlobConfiguring, $script:BlobCreating, $script:BlobStuck, $script:BlobFailedWhileConfiguring, $script:BlobFailedAtOnce)
 }
 
 AfterAll {
@@ -220,5 +277,61 @@ Describe 'Lab 5.2 Test-Lab.ps1 - a raw ARM read that fails is not a missing reso
 
     It 'exits 1' {
         $script:Denied.ExitCode | Should -Be 1
+    }
+}
+
+Describe 'Lab 5.2 Test-Lab.ps1 - blob backup instance protection (#371)' {
+
+    It 'passes an instance with protection configured and provisioning Succeeded' {
+        $script:BlobOk.Output | Should -Match 'Testing: Blob backup instance exists for[^\r\n]*PASS'
+        $script:BlobOk.Output | Should -Match 'Testing: Blob backup instance protection is configured and provisioned\.\.\. PASS'
+    }
+
+    It 'fails an instance in protection state ProtectionError, and names the state' {
+        $script:BlobProtErr.ExitCode | Should -Be 1 -Because "output was:`n$($script:BlobProtErr.Output)"
+        $script:BlobProtErr.Output | Should -Match "Blob backup instance exists for[^\r\n]*PASS"
+        $script:BlobProtErr.Output | Should -Match "protection state 'ProtectionError', provisioning state 'Succeeded'[^\r\n]*FAIL"
+    }
+
+    It 'fails an instance whose provisioning state is Failed' {
+        $script:BlobProvFail.Output | Should -Match "protection state 'ProtectionConfigured', provisioning state 'Failed'[^\r\n]*FAIL"
+    }
+
+    It 'fails an instance that reports no state at all' {
+        $script:BlobNoState.Output | Should -Match "protection state '', provisioning state ''[^\r\n]*FAIL"
+    }
+
+    It 'fails the protection check when there is no instance' {
+        $script:BlobNone.Output | Should -Match 'Blob backup instance protection is configured and provisioned\.\.\. FAIL'
+    }
+
+    It 'retries an instance still in protection state ConfiguringProtection, with progress lines, and passes once it settles' {
+        $out = $script:BlobConfiguring.Output
+        $out | Should -Match "protection state 'ConfiguringProtection', provisioning state 'Succeeded'; checking again"
+        $out | Should -Match 'Blob backup instance protection is configured and provisioned[\s\S]*PASS'
+        $out | Should -Not -Match 'protection is configured and provisioned[^\r\n]*FAIL'
+    }
+
+    It 'retries an instance whose provisioning state is Creating, and passes once it settles' {
+        $out = $script:BlobCreating.Output
+        $out | Should -Match "provisioning state 'Creating'; checking again"
+        $out | Should -Match 'Blob backup instance protection is configured and provisioned[\s\S]*PASS'
+    }
+
+    It 'fails an instance that never leaves ConfiguringProtection, once the time is up, naming the state' {
+        $script:BlobStuck.ExitCode | Should -Be 1 -Because "output was:`n$($script:BlobStuck.Output)"
+        $script:BlobStuck.Output | Should -Match "protection state 'ConfiguringProtection', provisioning state 'Succeeded'; expected ProtectionConfigured and Succeeded[^\r\n]*FAIL"
+    }
+
+    It 'stops waiting at once when a configuring instance turns Failed' {
+        $out = $script:BlobFailedWhileConfiguring.Output
+        $out | Should -Match "protection state 'ConfiguringProtection', provisioning state 'Failed'; expected[^\r\n]*FAIL"
+        @([regex]::Matches($out, 'checking again')).Count | Should -Be 1 -Because "only the first poll was in progress:`n$out"
+    }
+
+    It 'does not wait for a terminal Failed state' {
+        $out = $script:BlobFailedAtOnce.Output
+        $out | Should -Match "provisioning state 'Failed'[^\r\n]*FAIL"
+        $out | Should -Not -Match 'checking again'
     }
 }
