@@ -5,7 +5,8 @@
 .DESCRIPTION
     Validates that all Lab 5.1 monitoring resources are deployed correctly:
     - Log Analytics Workspace exists with correct SKU and retention
-    - VM Insights DCR is associated with a SkyCraft VM and sends to the workspace
+    - VM DCR is associated with a SkyCraft VM, sends to the workspace and collects Perf and Syslog
+    - Azure Monitor Agent is Succeeded on those VMs and their Heartbeat reaches the workspace
     - Action Group exists with email receiver configured
     - Metric Alert rule exists and is enabled
     - Storage Diagnostic Settings are configured
@@ -24,9 +25,46 @@
     stay literal where the guide has the learner type both name and group: the action group and
     the diagnostic setting.
 
+    The Azure Monitor Agent is checked on every VM the lab's rule is associated with (issue #369):
+    its extension must be present and Succeeded, and the workspace must hold a Heartbeat row from
+    each of those VMs from the last 15 minutes. A failed extension read or workspace query is a
+    failure, never a pass. While every agent is Succeeded and a VM's Heartbeat is still missing,
+    the wait for its first row is keyed to when that VM's agent extension was installed: the time
+    of its last successful 'Create or Update Virtual Machine Extension' event in the activity log
+    (the extension's own instance view carries no time), and the query is repeated once a minute,
+    with a progress line, until -AgentInstallWaitMinutes after that time. The first row has
+    reached the workspace 27-39 minutes after the install, also on a recovered workspace whose
+    table already exists. An agent installed longer ago than that with still no row fails at
+    once, naming the cause: the agent is installed but not sending. Without a readable install
+    time (no event, or the log cannot be read) the short -HeartbeatWaitMinutes applies, and the
+    message says the time was unknown.
+    A new workspace has no Heartbeat table until the first row arrives, up to about 40 minutes
+    after the workspace is created; until then the query fails with BadRequest (failed to resolve
+    the table). While every agent is Succeeded, that is read as 'workspace not ready' and the
+    query is repeated once a minute for up to -NewWorkspaceWaitMinutes, with a progress line per
+    minute; if the table never appears the check fails and the message names that cause.
+
 .PARAMETER Environment
     Target environment prefix when checking VM resources: its group's VMs are searched first for
     the data collection rule, then the other environment's. Default: dev
+
+.PARAMETER HeartbeatWaitMinutes
+    How long to keep waiting for a first Heartbeat row when the agent's install time cannot be
+    read (see -AgentInstallWaitMinutes). 0 queries once. Counted from the moment the Heartbeat
+    table exists. Default: 10
+
+.PARAMETER AgentInstallWaitMinutes
+    How long after an agent extension was installed to keep waiting for the first Heartbeat row
+    of its VM; a rebuilt VM sends it 27-39 minutes after the install. Counted from the install
+    time in the activity log, so a run started late waits only for the rest, and an agent older
+    than this fails at once when its VM has no row. The wait applies only while every agent is
+    Succeeded. 0 queries once. Default: 45
+
+.PARAMETER NewWorkspaceWaitMinutes
+    How long to keep waiting for the Heartbeat table itself to exist, which a new workspace
+    creates only with its first row (about 40 minutes after the workspace is created). The wait
+    applies only while every agent is Succeeded. 0 fails at once when the table is missing.
+    Default: 45
 
 .EXAMPLE
     .\Test-Lab.ps1
@@ -45,7 +83,19 @@
 param(
     [Parameter()]
     [ValidateSet('dev', 'prod')]
-    [string]$Environment = 'dev'
+    [string]$Environment = 'dev',
+
+    [Parameter()]
+    [ValidateRange(0, 60)]
+    [int]$HeartbeatWaitMinutes = 10,
+
+    [Parameter()]
+    [ValidateRange(0, 120)]
+    [int]$NewWorkspaceWaitMinutes = 45,
+
+    [Parameter()]
+    [ValidateRange(0, 120)]
+    [int]$AgentInstallWaitMinutes = 45
 )
 
 $ErrorActionPreference = 'Stop'
@@ -199,6 +249,7 @@ Write-Host "[VM Insights Data Collection Rule]" -ForegroundColor Yellow
 $vmGroups = @("$Environment-skycraft-swc-rg") + @(@('dev', 'prod') | Where-Object { $_ -ne $Environment } | ForEach-Object { "$_-skycraft-swc-rg" })
 $dcrResource    = $null
 $dcrVmNames     = @()
+$dcrVmIds       = @()
 $dcrLookupError = $null
 $dcrUnread      = @()   # what could not be read, when what was read shows no rule
 try {
@@ -234,8 +285,9 @@ try {
                 $ruleId = "$($association.properties.dataCollectionRuleId)"
                 if (-not $ruleId) { continue }
                 $key = $ruleId.ToLowerInvariant()
-                if (-not $ruleVms.Contains($key)) { $ruleVms[$key] = [pscustomobject]@{ Id = $ruleId; Vms = @() } }
+                if (-not $ruleVms.Contains($key)) { $ruleVms[$key] = [pscustomobject]@{ Id = $ruleId; Vms = @(); VmIds = @() } }
                 $ruleVms[$key].Vms += $vm.Name
+                $ruleVms[$key].VmIds += $vm.ResourceId
             }
         }
     }
@@ -253,7 +305,7 @@ try {
             continue
         }
         $sendsHere = $null -ne $wsCache -and (@($rule.Properties.destinations.logAnalytics | ForEach-Object { "$($_.workspaceResourceId)" }) -contains $wsCache.ResourceId)
-        [pscustomobject]@{ Resource = $rule; Vms = $entry.Vms; SendsHere = $sendsHere; Preferred = ($rule.Name -eq $dcrName) }
+        [pscustomobject]@{ Resource = $rule; Vms = $entry.Vms; VmIds = $entry.VmIds; SendsHere = $sendsHere; Preferred = ($rule.Name -eq $dcrName) }
     }
     # The rule that sends to the lab's workspace is the lab's; the Bicep's name breaks a tie.
     $chosen = @($rules) | Where-Object { $_ } |
@@ -262,6 +314,7 @@ try {
     if ($chosen) {
         $dcrResource = $chosen.Resource
         $dcrVmNames  = $chosen.Vms
+        $dcrVmIds    = $chosen.VmIds
     }
     elseif ($readErrors.Count -gt 0 -and ($vmsRead -eq 0 -or $ruleVms.Count -gt 0)) {
         # Nothing was read, or every associated rule was unreadable: the lookup itself failed.
@@ -293,14 +346,180 @@ Invoke-Test "DCR destination points to workspace" {
     return ($destWsIds -contains $wsCache.ResourceId)
 }
 
-Invoke-Test "DCR has InsightsMetrics data flow" {
+# Perf, not InsightsMetrics: Step 5.1.4 queries the Perf table (#369).
+Invoke-Test "DCR has Perf data flow" {
     $streams = $dcrResource.Properties.dataFlows | ForEach-Object { $_.streams } | Select-Object -Unique
-    return ($streams -contains 'Microsoft-InsightsMetrics')
+    return ($streams -contains 'Microsoft-Perf')
 }
 
 Invoke-Test "DCR includes Syslog stream" {
     $streams = $dcrResource.Properties.dataFlows | ForEach-Object { $_.streams } | Select-Object -Unique
     return ($streams -contains 'Microsoft-Syslog')
+}
+
+# ============================================================================
+# Azure Monitor Agent Tests (#369)
+# ============================================================================
+Write-Host ""
+Write-Host "[Azure Monitor Agent]" -ForegroundColor Yellow
+
+# The lab's VMs are the ones its rule is associated with; a rule without an agent collects nothing.
+$agentTypes  = @('AzureMonitorLinuxAgent', 'AzureMonitorWindowsAgent')
+$agentStates = [ordered]@{}   # VM name -> provisioning state, 'missing', or the read error
+$agentExtIds = @{}            # VM name -> the agent extension's resource id
+$agentsReady = $false
+if ($dcrVmIds.Count -gt 0) {
+    for ($i = 0; $i -lt $dcrVmIds.Count; $i++) {
+        try {
+            $response = Invoke-AzRestMethod -Method GET -Path "$($dcrVmIds[$i])/extensions?api-version=2024-07-01" -ErrorAction Stop
+            if ($response.StatusCode -ne 200) { throw "HTTP $($response.StatusCode)" }
+            $agent = @(($response.Content | ConvertFrom-Json).value) |
+                Where-Object { $_.properties.publisher -eq 'Microsoft.Azure.Monitor' -and $_.properties.type -in $agentTypes } |
+                Select-Object -First 1
+            $agentStates[$dcrVmNames[$i]] = if ($agent) { "$($agent.properties.provisioningState)" } else { 'missing' }
+            if ($agent) { $agentExtIds[$dcrVmNames[$i]] = "$($dcrVmIds[$i])/extensions/$($agent.name)" }
+        }
+        catch {
+            $agentStates[$dcrVmNames[$i]] = "unreadable: $($_.Exception.Message)"
+        }
+    }
+    $agentsReady = @($agentStates.Values | Where-Object { $_ -ne 'Succeeded' }).Count -eq 0
+}
+
+Invoke-Test "Azure Monitor Agent Succeeded on the rule's VMs" {
+    if ($agentStates.Count -eq 0) {
+        Write-Host " (no VM carries the lab's rule - Step 5.1.2)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
+    $unread = @($agentStates.Keys | Where-Object { $agentStates[$_] -like 'unreadable:*' })
+    if ($unread.Count -gt 0) {
+        throw "could not read the extensions of $(($unread | ForEach-Object { "'$_' ($($agentStates[$_] -replace '^unreadable: '))" }) -join ', ')"
+    }
+    $summary = ($agentStates.Keys | ForEach-Object { "$_ $($agentStates[$_])" }) -join ', '
+    $step = if ($agentsReady) { '' } else { ' - Step 5.1.2 installs it' }
+    Write-Host " ($summary$step)" -NoNewline -ForegroundColor Gray
+    return $agentsReady
+}
+
+# When a VM's agent extension last installed successfully, as UTC, or $null with the reason. The
+# extension's instance view has no time, the activity log has one event per write (issue #369).
+function Get-AgentInstallTime {
+    param([string]$ExtensionId)
+    try {
+        $events = @(Get-AzActivityLog -ResourceId $ExtensionId -StartTime (Get-Date).AddDays(-14) -WarningAction SilentlyContinue -ErrorAction Stop)
+    }
+    catch {
+        return [pscustomobject]@{ Time = $null; Reason = "the activity log could not be read: $($_.Exception.Message)" }
+    }
+    # Plain output carries strings, detailed output localizable strings with a Value.
+    $writes = @($events | Where-Object {
+        $op = if ($_.OperationName.Value) { "$($_.OperationName.Value)" } else { "$($_.OperationName)" }
+        $status = if ($_.Status.Value) { "$($_.Status.Value)" } else { "$($_.Status)" }
+        $status -eq 'Succeeded' -and $op -match 'Create or Update|extensions/write'
+    })
+    if ($writes.Count -eq 0) {
+        return [pscustomobject]@{ Time = $null; Reason = 'the activity log has no successful install of the extension in the last 14 days' }
+    }
+    $latest = ($writes | Sort-Object -Property EventTimestamp -Descending | Select-Object -First 1).EventTimestamp
+    [pscustomobject]@{ Time = ([datetime]$latest).ToUniversalTime(); Reason = $null }
+}
+
+$heartbeatWindow = 15
+# Waiting only helps a Succeeded agent whose first rows, or whose workspace's table, are still on their way.
+# $heartbeatWait bounds the row wait only where the agent's install time is not known.
+$heartbeatWait = if ($agentsReady) { $HeartbeatWaitMinutes } else { 0 }
+$tableWait     = if ($agentsReady) { $NewWorkspaceWaitMinutes } else { 0 }
+$installWait   = $AgentInstallWaitMinutes
+# A workspace without its Heartbeat table answers BadRequest: failed to resolve the table.
+$tableMissingPattern = 'BadRequest|Bad Request|Failed to resolve|could not be resolved|SEM0100'
+Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes" {
+    if ($dcrVmIds.Count -eq 0) {
+        Write-Host " (no VM carries the lab's rule - Step 5.1.2)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
+    if (-not $wsCache) { throw "workspace '$workspaceName' not found" }
+    $idList = ($dcrVmIds | ForEach-Object { "'$($_.ToLowerInvariant())'" }) -join ', '
+    $query = "Heartbeat | where TimeGenerated > ago($($heartbeatWindow)m) | where tolower(_ResourceId) in ($idList) | summarize LastHeartbeat = max(TimeGenerated) by VmId = tolower(_ResourceId)"
+    $started       = Get-Date
+    $tableDeadline = $started.AddMinutes($tableWait)
+    $rowDeadline   = $null   # set when the table first exists; bounds the wait where no install time is known
+    $installs      = @{}     # VM name -> install time or why there is none, read once a VM lacks a row
+    while ($true) {
+        $tableError = $null
+        $result     = $null
+        try {
+            $result = Invoke-AzOperationalInsightsQuery -WorkspaceId "$($wsCache.CustomerId)" -Query $query -ErrorAction Stop
+        }
+        catch {
+            # Only a missing table is waited for; any other failure is a failure.
+            if ($_.Exception.Message -notmatch $tableMissingPattern -or $null -ne $rowDeadline) { throw }
+            $tableError = $_.Exception.Message
+        }
+        if (-not $tableError) {
+            if ($null -eq $result) { throw 'the workspace query returned nothing' }
+            if ($result.Error) {
+                if ("$($result.Error.Message)" -notmatch $tableMissingPattern -or $null -ne $rowDeadline) { throw "the workspace query failed: $($result.Error.Message)" }
+                $tableError = "$($result.Error.Message)"
+            }
+        }
+        if ($tableError) {
+            $waited = [int][math]::Floor(((Get-Date) - $started).TotalMinutes)
+            if ((Get-Date) -ge $tableDeadline) {
+                $after = if ($tableWait -gt 0) { " after waiting $waited of $tableWait minutes" } else { '' }
+                Write-Host " (the Heartbeat table does not exist in '$workspaceName' yet${after}: a new workspace creates it with the first row, up to about 40 minutes after the workspace is created; run again later - Step 5.1.3. Query said: $tableError)" -NoNewline -ForegroundColor Gray
+                return $false
+            }
+            Write-Host ''
+            Write-Host "    workspace not ready: no Heartbeat table yet, waited $waited of $tableWait minutes, trying again in 60 seconds" -ForegroundColor Gray
+            Start-Sleep -Seconds 60
+            continue
+        }
+        if ($null -eq $rowDeadline) { $rowDeadline = (Get-Date).AddMinutes($heartbeatWait) }
+        $seen = @($result.Results | ForEach-Object { "$($_.VmId)" })
+        $missing = @(for ($i = 0; $i -lt $dcrVmIds.Count; $i++) { if ($dcrVmIds[$i].ToLowerInvariant() -notin $seen) { $dcrVmNames[$i] } })
+        # A Failed or missing agent explains the gap; there is nothing to wait for.
+        if ($missing.Count -eq 0 -or -not $agentsReady) { break }
+        # The first row follows the install by 27-39 minutes: wait to a bound after the install
+        # time, or only -HeartbeatWaitMinutes where it is not known.
+        $now = (Get-Date).ToUniversalTime()
+        $stillWaiting = @()
+        foreach ($name in $missing) {
+            if (-not $installs.ContainsKey($name)) {
+                $installs[$name] = if ($agentExtIds[$name]) { Get-AgentInstallTime -ExtensionId $agentExtIds[$name] }
+                                   else { [pscustomobject]@{ Time = $null; Reason = 'the extension id is not known' } }
+            }
+            $install = $installs[$name]
+            if ($install.Time) {
+                if ($now -lt $install.Time.AddMinutes($installWait)) { $stillWaiting += $name }
+            }
+            elseif ((Get-Date) -lt $rowDeadline) { $stillWaiting += $name }
+        }
+        if ($stillWaiting.Count -eq 0) { break }
+        $progress = foreach ($name in $stillWaiting) {
+            if ($installs[$name].Time) {
+                $age = [int][math]::Floor(($now - $installs[$name].Time).TotalMinutes)
+                "$name (agent installed $age of $installWait minutes ago)"
+            }
+            else { "$name (install time unknown, waiting up to $heartbeatWait minutes)" }
+        }
+        Write-Host ''
+        Write-Host "    waiting for the first Heartbeat row from $($progress -join ', '), trying again in 60 seconds" -ForegroundColor Gray
+        Start-Sleep -Seconds 60
+    }
+    if ($missing.Count -gt 0) {
+        $causes = foreach ($name in $missing) {
+            $install = $installs[$name]
+            if (-not $install) { $name }
+            elseif ($install.Time) {
+                $age = [int][math]::Floor(((Get-Date).ToUniversalTime() - $install.Time).TotalMinutes)
+                "$name (agent installed $age minutes ago, past the $installWait-minute bound the first row takes: the agent is installed but not sending, check that the VM runs and that the rule is associated with it)"
+            }
+            else { "$name (install time unknown: $($install.Reason); waited $heartbeatWait minutes)" }
+        }
+        Write-Host " (no row from $($causes -join '; ') - Steps 5.1.2 and 5.1.3)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
+    return $true
 }
 
 # ============================================================================

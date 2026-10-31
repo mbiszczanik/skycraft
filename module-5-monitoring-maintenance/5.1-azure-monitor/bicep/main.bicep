@@ -1,9 +1,9 @@
 /*=====================================================
 SUMMARY: Lab 5.1 - Azure Monitor & Insights - Orchestrator
-DESCRIPTION: Deploys the SkyCraft monitoring hub into platform-skycraft-swc-rg through Azure Verified Modules - the Log Analytics workspace, the VM Insights data collection rule, the operations action group and the CPU metric alert - plus the platform storage account's blob diagnostic setting through a local fallback module
+DESCRIPTION: Deploys the SkyCraft monitoring hub into platform-skycraft-swc-rg through Azure Verified Modules - the Log Analytics workspace, the VM data collection rule (Perf, InsightsMetrics and Syslog), the tagged Azure Monitor Agent on the monitored VM, the operations action group and the CPU metric alert - plus the platform storage account's blob diagnostic setting through a local fallback module
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -OpsEmail ops@example.com
 AUTHOR/S: Marcin Biszczanik
-VERSION: 2.0.0
+VERSION: 2.1.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -32,6 +32,10 @@ param parOpsEmail string
 @description('Resource ID of the VM the CPU metric alert is scoped to (Deploy-Bicep.ps1 resolves it at run time)')
 @minLength(1)
 param parProdVmResourceId string
+
+@description('Resource ID of the Linux VM the data collection rule is associated with; it gets the Azure Monitor Agent (Deploy-Bicep.ps1 resolves it at run time)')
+@minLength(1)
+param parAgentVmResourceId string
 
 @description('Resource ID of the platform storage account whose blob service streams StorageRead/StorageWrite logs to the workspace')
 @minLength(1)
@@ -70,6 +74,13 @@ var varStorageDiagName = 'skycraft-storage-diag'
 var varStorageAccountRgName = split(parStorageAccountResourceId, '/')[4]
 var varStorageAccountName = split(parStorageAccountResourceId, '/')[8]
 
+// The agent is a child of the VM, so it lives in the VM's group and carries the VM's environment
+var varAgentVmRgName = split(parAgentVmResourceId, '/')[4]
+var varAgentVmName = split(parAgentVmResourceId, '/')[8]
+var varAgentTags = union(varCommonTags, {
+  Environment: startsWith(varAgentVmRgName, 'prod-') ? 'Production' : 'Development'
+})
+
 /*******************
 *     Modules      *
 *******************/
@@ -89,8 +100,8 @@ module modWorkspace 'br/public:avm/res/operational-insights/workspace:0.16.1' = 
   }
 }
 
-// 2. VM Insights data collection rule (the association with the VM is created by Deploy-Bicep.ps1,
-//    because the VM resource ID is only known at run time)
+// 2. VM data collection rule (the association with the VM is created by Deploy-Bicep.ps1).
+//    Perf fills the table Step 5.1.4 queries; InsightsMetrics feeds VM insights' Performance view.
 module modDcr 'br/public:avm/res/insights/data-collection-rule:0.11.0' = {
   name: 'dcr-deployment'
   scope: resourceGroup(varPlatformRgName)
@@ -100,7 +111,7 @@ module modDcr 'br/public:avm/res/insights/data-collection-rule:0.11.0' = {
     tags: varCommonTags
     dataCollectionRuleProperties: {
       kind: 'Linux'
-      description: 'Data collection rule for VM Insights logs-based metrics (InsightsMetrics).'
+      description: 'Data collection rule for the SkyCraft VMs: performance counters (Perf, InsightsMetrics) and Syslog.'
       dataSources: {
         performanceCounters: [
           {
@@ -108,6 +119,18 @@ module modDcr 'br/public:avm/res/insights/data-collection-rule:0.11.0' = {
             streams: ['Microsoft-InsightsMetrics']
             samplingFrequencyInSeconds: 60
             counterSpecifiers: ['\\VmInsights\\DetailedMetrics']
+          }
+          {
+            name: 'PerfCounters'
+            streams: ['Microsoft-Perf']
+            samplingFrequencyInSeconds: 60
+            counterSpecifiers: [
+              'Processor(*)\\% Processor Time'
+              'Memory(*)\\% Used Memory'
+              'Memory(*)\\Available MBytes Memory'
+              'Logical Disk(*)\\% Used Space'
+              'Network(*)\\Total Bytes'
+            ]
           }
         ]
         syslog: [
@@ -129,11 +152,29 @@ module modDcr 'br/public:avm/res/insights/data-collection-rule:0.11.0' = {
       }
       dataFlows: [
         {
-          streams: ['Microsoft-InsightsMetrics', 'Microsoft-Syslog']
+          streams: ['Microsoft-Perf', 'Microsoft-InsightsMetrics', 'Microsoft-Syslog']
           destinations: [varDcrDestinationName]
         }
       ]
     }
+  }
+}
+
+// 2b. Azure Monitor Agent on the VM the rule is associated with. Tagged, because Lab 1.3's
+//     Enforce-Project-Tag denies an untagged extension (#350, #369).
+module modMonitorAgent 'br/public:avm/res/compute/virtual-machine/extension:0.1.0' = {
+  name: 'ama-deployment'
+  scope: resourceGroup(varAgentVmRgName)
+  params: {
+    name: 'AzureMonitorLinuxAgent'
+    virtualMachineName: varAgentVmName
+    location: parLocation
+    tags: varAgentTags
+    publisher: 'Microsoft.Azure.Monitor'
+    type: 'AzureMonitorLinuxAgent'
+    typeHandlerVersion: '1.0'
+    autoUpgradeMinorVersion: true
+    enableAutomaticUpgrade: true
   }
 }
 
@@ -213,6 +254,9 @@ output outWorkspaceCustomerId string = modWorkspace.outputs.logAnalyticsWorkspac
 
 @description('Resource ID of the VM Insights data collection rule')
 output outDcrId string = modDcr.outputs.resourceId
+
+@description('Resource ID of the Azure Monitor Agent extension')
+output outMonitorAgentId string = modMonitorAgent.outputs.resourceId
 
 @description('Resource ID of the action group')
 output outActionGroupId string = modActionGroup.outputs.resourceId
