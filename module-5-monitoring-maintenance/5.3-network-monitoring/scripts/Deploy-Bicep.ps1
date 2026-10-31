@@ -146,7 +146,13 @@ Write-Host "  ✓ Connection Monitor: $($sourceVm.Name) -> $($destVm.Name)" -For
 foreach ($cmVm in @($sourceVm, $destVm)) {
     $hasExt = Get-AzVMExtension -ResourceGroupName $cmVm.ResourceGroupName -VMName $cmVm.Name -ErrorAction SilentlyContinue |
         Where-Object { $_.Publisher -eq 'Microsoft.Azure.NetworkWatcher' }
-    if (-not $hasExt) {
+    if ($WhatIf) {
+        if ($hasExt) {
+            Write-Host "  ✓ NetworkWatcherAgent already present on $($cmVm.Name)" -ForegroundColor Green
+        } else {
+            Write-Host "  What-if: would install NetworkWatcherAgentLinux on $($cmVm.Name) (skipped)" -ForegroundColor Cyan
+        }
+    } elseif (-not $hasExt) {
         Write-Host "  Installing NetworkWatcherAgent on $($cmVm.Name)..." -ForegroundColor Yellow
         try {
             # Use New-AzResource (not Set-AzVMExtension) so the extension carries the
@@ -167,7 +173,13 @@ foreach ($cmVm in @($sourceVm, $destVm)) {
 
 # Verify Network Watcher exists in the region
 $nwExists = @(Get-AzNetworkWatcher -ErrorAction SilentlyContinue | Where-Object { $_.Location -eq $location })
-if (-not $nwExists -or $nwExists.Count -eq 0) {
+if ($WhatIf) {
+    if (-not $nwExists -or $nwExists.Count -eq 0) {
+        Write-Host "  What-if: would create NetworkWatcherRG (if missing) and Network Watcher for swedencentral (skipped)" -ForegroundColor Cyan
+    } else {
+        Write-Host "  ✓ Network Watcher active for swedencentral" -ForegroundColor Green
+    }
+} elseif (-not $nwExists -or $nwExists.Count -eq 0) {
     Write-Host "  [WARNING] Network Watcher not found for swedencentral. Enabling now..." -ForegroundColor Yellow
     try {
         $nwRg = Get-AzResourceGroup -Name 'NetworkWatcherRG' -ErrorAction SilentlyContinue
