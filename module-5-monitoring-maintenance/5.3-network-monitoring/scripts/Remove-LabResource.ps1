@@ -32,6 +32,14 @@
     the same name, level and notes, also when one fails. A lock it cannot read, lift or restore
     is an [ERROR] and counted; any other lock is left alone.
 
+    A VM that is not running (stopped or deallocated) refuses extension changes: Azure answers 409
+    OperationNotAllowed, "Cannot modify extensions in the VM when the VM is not running". The agent
+    on such a VM is left in place and reported as [SKIP] ... left behind on purpose, not counted as
+    a failure (issue #465). Starting the VM just to remove it would cost compute time and minutes,
+    can fail for capacity, and gains nothing: a stopped VM runs no agent, the extension itself is
+    not billed, and it is deleted with the VM by Lab 3.2's cleanup. Any other removal error is
+    still an [ERROR] and counted.
+
     Every exit goes through Exit-Lab (tools/LabCommon.psm1): 1 when anything failed, 0
     otherwise. Run as "pwsh -File", where #Requires -Modules would drop a bare "exit 1"
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
@@ -238,6 +246,30 @@ function Test-LabNotFoundError {
     return $text -match '\bResource(Group)?NotFound\b|was not found|Resource group .{0,100}could not be found|invalid status code ''NotFound''|\b404 \(Not Found\)'
 }
 
+# Whether a removal error says the VM is not running (issue #465): Azure refuses extension changes
+# on a stopped or deallocated VM with 409 OperationNotAllowed. Both the code and the wording must
+# match, so any other 409 is still a failure.
+function Test-LabVmNotRunningError {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    $evidence = [System.Collections.Generic.List[string]]::new()
+    $evidence.Add([string]$ErrorRecord)
+    $evidence.Add([string]$ErrorRecord.FullyQualifiedErrorId)
+    for ($exception = $ErrorRecord.Exception; $exception; $exception = $exception.InnerException) {
+        $evidence.Add([string]$exception.Message)
+        foreach ($code in @($exception.Body.Code, $exception.Body.Error.Code, $exception.ErrorCode)) {
+            if ($code) { $evidence.Add([string]$code) }
+        }
+    }
+    $text = $evidence -join "`n"
+    return ($text -match '\bOperationNotAllowed\b') -and ($text -match 'when the VM is not running')
+}
+
 # Runs one lookup with -ErrorAction Stop inside $Lookup, and returns what it found:
 #   Value     the lookup's output, as an array - empty when the object is absent
 #   NotFound  the getter reported the object as not found (Test-LabNotFoundError)
@@ -421,6 +453,11 @@ if ($agentDeletes.Count -gt 0) {
                     Remove-AzVMExtension -ResourceGroupName $agentDelete.ResourceGroupName -VMName $vmName -Name $agentDelete.Name -Force -ErrorAction Stop | Out-Null
                     Write-Host "  ✓ NetworkWatcherAgent removed from $vmName" -ForegroundColor Green
                 } catch {
+                    if (Test-LabVmNotRunningError -ErrorRecord $_) {
+                        Write-Host "  [SKIP] $($agentDelete.Name) left on $vmName on purpose: the VM is not running and Azure refuses extension changes on it" -ForegroundColor Yellow
+                        Write-Host "         Harmless: a stopped VM runs no agent, the extension costs nothing and goes away with the VM. To remove it now, start the VM and run this cleanup again." -ForegroundColor Gray
+                        continue
+                    }
                     $script:cleanupFailures++
                     Write-Host "  [ERROR] Failed to remove NetworkWatcherAgent from ${vmName}: $($_.Exception.Message)" -ForegroundColor Red
                 }
