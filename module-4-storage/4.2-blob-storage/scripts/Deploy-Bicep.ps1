@@ -74,7 +74,7 @@ $takenNames = 0
 foreach ($sa in @(
         @{ Name = $ProdSaName; Parameter = 'ProdSaName'; RG = 'prod-skycraft-swc-rg' },
         @{ Name = $DevSaName; Parameter = 'DevSaName'; RG = 'dev-skycraft-swc-rg' })) {
-    $owned = [bool](Get-AzResource -ResourceGroupName $sa.RG -ResourceType 'Microsoft.Storage/storageAccounts' -Name $sa.Name -ErrorAction SilentlyContinue)
+    $owned = [bool](Get-AzResource -ResourceGroupName $sa.RG -ResourceType 'Microsoft.Storage/storageAccounts' -Name $sa.Name -ApiVersion '2023-05-01' -ErrorAction SilentlyContinue)
     if (-not (Test-LabGlobalName -Kind StorageAccount -Name $sa.Name -ParameterName $sa.Parameter -Owned $owned)) { $takenNames++ }
 }
 if ($takenNames -gt 0) {

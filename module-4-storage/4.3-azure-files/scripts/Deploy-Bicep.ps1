@@ -60,7 +60,7 @@ if (-not $context) {
 }
 
 # 2. A taken name otherwise fails the deployment with StorageAccountAlreadyTaken (#438).
-$accountOwned = [bool](Get-AzResource -ResourceGroupName "$Environment-skycraft-swc-rg" -ResourceType 'Microsoft.Storage/storageAccounts' -Name $StorageAccountName -ErrorAction SilentlyContinue)
+$accountOwned = [bool](Get-AzResource -ResourceGroupName "$Environment-skycraft-swc-rg" -ResourceType 'Microsoft.Storage/storageAccounts' -Name $StorageAccountName -ApiVersion '2023-05-01' -ErrorAction SilentlyContinue)
 if (-not (Test-LabGlobalName -Kind StorageAccount -Name $StorageAccountName -ParameterName 'StorageAccountName' -Owned $accountOwned)) {
     Exit-Lab -FailureCount 1
 }
