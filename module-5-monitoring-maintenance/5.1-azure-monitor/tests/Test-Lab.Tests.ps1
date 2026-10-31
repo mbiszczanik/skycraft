@@ -32,6 +32,12 @@
          is Succeeded that is waited for, with progress lines, up to -NewWorkspaceWaitMinutes;
          a table that never appears fails and names the cause; an agent that is not Succeeded
          is not waited for; a BadRequest after the table existed is a failure.
+      8. The first row of a rebuilt VM arrives 27-30 minutes after the agent install, also where
+         the table already exists (#369): while the agent is Succeeded the wait is keyed to the
+         install time in the activity log, up to -AgentInstallWaitMinutes after it, with progress
+         lines; an agent installed longer ago than that fails at once and the message names the
+         cause; an unreadable or missing install time falls back to -HeartbeatWaitMinutes and
+         says so; an agent that is not Succeeded is not waited for.
 
     The VM insights rule in the 'portal' case carries the streams VM insights really sends
     (InsightsMetrics, no Perf or Syslog), so the Perf and Syslog checks fail on it: the guide's
@@ -71,6 +77,7 @@ BeforeAll {
         'Get-AzStorageAccount'
         'Get-AzDiagnosticSetting'
         'Invoke-AzOperationalInsightsQuery'
+        'Get-AzActivityLog'
         # Shadowed so a wait for Heartbeat rows is counted, not slept: the sleep moves the clock.
         'Start-Sleep'
         'Get-Date'
@@ -270,7 +277,8 @@ function Get-StubExtensions {
 #   'notable' throws BadRequest (no Heartbeat table, a fresh workspace) every time,
 #   'tablelate' throws it for the first two queries, then answers with rows,
 #   'tableerror' returns the failed-to-resolve error shape for the first two queries, then rows,
-#   'tablegone' answers with no rows once, then throws BadRequest.
+#   'tablegone' answers with no rows once, then throws BadRequest,
+#   'slow' answers with no rows for twenty queries (twenty minutes), then with rows.
 $script:QueryCount = 0
 function Invoke-AzOperationalInsightsQuery {
     [CmdletBinding()]
@@ -287,12 +295,40 @@ function Invoke-AzOperationalInsightsQuery {
         'tableerror' { if ($script:QueryCount -le 2) { return [pscustomobject]@{ Results = @(); Error = [pscustomobject]@{ Message = "Failed to resolve table or column expression named 'Heartbeat'" } } } }
         'tablegone' { if ($script:QueryCount -gt 1) { throw "Operation returned an invalid status code 'BadRequest'" } }
     }
+    $slowAnswer = $env:SKYCRAFT_STUB_HEARTBEAT -eq 'slow' -and $script:QueryCount -gt 20
     $rows = @()
-    $answer = $env:SKYCRAFT_STUB_HEARTBEAT -in '', 'rows', 'tablelate', 'tableerror' -or ($env:SKYCRAFT_STUB_HEARTBEAT -eq 'late' -and $script:QueryCount -gt 1)
+    $answer = $env:SKYCRAFT_STUB_HEARTBEAT -in '', 'rows', 'tablelate', 'tableerror' -or ($env:SKYCRAFT_STUB_HEARTBEAT -eq 'late' -and $script:QueryCount -gt 1) -or $slowAnswer
     if ($answer) {
         $rows = @([regex]::Matches($Query, "'(/subscriptions/[^']+)'") | ForEach-Object { [pscustomobject]@{ VmId = $_.Groups[1].Value; LastHeartbeat = '2026-10-28T10:00:00Z' } })
     }
     [pscustomobject]@{ Results = $rows; Error = $null }
+}
+
+# The activity log of the agent extension, as plain Get-AzActivityLog output (strings), as
+# SKYCRAFT_STUB_INSTALL says: the last successful install was 'recent' (5 minutes ago), 'mid'
+# (30 minutes ago) or 'old' (3 hours ago); 'none' has no event (the log is empty), 'throws' fails.
+# Every case also carries the install's Accepted and Started events, an older install and an
+# older successful delete, none of which is the install time.
+function Get-AzActivityLog {
+    [CmdletBinding()]
+    param([string]$ResourceId, [datetime]$StartTime, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($ResourceId -notmatch '/virtualMachines/[^/]+/extensions/AzureMonitorLinuxAgent$') { throw "stub: unexpected activity log resource $ResourceId" }
+    $minutes = switch ($env:SKYCRAFT_STUB_INSTALL) {
+        'throws' { throw 'stub lookup failure: activity log' }
+        'recent' { 5 }
+        'mid'    { 30 }
+        'old'    { 180 }
+        default  { return @() }
+    }
+    $at = [datetime]::UtcNow.AddMinutes(-$minutes)
+    $mk = { param($op, $status, $time) [pscustomobject]@{ EventTimestamp = $time; OperationName = $op; Status = $status; ResourceId = $ResourceId } }
+    @(
+        (& $mk 'Create or Update Virtual Machine Extension' 'Started' $at.AddSeconds(-4))
+        (& $mk 'Create or Update Virtual Machine Extension' 'Accepted' $at.AddSeconds(-2))
+        (& $mk 'Create or Update Virtual Machine Extension' 'Succeeded' $at)
+        (& $mk 'Create or Update Virtual Machine Extension' 'Succeeded' $at.AddDays(-3))
+        (& $mk 'Delete Virtual Machine Extension' 'Succeeded' $at.AddDays(-3).AddHours(-1))
+    )
 }
 
 # A sleep moves the clock the script reads, so a bounded wait ends without waiting.
@@ -357,12 +393,17 @@ function Get-AzDiagnosticSetting {
             [string]$Alert = 'platform',
             [ValidateSet('succeeded', 'missing', 'failed', 'unreadable')]
             [string]$Agent = 'succeeded',
-            [ValidateSet('rows', 'late', 'none', 'fail', 'error', 'notable', 'tablelate', 'tableerror', 'tablegone')]
+            [ValidateSet('rows', 'late', 'none', 'fail', 'error', 'notable', 'tablelate', 'tableerror', 'tablegone', 'slow')]
             [string]$Heartbeat = 'rows',
             [int]$WaitMinutes = 0,
-            [int]$TableWaitMinutes = 0
+            [int]$TableWaitMinutes = 0,
+            [ValidateSet('none', 'recent', 'mid', 'old', 'throws')]
+            [string]$Install = 'none',
+            [int]$InstallWaitMinutes = 45
         )
-        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList @("-HeartbeatWaitMinutes $WaitMinutes", "-NewWorkspaceWaitMinutes $TableWaitMinutes") -Environment @{
+        $arguments = @("-HeartbeatWaitMinutes $WaitMinutes", "-NewWorkspaceWaitMinutes $TableWaitMinutes", "-AgentInstallWaitMinutes $InstallWaitMinutes")
+        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList $arguments -Environment @{
+            SKYCRAFT_STUB_INSTALL   = $Install
             SKYCRAFT_STUB_DCR       = $Dcr
             SKYCRAFT_STUB_ALERT     = $Alert
             SKYCRAFT_STUB_AGENT     = $Agent
@@ -404,13 +445,26 @@ function Get-AzDiagnosticSetting {
     $script:TableLate        = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'tablelate' -TableWaitMinutes 5
     $script:TableErrorLate   = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'tableerror' -TableWaitMinutes 5
     $script:TableGone        = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'tablegone' -WaitMinutes 5 -TableWaitMinutes 5
+    # The install-keyed wait: the flat -HeartbeatWaitMinutes is 10 in every one of them.
+    $script:SlowAfterInstall = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'slow' -WaitMinutes 10 -Install 'recent'
+    $script:SlowFlatOnly     = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'slow' -WaitMinutes 10 -Install 'none'
+    $script:BoundReached     = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 10 -Install 'mid'
+    $script:OldNoRow         = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 10 -Install 'old'
+    $script:OldWithRow       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'rows' -WaitMinutes 10 -Install 'old'
+    $script:InstallLogFails  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 2 -Install 'throws'
+    $script:InstallLogEmpty  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 2 -Install 'none'
+    $script:InstallZeroWait  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 10 -Install 'recent' -InstallWaitMinutes 0
+    $script:AgentFailedRecent = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Agent 'failed' -Heartbeat 'none' -WaitMinutes 10 -Install 'recent'
     $script:AllRuns    = @(
         $script:BicepMade, $script:PortalMade, $script:NoRule, $script:ReadFails, $script:NoRulePartial,
         $script:VmThrows, $script:Dangling, $script:AlertInVmGroup, $script:AlertRecommended,
         $script:AlertListFails, $script:AlertListFailsPlatform, $script:AgentMissing, $script:AgentFailed,
         $script:AgentUnreadable, $script:AgentFailedNoRow, $script:NoHeartbeat, $script:HeartbeatLate,
         $script:QueryThrows, $script:QueryError, $script:NoTableNoWait, $script:NoTableNever,
-        $script:NoTableAgentFail, $script:TableLate, $script:TableErrorLate, $script:TableGone
+        $script:NoTableAgentFail, $script:TableLate, $script:TableErrorLate, $script:TableGone,
+        $script:SlowAfterInstall, $script:SlowFlatOnly, $script:BoundReached, $script:OldNoRow,
+        $script:OldWithRow, $script:InstallLogFails, $script:InstallLogEmpty, $script:InstallZeroWait,
+        $script:AgentFailedRecent
     )
 }
 
@@ -586,14 +640,14 @@ Describe 'Lab 5.1 Test-Lab.ps1 - checks the Azure Monitor Agent and its Heartbea
     It 'fails, counted, when no Heartbeat row has arrived from the VM, and names it' {
         $run = $script:NoHeartbeat
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\.\[stub-query 1\] \(no row from dev-skycraft-swc-auth-vm - Steps 5\.1\.2 and 5\.1\.3\) FAIL"
+        $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\.\[stub-query 1\] \(no row from dev-skycraft-swc-auth-vm \(install time unknown: the activity log has no successful install of the extension in the last 14 days; waited 0 minutes\) - Steps 5\.1\.2 and 5\.1\.3\) FAIL"
         $run.Output | Should -Match 'Failed: 1\b'
     }
 
     It 'waits for a first Heartbeat while the agent is Succeeded, and passes when it arrives' {
         $run = $script:HeartbeatLate
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\.\[stub-query 1\]\.\[stub-sleep 60\]\[stub-query 2\] PASS"
+        $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\.\[stub-query 1\]\s+waiting for the first Heartbeat row from dev-skycraft-swc-auth-vm \(install time unknown, waiting up to 1 minutes\), trying again in 60 seconds\s+\[stub-sleep 60\]\[stub-query 2\] PASS"
     }
 
     It 'does not wait for Heartbeat from an agent that is not Succeeded' {
@@ -671,3 +725,81 @@ Describe 'Lab 5.1 Test-Lab.ps1 - waits for the Heartbeat table of a new workspac
         $run.Output | Should -Not -Match 'workspace not ready'
     }
 }
+
+Describe 'Lab 5.1 Test-Lab.ps1 - waits for the first Heartbeat row up to a bound after the agent install (#369)' {
+
+    It 'keeps waiting past the flat wait while the agent is younger than the bound, and passes when the row arrives' {
+        $run = $script:SlowAfterInstall
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        ([regex]::Matches($run.Output, 'stub-sleep 60')).Count | Should -Be 20
+        $run.Output | Should -Match '\[stub-query 21\] PASS'
+        $run.Output | Should -Match 'waiting for the first Heartbeat row from dev-skycraft-swc-auth-vm \(agent installed [45] of 45 minutes ago\), trying again in 60 seconds'
+        $run.Output | Should -Match 'agent installed 2[0-9] of 45 minutes ago'
+        $run.Output | Should -Match 'Failed: 0\b'
+    }
+
+    It 'still bounds the wait to -HeartbeatWaitMinutes where the install time is not known' {
+        $run = $script:SlowFlatOnly
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        ([regex]::Matches($run.Output, 'stub-sleep 60')).Count | Should -Be 10
+        $run.Output | Should -Not -Match 'stub-query 21'
+        $run.Output | Should -Match 'install time unknown'
+    }
+
+    It 'stops at the bound after the install, names the cause and the age, and fails' {
+        $run = $script:BoundReached
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        # 30 minutes old with a 45-minute bound: about 15 more minutes, not the flat 10.
+        $sleeps = ([regex]::Matches($run.Output, 'stub-sleep 60')).Count
+        $sleeps | Should -BeGreaterOrEqual 14
+        $sleeps | Should -BeLessOrEqual 16
+        $run.Output | Should -Match 'no row from dev-skycraft-swc-auth-vm \(agent installed 4[5-6] minutes ago, past the 45-minute bound the first row takes: the agent is installed but not sending'
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'fails at once, naming the cause, for an agent installed longer ago than the bound' {
+        $run = $script:OldNoRow
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Not -Match 'stub-sleep'
+        $run.Output | Should -Not -Match 'stub-query 2'
+        $run.Output | Should -Match 'no row from dev-skycraft-swc-auth-vm \(agent installed 18[0-9] minutes ago, past the 45-minute bound the first row takes: the agent is installed but not sending'
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'passes an old agent whose VM sends Heartbeat, without waiting' {
+        $run = $script:OldWithRow
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Not -Match 'stub-sleep'
+        $run.Output | Should -Match 'Failed: 0\b'
+    }
+
+    It 'does not wait at all when -AgentInstallWaitMinutes is 0' {
+        $run = $script:InstallZeroWait
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Not -Match 'stub-sleep'
+        $run.Output | Should -Match 'agent installed [45] minutes ago, past the 0-minute bound'
+    }
+
+    It 'falls back to the flat wait and says why when the activity log cannot be read' {
+        $run = $script:InstallLogFails
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        ([regex]::Matches($run.Output, 'stub-sleep 60')).Count | Should -Be 2
+        $run.Output | Should -Match 'install time unknown: the activity log could not be read: stub lookup failure: activity log; waited 2 minutes'
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'falls back to the flat wait and says why when the log holds no install' {
+        $run = $script:InstallLogEmpty
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        ([regex]::Matches($run.Output, 'stub-sleep 60')).Count | Should -Be 2
+        $run.Output | Should -Match 'install time unknown: the activity log has no successful install of the extension in the last 14 days; waited 2 minutes'
+    }
+
+    It 'does not wait for a Failed agent however recent its install' {
+        $run = $script:AgentFailedRecent
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Not -Match 'stub-sleep'
+        $run.Output | Should -Not -Match 'agent installed'
+        $run.Output | Should -Match 'Failed: 2\b'
+    }
+}

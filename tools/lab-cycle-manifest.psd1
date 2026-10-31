@@ -335,7 +335,8 @@
             PostDeploy = $null
             Test       = @{}
             DependsOn  = @('3.2', '4.1')
-            # 60 min: Test-Lab waits up to 45 for a new workspace's Heartbeat table (#369).
+            # 60 min: Test-Lab waits up to 45 for a new workspace's Heartbeat table, then up to 10 for a row
+            # where the agent's install time is unreadable; 45 after the install otherwise (#369).
             TimeoutMs  = 3600000
             StdinAnswers = $null
             Excluded   = $null
