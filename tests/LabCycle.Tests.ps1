@@ -665,10 +665,11 @@ Describe 'Manifest - teardown covers what the cycle deploys' {
         $containers.TimeoutMs | Should -BeGreaterThan 1200000
     }
 
-    It 'gives lab 5.1 a phase limit above the 45 minutes its validator may wait for a new workspace' {
-        # Test-Lab.ps1 -NewWorkspaceWaitMinutes defaults to 45 (#369); a shorter limit would kill it.
+    It 'gives lab 5.1 a phase limit above the longest wait of its validator' {
+        # Test-Lab.ps1 waits up to -NewWorkspaceWaitMinutes (45) for the Heartbeat table and then up
+        # to -HeartbeatWaitMinutes (10) for a row where the install time is unreadable (#369).
         $phase = $script:LivePhases | Where-Object { $_.Id -eq '5.1' }
-        $phase.TimeoutMs | Should -BeGreaterThan (45 * 60 * 1000)
+        $phase.TimeoutMs | Should -BeGreaterThan ((45 + 10) * 60 * 1000)
     }
 
     It 'tears the remaining labs down in the reverse of the deploy order' {

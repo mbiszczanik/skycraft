@@ -148,7 +148,7 @@ Two pieces connect a VM to the workspace: the **Azure Monitor Agent (AMA)**, a V
    }'
    ```
 
-**Expected Result**: `skycraft-vm-dcr` lists `dev-skycraft-swc-auth-vm` under **Resources**, the VM shows `AzureMonitorLinuxAgent` with **Provisioning succeeded**, and after 5-10 minutes the queries in Steps 5.1.3 and 5.1.4 return rows.
+**Expected Result**: `skycraft-vm-dcr` lists `dev-skycraft-swc-auth-vm` under **Resources**, the VM shows `AzureMonitorLinuxAgent` with **Provisioning succeeded**, and the queries in Steps 5.1.3 and 5.1.4 return rows once the agent's first data arrives (up to about 40 minutes after the install, see the note in Step 5.1.3).
 
 ---
 
@@ -168,7 +168,7 @@ Heartbeat
 
 5. Click **Run**.
 
-> **Wait on a new workspace**: with a workspace that already holds data, rows appear 5-10 minutes after the agent is installed. A **new** workspace has no `Heartbeat` table until its first row arrives, up to about 40 minutes after the workspace was created. Until then the query fails with a `BadRequest` or "Failed to resolve table" error: that means "not ready yet", not a broken setup. Run it again every few minutes. `scripts/Test-Lab.ps1` waits for this itself, up to 45 minutes (`-NewWorkspaceWaitMinutes`), and fails naming the missing table if it never appears.
+> **Wait for the first row**: the first `Heartbeat` row of a newly installed agent reaches the workspace 27-39 minutes after the install, also when the workspace is recovered with its table and old data. A **new** workspace has no `Heartbeat` table until that first row arrives; until then the query fails with a `BadRequest` or "Failed to resolve table" error. Both mean "not ready yet", not a broken setup: run the query again every few minutes. `scripts/Test-Lab.ps1` waits for this itself, once a minute with progress lines: up to 45 minutes after the agent was installed (`-AgentInstallWaitMinutes`, read from the extension's last successful write in the activity log), and up to 45 minutes for the table of a new workspace (`-NewWorkspaceWaitMinutes`). An agent installed longer ago than that with still no row fails at once, naming the agent as installed but not sending.
 
 ### Step 5.1.4: Query Performance Data
 
@@ -356,7 +356,7 @@ The data collection rule, the action group and the tagged Azure Monitor Agent (`
 
 - Ensure the VM is **Running**.
 - Check that the VM lists `AzureMonitorLinuxAgent` under **Extensions + applications** with **Provisioning succeeded**; if not, run the install block in Step 5.1.2.
-- Wait up to 10 minutes for the AMA agent to finalize configuration. On a new workspace the `Heartbeat` table appears with the first row, up to about 40 minutes after the workspace was created; a `BadRequest` or "Failed to resolve table" error before that is expected (Step 5.1.3).
+- Wait for the agent's first data: the first `Heartbeat` row arrives 27-39 minutes after the install, and on a new workspace the `Heartbeat` table appears only with it; a `BadRequest` or "Failed to resolve table" error before that is expected (Step 5.1.3). If more than 45 minutes have passed since the install, the agent is not sending: check that the VM is running and that the rule is associated with it.
 - Check if the **Data Collection Rule** is correctly associated with the VM.
 - `Heartbeat` has rows but `Perf` is empty: the rule must send **Performance Counters** to **Azure Monitor Logs**. A rule made by VM insights sends `InsightsMetrics` instead.
 

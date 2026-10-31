@@ -248,8 +248,8 @@ if ($WhatIf) {
     }
 
     Write-Host "`n  Next Steps:" -ForegroundColor Cyan
-    Write-Host "    1. Wait 5-10 minutes for Heartbeat and Perf rows to appear in the workspace (up to about 40 minutes on a new workspace)" -ForegroundColor Gray
-    Write-Host "    2. Run .\Test-Lab.ps1 to validate deployment" -ForegroundColor Gray
+    Write-Host "    1. Heartbeat and Perf rows reach the workspace up to about 40 minutes after the agent install (a new workspace has no Heartbeat table until then)" -ForegroundColor Gray
+    Write-Host "    2. Run .\Test-Lab.ps1 to validate deployment (it waits up to 45 minutes after the agent install for the first Heartbeat row)" -ForegroundColor Gray
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan

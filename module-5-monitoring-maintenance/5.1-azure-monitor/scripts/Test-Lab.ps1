@@ -29,7 +29,15 @@
     its extension must be present and Succeeded, and the workspace must hold a Heartbeat row from
     each of those VMs from the last 15 minutes. A failed extension read or workspace query is a
     failure, never a pass. While every agent is Succeeded and a VM's Heartbeat is still missing,
-    the query is repeated once a minute for up to -HeartbeatWaitMinutes.
+    the wait for its first row is keyed to when that VM's agent extension was installed: the time
+    of its last successful 'Create or Update Virtual Machine Extension' event in the activity log
+    (the extension's own instance view carries no time), and the query is repeated once a minute,
+    with a progress line, until -AgentInstallWaitMinutes after that time. The first row has
+    reached the workspace 27-39 minutes after the install, also on a recovered workspace whose
+    table already exists. An agent installed longer ago than that with still no row fails at
+    once, naming the cause: the agent is installed but not sending. Without a readable install
+    time (no event, or the log cannot be read) the short -HeartbeatWaitMinutes applies, and the
+    message says the time was unknown.
     A new workspace has no Heartbeat table until the first row arrives, up to about 40 minutes
     after the workspace is created; until then the query fails with BadRequest (failed to resolve
     the table). While every agent is Succeeded, that is read as 'workspace not ready' and the
@@ -41,9 +49,16 @@
     the data collection rule, then the other environment's. Default: dev
 
 .PARAMETER HeartbeatWaitMinutes
-    How long to keep waiting for a first Heartbeat row after the agent is Succeeded; data takes
-    5-10 minutes to arrive after a fresh install. 0 queries once. Counted from the moment the
-    Heartbeat table exists. Default: 10
+    How long to keep waiting for a first Heartbeat row when the agent's install time cannot be
+    read (see -AgentInstallWaitMinutes). 0 queries once. Counted from the moment the Heartbeat
+    table exists. Default: 10
+
+.PARAMETER AgentInstallWaitMinutes
+    How long after an agent extension was installed to keep waiting for the first Heartbeat row
+    of its VM; a rebuilt VM sends it 27-39 minutes after the install. Counted from the install
+    time in the activity log, so a run started late waits only for the rest, and an agent older
+    than this fails at once when its VM has no row. The wait applies only while every agent is
+    Succeeded. 0 queries once. Default: 45
 
 .PARAMETER NewWorkspaceWaitMinutes
     How long to keep waiting for the Heartbeat table itself to exist, which a new workspace
@@ -76,7 +91,11 @@ param(
 
     [Parameter()]
     [ValidateRange(0, 120)]
-    [int]$NewWorkspaceWaitMinutes = 45
+    [int]$NewWorkspaceWaitMinutes = 45,
+
+    [Parameter()]
+    [ValidateRange(0, 120)]
+    [int]$AgentInstallWaitMinutes = 45
 )
 
 $ErrorActionPreference = 'Stop'
@@ -347,6 +366,7 @@ Write-Host "[Azure Monitor Agent]" -ForegroundColor Yellow
 # The lab's VMs are the ones its rule is associated with; a rule without an agent collects nothing.
 $agentTypes  = @('AzureMonitorLinuxAgent', 'AzureMonitorWindowsAgent')
 $agentStates = [ordered]@{}   # VM name -> provisioning state, 'missing', or the read error
+$agentExtIds = @{}            # VM name -> the agent extension's resource id
 $agentsReady = $false
 if ($dcrVmIds.Count -gt 0) {
     for ($i = 0; $i -lt $dcrVmIds.Count; $i++) {
@@ -357,6 +377,7 @@ if ($dcrVmIds.Count -gt 0) {
                 Where-Object { $_.properties.publisher -eq 'Microsoft.Azure.Monitor' -and $_.properties.type -in $agentTypes } |
                 Select-Object -First 1
             $agentStates[$dcrVmNames[$i]] = if ($agent) { "$($agent.properties.provisioningState)" } else { 'missing' }
+            if ($agent) { $agentExtIds[$dcrVmNames[$i]] = "$($dcrVmIds[$i])/extensions/$($agent.name)" }
         }
         catch {
             $agentStates[$dcrVmNames[$i]] = "unreadable: $($_.Exception.Message)"
@@ -380,8 +401,32 @@ Invoke-Test "Azure Monitor Agent Succeeded on the rule's VMs" {
     return $agentsReady
 }
 
+# When a VM's agent extension last installed successfully, as UTC, or $null with the reason. The
+# extension's instance view has no time, the activity log has one event per write (issue #369).
+function Get-AgentInstallTime {
+    param([string]$ExtensionId)
+    try {
+        $events = @(Get-AzActivityLog -ResourceId $ExtensionId -StartTime (Get-Date).AddDays(-14) -WarningAction SilentlyContinue -ErrorAction Stop)
+    }
+    catch {
+        return [pscustomobject]@{ Time = $null; Reason = "the activity log could not be read: $($_.Exception.Message)" }
+    }
+    # Plain output carries strings, detailed output localizable strings with a Value.
+    $writes = @($events | Where-Object {
+        $op = if ($_.OperationName.Value) { "$($_.OperationName.Value)" } else { "$($_.OperationName)" }
+        $status = if ($_.Status.Value) { "$($_.Status.Value)" } else { "$($_.Status)" }
+        $status -eq 'Succeeded' -and $op -match 'Create or Update|extensions/write'
+    })
+    if ($writes.Count -eq 0) {
+        return [pscustomobject]@{ Time = $null; Reason = 'the activity log has no successful install of the extension in the last 14 days' }
+    }
+    $latest = ($writes | Sort-Object -Property EventTimestamp -Descending | Select-Object -First 1).EventTimestamp
+    [pscustomobject]@{ Time = ([datetime]$latest).ToUniversalTime(); Reason = $null }
+}
+
 $heartbeatWindow = 15
 # Waiting only helps a Succeeded agent whose first rows, or whose workspace's table, are still on their way.
+# $heartbeatWait bounds the row wait only where the agent's install time is not known.
 $heartbeatWait = if ($agentsReady) { $HeartbeatWaitMinutes } else { 0 }
 $tableWait     = if ($agentsReady) { $NewWorkspaceWaitMinutes } else { 0 }
 # A workspace without its Heartbeat table answers BadRequest: failed to resolve the table.
@@ -396,7 +441,8 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
     $query = "Heartbeat | where TimeGenerated > ago($($heartbeatWindow)m) | where tolower(_ResourceId) in ($idList) | summarize LastHeartbeat = max(TimeGenerated) by VmId = tolower(_ResourceId)"
     $started       = Get-Date
     $tableDeadline = $started.AddMinutes($tableWait)
-    $rowDeadline   = $null   # set when the table first exists
+    $rowDeadline   = $null   # set when the table first exists; bounds the wait where no install time is known
+    $installs      = @{}     # VM name -> install time or why there is none, read once a VM lacks a row
     while ($true) {
         $tableError = $null
         $result     = $null
@@ -430,12 +476,46 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
         if ($null -eq $rowDeadline) { $rowDeadline = (Get-Date).AddMinutes($heartbeatWait) }
         $seen = @($result.Results | ForEach-Object { "$($_.VmId)" })
         $missing = @(for ($i = 0; $i -lt $dcrVmIds.Count; $i++) { if ($dcrVmIds[$i].ToLowerInvariant() -notin $seen) { $dcrVmNames[$i] } })
-        if ($missing.Count -eq 0 -or (Get-Date) -ge $rowDeadline) { break }
-        Write-Host '.' -NoNewline
+        # A Failed or missing agent explains the gap; there is nothing to wait for.
+        if ($missing.Count -eq 0 -or -not $agentsReady) { break }
+        # The first row follows the install by 27-39 minutes: wait to a bound after the install
+        # time, or only -HeartbeatWaitMinutes where it is not known.
+        $now = (Get-Date).ToUniversalTime()
+        $stillWaiting = @()
+        foreach ($name in $missing) {
+            if (-not $installs.ContainsKey($name)) {
+                $installs[$name] = if ($agentExtIds[$name]) { Get-AgentInstallTime -ExtensionId $agentExtIds[$name] }
+                                   else { [pscustomobject]@{ Time = $null; Reason = 'the extension id is not known' } }
+            }
+            $install = $installs[$name]
+            if ($install.Time) {
+                if ($now -lt $install.Time.AddMinutes($AgentInstallWaitMinutes)) { $stillWaiting += $name }
+            }
+            elseif ((Get-Date) -lt $rowDeadline) { $stillWaiting += $name }
+        }
+        if ($stillWaiting.Count -eq 0) { break }
+        $progress = foreach ($name in $stillWaiting) {
+            if ($installs[$name].Time) {
+                $age = [int][math]::Floor(($now - $installs[$name].Time).TotalMinutes)
+                "$name (agent installed $age of $AgentInstallWaitMinutes minutes ago)"
+            }
+            else { "$name (install time unknown, waiting up to $heartbeatWait minutes)" }
+        }
+        Write-Host ''
+        Write-Host "    waiting for the first Heartbeat row from $($progress -join ', '), trying again in 60 seconds" -ForegroundColor Gray
         Start-Sleep -Seconds 60
     }
     if ($missing.Count -gt 0) {
-        Write-Host " (no row from $($missing -join ', ') - Steps 5.1.2 and 5.1.3)" -NoNewline -ForegroundColor Gray
+        $causes = foreach ($name in $missing) {
+            $install = $installs[$name]
+            if (-not $install) { $name }
+            elseif ($install.Time) {
+                $age = [int][math]::Floor(((Get-Date).ToUniversalTime() - $install.Time).TotalMinutes)
+                "$name (agent installed $age minutes ago, past the $AgentInstallWaitMinutes-minute bound the first row takes: the agent is installed but not sending, check that the VM runs and that the rule is associated with it)"
+            }
+            else { "$name (install time unknown: $($install.Reason); waited $heartbeatWait minutes)" }
+        }
+        Write-Host " (no row from $($causes -join '; ') - Steps 5.1.2 and 5.1.3)" -NoNewline -ForegroundColor Gray
         return $false
     }
     return $true
