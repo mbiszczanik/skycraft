@@ -67,6 +67,8 @@ BeforeAll {
         'Get-AzVM'
         'Get-AzVMExtension'
         'Remove-AzVMExtension'
+        'Start-AzVM'
+        'Stop-AzVM'
         'Remove-AzResourceGroup'
         'Invoke-AzRestMethod'
         'Start-Sleep'
@@ -82,6 +84,9 @@ BeforeAll {
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled);
     #                         '<lookup>#<n>=<kind>' only its n-th call
     #   SKYCRAFT_STUB_FAIL    '<command>:<name>,...' makes one removal throw
+    #   SKYCRAFT_STUB_STOPPED '<vm>,...' makes Remove-AzVMExtension on that VM fail as Azure does on
+    #                         a VM that is not running (409 OperationNotAllowed, #465)
+    #   SKYCRAFT_STUB_CONFLICT '<vm>,...' makes it fail with a different 409 OperationNotAllowed
     # Lookups: 'ConnectionMonitor', 'FlowLogs', 'PlatformResources', 'Get-AzVM:<vm>',
     # 'Get-AzVMExtension:<vm>', 'Tags:<vm>'. A removal is logged as '<command>:<name>'. The kind
     # 'status404' reports a missing object the way Az.Resources can: a status-only 404 (an
@@ -275,7 +280,30 @@ function Get-AzVMExtension {
 function Remove-AzVMExtension {
     [CmdletBinding()]
     param([string]$ResourceGroupName, [string]$VMName, [string]$Name, [switch]$Force)
+    if (@($env:SKYCRAFT_STUB_STOPPED -split ',') -contains $VMName) {
+        Write-StubCall -Name 'Remove-AzVMExtension'
+        Write-StubCall -Name "Remove-AzVMExtension:${VMName}/$Name"
+        throw "Long running operation failed with status 'Failed'. Additional Info:'Cannot modify extensions in the VM when the VM is not running.' ErrorCode: OperationNotAllowed ErrorMessage: Cannot modify extensions in the VM when the VM is not running. ErrorTarget: StatusCode: 409 ReasonPhrase: Conflict OperationID : 00000000"
+    }
+    if (@($env:SKYCRAFT_STUB_CONFLICT -split ',') -contains $VMName) {
+        Write-StubCall -Name 'Remove-AzVMExtension'
+        Write-StubCall -Name "Remove-AzVMExtension:${VMName}/$Name"
+        throw "Operation 'Delete' is not allowed on VM '$VMName' since the VM is marked for deletion. ErrorCode: OperationNotAllowed StatusCode: 409 ReasonPhrase: Conflict"
+    }
     Invoke-StubRemoval -Command 'Remove-AzVMExtension' -Name "${VMName}/$Name"
+}
+
+# The cleanup never starts or stops a VM; a call is logged and fails the run.
+function Start-AzVM {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$Name)
+    Invoke-StubRemoval -Command 'Start-AzVM' -Name $Name
+}
+
+function Stop-AzVM {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$Name, [switch]$Force)
+    Invoke-StubRemoval -Command 'Stop-AzVM' -Name $Name
 }
 
 function Remove-AzResourceGroup {
@@ -294,6 +322,8 @@ function Remove-AzResourceGroup {
             [string[]]$Lookup = @(),
             [string[]]$Locks = @(),
             [string[]]$LockFail = @(),
+            [string[]]$Stopped = @(),
+            [string[]]$Conflict = @(),
             [string[]]$ArgumentList = @('-Force'),
             [switch]$Empty
         )
@@ -306,6 +336,8 @@ function Remove-AzResourceGroup {
             SKYCRAFT_STUB_LOOKUP = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG    = $logPath
+            SKYCRAFT_STUB_STOPPED  = $Stopped -join ','
+            SKYCRAFT_STUB_CONFLICT = $Conflict -join ','
             SKYCRAFT_STUB_LOCKS = $Locks -join ','
             SKYCRAFT_STUB_LOCK_FAIL = $LockFail -join ','
         }
@@ -345,6 +377,12 @@ function Remove-AzResourceGroup {
         'Remove-AzVMExtension:dev-skycraft-swc-auth-vm/NetworkWatcherAgentLinux'
     )
 
+    # A VM that is not running refuses extension changes (#465).
+    $script:OneStopped  = Invoke-CleanupScript -Stub $script:Stub -Stopped 'dev-skycraft-swc-auth-vm'
+    $script:BothStopped = Invoke-CleanupScript -Stub $script:Stub -Stopped 'dev-skycraft-swc-auth-vm', 'prod-skycraft-swc-auth-vm'
+    $script:OtherConflict = Invoke-CleanupScript -Stub $script:Stub -Conflict 'dev-skycraft-swc-auth-vm'
+    $script:StoppedAndFailed = Invoke-CleanupScript -Stub $script:Stub -Stopped 'dev-skycraft-swc-auth-vm' -Fail 'Remove-AzVMExtension:prod-skycraft-swc-auth-vm/NetworkWatcherAgentLinux'
+
     # Lab 1.3's delete locks (#372): the cleanup lifts them for its deletes and puts them back.
     $script:Locked         = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg'
     $script:LockedFail     = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg' -Fail 'Remove-AzResource:dataCollectionRules/NWTA-0000-swedencentral'
@@ -353,7 +391,8 @@ function Remove-AzResourceGroup {
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:CmDenied, $script:GroupListFails,
-        $script:TaListFails, $script:AgentLookupsFail, $script:StepsFail
+        $script:TaListFails, $script:AgentLookupsFail, $script:StepsFail, $script:OneStopped,
+        $script:BothStopped, $script:OtherConflict, $script:StoppedAndFailed
     )
 }
 
@@ -494,6 +533,56 @@ Describe 'Lab 5.3 Remove-LabResource.ps1 - a failed removal is counted' {
         $calls | Should -Contain 'Remove-AzVMExtension:prod-skycraft-swc-auth-vm/NetworkWatcherAgentLinux'
         $calls | Should -Contain $script:NwtaRule
         $calls | Should -Contain $script:NwtaEndpoint
+    }
+}
+
+Describe 'Lab 5.3 Remove-LabResource.ps1 - a VM that is not running (#465)' {
+
+    It 'leaves the agent on a stopped VM, reports why, and exits 0' {
+        $run = $script:OneStopped
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls    | Should -Contain 'Remove-AzVMExtension:dev-skycraft-swc-auth-vm/NetworkWatcherAgentLinux'
+        $run.Output   | Should -Match '\[SKIP\] NetworkWatcherAgentLinux left on dev-skycraft-swc-auth-vm on purpose'
+        $run.Output   | Should -Match 'goes away with the VM'
+        $run.Output   | Should -Not -Match '\[ERROR\]'
+        $run.Output   | Should -Not -Match 'NetworkWatcherAgent removed from dev-skycraft-swc-auth-vm'
+        $run.Output   | Should -Match 'Cleanup Complete'
+    }
+
+    It 'still removes the agent on the running VM and runs the later steps' {
+        $run = $script:OneStopped
+        $run.Output   | Should -Match 'NetworkWatcherAgent removed from prod-skycraft-swc-auth-vm'
+        $run.Calls    | Should -Contain $script:NwtaRule
+        $run.Calls    | Should -Contain $script:NwtaEndpoint
+    }
+
+    It 'exits 0 when both VMs are stopped' {
+        $run = $script:BothStopped
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        @([regex]::Matches($run.Output, 'left on .* on purpose')).Count | Should -Be 2
+        $run.Output   | Should -Not -Match '\[ERROR\]'
+    }
+
+    It 'never starts or stops a VM' {
+        foreach ($run in @($script:Clean, $script:OneStopped, $script:BothStopped, $script:OtherConflict)) {
+            @($run.Calls | Where-Object { $_ -match '^(Start|Stop)-AzVM' }) | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'still fails on a different 409 OperationNotAllowed' {
+        $run = $script:OtherConflict
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Match '\[ERROR\] Failed to remove NetworkWatcherAgent from dev-skycraft-swc-auth-vm'
+        $run.Output   | Should -Not -Match 'on purpose'
+        $run.Output   | Should -Match 'Cleanup finished with 1 failure\(s\)'
+    }
+
+    It 'counts another VM''s failed removal next to a stopped VM that is left on purpose' {
+        $run = $script:StoppedAndFailed
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Match 'left on dev-skycraft-swc-auth-vm on purpose'
+        $run.Output   | Should -Match '\[ERROR\] Failed to remove NetworkWatcherAgent from prod-skycraft-swc-auth-vm'
+        $run.Output   | Should -Match 'Cleanup finished with 1 failure\(s\)'
     }
 }
 

@@ -23,7 +23,7 @@ This guide addresses common issues encountered while setting up or running the S
 ### "Authentication failed against resource MicrosoftGraphEndpointResourceId"
 
 **Symptoms**: `Get-AzRoleAssignment`, `New-AzRoleAssignment`, `Remove-AzRoleAssignment`, `Get-AzADUser` or `Get-AzADGroup` fails with `Authentication failed against resource MicrosoftGraphEndpointResourceId. User interaction is required`, although other Az commands work and you hold Owner on the subscription.
-**Cause**: These cmdlets call Microsoft Graph to resolve users, groups and service principals. Your tenant's Conditional Access (MFA, for example) asks for interaction before it issues a Graph token to Azure PowerShell, and the sign-in you made did not include one. The lab scripts read, create and remove role assignments through the Azure Resource Manager API instead, so their role steps do not need Graph (#397); only the steps that find a user or group by name do (Lab 1.2's `Test-Lab.ps1`, `Remove-LabResource.ps1` and `Deploy-Bicep.ps1 -IncludeRoleAssignments`).
+**Cause**: These cmdlets call Microsoft Graph to resolve users, groups and service principals. Your tenant's Conditional Access (MFA, for example) asks for interaction before it issues a Graph token to Azure PowerShell, and the sign-in you made did not include one. The lab scripts read, create and remove role assignments through the Azure Resource Manager API instead, so their role steps do not need Graph (#397); only the steps that find a user, group or app by name do (Lab 1.2's `Test-Lab.ps1`, `Remove-LabResource.ps1` and `Deploy-Bicep.ps1 -IncludeRoleAssignments`; Lab 5.2's `Deploy-Bicep.ps1` and `Test-Lab.ps1`, which find the *Backup Management Service* app with `Get-AzADServicePrincipal`).
 **Solution**: Sign in again with a Graph token, then rerun the command or the script:
 
 ```powershell
@@ -334,6 +334,16 @@ group and is shared with every other workload in the subscription. Lab 5.3's `Re
 removes *this repository's children* from inside it — the flow log, the connection monitor, the
 Traffic Analytics DCR/DCE and the NetworkWatcherAgent extensions — and leaves the group itself
 standing. The orchestrator never lists it among the groups it deletes.
+
+### Lab 5.3 reports the NetworkWatcherAgent as "left on <vm> on purpose"
+
+**This is correct, and it is not a failure.** Azure refuses extension changes on a VM that is not
+running (409 `OperationNotAllowed`, "Cannot modify extensions in the VM when the VM is not
+running"), so Lab 5.3's `Remove-LabResource.ps1` leaves the agent on a stopped or deallocated VM and
+exits 0. The leftover is harmless: a stopped VM runs no agent, the extension is not billed, and it
+is deleted with the VM when Lab 3.2's cleanup removes it. To remove it sooner, start the VM, run
+the Lab 5.3 cleanup again and deallocate the VM afterwards. Any other error on the removal still
+fails the cleanup.
 
 ### The Log Analytics workspace name is still reserved
 
