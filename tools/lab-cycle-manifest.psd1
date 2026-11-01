@@ -522,6 +522,17 @@
     # inside it. Deleting the group would take out Network Watcher for every other workload in the
     # subscription.
     ResidualSweep = @{
+        # Retained IDs let teardown detect diagnostics whose parent disappeared in an earlier run.
+        DiagnosticResources = @(
+            @{ ResourceGroup = 'dev-skycraft-swc-rg'; ResourceType = 'Microsoft.KeyVault/vaults'; Name = 'dev-skycraft-swc-kv'; NameParameter = 'KeyVaultName' }
+            @{ ResourceGroup = 'prod-skycraft-swc-rg'; ResourceType = 'Microsoft.KeyVault/vaults'; Name = 'prod-skycraft-swc-kv' }
+            @{ ResourceGroup = 'platform-skycraft-swc-rg'; ResourceType = 'Microsoft.RecoveryServices/vaults'; Name = 'platform-skycraft-swc-rsv' }
+            @{ ResourceGroup = 'platform-skycraft-swc-rg'; ResourceType = 'Microsoft.DataProtection/backupVaults'; Name = 'platform-skycraft-swc-bv' }
+            @{ ResourceGroup = 'platform-skycraft-swc-rg'; ResourceType = 'Microsoft.Storage/storageAccounts'; Name = 'platformskycraftswcsa'; NameParameter = 'PlatformSaName' }
+            @{ ResourceGroup = 'dev-skycraft-swc-rg'; ResourceType = 'Microsoft.Storage/storageAccounts'; Name = 'devskycraftswcsa'; NameParameter = 'DevSaName' }
+            @{ ResourceGroup = 'prod-skycraft-swc-rg'; ResourceType = 'Microsoft.Storage/storageAccounts'; Name = 'prodskycraftswcsa'; NameParameter = 'ProdSaName' }
+        )
+
         # Matched as a prefix against resource group names. Used only to find SkyCraft-owned restore
         # point collections still parked in one, which is a failure: lab 5.2's teardown should have
         # removed them.

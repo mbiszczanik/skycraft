@@ -1419,4 +1419,81 @@ function Invoke-LabWithoutLock {
     return $failures
 }
 
-Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock
+
+function Get-LabDiagnosticResourceId {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$ResourceGroupName)
+
+    try { $resources = @(Get-AzResource -ResourceGroupName $ResourceGroupName -ErrorAction Stop) }
+    catch {
+        if (Test-LabDiagnosticNotFound -ErrorRecord $_) { return }
+        throw
+    }
+    foreach ($resource in $resources) {
+        if (-not $resource) { continue }
+        if ($resource.ResourceType -notin @('Microsoft.KeyVault/vaults', 'Microsoft.RecoveryServices/vaults', 'Microsoft.DataProtection/backupVaults', 'Microsoft.Storage/storageAccounts')) { continue }
+        $id = [string]$resource.ResourceId
+        if (-not $id -or $id -notmatch '^/subscriptions/[^/]+/resourceGroups/([^/]+)/providers/' -or $Matches[1] -ne $ResourceGroupName) {
+            throw "Diagnostic resource discovery returned a resource outside '$ResourceGroupName'."
+        }
+        $id
+        if ($resource.ResourceType -eq 'Microsoft.Storage/storageAccounts') {
+            foreach ($service in 'blobServices', 'fileServices', 'queueServices', 'tableServices') { "$id/$service/default" }
+        }
+    }
+}
+
+function Test-LabDiagnosticNotFound {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][System.Management.Automation.ErrorRecord]$ErrorRecord)
+
+    $text = "$ErrorRecord $($ErrorRecord.FullyQualifiedErrorId)"
+    for ($exception = $ErrorRecord.Exception; $exception; $exception = $exception.InnerException) {
+        $text += " $($exception.Message) $($exception.Body.Code) $($exception.Body.Error.Code) $($exception.ErrorCode)"
+    }
+    if ($text -match 'SubscriptionNotFound|subscription .{0,80}(could not be|was not) found') { return $false }
+    if ($text -match '\bResource(Group)?NotFound\b|invalid status code ''NotFound''|\b404 \(Not Found\)') { return $true }
+    for ($exception = $ErrorRecord.Exception; $exception; $exception = $exception.InnerException) {
+        foreach ($status in @($exception.Response.StatusCode, $exception.ResponseStatusCode, $exception.Status)) {
+            if ("$status" -in @('404', 'NotFound')) { return $true }
+        }
+    }
+    return $false
+}
+
+function Get-LabResourceDiagnosticSetting {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ResourceId)
+
+    try { Get-AzDiagnosticSetting -ResourceId $ResourceId -ErrorAction Stop }
+    catch { if (-not (Test-LabDiagnosticNotFound -ErrorRecord $_)) { throw } }
+}
+
+function Remove-LabResourceDiagnosticSetting {
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([int])]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ResourceId)
+
+    $failures = 0
+    foreach ($id in @($ResourceId | Sort-Object -Unique)) {
+        try { $settings = @(Get-LabResourceDiagnosticSetting -ResourceId $id) }
+        catch {
+            $failures++
+            Write-Host "  [ERROR] Could not read diagnostic settings on '$id': $_" -ForegroundColor Red
+            continue
+        }
+        foreach ($setting in @($settings | Where-Object { $_ })) {
+            if (-not $PSCmdlet.ShouldProcess("$id/$($setting.Name)", 'Remove diagnostic setting')) { continue }
+            try { Remove-AzDiagnosticSetting -ResourceId $id -Name $setting.Name -ErrorAction Stop | Out-Null }
+            catch {
+                $failures++
+                Write-Host "  [ERROR] Could not remove diagnostic setting '$($setting.Name)' on '$id': $_" -ForegroundColor Red
+            }
+        }
+    }
+    return $failures
+}
+
+Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock, Get-LabDiagnosticResourceId, Get-LabResourceDiagnosticSetting, Remove-LabResourceDiagnosticSetting

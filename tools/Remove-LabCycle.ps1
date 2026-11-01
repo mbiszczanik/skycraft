@@ -71,6 +71,11 @@
       every other workload in the subscription; lab 5.3's own teardown removes this repository's
       children from inside it, which is the correct scope.
 
+    Diagnostic target IDs and settings are read before any lab runs. A failed read stops teardown.
+    Lab 1.3 then removes its locks, followed by diagnostic removal before the other labs run.
+    A failed diagnostic removal keeps all remaining labs and groups. The sweep repeats discovery
+    before each group delete, and final assertions inspect the captured IDs even after deletion.
+
     THEN IT CHECKS. Issue #73 is explicit that a surviving vault is a failure rather than expected
     residue, so the vaults are asserted absent rather than reported. So are the lab resource
     groups, and any SkyCraft restore point collection still parked in an AzureBackupRG_* group. An
@@ -157,6 +162,15 @@
     Get-AzResourceGroup -Name reports a missing group in words that are no recognised not-found
     error (docs/powershell-standards.md rule 3), and by the time the vaults are checked their
     resource group has usually been deleted by the sweep, so a lookup scoped to it would fail.
+
+.PARAMETER DiagnosticTargetProbe
+    Lists vault and storage diagnostic target IDs within the named resource group.
+
+.PARAMETER DiagnosticSettingProbe
+    Lists settings on one captured ID. Only a genuine not-found response means absence.
+
+.PARAMETER DiagnosticSettingRemover
+    Removes settings on the supplied IDs and returns an integer failure count.
 
 .PARAMETER UniqueNames
     The names of your own the deploy run used for resources whose names are unique across Azure,
@@ -284,6 +298,15 @@ param(
     },
 
     [Parameter()]
+    [scriptblock]$DiagnosticTargetProbe = { param($Name) Get-LabDiagnosticResourceId -ResourceGroupName $Name },
+
+    [Parameter()]
+    [scriptblock]$DiagnosticSettingProbe = { param($Id) Get-LabResourceDiagnosticSetting -ResourceId $Id },
+
+    [Parameter()]
+    [scriptblock]$DiagnosticSettingRemover = { param($Ids) Remove-LabResourceDiagnosticSetting -ResourceId $Ids -Confirm:$false },
+
+    [Parameter()]
     [hashtable]$UniqueNames = @{},
 
     [Parameter()]
@@ -293,6 +316,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'LabCycle.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'LabCommon.psm1') -Force -Verbose:$false
 
 if (-not $TeardownRunner) {
     $shimPath = Join-Path $PSScriptRoot 'Invoke-LabScript.ps1'
@@ -407,9 +431,69 @@ if ($blocked.Count -gt 0) {
 }
 Write-Host ''
 
+# Capture before any parent can disappear. Read failures stop even the first lab.
+$sweep = $manifest.ResidualSweep
+$doSweep = -not $SkipSweep -and -not $partial
+$diagnosticIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+if ($doSweep) {
+    try {
+        foreach ($name in @($sweep.ResourceGroups)) {
+            foreach ($id in @(& $DiagnosticTargetProbe $name)) {
+                if (-not $id) { continue }
+                $prefix = "/subscriptions/$SubscriptionId/resourceGroups/$name/providers/"
+                if (-not ([string]$id).StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    throw "Diagnostic target is outside resource group '$name' in the selected subscription."
+                }
+                $null = $diagnosticIds.Add([string]$id)
+            }
+        }
+        # Known IDs also catch settings orphaned before this run could discover their parents.
+        foreach ($target in @($sweep.DiagnosticResources | Where-Object { $_ })) {
+            if ($target.ResourceGroup -notin @($sweep.ResourceGroups)) { throw 'Known diagnostic target is outside the sweep groups.' }
+            if ($target.ResourceType -notin @('Microsoft.KeyVault/vaults', 'Microsoft.RecoveryServices/vaults', 'Microsoft.DataProtection/backupVaults', 'Microsoft.Storage/storageAccounts')) { throw 'Unsupported known diagnostic resource type.' }
+            $targetName = if ($target.NameParameter -and $UniqueNames.ContainsKey($target.NameParameter)) { $UniqueNames[$target.NameParameter] } else { $target.Name }
+            if (-not $targetName -or $targetName -match '[/\\]') { throw 'Invalid known diagnostic resource name.' }
+            $id = "/subscriptions/$SubscriptionId/resourceGroups/$($target.ResourceGroup)/providers/$($target.ResourceType)/$targetName"
+            $null = $diagnosticIds.Add($id)
+            if ($target.ResourceType -eq 'Microsoft.Storage/storageAccounts') {
+                foreach ($service in 'blobServices', 'fileServices', 'queueServices', 'tableServices') { $null = $diagnosticIds.Add("$id/$service/default") }
+            }
+        }
+        foreach ($id in $diagnosticIds) { $null = @(& $DiagnosticSettingProbe $id) }
+    }
+    catch {
+        $record = @{ Lab = '(diagnostics)'; Status = 'Failed'; ExitCode = 1; Detail = "Diagnostic preflight failed; no lab teardown ran: $_" }
+        & $recordResult $record
+        Write-Host "[ERROR] $($record.Detail)" -ForegroundColor Red
+        $Host.SetShouldExit(3)
+        exit 3
+    }
+}
+
+$lockOwner = @($manifest.Phases | Where-Object { $_.Id -eq '1.3' } | ForEach-Object { $_.Lab })
+$diagnosticsCleared = -not $doSweep
+$clearDiagnostics = {
+    if ($diagnosticIds.Count -eq 0) { return $true }
+    if (-not $PSCmdlet.ShouldProcess('captured lab resources', 'remove diagnostic settings before resource teardown')) { return $true }
+    try {
+        $count = & $DiagnosticSettingRemover @($diagnosticIds)
+        if ($null -eq $count -or $count -isnot [int] -or $count -ne 0) { throw "Diagnostic removal reported '$count' failures (an integer zero is required)." }
+        return $true
+    }
+    catch {
+        & $recordResult @{ Lab = '(diagnostics)'; Status = 'Failed'; ExitCode = 1; Detail = "$_" }
+        Write-Host "[ERROR] Diagnostic cleanup failed. Remaining labs and resource groups are kept: $_" -ForegroundColor Red
+        return $false
+    }
+}
+
 # -- Per-lab teardown --------------------------------------------------------------------------
 Write-Host '  Labs' -ForegroundColor Cyan
 foreach ($entry in $teardowns) {
+    if (-not $diagnosticsCleared -and $entry.Lab -notin $lockOwner) {
+        if (-not (& $clearDiagnostics)) { $Host.SetShouldExit(1); exit 1 }
+        $diagnosticsCleared = $true
+    }
     $worstExit = 0
     $ran       = $false
 
@@ -466,8 +550,10 @@ foreach ($residue in $leftBehind) {
 }
 
 # -- Residue sweep, and the assertions -----------------------------------------------------------
-$sweep = $manifest.ResidualSweep
-$doSweep = -not $SkipSweep -and -not $partial
+if (-not $diagnosticsCleared) {
+    if (-not (& $clearDiagnostics)) { $Host.SetShouldExit(1); exit 1 }
+    $diagnosticsCleared = $true
+}
 
 if (-not $doSweep) {
     Write-Host ''
@@ -502,6 +588,25 @@ else {
         }
         if (-not $PSCmdlet.ShouldProcess($name, 'delete lab resource group')) {
             Write-Host "    [PLAN] delete $name" -ForegroundColor Gray
+            continue
+        }
+        try {
+            $groupIds = @(& $DiagnosticTargetProbe $name)
+            foreach ($id in $groupIds) {
+                $prefix = "/subscriptions/$SubscriptionId/resourceGroups/$name/providers/"
+                if (-not ([string]$id).StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Diagnostic target is outside '$name'." }
+                $null = $diagnosticIds.Add([string]$id)
+            }
+            if ($groupIds.Count -gt 0) {
+                $count = & $DiagnosticSettingRemover $groupIds
+                if ($null -eq $count -or $count -isnot [int] -or $count -ne 0) { throw "Diagnostic removal reported '$count' failures." }
+            }
+        }
+        catch {
+            $record = @{ Lab = '(sweep)'; Status = 'Failed'; ExitCode = 1; Target = $name; Detail = "Diagnostic cleanup failed; group kept: $_" }
+            $results.Add($record)
+            & $recordResult $record
+            Write-Host "    [FAIL] $name - $($record.Detail)" -ForegroundColor Red
             continue
         }
         Write-Host "    [ .. ] deleting $name" -ForegroundColor Yellow
@@ -608,6 +713,17 @@ else {
                 $assertions.Add(@{ Name = 'lab resource group absent'; Ok = $true; Detail = "'$name' is gone" })
                 Write-Host "    [ OK ] resource group '$name' is gone" -ForegroundColor Green
             }
+        }
+
+        foreach ($id in $diagnosticIds) {
+            try {
+                $remaining = @(& $DiagnosticSettingProbe $id)
+                $ok = @($remaining | Where-Object { $_ }).Count -eq 0
+                $detail = if ($ok) { "No diagnostic settings remain on '$id'." } else { "Diagnostic settings remain on deleted target '$id'." }
+            }
+            catch { $ok = $false; $detail = "Could not check diagnostic settings on '$id': $_" }
+            $assertions.Add(@{ Name = 'diagnostic settings absent'; Ok = $ok; Detail = $detail })
+            if (-not $ok) { Write-Host "    [FAIL] $detail" -ForegroundColor Red }
         }
 
         foreach ($assertion in $assertions) {

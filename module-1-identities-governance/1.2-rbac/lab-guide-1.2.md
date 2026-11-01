@@ -54,10 +54,10 @@ Before starting this lab:
 - [ ] Azure subscription with Owner or User Access Administrator role, assigned without a condition that keeps you from assigning Owner (Troubleshooting, Issue 1, shows how to check)
 - [ ] Understanding of resource groups concept
 - [ ] Azure Portal access
-- [ ] Only for the scripts in `scripts/` and the checklist commands (the Portal steps need none): PowerShell 7 with `Az.Accounts` and `Az.Resources`, and, for `New-LabRoleAssignment.ps1`, the Microsoft Graph modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Identity.DirectoryManagement`, `Microsoft.Graph.Users` and `Microsoft.Graph.Groups`. Install them for your account:
+- [ ] Only for the scripts in `scripts/` and the checklist commands (the Portal steps need none): PowerShell 7 with `Az.Accounts`, `Az.Resources` and `Az.Monitor`, and, for `New-LabRoleAssignment.ps1`, the Microsoft Graph modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Identity.DirectoryManagement`, `Microsoft.Graph.Users` and `Microsoft.Graph.Groups`. Install them for your account:
 
   ```powershell
-  Install-Module Az.Accounts, Az.Resources -Scope CurrentUser
+  Install-Module Az.Accounts, Az.Resources, Az.Monitor -Scope CurrentUser
   Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Users, Microsoft.Graph.Groups -Scope CurrentUser
   ```
 
