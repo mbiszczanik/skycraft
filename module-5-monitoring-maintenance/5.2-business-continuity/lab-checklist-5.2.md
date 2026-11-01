@@ -281,7 +281,7 @@ $items = foreach ($fabric in Get-AzRecoveryServicesAsrFabric) {
 }
 $items | Format-Table -AutoSize
 
-# Expected output (after the initial replication, about 45 minutes):
+# Expected output (after the initial replication, about 45 to 75 minutes):
 # FriendlyName                ProtectionState ReplicationHealth
 # ------------                --------------- -----------------
 # dev-skycraft-swc-world-vm   Protected       Normal
