@@ -9,6 +9,32 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.1](https://github.com/mbiszczanik/skycraft/compare/v0.19.0...v0.19.1) (2026-11-01)
+
+
+### Bug Fixes
+
+* **lab-4.2:** turn point-in-time restore off before versioning in cleanup ([#464](https://github.com/mbiszczanik/skycraft/issues/464)) ([9acbfde](https://github.com/mbiszczanik/skycraft/commit/9acbfde0af259e74e12116fdb6eb7dca4ad288c6)), closes [#453](https://github.com/mbiszczanik/skycraft/issues/453)
+* **lab-5.1:** install a tagged Azure Monitor Agent, send Perf, and fail Test-Lab without the agent or a Heartbeat ([#449](https://github.com/mbiszczanik/skycraft/issues/449)) ([279fb01](https://github.com/mbiszczanik/skycraft/commit/279fb010bf8f3359fc997995c5a71d84ccf0e3f7))
+* **lab-5.1:** match the guide to today's Portal and add a missing-Heartbeat log search alert ([#457](https://github.com/mbiszczanik/skycraft/issues/457)) ([c940f10](https://github.com/mbiszczanik/skycraft/commit/c940f1073b6ff3e8a09404af38abf600ad6def9f))
+* **lab-5.2:** finish Deploy-Bicep step 7 loudly, end the SAS before the snapshot group delete, correct the Backup vault and alert rule steps ([#469](https://github.com/mbiszczanik/skycraft/issues/469)) ([1488f69](https://github.com/mbiszczanik/skycraft/commit/1488f698bacb2afc739e4942e13012beaff572ce))
+* **lab-5.2:** key vault role for backup, alert processing rule, operational blob policy and today's Portal steps ([#458](https://github.com/mbiszczanik/skycraft/issues/458)) ([518ba11](https://github.com/mbiszczanik/skycraft/commit/518ba11c5184919cd7701474956091b52f68c054))
+* **lab-5.2:** replicate the world VM to a tagged North Europe group with Site Recovery (stacks on [#458](https://github.com/mbiszczanik/skycraft/issues/458)) ([#463](https://github.com/mbiszczanik/skycraft/issues/463)) ([406cfbe](https://github.com/mbiszczanik/skycraft/commit/406cfbe4ea10658284e3889396b69d85cad637eb))
+* **lab-5.3:** leave the NetworkWatcherAgent on a VM that is not running ([#465](https://github.com/mbiszczanik/skycraft/issues/465)) ([#467](https://github.com/mbiszczanik/skycraft/issues/467)) ([bb3d140](https://github.com/mbiszczanik/skycraft/commit/bb3d1400f30b70e71536a3d3e7a5254ed3418cbb))
+* **lab-5.3:** match today's Portal and create the flow log and connection monitor under Lab 1.3's policies ([#456](https://github.com/mbiszczanik/skycraft/issues/456)) ([e36d4c7](https://github.com/mbiszczanik/skycraft/commit/e36d4c7b3993f4b6ba1cbe6f49880452de249356))
+* **labs-4.1-5.2:** remove a resource's diagnostic settings before its cleanup deletes it ([#448](https://github.com/mbiszczanik/skycraft/issues/448)) ([f1ea4af](https://github.com/mbiszczanik/skycraft/commit/f1ea4aff832fc1e3d6901b6dda28d37278a3974d))
+* **labs-4.1-5.3:** lift Lab 1.3's delete lock for cleanup deletes and restore it ([#459](https://github.com/mbiszczanik/skycraft/issues/459)) ([642f9d0](https://github.com/mbiszczanik/skycraft/commit/642f9d0440ef2a1acef3cb539d089017e6918bf1))
+* **labs-5.2-5.3:** make Deploy-Bicep.ps1 -WhatIf only read and report ([#447](https://github.com/mbiszczanik/skycraft/issues/447)) ([ec8fb51](https://github.com/mbiszczanik/skycraft/commit/ec8fb5111348f3b57e989f18c725bb43b1a93be6))
+* **labs:** delete the private DNS link a re-created VNet leaves behind ([#446](https://github.com/mbiszczanik/skycraft/issues/446)) ([b732e1f](https://github.com/mbiszczanik/skycraft/commit/b732e1fe39bacbca7e5ff114e24b68a75da0ae2e))
+* **labs:** fail Test-Lab for resources left Failed in labs 2.2, 2.3, 3.2, 5.1, 5.2 and 5.3 ([#450](https://github.com/mbiszczanik/skycraft/issues/450)) ([4e02196](https://github.com/mbiszczanik/skycraft/commit/4e02196e9c7abfc16e466aef2a189114a3e9f6c3))
+* **labs:** let the storage account names of Labs 4.1-5.3 be overridden, and stop on a taken one ([#461](https://github.com/mbiszczanik/skycraft/issues/461)) ([8c00e50](https://github.com/mbiszczanik/skycraft/commit/8c00e5070ffccef9f7dc2986d1dd26cf47ca80f3))
+* **module-5:** explicit api-version on ARM calls and checks that fail on a lookup error (Refs [#452](https://github.com/mbiszczanik/skycraft/issues/452)) ([#460](https://github.com/mbiszczanik/skycraft/issues/460)) ([0849077](https://github.com/mbiszczanik/skycraft/commit/0849077df92c4d2c0d97856ca09c3f9f57db143d))
+
+
+### Documentation
+
+* **labs:** name collapsed Portal groups in Labs 1.3 and 3.2, fix Lab 1.3 headings and the Lab 1.2 time plan ([#455](https://github.com/mbiszczanik/skycraft/issues/455)) ([49253d9](https://github.com/mbiszczanik/skycraft/commit/49253d99c1de4e16e11d12fec5a2f0010f51292f))
+
 ## [0.19.0](https://github.com/mbiszczanik/skycraft/compare/v0.18.0...v0.19.0) (2026-10-28)
 
 
