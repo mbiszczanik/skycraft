@@ -82,7 +82,7 @@
 - [x] Resource group: `platform-skycraft-swc-rg`
 - [x] Storage redundancy: **Locally-redundant (LRS)**
 - [x] Identity type: **System Assigned**
-- [x] Soft delete: **Off** (lab-friction override for cleanup), so created with Az PowerShell or the Bicep: the Portal creates it AlwaysOn, which cannot be undone
+- [x] Soft delete: **Off** (lab-friction override for cleanup), so created with the ARM request of Step 5.2.4 or the Bicep: the Portal creates it AlwaysOn, which cannot be undone, and `New-AzDataProtectionBackupVault -SoftDeleteState Off` is refused
 
 ### Tags
 

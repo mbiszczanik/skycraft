@@ -518,7 +518,7 @@ Invoke-Test "Backup Vault soft delete is $($backupVaultSoftDeleteAccepted -join 
     if ($softDeleteState -in $backupVaultSoftDeleteAccepted) { return $true }
     if ($softDeleteState -eq 'AlwaysOn') {
         # The Portal creates Backup vaults AlwaysOn, and AlwaysOn cannot be turned off.
-        Write-Host " (state is AlwaysOn, which cannot be turned off: a vault created in the Portal is AlwaysOn - delete the vault and recreate it with soft delete Off, with New-AzDataProtectionBackupVault -SoftDeleteState Off (Az PowerShell) or scripts/Deploy-Bicep.ps1 (the Bicep))" -NoNewline -ForegroundColor Gray
+        Write-Host " (state is AlwaysOn, which cannot be turned off: a vault created in the Portal is AlwaysOn - delete the vault and recreate it with soft delete Off, with scripts/Deploy-Bicep.ps1 (the Bicep) or the request in lab-guide-5.2.md Step 5.2.4; New-AzDataProtectionBackupVault -SoftDeleteState Off is refused)" -NoNewline -ForegroundColor Gray
     } else {
         Write-Host " (state is '$softDeleteState' - set it to Off: Update-AzDataProtectionBackupVault -SoftDeleteState Off)" -NoNewline -ForegroundColor Gray
     }

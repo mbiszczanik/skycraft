@@ -858,8 +858,9 @@ Describe 'parse.py - labs 3.2, 4.2 and 5.2, resource names in navigation chains 
         @{ lab = '4.2'; id = '4.2.11'; labels = @('prodskycraftswcsa', 'Containers'); resources = @(0) }
         # 'waiting for 02:00: under **Protected items** ..., click **Backup items** -> ...': the group is a
         # place, and the chain keeps its resource (picker_field, #250). The key vault's IAM chain (#368) is first.
+        # The item's name is not a link, so the chain goes on with View details (#366).
         @{ lab = '5.2'; id = '5.2.3'; labels = @('Key vaults', 'dev-skycraft-swc-kv', 'Access control (IAM)', '+ Add', 'Add role assignment'); resources = @(1); count = 2; index = 0 }
-        @{ lab = '5.2'; id = '5.2.3'; labels = @('Backup items', 'Azure Virtual Machine', 'dev-skycraft-swc-auth-vm', 'Backup now', 'OK'); resources = @(2); count = 2; index = 1 }
+        @{ lab = '5.2'; id = '5.2.3'; labels = @('Backup items', 'Azure Virtual Machine', 'dev-skycraft-swc-auth-vm', 'View details', 'Backup now', 'OK'); resources = @(2); count = 2; index = 1 }
     ) {
         $chains = @(($script:ChainLabs[$lab].steps | Where-Object id -eq $id).items |
             Where-Object { $_.PSObject.Properties.Name -contains 'resources' })

@@ -62,7 +62,7 @@ Before starting this lab:
 
 The Lab 5.1, Lab 3.2, Lab 4.1 and resource group items are what the scripts check: `scripts/Deploy-Bicep.ps1` stops on a missing resource group, workspace or action group, and only warns about a missing key vault (step [2/7]) or VM (step [7/7]); `scripts/New-LabBlobBackup.ps1` stops on a missing Backup vault or storage account. The shortest chain that also satisfies the gates of the labs it runs is 1.2 → 2.1 → 2.3 → 3.2 (dev, needs `~/.ssh/skycraft-dev.pub`) → 4.1 `-All` → 5.1 → 5.2 (see `tools/lab-cycle-manifest.psd1`).
 
-Both scripts also need PowerShell 7 with Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights and Az.Storage, a signed-in `Connect-AzAccount` context, permission to register the `Microsoft.RecoveryServices` and `Microsoft.DataProtection` resource providers (`Deploy-Bicep.ps1` registers them if needed), and **Owner** or **User Access Administrator** on `prodskycraftswcsa` (`New-LabBlobBackup.ps1` assigns the Backup Vault identity two roles there). `Deploy-Bicep.ps1` and `Test-Lab.ps1` find the *Backup Management Service* app with `Get-AzADServicePrincipal`, which needs a Microsoft Graph token in your Az sign-in: if they report `MicrosoftGraphEndpointResourceId`, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md). The guide's own blocks for Steps 5.2.3 and 5.2.9 also use Az.KeyVault and Az.AlertsManagement, both part of the Az module. If Lab 4.1 had to use another name than `prodskycraftswcsa` (storage account names are unique across Azure), pass it to `New-LabBlobBackup.ps1`, `Test-Lab.ps1` and `Remove-LabResource.ps1` as `-ProdSaName`.
+Both scripts also need PowerShell 7 with Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights and Az.Storage, a signed-in `Connect-AzAccount` context, permission to register the `Microsoft.RecoveryServices` and `Microsoft.DataProtection` resource providers (`Deploy-Bicep.ps1` registers them if needed), and **Owner** or **User Access Administrator** on `prodskycraftswcsa` (`New-LabBlobBackup.ps1` assigns the Backup Vault identity two roles there). `Deploy-Bicep.ps1` and `Test-Lab.ps1` find the *Backup Management Service* app with `Get-AzADServicePrincipal`, which needs a Microsoft Graph token in your Az sign-in: if they report `MicrosoftGraphEndpointResourceId`, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md). The guide's own blocks for Steps 5.2.3 and 5.2.9 also use Az.KeyVault, which is part of the Az module, and Az.AlertsManagement, which is not: the Az module does not include it, so install it once with `Install-Module Az.AlertsManagement -Scope CurrentUser` before the Azure PowerShell block of Step 5.2.9 (the scripts and the Portal and Bicep paths do not need it). If Lab 4.1 had to use another name than `prodskycraftswcsa` (storage account names are unique across Azure), pass it to `New-LabBlobBackup.ps1`, `Test-Lab.ps1` and `Remove-LabResource.ps1` as `-ProdSaName`.
 
 ---
 
@@ -112,7 +112,7 @@ Just like storage accounts, vaults support redundancy:
    > Soft delete on a new Recovery Services vault is **AlwaysON**: Azure Backup "secure by default" turns it on and nothing can turn it off. Only the retention period is yours to choose, and only here.
 
 6. On the **Tags** tab: `Project` = `SkyCraft`, `Environment` = `Platform`, `CostCenter` = `MSDN`, `Owner` = your name. Lab 1.3's `Enforce-Project-Tag` denies the vault without `Project`.
-7. Click **Review + Create** → **Create**.
+7. Click **Review + Create** → **Create**. The form also has a **Networking** tab, which this lab does not change: it keeps its default, public access.
 
 #### Azure PowerShell
 
@@ -123,7 +123,7 @@ $rsv = New-AzRecoveryServicesVault -Name platform-skycraft-swc-rsv -ResourceGrou
 Set-AzRecoveryServicesBackupProperty -Vault $rsv -BackupStorageRedundancy LocallyRedundant
 ```
 
-To read the settings afterwards, open the vault and, under **Settings** (expand it if it is collapsed), click **Properties**: **Backup Configuration** shows the redundancy and **Security Settings** shows soft delete.
+To read the settings afterwards, open the vault and, under **Settings** (expand it if it is collapsed), click **Properties**. **Backup Configuration** has an **Update** link that opens a pane with the redundancy, and **Soft Delete** reads **Enabled - Always On** under **Logically Air-Gapped Vault**; the page has no **Security Settings** heading.
 
 **Preview - the AVM module call the Bicep path makes** (`bicep/main.bicep`; versions pinned in `docs/bicep-standards.md` §4.4):
 
@@ -144,7 +144,7 @@ module modRecoveryServicesVault 'br/public:avm/res/recovery-services/vault:0.13.
 
 The Backup Vault uses `avm/res/data-protection/backup-vault:0.13.2` the same way; its diagnostic setting is the one resource without an AVM parameter and lives in `bicep/modules/backup-vault-diagnostics.bicep`. Backup policies stay in the scripts (`docs/bicep-standards.md` §10.4): `Deploy-Bicep.ps1` creates the VM policy, `New-LabBlobBackup.ps1` the blob policy.
 
-**Expected Result**: Vault `platform-skycraft-swc-rsv` is deployed in Sweden Central with the four tags; **Properties** → **Backup Configuration** shows **Locally-redundant**.
+**Expected Result**: Vault `platform-skycraft-swc-rsv` is deployed in Sweden Central with the four tags; **Properties** → **Backup Configuration** → **Update** shows **Locally-redundant**.
 
 ---
 
@@ -231,7 +231,7 @@ The Bicep path grants the same role: `bicep/main.bicep` calls `avm/ptn/authoriza
 
 **c. Take the first backup and watch the snapshot**
 
-1. Run the first backup now instead of waiting for 02:00: under **Protected items** (expand it if it is collapsed), click **Backup items** → **Azure Virtual Machine** → `dev-skycraft-swc-auth-vm` → **Backup now** → **OK**. Do the same for `dev-skycraft-swc-world-vm`.
+1. Run the first backup now instead of waiting for 02:00: under **Protected items** (expand it if it is collapsed), click **Backup items** → **Azure Virtual Machine** → `dev-skycraft-swc-auth-vm` → **View details** → **Backup now** → **OK**. The name is not a link: **View details** on its row opens the item. Do the same for `dev-skycraft-swc-world-vm`.
 2. Under **Monitoring**, click **Backup jobs**, and open the job of each VM. Its *Take Snapshot* sub-task is the part to watch: once it is *Completed*, the VM has a recovery point, which is what Step 5.2.10 needs. It took about 8.5 minutes in a live run. The job itself stays *In progress* until the transfer to the vault ends, which takes far longer.
 3. A job that turns *Failed* within seconds with `UserErrorRequestDisallowedByPolicy` means a policy refused the snapshot group or the restore point collection: see Troubleshooting, Issue 2. `400198 UserErrorKeyVaultPermissionsNotConfigured` on the auth VM means part a is missing or not active yet: Issue 4.
 
@@ -270,24 +270,36 @@ foreach ($vm in 'dev-skycraft-swc-auth-vm', 'dev-skycraft-swc-world-vm') {
 
 **Backup Vaults** are newer entities used for Azure Blobs, Azure Disks, and PostgreSQL. They are distinct from Recovery Services Vaults.
 
-Create this vault with Az PowerShell, not with the Portal's **+ Create**. The Portal creates a Backup vault with soft delete **AlwaysOn** ("secure by default", in preview for Backup vaults in Sweden Central), and `Test-Lab.ps1` expects **Off**, the lab's setting that lets the cleanup delete the vault in one pass.
+Create this vault with the Bicep or with the ARM request below, not with the Portal's **+ Create** and not with `New-AzDataProtectionBackupVault`. The Portal creates a Backup vault with soft delete **AlwaysOn** ("secure by default", in preview for Backup vaults in Sweden Central), and `Test-Lab.ps1` expects **Off**, the lab's setting that lets the cleanup delete the vault in one pass.
 
 > [!WARNING]
 > **AlwaysOn cannot be undone.** Once a vault's soft delete is AlwaysOn, `Update-AzDataProtectionBackupVault -SoftDeleteState Off` fails with `UserErrorDisableSoftDeleteNotAllowed`, and the only way back is to delete the vault and create it again (Troubleshooting, Issue 3). Do not open the Portal's **+ Create** for this vault.
 
+> [!NOTE]
+> `New-AzDataProtectionBackupVault ... -SoftDeleteState Off` (Az.DataProtection 3.0.1, Az 16.3.0) fails: `This API version requires backup vaults to have the soft delete setting configured to Enable Always-On Soft Delete`, and no vault is created. The cmdlet calls an API version that refuses Off. Microsoft Learn's [secure by default](https://learn.microsoft.com/azure/backup/secure-by-default) article says that in the preview regions older API versions can still disable soft delete; the Bicep and the request below use `2024-04-01`.
+
 #### Azure PowerShell
 
 ```powershell
-$storage = New-AzDataProtectionBackupVaultStorageSettingObject -DataStoreType VaultStore -Type LocallyRedundant
-# Az.DataProtection 2.x: use -IdentityType SystemAssigned instead of -EnableSystemAssignedIdentity
-New-AzDataProtectionBackupVault -ResourceGroupName platform-skycraft-swc-rg -VaultName platform-skycraft-swc-bv `
-  -Location swedencentral -StorageSetting $storage -EnableSystemAssignedIdentity -SoftDeleteState Off `
-  -Tag @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = '<your name>' }
+$subscriptionId = (Get-AzContext).Subscription.Id
+$body = @{
+  location   = 'swedencentral'
+  identity   = @{ type = 'SystemAssigned' }
+  tags       = @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = '<your name>' }
+  properties = @{
+    storageSettings  = @(@{ datastoreType = 'VaultStore'; type = 'LocallyRedundant' })
+    securitySettings = @{ softDeleteSettings = @{ state = 'Off'; retentionDurationInDays = 14 } }
+  }
+} | ConvertTo-Json -Depth 6
+$response = Invoke-AzRestMethod -Method PUT -Payload $body `
+  -Path "/subscriptions/$subscriptionId/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.DataProtection/backupVaults/platform-skycraft-swc-bv?api-version=2024-04-01"
+$response.StatusCode   # 2xx: ARM accepted the request
+Get-AzDataProtectionBackupVault -ResourceGroupName platform-skycraft-swc-rg -VaultName platform-skycraft-swc-bv   # repeat until it returns the vault
 ```
 
-The Bicep path creates the same vault: `avm/res/data-protection/backup-vault` with `softDeleteSettings: { state: 'Off' }` (`bicep/main.bicep`).
+The Bicep path (`scripts/Deploy-Bicep.ps1`) creates the same vault: `avm/res/data-protection/backup-vault` with `softDeleteSettings: { state: 'Off' }` (`bicep/main.bicep`).
 
-Then look at it in the Portal: search for **Backup vaults** → `platform-skycraft-swc-bv` → under **Settings** (expand it if it is collapsed), click **Properties**. **Soft delete** reads **Disabled** (Off). On a vault created in the Portal it reads enabled with a 14-day retention: deleted backup data is kept for 14 to 180 days and can be undeleted in that time, which is what production wants. Microsoft Learn says the option to turn it off may go once secure by default reaches general availability in the region; `Test-Lab.ps1` will then accept On and AlwaysOn (#376).
+Then look at it in the Portal: search for **Backup vaults** → `platform-skycraft-swc-bv` → under **Manage** (expand it if it is collapsed), click **Properties**. **Soft delete** reads **Disabled** (Off). On a vault created in the Portal it reads enabled with a 14-day retention: deleted backup data is kept for 14 to 180 days and can be undeleted in that time, which is what production wants. Microsoft Learn says the option to turn it off may go once secure by default reaches general availability in the region; `Test-Lab.ps1` will then accept On and AlwaysOn (#376).
 
 **Expected Result**: `platform-skycraft-swc-bv` exists in Sweden Central with locally-redundant storage, a system-assigned identity, soft delete **Off** and the four tags.
 
@@ -504,7 +516,9 @@ az monitor alert-processing-rule create --name skycraft-backup-critical-apr --re
 ```powershell
 $rsv = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-rsv
 $ag  = Get-AzActionGroup -ResourceGroupName platform-skycraft-swc-rg -Name skycraft-ops-ag
-# Az.AlertsManagement; -Enabled and -FilterSeverity take strings
+# Az.AlertsManagement is a separate module, not part of Az: install it once.
+Install-Module Az.AlertsManagement -Scope CurrentUser
+# -Enabled and -FilterSeverity take strings
 Set-AzAlertProcessingRule -ResourceGroupName platform-skycraft-swc-rg -Name skycraft-backup-critical-apr `
   -Scope $rsv.ID -AlertProcessingRuleType AddActionGroups -ActionGroupId $ag.Id -FilterSeverity 'Equals:Sev0' `
   -Enabled 'True' -Description 'Send Critical alerts of platform-skycraft-swc-rsv to skycraft-ops-ag' `
@@ -588,7 +602,7 @@ The steps below run commands on the VM with **Run command**, which needs no Bast
 - [ ] *Backup Management Service* holds **Key Vault Administrator** on `dev-skycraft-swc-kv`
 - [ ] `dev-skycraft-swc-auth-vm` and `dev-skycraft-swc-world-vm` registered for backup
 - [ ] Each first backup job shows **Take Snapshot** **Completed**, and no job is **Failed**
-- [ ] Backup Vault `platform-skycraft-swc-bv` with soft delete **Off**, created with Az PowerShell or the Bicep
+- [ ] Backup Vault `platform-skycraft-swc-bv` with soft delete **Off**, created with the ARM request of Step 5.2.4 or the Bicep
 - [ ] `SkyCraft-Blob-Policy` (operational only, 30 days, no vaulted rule) protecting `prodskycraftswcsa`
 - [ ] Diagnostic settings `rsv-backup-reports-diag` and `bv-backup-reports-diag` send backup logs to `platform-skycraft-swc-law`
 - [ ] Alert processing rule `skycraft-backup-critical-apr` applies `skycraft-ops-ag` to the vault's Critical alerts
@@ -638,7 +652,7 @@ If the Activity Log names the restore point collection, check that `platform-sky
 1. Make sure the vault protects nothing yet (no backup instance; delete `prodskycraftswcsa`'s instance first if there is one).
 2. Lab 1.3's lock `lock-no-delete-platform` on `platform-skycraft-swc-rg` blocks the delete. Remove it for the moment: the group's **Settings** → **Locks** → delete `lock-no-delete-platform` (it is recreated in step 5).
 3. Delete the vault: `Remove-AzDataProtectionBackupVault -ResourceGroupName platform-skycraft-swc-rg -VaultName platform-skycraft-swc-bv`. The deleted vault stays soft-deleted for its retention period; Azure still allows a new vault with the same name.
-4. **Wait about a minute**, then create it again with the block in Step 5.2.4. Recreating it at once failed once in a live run with `Identity operation for resource ... failed ... BadRequest ... was not found`; the same command a minute later worked. Recreate the diagnostic setting `bv-backup-reports-diag` (Step 5.2.8 b) and the blob policy (Step 5.2.5 a): they went with the vault.
+4. **Wait about a minute**, then create it again with the Bicep (`Deploy-Bicep.ps1`) or the request in Step 5.2.4; `New-AzDataProtectionBackupVault -SoftDeleteState Off` is refused (Step 5.2.4). Recreating it at once failed once in a live run with `Identity operation for resource ... failed ... BadRequest ... was not found`; the same command a minute later worked. Recreate the diagnostic setting `bv-backup-reports-diag` (Step 5.2.8 b) and the blob policy (Step 5.2.5 a): they went with the vault.
 5. Put the lock back: re-run Lab 1.3's `Deploy-Bicep.ps1`, or the group's **Locks** → **+ Add**, name `lock-no-delete-platform`, type **Delete**.
 
 ### Issue 4: Enable backup fails with `400198 UserErrorKeyVaultPermissionsNotConfigured`
