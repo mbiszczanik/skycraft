@@ -89,3 +89,46 @@ Describe 'Lab 5.2 - Business Continuity Deploy-Bicep.ps1 under -WhatIf (#370)' {
         $exposed | Should -BeNullOrEmpty -Because 'these calls run under -WhatIf'
     }
 }
+
+Describe 'Lab 5.2 - Business Continuity Deploy-Bicep.ps1 step 7 cannot end the script silently (#366)' {
+    BeforeAll {
+        $script:TryAst = [System.Management.Automation.Language.TryStatementAst]
+        $script:VmLoop = $script:Ast.Find({
+                param($n)
+                $n -is [System.Management.Automation.Language.ForEachStatementAst] -and $n.Variable.VariablePath.UserPath -eq 'vmName'
+            }, $true)
+    }
+
+    It 'finds the loop over the VMs' {
+        $script:VmLoop | Should -Not -BeNullOrEmpty
+    }
+
+    It 'runs the loop inside a try whose finally fails the run with Exit-Lab when the loop did not finish' {
+        $try = $script:VmLoop.Parent
+        while ($try -and $try -isnot $script:TryAst) { $try = $try.Parent }
+        $try | Should -Not -BeNullOrEmpty -Because 'a stopped pipeline throws past every catch, so only a finally still runs'
+        $try.Finally | Should -Not -BeNullOrEmpty
+        $try.Finally.Extent.Text | Should -Match 'Exit-Lab\s+-FailureCount\s+1'
+        $try.Finally.Extent.Text | Should -Match '-not\s+\$vmStepsDone'
+    }
+
+    It 'sets the finished flag after the loop, inside the try' {
+        $try = $script:VmLoop.Parent
+        while ($try -and $try -isnot $script:TryAst) { $try = $try.Parent }
+        $last = $try.Body.Statements[-1]
+        $last.Extent.Text | Should -Match '^\$vmStepsDone\s*=\s*\$true$'
+        $last.Extent.StartOffset | Should -BeGreaterThan $script:VmLoop.Extent.EndOffset
+    }
+
+    It 'collects the Az pipelines before taking the first element' {
+        $names = 'Get-AzResourceProvider', 'Get-AzRecoveryServicesBackupJob'
+        foreach ($name in $names) {
+            $cmd = $script:Ast.Find({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq $name }, $true)
+            $cmd | Should -Not -BeNullOrEmpty
+            $pipeline = $cmd.Parent
+            $pipeline.PipelineElements.Count | Should -BeGreaterThan 0
+            ($pipeline.PipelineElements | Where-Object { $_ -is [System.Management.Automation.Language.CommandAst] -and $_.GetCommandName() -in 'Select-Object', 'select' }) |
+                Should -BeNullOrEmpty -Because "$name ran with -ErrorAction SilentlyContinue into Select-Object -First and ended the script silently"
+        }
+    }
+}
