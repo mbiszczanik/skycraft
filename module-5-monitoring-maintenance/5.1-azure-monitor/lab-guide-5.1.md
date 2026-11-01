@@ -106,6 +106,9 @@ A **Log Analytics Workspace** is a unique environment for Azure Monitor log data
 
 5. Click **Review + Create** → **Create**.
 
+> [!NOTE]
+> **A deleted workspace keeps its name for 14 days.** After a cleanup (`scripts/Remove-LabResource.ps1`, or a delete in the Portal) the workspace is only soft-deleted, and the Portal refuses `platform-skycraft-swc-law` on the **Basics** tab: *A workspace with this name was deleted in the last 14 days and it is in soft-delete state*. Recover it instead of creating it: **Log Analytics workspaces** → **Open recycle bin** → select `platform-skycraft-swc-law` → **Recover**. It comes back with its tags, retention and old data. To release the name for a brand-new workspace, recover it first and then purge it with `Remove-AzOperationalInsightsWorkspace -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-law -ForceDelete`. A purge deletes the workspace and its data for good. The CLI, PowerShell and Bicep create calls recover a soft-deleted workspace of the same name, group, subscription and region without a message; see Troubleshooting, Issue 6.
+
 #### Azure CLI
 
 ```azurecli
@@ -131,12 +134,12 @@ New-AzOperationalInsightsWorkspace -ResourceGroupName platform-skycraft-swc-rg -
 
 ### Step 5.1.2: Connect Virtual Machines
 
-Two pieces connect a VM to the workspace: the **Azure Monitor Agent (AMA)**, a VM extension that collects the data, and a **Data Collection Rule (DCR)**, which says what to collect and where to send it. The lab creates the rule with the **Data Collection Rules** wizard, which has a **Tags** tab, and installs the agent with the SkyCraft tags: Lab 1.3's `Enforce-Project-Tag` policy refuses an untagged extension. `scripts/Test-Lab.ps1` checks that the agent shows **Provisioning succeeded** on the rule's VM and that its `Heartbeat` reaches the workspace.
+Two pieces connect a VM to the workspace: the **Azure Monitor Agent (AMA)**, a VM extension that collects the data, and a **Data Collection Rule (DCR)**, which says what to collect and where to send it. The lab creates the rule with the **Data Collection Rules** wizard, which has a **Tags** tab and installs the agent on the VMs you add to the rule. The extension it creates carries the `Project` tag only: Lab 1.3's `Inherit-Project-Tag` adds it from the resource group, and `Enforce-Project-Tag` requires it. `scripts/Test-Lab.ps1` checks that the agent shows **Provisioning succeeded** on the rule's VM and that its `Heartbeat` reaches the workspace.
 
 > [!NOTE]
 > **VM insights** (**Monitor** → **Insights** (expand it if it is collapsed) → **Virtual Machines** → **Configure Insights**) is the Portal shortcut that creates a rule and installs the agent in one wizard. It has no Tags field, so under Lab 1.3's policies it ends in *Onboarding failed*, and its rule sends `InsightsMetrics`, not the `Perf` table Step 5.1.4 queries. Its defaults are also not the lab's: **OpenTelemetry metrics** to a new Azure Monitor workspace (the Log Analytics path is the unticked **[Classic] Log-based metrics**), **Enable recommended alerts** ticked (eight alert rules that e-mail you), a workspace other than `platform-skycraft-swc-law`, and a rule named `MSVMI-<...>` in the VM's resource group.
 
-1. Navigate to **Monitor** → **Data Collection Rules** (under **Settings**) → **+ Create**.
+1. Navigate to **Monitor** → **Data Collection Rules** (under **Settings**) → **Create a data collection rule**.
 2. **Basics**:
 
 | Field                    | Value                      |
@@ -145,19 +148,25 @@ Two pieces connect a VM to the workspace: the **Azure Monitor Agent (AMA)**, a V
 | Subscription             | [Your Subscription]        |
 | Resource Group           | `platform-skycraft-swc-rg` |
 | Region                   | **Sweden Central**         |
-| Platform Type            | **Linux**                  |
+| Type of telemetry        | **Agent-based - Linux**    |
 | Data Collection Endpoint | leave empty                |
 
+The wizard starts **Resource Group** on `dev-skycraft-swc-rg`, the group of the VM: change it to `platform-skycraft-swc-rg`.
+
 3. **Resources** → **+ Add resources** → expand `dev-skycraft-swc-rg`, check `dev-skycraft-swc-auth-vm` (or `prod-skycraft-swc-auth-vm` if only the prod environment exists) → **Apply**.
-4. **Collect and deliver** → **+ Add data source**:
-   - Data source type: **Performance Counters**, **Basic** (CPU, memory, disk and network)
-   - **Next : Destination** → **+ Add destination**: Destination type **Azure Monitor Logs**, account `platform-skycraft-swc-law` → **Add data source**
-5. **+ Add data source** again:
-   - Data source type: **Linux Syslog**, the facilities at their defaults
-   - Destination: **Azure Monitor Logs**, `platform-skycraft-swc-law` → **Add data source**
+4. **Collect and deliver** → **Add new data source**:
+   - Data source type: **Performance Counters**. The counters are a tree with no **Basic** option: tick **CPU**, **Memory**, **Disk** and **Network**
+   - **Next : Destination** → **+ Add destination**: Destination type **Log Analytics Workspaces** (it starts on **Azure Monitor Metrics**), account `platform-skycraft-swc-law` → **Save**
+5. **Add new data source** again:
+   - Data source type: **Linux Syslog**. Tick only the facilities you want and set a minimum log level for each: one or two facilities at **Warning** are enough for this lab
+   - Destination: **Log Analytics Workspaces**, `platform-skycraft-swc-law` → **Save**
+
+   > [!WARNING]
+   > **Cost**: a Syslog data source saved with no facility ticked is stored as all 25 facilities at all 8 levels (Debug and up), and the workspace bills every GB it ingests. Tick only the facilities you want, or accept that cost: a lab VM writes little, a busy one does not.
+
 6. **Tags**: `Project = SkyCraft`, `Environment = Platform`, `CostCenter = MSDN`, `Owner = <your name>`.
 7. Click **Review + create** → **Create**.
-8. Open the VM → **Extensions + applications**. If `AzureMonitorLinuxAgent` is not listed with **Provisioning succeeded**, install it with the tags from Cloud Shell (PowerShell). The Portal offers no tags field for it, and running the block over an installed agent only sets its tags:
+8. Open the VM → **Extensions + applications**. The wizard has installed `AzureMonitorLinuxAgent` itself: it is listed with **Provisioning succeeded** and the `Project` tag only. Run the block below only if the agent is missing, or to give it all four tags (the Portal offers no tags field for it). Running the block over an installed agent only sets its tags:
 
    ```powershell
    $vm = Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-vm
@@ -201,7 +210,7 @@ Heartbeat
 
 **Expected Result**: One row per connected VM, such as `dev-skycraft-swc-auth-vm`, with a `LastHeartbeat` from the last few minutes. No rows: see Troubleshooting, Issue 1.
 
-> **Wait for the first row**: the first `Heartbeat` row of a newly installed agent reaches the workspace 27-39 minutes after the install, also when the workspace is recovered with its table and old data. A **new** workspace has no `Heartbeat` table until that first row arrives; until then the query fails with a `BadRequest` or "Failed to resolve table" error. Both mean "not ready yet", not a broken setup: run the query again every few minutes. `scripts/Test-Lab.ps1` waits for this itself, once a minute with progress lines: up to 45 minutes after the agent was installed (`-AgentInstallWaitMinutes`, read from the extension's last successful write in the activity log), and up to 45 minutes for the table of a new workspace (`-NewWorkspaceWaitMinutes`). An agent installed longer ago than that with still no row fails at once, naming the agent as installed but not sending.
+> **Wait for the first row**: the first `Heartbeat` row of a newly installed agent can take up to about 40 minutes to reach the workspace, and often arrives much sooner on a workspace that already has a `Heartbeat` table, a recovered one for example (3 to 13 minutes were measured there). A recovered workspace also answers at once with the old rows of the earlier run, so look for a `LastHeartbeat` from the last few minutes. A **new** workspace has no `Heartbeat` table until that first row arrives; until then the query fails with a `BadRequest` or "Failed to resolve table" error. Both mean "not ready yet", not a broken setup: run the query again every few minutes. `scripts/Test-Lab.ps1` waits for this itself, once a minute with progress lines: up to 45 minutes after the agent was installed (`-AgentInstallWaitMinutes`, read from the extension's last successful write in the activity log), and up to 45 minutes for the table of a new workspace (`-NewWorkspaceWaitMinutes`). An agent installed longer ago than that with still no row fails at once, naming the agent as installed but not sending.
 
 ### Step 5.1.4: Query Performance Data
 
@@ -235,7 +244,7 @@ The alert rule and its action group are **platform** resources - they live in `p
    - Threshold value: **80**
    - Check every: **1 minute**
    - Lookback period: **5 minutes**
-4. **Actions** → **+ Create action group**. On its **Basics** tab:
+4. **Actions**. The tab opens on **Use quick actions (preview)**: cancel the quick actions pane (it would create an e-mail action to the account you are signed in with) and choose **Use action groups**, then **+ Create action group**. On its **Basics** tab:
 
 | Field             | Value                      |
 | :---------------- | :------------------------- |
@@ -250,7 +259,7 @@ The alert rule and its action group are **platform** resources - they live in `p
    - Notification type: **Email/SMS message/Push/Voice**
    - Name: `ops-email`
    - In the pane that opens, check **Email** and enter your address
-   - Enable the common alert schema: **Yes** (the Bicep sets it too)
+   - Enable the common alert schema: **Yes** (the Bicep sets it too). The toggle appears after you check **Email**, and starts at **No**
    - Click **OK**
 
    The pane notes that e-mails must be verified before the action group can send notifications: confirm the message Azure sends to that address.
@@ -397,14 +406,14 @@ The rule watches the VM itself, as the CPU alert does: a log search alert scoped
    - Threshold value: **1**
    - Frequency of evaluation: **5 minutes**
 
-   If a separate Logs pane opens for the query, click *Run*, then *Continue Editing Alert*.
-4. **Actions** → **Select action groups** → check `skycraft-ops-ag` → **Select**.
+   If a separate Logs pane opens for the query, it starts in *Simple mode*: switch it to **KQL mode** before you type the query, then click *Run*, then *Continue Editing Alert*.
+4. **Actions**. The tab opens on **Use quick actions (preview)**: cancel the quick actions pane (it would create an e-mail action to the account you are signed in with) and choose **Use action groups**, then **Select action groups** → check `skycraft-ops-ag` → **Select**.
 5. **Details**:
    - Resource group: `platform-skycraft-swc-rg`
    - Severity: **1 - Error**
    - Alert rule name: `skycraft-heartbeat-alert`
    - Region: **Sweden Central**
-   - Identity: **None** (the rule runs its query with the permissions of whoever last saved it; a managed identity would need a role assignment first)
+   - Identity: leave the preselected **Default** (the Portal has no **None**; do not pick a managed identity, it would need a role assignment first)
    - Under **Advanced options**, check **Enable upon creation** and **Automatically resolve alerts**
 6. **Tags**: `Project = SkyCraft`, `Environment = Platform`, `CostCenter = MSDN`, `Owner = <your name>`.
 7. Click **Review + create** → **Create**.
@@ -488,6 +497,22 @@ The data collection rule, the action group and the tagged Azure Monitor Agent (`
 
 ---
 
+## 🧹 Clean Up
+
+Remove the lab's resources when you finish; the workspace bills for what it ingests.
+
+```powershell
+.\scripts\Remove-LabResource.ps1
+```
+
+The script removes the alert rules, the data collection rule and its association, the action group, the diagnostic setting and the workspace. Three things stay:
+
+- **The `AzureMonitorLinuxAgent` extension stays on the VM.** The **Data Collection Rules** wizard installed it on `dev-skycraft-swc-auth-vm`, and `Remove-LabResource.ps1` does not remove it, because other labs share the VM. To remove it yourself: `Remove-AzVMExtension -ResourceGroupName dev-skycraft-swc-rg -VMName dev-skycraft-swc-auth-vm -Name AzureMonitorLinuxAgent -Force`.
+- The private dashboard `SkyCraft-Ops` (Step 5.1.6) stays: delete it under **Dashboard**.
+- The workspace is soft-deleted, and its name stays reserved for 14 days. Recover it or purge it before you build the lab again in the Portal (Step 5.1.1 and Troubleshooting, Issue 6).
+
+---
+
 ## ✅ Lab Checklist
 
 - [ ] Log Analytics Workspace `platform-skycraft-swc-law` created
@@ -512,9 +537,9 @@ The data collection rule, the action group and the tagged Azure Monitor Agent (`
 
 - Ensure the VM is **Running**.
 - Check that the VM lists `AzureMonitorLinuxAgent` under **Extensions + applications** with **Provisioning succeeded**; if not, run the install block in Step 5.1.2.
-- Wait for the agent's first data: the first `Heartbeat` row arrives 27-39 minutes after the install, and on a new workspace the `Heartbeat` table appears only with it; a `BadRequest` or "Failed to resolve table" error before that is expected (Step 5.1.3). If more than 45 minutes have passed since the install, the agent is not sending: check that the VM is running and that the rule is associated with it.
+- Wait for the agent's first data: the first `Heartbeat` row can take up to about 40 minutes after the install (often much sooner on a workspace that already has the table), and on a new workspace the `Heartbeat` table appears only with it; a `BadRequest` or "Failed to resolve table" error before that is expected (Step 5.1.3). If more than 45 minutes have passed since the install, the agent is not sending: check that the VM is running and that the rule is associated with it.
 - Check if the **Data Collection Rule** is correctly associated with the VM.
-- `Heartbeat` has rows but `Perf` is empty: the rule must send **Performance Counters** to **Azure Monitor Logs**. A rule made by VM insights sends `InsightsMetrics` instead.
+- `Heartbeat` has rows but `Perf` is empty: the rule must send **Performance Counters** to the workspace (destination type **Log Analytics Workspaces**). A rule made by VM insights sends `InsightsMetrics` instead.
 
 ### Issue 2: Create fails with "disallowed by policy"
 
@@ -557,6 +582,18 @@ The data collection rule, the action group and the tagged Azure Monitor Agent (`
 **Solution**:
 
 - Open **Monitoring** → **Diagnostic settings** (not the classic entry), select **blob**, and check that `skycraft-storage-diag` is listed there; create it there if not (Step 5.1.7).
+
+### Issue 6: The Portal refuses the workspace name after a cleanup
+
+**Symptom**: **Review + Create** on the workspace's **Basics** tab fails with *A workspace with this name was deleted in the last 14 days and it is in soft-delete state. Its name remains reserved and can't be used.*
+
+**Root Cause**: `scripts/Remove-LabResource.ps1`, like any delete, soft-deletes the workspace. Its name stays reserved for 14 days.
+
+**Solution**:
+
+- Recover it: **Log Analytics workspaces** → **Open recycle bin** → select `platform-skycraft-swc-law` → **Recover**. Its tags, retention and old data come back, so `Heartbeat` already holds rows from the earlier run.
+- Or purge it, which releases the name: recover the workspace first, then run `Remove-AzOperationalInsightsWorkspace -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-law -ForceDelete`. **A purge is permanent**: the workspace and its data cannot be brought back.
+- A create with the same name, resource group, subscription and region from the CLI, PowerShell or Bicep (`scripts/Deploy-Bicep.ps1`) recovers it as well, without a message.
 
 ---
 

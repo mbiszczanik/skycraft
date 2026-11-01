@@ -22,7 +22,7 @@
 - [ ] Data Collection Rule (DCR) `skycraft-vm-dcr` created and associated with at least one VM (e.g., `dev-skycraft-swc-auth-vm`)
 - [ ] Azure Monitor Agent `AzureMonitorLinuxAgent` on that VM: **Provisioning succeeded**, tagged `Project = SkyCraft`
 - [ ] Performance counters (`Perf` table) and Syslog being collected
-- [ ] `Heartbeat` rows from the VM in the last 15 minutes (the first row arrives 27-39 minutes after the agent is installed; a new workspace has no `Heartbeat` table until then and a `BadRequest` is expected, wait and rerun; `Test-Lab.ps1` waits up to 45 minutes after the install)
+- [ ] `Heartbeat` rows from the VM in the last 15 minutes (the first row can take up to about 40 minutes after the agent is installed, and often arrives much sooner on a workspace that already has the table; a new workspace has no `Heartbeat` table until then and a `BadRequest` is expected, wait and rerun; `Test-Lab.ps1` waits up to 45 minutes after the install)
 
 ---
 
