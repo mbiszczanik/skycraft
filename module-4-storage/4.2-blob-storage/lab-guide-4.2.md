@@ -293,7 +293,7 @@ Get-AzRmStorageContainer -ResourceGroupName 'prod-skycraft-swc-rg' -StorageAccou
 
 The default access tier for `prodskycraftswcsa` is **Hot** (Lab 4.1). Blobs uploaded will be Hot by default unless explicitly specified.
 
-1. Navigate to `prodskycraftswcsa` → **Configuration** (in the left menu, under **Settings**).
+1. Navigate to `prodskycraftswcsa` → **Configuration** (in the left menu, under **Settings**; expand the group if it is collapsed).
 2. Verify:
    - **Blob access tier (default)**: **Hot**
 
@@ -324,7 +324,7 @@ Steps 4.2.5-4.2.7 are made on one page, **Data protection**, and saved once at t
 
 **Note**: If you come back to this lab after Lab 5.2, its blob backup protects the account, and the **Data protection** page greys out what the backup needs: soft delete for blobs at 35 days, point-in-time restore, versioning and the change feed. Leave those settings as they are. This lab's `Test-Lab.ps1` then reports soft delete for blobs at 35 days instead of 7, and this lab's `Deploy-Bicep.ps1` would set them back under an active backup, so do not run it (issue #364). Even after the backup is removed, point-in-time restore stays on, and the Bicep then stops with `InvalidValuesForRequestParameters` on `properties.deleteRetentionPolicy.days`: uncheck **Enable point-in-time restore for containers** on this page and **Save** first.
 
-1. Navigate to `prodskycraftswcsa` → **Data protection** (in the left menu, under **Data management**).
+1. Navigate to `prodskycraftswcsa` → **Data protection** (in the left menu, under **Data management**; expand the group if it is collapsed).
 2. Under **Recovery**, enable **Enable soft delete for blobs** (it is checked already if you created the account in Lab 4.1's wizard).
 3. **Keep deleted blobs for (in days)**: `7`
 4. Leave **Enable Azure Backup for blobs** unchecked - it bills each protected account and its backup storage; Lab 5.2 covers backup.
@@ -414,7 +414,7 @@ Lifecycle management policies automatically transition blobs between access tier
 
 This rule tiers the blobs in the `game-logs` container to cheaper tiers as they age, and deletes them after a year. It applies to no other container.
 
-1. Navigate to `prodskycraftswcsa` → **Lifecycle management** (in the left menu, under **Data management**).
+1. Navigate to `prodskycraftswcsa` → **Lifecycle management** (in the left menu, under **Data management**; expand the group if it is collapsed).
 2. On the **List View** tab, click **Add a rule**.
 3. On the **Details** tab, fill in:
 
@@ -610,7 +610,7 @@ An empty **Prefix** means the rule applies to the whole account: delete it and c
 Upload a sample file to the **Production** container to verify upload capability and prepare for the versioning test. Note that this blob will be **Private**. On every path the blob is named `textures/test-asset.txt`, so that Step 4.2.13 overwrites the same blob and creates a second version of it.
 
 1. On your computer, create a text file named `test-asset.txt` that contains the line `Test game asset content`.
-2. Navigate to `prodskycraftswcsa` → **Containers** (under **Data storage**).
+2. Navigate to `prodskycraftswcsa` → **Containers** (under **Data storage**; expand the group if it is collapsed).
 3. On the toolbar of the containers list, click **Upload**. The Upload blob pane opens; you do not need to open the container first.
 4. **Select an existing container**: `game-assets`
 5. Click **Browse for files** and choose your `test-asset.txt`.
@@ -659,14 +659,14 @@ az storage blob upload \
 > **Exam Requirement**: Configuring anonymous (public) blob access is an **AZ-104 skill**, so you need to know where both switches are. SkyCraft keeps anonymous access **off** on both accounts, so this step is a walk-through of the settings rather than a configuration - the `public-demo` container is created **Private**, exactly as `bicep/main.bicep` and `scripts/Test-Lab.ps1` expect. Nothing in the course enforces this with Azure Policy (Lab 1.3 assigns only the tag and allowed-locations policies), so it is up to you not to leave a switch on: a learner who enables public access here ends up with a container `Test-Lab.ps1` fails, and with an anonymously readable dev account.
 
 1. **Find the account-level switch** (Dev):
-   - Navigate to `devskycraftswcsa` → **Configuration** (under **Settings**)
+   - Navigate to `devskycraftswcsa` → **Configuration** (under **Settings**; expand the group if it is collapsed)
    - Verify the switch:
      - **Allow Blob anonymous access**: **Disabled**
 
    > `Deploy-Bicep.ps1` deploys the switch that way (`allowBlobPublicAccess: false`). Look at it, but leave it **Disabled** and do not click **Save**. If you do enable it, set it back to **Disabled** and **Save** again at once, or `Test-Lab.ps1` fails `DEV: AllowBlobPublicAccess is disabled`. (Organizations commonly pin this switch with a **Deny** assignment of the built-in policy *Storage account public access should be disallowed*; on such a subscription the save is refused with **RequestDisallowedByPolicy**. The SkyCraft course does not assign it.)
 
 2. **Create the `public-demo` container - Private**:
-   - Go to **Containers** (in the left menu, under **Data storage**) → **+ Add container**
+   - Go to **Containers** (in the left menu, under **Data storage**; expand the group if it is collapsed) → **+ Add container**
    - Name: `public-demo`
    - Click **Create**
 
@@ -675,7 +675,7 @@ az storage blob upload \
    ![New container pane with the access level greyed out](./images/step-4.2.12.png)
 
 3. **Prove the container is not anonymous**:
-   - **Containers** (under **Data storage**) → `public-demo`
+   - **Containers** (under **Data storage**; expand the group if it is collapsed) → `public-demo`
    - Click **Upload**, select a small local text file named `file.txt`, and click **Upload**
    - Select `file.txt` → **Overview** → copy its **URL** (`https://devskycraftswcsa.blob.core.windows.net/public-demo/file.txt`)
    - Open the URL in an incognito/private browser window
@@ -704,14 +704,14 @@ New-AzRmStorageContainer -ResourceGroupName 'dev-skycraft-swc-rg' -StorageAccoun
 Overwrite the blob of Step 4.2.11 to create a new version. Use the same blob name as there: a blob with another name is a new blob, not a second version.
 
 1. Change the line in your local `test-asset.txt` to `Updated test asset content - Version 2` and save the file.
-2. Navigate to `prodskycraftswcsa` → **Containers** (under **Data storage**), and click **Upload** on the toolbar.
+2. Navigate to `prodskycraftswcsa` → **Containers** (under **Data storage**; expand the group if it is collapsed), and click **Upload** on the toolbar.
 3. **Select an existing container**: `game-assets`
 4. Click **Browse for files** and choose your `test-asset.txt`.
 5. Check **Overwrite if files already exist**.
 6. Expand **Advanced**.
 7. **Upload to folder**: `textures`
 8. Click **Upload**.
-9. Open `prodskycraftswcsa` → **Containers** (under **Data storage**) → `game-assets` → `textures` → `test-asset.txt` → **Versions**.
+9. Open `prodskycraftswcsa` → **Containers** (under **Data storage**; expand the group if it is collapsed) → `game-assets` → `textures` → `test-asset.txt` → **Versions**.
 
 **Expected Result**: The **Versions** tab of `textures/test-asset.txt` lists two versions: the current one and the version of Step 4.2.11.
 
@@ -897,7 +897,7 @@ Get-AzStorageBlob -Container 'game-assets' -IncludeDeleted -Context $ctx | Selec
 
 **Solution**:
 
-- Delete all blobs first, or delete the whole container from **Containers** (under **Data storage**; it takes its blobs with it)
+- Delete all blobs first, or delete the whole container from **Containers** (under **Data storage**, expand the group if it is collapsed; it takes its blobs with it)
 - A container with version-level immutability cannot be deleted while it holds a blob (Step 4.2.2)
 - While Lab 1.3's `lock-no-delete-prod` is on, a container of `prodskycraftswcsa` cannot be deleted: the Portal's *Delete confirmation* offers **Attempt override of delete lock**, which deletes it permanently. Leave it unchecked and choose **Go back** (What This Lab Leaves Behind)
 
@@ -962,7 +962,7 @@ Get-AzStorageBlob -Container 'game-assets' -IncludeDeleted -Context $ctx | Selec
    <details>
      <summary>**Click to see the answer**</summary>
 
-   **Answer**: In Azure Portal: go to the storage account → **Data storage** → **Containers** → switch the filter from "Only show active containers" to show deleted containers → select the deleted container → click "Undelete". Via Az PowerShell: `Restore-AzRmStorageContainer -ResourceGroupName <rg> -StorageAccountName <account> -Name <container-name> -DeletedContainerVersion <version>`. The container and all its blobs are restored to their state at deletion time.
+   **Answer**: In Azure Portal: go to the storage account → **Data storage** (expand it if it is collapsed) → **Containers** → switch the filter from "Only show active containers" to show deleted containers → select the deleted container → click "Undelete". Via Az PowerShell: `Restore-AzRmStorageContainer -ResourceGroupName <rg> -StorageAccountName <account> -Name <container-name> -DeletedContainerVersion <version>`. The container and all its blobs are restored to their state at deletion time.
    </details>
 
 8. **Why does each lifecycle rule in this lab carry a prefix filter?**

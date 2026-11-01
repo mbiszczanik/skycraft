@@ -1604,7 +1604,7 @@ subnet part reads:
 
 If `AppServiceSubnet` is reported as not delegated (a dev VNet built in the Portal without
 Lab 2.1's **Delegate subnet to a service** setting), open `dev-skycraft-swc-vnet` in the Portal,
-under **Settings** click **Subnets**, open `AppServiceSubnet`, set **Delegate subnet to a
+under **Settings** (expand it if it is collapsed), click **Subnets**, open `AppServiceSubnet`, set **Delegate subnet to a
 service** to `Microsoft.Web/serverFarms` and click **Save**, then run the script again. With Az
 PowerShell:
 

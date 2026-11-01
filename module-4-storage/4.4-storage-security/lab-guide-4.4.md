@@ -167,7 +167,7 @@ The storage firewall works on the **data plane** only: requests to the blobs, fi
 Lab 2.2 (Step 2.2.15) added the `Microsoft.Storage` service endpoint to `WorldSubnet`, so this step is a check: you change something only if the endpoint is missing.
 
 1. In Azure Portal, search for **Virtual networks**
-2. Select `prod-skycraft-swc-vnet` → **Subnets** (in the left menu, under **Settings**) → `WorldSubnet`. The *Edit subnet* pane opens.
+2. Select `prod-skycraft-swc-vnet` → **Subnets** (in the left menu, under **Settings**; expand the group if it is collapsed) → `WorldSubnet`. The *Edit subnet* pane opens.
 3. Check that the services table under *Service Endpoints* lists `Microsoft.Storage`.
 4. If the table lists `Microsoft.Storage`, click **Cancel**: the endpoint is in place.
 
@@ -197,7 +197,7 @@ if ($subnet.ServiceEndpoints.Service -notcontains 'Microsoft.Storage') {
 > Do not choose **Disable** or **Secured by perimeter** under **Public network access**: either one closes the public endpoint to your computer too, and only a private endpoint or a network security perimeter would let you in again.
 
 1. In Azure Portal, search for **Storage accounts**
-2. Select `prodskycraftswcsa` → **Networking** (in the left menu, under **Security + networking**)
+2. Select `prodskycraftswcsa` → **Networking** (in the left menu, under **Security + networking**; expand the group if it is collapsed)
 3. Next to *Public network access* (it shows *Enabled from all networks*), click **Manage**. The *Public network access* page opens. The page has a second **Manage**, under *Resource settings: Virtual networks, IP addresses, and exceptions*; use the one next to *Public network access*.
 4. Under **Public network access**, leave **Enable** selected
 5. Under **Public network access scope**, select **Enabled from selected networks**
@@ -263,7 +263,7 @@ A stored access policy works only with a **service SAS** signed with an account 
 On every path the policy lives on the container `dev-assets`, which this step creates. The Bicep path creates the same container.
 
 1. In Azure Portal, search for **Storage accounts**
-2. Select `prodskycraftswcsa` → **Containers** (in the left menu, under **Data storage**)
+2. Select `prodskycraftswcsa` → **Containers** (in the left menu, under **Data storage**; expand the group if it is collapsed)
 3. Only if `dev-assets` is not in the containers list: click **+ Add container**. If it is there already - from an earlier run of this lab or from the Bicep path - go on to item 6.
 
    If you deleted `dev-assets` less than a minute ago - this lab's cleanup deletes it - wait a minute before you create it again: Azure refuses the name of a deleted container for at least 30 seconds, and **Create** then fails with a message that the container is being deleted (Troubleshooting, Issue 5).
@@ -322,7 +322,7 @@ You create a token that names the policy, use it, revoke it by deleting the poli
 > [!WARNING]
 > The **Blob SAS URL** this step shows is a password to the container: anyone who has it can list the container until the policy is deleted or expires. Do not paste it into a chat, an issue or a screenshot. Item 12 revokes it.
 
-1. Go to `prodskycraftswcsa` → **Containers** (in the left menu, under **Data storage**)
+1. Go to `prodskycraftswcsa` → **Containers** (in the left menu, under **Data storage**; expand the group if it is collapsed)
 2. On the `dev-assets` row, click **...** (More), then **Generate SAS**
 3. In the *Generate SAS* pane, fill in:
 
@@ -394,7 +394,7 @@ A rotation invalidates everything signed with the old key: connection strings, L
 > A rotation cannot be undone: the old key stops working at once, and everything signed with it fails until it gets the new key.
 
 1. In Azure Portal, search for **Storage accounts**
-2. Select `prodskycraftswcsa` → **Access keys** (in the left menu, under **Security + networking**)
+2. Select `prodskycraftswcsa` → **Access keys** (in the left menu, under **Security + networking**; expand the group if it is collapsed)
 3. Note the date that `key1`'s *Last rotated* shows
 4. Next to `key1`, click **Rotate key**
 5. In the confirmation dialog, click **Yes**
@@ -445,7 +445,7 @@ An **Owner** of the subscription has no data role. It reaches the blobs only by 
 
 **Storage Blob Data Contributor** lets its holder read, write and delete every blob in the scope it is assigned at. This lab assigns it on the storage account, not on the resource group or the subscription, so that it reaches this account's data only.
 
-> **Allow storage account key access** (account **Configuration**, under **Settings**) is **Enabled**, the default, and stays so in this course. Turning it off is the last step of a move to Entra ID: it would stop the account-key SAS of Section 2, Lab 4.3's key-based mounts, `Test-Lab.ps1`'s policy reads and the Portal's default access-key view. Do not change it here.
+> **Allow storage account key access** (account **Configuration**, under **Settings**; expand the group if it is collapsed) is **Enabled**, the default, and stays so in this course. Turning it off is the last step of a move to Entra ID: it would stop the account-key SAS of Section 2, Lab 4.3's key-based mounts, `Test-Lab.ps1`'s policy reads and the Portal's default access-key view. Do not change it here.
 
 ### Step 4.4.7: Assign Storage Blob Data Contributor
 
@@ -503,7 +503,7 @@ if (-not $existing) {
 ### Step 4.4.8: Access Blobs with Your Entra ID Identity
 
 1. On your computer, create a text file named `hello-skycraft.txt` that contains the line `Hello from SkyCraft`.
-2. Go to `prodskycraftswcsa` → **Containers** (in the left menu, under **Data storage**) → `dev-assets`
+2. Go to `prodskycraftswcsa` → **Containers** (in the left menu, under **Data storage**; expand the group if it is collapsed) → `dev-assets`
 3. Next to *Authentication method* (it shows *Access key*), click **Switch to Microsoft Entra user account**
 4. Click **Upload**, then **Browse for files**, choose your `hello-skycraft.txt` and click **Upload**
 
@@ -576,7 +576,7 @@ While Lab 1.3's delete lock (`lock-no-delete-prod`) is on `prod-skycraft-swc-rg`
 
 **Symptom**: After Step 4.4.2 the Portal cannot list the containers or their blobs, or shows *This request is not authorized to perform this operation*.
 **Root Cause**: The Portal reads the data from your browser's public IP address. If that address is not in the firewall - you skipped item 6 of Step 4.4.2, or you are now on another network or a VPN - the account refuses it.
-**Solution**: `prodskycraftswcsa` → **Networking** (under **Security + networking**) → **Manage** → under **IPv4 Addresses**, click **+ Add your client IPv4 address** → **Save**, then wait a minute. This page is part of the control plane, which the firewall does not block.
+**Solution**: `prodskycraftswcsa` → **Networking** (under **Security + networking**; expand the group if it is collapsed) → **Manage** → under **IPv4 Addresses**, click **+ Add your client IPv4 address** → **Save**, then wait a minute. This page is part of the control plane, which the firewall does not block.
 
 ### Issue 2: Key rotation breaks legacy mounting
 

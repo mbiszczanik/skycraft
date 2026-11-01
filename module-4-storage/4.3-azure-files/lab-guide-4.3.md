@@ -210,7 +210,7 @@ We need a share named `skycraft-config` with a 100 GiB quota. This share stores 
 
 **Note**: Searching for **Storage accounts** opens **Storage center | Blob Storage**; its **Resources** tab lists the storage accounts.
 
-4. Under **Data storage**, select **Classic file shares**
+4. Under **Data storage** (expand it if it is collapsed), select **Classic file shares**
 
 **Note**: The page may open with a banner, "Action required: Windows Kerberos RC4 hardening may affect your Azure Files access". It concerns accounts that use Active Directory (Kerberos) authentication; this lab mounts with the account key, so there is nothing to do. Under **Classic file share settings**, the page lists **Identity-based access** (**Not configured**), **Default share-level permissions** (**Disabled**), **Soft delete** (**7 days** after Lab 4.1's Portal wizard or Bicep, **Disabled** if it is off) and **Security** (**Maximum compatibility (Recommended)**). Leave **Security** as it is: its **Maximum security** profile allows only Kerberos and AES-256-GCM, so the account key mounts of Steps 4.3.7 and 4.3.8 (NTLMv2) would be refused, and Windows clients older than Windows 11 could not connect at all ([SMB security settings](https://learn.microsoft.com/azure/storage/files/files-smb-protocol#smb-security-settings)).
 
@@ -420,7 +420,7 @@ Before creating a snapshot, upload a test file so you can verify the snapshot-re
 
 #### Option 1: Azure Portal (GUI)
 
-1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**) → `skycraft-config` → **Browse**
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**; expand the group if it is collapsed) → `skycraft-config` → **Browse**
 
 **Note**: **Browse** shows **Authentication method: Access key (Switch to Microsoft Entra user account)**. Leave the access key: browsing with your Microsoft Entra account needs a file data role that this lab does not grant.
 
@@ -494,8 +494,8 @@ Snapshots are read-only point-in-time copies. Create one before any config chang
 
 #### Option 1: Azure Portal (GUI)
 
-1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**) → `skycraft-config`
-2. Under **Operations**, select **Snapshots**
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**; expand the group if it is collapsed) → `skycraft-config`
+2. Under **Operations** (expand it if it is collapsed), select **Snapshots**
 3. Click **+ Add snapshot**
 4. Comment: `Pre-update backup`
 5. Click **OK**
@@ -536,11 +536,11 @@ Simulate a bad config push by modifying the test file, then restore the original
 
 #### Option 1: Azure Portal (GUI)
 
-1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**) → `skycraft-config` → **Browse** → `common` → select `config.txt`
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**; expand the group if it is collapsed) → `skycraft-config` → **Browse** → `common` → select `config.txt`
 2. Click **Download** to save the file locally
 3. Open the downloaded file in a text editor, change content to `server-name=BROKEN`, and save
 4. Back in the Portal, click **Upload** → select the modified `config.txt` → check **Overwrite if files already exist** → **Upload**
-5. Under **Operations**, select **Snapshots** → select `Pre-update backup` (the snapshot's Comment)
+5. Under **Operations** (expand it if it is collapsed), select **Snapshots** → select `Pre-update backup` (the snapshot's Comment)
 6. Browse to `common/config.txt` → **Restore** (selecting the file opens its File properties pane)
 7. **Overwrite original file** → **OK**
 8. Download `config.txt` again and verify the content is back to `server-name=skycraft-prod-01`
@@ -606,7 +606,7 @@ If `TcpTestSucceeded` is `False`, your network blocks SMB: skip to Step 4.3.8 an
 
 #### Option 1: Azure Portal (Generate Script)
 
-1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**) → `skycraft-config` → **Overview**
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**; expand the group if it is collapsed) → `skycraft-config` → **Overview**
 2. Click **Connect**
 3. Click the **Windows** tab
 4. Drive letter: **Z**
@@ -657,7 +657,7 @@ Mount the `skycraft-config` share on a Linux machine. This simulates how the Aut
 
 #### Option 1: Azure Portal (Generate Script)
 
-1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**) → `skycraft-config` → **Overview** → **Connect**
+1. Navigate to `prodskycraftswcsa` → **Classic file shares** (under **Data storage**; expand the group if it is collapsed) → `skycraft-config` → **Overview** → **Connect**
 2. Click the **Linux** tab
 3. Click **Show Script**
 4. Copy the generated script — it installs `cifs-utils`, stores the account key in a credentials file under `/etc/smbcredentials` and adds the mount to `/etc/fstab`
@@ -796,7 +796,7 @@ While Lab 1.3's delete lock (`lock-no-delete-prod`) is on `prod-skycraft-swc-rg`
 
 **Solution**:
 
-- Read the current key: in `prodskycraftswcsa`, under **Security + networking**, select **Access keys** (a key rotated in Lab 4.1, Step 4.1.13, has a new value)
+- Read the current key: in `prodskycraftswcsa`, under **Security + networking** (expand it if it is collapsed), select **Access keys** (a key rotated in Lab 4.1, Step 4.1.13, has a new value)
 - Update the stored credential: `cmdkey /delete:prodskycraftswcsa.file.core.windows.net`, then run the mount script again
 - Sync your system clock: `w32tm /resync` (Windows) or `sudo ntpdate pool.ntp.org` (Linux)
 
@@ -862,7 +862,7 @@ sudo mount -t cifs \
 
 - Increase the quota: on the share's page, click **Edit quota**, enter the new quota and click **OK** (in a pay-as-you-go account a larger quota costs nothing)
 - Clean up unused files or old directories
-- Check actual usage: **Classic file shares** (under **Data storage**) → select share → **Overview** → Used capacity
+- Check actual usage: **Classic file shares** (under **Data storage**; expand the group if it is collapsed) → select share → **Overview** → Used capacity
 
 ```powershell
 # Increase quota to 200 GiB
@@ -874,11 +874,11 @@ Update-AzRmStorageShare -ResourceGroupName "prod-skycraft-swc-rg" -StorageAccoun
 
 ### Issue 6: Azure Backup protects a share (Enable backup was left ticked)
 
-**Symptom**: `Test-Lab.ps1` reports `[FAIL] No Azure Backup protects a file share of the account`, the share's page lists a backup under **Operations** → **Backup**, or the cleanup fails on a lock it did not expect.
+**Symptom**: `Test-Lab.ps1` reports `[FAIL] No Azure Backup protects a file share of the account`, the share's page lists a backup under **Operations** (expand it if it is collapsed) → **Backup**, or the cleanup fails on a lock it did not expect.
 
 **Cause**: The **Backup** tab of the new share wizard was left at its default, **Enable backup** ticked (Steps 4.3.1 and 4.3.2). Azure Backup registered `prodskycraftswcsa` with a Recovery Services vault, protects the share with a daily policy and put a delete lock on the account.
 
-**Solution**: Stop the backup and delete its data, then unregister the account from the vault. In the Portal: open the vault → **Backup items** (under **Protected items**) → **Azure Storage (Azure Files)** → the share → **Stop backup** → **Delete Backup Data**; then the vault's **Backup Infrastructure** (under **Manage**) → **Storage Accounts** → `prodskycraftswcsa` → **Unregister**. With Az PowerShell:
+**Solution**: Stop the backup and delete its data, then unregister the account from the vault. In the Portal: open the vault → **Backup items** (under **Protected items**; expand the group if it is collapsed) → **Azure Storage (Azure Files)** → the share → **Stop backup** → **Delete Backup Data**; then the vault's **Backup Infrastructure** (under **Manage**; expand the group if it is collapsed) → **Storage Accounts** → `prodskycraftswcsa` → **Unregister**. With Az PowerShell:
 
 ```powershell
 foreach ($vault in Get-AzResource -ResourceType "Microsoft.RecoveryServices/vaults") {
@@ -894,7 +894,7 @@ foreach ($vault in Get-AzResource -ResourceType "Microsoft.RecoveryServices/vaul
 }
 ```
 
-Afterwards, check three things. Under **Settings**, **Locks** of `prodskycraftswcsa`: delete a lock that Azure Backup created if one is still there (not Lab 1.3's `lock-no-delete-prod`, which sits on the resource group). The soft delete of Step 4.3.3: when it unregisters an account whose share retention is exactly 14 days, Azure Backup turns share soft delete off ([Azure Backup soft delete for Azure Files](https://learn.microsoft.com/azure/backup/soft-delete-azure-file-share#frequently-asked-questions-azure-backup-soft-delete-for-azure-files)), so repeat Step 4.3.3 if it shows **Disabled**. And if the wizard created a new vault, delete it when it holds no backup item any more (it is not Lab 5.2's `platform-skycraft-swc-rsv`).
+Afterwards, check three things. Under **Settings** (expand it if it is collapsed), **Locks** of `prodskycraftswcsa`: delete a lock that Azure Backup created if one is still there (not Lab 1.3's `lock-no-delete-prod`, which sits on the resource group). The soft delete of Step 4.3.3: when it unregisters an account whose share retention is exactly 14 days, Azure Backup turns share soft delete off ([Azure Backup soft delete for Azure Files](https://learn.microsoft.com/azure/backup/soft-delete-azure-file-share#frequently-asked-questions-azure-backup-soft-delete-for-azure-files)), so repeat Step 4.3.3 if it shows **Disabled**. And if the wizard created a new vault, delete it when it holds no backup item any more (it is not Lab 5.2's `platform-skycraft-swc-rsv`).
 
 ---
 

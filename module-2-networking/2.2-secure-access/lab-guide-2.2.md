@@ -693,7 +693,7 @@ $vnet | Set-AzVirtualNetwork | Select-Object Name, ProvisioningState
 1. Navigate to any NSG (e.g., `prod-skycraft-swc-db-nsg`).
 2. Under **Settings** (expand it if it is collapsed), click **Inbound security rules**.
 3. Below your two custom rules, read the three default rules: `AllowVnetInBound` (priority 65000), `AllowAzureLoadBalancerInBound` (65001) and `DenyAllInBound` (65500).
-4. Under **Settings**, click **Outbound security rules** and read its three default rules: `AllowVnetOutBound` (65000), `AllowInternetOutBound` (65001) and `DenyAllOutBound` (65500).
+4. Under **Settings** (expand it if it is collapsed), click **Outbound security rules** and read its three default rules: `AllowVnetOutBound` (65000), `AllowInternetOutBound` (65001) and `DenyAllOutBound` (65500).
 5. Review rule evaluation order:
    - Custom rules (priority 100-4096)
    - Default allow rules (65000-65001)
@@ -1216,7 +1216,7 @@ In the Portal, delete in this order:
 - Check rule priority (lower number = higher priority)
 - Verify source/destination IP ranges don't have typos
 - Remember rules are stateful (return traffic automatically allowed)
-- Read the default rules under **Inbound security rules** and **Outbound security rules**; in Module 3, once a VM exists, use **Effective security rules** (under **Help**) to see the actual rule evaluation
+- Read the default rules under **Inbound security rules** and **Outbound security rules**; in Module 3, once a VM exists, use **Effective security rules** (under **Help**; expand the group if it is collapsed) to see the actual rule evaluation
 - Check both subnet NSG and NIC NSG (if VM has both)
 
 ### Issue 4: Service endpoint shows "Provisioning" for long time
