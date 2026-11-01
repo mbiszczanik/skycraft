@@ -34,12 +34,14 @@
          is Succeeded that is waited for, with progress lines, up to -NewWorkspaceWaitMinutes;
          a table that never appears fails and names the cause; an agent that is not Succeeded
          is not waited for; a BadRequest after the table existed is a failure.
-      8. The first row of a rebuilt VM arrives 27-30 minutes after the agent install, also where
-         the table already exists (#369): while the agent is Succeeded the wait is keyed to the
+      8. The first row arrives up to about 40 minutes after the agent install, also where the
+         table already exists (#369): while the agent is Succeeded the wait is keyed to the
          install time in the activity log, up to -AgentInstallWaitMinutes after it, with progress
          lines; an agent installed longer ago than that fails at once and the message names the
          cause; an unreadable or missing install time falls back to -HeartbeatWaitMinutes and
-         says so; an agent that is not Succeeded is not waited for.
+         says so; an agent that is not Succeeded is not waited for. The install time is read
+         again every 5 minutes, so a reinstall during the wait restarts the count, and a read
+         that fails later keeps the time already known.
       9. A rule built by the data collection rules wizard passes the stream checks (#355): one
          flow per data source to an 'la-<n>' destination, an outputStream, a lower-case
          workspace id. Perf and Syslog sent to another workspace do not count.
@@ -391,21 +393,28 @@ function Invoke-AzOperationalInsightsQuery {
 
 # The activity log of the agent extension, as plain Get-AzActivityLog output (strings), as
 # SKYCRAFT_STUB_INSTALL says: the last successful install was 'recent' (5 minutes ago), 'mid'
-# (30 minutes ago) or 'old' (3 hours ago); 'none' has no event (the log is empty), 'throws' fails.
+# (30 minutes ago) or 'old' (3 hours ago); 'none' has no event (the log is empty), 'throws' fails;
+# 'reinstall' installed 40 minutes ago and again 2 minutes into the wait (the stubbed clock);
+# 'reinstallthenfails' is that, then the log cannot be read from the 10th minute of the wait.
 # Every case also carries the install's Accepted and Started events, an older install and an
 # older successful delete, none of which is the install time.
 function Get-AzActivityLog {
     [CmdletBinding()]
     param([string]$ResourceId, [datetime]$StartTime, [Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($env:SKYCRAFT_STUB_ACTLOG) { Add-Content -LiteralPath $env:SKYCRAFT_STUB_ACTLOG -Value 'read' }
     if ($ResourceId -notmatch '/virtualMachines/[^/]+/extensions/AzureMonitorLinuxAgent$') { throw "stub: unexpected activity log resource $ResourceId" }
+    if ($env:SKYCRAFT_STUB_INSTALL -eq 'reinstallthenfails' -and $script:ClockSkew -ge 600) { throw 'stub lookup failure: activity log' }
     $minutes = switch ($env:SKYCRAFT_STUB_INSTALL) {
         'throws' { throw 'stub lookup failure: activity log' }
         'recent' { 5 }
         'mid'    { 30 }
         'old'    { 180 }
+        { $_ -in 'reinstall', 'reinstallthenfails' } { 40 }
         default  { return @() }
     }
     $at = [datetime]::UtcNow.AddMinutes(-$minutes)
+    # The reinstall happens 120 seconds into the wait on the stubbed clock (Start-Sleep moves it).
+    if ($env:SKYCRAFT_STUB_INSTALL -in 'reinstall', 'reinstallthenfails' -and $script:ClockSkew -ge 120) { $at = [datetime]::UtcNow.AddSeconds(120) }
     $mk = { param($op, $status, $time) [pscustomobject]@{ EventTimestamp = $time; OperationName = $op; Status = $status; ResourceId = $ResourceId } }
     @(
         (& $mk 'Create or Update Virtual Machine Extension' 'Started' $at.AddSeconds(-4))
@@ -485,14 +494,17 @@ function Get-AzDiagnosticSetting {
             # 0 by default: a run that waited would spin on the real clock with the stubbed sleep.
             [int]$WaitMinutes = 0,
             [int]$TableWaitMinutes = 0,
-            [ValidateSet('none', 'recent', 'mid', 'old', 'throws')]
+            [ValidateSet('none', 'recent', 'mid', 'old', 'throws', 'reinstall', 'reinstallthenfails')]
             [string]$Install = 'none',
             [int]$InstallWaitMinutes = 45,
             [ValidateSet('ok', 'rulefailed')]
             [string]$State = 'ok'
         )
         $arguments = @("-HeartbeatWaitMinutes $WaitMinutes", "-NewWorkspaceWaitMinutes $TableWaitMinutes", "-AgentInstallWaitMinutes $InstallWaitMinutes")
+        # One line per activity log read, so a test can count them without touching the script's output.
+        $readLog = Join-Path $Stub.Directory "activity-log-reads-$([guid]::NewGuid().ToString('N')).txt"
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList $arguments -Environment @{
+            SKYCRAFT_STUB_ACTLOG    = $readLog
             SKYCRAFT_STUB_INSTALL   = $Install
             SKYCRAFT_STUB_DCR       = $Dcr
             SKYCRAFT_STUB_ALERT     = $Alert
@@ -505,6 +517,7 @@ function Get-AzDiagnosticSetting {
             ExitCode = $run.ExitCode
             Refused  = $run.Refused
             Output   = $run.Output
+            ActivityLogReads = if (Test-Path -LiteralPath $readLog) { @(Get-Content -LiteralPath $readLog).Count } else { 0 }
         }
     }
 
@@ -548,6 +561,9 @@ function Get-AzDiagnosticSetting {
     $script:InstallLogEmpty  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 2 -Install 'none'
     $script:InstallZeroWait  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 10 -Install 'recent' -InstallWaitMinutes 0
     $script:AgentFailedRecent = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Agent 'failed' -Heartbeat 'none' -WaitMinutes 10 -Install 'recent'
+    # 'slow' answers on the 21st query (20 minutes in); the agent first installed 40 minutes before the start.
+    $script:Reinstalled      = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'slow' -WaitMinutes 10 -Install 'reinstall'
+    $script:ReinstalledThenLogFails = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'slow' -WaitMinutes 10 -Install 'reinstallthenfails'
     $script:RuleFailed  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -State 'rulefailed'
     $script:WizardMade       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'wizard'
     $script:StreamsElsewhere = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'elsewhere'
@@ -567,7 +583,7 @@ function Get-AzDiagnosticSetting {
         $script:NoTableAgentFail, $script:TableLate, $script:TableErrorLate, $script:TableGone,
         $script:SlowAfterInstall, $script:SlowFlatOnly, $script:BoundReached, $script:OldNoRow,
         $script:OldWithRow, $script:InstallLogFails, $script:InstallLogEmpty, $script:InstallZeroWait,
-        $script:AgentFailedRecent, $script:CriteriaDenied,
+        $script:AgentFailedRecent, $script:Reinstalled, $script:ReinstalledThenLogFails, $script:CriteriaDenied,
         $script:WizardMade, $script:StreamsElsewhere,
         $script:LogAlertWorkspace, $script:LogAlertNone, $script:LogAlertDisabled, $script:LogAlertWrongOp,
         $script:LogAlertNoAction, $script:LogAlertListFails
@@ -935,6 +951,32 @@ Describe 'Lab 5.1 Test-Lab.ps1 - waits for the first Heartbeat row up to a bound
         $run.Output | Should -Not -Match 'stub-sleep'
         $run.Output | Should -Not -Match 'agent installed'
         $run.Output | Should -Match 'Failed: 2\b'
+    }
+
+    It 'picks up a reinstall during the wait, instead of stopping at the bound of the first install' {
+        $run = $script:Reinstalled
+        # Keyed to the first install (40 minutes before the start) the wait would end after about 5 minutes.
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        ([regex]::Matches($run.Output, 'stub-sleep 60')).Count | Should -Be 20
+        $run.Output | Should -Match '\[stub-query 21\] PASS'
+        $run.Output | Should -Match 'agent installed 4[0-5] of 45 minutes ago'
+        $run.Output | Should -Match 'agent installed [0-9] of 45 minutes ago'
+        $run.Output | Should -Match 'Failed: 0\b'
+    }
+
+    It 'reads the install time again every 5 minutes, not on every poll' {
+        # Reads at 0, 5, 10 and 15 minutes of a 20-minute wait.
+        $reads = $script:Reinstalled.ActivityLogReads
+        $reads | Should -BeGreaterOrEqual 3
+        $reads | Should -BeLessOrEqual 5
+    }
+
+    It 'keeps the install time already known when a later read fails' {
+        $run = $script:ReinstalledThenLogFails
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[stub-query 21\] PASS'
+        $run.Output | Should -Not -Match 'install time unknown'
+        $run.Output | Should -Match 'Failed: 0\b'
     }
 }
 

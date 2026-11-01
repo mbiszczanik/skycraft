@@ -41,10 +41,12 @@
     the wait for its first row is keyed to when that VM's agent extension was installed: the time
     of its last successful 'Create or Update Virtual Machine Extension' event in the activity log
     (the extension's own instance view carries no time), and the query is repeated once a minute,
-    with a progress line, until -AgentInstallWaitMinutes after that time. The first row has
-    reached the workspace 27-39 minutes after the install, also on a recovered workspace whose
-    table already exists. An agent installed longer ago than that with still no row fails at
-    once, naming the cause: the agent is installed but not sending. Without a readable install
+    with a progress line, until -AgentInstallWaitMinutes after that time. The first row takes up
+    to about 40 minutes after the install, often much sooner on a workspace that already has a
+    Heartbeat table (3 to 13 minutes were seen on a recovered one). The install time is read
+    again every 5 minutes, so a reinstall during the wait restarts the count. An agent installed
+    longer ago than the bound with still no row fails at once, naming the cause: the agent is
+    installed but not sending. Without a readable install
     time (no event, or the log cannot be read) the short -HeartbeatWaitMinutes applies, and the
     message says the time was unknown.
     A new workspace has no Heartbeat table until the first row arrives, up to about 40 minutes
@@ -64,8 +66,8 @@
 
 .PARAMETER AgentInstallWaitMinutes
     How long after an agent extension was installed to keep waiting for the first Heartbeat row
-    of its VM; a rebuilt VM sends it 27-39 minutes after the install. Counted from the install
-    time in the activity log, so a run started late waits only for the rest, and an agent older
+    of its VM; the row takes up to about 40 minutes after the install, often much sooner.
+    Counted from the install time in the activity log, so a run started late waits only for the rest, and an agent older
     than this fails at once when its VM has no row. The wait applies only while every agent is
     Succeeded. 0 queries once. Default: 45
 
@@ -467,7 +469,7 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
     $started       = Get-Date
     $tableDeadline = $started.AddMinutes($tableWait)
     $rowDeadline   = $null   # set when the table first exists; bounds the wait where no install time is known
-    $installs      = @{}     # VM name -> install time or why there is none, read once a VM lacks a row
+    $installs      = @{}     # VM name -> install time or why there is none, and when it was read
     while ($true) {
         $tableError = $null
         $result     = $null
@@ -503,14 +505,18 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
         $missing = @(for ($i = 0; $i -lt $dcrVmIds.Count; $i++) { if ($dcrVmIds[$i].ToLowerInvariant() -notin $seen) { $dcrVmNames[$i] } })
         # A Failed or missing agent explains the gap; there is nothing to wait for.
         if ($missing.Count -eq 0 -or -not $agentsReady) { break }
-        # The first row follows the install by 27-39 minutes: wait to a bound after the install
-        # time, or only -HeartbeatWaitMinutes where it is not known.
+        # The first row follows the install by up to about 40 minutes: wait to a bound after the
+        # install time, or only -HeartbeatWaitMinutes where it is not known.
         $now = (Get-Date).ToUniversalTime()
         $stillWaiting = @()
         foreach ($name in $missing) {
-            if (-not $installs.ContainsKey($name)) {
-                $installs[$name] = if ($agentExtIds[$name]) { Get-AgentInstallTime -ExtensionId $agentExtIds[$name] }
-                                   else { [pscustomobject]@{ Time = $null; Reason = 'the extension id is not known' } }
+            # Read again every 5 minutes: a reinstall during the wait moves the install time.
+            if (-not $installs.ContainsKey($name) -or ((Get-Date) - $installs[$name].ReadAt).TotalMinutes -ge 5) {
+                $read = if ($agentExtIds[$name]) { Get-AgentInstallTime -ExtensionId $agentExtIds[$name] }
+                        else { [pscustomobject]@{ Time = $null; Reason = 'the extension id is not known' } }
+                # A read that fails later keeps the time already known.
+                if (-not $read.Time -and $installs.ContainsKey($name) -and $installs[$name].Time) { $read = $installs[$name] }
+                $installs[$name] = [pscustomobject]@{ Time = $read.Time; Reason = $read.Reason; ReadAt = (Get-Date) }
             }
             $install = $installs[$name]
             if ($install.Time) {
