@@ -35,6 +35,10 @@
          the script with the parser and running them on one error per shape.
       8. The alert processing rule of Step 5.2.9 (issue #366) is deleted, and a failed lookup or
          delete of it is counted.
+      9. The shared access signature (SAS) on the disk restore points of a restore point collection
+         is ended before the snapshot group or an orphaned collection is deleted, a delete that
+         still reports one is retried, and a delete that never succeeds says so instead of naming
+         a lock (issue #366).
 
     No Azure connection is needed, and none is used. The script runs through
     tests/Support/LabScriptStub.psm1 (issue #112), which imports the real Az modules first, the
@@ -336,6 +340,8 @@ function Remove-AzResource {
         Invoke-StubGate -Name 'Remove-AzResource:apr'
         return
     }
+    # SKYCRAFT_STUB_SAS 'outstanding' refuses the delete until the disk restore points' SAS is ended.
+    if ($env:SKYCRAFT_STUB_SAS -eq 'outstanding' -and -not (Test-StubCalled -Name 'DiskRestorePoint:endGetAccess')) { throw (Get-StubSasMessage) }
     Invoke-StubGate -Name 'Remove-AzResource'
 }
 
@@ -345,7 +351,73 @@ function Remove-AzResourceGroup {
     [CmdletBinding()]
     param($Name, [switch]$Force)
     Write-StubCall -Name 'Remove-AzResourceGroup'
+    # SKYCRAFT_STUB_SAS models the outstanding SAS on the disk restore points of the snapshot group:
+    # 'outstanding' refuses the delete until endGetAccess has run, 'slow' also refuses the first
+    # attempt after it (the revoke is asynchronous), 'stuck' always refuses.
+    if ($Name -like 'platform-skycraft-swc-rpc*') {
+        $attempts = if ($script:LogPath -and (Test-Path -LiteralPath $script:LogPath)) { @(Get-Content -LiteralPath $script:LogPath | Where-Object { $_ -eq "Remove-AzResourceGroup:attempt:$Name" }).Count } else { 0 }
+        Write-StubCall -Name "Remove-AzResourceGroup:attempt:$Name"
+        $revoked = Test-StubCalled -Name 'DiskRestorePoint:endGetAccess'
+        $refuse = switch ($env:SKYCRAFT_STUB_SAS) {
+            'outstanding' { -not $revoked }
+            'slow'        { (-not $revoked) -or $attempts -eq 0 }
+            'stuck'       { $true }
+            default       { $false }
+        }
+        if ($refuse) { throw (Get-StubSasMessage) }
+    }
     Invoke-StubGate -Name "Remove-AzResourceGroup:$Name"
+}
+
+function Get-StubSasMessage {
+    'ResourceGroupDeletionBlocked: The resource group cannot be deleted. Call EndGetAccess before deleting the VM restore point: there is an active shared access signature outstanding for disk restore point.'
+}
+'@
+
+    # The disk restore point calls (#366), answered through the ARM fake's route hook: the restore
+    # point collection list and Get at 2024-07-01, the disk restore points list and endGetAccess at
+    # 2025-01-02. Only the snapshot group lists a collection; every collection holds two restore
+    # points of two disks. 'DiskRestorePoint:list' in SKYCRAFT_STUB_FAIL refuses the collection
+    # list, 'DiskRestorePoint:endGetAccess' refuses each revoke.
+    $script:DiskRestorePointStub = @'
+
+$script:StubArmRoutes += 'DiskRestorePoint'
+
+function Invoke-StubArmDiskRestorePointRoute {
+    param([string]$Method, [string]$Path, [string]$Resource, [string]$Query, [string]$Payload)
+
+    $pattern = '^/subscriptions/[^/]+/resourceGroups/(?<group>[^/]+)/providers/Microsoft\.Compute/restorePointCollections(/(?<collection>[^/]+)(/restorePoints/(?<rp>[^/]+)/diskRestorePoints(/(?<disk>[^/]+)/endGetAccess)?)?)?$'
+    if ($Resource -notmatch $pattern) { return }
+    $m = $Matches
+    $failing = @($env:SKYCRAFT_STUB_FAIL -split ',')
+    $expected = if ($m['rp']) { '2025-01-02' } else { '2024-07-01' }
+    if ($Query -notmatch "(^|&)api-version=$expected(&|`$)") { throw "stub: unexpected api-version in $Method $Path" }
+
+    if (-not $m['collection']) {
+        if ($Method -ne 'GET') { throw "stub: unexpected ARM request $Method $Path" }
+        if ($failing -contains 'DiskRestorePoint:list') {
+            return ConvertTo-StubArmError -Code 'AuthorizationFailed' -Message 'stub: listing the restore point collections refused'
+        }
+        $names = if ($m['group'] -like 'platform-skycraft-swc-rpc*') { @(@{ name = 'AzureBackup_dev-skycraft-swc-auth-vm_1' }) } else { @() }
+        return ConvertTo-StubArmReply -StatusCode 200 -Body @{ value = $names }
+    }
+    if (-not $m['rp']) {
+        if ($Method -ne 'GET' -or $Query -notmatch 'expand=restorePoints') { throw "stub: unexpected ARM request $Method $Path" }
+        return ConvertTo-StubArmReply -StatusCode 200 -Body @{ name = $m['collection']; properties = @{ restorePoints = @(@{ name = 'rp-1' }, @{ name = 'rp-2' }) } }
+    }
+    if (-not $m['disk']) {
+        if ($Method -ne 'GET') { throw "stub: unexpected ARM request $Method $Path" }
+        return ConvertTo-StubArmReply -StatusCode 200 -Body @{ value = @(@{ name = 'osdisk' }, @{ name = 'datadisk0' }) }
+    }
+    if ($Method -ne 'POST') { throw "stub: unexpected ARM request $Method $Path" }
+    if ($failing -contains 'DiskRestorePoint:endGetAccess') {
+        return ConvertTo-StubArmError -Code 'InternalServerError' -Message 'stub: endGetAccess refused'
+    }
+    if ($env:SKYCRAFT_STUB_LOG) {
+        Add-Content -LiteralPath $env:SKYCRAFT_STUB_LOG -Value 'DiskRestorePoint:endGetAccess'
+        Add-Content -LiteralPath $env:SKYCRAFT_STUB_LOG -Value "DiskRestorePoint:endGetAccess:$($m['group'])/$($m['collection'])/$($m['rp'])/$($m['disk'])"
+    }
+    ConvertTo-StubArmReply -StatusCode 202
 }
 '@
 
@@ -364,7 +436,9 @@ function Remove-AzResourceGroup {
             [switch]$NoFriendlyName,
             [switch]$AlertRule,
             [switch]$AlertRuleLocked,
-            [string]$KeyVaultName
+            [string]$KeyVaultName,
+            [ValidateSet('', 'outstanding', 'slow', 'stuck')]
+            [string]$Sas = ''
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
@@ -381,6 +455,7 @@ function Remove-AzResourceGroup {
             SKYCRAFT_STUB_NOFRIENDLY = if ($NoFriendlyName) { '1' } else { '0' }
             SKYCRAFT_STUB_APR        = if ($AlertRule) { '1' } else { '0' }
             SKYCRAFT_STUB_APRLOCK    = if ($AlertRuleLocked) { '1' } else { '0' }
+            SKYCRAFT_STUB_SAS        = $Sas
         }
 
         $calls = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { @() }
@@ -393,7 +468,7 @@ function Remove-AzResourceGroup {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body ($script:StubBody + (Get-LabArmStub -Api RoleAssignment, Lock)) -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmStub -Api RoleAssignment, Lock) + $script:DiskRestorePointStub) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs
@@ -446,6 +521,13 @@ function Remove-AzResourceGroup {
     $script:AprLocked = Invoke-CleanupScript -Stub $script:Stub -AlertRule -Locks 'platform-skycraft-swc-rg'
     $script:AprStillLocked = Invoke-CleanupScript -Stub $script:Stub -AlertRule -AlertRuleLocked -Locks 'platform-skycraft-swc-rg'
 
+    # Issue #366: an outstanding SAS on the disk restore points blocks the group and collection deletes.
+    $script:SasRevoked      = Invoke-CleanupScript -Stub $script:Stub -Sas outstanding
+    $script:SasSlow         = Invoke-CleanupScript -Stub $script:Stub -Sas slow
+    $script:SasStuck        = Invoke-CleanupScript -Stub $script:Stub -Sas stuck
+    $script:SasRevokeFails  = Invoke-CleanupScript -Stub $script:Stub -Sas outstanding -Fail 'DiskRestorePoint:endGetAccess'
+    $script:SasListDenied   = Invoke-CleanupScript -Stub $script:Stub -Fail 'DiskRestorePoint:list'
+
     # The Key Vault Administrator role stays on Lab 3.2's key vault, whatever its name.
     $script:VaultNamed = Invoke-CleanupScript -Stub $script:Stub -KeyVaultName 'dev-skycraft-swc-kv-ab'
 
@@ -477,7 +559,8 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - test harness' {
                 $script:DependantsNotFound, $script:RoleNotFound, $script:VaultDenied, $script:RecheckDenied,
                 $script:StorageDenied, $script:RoleStuck, $script:RsvDiagDenied, $script:BvDiagDenied,
                 $script:RsvDiagStuck, $script:BvDiagStuck, $script:DiagNotFound, $script:AprClean, $script:AprStuck,
-                $script:AprDenied, $script:AprGone, $script:AprLocked, $script:AprStillLocked)) {
+                $script:AprDenied, $script:AprGone, $script:AprLocked, $script:AprStillLocked,
+                $script:SasRevoked, $script:SasSlow, $script:SasStuck, $script:SasRevokeFails, $script:SasListDenied)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az cmdlets (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -1094,5 +1177,62 @@ Describe 'Lab 5.2 Remove-LabResource.ps1 - under Lab 1.3''s delete lock (#372)' 
         $run.Output | Should -Match "\[ERROR\] Could not read Lab 1\.3's lock 'lock-no-delete-[a-z]+' on 'platform-skycraft-swc-rg'"
         $run.Calls | Should -Not -Contain 'Remove-AzRecoveryServicesVault'
         $run.Calls | Should -Not -Contain 'Lock:DELETE:platform-skycraft-swc-rg'
+    }
+}
+
+
+Describe 'Lab 5.2 Remove-LabResource.ps1 - outstanding SAS on the disk restore points (#366)' {
+
+    It 'ends the SAS on every disk restore point of the snapshot group before deleting the group' {
+        $revokes = @($script:SasRevoked.Calls | Where-Object { $_ -like 'DiskRestorePoint:endGetAccess:platform-skycraft-swc-rpc1-rg/*' })
+        $revokes.Count | Should -Be 4 -Because 'two restore points of two disks each'
+        $revokes | Should -Contain 'DiskRestorePoint:endGetAccess:platform-skycraft-swc-rpc1-rg/AzureBackup_dev-skycraft-swc-auth-vm_1/rp-2/datadisk0'
+        $firstRevoke = [array]::IndexOf($script:SasRevoked.Calls, $revokes[0])
+        $delete      = [array]::IndexOf($script:SasRevoked.Calls, 'Remove-AzResourceGroup:platform-skycraft-swc-rpc1-rg')
+        $delete | Should -BeGreaterThan $firstRevoke -Because 'the delete must come after the revoke'
+        $script:SasRevoked.ExitCode | Should -Be 0 -Because "output was:`n$($script:SasRevoked.Output)"
+        $script:SasRevoked.Output   | Should -Match 'Ended the shared access on 4 disk restore point'
+    }
+
+    It 'ends the SAS under an orphaned restore point collection before deleting it' {
+        $script:SasRevoked.Calls | Should -Contain 'DiskRestorePoint:endGetAccess:AzureBackupRG_swedencentral_1/AzureBackup_dev-skycraft-swc-auth-vm_7702140526018345310/rp-1/osdisk'
+        $script:SasRevoked.Calls | Should -Contain 'Remove-AzResource'
+        $script:SasRevoked.Calls | Should -Contain 'Remove-AzResourceGroup:AzureBackupRG_swedencentral_1'
+    }
+
+    It 'retries a delete that still reports an outstanding SAS after the revoke, then succeeds' {
+        $script:SasSlow.ExitCode | Should -Be 0 -Because "output was:`n$($script:SasSlow.Output)"
+        @($script:SasSlow.Calls | Where-Object { $_ -eq 'Remove-AzResourceGroup:attempt:platform-skycraft-swc-rpc1-rg' }).Count | Should -Be 2
+        $script:SasSlow.Calls  | Should -Contain 'Start-Sleep:30'
+        $script:SasSlow.Output | Should -Match 'trying again in 30 seconds'
+    }
+
+    It 'gives up after four attempts, exits 1 and names the SAS, not a lock' {
+        $script:SasStuck.ExitCode | Should -Be 1 -Because "output was:`n$($script:SasStuck.Output)"
+        @($script:SasStuck.Calls | Where-Object { $_ -eq 'Remove-AzResourceGroup:attempt:platform-skycraft-swc-rpc1-rg' }).Count | Should -Be 4
+        $script:SasStuck.Calls  | Should -Not -Contain 'Remove-AzResourceGroup:platform-skycraft-swc-rpc1-rg'
+        $script:SasStuck.Output | Should -Match "\[ERROR\] Could not delete snapshot resource group 'platform-skycraft-swc-rpc1-rg'.*EndGetAccess"
+        $script:SasStuck.Output | Should -Match 'still holds a shared access signature'
+        $script:SasStuck.Output | Should -Not -Match 'lock on the group'
+    }
+
+    It 'notes a revoke that failed, still tries the delete, and counts the delete when it fails too' {
+        $script:SasRevokeFails.Output   | Should -Match '\[INFO\] Could not end the shared access'
+        $script:SasRevokeFails.Calls    | Should -Not -Contain 'Remove-AzResourceGroup:platform-skycraft-swc-rpc1-rg'
+        $script:SasRevokeFails.ExitCode | Should -Be 1
+    }
+
+    It 'does not count a failed listing when the delete then succeeds' {
+        $script:SasListDenied.Output   | Should -Match '\[INFO\] Could not end the shared access'
+        $script:SasListDenied.Calls    | Should -Contain 'Remove-AzResourceGroup:platform-skycraft-swc-rpc1-rg'
+        $script:SasListDenied.ExitCode | Should -Be 0 -Because "output was:`n$($script:SasListDenied.Output)"
+    }
+
+    It 'does not call the disk restore point API when no snapshot group or collection exists' {
+        @($script:Nothing.Calls | Where-Object { $_ -like 'DiskRestorePoint:*' }).Count | Should -Be 0
+    }
+
+    It 'does not blame a lock for a failure that has no lock in it' {
+        $script:SnapshotRgStuck.Output | Should -Not -Match 'lock on the group'
     }
 }
