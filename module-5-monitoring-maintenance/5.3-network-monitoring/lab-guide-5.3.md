@@ -58,7 +58,7 @@ Before starting this lab:
 
 These are the same checks `scripts/Deploy-Bicep.ps1` performs before it deploys anything - the cheapest chain that satisfies them is 1.2 → 2.1 → 2.3 → 3.2 (dev) → 4.1 `-All` → 5.1 → 5.2 → 5.3. If Lab 4.1 had to use another name than `platformskycraftswcsa` (storage account names are unique across Azure), pass it to `Deploy-Bicep.ps1` as `-PlatformSaName`.
 
-**If you did Lab 1.3**, its policies are still in force. `Enforce-Project-Tag` refuses every resource without `Project` = `SkyCraft`, and this lab makes Azure create resources you cannot tag yourself: on the Portal path the Network Watcher agent (the wizard installs it on an endpoint VM that has none of the monitoring agents yet) and the connection monitor (the wizard has no tags field for either), and on every path the `NWTA-*` data collection endpoint and rule that Azure's documentation says Traffic Analytics creates and manages (none was there 20 minutes after the flow log was created in a lab whose production VNet had no VM traffic). Each one passes only because `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8) copies `Project` from its resource group. Before you start, check that **Policy** → under **Authoring** (expand it if it is collapsed), **Assignments** lists `Inherit-Project-Tag`, and that `dev-skycraft-swc-rg`, `NetworkWatcherRG` and `platform-skycraft-swc-rg` (and `prod-skycraft-swc-rg` if you use the prod VM) carry `Project` = `SkyCraft` on their **Tags** page. See Troubleshooting, Issue 5 if a create is refused.
+**If you did Lab 1.3**, its policies are still in force. `Enforce-Project-Tag` refuses every resource without `Project` = `SkyCraft`, and this lab makes Azure create resources you cannot tag yourself: on the Portal path the Network Watcher agent (the wizard installs it on the endpoint VMs) and the connection monitor (the wizard has no tags field for either), and on every path the `NWTA-*` data collection endpoint and rule that Azure's documentation says Traffic Analytics creates and manages (none was there 20 minutes after the flow log was created in a lab whose production VNet had no VM traffic). Each one passes only because `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8) copies `Project` from its resource group. Before you start, check that **Policy** → under **Authoring** (expand it if it is collapsed), **Assignments** lists `Inherit-Project-Tag`, and that `dev-skycraft-swc-rg`, `NetworkWatcherRG` and `platform-skycraft-swc-rg` (and `prod-skycraft-swc-rg` if you use the prod VM) carry `Project` = `SkyCraft` on their **Tags** page. See Troubleshooting, Issue 5 if a create is refused.
 
 ---
 
@@ -228,7 +228,7 @@ The endpoint VMs need the Network Watcher agent, a VM extension that no earlier 
 
 | Path | Agent extension | How it gets `Project` = `SkyCraft` |
 | ---- | --------------- | ---------------------------------- |
-| Azure Portal | `AzureNetworkWatcherExtension`, installed by the wizard on an endpoint VM that has none of the monitoring agents yet (with Lab 5.1's Azure Monitor Agent already on `dev-skycraft-swc-auth-vm`, it installed the agent on the source VM only) | `Inherit-Project-Tag` copies it from the VM's resource group (the wizard has no tags field for it) |
+| Azure Portal | `AzureNetworkWatcherExtension`, installed by the wizard on the endpoint VMs (in the pass, with Lab 5.1's Azure Monitor Agent already on `dev-skycraft-swc-auth-vm`, it installed the agent on the source VM only and the pass did not establish why; if an endpoint VM shows no agent after the wizard, install it as Issue 3 describes) | `Inherit-Project-Tag` copies it from the VM's resource group (the wizard has no tags field for it) |
 | Azure CLI, Azure PowerShell, `Deploy-Bicep.ps1` | `NetworkWatcherAgentLinux`, installed before the monitor | Set in the install request |
 
 A VM takes one Network Watcher agent, so the CLI and PowerShell blocks skip a VM that already has one, whatever its name.
@@ -264,7 +264,7 @@ The monitor itself lives in `NetworkWatcherRG`. The Portal wizard has no Tags ta
    - **Workspace**: `platform-skycraft-swc-law`
 5. **Create alert**:
    - **Create alert**: leave unchecked
-6. Click **Review + create** → **Create**. When you add the VM endpoints, the wizard enables the Network Watcher agent on an endpoint VM that has none of the monitoring agents yet, so the deployment can take a few minutes. If it fails, read the reason under the notification bell (the page itself shows none) and see Troubleshooting, Issue 5. Do not use **Redeploy** on the failed monitor.
+6. Click **Review + create** → **Create**. When you add the VM endpoints, the wizard enables the Network Watcher agent on the endpoint VMs, so the deployment can take a few minutes (in the pass it installed the agent on the source VM only; see the table above). If it fails, read the reason under the notification bell (the page itself shows none) and see Troubleshooting, Issue 5. Do not use **Redeploy** on the failed monitor.
 7. Add the other three tags, which `Test-Lab.ps1` checks (`CostCenter`) and the cost reports use. In the search box at the top, type **Resource groups**, open `NetworkWatcherRG`, click **Manage view** → **Show hidden types** (a menu item, not a check box), then click `skycraft-hub-spoke-cm`. The monitor's page has no Tags menu item: click the edit link next to Tags in **Essentials**. `Project` = `SkyCraft` is already there. In the Edit tags pane add `Environment` = `Production`, `CostCenter` = `MSDN` and `Owner` = `<your name>`, then click **Save**.
 
    If the monitor is not listed there, set the same tags from Cloud Shell (PowerShell):
@@ -400,7 +400,7 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 
 **Symptom**: The test group stays **Indeterminate** and the endpoint carries a warning.
 
-**Root Cause**: Connection Monitor probes from the Network Watcher agent VM extension, and no earlier lab installs it - Lab 3.2's VMs come without it. The Portal wizard installs it on an endpoint VM that has none of the monitoring agents yet, but that install fails when the VM is deallocated or the policy refuses it (Issue 5).
+**Root Cause**: Connection Monitor probes from the Network Watcher agent VM extension, and no earlier lab installs it - Lab 3.2's VMs come without it. The Portal wizard installs it on the endpoint VMs, but that install fails when the VM is deallocated or the policy refuses it (Issue 5).
 
 **Solution**:
 
