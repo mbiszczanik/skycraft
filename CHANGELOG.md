@@ -451,7 +451,7 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 
 ### Changed
 
-- `.gitignore` now excludes the private, un-checked-in `CLAUDE.local.md` assistant instructions file so it is no longer listed as untracked.
+- `.gitignore` now excludes a private, un-checked-in local instructions file so it is no longer listed as untracked.
 
 ## [0.7.0] - 2026-07-10
 
