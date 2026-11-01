@@ -141,6 +141,12 @@ function Get-MgUser {
     [CmdletBinding()]
     param([string]$Filter, [string]$UserId, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name "Get-MgUser|$Filter"
+    if ($Filter -match "^UserPrincipalName eq '([^']+)'$") {
+        $upn = $Matches[1]
+        if ($env:SKYCRAFT_STUB_EXISTING_USERS -eq 'all' -or $upn -in ($env:SKYCRAFT_STUB_EXISTING_USERS -split ',')) {
+            [pscustomobject]@{ Id = 'existing'; UserPrincipalName = $upn }
+        }
+    }
 }
 
 function New-MgUser {
@@ -150,6 +156,9 @@ function New-MgUser {
         [string]$MailNickname, [string]$UsageLocation, [string]$Department, [string]$JobTitle
     )
     Write-StubCall -Name "New-MgUser|$UserPrincipalName"
+    if ($env:SKYCRAFT_STUB_CREATE_FAIL -eq 'all' -or $UserPrincipalName -in ($env:SKYCRAFT_STUB_CREATE_FAIL -split ',')) {
+        throw 'stub failure: New-MgUser'
+    }
     [pscustomobject]@{ Id = 'member'; DisplayName = $DisplayName }
 }
 
@@ -201,7 +210,9 @@ function New-MgGroupMember {
         param(
             [string]$ScriptPath,
             [string[]]$ArgumentList = @(),
-            [string]$Domain = 'custom'
+            [string]$Domain = 'custom',
+            [string]$ExistingUsers = '',
+            [string]$FailCreate = ''
         )
 
         $logPath = Join-Path $script:Stub.Directory 'calls.log'
@@ -210,6 +221,8 @@ function New-MgGroupMember {
         $run = Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $ScriptPath -ArgumentList $ArgumentList -Environment @{
             SKYCRAFT_STUB_DOMAIN           = $Domain
             SKYCRAFT_STUB_LOG              = $logPath
+            SKYCRAFT_STUB_EXISTING_USERS   = $ExistingUsers
+            SKYCRAFT_STUB_CREATE_FAIL      = $FailCreate
             SKYCRAFT_GRAPH_TENANT_ID       = ''
             SKYCRAFT_GRAPH_CLIENT_ID       = ''
             SKYCRAFT_GRAPH_CLIENT_SECRET   = ''
@@ -255,6 +268,11 @@ function New-MgGroupMember {
         $script:Failed["New-LabUser.ps1/$domainCase"]        = Invoke-AddressScript -ScriptPath $script:NewUserPath -Domain $domainCase
         $script:Failed["Test-Lab.ps1/$domainCase"]           = Invoke-AddressScript -ScriptPath $script:TestLabPath -Domain $domainCase
         $script:Failed["Remove-LabResource.ps1/$domainCase"] = Invoke-AddressScript -ScriptPath $script:RemovePath -ArgumentList '-Force' -Domain $domainCase
+    }
+    $script:PasswordRuns = @{
+        Existing = Invoke-AddressScript -ScriptPath $script:NewUserPath -ExistingUsers 'all'
+        Failed = Invoke-AddressScript -ScriptPath $script:NewUserPath -FailCreate 'all'
+        Partial = Invoke-AddressScript -ScriptPath $script:NewUserPath -ExistingUsers $script:GuideUpns[0] -FailCreate $script:GuideUpns[2]
     }
 }
 
@@ -339,5 +357,37 @@ Describe 'Lab 1.1 addresses - no guessed domain (#193)' {
         $run.Calls | Should -Contain 'Get-MgDomain'
         @($run.Calls | Where-Object { $_ -match '^(Get|New|Remove)-MgUser\||^New-MgInvitation\|' }) |
             Should -BeNullOrEmpty -Because 'nothing may be looked up, created or deleted on a guessed domain'
+    }
+}
+
+Describe 'Generated password output follows successful user creation (#413)' {
+    It 'prints no password when every user already exists and says passwords stay unchanged' {
+        $run = $script:PasswordRuns.Existing
+        $run.Refused | Should -BeFalse
+        $run.Output | Should -Not -Match 'Auto-Generated Initial Password'
+        @($run.Calls | Where-Object { $_ -like 'New-MgUser|*' }).Count | Should -Be 0
+        $run.Output | Should -Match 'existing password is unchanged'
+    }
+
+    It 'prints no password when every user creation fails' {
+        $run = $script:PasswordRuns.Failed
+        $run.Refused | Should -BeFalse
+        @($run.Calls | Where-Object { $_ -like 'New-MgUser|*' }).Count | Should -Be 3
+        $run.Output | Should -Not -Match 'Auto-Generated Initial Password'
+    }
+
+    It 'names only successful creations in the password block after partial success' {
+        $run = $script:PasswordRuns.Partial
+        $run.Refused | Should -BeFalse
+        $block = [regex]::Match($run.Output, '(?s)=== Auto-Generated Initial Password ===.*').Value
+        $block | Should -Not -BeNullOrEmpty
+        $block | Should -Match ([regex]::Escape($script:GuideUpns[1]))
+        $block | Should -Not -Match ([regex]::Escape($script:GuideUpns[0]))
+        $block | Should -Not -Match ([regex]::Escape($script:GuideUpns[2]))
+    }
+
+    It 'names all successfully created users when it prints their password' {
+        $block = [regex]::Match($script:Runs['New-LabUser.ps1'].Output, '(?s)=== Auto-Generated Initial Password ===.*').Value
+        foreach ($upn in $script:GuideUpns) { $block | Should -Match ([regex]::Escape($upn)) }
     }
 }
