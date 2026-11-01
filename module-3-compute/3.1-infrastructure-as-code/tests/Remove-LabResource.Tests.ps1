@@ -47,11 +47,14 @@ BeforeAll {
     $script:ScriptPath     = (Resolve-Path (Join-Path $PSScriptRoot '..' 'scripts' 'Remove-LabResource.ps1')).Path
     $script:StubModuleName = 'SkyCraftLab31CleanupStub'
     # Exactly the script's '#Requires -Modules' line: these are imported for real before the stub.
-    $script:RequiredModules = @('Az.Accounts', 'Az.Resources')
+    $script:RequiredModules = @('Az.Accounts', 'Az.Resources', 'Az.Monitor')
 
     $script:StubCommands = @(
         'Get-AzResourceGroup'
         'Remove-AzResourceGroup'
+        'Get-AzResource'
+        'Get-AzDiagnosticSetting'
+        'Remove-AzDiagnosticSetting'
     )
 
     # Every command the script calls, recording its own invocation. By default the subscription
@@ -119,6 +122,27 @@ function Remove-AzResourceGroup {
     Invoke-StubRemoval -Command 'Remove-AzResourceGroup' -Name $Name
     $true
 }
+function Get-AzResource {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName)
+    if (Invoke-StubLookup -Name "Get-AzResource:$ResourceGroupName") { return }
+    $root = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/$ResourceGroupName/providers"
+    foreach ($type in 'Microsoft.Storage/storageAccounts', 'Microsoft.KeyVault/vaults', 'Microsoft.RecoveryServices/vaults', 'Microsoft.DataProtection/backupVaults', 'Microsoft.Compute/virtualMachines') {
+        [pscustomobject]@{ ResourceId = "$root/$type/stub"; ResourceType = $type }
+    }
+}
+function Get-AzDiagnosticSetting {
+    [CmdletBinding()]
+    param([string]$ResourceId)
+    if (Invoke-StubLookup -Name "Get-AzDiagnosticSetting:$ResourceId") { return }
+    [pscustomobject]@{ Name = 'stub-diag' }
+}
+function Remove-AzDiagnosticSetting {
+    [CmdletBinding()]
+    param([string]$ResourceId, [string]$Name)
+    Invoke-StubRemoval -Command 'Remove-AzDiagnosticSetting' -Name "$ResourceId/$Name"
+}
+
 '@
 
     # Runs the real script in a child process with the stubs shadowing the Az commands, and
@@ -261,5 +285,41 @@ Describe 'Lab 3.1 Remove-LabResource.ps1 - -WhatIf' {
         @($run.Calls | Where-Object { $_ -match '^Remove-' }) | Should -BeNullOrEmpty
         $run.Calls  | Should -Contain 'Get-AzResourceGroup'
         $run.Output | Should -Match 'What if: .*prod-skycraft-swc-rg'
+    }
+}
+
+Describe 'Group cleanup diagnostics (#454)' {
+    It 'removes every supported resource diagnostic setting before its group' {
+        $root = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/dev-skycraft-swc-rg/providers'
+        $targets = @('Microsoft.KeyVault/vaults/stub', 'Microsoft.RecoveryServices/vaults/stub', 'Microsoft.DataProtection/backupVaults/stub', 'Microsoft.Storage/storageAccounts/stub', 'Microsoft.Storage/storageAccounts/stub/blobServices/default', 'Microsoft.Storage/storageAccounts/stub/fileServices/default', 'Microsoft.Storage/storageAccounts/stub/queueServices/default', 'Microsoft.Storage/storageAccounts/stub/tableServices/default')
+        foreach ($target in $targets) {
+            $call = "Remove-AzDiagnosticSetting:$root/$target/stub-diag"
+            $script:Clean.Calls | Should -Contain $call
+            [array]::IndexOf($script:Clean.Calls, $call) | Should -BeLessThan ([array]::IndexOf($script:Clean.Calls, 'Remove-AzResourceGroup:dev-skycraft-swc-rg'))
+        }
+        $script:Clean.Calls | Should -Not -Contain "Get-AzDiagnosticSetting:$root/Microsoft.Compute/virtualMachines/stub"
+    }
+    It 'preserves the affected group when resource discovery fails and continues other groups' {
+        $run = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzResource:dev-skycraft-swc-rg=denied'
+        $run.Refused | Should -BeFalse
+        $run.ExitCode | Should -Be 1
+        $run.Calls | Should -Not -Contain 'Remove-AzResourceGroup:dev-skycraft-swc-rg'
+        $run.Calls | Should -Contain 'Remove-AzResourceGroup:prod-skycraft-swc-rg'
+    }
+    It 'preserves the affected group when a diagnostic lookup fails' {
+        $id = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/stub/blobServices/default'
+        $run = Invoke-CleanupScript -Stub $script:Stub -Lookup "Get-AzDiagnosticSetting:${id}=denied"
+        $run.Refused | Should -BeFalse
+        $run.ExitCode | Should -Be 1
+        $run.Calls | Should -Not -Contain 'Remove-AzResourceGroup:dev-skycraft-swc-rg'
+        $run.Calls | Should -Contain 'Remove-AzResourceGroup:prod-skycraft-swc-rg'
+    }
+    It 'preserves the affected group when diagnostic deletion fails' {
+        $id = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/dev-skycraft-swc-rg/providers/Microsoft.KeyVault/vaults/stub'
+        $run = Invoke-CleanupScript -Stub $script:Stub -Fail "Remove-AzDiagnosticSetting:$id/stub-diag"
+        $run.Refused | Should -BeFalse
+        $run.ExitCode | Should -Be 1
+        $run.Calls | Should -Not -Contain 'Remove-AzResourceGroup:dev-skycraft-swc-rg'
+        $run.Calls | Should -Contain 'Remove-AzResourceGroup:prod-skycraft-swc-rg'
     }
 }
