@@ -53,12 +53,12 @@ Before starting this lab:
 - [ ] Completed **Lab 2.2: Secure Access** (NSGs must exist for IP Flow Verify to have rules to report)
 - [ ] Completed **Lab 3.2: Virtual Machines** (`dev-skycraft-swc-auth-vm` and `dev-skycraft-swc-world-vm` must be running - the Connection Monitor needs two distinct VMs; `prod-skycraft-swc-auth-vm` is used as the source when it exists, and `dev-skycraft-swc-world-vm` in a dev-only environment, the default of Lab 3.2)
 - [ ] Completed **Lab 4.1: Storage Accounts** (`platformskycraftswcsa` must exist for flow log storage)
-- [ ] Completed **Lab 5.1: Azure Monitor** (`platform-skycraft-swc-law` Log Analytics Workspace must exist for Traffic Analytics and Connection Monitor output)
+- [ ] Completed **Lab 5.1: Azure Monitor**, deployed before this lab (the `platform-skycraft-swc-law` Log Analytics Workspace must exist for Traffic Analytics and Connection Monitor output; this lab does not create it, and `Deploy-Bicep.ps1` stops without it). See Troubleshooting, Issue 6, if Lab 5.1's deployment fails on a new workspace
 - [ ] Network Watcher `NetworkWatcher_swedencentral` in `NetworkWatcherRG`, and `NetworkWatcherRG` carries the four SkyCraft tags (Lab 2.1, Step 2.1.14; `Deploy-Bicep.ps1` enables the watcher if missing)
 
 These are the same checks `scripts/Deploy-Bicep.ps1` performs before it deploys anything - the cheapest chain that satisfies them is 1.2 → 2.1 → 2.3 → 3.2 (dev) → 4.1 `-All` → 5.1 → 5.2 → 5.3. If Lab 4.1 had to use another name than `platformskycraftswcsa` (storage account names are unique across Azure), pass it to `Deploy-Bicep.ps1` as `-PlatformSaName`.
 
-**If you did Lab 1.3**, its policies are still in force. `Enforce-Project-Tag` refuses every resource without `Project` = `SkyCraft`, and this lab makes Azure create resources you cannot tag yourself: the `NWTA-*` data collection endpoint and rule that Traffic Analytics adds (every path), and on the Portal path the Network Watcher agent on each endpoint VM and the connection monitor (the wizard has no tags field for either). Each one passes only because `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8) copies `Project` from its resource group. Before you start, check that **Policy** → under **Authoring** (expand it if it is collapsed), **Assignments** lists `Inherit-Project-Tag`, and that `dev-skycraft-swc-rg`, `NetworkWatcherRG` and `platform-skycraft-swc-rg` (and `prod-skycraft-swc-rg` if you use the prod VM) carry `Project` = `SkyCraft` on their **Tags** page. See Troubleshooting, Issue 5 if a create is refused.
+**If you did Lab 1.3**, its policies are still in force. `Enforce-Project-Tag` refuses every resource without `Project` = `SkyCraft`, and this lab makes Azure create resources you cannot tag yourself: on the Portal path the Network Watcher agent (the wizard installs it on an endpoint VM that has none of the monitoring agents yet) and the connection monitor (the wizard has no tags field for either), and on every path the `NWTA-*` data collection endpoint and rule that Azure's documentation says Traffic Analytics creates and manages (none was there 20 minutes after the flow log was created in a lab whose production VNet had no VM traffic). Each one passes only because `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8) copies `Project` from its resource group. Before you start, check that **Policy** → under **Authoring** (expand it if it is collapsed), **Assignments** lists `Inherit-Project-Tag`, and that `dev-skycraft-swc-rg`, `NetworkWatcherRG` and `platform-skycraft-swc-rg` (and `prod-skycraft-swc-rg` if you use the prod VM) carry `Project` = `SkyCraft` on their **Tags** page. See Troubleshooting, Issue 5 if a create is refused.
 
 ---
 
@@ -71,7 +71,7 @@ These are the same checks `scripts/Deploy-Bicep.ps1` performs before it deploys 
 > [!NOTE]
 > Azure enables Network Watcher for a region when the first virtual network appears there, by creating `NetworkWatcher_<region>` in `NetworkWatcherRG`. Under Lab 1.3's policies that automatic create is refused, which is why Lab 2.1 (Step 2.1.14) has you create the tagged group and the watcher yourself.
 
-In the Azure Portal, search **Network Watcher** and open it: the page is titled **Networking monitoring & management | Network Watcher**. Its left menu folds the tools of this lab into collapsed groups: **Network diagnostics** (IP flow verify, Next hop, Connection troubleshoot), **Monitoring** (Topology, Connection monitor) and **Logs** (Flow logs). Expand a group if it is collapsed.
+In the Azure Portal, search **Network Watcher** and open it: the page is titled **Network Watcher**. Its left menu folds the tools of this lab into collapsed groups: **Network diagnostic tools** (IP flow verify, Next hop, Connection troubleshoot), **Monitoring** (Topology, Connection monitor) and **Logs** (Flow logs). Expand a group if it is collapsed.
 
 ---
 
@@ -79,12 +79,12 @@ In the Azure Portal, search **Network Watcher** and open it: the page is titled 
 
 ### Step 5.3.1: Check for NSG Blocks
 
-1. In the search box at the top, type **Network Watcher** and open it (**Networking monitoring & management | Network Watcher**).
-2. In the left menu, under **Network diagnostics** (expand it if it is collapsed), click **IP flow verify**.
+1. In the search box at the top, type **Network Watcher** and open it.
+2. In the left menu, under **Network diagnostic tools** (expand it if it is collapsed), click **IP flow verify**.
 3. Select the VM and its network interface:
-   - **Select virtual machine**: `dev-skycraft-swc-auth-vm`
-   - The network interface field then shows the VM's only network interface.
-4. Configure the check: <!-- confirm in Portal pass: field labels Protocol, Direction, Local port, Remote IP address, Remote port -->
+   - **Select virtual machine** → `dev-skycraft-swc-auth-vm`
+   - Pick the VM's only network interface in the network interface field: the Portal does not fill it in. The read-only local IP address field then shows the interface's private IP.
+4. Configure the check:
    - **Protocol**: **TCP**
    - **Direction**: **Inbound**
    - **Local port**: `8080`
@@ -100,21 +100,21 @@ In the Azure Portal, search **Network Watcher** and open it: the page is titled 
 
 ### Step 5.3.2: Verify Routing
 
-1. In Network Watcher, in the left menu, under **Network diagnostics**, click **Next hop**. <!-- confirm in Portal pass: Next hop sits under Network diagnostics -->
+1. In Network Watcher, in the left menu, under **Network diagnostic tools**, click **Next hop**.
 2. **Virtual machine**: `prod-skycraft-swc-auth-vm`.
    - **Fallback** - if only the dev environment exists (the default of Lab 3.2): pick `dev-skycraft-swc-world-vm` instead.
 3. Leave the source IP address the Portal fills in (the VM's private IP).
 4. **Destination IP address**: `1.1.1.1` (a public DNS resolver).
 5. Click **Next hop**.
 
-**Expected Result**: The tool returns **Internet** as the next hop type, from either VM. Traffic to a private IP in the hub would return **VNetPeering**, and to a private IP in the same VNet **VirtualNetwork**.
+**Expected Result**: The tool returns **Internet** as the next hop type, from either VM. Traffic to a private IP in the hub returns **VirtualNetworkPeering**, and to a private IP in the same VNet **VirtualNetwork**.
 
 ### Step 5.3.3: Visualize Topology
 
 1. In Network Watcher, in the left menu, under **Monitoring** (expand it if it is collapsed), click **Topology**. The page opens on a world map; there is no resource group field and no View topology button.
-2. Click the **Scope** chip and open **Resource Groups** in the pane. If **Select All** is checked, clear it, then select only `dev-skycraft-swc-rg`. Close the list and click **Save**.
-3. The map can open scrolled to the Americas. Click **Zoom to Fit** on the map, then the expand button on the **Sweden Central** region card. <!-- confirm in Portal pass: the 2026-10-16 pass of this lab called the button Fit to screen, Lab 2.1's pass of 2026-10-26 Zoom to Fit -->
-4. Click **+** on `dev-skycraft-swc-vnet` to show its subnets, then **+** on `AuthSubnet` to show the VM in it.
+2. Click the **Scope** chip and open **Resource Groups** in the pane. If **Select All** is checked, clear it, then select only `dev-skycraft-swc-rg`. Click **Save** without closing the list first: closing it by clicking the pane title dropped the selection, and the chip text does not change.
+3. If the map is not showing Sweden Central, zoom and drag it (mouse wheel, or its plus and minus controls) until it is. Point at the **Sweden Central** region on the map and click **Expand** in its card.
+4. Click **+** on `dev-skycraft-swc-vnet` to show its subnets, then point at `AuthSubnet` and click **Expand** in its card to show the VM in it.
 
 **Expected Result**: The map shows `dev-skycraft-swc-vnet` with its subnets, the VMs inside them, and the peering to the hub VNet.
 
@@ -124,8 +124,8 @@ In the Azure Portal, search **Network Watcher** and open it: the page is titled 
 
 ### Step 5.3.4: End-to-End Check
 
-1. In Network Watcher, in the left menu, under **Network diagnostics**, click **Connection troubleshoot**. <!-- confirm in Portal pass: Connection troubleshoot sits under Network diagnostics -->
-2. **Source**: <!-- confirm in Portal pass: field labels Source type, Virtual machine, Destination type, Destination port -->
+1. In Network Watcher, in the left menu, under **Network diagnostic tools**, click **Connection troubleshoot**.
+2. **Source**:
    - **Source type**: **Virtual machine**
    - **Virtual machine**: `prod-skycraft-swc-auth-vm` *(if Lab 3.2 prod environment was deployed)*
    - **Fallback** - if only the dev environment exists: use `dev-skycraft-swc-world-vm` as source
@@ -154,24 +154,25 @@ The tools above answer a question you already have. A **flow log** records every
 
 The flow log is a child of the regional Network Watcher `NetworkWatcher_swedencentral` in `NetworkWatcherRG`, not of the VNet, which is why it lives in that resource group.
 
-Under Lab 1.3's policies, enabling Traffic Analytics makes Azure create a data collection endpoint and rule, `NWTA-<workspace-guid>...`, in the workspace's group `platform-skycraft-swc-rg`, without tags. They are accepted only because `Inherit-Project-Tag` copies `Project` = `SkyCraft` from that group (see Prerequisites). If the create fails with `TARequestDisallowedByPolicy`, see Troubleshooting, Issue 4.
+Azure's documentation says Traffic Analytics creates and manages a data collection endpoint and rule, `NWTA-<workspace-guid>...`, in the workspace's group `platform-skycraft-swc-rg`. Under Lab 1.3's policies they carry no tags of their own and are accepted only because `Inherit-Project-Tag` copies `Project` = `SkyCraft` from that group (see Prerequisites). They were not there 20 minutes after the flow log was created in a lab whose production VNet had no VM traffic, so do not wait for them. If the create fails with `TARequestDisallowedByPolicy`, see Troubleshooting, Issue 4.
 
 #### Azure Portal
 
-In the wizard, the VNet you add appears as a row of a table whose name cell you can edit; it is pre-filled with a name built from the VNet and its group. The retention days field appears only after you pick the storage account, empty and required.
+In the wizard, the VNet you add appears as a row of a table whose name cell you can edit; it is pre-filled with a name built from the VNet and its group. The retention days field appears only after you pick the storage account, prefilled with `0`: that keeps the logs forever and the storage bill grows without limit, so set it to `7`. Enable traffic analytics is unchecked by default. On the Tags tab each name and value is a combo box, and the suggestion list of the row above can swallow what you type in the next one: check every row before you continue.
 
 1. In **Network Watcher**, in the left menu, under **Logs** (expand it if it is collapsed), click **Flow logs** → **+ Create**.
 2. **Basics** (there is no flow log type to choose; the target decides it):
-   - **+ Add virtual networks** → `prod-skycraft-swc-vnet` (in Sweden Central) → confirm the selection. The flow log is created in the region of its target, Sweden Central. <!-- confirm in Portal pass: label of the picker's confirm button -->
+   - **+ Add virtual networks** → `prod-skycraft-swc-vnet` (in Sweden Central) → **Confirm selection**. The flow log is created in the region of its target, Sweden Central.
    - **Name**: `prod-skycraft-swc-vnet-flowlog`
    - **Storage account**: `platformskycraftswcsa`
    - **Retention days**: `7`
-3. **Analytics** (VNet flow logs are always format version 2; there is no version field):
+3. **Configure** (a further tab of the wizard that asks for a traffic capture mode: leave Capture all traffic, its default, and do not choose Custom traffic filters)
+4. **Analytics** (VNet flow logs are always format version 2; there is no version field):
    - **Enable traffic analytics**: checked
-   - **Traffic analytics processing interval**: **Every 10 mins** (the wizard defaults to **Every 1 hour**) <!-- confirm in Portal pass: label of the 10-minute option -->
    - **Log Analytics workspace**: `platform-skycraft-swc-law`
-4. **Tags**: `Project = SkyCraft`, `Environment = Production`, `CostCenter = MSDN`, `Owner = <your name>`.
-5. Click **Review + create** → **Create**.
+   - **Traffic analytics processing interval**: **Every 10 mins** (the wizard defaults to **Every 1 hour**)
+5. **Tags**: `Project = SkyCraft`, `Environment = Production`, `CostCenter = MSDN`, `Owner = <your name>`.
+6. Click **Review + create** → **Create resource**.
 
 #### Azure CLI
 
@@ -211,7 +212,7 @@ New-AzNetworkWatcherFlowLog -NetworkWatcher $nw -Name prod-skycraft-swc-vnet-flo
   -Tag @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN'; Owner = '<your name>' }
 ```
 
-**Expected Result**: The deployment ends **Succeeded**, and `prod-skycraft-swc-vnet-flowlog` shows **Enabled** under Flow logs with `prod-skycraft-swc-vnet` as its target. A deployment that ends *Conflict* leaves the flow log in the **Failed** state, recording nothing: see Troubleshooting, Issue 4. After 10-20 minutes, **Traffic Analytics** in Network Watcher shows the first flows between the hub and the spokes.
+**Expected Result**: The deployment ends **Succeeded**, and `prod-skycraft-swc-vnet-flowlog` shows **Enabled** under Flow logs with `prod-skycraft-swc-vnet` as its target. A deployment that ends *Conflict* leaves the flow log in the **Failed** state, recording nothing: see Troubleshooting, Issue 4. After 10-20 minutes, **Traffic Analytics** in Network Watcher shows the first flows between the hub and the spokes. Its FlowLog Type filter can start on NSG: switch it to VNet. Only traffic of VMs in `prod-skycraft-swc-vnet` is recorded, so with no VM there the page reports no data.
 
 ---
 
@@ -223,11 +224,11 @@ New-AzNetworkWatcherFlowLog -NetworkWatcher $nw -Name prod-skycraft-swc-vnet-flo
 
 ### Step 5.3.6: Create the Connection Monitor
 
-Both endpoint VMs need the Network Watcher agent, a VM extension, and no earlier lab installs it: creating a monitor with an agent-less VM endpoint fails with `NetworkWatcherVmExtensionNotInstalled`. Each path installs it differently. Under Lab 1.3's policies each ends with the agent tagged `Project` = `SkyCraft`, the tag `Remove-LabResource.ps1` selects on when it removes the agent again (without Lab 1.3, the Portal's agent stays untagged and the cleanup leaves it):
+The endpoint VMs need the Network Watcher agent, a VM extension that no earlier lab installs: creating a monitor with an agent-less VM endpoint fails with `NetworkWatcherVmExtensionNotInstalled`. Each path installs it differently. Under Lab 1.3's policies each ends with the agent tagged `Project` = `SkyCraft`, the tag `Remove-LabResource.ps1` selects on when it removes the agent again (without Lab 1.3, the Portal's agent stays untagged and the cleanup leaves it):
 
 | Path | Agent extension | How it gets `Project` = `SkyCraft` |
 | ---- | --------------- | ---------------------------------- |
-| Azure Portal | `AzureNetworkWatcherExtension`, installed by the wizard when you add a VM endpoint | `Inherit-Project-Tag` copies it from the VM's resource group (the wizard has no tags field for it) |
+| Azure Portal | `AzureNetworkWatcherExtension`, installed by the wizard on an endpoint VM that has none of the monitoring agents yet (with Lab 5.1's Azure Monitor Agent already on `dev-skycraft-swc-auth-vm`, it installed the agent on the source VM only) | `Inherit-Project-Tag` copies it from the VM's resource group (the wizard has no tags field for it) |
 | Azure CLI, Azure PowerShell, `Deploy-Bicep.ps1` | `NetworkWatcherAgentLinux`, installed before the monitor | Set in the install request |
 
 A VM takes one Network Watcher agent, so the CLI and PowerShell blocks skip a VM that already has one, whatever its name.
@@ -240,15 +241,15 @@ The monitor itself lives in `NetworkWatcherRG`. The Portal wizard has no Tags ta
 2. **Basics**:
    - **Connection Monitor Name**: `skycraft-hub-spoke-cm`
    - **Subscription**: yours
-   - **Region**: **Sweden Central** (the wizard defaults to East US; the region picks the Network Watcher, `Test-Lab.ps1` looks under `NetworkWatcher_swedencentral`, and Lab 1.3's `Restrict-Azure-Regions` refuses East US)
-3. **Test groups** → **+ Add test group**
+   - **Region**: **Sweden Central** (the wizard defaults to East US, and its list offers both Sweden Central and Sweden: pick Sweden Central; the region picks the Network Watcher, `Test-Lab.ps1` looks under `NetworkWatcher_swedencentral`, and Lab 1.3's `Restrict-Azure-Regions` refuses East US)
+3. **Test groups** → **+ Add test group** (the wizard can open the Add test group details form straight away: if it has, skip this click)
    - **Test group name**: `hub-spoke-ssh`
-   - **+ Add sources** → **Azure endpoints** → select `prod-skycraft-swc-auth-vm` → **Add endpoints** <!-- confirm in Portal pass: endpoint picker labels Azure endpoints and Add endpoints -->
+   - **+ Add sources** → **Azure endpoints** → select `prod-skycraft-swc-auth-vm` → **Add endpoints**. The picker lists virtual networks, then subnets, then VMs: filter it by the VM name.
      - **Fallback** - if only the dev environment exists: pick `dev-skycraft-swc-world-vm` instead (the deployment script makes the same substitution)
    - The source endpoint is named after its VM. Click the **Edit** link under it and rename it `prod-auth-source`.
    - **+ Add destinations** → **Azure endpoints** → select `dev-skycraft-swc-auth-vm` → **Add endpoints**
    - Click the **Edit** link under the destination endpoint and rename it `dev-auth-destination` (`Test-Lab.ps1` looks the destination up by this name).
-   - **Add Test configuration** → **New configuration**. A new configuration starts as HTTP, port 80, every 30 seconds; change it to: <!-- confirm in Portal pass: labels of the test configuration fields -->
+   - **Add Test configuration** → **New configuration**. A new configuration starts as HTTP, port 80, every 30 seconds; change it to:
      - **Test configuration name**: `tcp-22-every-5m`
      - **Protocol**: **TCP**
      - **Disable traceroute**: leave unchecked
@@ -259,12 +260,12 @@ The monitor itself lives in `NetworkWatcherRG`. The Portal wizard has no Tags ta
      - **Round trip time (ms)**: `100`
    - **Add Test configuration** → **Add Test Group**
 4. **Workspace**:
-   - Select **Custom Workspace** (not *Default (Recommended)*, which sends the results to a default workspace instead of the lab's). The workspace list can preselect another workspace, for example one an earlier lab left in `dev-skycraft-swc-rg`: change it. <!-- confirm in Portal pass: the radio's labels and the fields under Custom Workspace -->
+   - Select **Custom Workspace** (not *Default (Recommended)*, which sends the results to a default workspace instead of the lab's). The workspace list can preselect another workspace, for example one an earlier lab left in `dev-skycraft-swc-rg`: change it.
    - **Workspace**: `platform-skycraft-swc-law`
 5. **Create alert**:
-   - **Create alert**: leave unchecked <!-- confirm in Portal pass: the Create alert tab -->
-6. Click **Review + create** → **Create**. When you add the VM endpoints, the wizard enables the Network Watcher agent on any VM without one, so the deployment can take a few minutes. If it fails, read the reason under the notification bell (the page itself shows none) and see Troubleshooting, Issue 5. Do not use **Redeploy** on the failed monitor.
-7. Add the other three tags, which `Test-Lab.ps1` checks (`CostCenter`) and the cost reports use. In the search box at the top, type **Resource groups**, open `NetworkWatcherRG`, check **Show hidden types**, click `skycraft-hub-spoke-cm`, then **Tags**. `Project` = `SkyCraft` is already there. Add `Environment` = `Production`, `CostCenter` = `MSDN` and `Owner` = `<your name>`, then click **Apply**. <!-- confirm in Portal pass: the connection monitor is listed in NetworkWatcherRG and has a Tags page -->
+   - **Create alert**: leave unchecked
+6. Click **Review + create** → **Create**. When you add the VM endpoints, the wizard enables the Network Watcher agent on an endpoint VM that has none of the monitoring agents yet, so the deployment can take a few minutes. If it fails, read the reason under the notification bell (the page itself shows none) and see Troubleshooting, Issue 5. Do not use **Redeploy** on the failed monitor.
+7. Add the other three tags, which `Test-Lab.ps1` checks (`CostCenter`) and the cost reports use. In the search box at the top, type **Resource groups**, open `NetworkWatcherRG`, click **Manage view** → **Show hidden types** (a menu item, not a check box), then click `skycraft-hub-spoke-cm`. The monitor's page has no Tags menu item: click the edit link next to Tags in **Essentials**. `Project` = `SkyCraft` is already there. In the Edit tags pane add `Environment` = `Production`, `CostCenter` = `MSDN` and `Owner` = `<your name>`, then click **Save**.
 
    If the monitor is not listed there, set the same tags from Cloud Shell (PowerShell):
 
@@ -337,7 +338,7 @@ New-AzNetworkWatcherConnectionMonitor -NetworkWatcher $nw -Name skycraft-hub-spo
   -Tag @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN'; Owner = '<your name>' }
 ```
 
-**Expected Result**: `skycraft-hub-spoke-cm` appears under Connection monitor with monitoring status **Running** and carries the four tags, both endpoint VMs list a Network Watcher agent with `Project` = `SkyCraft` (on the Portal path only under Lab 1.3's policies), and `NWConnectionMonitorTestResult` in `platform-skycraft-swc-law` starts receiving rows within about 10 minutes. What `hub-spoke-ssh` reports depends on the source:
+**Expected Result**: `skycraft-hub-spoke-cm` appears under Connection monitor with a status (below) and carries the four tags (the page shows no monitoring status of its own; the list does), the source VM lists a Network Watcher agent with `Project` = `SkyCraft` (on the Portal path only under Lab 1.3's policies; the CLI, PowerShell and Bicep paths install it on the destination VM too, while after the wizard the destination VM may have none), and `NWConnectionMonitorTestResult` in `platform-skycraft-swc-law` starts receiving rows within about 10 minutes. What `hub-spoke-ssh` reports depends on the source:
 
 - **Dev fallback source** (`dev-skycraft-swc-world-vm`): **Pass** - source and destination share `dev-skycraft-swc-vnet`.
 - **Production source** (`prod-skycraft-swc-auth-vm`): **Fail**. The prod and dev spokes are each peered only to the hub, and VNet peering is not transitive, so traffic to the dev `AuthSubnet` (`10.1.1.0/24`) matches the system route `10.0.0.0/8 → None` and is dropped. Confirm it with **Next hop** (Step 5.3.2) from `prod-skycraft-swc-auth-vm` to the private IP of `dev-skycraft-swc-auth-vm`: this is the monitor doing its job, not a broken lab. Issue #178 tracks the route the lab should provide.
@@ -376,7 +377,7 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 
 ### Issue 1: No network watcher for Sweden Central
 
-**Symptom**: **Networking monitoring & management | Network Watcher** shows "No network watchers to display", or none in **Sweden Central**, and the tools of this lab offer no VM to select.
+**Symptom**: **Network Watcher** shows "No network watchers to display", or none in **Sweden Central**, and the tools of this lab offer no VM to select.
 
 **Root Cause**: Azure creates `NetworkWatcher_swedencentral` in `NetworkWatcherRG` on its own when the first VNet appears in the region, but Lab 1.3's `Require-Environment-Tag-RG` refuses the untagged group it would create.
 
@@ -399,7 +400,7 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 
 **Symptom**: The test group stays **Indeterminate** and the endpoint carries a warning.
 
-**Root Cause**: Connection Monitor probes from the Network Watcher agent VM extension, and no earlier lab installs it - Lab 3.2's VMs come without it. The Portal wizard installs it, but that install fails when the VM is deallocated or the policy refuses it (Issue 5).
+**Root Cause**: Connection Monitor probes from the Network Watcher agent VM extension, and no earlier lab installs it - Lab 3.2's VMs come without it. The Portal wizard installs it on an endpoint VM that has none of the monitoring agents yet, but that install fails when the VM is deallocated or the policy refuses it (Issue 5).
 
 **Solution**:
 
@@ -409,13 +410,13 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 
 **Symptom**: Creating the flow log (Step 5.3.5, any path) ends *Conflict* with *The enablement of Traffic Analytics is blocked due to the user's policy restrictions: "RequestDisallowedByPolicy ..." (Code: TARequestDisallowedByPolicy)*, and the flow log is left in the **Failed** state. The message names Lab 1.3's `Enforce-Project-Tag` assignment: its id ends in `policyAssignments/Enforce-Project-Tag` when Lab 1.3 was deployed with Bicep or its scripts, and in a generated id when the assignment was made in the Portal. The Activity Log of `platform-skycraft-swc-rg` shows the denied `dataCollectionEndpoints/write` for `NWTA-<workspace-guid>...`.
 
-**Root Cause**: When Traffic Analytics is enabled it creates its own data collection endpoint and rule, `NWTA-<workspace-guid>...`, in the workspace's resource group (`platform-skycraft-swc-rg`), without tags. `Enforce-Project-Tag` refuses them unless `Inherit-Project-Tag` has added `Project` from the group first. That fails when `Inherit-Project-Tag` is not assigned (Lab 1.3 done before it gained that assignment), was assigned only minutes ago, or `platform-skycraft-swc-rg` has no `Project` tag.
+**Root Cause**: Traffic Analytics creates and manages its own data collection endpoint and rule, `NWTA-<workspace-guid>...`, in the workspace's resource group (`platform-skycraft-swc-rg`), without tags; the refused write above is that create. `Enforce-Project-Tag` refuses them unless `Inherit-Project-Tag` has added `Project` from the group first. That fails when `Inherit-Project-Tag` is not assigned (Lab 1.3 done before it gained that assignment), was assigned only minutes ago, or `platform-skycraft-swc-rg` has no `Project` tag.
 
 **Solution**:
 
 - Check that **Policy** → under **Authoring** (expand it if it is collapsed), **Assignments** lists `Inherit-Project-Tag` with **Tag Name** `Project`. If it is missing, assign it as in Lab 1.3, Step 1.3.8, and wait about ten minutes. Do not delete `Enforce-Project-Tag`: Lab 1.3's `Test-Lab.ps1` checks it.
 - Check that `platform-skycraft-swc-rg` carries `Project` = `SkyCraft` on its **Tags** page.
-- Delete the Failed flow log (under **Logs**, **Flow logs**, select `prod-skycraft-swc-vnet-flowlog` → **Delete**) and create it again with Step 5.3.5. <!-- confirm in Portal pass: Delete on the Flow logs list -->
+- Delete the Failed flow log (under **Logs**, **Flow logs**, tick the box of `prod-skycraft-swc-vnet-flowlog` → **Delete**) and create it again with Step 5.3.5.
 
 ### Issue 5: Creating the Connection Monitor fails with no reason on the page
 
@@ -428,6 +429,16 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 - Check the tags of `NetworkWatcherRG` and of the VMs' groups, and the `Inherit-Project-Tag` assignment, as in the Prerequisites; Lab 1.3, Troubleshooting Issue 7 covers the same refusal for any resource.
 - Do not use **Redeploy**: delete the failed monitor if it is listed, then start again with **+ Create** → **Manual Create**.
 - Or install the agent first with the loop of the Step 5.3.6 PowerShell block, then run the wizard again.
+
+### Issue 6: Lab 5.1's deployment fails on a new workspace, so this lab has no workspace
+
+**Symptom**: This lab's `Deploy-Bicep.ps1` stops with `Log Analytics Workspace 'platform-skycraft-swc-law' not found`, and Lab 5.1's `Deploy-Bicep.ps1`, run just before, ended Failed with `InvalidOutputTable` on the data collection rule.
+
+**Root Cause**: Lab 5.1 creates the workspace and the rule in one deployment, and on a brand-new workspace the tables the rule writes to are not ready yet. The failure can happen once.
+
+**Solution**:
+
+- Wait a minute or two and run Lab 5.1's `Deploy-Bicep.ps1` again: the second run succeeded. Then run this lab's `Deploy-Bicep.ps1`, or continue with the Portal steps.
 
 ---
 
@@ -499,7 +510,7 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 | `NetworkWatcher_swedencentral`   | Network Watcher                   | `NetworkWatcherRG` | Azure-provisioned per region; re-declared with the SkyCraft tags          |
 | `prod-skycraft-swc-vnet-flowlog` | Flow log (VNet)                   | `NetworkWatcherRG` | Target `prod-skycraft-swc-vnet`, v2, 7-day retention, Traffic Analytics 10 min |
 | `skycraft-hub-spoke-cm`          | Connection Monitor                | `NetworkWatcherRG` | `hub-spoke-ssh` → `tcp-22-every-5m`, output to `platform-skycraft-swc-law` |
-| Network Watcher agent            | VM extension on both endpoint VMs | `dev-skycraft-swc-rg` / `prod-skycraft-swc-rg` | `AzureNetworkWatcherExtension` from the Portal wizard, or `NetworkWatcherAgentLinux` from the CLI, PowerShell and `Deploy-Bicep.ps1`; tagged `Project = SkyCraft`; removed by `Remove-LabResource.ps1`, except on a VM that is not running, where Azure refuses the change and the cleanup leaves it (harmless, deleted with the VM) |
+| Network Watcher agent            | VM extension on the endpoint VMs  | `dev-skycraft-swc-rg` / `prod-skycraft-swc-rg` | `AzureNetworkWatcherExtension` from the Portal wizard, or `NetworkWatcherAgentLinux` from the CLI, PowerShell and `Deploy-Bicep.ps1`; tagged `Project = SkyCraft`; removed by `Remove-LabResource.ps1`, except on a VM that is not running, where Azure refuses the change and the cleanup leaves it (harmless, deleted with the VM) |
 
 **Time Spent**: ~1.5 hours
 

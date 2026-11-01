@@ -896,9 +896,9 @@ Describe 'parse.py - labs 4.2, 4.3, 5.1, 5.2 and 5.3, pickers, worded resource s
     }
 
     It 'reads <count> chain(s) of step <id> as <labels>, resource names at <resources>, picking field "<field>"' -ForEach @(
-        # '**+ Add virtual networks** -> `prod-skycraft-swc-vnet` (in Sweden Central) -> confirm the selection.' (#367):
-        # the picker, then the VNet; the unworded confirm and the region in brackets are no labels.
-        @{ lab = '5.3'; id = '5.3.5'; count = 1; field = ''; labels = @('+ Add virtual networks', 'prod-skycraft-swc-vnet'); resources = @(1) }
+        # '**+ Add virtual networks** -> `prod-skycraft-swc-vnet` (in Sweden Central) -> **Confirm selection**.' (#367):
+        # the picker, the VNet, then the confirm button the Portal pass of 2026-11-01 read; the region in brackets is no label.
+        @{ lab = '5.3'; id = '5.3.5'; count = 1; field = ''; labels = @('+ Add virtual networks', 'prod-skycraft-swc-vnet', 'Confirm selection'); resources = @(1) }
         # 'Browse to `common/config.txt`': a path opens each segment; 4.3.8 opens its share from the account.
         @{ lab = '4.3'; id = '4.3.6'; count = 1; field = ''; labels = @('common', 'config.txt', 'Restore'); resources = @(0, 1) }
         @{ lab = '4.3'; id = '4.3.8'; count = 1; field = ''; labels = @('prodskycraftswcsa', 'Classic file shares', 'skycraft-config', 'Overview', 'Connect'); resources = @(0, 2) }
@@ -1475,8 +1475,6 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/checked=0,1,2,3'
             '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/unchecked=4'
             '5.2.8/Core Azure Backup Data | Addon Azure Backup Job Data | Addon Azure Backup Policy Data | Addon Azure Backup Protected Instance Data | Health/stateOnly=4'
-            # The connection monitor's tags (#367): NetworkWatcherRG lists it only with hidden types shown.
-            '5.3.6/Resource groups | Show hidden types | Tags | Apply/checked=1'
         )
         @(Get-StatedItem | Sort-Object) | Should -Be @($expected | Sort-Object)
     }
