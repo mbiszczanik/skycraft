@@ -487,7 +487,7 @@ Add-AzVirtualNetworkPeering -Name 'dev-to-hub' -VirtualNetwork $dev -RemoteVirtu
 
 ### Step 2.1.10: Peer Hub to Prod (Hub Side)
 
-1. Still in **platform-skycraft-swc-vnet**, under **Settings**, click **Peerings**.
+1. Still in **platform-skycraft-swc-vnet**, under **Settings** (expand it if it is collapsed), click **Peerings**.
 2. Click **+ Add**.
 
 Fill in the same four sections as in Step 2.1.9, with these values:
@@ -524,7 +524,7 @@ Add-AzVirtualNetworkPeering -Name 'prod-to-hub' -VirtualNetwork $prod -RemoteVir
 
 ### Step 2.1.11: Verify Peering Configuration
 
-1. Navigate to **platform-skycraft-swc-vnet**, then under **Settings** click **Peerings**. A new peering can be missing from the list until you click **Refresh**.
+1. Navigate to **platform-skycraft-swc-vnet**, then under **Settings** (expand it if it is collapsed), click **Peerings**. A new peering can be missing from the list until you click **Refresh**.
 2. Verify both peerings are listed (columns **Name**, **Peering sync status**, **Peering state**, **Remote virtual network name**, **Virtual network gateway**, **Cross-tenant**):
 
 | Peering Name | Peering sync status | Peering state | Remote virtual network name |
@@ -534,14 +534,14 @@ Add-AzVirtualNetworkPeering -Name 'prod-to-hub' -VirtualNetwork $prod -RemoteVir
 
 ![Hub to Dev Peering](./images/step-2.1.11.png)
 
-3. Navigate to **dev-skycraft-swc-vnet** → **Settings** → **Peerings**.
+3. Navigate to **dev-skycraft-swc-vnet** → **Settings** (expand it if it is collapsed) → **Peerings**.
 4. Verify peering exists:
 
 | Peering Name | Peering sync status | Peering state | Remote virtual network name |
 | ------------ | ------------------- | ------------- | --------------------------- |
 | dev-to-hub   | Fully Synchronized  | Connected     | platform-skycraft-swc-vnet  |
 
-5. Navigate to **prod-skycraft-swc-vnet** → **Settings** → **Peerings**.
+5. Navigate to **prod-skycraft-swc-vnet** → **Settings** (expand it if it is collapsed) → **Peerings**.
 6. Verify peering exists:
 
 | Peering Name | Peering sync status | Peering state | Remote virtual network name |
@@ -871,7 +871,7 @@ To remove what this lab created, run the lab's cleanup from the lab folder:
 ./scripts/Remove-LabResource.ps1
 ```
 
-It asks before each delete (`-WhatIf` lists them without deleting anything; `-Force` skips the questions). It removes the peerings first, then the links of Lab 2.3's private DNS zone to these VNets, then the three VNets, then the two public IPs. A link left behind no longer serves a VNet you create again under the same name, and Lab 2.3 cannot be deployed again until it is deleted. In the Portal, delete in the same order: the four peerings (**Settings** → **Peerings** on each VNet), the links (`skycraft.internal` → **Virtual Network Links**) if you did Lab 2.3, then the VNets (a VNet that still holds a network interface, a private endpoint or a gateway cannot be deleted: remove those first, the resources of later labs before those of earlier ones), then the public IPs (a public IP still used by a load balancer cannot be deleted: remove the load balancer of Lab 2.3 first). Delete `NetworkWatcherRG` yourself only after Lab 5.3, if you want it gone.
+It asks before each delete (`-WhatIf` lists them without deleting anything; `-Force` skips the questions). It removes the peerings first, then the links of Lab 2.3's private DNS zone to these VNets, then the three VNets, then the two public IPs. A link left behind no longer serves a VNet you create again under the same name, and Lab 2.3 cannot be deployed again until it is deleted. In the Portal, delete in the same order: the four peerings (**Settings** (expand it if it is collapsed) → **Peerings** on each VNet), the links (`skycraft.internal` → **Virtual Network Links**) if you did Lab 2.3, then the VNets (a VNet that still holds a network interface, a private endpoint or a gateway cannot be deleted: remove those first, the resources of later labs before those of earlier ones), then the public IPs (a public IP still used by a load balancer cannot be deleted: remove the load balancer of Lab 2.3 first). Delete `NetworkWatcherRG` yourself only after Lab 5.3, if you want it gone.
 
 ---
 

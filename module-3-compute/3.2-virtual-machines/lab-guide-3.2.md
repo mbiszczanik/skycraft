@@ -956,7 +956,7 @@ $vm.HardwareProfile.VmSize = 'Standard_B2s_v2'
 Update-AzVM -ResourceGroupName dev-skycraft-swc-rg -VM $vm
 ```
 
-In the Portal the same is **Availability + scale** → **Size** on the VM (Step 3.2.26).
+In the Portal the same is **Availability + scale** (expand it if it is collapsed) → **Size** on the VM (Step 3.2.26).
 
 **Expected Result**: `dev-skycraft-swc-auth-vm` running with `Standard_B2s_v2` (2 vCPUs, 8 GB RAM).
 
@@ -2003,7 +2003,7 @@ Pass `$publicKey` to `az vm create --ssh-key-values`, to `Add-AzVMSshPublicKey -
 
 **Cause**: The scale set is in `prod-skycraft-swc-rg`, as an earlier version of this guide said, and Lab 1.3's `CanNotDelete` lock protects that group.
 
-**Solution**: This guide creates the scale set in `dev-skycraft-swc-rg`, which has no lock. To delete one already in prod, remove the lock `lock-no-delete-prod` (**prod-skycraft-swc-rg** → **Settings** → **Locks**), delete the scale set, and create the lock again as Lab 1.3 describes; or run `scripts/Remove-LabResource.ps1 -Environment prod` with the lock removed.
+**Solution**: This guide creates the scale set in `dev-skycraft-swc-rg`, which has no lock. To delete one already in prod, remove the lock `lock-no-delete-prod` (**prod-skycraft-swc-rg** → **Settings** (expand it if it is collapsed) → **Locks**), delete the scale set, and create the lock again as Lab 1.3 describes; or run `scripts/Remove-LabResource.ps1 -Environment prod` with the lock removed.
 
 ---
 
