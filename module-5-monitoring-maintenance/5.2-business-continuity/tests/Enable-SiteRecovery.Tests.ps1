@@ -6,7 +6,7 @@
 .DESCRIPTION
     Issue #366 (decisions 2026-10-16/17): Site Recovery targets North Europe, with a pre-created
     tagged group used as both the VM group and the vault group; the initial replication takes
-    about 45 minutes; the failover VM size is the source size; a full test failover is cleaned up.
+    about 45 to 75 minutes; the failover VM size is the source size; a full test failover is cleaned up.
     These tests run the real Enable-SiteRecovery.ps1 in a child pwsh against a generated stub of
     the Az commands it calls (tests/Support/LabScriptStub.psm1, issue #112) and assert that:
 
@@ -477,11 +477,13 @@ Describe 'Lab 5.2 Enable-SiteRecovery.ps1 - replication into the tagged North Eu
     It 'goes on to the wait for Protected when the enable job ends PartiallySucceeded, and says so' {
         $script:PartialEnable.ExitCode | Should -Be 0 -Because $script:PartialEnable.Output
         $script:PartialEnable.Output | Should -Match '\[WARNING\] Enable replication of dev-skycraft-swc-world-vm finished PartiallySucceeded: stub failure'
+        $script:PartialEnable.Output | Should -Match 'The wait for Protected decides whether it worked'
         $script:PartialEnable.Output | Should -Match 'Protected, health Normal'
     }
 
     It 'exits 1, not 0, when the item is not Protected within the wait' {
         $script:StillReplicating.ExitCode | Should -Be 1
+        $script:StillReplicating.Output | Should -Match 'Waiting for Protected \(state: InitialReplicationInProgress, 0 min of 0\)'
         $script:StillReplicating.Output | Should -Match 'is not Protected after 0 minutes \(state: InitialReplicationInProgress\)'
     }
 

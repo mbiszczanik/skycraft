@@ -33,7 +33,7 @@
     - Azure Site Recovery target: the tagged North Europe group platform-skycraft-neu-asr-rg and
       its Recovery Services vault platform-skycraft-neu-asr-rsv. Replication of the world VM is
       started by Enable-SiteRecovery.ps1, which this script runs when the VM exists and waits
-      for Protected (about 45 minutes). -SkipSiteRecovery leaves it for later (issue #366).
+      for Protected (about 45 to 75 minutes). -SkipSiteRecovery leaves it for later (issue #366).
 
     The blob backup policy (SkyCraft-Blob-Policy) is created by New-LabBlobBackup.ps1, the
     script the guide has the learner run (issue #306).
