@@ -156,7 +156,7 @@ The wizard starts **Resource Group** on `dev-skycraft-swc-rg`, the group of the 
 3. **Resources** → **+ Add resources** → expand `dev-skycraft-swc-rg`, check `dev-skycraft-swc-auth-vm` (or `prod-skycraft-swc-auth-vm` if only the prod environment exists) → **Apply**.
 4. **Collect and deliver** → **Add new data source**:
    - Data source type: **Performance Counters**. The counters are a tree with no **Basic** option: tick **CPU**, **Memory**, **Disk** and **Network**
-   - **Next : Destination** → **+ Add destination**: Destination type **Log Analytics Workspaces** (it starts on **Azure Monitor Metrics**), account `platform-skycraft-swc-law` → **Save**
+   - **Next : Destination** → **+ Add destination**: Destination type **Log Analytics Workspaces** (it starts on **Azure Monitor Metrics**), account `platform-skycraft-swc-law` → **Apply** (the destination form's button; **Save** on the data source pane stays disabled until a destination is applied), then **Save**
 5. **Add new data source** again:
    - Data source type: **Linux Syslog**. Tick only the facilities you want and set a minimum log level for each: one or two facilities at **Warning** are enough for this lab
    - Destination: **Log Analytics Workspaces**, `platform-skycraft-swc-law` → **Save**
