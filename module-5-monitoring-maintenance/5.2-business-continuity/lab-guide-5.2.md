@@ -255,7 +255,7 @@ foreach ($vm in 'dev-skycraft-swc-auth-vm', 'dev-skycraft-swc-world-vm') {
 }
 ```
 
-`Deploy-Bicep.ps1` protects both VMs itself, starts a backup for each one that has no recovery point yet, and watches its **Take Snapshot** phase until it completes or fails (up to 20 minutes); a failure, or a phase it did not see finish, fails the run. `Test-Lab.ps1` fails if the latest backup job of either VM failed.
+`Deploy-Bicep.ps1` protects both VMs itself, waits for the vault to list each one as a backup item (up to 10 minutes, `-BackupItemWaitMinutes`), starts a backup for each one that has no recovery point yet, and watches its **Take Snapshot** phase until it completes or fails (up to 20 minutes); a VM that is never listed, a failure, or a phase it did not see finish fails the run. `Test-Lab.ps1` fails if the latest backup job of either VM failed.
 
 > [!TIP]
 > The first backup is an **Initial Replica** (full backup). Subsequent backups are **Incrementals** (only changed blocks), making them faster and cheaper.

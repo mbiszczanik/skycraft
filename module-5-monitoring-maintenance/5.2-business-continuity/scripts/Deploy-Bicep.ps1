@@ -26,7 +26,9 @@
       (each when present), plus an on-demand backup whenever a VM has no recovery point yet.
       The world VM is the unencrypted one Step 5.2.10 restores files from. The script watches the
       job's Take Snapshot phase until it completes or fails (up to 20 minutes) and counts a
-      failure, or a phase it did not see finish, as a deployment failure.
+      failure, or a phase it did not see finish, as a deployment failure. After enabling
+      protection it waits for the vault to list the VM as a backup item (-BackupItemWaitMinutes);
+      a VM that is never listed is a deployment failure, not a skipped backup.
 
     The blob backup policy (SkyCraft-Blob-Policy) is created by New-LabBlobBackup.ps1, the
     script the guide has the learner run (issue #306).
@@ -44,6 +46,14 @@
     Name of Lab 3.2's key vault in dev-skycraft-swc-rg, when it was created under another name
     (key vault names are globally unique). Pass the same name to Test-Lab.ps1 and
     Remove-LabResource.ps1. Default: dev-skycraft-swc-kv
+
+.PARAMETER BackupItemWaitMinutes
+    How long step 7 waits for the vault to list a VM as a backup item after protection was
+    enabled. The listing trailed Enable in one live run (2026-10-31). A VM still not listed
+    after this time fails the run. Default: 10
+
+.PARAMETER BackupItemPollSeconds
+    Seconds between two looks at the vault's backup items while step 7 waits. Default: 30
 
 .PARAMETER WhatIf
     Run deployment in what-if mode (dry run).
@@ -67,8 +77,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.3.0
-    Date: 2026-10-29
+    Version: 1.4.0
+    Date: 2026-11-01
 #>
 
 #Requires -Version 7.0
@@ -79,6 +89,14 @@ param(
     [Parameter()]
     [ValidateLength(3, 24)]
     [string]$KeyVaultName = 'dev-skycraft-swc-kv',
+
+    [Parameter()]
+    [ValidateRange(0, 120)]
+    [int]$BackupItemWaitMinutes = 10,
+
+    [Parameter()]
+    [ValidateRange(0, 600)]
+    [int]$BackupItemPollSeconds = 30,
 
     [Parameter()]
     [switch]$WhatIf,
@@ -110,6 +128,34 @@ $deploymentName = "lab52-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 # Counts lab resources that were meant to be created but were not. A step that only warns
 # and lets the script exit 0 lets an orchestrated cycle record a half-built lab as a success.
 $script:deployFailures = 0
+
+function Find-LabVmBackupItem {
+    param([string]$VaultId, [string]$VmName)
+    # FriendlyName comes back empty for some protected VMs (#105); the container name carries the VM
+    # name as its last ';'-separated segment. Collected, then indexed: Select-Object -First on a
+    # -ErrorAction SilentlyContinue pipeline can end the script silently (#366).
+    @(Get-AzRecoveryServicesBackupItem `
+        -VaultId $VaultId `
+        -BackupManagementType AzureVM `
+        -WorkloadType AzureVM `
+        -ErrorAction SilentlyContinue |
+        Where-Object { $_.FriendlyName -eq $VmName -or ($_.ContainerName -split ';')[-1] -eq $VmName })[0]
+}
+
+# The vault lists a VM some time after Enable returns; one early read missed it (2026-10-31).
+function Wait-LabVmBackupItem {
+    param([string]$VaultId, [string]$VmName, [int]$TimeoutMinutes, [int]$PollSeconds)
+    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    $poll = 0
+    while ($true) {
+        $poll++
+        $item = Find-LabVmBackupItem -VaultId $VaultId -VmName $VmName
+        if ($item) { return $item }
+        if ((Get-Date) -ge $deadline) { return $null }
+        Write-Host "  Poll ${poll}: $VmName is not listed as a backup item yet; looking again in $PollSeconds seconds (up to $TimeoutMinutes minutes)..." -ForegroundColor Gray
+        Start-Sleep -Seconds $PollSeconds
+    }
+}
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Lab 5.2 - BCDR Deployment" -ForegroundColor Cyan
@@ -424,17 +470,8 @@ if ($WhatIf) {
             $vm = $null
             $vmItem = $null
             $job = $null
-            $vmItems = Get-AzRecoveryServicesBackupItem `
-                -VaultId $vault.ID `
-                -BackupManagementType AzureVM `
-                -WorkloadType AzureVM `
-                -ErrorAction SilentlyContinue
-            # FriendlyName comes back empty for some protected VMs (#105), which made this check
-            # miss an already-protected VM and re-run Enable on every deployment. The container name
-            # carries the VM name as its last ';'-separated segment.
-            $vmItem = $vmItems | Where-Object {
-                $_.FriendlyName -eq $vmName -or ($_.ContainerName -split ';')[-1] -eq $vmName
-            }
+            # A missed match here re-ran Enable on every deployment (#105); see Find-LabVmBackupItem.
+            $vmItem = Find-LabVmBackupItem -VaultId $vault.ID -VmName $vmName
 
             if ($vmItem) {
                 Write-Host "  ✓ $vmName is already protected (policy: $($vmItem.ProtectionPolicyName))" -ForegroundColor Green
@@ -464,13 +501,17 @@ if ($WhatIf) {
                             throw "ConfigureBackup job failed: $reason (400198 UserErrorKeyVaultPermissionsNotConfigured: the Key Vault role is missing or not active yet)"
                         }
                         Write-Host "  ✓ VM backup protection enabled for $vmName" -ForegroundColor Green
-                        $vmItem = Get-AzRecoveryServicesBackupItem `
-                            -VaultId $vault.ID `
-                            -BackupManagementType AzureVM `
-                            -WorkloadType AzureVM `
-                            -ErrorAction SilentlyContinue | Where-Object {
-                                $_.FriendlyName -eq $vmName -or ($_.ContainerName -split ';')[-1] -eq $vmName
-                            }
+                        # Enable returns before the vault lists the item; skipping the backup here once ended in a
+                        # green run with no recovery point.
+                        Write-Host "  Waiting for the vault to list $vmName as a backup item (up to $BackupItemWaitMinutes minutes)..." -ForegroundColor Gray
+                        $vmItem = Wait-LabVmBackupItem -VaultId $vault.ID -VmName $vmName -TimeoutMinutes $BackupItemWaitMinutes -PollSeconds $BackupItemPollSeconds
+                        if ($vmItem) {
+                            Write-Host "  ✓ $vmName is listed as a backup item" -ForegroundColor Green
+                        } else {
+                            $script:deployFailures++
+                            Write-Host "  [ERROR] $vmName was not listed as a backup item within $BackupItemWaitMinutes minutes of enabling protection - no initial backup was triggered." -ForegroundColor Red
+                            Write-Host "    Re-run this script (-BackupItemWaitMinutes sets the wait), or use Backup now (Step 5.2.3)." -ForegroundColor Gray
+                        }
                     } catch {
                         $script:deployFailures++
                         Write-Host "  [ERROR] Could not enable VM backup for ${vmName}: $_" -ForegroundColor Red
@@ -563,10 +604,6 @@ if ($WhatIf) {
                     Write-Host "  [ERROR] Could not run the initial backup of ${vmName}: $_" -ForegroundColor Red
                     Write-Host "    Trigger it manually: vault -> Backup items -> Azure Virtual Machine -> Backup now (Step 5.2.3)" -ForegroundColor Gray
                 }
-            } elseif ($vm) {
-                # Protection was just enabled, but the vault does not list the item yet.
-                Write-Host "  [WARNING] $vmName is protected but not listed as a backup item yet - no initial backup was triggered." -ForegroundColor Yellow
-                Write-Host "    Re-run this script in a few minutes, or use Backup now (Step 5.2.3)." -ForegroundColor Gray
             }
         }
         $vmStepsDone = $true
