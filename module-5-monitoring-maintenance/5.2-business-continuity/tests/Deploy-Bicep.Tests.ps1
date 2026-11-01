@@ -275,9 +275,9 @@ function Start-Sleep { [CmdletBinding()] param([int]$Seconds) Write-StubCall "Sl
         $script:Stub = Initialize-LabScriptStub -Name 'SkyCraftLab52DeployStub' -Command $script:StubCommands `
             -Body $script:StubBody -RequiredModule $script:RequiredModules
 
-        $script:Listed      = Invoke-DeployScript -ListAfter 1 -ArgumentList '-Force', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
-        $script:ListedLate  = Invoke-DeployScript -ListAfter 3 -ArgumentList '-Force', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
-        $script:NeverListed = Invoke-DeployScript -ListAfter 999 -ArgumentList '-Force', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '0'
+        $script:Listed      = Invoke-DeployScript -ListAfter 1 -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
+        $script:ListedLate  = Invoke-DeployScript -ListAfter 3 -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
+        $script:NeverListed = Invoke-DeployScript -ListAfter 999 -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '0'
     }
 
     AfterAll {

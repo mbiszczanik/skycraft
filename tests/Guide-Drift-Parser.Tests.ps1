@@ -1456,6 +1456,8 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
             '4.4.2/Allow trusted Microsoft services to access this resource/stateOnly=0'
             '5.1.7/StorageRead | StorageWrite/checked=0,1'
             '5.1.7/Send to Log Analytics workspace/checked=0'
+            # Step 5.2.7 (#366): tick the box that deletes the test failover VM.
+            '5.2.7/Cleanup test failover | Testing is complete. Delete test failover virtual machine(s) | OK/checked=1'
             '5.2.8/Core Azure Backup Data/checked=0'
             '5.2.8/Addon Azure Backup Job Data/checked=0'
             '5.2.8/Addon Azure Backup Policy Data/checked=0'

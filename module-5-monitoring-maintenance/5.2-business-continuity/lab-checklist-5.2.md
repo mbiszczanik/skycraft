@@ -97,15 +97,20 @@
 
 ### Replication Status
 
-- [ ] VM `dev-skycraft-swc-auth-vm` replication status: **Protected**
-- [ ] Target region: **Norway East**
-- [ ] Cache storage account created in source region
-- [ ] Target resource group created in Norway East
+- [ ] VM `dev-skycraft-swc-world-vm` (the unencrypted one) replication status: **Protected**, health **Normal**
+- [ ] Running kernel on the VM is on Site Recovery's supported list (`6.8.0-1030-azure` from Lab 3.2's Bicep)
+- [ ] Target region: **North Europe**
+- [ ] Target resource group `platform-skycraft-neu-asr-rg` created in North Europe with `Project`, `Environment`, `CostCenter` and `Owner`
+- [ ] The group holds the Recovery Services vault, the cache storage account (Sweden Central), the target virtual network and the replica disks
+- [ ] No `Site-recovery-vault-RG` or `<source group>-asr` group exists
 
-### Test Failover
+### Test Failover (optional)
 
+The lab is complete with a **Protected** replication. Tick these only if you ran Step 5.2.7: the failover VM must be offered to your subscription in North Europe and fit its core quota, which a Free Trial subscription often cannot do (skip the step, or request quota).
+
+- [ ] Failover VM size set before the test, to the size of the source VM or the nearest size the subscription may use in North Europe (never Site Recovery's default, `Standard_HC44rs`: 44 cores)
 - [ ] Test failover completed successfully
-- [ ] Test VM booted in Norway East
+- [ ] Test VM `dev-skycraft-swc-world-vm-test` booted in North Europe
 - [ ] Cleanup of test resources completed (no orphaned VMs)
 
 ---
@@ -265,22 +270,24 @@ Get-AzDataProtectionBackupInstance -ResourceGroupName 'platform-skycraft-swc-rg'
 ### Verify ASR Replication Status
 
 ```powershell
-# ASR replication status is managed within the Recovery Services Vault
-$vault = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-rsv
-Set-AzRecoveryServicesAsrVaultContext -Vault $vault
-$fabric = Get-AzRecoveryServicesAsrFabric
-$container = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric
-Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $container |
-    Select-Object FriendlyName, ProtectionState |
-    Format-Table -AutoSize
+# ASR replication lives in the vault of the North Europe target group
+$vault = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-neu-asr-rg | Select-Object -First 1
+Set-AzRecoveryServicesAsrVaultContext -Vault $vault | Out-Null
+$items = foreach ($fabric in Get-AzRecoveryServicesAsrFabric) {
+    foreach ($container in Get-AzRecoveryServicesAsrProtectionContainer -Fabric $fabric) {
+        Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $container |
+            Select-Object FriendlyName, ProtectionState, ReplicationHealth
+    }
+}
+$items | Format-Table -AutoSize
 
-# Expected output (after replication is enabled):
-# FriendlyName                          ProtectionState
-# ------------                          ---------------
-# dev-skycraft-swc-auth-vm              Protected
+# Expected output (after the initial replication, about 45 minutes):
+# FriendlyName                ProtectionState ReplicationHealth
+# ------------                --------------- -----------------
+# dev-skycraft-swc-world-vm   Protected       Normal
 ```
 
-> **Note**: ASR replication is configured via the Azure Portal (Step 5.2.6) and may not yet be enabled in all environments. Verify status in **Azure Portal → Recovery Services Vault → Replicated items**.
+> **Note**: `Test-Lab.ps1` runs the same read and fails while the item is still replicating. In the Portal: **Recovery Services Vault** → **Protected items** → **Replicated items**.
 
 ---
 
@@ -295,8 +302,8 @@ Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $containe
 | **Backup Vault**            | `platform-skycraft-swc-bv`  | LRS, soft delete Off | [x] |
 | **Blob Policy**             | `SkyCraft-Blob-Policy`      | Operational, 30-day | [x] |
 | **Alert processing rule**   | `skycraft-backup-critical-apr` | Sev0 → `skycraft-ops-ag` | [ ] |
-| **Site Recovery**           | ASR → Norway East           | Continuous    | [ ]    |
-| **Test Failover**           | Completed + cleaned up      | Validated     | [ ]    |
+| **Site Recovery**           | `dev-skycraft-swc-world-vm` → North Europe, `platform-skycraft-neu-asr-rg` | Continuous    | [ ]    |
+| **Test Failover** (optional) | Completed + cleaned up, or skipped | Validated or skipped | [ ]    |
 
 ---
 
@@ -369,7 +376,7 @@ You've successfully completed **Lab 5.2: Business Continuity & Disaster Recovery
 - ✅ Multi-layered BCDR strategy with Recovery Services and Backup Vaults
 - ✅ Automated daily VM backups with 30-day retention
 - ✅ Cross-region disaster recovery with Azure Site Recovery
-- ✅ Validated DR strategy with successful test failover
+- ✅ Validated DR strategy with a Protected replication (and, where the subscription allows, a successful test failover)
 
 **Next**: [Lab 5.3: Network Monitoring & Diagnostics →](../5.3-network-monitoring/lab-guide-5.3.md)
 
