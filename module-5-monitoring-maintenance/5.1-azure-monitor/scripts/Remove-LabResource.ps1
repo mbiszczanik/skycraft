@@ -53,7 +53,9 @@
     (issue #104), it also sets the process exit code; run at a prompt or by another script,
     it leaves the session open and the code in $LASTEXITCODE (issue #257).
 
-    Note: This does NOT remove VMs, VNets, or Storage Accounts from earlier labs.
+    Note: This does NOT remove VMs, VNets, or Storage Accounts from earlier labs. It also leaves
+    the AzureMonitorLinuxAgent extension that the lab's Data Collection Rules wizard installs on
+    the VM, because other labs share the VM; remove it by hand (Remove-AzVMExtension).
     The Azure Dashboard (SkyCraft-Ops) must be removed manually via the Azure Portal.
 
 .PARAMETER DevEnvironment
