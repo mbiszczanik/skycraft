@@ -896,8 +896,9 @@ Describe 'parse.py - labs 4.2, 4.3, 5.1, 5.2 and 5.3, pickers, worded resource s
     }
 
     It 'reads <count> chain(s) of step <id> as <labels>, resource names at <resources>, picking field "<field>"' -ForEach @(
-        # 'Flow log type: **Virtual network** -> ... -> `prod-skycraft-swc-vnet` -> ...': the field's picker, then the chain.
-        @{ lab = '5.3'; id = '5.3.5'; count = 1; field = 'Flow log type'; labels = @('Virtual network', '+ Select target resource', 'Virtual network', 'prod-skycraft-swc-vnet', 'Confirm selection'); resources = @(3) }
+        # '**+ Add virtual networks** -> `prod-skycraft-swc-vnet` (in Sweden Central) -> **Confirm selection**.' (#367):
+        # the picker, the VNet, then the confirm button the Portal pass of 2026-11-01 read; the region in brackets is no label.
+        @{ lab = '5.3'; id = '5.3.5'; count = 1; field = ''; labels = @('+ Add virtual networks', 'prod-skycraft-swc-vnet', 'Confirm selection'); resources = @(1) }
         # 'Browse to `common/config.txt`': a path opens each segment; 4.3.8 opens its share from the account.
         @{ lab = '4.3'; id = '4.3.6'; count = 1; field = ''; labels = @('common', 'config.txt', 'Restore'); resources = @(0, 1) }
         @{ lab = '4.3'; id = '4.3.8'; count = 1; field = ''; labels = @('prodskycraftswcsa', 'Classic file shares', 'skycraft-config', 'Overview', 'Connect'); resources = @(0, 2) }
@@ -1101,7 +1102,6 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         $fields = @{}
         foreach ($field in @($items | Where-Object kind -eq 'field')) { $fields[$field.label] = $field }
         $expected = [ordered]@{
-            'Use workspace created by connection monitor' = 'unchecked'
             'Workspace'                = 'platform-skycraft-swc-law'
             'Test group name'          = 'hub-spoke-ssh'
             'Test configuration name'  = 'tcp-22-every-5m'
@@ -1111,6 +1111,7 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
             'Checks failed (%)'        = '10'
             'Round trip time (ms)'     = '100'
             'Disable traceroute'       = 'leave unchecked'
+            'Listen on port'           = 'leave unchecked'
         }
         foreach ($label in $expected.Keys) {
             $fields.ContainsKey($label) | Should -BeTrue -Because $label
@@ -1127,10 +1128,13 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         $tab = @($items | Where-Object { $_.kind -eq 'action' -and (@($_.labels) -join "`n") -ceq 'Workspace' })
         $tab.Count | Should -Be 1
         [array]::IndexOf($items, $tab[0]) | Should -BeGreaterThan ([array]::IndexOf($items, $fields['Test group name']))
-        [array]::IndexOf($items, $fields['Use workspace created by connection monitor']) | Should -Be ([array]::IndexOf($items, $tab[0]) + 1)
+        # Since #367 the tab holds a radio: Custom Workspace is clicked, then the workspace is picked.
+        $custom = $items[[array]::IndexOf($items, $tab[0]) + 1]
+        $custom.kind | Should -Be 'action'
+        @($custom.labels) | Should -Be @('Custom Workspace')
         [array]::IndexOf($items, $fields['Workspace']) | Should -Be ([array]::IndexOf($items, $tab[0]) + 2)
         $labels = @($items | ForEach-Object { $_.labels })
-        foreach ($label in 'Disable traceroute', 'Use workspace created by connection monitor', 'TCP', '22', '10', '100') {
+        foreach ($label in 'Disable traceroute', 'Listen on port', 'Default (Recommended)', 'TCP', '22', '10', '100') {
             $labels | Should -Not -Contain $label
         }
     }
