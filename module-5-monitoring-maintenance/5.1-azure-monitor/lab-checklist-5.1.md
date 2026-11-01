@@ -22,7 +22,7 @@
 - [ ] Data Collection Rule (DCR) `skycraft-vm-dcr` created and associated with at least one VM (e.g., `dev-skycraft-swc-auth-vm`)
 - [ ] Azure Monitor Agent `AzureMonitorLinuxAgent` on that VM: **Provisioning succeeded**, tagged `Project = SkyCraft`
 - [ ] Performance counters (`Perf` table) and Syslog being collected
-- [ ] `Heartbeat` rows from the VM in the last 15 minutes (the first row arrives 27-39 minutes after the agent is installed; a new workspace has no `Heartbeat` table until then and a `BadRequest` is expected, wait and rerun; `Test-Lab.ps1` waits up to 45 minutes after the install)
+- [ ] `Heartbeat` rows from the VM in the last 15 minutes (the first row can take up to about 40 minutes after the agent is installed, and often arrives much sooner on a workspace that already has the table; a new workspace has no `Heartbeat` table until then and a `BadRequest` is expected, wait and rerun; `Test-Lab.ps1` waits up to 45 minutes after the install)
 
 ---
 
@@ -31,9 +31,10 @@
 ### Alert Rules
 
 - [ ] Metric Alert: **Percentage CPU > 80%**
-- [ ] Log Search Alert: (Optional) Heartbeat missing
-- [ ] Action Group: `skycraft-ops-ag` created (short name `SkyCraftOps`)
-- [ ] Target email matches your account for testing
+- [ ] Log Search Alert `skycraft-heartbeat-alert`: query `Heartbeat` on the monitored VM, **Count Less than 1** over 5 minutes, enabled, notifies `skycraft-ops-ag`
+- [ ] Action Group: `skycraft-ops-ag` created (short name `SkyCraftOps`), region **Global**, tagged `Project = SkyCraft`
+- [ ] Target email matches your account for testing, and its verification e-mail is confirmed
+- [ ] Dashboard `SkyCraft-Ops` (Private) shows the CPU chart from Step 5.1.6
 
 ---
 
@@ -83,6 +84,17 @@ Get-AzMetricAlertRuleV2 -ResourceGroupName platform-skycraft-swc-rg -Name skycra
     Format-Table -AutoSize
 ```
 
+### Verify the Log Search Alert
+
+```powershell
+# The Heartbeat rule, its scope, condition and action group
+$rule = Get-AzResource -ResourceGroupName platform-skycraft-swc-rg -ResourceType Microsoft.Insights/scheduledQueryRules `
+    -Name skycraft-heartbeat-alert -ApiVersion 2023-12-01 -ExpandProperties
+$rule.Properties.criteria.allOf | Select-Object query, timeAggregation, operator, threshold
+$rule.Properties | Select-Object enabled, severity, windowSize, @{N='Scope';E={$_.scopes -join ', '}},
+    @{N='ActionGroups';E={($_.actions.actionGroups | ForEach-Object { ($_ -split '/')[-1] }) -join ', '}}
+```
+
 ### Verify the Storage Diagnostic Setting
 
 ```powershell
@@ -100,6 +112,7 @@ Get-AzDiagnosticSetting -ResourceId "$($sa.Id)/blobServices/default" -Name skycr
 | **Central Logs** | [ ]    | LAW exists in Platform RG       |
 | **VM Telemetry** | [ ]    | KQL returns Heartbeat and Perf  |
 | **CPU Alerts**   | [ ]    | Alert rule listed in Monitor    |
+| **Heartbeat Alert** | [ ] | Log search rule listed in Monitor |
 | **Dashboard**    | [ ]    | Ops Dashboard visible in Portal |
 
 ---
@@ -133,6 +146,7 @@ Get-AzDiagnosticSetting -ResourceId "$($sa.Id)/blobServices/default" -Name skycr
 - [ ] Log Analytics Workspace correctly deployed
 - [ ] AMA Agent active and reporting to LAW
 - [ ] CPU Threshold alert configured
+- [ ] Missing-Heartbeat log search alert configured
 - [ ] Central dashboard created
 - [ ] All reflection questions answered
 - [ ] Ready to proceed to Lab 5.2

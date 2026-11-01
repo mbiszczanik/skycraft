@@ -9,6 +9,7 @@
     - Azure Monitor Agent is Succeeded on those VMs and their Heartbeat reaches the workspace
     - Action Group exists with email receiver configured
     - Metric Alert rule exists and is enabled
+    - Log Search Alert fires on a missing Heartbeat and notifies the Action Group
     - Storage Diagnostic Settings are configured
     - Tags match governance requirements
 
@@ -18,12 +19,20 @@
     The rules associated with the VMs of the dev and prod groups are read, and the one that sends
     to the lab's workspace is checked ('skycraft-vm-dcr' first if several do); a group, VM or
     rule that cannot be read is skipped and named, never allowed to hide a rule found elsewhere.
+    Its streams count only when a data flow sends them to a destination that is the lab's
+    workspace, by whatever name the destination has: the data collection rules wizard writes one
+    flow per data source to an 'la-<n>' destination, the Bicep one flow to its own name.
     The alert rule is found through its scope (issues #355, #365): the rule named
     'skycraft-cpu-alert' that watches a SkyCraft VM, in whatever group it sits, since the Portal
     defaults the rule's group to the VM's. Its name stays literal because the guide has the
     learner type it and VM insights' recommended alerts put other rules on the same VM. Names
     stay literal where the guide has the learner type both name and group: the action group and
     the diagnostic setting.
+
+    The log search alert is found by relation only (issue #357): a scheduled query rule whose
+    query reads Heartbeat and that watches a SkyCraft VM or the lab's workspace, in any group and
+    under any name; one that notifies the lab's action group is preferred. A listing that fails
+    is a failure, never a pass.
 
     The Azure Monitor Agent is checked on every VM the lab's rule is associated with (issue #369):
     its extension must be present and Succeeded, and the workspace must hold a Heartbeat row from
@@ -32,10 +41,12 @@
     the wait for its first row is keyed to when that VM's agent extension was installed: the time
     of its last successful 'Create or Update Virtual Machine Extension' event in the activity log
     (the extension's own instance view carries no time), and the query is repeated once a minute,
-    with a progress line, until -AgentInstallWaitMinutes after that time. The first row has
-    reached the workspace 27-39 minutes after the install, also on a recovered workspace whose
-    table already exists. An agent installed longer ago than that with still no row fails at
-    once, naming the cause: the agent is installed but not sending. Without a readable install
+    with a progress line, until -AgentInstallWaitMinutes after that time. The first row takes up
+    to about 40 minutes after the install, often much sooner on a workspace that already has a
+    Heartbeat table (3 to 13 minutes were seen on a recovered one). The install time is read
+    again every 5 minutes, so a reinstall during the wait restarts the count. An agent installed
+    longer ago than the bound with still no row fails at once, naming the cause: the agent is
+    installed but not sending. Without a readable install
     time (no event, or the log cannot be read) the short -HeartbeatWaitMinutes applies, and the
     message says the time was unknown.
     A new workspace has no Heartbeat table until the first row arrives, up to about 40 minutes
@@ -55,10 +66,10 @@
 
 .PARAMETER AgentInstallWaitMinutes
     How long after an agent extension was installed to keep waiting for the first Heartbeat row
-    of its VM; a rebuilt VM sends it 27-39 minutes after the install. Counted from the install
-    time in the activity log, so a run started late waits only for the rest, and an agent older
-    than this fails at once when its VM has no row. The wait applies only while every agent is
-    Succeeded. 0 queries once. Default: 45
+    of its VM; the row takes up to about 40 minutes after the install, often much sooner.
+    Counted from the install time in the activity log, so a run started late waits only for
+    the rest, and an agent older than this fails at once when its VM has no row. The wait
+    applies only while every agent is Succeeded. 0 queries once. Default: 45
 
 .PARAMETER NewWorkspaceWaitMinutes
     How long to keep waiting for the Heartbeat table itself to exist, which a new workspace
@@ -112,6 +123,7 @@ $storageRg      = 'platform-skycraft-swc-rg'
 # Explicit api-versions for the raw ARM reads (#452); Sweden Central serves both.
 $dcrApiVersion         = '2023-03-11'
 $metricAlertApiVersion = '2018-03-01'
+$scheduledQueryApiVersion = '2023-12-01'
 
 $passCount = 0
 $failCount = 0
@@ -351,15 +363,24 @@ Invoke-Test "DCR destination points to workspace" {
     return ($destWsIds -contains $wsCache.ResourceId)
 }
 
-# Perf, not InsightsMetrics: Step 5.1.4 queries the Perf table (#369).
-Invoke-Test "DCR has Perf data flow" {
-    $streams = $dcrResource.Properties.dataFlows | ForEach-Object { $_.streams } | Select-Object -Unique
-    return ($streams -contains 'Microsoft-Perf')
+# Streams that reach the lab's workspace, matched through the destination's workspace, not its
+# name: the wizard names it 'la-<n>' and writes one flow per data source (#355).
+$dcrStreamsHere = @()
+if ($dcrResource -and $wsCache) {
+    $destNames = @($dcrResource.Properties.destinations.logAnalytics |
+        Where-Object { "$($_.workspaceResourceId)" -eq $wsCache.ResourceId } | ForEach-Object { "$($_.name)" })
+    $dcrStreamsHere = @($dcrResource.Properties.dataFlows |
+        Where-Object { @($_.destinations | Where-Object { "$_" -in $destNames }).Count -gt 0 } |
+        ForEach-Object { @($_.streams) + @($_.outputStream) } | Where-Object { $_ } | ForEach-Object { "$_" } | Select-Object -Unique)
 }
 
-Invoke-Test "DCR includes Syslog stream" {
-    $streams = $dcrResource.Properties.dataFlows | ForEach-Object { $_.streams } | Select-Object -Unique
-    return ($streams -contains 'Microsoft-Syslog')
+# Perf, not InsightsMetrics: Step 5.1.4 queries the Perf table (#369).
+Invoke-Test "DCR sends Perf to the workspace" {
+    return ($dcrStreamsHere -contains 'Microsoft-Perf')
+}
+
+Invoke-Test "DCR sends Syslog to the workspace" {
+    return ($dcrStreamsHere -contains 'Microsoft-Syslog')
 }
 
 # ============================================================================
@@ -448,7 +469,7 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
     $started       = Get-Date
     $tableDeadline = $started.AddMinutes($tableWait)
     $rowDeadline   = $null   # set when the table first exists; bounds the wait where no install time is known
-    $installs      = @{}     # VM name -> install time or why there is none, read once a VM lacks a row
+    $installs      = @{}     # VM name -> install time or why there is none, and when it was read
     while ($true) {
         $tableError = $null
         $result     = $null
@@ -484,14 +505,18 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
         $missing = @(for ($i = 0; $i -lt $dcrVmIds.Count; $i++) { if ($dcrVmIds[$i].ToLowerInvariant() -notin $seen) { $dcrVmNames[$i] } })
         # A Failed or missing agent explains the gap; there is nothing to wait for.
         if ($missing.Count -eq 0 -or -not $agentsReady) { break }
-        # The first row follows the install by 27-39 minutes: wait to a bound after the install
-        # time, or only -HeartbeatWaitMinutes where it is not known.
+        # The first row follows the install by up to about 40 minutes: wait to a bound after the
+        # install time, or only -HeartbeatWaitMinutes where it is not known.
         $now = (Get-Date).ToUniversalTime()
         $stillWaiting = @()
         foreach ($name in $missing) {
-            if (-not $installs.ContainsKey($name)) {
-                $installs[$name] = if ($agentExtIds[$name]) { Get-AgentInstallTime -ExtensionId $agentExtIds[$name] }
-                                   else { [pscustomobject]@{ Time = $null; Reason = 'the extension id is not known' } }
+            # Read again every 5 minutes: a reinstall during the wait moves the install time.
+            if (-not $installs.ContainsKey($name) -or ((Get-Date) - $installs[$name].ReadAt).TotalMinutes -ge 5) {
+                $read = if ($agentExtIds[$name]) { Get-AgentInstallTime -ExtensionId $agentExtIds[$name] }
+                        else { [pscustomobject]@{ Time = $null; Reason = 'the extension id is not known' } }
+                # A read that fails later keeps the time already known.
+                if (-not $read.Time -and $installs.ContainsKey($name) -and $installs[$name].Time) { $read = $installs[$name] }
+                $installs[$name] = [pscustomobject]@{ Time = $read.Time; Reason = $read.Reason; ReadAt = (Get-Date) }
             }
             $install = $installs[$name]
             if ($install.Time) {
@@ -629,6 +654,73 @@ Invoke-Test "Alert rule threshold is > 80% CPU" {
     # does not reliably expose metricName/operator across Az.Monitor versions.
     $crit = (Get-LabArmResource -ResourceId $alert.Id -ApiVersion $metricAlertApiVersion -ExpandProperties).Properties.criteria.allOf[0]
     return ($crit.metricName -eq 'Percentage CPU' -and [int]$crit.threshold -eq 80 -and $crit.operator -eq 'GreaterThan')
+}
+
+# ============================================================================
+# Log Search Alert Tests (#357)
+# ============================================================================
+Write-Host ""
+Write-Host "[Log Search Alert]" -ForegroundColor Yellow
+
+# Found by relation, not by name or group: a rule whose query reads Heartbeat and that watches a
+# SkyCraft VM or the lab's workspace. One that notifies the lab's action group comes first.
+# Read from the raw ARM body, as the data collection rule is.
+$actionGroupPattern = "/resourceGroups/$platformRg/providers/Microsoft\.Insights/actionGroups/$actionGroupName$"
+$hbAlert          = $null
+$hbAlertListError = $null
+try {
+    # The rules are listed without -ExpandProperties and read one by one by id at an explicit
+    # api-version (#452).
+    $hbCandidates = @(Get-AzResource -ResourceType 'Microsoft.Insights/scheduledQueryRules' -ErrorAction Stop |
+        Where-Object { $_ } |
+        ForEach-Object { Get-LabArmResource -ResourceId $_.ResourceId -ApiVersion $scheduledQueryApiVersion -ExpandProperties } |
+        Where-Object { $_ } | Where-Object {
+            $watchesLab = @($_.Properties.scopes | Where-Object { "$_" -match $vmScope -or ($wsCache -and "$_" -eq $wsCache.ResourceId) }).Count -gt 0
+            $readsHeartbeat = @($_.Properties.criteria.allOf | Where-Object { "$($_.query)" -match '\bHeartbeat\b' }).Count -gt 0
+            $watchesLab -and $readsHeartbeat
+        })
+    $hbAlert = $hbCandidates |
+        Sort-Object -Property @{ Expression = { @($_.Properties.actions.actionGroups | Where-Object { "$_" -match $actionGroupPattern }).Count -gt 0 }; Descending = $true } |
+        Select-Object -First 1
+}
+catch {
+    $hbAlertListError = $_.Exception.Message
+}
+
+Invoke-Test "Log search alert on Heartbeat watches a SkyCraft VM or the workspace" {
+    if ($hbAlertListError) { throw "could not list the log search alert rules: $hbAlertListError" }
+    if (-not $hbAlert) {
+        Write-Host " (no log search alert reads Heartbeat on a SkyCraft VM or '$workspaceName' - Step 5.1.8)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
+    Write-Host " ('$($hbAlert.Name)' in $($hbAlert.ResourceGroupName))" -NoNewline -ForegroundColor Gray
+    return $true
+}
+
+Invoke-Test "Log search alert is enabled" {
+    return ($null -ne $hbAlert -and $hbAlert.Properties.enabled -eq $true)
+}
+
+Invoke-Test "Log search alert fires when no Heartbeat row arrives (count < 1)" {
+    if (-not $hbAlert) { return $false }
+    $crit = @($hbAlert.Properties.criteria.allOf | Where-Object { "$($_.query)" -match '\bHeartbeat\b' })[0]
+    $threshold = [double]$crit.threshold
+    $belowOne = ("$($crit.operator)" -eq 'LessThan' -and $threshold -gt 0 -and $threshold -le 1) -or
+        ("$($crit.operator)" -eq 'LessThanOrEqual' -and $threshold -eq 0)
+    if (-not ("$($crit.timeAggregation)" -eq 'Count' -and $belowOne)) {
+        Write-Host " ($($crit.timeAggregation) $($crit.operator) $($crit.threshold) - Step 5.1.8 counts rows, Less than 1)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
+    return $true
+}
+
+Invoke-Test "Log search alert notifies '$actionGroupName'" {
+    if (-not $hbAlert) { return $false }
+    $groups = @($hbAlert.Properties.actions.actionGroups | ForEach-Object { "$_" })
+    if (@($groups | Where-Object { $_ -match $actionGroupPattern }).Count -gt 0) { return $true }
+    $names = if ($groups.Count -gt 0) { ($groups | ForEach-Object { ($_ -split '/')[-1] }) -join ', ' } else { 'no action group' }
+    Write-Host " (notifies $names - Step 5.1.8 picks '$actionGroupName')" -NoNewline -ForegroundColor Gray
+    return $false
 }
 
 # ============================================================================

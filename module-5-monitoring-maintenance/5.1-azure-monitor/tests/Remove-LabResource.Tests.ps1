@@ -22,6 +22,10 @@
          stub reports the failure with Write-Error, as the Az getters do, so a script that passes
          -ErrorAction SilentlyContinue swallows it.
       4. A deletion that fails is an [ERROR], counted, and the later steps still run: exit 1.
+      5. The log search alert of Step 5.1.8 is found as Test-Lab.ps1 finds it (#357): a Heartbeat
+         rule on a SkyCraft VM or the lab's workspace, that notifies the lab's action group or
+         carries the Bicep's name. Another Heartbeat rule and a Perf rule on the VM stay. The
+         action group stays while the rules could not be listed or one could not be deleted.
 
     Which errors mean "not found" is pinned for every cleanup that carries the helpers by
     tests/Lab-Cleanup-Lookup.Tests.ps1.
@@ -87,12 +91,14 @@ BeforeAll {
     #                         after the first; the lab's diagnostic setting is on the second one
     #   SKYCRAFT_STUB_PORTAL  '1' builds the alert rule and the data collection rule as the Portal
     #                         does (#362): the alert rule left in the VM's group, and VM insights'
-    #                         'MSVMI-<vm>' rule in the VM's group instead of 'skycraft-vm-dcr'
+    #                         'MSVMI-<vm>' rule in the VM's group instead of 'skycraft-vm-dcr';
+    #                         the log search alert under the learner's own name, in the VM's
+    #                         group, scoped to the workspace
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled)
     #   SKYCRAFT_STUB_FAIL    '<command>:<name>,...' makes one deletion throw
     # A lookup is named after its command ('Get-AzDiagnosticSetting:<account>' for the diagnostic
     # settings, 'Get-AzVM:<group>' for a group's VMs, 'Get-AzResource:<name>' for a data collection
-    # rule); a deletion is logged as '<command>:<name>' ('<account>/<name>' for a setting), and as
+    # rule, 'Get-AzResource:scheduledQueryRules' for the log search alerts); a deletion is logged as '<command>:<name>' ('<account>/<name>' for a setting), and as
     # '<command>:<group>/<name>' too for an alert rule or a data collection rule.
     # A missing data collection rule is reported the way Az.Resources can report it: a status-only
     # 404 (an exception whose inner CloudException carries the 404 response) with no not-found
@@ -285,7 +291,12 @@ function Remove-AzDataCollectionRuleAssociation {
 # rule is reported as a status-only 404.
 function Get-AzResource {
     [CmdletBinding()]
-    param([string]$ResourceId, [switch]$ExpandProperties, [string]$ApiVersion)
+    param([string]$ResourceId, [string]$ResourceType, [switch]$ExpandProperties, [string]$ApiVersion)
+    if ($ResourceType -eq 'Microsoft.Insights/scheduledQueryRules') { return Get-StubLogAlerts }
+    if ($ResourceId -like '*/scheduledQueryRules/*') {
+        if (Invoke-StubLookup -Name 'Get-AzResource:scheduledQueryRuleRead') { return }
+        return @(Get-StubLogAlerts | Where-Object { $_.ResourceId -eq $ResourceId })
+    }
     $name  = ($ResourceId -split '/')[-1]
     $group = ($ResourceId -split '/')[4]
     if (Invoke-StubLookup -Name "Get-AzResource:$name" -Gone 'group') { return }
@@ -309,6 +320,42 @@ function Get-AzResource {
                 logAnalytics = @([pscustomobject]@{ workspaceResourceId = "/subscriptions/$($script:SubscriptionId)/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.OperationalInsights/workspaces/$workspace" })
             }
         }
+    }
+}
+
+# The subscription's log search alerts, raw ARM shape. The lab's notifies the lab's action group
+# (the Portal writes the id in lower case); next to it a Heartbeat rule on another VM, a Perf rule
+# on the lab's VM, and a Heartbeat rule on the lab's VM that notifies another group under a
+# learner's name - none of them the lab's.
+function New-StubLogAlert {
+    param([string]$Name, [string]$Group, [string]$Scope, [string]$Query = 'Heartbeat', [string]$ActionGroup = 'platform-skycraft-swc-rg/skycraft-ops-ag')
+    $agGroup, $agName = $ActionGroup -split '/'
+    [pscustomobject]@{
+        Name              = $Name
+        ResourceGroupName = $Group
+        ResourceId        = "/subscriptions/$($script:SubscriptionId)/resourceGroups/$Group/providers/Microsoft.Insights/scheduledQueryRules/$Name"
+        Properties        = [pscustomobject]@{
+            scopes   = @($Scope)
+            criteria = [pscustomobject]@{ allOf = @([pscustomobject]@{ query = $Query }) }
+            actions  = [pscustomobject]@{ actionGroups = @("/subscriptions/$($script:SubscriptionId)/resourcegroups/$agGroup/providers/microsoft.insights/actiongroups/$agName".ToLowerInvariant()) }
+        }
+    }
+}
+
+function Get-StubLogAlerts {
+    if (Invoke-StubLookup -Name 'Get-AzResource:scheduledQueryRules') { return }
+    if (Test-StubEmpty) { return }
+    $otherVm = "/subscriptions/$($script:SubscriptionId)/resourceGroups/other-rg/providers/Microsoft.Compute/virtualMachines/other-vm"
+    New-StubLogAlert -Name 'unrelated-heartbeat-other-vm' -Group 'other-rg' -Scope $otherVm
+    New-StubLogAlert -Name 'unrelated-perf-rows' -Group 'dev-skycraft-swc-rg' -Scope $script:VmId -Query 'Perf | where CounterName == "% Processor Time"'
+    New-StubLogAlert -Name 'unrelated-heartbeat-team' -Group 'dev-skycraft-swc-rg' -Scope $script:VmId -ActionGroup 'dev-skycraft-swc-rg/team-ag'
+    if (Test-StubBare) { return }
+    if (Test-StubPortal) {
+        $workspace = "/subscriptions/$($script:SubscriptionId)/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.OperationalInsights/workspaces/platform-skycraft-swc-law"
+        New-StubLogAlert -Name 'vm-heartbeat-missing' -Group 'dev-skycraft-swc-rg' -Scope $workspace.ToLowerInvariant() -Query 'Heartbeat | where Computer == "dev-skycraft-swc-auth-vm"'
+    }
+    else {
+        New-StubLogAlert -Name 'skycraft-heartbeat-alert' -Group 'platform-skycraft-swc-rg' -Scope $script:VmId
     }
 }
 
@@ -444,6 +491,9 @@ function Remove-AzOperationalInsightsWorkspace {
     $script:Portal            = Invoke-CleanupScript -Stub $script:Stub -Portal
     $script:PortalRuleDenied  = Invoke-CleanupScript -Stub $script:Stub -Portal -Lookup 'Get-AzResource:MSVMI-dev-skycraft-swc-auth-vm=denied'
     $script:PortalAssocFails  = Invoke-CleanupScript -Stub $script:Stub -Portal -Fail 'Remove-AzDataCollectionRuleAssociation:MSVMI-dev-skycraft-swc-auth-vm-assoc'
+    $script:LogAlertsDenied   = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzResource:scheduledQueryRules=denied'
+    $script:LogAlertFails     = Invoke-CleanupScript -Stub $script:Stub -Fail 'Remove-AzResource:skycraft-heartbeat-alert'
+    $script:LogAlertReadDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzResource:scheduledQueryRuleRead=denied'
 
     # Lab 1.3's delete locks (#372): the cleanup lifts them for its deletes and puts them back.
     $script:Locked         = Invoke-CleanupScript -Stub $script:Stub -Locks 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg'
@@ -454,7 +504,7 @@ function Remove-AzOperationalInsightsWorkspace {
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:Bare, $script:WhatIf, $script:LookupsFail, $script:VmDenied,
         $script:StepsFail, $script:TwoAccounts, $script:TwoAccountsDenied, $script:Portal, $script:PortalRuleDenied,
-        $script:PortalAssocFails
+        $script:PortalAssocFails, $script:LogAlertsDenied, $script:LogAlertFails, $script:LogAlertReadDenied
     )
 }
 
@@ -484,6 +534,7 @@ Describe 'Lab 5.1 Remove-LabResource.ps1 - removes what the lab created' {
     It 'removes the alert, the association, the rule, the action group, the diagnostic setting and the workspace' {
         $calls = $script:Clean.Calls
         $calls | Should -Contain 'Remove-AzMetricAlertRuleV2:platform-skycraft-swc-rg/skycraft-cpu-alert'
+        $calls | Should -Contain 'Remove-AzResource:platform-skycraft-swc-rg/skycraft-heartbeat-alert'
         $calls | Should -Contain 'Remove-AzDataCollectionRuleAssociation:skycraft-vminsights-dcr-assoc'
         $calls | Should -Contain 'Remove-AzResource:platform-skycraft-swc-rg/skycraft-vm-dcr'
         $calls | Should -Contain 'Remove-AzActionGroup:skycraft-ops-ag'
@@ -704,5 +755,52 @@ Describe 'Lab 5.1 Remove-LabResource.ps1 - under Lab 1.3''s delete lock (#372)' 
         $script:LockedWhatIf.ExitCode | Should -Be 0 -Because "output was:`n$($script:LockedWhatIf.Output)"
         $script:LockedWhatIf.Calls | Should -Not -Match '^Lock:(DELETE|PUT):'
         $script:LockedWhatIf.Calls | Should -Not -Contain 'Remove-AzActionGroup:skycraft-ops-ag'
+    }
+}
+
+Describe 'Lab 5.1 Remove-LabResource.ps1 - removes the log search alert Test-Lab.ps1 accepts (#357)' {
+
+    It 'removes the rule the Portal made under the learner''s name, scoped to the workspace' {
+        $script:Portal.Calls | Should -Contain 'Remove-AzResource:dev-skycraft-swc-rg/vm-heartbeat-missing'
+    }
+
+    It 'removes the log search alert before the action group it notifies' {
+        $calls = @($script:Clean.Calls)
+        [array]::IndexOf($calls, 'Remove-AzResource:platform-skycraft-swc-rg/skycraft-heartbeat-alert') |
+            Should -BeLessThan ([array]::IndexOf($calls, 'Remove-AzActionGroup:skycraft-ops-ag'))
+    }
+
+    It 'leaves other Heartbeat and Perf rules alone' {
+        foreach ($run in $script:Clean, $script:Portal) {
+            $run.Calls | Should -Not -Contain 'Remove-AzResource:other-rg/unrelated-heartbeat-other-vm'
+            $run.Calls | Should -Not -Contain 'Remove-AzResource:dev-skycraft-swc-rg/unrelated-perf-rows'
+            $run.Calls | Should -Not -Contain 'Remove-AzResource:dev-skycraft-swc-rg/unrelated-heartbeat-team'
+        }
+    }
+
+    It 'counts a listing that fails and keeps the action group' {
+        $run = $script:LogAlertsDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Match '\[ERROR\] Could not look up the log search alert rules in the subscription'
+        $run.Output   | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls    | Should -Not -Contain 'Remove-AzActionGroup:skycraft-ops-ag'
+        $run.Output   | Should -Match "Kept Action Group 'skycraft-ops-ag'"
+    }
+
+    It 'counts a rule it could not read and keeps the action group' {
+        $run = $script:LogAlertReadDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Match '\[ERROR\] Could not look up log search alert rule'
+        $run.Calls    | Should -Not -Contain 'Remove-AzActionGroup:skycraft-ops-ag'
+        $run.Output   | Should -Match "Kept Action Group 'skycraft-ops-ag'"
+    }
+
+    It 'counts a deletion that fails and keeps the action group' {
+        $run = $script:LogAlertFails
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output   | Should -Match "\[ERROR\] Could not delete Log Search Alert 'skycraft-heartbeat-alert'"
+        $run.Output   | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls    | Should -Not -Contain 'Remove-AzActionGroup:skycraft-ops-ag'
+        $run.Calls    | Should -Contain 'Remove-AzOperationalInsightsWorkspace:platform-skycraft-swc-law'
     }
 }

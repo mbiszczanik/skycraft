@@ -125,6 +125,7 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 | `avm/res/insights/action-group` | `0.8.0` | Lab 5.1 |
 | `avm/res/insights/data-collection-rule` | `0.11.0` | Lab 5.1 |
 | `avm/res/insights/metric-alert` | `0.4.1` | Lab 5.1 |
+| `avm/res/insights/scheduled-query-rule` | `0.6.0` | Lab 5.1 |
 | `avm/res/key-vault/vault` | `0.14.2` | Lab 3.2 |
 | `avm/res/network/application-security-group` | `0.2.2` | Lab 2.2 |
 | `avm/res/network/bastion-host` | `0.8.2` | Lab 2.2 |
