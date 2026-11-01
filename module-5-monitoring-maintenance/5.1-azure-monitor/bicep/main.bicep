@@ -161,8 +161,8 @@ module modDcr 'br/public:avm/res/insights/data-collection-rule:0.11.0' = {
   }
 }
 
-// 2b. Azure Monitor Agent on the VM the rule is associated with. Tagged, because Lab 1.3's
-//     Enforce-Project-Tag denies an untagged extension (#350, #369).
+// 2b. Azure Monitor Agent on the VM the rule is associated with. Tagged here, so it passes
+//     Lab 1.3's Enforce-Project-Tag without Inherit-Project-Tag's help (#350, #369).
 module modMonitorAgent 'br/public:avm/res/compute/virtual-machine/extension:0.1.0' = {
   name: 'ama-deployment'
   scope: resourceGroup(varAgentVmRgName)

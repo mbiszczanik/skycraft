@@ -10,8 +10,8 @@
 
       1. An Azure Monitor Agent extension (Microsoft.Azure.Monitor / AzureMonitorLinuxAgent) is
          deployed into the group of the VM Deploy-Bicep.ps1 associates the rule with, with the
-         canonical tags, Project = SkyCraft among them (Lab 1.3's Enforce-Project-Tag denies an
-         untagged extension, #350).
+         canonical tags, Project = SkyCraft among them, so it passes Lab 1.3's Enforce-Project-Tag
+         without Inherit-Project-Tag's help (#350).
       2. The rule collects '% Processor Time' into Microsoft-Perf and sends Perf and Syslog to
          the lab's workspace.
       3. Deploy-Bicep.ps1 passes the agent's VM to the template.

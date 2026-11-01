@@ -67,9 +67,9 @@
 .PARAMETER AgentInstallWaitMinutes
     How long after an agent extension was installed to keep waiting for the first Heartbeat row
     of its VM; the row takes up to about 40 minutes after the install, often much sooner.
-    Counted from the install time in the activity log, so a run started late waits only for the rest, and an agent older
-    than this fails at once when its VM has no row. The wait applies only while every agent is
-    Succeeded. 0 queries once. Default: 45
+    Counted from the install time in the activity log, so a run started late waits only for
+    the rest, and an agent older than this fails at once when its VM has no row. The wait
+    applies only while every agent is Succeeded. 0 queries once. Default: 45
 
 .PARAMETER NewWorkspaceWaitMinutes
     How long to keep waiting for the Heartbeat table itself to exist, which a new workspace
