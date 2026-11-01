@@ -290,7 +290,7 @@ function Invoke-LabRestorePointRequest {
 # collection or its group: 'Call EndGetAccess before deleting the VM restore point' (#366). Backup's
 # scheduled run can leave one behind. Returns how many it ended. A failure here is a note, not a
 # count: the delete that follows says whether it mattered.
-function Stop-LabDiskRestorePointAccess {
+function Revoke-LabDiskRestorePointAccess {
     [CmdletBinding()]
     [OutputType([int])]
     param(
@@ -351,7 +351,7 @@ function Invoke-LabRestorePointDelete {
     )
 
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
-        $ended = Stop-LabDiskRestorePointAccess -ResourceGroupName $ResourceGroupName -CollectionName $CollectionName
+        $ended = Revoke-LabDiskRestorePointAccess -ResourceGroupName $ResourceGroupName -CollectionName $CollectionName
         if ($ended -gt 0) {
             Write-Host "  ✓ Ended the shared access on $ended disk restore point(s) in $ResourceGroupName" -ForegroundColor Green
         }
